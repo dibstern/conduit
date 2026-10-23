@@ -26,6 +26,10 @@ import type { ProviderStopSnapshot } from "../contracts/stored-event.js";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../daemon/config-persistence.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import {
+	SecretAnswerFailure,
+	type SecretAnswers,
+} from "../domain/daemon/Services/secret-answers.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
@@ -134,6 +138,8 @@ export interface ResolveQuestionCommand {
 	readonly sessionId: string;
 	readonly requestId: string;
 	readonly answers: Record<string, unknown>;
+	/** Live prompt fallback; never persisted in the command payload. */
+	readonly secretAnswerIndices?: readonly string[];
 	readonly providerProcessId?: string;
 	readonly nativeRequestId?: string;
 	readonly operation?: "reply" | "reject";
@@ -240,6 +246,7 @@ export interface ProviderCallRequest {
 
 export interface OrchestrationEngineOptions {
 	readonly registry: ProviderRegistry;
+	readonly secretAnswers?: SecretAnswers["Service"];
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
@@ -310,6 +317,7 @@ const admittedCallSchema = Schema.Struct({
 
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
+	private readonly secretAnswers: OrchestrationEngineOptions["secretAnswers"];
 	private readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
 	private readonly accountDirectory: OrchestrationEngineOptions["accountDirectory"];
 	private readonly resolveCallContext: OrchestrationEngineOptions["resolveCallContext"];
@@ -338,6 +346,7 @@ export class OrchestrationEngine {
 
 	constructor(options: OrchestrationEngineOptions) {
 		this.registry = options.registry;
+		this.secretAnswers = options.secretAnswers;
 		this.sessionBindingReadModel =
 			options.sessionBindingReadModel ??
 			new InMemoryProviderSessionBindingReadModel();
@@ -359,6 +368,7 @@ export class OrchestrationEngine {
 				),
 				reactor: new ProviderSideEffectReactor({
 					sql: durable.sql,
+					...(this.secretAnswers ? { secretAnswers: this.secretAnswers } : {}),
 					...(durable.projectKey === undefined
 						? {}
 						: { projectId: durable.projectKey }),
@@ -645,6 +655,17 @@ export class OrchestrationEngine {
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
 			yield* this.ensureMutatingCommandHasId(command);
+			if (
+				command.type === "resolve_question" &&
+				command.secretAnswerIndices !== undefined &&
+				(!this.durable || !this.secretAnswers)
+			)
+				return yield* new ProviderInstanceFailure({
+					providerId: "conduit",
+					operation: command.type,
+					code: "secret_answer_unavailable",
+					cause: new SecretAnswerFailure({ code: "secret_answer_unavailable" }),
+				});
 			if (
 				this.durable &&
 				command.type !== "send_turn" &&
@@ -989,6 +1010,49 @@ export class OrchestrationEngine {
 									nativeRequestId =
 										prompt.provider_request_id ?? payload.requestId;
 								}
+								let committedPayload = payload;
+								if (payload.type === "resolve_question") {
+									const storedSecrets = yield* durable.sql<{
+										answer_index: string;
+									}>`SELECT CAST(question.key AS TEXT) AS answer_index
+						FROM pending_approvals, json_each(pending_approvals.input) AS question
+						WHERE pending_approvals.id = ${payload.requestId} AND session_id = ${payload.sessionId}
+							AND CASE WHEN question.type = 'object'
+								THEN json_extract(question.value, '$.isSecret') ELSE 0 END = 1`;
+									const secretIndices = [
+										...new Set([
+											...storedSecrets.map(({ answer_index }) => answer_index),
+											...(command.type === "resolve_question"
+												? (command.secretAnswerIndices ?? [])
+												: []),
+										]),
+									];
+									if (secretIndices.length) {
+										if (!this.secretAnswers)
+											return yield* new ProviderInstanceFailure({
+												providerId,
+												operation: payload.type,
+												code: "secret_answer_unavailable",
+												cause: new SecretAnswerFailure({
+													code: "secret_answer_unavailable",
+												}),
+											});
+										const answers = yield* this.secretAnswers
+											.seal(payload.answers, secretIndices)
+											.pipe(
+												Effect.mapError(
+													(cause) =>
+														new ProviderInstanceFailure({
+															providerId,
+															operation: payload.type,
+															code: cause.code,
+															cause,
+														}),
+												),
+											);
+										committedPayload = { ...payload, answers };
+									}
+								}
 								const [maxRow] = yield* durable.sql<{
 									m: number;
 								}>`SELECT COALESCE(MAX(request_sequence), 0) AS m FROM provider_command_outbox`;
@@ -999,7 +1063,7 @@ export class OrchestrationEngine {
 										commandId: command.commandId,
 										providerId,
 										payload: {
-											...payload,
+											...committedPayload,
 											...(nativeRequestId ? { nativeRequestId } : {}),
 										},
 										fingerprintHash: hash,
@@ -1029,6 +1093,7 @@ export class OrchestrationEngine {
 						),
 						Effect.mapError((cause) =>
 							cause instanceof CommandFingerprintMismatch ||
+							cause instanceof ProviderInstanceFailure ||
 							cause instanceof StaleCommandRejected ||
 							cause instanceof SessionProviderNotBound
 								? cause
@@ -1295,6 +1360,7 @@ export class OrchestrationEngine {
 				abortSignal: _abortSignal,
 				history: _history,
 				shellEnv: _shellEnv,
+				shellConfig: _shellConfig,
 				account,
 				...payload
 			} = command.input;

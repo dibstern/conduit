@@ -144,7 +144,7 @@ export interface ProjectRelayConfig {
 	/** Immediate cached environment snapshot; shell resolution runs in the background. */
 	shellEnv?: (
 		directory: string,
-	) => Readonly<Record<string, string | undefined>>;
+	) => import("./contracts/project-shell-env.js").ProjectShellEnvSnapshot;
 	/** Await the existing shell capture before speculative Claude boot only. */
 	prepareShellEnv?: (directory: string) => Promise<boolean>;
 	/** Shared HTTP server owned by the caller. */

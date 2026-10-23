@@ -448,6 +448,105 @@ it("cancels an undelivered account rebind while background work is running, then
 	}
 }, 45_000);
 
+// Volatile shell values (mise/starship session keys) change on every capture.
+// They must reach the launch but never count as a login change, or a send
+// waits on background work until the processing timeout.
+it("delivers a send after a volatile shell recapture while background work runs", async () => {
+	const fixture = ProcessHarness.create({
+		dist: "dist",
+		restartProof: true,
+		shellEnvProof: true,
+	});
+	harness = fixture;
+	await fixture.restart();
+	const profile = join(fixture.root, "home/.zprofile");
+	const captures = join(fixture.root, "home/captures");
+	const captureCount = () =>
+		existsSync(captures) ? readFileSync(captures, "utf8").length : 0;
+	writeFileSync(
+		profile,
+		`${readFileSync(profile, "utf8")}export VOLATILE_SHELL_TOKEN="$$-$RANDOM"\nprintf x >> "$ZDOTDIR/captures"\n`,
+	);
+	await vi.waitFor(() => expect(captureCount()).toBeGreaterThan(0), {
+		timeout: 10_000,
+	});
+	const browser = await fixture.connect();
+	const sessionId = await browser.createSession("Volatile shell recapture");
+	await browser.send(sessionId, "upgrade-background-work");
+	const before = captureCount();
+	writeFileSync(profile, `${readFileSync(profile, "utf8")}\n`);
+	await vi.waitFor(() => expect(captureCount()).toBeGreaterThan(before), {
+		timeout: 10_000,
+	});
+	const prompt = "after-volatile-recapture";
+	await Effect.runPromise(
+		browser.rpc["input.submit"]({
+			sessionId,
+			originId: browser.originId,
+			inputId: randomUUID(),
+			delivery: "queue",
+			text: prompt,
+		}),
+	);
+	const marks = () =>
+		readFileSync(join(fixture.root, "sdk-proof.ndjson"), "utf8")
+			.trim()
+			.split("\n")
+			.map(
+				(line) =>
+					JSON.parse(line) as {
+						kind: string;
+						request?: string;
+						phase?: string;
+					},
+			);
+	const delivered = await vi
+		.waitFor(
+			() =>
+				expect(
+					fixture
+						.proof()
+						.marks.filter(
+							(mark) =>
+								mark.kind === "runner-command" && mark.type === "send-turn",
+						),
+				).toHaveLength(2),
+			{ timeout: 15_000 },
+		)
+		.then(
+			() => true,
+			() => false,
+		);
+	const launches = fixture.claudeOptions();
+	writeFileSync(join(fixture.root, "release-upgrade-background"), "release");
+	await vi.waitFor(
+		() =>
+			expect(
+				marks().some(
+					({ kind, phase }) =>
+						kind === "background-work" && phase === "completed",
+				),
+			).toBe(true),
+		{ timeout: 10_000 },
+	);
+	proofs.push({
+		sessionId,
+		delivered,
+		launches: launches.length,
+		token: (
+			launches[0]?.options["env"] as Record<string, string> | undefined
+		)?.["VOLATILE_SHELL_TOKEN"],
+		marks: marks(),
+	});
+	expect(delivered).toBe(true);
+	expect(launches).toHaveLength(1);
+	expect(
+		(launches[0]?.options["env"] as Record<string, string>)[
+			"VOLATILE_SHELL_TOKEN"
+		],
+	).toBeDefined();
+}, 60_000);
+
 it("cancels an ordinary account rebind during environment capture", async () => {
 	const fixture = ProcessHarness.create({
 		dist: "dist",

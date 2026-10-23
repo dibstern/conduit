@@ -10,6 +10,7 @@ import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROVIDER_DRIVERS } from "../../../src/lib/contracts/provider-instance.js";
 import type { AppServerTraceReport } from "../../../src/lib/provider/codex/app-server/trace-player.js";
+import { codexAccountHome } from "../../../src/lib/provider/codex/codex-home.js";
 import { writeCodexSessionIdentity } from "../../../src/lib/provider/codex/codex-session-store.js";
 import {
 	codexModels,
@@ -220,6 +221,7 @@ describe("Codex control through the daemon and detached runner", () => {
 		fixture: ProcessHarness,
 		id: string,
 		trace: TraceRow[],
+		accountId: string,
 		pid = 2_000_000_000,
 	) {
 		const threadId = trace.find(
@@ -229,6 +231,7 @@ describe("Codex control through the daemon and detached runner", () => {
 			throw new Error("Missing recorded thread/resume");
 		writeCodexSessionIdentity(fixture.configDir, id, {
 			threadId,
+			codexHome: codexAccountHome({ id: accountId }, fixture.configDir),
 			cwd: fixture.projectDir,
 			controllerPid: pid,
 		});
@@ -623,8 +626,14 @@ describe("Codex control through the daemon and detached runner", () => {
 	it(
 		"resume-unarchive retries the archived thread once",
 		async () => {
-			const { fixture, browser, id } = await start("resume-unarchive");
-			const threadId = seed(fixture, id, fixtureRows("resume-unarchive"));
+			const { fixture, browser, id, accountId } =
+				await start("resume-unarchive");
+			const threadId = seed(
+				fixture,
+				id,
+				fixtureRows("resume-unarchive"),
+				accountId,
+			);
 			await browser.send(id, "Say hello", TIMEOUT);
 			await states(fixture, id, ["completed"]);
 			expect(requests().map((row) => row.message?.method)).toEqual([
@@ -643,8 +652,13 @@ describe("Codex control through the daemon and detached runner", () => {
 	it(
 		"resume-missing fails with codex_thread_missing after one unarchive",
 		async () => {
-			const { fixture, browser, id } = await start("resume-missing");
-			const threadId = seed(fixture, id, fixtureRows("resume-missing"));
+			const { fixture, browser, id, accountId } = await start("resume-missing");
+			const threadId = seed(
+				fixture,
+				id,
+				fixtureRows("resume-missing"),
+				accountId,
+			);
 			await browser.send(id, "Say hello", TIMEOUT);
 			await states(fixture, id, ["error"]);
 			expectFailedRun(fixture, id, false);
@@ -746,7 +760,7 @@ describe("Codex control through the daemon and detached runner", () => {
 	it(
 		"waits for a retiring controller before resuming",
 		async () => {
-			const { fixture, browser, id } = await start(
+			const { fixture, browser, id, accountId } = await start(
 				"retiring-controller",
 				"resume-after-crash",
 			);
@@ -756,7 +770,13 @@ describe("Codex control through the daemon and detached runner", () => {
 				{ stdio: "ignore" },
 			);
 			if (!controller.pid) throw new Error("No temporary controller pid");
-			seed(fixture, id, fixtureRows("resume-after-crash"), controller.pid);
+			seed(
+				fixture,
+				id,
+				fixtureRows("resume-after-crash"),
+				accountId,
+				controller.pid,
+			);
 			await browser.send(id, "Say hello", TIMEOUT);
 			await states(fixture, id, ["completed"]);
 			expect(
@@ -769,11 +789,17 @@ describe("Codex control through the daemon and detached runner", () => {
 	it(
 		"a genuinely concurrent controller still fails agent_busy",
 		async () => {
-			const { fixture, browser, id } = await start(
+			const { fixture, browser, id, accountId } = await start(
 				"live-controller",
 				"resume-after-crash",
 			);
-			seed(fixture, id, fixtureRows("resume-after-crash"), process.pid);
+			seed(
+				fixture,
+				id,
+				fixtureRows("resume-after-crash"),
+				accountId,
+				process.pid,
+			);
 			// Ownership must be rejected before even opening the app-server.
 			writeTrace([]);
 			await browser.send(id, "Say hello", TIMEOUT);

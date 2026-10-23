@@ -694,6 +694,7 @@ export interface ReadQueryEffect {
 				readonly id: string;
 				readonly version: number;
 				readonly deleted: boolean;
+				readonly projectSlug?: string;
 			}[];
 			/**
 			 * With `removed`: the version tombstones were first kept at. A range
@@ -1960,6 +1961,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				readonly id: string;
 				readonly version: number;
 				readonly deleted: boolean;
+				readonly projectSlug?: string;
 			}[];
 			readonly removedSince?: number;
 			readonly listing?: readonly (readonly [id: string, version: number])[];
@@ -1980,12 +1982,13 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						const ranged = range?.after !== undefined;
 						const stored = yield* sql<{
 							session_id: string;
+							project_id: string;
 							version: number;
 							row: string | null;
 							workspace_hint_sequence: number | null;
 							deleted: number;
 						}>`
-							SELECT session_sidebar.session_id, session_sidebar.version, row,
+							SELECT session_sidebar.session_id, session_sidebar.project_id, session_sidebar.version, row,
 								workspace_hint_sequence, sessions.id IS NULL AS deleted
 							FROM session_sidebar LEFT JOIN sessions
 								ON sessions.id = session_sidebar.session_id
@@ -2059,6 +2062,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 													id: stamp.session_id,
 													version: stamp.version,
 													deleted: stamp.deleted === 1,
+													projectSlug: stamp.project_id,
 												},
 											]
 										: [],

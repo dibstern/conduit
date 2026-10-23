@@ -28,12 +28,23 @@ import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { subscribeProjectSettings } from "../domain/relay/Services/project-settings.js";
 import { subscribePtys } from "../domain/relay/Services/pty-subscription.js";
 import { RecapServiceTag } from "../domain/relay/Services/recap-service.js";
-import { WebSocketHandlerTag } from "../domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	WebSocketHandlerTag,
+} from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
 import * as Failure from "../effect/failure-classification.js";
+import { EventDelivery } from "./event-audiences.js";
+import {
+	CurrentEventDelivery,
+	deliverEventStream,
+	deliverPtyRows,
+	deliverSessionRows,
+	type subscriptionAudiences,
+} from "./event-delivery.js";
 import { conversationHandlers } from "./ws-rpc/conversation.js";
 import { daemonOnlyHandlers } from "./ws-rpc/daemon.js";
 import { filesHandlers } from "./ws-rpc/files.js";
@@ -107,17 +118,19 @@ const streamHandlers = {
 			),
 		),
 	SubscribeShell: (request) =>
-		subscribeShell({
-			...(request.resumeFromSequence === undefined
-				? {}
-				: { resumeFromSequence: request.resumeFromSequence }),
-			...(request.resumeBase === undefined
-				? {}
-				: { resumeBase: request.resumeBase }),
-			...(request.resumePoint === undefined
-				? {}
-				: { resumePoint: request.resumePoint }),
-		}),
+		deliverSessionRows(
+			subscribeShell({
+				...(request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence }),
+				...(request.resumeBase === undefined
+					? {}
+					: { resumeBase: request.resumeBase }),
+				...(request.resumePoint === undefined
+					? {}
+					: { resumePoint: request.resumePoint }),
+			}),
+		),
 	SubscribeApprovals: (request) =>
 		subscribeApprovals(
 			request.resumeFromSequence === undefined
@@ -145,13 +158,15 @@ const streamHandlers = {
 				: { resumeFromSequence: request.resumeFromSequence }),
 		}),
 	SubscribeSessionFamily: (request) =>
-		subscribeSessionFamily({
-			sessionId: request.sessionId,
-			...(request.resumeFromSequence === undefined
-				? {}
-				: { resumeFromSequence: request.resumeFromSequence }),
-		}),
-	SubscribePtys: () => subscribePtys(),
+		deliverSessionRows(
+			subscribeSessionFamily({
+				sessionId: request.sessionId,
+				...(request.resumeFromSequence === undefined
+					? {}
+					: { resumeFromSequence: request.resumeFromSequence }),
+			}),
+		).pipe(Stream.filter((envelope) => envelope._tag !== "projects")),
+	SubscribePtys: () => deliverPtyRows(subscribePtys(), undefined),
 	SubscribeProjectSettings: () => subscribeProjectSettings(),
 	SubscribeDraftModels: (request) => subscribeDraftModels(request),
 	SubscribeAlerts: () => subscribeAlerts(),
@@ -196,7 +211,11 @@ export const wsRpcHandlers = WsRpcGroup.of({
 				const stream: Stream.Stream<unknown, unknown, StreamHandlerContext> =
 					handler(request);
 				return Rpc.fork(
-					stream.pipe(
+					deliverEventStream(
+						name as keyof typeof subscriptionAudiences,
+						request,
+						stream,
+					).pipe(
 						Failure.mapStreamFailures((error) =>
 							error instanceof WsRpcError
 								? error
@@ -414,9 +433,8 @@ export const makeRoutedWsRpcServerLayer = <
 							Extract<keyof DaemonRpcHandlers, keyof typeof unaryHandlers>
 					  >
 					| undefined);
-			const daemonStreamHandlers =
-				daemon &&
-				(Object.fromEntries(
+			const daemonStreamHandlers = daemon && {
+				...(Object.fromEntries(
 					Object.entries(daemon).filter(([name]) => {
 						const rpc = WsRpcGroup.requests.get(name);
 						return (
@@ -428,7 +446,11 @@ export const makeRoutedWsRpcServerLayer = <
 							DaemonRpcHandlers,
 							Extract<keyof DaemonRpcHandlers, keyof typeof streamHandlers>
 					  >
-					| undefined);
+					| undefined),
+				SubscribeShell: (
+					request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeShell">>,
+				) => deliverSessionRows(daemon.SubscribeShell(request)),
+			};
 
 			// Test-only: the named unary RPC dies, so the process harness can pin
 			// how an unexpected defect reaches the browser.
@@ -484,7 +506,8 @@ export const makeRoutedWsRpcServerLayer = <
 				E,
 				R extends Layer.Services<typeof WsRpcServerLayer>,
 			>(
-				payload: object,
+				method: keyof typeof subscriptionAudiences,
+				payload: never,
 				make: () => Stream.Stream<A, E, R>,
 				fallbackProjectSlug?: string,
 			) =>
@@ -496,35 +519,53 @@ export const makeRoutedWsRpcServerLayer = <
 								fallbackProjectSlug,
 							);
 							const context = yield* resolveContext(projectSlug);
-							const queue = yield* Effect.acquireRelease(
-								Queue.bounded<Arr.NonEmptyReadonlyArray<A>, E | Cause.Done>(2),
-								Queue.shutdown,
-							);
-							// Project removal and browser cancellation both await this producer
-							// before SQLite closes. Queue shutdown ends the consumer cleanly.
-							yield* Effect.acquireRelease(
-								Stream.runForEachArray(
-									Stream.provideContext(make(), context),
-									(values) => Queue.offer(queue, values),
-								).pipe(
-									Effect.matchCauseEffect({
-										onFailure: (cause) => Queue.failCause(queue, cause),
-										onSuccess: () => Queue.end(queue),
-									}),
-									Effect.interruptible,
-									Effect.onInterrupt(() =>
-										// Shutdown retains Done and discards buffered batches on project removal.
-										Queue.end(queue).pipe(
-											Effect.andThen(Queue.shutdown(queue)),
-											Effect.asVoid,
+							const producerProject = Context.get(context, ConfigTag).slug;
+							const delivery =
+								(yield* CurrentEventDelivery) ?? new EventDelivery();
+							const source = Stream.unwrap(
+								Effect.gen(function* () {
+									const queue = yield* Effect.acquireRelease(
+										Queue.bounded<Arr.NonEmptyReadonlyArray<A>, E | Cause.Done>(
+											2,
 										),
-									),
-									Effect.forkIn(Context.get(context, RpcSubscriptionScopeTag)),
-								),
-								Fiber.interrupt,
+										Queue.shutdown,
+									);
+									// Project removal and browser cancellation both await this producer
+									// before SQLite closes. Queue shutdown ends the consumer cleanly.
+									yield* Effect.acquireRelease(
+										Stream.runForEachArray(
+											make().pipe(
+												Stream.provideService(CurrentEventDelivery, delivery),
+												Stream.provideContext(context),
+											),
+											(values) => Queue.offer(queue, values),
+										).pipe(
+											Effect.matchCauseEffect({
+												onFailure: (cause) => Queue.failCause(queue, cause),
+												onSuccess: () => Queue.end(queue),
+											}),
+											Effect.interruptible,
+											Effect.onInterrupt(() =>
+												// Shutdown retains Done and discards buffered batches on project removal.
+												Queue.end(queue).pipe(
+													Effect.andThen(Queue.shutdown(queue)),
+													Effect.asVoid,
+												),
+											),
+											Effect.forkIn(
+												Context.get(context, RpcSubscriptionScopeTag),
+											),
+										),
+										Fiber.interrupt,
+									);
+									return Stream.fromQueue(queue).pipe(Stream.flattenArray);
+								}),
 							);
-							return Stream.fromQueue(queue).pipe(
-								Stream.flattenArray,
+							return deliverEventStream(method, payload, source, {
+								projectId: producerProject,
+							}).pipe(
+								Stream.provideService(CurrentEventDelivery, delivery),
+								Stream.provideService(SessionDirectory, directory),
 								Failure.mapStreamFailures((error) =>
 									error instanceof WsRpcError
 										? error
@@ -555,8 +596,22 @@ export const makeRoutedWsRpcServerLayer = <
 							(
 								request: never,
 							): Rpc.Wrapper<Stream.Stream<unknown, WsRpcError>> => {
-								if (daemonHandler) return Rpc.fork(daemonHandler(request));
+								if (daemonHandler)
+									return Rpc.fork(
+										deliverEventStream<
+											keyof typeof subscriptionAudiences,
+											unknown,
+											WsRpcError,
+											never
+										>(
+											name as keyof typeof subscriptionAudiences,
+											request,
+											daemonHandler(request),
+											{ projectId: undefined },
+										).pipe(Stream.provideService(SessionDirectory, directory)),
+									);
 								return routeStream<unknown, unknown, StreamHandlerContext>(
+									name as keyof typeof subscriptionAudiences,
 									request,
 									() => handler(request),
 									name === "SubscribeShell" ||

@@ -249,11 +249,14 @@ export interface ProviderCall {
 	readonly workspaceRoot: string;
 	readonly extraFolders: readonly string[];
 	readonly shellEnv: Readonly<Record<string, string | undefined>>;
+	readonly shellConfig?:
+		| import("../contracts/project-shell-env.js").ProjectShellEnvConfig
+		| undefined;
 }
 
 export interface SendTurnInput
 	extends Pick<ProviderCall, "sessionId" | "workspaceRoot" | "extraFolders">,
-		Partial<Pick<ProviderCall, "projectId" | "shellEnv">> {
+		Partial<Pick<ProviderCall, "projectId" | "shellEnv" | "shellConfig">> {
 	/** Durable run reservation created by the send_turn outbox transaction. */
 	readonly runId?: string;
 	/** Durable acknowledgement of this reservation's intake or pre-intake end. */
@@ -328,6 +331,7 @@ export type PreWarmSessionInput = Pick<
 	| "sessionId"
 	| "projectId"
 	| "shellEnv"
+	| "shellConfig"
 	| "workspaceRoot"
 	| "extraFolders"
 	| "providerState"
@@ -366,6 +370,16 @@ export interface CommandInfo {
 	readonly description?: string;
 	readonly args?: string;
 	readonly source: CommandSource;
+	readonly skillRef?: string;
+}
+
+export interface DiscoveredSkill {
+	readonly name: string;
+	readonly source: CommandSource;
+	readonly description?: string;
+	readonly location:
+		| { readonly _tag: "File"; readonly path: string; readonly root: string }
+		| { readonly _tag: "Provider" };
 }
 
 export interface ProviderAgentInfo {
@@ -385,6 +399,7 @@ export interface ProviderCapabilities {
 	readonly supportsFork: boolean;
 	readonly supportsRevert: boolean;
 	readonly commands: readonly CommandInfo[];
+	readonly skills?: readonly DiscoveredSkill[];
 	readonly agents?: readonly ProviderAgentInfo[];
 }
 

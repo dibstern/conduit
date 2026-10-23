@@ -49,12 +49,20 @@ import {
 	type ProviderAdapterProjectContext,
 	ProviderAdapters,
 } from "../Services/provider-adapters.js";
+import {
+	SecretAnswers,
+	SecretAnswersLive,
+} from "../Services/secret-answers.js";
 import { SessionDirectory } from "../Services/session-directory.js";
 
 export const DaemonOrchestrationLive = Layer.effect(
 	DaemonOrchestration,
 	Effect.gen(function* () {
 		const scope = yield* Effect.scope;
+		const secretAnswers = Context.get(
+			yield* Layer.build(SecretAnswersLive),
+			SecretAnswers,
+		);
 		const store = yield* PersistenceStore;
 		const sql = Context.get(store, SqlClient.SqlClient);
 		const adapters = yield* ProviderAdapters;
@@ -211,10 +219,11 @@ export const DaemonOrchestrationLive = Layer.effect(
 		const resolveCallContext = yield* makeProviderCallContextResolver({
 			sessionBindingReadModel: bindings,
 			sessionWorkspace,
-			shellEnv: () => ({}),
+			shellEnv: () => ({ env: {}, declared: {} }),
 		}).pipe(Effect.provideService(ReadQueryEffectTag, read));
 		const engine = new OrchestrationEngine({
 			registry: adapters.registry,
+			secretAnswers,
 			autoSettleAfterDays: Ref.get(configRef).pipe(
 				Effect.map((config) => config.autoSettleAfterDays),
 			),

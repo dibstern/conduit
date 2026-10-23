@@ -11,6 +11,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { access } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { Redacted } from "effect";
 import type { CursorCredentialEnvelope } from "./cursor-credential.js";
@@ -22,6 +23,36 @@ import type {
 	CursorSdkPort,
 	CursorStore,
 } from "./sdk-port.js";
+
+export type { ToolType as CursorToolKind } from "@cursor/sdk";
+
+export function cursorSdkVersion(): string {
+	let directory = dirname(
+		createRequire(import.meta.url).resolve("@cursor/sdk"),
+	);
+	while (true) {
+		const path = join(directory, "package.json");
+		if (existsSync(path)) {
+			const manifest: unknown = JSON.parse(readFileSync(path, "utf8"));
+			if (
+				manifest &&
+				typeof manifest === "object" &&
+				"name" in manifest &&
+				manifest.name === "@cursor/sdk" &&
+				"version" in manifest &&
+				typeof manifest.version === "string"
+			)
+				return manifest.version;
+		}
+		const parent = dirname(directory);
+		if (parent === directory)
+			throw new CursorSdkFailure({
+				operation: "sdk-version",
+				reason: "Resolved Cursor SDK package has no version",
+			});
+		directory = parent;
+	}
+}
 
 /** Runs once at startup, before any account can log in or out. */
 export async function adoptLegacyCursorCredential(
@@ -216,8 +247,8 @@ export function createRealCursorSdkPort(
 			getUsage: () => call("agent.getUsage", () => agent.getUsage()),
 			close() {
 				return (closed ??= (async () => {
-					// close() releases its lease without awaiting it in 1.0.37.
-					// Await disposal first so store teardown cannot race that release.
+					// close() does not await its lease release; dispose first so store
+					// teardown cannot race it.
 					await agent[Symbol.asyncDispose]();
 					agent.close();
 				})());
@@ -288,8 +319,8 @@ export function createRealCursorSdkPort(
 			const operation = (async () => {
 				const sdk = await load();
 				const store = await credentialStore();
-				// SDK 1.0.37 aborts polling, but does not check the signal while
-				// minting/saving. Keep cancelled flows from replacing the SDK login.
+				// The SDK stops polling on abort but not while minting or saving, so
+				// the store below keeps a cancelled flow from replacing the login.
 				await sdk.Cursor.auth.login({
 					...options,
 					store: {
@@ -423,8 +454,8 @@ export function createRealCursorSdkPort(
 				throw cursorSdkFailure("sandbox.prime", cause);
 			});
 			try {
-				// 1.0.37 initializes executors lazily. Its checked internal method
-				// primes the sandbox without sending a hidden, billable prompt.
+				// Executors start lazily. This checked internal method primes the
+				// sandbox without sending a hidden, billable prompt.
 				if (
 					!("getExecutor" in agent) ||
 					typeof agent.getExecutor !== "function"

@@ -279,6 +279,7 @@ describe("Codex skills and digest forks through the daemon and detached runners"
 			expect((await commands()).commands).toContainEqual({
 				name: "fixture-skill",
 				description: "Answer fixture greetings directly.",
+				skillRef: expect.any(String),
 			});
 			expect((await commands()).commands).toContainEqual(
 				expect.objectContaining({ name: "user-skill" }),

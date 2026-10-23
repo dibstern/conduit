@@ -270,7 +270,14 @@ function convertAssistantParts(
 			}
 			case "tool": {
 				const state = part.state;
-				const isError = state?.status === "error";
+				const outcome =
+					state?.outcome ??
+					(state?.status === "error"
+						? "failed"
+						: state?.status === "completed"
+							? "succeeded"
+							: undefined);
+				const isError = outcome === "failed";
 				const inputValue = state?.input?.value;
 				const toolInput =
 					inputValue != null &&
@@ -305,6 +312,7 @@ function convertAssistantParts(
 						id: part.callID ?? part.id,
 						name: mapToolName(rawToolName),
 						status: mapToolStatus(state?.status, rawToolName, toolMetadata),
+						...(outcome !== undefined && { outcome }),
 						...(toolResult != null && { result: toolResult }),
 						...(Object.keys(preview).length > 0 && { preview }),
 						isError,

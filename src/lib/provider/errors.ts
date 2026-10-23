@@ -51,6 +51,8 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 		| "provider_process_gone"
 		| "provider_process_unavailable"
 		| "provider_control_timeout"
+		| "secret_answer_expired"
+		| "secret_answer_unavailable"
 		| "runner_detached"
 		| "project_inactive"
 		| "project_unavailable";

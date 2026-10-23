@@ -63,6 +63,28 @@ function stateEntries(state: ProviderRuntimeDomainMapperState) {
 }
 
 describe("translateProviderRuntimeEventToDomain", () => {
+	it.each([
+		"succeeded",
+		"failed",
+	] as const)("preserves the typed %s tool outcome", (outcome) => {
+		const { events } = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "tool-outcome",
+				type: "tool.completed",
+				data: {
+					messageId: "message",
+					partId: "tool",
+					result: "result",
+					duration: 1,
+					outcome,
+				},
+			}),
+		);
+		expect(
+			events.find(({ type }) => type === "tool.completed")?.data,
+		).toMatchObject({ outcome });
+	});
+
 	it("retains accepted run ownership and input identity without inferring an owner", () => {
 		const accepted = translateProviderRuntimeEventToDomain(
 			runtimeEvent({

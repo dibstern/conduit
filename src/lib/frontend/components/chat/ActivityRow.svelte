@@ -102,8 +102,8 @@
 </script>
 
 {#if part.type === "tool"}
-	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.status !== "error" && !part.isError)}
-	{@const failed = part.status === "error" || part.isError}
+	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.outcome !== "failed")}
+	{@const failed = part.outcome === "failed"}
 	{@const movedToBackground = part.metadata?.['movedToBackground'] === true}
 	{@const verb = movedToBackground ? "Moved to background" : toolVerb(part, running ? "present" : "past")}
 	{@const command = toolCommand(part)}
@@ -214,7 +214,7 @@
 						<ShellToolDetail {tool} command={fullCommand ?? ""} />
 					{:else}
 					<div
-						class="tool-result my-[4px] py-[8px] px-[10px] font-mono text-mono-xs leading-[1.6] whitespace-pre-wrap break-all bg-code-bg rounded-[6px] max-h-[300px] overflow-y-auto {tool.isError ? 'text-error' : 'text-text-secondary'}"
+						class="tool-result my-[4px] py-[8px] px-[10px] font-mono text-mono-xs leading-[1.6] whitespace-pre-wrap break-all bg-code-bg rounded-[6px] max-h-[300px] overflow-y-auto {tool.outcome === 'failed' ? 'text-error' : 'text-text-secondary'}"
 					>{#if fullCommand}<span class="text-text-muted">$ {fullCommand}</span>{#if tool.result}{"\n\n"}{/if}{/if}{tool.result ?? ""}</div>
 					{/if}
 				{/snippet}

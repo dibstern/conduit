@@ -21,6 +21,7 @@ import { PtyManager } from "../../../src/lib/relay/pty-manager.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeFakeSocketServer } from "../../helpers/fake-socket-server.js";
 import {
+	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
@@ -68,6 +69,8 @@ describe("PTY output storm", () => {
 		const handlers = WsRpcServerLayer.pipe(
 			Layer.provideMerge(
 				makeTestHandlerLayer({
+					// PTY subscriptions are refused when the request names another project.
+					config: makeMockConfig({ slug: "p" }),
 					api,
 					localPty,
 					ptyManager: new PtyManager({ log: makeMockLogger() }),

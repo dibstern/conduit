@@ -134,7 +134,7 @@ describe("WsRpcServerLayer terminal controls", () => {
 				const client = yield* rpcClient;
 				const subscribed = yield* Deferred.make<void>();
 				const announced = yield* client
-					.SubscribePtys({ projectSlug: "proj-1" })
+					.SubscribePtys({ projectSlug: "test-project" })
 					.pipe(
 						Stream.tap((envelope) =>
 							envelope._tag === "synchronized"

@@ -23,6 +23,8 @@ import type {
 	CursorStoredCredential,
 } from "./sdk-port.js";
 
+export const SUPPORTED_TRACE_VERSIONS: readonly string[] = ["1.0.37", "1.0.40"];
+
 interface TraceRow {
 	kind: string;
 	data: unknown;
@@ -187,7 +189,8 @@ export function createTraceCursorSdkPort(
 		const header = values.shift();
 		if (
 			!object(header) ||
-			header["sdkVersion"] !== "1.0.37" ||
+			typeof header["sdkVersion"] !== "string" ||
+			!SUPPORTED_TRACE_VERSIONS.includes(header["sdkVersion"]) ||
 			typeof header["scenario"] !== "string" ||
 			!(
 				typeof header["model"] === "string" ||

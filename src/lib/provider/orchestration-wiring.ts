@@ -59,7 +59,7 @@ import type { ProviderCall } from "./types.js";
 export interface OrchestrationRuntimeLayerOptions {
 	readonly shellEnv?: (
 		directory: string,
-	) => Readonly<Record<string, string | undefined>>;
+	) => import("../contracts/project-shell-env.js").ProjectShellEnvSnapshot;
 	readonly prepareShellEnv?: (directory: string) => Promise<boolean>;
 	readonly workspaceRoot?: string;
 	readonly extraFolders?: readonly string[];
@@ -145,6 +145,7 @@ export const makeProviderCallContextResolver = (options: {
 											mainFolder: request.workspaceRoot,
 											extraFolders: request.extraFolders,
 											shellEnv: Object.freeze({}),
+											shellConfig: undefined,
 										})
 									: Effect.fail(cause),
 							),
@@ -221,16 +222,21 @@ export const makeProviderCallContextResolver = (options: {
 						Effect.catch(() => Effect.void),
 					);
 				}
-				const environment =
+				const environmentProject =
 					project && Option.isSome(projectContexts)
-						? (workspaceRoot !== project.mainFolder || request.prepareShellEnv
-								? yield* projectContexts.value.forProject(project.projectId, {
-										directory: workspaceRoot,
-										prepareShellEnv: request.prepareShellEnv === true,
-									})
-								: project
-							).shellEnv
-						: getShellEnv(workspaceRoot);
+						? workspaceRoot !== project.mainFolder || request.prepareShellEnv
+							? yield* projectContexts.value.forProject(project.projectId, {
+									directory: workspaceRoot,
+									prepareShellEnv: request.prepareShellEnv === true,
+								})
+							: project
+						: undefined;
+				const environment = environmentProject
+					? {
+							env: environmentProject.shellEnv,
+							declared: environmentProject.shellConfig,
+						}
+					: getShellEnv(workspaceRoot);
 				const owner = project?.projectId ?? projectId;
 				if (!owner)
 					return yield* Effect.fail(
@@ -246,7 +252,8 @@ export const makeProviderCallContextResolver = (options: {
 					account,
 					workspaceRoot,
 					extraFolders: Object.freeze([...extraFolders]),
-					shellEnv: Object.freeze({ ...environment }),
+					shellEnv: Object.freeze({ ...environment.env }),
+					shellConfig: environment.declared,
 				});
 			}).pipe(
 				Effect.mapError((cause) =>
@@ -332,7 +339,7 @@ const createOrchestrationComponentsEffect = (
 					(project) => resolve(project.path) === resolve(directory),
 				);
 			resolver.register(directory, config?.shellEnv, projectId);
-			shellEnv = (projectDir) => resolver.get(projectDir, projectId);
+			shellEnv = (projectDir) => resolver.getSnapshot(projectDir, projectId);
 			prepareShellEnv = (projectDir) =>
 				resolver.waitUntilReady(projectDir, projectId);
 		}
