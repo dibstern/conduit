@@ -2909,6 +2909,10 @@ describe("durable control outbox scheduling", () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				const accepted = yield* Deferred.make<void>();
+				const resumeAccepting = yield* Deferred.make<void>();
+				const duplicateAccepted = yield* Deferred.make<void>();
+				const secondClaimAttempted = yield* Deferred.make<void>();
 				const entered = yield* Deferred.make<void>();
 				const release = yield* Deferred.make<void>();
 				const calls: string[] = [];
@@ -2928,10 +2932,48 @@ describe("durable control outbox scheduling", () => {
 						calls.push("end");
 					}),
 				);
-				const accepting = yield* engine(instance);
+				const accepting = yield* engine(
+					instance,
+					undefined,
+					undefined,
+					undefined,
+					(write) => (body, options) =>
+						write(body, options).pipe(
+							Effect.tap(() => Deferred.succeed(accepted, undefined)),
+							Effect.tap(() => Deferred.await(resumeAccepting)),
+						),
+				);
 				const background = yield* engine(instance);
-				const replaying = yield* engine(instance);
-				yield* sql`CREATE TRIGGER hold_first_control BEFORE UPDATE OF status ON provider_command_outbox WHEN NEW.command_id = 'background-owned-control' AND NEW.status = 'running' BEGIN SELECT RAISE(IGNORE); END`;
+				const replaying = yield* engine(
+					instance,
+					undefined,
+					undefined,
+					undefined,
+					(write) => (body, options) =>
+						write(body, options).pipe(
+							// Signal the claim attempt whether it wins or loses, so a broken
+							// process-order fence reaches the assertions instead of hanging.
+							Effect.tap((result) =>
+								Deferred.succeed(
+									typeof result === "object" &&
+										result !== null &&
+										"newlyAccepted" in result
+										? duplicateAccepted
+										: secondClaimAttempted,
+									undefined,
+								),
+							),
+						),
+				);
+				yield* Effect.addFinalizer(() =>
+					Effect.gen(function* () {
+						yield* Deferred.succeed(resumeAccepting, undefined);
+						yield* Deferred.succeed(release, undefined);
+						yield* accepting.shutdownEffect();
+						yield* background.shutdownEffect();
+						yield* replaying.shutdownEffect();
+					}),
+				);
 				const command = {
 					type: "interrupt_turn" as const,
 					commandId: "background-owned-control",
@@ -2941,17 +2983,19 @@ describe("durable control outbox scheduling", () => {
 				const firstWaiter = yield* Effect.forkChild(
 					Effect.result(accepting.dispatchEffect(command)),
 				);
-				yield* Effect.sleep("20 millis");
+				// Hold acceptance after commit so only the background reactor can claim.
+				// Its startup recovery must finish before the accepting worker proceeds.
+				yield* Deferred.await(accepted);
 				expect(
 					yield* sql`SELECT status FROM provider_command_outbox WHERE command_id = 'background-owned-control'`,
 				).toEqual([{ status: "pending" }]);
-				yield* sql`DROP TRIGGER hold_first_control`;
 				const drain = yield* Effect.forkChild(background.drainSideEffects());
 				yield* Deferred.await(entered);
+				yield* Deferred.succeed(resumeAccepting, undefined);
 				const duplicate = yield* Effect.forkChild(
 					replaying.dispatchEffect(command),
 				);
-				yield* Effect.sleep("20 millis");
+				yield* Deferred.await(duplicateAccepted);
 				yield* Fiber.interrupt(duplicate);
 				const second = yield* Effect.forkChild(
 					replaying.dispatchEffect({
@@ -2962,9 +3006,23 @@ describe("durable control outbox scheduling", () => {
 						targetProviderId: "opencode",
 					}),
 				);
-				yield* Effect.sleep("20 millis");
+				yield* Deferred.await(secondClaimAttempted);
 				const callsBeforeRelease = [...calls];
 				const secondBeforeRelease = second.pollUnsafe();
+				expect(
+					yield* sql`SELECT command_id, status, attempt_count FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{
+						command_id: "background-owned-control",
+						status: "running",
+						attempt_count: 1,
+					},
+					{
+						command_id: "after-background-control",
+						status: "pending",
+						attempt_count: 0,
+					},
+				]);
 				yield* Deferred.succeed(release, undefined);
 				yield* Fiber.join(drain);
 				yield* Fiber.join(second);
@@ -2975,9 +3033,23 @@ describe("durable control outbox scheduling", () => {
 				expect(outcome._tag).toBe("Success");
 				expect(calls).toEqual(["interrupt", "end"]);
 				expect(
+					yield* sql`SELECT command_id, status, attempt_count FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{
+						command_id: "background-owned-control",
+						status: "completed",
+						attempt_count: 1,
+					},
+					{
+						command_id: "after-background-control",
+						status: "completed",
+						attempt_count: 1,
+					},
+				]);
+				expect(
 					yield* sql`SELECT status FROM command_receipts WHERE command_id = 'background-owned-control'`,
 				).toEqual([{ status: "side_effect_completed" }]);
-			}).pipe(Effect.provide(fixture())),
+			}).pipe(Effect.scoped, Effect.provide(fixture())),
 		);
 	});
 });

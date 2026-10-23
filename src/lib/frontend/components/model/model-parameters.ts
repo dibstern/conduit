@@ -1,29 +1,26 @@
-import type { Immutable, ModelInfo } from "../../types.js";
+import { Result } from "effect";
+import { modelParameterChoices } from "../../../provider/turn-settings.js";
 
 /** Resolve each parameter independently while preserving the other values. */
 export function resolveModelParameters(
-	parameters: Immutable<ModelInfo["parameters"]>,
+	model: Parameters<typeof modelParameterChoices>[0] | undefined,
 	variant: string | null | undefined,
 ) {
-	const defaultCombination =
-		parameters?.combinations.find((entry) => entry.isDefault) ??
-		parameters?.combinations[0];
-	const selectedCombination = parameters?.combinations.find(
-		(entry) => entry.variant === variant,
+	const choices = modelParameterChoices(model ?? { id: "" });
+	const resolved = choices.resolve(variant ?? "");
+	const defaultChoice = Result.getOrUndefined(choices.resolve(""));
+	const unavailable = Result.isFailure(resolved) ? resolved.failure : undefined;
+	// Keep stale picks visible. An explicit replacement starts from the provider
+	// default; rendering never changes the stored choice.
+	const values = Object.fromEntries(
+		(Result.isSuccess(resolved)
+			? resolved.success.values
+			: (defaultChoice?.values ?? [])
+		).map(({ id, value }) => [id, value]),
 	);
-	const combination = selectedCombination ?? defaultCombination;
-	function parameterCombination(id: string, value: string) {
-		if (!combination) return undefined;
-		const values = { ...combination.values, [id]: value };
-		return parameters?.combinations.find(
-			(entry) =>
-				Object.keys(entry.values).length === Object.keys(values).length &&
-				Object.entries(values).every(
-					([key, value]) => entry.values[key] === value,
-				),
-		);
-	}
-	const rows = (parameters?.rows ?? []).flatMap((row) => {
+	const withValue = (id: string, value: string) =>
+		choices.withValue(unavailable ? "" : (variant ?? ""), id, value);
+	const rows = (model?.parameters?.rows ?? []).flatMap((row) => {
 		const kind = ["effort", "reasoning", "reasoning_effort"].includes(row.id)
 			? "effort"
 			: row.id;
@@ -39,9 +36,9 @@ export function resolveModelParameters(
 							: "Off"
 						: label,
 			testId: `picker-${kind}-option-${value}`,
-			disabled: !parameterCombination(row.id, value),
+			disabled: withValue(row.id, value) === undefined,
 		}));
-		const value = combination?.values[row.id] ?? "";
+		const value = values[row.id] ?? "";
 		return [
 			{
 				id: row.id,
@@ -61,10 +58,12 @@ export function resolveModelParameters(
 		];
 	});
 	return {
-		defaultCombination,
-		combination,
-		variantUnavailable: Boolean(variant && !selectedCombination),
+		defaultValues: Object.fromEntries(
+			(defaultChoice?.values ?? []).map(({ id, value }) => [id, value]),
+		),
+		unavailable,
+		variantUnavailable: unavailable !== undefined,
 		rows,
-		parameterCombination,
+		withValue,
 	};
 }

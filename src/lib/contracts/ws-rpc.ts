@@ -298,6 +298,7 @@ export const CommandInfoSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
 	args: Schema.optional(Schema.String),
+	skillRef: Schema.optional(NonEmptyString),
 	/** The provider's own command or bundled skill; the composer offers these under `$`. */
 	builtin: Schema.optional(Schema.Boolean),
 });
@@ -2549,7 +2550,7 @@ export const GetToolDetails = Rpc.make("GetToolDetails", {
 export const GetSkillContent = Rpc.make("GetSkillContent", {
 	payload: Schema.TaggedStruct("GetSkillContent", {
 		projectSlug: NonEmptyString,
-		name: NonEmptyString,
+		skillRef: NonEmptyString,
 	}),
 	success: GetSkillContentResponseSchema,
 	error: WsRpcError,
@@ -2558,7 +2559,7 @@ export const GetSkillContent = Rpc.make("GetSkillContent", {
 /** Session-scoped form of GetSkillContent; its owner supplies the project. */
 export const GetSkillContentForSession = Rpc.make(GetSkillContent._tag, {
 	payload: Schema.TaggedStruct(GetSkillContent._tag, {
-		name: NonEmptyString,
+		skillRef: NonEmptyString,
 		sessionId: NonEmptyString,
 	}),
 	success: GetSkillContent.successSchema,

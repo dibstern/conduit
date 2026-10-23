@@ -8,7 +8,10 @@ import {
 	OpenCodeSettingsServiceTag,
 	OrchestrationEngineTag,
 } from "../domain/relay/Services/services.js";
+import { getDefaultModel } from "../domain/relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+import { skillCommand, skillRefFor } from "../provider/skill-discovery.js";
+import { harnessForModelProvider } from "../provider/turn-settings.js";
 
 export const MAX_PROJECT_TITLE_LENGTH = 100;
 
@@ -22,7 +25,7 @@ const OPENCODE_BUILTIN_COMMANDS: ReadonlySet<string> = new Set([
 export const normalizeProjectTitle = (title: string): string =>
 	title.trim().slice(0, MAX_PROJECT_TITLE_LENGTH);
 
-const listSessionCommands = (
+const listSessionCatalog = (
 	activeSessionId: string | undefined,
 	tolerateDiscoveryFailure = true,
 	draftInstanceId?: string,
@@ -35,9 +38,16 @@ const listSessionCommands = (
 			: undefined;
 		// A draft has no session yet; the account it picked owns its catalogue.
 		const accountId = boundId ?? draftInstanceId;
+		const defaultModel =
+			accountId === undefined ? yield* getDefaultModel() : undefined;
 		const account = yield* directory.resolve(
 			accountId === undefined
-				? { _tag: "DriverDefault", driver: "opencode" }
+				? {
+						_tag: "DriverDefault",
+						driver: defaultModel
+							? harnessForModelProvider(defaultModel.providerID)
+							: "opencode",
+					}
 				: { _tag: "Id", id: accountId },
 		);
 		const listDiscoveredCommands = (selected: Account) =>
@@ -54,14 +64,17 @@ const listSessionCommands = (
 						workspaceRoot,
 					})
 					.pipe(
-						Effect.map((capabilities) => capabilities.commands),
+						Effect.map((capabilities) => ({
+							commands: capabilities.commands,
+							skills: capabilities.skills ?? [],
+						})),
 						Effect.catch((error) =>
 							tolerateDiscoveryFailure
 								? Effect.gen(function* () {
 										(yield* LoggerTag).warn(
 											`Failed to discover ${selected.name} commands: ${error instanceof Error ? error.message : error}`,
 										);
-										return [];
+										return { commands: [], skills: [] };
 									})
 								: Effect.fail(error),
 						),
@@ -70,11 +83,24 @@ const listSessionCommands = (
 		if (PROVIDER_DRIVERS[account.driver].catalogSource === "discovery")
 			return yield* listDiscoveredCommands(account);
 		const result = yield* Effect.result(
-			(yield* OpenCodeSettingsServiceTag).listCommands({
+			(yield* OpenCodeSettingsServiceTag).listCatalog({
 				startIfStopped: !tolerateDiscoveryFailure,
+				instanceId: account.id,
+				directory: activeSessionId
+					? yield* (yield* SessionWorkspaceTag).get(activeSessionId)
+					: (yield* ConfigTag).projectDir,
 			}),
 		);
-		if (result._tag === "Success") return result.success;
+		if (result._tag === "Success")
+			return {
+				commands: [
+					...result.success.commands.filter(
+						(command) => command.source !== "skill",
+					),
+					...result.success.skills.map(skillCommand),
+				],
+				skills: result.success.skills,
+			};
 		if (boundId !== undefined) return yield* Effect.fail(result.failure);
 		(yield* LoggerTag).warn(
 			`Failed to discover OpenCode commands; falling back to Claude commands: ${result.failure instanceof Error ? result.failure.message : result.failure}`,
@@ -88,12 +114,15 @@ export const getCommandsForSession = (
 	activeSessionId: string | undefined,
 	draftInstanceId?: string,
 ) =>
-	listSessionCommands(activeSessionId, true, draftInstanceId).pipe(
-		Effect.map((commands) =>
+	listSessionCatalog(activeSessionId, true, draftInstanceId).pipe(
+		Effect.map(({ commands }) =>
 			commands.map((command) => ({
 				name: command.name,
 				...(command.description ? { description: command.description } : {}),
 				...("args" in command && command.args ? { args: command.args } : {}),
+				...("skillRef" in command && command.skillRef
+					? { skillRef: command.skillRef }
+					: {}),
 				...(command.source === "builtin" ||
 				(command.source === "command" &&
 					OPENCODE_BUILTIN_COMMANDS.has(command.name))
@@ -104,9 +133,9 @@ export const getCommandsForSession = (
 	);
 
 export const getSkillNamesForSession = (sessionId: string) =>
-	listSessionCommands(sessionId, false).pipe(
+	listSessionCatalog(sessionId, false).pipe(
 		Effect.map(
-			(commands) =>
+			({ commands }) =>
 				new Set(
 					commands
 						.filter(
@@ -121,3 +150,15 @@ export const getSkillNamesForSession = (sessionId: string) =>
 				),
 		),
 	);
+
+export const getDiscoveredSkillForSession = (
+	skillRef: string,
+	sessionId?: string,
+) =>
+	/^[a-f0-9]{64}$/.test(skillRef)
+		? listSessionCatalog(sessionId, false).pipe(
+				Effect.map(({ skills }) =>
+					skills.find((skill) => skillRefFor(skill) === skillRef),
+				),
+			)
+		: Effect.succeed(undefined);

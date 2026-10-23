@@ -295,6 +295,7 @@
 			return recovery.scheduledAt * 1000;
 		const limit = accountLimit({
 			asker: "user",
+			modelId: currentSession?.model?.model,
 			...(usageReading ? { reading: usageReading } : {}),
 			...(recovery && !recovery.switched ? { recovery } : {}),
 			now: clock.now,

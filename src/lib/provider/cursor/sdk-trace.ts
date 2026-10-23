@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
+import { Redacted } from "effect";
 import { redactText as redactCursorText } from "../redact-text.js";
 import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
 import type {
@@ -276,7 +277,7 @@ export function teeCursorSdkPort(
 		storedCredential: () =>
 			call("credential.store", {}, () => port.storedCredential()),
 		modelsList: (credential) => {
-			trace.protect(credential.apiKey);
+			trace.protect(Redacted.value(credential.apiKey));
 			return call("models.list", { credential }, () =>
 				port.modelsList(credential),
 			);
@@ -307,7 +308,7 @@ export function teeCursorSdkPort(
 				port.deleteAgent(agentId, cwd, unwrapStore(store)),
 			),
 		async primeSandbox(options, credential, store) {
-			trace.protect(credential.apiKey);
+			trace.protect(Redacted.value(credential.apiKey));
 			trace.record(
 				"sandbox.prime.options",
 				recordedOptions({
@@ -334,7 +335,7 @@ export function teeCursorSdkPort(
 			}
 		},
 		async createAgent(options, credential, store, customTools) {
-			trace.protect(credential.apiKey);
+			trace.protect(Redacted.value(credential.apiKey));
 			trace.record("create.options", recordedOptions(options));
 			try {
 				const agent = await port.createAgent(
@@ -350,7 +351,7 @@ export function teeCursorSdkPort(
 			}
 		},
 		async resumeAgent(id, options, credential, store, customTools) {
-			trace.protect(credential.apiKey);
+			trace.protect(Redacted.value(credential.apiKey));
 			trace.record("resume.options", {
 				agentId: id,
 				...recordedOptions(options),

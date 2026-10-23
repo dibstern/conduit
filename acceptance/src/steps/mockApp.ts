@@ -124,7 +124,18 @@ const skillNavigationMockup = {
 						...message,
 						history: { messages: skillNavigationMessages, hasMore: true },
 					}
-				: message,
+				: message.type === "mock_command_catalog"
+					? {
+							...message,
+							commands: [
+								...(Array.isArray(message["commands"])
+									? message["commands"]
+									: []),
+								{ name: "paged-skill", skillRef: "skill-navigation-paged" },
+								{ name: "user-skill", skillRef: "skill-navigation-user" },
+							],
+						}
+					: message,
 	),
 };
 
@@ -724,7 +735,7 @@ export const mockAppHandlers: StepHandler[] = [
 					GetSkillContent: async (payload) => ({
 						projectSlug:
 							"projectSlug" in payload ? payload.projectSlug : "myapp",
-						name: String(payload["name"] ?? ""),
+						name: "paged-skill",
 						path: ".agents/skills/paged-skill/SKILL.md",
 						content:
 							"---\nname: paged-skill\ndescription: A navigation fixture\n---\n# Skill instructions\n\nReview the earlier runs before continuing.\n",

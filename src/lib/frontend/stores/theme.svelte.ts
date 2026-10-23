@@ -42,7 +42,7 @@ export function dimThemeColor(): () => void {
 	};
 }
 
-function isThemeMode(value: string | null): value is ThemeMode {
+export function isThemeMode(value: string | null): value is ThemeMode {
 	return value === "light" || value === "dark" || value === "system";
 }
 

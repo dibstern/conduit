@@ -18,6 +18,7 @@ import { makeCursorSessionRunner } from "../../../src/lib/provider/cursor/cursor
 import { createTraceCursorSdkPort } from "../../../src/lib/provider/cursor/sdk-trace-player.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import { connectRunner } from "../../../src/lib/provider/runner/runner-connection.js";
+import { cursorCredentialFixture } from "../../helpers/cursor-account-resources-fixture.js";
 
 beforeEach(() => mkdirSync("test-results/82tn9-5", { recursive: true }));
 
@@ -62,6 +63,8 @@ it.live(
 						workspaceRoot: root,
 						daemonConfigDir: root,
 						port,
+						credential: () =>
+							cursorCredentialFixture("[REDACTED:environment]", "environment"),
 						environment: () => ({
 							NODE_ENV: "test",
 							CURSOR_API_KEY: "[REDACTED:environment]",

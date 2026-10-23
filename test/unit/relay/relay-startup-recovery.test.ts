@@ -83,46 +83,40 @@ it.each([
 			publishGlobalSetting: () => Effect.void,
 			log: createSilentLogger(),
 		});
-		let result: string | undefined;
 		const deliver = vi.spyOn(
 			relay.orchestration.openCodeInstance,
 			"sendTurnEffect",
 		);
 		if (readiness === "hung")
 			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-		const send = relay.effectRuntime.runtime
-			.runPromise(
-				Effect.gen(function* () {
-					const engine = yield* OrchestrationEngineTag;
-					return yield* engine.dispatchEffect({
-						type: "send_turn",
-						commandId: "input",
-						providerId: "opencode",
-						input: {
-							sessionId: "s",
-							inputId: "input",
-							runId: "r",
-							prompt: "Continue",
-							history: [],
-							providerState: {},
-							workspaceRoot: dir,
-							extraFolders: [],
-							abortSignal: new AbortController().signal,
-							eventSink: {
-								push: () => Effect.void,
-								requestPermission: () => Effect.succeed({ decision: "once" }),
-								requestQuestion: () => Effect.succeed({}),
-								resolvePermission: () => Effect.void,
-								resolveQuestion: () => Effect.void,
-							},
+		const send = relay.effectRuntime.runtime.runPromise(
+			Effect.gen(function* () {
+				const engine = yield* OrchestrationEngineTag;
+				return yield* engine.dispatchEffect({
+					type: "send_turn",
+					commandId: "input",
+					providerId: "opencode",
+					input: {
+						sessionId: "s",
+						inputId: "input",
+						runId: "r",
+						prompt: "Continue",
+						history: [],
+						providerState: {},
+						workspaceRoot: dir,
+						extraFolders: [],
+						abortSignal: new AbortController().signal,
+						eventSink: {
+							push: () => Effect.void,
+							requestPermission: () => Effect.succeed({ decision: "once" }),
+							requestQuestion: () => Effect.succeed({}),
+							resolvePermission: () => Effect.void,
+							resolveQuestion: () => Effect.void,
 						},
-					});
-				}),
-			)
-			.then((completion) => {
-				result = completion.status;
-				return completion;
-			});
+					},
+				});
+			}),
+		);
 		// Relay disposal interrupts this waiter if an earlier assertion fails.
 		void send.catch(() => undefined);
 		if (readiness === "hung") {
@@ -149,16 +143,11 @@ it.each([
 				},
 			}),
 		);
-		// With fake timers, waitFor only advances fake time by `interval` per check,
-		// so under load it never reaches the reactor's 500 ms outcome poll.
-		await vi.waitFor(
-			async () => {
-				if (readiness === "hung") await vi.advanceTimersByTimeAsync(500);
-				expect(result).toBe("interrupted");
-			},
-			{ timeout: 5_000, interval: 10 },
-		);
-		expect((await send).error?.code).toBe("interrupted");
+		// Let the reactor's outcome poll advance while awaiting the send itself.
+		if (readiness === "hung") vi.setTimerTickMode("nextTimerAsync");
+		const completion = await send;
+		expect(completion.status).toBe("interrupted");
+		expect(completion.error?.code).toBe("interrupted");
 		expect(
 			await relay.effectRuntime.runtime.runPromise(
 				Effect.gen(function* () {

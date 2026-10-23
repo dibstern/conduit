@@ -22,6 +22,7 @@ import type {
 	SessionStatus,
 } from "../../../instance/sdk-types.js";
 import type { Logger } from "../../../logger.js";
+import { discoverOpenCodeCatalog } from "../../../provider/opencode-discovery.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import type { Translator } from "../../../relay/event-translator.js";
 import type { PtyManager } from "../../../relay/pty-manager.js";
@@ -33,7 +34,10 @@ import type {
 	RelayMessage,
 	SessionInfo,
 } from "../../../types.js";
-import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
+import {
+	OpenCodeInstancesTag,
+	type OpenCodeUnavailable,
+} from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { SessionStatusPollerService } from "./session-status-poller.js";
 
@@ -312,9 +316,14 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 );
 
 export interface OpenCodeSettingsService {
-	listCommands(options?: {
+	listCatalog(options?: {
 		readonly startIfStopped?: boolean;
-	}): Effect.Effect<OpenCodeCommandList, Cause.UnknownError>;
+		readonly directory?: string;
+		readonly instanceId?: string;
+	}): Effect.Effect<
+		Awaited<ReturnType<typeof discoverOpenCodeCatalog>>,
+		Cause.UnknownError | OpenCodeUnavailable
+	>;
 	listProjects(): Effect.Effect<OpenCodeProjectList, Cause.UnknownError>;
 }
 
@@ -332,15 +341,20 @@ export const OpenCodeSettingsServiceLive: Layer.Layer<
 	Effect.gen(function* () {
 		const client = yield* OpenCodeAPITag;
 		const instances = yield* OpenCodeInstancesTag;
-		const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 		return {
-			listCommands: ({ startIfStopped = true } = {}) =>
+			listCatalog: ({
+				startIfStopped = true,
+				directory,
+				instanceId = MANAGED_OPENCODE_ACCOUNT_ID,
+			} = {}) =>
 				Effect.gen(function* () {
 					const available = startIfStopped
-						? Option.some(client)
-						: yield* instances.ifRunning(instanceId);
-					if (Option.isNone(available)) return [];
-					return yield* Effect.tryPromise(() => available.value.app.commands());
+						? Option.some(yield* instances.use(instanceId, directory))
+						: yield* instances.ifRunning(instanceId, directory);
+					if (Option.isNone(available)) return { commands: [], skills: [] };
+					return yield* Effect.tryPromise(() =>
+						discoverOpenCodeCatalog(available.value, directory),
+					);
 				}).pipe(Effect.scoped),
 			listProjects: () => Effect.tryPromise(() => client.app.projects()),
 		};

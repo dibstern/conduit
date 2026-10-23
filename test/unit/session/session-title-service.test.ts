@@ -40,7 +40,9 @@ import type { StoredEvent } from "../../../src/lib/persistence/events.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { CursorAccountResources } from "../../../src/lib/provider/cursor/cursor-account-resources.js";
 import { makeCursorProviderRuntime } from "../../../src/lib/provider/cursor/cursor-provider-runtime.js";
+import { createCursorSdkPort } from "../../../src/lib/provider/cursor/cursor-sdk.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import * as openCodeTextServer from "../../../src/lib/provider/opencode-text-server.js";
 import {
@@ -52,6 +54,7 @@ import {
 	makeClaudeTextGenerationLayer,
 	replayClaudeText,
 } from "../../helpers/claude-text-generation.js";
+import { cursorAccountResourcesFixture } from "../../helpers/cursor-account-resources-fixture.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -608,6 +611,11 @@ describe("SessionTitleService", () => {
 								accounts: accounts.snapshot,
 							},
 							{ read, state },
+						).pipe(
+							Effect.provideService(
+								CursorAccountResources,
+								cursorAccountResourcesFixture(createCursorSdkPort()),
+							),
 						);
 						return new ProviderRegistry([provider]);
 					}),

@@ -565,15 +565,27 @@ describe("shared-store relay project scope", () => {
 						Effect.provideService(PersistenceProjectTag, { projectId: B }),
 					);
 					if (mode !== "empty") {
-						yield* sql`INSERT INTO pending_inputs (input_id, session_id, text, request, state, admitted_at, version)
-						VALUES (${commandId}, ${sessionId}, 'steer', '{}', 'steering', 1000, 1)`;
-						yield* eventStore.appendBatch([
-							canonicalEvent("input.sent", sessionId, {
-								sessionId,
-								inputId: commandId,
-								steer: true,
-							}),
-						]);
+						const runner = yield* ProjectionRunnerEffectTag;
+						yield* runner.projectBatch(
+							yield* eventStore.appendBatch([
+								canonicalEvent(
+									"input.admitted",
+									sessionId,
+									{
+										sessionId,
+										inputId: commandId,
+										delivery: "steer",
+										request: { text: "steer" },
+									},
+									{ createdAt: 1000 },
+								),
+								canonicalEvent("input.sent", sessionId, {
+									sessionId,
+									inputId: commandId,
+									steer: true,
+								}),
+							]),
+						);
 					}
 					let closing = mode === "closing";
 					let interrupted = mode === "interrupted";

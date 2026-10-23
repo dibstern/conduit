@@ -6,8 +6,10 @@ import {
 	type ClaudeAdapterError,
 	ClaudeRuntimeError,
 } from "../event-sink-errors.js";
+import { skillCommand } from "../skill-discovery.js";
 import type {
 	CommandInfo,
+	DiscoveredSkill,
 	ModelInfo,
 	PreWarmSessionInput,
 	ProviderCall,
@@ -111,9 +113,9 @@ function enumerateCommands(
 function enumerateSkills(
 	baseDir: string,
 	source: "user-skill" | "project-skill",
-): CommandInfo[] {
+): DiscoveredSkill[] {
 	const dir = join(baseDir, "skills");
-	const out: CommandInfo[] = [];
+	const out: DiscoveredSkill[] = [];
 	for (const entry of safeReaddir(dir)) {
 		const skillPath = join(dir, entry);
 		try {
@@ -130,6 +132,7 @@ function enumerateSkills(
 			out.push({
 				name: skillName,
 				source,
+				location: { _tag: "File", path: skillFile, root: dir },
 				...(skillDesc ? { description: skillDesc } : {}),
 			});
 		} catch {
@@ -149,6 +152,10 @@ export function discoverCapabilitiesEffect(
 	return Effect.gen(function* () {
 		const userBase = folder.path;
 		const projectBase = join(workspaceRoot, ".claude");
+		const skills = [
+			...enumerateSkills(projectBase, "project-skill"),
+			...enumerateSkills(userBase, "user-skill"),
+		];
 
 		const fsCommands: CommandInfo[] = [
 			...BUILTIN_COMMANDS.map((c) => ({
@@ -158,8 +165,7 @@ export function discoverCapabilitiesEffect(
 			})),
 			...enumerateCommands(userBase, "user-command"),
 			...enumerateCommands(projectBase, "project-command"),
-			...enumerateSkills(userBase, "user-skill"),
-			...enumerateSkills(projectBase, "project-skill"),
+			...skills.map(skillCommand),
 		];
 
 		const probe = yield* getCapabilitiesProbeEffect(
@@ -197,6 +203,7 @@ export function discoverCapabilitiesEffect(
 			supportsFork: true,
 			supportsRevert: true,
 			commands,
+			skills,
 			agents: probe.agents,
 		};
 	});

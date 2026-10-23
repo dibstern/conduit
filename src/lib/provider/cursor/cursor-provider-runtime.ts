@@ -11,7 +11,9 @@ import {
 	type RunnerProviderInstanceDeps,
 } from "../runner/runner-provider-instance.js";
 import { CursorAccountResources } from "./cursor-account-resources.js";
+import { cursorCredentialMessage } from "./cursor-credential.js";
 import { makeCursorRunnerDriver } from "./cursor-runner-driver.js";
+import { cursorRunnerWire } from "./cursor-runner-wire.js";
 
 export function makeCursorProviderRuntime(
 	deps: RunnerProviderInstanceDeps,
@@ -19,18 +21,17 @@ export function makeCursorProviderRuntime(
 		readonly read: ReadQueryEffect;
 		readonly state: Omit<ProviderStateEffect, "projectId">;
 	},
-): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> {
+): Effect.Effect<
+	RunnerProviderInstance,
+	never,
+	Scope.Scope | CursorAccountResources
+> {
 	return Effect.gen(function* () {
 		const { read, state } = persistence;
-		const resources = yield* Effect.serviceOption(CursorAccountResources);
+		const resources = yield* CursorAccountResources;
 		return yield* makeRunnerProviderInstance(
 			deps,
-			makeCursorRunnerDriver(
-				undefined,
-				{ read, state },
-				deps.daemonConfigDir,
-				resources._tag === "Some" ? resources.value : undefined,
-			),
+			makeCursorRunnerDriver(resources, { read, state }, deps.daemonConfigDir),
 			(emit) =>
 				makeProcessSessionRunner(
 					{
@@ -41,39 +42,37 @@ export function makeCursorProviderRuntime(
 					emit,
 					{
 						driverKind: "cursor",
-						...(resources._tag === "Some"
-							? {
-									withAccountScope: (
-										accountId: string,
-										work: Effect.Effect<void>,
-									) =>
-										Effect.gen(function* () {
-											const accounts = yield* deps.accounts;
-											if (
-												!accounts.accounts.some(
-													(account) =>
-														account.id === accountId &&
-														account.driver === "cursor",
-												)
-											)
-												return yield* Effect.fail({
-													operation: "retain account",
-													message: `Cursor account "${accountId}" is unavailable`,
-													code: "account_unavailable",
-													retryable: false,
-												});
-											return yield* resources.value.use(accountId, () => work);
-										}).pipe(
-											Effect.mapError((cause) =>
-												"operation" in cause
-													? cause
-													: runnerFailure("retain account", cause),
-											),
-										),
-								}
-							: {}),
+						withAccountScope: (accountId: string, work: Effect.Effect<void>) =>
+							Effect.gen(function* () {
+								const accounts = yield* deps.accounts;
+								if (
+									!accounts.accounts.some(
+										(account) =>
+											account.id === accountId && account.driver === "cursor",
+									)
+								)
+									return yield* Effect.fail({
+										operation: "retain account",
+										message: `Cursor account "${accountId}" is unavailable`,
+										code: "account_unavailable",
+										retryable: false,
+									});
+								return yield* resources.use(accountId, () => work);
+							}).pipe(
+								Effect.mapError((cause) =>
+									"operation" in cause
+										? cause
+										: runnerFailure("retain account", cause),
+								),
+							),
 						coldUpgrade: true,
-						connect: connectRunner,
+						spawnEnvironment: { CURSOR_BACKEND_URL: resources.backendUrl },
+						connect: (options) =>
+							connectRunner({
+								...options,
+								cursorBackendUrl: resources.backendUrl,
+								wire: cursorRunnerWire,
+							}),
 						settingsDeferredCode: "cursor_settings_deferred",
 						snapshotCommandSettings: () => ({}),
 						warmCommand: (sessionId, _state, snapshot) => ({
@@ -90,32 +89,26 @@ export function makeCursorProviderRuntime(
 								: {}),
 							state,
 							providerStateKeys: ["cursor.forkDigest"],
-							...(resources._tag === "Some"
-								? {
-										replayCommandFields: (accountId: string) =>
-											resources.value
-												.use(accountId, ({ credential }) => credential)
-												.pipe(
-													Effect.mapError((cause) =>
-														runnerFailure("recover Cursor credentials", cause),
-													),
-													Effect.flatMap((credential) =>
-														credential
-															? Effect.succeed({
-																	cursorCredential: {
-																		...credential,
-																		apiKey: credential.apiKey,
-																	},
-																})
-															: Effect.fail({
-																	operation: "recover Cursor credentials",
-																	message: "Cursor authentication required",
-																	code: "auth_required",
-																}),
-													),
-												),
-									}
-								: {}),
+							replayCommandFields: (accountId: string) =>
+								resources
+									.use(accountId, ({ credential }) => credential)
+									.pipe(
+										Effect.mapError((cause) =>
+											runnerFailure("recover Cursor credentials", cause),
+										),
+										Effect.flatMap((lookup) =>
+											lookup._tag === "Ready"
+												? Effect.succeed({
+														cursorCredential: lookup.credential,
+														shellEnv: {},
+													})
+												: Effect.fail({
+														operation: "recover Cursor credentials",
+														message: cursorCredentialMessage(lookup),
+														code: "auth_required",
+													}),
+										),
+									),
 						}),
 					},
 				),

@@ -40,6 +40,7 @@ export const connectRunner = (options: {
 	readonly helloTimeoutMs?: number;
 	readonly preserveRole?: boolean;
 	readonly driverKind?: string;
+	readonly cursorBackendUrl?: import("../cursor/cursor-credential.js").CursorBackendUrl;
 	readonly wire?: RunnerWireCodec;
 	readonly readThread?: (
 		sessionId: string,
@@ -199,14 +200,16 @@ export const connectRunner = (options: {
 					}
 					if (message.type === "hello") {
 						if (greeted) return;
-						const helloFailure = runnerHelloFailure(message, "runner");
-						// Runner builds predating driverKind were all Claude.
+						const helloFailure = runnerHelloFailure(
+							message,
+							"runner",
+							options.driverKind ?? "claude",
+							options.cursorBackendUrl,
+						);
 						if (
 							helloFailure ||
 							message.runnerId !== options.runnerId ||
 							message.sessionId !== options.sessionId ||
-							(message.driverKind ?? "claude") !==
-								(options.driverKind ?? "claude") ||
 							(options.pid !== undefined && message.pid !== options.pid)
 						) {
 							finish(

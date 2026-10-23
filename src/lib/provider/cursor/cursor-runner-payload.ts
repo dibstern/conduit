@@ -26,7 +26,7 @@ import type {
 	SessionTurn,
 } from "../runner/session-runner.js";
 import type { EventSink, TurnErrorCode, TurnResult } from "../types.js";
-import { resolveCursorCredential } from "./cursor-credential.js";
+import type { CursorCredentialEnvelope } from "./cursor-credential.js";
 import { cursorAskUserTool } from "./cursor-questions.js";
 import { CursorModelParameters } from "./cursor-runner-driver.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
@@ -45,7 +45,6 @@ import {
 import type {
 	CursorAgent,
 	CursorAgentOptions,
-	CursorCredential,
 	CursorRun,
 	CursorSdkPort,
 	CursorStore,
@@ -56,7 +55,9 @@ export interface CursorRunnerDeps {
 	readonly daemonConfigDir: string;
 	readonly port?: CursorSdkPort;
 	readonly environment?: () => Readonly<Record<string, string | undefined>>;
-	readonly credential?: (inputId: string) => CursorCredential | undefined;
+	readonly credential: (
+		inputId: string,
+	) => CursorCredentialEnvelope | undefined;
 	readonly onAbandonedRun?: (inputId: string) => void;
 }
 
@@ -538,33 +539,12 @@ export class CursorRunnerPayload implements RunnerPayload {
 								text: input.text ?? input.prompt,
 							},
 						});
-					const credential =
-						this.deps.credential?.(input.inputId) ??
-						(yield* sdkCall("credential lookup", () =>
-							resolveCursorCredential(
-								this.deps.port ??
-									(input.account
-										? createCursorSdkPort({
-												id: input.account.id,
-												configDir: this.deps.daemonConfigDir,
-											})
-										: this.sdk),
-								{
-									NODE_ENV: process.env["NODE_ENV"],
-									...(input.account
-										? {}
-										: (input.shellEnv ??
-											this.deps.environment?.() ??
-											process.env)),
-									...input.account?.env,
-								},
-							),
-						));
+					const credential = this.deps.credential(input.inputId);
 					if (!credential)
 						return yield* finish(
 							"error",
-							"auth_required",
-							"Cursor authentication required. Log in to Cursor in Settings.",
+							"turn_unprepared",
+							"Cursor turn has no prepared credential envelope",
 						);
 					if (!input.model)
 						return yield* finish(

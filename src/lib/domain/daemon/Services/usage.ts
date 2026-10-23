@@ -49,6 +49,7 @@ export interface UsageService {
 	readonly turnEnded: (accountId: string) => Effect.Effect<void>;
 	readonly pickFailover: (
 		excluding: string,
+		modelId?: string,
 	) => Effect.Effect<string | undefined>;
 }
 
@@ -461,7 +462,7 @@ export const makeUsage = (options: {
 							),
 						).pipe(Effect.asVoid),
 			);
-		const pickFailover: UsageService["pickFailover"] = (excluding) =>
+		const pickFailover: UsageService["pickFailover"] = (excluding, modelId) =>
 			Effect.gen(function* () {
 				const order: readonly string[] = yield* options.order ??
 					Effect.succeed([]);
@@ -488,6 +489,7 @@ export const makeUsage = (options: {
 						reading &&
 						accountLimit({
 							asker: "automatic",
+							modelId,
 							reading,
 							now: yield* Clock.currentTimeMillis,
 						}).kind === "go"
