@@ -53,6 +53,8 @@ export interface PermissionResponse {
 export interface ProviderControlContext {
 	readonly commandId: string;
 	readonly providerProcessId: string;
+	/** Original Stop cutoff, before its owner snapshot and delivery. */
+	readonly requestedAt?: number;
 	/** Conditional End for the original Stop cohort only. */
 	readonly retireRunIds?: readonly string[];
 	readonly response?: PermissionResponse;

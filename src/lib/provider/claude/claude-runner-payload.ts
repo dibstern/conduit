@@ -511,8 +511,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	interrupt(
 		sessionId: string,
 		turnIds?: readonly string[],
+		requestedAt?: number,
 	): Effect.Effect<void, SessionFailure> {
-		return this.interruptTurnEffect(sessionId, turnIds).pipe(
+		return this.interruptTurnEffect(sessionId, turnIds, requestedAt).pipe(
 			Effect.mapError((cause) => sessionFailure("interrupt", cause)),
 		);
 	}
@@ -2525,11 +2526,12 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	interruptTurnEffect(
 		sessionId: string,
 		turnIds?: readonly string[],
+		requestedAt?: number,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const attributes = { providerId: this.providerId, sessionId };
 		return this.mapProviderFailure(
 			"interruptTurn",
-			this.interruptSessionEffect(sessionId, turnIds).pipe(
+			this.interruptSessionEffect(sessionId, turnIds, requestedAt).pipe(
 				Effect.annotateLogs(attributes),
 				Effect.withSpan("claude.interrupt", { attributes }),
 			),
@@ -2539,6 +2541,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	private interruptSessionEffect(
 		sessionId: string,
 		turnIds?: readonly string[],
+		requestedAt?: number,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		const bound = turnIds !== undefined;
 		return Effect.gen({ self: this }, function* () {
@@ -2550,7 +2553,19 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			}
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			const interrupt = Effect.gen({ self: this }, function* () {
-				if (ctx && bound && turnIds.length === 0) {
+				const awaitingUser =
+					(ctx?.pendingApprovals.size ?? 0) > 0 ||
+					(ctx?.pendingQuestions.size ?? 0) > 0;
+				// Recover lost input identity only for interactions present at Stop.
+				// A delayed idle Stop must leave a later turn's questions alone.
+				const recoverBlocked =
+					ctx &&
+					requestedAt !== undefined &&
+					[
+						...ctx.pendingApprovals.values(),
+						...ctx.pendingQuestions.values(),
+					].some((pending) => Date.parse(pending.createdAt) <= requestedAt);
+				if (ctx && bound && turnIds.length === 0 && !recoverBlocked) {
 					const foreground =
 						(ctx.turnInFlight && ctx.currentRunId !== undefined) ||
 						(yield* pendingIntakes(this.stateRef, sessionId)).size > 0;
@@ -2576,8 +2591,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				} else if (
 					ctx &&
 					bound &&
-					(!boundTurnId ||
-						!turnIds.includes(boundTurnId) ||
+					((!recoverBlocked &&
+						(!boundTurnId || !turnIds.includes(boundTurnId))) ||
 						!(yield* isCurrentSession(this.stateRef, ctx)))
 				)
 					return Effect.void;
@@ -2651,8 +2666,16 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							}),
 						),
 					);
-					// Only an accepted interrupt may reject interactions. Keep this on
-					// the stream's ownership permit so a pending steer cannot lose its approvals.
+					// canUseTool may prevent the SDK from acknowledging interrupt. Release
+					// its wait under this ownership permit before awaiting that acknowledgement.
+					if (awaitingUser)
+						yield* this.cancelInteractionsEffect(
+							ctx,
+							"Turn interrupted",
+							false,
+						);
+					// Otherwise only an accepted interrupt may reject interactions. Keep this
+					// on the stream's permit so a pending steer cannot lose its approvals.
 					// A bound Stop awaits acceptance after releasing that permit, so the
 					// acknowledgement holds no admission and a rejection still fails the Stop.
 					// Native completion also releases the runner's command ownership.
@@ -2671,7 +2694,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						).pipe(Effect.as(false)),
 					).pipe(
 						Effect.flatMap((accepted) =>
-							accepted
+							accepted && !awaitingUser
 								? (ctx.messageOwnershipPermit ??=
 										Semaphore.makeUnsafe(1)).withPermits(1)(
 										Effect.gen({ self: this }, function* () {
