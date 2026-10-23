@@ -81,6 +81,11 @@ function snapshotRowToHistory(
 				: {
 						state: {
 							...providerState,
+							...("status" in state && state.status === "error"
+								? { outcome: "failed" as const }
+								: "status" in state && state.status === "completed"
+									? { outcome: "succeeded" as const }
+									: {}),
 							...(metadata === undefined ? {} : { metadata }),
 							...projectTool({
 								name:
@@ -173,7 +178,6 @@ const CURSOR_PRESENTATION_KEYS = new Set([
 	"truncated",
 	"movedToBackground",
 	"exitCode",
-	"isError",
 	"fileChange",
 	"plan",
 	"computerUse",
@@ -355,6 +359,8 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 		const status =
 			row.status == null ? undefined : TOOL_STATUSES.get(row.status);
 		if (status) stateObj["status"] = status;
+		if (status === "error") stateObj.outcome = "failed";
+		else if (status === "completed") stateObj.outcome = "succeeded";
 		const metadata = browserMetadata(
 			row.metadata == null ? undefined : parseObjectJson(row.metadata),
 			row.result == null &&
@@ -362,8 +368,7 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 				row.status !== "error",
 		);
 		if (metadata) stateObj["metadata"] = metadata;
-		if (metadata?.["isError"] === true) {
-			stateObj["status"] = "error";
+		if (stateObj.outcome === "failed") {
 			stateObj["error"] = stateObj.output?.text ?? "Tool failed";
 		}
 		if (Object.keys(stateObj).length > 0) {

@@ -1,5 +1,8 @@
 # Cursor SDK traces
 
+- SDK 1.0.37 live capture: `basic.jsonl`.
+- SDK 1.0.40 live capture: unavailable because the corpus predates this SDK upgrade and C4 excludes live recapture; follow-up ie7l.
+
 `title-generation.jsonl` is a real SDK 1.0.37 capture for conduit-test-9mbo.7.
 It uses the machine's environment credential, Composer 2.5 with `fast:false`,
 an empty temporary workspace and store, `settingSources:[]`, `tools:[]`, and
@@ -249,7 +252,7 @@ captured `wait.result.model.id` proves that choosing an actual model is not drif
 
 ## Tool replay cases (conduit-test-xqsg.7)
 
-The 23 `tool-*.jsonl` files are derived fixtures, not live captures. They use
+The `tool-*.jsonl` files are derived fixtures, not live captures. They use
 `tools-project.jsonl`'s header, create/send/run envelopes, tool delta wrappers,
 tool-requests-listed update, authoritative wait result and disposal markers.
 Unrelated text/thinking, hooks, tool calls and duplicated stream content are
@@ -269,7 +272,9 @@ to prevent independent replay turns from sharing a projected tool part.
   The write path is `created.txt`; the success value supplies `linesCreated`
   and `fileSize`. No prior read or before-content is added. Glob's declared
   `clientTruncated` is true. Todos include the declared `inProgress` status.
-  Image data is a one-pixel PNG. Screen media paths are relative to the isolated
+  Generate-image success contains only `filePath`, matching the installed
+  SDK 1.0.40 converter rather than its stale `imageData` declaration.
+  Screen media paths are relative to the isolated
   workspace, where the process test creates deterministic PNG/video bytes.
 - `tool-shell` additionally exercises streamed stdout/stderr with
   `shell-output-delta.event = {case, value: {content}}`. No live native capture
@@ -293,6 +298,10 @@ to prevent independent replay turns from sharing a projected tool part.
   to a failure line. `tool-computerUse-error` replaces its result with the
   declared error fields (`message`, `actionCount`, `durationMs`, `screenshotPath`,
   `log`) to pin failed actions and their screenshot attachment.
+- `tool-mcp-error.jsonl` derives from `tool-mcp.jsonl`, changing only the
+  scenario and completed MCP success value's `isError` to true. The public
+  envelope remains `status: "success"`, as in SDK 1.0.40's MCP converter.
+  The daemon test asserts `error` in projected browser history.
 - `tool-stream-truncated` removes glob's result-level truncation flag and adds
   the declared `SDKToolUseMessage.truncated.result` after completion, proving a
   late stream marker survives in stored history without creating another row.
@@ -325,8 +334,8 @@ count is reconstructed, cached or read from the filesystem.
 foreground capture. Its nested `taskUpdate` deltas stream child text, thinking
 and seven public tool calls. Its completion snapshot repeats that content and
 also contains three `getMcpToolsToolCall` steps absent from the public live
-updates. Those three steps stay generic; they are not claimed as public tool
-union members. Child identity uses the parent Conduit ID and Task call ID,
+updates. Those three non-public steps are skipped, matching the SDK converter.
+Child identity uses the parent Conduit ID and Task call ID,
 never the SDK child agent ID or a custom-tool context's parent session ID.
 
 The following are replay derivatives, not new live observations. Each uses the
@@ -339,9 +348,19 @@ foreground capture's complete rows and envelopes except for these edits:
   `subagent-background-default.jsonl`. This pins a later SDK-reported model
   replacing the initial inherited parent pick, plus idempotent reconciliation.
   Foreground reconciliation reuses live text and thinking part IDs positionally
-  by kind and fills the three snapshot-only generic tools in snapshot order.
+  by kind and skips the three non-public tools in snapshot order.
   There is no derived callback-gap case: the spike did not observe missing
   live text callbacks.
+- `subagent-reconcile-failures.jsonl` derives from `subagent-reconcile.jsonl`.
+  It removes nested live tool callbacks to force snapshot reconciliation.
+  Its Task snapshots retain captured text/thinking and non-public MCP discovery
+  steps, replacing public tools with four copies of the captured shell step
+  and one MCP step. Their derived results are shell `failure` with exit 7,
+  `timeout`, `rejected`, `spawnError`, and MCP success with `isError: true`,
+  following the installed SDK 1.0.40 shell/MCP converters. The copies have
+  distinct `c4-*` call IDs. A copied shell step renamed `futureToolCall` pins
+  unknown snapshot kinds being skipped without terminating the turn.
+  These are derived converter examples, not live observations.
 - `subagent-background-follow-up.jsonl` sets the completed Task's declared
   `isBackground` field to true, including its duplicate stream envelope, and
   copies the capture's existing `turn-ended` delta immediately after the Task

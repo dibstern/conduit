@@ -172,6 +172,7 @@ export interface ToolMessage {
 	/** Tool input parameters — stored for tools that need rich rendering (e.g. task/subagent). */
 	input?: unknown;
 	status: ToolStatus;
+	outcome?: "succeeded" | "failed";
 	result?: string;
 	isError?: boolean;
 	/** Set while `input` or `result` is a preview: each cut field's full size.
