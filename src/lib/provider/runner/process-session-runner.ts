@@ -1347,6 +1347,17 @@ export const makeProcessSessionRunner = (
 							...state,
 							...(snapshot ? { snapshot } : {}),
 						};
+						if (
+							state.snapshot &&
+							process.env["NODE_ENV"] === "test" &&
+							process.env["CONDUIT_TEST_UPGRADE_SINK_PROOF"] === "1" &&
+							process.connected
+						)
+							process.send?.({
+								channel: "conduit-process-test",
+								kind: "runner-snapshot-observed",
+								sessionId,
+							});
 						upgrade(sessionId, entry);
 					},
 					onIdleExit: () => {

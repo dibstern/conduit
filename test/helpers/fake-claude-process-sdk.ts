@@ -233,6 +233,7 @@ export type ProcessMark =
 			sessionId: string;
 			snapshotJson: string;
 	  }
+	| { kind: "runner-snapshot-observed"; sessionId: string }
 	| {
 			kind: "runtime-sink";
 			phase: "allocated" | "released";

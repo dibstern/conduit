@@ -3,7 +3,7 @@
  * - An idle live query must not keep an edited or cleared account folder.
  * - An unused prewarmed query must not survive a folder edit or clear.
  * - Editing during a turn must preserve that turn's query and settings.
- * - Steering that turn must still reach its original query after a folder edit.
+ * - Steering after a folder edit must refuse the busy account identity change.
  * - A steer during runner startup must retain the original turn's saved account.
  * - Missing native history in the new folder must use the canonical handoff.
  * - A shared transcript may resume, but its old receipt cannot pick the folder.
@@ -25,6 +25,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AccountSwitchBusy } from "../../../src/lib/contracts/limit-recovery.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 
 import {
@@ -411,7 +412,35 @@ describe("Account folder changes without daemon restart", () => {
 				configDir,
 			});
 			const text = `first-send-after-${configDir ? "edit" : "clear"}`;
-			const requestCursor = browser.frames.length;
+			if (initializing && action === "send") {
+				await daemon.waitForMark(
+					(mark) =>
+						mark.kind === "runner-snapshot-observed" &&
+						mark.sessionId === sessionId,
+					marksBefore,
+				);
+				// 0a0dc56f treats an edited config folder as a busy account switch.
+				const refusal = await Effect.runPromise(
+					browser.rpc["input.submit"]({
+						sessionId,
+						inputId: randomUUID(),
+						originId: browser.originId,
+						delivery: "queue",
+						text,
+					}).pipe(Effect.flip),
+				);
+				expect(refusal).toBeInstanceOf(AccountSwitchBusy);
+				expect(refusal).toMatchObject({
+					sessionId,
+					fromAccountId: accountId,
+					toAccountId: accountId,
+				});
+				writeFileSync(
+					join(daemon.root, "release-held-initialization"),
+					"release",
+				);
+				expect(await warm).toBe("ready");
+			}
 			const sent = (async () => {
 				if (action === "pre-warm") {
 					await browser.preWarmSession(sessionId);
@@ -424,21 +453,12 @@ describe("Account folder changes without daemon restart", () => {
 				}
 				return browser.send(sessionId, text);
 			})();
-			if (initializing) {
-				if (action === "pre-warm")
-					await daemon.waitForMark(
-						(mark) =>
-							mark.kind === "pre-warm-joined" && mark.sessionId === sessionId,
-						marksBefore,
-					);
-				else
-					await browser.waitFor(
-						(message) =>
-							message["type"] === "session_row" &&
-							message["id"] === sessionId &&
-							message["status"] === "busy",
-						requestCursor,
-					);
+			if (initializing && action === "pre-warm") {
+				await daemon.waitForMark(
+					(mark) =>
+						mark.kind === "pre-warm-joined" && mark.sessionId === sessionId,
+					marksBefore,
+				);
 				writeFileSync(
 					join(daemon.root, "release-held-initialization"),
 					"release",
@@ -463,7 +483,7 @@ describe("Account folder changes without daemon restart", () => {
 		expect(daemon.generations).toHaveLength(1);
 	});
 
-	it("keeps steering the running turn on its original folder after an edit", async () => {
+	it("refuses steering after a folder edit until the original turn finishes", async () => {
 		const { daemon, browser } = await start();
 		const original = login(daemon, "original");
 		const edited = login(daemon, "edited");
@@ -485,32 +505,36 @@ describe("Account folder changes without daemon restart", () => {
 				configDir: edited,
 			});
 			const inputId = randomUUID();
-			// The fixture emits the SDK's command-start boundary for corrections.
 			const steerText = "correction-after-folder-edit";
-			const submitted = await Effect.runPromise(
+			// 0a0dc56f refuses a config-folder identity change before admission.
+			const refusal = await Effect.runPromise(
 				browser.rpc["input.submit"]({
 					sessionId,
 					inputId,
 					originId: browser.originId,
 					delivery: "steer",
 					text: steerText,
-				}),
+				}).pipe(Effect.flip),
 			);
-			expect(submitted.ok).toBe(true);
-			await daemon.waitForMark(
-				(mark) =>
-					mark.kind === "runner-command" &&
-					mark.commandId === inputId &&
-					mark.type === "send-turn",
-			);
+			expect(refusal).toBeInstanceOf(AccountSwitchBusy);
+			expect(refusal).toMatchObject({
+				sessionId,
+				fromAccountId: "claude",
+				toAccountId: "claude",
+			});
+			expect(
+				daemon.marks.some(
+					(mark) =>
+						mark.kind === "runner-command" &&
+						mark.commandId === inputId &&
+						mark.type === "send-turn",
+				),
+			).toBe(false);
 			expect(daemon.marks.filter((mark) => mark.kind === "query")).toHaveLength(
 				1,
 			);
 			writeFileSync(join(daemon.root, "release-local-work"), "release");
 			await active;
-			await daemon.waitForMark(
-				(mark) => mark.kind === "emit" && mark.prompt.endsWith(steerText),
-			);
 			expect(launches().at(-1)?.configDir).toBe(original);
 			await browser.send(sessionId, "next-turn-after-steering");
 			await vi.waitFor(
