@@ -18,7 +18,7 @@
 -->
 
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { tick, untrack } from "svelte";
 	import { isProcessing } from "../../stores/chat.svelte.js";
 	import { discoveryState, getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
@@ -309,7 +309,7 @@
 	);
 	// The island is phone-only, so its commands and the keyboard share one list.
 	const commands = $derived(session
-		? getSessionCommands(session, sessionState.now, { rename: () => { forceBarOpen(); renaming = true; } }, sessionViewState.compact ? "sheet" : "center")
+		? getSessionCommands(session, sessionState.now, { rename: async () => { forceBarOpen(); await tick(); renaming = true; } }, sessionViewState.compact ? "sheet" : "center")
 		: []);
 	const snoozeCommand = $derived(commands.find((item) => item.testId === "session-ctx-snooze"));
 	const globalActions = $derived(chromeMenuActions());
