@@ -323,11 +323,8 @@ for (const mode of [
 		test.use({ viewport: mode.viewport, hasTouch: mode.hasTouch });
 		const press = (target: Locator) =>
 			mode.hasTouch ? target.tap() : target.click();
-		// Phones keep the session checkout in the Composer sheet.
-		const checkout = async (page: Page) => {
-			if (mode.hasTouch) await press(page.getByTestId("model-picker-trigger"));
-			return page.getByTestId("composer-checkout");
-		};
+		const checkout = (page: Page) =>
+			page.getByTestId("composer-icons-left").getByTestId("composer-checkout");
 
 		test("New worktree starts on a generated branch and renders the worktree pill", async ({
 			page,
