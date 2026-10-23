@@ -20,10 +20,14 @@ export async function chooseSettingsOption(
 	option: string | { label: string },
 ): Promise<void> {
 	await trigger.click();
-	const items = page.getByRole("menuitemradio");
+	const menuId = await trigger.getAttribute("aria-controls");
+	if (!menuId) throw new Error("Settings picker did not identify its menu");
+	const menu = page.locator(`[id=${JSON.stringify(menuId)}]`);
+	await expect(menu).toBeVisible();
+	const items = menu.getByRole("menuitemradio");
 	await (typeof option === "string"
 		? items.and(page.locator(`[data-value=${JSON.stringify(option)}]`))
-		: page.getByRole("menuitemradio", { name: option.label, exact: true })
+		: menu.getByRole("menuitemradio", { name: option.label, exact: true })
 	).click();
-	await expect(page.getByRole("menu")).toBeHidden();
+	await expect(menu).toBeHidden();
 }
