@@ -219,6 +219,7 @@ export const Final: Story = {
 		return fitSidebarToViewport();
 	},
 	play: async ({ canvasElement }) => {
+		await document.fonts.ready;
 		await expectSessionTitle(canvasElement);
 		const canvas = within(canvasElement);
 		await expect(canvas.getByText("Fix token refresh race")).toBeVisible();
@@ -244,8 +245,19 @@ export const Final: Story = {
 		if (!title) throw new TypeError("Pinned title is missing");
 		const phone = matchMedia("(max-width: 767px)").matches;
 		if (!sessionViewState.compact) {
-			// The 260px sidebar reserves 16px for status before truncating this title.
-			await expect(title.scrollWidth).toBeGreaterThan(title.clientWidth);
+			// The loaded font fits at 260px; exercise ellipsis at a narrower width.
+			const width = uiState.sidebarWidth;
+			uiState.sidebarWidth = 240;
+			await waitFor(() =>
+				expect(title.scrollWidth).toBeGreaterThan(title.clientWidth),
+			);
+			uiState.sidebarWidth = width;
+			await waitFor(() =>
+				expect(
+					canvasElement.querySelector("#sidebar")?.getBoundingClientRect()
+						.width,
+				).toBe(width),
+			);
 			await expect(getComputedStyle(title).overflowX).toBe("hidden");
 			await expect(getComputedStyle(title).textOverflow).toBe("ellipsis");
 		} else {

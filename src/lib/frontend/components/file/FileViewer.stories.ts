@@ -51,6 +51,12 @@ type Story = StoryObj<typeof meta>;
 
 export const Loading: Story = {
 	beforeEach: () => {
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = fn(async (input: RequestInfo | URL) => {
+			if (String(input) !== "/p/storybook/api/status")
+				throw new TypeError(`Unexpected story request: ${String(input)}`);
+			return Response.json({ status: "ready" });
+		});
 		const restoreSocket = connectedSocket();
 		const previousProject = attachedProjectState.slug;
 		attachedProjectState.slug = "storybook";
@@ -59,12 +65,16 @@ export const Loading: Story = {
 		openFileViewer("src/lib/project.ts");
 		return () => {
 			restoreSocket();
+			globalThis.fetch = realFetch;
 			attachedProjectState.slug = previousProject;
 			closeFileViewer();
 			clearFileTreeState();
 		};
 	},
 	play: async ({ canvasElement }) => {
+		await waitFor(() =>
+			expect(globalThis.fetch).toHaveBeenCalledWith("/p/storybook/api/status"),
+		);
 		await expect(
 			await within(canvasElement).findByText("Loading…"),
 		).toBeVisible();

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import {
 	applyGetFileTreeResponse,
 	clearFileTreeState,
@@ -55,16 +55,26 @@ export const Default: Story = {};
 
 export const Loading: Story = {
 	beforeEach: () => {
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = fn(async (input: RequestInfo | URL) => {
+			if (String(input) !== "/p/storybook/api/status")
+				throw new TypeError(`Unexpected story request: ${String(input)}`);
+			return Response.json({ status: "ready" });
+		});
 		const restoreSocket = connectedSocket();
 		const previousProject = attachedProjectState.slug;
 		attachedProjectState.slug = "storybook";
 		return () => {
 			restoreSocket();
+			globalThis.fetch = realFetch;
 			attachedProjectState.slug = previousProject;
 		};
 	},
 	play: async ({ canvasElement }) => {
 		fileTreeState.scope = "storybook";
+		await waitFor(() =>
+			expect(globalThis.fetch).toHaveBeenCalledWith("/p/storybook/api/status"),
+		);
 		await expect(
 			await within(canvasElement).findByText("Loading..."),
 		).toBeVisible();
