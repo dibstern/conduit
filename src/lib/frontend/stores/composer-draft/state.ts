@@ -14,6 +14,8 @@ export interface DraftAttachmentItem {
 	status: "saving" | "saved" | "failed" | "removing";
 	previousStatus?: "saving" | "saved" | "failed";
 	error?: string;
+	/** Validation refusals need an explicit Retry, even after reconnecting. */
+	retryOnReconnect?: false;
 }
 type LocalAttachment = Required<
 	Pick<DraftAttachmentItem, "id" | "name" | "mime" | "size" | "dataUrl">
@@ -62,7 +64,9 @@ export type DraftEvent =
 			key: InputDraftKey;
 			id: string;
 			error: string;
+			retryOnReconnect?: false;
 	  }
+	| { _tag: "AttachmentRetryRequested"; key: InputDraftKey; id: string }
 	| {
 			_tag: "AttachmentsReceived";
 			key: InputDraftKey;
@@ -198,6 +202,14 @@ export function hasContent(state: DraftState, key: InputDraftKey): boolean {
 		(state.attachments.get(id) ?? []).some((item) => item.status !== "removing")
 	);
 }
+export function attachmentsReady(
+	state: DraftState,
+	key: InputDraftKey,
+): boolean {
+	return !(state.attachments.get(draftKeyId(key)) ?? []).some(
+		(item) => item.status === "saving" || item.status === "failed",
+	);
+}
 function settleSend(
 	state: DraftState,
 	key: InputDraftKey | null,
@@ -285,7 +297,8 @@ export function step(
 		id !== null && !state.promoted.has(id) && !state.inFlight.has(id);
 	switch (event._tag) {
 		case "ConnectionLost":
-		case "Reconnected": {
+		case "Reconnected":
+		case "AttachmentRetryRequested": {
 			const attachments = new Map(state.attachments);
 			const commands: DraftCommand[] = [];
 			for (const [keyId, items] of attachments) {
@@ -308,13 +321,18 @@ export function step(
 								error: "Connection lost",
 							};
 						if (
-							event._tag === "Reconnected" &&
+							(event._tag === "Reconnected"
+								? item.retryOnReconnect !== false
+								: event._tag === "AttachmentRetryRequested" &&
+									keyId === draftKeyId(event.key) &&
+									item.id === event.id) &&
 							item.status === "failed" &&
 							item.dataUrl
 						) {
 							const {
 								error: _error,
 								previousStatus: _previousStatus,
+								retryOnReconnect: _retryOnReconnect,
 								...retry
 							} = item;
 							commands.push({
@@ -422,10 +440,26 @@ export function step(
 				items = items.map((item) =>
 					item.id !== event.id
 						? item
-						: item.status === "saving"
-							? { ...item, status: "failed", error: event.error }
-							: item.status === "removing" && item.previousStatus === "saving"
-								? { ...item, previousStatus: "failed", error: event.error }
+						: item.status === "saving" || item.status === "failed"
+							? {
+									...item,
+									status: "failed",
+									error: event.error,
+									...(event.retryOnReconnect === false
+										? { retryOnReconnect: false as const }
+										: {}),
+								}
+							: item.status === "removing" &&
+									(item.previousStatus === "saving" ||
+										item.previousStatus === "failed")
+								? {
+										...item,
+										previousStatus: "failed",
+										error: event.error,
+										...(event.retryOnReconnect === false
+											? { retryOnReconnect: false as const }
+											: {}),
+									}
 								: item,
 				);
 			}

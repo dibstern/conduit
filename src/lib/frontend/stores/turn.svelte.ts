@@ -11,6 +11,7 @@ import type {
 import { WorktreeCreationError } from "../../contracts/worktree.js";
 import {
 	DraftAlreadySent,
+	DraftAttachmentMissing,
 	type InputDraftKey,
 } from "../../contracts/ws-rpc.js";
 import { stopBackgroundTasks } from "../components/session/background-tasks.svelte.js";
@@ -47,7 +48,11 @@ export type SendOutcome =
 	| { readonly kind: "started" }
 	| { readonly kind: "waiting" }
 	| { readonly kind: "refused"; readonly reason: SteerBlocker }
-	| { readonly kind: "failed"; readonly alreadySent?: boolean };
+	| {
+			readonly kind: "failed";
+			readonly alreadySent?: boolean;
+			readonly draftAttachmentMissing?: string;
+	  };
 
 type SendInput = {
 	readonly text: string;
@@ -375,6 +380,8 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 	} catch (error) {
 		intents.delete(inputId);
 		localSends.delete(inputId);
+		if (Schema.is(DraftAttachmentMissing)(error))
+			return { kind: "failed", draftAttachmentMissing: error.message };
 		toastFailure(
 			"sideThread" in input
 				? "Failed to start Side Thread"

@@ -1,7 +1,11 @@
+import { Schema } from "effect";
 import { untrack } from "svelte";
-import type { InputDraftKey } from "../../../contracts/ws-rpc.js";
+import {
+	DraftAttachmentRejected,
+	type InputDraftKey,
+} from "../../../contracts/ws-rpc.js";
 import { connectionState } from "../../transport/connection-status.svelte.js";
-import { toastFailure } from "../../transport/rpc-errors.js";
+import { failureLine, toastFailure } from "../../transport/rpc-errors.js";
 import { rpc } from "../../transport/ws-rpc-client.js";
 import { getBrowserClientId } from "../client-identity.js";
 import {
@@ -11,6 +15,7 @@ import {
 	replaceRoute,
 } from "../router.svelte.js";
 import {
+	attachmentsReady,
 	type DraftAttachmentItem,
 	type DraftCommand,
 	type DraftEvent,
@@ -125,6 +130,7 @@ export function createComposerDraft(options: {
 	let sendPick = $state<DraftState["sendPick"]>();
 	let sending = $state(false);
 	let content = $state(false);
+	let ready = $state(true);
 	let attachments = $state<readonly DraftAttachmentItem[]>([]);
 	let syncTimer: ReturnType<typeof setTimeout> | null = null;
 	function cancelSync() {
@@ -137,6 +143,15 @@ export function createComposerDraft(options: {
 			switch (command._tag) {
 				case "AddAttachment": {
 					const { key, attachment } = command;
+					if (connectionState.status !== "connected") {
+						dispatch({
+							_tag: "AttachmentAddFailed",
+							key,
+							id: attachment.id,
+							error: "Connection lost",
+						});
+						break;
+					}
 					const sent = rpc("AddDraftAttachment", { key, ...attachment }).then(
 						(result) => {
 							dispatch({
@@ -151,10 +166,15 @@ export function createComposerDraft(options: {
 								_tag: "AttachmentAddFailed",
 								key,
 								id: attachment.id,
-								error:
+								error: failureLine(
+									error,
 									error instanceof Error
 										? error.message
 										: "Attachment save failed",
+								),
+								...(Schema.is(DraftAttachmentRejected)(error)
+									? { retryOnReconnect: false as const }
+									: {}),
 							});
 						},
 					);
@@ -177,10 +197,12 @@ export function createComposerDraft(options: {
 								_tag: "AttachmentRemoveFailed",
 								key,
 								id,
-								error:
+								error: failureLine(
+									error,
 									error instanceof Error
 										? error.message
 										: "Attachment removal failed",
+								),
 							});
 						},
 					);
@@ -294,6 +316,7 @@ export function createComposerDraft(options: {
 		const [next, commands] = step(state, event);
 		state = next;
 		content = state.key ? hasContent(state, state.key) : false;
+		ready = state.key ? attachmentsReady(state, state.key) : true;
 		text = state.text;
 		sendPick = state.sendPick;
 		sending =
@@ -449,9 +472,7 @@ export function createComposerDraft(options: {
 			return attachments.filter((item) => item.status !== "removing");
 		},
 		get attachmentsReady() {
-			return !attachments.some(
-				(item) => item.status === "saving" || item.status === "failed",
-			);
+			return ready;
 		},
 		get hasContent() {
 			return content;
@@ -475,6 +496,10 @@ export function createComposerDraft(options: {
 		removeAttachment(id: string) {
 			if (state.key)
 				dispatch({ _tag: "AttachmentRemoved", key: state.key, id });
+		},
+		retryAttachment(id: string) {
+			if (state.key)
+				dispatch({ _tag: "AttachmentRetryRequested", key: state.key, id });
 		},
 		attachmentsAccepted(key: InputDraftKey, ids: readonly string[]) {
 			dispatch({ _tag: "SendAttachmentsAccepted", key, ids });

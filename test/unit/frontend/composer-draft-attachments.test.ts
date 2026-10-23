@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	attachmentsReady,
 	type DraftEvent,
 	type DraftState,
 	draftKeyId,
@@ -49,6 +50,8 @@ describe("composer Draft attachment transitions", () => {
 			attachment: local(),
 		});
 		expect(items(state)).toEqual([{ ...local(), status: "saving" }]);
+		expect(attachmentsReady(state, key)).toBe(false);
+		expect(attachmentsReady(state, other)).toBe(true);
 		expect(commands).toEqual([
 			{ _tag: "AddAttachment", key, attachment: local() },
 		]);
@@ -72,6 +75,7 @@ describe("composer Draft attachment transitions", () => {
 			result: { attachment: saved() },
 		});
 		expect(items(acknowledged)).toEqual([{ ...saved(), status: "saved" }]);
+		expect(attachmentsReady(acknowledged, key)).toBe(true);
 		for (const ended of ["removed", "sent"] as const)
 			expect(
 				items(
@@ -86,6 +90,7 @@ describe("composer Draft attachment transitions", () => {
 	});
 
 	it("add failure and connection loss turn saving into failed", () => {
+		expect(attachmentsReady(failed(), key)).toBe(false);
 		expect(items(failed())[0]).toMatchObject({
 			status: "failed",
 			error: "offline",
@@ -408,6 +413,70 @@ describe("composer Draft attachment transitions", () => {
 			{ _tag: "AddAttachment", key, attachment: local() },
 		]);
 		expect(items(next, other)[0]?.status).toBe("saving");
+	});
+
+	it("Retry resends only its failed item, with the reconnect payload", () => {
+		const state = apply(failed(), {
+			_tag: "AttachmentAdded",
+			key: other,
+			attachment: local("b"),
+		});
+		const disconnected = apply(state, { _tag: "ConnectionLost" });
+		const [next, commands] = step(disconnected, {
+			_tag: "AttachmentRetryRequested",
+			key,
+			id: "a",
+		});
+		expect(items(next)).toEqual([{ ...local(), status: "saving" }]);
+		expect(items(next, other)[0]?.status).toBe("failed");
+		expect(commands).toEqual([
+			{ _tag: "AddAttachment", key, attachment: local() },
+		]);
+		for (const unchanged of [added(), received(added()), removing(failed())]) {
+			expect(
+				step(unchanged, { _tag: "AttachmentRetryRequested", key, id: "a" })[1],
+			).toEqual([]);
+		}
+	});
+
+	it("validation refusal stays failed on reconnect, but explicit Retry can resend", () => {
+		for (const before of [
+			added(),
+			apply(added(), { _tag: "ConnectionLost" }),
+			removing(),
+			apply(removing(), { _tag: "ConnectionLost" }),
+		]) {
+			let state = apply(before, {
+				_tag: "AttachmentAddFailed",
+				key,
+				id: "a",
+				error: "The file is over the 5 MB attachment limit.",
+				retryOnReconnect: false,
+			});
+			if (items(state)[0]?.status === "removing")
+				state = apply(state, {
+					_tag: "AttachmentRemoveFailed",
+					key,
+					id: "a",
+					error: "remove refused",
+				});
+			const [next, commands] = step(state, { _tag: "Reconnected" });
+			expect(items(next)[0]).toMatchObject({
+				status: "failed",
+				retryOnReconnect: false,
+			});
+			expect(attachmentsReady(next, key)).toBe(false);
+			expect(commands).toEqual([]);
+			const [retried, retryCommands] = step(next, {
+				_tag: "AttachmentRetryRequested",
+				key,
+				id: "a",
+			});
+			expect(items(retried)).toEqual([{ ...local(), status: "saving" }]);
+			expect(retryCommands).toEqual([
+				{ _tag: "AddAttachment", key, attachment: local() },
+			]);
+		}
 	});
 
 	it("accepted send drops listed ids, retaining later picks and other Drafts", () => {

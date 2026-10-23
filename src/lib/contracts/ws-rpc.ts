@@ -1145,6 +1145,11 @@ export class DraftAttachmentMissing extends Schema.TaggedError<DraftAttachmentMi
 	}
 }
 
+export class DraftAttachmentRejected extends Schema.TaggedError<DraftAttachmentRejected>()(
+	"DraftAttachmentRejected",
+	{ message: Schema.String },
+) {}
+
 export const GetStatus = Rpc.make("GetStatus", {
 	payload: Schema.TaggedStruct("GetStatus", {}),
 	success: GetStatusResponseSchema,
@@ -2995,7 +3000,7 @@ export const AddDraftAttachment = Rpc.make("AddDraftAttachment", {
 		Schema.Struct({ attachment: DraftAttachmentSchema }),
 		Schema.Struct({ ended: Schema.Literals(["removed", "sent"]) }),
 	]),
-	error: WsRpcError,
+	error: Schema.Union([WsRpcError, DraftAttachmentRejected]),
 });
 
 export const RemoveDraftAttachment = Rpc.make("RemoveDraftAttachment", {
