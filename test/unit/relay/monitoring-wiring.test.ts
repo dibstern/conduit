@@ -895,6 +895,7 @@ async function createEffectHarness(
 			setSessionArchived: unused,
 			restoreSessionForSend: unused,
 			setSessionAutoSettleDisabled: unused,
+			setSessionJev: unused,
 			setSessionPinned: unused,
 			snoozeSession: unused,
 			unsnoozeSession: unused,

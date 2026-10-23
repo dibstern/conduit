@@ -135,6 +135,11 @@
 	const searching = $derived(sessionState.searchQuery.trim().length > 0);
 	const settledShelfOpen = $derived(searching || uiState.settledShelfOpen);
 	const snoozedShelfOpen = $derived(searching || uiState.snoozedShelfOpen);
+	const groupsOpen = $derived({
+		pinned: searching || uiState.sessionGroupsOpen.pinned,
+		running: searching || uiState.sessionGroupsOpen.running,
+		idle: searching || uiState.sessionGroupsOpen.idle,
+	});
 	const scope = $derived(getSessionScope());
 	const tree = $derived(grouping === "project" ? buildProjectTree({
 		projects: projectState.projects.filter((project) => scope === null || project.slug === scope),
@@ -144,8 +149,10 @@
 		currentId: sessionState.currentId,
 	}) : null);
 	const visibleRowIds = $derived([
-		...arrangement.pinned.map((session) => session.id),
-		...(tree ? tree.flatMap((node) => node.shown) : arrangement.sections.flatMap((section) => section.sessions)).map((session) => session.id),
+		...(groupsOpen.pinned ? arrangement.pinned.map((session) => session.id) : []),
+		...(tree ? tree.flatMap((node) => node.shown) : arrangement.sections.flatMap((section) =>
+			(section.key === "running" || section.key === "idle") && !groupsOpen[section.key] ? [] : section.sessions,
+		)).map((session) => session.id),
 		...(settledShelfOpen ? arrangement.settled.map((session) => session.id) : []),
 		...(snoozedShelfOpen ? arrangement.snoozed.map((session) => session.id) : []),
 	]);
@@ -196,6 +203,13 @@
 	}));
 	const unpinSelected = $derived(selectedSessions.length > 0 && selectedSessions.every((session) => getSessionActionState(session, sessionState.now).pinned));
 	const pinEligible = $derived(selectedSessions.filter((session) => getSessionActionState(session, sessionState.now).pinned === unpinSelected));
+	// Like Pin: when every markable row is already unread the verb flips to Read.
+	const markable = $derived(selectedSessions.filter((session) => {
+		const actions = getSessionActionState(session, sessionState.now);
+		return !actions.settled && !actions.snoozed;
+	}));
+	const allUnread = $derived(markable.length > 0 && markable.every((session) => session.unread === true));
+	const unreadEligible = $derived(markable.filter((session) => (session.unread === true) === allUnread));
 	const allSelected = $derived(
 		selectCandidates.length > 0 &&
 			selectCandidates.every((s) => selectedSessionIds.has(s.id)),
@@ -426,14 +440,18 @@
 		}
 	}
 
-	async function handleBulkChange(kind: "settle" | "pin") {
-		const eligible = kind === "settle" ? settleEligible : pinEligible;
+	async function handleBulkChange(kind: "settle" | "pin" | "unread") {
+		const { eligible, on } = {
+			settle: { eligible: settleEligible, on: true },
+			pin: { eligible: pinEligible, on: !unpinSelected },
+			unread: { eligible: unreadEligible, on: !allUnread },
+		}[kind];
 		if (bulkPending || eligible.length === 0) return;
 		bulkPending = true;
 		await runBulkChange(kind, { eligible, selectedCount: selectedSessions.length, oncomplete: () => {
 			bulkPending = false;
 			resetSelectMode();
-		} }, unpinSelected);
+		} }, on);
 	}
 
 	function handleOpenBulkSnooze() {
@@ -515,9 +533,9 @@
 			Pick sessions to act on, then choose an action below.
 		</div>
 	{/if}
-	<SessionListRows {arrangement} {fullArrangement} {settledCount} {tree} {drafts} reorderable={!searching && statusFilter === null && scope === null} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
+	<SessionListRows {arrangement} {fullArrangement} {settledCount} {tree} {drafts} reorderable={!searching && statusFilter === null && scope === null} {isEmpty} {emptyMessage} {statusFilter} {searching} filteredLength={filtered.length} {groupsOpen} {snoozedShelfOpen} {settledShelfOpen} {pagerPending} {unavailableProjectLabels} {selectMode} {selectedSessionIds} menuOpenId={ctxMenuSession?.id} {renamingSessionId} {getProjectLabel} {getProjectAccent} oncontextmenu={handleContextMenu} ontoggleselection={handleToggleSelection} onrenamestart={handleCtxRename} onrenameend={handleRenameEnd} />
 	{#if selectMode}
-		<SessionListBulkBar settleCount={settleEligible.length} snoozeCount={snoozeEligible.length} pinCount={pinEligible.length} {selectionCount} {unpinSelected} {bulkPending} onsettle={() => { void handleBulkChange("settle"); }} onsnooze={handleOpenBulkSnooze} onpin={() => { void handleBulkChange("pin"); }} ondelete={handleBulkDelete} />
+		<SessionListBulkBar settleCount={settleEligible.length} snoozeCount={snoozeEligible.length} pinCount={pinEligible.length} unreadCount={unreadEligible.length} {selectionCount} {unpinSelected} {allUnread} {bulkPending} onsettle={() => { void handleBulkChange("settle"); }} onsnooze={handleOpenBulkSnooze} onpin={() => { void handleBulkChange("pin"); }} onunread={() => { void handleBulkChange("unread"); }} ondelete={handleBulkDelete} />
 	{/if}
 </div>
 

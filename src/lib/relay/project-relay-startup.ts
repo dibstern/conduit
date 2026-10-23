@@ -1,8 +1,13 @@
-import { Effect, Exit, Option, Schedule } from "effect";
+import { Context, Effect, Exit, Option, Schedule, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import { DaemonOrchestration } from "../domain/daemon/Services/daemon-orchestration.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import {
+	type ProviderAdapterProjectContext,
+	ProviderAdapters,
+} from "../domain/daemon/Services/provider-adapters.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
@@ -12,6 +17,7 @@ import type { ProjectSettingsTag } from "../domain/relay/Services/project-settin
 import { makeEventSinkFactory } from "../domain/relay/Services/provider-turn-dispatch.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
 import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resolve-orphaned-claude-permissions.js";
+import { restoreAsyncQuestionsFromStore } from "../domain/relay/Services/restore-async-questions.js";
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import {
 	type ConfigTag,
@@ -26,7 +32,7 @@ import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { restoreSessionSettings } from "../domain/relay/Services/session-model-settings.js";
 import {
-	type OverridesStateTag,
+	OverridesStateTag,
 	setDefaultModel,
 	setDefaultPermissionMode,
 	setDefaultVariant,
@@ -54,7 +60,6 @@ import type { Logger } from "../logger.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
-import { RunnerProviderInstance } from "../provider/runner/runner-provider-instance.js";
 import { runningRunnerCommands } from "../provider/runner/runner-recovery.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
 import type { ProjectRelayConfig } from "../types.js";
@@ -125,25 +130,68 @@ function acquireStartupServices(inputs: StartupInputs) {
 		});
 		const statusSnapshot = yield* RelayStatusSnapshotTag;
 		const sseStream = yield* SSEStreamTag;
-		// Defaults come from settings; legacy pick repair uses only stored history.
-		if (initialDefaultModel) {
-			yield* setDefaultModel(initialDefaultModel);
-		}
-		if (initialDefaultVariant) {
-			yield* setDefaultVariant(initialDefaultVariant);
-		}
-		if (relaySettings.defaultPermissionMode !== undefined) {
-			yield* setDefaultPermissionMode(relaySettings.defaultPermissionMode);
+		// The daemon seeds its defaults once. A borrowing relay must not replay
+		// its startup snapshot over a default changed by another project.
+		if (
+			Option.isNone(
+				Context.getOption(
+					config.daemonConfigContext ?? Context.empty(),
+					OverridesStateTag,
+				),
+			)
+		) {
+			if (initialDefaultModel) yield* setDefaultModel(initialDefaultModel);
+			if (initialDefaultVariant)
+				yield* setDefaultVariant(initialDefaultVariant);
+			if (relaySettings.defaultPermissionMode !== undefined)
+				yield* setDefaultPermissionMode(relaySettings.defaultPermissionMode);
 		}
 		// Recover pending state before initialization advances projector cursors.
 		yield* restoreClaudeQuestionsFromStore;
+		yield* restoreAsyncQuestionsFromStore;
 		const orchestration = yield* getOrchestrationLayer;
-		for (const providerId of orchestration.registry.listProviders()) {
-			const instance =
-				yield* orchestration.registry.getInstanceEffect(providerId);
-			if (instance instanceof RunnerProviderInstance)
-				yield* instance.recoverEffect();
-		}
+		const runFork = Effect.runForkWith(
+			yield* Effect.context<
+				| SessionManagerServiceTag
+				| Effect.Services<ReturnType<typeof announceBackgroundWork>>
+			>(),
+		);
+		const onBackgroundWorkChanged = (sessionId: string) => {
+			runFork(
+				Effect.gen(function* () {
+					yield* announceBackgroundWork(sessionId);
+					if (
+						config.requestWorktreeCleanup &&
+						activity.background.backgroundOf(sessionId) === undefined &&
+						(yield* sql<{ settled_at: number | null }>`
+							SELECT settled_at FROM sessions WHERE id = ${sessionId}
+						`)[0]?.settled_at != null
+					)
+						yield* config.requestWorktreeCleanup();
+				}).pipe(
+					Effect.catchCause((cause) =>
+						Effect.sync(() =>
+							log.warn(
+								`Failed to announce background work: ${Failure.renderCause(cause)}`,
+							),
+						),
+					),
+				),
+			);
+		};
+		const adapters = yield* ProviderAdapters;
+		yield* orchestration.engine.prepareProjectRecovery(
+			persistenceProject.projectId,
+		);
+		yield* adapters
+			.registerProject(
+				persistenceProject.projectId,
+				yield* Effect.context<ProviderAdapterProjectContext>(),
+				onBackgroundWorkChanged,
+				orchestration.engine.ownsPendingSend.bind(orchestration.engine),
+			)
+			.pipe(Effect.provideService(Scope.Scope, relayManagedRuntime.scope));
+		yield* adapters.recover;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		if (!(yield* projectionRunner.isRecovered()))
 			yield* projectionRunner.recover();
@@ -192,12 +240,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 			);
 		}
 		const sessionManagerService = yield* SessionManagerServiceTag;
-		const runFork = Effect.runForkWith(
-			yield* Effect.context<
-				| SessionManagerServiceTag
-				| Effect.Services<ReturnType<typeof announceBackgroundWork>>
-			>(),
-		);
 		// Read-model only: creating a first session could call OpenCode, so attach
 		// creates it instead (getDefaultSessionId).
 		const readQueryEffect = yield* ReadQueryEffectTag;
@@ -281,10 +323,15 @@ function acquireStartupServices(inputs: StartupInputs) {
 			sql,
 			"opencode",
 			(id) => accounts.accounts.find((account) => account.id === id)?.driver,
+			undefined,
+			// Removal cannot prove whether an OpenCode send reached the provider.
+			// Reattachment settles retained reservations from provider truth.
+			true,
 		);
 		const readOpenCodeStatuses = (instanceId: string, sessionId: string) =>
 			Effect.gen(function* () {
 				const { directory, hasWorkspace } = yield* workspace.withLaunch(
+					sessionId,
 					Effect.gen(function* () {
 						// A reset clears the workspace row but remains an explicit move.
 						const [row] = yield* sql<{ has_workspace: number }>`
@@ -369,6 +416,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 			sseStream,
 			sessionManagerService,
 			runFork,
+			onBackgroundWorkChanged,
 			sessionId,
 			orchestration,
 			statusPoller,
@@ -465,18 +513,6 @@ function startSseConsumers(
 	} = services;
 	return Effect.gen(function* () {
 		const terminal = yield* OpenCodeTerminalServiceTag;
-		const workspace = yield* SessionWorkspaceTag;
-		const instances = yield* OpenCodeInstancesTag;
-		const replyPermission =
-			(instanceId: string) =>
-			(sessionId: string, permissionId: string, response: "once") =>
-				Effect.gen(function* () {
-					const directory = yield* workspace.get(sessionId);
-					const client = yield* instances.use(instanceId, directory);
-					yield* Effect.tryPromise(() =>
-						client.permission.reply(sessionId, permissionId, response),
-					);
-				}).pipe(Effect.scoped);
 		const sseConsumerDeps = {
 			translator,
 			wsHandler,
@@ -485,7 +521,6 @@ function startSseConsumers(
 			}),
 			log: sseLog,
 			pipelineLog,
-			replyPermission: replyPermission(MANAGED_OPENCODE_ACCOUNT_ID),
 			statusPoller,
 			slug: config.slug,
 			providerInstanceId: MANAGED_OPENCODE_ACCOUNT_ID,
@@ -507,7 +542,6 @@ function startSseConsumers(
 					{
 						...sseConsumerDeps,
 						providerInstanceId: instanceId,
-						replyPermission: replyPermission(instanceId),
 					},
 					stream,
 				);
@@ -518,7 +552,7 @@ function startSseConsumers(
 }
 
 export async function startProjectRelay(inputs: StartupInputs) {
-	const { config, log, layers } = inputs;
+	const { config, layers } = inputs;
 	const { relayManagedRuntime } = layers;
 	try {
 		if (config.signal?.aborted) {
@@ -544,27 +578,30 @@ export async function startProjectRelay(inputs: StartupInputs) {
 						relayManagedRuntime.scope,
 					);
 					yield* (yield* SessionSetupTag).recover;
-					const makeInteractions = yield* makeEventSinkFactory;
-					// Recovery must settle crashed turns before an outbox claim can
-					// resend them. The runtime scope stops this fiber before providers
-					// and persistence are released, including failed startup.
-					yield* Effect.forkIn(
-						services.orchestration.drainSideEffects(makeInteractions).pipe(
-							Effect.catchCause((cause) =>
-								Failure.isInterruptedOnly(cause)
-									? Effect.interrupt
-									: Effect.logError(
-											"Provider command outbox drain failed",
-											cause,
-										),
+					const daemon = yield* Effect.serviceOption(DaemonOrchestration);
+					if (Option.isNone(daemon)) {
+						const makeInteractions = yield* makeEventSinkFactory;
+						// Recovery must settle crashed turns before an outbox claim can
+						// resend them. The runtime scope stops this fiber before providers
+						// and persistence are released, including failed startup.
+						yield* Effect.forkIn(
+							services.orchestration.drainSideEffects(makeInteractions).pipe(
+								Effect.catchCause((cause) =>
+									Failure.isInterruptedOnly(cause)
+										? Effect.interrupt
+										: Effect.logError(
+												"Provider command outbox drain failed",
+												cause,
+											),
+								),
+								// A sweep may wait for whole turns. Keep scanning newly due
+								// sessions while the reactor holds each active session's lease.
+								Effect.forkIn(relayManagedRuntime.scope),
+								Effect.repeat(Schedule.spaced(ENV.outboxDrainIntervalMs)),
 							),
-							// A sweep may wait for whole turns. Keep scanning newly due
-							// sessions while the reactor holds each active session's lease.
-							Effect.forkIn(relayManagedRuntime.scope),
-							Effect.repeat(Schedule.spaced(ENV.outboxDrainIntervalMs)),
-						),
-						relayManagedRuntime.scope,
-					);
+							relayManagedRuntime.scope,
+						);
+					}
 					// Providers are registered and recovered; queued inputs may drain.
 					yield* (yield* SessionInboxTag).start;
 				}).pipe(
@@ -575,7 +612,6 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				const {
 					sql,
 					sessionManagerService,
-					runFork,
 					api,
 					wsHandler,
 					rpcWsHandler,
@@ -592,31 +628,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 					projectSettingsContext: services.projectSettingsContext,
 					sessionManagerService,
 					// The sidebar and open family feeds follow the stamped row.
-					announceBackgroundWork: (changedSessionId: string) => {
-						runFork(
-							Effect.gen(function* () {
-								yield* announceBackgroundWork(changedSessionId);
-								if (
-									config.requestWorktreeCleanup &&
-									services.activity.background.backgroundOf(
-										changedSessionId,
-									) === undefined &&
-									(yield* sql<{ settled_at: number | null }>`
-										SELECT settled_at FROM sessions WHERE id = ${changedSessionId}
-									`)[0]?.settled_at != null
-								)
-									yield* config.requestWorktreeCleanup();
-							}).pipe(
-								Effect.catchCause((cause) =>
-									Effect.sync(() =>
-										log.warn(
-											`Failed to announce background work: ${Failure.renderCause(cause)}`,
-										),
-									),
-								),
-							),
-						);
-					},
+					announceBackgroundWork: services.onBackgroundWorkChanged,
 					api,
 					wsHandler,
 					rpcWsHandler,

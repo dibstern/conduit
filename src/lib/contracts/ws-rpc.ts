@@ -12,6 +12,7 @@ import {
 	SessionStatusSchema,
 } from "../shared-types.js";
 import { AccountChangeRejected } from "./account.js";
+import { AccountColorSlotSchema } from "./account-color.js";
 import {
 	CategorySetContentsSchema,
 	CategorySetRejected,
@@ -38,6 +39,7 @@ import {
 // re-exported here so contract consumers never reach past the contract module.
 export { SessionInfoSchema, SessionStatusSchema };
 export type { SessionInfo };
+export { type GoalStuck, GoalStuckSchema } from "../shared-types.js";
 
 import { AccountRefSchema } from "./account.js";
 import { AskExplanationSchema } from "./ask-explanation.js";
@@ -327,6 +329,7 @@ export const InstanceStatusSchema = Schema.Literals([
 export const OpenCodeInstanceSchema = Schema.Struct({
 	id: Schema.String,
 	name: Schema.String,
+	colorSlot: Schema.optional(AccountColorSlotSchema),
 	port: Schema.Number,
 	managed: Schema.Boolean,
 	driver: Schema.optional(Schema.suspend(() => ProviderDriverKindSchema)),
@@ -337,7 +340,9 @@ export const OpenCodeInstanceSchema = Schema.Struct({
 	),
 	available: Schema.optional(Schema.Boolean),
 	unavailableReason: Schema.optional(Schema.String),
-	unavailableCode: Schema.optional(Schema.Literal("auth_required")),
+	unavailableCode: Schema.optional(
+		Schema.Literals(["auth_required", "codex_version_unsupported"]),
+	),
 	capabilities: Schema.optional(
 		Schema.suspend(() => ProviderSessionCapabilitiesSchema),
 	),
@@ -410,6 +415,7 @@ export const HistoryMessagePartSchema = Schema.Struct({
 
 export const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
+	turnId: Schema.optionalKey(Schema.String),
 	role: Schema.Literals(["user", "assistant"]),
 	isBackfilled: Schema.optional(Schema.Boolean),
 	inputId: Schema.optional(Schema.String),
@@ -1105,7 +1111,7 @@ export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
-	code: Schema.optional(Schema.Literal("unknown-session")),
+	code: Schema.optional(Schema.Literals(["unknown-session", "unknown-turn"])),
 }) {}
 
 export class DraftAlreadySent extends Schema.TaggedError<DraftAlreadySent>()(
@@ -1215,26 +1221,86 @@ export const CursorAuthStateSchema = Schema.Struct({
 export type CursorAuthState = typeof CursorAuthStateSchema.Type;
 
 export const GetCursorAuth = Rpc.make("GetCursorAuth", {
-	payload: Schema.TaggedStruct("GetCursorAuth", {}),
+	payload: Schema.TaggedStruct("GetCursorAuth", {
+		accountId: Schema.optional(Schema.String),
+	}),
 	success: CursorAuthStateSchema,
 	error: WsRpcError,
 });
 
 export const StartCursorLogin = Rpc.make("StartCursorLogin", {
-	payload: Schema.TaggedStruct("StartCursorLogin", {}),
+	payload: Schema.TaggedStruct("StartCursorLogin", {
+		accountId: Schema.optional(Schema.String),
+	}),
 	success: CursorAuthStateSchema,
 	error: WsRpcError,
 });
 
 export const CancelCursorLogin = Rpc.make("CancelCursorLogin", {
-	payload: Schema.TaggedStruct("CancelCursorLogin", {}),
+	payload: Schema.TaggedStruct("CancelCursorLogin", {
+		accountId: Schema.optional(Schema.String),
+	}),
 	success: CursorAuthStateSchema,
 	error: WsRpcError,
 });
 
 export const LogoutCursor = Rpc.make("LogoutCursor", {
-	payload: Schema.TaggedStruct("LogoutCursor", {}),
+	payload: Schema.TaggedStruct("LogoutCursor", {
+		accountId: Schema.optional(Schema.String),
+	}),
 	success: CursorAuthStateSchema,
+	error: WsRpcError,
+});
+
+export const CodexAuthStateSchema = Schema.Struct({
+	accountId: Schema.String,
+	source: Schema.Literals(["environment", "codex-login", "none"]),
+	status: Schema.Literals(["logged-in", "logged-out", "error"]),
+	email: Schema.optional(Schema.String),
+	error: Schema.optional(Schema.String),
+	login: Schema.Struct({
+		state: Schema.Literals([
+			"idle",
+			"pending",
+			"complete",
+			"cancelled",
+			"timed-out",
+			"error",
+		]),
+		method: Schema.optional(Schema.Literals(["browser", "device-code"])),
+		url: Schema.optional(Schema.String),
+		verificationUrl: Schema.optional(Schema.String),
+		userCode: Schema.optional(Schema.String),
+		loginId: Schema.optional(Schema.String),
+		deadlineAtMs: Schema.optional(Schema.Number),
+		error: Schema.optional(Schema.String),
+	}),
+});
+export type CodexAuthState = typeof CodexAuthStateSchema.Type;
+
+export const GetCodexAuth = Rpc.make("GetCodexAuth", {
+	payload: Schema.TaggedStruct("GetCodexAuth", { accountId: NonEmptyString }),
+	success: CodexAuthStateSchema,
+	error: WsRpcError,
+});
+export const StartCodexLogin = Rpc.make("StartCodexLogin", {
+	payload: Schema.TaggedStruct("StartCodexLogin", {
+		accountId: NonEmptyString,
+		method: Schema.Literals(["browser", "device-code"]),
+	}),
+	success: CodexAuthStateSchema,
+	error: WsRpcError,
+});
+export const CancelCodexLogin = Rpc.make("CancelCodexLogin", {
+	payload: Schema.TaggedStruct("CancelCodexLogin", {
+		accountId: NonEmptyString,
+	}),
+	success: CodexAuthStateSchema,
+	error: WsRpcError,
+});
+export const LogoutCodex = Rpc.make("LogoutCodex", {
+	payload: Schema.TaggedStruct("LogoutCodex", { accountId: NonEmptyString }),
+	success: CodexAuthStateSchema,
 	error: WsRpcError,
 });
 
@@ -2209,6 +2275,16 @@ export const SetSessionAutoSettle = Rpc.make("SetSessionAutoSettle", {
 	error: WsRpcError,
 });
 
+export const SetSessionJev = Rpc.make("SetSessionJev", {
+	payload: Schema.TaggedStruct("SetSessionJev", {
+		sessionId: NonEmptyString,
+		jev: Schema.NullOr(Schema.Literals(["on", "off"])),
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
 export const SnoozeSession = Rpc.make("SnoozeSession", {
 	payload: Schema.TaggedStruct("SnoozeSession", {
 		sessionId: NonEmptyString,
@@ -2697,6 +2773,8 @@ export const ForkSession = Rpc.make("ForkSession", {
 	payload: Schema.TaggedStruct("ForkSession", {
 		projectSlug: NonEmptyString,
 		originId: NonEmptyString,
+		/** Destination account; defaults to the parent's account. */
+		instanceId: Schema.optional(NonEmptyString),
 
 		messageId: Schema.optional(NonEmptyString),
 	}),
@@ -2709,6 +2787,8 @@ export const ForkSessionForSession = Rpc.make(ForkSession._tag, {
 	payload: Schema.TaggedStruct(ForkSession._tag, {
 		originId: NonEmptyString,
 		sessionId: NonEmptyString,
+		/** Destination account; defaults to the parent's account. */
+		instanceId: Schema.optional(NonEmptyString),
 		messageId: Schema.optional(NonEmptyString),
 	}),
 	success: ForkSession.successSchema,
@@ -2901,7 +2981,20 @@ export const ResolveSession = Rpc.make("ResolveSession", {
 	error: WsRpcError,
 });
 
+/** A short model-written account of where the goal stands, written only when the goal sheet opens. */
+export const GoalSummarySchema = Schema.Struct({
+	text: Schema.Trimmed.check(Schema.isNonEmpty()),
+	generatedAt: Schema.Number,
+	/** True when the goal changed since this was written: a new blocker, a progress check, or a pause, resume or finish. More checks on the same blocker never make it stale. */
+	stale: Schema.Boolean,
+});
+export type GoalSummary = typeof GoalSummarySchema.Type;
+
 export const GoalDetailsSchema = Schema.Struct({
+	/** The cached summary, or null when none has been written for this goal yet. Never generated by this request. */
+	summary: Schema.optional(Schema.NullOr(GoalSummarySchema)),
+	/** False when goal summaries are switched off; the sheet then shows the latest check's reason instead. */
+	summaryEnabled: Schema.optional(Schema.Boolean),
 	judgeModel: Schema.optional(
 		Schema.NullOr(Schema.Trimmed.check(Schema.isNonEmpty())),
 	),
@@ -2933,6 +3026,15 @@ export const GetGoalDetails = Rpc.make("GetGoalDetails", {
 		sessionId: NonEmptyString,
 	}),
 	success: GoalDetailsSchema,
+	error: WsRpcError,
+});
+
+/** Writes a fresh summary for the session's current goal, or returns the cached one when nothing changed since it was written. */
+export const GenerateGoalSummary = Rpc.make("GenerateGoalSummary", {
+	payload: Schema.TaggedStruct("GenerateGoalSummary", {
+		sessionId: NonEmptyString,
+	}),
+	success: GoalSummarySchema,
 	error: WsRpcError,
 });
 
@@ -2992,6 +3094,10 @@ const wsRpcRequests = [
 	StartCursorLogin,
 	CancelCursorLogin,
 	LogoutCursor,
+	GetCodexAuth,
+	StartCodexLogin,
+	CancelCodexLogin,
+	LogoutCodex,
 	GetInstanceStatus,
 	{
 		requests: [AttachProjectForSession, AttachProject],
@@ -3012,6 +3118,7 @@ const wsRpcRequests = [
 	},
 	ResolveSession,
 	GetGoalDetails,
+	GenerateGoalSummary,
 	{
 		requests: [GetAgentsForSession, GetAgents],
 		rpc: Rpc.make(GetAgents._tag, {
@@ -3161,6 +3268,7 @@ const wsRpcRequests = [
 	SetSessionArchived,
 	SetSessionPinned,
 	SetSessionAutoSettle,
+	SetSessionJev,
 	GetSessionAutoSettleOutlook,
 	SnoozeSession,
 	UnsnoozeSession,

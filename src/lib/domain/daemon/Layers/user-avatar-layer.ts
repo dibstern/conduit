@@ -51,15 +51,24 @@ export const UserAvatarLive = Layer.effect(
 		const picture = yield* AccountPicture;
 		const get: Effect.Effect<Avatar> = Effect.gen(function* () {
 			const name = yield* globalName;
-			const macPicture = yield* picture.read;
+			const macPicture = yield* picture.read.pipe(
+				Effect.map(
+					Option.match({
+						onNone: () => ({ macPicture: null }),
+						onSome: (bytes) => ({
+							macPicture: `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`,
+						}),
+					}),
+				),
+				// Unreadable this time: leave it out so the browser keeps its copy.
+				Effect.catch((error) =>
+					Effect.logWarning("Mac account picture unavailable", error).pipe(
+						Effect.as({}),
+					),
+				),
+			);
 			const config = yield* Ref.get(configRef);
-			return {
-				choice: config.avatar ?? null,
-				name,
-				macPicture: Option.isSome(macPicture)
-					? `data:image/jpeg;base64,${Buffer.from(macPicture.value).toString("base64")}`
-					: null,
-			};
+			return { choice: config.avatar ?? null, name, ...macPicture };
 		});
 		return UserAvatar.of({
 			get,

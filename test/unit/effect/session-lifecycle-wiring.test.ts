@@ -129,7 +129,8 @@ function makeTestLayer(
 	const bridgeLayers = Layer.mergeAll(
 		Layer.mock(SessionWorkspaceTag, {
 			get: () => Effect.succeed(tmpdir()),
-			withLaunch: (effect) => effect,
+			withLaunch: (_sessionId, effect) => effect,
+			withProjectLaunch: (effect) => effect,
 		}),
 		Layer.mock(ReadQueryEffectTag, {
 			getSession: (id) =>
@@ -165,7 +166,8 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 	const baseLayer = Layer.mergeAll(
 		Layer.mock(SessionWorkspaceTag, {
 			get: () => Effect.succeed(tmpdir()),
-			withLaunch: (effect) => effect,
+			withLaunch: (_sessionId, effect) => effect,
+			withProjectLaunch: (effect) => effect,
 		}),
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 		Layer.succeed(ConfigTag)(makeMockConfig()),

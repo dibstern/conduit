@@ -90,9 +90,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 
 	describe("shutdown()", () => {
 		it("leaves an in-flight question open while completing other tools", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const sink = {
 				...createMockEventSink(),
 				cancelSessionInteractions: vi.fn(() => Effect.void),
@@ -124,9 +122,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			);
 		});
 		it("rejects queued turn deferreds with the shutdown reason", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const ctx = makeFakeSessionContext("sess-shutdown");
 			setClaudeRuntimeSessionForTest(instance, "sess-shutdown", ctx);
 			const deferred = await Effect.runPromise(
@@ -148,9 +144,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("closes all active sessions", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const ctx = makeFakeSessionContext("sess-1");
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
@@ -163,9 +157,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("resolves pending approvals with reject on shutdown", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const resolvedWith: string[] = [];
 			const pending: PendingApproval = {
 				requestId: "perm-1",
@@ -188,9 +180,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("rejects pending questions on shutdown", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const rejected: Error[] = [];
 			const pending: PendingQuestion = {
 				requestId: "q-1",
@@ -212,9 +202,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("is idempotent for already-stopped sessions", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const ctx = makeFakeSessionContext("sess-1", { stopped: true });
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
@@ -235,7 +223,6 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			const prepareQuery = vi.fn(() => setup);
 			const queryFactory = vi.fn(() => createMockQuery([makeSuccessResult()]));
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
 				runnerFactory: (deps, emit) =>
 					makeClaudeSessionRunner({ ...deps, prepareQuery }, emit),
 				queryFactory,
@@ -270,9 +257,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		// A lifecycle start already waiting for ownership can change the active
 		// candidate before Stop gets the permit. Later replacements must not match.
 		it("selects the active Stop candidate after queued message ownership", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const ownership = Semaphore.makeUnsafe(1);
 			await Effect.runPromise(ownership.take(1));
 			const ctx = makeFakeSessionContext("sess-1", {
@@ -316,9 +301,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			"previous-input",
 			"active-input",
 		])("stops runtime-confirmed %s while placement and another admitted steer lag", async (activeInput) => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const placement = Semaphore.makeUnsafe(1);
 			await Effect.runPromise(placement.take(1));
 			const ctx = makeFakeSessionContext("sess-1", {
@@ -344,9 +327,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("retries a bound live-task Stop after its acknowledgement rejects", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const ack = await Effect.runPromise(Deferred.make<void, Error>());
 			const ctx = makeFakeSessionContext("sess-1", {
 				turnInFlight: true,
@@ -375,9 +356,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("keeps a replacement live-task Stop marker when an older acknowledgement rejects", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const ack = await Effect.runPromise(Deferred.make<void, Error>());
 			const ctx = makeFakeSessionContext("sess-1", {
 				turnInFlight: true,
@@ -414,9 +393,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("ignores an interrupt bound to a replaced input", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const replacement = makeFakeSessionContext("sess-1", {
 				currentTurnId: "replacement-input",
 				turnInFlight: true,
@@ -435,10 +412,8 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		it.each([
 			"resolve",
 			"reject",
-		] as const)("releases a bound interrupt before its acknowledgement can %s and preserves replacement waiters", async (settlement) => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+		] as const)("awaits a bound interrupt acknowledgement that can %s and preserves replacement waiters", async (settlement) => {
+			const instance = makeTestClaudeProviderInstance({});
 			const ack = await Effect.runPromise(Deferred.make<void, Error>());
 			const original = makeFakeSessionContext("sess-1", { turnInFlight: true });
 			vi.mocked(original.query.interrupt).mockImplementation(() =>
@@ -447,7 +422,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			setClaudeRuntimeSessionForTest(instance, "sess-1", original);
 
 			const interruption = Effect.runPromise(
-				instance.interruptTurnEffect("sess-1", ["turn-1"]),
+				instance.interruptTurnEffect("sess-1", ["turn-1"]).pipe(Effect.result),
 			);
 			const released = await Promise.race([
 				interruption.then(() => true),
@@ -467,53 +442,48 @@ describe("ClaudeProviderInstance lifecycle", () => {
 					? Deferred.succeed(ack, undefined)
 					: Deferred.fail(ack, new Error("old interrupt rejected")),
 			);
-			await interruption;
+			expect((await interruption)._tag).toBe(
+				settlement === "resolve" ? "Success" : "Failure",
+			);
 			await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-			expect(released).toBe(true);
+			expect(released).toBe(false);
 			expect(original.query.interrupt).toHaveBeenCalledOnce();
-			expect(original.query.close).toHaveBeenCalledOnce();
+			expect(original.query.close).not.toHaveBeenCalled();
 			expect(replacement.query.interrupt).not.toHaveBeenCalled();
 			expect(replacement.query.close).not.toHaveBeenCalled();
 			expect(replacement.stopped).toBe(false);
 			expect(await Effect.runPromise(Deferred.isDone(waiter))).toBe(false);
 		});
 
-		it("closes prompt queue, interrupts and closes query", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
-			const ctx = makeFakeSessionContext("sess-1");
+		it("keeps the prompt queue and query open after interrupt acknowledgement", async () => {
+			const instance = makeTestClaudeProviderInstance({});
+			const ctx = makeFakeSessionContext("sess-1", { turnInFlight: true });
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
 
-			expect(ctx.promptQueue.close).toHaveBeenCalled();
+			expect(ctx.promptQueue.close).not.toHaveBeenCalled();
 			expect(ctx.query.interrupt).toHaveBeenCalled();
-			// The process goes too, or armed Monitor tasks outlive the Stop.
-			expect(ctx.query.close).toHaveBeenCalled();
-			expect(ctx.stopped).toBe(true);
+			expect(ctx.query.close).not.toHaveBeenCalled();
+			expect(ctx.stopped).toBe(false);
 		});
 
 		it("is idempotent for an already-interrupted active session", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
-			const ctx = makeFakeSessionContext("sess-1");
+			const instance = makeTestClaudeProviderInstance({});
+			const ctx = makeFakeSessionContext("sess-1", { turnInFlight: true });
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
 
-			expect(ctx.promptQueue.close).toHaveBeenCalledTimes(1);
+			expect(ctx.promptQueue.close).not.toHaveBeenCalled();
 			expect(ctx.query.interrupt).toHaveBeenCalledTimes(1);
-			expect(ctx.stopped).toBe(true);
+			expect(ctx.stopped).toBe(false);
 		});
 
 		it("resolves pending approvals with reject", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const resolvedWith: string[] = [];
 			const pending: PendingApproval = {
 				requestId: "perm-1",
@@ -526,7 +496,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 					}),
 				reject: vi.fn(() => Effect.void),
 			};
-			const ctx = makeFakeSessionContext("sess-1");
+			const ctx = makeFakeSessionContext("sess-1", { turnInFlight: true });
 			ctx.pendingApprovals.set("perm-1", pending);
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
@@ -536,10 +506,8 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(ctx.pendingApprovals.size).toBe(0);
 		});
 
-		it("resolves all queued turn deferreds as interrupted", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+		it("rejects all queued turn deferreds on End", async () => {
+			const instance = makeTestClaudeProviderInstance({});
 			const ctx = makeFakeSessionContext("sess-interrupt-reject");
 			setClaudeRuntimeSessionForTest(instance, "sess-interrupt-reject", ctx);
 
@@ -550,21 +518,18 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				d2,
 			]);
 
-			await Effect.runPromise(
-				instance.interruptTurnEffect("sess-interrupt-reject"),
-			);
-			const results = await Promise.all([
-				Effect.runPromise(Deferred.await(d1)),
-				Effect.runPromise(Deferred.await(d2)),
+			const results = Promise.all([
+				Effect.runPromise(Deferred.await(d1).pipe(Effect.result)),
+				Effect.runPromise(Deferred.await(d2).pipe(Effect.result)),
 			]);
+			await Effect.runPromise(
+				instance.endSessionEffect("sess-interrupt-reject"),
+			);
 
-			for (const result of results) {
-				expect(result).toEqual({
-					status: "interrupted",
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-					providerStateUpdates: [],
+			for (const result of await results) {
+				expect(result).toMatchObject({
+					_tag: "Failure",
+					failure: { message: expect.stringContaining("reload") },
 				});
 			}
 			expect(
@@ -576,9 +541,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("rejects pending questions", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const rejected: Error[] = [];
 			const pending: PendingQuestion = {
 				requestId: "q-1",
@@ -589,7 +552,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 						rejected.push(err);
 					}),
 			};
-			const ctx = makeFakeSessionContext("sess-1");
+			const ctx = makeFakeSessionContext("sess-1", { turnInFlight: true });
 			ctx.pendingQuestions.set("q-1", pending);
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
@@ -600,17 +563,13 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("is a no-op when session does not exist", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			// Should not throw
 			await Effect.runPromise(instance.interruptTurnEffect("nonexistent"));
 		});
 
 		it("cleanupSession with no eventSink skips tool.completed emission", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const ctx = makeFakeSessionContext("sess-1", {
 				eventSink: undefined,
 			});
@@ -631,17 +590,15 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
 			// Should not throw even though eventSink is undefined
-			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
+			await Effect.runPromise(instance.endSessionEffect("sess-1"));
 
 			// In-flight tools should still be cleared
 			expect(ctx.inFlightTools.size).toBe(0);
 			expect(ctx.stopped).toBe(true);
 		});
 
-		it("emits tool.completed events via EventSink for in-flight tools on interrupt", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+		it("completes non-question tools via EventSink on End", async () => {
+			const instance = makeTestClaudeProviderInstance({});
 			const sink = createMockEventSink();
 			const ctx = makeFakeSessionContext("sess-1");
 			ctx.eventSink = sink;
@@ -669,14 +626,14 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			});
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
-			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
+			await Effect.runPromise(instance.endSessionEffect("sess-1"));
 
 			const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
 				.calls as Array<[CanonicalEvent]>;
 			const completedEvents = pushCalls.filter(
 				(call) => call[0].type === "tool.completed",
 			);
-			expect(completedEvents).toHaveLength(3);
+			expect(completedEvents).toHaveLength(2);
 			expect(completedEvents[0]?.[0].data).toMatchObject({
 				partId: "tool-1",
 				result: null,
@@ -685,16 +642,10 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				partId: "tool-2",
 				result: null,
 			});
-			expect(completedEvents[2]?.[0].data).toMatchObject({
-				partId: "question-1",
-				result: null,
-			});
 		});
 
-		it("persists turn.interrupted + session.status idle for an in-flight turn", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+		it("leaves an in-flight turn pending after silent interrupt acknowledgement", async () => {
+			const instance = makeTestClaudeProviderInstance({});
 			const sink = createMockEventSink();
 			const ctx = makeFakeSessionContext("sess-1", {
 				eventSink: sink,
@@ -707,27 +658,32 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			);
 			setClaudeRuntimePendingIntakesForTest(instance, "sess-1", [deferred]);
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1"));
-			expect(await Effect.runPromise(Deferred.await(deferred))).toMatchObject({
-				status: "interrupted",
-			});
+			expect(await Effect.runPromise(Deferred.isDone(deferred))).toBe(false);
 
 			const pushCalls = (sink.push as ReturnType<typeof vi.fn>).mock
 				.calls as Array<[CanonicalEvent]>;
-			const interrupted = pushCalls.find(
-				(call) => call[0].type === "turn.interrupted",
+			expect(
+				pushCalls.some(([event]) => event.type === "turn.interrupted"),
+			).toBe(false);
+			expect(
+				pushCalls.some(
+					([event]) =>
+						event.type === "session.status" && event.data.status === "idle",
+				),
+			).toBe(false);
+			expect(ctx.query.close).not.toHaveBeenCalled();
+			const result = Effect.runPromise(
+				Deferred.await(deferred).pipe(Effect.result),
 			);
-			expect(interrupted?.[0].data).toMatchObject({ messageId: "asst-uuid" });
-			const idle = pushCalls.find((call) => call[0].type === "session.status");
-			expect(idle?.[0].data).toMatchObject({
-				sessionId: "sess-1",
-				status: "idle",
+			await Effect.runPromise(instance.endSessionEffect("sess-1"));
+			expect(await result).toMatchObject({
+				_tag: "Failure",
+				failure: { message: expect.stringContaining("reload") },
 			});
 		});
 
 		it("does not emit terminal turn events when no turn is in flight", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const sink = createMockEventSink();
 			const ctx = makeFakeSessionContext("sess-1", { eventSink: sink });
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
@@ -742,15 +698,14 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("treats cancelSessionInteractions as best-effort when it throws synchronously", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const sink = createMockEventSink();
 			sink.cancelSessionInteractions = vi.fn(() => {
 				throw new Error("interaction cancel failed");
 			});
 			const ctx = makeFakeSessionContext("sess-1", {
 				eventSink: sink,
+				turnInFlight: true,
 			});
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
@@ -760,17 +715,15 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				"Turn interrupted",
 				{ recoverQuestions: false },
 			);
-			expect(ctx.promptQueue.close).toHaveBeenCalled();
+			expect(ctx.promptQueue.close).not.toHaveBeenCalled();
 			expect(ctx.query.interrupt).toHaveBeenCalled();
-			expect(ctx.stopped).toBe(true);
+			expect(ctx.stopped).toBe(false);
 		});
 	});
 
 	describe("resolvePermission()", () => {
 		it("resolves the pending approval's deferred", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const resolvedWith: string[] = [];
 			const pending: PendingApproval = {
 				requestId: "perm-1",
@@ -795,9 +748,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("is a no-op for unknown session", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			// Should not throw
 			await Effect.runPromise(
 				instance.resolvePermissionEffect("nonexistent", "perm-1", "once"),
@@ -805,9 +756,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("is a no-op for unknown requestId", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const ctx = makeFakeSessionContext("sess-1");
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
 
@@ -822,7 +771,6 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		it("signals session-ended on terminal disposal", async () => {
 			const onBackgroundTask = vi.fn();
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
 				onBackgroundTask,
 			});
 			const ctx = makeFakeSessionContext("sess-end");
@@ -837,9 +785,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("closes query and removes session from map", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const ctx = makeFakeSessionContext("sess-end");
 			setClaudeRuntimeSessionForTest(instance, "sess-end", ctx);
 
@@ -852,17 +798,13 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("is a no-op for unknown session", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			// Should not throw
 			await Effect.runPromise(instance.endSessionEffect("nonexistent"));
 		});
 
 		it("rejects queued turn deferreds with reload reason", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const ctx = makeFakeSessionContext("sess-reject");
 			setClaudeRuntimeSessionForTest(instance, "sess-reject", ctx);
 
@@ -905,7 +847,6 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			});
 
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
 				queryFactory: factory,
 			});
 
@@ -946,9 +887,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 
 	describe("resolveQuestion()", () => {
 		it("resolves the pending question's deferred", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			let resolvedAnswers: Record<string, unknown> | undefined;
 			const pending: PendingQuestion = {
 				requestId: "q-1",
@@ -972,9 +911,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		});
 
 		it("is a no-op for unknown session", async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			await Effect.runPromise(
 				instance.resolveQuestionEffect("nonexistent", "q-1", {}),
 			);

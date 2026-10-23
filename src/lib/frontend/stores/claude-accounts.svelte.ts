@@ -1,7 +1,9 @@
+import { accountLimit } from "../../contracts/account-limit.js";
 import type {
 	HandoffSummary,
 	LimitRecovery,
 	UsageReading,
+	UsageWindow,
 } from "../../contracts/limit-recovery.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 import {
@@ -10,31 +12,25 @@ import {
 } from "../utils/account-switch.js";
 import {
 	accountQuota,
-	limitedQuota,
-	type PlanUsageWindow,
 	planUsageWindows,
-	quotaBlocksSwitch,
-	quotaHeadroom,
 	quotaReading,
 	usageDisplay,
 } from "../utils/continuation.js";
 import { getBrowserClientId } from "./client-identity.js";
+import { clock } from "./clock.svelte.js";
 import {
 	getDriverTraits,
 	getInstanceById,
 	instanceState,
 } from "./instance.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
-import {
-	composerAccountId,
-	orderedUsageAccounts,
-	usageState,
-} from "./usage.svelte.js";
+import { composerAccountId, usageState } from "./usage.svelte.js";
 
 export type AccountAvailability =
 	| { kind: "current" }
+	| { kind: "signed-out" }
 	| { kind: "limited"; resetsAt: string | undefined }
-	| { kind: "selectable"; usagePct: number | null };
+	| { kind: "selectable"; usagePct: number | null; usageUnknown: boolean };
 
 type SwitchContext = {
 	requestId: number;
@@ -61,11 +57,15 @@ class ClaudeAccounts {
 	private previewTicket = 0;
 	private inFlightTarget = $state<string | null>(null);
 
-	constructor(readonly projectSlug: string) {}
+	constructor(
+		readonly projectSlug: string,
+		readonly harness: "claude" | "codex",
+	) {}
 
 	get configuredAccounts() {
 		return instanceState.instances.filter(
-			(instance) => getDriverTraits(instance.driver)?.usageHarness === "claude",
+			(instance) =>
+				getDriverTraits(instance.driver)?.usageHarness === this.harness,
 		);
 	}
 
@@ -73,7 +73,10 @@ class ClaudeAccounts {
 		return this.configuredAccounts;
 	}
 
-	nameOf(instanceId: string | undefined, fallback = "Claude"): string {
+	nameOf(
+		instanceId: string | undefined,
+		fallback = this.harness === "codex" ? "Codex" : "Claude",
+	): string {
 		return getInstanceById(instanceId ?? "")?.name ?? fallback;
 	}
 
@@ -84,12 +87,15 @@ class ClaudeAccounts {
 	readingOf(instanceId: string | undefined): UsageReading | undefined {
 		return usageState.readings.find(
 			(reading) =>
-				reading.accountId === instanceId && reading.harness === "claude",
+				reading.accountId === instanceId && reading.harness === this.harness,
 		);
 	}
 
 	quotaOf(instanceId: string): UsageReading | undefined {
-		return accountQuota(this.quotas, instanceId);
+		const quota = accountQuota(this.quotas, instanceId);
+		return quota === undefined || quota.harness === this.harness
+			? quota
+			: { ...quota, harness: this.harness };
 	}
 
 	/** Closing or changing the composer must not invalidate a picker's read. */
@@ -113,15 +119,26 @@ class ClaudeAccounts {
 			});
 			refreshed = true;
 		} catch {
-			// A failed check reads as unknown, with no measured send candidates.
+			// A failed read leaves accounts for the user to choose explicitly.
 		}
 		const quotas = new Map(
-			checked.map((reading) => [reading.accountId, reading]),
+			checked
+				.filter((reading) => reading.harness === this.harness)
+				.map((reading) => [reading.accountId, reading]),
 		);
 		if (ticket === this.quotaTicket) this.quotas = quotas;
 		// A picker's refresh must not discard the send menu's own fresh result.
 		if (sendTicket === this.sendQuotaTicket) this.sendQuotas = quotas;
 		return refreshed;
+	}
+
+	private accountLimitFor(reading: UsageReading | undefined) {
+		const input = { ...(reading ? { reading } : {}), now: clock.now };
+		return {
+			limit: accountLimit({ ...input, asker: "user" }),
+			usageUnknown:
+				accountLimit({ ...input, asker: "automatic" }).kind !== "go",
+		};
 	}
 
 	availabilityOf(
@@ -130,71 +147,85 @@ class ClaudeAccounts {
 	): AccountAvailability {
 		if (instanceId === currentId) return { kind: "current" };
 		const quota = this.quotaOf(instanceId);
-		if (quotaBlocksSwitch(quota))
+		const { limit, usageUnknown } = this.accountLimitFor(quota);
+		if (limit.kind === "signed-out") return limit;
+		if (limit.kind !== "go")
 			return {
 				kind: "limited",
-				resetsAt: usageDisplay(quota, "off").binding?.resetsAt,
+				resetsAt:
+					limit.kind === "wait-until"
+						? new Date(limit.until).toISOString()
+						: undefined,
 			};
-		const { used } = quotaReading(quota);
+		const { used } = quotaReading(quota, clock.now);
 		return {
 			kind: "selectable",
-			usagePct: typeof used === "number" ? used : null,
+			usagePct: !usageUnknown && typeof used === "number" ? used : null,
+			usageUnknown,
 		};
+	}
+
+	sendOptions(currentId: string | undefined) {
+		const order = usageState.limits.order;
+		const rank = (id: string) => {
+			const index = order.indexOf(id);
+			return index === -1 ? order.length : index;
+		};
+		return [...this.configuredAccounts]
+			.sort((a, b) => rank(a.id) - rank(b.id))
+			.flatMap((account) => {
+				if (account.id === currentId) return [];
+				const reading =
+					this.sendQuotas === undefined
+						? this.readingOf(account.id)
+						: this.sendQuotas.get(account.id);
+				const { limit, usageUnknown } = this.accountLimitFor(reading);
+				if (limit.kind !== "go") return [];
+				const windows = reading
+					? this.harness === "codex"
+						? reading.windows
+						: planUsageWindows(reading)
+					: [];
+				const fullest = windows.reduce<UsageWindow | undefined>(
+					(best, window) =>
+						best === undefined ||
+						window.utilization > best.utilization ||
+						(window.utilization === best.utilization &&
+							window.kind === "five_hour")
+							? window
+							: best,
+					undefined,
+				);
+				return [
+					{
+						id: account.id,
+						name: account.name,
+						usageEligible: account.usageEligible,
+						usageUnknown,
+						fullest,
+					},
+				];
+			});
 	}
 
 	suggestedAccount(currentId: string): string | undefined {
 		if (this.quotas === undefined) return undefined;
 		return this.configuredAccounts
-			.filter(
-				(account) =>
-					this.availabilityOf(account.id, currentId).kind === "selectable",
-			)
+			.filter((account) => {
+				const choice = this.availabilityOf(account.id, currentId);
+				return choice.kind === "selectable" && !choice.usageUnknown;
+			})
 			.reduce<(typeof this.configuredAccounts)[number] | undefined>(
 				(best, account) =>
 					best === undefined ||
-					quotaHeadroom(this.quotaOf(account.id)) >
-						quotaHeadroom(this.quotaOf(best.id))
+					(usageDisplay(this.quotaOf(account.id), "off", clock.now).binding
+						?.utilization ?? 100) <
+						(usageDisplay(this.quotaOf(best.id), "off", clock.now).binding
+							?.utilization ?? 100)
 						? account
 						: best,
 				undefined,
 			)?.id;
-	}
-
-	/** The send menu requires measured headroom and retains the switch order. */
-	sendOptions(currentId: string | undefined) {
-		return orderedUsageAccounts().flatMap((reading) => {
-			const quota =
-				this.sendQuotas === undefined
-					? reading
-					: this.sendQuotas.get(reading.accountId);
-			const instance = this.configuredAccounts.find(
-				(account) => account.id === reading.accountId,
-			);
-			if (
-				reading.accountId === currentId ||
-				!instance ||
-				// driver-dispatch-ok: narrows the usage reading's harness, not a driver.
-				quota?.harness !== "claude" ||
-				quota.status !== "available" ||
-				quotaBlocksSwitch(quota)
-			)
-				return [];
-			const fullest = planUsageWindows(quota).reduce<
-				PlanUsageWindow | undefined
-			>(
-				(best, window) =>
-					best === undefined ||
-					window.utilization > best.utilization ||
-					(window.utilization === best.utilization &&
-						window.kind === "five_hour")
-						? window
-						: best,
-				undefined,
-			);
-			return fullest === undefined || fullest.utilization >= 100
-				? []
-				: [{ id: instance.id, name: this.nameOf(instance.id), fullest }];
-		});
 	}
 
 	get switchingTo(): string | null {
@@ -255,14 +286,6 @@ class ClaudeAccounts {
 		}
 	}
 
-	fromQuota(
-		handoff: Pick<SwitchContext, "from" | "limit">,
-	): UsageReading | undefined {
-		return handoff.limit
-			? limitedQuota(handoff.limit)
-			: this.quotaOf(handoff.from);
-	}
-
 	cancel(): void {
 		this.previewTicket++;
 		this.handoff = { kind: "idle" };
@@ -289,11 +312,15 @@ class ClaudeAccounts {
 
 const projects = new Map<string, ClaudeAccounts>();
 
-export function getClaudeAccounts(projectSlug: string): ClaudeAccounts {
-	let accounts = projects.get(projectSlug);
+export function getClaudeAccounts(
+	projectSlug: string,
+	harness: "claude" | "codex" = "claude",
+): ClaudeAccounts {
+	const key = `${harness}:${projectSlug}`;
+	let accounts = projects.get(key);
 	if (!accounts) {
-		accounts = new ClaudeAccounts(projectSlug);
-		projects.set(projectSlug, accounts);
+		accounts = new ClaudeAccounts(projectSlug, harness);
+		projects.set(key, accounts);
 	}
 	return accounts;
 }

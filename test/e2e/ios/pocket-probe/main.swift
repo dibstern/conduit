@@ -55,10 +55,17 @@ final class ProbeViewController: UIViewController, WKNavigationDelegate {
 		}
 	}
 
+	// The colour the status bar shows: WebKit extends the page's top edge into it.
+	func hex(_ color: UIColor?) -> String {
+		var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+		guard let color, color.getRed(&r, green: &g, blue: &b, alpha: &a) else { return "none" }
+		return String(format: "#%02x%02x%02x/%.2f", Int(r * 255), Int(g * 255), Int(b * 255), a)
+	}
+
 	func nativeState() -> String {
 		let top = extensionViews(in: webView).filter { $0.frame.minY <= 0 && $0.frame.width > 100 }
 		let visible = top.filter { !$0.isHidden && $0.alpha > 0.01 && $0.frame.height > 0 }
-		let detail = top.map { "\(Int($0.frame.minY)),\(Int($0.frame.height)) h=\($0.isHidden) a=\(String(format: "%.2f", $0.alpha))" }.joined(separator: "; ")
+		let detail = top.map { "\(Int($0.frame.minY)),\(Int($0.frame.height)) h=\($0.isHidden) a=\(String(format: "%.2f", $0.alpha)) c=\(hex($0.backgroundColor))" }.joined(separator: "; ")
 		var edge = "?"
 		if #available(iOS 26.0, *) { edge = webView.scrollView.topEdgeEffect.isHidden ? "hidden" : "shown" }
 		return "pocketHidden=\(!visible.isEmpty) topEdgeEffect=\(edge) safeTop=\(Int(view.safeAreaInsets.top)) views=[\(detail)]"

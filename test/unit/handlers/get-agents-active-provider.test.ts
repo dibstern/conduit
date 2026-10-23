@@ -134,6 +134,7 @@ describe("GetAgents active provider", () => {
 			expect(engine.dispatchEffect).toHaveBeenCalledWith({
 				type: "discover",
 				providerId: "claude",
+				sessionId: "session-1",
 				account: expect.objectContaining({ driver: "claude", id: "claude" }),
 			});
 			expect(reply).toEqual({

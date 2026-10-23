@@ -36,6 +36,8 @@
 			multiple?: boolean;
 			multiSelect?: boolean;
 			custom?: boolean;
+			isOther?: boolean;
+			isSecret?: boolean;
 		}> | undefined;
 		if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) return null;
 
@@ -48,7 +50,9 @@
 			})),
 			// Tool input uses `multiple`; AskUserQuestion uses `multiSelect`
 			multiSelect: q.multiSelect ?? q.multiple ?? false,
-			custom: q.custom ?? true,
+			custom: q.custom ?? q.isOther ?? true,
+			...(q.isOther != null && { isOther: q.isOther }),
+			...(q.isSecret != null && { isSecret: q.isSecret }),
 		}));
 	});
 
@@ -89,14 +93,21 @@
 		return null;
 	});
 
+	const isAsync = $derived(
+		pendingQuestionRequest?.delivery === "async" ||
+		(message.input as Record<string, unknown> | null | undefined)?.['delivery'] === "async",
+	);
+
 	/** Whether the question is actively pending and should show an interactive card.
-	 *  True when EITHER:
+	 *  Async questions stay interactive after their turn and tool have completed.
+	 *  Blocking questions are interactive when either:
 	 *  1. The tool is running AND matched to a pendingQuestion (has server-side que_ ID), OR
 	 *  2. The tool is running AND we have question data from the tool input (cross-process
 	 *     case where GET /question returns empty, but the tool is still running). */
 	const isQuestionActive = $derived(
-		(message.status === "pending" || message.status === "running") &&
-		(pendingQuestionRequest !== null || questionDataFromInput !== null)
+		pendingQuestionRequest?.delivery === "async" ||
+		((message.status === "pending" || message.status === "running") &&
+			(pendingQuestionRequest !== null || questionDataFromInput !== null))
 	);
 
 	/**
@@ -113,6 +124,7 @@
 			toolId: message.id,
 			sessionId: "",
 			toolUseId: message.id,
+			...(isAsync && { delivery: "async" }),
 			questions: questionDataFromInput,
 		};
 	});
@@ -125,8 +137,14 @@
 
 	// History returns results still JSON-encoded, so a question closed without an
 	// answer reloads as the literal '""' rather than an empty string.
+	// Codex async questions use JSON null for their empty result.
 	const questionAnswer = $derived(
-		message.result && message.result !== '""' ? message.result : null,
+		message.result && message.result !== '""' && (!isAsync || message.result !== "null") ? message.result : null,
+	);
+	const answerDisplay = $derived(
+		questionData?.some((question) => question.isSecret)
+			? "Secret answer hidden"
+			: questionAnswer,
 	);
 	const parsedAnswers = $derived.by((): string[][] | null => {
 		if (!questionData) return null;
@@ -188,7 +206,7 @@
 	);
 	const isUnanswered = $derived(message.status === "completed" && !isAnswered);
 	const isSkipped = $derived(message.status === "error" && /dismiss|skip|reject|declin/i.test(message.result ?? ""));
-	const running = $derived(message.status === "running" || message.status === "pending");
+	const running = $derived(!isAsync && (message.status === "running" || message.status === "pending"));
 	const duration = $derived(message.createdAt === undefined || (!running && message.endedAt === undefined) ? undefined : Math.max(0, (message.endedAt ?? clock.now) - message.createdAt));
 </script>
 
@@ -251,6 +269,8 @@
 		>
 			{#if isAnswered}
 				<span class="tool-subtitle-text">Answered ✓</span>
+			{:else if isAsync && (message.status === "completed" || message.status === "error")}
+				<span class="tool-subtitle-text not-italic">Dismissed</span>
 			{:else if isUnanswered}
 				<span class="tool-subtitle-text not-italic">Not answered</span>
 			{:else if isSkipped}
@@ -269,7 +289,7 @@
 				radius="md"
 				class="question-raw-answer font-mono text-mono-xs leading-[1.6] whitespace-pre-wrap break-all my-[4px] py-[8px] px-[10px] text-text-secondary max-h-[200px] overflow-y-auto mb-[8px]"
 			>
-				{questionAnswer}
+				{answerDisplay}
 			</Surface>
 		{/if}
 	</div>

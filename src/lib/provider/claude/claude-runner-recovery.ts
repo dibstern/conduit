@@ -1,11 +1,7 @@
 import { Effect, Result } from "effect";
 import { SqlClient } from "effect/sql";
 import { accountsStateFromConfig, resolve } from "../../account-directory.js";
-import {
-	defaultDaemonConfig,
-	loadDaemonConfigResult,
-	resolveClaudeLaunchConfig,
-} from "../../daemon/config-persistence.js";
+import { defaultDaemonConfig } from "../../daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import {
 	makeProviderStateEffect,
@@ -17,11 +13,22 @@ import {
 } from "../../persistence/effect/read-query-effect.js";
 import { runnerFailure, runnerSinkId } from "../runner/runner-protocol.js";
 import { recoverRunnerCommands } from "../runner/runner-recovery.js";
-import type { SessionFailure, SessionTurn } from "../runner/session-runner.js";
-import type { ProviderNativeSession } from "../types.js";
+import type {
+	SessionCommand,
+	SessionFailure,
+	SessionTurn,
+} from "../runner/session-runner.js";
+import type {
+	ProviderCall,
+	ProviderNativeSession,
+	TurnResult,
+} from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import type { ClaudeRunnerSocket } from "./claude-runner-protocol.js";
-import { normalizeClaudeSessionTurn } from "./claude-runner-wire.js";
+import {
+	claudeLaunchConfigFromAccounts,
+	normalizeClaudeSessionTurn,
+} from "./claude-runner-wire.js";
 import { captureClaudeLaunchLogin } from "./claude-sdk-env.js";
 import { sendPreparedClaudeTurn } from "./prepare-turn.js";
 export const recoverClaudeRunnerCommands = (
@@ -42,46 +49,104 @@ export const recoverClaudeRunnerCommands = (
 		nativeResumeFallback?: boolean,
 	) => string = (commandId, _inputId, attempt, nativeResumeFallback) =>
 		runnerSinkId(commandId, attempt, nativeResumeFallback),
+	sendTurn: (
+		commandId: string,
+		command: Extract<SessionCommand, { type: "send-turn" }>,
+		attempt: number,
+	) => Effect.Effect<TurnResult | undefined, SessionFailure> = (
+		commandId,
+		command,
+		attempt,
+	) => connection.commandEffect(commandId, command, attempt),
+	admitReplay: (
+		sinkId: string,
+		replay: Effect.Effect<TurnResult | undefined, SessionFailure>,
+	) => Effect.Effect<TurnResult | undefined, SessionFailure> = (
+		_sinkId,
+		replay,
+	) => replay,
 ) =>
 	Effect.gen(function* () {
-		const config = yield* Effect.suspend(() =>
-			Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
-		).pipe(
-			Effect.catchTag("NotFound", () => Effect.succeed(defaultDaemonConfig())),
-		);
-		const accounts = accountsStateFromConfig(
-			config,
-			captureClaudeLaunchLogin(process.env),
-		);
-		const driverForAccount = (id: string) =>
-			Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }))?.driver;
-		return yield* recoverRunnerCommands(sql, sessionId, "claude", {
-			legacyResult: connection.legacyResult,
-			driverForAccount,
-			decodeInput: (row) => ({
-				...normalizeClaudeSessionTurn(
-					JSON.parse(row.payload_json) as SessionTurn,
-					() => resolveClaudeLaunchConfig(config),
+		const accounts = yield* deps.accounts ??
+			Effect.sync(() =>
+				accountsStateFromConfig(
+					defaultDaemonConfig(),
+					captureClaudeLaunchLogin(process.env),
 				),
-				commandAttempt: row.attempt_count,
-			}),
+			);
+		const accountForId = (id: string) =>
+			Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }));
+		const driverForAccount = (id: string) => accountForId(id)?.driver;
+		return yield* recoverRunnerCommands(sql, sessionId, "claude", {
+			driverForAccount,
+			decodeInput: (row) => {
+				const input = normalizeClaudeSessionTurn(
+					JSON.parse(row.payload_json) as SessionTurn,
+					() => claudeLaunchConfigFromAccounts(accounts),
+				);
+				// Credentials are omitted from the durable payload. Capture them
+				// once for this replay, preserving its admitted identity and folder.
+				const account = accountForId(input.account?.id ?? row.provider_id);
+				return {
+					...input,
+					...(account
+						? {
+								account: input.account
+									? { ...input.account, env: account.env }
+									: account,
+							}
+						: {}),
+					commandAttempt: row.attempt_count,
+				};
+			},
 			resolveSinkId,
 			closing,
 			failTurn,
 			replay: (row, input) => {
-				const instanceId = input.instanceId ?? row.provider_id;
-				return Effect.gen(function* () {
-					// Recovery can race the project's asynchronous environment capture.
-					const prepareShellEnv = deps.prepareShellEnv;
-					if (prepareShellEnv)
-						yield* Effect.tryPromise(() =>
-							prepareShellEnv(input.workspaceRoot),
-						).pipe(
-							Effect.timeoutOption("10 seconds"),
-							Effect.catch(() => Effect.void),
-						);
+				const replay = Effect.gen(function* () {
+					// Commands admitted before policy snapshots existed fall back to daemon memory.
+					const autoSettleAfterDays =
+						input.autoSettleAfterDays !== undefined
+							? input.autoSettleAfterDays
+							: yield* deps.autoSettleAfterDays ?? Effect.succeed(undefined);
+					const admittedAccountId =
+						input.account?.id ?? input.instanceId ?? row.provider_id;
+					let call: ProviderCall | undefined;
+					if (deps.recoveryForSession) {
+						// The shared adapter borrows environment preparation and account resolution from the project's engine.
+						const recovery = yield* deps.recoveryForSession(sessionId);
+						if (!recovery)
+							return yield* Effect.fail(
+								new Error(
+									`Project services unavailable for recovered session ${sessionId}`,
+								),
+							);
+						call = yield* recovery.resolveCallContext({
+							sessionId,
+							...(input.account ? { account: input.account } : {}),
+							providerId: admittedAccountId,
+							workspaceRoot: input.workspaceRoot,
+							extraFolders: input.extraFolders,
+							prepareShellEnv: true,
+							requireRoutableAccount: true,
+						});
+						const matchesAdmission =
+							call !== undefined &&
+							call.account.id === admittedAccountId &&
+							call.account.driver === "claude";
+						if (!matchesAdmission)
+							return yield* Effect.fail(
+								new Error(
+									`Claude account "${admittedAccountId}" is unavailable for recovery`,
+								),
+							);
+					}
 					// The shared recovery drops a result that arrives while closing.
 					if (closing()) return undefined;
+					const instanceId =
+						call?.account.id ?? input.instanceId ?? row.provider_id;
+					const shellEnv = call?.shellEnv ??
+						input.shellEnv ?? { ...process.env };
 					const state = yield* makeProviderStateEffect.pipe(
 						Effect.provideService(PersistenceProjectTag, {
 							projectId: row.project_key,
@@ -109,7 +174,7 @@ export const recoverClaudeRunnerCommands = (
 								input.contextWindow === "1m" ? 1000000 : undefined,
 						},
 						send: (prepared, nativeResumeFallback) =>
-							connection.commandEffect(
+							sendTurn(
 								row.command_id,
 								{
 									type: "send-turn",
@@ -120,12 +185,20 @@ export const recoverClaudeRunnerCommands = (
 										nativeResumeFallback,
 									),
 									aborted: false,
-									shellEnv: deps.shellEnv?.(input.workspaceRoot) ?? {
-										...process.env,
-									},
+									autoSettleAfterDays,
+									shellEnv,
 									claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
 									input: {
 										...input,
+										...(call
+											? {
+													projectId: call.projectId,
+													account: call.account,
+													workspaceRoot: call.workspaceRoot,
+													extraFolders: call.extraFolders,
+													shellEnv: call.shellEnv,
+												}
+											: {}),
 										instanceId,
 										prompt: prepared.prompt,
 										text: input.prompt,
@@ -151,6 +224,15 @@ export const recoverClaudeRunnerCommands = (
 				}).pipe(
 					Effect.provideService(SqlClient.SqlClient, sql),
 					Effect.mapError((cause) => runnerFailure("recover turn", cause)),
+				);
+				return admitReplay(
+					resolveSinkId(
+						row.command_id,
+						input.inputId,
+						row.attempt_count,
+						input.nativeResumeFallback,
+					),
+					replay,
 				);
 			},
 		});

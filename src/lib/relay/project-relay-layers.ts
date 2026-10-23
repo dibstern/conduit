@@ -29,6 +29,7 @@ import {
 	loadDaemonConfigResult,
 } from "../daemon/config-persistence.js";
 import { AccountPictureLive } from "../domain/daemon/Layers/account-picture-layer.js";
+import { makeAccountResourceScopesLive } from "../domain/daemon/Layers/account-resource-scopes-layer.js";
 import { CategorySetLive } from "../domain/daemon/Layers/category-set-layer.js";
 import {
 	ConfigPersistenceLive,
@@ -50,6 +51,7 @@ import {
 	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
 } from "../domain/daemon/Services/daemon-config-ref.js";
+import { DaemonOrchestration } from "../domain/daemon/Services/daemon-orchestration.js";
 import {
 	MessageSurfacingSettings,
 	makeMessageSurfacingSettings,
@@ -58,6 +60,8 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
+import { ProjectContext } from "../domain/daemon/Services/project-context.js";
+import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
@@ -95,19 +99,27 @@ import {
 	DaemonSessionQueryServiceTag,
 } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
-import { DraftPreWarmLive } from "../domain/relay/Services/draft-prewarm.js";
+import {
+	DraftPreWarmLive,
+	DraftPreWarmTag,
+} from "../domain/relay/Services/draft-prewarm.js";
+import { makeGoalSummaryServiceLive } from "../domain/relay/Services/goal-summary-service.js";
 import { HandoffReceiptsLive } from "../domain/relay/Services/handoff-receipts.js";
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import {
 	InstanceManagementServiceLive,
 	InstanceManagementServiceTag,
 } from "../domain/relay/Services/instance-management-service.js";
+import { makeMessageSurfacing } from "../domain/relay/Services/message-surfacing.js";
 import {
 	type EffectOpenCodeRuntimeIngressPort,
 	OpenCodeHistoryReconcileTag,
 	OpenCodeSessionCreationGateTag,
 } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
-import { PendingInteractionServiceLive } from "../domain/relay/Services/pending-interaction-service.js";
+import {
+	PendingInteractionServiceLive,
+	PendingInteractionServiceTag,
+} from "../domain/relay/Services/pending-interaction-service.js";
 import {
 	ProjectManagementServiceLive,
 	ProjectManagementServiceTag,
@@ -143,7 +155,7 @@ import {
 } from "../domain/relay/Services/session-event-bus.js";
 import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
 import type { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
-import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
+import { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	SessionSetupLive,
 	type SessionSetupTag,
@@ -170,14 +182,16 @@ import {
 } from "../persistence/effect/live.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import {
+	ClaudeAccountScopes,
+	ClaudeAccountScopesLive,
+} from "../provider/claude/claude-account-scopes.js";
 import { ClaudeProviderInstance } from "../provider/claude/claude-provider-instance.js";
 import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
-import {
-	makeOrchestrationRuntimeLayer,
-	type OrchestrationRuntimeLayerOptions,
-} from "../provider/orchestration-wiring.js";
+import { codexUsageReader } from "../provider/codex/codex-usage.js";
+import { makeOrchestrationRuntimeLayer } from "../provider/orchestration-wiring.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
 import { usageAccounts } from "../provider/usage-reader.js";
@@ -251,6 +265,7 @@ const relayOpenCodeInstances = (
 /** Services promised to callers of ProjectRelay.effectRuntime. */
 export type RelayRuntimeServices =
 	| SessionDirectory
+	| ProviderAdapters
 	| AccountDirectory
 	| SessionActivityTag
 	| ConfigTag
@@ -288,16 +303,14 @@ export class TranslatorTag extends Context.Service<
 export interface RelayRuntime {
 	runtime: ManagedRuntime.ManagedRuntime<
 		RelayRuntimeServices,
-		PersistenceEffectError | DaemonConfigLoadError
+		PersistenceEffectError | DaemonConfigLoadError | Error
 	>;
 	dispose: () => Promise<void>;
 }
 
 export interface ProjectRelayLayerInputs {
 	config: ProjectRelayConfig;
-	claudeRunnerFactory?: OrchestrationRuntimeLayerOptions["claudeRunnerFactory"];
 	testSendLimit?: number;
-	onBackgroundWorkChanged: (sessionId: string) => void;
 	/** Undefined until startup finishes; runner adoption publishes before then. */
 	getWsHandler: () => WebSocketHandlerShape | undefined;
 }
@@ -305,9 +318,7 @@ export interface ProjectRelayLayerInputs {
 /** Build the shared per-project Layer graph and its managed runtime. */
 export function createProjectRelayLayers({
 	config,
-	claudeRunnerFactory,
 	testSendLimit,
-	onBackgroundWorkChanged,
 	getWsHandler,
 }: ProjectRelayLayerInputs) {
 	const claudeSdk = config.claudeSdk ?? {
@@ -322,7 +333,10 @@ export function createProjectRelayLayers({
 
 	const configLayer = makeProjectRelayConfigLive({ ...config, claudeSdk });
 	const daemonSettingsLayer: Layer.Layer<
-		DaemonConfigRefTag | ConfigPersistenceTag | AccountDirectory,
+		| DaemonConfigRefTag
+		| ConfigPersistenceTag
+		| ConfigSnapshotTag
+		| AccountDirectory,
 		DaemonConfigLoadError
 	> = Layer.unwrap(
 		Effect.gen(function* () {
@@ -330,15 +344,18 @@ export function createProjectRelayLayers({
 			const configRef = Context.getOption(shared, DaemonConfigRefTag);
 			const persistence = Context.getOption(shared, ConfigPersistenceTag);
 			const accountsService = Context.getOption(shared, AccountDirectory);
+			const configSnapshot = Context.getOption(shared, ConfigSnapshotTag);
 			if (
 				Option.isSome(configRef) &&
 				Option.isSome(persistence) &&
-				Option.isSome(accountsService)
+				Option.isSome(accountsService) &&
+				Option.isSome(configSnapshot)
 			) {
 				return Layer.succeedContext(
 					Context.make(DaemonConfigRefTag, configRef.value).pipe(
 						Context.add(ConfigPersistenceTag, persistence.value),
 						Context.add(AccountDirectory, accountsService.value),
+						Context.add(ConfigSnapshotTag, configSnapshot.value),
 						Context.merge(shared),
 					),
 				);
@@ -369,14 +386,7 @@ export function createProjectRelayLayers({
 					return {
 						build: Effect.gen(function* () {
 							const current = yield* Ref.get(configRef);
-							const persisted = yield* Effect.suspend(() =>
-								Effect.fromResult(loadDaemonConfigResult(configDir)),
-							).pipe(
-								Effect.catchTag("NotFound", () =>
-									Effect.succeed(defaultDaemonConfig()),
-								),
-							);
-							const { cursorUsageBinding: _binding, ...unchanged } = persisted;
+							const { cursorUsageBinding: _binding, ...unchanged } = saved;
 							return {
 								...unchanged,
 								...(current.avatar !== undefined && { avatar: current.avatar }),
@@ -417,9 +427,19 @@ export function createProjectRelayLayers({
 			Layer.succeedContext(config.daemonConfigContext ?? Context.empty()),
 		),
 	);
+	const claudeAccountsLayer = Layer.unwrap(
+		Effect.gen(function* () {
+			const shared = yield* Effect.serviceOption(ClaudeAccountScopes);
+			return Option.isSome(shared)
+				? Layer.empty
+				: ClaudeAccountScopesLive(config.configDir).pipe(
+						Layer.provideMerge(makeAccountResourceScopesLive()),
+					);
+		}),
+	).pipe(Layer.provideMerge(daemonSettingsLayer));
 	const daemonConfigLayer = UserAvatarLive.pipe(
 		Layer.provide(AccountPictureLive),
-		Layer.provideMerge(daemonSettingsLayer),
+		Layer.provideMerge(claudeAccountsLayer),
 	);
 	const activityLayer = Layer.effect(
 		SessionActivityTag,
@@ -460,31 +480,16 @@ export function createProjectRelayLayers({
 		),
 	).pipe(Layer.provideMerge(activityLayer));
 	// Orchestration runtime layer (provider instance routing)
-	const orchestrationRuntimeLayer = Layer.unwrap(
-		Effect.map(SessionActivityTag, (activity) =>
-			makeOrchestrationRuntimeLayer({
-				...(config.shellEnv && { shellEnv: config.shellEnv }),
-				...(config.prepareShellEnv && {
-					prepareShellEnv: config.prepareShellEnv,
-				}),
-				onBackgroundTask: (transition) => {
-					if (activity.background.record(transition))
-						onBackgroundWorkChanged(transition.sessionId);
-				},
-				claudeQueryFactory: claudeSdk.query,
-				claudeGenerateTextQueryFactory:
-					config.titleQuery ?? claudeSdk.titleQuery,
-				claudeSessionForkSdk: claudeSdk.fork,
-				...(config.claudeSdk?.subagentSdk && {
-					claudeSubagentSdk: config.claudeSdk.subagentSdk,
-				}),
-				...(claudeRunnerFactory && { claudeRunnerFactory }),
-				...(config.projectDir != null && { workspaceRoot: config.projectDir }),
-				extraFolders: config.extraFolders ?? [],
-				...(config.configDir != null ? { configDir: config.configDir } : {}),
-			}),
-		),
-	).pipe(Layer.provide(activityLayer));
+	const orchestrationRuntimeLayer = makeOrchestrationRuntimeLayer({
+		...(config.shellEnv && { shellEnv: config.shellEnv }),
+		...(config.prepareShellEnv && {
+			prepareShellEnv: config.prepareShellEnv,
+		}),
+		claudeSessionForkSdk: claudeSdk.fork,
+		...(config.projectDir != null && { workspaceRoot: config.projectDir }),
+		extraFolders: config.extraFolders ?? [],
+		...(config.configDir != null ? { configDir: config.configDir } : {}),
+	});
 
 	const sharedUsage = config.usage;
 	const usageLayer = sharedUsage
@@ -508,6 +513,7 @@ export function createProjectRelayLayers({
 									: undefined;
 							}),
 						readers: {
+							codex: codexUsageReader,
 							cursor: cursor.reader,
 							claude: makeClaudeUsageReader({
 								queryFactory: claudeSdk.query,
@@ -610,7 +616,9 @@ export function createProjectRelayLayers({
 			Layer.merge(
 				sharedInstances
 					? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
-					: makeStandaloneOpenCodeInstancesLive(config),
+					: makeStandaloneOpenCodeInstancesLive(config).pipe(
+							Layer.provide(daemonConfigLayer),
+						),
 				persistenceEffectLayer,
 			),
 		),
@@ -622,15 +630,56 @@ export function createProjectRelayLayers({
 	const alertLedgerLayer = AlertLedgerLive.pipe(
 		Layer.provide(persistenceEffectLayer),
 	);
-	const sessionWorkspaceLayer = SessionWorkspaceLive.pipe(
-		Layer.provide(
-			Layer.mergeAll(
-				daemonConfigLayer,
-				persistenceEffectLayer,
-				configLayer,
-				loggerLayer,
-				openCodeApiLayer,
-				sessionEventBusLayer,
+	const worktreeLayer = config.worktreeContext
+		? Layer.succeedContext(config.worktreeContext)
+		: makeWorktreeLive(config.configDir ?? getConfigDir());
+	const sharedWorkspace = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		SessionWorkspaceTag,
+	);
+	const sessionWorkspaceLayer = Option.isSome(sharedWorkspace)
+		? Layer.sync(SessionWorkspaceTag, () => sharedWorkspace.value)
+		: SessionWorkspaceLive.pipe(
+				Layer.provide(
+					Layer.mergeAll(
+						daemonConfigLayer,
+						persistenceEffectLayer,
+						configLayer,
+						loggerLayer,
+						openCodeApiLayer,
+						sessionEventBusLayer,
+						worktreeLayer,
+					),
+				),
+			);
+	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
+	const recapSettingsLayer = Layer.suspend(() => {
+		const shared = config.daemonConfigContext ?? Context.empty();
+		const settings = Context.getOption(shared, MessageSurfacingSettings);
+		const categories = Context.getOption(shared, CategorySet);
+		const configDir = config.configDir ?? getConfigDir();
+		return Layer.merge(
+			Option.isSome(settings)
+				? Layer.succeedContext(
+						Context.make(MessageSurfacingSettings, settings.value),
+					)
+				: Layer.effect(
+						MessageSurfacingSettings,
+						makeMessageSurfacingSettings(configDir),
+					),
+			Option.isSome(categories)
+				? Layer.succeedContext(Context.make(CategorySet, categories.value))
+				: CategorySetLive(configDir),
+		);
+	}).pipe(
+		Layer.catch((cause) =>
+			Layer.effectContext(
+				Effect.fail(
+					new DaemonConfigUnreadable({
+						path: config.configDir ?? getConfigDir(),
+						cause,
+					}),
+				),
 			),
 		),
 	);
@@ -642,6 +691,7 @@ export function createProjectRelayLayers({
 			const log = yield* LoggerTag;
 			const workspace = yield* SessionWorkspaceTag;
 			return makeProviderRuntimeIngestionLive({
+				pendingInteractions: yield* PendingInteractionServiceTag,
 				usage: yield* Usage,
 				workspaceChanged: (event) =>
 					Effect.gen(function* () {
@@ -730,6 +780,7 @@ export function createProjectRelayLayers({
 				},
 				compactions: (yield* SessionActivityTag).compactions,
 				retries: (yield* SessionActivityTag).retries,
+				surfacing: yield* makeMessageSurfacing,
 			});
 		}),
 	).pipe(
@@ -739,11 +790,13 @@ export function createProjectRelayLayers({
 				sessionWorkspaceLayer,
 				sessionEventBusLayer,
 				alertLedgerLayer,
+				pendingInteractionServiceLayer,
 				// The same reference makeRelayStateLive merges, so it memoizes to the
 				// one PubSub SubscribeAlerts reads.
 				AlertsLive,
 				loggerLayer,
 				usageLayer,
+				recapSettingsLayer,
 			),
 		),
 	);
@@ -764,8 +817,26 @@ export function createProjectRelayLayers({
 				Layer.sync(InstanceManagementServiceTag, () => service),
 		},
 	);
-	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
+	const sharedProjectContext = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		ProjectContext,
+	);
+	// Without a daemon context, orchestration builds its existing relay-local
+	// folder and shell-env fallback. Shared services belong to the daemon scope.
+	const projectContextLayer = Option.isSome(sharedProjectContext)
+		? Layer.sync(ProjectContext, () => sharedProjectContext.value)
+		: Layer.empty;
+	const providerAdaptersLayer = Layer.sync(ProviderAdapters, () =>
+		Option.getOrThrow(
+			Context.getOption(
+				config.daemonConfigContext ?? Context.empty(),
+				ProviderAdapters,
+			),
+		),
+	);
 	const providerOrchestrationDeps = Layer.mergeAll(
+		projectContextLayer,
+		usageLayer,
 		daemonConfigLayer,
 		sessionWorkspaceLayer,
 		openCodeApiLayer,
@@ -782,6 +853,7 @@ export function createProjectRelayLayers({
 		// Recovery can publish a completed run while orchestration is adopted.
 		Layer.provide(HandoffReceiptsLive),
 		Layer.provide(providerOrchestrationDeps),
+		Layer.provideMerge(providerAdaptersLayer),
 	);
 	const agentLivenessLayer = Layer.effect(
 		AgentLivenessTag,
@@ -915,9 +987,7 @@ export function createProjectRelayLayers({
 		sessionDirectoryLayer,
 		sessionWorkspaceLayer,
 		daemonConfigLayer,
-		config.worktreeContext
-			? Layer.succeedContext(config.worktreeContext)
-			: makeWorktreeLive(config.configDir ?? getConfigDir()),
+		worktreeLayer,
 		usageLayer,
 		historyReconcileLayer,
 		Layer.effect(OpenCodeSessionCreationGateTag, Semaphore.make(1)),
@@ -954,9 +1024,18 @@ export function createProjectRelayLayers({
 	// baseLayers are defined here; wiringLayers (PermissionTimeoutLive,
 	// SessionLifecycleWiringLive) are added after monitoring state exists
 	// (provides sseTracker, getMonitoringState).
+	const sharedOverrides = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		OverridesStateTag,
+	);
 	const relayStateAndBridges = Layer.provideMerge(
 		makeRelayStateLive({
 			sessionEventBusLayer,
+			...(Option.isSome(sharedOverrides) && {
+				overridesStateLayer: Layer.succeedContext(
+					Context.make(OverridesStateTag, sharedOverrides.value),
+				),
+			}),
 			...(testSendLimit !== undefined && { testSendLimit }),
 		}),
 		bridgeLayers,
@@ -965,39 +1044,14 @@ export function createProjectRelayLayers({
 		StatusPollerLive,
 		Layer.provideMerge(SessionGitLive, relayStateAndBridges),
 	);
-	const recapSettingsLayer = Layer.suspend(() => {
-		const shared = config.daemonConfigContext ?? Context.empty();
-		const settings = Context.getOption(shared, MessageSurfacingSettings);
-		const categories = Context.getOption(shared, CategorySet);
-		const configDir = config.configDir ?? getConfigDir();
-		return Layer.merge(
-			Option.isSome(settings)
-				? Layer.succeedContext(
-						Context.make(MessageSurfacingSettings, settings.value),
-					)
-				: Layer.effect(
-						MessageSurfacingSettings,
-						makeMessageSurfacingSettings(configDir),
-					),
-			Option.isSome(categories)
-				? Layer.succeedContext(Context.make(CategorySet, categories.value))
-				: CategorySetLive(configDir),
-		);
-	}).pipe(
-		Layer.catch((cause) =>
-			Layer.effectContext(
-				Effect.fail(
-					new DaemonConfigUnreadable({
-						path: config.configDir ?? getConfigDir(),
-						cause,
-					}),
-				),
-			),
-		),
-	);
-	const relayStateWithRecaps = makeRecapServiceLive({
-		queryFactory: config.titleQuery ?? claudeSdk.titleQuery,
-	}).pipe(
+	const relayStateWithRecaps = Layer.merge(
+		makeRecapServiceLive({
+			queryFactory: config.titleQuery ?? claudeSdk.titleQuery,
+		}),
+		makeGoalSummaryServiceLive({
+			queryFactory: config.titleQuery ?? claudeSdk.titleQuery,
+		}),
+	).pipe(
 		Layer.provideMerge(relayStateBridgesAndStatus),
 		Layer.provide(recapSettingsLayer),
 	);
@@ -1006,8 +1060,15 @@ export function createProjectRelayLayers({
 		relayStateWithRecaps,
 	);
 	const translatorLayer = Layer.sync(TranslatorTag, () => createTranslator());
+	const sharedOrchestration = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		DaemonOrchestration,
+	);
+	const draftPreWarmLayer = Option.isSome(sharedOrchestration)
+		? Layer.sync(DraftPreWarmTag, () => sharedOrchestration.value.drafts)
+		: DraftPreWarmLive;
 	const baseLayers = Layer.provideMerge(
-		Layer.merge(translatorLayer, DraftPreWarmLive),
+		Layer.merge(translatorLayer, draftPreWarmLayer),
 		relayStateServicesAndBridges,
 	);
 	const baseLayersWithProjectionNotifier = Layer.provideMerge(

@@ -6,6 +6,7 @@
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 	import TitleGenerationPicker from "../model/TitleGenerationPicker.svelte";
+	import { resolveModelParameters } from "../model/model-parameters.js";
 	import TextButton from "../ui/TextButton.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import { createFrontendLogger } from "../../utils/logger.js";
@@ -74,13 +75,13 @@
 		const providers = getHarnessDefaultProviders(row.harness);
 		const catalog = catalogFromProviderList(providers);
 		const model = state.pick ? findCatalogModel(row.harness, state.pick, catalog) : undefined;
-		return { ...row, state, providers, model, options: model ? offeredOptions(model) : { efforts: [], contextWindows: [] } };
+		return { ...row, state, providers, model, parameters: resolveModelParameters(model, state.pick?.effort), options: model ? offeredOptions(model) : { efforts: [], contextWindows: [] } };
 	}));
 
 	function defaultProblem(state: HarnessDefaultState, harness: Harness, label: string): string {
 		if (state.status === "missing") return `No default. New chats on ${label} start with no model.`;
 		if (state.status === "unverified") return getDriverTraits(harness)?.runsOpenCodeServer ? `Start ${label} to check this default.` : `Connect ${label} to check this default.`;
-		if (state.problem?.startsWith("EffortNotOffered")) return `Effort "${state.pick?.effort}" is no longer available for ${state.pick?.modelId}.`;
+		if (state.problem?.startsWith("ModelParametersUnavailable")) return `Effort "${state.pick?.effort}" is no longer available for ${state.pick?.modelId}.`;
 		if (state.problem?.startsWith("ContextWindowNotOffered")) return `Context window "${state.pick?.contextWindow}" is no longer available for ${state.pick?.modelId}.`;
 		return `${state.pick?.modelId ?? "This model"} is no longer available.`;
 	}
@@ -204,7 +205,22 @@
 								: [{ value: `${provider.id}/${model.id}`, label: model.name || model.id, group: provider.name || provider.id }])),
 						]}
 					/>
-					{#if pick && row.options.efforts.length > 0}
+					{#if pick && row.model?.parameters}
+						{#if row.parameters.variantUnavailable}
+							<SettingsPicker value={pick.effort} disabled label="{row.label} unavailable parameters"
+								data-testid="settings-harness-default-{row.harness}-unavailable" onvaluechange={() => {}} options={[
+									{ value: pick.effort, label: `${pick.effort} (unavailable)`, disabled: true },
+								]} />
+						{/if}
+						{#each row.parameters.rows as parameter (parameter.id)}
+							<SettingsPicker value={parameter.value} disabled={saving[row.harness]} label="{row.label} {parameter.title}"
+								data-testid="settings-harness-default-{row.harness}-{parameter.kind}" options={parameter.options}
+								onvaluechange={(value) => {
+									const choice = row.parameters.withValue(parameter.id, value);
+									if (choice !== undefined) void updateDefault(row.harness, "effort", choice);
+								}} />
+						{/each}
+					{:else if pick && row.options.efforts.length > 0}
 						<SettingsPicker value={pick.effort} disabled={saving[row.harness]} label="{row.label} effort"
 							data-testid="settings-harness-default-{row.harness}-effort" onvaluechange={(value) => void updateDefault(row.harness, "effort", value)} options={[
 								{ value: "", label: "Default" },
@@ -212,7 +228,7 @@
 								...row.options.efforts.map((effort) => ({ value: effort, label: effort })),
 							]} />
 					{/if}
-					{#if pick && row.options.contextWindows.length > 0}
+					{#if pick && !row.model?.parameters && row.options.contextWindows.length > 0}
 						<SettingsPicker value={pick.contextWindow} disabled={saving[row.harness]} label="{row.label} context window"
 							data-testid="settings-harness-default-{row.harness}-context" onvaluechange={(value) => void updateDefault(row.harness, "contextWindow", value)} options={[
 								{ value: "", label: "Default" },

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { Deferred, Effect, Semaphore } from "effect";
+import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../daemon/config-persistence.js";
 import { observeTurnTimelineFrame } from "../../domain/daemon/Services/turn-timeline.js";
 import * as Failure from "../../effect/failure-classification.js";
 import {
@@ -28,6 +29,8 @@ import type {
 
 type ReceiptStore = Effect.Success<ReturnType<typeof makeRunnerReceiptStore>>;
 
+const REPLAY_INACTIVITY_TIMEOUT_MS = 30_000;
+
 /** Verify a discovered runner's identity and protocol before attaching. */
 export const connectRunner = (options: {
 	readonly socketPath: string;
@@ -37,6 +40,7 @@ export const connectRunner = (options: {
 	readonly helloTimeoutMs?: number;
 	readonly preserveRole?: boolean;
 	readonly driverKind?: string;
+	readonly cursorBackendUrl?: import("../cursor/cursor-credential.js").CursorBackendUrl;
 	readonly wire?: RunnerWireCodec;
 	readonly readThread?: (
 		sessionId: string,
@@ -45,6 +49,15 @@ export const connectRunner = (options: {
 	readonly deps: {
 		readonly workspaceRoot: string;
 		readonly daemonConfigDir?: string;
+		readonly accounts?: Effect.Effect<
+			import("../../account-directory.js").AccountsState
+		>;
+		readonly claudeLaunchConfig?:
+			| import("../claude/claude-sdk-env.js").ClaudeLaunchConfig
+			| null;
+		readonly autoSettleAfterDays?:
+			| Effect.Effect<number | null | undefined>
+			| undefined;
 		readonly extraFolders?: readonly string[];
 		readonly subagentPollTimeoutMs?: number;
 	};
@@ -57,6 +70,7 @@ export const connectRunner = (options: {
 	readonly onHello: (
 		hello: RunnerHello,
 		connection: RunnerSocket,
+		replay?: Effect.Effect<void, SessionFailure>,
 	) => Effect.Effect<void, SessionFailure>;
 	readonly onClose: (failure: SessionFailure) => void;
 	readonly onIdleExit?: () => void;
@@ -68,6 +82,13 @@ export const connectRunner = (options: {
 	readonly onOutputCommitted?: (output: SessionOutput) => void;
 }) =>
 	Effect.gen(function* () {
+		const autoSettleAfterDays = options.deps.autoSettleAfterDays
+			? yield* options.deps.autoSettleAfterDays.pipe(
+					Effect.map((days) =>
+						days === undefined ? DEFAULT_AUTO_SETTLE_AFTER_DAYS : days,
+					),
+				)
+			: undefined;
 		const outputLock = yield* Semaphore.make(1);
 		const attachmentId = randomUUID();
 		let acknowledged = 0;
@@ -104,6 +125,12 @@ export const connectRunner = (options: {
 				});
 			};
 			let greeted = false;
+			let replayRequested = false;
+			let replayed:
+				| ((effect: Effect.Effect<void, SessionFailure>) => void)
+				| undefined;
+			let replayTimer: ReturnType<typeof setTimeout> | undefined;
+			let replayCommittedSequence = 0;
 			let resyncScheduled = false;
 			let resyncFailures = 0;
 			const socket = createConnection(options.socketPath);
@@ -111,7 +138,26 @@ export const connectRunner = (options: {
 				if (settled) return;
 				settled = true;
 				clearTimeout(timer);
+				clearTimeout(replayTimer);
+				replayTimer = undefined;
 				resume(effect);
+			};
+			const resetReplayTimeout = () => {
+				clearTimeout(replayTimer);
+				replayTimer = setTimeout(() => {
+					finish(
+						Effect.fail(
+							runnerFailure("runner replay", "Runner replay made no progress"),
+						),
+					);
+					connection.destroy();
+				}, REPLAY_INACTIVITY_TIMEOUT_MS);
+			};
+			const replayOutputCommitted = (sequence: number) => {
+				if (replayTimer === undefined || sequence <= replayCommittedSequence)
+					return;
+				replayCommittedSequence = sequence;
+				resetReplayTimeout();
 			};
 			const timer = setTimeout(() => {
 				finish(
@@ -125,6 +171,11 @@ export const connectRunner = (options: {
 				socket,
 				(message) => {
 					if (message.type === "upgrade-state") {
+						// The runner writes this state after its retained replay frames.
+						// Wait for their durable boundary, including receipt-failure retries.
+						const completeReplay = replayed;
+						replayed = undefined;
+						completeReplay?.(beforeCommandFailure());
 						options.onUpgradeState?.(message.state);
 						return;
 					}
@@ -149,13 +200,16 @@ export const connectRunner = (options: {
 					}
 					if (message.type === "hello") {
 						if (greeted) return;
-						const helloFailure = runnerHelloFailure(message, "runner");
+						const helloFailure = runnerHelloFailure(
+							message,
+							"runner",
+							options.driverKind ?? "claude",
+							options.cursorBackendUrl,
+						);
 						if (
 							helloFailure ||
 							message.runnerId !== options.runnerId ||
 							message.sessionId !== options.sessionId ||
-							(message.driverKind ?? "claude") !==
-								(options.driverKind ?? "claude") ||
 							(options.pid !== undefined && message.pid !== options.pid)
 						) {
 							finish(
@@ -171,6 +225,7 @@ export const connectRunner = (options: {
 							return;
 						}
 						greeted = true;
+						clearTimeout(timer);
 						options.runFork(
 							Effect.gen(function* () {
 								const cursor = options.receipts
@@ -201,6 +256,25 @@ export const connectRunner = (options: {
 									.onHello(
 										{ ...message, acknowledgedSequence: acknowledged },
 										connection,
+										Effect.callback<void, SessionFailure>((resume) => {
+											replayRequested = true;
+											replayed = resume;
+											replayCommittedSequence = acknowledged;
+											resetReplayTimeout();
+											connection.write({
+												type: "replay",
+												acknowledgedSequence: acknowledged,
+												...(options.preserveRole ? { preserveRole: true } : {}),
+											});
+										}).pipe(
+											Effect.ensuring(
+												Effect.sync(() => {
+													clearTimeout(replayTimer);
+													replayTimer = undefined;
+													replayed = undefined;
+												}),
+											),
+										),
 									)
 									.pipe(Effect.provideService(currentRunnerOutput, restored));
 							}).pipe(
@@ -220,11 +294,14 @@ export const connectRunner = (options: {
 									onSuccess: () =>
 										Effect.sync(() => {
 											releaseOutputWaiters();
-											connection.write({
-												type: "replay",
-												acknowledgedSequence: acknowledged,
-												...(options.preserveRole ? { preserveRole: true } : {}),
-											});
+											if (!replayRequested)
+												connection.write({
+													type: "replay",
+													acknowledgedSequence: acknowledged,
+													...(options.preserveRole
+														? { preserveRole: true }
+														: {}),
+												});
 											finish(Effect.succeed(connection));
 										}),
 								}),
@@ -339,6 +416,7 @@ export const connectRunner = (options: {
 											consumed: false,
 											onCommitted: () => {
 												// Durable terminal state must survive publication failure.
+												replayOutputCommitted(sequence);
 												options.onOutputCommitted?.(message.output);
 												if (
 													message.output.type === "event" &&
@@ -383,6 +461,7 @@ export const connectRunner = (options: {
 														),
 													);
 										}
+										replayOutputCommitted(sequence);
 										acknowledged = sequence;
 										lastReply = result;
 										return result;
@@ -431,6 +510,8 @@ export const connectRunner = (options: {
 				},
 				(failure) => {
 					active = false;
+					replayed?.(Effect.fail(failure));
+					replayed = undefined;
 					releaseOutputWaiters();
 					finish(Effect.fail(failure));
 					options.onClose(failure);
@@ -441,6 +522,7 @@ export const connectRunner = (options: {
 			socket.once("connect", () =>
 				connection.write({
 					type: "hello",
+					// Runner builds predating driverKind were all Claude.
 					driverKind: options.driverKind ?? "claude",
 					protocolVersion:
 						process.env["NODE_ENV"] === "test" &&
@@ -453,6 +535,10 @@ export const connectRunner = (options: {
 					config: {
 						workspaceRoot: options.deps.workspaceRoot,
 						extraFolders: options.deps.extraFolders ?? [],
+						autoSettleAfterDays,
+						...(options.deps.claudeLaunchConfig !== undefined
+							? { claudeLaunchConfig: options.deps.claudeLaunchConfig }
+							: {}),
 						...(options.deps.daemonConfigDir !== undefined
 							? { daemonConfigDir: options.deps.daemonConfigDir }
 							: {}),
@@ -464,6 +550,7 @@ export const connectRunner = (options: {
 			);
 			return Effect.sync(() => {
 				clearTimeout(timer);
+				clearTimeout(replayTimer);
 				connection.destroy();
 			});
 		});

@@ -15,6 +15,7 @@ import {
 	composerPreferences,
 	setComposerPreferences,
 } from "../../stores/composer-preferences.svelte.js";
+import { effort } from "../../stores/composer-settings.svelte.js";
 import {
 	applyGetModelsResponse,
 	chooseAgent,
@@ -40,12 +41,12 @@ import { turn as readTurn } from "../../stores/turn.svelte.js";
 import { usageState } from "../../stores/usage.svelte.js";
 import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
-import { connectedSocket } from "../../stories/sockets.js";
+import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import { connectionState } from "../../transport/connection-status.svelte.js";
 import { runTransportEffect } from "../../transport/runtime.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import { WsRpcClients } from "../../transport/shared-client.js";
-import type { OpenCodeInstance } from "../../types.js";
+import type { ModelInfo, OpenCodeInstance } from "../../types.js";
 import {
 	insertComposerReference,
 	type ReplyReference,
@@ -250,6 +251,7 @@ const replyAsk: ReplyReference = {
 	kind: "message",
 	ordinal: 24,
 	category: "Ask",
+	builtinCategory: "ask",
 	glyph: "?",
 	time: "31:02",
 	text: "The phone sidebar baseline shifts 2px because the unread badge now paints before the first frame. Recapture it, or keep the old paint order?",
@@ -347,6 +349,7 @@ export const ReplyMultiple: Story = {
 				kind: "excerpt",
 				ordinal: 18,
 				category: "Decision",
+				builtinCategory: "decision",
 				glyph: "◆",
 				time: "22:40",
 				text: "one subscribeSessionSummaries stream",
@@ -354,6 +357,7 @@ export const ReplyMultiple: Story = {
 		]),
 };
 export const ReplyReferencesPhone: Story = {
+	tags: ["visual-phone-viewport"],
 	globals: { viewport: { value: "mobile1", isRotated: false } },
 	beforeEach: ({ canvasElement }) => setupWords(canvasElement, true),
 	play: async ({ canvasElement }) => {
@@ -366,6 +370,28 @@ export const ReplyReferencesPhone: Story = {
 		expect(scroller.offsetWidth).toBe(scroller.clientWidth);
 		await showReferences(canvasElement, [replyAsk], "Claude");
 	},
+};
+
+export const ReplyCustomLookalike: Story = {
+	play: async ({ canvasElement }) => {
+		await showReferences(canvasElement, [
+			{
+				...replyAsk,
+				builtinCategory: undefined,
+				category: "Decision",
+				glyph: "◆",
+			},
+		]);
+		const chip = within(canvasElement).getByTestId("surfacing-ref-token");
+		await expect(getComputedStyle(chip).color).toBe(
+			getComputedStyle(canvasElement.querySelector(".mirror") as HTMLElement)
+				.color,
+		);
+	},
+};
+export const ReplyCustomLookalikeLight: Story = {
+	...ReplyCustomLookalike,
+	globals: { theme: "light" },
 };
 export const ReplyAtomicEditing: Story = {
 	play: async ({ canvasElement }) => {
@@ -450,24 +476,17 @@ export const OverflowingInsert: Story = {
 			});
 		await expectCaretOnLastLineVisible();
 
-		// A mid-word insert that wraps its word onto a new last line: the text
-		// after the caret decides where the caret lands. Pad a final line until
-		// its word sits on the wrap boundary, then grow the word from its middle.
+		// Fixed input straddles the wrap at both viewport widths, independently
+		// of scrollbar gutters. Text after the caret decides where it lands.
 		const word = "bbbbbbbb";
-		document.execCommand("insertText", false, `\n ${word}`);
-		const lineStart = textarea.value.length - word.length - 1;
+		const prefix = "a".repeat(
+			window.matchMedia("(width < 48rem)").matches ? 31 : 78,
+		);
+		document.execCommand("insertText", false, `\n${prefix} ${word}`);
 		const rows = () => mirror.getBoundingClientRect().height;
-		const flush = () => new Promise(requestAnimationFrame);
-		await flush();
+		await new Promise(requestAnimationFrame);
 		await document.fonts.ready;
 		const height = rows();
-		while (rows() === height) {
-			textarea.setSelectionRange(lineStart, lineStart);
-			document.execCommand("insertText", false, "a");
-			await flush();
-		}
-		document.execCommand("delete");
-		await flush();
 		const middle = textarea.value.length - word.length / 2;
 		textarea.setSelectionRange(middle, middle);
 		document.execCommand("insertText", false, "bbbb");
@@ -514,6 +533,7 @@ function setupWords(
 		{
 			id: "claude",
 			name: "personal",
+			colorSlot: 0,
 			driver: "claude",
 			isDefault: true,
 			port: 0,
@@ -1414,6 +1434,7 @@ function narrowComposer(
 					{
 						...mockClaudeAccount,
 						id: "work",
+						colorSlot: 1,
 						name: "work",
 						isDefault: false,
 						usageEligible: true,
@@ -1763,7 +1784,11 @@ export const FinalIconsDesktop: Story = {
 				'[data-part="branch"]',
 			);
 			if (window.innerWidth === 320) {
-				await expect(branch).toBeNull();
+				await waitFor(() =>
+					expect(
+						checkoutControl.querySelector('[data-part="branch"]'),
+					).toBeNull(),
+				);
 			} else {
 				await expect(branch).toBeVisible();
 				if (!branch) throw new Error("Branch label missing");
@@ -2210,11 +2235,13 @@ function setupComposerStage(
 		...instanceState.instances.map((account) => ({
 			...account,
 			name: limited ? "lab" : stage === "usage" ? "work" : "personal",
+			colorSlot: limited ? 2 : stage === "usage" ? 1 : 0,
 			usageEligible: true,
 		})),
 		{
 			...mockClaudeAccount,
 			id: "standby",
+			colorSlot: limited || stage === "usage" ? 0 : 1,
 			name: "personal",
 			isDefault: false,
 			usageEligible: true,
@@ -2224,6 +2251,7 @@ function setupComposerStage(
 					{
 						...mockClaudeAccount,
 						id: "lab",
+						colorSlot: 2,
 						name: "lab",
 						isDefault: false,
 						usageEligible: true,
@@ -2268,7 +2296,13 @@ function setupComposerStage(
 						accountId: "lab",
 						harness: "claude" as const,
 						status: "limited" as const,
-						windows: [],
+						windows: [
+							{
+								kind: "five_hour" as const,
+								utilization: 100,
+								resetsAt: new Date(reset).toISOString(),
+							},
+						],
 						readAt: now,
 						stale: false,
 					},
@@ -2293,6 +2327,7 @@ function setupComposerStage(
 						limitRecovery: {
 							instanceId: "claude",
 							rateLimitType: "five_hour",
+							limitedAt: now - 1,
 							resetsAt: reset / 1000,
 							cutOffMessageId: "composer-limit-turn",
 							rearms: 0,
@@ -2438,7 +2473,7 @@ export const WaitingForReset: Story = {
 	globals: { theme: "dark" },
 	beforeEach: ({ canvasElement }) =>
 		setupComposerStage(canvasElement, "waiting"),
-	play: async ({ canvasElement }) => {
+	play: async ({ canvasElement, parameters }) => {
 		const canvas = within(canvasElement);
 		await expect(canvas.getByTestId("pending-input-waiting")).toHaveTextContent(
 			"Waiting for lab's limit to reset",
@@ -2449,14 +2484,46 @@ export const WaitingForReset: Story = {
 		await expect(canvas.getByTestId("pending-input-send-now")).toBeVisible();
 		await expect(canvas.queryByTestId("usage-limit-strip")).toBeNull();
 		const cancel = canvas.getByTestId("usage-limit-cancel-resume");
-		const actions = cancel.parentElement;
-		if (!actions) throw new Error("Waiting tray actions are missing");
-		await expect(getComputedStyle(cancel).flexGrow).toBe("0");
+		const resetLink = canvas.getByTestId("usage-limit-reset-link");
+		await expect(resetLink).toBeVisible();
+		const actions = resetLink.parentElement;
+		const buttonRow = cancel.parentElement;
+		if (!actions || !buttonRow)
+			throw new Error("Waiting tray actions are missing");
 		const header = canvas.getByTestId("pending-input-waiting");
 		const headerRect = header.getBoundingClientRect();
-		await expect(cancel.getBoundingClientRect().width).toBeLessThan(
-			headerRect.width * 0.7,
-		);
+		if (parameters["phone"]) {
+			const rowRect = buttonRow.getBoundingClientRect();
+			const buttons = [
+				canvas.getByTestId("usage-limit-switch-account"),
+				cancel,
+				canvas.getByTestId("usage-limit-used-reset"),
+			];
+			for (const button of buttons) {
+				await expect(button).toBeVisible();
+				const rect = button.getBoundingClientRect();
+				await expect(rect.left).toBeGreaterThanOrEqual(rowRect.left - 1);
+				await expect(rect.right).toBeLessThanOrEqual(rowRect.right + 1);
+			}
+			await expect(
+				Math.abs(
+					rowRect.left -
+						headerRect.left -
+						Number.parseFloat(getComputedStyle(header).paddingLeft),
+				),
+			).toBeLessThanOrEqual(1);
+			await expect(
+				Math.abs(rowRect.width - actions.getBoundingClientRect().width),
+			).toBeLessThanOrEqual(1);
+			await expect(
+				resetLink.getBoundingClientRect().top,
+			).toBeGreaterThanOrEqual(rowRect.bottom);
+		} else {
+			await expect(getComputedStyle(cancel).flexGrow).toBe("0");
+			await expect(cancel.getBoundingClientRect().width).toBeLessThan(
+				headerRect.width * 0.7,
+			);
+		}
 		await expect(
 			Math.abs(
 				actions.getBoundingClientRect().right -
@@ -3040,4 +3107,369 @@ export const FinalIconsPhonePriorityGoal: Story = {
 export const FinalIconsPhonePriorityAtReset: Story = {
 	...FinalIconsPhonePriorityIdle,
 	parameters: { phone: true, footerState: "at-reset" },
+};
+
+const cursorPhoneParameters: NonNullable<ModelInfo["parameters"]> = {
+	rows: [
+		{
+			id: "context",
+			label: "Context",
+			values: ["200k", "500k"].map((value) => ({ value, label: value })),
+		},
+		{
+			id: "effort",
+			label: "Effort",
+			values: ["low", "high"].map((value) => ({ value, label: value })),
+		},
+		{
+			id: "thinking",
+			label: "Thinking",
+			values: ["false", "true"].map((value) => ({ value, label: value })),
+		},
+		{
+			id: "fast",
+			label: "Fast",
+			values: ["false", "true"].map((value) => ({ value, label: value })),
+		},
+	],
+	combinations: ["200k", "500k"].flatMap((context) =>
+		["low", "high"].flatMap((effort) =>
+			["false", "true"].flatMap((thinking) =>
+				["false", "true"].map((fast) => ({
+					variant: `${context}/${effort}/${thinking}/${fast}`,
+					values: { context, effort, thinking, fast },
+					isDefault:
+						context === "200k" &&
+						effort === "high" &&
+						thinking === "true" &&
+						fast === "false",
+				})),
+			),
+		),
+	),
+};
+const phoneEffortFixtures = [
+	{
+		id: "claude",
+		driver: "claude",
+		model: {
+			id: "sonnet",
+			name: "Sonnet",
+			provider: "claude",
+			variants: ["low", "medium", "high", "xhigh", "max"],
+		},
+		current: "high",
+		levels: 5,
+		filled: 3,
+		label: "High",
+	},
+	{
+		id: "opencode",
+		driver: "opencode",
+		model: {
+			id: "gpt",
+			name: "GPT",
+			provider: "opencode",
+			variants: ["low", "medium", "high"],
+		},
+		current: "high",
+		levels: 3,
+		filled: 3,
+		label: "High",
+	},
+	{
+		id: "codex",
+		driver: "codex",
+		model: {
+			id: "gpt-5.4",
+			name: "GPT-5.4",
+			provider: "codex",
+			variants: ["low", "medium", "high", "xhigh"],
+			parameters: {
+				rows: [
+					{
+						id: "effort",
+						label: "Reasoning effort",
+						values: ["low", "medium", "high", "xhigh"].map((value) => ({
+							value,
+							label: value,
+						})),
+					},
+				],
+				combinations: ["low", "medium", "high", "xhigh"].map((effort) => ({
+					variant: effort,
+					values: { effort },
+					isDefault: effort === "medium",
+				})),
+			},
+		},
+		current: "high",
+		levels: 4,
+		filled: 3,
+		label: "High",
+	},
+	{
+		id: "cursor",
+		driver: "cursor",
+		model: {
+			id: "cursor-reasoning",
+			name: "Reasoning",
+			provider: "cursor",
+			variants: cursorPhoneParameters.combinations.map(
+				({ variant }) => variant,
+			),
+			parameters: cursorPhoneParameters,
+		},
+		current: "200k/high/true/false",
+		levels: 2,
+		filled: 2,
+		label: "High",
+	},
+	...["thinking", "fast"].map((kind) => ({
+		id: `cursor-${kind}`,
+		driver: "cursor" as const,
+		model: {
+			id: `cursor-${kind}`,
+			name: kind,
+			provider: "cursor",
+			variants: ["false", "true"],
+			parameters: {
+				rows: [
+					{
+						id: kind,
+						label: kind,
+						values: ["false", "true"].map((value) => ({ value, label: value })),
+					},
+				],
+				combinations: ["false", "true"].map((value) => ({
+					variant: value,
+					values: { [kind]: value },
+					isDefault: value === "false",
+				})),
+			},
+		},
+		current: "true",
+		levels: 0,
+		filled: 0,
+		label: kind === "thinking" ? "Thinking" : "Fast",
+	})),
+] satisfies readonly {
+	id: string;
+	driver: "claude" | "opencode" | "cursor" | "codex";
+	model: ModelInfo;
+	current: string;
+	levels: number;
+	filled: number;
+	label: string;
+}[];
+
+export const PhoneProviderEffortClaude: Story = {
+	parameters: { phone: true, effortFixture: "claude" },
+	beforeEach: ({ canvasElement, parameters }) => {
+		const fixture = phoneEffortFixtures.find(
+			({ id }) => id === parameters["effortFixture"],
+		);
+		if (!fixture) throw new Error("Phone effort fixture is missing");
+		const cleanup = setupWords(canvasElement, true);
+		setComposerPreferences({ controls: "icons" });
+		seedSessionAccount({
+			...mockClaudeAccount,
+			id: fixture.driver,
+			driver: fixture.driver,
+		});
+		const models = () => ({
+			projectSlug: "conduit",
+			instanceId: fixture.driver,
+			providers: [
+				{
+					id: fixture.driver,
+					name: fixture.driver,
+					configured: true,
+					models: [fixture.model],
+				},
+			],
+			active: { model: fixture.model.id, provider: fixture.driver },
+			variant: {
+				variant: discoveryState.currentVariant,
+				variants: fixture.model.variants,
+			},
+			contextWindow: { contextWindow: "", options: [] },
+			permissionMode: "ask" as const,
+		});
+		applyGetModelsResponse(
+			{
+				...models(),
+				variant: {
+					variant:
+						typeof parameters["savedEffort"] === "string"
+							? parameters["savedEffort"]
+							: fixture.current,
+					variants: fixture.model.variants,
+				},
+			},
+			testId,
+		);
+		const restoreModels = replyRpc("GetModels", models);
+		const restoreVariant = replyRpc("SwitchVariant", (payload) => {
+			if (
+				typeof payload !== "object" ||
+				payload === null ||
+				!("variant" in payload) ||
+				typeof payload.variant !== "string"
+			)
+				throw new Error("SwitchVariant fixture requires a variant");
+			return {
+				projectSlug: "conduit",
+				variant: payload.variant,
+				variants: fixture.model.variants,
+			};
+		});
+		return () => {
+			restoreVariant();
+			restoreModels();
+			cleanup();
+		};
+	},
+	play: async ({ canvasElement, parameters }) => {
+		const fixture = phoneEffortFixtures.find(
+			({ id }) => id === parameters["effortFixture"],
+		);
+		if (!fixture) throw new Error("Phone effort fixture is missing");
+		const canvas = within(canvasElement);
+		const body = within(document.body);
+		const saved = parameters["savedEffort"];
+		const label =
+			saved === "" ? "Medium" : saved === "retired" ? "retired" : fixture.label;
+		const filled = saved === "" ? 2 : saved === "retired" ? 0 : fixture.filled;
+		if (typeof saved === "string")
+			await expect(discoveryState.currentVariant).toBe(saved);
+		const meter = canvas.queryByTestId("variant-badge");
+		if (fixture.levels > 0) {
+			if (!meter) throw new Error("Phone effort control is missing");
+			await expect(meter).toBeVisible();
+			await expect(meter).toHaveAccessibleName(
+				`Effort: ${label}. Open effort options`,
+			);
+			await expect(meter).toHaveTextContent(/^$/);
+			const bars = canvas.getByTestId("effort-meter").children;
+			await expect(bars).toHaveLength(fixture.levels);
+			const color = getComputedStyle(meter).color;
+			for (const [index, bar] of Array.from(bars).entries())
+				await expect(getComputedStyle(bar).backgroundColor === color).toBe(
+					index < filled,
+				);
+			await userEvent.click(meter);
+			const picker = await body.findByTestId("model-picker");
+			await expect(
+				within(picker).getByTestId("picker-effort-option-high"),
+			).toBeVisible();
+			if (fixture.id === "cursor") {
+				for (const [kind, value, expected] of [
+					["fast", "true", "200k/high/true/true"],
+					["thinking", "false", "200k/high/false/true"],
+					["context", "500k", "500k/high/false/true"],
+					["effort", "low", "500k/low/false/true"],
+				]) {
+					await userEvent.click(
+						within(picker).getByTestId(`picker-${kind}-option-${value}`),
+					);
+					await waitFor(() => {
+						expect(effort.pending).toBe(false);
+						expect(discoveryState.currentVariant).toBe(expected);
+					});
+				}
+				await expect(
+					within(picker).getByTestId("picker-context-option-500k"),
+				).toHaveAttribute("aria-checked", "true");
+				await expect(
+					within(picker).getByTestId("picker-thinking-option-false"),
+				).toHaveAttribute("aria-checked", "true");
+				await expect(
+					within(picker).getByTestId("picker-fast-option-true"),
+				).toHaveAttribute("aria-checked", "true");
+				await expect(
+					within(picker).getByTestId("picker-effort-option-low"),
+				).toHaveAttribute("aria-checked", "true");
+			}
+			document
+				.querySelector("dialog[open]")
+				?.dispatchEvent(new Event("cancel", { cancelable: true }));
+			await waitFor(() => {
+				expect(body.queryByTestId("model-picker")).toBeNull();
+				expect(
+					getComputedStyle(canvas.getByTestId("model-picker-trigger"))
+						.pointerEvents,
+				).not.toBe("none");
+			});
+		} else {
+			await expect(meter).toBeNull();
+		}
+		await userEvent.click(canvas.getByTestId("model-picker-trigger"));
+		const more = await body.findByTestId("composer-more-sheet");
+		const row = within(more).getByTestId("composer-more-effort");
+		await expect(row).toBeEnabled();
+		await expect(row).toHaveTextContent(
+			typeof saved === "string"
+				? saved || "medium"
+				: fixture.id === "cursor"
+					? "low · Fast"
+					: fixture.levels > 0
+						? "high"
+						: fixture.label,
+		);
+		await userEvent.click(row);
+		const picker = await body.findByTestId("model-picker");
+		await expect(picker.closest("dialog[open]")).not.toBeNull();
+		if (fixture.levels === 0) {
+			const kind = fixture.id === "cursor-thinking" ? "thinking" : "fast";
+			await expect(
+				within(picker).queryByTestId("picker-row-effort"),
+			).toBeNull();
+			await userEvent.click(
+				within(picker).getByTestId(`picker-${kind}-option-false`),
+			);
+			await waitFor(() => {
+				expect(effort.pending).toBe(false);
+				expect(discoveryState.currentVariant).toBe("false");
+			});
+		}
+		document
+			.querySelector("dialog[open]")
+			?.dispatchEvent(new Event("cancel", { cancelable: true }));
+		await waitFor(() => expect(body.queryByTestId("model-picker")).toBeNull());
+		document
+			.querySelector("dialog[open]")
+			?.dispatchEvent(new Event("cancel", { cancelable: true }));
+		await waitFor(() =>
+			expect(body.queryByTestId("composer-more-sheet")).toBeNull(),
+		);
+	},
+};
+export const PhoneProviderEffortOpenCode: Story = {
+	...PhoneProviderEffortClaude,
+	parameters: { phone: true, effortFixture: "opencode" },
+};
+export const PhoneProviderEffortCodex: Story = {
+	...PhoneProviderEffortClaude,
+	parameters: { phone: true, effortFixture: "codex" },
+};
+export const PhoneProviderEffortCodexDefault: Story = {
+	...PhoneProviderEffortCodex,
+	parameters: { phone: true, effortFixture: "codex", savedEffort: "" },
+};
+export const PhoneProviderEffortCodexUnavailable: Story = {
+	...PhoneProviderEffortCodex,
+	parameters: { phone: true, effortFixture: "codex", savedEffort: "retired" },
+};
+export const PhoneProviderEffortCursor: Story = {
+	...PhoneProviderEffortClaude,
+	parameters: { phone: true, effortFixture: "cursor" },
+};
+export const PhoneProviderThinkingCursor: Story = {
+	...PhoneProviderEffortClaude,
+	parameters: { phone: true, effortFixture: "cursor-thinking" },
+};
+export const PhoneProviderFastCursor: Story = {
+	...PhoneProviderEffortClaude,
+	parameters: { phone: true, effortFixture: "cursor-fast" },
 };

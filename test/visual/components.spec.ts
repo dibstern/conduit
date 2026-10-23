@@ -25,6 +25,7 @@ interface StoryEntry {
 }
 
 const VIEWPORT_CAPTURE_TAG = "viewport-capture";
+const PHONE_VIEWPORT_TAG = "visual-phone-viewport";
 const POINTER_HOVER_TAG = "visual-pointer-hover";
 
 const LIGHT_STORY_IDS = new Set([
@@ -35,6 +36,7 @@ const LIGHT_STORY_IDS = new Set([
 	"file-sidebarfilepanel--expanded-directory",
 	// Populated and open-shelf lists expose grouping, borders, and nested surfaces.
 	"session-sessionlist--with-items",
+	"session-sessionlist--all-groups",
 	"session-sessionlist--pinned-and-settled-shelf-open",
 	"session-sessionlist--grouped-by-project",
 	// Select mode tints the header, rows, and action bar with the accent.
@@ -592,7 +594,15 @@ if (stories.length > 0) {
 					testInfo: TestInfo,
 					theme: "dark" | "light",
 				) => {
-					const skipScope = SKIP_STORIES.get(story.id);
+					// These fixtures explicitly select a sheet or desktop popover. Capture
+					// each in its intended viewport, as for the existing desktop goal stories.
+					const skipScope = story.id.startsWith(
+						"layout-sessionbar--desktop-goal-summary-",
+					)
+						? "mobile"
+						: story.id.startsWith("layout-sessionbar--phone-goal-summary-")
+							? "desktop"
+							: SKIP_STORIES.get(story.id);
 					if (skipScope === "all" || skipScope === testInfo.project.name) {
 						test.skip(true, "Intentionally excluded from visual capture");
 						return;
@@ -611,6 +621,12 @@ if (stories.length > 0) {
 						return;
 					}
 
+					// A phone story needs CSS media queries and JavaScript width to agree.
+					if (story.tags?.includes(PHONE_VIEWPORT_TAG)) {
+						const viewport = page.viewportSize();
+						if (!viewport) throw new Error("Phone story requires a viewport");
+						await page.setViewportSize({ ...viewport, width: 393 });
+					}
 					await pinRandomness(page);
 					await pinClock(page);
 					await page.goto(

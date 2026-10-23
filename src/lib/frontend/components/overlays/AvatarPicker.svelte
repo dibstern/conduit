@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import type { AvatarChoice } from "../../../contracts/user-avatar.js";
-	import { avatarState, saveAvatar } from "../../stores/avatar.svelte.js";
+	import { avatarState, loadAvatar, saveAvatar } from "../../stores/avatar.svelte.js";
 	import { face } from "../../utils/avatar-face.js";
 	import Popover from "../ui/Popover.svelte";
 	import UserAvatar from "../ui/UserAvatar.svelte";
@@ -23,6 +23,8 @@
 	function changeOpen(next: boolean): void {
 		open = next;
 		if (!next) return;
+		// The daemon doesn't keep a failed picture read, so this retries it.
+		void loadAvatar();
 		choice = avatarState.current.choice ?? { kind: "initial" };
 		if (choice.kind === "mac" && !avatarState.current.macPicture) choice = { kind: "initial" };
 		kind = choice.kind;

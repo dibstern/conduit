@@ -32,6 +32,22 @@ const IMPLEMENTATION_CALLS = [
 		childMetadataWrites: ["metadata: { childSessionId"],
 		// The Task translator owns Cursor child identity and its tool link.
 	},
+	{
+		file: "src/lib/provider/codex/codex-runner-payload.ts",
+		calls: ['emit({ type: "ensure-subagent-session"'],
+	},
+	{
+		file: "src/lib/provider/codex/codex-item-mapper.ts",
+		calls: [],
+		childMetadataWrites: [
+			"metadata: { ...metadata, ...(item.receiverThreadIds[0] ? { childSessionId",
+		],
+	},
+	{
+		file: "src/lib/provider/codex/codex-subagents.ts",
+		calls: [],
+		childMetadataWrites: ["metadata = { ...part.metadata, childSessionId"],
+	},
 ];
 
 function sourceFiles(dir: string): string[] {

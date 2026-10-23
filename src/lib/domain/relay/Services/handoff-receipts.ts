@@ -16,11 +16,15 @@ export const HandoffReceiptsLive = Layer.effectDiscard(
 		yield* events.pipe(
 			Stream.runForEach((event) => {
 				if (!event.runEnded) return Effect.void;
+				const continuationKind =
+					event.type === "turn.completed"
+						? event.data.continuationKind
+						: undefined;
 				return Effect.gen(function* () {
 					const commands = yield* sql<{
 						command_id: string;
 						instance_id: string;
-						handoff: string;
+						handoff: string | null;
 					}>`
 						SELECT o.command_id, COALESCE(json_extract(o.payload_json, '$.instanceId'), o.provider_id) AS instance_id,
 						json_extract(o.payload_json, '$.handoff') AS handoff
@@ -28,11 +32,25 @@ export const HandoffReceiptsLive = Layer.effectDiscard(
 						WHERE o.session_id = ${event.sessionId} AND o.project_key = ${store.projectId}
 						AND o.effect_type = 'send_turn' AND o.status = 'completed'
 						AND (r.id = ${event.metadata.runId ?? null} OR r.joined_into = ${event.metadata.runId ?? null})
-						AND json_type(o.payload_json, '$.handoff') = 'object'`;
+						AND (json_type(o.payload_json, '$.handoff') = 'object'
+							OR (${continuationKind ?? null} IS NOT NULL
+								AND r.id = ${event.metadata.runId ?? null}
+								AND json_type(o.payload_json, '$.handoff') IS NULL))`;
 					for (const command of commands) {
-						const handoff = yield* Schema.decodeUnknownEffect(
-							Schema.fromJsonString(SessionHandoffDeliveredPayloadSchema),
-						)(command.handoff);
+						if (command.handoff === null && !continuationKind) continue;
+						const handoff =
+							command.handoff !== null
+								? yield* Schema.decodeUnknownEffect(
+										Schema.fromJsonString(SessionHandoffDeliveredPayloadSchema),
+									)(command.handoff)
+								: {
+										continuationKind,
+										included: 0,
+										omitted: 0,
+										firstMessageIncluded: false,
+										tokens: 0,
+										instanceId: command.instance_id,
+									};
 						yield* persist.persistHandoffDelivered(
 							event.sessionId,
 							{
@@ -40,6 +58,8 @@ export const HandoffReceiptsLive = Layer.effectDiscard(
 								instanceId: handoff.instanceId ?? command.instance_id,
 							},
 							command.command_id,
+							store.projectId,
+							event.provider,
 						);
 					}
 				}).pipe(

@@ -18,6 +18,7 @@
 -->
 
 <script lang="ts">
+	import { untrack } from "svelte";
 	import { isProcessing } from "../../stores/chat.svelte.js";
 	import { discoveryState, getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
@@ -36,7 +37,7 @@
 	import { backToSessions } from "../../utils/session-read.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { getSessionBarState, getWokenSessionText } from "../../utils/session-lifecycle.js";
-	import type { GoalDetails } from "../../transport/ws-rpc.js";
+	import type { GoalDetails, GoalSummary } from "../../transport/ws-rpc.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
@@ -71,7 +72,13 @@
 	import ViewCard from "../ui/ViewCard.svelte";
 	import { activeSessionView, sessionViews } from "./session-views.js";
 
-	let { getGoalDetails = (input) => rpc("GetGoalDetails", input) }: { getGoalDetails?: ((input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => Promise<GoalDetails>) | undefined } = $props();
+	let {
+		getGoalDetails = (input) => rpc("GetGoalDetails", input),
+		generateGoalSummary = (input) => rpc("GenerateGoalSummary", input),
+	}: {
+		getGoalDetails?: ((input: { sessionId: string }) => Promise<GoalDetails>) | undefined;
+		generateGoalSummary?: ((input: { sessionId: string }) => Promise<GoalSummary>) | undefined;
+	} = $props();
 
 	// "New Session" matches session/SessionItem.svelte, so an untitled session
 	// reads the same in the bar as it does in the list it came from.
@@ -114,7 +121,20 @@
 	let details: GoalDetails | null = $state(null);
 	let detailsLoading = $state(false);
 	let detailsFailed = $state("");
+	let historyOpen = $state(false);
+	let summaryLoading = $state(false);
+	let summaryFailed = $state(false);
+	let detailsContext = "";
+	let summaryOnOpen = false;
+	let summaryEpoch = 0;
 	let detailsProjectSlug: string | null | undefined;
+	const summary = $derived.by(() => details?.summary);
+	const summaryEnabled = $derived.by(() => details?.summaryEnabled !== false);
+	const latestCheck = $derived.by(() => goalFacts?.ended === "met" && detailsGoal
+		? { at: details?.metAt ?? goalFacts.endedAt ?? detailsGoal.setAt, reason: detailsGoal.lastReason ?? details?.checks.at(-1)?.reason }
+		: details?.checks.at(-1));
+	const newCheckCount = $derived.by(() => summary ? (details?.checks.filter((check) => check.at > summary.generatedAt).length ?? 0) : (details?.checks.length ?? 0));
+	const stuck = $derived(goalFacts?.goal ? session?.goalStuck : undefined);
 
 	$effect(() => {
 		const projectSlug = getCurrentSlug();
@@ -131,21 +151,67 @@
 	$effect(() => {
 		const sessionId = sessionState.currentId;
 		const facts = goalFacts;
-		details = null;
-		detailsFailed = "";
-		detailsLoading = false;
-		if (!goalDetails.open || !sessionId || !facts || (!facts.goal && !facts.endedGoal)) return;
-		let stale = false;
-		detailsLoading = true;
-		void getGoalDetails({ sessionId }).then((result) => {
-			if (!stale) details = result;
-		}).catch((error) => {
-			if (!stale) detailsFailed = failureLine(error, "Could not load check history.");
-		}).finally(() => {
-			if (!stale) detailsLoading = false;
+		const currentGoal = facts?.goal ?? facts?.endedGoal;
+		const open = goalDetails.open;
+		void session?.goalStuck;
+		return untrack(() => {
+			const context = open && sessionId && currentGoal ? `${sessionId}:${currentGoal.setAt}:${currentGoal.condition}` : "";
+			if (context !== detailsContext) {
+				detailsContext = context;
+				summaryEpoch++;
+				details = null;
+				detailsFailed = "";
+				detailsLoading = false;
+				historyOpen = false;
+				summaryLoading = false;
+				summaryFailed = false;
+				summaryOnOpen = Boolean(context);
+			}
+			if (!context || !sessionId) return;
+			let cancelled = false;
+			detailsLoading = true;
+			detailsFailed = "";
+			void getGoalDetails({ sessionId }).then((result) => {
+				if (cancelled) return;
+				// A details read started before generation may carry the older cache.
+				const cached = details?.summary;
+				details = cached && cached.generatedAt > (result.summary?.generatedAt ?? 0)
+					? { ...result, summary: cached }
+					: result;
+				const generate = summaryOnOpen;
+				summaryOnOpen = false;
+				if (generate && result.summaryEnabled !== false && result.checks.length && (!result.summary || result.summary.stale)) void updateGoalSummary();
+			}).catch((error) => {
+				if (!cancelled) detailsFailed = failureLine(error, "Could not load check history.");
+			}).finally(() => {
+				if (!cancelled) detailsLoading = false;
+			});
+			return () => { cancelled = true; };
 		});
-		return () => { stale = true; };
 	});
+
+	async function updateGoalSummary() {
+		const sessionId = sessionState.currentId;
+		if (!sessionId || !details?.checks.length || !summaryEnabled || summaryLoading) return;
+		const epoch = summaryEpoch;
+		summaryLoading = true;
+		summaryFailed = false;
+		try {
+			const result = await generateGoalSummary({ sessionId });
+			if (epoch === summaryEpoch && details && result.generatedAt > (details.summary?.generatedAt ?? 0)) details = { ...details, summary: result };
+		} catch {
+			if (epoch === summaryEpoch) summaryFailed = true;
+		} finally {
+			if (epoch === summaryEpoch) summaryLoading = false;
+		}
+	}
+
+	function goalDuration(milliseconds: number, short = false): string {
+		const minutes = Math.max(1, Math.floor(milliseconds / 60_000));
+		const hours = Math.floor(minutes / 60);
+		const part = (value: number, unit: string) => short ? `${value} ${unit === "hour" ? "hr" : "min"}` : `${value} ${unit}${value === 1 ? "" : "s"}`;
+		return hours ? `${part(hours, "hour")}${minutes % 60 ? ` ${part(minutes % 60, "minute")}` : ""}` : part(minutes, "minute");
+	}
 
 	function goalTokens(tokens: number): string {
 		if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(2))}M`;
@@ -166,6 +232,7 @@
 	function handleGoalDetailsKeydown(event: KeyboardEvent) {
 		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open && !sideThreadsPanel.open) || uiState.confirmDialog) return;
 		if (goalDetails.open && sessionViewState.compact && !tasksPanel.open && !sideThreadsPanel.open) return;
+		if (sideThreadsPanel.open && sessionViewState.compact) return;
 		event.preventDefault();
 		event.stopPropagation();
 		if (sideThreadsPanel.open) {
@@ -211,10 +278,9 @@
 		if (woke) return undefined;
 		return getPrimaryCommand(session, sessionState.now);
 	});
-	// Phones colour the line by the store's tone (amber = not yet). Desktop labels not-yet as
-	// Pursuing, so only a paused goal leaves the teal.
-	const goalButtonTone = $derived(goal.tone === "success" ? "goal-met" : (sessionViewState.compact ? goal.tone === "amber" : goal.phase === "paused") ? "goal-paused" : "goal");
-	const desktopGoalLabel = $derived(goal.phase === "met" ? "Goal met" : goal.phase === "checking" ? "Checking" : goal.phase === "paused" ? "Paused" : "Pursuing");
+	const goalButtonTone = $derived(goal.phase === "met" ? "goal-met" : stuck || (!sessionViewState.compact && goal.phase === "paused") ? "goal-paused" : "goal");
+	const desktopGoalLabel = $derived(goal.phase === "met" ? "Goal met" : goal.phase === "paused" ? "Paused" : stuck ? "Stuck" : goal.phase === "checking" ? "Checking" : "Pursuing");
+	const goalIcon = $derived(goal.phase === "met" ? "circle-check" : goal.phase === "paused" ? "pause" : stuck ? "circle-alert" : goal.phase === "checking" ? "loader-circle" : "target");
 	const statusTitle = $derived(connectionState.statusText || "Connecting");
 	const statusClass = $derived.by(() => {
 		switch (connectionState.status) {
@@ -273,7 +339,7 @@
 
 	let overflowOpen = $state(false);
 	$effect(() => {
-		if (sessionViewState.compact && !goalDetails.open && (tasksPanel.open || sideThreadsPanel.open)) return dimThemeColor();
+		if (sessionViewState.compact && !goalDetails.open && tasksPanel.open) return dimThemeColor();
 		return undefined;
 	});
 	let overflowOpener: HTMLElement | null = null;
@@ -304,8 +370,8 @@
 	{#if !sessionViewState.compact}<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => closeGoalDetails(true)} />{/if}
 {:else if tasksPanel.open && backgroundTasks.length > 0}
 	<Button variant={sessionViewState.compact ? "sheet-scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { tasksPanel.open = false; }} />
-{:else if sideThreadsPanel.open}
-	<Button variant={sessionViewState.compact ? "sheet-scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { sideThreadsPanel.open = false; }} />
+{:else if sideThreadsPanel.open && !sessionViewState.compact}
+	<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { sideThreadsPanel.open = false; }} />
 {/if}
 
 {#snippet viewCards()}
@@ -386,15 +452,47 @@
 
 {#snippet goalContent()}
 	{#if detailsGoal && goalFacts}
-		<div class="px-[10px] pt-[10px] pb-[4px]">
-			<Badge variant={goal.phase === "met" ? "success" : "goal"} shape="pill" size="label"><Icon name={goal.phase === "met" ? "circle-check" : "target"} size={12} />{desktopGoalLabel}</Badge>
-			<h2 id="goal-details-title" data-testid="goal-details-condition" class="mt-[8px] mb-[3px] text-[15px] font-semibold leading-[1.35] tracking-[-0.01em]">{detailsGoal.condition}</h2>
-			<p data-testid="goal-details-meta" class="m-0 font-mono text-[11.5px] text-text-dimmer">Set {goalClock(details?.setAt ?? detailsGoal.setAt)} · {detailsGoal.iterations} checks{details?.judgeModel ? ` · ${details.judgeModel} judges` : ""}</p>
-			{#if !sessionViewState.compact && details?.tokensSinceStart != null}<p data-testid="goal-details-tokens" class="mt-[4px] mb-0 font-mono text-[11px] text-text-dimmer">{goalTokens(details.tokensSinceStart)} tokens</p>{/if}
+		<div class={sessionViewState.compact ? "pt-[2px]" : ""}>
+			<Badge variant={goal.phase === "met" ? "success" : stuck ? "warning" : "goal"} shape="pill" size="session"><Icon name={goalIcon} size={12} class={goalIcon === "loader-circle" ? "motion-safe:animate-spin" : ""} />{desktopGoalLabel}</Badge>
+			<h2 id="goal-details-title" data-testid="goal-details-condition" class="mt-[10px] mb-[4px] text-[15px] font-semibold leading-[1.35] tracking-[-0.01em]">{detailsGoal.condition}</h2>
+			<p data-testid="goal-details-meta" class="m-0 font-mono text-[10.5px] text-text-dimmer">Set {goalClock(details?.setAt ?? detailsGoal.setAt)}{details?.judgeModel ? ` · ${details.judgeModel} judges` : ""}{#if details?.tokensSinceStart != null}<span data-testid="goal-details-tokens">{" · "}{goalTokens(details.tokensSinceStart)} tokens</span>{/if}</p>
 		</div>
-		<div class="mx-[4px] mt-[8px] border-t border-border-chip"></div>
-		<div data-goal-checks-heading class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-dimmer">Checks{#if sessionViewState.compact && details?.tokensSinceStart != null}<span data-testid="goal-details-tokens" class="font-mono text-[10.58px] text-text-dimmer">{goalTokens(details.tokensSinceStart)} tokens</span>{/if}</div>
-	<ol data-testid="goal-details-history" class="m-0 flex list-none flex-col gap-[5px] p-0">
+		<div class="my-[12px] border-t border-border-chip"></div>
+		{#if stuck}
+			<div data-testid="goal-details-stuck" class="mb-[12px] rounded-[12px] border border-warning/30 bg-warning/5 px-[12px] py-[10px]">
+				<b class="text-[13.5px] font-semibold text-warning">{goal.phase === "paused" ? `Paused after ${goalDuration(stuck.lastAt - stuck.since)} stuck` : `Stuck for ${goalDuration(stuck.lastAt - stuck.since)}`}</b>
+				<p class="mt-[3px] mb-0 text-[12.5px] leading-[1.45] text-text-secondary">{goal.phase === "paused" ? `Checks stopped after ${stuck.count} found the same blocker. Resume once it is fixed.` : `${stuck.count} checks in a row found the same blocker.`}</p>
+			</div>
+		{/if}
+		<div data-testid="goal-details-summary" aria-live="polite" aria-atomic="true">
+			{#if details?.checks.length}
+				<div class="mb-[6px] flex flex-wrap items-baseline justify-between gap-x-[8px] gap-y-[4px]">
+					<h3 class="m-0 text-[14px] font-semibold">{!summaryEnabled ? "Latest check" : goal.phase === "met" ? "How it ended" : "Where it stands"}</h3>
+					<span data-testid="goal-details-summary-label" class="inline-flex items-center gap-[5px] font-mono text-[10.5px] text-text-dimmer">
+						{#if !summaryEnabled}{latestCheck ? goalClock(latestCheck.at) : ""}
+						{:else if summaryLoading}<Icon name="loader-circle" size={11} class="motion-safe:animate-spin" />{summary ? `Updating · ${newCheckCount} new checks` : `Summarising ${detailsGoal.iterations} checks`}
+						{:else if summaryFailed}Couldn't summarise · <Button variant="ghost" size="content" tone="accent" touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-retry" onclick={updateGoalSummary}>Retry</Button>
+						{:else if !summary || summary.stale}<Button variant="ghost" size="content" tone="accent" touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-update" onclick={updateGoalSummary}>{newCheckCount > 1 ? `${newCheckCount} new checks` : "New check"} · Update</Button>
+						{:else if summary}Summary · {goalClock(summary.generatedAt)}{newCheckCount > 0 ? " · still current" : ""}{/if}
+					</span>
+				</div>
+				{#if summaryEnabled && summaryLoading && !summary}
+					<div data-testid="goal-details-summary-skeleton" aria-hidden="true" class="flex flex-col gap-[8px] py-[3px] motion-safe:animate-pulse"><div class="h-[11px] w-[96%] rounded-full bg-chip"></div><div class="h-[11px] w-[88%] rounded-full bg-chip"></div><div class="h-[11px] w-[58%] rounded-full bg-chip"></div></div>
+				{:else}
+					<p data-testid="goal-details-summary-body" class="m-0 whitespace-pre-wrap text-[13px] leading-[1.5] {summaryEnabled && summaryLoading ? 'text-text-dimmer' : 'text-text-secondary'}">{summaryEnabled && summary ? summary.text : latestCheck?.reason ?? detailsGoal.lastReason ?? ""}</p>
+				{/if}
+			{:else if detailsLoading && !details}<p class="m-0 text-text-muted">Loading goal details…</p>{/if}
+		</div>
+		{#if detailsFailed}<p role="status" class="mt-[8px] mb-0 text-error">{detailsFailed}</p>{/if}
+		<div class="mt-[10px] flex items-center justify-between gap-[8px] text-[12px] text-text-dimmer">
+			<span data-testid="goal-details-foot" class="inline-flex items-center gap-[5px]">
+				{#if goal.phase === "checking"}<Icon name="loader-circle" size={12} class="motion-safe:animate-spin text-status-goal" /><span class="text-status-goal">Checking{details?.turnCount != null ? ` after turn ${details.turnCount}` : ""}</span>
+				{:else}{detailsGoal.iterations} checks · {#if goal.phase === "paused"}paused {goalClock(latestCheck?.at ?? detailsGoal.setAt)}{:else if goal.phase === "met"}met {goalClock(details?.metAt ?? goalFacts.endedAt ?? detailsGoal.setAt)}{:else}{goalDuration(sessionState.now - (details?.setAt ?? detailsGoal.setAt), true)}{/if}{/if}
+			</span>
+			<Button variant="ghost" size="content" tone="accent" touchTarget={sessionViewState.compact ? "always" : true} aria-expanded={historyOpen} aria-controls="goal-details-history" data-testid="goal-details-history-toggle" onclick={() => { historyOpen = !historyOpen; }}>History {historyOpen ? "⌄" : "›"}</Button>
+		</div>
+		{#if historyOpen}
+		<ol id="goal-details-history" data-testid="goal-details-history" class="mt-[10px] mb-0 flex list-none flex-col gap-[5px] p-0">
 			{#if goal.phase === "checking"}
 				<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="loader-circle" size={13} class="mt-[2px] motion-safe:animate-spin text-status-goal" /><span><b>Checking</b>{details?.turnCount != null ? ` · after turn ${details.turnCount}` : ""}</span><time class="text-text-dimmer">now</time></li>
 			{:else if goalFacts.ended === "met"}
@@ -410,15 +508,16 @@
 		{:else if !details?.checks.length && goal.phase !== "checking" && goal.phase !== "met"}
 			<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when Claude finishes a turn.</span></li>
 		{/if}
-	</ol>
-	<div class="flex gap-[6px] {sessionViewState.compact ? 'mt-[8px]' : 'mt-[12px] px-[8px]'} pb-[4px]">
+		</ol>
+		{/if}
+	<div class="flex gap-[8px] mt-[16px] pb-[4px]">
 		{#if goalFacts.goal}
-			<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon={goal.phase === "paused" ? "play" : "pause"} iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid={goal.phase === "paused" ? "goal-details-resume" : "goal-details-pause"} onclick={() => runGoalAction(goal.phase === "paused" ? "resume" : "pause")}>{goal.phase === "paused" ? "Resume" : "Pause"}</Button>
+			<Button variant={stuck || goal.phase === "paused" ? "primary" : "chip"} size={sessionViewState.compact ? "phone-card-action" : "card-action"} icon={goal.phase === "paused" ? "play" : "pause"} iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid={goal.phase === "paused" ? "goal-details-resume" : "goal-details-pause"} onclick={() => runGoalAction(goal.phase === "paused" ? "resume" : "pause")}>{goal.phase === "paused" ? "Resume" : "Pause"}</Button>
 			<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon="pencil" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-edit" onclick={() => runGoalAction("edit")}>Edit</Button>
 			<Button variant="danger-soft" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="error" touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-clear" onclick={() => runGoalAction("clear")}>Clear goal</Button>
 		{:else if goalFacts.ended === "met"}
-			<Button variant="secondary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-new" onclick={() => runGoalAction("new")}>Set a new goal</Button>
-			<Button variant="secondary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="error" touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-dismiss" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); closeGoalDetails(); }}>Dismiss</Button>
+			<Button variant="primary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-new" onclick={() => runGoalAction("new")}>Set a new goal</Button>
+			<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-dismiss" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); closeGoalDetails(); }}>Dismiss</Button>
 		{/if}
 	</div>
 	{/if}
@@ -426,7 +525,7 @@
 
 {#snippet goalLine(props: Record<string, unknown> = {})}
 	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[1px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }} {...props}>
-		<Icon name={goal.phase === "met" ? "circle-check" : goal.icon === "spinner" ? "loader-circle" : goal.icon} size={12} class="shrink-0 {goal.icon === 'spinner' ? 'motion-safe:animate-spin' : ''}" />
+		<Icon name={goalIcon} size={12} class="shrink-0 {goalIcon === 'loader-circle' ? 'motion-safe:animate-spin' : ''}" />
 		<b class="shrink-0 font-medium">{desktopGoalLabel}</b>{" "}<span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
 	</Button>
 {/snippet}
@@ -662,7 +761,7 @@
 	{/if}
 
 	{#if goalDetails.open && detailsGoal && goalFacts && !sessionViewState.compact}
-		<Surface id="goal-details" data-testid="goal-details" variant="floating" radius="none" elevation="popover" role="region" aria-label="Goal details" class="z-[var(--z-popover)] whitespace-normal text-[12px] absolute top-full left-[20px] mt-[8px] max-h-[70dvh] w-[380px] max-w-[calc(100%-40px)] overflow-y-auto rounded-[16px] p-[6px]">
+		<Surface id="goal-details" data-testid="goal-details" variant="floating" radius="none" elevation="popover" role="region" aria-label="Goal details" class="z-[var(--z-popover)] whitespace-normal text-[12px] absolute top-full left-[20px] mt-[8px] max-h-[70dvh] w-[380px] max-w-[calc(100%-40px)] overflow-y-auto rounded-[16px] px-[16px] pt-[14px] pb-[12px]">
 			{@render goalContent()}
 		</Surface>
 	{/if}

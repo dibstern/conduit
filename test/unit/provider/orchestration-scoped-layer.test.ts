@@ -14,9 +14,9 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
-import { makeOrchestrationRuntimeLayer } from "../../../src/lib/provider/orchestration-wiring.js";
 import { RunnerProviderInstance } from "../../../src/lib/provider/runner/runner-provider-instance.js";
 import { makeOpenCodeInstancesStub } from "../../helpers/mock-factories.js";
+import { makeTestOrchestrationRuntimeLayer as makeOrchestrationRuntimeLayer } from "../../helpers/provider-adapters.js";
 
 function makeStubClient(): OpenCodeAPI {
 	return {
@@ -41,7 +41,7 @@ describe("orchestration scoped layer", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("shuts down registered instances when the runtime is disposed", async () => {
+	it("keeps borrowed adapters alive until their owner runtime is disposed", async () => {
 		const opencodeShutdown = vi
 			.spyOn(OpenCodeProviderInstance.prototype, "shutdownEffect")
 			.mockReturnValue(Effect.void);
@@ -70,7 +70,8 @@ describe("orchestration scoped layer", () => {
 						Layer.succeed(OpenCodeAPITag)(openCodeApi),
 						Layer.succeed(SessionWorkspaceTag)({
 							get: () => Effect.die("Unexpected workspace lookup"),
-							withLaunch: (effect) => effect,
+							withLaunch: (_sessionId, effect) => effect,
+							withProjectLaunch: (effect) => effect,
 							preview: () => Effect.die("Unexpected workspace preview"),
 							renameBranch: () => Effect.die("Unexpected workspace rename"),
 							move: () => Effect.die("Unexpected workspace move"),
@@ -93,14 +94,17 @@ describe("orchestration scoped layer", () => {
 		try {
 			await runtime.runPromise(
 				Effect.gen(function* () {
-					yield* OrchestrationEngineTag;
+					yield* (yield* OrchestrationEngineTag).shutdownEffect();
 				}),
 			);
+			expect(opencodeShutdown).not.toHaveBeenCalled();
+			expect(runnerShutdown).not.toHaveBeenCalled();
 		} finally {
 			await runtime.dispose();
 		}
 
 		expect(opencodeShutdown).toHaveBeenCalledTimes(1);
-		expect(runnerShutdown).toHaveBeenCalledTimes(2);
+		// Claude, Cursor and Codex each register a runner-backed instance.
+		expect(runnerShutdown).toHaveBeenCalledTimes(3);
 	});
 });

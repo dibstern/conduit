@@ -11,7 +11,7 @@ test("hold menu native touch capture, scroll, sheet dismissal and selection", as
 	await page.goto(
 		`http://localhost:${port}/iframe.html?id=ui-holdmenu--device-probe&viewMode=story`,
 	);
-	const sheet = page.getByRole("menu", {
+	const sheet = page.getByRole("dialog", {
 		name: "Session actions",
 		exact: true,
 	});
@@ -171,7 +171,7 @@ test("hold menu keeps bits-ui keyboard navigation and reduced-motion mouse follo
 	await expect(list.getByRole("menuitem", { name: /In 1 hour/ })).toBeFocused();
 	await page.keyboard.press("Escape");
 	await expect(list).toBeHidden();
-	const sheet = page.getByRole("menu", {
+	const sheet = page.getByRole("dialog", {
 		name: "Session actions",
 		exact: true,
 	});

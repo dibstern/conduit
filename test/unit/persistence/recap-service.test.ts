@@ -4,6 +4,7 @@ import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
 import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js";
 import type { MessageSurfacingStatus } from "../../../src/lib/contracts/message-surfacing.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { CategorySet } from "../../../src/lib/domain/daemon/Services/category-set.js";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/domain/daemon/Services/claude-one-shot.js";
 import { MessageSurfacingSettings } from "../../../src/lib/domain/daemon/Services/message-surfacing-settings.js";
@@ -20,6 +21,7 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
+	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
 } from "../../helpers/mock-factories.js";
@@ -67,6 +69,7 @@ const layer = (
 		};
 	});
 	const deps = Layer.mergeAll(
+		Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 		makePersistenceEffectLayer(":memory:", "test-project"),
 		SessionEventBusLive,
 		Layer.succeed(

@@ -33,6 +33,7 @@ import {
 } from "../../session/claude-worktree-state.js";
 import type { SessionSkillMessage } from "../../session/session-skills.js";
 import {
+	GoalStuckSchema,
 	type SessionAttention,
 	type SessionInfo,
 	SessionPermissionModeSchema,
@@ -284,6 +285,13 @@ export const sessionRowsToSessionInfoList = (
 					)
 				: undefined,
 			...(row.goal_state ? { goalState: sessionGoalState(row) } : {}),
+			...(row.goal_stuck
+				? {
+						goalStuck: Schema.decodeUnknownSync(
+							Schema.fromJsonString(GoalStuckSchema),
+						)(row.goal_stuck),
+					}
+				: {}),
 			...(isSessionPermissionMode(row.permission_mode)
 				? { permissionMode: row.permission_mode }
 				: {}),
@@ -338,6 +346,7 @@ export const sessionRowsToSessionInfoList = (
 			...(row.auto_settle_disabled_at != null
 				? { autoSettleDisabled: true }
 				: {}),
+			...(row.jev != null ? { jev: row.jev } : {}),
 			...(row.pinned_at !== null ? { pinnedAt: row.pinned_at } : {}),
 			...deriveSessionSnooze(row, opts.now),
 			attention,
@@ -782,8 +791,8 @@ export interface ReadQueryEffect {
 	/**
 	 * The session's inbox facts, computed on read. A queue is paused while
 	 * inputs wait behind a turn stopped or failed since the latest handoff,
-	 * or behind a usage limit's open cut-off; the next handoff, or the
-	 * cut-off's reply or dismissal, un-pauses it. `version` is the session row's, which
+	 * or behind a Limit Recovery. A Resume lifts a hold admitted after the
+	 * latest Stop; a later Stop still wins. `version` is the session row's, which
 	 * every turn end, prompt and pending-input write stamps. Undefined for a
 	 * session that has never held an input, which has no queue to pause and no
 	 * turn to steer into.
@@ -987,13 +996,15 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		yield* Effect.serviceOption(SessionWorkspaceHintStateTag),
 	);
 	// A prompt queued behind a running turn starts working when that turn
-	// ends, not when it was sent: waiting in the queue is not work.
+	// ends, not when it was sent: waiting in the queue is not work. A steer
+	// joins the running turn and settles with it, so it starts when sent.
 	const turnMetadataColumns = sql`
 		CASE WHEN (SELECT provider FROM sessions WHERE id = messages.session_id) = 'claude'
 			THEN turns.cost ELSE NULL END AS turn_cost,
-		MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p
-			WHERE p.session_id = t.session_id AND p.requested_at < t.requested_at), 0)
-		) AS turn_started_at,
+		CASE WHEN messages.steered = 1 THEN t.requested_at
+			ELSE MAX(t.requested_at, COALESCE((SELECT MAX(p.completed_at) FROM turns p
+				WHERE p.session_id = t.session_id AND p.requested_at < t.requested_at), 0))
+		END AS turn_started_at,
 		t.completed_at AS turn_completed_at,
 		(SELECT json_group_array(json_object(
 			'id', pa.id, 'from', pa.created_at, 'to', pa.resolved_at
@@ -1001,6 +1012,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		FROM (
 			SELECT id, created_at, resolved_at FROM pending_approvals
 			WHERE session_id = t.session_id
+				AND (type <> 'question' OR COALESCE(json_extract(details, '$.delivery'), '') <> 'async')
 				AND created_at >= t.requested_at
 				AND (t.completed_at IS NULL OR created_at <= t.completed_at)
 			ORDER BY created_at ASC, id ASC
@@ -1414,6 +1426,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				SELECT session_id, type, COUNT(*) AS pending_count
 				FROM pending_approvals
 				WHERE status = 'pending'
+					AND (type <> 'question' OR COALESCE(json_extract(details, '$.delivery'), '') <> 'async')
 					AND session_id IN (SELECT id FROM sessions WHERE project_id IN ${sql.in(projectIds)})
 				GROUP BY session_id, type`;
 		}).pipe(
@@ -2096,6 +2109,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						SELECT session_id, type, COUNT(*) AS pending_count
 						FROM pending_approvals
 						WHERE status = 'pending'
+							AND (type <> 'question' OR COALESCE(json_extract(details, '$.delivery'), '') <> 'async')
 							AND session_id IN (SELECT value FROM json_each(${JSON.stringify(family.map((row) => row.id))}))
 						GROUP BY session_id, type`;
 					const pending = pendingApprovalCountsByType(approvals);
@@ -2420,10 +2434,37 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			SELECT version, provider,
 				EXISTS (SELECT 1 FROM pending_inputs
 					WHERE session_id = ${sessionId} AND state = 'queued')
-				AND ((SELECT stopped FROM latest_run)
-					OR json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL) AS paused,
+				AND (((SELECT stopped FROM latest_run) AND NOT EXISTS (
+					SELECT 1 FROM events admitted JOIN events resumed
+						ON resumed.session_id = admitted.session_id
+					WHERE admitted.session_id = ${sessionId} AND admitted.type = 'input.admitted'
+						AND resumed.type = 'session.resumed'
+						AND resumed.sequence > admitted.sequence
+						AND admitted.sequence > COALESCE((SELECT MAX(sequence) FROM events
+							WHERE session_id = ${sessionId}
+							AND type IN ('turn.interrupted', 'turn.error')), 0)
+						AND resumed.sequence > COALESCE((SELECT MAX(requeued.sequence) FROM events requeued
+							WHERE requeued.session_id = ${sessionId} AND requeued.type = 'input.requeued'
+								AND json_extract(requeued.data, '$.reason') = 'failed'
+								AND requeued.sequence = (SELECT MIN(first.sequence) FROM events first
+									WHERE first.session_id = ${sessionId} AND first.type = 'input.requeued'
+									AND json_extract(first.data, '$.sentSequence') = json_extract(requeued.data, '$.sentSequence'))
+								AND json_extract(requeued.data, '$.sentSequence') = (SELECT MAX(sent.sequence) FROM events sent
+									WHERE sent.session_id = ${sessionId} AND sent.type = 'input.sent'
+									AND json_extract(sent.data, '$.inputId') = json_extract(requeued.data, '$.inputId'))
+								AND requeued.sequence > COALESCE((SELECT MAX(sequence) FROM events
+									WHERE session_id = ${sessionId} AND (type = 'input.sent'
+										OR (type = 'session.resume_cancelled'
+											AND json_extract(metadata, '$.source') = 'inbox-reset'))), 0)), 0)))
+					OR json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
+					OR (NOT json_extract(limit_recovery, '$.continued')
+						AND COALESCE((SELECT MAX(sequence) FROM events
+							WHERE session_id = ${sessionId} AND type = 'session.resume_scheduled'), 0)
+							> COALESCE((SELECT MAX(sequence) FROM events
+								WHERE session_id = ${sessionId} AND type = 'session.cut_off_dismissed'), 0))) AS paused,
 				EXISTS (SELECT 1 FROM pending_approvals
-					WHERE session_id = ${sessionId} AND status = 'pending') AS prompt_open
+					WHERE session_id = ${sessionId} AND status = 'pending'
+						AND (type <> 'question' OR COALESCE(json_extract(details, '$.delivery'), '') <> 'async')) AS prompt_open
 			FROM sessions WHERE id = ${sessionId}
 				AND EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${sessionId})`.pipe(
 			Effect.map(([row]) =>

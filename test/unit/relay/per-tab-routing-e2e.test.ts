@@ -1,3 +1,4 @@
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 // E2E: Per-Tab Session Routing (Mock OpenCode)
 // Spins up a mock OpenCode HTTP+SSE server and a real relay stack, then connects
 // RPC clients to verify SSE events reach session-detail subscribers.
@@ -20,10 +21,7 @@ import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/op
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
-import {
-	createProjectRelay,
-	type ProjectRelay,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 
 // Minimal HTTP server impersonating OpenCode's REST + SSE endpoints.

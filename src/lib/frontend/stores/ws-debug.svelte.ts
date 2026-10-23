@@ -30,6 +30,7 @@ let _lastTransitionTime = Date.now();
 let _messageCount = 0;
 
 export const wsDebugState = $state({
+	panelOpen: false,
 	/** Monotonic revision counter — triggers reactivity for the panel.
 	 *  Increments on every push (unlike array length which plateaus at MAX_EVENTS). */
 	eventCount: 0,

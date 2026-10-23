@@ -3,7 +3,7 @@
 // Instances are execution-only — they don't own sessions, messages, or history.
 // Conduit owns all state. Instances turn prompts into event streams.
 
-import type { Effect, Scope, Stream } from "effect";
+import type { Effect, Scope } from "effect";
 import type { Account } from "../contracts/account.js";
 import type { ProviderSessionCapabilities } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
@@ -49,16 +49,36 @@ export interface PermissionResponse {
 	readonly permissionUpdates?: readonly ProviderPermissionUpdate[];
 }
 
+/** Stable identity and answer data for a committed provider control. */
+export interface ProviderControlContext {
+	readonly commandId: string;
+	readonly providerProcessId: string;
+	/** Conditional End for the original Stop cohort only. */
+	readonly retireRunIds?: readonly string[];
+	readonly response?: PermissionResponse;
+	readonly operation?: "reply" | "reject";
+}
+
+export type ProviderControlCommandStatus =
+	| "not_received"
+	| "running"
+	| "completed"
+	| "failed"
+	| "gone";
+
 export interface QuestionRequest {
 	readonly requestId: string;
 	readonly runId?: string;
 	readonly toolUseId?: string;
+	readonly delivery?: "async";
 	readonly questions: Array<{
 		question: string;
 		header: string;
 		options: Array<{ label: string; description: string }>;
 		multiSelect?: boolean;
 		custom?: boolean;
+		isOther?: boolean;
+		isSecret?: boolean;
 	}>;
 }
 
@@ -89,6 +109,11 @@ export interface EventSink {
 	resolveQuestion(
 		requestId: string,
 		answers: Record<string, unknown>,
+	): Effect.Effect<void, EventSinkError>;
+	/** Clear a provider-withdrawn request even when recovery restored no waiter. */
+	withdrawInteraction?(
+		requestId: string,
+		kind: "permission" | "question",
 	): Effect.Effect<void, EventSinkError>;
 	cancelSessionInteractions?(
 		reason: string,
@@ -130,7 +155,11 @@ export interface TurnTokens {
 }
 
 export type TurnErrorCode =
+	| "turn_unprepared"
 	| "auth_required"
+	| "usage_limited"
+	| "context_overflow"
+	| "codex_thread_missing"
 	| "agent_busy"
 	| "rate_limited"
 	| "model_unavailable"
@@ -138,6 +167,7 @@ export type TurnErrorCode =
 	| "sandbox_unavailable"
 	| "send_failed"
 	| "provider_error"
+	| "provider_unavailable"
 	| "interrupted"
 	| "timeout"
 	| "unknown";
@@ -211,7 +241,19 @@ export interface HistoryMessage {
 	readonly time?: unknown;
 }
 
-export interface SendTurnInput {
+/** The owning project resolves this immutable launch context above adapters. */
+export interface ProviderCall {
+	readonly projectId: string;
+	readonly sessionId: string;
+	readonly account: Account;
+	readonly workspaceRoot: string;
+	readonly extraFolders: readonly string[];
+	readonly shellEnv: Readonly<Record<string, string | undefined>>;
+}
+
+export interface SendTurnInput
+	extends Pick<ProviderCall, "sessionId" | "workspaceRoot" | "extraFolders">,
+		Partial<Pick<ProviderCall, "projectId" | "shellEnv">> {
 	/** Durable run reservation created by the send_turn outbox transaction. */
 	readonly runId?: string;
 	/** Durable acknowledgement of this reservation's intake or pre-intake end. */
@@ -224,7 +266,6 @@ export interface SendTurnInput {
 	readonly continuation?: { readonly cutOffMessageId: string };
 	/** The claimed outbox attempt; retries advance it, restart replay preserves it. */
 	readonly commandAttempt?: number;
-	readonly sessionId: string;
 	readonly prompt: string;
 	/** Kept ahead of Claude's context handoff without changing the displayed user text. */
 	readonly workspaceMoveDirective?: string;
@@ -260,14 +301,16 @@ export interface SendTurnInput {
 	 * runtime rejects direct model-less dispatches.
 	 */
 	readonly model?: ModelSelection;
-	readonly workspaceRoot: string;
-	readonly extraFolders: readonly string[];
 	readonly configDir?: ClaudeConfigDir | undefined;
+	/** Claude model expectation resolved in its account scope; null means unknown. */
+	readonly expectedApiModelId?: string | null;
 	readonly folderSource?: ClaudeLaunchConfig["folderSource"] | undefined;
 	/** Projected Claude goal facts and cumulative usage seed a reopened SDK query. */
 	readonly goalState?: SessionGoalChangedPayload;
 	readonly cumulativeTokens?: number;
 	readonly eventSink: EventSink;
+	/** Config snapshot admitted with the durable turn, including disabled idle exit. */
+	readonly autoSettleAfterDays?: number | null | undefined;
 	readonly abortSignal: AbortSignal;
 	readonly permissionMode?: SessionPermissionMode;
 	/** Session rules enforce the Side Thread's mode. */
@@ -283,6 +326,8 @@ export interface SendTurnInput {
 export type PreWarmSessionInput = Pick<
 	SendTurnInput,
 	| "sessionId"
+	| "projectId"
+	| "shellEnv"
 	| "workspaceRoot"
 	| "extraFolders"
 	| "providerState"
@@ -295,6 +340,7 @@ export type PreWarmSessionInput = Pick<
 	| "clearInheritedGoal"
 	| "model"
 	| "configDir"
+	| "expectedApiModelId"
 	| "folderSource"
 	| "permissionMode"
 	| "sideThread"
@@ -350,12 +396,6 @@ export interface ProviderNativeSession {
 	readonly resumeSessionId?: string | undefined;
 }
 
-export interface InputAdmission {
-	readonly isHeld: (sessionId: string) => boolean;
-	readonly changes: Effect.Effect<Stream.Stream<string>, never, Scope.Scope>;
-	readonly afterStop?: (sessionId: string) => Effect.Effect<void>;
-}
-
 /**
  * ProviderInstance -- the contract for provider execution.
  *
@@ -369,8 +409,17 @@ export interface InputAdmission {
  * - No streamEvents -- instance pushes via EventSink, no output stream needed
  */
 export interface ProviderInstance {
-	/** A retained runner must upgrade before accepting another input. */
-	readonly inputAdmission?: InputAdmission | undefined;
+	/** Liveness includes quarantined runners that cannot accept controls. */
+	readonly hasLiveProcessEffect?: (sessionId: string) => Effect.Effect<boolean>;
+	/** Process identity captured without starting work; refuses unavailable sessions. */
+	readonly getControlProcessIdEffect?: (
+		sessionId: string,
+	) => Effect.Effect<string | undefined, ProviderInstanceFailure>;
+	/** Reconcile a committed command on its original process without starting work. */
+	readonly getControlCommandStatusEffect?: (
+		sessionId: string,
+		control: ProviderControlContext,
+	) => Effect.Effect<ProviderControlCommandStatus, ProviderInstanceFailure>;
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 	/** Native identity used for a locally placed input before provider acceptance. */
@@ -381,6 +430,7 @@ export interface ProviderInstance {
 		workspaceRoot?: string,
 		account?: Account,
 		options?: { readonly refresh?: boolean },
+		call?: ProviderCall,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
 
 	/**
@@ -418,12 +468,15 @@ export interface ProviderInstance {
 	interruptTurnEffect(
 		sessionId: string,
 		turnIds?: readonly string[],
+		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Stop a background task while leaving the query and its input queue live. */
 	readonly stopTaskEffect?: (
 		sessionId: string,
 		taskId: string,
+		call?: ProviderCall,
 	) => Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Resolve a pending permission request (from EventSink.requestPermission) */
@@ -432,6 +485,8 @@ export interface ProviderInstance {
 		requestId: string,
 		decision: PermissionDecision,
 		providerProcessId?: string,
+		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Resolve a pending question (from EventSink.requestQuestion) */
@@ -439,6 +494,8 @@ export interface ProviderInstance {
 		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
+		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
 	/**
@@ -452,12 +509,14 @@ export interface ProviderInstance {
 			readonly contextWindow?: string | undefined;
 			readonly variant?: string | undefined;
 		},
+		call?: ProviderCall,
 	) => Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Update a live provider query's classifier mode when supported. */
 	readonly setPermissionModeEffect?: (
 		sessionId: string,
 		mode: SessionPermissionMode,
+		call?: ProviderCall,
 	) => Effect.Effect<void, ProviderInstanceFailure>;
 
 	/** Graceful shutdown -- clean up connections, abort pending turns */
@@ -471,6 +530,8 @@ export interface ProviderInstance {
 	 */
 	endSessionEffect(
 		sessionId: string,
+		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 }
 

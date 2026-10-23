@@ -118,6 +118,10 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 			projectLimit(world.page, {
 				instanceId: "claude",
 				rateLimitType: "five_hour",
+				limitedAt:
+					(snapshot(world.page).find(
+						(reading) => reading.accountId === "claude",
+					)?.readAt ?? 0) - 1,
 				rearms: 0,
 				continued: false,
 				scheduledAt,
@@ -147,6 +151,10 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 						projectLimit(world.page, {
 							instanceId: row?.accountId ?? "",
 							rateLimitType: "five_hour",
+							limitedAt:
+								(snapshot(world.page).find(
+									(reading) => reading.accountId === row?.accountId,
+								)?.readAt ?? 0) - 1,
 							rearms: 0,
 							continued: false,
 							scheduledAt: Date.parse(resetsAt) / 1000,
@@ -171,26 +179,15 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "send at reset through the unchanged click or keyboard path",
+		name: "commit the reset choice through the button or keyboard",
 		match:
-			/^I send the reset-bound message with (the button|the keyboard|the reset menu row|the open reset menu row|the keyboard menu)$/,
+			/^I send the reset-bound message with (the button|the keyboard|the shortcut)$/,
 		run: async ({ world, match }) => {
 			const input = world.page.locator("#input");
 			const text = await input.inputValue();
 			if (match[1] === "the keyboard") await input.press("Enter");
-			else if (match[1] === "the reset menu row") {
-				await world.page.getByTestId("composer-send-menu-trigger").click();
-				await world.page.getByTestId("composer-send-menu-reset").click();
-			} else if (match[1] === "the open reset menu row") {
-				await world.page.getByTestId("composer-send-menu-reset").click();
-			} else if (match[1] === "the keyboard menu") {
-				const trigger = world.page.getByTestId("composer-send-menu-trigger");
-				await trigger.focus();
-				await trigger.press("ArrowDown");
-				const reset = world.page.getByTestId("composer-send-menu-reset");
-				await expect(reset).toBeFocused();
-				await reset.press("Enter");
-			} else await world.page.locator("#send").click();
+			else if (match[1] === "the shortcut") await input.press("Meta+Enter");
+			else await world.page.locator("#send").click();
 			const rpc = requireRpcControl(world.page);
 			await rpc.waitForRequest(
 				(request) =>
@@ -205,6 +202,86 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 					.filter((request) => request.tag === "ContinueSession"),
 			).toHaveLength(0);
 			await expect(input).toHaveValue("");
+		},
+	},
+	{
+		name: "select the reset mode without sending",
+		match: /^I choose Send at reset with (the pointer|the keyboard)$/,
+		run: async ({ world, match }) => {
+			const reset = world.page.getByTestId("composer-send-menu-reset");
+			if (match[1] === "the keyboard") {
+				await reset.focus();
+				await reset.press("Enter");
+			} else await reset.click();
+			await expect(world.page.getByTestId("composer-send-menu")).toHaveCount(0);
+		},
+	},
+	{
+		name: "dismiss the send menu without changing the choice",
+		match: /^I dismiss the composer send menu$/,
+		run: async ({ world }) => {
+			await world.page.keyboard.press("Escape");
+			await expect(world.page.getByTestId("composer-send-menu")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert the effective send label",
+		match: /^the composer commit button announces (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.locator("#send")).toHaveAccessibleName(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "assert selection has sent no input or account switch",
+		match: /^the composer has sent no message or account switch$/,
+		run: ({ world }) => {
+			expect(
+				requireRpcControl(world.page)
+					.getRequests()
+					.filter(
+						(request) =>
+							request.tag === "input.submit" ||
+							request.tag === "ContinueSession",
+					),
+			).toHaveLength(0);
+		},
+	},
+	{
+		name: "open a session to check its composer send choice",
+		match: /^I open send-menu session (\S+)$/,
+		run: async ({ world, match }) => {
+			const sessionId = match[1] ?? "";
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				accountId: "claude",
+			});
+			await world.page
+				.locator(
+					`#session-list [data-session-id="${sessionId}"] .session-item-title`,
+				)
+				.click({ position: { x: 8, y: 6 } });
+			await expect(world.page).toHaveURL(
+				new RegExp(`/s/${sessionId}(?:\\?|$)`),
+			);
+			await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "ViewSession" &&
+					request.payload["sessionId"] === sessionId,
+			);
+			await expect(world.page.locator("#input")).toBeVisible();
+		},
+	},
+	{
+		name: "assert shortcut delivery keeps its queue or steer meaning",
+		match: /^the composer commits (.+) as (queue|steer)$/,
+		run: async ({ world, match }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "input.submit" &&
+					request.payload["text"] === match[1],
+			);
+			expect(request.payload["delivery"]).toBe(match[2]);
 		},
 	},
 	{
@@ -249,8 +326,8 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the selected reset choice and account name come first",
-		match: /^the send menu starts with selected (.+) on (.+)$/,
+		name: "assert the reset choice and its selection state come first",
+		match: /^the send menu starts with (selected|unselected) (.+) on (.+)$/,
 		run: async ({ world, match }) => {
 			const menu = world.page.getByTestId("composer-send-menu");
 			const reset = menu.getByRole("menuitem").first();
@@ -258,15 +335,17 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 				"data-testid",
 				"composer-send-menu-reset",
 			);
-			await expect(reset).toHaveAttribute("data-selected", "true");
-			await expect(reset).toHaveCSS(
-				"background-color",
-				await themeColour(world.page, "--color-border-chip"),
-			);
+			if (match[1] === "selected") {
+				await expect(reset).toHaveAttribute("data-selected", "true");
+				await expect(reset).toHaveCSS(
+					"background-color",
+					await themeColour(world.page, "--color-border-chip"),
+				);
+			} else await expect(reset).not.toHaveAttribute("data-selected", "true");
 			await expect(
-				reset.getByText(match[1] ?? "", { exact: true }),
+				reset.getByText(match[2] ?? "", { exact: true }),
 			).toBeVisible();
-			await expect(reset.getByText(match[2] ?? "", { exact: true })).toHaveCSS(
+			await expect(reset.getByText(match[3] ?? "", { exact: true })).toHaveCSS(
 				"color",
 				await themeColour(world.page, "--color-text-dimmer"),
 			);
@@ -274,6 +353,29 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 				"color",
 				await themeColour(world.page, "--color-status-red"),
 			);
+		},
+	},
+	{
+		name: "assert the selected account row",
+		match: /^the send menu selects account (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.getByTestId("composer-send-menu-account")
+					.and(world.page.locator(`[data-account="${match[1]}"]`)),
+			).toHaveAttribute("data-selected", "true");
+		},
+	},
+	{
+		name: "assert the current-account override is absent",
+		match: /^the send menu has no Send now on this account option$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByRole("menuitem", {
+					name: "Send now on this account",
+					exact: true,
+				}),
+			).toHaveCount(0);
 		},
 	},
 	{
@@ -310,6 +412,52 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 				"color",
 				await themeColour(world.page, "--color-text-dimmer"),
 			);
+		},
+	},
+	{
+		name: "assert an account's unknown Usage Reading label",
+		match:
+			/^send menu account (\S+) offers Send now on (.+) with usage unknown$/,
+		run: async ({ world, match }) => {
+			const row = world.page
+				.getByTestId("composer-send-menu-account")
+				.and(world.page.locator(`[data-account="${match[1]}"]`));
+			await expect(
+				row.getByText(`Send now on ${match[2]}`, { exact: true }),
+			).toBeVisible();
+			await expect(row.getByText("usage unknown", { exact: true })).toHaveCSS(
+				"color",
+				await themeColour(world.page, "--color-text-dimmer"),
+			);
+		},
+	},
+	{
+		name: "publish a stale Usage Reading through the shared mock feed",
+		match: /^the mock usage reading for (\S+) becomes stale$/,
+		run: ({ world, match }) => {
+			const readings = snapshot(world.page).map((reading) =>
+				reading.accountId === match[1] ? { ...reading, stale: true } : reading,
+			);
+			const rpc = requireRpcControl(world.page);
+			rpc.setUsageReadings(readings);
+			rpc.setStubs({ QuotaForAccounts: () => readings });
+		},
+	},
+	{
+		name: "project a composer's Limit Recovery beside its Usage Reading",
+		match:
+			/^the session has a Limit Recovery recorded at (\S+) resetting at (\S+)$/,
+		run: ({ world, match }) => {
+			projectLimit(world.page, {
+				instanceId: "claude",
+				rateLimitType: "five_hour",
+				...(match[1] === "unknown"
+					? {}
+					: { limitedAt: Date.parse(match[1] ?? "") }),
+				resetsAt: Date.parse(match[2] ?? "") / 1000,
+				rearms: 0,
+				continued: false,
+			});
 		},
 	},
 	{
@@ -396,7 +544,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 				QuotaForAccounts: () =>
 					readings.map((reading) =>
 						reading.accountId === "blocked"
-							? { ...reading, status: "limited" }
+							? accountReading("blocked", "Pro", [100, 9], now)
 							: reading,
 					),
 			});
@@ -415,6 +563,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 					)
 						throw new Error("Incomplete send-menu switch");
 					setSessionRowStatus(world.page, sessionId, "idle", {
+						accountId: instanceId,
 						limitRecovery: null,
 						resumes: [
 							{
@@ -431,24 +580,25 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "choose a send-now account without a confirmation dialog",
+		name: "select a send-now account without sending",
 		match: /^I choose Send now on (\S+)$/,
 		run: async ({ world, match }) => {
 			await world.page
 				.getByTestId("composer-send-menu-account")
 				.and(world.page.locator(`[data-account="${match[1]}"]`))
 				.click();
+			await expect(world.page.getByTestId("composer-send-menu")).toHaveCount(0);
 		},
 	},
 	{
-		name: "send through the button's auto-switch mode",
+		name: "commit the account choice through the button or keyboard",
 		match:
 			/^I send the switch-bound message with (the button|the keyboard|the shortcut)$/,
 		run: async ({ world, match }) => {
 			if (match[1] === "the keyboard")
 				await world.page.locator("#input").press("Enter");
 			else if (match[1] === "the shortcut")
-				await world.page.locator("#input").press("Control+Enter");
+				await world.page.locator("#input").press("Meta+Enter");
 			else await world.page.locator("#send").click();
 		},
 	},

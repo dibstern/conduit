@@ -1,16 +1,15 @@
-<!-- The limit strip above the composer while a session's account is at its usage
-     limit. A pure render of the session row's `limitRecovery` plus its recovery
-     actions: no close button, it leaves when the server nulls the field. Once a
-     resume at reset is scheduled it turns amber and counts down to it. The
-     actions sit at the right of the row, on a wrapped second row on phones.
-     With another Claude account to go to, Switch account leads both states. -->
+<!-- Limit Recovery stays visible until a reply clears it or the session switches
+     accounts. The reset action refreshes the account's Usage Reading on the server. -->
 <script lang="ts">
+	import { accountLimit, accountLimitWindowLabel } from "../../../contracts/account-limit.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
+	import { getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { usageState } from "../../stores/usage.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -28,27 +27,37 @@
 	}: { limitRecovery: LimitRecovery; sessionId: string; projectSlug: string; presentation?: "strip" | "tray" } = $props();
 
 	let busy = $state(false);
-	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
 	const accountId = $derived(findSession(sessionId)?.accountId ?? undefined);
+	const claudeAccounts = $derived(getClaudeAccounts(projectSlug, getDriverTraits(getInstanceById(accountId ?? "")?.driver)?.usageHarness === "codex" ? "codex" : "claude"));
 
 	const account = $derived(
 		accountId ? claudeAccounts.nameOf(accountId, accountId) : "Account unavailable",
 	);
-	// Switch account needs another Claude account to go to.
+	// Switch account needs another account of the same provider.
 	const canSwitch = $derived(
 		accountId !== undefined && claudeAccounts.hasAlternative(accountId),
 	);
-	// Phone strips stack full-width actions; the tray keeps them trailing at natural width.
-	const stretch = $derived(sessionViewState.compact && presentation === "strip");
+	// On phones the buttons share a row, with the reset link below them.
+	const stretch = $derived(sessionViewState.compact);
 	const geometry = $derived(stretch ? "flex-1 justify-center" : "");
-	const limitWindow = $derived(
-		limitRecovery.rateLimitType.startsWith("seven_day")
-			? "weekly limit"
-			: limitRecovery.rateLimitType === "five_hour"
-				? "5-hour limit"
-				: "usage limit",
-	);
+	const limitWindow = $derived(accountLimitWindowLabel(limitRecovery.rateLimitType));
+	const reading = $derived(claudeAccounts.readingOf(accountId));
+	const answer = $derived(accountLimit({
+		asker: "automatic",
+		modelId: findSession(sessionId)?.model?.model,
+		...(reading === undefined ? {} : { reading }),
+		recovery: limitRecovery,
+		now: clock.now,
+	}));
 	const scheduledAt = $derived(limitRecovery.continued ? undefined : limitRecovery.scheduledAt);
+	const resetAt = $derived(answer.kind === "wait-until" ? answer.until / 1000 : limitRecovery.resetsAt);
+	const stripState = $derived(
+		!usageState.limits.autoResume && answer.kind === "go" ? "looks_reset"
+		: !limitRecovery.cutOffMessageId ? "held"
+		: scheduledAt !== undefined ? "waiting"
+		: resetAt !== undefined ? "can_resume_at_reset"
+		: "limited",
+	);
 	const resumesAt = $derived(scheduledAt === undefined ? "" : usageForecastTime(scheduledAt * 1000, clock.now));
 	// Worked out on read from the local clock, so it ticks without the server.
 	const countdown = $derived.by(() => {
@@ -60,10 +69,11 @@
 		if (hours > 0) return `in ${hours}h ${minutes}m`;
 		return minutes > 0 ? `in ${minutes}m` : `in ${seconds}s`;
 	});
+	const waitingDetail = $derived(`${sessionViewState.compact ? `${account} · ` : ""}${countdown}${limitRecovery.auto ? " · auto-resume is on" : ""}`);
 	const detail = $derived.by(() => {
-		if (limitRecovery.resetsAt === undefined)
+		if (resetAt === undefined)
 			return "Reset time unavailable";
-		return `Resets at ${usageForecastTime(limitRecovery.resetsAt * 1000, clock.now)}.`;
+		return `Resets at ${usageForecastTime(resetAt * 1000, clock.now)}.`;
 	});
 
 	// Each action is one RPC on the session's own account. A refusal leaves the
@@ -80,12 +90,12 @@
 		}
 	}
 
-	// Without `at` the server re-checks quota and continues now; with it, the
+	// Without `at` the server refreshes Usage and continues now; with it, the
 	// server schedules the resume and the strip turns to its waiting state.
 	async function continueAt(at?: number): Promise<void> {
 		const currentAccountId = accountId;
 		if (!currentAccountId) {
-			showToast("No account is available for this session. Add a Claude account in Settings before continuing.", { variant: "error" });
+			showToast("No account is available for this session. Add an account in Settings before continuing.", { variant: "error" });
 			return;
 		}
 		return run(
@@ -126,48 +136,60 @@
 
 <!-- The copy keeps a readable width; the actions wrap below it before it squeezes. -->
 {#snippet recovery()}
-	{#if scheduledAt === undefined}
+	{#if stripState === "looks_reset"}
+		<Icon name="gauge" size={13} class="shrink-0 text-warning" />
+		<b data-testid="usage-limit-title" class="min-w-[min(100%,16em)] flex-1 font-semibold text-text">Limit looks reset · Continue now</b>
+	{:else if stripState === "held"}
+		<Icon name="timer" size={13} class="shrink-0 text-warning" />
+		<span class="min-w-[min(100%,16em)] flex-1">
+			<b data-testid="usage-limit-title" class="font-semibold text-text">Waiting for {account}'s limit to reset</b>
+			{#if presentation === "strip"}
+				<span data-testid="usage-limit-detail" class="text-text-dimmer"> {detail}</span>
+			{:else if scheduledAt !== undefined}
+				<br />
+				<span data-testid="usage-limit-detail" class="text-text-dimmer">{waitingDetail}</span>
+			{/if}
+		</span>
+	{:else if scheduledAt === undefined}
 		<Icon name="gauge" size={13} class="shrink-0 text-error" />
 		<span class="min-w-[min(100%,16em)] flex-1">
 			<b data-testid="usage-limit-title" class="font-semibold text-text">{presentation === "tray" ? `Waiting for ${account}'s limit to reset` : `${account} hit its ${limitWindow}.`}</b>{" "}
 			{#if presentation === "strip"}<span data-testid="usage-limit-detail" class="text-text-dimmer">{detail}</span>{/if}
 		</span>
-		{#if !limitRecovery.continued}
-			<div class="flex flex-wrap gap-[6px] {stretch ? 'mt-[6px] w-full' : 'ml-auto shrink-0'}">
-				{#if canSwitch && accountId}
-					{@render switchAccount(true, accountId)}
-				{/if}
-				{#if limitRecovery.resetsAt === undefined}
-					<Button variant={canSwitch ? "secondary" : "inverse"} size="composer-chip" touchTarget iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-try-again" class={geometry} onclick={() => continueAt()}>Try again</Button>
-				{:else}
-					<Button variant="secondary" size="composer-chip" touchTarget iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-resume-at-reset" class={geometry} onclick={() => continueAt(limitRecovery.resetsAt)}>Resume at reset</Button>
-				{/if}
-			</div>
-		{/if}
 	{:else}
 		<Icon name="timer" size={13} class="shrink-0 text-warning" />
 		<span class="min-w-[min(100%,16em)] flex-1">
 			<b data-testid="usage-limit-title" class="font-semibold text-text">{presentation === "tray" ? `Waiting for ${account}'s limit to reset` : sessionViewState.compact ? `Resumes ${resumesAt}` : `Resumes on ${account} at ${resumesAt}`}</b><br />
-			<span data-testid="usage-limit-detail" class="text-text-dimmer">{sessionViewState.compact ? `${account} · ${countdown}` : countdown}{limitRecovery.auto ? " · auto-resume is on" : ""}</span>
+			<span data-testid="usage-limit-detail" class="text-text-dimmer">{waitingDetail}</span>
 		</span>
-		<div class="flex flex-wrap gap-[6px] {stretch ? 'mt-[6px] w-full' : 'ml-auto shrink-0'}">
-			{#if canSwitch && accountId}
-				{@render switchAccount(false, accountId)}
-			{/if}
-			<Button variant="ghost" size="composer-chip" touchTarget iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-cancel-resume" class={geometry} onclick={cancelResume}>Cancel auto-resume</Button>
+	{/if}
+	{#if !limitRecovery.continued}
+		<div class="flex flex-wrap items-center gap-[6px] {stretch ? 'mt-[6px] w-full' : 'ml-auto'}">
+			<div class={stretch ? "flex w-full flex-wrap gap-[6px]" : "contents"}>
+				{#if canSwitch && accountId}
+					{@render switchAccount(scheduledAt === undefined && stripState !== "looks_reset", accountId)}
+				{/if}
+				{#if scheduledAt !== undefined}
+					<Button variant="ghost" size="composer-chip" touchTarget iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-cancel-resume" class={geometry} onclick={cancelResume}>Cancel auto-resume</Button>
+				{:else if resetAt !== undefined && stripState !== "looks_reset"}
+					<Button variant="secondary" size="composer-chip" touchTarget iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-resume-at-reset" class={geometry} onclick={() => continueAt(resetAt)}>Resume at reset</Button>
+				{/if}
+				<Button variant="secondary" size="composer-chip" touchTarget iconSize={12} loading={busy} disabled={busy} data-testid="usage-limit-used-reset" class={geometry} onclick={() => continueAt()}>I used a reset</Button>
+			</div>
+			<a href="https://claude.ai/settings/usage" target="_blank" rel="noopener noreferrer" data-testid="usage-limit-reset-link" class="text-[12px] text-text-muted underline underline-offset-2 hover:text-text">Use a reset on Claude ↗</a>
 		</div>
 	{/if}
 {/snippet}
 
 {#if presentation === "tray"}
-	<div data-testid="pending-input-waiting" class="flex min-h-[30px] flex-wrap items-center gap-[8px] px-[6px] text-[12px] text-text-muted">
+	<div data-testid="pending-input-waiting" data-state={stripState} class="flex min-h-[30px] flex-wrap items-center gap-[8px] px-[6px] text-[12px] text-text-muted">
 		{@render recovery()}
 	</div>
 {:else}
 <ComposerStrip
-	tone={scheduledAt === undefined ? "risk" : "ask"}
+	tone={stripState === "looks_reset" || stripState === "waiting" || stripState === "held" ? "ask" : "risk"}
 	data-testid="usage-limit-strip"
-	data-state={scheduledAt === undefined ? "limited" : "waiting"}
+	data-state={stripState}
 	class="flex flex-wrap items-center gap-[8px]"
 >
 	{@render recovery()}

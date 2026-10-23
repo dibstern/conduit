@@ -8,6 +8,12 @@ import {
 	Option,
 	Ref,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
+import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
+import { canonicalEvent } from "../../../persistence/events.js";
+import { enqueueCommittedControlAnswers } from "../../../provider/legacy-control-outbox.js";
 import type { PermissionId } from "../../../shared-types.js";
 import type {
 	FrontendDecision,
@@ -50,6 +56,7 @@ export interface PendingPermissionRequestInput {
 
 export interface PendingQuestionInput {
 	readonly requestId: string;
+	readonly delivery?: "async";
 	readonly providerProcessId?: string;
 	readonly providerRequestId?: string;
 	readonly sessionId: string;
@@ -67,10 +74,14 @@ export interface PendingQuestionItemInput {
 	readonly header?: string;
 	readonly options?: readonly unknown[];
 	readonly multiSelect?: boolean;
+	readonly custom?: boolean | undefined;
+	readonly isOther?: boolean | undefined;
+	readonly isSecret?: boolean | undefined;
 }
 
 export interface PendingQuestion {
 	readonly requestId: string;
+	readonly delivery?: "async";
 	readonly providerProcessId?: string;
 	readonly providerRequestId?: string;
 	readonly sessionId: string;
@@ -88,6 +99,9 @@ export interface PendingQuestionItem {
 	readonly header?: string;
 	readonly options?: readonly unknown[];
 	readonly multiSelect?: boolean;
+	readonly custom?: boolean;
+	readonly isOther?: boolean;
+	readonly isSecret?: boolean;
 }
 
 export interface ResolvedPermissionDecision {
@@ -243,6 +257,7 @@ export const makePendingInteractionServiceLive = (
 
 			const toPendingQuestion = (state: QuestionState): PendingQuestion => ({
 				requestId: state.requestId,
+				...(state.delivery ? { delivery: state.delivery } : {}),
 				...(state.providerProcessId
 					? { providerProcessId: state.providerProcessId }
 					: {}),
@@ -324,6 +339,7 @@ export const makePendingInteractionServiceLive = (
 					const timestamp = input.timestamp ?? (yield* Clock.currentTimeMillis);
 					const entry: QuestionState = {
 						requestId: input.requestId,
+						...(input.delivery ? { delivery: input.delivery } : {}),
 						...(input.providerProcessId
 							? { providerProcessId: input.providerProcessId }
 							: {}),
@@ -339,6 +355,13 @@ export const makePendingInteractionServiceLive = (
 								: {}),
 							...(question.multiSelect != null
 								? { multiSelect: question.multiSelect }
+								: {}),
+							...(question.custom != null ? { custom: question.custom } : {}),
+							...(question.isOther != null
+								? { isOther: question.isOther }
+								: {}),
+							...(question.isSecret != null
+								? { isSecret: question.isSecret }
 								: {}),
 						})),
 						...(input.toolCallId != null
@@ -455,6 +478,7 @@ export const makePendingInteractionServiceLive = (
 						for (const [id, entry] of current) {
 							if (
 								entry.sessionId === sessionId &&
+								entry.delivery !== "async" &&
 								(!options?.requestIds || options.requestIds.has(id))
 							) {
 								cancelled.push(entry);
@@ -579,37 +603,142 @@ export const makePendingInteractionServiceLive = (
 				takeTimedOutPermissions: () =>
 					Effect.gen(function* () {
 						const now = yield* Clock.currentTimeMillis;
-						const timedOut = yield* Ref.modify(permissions, (current) => {
-							const next = new Map(current);
-							const timedOutEntries: PermissionState[] = [];
-							for (const [id, entry] of current) {
-								if (now - entry.timestamp >= timeoutMs) {
-									timedOutEntries.push(entry);
-									next.delete(id);
-								}
-							}
-							return [timedOutEntries, next] as const;
-						});
-						yield* Effect.forEach(
-							timedOut,
-							(entry) =>
-								entry.waiter
-									? Deferred.fail(
-											entry.waiter,
-											new PendingInteractionCancelled({
-												requestId: entry.requestId,
-												sessionId: entry.sessionId,
-												reason: "Permission request timed out",
-											}),
-										).pipe(Effect.ignore)
-									: Effect.void,
-							{ discard: true },
+						const snapshot = yield* Ref.get(permissions);
+						const candidates = [...snapshot.values()].filter(
+							(entry) => now - entry.timestamp >= timeoutMs,
 						);
-						return timedOut.map((entry) => ({
-							id: entry.requestId,
-							sessionId: entry.sessionId,
-							awaited: entry.waiter !== undefined,
-						}));
+						if (candidates.length === 0) return [];
+						const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+						const expire = Effect.gen(function* () {
+							let expired = candidates;
+							if (Option.isSome(sql)) {
+								const eventStore =
+									yield* Effect.serviceOption(EventStoreEffectTag);
+								const projector = yield* Effect.serviceOption(
+									ProjectionRunnerEffectTag,
+								);
+								if (Option.isNone(eventStore) || Option.isNone(projector))
+									return [];
+								expired = yield* Effect.gen(function* () {
+									const commit = yield* makeCommitAndSignal;
+									return yield* commit.write((project) =>
+										Effect.gen(function* () {
+											// Claim expiry durably before failing the waiter, so a late
+											// answer cannot be accepted between those two actions.
+											yield* sql.value`UPDATE sessions SET project_id = project_id WHERE 0`;
+											const rows = yield* sql.value<{
+												id: string;
+												session_id: string;
+												provider_process_id: string | null;
+												provider_request_id: string | null;
+											}>`SELECT pa.id, pa.session_id, pa.provider_process_id, pa.provider_request_id FROM pending_approvals pa JOIN sessions s ON s.id = pa.session_id
+											WHERE pa.type = 'permission' AND pa.status = 'pending' AND s.project_id = ${eventStore.value.projectId}
+											AND ${sql.value.in(
+												"pa.id",
+												candidates.map((entry) => entry.requestId),
+											)}`;
+											const current = yield* Ref.get(permissions);
+											const selected = candidates.filter(
+												(entry) =>
+													current.get(entry.requestId) === entry &&
+													rows.some(
+														(row) =>
+															row.id === entry.requestId &&
+															row.session_id === entry.sessionId,
+													),
+											);
+											if (selected.length > 0)
+												yield* project(
+													yield* eventStore.value.appendBatch(
+														selected.map((entry) => {
+															const prompt = rows.find(
+																(row) =>
+																	row.id === entry.requestId &&
+																	row.session_id === entry.sessionId,
+															);
+															return canonicalEvent(
+																"permission.resolved",
+																entry.sessionId,
+																{
+																	id: entry.requestId,
+																	decision: "reject",
+																	...(prompt?.provider_process_id != null
+																		? {
+																				providerProcessId:
+																					prompt.provider_process_id,
+																			}
+																		: {}),
+																	...(prompt?.provider_request_id != null
+																		? {
+																				providerRequestId:
+																					prompt.provider_request_id,
+																			}
+																		: {}),
+																},
+																{ metadata: { source: "permission-timeout" } },
+															);
+														}),
+													),
+												);
+											yield* enqueueCommittedControlAnswers({
+												sql: sql.value,
+												projectId: eventStore.value.projectId,
+												project,
+												requestIds: selected.map((entry) => entry.requestId),
+											});
+											return selected;
+										}),
+									);
+								}).pipe(
+									Effect.provideService(SqlClient.SqlClient, sql.value),
+									Effect.provideService(EventStoreEffectTag, eventStore.value),
+									Effect.provideService(
+										ProjectionRunnerEffectTag,
+										projector.value,
+									),
+								);
+							}
+							const timedOut = yield* Ref.modify(permissions, (current) => {
+								const next = new Map(current);
+								const timedOutEntries: PermissionState[] = [];
+								for (const entry of expired) {
+									const id = entry.requestId;
+									if (current.get(id) === entry) {
+										timedOutEntries.push(entry);
+										next.delete(id);
+									}
+								}
+								return [timedOutEntries, next] as const;
+							});
+							yield* Effect.forEach(
+								timedOut,
+								(entry) =>
+									entry.waiter
+										? Deferred.fail(
+												entry.waiter,
+												new PendingInteractionCancelled({
+													requestId: entry.requestId,
+													sessionId: entry.sessionId,
+													reason: "Permission request timed out",
+												}),
+											).pipe(Effect.ignore)
+										: Effect.void,
+								{ discard: true },
+							);
+							return timedOut.map((entry) => ({
+								id: entry.requestId,
+								sessionId: entry.sessionId,
+								awaited: entry.waiter !== undefined,
+							}));
+						});
+						return yield* expire.pipe(
+							Effect.catch((cause) =>
+								Effect.logWarning(
+									"Could not verify permission expiry",
+									cause,
+								).pipe(Effect.as([])),
+							),
+						);
 					}),
 				recordQuestionRequest,
 				beginQuestionRequest,

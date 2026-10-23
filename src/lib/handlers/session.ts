@@ -122,6 +122,7 @@ interface DeleteSessionPayload {
 interface ForkSessionPayload {
 	readonly sessionId?: string;
 	readonly messageId?: string;
+	readonly instanceId?: string;
 }
 
 const shouldStartOpenCodePoller = (sessionId: string) =>
@@ -157,7 +158,7 @@ const switchClientToSession = (
 			const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 			const start = Effect.sync(() => pollerManager.startPolling(sessionId));
 			yield* workspace._tag === "Some"
-				? workspace.value.withLaunch(start)
+				? workspace.value.withLaunch(sessionId, start)
 				: start;
 		}
 	});
@@ -389,8 +390,9 @@ export const deleteSessionForClient = ({
 				});
 			return warnings;
 		});
+		// Deletion cascades to descendants and checks every session sharing its checkouts.
 		return yield* workspace._tag === "Some"
-			? workspace.value.withLaunch(deletion)
+			? workspace.value.withProjectLaunch(deletion)
 			: deletion;
 	});
 
@@ -507,6 +509,26 @@ export const setSessionAutoSettleForClient = ({
 			log.info(
 				`client=${clientId} Set auto-settle disabled=${disabled}: ${sessionId}`,
 			);
+		}
+	});
+
+export const setSessionJevForClient = ({
+	clientId,
+	sessionId,
+	jev,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly jev: "on" | "off" | null;
+}) =>
+	Effect.gen(function* () {
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (yield* service.setSessionJev(sessionId, jev)) {
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
+			log.info(`client=${clientId} Set Jev=${jev ?? "default"}: ${sessionId}`);
 		}
 	});
 
@@ -637,10 +659,12 @@ export const forkSessionForClient = ({
 	clientId,
 	sessionId: requestedSessionId,
 	messageId,
+	instanceId,
 }: {
 	readonly clientId: string;
 	readonly sessionId?: string;
 	readonly messageId?: string;
+	readonly instanceId?: string;
 }) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -653,10 +677,10 @@ export const forkSessionForClient = ({
 
 		// Through the seam: forking upstream and forgetting to record the forked
 		// session locally is the same parity gap as creating one and forgetting.
-		const forked = yield* forkSession(
-			sessionId,
-			messageId === undefined ? undefined : { messageId },
-		);
+		const forked = yield* forkSession(sessionId, {
+			...(messageId === undefined ? {} : { messageId }),
+			...(instanceId === undefined ? {} : { instanceId }),
+		});
 
 		yield* clearEffectOverrideSession(sessionId);
 
@@ -693,4 +717,5 @@ export const handleForkSession = (
 		clientId,
 		...(payload.sessionId != null ? { sessionId: payload.sessionId } : {}),
 		...(payload.messageId != null ? { messageId: payload.messageId } : {}),
+		...(payload.instanceId != null ? { instanceId: payload.instanceId } : {}),
 	}).pipe(Effect.asVoid);

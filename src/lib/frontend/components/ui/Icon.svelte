@@ -102,6 +102,8 @@
     BookOpen,
     Book,
     Moon,
+    Sun,
+    Monitor,
     PanelsTopLeft,
     Bot,
     Lock,
@@ -118,6 +120,7 @@
   import ClaudeMark from './marks/ClaudeMark.svelte';
   import OpenCodeMark from './marks/OpenCodeMark.svelte';
   import CursorMark from './marks/CursorMark.svelte';
+  import CodexMark from './marks/CodexMark.svelte';
 
   // Map of kebab-case icon name to Svelte component.
   // Keys match the names used in data-lucide="..." attributes in the vanilla HTML.
@@ -198,6 +201,8 @@
     'external-link': ExternalLink,
     'clock': Clock,
     'moon': Moon,
+    'sun': Sun,
+    'monitor': Monitor,
     'message-square': MessageSquare,
     'messages-square': MessagesSquare,
     'chevron-up': ChevronUp,
@@ -249,6 +254,7 @@
     'claude': ClaudeMark,
     'opencode': OpenCodeMark,
     'cursor': CursorMark,
+    'codex': CodexMark,
   };
 
   let {

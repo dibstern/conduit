@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer, Logger, ManagedRuntime, Schema } from "effect";
@@ -23,6 +23,7 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
+import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 function makeCostRuntime(filename: string) {
 	const persistence = makePersistenceEffectLayer(filename, "test-project");
@@ -600,6 +601,9 @@ describe("Claude turn economics through SQLite persistence", () => {
 					[76, "events_forked_from_index"],
 					[77, "message_parts_result_event_seq_index"],
 					[78, "provider_run_ownership"],
+					[79, "sessions_goal_stuck"],
+					[80, "sessions_jev"],
+					[81, "provider_control_process"],
 				]);
 				expect(yield* makeEffectSqlMigrator()).toEqual([]);
 			}),
@@ -813,7 +817,9 @@ describe("Claude turn economics through SQLite persistence", () => {
 					rows.turns.map((row) => row.cost),
 				);
 				const completed = (yield* store.readBySession("parent")).filter(
-					(event) => event.type === "turn.completed",
+					(event) =>
+						event.type === "turn.completed" ||
+						event.type === "message.completed",
 				);
 				expect(
 					completed.map((event) => event.data.providerCostTotalUsd),
@@ -918,7 +924,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 				const deltas = yield* sql<{ total: number; cost: number }>`
 					SELECT json_extract(data, '$.providerCostTotalUsd') AS total,
 					json_extract(data, '$.cost') AS cost FROM events
-					WHERE session_id = 's1' AND type = 'turn.completed' ORDER BY sequence`;
+					WHERE session_id = 's1' AND type IN ('turn.completed', 'message.completed') ORDER BY sequence`;
 				expect(deltas.map((row) => row.cost)).toEqual([1, 2, 0.25, 0.25]);
 				expect((yield* costs).turns).toEqual([
 					{ id: "u1", cost: 3.5 },
@@ -988,7 +994,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 				const rows = yield* sql<{ total: number | null; cost: number | null }>`
 					SELECT json_extract(data, '$.providerCostTotalUsd') AS total,
 					json_extract(data, '$.cost') AS cost FROM events
-					WHERE type = 'turn.completed' ORDER BY sequence`;
+					WHERE type IN ('turn.completed', 'message.completed') ORDER BY sequence`;
 				expect(rows.map((row) => row.cost)).toEqual([0, 1, 0, null, 0, 0.25]);
 				expect((yield* costs).turns).toEqual([{ id: "u1", cost: 1.25 }]);
 				expect(warnings).toHaveLength(1);
@@ -1013,7 +1019,7 @@ describe("Claude turn economics through SQLite persistence", () => {
 				);
 				expect((yield* costs).turns).toEqual([{ id: "u1", cost: 1 }]);
 				yield* sql`CREATE TEMP TRIGGER reject_cost BEFORE INSERT ON events
-					WHEN NEW.type = 'turn.completed' AND json_extract(NEW.data, '$.providerCostTotalUsd') = 2
+					WHEN NEW.type IN ('turn.completed', 'message.completed') AND json_extract(NEW.data, '$.providerCostTotalUsd') = 2
 					BEGIN SELECT RAISE(ABORT, 'reject test completion'); END`;
 				const rejected = yield* Effect.result(
 					persist.persistEvents([
@@ -1024,9 +1030,213 @@ describe("Claude turn economics through SQLite persistence", () => {
 				expect(rejected._tag).toBe("Failure");
 				yield* persist.persistEvent(completion("s1", "a1", 1.6));
 				const rows = yield* sql<{ cost: number }>`
-					SELECT json_extract(data, '$.cost') AS cost FROM events WHERE type = 'turn.completed' ORDER BY sequence`;
+					SELECT json_extract(data, '$.cost') AS cost FROM events WHERE type IN ('turn.completed', 'message.completed') ORDER BY sequence`;
 				expect(rows.map((row) => row.cost)).toEqual([1, 0, 0.6000000000000001]);
 				expect((yield* costs).turns[0]?.cost).toBeCloseTo(1.6, 12);
+			}),
+		);
+	});
+
+	it.each([
+		{ nextStarted: false, missingOwner: false },
+		{ nextStarted: true, missingOwner: false },
+		{ nextStarted: false, missingOwner: true },
+		{ nextStarted: true, missingOwner: true },
+	])("preserves late interrupted-run accounting through runtime ingestion ($nextStarted next started, $missingOwner missing owner)", async ({
+		nextStarted,
+		missingOwner,
+	}) => {
+		const evidence = await runtime.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const store = yield* EventStoreEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSession("s1");
+				yield* seedTurn("s1", "u1", "a1");
+				yield* ingestion.ingest(
+					providerRuntimeEvent(
+						"turn.interrupted",
+						"s1",
+						{
+							messageId: "a1",
+						},
+						{ runId: "run-s1-u1", createdAt: stamp++ },
+					),
+				);
+				const interrupted =
+					yield* sql`SELECT state, completed_at FROM turns WHERE id = 'u1'`;
+				const boundary =
+					yield* sql`SELECT last_turn_end_version FROM sessions WHERE id = 's1'`;
+				if (nextStarted) yield* seedTurn("s1", "u2", "a2");
+				if (missingOwner)
+					yield* sql`DELETE FROM provider_runs WHERE id = 'run-s1-u1'`;
+				const late = providerRuntimeEvent(
+					"turn.completed",
+					"s1",
+					{
+						messageId: "a1",
+						providerCostTotalUsd: 1,
+						providerSessionId: "sdk-session",
+						tokens: {
+							input: 100,
+							output: 20,
+							cacheRead: 30,
+							cacheWrite: 40,
+							contextWindow: 200_000,
+						},
+						contextTokens: 170,
+					},
+					{
+						eventId: "late-result",
+						runId: "run-s1-u1",
+						createdAt: stamp++,
+						rawSourceKind: "claude.sdk.message",
+					},
+				);
+				yield* ingestion.ingest(late);
+				// Re-ingestion and reconstruction of the same result must not add usage twice.
+				yield* ingestion.ingest(late);
+				yield* ingestion.ingest({ ...late, eventId: "late-result-replayed" });
+				const stored = (yield* store.readBySession("s1")).filter(
+					(event) => event.type === "message.completed",
+				);
+				expect(
+					yield* sql`SELECT state, completed_at FROM turns WHERE id = 'u1'`,
+				).toEqual(interrupted);
+				expect(
+					yield* sql`SELECT last_turn_end_version FROM sessions WHERE id = 's1'`,
+				).toEqual(boundary);
+				const message =
+					yield* sql`SELECT cost, tokens_in, tokens_out, tokens_cache_read, tokens_cache_write, context_tokens, context_window FROM messages WHERE id = 'a1'`;
+				if (nextStarted) {
+					expect(
+						yield* sql`SELECT state, cost, tokens_in FROM turns WHERE id = 'u2'`,
+					).toEqual([{ state: "running", cost: null, tokens_in: null }]);
+				} else yield* seedTurn("s1", "u2", "a2");
+				yield* ingestion.ingest(
+					providerRuntimeEvent(
+						"turn.completed",
+						"s1",
+						{
+							messageId: "a2",
+							providerCostTotalUsd: 2,
+							providerSessionId: "sdk-session",
+							tokens: { input: 200, output: 40 },
+						},
+						{ eventId: "next-result", runId: "run-s1-u2", createdAt: stamp++ },
+					),
+				);
+				const live = yield* costs;
+				expect(live.turns).toEqual([
+					{ id: "u1", cost: missingOwner ? null : 1 },
+					{ id: "u2", cost: 1 },
+				]);
+				expect(stored).toHaveLength(1);
+				expect(stored[0]).toMatchObject({
+					metadata: { runId: "run-s1-u1" },
+					data: { ...late.data, cost: 1 },
+				});
+				expect(message).toEqual([
+					{
+						cost: 1,
+						tokens_in: 100,
+						tokens_out: 20,
+						tokens_cache_read: 30,
+						tokens_cache_write: 40,
+						context_tokens: 170,
+						context_window: 200_000,
+					},
+				]);
+				const terminals = (yield* store.readBySession("s1")).filter(
+					(event) =>
+						event.type === "turn.interrupted" ||
+						event.type === "turn.completed" ||
+						event.type === "turn.error",
+				);
+				expect(
+					terminals.map((event) => [event.type, event.metadata.runId]),
+				).toEqual([
+					["turn.interrupted", "run-s1-u1"],
+					["turn.completed", "run-s1-u2"],
+				]);
+				const rebuilt = yield* rebuildCosts;
+				expect(rebuilt.turns).toEqual([
+					{ id: "u1", cost: 1 },
+					{ id: "u2", cost: 1 },
+				]);
+				const turns =
+					yield* sql`SELECT id, state, cost, tokens_in, tokens_out FROM turns ORDER BY id`;
+				expect(turns).toEqual([
+					{
+						id: "u1",
+						state: "interrupted",
+						cost: 1,
+						tokens_in: 100,
+						tokens_out: 20,
+					},
+					{
+						id: "u2",
+						state: "completed",
+						cost: 1,
+						tokens_in: 200,
+						tokens_out: 40,
+					},
+				]);
+				return {
+					nextStarted,
+					missingOwner,
+					stored,
+					terminals,
+					message,
+					live,
+					rebuilt,
+					turns,
+				};
+			}),
+		);
+		const artifactDir = "test-results/82tn10-4-round4";
+		mkdirSync(artifactDir, { recursive: true });
+		writeFileSync(
+			join(artifactDir, `late-success-${nextStarted}-${missingOwner}.json`),
+			JSON.stringify(evidence, null, 2),
+		);
+	});
+
+	it("keeps a late error from replacing an interrupted run through runtime ingestion", async () => {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const sql = yield* SqlClient.SqlClient;
+				const store = yield* EventStoreEffectTag;
+				yield* seedSession("s1");
+				yield* seedTurn("s1", "u1", "a1");
+				yield* ingestion.ingest(
+					providerRuntimeEvent(
+						"turn.interrupted",
+						"s1",
+						{ messageId: "a1" },
+						{ runId: "run-s1-u1", createdAt: stamp++ },
+					),
+				);
+				yield* seedTurn("s1", "u2", "a2");
+				const before =
+					yield* sql`SELECT id, state, completed_at, cost, tokens_in FROM turns ORDER BY id`;
+				const late = providerRuntimeEvent(
+					"turn.error",
+					"s1",
+					{ messageId: "a1", error: "late provider error" },
+					{ runId: "run-s1-u1", createdAt: stamp++ },
+				);
+				yield* ingestion.ingest(late);
+				yield* ingestion.ingest(late);
+				expect(
+					yield* sql`SELECT id, state, completed_at, cost, tokens_in FROM turns ORDER BY id`,
+				).toEqual(before);
+				expect(
+					(yield* store.readBySession("s1")).filter(
+						(event) => event.type === "turn.error",
+					),
+				).toEqual([]);
 			}),
 		);
 	});
@@ -1059,7 +1269,9 @@ describe("Claude turn economics through SQLite persistence", () => {
 					})),
 				);
 				const rows = (yield* store.readBySession("s1")).filter(
-					(event) => event.type === "turn.completed",
+					(event) =>
+						event.type === "turn.completed" ||
+						event.type === "message.completed",
 				);
 				expect(rows.map((event) => event.data.cost)).toEqual([1, 0.5]);
 				expect((yield* costs).turns).toEqual([{ id: "u1", cost: 1.5 }]);

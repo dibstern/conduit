@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { DEFAULT_USAGE_LIMITS } from "../../../contracts/limit-recovery.js";
+import type { CodexAuthState } from "../../../contracts/ws-rpc.js";
 import {
 	composerPreferences,
 	setComposerPreferences,
@@ -83,6 +84,7 @@ function populateInstances() {
 			{
 				id: "claude",
 				name: "Personal Claude",
+				colorSlot: 0,
 				driver: "claude",
 				isDefault: true,
 				configDir: "~/.claude",
@@ -95,6 +97,7 @@ function populateInstances() {
 			{
 				id: "work-claude",
 				name: "Work Claude",
+				colorSlot: 1,
 				driver: "claude",
 				configDir: "~/.config/claude/work",
 				port: 0,
@@ -106,6 +109,7 @@ function populateInstances() {
 			{
 				id: "instance-local",
 				name: "Local OpenCode",
+				colorSlot: 3,
 				port: 4096,
 				managed: true,
 				status: "healthy",
@@ -115,6 +119,7 @@ function populateInstances() {
 			{
 				id: "instance-discovered",
 				name: "Team sandbox",
+				colorSlot: 4,
 				port: 4102,
 				managed: false,
 				status: "stopped",
@@ -206,6 +211,14 @@ export const Default: Story = {
 		const secondaryColour = getComputedStyle(swatch).color;
 		swatch.remove();
 		if (sessionViewState.compact) {
+			const leftInset = parseFloat(getComputedStyle(header).paddingLeft);
+			const done = body
+				.getByTestId("settings-close-btn")
+				.getBoundingClientRect();
+			await expect(leftInset).toBeGreaterThanOrEqual(14);
+			await expect(
+				Math.abs(header.getBoundingClientRect().right - done.right - leftInset),
+			).toBeLessThanOrEqual(1);
 			await expect(getComputedStyle(header).backgroundColor).toBe(
 				canvasElement.ownerDocument.documentElement.classList.contains(
 					"light-theme",
@@ -214,6 +227,8 @@ export const Default: Story = {
 					: "rgb(17, 17, 19)",
 			);
 			const you = body.getByTestId("avatar-change-root");
+			const rootGap =
+				you.getBoundingClientRect().top - header.getBoundingClientRect().bottom;
 			await expect(you.getBoundingClientRect().height).toBeCloseTo(56.3, 1);
 			await expect(
 				body.getByTestId("settings-tab-general").getBoundingClientRect().top -
@@ -254,6 +269,25 @@ export const Default: Story = {
 				name: "General",
 			});
 			await expect(heading).toBeVisible();
+			const youSection = panel.querySelector<HTMLElement>("#settings-you");
+			const appearance = panel.querySelector<HTMLElement>(
+				"#settings-appearance",
+			);
+			await expect(youSection).not.toBeNull();
+			await expect(appearance).not.toBeNull();
+			if (!youSection || !appearance) return;
+			const sectionGap =
+				appearance.getBoundingClientRect().top -
+				youSection.getBoundingClientRect().bottom;
+			await expect(sectionGap).toBe(16);
+			await expect(Math.abs(rootGap - sectionGap)).toBeLessThanOrEqual(1);
+			await expect(
+				Math.abs(
+					youSection.getBoundingClientRect().top -
+						header.getBoundingClientRect().bottom -
+						sectionGap,
+				),
+			).toBeLessThanOrEqual(1);
 			await expect(
 				body.queryByTestId("settings-close-btn"),
 			).not.toBeInTheDocument();
@@ -465,6 +499,7 @@ function populateVisibility() {
 			{
 				id: "claude",
 				name: "Personal Claude",
+				colorSlot: 0,
 				driver: "claude",
 				isDefault: true,
 				port: 0,
@@ -733,6 +768,7 @@ export const UsageAccounts: Story = {
 			instances: accounts.map(({ id, name }, index) => ({
 				id,
 				name,
+				colorSlot: index,
 				driver: "claude",
 				isDefault: index === 0,
 				port: 0,
@@ -1148,6 +1184,98 @@ export const ClaudeAccountExpanded: Story = {
 		await expect(accountBox.bottom).toBeLessThanOrEqual(viewport.bottom);
 	},
 };
+
+function codexSignIn(login: CodexAuthState["login"]): Story {
+	return {
+		args: { initialTab: "server" },
+		beforeEach: () => {
+			populateInstances();
+			applyInstanceListResponse({
+				instances: [
+					...getCachedInstances(),
+					{
+						id: "work-codex",
+						name: "Work Codex",
+						driver: "codex",
+						port: 0,
+						managed: false,
+						status: "healthy",
+						restartCount: 0,
+						createdAt: 1_772_011_860_000,
+					},
+				],
+			});
+			return replyRpc(
+				"GetCodexAuth",
+				() =>
+					({
+						accountId: "work-codex",
+						source: "none",
+						status: "logged-out",
+						login,
+					}) satisfies CodexAuthState,
+			);
+		},
+		play: async ({ canvasElement }) => {
+			const canvas = within(canvasElement);
+			const account = within(canvas.getByTestId("instance-row-work-codex"));
+			await userEvent.click(
+				account.getByRole("button", { name: /Work Codex/ }),
+			);
+			await expect(account.getByTestId("codex-auth-status")).toHaveTextContent(
+				"Not signed in",
+			);
+			if (login.state === "pending") {
+				await expect(account.getByTestId("codex-login-link")).toHaveAttribute(
+					"href",
+					login.verificationUrl ?? login.url,
+				);
+				await expect(account.getByTestId("codex-login-cancel")).toBeVisible();
+				if (login.userCode) {
+					await expect(
+						account.getByTestId("codex-login-code"),
+					).toHaveTextContent(login.userCode);
+					await expect(
+						account.getByTestId("codex-login-copy-code"),
+					).toBeVisible();
+				}
+			} else if (login.state === "error") {
+				await expect(
+					account.getByTestId("codex-login-result"),
+				).toHaveTextContent(login.error ?? "");
+			} else {
+				await expect(account.getByTestId("codex-login-browser")).toBeVisible();
+				await expect(
+					account.getByTestId("codex-login-device-code"),
+				).toBeVisible();
+			}
+			await scrollSettingsIntoView(
+				account.getByTestId("codex-auth-account"),
+				"center",
+			);
+		},
+	};
+}
+
+export const CodexSignInIdle: Story = codexSignIn({ state: "idle" });
+export const CodexSignInBrowserPending: Story = codexSignIn({
+	state: "pending",
+	method: "browser",
+	url: "https://auth.openai.com/authorize?state=storybook",
+	deadlineAtMs: 1_772_012_460_000,
+});
+export const CodexSignInDeviceCodePending: Story = codexSignIn({
+	state: "pending",
+	method: "device-code",
+	verificationUrl: "https://auth.openai.com/codex/device",
+	userCode: "ABCD-EFGH",
+	deadlineAtMs: 1_772_012_460_000,
+});
+export const CodexSignInError: Story = codexSignIn({
+	state: "error",
+	method: "device-code",
+	error: "Could not complete sign-in. Start again to get a new code.",
+});
 
 export const DefaultClaudeAccountEdit: Story = {
 	args: { initialTab: "server" },

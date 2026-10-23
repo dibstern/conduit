@@ -1,0 +1,598 @@
+<!doctype html><html><head><meta charset="utf-8"><script>(()=>{let t;try{t=parent!==window&&parent.document.documentElement.dataset.designTheme}catch(e){}t=t||localStorage.getItem('tsp-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');const h=document.documentElement;h.dataset.theme=t;h.style.setProperty('color-scheme',t,'important')})()</script><style>body{margin:0}html:not([data-theme=dark]) [data-theme-only=dark],html[data-theme=dark] [data-theme-only=light]{display:none!important}</style><meta name="viewport" content="width=390">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<style>
+:root{
+  --bg:light-dark(#fff,#111113); --turn-bg:light-dark(#f4f4f6,#1a1a1d); --raised:light-dark(#fff,#1d1d21);
+  --well:light-dark(#e9e9ed,#0c0c0e); --zebra:light-dark(#fafafb,#151517);
+  --text:light-dark(#0b0b0d,#ededf0); --text2:light-dark(#5d5d66,#a1a1aa); --dim:light-dark(#868692,#6e6e77);
+  --border:light-dark(#e3e3e7,#2b2b31); --chip:light-dark(rgba(0,0,0,.05),rgba(255,255,255,.07)); --sel:light-dark(#ececef,#202024);
+  --explore:light-dark(#0369a1,#38bdf8); --edit:light-dark(#a87e00,#d9a521); --shell:light-dark(#15803d,#4ade80);
+  --other:light-dark(#3f40b2,#818cf8); --thinking:light-dark(#7441ff,#b07cff); --textc:light-dark(#c0267f,#f472b6);
+  --fail:light-dark(#ff3b62,#ff4f73); --error:light-dark(#bc1f1f,#ff6369); --accent:light-dark(#4352d2,#8e9bff);
+  --success:light-dark(#127136,#3ecf8e);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 Geist,system-ui,sans-serif;padding:22px 30px 8px}
+body.phone{padding:18px 14px 6px}
+.mono{font-family:"Geist Mono",ui-monospace,monospace}
+svg.lucide{width:14px;height:14px;stroke-width:2}
+.sm svg.lucide{width:12px;height:12px}
+.state{margin-bottom:28px}
+.lbl{font:600 10.5px/1 Geist,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:0 0 9px}
+.lbl em{font-style:normal;text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px}
+.card{background:var(--turn-bg);border-radius:14px;padding:10px 12px}
+.hl{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap}
+.hl .w{font-size:14px;font-weight:600}
+.dur{font:12px "Geist Mono",monospace;color:var(--dim)}
+.hl .ph{font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;min-width:0}
+.hl .chev{color:var(--dim);display:flex}
+.hr{margin-left:auto;flex:none;padding-left:8px;font:12px "Geist Mono",monospace;color:var(--text2);display:flex;align-items:center;gap:8px}
+.spin{color:var(--accent);display:flex;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.stripw{position:relative;margin-top:9px}
+.stripw.lab{margin-bottom:15px}
+.strip{display:flex;gap:2px;height:4px}
+.strip i{display:block;height:100%;border-radius:2px}
+.strip i.seam{flex:0 0 2px!important;background:var(--text2);height:10px;margin-top:-3px}
+.strip i.live{animation:breathe 1.2s ease-in-out infinite}
+@keyframes breathe{50%{opacity:.35}}
+.tick{position:absolute;top:-3px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;pointer-events:none}
+.dm{width:6px;height:6px;background:var(--other);transform:rotate(45deg);outline:2px solid var(--turn-bg);border-radius:1px}
+.tl2{font-size:10px;color:var(--other);margin-top:4px;white-space:nowrap}
+.log{margin-top:6px}
+.row{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:6px;min-height:26px}
+.row .ic{flex:none;display:flex}
+.row .verb{color:var(--text2);flex:none}
+.row .subj{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px "Geist Mono",monospace;color:var(--dim)}
+.row .subj.it{font:italic 13px Geist,sans-serif}
+.row .msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-style:italic;color:var(--text2)}
+.row time{margin-left:auto;font:11.5px "Geist Mono",monospace;color:var(--dim);flex:none}
+.blk{width:9px;height:9px;flex:none;display:inline-block;background:repeating-linear-gradient(90deg,var(--accent) 0 1.5px,transparent 1.5px 2.5px);animation:breathe .6s steps(2) infinite}
+.rule{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:12px;color:var(--dim);white-space:nowrap}
+.rule::before,.rule::after{content:"";height:1px;flex:1;background:var(--border)}
+.phone .rule .saved{display:none}
+.bill{font:12px "Geist Mono",monospace;color:var(--text2);display:inline-flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.bill .sep{color:var(--dim)}
+.gauge{display:inline-block;width:40px;height:4px;border-radius:9px;background:var(--chip);overflow:hidden;vertical-align:middle}
+.gauge b{display:block;height:100%;width:41%;background:var(--success)}
+.earlier{font-size:12px;color:var(--text2);padding:7px 6px}
+.pill{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:99px;background:var(--chip);color:var(--text2);font-size:12px;font-weight:500;border:0;white-space:nowrap}
+.pill.sk{color:var(--other);background:color-mix(in srgb,var(--other) 13%,transparent)}
+.pill.err{color:var(--error);background:color-mix(in srgb,var(--error) 12%,transparent)}
+.evtx{font-size:12px;color:var(--dim)}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px}
+.mright{margin-left:auto}
+.mrow{flex-basis:100%;margin-top:2px}
+.flag{outline:1.5px dashed var(--fail);outline-offset:3px;border-radius:6px}
+.note{font-size:11.5px;color:var(--fail);margin:7px 0 0 2px}
+/* 2 panel */
+.panel{border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--bg)}
+.panel .top{background:var(--turn-bg);padding:10px 12px}
+.pbody{padding:6px;border-top:1px solid var(--border)}
+.pfoot{background:var(--turn-bg);border-top:1px solid var(--border);padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center}
+/* 3 well */
+.well{margin:12px -6px -4px;background:var(--well);border-radius:10px;box-shadow:inset 0 1px 3px light-dark(rgba(0,0,0,.09),rgba(0,0,0,.6));padding:4px}
+.well .row{min-height:24px;padding:3px 6px}
+.wfoot{display:flex;justify-content:flex-end;padding:8px 6px 4px;border-top:1px dashed var(--border);margin-top:4px}
+.phone .wfoot{justify-content:flex-start}
+/* 4 rail */
+.tl{position:relative;margin:10px 0 0 9px;padding-left:16px}
+.tl::before{content:"";position:absolute;left:0;top:8px;bottom:12px;width:2px;background:var(--border);border-radius:2px}
+.node{position:relative}
+.node::before{content:"";position:absolute;left:-19px;top:9px;width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 0 3px var(--bg)}
+.node.dia::before{border-radius:1px;transform:rotate(45deg) scale(.9)}
+.node.gap::before{display:none}
+.node.pulse::before{animation:breathe 1.2s ease-in-out infinite}
+.node.cap::before{width:10px;height:10px;left:-20px;top:10px;background:var(--bg);border:2px solid var(--c)}
+.capr{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:6px 6px;min-height:30px}
+.capr .w2{font-weight:600}
+/* 5 table */
+.tbl{border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-top:8px}
+.tr{display:grid;grid-template-columns:44px 16px minmax(0,1fr) auto;gap:8px;align-items:center;padding:5px 12px;min-height:30px}
+.phone .tr{grid-template-columns:34px 14px minmax(0,1fr) auto;gap:6px;padding:5px 10px}
+.tr:nth-child(even){background:var(--zebra)}
+.tr .ic{display:flex}
+.tr .off{font-size:11px;color:var(--dim)}
+.tr .what{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr .v2{color:var(--text2)}
+.tr .s2{font-size:12px;color:var(--dim)}
+.tr .it2{font-style:italic;color:var(--text2)}
+.tr .took{font:11.5px "Geist Mono",monospace;color:var(--dim);display:flex;gap:5px;align-items:center}
+.tr.th{font:600 10px Geist,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);background:var(--turn-bg)!important;min-height:26px}
+.tr.run{background:color-mix(in srgb,var(--accent) 9%,transparent)!important}
+.tr.full{display:block;padding:0 12px}
+.tr.ear{display:block;color:var(--text2);font-size:12px}
+.tfoot{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;padding:8px 12px;background:var(--turn-bg);border-top:1px solid var(--border)}
+.tfoot .w2{font-weight:600}
+/* 6 sheet */
+.sheet{background:var(--raised);border:1px solid var(--border);border-radius:14px;box-shadow:0 12px 32px -12px light-dark(rgba(0,0,0,.22),rgba(0,0,0,.7));padding:10px 12px 8px}
+.seg{display:inline-flex;background:var(--chip);border-radius:9px;padding:2px;gap:2px}
+.seg span{font:500 12px Geist,sans-serif;color:var(--text2);padding:3px 10px;border-radius:7px}
+.seg .on{background:var(--bg);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.seg .ct{color:var(--dim);font-family:"Geist Mono",monospace;font-size:11px;margin-left:3px}
+.sbody{margin:8px -6px 0;border-top:1px solid var(--border);padding-top:6px}
+.usage{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px 18px;padding:10px 6px 6px}
+.uk{font:600 10px Geist,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:5px}
+.uv{font:13px "Geist Mono",monospace}
+.uw{grid-column:1/-1}
+.ul{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12.5px}
+.ul .at{margin-left:auto;font:11.5px "Geist Mono",monospace;color:var(--dim)}
+.gauge.big{flex:1 1 auto;min-width:90px;max-width:280px;height:6px}
+/* 7 gutter */
+.gut{margin:6px 0 0 19px;padding-left:8px;border-left:1px solid var(--border)}
+/* round 3 */
+:root{--ask:light-dark(#b45309,#ff9f0a);--decision:light-dark(#255fcb,#689cff);--risk:light-dark(#c0267f,#f469c4);--finding:light-dark(#087f76,#2bb5ab);--milestone:light-dark(#127136,#3ecf8e)}
+.ct{color:var(--dim);font:11px "Geist Mono",monospace;margin-left:4px}
+.chip{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:99px;font:500 11.5px "Geist Mono",monospace;flex:none}
+.chip.ask{background:color-mix(in srgb,var(--ask) 18%,transparent);color:var(--ask)}
+.chip.unr{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}
+.phone .hl .ph.jh{display:none}
+.mdot{position:absolute;top:2px;left:var(--x);width:7px;height:7px;border-radius:50%;background:var(--c);transform:translate(-50%,-50%);box-shadow:0 0 0 1.5px var(--turn-bg)}
+.mdot.ring::after{content:"";position:absolute;inset:-4px;border:1px solid var(--c);border-radius:50%;opacity:.55}
+.stripw.pins{margin-top:32px}
+.pin{position:absolute;bottom:100%;left:var(--x);transform:translateX(-50%);display:flex;flex-direction:column;align-items:center}
+.pin .pc{display:flex;align-items:center;gap:3px;height:19px;padding:0 6px;border-radius:99px;background:var(--chip);font:500 11px "Geist Mono",monospace;color:var(--text2);white-space:nowrap}
+.pin .pc b{color:var(--c);font-weight:600}
+.pin.on .pc{background:color-mix(in srgb,var(--c) 22%,transparent);color:var(--text);box-shadow:0 0 0 1px var(--c)}
+.pin .ps{width:1px;height:6px;background:var(--border)}
+.phone .pin .n{display:none}
+.mb{display:inline-flex;align-items:center;gap:3px;height:18px;padding:0 6px;border-radius:6px;font:600 11px "Geist Mono",monospace;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent);flex:none}
+.hov{padding-bottom:78px}
+.cur{position:absolute;top:-4px;left:var(--x);width:2px;height:12px;margin-left:-1px;border-radius:1px;background:var(--text)}
+.caret{position:absolute;top:11px;left:var(--x);width:11px;height:11px;margin-left:-5.5px;background:var(--raised);border-left:1px solid var(--border);border-top:1px solid var(--border);transform:rotate(45deg);z-index:3}
+.pop{position:absolute;top:16px;--w:min(400px,100%);width:var(--w);left:clamp(0px,calc(var(--x) - var(--w) * .3),calc(100% - var(--w)));z-index:2;background:var(--raised);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 28px -10px light-dark(rgba(0,0,0,.25),rgba(0,0,0,.75));padding:6px 8px 6px}
+.pl{display:flex;align-items:center;gap:6px;padding:2px 0;white-space:nowrap;min-width:0}
+.pl .v2{color:var(--text2)}
+.pl .ptx{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.pl .ptx.mono{font-size:12px;color:var(--dim)}
+.pl .pat{margin-left:auto;padding-left:8px;font:11.5px "Geist Mono",monospace;color:var(--dim);flex:none}
+.perr{font-size:12px;color:var(--error);flex:none}
+.pfine{font-size:11.5px;color:var(--dim);padding-top:3px}
+.pnl{border:1px solid var(--border);border-radius:14px;background:var(--bg)}
+.pnl>.top{background:var(--turn-bg);padding:10px 12px}
+.pnl>:first-child{border-radius:13px 13px 0 0}
+.pnl>:last-child{border-radius:0 0 13px 13px}
+.pnl>:only-child{border-radius:13px}
+.pbody.jb{padding:10px}
+.tabrow{margin-top:12px}
+.phone .tabrow .seg,.phone .lvrow .seg{display:flex;width:100%}
+.phone .tabrow .seg>span,.phone .lvrow .seg>span{flex:1 1 auto;text-align:center;padding:3px 4px}
+.seg .dv{flex:0 0 1px!important;padding:0!important;margin:4px 1px;background:var(--border);border-radius:0}
+.jc{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:10px 12px 8px}
+.card .jc{margin-top:10px}
+.jc.ask{border-color:color-mix(in srgb,var(--ask) 65%,transparent)}
+.jtop{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.tag{font:600 11px Geist,sans-serif;padding:3px 7px;border-radius:6px;color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
+.jmeta{margin-left:auto;font:11.5px "Geist Mono",monospace;color:var(--dim)}
+.jtx{font-size:13.5px;line-height:1.5;margin:8px 0 9px}
+.jact{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.btn{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:8px;background:var(--chip);font-size:12px;color:var(--text2);white-space:nowrap}
+.btn.on{background:var(--sel);color:var(--text);box-shadow:0 0 0 1px var(--border)}
+.nav{margin-left:auto;display:flex;gap:2px;color:var(--dim)}
+.nav span{display:flex;width:24px;height:24px;align-items:center;justify-content:center}
+.phone .jact .rt{display:none}
+.lvrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px;font:11.5px "Geist Mono",monospace;color:var(--dim)}
+.lvrow .seg{margin-left:auto}
+.phone .lvrow .t{display:none}
+.phone .seg.dial .ct{display:none}
+.drawer{margin:0 10px;background:var(--raised);border:1px solid var(--border);border-top:0;border-radius:0 0 12px 12px;box-shadow:0 14px 28px -14px light-dark(rgba(0,0,0,.25),rgba(0,0,0,.75));padding:8px 6px 6px}
+.phone .drawer{margin:0 6px}
+.dtop{display:flex;align-items:center;gap:8px;padding:0 4px 8px;border-bottom:1px solid var(--border);margin-bottom:4px}
+.ftabs{display:flex;align-items:stretch;background:var(--turn-bg);border-top:1px solid var(--border);padding:0 6px;min-height:38px}
+.ftab{display:flex;align-items:center;padding:0 10px;font:500 12px Geist,sans-serif;color:var(--text2)}
+.ftab.on{color:var(--text);box-shadow:inset 0 2px 0 var(--accent)}
+.phone .ftab{padding:0 8px}
+.fright{margin-left:auto;display:flex;align-items:center;gap:6px;padding-right:6px;font:12px "Geist Mono",monospace;color:var(--text2);white-space:nowrap}
+/* round 4 */
+.top .jc{margin-top:10px}
+.pop.up{top:auto;bottom:calc(100% + 12px)}
+.pop.cp{--w:min(480px,100%);padding:0;border:0;background:none;box-shadow:none}
+.pop.cp .jc{box-shadow:0 14px 34px -12px light-dark(rgba(0,0,0,.3),rgba(0,0,0,.8))}
+.caret.up{top:auto;bottom:calc(100% + 6.5px);transform:rotate(225deg);background:var(--bg)}
+.caret.dn{background:var(--bg)}
+.caret.ask{border-color:color-mix(in srgb,var(--ask) 65%,var(--bg))}
+.hovup{padding-top:135px}.phone .hovup{padding-top:180px}
+.hovdn{padding-bottom:150px}.phone .hovdn{padding-bottom:205px}
+.menuw{padding-bottom:290px}
+.flab{display:flex;align-items:center;padding:0 6px;font:600 10px Geist,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+.fdv{flex:0 0 1px;margin:10px 4px;background:var(--border)}
+.ftabs{position:relative}
+.ftab{white-space:nowrap;gap:5px}
+.ftab.mt{padding:0 2px}
+.mbtn{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 6px 0 9px;border-radius:8px;background:var(--chip);font:500 12px Geist,sans-serif;color:var(--text);white-space:nowrap}
+.mbtn .k{color:var(--dim)}
+.menu{position:absolute;top:calc(100% + 6px);left:6px;z-index:4;width:min(310px,calc(100% - 12px));background:var(--raised);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px -10px light-dark(rgba(0,0,0,.25),rgba(0,0,0,.75));padding:4px}
+.mh{font:600 10px Geist,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);padding:6px 8px 4px}
+.mi{display:grid;grid-template-columns:14px 1fr auto;column-gap:8px;padding:6px 8px;border-radius:7px;align-items:center}
+.mi.on{background:var(--sel)}
+.mi b{font-weight:500}
+.mi>span:first-child{display:flex;color:var(--accent)}
+.mi small{grid-column:2/4;color:var(--dim);font-size:11.5px}
+.mi.sep{margin-top:5px;position:relative}
+.mi.sep::before{content:"";position:absolute;left:8px;right:8px;top:-3px;height:1px;background:var(--border)}
+.shrow{display:flex;align-items:center;gap:6px;margin-top:12px}
+.shrow .flab{padding:0 2px 0 0}
+.seg.sh span svg{margin-right:4px;vertical-align:-2px}
+.phone .shrow .seg{flex:1 1 auto;display:flex}
+.phone .shrow .seg>span{flex:1 1 auto;text-align:center;padding:3px 2px}
+.dr2{padding:0}
+.dr2 .din{padding:6px}
+.dr2 .ftabs{border-radius:0 0 12px 12px;background:var(--raised)}
+.dr2>.ftabs:only-child{border-top:0}
+.dcap{font-size:12px;color:var(--text2);padding:4px 6px 6px}
+.dcap b{color:var(--text);font-weight:500}
+.row.sel{background:var(--sel)}
+.sl{flex:1 1 auto;max-width:380px;min-width:0;padding:7px 0 4px;display:flex;flex-direction:column;gap:4px}
+.slt{position:relative;height:4px;border-radius:9px;background:var(--chip);margin:4px 10% 0}
+.slt b{position:absolute;left:0;top:0;bottom:0;width:var(--f);background:var(--accent);border-radius:9px}
+.slt i{position:absolute;top:50%;left:var(--x);width:8px;height:8px;border-radius:50%;background:var(--raised);border:1.5px solid var(--dim);transform:translate(-50%,-50%)}
+.slt i.in{background:var(--accent);border-color:var(--accent)}
+.slt i.on{width:14px;height:14px;border:2px solid var(--accent);background:var(--raised)}
+.sll{display:grid;grid-template-columns:repeat(5,1fr);text-align:center;font:11px Geist,sans-serif;color:var(--dim);white-space:nowrap}
+.sll .on{color:var(--text);font-weight:500}
+.phone .sll{font-size:10.5px}
+.phone .gf .flab,.phone .gf .fright{display:none}
+.phone .gf .sl{max-width:none}
+.stp{display:flex;align-items:center;gap:6px;padding-left:4px}
+.sbtn{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 8px;border-radius:8px;background:var(--chip);font:12px Geist,sans-serif;color:var(--text2);white-space:nowrap}
+.sbtn.off{opacity:.35}
+.scap{font:500 12px Geist,sans-serif;white-space:nowrap}
+.hangw{position:relative;margin-top:14px}
+.hangw .jc{margin-top:0!important}
+.hcaret{position:absolute;top:-5.5px;left:clamp(14px,var(--x),calc(100% - 14px));width:11px;height:11px;margin-left:-5.5px;background:var(--bg);border-left:1px solid var(--border);border-top:1px solid var(--border);transform:rotate(45deg);z-index:1}
+.hcaret.ask{border-color:color-mix(in srgb,var(--ask) 65%,var(--bg))}
+.offh{margin:36px 0 18px;padding-top:14px;border-top:1px dashed var(--border);font:600 12px Geist,sans-serif;color:var(--text2)}
+.offh span{font-weight:400;color:var(--dim)}
+</style>
+<script>
+const K={skill:['sparkles','--other','Loaded'],think:['brain','--thinking','Thought'],read:['file-text','--explore','Read'],search:['search','--explore','Searched'],edit:['pencil','--edit','Edited'],bash:['terminal','--shell','Ran'],msg:['message-square','--textc','']};
+const STEPS=[
+ {k:'think',text:'They want the log redesigned; load tsp, then find the component',d:'4s',w:5,at:'0:00'},
+ {k:'skill',subj:'tsp',d:'380ms',w:1,at:'0:04'},
+ {k:'read',subj:'chat/TurnActivity.svelte',d:'31ms',w:2,at:'0:05'},
+ {k:'search',subj:'"Loaded" in src/lib/frontend',d:'210ms',w:3,at:'0:05'},
+ {k:'read',subj:'chat/ActivityRow.svelte',d:'22ms',w:2,at:'0:06'},
+ {k:'msg',text:'The footer reuses the row indent and icon, so it reads as a step.',d:'3s',w:8,at:'0:08'},
+ {k:'skill',subj:'brainstorm',d:'290ms',w:1,at:'1:12'},
+ {k:'edit',subj:'chat/TurnActivity.svelte',d:'1s',w:5,at:'1:13'},
+ {k:'bash',subj:'pnpm check',d:'38s',w:18,fail:1,at:'1:20'},
+ {k:'bash',subj:'pnpm check',d:'41s',w:20,at:'2:01'},
+ {k:'compact',at:'3:00'},
+ {k:'edit',subj:'chat/ActivityRow.svelte',d:'900ms',w:6,at:'3:58'},
+];
+const LIVE=STEPS.slice(0,10);
+const SK=['tsp','brainstorm'];
+const PHRASE='2 reads · 1 search · 2 edits · 2 commands';
+const ico=(n,c,cls='')=>`<span class="ic ${cls}" style="color:var(${c})"><i data-lucide="${n}"></i></span>`;
+const skillPill=n=>`<span class="pill sk">${ico('sparkles','--other','sm')}<span class="mono" style="font-size:11.5px">${n}</span></span>`;
+function row(s,o={}){
+ if(s.k==='compact')return `<div class="rule"><span>Compacted context</span><span class="mono">182k → 41k</span><span class="saved">· <b style="color:var(--text2);font-weight:500">141k saved</b></span></div>`;
+ if(s.k==='skill'&&o.skill==='event')return `<div class="row">${o.noIcon?'':ico('sparkles','--other')}<span class="verb">Skill</span><span class="subj" style="color:var(--other)">${s.subj}</span></div>`;
+ if(s.k==='skill'&&o.skill==='pill')return `<div class="row">${skillPill(s.subj)}<span class="evtx">skill loaded</span></div>`;
+ const [n,c,v]=K[s.k];
+ const col=s.fail?'--fail':o.live?'--accent':c;
+ const icon=o.noIcon?'':ico(n,col);
+ const tail=o.live?'<span class="blk"></span>':s.fail?ico('circle-alert','--error','sm'):'';
+ if(s.k==='think')return `<div class="row">${icon}<span class="verb" style="font-weight:500">Thought</span><span class="subj it">${s.text}</span><time>${s.d}</time></div>`;
+ if(s.k==='msg')return `<div class="row">${icon}<span class="msg">${s.text}</span><time>${s.d}</time></div>`;
+ return `<div class="row">${icon}<span class="verb">${o.live?'Running':(o.verb??v)}</span><span class="subj">${s.subj}</span>${o.live?'':`<time>${s.d}</time>`}${tail}</div>`;
+}
+function strip(steps,o={}){
+ const tot=steps.reduce((a,s)=>a+(s.w||0),0);let acc=0;const ticks=[];
+ const segs=steps.map((s,i)=>{
+  if(s.k==='compact')return '<i class="seam"></i>';
+  if(s.k==='skill'&&o.ticks)ticks.push({n:s.subj,l:(acc+s.w/2)/tot*100});
+  acc+=s.w;
+  const live=o.live&&i===steps.length-1;
+  const col=s.fail?'--fail':live?'--accent':K[s.k][1];
+  return `<i class="${live?'live':''}" style="flex:${s.w} 1 0;background:var(${col})"></i>`}).join('');
+ const tk=ticks.map(t=>`<span class="tick" style="left:${t.l}%"><span class="dm"></span>${o.ticks==='label'?`<span class="tl2 mono">${t.n}</span>`:''}</span>`).join('');
+ return `<div class="stripw ${o.ticks==='label'?'lab':''}"><div class="strip">${segs}</div>${tk}</div>`;
+}
+function head(o={}){
+ const lead=o.live?`<span class="spin"><i data-lucide="loader-circle"></i></span><span class="w">Working</span><span class="dur">1m 31s</span>`
+  :`<span class="chev"><i data-lucide="${o.open?'chevron-down':'chevron-right'}"></i></span><span class="w">Worked</span><span class="dur">4m 12s</span>`;
+ const ph=o.phrase===''?'':`<span class="ph">· ${o.phrase??PHRASE}</span>`;
+ return `<div class="hl">${lead}${ph}${o.right?`<span class="hr">${o.right}</span>`:''}</div>`;
+}
+const BILL=`<span class="bill"><span>$0.4123</span><span class="sep">·</span><span>1.2M in</span><span class="sep">·</span><span>18k out</span><span class="sep">·</span><span>ctx <span class="gauge"><b></b></span> 41%</span></span>`;
+const LIVEBILL=`<span class="bill"><span>$0.2108</span><span class="sep">·</span><span>640k in</span><span class="sep">·</span><span>9k out</span></span>`;
+const earlier=(n=7)=>`<div class="earlier">+ ${n} earlier steps</div>`;
+const ticker=(o={})=>LIVE.slice(-3).map((s,i)=>row(s,{...o,live:i===2})).join('');
+const state=(label,html,note='')=>`<div class="state"><div class="lbl">${label}${note?`<em>${note}</em>`:''}</div>${html}</div>`;
+const three=(c,l,e,notes=[])=>state('Collapsed',c,notes[0])+state('Live',l,notes[1])+state('Expanded',e,notes[2]);
+
+const D={};
+D.ledger=p=>{
+ const meta=live=>`<div class="meta">${SK.map(skillPill).join('')}<span class="pill err">1 failed</span><span class="${p?'mrow':'mright'}">${live?LIVEBILL:BILL}</span></div>`;
+ return three(
+  `<div class="card">${head()}${strip(STEPS,{ticks:1})}${meta()}</div>`,
+  `<div class="card">${head({live:1})}${strip(LIVE,{live:1,ticks:1})}${meta(1)}</div><div class="log">${earlier()}${ticker()}</div>`,
+  `<div class="card">${head({open:1})}${strip(STEPS,{ticks:1})}${meta()}</div><div class="log">${STEPS.map(s=>row(s,{skill:'event'})).join('')}</div>`);
+};
+D.panel=p=>{
+ const top=o=>`<div class="top">${head({...o,phrase:PHRASE+' · 2 skills'})}${strip(o.live?LIVE:STEPS,{live:o.live})}</div>`;
+ const foot=live=>`<div class="pfoot"><span class="pill err">1 failed</span><span class="${p?'mrow':'mright'}">${live?LIVEBILL:BILL}</span></div>`;
+ return three(
+  `<div class="panel">${top({})}</div>`,
+  `<div class="panel">${top({live:1})}<div class="pbody">${earlier()}${ticker({skill:'pill'})}</div>${foot(1)}</div>`,
+  `<div class="panel">${top({open:1})}<div class="pbody">${STEPS.map(s=>row(s,{skill:'pill'})).join('')}</div>${foot()}</div>`,
+  ['','the panel grows down; the footer bar is the panel’s edge, not a row']);
+};
+D.well=p=>{
+ const card=(o,inner='')=>`<div class="card">${head({...o,right:o.live?'$0.21':p?'$0.41':'$0.4123 · ctx 41%'})}${strip(o.live?LIVE:STEPS,{live:o.live,ticks:'label'})}${inner}</div>`;
+ return three(
+  card({}),
+  card({live:1},`<div class="well">${earlier()}${ticker({skill:'event'})}</div>`),
+  card({open:1},`<div class="well">${STEPS.map(s=>row(s,{skill:'event'})).join('')}<div class="wfoot">${BILL}</div></div>`),
+  ['skills are labelled where they loaded on the strip','the log is a recessed tray inside the card']);
+};
+D.rail=p=>{
+ const node=(s,o={})=>{
+  if(s.k==='compact')return `<div class="node gap">${row(s)}</div>`;
+  if(s.k==='skill')return `<div class="node dia" style="--c:var(--other)"><div class="row"><span class="mono" style="color:var(--other);font-size:12px;font-weight:500">${s.subj}</span><span class="evtx">skill loaded</span></div></div>`;
+  const c=s.fail?'--fail':o.live?'--accent':K[s.k][1];
+  return `<div class="node ${o.live?'pulse':''}" style="--c:var(${c})">${row(s,{...o,noIcon:1})}</div>`;
+ };
+ const card=o=>`<div class="card">${head({...o,phrase:PHRASE+' · 2 skills',right:o.live?'':'$0.41'})}${strip(o.live?LIVE:STEPS,{live:o.live})}</div>`;
+ const cap=`<div class="node cap" style="--c:var(--text2)"><div class="capr"><span class="w2">Done</span><span class="dur">4m 12s</span><span class="${p?'mrow':'mright'}">${BILL}</span></div></div>`;
+ return three(
+  card({}),
+  card({live:1})+`<div class="tl">${earlier()}${LIVE.slice(-3).map((s,i)=>node(s,{live:i===2})).join('')}</div>`,
+  card({open:1})+`<div class="tl">${STEPS.map(s=>node(s)).join('')}${cap}</div>`,
+  ['','no icons: the dot carries the colour, a diamond marks a skill','the rail ends in a “Done” node that carries the bill']);
+};
+D.table=p=>{
+ const tr=(s,o={})=>{
+  if(s.k==='compact')return `<div class="tr full">${row(s)}</div>`;
+  const [n,c,v]=K[s.k];const col=s.fail?'--fail':o.live?'--accent':c;
+  const what=s.k==='think'||s.k==='msg'?`<span class="it2">${s.text}</span>`:`<span class="v2">${s.k==='skill'?'Skill':o.live?'Running':v}</span> <span class="mono s2" ${s.k==='skill'?'style="color:var(--other)"':''}>${s.subj}</span>`;
+  const took=s.k==='skill'?'':o.live?'<span class="blk"></span>':s.d+(s.fail?ico('circle-alert','--error','sm'):'');
+  return `<div class="tr ${o.live?'run':''}"><span class="mono off">${s.at}</span>${ico(n,col)}<span class="what">${what}</span><span class="took">${took}</span></div>`;
+ };
+ const th=`<div class="tr th"><span>At</span><span></span><span>Step</span><span>Took</span></div>`;
+ const foot=live=>`<div class="tfoot"><span class="w2">${live?'So far':'Total'}</span><span class="dur">${live?'1m 31s':'4m 12s'}</span><span class="${p?'mrow':'mright'}">${live?LIVEBILL:BILL}</span></div>`;
+ const card=o=>`<div class="card">${head({...o,right:o.live?'':'$0.41'})}${strip(o.live?LIVE:STEPS,{live:o.live})}</div>`;
+ return three(
+  card({}),
+  card({live:1})+`<div class="tbl">${th}<div class="tr ear">+ 7 earlier steps</div>${LIVE.slice(-3).map((s,i)=>tr(s,{live:i===2})).join('')}${foot(1)}</div>`,
+  card({open:1})+`<div class="tbl">${th}${STEPS.map(s=>tr(s)).join('')}${foot()}</div>`,
+  ['','“At” is time into the turn, so a skill is a moment, not a span','totals are the table’s footer row']);
+};
+const USAGE=`<div class="usage">
+  <div><div class="uk">Cost</div><div class="uv">$0.4123</div></div>
+  <div><div class="uk">Tokens</div><div class="uv">1.2M in · 18k out</div></div>
+  <div class="uw"><div class="uk">Context at end</div><div class="uv" style="display:flex;align-items:center;gap:10px"><span class="gauge big"><b></b></span><span style="white-space:nowrap">41% · 82k / 200k</span></div></div>
+  <div class="uw"><div class="uk">Skills loaded</div>${STEPS.filter(s=>s.k==='skill').map(s=>`<div class="ul">${skillPill(s.subj)}<span class="at">at ${s.at}</span></div>`).join('')}</div>
+  <div class="uw"><div class="uk">Worth a look</div>
+   <div class="ul">${ico('circle-alert','--error')}<span>1 failed step · <span class="mono" style="font-size:12px">pnpm check</span></span><span class="at">at 1:20</span></div>
+   <div class="ul">${ico('minimize','--text2')}<span>Context compacted · 141k saved</span><span class="at">at 3:00</span></div></div></div>`;
+D.sheet=p=>{
+ const tabs=on=>`<span class="seg"><span class="${on==='s'?'on':''}">Steps<span class="ct">12</span></span><span class="${on==='u'?'on':''}">Usage</span></span>`;
+ const top=(o,on)=>p?`${head(o)}${strip(o.live?LIVE:STEPS,{live:o.live})}<div style="margin-top:10px">${tabs(on)}</div>`:`${head({...o,right:tabs(on)})}${strip(o.live?LIVE:STEPS,{live:o.live})}`;
+ const usage=USAGE;
+ return three(
+  `<div class="card">${head({})}${strip(STEPS)}</div>`,
+  `<div class="sheet">${top({live:1},'s')}<div class="sbody">${earlier()}${ticker({skill:'event'})}</div></div>`,
+  `<div class="sheet">${top({open:1},'s')}<div class="sbody">${STEPS.map(s=>row(s,{skill:'event'})).join('')}</div></div>`,
+  ['unchanged','opening lifts the card into a raised sheet','Steps tab: only steps, nothing else'])
+  +state('Expanded, Usage tab',`<div class="sheet">${top({open:1},'u')}<div class="sbody">${usage}</div></div>`,'skills, cost, context, failures and compaction in one place');
+};
+D.gutter=p=>{
+ const card=o=>`<div class="card">${head({...o,phrase:PHRASE+' · 2 skills',right:o.live?'$0.21':'$0.41'})}${strip(o.live?LIVE:STEPS,{live:o.live})}</div>`;
+ return three(
+  card({}),
+  card({live:1})+`<div class="gut">${earlier()}${ticker({skill:'event'})}</div>`,
+  card({open:1})+`<div class="gut">${STEPS.map(s=>row(s,{skill:'event'})).join('')}</div>`,
+  ['the bill shrinks to its cost; the full bill lives in the hover','',"a hairline hangs the log off the card; nothing follows the last step"]);
+};
+D.today=p=>{
+ const foot=live=>`<div class="flag" style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 0;font-size:12px;color:var(--text2)"><span style="display:inline-flex;gap:5px;align-items:center"><span class="sm" style="display:flex"><i data-lucide="sparkles"></i></span>2 skills</span>${live?'':'<span>compacted</span>'}<span style="color:var(--error)">1 failed</span>${live?LIVEBILL:BILL}</div>`;
+ return three(
+  `<div class="card">${head()}${strip(STEPS)}</div>`,
+  `<div class="card">${head({live:1})}${strip(LIVE,{live:1})}</div><div class="log"><div class="earlier">+ 7 earlier messages</div>${ticker()}${foot(1)}</div>`,
+  `<div class="card">${head({open:1})}${strip(STEPS)}</div><div class="log">${STEPS.map(s=>row(s)).join('')}${foot()}</div>`,
+  ['','the footer reads as the next step','“✦ 2 skills” reads as step 13']);
+};
+/* ---------- round 3: panel × sheet × Jev × strip popover ---------- */
+const M={
+ 1:{n:1,c:'--finding',g:'●',tag:'Finding',at:'0:08',text:'The footer reuses the row indent and icon, so it reads as a step.'},
+ 2:{n:2,c:'--ask',g:'?',tag:'Ask',at:'1:10',ask:1,text:'Keep a skill counter at all, or only mark skills where they loaded? <b>I’ll carry on with the second for now.</b>'},
+ 3:{n:3,c:'--decision',g:'◆',tag:'Decision',at:'1:58',text:'Treating each skill load as an event with a name and a time, not a span.'},
+ 4:{n:4,c:'--risk',g:'!',tag:'Risk',at:'3:02',text:'Compaction dropped my notes on ActivityRow, so I re-read it before editing.'},
+ 5:{n:5,c:'--milestone',g:'●',tag:'Done',at:'4:10',text:'Both drafts are on the tsp page, with every state on desktop and phone.'}};
+const LV={final:[5],key:[2,4,5],balanced:[2,3,4,5],all:[1,2,3,4,5]};
+const msg=(n,d,w)=>({k:'msg',m:n,text:M[n].text,at:M[n].at,d,w});
+const STEPS2=[
+ STEPS[0],STEPS[1],STEPS[2],STEPS[3],STEPS[4],msg(1,'3s',6),msg(2,'2s',4),
+ {k:'skill',subj:'brainstorm',d:'290ms',w:1,at:'1:12'},
+ {k:'edit',subj:'chat/TurnActivity.svelte',d:'1s',w:5,at:'1:13'},
+ {k:'bash',subj:'pnpm check',d:'38s',w:18,fail:1,at:'1:20'},
+ msg(3,'2s',3),
+ {k:'bash',subj:'pnpm check',d:'41s',w:20,at:'2:01'},
+ {k:'compact',at:'3:00'},msg(4,'2s',3),
+ {k:'edit',subj:'chat/ActivityRow.svelte',d:'900ms',w:6,at:'3:58'},msg(5,'2s',3)];
+const LIVE2=STEPS2.slice(0,12);
+const mb=m=>`<span class="mb" style="--c:var(${m.c})">${m.g} ${m.n}</span>`;
+const lu=n=>`<i data-lucide="${n}"></i>`;
+function row2(s,o={}){
+ if(!s.m)return row(s,{...o,skill:'event'});
+ return `<div class="row">${mb(M[s.m])}<span class="msg" style="font-style:normal">${s.text.replace(/<\/?b>/g,'')}</span><time>${s.d}</time></div>`;
+}
+const ticker2=()=>LIVE2.slice(-3).map((s,i)=>row2(s,{live:i===2})).join('');
+function popover(steps,i,x,live){
+ const s=steps[i];const real=steps.filter(t=>t.k!=='compact');
+ let line,fine;
+ if(s.m){const m=M[s.m];line=`${mb(m)}<span class="ptx">${m.text.replace(/<\/?b>/g,'')}</span><span class="pat">${s.at}</span>`;fine=m.ask?'<span style="color:var(--ask)">Needs reply</span> · click to open':'Click to open';}
+ else{const [n,c,v]=K[s.k];const run=live&&i===steps.length-1;
+  line=`${ico(n,s.fail?'--fail':run?'--accent':c)}<span class="v2">${run?'Running':v}</span><span class="ptx mono">${s.subj}</span><span class="dur">${run?'31s so far':s.d}</span>${s.fail?'<span class="perr">failed</span>':''}<span class="pat">${s.at}</span>`;
+  fine=`Step ${real.indexOf(s)+1}${live?'':' of '+real.length} · click to open it in the log`;}
+ return `<span class="cur" style="--x:${x}%"></span><span class="caret" style="--x:${x}%"></span><div class="pop" style="--x:${x}%"><div class="pl">${line}</div><div class="pfine">${fine}</div></div>`;
+}
+function strip2(steps,o={}){
+ const tot=steps.reduce((a,s)=>a+(s.w||0),0);let acc=0;const xs=[];
+ const segs=steps.map((s,i)=>{
+  if(s.k==='compact'){xs.push(acc/tot*100);return '<i class="seam"></i>';}
+  xs.push((acc+s.w/2)/tot*100);acc+=s.w;
+  const live=o.live&&i===steps.length-1;
+  return `<i class="${live?'live':''}" style="flex:${s.w} 1 0;background:var(${s.fail?'--fail':live?'--accent':K[s.k][1]})"></i>`}).join('');
+ const ms=steps.map((s,i)=>s.m?{...M[s.m],x:xs[i]}:null).filter(Boolean);
+ const dots=o.dots?ms.map(m=>`<span class="mdot ${m.ask?'ring':''}" style="--x:${m.x}%;--c:var(${m.c})"></span>`).join(''):'';
+ const pins=o.pins?ms.filter(m=>o.pins.includes(m.n)).map(m=>`<span class="pin ${m.n===o.pinOn?'on':''}" style="--x:${m.x}%;--c:var(${m.c})"><span class="pc"><b>${m.g}</b><span class="n">${m.n}</span></span><span class="ps"></span></span>`).join(''):'';
+ const hv=o.hover==null?'':o.card&&steps[o.hover].m?cardpop(steps,o.hover,xs[o.hover],o.card):popover(steps,o.hover,xs[o.hover],o.live);
+ const cur=o.cur!=null?`<span class="cur" style="--x:${xs[o.cur]}%"></span>`:'';
+ return `<div class="stripw ${o.pins?'pins':''}"><div class="strip">${segs}</div>${dots}${pins}${cur}${hv}</div>`;
+}
+function headJ(o={}){
+ const lead=o.live?`<span class="spin">${lu('loader-circle')}</span><span class="w">Working</span><span class="dur">1m 31s</span>`
+  :`<span class="chev">${lu(o.open?'chevron-down':'chevron-right')}</span><span class="w">Worked</span><span class="dur">4m 12s</span>`;
+ return `<div class="hl">${lead}<span class="ph jh">· ${PHRASE} · 2 skills</span><span class="chip ask">? #2</span><span class="chip unr">${o.live?2:3} unread</span>${o.right?`<span class="hr">${o.right}</span>`:''}</div>`;
+}
+const lv=(on,steps)=>`<span class="seg ${steps?'dial':''}">${[['final','Final'],['key','Key'],['balanced','Balanced'],['all','All']].map(([k,l])=>`<span class="${on===k?'on':''}">${l}<span class="ct">${LV[k].length}</span></span>`).join('')}${steps?`<span class="dv"></span><span class="${on==='steps'?'on':''}">Steps<span class="ct">15</span></span>`:''}</span>`;
+const lvrow=(on,extra='',end='4:12',dial=0)=>`<div class="lvrow"><span class="t">0:00</span>${lv(on,dial)}<span class="t">${end}</span>${extra}</div>`;
+function jev(m,pos,o={}){
+ return `<div class="jc ${m.ask?'ask':''} ${o.pv?'pv':''}"><div class="jtop"><span class="tag" style="--c:var(${m.c})">${m.g} ${m.tag}</span>${m.ask?'<span class="tag" style="--c:var(--ask)">Needs reply</span>':''}${o.live?'<span class="tag" style="--c:var(--accent)">Following latest</span>':''}${o.pv?'<span class="tag" style="--c:var(--accent)">Preview · click to keep</span>':''}<span class="jmeta">#${m.n} · ${m.at} · ${pos}</span></div><div class="jtx">${m.text}</div><div class="jact"><span class="btn">${lu('reply')}Reply</span><span class="btn">${lu('arrow-down')}Lower</span><span class="btn rt">${lu('repeat-2')}Retype</span><span class="nav"><span>${lu('chevron-left')}</span><span>${lu('chevron-right')}</span><span>${lu('x')}</span></span></div>${o.foot??''}</div>`;
+}
+const tabs3=(on,live)=>`<span class="seg"><span class="${on==='m'?'on':''}">Messages<span class="ct">${live?3:5}</span></span><span class="${on==='s'?'on':''}">Steps<span class="ct">${live?11:15}</span></span><span class="${on==='u'?'on':''}">Usage</span></span>`;
+const allRows=()=>STEPS2.map(s=>row2(s)).join('');
+
+D.popover=p=>{
+ const card=(o,steps,i)=>`<div class="hov"><div class="card">${headJ(o)}${strip2(steps,{live:o.live,dots:1,hover:i})}</div></div>`;
+ return state('Hovering a step',card({},STEPS2,9),'the failed check')
+  +state('Hovering a message',card({},STEPS2,6),'the open Ask; click opens it')
+  +state('Live, hovering the running step',card({live:1},LIVE2,11));
+};
+D.ptabs=p=>{
+ const top=(o,on)=>{const t=on?tabs3(on,o.live):'';
+  return `<div class="top">${headJ({...o,right:p?'':t})}${strip2(o.live?LIVE2:STEPS2,{live:o.live,dots:on!=='m',pins:on==='m'?LV.all:null,pinOn:2,hover:o.hover})}${p&&t?`<div class="tabrow">${t}</div>`:''}</div>`};
+ const body=(on,o)=>on==='m'?`<div class="pbody jb">${jev(M[2],'2/5')}${lvrow('all')}</div>`
+  :on==='u'?`<div class="pbody">${USAGE}</div>`
+  :`<div class="pbody">${o.live?earlier(9)+ticker2():allRows()}</div>`;
+ const P=(o,on)=>`<div class="pnl">${top(o,on)}${on?body(on,o):''}</div>`;
+ return state('Collapsed',`<div class="hov">${P({hover:6})}</div>`,'hovering the Ask on the strip')
+  +state('Live',P({live:1},'s'),'opens on Steps while work runs')
+  +state('Expanded',P({open:1},'m'),'opens on Messages once the turn ends; pins replace the dots')
+  +state('Expanded, Steps tab',P({open:1},'s'),'messages sit in the log as badged rows')
+  +state('Expanded, Usage tab',P({open:1},'u'));
+};
+D.jevsheet=p=>{
+ const stepsBtn=open=>`<span class="btn ${open?'on':''}" style="font-family:Geist,sans-serif">${lu('list')}Steps<span class="ct">15</span></span>`;
+ const drawer=(live,inner)=>`<div class="drawer"><div class="dtop"><span class="seg"><span class="on">Steps<span class="ct">${live?11:15}</span></span><span>Usage</span></span></div>${inner}</div>`;
+ return state('Collapsed',`<div class="hov"><div class="card">${headJ({})}${strip2(STEPS2,{dots:1,hover:9})}</div></div>`,'Jev minimised; hovering the failed check')
+  +state('Live',`<div class="card">${headJ({live:1})}${jev(M[3],'3/3',{live:1})}${strip2(LIVE2,{live:1,pins:LV.all,pinOn:3})}${lvrow('all',p?'':stepsBtn(1),'1:31')}</div>${drawer(1,earlier(9)+ticker2())}`,'the drawer follows the work under the latest message')
+  +state('Expanded',`<div class="card">${headJ({open:1})}${jev(M[2],'2/5')}${strip2(STEPS2,{pins:LV.all,pinOn:2})}${lvrow('all',p?'':stepsBtn(1))}</div>${drawer(0,allRows())}`,'messages stay in the card; raw steps pull out underneath');
+};
+D.ftabs=p=>{
+ const foot=(on,live)=>`<div class="ftabs">${[['m','Messages',live?3:5],['s','Steps',live?11:15],['u','Usage','']].map(([k,l,c])=>`<span class="ftab ${on===k?'on':''}">${l}${c!==''?`<span class="ct">${c}</span>`:''}</span>`).join('')}<span class="fright">${live?'$0.21':p?'$0.41':'$0.4123 · ctx <span class="gauge"><b></b></span> 41%'}</span></div>`;
+ const top=(o,on)=>`<div class="top">${headJ(o)}${strip2(o.live?LIVE2:STEPS2,{live:o.live,dots:on!=='m',pins:on==='m'?LV.all:null,pinOn:2,hover:o.hover})}</div>`;
+ return state('Collapsed',`<div class="pnl">${top({})}${foot()}</div>`,'the tab bar is always there')
+  +state('Collapsed, hovering the Ask',`<div class="hov"><div class="pnl">${top({hover:6})}${foot()}</div></div>`,'the popover covers the tabs while it shows')
+  +state('Live',`<div class="pnl">${top({live:1},'s')}<div class="pbody">${earlier(9)+ticker2()}</div>${foot('s',1)}</div>`)
+  +state('Expanded',`<div class="pnl">${top({open:1},'m')}<div class="pbody jb">${jev(M[2],'2/5')}${lvrow('all')}</div>${foot('m')}</div>`,'the accent edge points up at what it opened');
+};
+D.dial=p=>{
+ const top=(o,on)=>{const pins=on&&on!=='steps'?LV[on]:null;
+  return `<div class="top">${headJ(o)}${strip2(o.live?LIVE2:STEPS2,{live:o.live,dots:!pins,pins,pinOn:2,hover:o.hover})}${on?lvrow(on,'',o.live?'1:31':'4:12',1):''}</div>`};
+ const foot=live=>`<div class="pfoot">${live?'':'<span class="pill err">1 failed</span>'}<span class="${p?'mrow':'mright'}">${live?LIVEBILL:BILL}</span></div>`;
+ return state('Collapsed',`<div class="hov"><div class="pnl">${top({hover:9})}</div></div>`,'hovering the failed check')
+  +state('Live',`<div class="pnl">${top({live:1},'steps')}<div class="pbody">${earlier(9)+ticker2()}</div>${foot(1)}</div>`,'the dial sits on Steps while work runs')
+  +state('Expanded, at Key',`<div class="pnl">${top({open:1},'key')}<div class="pbody jb">${jev(M[2],'1/3')}</div>${foot()}</div>`,'once done it returns to your saved level')
+  +state('Expanded, at Steps',`<div class="pnl">${top({open:1},'steps')}<div class="pbody">${allRows()}</div>${foot()}</div>`,'one more stop on the same dial: everything');
+};
+/* ---------- round 4 ---------- */
+const SH=[['final','Answer'],['key','Key'],['balanced','Most'],['all','All messages'],['steps','Full log']];
+const cnt=(k,live)=>k==='steps'?(live?12:15):LV[k].filter(n=>!live||n<=3).length;
+const shName={final:'Answer only',key:'Key messages',balanced:'Most messages',all:'All messages',steps:'Full log'};
+const shDesc={final:'Just the final message',key:'Adds asks and risks',balanced:'Adds decisions',all:'Adds findings: every message',steps:'Adds every step, messages in place'};
+const PLAIN=STEPS2.map(s=>s.m?{k:'msg',text:s.text.replace(/<\/?b>/g,''),d:s.d,w:s.w,at:s.at}:s);
+const PLIVE=PLAIN.slice(0,12);
+const xsOf=steps=>{const tot=steps.reduce((a,s)=>a+(s.w||0),0);let acc=0;return steps.map(s=>{if(s.k==='compact')return acc/tot*100;const x=(acc+s.w/2)/tot*100;acc+=s.w;return x;});};
+const at=(steps,n)=>steps.findIndex(s=>s.m===n);
+function cardpop(steps,i,x,dir){
+ const m=M[steps[i].m];const up=dir==='up';
+ return `<span class="cur" style="--x:${x}%"></span><span class="caret ${up?'up':'dn'} ${m.ask?'ask':''}" style="--x:${x}%"></span><div class="pop cp ${up?'up':''}" style="--x:${x}%">${jev(m,m.n+'/5',{foot:'<div class="pfine" style="padding-top:7px">Hover preview · click to open the turn on this message</div>'})}</div>`;
+}
+function headK(o={}){
+ const ch=`<span class="chev">${lu(o.open||o.live?'chevron-down':'chevron-right')}</span>`;
+ const lead=o.live?`${ch}<span class="spin">${lu('loader-circle')}</span><span class="w">Working</span><span class="dur">1m 31s</span>`:`${ch}<span class="w">Worked</span><span class="dur">4m 12s</span>`;
+ const chips=o.jev===0?'':`<span class="chip ask">? #2</span><span class="chip unr">${o.live?2:3} unread</span>`;
+ return `<div class="hl">${lead}<span class="ph ${o.jev===0?'':'jh'}">· ${PHRASE} · 2 skills</span>${chips}${o.right?`<span class="hr">${o.right}</span>`:''}</div>`;
+}
+const costR=(live,p)=>live?'$0.21':p?'$0.41':'$0.4123 · ctx <span class="gauge"><b></b></span> 41%';
+const usageTab=(on,live,p,dv=1)=>`${dv?'<span class="fdv"></span>':''}<span class="ftab ${on?'on':''}">Usage</span><span class="fright">${costR(live,p)}</span>`;
+const logTab=(on,live)=>`<span class="ftab ${on?'on':''}">Log<span class="ct">${live?12:15}</span></span>`;
+const plainLog=live=>live?earlier(9)+PLIVE.slice(-3).map((s,i)=>row(s,{skill:'event',live:i===2})).join(''):PLAIN.map(s=>row(s,{skill:'event'})).join('');
+const pinsAt=on=>on&&on!=='u'?LV[on==='steps'?'all':on]:null;
+const mbtn=on=>`<span class="mbtn">Show${on&&on!=='u'?`<span class="k">·</span>${shName[on]}`:''}${lu('chevron-down')}</span>`;
+const menu=(on,live)=>`<div class="menu"><div class="mh">Show, least to most</div>${SH.map(([k])=>`<div class="mi ${on===k?'on':''} ${k==='steps'?'sep':''}"><span>${on===k?lu('check'):''}</span><b>${shName[k]}</b><span class="ct">${cnt(k,live)}</span><small>${shDesc[k]}</small></div>`).join('')}</div>`;
+const msgRows=(on,sel)=>LV[on].map(n=>{const m=M[n];return `<div class="row ${n===sel?'sel':''}">${mb(m)}<span class="msg" style="font-style:normal;color:var(--text)">${m.text.replace(/<\/?b>/g,'')}</span><time>${m.at}</time></div>`}).join('');
+const off=(c,l,e,notes=[])=>`<div class="offh">Jev off <span>· no surfacing or categories: no Show control, chips or pins; messages are plain rows in the log</span></div>`+state('Jev off · Collapsed',c,notes[0])+state('Jev off · Live',l,notes[1])+state('Jev off · Expanded',e,notes[2]);
+const jtop=(o,on,dir='up')=>`${headK(o)}${o.m?jev(M[o.m],o.pos,{live:o.live,pv:o.pv}):''}${strip2(o.live?LIVE2:STEPS2,{live:o.live,dots:!pinsAt(on),pins:pinsAt(on),pinOn:o.m,hover:o.hover,card:dir,cur:o.cur})}`;
+const offTop=o=>`${headK({...o,jev:0})}${strip2(o.live?PLIVE:PLAIN,{live:o.live,hover:o.hover})}`;
+
+D.e=p=>{
+ const stops=(on,live)=>p?`<span class="ftab mt">${mbtn(on)}</span>`:`<span class="flab">Show</span>`+SH.map(([k,l])=>`${k==='steps'?'<span class="fdv"></span>':''}<span class="ftab ${on===k?'on':''}">${l}<span class="ct">${cnt(k,live)}</span></span>`).join('');
+ const P=(o,on,body='',mo)=>`<div class="pnl"><div class="top">${jtop(o,on)}</div>${body?`<div class="pbody">${body}</div>`:''}<div class="ftabs">${stops(on,o.live)}${usageTab(on==='u',o.live,p)}${mo?menu(on,o.live):''}</div></div>`;
+ const O=(o,on,body='')=>`<div class="pnl"><div class="top">${offTop(o)}</div>${body?`<div class="pbody">${body}</div>`:''}<div class="ftabs">${logTab(on==='log',o.live)}${usageTab(on==='u',o.live,p)}</div></div>`;
+ return state('Collapsed, hovering the Ask',`<div class="hovup">${P({hover:6})}</div>`,'the full Jev card, as it would open; the bar is always there and any stop opens the turn at it')
+  +state('Live',P({live:1,m:3,pos:'3/3'},'steps',earlier(9)+ticker2()),'chevron left of the spinner collapses it; Full log while work runs')
+  +state('Expanded, Key messages',P({open:1,m:2,pos:'1/3'},'key'),'once done it returns to your saved stop')
+  +state('Expanded, Full log',P({open:1,m:2,pos:'2/5'},'steps',allRows()),'Full log is the last stop, so it includes every message')
+  +state('Expanded, Usage',P({open:1},'u',USAGE))
+  +(p?state('Show menu open',`<div class="menuw">${P({open:1,m:2,pos:'1/3'},'key','',1)}</div>`,'phone: the stops live in a menu that explains each one'):'')
+  +off(O({},''),O({live:1},'log',plainLog(1)),O({open:1},'log',plainLog()),['','Show becomes Log','']);
+};
+D.f=p=>{
+ const sel=(on,live)=>`<div class="shrow"><span class="flab">Show</span><span class="seg sh">${SH.map(([k,l])=>`${k==='steps'?'<span class="dv"></span>':''}<span class="${on===k?'on':''}">${k==='steps'&&!p?lu('panel-bottom-open'):''}${p&&k==='all'?'All msgs':l}${p?'':`<span class="ct">${cnt(k,live)}</span>`}</span>`).join('')}</span></div>`;
+ const card=(o,on)=>`<div class="card">${jtop(o,on)}${on?sel(on==='u'?o.sh:on,o.live):''}</div>`;
+ const lip=(on,live,inner='',tabs='')=>`<div class="drawer dr2">${inner?`<div class="din">${inner}</div>`:''}<div class="ftabs">${tabs}${usageTab(on==='u',live,p,!!tabs)}</div></div>`;
+ return state('Collapsed, hovering the Ask',`<div class="hovup"><div class="card">${jtop({hover:6},null)}</div></div>`)
+  +state('Live',card({live:1,m:3,pos:'3/3'},'steps')+lip(null,1,earlier(9)+ticker2()),'Full log pulls the drawer out under the card')
+  +state('Expanded, Key messages',card({open:1,m:2,pos:'1/3'},'key')+lip(),'no log, so the drawer is just its lip: Usage and cost')
+  +state('Expanded, scrubbing to #4',card({open:1,m:4,pos:'2/3',pv:1,cur:at(STEPS2,4)},'key')+lip(),'drag along the strip: the card swaps in place, as Jev does today')
+  +state('Expanded, Full log',card({open:1,m:2,pos:'2/5'},'steps')+lip(null,0,allRows()))
+  +state('Expanded, Usage',card({open:1,m:2,pos:'1/3',sh:'key'},'u')+lip('u',0,USAGE),'Usage opens the same drawer')
+  +off(`<div class="card">${offTop({})}</div>`,`<div class="card">${offTop({live:1})}</div>`+lip('',1,plainLog(1),logTab(1,1)),`<div class="card">${offTop({open:1})}</div>`+lip('',0,plainLog(),logTab(1,0)),['','the drawer is the log; its lip keeps Log · Usage','']);
+};
+D.g=p=>{
+ const slider=on=>{const i=SH.findIndex(([k])=>k===on);return `<div class="sl"><div class="slt" style="--f:${Math.max(i,0)*25}%"><b></b>${SH.map((_,j)=>`<i class="${j===i?'on':j<i?'in':''}" style="--x:${j*25}%"></i>`).join('')}</div><div class="sll">${SH.map(([k,l],j)=>`<span class="${j===i?'on':''}">${p&&k==='all'?'All msgs':l}</span>`).join('')}</div></div>`};
+ const card=o=>`<div class="card">${jtop(o,o.on)}</div>`;
+ const dr=(on,live,inner,u)=>`<div class="drawer dr2"><div class="din">${u?'':`<div class="dcap"><b>${shName[on]}</b> · ${shDesc[on].toLowerCase()}</div>`}${inner}</div><div class="ftabs gf"><span class="flab">Show</span>${slider(on)}${usageTab(u,live,p)}</div></div>`;
+ return state('Collapsed, hovering the risk',`<div class="hovup">${card({hover:at(STEPS2,4)})}</div>`)
+  +state('Live',card({live:1,m:3,pos:'3/3',on:'steps'})+dr('steps',1,earlier(9)+ticker2()),'')
+  +state('Expanded, Key messages',card({open:1,m:2,pos:'1/3',on:'key'})+dr('key',0,msgRows('key',2)),'the drawer is one list: here, just the 3 key messages, as an index for the card')
+  +state('Expanded, Full log',card({open:1,m:2,pos:'2/5',on:'steps'})+dr('steps',0,allRows()),'slide right and the same list fills in with every step')
+  +state('Expanded, Usage',card({open:1,m:2,pos:'1/3',on:'key'})+dr('key',0,USAGE,1))
+  +off(`<div class="card">${offTop({})}</div>`,`<div class="card">${offTop({live:1})}</div><div class="drawer dr2"><div class="din">${plainLog(1)}</div><div class="ftabs">${logTab(1,1)}${usageTab(0,1,p)}</div></div>`,`<div class="card">${offTop({open:1})}</div><div class="drawer dr2"><div class="din">${plainLog()}</div><div class="ftabs">${logTab(1,0)}${usageTab(0,0,p)}</div></div>`,['','the slider goes; the list is the log','']);
+};
+D.h=p=>{
+ const stepper=(on,live)=>{const i=SH.findIndex(([k])=>k===on);const pv=SH[i-1],nx=SH[i+1];
+  return `<span class="stp"><span class="sbtn ${pv?'':'off'}">${lu('minus')}${pv&&!p?pv[1]:''}</span><span class="scap">${shName[on]}<span class="ct">${cnt(on,live)}</span></span><span class="sbtn ${nx?'':'off'}">${nx&&!p?nx[1]:''}${lu('plus')}</span></span>`};
+ const P=(o,on,body='')=>`<div class="pnl"><div class="top">${jtop(o,on==='u'?null:on)}</div>${body?`<div class="pbody">${body}</div>`:''}${on?`<div class="ftabs">${stepper(on==='u'?o.sh:on,o.live)}${usageTab(on==='u',o.live,p)}</div>`:''}</div>`;
+ const O=(o,on,body='')=>`<div class="pnl"><div class="top">${offTop(o)}</div>${body?`<div class="pbody">${body}</div><div class="ftabs">${logTab(1,o.live)}${usageTab(0,o.live,p)}</div>`:''}</div>`;
+ return state('Collapsed, hovering a step',`<div class="hov">${P({hover:9})}</div>`,'steps keep the one-line popover')
+  +state('Collapsed, hovering the Ask',`<div class="hovup">${P({hover:6})}</div>`,'messages get the full card')
+  +state('Live',P({live:1,m:3,pos:'3/3'},'steps',earlier(9)+ticker2()))
+  +state('Expanded, Key messages',P({open:1,m:2,pos:'1/3'},'key'),'each button names the stop it goes to, so the order teaches itself')
+  +state('Expanded, Full log',P({open:1,m:2,pos:'2/5'},'steps',allRows()),'the end of the scale: + greys out')
+  +state('Expanded, Usage',P({open:1,sh:'key'},'u',USAGE))
+  +off(O({}),O({live:1},'',plainLog(1)),O({open:1},'',plainLog()),['collapsed stays footer-free','','']);
+};
+D.i=p=>{
+ const hang=(steps,o)=>{const m=M[o.m];return `<div class="hangw" style="--x:${xsOf(steps)[at(steps,o.m)]}%"><span class="hcaret ${m.ask?'ask':''}"></span>${jev(m,o.pos,{live:o.live})}</div>`};
+ const top=(o,on)=>{const steps=o.live?LIVE2:STEPS2;return `${headK(o)}${strip2(steps,{live:o.live,dots:!pinsAt(on),pins:pinsAt(on),pinOn:o.m,hover:o.hover,card:'down'})}${o.m?hang(steps,o):''}`};
+ const P=(o,on,body='',mo)=>`<div class="pnl"><div class="top">${top(o,on)}</div>${body?`<div class="pbody">${body}</div>`:''}${on?`<div class="ftabs"><span class="ftab mt">${mbtn(on)}</span>${usageTab(on==='u',o.live,p)}${mo?menu(on,o.live):''}</div>`:''}</div>`;
+ const O=(o,body='')=>`<div class="pnl"><div class="top">${offTop(o)}</div>${body?`<div class="pbody">${body}</div><div class="ftabs">${logTab(1,o.live)}${usageTab(0,o.live,p)}</div>`:''}</div>`;
+ return state('Collapsed, hovering the Ask',`<div class="hovdn">${P({hover:6})}</div>`,'the card hangs from the strip exactly where it sits when open')
+  +state('Live',P({live:1,m:3,pos:'3/3'},'steps',earlier(9)+ticker2()),'')
+  +state('Expanded, Key messages',P({open:1,m:2,pos:'1/3'},'key'),'the caret ties the card to its moment on the strip')
+  +state('Show menu open',`<div class="menuw">${P({open:1,m:2,pos:'1/3'},'key','',1)}</div>`,'one button, and the menu says what each stop adds')
+  +state('Expanded, Full log',P({open:1,m:2,pos:'2/5'},'steps',allRows()))
+  +state('Expanded, Usage',P({open:1},'u',USAGE))
+  +off(O({}),O({live:1},plainLog(1)),O({open:1},plainLog()));
+};
+function show(key,phone){if(phone)document.body.classList.add('phone');const d=document.createElement('div');d.innerHTML=D[key](!!phone);document.body.prepend(d);lucide.createIcons();}
+</script>
+</head><body><script>show('popover',1)</script></body></html>

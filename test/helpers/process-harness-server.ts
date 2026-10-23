@@ -13,7 +13,7 @@ import { Session } from "node:inspector/promises";
 import { join } from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Effect, Fiber } from "effect";
+import { Context, Effect, Fiber, HashMap, Ref } from "effect";
 
 // Event-loop stalls and read-model reads for load tests, flushed to a file the
 // spec reads after each phase. Stalls are wall-clock end times and durations.
@@ -353,6 +353,892 @@ async function main(): Promise<void> {
 		? join(dist, "src")
 		: fileURLToPath(new URL("../../src", import.meta.url));
 	const extension = dist ? "js" : "ts";
+	// Drop only fixture-selected attachments, after the real hello restores demand.
+	const attachmentFault = join(root, "runner-attachment-drop.json");
+	if (existsSync(attachmentFault)) {
+		const net = await import("node:net");
+		const { syncBuiltinESMExports } = await import("node:module");
+		const connections = new Map<string, import("node:net").Socket>();
+		const attempts = new Map<string, number>();
+		const connect = net.default.createConnection;
+		Object.assign(net.default, {
+			createConnection: (
+				options: string | import("node:net").NetConnectOpts,
+				listener?: () => void,
+			) => {
+				const target =
+					typeof options === "string" ? { path: options } : options;
+				const socket = connect(target, listener);
+				const path = "path" in target ? target.path : undefined;
+				if (path && existsSync(attachmentFault)) {
+					const { socketPaths }: { socketPaths: string[] } = JSON.parse(
+						readFileSync(attachmentFault, "utf8"),
+					);
+					if (socketPaths.includes(path)) {
+						connections.set(path, socket);
+						const attempt = (attempts.get(path) ?? 0) + 1;
+						attempts.set(path, attempt);
+						appendFileSync(
+							`${attachmentFault}.attempts.ndjson`,
+							`${JSON.stringify({ socketPath: path, attempt, daemonPid: process.pid })}\n`,
+						);
+						if (attempt > 1) socket.destroy();
+					}
+				}
+				return socket;
+			},
+		});
+		syncBuiltinESMExports();
+		const send = process.send?.bind(process);
+		Object.assign(process, {
+			send: (message: import("node:child_process").Serializable) => {
+				if (
+					typeof message === "object" &&
+					message !== null &&
+					"kind" in message &&
+					message.kind === "runner-started" &&
+					"socketPath" in message &&
+					typeof message.socketPath === "string" &&
+					existsSync(attachmentFault)
+				) {
+					const { socketPaths }: { socketPaths: string[] } = JSON.parse(
+						readFileSync(attachmentFault, "utf8"),
+					);
+					if (socketPaths.includes(message.socketPath)) {
+						connections.get(message.socketPath)?.destroy();
+						appendFileSync(
+							`${attachmentFault}.ndjson`,
+							`${JSON.stringify({ socketPath: message.socketPath, daemonPid: process.pid })}\n`,
+						);
+					}
+				}
+				return send?.(message);
+			},
+		});
+	}
+	if (existsSync(join(root, "hold-draft-launch"))) {
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const resolveCall = OrchestrationEngine.prototype.resolveCallContextEffect;
+		Object.assign(OrchestrationEngine.prototype, {
+			resolveCallContextEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				request: Parameters<typeof resolveCall>[0],
+			) {
+				const caller = this;
+				return Effect.gen(function* () {
+					const call = yield* resolveCall.call(caller, request);
+					yield* Effect.gen(function* () {
+						const hold = join(root, "hold-draft-launch");
+						if (
+							request.sessionId !== "" ||
+							!existsSync(hold) ||
+							request.workspaceRoot !== readFileSync(hold, "utf8")
+						)
+							return;
+						writeFileSync(join(root, "draft-launch-held"), "");
+						while (existsSync(hold)) yield* Effect.sleep(10);
+					});
+					return call;
+				});
+			},
+		});
+	}
+	if (existsSync(join(root, "thread-read-proof.json"))) {
+		const readProbe = (): { sessionId: string; projectId: string } =>
+			JSON.parse(readFileSync(join(root, "thread-read-proof.json"), "utf8"));
+		const record = (
+			kind: "before-borrow" | "missing-project",
+			result: unknown,
+		) =>
+			appendFileSync(
+				join(root, "thread-read-probes.ndjson"),
+				`${JSON.stringify({ daemonPid: process.pid, kind, result })}\n`,
+			);
+		const { ClaudeDriver } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/claude",
+					`claude-provider-instance.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/claude/claude-provider-instance.js");
+		const { ProjectRegistryTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`project-registry-service.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/project-registry-service.js");
+		const create = ClaudeDriver.create;
+		Object.assign(ClaudeDriver, {
+			create: (
+				deps: import("../../src/lib/provider/claude/claude-provider-instance.js").ClaudeProviderInstanceDeps,
+			) =>
+				Effect.gen(function* () {
+					const projects = yield* ProjectRegistryTag;
+					const readThread = deps.readThread;
+					if (!readThread)
+						throw new Error("Thread-read fixture requires the daemon reader");
+					const startup = readProbe();
+					if (startup.sessionId) {
+						const result = yield* readThread(startup.sessionId, { limit: 1 });
+						yield* Effect.sync(() => record("before-borrow", result));
+					}
+					let probedMissingProject = false;
+					return yield* create({
+						...deps,
+						readThread: (sessionId, input) =>
+							Effect.gen(function* () {
+								const probe = readProbe();
+								if (sessionId === probe.sessionId && !probedMissingProject) {
+									probedMissingProject = true;
+									const project = HashMap.get(
+										yield* Ref.get(projects),
+										probe.projectId,
+									);
+									if (project._tag !== "Some")
+										throw new Error(
+											"Thread-read probe project is not registered",
+										);
+									const result = yield* Ref.update(
+										projects,
+										HashMap.remove(probe.projectId),
+									).pipe(
+										Effect.andThen(readThread(sessionId, input)),
+										Effect.ensuring(
+											Ref.update(
+												projects,
+												HashMap.set(probe.projectId, project.value),
+											),
+										),
+									);
+									yield* Effect.sync(() => record("missing-project", result));
+								}
+								return yield* readThread(sessionId, input);
+							}),
+					});
+				}),
+		});
+	}
+	if (existsSync(join(root, "daemon-overrides-proof.json"))) {
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const overrides = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/relay/Services",
+					`session-overrides-state.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/session-overrides-state.js");
+		const record = (entry: Record<string, unknown>) =>
+			appendFileSync(
+				join(root, "daemon-overrides.ndjson"),
+				`${JSON.stringify({ ...entry, at: Date.now() })}\n`,
+			);
+		const resolveCall = OrchestrationEngine.prototype.resolveCallContextEffect;
+		const seeded = new Set<string>();
+		Object.assign(OrchestrationEngine.prototype, {
+			resolveCallContextEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				request: Parameters<typeof resolveCall>[0],
+			) {
+				const engine = this;
+				return Effect.gen(function* () {
+					const sessionId = request.sessionId;
+					if (sessionId) {
+						const fixture = JSON.parse(
+							readFileSync(join(root, "daemon-overrides-proof.json"), "utf8"),
+						) as {
+							seedSession?: string;
+							armSession?: string;
+							inspectSessions?: string[];
+							timeoutMs: number;
+						};
+						if (fixture.armSession === sessionId && !seeded.has(sessionId)) {
+							seeded.add(sessionId);
+							yield* overrides.setAgent(sessionId, "session-only-agent");
+							yield* overrides.startProcessingTimeout(
+								sessionId,
+								fixture.timeoutMs,
+								() => Effect.sync(() => record({ kind: "timeout", sessionId })),
+							);
+						}
+						// Inject transient state at the real relay context. Durable picks
+						// would otherwise hide replacement with startup restoration.
+						if (fixture.seedSession === sessionId && !seeded.has(sessionId)) {
+							seeded.add(sessionId);
+							yield* overrides.setAgent(sessionId, "session-only-agent");
+							const timeout = (yield* Ref.get(
+								yield* overrides.OverridesStateTag,
+							)).processingTimeouts.get(sessionId);
+							if (!timeout)
+								return yield* Effect.die(
+									new Error("Running turn has no timeout"),
+								);
+							yield* overrides.startProcessingTimeout(
+								sessionId,
+								fixture.timeoutMs,
+								() =>
+									Effect.sync(() =>
+										record({ kind: "timeout", sessionId }),
+									).pipe(Effect.andThen(timeout.callback())),
+							);
+						}
+						record({
+							kind: "state",
+							sessionId,
+							defaultAgent: yield* overrides.getDefaultAgent(),
+							overrides: yield* overrides.getOverrides(sessionId),
+							timeoutActive:
+								yield* overrides.hasActiveProcessingTimeout(sessionId),
+							entries: yield* Effect.forEach(
+								fixture.inspectSessions ?? [],
+								(id) =>
+									Effect.gen(function* () {
+										return {
+											sessionId: id,
+											overrides: yield* overrides.getOverrides(id),
+											timeoutActive:
+												yield* overrides.hasActiveProcessingTimeout(id),
+										};
+									}),
+							),
+						});
+					}
+					return yield* resolveCall.call(engine, request);
+				});
+			},
+		});
+	}
+	if (existsSync(join(root, "daemon-session-workspace-proof"))) {
+		const { SessionWorkspaceTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/relay/Services",
+					`session-workspace.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/session-workspace.js");
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const { ConfigTag } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/domain/relay/Services", `services.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/services.js");
+		const { SessionManagerServiceTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/relay/Services",
+					`session-manager-service.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/session-manager-service.js");
+		const resolveCall = OrchestrationEngine.prototype.resolveCallContextEffect;
+		type Workspace =
+			import("../../src/lib/domain/relay/Services/session-workspace.js").SessionWorkspace;
+		const owners = new Map<Workspace, number>();
+		const heldLaunches = new Set<string>();
+		let first: Workspace | undefined;
+		Object.assign(OrchestrationEngine.prototype, {
+			resolveCallContextEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				request: Parameters<typeof resolveCall>[0],
+			) {
+				const caller = this;
+				return Effect.gen(function* () {
+					const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+					if (request.sessionId && workspace._tag === "Some") {
+						first ??= workspace.value;
+						if (!owners.has(workspace.value))
+							owners.set(workspace.value, owners.size + 1);
+						// Exercise the retained service without a caller-supplied root.
+						const directory = yield* first.get(request.sessionId);
+						const state = yield* first.claudeWorktreeState(request.sessionId);
+						appendFileSync(
+							join(root, "daemon-session-workspace.ndjson"),
+							`${JSON.stringify({
+								sessionId: request.sessionId,
+								owner: owners.get(workspace.value),
+								directory,
+								requestedPath: state.requestedPath,
+							})}\n`,
+						);
+						const gate = join(root, `workspace-launch-${request.sessionId}`);
+						if (existsSync(gate) && !heldLaunches.has(gate)) {
+							heldLaunches.add(gate);
+							// Keep a caller alive beyond relay disposal to prove a removed
+							// generation's held permit cannot block its replacement.
+							const hold = workspace.value.withLaunch(
+								request.sessionId,
+								Effect.gen(function* () {
+									writeFileSync(`${gate}-started`, "held");
+									while (!existsSync(`${gate}-release`))
+										yield* Effect.sleep("10 millis");
+									writeFileSync(`${gate}-finished`, "released");
+								}),
+							);
+							const mode = readFileSync(gate, "utf8");
+							yield* (
+								mode === "no-project"
+									? hold.pipe(Effect.updateContext(() => Context.empty()))
+									: mode === "empty-project"
+										? hold.pipe(
+												Effect.provideService(ConfigTag, {
+													...(yield* ConfigTag),
+													slug: "",
+												}),
+											)
+										: hold
+							).pipe(Effect.forkDetach);
+							if (existsSync(join(root, "workspace-retention-proof"))) {
+								const manager = yield* SessionManagerServiceTag;
+								yield* Effect.gen(function* () {
+									writeFileSync(`${gate}-retention-started`, "daemon callback");
+									// AutoSettle calls the captured manager from the daemon context.
+									yield* manager.deleteArchivedSessions(
+										30 * 86_400_000,
+										Date.now(),
+									);
+									writeFileSync(`${gate}-retention-finished`, "swept");
+								}).pipe(
+									Effect.updateContext(() => Context.empty()),
+									Effect.forkDetach,
+								);
+							}
+						}
+					}
+					return yield* resolveCall.call(caller, request);
+				});
+			},
+		});
+	}
+	if (existsSync(join(root, "project-context-proof"))) {
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const resolveCall = OrchestrationEngine.prototype.resolveCallContextEffect;
+		let firstEngine: InstanceType<typeof OrchestrationEngine> | undefined;
+		const engines = new Map<InstanceType<typeof OrchestrationEngine>, number>();
+		Object.assign(OrchestrationEngine.prototype, {
+			resolveCallContextEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				request: Parameters<typeof resolveCall>[0],
+			) {
+				const caller = this;
+				return Effect.gen(function* () {
+					if (request.sessionId) {
+						firstEngine ??= caller;
+						if (!engines.has(caller)) engines.set(caller, engines.size + 1);
+						// No caller-provided folders: the retained engine must find the
+						// session's current project itself, even after another relay changes.
+						const call = yield* resolveCall.call(firstEngine, {
+							sessionId: request.sessionId,
+							...(request.account ? { account: request.account } : {}),
+							prepareShellEnv: true,
+						});
+						appendFileSync(
+							join(root, "project-context.ndjson"),
+							`${JSON.stringify({
+								callerEngine: engines.get(caller),
+								resolutionEngine: engines.get(firstEngine),
+								sessionId: request.sessionId,
+								projectId: call?.projectId,
+								workspaceRoot: call?.workspaceRoot,
+								extraFolders: call?.extraFolders,
+								projectOwner: call?.shellEnv["PROJECT_OWNER"],
+								shellProof: call?.shellEnv["CONDUIT_ENV_PROOF"],
+							})}\n`,
+						);
+					}
+					return yield* resolveCall.call(caller, request);
+				});
+			},
+		});
+	}
+	if (
+		existsSync(join(root, "daemon-adapters-proof")) ||
+		existsSync(join(root, "daemon-engine-proof"))
+	) {
+		const proofPath = join(
+			root,
+			existsSync(join(root, "daemon-engine-proof"))
+				? "daemon-engine.ndjson"
+				: "daemon-adapters.ndjson",
+		);
+		const record = (entry: Record<string, unknown>) =>
+			appendFileSync(
+				proofPath,
+				`${JSON.stringify({ daemonPid: process.pid, ...entry })}\n`,
+			);
+		const { ProviderRegistry } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `provider-registry.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/provider-registry.js");
+		const { RunnerProviderInstance } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/runner",
+					`runner-provider-instance.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/runner/runner-provider-instance.js");
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const { ClaudeDriver } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/claude",
+					`claude-provider-instance.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/claude/claude-provider-instance.js");
+		const { CursorAccountResources } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/provider/cursor",
+					`cursor-account-resources.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/provider/cursor/cursor-account-resources.js");
+		const { AccountResourceScopesTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`account-resource-scopes.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/account-resource-scopes.js");
+		const { PersistenceProjectTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/persistence/Services",
+					`persistence-service.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/persistence/Services/persistence-service.js");
+		const resourceIdentities = new WeakMap<object, number>();
+		const observedOwners = new WeakSet<object>();
+		const observedScopes = new WeakSet<object>();
+		const resourceGenerations = new Map<string, number>();
+		const activeResources = new Map<
+			string,
+			{ resourceIdentity: number; generation: number }
+		>();
+		let nextResourceIdentity = 0;
+		const createClaude = ClaudeDriver.create;
+		Object.assign(ClaudeDriver, {
+			create: (
+				deps: import("../../src/lib/provider/claude/claude-provider-instance.js").ClaudeProviderInstanceDeps,
+			) =>
+				createClaude(deps).pipe(
+					Effect.tap(() =>
+						Effect.gen(function* () {
+							const scopes = yield* Effect.serviceOption(
+								AccountResourceScopesTag,
+							);
+							if (scopes._tag === "Some" && !observedScopes.has(scopes.value)) {
+								const owner = scopes.value;
+								observedScopes.add(owner);
+								const invalidate = owner.invalidate;
+								Object.assign(owner, {
+									invalidate: (accountId: string) =>
+										Effect.gen(function* () {
+											record({ kind: "invalidation-start", accountId });
+											while (
+												existsSync(join(root, `invalidate-${accountId}.hold`))
+											)
+												yield* Effect.sleep("10 millis");
+											yield* invalidate(accountId);
+											const resource = activeResources.get(accountId);
+											if (resource) {
+												// invalidate returns after closing the exact account scope.
+												record({
+													kind: "account-scope-close",
+													driver: "cursor",
+													accountId,
+													...resource,
+													cause: "invalidation-completed",
+												});
+												activeResources.delete(accountId);
+											}
+											record({ kind: "invalidation-end", accountId });
+										}),
+								});
+							}
+							const resources = yield* Effect.serviceOption(
+								CursorAccountResources,
+							);
+							if (
+								resources._tag === "None" ||
+								observedOwners.has(resources.value)
+							)
+								return;
+							const owner = resources.value;
+							observedOwners.add(owner);
+							const use = owner.use;
+							const observedUse: typeof owner.use = (selected, work) => {
+								const accountId =
+									typeof selected === "string" ? selected : "cursor-login-slot";
+								return use(selected, (resource) =>
+									Effect.suspend(() => {
+										let identity = resourceIdentities.get(resource);
+										if (identity === undefined) {
+											identity = ++nextResourceIdentity;
+											resourceIdentities.set(resource, identity);
+											const generation =
+												(resourceGenerations.get(accountId) ?? 0) + 1;
+											resourceGenerations.set(accountId, generation);
+											activeResources.set(accountId, {
+												resourceIdentity: identity,
+												generation,
+											});
+											record({
+												kind: "account-scope-open",
+												driver: "cursor",
+												accountId,
+												resourceIdentity: identity,
+												generation,
+											});
+										}
+										record({
+											kind: "account-scope-use",
+											driver: "cursor",
+											accountId,
+											resourceIdentity: identity,
+											generation: resourceGenerations.get(accountId),
+										});
+										return work(resource);
+									}),
+								);
+							};
+							Object.assign(owner, { use: observedUse });
+						}),
+					),
+				),
+		});
+		const identities = new WeakMap<object, string>();
+		const register = ProviderRegistry.prototype.registerInstance;
+		ProviderRegistry.prototype.registerInstance = function (instance) {
+			if (!identities.has(instance)) {
+				const identity = `${instance.providerId}-${++nextIdentity}`;
+				identities.set(instance, identity);
+				record({
+					kind: "adapter-constructed",
+					driver: instance.providerId,
+					identity,
+					constructorName: instance.constructor.name,
+				});
+				const send = instance.sendTurnEffect.bind(instance);
+				const interrupt = instance.interruptTurnEffect.bind(instance);
+				instance.interruptTurnEffect = (...args) =>
+					Effect.gen(function* () {
+						const gate = join(root, "hold-control-delivery");
+						if (existsSync(gate)) {
+							record({ kind: "control-gap" });
+							while (existsSync(gate)) yield* Effect.sleep("10 millis");
+						}
+						return yield* interrupt(...args);
+					});
+				instance.sendTurnEffect = (input) =>
+					Effect.suspend(() => {
+						record({
+							kind: "send",
+							driver: instance.providerId,
+							identity,
+							sessionId: input.sessionId,
+							projectId: input.projectId,
+							accountId: input.account?.id,
+							workspaceRoot: input.workspaceRoot,
+							extraFolders: input.extraFolders,
+							shellMarker: input.shellEnv?.["PROJECT_OWNER"],
+						});
+						return Effect.gen(function* () {
+							const gate = join(root, "hold-provider-intake");
+							if (
+								existsSync(gate) &&
+								readFileSync(gate, "utf8") === input.sessionId
+							) {
+								record({ kind: "provider-intake-gap" });
+								while (existsSync(gate)) yield* Effect.sleep("10 millis");
+							}
+							return yield* send(input).pipe(
+								Effect.catch((error) => {
+									if (error.code !== "runner_detached")
+										return Effect.fail(error);
+									return Effect.gen(function* () {
+										const gate = join(root, "hold-detachment-error");
+										if (existsSync(gate)) {
+											record({ kind: "detachment-error-gap" });
+											while (existsSync(gate)) yield* Effect.sleep("10 millis");
+										}
+										record({ kind: "detachment-error-released" });
+										return yield* Effect.fail(error);
+									});
+								}),
+							);
+						});
+					});
+				const shutdown = instance.shutdownEffect.bind(instance);
+				instance.shutdownEffect = () =>
+					Effect.suspend(() => {
+						record({ kind: "shutdown", driver: instance.providerId, identity });
+						return shutdown();
+					});
+				if (instance instanceof RunnerProviderInstance) {
+					const attach = instance.attachSessionsEffect.bind(instance);
+					instance.attachSessionsEffect = (...args) =>
+						Effect.gen(function* () {
+							record({
+								kind: "attachment",
+								driver: instance.providerId,
+								sessionIds: args[0],
+							});
+							const gate = join(root, "hold-attachment");
+							if (
+								instance.providerId === "claude" &&
+								existsSync(gate) &&
+								args[0].includes(readFileSync(gate, "utf8"))
+							) {
+								record({ kind: "attachment-gap" });
+								while (existsSync(gate)) yield* Effect.sleep("10 millis");
+								if (existsSync(join(root, "fail-attachment")))
+									return yield* Effect.die(
+										new Error("Fixture attachment failure"),
+									);
+							}
+							yield* attach(...args);
+							if (existsSync(join(root, "repeat-attachment"))) {
+								yield* attach(...args);
+								record({
+									kind: "attachment-repeated",
+									driver: instance.providerId,
+									sessionIds: args[0],
+								});
+							}
+						});
+					const recover = instance.recoverProjectContextsEffect.bind(instance);
+					instance.recoverProjectContextsEffect = (...args) =>
+						Effect.suspend(() => {
+							record({
+								kind: "recovery-start",
+								driver: instance.providerId,
+								identity,
+							});
+							return recover(...args).pipe(
+								Effect.tap(() =>
+									Effect.sync(() =>
+										record({
+											kind: "recovery-end",
+											driver: instance.providerId,
+											identity,
+										}),
+									),
+								),
+							);
+						});
+				}
+			}
+			return register.call(this, instance);
+		};
+		let nextIdentity = 0;
+		const engines = new WeakMap<object, number>();
+		let nextEngineIdentity = 0;
+		const engineIdentity = (engine: object) => {
+			let identity = engines.get(engine);
+			if (identity === undefined) {
+				identity = ++nextEngineIdentity;
+				engines.set(engine, identity);
+				record({ kind: "engine-observed", engineIdentity: identity });
+			}
+			return identity;
+		};
+		subscribe("conduit.orchestration.engine", (message) => {
+			const event = message as { event: string; engine: object };
+			record({
+				kind: `engine-${event.event}`,
+				engineIdentity: engineIdentity(event.engine),
+			});
+		});
+		const dispatch = OrchestrationEngine.prototype.dispatchEffect;
+		Object.assign(OrchestrationEngine.prototype, {
+			dispatchEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				command: import("../../src/lib/provider/orchestration-engine.js").OrchestrationCommand,
+			) {
+				record({
+					kind: "engine-command",
+					engineIdentity: engineIdentity(this),
+					commandId: command.commandId,
+					commandType: command.type,
+				});
+				return dispatch.call(this, command).pipe(
+					Effect.onExit((exit) =>
+						Effect.sync(() =>
+							record({
+								kind: "engine-command-exit",
+								commandId: command.commandId,
+								outcome: exit._tag,
+							}),
+						),
+					),
+				);
+			},
+		});
+		const drain = OrchestrationEngine.prototype.drainSideEffects;
+		const ownsPending = OrchestrationEngine.prototype.ownsPendingSend;
+		OrchestrationEngine.prototype.ownsPendingSend = function (...args) {
+			const owned = ownsPending.apply(this, args);
+			record({
+				kind: "pending-send-owner",
+				sessionId: args[0],
+				commandId: args[1],
+				owned,
+			});
+			return owned;
+		};
+		const { RelayCacheTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`relay-cache.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/relay-cache.js");
+		const { InputDraftsTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/relay/Services",
+					`input-drafts.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/input-drafts.js");
+		const { AccountDirectory } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`account-directory.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/account-directory.js");
+		let relayGateInstalled = false;
+		OrchestrationEngine.prototype.drainSideEffects = function (...args) {
+			return Effect.gen({ self: this }, function* () {
+				const detach = join(root, "detach-relay");
+				if (existsSync(detach)) {
+					const slug = readFileSync(detach, "utf8");
+					renameSync(detach, `${detach}.done`);
+					const cache = yield* Effect.serviceOption(RelayCacheTag);
+					if (cache._tag === "Some") {
+						yield* cache.value.invalidate(slug);
+						record({ kind: "relay-gap", projectId: slug });
+					}
+				}
+				if (!relayGateInstalled) {
+					const accounts = yield* Effect.serviceOption(AccountDirectory);
+					if (accounts._tag === "Some") {
+						const resolve = accounts.value.resolve;
+						const gated: typeof resolve = (...args) =>
+							Effect.gen(function* () {
+								const gate = join(root, "hold-claimed-account");
+								if (existsSync(gate)) {
+									const db = new DatabaseSync(
+										join(root, "config", "events.db"),
+									);
+									const claimed = db
+										.prepare(
+											"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+										)
+										.get(readFileSync(gate, "utf8"));
+									db.close();
+									const entered = join(root, "claimed-account-entered");
+									if (
+										claimed?.["status"] === "running" &&
+										!existsSync(entered)
+									) {
+										writeFileSync(entered, "");
+										record({ kind: "claimed-account-gap" });
+										while (existsSync(gate)) yield* Effect.sleep("10 millis");
+									}
+								}
+								return yield* resolve(...args);
+							});
+						Object.assign(accounts.value, { resolve: gated });
+					}
+					const drafts = yield* Effect.serviceOption(InputDraftsTag);
+					if (drafts._tag === "Some") {
+						const invalidate = drafts.value.invalidateList;
+						Object.assign(drafts.value, {
+							invalidateList: () =>
+								Effect.gen(function* () {
+									const gate = join(root, "hold-import-publication");
+									if (existsSync(gate)) {
+										record({ kind: "import-gap" });
+										while (existsSync(gate)) yield* Effect.sleep("10 millis");
+									}
+									return yield* invalidate();
+								}),
+						});
+					}
+					const service = yield* Effect.serviceOption(RelayCacheTag);
+					if (service._tag === "Some") {
+						const cache = service.value;
+						const get = cache.get;
+						cache.get = (slug) =>
+							Effect.gen(function* () {
+								const gate = join(root, `hold-relay-${slug}`);
+								if (existsSync(gate)) {
+									record({ kind: "relay-gap", projectId: slug });
+									while (existsSync(gate)) yield* Effect.sleep("10 millis");
+								}
+								return yield* get(slug);
+							});
+						relayGateInstalled = true;
+					}
+				}
+				const project = yield* Effect.serviceOption(PersistenceProjectTag);
+				record({
+					kind: "outbox-drain",
+					engineIdentity: engineIdentity(this),
+					...(project._tag === "Some"
+						? { projectId: project.value.projectId }
+						: {}),
+				});
+				return yield* drain.apply(this, args);
+			});
+		};
+	}
 	if (existsSync(join(root, "claude-end-session-failure-fixture"))) {
 		const { OrchestrationEngine } = (await import(
 			pathToFileURL(
@@ -399,10 +1285,10 @@ async function main(): Promise<void> {
 					Effect.tap((instance) =>
 						Effect.sync(() => {
 							const endSession = instance.endSessionEffect.bind(instance);
-							instance.endSessionEffect = (sessionId) =>
+							instance.endSessionEffect = (sessionId, call, control) =>
 								Effect.suspend(() => {
 									if (!existsSync(join(root, `fail-end-session-${sessionId}`)))
-										return endSession(sessionId);
+										return endSession(sessionId, call, control);
 									appendFileSync(
 										join(root, "end-session-failures.ndjson"),
 										`${JSON.stringify({ sessionId })}\n`,
@@ -562,7 +1448,12 @@ async function main(): Promise<void> {
 		opencodeUrl:
 			process.env["CONDUIT_TEST_OPENCODE_URL"] ?? "http://127.0.0.1:0",
 		keepAwake: false,
-		logLevel: process.env["LOG_LEVEL"] === "warn" ? "warn" : "error",
+		logLevel:
+			process.env["LOG_LEVEL"] === "info"
+				? "info"
+				: process.env["LOG_LEVEL"] === "warn"
+					? "warn"
+					: "error",
 	});
 	daemon = activeDaemon;
 	if (disconnected) {

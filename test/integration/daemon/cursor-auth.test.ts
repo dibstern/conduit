@@ -3,8 +3,10 @@
 // stale credentials in existing runners, and secrets escaping into RPC/captures.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CURRENT_CONFIG_VERSION } from "../../../src/lib/daemon/config-persistence.js";
 
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -54,6 +56,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 	let tracePath = "";
 	let capturePath = "";
 	let authStatePath = "";
+	let commandLogPath = "";
 	let scenario = "setup";
 	let invariants: Record<string, boolean> = {};
 	const scenarios: Record<string, unknown>[] = [];
@@ -67,6 +70,10 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			catalogTtlMs?: number;
 			environmentKey?: boolean;
 			initialCredential?: boolean;
+			backendUrl?: string;
+			storedBackendUrl?: string;
+			recordCommands?: boolean;
+			compatibilityAccount?: boolean;
 		} = {},
 	) {
 		scenario = name;
@@ -75,9 +82,50 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 		});
 		const fixture = harness;
+		if (options.compatibilityAccount) {
+			const path = join(fixture.configDir, "daemon.json");
+			const config = JSON.parse(readFileSync(path, "utf8")) as Record<
+				string,
+				unknown
+			>;
+			writeFileSync(
+				path,
+				JSON.stringify({
+					...config,
+					configVersion: CURRENT_CONFIG_VERSION,
+					instances: [
+						{
+							id: "cursor-command-account",
+							name: "Cursor compatibility",
+							driver: "cursor",
+							port: 0,
+							managed: false,
+						},
+					],
+					accountDefaults: { cursor: "cursor-command-account" },
+				}),
+			);
+		}
 		tracePath = join(fixture.root, "cursor-auth-replay.jsonl");
 		capturePath = join(fixture.root, "cursor-auth-capture.jsonl");
 		authStatePath = join(fixture.root, "cursor-replay-auth.json");
+		commandLogPath = join(fixture.root, "runner-commands.jsonl");
+		const commandRecorder = join(fixture.root, "record-runner-commands.mjs");
+		if (options.recordCommands) {
+			writeFileSync(
+				commandRecorder,
+				`
+import { appendFileSync } from "node:fs";
+import { RunnerSocket } from ${JSON.stringify(pathToFileURL(resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist", "src/lib/provider/runner/runner-protocol.js")).href)};
+const write = RunnerSocket.prototype.write;
+RunnerSocket.prototype.write = function(message) {
+  if (message.type === "command" && message.command.type === "send-turn")
+    appendFileSync(${JSON.stringify(commandLogPath)}, JSON.stringify(message) + "\\n");
+  return write.call(this, message);
+};
+`,
+			);
+		}
 		const auth = traceRows(
 			resolve("test/fixtures/cursor-sdk-traces/auth-login.jsonl"),
 		);
@@ -95,6 +143,9 @@ describe("Cursor authentication through the built daemon and detached runners", 
 								...(auth.find(({ kind }) => kind === "credential.store")
 									?.data as Record<string, unknown>),
 								apiKey: "[REDACTED:before-login]",
+								...(options.storedBackendUrl
+									? { backendUrl: options.storedBackendUrl }
+									: {}),
 							},
 						}
 					: { status: { status: "logged-out" }, credential: null },
@@ -104,6 +155,10 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			startupTimeoutMs: TIMEOUT,
 			runnerStartupTimeoutMs: TIMEOUT,
 			serviceEnvironment: {
+				CURSOR_BACKEND_URL: options.backendUrl ?? "https://api2.cursor.sh",
+				...(options.recordCommands
+					? { NODE_OPTIONS: `--import=${pathToFileURL(commandRecorder).href}` }
+					: {}),
 				CONDUIT_CURSOR_SDK_TRACE: tracePath,
 				CONDUIT_CURSOR_SDK_CAPTURE: capturePath,
 				CONDUIT_TEST_CURSOR_AUTH_STATE: authStatePath,
@@ -201,6 +256,250 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			harness = undefined;
 		}
 	});
+
+	it("C1 B: refuses another backend's stored login but accepts trailing slashes", async () => {
+		const fixture = await start("backend-credential", {
+			initialCredential: true,
+			backendUrl: "https://cursor-backend.example.test/",
+			storedBackendUrl: "https://cursor-backend.example.test///",
+		});
+		const { addedInstanceId: accountId } = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor backend",
+			driver: "cursor",
+		});
+		if (!accountId) throw new Error("Missing Cursor account");
+		const browser = await fixture.connect();
+		const id = await browser.createSession(
+			"Backend credential",
+			accountId,
+			"cursor",
+			{
+				modelId: "composer-2.5",
+				contextWindow: "",
+			},
+		);
+		expect(
+			(await browser.send(id, "Matching backend", TIMEOUT)).chunks.join(""),
+		).toBe(BASIC_TEXT);
+		const state = JSON.parse(readFileSync(authStatePath, "utf8")) as {
+			status: Record<string, unknown>;
+			credential: Record<string, unknown>;
+		};
+		writeFileSync(
+			authStatePath,
+			JSON.stringify({
+				...state,
+				credential: {
+					...state.credential,
+					backendUrl: "https://other-backend.example.test",
+				},
+			}),
+		);
+		await browser.send(id, "Do not send this key to another backend", TIMEOUT);
+		expect(storedTurns(fixture, id).states).toEqual(["completed", "error"]);
+		expect(storedTurns(fixture, id).errors).toEqual([
+			expect.objectContaining({
+				code: "auth_required",
+				error: expect.stringMatching(
+					/logging in replaces the stored login for.*other-backend/i,
+				),
+			}),
+		]);
+		expect(
+			traceRows(capturePath).filter(({ kind }) => kind === "send.options"),
+		).toHaveLength(1);
+		invariants = {
+			matchingBackendNormalised: true,
+			otherBackendNeverSentToSdk: true,
+		};
+	}, 240_000);
+
+	it.each([
+		"stored",
+		"account-env",
+		"launch-env",
+	] as const)("C1 C: logging the prepared runner send command does not expose the API key (%s)", async (source) => {
+		const fixture = await start("redacted-runner-command", {
+			initialCredential: true,
+			recordCommands: true,
+			environmentKey: source !== "stored",
+			compatibilityAccount: source === "launch-env",
+		});
+		const accountId =
+			source === "launch-env"
+				? "cursor-command-account"
+				: (
+						await fixture.requestRpc({
+							_tag: "AddInstance",
+							name: "Cursor redacted",
+							driver: "cursor",
+							...(source === "account-env"
+								? { env: { CURSOR_API_KEY: "[REDACTED:environment]" } }
+								: {}),
+						})
+					).addedInstanceId;
+		if (!accountId) throw new Error("Missing Cursor account");
+		const browser = await fixture.connect();
+		const id = await browser.createSession(
+			"Redacted command",
+			accountId,
+			"cursor",
+			{
+				modelId: "composer-2.5",
+				contextWindow: "",
+			},
+		);
+		expect(
+			(
+				await browser.send(id, "Use the prepared credential", TIMEOUT)
+			).chunks.join(""),
+		).toBe(BASIC_TEXT);
+		const logged = readFileSync(commandLogPath, "utf8");
+		expect(logged).toContain('"type":"send-turn"');
+		expect(logged).not.toContain("[REDACTED:before-login]");
+		expect(logged).not.toContain("[REDACTED:environment]");
+		invariants = {
+			commandLoggedBeforeWireEncoding: true,
+			secretAbsentFromCommandLog: true,
+			runnerReceivedCredential: true,
+		};
+	}, 240_000);
+
+	it("C1 D: auth status reports a stored login for another backend as an error", async () => {
+		const fixture = await start("backend-auth-status", {
+			initialCredential: true,
+			backendUrl: "https://cursor-backend.example.test",
+		});
+		expect(await fixture.requestRpc({ _tag: "GetCursorAuth" })).toMatchObject({
+			source: "sdk-login",
+			status: "error",
+			error: expect.stringMatching(
+				/logging in replaces the stored login for.*api2\.cursor\.sh/i,
+			),
+		});
+		invariants = { otherBackendNotLoggedIn: true };
+	}, 240_000);
+
+	it("C1: reports an expired stored login consistently in auth status and turns", async () => {
+		const fixture = await start("expired-credential", {
+			initialCredential: true,
+		});
+		const { addedInstanceId: accountId } = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor expiry",
+			driver: "cursor",
+		});
+		if (!accountId) throw new Error("Missing Cursor account");
+		const browser = await fixture.connect();
+		const id = await browser.createSession(
+			"Expired credential",
+			accountId,
+			"cursor",
+			{ modelId: "composer-2.5", contextWindow: "" },
+		);
+		const state = JSON.parse(readFileSync(authStatePath, "utf8")) as {
+			status: Record<string, unknown>;
+			credential: Record<string, unknown>;
+		};
+		writeFileSync(
+			authStatePath,
+			JSON.stringify({
+				...state,
+				credential: { ...state.credential, apiKeyExpiresAtMs: Date.now() - 1 },
+			}),
+		);
+		expect(
+			await fixture.requestRpc({ _tag: "GetCursorAuth", accountId }),
+		).toMatchObject({
+			source: "sdk-login",
+			status: "error",
+			error: expect.stringMatching(/expired.*log in/i),
+		});
+		await browser.send(id, "Do not use an expired key", TIMEOUT);
+		expect(storedTurns(fixture, id).errors).toEqual([
+			expect.objectContaining({
+				code: "auth_required",
+				error: expect.stringMatching(/expired.*log in/i),
+			}),
+		]);
+		expect(
+			traceRows(capturePath).filter(({ kind }) => kind === "send.options"),
+		).toEqual([]);
+	}, 240_000);
+
+	it("C1: rejects an account-level backend override", async () => {
+		const fixture = await start("account-backend-rejection");
+		await expect(
+			fixture.requestRpc({
+				_tag: "AddInstance",
+				name: "Invalid Cursor backend",
+				driver: "cursor",
+				env: { CURSOR_BACKEND_URL: "https://other-backend.example.test" },
+			}),
+		).rejects.toThrow(/CURSOR_BACKEND_URL.*daemon/i);
+	}, 240_000);
+
+	it("C1: retires a detached runner when the daemon changes backend", async () => {
+		const fixture = await start("runner-backend-upgrade", {
+			environmentKey: true,
+		});
+		const { addedInstanceId: accountId } = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Cursor backend upgrade",
+			driver: "cursor",
+			env: { CURSOR_API_KEY: "[REDACTED:environment]" },
+		});
+		if (!accountId) throw new Error("Missing Cursor account");
+		const browser = await fixture.connect();
+		const id = await browser.createSession(
+			"Runner backend upgrade",
+			accountId,
+			"cursor",
+			{ modelId: "composer-2.5", contextWindow: "" },
+		);
+		expect(
+			(await browser.send(id, "Before backend change", TIMEOUT)).chunks.join(
+				"",
+			),
+		).toBe(BASIC_TEXT);
+		const before = fixture.remainingRunnerPids();
+		expect(before).toHaveLength(1);
+		await fixture.terminate();
+		await fixture.restart({
+			startupTimeoutMs: TIMEOUT,
+			runnerStartupTimeoutMs: TIMEOUT,
+			serviceEnvironment: {
+				CURSOR_BACKEND_URL: "https://other-backend.example.test///",
+				CURSOR_API_KEY: "[REDACTED:environment]",
+				CONDUIT_CURSOR_SDK_TRACE: tracePath,
+				CONDUIT_CURSOR_SDK_CAPTURE: capturePath,
+				CONDUIT_TEST_CURSOR_AUTH_STATE: authStatePath,
+			},
+		});
+		const recovered = await fixture.connect();
+		expect(
+			(await recovered.send(id, "After backend change", TIMEOUT)).chunks.join(
+				"",
+			),
+		).toBe(BASIC_TEXT);
+		const after = fixture.remainingRunnerPids();
+		expect(after).toHaveLength(1);
+		expect(after[0]).not.toBe(before[0]);
+		const opens = traceRows(capturePath)
+			.filter(
+				({ kind }) => kind === "create.options" || kind === "resume.options",
+			)
+			.map(({ data }) => data as Record<string, unknown>);
+		expect(opens).toHaveLength(2);
+		expect(opens[1]?.["credentialFingerprint"]).not.toBe(
+			opens[0]?.["credentialFingerprint"],
+		);
+		invariants = {
+			otherBackendRunnerRetired: true,
+			freshBackendCredential: true,
+		};
+	}, 240_000);
 
 	it("shows one login link, completes once, reports the key expiry, and refreshes one routable account", async () => {
 		const fixture = await start("login-status-directory");
@@ -428,6 +727,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			_tag: "AddInstance",
 			name: "Cursor environment",
 			driver: "cursor",
+			env: { CURSOR_API_KEY: "[REDACTED:environment]" },
 		});
 		expect(added.instances.filter(({ driver }) => driver === "cursor")).toEqual(
 			[expect.objectContaining({ available: true })],

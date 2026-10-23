@@ -55,6 +55,17 @@ function snapshot(harness: ProcessHarness, sessionId: string) {
 					"SELECT status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
 				)
 				.all(sessionId),
+			ends: db
+				.prepare(
+					"SELECT outbox.command_id, outbox.provider_process_id, outbox.status, outbox.attempt_count, receipt.status AS receipt_status FROM provider_command_outbox outbox JOIN command_receipts receipt ON receipt.command_id = outbox.command_id AND receipt.project_key = outbox.project_key WHERE outbox.session_id = ? AND outbox.effect_type = 'end_session' ORDER BY outbox.request_sequence",
+				)
+				.all(sessionId) as Array<{
+				command_id: string;
+				provider_process_id: string;
+				status: string;
+				attempt_count: number;
+				receipt_status: string;
+			}>,
 			runReservations: (
 				db
 					.prepare(
@@ -76,7 +87,12 @@ function snapshot(harness: ProcessHarness, sessionId: string) {
 				.all(sessionId),
 			approvals: db
 				.prepare(
-					"SELECT id, type, status, decision FROM pending_approvals WHERE session_id = ?",
+					"SELECT id, type, status, decision, provider_process_id FROM pending_approvals WHERE session_id = ?",
+				)
+				.all(sessionId),
+			promptResolutions: db
+				.prepare(
+					"SELECT type, json_extract(data, '$.id') AS id, json_extract(metadata, '$.source') AS source FROM events WHERE session_id = ? AND type IN ('permission.resolved', 'question.resolved') ORDER BY sequence",
 				)
 				.all(sessionId),
 			queued: db
@@ -109,7 +125,7 @@ function started(harness: ProcessHarness) {
 describe("Claude runner admission socket probes", () => {
 	const probes: Array<Awaited<ReturnType<typeof probe>>> = [];
 
-	async function probe(mode: "idle" | "reject" | "delayed") {
+	async function probe(mode: "idle" | "reject" | "delayed", orphan = false) {
 		// Runner test marks are plain IPC objects; Vitest's fork uses encoded IPC.
 		const send = process.send;
 		if (send)
@@ -163,6 +179,7 @@ describe("Claude runner admission socket probes", () => {
 		const socketPath = join(directory, runnerId);
 		const sockets = new Set<Socket>();
 		const commands: string[] = [];
+		const helloRoots: Array<string | undefined> = [];
 		const outputs: import("../../../src/lib/provider/runner/session-runner.js").SessionOutput[] =
 			[];
 		const received = await Effect.runPromise(Deferred.make<void>());
@@ -204,6 +221,7 @@ describe("Claude runner admission socket probes", () => {
 					if (message.type === "output-reply")
 						Deferred.doneUnsafe(released, Effect.void);
 					if (message.type === "hello") {
+						helloRoots.push(message.config?.workspaceRoot);
 						if (mode === "delayed") {
 							delayedPeer = peer;
 							Deferred.doneUnsafe(received, Effect.void);
@@ -252,6 +270,7 @@ describe("Claude runner admission socket probes", () => {
 			socketPath,
 			buildId: BUILD_ID,
 			pid,
+			...(orphan ? { role: "candidate" as const } : {}),
 		});
 		const runnerPids = new Set([pid]);
 		const fixture = {
@@ -263,6 +282,7 @@ describe("Claude runner admission socket probes", () => {
 			server,
 			sockets,
 			commands,
+			helloRoots,
 			outputs,
 			received,
 			released,
@@ -283,7 +303,11 @@ describe("Claude runner admission socket probes", () => {
 				if (delayedPeer) replyHello(delayedPeer);
 			},
 			make: makeProcessClaudeSessionRunner(
-				{ workspaceRoot, daemonConfigDir: configDir },
+				{
+					projectRootForSession: () =>
+						Effect.succeed(orphan ? undefined : workspaceRoot),
+					daemonConfigDir: configDir,
+				},
 				(output) =>
 					Effect.sync(() => {
 						outputs.push(output);
@@ -347,6 +371,7 @@ describe("Claude runner admission socket probes", () => {
 						result: context.task.result?.state,
 						attempts: fixture.attempts,
 						commands: fixture.commands,
+						helloRoots: fixture.helloRoots,
 						outputs: fixture.outputs,
 						cleanup,
 					},
@@ -361,6 +386,22 @@ describe("Claude runner admission socket probes", () => {
 		vi.unstubAllEnvs();
 		vi.restoreAllMocks();
 	});
+
+	it("retires an orphan candidate through an identity hello without starting provider work", async () => {
+		const fixture = await probe("idle", true);
+		probes.push(fixture);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* fixture.make;
+					yield* runner.recoverEffect;
+					expect(fixture.helloRoots).toEqual([fixture.configDir]);
+					expect(fixture.commands).toEqual(["shutdown"]);
+					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(false);
+				}),
+			),
+		);
+	}, 15_000);
 
 	it("releases a pending send's retained sink when its caller is cancelled", async () => {
 		const fixture = await probe("idle");
@@ -416,9 +457,15 @@ describe("Claude runner admission socket probes", () => {
 						Effect.timeout("6 seconds"),
 					);
 					expect(ended).toMatchObject({
-						_tag: "Failure",
-						failure: { code: "runner_idle_exit" },
+						_tag: "Success",
 					});
+					// End succeeds only after the old process has actually stopped.
+					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(false);
+					expect(fixture.commands).toEqual([
+						"send-turn",
+						"end-session",
+						"shutdown",
+					]);
 					expect(
 						(yield* Fiber.join(send).pipe(Effect.timeout("10 seconds"))).status,
 					).toBe("accepted");
@@ -434,6 +481,81 @@ describe("Claude runner admission socket probes", () => {
 			),
 		);
 	}, 30_000);
+
+	it.each([
+		"abort",
+		"already-aborted",
+		"interrupt",
+		"continuation-interrupt",
+	])("cancels an undelivered send during adoption via %s", async (mode) => {
+		const fixture = await probe("delayed");
+		probes.push(fixture);
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* fixture.make;
+					const recovery = yield* Effect.forkChild(runner.recoverEffect);
+					yield* Deferred.await(fixture.received);
+					const send = yield* Effect.forkChild(
+						runner.executeEffect({
+							...fixture.send,
+							aborted: mode === "already-aborted",
+							input: {
+								...fixture.send.input,
+								...(mode === "continuation-interrupt"
+									? { continuation: { cutOffMessageId: "original-user" } }
+									: {}),
+							},
+						}),
+					);
+					if (mode !== "already-aborted") {
+						yield* Effect.sleep("20 millis");
+						if (mode === "abort")
+							yield* runner.executeEffect({
+								type: "abort",
+								sinkId: fixture.send.sinkId,
+							});
+						else {
+							yield* Effect.forkChild(
+								runner.executeEffect({
+									type: "interrupt",
+									sessionId: fixture.send.input.sessionId,
+									turnIds: ["unrelated-input"],
+								}),
+							);
+							yield* Effect.sleep("20 millis");
+							expect(fixture.outputs).not.toContainEqual({
+								type: "release-sink",
+								sinkId: fixture.send.sinkId,
+							});
+							yield* Effect.forkChild(
+								runner.executeEffect({
+									type: "interrupt",
+									sessionId: fixture.send.input.sessionId,
+									turnIds: [
+										mode === "continuation-interrupt"
+											? "original-user"
+											: fixture.send.input.inputId,
+									],
+								}),
+							);
+						}
+					}
+					expect(
+						yield* Fiber.join(send).pipe(Effect.timeout("2 seconds")),
+					).toMatchObject({ status: "cancelled" });
+					expect(fixture.commands).not.toContain("send-turn");
+					expect(fixture.outputs).toContainEqual({
+						type: "release-sink",
+						sinkId: fixture.send.sinkId,
+					});
+					fixture.allowHello();
+					yield* Fiber.join(recovery);
+					expect(fixture.commands).not.toContain("send-turn");
+				}),
+			),
+		);
+	}, 15_000);
 
 	it("makes pre-warm a no-op while adoption is retrying", async () => {
 		const fixture = await probe("reject");
@@ -562,6 +684,10 @@ describe("Claude runner admission socket probes", () => {
 	}, 30_000);
 });
 
+// Adoption boots two daemons and two runners. Cold daemon loads have taken
+// 22.9s under load, before cleanup or RPC work. All event waits share this budget.
+const LIFECYCLE_TIMEOUT_MS = 120_000;
+
 describe("built-dist Claude runner lifecycle", () => {
 	const fixtures: Array<{ harness: ProcessHarness; sessionId?: string }> = [];
 	afterEach(async (context) => {
@@ -602,22 +728,32 @@ describe("built-dist Claude runner lifecycle", () => {
 		fixtures.length = 0;
 	});
 
+	function waitFor(
+		harness: ProcessHarness,
+		assertion: () => unknown,
+		options: { timeout?: number } = {},
+	) {
+		return vi.waitFor(assertion, {
+			timeout: harness.remainingTimeMs(options.timeout ?? 1000),
+		});
+	}
+
 	async function start(
 		runnerLifecycle?: NonNullable<
 			Parameters<typeof ProcessHarness.start>[0]
 		>["runnerLifecycle"],
-		options: { runnerStartupTimeoutMs?: number } = {},
 	) {
 		expect(existsSync("dist/src/bin/claude-session-runner.js")).toBe(true);
 		const harness = ProcessHarness.create({
 			dist: resolve("dist"),
+			deadline: performance.now() + LIFECYCLE_TIMEOUT_MS,
 			...(runnerLifecycle ? { runnerLifecycle } : {}),
 		});
 		const fixture: { harness: ProcessHarness; sessionId?: string } = {
 			harness,
 		};
 		fixtures.push(fixture);
-		await harness.restart(options);
+		await harness.restart();
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Runner lifecycle");
 		fixture.sessionId = sessionId;
@@ -628,7 +764,9 @@ describe("built-dist Claude runner lifecycle", () => {
 		const { harness, browser, sessionId } = await start();
 		const sent = browser.send(sessionId, "fail-before-intake");
 		void sent.catch(() => undefined);
-		await vi.waitFor(
+		await sent;
+		await waitFor(
+			harness,
 			() => {
 				const state = snapshot(harness, sessionId);
 				expect(state.commands).toEqual([{ status: "failed" }]);
@@ -647,7 +785,9 @@ describe("built-dist Claude runner lifecycle", () => {
 						},
 					]),
 				);
-				const db = new Database(harness.daemonStorePath(), { readonly: true });
+				const db = new Database(harness.daemonStorePath(), {
+					readonly: true,
+				});
 				try {
 					expect(
 						db
@@ -667,15 +807,13 @@ describe("built-dist Claude runner lifecycle", () => {
 			},
 			{ timeout: 25_000 },
 		);
-		await sent;
-	}, 30_000);
+	});
 
 	it("reclaims a pre-warmed runner through the idle policy without a send", async () => {
-		const { harness, browser, sessionId } = await start(
-			{ idleTimeoutMs: 500 },
-			{ runnerStartupTimeoutMs: 25_000 },
-		);
-		await browser.preWarmSession(sessionId, 30_000);
+		const { harness, browser, sessionId } = await start({
+			idleTimeoutMs: 500,
+		});
+		await browser.preWarmSession(sessionId);
 		await harness.waitForMark((mark) => mark.kind === "runner-started");
 		const runner = started(harness);
 		const query = harness.marks.find((mark) => mark.kind === "query");
@@ -690,7 +828,12 @@ describe("built-dist Claude runner lifecycle", () => {
 			),
 		).toBe(true);
 		expect(() => process.kill(runner.pid, 0)).not.toThrow();
-		await vi.waitFor(
+		await harness.waitForMark(
+			(mark) =>
+				mark.kind === "runner-idle-exit-started" && mark.pid === runner.pid,
+		);
+		await waitFor(
+			harness,
 			() => {
 				expect(
 					harness.marks.some(
@@ -717,22 +860,20 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(state.events.some((event) => event.type === "turn.error")).toBe(
 			false,
 		);
-	}, 60_000);
+	});
 
 	it("exits after the idle window, resets it on activity, and respawns on send", async () => {
 		const idleTimeoutMs = 1200;
-		const { harness, browser, sessionId } = await start(
-			{ idleTimeoutMs },
-			{ runnerStartupTimeoutMs: 25_000 },
-		);
-		await browser.send(sessionId, "idle-first", 30_000);
+		const { harness, browser, sessionId } = await start({ idleTimeoutMs });
+		await browser.send(sessionId, "idle-first");
 		const first = started(harness);
 		await new Promise<void>((done) => setTimeout(done, 700));
 		await browser.send(sessionId, "ambient-idle");
 		expect(started(harness).pid).toBe(first.pid);
 		await new Promise<void>((done) => setTimeout(done, 700));
 		expect(() => process.kill(first.pid, 0)).not.toThrow();
-		await vi.waitFor(
+		await waitFor(
+			harness,
 			() => {
 				expect(() => process.kill(first.pid, 0)).toThrow();
 				expect(existsSync(first.socketPath)).toBe(false);
@@ -744,50 +885,127 @@ describe("built-dist Claude runner lifecycle", () => {
 				(event) => event.type === "turn.error",
 			),
 		).toBe(false);
-		const next = await browser.send(sessionId, "idle-restart", 30_000);
+		const next = await browser.send(sessionId, "idle-restart");
 		expect(next.chunks.join("")).toBe(responseChunks("idle-restart").join(""));
 		expect(next.done["status"]).toBe("idle");
 		expect(started(harness).pid).not.toBe(first.pid);
-		await vi.waitFor(() =>
+		await waitFor(harness, () =>
 			expect(snapshot(harness, sessionId).commands).toEqual([
 				{ status: "completed" },
 				{ status: "completed" },
 				{ status: "completed" },
 			]),
 		);
-	}, 90_000);
+	});
 
 	it("releases end-session admission when interrupted before runner readiness", async () => {
-		const { harness, browser, sessionId } = await start({ helloDelayMs: 3000 });
+		const { harness, browser, sessionId } = await start({
+			helloDelayMs: 3000,
+		});
 		const first = browser.send(sessionId, "before-interrupted-end");
 		void first.catch(() => undefined);
-		await harness.waitForMark((mark) => mark.kind === "runner-hello-pending");
-		const controller = new AbortController();
-		const reload = browser.reloadSession(sessionId, controller.signal).then(
-			() => "completed",
-			() => "interrupted",
+		const hello = await harness.waitForMark(
+			(mark) => mark.kind === "runner-hello-pending",
 		);
-		await harness.waitForMark(
-			(mark) =>
-				mark.kind === "runner-end-selected" && mark.sessionId === sessionId,
-		);
-		controller.abort();
-		expect(await reload).toBe("interrupted");
+		if (hello.kind !== "runner-hello-pending") throw new Error("Missing hello");
+		// Keep readiness blocked while the RPC abort and durable reads run,
+		// independent of how long this loaded machine takes to schedule them.
+		process.kill(hello.pid, "SIGSTOP");
+		let ends: ReturnType<typeof snapshot>["ends"];
+		try {
+			const controller = new AbortController();
+			const reload = browser.reloadSession(sessionId, controller.signal).then(
+				() => "completed",
+				() => "interrupted",
+			);
+			await harness.waitForMark(
+				(mark) =>
+					mark.kind === "runner-end-selected" && mark.sessionId === sessionId,
+			);
+			controller.abort();
+			expect(await reload).toBe("interrupted");
+			// Interrupting the RPC detaches its waiter; the accepted End still owns
+			// admission while it waits for this runner's hello.
+			ends = snapshot(harness, sessionId).ends;
+			expect(ends).toEqual([
+				{
+					command_id: expect.any(String),
+					provider_process_id: expect.any(String),
+					status: "running",
+					attempt_count: 1,
+					receipt_status: "side_effect_requested",
+				},
+			]);
+			expect(
+				harness.marks.filter(
+					(mark) =>
+						mark.kind === "runner-command" && mark.type === "end-session",
+				),
+			).toEqual([]);
+		} finally {
+			process.kill(hello.pid, "SIGCONT");
+		}
 		expect((await first).done["status"]).toBe("idle");
+		const firstCompleted = snapshot(harness, sessionId).events.some(
+			(event) => event.type === "turn.completed",
+		);
 		const runner = started(harness);
+		expect(runner.socketPath.endsWith(`/${ends[0]?.provider_process_id}`)).toBe(
+			true,
+		);
 		const next = await browser.send(sessionId, "after-interrupted-end");
 		expect(next.done["status"]).toBe("idle");
 		expect(next.chunks.join("")).toBe(
 			responseChunks("after-interrupted-end").join(""),
 		);
-		expect(started(harness).pid).toBe(runner.pid);
-		await vi.waitFor(() =>
-			expect(snapshot(harness, sessionId).commands).toEqual([
+		expect(started(harness).pid).not.toBe(runner.pid);
+		expect(() => process.kill(runner.pid, 0)).toThrow();
+		expect(existsSync(runner.socketPath)).toBe(false);
+		expect(() => process.kill(started(harness).pid, 0)).not.toThrow();
+		await waitFor(harness, () => {
+			const state = snapshot(harness, sessionId);
+			expect(state.ends).toEqual([
+				{
+					...ends[0],
+					status: "completed",
+					receipt_status: "side_effect_completed",
+				},
+			]);
+			expect(state.commands).toEqual([
+				{ status: firstCompleted ? "completed" : "failed" },
 				{ status: "completed" },
-				{ status: "completed" },
-			]),
-		);
-	}, 40_000);
+			]);
+			expect(state.receipts).toEqual([
+				{
+					status: firstCompleted
+						? "side_effect_completed"
+						: "side_effect_failed",
+				},
+				{ status: "side_effect_completed" },
+			]);
+			expect(state.turns).toEqual([
+				{ state: firstCompleted ? "completed" : "error" },
+				{ state: "completed" },
+			]);
+			expect(state.session).toEqual({ status: "idle" });
+			expect(state.queued).toEqual([]);
+		});
+		expect(
+			harness.marks.filter(
+				(mark) => mark.kind === "runner-command" && mark.type === "end-session",
+			),
+		).toEqual([expect.objectContaining({ commandId: ends[0]?.command_id })]);
+		expect(
+			snapshot(harness, sessionId).events.filter(
+				(event) => event.type === "session.end_requested",
+			),
+		).toEqual([
+			{
+				type: "session.end_requested",
+				data: { providerProcessId: ends[0]?.provider_process_id },
+			},
+		]);
+	});
 
 	it("respawns transparently for a send racing idle exit admission", async () => {
 		const { harness, browser, sessionId } = await start({
@@ -796,7 +1014,12 @@ describe("built-dist Claude runner lifecycle", () => {
 		});
 		await browser.send(sessionId, "before-idle-race");
 		const first = started(harness);
-		await vi.waitFor(
+		await harness.waitForMark(
+			(mark) =>
+				mark.kind === "runner-idle-exit-started" && mark.pid === first.pid,
+		);
+		await waitFor(
+			harness,
 			() =>
 				expect(
 					harness.marks.some(
@@ -818,7 +1041,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(started(harness).pid).not.toBe(first.pid);
 		await browser.answerApproval(approval, "allow");
 		expect((await turn).done["status"]).toBe("idle");
-		await vi.waitFor(() =>
+		await waitFor(harness, () =>
 			expect(snapshot(harness, sessionId).commands).toEqual([
 				{ status: "completed" },
 				{ status: "completed" },
@@ -840,7 +1063,7 @@ describe("built-dist Claude runner lifecycle", () => {
 				(event) => event.type === "turn.error",
 			),
 		).toBe(false);
-	}, 35_000);
+	});
 
 	it("uses the active daemon config directory for idle policy and sockets", async () => {
 		const { harness, browser, sessionId } = await start({
@@ -850,7 +1073,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		const activeDir = join(harness.root, "active-config");
 		const path = join(activeDir, "daemon.json");
 		await browser.setAutoSettle(null);
-		await vi.waitFor(() =>
+		await waitFor(harness, () =>
 			expect(
 				(JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>)[
 					"autoSettleAfterDays"
@@ -871,7 +1094,9 @@ describe("built-dist Claude runner lifecycle", () => {
 		await new Promise<void>((done) => setTimeout(done, 500));
 		expect(() => process.kill(first.pid, 0)).not.toThrow();
 		await browser.setAutoSettle(1);
-		await vi.waitFor(
+		await browser.send(sessionId, "admit-active-config-idle-policy");
+		await waitFor(
+			harness,
 			() => {
 				expect(() => process.kill(first.pid, 0)).toThrow();
 				expect(existsSync(first.socketPath)).toBe(false);
@@ -882,10 +1107,12 @@ describe("built-dist Claude runner lifecycle", () => {
 			(await browser.send(sessionId, "active-config-restart")).done["status"],
 		).toBe("idle");
 		expect(started(harness).pid).not.toBe(first.pid);
-	}, 35_000);
+	});
 
 	it("keeps a pending approval alive beyond the idle window", async () => {
-		const { harness, browser, sessionId } = await start({ idleTimeoutMs: 100 });
+		const { harness, browser, sessionId } = await start({
+			idleTimeoutMs: 100,
+		});
 		const pending = browser.send(sessionId, "approval-idle");
 		const request = await browser.waitFor(
 			(message) => message["type"] === "permission_pending",
@@ -895,10 +1122,12 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(() => process.kill(runner.pid, 0)).not.toThrow();
 		await browser.answerApproval(request, "allow");
 		expect((await pending).done["status"]).toBe("idle");
-		await vi.waitFor(() =>
-			expect(snapshot(harness, sessionId).session).toEqual({ status: "idle" }),
+		await waitFor(harness, () =>
+			expect(snapshot(harness, sessionId).session).toEqual({
+				status: "idle",
+			}),
 		);
-	}, 30_000);
+	});
 
 	it("honors a disabled idle policy", async () => {
 		const { harness, browser, sessionId } = await start({
@@ -908,7 +1137,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		const runner = started(harness);
 		await new Promise<void>((done) => setTimeout(done, 400));
 		expect(() => process.kill(runner.pid, 0)).not.toThrow();
-	}, 30_000);
+	});
 
 	it.each([
 		"stall",
@@ -932,7 +1161,8 @@ describe("built-dist Claude runner lifecycle", () => {
 		process.kill(runner.pid, "SIGKILL");
 		const { done } = await pending;
 		expect(done["lastTurnEndVersion"]).toEqual(expect.any(Number));
-		await vi.waitFor(
+		await waitFor(
+			harness,
 			() => {
 				const state = snapshot(harness, sessionId);
 				expect(state.session).toEqual({ status: "idle" });
@@ -960,8 +1190,10 @@ describe("built-dist Claude runner lifecycle", () => {
 			responseChunks("after-crash").join(""),
 		);
 		expect(started(harness).pid).not.toBe(runner.pid);
-		await vi.waitFor(() =>
-			expect(snapshot(harness, sessionId).session).toEqual({ status: "idle" }),
+		await waitFor(harness, () =>
+			expect(snapshot(harness, sessionId).session).toEqual({
+				status: "idle",
+			}),
 		);
 		expect(
 			reconnect.frames.some(
@@ -970,7 +1202,7 @@ describe("built-dist Claude runner lifecycle", () => {
 					message["type"] === "question_pending",
 			),
 		).toBe(false);
-	}, 30_000);
+	});
 
 	it.each([
 		"crash",
@@ -985,7 +1217,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		);
 		if (phase === "crash") {
 			process.kill(started(harness).pid, "SIGKILL");
-			await vi.waitFor(() =>
+			await waitFor(harness, () =>
 				expect(JSON.stringify(harness.proof())).toContain(
 					"Claude runner failed",
 				),
@@ -1044,7 +1276,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		await browser.answerApproval(approval, "allow");
 		await browser.waitForTurnEnd(sessionId, cursor);
 		await replacement;
-		await vi.waitFor(() => {
+		await waitFor(harness, () => {
 			const state = snapshot(harness, sessionId);
 			expect(state.session).toEqual({ status: "idle" });
 			expect(state.turns).toEqual([
@@ -1063,7 +1295,7 @@ describe("built-dist Claude runner lifecycle", () => {
 			for (const approval of state.approvals)
 				expect(approval).toMatchObject({ status: "resolved" });
 		});
-	}, 35_000);
+	});
 
 	it.each([
 		"server",
@@ -1076,7 +1308,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		);
 		const turn = await browser.send(sessionId, "protocol-refusal");
 		expect(turn.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
-		await vi.waitFor(() => {
+		await waitFor(harness, () => {
 			const state = snapshot(harness, sessionId);
 			expect(state.session).toEqual({ status: "idle" });
 			expect(state.turns).toEqual([{ state: "error" }]);
@@ -1094,14 +1326,145 @@ describe("built-dist Claude runner lifecycle", () => {
 			);
 		});
 		expect(harness.marks.some((mark) => mark.kind === "query")).toBe(false);
-	}, 30_000);
+	});
+
+	it.each([
+		["protocol version", "permission"],
+		["run ownership", "permission"],
+		["protocol version", "question"],
+		["run ownership", "question"],
+	] as const)("settles a live runner refused at adoption for %s with a pending %s and sends again", async (reason, prompt) => {
+		const { harness, browser, sessionId } = await start({
+			runnerHelloAfterFirst: true,
+			...(reason === "protocol version"
+				? { runnerHelloProtocolVersion: 999 }
+				: { runnerHelloWithoutRunIds: true }),
+		});
+		const pending = browser.send(
+			sessionId,
+			`${prompt === "permission" ? "approval" : "question"}-adoption-refusal`,
+		);
+		void pending.catch(() => undefined);
+		await browser.waitFor((frame) => frame["type"] === `${prompt}_pending`);
+		const runner = started(harness);
+		expect(testRunnerAlive(runner.pid)).toBe(true);
+		const before = snapshot(harness, sessionId);
+		expect(before.turns).toEqual([{ state: "running" }]);
+		expect(before.approvals).toEqual([
+			expect.objectContaining({
+				type: prompt,
+				status: "pending",
+				provider_process_id: discoverRunners(
+					harness.projectDir,
+					harness.configDir,
+				).find((entry) => entry.pid === runner.pid)?.runnerId,
+			}),
+		]);
+		await harness.kill();
+		expect(testRunnerAlive(runner.pid)).toBe(true);
+		// Migration 0063 leaves legacy prompts without a provider process owner.
+		const legacyPromptId = `legacy-${prompt}`;
+		const db = new Database(harness.daemonStorePath());
+		try {
+			db.prepare(
+				`INSERT INTO pending_approvals (id, session_id, turn_id, type, tool_name, input, created_at)
+					 SELECT ?, session_id, turn_id, type, tool_name, input, created_at
+					 FROM pending_approvals WHERE session_id = ? AND status = 'pending'`,
+			).run(legacyPromptId, sessionId);
+		} finally {
+			db.close();
+		}
+		expect(snapshot(harness, sessionId).approvals).toContainEqual(
+			expect.objectContaining({
+				id: legacyPromptId,
+				status: "pending",
+				provider_process_id: null,
+			}),
+		);
+		await harness.restart();
+		const restored = await harness.connect(sessionId);
+		await restored.view(sessionId);
+		await waitFor(
+			harness,
+			() => {
+				const state = snapshot(harness, sessionId);
+				expect(state.session).toEqual({ status: "idle" });
+				expect(state.turns).toEqual([{ state: "error" }]);
+				expect(state.commands).toEqual([{ status: "failed" }]);
+				expect(state.receipts).toEqual([{ status: "side_effect_failed" }]);
+				expect(state.errorOwners).toEqual(state.runReservations);
+				expect(state.approvals).toEqual([
+					expect.objectContaining({ status: "resolved" }),
+					expect.objectContaining({
+						id: legacyPromptId,
+						status: "resolved",
+						provider_process_id: null,
+					}),
+				]);
+				expect(state.promptResolutions).toEqual(
+					expect.arrayContaining([
+						{
+							type: `${prompt}.resolved`,
+							id: expect.not.stringMatching(/^legacy-/),
+							source: "provider-process-expired",
+						},
+						{
+							type: `${prompt}.resolved`,
+							id: legacyPromptId,
+							source: "provider-process-expired",
+						},
+					]),
+				);
+				expect(state.promptResolutions).toHaveLength(2);
+				expect(
+					state.events.filter((event) =>
+						/^turn\.(error|completed|interrupted)$/.test(event.type),
+					),
+				).toHaveLength(1);
+				expect(testRunnerAlive(runner.pid)).toBe(false);
+			},
+			{ timeout: 10_000 },
+		);
+		const failure =
+			reason === "protocol version"
+				? /protocol.*mismatch.*999/i
+				: /predates run ownership.*build/i;
+		expect(JSON.stringify(harness.proof())).toMatch(failure);
+		expect(harness.logTail).not.toMatch(/Failed to create relay/);
+		const state = snapshot(harness, sessionId);
+		expect(
+			JSON.stringify(
+				state.events.filter((event) => event.type === "turn.error"),
+			),
+		).toMatch(failure);
+		const reply = await restored.send(sessionId, "after-adoption-refusal");
+		expect(reply.done["status"]).toBe("idle");
+		expect(reply.chunks.join("")).toBe(
+			responseChunks("after-adoption-refusal").join(""),
+		);
+		expect(started(harness).pid).not.toBe(runner.pid);
+		await waitFor(harness, () => {
+			const after = snapshot(harness, sessionId);
+			expect(after.queued).toEqual([]);
+			expect(after.turns).toEqual([{ state: "error" }, { state: "completed" }]);
+			expect(after.commands).toEqual([
+				{ status: "failed" },
+				{ status: "completed" },
+			]);
+			expect(
+				after.events.filter((event) =>
+					/^turn\.(error|completed|interrupted)$/.test(event.type),
+				),
+			).toHaveLength(2);
+		});
+	});
 
 	it("fails the owning turn and requeues its unstarted steer when startup refuses the protocol", async () => {
 		const { harness, browser, sessionId } = await start({
 			serverProtocolVersion: 999,
 		});
 		const first = browser.send(sessionId, "protocol-queued-first");
-		await vi.waitFor(() =>
+		await waitFor(harness, () =>
 			expect(snapshot(harness, sessionId).commands).toHaveLength(1),
 		);
 		const steerId = randomUUID();
@@ -1112,12 +1475,12 @@ describe("built-dist Claude runner lifecycle", () => {
 				originId: browser.originId,
 				delivery: "steer",
 				text: "protocol-steered-second",
-			}),
+			}).pipe(Effect.timeout(harness.remainingTimeMs())),
 		);
 		expect(submitted.ok).toBe(true);
 		const turn = await first;
 		expect(turn.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
-		await vi.waitFor(() => {
+		await waitFor(harness, () => {
 			const state = snapshot(harness, sessionId);
 			expect(state.session).toEqual({ status: "idle" });
 			expect(state.turns).toEqual([{ state: "error" }]);
@@ -1156,7 +1519,7 @@ describe("built-dist Claude runner lifecycle", () => {
 			expect(userMessages).toHaveLength(1);
 			expect(userMessages[0]?.data).not.toMatchObject({ inputId: steerId });
 		});
-	}, 30_000);
+	});
 
 	it("persists the adapter failure once and requeues its unstarted steer without a user message", async () => {
 		// Hold initialization until the steer reaches the runner, before an
@@ -1165,6 +1528,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		const harness = await ProcessHarness.start({
 			dist: resolve("dist"),
 			restartProof: true,
+			deadline: performance.now() + LIFECYCLE_TIMEOUT_MS,
 		});
 		const fixture: { harness: ProcessHarness; sessionId?: string } = {
 			harness,
@@ -1176,13 +1540,10 @@ describe("built-dist Claude runner lifecycle", () => {
 		writeFileSync(join(harness.root, "hold-next-initialization"), "hold once");
 		const first = browser.send(sessionId, "approval-failure-queued-first");
 		void first.catch(() => undefined);
-		await vi.waitFor(
-			() =>
-				expect(
-					harness.marks.filter((mark) => mark.kind === "initialization-held"),
-				).toHaveLength(1),
-			{ timeout: 15_000 },
-		);
+		await harness.waitForMark((mark) => mark.kind === "initialization-held");
+		expect(
+			harness.marks.filter((mark) => mark.kind === "initialization-held"),
+		).toHaveLength(1);
 		const steerId = randomUUID();
 		const submitted = await Effect.runPromise(
 			browser.rpc["input.submit"]({
@@ -1191,23 +1552,29 @@ describe("built-dist Claude runner lifecycle", () => {
 				originId: browser.originId,
 				delivery: "steer",
 				text: "stall-steered-second",
-			}),
+			}).pipe(Effect.timeout(harness.remainingTimeMs())),
 		);
 		expect(submitted.ok).toBe(true);
-		await vi.waitFor(() =>
-			expect(
+		await harness.waitForMark(
+			(mark) =>
+				mark.kind === "runner-command" &&
+				mark.type === "send-turn" &&
 				harness.marks.filter(
-					(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
-				),
-			).toHaveLength(2),
+					(item) => item.kind === "runner-command" && item.type === "send-turn",
+				).length >= 2,
 		);
+		expect(
+			harness.marks.filter(
+				(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
+			),
+		).toHaveLength(2);
 		writeFileSync(join(harness.root, "release-held-initialization"), "release");
 		const approval = await browser.waitFor(
 			(message) => message["type"] === "permission_pending",
 		);
 		await browser.answerApproval(approval, "allow");
 		await first;
-		await vi.waitFor(() => {
+		await waitFor(harness, () => {
 			const state = snapshot(harness, sessionId);
 			expect(state.session).toEqual({ status: "idle" });
 			expect(state.turns).toEqual([{ state: "error" }]);
@@ -1246,5 +1613,5 @@ describe("built-dist Claude runner lifecycle", () => {
 			expect(userMessages).toHaveLength(1);
 			expect(userMessages[0]?.data).not.toMatchObject({ inputId: steerId });
 		});
-	}, 30_000);
-});
+	});
+}, 125_000);

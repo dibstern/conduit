@@ -1,3 +1,4 @@
+import { channel } from "node:diagnostics_channel";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 
@@ -6,13 +7,29 @@ import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 // Routes commands to the correct provider instance via ProviderRegistry.
 // Manages session-to-provider mapping.
 
-import { Data, Deferred, Effect } from "effect";
+import {
+	Data,
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Option,
+	Schema,
+	Scope,
+} from "effect";
 import type { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 
-import type { Account } from "../contracts/account.js";
+import { type Account, AccountSchema } from "../contracts/account.js";
 import type { SessionScope } from "../contracts/session-scope.js";
+import type { ProviderStopSnapshot } from "../contracts/stored-event.js";
+import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../daemon/config-persistence.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import {
+	SecretAnswerFailure,
+	type SecretAnswers,
+} from "../domain/daemon/Services/secret-answers.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
@@ -35,8 +52,12 @@ import {
 	StaleCommandRejected,
 } from "./errors.js";
 import { DurableCommandCommitRepository } from "./orchestration-command-commit.js";
-import { DURABLE_COMMAND_FINGERPRINT_VERSION } from "./orchestration-command-contracts.js";
 import {
+	DURABLE_COMMAND_FINGERPRINT_VERSION,
+	ProviderControlPayloadSchema,
+} from "./orchestration-command-contracts.js";
+import {
+	controlFingerprintHash,
 	effectiveDispatchFingerprint,
 	fingerprintHash,
 } from "./orchestration-command-fingerprint.js";
@@ -57,7 +78,10 @@ import {
 	type ProviderSessionBindingReadModel,
 } from "./provider-session-binding-read-model.js";
 import type {
+	EventSink,
 	PermissionDecision,
+	PermissionResponse,
+	ProviderCall,
 	ProviderCapabilities,
 	ProviderInstance,
 	SendTurnInput,
@@ -91,8 +115,10 @@ export interface InterruptTurnCommand {
 	readonly type: "interrupt_turn";
 	readonly commandId: string;
 	readonly sessionId: string;
+	readonly providerProcessId?: string;
 	/** Interrupt only an active turn admitted under one of these input ids. */
 	readonly turnIds?: readonly string[];
+	readonly stop?: ProviderStopSnapshot;
 }
 
 export interface ResolvePermissionCommand {
@@ -101,6 +127,9 @@ export interface ResolvePermissionCommand {
 	readonly sessionId: string;
 	readonly requestId: string;
 	readonly decision: PermissionDecision;
+	readonly providerProcessId?: string;
+	readonly nativeRequestId?: string;
+	readonly response?: PermissionResponse;
 }
 
 export interface ResolveQuestionCommand {
@@ -109,6 +138,11 @@ export interface ResolveQuestionCommand {
 	readonly sessionId: string;
 	readonly requestId: string;
 	readonly answers: Record<string, unknown>;
+	/** Live prompt fallback; never persisted in the command payload. */
+	readonly secretAnswerIndices?: readonly string[];
+	readonly providerProcessId?: string;
+	readonly nativeRequestId?: string;
+	readonly operation?: "reply" | "reject";
 }
 
 export interface DiscoverCommand {
@@ -116,6 +150,7 @@ export interface DiscoverCommand {
 	readonly commandId?: string;
 	readonly providerId: string;
 	readonly account?: Account;
+	readonly sessionId?: string;
 	readonly workspaceRoot?: string;
 	readonly refresh?: boolean;
 }
@@ -124,9 +159,17 @@ export interface EndSessionCommand {
 	readonly type: "end_session";
 	readonly commandId: string;
 	readonly sessionId: string;
+	readonly providerProcessId?: string;
+	readonly stop?: ProviderStopSnapshot;
+	/** Stop escalation may retire its process while an earlier control is blocked. */
+	readonly retireProcess?: true;
+	/** Stop retirement is unnecessary once all captured runs have ended. */
+	readonly retireRunIds?: readonly string[];
 	/** Explicit provider-instance route captured before session projections change. */
 	readonly targetProviderId?: string;
 	readonly account?: Account;
+	/** Ephemeral context captured before deletion removes session ownership. */
+	readonly call?: ProviderCall;
 	/** Default false -- keep binding. Set true to also unbind. */
 	readonly unbind?: boolean;
 }
@@ -163,8 +206,8 @@ export interface SessionBinding {
 export interface DurableCommandStoreOptions {
 	readonly sql: SqlClient.SqlClient;
 	readonly snapshot: CommandReadModelSnapshot;
-	/** The stable slug bound when the project's store is constructed. */
-	readonly projectKey: string;
+	/** Omitted for the daemon engine, which resolves ownership per command. */
+	readonly projectKey?: string;
 	readonly now: () => number;
 	readonly generateId: () => string;
 	/** Provider output and command outcomes share durable ingestion. */
@@ -173,13 +216,47 @@ export interface DurableCommandStoreOptions {
 	readonly write: CommitAndSignal["write"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
+	readonly isProjectReady?: (
+		projectId: string,
+		sessionId: string,
+	) => Effect.Effect<boolean, ProviderInstanceFailure>;
+	readonly recoverDetachedSession?: (sessionId: string) => Effect.Effect<void>;
+	readonly makeInteractions?: (
+		sessionId: string,
+		driver: string,
+	) => Effect.Effect<EventSink, ProviderInstanceFailure>;
+	readonly projectContext?: (
+		projectId: string,
+	) => Option.Option<import("effect").Context.Context<never>>;
+}
+
+export interface ProviderCallRequest {
+	/** Empty for discovery before a draft has a reserved session. */
+	readonly sessionId: string;
+	/** Owning project from an admitted call or durable command, never the caller's relay. */
+	readonly projectId?: string;
+	readonly account?: Account;
+	readonly providerId?: string;
+	readonly workspaceRoot?: string;
+	readonly extraFolders?: readonly string[];
+	readonly prepareShellEnv?: boolean;
+	/** Launches require the admitted identity; controls retain it without env if unroutable. */
+	readonly requireRoutableAccount?: boolean;
 }
 
 export interface OrchestrationEngineOptions {
 	readonly registry: ProviderRegistry;
+	readonly secretAnswers?: SecretAnswers["Service"];
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
+	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
+	readonly resolveCallContext?: (
+		request: ProviderCallRequest,
+	) => Effect.Effect<ProviderCall, ProviderInstanceFailure>;
+	readonly projectOfSession?: (
+		sessionId: string,
+	) => Effect.Effect<string, ProviderInstanceFailure>;
 	readonly accountDirectory?: Pick<
 		AccountDirectory["Service"],
 		"resolve" | "defaultFor"
@@ -187,7 +264,7 @@ export interface OrchestrationEngineOptions {
 }
 
 interface DurableCommandRuntime {
-	readonly projectId: string;
+	readonly projectId: string | undefined;
 	readonly commit: DurableCommandCommitRepository;
 	readonly receipts: CommandReadModelRepository;
 	readonly reactor: ProviderSideEffectReactor;
@@ -198,6 +275,10 @@ interface DurableCommandRuntime {
 	readonly snapshot: CommandReadModelSnapshot;
 	readonly write: CommitAndSignal["write"];
 }
+
+type ProjectCommandRuntime = DurableCommandRuntime & {
+	readonly projectId: string;
+};
 
 /**
  * Result returned when a durable receipt replays an already-accepted send_turn
@@ -226,22 +307,53 @@ const ORPHANED_TURN_RESULT: TurnResult = {
 	},
 };
 
+const admittedCallSchema = Schema.Struct({
+	projectId: Schema.String,
+	sessionId: Schema.String,
+	account: AccountSchema,
+	workspaceRoot: Schema.String,
+	extraFolders: Schema.Array(Schema.String),
+});
+
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
+	private readonly secretAnswers: OrchestrationEngineOptions["secretAnswers"];
 	private readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
 	private readonly accountDirectory: OrchestrationEngineOptions["accountDirectory"];
+	private readonly resolveCallContext: OrchestrationEngineOptions["resolveCallContext"];
+	private readonly autoSettleAfterDays: OrchestrationEngineOptions["autoSettleAfterDays"];
+	private readonly projectOfSession: OrchestrationEngineOptions["projectOfSession"];
 	private readonly durable?: DurableCommandRuntime;
+	private readonly commandScope = Scope.makeUnsafe();
 	private readonly inFlightCommands = new Map<
 		string,
-		Deferred.Deferred<OrchestrationResult, OrchestrationError>
+		{
+			readonly deferred: Deferred.Deferred<
+				OrchestrationResult,
+				OrchestrationError
+			>;
+			readonly fingerprintHash: string | undefined;
+			readonly projectId: string | undefined;
+		}
+	>();
+	private readonly preWarmPreparations = new Map<
+		string,
+		{
+			readonly cancelled: Deferred.Deferred<void>;
+			waiters: number;
+		}
 	>();
 
 	constructor(options: OrchestrationEngineOptions) {
 		this.registry = options.registry;
+		this.secretAnswers = options.secretAnswers;
 		this.sessionBindingReadModel =
 			options.sessionBindingReadModel ??
 			new InMemoryProviderSessionBindingReadModel();
 		this.accountDirectory = options.accountDirectory;
+		this.resolveCallContext = options.resolveCallContext;
+		this.autoSettleAfterDays = options.autoSettleAfterDays;
+		this.projectOfSession = options.projectOfSession;
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
 			this.durable = {
@@ -256,10 +368,25 @@ export class OrchestrationEngine {
 				),
 				reactor: new ProviderSideEffectReactor({
 					sql: durable.sql,
-					projectId: durable.projectKey,
+					...(this.secretAnswers ? { secretAnswers: this.secretAnswers } : {}),
+					...(durable.projectKey === undefined
+						? {}
+						: { projectId: durable.projectKey }),
 					registry: this.registry,
 					ingestion: durable.ingestion,
 					write: durable.write,
+					...(durable.isProjectReady
+						? { isProjectReady: durable.isProjectReady }
+						: {}),
+					...(durable.recoverDetachedSession
+						? { recoverDetachedSession: durable.recoverDetachedSession }
+						: {}),
+					...(durable.makeInteractions
+						? { makeInteractions: durable.makeInteractions }
+						: {}),
+					...(durable.projectContext
+						? { projectContext: durable.projectContext }
+						: {}),
 					...(durable.persistUserMessage
 						? { persistUserMessage: durable.persistUserMessage }
 						: {}),
@@ -273,6 +400,11 @@ export class OrchestrationEngine {
 					...(this.accountDirectory
 						? { accountDirectory: this.accountDirectory }
 						: {}),
+					resolveSessionCallContext: (...args) =>
+						this.resolveSessionCallContextEffect(...args),
+					...(this.resolveCallContext
+						? { resolveCallContext: this.resolveCallContext }
+						: {}),
 				}),
 				sql: durable.sql,
 				ingestion: durable.ingestion,
@@ -282,6 +414,219 @@ export class OrchestrationEngine {
 				write: durable.write,
 			};
 		}
+		channel("conduit.orchestration.engine").publish({
+			event: "constructed",
+			engine: this,
+		});
+	}
+
+	private commandRuntimeEffect(
+		command: Exclude<OrchestrationCommand, DiscoverCommand>,
+		durable: DurableCommandRuntime,
+	): Effect.Effect<ProjectCommandRuntime, OrchestrationError> {
+		return Effect.gen({ self: this }, function* () {
+			if (durable.projectId !== undefined)
+				return { ...durable, projectId: durable.projectId };
+			const sessionId =
+				command.type === "send_turn"
+					? command.input.sessionId
+					: command.sessionId;
+			const capturedProject =
+				command.type === "send_turn"
+					? command.input.projectId
+					: command.type === "end_session"
+						? command.call?.projectId
+						: undefined;
+			const existing = yield* durable.receipts
+				.checkReceipt(command.commandId)
+				.pipe(Effect.orDie);
+			const projectId =
+				existing?.projectId ??
+				(this.projectOfSession
+					? yield* this.projectOfSession(sessionId).pipe(
+							Effect.catch((error) =>
+								command.type === "end_session" &&
+								command.call &&
+								error.code === "project_inactive"
+									? Effect.succeed(command.call.projectId)
+									: Effect.fail(error),
+							),
+						)
+					: capturedProject);
+			if (projectId === undefined)
+				return yield* Effect.fail(
+					new ProviderInstanceFailure({
+						providerId: "conduit",
+						operation: "resolveCommandProject",
+						cause: new Error(`Session ${sessionId} has no owning project`),
+					}),
+				);
+			if (capturedProject !== undefined && capturedProject !== projectId)
+				return yield* Effect.fail(
+					new CommandFingerprintMismatch({ commandId: command.commandId }),
+				);
+			return { ...durable, projectId };
+		});
+	}
+
+	/** Compatibility runtimes omit the resolver until their composition is migrated. */
+	resolveCallContextEffect(request: ProviderCallRequest) {
+		return this.resolveCallContext?.(request) ?? Effect.succeed(undefined);
+	}
+
+	/** Cancellation owns preparation too, before a call reaches the adapter. */
+	preparePreWarmSessionEffect<A, E, R>(
+		sessionId: string,
+		preparation: Effect.Effect<A, E, R>,
+	) {
+		return Effect.gen({ self: this }, function* () {
+			const entry = this.preWarmPreparations.get(sessionId) ?? {
+				cancelled: yield* Deferred.make<void>(),
+				waiters: 0,
+			};
+			entry.waiters++;
+			this.preWarmPreparations.set(sessionId, entry);
+			return yield* Effect.raceFirst(
+				preparation,
+				Deferred.await(entry.cancelled).pipe(
+					Effect.andThen(
+						Effect.fail(
+							new ProviderInstanceFailure({
+								providerId: "claude",
+								operation: "preWarmSession",
+								cause: new Error("Session pre-warm was cancelled"),
+							}),
+						),
+					),
+				),
+			).pipe(
+				Effect.ensuring(
+					Effect.sync(() => {
+						if (
+							--entry.waiters === 0 &&
+							this.preWarmPreparations.get(sessionId) === entry
+						)
+							this.preWarmPreparations.delete(sessionId);
+					}),
+				),
+			);
+		});
+	}
+
+	private cancelPreWarmPreparationEffect(sessionId: string) {
+		return Effect.gen({ self: this }, function* () {
+			const entry = this.preWarmPreparations.get(sessionId);
+			if (!entry) return;
+			this.preWarmPreparations.delete(sessionId);
+			yield* Deferred.succeed(entry.cancelled, undefined);
+		});
+	}
+
+	/** Controls retain admitted account/folders and resolve the current environment. */
+	resolveSessionCallContextEffect(
+		sessionId: string,
+		account?: Account,
+		target?: {
+			readonly projectId?: string;
+			readonly providerId?: string;
+			readonly includeSettledForProviderId?: string;
+			readonly runId?: string;
+			readonly turnIds?: readonly string[];
+			readonly prompt?: {
+				readonly id: string;
+				readonly kind: "permission" | "question";
+			};
+		},
+	) {
+		return Effect.gen({ self: this }, function* () {
+			if (!this.resolveCallContext) return undefined;
+			const hasRunTarget = Boolean(
+				target?.runId || target?.turnIds || target?.prompt,
+			);
+			if (this.durable) {
+				const sql = this.durable.sql;
+				let targetRuns = sql`SELECT NULL`;
+				if (target?.runId) {
+					targetRuns = sql`SELECT COALESCE(joined_into, id) FROM provider_runs
+						WHERE id = ${target.runId} AND session_id = ${sessionId}`;
+				} else if (target?.turnIds?.length) {
+					targetRuns = sql`SELECT COALESCE(requested.joined_into, requested.id)
+						FROM provider_command_outbox command JOIN provider_runs requested ON requested.id = command.run_id
+						WHERE ${this.durable.projectId === undefined ? sql`1 = 1` : sql`command.project_key = ${this.durable.projectId}`} AND command.session_id = ${sessionId}
+							AND command.effect_type = 'send_turn' AND (
+								json_extract(command.payload_json, '$.inputId') IN ${sql.in(target.turnIds)}
+								OR command.command_id IN ${sql.in(target.turnIds)}
+								OR (requested.status = 'running' AND json_extract(command.payload_json, '$.continuation.cutOffMessageId') IN ${sql.in(target.turnIds)}))
+						UNION SELECT turn.run_id FROM turns turn LEFT JOIN messages message ON message.id = turn.user_message_id
+						WHERE turn.session_id = ${sessionId} AND (turn.id IN ${sql.in(target.turnIds)}
+							OR turn.user_message_id IN ${sql.in(target.turnIds)} OR message.input_id IN ${sql.in(target.turnIds)})`;
+				} else if (target?.prompt) {
+					targetRuns = sql`SELECT COALESCE(json_extract(event.metadata, '$.runId'), turn.run_id)
+						FROM events event LEFT JOIN pending_approvals prompt ON prompt.id = json_extract(event.data, '$.id') AND prompt.session_id = event.session_id
+						LEFT JOIN turns turn ON turn.id = prompt.turn_id AND turn.session_id = event.session_id
+						WHERE event.session_id = ${sessionId} AND event.type = ${`${target.prompt.kind}.asked`}
+							AND (json_extract(event.data, '$.id') = ${target.prompt.id} OR prompt.provider_request_id = ${target.prompt.id})`;
+				}
+				const activeRows = yield* sql<{ payload_json: string }>`
+					SELECT o.payload_json FROM provider_command_outbox o
+					JOIN provider_runs r ON r.id = o.run_id
+					WHERE ${this.durable.projectId === undefined ? sql`1 = 1` : sql`o.project_key = ${this.durable.projectId}`}
+						AND o.session_id = ${sessionId} AND r.session_id = ${sessionId} AND o.effect_type = 'send_turn'
+						AND ${hasRunTarget ? sql`r.id IN (${targetRuns})` : target?.includeSettledForProviderId ? sql`(r.status IN ('pending', 'running') OR COALESCE(json_extract(o.payload_json, '$.account.id'), o.provider_id) = ${target.includeSettledForProviderId})` : sql`r.status IN ('pending', 'running')`}
+						AND ${target?.providerId ? sql`COALESCE(json_extract(o.payload_json, '$.account.id'), o.provider_id) = ${target.providerId}` : sql`1 = 1`}
+					ORDER BY CASE r.status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, o.request_sequence DESC
+					LIMIT ${hasRunTarget ? 2 : 1}`.pipe(
+					Effect.mapError(
+						(cause) =>
+							new ProviderInstanceFailure({
+								providerId: account?.driver ?? "unknown",
+								operation: "resolveCallContext",
+								cause,
+							}),
+					),
+				);
+				const active = activeRows.length === 1 ? activeRows[0] : undefined;
+				const admitted = active
+					? Schema.decodeUnknownOption(
+							Schema.fromJsonString(admittedCallSchema),
+						)(active.payload_json)
+					: Option.none();
+				if (
+					Option.isSome(admitted) &&
+					(!account ||
+						target?.providerId ||
+						admitted.value.account.id === account.id)
+				) {
+					const currentAccount = this.accountDirectory
+						? yield* this.accountDirectory
+								.resolve({ _tag: "Id", id: admitted.value.account.id })
+								.pipe(
+									Effect.catchTag("AccountUnroutable", () =>
+										Effect.succeed(undefined),
+									),
+								)
+						: undefined;
+					return yield* this.resolveCallContext({
+						...admitted.value,
+						account: {
+							...admitted.value.account,
+							env:
+								currentAccount?.id === admitted.value.account.id &&
+								currentAccount.driver === admitted.value.account.driver
+									? currentAccount.env
+									: undefined,
+						},
+					});
+				}
+			}
+			if (hasRunTarget) return undefined;
+			return yield* this.resolveCallContext({
+				sessionId,
+				...(target?.projectId ? { projectId: target.projectId } : {}),
+				...(target?.providerId ? { providerId: target.providerId } : {}),
+				...(account ? { account } : {}),
+			});
+		});
 	}
 
 	dispatchEffect(
@@ -310,13 +655,68 @@ export class OrchestrationEngine {
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
 			yield* this.ensureMutatingCommandHasId(command);
+			if (
+				command.type === "resolve_question" &&
+				command.secretAnswerIndices !== undefined &&
+				(!this.durable || !this.secretAnswers)
+			)
+				return yield* new ProviderInstanceFailure({
+					providerId: "conduit",
+					operation: command.type,
+					code: "secret_answer_unavailable",
+					cause: new SecretAnswerFailure({ code: "secret_answer_unavailable" }),
+				});
+			if (
+				this.durable &&
+				command.type !== "send_turn" &&
+				command.type !== "discover"
+			) {
+				const durable = yield* this.commandRuntimeEffect(command, this.durable);
+				// Retries keep the process captured by the original acceptance.
+				const [stored] = yield* durable.sql<{
+					provider_process_id: string | null;
+				}>`SELECT provider_process_id FROM provider_command_outbox WHERE command_id = ${command.commandId} AND project_key = ${durable.projectId} AND effect_type <> 'send_turn' LIMIT 1`.pipe(
+					Effect.orDie,
+				);
+				const providerProcessId =
+					command.providerProcessId ??
+					stored?.provider_process_id ??
+					(yield* this.resolveControlProcessEffect(command).pipe(
+						Effect.catch((error) =>
+							error instanceof ProviderInstanceFailure &&
+							error.code === "project_unavailable"
+								? Effect.succeed(`absent:${command.commandId}`)
+								: Effect.fail(error),
+						),
+					));
+				return yield* this.handleDurableControlEffect(
+					{ ...command, providerProcessId },
+					durable,
+				);
+			}
 			if (!command.commandId) {
 				return yield* this.runCommandEffect(command);
 			}
 			const commandId = command.commandId;
+			const durable =
+				command.type === "send_turn" && this.durable
+					? yield* this.commandRuntimeEffect(command, this.durable)
+					: undefined;
+			const hash =
+				command.type === "send_turn"
+					? fingerprintHash(effectiveDispatchFingerprint(command))
+					: undefined;
 
 			const existing = this.inFlightCommands.get(commandId);
 			if (existing) {
+				if (
+					durable &&
+					(existing.projectId !== durable.projectId ||
+						existing.fingerprintHash !== hash)
+				)
+					return yield* Effect.fail(
+						new CommandFingerprintMismatch({ commandId }),
+					);
 				const receipt =
 					command.type === "send_turn" && this.durable
 						? yield* this.durable.receipts
@@ -324,10 +724,10 @@ export class OrchestrationEngine {
 								.pipe(Effect.orDie)
 						: undefined;
 				if (receipt?.status !== "side_effect_failed")
-					return yield* Deferred.await(existing);
+					return yield* Deferred.await(existing.deferred);
 				// Resume may arrive before the failed attempt's receipt poll unwinds.
 				// Release that attempt's live claim before reserving the next one.
-				yield* Effect.result(Deferred.await(existing));
+				yield* Effect.result(Deferred.await(existing.deferred));
 				if (this.inFlightCommands.get(commandId) === existing)
 					this.inFlightCommands.delete(commandId);
 				return yield* this.dispatchEffect(command);
@@ -337,24 +737,39 @@ export class OrchestrationEngine {
 				OrchestrationResult,
 				OrchestrationError
 			>();
-			this.inFlightCommands.set(commandId, deferred);
+			const waiter = {
+				deferred,
+				fingerprintHash: hash,
+				projectId: durable?.projectId,
+			};
+			this.inFlightCommands.set(commandId, waiter);
 
-			const run = this.runCommandEffect(command);
+			const run = this.runCommandEffect(command, durable);
 			const owned =
 				command.type === "send_turn" && this.durable
 					? this.durable.reactor.withLiveCommand(commandId, run)
 					: run;
-			return yield* owned.pipe(
+			const execution = owned.pipe(
 				Effect.tap((result) => Deferred.succeed(deferred, result)),
 				Effect.tapError((error) => Deferred.fail(deferred, error)),
 				Effect.ensuring(
 					Effect.sync(() => {
-						if (this.inFlightCommands.get(commandId) === deferred) {
+						if (this.inFlightCommands.get(commandId) === waiter) {
 							this.inFlightCommands.delete(commandId);
 						}
 					}),
 				),
 			);
+			if (command.type === "send_turn" && durable)
+				return yield* Effect.uninterruptibleMask((restore) =>
+					Effect.gen({ self: this }, function* () {
+						// A relay owns the request waiter; the daemon engine owns the
+						// accepted send, including intake before a runner exists.
+						const worker = yield* Effect.forkIn(execution, this.commandScope);
+						return yield* restore(Fiber.join(worker));
+					}),
+				);
+			return yield* execution;
 		});
 	}
 
@@ -369,11 +784,12 @@ export class OrchestrationEngine {
 
 	private runCommandEffect(
 		command: OrchestrationCommand,
+		durable?: ProjectCommandRuntime,
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
 			switch (command.type) {
 				case "send_turn":
-					return yield* this.handleSendTurnEffect(command);
+					return yield* this.handleSendTurnEffect(command, durable);
 				case "interrupt_turn":
 					return yield* this.handleInterruptTurnEffect(command);
 				case "resolve_permission":
@@ -394,10 +810,346 @@ export class OrchestrationEngine {
 
 	private handleSendTurnEffect(
 		command: SendTurnCommand,
+		durable?: ProjectCommandRuntime,
 	): Effect.Effect<TurnResult, OrchestrationError> {
-		return this.durable
-			? this.handleDurableSendTurnEffect(command, this.durable)
-			: this.handleInlineSendTurnEffect(command);
+		return Effect.gen({ self: this }, function* () {
+			const days = yield* this.autoSettleAfterDays ?? Effect.succeed(undefined);
+			const admitted = this.autoSettleAfterDays
+				? {
+						...command,
+						input: {
+							...command.input,
+							autoSettleAfterDays:
+								days === undefined ? DEFAULT_AUTO_SETTLE_AFTER_DAYS : days,
+						},
+					}
+				: command;
+			return yield* durable
+				? this.handleDurableSendTurnEffect(admitted, durable)
+				: this.handleInlineSendTurnEffect(admitted);
+		});
+	}
+
+	private resolveControlProcessEffect(
+		command:
+			| InterruptTurnCommand
+			| ResolvePermissionCommand
+			| ResolveQuestionCommand
+			| EndSessionCommand,
+	): Effect.Effect<string, OrchestrationError> {
+		return Effect.gen({ self: this }, function* () {
+			if (
+				this.durable &&
+				(command.type === "resolve_permission" ||
+					command.type === "resolve_question")
+			) {
+				const [prompt] = yield* this.durable.sql<{
+					provider_process_id: string | null;
+				}>`SELECT provider_process_id FROM pending_approvals WHERE id = ${command.requestId} AND session_id = ${command.sessionId}`.pipe(
+					Effect.orDie,
+				);
+				if (prompt?.provider_process_id) return prompt.provider_process_id;
+			}
+			const providerId =
+				command.type === "end_session" && command.targetProviderId
+					? command.targetProviderId
+					: yield* this.requireProviderForSessionEffect(command.sessionId);
+			const call =
+				command.type === "end_session" && command.call
+					? command.call
+					: yield* this.resolveSessionCallContextEffect(
+							command.sessionId,
+							command.type === "end_session" ? command.account : undefined,
+							command.type === "interrupt_turn" && command.turnIds
+								? { turnIds: command.turnIds }
+								: command.type === "end_session"
+									? {
+											includeSettledForProviderId:
+												command.targetProviderId ??
+												command.account?.id ??
+												providerId,
+											...(command.targetProviderId
+												? { providerId: command.targetProviderId }
+												: {}),
+										}
+									: undefined,
+						);
+			const instance = yield* this.getProviderInstanceEffect(
+				providerId,
+				call?.account,
+			);
+			if (instance.getControlProcessIdEffect)
+				return (
+					(yield* instance.getControlProcessIdEffect(command.sessionId)) ??
+					`absent:${command.commandId}`
+				);
+			const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
+			if (Option.isSome(instances)) {
+				const running = yield* instances.value
+					.ifRunning(call?.account.id ?? providerId, call?.workspaceRoot)
+					.pipe(Effect.scoped);
+				if (Option.isSome(running) && running.value.promptProcessId)
+					return running.value.promptProcessId;
+			}
+			return `absent:${command.commandId}`;
+		});
+	}
+
+	private handleDurableControlEffect(
+		command:
+			| InterruptTurnCommand
+			| ResolvePermissionCommand
+			| ResolveQuestionCommand
+			| EndSessionCommand,
+		durable: ProjectCommandRuntime,
+	): Effect.Effect<void, OrchestrationError> {
+		return Effect.uninterruptibleMask((restore) =>
+			Effect.gen({ self: this }, function* () {
+				const payload = yield* Effect.try({
+					try: () =>
+						Schema.decodeSync(ProviderControlPayloadSchema)(
+							JSON.parse(
+								JSON.stringify(
+									command.type === "end_session" && command.account
+										? {
+												...command,
+												account: { ...command.account, env: undefined },
+											}
+										: command,
+								),
+							),
+						),
+					catch: (cause) =>
+						new ProviderInstanceFailure({
+							providerId: "conduit",
+							operation: "serializeControl",
+							cause,
+						}),
+				});
+				const hash = controlFingerprintHash(payload);
+				const targetBindingRevision =
+					yield* this.sessionBindingReadModel.getBindingRevision(
+						command.sessionId,
+					);
+				let registered = false;
+				const acceptance = yield* durable
+					.write(
+						(project) =>
+							Effect.gen({ self: this }, function* () {
+								const existing = yield* durable.receipts.checkReceipt(
+									command.commandId,
+								);
+								if (existing) {
+									if (
+										existing.projectId !== durable.projectId ||
+										existing.fingerprintHash !== hash ||
+										existing.fingerprintVersion !==
+											DURABLE_COMMAND_FINGERPRINT_VERSION
+									)
+										return yield* Effect.fail(
+											new CommandFingerprintMismatch({
+												commandId: command.commandId,
+											}),
+										);
+									const [row] = yield* durable.sql<{
+										provider_id: string;
+									}>`SELECT provider_id FROM provider_command_outbox WHERE command_id = ${command.commandId} AND project_key = ${durable.projectId} LIMIT 1`;
+									return {
+										providerId: row?.provider_id ?? "conduit",
+										newlyAccepted: false,
+									};
+								}
+								const providerId =
+									command.type === "end_session" && command.targetProviderId
+										? command.targetProviderId
+										: yield* this.requireProviderForSessionEffect(
+												command.sessionId,
+											);
+								const [session] = yield* durable.sql<{
+									id: string;
+								}>`SELECT id FROM sessions WHERE id = ${command.sessionId} AND project_id = ${durable.projectId}`;
+								const deleted =
+									!session &&
+									command.type === "end_session" &&
+									command.targetProviderId
+										? yield* durable.sql`SELECT 1 FROM events
+									WHERE project_id = ${durable.projectId} AND type = 'session.deleted' AND session_id = ${command.sessionId}
+										AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = ${command.sessionId}) LIMIT 1`
+										: [];
+								if (!session && deleted.length === 0)
+									return yield* Effect.fail(
+										new StaleCommandRejected({
+											commandId: command.commandId,
+											scopeKind: "session",
+											scopeId: command.sessionId,
+										}),
+									);
+								let nativeRequestId: string | undefined;
+								if (
+									payload.type === "resolve_permission" ||
+									payload.type === "resolve_question"
+								) {
+									const [prompt] = yield* durable.sql<{
+										provider_request_id: string | null;
+									}>`SELECT provider_request_id FROM pending_approvals
+						WHERE id = ${payload.requestId} AND session_id = ${payload.sessionId} AND status = 'pending'
+						AND type = ${payload.type === "resolve_permission" ? "permission" : "question"}
+						AND provider_process_id = ${payload.providerProcessId}`;
+									if (
+										!prompt ||
+										(payload.nativeRequestId !== undefined &&
+											payload.nativeRequestId !== prompt.provider_request_id)
+									)
+										return yield* Effect.fail(
+											new StaleCommandRejected({
+												commandId: command.commandId,
+												scopeKind: "interaction",
+												scopeId: payload.requestId,
+											}),
+										);
+									nativeRequestId =
+										prompt.provider_request_id ?? payload.requestId;
+								}
+								let committedPayload = payload;
+								if (payload.type === "resolve_question") {
+									const storedSecrets = yield* durable.sql<{
+										answer_index: string;
+									}>`SELECT CAST(question.key AS TEXT) AS answer_index
+						FROM pending_approvals, json_each(pending_approvals.input) AS question
+						WHERE pending_approvals.id = ${payload.requestId} AND session_id = ${payload.sessionId}
+							AND CASE WHEN question.type = 'object'
+								THEN json_extract(question.value, '$.isSecret') ELSE 0 END = 1`;
+									const secretIndices = [
+										...new Set([
+											...storedSecrets.map(({ answer_index }) => answer_index),
+											...(command.type === "resolve_question"
+												? (command.secretAnswerIndices ?? [])
+												: []),
+										]),
+									];
+									if (secretIndices.length) {
+										if (!this.secretAnswers)
+											return yield* new ProviderInstanceFailure({
+												providerId,
+												operation: payload.type,
+												code: "secret_answer_unavailable",
+												cause: new SecretAnswerFailure({
+													code: "secret_answer_unavailable",
+												}),
+											});
+										const answers = yield* this.secretAnswers
+											.seal(payload.answers, secretIndices)
+											.pipe(
+												Effect.mapError(
+													(cause) =>
+														new ProviderInstanceFailure({
+															providerId,
+															operation: payload.type,
+															code: cause.code,
+															cause,
+														}),
+												),
+											);
+										committedPayload = { ...payload, answers };
+									}
+								}
+								const [maxRow] = yield* durable.sql<{
+									m: number;
+								}>`SELECT COALESCE(MAX(request_sequence), 0) AS m FROM provider_command_outbox`;
+								const requestSequence = (maxRow?.m ?? 0) + 1;
+								const nowMs = durable.now();
+								const stored = yield* durable.commit.commitControl(
+									{
+										commandId: command.commandId,
+										providerId,
+										payload: {
+											...committedPayload,
+											...(nativeRequestId ? { nativeRequestId } : {}),
+										},
+										fingerprintHash: hash,
+										requestSequence,
+										nowMs,
+									},
+									durable.projectId,
+								);
+								// Publication may drain before write returns. Register while
+								// the transaction still hides this control from other drains.
+								durable.reactor.registerControl(
+									command.commandId,
+									command.type === "end_session" ? command.call : undefined,
+								);
+								registered = true;
+								yield* project(stored);
+								return { providerId, newlyAccepted: true };
+							}),
+						{ projectId: durable.projectId },
+					)
+					.pipe(
+						Effect.onExit((exit) =>
+							Effect.sync(() => {
+								if (Exit.isFailure(exit) && registered)
+									durable.reactor.unregisterControl(command.commandId);
+							}),
+						),
+						Effect.mapError((cause) =>
+							cause instanceof CommandFingerprintMismatch ||
+							cause instanceof ProviderInstanceFailure ||
+							cause instanceof StaleCommandRejected ||
+							cause instanceof SessionProviderNotBound
+								? cause
+								: new ProviderInstanceFailure({
+										providerId: "conduit",
+										operation: "commitControl",
+										cause,
+									}),
+						),
+					);
+				const { providerId, newlyAccepted } = acceptance;
+				if (
+					newlyAccepted &&
+					(command.type === "end_session" ||
+						(command.type === "interrupt_turn" &&
+							(command.turnIds === undefined || command.stop !== undefined)))
+				)
+					yield* this.cancelPreWarmPreparationEffect(command.sessionId);
+				const delivery = durable.reactor.runCommand(command.commandId).pipe(
+					Effect.asVoid,
+					Effect.mapError((cause) =>
+						cause instanceof ProviderInstanceFailure
+							? cause
+							: new ProviderInstanceFailure({
+									providerId,
+									operation: command.type,
+									cause,
+								}),
+					),
+					// An already absent process satisfies End. Its durable receipt
+					// still records cancellation, while deletion/continuation can finish.
+					Effect.catch((error) =>
+						command.type === "end_session" &&
+						error.code === "provider_process_gone"
+							? Effect.void
+							: Effect.fail(error),
+					),
+				);
+				const owned =
+					command.type === "end_session" && command.unbind && newlyAccepted
+						? delivery.pipe(
+								Effect.ensuring(
+									this.sessionBindingReadModel.unbindSessionIfBoundTo(
+										command.sessionId,
+										providerId,
+										targetBindingRevision,
+									),
+								),
+							)
+						: delivery;
+				// Accepted controls belong to the engine. Request interruption only
+				// detaches this waiter, including while provider delivery is in flight.
+				const worker = yield* Effect.forkIn(owned, this.commandScope);
+				return yield* restore(Fiber.join(worker));
+			}),
+		);
 	}
 
 	/**
@@ -413,7 +1165,7 @@ export class OrchestrationEngine {
 	 */
 	private handleDurableSendTurnEffect(
 		command: SendTurnCommand,
-		durable: DurableCommandRuntime,
+		durable: ProjectCommandRuntime,
 	): Effect.Effect<TurnResult, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
 			const hash = fingerprintHash(effectiveDispatchFingerprint(command));
@@ -494,6 +1246,7 @@ export class OrchestrationEngine {
 					durable.snapshot,
 					"session",
 					command.input.sessionId,
+					durable.projectId,
 				)
 			) {
 				return yield* Effect.fail(
@@ -561,6 +1314,7 @@ export class OrchestrationEngine {
 					command.commandId,
 					command.input.eventSink,
 					command.input.abortSignal,
+					command.input,
 				)
 				.pipe(
 					Effect.mapError((cause) =>
@@ -578,7 +1332,7 @@ export class OrchestrationEngine {
 
 	private commitAcceptedSendTurn(
 		command: SendTurnCommand,
-		durable: DurableCommandRuntime,
+		durable: ProjectCommandRuntime,
 		fingerprintHashValue: string,
 		dispatchId: string,
 		nowMs: number,
@@ -591,6 +1345,7 @@ export class OrchestrationEngine {
 		| CommandPayloadSerializationFailed
 	> {
 		const driver = command.input.account?.driver ?? command.providerId;
+		const traits = getProviderDriver(driver);
 		// The rewind range and request sequence share ingestion's write boundary:
 		// a backfill accepted before this write must be removed by this commit.
 		const commit = Effect.gen(function* () {
@@ -604,13 +1359,19 @@ export class OrchestrationEngine {
 				eventSink: _eventSink,
 				abortSignal: _abortSignal,
 				history: _history,
+				shellEnv: _shellEnv,
+				account,
 				...payload
 			} = command.input;
 			const payloadJson = yield* Effect.try({
 				try: () =>
 					JSON.stringify({
 						...payload,
-						...(getProviderDriver(driver)?.supportsNativeResume && pendingRewind
+						projectId: durable.projectId,
+						...(account ? { account: { ...account, env: undefined } } : {}),
+						...((traits?.supportsNativeResume ||
+							traits?.revertsConversationNatively) &&
+						pendingRewind
 							? { rewind: pendingRewind.rewind }
 							: {}),
 						dispatchId,
@@ -630,13 +1391,22 @@ export class OrchestrationEngine {
 					nowMs,
 					requestSequence,
 					payloadJson,
-					events: [...(pendingRewind?.events ?? []), ...(command.events ?? [])],
+					// A native revert confirms the removal itself, after it succeeds.
+					events: [
+						...(traits?.revertsConversationNatively
+							? []
+							: (pendingRewind?.events ?? [])),
+						...(command.events ?? []),
+					],
 				}),
+				durable.projectId,
 			);
 		});
 		// Through the seam the events are projected in the same transaction and
 		// announced once it commits.
-		return durable.write((project) => Effect.flatMap(commit, project));
+		return durable.write((project) => Effect.flatMap(commit, project), {
+			projectId: durable.projectId,
+		});
 	}
 
 	private handleInlineSendTurnEffect(
@@ -704,19 +1474,37 @@ export class OrchestrationEngine {
 		command: InterruptTurnCommand,
 	): Effect.Effect<void, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
+			if (command.turnIds === undefined || command.stop !== undefined)
+				yield* this.cancelPreWarmPreparationEffect(command.sessionId);
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
-			const instance = yield* this.getProviderInstanceEffect(providerId);
+			const call = yield* this.resolveSessionCallContextEffect(
+				command.sessionId,
+				undefined,
+				command.turnIds === undefined
+					? undefined
+					: { turnIds: command.turnIds },
+			);
+			const instance = yield* this.getProviderInstanceEffect(
+				providerId,
+				call?.account,
+			);
 
 			yield* Effect.sync(() =>
 				log.info(`Dispatching interruptTurn: session=${command.sessionId}`),
 			);
 
 			return yield* (
-				command.turnIds === undefined
-					? instance.interruptTurnEffect(command.sessionId)
-					: instance.interruptTurnEffect(command.sessionId, command.turnIds)
+				call
+					? instance.interruptTurnEffect(
+							command.sessionId,
+							command.turnIds,
+							call,
+						)
+					: command.turnIds === undefined
+						? instance.interruptTurnEffect(command.sessionId)
+						: instance.interruptTurnEffect(command.sessionId, command.turnIds)
 			).pipe(
 				Effect.tapError((error) =>
 					Effect.sync(() =>
@@ -736,23 +1524,38 @@ export class OrchestrationEngine {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
-			const instance = yield* this.getProviderInstanceEffect(providerId);
+			const call = yield* this.resolveSessionCallContextEffect(
+				command.sessionId,
+				undefined,
+				{ prompt: { id: command.requestId, kind: "permission" } },
+			);
+			const instance = yield* this.getProviderInstanceEffect(
+				providerId,
+				call?.account,
+			);
 
-			return yield* instance
-				.resolvePermissionEffect(
-					command.sessionId,
-					command.requestId,
-					command.decision,
-				)
-				.pipe(
-					Effect.tapError((error) =>
-						Effect.sync(() =>
-							log.error(
-								`resolvePermission failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${error.message}`,
-							),
+			const resolution = call
+				? instance.resolvePermissionEffect(
+						command.sessionId,
+						command.requestId,
+						command.decision,
+						undefined,
+						call,
+					)
+				: instance.resolvePermissionEffect(
+						command.sessionId,
+						command.requestId,
+						command.decision,
+					);
+			return yield* resolution.pipe(
+				Effect.tapError((error) =>
+					Effect.sync(() =>
+						log.error(
+							`resolvePermission failed: session=${command.sessionId} request=${command.requestId} provider=${providerId}: ${error.message}`,
 						),
 					),
-				);
+				),
+			);
 		});
 	}
 
@@ -763,13 +1566,22 @@ export class OrchestrationEngine {
 			const providerId = yield* this.requireProviderForSessionEffect(
 				command.sessionId,
 			);
-			const instance = yield* this.getProviderInstanceEffect(providerId);
+			const call = yield* this.resolveSessionCallContextEffect(
+				command.sessionId,
+				undefined,
+				{ prompt: { id: command.requestId, kind: "question" } },
+			);
+			const instance = yield* this.getProviderInstanceEffect(
+				providerId,
+				call?.account,
+			);
 
 			return yield* instance
 				.resolveQuestionEffect(
 					command.sessionId,
 					command.requestId,
 					command.answers,
+					...(call ? ([call] as const) : []),
 				)
 				.pipe(
 					Effect.tapError((error) =>
@@ -787,15 +1599,32 @@ export class OrchestrationEngine {
 		command: DiscoverCommand,
 	): Effect.Effect<ProviderCapabilities, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
+			const call = yield* this.resolveCallContextEffect({
+				sessionId: command.sessionId ?? "",
+				providerId: command.providerId,
+				...(command.account ? { account: command.account } : {}),
+				...(command.workspaceRoot
+					? { workspaceRoot: command.workspaceRoot }
+					: {}),
+				prepareShellEnv: true,
+				requireRoutableAccount: true,
+			});
 			const instance = yield* this.getProviderInstanceEffect(
 				command.providerId,
-				command.account,
+				call?.account ?? command.account,
 			);
-			const discovery = command.refresh
-				? instance.discoverEffect(command.workspaceRoot, command.account, {
-						refresh: true,
-					})
-				: instance.discoverEffect(command.workspaceRoot, command.account);
+			const discovery = call
+				? instance.discoverEffect(
+						call.workspaceRoot,
+						call.account,
+						command.refresh ? { refresh: true } : undefined,
+						call,
+					)
+				: command.refresh
+					? instance.discoverEffect(command.workspaceRoot, command.account, {
+							refresh: true,
+						})
+					: instance.discoverEffect(command.workspaceRoot, command.account);
 			return yield* discovery.pipe(
 				Effect.tapError((error) =>
 					Effect.sync(() =>
@@ -812,6 +1641,7 @@ export class OrchestrationEngine {
 		command: EndSessionCommand,
 	): Effect.Effect<void, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
+			yield* this.cancelPreWarmPreparationEffect(command.sessionId);
 			const targetBindingRevision =
 				yield* this.sessionBindingReadModel.getBindingRevision(
 					command.sessionId,
@@ -830,9 +1660,22 @@ export class OrchestrationEngine {
 				return;
 			}
 			const endSession = Effect.gen({ self: this }, function* () {
+				const call =
+					command.call ??
+					(yield* this.resolveSessionCallContextEffect(
+						command.sessionId,
+						command.account,
+						{
+							includeSettledForProviderId:
+								command.targetProviderId ?? command.account?.id ?? providerId,
+							...(command.targetProviderId
+								? { providerId: command.targetProviderId }
+								: {}),
+						},
+					));
 				const instance = yield* this.getProviderInstanceEffect(
 					providerId,
-					command.account,
+					call?.account ?? command.account,
 				);
 				yield* Effect.sync(() =>
 					log.info(
@@ -840,7 +1683,10 @@ export class OrchestrationEngine {
 					),
 				);
 				return yield* instance
-					.endSessionEffect(command.sessionId)
+					.endSessionEffect(
+						command.sessionId,
+						...(call ? ([call] as const) : []),
+					)
 					.pipe(
 						Effect.tapError((error) =>
 							Effect.sync(() =>
@@ -904,11 +1750,38 @@ export class OrchestrationEngine {
 			: Effect.void;
 	}
 
-	/** Shutdown the engine and all provider instances. */
+	prepareProjectRecovery(
+		projectId: string,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
+		return (
+			this.durable?.reactor.prepareProjectRecovery(projectId) ?? Effect.void
+		);
+	}
+
+	ownsPendingSend(
+		sessionId: string,
+		commandId: string,
+		requestSequence: number,
+		attemptCount: number,
+	): boolean {
+		return (
+			this.durable?.reactor.ownsPendingSend(
+				sessionId,
+				commandId,
+				requestSequence,
+				attemptCount,
+			) ?? false
+		);
+	}
+
+	/** Release engine work; adapter lifetime belongs to its ProviderAdapters owner. */
 	shutdownEffect(): Effect.Effect<void> {
 		return Effect.gen({ self: this }, function* () {
 			yield* Effect.sync(() => log.info("OrchestrationEngine shutting down"));
-			yield* this.registry.shutdownAllEffect();
+			yield* Effect.forEach([...this.preWarmPreparations.keys()], (sessionId) =>
+				this.cancelPreWarmPreparationEffect(sessionId),
+			);
+			yield* Scope.close(this.commandScope, Exit.void);
 			yield* Effect.sync(() => {
 				this.sessionBindingReadModel.clearTransientBindings();
 				this.inFlightCommands.clear();

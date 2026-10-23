@@ -11,10 +11,19 @@ export function withDispatchEffect<T extends object>(
 		getProviderForSessionEffect?: (
 			sessionId: string,
 		) => Effect.Effect<string | undefined>;
+		resolveCallContextEffect?: OrchestrationEngine["resolveCallContextEffect"];
+		preparePreWarmSessionEffect?: OrchestrationEngine["preparePreWarmSessionEffect"];
+		resolveSessionCallContextEffect?: OrchestrationEngine["resolveSessionCallContextEffect"];
 		bindSession?: (sessionId: string, providerId: string) => void;
 		unbindSession?: (sessionId: string) => void;
 	};
 	const bindings = new Map<string, string>();
+	mutable.resolveCallContextEffect ??= vi.fn(() => Effect.succeed(undefined));
+	mutable.preparePreWarmSessionEffect ??= (_sessionId, preparation) =>
+		preparation;
+	mutable.resolveSessionCallContextEffect ??= vi.fn(() =>
+		Effect.succeed(undefined),
+	);
 	const originalGetProviderForSession =
 		mutable.getProviderForSessionEffect?.bind(mutable);
 	mutable.getProviderForSessionEffect = vi.fn((sessionId: string) => {

@@ -42,6 +42,9 @@ describe("Schema Migration", () => {
 					[76, "events_forked_from_index"],
 					[77, "message_parts_result_event_seq_index"],
 					[78, "provider_run_ownership"],
+					[79, "sessions_goal_stuck"],
+					[80, "sessions_jev"],
+					[81, "provider_control_process"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -104,6 +107,9 @@ describe("Schema Migration", () => {
 					[76, "events_forked_from_index"],
 					[77, "message_parts_result_event_seq_index"],
 					[78, "provider_run_ownership"],
+					[79, "sessions_goal_stuck"],
+					[80, "sessions_jev"],
+					[81, "provider_control_process"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -337,6 +343,11 @@ describe("Schema Migration", () => {
 				{
 					name: "idx_pending_inputs_session_version",
 					table: "pending_inputs",
+					unique: false,
+				},
+				{
+					name: "idx_provider_command_outbox_process",
+					table: "provider_command_outbox",
 					unique: false,
 				},
 				{

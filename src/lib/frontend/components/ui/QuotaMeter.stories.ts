@@ -22,7 +22,7 @@ export const States: Story = {
 	render: () => ({ Component: QuotaMeterStoryGallery }),
 };
 
-/** The fill is the share used; amber from 80%, red and "limited" at 100%. */
+/** The fill is the share used; amber from 80%, red when Account Limit says wait. */
 export const Thresholds: Story = {
 	args: { used: 96 },
 	play: async ({ canvasElement }) => {

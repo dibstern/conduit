@@ -5,7 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
-import { Effect, Layer, ManagedRuntime, Ref, Stream } from "effect";
+import {
+	Cause,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+	Ref,
+	Stream,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import * as Statement from "effect/sql/Statement";
 import {
@@ -24,7 +33,10 @@ import {
 	hasColdAutoSettleCandidate,
 	hasProviderRecoveryCandidate,
 } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
-import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	type OpenCodeInstanceEvent,
+	OpenCodeInstancesTag,
+} from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { readColdWorktreeCleanupCandidates } from "../../../src/lib/domain/daemon/Services/worktree-cleanup-reader.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
@@ -103,6 +115,7 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import {
+	recoverRunnerCommands,
 	runningRunnerCommands,
 	settleUnclaimedRunnerCommands,
 } from "../../../src/lib/provider/runner/runner-recovery.js";
@@ -513,6 +526,144 @@ describe("shared-store relay project scope", () => {
 		);
 	});
 
+	it("session-targeted runner recovery uses stored ownership instead of the relay scope", async () => {
+		const rows = await store.runtime.runPromise(
+			Effect.gen(function* () {
+				return yield* runningRunnerCommands(
+					yield* SqlClient.SqlClient,
+					"claude",
+					() => "claude",
+					id(B, "runner"),
+				);
+			}),
+		);
+		expect(rows).toMatchObject([
+			{
+				project_key: B,
+				session_id: id(B, "runner"),
+				command_id: `${B}-runner-command`,
+			},
+		]);
+	});
+
+	// Failure modes: a foreign persister rejects the requeue, retries append it
+	// twice, or cancellation/shutdown requeues a command whose replay is unfinished.
+	it.each([
+		"failed",
+		"interrupted",
+		"closing",
+		"retry",
+		"empty",
+	] as const)("session-targeted recovery requeues failed steers through their stored owner: %s", async (mode) => {
+		await store.runtime.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const sessionId = id(B, "runner");
+					const commandId = `${B}-runner-command`;
+					const eventStore = yield* makeEventStoreEffect.pipe(
+						Effect.provideService(PersistenceProjectTag, { projectId: B }),
+					);
+					if (mode !== "empty") {
+						const runner = yield* ProjectionRunnerEffectTag;
+						yield* runner.projectBatch(
+							yield* eventStore.appendBatch([
+								canonicalEvent(
+									"input.admitted",
+									sessionId,
+									{
+										sessionId,
+										inputId: commandId,
+										delivery: "steer",
+										request: { text: "steer" },
+									},
+									{ createdAt: 1000 },
+								),
+								canonicalEvent("input.sent", sessionId, {
+									sessionId,
+									inputId: commandId,
+									steer: true,
+								}),
+							]),
+						);
+					}
+					let closing = mode === "closing";
+					let interrupted = mode === "interrupted";
+					let failedAttempt = 1;
+					const recover = recoverRunnerCommands(sql, sessionId, "claude", {
+						driverForAccount: () => "claude",
+						decodeInput: () => ({
+							sessionId,
+							inputId: commandId,
+							prompt: "steer",
+							workspaceRoot: store.root,
+							extraFolders: [],
+							history: [],
+							providerState: {},
+						}),
+						replay: () =>
+							interrupted
+								? Effect.interrupt
+								: Effect.fail({
+										operation: "recover",
+										message: "runner stopped",
+										code: "runner_stopped",
+									}),
+						resolveSinkId: (command) => command,
+						closing: () => closing,
+						failTurn: () =>
+							sql`UPDATE provider_command_outbox SET status = 'failed', error_code = 'runner_stopped'
+						WHERE command_id = ${commandId} AND attempt_count = ${failedAttempt}`.pipe(
+								Effect.asVoid,
+								Effect.orDie,
+							),
+					});
+					const [command] = yield* recover;
+					expect(command).toBeDefined();
+					if (!command) return;
+					if (mode === "retry") {
+						yield* sql`UPDATE provider_command_outbox SET attempt_count = 2 WHERE command_id = ${commandId}`;
+					} else if (interrupted) {
+						const fiber = yield* Effect.forkChild(command.wait);
+						const exit = yield* Fiber.await(fiber);
+						expect(
+							Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause),
+						).toBe(true);
+					}
+					if (mode === "closing" || mode === "retry") yield* command.wait;
+					if (
+						mode === "closing" ||
+						mode === "interrupted" ||
+						mode === "retry"
+					) {
+						expect(
+							yield* sql`SELECT state FROM pending_inputs WHERE input_id = ${commandId}`,
+						).toEqual([{ state: "steering" }]);
+						expect(
+							yield* sql`SELECT 1 FROM events WHERE session_id = ${sessionId} AND type = 'input.requeued'`,
+						).toEqual([]);
+					}
+					closing = false;
+					interrupted = false;
+					if (mode === "retry") failedAttempt = 2;
+					const [current] = yield* recover;
+					if (!current) throw new Error("Missing recovered command");
+					yield* current.wait;
+					yield* current.wait;
+					expect(
+						yield* sql`SELECT state FROM pending_inputs WHERE input_id = ${commandId}`,
+					).toEqual(mode === "empty" ? [] : [{ state: "queued" }]);
+					expect(
+						yield* sql`SELECT project_id FROM events WHERE session_id = ${sessionId} AND type = 'input.requeued'`,
+					).toEqual(mode === "empty" ? [] : [{ project_id: B }]);
+					expect(
+						yield* sql`SELECT input_id FROM pending_inputs WHERE session_id = ${id(A, "runner")}`,
+					).toEqual([]);
+				}),
+			),
+		);
+	});
+
 	it("unclaimed Claude runner settlement changes only A", async () => {
 		const before = daemonStoreManifest(store.filename);
 		const failures: string[] = [];
@@ -675,7 +826,8 @@ describe("shared-store relay project scope", () => {
 		const workspace: SessionWorkspaceTag["Service"] = {
 			preview: unused,
 			renameBranch: unused,
-			withLaunch: (effect) => effect,
+			withLaunch: (_sessionId, effect) => effect,
+			withProjectLaunch: (effect) => effect,
 			get: unused,
 			move: unused,
 			inherit: unused,
@@ -770,14 +922,38 @@ describe("shared-store relay project scope", () => {
 		);
 	});
 
-	it("SSE passive subscription includes only A's persisted directories", async () => {
+	it("SSE subscription scopes directories and replacement prompt retirement to A", async () => {
+		await store.runtime.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				for (const project of [A, B]) {
+					for (const owner of [null, "old-process", "current-process"]) {
+						for (const type of ["permission", "question"]) {
+							yield* sql`INSERT INTO pending_approvals (id, session_id, type, created_at, provider_process_id)
+								VALUES (${`${project}-${type}-${owner}`}, ${id(project, "workspace")}, ${type}, ${NOW}, ${owner})`;
+						}
+					}
+				}
+			}),
+		);
 		const before = daemonStoreManifest(store.filename);
 		let directories: readonly string[] = [];
 		const instances = {
 			...makeOpenCodeInstancesStub(),
 			events: (read: readonly string[] | (() => readonly string[])) => {
 				directories = typeof read === "function" ? read() : read;
-				return Stream.never;
+				return Stream.make({
+					_tag: "connected",
+					instanceId: "opencode",
+					managed: true,
+					providerProcessId: "current-process",
+					health: {
+						connected: true,
+						lastEventAt: null,
+						reconnectCount: 0,
+						stale: false,
+					},
+				} satisfies OpenCodeInstanceEvent);
 			},
 		};
 		await store.runtime.runPromise(
@@ -785,6 +961,30 @@ describe("shared-store relay project scope", () => {
 				Effect.gen(function* () {
 					const stream = yield* SSEStreamTag;
 					yield* stream.connectEffect();
+					const sql = yield* SqlClient.SqlClient;
+					yield* Effect.tryPromise(() =>
+						vi.waitFor(async () => {
+							const rows = await store.runtime.runPromise(
+								sql`SELECT type, status, provider_process_id FROM pending_approvals
+									WHERE session_id = ${id(A, "workspace")} ORDER BY type, provider_process_id`,
+							);
+							expect(rows).toEqual(
+								["permission", "question"].flatMap((type) => [
+									{ type, status: "pending", provider_process_id: null },
+									{
+										type,
+										status: "pending",
+										provider_process_id: "current-process",
+									},
+									{
+										type,
+										status: "resolved",
+										provider_process_id: "old-process",
+									},
+								]),
+							);
+						}),
+					);
 				}).pipe(
 					Effect.provide(
 						SSEStreamLive.pipe(
@@ -879,7 +1079,7 @@ describe("shared-store relay project scope", () => {
 						readings: Stream.empty,
 						latest: () => Effect.succeed(undefined),
 						turnEnded: () => Effect.void,
-						refresh: () =>
+						refresh: (_options) =>
 							Effect.succeed([usageReading("claude", { status: "available" })]),
 						pickFailover: () => Effect.succeed(undefined),
 					}),

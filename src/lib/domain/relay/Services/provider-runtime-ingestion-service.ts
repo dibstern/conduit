@@ -22,6 +22,7 @@ import {
 	EventStoreEffectTag,
 	type EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
+import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { readPendingRewindCommit } from "../../../persistence/effect/pending-rewind.js";
 import type {
 	ProjectionRunnerEffectTag,
@@ -49,11 +50,13 @@ import type { TurnSettings } from "../../../provider/turn-settings.js";
 import { turnEndedAlert } from "../../../relay/turn-ended-alert.js";
 import type { makeSessionCompactions } from "../../../session/session-compactions.js";
 import type { makeSessionRetries } from "../../../session/session-retries.js";
+import { QuestionApprovalSchema } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
 import { isRecord } from "../../../utils.js";
 import type { UsageService } from "../../daemon/Services/usage.js";
 import { ContinuationLive, ContinuationTag } from "./continuation.js";
 import { InputDraftsLive, InputDraftsTag } from "./input-drafts.js";
+import type { PendingInteractionService } from "./pending-interaction-service.js";
 import { announceBackgroundWork } from "./session-attention.js";
 import { sessionPickEvents } from "./session-pick.js";
 
@@ -119,6 +122,10 @@ export interface ProviderRuntimeRelayPublisher {
 }
 
 export interface ProviderRuntimeIngestionLiveOptions {
+	readonly pendingInteractions?: Pick<
+		PendingInteractionService,
+		"recordQuestionRequest"
+	>;
 	/** Resolve before any permit; the returned writer joins the ingestion receipt commit. */
 	readonly workspaceChanged?: (
 		event: Extract<ProviderRuntimeEvent, { type: "workspace.changed" }>,
@@ -136,6 +143,12 @@ export interface ProviderRuntimeIngestionLiveOptions {
 		"observe"
 	>;
 	readonly retries?: Pick<ReturnType<typeof makeSessionRetries>, "observe">;
+	/** Sees each live commit's accepted events, after COMMIT; it never blocks. */
+	readonly surfacing?: {
+		readonly observe: (
+			events: readonly CanonicalEvent[],
+		) => Effect.Effect<void>;
+	};
 }
 
 export const makeProviderRuntimeIngestionLive = (
@@ -366,6 +379,48 @@ export const makeProviderRuntimeIngestionLive = (
 							});
 							const afterCommit = Effect.gen(function* () {
 								if (appended) {
+									if (options.pendingInteractions) {
+										for (const event of domainEvents) {
+											if (
+												event.type !== "question.asked" ||
+												event.data.delivery !== "async"
+											)
+												continue;
+											const questions = Schema.decodeUnknownOption(
+												QuestionApprovalSchema.fields.questions,
+											)(event.data.questions);
+											if (questions._tag === "None") {
+												yield* Effect.logWarning(
+													`Invalid async question ${event.data.id}`,
+												);
+												continue;
+											}
+											yield* options.pendingInteractions.recordQuestionRequest({
+												requestId: event.data.id,
+												sessionId: event.sessionId ?? event.data.sessionId,
+												delivery: "async",
+												questions: questions.value,
+												...(event.data.providerProcessId
+													? { providerProcessId: event.data.providerProcessId }
+													: {}),
+												...(event.data.providerRequestId
+													? { providerRequestId: event.data.providerRequestId }
+													: {}),
+												...(event.data.providerId
+													? { providerId: event.data.providerId }
+													: {}),
+												...(event.data.toolUseId
+													? { toolCallId: event.data.toolUseId }
+													: {}),
+												...(event.data.messageId
+													? { messageId: event.data.messageId }
+													: {}),
+												...(event.data.partId
+													? { partId: event.data.partId }
+													: {}),
+											});
+										}
+									}
 									for (const id of draftsToForget)
 										yield* drafts
 											.forget(id)
@@ -619,12 +674,31 @@ export const makeProviderRuntimeIngestionLive = (
 											}
 											if (pending.length > 0)
 												yield* project(yield* appendEvents(pending));
+											// Orphan settlement must commit its unplaced steers too;
+											// a terminal run no longer triggers startup recovery.
+											for (const event of accepted)
+												if (
+													event.type === "turn.error" &&
+													event.data.code === "runner_stopped"
+												)
+													yield* requeueFailedSteers(
+														sql,
+														{
+															persistEvents: (events) =>
+																Effect.gen(function* () {
+																	yield* project(yield* appendEvents(events));
+																}),
+														},
+														event.sessionId,
+													);
 											yield* beforeCommit;
 										}),
 									commitOptions,
 								)
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 							if (!appended) return 0;
+							if (options.surfacing)
+								yield* options.surfacing.observe(domainEvents);
 
 							// A compaction in progress and a retry live in memory, not the
 							// log (C1). Stamp their rows so the shell re-reads them.

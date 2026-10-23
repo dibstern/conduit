@@ -106,7 +106,9 @@ it.live(
 			vi.mocked(client.session.summarize)
 				.mockImplementationOnce(() => heldA)
 				.mockImplementationOnce(() => heldB);
-			const provider = new OpenCodeProviderInstance({ client });
+			const provider = new OpenCodeProviderInstance({
+				clientForSession: () => Effect.succeed(client),
+			});
 			const ingress = yield* makeEffectOpenCodeRuntimeIngress(
 				createSilentLogger(),
 				undefined,
@@ -381,7 +383,9 @@ it.live("an unrelated native echo never accepts an indeterminate send", () =>
 		vi.mocked(client.session.prompt).mockRejectedValue(
 			new Error("connection lost before server receipt"),
 		);
-		const provider = new OpenCodeProviderInstance({ client });
+		const provider = new OpenCodeProviderInstance({
+			clientForSession: () => Effect.succeed(client),
+		});
 		const ingress = yield* makeEffectOpenCodeRuntimeIngress(
 			createSilentLogger(),
 			undefined,
@@ -495,7 +499,7 @@ for (const scenario of [
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				const client = makeMockOpenCodeAPI();
 				const provider = new OpenCodeProviderInstance({
-					client,
+					clientForSession: () => Effect.succeed(client),
 				});
 				const ingress = yield* makeEffectOpenCodeRuntimeIngress(
 					createSilentLogger(),
@@ -849,7 +853,9 @@ for (const confirmedStop of [false, true]) {
 				const sql = yield* SqlClient.SqlClient;
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				const client = makeMockOpenCodeAPI();
-				const provider = new OpenCodeProviderInstance({ client });
+				const provider = new OpenCodeProviderInstance({
+					clientForSession: () => Effect.succeed(client),
+				});
 				if (confirmedStop)
 					vi.mocked(client.session.messages).mockImplementation(() =>
 						Effect.runPromise(Effect.never),

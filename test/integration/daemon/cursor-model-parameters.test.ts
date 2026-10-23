@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import { cursorModelInfo } from "../../../src/lib/provider/cursor/cursor-runner-driver.js";
 import type { CursorModel } from "../../../src/lib/provider/cursor/sdk-port.js";
+import { modelParameterChoices } from "../../../src/lib/provider/turn-settings.js";
 import type {
 	HistoryMessage,
 	ProviderInfo,
@@ -241,11 +242,12 @@ describe("Cursor model parameters, instance catalog cache and reroute", () => {
 		for (const { modelId, variant, params } of defaults) {
 			const captured = capturedCatalog.models.find(({ id }) => id === modelId);
 			if (!captured) throw new Error(`Missing captured model ${modelId}`);
-			expect(
-				Object.entries(cursorModelInfo(captured).variants ?? {}).filter(
-					([, value]) => value["isDefault"] === true,
-				),
-			).toEqual([[variant, { params, isDefault: true }]]);
+			const choices = modelParameterChoices(cursorModelInfo(captured));
+			expect(choices.offered()).toContain(variant);
+			expect(choices.resolve("")).toMatchObject({
+				_tag: "Success",
+				success: { _tag: "Default", values: params },
+			});
 			const defaultId = await browser.createSession(
 				`Cursor ${modelId} default`,
 				accountId,

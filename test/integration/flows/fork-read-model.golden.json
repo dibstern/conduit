@@ -47,7 +47,9 @@
 				"archived_at": null,
 				"archived_automatically": 0,
 				"unarchived_at": null,
-				"last_user_message_at": null
+				"last_user_message_at": null,
+				"goal_stuck": null,
+				"jev": null
 			}
 		],
 		"turns": [
@@ -612,7 +614,9 @@
 				"archived_at": null,
 				"archived_automatically": 0,
 				"unarchived_at": null,
-				"last_user_message_at": null
+				"last_user_message_at": null,
+				"goal_stuck": null,
+				"jev": null
 			}
 		],
 		"turns": [
@@ -859,7 +863,9 @@
 				"archived_at": null,
 				"archived_automatically": 0,
 				"unarchived_at": null,
-				"last_user_message_at": null
+				"last_user_message_at": null,
+				"goal_stuck": null,
+				"jev": null
 			}
 		],
 		"turns": [

@@ -207,6 +207,34 @@ export const MultipleQuestions: Story = {
 	args: { request: mockMultiQuestion },
 };
 
+export const SecretQuestion: Story = {
+	args: {
+		request: {
+			toolId: "q-secret",
+			sessionId: "test-session",
+			questions: [
+				{
+					header: "API token",
+					question: "Which API token should be used?",
+					options: [],
+					multiSelect: false,
+					custom: false,
+					isOther: false,
+					isSecret: true,
+				},
+			],
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const input = canvas.getByLabelText("Type your answer");
+		await expect(input).toHaveAttribute("type", "password");
+		await userEvent.type(input, "private-token-must-stay-hidden");
+		await expect(input).toHaveValue("private-token-must-stay-hidden");
+		await expect(canvas.getByRole("button", { name: "Submit" })).toBeEnabled();
+	},
+};
+
 export const Hover: Story = {
 	...SingleSelect,
 	parameters: { pseudo: { hover: true } },

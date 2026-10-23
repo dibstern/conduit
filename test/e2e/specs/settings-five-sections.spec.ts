@@ -21,17 +21,16 @@ const sections = [
 		"Claude",
 		"[data-testid=claude-setting-defaultPermissionMode-select]",
 	],
-	["surfacing", "Surfacing", "[data-testid=surfacing-settings-general]"],
+	["surfacing", "Jev", "[data-testid=surfacing-settings-general]"],
 	["archived", "Archived", "section[aria-label='Archived sessions']"],
 	["usage", "Usage", "#usage-settings"],
 	["server", "Server", "#instances-settings"],
 ] as const;
 
 async function openSettingsPanel(page: Page): Promise<void> {
-	const listOverflow = page.getByTestId("list-bar-overflow");
-	if (await listOverflow.isVisible()) {
-		await listOverflow.click();
-		await page.getByTestId("list-overflow-settings").click();
+	const listSettings = page.getByTestId("list-bar-settings");
+	if (await listSettings.isVisible()) {
+		await listSettings.click();
 		return;
 	}
 	await page

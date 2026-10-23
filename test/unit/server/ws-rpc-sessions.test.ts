@@ -11,6 +11,7 @@ import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { OpenCodeUnavailable } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { GoalSummaryServiceTag } from "../../../src/lib/domain/relay/Services/goal-summary-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
@@ -61,6 +62,68 @@ const makeModelApi = () => {
 
 const rpcClient = Effect.gen(function* () {
 	return yield* RpcTest.makeClient(WsRpcGroup);
+});
+
+describe("WsRpcServerLayer GenerateGoalSummary", () => {
+	it.effect(
+		"goal RPCs keep missing-session and unsupported-provider guards and only generate on request",
+		() => {
+			const summary = {
+				text: "Upload needs a release credential.",
+				generatedAt: 300,
+				stale: false,
+			};
+			const generate = vi.fn(() => Effect.succeed(summary));
+			const layer = Layer.merge(
+				makeTestHandlerLayer({
+					persistenceLayer: makePersistenceEffectLayer(
+						":memory:",
+						"test-project",
+					),
+				}),
+				Layer.succeed(GoalSummaryServiceTag, {
+					metadata: () =>
+						Effect.succeed({ summary: null, summaryEnabled: true }),
+					generate,
+				}),
+			);
+			return Effect.gen(function* () {
+				yield* (yield* ProjectionRunnerEffectTag).recover();
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, created_at, updated_at)
+				VALUES ('claude-goal', 'test-project', 'claude', 'Goal', 1, 1),
+				('opencode-goal', 'test-project', 'opencode', 'Goal', 1, 1)`;
+				const client = yield* rpcClient;
+				const before = yield* client.GetGoalDetails({
+					sessionId: "claude-goal",
+				});
+				for (const [sessionId, message] of [
+					["missing", "Session missing not found"],
+					[
+						"opencode-goal",
+						"Goal summaries are available only for Claude sessions",
+					],
+				] as const) {
+					expect(
+						yield* Effect.result(client.GenerateGoalSummary({ sessionId })),
+					).toMatchObject({
+						_tag: "Failure",
+						failure: { _tag: "WsRpcError", message },
+					});
+				}
+				expect(generate).not.toHaveBeenCalled();
+				expect(
+					yield* client.GenerateGoalSummary({ sessionId: "claude-goal" }),
+				).toEqual(summary);
+				expect(generate).toHaveBeenCalledExactlyOnceWith("claude-goal");
+				expect(
+					yield* client.GetGoalDetails({ sessionId: "claude-goal" }),
+				).toEqual(before);
+				expect(before).not.toHaveProperty("stuck");
+				expect(before).toMatchObject({ summary: null, summaryEnabled: true });
+			}).pipe(Effect.provide(WsRpcServerLayer.pipe(Layer.provideMerge(layer))));
+		},
+	);
 });
 
 describe("WsRpcServerLayer ResolveSession", () => {
@@ -1013,9 +1076,7 @@ describe("WsRpcServerLayer ListSessions", () => {
 				);
 				expect(missing._tag).toBe("Failure");
 				if (missing._tag === "Failure")
-					expect(String(missing.failure)).toContain(
-						"has no Claude transcript yet",
-					);
+					expect(String(missing.failure)).toContain("has no messages yet");
 				expect(forkSession).not.toHaveBeenCalled();
 				expect(query).not.toHaveBeenCalled();
 				if (usesCanonicalHistory) expect(readTranscript).not.toHaveBeenCalled();
@@ -1033,6 +1094,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("responds to a permission request for the originating tab", () => {
 		const api = makeMockOpenCodeAPI();
+		const dispatchEffect = vi.fn(() => Effect.void);
+		const orchestrationEngine = withDispatchEffect({
+			dispatchEffect,
+			getProviderForSessionEffect: () => Effect.succeed("opencode"),
+		});
 		const resolvePermissionEffect = vi.fn(() => Effect.void);
 		const providerRegistry = new ProviderRegistry();
 		providerRegistry.registerInstance({
@@ -1062,18 +1128,26 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(resolvePermissionEffect).toHaveBeenCalledWith(
-				"session-1",
-				"per-1",
-				"once",
-				undefined,
-			);
+			expect(dispatchEffect).toHaveBeenCalledWith({
+				type: "resolve_permission",
+				commandId: "cmd-respond-permission",
+				sessionId: "session-1",
+				requestId: "per-1",
+				decision: "once",
+				response: { decision: "once" },
+			});
+			expect(resolvePermissionEffect).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
-						makeTestHandlerLayer({ api, wsHandler, providerRegistry }),
+						makeTestHandlerLayer({
+							api,
+							wsHandler,
+							providerRegistry,
+							orchestrationEngine,
+						}),
 					),
 				),
 				{ local: true },
@@ -1083,6 +1157,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("answers an ask-user question for the originating tab", () => {
 		const api = makeMockOpenCodeAPI();
+		const dispatchEffect = vi.fn(() => Effect.void);
+		const orchestrationEngine = withDispatchEffect({ dispatchEffect });
 		const config = makeMockConfig({ projectDir: "/project" });
 		const wsHandler = makeMockWebSocketHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -1115,16 +1191,26 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(api.question.reply).toHaveBeenCalledWith(
-				"que-1",
-				[["PostgreSQL"]],
-				"/project-worktree",
-			);
+			expect(dispatchEffect).toHaveBeenCalledWith({
+				type: "resolve_question",
+				commandId: "cmd-answer-question",
+				sessionId: "session-1",
+				requestId: "que-1",
+				answers: { "0": "PostgreSQL" },
+			});
+			expect(api.question.reply).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ api, config, wsHandler })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							api,
+							config,
+							wsHandler,
+							orchestrationEngine,
+						}),
+					),
 				),
 				{ local: true },
 			),
@@ -1133,6 +1219,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("rejects an ask-user question for the originating tab", () => {
 		const api = makeMockOpenCodeAPI();
+		const dispatchEffect = vi.fn(() => Effect.void);
+		const orchestrationEngine = withDispatchEffect({ dispatchEffect });
 		const config = makeMockConfig({ projectDir: "/project" });
 		const wsHandler = makeMockWebSocketHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -1164,15 +1252,27 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(api.question.reject).toHaveBeenCalledWith(
-				"que-1",
-				"/project-worktree",
-			);
+			expect(dispatchEffect).toHaveBeenCalledWith({
+				type: "resolve_question",
+				commandId: "cmd-reject-question",
+				sessionId: "session-1",
+				requestId: "que-1",
+				answers: {},
+				operation: "reject",
+			});
+			expect(api.question.reject).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ api, config, wsHandler })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							api,
+							config,
+							wsHandler,
+							orchestrationEngine,
+						}),
+					),
 				),
 				{ local: true },
 			),

@@ -65,6 +65,17 @@ export const PROVIDER_PRESENTATION = {
 		},
 		subagentNotice: "Subagent sessions are read-only.",
 	},
+	codex: {
+		logo: "codex",
+		label: "Codex",
+		settingsTab: "server",
+		namePlaceholder: "Work Codex",
+		configDirPlaceholder: "~/.config/codex/work",
+		environment: undefined,
+		composerNotice: undefined,
+		auth: undefined,
+		subagentNotice: undefined,
+	},
 } as const satisfies Record<
 	KnownProviderDriverKind,
 	{

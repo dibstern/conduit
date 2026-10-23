@@ -52,7 +52,8 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 				preview: () => Effect.die("unused"),
 				record: () => Effect.die("unused"),
 				claudeWorktreeState: () => Effect.die("unused"),
-				withLaunch: (effect) => effect,
+				withLaunch: (_sessionId, effect) => effect,
+				withProjectLaunch: (effect) => effect,
 			}),
 		),
 	);
@@ -98,6 +99,7 @@ describe("getCommandsForSession active provider", () => {
 					expect(engine.dispatchEffect).toHaveBeenCalledWith({
 						type: "discover",
 						providerId: "claude",
+						sessionId: "session-1",
 						account: expect.objectContaining({
 							driver: "claude",
 							id: "claude",

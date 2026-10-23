@@ -40,6 +40,7 @@ function seed(
 		instances: rows.map((reading) => ({
 			...mockClaudeAccount,
 			id: reading.accountId,
+			colorSlot: (accounts as readonly string[]).indexOf(reading.accountId),
 			name: reading.accountId,
 			usageEligible: true,
 		})),
@@ -68,8 +69,11 @@ const meta = {
 		docs: { story: { inline: false, height: "640px" } },
 	},
 	beforeEach: () => {
+		const realNow = Date.now;
+		Date.now = () => new Date(2026, 0, 1, 1).getTime();
 		seed();
 		return () => {
+			Date.now = realNow;
 			applyUsageReadings([]);
 			applyUsageLimitsSetting(DEFAULT_USAGE_LIMITS);
 			openSessionForSetup(null);
@@ -79,6 +83,201 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+const codexReading: UsageReading = {
+	accountId: "codex",
+	harness: "codex",
+	status: "available",
+	readAt: 1,
+	stale: false,
+	windows: [
+		{
+			id: "codex:primary",
+			limitId: "codex",
+			label: "Codex 5h",
+			kind: "five_hour",
+			utilization: 42,
+			resetsAt: new Date(2026, 0, 1, 15, 40).toISOString(),
+		},
+		{
+			id: "codex:secondary",
+			limitId: "codex",
+			label: "Codex Week",
+			kind: "seven_day",
+			utilization: 64,
+			resetsAt: new Date(2026, 0, 5, 10, 0).toISOString(),
+		},
+		{
+			id: "codex_spark:primary",
+			limitId: "codex_spark",
+			label: "Spark 5h",
+			kind: "five_hour",
+			utilization: 83,
+			resetsAt: new Date(2026, 0, 1, 17, 10).toISOString(),
+		},
+		{
+			id: "codex_spark:secondary",
+			limitId: "codex_spark",
+			label: "Spark Week",
+			kind: "seven_day",
+			utilization: 31,
+			resetsAt: new Date(2026, 0, 6, 10, 0).toISOString(),
+		},
+	],
+};
+
+function seedCodex(reading: UsageReading = codexReading) {
+	seed([reading]);
+	applyInstanceListResponse({
+		instances: [
+			{
+				...mockClaudeAccount,
+				id: "codex",
+				name: "codex",
+				driver: "codex",
+				usageEligible: true,
+			},
+		],
+	});
+}
+
+export const CodexAllowances: Story = {
+	beforeEach: () => seedCodex(),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.queryByTestId("usage-footer-single"),
+		).not.toBeInTheDocument();
+		await expect(
+			canvas.getByTestId("usage-footer-heading-codex"),
+		).toHaveTextContent("Codex");
+		await expect(
+			canvas.getByTestId("usage-footer-column-codex-five_hour"),
+		).toHaveTextContent("5h");
+		await expect(
+			canvas.getByTestId("usage-footer-column-codex-seven_day"),
+		).toHaveTextContent("Week");
+		await expect(
+			canvas.getByTestId("usage-footer-name-codex"),
+		).toHaveTextContent(/^codex$/);
+		await expect(
+			canvas.getByTestId("usage-footer-name-codex-codex_spark"),
+		).toHaveTextContent("codex · Spark");
+		for (const window of codexReading.windows) {
+			const rowId =
+				window.limitId === "codex" ? "codex" : `codex-${window.limitId}`;
+			const row = canvas.getByTestId(`usage-footer-row-${rowId}`);
+			const value = canvas.getByTestId(
+				`usage-footer-value-${rowId}-${window.kind}`,
+			);
+			await expect(row).toBeVisible();
+			await expect(value).toHaveTextContent(`${window.utilization}%`);
+			await expect(
+				canvas.getByTestId(`usage-footer-cell-${rowId}-${window.kind}`),
+			).toHaveAttribute("title", expect.stringContaining("Resets"));
+			// Each caption must fit inside its shared grid row, including on desktop.
+			const bounds = row.getBoundingClientRect();
+			const caption = value.getBoundingClientRect();
+			await expect(caption.top).toBeGreaterThanOrEqual(bounds.top);
+			await expect(caption.bottom).toBeLessThanOrEqual(bounds.bottom);
+		}
+		await expect(
+			canvas.getByTestId("usage-footer-cell-codex-codex_spark-five_hour"),
+		).toHaveAttribute("data-level", "warning");
+		await expect(canvas.queryByText(/^Resets /)).not.toBeInTheDocument();
+	},
+};
+
+export const CodexAllowancesPhone: Story = {
+	...CodexAllowances,
+	args: { phone: true, width: 390 },
+	play: async (context) => {
+		await CodexAllowances.play?.(context);
+		const body = within(context.canvasElement.ownerDocument.body);
+		await expect(
+			body.queryByTestId("usage-phone-single"),
+		).not.toBeInTheDocument();
+		await userEvent.click(body.getByTestId("usage-phone-dock"));
+		await expect(
+			await body.findByRole("dialog", { name: "Usage" }),
+		).toBeVisible();
+		await expect(body.getByTestId("usage-sheet-name-codex")).toHaveTextContent(
+			/^codex$/,
+		);
+		await expect(
+			body.getByTestId("usage-sheet-name-codex-codex_spark"),
+		).toHaveTextContent("codex · Spark");
+		await expect(
+			body.getByTestId("usage-sheet-value-codex-five_hour"),
+		).toHaveTextContent("42%");
+		await expect(
+			body.getByTestId("usage-sheet-value-codex-codex_spark-seven_day"),
+		).toHaveTextContent("31%");
+	},
+};
+
+export const CodexSingleLimit: Story = {
+	beforeEach: () =>
+		seedCodex({
+			...codexReading,
+			windows: codexReading.windows.filter(
+				(window) => window.limitId === "codex",
+			),
+		}),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("usage-footer-single")).toBeVisible();
+		await expect(canvas.getByTestId("usage-footer-harness")).toHaveTextContent(
+			"Codex",
+		);
+		await expect(
+			canvas.getByTestId("usage-footer-column-codex-five_hour"),
+		).toHaveTextContent("5h");
+		await expect(
+			canvas.getByTestId("usage-footer-column-codex-seven_day"),
+		).toHaveTextContent("Week");
+		await expect(
+			canvas.getByTestId("usage-footer-value-codex-five_hour"),
+		).toHaveTextContent("42%");
+		await expect(
+			canvas.getByTestId("usage-footer-value-codex-seven_day"),
+		).toHaveTextContent("64%");
+		await expect(
+			canvas.queryByTestId("usage-footer-group-codex"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const CodexCustomWindow: Story = {
+	beforeEach: () =>
+		seedCodex({
+			...codexReading,
+			windows: codexReading.windows.map((window) =>
+				window.id === "codex_spark:primary"
+					? { ...window, kind: "custom", label: "Spark 15m" }
+					: window,
+			),
+		}),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByTestId("usage-footer-name-codex-codex_spark"),
+		).toHaveTextContent("codex · Spark");
+		await expect(
+			canvas.getByTestId("usage-footer-row-codex-codex_spark"),
+		).toHaveAttribute("title", "Spark 15m: 83%");
+		await expect(
+			canvas.getByTestId("usage-footer-value-codex-codex_spark-five_hour"),
+		).toHaveTextContent("—");
+		await expect(
+			canvas.getByTestId("usage-footer-value-codex-codex_spark-seven_day"),
+		).toHaveTextContent("31%");
+		await expect(canvas.queryByText("Spark 15m")).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByTestId("usage-footer-column-codex-custom"),
+		).not.toBeInTheDocument();
+	},
+};
 
 /** Current, normal, warning, limited, stale and a second harness in one meter. */
 export const States: Story = {

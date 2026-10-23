@@ -2,6 +2,7 @@ import { Arbitrary, Effect, Schema, type SchemaAST } from "effect";
 import { RpcSchema } from "effect/rpc";
 import { RpcClientDefect, RpcClientError } from "effect/rpc/RpcClientError";
 import { afterEach, expect, it, vi } from "vitest";
+import { AccountStillLimited } from "../../../src/lib/contracts/limit-recovery.js";
 import { WorkspaceMoveError } from "../../../src/lib/contracts/session-workspace.js";
 import { WorktreeBranchRenameError } from "../../../src/lib/contracts/worktree.js";
 import {
@@ -73,8 +74,7 @@ for (const rpc of WsRpcGroup.requests.values()) {
 						expect(() => failureLine(error, "Could not act")).not.toThrow();
 						expect(() => toastFailure("Could not act")(error)).not.toThrow();
 						expect(uiState.toasts.at(-1)?.title).toBe("Could not act");
-						// Message-owning classes retain their message, except branch rename
-						// whose existing inline sentence also includes the folder.
+						// Some browser copy adds context or formats server fields locally.
 						if (
 							typeof error === "object" &&
 							error !== null &&
@@ -82,6 +82,7 @@ for (const rpc of WsRpcGroup.requests.values()) {
 							!(error instanceof WorktreeBranchRenameError) &&
 							!(error instanceof WorkspaceMoveError) &&
 							!(error instanceof SetPinRejected) &&
+							!(error instanceof AccountStillLimited) &&
 							error.message
 						) {
 							expect(failureLine(error, "Could not act")).toBe(error.message);
@@ -97,6 +98,22 @@ for (const rpc of WsRpcGroup.requests.values()) {
 		});
 	}
 }
+
+it("formats a still-limited refusal in the user's local time", () => {
+	vi.useFakeTimers();
+	vi.setSystemTime(new Date(2026, 0, 1, 10));
+	const error = new AccountStillLimited({
+		label: "weekly limit",
+		until: new Date(2026, 0, 5, 9).getTime(),
+	});
+	const message = "Claude still shows the weekly limit until Mon 9 am.";
+	expect(failureLine(error, "Couldn't continue the session")).toBe(message);
+	toastFailure("Couldn't continue the session")(error);
+	expect(uiState.toasts.at(-1)).toMatchObject({
+		title: "Couldn't continue the session",
+		body: message,
+	});
+});
 
 it("uses the composer's standalone move sentence under the caller's title", () => {
 	const error = new WorkspaceMoveError({ path: "/gone", reason: "missing" });

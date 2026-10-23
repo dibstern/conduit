@@ -302,9 +302,14 @@ function pin(flags) {
 		const dependencies =
 			slice === "cursor"
 				? manifest.optionalDependencies
-				: manifest.dependencies;
+				: { ...manifest.dependencies, ...manifest.devDependencies };
+		// The opencode-ai server is a devDependency so tests run the pinned build.
 		const names =
-			slice === "cursor" ? [s.package, ...cursorHelpers] : [s.package];
+			slice === "cursor"
+				? [s.package, ...cursorHelpers]
+				: slice === "opencode"
+					? [s.package, "opencode-ai"]
+					: [s.package];
 		for (const name of names) {
 			expected(dependencies[name], s, `${name} dependency`);
 			const key = RegExp.escape(name);

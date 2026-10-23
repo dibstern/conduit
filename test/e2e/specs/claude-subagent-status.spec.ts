@@ -123,6 +123,8 @@ test.describe("Claude subagent child status", () => {
 		const parentId = await startHeldSubagent(page, relayUrl, db);
 		const whileRunning = childStatuses(db, parentId);
 
+		// Stop ignores clicks for 1.5s after a send from idle (double-tap guard).
+		await page.waitForTimeout(1500);
 		await new ChatPage(page).stopBtn.click();
 		await expect
 			.poll(() => countEvents(db, parentId, "turn.interrupted"))

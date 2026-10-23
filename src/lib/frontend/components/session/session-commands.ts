@@ -1,4 +1,8 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
+import {
+	messageSurfacing,
+	sessionJevEnabled,
+} from "../../stores/message-surfacing.svelte.js";
 import { selection } from "../../stores/selection.svelte.js";
 import {
 	followFork,
@@ -6,7 +10,6 @@ import {
 	sessionState,
 } from "../../stores/session.svelte.js";
 import { refreshListedSessions } from "../../stores/session-list.svelte.js";
-import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
 import { showToast } from "../../stores/ui.svelte.js";
 import { toastFailure } from "../../transport/rpc-errors.js";
@@ -156,17 +159,11 @@ function refreshSearch(): void {
 async function settle(session: SessionInfo, settled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
-	const returnToList =
-		sessionViewState.compact && sessionState.currentId === session.id;
+	const returnToList = sessionState.currentId === session.id;
 	try {
 		await rpc("SetSessionSettled", { ...input, settled });
 		refreshSearch();
-		if (
-			settled &&
-			returnToList &&
-			sessionViewState.compact &&
-			sessionState.currentId === session.id
-		)
+		if (settled && returnToList && sessionState.currentId === session.id)
 			backToSessions();
 		if (settled)
 			showToast(`Moved “${session.title || "New Session"}” to Settled`, {
@@ -230,8 +227,7 @@ async function autoSettle(session: SessionInfo, disabled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
 	const wasSettled = session.settledAt != null;
-	const returnToList =
-		sessionViewState.compact && sessionState.currentId === session.id;
+	const returnToList = sessionState.currentId === session.id;
 	try {
 		const outlook = await rpc("SetSessionAutoSettle", { ...input, disabled });
 		refreshSearch();
@@ -240,7 +236,6 @@ async function autoSettle(session: SessionInfo, disabled: boolean) {
 			!disabled &&
 			outlook.kind === "settled" &&
 			returnToList &&
-			sessionViewState.compact &&
 			sessionState.currentId === session.id
 		)
 			backToSessions();
@@ -549,6 +544,47 @@ export function getSessionCommands(
 			void archive(session, session.archivedAt == null);
 		},
 	});
+	const status = messageSurfacing.status;
+	if (status.key.source !== "none" && !status.key.rejected) {
+		const jevOn = sessionJevEnabled(session);
+		const setJev = (jev: "on" | "off" | null) => {
+			const input = rpcInput(session);
+			if (!input) return;
+			void rpc("SetSessionJev", { ...input, jev })
+				.then(refreshSearch)
+				.catch(toastFailure("Couldn't change Jev"));
+		};
+		items.push({
+			testId: "session-ctx-jev",
+			label: "Jev",
+			section: "manage",
+			icon: "zap",
+			detail:
+				session.jev == null
+					? `Default · ${jevOn ? "on" : "off"}`
+					: jevOn
+						? "On"
+						: "Off",
+			options: {
+				title: "Jev",
+				hint: "For this session",
+				items: (["on", "off", null] as const).map((jev) => ({
+					id: `jev-${jev ?? "default"}`,
+					icon: jev === "on" ? "zap" : jev === "off" ? "circle" : "settings",
+					label:
+						jev === null
+							? `Default (${status.enabled ? "on" : "off"})`
+							: jev === "on"
+								? "On"
+								: "Off",
+					selected: (session.jev ?? null) === jev,
+					run: () => setJev(jev),
+				})),
+			},
+			// A tap on the phone tile flips Jev; holding it offers Default too.
+			run: () => setJev(jevOn ? "off" : "on"),
+		});
+	}
 	items.push(
 		...(host.select
 			? [

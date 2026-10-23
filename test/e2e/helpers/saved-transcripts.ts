@@ -2,7 +2,6 @@ import type { Page } from "@playwright/test";
 
 /** What a test needs to know of one saved transcript record. */
 export interface SavedSummary {
-	readonly buildId: unknown;
 	readonly project: unknown;
 	readonly sequence: unknown;
 	readonly resumePoint: unknown;
@@ -49,7 +48,6 @@ export const savedTranscripts = (
 						[
 							String(field(record, "sessionId")),
 							{
-								buildId: field(record, "buildId"),
 								project: field(record, "project"),
 								sequence: of("sequence"),
 								resumePoint: of("resumePoint"),

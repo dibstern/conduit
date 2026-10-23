@@ -1,3 +1,4 @@
+import { ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,15 +33,18 @@ import {
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
-import type { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
+import { ProviderStateEffectTag } from "../../../src/lib/persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { StoredEvent } from "../../../src/lib/persistence/events.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { CursorAccountResources } from "../../../src/lib/provider/cursor/cursor-account-resources.js";
 import { makeCursorProviderRuntime } from "../../../src/lib/provider/cursor/cursor-provider-runtime.js";
+import { createCursorSdkPort } from "../../../src/lib/provider/cursor/cursor-sdk.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
+import * as openCodeTextServer from "../../../src/lib/provider/opencode-text-server.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
@@ -50,6 +54,7 @@ import {
 	makeClaudeTextGenerationLayer,
 	replayClaudeText,
 } from "../../helpers/claude-text-generation.js";
+import { cursorAccountResourcesFixture } from "../../helpers/cursor-account-resources-fixture.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -211,7 +216,8 @@ const waitForSessionProjectorToReachLatestRename = (sessionId = "session-1") =>
 					if (latest > 0 && cursor >= latest) return latest;
 					throw new Error("Timed out waiting for session projector cursor");
 				},
-				{ timeout: 1_000 },
+				// Covers a whole replayed generation plus projection, which is slow under load.
+				{ timeout: 10_000 },
 			),
 		);
 	});
@@ -475,11 +481,32 @@ describe("SessionTitleService", () => {
 			const accounts = makeMockAccountDirectory([account]);
 			const route = vi.fn((selected: OpenCodeAccount, directory?: string) => {
 				expect(selected).toEqual(account);
-				expect(directory).toContain(join(configDir, "text-generation"));
+				expect(directory).toBeUndefined();
 				return Effect.succeed(replay.client(directory ?? ""));
 			});
+			let scratch = "";
+			const server = vi
+				.spyOn(openCodeTextServer, "openCodeTextServerEffect")
+				.mockImplementation(() =>
+					Effect.gen(function* () {
+						const root = yield* Effect.acquireRelease(
+							Effect.sync(() =>
+								mkdtempSync(join(tmpdir(), "conduit-title-service-")),
+							),
+							removeTempDir,
+						);
+						scratch = root;
+						return {
+							client: replay.client(root),
+							cwd: root,
+							root,
+							process: new ChildProcess(),
+							pid: 123456,
+						};
+					}),
+				);
 			const provider = new OpenCodeProviderInstance({
-				client: replay.client("/project"),
+				clientForSession: () => Effect.succeed(replay.client("/project")),
 				configDir,
 				clientForAccount: route,
 			});
@@ -516,7 +543,8 @@ describe("SessionTitleService", () => {
 				).toEqual([]);
 				expect(queryFactory).not.toHaveBeenCalled();
 				expect(route).toHaveBeenCalledOnce();
-				expect(readdirSync(join(configDir, "text-generation"))).toEqual([]);
+				expect(server).toHaveBeenCalledOnce();
+				expect(existsSync(scratch)).toBe(false);
 			}).pipe(
 				Effect.provide(
 					makeTestLayer({
@@ -529,6 +557,7 @@ describe("SessionTitleService", () => {
 					}),
 				),
 				Effect.ensuring(removeTempDir(configDir)),
+				Effect.ensuring(Effect.sync(() => server.mockRestore())),
 			);
 		},
 	);
@@ -573,11 +602,23 @@ describe("SessionTitleService", () => {
 				accounts,
 				providerLayer: Layer.effect(
 					ProviderRegistryTag,
-					makeCursorProviderRuntime({
-						workspaceRoot: process.cwd(),
-						daemonConfigDir: configDir,
-						accounts: accounts.snapshot,
-					}).pipe(Effect.map((provider) => new ProviderRegistry([provider]))),
+					Effect.gen(function* () {
+						const read = yield* ReadQueryEffectTag;
+						const state = yield* ProviderStateEffectTag;
+						const provider = yield* makeCursorProviderRuntime(
+							{
+								daemonConfigDir: configDir,
+								accounts: accounts.snapshot,
+							},
+							{ read, state },
+						).pipe(
+							Effect.provideService(
+								CursorAccountResources,
+								cursorAccountResourcesFixture(createCursorSdkPort()),
+							),
+						);
+						return new ProviderRegistry([provider]);
+					}),
 				),
 			});
 			return Effect.gen(function* () {
@@ -698,12 +739,13 @@ describe("SessionTitleService", () => {
 	it.effect(
 		"uses the directory's default account and removes the scratch directory",
 		() => {
+			const projectDir = "/title-project-root";
 			let scratchDir: string | undefined;
 			const queryFactory = vi.fn(
 				(params: Parameters<ClaudeOneShotQueryFactory>[0]) => {
 					scratchDir = params.options?.cwd;
 					expect(params.options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(
-						join(process.cwd(), ".claude-work"),
+						"/account-base/.claude-work",
 					);
 					expect(params.options?.env?.["TITLE_ACCOUNT_MARKER"]).toBe("work");
 					return replayClaudeText();
@@ -716,13 +758,17 @@ describe("SessionTitleService", () => {
 						driver: "claude",
 						id: AccountIdSchema.make("claude-work"),
 						name: "Work",
-						folder: configuredClaudeConfigDir(".claude-work"),
+						configuredFolder: ".claude-work",
+						folder: configuredClaudeConfigDir("/account-base/.claude-work"),
 						env: { TITLE_ACCOUNT_MARKER: "work" },
 						usageEligible: true,
 					},
 				]),
 				// Deliberately not a daemon config path. The job must use the directory.
-				config: makeMockConfig({ configDir: "/not-a-daemon-config" }),
+				config: makeMockConfig({
+					projectDir,
+					configDir: "/not-a-daemon-config",
+				}),
 			});
 			return Effect.gen(function* () {
 				yield* seedSessionRow();

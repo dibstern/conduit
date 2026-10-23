@@ -1,4 +1,11 @@
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import Database from "better-sqlite3";
@@ -173,6 +180,11 @@ describe("Project provenance through the built daemon", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
+			evidence["process"] = fixture.proof();
+			const runnerLog = join(fixture.configDir, "runners.log");
+			evidence["runnerLogTail"] = existsSync(runnerLog)
+				? readFileSync(runnerLog).subarray(-8_000).toString()
+				: "";
 			evidence["errors"] =
 				task.result?.errors?.map(({ message }) => message) ?? [];
 			await fixture.dispose();
@@ -241,7 +253,7 @@ describe("Project provenance through the built daemon", () => {
 			const cursor = browser.frames.length;
 			const approvalsBefore = fixture.marks.filter(
 				(mark) =>
-					mark.kind === "runner-command" && mark.type === "answer-permission",
+					mark.kind === "runner-command" && mark.type === "resolve-permission",
 			).length;
 			const pending = browser.send(sessionId, "approval-parity");
 			const request = await browser.waitFor(
@@ -253,6 +265,7 @@ describe("Project provenance through the built daemon", () => {
 			await replay();
 			await vi.waitFor(() =>
 				expect(outbox(fixture, slug)).toMatchObject([
+					{ status: "completed", attempt_count: 1 },
 					{ status: "completed", attempt_count: 1 },
 					{ status: "completed", attempt_count: 1 },
 				]),
@@ -268,6 +281,14 @@ describe("Project provenance through the built daemon", () => {
 				]),
 			);
 			await browser.deleteSession(sessionId);
+			// Ending the session on delete is an outbox command too.
+			await vi.waitFor(() => {
+				const commands = outbox(fixture, slug);
+				expect(commands).toHaveLength(4);
+				expect(commands.every(({ status }) => status === "completed")).toBe(
+					true,
+				);
+			});
 			await vi.waitFor(() =>
 				expect(provenance(fixture, slug).events).toEqual([
 					{ type: "session.deleted", project_id: slug, count: 1 },
@@ -283,7 +304,6 @@ describe("Project provenance through the built daemon", () => {
 					fixture.marks.filter(
 						(mark) =>
 							mark.kind === "runner-command" &&
-							mark.type === "send-turn" &&
 							mark.commandId === command.command_id,
 					),
 				).toHaveLength(1);
@@ -291,7 +311,8 @@ describe("Project provenance through the built daemon", () => {
 			const approvalExecutions =
 				fixture.marks.filter(
 					(mark) =>
-						mark.kind === "runner-command" && mark.type === "answer-permission",
+						mark.kind === "runner-command" &&
+						mark.type === "resolve-permission",
 				).length - approvalsBefore;
 			expect(approvalExecutions).toBe(1);
 			projects.push({
@@ -309,7 +330,7 @@ describe("Project provenance through the built daemon", () => {
 		expect(
 			fixture.marks.filter(
 				(mark) =>
-					mark.kind === "runner-command" && mark.type === "answer-permission",
+					mark.kind === "runner-command" && mark.type === "resolve-permission",
 			),
 		).toHaveLength(2);
 		evidence["projects"] = projects.sort((a, b) =>

@@ -39,6 +39,7 @@
 		duration,
 		highlight = false,
 		messageNumber,
+		messageCategory,
 		live = false,
 		runningTasks = new Set<string>(),
 	}: {
@@ -48,6 +49,7 @@
 		duration?: number | undefined;
 		highlight?: boolean;
 		messageNumber?: number | undefined;
+		messageCategory?: { glyph: string; colour: string | undefined } | undefined;
 		live?: boolean;
 		/** Shared with the strip so status overrides use the same snapshot. */
 		runningTasks?: ReadonlySet<string>;
@@ -97,6 +99,7 @@
 	{@const subject = part.name === "Skill" ? skillName(part) : toolSubject(part)}
 	{@const tag = toolTags(part)[0]}
 	{@const isSkill = part.name === "Skill"}
+	{@const hasLiveOutput = typeof part.metadata?.['output'] === "string"}
 	{@const cursorDetail = typeof part.metadata?.['cursorToolType'] === "string" && (part.metadata['fileChange'] || part.metadata['plan'] || part.metadata['computerUse'] || part.metadata['media'] || part.metadata['output'] !== undefined || ensureCanonical(part.name, part.input).tool === "Unknown")}
 	<!-- A compact row is still this tool's rendering, so it answers to the same
 	     .tool-item / data-tool-status hooks the expanded card used to. -->
@@ -191,7 +194,7 @@
 		{/if}
 		{#if !launch && expanded && isSkill}
 			<div class="ml-[22px] mr-[4px] my-[4px]"><SkillDoc name={subject} /></div>
-		{:else if !launch && expanded && (part.result || command || cursorDetail)}
+		{:else if !launch && expanded && (part.result || command || hasLiveOutput || cursorDetail)}
 			<ToolFullDetail message={part} class="ml-[22px] mr-[4px] mb-[4px]">
 				{#snippet children(tool)}
 					{@const fullCommand = toolCommand(tool)}
@@ -242,7 +245,7 @@
 {:else}
 	<div data-part={part.uuid} data-message-number={messageNumber} data-highlighted={highlight || undefined}>
 		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" class={highlight ? "bg-selection" : ""} aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
-			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs {style.text}">#{messageNumber}</span>
+			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs {style.text}" style:color={messageCategory?.colour}>{#if messageCategory}<span aria-hidden="true">{messageCategory.glyph}</span>{" "}{/if}#{messageNumber}</span>
 			{:else}<span class="shrink-0 {style.text}"><Icon name={style.icon} size={14} /></span>{/if}
 			<span class="flex-1 truncate italic text-text-secondary">{firstLine(part.rawText, 120)}</span>
 			{#if meta}<span class="shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}

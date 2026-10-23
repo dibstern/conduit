@@ -268,7 +268,8 @@ export const cleanUpProjectWorktrees = (
 						// that order and retain its durable handoff until the turn settles.
 						const keptReason = yield* inbox.withSession(
 							sessionId,
-							workspace.withLaunch(
+							// Another session may be about to publish a move onto this checkout.
+							workspace.withProjectLaunch(
 								worktrees.withCheckoutUse(
 									worktrees.removeCheckout(
 										{

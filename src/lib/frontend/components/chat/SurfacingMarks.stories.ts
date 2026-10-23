@@ -58,6 +58,7 @@ const activity: ActivityPart[] = [
 const segment: Segment = { activity, reply: [] };
 const turn: Turn = {
 	id: "marks-turn",
+	storeId: "marks-turn",
 	user: {
 		type: "user",
 		uuid: "marks-user",
@@ -127,14 +128,13 @@ export const RaiseWhy: Story = {
 			.querySelector(".type-label");
 		const glyph = label?.querySelector(".glyph");
 		if (!pin || !label || !glyph)
-			throw new Error("Missing neutral pin or type label");
+			throw new Error("Missing Finding pin or type label");
 		const expected = new Option().style;
-		expected.color = getComputedStyle(pin).getPropertyValue("--color-text");
+		expected.color = getComputedStyle(pin).getPropertyValue(
+			"--color-cat-finding",
+		);
 		await expect(getComputedStyle(pin).backgroundColor).toBe(expected.color);
 		await expect(getComputedStyle(label).color).toBe(expected.color);
-		expected.color = getComputedStyle(glyph).getPropertyValue(
-			"--color-text-dimmer",
-		);
 		await expect(getComputedStyle(glyph).color).toBe(expected.color);
 	},
 };

@@ -1,4 +1,4 @@
-<!-- Warn before the composer's Claude account reaches its plan limit. Dismissals
+<!-- Warn before the composer's account reaches its plan limit. Dismissals
      stay in memory per session or draft project until 95% or a new window. -->
 <script module lang="ts">
 	import { SvelteMap } from "svelte/reactivity";
@@ -11,12 +11,14 @@
 </script>
 
 <script lang="ts">
+	import { accountLimit } from "../../../contracts/account-limit.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
+	import { getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import type { Immutable, SessionInfo } from "../../types.js";
-	import { quotaBlocksSwitch, usageForecastTime, usageWarning } from "../../utils/continuation.js";
+	import { usageForecastTime, usageWarning } from "../../utils/continuation.js";
 	import { openSettings } from "../layout/chrome-actions.js";
 	import Button from "../ui/Button.svelte";
 	import ComposerStrip from "../ui/ComposerStrip.svelte";
@@ -27,12 +29,19 @@
 	let { session, projectSlug }: { session: Immutable<SessionInfo> | undefined; projectSlug: string } = $props();
 
 	const key = $derived(session?.id ?? projectSlug);
-	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
 	const accountId = $derived(composerAccountId(session));
+	const claudeAccounts = $derived(getClaudeAccounts(projectSlug, getDriverTraits(getInstanceById(accountId ?? "")?.driver)?.usageHarness === "codex" ? "codex" : "claude"));
 	const reading = $derived(claudeAccounts.readingOf(accountId));
 	const severalAccounts = $derived(claudeAccounts.hasAlternative(accountId));
-	const alternatives = $derived(claudeAccounts.configuredAccounts.filter((account) =>
-		account.id !== accountId && !quotaBlocksSwitch(claudeAccounts.quotaOf(account.id) ?? claudeAccounts.readingOf(account.id))));
+	const alternatives = $derived(claudeAccounts.configuredAccounts.filter((account) => {
+		const reading = claudeAccounts.quotaOf(account.id) ?? claudeAccounts.readingOf(account.id);
+		return account.id !== accountId && accountLimit({
+			asker: "user",
+			modelId: session?.model?.model,
+			...(reading ? { reading } : {}),
+			now: clock.now,
+		}).kind === "go";
+	}));
 	const compactSwitchLabel = $derived(alternatives.length === 1 ? `Switch to ${alternatives[0]?.name}` : "Switch account");
 	const warning = $derived(usageWarning(reading, usageState.limits.warnAt, claudeAccounts.nameOf(accountId), severalAccounts, clock.now));
 	const limited = $derived(session?.limitRecovery && !session.limitRecovery.switched);

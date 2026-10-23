@@ -12,7 +12,7 @@
 		{ label: "79% used", props: { used: 79 } },
 		{ label: "80% used, amber", props: { used: 80 } },
 		{ label: "96% used, amber", props: { used: 96 } },
-		{ label: "100% used, red", props: { used: 100, caption: "limited · Mon 9:00" } },
+		{ label: "100% used, red", props: { used: 100, limited: true, caption: "limited · Mon 9:00" } },
 		{ label: "checking", props: { used: "checking" } },
 		{ label: "unknown", props: { used: "unknown" } },
 	];

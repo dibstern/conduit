@@ -13,3 +13,22 @@ Scenario: Sent message stays visible after the browser selects the first-send se
 Scenario: Subagent session shows its parent link
   When the mock relay replays a session family with a parent
   Then the subagent parent link is visible
+
+Scenario Outline: Session group collapse persists on this device
+  Given the viewport is a <viewport>
+  And the sidebar has the session group fixture
+  When I collapse the <group> session group
+  Then the <group> session group is collapsed with 0 rows
+  When I reload the session group list
+  Then the <group> session group is collapsed with 0 rows
+  When I expand the <group> session group
+  Then the <group> session group is expanded with 3 rows
+
+Examples:
+  | viewport | group   |
+  | desktop  | pinned  |
+  | desktop  | running |
+  | desktop  | idle    |
+  | phone    | pinned  |
+  | phone    | running |
+  | phone    | idle    |

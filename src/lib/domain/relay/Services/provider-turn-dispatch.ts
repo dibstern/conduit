@@ -12,6 +12,7 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { type Account, AccountSchema } from "../../../contracts/account.js";
+import { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import {
 	PROVIDER_DRIVERS,
 	type ProviderDriverKind,
@@ -38,6 +39,7 @@ import {
 } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
+import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { openCodeInputMessageId } from "../../../provider/opencode/opencode-input-message-id.js";
 import { createRelayEventSink } from "../../../provider/relay-event-sink.js";
 import {
@@ -177,6 +179,7 @@ export const resolveSessionFolders = (
 		const savedWorkspace =
 			workspace._tag === "Some" && read._tag === "Some"
 				? yield* workspace.value.withLaunch(
+						session.id,
 						Effect.gen(function* () {
 							const row = yield* read.value.getSession(session.id);
 							if (!row)
@@ -200,7 +203,20 @@ export const resolveSessionFolders = (
 			{ id: session.id, workspace: state },
 			config,
 		);
-		if (missing) {
+		// A deleted branch can never be recreated, so a fresh turn continues in
+		// the main folder. The "missing" cause tells the UI the session moved.
+		if (
+			missing?.reason === "branch-missing" &&
+			fallbackMissingWorktree &&
+			workspace._tag === "Some" &&
+			existsSync(config.projectDir)
+		) {
+			workspaceRoot = yield* workspace.value.withLaunch(
+				session.id,
+				workspace.value.move(session.id, config.projectDir, "missing"),
+			);
+			state = null;
+		} else if (missing) {
 			const branch =
 				missing.folders?.find(({ reason }) => reason === "branch-missing")
 					?.branch ?? missing.branch;
@@ -253,10 +269,9 @@ export const resolveSessionFolders = (
 						},
 					),
 				);
-			workspaceRoot = yield* workspace.value.move(
+			workspaceRoot = yield* workspace.value.withLaunch(
 				session.id,
-				config.projectDir,
-				"missing",
+				workspace.value.move(session.id, config.projectDir, "missing"),
 			);
 			state = null;
 		}
@@ -379,6 +394,18 @@ const restoreFailedPlacement = (
 					input.commandId,
 				);
 				return false;
+			}
+			if (driver === "codex" && runId) {
+				const [failedRewind] = yield* sql`
+					SELECT 1 FROM provider_command_outbox o
+					JOIN provider_runs r ON r.id = o.run_id AND r.session_id = o.session_id
+					WHERE o.session_id = ${input.sessionId} AND o.run_id = ${runId}
+						AND o.effect_type = 'send_turn'
+						AND json_extract(o.payload_json, '$.inputId') = ${input.commandId}
+						AND json_type(o.payload_json, '$.rewind') = 'object'
+						AND r.status = 'error' AND r.started_at IS NULL LIMIT 1`;
+				// A failed native revert must leave its input unplaced.
+				if (failedRewind) return false;
 			}
 			const persist = yield* ClaudeEventPersistEffectTag;
 			yield* persist
@@ -508,9 +535,54 @@ const handleDispatchFailure = (
 
 const prepareEngineTurnInput = (
 	resolvedInput: ProviderTurnServiceSendInput,
-	account: Account,
+	initialAccount: Account,
 ) =>
 	Effect.gen(function* () {
+		// The committed turn owns its account even before a runner has a snapshot.
+		let account = initialAccount;
+		if (resolvedInput.steer) {
+			const sql = yield* SqlClient.SqlClient;
+			const [turn] = yield* sql<{ account_json: string | null }>`
+				SELECT json_extract(o.payload_json, '$.account') AS account_json
+				FROM provider_command_outbox o JOIN provider_runs r ON r.id = o.run_id
+				WHERE o.session_id = ${resolvedInput.sessionId} AND o.effect_type = 'send_turn'
+					AND r.status IN ('pending', 'running')
+				ORDER BY CASE WHEN r.status = 'running' THEN 0 ELSE 1 END, o.request_sequence DESC LIMIT 1`;
+			if (turn?.account_json) {
+				const admittedAccount = yield* Schema.decodeUnknownEffect(
+					Schema.fromJsonString(AccountSchema),
+				)(turn.account_json);
+				const currentAccount = yield* (yield* AccountDirectory)
+					.resolve({ _tag: "Id", id: admittedAccount.id })
+					.pipe(
+						Effect.mapError(
+							(cause) =>
+								new ProviderInstanceFailure({
+									providerId: admittedAccount.driver,
+									operation: "resolveSteeringAccount",
+									cause,
+								}),
+						),
+					);
+				if (
+					currentAccount.id !== admittedAccount.id ||
+					currentAccount.driver !== admittedAccount.driver
+				)
+					return yield* Effect.fail(
+						new ProviderInstanceFailure({
+							providerId: admittedAccount.driver,
+							operation: "resolveSteeringAccount",
+							cause: new AccountUnroutable({
+								ref: { _tag: "Id", id: admittedAccount.id },
+							}),
+						}),
+					);
+				account = {
+					...admittedAccount,
+					env: currentAccount.env,
+				};
+			}
+		}
 		const driver = account.driver;
 		const providerId = account.id;
 		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[driver];
@@ -654,22 +726,6 @@ const prepareEngineTurnInput = (
 				}
 			}
 		}
-		// The committed turn owns its account even before a runner has a snapshot.
-		let turnAccount = account;
-		if (resolvedInput.steer) {
-			const sql = yield* SqlClient.SqlClient;
-			const [turn] = yield* sql<{ account_json: string | null }>`
-				SELECT json_extract(payload_json, '$.account') AS account_json
-				FROM provider_command_outbox
-				WHERE session_id = ${resolvedInput.sessionId} AND effect_type = 'send_turn'
-					AND json_extract(payload_json, '$.account.id') = ${account.id}
-				ORDER BY request_sequence DESC LIMIT 1`;
-			if (turn?.account_json) {
-				turnAccount = yield* Schema.decodeUnknownEffect(
-					Schema.fromJsonString(AccountSchema),
-				)(turn.account_json);
-			}
-		}
 		const sendTurnInput: SendTurnInput = {
 			sessionId: resolvedInput.sessionId,
 			inputId,
@@ -683,12 +739,20 @@ const prepareEngineTurnInput = (
 			history: [],
 			providerState,
 			...buildSessionLaunchInput(
-				turnAccount,
+				account,
 				settings,
 				yield* getPermissionMode(resolvedInput.sessionId),
 				folders,
 				resolvedInput.agent,
 			),
+			...(yield* (yield* OrchestrationEngineTag).resolveCallContextEffect({
+				sessionId: resolvedInput.sessionId,
+				account: account,
+				workspaceRoot: folders.workspaceRoot,
+				extraFolders: folders.extraFolders,
+				prepareShellEnv: true,
+				requireRoutableAccount: true,
+			})),
 			...(traits.supportsGoalState && sessionRow
 				? { goalState: sessionGoalState(sessionRow) }
 				: {}),
@@ -898,7 +962,7 @@ const sendViaEngine = (
 		yield* dispatchEngineTurn(
 			input,
 			providerId,
-			account,
+			prepared.sendTurnInput.account ?? account,
 			prepared.sendTurnInput,
 			prepared.workspaceMoveSequence,
 		);

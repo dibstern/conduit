@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
 	Deferred,
 	Effect,
@@ -5,30 +6,25 @@ import {
 	Fiber,
 	FiberMap,
 	Option,
-	Result,
 	type Scope,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import {
-	type AccountsState,
-	resolve as resolveAccount,
-} from "../../account-directory.js";
+import type { AccountsState } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
-import type { DaemonConfigLoadError } from "../../daemon/config-persistence.js";
 import {
 	bindTurnTimelineSink,
 	observeTurnTimelineFrame,
 } from "../../domain/daemon/Services/turn-timeline.js";
-import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import {
-	type ProviderRuntimeIngestionError,
-	ProviderRuntimeIngestionTag,
+	Usage,
+	type UsageService,
+} from "../../domain/daemon/Services/usage.js";
+import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
+import type {
+	ProviderRuntimeIngestion,
+	ProviderRuntimeIngestionError,
 } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
-import {
-	makeProcessingTimeoutHooks,
-	type OverridesStateTag,
-} from "../../domain/relay/Services/session-overrides-state.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors-utils.js";
 import { createLogger } from "../../logger.js";
@@ -37,14 +33,21 @@ import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../persistence/effect/claude-event-persist-effect.js";
+import type { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { ProviderInstanceFailure } from "../errors.js";
+import type { OrchestrationEngine } from "../orchestration-engine.js";
+import type { ProviderRegistry } from "../provider-registry.js";
+import type { RelayEventSinkDeps } from "../relay-event-sink.js";
 import type {
 	EventSink,
 	PermissionDecision,
 	PreWarmSessionInput,
+	ProviderCall,
 	ProviderCapabilities,
+	ProviderControlCommandStatus,
+	ProviderControlContext,
 	ProviderInstance,
 	ProviderNativeSession,
 	SendTurnInput,
@@ -56,7 +59,7 @@ import {
 	runnerFailure as sessionFailure,
 } from "./runner-protocol.js";
 import { settleUnclaimedRunnerCommands } from "./runner-recovery.js";
-import { discoverRunners } from "./runner-registry.js";
+import { discoverAllRunners } from "./runner-registry.js";
 import { failRunnerTurn } from "./runner-turn-failure.js";
 import type {
 	SessionCommand,
@@ -68,6 +71,25 @@ import type {
 } from "./session-runner.js";
 
 const log = createLogger("runner-provider-instance");
+
+/** Check every owner, including one retained across an account rebind. */
+export const assertSessionRunnerAvailable = (
+	sessionId: string,
+	registry: ProviderRegistry | undefined,
+) =>
+	Effect.gen(function* () {
+		for (const providerId of registry?.listProviders() ?? []) {
+			const provider = registry?.getInstance(providerId);
+			if (!(provider instanceof RunnerProviderInstance)) continue;
+			const failure = yield* provider.getSessionFailureEffect(sessionId);
+			if (failure)
+				return yield* new ProviderInstanceFailure({
+					providerId,
+					operation: failure.operation,
+					cause: Object.assign(new Error(failure.message), failure),
+				});
+		}
+	});
 
 type PreparedTurn = Omit<
 	Extract<SessionCommand, { type: "send-turn" }>,
@@ -81,6 +103,7 @@ export interface RunnerDriverPieces {
 		workspaceRoot?: string,
 		account?: Account,
 		options?: { readonly refresh?: boolean },
+		call?: ProviderCall,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure>;
 	readonly generateTextEffect: ProviderInstance["generateTextEffect"];
 	prepareTurnEffect(
@@ -97,10 +120,42 @@ export interface RunnerDriverPieces {
 	readonly nativeSession?: boolean;
 }
 
+export interface RunnerRecoveryDependencies {
+	readonly projectId: string;
+	readonly ingestion: ProviderRuntimeIngestion;
+	readonly pending: PendingInteractionService;
+	readonly timeoutHooks: Pick<
+		RelayEventSinkDeps,
+		"clearTimeout" | "resetTimeout"
+	>;
+	readonly persist: ClaudeEventPersistEffect;
+	readonly resolveCallContext: OrchestrationEngine["resolveCallContextEffect"];
+	readonly retirePrompts: (
+		currentProcessId: string | null,
+		options?: {
+			readonly expiredProcessId?: string;
+			readonly exceptCommandId?: string;
+		},
+	) => ReturnType<Effect.Success<typeof makeRetireReplacedProcessPrompts>>;
+}
+
 export interface RunnerProviderInstanceDeps {
-	readonly workspaceRoot: string;
-	readonly accounts: Effect.Effect<AccountsState, DaemonConfigLoadError>;
+	readonly accountResources?: {
+		readonly use: <A, E, R>(
+			account: Account,
+			work: (account: Account) => Effect.Effect<A, E, R>,
+		) => Effect.Effect<A, E | ProviderInstanceFailure, R>;
+	};
+	readonly accounts: Effect.Effect<AccountsState>;
+	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
 	readonly daemonConfigDir?: string;
+	readonly projectRootForSession?: (
+		sessionId: string,
+		projectId?: string,
+	) => Effect.Effect<string | undefined>;
+	readonly recoveryForSession?: (
+		sessionId: string,
+	) => Effect.Effect<RunnerRecoveryDependencies | undefined>;
 	readonly onBackgroundTask?: (input: BackgroundTaskTransition) => void;
 	readonly ensureChildSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
 	readonly readSubagentTranscript?: ClaudeEventPersistEffect["readClaudeSubagentTranscript"];
@@ -119,6 +174,7 @@ export const makeRunnerProviderInstance = (
 ): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const providerScope = yield* Effect.scope;
+		const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 		const abortFibers = yield* FiberMap.make<string, void, never>();
 		const interactionFibers = yield* FiberMap.make<string, void, never>();
 		const preWarmFibers = yield* FiberMap.make<
@@ -126,6 +182,7 @@ export const makeRunnerProviderInstance = (
 			void,
 			ProviderInstanceFailure
 		>();
+		const accountResourceFibers = yield* FiberMap.make<string, void, never>();
 		let instance: RunnerProviderInstance | undefined;
 		const dispose = yield* Effect.cached(
 			Effect.suspend(() => (instance ? instance.disposeEffect() : Effect.void)),
@@ -143,8 +200,10 @@ export const makeRunnerProviderInstance = (
 			abortFibers,
 			interactionFibers,
 			preWarmFibers,
+			accountResourceFibers,
 			providerScope,
 			shutdown,
+			usage,
 		);
 		yield* Effect.addFinalizer(() => shutdown.pipe(Effect.ignore));
 		return instance;
@@ -154,9 +213,13 @@ export const makeRunnerProviderInstance = (
 export class RunnerProviderInstance implements ProviderInstance {
 	readonly providerId: KnownProviderDriverKind;
 	private readonly sinks = new Map<string, EventSink>();
+	private readonly sinkSessions = new Map<string, string>();
 	private detachingInteractions = false;
 	private recoveredSink:
-		| ((sessionId: string, sinkId: string) => EventSink)
+		| ((
+				sessionId: string,
+				sinkId: string,
+		  ) => Effect.Effect<EventSink | undefined>)
 		| undefined;
 	private readonly recoveredSinkIds = new Set<string>();
 	private readonly recoveredRequests = new Map<
@@ -164,96 +227,168 @@ export class RunnerProviderInstance implements ProviderInstance {
 		Deferred.Deferred<void>
 	>();
 
-	readonly recoverRunnerEffect = Effect.gen({ self: this }, function* () {
-		const sql = yield* SqlClient.SqlClient;
-		const ingestion = yield* ProviderRuntimeIngestionTag;
-		const pending = yield* PendingInteractionServiceTag;
-		const timeoutRuntime = yield* Effect.context<OverridesStateTag>();
-		// An in-process runner's turns ended with the relay that ran them, so
-		// every running command is unclaimed. Runner processes may outlive it.
-		let claimed = new Set<string>();
-		if (this.runner.recoverEffect) {
-			this.recoveredSink = (sessionId, sinkId) =>
-				makeRecoveredEventSink({
-					driverKind: this.providerId,
-					sessionId,
-					sql,
-					ingestion,
-					pending,
-					timeoutHooks: makeProcessingTimeoutHooks(timeoutRuntime, sessionId),
-					onRegistered: (id) => {
-						const ready = this.recoveredRequests.get(
-							JSON.stringify([sinkId, id]),
-						);
-						return ready ? Deferred.succeed(ready, undefined) : Effect.void;
-					},
-				});
-			yield* this.runner.recoverEffect;
-			const registrations = yield* Effect.try(() =>
-				discoverRunners(this.deps.workspaceRoot, this.deps.daemonConfigDir),
-			).pipe(
-				Effect.catch((error) =>
-					Effect.logError("Could not verify runner ownership", error).pipe(
-						Effect.as(undefined),
+	private recoverWithContexts = (
+		recoveryForSession: NonNullable<
+			RunnerProviderInstanceDeps["recoveryForSession"]
+		>,
+		sessionIds?: ReadonlySet<string>,
+		ownsPendingSend?: OrchestrationEngine["ownsPendingSend"],
+	) =>
+		Effect.gen({ self: this }, function* () {
+			const sql = yield* SqlClient.SqlClient;
+			// An in-process runner's turns ended with the relay that ran them, so
+			// every running command is unclaimed. Runner processes may outlive it.
+			let claimed = new Set<string>();
+			if (this.runner.recoverEffect) {
+				this.recoveredSink = (sessionId, sinkId) =>
+					Effect.gen({ self: this }, function* () {
+						const recovery = yield* recoveryForSession(sessionId);
+						if (!recovery) return undefined;
+						return makeRecoveredEventSink({
+							driverKind: this.providerId,
+							sessionId,
+							sql,
+							ingestion: recovery.ingestion,
+							pending: recovery.pending,
+							timeoutHooks: recovery.timeoutHooks,
+							onRegistered: (id) => {
+								const ready = this.recoveredRequests.get(
+									JSON.stringify([sinkId, id]),
+								);
+								return ready ? Deferred.succeed(ready, undefined) : Effect.void;
+							},
+						});
+					});
+				yield* sessionIds
+					? (this.runner.attachSessionsEffect?.([...sessionIds]) ?? Effect.void)
+					: this.runner.recoverEffect;
+				const registrations = yield* Effect.try(() =>
+					discoverAllRunners(this.deps.daemonConfigDir),
+				).pipe(
+					Effect.catch((error) =>
+						Effect.logError("Could not verify runner ownership", error).pipe(
+							Effect.as(undefined),
+						),
 					),
-				),
-			);
-			// Discovery errors are not proof that a running command has no owner.
-			if (!registrations) return;
-			claimed = new Set(
-				registrations
-					.filter((runner) => runner.driverKind === this.providerId)
-					.map((runner) => runner.sessionId),
-			);
-		}
-		const accounts = yield* this.deps.accounts;
-		yield* settleUnclaimedRunnerCommands(
-			sql,
-			claimed,
-			this.providerId,
-			(id) =>
-				Result.getOrUndefined(resolveAccount(accounts, { _tag: "Id", id }))
-					?.driver,
-			(sinkId, turn, failure) =>
-				Effect.gen({ self: this }, function* () {
-					let persistenceError: ProviderRuntimeIngestionError | undefined;
-					yield* failRunnerTurn(
-						(output) =>
-							Effect.gen(function* () {
-								if (output.type === "event") {
-									// Startup has no WebSocket publisher or live sink yet.
-									yield* ingestion.ingestBatch([output.event], {
-										publishToBus: false,
-										publishToRelay: false,
-									});
-								} else if (output.type === "cancel-interactions") {
-									yield* pending.cancelSessionInteractions(
-										turn.sessionId,
-										output.reason,
-										{ recoverQuestions: false },
-									);
-								}
-								return {};
-							}).pipe(
-								Effect.tapError((error) =>
-									Effect.sync(() => {
-										persistenceError = error;
-									}),
-								),
-								Effect.mapError((error) =>
-									sessionFailure("recover stopped runner", error),
-								),
-							),
-						sinkId,
-						turn,
-						failure,
-						this.providerId,
+				);
+				// Discovery errors are not proof that a running command has no owner.
+				if (!registrations) return;
+				claimed = new Set(
+					registrations
+						.filter((runner) => runner.driverKind === this.providerId)
+						.map((runner) => runner.sessionId),
+				);
+			}
+			const accounts = yield* this.deps.accounts;
+			const sessions = yield* sql<{
+				id: string;
+				provider: string;
+			}>`SELECT id, provider FROM sessions`;
+			for (const session of sessions) {
+				if (sessionIds && !sessionIds.has(session.id)) continue;
+				const driver =
+					accounts.accounts.find((account) => account.id === session.provider)
+						?.driver ??
+					accounts.deleted.find((account) => account.id === session.provider)
+						?.driver;
+				if (
+					!claimed.has(session.id) &&
+					(driver ?? session.provider) === this.providerId
+				) {
+					const recovery = yield* recoveryForSession(session.id);
+					if (recovery) yield* recovery.retirePrompts(null);
+				}
+			}
+			for (const sessionId of claimed) {
+				if (sessionIds && !sessionIds.has(sessionId)) continue;
+				const native = yield* this.runner.getNativeSessionEffect?.(sessionId) ??
+					Effect.succeed(undefined);
+				const account = accounts.accounts.find(
+					(account) => account.id === native?.instanceId,
+				);
+				if (
+					account &&
+					(yield* this.runner.hasDemandEffect?.(sessionId) ??
+						Effect.succeed(false))
+				)
+					yield* this.withAccountResources(
+						account,
+						sessionId,
+						() => Effect.void,
 					);
-					// failRunnerTurn logs errors; database failures still need a retry.
-					if (persistenceError) return yield* Effect.fail(persistenceError);
-				}),
-		);
-	});
+			}
+			yield* settleUnclaimedRunnerCommands(
+				sql,
+				claimed,
+				this.providerId,
+				(id) =>
+					accounts.accounts.find((account) => account.id === id)?.driver ??
+					accounts.deleted.find((account) => account.id === id)?.driver,
+				(sinkId, turn, failure, beforeProject) =>
+					Effect.gen({ self: this }, function* () {
+						const recovery = yield* recoveryForSession(turn.sessionId);
+						if (!recovery) return;
+						const requestIds = new Set([
+							...(yield* recovery.pending.listPendingPermissions(
+								turn.sessionId,
+							)).map((request) => request.requestId),
+							...(yield* recovery.pending.listPendingQuestions(
+								turn.sessionId,
+							)).map((request) => request.requestId),
+						]);
+						let persistenceError: ProviderRuntimeIngestionError | undefined;
+						yield* failRunnerTurn(
+							(output) =>
+								Effect.gen(function* () {
+									if (output.type === "event") {
+										// Startup has no WebSocket publisher or live sink yet.
+										yield* recovery.ingestion.ingestBatch([output.event], {
+											publishToBus: false,
+											publishToRelay: false,
+											...(output.event.type === "turn.error"
+												? {
+														beforeProject,
+														beforeCommit:
+															recovery.pending.cancelSessionInteractions(
+																turn.sessionId,
+																failure.message,
+																{ recoverQuestions: false, requestIds },
+															),
+													}
+												: {}),
+										});
+									}
+									return {};
+								}).pipe(
+									Effect.tapError((error) =>
+										Effect.sync(() => {
+											persistenceError = error;
+										}),
+									),
+									Effect.mapError((error) =>
+										sessionFailure("recover stopped runner", error),
+									),
+								),
+							sinkId,
+							turn,
+							accounts.accounts.some((account) => account.id === turn.accountId)
+								? failure
+								: {
+										operation: "recover stopped runner",
+										message: `${this.providerId} account "${turn.accountId}" is unavailable`,
+										code: "account_unavailable",
+										retryable: false,
+									},
+							this.providerId,
+						);
+						// failRunnerTurn logs errors; database failures still need a retry.
+						if (persistenceError) return yield* Effect.fail(persistenceError);
+					}),
+				recoveryForSession,
+				sessionIds,
+				ownsPendingSend,
+			);
+		});
 
 	constructor(
 		private readonly deps: RunnerProviderInstanceDeps,
@@ -266,14 +401,38 @@ export class RunnerProviderInstance implements ProviderInstance {
 			void,
 			ProviderInstanceFailure
 		>,
+		private readonly accountResourceFibers: FiberMap.FiberMap<
+			string,
+			void,
+			never
+		>,
 		private readonly providerScope: Scope.Scope,
 		private readonly shutdown: Effect.Effect<void, ProviderInstanceFailure>,
+		private readonly usage?: UsageService,
 	) {
 		this.providerId = driver.driverKind;
 	}
 
-	recoverEffect() {
-		return this.recoverRunnerEffect;
+	recoverProjectContextsEffect(
+		recoveryForSession: NonNullable<
+			RunnerProviderInstanceDeps["recoveryForSession"]
+		>,
+	) {
+		return this.recoverWithContexts(recoveryForSession);
+	}
+
+	attachSessionsEffect(
+		sessionIds: readonly string[],
+		recoveryForSession: NonNullable<
+			RunnerProviderInstanceDeps["recoveryForSession"]
+		>,
+		ownsPendingSend?: OrchestrationEngine["ownsPendingSend"],
+	) {
+		return this.recoverWithContexts(
+			recoveryForSession,
+			new Set(sessionIds),
+			ownsPendingSend,
+		);
 	}
 
 	private commandEffect(
@@ -292,6 +451,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 						providerId: this.providerId,
 						operation: failure.operation,
 						cause: Object.assign(new Error(failure.message), failure),
+						...(failure.code === "provider_process_gone" ||
+						(command.type === "send-turn" && failure.code === "runner_detached")
+							? { code: failure.code }
+							: {}),
 					}),
 			),
 		);
@@ -301,8 +464,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 		workspaceRoot?: string,
 		account?: Account,
 		options?: { readonly refresh?: boolean },
+		call?: ProviderCall,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
-		return this.driver.discoverEffect(workspaceRoot, account, options);
+		return this.driver.discoverEffect(workspaceRoot, account, options, call);
 	}
 
 	generateTextEffect(
@@ -311,12 +475,59 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return this.driver.generateTextEffect(input);
 	}
 
-	hasLiveProcessEffect(sessionId: string): Effect.Effect<boolean> {
-		return this.runner.hasLiveProcessEffect(sessionId);
+	hasLiveProcessEffect(
+		sessionId: string,
+		processId?: string,
+	): Effect.Effect<boolean> {
+		return this.runner.hasLiveProcessEffect(sessionId, processId);
 	}
 
-	get inputAdmission() {
-		return this.runner.inputAdmission;
+	getControlProcessIdEffect(
+		sessionId: string,
+	): Effect.Effect<string | undefined, ProviderInstanceFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const failure = yield* this.getSessionFailureEffect(sessionId);
+			if (failure)
+				return yield* new ProviderInstanceFailure({
+					providerId: this.providerId,
+					operation: "getControlProcessId",
+					code: "provider_process_unavailable",
+					cause: new Error(failure.message),
+				});
+			return yield* this.runner.getControlProcessIdEffect?.(sessionId) ??
+				Effect.succeed(undefined);
+		});
+	}
+
+	getSessionFailureEffect(sessionId: string) {
+		return (
+			this.runner.getSessionFailureEffect?.(sessionId) ??
+			Effect.succeed(undefined)
+		);
+	}
+
+	getControlCommandStatusEffect(
+		sessionId: string,
+		control: ProviderControlContext,
+	): Effect.Effect<ProviderControlCommandStatus, ProviderInstanceFailure> {
+		return (
+			this.runner.getControlCommandStatusEffect?.(sessionId, control) ??
+			Effect.fail(
+				sessionFailure(
+					"get control command status",
+					"Runner cannot reconcile commands",
+				),
+			)
+		).pipe(
+			Effect.mapError(
+				(failure) =>
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: failure.operation,
+						cause: Object.assign(new Error(failure.message), failure),
+					}),
+			),
+		);
 	}
 
 	getNativeSessionEffect(
@@ -332,21 +543,113 @@ export class RunnerProviderInstance implements ProviderInstance {
 	sendTurnEffect(
 		input: SendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
-		return Effect.gen({ self: this }, function* () {
-			const {
-				eventSink,
-				abortSignal,
-				awaitIntake: _awaitIntake,
-				...payload
-			} = input;
+		return input.account
+			? this.withAccountResources(
+					input.account,
+					input.sessionId,
+					(account) => this.sendTurnUnscopedEffect({ ...input, account }),
+					runnerSinkId(
+						input.inputId,
+						input.commandAttempt,
+						input.nativeResumeFallback,
+					),
+				)
+			: this.sendTurnUnscopedEffect(input);
+	}
+
+	private withAccountResources<A>(
+		admitted: Account,
+		sessionId: string,
+		operation: (account: Account) => Effect.Effect<A, ProviderInstanceFailure>,
+		sinkId?: string,
+	): Effect.Effect<A, ProviderInstanceFailure> {
+		const resources = this.deps.accountResources;
+		if (!resources) return operation(admitted);
+		return Effect.uninterruptibleMask((restore) =>
+			Effect.gen({ self: this }, function* () {
+				const reply = yield* Deferred.make<A, ProviderInstanceFailure>();
+				let callerCancelled = false;
+				const work = resources
+					.use(admitted, (account) =>
+						Effect.gen({ self: this }, function* () {
+							const result = yield* operation(account);
+							yield* Deferred.succeed(reply, result);
+							// Intake can precede the end of the native turn by hours. The runner's
+							// quiescence also counts questions, approvals and background finalizers.
+							while (
+								yield* this.runner.hasDemandEffect?.(sessionId) ??
+									Effect.succeed(false)
+							) {
+								const native = yield* this.runner.getNativeSessionEffect?.(
+									sessionId,
+								) ?? Effect.succeed(undefined);
+								if (native && native.instanceId !== admitted.id) break;
+								yield* Effect.sleep("25 millis");
+							}
+						}),
+					)
+					.pipe(
+						Effect.onInterrupt(() =>
+							Effect.gen({ self: this }, function* () {
+								if (this.detachingInteractions) return;
+								if (sinkId)
+									yield* this.runner
+										.executeEffect({ type: "abort", sinkId })
+										.pipe(Effect.ignore);
+								const native = yield* this.runner.getNativeSessionEffect?.(
+									sessionId,
+								) ?? Effect.succeed(undefined);
+								if (
+									!callerCancelled &&
+									(native?.instanceId === admitted.id || (!native && !sinkId))
+								)
+									yield* this.runner
+										.executeEffect({ type: "end-session", sessionId })
+										.pipe(Effect.ignore);
+							}),
+						),
+						Effect.onExit((exit) =>
+							Exit.isFailure(exit)
+								? Deferred.failCause(reply, exit.cause)
+								: Effect.void,
+						),
+						Effect.catchCause(() => Effect.void),
+					);
+				const fiber = yield* FiberMap.run(
+					this.accountResourceFibers,
+					randomUUID(),
+					Effect.interruptible(work),
+				);
+				return yield* restore(Deferred.await(reply)).pipe(
+					Effect.onInterrupt(() =>
+						Effect.sync(() => {
+							callerCancelled = true;
+						}).pipe(Effect.andThen(Fiber.interrupt(fiber))),
+					),
+				);
+			}),
+		);
+	}
+
+	private sendTurnUnscopedEffect(
+		input: SendTurnInput,
+	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
+		const {
+			eventSink,
+			abortSignal,
+			awaitIntake: _awaitIntake,
+			...payload
+		} = input;
+		const { sessionId } = input;
+		const sinkId = runnerSinkId(
+			input.inputId,
+			input.commandAttempt,
+			input.nativeResumeFallback,
+		);
+		const send = Effect.gen({ self: this }, function* () {
 			const prepared = yield* this.driver.prepareTurnEffect(payload);
-			const { sessionId } = input;
-			const sinkId = runnerSinkId(
-				input.inputId,
-				input.commandAttempt,
-				input.nativeResumeFallback,
-			);
 			this.sinks.set(sinkId, eventSink);
+			this.sinkSessions.set(sinkId, sessionId);
 			bindTurnTimelineSink(sinkId, {
 				sessionId,
 				inputId: input.inputId,
@@ -375,6 +678,17 @@ export class RunnerProviderInstance implements ProviderInstance {
 				...prepared,
 			});
 		});
+		return (this.runner.withTurnEffect?.(payload, sinkId, send) ?? send).pipe(
+			Effect.mapError((cause) =>
+				cause instanceof ProviderInstanceFailure
+					? cause
+					: new ProviderInstanceFailure({
+							providerId: this.providerId,
+							operation: cause.operation,
+							cause,
+						}),
+			),
+		);
 	}
 
 	/** Places a send's user message once; only a missing session fails it. */
@@ -418,10 +732,16 @@ export class RunnerProviderInstance implements ProviderInstance {
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const prepare = this.driver.preparePreWarmEffect;
 		if (!prepare) return Effect.void;
-		const preWarm = Effect.gen({ self: this }, function* () {
-			const command = yield* prepare(input, this.providerScope);
-			if (command) yield* this.commandEffect(command);
-		});
+		const warm = (input: PreWarmSessionInput) =>
+			Effect.gen({ self: this }, function* () {
+				const command = yield* prepare(input, this.providerScope);
+				if (command) yield* this.commandEffect(command);
+			});
+		const preWarm = input.account
+			? this.withAccountResources(input.account, input.sessionId, (account) =>
+					warm({ ...input, account }),
+				)
+			: warm(input);
 		return Effect.uninterruptibleMask((restore) =>
 			Effect.gen({ self: this }, function* () {
 				const runPreWarm = yield* FiberMap.runtime(this.preWarmFibers)();
@@ -467,6 +787,8 @@ export class RunnerProviderInstance implements ProviderInstance {
 	interruptTurnEffect(
 		sessionId: string,
 		turnIds?: readonly string[],
+		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		// A bound Stop must leave a pre-warm for a replacement turn alone.
 		return (
@@ -478,6 +800,8 @@ export class RunnerProviderInstance implements ProviderInstance {
 				this.commandEffect({
 					type: "interrupt",
 					sessionId,
+					...(control ? { control } : {}),
+					...(call ? { call } : {}),
 					...(turnIds !== undefined ? { turnIds } : {}),
 				}),
 			),
@@ -486,19 +810,30 @@ export class RunnerProviderInstance implements ProviderInstance {
 	stopTaskEffect(
 		sessionId: string,
 		taskId: string,
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.driver.stopTask
-			? this.commandEffect({ type: "stop-task", sessionId, taskId })
+			? this.commandEffect({
+					type: "stop-task",
+					sessionId,
+					taskId,
+					...(call ? { call } : {}),
+				})
 			: Effect.void;
 	}
 	resolvePermissionEffect(
 		sessionId: string,
 		requestId: string,
 		decision: PermissionDecision,
+		_providerProcessId?: string,
+		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-permission",
 			sessionId,
+			...(control ? { control } : {}),
+			...(call ? { call } : {}),
 			requestId,
 			decision,
 		});
@@ -507,10 +842,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
+		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-question",
 			sessionId,
+			...(control ? { control } : {}),
+			...(call ? { call } : {}),
 			requestId,
 			answers,
 		});
@@ -522,32 +861,71 @@ export class RunnerProviderInstance implements ProviderInstance {
 			readonly contextWindow?: string | undefined;
 			readonly variant?: string | undefined;
 		},
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "apply-live-settings",
 			sessionId,
+			...(call ? { call } : {}),
 			settings,
 		});
 	}
 	setPermissionModeEffect(
 		sessionId: string,
 		mode: SessionPermissionMode,
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "apply-live-settings",
 			sessionId,
+			...(call ? { call } : {}),
 			settings: { permissionMode: mode },
 		});
 	}
 	endSessionEffect(
 		sessionId: string,
+		call?: ProviderCall,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
-			Effect.andThen(this.commandEffect({ type: "end-session", sessionId })),
+			Effect.andThen(
+				this.commandEffect({
+					type: "end-session",
+					sessionId,
+					...(control ? { control } : {}),
+					...(call ? { call } : {}),
+				}),
+			),
 		);
 	}
 	shutdownEffect(): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.shutdown;
+	}
+
+	/** Project scopes release their attachments without closing the shared driver. */
+	releaseSessionsEffect(sessionIds: readonly string[]): Effect.Effect<void> {
+		return Effect.gen({ self: this }, function* () {
+			const sessions = new Set(sessionIds);
+			for (const sessionId of sessions) {
+				yield* FiberMap.remove(this.preWarmFibers, sessionId);
+				yield* this.runner.detachSessionEffect?.(sessionId) ??
+					this.runner
+						.executeEffect({ type: "end-session", sessionId })
+						.pipe(Effect.ignore);
+			}
+			for (const [sinkId, sessionId] of this.sinkSessions) {
+				if (!sessions.has(sessionId)) continue;
+				yield* this.sinks.get(sinkId)?.detachInteractions?.() ?? Effect.void;
+				for (const [key] of Array.from(this.interactionFibers))
+					if (key.startsWith(`${sinkId}:`))
+						yield* FiberMap.remove(this.interactionFibers, key);
+				yield* FiberMap.remove(this.abortFibers, sinkId);
+				this.sinks.delete(sinkId);
+				this.sinkSessions.delete(sinkId);
+				this.recoveredSinkIds.delete(sinkId);
+				this.reportSinkForTesting("released", sinkId, sessionId);
+			}
+		});
 	}
 
 	/** Shared by explicit shutdown and scope disposal through one cached Effect. */
@@ -563,6 +941,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			Effect.ensuring(
 				Effect.gen({ self: this }, function* () {
 					this.sinks.clear();
+					this.sinkSessions.clear();
 					yield* FiberMap.clear(this.abortFibers);
 					yield* FiberMap.clear(this.interactionFibers);
 				}),
@@ -596,14 +975,24 @@ export class RunnerProviderInstance implements ProviderInstance {
 	): Effect.Effect<SessionOutputReply, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			observeTurnTimelineFrame(output);
+			if (output.type === "account-usage") {
+				yield* this.usage?.update?.(
+					output.accountId,
+					output.harness,
+					output.reading,
+				) ?? Effect.void;
+				return;
+			}
 			if (output.type === "background-task") {
 				this.deps.onBackgroundTask?.(output.transition);
 				return;
 			}
 			let sink = this.sinks.get(output.sinkId);
 			if (!sink && recoveredSessionId && this.recoveredSink) {
-				sink = this.recoveredSink(recoveredSessionId, output.sinkId);
+				sink = yield* this.recoveredSink(recoveredSessionId, output.sinkId);
+				if (!sink) return;
 				this.sinks.set(output.sinkId, sink);
+				this.sinkSessions.set(output.sinkId, recoveredSessionId);
 				this.recoveredSinkIds.add(output.sinkId);
 				this.reportSinkForTesting(
 					"allocated",
@@ -629,28 +1018,11 @@ export class RunnerProviderInstance implements ProviderInstance {
 						? yield* Deferred.make<void>()
 						: undefined;
 					if (registered) this.recoveredRequests.set(requestKey, registered);
+					// Registration and UI waiters belong here; only the outbox delivers answers.
 					const request = Effect.suspend(() =>
 						output.type === "permission-request"
-							? sink.requestPermission(output.request).pipe(
-									Effect.flatMap((response) =>
-										this.runner.executeEffect({
-											type: "answer-permission",
-											sinkId: output.sinkId,
-											requestId: output.request.requestId,
-											response,
-										}),
-									),
-								)
-							: sink.requestQuestion(output.request).pipe(
-									Effect.flatMap((answers) =>
-										this.runner.executeEffect({
-											type: "answer-question",
-											sinkId: output.sinkId,
-											requestId: output.request.requestId,
-											answers,
-										}),
-									),
-								),
+							? sink.requestPermission(output.request).pipe(Effect.asVoid)
+							: sink.requestQuestion(output.request).pipe(Effect.asVoid),
 					);
 					yield* FiberMap.run(
 						this.interactionFibers,
@@ -717,10 +1089,19 @@ export class RunnerProviderInstance implements ProviderInstance {
 							}) ?? Effect.void,
 					).pipe(Effect.catchCause(() => Effect.void));
 				case "cancel-interaction":
-					return yield* FiberMap.remove(
+					yield* FiberMap.remove(
 						this.interactionFibers,
 						`${output.sinkId}:${output.requestId}`,
 					);
+					if (output.kind && sink.withdrawInteraction)
+						yield* sink
+							.withdrawInteraction(output.requestId, output.kind)
+							.pipe(
+								Effect.mapError((cause) =>
+									sessionFailure("withdrawInteraction", cause),
+								),
+							);
+					return;
 				case "release-sink":
 					for (const [key] of Array.from(this.interactionFibers)) {
 						if (key.startsWith(`${output.sinkId}:`)) {
@@ -728,6 +1109,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 						}
 					}
 					this.sinks.delete(output.sinkId);
+					this.sinkSessions.delete(output.sinkId);
 					this.recoveredSinkIds.delete(output.sinkId);
 					yield* FiberMap.remove(this.abortFibers, output.sinkId);
 					this.reportSinkForTesting(
@@ -741,11 +1123,15 @@ export class RunnerProviderInstance implements ProviderInstance {
 						Effect.mapError((cause) => sessionFailure(output.type, cause)),
 					);
 				case "read-subagent-transcript": {
+					const project = yield* this.deps.recoveryForSession?.(
+						output.childSessionId,
+					) ?? Effect.succeed(undefined);
 					const persist = yield* Effect.serviceOption(
 						ClaudeEventPersistEffectTag,
 					);
 					const readTranscript =
 						this.deps.readSubagentTranscript ??
+						project?.persist.readClaudeSubagentTranscript ??
 						(persist._tag === "Some"
 							? persist.value.readClaudeSubagentTranscript
 							: undefined);
@@ -757,11 +1143,15 @@ export class RunnerProviderInstance implements ProviderInstance {
 					return { subagentTranscript };
 				}
 				case "ensure-subagent-session": {
+					const project = yield* this.deps.recoveryForSession?.(
+						output.input.parentSessionId,
+					) ?? Effect.succeed(undefined);
 					const persist = yield* Effect.serviceOption(
 						ClaudeEventPersistEffectTag,
 					);
 					const ensureSession =
 						this.deps.ensureChildSession ??
+						project?.persist.ensureClaudeSubagentSession ??
 						(persist._tag === "Some"
 							? persist.value.ensureClaudeSubagentSession
 							: undefined);

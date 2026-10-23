@@ -1651,6 +1651,10 @@ describe("SessionManagerService", () => {
 			);
 
 			return Effect.gen(function* () {
+				const capturedAccount = yield* (yield* AccountDirectory).resolve({
+					_tag: "Id",
+					id: "opencode",
+				});
 				const service = yield* SessionManagerServiceTag;
 				yield* service.deleteSession(sessionId);
 				const eventStore = yield* EventStoreEffectTag;
@@ -1662,6 +1666,7 @@ describe("SessionManagerService", () => {
 					commandId: expect.any(String),
 					sessionId,
 					targetProviderId: "opencode",
+					account: capturedAccount,
 					unbind: true,
 				});
 				expect(api.session.delete).toHaveBeenCalledOnce();
@@ -2072,6 +2077,10 @@ describe("SessionManagerService", () => {
 			);
 
 			return Effect.gen(function* () {
+				const capturedAccount = yield* (yield* AccountDirectory).resolve({
+					_tag: "Id",
+					id: "claude",
+				});
 				const service = yield* SessionManagerServiceTag;
 				yield* service.deleteSession(sessionId);
 				const eventStore = yield* EventStoreEffectTag;
@@ -2089,6 +2098,7 @@ describe("SessionManagerService", () => {
 					commandId: expect.any(String),
 					sessionId,
 					targetProviderId: "claude",
+					account: capturedAccount,
 					unbind: true,
 				});
 				expect(api.session.delete).not.toHaveBeenCalled();

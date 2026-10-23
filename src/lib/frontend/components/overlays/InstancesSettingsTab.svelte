@@ -3,6 +3,7 @@
 	import { onDestroy } from "svelte";
 	import type { ServerForm } from "./ServerSettingsTab.svelte";
 	import CursorAuthSettings from "./CursorAuthSettings.svelte";
+	import CodexAuthSettings from "./CodexAuthSettings.svelte";
 	import { refreshServerStatus } from "../../stores/server-status.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
@@ -333,7 +334,7 @@
 			{/if}
 		</div>
 		{#if formTraits?.accountKind === "config-directory"}
-			<p class="text-[12px] text-text-muted">Folder changes apply on the next turn. Leave the folder empty to use the login Conduit was launched with.</p>
+			<p class="text-[12px] text-text-muted">Folder changes apply on the next turn. {state.formDriver === "codex" ? "An empty folder gives named accounts a separate Conduit-managed login. The built-in account keeps the default Codex home." : "Leave the folder empty to use the login Conduit was launched with."}</p>
 		{/if}
 		{#if formPresentation.environment || (formTraits?.runsOpenCodeServer && state.formManaged)}
 			<SettingsGroup title="Environment variables" summary="KEY=VALUE per line" collapsible bind:open={state.formEnvOpen}>
@@ -357,7 +358,11 @@
 		{@const accounts = instancesByDriver[driver] ?? []}
 		{@const presentation = PROVIDER_PRESENTATION[driver]}
 		{#if presentation.auth}
-			<CursorAuthSettings account={accounts[0]} />
+			{#each accounts as account (account.id)}
+				<CursorAuthSettings {account} />
+			{:else}
+				<CursorAuthSettings />
+			{/each}
 		{:else if accounts.length > 0}
 			<SettingsGroup title="{presentation.label} accounts" testId="{driver}-accounts-list">
 				{#snippet actions()}
@@ -377,15 +382,16 @@
 									<span class="truncate">{inst.name}</span>
 									{#if inst.isDefault}<Badge variant="quiet" size="xs" shape="pill" data-testid="default-account-marker">default</Badge>{/if}
 								</div>
-								<div class="font-mono text-[12px] leading-[1.35] text-text-muted truncate">{inst.configDir || "env"}</div>
+								<div class="font-mono text-[12px] leading-[1.35] text-text-muted truncate">{inst.configDir || (driver === "codex" ? "Automatic Codex home" : "env")}</div>
 							</div>
 							<span aria-hidden="true" class="w-[10px] shrink-0 text-center not-italic text-text-muted transition-transform duration-150" class:rotate-90={state.expandedInstanceId === inst.id}>›</span>
 						</Disclosure>
 						{#if state.expandedInstanceId === inst.id}
 							<div class="flex flex-col gap-[8px] border-t border-settings-separator pt-[9px] pb-[10px] pr-[12px] pl-[40px] max-md:pl-[12px]">
+								{#if driver === "codex"}<CodexAuthSettings accountId={inst.id} />{/if}
 								<dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-[14px] gap-y-[3px] text-[12px] [&_dd]:truncate">
 									<dt class="text-text-muted">Config dir</dt>
-									<dd class="font-mono text-text">{inst.configDir || "env"}</dd>
+									<dd class="font-mono text-text">{inst.configDir || (driver === "codex" ? "Automatic Codex home" : "env")}</dd>
 									<dt class="text-text-muted">Used by</dt>
 									<dd class="text-text">{inst.isDefault ? "New sessions, unless you pick another account" : inst.usageEligible !== false && getDriverTraits(driver)?.usageHarness ? "Sessions you move to it, and auto-switch" : "Sessions you move to it"}</dd>
 								</dl>

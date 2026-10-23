@@ -123,6 +123,18 @@ it.effect(
 				('foreign', 'other', 'running', 'running', 1, 4, NULL),
 				('finished', 'legacy', 'pending', 'completed', 1, 2, 3)`;
 			yield* makeEffectSqlMigrator();
+			const outboxColumns = yield* sql<{
+				name: string;
+				type: string;
+				notnull: number;
+				dflt_value: string | null;
+			}>`PRAGMA table_info(provider_command_outbox)`;
+			expect(
+				outboxColumns.find(({ name }) => name === "provider_process_id"),
+			).toMatchObject({ type: "TEXT", notnull: 0, dflt_value: null });
+			expect(
+				yield* sql`SELECT command_id FROM provider_command_outbox WHERE provider_process_id IS NOT NULL`,
+			).toEqual([]);
 			for (const [index, row] of owned.entries())
 				expect(
 					yield* sql`SELECT state, started_at, completed_at, run_id FROM turns WHERE id = ${row.id}`,
@@ -555,6 +567,9 @@ const expectedNames = [
 	"events_forked_from_index",
 	"message_parts_result_event_seq_index",
 	"provider_run_ownership",
+	"sessions_goal_stuck",
+	"sessions_jev",
+	"provider_control_process",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -599,6 +614,9 @@ it.effect(
 				[76, "events_forked_from_index"],
 				[77, "message_parts_result_event_seq_index"],
 				[78, "provider_run_ownership"],
+				[79, "sessions_goal_stuck"],
+				[80, "sessions_jev"],
+				[81, "provider_control_process"],
 			]);
 			yield* sql`UPDATE sessions SET forked_from = 'source' WHERE id = 'fork'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
@@ -644,6 +662,9 @@ describe("Effect migration lineage", () => {
 				[76, "events_forked_from_index"],
 				[77, "message_parts_result_event_seq_index"],
 				[78, "provider_run_ownership"],
+				[79, "sessions_goal_stuck"],
+				[80, "sessions_jev"],
+				[81, "provider_control_process"],
 			]);
 			expect(
 				yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 68 ORDER BY migration_id`,
@@ -737,7 +758,7 @@ describe("Effect migration lineage", () => {
 						const entries = {
 							...effectMigrationEntries,
 							...(migrationPath === "gap"
-								? { "0079_test_marker": Effect.void }
+								? { "0082_test_marker": Effect.void }
 								: {}),
 						};
 						yield* makeEffectSqlMigrator(entries);
@@ -788,6 +809,9 @@ describe("Effect migration lineage", () => {
 				[76, "events_forked_from_index"],
 				[77, "message_parts_result_event_seq_index"],
 				[78, "provider_run_ownership"],
+				[79, "sessions_goal_stuck"],
+				[80, "sessions_jev"],
+				[81, "provider_control_process"],
 			]);
 			expect(
 				yield* sql`SELECT reason, turn_index, judge_model FROM session_goal_checks`,
@@ -819,6 +843,9 @@ describe("Effect migration lineage", () => {
 					[76, "events_forked_from_index"],
 					[77, "message_parts_result_event_seq_index"],
 					[78, "provider_run_ownership"],
+					[79, "sessions_goal_stuck"],
+					[80, "sessions_jev"],
+					[81, "provider_control_process"],
 				]);
 				expect(
 					yield* sql`SELECT text, created_at, updated_at, surfacing_ordinal, surfacing_probabilities, surfacing_set_version, surfacing_model FROM message_parts`,
@@ -953,6 +980,9 @@ describe("Effect migration lineage", () => {
 					76,
 					77,
 					78,
+					79,
+					80,
+					81,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -1117,8 +1147,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 78", () => {
-		expect(migrationEntries).toHaveLength(78);
+	it("registers the contiguous production chain from 1 through 81", () => {
+		expect(migrationEntries).toHaveLength(81);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -1313,6 +1343,9 @@ describe("Effect migration lineage", () => {
 					[76, "events_forked_from_index"],
 					[77, "message_parts_result_event_seq_index"],
 					[78, "provider_run_ownership"],
+					[79, "sessions_goal_stuck"],
+					[80, "sessions_jev"],
+					[81, "provider_control_process"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -1412,6 +1445,9 @@ describe("Effect migration lineage", () => {
 					[76, "events_forked_from_index"],
 					[77, "message_parts_result_event_seq_index"],
 					[78, "provider_run_ownership"],
+					[79, "sessions_goal_stuck"],
+					[80, "sessions_jev"],
+					[81, "provider_control_process"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -1490,6 +1526,9 @@ describe("Effect migration lineage", () => {
 					[76, "events_forked_from_index"],
 					[77, "message_parts_result_event_seq_index"],
 					[78, "provider_run_ownership"],
+					[79, "sessions_goal_stuck"],
+					[80, "sessions_jev"],
+					[81, "provider_control_process"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -2102,6 +2141,9 @@ describe("Effect migration lineage", () => {
 				[76, "events_forked_from_index"],
 				[77, "message_parts_result_event_seq_index"],
 				[78, "provider_run_ownership"],
+				[79, "sessions_goal_stuck"],
+				[80, "sessions_jev"],
+				[81, "provider_control_process"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -2217,6 +2259,9 @@ describe("Effect migration lineage", () => {
 					[76, "events_forked_from_index"],
 					[77, "message_parts_result_event_seq_index"],
 					[78, "provider_run_ownership"],
+					[79, "sessions_goal_stuck"],
+					[80, "sessions_jev"],
+					[81, "provider_control_process"],
 				]);
 				const rows = yield* sql<{
 					id: string;

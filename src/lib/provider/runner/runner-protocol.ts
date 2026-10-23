@@ -4,7 +4,8 @@ import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { BUILD_ID } from "../../build-id.js";
 import { isRecord } from "../../utils.js";
-import type { TurnResult } from "../types.js";
+import type { CursorBackendUrl } from "../cursor/cursor-credential.js";
+import type { ProviderControlCommandStatus, TurnResult } from "../types.js";
 import type { RunnerUpgradeState } from "./runner-upgrade.js";
 import type {
 	SessionCommand,
@@ -67,11 +68,18 @@ export interface RunnerHello {
 	readonly stopsTasks?: true;
 	/** Every event produced by a send carries its conduit run identity. */
 	readonly stampsRunIds?: true;
+	/** The session controller survives an idle account/query rebind. */
+	readonly rebindsAccount?: true;
+	/** Cursor sends consume the daemon's admitted account credential envelope. */
+	readonly scopedCursorCredentials?: true;
+	readonly cursorBackendUrl?: CursorBackendUrl;
 	readonly taggedConfigDir?: true;
 	readonly bindings?: readonly {
 		readonly sinkId: string;
 		readonly sessionId: string;
 		readonly commandId?: string;
+		/** Absent on older runners; the daemon falls back to its turn records. */
+		readonly released?: boolean;
 	}[];
 	readonly pendingOutputs?: readonly {
 		readonly sequence: number;
@@ -90,11 +98,22 @@ export interface RunnerHello {
 		readonly workspaceRoot: string;
 		readonly extraFolders?: readonly string[];
 		readonly daemonConfigDir?: string;
+		/** Null records an unavailable daemon default; absent is legacy compatibility. */
+		readonly claudeLaunchConfig?:
+			| import("../claude/claude-sdk-env.js").ClaudeLaunchConfig
+			| null;
+		readonly autoSettleAfterDays?: number | null | undefined;
 		readonly subagentPollTimeoutMs?: number;
 	};
 }
 
 type RunnerReply =
+	| {
+			readonly type: "command-status-reply";
+			readonly requestId: string;
+			readonly result: Exclude<ProviderControlCommandStatus, "gone">;
+			readonly failure?: SessionFailure;
+	  }
 	| {
 			readonly type: "thread-read-reply";
 			readonly requestId: string;
@@ -123,6 +142,11 @@ type RunnerReply =
 
 export type RunnerMessage =
 	| RunnerHello
+	| {
+			readonly type: "command-status";
+			readonly requestId: string;
+			readonly commandId: string;
+	  }
 	| {
 			readonly type: "thread-read";
 			readonly requestId: string;
@@ -169,20 +193,48 @@ export function runnerHelloFailure(
 	hello: RunnerHello,
 	peer: "server" | "runner",
 	expectedDriverKind?: string,
+	expectedCursorBackendUrl?: CursorBackendUrl,
 ): SessionFailure | undefined {
 	if (hello.protocolVersion !== RUNNER_PROTOCOL_VERSION)
-		return runnerFailure(
-			"runner hello",
-			`Runner protocol mismatch: ${peer} speaks version ${hello.protocolVersion}, expected ${RUNNER_PROTOCOL_VERSION} (peer build ${hello.buildId}, local build ${BUILD_ID})`,
-		);
+		return {
+			...runnerFailure(
+				"runner hello",
+				`Runner protocol mismatch: ${peer} speaks version ${hello.protocolVersion}, expected ${RUNNER_PROTOCOL_VERSION} (peer build ${hello.buildId}, local build ${BUILD_ID})`,
+			),
+			...(peer === "runner" ? { code: "runner_incompatible" } : {}),
+		};
+	if (peer === "runner" && hello.stampsRunIds !== true)
+		return {
+			...runnerFailure(
+				"runner hello",
+				`Runner predates run ownership (peer build ${hello.buildId}, local build ${BUILD_ID})`,
+			),
+			code: "runner_incompatible",
+		};
+	// Runner builds predating driverKind were all Claude.
+	if (
+		peer === "runner" &&
+		expectedCursorBackendUrl !== undefined &&
+		hello.cursorBackendUrl !== expectedCursorBackendUrl
+	)
+		return {
+			...runnerFailure(
+				"runner hello",
+				`Cursor runner backend mismatch: runner uses ${hello.cursorBackendUrl ?? "an unreported backend"}, expected ${expectedCursorBackendUrl}`,
+			),
+			code: "runner_incompatible",
+		};
 	if (
 		expectedDriverKind !== undefined &&
 		(hello.driverKind ?? "claude") !== expectedDriverKind
 	)
-		return runnerFailure(
-			"runner hello",
-			`Runner driver mismatch: ${peer} speaks ${hello.driverKind ?? "claude"}, expected ${expectedDriverKind}`,
-		);
+		return {
+			...runnerFailure(
+				"runner hello",
+				`Runner driver mismatch: ${peer} speaks ${hello.driverKind ?? "claude"}, expected ${expectedDriverKind}`,
+			),
+			code: "runner_incompatible",
+		};
 	return undefined;
 }
 
@@ -232,12 +284,9 @@ export class RunnerSocket {
 	private failure: SessionFailure | undefined;
 	private idleExiting = false;
 	private peerTaggedConfigDir = false;
-	/** Temporary old-runner adapter, installed by the hello compatibility decision. */
-	legacyResult?: (
-		commandId: string,
-		attempt: number | undefined,
-		result: TurnResult | undefined,
-	) => Effect.Effect<void, SessionFailure>;
+	scopedCursorCredentials = false;
+	private peerDriverKind: string | undefined;
+	private retainedSends: RunnerHello["sendCommands"];
 
 	constructor(
 		private readonly socket: Socket,
@@ -251,8 +300,13 @@ export class RunnerSocket {
 			try {
 				const decoded = JSON.parse(line) as RunnerMessage;
 				const message = this.wire?.decode(decoded) ?? decoded;
-				if (message.type === "hello")
+				if (message.type === "hello") {
 					this.peerTaggedConfigDir = message.taggedConfigDir === true;
+					this.scopedCursorCredentials =
+						message.scopedCursorCredentials === true;
+					this.peerDriverKind = message.driverKind;
+					this.retainedSends = message.sendCommands;
+				}
 				if (message.type === "idle-exit") this.idleExiting = true;
 				if (message.type === "command-accepted") {
 					const pending = this.pending.get(`command:${message.commandId}`);
@@ -262,16 +316,19 @@ export class RunnerSocket {
 					message.type === "command-reply" ||
 					message.type === "output-reply" ||
 					message.type === "upgrade-reply" ||
+					message.type === "command-status-reply" ||
 					message.type === "thread-read-reply"
 				) {
 					const key =
-						message.type === "thread-read-reply"
-							? `thread-read:${message.requestId}`
-							: message.type === "upgrade-reply"
-								? `upgrade:${message.requestId}`
-								: message.type === "command-reply"
-									? `command:${message.commandId}`
-									: `output:${message.outputId}`;
+						message.type === "command-status-reply"
+							? `command-status:${message.requestId}`
+							: message.type === "thread-read-reply"
+								? `thread-read:${message.requestId}`
+								: message.type === "upgrade-reply"
+									? `upgrade:${message.requestId}`
+									: message.type === "command-reply"
+										? `command:${message.commandId}`
+										: `output:${message.outputId}`;
 					const reply = this.pending.get(key);
 					if (reply) reply.reply(message);
 					else onMessage(message);
@@ -331,11 +388,65 @@ export class RunnerSocket {
 		command: SessionCommand,
 		attempt?: number,
 	): Effect.Effect<TurnResult | undefined, SessionFailure> {
+		if (
+			this.peerDriverKind === "cursor" &&
+			!this.scopedCursorCredentials &&
+			(command.type === "pre-warm" ||
+				(command.type === "send-turn" &&
+					!this.retainedSends?.some(
+						(send) =>
+							send.commandId === commandId && send.attempt === (attempt ?? 0),
+					)))
+		)
+			return Effect.fail({
+				...runnerFailure(
+					command.type,
+					"Cursor runner predates scoped credentials",
+				),
+				code: "runner_incompatible",
+			});
+		if (
+			this.peerDriverKind === "cursor" &&
+			(command.type === "send-turn" || command.type === "pre-warm")
+		) {
+			const inputEnvironment = {
+				shellEnv: {},
+				...(command.input.account
+					? { account: { ...command.input.account, env: {} } }
+					: {}),
+			};
+			command =
+				command.type === "send-turn"
+					? {
+							...command,
+							shellEnv: {},
+							input: { ...command.input, ...inputEnvironment },
+						}
+					: {
+							...command,
+							shellEnv: {},
+							input: { ...command.input, ...inputEnvironment },
+						};
+		}
 		return this.requestEffect(`command:${commandId}`, {
 			type: "command",
 			commandId,
 			command,
 			...(attempt !== undefined ? { attempt } : {}),
+		});
+	}
+
+	commandStatusEffect(
+		commandId: string,
+	): Effect.Effect<
+		Exclude<ProviderControlCommandStatus, "gone">,
+		SessionFailure
+	> {
+		const requestId = randomUUID();
+		return this.requestEffect(`command-status:${requestId}`, {
+			type: "command-status",
+			requestId,
+			commandId,
 		});
 	}
 
@@ -390,19 +501,6 @@ export class RunnerSocket {
 						reply.failure && message.type === "command"
 							? (this.beforeCommandFailure?.() ?? Effect.void)
 							: Effect.void;
-					if (
-						this.legacyResult &&
-						!reply.failure &&
-						message.type === "command" &&
-						message.command.type === "send-turn"
-					) {
-						resume(
-							(this.beforeCommandFailure?.() ?? Effect.void).pipe(
-								Effect.as(reply.result as A),
-							),
-						);
-						return;
-					}
 					resume(
 						reply.failure
 							? precedingOutputs.pipe(
@@ -424,8 +522,10 @@ export class RunnerSocket {
 		});
 	}
 
-	destroy(): void {
-		this.socket.destroy();
+	destroy(failure?: SessionFailure): void {
+		this.socket.destroy(
+			failure ? Object.assign(new Error(failure.message), failure) : undefined,
+		);
 	}
 
 	refuse(failure: SessionFailure): void {

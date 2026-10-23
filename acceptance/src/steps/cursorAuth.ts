@@ -24,6 +24,7 @@ function publishAccount(page: Page, available: boolean): void {
 		{
 			id: "cursor-work",
 			name: "Cursor",
+			colorSlot: 4,
 			driver: "cursor",
 			isDefault: true,
 			usageEligible: false,
