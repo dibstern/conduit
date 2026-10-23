@@ -72,7 +72,7 @@ html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme
 @media (prefers-reduced-motion:reduce){.tsp-chev{transition:none}}
 </style></head>
 <body>
-<header class="tsp-bar"><div class="tsp-titles"><a class="tsp-home" href="/tsp/" hidden>tsp</a><h1>Turn log redesign</h1><p>Round 3: panel × sheet, with Jev and one strip popover</p></div>
+<header class="tsp-bar"><div class="tsp-titles"><a class="tsp-home" href="/tsp/" hidden>tsp</a><h1>Turn log redesign</h1><p>Round 4: one labelled Show control, Usage, Jev card hover, Jev off</p></div>
 <div class="tsp-actions"><button class="tsp-btn" type="button" data-tsp="toggle-all" hidden>Collapse all</button>
 <button class="tsp-btn tsp-theme" type="button" aria-label="Switch the designs between light and dark">
 <svg class="tsp-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
@@ -81,13 +81,59 @@ html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme
 <main class="tsp-main">
 
 
+<p><strong>Round 4: five designs from your picks.</strong> Every one has the same six fixes, so compare them on layout:</p>
+<p><strong>1. One labelled "Show" control.</strong> Its stops add up, left to right: <strong>Answer only → Key messages → Most messages → All messages → Full log</strong>. Full log is every step with the messages in place, so it now reads as "everything", not as something "All" leaves out. <strong>2. Usage is back</strong> as its own tab, beside Show. <strong>3. A chevron in every state</strong>, Live included, left of the spinner. <strong>4. The Jev card sits above the strip</strong>, as the spec says. I tries it underneath. <strong>5. Hovering a message shows the full Jev card</strong>, and hovering a step keeps the one-line popover. <strong>6. Jev off</strong> is shown under each design.</p>
+<p><strong>On the original hover, you're half right.</strong> Expanded, dragging along the strip swapped in the full Jev card for that message, so you did see the card. Minimised, hovering only showed a one-line peek of the nearest message, and a plain hover only captioned the step. Round 4 uses the full card in both states.</p>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>E · Footer Show bar</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>C's footer becomes the Show bar:</strong> the label, the five stops, then Usage and cost. <strong>It's always there, even collapsed</strong>, and any stop opens the turn at that stop. <strong>Phone:</strong> the stops fold into a "Show" menu that says what each stop adds. <strong>Jev off:</strong> the bar becomes Log · Usage.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-e"><header class="tsp-card-head"><span class="tsp-n">E</span><h3>Footer Show bar, desktop</h3><a class="tsp-open" href="_frame-e.html" target="_blank" aria-label="Open Footer Show bar, desktop alone">↗</a></header><p class="tsp-why">C&#x27;s footer look, with D&#x27;s single control, labelled.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-e.html" title="Footer Show bar, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-ex"><header class="tsp-card-head"><span class="tsp-n">E</span><h3>Footer Show bar, phone</h3><a class="tsp-open" href="_frame-ex.html" target="_blank" aria-label="Open Footer Show bar, phone alone">↗</a></header><p class="tsp-why">Five stops don&#x27;t fit, so it&#x27;s a menu.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-ex.html" title="Footer Show bar, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>F · Card + drawer</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>B's shape:</strong> Jev card, strip, then Show, labelled, under the strip. <strong>Full log pulls a drawer out under the card</strong>, the raised drawer from A and B. <strong>The drawer's lip is C's footer:</strong> Usage and cost, there whenever the turn is open. <strong>Scrubbing</strong> swaps the card in place, as Jev does today.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-f"><header class="tsp-card-head"><span class="tsp-n">F</span><h3>Card + drawer, desktop</h3><a class="tsp-open" href="_frame-f.html" target="_blank" aria-label="Open Card + drawer, desktop alone">↗</a></header><p class="tsp-why">Messages in the card, raw steps in the drawer.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-f.html" title="Card + drawer, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-fx"><header class="tsp-card-head"><span class="tsp-n">F</span><h3>Card + drawer, phone</h3><a class="tsp-open" href="_frame-fx.html" target="_blank" aria-label="Open Card + drawer, phone alone">↗</a></header><p class="tsp-why">All five stops fit as a full-width control.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-fx.html" title="Card + drawer, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>G · One list, with a Show slider</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>The drawer always holds one list, and the slider sets how much is in it.</strong> At Key it lists the 3 key messages, an index for the card above. At Full log the same list fills in with every step. <strong>A caption names the stop</strong> and what it adds. <strong>Footer:</strong> C's bar at the bottom of the drawer.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-g"><header class="tsp-card-head"><span class="tsp-n">G</span><h3>One list, desktop</h3><a class="tsp-open" href="_frame-g.html" target="_blank" aria-label="Open One list, desktop alone">↗</a></header><p class="tsp-why">You can see what each stop adds, because the list grows.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-g.html" title="One list, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-gx"><header class="tsp-card-head"><span class="tsp-n">G</span><h3>One list, phone</h3><a class="tsp-open" href="_frame-gx.html" target="_blank" aria-label="Open One list, phone alone">↗</a></header><p class="tsp-why">The slider fits a phone; its labels stay readable.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-gx.html" title="One list, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>H · Less / More stepper</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>No scale to read.</strong> The footer shows where you are ("Key messages · 3"), and each button names the stop it goes to: <strong>− Answer</strong>, <strong>Most +</strong>. <strong>The footer only appears once the turn is open</strong>, so collapsed turns stay short. <strong>Hover:</strong> a step gets the line, a message gets the card.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-h"><header class="tsp-card-head"><span class="tsp-n">H</span><h3>Stepper, desktop</h3><a class="tsp-open" href="_frame-h.html" target="_blank" aria-label="Open Stepper, desktop alone">↗</a></header><p class="tsp-why">The smallest control that&#x27;s still clear.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-h.html" title="Stepper, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-hx"><header class="tsp-card-head"><span class="tsp-n">H</span><h3>Stepper, phone</h3><a class="tsp-open" href="_frame-hx.html" target="_blank" aria-label="Open Stepper, phone alone">↗</a></header><p class="tsp-why">Buttons drop their labels; the caption stays.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-hx.html" title="Stepper, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>I · Card under the strip, pointing at its moment</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>The beneath option, and why it might be worth it.</strong> The card hangs under the strip with a caret on its pin, so you can see when it was said. <strong>The hover card shows in exactly the same place</strong>, so a hover previews the open turn exactly. <strong>Show is a menu</strong> in C's footer, on both desktop and phone.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-i"><header class="tsp-card-head"><span class="tsp-n">I</span><h3>Card hangs from pin, desktop</h3><a class="tsp-open" href="_frame-i.html" target="_blank" aria-label="Open Card hangs from pin, desktop alone">↗</a></header><p class="tsp-why">Hover and open look the same.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-i.html" title="Card hangs from pin, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-ix"><header class="tsp-card-head"><span class="tsp-n">I</span><h3>Card hangs from pin, phone</h3><a class="tsp-open" href="_frame-ix.html" target="_blank" aria-label="Open Card hangs from pin, phone alone">↗</a></header><p class="tsp-why">The caret clamps to the card&#x27;s edge near the ends.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-ix.html" title="Card hangs from pin, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<p><strong>Round 3, for reference:</strong> sections P and A to D below.</p>
+
 <p><strong>Round 3: four ways to combine One panel (2) and Raised sheet (6), with Jev and the strip popover built in.</strong> Skills stay events everywhere. Every direction shows Collapsed, Live and Expanded on desktop and phone. Round 2 is at the bottom, collapsed.</p>
 
 <p><strong>What I took as "the timeline popover":</strong> the hover card on the strip. Today there are two of them: the head tooltip (hovered step plus turn totals) and Jev's minimised peek (nearest message). Section P merges them, and every direction uses it. Tell me if you meant something else.</p>
 
 <p><strong>Sample turn:</strong> 4m 12s, 15 steps, 2 skill loads, 1 failed check, 1 compaction, and 5 surfaced messages, one of them an open Ask.</p>
 
-<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>P · One strip popover (used by every direction)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>P · One strip popover (used by every direction)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
 <p><strong>One popover, showing whatever is under the pointer.</strong> A step shows verb, subject, duration and time into the turn. A message shows its badge and text, and clicking opens it. <strong>Turn totals leave the popover:</strong> they don't change with where you hover, so they move to Usage or the footer. <strong>Phone:</strong> press and drag on the strip to scrub, lift to open.</p>
 <div class="tsp-grid" style="--tsp-min:360px">
 <article class="tsp-card tsp-wide" id="d-p"><header class="tsp-card-head"><span class="tsp-n">P</span><h3>Strip popover, desktop</h3><a class="tsp-open" href="_frame-p.html" target="_blank" aria-label="Open Strip popover, desktop alone">↗</a></header><p class="tsp-why">Replaces both today&#x27;s head tooltip and Jev&#x27;s peek.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-p.html" title="Strip popover, desktop" loading="lazy"></iframe></div></article>
@@ -95,7 +141,7 @@ html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme
 </div>
 </div></details>
 
-<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>A · Tabbed panel (Jev as a tab)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>A · Tabbed panel (Jev as a tab)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
 <p><strong>Container:</strong> 2's bordered panel. <strong>Tabs from 6:</strong> Messages · Steps · Usage, in the head (under the strip on phone). <strong>Jev</strong> is the Messages tab, and numbered pins replace the strip dots while it's open. <strong>Default tab:</strong> Steps while live, Messages once done. <strong>Jev off:</strong> the Messages tab goes and this is 6 inside 2's border.</p>
 <div class="tsp-grid" style="--tsp-min:360px">
 <article class="tsp-card tsp-wide" id="d-a"><header class="tsp-card-head"><span class="tsp-n">A</span><h3>Tabbed panel, desktop</h3><a class="tsp-open" href="_frame-a.html" target="_blank" aria-label="Open Tabbed panel, desktop alone">↗</a></header><p class="tsp-why">The most familiar shape: one box, three views.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-a.html" title="Tabbed panel, desktop" loading="lazy"></iframe></div></article>
@@ -103,7 +149,7 @@ html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme
 </div>
 </div></details>
 
-<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>B · Jev on top, steps drawer underneath</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>B · Jev on top, steps drawer underneath</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
 <p><strong>Jev is not a tab here.</strong> Messages are what you read, so they stay in the card as they do today. <strong>Raw steps</strong> pull out from under the card as a raised drawer, with 6's lift and 2's attachment, and Steps · Usage tabs. <strong>Opener:</strong> the Steps button in the level row, or a click on the strip. <strong>Jev off:</strong> the card is the plain head and the drawer is 6's sheet.</p>
 <div class="tsp-grid" style="--tsp-min:360px">
 <article class="tsp-card tsp-wide" id="d-b"><header class="tsp-card-head"><span class="tsp-n">B</span><h3>Jev + drawer, desktop</h3><a class="tsp-open" href="_frame-b.html" target="_blank" aria-label="Open Jev + drawer, desktop alone">↗</a></header><p class="tsp-why">An open Ask is never hidden behind a tab.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-b.html" title="Jev + drawer, desktop" loading="lazy"></iframe></div></article>
@@ -111,7 +157,7 @@ html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme
 </div>
 </div></details>
 
-<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>C · Footer tab bar</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>C · Footer tab bar</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
 <p><strong>2's footer bar becomes the tab bar.</strong> It's a control, so it can't pass for a step, and it carries the cost on the right. <strong>Always visible, even collapsed:</strong> one click to any view. <strong>Cost:</strong> every collapsed turn grows by about 38px. <strong>Jev off:</strong> Steps · Usage only.</p>
 <div class="tsp-grid" style="--tsp-min:360px">
 <article class="tsp-card tsp-wide" id="d-c"><header class="tsp-card-head"><span class="tsp-n">C</span><h3>Footer tabs, desktop</h3><a class="tsp-open" href="_frame-c.html" target="_blank" aria-label="Open Footer tabs, desktop alone">↗</a></header><p class="tsp-why">The tab underline sits on top, pointing at what it opened.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-c.html" title="Footer tabs, desktop" loading="lazy"></iframe></div></article>
@@ -119,7 +165,7 @@ html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme
 </div>
 </div></details>
 
-<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>D · One dial (novel)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>D · One dial (novel)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
 <p><strong>Jev's level row gains a fifth stop: Steps.</strong> It stays under the strip, where Jev's levels live today. Final, Key, Balanced and All filter messages. Steps shows everything, with messages badged in place. This works because messages already are steps (the text parts), so it's one control instead of tabs plus levels. <strong>Usage:</strong> 2's footer bar. <strong>Jev off:</strong> the dial goes and this is exactly 2.</p>
 <div class="tsp-grid" style="--tsp-min:360px">
 <article class="tsp-card tsp-wide" id="d-d"><header class="tsp-card-head"><span class="tsp-n">D</span><h3>One dial, desktop</h3><a class="tsp-open" href="_frame-d.html" target="_blank" aria-label="Open One dial, desktop alone">↗</a></header><p class="tsp-why">Removes a concept instead of adding one.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-d.html" title="One dial, desktop" loading="lazy"></iframe></div></article>
@@ -127,7 +173,7 @@ html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme
 </div>
 </div></details>
 
-<p><strong>My lean: D.</strong> It removes a concept, and with Jev off it falls back to 2, the one you liked. <strong>Safe pick: A</strong>, the most familiar. <strong>B</strong> if an open Ask should never sit behind a tab.</p>
+<p><strong>Round 3 lean was D.</strong> It removes a concept, and with Jev off it falls back to 2, the one you liked. <strong>Safe pick: A</strong>, the most familiar. <strong>B</strong> if an open Ask should never sit behind a tab.</p>
 
 <p><strong>Round 2, for reference:</strong> sections 0 to 7 below.</p>
 
@@ -195,7 +241,7 @@ html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme
 </div></details>
 
 </main>
-<footer class="tsp-foot">turn-log-redesign · 2026-10-23T13:19</footer>
+<footer class="tsp-foot">turn-log-redesign · 2026-10-23T14:32</footer>
 <script>(() => {
   const root = document.documentElement, KEY = 'tsp-theme';
   const frames = [...document.querySelectorAll('iframe.tsp-frame')];
