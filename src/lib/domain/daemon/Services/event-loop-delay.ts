@@ -22,11 +22,14 @@ export const monitorEventLoopBlocks = ({
 		let lastWarningAt = Number.NEGATIVE_INFINITY;
 		yield* Effect.gen(function* () {
 			while (true) {
+				const dueAt = performance.now() + checkMs;
 				yield* Effect.sleep(checkMs);
-				const maxMs = histogram.max / 1_000_000;
+				const now = performance.now();
+				// The native sample for a stall can land after this check runs; this
+				// check's own lateness always covers it.
+				const maxMs = Math.max(histogram.max / 1_000_000, now - dueAt);
 				const p99Ms = histogram.percentile(99) / 1_000_000;
 				histogram.reset();
-				const now = performance.now();
 				if (maxMs < thresholdMs || now - lastWarningAt < warnEveryMs) continue;
 				lastWarningAt = now;
 				yield* Effect.logWarning("event loop blocked").pipe(
