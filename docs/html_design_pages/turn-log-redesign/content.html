@@ -1,0 +1,226 @@
+<tsp-shared>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<style>
+:root{
+  --bg:light-dark(#fff,#111113); --turn-bg:light-dark(#f4f4f6,#1a1a1d);
+  --text:light-dark(#0b0b0d,#ededf0); --text2:light-dark(#5d5d66,#a1a1aa); --dim:light-dark(#868692,#6e6e77);
+  --border:light-dark(#e3e3e7,#2b2b31); --chip:light-dark(rgba(0,0,0,.05),rgba(255,255,255,.07)); --sel:light-dark(#ececef,#202024);
+  --explore:light-dark(#0369a1,#38bdf8); --edit:light-dark(#a87e00,#d9a521); --shell:light-dark(#15803d,#4ade80);
+  --other:light-dark(#3f40b2,#6366f1); --thinking:light-dark(#7441ff,#b07cff); --textc:light-dark(#c0267f,#f472b6);
+  --fail:light-dark(#ff3b62,#ff4f73); --error:light-dark(#bc1f1f,#ff6369); --accent:light-dark(#4352d2,#8e9bff);
+  --success:light-dark(#127136,#3ecf8e);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 Geist,system-ui,sans-serif;padding:22px 30px 8px}
+body.phone{padding:18px 14px 6px}
+.mono{font-family:"Geist Mono",ui-monospace,monospace}
+svg.lucide{width:14px;height:14px;stroke-width:2}
+.sm svg.lucide,svg.lucide.sm{width:12px;height:12px}
+.state{margin-bottom:26px}
+.lbl{font:600 10.5px/1 Geist,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:0 0 9px}
+.lbl em{font-style:normal;text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px}
+.card{background:var(--turn-bg);border-radius:14px;padding:10px 12px 10px}
+.hl{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap}
+.hl .w{font-size:14px;font-weight:600}
+.hl .dur{font:12px "Geist Mono",monospace;color:var(--dim)}
+.hl .ph{font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;min-width:0}
+.hl .chev{color:var(--dim);display:flex}
+.spin{color:var(--accent);display:flex;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.strip{display:flex;gap:2px;height:4px;margin-top:9px}
+.strip i{display:block;height:100%;border-radius:2px;transition:opacity .2s}
+.strip i.seam{flex:0 0 2px!important;background:var(--text2);height:10px;margin-top:-3px}
+.strip i.live{animation:breathe 1.2s ease-in-out infinite}
+@keyframes breathe{50%{opacity:.35}}
+.log{margin-top:6px}
+.row{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:6px;min-height:26px}
+.row .ic{flex:none;display:flex}
+.row .verb{color:var(--text2);flex:none}
+.row .subj{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px "Geist Mono",monospace;color:var(--dim)}
+.row .subj.it{font:italic 13px Geist,sans-serif}
+.row .msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-style:italic;color:var(--text2)}
+.row time{margin-left:auto;font:11.5px "Geist Mono",monospace;color:var(--dim);flex:none}
+.blk{width:9px;height:9px;flex:none;background:repeating-linear-gradient(90deg,var(--accent) 0 1.5px,transparent 1.5px 2.5px);animation:breathe .6s steps(2) infinite}
+.rule{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:12px;color:var(--dim)}
+.rule::before,.rule::after{content:"";height:1px;flex:1;background:var(--border)}
+.bill{font:12px "Geist Mono",monospace;color:var(--text2);display:inline-flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.bill .sep{color:var(--dim)}
+.gauge{display:inline-block;width:40px;height:4px;border-radius:9px;background:var(--chip);overflow:hidden;vertical-align:middle}
+.gauge b{display:block;height:100%;width:41%;background:var(--success)}
+.earlier{font-size:12px;color:var(--text2);padding:8px 6px}
+.flag{outline:1.5px dashed var(--fail);outline-offset:3px;border-radius:6px}
+.note{font-size:11.5px;color:var(--fail);margin:7px 0 0 2px;display:flex;gap:6px;align-items:baseline}
+.note b{font:600 10.5px "Geist Mono",monospace;background:var(--fail);color:#fff;border-radius:99px;padding:0 6px}
+.pill{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:99px;background:var(--chip);color:var(--text2);font-size:12px;font-weight:500;border:0}
+.pill.on{background:color-mix(in srgb,var(--other) 18%,transparent);color:var(--other)}
+.pill.err{color:var(--error);background:color-mix(in srgb,var(--error) 12%,transparent)}
+/* B: skill chapters */
+.chap{display:flex;align-items:center;gap:7px;padding:7px 6px 4px;margin-top:2px;border-radius:6px}
+.chap.hov{background:var(--sel)}
+.chap .cn{font:500 12.5px "Geist Mono",monospace;color:var(--text)}
+.chap .ct{font-size:11px;color:var(--dim)}
+.chap .cm{margin-left:auto;font:11.5px "Geist Mono",monospace;color:var(--dim)}
+.rail{margin-left:12px;padding-left:4px;border-left:2px solid color-mix(in srgb,var(--other) 40%,transparent)}
+.totals{display:flex;justify-content:flex-end;align-items:center;gap:10px;border-top:1px solid var(--border);margin-top:8px;padding:8px 6px 2px}
+.phone .totals{justify-content:flex-start}
+</style>
+<script>
+const K={skill:['sparkles','--other','Loaded'],think:['brain','--thinking','Thought'],read:['file-text','--explore','Read'],search:['search','--explore','Searched'],edit:['pencil','--edit','Edited'],bash:['terminal','--shell','Ran'],msg:['message-square','--textc','']};
+const STEPS=[
+ {k:'think',text:'They want the log redesigned; load tsp, then find the component',d:'4s',w:5},
+ {k:'skill',subj:'tsp',d:'380ms',w:1,ch:'tsp'},
+ {k:'read',subj:'chat/TurnActivity.svelte',d:'31ms',w:2,ch:'tsp'},
+ {k:'search',subj:'"Loaded" in src/lib/frontend',d:'210ms',w:3,ch:'tsp'},
+ {k:'read',subj:'chat/ActivityRow.svelte',d:'22ms',w:2,ch:'tsp'},
+ {k:'msg',text:'The footer reuses the row indent and icon, so it reads as a step.',d:'3s',w:8,ch:'tsp'},
+ {k:'skill',subj:'brainstorm',d:'290ms',w:1,ch:'brainstorm'},
+ {k:'edit',subj:'chat/TurnActivity.svelte',d:'1s',w:5,ch:'brainstorm'},
+ {k:'bash',subj:'pnpm check',d:'38s',w:18,fail:1,ch:'brainstorm'},
+ {k:'bash',subj:'pnpm check',d:'41s',w:20,ch:'brainstorm'},
+ {k:'compact',ch:'brainstorm'},
+ {k:'edit',subj:'chat/ActivityRow.svelte',d:'900ms',w:6,ch:'brainstorm'},
+];
+const LIVE=STEPS.slice(0,10);
+const PHRASE='2 reads · 1 search · 2 edits · 2 commands';
+const ico=(n,c,cls='')=>`<span class="ic ${cls}" style="color:var(${c})"><i data-lucide="${n}"></i></span>`;
+function row(s,o={}){
+ if(s.k==='compact')return `<div class="rule"><span>Compacted context</span><span class="mono">182k → 41k</span><span>·</span><span style="color:var(--text2);font-weight:500">141k saved</span></div>`;
+ const [n,c,v]=K[s.k];
+ const col=s.fail?'--fail':o.live?'--accent':c;
+ const tail=o.live?'<span class="blk"></span>':s.fail?ico('circle-alert','--error','sm'):'';
+ if(s.k==='think')return `<div class="row">${ico(n,col)}<span class="verb" style="font-weight:500">Thought</span><span class="subj it">${s.text}</span><time>${s.d}</time></div>`;
+ if(s.k==='msg')return `<div class="row">${ico(n,col)}<span class="msg">${s.text}</span><time>${s.d}</time></div>`;
+ return `<div class="row">${ico(n,col)}<span class="verb">${o.live?'Running':(o.verb??v)}</span><span class="subj">${s.subj}</span>${o.live?'':`<time>${s.d}</time>`}${tail}</div>`;
+}
+function strip(steps,o={}){
+ return `<div class="strip">${steps.map((s,i)=>{
+  if(s.k==='compact')return '<i class="seam"></i>';
+  const live=o.live&&i===steps.length-1;
+  const col=s.fail?'--fail':live?'--accent':K[s.k][1];
+  const dim=o.emph&&s.ch!==o.emph?';opacity:.22':'';
+  return `<i class="${live?'live':''}" style="flex:${s.w} 1 0;background:var(${col})${dim}"></i>`}).join('')}</div>`;
+}
+function head(o={}){
+ const lead=o.live?`<span class="spin"><i data-lucide="loader-circle"></i></span><span class="w">Working</span><span class="dur">1m 31s</span>`
+  :`<span class="chev"><i data-lucide="${o.open?'chevron-down':'chevron-right'}"></i></span><span class="w">Worked</span><span class="dur">4m 12s</span>`;
+ return `<div class="hl">${lead}<span class="ph">· ${o.phrase??PHRASE}</span></div>`;
+}
+const BILL=`<span class="bill"><span>$0.4123</span><span class="sep">·</span><span>1.2M in</span><span class="sep">·</span><span>18k out</span><span class="sep">·</span><span>ctx <span class="gauge"><b></b></span> 41%</span></span>`;
+function state(label,html,note=''){return `<div class="state"><div class="lbl">${label}${note?`<em>${note}</em>`:''}</div>${html}</div>`}
+function mount(html){const d=document.createElement('div');d.innerHTML=html;document.body.prepend(d);lucide.createIcons();}
+</script>
+</tsp-shared>
+
+<p><strong>Short answer:</strong> they're two separate features that were each built without the other in mind, and the counter was placed so it copies the layout of a step row.</p>
+
+<ul>
+<li><strong>"Loaded"</strong> is the generic tool row. The <code>Skill</code> tool's past-tense verb is <code>"Loaded"</code> in <code>VERBS</code> (<code>utils/turns.ts:194</code>), so every skill call becomes a row like any Read or Edit.</li>
+<li><strong>The counter</strong> (<code>✦ 2 skills</code>) is a separate toggle that opens a "chapters" list: which skill was in charge, when it started, how long it ran. <code>countsPhrase</code> leaves skills out of the header sentence on purpose ("each has its own control"), and that control went into the log footer (<code>TurnActivity.svelte:641</code>).</li>
+<li><strong>Why it looks like a step:</strong> the footer sits directly under the last row with no rule or gap. It starts at the same left edge, leads with the same <code>sparkles</code> icon the skill row uses, and has the same muted ghost-button look. Opening it adds a second list of skill rows under the first. So one fact gets shown three times, in three styles that all look alike.</li>
+</ul>
+
+<tsp-section title="Today: what the log looks like now">
+<tsp-grid min="520">
+<tsp-card n="0" name="Current" why="Collapsed, live, expanded, and skills opened. The dashed outlines are where it reads wrong." width="820" wide>
+<script>
+const foot=(live)=>`<div class="flag" style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 0;font-size:12px;color:var(--text2)">
+ <span style="display:inline-flex;gap:5px;align-items:center"><span class="sm" style="display:flex"><i data-lucide="sparkles"></i></span>2 skills</span>
+ ${live?'':'<span>compacted</span>'}<span style="color:var(--error)">1 failed</span>${BILL}</div>`;
+mount(
+ state('Collapsed',`<div class="card">${head()}${strip(STEPS)}</div>`)+
+ state('Live',`<div class="card">${head({live:1})}${strip(LIVE,{live:1})}</div><div class="log"><div class="earlier">+ 7 earlier messages</div>${LIVE.slice(-3).map((s,i)=>row(s,{live:i===2})).join('')}${foot(true)}<div class="note"><b>1</b>The bill and skill counter sit under the live ticker as if they were the next step.</div></div>`)+
+ state('Expanded',`<div class="card">${head({open:1})}${strip(STEPS)}</div><div class="log">${STEPS.map(s=>row(s)).join('')}${foot()}<div class="note"><b>2</b>Same left edge, same sparkles icon, no divider: "✦ 2 skills" reads as step 13.</div></div>`)+
+ state('Skills opened',`<div class="log"><div style="opacity:.45">${STEPS.slice(-2).map(s=>row(s)).join('')}</div>${foot()}
+ <div class="flag" style="margin-top:8px">${[['tsp','at start · 1m 12s'],['brainstorm','1m 12s in · 3m 0s']].map(([n,t])=>`<div class="row">${ico('sparkles','--other')}<span class="subj" style="color:var(--text2)">${n}</span><time>${t}</time></div>`).join('')}</div>
+ <div class="note"><b>3</b>A second list of skill rows, right under the "Loaded" rows it repeats.</div></div>`)
+);
+</script>
+</tsp-card>
+</tsp-grid>
+</tsp-section>
+
+<tsp-section title="Three directions">
+<tsp-grid min="440">
+
+<tsp-card n="A" name="Ruled footer" why="Smallest change. A rule and a pill make the footer read as a summary, not a step. The repetition stays." width="760">
+<script>
+const footA=`<div style="display:flex;align-items:center;gap:8px;border-top:1px solid var(--border);margin-top:8px;padding:8px 0 2px">
+ <button class="pill"><span class="sm" style="display:flex"><i data-lucide="sparkles"></i></span>2 skills<span class="sm" style="display:flex"><i data-lucide="chevron-down"></i></span></button>
+ <span class="pill err">1 failed</span><span style="margin-left:auto">${BILL}</span></div>`;
+mount(
+ state('Collapsed',`<div class="card">${head()}${strip(STEPS)}</div>`,'unchanged')+
+ state('Live',`<div class="card">${head({live:1})}${strip(LIVE,{live:1})}</div><div class="log"><div class="earlier">+ 7 earlier messages</div>${LIVE.slice(-3).map((s,i)=>row(s,{live:i===2})).join('')}</div>`,'no footer until it settles')+
+ state('Expanded',`<div class="card">${head({open:1})}${strip(STEPS)}</div><div class="log">${STEPS.map(s=>row(s)).join('')}${footA}</div>`)
+);
+</script>
+</tsp-card>
+
+<tsp-card n="B" name="Skill chapters" why="A skill row becomes a chapter heading over the steps it ran. The counter goes, because the log is the breakdown." width="760">
+<script>
+function chapters(steps,o={}){
+ const pre=steps.filter(s=>!s.ch), out=[pre.map(s=>row(s)).join('')];
+ for(const name of ['tsp','brainstorm']){
+  const body=steps.filter(s=>s.ch===name&&s.k!=='skill'); if(!body.length&&!steps.some(s=>s.ch===name))continue;
+  const meta=name==='tsp'?'4 steps · 1m 12s':o.live?'running':'5 steps · 3m 0s';
+  out.push(`<div class="chap ${o.hov===name?'hov':''}">${ico('sparkles','--other')}<span class="cn">${name}</span><span class="ct">skill</span><span class="cm">${meta}</span></div><div class="rail">${body.map(s=>row(s)).join('')}</div>`);
+ }
+ return out.join('');
+}
+const phraseB=PHRASE+' · 2 skills';
+mount(
+ state('Collapsed',`<div class="card">${head({phrase:phraseB})}${strip(STEPS)}</div>`,'skills join the sentence')+
+ state('Live',`<div class="card">${head({live:1,phrase:phraseB})}${strip(LIVE,{live:1})}</div><div class="log"><div class="earlier">+ 6 earlier steps</div>
+  <div class="chap">${ico('sparkles','--other')}<span class="cn">brainstorm</span><span class="ct">skill</span><span class="cm">running</span></div>
+  <div class="rail">${LIVE.slice(-3).map((s,i)=>row(s,{live:i===2})).join('')}</div></div>`,'the skill in charge stays above the ticker')+
+ state('Expanded',`<div class="card">${head({open:1,phrase:phraseB})}${strip(STEPS)}</div><div class="log">${chapters(STEPS)}<div class="totals">${BILL}</div></div>`)+
+ state('Hovering a chapter',`<div class="card">${head({open:1,phrase:phraseB})}${strip(STEPS,{emph:'brainstorm'})}</div><div class="log"><div class="chap hov">${ico('sparkles','--other')}<span class="cn">brainstorm</span><span class="ct">skill</span><span class="cm">5 steps · 3m 0s</span></div><div class="rail" style="opacity:.6">${STEPS.slice(7,9).map(s=>row(s)).join('')}</div></div>`,'strip picks out its steps, as the old toggle did')
+);
+</script>
+</tsp-card>
+
+<tsp-card n="C" name="Head ledger" why="Skills, failures and the bill move into the head card under the strip, so they show even when the log is closed. The log holds only steps." width="760">
+<script>
+const meta=(on)=>`<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px">
+ ${['tsp','brainstorm'].map(n=>`<button class="pill ${on===n?'on':''}"><span class="sm" style="display:flex"><i data-lucide="sparkles"></i></span><span class="mono" style="font-size:11.5px">${n}</span></button>`).join('')}
+ <span class="pill err">1 failed</span><span style="margin-left:auto">${BILL}</span></div>`;
+mount(
+ state('Collapsed',`<div class="card">${head()}${strip(STEPS)}${meta()}</div>`)+
+ state('Live',`<div class="card">${head({live:1})}${strip(LIVE,{live:1})}${meta().replace(/<span style="margin-left:auto">[\s\S]*<\/span><\/div>$/,'</div>')}</div><div class="log"><div class="earlier">+ 7 earlier messages</div>${LIVE.slice(-3).map((s,i)=>row(s,{live:i===2})).join('')}</div>`)+
+ state('Expanded, a skill picked',`<div class="card">${head({open:1})}${strip(STEPS,{emph:'brainstorm'})}${meta('brainstorm')}</div><div class="log">${STEPS.map(s=>row(s,{verb:s.k==='skill'?'Skill':undefined})).join('')}</div>`)
+);
+</script>
+</tsp-card>
+
+</tsp-grid>
+</tsp-section>
+
+<tsp-section title="B on a phone">
+<tsp-grid min="300">
+<tsp-card n="B" name="Skill chapters, 390px" why="The rail costs 18px of width. Subjects still truncate cleanly; the bill wraps under the rule." width="390">
+<script>
+document.body.classList.add('phone');
+const ch=(n,m)=>`<div class="chap">${ico('sparkles','--other')}<span class="cn">${n}</span><span class="ct">skill</span><span class="cm">${m}</span></div>`;
+mount(
+ state('Collapsed',`<div class="card">${head({phrase:PHRASE+' · 2 skills'})}${strip(STEPS)}</div>`)+
+ state('Expanded',`<div class="card">${head({open:1,phrase:PHRASE+' · 2 skills'})}${strip(STEPS)}</div><div class="log">${row(STEPS[0])}
+  ${ch('tsp','1m 12s')}<div class="rail">${STEPS.slice(2,6).map(s=>row(s)).join('')}</div>
+  ${ch('brainstorm','3m 0s')}<div class="rail">${STEPS.slice(7).map(s=>row(s)).join('')}</div>
+  <div class="totals">${BILL}</div></div>`)
+);
+</script>
+</tsp-card>
+</tsp-grid>
+</tsp-section>
+
+<tsp-section title="Recommendation">
+<p><strong>B, skill chapters.</strong> It fixes the cause, not the look: one concept (a skill governed these steps) gets one rendering, in the place you're already reading. The "Loaded" verb, the counter, and the chapters list all go away. Turns without skills only change by gaining the ruled totals line.</p>
+<table>
+<tr><th></th><th>Fixes repetition</th><th>Visible collapsed</th><th>Cost</th></tr>
+<tr><td>A Ruled footer</td><td>No</td><td>No</td><td>Tiny: CSS + pill</td></tr>
+<tr><td>B Chapters</td><td>Yes</td><td>Count in sentence</td><td>Medium: group rows by <code>skillChapters</code>, which already exists</td></tr>
+<tr><td>C Head ledger</td><td>Partly (rows still say Skill)</td><td>Yes, by name</td><td>Medium, and the head grows a line on every turn</td></tr>
+</table>
+<p><strong>Watch out for:</strong> the live ticker shows the last 3 steps, and in B those can span two chapters. Show the newest chapter's heading and let older rows sit above it without one. Also, the hover link from chapter to strip replaces the toggle's <code>emphasis</code> set, so the existing <code>SkillsOpen</code> stories need rewriting.</p>
+</tsp-section>

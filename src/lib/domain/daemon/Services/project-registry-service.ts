@@ -83,6 +83,11 @@ import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
 import { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import {
+	clearProject,
+	OverridesStateTag,
+} from "../../relay/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
 import {
 	ConfigPersistenceTag,
@@ -92,10 +97,15 @@ import {
 	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
 } from "./daemon-config-ref.js";
+import { DaemonOrchestration } from "./daemon-orchestration.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 import { countRunningProjectSessions } from "./daemon-session-reader.js";
 import { type DaemonProject, DaemonStateTag } from "./daemon-state.js";
-import { DaemonStoreAvailability } from "./daemon-store-availability.js";
+import {
+	DaemonStoreAvailability,
+	markProjectUnavailable,
+	transitionProjectUnavailable,
+} from "./daemon-store-availability.js";
 import { RelayCacheTag } from "./relay-cache.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
@@ -582,22 +592,26 @@ export const markError = (slug: string, error: string) =>
 		const ref = yield* ProjectRegistryTag;
 		const bus = yield* DaemonEventBusTag;
 
-		const notFound = yield* Ref.modify(ref, (state) => {
-			const existing = HashMap.get(state, slug);
-			if (Option.isNone(existing)) {
-				return [true, state] as const;
-			}
-			const entry: ProjectError = {
-				_tag: "Error",
-				project: existing.value.project,
-				error,
-			};
-			return [false, HashMap.set(state, slug, entry)] as const;
-		});
+		yield* transitionProjectUnavailable(
+			yield* DaemonStoreAvailability,
+			slug,
+			Effect.gen(function* () {
+				const notFound = yield* Ref.modify(ref, (state) => {
+					const existing = HashMap.get(state, slug);
+					if (Option.isNone(existing)) {
+						return [true, state] as const;
+					}
+					const entry: ProjectError = {
+						_tag: "Error",
+						project: existing.value.project,
+						error,
+					};
+					return [false, HashMap.set(state, slug, entry)] as const;
+				});
 
-		if (notFound) {
-			return yield* new ProjectNotFound({ slug });
-		}
+				if (notFound) return yield* new ProjectNotFound({ slug });
+			}),
+		);
 
 		yield* PubSub.publish(
 			bus,
@@ -637,6 +651,15 @@ export const remove = (slug: string) =>
 				yield* Effect.gen(function* () {
 					// Relay disposal only detaches; removal ends every registered runner afterwards.
 					yield* relayCache.invalidate(slug);
+					const overrides = yield* Effect.serviceOption(OverridesStateTag);
+					if (Option.isSome(overrides))
+						yield* clearProject(slug).pipe(
+							Effect.provideService(OverridesStateTag, overrides.value),
+						);
+					const orchestration =
+						yield* Effect.serviceOption(DaemonOrchestration);
+					if (Option.isSome(orchestration))
+						yield* orchestration.value.drafts.discardProject(slug);
 					const state = yield* Ref.get(yield* DaemonStateTag);
 					yield* stopRegisteredRunners(
 						removed.value.project.folders[0],
@@ -667,6 +690,10 @@ export const remove = (slug: string) =>
 						}),
 					})).pipe(Effect.provideService(DaemonConfigRefTag, config.value));
 				}
+				// Removal can roll back while disposing the relay. Retire launch
+				// serialization only after it succeeds, before a locked re-add can run.
+				const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+				if (Option.isSome(workspace)) workspace.value.forgetProject?.(slug);
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
@@ -832,6 +859,8 @@ export const removeAll = Effect.gen(function* () {
 		(slug) =>
 			Effect.gen(function* () {
 				yield* relayCache.invalidate(slug);
+				const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+				if (Option.isSome(workspace)) workspace.value.forgetProject?.(slug);
 				yield* PubSub.publish(
 					bus,
 					DaemonEvent.InstanceRemoved({ instanceId: slug }),
@@ -1281,7 +1310,7 @@ export const saveProject = (input: SaveProjectInput) =>
 							path: mainFolder,
 						});
 						if (reason !== undefined) {
-							unavailable.set(slug, reason);
+							yield* markProjectUnavailable(unavailable, slug, reason);
 						} else {
 							const store = yield* PersistenceStore;
 							const sql = Context.get(store, SqlClient.SqlClient);
@@ -1356,7 +1385,8 @@ export const saveProject = (input: SaveProjectInput) =>
 								),
 							);
 							if (result.error)
-								unavailable.set(
+								yield* markProjectUnavailable(
+									unavailable,
 									slug,
 									`History import failed (${result.error.kind})`,
 								);

@@ -38,11 +38,21 @@ export const ProjectShellEnvWiringLive: Layer.Layer<
 					const directories = new Set(
 						projects.map((project) => project.folders[0]),
 					);
-					for (const directory of resolver.directories()) {
-						if (!directories.has(directory)) resolver.remove(directory);
+					const projectIds = new Set(projects.map((project) => project.slug));
+					for (const { directory, projectId } of resolver.registrations()) {
+						if (
+							projectId === undefined
+								? !directories.has(directory)
+								: !projectIds.has(projectId)
+						)
+							resolver.remove(directory, projectId);
 					}
 					for (const project of projects)
-						resolver.register(project.folders[0], project.shellEnv);
+						resolver.register(
+							project.folders[0],
+							project.shellEnv,
+							project.slug,
+						);
 				}),
 			),
 		);

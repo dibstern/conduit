@@ -72,7 +72,6 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 		{ timeout: 120_000 },
 		async () => {
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: process.cwd(),
 				// No queryFactory override — uses the real SDK
 			});
 
@@ -119,9 +118,7 @@ describe.skipIf(!RUN_EXPENSIVE)("ClaudeProviderInstance E2E (real SDK)", () => {
 		"subagent turn: stays busy from the prompt until the result",
 		{ timeout: 180_000 },
 		async () => {
-			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: process.cwd(),
-			});
+			const instance = makeTestClaudeProviderInstance({});
 			const sink = createCollectingEventSink();
 			const abortController = new AbortController();
 			const sessionId = `e2e-real-sdk-subagent-${Date.now()}`;

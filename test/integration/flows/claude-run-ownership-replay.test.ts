@@ -74,10 +74,13 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 		outcome: string;
 		turns?: string[];
 		ownedEnds?: number;
+		ledger?: ReturnType<typeof ledger>;
 	}[] = [];
 
 	afterEach(async () => {
 		try {
+			const proof = cases.at(-1);
+			if (proof && harness) proof.ledger = ledger(harness);
 			await harness?.stop();
 		} finally {
 			harness = undefined;
@@ -295,4 +298,93 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 			}, 90_000);
 		}
 	}
+
+	it.each([
+		"stop",
+		"queued slash",
+	] as const)("natural completion survives %s and leaves the following run active", async (action) => {
+		const proof: (typeof cases)[number] = {
+			case: `natural-completion-${action}`,
+			outcome: "failed",
+		};
+		cases.push(proof);
+		harness = await createReplayHarness("chat-streaming", {
+			claudeReplay: {
+				turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
+				holdBefore: [
+					{ turn: 1, message: 19 },
+					{ turn: 2, message: 6 },
+				],
+			},
+		});
+		const fixture = harness;
+		const sessionId = decodeURIComponent(fixture.projectUrl.slice(3));
+		const submit = (text: string) =>
+			rpc(fixture, (client) =>
+				client["input.submit"]({
+					sessionId,
+					inputId: randomUUID(),
+					text,
+					delivery: "queue",
+				}),
+			);
+		expect(await submit("Alpha")).toMatchObject({ ok: true });
+		await fixture.claudeReplayer?.held();
+		expect(
+			await submit(action === "stop" ? "Bravo" : "/compact"),
+		).toMatchObject({ ok: true });
+		expect(ledger(fixture).runs.map((run) => run.status)).toEqual(["running"]);
+		expect(ledger(fixture).queued).toHaveLength(1);
+		const db = new DatabaseSync(fixture.eventsDbPath);
+		try {
+			if (action === "stop") {
+				// Admit Stop before the result, but deliver it only after completion.
+				db.exec(`CREATE TRIGGER hold_stop BEFORE UPDATE OF status ON provider_command_outbox
+						WHEN NEW.effect_type = 'interrupt_turn' AND NEW.status = 'running'
+						BEGIN SELECT RAISE(IGNORE); END`);
+				const stop = rpc(fixture, (client) =>
+					client.CancelSession({ sessionId, commandId: randomUUID() }),
+				);
+				void stop.catch(() => undefined);
+				await vi.waitFor(() =>
+					expect(
+						db
+							.prepare(
+								"SELECT status FROM provider_command_outbox WHERE effect_type = 'interrupt_turn'",
+							)
+							.all(),
+					).toEqual([{ status: "pending" }]),
+				);
+				fixture.claudeReplayer?.release();
+				await vi.waitFor(() =>
+					expect(ledger(fixture).turns[0]?.state).toBe("completed"),
+				);
+				db.exec("DROP TRIGGER hold_stop");
+				expect(await stop).toMatchObject({ ok: true });
+			} else {
+				fixture.claudeReplayer?.release();
+			}
+			await fixture.claudeReplayer?.held();
+			expect(ledger(fixture).turns.map((turn) => turn.state)).toEqual([
+				"completed",
+				"running",
+			]);
+			expect(ledger(fixture).ends.map((event) => event.type)).toEqual([
+				"turn.completed",
+			]);
+			fixture.claudeReplayer?.release();
+			await vi.waitFor(() =>
+				expect(ledger(fixture).turns.map((turn) => turn.state)).toEqual([
+					"completed",
+					"completed",
+				]),
+			);
+			fixture.claudeReplayer?.assertComplete();
+			proof.turns = ledger(fixture).turns.map((turn) => turn.state);
+			proof.ownedEnds = ledger(fixture).ends.length;
+			proof.outcome = "passed";
+		} finally {
+			db.close();
+		}
+	}, 60_000);
 });

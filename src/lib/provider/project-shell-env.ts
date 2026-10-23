@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
 	accessSync,
 	constants,
+	existsSync,
 	type Stats,
 	statSync,
 	unwatchFile,
@@ -17,6 +18,8 @@ import { createLogger } from "../logger.js";
 
 type Env = Readonly<Record<string, string | undefined>>;
 type EnvSource = "process" | "login" | "mise" | "interactive" | "overrides";
+
+const EFFECTIVE_DIRECTORY_IDLE_MS = 60_000;
 
 class ShellEnvResolveError extends Data.TaggedError("ShellEnvResolveError")<{
 	readonly message: string;
@@ -40,6 +43,10 @@ function parseEnv(output: string, source: string): Env {
 }
 
 interface CachedEnv {
+	readonly directory: string;
+	readonly projectId: string | undefined;
+	root: boolean;
+	lastUsedAt: number;
 	config: ProjectShellEnvConfig;
 	env?: Env;
 	sources: EnvSource[];
@@ -76,6 +83,7 @@ export function findExecutable(
 /** Background-only shell I/O; get() always returns an immediate snapshot. */
 export class ProjectShellEnvResolver {
 	private readonly entries = new Map<string, CachedEnv>();
+	private readonly projectConfigs = new Map<string, ProjectShellEnvConfig>();
 	private readonly baseEnv: Env;
 	private readonly shell: string;
 	private readonly ttlMs: number;
@@ -99,22 +107,61 @@ export class ProjectShellEnvResolver {
 		this.watchIntervalMs = options.watchIntervalMs ?? 1_000;
 	}
 
-	register(directory: string, config: ProjectShellEnvConfig = {}): void {
+	register(
+		directory: string,
+		config: ProjectShellEnvConfig = {},
+		projectId?: string,
+	): void {
+		this.registerEntry(directory, config, projectId, true);
+		const resolved = resolve(directory);
+		for (const entry of this.entries.values()) {
+			if (
+				entry.projectId === projectId &&
+				(projectId !== undefined || entry.directory === resolved)
+			)
+				entry.root = entry.directory === resolved;
+		}
+	}
+
+	private registerEntry(
+		directory: string,
+		config: ProjectShellEnvConfig = {},
+		projectId?: string,
+		root = false,
+	): void {
 		if (this.closed) return;
-		const key = resolve(directory);
+		const resolved = resolve(directory);
+		const key = this.cacheKey(resolved, projectId);
 		const nextConfig = {
 			...config,
 			...(config.overrides && { overrides: { ...config.overrides } }),
 		};
+		if (projectId !== undefined) {
+			this.projectConfigs.set(projectId, nextConfig);
+			for (const entry of this.entries.values()) {
+				if (
+					entry.projectId !== projectId ||
+					isDeepStrictEqual(entry.config, nextConfig)
+				)
+					continue;
+				entry.config = nextConfig;
+				this.invalidate(entry);
+			}
+		}
 		const existing = this.entries.get(key);
 		if (existing) {
+			existing.root ||= root;
 			if (!isDeepStrictEqual(existing.config, nextConfig)) {
 				existing.config = nextConfig;
-				this.invalidate(key, existing);
+				this.invalidate(existing);
 			}
 			return;
 		}
 		const entry: CachedEnv = {
+			directory: resolved,
+			projectId,
+			root,
+			lastUsedAt: Date.now(),
 			config: nextConfig,
 			sources: [],
 			resolvedAt: null,
@@ -143,7 +190,7 @@ export class ProjectShellEnvResolver {
 				"mise.local.toml",
 				".mise.local.toml",
 				".tool-versions",
-			].map((file) => join(key, file)),
+			].map((file) => join(resolved, file)),
 			...(this.baseEnv["ZDOTDIR"]
 				? [".zprofile", ".zlogin", ".zshrc", ".zshenv"].map((file) =>
 						join(this.baseEnv["ZDOTDIR"] ?? home, file),
@@ -157,7 +204,7 @@ export class ProjectShellEnvResolver {
 				current.ino !== previous.ino ||
 				current.size !== previous.size
 			) {
-				this.invalidate(key, entry);
+				this.invalidate(entry);
 			}
 		};
 		for (const file of files) {
@@ -167,32 +214,53 @@ export class ProjectShellEnvResolver {
 				changed,
 			);
 		}
-		const timer = setInterval(() => {
-			void this.refresh(key);
-		}, this.ttlMs);
+		const timer = setInterval(
+			() => {
+				if (
+					!entry.root &&
+					Date.now() - entry.lastUsedAt >= EFFECTIVE_DIRECTORY_IDLE_MS
+				)
+					this.remove(resolved, projectId);
+				else if (Date.now() - entry.attemptedAt >= this.ttlMs)
+					void this.refresh(resolved, projectId);
+			},
+			Math.min(this.ttlMs, EFFECTIVE_DIRECTORY_IDLE_MS),
+		);
 		timer.unref();
 		entry.cleanup = () => {
 			clearInterval(timer);
 			for (const file of files) unwatchFile(file, changed);
 		};
-		void this.refresh(key);
+		void this.refresh(resolved, projectId);
 	}
 
-	get(directory: string): Env {
-		const key = resolve(directory);
-		if (!this.entries.has(key)) this.register(key);
+	get(directory: string, projectId?: string): Env {
+		const key = this.cacheKey(directory, projectId);
+		if (!this.entries.has(key))
+			this.registerEntry(
+				directory,
+				projectId === undefined ? {} : this.projectConfigs.get(projectId),
+				projectId,
+			);
 		const entry = this.entries.get(key);
+		if (entry) entry.lastUsedAt = Date.now();
 		if (entry && Date.now() - entry.attemptedAt >= this.ttlMs) {
-			void this.refresh(key);
+			void this.refresh(directory, projectId);
 		}
-		return entry?.env ?? { ...this.baseEnv, ...entry?.config.overrides };
+		return (
+			entry?.env ??
+			Object.freeze({ ...this.baseEnv, ...entry?.config.overrides })
+		);
 	}
 
 	/** Pre-warming waits for a current capture; sends keep reading the cache. */
-	async waitUntilReady(directory: string): Promise<boolean> {
+	async waitUntilReady(
+		directory: string,
+		projectId?: string,
+	): Promise<boolean> {
 		if (this.closed) return false;
-		const key = resolve(directory);
-		this.get(key);
+		const key = this.cacheKey(directory, projectId);
+		this.get(directory, projectId);
 		const entry = this.entries.get(key);
 		if (!entry || entry.closed) return false;
 		await entry.pending;
@@ -204,13 +272,16 @@ export class ProjectShellEnvResolver {
 		);
 	}
 
-	snapshot(directory: string): {
+	snapshot(
+		directory: string,
+		projectId?: string,
+	): {
 		sources: readonly EnvSource[];
 		resolvedAt: number | null;
 		warnings: readonly string[];
 		resolving: boolean;
 	} {
-		const entry = this.entries.get(resolve(directory));
+		const entry = this.entries.get(this.cacheKey(directory, projectId));
 		return {
 			sources: entry?.env
 				? [...entry.sources]
@@ -228,14 +299,32 @@ export class ProjectShellEnvResolver {
 	}
 
 	directories(): readonly string[] {
-		return [...this.entries.keys()];
+		return [
+			...new Set(
+				Array.from(this.entries.values(), ({ directory }) => directory),
+			),
+		];
+	}
+
+	registrations(): readonly {
+		directory: string;
+		projectId: string | undefined;
+	}[] {
+		return Array.from(this.entries.values(), ({ directory, projectId }) => ({
+			directory,
+			projectId,
+		}));
 	}
 
 	/** Awaitable only for diagnostics/tests; runtime callers use get(). */
-	refresh(directory: string): Promise<void> {
-		const key = resolve(directory);
-		const entry = this.entries.get(key);
+	refresh(directory: string, projectId?: string): Promise<void> {
+		const resolved = resolve(directory);
+		const entry = this.entries.get(this.cacheKey(resolved, projectId));
 		if (!entry || entry.closed) return Promise.resolve();
+		if (!entry.root && !existsSync(resolved)) {
+			this.remove(resolved, projectId);
+			return Promise.resolve();
+		}
 		if (entry.pending) return entry.pending;
 		const controller = new AbortController();
 		entry.attemptedAt = Date.now();
@@ -246,18 +335,18 @@ export class ProjectShellEnvResolver {
 			if (entry.closed) return;
 			try {
 				let env = await this.shellEnv(
-					key,
+					resolved,
 					this.baseEnv,
 					false,
 					controller.signal,
 				);
 				const sources: EnvSource[] = ["login"];
-				const mise = findExecutable("mise", env, key);
+				const mise = findExecutable("mise", env, resolved);
 				if (mise) {
 					const output = await this.run(
 						mise,
 						["env", "-s", "bash"],
-						key,
+						resolved,
 						env,
 						controller.signal,
 						"mise",
@@ -273,7 +362,7 @@ export class ProjectShellEnvResolver {
 									"conduit-mise-env",
 									output.toString("utf8"),
 								],
-								key,
+								resolved,
 								env,
 								controller.signal,
 								"mise",
@@ -284,7 +373,7 @@ export class ProjectShellEnvResolver {
 					sources.push("mise");
 				}
 				if (config.interactive === true) {
-					env = await this.shellEnv(key, env, true, controller.signal);
+					env = await this.shellEnv(resolved, env, true, controller.signal);
 					sources.push("interactive");
 				}
 				if (config.overrides && Object.keys(config.overrides).length > 0) {
@@ -292,7 +381,7 @@ export class ProjectShellEnvResolver {
 					sources.push("overrides");
 				}
 				if (entry.closed || entry.dirty) return;
-				entry.env = env;
+				entry.env = Object.freeze(env);
 				entry.sources = sources;
 				entry.resolvedAt = Date.now();
 				entry.warnings = [];
@@ -304,39 +393,51 @@ export class ProjectShellEnvResolver {
 						: "Environment resolution failed";
 				entry.warnings = [warning];
 				createLogger("shell-env").warn(
-					`Project ${key}: ${warning}; keeping previous environment`,
+					`Project ${resolved}: ${warning}; keeping previous environment`,
 				);
 			} finally {
 				delete entry.pending;
 				delete entry.controller;
 				if (entry.dirty && !entry.closed) {
 					entry.dirty = false;
-					await this.refresh(key);
+					await this.refresh(resolved, projectId);
 				}
 			}
 		});
 		return entry.pending;
 	}
 
-	remove(directory: string): void {
-		const key = resolve(directory);
+	remove(directory: string, projectId?: string): void {
+		const key = this.cacheKey(directory, projectId);
 		const entry = this.entries.get(key);
 		if (!entry) return;
 		entry.closed = true;
 		entry.controller?.abort();
 		entry.cleanup();
 		this.entries.delete(key);
+		if (
+			projectId !== undefined &&
+			!Array.from(this.entries.values()).some(
+				(entry) => entry.projectId === projectId,
+			)
+		)
+			this.projectConfigs.delete(projectId);
 	}
 
 	close(): void {
 		this.closed = true;
-		for (const directory of this.entries.keys()) this.remove(directory);
+		for (const { directory, projectId } of this.entries.values())
+			this.remove(directory, projectId);
 	}
 
-	private invalidate(key: string, entry: CachedEnv): void {
+	private cacheKey(directory: string, projectId?: string): string {
+		return JSON.stringify([projectId, resolve(directory)]);
+	}
+
+	private invalidate(entry: CachedEnv): void {
 		if (entry.closed) return;
 		if (entry.pending) entry.dirty = true;
-		else void this.refresh(key);
+		else void this.refresh(entry.directory, entry.projectId);
 	}
 
 	private async shellEnv(

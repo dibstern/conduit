@@ -1,17 +1,18 @@
-import { Effect, Option, Schema } from "effect";
-import { SqlClient } from "effect/sql";
+import { Effect, Option, Schema, type Scope } from "effect";
+import type { SqlClient } from "effect/sql";
 import {
 	CanonicalEvents,
 	SessionUsageLimitedPayloadSchema,
 } from "../../contracts/stored-event.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
-import { ProviderStateEffectTag } from "../../persistence/effect/provider-state-effect.js";
-import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
+import type { ProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
+import type { ReadQueryEffect } from "../../persistence/effect/read-query-effect.js";
 import { makeProcessSessionRunner } from "../runner/process-session-runner.js";
 import { makeRunnerCommandRecovery } from "../runner/runner-command-recovery.js";
 import { connectRunner } from "../runner/runner-connection.js";
 import {
 	makeRunnerProviderInstance,
+	type RunnerProviderInstance,
 	type RunnerProviderInstanceDeps,
 } from "../runner/runner-provider-instance.js";
 import { invalidateCodexAuth } from "./codex-discovery.js";
@@ -21,22 +22,27 @@ import { makeCodexRunnerDriver } from "./codex-runner-driver.js";
 const isUsageLimit = Schema.is(SessionUsageLimitedPayloadSchema);
 const isTurnError = Schema.is(CanonicalEvents["turn.error"].payload);
 
-export const makeCodexProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
+export const makeCodexProviderRuntime = (
+	deps: RunnerProviderInstanceDeps,
+	persistence: {
+		readonly read: ReadQueryEffect;
+		readonly state: Omit<ProviderStateEffect, "projectId">;
+		readonly sql: SqlClient.SqlClient;
+	},
+): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
-		const read = yield* ReadQueryEffectTag;
-		const state = yield* ProviderStateEffectTag;
-		const sql = yield* SqlClient.SqlClient;
+		const { read, state } = persistence;
 		const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 		return yield* makeRunnerProviderInstance(
 			deps,
-			makeCodexRunnerDriver(
-				deps.workspaceRoot,
-				{ read, state, sql },
-				deps.daemonConfigDir,
-			),
+			makeCodexRunnerDriver(persistence, deps.daemonConfigDir),
 			(emit) =>
 				makeProcessSessionRunner(
-					deps,
+					{
+						...deps,
+						projectRootForSession:
+							deps.projectRootForSession ?? (() => Effect.succeed(undefined)),
+					},
 					(output, sessionId) =>
 						Effect.gen(function* () {
 							if (
@@ -124,6 +130,9 @@ export const makeCodexProviderRuntime = (deps: RunnerProviderInstanceDeps) =>
 						recoverCommands: makeRunnerCommandRecovery({
 							driverKind: "codex",
 							accounts: deps.accounts,
+							...(deps.autoSettleAfterDays
+								? { autoSettleAfterDays: deps.autoSettleAfterDays }
+								: {}),
 							state,
 							providerStateKeys: ["codex.forkDigest"],
 						}),

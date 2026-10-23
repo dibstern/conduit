@@ -58,6 +58,7 @@ export const HandoffReceiptsLive = Layer.effectDiscard(
 								instanceId: handoff.instanceId ?? command.instance_id,
 							},
 							command.command_id,
+							store.projectId,
 							event.provider,
 						);
 					}

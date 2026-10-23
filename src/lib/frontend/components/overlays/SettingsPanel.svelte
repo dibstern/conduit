@@ -33,7 +33,7 @@
 		{ value: "terminal", label: "Terminal", testId: "settings-tab-terminal", icon: "terminal", iconTone: "neutral" },
 		{ value: "models", label: "Models & agents", testId: "settings-tab-models", icon: "sliders-horizontal", iconTone: "purple" },
 		{ value: "claude", label: "Claude", testId: "settings-tab-claude", icon: "claude", iconTone: "clay" },
-		{ value: "surfacing", label: "Surfacing", testId: "settings-tab-surfacing", icon: "sparkle", iconTone: "purple" },
+		{ value: "surfacing", label: "Jev", testId: "settings-tab-surfacing", icon: "sparkle", iconTone: "purple" },
 		{ value: "archived", label: "Archived", testId: "settings-tab-archived", icon: "archive", iconTone: "neutral" },
 		{ value: "usage", label: "Usage", testId: "settings-tab-usage", groupLabel: "This computer", icon: "gauge", iconTone: "amber" },
 		{ value: "server", label: "Server", testId: "settings-tab-server", icon: "server", iconTone: "green" },
@@ -100,11 +100,11 @@
 					size="content"
 					icon="chevron-left"
 					iconSize={16}
-					ariaLabel={surfacingPage ? "Back to Surfacing" : "Back to settings sections"}
+					ariaLabel={surfacingPage ? "Back to Jev" : "Back to settings sections"}
 					data-testid="settings-back-btn"
 					class="min-h-[44px] justify-self-start text-[15px]"
 					onclick={() => { if (surfacingPage) surfacingPage.back(); else void showSectionList(); }}
-				>{surfacingPage ? "Surfacing" : "Settings"}</Button>
+					>{surfacingPage ? "Jev" : "Settings"}</Button>
 			{:else if sessionViewState.compact}
 				<span></span>
 			{/if}

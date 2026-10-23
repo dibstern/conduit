@@ -5,12 +5,17 @@ export {
 	ClaudeEventPersistEffectError,
 	ClaudeEventPersistEffectTag,
 	makeClaudeEventPersistEffect,
+	makeUnboundClaudeEventPersistEffect,
+	UnboundClaudeEventPersistEffectTag,
 } from "./claude-event-persist-effect.js";
 export {
 	EventStoreEffect,
 	EventStoreEffectTag,
 	EventStoreError,
 	makeEventStoreEffect,
+	makeUnboundEventStoreEffect,
+	type UnboundEventStoreEffect,
+	UnboundEventStoreEffectTag,
 } from "./event-store-effect.js";
 export {
 	makeProjectionRunnerEffect,
@@ -40,10 +45,13 @@ export {
 } from "./projectors-effect.js";
 export {
 	makeProviderStateEffect,
+	makeUnboundProviderStateEffect,
 	type ProviderStateEffect,
 	ProviderStateEffectError,
 	ProviderStateEffectTag,
 	type ProviderStateEffectUpdate,
+	type UnboundProviderStateEffect,
+	UnboundProviderStateEffectTag,
 } from "./provider-state-effect.js";
 export {
 	makeReadQueryEffect,

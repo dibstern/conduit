@@ -4,6 +4,8 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import HoldMenuTile from "../ui/HoldMenuTile.svelte";
+	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
+	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import LabelledGridGroup from "../ui/LabelledGridGroup.svelte";
 	import Tile from "../ui/Tile.svelte";
 	import type { SessionInfo } from "../../types.js";
@@ -80,7 +82,18 @@
 	{#if index > 0 && item.section !== commands[index - 1]?.section}
 		<MenuSeparator />
 	{/if}
-	{#if item.checked !== undefined}
+	{#if item.options && item.section === "manage"}
+		{@const options = item.options.items}
+		<div data-testid={item.testId} class="flex items-center gap-[8px] px-[10px] pt-[6px] pb-[2px] text-xs text-text-muted">
+			<Icon name={item.icon} size={13} /><span>{item.label}</span>
+		</div>
+		<MenuRadioGroup value={options.find((option) => option.selected)?.id ?? ""} onvaluechange={(id) => { const option = options.find((choice) => choice.id === id); if (option) onselect(option.run); }}>
+			{#each options as option (option.id)}
+				<MenuRadioItem value={option.id} data-testid="{item.testId}-{option.id}" class="min-h-[44px] md:min-h-0"><span class="flex items-center gap-2"><span class="w-[17px] shrink-0" aria-hidden="true"></span>{option.label}</span></MenuRadioItem>
+			{/each}
+		</MenuRadioGroup>
+		{#if commands[index + 1]?.section === item.section}<MenuSeparator />{/if}
+	{:else if item.checked !== undefined}
 		<MenuCheckboxItem
 			data-testid={item.testId}
 			class="min-h-[44px] md:min-h-0"

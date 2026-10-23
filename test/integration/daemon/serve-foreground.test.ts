@@ -1458,15 +1458,16 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		const markCursor = harness.marks.length;
 		try {
 			await harness.restart({ skipBrowserProbe: true });
-			await vi.waitFor(() => {
-				const proof = harness?.proof() as { logTail: string };
-				for (const projectSlug of ["process-test", "never-started-project"])
-					expect(proof.logTail).toContain(
-						JSON.stringify(
-							`Failed to recover relay for project "${projectSlug}"`,
-						),
-					);
-			});
+			const projects = await sendRpcRequest(
+				join(harness.configDir, "relay.sock"),
+				{ _tag: "GetProjects" },
+			);
+			for (const slug of ["process-test", "never-started-project"])
+				expect(
+					projects.projects.find((project) => project.slug === slug),
+				).toMatchObject({
+					unavailableReason: "History import failed (corrupt)",
+				});
 			const replacement = harness.generations[1];
 			if (!replacement)
 				throw new Error("Replacement server generation missing");

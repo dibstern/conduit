@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Turn log: skills and the footer</title>
+<script>document.documentElement.dataset.designTheme=localStorage.getItem('tsp-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<style>/* tsp chrome. Styles the page around designs only; designs render in their own iframes.
+   The chrome is always light: the theme toggle switches the designs (data-design-theme), never the page. */
+:root{--bg:#f7f7f5;--surface:#fff;--text:#1c1c1a;--muted:#6b6b65;--line:#e3e3de;--soft:#efefea;--ring:#1c1c1a;color-scheme:light;
+--font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--font);overflow-x:clip}
+[hidden]{display:none!important}
+html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme=dark] [data-theme-only=light]{display:none!important}
+
+.tsp-bar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;
+  padding:10px max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left));
+  background:color-mix(in srgb,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.tsp-titles{flex:1;min-width:0}
+.tsp-home{display:inline-block;font:600 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:4px 0}
+.tsp-bar h1{margin:0;font-size:clamp(17px,2.2vw,21px);line-height:1.25;font-weight:650;text-wrap:balance}
+.tsp-bar p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.tsp-actions{display:flex;gap:8px;flex-shrink:0}
+.tsp-btn{min-height:44px;min-width:44px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);
+  color:var(--text);font:500 13px/1 var(--font);cursor:pointer;display:inline-grid;place-items:center}
+.tsp-btn:hover{background:var(--soft)}
+.tsp-btn:focus-visible,.tsp-section>summary:focus-visible,.tsp-open:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.tsp-theme{padding:0}
+.tsp-theme svg{width:18px;height:18px}
+[data-design-theme=light] .tsp-sun,[data-design-theme=dark] .tsp-moon{display:none}
+
+.tsp-main{max-width:1440px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
+.tsp-main>*+*,.tsp-section-body>*+*{margin-top:16px}
+
+.tsp-section{border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.tsp-section>summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:52px;padding:8px 16px;cursor:pointer;border-radius:14px}
+.tsp-section>summary::-webkit-details-marker{display:none}
+.tsp-section>summary h2{margin:0;flex:1;font-size:17px;line-height:1.3;font-weight:650}
+.tsp-chev{width:16px;height:16px;flex-shrink:0;color:var(--muted);transition:transform .15s}
+.tsp-section[open]>summary .tsp-chev{transform:rotate(90deg)}
+.tsp-count{font:12px var(--mono);color:var(--muted)}
+.tsp-section-body{padding:0 16px 16px}
+@media (max-width:520px){.tsp-section-body{padding:0 10px 10px}.tsp-section>summary{padding:8px 12px}}
+
+.tsp-grid{display:grid;align-items:start;gap:16px;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--tsp-min,340px)),1fr))}
+.tsp-card{display:flex;flex-direction:column;gap:6px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.tsp-wide{grid-column:1/-1}
+.tsp-card-head{display:flex;align-items:baseline;gap:8px}
+.tsp-n{font:600 12px/1 var(--mono);color:var(--muted)}
+.tsp-card h3{margin:0;flex:1;font-size:15px;line-height:1.35;font-weight:600}
+.tsp-open{display:inline-grid;place-items:center;min-width:44px;min-height:44px;margin:-14px -10px -14px 0;border-radius:8px;color:var(--muted);text-decoration:none}
+.tsp-open:hover{color:var(--text)}
+.tsp-why{margin:0;color:var(--muted);font-size:13px}
+.tsp-stage{overflow:hidden;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.tsp-frame{display:block;width:100%;height:240px;border:0;transform-origin:0 0}
+
+:where(.tsp-main) :is(h2,h3,h4){line-height:1.3;text-wrap:balance}
+:where(.tsp-main) :is(p,li){max-width:78ch}
+:where(.tsp-main) a{color:inherit;text-underline-offset:2px}
+:where(.tsp-main) code{font:.9em var(--mono);background:var(--soft);padding:.1em .35em;border-radius:5px}
+:where(.tsp-main) pre{overflow-x:auto;padding:12px 14px;background:var(--soft);border-radius:10px;font:13px/1.5 var(--mono)}
+:where(.tsp-main) pre code{background:none;padding:0}
+:where(.tsp-main) table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:14px}
+:where(.tsp-main) :is(th,td){padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+:where(.tsp-main) :is(img,video){max-width:100%;height:auto}
+:where(.tsp-main) blockquote{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:var(--muted)}
+
+.tsp-index{list-style:none;padding:0;display:grid;gap:10px}
+.tsp-index li{max-width:none;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--muted);font-size:13px}
+.tsp-index strong{color:var(--text);font-size:15px}
+.tsp-foot{padding:0 16px 32px;text-align:center;font:12px var(--mono);color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.tsp-chev{transition:none}}
+</style></head>
+<body>
+<header class="tsp-bar"><div class="tsp-titles"><a class="tsp-home" href="/tsp/" hidden>tsp</a><h1>Turn log: skills and the footer</h1><p>Why the skill counter looks like a step, and three fixes</p></div>
+<div class="tsp-actions"><button class="tsp-btn" type="button" data-tsp="toggle-all" hidden>Collapse all</button>
+<button class="tsp-btn tsp-theme" type="button" aria-label="Switch the designs between light and dark">
+<svg class="tsp-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+<svg class="tsp-sun" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></svg>
+</button></div></header>
+<main class="tsp-main">
+
+
+<p><strong>Short answer:</strong> they're two separate features that were each built without the other in mind, and the counter was placed so it copies the layout of a step row.</p>
+
+<ul>
+<li><strong>"Loaded"</strong> is the generic tool row. The <code>Skill</code> tool's past-tense verb is <code>"Loaded"</code> in <code>VERBS</code> (<code>utils/turns.ts:194</code>), so every skill call becomes a row like any Read or Edit.</li>
+<li><strong>The counter</strong> (<code>✦ 2 skills</code>) is a separate toggle that opens a "chapters" list: which skill was in charge, when it started, how long it ran. <code>countsPhrase</code> leaves skills out of the header sentence on purpose ("each has its own control"), and that control went into the log footer (<code>TurnActivity.svelte:641</code>).</li>
+<li><strong>Why it looks like a step:</strong> the footer sits directly under the last row with no rule or gap. It starts at the same left edge, leads with the same <code>sparkles</code> icon the skill row uses, and has the same muted ghost-button look. Opening it adds a second list of skill rows under the first. So one fact gets shown three times, in three styles that all look alike.</li>
+</ul>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Today: what the log looks like now</h2><span class="tsp-count">1</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:520px">
+<article class="tsp-card tsp-wide" id="d-0"><header class="tsp-card-head"><span class="tsp-n">0</span><h3>Current</h3><a class="tsp-open" href="_frame-0.html" target="_blank" aria-label="Open Current alone">↗</a></header><p class="tsp-why">Collapsed, live, expanded, and skills opened. The dashed outlines are where it reads wrong.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-0.html" title="Current" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Three directions</h2><span class="tsp-count">3</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:440px">
+
+<article class="tsp-card" id="d-a"><header class="tsp-card-head"><span class="tsp-n">A</span><h3>Ruled footer</h3><a class="tsp-open" href="_frame-a.html" target="_blank" aria-label="Open Ruled footer alone">↗</a></header><p class="tsp-why">Smallest change. A rule and a pill make the footer read as a summary, not a step. The repetition stays.</p><div class="tsp-stage" data-width="760"><iframe class="tsp-frame" src="_frame-a.html" title="Ruled footer" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-b"><header class="tsp-card-head"><span class="tsp-n">B</span><h3>Skill chapters</h3><a class="tsp-open" href="_frame-b.html" target="_blank" aria-label="Open Skill chapters alone">↗</a></header><p class="tsp-why">A skill row becomes a chapter heading over the steps it ran. The counter goes, because the log is the breakdown.</p><div class="tsp-stage" data-width="760"><iframe class="tsp-frame" src="_frame-b.html" title="Skill chapters" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c"><header class="tsp-card-head"><span class="tsp-n">C</span><h3>Head ledger</h3><a class="tsp-open" href="_frame-c.html" target="_blank" aria-label="Open Head ledger alone">↗</a></header><p class="tsp-why">Skills, failures and the bill move into the head card under the strip, so they show even when the log is closed. The log holds only steps.</p><div class="tsp-stage" data-width="760"><iframe class="tsp-frame" src="_frame-c.html" title="Head ledger" loading="lazy"></iframe></div></article>
+
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>B on a phone</h2><span class="tsp-count">1</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:300px">
+<article class="tsp-card" id="d-bx"><header class="tsp-card-head"><span class="tsp-n">B</span><h3>Skill chapters, 390px</h3><a class="tsp-open" href="_frame-bx.html" target="_blank" aria-label="Open Skill chapters, 390px alone">↗</a></header><p class="tsp-why">The rail costs 18px of width. Subjects still truncate cleanly; the bill wraps under the rule.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-bx.html" title="Skill chapters, 390px" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Recommendation</h2></summary><div class="tsp-section-body">
+<p><strong>B, skill chapters.</strong> It fixes the cause, not the look: one concept (a skill governed these steps) gets one rendering, in the place you're already reading. The "Loaded" verb, the counter, and the chapters list all go away. Turns without skills only change by gaining the ruled totals line.</p>
+<table>
+<tr><th></th><th>Fixes repetition</th><th>Visible collapsed</th><th>Cost</th></tr>
+<tr><td>A Ruled footer</td><td>No</td><td>No</td><td>Tiny: CSS + pill</td></tr>
+<tr><td>B Chapters</td><td>Yes</td><td>Count in sentence</td><td>Medium: group rows by <code>skillChapters</code>, which already exists</td></tr>
+<tr><td>C Head ledger</td><td>Partly (rows still say Skill)</td><td>Yes, by name</td><td>Medium, and the head grows a line on every turn</td></tr>
+</table>
+<p><strong>Watch out for:</strong> the live ticker shows the last 3 steps, and in B those can span two chapters. Show the newest chapter's heading and let older rows sit above it without one. Also, the hover link from chapter to strip replaces the toggle's <code>emphasis</code> set, so the existing <code>SkillsOpen</code> stories need rewriting.</p>
+</div></details>
+
+</main>
+<footer class="tsp-foot">turn-log-redesign · 2026-10-23T11:38</footer>
+<script>(() => {
+  const root = document.documentElement, KEY = 'tsp-theme';
+  const frames = [...document.querySelectorAll('iframe.tsp-frame')];
+
+  // Theme: one choice shared by every tsp page, applied to the designs only; the chrome stays light.
+  // Each frame gets data-theme, plus color-scheme inline with !important so it beats a design's own
+  // `color-scheme: light dark`, which would otherwise make light-dark() follow the OS.
+  const theme = (d, t) => {
+    d.documentElement.dataset.theme = t;
+    d.documentElement.style.setProperty('color-scheme', t, 'important');
+  };
+  const paint = t => {
+    root.dataset.designTheme = t;
+    for (const f of frames) try { theme(f.contentDocument, t) } catch {}
+  };
+  const toggle = document.querySelector('.tsp-theme');
+  if (toggle && !frames.length && !document.querySelector('[data-theme-only]')) toggle.hidden = true;
+  toggle?.addEventListener('click', () => {
+    const t = root.dataset.designTheme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(KEY, t);
+    paint(t);
+  });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+    if (!localStorage.getItem(KEY)) paint(e.matches ? 'dark' : 'light');
+  });
+
+  // Collapse / expand all sections.
+  const sections = [...document.querySelectorAll('details.tsp-section')];
+  const all = document.querySelector('[data-tsp=toggle-all]');
+  if (all && sections.length > 1) {
+    const label = () => { all.textContent = sections.some(s => s.open) ? 'Collapse all' : 'Expand all' };
+    all.hidden = false;
+    all.addEventListener('click', () => {
+      const open = !sections.some(s => s.open);
+      sections.forEach(s => { s.open = open });
+      label();
+    });
+    sections.forEach(s => s.addEventListener('toggle', label));
+    label();
+  }
+
+  // The home link only resolves when served under /tsp/ (not in committed copies).
+  const home = document.querySelector('.tsp-home');
+  if (home && location.pathname.startsWith('/tsp/') && location.pathname.split('/').filter(Boolean).length > 1) home.hidden = false;
+
+  // Frames: height follows content (or data-height); data-width designs scale down to fit.
+  const fit = f => {
+    const stage = f.parentElement, avail = stage.clientWidth;
+    if (!avail) return;
+    const w = +stage.dataset.width || 0;
+    let h = +stage.dataset.height || 0;
+    if (!h) {
+      try {
+        const b = f.contentDocument.body;
+        h = Math.min(Math.ceil(Math.max(b.scrollHeight, b.getBoundingClientRect().height)), 6000) || 240;
+      } catch { h = 480 }
+    }
+    const s = w && avail < w ? avail / w : 1;
+    f.style.width = w ? `${w}px` : '100%';
+    f.style.marginInline = w && s === 1 ? 'auto' : '0';
+    f.style.height = `${h}px`;
+    f.style.transform = s < 1 ? `scale(${s})` : '';
+    stage.style.height = `${Math.ceil(h * s) + 2}px`;
+  };
+  const stages = new ResizeObserver(es => es.forEach(e => fit(e.target.querySelector('iframe.tsp-frame'))));
+  for (const f of frames) {
+    stages.observe(f.parentElement);
+    const ready = () => {
+      try {
+        const d = f.contentDocument;
+        theme(d, root.dataset.designTheme);
+        new f.contentWindow.ResizeObserver(() => fit(f)).observe(d.body);
+      } catch {}
+      fit(f);
+    };
+    f.addEventListener('load', ready);
+    try { if (f.contentDocument?.readyState === 'complete' && f.contentDocument.URL !== 'about:blank') ready() } catch {}
+  }
+})();
+</script>
+</body></html>

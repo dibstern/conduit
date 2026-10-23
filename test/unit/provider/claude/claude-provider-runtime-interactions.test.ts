@@ -26,8 +26,11 @@ import {
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
 	makeOverridesStateLive,
+	makeProcessingTimeoutHooks,
+	type OverridesStateTag,
 	startProcessingTimeout,
 } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { ClaudeEventPersistEffectTag } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -223,7 +226,7 @@ describe("Claude runner interaction transport", () => {
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
-						workspaceRoot: "/tmp/ws",
+
 						queryFactory: factory,
 						capabilitiesService,
 					});
@@ -274,7 +277,7 @@ describe("Claude runner interaction transport", () => {
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
-						workspaceRoot: "/tmp/ws",
+
 						queryFactory: factory,
 						capabilitiesService,
 					});
@@ -292,7 +295,8 @@ describe("Claude runner interaction transport", () => {
 						: runtime.shutdownEffect();
 					expect(query.interrupt).toHaveBeenCalledOnce();
 					if (operation === "interrupt") {
-						expect((yield* Fiber.join(turn)).status).toBe("interrupted");
+						expect((yield* Fiber.join(turn)).status).toBe("completed");
+						expect(query.close).not.toHaveBeenCalled();
 					} else {
 						const exit = yield* Fiber.await(turn);
 						expect(Exit.isFailure(exit)).toBe(true);
@@ -340,7 +344,7 @@ describe("Claude runner interaction transport", () => {
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
-						workspaceRoot: "/tmp/ws",
+
 						queryFactory: factory,
 						capabilitiesService,
 					});
@@ -412,7 +416,7 @@ describe("Claude durable interaction resolution", () => {
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
-						workspaceRoot: "/tmp/ws",
+
 						queryFactory: factory,
 						capabilitiesService,
 					});
@@ -486,7 +490,7 @@ describe("Claude durable interaction resolution", () => {
 					const started = yield* Deferred.make<string>();
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: detachedRunnerFactory(started),
-						workspaceRoot: "/tmp/ws",
+
 						capabilitiesService,
 					}).pipe(Scope.provide(relayScope));
 					if (shutdownPath === "engine") {
@@ -809,10 +813,25 @@ describe("Claude recovered runner processing timeout", () => {
 									recoverEffect: Effect.void,
 								})),
 							),
-						workspaceRoot: "/tmp/ws",
+
 						capabilitiesService,
 					});
-					yield* runtime.recoverRunnerEffect;
+					const timeoutContext = yield* Effect.context<OverridesStateTag>();
+					const persist = yield* ClaudeEventPersistEffectTag;
+					yield* runtime.recoverProjectContextsEffect(() =>
+						Effect.succeed({
+							projectId: "test-project",
+							ingestion: f.ingestion,
+							pending: f.pending,
+							timeoutHooks: makeProcessingTimeoutHooks(
+								timeoutContext,
+								"session-1",
+							),
+							persist,
+							resolveCallContext: () => Effect.succeed(undefined),
+							retirePrompts: () => Effect.succeed(0),
+						}),
+					);
 					// Answering a question re-arms the turn's timeout.
 					let timedOut = false;
 					yield* startProcessingTimeout("session-1", "2 minutes", () =>

@@ -16,8 +16,12 @@ const rpcClient = Effect.gen(function* () {
 });
 
 describe("WsRpcServerLayer CancelSession", () => {
-	it.effect("aborts an OpenCode session", () => {
+	it.effect("routes OpenCode sessions through the orchestration engine", () => {
 		const abort = vi.fn(async () => undefined);
+		const engine = withDispatchEffect({
+			getProviderForSessionEffect: vi.fn(() => Effect.succeed("opencode")),
+			dispatchEffect: vi.fn(() => Effect.void),
+		});
 		const api = makeMockOpenCodeAPI();
 		api.session.abort = abort as typeof api.session.abort;
 
@@ -30,7 +34,20 @@ describe("WsRpcServerLayer CancelSession", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(abort).toHaveBeenCalledWith("session-1");
+			expect(abort).not.toHaveBeenCalled();
+			expect(engine.dispatchEffect).toHaveBeenCalledExactlyOnceWith({
+				type: "interrupt_turn",
+				commandId: "cmd-stop-opencode",
+				sessionId: "session-1",
+				turnIds: [],
+				stop: {
+					deadlineAt: 30_000,
+					owners: [],
+					turnIds: [],
+					runnerBacked: false,
+					retainedSteers: false,
+				},
+			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -38,6 +55,7 @@ describe("WsRpcServerLayer CancelSession", () => {
 					Layer.provideMerge(
 						makeTestHandlerLayer({
 							api,
+							orchestrationEngine: engine,
 							seedEvents: [
 								canonicalEvent("session.created", "session-1", {
 									sessionId: "session-1",
@@ -83,6 +101,14 @@ describe("WsRpcServerLayer CancelSession", () => {
 				type: "interrupt_turn",
 				commandId: "cmd-stop-1",
 				sessionId: "session-claude",
+				turnIds: [],
+				stop: {
+					deadlineAt: 30_000,
+					owners: [],
+					turnIds: [],
+					runnerBacked: true,
+					retainedSteers: false,
+				},
 			});
 		}).pipe(
 			Effect.scoped,

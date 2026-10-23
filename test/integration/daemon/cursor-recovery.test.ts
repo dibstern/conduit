@@ -774,7 +774,11 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 			await vi.waitFor(
 				() => {
 					expect(journal(fixture, other)).toMatchObject([
-						{ providerRunId: expect.any(String) },
+						{
+							providerRunId: expect.any(String),
+							completedAt: expect.any(Number),
+							result: { status: "accepted" },
+						},
 					]);
 					expect(
 						persisted(fixture, other).commands.map(({ status }) => status),
@@ -783,10 +787,6 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 				{ timeout: TIMEOUT },
 			);
 			const unfinished = journal(fixture, other);
-			expect(unfinished[0]).toMatchObject({
-				completedAt: expect.any(Number),
-				result: { status: "accepted" },
-			});
 			await browser.deleteSession(id);
 			await vi.waitFor(
 				() => {

@@ -235,6 +235,8 @@ const scenario = (store: Store) => {
 	// No event can name a missing parent while foreign keys are on, and the
 	// fork-lineage import skips one. This writes one anyway, with them off, so
 	// a store that holds an orphan is proven not to loop or show it.
+	// Detach the old fork link too: deleting it would SET NULL on this row,
+	// rechecking the deliberately invalid parent foreign key.
 	const orphan = (id: string, parent: string) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -245,7 +247,7 @@ const scenario = (store: Store) => {
 					(_project, stamp) =>
 						stamp((version) =>
 							Effect.gen(function* () {
-								yield* sql`UPDATE sessions SET parent_id = ${parent}, version = ${version} WHERE id = ${id}`;
+								yield* sql`UPDATE sessions SET parent_id = ${parent}, forked_from = NULL, version = ${version} WHERE id = ${id}`;
 								yield* refreshSidebar(yield* rerootSession(id), version);
 								return [id];
 							}),
@@ -889,6 +891,28 @@ describe("sidebar table against the full computation", () => {
 			root("a"),
 		]);
 		await run([root("b"), { kind: "orphan", id: "b", parent: "a" }, root("b")]);
+	});
+
+	it("can delete the former parent of a synthetic orphaned side thread", async () => {
+		// Seed 1012664611: the orphan fixture must detach both lineage links.
+		await run(
+			[
+				root("b"),
+				child("a", "b", { side: true }),
+				{ kind: "orphan", id: "a", parent: "c" },
+				{ kind: "delete", id: "b" },
+				{ kind: "ask", id: "a", question: false },
+				{ kind: "chunk", id: "a" },
+				root("a"),
+				{ kind: "unread", id: "a" },
+				root("a"),
+				{ kind: "status", id: "a", status: "idle" },
+				{ kind: "orphan", id: "a", parent: "a" },
+				{ kind: "answer", pick: 0 },
+				root("a"),
+			],
+			{ backfill: true, rebuild: true },
+		);
 	});
 
 	it("shows no orphan or parent cycle, as the full list does not, and backfills them alike", async () => {

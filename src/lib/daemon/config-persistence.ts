@@ -50,6 +50,7 @@ import {
 	type ClaudeConfigDir,
 	type ClaudeLaunchConfig,
 	captureClaudeLaunchLogin,
+	resolveClaudeAccountFolder,
 } from "../provider/claude/claude-sdk-env.js";
 import { RepositoryIdentitySchema } from "../shared-types.js";
 import type { RecentProject } from "../types.js";
@@ -418,7 +419,7 @@ export function resolveClaudeLaunchConfig(
 				account.success.configuredFolder === undefined
 					? "implicitDefault"
 					: "account",
-			configDir: account.success.folder,
+			configDir: resolveClaudeAccountFolder(account.success.folder),
 		};
 	throw new AccountUnroutable({ ref: { _tag: "Id", id: account.success.id } });
 }

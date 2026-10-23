@@ -1,4 +1,15 @@
-import { constants } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+	chmodSync,
+	constants,
+	existsSync,
+	linkSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { CursorSdkFailure, cursorSdkFailure } from "./sdk-error.js";
@@ -11,10 +22,66 @@ import type {
 	CursorStore,
 } from "./sdk-port.js";
 
-export function createRealCursorSdkPort(): CursorSdkPort {
+/** Runs once at startup, before any account can log in or out. */
+export async function adoptLegacyCursorCredential(
+	storePath: string,
+	markerPath: string,
+	legacyStorePath?: string,
+): Promise<string> {
+	const completed = `${markerPath}.complete`;
+	if (existsSync(completed)) return readFileSync(markerPath, "utf8");
+	mkdirSync(dirname(markerPath), { recursive: true, mode: 0o700 });
+	// Claim the original target before any work that can fail or be interrupted.
+	// Publish the claim atomically so another startup can only read a full path.
+	const claim = `${markerPath}.${randomUUID()}.tmp`;
+	try {
+		writeFileSync(claim, storePath, { mode: 0o600, flag: "wx" });
+		try {
+			linkSync(claim, markerPath);
+		} catch (cause) {
+			if (
+				!(cause instanceof Error && "code" in cause && cause.code === "EEXIST")
+			)
+				throw cause;
+		}
+	} finally {
+		rmSync(claim, { force: true });
+	}
+	const selectedStorePath = readFileSync(markerPath, "utf8");
+	const { FileCredentialStore } = await import("@cursor/sdk");
+	const legacy = new FileCredentialStore(legacyStorePath);
+	const scoped = new FileCredentialStore(selectedStorePath);
+	if (!(await scoped.load()) && (await legacy.load())) {
+		mkdirSync(dirname(selectedStorePath), { recursive: true, mode: 0o700 });
+		chmodSync(dirname(selectedStorePath), 0o700);
+		const temporary = `${selectedStorePath}.${randomUUID()}.tmp`;
+		try {
+			writeFileSync(temporary, readFileSync(legacy.path), {
+				mode: 0o600,
+				flag: "wx",
+			});
+			renameSync(temporary, selectedStorePath);
+		} finally {
+			rmSync(temporary, { force: true });
+		}
+	}
+	// Record even an empty/existing store, so logout, removal or a later
+	// default change can never cause another account to inherit the old login.
+	writeFileSync(completed, "", { mode: 0o600 });
+	return selectedStorePath;
+}
+
+export function createRealCursorSdkPort(
+	credentialStorePath?: string,
+): CursorSdkPort {
 	let sdk: Promise<typeof import("@cursor/sdk")> | undefined;
 	let pendingLogin: Promise<void> | undefined;
 	const load = () => (sdk ??= import("@cursor/sdk"));
+	let credentials: import("@cursor/sdk").FileCredentialStore | undefined;
+	const credentialStore = async () =>
+		(credentials ??= new (await load()).FileCredentialStore(
+			credentialStorePath,
+		));
 	const call = async <A>(
 		operation: string,
 		run: () => Promise<A>,
@@ -219,7 +286,7 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 				});
 			const operation = (async () => {
 				const sdk = await load();
-				const store = new sdk.FileCredentialStore();
+				const store = await credentialStore();
 				// SDK 1.0.37 aborts polling, but does not check the signal while
 				// minting/saving. Keep cancelled flows from replacing the SDK login.
 				await sdk.Cursor.auth.login({
@@ -252,7 +319,9 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 		},
 		async authStatus() {
 			try {
-				return await (await load()).Cursor.auth.status();
+				return await (await load()).Cursor.auth.status({
+					store: await credentialStore(),
+				});
 			} catch (cause) {
 				throw cursorSdkFailure("auth.status", cause);
 			}
@@ -261,15 +330,16 @@ export function createRealCursorSdkPort(): CursorSdkPort {
 			try {
 				// A cancelled mint/save must settle before logout clears the store.
 				await pendingLogin?.catch(() => {});
-				await (await load()).Cursor.auth.logout();
+				await (await load()).Cursor.auth.logout({
+					store: await credentialStore(),
+				});
 			} catch (cause) {
 				throw cursorSdkFailure("auth.logout", cause);
 			}
 		},
 		async storedCredential() {
 			try {
-				const { FileCredentialStore } = await load();
-				return await new FileCredentialStore().load();
+				return await (await credentialStore()).load();
 			} catch (cause) {
 				throw cursorSdkFailure("credential.store", cause);
 			}

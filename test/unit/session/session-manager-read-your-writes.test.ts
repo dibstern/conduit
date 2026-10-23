@@ -65,6 +65,8 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	// Archive's read-model parity is covered by the real-relay session-archive E2E.
 	| "setSessionArchived"
 	| "restoreSessionForSend"
+	// Jev's RPC and DTO behavior is covered by session-jev-override E2E.
+	| "setSessionJev"
 	// Retention parity and event reclamation are covered by auto-delete-archived-sweep.
 	| "deleteArchivedSessions"
 >;

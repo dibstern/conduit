@@ -6,12 +6,13 @@
 	import Icon from "../ui/Icon.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
-	import { cursorAuth, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
+	import { cursorAuthFor, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
 
-	let { message, driver }: { message: SystemMessage; driver?: string | undefined } = $props();
+	let { message, driver, accountId }: { message: SystemMessage; driver?: string | undefined; accountId?: string | undefined } = $props();
+	const cursorAuth = $derived(cursorAuthFor(accountId));
 	const auth = $derived(getProviderPresentation(driver)?.auth);
 	$effect(() => {
-		if (auth && message.errorCode === auth.errorCode) void refreshCursorAuth();
+		if (auth && message.errorCode === auth.errorCode) void refreshCursorAuth(accountId);
 	});
 
 	const isError = $derived(message.variant === "error" || message.setup?.status === "failed" || message.setup?.status === "timed_out");
@@ -89,7 +90,7 @@
 						{message.text}
 					</span>
 					{#if auth && message.errorCode === auth.errorCode}
-						<Button variant="ghost-accent" size="sm" class="ml-2" data-testid="provider-auth-login" onclick={openCursorLogin}>{cursorAuth.current && cursorAuth.current.source !== "environment" ? auth.login : auth.manage}</Button>
+						<Button variant="ghost-accent" size="sm" class="ml-2" data-testid="provider-auth-login" onclick={() => openCursorLogin(accountId)}>{cursorAuth.current && cursorAuth.current.source !== "environment" ? auth.login : auth.manage}</Button>
 					{/if}
 					{#if hasDetails}
 						<Button

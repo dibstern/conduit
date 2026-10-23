@@ -1,3 +1,4 @@
+import { createTestRelayStack as createRelayStack } from "../../helpers/project-relay.js";
 // Starts the relay stack pointed at a MockOpenCodeServer backed by recordings.
 // Integration tests use this to exercise the exact same wiring as production,
 // without requiring a live OpenCode instance.
@@ -15,10 +16,7 @@ import {
 	type ReplayParityReport,
 	verifyReplayParity,
 } from "../../../src/lib/persistence/replay-parity.js";
-import {
-	createRelayStack,
-	type RelayStack,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { RelayStack } from "../../../src/lib/relay/relay-stack.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import type { OpenCodeRecording } from "../../e2e/fixtures/recorded/types.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";

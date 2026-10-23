@@ -24,19 +24,18 @@ const decodeParameters = Schema.decodeUnknownResult(
 );
 
 export const makeCodexRunnerDriver = (
-	workspaceRoot: string,
 	persistence?: {
 		readonly read: ReadQueryEffect;
-		readonly state: ProviderStateEffect;
+		readonly state: Pick<ProviderStateEffect, "getState" | "saveUpdates">;
 		readonly sql?: SqlClient.SqlClient;
 	},
 	configDir = DEFAULT_CONFIG_DIR,
 ): RunnerDriverPieces => ({
 	driverKind: "codex",
-	discoverEffect: (directory, account, options) =>
+	discoverEffect: (directory, account, options, call) =>
 		discoverCodexEffect(
-			account,
-			directory ?? workspaceRoot,
+			call?.account ?? account,
+			call?.workspaceRoot ?? directory,
 			configDir,
 			options,
 		),
@@ -80,7 +79,7 @@ export const makeCodexRunnerDriver = (
 			const catalog = yield* discoverCodex(
 				home,
 				env,
-				input.workspaceRoot ?? workspaceRoot,
+				input.workspaceRoot,
 				true,
 			);
 			// The runner owns the auth error and its durable turn terminal.

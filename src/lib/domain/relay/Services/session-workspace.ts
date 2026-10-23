@@ -37,6 +37,8 @@ export interface SessionWorkspace {
 	readonly preview: (
 		account: Account,
 		path: string,
+		/** Required for daemon-owned previews before a session exists. */
+		projectId?: string,
 	) => Effect.Effect<
 		RecordedWorkspace,
 		WorkspaceMoveError | SessionCommandError
@@ -45,7 +47,7 @@ export interface SessionWorkspace {
 		sessionId: string,
 		branchName: string,
 	) => Effect.Effect<void, WorktreeBranchRenameError | SessionCommandError>;
-	/** Serialize one session's launch-folder reads and workspace initialization. Not reentrant. */
+	/** Serialize one session's launch-folder reads and workspace initialization in the caller's project. Not reentrant. */
 	readonly withLaunch: <A, E, R>(
 		sessionId: string,
 		effect: Effect.Effect<A, E, R>,
@@ -54,10 +56,14 @@ export interface SessionWorkspace {
 	readonly withProjectLaunch: <A, E, R>(
 		effect: Effect.Effect<A, E, R>,
 	) => Effect.Effect<A, E, R>;
+	/** Daemon registration removal retires its cached launch permit. */
+	readonly forgetProject?: (projectId: string) => void;
 	readonly get: (
 		sessionId: string,
 		/** Native directory before the session declares a stored workspace. */
 		nativeDirectory?: string,
+		/** Legacy hint; the service resolves the session's owning project. */
+		mainFolder?: string,
 	) => Effect.Effect<string, SessionCommandError>;
 	readonly move: (
 		sessionId: string,
@@ -84,7 +90,7 @@ export interface SessionWorkspace {
 		ResolvedWorkspaceTarget,
 		WorkspaceMoveError | SessionCommandError
 	>;
-	/** Re-read and record through the command seam, optionally joining a caller's commit. */
+	/** Re-read and record through the commit seam, optionally joining a caller's commit. */
 	readonly record: (
 		sessionId: string,
 		target: ResolvedWorkspaceTarget,

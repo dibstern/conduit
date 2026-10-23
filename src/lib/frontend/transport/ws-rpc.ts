@@ -110,6 +110,7 @@ export {
 	SetLogLevel,
 	SetPinRejected,
 	SetSessionArchived,
+	SetSessionJev,
 	SetSessionPinned,
 	SetSessionSettled,
 	SetTerminalKeys,

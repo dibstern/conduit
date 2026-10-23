@@ -36,7 +36,15 @@ export const stopBackgroundTaskById = (sessionId: string, taskId: string) =>
 					),
 				}),
 			);
-		yield* provider.stopTaskEffect(sessionId, taskId).pipe(
+		const call = yield* engine.resolveSessionCallContextEffect(
+			sessionId,
+			account,
+		);
+		yield* (
+			call
+				? provider.stopTaskEffect(sessionId, taskId, call)
+				: provider.stopTaskEffect(sessionId, taskId)
+		).pipe(
 			// Another client or the task itself may finish it while the SDK answers.
 			Effect.catch((error) => (isLive() ? Effect.fail(error) : Effect.void)),
 		);
