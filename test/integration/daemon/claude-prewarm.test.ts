@@ -1452,7 +1452,9 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		]);
 	});
 
-	it("settles a first send interrupted while initialization is pending and allows the next send", async () => {
+	it("settles a first send interrupted while initialization is pending and allows the next send", async ({
+		signal,
+	}) => {
 		const { harness, browser } = await start({
 			restartProof: true,
 			holdRunnerAck: "place-user-message",
@@ -1463,12 +1465,9 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			() => "ready" as const,
 			() => "cancelled" as const,
 		);
-		await vi.waitFor(
-			() =>
-				expect(
-					harness.marks.filter((mark) => mark.kind === "query"),
-				).toHaveLength(1),
-			{ timeout: 5000 },
+		await harness.waitForMark((mark) => mark.kind === "query", 0, signal);
+		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
+			1,
 		);
 		const pending = browser
 			.send(sessionId, "cancel-before-initialization")
@@ -1476,12 +1475,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				(response) => ({ response }),
 				(error: unknown) => ({ error }),
 			);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.some(
-					(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
-				),
-			).toBe(true),
+		await harness.waitForMark(
+			(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
+			0,
+			signal,
 		);
 		await vi.waitFor(async () =>
 			expect(
@@ -1535,24 +1532,29 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		);
 	});
 
-	it.each([
+	it.for([
 		0, 1,
-	])("preserves a send racing slow initialization with %s initialization failures", async (queryInitializationFailures) => {
+	])("preserves a send racing slow initialization with %s initialization failures", async (queryInitializationFailures, {
+		signal,
+	}) => {
 		const { harness, browser } = await start({
-			queryInitializationDelayMs: 500,
+			restartProof: true,
 			queryInitializationFailures,
 		});
 		const sessionId = await browser.createSession("Send racing initialization");
+		writeFileSync(join(harness.root, "hold-next-initialization"), "hold once");
 		const warm = browser.preWarmSession(sessionId).then(
 			() => "ready" as const,
 			() => "failed" as const,
 		);
-		await vi.waitFor(
-			() =>
-				expect(
-					harness.marks.filter((mark) => mark.kind === "query"),
-				).toHaveLength(1),
-			{ timeout: 5000 },
+		await harness.waitForMark((mark) => mark.kind === "query", 0, signal);
+		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
+			1,
+		);
+		await harness.waitForMark(
+			(mark) => mark.kind === "initialization-held",
+			0,
+			signal,
 		);
 		expect(
 			harness.marks.filter((mark) => mark.kind === "enqueue"),
@@ -1560,7 +1562,16 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		expect(
 			harness.marks.filter((mark) => mark.kind === "initialization-ready"),
 		).toHaveLength(0);
-		const result = await browser.send(sessionId, "racing-first-send");
+		const send = browser.send(sessionId, "racing-first-send");
+		void send.catch(() => undefined);
+		await harness.waitForMark(
+			(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
+			0,
+			signal,
+		);
+		// Release only after the send reaches the runner, regardless of startup time.
+		writeFileSync(join(harness.root, "release-held-initialization"), "release");
+		const result = await send;
 		expect(result.chunks.join("")).toBe(
 			responseChunks("racing-first-send").join(""),
 		);

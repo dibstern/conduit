@@ -1633,18 +1633,20 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 	async waitForMark(
 		predicate: (mark: ProcessMark) => boolean,
 		cursor = 0,
+		signal?: AbortSignal,
 	): Promise<ProcessMark> {
 		const controller = new AbortController();
-		const timer = setTimeout(
-			() => controller.abort(),
-			remainingTimeout(this.deadline),
-		);
+		const timer = signal
+			? undefined
+			: setTimeout(() => controller.abort(), remainingTimeout(this.deadline));
 		try {
 			for (;;) {
 				const mark = this.marks.slice(cursor).find(predicate);
 				if (mark) return mark;
 				if (!this.child) throw new Error("No server to receive fixture marks");
-				await once(this.child, "message", { signal: controller.signal });
+				await once(this.child, "message", {
+					signal: signal ?? controller.signal,
+				});
 			}
 		} finally {
 			clearTimeout(timer);
