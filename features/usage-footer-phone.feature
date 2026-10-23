@@ -70,7 +70,7 @@ Scenario Outline: tapping the dock opens every account's meter in a sheet
   And the usage sheet chatgpt shows five_hour 30% and seven_day 64%
   And the usage sheet account claude shows a claude logo with badge P
   And the usage sheet account work shows a claude logo with badge W
-  And the usage sheet account chatgpt shows a codex logo without a badge
+  And the usage sheet account chatgpt shows an opencode logo with badge C
   And the usage sheet account cursor shows a cursor logo without a badge
   And the usage sheet names for claude, work, chatgpt, cursor are left-aligned
   And the screen region visually matches <baseline> at <threshold> percent

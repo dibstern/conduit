@@ -72,7 +72,7 @@ Scenario Outline: accounts follow auto-switch order inside their harness groups
   And the usage footer account claude shows a claude logo with badge P
   And the usage footer account work shows a claude logo with badge W
   And the usage footer account unreadable shows a claude logo with badge U
-  And the usage footer account chatgpt shows a codex logo without a badge
+  And the usage footer account chatgpt shows an opencode logo with badge C
   And the usage footer account cursor shows a cursor logo without a badge
   And the usage footer names for claude, work, chatgpt, cursor are left-aligned
   And the usage footer claude shows five_hour 41% and seven_day 22%

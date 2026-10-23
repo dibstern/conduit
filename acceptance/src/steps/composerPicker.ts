@@ -287,19 +287,19 @@ export const composerPickerHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert intrinsic Harness layout",
-		match: /^the Harness section has (\d+) intrinsic-width tabs$/,
+		name: "assert segmented Harness layout",
+		match: /^the Harness section has (\d+) equal-width segmented tabs$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId("picker-harness-options");
 			await expect(row).toHaveAttribute("data-layout", "segmented");
-			await expect(row).toHaveCSS("display", "flex");
+			await expect(row).toHaveCSS("display", "grid");
 			await expect(row.getByRole("radio")).toHaveCount(Number(match[1]));
 			const widths = await row
 				.getByRole("radio")
 				.evaluateAll((items) =>
 					items.map((item) => item.getBoundingClientRect().width),
 				);
-			expect(Math.max(...widths) - Math.min(...widths)).toBeGreaterThan(1);
+			expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
 			for (const tab of await row.getByRole("radio").all()) {
 				await expect(tab).toHaveCSS(
 					"height",
@@ -327,20 +327,13 @@ export const composerPickerHandlers: StepHandler[] = [
 				),
 			).toBe(true);
 			for (const tab of await row.getByRole("radio").all()) {
+				await expect(tab).toHaveCSS("width", "104px");
 				await expect(tab).toHaveCSS(
 					"height",
 					(world.page.viewportSize()?.width ?? 1024) < 768 ? "44px" : "30px",
 				);
 				await expect(tab).toHaveCSS("scroll-snap-align", "start");
 			}
-			await expect(row).toHaveCSS("padding-right", "2px");
-			const openCode = await world.page
-				.getByTestId("picker-harness-opencode")
-				.boundingBox();
-			const codex = await world.page
-				.getByTestId("picker-harness-codex")
-				.boundingBox();
-			expect(openCode?.width).toBeGreaterThan(codex?.width ?? 0);
 		},
 	},
 	{

@@ -427,6 +427,7 @@
 							onChange={handleHarnessSelect}
 							label="Harness"
 							lockedReason="Harness is fixed for this session"
+							itemWidth={104}
 							testId="picker-harness-options"
 							itemTestId={(driver) => `picker-harness-${driver}`}
 							class="mx-[4px]"

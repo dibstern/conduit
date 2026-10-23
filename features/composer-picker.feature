@@ -357,7 +357,7 @@ Scenario Outline: C1 two harnesses are equal-width tabs in the picker root
   And I start a new session
   When I view Harness choices in the picker
   And I select the Claude Harness tab in the picker
-  Then the Harness section has 2 intrinsic-width tabs
+  Then the Harness section has 2 equal-width segmented tabs
   And the Claude Harness tab is selected and in view
   And the picker subtitle is new session
   And the picker has no Harness drill-in

@@ -102,7 +102,7 @@ function setAccounts(
 	accounts: readonly (readonly [
 		id: string,
 		name: string,
-		driver?: "claude" | "codex" | "opencode" | "cursor",
+		driver?: "claude" | "opencode" | "cursor",
 	])[],
 ): void {
 	const rpc = requireRpcControl(page);
@@ -436,7 +436,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 				["spare", "Spare"],
 				["work", "Work"],
 				["unreadable", "Unreadable"],
-				["chatgpt", "ChatGPT", "codex"],
+				["chatgpt", "ChatGPT", "opencode"],
 				["claude", "Personal"],
 				["opencode", "OpenCode", "opencode"],
 				["api-key", "API key"],
@@ -704,7 +704,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 	{
 		name: "assert a footer or sheet account logo",
 		match:
-			/^the (usage footer|usage sheet) account (\S+) shows a (\S+) logo (without a badge|with badge (\S))$/,
+			/^the (usage footer|usage sheet) account (\S+) shows an? (\S+) logo (without a badge|with badge (\S))$/,
 		run: async ({ world, match }) => {
 			const prefix =
 				match[1] === "usage sheet" ? "usage-sheet" : "usage-footer";
