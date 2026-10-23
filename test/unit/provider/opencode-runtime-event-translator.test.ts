@@ -517,7 +517,10 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 		expect(completed).toMatchObject([
 			{
 				type: "tool.completed",
-				data: { metadata: { sessionId: "ses_child_differential" } },
+				data: {
+					outcome: "succeeded",
+					metadata: { sessionId: "ses_child_differential" },
+				},
 			},
 		]);
 	});

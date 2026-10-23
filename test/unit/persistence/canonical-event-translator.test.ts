@@ -264,6 +264,7 @@ describe("CanonicalEventTranslator", () => {
 				messageId: "msg-001",
 				partId: "part-t4",
 				result: "match found",
+				outcome: "succeeded",
 				duration: 1500,
 			});
 		});
@@ -416,6 +417,7 @@ describe("CanonicalEventTranslator", () => {
 			expect(events[0]?.type).toBe("tool.completed");
 			expect(events[0]?.data).toMatchObject({
 				result: "Command failed",
+				outcome: "failed",
 				duration: 200,
 			});
 		});

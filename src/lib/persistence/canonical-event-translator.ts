@@ -329,6 +329,8 @@ export class CanonicalEventTranslator {
 							status === "error"
 								? (rawPart.state?.error ?? "Unknown error")
 								: (rawPart.state?.output ?? ""),
+						// OpenCode's status owns the outcome; its private metadata is opaque.
+						outcome: status === "error" ? "failed" : "succeeded",
 						duration,
 						...(metadata ? { metadata } : {}),
 						...(inputRefreshed
