@@ -1,4 +1,5 @@
 import {
+	type FSWatcher,
 	readFileSync,
 	type StatsListener,
 	unwatchFile,
@@ -38,7 +39,10 @@ import {
 	forgetCanonicalDirectory,
 	readPublishedSessionGit,
 } from "../../../persistence/effect/session-git-publication.js";
-import { readSessionWorktreeOwnershipSnapshot } from "../../../persistence/effect/session-worktree-ownership.js";
+import {
+	readSessionWorktreeOwnershipSnapshot,
+	recordedBranchForFolder,
+} from "../../../persistence/effect/session-worktree-ownership.js";
 import {
 	effectiveSessionFolders,
 	effectiveWorkingDirectory,
@@ -78,6 +82,10 @@ interface Membership {
 	readonly directories: readonly CanonicalDirectory[];
 	running: boolean;
 	listedUntil: number;
+}
+interface WatchSubscriber {
+	readonly change: (name: string | null) => void;
+	readonly error: () => void;
 }
 interface DirectoryState {
 	readonly directory: CanonicalDirectory;
@@ -138,6 +146,47 @@ export const makeSessionGit = Effect.gen(function* () {
 		string,
 		{ readonly listeners: Set<StatsListener>; readonly listener: StatsListener }
 	>();
+	// Closing a directory watch rebuilds libuv's one FSEvents stream
+	// synchronously, so sibling worktrees and shared git directories share one.
+	const fsWatches = new Map<
+		string,
+		{
+			readonly watcher: FSWatcher;
+			readonly subscribers: Set<WatchSubscriber>;
+		}
+	>();
+	const watchShared = (path: string, subscriber: WatchSubscriber) => {
+		let shared = fsWatches.get(path);
+		if (!shared) {
+			const subscribers = new Set<WatchSubscriber>();
+			const watcher = watch(path, { persistent: false }, (_kind, name) => {
+				for (const each of subscribers) each.change(name);
+			});
+			const created = { watcher, subscribers };
+			watcher.on("error", () => {
+				watcher.close();
+				if (fsWatches.get(path) === created) fsWatches.delete(path);
+				for (const each of [...subscribers]) each.error();
+				subscribers.clear();
+			});
+			fsWatches.set(path, created);
+			shared = created;
+		}
+		const subscription = shared;
+		subscription.subscribers.add(subscriber);
+		return {
+			close: () => {
+				subscription.subscribers.delete(subscriber);
+				if (
+					subscription.subscribers.size === 0 &&
+					fsWatches.get(path) === subscription
+				) {
+					fsWatches.delete(path);
+					subscription.watcher.close();
+				}
+			},
+		};
+	};
 	let readQuietUntil = 0;
 	let lastSafetyNet = Number.NEGATIVE_INFINITY;
 	const decodeWorkspace = Schema.decodeUnknownOption(
@@ -323,35 +372,37 @@ export const makeSessionGit = Effect.gen(function* () {
 					};
 				};
 				try {
-					const watcher = watch(path, { persistent: false }, (_kind, name) => {
-						if (
-							path === dirname(entry.directory) &&
-							name !== basename(entry.directory)
-						)
-							return;
-						if (path.endsWith(join("refs", "heads"))) {
-							if (refs(path).map(changed).includes(true)) request(entry, true);
-							return;
-						}
-						const file = name?.replace(/\.lock$/, "") ?? null;
-						if (
-							file === "packed-refs" ||
-							(file === "HEAD" && !shared.has(path))
-						) {
-							if (changed(basename(path) === file ? path : join(path, file)))
-								request(entry, true);
-							return;
-						}
-						if (shared.has(path) || name !== file) return;
-						request(entry, false);
+					const handle = watchShared(path, {
+						change: (name) => {
+							if (
+								path === dirname(entry.directory) &&
+								name !== basename(entry.directory)
+							)
+								return;
+							if (path.endsWith(join("refs", "heads"))) {
+								if (refs(path).map(changed).includes(true))
+									request(entry, true);
+								return;
+							}
+							const file = name?.replace(/\.lock$/, "") ?? null;
+							if (
+								file === "packed-refs" ||
+								(file === "HEAD" && !shared.has(path))
+							) {
+								if (changed(basename(path) === file ? path : join(path, file)))
+									request(entry, true);
+								return;
+							}
+							if (shared.has(path) || name !== file) return;
+							request(entry, false);
+						},
+						error: () => {
+							const index = entry.watchers.indexOf(handle);
+							if (index >= 0) entry.watchers.splice(index, 1);
+							if (!entry.abort.signal.aborted) entry.watchers.push(fallback());
+						},
 					});
-					watcher.on("error", () => {
-						watcher.close();
-						const index = entry.watchers.indexOf(watcher);
-						if (index >= 0) entry.watchers.splice(index, 1);
-						if (!entry.abort.signal.aborted) entry.watchers.push(fallback());
-					});
-					watchers.push(watcher);
+					watchers.push(handle);
 				} catch {
 					watchers.push(fallback());
 				}
@@ -517,7 +568,15 @@ export const makeSessionGit = Effect.gen(function* () {
 					return previous;
 				}
 				const owner = yield* owners.sessionScope(sessionId);
-				if (previous) releaseMembership(previous);
+				// Directories the session keeps stay watched; closing and reopening
+				// a watch blocks the event loop.
+				if (previous)
+					releaseMembership({
+						...previous,
+						directories: previous.directories.filter(
+							(key) => !keys.includes(key),
+						),
+					});
 				const session: Membership = {
 					sessionId,
 					projectId: row.project_id,
@@ -578,9 +637,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 				const recordedBranch =
 					ownership?._tag === "Owned"
-						? ownership.ownership.find(
-								(owned) => canonicalDirectory(owned.path) === entry.directory,
-							)?.branchName
+						? recordedBranchForFolder(ownership.ownership, ...pair)
 						: undefined;
 				return yield* worktrees.value
 					.inspectMissing(
