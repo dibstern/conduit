@@ -288,6 +288,10 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await expect(world.page.locator("#terminal-panel .term-tab")).toHaveCount(
 				1,
 			);
+			// The tab's emulator loads lazily; a terminal key pressed before it
+			// mounts finds no terminal and is dropped. Mounting and connecting the
+			// keys happen in one task, so a mounted emulator is a connected one.
+			await expect(world.page.locator("#terminal-panel .xterm")).toHaveCount(1);
 		},
 	},
 	{
