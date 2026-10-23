@@ -2801,8 +2801,12 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			}
 			ctx.pendingApprovals.clear();
 
-			for (const pending of ctx.pendingQuestions.values()) {
-				yield* pending.reject(new Error(reason)).pipe(Effect.ignore);
+			// Rejecting would record a denial in the transcript; recoverable
+			// questions must stay open for the next runner to answer.
+			if (!recoverQuestions) {
+				for (const pending of ctx.pendingQuestions.values()) {
+					yield* pending.reject(new Error(reason)).pipe(Effect.ignore);
+				}
 			}
 			ctx.pendingQuestions.clear();
 

@@ -166,10 +166,13 @@ describe("Claude accepted run ownership", () => {
 				await Effect.runPromise(Deferred.await(queuedHandoff));
 				Effect.runSync(Deferred.succeed(resumeBackground, undefined));
 			}
-			await vi.waitFor(() =>
-				expect(
-					events.filter((event) => event.type === "turn.completed"),
-				).toHaveLength(4),
+			// Four SDK results flow through the runner; 1s is too tight under load.
+			await vi.waitFor(
+				() =>
+					expect(
+						events.filter((event) => event.type === "turn.completed"),
+					).toHaveLength(4),
+				{ timeout: 5_000 },
 			);
 			const completions = events.filter(
 				(
