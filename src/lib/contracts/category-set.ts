@@ -264,3 +264,36 @@ export function surfacingLevel(
 				: category,
 	};
 }
+
+/** Retired rows preview only their own restoration; verdicts stay untouched. */
+export function countSessionCategories(
+	verdicts: readonly {
+		readonly probabilities: Readonly<Record<string, number>> | null;
+		readonly mark?: SurfacingMark | undefined;
+	}[],
+	set: CategorySetContents,
+): Record<string, number> {
+	const counts: Record<string, number> = Object.fromEntries(
+		set.categories.map(({ id }) => [id, 0]),
+	);
+	for (const verdict of verdicts) {
+		const { category, level } = surfacingLevel(verdict, set, verdict.mark);
+		if (level !== "hidden" && category !== null)
+			counts[category] = (counts[category] ?? 0) + 1;
+	}
+	for (const category of set.categories) {
+		if (!category.retired) continue;
+		const restored = {
+			categories: set.categories.map((candidate) =>
+				candidate.id === category.id
+					? { ...candidate, retired: false }
+					: candidate,
+			),
+		};
+		counts[category.id] = verdicts.filter((verdict) => {
+			const result = surfacingLevel(verdict, restored, verdict.mark);
+			return result.level !== "hidden" && result.category === category.id;
+		}).length;
+	}
+	return counts;
+}
