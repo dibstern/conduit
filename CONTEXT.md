@@ -330,6 +330,15 @@ driver. A failed save fails the turn instead of being logged. A turn that
 joined one already running only completes its receipt. The reactor, dispatch
 and runner recovery all settle through it.
 
+## Tool Outcome
+
+**Tool Outcome** is a completed tool's `succeeded` or `failed` result, recorded
+by its provider adapter in `tool.completed.outcome`. Cursor classifies live
+calls and reconciled conversation steps through one converter. Readers use
+that outcome; the message projection stores it as `completed` or `error`.
+The stored-event decoder fills a missing outcome from legacy
+`metadata.isError === true`, so existing events need no migration.
+
 ## Sidebar Overlay
 
 **Sidebar Overlay** is sidebar state that is deliberately not a canonical

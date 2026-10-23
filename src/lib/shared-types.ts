@@ -522,6 +522,7 @@ export interface HistoryMessagePart {
 	 */
 	state?: {
 		status?: ToolStatus;
+		outcome?: "succeeded" | "failed";
 		/** Whole, or a preview GetToolDetails serves in full. */
 		input?: ToolInput;
 		output?: ToolText;

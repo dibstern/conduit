@@ -91,8 +91,7 @@ export function segmentAppearance(
 	running: ReadonlySet<string>,
 ): { tone: PartStyle["tone"]; running: boolean } {
 	if (part.type === "tool") {
-		if (part.status === "error" || part.isError)
-			return { tone: "fail", running: false };
+		if (part.outcome === "failed") return { tone: "fail", running: false };
 		const taskId = part.metadata?.["providerTaskId"];
 		if (
 			typeof taskId === "string" && part.metadata?.["backgrounded"] === true

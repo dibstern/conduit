@@ -11,6 +11,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { access } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { Redacted } from "effect";
 import type { CursorCredentialEnvelope } from "./cursor-credential.js";
@@ -22,6 +23,36 @@ import type {
 	CursorSdkPort,
 	CursorStore,
 } from "./sdk-port.js";
+
+export type { ToolType as CursorToolKind } from "@cursor/sdk";
+
+export function cursorSdkVersion(): string {
+	let directory = dirname(
+		createRequire(import.meta.url).resolve("@cursor/sdk"),
+	);
+	while (true) {
+		const path = join(directory, "package.json");
+		if (existsSync(path)) {
+			const manifest: unknown = JSON.parse(readFileSync(path, "utf8"));
+			if (
+				manifest &&
+				typeof manifest === "object" &&
+				"name" in manifest &&
+				manifest.name === "@cursor/sdk" &&
+				"version" in manifest &&
+				typeof manifest.version === "string"
+			)
+				return manifest.version;
+		}
+		const parent = dirname(directory);
+		if (parent === directory)
+			throw new CursorSdkFailure({
+				operation: "sdk-version",
+				reason: "Resolved Cursor SDK package has no version",
+			});
+		directory = parent;
+	}
+}
 
 /** Runs once at startup, before any account can log in or out. */
 export async function adoptLegacyCursorCredential(

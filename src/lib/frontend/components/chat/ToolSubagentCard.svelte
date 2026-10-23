@@ -79,7 +79,7 @@
 	}
 
 	const subtitleText = $derived.by(() => {
-		if (childOutcome === "failed") return "Error";
+		if (message.outcome === "failed") return "Error";
 		if (childOutcome === "stopped") return "Stopped";
 		switch (message.status) {
 			case "pending":
@@ -88,8 +88,6 @@
 				return "Running…";
 			case "completed":
 				return "Done";
-			case "error":
-				return "Error";
 			default:
 				return "";
 		}
@@ -116,7 +114,7 @@
 		<span class="subagent-link flex-1 min-w-0 truncate font-mono text-mono-code text-text-dimmer select-text">{agentDescription}</span>
 		{#if duration !== undefined}<time class="ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{fmtDuration(duration)}</time>{/if}
 		{#if running}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
-		{:else if message.status === "error" || message.isError || childOutcome === "failed"}<span class="shrink-0 text-error"><Icon name="circle-alert" size={12} /></span>{/if}
+		{:else if message.outcome === "failed"}<span class="shrink-0 text-error"><Icon name="circle-alert" size={12} /></span>{/if}
 
 		<!-- Navigate arrow (only when session is available) -->
 		{#if subagentSessionId}
@@ -131,7 +129,7 @@
 		</div>
 	{/if}
 
-	{#if message.status !== "completed" || childOutcome === "failed" || childOutcome === "stopped"}
+	{#if running || message.outcome === "failed" || childOutcome === "stopped"}
 	<div
 		class="tool-subtitle pb-[3px] pl-[22px] text-[12px] text-text-dimmer"
 	>
