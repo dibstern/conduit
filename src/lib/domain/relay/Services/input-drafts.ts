@@ -32,6 +32,8 @@ export interface InputDrafts {
 	) => Effect.Effect<void>;
 	/** Empty a session draft only if it still holds the text that was sent. */
 	readonly clearSent: (sessionId: string, sent: string) => Effect.Effect<void>;
+	/** Return an unsent input without overwriting a newer composer draft. */
+	readonly restore: (sessionId: string, text: string) => Effect.Effect<void>;
 	readonly claim: (
 		draftId: string,
 		projectId: string,
@@ -231,6 +233,33 @@ export const makeInputDrafts: Effect.Effect<
 				Effect.asVoid,
 				Effect.catch((cause) =>
 					Effect.logError(`Could not clear input draft ${sessionId}: ${cause}`),
+				),
+			),
+		restore: (sessionId, text) =>
+			sql<{
+				text: string;
+			}>`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at)
+				SELECT id, project_id, 'session', ${text}, ${Date.now()}
+				FROM sessions WHERE id = ${sessionId}
+				ON CONFLICT (draft_key) DO UPDATE SET
+					text = excluded.text || CASE WHEN input_drafts.text != '' AND input_drafts.text != excluded.text
+						THEN '\n\n' || input_drafts.text ELSE '' END,
+					updated_at = excluded.updated_at
+				WHERE input_drafts.kind = 'session' AND input_drafts.promoted_session_id IS NULL
+				RETURNING text`.pipe(
+				Effect.flatMap((rows) =>
+					rows[0]
+						? PubSub.publish(changes, {
+								key: { session: sessionId },
+								envelope: { _tag: "draft", text: rows[0].text },
+							})
+						: Effect.void,
+				),
+				Effect.asVoid,
+				Effect.catch((cause) =>
+					Effect.logError(
+						`Could not restore input draft ${sessionId}: ${cause}`,
+					),
 				),
 			),
 		claim: (draftId, projectId) =>

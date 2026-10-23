@@ -59,6 +59,7 @@ import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.
 import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
 import type { RunnerProviderInstanceDeps } from "../runner/runner-provider-instance.js";
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
+import { makeSendAdmissionWait } from "../runner/send-admission.js";
 import type {
 	SessionCommand,
 	SessionFailure,
@@ -1531,7 +1532,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					}),
 				);
 			}
-			const intake = yield* turnAdmissionSemaphore.withPermits(1)(
+			const waitForAdmission = makeSendAdmissionWait(
+				ctx.sessionId,
+				input.inputId,
+			);
+			const admit = () =>
 				Effect.gen({ self: this }, function* () {
 					// A send that needs no settings change joins the live query at
 					// once: mid-turn it is a steer, which the SDK reads at its next
@@ -1554,7 +1559,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							!input.abortSignal.aborted &&
 							(yield* hasPendingTurn(this.stateRef, ctx.sessionId))
 						)
-							yield* Effect.sleep("10 millis");
+							yield* waitForAdmission(
+								"retunePending",
+								Effect.sleep("10 millis"),
+							);
 					// A Stop that landed while this turn waited dropped it with the
 					// rest of the queue and already sent done. Failing it instead
 					// would send a second done that ends the user's next prompt.
@@ -1684,7 +1692,18 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					);
 
 					return intakeReceipt;
+				});
+			const intake = yield* Effect.acquireUseRelease(
+				Effect.gen(function* () {
+					// Keep permit acquisition atomic with bracket ownership; only the
+					// unsuccessful wait may be interrupted by the admission deadline.
+					while (!(yield* turnAdmissionSemaphore.takeIfAvailable(1)))
+						yield* Effect.interruptible(
+							waitForAdmission("retunePending", Effect.sleep("10 millis")),
+						);
 				}),
+				admit,
+				() => turnAdmissionSemaphore.release(1),
 			);
 
 			return yield* this.awaitIntakeEffect(input, intake);
