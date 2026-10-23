@@ -33,6 +33,9 @@ const subprocess = () => {
 const warmRead = async (directory: string) => {
 	const { owner, runner } = subprocess();
 	const previous = await readSessionGit(directory, undefined, runner);
+	expect(runner.mock.calls.some(([, args]) => args.includes("--short"))).toBe(
+		false,
+	);
 	const before = Effect.runSync(owner.metrics);
 	runner.mockClear();
 	const value = await readSessionGit(directory, previous, runner);
@@ -69,7 +72,7 @@ const commit = (directory: string, name: string) => {
 	writeFileSync(join(directory, name), name);
 	git(directory, "add", name);
 	git(directory, "commit", "-qm", name);
-	return git(directory, "rev-parse", "--short", "HEAD");
+	return git(directory, "rev-parse", "HEAD").slice(0, 7);
 };
 
 afterEach(async () => {
@@ -82,38 +85,30 @@ afterEach(async () => {
 describe("readSessionGit", () => {
 	// Failure modes: HEAD lives in a gitfile/commondir or packed ref; unborn and
 	// detached heads differ; a cache misses external ref changes or crosses repos;
-	// abbreviations change with config/objects; unusual ref storage needs git.
+	// unusual ref storage needs git.
 	it.each([
 		"branch",
 		"detached",
 		"unborn",
 		"packed",
 		"feature",
-		"merged",
 	])("uses one subprocess for a warm %s read, preserving the pill", async (kind) => {
 		const directory = repo();
+		if (kind === "detached") git(directory, "config", "core.abbrev", "12");
 		let head: string | undefined;
 		if (kind !== "unborn") head = commit(directory, "initial");
 		if (kind === "detached") git(directory, "checkout", "--detach", "-q");
 		if (kind === "packed") git(directory, "pack-refs", "--all");
-		if (kind === "feature" || kind === "merged") {
+		if (kind === "feature") {
 			git(directory, "checkout", "-qb", "feature");
 			head = commit(directory, "feature-file");
-			if (kind === "merged") {
-				git(directory, "checkout", "-q", "main");
-				git(directory, "merge", "--no-ff", "-qm", "merge", "feature");
-				git(directory, "checkout", "-q", "feature");
-			}
 		}
 		const value = await warmRead(directory);
 		expect(value).toMatchObject({ dirty: false });
 		if (head) expect(value?.head).toBe(head);
 		else expect(value).not.toHaveProperty("head");
 		if (kind === "detached") expect(value).not.toHaveProperty("branch");
-		else
-			expect(value?.branch).toBe(
-				kind === "feature" || kind === "merged" ? "feature" : "main",
-			);
+		else expect(value?.branch).toBe(kind === "feature" ? "feature" : "main");
 		expect(value).not.toHaveProperty("ahead");
 		expect(value).not.toHaveProperty("behind");
 	});
@@ -197,6 +192,8 @@ describe("readSessionGit", () => {
 	it("can explicitly invalidate a repository shared by worktrees", async () => {
 		const directory = repo();
 		commit(directory, "initial");
+		git(directory, "checkout", "-qb", "feature");
+		commit(directory, "feature-file");
 		await warmRead(directory);
 		invalidateSessionGitRepository(join(directory, ".git"));
 		const { runner } = subprocess();
@@ -204,52 +201,9 @@ describe("readSessionGit", () => {
 		expect(
 			runner.mock.calls.some(([, args]) => args[0] === "for-each-ref"),
 		).toBe(true);
-	});
-	it("keeps Git's configured abbreviation and refreshes it after config changes", async () => {
-		const directory = repo();
-		commit(directory, "initial");
-		for (const length of [12, 9]) {
-			git(directory, "config", "core.abbrev", String(length));
-			expect((await warmRead(directory))?.head).toBe(
-				git(directory, "rev-parse", "--short", "HEAD"),
-			);
-		}
-	});
-	it("rechecks abbreviations for branch-conditional config at the same oid", async () => {
-		const directory = repo();
-		commit(directory, "initial");
-		const config = join(root(), "feature.config");
-		writeFileSync(config, "[core]\n\tabbrev = 12\n");
-		git(directory, "config", "includeIf.onbranch:feature.path", config);
-		await warmRead(directory);
-		git(directory, "checkout", "-qb", "feature");
-		expect((await warmRead(directory))?.head).toBe(
-			git(directory, "rev-parse", "--short", "HEAD"),
+		expect(runner.mock.calls.some(([, args]) => args[0] === "merge-base")).toBe(
+			true,
 		);
-		writeFileSync(config, "[core]\n\tabbrev = 9\n");
-		expect((await warmRead(directory))?.head).toBe(
-			git(directory, "rev-parse", "--short", "HEAD"),
-		);
-	});
-	it("does not cache merge ancestry through replacement refs", async () => {
-		const directory = repo();
-		commit(directory, "initial");
-		const base = git(directory, "rev-parse", "HEAD");
-		git(directory, "checkout", "-qb", "feature");
-		commit(directory, "feature-file");
-		const feature = git(directory, "rev-parse", "HEAD");
-		git(directory, "checkout", "-q", "main");
-		commit(directory, "main-file");
-		const main = git(directory, "rev-parse", "HEAD");
-		git(directory, "checkout", "-q", "feature");
-		expect(await warmRead(directory)).toMatchObject({ merged: false });
-		git(directory, "replace", "--graft", main, base, feature);
-		expect(git(directory, "merge-base", "--is-ancestor", feature, main)).toBe(
-			"",
-		);
-		expect(await readSessionGit(directory)).toMatchObject({ merged: true });
-		git(directory, "replace", "-d", main);
-		expect(await readSessionGit(directory)).toMatchObject({ merged: false });
 	});
 	it("retries merge detection after a transient subprocess failure", async () => {
 		const directory = repo();
@@ -265,16 +219,16 @@ describe("readSessionGit", () => {
 				? Promise.reject(new Error("transient"))
 				: runner(command, args, options, signal),
 		);
-		expect(await readSessionGit(directory, undefined, failing)).toMatchObject({
-			merged: false,
-		});
+		expect(await readSessionGit(directory, undefined, failing)).toBeUndefined();
 		expect(await readSessionGit(directory, undefined, runner)).toMatchObject({
 			merged: true,
 		});
 	});
 	it("falls back for a symlinked HEAD", async () => {
 		const directory = repo();
-		const head = commit(directory, "initial");
+		commit(directory, "initial");
+		git(directory, "config", "core.abbrev", "12");
+		const head = git(directory, "rev-parse", "--short", "HEAD");
 		const headFile = join(directory, ".git", "HEAD");
 		rmSync(headFile);
 		symlinkSync("refs/heads/main", headFile);
@@ -301,7 +255,8 @@ describe("readSessionGit", () => {
 		}
 		git(directory, "config", "user.name", "Test User");
 		git(directory, "config", "user.email", "test@example.com");
-		const head = commit(directory, "initial");
+		commit(directory, "initial");
+		const head = git(directory, "rev-parse", "--short", "HEAD");
 		const { runner } = subprocess();
 		expect(await readSessionGit(directory, undefined, runner)).toMatchObject({
 			head,
