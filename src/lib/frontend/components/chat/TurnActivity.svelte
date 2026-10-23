@@ -26,6 +26,7 @@
 	import type { BackgroundTask } from "../../../shared-types.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
 	import {
 		countsPhrase,
@@ -549,7 +550,7 @@
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
 							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={expanded}
 							onclick={toggleLog}>
-							{#if live}<Icon name="loader-circle" size={13} class="animate-spin shrink-0 text-accent" />
+							{#if live}<ConduitMark size={16} variant="running" />
 							{:else}<Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-dimmer" />{/if}
 							<span class="text-[14px] font-semibold text-text">{live ? "Working" : "Worked"}</span>
 							{#if live && !turn.user}

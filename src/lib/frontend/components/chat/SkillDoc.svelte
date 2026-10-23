@@ -5,6 +5,7 @@
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { renderMarkdown } from "../../utils/markdown.js";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 
 	let { name }: { name: string } = $props();
 	let skillDoc = $state<string | null>(null);
@@ -67,7 +68,8 @@
 			{@attach highlightCodeBlocks}
 		>{@html renderMarkdown(skillDoc)}</div>
 	{:else}
-		<span class="font-mono text-xs text-text-muted">
+		<span class="inline-flex items-center gap-2 font-mono text-xs text-text-muted">
+			{#if skillState === "loading"}<ConduitMark size={16} variant="running" />{/if}
 			{skillState === "loading" ? "Loading skill…" : skillError || "This skill's file could not be found on disk."}
 		</span>
 	{/if}

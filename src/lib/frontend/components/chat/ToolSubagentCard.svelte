@@ -10,7 +10,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
-	import BlockGrid from '../ui/BlockGrid.svelte';
+	import ConduitMark from '../ui/ConduitMark.svelte';
 
 	let { message }: {
 		message: ToolMessage;
@@ -115,7 +115,7 @@
 		<Badge variant="tag" size="sm" class="agent-title shrink-0 font-mono capitalize select-text">{agentLabel}</Badge>
 		<span class="subagent-link flex-1 min-w-0 truncate font-mono text-mono-code text-text-dimmer select-text">{agentDescription}</span>
 		{#if duration !== undefined}<time class="ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{fmtDuration(duration)}</time>{/if}
-		{#if running}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+		{#if running}<ConduitMark size={16} variant="running" />
 		{:else if message.status === "error" || message.isError || childOutcome === "failed"}<span class="shrink-0 text-error"><Icon name="circle-alert" size={12} /></span>{/if}
 
 		<!-- Navigate arrow (only when session is available) -->

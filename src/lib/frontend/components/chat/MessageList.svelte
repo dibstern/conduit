@@ -64,7 +64,7 @@
 	import PermissionCard from "../permissions/PermissionCard.svelte";
 	import QuestionCard from "./QuestionCard.svelte";
 	import HistoryLoader from "./HistoryLoader.svelte";
-	import BlockGrid from "../ui/BlockGrid.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TranscriptDivider from "../ui/TranscriptDivider.svelte";
 	import ContinuationDivider from "./ContinuationDivider.svelte";
@@ -564,7 +564,7 @@
 	<!-- Loading indicator (was in HistoryView) -->
 	{#if chat.historyLoading}
 		<div class="history-loading flex items-center justify-center py-3 text-text-dimmer text-xs gap-2">
-			<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} />
+			<ConduitMark size={16} variant="running" />
 			<span>Loading history...</span>
 		</div>
 	{/if}

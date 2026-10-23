@@ -120,6 +120,13 @@ export const ExpandedLight: Story = {
 /** Elapsed time counts up, the strip grows, and the last three steps show as a fading ticker. */
 export const Live: Story = {
 	args: { turn: live, segment: liveSegment, final: true },
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement)
+				.getByTestId("turn-live-head")
+				.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
+	},
 };
 
 export const LiveLight: Story = { ...Live, globals: { theme: "light" } };

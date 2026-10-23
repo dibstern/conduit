@@ -3,13 +3,18 @@ import { expect, userEvent, waitFor, within } from "storybook/test";
 import {
 	applyGetFileTreeResponse,
 	clearFileTreeState,
+	fileTreeState,
 } from "../../stores/file-tree.svelte.js";
-import { routerState } from "../../stores/router.svelte.js";
+import {
+	attachedProjectState,
+	routerState,
+} from "../../stores/router.svelte.js";
 import {
 	applyGetFileListResponse,
 	fileBrowserListeners,
 } from "../../stores/ws-listeners.js";
 import { mockFileTree } from "../../stories/mocks.js";
+import { connectedSocket } from "../../stories/sockets.js";
 import SidebarFilePanel from "./SidebarFilePanel.svelte";
 
 async function showDirectory(
@@ -47,6 +52,27 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+
+export const Loading: Story = {
+	beforeEach: () => {
+		const restoreSocket = connectedSocket();
+		const previousProject = attachedProjectState.slug;
+		attachedProjectState.slug = "storybook";
+		return () => {
+			restoreSocket();
+			attachedProjectState.slug = previousProject;
+		};
+	},
+	play: async ({ canvasElement }) => {
+		fileTreeState.scope = "storybook";
+		await expect(
+			await within(canvasElement).findByText("Loading..."),
+		).toBeVisible();
+		await expect(
+			canvasElement.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
+	},
+};
 
 export const Populated: Story = {
 	play: async ({ canvasElement }) => {
@@ -132,6 +158,9 @@ export const ExpandedDirectoryLoading: Story = {
 		if (chevron) chevron.style.transition = "none";
 		await userEvent.click(srcButton);
 		await within(canvasElement).findByText("Loading…");
+		await expect(
+			canvasElement.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
 	},
 };
 

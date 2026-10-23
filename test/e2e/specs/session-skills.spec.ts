@@ -176,10 +176,11 @@ test.describe("Session skills chip", () => {
 		await skillsToggle.click();
 		await activityToggle.click();
 		await expect(activityToggle).toHaveAttribute("aria-expanded", "false");
-		await expect(anchoredStep).toHaveCount(0);
+		await expect(anchoredStep).toBeHidden();
 		await chip.click();
 		await agentRow.click();
 		await expect(activityToggle).toHaveAttribute("aria-expanded", "true");
+		await expect(anchoredStep).toBeVisible();
 		await expect(anchoredStep).toBeInViewport();
 	});
 });
