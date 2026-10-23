@@ -1,5 +1,14 @@
 Feature: Cursor model parameters have separate picker rows
 
+Scenario: an empty title choice displays the cheapest parameters independent of combination order
+  Given the conduit app is served with the connected mockup
+  And a Cursor account is available with its live models
+  And the Cursor parameter catalogue is ready for title-order-probe
+  And Cursor titles use the default choice for title-order-probe
+  When I open settings to the Models & agents section
+  And I open the title generation picker
+  Then the empty Cursor title choice shows effort=low
+
 Scenario: the composer meter counts effort values rather than combinations
   Given the conduit app is served with the connected mockup
   And a Cursor account is available with its live models

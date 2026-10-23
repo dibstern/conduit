@@ -123,6 +123,7 @@ interface ProcessRunnerDeps {
 }
 
 export interface ProcessRunnerDriver {
+	readonly spawnEnvironment?: Readonly<Record<string, string>>;
 	/** Undelivered replays use the sendTurn callback's ordinary admission. */
 	readonly admitsRecoveredSends?: boolean;
 	readonly driverKind: string;
@@ -1399,7 +1400,11 @@ export const makeProcessSessionRunner = (
 								],
 								{
 									cwd: entry.launch?.workspaceRoot ?? registrationRoot,
-									env: { ...process.env, CONDUIT_CONFIG_DIR: configDir },
+									env: {
+										...process.env,
+										...driver.spawnEnvironment,
+										CONDUIT_CONFIG_DIR: configDir,
+									},
 									detached: true,
 									stdio: ["ignore", log, log, "ipc"],
 								},

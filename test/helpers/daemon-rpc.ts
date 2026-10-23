@@ -72,6 +72,7 @@ import {
 	type ClaudeConfigDir,
 	configuredClaudeConfigDir,
 } from "../../src/lib/provider/claude/claude-sdk-env.js";
+import { CodexAccountResourcesLive } from "../../src/lib/provider/codex/codex-account-resources.js";
 import { CursorAccountResourcesLive } from "../../src/lib/provider/cursor/cursor-account-resources.js";
 import {
 	BrowserRpcConnectionsLive,
@@ -190,8 +191,9 @@ export const makeDaemonRpcTestLayer = (
 	const withDirectory = (
 		options.sessionDirectory ?? makeSharedSessionDirectoryLive
 	).pipe(Layer.provideMerge(base));
-	const dependencies = Layer.merge(
+	const dependencies = Layer.mergeAll(
 		OpenCodeInstancesLive,
+		CodexAccountResourcesLive(options.configDir ?? "/tmp/daemon-rpc-fixture"),
 		CursorAccountResourcesLive(
 			options.configDir ?? "/tmp/daemon-rpc-fixture",
 			`${options.configDir ?? "/tmp/daemon-rpc-fixture"}/legacy-cursor-auth.json`,

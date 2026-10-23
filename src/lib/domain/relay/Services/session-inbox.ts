@@ -458,12 +458,14 @@ export const SessionInboxLive = Layer.effect(
 					scheduled: number;
 					open_prompts: number;
 					limit_recovery: string | null;
+					model_id: string | null;
 					interrupt_requested: string | null;
 					running: string | null;
 				}>`WITH latest_run AS (${inboxRunStatusQuery(sql, sessionId)}) SELECT
 					(SELECT status FROM latest_run) AS run_status,
 					(SELECT provider FROM sessions WHERE id = ${sessionId}) AS provider,
 					(SELECT limit_recovery FROM sessions WHERE id = ${sessionId}) AS limit_recovery,
+					(SELECT model_id FROM sessions WHERE id = ${sessionId}) AS model_id,
 					(SELECT json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
 						FROM sessions WHERE id = ${sessionId}) AS limited,
 					(SELECT json_extract(limit_recovery, '$.scheduledAt') IS NOT NULL
@@ -512,6 +514,7 @@ export const SessionInboxLive = Layer.effect(
 							)(facts.limit_recovery).pipe(Effect.orDie);
 				const limit = accountLimit({
 					asker: "user",
+					modelId: facts?.model_id ?? undefined,
 					...(reading === undefined ? {} : { reading }),
 					...(recovery === undefined ? {} : { recovery }),
 					now: yield* Clock.currentTimeMillis,

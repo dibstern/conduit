@@ -57,6 +57,7 @@ import {
 	UsageHistorySnapshotSchema,
 } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
+import { CodexAccountResources } from "../../../../src/lib/provider/codex/codex-account-resources.js";
 import type {
 	UsageRead,
 	UsageReader,
@@ -1449,8 +1450,11 @@ it.effect(
 				}),
 			}).pipe(
 				Layer.provide(
-					Layer.merge(
+					Layer.mergeAll(
 						makeDaemonStateLive({ configDir }),
+						Layer.succeed(CodexAccountResources)({
+							use: () => Effect.die("Unexpected Codex account use"),
+						}),
 						Layer.succeed(AccountDirectory)(
 							makeMockAccountDirectory([
 								{
@@ -1547,8 +1551,11 @@ it.effect(
 							}),
 						}).pipe(
 							Layer.provide(
-								Layer.merge(
+								Layer.mergeAll(
 									makeDaemonStateLive({ configDir }),
+									Layer.succeed(CodexAccountResources)({
+										use: () => Effect.die("Unexpected Codex account use"),
+									}),
 									Layer.succeed(AccountDirectory)(
 										makeMockAccountDirectory([
 											{

@@ -729,6 +729,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_TEST_CURSOR_LOGIN_URL_DELAY_MS"
 					| "CONDUIT_TEST_CURSOR_LOGIN_TIMEOUT_MS"
 					| "CURSOR_API_KEY"
+					| "CURSOR_BACKEND_URL"
 					| "CURSOR_AUTH_TOKEN"
 					| "CONDUIT_TEST_CURSOR_DASHBOARD_URL"
 					| "CONDUIT_TEST_CURSOR_KEYCHAIN"

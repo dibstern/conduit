@@ -687,6 +687,7 @@ export function createTraceCursorSdkPort(
 						: "https://api2.cursor.sh",
 				createdAtMs:
 					typeof data["createdAtMs"] === "number" ? data["createdAtMs"] : 0,
+				...(typeof data["email"] === "string" ? { email: data["email"] } : {}),
 				...(typeof data["apiKeyExpiresAtMs"] === "number"
 					? { apiKeyExpiresAtMs: data["apiKeyExpiresAtMs"] }
 					: {}),

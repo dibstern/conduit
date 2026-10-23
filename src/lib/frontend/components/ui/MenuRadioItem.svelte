@@ -77,6 +77,10 @@
 				<span aria-hidden="true" class={`${MENU_SHEET_LEADING_ICON_CLASSES} ${checked ? "text-accent" : "text-text-secondary"}`}>
 					{#if icon}<Icon name={icon} size={15} />{/if}
 				</span>
+			{:else if icon}
+				<span aria-hidden="true" data-menu-item-icon class="shrink-0">
+					<Icon name={icon} size={13} />
+				</span>
 			{/if}
 			<span class="min-w-0 flex-1">
 				{@render children()}

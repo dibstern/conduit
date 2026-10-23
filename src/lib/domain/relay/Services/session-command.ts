@@ -740,8 +740,7 @@ const forkRefusalError = (parentId: string, refusal: ForkRefusal) => {
 		return new SessionCommandError({
 			operation: "session.side_thread.no_completed_turn",
 			cause: parentId,
-			message:
-				"This session has no completed turn yet. Wait for its first reply.",
+			message: "Wait for this session's first reply to finish.",
 		});
 	if (refusal.reason === "point_not_found") {
 		const message = `Fork point ${refusal.messageId} was not found in the session history`;
@@ -756,7 +755,7 @@ const forkRefusalError = (parentId: string, refusal: ForkRefusal) => {
 		cause: "Claude fork boundary has no persisted message ordering key",
 		message:
 			refusal.reason === "no_transcript"
-				? "This session has no Claude transcript yet. Send a message first."
+				? "This session has no messages yet. Send a message first."
 				: `Fork point ${refusal.messageId} was not found in the session history`,
 	});
 };

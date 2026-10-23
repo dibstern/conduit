@@ -137,6 +137,7 @@ function predictsHandoff(sessionId: string): boolean {
 		!inbox?.paused &&
 		accountLimit({
 			asker: "user",
+			modelId: row.model?.model,
 			...(reading ? { reading } : {}),
 			...(recovery && !recovery.switched ? { recovery } : {}),
 			now: clock.now,

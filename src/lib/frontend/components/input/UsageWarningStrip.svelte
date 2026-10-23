@@ -37,6 +37,7 @@
 		const reading = claudeAccounts.quotaOf(account.id) ?? claudeAccounts.readingOf(account.id);
 		return account.id !== accountId && accountLimit({
 			asker: "user",
+			modelId: session?.model?.model,
 			...(reading ? { reading } : {}),
 			now: clock.now,
 		}).kind === "go";

@@ -5,6 +5,7 @@
 	import Button from "../ui/Button.svelte";
 	import ConduitMark from "../ui/ConduitMark.svelte";
 	import SessionList from "../session/SessionList.svelte";
+	import ThemeMenu from "./ThemeMenu.svelte";
 	import {
 		uiState,
 		collapseSidebar,
@@ -89,6 +90,7 @@
 	>
 		{@render title()}
 		<span class="flex-1"></span>
+		<ThemeMenu compact={sessionViewState.compact} />
 		<Button
 			variant="toolbar"
 			size="content"
