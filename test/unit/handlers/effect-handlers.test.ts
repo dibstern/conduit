@@ -2409,6 +2409,8 @@ describe("handleNewSession", () => {
 					expect(ws.setClientSession).toHaveBeenCalledWith(
 						"client-1",
 						"new-session-1",
+						"test-project",
+						undefined,
 					);
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Created: new-session-1",
@@ -2456,6 +2458,8 @@ describe("handleNewSession", () => {
 				expect(ws.setClientSession).toHaveBeenCalledWith(
 					"client-1",
 					"opencode-session",
+					"test-project",
+					undefined,
 				);
 			})),
 		);

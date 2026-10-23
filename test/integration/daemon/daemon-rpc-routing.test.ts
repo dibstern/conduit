@@ -240,6 +240,8 @@ describe("daemon shared RPC routing", () => {
 					expect(handlerB.setClientSession).toHaveBeenCalledWith(
 						"daemon-client",
 						"session-b",
+						"project-b",
+						undefined,
 					);
 					expect(startPolling).toHaveBeenCalledWith("session-b");
 				}

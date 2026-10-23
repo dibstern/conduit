@@ -182,6 +182,8 @@ export const EnvelopeSchema = <A, I = A, RD = never, RE = RD>(
 			sequence: Schema.Number,
 			/** The item itself is gone, not only out of this collection. */
 			deleted: Schema.optional(Schema.Boolean),
+			/** Retained producer provenance when a Session Row no longer exists. */
+			projectSlug: Schema.optional(Schema.String),
 		}),
 	]);
 
@@ -1112,7 +1114,14 @@ export type RpcLogLevel = typeof RpcLogLevelSchema.Type;
 
 export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	message: Schema.String,
-	code: Schema.optional(Schema.Literals(["unknown-session", "unknown-turn"])),
+	code: Schema.optional(
+		Schema.Literals([
+			"unknown-session",
+			"unknown-turn",
+			"project-mismatch",
+			"ownership-lookup-failed",
+		]),
+	),
 }) {}
 
 export class DraftAlreadySent extends Schema.TaggedError<DraftAlreadySent>()(
