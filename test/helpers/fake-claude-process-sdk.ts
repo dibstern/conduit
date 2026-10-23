@@ -1759,6 +1759,24 @@ function query(params: {
 					taskStopHeldRequest = undefined;
 					if (closed) return;
 					if (taskTurnInterrupted) break;
+					if (request.includes("correction-reject"))
+						yield {
+							type: "user",
+							uuid: randomUUID(),
+							session_id: sessionId,
+							parent_tool_use_id: null,
+							message: {
+								role: "user",
+								content: [
+									{
+										type: "tool_result",
+										tool_use_id: "correction-foreground",
+										content: "Fixture tool completed",
+										is_error: false,
+									},
+								],
+							},
+						} satisfies SDKUserMessage;
 				}
 			}
 			// A turn that keeps streaming until it is stopped, for load tests.
