@@ -278,14 +278,6 @@ describe("Conduit prompt identity through the daemon and Claude runner", () => {
 		});
 		await harness.restart({ startupTimeoutMs: 60_000 });
 		const recovered = await harness.connect(session);
-		// A live barrier follows the connect-time permission/question reconciliation.
-		await harness.emitOpenCodeEvent({
-			directory: realpathSync(harness.projectDir),
-			payload: {
-				type: "session.status",
-				properties: { sessionID: session, status: { type: "idle" } },
-			},
-		});
 		for (const type of ["permission", "question"] as const) {
 			await recovered.waitFor(
 				(frame) =>
@@ -293,7 +285,14 @@ describe("Conduit prompt identity through the daemon and Claude runner", () => {
 					(frame["requestId"] ?? frame["toolId"]) === `${type}-legacy`,
 			);
 		}
-		expect(rows(harness)).toHaveLength(2);
+		await vi.waitFor(() => {
+			expect(rows(harness)).toHaveLength(2);
+			for (const row of rows(harness)) {
+				expect(row.id).toBe(`${row.type}-legacy`);
+				expect(row.provider_request_id).toBe(row.id);
+				expect(row.provider_process_id).toMatch(/^opencode:/);
+			}
+		});
 		for (const row of rows(harness)) await answer(recovered, row);
 		await vi.waitFor(() =>
 			expect(rows(harness).map(({ status }) => status)).toEqual([
@@ -314,6 +313,77 @@ describe("Conduit prompt identity through the daemon and Claude runner", () => {
 					),
 			).toBe(true);
 		}
+
+		// Replayed asks cannot reopen resolved legacy cards or fill half a reference.
+		mutateStore(harness, (db) => {
+			db.prepare(
+				"UPDATE pending_approvals SET provider_process_id = NULL, provider_request_id = NULL WHERE id = 'permission-legacy'",
+			).run();
+			db.prepare(
+				"UPDATE pending_approvals SET status = 'pending', provider_process_id = NULL WHERE id = 'question-legacy'",
+			).run();
+		});
+		for (const type of ["permission", "question"] as const) {
+			await harness.emitOpenCodeEvent({
+				directory: realpathSync(harness.projectDir),
+				payload: {
+					type: `${type}.asked`,
+					properties: openCodePrompt(type, `${type}-legacy`, session),
+				},
+			});
+		}
+		await harness.addOpenCodePrompt(
+			"permission",
+			harness.projectDir,
+			openCodePrompt("permission", "guard-barrier", session),
+		);
+		await vi.waitFor(() => expect(rows(harness)).toHaveLength(3));
+		expect(
+			rows(harness).find(({ id }) => id === "permission-legacy"),
+		).toMatchObject({
+			status: "resolved",
+			provider_process_id: null,
+			provider_request_id: null,
+		});
+		expect(
+			rows(harness).find(({ id }) => id === "question-legacy"),
+		).toMatchObject({
+			status: "pending",
+			provider_process_id: null,
+			provider_request_id: "question-legacy",
+		});
+
+		const foreign = await recovered.createSession(
+			"Foreign prompts",
+			"opencode",
+			"opencode",
+		);
+		mutateStore(harness, (db) => {
+			db.prepare(
+				"UPDATE pending_approvals SET id = 'foreign-legacy', provider_process_id = NULL, provider_request_id = NULL WHERE provider_request_id = 'guard-barrier'",
+			).run();
+		});
+		await harness.addOpenCodePrompt(
+			"permission",
+			harness.projectDir,
+			openCodePrompt("permission", "foreign-legacy", foreign),
+		);
+		await vi.waitFor(() => expect(rows(harness)).toHaveLength(4));
+		expect(
+			rows(harness).find(({ id }) => id === "foreign-legacy"),
+		).toMatchObject({
+			session_id: session,
+			provider_process_id: null,
+			provider_request_id: null,
+		});
+		expect(
+			rows(harness).find(
+				({ provider_request_id }) => provider_request_id === "foreign-legacy",
+			),
+		).toMatchObject({
+			session_id: foreign,
+			provider_process_id: expect.stringMatching(/^opencode:/),
+		});
 	}, 150_000);
 
 	it("expires answers to stopped OpenCode prompts and retires the rest on replacement", async () => {
