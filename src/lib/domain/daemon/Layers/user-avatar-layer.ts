@@ -1,5 +1,5 @@
 import { userInfo } from "node:os";
-import { Effect, Layer, Option, Ref } from "effect";
+import { Effect, Layer, Option, Ref, Semaphore } from "effect";
 import type { Avatar } from "../../../contracts/user-avatar.js";
 import { AccountPicture } from "../Services/account-picture.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
@@ -52,8 +52,24 @@ export const UserAvatarLive = Layer.effect(
 		const persistence = yield* ConfigPersistenceTag;
 		const picture = yield* AccountPicture;
 		const subprocess = yield* Subprocess;
+		const [readName, invalidateName] = yield* Effect.cachedInvalidateWithTTL(
+			globalName(subprocess),
+			"10 minutes",
+		);
+		let nameConfig = yield* Ref.get(configRef);
+		// Serialize invalidation with reads so settings cannot retain an old lookup.
+		const nameLock = yield* Semaphore.make(1);
 		const get: Effect.Effect<Avatar> = Effect.gen(function* () {
-			const name = yield* globalName(subprocess);
+			const name = yield* nameLock.withPermits(1)(
+				Effect.gen(function* () {
+					const config = yield* Ref.get(configRef);
+					if (config !== nameConfig) {
+						yield* invalidateName;
+						nameConfig = config;
+					}
+					return yield* readName;
+				}),
+			);
 			const macPicture = yield* picture.read.pipe(
 				Effect.map(
 					Option.match({
