@@ -83,6 +83,7 @@
 	aria-label={label}
 	data-testid={testId}
 	data-layout={scrolling ? "scroll" : "segmented"}
+	data-sizing={itemWidth === undefined ? "content" : "fixed"}
 	data-variant={variant}
 	data-fade={moreToRight ? "true" : "false"}
 	class="option-row {variant === 'joined' ? SEGMENTED_VARIANTS.joined.list : ''} {className}"
@@ -151,6 +152,14 @@
 		display: grid;
 		grid-template-columns: repeat(var(--option-count), minmax(0, 1fr));
 	}
+	:global(.option-row[data-sizing="content"]) {
+		display: flex;
+		gap: 6px;
+	}
+	:global(.option-row[data-sizing="content"] > [data-radio-group-item]) {
+		flex: none;
+		white-space: nowrap;
+	}
 	:global(.option-row[data-layout="scroll"]) {
 		display: flex;
 		gap: 6px;
@@ -166,9 +175,13 @@
 		width: var(--option-width);
 		scroll-snap-align: start;
 	}
+	:global(.option-row[data-layout="scroll"][data-sizing="content"]) {
+		scroll-padding-inline-end: 2px;
+		padding-right: 2px;
+	}
 	/* Match the joined track's 2px inset, or mandatory snapping parks scrollLeft at 2. */
 	:global(.option-row[data-variant="joined"][data-layout="scroll"]) { scroll-padding-inline-start: 2px; }
-	:global(.option-row[data-variant="joined"][data-layout="scroll"] > [data-radio-group-item]) {
+	:global(.option-row[data-variant="joined"][data-layout="scroll"][data-sizing="fixed"] > [data-radio-group-item]) {
 		padding-inline: 4px;
 		font-size: 12px;
 		white-space: nowrap;

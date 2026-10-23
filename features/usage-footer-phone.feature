@@ -13,6 +13,7 @@ Scenario Outline: normal accounts dock the current account's row and fold the re
   Then the session list is open
   And the phone usage rows are claude in that order
   And the phone usage row claude is the highlighted current account
+  And the usage footer account claude shows a claude logo with badge P
   And the usage footer claude shows five_hour 41% and seven_day 22%
   And the phone usage footer folds 5 more accounts
   And the phone usage footer clears the new-session button and the last row text
@@ -67,6 +68,11 @@ Scenario Outline: tapping the dock opens every account's meter in a sheet
   And the usage sheet row claude is the highlighted current account
   And the usage sheet work shows five_hour 86% and seven_day 48%
   And the usage sheet chatgpt shows five_hour 30% and seven_day 64%
+  And the usage sheet account claude shows a claude logo with badge P
+  And the usage sheet account work shows a claude logo with badge W
+  And the usage sheet account chatgpt shows a codex logo without a badge
+  And the usage sheet account cursor shows a cursor logo without a badge
+  And the usage sheet names for claude, work, chatgpt, cursor are left-aligned
   And the screen region visually matches <baseline> at <threshold> percent
   When I tap Settings in the usage sheet
   Then the usage sheet is closed and Usage settings are open

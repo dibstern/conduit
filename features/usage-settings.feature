@@ -5,6 +5,21 @@ Background:
   And a session already exists on the Claude harness
   And the Usage settings clock is pinned to 2026-01-01T14:25:00Z
 
+Scenario Outline: Usage account logos retain identity when a reading is unavailable
+  Given the viewport is a <viewport>
+  And Usage settings have several Claude accounts in the normal state
+  And the Usage account work is unavailable
+  When I open settings to the Usage section
+  Then the Usage account claude shows a claude logo with a letter badge
+  And the Usage account work shows a claude logo with a letter badge
+  And the Usage account spare shows a claude logo with a letter badge
+  And the Usage account names are left aligned
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario Outline: one account has full window rows on desktop
   Given the viewport is a desktop
   And Usage settings have one Claude account in the <state> state
@@ -69,7 +84,7 @@ Scenario Outline: several accounts share ordered cards on desktop
   And the Usage settings subheader reads 3 accounts · updated 2m ago · Refresh all
   And the Usage settings headline reads <headline> in <colour>
   And the account order reads Personal, Work, Spare
-  And the Usage cards show their positions, account dots, plan badges and drag handles
+  And the Usage cards show their positions, account logos, plan badges and drag handles
   And the Usage account claude status reads <status> in <statusColour>
   And the Usage account claude windows show 5h <fiveHour> and Week <week>
   And the Usage account claude five_hour reset reads <fiveHourReset>
@@ -105,7 +120,7 @@ Scenario Outline: several account cards and limit controls fit the phone screen
   And the Usage settings subheader reads 3 accounts · updated 2m ago · Refresh all
   And the Usage settings headline reads <headline> in <colour>
   And the account order reads Personal, Work, Spare
-  And the phone Usage cards show account dots and plan badges, and drag handles only after Edit order
+  And the phone Usage cards show account logos and plan badges, and drag handles only after Edit order
   And the Usage account claude status reads <status> in <statusColour>
   And the Usage account claude windows show 5h <fiveHour> and Week <week>
   And the Usage account claude five_hour reset reads <fiveHourReset>

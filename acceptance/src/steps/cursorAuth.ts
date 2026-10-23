@@ -233,7 +233,7 @@ export const cursorAuthHandlers: StepHandler[] = [
 			await expect(
 				world.page
 					.getByTestId("cursor-accounts-list")
-					.locator('[data-driver="cursor"]'),
+					.locator('[data-testid^="instance-row-"][data-driver="cursor"]'),
 			).toHaveCount(1);
 		},
 	},

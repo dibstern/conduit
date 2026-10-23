@@ -102,7 +102,7 @@ function setAccounts(
 	accounts: readonly (readonly [
 		id: string,
 		name: string,
-		driver?: "claude" | "opencode" | "cursor",
+		driver?: "claude" | "codex" | "opencode" | "cursor",
 	])[],
 ): void {
 	const rpc = requireRpcControl(page);
@@ -436,7 +436,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 				["spare", "Spare"],
 				["work", "Work"],
 				["unreadable", "Unreadable"],
-				["chatgpt", "ChatGPT", "opencode"],
+				["chatgpt", "ChatGPT", "codex"],
 				["claude", "Personal"],
 				["opencode", "OpenCode", "opencode"],
 				["api-key", "API key"],
@@ -682,21 +682,63 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert account dots match the composer account badge colour",
-		match: /^the usage footer (\S+) dot matches the composer account badge$/,
+		name: "assert account badges match the composer account badge colour",
+		match: /^the usage footer (\S+) badge matches the composer account badge$/,
 		run: async ({ world, match }) => {
-			const footerDot = world.page.getByTestId(`usage-footer-dot-${match[1]}`);
+			const footerLogo = world.page.getByTestId(
+				`usage-footer-logo-${match[1]}`,
+			);
 			const badge = world.page
 				.locator(
 					`#input-area [data-testid="harness-logo"][data-account="${match[1]}"]`,
 				)
 				.getByTestId("harness-logo-badge");
-			await expect(footerDot).toHaveAttribute("data-account", match[1] ?? "");
+			await expect(footerLogo).toHaveAttribute("data-account", match[1] ?? "");
 			await expect(badge).toBeVisible();
-			await expect(footerDot).toHaveCSS(
+			await expect(footerLogo.getByTestId("harness-logo-badge")).toHaveCSS(
 				"background-color",
 				await badge.evaluate((dot) => getComputedStyle(dot).backgroundColor),
 			);
+		},
+	},
+	{
+		name: "assert a footer or sheet account logo",
+		match:
+			/^the (usage footer|usage sheet) account (\S+) shows a (\S+) logo (without a badge|with badge (\S))$/,
+		run: async ({ world, match }) => {
+			const prefix =
+				match[1] === "usage sheet" ? "usage-sheet" : "usage-footer";
+			const logo = world.page.getByTestId(`${prefix}-logo-${match[2]}`);
+			await expect(logo).toBeVisible();
+			await expect(logo).toHaveAttribute("data-driver", match[3] ?? "");
+			await expect(logo).toHaveAttribute("data-account", match[2] ?? "");
+			await expect(logo).toHaveAttribute("aria-hidden", "true");
+			const badge = logo.getByTestId("harness-logo-badge");
+			if (match[5]) {
+				await expect(badge).toBeVisible();
+				await expect(badge).toHaveText(match[5]);
+				await expect(badge).toHaveAttribute("data-state", "idle");
+			} else await expect(badge).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert account names align across usage groups",
+		match: /^the (usage footer|usage sheet) names for (.+) are left-aligned$/,
+		run: async ({ world, match }) => {
+			const prefix =
+				match[1] === "usage sheet" ? "usage-sheet" : "usage-footer";
+			const positions = await Promise.all(
+				(match[2] ?? "").split(", ").map(async (id) => {
+					const name = world.page.getByTestId(`${prefix}-name-${id}`);
+					await expect(name).toBeVisible();
+					const box = await name.boundingBox();
+					if (!box) throw new Error(`Missing name for ${id}`);
+					return box.x;
+				}),
+			);
+			expect(
+				Math.max(...positions) - Math.min(...positions),
+			).toBeLessThanOrEqual(0.5);
 		},
 	},
 	{

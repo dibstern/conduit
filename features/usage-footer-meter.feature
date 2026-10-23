@@ -68,7 +68,13 @@ Scenario Outline: accounts follow auto-switch order inside their harness groups
   And the usage footer groups read Claude, Codex, Cursor in that order
   And the Claude usage footer rows read Personal, Work, Spare, Unreadable in auto-switch order
   And the usage footer claude row is the highlighted current account
-  And the usage footer claude dot matches the composer account badge
+  And the usage footer claude badge matches the composer account badge
+  And the usage footer account claude shows a claude logo with badge P
+  And the usage footer account work shows a claude logo with badge W
+  And the usage footer account unreadable shows a claude logo with badge U
+  And the usage footer account chatgpt shows a codex logo without a badge
+  And the usage footer account cursor shows a cursor logo without a badge
+  And the usage footer names for claude, work, chatgpt, cursor are left-aligned
   And the usage footer claude shows five_hour 41% and seven_day 22%
   And the usage footer work shows five_hour 12% and seven_day 48%
   And the usage footer spare shows five_hour 0% and seven_day 9%

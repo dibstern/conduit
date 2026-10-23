@@ -390,9 +390,13 @@ Scenario Outline: Switch account lists each account's fresh quota and pre-select
   And the account picker row for work2claude reads limited · Mon 9:00 am and cannot be picked
   And the account picker row for team-max reads limited · 2:30 pm and cannot be picked
   And the account picker pre-selects personal
-  And the account picker shows claude with a blue dot
-  And the account picker shows self with a green dot
-  And the account picker shows team with a pink dot
+  And the account picker account claude shows a claude logo with badge W
+  And the account picker account self shows a claude logo with badge P
+  And the account picker account team shows a claude logo with badge T
+  And the account picker shows claude with a blue badge
+  And the account picker shows self with a green badge
+  And the account picker shows team with a pink badge
+  And the account picker names work2claude, personal, team-max are left-aligned
 
 Examples:
   | viewport | quota       | caption       |

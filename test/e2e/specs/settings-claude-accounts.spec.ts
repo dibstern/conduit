@@ -120,12 +120,14 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 	await expect(
 		list.getByRole("heading", { name: "Claude accounts" }),
 	).toBeVisible();
-	await expect(list.locator('[data-driver="claude"]')).toHaveCount(2);
+	await expect(
+		list.locator('[data-testid^="instance-row-"][data-driver="claude"]'),
+	).toHaveCount(2);
 	await expect(defaultRow.getByText("default", { exact: true })).toBeVisible();
 	await expect(defaultRow.getByText("env", { exact: true })).toBeVisible();
 	await expect(workRow.getByText("default", { exact: true })).toHaveCount(0);
 	for (const row of [defaultRow, workRow]) {
-		await expect(row.getByTestId("account-dot")).toBeVisible();
+		await expect(row.getByTestId("account-logo")).toBeVisible();
 		await expect(row.getByText("Claude", { exact: true })).toHaveCount(0);
 	}
 
