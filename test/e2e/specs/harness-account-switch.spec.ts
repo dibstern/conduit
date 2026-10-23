@@ -2903,7 +2903,31 @@ for (const behavior of [
 			const original = harness
 				.claudeOptions()
 				.find((call) => call.prompt === first);
-			expect(switched?.pid).not.toBe(original?.pid);
+			if (!original || !switched) throw new Error("Missing account query call");
+			// Account continuation retains its controller and replaces the SDK query.
+			expect(switched.pid).toBe(original.pid);
+			const originalQuery = proofMarks().find(
+				(mark) =>
+					mark.kind === "query" &&
+					mark.pid === original.pid &&
+					mark.env["CLAUDE_CONFIG_DIR"] === source.configDir,
+			);
+			const switchedQuery = proofMarks().find(
+				(mark) =>
+					mark.kind === "query" &&
+					mark.pid === switched.pid &&
+					mark.env["CLAUDE_CONFIG_DIR"] === target.configDir,
+			);
+			if (originalQuery?.kind !== "query" || switchedQuery?.kind !== "query")
+				throw new Error("Missing account query identity");
+			expect(switchedQuery.queryId).not.toBe(originalQuery.queryId);
+			expect(
+				proofMarks().filter(
+					(mark) =>
+						mark.kind === "query-closed" &&
+						mark.queryId === originalQuery.queryId,
+				),
+			).toHaveLength(1);
 			const verifyFork = async (historyAfter: typeof historyBefore) => {
 				// Coverage must include both receipt bounds. While account 2's
 				// repeated handoff is held, its user message follows account 1's
