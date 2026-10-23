@@ -44,6 +44,7 @@ import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
+import { CodexAccountResourcesLive } from "../../../provider/codex/codex-account-resources.js";
 import { CursorAccountResourcesLive } from "../../../provider/cursor/cursor-account-resources.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import {
@@ -830,9 +831,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	)
 		.pipe(Layer.provideMerge(stateLayer))
 		.pipe(Layer.provideMerge(auxiliaryServices));
-	const registryState = CursorAccountResourcesLive(configDir).pipe(
-		Layer.provideMerge(registryBase),
-	);
+	const registryState = Layer.merge(
+		CursorAccountResourcesLive(configDir),
+		CodexAccountResourcesLive(configDir),
+	).pipe(Layer.provideMerge(registryBase));
 
 	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
 		Layer.provideMerge(

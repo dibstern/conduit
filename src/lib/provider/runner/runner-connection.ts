@@ -203,16 +203,13 @@ export const connectRunner = (options: {
 						const helloFailure = runnerHelloFailure(
 							message,
 							"runner",
-							options.driverKind,
+							options.driverKind ?? "claude",
 							options.cursorBackendUrl,
 						);
-						// Runner builds predating driverKind were all Claude.
 						if (
 							helloFailure ||
 							message.runnerId !== options.runnerId ||
 							message.sessionId !== options.sessionId ||
-							(message.driverKind ?? "claude") !==
-								(options.driverKind ?? "claude") ||
 							(options.pid !== undefined && message.pid !== options.pid)
 						) {
 							finish(

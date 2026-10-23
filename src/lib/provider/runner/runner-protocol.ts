@@ -228,10 +228,13 @@ export function runnerHelloFailure(
 		expectedDriverKind !== undefined &&
 		(hello.driverKind ?? "claude") !== expectedDriverKind
 	)
-		return runnerFailure(
-			"runner hello",
-			`Runner driver mismatch: ${peer} speaks ${hello.driverKind ?? "claude"}, expected ${expectedDriverKind}`,
-		);
+		return {
+			...runnerFailure(
+				"runner hello",
+				`Runner driver mismatch: ${peer} speaks ${hello.driverKind ?? "claude"}, expected ${expectedDriverKind}`,
+			),
+			code: "runner_incompatible",
+		};
 	return undefined;
 }
 
