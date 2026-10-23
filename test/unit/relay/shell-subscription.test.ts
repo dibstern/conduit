@@ -24,6 +24,7 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { subscribeDaemonShell } from "../../../src/lib/domain/daemon/Services/shell-subscription.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
@@ -1061,6 +1062,53 @@ describe("subscribeShell", () => {
 	);
 
 	it.effect(
+		"EA30 resumed daemon Shell retains Project Provenance for a deleted row",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* commit([sessionCreated("shell-deleted")]);
+				const config = yield* ConfigTag;
+				const projects = Stream.succeed({
+					_tag: "projects" as const,
+					projects: [
+						{
+							slug: config.slug,
+							title: "Test",
+							folders: [config.projectDir] as const,
+						},
+					],
+				});
+				const initial = yield* subscribeDaemonShell({}, projects).pipe(
+					Stream.take(3),
+					Stream.runCollect,
+				);
+				const snapshot = initial[1];
+				if (snapshot?._tag !== "snapshot" || snapshot.resumePoint === undefined)
+					return yield* Effect.die("expected resumable snapshot");
+				yield* commit([sessionDeleted("shell-deleted")]);
+				const resumed = yield* subscribeDaemonShell(
+					{
+						resumeFromSequence: snapshot.sequence,
+						resumeBase: { sequence: snapshot.sequence },
+						resumePoint: snapshot.resumePoint,
+					},
+					projects,
+				).pipe(Stream.take(3), Stream.runCollect);
+				expect(resumed).toMatchObject([
+					{ _tag: "projects" },
+					{
+						_tag: "remove",
+						id: "shell-deleted",
+						projectSlug: "test-project",
+						sequence: yield* readModelVersion,
+						deleted: true,
+					},
+					{ _tag: "synchronized" },
+				]);
+			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
+	);
+
+	it.effect(
 		"resume after a parent deletion is told both it and its child are deleted",
 		() =>
 			Effect.gen(function* () {
@@ -1081,8 +1129,20 @@ describe("subscribeShell", () => {
 						JSON.stringify(a).localeCompare(JSON.stringify(b)),
 					),
 				).toEqual([
-					{ _tag: "remove", id: "shell-child", sequence, deleted: true },
-					{ _tag: "remove", id: "shell-parent", sequence, deleted: true },
+					{
+						_tag: "remove",
+						id: "shell-child",
+						sequence,
+						deleted: true,
+						projectSlug: "test-project",
+					},
+					{
+						_tag: "remove",
+						id: "shell-parent",
+						sequence,
+						deleted: true,
+						projectSlug: "test-project",
+					},
 				]);
 			}).pipe(
 				Effect.provide(
@@ -1123,6 +1183,7 @@ describe("subscribeShell", () => {
 					id: "shell-c",
 					sequence: yield* readModelVersion,
 					deleted: true,
+					projectSlug: "test-project",
 				});
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
@@ -1328,8 +1389,20 @@ describe("subscribeShell", () => {
 						JSON.stringify(a).localeCompare(JSON.stringify(b)),
 					),
 				).toEqual([
-					{ _tag: "remove", id: "shell-child", sequence, deleted: true },
-					{ _tag: "remove", id: "shell-parent", sequence, deleted: true },
+					{
+						_tag: "remove",
+						id: "shell-child",
+						sequence,
+						deleted: true,
+						projectSlug: "test-project",
+					},
+					{
+						_tag: "remove",
+						id: "shell-parent",
+						sequence,
+						deleted: true,
+						projectSlug: "test-project",
+					},
 				]);
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(

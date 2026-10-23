@@ -187,6 +187,7 @@ export const recoverClaudeRunnerCommands = (
 									aborted: false,
 									autoSettleAfterDays,
 									shellEnv,
+									shellConfig: call?.shellConfig ?? input.shellConfig,
 									claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
 									input: {
 										...input,
@@ -197,6 +198,7 @@ export const recoverClaudeRunnerCommands = (
 													workspaceRoot: call.workspaceRoot,
 													extraFolders: call.extraFolders,
 													shellEnv: call.shellEnv,
+													shellConfig: call.shellConfig,
 												}
 											: {}),
 										instanceId,

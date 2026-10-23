@@ -27,6 +27,8 @@ import {
 import * as Failure from "../effect/failure-classification.js";
 import { ENV } from "../env.js";
 import { isRecord } from "../utils.js";
+import { EventDelivery } from "./event-audiences.js";
+import { CurrentEventDelivery } from "./event-delivery.js";
 import { getClientIp, isLoopbackAddress } from "./http-utils.js";
 import {
 	type AttachDaemonProject,
@@ -277,6 +279,8 @@ const runRpcWebSocketConnection = <R>(
 ) =>
 	Effect.scoped(
 		Effect.gen(function* () {
+			const delivery = new EventDelivery();
+			yield* Effect.addFinalizer(() => Effect.sync(() => delivery.close()));
 			const pendingPinChanges = new Map<
 				RpcMessage.RequestEncoded["id"],
 				() => void
@@ -368,6 +372,7 @@ const runRpcWebSocketConnection = <R>(
 				concurrency: RPC_CONNECTION_CONCURRENCY,
 				spanPrefix: "RpcServer",
 			}).pipe(
+				Effect.provideService(CurrentEventDelivery, delivery),
 				Effect.provideService(
 					RpcServer.Protocol,
 					onSuccessfulShutdownResponse

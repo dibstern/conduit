@@ -19,6 +19,7 @@ import {
 	legacyStopOwnersQuery,
 	sessionRunOwnersQuery,
 } from "../../../provider/session-run-settlement.js";
+import { CurrentEventDelivery } from "../../../server/event-delivery.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
 	PendingInteractionServiceTag,
@@ -32,6 +33,7 @@ import type {
 	ProviderTurnServicePrepareInput,
 } from "./provider-turn-service.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
@@ -188,7 +190,12 @@ const materializeOpenCodeSession = (
 			sourceSessionId: row.id,
 		});
 		orchestrationEngine.bindSession(session.id, account.id);
-		wsHandler.setClientSession(input.clientId, session.id);
+		wsHandler.setClientSession(
+			input.clientId,
+			session.id,
+			(yield* ConfigTag).slug,
+			yield* CurrentEventDelivery,
+		);
 		log.info(
 			`client=${input.clientId} materialized OpenCode session ${session.id} from local session ${input.sessionId}`,
 		);

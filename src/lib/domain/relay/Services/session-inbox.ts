@@ -19,7 +19,10 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
 import { accountLimit } from "../../../contracts/account-limit.js";
-import { LimitRecoverySchema } from "../../../contracts/limit-recovery.js";
+import {
+	type AccountSwitchBusy,
+	LimitRecoverySchema,
+} from "../../../contracts/limit-recovery.js";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
 import {
@@ -346,6 +349,7 @@ type SendTurnError = Effect.Error<ReturnType<ProviderTurnService["sendTurn"]>>;
 export type SessionInboxError =
 	| SqlError
 	| ProviderInstanceFailure
+	| AccountSwitchBusy
 	| ClaudeEventPersistFailure
 	| SendTurnError
 	| Effect.Error<ReturnType<Continuation["requestContinuation"]>>;
@@ -675,8 +679,6 @@ export const SessionInboxLive = Layer.effect(
 			(command: "Cancel" | "SendNow") =>
 			(target: SessionInboxTarget & { readonly interrupt?: boolean }) =>
 				Effect.gen(function* () {
-					if (command === "SendNow")
-						yield* assertSessionRunnerAvailable(target.sessionId, registry);
 					const runNow = command === "SendNow" && target.interrupt;
 					if (runNow && runNowInFlight.has(target.inputId))
 						return "accepted" as const;
@@ -684,6 +686,18 @@ export const SessionInboxLive = Layer.effect(
 					return yield* serialised(target.sessionId)(
 						Effect.gen(function* () {
 							const view = yield* readView(target.sessionId);
+							if (command === "SendNow") {
+								const account = view.provider
+									? yield* accounts
+											.resolve({ _tag: "Id", id: view.provider })
+											.pipe(Effect.option)
+									: Option.none<Account>();
+								yield* assertSessionRunnerAvailable(
+									target.sessionId,
+									registry,
+									Option.getOrUndefined(account),
+								);
+							}
 							const decision = decideInbox(target.sessionId, view, {
 								_tag: command,
 								inputId: target.inputId,
@@ -808,8 +822,17 @@ export const SessionInboxLive = Layer.effect(
 				serialised(input.sessionId)(
 					Effect.gen(function* () {
 						// Busy and approval-blocked inputs may never reach runner execution.
-						yield* assertSessionRunnerAvailable(input.sessionId, registry);
 						const view = yield* readView(input.sessionId, input.inputId);
+						const account = view.provider
+							? yield* accounts
+									.resolve({ _tag: "Id", id: view.provider })
+									.pipe(Effect.option)
+							: Option.none<Account>();
+						yield* assertSessionRunnerAvailable(
+							input.sessionId,
+							registry,
+							Option.getOrUndefined(account),
+						);
 						const decision = decideInbox(input.sessionId, view, {
 							_tag: "Submit",
 							inputId: input.inputId,

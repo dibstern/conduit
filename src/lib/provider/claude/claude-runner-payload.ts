@@ -173,6 +173,7 @@ import { toSdkPermissionMode } from "./permission-mode-map.js";
 import { captureClaudeSdkMessage } from "./sdk-trace-capture.js";
 import type {
 	CanUseTool,
+	ClaudePreWarmSessionInput,
 	ClaudeSendTurnInput,
 	ClaudeSessionContext,
 	ClaudeSessionController,
@@ -254,6 +255,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	| "readGoalStatus"
 > & {
 	readonly accountResources?: RunnerProviderInstanceDeps["accountResources"];
+	readonly isBackgroundBusy?: () => boolean;
 	readonly onSubagentFinalizationComplete?: () => void;
 	readonly onTurnStateChanged?: (sessionId: string, inFlight: boolean) => void;
 	readonly onAbandonedRun?: (inputId: string) => void;
@@ -261,7 +263,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 		sessionId: string,
 		nativeSessionId: string,
 	) => void;
-	readonly prepareQuery?: () => Promise<void>;
+	readonly prepareQuery?: (input: ClaudePreWarmSessionInput) => Promise<void>;
 };
 
 export interface ClaudeProviderRuntimeState {
@@ -344,7 +346,10 @@ export const makeClaudeSessionRunner = (
 
 function sessionFailure(operation: string, cause: unknown): SessionFailure {
 	const failure =
-		cause instanceof ProviderInstanceFailure ? cause.cause : cause;
+		cause instanceof ProviderInstanceFailure ||
+		(cause instanceof ClaudeBoundaryError && cause.operation === "prepareQuery")
+			? cause.cause
+			: cause;
 	return {
 		operation:
 			cause instanceof ProviderInstanceFailure ? cause.operation : operation,
@@ -554,7 +559,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			)
 				return;
 			yield* this.warmedQueries.preWarmEffect(
-				normalizeClaudeLaunchInput(command.input),
+				normalizeClaudeLaunchInput({
+					...command.input,
+					shellConfig: command.input.shellConfig ?? command.shellConfig,
+				}),
 				command.claudeSettingsOverrides,
 				command.input.shellEnv ?? command.shellEnv,
 				this.getPermissionBridge(),
@@ -947,10 +955,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					{
 						...input,
 						root: input.workspaceRoot,
-						shellEnv: input.shellEnv,
+						shellConfig: input.shellConfig,
 					},
 				) &&
-				!(yield* hasPendingTurn(this.stateRef, sessionId))
+				!(yield* hasPendingTurn(this.stateRef, sessionId)) &&
+				!this.deps.isBackgroundBusy?.()
 			) {
 				return yield* this.rebindSessionEffect(existingCtx, input);
 			} else if (existingCtx && this.hasAgentChanged(existingCtx, input)) {
@@ -1139,11 +1148,12 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				const warmed = yield* this.warmedQueries.takeEffect(
 					sessionId,
 					launchOptions,
-					input.configDir,
+					{ ...input, root: input.workspaceRoot },
 				);
-				if (!warmed && this.deps.prepareQuery)
+				const prepareQuery = this.deps.prepareQuery;
+				if (!warmed && prepareQuery)
 					yield* Effect.tryPromise({
-						try: this.deps.prepareQuery,
+						try: () => prepareQuery(launchInput),
 						catch: (cause) =>
 							new ClaudeBoundaryError({ operation: "prepareQuery", cause }),
 					});
@@ -1187,7 +1197,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					login: {
 						...input,
 						root: input.workspaceRoot,
-						shellEnv: input.shellEnv,
+						shellConfig: input.shellConfig,
 					},
 					instanceId: input.instanceId ?? "claude",
 					nativeThread: launchInput.nativeThread,

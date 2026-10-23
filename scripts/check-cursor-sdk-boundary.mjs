@@ -1,10 +1,25 @@
 #!/usr/bin/env node
 
 import { readdirSync, readFileSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import ts from "typescript";
 
 const adapter = resolve("src/lib/provider/cursor/sdk-real.ts");
+// Named real-SDK contract references only. Production imports stay in the port.
+const testSdkImportAllowances = {
+	"stored-login-wire-reference":
+		"test/helpers/cursor-credentials-sdk-reference.mjs",
+	"installed-error-contract":
+		"test/e2e/provider/cursor-errors-real-sdk.test.ts",
+};
+const allowedTests = new Set(
+	Object.entries(testSdkImportAllowances).map(([name, file]) => {
+		const path = resolve(file);
+		if (!path.startsWith(`${resolve("test")}${sep}`))
+			throw new Error(`Cursor SDK allowance ${name} must be under test/**`);
+		return path;
+	}),
+);
 let violations = 0;
 
 function check(directory) {
@@ -14,7 +29,11 @@ function check(directory) {
 			if (!["node_modules", "generated"].includes(entry.name)) check(path);
 			continue;
 		}
-		if (path === adapter || !/\.(?:[cm]?[jt]s|svelte)$/.test(entry.name)) {
+		if (
+			path === adapter ||
+			allowedTests.has(path) ||
+			!/\.(?:[cm]?[jt]s|svelte)$/.test(entry.name)
+		) {
 			continue;
 		}
 		const source = ts.createSourceFile(

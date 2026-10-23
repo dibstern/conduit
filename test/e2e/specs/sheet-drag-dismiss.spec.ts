@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
-import { dragDown } from "../helpers/sheet-drag.js";
+import { dragSheet } from "../helpers/sheet-drag.js";
 
 test.use({
 	recording: "chat-simple",
@@ -24,15 +24,15 @@ async function openOverflowSheet(
 	return sheet;
 }
 
-test("phone: dragging the session sheet down from its top follows the finger and dismisses", async ({
+test("phone: dragging the session sheet up from its handle follows the finger and dismisses", async ({
 	page,
 	relayUrl,
 }) => {
 	const sheet = await openOverflowSheet(page, relayUrl);
-	const { top, end } = await dragDown(page, sheet, 200, false);
+	const { top, end } = await dragSheet(page, sheet, -200, false, -10);
 	// Mid-drag the sheet tracks the finger instead of scrolling its content.
 	const moved = await sheet.boundingBox();
-	expect(moved?.y ?? top).toBeGreaterThan(top + 120);
+	expect(moved?.y ?? top).toBeLessThan(top - 120);
 	await end();
 	await expect(sheet).toHaveCount(0);
 });
@@ -42,7 +42,7 @@ test("phone: a short drag springs the session sheet back open", async ({
 	relayUrl,
 }) => {
 	const sheet = await openOverflowSheet(page, relayUrl);
-	const { top } = await dragDown(page, sheet, 30);
+	const { top } = await dragSheet(page, sheet, -30, true, -10);
 	await expect(sheet).toBeVisible();
 	await expect
 		.poll(async () => (await sheet.boundingBox())?.y)
@@ -58,17 +58,17 @@ test("phone: dragging a scrolled sheet body scrolls without dismissing", async (
 	const body = sheet.locator("[data-sheet-body]");
 	await expect
 		.poll(() => body.evaluate((node) => node.scrollHeight - node.clientHeight))
-		.toBeGreaterThan(40);
+		.toBeGreaterThan(80);
 	await body.evaluate((node) => {
 		node.scrollTop = 40;
 	});
 	const top = (await sheet.boundingBox())?.y;
-	await dragDown(page, body, 30, true, 30);
+	await dragSheet(page, body, -30, true, -30);
 	await expect(sheet).toBeVisible();
 	expect((await sheet.boundingBox())?.y).toBeCloseTo(top ?? 0, 0);
 	await expect
 		.poll(() => body.evaluate((node) => node.scrollTop))
-		.toBeLessThan(40);
+		.toBeGreaterThan(40);
 	await testInfo.attach("scrolled-sheet-body", {
 		body: await page.screenshot(),
 		contentType: "image/png",

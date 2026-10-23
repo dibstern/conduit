@@ -39,6 +39,29 @@ create or close these lifetimes.
 Project lookups verify current registration. After close completes, a registered
 project can open a new owner generation; retained handles stay closed forever.
 
+## Audience
+
+An **Audience** names who an event is for: one session and its Project, one
+Project, every connection, or one PTY and its Project. A typed subscription table
+decides its Audience when it opens. Session Directory resolves ownership at open;
+relay-backed streams retain their producer's Project Provenance. Failed ownership
+lookups and requests for another producer's Project fail the subscription.
+Mixed-project streams carry an Audience per row. Approvals and questions have
+global Audience.
+Session Row deletion tombstones retain their producer's Project Provenance even
+after the Session disappears, so a resumed stream can address each removal.
+
+## Interests
+
+**Interests** are the sessions and Projects a connection views and the PTYs it
+is attached to, with each PTY attachment qualified by its Project. Each
+subscription holds its Interests until its scope closes. Overlapping views retain
+independent holds. Session selection replaces that client's selected Interests.
+If Interests stop covering an open subscription's Audience, the subscription is
+interrupted, including pending producer work. A reconnect starts empty and
+restores views by subscribing again. Interests are never persisted across daemon
+restarts.
+
 ## Repository Identity
 
 A Project Folder's Repository Identity is its canonical repository `key`, display

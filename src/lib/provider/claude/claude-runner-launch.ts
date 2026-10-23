@@ -364,9 +364,79 @@ export const makeClaudeRunnerLaunch = (
 								: {}),
 							queryFactory: createQuery,
 							...(sessionForkSdk ? { sessionForkSdk } : {}),
-							prepareQuery: async () => {
-								// First warming prepares the snapshot in the command path.
-								// Revalidate native sources only when creating another query.
+							prepareQuery: async (input) => {
+								// Only an actual query replacement may discard the old login.
+								// Busy state can change while file settings are loading.
+								if (
+									snapshot &&
+									!sameClaudeLogin(
+										{ ...snapshot.input, root: snapshot.input.workspaceRoot },
+										{ ...input, root: input.workspaceRoot },
+									)
+								) {
+									snapshot = undefined;
+									frozenSnapshot = undefined;
+									fileSettings = undefined;
+									replayedSettings = undefined;
+								}
+								if (
+									settingsResolver &&
+									(!snapshot ||
+										!resumeSessionId ||
+										(frozenSnapshot && !replayedSettings))
+								) {
+									const resolver = settingsResolver;
+									const options: Options = frozenSnapshot?.options ?? {
+										cwd: input.workspaceRoot,
+										...(input.extraFolders?.length > 0
+											? { additionalDirectories: [...input.extraFolders] }
+											: {}),
+										settingSources: ["user", "project", "local"],
+										settings: buildClaudeFlagSettings(launchSettings),
+										env: makeClaudeSdkEnv({
+											configDir: input.configDir,
+											baseEnv: input.shellEnv ?? shellEnv,
+											...(input.account?.env
+												? { accountEnv: input.account.env }
+												: {}),
+										}),
+									};
+									if (!fileSettingsPreparation)
+										fileSettingsPreparation = (async () => {
+											try {
+												applyClaudeSdkProcessLogin(
+													input.configDir,
+													options.cwd ?? process.cwd(),
+												);
+												if (frozenSnapshot)
+													replayedSettings =
+														await replayClaudeRunnerFileSettings(
+															frozenSnapshot.fileSettings,
+															options,
+															resolver,
+															callbacks.isCandidate(),
+															input.configDir,
+														);
+												else
+													fileSettings = await captureClaudeRunnerFileSettings(
+														options,
+														resolver,
+														input.configDir,
+													);
+											} catch (cause) {
+												if (frozenSnapshot) throw cause;
+												log.warn(
+													"Unable to capture Claude file settings for runner upgrade",
+													cause,
+												);
+											}
+										})();
+									try {
+										await fileSettingsPreparation;
+									} finally {
+										fileSettingsPreparation = undefined;
+									}
+								}
 								if (
 									!frozenSnapshot ||
 									!snapshot ||
@@ -387,6 +457,7 @@ export const makeClaudeRunnerLaunch = (
 								? { subagentPollTimeoutMs: testSubagentPollTimeoutMs }
 								: {}),
 							onSubagentFinalizationComplete: reportUpgradeState,
+							isBackgroundBusy: () => callbacks.isBackgroundBusy(1),
 							onTurnStateChanged: (_sessionId, inFlight) =>
 								callbacks.turnStateChanged(inFlight),
 							onAbandonedRun: (inputId) =>
@@ -475,7 +546,10 @@ export const makeClaudeRunnerLaunch = (
 					if (command.type === "pre-warm" && command.settingsSnapshot)
 						frozenSnapshot = command.settingsSnapshot;
 					const input = normalizeClaudeLaunchInput(
-						command.input,
+						{
+							...command.input,
+							shellConfig: command.input.shellConfig ?? command.shellConfig,
+						},
 						defaultLaunchConfig,
 					);
 					if (
@@ -498,6 +572,9 @@ export const makeClaudeRunnerLaunch = (
 							: {}),
 						...(input.account ? { account: input.account } : {}),
 						...(input.shellEnv ? { shellEnv: input.shellEnv } : {}),
+						...(input.shellConfig !== undefined
+							? { shellConfig: input.shellConfig }
+							: {}),
 						workspaceRoot: input.workspaceRoot,
 						extraFolders: input.extraFolders ?? [],
 						providerState: input.providerState,
@@ -540,99 +617,20 @@ export const makeClaudeRunnerLaunch = (
 			},
 			executeEffect: (runner, command) =>
 				Effect.gen(function* () {
+					// A hint cannot rebind a live controller. Unused warm queries can
+					// still be replaced before the first send.
 					if (
-						(command.type === "send-turn" || command.type === "pre-warm") &&
+						command.type === "pre-warm" &&
 						snapshot &&
 						launchInput &&
 						!sameClaudeLogin(
 							{ ...snapshot.input, root: snapshot.input.workspaceRoot },
 							{ ...launchInput, root: launchInput.workspaceRoot },
-						)
-					) {
-						// A hint cannot rebind a live controller. Unused warm queries can
-						// still be replaced, while a real send waits for quiescence.
-						if (
-							command.type === "pre-warm" &&
-							(yield* runner.getNativeSessionEffect?.(sessionId) ??
-								Effect.succeed(undefined))
-						)
-							return;
-						// Rebinds read the selected account's native settings and env.
-						snapshot = undefined;
-						frozenSnapshot = undefined;
-						fileSettings = undefined;
-						replayedSettings = undefined;
-					}
-					if (
-						(command.type === "pre-warm" || command.type === "send-turn") &&
-						settingsResolver &&
-						(!snapshot ||
-							!resumeSessionId ||
-							(frozenSnapshot && !replayedSettings))
-					) {
-						const resolver = settingsResolver;
-						const input = normalizeClaudeLaunchInput(
-							command.input,
-							defaultLaunchConfig,
-						);
-						const options: Options = frozenSnapshot?.options ?? {
-							cwd: input.workspaceRoot,
-							...(input.extraFolders?.length > 0
-								? { additionalDirectories: [...input.extraFolders] }
-								: {}),
-							settingSources: ["user", "project", "local"],
-							settings: buildClaudeFlagSettings(
-								command.claudeSettingsOverrides,
-							),
-							env: makeClaudeSdkEnv({
-								configDir: input.configDir,
-								baseEnv: shellEnv,
-								...(input.account?.env
-									? { accountEnv: input.account.env }
-									: {}),
-							}),
-						};
-						if (!fileSettingsPreparation)
-							fileSettingsPreparation = (async () => {
-								try {
-									applyClaudeSdkProcessLogin(
-										input.configDir,
-										options.cwd ?? process.cwd(),
-									);
-									if (frozenSnapshot)
-										replayedSettings = await replayClaudeRunnerFileSettings(
-											frozenSnapshot.fileSettings,
-											options,
-											resolver,
-											callbacks.isCandidate(),
-											input.configDir,
-										);
-									else
-										fileSettings = await captureClaudeRunnerFileSettings(
-											options,
-											resolver,
-											input.configDir,
-										);
-								} catch (cause) {
-									if (frozenSnapshot) throw cause;
-									log.warn(
-										"Unable to capture Claude file settings for runner upgrade",
-										cause,
-									);
-								}
-							})();
-						const preparation = fileSettingsPreparation;
-						yield* Effect.tryPromise({
-							try: () => preparation,
-							catch: (cause) => runnerFailure("prepare runner settings", cause),
-						}).pipe(
-							Effect.ensuring(
-								Effect.sync(() => {
-									fileSettingsPreparation = undefined;
-								}),
-							),
-						);
-					}
+						) &&
+						(yield* runner.getNativeSessionEffect?.(sessionId) ??
+							Effect.succeed(undefined))
+					)
+						return;
 					const result = yield* runner.executeEffect(command).pipe(
 						Effect.tap(() => {
 							const frozen = frozenSnapshot;

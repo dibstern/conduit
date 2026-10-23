@@ -13,7 +13,7 @@
 	import Icon from "../ui/Icon.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
-	import BlockGrid from '../ui/BlockGrid.svelte';
+	import ConduitMark from '../ui/ConduitMark.svelte';
 	import Surface from "../ui/Surface.svelte";
 	import ToolFullDetail from "./ToolFullDetail.svelte";
 
@@ -100,7 +100,7 @@
 		{/each}
 	{/if}
 	{#if duration !== undefined}<time class="ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{fmtDuration(duration)}</time>{/if}
-	{#if running}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+	{#if running}<ConduitMark size={16} variant="running" />
 	{:else if message.status === "error" || message.isError}<span class="shrink-0 text-error"><Icon name="circle-alert" size={12} /></span>{/if}
 	</Disclosure>
 

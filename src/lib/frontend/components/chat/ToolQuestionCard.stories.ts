@@ -89,6 +89,11 @@ export const Default: Story = {
 
 export const Active: Story = {
 	args: { message: mockQuestionRunning },
+	play: async ({ canvasElement }) => {
+		await expect(
+			canvasElement.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
+	},
 };
 
 export const WaitingWithoutQuestionData: Story = {

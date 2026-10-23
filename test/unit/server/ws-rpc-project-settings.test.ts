@@ -62,7 +62,7 @@ const open = Effect.gen(function* () {
 	const subscribe = Effect.gen(function* () {
 		const q = yield* Queue.unbounded<ProjectSettingsEnvelope>();
 		yield* Stream.runForEach(
-			client.SubscribeProjectSettings({ projectSlug: "project" }),
+			client.SubscribeProjectSettings({ projectSlug: "test-project" }),
 			(envelope) => Queue.offer(q, envelope),
 		).pipe(Effect.forkScoped);
 		const snapshot = yield* Queue.take(q);
@@ -73,6 +73,18 @@ const open = Effect.gen(function* () {
 });
 
 describe("SubscribeProjectSettings", () => {
+	it.effect("EA21 standalone project mismatch reaches the RPC client", () =>
+		Effect.gen(function* () {
+			const client = yield* RpcTest.makeClient(WsRpcGroup);
+			const result = yield* client
+				.SubscribeProjectSettings({ projectSlug: "another-project" })
+				.pipe(Stream.runHead, Effect.result);
+			expect(result).toMatchObject({
+				_tag: "Failure",
+				failure: { _tag: "WsRpcError", code: "project-mismatch" },
+			});
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
+	);
 	it.effect("opens with a snapshot of every current project setting", () =>
 		Effect.gen(function* () {
 			const { subscribe } = yield* open;

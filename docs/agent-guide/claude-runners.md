@@ -131,8 +131,8 @@ state; it never synthesizes completion from a command result.
 Project folder changes rebuild the relay. At send admission, the server compares
 an existing runner's launch snapshot with the current main and extra folders.
 An idle, quiescent runner with different folders drains through end-session;
-the send starts a new runner with its last reported resume cursor. A busy runner
-serves the current send and switches on a later send after it becomes idle.
+the send starts a new runner with its last reported resume cursor. Folder changes
+hold the send until the runner is idle and quiescent.
 Pre-warm skips an existing runner with different folders. An adopted runner that stamps run ids
 continues normally without a launch snapshot. Changing the main folder also
 stops runners registered under the old folder, since their runtime directory
@@ -141,10 +141,24 @@ File mentions, the file browser, terminal cwd and Conduit's Claude settings look
 continue to use only the main folder.
 
 Claude runners advertise `rebindsAccount: true` in hello. A same-driver account
-continuation retains the session controller and waits for quiescence before the
-next send closes its SDK query and opens one with the selected login. Login
-comparison includes account identity, account env and frozen shell env as well
-as the config folder. The new query reads its account's native settings; an old
+continuation retains the session controller. Same-account login changes, including
+account env and declared project shell configuration, defer while background work
+runs. The send uses the current login and the server logs the deferral. The runner
+keeps reporting its old snapshot, so the next quiet send closes its SDK query and
+opens one with the new settings. Snapshot and native settings replacement happen
+during query preparation, after the payload commits to the rebind.
+
+An account switch while busy is refused at `input.submit`, before admission, so
+the browser restores the text as a composer draft. `input.sendNow` checks the same
+boundary for queued inputs. The daemon also refuses a switched-account send if
+the runner becomes busy after submission. That backstop leaves the admitted user
+message visible and reports an error. An account switch needs a fresh native
+session on the new config dir; sending it to the old query would interrupt its
+background work. Account identity includes the account id and resolved config
+folder. Same-account settings include account env and declared shell overrides
+and interactive mode. Captured shell env is passed to the launch but never
+compared. Folder changes still wait for quiescence.
+The new query reads its account's native settings; an old
 upgrade snapshot cannot supply another account's credentials. Goal fact
 deduplication, message/run ownership and interaction routing remain with the
 controller, including native-resume fallback. Old query callbacks keep their
@@ -166,8 +180,12 @@ are logged without failing the user's turn; retries at later turn boundaries use
 bounded backoff.
 
 The runner reports quiescence only after its turns, background work, subagent
-finalizers, approval waiters, and unacknowledged outputs settle. Before the server
-swaps its session route, the old runner atomically verifies that state and its
+finalizers, approval waiters, and unacknowledged outputs settle. Quiescence and
+retire-when-quiet share one background-busy predicate. Account rebind checks use
+that predicate while excluding the executing send's own command and admitted
+turn; other commands, SDK turns, background tasks, finalizers and held outputs
+still block a rebind. Before the server swaps its session route, the old runner
+atomically verifies that state and its
 activity revision. Retirement then uses the existing stop path. Shutdown notices from the retired
 query cannot clear the replacement's state; sink-specific releases still reach
 the server and dispose their retained sinks, abort fibers and history.

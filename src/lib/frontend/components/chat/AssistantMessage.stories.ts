@@ -171,7 +171,7 @@ export const RichMarkdown: Story = {
 		await expect(getComputedStyle(stripe).backgroundColor).toContain("0.03");
 		await expect(
 			Number.parseFloat(getComputedStyle(inline).fontSize),
-		).toBeCloseTo(11.96, 2);
+		).toBeCloseTo(12.88, 2);
 	},
 };
 export const RichMarkdownLight: Story = {

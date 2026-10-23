@@ -3,6 +3,7 @@
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
+	import { on } from "svelte/events";
 	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
 	import SurfacingAskContext from "./SurfacingAskContext.svelte";
 	import { MediaQuery } from "svelte/reactivity";
@@ -27,6 +28,7 @@
 	import type { BackgroundTask } from "../../../shared-types.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
 	import {
 		countsPhrase,
@@ -470,6 +472,11 @@
 		await tick();
 		panelEl?.querySelector(`[data-part="${CSS.escape(part.uuid)}"]`)?.scrollIntoView({ block: "nearest" });
 	}
+
+	// Safari only paints :active when a touch listener covers the target.
+	function enableTouchActive(node: HTMLDivElement) {
+		return { destroy: on(node, "touchstart", () => {}, { passive: true }) };
+	}
 </script>
 
 {#snippet markLabel(pin: SurfacePin)}
@@ -545,7 +552,7 @@
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
 							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={expanded}
 							onclick={toggleLog}>
-							{#if live}<Icon name="loader-circle" size={13} class="animate-spin shrink-0 text-accent" />
+							{#if live}<ConduitMark size={16} variant="running" />
 							{:else}<Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-dimmer" />{/if}
 							<span class="text-[14px] font-semibold text-text">{live ? "Working" : "Worked"}</span>
 							{#if live && !turn.user}
@@ -611,7 +618,7 @@
 			{/if}
 		</div>
 		{#if !minimised && (logMounted || showTicker)}
-			<div class="step-log mt-[6px]" hidden={!expanded && !showTicker} data-testid={live ? "turn-live-activity" : undefined}>
+			<div class="step-log mt-[6px]" use:enableTouchActive hidden={!expanded && !showTicker} data-testid={live ? "turn-live-activity" : undefined}>
 				{#if !expanded && earlierCount > 0}
 					<Button variant="ghost" size="content" tone="muted" hoverFill="none" align="start" touchTarget
 						class="py-[8px] text-[12px]" onclick={() => (expanded = logMounted = true)}>+ {earlierCount} earlier messages</Button>
@@ -668,6 +675,7 @@
 </div>
 
 <style>
+	.step-log :global(::selection) { background:var(--color-accent-bg); color:inherit; }
 	.surface-head-chips { display:contents; }
 	.turn-activity[data-minimised="true"] .turn-duration { min-width:0; flex-shrink:1; overflow:hidden; text-overflow:ellipsis; }
 	.mark-toast { display:flex; align-items:center; gap:10px; width:fit-content; max-width:100%; min-height:34px; margin:10px auto 2px; padding:4px 5px 4px 14px; border-radius:999px; background:var(--color-inverse-bg); color:var(--color-inverse-text); font-size:13px; box-shadow:0 8px 24px rgb(0 0 0 / .22); }

@@ -250,6 +250,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
 				"browser-tab-a",
 				"session-new",
+				"test-project",
+				undefined,
 			);
 		}).pipe(
 			Effect.scoped,
@@ -419,6 +421,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 			expect(wsHandler.setClientSession).toHaveBeenCalledWith(
 				"browser-tab-a",
 				"session-1",
+				"test-project",
+				undefined,
 			);
 		}).pipe(
 			Effect.scoped,
@@ -728,7 +732,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 									fork: sessionForkSdk,
 								},
 								shellEnv: () => ({
-									CLAUDE_CONFIG_DIR: "/current-project-config",
+									env: { CLAUDE_CONFIG_DIR: "/current-project-config" },
+									declared: {},
 								}),
 							}),
 						}),

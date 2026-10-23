@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { Schema } from "effect";
 import type { ClaudeConfigDir } from "../../contracts/claude-config-dir.js";
 import { ClaudeConfigDirSchema as ClaudeConfigDirWireSchema } from "../../contracts/claude-config-dir.js";
+import type { ProjectShellEnvConfig } from "../../contracts/project-shell-env.js";
 import { ClaudeBoundaryError } from "../event-sink-errors.js";
 
 export type { ClaudeConfigDir } from "../../contracts/claude-config-dir.js";
@@ -66,22 +67,53 @@ export const resolveClaudeAccountFolder = (
 export interface ClaudeLogin {
 	readonly account?: ClaudePreWarmSessionInput["account"];
 	readonly instanceId?: string | undefined;
-	readonly shellEnv?: ClaudePreWarmSessionInput["shellEnv"];
+	readonly shellConfig?: ProjectShellEnvConfig | undefined;
 	readonly configDir: ClaudeConfigDir;
 	readonly root: string;
 }
 
-/** A login includes the admitted identity and env, even when accounts share a folder. */
-export const sameClaudeLogin = (a: ClaudeLogin, b: ClaudeLogin): boolean =>
-	a.configDir._tag === b.configDir._tag &&
-	resolve(a.root, a.configDir.path) === resolve(b.root, b.configDir.path) &&
-	(a.account?.id ?? a.instanceId) === (b.account?.id ?? b.instanceId) &&
-	isDeepStrictEqual(a.account?.env, b.account?.env) &&
-	// PWD follows declared workspace moves without changing the query's login.
-	isDeepStrictEqual(
-		{ ...a.shellEnv, PWD: undefined },
-		{ ...b.shellEnv, PWD: undefined },
-	);
+interface ClaudeLoginKey {
+	readonly configDir: ClaudeConfigDir;
+	readonly accountId: string | undefined;
+	readonly accountEnv: Readonly<Record<string, string>> | undefined;
+	readonly shellConfig: ProjectShellEnvConfig | undefined;
+}
+
+const claudeLoginKey = (login: ClaudeLogin): ClaudeLoginKey => ({
+	configDir: {
+		...login.configDir,
+		path: resolve(login.root, login.configDir.path),
+	},
+	accountId: login.account?.id ?? login.instanceId,
+	accountEnv: login.account?.env,
+	shellConfig: login.shellConfig,
+});
+
+/** Captured shell values can change on every invocation without changing login. */
+export const claudeLoginChange = (
+	first: ClaudeLogin,
+	second: ClaudeLogin,
+): "None" | "Settings" | "Account" => {
+	const a = claudeLoginKey(first);
+	const b = claudeLoginKey(second);
+	if (
+		!isDeepStrictEqual(a.configDir, b.configDir) ||
+		a.accountId !== b.accountId
+	)
+		return "Account";
+	return isDeepStrictEqual(a.accountEnv, b.accountEnv) &&
+		// Older peers omit declared config; unknown alone must not trigger a rebind.
+		(a.shellConfig === undefined ||
+			b.shellConfig === undefined ||
+			isDeepStrictEqual(a.shellConfig, b.shellConfig))
+		? "None"
+		: "Settings";
+};
+
+export const sameClaudeLogin = (
+	first: ClaudeLogin,
+	second: ClaudeLogin,
+): boolean => claudeLoginChange(first, second) === "None";
 
 /** Read a recorded login, leaving absent launch metadata to the caller. */
 export function claudeLoginFromEnv(

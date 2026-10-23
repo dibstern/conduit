@@ -7,9 +7,10 @@
 		type PopoverPortalProps,
 	} from "bits-ui";
 	import { type Snippet, tick, untrack } from "svelte";
+	import { fade } from "svelte/transition";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { dimThemeColor } from "../../stores/theme.svelte.js";
-	import { dragToDismiss, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
+	import { dragToDismiss, sheetGlide, sheetPosition, settleMs, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
 	import SheetChrome from "./SheetChrome.svelte";
 	import {
 		backgroundInert,
@@ -30,6 +31,7 @@
 		open?: boolean | undefined;
 		onopenchange?: ((open: boolean) => void) | undefined;
 		presentation?: "popover" | "sheet" | "auto";
+		sheetEdge?: "bottom" | "top";
 		/** Sheet modality is opt-in so existing anchored popovers retain their behavior. */
 		modal?: boolean;
 		initialFocus?: "first" | "content";
@@ -74,6 +76,7 @@
 		open = $bindable(false),
 		onopenchange,
 		presentation = "popover",
+		sheetEdge = "bottom",
 		modal = false,
 		initialFocus = "first",
 		sheetBottomPadding = 12,
@@ -100,6 +103,7 @@
 	});
 	const sheet = $derived(presentation === "sheet" || (presentation === "auto" && autoSheet));
 	let scrimFade = $state({ progress: 0, settling: false });
+	const scrimStyle = $derived(sheetScrimStyle(scrimFade));
 	let sheetEl = $state<HTMLDivElement | null>(null);
 	let triggerEl = $state<HTMLButtonElement | null>(null);
 
@@ -127,7 +131,7 @@
 		return undefined;
 	});
 	$effect(() => {
-		if (!open || !sheet) scrimFade = { progress: 0, settling: false };
+		if (!sheet || (!open && sheetEdge === "bottom")) scrimFade = { progress: 0, settling: false };
 	});
 	$effect(() => {
 		if (open && sheet) return dimThemeColor();
@@ -166,12 +170,14 @@
 		role: "dialog",
 		"aria-modal": modal ? true : undefined,
 		...accessibleName,
-		class: "fixed inset-x-0 bottom-0 z-[var(--z-sheet)] w-full outline-hidden",
+		class: `${sheetEdge === "top" ? "relative pointer-events-auto" : "fixed inset-x-0 bottom-0"} z-[var(--z-sheet)] w-full outline-hidden`,
 		onOpenAutoFocus: (event) => {
 			rest.onOpenAutoFocus?.(event);
 			if (!event.defaultPrevented && initialFocus === "content") {
 				event.preventDefault();
-				sheetEl?.focus({ preventScroll: true });
+				// Bits can run this twice per open; never pull focus back out of the sheet.
+				if (!sheetEl?.contains(document.activeElement))
+					sheetEl?.focus({ preventScroll: true });
 			}
 		},
 		onCloseAutoFocus: (event) => {
@@ -205,7 +211,7 @@
 {/snippet}
 
 {#snippet scrim()}
-	<button type="button" tabindex="-1" aria-label="Close details" data-testid={sheetScrim?.testId ?? "popover-sheet-scrim"} class="pointer-events-auto fixed inset-0 z-[var(--z-sheet)] border-0 bg-backdrop p-0" style:z-index={sheetScrim?.zIndex} style={sheetScrimStyle(scrimFade)} onclick={() => handleOpenChange(false)} use:exemptFromBackgroundInert></button>
+	<button type="button" tabindex="-1" aria-label="Close details" data-testid={sheetScrim?.testId ?? "popover-sheet-scrim"} class="pointer-events-auto fixed inset-0 z-[var(--z-sheet)] border-0 bg-backdrop p-0" style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} style:z-index={sheetScrim?.zIndex} style:opacity={scrimStyle.opacity} style:transition={scrimStyle.transition} onclick={() => handleOpenChange(false)} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:sheetPosition={sheetEdge} use:exemptFromBackgroundInert></button>
 {/snippet}
 
 <BitsPopover.Root bind:open onOpenChange={handleOpenChange}>
@@ -222,13 +228,15 @@
 	{/if}<BitsPopover.Portal {...portalProps}>
 		{#if sheet}
 			{#if open && (!modal || sheetEl) && sheetScrim?.portalTo === undefined}{@render scrim()}{/if}
+			<div class={sheetEdge === "top" ? "pointer-events-none fixed inset-x-0 z-[var(--z-sheet)] overflow-hidden" : "contents"} style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} use:sheetPosition={sheetEdge}>
 			<BitsPopover.ContentStatic {...sheetContentProps} bind:ref={sheetEl}>
 				{#snippet child({ props })}
-					<div {...props} id={sheetContentProps.id} use:exemptFromBackgroundInert use:backgroundInert={modal && open} use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
-						<SheetChrome {footer} bottomPadding={sheetBottomPadding} bodyClass={className ?? ""}>{@render content()}</SheetChrome>
+					<div {...props} id={sheetContentProps.id} data-sheet-edge={sheetEdge} use:exemptFromBackgroundInert use:backgroundInert={modal && open} use:dragToDismiss={{ edge: sheetEdge, ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }} transition:sheetGlide|global={{ edge: sheetEdge, onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
+						<SheetChrome edge={sheetEdge} maxHeight={sheetEdge === "top" ? "max(0px, calc(100dvh - var(--sheet-top, 0px) - 64px))" : "90dvh"} {footer} bottomPadding={sheetBottomPadding} bodyClass={className ?? ""}>{@render content()}</SheetChrome>
 					</div>
 				{/snippet}
 			</BitsPopover.ContentStatic>
+			</div>
 		{:else}
 		<BitsPopover.Content {...contentProps}>
 			{#snippet child({ props, wrapperProps })}

@@ -204,7 +204,7 @@ export const readPublishedSessionGit = (
 	folders?: readonly [string, ...string[]],
 ) =>
 	sessionPublication(sessionId, folders).pipe(
-		Effect.map((state) => state?.git),
+		Effect.map((state): SessionGit | undefined => state?.git),
 	);
 
 export const readPublishedWorkspaceMissing = (

@@ -32,6 +32,11 @@ export const Pending: Story = {
 
 export const Running: Story = {
 	args: { message: mockToolRunning },
+	play: async ({ canvasElement }) => {
+		await expect(
+			canvasElement.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
+	},
 };
 
 export const RunningCodexBash: Story = {
@@ -109,6 +114,11 @@ export const ExpandedPreviewLoading: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByRole("button"));
 		await expect(canvas.getByText("Loading full output…")).toBeVisible();
+		await expect(
+			canvasElement.querySelector(
+				'.tool-full-detail [data-flow-glyph="running"]',
+			),
+		).toBeVisible();
 	},
 };
 
