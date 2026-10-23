@@ -335,7 +335,11 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 					inputId,
 					delivery: input.delivery,
 					...(input.images ? { images: input.images } : {}),
-					...(input.draftKey ? { draftKey: input.draftKey } : {}),
+					...("draft" in input
+						? { draftKey: { session: sentToSessionId } }
+						: input.draftKey
+							? { draftKey: input.draftKey }
+							: {}),
 					...(input.draftText !== undefined
 						? { draftText: input.draftText }
 						: {}),

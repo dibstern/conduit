@@ -11,6 +11,8 @@ import {
 	SessionDirectory,
 	SessionDirectoryReadError,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { InputDraftsTag } from "../../../src/lib/domain/relay/Services/input-drafts.js";
+import { inputDraftClaimMarker } from "../../../src/lib/persistence/input-drafts.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
@@ -40,6 +42,82 @@ const open = Effect.gen(function* () {
 });
 
 describe("SubscribeInputDraft", () => {
+	it.effect("an unclaimed promotion writes and publishes nothing", () =>
+		Effect.gen(function* () {
+			const drafts = yield* InputDraftsTag;
+			const sql = yield* SqlClient.SqlClient;
+			const key = { draft: "unclaimed" };
+			yield* drafts.write(key, "keep", undefined, "test-project");
+			const queue = yield* Queue.unbounded<InputDraftEnvelope>();
+			yield* Stream.runForEach(drafts.subscribe(key), (envelope) =>
+				Queue.offer(queue, envelope),
+			).pipe(Effect.forkScoped);
+			yield* Queue.take(queue);
+			const change = drafts.promotionChange(key, "missing-session", "keep");
+			yield* sql.withTransaction(change.write);
+			yield* change.publish;
+			expect(yield* drafts.read(key)).toBe("keep");
+			expect(Option.isNone(yield* Queue.poll(queue))).toBe(true);
+		}).pipe(Effect.provide(makeLayer(), { local: true })),
+	);
+
+	it.effect(
+		"demotion restores text and all attachment states before deletion, releases and retries",
+		() =>
+			Effect.gen(function* () {
+				const drafts = yield* InputDraftsTag;
+				const sql = yield* SqlClient.SqlClient;
+				const key = { draft: "retry-draft" };
+				yield* drafts.write(key, "original text", undefined, "test-project");
+				yield* drafts.addAttachment(
+					key,
+					"live",
+					"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=",
+					"image.png",
+					"test-project",
+				);
+				yield* drafts.removeAttachment(key, "removed", "test-project");
+				yield* sql`INSERT INTO draft_attachments (id, draft_key, position, state, created_at) VALUES ('sent', 'retry-draft', 2, 'sent', 1)`;
+				const before =
+					yield* sql`SELECT * FROM draft_attachments WHERE draft_key = 'retry-draft' ORDER BY id`;
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+				VALUES ('created', 'test-project', 'claude', 'Session', 'idle', 1, 1)`;
+				expect(yield* drafts.claim(key.draft, "test-project")).toBe(true);
+				yield* sql.withTransaction(
+					drafts.promotionChange(key, "created", "original text").write,
+				);
+				yield* drafts.demote(key, "created");
+				expect(
+					yield* sql`SELECT text, promoted_session_id FROM input_drafts WHERE draft_key = 'retry-draft'`,
+				).toEqual([
+					{ text: "original text", promoted_session_id: inputDraftClaimMarker },
+				]);
+				expect(
+					yield* sql`SELECT draft_key FROM input_drafts WHERE draft_key = 'created'`,
+				).toEqual([]);
+				yield* sql`DELETE FROM sessions WHERE id = 'created'`;
+				yield* drafts.releaseClaim(key.draft);
+				expect(
+					yield* sql`SELECT * FROM draft_attachments WHERE draft_key = 'retry-draft' ORDER BY id`,
+				).toEqual(before);
+				expect(
+					Option.getOrThrow(yield* drafts.listDrafts().pipe(Stream.runHead)),
+				).toMatchObject([
+					{ draftId: key.draft, firstLine: "original text", imageCount: 1 },
+				]);
+				expect(yield* drafts.claim(key.draft, "test-project")).toBe(true);
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
+				VALUES ('retry', 'test-project', 'claude', 'Session', 'idle', 1, 1)`;
+				yield* sql.withTransaction(
+					drafts.promotionChange(key, "retry", "original text").write,
+				);
+				expect(yield* drafts.read({ session: "retry" })).toBe("original text");
+				expect(
+					yield* drafts.takeForSend({ session: "retry" }, ["live"]),
+				).toMatchObject([{ name: "image.png" }]);
+			}).pipe(Effect.provide(makeLayer(), { local: true })),
+	);
+
 	it.effect("EA22 ownership lookup errors reach the RPC client", () =>
 		Effect.gen(function* () {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);

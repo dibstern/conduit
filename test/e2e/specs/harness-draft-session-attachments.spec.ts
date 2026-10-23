@@ -45,7 +45,8 @@ function withStore<A>(
 	harness: ProcessHarness,
 	read: (db: DatabaseSync) => A,
 ): A {
-	const db = new DatabaseSync(harness.daemonStorePath());
+	// The live daemon writes too; wait out its locks instead of failing at once.
+	const db = new DatabaseSync(harness.daemonStorePath(), { timeout: 5_000 });
 	try {
 		return read(db);
 	} finally {
@@ -596,15 +597,6 @@ test("startup sweeps a removed Draft blob while keeping a sent image", async ({
 			id: removedId,
 		}),
 	);
-	// B3 forbids time-based tombstone pruning, even for an otherwise empty
-	// Draft. Moving the fixture clock back catches the withdrawn seven-day rule.
-	withStore(harness, (db) =>
-		db
-			.prepare(
-				"UPDATE draft_attachments SET created_at = ? WHERE draft_key = ? AND state IN ('removed', 'sent')",
-			)
-			.run(Date.now() - 30 * 24 * 60 * 60 * 1000, sessionId),
-	);
 	expect(
 		withStore(harness, (db) =>
 			db
@@ -613,6 +605,16 @@ test("startup sweeps a removed Draft blob while keeping a sent image", async ({
 		),
 	).toBeDefined();
 	await harness.kill();
+	// B3 forbids time-based tombstone pruning, even for an otherwise empty
+	// Draft. Moving the fixture clock back catches the withdrawn seven-day rule.
+	// Write only while the daemon is down, so its own writes cannot lock us out.
+	withStore(harness, (db) =>
+		db
+			.prepare(
+				"UPDATE draft_attachments SET created_at = ? WHERE draft_key = ? AND state IN ('removed', 'sent')",
+			)
+			.run(Date.now() - 30 * 24 * 60 * 60 * 1000, sessionId),
+	);
 	await harness.restart();
 	const retained = withStore(harness, (db) =>
 		db.prepare("SELECT hash FROM attachment_blobs ORDER BY hash").all(),

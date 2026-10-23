@@ -124,6 +124,7 @@ export function createComposerDraft(options: {
 	let text = $state("");
 	let sendPick = $state<DraftState["sendPick"]>();
 	let sending = $state(false);
+	let content = $state(false);
 	let attachments = $state<readonly DraftAttachmentItem[]>([]);
 	let syncTimer: ReturnType<typeof setTimeout> | null = null;
 	function cancelSync() {
@@ -292,6 +293,7 @@ export function createComposerDraft(options: {
 	function dispatch(event: DraftEvent) {
 		const [next, commands] = step(state, event);
 		state = next;
+		content = state.key ? hasContent(state, state.key) : false;
 		text = state.text;
 		sendPick = state.sendPick;
 		sending =
@@ -452,9 +454,7 @@ export function createComposerDraft(options: {
 			);
 		},
 		get hasContent() {
-			return (
-				Boolean(text) || attachments.some((item) => item.status !== "removing")
-			);
+			return content;
 		},
 		hasContentFor(key: InputDraftKey) {
 			return hasContent(state, key);

@@ -88,10 +88,14 @@ export interface InputDrafts {
 		projectId: string,
 	) => Effect.Effect<boolean, SqlError>;
 	readonly releaseClaim: (draftId: string) => Effect.Effect<void, SqlError>;
-	readonly promote: (
-		draftId: string,
+	readonly promotionChange: (
+		key: InputDraftKey,
 		sessionId: string,
-		sentText: string,
+		text: string,
+	) => DraftChange;
+	readonly demote: (
+		key: InputDraftKey,
+		sessionId: string,
 	) => Effect.Effect<void, SqlError>;
 	readonly subscribe: (key: InputDraftKey) => Stream.Stream<InputDraftEnvelope>;
 	readonly listDrafts: () => Stream.Stream<readonly DraftListItem[], SqlError>;
@@ -108,6 +112,12 @@ const keyOf = (key: InputDraftKey) =>
 	"session" in key ? key.session : key.draft;
 const kindOf = (key: InputDraftKey) => ("session" in key ? "session" : "draft");
 
+// Live rows count as content. Tombstones are retained separately for late Adds.
+const hasDraftContent = `(input_drafts.text != '' OR EXISTS (
+	SELECT 1 FROM draft_attachments
+	WHERE draft_key = input_drafts.draft_key AND state = 'live'
+))`;
+
 /** No in-flight create can survive the daemon process that owned its claim. */
 export const releaseInputDraftClaims = () =>
 	Effect.gen(function* () {
@@ -115,7 +125,8 @@ export const releaseInputDraftClaims = () =>
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
 				yield* sql`DELETE FROM input_drafts
-					WHERE promoted_session_id = ${inputDraftClaimMarker} AND text = ''
+					WHERE kind = 'draft' AND (promoted_session_id IS NULL OR promoted_session_id = ${inputDraftClaimMarker})
+					AND NOT ${sql.literal(hasDraftContent)}
 					AND NOT EXISTS (SELECT 1 FROM draft_attachments WHERE draft_key = input_drafts.draft_key)`;
 				yield* sql`UPDATE input_drafts SET promoted_session_id = NULL
 					WHERE promoted_session_id = ${inputDraftClaimMarker}`;
@@ -128,7 +139,8 @@ export function releaseCopiedInputDraftClaims(
 	db: Pick<DatabaseSync, "prepare">,
 ) {
 	db.prepare(`DELETE FROM main.input_drafts
-		WHERE promoted_session_id = ? AND text = ''
+		WHERE kind = 'draft' AND (promoted_session_id IS NULL OR promoted_session_id = ?)
+		AND NOT ${hasDraftContent}
 		AND NOT EXISTS (SELECT 1 FROM main.draft_attachments WHERE draft_key = input_drafts.draft_key)
 		AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
 		inputDraftClaimMarker,
@@ -158,6 +170,7 @@ export const makeInputDrafts: Effect.Effect<
 	const draftChanges = yield* PubSub.unbounded<void>();
 	// A snapshot cannot observe a committed promotion before its live publication.
 	const snapshotGate = yield* Semaphore.make(1);
+	let promotionFailureInjected = false;
 	const readRow = (key: InputDraftKey) =>
 		sql<{
 			text: string;
@@ -241,10 +254,13 @@ export const makeInputDrafts: Effect.Effect<
 		});
 	const readDrafts = sql<DraftListItem>`SELECT draft_key AS draftId,
 		project_id AS projectSlug, substr(text, 1, 160) AS firstLine,
-		updated_at AS updatedAt FROM input_drafts
-		WHERE kind = 'draft' AND (text != '' OR EXISTS (
-			SELECT 1 FROM draft_attachments WHERE draft_key = input_drafts.draft_key AND state = 'live'
-		)) AND promoted_session_id IS NULL
+		updated_at AS updatedAt,
+		(SELECT COUNT(*) FROM draft_attachments attachment JOIN attachment_blobs blob ON blob.hash = attachment.hash
+			WHERE attachment.draft_key = input_drafts.draft_key AND attachment.state = 'live' AND blob.mime LIKE 'image/%') AS imageCount,
+		(SELECT COUNT(*) FROM draft_attachments attachment JOIN attachment_blobs blob ON blob.hash = attachment.hash
+			WHERE attachment.draft_key = input_drafts.draft_key AND attachment.state = 'live' AND blob.mime NOT LIKE 'image/%') AS fileCount
+		FROM input_drafts
+		WHERE kind = 'draft' AND ${sql.literal(hasDraftContent)} AND promoted_session_id IS NULL
 		ORDER BY updated_at DESC, draft_key ASC`.pipe(
 		Effect.map((rows) =>
 			rows.map((row) => ({
@@ -506,7 +522,7 @@ export const makeInputDrafts: Effect.Effect<
 						const deleted = yield* sql<{
 							draft_key: string;
 						}>`DELETE FROM input_drafts WHERE draft_key = ${draftId}
-						AND promoted_session_id = ${inputDraftClaimMarker} AND text = ''
+						AND promoted_session_id = ${inputDraftClaimMarker} AND NOT ${sql.literal(hasDraftContent)}
 						AND NOT EXISTS (SELECT 1 FROM draft_attachments WHERE draft_key = input_drafts.draft_key)
 						RETURNING draft_key`;
 						const released = yield* sql<{
@@ -522,27 +538,67 @@ export const makeInputDrafts: Effect.Effect<
 					),
 					Effect.asVoid,
 				),
-		promote: (draftId, sessionId, sentText) =>
-			snapshotGate.withPermits(1)(
-				sql<{ draft_key: string }>`UPDATE input_drafts
-				SET promoted_session_id = ${sessionId}, text = '', updated_at = ${Date.now()}
-				WHERE draft_key = ${draftId} AND kind = 'draft'
-				AND promoted_session_id = ${inputDraftClaimMarker} RETURNING draft_key`.pipe(
-					Effect.tap((rows) =>
-						rows.length > 0
-							? PubSub.publish(draftChanges, undefined)
-							: Effect.void,
-					),
-					Effect.flatMap((rows) =>
-						rows.length > 0
-							? PubSub.publish(changes, {
-									key: { draft: draftId },
-									envelope: { _tag: "promoted", sessionId, text: sentText },
-								})
-							: Effect.void,
-					),
-					Effect.asVoid,
+		promotionChange: (key, sessionId, text) => {
+			let promoted = false;
+			return {
+				write: Effect.gen(function* () {
+					promoted = false;
+					const [claimed] = yield* sql<{ draft_key: string }>`
+					SELECT draft_key FROM input_drafts WHERE draft_key = ${keyOf(key)} AND kind = 'draft'
+					AND promoted_session_id = ${inputDraftClaimMarker}`.pipe(
+						Effect.orDie,
+					);
+					if (!claimed) return;
+					yield* sql`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at)
+					SELECT ${sessionId}, project_id, 'session', text, ${Date.now()} FROM input_drafts
+					WHERE draft_key = ${keyOf(key)}
+					ON CONFLICT (draft_key) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`.pipe(
+						Effect.orDie,
+					);
+					// Move all states, including removed/sent ids, so a late Add stays ended.
+					yield* sql`UPDATE draft_attachments SET draft_key = ${sessionId}
+					WHERE draft_key = ${keyOf(key)}`.pipe(Effect.orDie);
+					yield* sql`UPDATE input_drafts SET promoted_session_id = ${sessionId}, text = '', updated_at = ${Date.now()}
+					WHERE draft_key = ${keyOf(key)}`.pipe(Effect.orDie);
+					// One-shot, after the writes: the harness proves the whole create rolls back.
+					if (
+						process.env["NODE_ENV"] === "test" &&
+						!promotionFailureInjected &&
+						process.env["CONDUIT_TEST_DRAFT_PROMOTION_WRITE_FAILURE"] ===
+							keyOf(key)
+					) {
+						promotionFailureInjected = true;
+						yield* Effect.logError("Test Draft promotion write failure");
+						return yield* Effect.die(
+							new Error("Test Draft promotion write failure"),
+						);
+					}
+					promoted = true;
+				}),
+				publish: snapshotGate.withPermits(1)(
+					Effect.gen(function* () {
+						if (!promoted) return;
+						yield* PubSub.publish(draftChanges, undefined);
+						yield* PubSub.publish(changes, {
+							key,
+							envelope: { _tag: "promoted", sessionId, text },
+						});
+					}),
 				),
+			};
+		},
+		demote: (key, sessionId) =>
+			sql.withTransaction(
+				Effect.gen(function* () {
+					const restored = yield* sql<{ draft_key: string }>`UPDATE input_drafts
+						SET text = (SELECT text FROM input_drafts WHERE draft_key = ${sessionId} AND kind = 'session'),
+						promoted_session_id = ${inputDraftClaimMarker}, updated_at = ${Date.now()}
+						WHERE draft_key = ${keyOf(key)} AND kind = 'draft' AND promoted_session_id = ${sessionId}
+						RETURNING draft_key`;
+					if (restored.length === 0) return;
+					yield* sql`UPDATE draft_attachments SET draft_key = ${keyOf(key)} WHERE draft_key = ${sessionId}`;
+					yield* sql`DELETE FROM input_drafts WHERE draft_key = ${sessionId} AND kind = 'session'`;
+				}),
 			),
 		subscribe: (key) =>
 			Stream.unwrap(

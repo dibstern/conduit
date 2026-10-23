@@ -263,7 +263,96 @@ describe("composer Draft attachment transitions", () => {
 		}
 	});
 
-	it("DraftAlreadySent retains its attempt until the winner's delayed promotion", () => {
+	it.each([
+		["Promoted", "SendSucceeded", "draft"],
+		["Promoted", "SendSucceeded", "session"],
+		["Promoted", "SendFailed", "draft"],
+		["Promoted", "SendFailed", "session"],
+		["Retired", "SendSucceeded", "draft"],
+		["Retired", "SendSucceeded", "session"],
+		["Retired", "SendFailed", "draft"],
+		["Retired", "SendFailed", "session"],
+	] as const)("%s transfers an in-flight send; %s for the %s key settles it", (promotion, settlement, scope) => {
+		const source = { draft: "sending-draft" };
+		const destination = { session: "created-session" };
+		let state = apply(initialState(), {
+			_tag: "KeySwitched",
+			key: source,
+			projectSlug: "project",
+			projectChosen: false,
+		});
+		state = apply(state, { _tag: "TextChanged", text: "sent text" });
+		state = apply(state, { _tag: "SendStarted", clear: true });
+		state = apply(state, {
+			_tag: promotion,
+			key: source,
+			sessionId: destination.session,
+			text: "sent text",
+			freshDraftId: "fresh",
+		});
+		expect(state.key).toEqual(destination);
+		expect([...state.inFlight]).toEqual([
+			[draftKeyId(destination), ["sent text"]],
+		]);
+		// A duplicate publication or reconnect must keep the pending attempt.
+		state = apply(state, {
+			_tag: "Retired",
+			key: source,
+			sessionId: destination.session,
+			freshDraftId: "fresh",
+		});
+		expect(state.inFlight.has(draftKeyId(destination))).toBe(true);
+		const [settled] = step(state, {
+			_tag: settlement,
+			key: scope === "draft" ? source : destination,
+			text: "sent text",
+			sentTo: null,
+			steer: false,
+			clear: true,
+			restore: true,
+			hasAttachments: false,
+			alreadySent: false,
+		});
+		expect(settled.inFlight.size).toBe(0);
+	});
+
+	it("promotion transfers a cached send without blocking another Draft", () => {
+		const source = { draft: "sending-draft" };
+		let state = apply(initialState(), {
+			_tag: "KeySwitched",
+			key: source,
+			projectSlug: "project",
+			projectChosen: false,
+		});
+		state = apply(state, { _tag: "SendStarted", clear: true });
+		state = apply(state, {
+			_tag: "KeySwitched",
+			key: other,
+			projectSlug: "project",
+			projectChosen: false,
+		});
+		state = apply(state, {
+			_tag: "Promoted",
+			key: source,
+			sessionId: "created",
+			text: "",
+			freshDraftId: "fresh",
+		});
+		expect(state.key).toEqual(other);
+		expect([...state.inFlight]).toEqual([["session:created", [""]]]);
+		state = apply(state, {
+			_tag: "SendFailed",
+			key: source,
+			text: "",
+			sentTo: "created",
+			restore: true,
+			hasAttachments: true,
+			alreadySent: false,
+		});
+		expect(state.inFlight.size).toBe(0);
+	});
+
+	it("DraftAlreadySent settles its attempt and follows the winner's delayed promotion", () => {
 		const draftKey = { draft: "draft-a" };
 		let state = apply(initialState(), {
 			_tag: "KeySwitched",
@@ -291,6 +380,7 @@ describe("composer Draft attachment transitions", () => {
 			[],
 		);
 		expect(refused.text).toBe("");
+		expect(refused.inFlight.size).toBe(0);
 		const [promoted, commands] = step(refused, {
 			_tag: "Promoted",
 			key: draftKey,

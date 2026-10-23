@@ -3902,6 +3902,8 @@ export const DraftListItemSchema = Schema.Struct({
 	projectSlug: NonEmptyString,
 	firstLine: Schema.String,
 	updatedAt: Schema.Number,
+	imageCount: Schema.Number,
+	fileCount: Schema.Number,
 });
 export type DraftListItem = typeof DraftListItemSchema.Type;
 

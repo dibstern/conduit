@@ -611,6 +611,8 @@ export const sessionsHandlers = {
 		),
 	CreateSession: (request) =>
 		Effect.gen(function* () {
+			const draftId = request.draftId;
+			let publishPromotion: Effect.Effect<void> = Effect.void;
 			const create = Effect.gen(function* () {
 				if (request.worktreeBase !== undefined && !request.newWorktree)
 					return yield* new WsRpcError({
@@ -666,6 +668,20 @@ export const sessionsHandlers = {
 					...(request.model != null ? { model: request.model } : {}),
 					permissionMode: request.permissionMode,
 					...(resolvedCreation === undefined ? {} : { resolvedCreation }),
+					...(draftId === undefined
+						? {}
+						: {
+								draftId,
+								draftChange: (sessionId: string) => {
+									const change = inputDrafts.promotionChange(
+										{ draft: draftId },
+										sessionId,
+										request.draftText ?? "",
+									);
+									publishPromotion = change.publish;
+									return { write: change.write, publish: Effect.void };
+								},
+							}),
 				};
 				if (request.newWorktree) {
 					yield* takeReservation;
@@ -795,8 +811,7 @@ export const sessionsHandlers = {
 					sessionId: session.id,
 				};
 			});
-			if (request.draftId === undefined) return yield* create;
-			const draftId = request.draftId;
+			if (draftId === undefined) return yield* create;
 			const inputDrafts = yield* InputDraftsTag;
 			const config = yield* ConfigTag;
 			return yield* Effect.uninterruptibleMask((restore) =>
@@ -822,43 +837,26 @@ export const sessionsHandlers = {
 								),
 						),
 					);
-					// Once creation succeeds the claim must stay a tombstone, even if
-					// finalizing it fails. Releasing it would permit a duplicate create,
-					// and failing the request would report a send that happened.
-					yield* inputDrafts
-						.promote(draftId, session.sessionId, request.draftText ?? "")
-						.pipe(
-							Effect.catch((cause) =>
-								Effect.logError(`Could not promote draft ${draftId}: ${cause}`),
+					if (request.worktreePath === undefined) {
+						yield* Effect.try(() =>
+							saveRelaySettings(
+								{ lastSessionMode: request.newWorktree ? "worktree" : "local" },
+								config.configDir,
+							),
+						).pipe(
+							Effect.catchCause((cause) =>
+								Effect.gen(function* () {
+									const log = yield* LoggerTag;
+									log.warn("Failed to persist last session mode", { cause });
+								}),
 							),
 						);
+					}
+					yield* publishPromotion;
 					return session;
 				}),
 			);
 		}).pipe(
-			Effect.tap(() =>
-				Effect.gen(function* () {
-					if (
-						request.draftId === undefined ||
-						request.worktreePath !== undefined
-					)
-						return;
-					const config = yield* ConfigTag;
-					yield* Effect.try(() =>
-						saveRelaySettings(
-							{ lastSessionMode: request.newWorktree ? "worktree" : "local" },
-							config.configDir,
-						),
-					).pipe(
-						Effect.catch((cause) =>
-							Effect.gen(function* () {
-								const log = yield* LoggerTag;
-								log.warn("Failed to persist last session mode", { cause });
-							}),
-						),
-					);
-				}),
-			),
 			Effect.catch(
 				(
 					error,

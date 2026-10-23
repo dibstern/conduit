@@ -44,7 +44,7 @@ export interface DraftState {
 	reloadBases: ReadonlyMap<string, string>;
 	legacy: { key: InputDraftKey; text: string } | null;
 	inFlight: ReadonlyMap<string, readonly string[]>;
-	promoted: ReadonlySet<string>;
+	promoted: ReadonlyMap<string, string>;
 	throttled: boolean;
 	pending: boolean;
 	snapshot: "waiting" | "overlapped" | "ready";
@@ -181,7 +181,7 @@ export function initialState(): DraftState {
 		reloadBases: new Map(),
 		legacy: null,
 		inFlight: new Map(),
-		promoted: new Set(),
+		promoted: new Map(),
 		throttled: false,
 		pending: false,
 		snapshot: "waiting",
@@ -204,7 +204,8 @@ function settleSend(
 	text: string,
 ): DraftState {
 	if (!key) return state;
-	const id = draftKeyId(key);
+	const source = draftKeyId(key);
+	const id = state.promoted.get(source) ?? source;
 	const pending = [...(state.inFlight.get(id) ?? [])];
 	const index = pending.indexOf(text);
 	if (index < 0) return state;
@@ -549,7 +550,9 @@ export function step(
 			const drafts = new Map(state.drafts);
 			const reloadBases = new Map(state.reloadBases);
 			const inFlight = new Map(state.inFlight);
-			const promoted = new Set(state.promoted);
+			const promoted = new Map(state.promoted);
+			const destination = draftKeyId({ session: event.sessionId });
+			const pending = inFlight.get(promotedId);
 			const sentText = inFlight.get(promotedId)?.at(-1);
 			const sending =
 				sentText !== undefined &&
@@ -557,7 +560,12 @@ export function step(
 			drafts.delete(promotedId);
 			reloadBases.delete(promotedId);
 			inFlight.delete(promotedId);
-			promoted.add(promotedId);
+			if (pending)
+				inFlight.set(destination, [
+					...(inFlight.get(destination) ?? []),
+					...pending,
+				]);
+			promoted.set(promotedId, destination);
 			const next = { ...state, drafts, reloadBases, inFlight, promoted };
 			if (promotedId !== id) return [next, []];
 			const localText = state.text || sentText || "";
@@ -566,7 +574,9 @@ export function step(
 			const follow =
 				event._tag === "Retired"
 					? sending || state.text === state.acked || !state.text
-					: sending || localText === event.text;
+					: sending ||
+						localText === event.text ||
+						(!state.text && state.acked === event.text);
 			const key = follow
 				? { session: event.sessionId }
 				: { draft: event.freshDraftId };
@@ -750,9 +760,10 @@ export function step(
 			];
 		}
 		case "SendFailed": {
-			// The winning tab's promotion still needs this attempt's identity.
-			if (event.alreadySent) return [state, []];
 			let next = settleSend(state, event.key, event.text);
+			// The failed attempt has settled; the acknowledged text can still follow
+			// the winning tab's promotion without keeping this composer busy.
+			if (event.alreadySent) return [next, []];
 			const restore =
 				event.restore && event.key !== null && "draft" in event.key;
 			const key =

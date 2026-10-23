@@ -45,7 +45,8 @@ function withStore<A>(
 	harness: ProcessHarness,
 	read: (db: DatabaseSync) => A,
 ): A {
-	const db = new DatabaseSync(harness.daemonStorePath());
+	// The live daemon writes too; wait out its locks instead of failing at once.
+	const db = new DatabaseSync(harness.daemonStorePath(), { timeout: 5_000 });
 	try {
 		return read(db);
 	} finally {
