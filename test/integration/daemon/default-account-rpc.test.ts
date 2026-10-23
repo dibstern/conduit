@@ -344,10 +344,17 @@ describe("default Claude account through daemon RPC", () => {
 				).toEqual(["personal"]);
 				for (const list of lists) {
 					if (!list) throw new Error("Missing client queue");
+					// Discovery may publish its startup snapshot after the preview.
+					const updated = yield* Queue.take(list).pipe(
+						Effect.repeat({
+							while: (instances) =>
+								!instances.some(
+									(item) => item.id === "personal" && item.isDefault,
+								),
+						}),
+					);
 					expect(
-						(yield* Queue.take(list))
-							.filter((item) => item.isDefault)
-							.map((item) => item.id),
+						updated.filter((item) => item.isDefault).map((item) => item.id),
 					).toEqual(["opencode", "personal"]);
 				}
 				yield* Queue.take(statuses);
