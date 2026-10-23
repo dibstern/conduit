@@ -45,6 +45,7 @@ describe("Schema Migration", () => {
 					[79, "sessions_goal_stuck"],
 					[80, "sessions_jev"],
 					[81, "provider_control_process"],
+					[82, "session_git_publication"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -110,6 +111,7 @@ describe("Schema Migration", () => {
 					[79, "sessions_goal_stuck"],
 					[80, "sessions_jev"],
 					[81, "provider_control_process"],
+					[82, "session_git_publication"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`

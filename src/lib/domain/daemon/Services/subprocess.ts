@@ -67,6 +67,15 @@ export interface SubprocessMetrics {
 	>;
 }
 
+/** Start events identify reads without retaining command arguments in metrics. */
+export interface SubprocessDiagnostic extends SubprocessMetrics {
+	readonly spawn?: {
+		readonly command: string;
+		readonly args: readonly string[];
+		readonly cwd: string;
+	};
+}
+
 /** Compatibility edge for the existing Promise-based git cache. */
 export type SubprocessRunner = (
 	command: string,
@@ -93,6 +102,11 @@ export class Subprocess extends Context.Reference<SubprocessService>(
 		defaultValue: () => makeSubprocess(),
 	},
 ) {}
+
+/** Background owners can lend existing command services their scheduling priority. */
+export class SubprocessPriority extends Context.Reference<
+	"interactive" | "background"
+>("SubprocessPriority", { defaultValue: () => "interactive" }) {}
 
 /** Capture before the first await: Promise continuations have no current fiber. */
 export const makeSubprocessRunner = (): SubprocessRunner => {
@@ -146,8 +160,9 @@ export const makeSubprocess = (
 			[...commands].map(([command, value]) => [command, { ...value }]),
 		),
 	});
-	const publish = () => {
-		if (metricsChannel.hasSubscribers) metricsChannel.publish(snapshot());
+	const publish = (spawn?: SubprocessDiagnostic["spawn"]) => {
+		if (metricsChannel.hasSubscribers)
+			metricsChannel.publish({ ...snapshot(), ...(spawn && { spawn }) });
 	};
 	const error = (
 		job: Job,
@@ -280,6 +295,11 @@ export const makeSubprocess = (
 			spawnTimeMs += elapsed;
 			metric.spawnTimeMs += elapsed;
 		}
+		publish({
+			command: job.command,
+			args: [...job.args],
+			cwd: job.options.cwd ?? process.cwd(),
+		});
 		if (!child) {
 			finish(null, spawnFailure);
 			return;
@@ -385,16 +405,21 @@ export const makeSubprocess = (
 		run: (command, args, runOptions) =>
 			Effect.gen(function* () {
 				const read = yield* ReadRequest;
+				const priority = runOptions.priority ?? (yield* SubprocessPriority);
 				guardRead(read);
 				warnRead(read, command);
 				return yield* Effect.callback<SubprocessResult, SubprocessError>(
 					(resume) => {
-						const cancel = enqueue(command, args, runOptions, (result) =>
-							resume(
-								Result.isSuccess(result)
-									? Effect.succeed(result.success)
-									: Effect.fail(result.failure),
-							),
+						const cancel = enqueue(
+							command,
+							args,
+							{ ...runOptions, priority },
+							(result) =>
+								resume(
+									Result.isSuccess(result)
+										? Effect.succeed(result.success)
+										: Effect.fail(result.failure),
+								),
 						);
 						return Effect.sync(cancel);
 					},

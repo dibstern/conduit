@@ -46,6 +46,7 @@ import {
 	SENT_ALERTS_MIGRATION,
 	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
+	SESSION_GIT_PUBLICATION_MIGRATION,
 	SESSION_GIT_PUBLISHED_MIGRATION,
 	SESSION_GOALS_MIGRATION,
 	SESSION_PICK_BACKFILL_MIGRATION,
@@ -1534,6 +1535,19 @@ export const effectMigrationEntries = {
 				.slice(1)
 				.join(";"),
 		);
+	}),
+	"0082_session_git_publication": Effect.gen(function* () {
+		for (const [index, column] of ["workspace_missing", "version"].entries()) {
+			const statement = splitSqlStatements(
+				readMigrationSql(SESSION_GIT_PUBLICATION_MIGRATION),
+			)[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing(
+					"session_git_published",
+					column,
+					statement,
+				);
+		}
 	}),
 } satisfies Record<
 	string,
