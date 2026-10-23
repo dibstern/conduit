@@ -39,6 +39,29 @@ create or close these lifetimes.
 Project lookups verify current registration. After close completes, a registered
 project can open a new owner generation; retained handles stay closed forever.
 
+## Audience
+
+An **Audience** names who an event is for: one session and its Project, one
+Project, every connection, or one PTY and its Project. A typed subscription table
+decides its Audience when it opens. Session Directory resolves ownership at open;
+relay-backed streams retain their producer's Project Provenance. Failed ownership
+lookups and requests for another producer's Project fail the subscription.
+Mixed-project streams carry an Audience per row. Approvals and questions have
+global Audience.
+Session Row deletion tombstones retain their producer's Project Provenance even
+after the Session disappears, so a resumed stream can address each removal.
+
+## Interests
+
+**Interests** are the sessions and Projects a connection views and the PTYs it
+is attached to, with each PTY attachment qualified by its Project. Each
+subscription holds its Interests until its scope closes. Overlapping views retain
+independent holds. Session selection replaces that client's selected Interests.
+If Interests stop covering an open subscription's Audience, the subscription is
+interrupted, including pending producer work. A reconnect starts empty and
+restores views by subscribing again. Interests are never persisted across daemon
+restarts.
+
 ## Repository Identity
 
 A Project Folder's Repository Identity is its canonical repository `key`, display
@@ -304,6 +327,15 @@ again and Held Messages go. It happens because the reset arrived, the user
 asked, or the session moved to another account.
 _Avoid_: release, unpark.
 
+## Model Parameter Choice
+
+A **Model Parameter Choice** is a stored model choice and the parameter values it
+resolves to. Empty means Default and follows the provider's default without
+pinning its current key. An explicit key must be offered by the current model.
+The choice module owns validation, row changes and cheapest selection; pickers
+and provider launches read its answer. Empty title choices use the cheapest
+offered row values, while remaining empty in storage.
+
 ## Turn Launcher
 
 **Turn Launcher** resolves everything a turn needs before it is sent: the
@@ -321,6 +353,15 @@ driver. A failed save fails the turn instead of being logged. A turn that
 joined one already running only completes its receipt. The reactor, dispatch
 and runner recovery all settle through it.
 
+## Tool Outcome
+
+**Tool Outcome** is a completed tool's `succeeded` or `failed` result, recorded
+by its provider adapter in `tool.completed.outcome`. Cursor classifies live
+calls and reconciled conversation steps through one converter. Readers use
+that outcome; the message projection stores it as `completed` or `error`.
+The stored-event decoder fills a missing outcome from legacy
+`metadata.isError === true`, so existing events need no migration.
+
 ## Sidebar Overlay
 
 **Sidebar Overlay** is sidebar state that is deliberately not a canonical
@@ -329,6 +370,15 @@ The commit step finds sidebar changes by comparing rows, so it cannot see an
 overlay change. Overlays are announced through the commit module's one overlay
 operation, which bumps the row's version and wakes subscribers. No other code
 stamps a version or moves `session_sidebar` markers for an overlay.
+
+## Skill Location
+
+**Skill Location** is a provider discovery's answer to where a skill's content
+lives: a file with its containment root, or content managed by the provider.
+Discovery alone chooses it, using the session's account and Effective Working
+Directory. Commands expose an opaque `skillRef`; content requests resolve that
+reference through the same discovery and never interpret it as a file path.
+Provider-managed skills without a file report that content is unavailable.
 
 ## Daemon Settings
 

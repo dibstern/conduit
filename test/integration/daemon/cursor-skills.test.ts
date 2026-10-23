@@ -81,6 +81,7 @@ describe("Cursor skills through the built daemon and runner", () => {
 		expect(existsSync(join(fixture.projectDir, ".git"))).toBe(false);
 		const expected = [
 			"linked",
+			"must-not-walk",
 			"nested",
 			"manual",
 			"folded",
@@ -330,11 +331,9 @@ describe("Cursor skills through the built daemon and runner", () => {
 			expected
 				.filter(
 					(name) =>
-						name.startsWith("user-") ||
-						name.startsWith("plugin-") ||
-						name === "managed",
+						name !== "linked" && name !== "must-not-walk" && name !== "crlf",
 				)
-				.concat("moved-only")
+				.concat("fresh", "moved-only")
 				.sort(),
 		);
 		expect(
@@ -344,8 +343,20 @@ describe("Cursor skills through the built daemon and runner", () => {
 					projectSlug: "process-test",
 					instanceId: addedInstanceId,
 				})
-			).commands,
-		).toEqual(afterMove.commands);
+			).commands
+				.map(({ name }) => name)
+				.sort(),
+		).toEqual(
+			expected
+				.filter(
+					(name) =>
+						name.startsWith("user-") ||
+						name.startsWith("plugin-") ||
+						name === "managed",
+				)
+				.concat("moved-only")
+				.sort(),
+		);
 		evidence["afterMove"] = afterMove.commands;
 		for (let i = 0; i < 300; i++)
 			skill(join(moved, ".cursor", "skills", `bounded-${i}`));

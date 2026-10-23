@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/chat/ActivityRow.svelte :: tool.isError": "C4 replaces this JavaScript condition with tool.outcome. It is not a CSS class; the text-error and text-text-secondary classes are unchanged.",
 	"src/lib/frontend/components/chat/SurfacingSummary.svelte :: animate-spin": "Approved Flow Set 1 replaces the summary content spinner with the shared ConduitMark running packet. Reduced motion is owned by that component.",
 	"src/lib/frontend/components/chat/TurnActivity.svelte :: animate-spin": "Approved Flow Set 1 replaces the live activity spinner with the shared 16px ConduitMark running packet.",
 	"src/lib/frontend/components/input/FileMenu.svelte :: contents": "The old wrapper hid BlockGrid's role=img from the listbox accessibility tree. ConduitMark is decorative with aria-hidden=true and has no image role, so the wrapper is unnecessary.",

@@ -119,6 +119,51 @@ export const canUseControlConnection = (state: RunnerEntryLifecycle) =>
 export const mustDrainBeforeSend = (state: RunnerEntryLifecycle) =>
 	state.failure !== undefined || state.idleExiting || state.end !== undefined;
 
+export type SendDecision = "Use" | "Retire" | "Wait" | "Skip";
+
+export const decideSend = (input: {
+	readonly command: "send-turn" | "pre-warm";
+	readonly lifecycle: RunnerEntryLifecycle;
+	readonly quiescent: boolean;
+	readonly rebindsAccount: boolean;
+	readonly changes: {
+		readonly folders: boolean;
+		readonly login: boolean;
+		readonly legacyCursor: boolean;
+		readonly settingsDeferred: boolean;
+	};
+}): SendDecision => {
+	const { command, lifecycle, quiescent, rebindsAccount, changes } = input;
+	if (changes.legacyCursor && command === "pre-warm") return "Skip";
+	if (changes.folders && command === "pre-warm") return "Skip";
+	// Only an idle runner restarts. Background tasks can keep one
+	// busy for hours, and it can still serve the send meanwhile.
+	const upgradeByRestart =
+		command === "send-turn" &&
+		changes.settingsDeferred &&
+		isCommandIdle(lifecycle) &&
+		quiescent;
+	if (
+		(changes.folders ||
+			changes.login ||
+			changes.legacyCursor ||
+			upgradeByRestart) &&
+		canReconfigure(lifecycle)
+	) {
+		// A turn's completion can reach the browser before the
+		// runner reports quiescence. Do not admit the next turn
+		// on its old folders while that final output drains.
+		if (!isCommandIdle(lifecycle) || !quiescent) {
+			if (command === "pre-warm") return "Skip";
+			return "Wait";
+		}
+		// New Claude payloads replace only the SDK query. Keep the
+		// quiescence wait above, and the old restart for older peers.
+		if (changes.folders || upgradeByRestart || !rebindsAccount) return "Retire";
+	}
+	return "Use";
+};
+
 /** Pure reduction; unsupported or repeated notifications are silent no-ops. */
 export const nextRunnerLifecycle = (
 	state: RunnerEntryLifecycle,

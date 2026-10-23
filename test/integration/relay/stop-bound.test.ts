@@ -63,7 +63,7 @@ const stopLayer = (api: OpenCodeAPI, scratch: string) => {
 	const orchestration = makeOrchestrationRuntimeLayer({
 		configDir: scratch,
 		workspaceRoot: scratch,
-		shellEnv: () => ({}),
+		shellEnv: () => ({ env: {}, declared: {} }),
 	}).pipe(
 		Layer.provideMerge(SessionWorkspaceLive),
 		Layer.provideMerge(

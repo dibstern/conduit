@@ -34,6 +34,7 @@ import { cursorSessionConfig } from "./cursor-session-config.js";
 import {
 	cursorSessionStorePath,
 	readCursorSessionIdentity,
+	resolveCursorSessionCwd,
 	writeCursorSessionIdentity,
 } from "./cursor-session-recovery.js";
 import { CursorTurnEvents } from "./cursor-turn-events.js";
@@ -279,12 +280,13 @@ export class CursorRunnerPayload implements RunnerPayload {
 						message: "Could not read Cursor session identity",
 					}),
 				});
-				const storedCwd = input.providerState["cursor.cwd"];
 				const storedId = input.providerState["cursor.agentId"];
 				state = {
-					cwd:
-						identity?.cwd ??
-						(typeof storedCwd === "string" ? storedCwd : input.workspaceRoot),
+					cwd: resolveCursorSessionCwd(
+						identity,
+						input.providerState,
+						input.workspaceRoot,
+					),
 					busy: false,
 					cancelRequested: false,
 					...(identity

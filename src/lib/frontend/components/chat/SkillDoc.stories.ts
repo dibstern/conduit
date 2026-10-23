@@ -1,5 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, within } from "storybook/test";
+import {
+	discoveryState,
+	handleCommandList,
+} from "../../stores/discovery.svelte.js";
 import { attachedProjectState } from "../../stores/router.svelte.js";
 import { connectedSocket } from "../../stories/sockets.js";
 import SkillDoc from "./SkillDoc.svelte";
@@ -19,7 +23,12 @@ export const Loading: Story = {
 		const restoreSocket = connectedSocket();
 		const previousProject = attachedProjectState.slug;
 		attachedProjectState.slug = "storybook";
+		const previousCommands = discoveryState.commands;
+		handleCommandList({
+			commands: [{ name: "flow-example", skillRef: "flow-example-ref" }],
+		});
 		return () => {
+			handleCommandList({ commands: previousCommands });
 			restoreSocket();
 			attachedProjectState.slug = previousProject;
 		};

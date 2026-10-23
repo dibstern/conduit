@@ -3,6 +3,8 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+const SUPPORTED_TRACE_VERSIONS = ["1.0.37", "1.0.40"];
+
 const directory = "test/fixtures/cursor-sdk-traces";
 const files = readdirSync(directory)
 	.filter((file) => file.endsWith(".jsonl"))
@@ -15,7 +17,7 @@ const privateHome = /\/Users\/[^/\s"\\]+|\/home\/(?!test\b)[^/\s"\\]+/g;
 const evidence = {
 	checkedAt: new Date().toISOString(),
 	directory,
-	sdkVersion: "1.0.37",
+	supportedTraceVersions: SUPPORTED_TRACE_VERSIONS,
 	files,
 	rows: 0,
 	invalidJsonRows: 0,
@@ -56,7 +58,7 @@ for (const file of files) {
 		if (
 			index === 0 &&
 			(!row ||
-				row.sdkVersion !== "1.0.37" ||
+				!SUPPORTED_TRACE_VERSIONS.includes(row.sdkVersion) ||
 				typeof row.scenario !== "string" ||
 				!(
 					typeof row.model === "string" ||

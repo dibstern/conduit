@@ -111,6 +111,7 @@ interface StoredPromptReference {
 	readonly provider_request_id: string | null;
 	readonly run_id: string | null;
 	readonly permission_suggestions: string | null;
+	readonly has_secret: number;
 }
 
 const readPromptReference = (
@@ -125,6 +126,11 @@ const readPromptReference = (
 			SELECT id, session_id, type, status, tool_name,
 				provider_process_id, provider_request_id,
 				json_extract(details, '$.permissionSuggestions') AS permission_suggestions,
+				CASE WHEN type = 'question' THEN EXISTS (
+					SELECT 1 FROM json_each(input)
+					WHERE CASE WHEN json_each.type = 'object'
+						THEN json_extract(value, '$.isSecret') ELSE 0 END = 1
+				) ELSE 0 END AS has_secret,
 				(SELECT json_extract(metadata, '$.runId') FROM events
 				 WHERE session_id = pending_approvals.session_id AND type = ${`${type}.asked`}
 					AND json_extract(data, '$.id') = pending_approvals.id
@@ -775,16 +781,20 @@ export const handleAskUserResponse = (
 			wsHandler.getClientSession(clientId) ||
 			"";
 		const formatted = formatAnswers(answers);
-		const loggedAnswers = pendingQuestion?.questions.some(
-			(question) => question.isSecret,
-		)
-			? "[redacted]"
-			: formatted;
+		const hasSecret =
+			stored?.has_secret === 1 ||
+			pendingQuestion?.questions.some((question) => question.isSecret);
+		const loggedAnswers = hasSecret ? "[redacted]" : formatted;
 		log.info(
 			`client=${clientId} session=${sessionId} answering: ${toolId} payload=${JSON.stringify({ id: toolId, answers: loggedAnswers })}`,
 		);
 		// Codex async questions are answered by a follow-up message, not the provider.
 		if (pendingQuestion?.delivery === "async") {
+			if (hasSecret)
+				return yield* new WsRpcError({
+					message:
+						"Secret answers cannot be sent as persisted follow-up messages.",
+				});
 			const question = pendingQuestion;
 			return yield* resolveAsyncQuestion(
 				question,
@@ -816,6 +826,10 @@ export const handleAskUserResponse = (
 			stored?.provider_request_id ?? pendingQuestion?.providerRequestId;
 		const providerRequestId = nativeRequestId ?? toolId;
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		if (hasSecret && Option.isNone(engineOption))
+			return yield* new WsRpcError({
+				message: "Secret answers require the secure command service.",
+			});
 		if (Option.isSome(engineOption)) {
 			yield* engineOption.value.dispatchEffect({
 				type: "resolve_question",
@@ -823,6 +837,14 @@ export const handleAskUserResponse = (
 				sessionId,
 				requestId: toolId,
 				answers,
+				...(hasSecret
+					? {
+							secretAnswerIndices:
+								pendingQuestion?.questions.flatMap((question, index) =>
+									question.isSecret ? [String(index)] : [],
+								) ?? [],
+						}
+					: {}),
 				...(providerProcessId ? { providerProcessId } : {}),
 				...(nativeRequestId ? { nativeRequestId } : {}),
 			});

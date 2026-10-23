@@ -22,6 +22,11 @@ import {
 	OpenCodeControlTarget,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
+import {
+	isSealedSecretAnswer,
+	SecretAnswerFailure,
+	type SecretAnswers,
+} from "../domain/daemon/Services/secret-answers.js";
 import { mark } from "../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -96,6 +101,8 @@ const controlErrorSchema = Schema.Struct({
 			"provider_process_gone",
 			"provider_process_unavailable",
 			"provider_control_timeout",
+			"secret_answer_expired",
+			"secret_answer_unavailable",
 			"project_inactive",
 			"project_unavailable",
 		]),
@@ -130,7 +137,10 @@ interface SendTurnOutboxPayload
 	readonly history?: SendTurnInput["history"];
 }
 
-type LiveSendContext = Pick<SendTurnInput, "account" | "shellEnv">;
+type LiveSendContext = Pick<
+	SendTurnInput,
+	"account" | "shellEnv" | "shellConfig"
+>;
 
 class UnknownProviderCommandEffect extends Data.TaggedError(
 	"UnknownProviderCommandEffect",
@@ -201,6 +211,7 @@ type ProviderCommandExecutionError =
 
 export interface ProviderSideEffectReactorOptions {
 	readonly projectId?: string;
+	readonly secretAnswers?: SecretAnswers["Service"];
 	readonly sql: SqlClient.SqlClient;
 	readonly registry: ProviderRegistry;
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest" | "ingestBatch">;
@@ -1496,7 +1507,7 @@ export class ProviderSideEffectReactor {
 						return REACTOR_COMPLETED_RESULT;
 					}
 				}
-				const deliver = Effect.gen(function* () {
+				const deliver = Effect.gen({ self: this }, function* () {
 					switch (payload.type) {
 						case "interrupt_turn": {
 							const driver = getProviderDriver(
@@ -1530,15 +1541,71 @@ export class ProviderSideEffectReactor {
 								},
 							);
 							break;
-						case "resolve_question":
+						case "resolve_question": {
+							let answers = payload.answers;
+							if (Object.values(answers).some(isSealedSecretAnswer)) {
+								if (
+									!this.acceptedControls.has(row.command_id) &&
+									instance.getControlCommandStatusEffect
+								) {
+									// The previous daemon may have delivered before losing its reply.
+									// Runner completion survives independently of the sealing key.
+									const status = yield* Effect.repeat(
+										instance.getControlCommandStatusEffect(
+											row.session_id,
+											context,
+										),
+										{
+											while: (value) => value === "running",
+											schedule: Schedule.spaced("100 millis"),
+										},
+									);
+									if (status === "completed") break;
+									if (status === "failed" || status === "gone")
+										return yield* new ProviderInstanceFailure({
+											providerId: row.provider_id,
+											operation: row.effect_type,
+											...(status === "gone"
+												? { code: "provider_process_gone" as const }
+												: {}),
+											cause:
+												status === "gone"
+													? "The original provider process is gone."
+													: "The runner previously failed this answer command.",
+										});
+								}
+								if (!this.options.secretAnswers)
+									return yield* new ProviderInstanceFailure({
+										providerId: row.provider_id,
+										operation: row.effect_type,
+										code: "secret_answer_unavailable",
+										cause: new SecretAnswerFailure({
+											code: "secret_answer_unavailable",
+										}),
+									});
+								answers = yield* this.options.secretAnswers
+									.unseal(answers)
+									.pipe(
+										Effect.mapError(
+											(cause) =>
+												new ProviderInstanceFailure({
+													providerId: row.provider_id,
+													operation: row.effect_type,
+													code: cause.code,
+													cause,
+												}),
+										),
+									);
+							}
 							yield* instance.resolveQuestionEffect(
 								row.session_id,
 								payload.nativeRequestId ?? payload.requestId,
-								payload.answers,
+								answers,
 								call,
 								{ ...context, operation: payload.operation ?? "reply" },
 							);
 							break;
+						}
 						case "end_session":
 							yield* instance.endSessionEffect(row.session_id, call, context);
 							break;
@@ -1659,6 +1726,10 @@ export class ProviderSideEffectReactor {
 							})
 						: undefined;
 				const shellEnv = liveContext?.shellEnv ?? call?.shellEnv;
+				const shellConfig =
+					liveContext?.shellEnv !== undefined
+						? liveContext.shellConfig
+						: call?.shellConfig;
 				// Daemon sends can outlive the caller's relay. Resolve its borrow
 				// when each interaction arrives, including after adapter intake.
 				const currentInteractions = this.options.makeInteractions?.(
@@ -1684,6 +1755,7 @@ export class ProviderSideEffectReactor {
 						return instance.sendTurnEffect({
 							...payload,
 							...(shellEnv ? { shellEnv } : {}),
+							...(shellConfig !== undefined ? { shellConfig } : {}),
 							awaitIntake: this.awaitIntake(row),
 							commandAttempt: row.attempt_count,
 							account:
@@ -1937,6 +2009,7 @@ export class ProviderSideEffectReactor {
 					userMessageId: _userMessageId,
 					commandId: _commandId,
 					shellEnv: _shellEnv,
+					shellConfig: _shellConfig,
 					...input
 				} = payload;
 				const normalized = {
@@ -1987,12 +2060,16 @@ export class ProviderSideEffectReactor {
 				row.effect_type === "resolve_question") &&
 			failure.retryable &&
 			row.attempt_count < maxControlAttempts;
+		const unsealFailed =
+			failure?.code === "secret_answer_expired" ||
+			failure?.code === "secret_answer_unavailable";
 		return (
 			failure &&
 			!retryable &&
 			(failure.code === undefined ||
-				failure.code === "provider_control_timeout")
-				? this.readFailedControlPrompt(row)
+				failure.code === "provider_control_timeout" ||
+				unsealFailed)
+				? this.readFailedControlPrompt(row, unsealFailed)
 				: Effect.succeed(undefined)
 		).pipe(
 			Effect.flatMap((reopened) =>
@@ -2058,7 +2135,12 @@ export class ProviderSideEffectReactor {
 											projectId: row.project_key,
 										}),
 									);
-									yield* project([yield* store.append(reopened.event)]);
+									yield* project(
+										yield* store.appendBatch([
+											reopened.event,
+											...(reopened.notice ? [reopened.notice] : []),
+										]),
+									);
 								}
 							}
 						}
@@ -2075,10 +2157,14 @@ export class ProviderSideEffectReactor {
 	}
 
 	/** Reopen runner answers only after confirming they were not consumed. */
-	private readFailedControlPrompt(row: ProviderCommandOutboxRow): Effect.Effect<
+	private readFailedControlPrompt(
+		row: ProviderCommandOutboxRow,
+		unsealFailed = false,
+	): Effect.Effect<
 		| {
 				readonly event: CanonicalEvent<"permission.asked" | "question.asked">;
 				readonly version: number;
+				readonly notice?: CanonicalEvent<"turn.notice">;
 		  }
 		| undefined,
 		ProviderCommandStoreFailure
@@ -2102,7 +2188,13 @@ export class ProviderSideEffectReactor {
 				tool_name: string | null;
 				input: string | null;
 				provider_request_id: string | null;
-			}>`SELECT version, tool_name, input, provider_request_id FROM pending_approvals WHERE id = ${payload.requestId} AND session_id = ${row.session_id} AND provider_process_id = ${row.provider_process_id} AND status = 'resolved'`;
+				run_id: string | null;
+			}>`SELECT version, tool_name, input, provider_request_id,
+				(SELECT json_extract(metadata, '$.runId') FROM events
+				 WHERE session_id = pending_approvals.session_id AND type = ${`${row.effect_type === "resolve_permission" ? "permission" : "question"}.asked`}
+					AND json_extract(data, '$.id') = pending_approvals.id
+				 ORDER BY sequence LIMIT 1) AS run_id
+			FROM pending_approvals WHERE id = ${payload.requestId} AND session_id = ${row.session_id} AND provider_process_id = ${row.provider_process_id} AND status = 'resolved'`;
 			if (!prompt) return undefined;
 			const input: unknown =
 				prompt.input === null ? undefined : JSON.parse(prompt.input);
@@ -2119,10 +2211,23 @@ export class ProviderSideEffectReactor {
 				metadata: {
 					commandId: row.command_id,
 					source: "conduit.control-reconciliation",
+					...(prompt.run_id ? { runId: prompt.run_id } : {}),
 				},
 			};
 			const reopened = {
 				version: prompt.version,
+				...(unsealFailed
+					? {
+							notice: canonicalEvent(
+								"turn.notice",
+								row.session_id,
+								{
+									text: "Secret answer expired after the server restarted. Please re-enter the answer.",
+								},
+								options,
+							),
+						}
+					: {}),
 				event:
 					payload.type === "resolve_permission"
 						? canonicalEvent(
@@ -2158,6 +2263,10 @@ export class ProviderSideEffectReactor {
 				account?.driver ?? row.provider_id,
 			);
 			if (!instance) return undefined;
+			// Sealed runner replays already proved not_received before unsealing.
+			// Native providers still need their pending-prompt check below.
+			if (unsealFailed && instance.getControlCommandStatusEffect)
+				return reopened;
 			if (instance.getControlCommandStatusEffect) {
 				const status = yield* instance
 					.getControlCommandStatusEffect(row.session_id, {

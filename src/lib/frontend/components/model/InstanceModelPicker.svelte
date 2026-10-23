@@ -164,7 +164,7 @@
 	const activeProviderId = $derived(selection.activeProviderId);
 	const activeModel = $derived(selection.activeModel);
 	const parameters = $derived(selection.parameters);
-	const defaultCombination = $derived(selection.defaultCombination);
+	const defaultValues = $derived(selection.defaultValues);
 	const parameterContext = $derived(selection.parameterContext);
 	const parameterEffortWord = $derived(selection.parameterEffortWord);
 	const contextOptions = $derived(selection.contextOptions);
@@ -174,7 +174,7 @@
 		(sessionState.currentId && contextOptions.length ? "Default" : modelContextLabel(activeModel)));
 	// Phones show the context word only when it differs from the default.
 	const showContextWord = $derived(!!contextLabel && (!phone || (parameterContext
-		? parameterContext.value !== defaultCombination?.values[parameterContext.id]
+		? parameterContext.value !== defaultValues[parameterContext.id]
 		: selectedContext !== null && !selectedContext.isDefault)));
 	const contextPercent = $derived(currentChat().contextPercent);
 	const contextWarning = $derived(isContextWarning(contextPercent, composerPreferences.contextWarning));
