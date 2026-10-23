@@ -14,29 +14,30 @@ import type { ProjectInfo, SessionGit, SessionInfo } from "../shared-types.js";
 const execFileAsync = promisify(execFile);
 const GIT_COMMAND_TIMEOUT_MS = 2_000;
 
-const git = async (
+const execGit = (directory: string, args: string[]): Promise<string> => {
+	const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0" };
+	for (const key of [
+		"GIT_DIR",
+		"GIT_INDEX_FILE",
+		"GIT_WORK_TREE",
+		"GIT_COMMON_DIR",
+	])
+		delete env[key];
+	return execFileAsync("git", args, {
+		cwd: directory,
+		timeout: GIT_COMMAND_TIMEOUT_MS,
+		env,
+	}).then(({ stdout }) => stdout);
+};
+
+const git = (
 	directory: string,
 	...args: string[]
-): Promise<string | undefined> => {
-	try {
-		const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0" };
-		for (const key of [
-			"GIT_DIR",
-			"GIT_INDEX_FILE",
-			"GIT_WORK_TREE",
-			"GIT_COMMON_DIR",
-		])
-			delete env[key];
-		const { stdout } = await execFileAsync("git", args, {
-			cwd: directory,
-			timeout: GIT_COMMAND_TIMEOUT_MS,
-			env,
-		});
-		return stdout.trim();
-	} catch {
-		return undefined;
-	}
-};
+): Promise<string | undefined> =>
+	execGit(directory, args).then(
+		(stdout) => stdout.trim(),
+		() => undefined,
+	);
 
 const operationAt = (gitDir: string): SessionGit["operation"] => {
 	if (
@@ -51,34 +52,26 @@ const operationAt = (gitDir: string): SessionGit["operation"] => {
 	return undefined;
 };
 
+// Every spawn blocks the daemon's event loop until the child execs, which takes
+// hundreds of ms on a loaded machine, so each read uses as few git calls as it can.
 const defaultRefs = async (directory: string): Promise<string[]> => {
-	const refs: string[] = [];
-	const origin = await git(
-		directory,
-		"symbolic-ref",
-		"-q",
-		"refs/remotes/origin/HEAD",
-	);
-	if (
-		origin &&
-		(await git(directory, "rev-parse", "--verify", "-q", `${origin}^{commit}`))
-	)
-		refs.push(origin);
-	const locals = await git(
+	const refs = await git(
 		directory,
 		"for-each-ref",
-		"--format=%(refname)",
+		"--format=%(refname) %(symref) %(objecttype)",
+		"refs/remotes/origin/HEAD",
 		"refs/heads/main",
 		"refs/heads/master",
 	);
-	refs.push(
-		...(locals
-			?.split("\n")
-			.filter(
-				(ref) => ref === "refs/heads/main" || ref === "refs/heads/master",
-			) ?? []),
-	);
-	return refs;
+	// Patterns also match refs nested below them, so keep exact names only.
+	return (refs?.split("\n") ?? []).flatMap((line) => {
+		const [ref, symref, type] = line.split(" ");
+		if (ref === "refs/remotes/origin/HEAD")
+			return symref && type === "commit" ? [symref] : [];
+		return ref === "refs/heads/main" || ref === "refs/heads/master"
+			? [ref]
+			: [];
+	});
 };
 
 /** Local default refs only, sharing merge detection's candidates. Never fetch. */
@@ -100,56 +93,52 @@ export async function readSessionGit(
 	previous?: SessionGit,
 ): Promise<SessionGit | undefined> {
 	try {
+		// Fails outside a work tree. A huge change list can outgrow maxBuffer; the
+		// branch headers come first and one entry marks it dirty, so keep the cut output.
+		const status = await execGit(directory, [
+			"status",
+			"--porcelain=v2",
+			"--branch",
+			"--untracked-files=normal",
+		]).catch((error: { code?: string; stdout?: string }) =>
+			error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
+				? error.stdout
+				: undefined,
+		);
+		if (status === undefined) return undefined;
+		const lines = status.split("\n");
+		const header = (key: string) =>
+			lines.find((line) => line.startsWith(`# ${key} `))?.slice(key.length + 3);
+		const oid = header("branch.oid");
+		const branchHead = header("branch.head");
+		const branch =
+			branchHead && branchHead !== "(detached)" ? branchHead : undefined;
+		// --short HEAD fails on a branch with no commits yet.
+		const born = oid !== undefined && oid !== "(initial)";
 		const dirs = await git(
 			directory,
 			"rev-parse",
 			"--absolute-git-dir",
 			"--git-common-dir",
-			"--is-inside-work-tree",
+			...(born ? ["--short", "HEAD"] : []),
 		);
 		if (!dirs) return undefined;
-		const [gitDir, commonDir, insideWorkTree] = dirs.split("\n");
-		if (!gitDir || !commonDir || insideWorkTree !== "true") return undefined;
+		const [gitDir, commonDir, head] = dirs.split("\n");
+		if (!gitDir || !commonDir) return undefined;
 		const common = isAbsolute(commonDir)
 			? resolve(commonDir)
 			: resolve(directory, commonDir);
-		const branch = await git(
-			directory,
-			"symbolic-ref",
-			"-q",
-			"--short",
-			"HEAD",
-		);
-		const head = await git(
-			directory,
-			"rev-parse",
-			"--verify",
-			"--short",
-			"HEAD",
-		);
 		const worktree =
 			realpathSync(gitDir) !== realpathSync(common)
 				? basename(gitDir)
 				: undefined;
 		const operation = operationAt(gitDir);
-		const [status, upstream] = await Promise.all([
-			git(directory, "status", "--porcelain=v1", "--untracked-files=normal"),
-			branch
-				? git(
-						directory,
-						"rev-list",
-						"--left-right",
-						"--count",
-						"HEAD...@{upstream}",
-					)
-				: Promise.resolve(undefined),
-		]);
-		const counts = upstream?.match(/^(\d+)\s+(\d+)$/);
+		const counts = header("branch.ab")?.match(/^\+(\d+) -(\d+)$/);
 		const result: SessionGit = {
 			...(branch ? { branch } : {}),
 			...(head ? { head } : {}),
 			...(worktree ? { worktree } : {}),
-			...(status !== undefined ? { dirty: status.length > 0 } : {}),
+			dirty: lines.some((line) => line !== "" && !line.startsWith("#")),
 			...(counts
 				? { ahead: Number(counts[1]), behind: Number(counts[2]) }
 				: {}),
@@ -167,9 +156,9 @@ export async function readSessionGit(
 		) {
 			return { ...result, merged: false };
 		}
-		if (!head) return { ...result, merged: false };
-		const tip = await git(directory, "rev-parse", `refs/heads/${branch}`);
-		if (!tip) return { ...result, merged: false };
+		if (!head || !born) return { ...result, merged: false };
+		// HEAD is the checked-out branch, so its oid is the branch tip.
+		const tip = oid;
 		const containingDefaults: string[] = [];
 		for (const ref of defaultBranches) {
 			const ancestor = await git(
@@ -182,6 +171,18 @@ export async function readSessionGit(
 			if (ancestor !== undefined) containingDefaults.push(ref);
 		}
 		if (containingDefaults.length === 0) return { ...result, merged: false };
+		// A merged tip that has not moved stays merged; skip re-deriving it every poll.
+		if (
+			previous?.merged &&
+			previous.mergedHead === tip &&
+			previous.mergedAt !== undefined
+		)
+			return {
+				...result,
+				merged: true,
+				mergedHead: tip,
+				mergedAt: previous.mergedAt,
+			};
 		const reflog = await git(
 			directory,
 			"reflog",

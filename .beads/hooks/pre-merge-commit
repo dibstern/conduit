@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# A merge with no conflicts is committed by `git merge` itself, which skips
+# pre-commit and runs this hook instead. Run the same gate so a clean merge
+# cannot land unchecked.
+exec "$(dirname "$0")/pre-commit" "$@"
