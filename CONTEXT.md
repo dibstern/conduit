@@ -293,6 +293,17 @@ delivery-unknown work requires a probe before any resend.
 _Avoid_: outbox command as the domain name. The old command outbox is replaced
 by Run Effects.
 
+## Send Token
+
+A **Send Token** identifies one transmission of a Run Effect, including timers.
+A retry is a new transmission with a new token; tokens are never reused. Every
+provider observation names the token of the send it answers, and evidence for a
+token that is no longer live never changes Run state. Retiring a Run, an
+attempt or a project retires its tokens.
+
+_Avoid_: attempt, admission or version checks as a way to decide staleness;
+they are what Send Tokens replace.
+
 ## Steer
 
 A **Steer** is a Run Input admitted while a Run is active to redirect that
