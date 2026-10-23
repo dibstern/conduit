@@ -233,20 +233,25 @@ export class CodexRunnerPayload implements RunnerPayload {
 		intake: Deferred.Deferred<TurnResult, SessionFailure>,
 	): Effect.Effect<TurnResult, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
+			const prepared = yield* prepareCodexAccount(
+				input.account,
+				this.deps.daemonConfigDir,
+				this.deps.environment?.() ?? process.env,
+			).pipe(
+				Effect.mapError(
+					(cause): SessionFailure => ({
+						operation: "prepare home",
+						message: cause.message,
+					}),
+				),
+			);
 			let session = this.sessions.get(input.sessionId);
+			if (session && !session.busy && session.codexHome !== prepared.home) {
+				if (session.child) yield* Scope.close(session.child.scope, Exit.void);
+				this.sessions.delete(input.sessionId);
+				session = undefined;
+			}
 			if (!session) {
-				const prepared = yield* prepareCodexAccount(
-					input.account,
-					this.deps.daemonConfigDir,
-					this.deps.environment?.() ?? process.env,
-				).pipe(
-					Effect.mapError(
-						(cause): SessionFailure => ({
-							operation: "prepare home",
-							message: cause.message,
-						}),
-					),
-				);
 				const identity = yield* Effect.try({
 					try: () =>
 						readCodexSessionIdentity(
