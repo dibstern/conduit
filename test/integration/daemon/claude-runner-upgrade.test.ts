@@ -856,8 +856,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		await vi.waitFor(
 			() => {
 				const state = persisted(harness, sessionId);
-				// Notification output retains its completed run's ownership.
-				expect(state.session.status).toBe("idle");
+				// A wake-up stays busy while retaining its completed run's ownership.
+				expect(state.session.status).toBe("busy");
 				expect(state.turns).toEqual([{ state: "completed" }]);
 				expect(
 					state.events.some(
@@ -905,7 +905,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		await new Promise<void>((done) => setTimeout(done, 250));
 		expect(() => process.kill(old.pid, 0)).not.toThrow();
 		expect(persisted(harness, sessionId)).toMatchObject({
-			session: { status: "idle" },
+			session: { status: "busy" },
 			turns: [{ state: "completed" }],
 			commands: [{ status: "completed" }],
 		});

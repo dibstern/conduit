@@ -575,9 +575,8 @@ describe("Claude session process runner", () => {
 		writeFileSync(join(harness.root, "release-notification-parent"), "release");
 		await vi.waitFor(() => {
 			const state = persisted(harness, sessionId);
-			// Run ownership contract, docs/plans/2026-10-19-run-ownership.md:5,15:
-			// delayed output retains its ended run; adapter activity cannot make it busy.
-			expect(state.session.status).toBe("idle");
+			// 4d3d157b keeps wake-up activity busy without reopening its ended run.
+			expect(state.session.status).toBe("busy");
 			expect(state.turns).toMatchObject([{ state: "completed" }]);
 			expect(
 				state.events.some(
