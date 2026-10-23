@@ -365,6 +365,16 @@ export interface CommandInfo {
 	readonly description?: string;
 	readonly args?: string;
 	readonly source: CommandSource;
+	readonly skillRef?: string;
+}
+
+export interface DiscoveredSkill {
+	readonly name: string;
+	readonly source: CommandSource;
+	readonly description?: string;
+	readonly location:
+		| { readonly _tag: "File"; readonly path: string; readonly root: string }
+		| { readonly _tag: "Provider" };
 }
 
 export interface ProviderAgentInfo {
@@ -384,6 +394,7 @@ export interface ProviderCapabilities {
 	readonly supportsFork: boolean;
 	readonly supportsRevert: boolean;
 	readonly commands: readonly CommandInfo[];
+	readonly skills?: readonly DiscoveredSkill[];
 	readonly agents?: readonly ProviderAgentInfo[];
 }
 

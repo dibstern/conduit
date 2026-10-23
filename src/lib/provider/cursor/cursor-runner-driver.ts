@@ -9,6 +9,7 @@ import type { ReadQueryEffect } from "../../persistence/effect/read-query-effect
 import { ProviderInstanceFailure } from "../errors.js";
 import { resolveRunnerForkDigest } from "../runner/runner-fork-digest.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
+import { skillCommand } from "../skill-discovery.js";
 import type { ModelInfo, ProviderCapabilities } from "../types.js";
 import { CursorAccountResources } from "./cursor-account-resources.js";
 import { resolveCursorCredential } from "./cursor-credential.js";
@@ -252,6 +253,9 @@ export const discoverCursorEffect = (
 				return models;
 			}),
 		);
+		const skills = workspaceRoot
+			? yield* discoverCursorSkillsEffect(workspaceRoot)
+			: [];
 		return {
 			models,
 			supportsTools: true,
@@ -262,9 +266,8 @@ export const discoverCursorEffect = (
 			supportsFork:
 				PROVIDER_DRIVERS.cursor.forkStrategy === "transcript-digest",
 			supportsRevert: false,
-			commands: workspaceRoot
-				? yield* discoverCursorSkillsEffect(workspaceRoot)
-				: [],
+			commands: skills.map(skillCommand),
+			skills,
 		};
 	});
 

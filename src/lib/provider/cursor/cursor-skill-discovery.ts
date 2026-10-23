@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { Effect, Schema } from "effect";
 import { parse } from "yaml";
-import type { CommandInfo } from "../types.js";
+import type { DiscoveredSkill } from "../types.js";
 
 // @cursor/sdk 1.0.37, dist/esm/464.js: oh/ch/lh, rh/ih and vh.
 // Local SDK mode enables third-party extensibility. Keep this list in its order.
@@ -68,8 +68,8 @@ async function readDocument(path: string): Promise<string | undefined> {
 
 async function readSkill(
 	directory: string,
-	source: CommandInfo["source"],
-): Promise<CommandInfo | undefined> {
+	source: DiscoveredSkill["source"],
+): Promise<DiscoveredSkill | undefined> {
 	if (
 		directory.includes(`${sep}.codex${sep}skills${sep}`) &&
 		CODEX_BUNDLED_SKILLS.has(basename(directory))
@@ -103,6 +103,11 @@ async function readSkill(
 		return {
 			name,
 			source,
+			location: {
+				_tag: "File",
+				path: join(directory, "SKILL.md"),
+				root: directory,
+			},
 			...(fm.description ? { description: fm.description } : {}),
 		};
 	} catch {
@@ -112,9 +117,9 @@ async function readSkill(
 
 export const discoverCursorSkillsEffect = (
 	workspaceRoot: string,
-): Effect.Effect<CommandInfo[]> =>
+): Effect.Effect<DiscoveredSkill[]> =>
 	Effect.tryPromise(async () => {
-		const commands = new Map<string, CommandInfo>();
+		const commands = new Map<string, DiscoveredSkill>();
 		const visited = new Set<string>();
 		let entries = 0;
 		let directories = 0;
@@ -124,13 +129,13 @@ export const discoverCursorSkillsEffect = (
 			commands.size >= MAX_SKILLS;
 		const collect = async (
 			directory: string,
-			source: CommandInfo["source"],
+			source: DiscoveredSkill["source"],
 		) => {
 			const command = await readSkill(directory, source);
 			if (command && !commands.has(command.name))
 				commands.set(command.name, command);
 		};
-		const scan = async (root: string, source: CommandInfo["source"]) => {
+		const scan = async (root: string, source: DiscoveredSkill["source"]) => {
 			const canonicalRoot = await realpath(root).catch(() => undefined);
 			if (!canonicalRoot) return;
 			const pending = [{ path: root, depth: 0 }];
@@ -272,6 +277,7 @@ export const discoverCursorSkillsEffect = (
 					commands.set(name, {
 						name,
 						source: "plugin-skill",
+						location: { _tag: "File", path, root },
 						...(typeof fm["description"] === "string"
 							? { description: fm["description"] }
 							: {}),

@@ -317,6 +317,15 @@ overlay change. Overlays are announced through the commit module's one overlay
 operation, which bumps the row's version and wakes subscribers. No other code
 stamps a version or moves `session_sidebar` markers for an overlay.
 
+## Skill Location
+
+**Skill Location** is a provider discovery's answer to where a skill's content
+lives: a file with its containment root, or content managed by the provider.
+Discovery alone chooses it, using the session's account and Effective Working
+Directory. Commands expose an opaque `skillRef`; content requests resolve that
+reference through the same discovery and never interpret it as a file path.
+Provider-managed skills without a file report that content is unavailable.
+
 ## Daemon Settings
 
 **Daemon Settings** is the one module that owns `daemon.json` while the daemon

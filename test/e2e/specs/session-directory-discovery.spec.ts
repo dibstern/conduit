@@ -90,6 +90,11 @@ test("settings, commands and skill documents follow a workspace change and sessi
 					projectSlug: "e2e-replay",
 					commands: [
 						{ name: directory === worktree ? "worktree-only" : "main-only" },
+						{
+							name: "release-notes",
+							skillRef:
+								directory === worktree ? "skill-worktree" : "skill-main",
+						},
 					],
 				};
 			},
@@ -106,13 +111,15 @@ test("settings, commands and skill documents follow a workspace change and sessi
 				],
 			}),
 			GetSkillContent: (input) => {
-				const { name } = input;
 				const sessionId = "sessionId" in input ? input.sessionId : undefined;
 				const directory = recordDirectory("GetSkillContent", sessionId);
+				expect(input.skillRef).toBe(
+					directory === worktree ? "skill-worktree" : "skill-main",
+				);
 				return {
 					projectSlug: "e2e-replay",
-					name,
-					path: `${directory}/.claude/skills/${String(name)}/SKILL.md`,
+					name: "release-notes",
+					path: `${directory}/.claude/skills/release-notes/SKILL.md`,
 					content: `Skill instructions from ${directory}`,
 				};
 			},

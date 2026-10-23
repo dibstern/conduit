@@ -1595,6 +1595,7 @@ export function applyGetCommandsResponse(
 					? { description: command.description }
 					: {}),
 				...(command.args != null ? { args: command.args } : {}),
+				...(command.skillRef != null ? { skillRef: command.skillRef } : {}),
 				...(command.builtin ? { builtin: true } : {}),
 			})),
 		},
