@@ -18,7 +18,9 @@ const fullCommandSuffix = "cursor-long-command-loaded";
 const fullCommand = `printf '${"x".repeat(2200)}' # ${fullCommandSuffix}`;
 const image =
 	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-const recording = "data:video/mp4;base64,AAAAHGZ0eXBtcDQyAAAAAG1wNDJpc29t";
+// A valid static recording exercises playback without moving the captured frame.
+const recording =
+	"data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMUbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAj50cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAASwAAACWAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAG2bWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABYW1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAASFzdGJsAAAAvXN0c2QAAAAAAAAAAQAAAK1hdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAASwAlgBIAAAASAAAAAAAAAABFUxhdmM2Mi4yOC4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAAM2F2Y0MBQsAe/+EAGmdCwB6mEQTFe5sBEAAAAwAQAAADACDxYuEYAQAGaMhCBETIAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAGKgAAAAAAAAAGHN0dHMAAAAAAAAAAQAAAAEAAEAAAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABRzdHN6AAAAAAAAAxUAAAABAAAAFHN0Y28AAAAAAAAAAQAAA0QAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYyLjEyLjEwMgAAAAhmcmVlAAADHW1kYXQAAAJ0BgX//3DcRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTY1IHIzMjIyIGIzNTYwNWEgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDI1IC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MCByZWY9MTYgZGVibG9jaz0xOi0zOi0zIGFuYWx5c2U9MHgxOjB4MTMxIG1lPXVtaCBzdWJtZT0xMCBwc3k9MSBwc3lfcmQ9Mi4wMDowLjcwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTI0IGNocm9tYV9tZT0xIHRyZWxsaXM9MiA4eDhkY3Q9MCBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tNCB0aHJlYWRzPTUgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0wIHdlaWdodHA9MCBrZXlpbnQ9MjUwIGtleWludF9taW49MSBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmNfbG9va2FoZWFkPTYwIHJjPWNyZiBtYnRyZWU9MSBjcmY9MzAuMCBxY29tcD0wLjYwIHFwbWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMjAAgAAAAJlliIIDGc5MUAAWq7777777777777777776666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666668=";
 // Date is pinned just after the snapshot times so elapsed timers render a short, stable duration.
 const toolsClock = new Date("2026-10-02T00:00:05Z");
 const row = (page: Page, id: string) =>
@@ -651,6 +653,40 @@ export const cursorToolsHandlers: StepHandler[] = [
 			await expect(
 				media.locator(id === "image" ? "img" : "video"),
 			).toHaveAttribute("src", id === "image" ? image : recording);
+			if (id === "recording") {
+				await media.locator("video").evaluate(async (video) => {
+					if (!(video instanceof HTMLVideoElement))
+						throw new Error("The recording must render a video element");
+					// Playback exits the native loading animation without waiting for its cooldown.
+					await video.play();
+					video.pause();
+					video.currentTime = 0;
+				});
+				await expect
+					.poll(() =>
+						media.locator("video").evaluate((video) => {
+							if (!(video instanceof HTMLVideoElement)) return null;
+							const quality = video.getVideoPlaybackQuality();
+							return {
+								ready: video.readyState === HTMLMediaElement.HAVE_ENOUGH_DATA,
+								error: video.error?.code ?? null,
+								paused: video.paused,
+								seeking: video.seeking,
+								currentTime: video.currentTime,
+								displayed:
+									quality.totalVideoFrames > quality.droppedVideoFrames,
+							};
+						}),
+					)
+					.toEqual({
+						ready: true,
+						error: null,
+						paused: true,
+						seeking: false,
+						currentTime: 0,
+						displayed: true,
+					});
+			}
 		},
 	},
 	{
