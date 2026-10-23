@@ -21,6 +21,7 @@ import { createServer } from "node:http";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "@playwright/test";
+import sharp from "sharp";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DOC = "docs/plans/2026-10-16-chat-redesign-designs.html";
@@ -486,7 +487,8 @@ async function docSections(page, tab, theme) {
 	await page.evaluate(() => document.fonts.ready);
 	// The doc's floating tab switcher would land on whichever section is in view.
 	await page.addStyleTag({
-		content: ".switcher { display: none !important; }",
+		content:
+			".switcher { display: none !important; } *, *::before, *::after { animation: none !important; transition: none !important; }",
 	});
 	const found = await page.evaluate(
 		({ theme, rows }) => {
@@ -917,54 +919,70 @@ async function main() {
 	try {
 		/** @type {Set<string>} */
 		const seen = new Set();
+		/** @type {{ section: DocSection, theme: Theme, spec: Buffer }[]} */
+		const snapshots = [];
+		// Capture before Storybook churns browser contexts, with one frozen frame per tab/theme.
 		for (const tab of TABS) {
 			for (const theme of THEMES) {
 				const sections = await docSections(docPage, tab, theme);
+				const frame = await docPage.screenshot({
+					fullPage: true,
+					animations: "disabled",
+				});
 				for (const section of sections) {
-					seen.add(section.key);
-					const mapping = SECTIONS[section.key] ?? {
-						none: `Not mapped: add "${section.key}" to SECTIONS in scripts/spec-vs-app.mjs.`,
-					};
-					if (!SECTIONS[section.key] && theme === "dark")
-						problems.push(`Unmapped doc section: ${section.key}`);
-					let row = rows.find((r) => r.key === section.key);
-					if (!row) {
-						row = {
-							n: rows.length + 1,
-							key: section.key,
-							tab,
-							title: section.title,
-							mapping,
-							files: { dark: "", light: "" },
-						};
-						rows.push(row);
-					}
-					const spec = await docPage.screenshot({
-						clip: section.clip,
-						fullPage: true,
-					});
-					const captures = await mapLimit(mapping.stories ?? [], 4, (ref) =>
-						captureStory(browser, server.origin, index, ref, theme),
-					);
-					for (const c of captures)
-						if (c.error) problems.push(`${section.key} (${theme}): ${c.error}`);
-					const file = `${String(row.n).padStart(2, "0")}-${tab}-${slug(section.title)}-${theme}.webp`;
-					const webp = await drawSheet(drawPage, {
-						title: `${tab} · ${section.title} · ${theme}`,
-						subtitle: `Spec: ${DOC}?variant=${tab}&theme=${theme}    App: Storybook at ${commit}${dirty ? " (uncommitted changes)" : ""}    ${generatedAt.slice(0, 10)}`,
-						theme,
-						spec,
-						specLabel: "Spec",
-						appLabel: "App",
-						note: mapping.note ?? "",
-						none: mapping.none ? `No app equivalent: ${mapping.none}` : "",
-						captures,
-					});
-					writeFileSync(join(outDir, file), webp);
-					row.files[theme] = file;
-					console.log(`${file}  ${(webp.length / 1024).toFixed(0)} KB`);
+					const { x: left, y: top, width, height } = section.clip;
+					const spec = await sharp(frame)
+						.extract({ left, top, width, height })
+						.png()
+						.toBuffer();
+					snapshots.push({ section, theme, spec });
 				}
+				console.log(
+					`Spec ${tab} (${theme}): ${sections.length} sections from ${frame.readUInt32BE(16)}×${frame.readUInt32BE(20)}.`,
+				);
 			}
+		}
+		await docPage.close();
+		for (const { section, theme, spec } of snapshots) {
+			const tab = section.tab;
+			seen.add(section.key);
+			const mapping = SECTIONS[section.key] ?? {
+				none: `Not mapped: add "${section.key}" to SECTIONS in scripts/spec-vs-app.mjs.`,
+			};
+			if (!SECTIONS[section.key] && theme === "dark")
+				problems.push(`Unmapped doc section: ${section.key}`);
+			let row = rows.find((r) => r.key === section.key);
+			if (!row) {
+				row = {
+					n: rows.length + 1,
+					key: section.key,
+					tab,
+					title: section.title,
+					mapping,
+					files: { dark: "", light: "" },
+				};
+				rows.push(row);
+			}
+			const captures = await mapLimit(mapping.stories ?? [], 4, (ref) =>
+				captureStory(browser, server.origin, index, ref, theme),
+			);
+			for (const c of captures)
+				if (c.error) problems.push(`${section.key} (${theme}): ${c.error}`);
+			const file = `${String(row.n).padStart(2, "0")}-${tab}-${slug(section.title)}-${theme}.webp`;
+			const webp = await drawSheet(drawPage, {
+				title: `${tab} · ${section.title} · ${theme}`,
+				subtitle: `Spec: ${DOC}?variant=${tab}&theme=${theme}    App: Storybook at ${commit}${dirty ? " (uncommitted changes)" : ""}    ${generatedAt.slice(0, 10)}`,
+				theme,
+				spec,
+				specLabel: "Spec",
+				appLabel: "App",
+				note: mapping.note ?? "",
+				none: mapping.none ? `No app equivalent: ${mapping.none}` : "",
+				captures,
+			});
+			writeFileSync(join(outDir, file), webp);
+			row.files[theme] = file;
+			console.log(`${file}  ${(webp.length / 1024).toFixed(0)} KB`);
 		}
 		for (const key of Object.keys(SECTIONS))
 			if (!seen.has(key))
