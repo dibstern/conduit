@@ -176,9 +176,13 @@ async function restart() {
 		// A daemon busy booting relays can miss the default 10s reply window,
 		// yet still restart, so a timeout falls through to the socket check.
 		await rpc
-			.sendRpcRequest(rpc.DEFAULT_SOCKET_PATH, new rpc.RestartWithConfig({}), {
-				requestTimeoutMs: 60_000,
-			})
+			.sendRpcRequest(
+				rpc.DEFAULT_SOCKET_PATH,
+				{ _tag: "RestartWithConfig" },
+				{
+					requestTimeoutMs: 60_000,
+				},
+			)
 			.catch((error) => log(`${error.message}; checking for a restart`));
 		if (await waitForServer(inode)) {
 			if (mode !== "service") {
@@ -225,7 +229,7 @@ async function restart() {
 async function startVite() {
 	const { port, tlsEnabled } = await rpc.sendRpcRequest(
 		rpc.DEFAULT_SOCKET_PATH,
-		new rpc.GetStatus({}),
+		{ _tag: "GetStatus" },
 	);
 	if (stopping) return;
 	const server = `${tlsEnabled ? "https" : "http"}://localhost:${port}`;
@@ -274,30 +278,26 @@ async function rebuild() {
 					{ loadDaemonConfigResult },
 					{ isDaemonRunning },
 					{ sendRpcRequest },
-					{ GetStatus, RestartWithConfig },
 				] = await Promise.all([
 					import("../dist/src/bin/cli-utils.js"),
 					import("../dist/src/lib/daemon/config-persistence.js"),
 					import("../dist/src/lib/daemon/daemon-utils.js"),
 					import("../dist/src/lib/daemon/daemon-rpc-client.js"),
-					import("../dist/src/lib/contracts/ws-rpc.js"),
 				]);
 				// The port `serve` will bind: flag, then persisted config, then default.
 				const parsed = parseArgs(["serve", ...args]);
 				const loaded = loadDaemonConfigResult(DEFAULT_CONFIG_DIR);
-				if (loaded._tag === "Left" && loaded.left._tag !== "NotFound")
-					throw loaded.left;
+				if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound")
+					throw loaded.failure;
 				rpc = {
 					port: parsed.portExplicit
 						? parsed.port
-						: loaded._tag === "Right"
-							? loaded.right.port
+						: loaded._tag === "Success"
+							? loaded.success.port
 							: DEFAULT_PORT,
 					DEFAULT_SOCKET_PATH,
 					isDaemonRunning,
 					sendRpcRequest,
-					GetStatus,
-					RestartWithConfig,
 				};
 			}
 			if (stopping) return;
