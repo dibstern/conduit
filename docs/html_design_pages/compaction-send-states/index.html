@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Sending + autocompaction states</title>
+<script>document.documentElement.dataset.designTheme=localStorage.getItem('tsp-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<style>/* tsp chrome. Styles the page around designs only; designs render in their own iframes.
+   The chrome is always light: the theme toggle switches the designs (data-design-theme), never the page. */
+:root{--bg:#f7f7f5;--surface:#fff;--text:#1c1c1a;--muted:#6b6b65;--line:#e3e3de;--soft:#efefea;--ring:#1c1c1a;color-scheme:light;
+--font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--font);overflow-x:clip}
+[hidden]{display:none!important}
+html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme=dark] [data-theme-only=light]{display:none!important}
+
+.tsp-bar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;
+  padding:10px max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left));
+  background:color-mix(in srgb,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.tsp-titles{flex:1;min-width:0}
+.tsp-home{display:inline-block;font:600 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:4px 0}
+.tsp-bar h1{margin:0;font-size:clamp(17px,2.2vw,21px);line-height:1.25;font-weight:650;text-wrap:balance}
+.tsp-bar p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.tsp-actions{display:flex;gap:8px;flex-shrink:0}
+.tsp-btn{min-height:44px;min-width:44px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);
+  color:var(--text);font:500 13px/1 var(--font);cursor:pointer;display:inline-grid;place-items:center}
+.tsp-btn:hover{background:var(--soft)}
+.tsp-btn:focus-visible,.tsp-section>summary:focus-visible,.tsp-open:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.tsp-theme{padding:0}
+.tsp-theme svg{width:18px;height:18px}
+[data-design-theme=light] .tsp-sun,[data-design-theme=dark] .tsp-moon{display:none}
+
+.tsp-main{max-width:1440px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
+.tsp-main>*+*,.tsp-section-body>*+*{margin-top:16px}
+
+.tsp-section{border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.tsp-section>summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:52px;padding:8px 16px;cursor:pointer;border-radius:14px}
+.tsp-section>summary::-webkit-details-marker{display:none}
+.tsp-section>summary h2{margin:0;flex:1;font-size:17px;line-height:1.3;font-weight:650}
+.tsp-chev{width:16px;height:16px;flex-shrink:0;color:var(--muted);transition:transform .15s}
+.tsp-section[open]>summary .tsp-chev{transform:rotate(90deg)}
+.tsp-count{font:12px var(--mono);color:var(--muted)}
+.tsp-section-body{padding:0 16px 16px}
+@media (max-width:520px){.tsp-section-body{padding:0 10px 10px}.tsp-section>summary{padding:8px 12px}}
+
+.tsp-grid{display:grid;align-items:start;gap:16px;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--tsp-min,340px)),1fr))}
+.tsp-card{display:flex;flex-direction:column;gap:6px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.tsp-wide{grid-column:1/-1}
+.tsp-card-head{display:flex;align-items:baseline;gap:8px}
+.tsp-n{font:600 12px/1 var(--mono);color:var(--muted)}
+.tsp-card h3{margin:0;flex:1;font-size:15px;line-height:1.35;font-weight:600}
+.tsp-open{display:inline-grid;place-items:center;min-width:44px;min-height:44px;margin:-14px -10px -14px 0;border-radius:8px;color:var(--muted);text-decoration:none}
+.tsp-open:hover{color:var(--text)}
+.tsp-why{margin:0;color:var(--muted);font-size:13px}
+.tsp-stage{overflow:hidden;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.tsp-frame{display:block;width:100%;height:240px;border:0;transform-origin:0 0}
+
+:where(.tsp-main) :is(h2,h3,h4){line-height:1.3;text-wrap:balance}
+:where(.tsp-main) :is(p,li){max-width:78ch}
+:where(.tsp-main) a{color:inherit;text-underline-offset:2px}
+:where(.tsp-main) code{font:.9em var(--mono);background:var(--soft);padding:.1em .35em;border-radius:5px}
+:where(.tsp-main) pre{overflow-x:auto;padding:12px 14px;background:var(--soft);border-radius:10px;font:13px/1.5 var(--mono)}
+:where(.tsp-main) pre code{background:none;padding:0}
+:where(.tsp-main) table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:14px}
+:where(.tsp-main) :is(th,td){padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+:where(.tsp-main) :is(img,video){max-width:100%;height:auto}
+:where(.tsp-main) blockquote{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:var(--muted)}
+
+.tsp-index{list-style:none;padding:0;display:grid;gap:10px}
+.tsp-index li{max-width:none;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--muted);font-size:13px}
+.tsp-index strong{color:var(--text);font-size:15px}
+.tsp-foot{padding:0 16px 32px;text-align:center;font:12px var(--mono);color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.tsp-chev{transition:none}}
+</style></head>
+<body>
+<header class="tsp-bar"><div class="tsp-titles"><a class="tsp-home" href="/tsp/" hidden>tsp</a><h1>Sending + autocompaction states</h1><p>No turn card while compacting · 5 send states, 12 compaction options</p></div>
+<div class="tsp-actions"><button class="tsp-btn" type="button" data-tsp="toggle-all" hidden>Collapse all</button>
+<button class="tsp-btn tsp-theme" type="button" aria-label="Switch the designs between light and dark">
+<svg class="tsp-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+<svg class="tsp-sun" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></svg>
+</button></div></header>
+<main class="tsp-main">
+
+
+<p><strong>The bug:</strong> when you send a message and autocompaction kicks in, the transcript shows a <em>Working</em> turn card plus a separate "Compacting…" notice. Nothing is working on your request yet, so the card lies, and the two statuses compete.</p>
+
+<p><strong>The catch:</strong> at the moment you press send, conduit can't know whether compaction will happen. So the <em>sent</em> state has to be neutral enough to turn into either "compacting" or "working" without a flash of the wrong one. That's why this page has two sections.</p>
+
+<p>Every card is a 3-frame storyboard: <strong>1 Sent</strong> → <strong>2 Compacting</strong> → <strong>3 Replying</strong>. Use the toggle top right for dark mode.</p>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Today (for reference)</h2><span class="tsp-count">1</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card" id="d-0"><header class="tsp-card-head"><span class="tsp-n">0</span><h3>Current behaviour</h3><a class="tsp-open" href="_frame-0.html" target="_blank" aria-label="Open Current behaviour alone">↗</a></header><p class="tsp-why">Working card appears at send and keeps ticking through compaction, with a second status stacked under it.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-0.html" title="Current behaviour" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>A · The sent state (before anything is known)</h2><span class="tsp-count">5</span></summary><div class="tsp-section-body">
+<p>These cover the gap between pressing send and the first event. Each one must turn cleanly into <em>either</em> compacting or working.</p>
+<div class="tsp-grid" style="--tsp-min:340px">
+
+<article class="tsp-card" id="d-s1"><header class="tsp-card-head"><span class="tsp-n">S1</span><h3>Neutral presence</h3><a class="tsp-open" href="_frame-s1.html" target="_blank" aria-label="Open Neutral presence alone">↗</a></header><p class="tsp-why">Claude&#x27;s avatar appears with a quiet pulse and no label. It commits to &#x27;Working&#x27; or &#x27;Compacting&#x27; only once an event says which.</p><div class="tsp-stage" data-width="520"><iframe class="tsp-frame" src="_frame-s1.html" title="Neutral presence" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-s2"><header class="tsp-card-head"><span class="tsp-n">S2</span><h3>Message receipt</h3><a class="tsp-open" href="_frame-s2.html" target="_blank" aria-label="Open Message receipt alone">↗</a></header><p class="tsp-why">The status belongs to your message, not to Claude. A small line under the bubble moves Sending → Sent → Claude started.</p><div class="tsp-stage" data-width="520"><iframe class="tsp-frame" src="_frame-s2.html" title="Message receipt" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-s3"><header class="tsp-card-head"><span class="tsp-n">S3</span><h3>Grace period</h3><a class="tsp-open" href="_frame-s3.html" target="_blank" aria-label="Open Grace period alone">↗</a></header><p class="tsp-why">Show nothing new for ~700ms. Most sends get a first event in that window, so the right status appears first time and never flips.</p><div class="tsp-stage" data-width="520"><iframe class="tsp-frame" src="_frame-s3.html" title="Grace period" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-s4"><header class="tsp-card-head"><span class="tsp-n">S4</span><h3>Composer carries it</h3><a class="tsp-open" href="_frame-s4.html" target="_blank" aria-label="Open Composer carries it alone">↗</a></header><p class="tsp-why">The send button turns into Stop with a ring. The transcript only grows when there&#x27;s something real to show.</p><div class="tsp-stage" data-width="520"><iframe class="tsp-frame" src="_frame-s4.html" title="Composer carries it" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-s5"><header class="tsp-card-head"><span class="tsp-n">S5</span><h3>Shimmering header</h3><a class="tsp-open" href="_frame-s5.html" target="_blank" aria-label="Open Shimmering header alone">↗</a></header><p class="tsp-why">Claude&#x27;s name itself shimmers, the way a live label does in a terminal. No card chrome until there&#x27;s a step to show.</p><div class="tsp-stage" data-width="520"><iframe class="tsp-frame" src="_frame-s5.html" title="Shimmering header" loading="lazy"></iframe></div></article>
+
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>B · Autocompaction starting (no turn card)</h2><span class="tsp-count">12</span></summary><div class="tsp-section-body">
+<p>In every option, the <em>Working</em> card only appears once compaction ends and the model actually starts on your message. Its timer starts then too.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+
+<article class="tsp-card" id="d-c1"><header class="tsp-card-head"><span class="tsp-n">C1</span><h3>Live seam</h3><a class="tsp-open" href="_frame-c1.html" target="_blank" aria-label="Open Live seam alone">↗</a></header><p class="tsp-why">The &#x27;Compacted context&#x27; rule already exists. Draw it early with a moving line, then let it settle in place. Zero layout jump.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c1.html" title="Live seam" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c2"><header class="tsp-card-head"><span class="tsp-n">C2</span><h3>Seam above your message</h3><a class="tsp-open" href="_frame-c2.html" target="_blank" aria-label="Open Seam above your message alone">↗</a></header><p class="tsp-why">Compaction summarises everything before your message, so the line goes there. Older messages fade while it runs; yours stays crisp.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c2.html" title="Seam above your message" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c3"><header class="tsp-card-head"><span class="tsp-n">C3</span><h3>Header status</h3><a class="tsp-open" href="_frame-c3.html" target="_blank" aria-label="Open Header status alone">↗</a></header><p class="tsp-why">Claude&#x27;s header shows what it&#x27;s doing in plain words. No card, no box, just a line, until the real turn starts.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c3.html" title="Header status" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c4"><header class="tsp-card-head"><span class="tsp-n">C4</span><h3>Receipt line</h3><a class="tsp-open" href="_frame-c4.html" target="_blank" aria-label="Open Receipt line alone">↗</a></header><p class="tsp-why">Compaction is something that happens to your message before it&#x27;s read, so it&#x27;s reported under your message. Claude isn&#x27;t on screen yet.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c4.html" title="Receipt line" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c5"><header class="tsp-card-head"><span class="tsp-n">C5</span><h3>Composer dock</h3><a class="tsp-open" href="_frame-c5.html" target="_blank" aria-label="Open Composer dock alone">↗</a></header><p class="tsp-why">The transcript stays quiet. A slim tab docked to the top of the composer reports compaction, near where your eyes already are.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c5.html" title="Composer dock" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c6"><header class="tsp-card-head"><span class="tsp-n">C6</span><h3>Context meter drains</h3><a class="tsp-open" href="_frame-c6.html" target="_blank" aria-label="Open Context meter drains alone">↗</a></header><p class="tsp-why">Show the thing compaction actually changes. The context ring beside send drains from 92% to 23% while it runs, and nothing else moves.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c6.html" title="Context meter drains" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c7"><header class="tsp-card-head"><span class="tsp-n">C7</span><h3>Squeeze pill</h3><a class="tsp-open" href="_frame-c7.html" target="_blank" aria-label="Open Squeeze pill alone">↗</a></header><p class="tsp-why">A centred pill with arrows pressing inward: reads as &#x27;shrinking&#x27; at a glance, even on a phone, without a word.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c7.html" title="Squeeze pill" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c8"><header class="tsp-card-head"><span class="tsp-n">C8</span><h3>Session bar chip</h3><a class="tsp-open" href="_frame-c8.html" target="_blank" aria-label="Open Session bar chip alone">↗</a></header><p class="tsp-why">Compaction is a session state, like &#x27;busy&#x27;. It shows in the session bar and sidebar dot. The transcript only shows the result.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c8.html" title="Session bar chip" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c9"><header class="tsp-card-head"><span class="tsp-n">C9</span><h3>Quiet dots</h3><a class="tsp-open" href="_frame-c9.html" target="_blank" aria-label="Open Quiet dots alone">↗</a></header><p class="tsp-why">The calmest option. Typing dots under Claude, with a dim word beside them. Nothing that reads as progress or work.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c9.html" title="Quiet dots" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c10"><header class="tsp-card-head"><span class="tsp-n">C10</span><h3>Toast over composer</h3><a class="tsp-open" href="_frame-c10.html" target="_blank" aria-label="Open Toast over composer alone">↗</a></header><p class="tsp-why">Transient by nature, so it gets a transient surface. Floats above the composer and leaves no trace; the seam is the record.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c10.html" title="Toast over composer" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c11"><header class="tsp-card-head"><span class="tsp-n">C11</span><h3>Placeholder card (contrast)</h3><a class="tsp-open" href="_frame-c11.html" target="_blank" aria-label="Open Placeholder card (contrast) alone">↗</a></header><p class="tsp-why">Keeps a card in the turn&#x27;s slot but strips it of everything turn-like: dashed, no timer, no Working. Least layout movement; closest to today.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c11.html" title="Placeholder card (contrast)" loading="lazy"></iframe></div></article>
+
+<article class="tsp-card" id="d-c12"><header class="tsp-card-head"><span class="tsp-n">C12</span><h3>History fold</h3><a class="tsp-open" href="_frame-c12.html" target="_blank" aria-label="Open History fold alone">↗</a></header><p class="tsp-why">Boldest. Earlier messages visibly fold into a summary stack while compaction runs, then stay folded as a clickable record.</p><div class="tsp-stage" data-width="560"><iframe class="tsp-frame" src="_frame-c12.html" title="History fold" loading="lazy"></iframe></div></article>
+
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>My pick</h2></summary><div class="tsp-section-body">
+<p><strong>S1 Neutral presence + C1 Live seam.</strong></p>
+<ul>
+<li><strong>No wrong first guess.</strong> The pulse commits to nothing, so it can become either state without a flash.</li>
+<li><strong>Reuses what exists.</strong> The live seam settles into the exact "Compacted context" rule conduit already renders, so frame 2 → 3 has no layout jump and no new component.</li>
+<li><strong>Turn timer stays honest.</strong> The Working card, and its clock, start when the model does.</li>
+</ul>
+<p><strong>Runner-up:</strong> C2 (seam above your message). It's the most truthful about <em>what</em> got compacted, but it moves the rule to a different spot than where completed compactions sit today.</p>
+</div></details>
+
+</main>
+<footer class="tsp-foot">compaction-send-states · 2026-10-23T21:55</footer>
+<script>(() => {
+  const root = document.documentElement, KEY = 'tsp-theme';
+  const frames = [...document.querySelectorAll('iframe.tsp-frame')];
+
+  // Theme: one choice shared by every tsp page, applied to the designs only; the chrome stays light.
+  // Each frame gets data-theme, plus color-scheme inline with !important so it beats a design's own
+  // `color-scheme: light dark`, which would otherwise make light-dark() follow the OS.
+  const theme = (d, t) => {
+    d.documentElement.dataset.theme = t;
+    d.documentElement.style.setProperty('color-scheme', t, 'important');
+  };
+  const paint = t => {
+    root.dataset.designTheme = t;
+    for (const f of frames) try { theme(f.contentDocument, t) } catch {}
+  };
+  const toggle = document.querySelector('.tsp-theme');
+  if (toggle && !frames.length && !document.querySelector('[data-theme-only]')) toggle.hidden = true;
+  toggle?.addEventListener('click', () => {
+    const t = root.dataset.designTheme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(KEY, t);
+    paint(t);
+  });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+    if (!localStorage.getItem(KEY)) paint(e.matches ? 'dark' : 'light');
+  });
+
+  // Collapse / expand all sections.
+  const sections = [...document.querySelectorAll('details.tsp-section')];
+  const all = document.querySelector('[data-tsp=toggle-all]');
+  if (all && sections.length > 1) {
+    const label = () => { all.textContent = sections.some(s => s.open) ? 'Collapse all' : 'Expand all' };
+    all.hidden = false;
+    all.addEventListener('click', () => {
+      const open = !sections.some(s => s.open);
+      sections.forEach(s => { s.open = open });
+      label();
+    });
+    sections.forEach(s => s.addEventListener('toggle', label));
+    label();
+  }
+
+  // The home link only resolves when served under /tsp/ (not in committed copies).
+  const home = document.querySelector('.tsp-home');
+  if (home && location.pathname.startsWith('/tsp/') && location.pathname.split('/').filter(Boolean).length > 1) home.hidden = false;
+
+  // Frames: height follows content (or data-height); data-width designs scale down to fit.
+  const fit = f => {
+    const stage = f.parentElement, avail = stage.clientWidth;
+    if (!avail) return;
+    const w = +stage.dataset.width || 0;
+    let h = +stage.dataset.height || 0;
+    if (!h) {
+      try {
+        const b = f.contentDocument.body;
+        h = Math.min(Math.ceil(Math.max(b.scrollHeight, b.getBoundingClientRect().height)), 6000) || 240;
+      } catch { h = 480 }
+    }
+    const s = w && avail < w ? avail / w : 1;
+    f.style.width = w ? `${w}px` : '100%';
+    f.style.marginInline = w && s === 1 ? 'auto' : '0';
+    f.style.height = `${h}px`;
+    f.style.transform = s < 1 ? `scale(${s})` : '';
+    stage.style.height = `${Math.ceil(h * s) + 2}px`;
+  };
+  const stages = new ResizeObserver(es => es.forEach(e => fit(e.target.querySelector('iframe.tsp-frame'))));
+  for (const f of frames) {
+    stages.observe(f.parentElement);
+    const ready = () => {
+      try {
+        const d = f.contentDocument;
+        theme(d, root.dataset.designTheme);
+        new f.contentWindow.ResizeObserver(() => fit(f)).observe(d.body);
+      } catch {}
+      fit(f);
+    };
+    f.addEventListener('load', ready);
+    try { if (f.contentDocument?.readyState === 'complete' && f.contentDocument.URL !== 'about:blank') ready() } catch {}
+  }
+})();
+</script>
+</body></html>
