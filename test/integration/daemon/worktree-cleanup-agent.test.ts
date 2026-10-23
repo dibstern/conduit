@@ -607,23 +607,27 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 			},
 			{ timeout: 15_000 },
 		);
-		const hold = join(fixture.root, "claude", "conduit-test-hold-stop");
-		writeFileSync(hold, "hold\n");
-		await settle(session.sessionId);
-		await vi.waitFor(
-			() =>
-				expect(
-					sdkProof(fixture).some((mark) => mark["kind"] === "stop-held"),
-				).toBe(true),
-			{ timeout: 15_000 },
-		);
-		expect(alive(runner.pid)).toBe(true);
-		expect(existsSync(session.path)).toBe(true);
 		const browser = await fixture.connect(session.sessionId);
 		const prompt = "message-during-settle-stop";
-		const reply = browser.send(session.sessionId, prompt, 60_000);
-		void reply.catch(() => {});
+		// 887c1afa lets disposal close without waiting for Query.interrupt's ack.
+		// Hold the provider operation itself to keep this race inside inbox ownership.
+		const hold = join(fixture.root, `hold-end-session-${session.sessionId}`);
+		writeFileSync(hold, "hold\n");
 		try {
+			await settle(session.sessionId);
+			await vi.waitFor(
+				() =>
+					expect(
+						existsSync(
+							join(fixture.root, `end-session-held-${session.sessionId}`),
+						),
+					).toBe(true),
+				{ timeout: 15_000 },
+			);
+			expect(alive(runner.pid)).toBe(true);
+			expect(existsSync(session.path)).toBe(true);
+			const reply = browser.send(session.sessionId, prompt, 60_000);
+			void reply.catch(() => {});
 			// Sending clears settled_at before inbox admission. This durable write
 			// proves the request reached the held lock before the stop is released.
 			await vi.waitFor(
@@ -641,24 +645,26 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 				fixture,
 				session.sessionId,
 			);
+			rmSync(hold, { force: true });
+			expect((await reply).chunks.join("")).toBe(
+				responseChunks(prompt).join(""),
+			);
+			expect(alive(runner.pid)).toBe(false);
+			expect(
+				fixture.claudeOptions().find((options) => options.prompt === prompt)
+					?.resumeId,
+			).toBe(before.providerConversationId);
+			expect(
+				sessionState(fixture, session.sessionId).providerConversationId,
+			).toBe(before.providerConversationId);
+			await sweep("message racing stop finished");
+			expect(stopCommands(fixture, session.sessionId)).toEqual([
+				{ sessionId: session.sessionId, unbind: false },
+			]);
 		} finally {
 			rmSync(hold, { force: true });
-			writeFileSync(join(fixture.root, "release-switch-stop"), "release\n");
+			await browser.close();
 		}
-		expect((await reply).chunks.join("")).toBe(responseChunks(prompt).join(""));
-		expect(alive(runner.pid)).toBe(false);
-		expect(
-			fixture.claudeOptions().find((options) => options.prompt === prompt)
-				?.resumeId,
-		).toBe(before.providerConversationId);
-		expect(
-			sessionState(fixture, session.sessionId).providerConversationId,
-		).toBe(before.providerConversationId);
-		await sweep("message racing stop finished");
-		expect(stopCommands(fixture, session.sessionId)).toEqual([
-			{ sessionId: session.sessionId, unbind: false },
-		]);
-		await browser.close();
 	}, 60_000);
 
 	it("keeps an idle-exiting runner after stop is requested until its OS process exits", async () => {

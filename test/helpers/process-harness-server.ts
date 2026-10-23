@@ -1286,14 +1286,22 @@ async function main(): Promise<void> {
 						Effect.sync(() => {
 							const endSession = instance.endSessionEffect.bind(instance);
 							instance.endSessionEffect = (sessionId, call, control) =>
-								Effect.suspend(() => {
+								Effect.gen(function* () {
+									const hold = join(root, `hold-end-session-${sessionId}`);
+									if (existsSync(hold)) {
+										writeFileSync(
+											join(root, `end-session-held-${sessionId}`),
+											"held\n",
+										);
+										while (existsSync(hold)) yield* Effect.sleep("20 millis");
+									}
 									if (!existsSync(join(root, `fail-end-session-${sessionId}`)))
-										return endSession(sessionId, call, control);
+										return yield* endSession(sessionId, call, control);
 									appendFileSync(
 										join(root, "end-session-failures.ndjson"),
 										`${JSON.stringify({ sessionId })}\n`,
 									);
-									return Effect.fail(
+									return yield* Effect.fail(
 										new ProviderInstanceFailure({
 											providerId: "claude",
 											operation: "endSession",
