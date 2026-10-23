@@ -20,6 +20,7 @@ import {
 	Usage,
 	type UsageService,
 } from "../../domain/daemon/Services/usage.js";
+import type { InputDrafts } from "../../domain/relay/Services/input-drafts.js";
 import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
 import type {
 	ProviderRuntimeIngestion,
@@ -137,6 +138,7 @@ export interface RunnerRecoveryDependencies {
 		"clearTimeout" | "resetTimeout"
 	>;
 	readonly persist: ClaudeEventPersistEffect;
+	readonly inputDrafts?: InputDrafts;
 	readonly resolveCallContext: OrchestrationEngine["resolveCallContextEffect"];
 	readonly retirePrompts: (
 		currentProcessId: string | null,

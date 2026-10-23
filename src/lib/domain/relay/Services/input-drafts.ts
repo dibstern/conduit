@@ -251,7 +251,7 @@ export const makeInputDrafts: Effect.Effect<
 					rows[0]
 						? PubSub.publish(changes, {
 								key: { session: sessionId },
-								envelope: { _tag: "draft", text: rows[0].text },
+								envelope: { _tag: "draft", text: rows[0].text, restored: text },
 							})
 						: Effect.void,
 				),

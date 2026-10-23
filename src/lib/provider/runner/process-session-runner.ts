@@ -24,6 +24,7 @@ import {
 	accountSwitchBusyMessage,
 } from "../../contracts/limit-recovery.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import {
 	type PendingInteractionService,
 	PendingInteractionServiceTag,
@@ -2374,23 +2375,27 @@ export const makeProcessSessionRunner = (
 												}),
 												Effect.map((commands) =>
 													commands.map((command) => {
-														const wait = command.wait.pipe(
+														let wait = command.wait.pipe(
 															Effect.provideService(PersistenceProjectTag, {
 																projectId: persisted.project_id,
 															}),
 															Effect.provideService(SqlClient.SqlClient, sql),
 														);
-														return {
-															...command,
-															wait: recovery
-																? wait.pipe(
-																		Effect.provideService(
-																			ClaudeEventPersistEffectTag,
-																			recovery.persist,
-																		),
-																	)
-																: wait,
-														};
+														if (recovery)
+															wait = wait.pipe(
+																Effect.provideService(
+																	ClaudeEventPersistEffectTag,
+																	recovery.persist,
+																),
+															);
+														if (recovery?.inputDrafts)
+															wait = wait.pipe(
+																Effect.provideService(
+																	InputDraftsTag,
+																	recovery.inputDrafts,
+																),
+															);
+														return { ...command, wait };
 													}),
 												),
 												Effect.mapError((cause) =>

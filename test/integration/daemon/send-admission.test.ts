@@ -17,9 +17,13 @@ import {
 } from "../../helpers/process-harness.js";
 
 it.each([
-	false,
-	true,
-])("bounds folder admission and restores a resendable draft without ending background work (newer draft: %s)", async (withNewerDraft) => {
+	{ withNewerDraft: false, restart: false },
+	{ withNewerDraft: true, restart: false },
+	{ withNewerDraft: false, restart: true },
+])("bounds folder admission and restores a resendable draft without ending background work ($withNewerDraft, restart: $restart)", async ({
+	withNewerDraft,
+	restart,
+}) => {
 	const harness = ProcessHarness.create({
 		dist: "dist",
 		restartProof: true,
@@ -28,6 +32,7 @@ it.each([
 	const observations: Record<string, unknown> = {
 		reason: "foldersPending",
 		withNewerDraft,
+		restart,
 	};
 	let db: Database.Database | undefined;
 	let subscription: Fiber.Fiber<void, unknown> | undefined;
@@ -77,17 +82,19 @@ it.each([
 				folders: [harness.projectDir, extra],
 			}),
 		);
-		const viewer = await harness.connect(sessionId);
+		let viewer = await harness.connect(sessionId);
 		const drafts: InputDraftEnvelope[] = [];
-		subscription = Effect.runFork(
-			Stream.runForEach(
-				viewer.rpc.SubscribeInputDraft({ key: { session: sessionId } }),
-				(draft) =>
-					Effect.sync(() => {
-						drafts.push(draft);
-					}),
-			),
-		);
+		const subscribe = () =>
+			Effect.runFork(
+				Stream.runForEach(
+					viewer.rpc.SubscribeInputDraft({ key: { session: sessionId } }),
+					(draft) =>
+						Effect.sync(() => {
+							drafts.push(draft);
+						}),
+				),
+			);
+		subscription = subscribe();
 		await vi.waitFor(() => expect(drafts).toHaveLength(1));
 		const before = await Effect.runPromise(
 			viewer.rpc.ListDaemonSessions({ projectSlug: "process-test" }),
@@ -101,6 +108,7 @@ it.each([
 		const text = "m1it resend after folders settle";
 		const restoredText = withNewerDraft ? `${text}\n\nnewer draft` : text;
 		const sentAt = Date.now();
+		const admissionCursor = harness.marks.length;
 		expect(
 			await Effect.runPromise(
 				viewer.rpc["input.submit"]({
@@ -121,14 +129,60 @@ it.each([
 				}),
 			);
 		}
+		if (restart) {
+			const command = db.prepare<
+				[string],
+				{ status: string; error_code: string | null }
+			>(
+				"SELECT status, error_code FROM provider_command_outbox WHERE command_id = ?",
+			);
+			await vi.waitFor(
+				() =>
+					expect(command.get(inputId)).toEqual({
+						status: "running",
+						error_code: null,
+					}),
+				{ interval: 10 },
+			);
+			observations["claimedBeforeRestart"] = command.get(inputId);
+			observations["admissionBeforeRestart"] = await harness.waitForMark(
+				(mark) =>
+					mark.kind === "runner-admission" &&
+					mark.sessionId === sessionId &&
+					mark.command === "send-turn" &&
+					mark.decision === "Wait",
+				admissionCursor,
+			);
+			const runnerPids = harness.runnerPids();
+			await harness.kill();
+			expect(command.get(inputId)).toEqual({
+				status: "running",
+				error_code: null,
+			});
+			await Effect.runPromise(Fiber.interrupt(subscription));
+			drafts.length = 0;
+			await harness.restart();
+			viewer = await harness.connect(sessionId);
+			subscription = subscribe();
+			expect(harness.runnerPids()).toEqual(runnerPids);
+			observations["runnerPidsAfterRestart"] = harness.runnerPids();
+		}
 		await vi.waitFor(
 			() =>
-				expect(drafts).toContainEqual({ _tag: "draft", text: restoredText }),
+				expect(drafts).toContainEqual(
+					expect.objectContaining({ _tag: "draft", text: restoredText }),
+				),
 			{ timeout: 2_000, interval: 10 },
 		);
+		if (!restart)
+			expect(drafts).toContainEqual({
+				_tag: "draft",
+				text: restoredText,
+				restored: text,
+			});
 		observations["refusedAfterMs"] = Date.now() - sentAt;
 		expect(observations["refusedAfterMs"]).toBeGreaterThanOrEqual(900);
-		expect(observations["refusedAfterMs"]).toBeLessThan(2_000);
+		if (!restart) expect(observations["refusedAfterMs"]).toBeLessThan(2_000);
 		expect(
 			db
 				.prepare<[string], { state: string }>(
@@ -226,7 +280,7 @@ it.each([
 		observations["cleanup"] = harness.proof();
 		mkdirSync("test-results", { recursive: true });
 		writeFileSync(
-			`test-results/m1it-send-admission${withNewerDraft ? "-newer-draft" : ""}.json`,
+			`test-results/m1it-send-admission${restart ? "-restart" : withNewerDraft ? "-newer-draft" : ""}.json`,
 			JSON.stringify(observations, null, 2),
 		);
 	}

@@ -37,6 +37,7 @@ export type DraftEvent =
 			_tag: "ServerTextReceived";
 			key: InputDraftKey;
 			text?: string;
+			restored?: string;
 			projectId?: string;
 			initial?: boolean;
 	  }
@@ -161,7 +162,7 @@ function clear(state: DraftState): [DraftState, DraftCommand[]] {
 		],
 	];
 }
-/** Unknown reads preserve text; unsent edits reject live text. Reload snapshots
+/** Unknown reads preserve text; unsent edits reject ordinary live text. Reload snapshots
  * compare their saved base once, before writes. Failed syncs keep acked; late
  * replies name their key/text. Explicit project moves and sends supersede reads. */
 export function step(
@@ -217,6 +218,7 @@ export function step(
 				"draft" in event.key && event.initial ? (event.text ?? "") : event.text;
 			const base = event.initial && id ? state.reloadBases.get(id) : undefined;
 			let next = state;
+			const commands: DraftCommand[] = [];
 			if (base !== undefined) {
 				const reloadBases = new Map(state.reloadBases);
 				reloadBases.delete(draftKeyId(event.key));
@@ -224,12 +226,26 @@ export function step(
 				if (incoming !== undefined && incoming !== base)
 					next = { ...next, text: incoming, acked: incoming };
 			} else if (
+				event.restored !== undefined &&
+				incoming !== undefined &&
+				state.text !== state.acked
+			) {
+				next = {
+					...state,
+					text: state.text
+						? `${event.restored}\n\n${state.text}`
+						: event.restored,
+					acked: incoming,
+					pending: true,
+					throttled: true,
+				};
+				commands.push({ _tag: "ScheduleSync", delay: 300 });
+			} else if (
 				!(event.initial && state.snapshot === "overlapped") &&
 				incoming !== undefined &&
 				(state.text === state.acked || !state.text)
 			)
 				next = { ...state, text: incoming, acked: incoming };
-			const commands: DraftCommand[] = [];
 			if (
 				"draft" in event.key &&
 				event.projectId &&
