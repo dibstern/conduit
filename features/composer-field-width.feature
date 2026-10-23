@@ -51,12 +51,12 @@ Examples:
   | message | baseline                   | threshold |
   | Hi      | composer-field-short-phone | 98        |
 
-Scenario Outline: send and stop keep the field clear of the extra touch target
+Scenario Outline: send and stop leave the field full width
   When I type <message> into the composer
   And the mock relay sets composer status to processing
   Then send and stop are both visible
   And the composer has 2 rows
-  And the composer field fills the space beside the Stop target
+  And the composer field is at least the composer width minus 30 pixels
   And the composer region visually matches <baseline> at <threshold> percent
 
 Examples:

@@ -393,7 +393,7 @@
 	/* A stable slot measures available room in block, grid and flex parents. Checkout still yields before the model. */
 	.git-pill.git-control { position: relative; width: 100%; flex: 0 1000000 220px; min-width: 30px; max-width: 220px; justify-content: end; }
 	/* Phone models yield their name first; checkout keeps a readable branch until then. */
-	.git-pill.git-control.compact { flex: 0 1 90px; max-width: 110px; }
+	.git-pill.git-control.compact { flex: 0 0 var(--composer-checkout-width, 90px); max-width: 110px; }
 	/* Content-sized, so it sits beside the context %. As an icon it still asks for its full width, or it could never grow back. */
 	.git-pill.git-word { position: relative; flex: 0 1 auto; min-width: 12px; justify-content: end; }
 	/* 100ch in the pill's font turns ch floors into px. It extends left from the pill, so it never adds scroll. */

@@ -64,31 +64,6 @@ export const composerFieldWidthHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert field beside Stop target",
-		match: /^the composer field fills the space beside the Stop target$/,
-		run: async ({ world }) => {
-			await world.page.waitForFunction(() => {
-				const composer = document.getElementById("input-row");
-				const field = document.getElementById("input");
-				const mirror = composer?.querySelector(".mirror");
-				const stop = document.getElementById("stop");
-				const send = document.getElementById("send");
-				if (!composer || !field || !mirror || !stop || !send) return false;
-				const fieldBox = field.getBoundingClientRect();
-				const stopBox = stop.getBoundingClientRect();
-				return (
-					stopBox.width >= 44 &&
-					stopBox.height >= 44 &&
-					fieldBox.width + stopBox.width >=
-						composer.getBoundingClientRect().width - 30 &&
-					fieldBox.right <= stopBox.left &&
-					stopBox.bottom <= send.getBoundingClientRect().top &&
-					Math.abs(mirror.getBoundingClientRect().width - fieldBox.width) <= 1
-				);
-			});
-		},
-	},
-	{
 		name: "assert placeholder fully visible",
 		match: /^the composer placeholder is fully visible$/,
 		run: async ({ world }) => {

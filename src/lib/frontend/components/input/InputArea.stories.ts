@@ -1585,6 +1585,33 @@ export const NarrowLimited395Light: Story = {
 	globals: { theme: "light" },
 };
 
+function phoneTouchBounds(control: Element) {
+	const rect = control.getBoundingClientRect();
+	const target = getComputedStyle(control, "::before");
+	const width = Math.max(
+		rect.width,
+		target.display === "none" ? 0 : Number.parseFloat(target.minWidth) || 0,
+	);
+	const height = Math.max(
+		rect.height,
+		target.display === "none" ? 0 : Number.parseFloat(target.minHeight) || 0,
+	);
+	return new DOMRect(
+		rect.x + (rect.width - width) / 2,
+		rect.y + (rect.height - height) / 2,
+		width,
+		height,
+	);
+}
+
+function controlsForPhone(canvasElement: HTMLElement) {
+	const controls = canvasElement.querySelectorAll<HTMLElement>(
+		'#attach-btn, [data-testid="model-picker-trigger"], [data-testid="variant-badge"], [data-testid="permission-mode-badge"]',
+	);
+	expect(controls).toHaveLength(4);
+	return controls;
+}
+
 export const FinalIconsDesktop: Story = {
 	beforeEach: ({ canvasElement }) => {
 		const cleanup = setupWords(canvasElement, false);
@@ -1628,6 +1655,18 @@ export const FinalIconsDesktop: Story = {
 		const checkoutControl = canvas.getByTestId("composer-checkout");
 		await expect(checkoutControl).toBeVisible();
 		if (phone) {
+			const layout = canvas.getByTestId("composer-layout");
+			await waitFor(() =>
+				expect(layout).toHaveAttribute(
+					"data-footer-fit",
+					window.innerWidth === 320 ? "checkout-icon" : "labels",
+				),
+			);
+			await waitFor(() =>
+				expect(checkoutControl.getBoundingClientRect().width).toBe(
+					window.innerWidth === 320 ? 44 : 90,
+				),
+			);
 			await expect(canvas.queryByTestId("composer-effort-label")).toBeNull();
 			const footer = canvas.getByTestId("composer-icons-left");
 			await expect(footer.scrollWidth).toBeLessThanOrEqual(footer.clientWidth);
@@ -1637,30 +1676,11 @@ export const FinalIconsDesktop: Story = {
 				effort,
 				canvas.getByTestId("permission-mode-badge"),
 				checkoutControl,
-				sendButton,
 			];
 			const boxes = controls.map((control) => {
 				if (!control) throw new Error("Phone footer control missing");
-				const rect = control.getBoundingClientRect();
-				const target = getComputedStyle(control, "::before");
-				const width = Math.max(
-					rect.width,
-					target.display === "none"
-						? 0
-						: Number.parseFloat(target.minWidth) || 0,
-				);
-				const height = Math.max(
-					rect.height,
-					target.display === "none"
-						? 0
-						: Number.parseFloat(target.minHeight) || 0,
-				);
-				return new DOMRect(
-					rect.x + (rect.width - width) / 2,
-					rect.y + (rect.height - height) / 2,
-					width,
-					height,
-				);
+				expect(control).toBeVisible();
+				return phoneTouchBounds(control);
 			});
 			for (const [index, box] of boxes.entries()) {
 				await expect(box.width).toBeGreaterThanOrEqual(44);
@@ -1671,9 +1691,24 @@ export const FinalIconsDesktop: Story = {
 						boxes[index - 1]?.right ?? 0,
 					);
 				await expect(box.right).toBeLessThanOrEqual(
-					frame.getBoundingClientRect().right,
+					sendButton.getBoundingClientRect().left,
 				);
 			}
+			await expect(sendButton.getBoundingClientRect().width).toBe(34);
+			await expect(sendButton.getBoundingClientRect().height).toBe(34);
+			await expect(getComputedStyle(sendButton, "::before").minWidth).toBe(
+				"44px",
+			);
+			await expect(getComputedStyle(sendButton, "::before").minHeight).toBe(
+				"44px",
+			);
+			await expect(layout).not.toHaveAttribute("data-footer-gutter");
+			await expect(
+				layout.style.getPropertyValue("--composer-footer-start"),
+			).toBe("");
+			await expect(layout.style.getPropertyValue("--composer-footer-end")).toBe(
+				"",
+			);
 			await expect(
 				checkoutControl.getBoundingClientRect().width,
 			).toBeLessThanOrEqual(110);
@@ -1681,12 +1716,41 @@ export const FinalIconsDesktop: Story = {
 				canvasElement.querySelector<HTMLElement>(".model-label");
 			if (!modelLabel) throw new Error("Model label missing");
 			await expect(getComputedStyle(modelLabel).textOverflow).toBe("ellipsis");
-			if (window.innerWidth === 320 || parameters["longModel"] === true) {
+			if (window.innerWidth === 320) {
+				await expect(modelLabel).not.toBeVisible();
+				await expect(
+					canvas.getByTestId("model-chip-chevron"),
+				).not.toBeVisible();
+			} else {
+				await expect(modelLabel.clientWidth).toBeGreaterThanOrEqual(20);
+			}
+			if (window.innerWidth !== 320 && parameters["longModel"] === true) {
 				await expect(modelLabel.scrollWidth).toBeGreaterThan(
 					modelLabel.clientWidth,
 				);
 			}
-			await expect(modelLabel.clientWidth).toBeGreaterThanOrEqual(20);
+			const mirror = canvasElement.querySelector(".mirror");
+			const field = input.closest('[data-slot="field"]');
+			const scroller = field?.firstElementChild;
+			if (!mirror || !field || !scroller)
+				throw new Error("Composer field is missing");
+			const fieldBounds = field.getBoundingClientRect();
+			await expect(fieldBounds.left).toBe(layout.getBoundingClientRect().left);
+			await expect(fieldBounds.right).toBe(
+				layout.getBoundingClientRect().right,
+			);
+			await expect(input.getBoundingClientRect().width).toBe(
+				scroller.clientWidth,
+			);
+			await expect(mirror.getBoundingClientRect().width).toBe(
+				input.getBoundingClientRect().width,
+			);
+			await expect(fieldBounds.left - frame.getBoundingClientRect().left).toBe(
+				14,
+			);
+			await expect(
+				frame.getBoundingClientRect().right - fieldBounds.right,
+			).toBe(8);
 			const branch = checkoutControl.querySelector<HTMLElement>(
 				'[data-part="branch"]',
 			);
@@ -1777,6 +1841,145 @@ export const FinalIconsDesktop: Story = {
 		await userEvent.clear(input);
 		await expect(sendButton).toBeDisabled();
 		await expect(getComputedStyle(sendButton).opacity).toBe("0.5");
+		if (phone) {
+			const layout = canvas.getByTestId("composer-layout");
+			const modelLabel =
+				canvasElement.querySelector<HTMLElement>(".model-label");
+			if (!modelLabel) throw new Error("Model label is missing");
+			const maxWidth = canvasElement.style.maxWidth;
+			try {
+				if (window.innerWidth !== 320) {
+					for (const [width, fit] of [
+						[374, "model-logo"],
+						[350, "checkout-icon"],
+						[374, "model-logo"],
+						[393, "labels"],
+					] as const) {
+						canvasElement.style.maxWidth = `${width}px`;
+						await waitFor(() =>
+							expect(layout).toHaveAttribute("data-footer-fit", fit),
+						);
+						await waitFor(() =>
+							expect(checkoutControl.getBoundingClientRect().width).toBe(
+								fit === "checkout-icon" ? 44 : 90,
+							),
+						);
+						await expect(modelLabel.checkVisibility()).toBe(fit === "labels");
+						await waitFor(() =>
+							expect(
+								checkoutControl
+									.querySelector('[data-part="branch"]')
+									?.checkVisibility() ?? false,
+							).toBe(fit !== "checkout-icon"),
+						);
+						for (const control of controlsForPhone(canvasElement))
+							await expect(control).toBeVisible();
+						await expect(layout).not.toHaveAttribute("data-footer-gutter");
+						await expect(
+							layout.style.getPropertyValue("--composer-footer-start"),
+						).toBe("");
+						await expect(
+							layout.style.getPropertyValue("--composer-footer-end"),
+						).toBe("");
+					}
+				}
+				canvasElement.style.maxWidth = "320px";
+				await userEvent.type(input, "Keep the footer visible");
+				phaseToProcessing(getOrCreateSessionActivity(testId));
+				const stop = await canvas.findByRole("button", {
+					name: "Stop generating",
+				});
+				await waitFor(() =>
+					expect(layout).toHaveAttribute("data-footer-fit", "checkout-hidden"),
+				);
+				await expect(checkoutControl).not.toBeVisible();
+				await expect(checkoutControl.getBoundingClientRect().width).toBe(0);
+				await expect(modelLabel).not.toBeVisible();
+				const footer = canvasElement.querySelector('[data-slot="send"]');
+				await expect(footer?.contains(stop)).toBe(true);
+				await expect(footer?.contains(sendButton)).toBe(true);
+				const field = input.closest('[data-slot="field"]');
+				const scroller = field?.firstElementChild;
+				const mirror = canvasElement.querySelector(".mirror");
+				if (!field || !scroller || !mirror)
+					throw new Error("Composer field is missing");
+				const fieldBounds = field.getBoundingClientRect();
+				await expect(fieldBounds.left).toBe(
+					layout.getBoundingClientRect().left,
+				);
+				await expect(fieldBounds.right).toBe(
+					layout.getBoundingClientRect().right,
+				);
+				await expect(
+					fieldBounds.left - frame.getBoundingClientRect().left,
+				).toBe(14);
+				await expect(
+					frame.getBoundingClientRect().right - fieldBounds.right,
+				).toBe(8);
+				await expect(input.getBoundingClientRect().width).toBe(
+					scroller.clientWidth,
+				);
+				await expect(mirror.getBoundingClientRect().width).toBe(
+					input.getBoundingClientRect().width,
+				);
+				for (const control of controlsForPhone(canvasElement))
+					await expect(control).toBeVisible();
+				await expect(stop.getBoundingClientRect().width).toBe(34);
+				await expect(stop.getBoundingClientRect().height).toBe(34);
+				await expect(
+					stop.getBoundingClientRect().left -
+						sendButton.getBoundingClientRect().right,
+				).toBe(5);
+				await expect(getComputedStyle(stop, "::before").minWidth).toBe("44px");
+				await expect(getComputedStyle(stop, "::before").minHeight).toBe("44px");
+				const targets = [...controlsForPhone(canvasElement)].map(
+					phoneTouchBounds,
+				);
+				for (const [index, box] of targets.entries()) {
+					await expect(box.width).toBeGreaterThanOrEqual(44);
+					await expect(box.height).toBeGreaterThanOrEqual(44);
+					await expect(box.right).toBeLessThanOrEqual(
+						sendButton.getBoundingClientRect().left,
+					);
+					if (index > 0)
+						await expect(box.left).toBeGreaterThanOrEqual(
+							targets[index - 1]?.right ?? 0,
+						);
+				}
+				await userEvent.click(canvas.getByTestId("model-picker-trigger"));
+				const sheet = await within(document.body).findByTestId(
+					"composer-more-sheet",
+				);
+				await waitFor(() =>
+					expect(within(sheet).getByTestId("composer-checkout")).toBeVisible(),
+				);
+				const dialog =
+					canvasElement.ownerDocument.querySelector("dialog[open]");
+				if (dialog)
+					dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
+				else await userEvent.keyboard("{Escape}");
+				await waitFor(() => {
+					expect(
+						within(document.body).queryByTestId("composer-more-sheet"),
+					).toBeNull();
+					expect(getComputedStyle(input).pointerEvents).not.toBe("none");
+				});
+				phaseToIdle(getOrCreateSessionActivity(testId));
+				canvasElement.style.maxWidth = maxWidth;
+				await userEvent.clear(input);
+				await userEvent.type(input, "/goal Keep the footer visible");
+				const goal = await canvas.findByRole("button", { name: "Set goal" });
+				await expect(goal).toHaveTextContent("Set goal");
+				await expect(goal.getBoundingClientRect().width).toBeGreaterThan(34);
+				await expect(
+					canvasElement.querySelector('[data-slot="send"]')?.contains(goal),
+				).toBe(true);
+			} finally {
+				phaseToIdle(getOrCreateSessionActivity(testId));
+				canvasElement.style.maxWidth = maxWidth;
+				await userEvent.clear(input);
+			}
+		}
 		if (!phone && matchMedia("(min-width: 768px)").matches) {
 			const maxWidth = canvasElement.style.maxWidth;
 			canvasElement.style.maxWidth = "560px";
@@ -2482,6 +2685,11 @@ export const FinalIconsPhoneActions320: Story = {
 	...LimitedPhone,
 	beforeEach: ({ canvasElement }) => {
 		const cleanup = setupComposerStage(canvasElement, "limited", true);
+		Object.defineProperty(window, "innerWidth", {
+			configurable: true,
+			value: 320,
+		});
+		window.dispatchEvent(new Event("resize"));
 		canvasElement.style.maxWidth = "320px";
 		return cleanup;
 	},
@@ -2500,34 +2708,141 @@ export const FinalIconsPhoneActions320: Story = {
 			"Check the footer{Shift>}{Enter}{/Shift}Keep both actions",
 		);
 		await expect(input).toHaveValue("Check the footer\nKeep both actions");
-		await waitFor(() => {
-			expect(canvasElement.querySelector(".mirror")?.textContent).toBe(
-				"Check the footer\nKeep both actions",
+		// Exercise expansion when the physical viewport can contain a 393px canvas.
+		const widths =
+			document.documentElement.clientWidth >= 393 ? [320, 393, 320] : [320];
+		for (const width of widths) {
+			Object.defineProperty(window, "innerWidth", {
+				configurable: true,
+				value: width,
+			});
+			canvasElement.style.maxWidth = `${width}px`;
+			window.dispatchEvent(new Event("resize"));
+			await waitFor(() => {
+				const mirror = canvasElement.querySelector(".mirror");
+				expect(mirror?.textContent).toBe("Check the footer\nKeep both actions");
+				const layout = canvas.getByTestId("composer-layout");
+				const crowded = width === 320;
+				expect(layout).toHaveAttribute(
+					"data-footer-fit",
+					crowded ? "checkout-hidden" : "checkout-icon",
+				);
+				const footer = canvasElement.querySelector('[data-slot="send"]');
+				const leading = canvasElement.querySelector('[data-slot="leading"]');
+				const frame = canvasElement.querySelector("#input-row");
+				const inputBounds = input.getBoundingClientRect();
+				const field = input.closest('[data-slot="field"]');
+				const scroller = field?.firstElementChild;
+				const send = canvasElement.querySelector("#send");
+				const stop = canvas.getByRole("button", { name: "Stop generating" });
+				const options = canvas.getByTestId("composer-send-menu-trigger");
+				const group = canvas.getByTestId("composer-send-control");
+				if (
+					!footer ||
+					!leading ||
+					!frame ||
+					!send ||
+					!mirror ||
+					!field ||
+					!scroller
+				)
+					throw new Error("Phone composer missing");
+				const frameBounds = frame.getBoundingClientRect();
+				const fieldBounds = field.getBoundingClientRect();
+				const sendBounds = send.getBoundingClientRect();
+				const optionBounds = options.getBoundingClientRect();
+				const stopBounds = stop.getBoundingClientRect();
+				expect(footer.contains(send)).toBe(true);
+				expect(footer.contains(stop)).toBe(true);
+				expect(footer.contains(options)).toBe(true);
+				expect(getComputedStyle(group).display).toBe("flex");
+				expect(group.getBoundingClientRect().width).toBe(65);
+				expect(group.getBoundingClientRect().height).toBe(34);
+				expect(sendBounds.width).toBe(37);
+				expect(sendBounds.height).toBe(34);
+				expect(optionBounds.width).toBe(28);
+				expect(optionBounds.height).toBe(34);
+				expect(stopBounds.width).toBe(34);
+				expect(stopBounds.height).toBe(34);
+				expect(getComputedStyle(send, "::before").content).toBe("none");
+				expect(getComputedStyle(options, "::before").content).toBe("none");
+				expect(getComputedStyle(stop, "::before").minWidth).toBe("44px");
+				expect(getComputedStyle(stop, "::before").minHeight).toBe("44px");
+				expect(getComputedStyle(send).borderTopRightRadius).toBe("0px");
+				expect(getComputedStyle(options).borderTopLeftRadius).toBe("0px");
+				expect(optionBounds.left).toBe(sendBounds.right);
+				expect(stopBounds.left - optionBounds.right).toBe(5);
+				for (const action of [sendBounds, optionBounds, stopBounds]) {
+					expect(action.top).toBe(sendBounds.top);
+					expect(action.top).toBeGreaterThanOrEqual(inputBounds.bottom);
+					expect(action.right).toBeLessThanOrEqual(frameBounds.right - 4);
+				}
+				expect(fieldBounds.left).toBe(layout.getBoundingClientRect().left);
+				expect(fieldBounds.right).toBe(layout.getBoundingClientRect().right);
+				expect(inputBounds.width).toBe(scroller.clientWidth);
+				expect(mirror.getBoundingClientRect().width).toBe(inputBounds.width);
+				expect(fieldBounds.left - frameBounds.left).toBe(14);
+				expect(frameBounds.right - fieldBounds.right).toBe(8);
+				expect(layout.style.getPropertyValue("--composer-footer-start")).toBe(
+					crowded ? "10px" : "",
+				);
+				expect(layout.style.getPropertyValue("--composer-footer-end")).toBe(
+					crowded ? "4px" : "",
+				);
+				if (crowded)
+					expect(layout).toHaveAttribute("data-footer-gutter", "borrowed");
+				else expect(layout).not.toHaveAttribute("data-footer-gutter");
+				expect(leading.getBoundingClientRect().left - frameBounds.left).toBe(
+					crowded ? 4 : 14,
+				);
+				expect(frameBounds.right - stopBounds.right).toBe(crowded ? 4 : 8);
+				expect(canvasElement.scrollWidth).toBeLessThanOrEqual(
+					canvasElement.clientWidth,
+				);
+				const checkout = canvas.getByTestId("composer-checkout");
+				expect(checkout.getBoundingClientRect().width).toBe(crowded ? 0 : 44);
+				if (crowded) expect(checkout).not.toBeVisible();
+				else expect(checkout).toBeVisible();
+				expect(canvasElement.querySelector(".model-label")).not.toBeVisible();
+				const required = [
+					...controlsForPhone(canvasElement),
+					...(crowded ? [] : [checkout]),
+				];
+				const boxes = required.map((control) => {
+					expect(control).toBeVisible();
+					return phoneTouchBounds(control);
+				});
+				for (const [index, box] of boxes.entries()) {
+					expect(box.width).toBeGreaterThanOrEqual(44);
+					expect(box.height).toBeGreaterThanOrEqual(44);
+					expect(box.top).toBeCloseTo(boxes[0]?.top ?? 0, 1);
+					expect(box.top).toBeGreaterThanOrEqual(inputBounds.bottom);
+					expect(box.left - frameBounds.left).toBeGreaterThanOrEqual(4);
+					expect(box.right).toBeLessThanOrEqual(sendBounds.left);
+					if (index > 0)
+						expect(box.left).toBeGreaterThanOrEqual(
+							boxes[index - 1]?.right ?? 0,
+						);
+				}
+			});
+			const controls = [
+				...controlsForPhone(canvasElement),
+				canvas.getByTestId("composer-send-control"),
+				canvas.getByRole("button", { name: "Stop generating" }),
+			];
+			const positions = controls.map((control) => {
+				const box = control.getBoundingClientRect();
+				return [box.x, box.y, box.width, box.height];
+			});
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
 			);
-			const field = canvasElement
-				.querySelector('[data-slot="field"]')
-				?.getBoundingClientRect();
-			const inputBounds = input.getBoundingClientRect();
-			const send = canvasElement
-				.querySelector("#send")
-				?.getBoundingClientRect();
-			const stop = canvas
-				.getByRole("button", { name: "Stop generating" })
-				.getBoundingClientRect();
-			const options = canvas
-				.getByTestId("composer-send-menu-trigger")
-				.getBoundingClientRect();
-			if (!field || !send) throw new Error("Phone composer missing");
-			expect(send.width).toBe(34);
-			expect(send.height).toBe(34);
-			expect(options.width).toBe(44);
-			expect(options.height).toBe(44);
-			expect(options.right).toBeLessThanOrEqual(stop.left);
-			expect(inputBounds.right).toBeLessThanOrEqual(options.left);
-			expect(stop.bottom).toBeLessThanOrEqual(send.top);
-			expect(
-				canvas.getByTestId("composer-checkout").getBoundingClientRect().right,
-			).toBeLessThanOrEqual(send.left - 5);
-		});
+			await expect(
+				controls.map((control) => {
+					const box = control.getBoundingClientRect();
+					return [box.x, box.y, box.width, box.height];
+				}),
+			).toEqual(positions);
+		}
 	},
 };
