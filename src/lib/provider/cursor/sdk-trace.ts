@@ -11,6 +11,7 @@ import type {
 	CursorSendOptions,
 	CursorStore,
 } from "./sdk-port.js";
+import { cursorSdkVersion } from "./sdk-real.js";
 
 const SECRET_FIELD =
 	/^(?:api[_-]?key|authorization|(?:access|refresh|session)[_-]?token|token|password|secret|(?:blob)?encryption[_-]?key|email)$/i;
@@ -70,7 +71,7 @@ export function createCursorSdkTrace(
 					empty = true;
 				}
 				const header = empty
-					? `${JSON.stringify({ scenario: metadata?.scenario ?? "cursor-sdk-port", model: metadata?.model ?? "discovery", sdkVersion: "1.0.37", recordedAt: new Date().toISOString() })}\n`
+					? `${JSON.stringify({ scenario: metadata?.scenario ?? "cursor-sdk-port", model: metadata?.model ?? "discovery", sdkVersion: cursorSdkVersion(), recordedAt: new Date().toISOString() })}\n`
 					: "";
 				appendFileSync(
 					path,

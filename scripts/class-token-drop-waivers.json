@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/chat/ActivityRow.svelte :: tool.isError": "C4 replaces this JavaScript condition with tool.outcome. It is not a CSS class; the text-error and text-text-secondary classes are unchanged.",
 	"src/lib/frontend/components/layout/Sidebar.svelte :: min-h-[44px]": "The phone list overflow menu is replaced by a direct Settings cog. Its size-[44px] button retains the 44px touch target; the removed menu items no longer need their minimum height.",
 	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: pt-[4px]": "The phone account card now starts one standard settings section gap below the header. Its padding uses --settings-section-gap, shared with SettingsGroup, instead of the previous 4px inset.",
 	"src/lib/frontend/components/ui/SettingsGroup.svelte :: mt-[16px]": "SettingsGroup keeps its 16px gap through --settings-section-gap with a 16px fallback. SettingsPanel uses that same value above the first phone account section, so its top spacing matches the following groups.",

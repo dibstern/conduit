@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { Effect, Schema, Semaphore } from "effect";
+import { Effect, Result, Schema, Semaphore } from "effect";
 import type { Account } from "../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
@@ -9,12 +9,19 @@ import type { ReadQueryEffect } from "../../persistence/effect/read-query-effect
 import { ProviderInstanceFailure } from "../errors.js";
 import { resolveRunnerForkDigest } from "../runner/runner-fork-digest.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
+import { skillCommand } from "../skill-discovery.js";
+import { modelParameterChoices } from "../turn-settings.js";
 import type { ModelInfo, ProviderCapabilities } from "../types.js";
 import { CursorAccountResources } from "./cursor-account-resources.js";
 import {
 	type CursorCredentialLookup,
 	cursorCredentialMessage,
 } from "./cursor-credential.js";
+import { cursorSessionDirs } from "./cursor-session-config.js";
+import {
+	readCursorSessionIdentity,
+	resolveCursorSessionCwd,
+} from "./cursor-session-recovery.js";
 import { discoverCursorSkillsEffect } from "./cursor-skill-discovery.js";
 import { cursorTurnError } from "./sdk-error.js";
 import type {
@@ -138,6 +145,7 @@ const catalogs = new WeakMap<
 export const discoverCursorEffect = (
 	account: Account,
 	workspaceRoot?: string,
+	extraFolders: readonly string[] = [],
 ): Effect.Effect<
 	ProviderCapabilities,
 	ProviderInstanceFailure,
@@ -147,7 +155,13 @@ export const discoverCursorEffect = (
 		const resources = yield* CursorAccountResources;
 		return yield* resources
 			.use(account.id, ({ sdk, credential }) =>
-				discoverCursorCatalog(sdk, credential, account, workspaceRoot),
+				discoverCursorCatalog(
+					sdk,
+					credential,
+					account,
+					workspaceRoot,
+					extraFolders,
+				),
 			)
 			.pipe(
 				Effect.mapError((cause) =>
@@ -163,6 +177,7 @@ const discoverCursorCatalog = (
 	credentialEffect: Effect.Effect<CursorCredentialLookup, unknown>,
 	account?: Account,
 	workspaceRoot?: string,
+	extraFolders: readonly string[] = [],
 ): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> =>
 	Effect.gen(function* () {
 		const runtime = yield* Effect.tryPromise({
@@ -235,6 +250,9 @@ const discoverCursorCatalog = (
 				return models;
 			}),
 		);
+		const skills = workspaceRoot
+			? yield* discoverCursorSkillsEffect(workspaceRoot, { dirs: extraFolders })
+			: [];
 		return {
 			models,
 			supportsTools: true,
@@ -245,9 +263,8 @@ const discoverCursorCatalog = (
 			supportsFork:
 				PROVIDER_DRIVERS.cursor.forkStrategy === "transcript-digest",
 			supportsRevert: false,
-			commands: workspaceRoot
-				? yield* discoverCursorSkillsEffect(workspaceRoot)
-				: [],
+			commands: skills.map(skillCommand),
+			skills,
 		};
 	});
 
@@ -259,18 +276,59 @@ export const makeCursorRunnerDriver = (
 	},
 	daemonConfigDir = DEFAULT_CONFIG_DIR,
 ): RunnerDriverPieces => {
+	const skillWorkspace = (
+		workspaceRoot: string | undefined,
+		extraFolders: readonly string[],
+		sessionId?: string,
+		providerState?: Readonly<Record<string, unknown>>,
+	) =>
+		Effect.gen(function* () {
+			const identity = sessionId
+				? yield* Effect.try({
+						try: () => readCursorSessionIdentity(daemonConfigDir, sessionId),
+						catch: () =>
+							discoveryFailure("Cursor session identity could not be read"),
+					})
+				: undefined;
+			const state = identity
+				? {}
+				: (providerState ??
+					(sessionId && persistence
+						? yield* persistence.state
+								.getState(sessionId)
+								.pipe(
+									Effect.mapError(() =>
+										discoveryFailure("Cursor session state could not be read"),
+									),
+								)
+						: {}));
+			const cwd = resolveCursorSessionCwd(identity, state, workspaceRoot);
+			return {
+				cwd,
+				dirs: cursorSessionDirs(cwd, workspaceRoot, extraFolders),
+			};
+		});
 	return {
 		driverKind: "cursor",
-		discoverEffect: (directory, account, _options, call) => {
-			const selected = call?.account ?? account;
-			return selected
-				? discoverCursorEffect(selected, call?.workspaceRoot ?? directory).pipe(
-						Effect.provideService(CursorAccountResources, resources),
-					)
-				: Effect.fail(
-						discoveryFailure("Cursor discovery requires an account", true),
+		discoverEffect: (directory, account, _options, call) =>
+			Effect.gen(function* () {
+				const selected = call?.account ?? account;
+				if (!selected)
+					return yield* discoveryFailure(
+						"Cursor discovery requires an account",
+						true,
 					);
-		},
+				const workspace = yield* skillWorkspace(
+					call?.workspaceRoot ?? directory,
+					call?.extraFolders ?? [],
+					call?.sessionId,
+				);
+				return yield* discoverCursorEffect(
+					selected,
+					workspace.cwd,
+					workspace.dirs,
+				).pipe(Effect.provideService(CursorAccountResources, resources));
+			}),
 		generateTextEffect: (input) => {
 			const generate = (
 				adapter: CursorSdkPort,
@@ -309,25 +367,12 @@ export const makeCursorRunnerDriver = (
 						return yield* Effect.fail(
 							new Error("Cursor title model is not offered"),
 						);
-					// Captured parameter values are cheapest-first. Composer lists its paid
-					// Fast variant first, so neither variant order nor isDefault is suitable.
-					const variant =
-						input.effort ||
-						model.parameters?.combinations.find(({ values }) =>
-							model.parameters?.rows.every(
-								(row) => values[row.id] === row.values[0]?.value,
-							),
-						)?.variant;
-					if (
-						(input.effort && !model.variants?.[input.effort]) ||
-						(model.parameters && !variant)
-					)
-						return yield* Effect.fail(
-							new Error("Cursor title model parameter choice is not offered"),
-						);
-					const params = yield* Schema.decodeUnknownEffect(
-						CursorModelParameters,
-					)(variant ? model.variants?.[variant]?.["params"] : []);
+					const choices = modelParameterChoices(model);
+					const choice = input.effort
+						? choices.resolve(input.effort)
+						: Result.succeed(choices.cheapest());
+					if (Result.isFailure(choice)) return yield* choice.failure;
+					const params = choice.success.values;
 					const scratchRoot = join(daemonConfigDir, "text-generation");
 					return yield* Effect.acquireUseRelease(
 						Effect.tryPromise(async () => {
@@ -491,11 +536,18 @@ export const makeCursorRunnerDriver = (
 							discoveryFailure(cursorCredentialMessage(lookup), true),
 						);
 					const credential = lookup.credential;
+					const workspace = yield* skillWorkspace(
+						input.workspaceRoot,
+						input.extraFolders,
+						input.sessionId,
+						input.providerState,
+					);
 					const catalog = yield* discoverCursorCatalog(
 						adapter,
 						Effect.succeed(lookup),
 						input.account,
-						input.workspaceRoot,
+						workspace.cwd,
+						workspace.dirs,
 					).pipe(
 						Effect.catch((failure) =>
 							// The runner owns the auth error and its durable turn terminal.
@@ -507,18 +559,18 @@ export const makeCursorRunnerDriver = (
 					const model = catalog.models.find(
 						({ id }) => id === input.model?.modelId,
 					);
-					const variants = model?.variants ?? {};
-					const selected = input.variant ? variants[input.variant] : undefined;
-					if (model && input.variant && !selected)
+					const choice = modelParameterChoices(
+						model ?? { id: input.model?.modelId ?? "" },
+					).resolve(model ? (input.variant ?? "") : "");
+					if (Result.isFailure(choice))
 						return yield* Effect.fail(
-							discoveryFailure("Cursor model parameter choice is not offered"),
+							new ProviderInstanceFailure({
+								providerId: "cursor",
+								operation: "prepare turn",
+								cause: choice.failure,
+							}),
 						);
-					const variant =
-						selected ??
-						Object.values(variants).find(
-							(variant) => variant["isDefault"] === true,
-						);
-					const params = variant?.["params"] ?? [];
+					const params = choice.success.values;
 					const digest = yield* resolveRunnerForkDigest(
 						input,
 						"cursor.forkDigest",

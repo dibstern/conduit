@@ -17,8 +17,12 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import {
+	SessionDirectory,
+	SessionDirectoryReadError,
+} from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makeWsTransportLive } from "../../../src/lib/domain/relay/Layers/ws-transport-layer.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { makeSessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -34,6 +38,7 @@ import {
 } from "../../../src/lib/server/ws-rpc-handler.js";
 import {
 	makeMockConfig,
+	makeMockWebSocketHandler,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
 
@@ -44,6 +49,54 @@ const sessionDirectory = Layer.succeed(SessionDirectory)({
 		),
 });
 describe("routed RPC server", () => {
+	it.effect(
+		"EA27 routed ownership failure is refused before producer acquisition",
+		() =>
+			Effect.gen(function* () {
+				const wsHandler = makeMockWebSocketHandler();
+				let lookups = 0;
+				const directory = Layer.succeed(SessionDirectory)({
+					projectOf: (sessionId) =>
+						++lookups === 1
+							? Effect.succeed(Option.some("project-a"))
+							: Effect.yieldNow.pipe(
+									Effect.andThen(
+										Effect.fail(
+											new SessionDirectoryReadError({
+												sessionId,
+												cause: "unavailable",
+											}),
+										),
+									),
+								),
+				});
+				const context = yield* Layer.build(
+					Layer.mergeAll(
+						RpcSubscriptionScopeLive,
+						makeTestHandlerLayer({
+							wsHandler,
+							config: makeMockConfig({ slug: "project-a" }),
+						}),
+					),
+				);
+				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
+					Effect.provide(
+						makeRoutedWsRpcServerLayer(() => Effect.succeed(context)).pipe(
+							Layer.provide(directory),
+						),
+						{ local: true },
+					),
+				);
+				const result = yield* client
+					.SubscribeSessionDetail({ sessionId: "session-a" })
+					.pipe(Stream.runHead, Effect.result);
+				expect(result).toMatchObject({
+					_tag: "Failure",
+					failure: { _tag: "WsRpcError", code: "ownership-lookup-failed" },
+				});
+				expect(wsHandler.registerSessionViewer).not.toHaveBeenCalled();
+			}),
+	);
 	it.effect(
 		"rejects session creation without a project even with a relay default",
 		() =>
@@ -89,13 +142,9 @@ describe("routed RPC server", () => {
 					const context = yield* Layer.build(
 						Layer.mergeAll(
 							RpcSubscriptionScopeLive,
+							Layer.succeed(ConfigTag)(makeMockConfig({ slug })),
 							bus,
-							makePersistenceEffectLayer(
-								":memory:",
-								"test-project",
-								undefined,
-								bus,
-							),
+							makePersistenceEffectLayer(":memory:", slug, undefined, bus),
 							Layer.effect(SessionActivityTag, makeSessionActivity),
 						),
 					);

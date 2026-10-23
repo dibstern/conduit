@@ -519,7 +519,7 @@ export function createProjectRelayLayers({
 								queryFactory: claudeSdk.query,
 								cwd: config.projectDir,
 								...(config.shellEnv
-									? { shellEnv: config.shellEnv(config.projectDir) }
+									? { shellEnv: config.shellEnv(config.projectDir).env }
 									: {}),
 							}),
 						},

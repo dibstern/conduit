@@ -38,6 +38,8 @@ const wirePart = <
 		...part,
 		state: {
 			...rest,
+			...(rest["status"] === "completed" && { outcome: "succeeded" as const }),
+			...(rest["status"] === "error" && { outcome: "failed" as const }),
 			...(input !== undefined && { input: { _tag: "whole", value: input } }),
 			...(typeof output === "string" && {
 				output: { _tag: "whole", text: output },

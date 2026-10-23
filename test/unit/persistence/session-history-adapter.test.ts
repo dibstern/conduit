@@ -67,6 +67,40 @@ function makeMessageWithParts(
 
 describe("messageRowsToHistory", () => {
 	it.each([
+		{ status: "error", metadata: {}, outcome: "failed" },
+		{
+			status: "completed",
+			metadata: { cursorToolType: "shellToolCall", isError: true },
+			outcome: "succeeded",
+		},
+	])("carries the projected $outcome outcome without interpreting metadata", ({
+		status,
+		metadata,
+		outcome,
+	}) => {
+		const part = messageRowsToHistory(
+			[
+				makeMessageWithParts("m1", {
+					role: "assistant",
+					parts: [
+						makePartRow("tool1", "m1", {
+							type: "tool",
+							tool_name: "Bash",
+							status,
+							result: JSON.stringify("output"),
+							metadata: JSON.stringify(metadata),
+						}),
+					],
+				}),
+			],
+			{ pageSize: 10 },
+		).messages[0]?.parts?.[0];
+		expect(part?.state?.status).toBe(status);
+		expect(part?.state?.["outcome"]).toBe(outcome);
+		expect(part?.state?.["metadata"] ?? {}).not.toHaveProperty("isError");
+	});
+
+	it.each([
 		false,
 		true,
 	])("uses the canonical completion instead of a late revision timestamp (snapshot: %s)", (snapshot) => {

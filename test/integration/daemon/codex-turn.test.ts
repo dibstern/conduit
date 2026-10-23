@@ -8,6 +8,7 @@ import { Effect, Fiber, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppServerTraceReport } from "../../../src/lib/provider/codex/app-server/trace-player.js";
+import { modelParameterChoices } from "../../../src/lib/provider/turn-settings.js";
 import type { HistoryMessagePart } from "../../../src/lib/shared-types.js";
 import {
 	codexModels,
@@ -1676,10 +1677,14 @@ describe("Codex turns through the real daemon and detached runner", () => {
 						.map(({ reasoningEffort }) => reasoningEffort)
 						.sort(),
 				);
-				expect(
-					model?.parameters?.combinations.find(({ isDefault }) => isDefault)
-						?.variant,
-				).toBe(native.defaultReasoningEffort);
+				if (!model) throw new Error(`Missing offered model ${native.model}`);
+				expect(modelParameterChoices(model).resolve("")).toMatchObject({
+					_tag: "Success",
+					success: {
+						_tag: "Default",
+						values: [{ id: "effort", value: native.defaultReasoningEffort }],
+					},
+				});
 			}
 			evidence["models"] = models;
 		},

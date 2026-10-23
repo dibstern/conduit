@@ -27,7 +27,9 @@ import {
 	inputIdFromOpenCodeMessageId,
 	openCodeInputMessageId,
 } from "./opencode/opencode-input-message-id.js";
+import { discoverOpenCodeCatalog } from "./opencode-discovery.js";
 import { openCodeTextServerEffect } from "./opencode-text-server.js";
+import { skillCommand } from "./skill-discovery.js";
 import type {
 	CommandInfo,
 	ModelInfo,
@@ -372,10 +374,9 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		client: OpenCodeAPI,
 		directory?: string,
 	): Promise<ProviderCapabilities> {
-		const [providerResult, commandsRaw, skillsRaw] = await Promise.all([
+		const [providerResult, catalog] = await Promise.all([
 			client.provider.list(),
-			client.app.commands(),
-			client.app.skills(directory),
+			discoverOpenCodeCatalog(client, directory),
 		]);
 
 		const models: ModelInfo[] = providerResult.providers.flatMap((provider) =>
@@ -388,17 +389,13 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			})),
 		);
 
-		const commands: CommandInfo[] = commandsRaw.map((cmd) => ({
-			name: cmd.name,
-			...(cmd.description != null ? { description: cmd.description } : {}),
-			source: "builtin" as const,
-		}));
-
-		const skills: CommandInfo[] = skillsRaw.map((skill) => ({
-			name: skill.name,
-			...(skill.description != null ? { description: skill.description } : {}),
-			source: "project-skill" as const,
-		}));
+		const commands: CommandInfo[] = catalog.commands
+			.filter((command) => command.source !== "skill")
+			.map((cmd) => ({
+				name: cmd.name,
+				...(cmd.description != null ? { description: cmd.description } : {}),
+				source: "builtin" as const,
+			}));
 
 		return {
 			models,
@@ -409,7 +406,8 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			supportsAttachments: true,
 			supportsFork: true,
 			supportsRevert: true,
-			commands: [...commands, ...skills],
+			commands: [...commands, ...catalog.skills.map(skillCommand)],
+			skills: catalog.skills,
 		};
 	}
 

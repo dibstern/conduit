@@ -10,10 +10,23 @@
 // Failure modes: a root missing from SDK loading, nested skills being skipped,
 // slash input being rewritten, a response guessed without reading the skill,
 // credentials leaking into evidence, and runner processes surviving cleanup.
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+
+import {
+	cursorSkill,
+	cursorSkillCycle,
+	cursorSkillsFixture,
+} from "../../helpers/cursor-skills-fixture.js";
 
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -21,6 +34,109 @@ const RUN_SMOKE =
 	process.env["RUN_CURSOR_SKILLS_SMOKE"] === "1" &&
 	Boolean(process.env["CURSOR_API_KEY"]?.trim());
 const TURN_TIMEOUT = 180_000;
+
+// Failure modes: the scanner disagrees with SDK roots, symlink traversal,
+// the explicit offline managed-cache divergence, plugins, or a realpath'd HOME.
+describe("Cursor skill discovery against SDK 1.0.40 offline", () => {
+	it.each([
+		"single-root",
+		"multi-root",
+		"project-only",
+		"mixed-git",
+		"mixed-non-git",
+		"cycle",
+		"managed-cache",
+	] as const)("uses SDK rules for %s with the on-disk managed cache", async (row) => {
+		const fixture = cursorSkillsFixture();
+		if (row === "cycle") cursorSkillCycle(fixture.repo);
+		const extra = join(fixture.root, "extra");
+		const mixed = row === "mixed-git" || row === "mixed-non-git";
+		if (mixed) {
+			cursorSkill(join(fixture.cwd, "packages/sdk/.agents/skills/git-nested"));
+			cursorSkill(join(extra, "packages/sdk/.agents/skills/non-git-nested"));
+		}
+		const cwd = row === "mixed-non-git" ? extra : fixture.cwd;
+		const options = {
+			dirs:
+				row === "mixed-non-git"
+					? [fixture.cwd]
+					: row === "multi-root" || mixed
+						? fixture.dirs
+						: [],
+			settingSources:
+				row === "managed-cache"
+					? ["team" as const]
+					: row === "project-only"
+						? ["project" as const]
+						: (["project", "user", "team", "mdm", "plugins"] as const),
+		};
+		try {
+			const output = join(fixture.root, "sdk.json");
+			execFileSync(
+				process.execPath,
+				[
+					resolve("test/helpers/cursor-skills-sdk-reference.mjs"),
+					JSON.stringify({ cwd, ...options }),
+					output,
+				],
+				{
+					env: {
+						...process.env,
+						HOME: fixture.homeAlias,
+						CURSOR_API_KEY: "",
+						GIT_CEILING_DIRECTORIES: fixture.root,
+					},
+					stdio: "pipe",
+					timeout: 30_000,
+				},
+			);
+			const reference = JSON.parse(readFileSync(output, "utf8")) as {
+				skills: { name?: string; fullPath: string }[];
+				conduitSkills: { name: string }[];
+				networkAttempts: string[];
+			};
+			expect(reference.networkAttempts).toEqual([]);
+			const sdkNames = reference.skills
+				.map(({ name, fullPath }) => name ?? basename(dirname(fullPath)))
+				.sort();
+			const names = reference.conduitSkills.map(({ name }) => name).sort();
+			const expectedNames =
+				row === "project-only" ? sdkNames : [...sdkNames, "managed"].sort();
+			writeFileSync(
+				`test-results/c5-a-${row}.json`,
+				JSON.stringify(
+					{
+						row,
+						sdkNames,
+						conduitNames: names,
+						expectedNames,
+						networkAttempts: reference.networkAttempts,
+					},
+					null,
+					2,
+				),
+			);
+			expect(sdkNames).not.toContain("outside");
+			expect(sdkNames).not.toContain("managed");
+			if (row === "single-root" || row === "project-only") {
+				expect(sdkNames).toContain("linked");
+				expect(sdkNames).toContain("must-not-walk");
+			}
+			if (mixed) {
+				expect(sdkNames).toContain("git-nested");
+				expect(sdkNames).not.toContain("non-git-nested");
+			}
+			if (row === "cycle") {
+				expect(sdkNames).toContain("deep-legitimate");
+				expect(names).toContain("deep-legitimate");
+			}
+			if (row === "managed-cache") expect(sdkNames).toEqual([]);
+			expect(names).toEqual(expectedNames);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+});
 
 describe.skipIf(!RUN_SMOKE)(
 	"Cursor skill activation through the real SDK",

@@ -293,7 +293,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 			const orchestration = makeOrchestrationRuntimeLayer({
 				configDir: scratch,
 				workspaceRoot: scratch,
-				shellEnv: () => ({}),
+				shellEnv: () => ({ env: {}, declared: {} }),
 				claudeRunnerFactory: (deps, emit) => {
 					if (!deps.capabilitiesService)
 						throw new Error("Expected the shared Claude capability service");

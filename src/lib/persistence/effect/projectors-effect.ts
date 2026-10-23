@@ -1391,10 +1391,7 @@ export const makeMessageProjector = defineProjector(() => ({
 			if (isEventType(event, "tool.completed")) {
 				const resultJson = encodeJson(event.data.result);
 				const toolStatus =
-					typeof event.data.metadata?.["cursorToolType"] === "string" &&
-					event.data.metadata["isError"] === true
-						? "error"
-						: "completed";
+					event.data.outcome === "failed" ? "error" : "completed";
 				const rows = yield* sql<{
 					metadata: string | null;
 					result: string;

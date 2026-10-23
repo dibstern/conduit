@@ -46,6 +46,7 @@ export type SessionCommand = (
 			readonly input: PreWarmSessionInput;
 			readonly claudeSettingsOverrides?: Settings | undefined;
 			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
+			readonly shellConfig?: ProviderCall["shellConfig"];
 			readonly settingsSnapshot?: RunnerSettingsSnapshot;
 	  }
 	| {
@@ -58,6 +59,7 @@ export type SessionCommand = (
 			readonly aborted: boolean;
 			readonly claudeSettingsOverrides?: Settings | undefined;
 			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
+			readonly shellConfig?: ProviderCall["shellConfig"];
 			readonly input: SessionTurn;
 	  }
 	| {

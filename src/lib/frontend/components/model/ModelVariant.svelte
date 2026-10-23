@@ -26,8 +26,9 @@
 	const phone = $derived(sessionViewState.composerTier === "phone");
 	const variants = $derived(effort.options);
 	const currentVariant = $derived(effort.current ?? "");
-	const parameters = $derived(getActiveModel()?.parameters);
-	const parameterState = $derived(resolveModelParameters(parameters, effort.current));
+	const activeModel = $derived(getActiveModel());
+	const parameters = $derived(activeModel?.parameters);
+	const parameterState = $derived(resolveModelParameters(activeModel, effort.current));
 	const parameterEffort = $derived(parameterState.rows.find((row) => row.kind === "effort"));
 	const levels = $derived(parameters ? parameterEffort?.options.length ?? 0 : variants.length);
 	const currentEffort = $derived(parameters && !parameterState.variantUnavailable ? parameterEffort?.value ?? "" : currentVariant);
@@ -219,8 +220,8 @@
 								disabled={effort.pending || option.disabled}
 								data-testid="variant-{row.kind}-option-{option.value}"
 								onselect={() => {
-									const combination = parameterState.parameterCombination(row.id, option.value);
-									if (combination && !effort.pending) effort.select(combination.variant);
+									const choice = parameterState.withValue(row.id, option.value);
+									if (choice !== undefined && !effort.pending) effort.select(choice);
 									open = false;
 								}}
 							>{option.label}</MenuRadioItem>
