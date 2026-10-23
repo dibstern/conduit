@@ -3,6 +3,9 @@
 	import { Schema } from "effect";
 	import { BUILTIN_CATEGORIES, CategorySchema, CategorySetRejected, DEFAULT_CUSTOM_CATEGORY_WEIGHT, type Category, type CategorySet } from "../../../contracts/category-set.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { sessionMessages } from "../../stores/chat.svelte.js";
+	import { getCurrentSessionId } from "../../stores/router.svelte.js";
+	import { findSession } from "../../stores/session.svelte.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import Button from "../ui/Button.svelte";
@@ -24,6 +27,13 @@
 	let editor = $state<{ category: Category; creating: boolean } | null>(null);
 	let deleting = $state<string | null>(null);
 	let reloadFailed = $state(false);
+	let counts = $state<Readonly<Record<string, number>> | null>(null);
+	let countsFailed = $state(false);
+	let countRevision = $state(0);
+	let countsSessionId: string | null = null;
+	const sessionId = $derived(getCurrentSessionId());
+	const sessionMessageCount = $derived(sessionId ? (findSession(sessionId)?.messageCount ?? sessionMessages.get(sessionId)?.messages.length ?? 0) : 0);
+	const lastMessageId = $derived(sessionId ? sessionMessages.get(sessionId)?.messages.at(-1)?.uuid : undefined);
 	const active = $derived(draft.filter((c) => !c.retired));
 	const retired = $derived(draft.filter((c) => c.retired));
 	const dirty = $derived(current !== null && JSON.stringify(draft) !== JSON.stringify(current.categories));
@@ -36,6 +46,23 @@
 			if (dirty) { stale = true; void reloadCurrent(); }
 			else void load();
 		});
+	});
+	$effect(() => {
+		void countRevision;
+		void sessionMessageCount;
+		void lastMessageId;
+		const id = sessionId;
+		const set = { categories: $state.snapshot(draft) };
+		if (id !== countsSessionId || !visible) { counts = null; countsFailed = false; }
+		countsSessionId = id;
+		if (!visible || !current || !valid || !id) return;
+		let cancelled = false;
+		const timer = setTimeout(() => {
+			void rpc("CountSessionCategories", { sessionId: id, set }).then((result) => {
+				if (!cancelled) { counts = result; countsFailed = false; }
+			}).catch(() => { if (!cancelled) countsFailed = true; });
+		}, 300);
+		return () => { cancelled = true; clearTimeout(timer); };
 	});
 
 	async function load(): Promise<void> {
@@ -110,6 +137,7 @@
 	{/if}
 	{#if !phoneEditor}
 		<SurfacingCategoryPreview current={current} draft={{ categories: draft }} {valid} active={visible} />
+		{#if sessionId && countsFailed}<p role="alert" class="mb-3 text-[12px] text-text-dimmer">Could not load session counts. <Button variant="ghost" size="sm" onclick={() => { countRevision++; }}>Retry counts</Button></p>{/if}
 		<p class="mb-[12px] text-[12px] leading-[1.5] text-text-dimmer">Weight changes re-level every message at once, at no cost. Definition changes and new categories apply to messages judged from now on.</p>
 	{/if}
 	{#if editor}
@@ -131,6 +159,7 @@
 					<CategoryPill {category} />
 					<span class="line-clamp-2 text-[12.5px] leading-[1.35] text-text-secondary max-md:col-span-2 max-md:row-start-2">{category.criteria.what}</span>
 					<div class="relative max-md:col-span-2 max-md:row-start-3">
+						{#if sessionId}<span class="whitespace-nowrap font-mono text-[11px] text-text-dimmer" data-testid="surfacing-category-count">{counts?.[category.id] ?? "…"} here</span>{/if}
 						<div class="category-actions flex flex-wrap items-center gap-1">
 							{#if deleting === category.id}
 								<span class="text-[12px]">Delete {category.glyph} {category.label}?</span>
@@ -156,6 +185,7 @@
 				{#each retired as category (category.id)}
 					<div class="flex flex-wrap items-center gap-3 px-[14px] py-[8px]" data-testid={`surfacing-category-row-${category.id}`}>
 						<CategoryPill {category} /><span class="min-w-0 flex-1 text-[12.5px]">{category.criteria.what}</span>
+						{#if sessionId}<span class="whitespace-nowrap font-mono text-[11px] text-text-dimmer" data-testid="surfacing-category-count">{counts?.[category.id] ?? "…"} if restored</span>{/if}
 						<Button variant="settings" size="content" disabled={saving || editor !== null || active.length >= 20} onclick={() => change({ ...category, retired: false })}>Restore</Button>
 					</div>
 				{/each}

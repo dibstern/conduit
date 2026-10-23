@@ -1,6 +1,6 @@
 <!--
   Lists the open session's Side Threads, newest first. Opened from the header's
-  Side Threads control or by a bare `$btw`: a sheet on phones and a popover
+  Side Threads control or by a bare `$btw`: a drop-down sheet on phones and a popover
   anchored under the control on desktop.
 -->
 <script lang="ts" module>
@@ -25,9 +25,8 @@
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import Popover from "../ui/Popover.svelte";
 	import Surface from "../ui/Surface.svelte";
-	import Dialog from "../ui/Dialog.svelte";
-	import SheetChrome from "../ui/SheetChrome.svelte";
 	import { sessionCommandActions } from "./session-commands.js";
 	import { sideThreadsPanel } from "./side-threads.svelte.js";
 
@@ -43,7 +42,8 @@
 	}
 </script>
 
-{#snippet content()}
+{#snippet panel()}
+<Surface id="side-threads-panel" data-testid="side-threads-panel" variant={compact ? "plain" : "floating"} radius="none" elevation={compact ? "none" : "popover"} role="region" aria-label="Side Threads" class="whitespace-normal border-border px-[14px] pt-[12px] pb-[10px] text-[12px] {compact ? '' : 'absolute top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto right-[16px] mt-[8px] w-[440px] max-w-[calc(100%-32px)] rounded-[16px]'}">
 	<!-- Desktop heads its card in sentence case, like the goal card's "Checks". -->
 	<div class="flex items-center gap-[7px] font-sans text-text-secondary {compact ? 'text-[11px] font-semibold uppercase tracking-[0.08em]' : 'text-[12px] font-medium'}">
 		<Icon name="messages-square" size={13} />{compact ? "Side Threads" : "Side threads"}
@@ -77,16 +77,14 @@
 	{:else}
 		<p data-testid="side-threads-empty" class="m-0 mt-2 text-[11px] leading-[1.45] text-text-muted">No Side Threads yet. Type <span class="font-mono text-text-secondary">$btw</span> and a question to ask one.</p>
 	{/if}
+</Surface>
 {/snippet}
 
 {#if compact}
-	<Dialog open={sideThreadsPanel.open} onclose={() => { sideThreadsPanel.open = false; }} placement="sheet" ariaLabel="Side Threads" returnFocus={() => document.getElementById("side-threads-control")}>
-		<SheetChrome id="side-threads-panel" data-testid="side-threads-panel" bodyClass="px-[14px] pt-[12px] whitespace-normal text-[12px]" bottomPadding={10}>
-			{@render content()}
-		</SheetChrome>
-	</Dialog>
+	<Popover bind:open={sideThreadsPanel.open} presentation="sheet" sheetEdge="top" ariaLabel="Side Threads" portalTo="#session-bar" sheetBottomPadding={0} sheetScrim={{ testId: "side-threads-scrim" }}>
+		{#snippet trigger()}{/snippet}
+		{@render panel()}
+	</Popover>
 {:else}
-	<Surface id="side-threads-panel" data-testid="side-threads-panel" variant="floating" radius="none" elevation="popover" role="region" aria-label="Side Threads" class="absolute top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto whitespace-normal border-border px-[14px] pt-[12px] pb-[10px] text-[12px] right-[16px] mt-[8px] w-[440px] max-w-[calc(100%-32px)] rounded-[16px]">
-		{@render content()}
-	</Surface>
+	{@render panel()}
 {/if}

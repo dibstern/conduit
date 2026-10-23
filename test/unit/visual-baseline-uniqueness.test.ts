@@ -36,6 +36,10 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"escape story re-opens the popover as its last step",
 	"layout-sessionbar--banners-row-expands | layout-sessionbar--island-with-banners":
 		"tapping the collapsed banners row opens the full header with its banners",
+	"layout-sessionbar--overflow-menu-open | layout-sessionbar--views-sheet-open":
+		"opening the phone drop-down forces the island bar open, so both end on the same sheet; each asserts different rows in play()",
+	"layout-sessionbar--overflow-menu-open-light | layout-sessionbar--views-sheet-open-light":
+		"opening the phone drop-down forces the island bar open, so both end on the same sheet; each asserts different rows in play()",
 	"project-projectdialog--multi-folder-supported | project-projectdialog--multi-folder-unknown":
 		"an unknown multi-folder capability warns like a supported one, i.e. not at all; both assert the missing warning in play()",
 	"ui-useravatar--initial | ui-useravatar--missing-mac-picture":
