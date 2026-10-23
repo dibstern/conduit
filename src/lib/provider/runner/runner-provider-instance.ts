@@ -514,6 +514,16 @@ export class RunnerProviderInstance implements ProviderInstance {
 		);
 	}
 
+	hasActiveTurnsEffect(sessionId: string) {
+		return (
+			this.runner.hasActiveTurnsEffect?.(sessionId) ?? Effect.succeed(false)
+		);
+	}
+
+	get turnEnds() {
+		return this.runner.turnEnds;
+	}
+
 	getAccountSwitchBlockEffect(sessionId: string, account: Account) {
 		return (
 			this.runner.getAccountSwitchBlockEffect?.(sessionId, account) ??

@@ -3,7 +3,7 @@
 // Instances are execution-only — they don't own sessions, messages, or history.
 // Conduit owns all state. Instances turn prompts into event streams.
 
-import type { Effect, Scope } from "effect";
+import type { Effect, Scope, Stream } from "effect";
 import type { Account } from "../contracts/account.js";
 import type { ProviderSessionCapabilities } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
@@ -424,6 +424,11 @@ export interface ProviderNativeSession {
  * - No streamEvents -- instance pushes via EventSink, no output stream needed
  */
 export interface ProviderInstance {
+	/** Native turn activity can outlive the last owned provider run. */
+	readonly hasActiveTurnsEffect?: (sessionId: string) => Effect.Effect<boolean>;
+	readonly turnEnds?:
+		| Effect.Effect<Stream.Stream<string>, never, Scope.Scope>
+		| undefined;
 	/** Liveness includes quarantined runners that cannot accept controls. */
 	readonly hasLiveProcessEffect?: (sessionId: string) => Effect.Effect<boolean>;
 	/** Process identity captured without starting work; refuses unavailable sessions. */
