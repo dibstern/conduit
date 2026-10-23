@@ -2556,6 +2556,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						(yield* pendingIntakes(this.stateRef, sessionId)).size > 0;
 					if (foreground || !(yield* isCurrentSession(this.stateRef, ctx)))
 						return Effect.void;
+					if (!ctx.turnInFlight && (ctx.liveBackgroundTaskCount ?? 0) > 0)
+						return Effect.void;
 					// Stop captured no foreground run. Notification activity can still
 					// hold the query, but cannot reopen its completed durable owner.
 					yield* this.disposeSessionEffect(ctx, "Stopped by the user");
@@ -2608,7 +2610,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							[...waiters.keys()].some((id) => !turnIds.includes(id))
 						)
 							return Effect.void;
-						// Background activity may remain after the foreground terminal.
+						if ((ctx.liveBackgroundTaskCount ?? 0) > 0) return Effect.void;
+						// Notification activity may remain after the foreground terminal.
 						// Dispose it without emitting another terminal for that turn.
 						yield* this.disposeSessionEffect(ctx, "Stopped by the user");
 						return Effect.void;
