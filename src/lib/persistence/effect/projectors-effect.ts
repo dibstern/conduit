@@ -10,7 +10,7 @@ import { PersistenceProjectTag } from "../../domain/persistence/Services/persist
 import { CLAUDE_WORKTREE_EVENTS } from "../../session/claude-worktree-state.js";
 import { isRecord } from "../../utils.js";
 import type { LiveEventType, StoredEvent } from "../events.js";
-import { type Check, detectGoalStuck } from "../goal-stuck-detector.js";
+import { type Check, createGoalStuckTracker } from "../goal-stuck-detector.js";
 import {
 	getSessionStatements,
 	isHumanSentMessage,
@@ -435,117 +435,135 @@ function mergeMetadata(
 	}
 }
 
-export const makeSessionProjector = defineProjector(() => ({
-	name: "session",
-	handles: SESSION_HANDLED_TYPES,
-	project: (event, ctx) =>
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			const terminal = runTerminalStatus(event, event.provider) !== undefined;
-			// Fork copies preserve historical attention without creating runs or settling live work.
-			if (
-				event.metadata.inherited &&
-				["turn.completed", "turn.error", "turn.interrupted"].includes(
-					event.type,
-				)
-			) {
-				const updated = yield* sql<{
-					id: string;
-				}>`UPDATE sessions SET last_turn_end_version = ${event.streamVersion}
+export const makeSessionProjector = defineProjector(() => {
+	const goalTrackers = new Map<
+		string,
+		{
+			condition: string;
+			setAt: number;
+			iterations: number;
+			rowid: number;
+			eventId: string | null;
+			goalState: string;
+			tracker: ReturnType<typeof createGoalStuckTracker>;
+			header: ReturnType<ReturnType<typeof createGoalStuckTracker>["add"]>;
+		}
+	>();
+	return {
+		name: "session",
+		handles: SESSION_HANDLED_TYPES,
+		project: (event, ctx) =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const terminal = runTerminalStatus(event, event.provider) !== undefined;
+				// Fork copies preserve historical attention without creating runs or settling live work.
+				if (
+					event.metadata.inherited &&
+					["turn.completed", "turn.error", "turn.interrupted"].includes(
+						event.type,
+					)
+				) {
+					const updated = yield* sql<{
+						id: string;
+					}>`UPDATE sessions SET last_turn_end_version = ${event.streamVersion}
 					WHERE id = ${event.sessionId} AND COALESCE(last_turn_end_version, -1) < ${event.streamVersion}
 					RETURNING id`;
-				return {
-					...(yield* stampSessions(ids(updated), ctx.version)),
-					sidebar: ids(updated),
-				};
-			}
-			if (event.type === "turn.completed" && !terminal)
-				return { stamped: [], removed: [], collections: [] };
-			const unownedStatus =
-				event.type === "session.status" && !event.metadata.runId;
-			if (terminal && unownedStatus) {
-				// An orphan status observation may move; it cannot end owned work.
-				const open =
-					yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
-					AND status IN ('pending', 'running') LIMIT 1`;
-				if (open.length) return { stamped: [], removed: [], collections: [] };
-			}
-			if (
-				(terminal && !unownedStatus) ||
-				(event.type === "session.status" && event.metadata.runId)
-			) {
-				const runId = event.metadata.runId;
-				if (!runId) return { stamped: [], removed: [], collections: [] };
-				const [run] = yield* sql<{
-					status: string;
-					completed_at: number | null;
-				}>`SELECT status, completed_at FROM provider_runs
-					WHERE id = ${runId} AND session_id = ${event.sessionId}`;
-				if (!run) return { stamped: [], removed: [], collections: [] };
-				const open = run.status === "pending" || run.status === "running";
-				if (
-					terminal &&
-					!open &&
-					!(ctx.replaying && run.completed_at === event.createdAt)
-				)
+					return {
+						...(yield* stampSessions(ids(updated), ctx.version)),
+						sidebar: ids(updated),
+					};
+				}
+				if (event.type === "turn.completed" && !terminal)
 					return { stamped: [], removed: [], collections: [] };
-				if (event.type === "session.status" && !open) {
-					if (event.data.status === "busy" || event.data.status === "retry")
-						return { stamped: [], removed: [], collections: [] };
-					const newer =
+				const unownedStatus =
+					event.type === "session.status" && !event.metadata.runId;
+				if (terminal && unownedStatus) {
+					// An orphan status observation may move; it cannot end owned work.
+					const open =
 						yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
-						AND id <> ${runId} AND status IN ('pending', 'running') LIMIT 1`;
-					if (newer.length)
+					AND status IN ('pending', 'running') LIMIT 1`;
+					if (open.length) return { stamped: [], removed: [], collections: [] };
+				}
+				if (
+					(terminal && !unownedStatus) ||
+					(event.type === "session.status" && event.metadata.runId)
+				) {
+					const runId = event.metadata.runId;
+					if (!runId) return { stamped: [], removed: [], collections: [] };
+					const [run] = yield* sql<{
+						status: string;
+						completed_at: number | null;
+					}>`SELECT status, completed_at FROM provider_runs
+					WHERE id = ${runId} AND session_id = ${event.sessionId}`;
+					if (!run) return { stamped: [], removed: [], collections: [] };
+					const open = run.status === "pending" || run.status === "running";
+					if (
+						terminal &&
+						!open &&
+						!(ctx.replaying && run.completed_at === event.createdAt)
+					)
 						return { stamped: [], removed: [], collections: [] };
+					if (event.type === "session.status" && !open) {
+						if (event.data.status === "busy" || event.data.status === "retry")
+							return { stamped: [], removed: [], collections: [] };
+						const newer =
+							yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
+						AND id <> ${runId} AND status IN ('pending', 'running') LIMIT 1`;
+						if (newer.length)
+							return { stamped: [], removed: [], collections: [] };
+					}
 				}
-			}
 
-			if (event.type === "session.created") {
-				for (const id of [event.data.parentId, event.data.forkedFrom]) {
-					if (id === undefined) continue;
-					const [row] = yield* sql`SELECT id FROM sessions WHERE id = ${id}`;
-					if (!row) return { stamped: [], removed: [], collections: [] };
+				if (event.type === "session.created") {
+					for (const id of [event.data.parentId, event.data.forkedFrom]) {
+						if (id === undefined) continue;
+						const [row] = yield* sql`SELECT id FROM sessions WHERE id = ${id}`;
+						if (!row) return { stamped: [], removed: [], collections: [] };
+					}
 				}
-			}
-			const written: string[] = [];
-			// Families this event can take members from, which naming the
-			// sessions it wrote does not reach.
-			const left: string[] = [];
+				const written: string[] = [];
+				// Families this event can take members from, which naming the
+				// sessions it wrote does not reach.
+				const left: string[] = [];
 
-			let goalFacts: SessionGoalChangedPayload | undefined;
-			let goalTurnIndex: number | null = null;
-			if (event.type === "session.goal_changed") {
-				const goal = event.data.goal ?? event.data.endedGoal;
-				if (goal) {
-					const until = event.data.endedAt ?? event.createdAt;
-					// Checks can run before turn.completed, and several checks may
-					// belong to one turn. Queued inputs have not run a turn yet.
-					const [turns] = yield* sql<{
-						turnIndex: number | null;
-						turnCount: number;
-					}>`
+				let goalFacts: SessionGoalChangedPayload | undefined;
+				let goalTurnIndex: number | null = null;
+				let previousGoalState: string | null = null;
+				if (event.type === "session.goal_changed") {
+					const [previous] = yield* sql<{ goal_state: string | null }>`
+					SELECT goal_state FROM sessions WHERE id = ${event.data.sessionId}`;
+					previousGoalState = previous?.goal_state ?? null;
+					const goal = event.data.goal ?? event.data.endedGoal;
+					if (goal) {
+						const until = event.data.endedAt ?? event.createdAt;
+						// Checks can run before turn.completed, and several checks may
+						// belong to one turn. Queued inputs have not run a turn yet.
+						const [turns] = yield* sql<{
+							turnIndex: number | null;
+							turnCount: number;
+						}>`
 						SELECT NULLIF(COUNT(*), 0) AS turnIndex,
 							COALESCE(SUM(CASE WHEN COALESCE(completed_at, ${until}) >= ${goal.setAt} THEN 1 ELSE 0 END), 0) AS turnCount
 						FROM turns WHERE session_id = ${event.data.sessionId}
 						AND state != 'pending' AND COALESCE(started_at, requested_at) <= ${until}`;
-					goalTurnIndex = turns?.turnIndex ?? null;
-					const countedGoal = { ...goal, turnCount: turns?.turnCount ?? 0 };
-					// The completion timestamp bounds ended totals on resync too.
-					goalFacts = event.data.goal
-						? { ...event.data, goal: countedGoal }
-						: { ...event.data, endedGoal: countedGoal };
+						goalTurnIndex = turns?.turnIndex ?? null;
+						const countedGoal = { ...goal, turnCount: turns?.turnCount ?? 0 };
+						// The completion timestamp bounds ended totals on resync too.
+						goalFacts = event.data.goal
+							? { ...event.data, goal: countedGoal }
+							: { ...event.data, endedGoal: countedGoal };
+					}
 				}
-			}
-			const checkedGoal =
-				event.type === "session.goal_changed"
-					? (event.data.goal ??
-						(event.data.ended === "met" ? event.data.endedGoal : undefined))
-					: undefined;
-			if (event.type === "session.goal_changed" && checkedGoal) {
-				const goal = checkedGoal;
-				// Read the preceding fact before replacing it. Pauses and status
-				// resyncs with unchanged iterations do not create another check.
-				yield* sql`INSERT OR IGNORE INTO session_goal_checks
+				const checkedGoal =
+					event.type === "session.goal_changed"
+						? (event.data.goal ??
+							(event.data.ended === "met" ? event.data.endedGoal : undefined))
+						: undefined;
+				if (event.type === "session.goal_changed" && checkedGoal) {
+					const goal = checkedGoal;
+					// Read the preceding fact before replacing it. Pauses and status
+					// resyncs with unchanged iterations do not create another check.
+					yield* sql`INSERT OR IGNORE INTO session_goal_checks
 					(event_id, session_id, condition, set_at, iterations, reason, created_at, turn_index, judge_model)
 					SELECT ${event.eventId}, id, ${goal.condition}, ${goal.setAt},
 						${goal.iterations}, ${goal.lastReason ?? null}, ${event.createdAt},
@@ -557,131 +575,189 @@ export const makeSessionProjector = defineProjector(() => ({
 							AND COALESCE(json_extract(goal_state, '$.goal.condition'), json_extract(goal_state, '$.endedGoal.condition')) = ${goal.condition}
 							THEN COALESCE(json_extract(goal_state, '$.goal.iterations'), json_extract(goal_state, '$.endedGoal.iterations'), 0)
 						ELSE 0 END`;
-				if (goal.judgeModel) {
-					// A terminal transcript attachment may report the judge after
-					// active_goal already reported this check's iteration.
-					yield* sql`UPDATE session_goal_checks SET judge_model = ${goal.judgeModel}
+					if (goal.judgeModel) {
+						// A terminal transcript attachment may report the judge after
+						// active_goal already reported this check's iteration.
+						yield* sql`UPDATE session_goal_checks SET judge_model = ${goal.judgeModel}
 						WHERE session_id = ${event.data.sessionId} AND set_at = ${goal.setAt}
 						AND condition = ${goal.condition} AND iterations = ${goal.iterations}
 						AND judge_model IS NULL`;
+					}
 				}
-			}
 
-			// Every session statement is a single-table write against `sessions`
-			// keyed by id, so `RETURNING id` names exactly the rows it wrote: the
-			// subagent row for a message filed under its parent, and nothing at
-			// all when the auto-title guard declines the rename.
-			//
-			// A removal is named instead of written, because `RETURNING` cannot
-			// report what the cascade takes: the subtree is read first, then the
-			// session row goes and the cascade takes the rest. Both arms feed the
-			// same list — the stamp pass is what tells a row that moved from one
-			// that is gone.
-			const [worktree] = CLAUDE_WORKTREE_EVENTS.has(event.type)
-				? yield* sql<{ claude_worktree_state: string | null }>`
+				// Every session statement is a single-table write against `sessions`
+				// keyed by id, so `RETURNING id` names exactly the rows it wrote: the
+				// subagent row for a message filed under its parent, and nothing at
+				// all when the auto-title guard declines the rename.
+				//
+				// A removal is named instead of written, because `RETURNING` cannot
+				// report what the cascade takes: the subtree is read first, then the
+				// session row goes and the cascade takes the rest. Both arms feed the
+				// same list — the stamp pass is what tells a row that moved from one
+				// that is gone.
+				const [worktree] = CLAUDE_WORKTREE_EVENTS.has(event.type)
+					? yield* sql<{ claude_worktree_state: string | null }>`
 					SELECT claude_worktree_state FROM sessions
 					WHERE id = ${event.sessionId}`
-				: [];
-			for (const stmt of getSessionStatements(
-				event.type === "session.goal_changed" && goalFacts
-					? { ...event, data: goalFacts }
-					: event,
-				worktree?.claude_worktree_state,
-			)) {
-				if (isSessionRemoval(stmt)) {
-					const subtree = yield* sql.unsafe<{ id: string }>(
-						SESSION_SUBTREE_SQL,
-						[stmt.removeSession],
-					);
-					// SET NULL preserves Forks of any Source in this subtree. Their
-					// lineage and sidebar rows still change under the same delete.
-					const forks = yield* sql<{ id: string }>`SELECT id FROM sessions
+					: [];
+				for (const stmt of getSessionStatements(
+					event.type === "session.goal_changed" && goalFacts
+						? { ...event, data: goalFacts }
+						: event,
+					worktree?.claude_worktree_state,
+				)) {
+					if (isSessionRemoval(stmt)) {
+						const subtree = yield* sql.unsafe<{ id: string }>(
+							SESSION_SUBTREE_SQL,
+							[stmt.removeSession],
+						);
+						// SET NULL preserves Forks of any Source in this subtree. Their
+						// lineage and sidebar rows still change under the same delete.
+						const forks = yield* sql<{ id: string }>`SELECT id FROM sessions
 						WHERE forked_from IN (SELECT value FROM json_each(${JSON.stringify(subtree.map((row) => row.id))}))`;
-					const roots = yield* sql<{ root_id: string | null }>`
+						const roots = yield* sql<{ root_id: string | null }>`
 						SELECT root_id FROM sessions WHERE id = ${stmt.removeSession}`;
-					left.push(...roots.flatMap((row) => row.root_id ?? []));
-					// Retain each descendant's owner before the cascade removes it.
-					yield* sql`
+						left.push(...roots.flatMap((row) => row.root_id ?? []));
+						// Retain each descendant's owner before the cascade removes it.
+						yield* sql`
 						INSERT INTO session_sidebar (session_id, project_id, version, last_activity, row)
 						SELECT id, project_id, ${ctx.version}, 0, NULL FROM sessions
 						WHERE id IN (SELECT value FROM json_each(${JSON.stringify(subtree.map((row) => row.id))}))
 						ON CONFLICT (session_id) DO UPDATE SET project_id = excluded.project_id`;
-					yield* sql.unsafe(REMOVE_SESSION_SQL, [stmt.removeSession]);
-					written.push(
-						...subtree.map((row) => row.id),
-						...forks.map((row) => row.id),
+						yield* sql.unsafe(REMOVE_SESSION_SQL, [stmt.removeSession]);
+						written.push(
+							...subtree.map((row) => row.id),
+							...forks.map((row) => row.id),
+						);
+						continue;
+					}
+					const rows = yield* sql.unsafe<{ id: string }>(
+						`${stmt.sql} RETURNING id`,
+						[...stmt.params],
 					);
-					continue;
+					written.push(...rows.map((row) => row.id));
 				}
-				const rows = yield* sql.unsafe<{ id: string }>(
-					`${stmt.sql} RETURNING id`,
-					[...stmt.params],
-				);
-				written.push(...rows.map((row) => row.id));
-			}
-			const inheritsHistory =
-				event.type === "session.created" && event.data.inheritsHistory === true;
-			if (event.type === "session.created" && inheritsHistory)
-				yield* inheritForkHistory(event, ctx.version);
-			if (event.type === "session.goal_changed") {
-				const goal = event.data.goal;
-				let goalStuck: string | null = null;
-				if (goal) {
-					// Restrict replays to this event's prefix even if later checks
-					// already exist in the materialised history.
-					const checks = yield* sql<Check>`
+				const inheritsHistory =
+					event.type === "session.created" &&
+					event.data.inheritsHistory === true;
+				if (event.type === "session.created" && inheritsHistory)
+					yield* inheritForkHistory(event, ctx.version);
+				if (event.type === "session.goal_changed") {
+					const goal = event.data.goal;
+					let goalStuck: string | null = null;
+					if (goal) {
+						const sessionId = event.data.sessionId;
+						let cached = goalTrackers.get(sessionId);
+						const [last] = yield* sql<{
+							rowid: number;
+							eventId: string;
+							previousEventId: string | null;
+						}>`
+							SELECT rowid, event_id AS eventId,
+								(SELECT event_id FROM session_goal_checks WHERE rowid = ${cached?.rowid ?? 0}) AS previousEventId
+							FROM session_goal_checks ORDER BY rowid DESC LIMIT 1`;
+						const rowid = last?.rowid ?? 0;
+						// goal_state commits with the checks. A rolled-back projection or
+						// a replay must never reuse speculative/future detector state.
+						// Certify the global cursor too: SQLite can reuse a rolled-back
+						// rowid for a different session's check with unchanged goal facts.
+						if (
+							cached &&
+							(cached.goalState !== previousGoalState ||
+								cached.condition !== goal.condition ||
+								cached.setAt !== goal.setAt ||
+								cached.iterations > goal.iterations ||
+								cached.eventId !== (last?.previousEventId ?? null))
+						)
+							cached = undefined;
+						// Checks are append-only apart from session deletion. Rowid also
+						// catches imported/backfilled checks below the iteration cursor.
+						// Force the rowid range, rather than scanning the session index.
+						let checks = cached
+							? yield* sql<Check>`
 						SELECT iterations AS iteration, created_at AS at, reason
-						FROM session_goal_checks WHERE session_id = ${event.data.sessionId}
-						AND set_at = ${goal.setAt} AND condition = ${goal.condition}
-						AND iterations <= ${goal.iterations} ORDER BY iterations ASC`;
-					const { stuck } = detectGoalStuck(checks);
-					const latest = checks.at(-1);
-					const first = stuck
-						? checks.find((check) => check.iteration === stuck.sinceIteration)
-						: undefined;
-					if (stuck && latest && first)
-						goalStuck = JSON.stringify({
-							since: first.at,
-							lastAt: latest.at,
-							count: stuck.count,
-						});
+						FROM session_goal_checks NOT INDEXED WHERE rowid > ${cached.rowid}
+						AND session_id = ${sessionId} AND set_at = ${goal.setAt}
+						AND condition = ${goal.condition} ORDER BY iterations ASC`
+							: [];
+						if (cached && checks[0] && checks[0].iteration <= cached.iterations)
+							cached = undefined;
+						if (!cached) {
+							checks = yield* sql<Check>`
+							SELECT iterations AS iteration, created_at AS at, reason
+							FROM session_goal_checks WHERE session_id = ${sessionId}
+							AND set_at = ${goal.setAt} AND condition = ${goal.condition}
+							ORDER BY iterations ASC`;
+							cached = {
+								condition: goal.condition,
+								setAt: goal.setAt,
+								iterations: goal.iterations,
+								rowid,
+								eventId: last?.eventId ?? null,
+								goalState: "",
+								tracker: createGoalStuckTracker(),
+								header: null,
+							};
+						}
+						for (const check of checks) {
+							if (check.iteration <= goal.iterations)
+								cached.header = cached.tracker.add(check);
+						}
+						if (cached.header) goalStuck = JSON.stringify(cached.header);
+						goalTrackers.delete(sessionId);
+						// A historical prefix cannot advance past checks it has not seen.
+						if (!checks.some((check) => check.iteration > goal.iterations)) {
+							cached.rowid = rowid;
+							cached.eventId = last?.eventId ?? null;
+							cached.iterations = goal.iterations;
+							cached.goalState = JSON.stringify(goalFacts ?? event.data);
+							goalTrackers.set(sessionId, cached);
+							// Bound idle-session retention; eviction only costs a cold replay.
+							if (goalTrackers.size > 32) {
+								const oldest = goalTrackers.keys().next().value;
+								if (oldest !== undefined) goalTrackers.delete(oldest);
+							}
+						}
+					} else goalTrackers.delete(event.data.sessionId);
+					// The session statement above already owns this row's version and
+					// notification; persist the header before that same stamp commits.
+					yield* sql`UPDATE sessions SET goal_stuck = ${goalStuck} WHERE id = ${event.data.sessionId}`;
 				}
-				// The session statement above already owns this row's version and
-				// notification; persist the header before that same stamp commits.
-				yield* sql`UPDATE sessions SET goal_stuck = ${goalStuck} WHERE id = ${event.data.sessionId}`;
-			}
-			// Only these two write a parent.
-			if (event.type === "session.created" || event.type === "session.forked")
-				left.push(...(yield* rerootSession(event.data.sessionId, ctx.version)));
-			const touch = yield* stampSessions(written, ctx.version);
-			// A removed session, child or root, leaves a deleted tombstone.
-			return {
-				...touch,
-				collections:
-					touch.removed.length > 0
-						? ([
-								...touch.collections,
-								"messages",
-								"approvals",
-								"inputs",
-							] as const)
-						: inheritsHistory
-							? ([...touch.collections, "messages"] as const)
-							: touch.collections,
-				sidebar: [...touch.stamped, ...touch.removed, ...left],
-			};
-		}).pipe(
-			Effect.mapError((e) =>
-				e instanceof ProjectionError
-					? e
-					: new ProjectionError({
-							projector: "session",
-							operation: "project",
-							cause: e,
-						}),
+				// Only these two write a parent.
+				if (event.type === "session.created" || event.type === "session.forked")
+					left.push(
+						...(yield* rerootSession(event.data.sessionId, ctx.version)),
+					);
+				const touch = yield* stampSessions(written, ctx.version);
+				// A removed session, child or root, leaves a deleted tombstone.
+				return {
+					...touch,
+					collections:
+						touch.removed.length > 0
+							? ([
+									...touch.collections,
+									"messages",
+									"approvals",
+									"inputs",
+								] as const)
+							: inheritsHistory
+								? ([...touch.collections, "messages"] as const)
+								: touch.collections,
+					sidebar: [...touch.stamped, ...touch.removed, ...left],
+				};
+			}).pipe(
+				Effect.mapError((e) =>
+					e instanceof ProjectionError
+						? e
+						: new ProjectionError({
+								projector: "session",
+								operation: "project",
+								cause: e,
+							}),
+				),
 			),
-		),
-}));
+	};
+});
 
 export const makeMessageProjector = defineProjector(() => ({
 	name: "message",
