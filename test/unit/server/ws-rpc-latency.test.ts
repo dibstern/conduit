@@ -1,6 +1,7 @@
 // Failure modes: concurrent requests share counters, routed streams lose SQL
 // attribution, stream lifetime is timed, queued time is omitted, or disabling
-// the warning still changes request execution.
+// the warning still changes request execution. Slow lines must carry
+// main-thread busy time, and loop stalls must warn once per interval.
 
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import {
@@ -23,7 +24,13 @@ import {
 } from "effect/rpc";
 import { SqlClient, Statement } from "effect/sql";
 import { describe, expect, it } from "vitest";
+import { monitorEventLoopBlocks } from "../../../src/lib/domain/daemon/Services/event-loop-delay.js";
 import { withSlowRpcLogging } from "../../../src/lib/server/ws-rpc-handler.js";
+
+const blockMainThread = (ms: number) =>
+	Effect.sync(() => {
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+	});
 
 const Probe = Rpc.make("Probe", {
 	payload: {
@@ -360,5 +367,46 @@ describe("slow browser RPC warnings", () => {
 				}),
 			),
 		);
+	});
+
+	it("reports main-thread busy time for a request stalled by synchronous work", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const server = yield* connect(() => blockMainThread(200));
+					yield* server.submit("1", "blocking");
+					const warning = yield* Queue.take(server.warnings);
+					expect(warning["loopActiveMs"]).toBeGreaterThanOrEqual(150);
+				}),
+			),
+		);
+	});
+});
+
+describe("event loop block monitor", () => {
+	it("warns once per interval when the loop stalls", async () => {
+		const records: Record<string, unknown>[] = [];
+		const logger = Logger.make(({ message, fiber }) => {
+			if (Array.isArray(message) && message[0] === "event loop blocked")
+				records.push({ ...fiber.getRef(References.CurrentLogAnnotations) });
+		});
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					yield* monitorEventLoopBlocks({
+						checkMs: 50,
+						thresholdMs: 100,
+						warnEveryMs: 60_000,
+					});
+					yield* Effect.sleep("100 millis");
+					yield* blockMainThread(200);
+					yield* Effect.sleep("150 millis");
+					yield* blockMainThread(200);
+					yield* Effect.sleep("150 millis");
+				}),
+			).pipe(Effect.provide(Logger.layer([logger]))),
+		);
+		expect(records).toHaveLength(1);
+		expect(records[0]?.["eventLoopDelayMaxMs"]).toBeGreaterThanOrEqual(100);
 	});
 });
