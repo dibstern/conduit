@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Turn log redesign</title>
+<script>document.documentElement.dataset.designTheme=localStorage.getItem('tsp-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<style>/* tsp chrome. Styles the page around designs only; designs render in their own iframes.
+   The chrome is always light: the theme toggle switches the designs (data-design-theme), never the page. */
+:root{--bg:#f7f7f5;--surface:#fff;--text:#1c1c1a;--muted:#6b6b65;--line:#e3e3de;--soft:#efefea;--ring:#1c1c1a;color-scheme:light;
+--font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--font);overflow-x:clip}
+[hidden]{display:none!important}
+html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme=dark] [data-theme-only=light]{display:none!important}
+
+.tsp-bar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;
+  padding:10px max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left));
+  background:color-mix(in srgb,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.tsp-titles{flex:1;min-width:0}
+.tsp-home{display:inline-block;font:600 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:4px 0}
+.tsp-bar h1{margin:0;font-size:clamp(17px,2.2vw,21px);line-height:1.25;font-weight:650;text-wrap:balance}
+.tsp-bar p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.tsp-actions{display:flex;gap:8px;flex-shrink:0}
+.tsp-btn{min-height:44px;min-width:44px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);
+  color:var(--text);font:500 13px/1 var(--font);cursor:pointer;display:inline-grid;place-items:center}
+.tsp-btn:hover{background:var(--soft)}
+.tsp-btn:focus-visible,.tsp-section>summary:focus-visible,.tsp-open:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.tsp-theme{padding:0}
+.tsp-theme svg{width:18px;height:18px}
+[data-design-theme=light] .tsp-sun,[data-design-theme=dark] .tsp-moon{display:none}
+
+.tsp-main{max-width:1440px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
+.tsp-main>*+*,.tsp-section-body>*+*{margin-top:16px}
+
+.tsp-section{border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.tsp-section>summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:52px;padding:8px 16px;cursor:pointer;border-radius:14px}
+.tsp-section>summary::-webkit-details-marker{display:none}
+.tsp-section>summary h2{margin:0;flex:1;font-size:17px;line-height:1.3;font-weight:650}
+.tsp-chev{width:16px;height:16px;flex-shrink:0;color:var(--muted);transition:transform .15s}
+.tsp-section[open]>summary .tsp-chev{transform:rotate(90deg)}
+.tsp-count{font:12px var(--mono);color:var(--muted)}
+.tsp-section-body{padding:0 16px 16px}
+@media (max-width:520px){.tsp-section-body{padding:0 10px 10px}.tsp-section>summary{padding:8px 12px}}
+
+.tsp-grid{display:grid;align-items:start;gap:16px;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--tsp-min,340px)),1fr))}
+.tsp-card{display:flex;flex-direction:column;gap:6px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.tsp-wide{grid-column:1/-1}
+.tsp-card-head{display:flex;align-items:baseline;gap:8px}
+.tsp-n{font:600 12px/1 var(--mono);color:var(--muted)}
+.tsp-card h3{margin:0;flex:1;font-size:15px;line-height:1.35;font-weight:600}
+.tsp-open{display:inline-grid;place-items:center;min-width:44px;min-height:44px;margin:-14px -10px -14px 0;border-radius:8px;color:var(--muted);text-decoration:none}
+.tsp-open:hover{color:var(--text)}
+.tsp-why{margin:0;color:var(--muted);font-size:13px}
+.tsp-stage{overflow:hidden;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.tsp-frame{display:block;width:100%;height:240px;border:0;transform-origin:0 0}
+
+:where(.tsp-main) :is(h2,h3,h4){line-height:1.3;text-wrap:balance}
+:where(.tsp-main) :is(p,li){max-width:78ch}
+:where(.tsp-main) a{color:inherit;text-underline-offset:2px}
+:where(.tsp-main) code{font:.9em var(--mono);background:var(--soft);padding:.1em .35em;border-radius:5px}
+:where(.tsp-main) pre{overflow-x:auto;padding:12px 14px;background:var(--soft);border-radius:10px;font:13px/1.5 var(--mono)}
+:where(.tsp-main) pre code{background:none;padding:0}
+:where(.tsp-main) table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:14px}
+:where(.tsp-main) :is(th,td){padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+:where(.tsp-main) :is(img,video){max-width:100%;height:auto}
+:where(.tsp-main) blockquote{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:var(--muted)}
+
+.tsp-index{list-style:none;padding:0;display:grid;gap:10px}
+.tsp-index li{max-width:none;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--muted);font-size:13px}
+.tsp-index strong{color:var(--text);font-size:15px}
+.tsp-foot{padding:0 16px 32px;text-align:center;font:12px var(--mono);color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.tsp-chev{transition:none}}
+</style></head>
+<body>
+<header class="tsp-bar"><div class="tsp-titles"><a class="tsp-home" href="/tsp/" hidden>tsp</a><h1>Turn log redesign</h1><p>Round 3: panel × sheet, with Jev and one strip popover</p></div>
+<div class="tsp-actions"><button class="tsp-btn" type="button" data-tsp="toggle-all" hidden>Collapse all</button>
+<button class="tsp-btn tsp-theme" type="button" aria-label="Switch the designs between light and dark">
+<svg class="tsp-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+<svg class="tsp-sun" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></svg>
+</button></div></header>
+<main class="tsp-main">
+
+
+<p><strong>Round 3: four ways to combine One panel (2) and Raised sheet (6), with Jev and the strip popover built in.</strong> Skills stay events everywhere. Every direction shows Collapsed, Live and Expanded on desktop and phone. Round 2 is at the bottom, collapsed.</p>
+
+<p><strong>What I took as "the timeline popover":</strong> the hover card on the strip. Today there are two of them: the head tooltip (hovered step plus turn totals) and Jev's minimised peek (nearest message). Section P merges them, and every direction uses it. Tell me if you meant something else.</p>
+
+<p><strong>Sample turn:</strong> 4m 12s, 15 steps, 2 skill loads, 1 failed check, 1 compaction, and 5 surfaced messages, one of them an open Ask.</p>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>P · One strip popover (used by every direction)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>One popover, showing whatever is under the pointer.</strong> A step shows verb, subject, duration and time into the turn. A message shows its badge and text, and clicking opens it. <strong>Turn totals leave the popover:</strong> they don't change with where you hover, so they move to Usage or the footer. <strong>Phone:</strong> press and drag on the strip to scrub, lift to open.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-p"><header class="tsp-card-head"><span class="tsp-n">P</span><h3>Strip popover, desktop</h3><a class="tsp-open" href="_frame-p.html" target="_blank" aria-label="Open Strip popover, desktop alone">↗</a></header><p class="tsp-why">Replaces both today&#x27;s head tooltip and Jev&#x27;s peek.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-p.html" title="Strip popover, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-px"><header class="tsp-card-head"><span class="tsp-n">P</span><h3>Strip popover, phone</h3><a class="tsp-open" href="_frame-px.html" target="_blank" aria-label="Open Strip popover, phone alone">↗</a></header><p class="tsp-why">Full width under the strip, caret on the touch point.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-px.html" title="Strip popover, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>A · Tabbed panel (Jev as a tab)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Container:</strong> 2's bordered panel. <strong>Tabs from 6:</strong> Messages · Steps · Usage, in the head (under the strip on phone). <strong>Jev</strong> is the Messages tab, and numbered pins replace the strip dots while it's open. <strong>Default tab:</strong> Steps while live, Messages once done. <strong>Jev off:</strong> the Messages tab goes and this is 6 inside 2's border.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-a"><header class="tsp-card-head"><span class="tsp-n">A</span><h3>Tabbed panel, desktop</h3><a class="tsp-open" href="_frame-a.html" target="_blank" aria-label="Open Tabbed panel, desktop alone">↗</a></header><p class="tsp-why">The most familiar shape: one box, three views.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-a.html" title="Tabbed panel, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-ax"><header class="tsp-card-head"><span class="tsp-n">A</span><h3>Tabbed panel, phone</h3><a class="tsp-open" href="_frame-ax.html" target="_blank" aria-label="Open Tabbed panel, phone alone">↗</a></header><p class="tsp-why">Tabs go full width under the strip.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-ax.html" title="Tabbed panel, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>B · Jev on top, steps drawer underneath</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Jev is not a tab here.</strong> Messages are what you read, so they stay in the card as they do today. <strong>Raw steps</strong> pull out from under the card as a raised drawer, with 6's lift and 2's attachment, and Steps · Usage tabs. <strong>Opener:</strong> the Steps button in the level row, or a click on the strip. <strong>Jev off:</strong> the card is the plain head and the drawer is 6's sheet.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-b"><header class="tsp-card-head"><span class="tsp-n">B</span><h3>Jev + drawer, desktop</h3><a class="tsp-open" href="_frame-b.html" target="_blank" aria-label="Open Jev + drawer, desktop alone">↗</a></header><p class="tsp-why">An open Ask is never hidden behind a tab.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-b.html" title="Jev + drawer, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-bx"><header class="tsp-card-head"><span class="tsp-n">B</span><h3>Jev + drawer, phone</h3><a class="tsp-open" href="_frame-bx.html" target="_blank" aria-label="Open Jev + drawer, phone alone">↗</a></header><p class="tsp-why">The Steps button drops on phone; tap the strip instead.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-bx.html" title="Jev + drawer, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>C · Footer tab bar</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>2's footer bar becomes the tab bar.</strong> It's a control, so it can't pass for a step, and it carries the cost on the right. <strong>Always visible, even collapsed:</strong> one click to any view. <strong>Cost:</strong> every collapsed turn grows by about 38px. <strong>Jev off:</strong> Steps · Usage only.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-c"><header class="tsp-card-head"><span class="tsp-n">C</span><h3>Footer tabs, desktop</h3><a class="tsp-open" href="_frame-c.html" target="_blank" aria-label="Open Footer tabs, desktop alone">↗</a></header><p class="tsp-why">The tab underline sits on top, pointing at what it opened.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-c.html" title="Footer tabs, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-cx"><header class="tsp-card-head"><span class="tsp-n">C</span><h3>Footer tabs, phone</h3><a class="tsp-open" href="_frame-cx.html" target="_blank" aria-label="Open Footer tabs, phone alone">↗</a></header><p class="tsp-why">Cost shortens to dollars; tabs stay.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-cx.html" title="Footer tabs, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>D · One dial (novel)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Jev's level row gains a fifth stop: Steps.</strong> It stays under the strip, where Jev's levels live today. Final, Key, Balanced and All filter messages. Steps shows everything, with messages badged in place. This works because messages already are steps (the text parts), so it's one control instead of tabs plus levels. <strong>Usage:</strong> 2's footer bar. <strong>Jev off:</strong> the dial goes and this is exactly 2.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-d"><header class="tsp-card-head"><span class="tsp-n">D</span><h3>One dial, desktop</h3><a class="tsp-open" href="_frame-d.html" target="_blank" aria-label="Open One dial, desktop alone">↗</a></header><p class="tsp-why">Removes a concept instead of adding one.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-d.html" title="One dial, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-dx"><header class="tsp-card-head"><span class="tsp-n">D</span><h3>One dial, phone</h3><a class="tsp-open" href="_frame-dx.html" target="_blank" aria-label="Open One dial, phone alone">↗</a></header><p class="tsp-why">Counts drop from the dial on phone; the pins carry them.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-dx.html" title="One dial, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<p><strong>My lean: D.</strong> It removes a concept, and with Jev off it falls back to 2, the one you liked. <strong>Safe pick: A</strong>, the most familiar. <strong>B</strong> if an open Ask should never sit behind a tab.</p>
+
+<p><strong>Round 2, for reference:</strong> sections 0 to 7 below.</p>
+
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>0 · Today (reference)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-0"><header class="tsp-card-head"><span class="tsp-n">0</span><h3>Today, desktop</h3><a class="tsp-open" href="_frame-0.html" target="_blank" aria-label="Open Today, desktop alone">↗</a></header><p class="tsp-why">Dashed: the footer that reads as a step.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-0.html" title="Today, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-0x"><header class="tsp-card-head"><span class="tsp-n">0</span><h3>Today, phone</h3><a class="tsp-open" href="_frame-0x.html" target="_blank" aria-label="Open Today, phone alone">↗</a></header><p class="tsp-why">Same, at 390px.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-0x.html" title="Today, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>1 · Head ledger (your pick, refined)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Skills:</strong> named pills in the head card, with diamonds on the strip where each loaded. <strong>Bill:</strong> head card, right of the pills. <strong>Log:</strong> steps only; a skill row says "Skill", not "Loaded", and has no duration, since loading takes milliseconds and the number means nothing.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-1"><header class="tsp-card-head"><span class="tsp-n">1</span><h3>Head ledger, desktop</h3><a class="tsp-open" href="_frame-1.html" target="_blank" aria-label="Open Head ledger, desktop alone">↗</a></header><p class="tsp-why">Everything about the turn sits in the card; everything below it is a step.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-1.html" title="Head ledger, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-1x"><header class="tsp-card-head"><span class="tsp-n">1</span><h3>Head ledger, phone</h3><a class="tsp-open" href="_frame-1x.html" target="_blank" aria-label="Open Head ledger, phone alone">↗</a></header><p class="tsp-why">The bill drops to its own line under the pills.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-1x.html" title="Head ledger, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>2 · One panel</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Container:</strong> the head card and the log become one bordered panel. The log is its body, the bill is its footer bar. <strong>Skills:</strong> inline event pills where they loaded, plus "2 skills" in the sentence.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-2"><header class="tsp-card-head"><span class="tsp-n">2</span><h3>One panel, desktop</h3><a class="tsp-open" href="_frame-2.html" target="_blank" aria-label="Open One panel, desktop alone">↗</a></header><p class="tsp-why">The border answers “does this belong to the turn?” and the footer bar can&#x27;t be mistaken for a row.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-2.html" title="One panel, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-2x"><header class="tsp-card-head"><span class="tsp-n">2</span><h3>One panel, phone</h3><a class="tsp-open" href="_frame-2x.html" target="_blank" aria-label="Open One panel, phone alone">↗</a></header><p class="tsp-why">Panel edges line up with the message column, so it reads as one block.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-2x.html" title="One panel, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>3 · Recessed tray</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Container:</strong> the log opens as a sunken tray inside the head card, like a drawer pulled out. The raw output looks lower and quieter than the summary above it. <strong>Skills:</strong> labelled diamonds on the strip. <strong>Bill:</strong> cost in the head, full bill at the bottom of the tray.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-3"><header class="tsp-card-head"><span class="tsp-n">3</span><h3>Recessed tray, desktop</h3><a class="tsp-open" href="_frame-3.html" target="_blank" aria-label="Open Recessed tray, desktop alone">↗</a></header><p class="tsp-why">Raw steps read as machine output, set apart from the prose around them.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-3.html" title="Recessed tray, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-3x"><header class="tsp-card-head"><span class="tsp-n">3</span><h3>Recessed tray, phone</h3><a class="tsp-open" href="_frame-3x.html" target="_blank" aria-label="Open Recessed tray, phone alone">↗</a></header><p class="tsp-why">The tray bleeds almost to the card edge to keep row width.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-3x.html" title="Recessed tray, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>4 · Timeline rail</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Structure:</strong> steps hang off a vertical rail. A coloured dot replaces each icon, a diamond marks a skill load, and the rail ends in a "Done" node that carries the bill. <strong>No container</strong>: the rail does the grouping.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-4"><header class="tsp-card-head"><span class="tsp-n">4</span><h3>Timeline rail, desktop</h3><a class="tsp-open" href="_frame-4.html" target="_blank" aria-label="Open Timeline rail, desktop alone">↗</a></header><p class="tsp-why">A skill is a point on the line, which is exactly what we know about it.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-4.html" title="Timeline rail, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-4x"><header class="tsp-card-head"><span class="tsp-n">4</span><h3>Timeline rail, phone</h3><a class="tsp-open" href="_frame-4x.html" target="_blank" aria-label="Open Timeline rail, phone alone">↗</a></header><p class="tsp-why">Dropping icons gives back the width the rail costs.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-4x.html" title="Timeline rail, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>5 · Ledger table</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Structure:</strong> a bordered table, with columns for time into the turn, kind, step, and how long it took. Totals are the footer row. Most "raw" of the set, and best for scanning when things happened.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-5"><header class="tsp-card-head"><span class="tsp-n">5</span><h3>Ledger table, desktop</h3><a class="tsp-open" href="_frame-5.html" target="_blank" aria-label="Open Ledger table, desktop alone">↗</a></header><p class="tsp-why">The “At” column puts skills, failures and the compaction on one clock.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-5.html" title="Ledger table, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-5x"><header class="tsp-card-head"><span class="tsp-n">5</span><h3>Ledger table, phone</h3><a class="tsp-open" href="_frame-5x.html" target="_blank" aria-label="Open Ledger table, phone alone">↗</a></header><p class="tsp-why">Columns tighten; the bill wraps in the footer.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-5x.html" title="Ledger table, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>6 · Raised sheet with tabs</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Container:</strong> opening lifts the card into a raised sheet with two tabs. <strong>Steps</strong> holds only steps. <strong>Usage</strong> collects everything that isn't a step: cost, tokens, context, skills (with load times), failures and compactions. Has a fourth state for the Usage tab.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-6"><header class="tsp-card-head"><span class="tsp-n">6</span><h3>Raised sheet, desktop</h3><a class="tsp-open" href="_frame-6.html" target="_blank" aria-label="Open Raised sheet, desktop alone">↗</a></header><p class="tsp-why">The cleanest split: the metadata gets a real home instead of a footer.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-6.html" title="Raised sheet, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-6x"><header class="tsp-card-head"><span class="tsp-n">6</span><h3>Raised sheet, phone</h3><a class="tsp-open" href="_frame-6x.html" target="_blank" aria-label="Open Raised sheet, phone alone">↗</a></header><p class="tsp-why">Tabs move under the strip.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-6x.html" title="Raised sheet, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>7 · Hairline gutter (minimal)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Container:</strong> none. A hairline drops from the card and the log hangs off it. <strong>Skills:</strong> in the sentence and as "Skill" rows. <strong>Bill:</strong> just the cost, top right; the rest on hover. The smallest change that still fixes the bug.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-7"><header class="tsp-card-head"><span class="tsp-n">7</span><h3>Hairline gutter, desktop</h3><a class="tsp-open" href="_frame-7.html" target="_blank" aria-label="Open Hairline gutter, desktop alone">↗</a></header><p class="tsp-why">Nothing follows the last step, so nothing can pass for one.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-7.html" title="Hairline gutter, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-7x"><header class="tsp-card-head"><span class="tsp-n">7</span><h3>Hairline gutter, phone</h3><a class="tsp-open" href="_frame-7x.html" target="_blank" aria-label="Open Hairline gutter, phone alone">↗</a></header><p class="tsp-why">Phones lose hover, so the full bill needs a tap target. That&#x27;s the open question.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-7x.html" title="Hairline gutter, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+</main>
+<footer class="tsp-foot">turn-log-redesign · 2026-10-23T13:19</footer>
+<script>(() => {
+  const root = document.documentElement, KEY = 'tsp-theme';
+  const frames = [...document.querySelectorAll('iframe.tsp-frame')];
+
+  // Theme: one choice shared by every tsp page, applied to the designs only; the chrome stays light.
+  // Each frame gets data-theme, plus color-scheme inline with !important so it beats a design's own
+  // `color-scheme: light dark`, which would otherwise make light-dark() follow the OS.
+  const theme = (d, t) => {
+    d.documentElement.dataset.theme = t;
+    d.documentElement.style.setProperty('color-scheme', t, 'important');
+  };
+  const paint = t => {
+    root.dataset.designTheme = t;
+    for (const f of frames) try { theme(f.contentDocument, t) } catch {}
+  };
+  const toggle = document.querySelector('.tsp-theme');
+  if (toggle && !frames.length && !document.querySelector('[data-theme-only]')) toggle.hidden = true;
+  toggle?.addEventListener('click', () => {
+    const t = root.dataset.designTheme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(KEY, t);
+    paint(t);
+  });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+    if (!localStorage.getItem(KEY)) paint(e.matches ? 'dark' : 'light');
+  });
+
+  // Collapse / expand all sections.
+  const sections = [...document.querySelectorAll('details.tsp-section')];
+  const all = document.querySelector('[data-tsp=toggle-all]');
+  if (all && sections.length > 1) {
+    const label = () => { all.textContent = sections.some(s => s.open) ? 'Collapse all' : 'Expand all' };
+    all.hidden = false;
+    all.addEventListener('click', () => {
+      const open = !sections.some(s => s.open);
+      sections.forEach(s => { s.open = open });
+      label();
+    });
+    sections.forEach(s => s.addEventListener('toggle', label));
+    label();
+  }
+
+  // The home link only resolves when served under /tsp/ (not in committed copies).
+  const home = document.querySelector('.tsp-home');
+  if (home && location.pathname.startsWith('/tsp/') && location.pathname.split('/').filter(Boolean).length > 1) home.hidden = false;
+
+  // Frames: height follows content (or data-height); data-width designs scale down to fit.
+  const fit = f => {
+    const stage = f.parentElement, avail = stage.clientWidth;
+    if (!avail) return;
+    const w = +stage.dataset.width || 0;
+    let h = +stage.dataset.height || 0;
+    if (!h) {
+      try {
+        const b = f.contentDocument.body;
+        h = Math.min(Math.ceil(Math.max(b.scrollHeight, b.getBoundingClientRect().height)), 6000) || 240;
+      } catch { h = 480 }
+    }
+    const s = w && avail < w ? avail / w : 1;
+    f.style.width = w ? `${w}px` : '100%';
+    f.style.marginInline = w && s === 1 ? 'auto' : '0';
+    f.style.height = `${h}px`;
+    f.style.transform = s < 1 ? `scale(${s})` : '';
+    stage.style.height = `${Math.ceil(h * s) + 2}px`;
+  };
+  const stages = new ResizeObserver(es => es.forEach(e => fit(e.target.querySelector('iframe.tsp-frame'))));
+  for (const f of frames) {
+    stages.observe(f.parentElement);
+    const ready = () => {
+      try {
+        const d = f.contentDocument;
+        theme(d, root.dataset.designTheme);
+        new f.contentWindow.ResizeObserver(() => fit(f)).observe(d.body);
+      } catch {}
+      fit(f);
+    };
+    f.addEventListener('load', ready);
+    try { if (f.contentDocument?.readyState === 'complete' && f.contentDocument.URL !== 'about:blank') ready() } catch {}
+  }
+})();
+</script>
+</body></html>
