@@ -157,11 +157,15 @@ export const dragToDismiss: Action<HTMLElement, DragToDismissOptions> = (
 		dragging = false;
 		if (!touch) return;
 		// SheetChrome scrolls its body, while the drag action stays on the shell.
+		// Only real scrollers count: an overflow-hidden shell still reports the
+		// height of whatever its scrolling body holds.
 		scrollTargets = event
 			.composedPath()
 			.filter(
 				(target): target is HTMLElement =>
-					target instanceof HTMLElement && node.contains(target),
+					target instanceof HTMLElement &&
+					node.contains(target) &&
+					/auto|scroll/.test(getComputedStyle(target).overflowY),
 			);
 		startY = lastY = touch.clientY;
 		lastTime = event.timeStamp;

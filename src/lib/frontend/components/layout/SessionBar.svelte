@@ -395,10 +395,12 @@
 				event.preventDefault();
 				// Yield to an item that moved focus on purpose: the Terminal view
 				// focuses xterm once its lazily loaded tab mounts, which can land
-				// either side of this restore.
+				// either side of this restore. The phone sheet keeps focus while it
+				// glides away.
 				setTimeout(() => {
 					requestAnimationFrame(() => {
-						if (opener.isConnected && document.activeElement === document.body) opener.focus();
+						const active = document.activeElement;
+						if (!overflowOpen && opener.isConnected && (active === document.body || active?.closest("[data-dropdown-menu-content]"))) opener.focus();
 					});
 				}, 0);
 			}
@@ -712,7 +714,7 @@
 	{/if}
 
 	{#if sessionViewState.compact && !collapsed && goalShown}
-		<Popover bind:open={goalDetails.open} presentation="sheet" sheetEdge="top" modal initialFocus="content" labelledBy="goal-details-title" id="goal-details" data-testid="goal-details" portalTo="#session-bar" sheetBottomPadding={34} class="px-[20px] pt-[2px] whitespace-normal text-[12px]" sheetScrim={{ portalTo: goalSubtitleEl?.closest("#session-bar")?.parentElement ?? undefined, zIndex: "var(--z-dropdown)", testId: "goal-details-scrim" }}
+		<Popover bind:open={goalDetails.open} presentation="sheet" sheetEdge="top" modal initialFocus="content" labelledBy="goal-details-title" id="goal-details" data-testid="goal-details" portalTo="#session-bar" sheetBottomPadding={16} class="px-[20px] pt-[16px] whitespace-normal text-[12px]" sheetScrim={{ portalTo: goalSubtitleEl?.closest("#session-bar")?.parentElement ?? undefined, zIndex: "var(--z-dropdown)", testId: "goal-details-scrim" }}
 			onopenchange={(open) => { if (open) { goalFocusHandedOff = false; tasksPanel.open = false; sideThreadsPanel.open = false; } }}
 			onCloseAutoFocus={(event) => { if (goalFocusHandedOff) event.preventDefault(); goalFocusHandedOff = false; }}
 		>

@@ -251,8 +251,8 @@
 
 	<DropdownMenu.Portal {...portalProps}>
 		{#if presentation === "sheet"}
-			<div class={sheetEdge === "top" ? "pointer-events-none fixed inset-x-0 bottom-0 z-[var(--z-sheet)] overflow-hidden" : "contents"} style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} use:sheetPosition={sheetEdge}>
-			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="{sheetEdge === 'top' ? 'absolute' : 'fixed'} inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} class:pointer-events-auto={scrimInteractive} style={sheetScrimStyle(scrimFade)} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:exemptFromBackgroundInert></div>{/if}
+			<div class={sheetEdge === "top" ? "pointer-events-none fixed inset-x-0 z-[var(--z-sheet)] overflow-hidden" : "contents"} style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} use:sheetPosition={sheetEdge}>
+			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} class:pointer-events-none={!scrimInteractive} class:pointer-events-auto={scrimInteractive} style={sheetScrimStyle(scrimFade)} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:exemptFromBackgroundInert></div>{/if}
 			<DropdownMenu.ContentStatic {...sheetContentProps}>
 				{#snippet child({ props })}
 					<!-- Keep the bits-ui focus target on the menu shell. SheetChrome gives the
