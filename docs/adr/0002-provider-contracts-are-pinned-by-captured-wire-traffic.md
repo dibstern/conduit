@@ -59,3 +59,20 @@ Re-capture `extra-folder-read-turn.jsonl` with `pnpm build` then `RUN_EXPENSIVE_
   rule is the guard. Review a trace before committing it.
 - The corpus only covers behaviors we've captured. When a bug reveals a new
   wire behavior, capture it and commit the trace as part of the fix.
+
+## Addendum: local SDK behavior, 2026-10-23
+
+Skill loading is local filesystem behavior, so it has no wire traffic to capture.
+A differential against the real installed SDK is the equivalent contract pin.
+`test/e2e/provider/cursor-skills-real-sdk.test.ts` compares Conduit's discovery
+with the SDK's walker, parser and containment filter in isolated offline child
+processes. The in-memory module-load hook exposes the private getter without
+changing SDK files. A changed hook anchor fails the test on upgrade. The
+`managed-cache` row records the accepted difference: Conduit includes the
+on-disk managed cache while the SDK excludes it without successful sync.
+
+The offline Cursor upgrade contract also pins stored-login backend match and
+expiry against real SDK Authorization headers on loopback, and error mappings
+against real SDK error classes and codes. Conduit passes an explicit resolved
+key, so the SDK's key precedence is outside the credential contract. The
+empty-key row records Conduit's deliberate fall-through where the SDK throws.
