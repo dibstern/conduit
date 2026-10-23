@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/provider-instance.js";
@@ -10,6 +13,7 @@ import type {
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import { WorktreeServiceTag } from "../domain/daemon/Services/worktree-service.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
+import { publishAlert } from "../domain/relay/Services/alerts.js";
 import {
 	AgentLivenessTag,
 	BackgroundLivenessTag,
@@ -36,6 +40,52 @@ import {
 	sessionQuiescenceBlockReason,
 	type WorktreeCleanupGitCheck,
 } from "./worktree-cleanup-rules.js";
+
+export type WorktreeCleanupRetry = {
+	readonly snapshot: string;
+	readonly attempts: number;
+	readonly lastError: string;
+} & (
+	| { readonly _tag: "Retrying"; readonly nextAttemptAt: number }
+	| { readonly _tag: "GaveUp" }
+);
+
+const RETRY_DELAY_MS = 3_600_000;
+const MAX_ATTEMPTS = 5;
+
+// Observe ownership, refs, index and locks without Git or a working-tree scan.
+// File-content-only edits and external repairs can be retried with Clean up now.
+const checkoutRetrySnapshot = (path: string) =>
+	Effect.gen(function* () {
+		const read = (file: string) =>
+			Effect.tryPromise(() => readFile(file, "utf8")).pipe(
+				Effect.orElseSucceed(() => ""),
+			);
+		const pointer = yield* read(join(path, ".git"));
+		const gitDir = pointer.startsWith("gitdir: ")
+			? resolve(path, pointer.slice(8).trim())
+			: join(path, ".git");
+		const head = yield* read(join(gitDir, "HEAD"));
+		const common = yield* read(join(gitDir, "commondir"));
+		const commonDir = common.trim() ? resolve(gitDir, common.trim()) : gitDir;
+		const metadata = yield* Effect.forEach(
+			[
+				path,
+				gitDir,
+				join(gitDir, "HEAD"),
+				join(gitDir, "index"),
+				...(head.startsWith("ref: ")
+					? [join(commonDir, head.slice(5).trim())]
+					: []),
+			],
+			(file) =>
+				Effect.tryPromise(() => stat(file)).pipe(
+					Effect.map((value) => [value.ino, value.mtimeMs, value.ctimeMs]),
+					Effect.orElseSucceed(() => undefined),
+				),
+		);
+		return [head, common, metadata];
+	});
 
 /** Discovery only: no Git calls and no relay startup for an absent checkout. */
 export const readWorktreeCleanupPaths = Effect.gen(function* () {
@@ -76,10 +126,10 @@ export const cleanUpProjectWorktrees = (
 	getSetting: Effect.Effect<WorktreeCleanup | "off">,
 	getProjectFolders: Effect.Effect<readonly string[]>,
 	now: number,
+	retries: Map<string, WorktreeCleanupRetry> = new Map(),
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		const { projectId } = yield* PersistenceProjectTag;
 		const worktrees = yield* WorktreeServiceTag;
 		const workspace = yield* SessionWorkspaceTag;
 		const inbox = yield* SessionInboxTag;
@@ -96,6 +146,11 @@ export const cleanUpProjectWorktrees = (
 		const paths = (yield* readWorktreeCleanupPaths).filter(({ path }) =>
 			existsSync(path),
 		);
+		const present = new Set(
+			paths.map(({ session_id, path }) => JSON.stringify([session_id, path])),
+		);
+		for (const key of retries.keys())
+			if (!present.has(key)) retries.delete(key);
 		const sessionIds = new Set(paths.map(({ session_id }) => session_id));
 		const stateOf = (sessionId: string) =>
 			Effect.gen(function* () {
@@ -137,8 +192,31 @@ export const cleanUpProjectWorktrees = (
 				}
 				for (const checkout of owned.filter(({ path }) => existsSync(path))) {
 					const entry = { ...base, path: checkout.path };
+					const key = JSON.stringify([sessionId, checkout.path]);
+					const snapshot = JSON.stringify([
+						checkout,
+						initial,
+						setting,
+						yield* checkoutRetrySnapshot(checkout.path),
+					]);
+					if (retries.get(key)?.snapshot !== snapshot) retries.delete(key);
+					const retry = retries.get(key);
+					if (
+						retry?._tag === "GaveUp" ||
+						(retry?._tag === "Retrying" && now < retry.nextAttemptAt)
+					) {
+						report.kept.push({
+							...entry,
+							reason:
+								retry._tag === "GaveUp"
+									? `Cleanup stopped after ${retry.attempts} attempts: ${retry.lastError}. Use Clean up now to retry.`
+									: `Retry scheduled for ${new Date(retry.nextAttemptAt).toISOString()}`,
+						});
+						continue;
+					}
 					yield* Effect.gen(function* () {
 						const keep = (reason: string) => {
+							retries.delete(key);
 							report.kept.push({ ...entry, reason });
 						};
 						if (earlyReason) return keep(earlyReason);
@@ -286,6 +364,7 @@ export const cleanUpProjectWorktrees = (
 							),
 						);
 						if (keptReason) return keep(keptReason);
+						retries.delete(key);
 						report.removed.push({ ...entry, reason: decision.reason });
 						if (sessionGit._tag === "Some")
 							yield* sessionGit.value.refresh({ sessionId }).pipe(
@@ -304,18 +383,61 @@ export const cleanUpProjectWorktrees = (
 								}),
 							);
 					}).pipe(
-						Effect.catchCause((cause) => {
-							if (Failure.isInterruptedOnly(cause))
-								return Effect.failCause(cause);
-							report.failed.push({
-								...entry,
-								reason: `Cleanup failed: ${Failure.renderCause(cause).split("\n")[0]?.slice(0, 300) ?? "Unknown error"}`,
-							});
-							return Effect.logWarning("worktree cleanup failed for session", {
-								...entry,
-								cause: Failure.renderCause(cause),
-							});
-						}),
+						Effect.catchCause((cause) =>
+							Effect.gen(function* () {
+								if (Failure.isInterruptedOnly(cause))
+									return yield* Effect.failCause(cause);
+								const lastError =
+									Failure.renderCause(cause).split("\n")[0]?.slice(0, 300) ??
+									"Unknown error";
+								const attempts = (retry?.attempts ?? 0) + 1;
+								// Git may touch its metadata before failing. That must not reset
+								// this checkout's budget on the next sweep.
+								const failedSnapshot = JSON.stringify([
+									checkout,
+									initial,
+									setting,
+									yield* checkoutRetrySnapshot(checkout.path),
+								]);
+								retries.set(
+									key,
+									attempts >= MAX_ATTEMPTS
+										? {
+												_tag: "GaveUp",
+												snapshot: failedSnapshot,
+												attempts,
+												lastError,
+											}
+										: {
+												_tag: "Retrying",
+												snapshot: failedSnapshot,
+												attempts,
+												lastError,
+												nextAttemptAt:
+													now + RETRY_DELAY_MS * 2 ** (attempts - 1),
+											},
+								);
+								report.failed.push({
+									...entry,
+									reason: `Cleanup failed: ${lastError}`,
+								});
+								if (attempts >= MAX_ATTEMPTS)
+									yield* publishAlert({
+										_tag: "alert",
+										kind: "warning",
+										alertId: randomUUID(),
+										sessionId,
+										message: `Worktree cleanup stopped after ${attempts} attempts for ${checkout.path}: ${lastError}. Use Clean up now to retry.`,
+									});
+								yield* Effect.logWarning(
+									"worktree cleanup failed for session",
+									{
+										...entry,
+										cause: Failure.renderCause(cause),
+									},
+								);
+							}),
+						),
 					);
 				}
 			}).pipe(

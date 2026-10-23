@@ -12,6 +12,7 @@ import {
 	Fiber,
 	Layer,
 	ManagedRuntime,
+	PubSub,
 	Ref,
 	Stream,
 } from "effect";
@@ -26,7 +27,10 @@ import {
 	it,
 	vi,
 } from "vitest";
-import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
+import {
+	DEFAULT_WORKTREE_CLEANUP,
+	WorktreeRecoveryError,
+} from "../../../src/lib/contracts/worktree.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	countRunningProjectSessions,
@@ -44,7 +48,10 @@ import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Servi
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { SessionGitLive } from "../../../src/lib/domain/relay/Layers/session-git-layer.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
+import {
+	AlertsLive,
+	AlertsTag,
+} from "../../../src/lib/domain/relay/Services/alerts.js";
 import { makeContinuation } from "../../../src/lib/domain/relay/Services/continuation.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import {
@@ -124,6 +131,7 @@ import { settleIdleSessions } from "../../../src/lib/session/auto-settle-sweep.j
 import {
 	cleanUpProjectWorktrees,
 	readWorktreeCleanupPaths,
+	type WorktreeCleanupRetry,
 } from "../../../src/lib/session/worktree-cleanup-sweep.js";
 import { projectManifest } from "../../helpers/daemon-store-import-manifest.js";
 import {
@@ -798,11 +806,46 @@ describe("shared-store relay project scope", () => {
 		);
 	});
 
-	it("worktree cleanup removes only A's eligible checkout", async () => {
+	// Failures: retries run early, never stop, alert repeatedly, leak between
+	// projects, survive manual/state resets, or a stale PTY cwd permits removal.
+	it.each([
+		"success",
+		"retries",
+		"stale-terminal",
+		"contained-stale-terminal",
+	] as const)("worktree cleanup: %s", async (scenario) => {
 		for (const project of [A, B])
 			mkdirSync(join(store.root, `${project}-launch`));
+		const gitDir = join(store.root, "alpha-git");
+		if (scenario === "retries") {
+			mkdirSync(join(gitDir, "refs", "heads"), { recursive: true });
+			writeFileSync(
+				join(store.root, `${A}-launch`, ".git"),
+				`gitdir: ${gitDir}\n`,
+			);
+			writeFileSync(join(gitDir, "HEAD"), "ref: refs/heads/main\n");
+			writeFileSync(join(gitDir, "refs", "heads", "main"), "original\n");
+			writeFileSync(join(gitDir, "index"), "index\n");
+			writeFileSync(join(gitDir, "locked"), "locked\n");
+		}
 		const before = daemonStoreManifest(store.filename);
 		const removed: string[] = [];
+		const inspect = vi.fn(() => {
+			if (scenario === "retries") {
+				// A failed Git command can create and remove temporary metadata.
+				writeFileSync(join(gitDir, "temporary"), "attempt\n");
+				rmSync(join(gitDir, "temporary"));
+			}
+			return scenario === "retries"
+				? Effect.fail(
+						new WorktreeRecoveryError({
+							reason: "git-failed",
+							path: store.root,
+							message: "locked checkout",
+						}),
+					)
+				: Effect.succeed({ head: "launch-head" });
+		});
 		const unused = () => Effect.die("Unexpected cleanup service call");
 		const worktrees: WorktreeServiceTag["Service"] = {
 			withCheckoutUse: (effect) => effect,
@@ -816,7 +859,7 @@ describe("shared-store relay project scope", () => {
 			recreateAll: unused,
 			create: unused,
 			rollback: unused,
-			inspectCheckoutCleanup: () => Effect.succeed({ head: "launch-head" }),
+			inspectCheckoutCleanup: inspect,
 			removeCheckout: (folder) =>
 				Effect.sync(() => {
 					removed.push(folder.sessionId);
@@ -844,11 +887,32 @@ describe("shared-store relay project scope", () => {
 			start: Effect.void,
 		};
 		const localPty: LocalPtyServiceTag["Service"] = {
-			list: () => Effect.succeed([]),
+			list: () =>
+				Effect.succeed(
+					scenario.includes("stale-terminal")
+						? [
+								{
+									id: "stale",
+									title: "stale",
+									command: "sh",
+									pid: 123,
+									status: "running" as const,
+									cwd: join(
+										store.root,
+										scenario === "contained-stale-terminal"
+											? `${A}-launch`
+											: "unrelated",
+										"removed",
+									),
+								},
+							]
+						: [],
+				),
 			attach: unused,
 			create: unused,
 		};
-		await store.runtime.runPromise(
+		const retries = new Map<string, WorktreeCleanupRetry>();
+		const sweep = (now: number) =>
 			cleanUpProjectWorktrees(
 				Effect.succeed({
 					...DEFAULT_WORKTREE_CLEANUP,
@@ -856,8 +920,68 @@ describe("shared-store relay project scope", () => {
 					settledAfterDays: 0,
 				}),
 				Effect.succeed([]),
-				NOW,
+				now,
+				retries,
+			);
+		await store.runtime.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const alerts = yield* AlertsTag;
+					const subscription = yield* PubSub.subscribe(alerts);
+					const first = yield* sweep(NOW);
+					if (scenario === "retries") {
+						expect(first.failed).toHaveLength(1);
+						const hour = 3_600_000;
+						for (let attempt = 1; attempt < 5; attempt++) {
+							const due = NOW + (2 ** attempt - 1) * hour;
+							expect((yield* sweep(due - 1)).kept[0]?.reason).toContain(
+								"Retry",
+							);
+							expect(inspect).toHaveBeenCalledTimes(attempt);
+							yield* sweep(due);
+							expect(inspect).toHaveBeenCalledTimes(attempt + 1);
+						}
+						for (let i = 0; i < 3; i++) yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(5);
+						const delivered = yield* PubSub.takeUpTo(subscription, 100);
+						expect(delivered).toHaveLength(1);
+						expect(delivered[0]).toMatchObject({
+							kind: "warning",
+							sessionId: id(A, "worktree"),
+						});
+						expect(delivered[0]?.message).toContain("locked checkout");
+						// A symbolic HEAD's target can move without changing HEAD or index.
+						writeFileSync(join(gitDir, "refs", "heads", "main"), "changed\n");
+						yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(6);
+						yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(6);
+						const sql = yield* SqlClient.SqlClient;
+						yield* sql`UPDATE sessions SET settled_at = ${NOW} WHERE id = ${id(A, "worktree")}`;
+						yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(7);
+						rmSync(join(gitDir, "locked"));
+						yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(8);
+						mkdirSync(join(store.root, `${A}-launch`, "changed"));
+						yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(9);
+						inspect.mockImplementationOnce(() =>
+							Effect.succeed({ head: "fixed" }),
+						);
+						expect((yield* sweep(NOW + 101 * hour)).removed).toHaveLength(1);
+						expect(retries.size).toBe(0);
+						expect(yield* PubSub.takeUpTo(subscription, 100)).toEqual([]);
+					} else if (scenario.includes("stale-terminal")) {
+						expect(first.failed[0]?.reason).toContain("WorkspaceMoveError");
+						expect((yield* sweep(NOW)).kept[0]?.reason).toContain("Retry");
+						expect(removed).toEqual([]);
+					} else {
+						expect(first.failed).toEqual([]);
+					}
+				}),
 			).pipe(
+				Effect.provide(AlertsLive),
 				Effect.provideService(ConfigTag, config()),
 				Effect.provideService(WorktreeServiceTag, worktrees),
 				Effect.provideService(SessionWorkspaceTag, workspace),
@@ -872,12 +996,13 @@ describe("shared-store relay project scope", () => {
 				Effect.provideService(AgentLivenessTag, () => Effect.succeed(false)),
 			),
 		);
-		record(
-			"worktree-cleanup",
-			before,
-			removed.filter((session) => session === id(A, "worktree")).length,
-			removed.filter((session) => session.startsWith(`${B}-`)).length,
-		);
+		if (scenario === "success")
+			record(
+				"worktree-cleanup",
+				before,
+				removed.filter((session) => session === id(A, "worktree")).length,
+				removed.filter((session) => session.startsWith(`${B}-`)).length,
+			);
 	});
 
 	it("session pick backfill completes only A's candidate", async () => {
