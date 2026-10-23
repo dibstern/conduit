@@ -6,7 +6,11 @@ import {
 	makeOpenCodeInstancesLive,
 	type OpenCodeEndpoint,
 } from "../../../src/lib/domain/daemon/Layers/opencode-instances-layer.js";
-import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	OpenCodeControlTarget,
+	OpenCodeInstancesTag,
+} from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { openCodePromptProcessId } from "../../../src/lib/provider/opencode-process-identity.js";
 
 // Failure cases: concurrent first uses spawning twice, a joiner getting a
 // client before the spawn finished, and a failed start being cached so every
@@ -17,6 +21,7 @@ describe("OpenCode Instances shared start", () => {
 	let url: string;
 	let endpoint: OpenCodeEndpoint;
 	let starts: number;
+	let replies: number;
 	let health: { status: number; body: string };
 	let holdHealth: boolean;
 	let healthRequested: Deferred.Deferred<ServerResponse>;
@@ -47,6 +52,12 @@ describe("OpenCode Instances shared start", () => {
 				authorization: req.headers.authorization,
 				directoryHeader: req.headers["x-opencode-directory"],
 			});
+			if (req.url?.includes("/permissions/") && req.method === "POST") {
+				replies++;
+				res.writeHead(200, { "content-type": "application/json" });
+				res.end("true");
+				return;
+			}
 			if (req.url?.startsWith("/global/event")) {
 				streams.push(res);
 				const closed = Deferred.makeUnsafe<void>();
@@ -86,6 +97,7 @@ describe("OpenCode Instances shared start", () => {
 		url = `http://127.0.0.1:${address.port}`;
 		endpoint = { url, status: "stopped", managed: true };
 		starts = 0;
+		replies = 0;
 	});
 
 	afterEach(async () => {
@@ -106,6 +118,10 @@ describe("OpenCode Instances shared start", () => {
 				null,
 				2,
 			),
+		);
+		writeFileSync(
+			"/tmp/82tn27-2-opencode-selection.json",
+			JSON.stringify(results, null, 2),
 		);
 	});
 
@@ -135,6 +151,68 @@ describe("OpenCode Instances shared start", () => {
 		Effect.map(({ cwd }) => cwd),
 		Effect.result,
 	);
+
+	for (const acquisition of ["use", "borrow"] as const) {
+		for (const state of ["stopped", "replacement", "matching"] as const) {
+			it(`${acquisition} delivers controls only to the matching process: ${state}`, async () => {
+				endpoint = {
+					...endpoint,
+					status: state === "stopped" ? "stopped" : "healthy",
+					processIdentity: state === "replacement" ? "replacement" : "original",
+				};
+				const outcome = await Effect.runPromise(
+					Effect.gen(function* () {
+						const owner = yield* OpenCodeInstancesTag;
+						const client = yield* owner[acquisition]("opencode");
+						yield* Effect.tryPromise(() =>
+							client.permission.reply("session-1", "perm-1", "once"),
+						);
+					}).pipe(
+						Effect.scoped,
+						Effect.provideService(
+							OpenCodeControlTarget,
+							openCodePromptProcessId("opencode", "original"),
+						),
+						Effect.result,
+						Effect.provide(instances()),
+					),
+				);
+				const result = {
+					scenario: `fenced-${acquisition}-${state}`,
+					starts,
+					replies,
+					failure: Either.isFailure(outcome) ? outcome.failure : undefined,
+				};
+				results.push(result);
+				expect(result).toMatchObject({
+					starts: 0,
+					replies: state === "matching" ? 1 : 0,
+					failure:
+						state === "matching"
+							? undefined
+							: { reason: "not-running", code: "provider_process_gone" },
+				});
+			});
+		}
+	}
+
+	it("marks only clients with managed process identity safe for restart replay", async () => {
+		endpoint = { ...endpoint, status: "healthy", processIdentity: "original" };
+		const clients = await Effect.runPromise(
+			Effect.gen(function* () {
+				const owner = yield* OpenCodeInstancesTag;
+				const managed = yield* owner.use("opencode");
+				endpoint = { url, status: "healthy", managed: false };
+				const external = yield* owner.use("opencode");
+				return {
+					managed: managed.controlReplaySafe,
+					external: external.controlReplaySafe,
+				};
+			}).pipe(Effect.scoped, Effect.provide(instances())),
+		);
+		results.push({ scenario: "restart-replay-identity", ...clients });
+		expect(clients).toEqual({ managed: true, external: false });
+	});
 
 	it("checks authenticated global health, waits for the stream and returns a directory client", async () => {
 		connectStream = false;

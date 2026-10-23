@@ -73,6 +73,7 @@ export interface OpenCodeAPIOptions {
 	authHeaders: Record<string, string>;
 	processIdentity?: string | undefined;
 	promptProcessId?: string | undefined;
+	controlReplaySafe?: boolean | undefined;
 }
 
 /**
@@ -85,6 +86,7 @@ export interface OpenCodeAPIOptions {
 export class OpenCodeAPI {
 	readonly processIdentity: string;
 	readonly promptProcessId: string | undefined;
+	readonly controlReplaySafe: boolean;
 	private readonly client: OpencodeClient;
 	private readonly _baseUrl: string;
 	private readonly _authHeaders: Record<string, string>;
@@ -103,6 +105,7 @@ export class OpenCodeAPI {
 	constructor(options: OpenCodeAPIOptions) {
 		this.processIdentity = options.processIdentity ?? options.baseUrl;
 		this.promptProcessId = options.promptProcessId;
+		this.controlReplaySafe = options.controlReplaySafe ?? false;
 		this.client = options.sdk;
 		this._baseUrl = options.baseUrl;
 		this._authHeaders = options.authHeaders;
@@ -159,13 +162,17 @@ export class OpenCodeAPI {
 		fn: () => Promise<{
 			data?: unknown;
 			error?: unknown;
-			response?: { status: number; url?: string } | undefined;
+			response?:
+				| { status: number; url?: string; headers?: Pick<Headers, "get"> }
+				| undefined;
 		}>,
 	): Promise<T> {
 		let result: {
 			data?: unknown;
 			error?: unknown;
-			response?: { status: number; url?: string } | undefined;
+			response?:
+				| { status: number; url?: string; headers?: Pick<Headers, "get"> }
+				| undefined;
 		};
 
 		try {
@@ -201,11 +208,13 @@ export class OpenCodeAPI {
 				result.response && "url" in result.response
 					? String(result.response.url)
 					: label;
+			const retryAfter = result.response.headers?.get("retry-after");
 			throw new OpenCodeApiError({
 				message: `API error during ${label}`,
 				endpoint: url,
 				responseStatus: status,
 				responseBody: result.error,
+				...(retryAfter ? { retryAfter } : {}),
 			});
 		}
 
@@ -547,13 +556,24 @@ class PermissionNamespace {
 		sessionId: string,
 		permissionId: string,
 		response: "once" | "always" | "reject",
+		directory?: string,
 	): Promise<void> {
-		await this.api.sdk("permission.reply", decodeOpenCodeBooleanResponse, () =>
-			this.api._sdk.permission.respond({
-				sessionID: sessionId,
-				permissionID: permissionId,
-				response,
-			}),
+		await this.api.sdk(
+			"permission.reply",
+			decodeOpenCodeBooleanResponse,
+			() => {
+				const request = {
+					sessionID: sessionId,
+					permissionID: permissionId,
+					response,
+					...(directory === undefined ? {} : { directory }),
+				};
+				return directory === undefined
+					? this.api._sdk.permission.respond(request)
+					: this.api._sdk.permission.respond(request, {
+							headers: { "x-opencode-directory": null },
+						});
+			},
 		);
 	}
 }

@@ -71,7 +71,6 @@ it("rejects pending intake when the accepted native query ends before starting i
 	const replies: string[] = [];
 	let firstResultConsumed = false;
 	const instance = makeTestClaudeProviderInstance({
-		workspaceRoot: workspace,
 		queryFactory: ({ prompt }) => {
 			if (typeof prompt === "string")
 				throw new Error("Expected streaming input");
@@ -133,7 +132,6 @@ it("preserves the native failure for an unstarted steer after an accepted input 
 	let queued = false;
 	const sink = createMockEventSink();
 	const instance = makeTestClaudeProviderInstance({
-		workspaceRoot: workspace,
 		persistUserMessage: (_sessionId, _text, options) =>
 			Effect.sync(() => {
 				if (options?.inputId) placed.push(options.inputId);
@@ -211,7 +209,6 @@ it("keeps queued intake pending when the prior accepted result omits input uuids
 	let firstResultConsumed = false;
 	const sink = createMockEventSink();
 	const instance = makeTestClaudeProviderInstance({
-		workspaceRoot: workspace,
 		persistUserMessage: (_sessionId, _text, options) =>
 			Effect.sync(() => {
 				if (options?.inputId) placed.push(options.inputId);
@@ -303,7 +300,6 @@ it("keeps queued intake pending when the prior accepted result omits input uuids
 
 it("acknowledges two accepted inputs and streams their shared result once", async () => {
 	const instance = makeTestClaudeProviderInstance({
-		workspaceRoot: workspace,
 		queryFactory: ({ prompt }) => {
 			if (typeof prompt === "string")
 				throw new Error("Expected streaming input");

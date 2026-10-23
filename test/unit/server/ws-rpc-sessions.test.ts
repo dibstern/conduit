@@ -1096,6 +1096,11 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("responds to a permission request for the originating tab", () => {
 		const api = makeMockOpenCodeAPI();
+		const dispatchEffect = vi.fn(() => Effect.void);
+		const orchestrationEngine = withDispatchEffect({
+			dispatchEffect,
+			getProviderForSessionEffect: () => Effect.succeed("opencode"),
+		});
 		const resolvePermissionEffect = vi.fn(() => Effect.void);
 		const providerRegistry = new ProviderRegistry();
 		providerRegistry.registerInstance({
@@ -1125,18 +1130,26 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(resolvePermissionEffect).toHaveBeenCalledWith(
-				"session-1",
-				"per-1",
-				"once",
-				undefined,
-			);
+			expect(dispatchEffect).toHaveBeenCalledWith({
+				type: "resolve_permission",
+				commandId: "cmd-respond-permission",
+				sessionId: "session-1",
+				requestId: "per-1",
+				decision: "once",
+				response: { decision: "once" },
+			});
+			expect(resolvePermissionEffect).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
 					Layer.provideMerge(
-						makeTestHandlerLayer({ api, wsHandler, providerRegistry }),
+						makeTestHandlerLayer({
+							api,
+							wsHandler,
+							providerRegistry,
+							orchestrationEngine,
+						}),
 					),
 				),
 				{ local: true },
@@ -1146,6 +1159,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("answers an ask-user question for the originating tab", () => {
 		const api = makeMockOpenCodeAPI();
+		const dispatchEffect = vi.fn(() => Effect.void);
+		const orchestrationEngine = withDispatchEffect({ dispatchEffect });
 		const config = makeMockConfig({ projectDir: "/project" });
 		const wsHandler = makeMockWebSocketHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -1178,16 +1193,26 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(api.question.reply).toHaveBeenCalledWith(
-				"que-1",
-				[["PostgreSQL"]],
-				"/project-worktree",
-			);
+			expect(dispatchEffect).toHaveBeenCalledWith({
+				type: "resolve_question",
+				commandId: "cmd-answer-question",
+				sessionId: "session-1",
+				requestId: "que-1",
+				answers: { "0": "PostgreSQL" },
+			});
+			expect(api.question.reply).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ api, config, wsHandler })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							api,
+							config,
+							wsHandler,
+							orchestrationEngine,
+						}),
+					),
 				),
 				{ local: true },
 			),
@@ -1196,6 +1221,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 
 	it.effect("rejects an ask-user question for the originating tab", () => {
 		const api = makeMockOpenCodeAPI();
+		const dispatchEffect = vi.fn(() => Effect.void);
+		const orchestrationEngine = withDispatchEffect({ dispatchEffect });
 		const config = makeMockConfig({ projectDir: "/project" });
 		const wsHandler = makeMockWebSocketHandler({
 			getClientSession: vi.fn(() => "session-1"),
@@ -1227,15 +1254,27 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(api.question.reject).toHaveBeenCalledWith(
-				"que-1",
-				"/project-worktree",
-			);
+			expect(dispatchEffect).toHaveBeenCalledWith({
+				type: "resolve_question",
+				commandId: "cmd-reject-question",
+				sessionId: "session-1",
+				requestId: "que-1",
+				answers: {},
+				operation: "reject",
+			});
+			expect(api.question.reject).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
 				WsRpcServerLayer.pipe(
-					Layer.provideMerge(makeTestHandlerLayer({ api, config, wsHandler })),
+					Layer.provideMerge(
+						makeTestHandlerLayer({
+							api,
+							config,
+							wsHandler,
+							orchestrationEngine,
+						}),
+					),
 				),
 				{ local: true },
 			),

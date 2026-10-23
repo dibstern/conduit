@@ -87,6 +87,7 @@ export const reloadProviderSessionForClient = (
 									providerId: account.id,
 									account,
 									workspaceRoot,
+									sessionId: input.sessionId,
 									refresh: true,
 								},
 								{

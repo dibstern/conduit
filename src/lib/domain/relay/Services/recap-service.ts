@@ -21,16 +21,13 @@ import type {
 	RecapSnapshot,
 	TurnRecap,
 } from "../../../contracts/turn-recap.js";
-import {
-	loadDaemonConfigResult,
-	resolveClaudeLaunchConfig,
-} from "../../../daemon/config-persistence.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { mapToolName } from "../../../relay/event-translator.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { numberTurnMessages } from "../../../turn-message-numbers.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { CategorySet } from "../../daemon/Services/category-set.js";
 import {
 	type ClaudeOneShotQueryFactory,
@@ -92,6 +89,7 @@ export const makeRecapServiceLive = (
 			const settings = yield* MessageSurfacingSettings;
 			const categories = yield* CategorySet;
 			const config = yield* ConfigTag;
+			const accounts = yield* AccountDirectory;
 			const log = yield* LoggerTag;
 			const bus = yield* SessionEventBusTag;
 			const scope = yield* Effect.scope;
@@ -277,9 +275,15 @@ export const makeRecapServiceLive = (
 				schema: Schema.Codec<A, I>,
 			) =>
 				Effect.gen(function* () {
-					const daemonConfig = yield* Effect.suspend(() =>
-						Effect.fromResult(loadDaemonConfigResult(config.configDir)),
-					).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
+					const account = yield* accounts.resolve({
+						_tag: "DriverDefault",
+						driver: "claude",
+					});
+					const configDir = "folder" in account ? account.folder : undefined;
+					if (configDir === undefined)
+						return yield* new RecapFailure({
+							message: "Claude account unavailable",
+						});
 					const workspace =
 						workspaceJson === null
 							? null
@@ -287,7 +291,7 @@ export const makeRecapServiceLive = (
 									Schema.fromJsonString(SessionWorkspaceSchema),
 								)(workspaceJson);
 					return yield* makeClaudeOneShot({
-						...resolveClaudeLaunchConfig(daemonConfig),
+						configDir,
 						cwd: effectiveWorkingDirectory(config.projectDir, workspace),
 						systemPrompt:
 							"You write short, factual summaries of coding-assistant turns with numbered citations.",

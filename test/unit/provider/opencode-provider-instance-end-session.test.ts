@@ -44,7 +44,9 @@ describe("OpenCodeProviderInstance.endSessionEffect()", () => {
 
 	beforeEach(() => {
 		client = makeStubClient();
-		instance = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({
+			clientForSession: () => Effect.succeed(client),
+		});
 	});
 
 	it("leaves provider-owned sessions running", async () => {

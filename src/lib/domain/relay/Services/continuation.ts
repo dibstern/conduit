@@ -32,7 +32,6 @@ import {
 	SessionBusy,
 	StaleSwitch,
 } from "../../../contracts/limit-recovery.js";
-import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { preWarmSession } from "../../../handlers/session-prewarm.js";
 import {
 	type CommitAndSignalFailure,
@@ -58,7 +57,11 @@ import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
 } from "./provider-turn-service.js";
-import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
+import {
+	type ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+} from "./services.js";
 import { applySessionCommand } from "./session-command.js";
 import { SessionInboxTag } from "./session-inbox.js";
 import {
@@ -671,13 +674,17 @@ export const makeContinuation = Effect.gen(function* () {
 								yield* Effect.sync(() =>
 									engine.bindSession(sessionId, account.id),
 								);
-								yield* engine.dispatchEffect({
-									type: "end_session",
-									commandId: randomUUID(),
-									sessionId,
-									targetProviderId: continued.previousInstanceId,
-									account: source,
-								});
+								// Same-driver account switches rebind on the next send. The
+								// process adapter negotiates query reuse with the live runner;
+								// older runners still drain and restart at that boundary.
+								if (source.driver !== account.driver)
+									yield* engine.dispatchEffect({
+										type: "end_session",
+										commandId: randomUUID(),
+										sessionId,
+										targetProviderId: continued.previousInstanceId,
+										account: source,
+									});
 								yield* preWarmSession(sessionId, account).pipe(
 									Effect.catch((error) =>
 										Effect.flatMap(LoggerTag, (log) =>
@@ -771,13 +778,7 @@ export const makeContinuation = Effect.gen(function* () {
 	const sweepDueContinuations: Continuation["sweepDueContinuations"] = (now) =>
 		Effect.gen(function* () {
 			const currentTime = now ?? (yield* Clock.currentTimeMillis) / 1000;
-			const autoResume =
-				(yield* readUsageLimits.pipe(
-					Effect.catchTags({
-						Invalid: () => Effect.succeed(undefined),
-						Unreadable: () => Effect.succeed(undefined),
-					}),
-				))?.autoResume ?? false;
+			const autoResume = (yield* readUsageLimits)?.autoResume ?? false;
 			const rows = yield* sql<{
 				id: string;
 				limit_recovery: string;
@@ -815,13 +816,7 @@ export const makeContinuation = Effect.gen(function* () {
 		const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
 		if (configRef._tag === "Some")
 			return (yield* Ref.get(configRef.value)).usageLimits;
-		const config = yield* ConfigTag;
-		return yield* Effect.suspend(() =>
-			Effect.fromResult(loadDaemonConfigResult(config.configDir)),
-		).pipe(
-			Effect.map((loaded) => loaded.usageLimits),
-			Effect.catchTag("NotFound", () => Effect.succeed(undefined)),
-		);
+		return undefined;
 	});
 	const tryAutoSwitch = (sessionId: string) =>
 		Effect.gen(function* () {

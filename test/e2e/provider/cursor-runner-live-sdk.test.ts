@@ -257,7 +257,7 @@ async function recordModelSelections(scenario: "parameter-change" | "reroute") {
 			scenario: `cursor-${scenario}-live-smoke`,
 			model: { id: modelId },
 		});
-		const driver = makeCursorRunnerDriver(workspaceRoot, port);
+		const driver = makeCursorRunnerDriver(port);
 		const paramsSchema = Schema.Struct({
 			params: Schema.Array(
 				Schema.Struct({ id: Schema.String, value: Schema.String }),

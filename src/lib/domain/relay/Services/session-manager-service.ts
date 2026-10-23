@@ -126,6 +126,7 @@ import {
 	unsnoozeSession,
 } from "./session-manager-triage.js";
 import {
+	clearSession,
 	getDefaultPermissionMode,
 	OverridesStateTag,
 	setContextWindow,
@@ -450,6 +451,29 @@ export const deleteSession = (
 				"provider_route: no provider route could be determined, so cleanup was skipped",
 			);
 		}
+		// Deletion projects its tombstone before provider cleanup runs. Resolve
+		// ownership while the row still exists, including drafts with no turn outbox.
+		const capturedCallExit =
+			engineOption._tag === "Some" && account !== undefined
+				? yield* Effect.exit(
+						engineOption.value.resolveSessionCallContextEffect(
+							sessionId,
+							account,
+							{
+								includeSettledForProviderId: account.id,
+								providerId: account.id,
+							},
+						),
+					)
+				: undefined;
+		const capturedCall =
+			capturedCallExit && Exit.isSuccess(capturedCallExit)
+				? capturedCallExit.value
+				: undefined;
+		if (capturedCallExit && Exit.isFailure(capturedCallExit))
+			cleanupFailures.push(
+				`call_context: ${renderProviderCleanupDetail(Failure.squashCause(capturedCallExit.cause))}`,
+			);
 
 		const providerCleanup = (command: SessionCommand) =>
 			Effect.gen(function* () {
@@ -471,6 +495,8 @@ export const deleteSession = (
 								commandId: randomUUID(),
 								sessionId,
 								targetProviderId: capturedInstanceId,
+								...(capturedCall ? { call: capturedCall } : {}),
+								...(account ? { account } : {}),
 								unbind: true,
 							}),
 						),
@@ -599,6 +625,11 @@ export const deleteSession = (
 			),
 		);
 		if (!applied) return false;
+		const overrides = yield* Effect.serviceOption(OverridesStateTag);
+		if (overrides._tag === "Some")
+			yield* Effect.forEach(deleted, (id) => clearSession(id), {
+				discard: true,
+			}).pipe(Effect.provideService(OverridesStateTag, overrides.value));
 
 		// The delete took the whole lineage, so the cache must forget the whole
 		// lineage: an edge naming a session that no longer exists would put a
@@ -1276,6 +1307,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 								Effect.provideService(SqlClient.SqlClient, sql),
 								Effect.provideService(InputDraftsTag, drafts),
 								Effect.provideService(ConfigTag, config),
+								Effect.provideService(OverridesStateTag, overrides),
 								Effect.provideService(SessionWorkspaceTag, workspace),
 								Effect.provideService(LoggerTag, log),
 								Effect.provideService(RelayStatusSnapshotTag, snapshot),
@@ -1333,15 +1365,17 @@ export const SessionManagerServiceLive: Layer.Layer<
 								}),
 						),
 					);
-				return workspace.withProjectLaunch(
-					Option.isSome(retentionScheduler)
-						? Effect.provideService(
-								sweep,
-								EventRetentionSchedulerTag,
-								retentionScheduler.value,
-							)
-						: sweep,
-				);
+				return workspace
+					.withProjectLaunch(
+						Option.isSome(retentionScheduler)
+							? Effect.provideService(
+									sweep,
+									EventRetentionSchedulerTag,
+									retentionScheduler.value,
+								)
+							: sweep,
+					)
+					.pipe(Effect.provideService(ConfigTag, config));
 			},
 			renameSession: (sessionId, title) =>
 				withSessionCommandServices(renameSession(sessionId, title)),

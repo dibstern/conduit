@@ -9,9 +9,11 @@ const source = (path: string) => readFileSync(join(REPO_ROOT, path), "utf8");
 
 describe("Claude provider runtime boundary", () => {
 	it("wires the persisted override getter into the scoped constructor", () => {
-		const wiring = source("src/lib/provider/orchestration-wiring.ts");
+		const wiring = source(
+			"src/lib/domain/daemon/Layers/provider-adapters-layer.ts",
+		);
 		const getters = wiring.match(
-			/claudeSettingsOverrides: \(\) =>\s*loadRelaySettings\(options\.configDir\)\.claudeSettings/g,
+			/claudeSettingsOverrides: \(\) =>\s*loadRelaySettings\(configDir\)\.claudeSettings/g,
 		);
 
 		expect(getters).toHaveLength(1);

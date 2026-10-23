@@ -131,6 +131,7 @@ describe("Bound project provenance", () => {
 			"0078_provider_run_ownership",
 			"0079_sessions_goal_stuck",
 			"0080_sessions_jev",
+			"0081_provider_control_process",
 		]);
 	});
 

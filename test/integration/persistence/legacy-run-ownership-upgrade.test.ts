@@ -17,12 +17,18 @@ import {
 	SessionInboxLive,
 	SessionInboxTag,
 } from "../../../src/lib/domain/relay/Services/session-inbox.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	effectMigrationEntries,
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
-import { createEventId } from "../../../src/lib/persistence/events.js";
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+	createEventId,
+} from "../../../src/lib/persistence/events.js";
 import {
 	runnerFailure,
 	runnerSinkId,
@@ -323,3 +329,360 @@ it.each([
 		);
 	}
 }, 30_000);
+
+// Failure modes: a later provider result appends a second terminal after a
+// refusal, two terminals share one unprojected batch, or a joined reservation
+// bypasses its effective owner's terminal. Racing writers must share the winner.
+it.each([
+	{ delivery: "separate", joined: false, aliasFirst: false },
+	{ delivery: "separate", joined: true, aliasFirst: false },
+	{ delivery: "batch", joined: false, aliasFirst: false },
+	{ delivery: "batch", joined: true, aliasFirst: false },
+	{ delivery: "concurrent", joined: false, aliasFirst: false },
+	{ delivery: "concurrent", joined: true, aliasFirst: false },
+	{ delivery: "batch", joined: true, aliasFirst: true },
+	{ delivery: "separate", joined: true, aliasFirst: true },
+	{ delivery: "separate", joined: false, aliasFirst: true },
+	{ delivery: "cleanup", joined: true, aliasFirst: true },
+] as const)("persists only one owned terminal with $delivery delivery, joined $joined, alias first $aliasFirst", async ({
+	delivery,
+	joined,
+	aliasFirst,
+}) => {
+	const root = mkdtempSync(join(tmpdir(), "run-terminal-once-"));
+	const runtime = ManagedRuntime.make(
+		makePersistenceEffectLayer(join(root, "events.db"), "test-project"),
+	);
+	const proof: Record<string, unknown> = {
+		delivery,
+		joined,
+		aliasFirst,
+		outcome: "failed",
+	};
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const commit = yield* makeCommitAndSignal;
+				const sql = yield* SqlClient.SqlClient;
+				yield* commit([
+					canonicalEvent("session.created", "session", {
+						sessionId: "session",
+						title: "Owned terminal",
+						provider: "claude",
+					}),
+					canonicalEvent("run.requested", "session", {
+						runId: "run",
+						inputId: "input",
+					}),
+					...(joined
+						? [
+								canonicalEvent("run.requested", "session", {
+									runId: "reservation",
+									inputId: "input",
+								}),
+							]
+						: []),
+				]);
+				yield* persist.persistUserMessage("session", "Original prompt", {
+					inputId: "input",
+					messageId: "input",
+					runId: "run",
+				});
+				yield* persist.persistEvent(
+					canonicalEvent(
+						"run.started",
+						"session",
+						{
+							inputId: "input",
+							requestedRunId: joined ? "reservation" : "run",
+						},
+						{ provider: "claude", metadata: { runId: "run" } },
+					),
+				);
+				const first = canonicalEvent(
+					"turn.error",
+					"session",
+					{
+						messageId: "input",
+						error: "Project was removed",
+						code: "project_inactive",
+						retryable: false,
+					},
+					{
+						provider: "claude",
+						metadata: { runId: aliasFirst ? "reservation" : "run" },
+					},
+				);
+				const later = canonicalEvent(
+					"turn.completed",
+					"session",
+					{
+						messageId: "",
+						userMessageId: "input",
+						providerCostTotalUsd: 99,
+						tokens: { input: 99, output: 99 },
+					},
+					{
+						provider: "claude",
+						metadata: { runId: joined && !aliasFirst ? "reservation" : "run" },
+					},
+				);
+				if (delivery === "cleanup") {
+					for (let attempt = 0; attempt < 2; attempt++)
+						yield* persist.persistUserMessage("session", "Original prompt", {
+							inputId: "input",
+							messageId: "input",
+							runId: "reservation",
+							failure: {
+								message: "Project was removed",
+								code: "project_inactive",
+							},
+						});
+					yield* persist.persistEvent(later);
+				} else if (delivery === "batch")
+					yield* persist.persistEvents([first, later]);
+				else if (delivery === "concurrent")
+					yield* Effect.all(
+						[persist.persistEvent(first), persist.persistEvent(later)],
+						{ concurrency: 2 },
+					);
+				else {
+					yield* persist.persistEvent(first);
+					if (aliasFirst)
+						yield* persist.persistEvent({ ...first, eventId: createEventId() });
+					yield* persist.persistEvent(later);
+				}
+				const terminals = yield* sql<{ type: string; run_id: string }>`
+					SELECT type, json_extract(metadata, '$.runId') AS run_id FROM events
+					WHERE type IN ('turn.error', 'turn.completed', 'turn.interrupted') ORDER BY sequence`;
+				proof["terminals"] = terminals;
+				expect(terminals).toEqual(
+					aliasFirst
+						? [
+								{ type: "turn.error", run_id: "reservation" },
+								{ type: "turn.completed", run_id: "run" },
+							]
+						: [{ type: "turn.error", run_id: "run" }],
+				);
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE id = 'run'`,
+				).toEqual([{ status: aliasFirst ? "completed" : "error" }]);
+				const hasAccounting = aliasFirst || !joined;
+				expect(
+					yield* sql`SELECT state, tokens_in, tokens_out, cost FROM turns`,
+				).toEqual([
+					{
+						state: aliasFirst ? "completed" : "error",
+						tokens_in: hasAccounting ? 99 : null,
+						tokens_out: hasAccounting ? 99 : null,
+						cost: hasAccounting ? 99 : null,
+					},
+				]);
+				proof["outcome"] = "passed";
+			}),
+		);
+	} finally {
+		await runtime.dispose();
+		rmSync(root, { recursive: true, force: true });
+		mkdirSync("test-results", { recursive: true });
+		writeFileSync(
+			`test-results/82tn10-4-round3-terminal-${delivery}-${joined}${aliasFirst ? "-alias-first" : ""}.json`,
+			`${JSON.stringify(proof, null, 2)}\n`,
+		);
+	}
+});
+
+// A completed run can still receive background messages. Keep their accounting
+// without a second run terminal; retrying the same message must not add it twice.
+it.each([
+	"separate",
+	"batch",
+	"inline",
+] as const)("retains background message accounting after a single run terminal with %s delivery", async (delivery) => {
+	const root = mkdtempSync(join(tmpdir(), "background-message-accounting-"));
+	const runtime = ManagedRuntime.make(
+		makePersistenceEffectLayer(join(root, "events.db"), "test-project"),
+	);
+	const proof: Record<string, unknown> = { delivery, outcome: "failed" };
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				const persist = yield* ClaudeEventPersistEffectTag;
+				const sql = yield* SqlClient.SqlClient;
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					canonicalEvent("session.created", "background", {
+						sessionId: "background",
+						title: "Background",
+						provider: "claude",
+					}),
+					canonicalEvent("run.requested", "background", {
+						runId: "background-run",
+						inputId: "input",
+					}),
+				]);
+				yield* persist.persistUserMessage("background", "Original prompt", {
+					messageId: "input",
+					inputId: "input",
+					runId: "background-run",
+				});
+				const metadata = {
+					provider: "claude",
+					metadata: { runId: "background-run" },
+				};
+				yield* persist.persistEvent(
+					canonicalEvent(
+						"run.started",
+						"background",
+						{ requestedRunId: "background-run", inputId: "input" },
+						metadata,
+					),
+				);
+				const completions = [];
+				const pending: CanonicalEvent[] = [];
+				for (const [index, total] of [10, 15, 21].entries()) {
+					const messageId = `answer-${index}`;
+					const created = canonicalEvent(
+						"message.created",
+						"background",
+						{
+							sessionId: "background",
+							messageId,
+							role: "assistant",
+							parentID: "input",
+						},
+						metadata,
+					);
+					if (delivery !== "inline" || index === 0)
+						yield* persist.persistEvent(created);
+					const completed = canonicalEvent(
+						"turn.completed",
+						"background",
+						{
+							messageId,
+							providerCostTotalUsd: total,
+							providerSessionId: "native-background",
+							contextTokens: (index + 1) * 111,
+							tokens: { input: index + 1, output: (index + 1) * 2 },
+						},
+						metadata,
+					);
+					completions.push(completed);
+					if (delivery === "inline" && index > 0)
+						pending.push(created, completed);
+				}
+				const first = completions[0];
+				if (!first) throw new Error("Missing fixture completion");
+				yield* persist.persistEvent(first);
+				const before =
+					yield* sql`SELECT status, completed_at FROM provider_runs WHERE id = 'background-run'`;
+				const boundary =
+					yield* sql`SELECT last_turn_end_version FROM sessions WHERE id = 'background'`;
+				const correction = canonicalEvent(
+					"turn.completed",
+					"background",
+					{
+						messageId: "answer-0",
+						providerCostTotalUsd: 12,
+						providerSessionId: "native-background",
+						contextTokens: 444,
+						tokens: { input: 4, output: 8 },
+					},
+					metadata,
+				);
+				const bare = canonicalEvent(
+					"turn.completed",
+					"background",
+					{
+						messageId: "answer-0",
+						userMessageId: "input",
+						providerCostTotalUsd: 14,
+						providerSessionId: "native-background",
+						tokens: { input: 5, output: 10 },
+					},
+					metadata,
+				);
+				yield* persist.persistEvents([correction, bare]);
+				if (delivery === "inline") yield* persist.persistEvents(pending);
+				else if (delivery === "batch")
+					yield* persist.persistEvents(completions.slice(1));
+				else
+					for (const completion of completions.slice(1))
+						yield* persist.persistEvent(completion);
+				expect(
+					yield* sql`SELECT COUNT(*) AS count FROM events WHERE type = 'message.completed'`,
+				).toEqual([{ count: 4 }]);
+				for (const completion of [...completions, correction, bare])
+					yield* persist.persistEvent({
+						...completion,
+						eventId: createEventId(),
+					});
+				const recorded =
+					yield* sql`SELECT type, json_extract(data, '$.messageId') AS message_id,
+				json_extract(data, '$.cost') AS cost, json_extract(metadata, '$.runId') AS run_id
+				FROM events WHERE type IN ('turn.completed', 'message.completed') ORDER BY sequence`;
+				proof["recorded"] = recorded;
+				expect(recorded).toEqual([
+					{
+						type: "turn.completed",
+						message_id: "answer-0",
+						cost: 10,
+						run_id: "background-run",
+					},
+					{
+						type: "message.completed",
+						message_id: "answer-0",
+						cost: 2,
+						run_id: "background-run",
+					},
+					{
+						type: "message.completed",
+						message_id: "answer-0",
+						cost: 2,
+						run_id: "background-run",
+					},
+					{
+						type: "message.completed",
+						message_id: "answer-1",
+						cost: 1,
+						run_id: "background-run",
+					},
+					{
+						type: "message.completed",
+						message_id: "answer-2",
+						cost: 6,
+						run_id: "background-run",
+					},
+				]);
+				expect(
+					yield* sql`SELECT id, cost, context_tokens, is_streaming FROM messages WHERE role = 'assistant' ORDER BY id`,
+				).toEqual([
+					{ id: "answer-0", cost: 12, context_tokens: 444, is_streaming: 0 },
+					{ id: "answer-1", cost: 1, context_tokens: 222, is_streaming: 0 },
+					{ id: "answer-2", cost: 6, context_tokens: 333, is_streaming: 0 },
+				]);
+				expect(
+					yield* sql`SELECT state, cost, tokens_in, tokens_out FROM turns`,
+				).toEqual([
+					{ state: "completed", cost: 21, tokens_in: 15, tokens_out: 30 },
+				]);
+				expect(
+					yield* sql`SELECT status, completed_at FROM provider_runs WHERE id = 'background-run'`,
+				).toEqual(before);
+				expect(
+					yield* sql`SELECT last_turn_end_version FROM sessions WHERE id = 'background'`,
+				).toEqual(boundary);
+				proof["outcome"] = "passed";
+			}),
+		);
+	} finally {
+		await runtime.dispose();
+		rmSync(root, { recursive: true, force: true });
+		mkdirSync("test-results", { recursive: true });
+		writeFileSync(
+			`test-results/82tn10-4-round3-background-accounting-${delivery}.json`,
+			`${JSON.stringify(proof, null, 2)}\n`,
+		);
+	}
+});

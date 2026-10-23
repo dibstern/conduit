@@ -9,7 +9,7 @@ export const resolveRunnerForkDigest = (
 	providerStateKey: string,
 	persistence?: {
 		readonly read: ReadQueryEffect;
-		readonly state: ProviderStateEffect;
+		readonly state: Pick<ProviderStateEffect, "getState" | "saveUpdates">;
 	},
 ) =>
 	Effect.gen(function* () {

@@ -178,7 +178,10 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 				recoverCommands: () => Effect.succeed([]),
 			};
 			const runner = yield* makeProcessSessionRunner(
-				{ workspaceRoot: root, daemonConfigDir: root },
+				{
+					projectRootForSession: () => Effect.succeed(root),
+					daemonConfigDir: root,
+				},
 				(output) =>
 					output.type === "event"
 						? ingestion.ingest(output.event).pipe(
@@ -438,7 +441,10 @@ for (const [
 				(2, 'future-command', 'test-project', 's', 'claude', 'send_turn',
 					'future-run', '{"inputId":"future-command"}', 'pending', 0, 2, 2)`;
 				const runner = yield* makeProcessSessionRunner(
-					{ workspaceRoot: root, daemonConfigDir: root },
+					{
+						projectRootForSession: () => Effect.succeed(root),
+						daemonConfigDir: root,
+					},
 					(output) =>
 						Effect.gen(function* () {
 							if (output.type === "event") {
@@ -526,7 +532,7 @@ for (const [
 						yield* sql`SELECT run.completed_at AS run_end, turn.completed_at AS turn_end
 						FROM provider_runs run JOIN turns turn ON turn.id = ${userMessageId}
 						WHERE run.id = 'old-run'`;
-					// Both exact failure facts may arrive; only projection owns the end.
+					// Repeated failure delivery cannot append another run terminal.
 					yield* failRunnerTurn(
 						(output) =>
 							output.type === "event"
@@ -556,7 +562,7 @@ for (const [
 					).toEqual(ended);
 					expect(
 						yield* sql`SELECT json_extract(data, '$.userMessageId') AS user_message_id FROM events WHERE type = 'turn.error'`,
-					).toEqual([{ user_message_id: null }, { user_message_id: null }]);
+					).toEqual([{ user_message_id: null }]);
 					expect(
 						yield* sql`SELECT type FROM events WHERE type = 'run.started'`,
 					).toEqual([]);
@@ -575,13 +581,7 @@ for (const [
 				}
 				expect(
 					yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'turn.error'`,
-				).toEqual(
-					pendingCompletion
-						? []
-						: unaccepted
-							? [{ run_id: "old-run" }, { run_id: "old-run" }]
-							: [{ run_id: "old-run" }],
-				);
+				).toEqual(pendingCompletion ? [] : [{ run_id: "old-run" }]);
 				if (joined) {
 					child.emit("exit", 0, null);
 					expect(

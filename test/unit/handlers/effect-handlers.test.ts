@@ -525,7 +525,7 @@ describe("reloadProviderSessionForClient", () => {
 			expect(events[0]).toBe("ended");
 			expect(events.slice(1)).toEqual(expect.arrayContaining(["workspace", "project"]));
 			expect(getWorkspace).toHaveBeenCalledWith("session-42");
-			expect(dispatchEffect).toHaveBeenCalledWith({ type: "discover", providerId: account.id, account, workspaceRoot: "/tmp/session-worktree", refresh: true });
+			expect(dispatchEffect).toHaveBeenCalledWith({ type: "discover", providerId: account.id, account, workspaceRoot: "/tmp/session-worktree", sessionId: "session-42", refresh: true });
 			expect(dispatchEffect).toHaveBeenCalledWith({ type: "discover", providerId: account.id, account, refresh: true });
 			expect(Option.isNone(yield* Effect.sync(() => Option.fromUndefinedOr(reload.pollUnsafe())))).toBe(true);
 			yield* Deferred.succeed(workspaceRelease, undefined);
@@ -1768,11 +1768,15 @@ describe("handlePermissionResponse", () => {
 			providerId: "opencode",
 			resolvePermissionEffect,
 		} as unknown as ProviderInstance);
-		return { registry, resolvePermissionEffect };
+		const engine = withDispatchEffect({
+			dispatchEffect: vi.fn(() => Effect.void),
+			getProviderForSessionEffect: () => Effect.succeed("opencode"),
+		});
+		return { registry, resolvePermissionEffect, engine };
 	};
 
 	it.effect(
-		"processes permission response through PendingInteractionService",
+		"dispatches permission responses through the orchestration engine",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "session-1"),
@@ -1783,7 +1787,7 @@ describe("handlePermissionResponse", () => {
 				config: { get: vi.fn(async () => makeSessionDetail()) },
 			});
 			const config = mockConfig();
-			const { registry, resolvePermissionEffect } = openCodeRegistry();
+			const { registry, resolvePermissionEffect, engine } = openCodeRegistry();
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
@@ -1791,6 +1795,7 @@ describe("handlePermissionResponse", () => {
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(ConfigTag)(config),
 				Layer.succeed(ProviderRegistryTag)(registry),
+				Layer.succeed(OrchestrationEngineTag)(engine),
 				PendingInteractionServiceLive,
 			);
 
@@ -1811,12 +1816,15 @@ describe("handlePermissionResponse", () => {
 			}).pipe(
 				Effect.provide(layer, { local: true }),
 				Effect.tap(() => Effect.sync(() => {
-					expect(resolvePermissionEffect).toHaveBeenCalledWith(
-						"session-1",
-						"perm-1",
-						"once",
-						undefined,
-					);
+					expect(engine.dispatchEffect).toHaveBeenCalledExactlyOnceWith({
+						type: "resolve_permission",
+						commandId: expect.any(String),
+						sessionId: "session-1",
+						requestId: "perm-1",
+						decision: "once",
+						response: { decision: "once" },
+					});
+					expect(resolvePermissionEffect).not.toHaveBeenCalled();
 				})),
 			);
 		},
@@ -1834,7 +1842,7 @@ describe("handlePermissionResponse", () => {
 				config: { get: vi.fn(async () => makeSessionDetail()) },
 			});
 			const config = mockConfig();
-			const { registry, resolvePermissionEffect } = openCodeRegistry();
+			const { registry, resolvePermissionEffect, engine } = openCodeRegistry();
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(OpenCodeAPITag)(client),
@@ -1842,6 +1850,7 @@ describe("handlePermissionResponse", () => {
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(ConfigTag)(config),
 				Layer.succeed(ProviderRegistryTag)(registry),
+				Layer.succeed(OrchestrationEngineTag)(engine),
 				PendingInteractionServiceLive,
 			);
 
@@ -1862,12 +1871,15 @@ describe("handlePermissionResponse", () => {
 			}).pipe(
 				Effect.provide(layer, { local: true }),
 				Effect.tap(() => Effect.sync(() => {
-					expect(resolvePermissionEffect).toHaveBeenCalledWith(
-						"permission-session",
-						"perm-cross-session",
-						"once",
-						undefined,
-					);
+					expect(engine.dispatchEffect).toHaveBeenCalledExactlyOnceWith({
+						type: "resolve_permission",
+						commandId: expect.any(String),
+						sessionId: "permission-session",
+						requestId: "perm-cross-session",
+						decision: "once",
+						response: { decision: "once" },
+					});
+					expect(resolvePermissionEffect).not.toHaveBeenCalled();
 				})),
 			);
 		},
@@ -1889,6 +1901,7 @@ describe("handlePermissionResponse", () => {
 			});
 			const config = mockConfig();
 			const engine = {
+				dispatchEffect: vi.fn(() => Effect.void),
 				getProviderForSessionEffect: vi.fn(() => Effect.succeed("claude")),
 			};
 
@@ -2072,7 +2085,8 @@ describe("handlePermissionResponse", () => {
 });
 
 describe("handleQuestionReject", () => {
-	it.effect("rejects question via REST API", () => {
+	it.effect("dispatches question rejection through the orchestration engine", () => {
+		const engine = withDispatchEffect({ dispatchEffect: vi.fn(() => Effect.void) });
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -2085,6 +2099,7 @@ describe("handleQuestionReject", () => {
 		const layer = Layer.mergeAll(
 			Layer.succeed(OpenCodeAPITag)(client),
 			Layer.succeed(WebSocketHandlerTag)(ws),
+			Layer.succeed(OrchestrationEngineTag)(engine),
 			Layer.succeed(LoggerTag)(log),
 			Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
 			makeOverridesStateLive(),
@@ -2093,7 +2108,15 @@ describe("handleQuestionReject", () => {
 		return handleQuestionReject("client-1", { toolId: "que-1" }).pipe(
 			Effect.provide(layer, { local: true }),
 			Effect.tap(() => Effect.sync(() => {
-				expect(client.question.reject).toHaveBeenCalledWith("que-1", tmpdir());
+				expect(engine.dispatchEffect).toHaveBeenCalledExactlyOnceWith({
+				type: "resolve_question",
+				commandId: expect.any(String),
+				sessionId: "session-1",
+				requestId: "que-1",
+				answers: {},
+				operation: "reject",
+			});
+			expect(client.question.reject).not.toHaveBeenCalled();
 			})),
 		);
 	});
@@ -2113,6 +2136,7 @@ describe("handleQuestionReject", () => {
 				},
 			});
 			const engine = withDispatchEffect({
+				dispatchEffect: vi.fn(() => Effect.void),
 				getProviderForSessionEffect: vi.fn((sessionId: string) =>
 					Effect.succeed(
 						sessionId === "question-session" ? "claude" : "opencode",
@@ -2164,12 +2188,13 @@ describe("handleQuestionReject", () => {
 
 describe("handleAskUserResponse", () => {
 	it.effect(
-		"persists and dispatches an answer to a recovered Claude question",
+		"dispatches an answer to a recovered Claude question without starting a continuation",
 		() => {
 			const ws = mockWsHandler({
 				getClientSession: vi.fn(() => "question-session"),
 				getClientsForSession: vi.fn(() => ["client-1"]),
 			});
+			const engine = withDispatchEffect({ dispatchEffect: vi.fn(() => Effect.void) });
 			const completeRecoveredQuestion = vi.fn(() => Effect.void);
 			const sendTurn = vi.fn(() => Effect.void);
 			const turns: ProviderTurnService = {
@@ -2188,6 +2213,7 @@ describe("handleAskUserResponse", () => {
 				Layer.succeed(LoggerTag)(mockLogger()),
 				Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
 				Layer.succeed(ProviderTurnServiceTag)(turns),
+				Layer.succeed(OrchestrationEngineTag)(engine),
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),
 			);
@@ -2207,22 +2233,21 @@ describe("handleAskUserResponse", () => {
 					toolId: "toolu-1",
 					answers: { "0": "red" },
 				});
-				expect(completeRecoveredQuestion).toHaveBeenCalledWith(
-					expect.objectContaining({ requestId: "toolu-1", recovered: true }),
-					'Answer to your question "Which colour?": red',
-					{ "0": "red" },
-				);
-				expect(sendTurn).toHaveBeenCalledWith(
-					expect.objectContaining({
-						sessionId: "question-session",
-						text: 'Answer to your question "Which colour?": red',
-					}),
-				);
-				expect(yield* pending.listPendingQuestions()).toHaveLength(0);
+				expect(engine.dispatchEffect).toHaveBeenCalledExactlyOnceWith({
+					type: "resolve_question",
+					commandId: expect.any(String),
+					sessionId: "question-session",
+					requestId: "toolu-1",
+					answers: { "0": "red" },
+				});
+				expect(completeRecoveredQuestion).not.toHaveBeenCalled();
+				expect(sendTurn).not.toHaveBeenCalled();
+				expect(yield* pending.listPendingQuestions()).toHaveLength(1);
 			}).pipe(Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }));
 		},
 	);
-	it.effect("answers question via REST API", () => {
+	it.effect("dispatches question answers through the orchestration engine", () => {
+		const engine = withDispatchEffect({ dispatchEffect: vi.fn(() => Effect.void) });
 		const ws = mockWsHandler({
 			getClientSession: vi.fn(() => "session-1"),
 		});
@@ -2238,6 +2263,7 @@ describe("handleAskUserResponse", () => {
 					Layer.succeed(OpenCodeAPITag)(client),
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
+					Layer.succeed(OrchestrationEngineTag)(engine),
 					Layer.succeed(ConfigTag)(mockConfig()),
 					PendingInteractionServiceLive,
 					Layer.succeed(LoggerTag)(log),
@@ -2252,11 +2278,14 @@ describe("handleAskUserResponse", () => {
 		}).pipe(
 			Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }),
 			Effect.tap(() => Effect.sync(() => {
-				expect(client.question.reply).toHaveBeenCalledWith(
-					"que-1",
-					[["Yes"], ["Approve"]],
-					tmpdir(),
-				);
+				expect(engine.dispatchEffect).toHaveBeenCalledExactlyOnceWith({
+					type: "resolve_question",
+					commandId: expect.any(String),
+					sessionId: "session-1",
+					requestId: "que-1",
+					answers: { "1": "Approve", "0": "Yes" },
+				});
+				expect(client.question.reply).not.toHaveBeenCalled();
 			})),
 		);
 	});
@@ -2276,6 +2305,7 @@ describe("handleAskUserResponse", () => {
 				},
 			});
 			const engine = withDispatchEffect({
+				dispatchEffect: vi.fn(() => Effect.void),
 				getProviderForSessionEffect: vi.fn((sessionId: string) =>
 					Effect.succeed(
 						sessionId === "question-session" ? "claude" : "opencode",
@@ -2313,9 +2343,13 @@ describe("handleAskUserResponse", () => {
 				Effect.provide(PassThroughSessionInbox, { local: true }), Effect.provide(layer, { local: true }),
 				Effect.tap(() => Effect.sync(() => {
 					expect(client.question.reply).not.toHaveBeenCalled();
-					expect(engine.getProviderForSessionEffect).toHaveBeenCalledWith(
-						"question-session",
-					);
+					expect(engine.dispatchEffect).toHaveBeenCalledExactlyOnceWith({
+						type: "resolve_question",
+						commandId: expect.any(String),
+						sessionId: "question-session",
+						requestId: "que-claude",
+						answers: { "0": "Yes" },
+					});
 				})),
 			);
 		},

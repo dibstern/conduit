@@ -2,65 +2,107 @@ import type { CursorAuthState } from "../../contracts/ws-rpc.js";
 import { openSettings } from "../components/layout/chrome-actions.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 
-export const cursorAuth = $state<{
+interface CursorAccountAuthState {
+	accountId: string | undefined;
 	current: CursorAuthState | undefined;
 	busy: boolean;
 	error: string | undefined;
-}>({ current: undefined, busy: false, error: undefined });
+}
 
-let generation = 0;
-let refreshing: Promise<void> | undefined;
+const accounts = new Map<
+	string | undefined,
+	{
+		state: CursorAccountAuthState;
+		generation: number;
+		refreshing: Promise<void> | undefined;
+	}
+>();
 
-export function refreshCursorAuth(): Promise<void> {
-	if (cursorAuth.busy) return Promise.resolve();
-	if (refreshing) return refreshing;
-	const request = generation;
-	refreshing = (async () => {
+function accountAuth(accountId: string | undefined) {
+	let account = accounts.get(accountId);
+	if (!account) {
+		const state = $state<CursorAccountAuthState>({
+			accountId,
+			current: undefined,
+			busy: false,
+			error: undefined,
+		});
+		account = {
+			state,
+			generation: 0,
+			refreshing: undefined,
+		};
+		accounts.set(accountId, account);
+	}
+	return account;
+}
+
+export const cursorAuthFor = (accountId: string | undefined) =>
+	accountAuth(accountId).state;
+export const cursorAuth = cursorAuthFor(undefined);
+
+export function refreshCursorAuth(
+	accountId: string | undefined,
+): Promise<void> {
+	const account = accountAuth(accountId);
+	const state = account.state;
+	if (state.busy) return Promise.resolve();
+	if (account.refreshing) return account.refreshing;
+	const request = account.generation;
+	account.refreshing = (async () => {
 		try {
-			const snapshot = await rpc("GetCursorAuth", {});
-			if (request !== generation) return;
-			cursorAuth.current = snapshot;
-			cursorAuth.error = undefined;
+			const snapshot = await rpc(
+				"GetCursorAuth",
+				accountId === undefined ? {} : { accountId },
+			);
+			if (request !== account.generation) return;
+			state.current = snapshot;
+			state.error = undefined;
 		} catch {
-			if (request === generation)
-				cursorAuth.error = "Could not check login status. Try again.";
+			if (request === account.generation)
+				state.error = "Could not check login status. Try again.";
 		} finally {
-			refreshing = undefined;
+			account.refreshing = undefined;
 		}
 	})();
-	return refreshing;
+	return account.refreshing;
 }
 
 export async function changeCursorAuth(
 	command: "StartCursorLogin" | "CancelCursorLogin" | "LogoutCursor",
+	accountId: string | undefined,
 ): Promise<void> {
-	if (cursorAuth.busy) return;
-	const request = ++generation;
-	cursorAuth.busy = true;
-	cursorAuth.error = undefined;
+	const account = accountAuth(accountId);
+	const state = account.state;
+	if (state.busy) return;
+	const request = ++account.generation;
+	state.busy = true;
+	state.error = undefined;
 	try {
+		const input = accountId === undefined ? {} : { accountId };
 		const snapshot = await (command === "StartCursorLogin"
-			? rpc("StartCursorLogin", {})
+			? rpc("StartCursorLogin", input)
 			: command === "CancelCursorLogin"
-				? rpc("CancelCursorLogin", {})
-				: rpc("LogoutCursor", {}));
-		if (request === generation) cursorAuth.current = snapshot;
+				? rpc("CancelCursorLogin", input)
+				: rpc("LogoutCursor", input));
+		if (request === account.generation) state.current = snapshot;
 	} catch {
-		if (request === generation)
-			cursorAuth.error = "Could not update login. Try again.";
+		if (request === account.generation)
+			state.error = "Could not update login. Try again.";
 	} finally {
-		if (request === generation) cursorAuth.busy = false;
+		if (request === account.generation) state.busy = false;
 	}
 }
 
-export function openCursorLogin(): void {
+export function openCursorLogin(accountId: string | undefined): void {
 	openSettings("server", "instances");
-	void refreshCursorAuth().then(() => {
+	const state = cursorAuthFor(accountId);
+	void refreshCursorAuth(accountId).then(() => {
 		if (
-			cursorAuth.current &&
-			cursorAuth.current.source !== "environment" &&
-			cursorAuth.current.login.state !== "pending"
+			state.current &&
+			state.current.source !== "environment" &&
+			state.current.login.state !== "pending"
 		)
-			void changeCursorAuth("StartCursorLogin");
+			void changeCursorAuth("StartCursorLogin", accountId);
 	});
 }

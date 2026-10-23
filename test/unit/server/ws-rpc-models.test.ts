@@ -398,7 +398,6 @@ describe("WsRpcServerLayer GetModels", () => {
 						session_id: `${sessionId}-sdk`,
 					} as unknown as SDKMessage;
 					const instance = makeTestClaudeProviderInstance({
-						workspaceRoot: "/tmp/ws",
 						capabilitiesService,
 						queryFactory: vi.fn(() =>
 							createMockQuery([

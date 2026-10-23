@@ -10,10 +10,7 @@ import {
 import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import { type GoalSummary, WsRpcError } from "../../../contracts/ws-rpc.js";
-import {
-	loadDaemonConfigResult,
-	resolveClaudeLaunchConfig,
-} from "../../../daemon/config-persistence.js";
+import { resolveClaudeLaunchConfig } from "../../../daemon/config-persistence.js";
 import {
 	ReadQueryEffectTag,
 	sessionGoalState,
@@ -30,6 +27,7 @@ import {
 	type ClaudeOneShotQueryFactory,
 	makeClaudeOneShot,
 } from "../../daemon/Services/claude-one-shot.js";
+import { ConfigSnapshotTag } from "../../daemon/Services/config-persistence-service.js";
 import { MessageSurfacingSettings } from "../../daemon/Services/message-surfacing-settings.js";
 import { ConfigTag } from "./services.js";
 
@@ -65,6 +63,8 @@ export const makeGoalSummaryServiceLive = (
 			const read = yield* ReadQueryEffectTag;
 			const settings = yield* MessageSurfacingSettings;
 			const config = yield* ConfigTag;
+			// Daemon config is read from memory at runtime (82tn.18).
+			const configSnapshot = yield* Effect.serviceOption(ConfigSnapshotTag);
 			const scope = yield* Effect.scope;
 			const reservation = yield* Semaphore.make(1);
 			const cache = new Map<string, CachedSummary>();
@@ -197,9 +197,10 @@ export const makeGoalSummaryServiceLive = (
 							const requestedGeneration = ++generation;
 							inFlight.set(key, deferred);
 							const run = Effect.gen(function* () {
-								const daemonConfig = yield* Effect.suspend(() =>
-									Effect.fromResult(loadDaemonConfigResult(config.configDir)),
-								).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
+								const daemonConfig =
+									configSnapshot._tag === "Some"
+										? yield* configSnapshot.value.build
+										: null;
 								const launch = yield* Effect.try(() =>
 									resolveClaudeLaunchConfig(daemonConfig),
 								);

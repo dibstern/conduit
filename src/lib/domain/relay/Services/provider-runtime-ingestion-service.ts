@@ -22,6 +22,7 @@ import {
 	EventStoreEffectTag,
 	type EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
+import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { readPendingRewindCommit } from "../../../persistence/effect/pending-rewind.js";
 import type {
 	ProjectionRunnerEffectTag,
@@ -673,6 +674,23 @@ export const makeProviderRuntimeIngestionLive = (
 											}
 											if (pending.length > 0)
 												yield* project(yield* appendEvents(pending));
+											// Orphan settlement must commit its unplaced steers too;
+											// a terminal run no longer triggers startup recovery.
+											for (const event of accepted)
+												if (
+													event.type === "turn.error" &&
+													event.data.code === "runner_stopped"
+												)
+													yield* requeueFailedSteers(
+														sql,
+														{
+															persistEvents: (events) =>
+																Effect.gen(function* () {
+																	yield* project(yield* appendEvents(events));
+																}),
+														},
+														event.sessionId,
+													);
 											yield* beforeCommit;
 										}),
 									commitOptions,

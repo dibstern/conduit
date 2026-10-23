@@ -240,7 +240,7 @@ describe("Claude session process runner", () => {
 		expect(
 			harness.marks.some(
 				(mark) =>
-					mark.kind === "runner-command" && mark.type === "answer-permission",
+					mark.kind === "runner-command" && mark.type === "resolve-permission",
 			),
 		).toBe(true);
 		const history = await browser.history(sessionId);
@@ -499,13 +499,25 @@ describe("Claude session process runner", () => {
 		}
 	}, 45_000);
 
-	it("terminates the runner and removes its socket when a session is deleted", async () => {
+	it.each([
+		"turn",
+		"prewarm",
+	] as const)("terminates the runner and removes its socket when a session is deleted after %s", async (activity) => {
 		const harness = await ProcessHarness.start();
 		harnesses.push(harness);
 		const browser = await harness.connect();
 		const sessionId = await browser.createSession("Runner deletion proof");
-		await browser.send(sessionId, "before-session-delete");
-		await settled(harness, sessionId, 1);
+		if (activity === "turn") {
+			await browser.send(sessionId, "before-session-delete");
+			await settled(harness, sessionId, 1);
+		} else {
+			await browser.preWarmSession(sessionId);
+			await vi.waitFor(() =>
+				expect(
+					harness.marks.some((mark) => mark.kind === "runner-started"),
+				).toBe(true),
+			);
+		}
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing runner proof");
@@ -521,7 +533,7 @@ describe("Claude session process runner", () => {
 		} finally {
 			mkdirSync("test-results/process-harness", { recursive: true });
 			writeFileSync(
-				"test-results/process-harness/85kb-8-runner-deletion.json",
+				`test-results/process-harness/82tn-10-1-runner-deletion-${activity}.json`,
 				JSON.stringify(
 					{
 						runner,
@@ -669,13 +681,7 @@ describe("Claude session process runner", () => {
 					expect(state.commands).toEqual(held.commands);
 					expect(
 						state.events.filter((event) => event.type === "turn.interrupted"),
-					).toEqual([
-						expect.objectContaining({
-							data: expect.objectContaining({
-								messageId: notificationMessageId,
-							}),
-						}),
-					]);
+					).toEqual([]);
 					expect(
 						state.events.filter((event) => event.type === "turn.completed"),
 					).toHaveLength(1);
@@ -685,7 +691,6 @@ describe("Claude session process runner", () => {
 				},
 				{ timeout: 10_000 },
 			);
-			const terminal = persisted(harness, sessionId);
 			// Repeated browser cancellation cannot interrupt the completed first
 			// turn or add another terminal event after notification cleanup.
 			await Effect.runPromise(
@@ -698,7 +703,8 @@ describe("Claude session process runner", () => {
 				persisted(harness, sessionId).events.filter(
 					(event) => event.type === "turn.interrupted",
 				),
-			).toHaveLength(1);
+			).toHaveLength(0);
+			const terminal = persisted(harness, sessionId);
 			await harness.kill();
 			await harness.restart();
 			await harness.connect(sessionId);

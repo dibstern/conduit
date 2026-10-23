@@ -115,7 +115,8 @@ it("keeps overlapping compaction calls one-to-one without claiming ordinary echo
 		.mockImplementationOnce(() => heldA)
 		.mockImplementationOnce(() => heldB);
 	const instance = new OpenCodeProviderInstance({
-		client: makeStubClient({ session: { summarize } }),
+		clientForSession: () =>
+			Effect.succeed(makeStubClient({ session: { summarize } })),
 	});
 	const input = (inputId: string) =>
 		makeSendTurnInput({
@@ -192,7 +193,9 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 	beforeEach(() => {
 		client = makeStubClient();
-		instance = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({
+			clientForSession: () => Effect.succeed(client),
+		});
 	});
 
 	it.each([
@@ -342,7 +345,9 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			client = makeStubClient({
 				session: { get: vi.fn(async () => ({ permission })) },
 			});
-			instance = new OpenCodeProviderInstance({ client });
+			instance = new OpenCodeProviderInstance({
+				clientForSession: () => Effect.succeed(client),
+			});
 			const resultPromise = Effect.runPromise(
 				instance.sendTurnEffect(
 					makeSendTurnInput({ extraFolders: desired ? [extra, extra] : [] }),
@@ -432,7 +437,9 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 				abort: vi.fn(async () => {}),
 			},
 		});
-		instance = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({
+			clientForSession: () => Effect.succeed(client),
+		});
 
 		const firstResultPromise = Effect.runPromise(
 			instance
@@ -552,7 +559,9 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 				abort: vi.fn(async () => {}),
 			},
 		});
-		instance = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({
+			clientForSession: () => Effect.succeed(client),
+		});
 
 		const input = makeSendTurnInput();
 		const result = await Effect.runPromise(
@@ -574,7 +583,9 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 				}),
 			},
 		});
-		instance = new OpenCodeProviderInstance({ client });
+		instance = new OpenCodeProviderInstance({
+			clientForSession: () => Effect.succeed(client),
+		});
 		if (phase === "before delivery") abortController.abort();
 		const input = makeSendTurnInput({ abortSignal: abortController.signal });
 		const result = await Effect.runPromise(
@@ -594,7 +605,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 	it("fails with SEND_FAILED (no hang) when the bound named instance cannot be resolved", async () => {
 		instance = new OpenCodeProviderInstance({
-			client,
 			clientForSession: () =>
 				Effect.fail(new Error('OpenCode instance "oc-b" is not configured')),
 		});
@@ -610,7 +620,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 	it("routes the prompt to the named instance client resolved for the session", async () => {
 		const namedClient = makeStubClient();
 		instance = new OpenCodeProviderInstance({
-			client,
 			clientForSession: (sessionId) =>
 				Effect.succeed(sessionId === "s1" ? namedClient : undefined),
 		});
@@ -643,7 +652,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			Effect.fail(new Error("Historical binding must not be resolved")),
 		);
 		instance = new OpenCodeProviderInstance({
-			client,
 			clientForAccount,
 			clientForSession,
 		});
@@ -670,7 +678,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			},
 		});
 		instance = new OpenCodeProviderInstance({
-			client,
 			clientForSession: () => Effect.succeed(namedClient),
 		});
 
@@ -704,7 +711,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			},
 		});
 		instance = new OpenCodeProviderInstance({
-			client,
 			clientForSession: () => Effect.succeed(freshClient),
 			instanceIdForSession: () => Effect.succeed(MANAGED_OPENCODE_ACCOUNT_ID),
 		});
@@ -736,7 +742,6 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 			},
 		});
 		instance = new OpenCodeProviderInstance({
-			client,
 			clientForSession: () => Effect.succeed(namedClient),
 			instanceIdForSession: () => Effect.succeed("oc-b"),
 		});
@@ -752,17 +757,15 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		expect(client.session.prompt).not.toHaveBeenCalled();
 	});
 
-	it("uses the default client when the resolver yields undefined", async () => {
+	it("fails delivery when the session client route is unavailable", async () => {
 		instance = new OpenCodeProviderInstance({
-			client,
 			clientForSession: () => Effect.succeed(undefined),
 		});
 
-		const resultPromise = Effect.runPromise(
-			instance.sendTurnEffect(makeSendTurnInput()),
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(makeSendTurnInput()).pipe(Effect.result),
 		);
-		await resultPromise;
-
-		expect(client.session.prompt).toHaveBeenCalled();
+		expectDeliveryFailure(result, 'OpenCode session "s1" has no client route');
+		expect(client.session.prompt).not.toHaveBeenCalled();
 	});
 });

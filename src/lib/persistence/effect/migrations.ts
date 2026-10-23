@@ -38,6 +38,7 @@ import {
 	PROJECT_TREE_DATA_MIGRATION,
 	PROJECTION_FAILURES_MIGRATION,
 	PROMPT_PROVIDER_REFERENCE_MIGRATION,
+	PROVIDER_CONTROL_PROCESS_MIGRATION,
 	READ_MODEL_COUNTER_MIGRATION,
 	READ_MODEL_VERSION_MIGRATION,
 	READ_STATE_TO_TURN_ENDS_MIGRATION,
@@ -1522,6 +1523,18 @@ export const effectMigrationEntries = {
 		"jev",
 		readMigrationSql(SESSIONS_JEV_MIGRATION),
 	),
+	"0081_provider_control_process": Effect.gen(function* () {
+		yield* runAddColumnMigrationIfMissing(
+			"provider_command_outbox",
+			"provider_process_id",
+			"ALTER TABLE provider_command_outbox ADD COLUMN provider_process_id TEXT",
+		);
+		yield* executeSqlStatements(
+			splitSqlStatements(readMigrationSql(PROVIDER_CONTROL_PROCESS_MIGRATION))
+				.slice(1)
+				.join(";"),
+		);
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

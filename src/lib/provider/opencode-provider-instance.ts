@@ -32,7 +32,9 @@ import type {
 	CommandInfo,
 	ModelInfo,
 	PermissionDecision,
+	ProviderCall,
 	ProviderCapabilities,
+	ProviderControlContext,
 	ProviderDriver,
 	ProviderInstance,
 	SendTurnInput,
@@ -64,8 +66,6 @@ function sendFailure(message: string) {
 }
 
 export interface OpenCodeProviderInstanceOptions {
-	readonly client: OpenCodeAPI;
-	readonly workspaceRoot?: string;
 	readonly configDir?: string;
 	readonly clientForAccount?: (
 		account: OpenCodeAccount,
@@ -73,11 +73,8 @@ export interface OpenCodeProviderInstanceOptions {
 	) => Effect.Effect<OpenCodeAPI, Error, Scope.Scope>;
 	/**
 	 * Resolve the scoped API client for the OpenCode instance that owns a
-	 * session (OpenCode Instances `use`). Resolving to undefined means the
-	 * default client. Fails when the instance is unknown or unreachable — the
-	 * caller surfaces that as a send failure instead of silently using the
-	 * default server. Absent in wirings
-	 * without named-instance support.
+	 * session for callers without a ProviderCall (OpenCode Instances `use`).
+	 * Missing or unreachable routes fail without fallback.
 	 */
 	readonly clientForSession?: (
 		sessionId: string,
@@ -96,8 +93,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	readonly providerId = "opencode";
 	readonly userMessageIdForInput = openCodeInputMessageId;
 
-	private readonly client: OpenCodeAPI;
-	private readonly workspaceRoot: string | undefined;
 	private readonly clientForSession:
 		| ((
 				sessionId: string,
@@ -112,8 +107,6 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	>();
 
 	constructor(options: OpenCodeProviderInstanceOptions) {
-		this.client = options.client;
-		this.workspaceRoot = options.workspaceRoot;
 		this.clientForSession = options.clientForSession;
 		this.clientForAccount = options.clientForAccount;
 		this.instanceIdForSession = options.instanceIdForSession;
@@ -138,8 +131,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	}
 
 	/**
-	 * Sends retain their admitted account. Other operations resolve the session
-	 * binding; legacy direct callers may use the project-default client.
+	 * Sends retain their admitted account. Other operations resolve the session binding.
 	 */
 	private resolveClientEffect(
 		sessionId: string,
@@ -153,16 +145,19 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				);
 			if (this.clientForAccount && account.driver === "opencode")
 				return this.clientForAccount(account, directory);
-			if (account.id === MANAGED_OPENCODE_ACCOUNT_ID)
-				return Effect.succeed(this.client);
 			return Effect.fail(
 				new Error(`OpenCode account "${account.id}" has no client route`),
 			);
 		}
 		const resolve = this.clientForSession;
-		if (resolve === undefined) return Effect.succeed(this.client);
-		return resolve(sessionId).pipe(
-			Effect.map((client) => client ?? this.client),
+		return (resolve ? resolve(sessionId) : Effect.succeed(undefined)).pipe(
+			Effect.flatMap((client) => {
+				return client
+					? Effect.succeed(client)
+					: Effect.fail(
+							new Error(`OpenCode session "${sessionId}" has no client route`),
+						);
+			}),
 		);
 	}
 
@@ -177,14 +172,59 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		});
 	}
 
-	discoverEffect(): Effect.Effect<
-		ProviderCapabilities,
-		ProviderInstanceFailure
-	> {
-		return Effect.tryPromise({
-			try: () => this.discoverCapabilities(),
-			catch: (cause) => this.providerFailure("discover", cause),
-		});
+	/** Account-bound calls must borrow a scoped client, never the default client. */
+	private resolveScopedClientEffect(
+		sessionId: string,
+		account?: Account,
+		directory?: string,
+	): Effect.Effect<OpenCodeAPI, Error, Scope.Scope> {
+		if (account?.driver === "opencode" && this.clientForAccount)
+			return this.clientForAccount(account, directory);
+		if (!account && this.clientForSession)
+			return this.clientForSession(sessionId).pipe(
+				Effect.flatMap((client) =>
+					client
+						? Effect.succeed(client)
+						: Effect.fail(
+								new Error(
+									`OpenCode session "${sessionId}" has no client route`,
+								),
+							),
+				),
+			);
+		return Effect.fail(
+			new Error("OpenCode call requires an account client route"),
+		);
+	}
+
+	discoverEffect(
+		workspaceRoot?: string,
+		account?: Account,
+		_options?: { readonly refresh?: boolean },
+		call?: ProviderCall,
+	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> {
+		const directory = call?.workspaceRoot ?? workspaceRoot;
+		const selected = call?.account ?? account;
+		const client =
+			selected && directory
+				? this.resolveScopedClientEffect(
+						call?.sessionId ?? "",
+						selected,
+						directory,
+					)
+				: Effect.fail(
+						new Error("OpenCode discovery requires an account and directory"),
+					);
+		return client.pipe(
+			Effect.flatMap((client) =>
+				Effect.tryPromise({
+					try: () => this.discoverCapabilities(client, directory),
+					catch: (cause) => cause,
+				}),
+			),
+			Effect.mapError((cause) => this.providerFailure("discover", cause)),
+			Effect.scoped,
+		);
 	}
 
 	generateTextEffect(
@@ -328,11 +368,14 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		);
 	}
 
-	private async discoverCapabilities(): Promise<ProviderCapabilities> {
+	private async discoverCapabilities(
+		client: OpenCodeAPI,
+		directory?: string,
+	): Promise<ProviderCapabilities> {
 		const [providerResult, commandsRaw, skillsRaw] = await Promise.all([
-			this.client.provider.list(),
-			this.client.app.commands(),
-			this.client.app.skills(this.workspaceRoot),
+			client.provider.list(),
+			client.app.commands(),
+			client.app.skills(directory),
 		]);
 
 		const models: ModelInfo[] = providerResult.providers.flatMap((provider) =>
@@ -636,8 +679,16 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 	interruptTurnEffect(
 		sessionId: string,
+		turnIds?: readonly string[],
+		call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.resolveClientEffect(sessionId).pipe(
+		if (turnIds?.length === 0) return Effect.void;
+		return this.resolveClientEffect(
+			sessionId,
+			call?.account,
+			call?.workspaceRoot,
+		).pipe(
 			Effect.flatMap((client) =>
 				Effect.tryPromise({
 					try: () => client.session.abort(sessionId),
@@ -654,8 +705,13 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	setPermissionModeEffect(
 		sessionId: string,
 		mode: SessionPermissionMode,
+		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.resolveClientEffect(sessionId).pipe(
+		return this.resolveClientEffect(
+			sessionId,
+			call?.account,
+			call?.workspaceRoot,
+		).pipe(
 			Effect.flatMap((client) =>
 				Effect.tryPromise({
 					try: () =>
@@ -678,40 +734,56 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		requestId: string,
 		decision: PermissionDecision,
 		providerProcessId?: string,
+		call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.resolveClientEffect(sessionId).pipe(
+		return this.resolveScopedClientEffect(
+			sessionId,
+			call?.account,
+			call?.workspaceRoot,
+		).pipe(
 			Effect.flatMap((client) =>
 				providerProcessId && client.promptProcessId !== providerProcessId
 					? Effect.fail(
 							"The provider process that asked this prompt is no longer running.",
 						)
-					: Effect.tryPromise({
-							try: async () => {
-								if (decision === "always") {
-									// OpenCode's "always" approvals override rules in other sessions.
-									const session = await client.session.get(sessionId);
-									const request = (
-										await client.permission.list(
-											session.directory || this.workspaceRoot,
-										)
-									).find((pending) => pending.id === requestId);
-									if (request?.always?.length) {
-										await client.session.update(sessionId, {
-											permission: request.always.map((pattern) => ({
-												permission: request.permission,
-												pattern,
-												action: "allow",
-											})),
-										});
-									}
-								}
-								await client.permission.reply(
-									sessionId,
-									requestId,
-									decision === "always" ? "once" : decision,
+					: Effect.gen(function* () {
+							const session = yield* Effect.tryPromise({
+								try: () => client.session.get(sessionId),
+								catch: (cause) => cause,
+							});
+							if (!session.directory)
+								return yield* Effect.fail(
+									new Error(
+										`OpenCode session "${sessionId}" has no stored directory`,
+									),
 								);
-							},
-							catch: (cause) => cause,
+							yield* Effect.tryPromise({
+								try: async () => {
+									if (decision === "always") {
+										// OpenCode's "always" approvals override rules in other sessions.
+										const request = (
+											await client.permission.list(session.directory)
+										).find((pending) => pending.id === requestId);
+										if (request?.always?.length) {
+											await client.session.update(sessionId, {
+												permission: request.always.map((pattern) => ({
+													permission: request.permission,
+													pattern,
+													action: "allow",
+												})),
+											});
+										}
+									}
+									await client.permission.reply(
+										sessionId,
+										requestId,
+										decision === "always" ? "once" : decision,
+										session.directory,
+									);
+								},
+								catch: (cause) => cause,
+							});
 						}),
 			),
 			Effect.mapError((cause) =>
@@ -726,22 +798,39 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		sessionId: string,
 		requestId: string,
 		answers: Record<string, unknown>,
+		call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const answerArrays = Object.values(answers).map((v) =>
 			Array.isArray(v) ? v.map(String) : [String(v)],
 		);
-		return this.resolveClientEffect(sessionId).pipe(
+		return this.resolveScopedClientEffect(
+			sessionId,
+			call?.account,
+			call?.workspaceRoot,
+		).pipe(
 			Effect.flatMap((client) =>
-				Effect.tryPromise({
-					try: async () => {
-						const session = await client.session.get(sessionId);
-						await client.question.reply(
-							requestId,
-							answerArrays,
-							session.directory || this.workspaceRoot,
+				Effect.gen(function* () {
+					const session = yield* Effect.tryPromise({
+						try: () => client.session.get(sessionId),
+						catch: (cause) => cause,
+					});
+					if (!session.directory)
+						return yield* Effect.fail(
+							new Error(
+								`OpenCode session "${sessionId}" has no stored directory`,
+							),
 						);
-					},
-					catch: (cause) => cause,
+					yield* Effect.tryPromise({
+						try: async () => {
+							await client.question.reply(
+								requestId,
+								answerArrays,
+								session.directory,
+							);
+						},
+						catch: (cause) => cause,
+					});
 				}),
 			),
 			Effect.mapError((cause) =>
@@ -754,6 +843,8 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 	endSessionEffect(
 		_sessionId: string,
+		_call?: ProviderCall,
+		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return Effect.void;
 	}

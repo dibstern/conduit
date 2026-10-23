@@ -1221,25 +1221,33 @@ export const CursorAuthStateSchema = Schema.Struct({
 export type CursorAuthState = typeof CursorAuthStateSchema.Type;
 
 export const GetCursorAuth = Rpc.make("GetCursorAuth", {
-	payload: Schema.TaggedStruct("GetCursorAuth", {}),
+	payload: Schema.TaggedStruct("GetCursorAuth", {
+		accountId: Schema.optional(Schema.String),
+	}),
 	success: CursorAuthStateSchema,
 	error: WsRpcError,
 });
 
 export const StartCursorLogin = Rpc.make("StartCursorLogin", {
-	payload: Schema.TaggedStruct("StartCursorLogin", {}),
+	payload: Schema.TaggedStruct("StartCursorLogin", {
+		accountId: Schema.optional(Schema.String),
+	}),
 	success: CursorAuthStateSchema,
 	error: WsRpcError,
 });
 
 export const CancelCursorLogin = Rpc.make("CancelCursorLogin", {
-	payload: Schema.TaggedStruct("CancelCursorLogin", {}),
+	payload: Schema.TaggedStruct("CancelCursorLogin", {
+		accountId: Schema.optional(Schema.String),
+	}),
 	success: CursorAuthStateSchema,
 	error: WsRpcError,
 });
 
 export const LogoutCursor = Rpc.make("LogoutCursor", {
-	payload: Schema.TaggedStruct("LogoutCursor", {}),
+	payload: Schema.TaggedStruct("LogoutCursor", {
+		accountId: Schema.optional(Schema.String),
+	}),
 	success: CursorAuthStateSchema,
 	error: WsRpcError,
 });

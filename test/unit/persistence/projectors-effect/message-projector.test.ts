@@ -689,6 +689,7 @@ describe("MessageProjector", () => {
 			"tool.completed",
 			"file.attached",
 			"turn.completed",
+			"message.completed",
 			"turn.notice",
 			"turn.error",
 			"turn.interrupted",

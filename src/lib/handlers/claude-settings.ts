@@ -1,4 +1,4 @@
-import { Data, Effect } from "effect";
+import { Data, Effect, Option } from "effect";
 import type { AccountRef } from "../contracts/account.js";
 import {
 	CLAUDE_TRUST_TIERED_SETTINGS_KEYS,
@@ -6,10 +6,12 @@ import {
 	ClaudeSettingsTrustBoundaryError,
 } from "../contracts/claude-settings.js";
 import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
+import { ProjectShellEnvTag } from "../domain/daemon/Layers/project-shell-env-layer.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { publishGlobalProjectSetting } from "../domain/relay/Services/project-settings.js";
 import { ConfigTag, LoggerTag } from "../domain/relay/Services/services.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
+import { ClaudeAccountScopes } from "../provider/claude/claude-account-scopes.js";
 import {
 	type ClaudeSettingsChildRunner,
 	resolveClaudeSettingsFromDisk,
@@ -80,6 +82,12 @@ export const resolveClaudeSettingsForInstance = (
 		const account = yield* (yield* AccountDirectory).resolve(
 			input.accountRef ?? { _tag: "Id", id: input.instanceId },
 		);
+		const requested = input.accountRef ?? { _tag: "Id", id: input.instanceId };
+		if (requested._tag === "Id" && account.id !== requested.id)
+			return yield* new ClaudeSettingsInstanceError({
+				instanceId: requested.id,
+				message: `Claude account "${requested.id}" is no longer available`,
+			});
 		if (
 			PROVIDER_DRIVERS[account.driver].accountKind !== "config-directory" ||
 			!("folder" in account)
@@ -94,11 +102,22 @@ export const resolveClaudeSettingsForInstance = (
 		const workspaceRoot = input.sessionId
 			? yield* (yield* SessionWorkspaceTag).get(input.sessionId)
 			: primaryFolder;
-		return yield* resolveClaudeSettingsFromDisk(
-			{
-				workspaceRoot,
-				configDir: account.folder,
-			},
-			runChild,
-		);
+		const scopes = yield* Effect.serviceOption(ClaudeAccountScopes);
+		const shell = yield* Effect.serviceOption(ProjectShellEnvTag);
+		const baseEnv = Option.isSome(shell)
+			? shell.value.get(workspaceRoot, config.slug)
+			: undefined;
+		const resolve = (selected: typeof account) =>
+			resolveClaudeSettingsFromDisk(
+				{
+					workspaceRoot,
+					...(baseEnv ? { baseEnv } : {}),
+					configDir: "folder" in selected ? selected.folder : account.folder,
+					...(selected.env ? { accountEnv: selected.env } : {}),
+				},
+				runChild,
+			);
+		return yield* Option.isSome(scopes)
+			? scopes.value.use(account, ({ account }) => resolve(account))
+			: resolve(account);
 	});

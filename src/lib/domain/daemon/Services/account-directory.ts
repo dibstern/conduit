@@ -17,7 +17,10 @@ import { AccountChangeRejected } from "../../../contracts/account.js";
 import type { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import type { KnownProviderDriverKind } from "../../../contracts/provider-instance.js";
 import { loadAccountsState } from "../../../daemon/config-persistence.js";
-import type { ClaudeConfigDir } from "../../../provider/claude/claude-sdk-env.js";
+import {
+	type ClaudeConfigDir,
+	resolveClaudeAccountFolder,
+} from "../../../provider/claude/claude-sdk-env.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import type { DaemonInstanceConfig } from "./daemon-state.js";
 
@@ -41,6 +44,16 @@ export class AccountDirectory extends Context.Service<
 	}
 >()("AccountDirectory") {}
 
+const resolveAccountFolders = (state: AccountsState): AccountsState => ({
+	...state,
+	launchLogin: resolveClaudeAccountFolder(state.launchLogin),
+	accounts: state.accounts.map((account) =>
+		account.driver === "claude"
+			? { ...account, folder: resolveClaudeAccountFolder(account.folder) }
+			: account,
+	),
+});
+
 export function makeAccountDirectory(
 	read: Effect.Effect<AccountsState>,
 	commit?: AccountDirectory["Service"]["apply"],
@@ -49,7 +62,7 @@ export function makeAccountDirectory(
 	// running outside the daemon's request context must provide DaemonConfigRefTag
 	// or bound accounts look ineligible.
 	const eligible = Effect.gen(function* () {
-		const state = yield* read;
+		const state = resolveAccountFolders(yield* read);
 		const config = yield* Effect.serviceOption(DaemonConfigRefTag);
 		const binding =
 			config._tag === "Some"
@@ -94,7 +107,7 @@ export function makeAccountDirectory(
 
 const makeWritableAccountDirectory = (initial: AccountsState) =>
 	Effect.gen(function* () {
-		const state = yield* Ref.make(initial);
+		const state = yield* Ref.make(resolveAccountFolders(initial));
 		const changes = yield* Semaphore.make(1);
 		return makeAccountDirectory(
 			changes.withPermits(1)(Ref.get(state)),
@@ -106,7 +119,10 @@ const makeWritableAccountDirectory = (initial: AccountsState) =>
 				changes.withPermits(1)(
 					Effect.gen(function* () {
 						const committed = yield* Ref.modify(state, (current) => {
-							const result = apply(current, change, usageOrder);
+							const result = Result.map(
+								apply(current, change, usageOrder),
+								resolveAccountFolders,
+							);
 							return [
 								{ previous: current, result },
 								Result.isSuccess(result) ? result.success : current,

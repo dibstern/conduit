@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import type { SessionGoalChangedPayload } from "../../../src/lib/contracts/stored-event.js";
@@ -281,6 +281,188 @@ describe("persisted goal stuck header", () => {
 	);
 
 	it.effect(
+		"discards speculative detector state after an enclosing commit rolls back",
+		() =>
+			Effect.gen(function* () {
+				yield* createSession();
+				yield* repeat();
+				const commit = yield* makeCommitAndSignal;
+				const sql = yield* SqlClient.SqlClient;
+				const failed = yield* commit(
+					[
+						canonicalEvent(
+							"session.goal_changed",
+							"selected",
+							{
+								sessionId: "selected",
+								goal: {
+									...goal,
+									iterations: 4,
+									lastReason:
+										"Database migration completed; preparing documentation preview.",
+								},
+							},
+							{ provider: "claude", createdAt: 500 },
+						),
+					],
+					{
+						beforeCommit: sql`SELECT * FROM deliberately_missing_table`.pipe(
+							Effect.asVoid,
+						),
+					},
+				).pipe(Effect.exit);
+				expect(Exit.isFailure(failed)).toBe(true);
+				expect(yield* header()).toEqual({ since: 200, lastAt: 400, count: 3 });
+				yield* changeGoal(
+					{
+						sessionId: "selected",
+						goal: { ...goal, iterations: 4, lastReason: reason },
+					},
+					600,
+				);
+				expect(yield* header()).toEqual({ since: 200, lastAt: 600, count: 4 });
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"rejects rolled-back state even when goal facts match and another session reuses its rowid",
+		() =>
+			Effect.gen(function* () {
+				yield* createSession();
+				yield* createSession("other");
+				yield* repeat();
+				const commit = yield* makeCommitAndSignal;
+				const sql = yield* SqlClient.SqlClient;
+				const failed = yield* commit(
+					[2, 3].map((iterations) =>
+						canonicalEvent(
+							"session.goal_changed",
+							"selected",
+							{
+								sessionId: "selected",
+								goal: { ...goal, iterations, lastReason: reason },
+							},
+							{ provider: "claude", createdAt: 500 + iterations },
+						),
+					),
+					{
+						beforeCommit: sql`SELECT * FROM deliberately_missing_table`.pipe(
+							Effect.asVoid,
+						),
+					},
+				).pipe(Effect.exit);
+				expect(Exit.isFailure(failed)).toBe(true);
+				yield* changeGoal(
+					{
+						sessionId: "other",
+						goal: { ...goal, iterations: 1, lastReason: reason },
+					},
+					600,
+				);
+				yield* changeGoal(
+					{
+						sessionId: "selected",
+						goal: { ...goal, iterations: 4, lastReason: reason },
+					},
+					700,
+				);
+				expect(yield* header()).toEqual({ since: 200, lastAt: 700, count: 4 });
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect("rejects a rolled-back watermark from an unrelated session", () =>
+		Effect.gen(function* () {
+			yield* createSession();
+			yield* createSession("other");
+			yield* repeat();
+			const commit = yield* makeCommitAndSignal;
+			const sql = yield* SqlClient.SqlClient;
+			const failed = yield* commit(
+				[
+					canonicalEvent(
+						"session.goal_changed",
+						"other",
+						{
+							sessionId: "other",
+							goal: { ...goal, iterations: 1, lastReason: reason },
+						},
+						{ provider: "claude", createdAt: 500 },
+					),
+					canonicalEvent(
+						"session.goal_changed",
+						"selected",
+						{
+							sessionId: "selected",
+							goal: { ...goal, iterations: 3, lastReason: reason },
+						},
+						{ provider: "claude", createdAt: 600 },
+					),
+				],
+				{
+					beforeCommit: sql`SELECT * FROM deliberately_missing_table`.pipe(
+						Effect.asVoid,
+					),
+				},
+			).pipe(Effect.exit);
+			expect(Exit.isFailure(failed)).toBe(true);
+			yield* changeGoal(
+				{
+					sessionId: "selected",
+					goal: { ...goal, iterations: 4, lastReason: reason },
+				},
+				700,
+			);
+			expect(yield* header()).toEqual({ since: 200, lastAt: 700, count: 4 });
+		}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
+		"recomputes a backfilled gap and replays only the event prefix when future checks exist",
+		() =>
+			Effect.gen(function* () {
+				yield* createSession();
+				yield* repeat();
+				const sql = yield* SqlClient.SqlClient;
+				yield* changeGoal(
+					{
+						sessionId: "selected",
+						goal: { ...goal, iterations: 5, lastReason: reason },
+					},
+					600,
+				);
+				expect(yield* header()).toBeUndefined();
+				yield* sql`INSERT INTO session_goal_checks (event_id, session_id, condition, set_at, iterations, reason, created_at)
+				VALUES ('synthetic-backfill', 'selected', ${goal.condition}, ${goal.setAt}, 4, ${reason}, 500)`;
+				yield* changeGoal(
+					{
+						sessionId: "selected",
+						goal: { ...goal, iterations: 6, lastReason: reason },
+					},
+					700,
+				);
+				expect(yield* header()).toEqual({ since: 200, lastAt: 700, count: 6 });
+				const runner = yield* ProjectionRunnerEffectTag;
+				const events = yield* (yield* EventStoreEffectTag).readBySession(
+					"selected",
+				);
+				for (const iteration of [2, 3, 5, 6]) {
+					const event = events.find(
+						(item) =>
+							item.type === "session.goal_changed" &&
+							item.data.goal?.iterations === iteration,
+					);
+					if (!event) throw new Error("Missing synthetic check event");
+					yield* runner.projectEvent(event);
+					expect(yield* header()).toEqual(
+						iteration < 3
+							? undefined
+							: { since: 200, lastAt: 100 + iteration * 100, count: iteration },
+					);
+				}
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.effect(
 		"upgrades existing sessions with a nullable goal_stuck column",
 		() =>
 			Effect.gen(function* () {
@@ -331,16 +513,15 @@ describe("persisted goal stuck header", () => {
 					for (const scenario of scenarios) {
 						const sessionId = `benchmark-${scenario.name}`;
 						yield* createSession(sessionId);
-						yield* sql`WITH RECURSIVE checks(iteration) AS (SELECT 1 UNION ALL SELECT iteration + 1 FROM checks WHERE iteration < 2499)
+						yield* sql`WITH RECURSIVE checks(iteration) AS (SELECT 1 UNION ALL SELECT iteration + 1 FROM checks WHERE iteration < 2455)
 						INSERT INTO session_goal_checks (event_id, session_id, condition, set_at, iterations, reason, created_at)
 						SELECT ${sessionId} || iteration, ${sessionId}, ${goal.condition}, ${goal.setAt}, iteration,
 						CASE iteration % 3 WHEN 0 THEN ${scenario.reasons[0]} WHEN 1 THEN ${scenario.reasons[1]} ELSE ${scenario.reasons[2]} END,
 						100 + iteration FROM checks`;
+						yield* sql`UPDATE sessions SET goal_state = ${JSON.stringify({ sessionId, goal: { ...goal, iterations: 2455 } })} WHERE id = ${sessionId}`;
 						const timings: number[] = [];
 						const cpuTimings: number[] = [];
 						for (let sample = 0; sample < 45; sample++) {
-							yield* sql`UPDATE sessions SET goal_state = ${JSON.stringify({ sessionId, goal: { ...goal, iterations: 2499 } })}, goal_stuck = ${JSON.stringify({ since: 101, lastAt: 2599, count: 2499 })} WHERE id = ${sessionId}`;
-							yield* sql`DELETE FROM session_goal_checks WHERE session_id = ${sessionId} AND iterations = 2500`;
 							const start = performance.now();
 							const cpuStart = process.cpuUsage();
 							yield* commit([
@@ -351,11 +532,11 @@ describe("persisted goal stuck header", () => {
 										sessionId,
 										goal: {
 											...goal,
-											iterations: 2500,
+											iterations: 2456 + sample,
 											lastReason: scenario.next,
 										},
 									},
-									{ provider: "claude", createdAt: 2600 },
+									{ provider: "claude", createdAt: 2556 + sample },
 								),
 							]);
 							const cpu = process.cpuUsage(cpuStart);

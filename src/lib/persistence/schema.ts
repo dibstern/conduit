@@ -114,6 +114,8 @@ export const MESSAGE_PARTS_RESULT_EVENT_SEQ_INDEX_MIGRATION =
 	"0075_message_parts_result_event_seq_index.sql";
 export const SESSIONS_GOAL_STUCK_MIGRATION = "0076_sessions_goal_stuck.sql";
 export const SESSIONS_JEV_MIGRATION = "0077_sessions_jev.sql";
+export const PROVIDER_CONTROL_PROCESS_MIGRATION =
+	"0078_provider_control_process.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

@@ -89,7 +89,8 @@ describe("Codex discovery failure memory", () => {
 					}),
 				),
 			);
-			const driver = makeCodexRunnerDriver("/tmp/codex-refresh-work");
+			const driver = makeCodexRunnerDriver();
+			const workspaceRoot = "/tmp/codex-refresh-work";
 			const account = {
 				id: AccountIdSchema.make("codex"),
 				driver: "codex" as const,
@@ -98,11 +99,11 @@ describe("Codex discovery failure memory", () => {
 				isDefault: false,
 				usageEligible: false,
 			};
-			yield* Effect.result(driver.discoverEffect(undefined, account));
-			yield* Effect.result(driver.discoverEffect(undefined, account));
+			yield* Effect.result(driver.discoverEffect(workspaceRoot, account));
+			yield* Effect.result(driver.discoverEffect(workspaceRoot, account));
 			expect(connect).toHaveBeenCalledTimes(1);
 			yield* Effect.result(
-				driver.discoverEffect(undefined, account, { refresh: true }),
+				driver.discoverEffect(workspaceRoot, account, { refresh: true }),
 			);
 			expect(connect).toHaveBeenCalledTimes(2);
 		}),

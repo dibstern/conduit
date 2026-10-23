@@ -4,7 +4,7 @@ import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service
 // Browser ids name Conduit's persisted prompts. OpenCode answers use the
 // provider reference on that row, so questions survive relay restarts.
 
-import { Data, Effect, Exit, Option } from "effect";
+import { Data, Effect, Exit, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import {
 	getProviderDriver,
@@ -44,11 +44,13 @@ import {
 	createCommandId,
 } from "../persistence/events.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
+import { RunnerProviderInstance } from "../provider/runner/runner-provider-instance.js";
 import { saveRelaySettings } from "../relay/relay-settings.js";
-import type {
-	PermissionId,
-	ProviderPermissionUpdateDestination,
-	SessionPermissionMode,
+import {
+	type PermissionId,
+	type ProviderPermissionUpdateDestination,
+	ProviderPermissionUpdateSchema,
+	type SessionPermissionMode,
 } from "../shared-types.js";
 import { sendMessageToSession } from "./prompt.js";
 
@@ -108,6 +110,7 @@ interface StoredPromptReference {
 	readonly provider_process_id: string | null;
 	readonly provider_request_id: string | null;
 	readonly run_id: string | null;
+	readonly permission_suggestions: string | null;
 }
 
 const readPromptReference = (
@@ -121,11 +124,26 @@ const readPromptReference = (
 		const [stored] = yield* sql.value<StoredPromptReference>`
 			SELECT id, session_id, type, status, tool_name,
 				provider_process_id, provider_request_id,
+				json_extract(details, '$.permissionSuggestions') AS permission_suggestions,
 				(SELECT json_extract(metadata, '$.runId') FROM events
 				 WHERE session_id = pending_approvals.session_id AND type = ${`${type}.asked`}
 					AND json_extract(data, '$.id') = pending_approvals.id
 				 ORDER BY sequence LIMIT 1) AS run_id
 			FROM pending_approvals WHERE id = ${id} AND type = ${type}`;
+		if (stored?.status === "pending") {
+			// A missing waiter cannot expire an ask still owned by a quarantined runner.
+			const registry = Option.getOrUndefined(
+				yield* Effect.serviceOption(ProviderRegistryTag),
+			);
+			for (const providerId of registry?.listProviders() ?? []) {
+				const provider = registry?.getInstance(providerId);
+				if (!(provider instanceof RunnerProviderInstance)) continue;
+				const failure = yield* provider.getSessionFailureEffect(
+					stored.session_id,
+				);
+				if (failure) return yield* new WsRpcError({ message: failure.message });
+			}
+		}
 		if (stored?.status === "resolved") {
 			const [expired] = yield* sql.value`
 				SELECT 1 FROM events WHERE session_id = ${stored.session_id}
@@ -416,11 +434,28 @@ export const recordPermissionTimedOut = (entry: {
 	readonly id: string;
 	readonly sessionId: string;
 }) =>
-	recordApprovalResolved(
-		canonicalEvent("permission.resolved", entry.sessionId, {
-			id: entry.id,
-			decision: "reject",
-		}),
+	Effect.gen(function* () {
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (Option.isSome(sql)) {
+			const [resolved] = yield* sql.value`SELECT id FROM pending_approvals
+				WHERE id = ${entry.id} AND session_id = ${entry.sessionId} AND type = 'permission' AND status = 'resolved'`;
+			if (resolved) return;
+		}
+		yield* recordApprovalResolved(
+			canonicalEvent(
+				"permission.resolved",
+				entry.sessionId,
+				{
+					id: entry.id,
+					decision: "reject",
+				},
+				{ metadata: { source: "permission-timeout" } },
+			),
+		);
+	}).pipe(
+		Effect.catch((cause) =>
+			Effect.logWarning("Could not record permission timeout", cause),
+		),
 	);
 
 /** Persist permission rule to opencode.jsonc. */
@@ -501,6 +536,71 @@ export const handlePermissionResponse = (
 		const visibleSessionId = wsHandler.getClientSession(clientId) ?? "";
 		const stored = yield* readPromptReference(requestId, "permission");
 		if (stored?.status === "resolved") return;
+		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		if (Option.isSome(engineOption)) {
+			const pending =
+				(yield* pendingInteractions.listPendingPermissions()).find(
+					(entry) => entry.requestId === requestId,
+				);
+			const mapped =
+				decision === "allow"
+					? "once"
+					: decision === "allow_always"
+						? "always"
+						: decision === "deny"
+							? "reject"
+							: undefined;
+			if (!mapped || (!stored && !pending)) return;
+			const sessionId =
+				stored?.session_id || pending?.sessionId || visibleSessionId;
+			const suggestions =
+				pending?.permissionSuggestions ??
+				(stored?.permission_suggestions
+					? yield* Schema.decodeUnknownEffect(
+							Schema.fromJsonString(
+								Schema.Array(ProviderPermissionUpdateSchema),
+							),
+						)(stored.permission_suggestions)
+					: []);
+			const permissionUpdates =
+				mapped === "always" && permissionDestination != null
+					? suggestions.filter(
+							(suggestion) => suggestion.destination === permissionDestination,
+						)
+					: undefined;
+			yield* engineOption.value.dispatchEffect({
+				type: "resolve_permission",
+				commandId: payload.commandId ?? createCommandId(),
+				sessionId,
+				requestId,
+				decision: mapped,
+				...(stored?.provider_process_id
+					? { providerProcessId: stored.provider_process_id }
+					: {}),
+				...(stored?.provider_request_id
+					? { nativeRequestId: stored.provider_request_id }
+					: {}),
+				response: {
+					decision: mapped,
+					...(permissionUpdates != null ? { permissionUpdates } : {}),
+				},
+			});
+			if (decision === "allow_always" && persistScope) {
+				const providerId =
+					yield* engineOption.value.getProviderForSessionEffect(sessionId);
+				if (
+					(getProviderDriver(providerId) ?? PROVIDER_DRIVERS.opencode)
+						.runsOpenCodeServer
+				)
+					yield* persistPermissionRule(
+						stored?.tool_name ?? pending?.toolName ?? "",
+						persistScope,
+						persistPattern,
+					);
+			}
+			yield* restartProcessingTimeout(sessionId, stored?.run_id);
+			return;
+		}
 		if (stored?.provider_process_id?.startsWith("opencode:")) {
 			yield* resolveOpenCodeQuestionTarget(stored.session_id, stored);
 		}
@@ -543,8 +643,18 @@ export const handlePermissionResponse = (
 			);
 
 			const engine = yield* OrchestrationEngineTag;
+			const call = yield* engine.resolveSessionCallContextEffect(
+				sessionId,
+				undefined,
+				{
+					...(stored?.run_id ? { runId: stored.run_id } : {}),
+					prompt: { id: stored?.id ?? requestId, kind: "permission" },
+				},
+			);
 			const bindingId = yield* engine.getProviderForSessionEffect(sessionId);
-			const traits = getProviderDriver(bindingId) ?? PROVIDER_DRIVERS.opencode;
+			const traits =
+				getProviderDriver(call?.account.driver ?? bindingId) ??
+				PROVIDER_DRIVERS.opencode;
 
 			// The adapter owns the reply: it scopes "always" to the session.
 			const opencode = traits.runsOpenCodeServer
@@ -557,6 +667,7 @@ export const handlePermissionResponse = (
 						stored?.provider_request_id ?? requestId,
 						result.mapped,
 						stored?.provider_process_id ?? undefined,
+						...(call ? ([call] as const) : []),
 					),
 				);
 				if (replied._tag === "Failure" && stored?.provider_process_id) {
@@ -650,20 +761,20 @@ export const handleAskUserResponse = (
 			wsHandler.getClientSession(clientId),
 		);
 		if (stored?.status === "resolved") return;
-		const sessionId =
-			stored?.session_id ?? wsHandler.getClientSession(clientId) ?? "";
-		const providerRequestId = stored?.provider_request_id ?? toolId;
-
-		const formatted = formatAnswers(answers);
 		const pendingInteractionsOption = yield* Effect.serviceOption(
 			PendingInteractionServiceTag,
 		);
-		const pendingQuestions = Option.isSome(pendingInteractionsOption)
-			? yield* pendingInteractionsOption.value.listPendingQuestions()
-			: [];
-		const pendingQuestion = pendingQuestions.find(
-			(question) => question.requestId === toolId,
-		);
+		const pendingQuestion = Option.isSome(pendingInteractionsOption)
+			? (yield* pendingInteractionsOption.value.listPendingQuestions()).find(
+					(question) => question.requestId === toolId,
+				)
+			: undefined;
+		const sessionId =
+			stored?.session_id ||
+			pendingQuestion?.sessionId ||
+			wsHandler.getClientSession(clientId) ||
+			"";
+		const formatted = formatAnswers(answers);
 		const loggedAnswers = pendingQuestion?.questions.some(
 			(question) => question.isSecret,
 		)
@@ -672,6 +783,7 @@ export const handleAskUserResponse = (
 		log.info(
 			`client=${clientId} session=${sessionId} answering: ${toolId} payload=${JSON.stringify({ id: toolId, answers: loggedAnswers })}`,
 		);
+		// Codex async questions are answered by a follow-up message, not the provider.
 		if (pendingQuestion?.delivery === "async") {
 			const question = pendingQuestion;
 			return yield* resolveAsyncQuestion(
@@ -697,6 +809,25 @@ export const handleAskUserResponse = (
 						yield* sendMessageToSession({ ...input, delivery: "queue" });
 				}),
 			);
+		}
+		const providerProcessId =
+			stored?.provider_process_id ?? pendingQuestion?.providerProcessId;
+		const nativeRequestId =
+			stored?.provider_request_id ?? pendingQuestion?.providerRequestId;
+		const providerRequestId = nativeRequestId ?? toolId;
+		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		if (Option.isSome(engineOption)) {
+			yield* engineOption.value.dispatchEffect({
+				type: "resolve_question",
+				commandId: payload.commandId ?? createCommandId(),
+				sessionId,
+				requestId: toolId,
+				answers,
+				...(providerProcessId ? { providerProcessId } : {}),
+				...(nativeRequestId ? { nativeRequestId } : {}),
+			});
+			yield* restartProcessingTimeout(sessionId, stored?.run_id);
+			return;
 		}
 
 		if (pendingInteractionsOption._tag === "Some") {
@@ -883,23 +1014,60 @@ export const handleQuestionReject = (
 			wsHandler.getClientSession(clientId),
 		);
 		if (stored?.status === "resolved") return;
-		const sessionId =
-			stored?.session_id ?? wsHandler.getClientSession(clientId) ?? "";
-		const providerRequestId = stored?.provider_request_id ?? toolId;
-
-		log.info(`client=${clientId} session=${sessionId} rejecting: ${toolId}`);
-
 		const pendingInteractionsOption = yield* Effect.serviceOption(
 			PendingInteractionServiceTag,
 		);
+		const pendingQuestion = Option.isSome(pendingInteractionsOption)
+			? (yield* pendingInteractionsOption.value.listPendingQuestions()).find(
+					(question) => question.requestId === toolId,
+				)
+			: undefined;
+		const sessionId =
+			stored?.session_id ||
+			pendingQuestion?.sessionId ||
+			wsHandler.getClientSession(clientId) ||
+			"";
+		const providerProcessId =
+			stored?.provider_process_id ?? pendingQuestion?.providerProcessId;
+		const nativeRequestId =
+			stored?.provider_request_id ?? pendingQuestion?.providerRequestId;
+		const providerRequestId = nativeRequestId ?? toolId;
+		// Codex async questions are dismissed locally; the provider never waits on them.
+		if (pendingQuestion?.delivery === "async")
+			return yield* resolveAsyncQuestion(pendingQuestion, null);
+		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
+		if (Option.isSome(engineOption)) {
+			const providerId =
+				yield* engineOption.value.getProviderForSessionEffect(sessionId);
+			if (
+				getProviderDriver(providerId)?.interactionSink === "permission-asking"
+			)
+				return yield* new WsRpcError({
+					message:
+						"Claude questions require an answer before the turn can continue.",
+				});
+			yield* engineOption.value.dispatchEffect({
+				type: "resolve_question",
+				commandId: payload.commandId ?? createCommandId(),
+				sessionId,
+				requestId: toolId,
+				answers: {},
+				operation: "reject",
+				...(providerProcessId ? { providerProcessId } : {}),
+				...(nativeRequestId ? { nativeRequestId } : {}),
+			});
+			yield* restartProcessingTimeout(sessionId, stored?.run_id);
+			return;
+		}
+
+		log.info(`client=${clientId} session=${sessionId} rejecting: ${toolId}`);
+
 		if (pendingInteractionsOption._tag === "Some") {
 			const pendingQuestions =
 				yield* pendingInteractionsOption.value.listPendingQuestions();
 			const pendingQuestion = pendingQuestions.find(
 				(question) => question.requestId === toolId,
 			);
-			if (pendingQuestion?.delivery === "async")
-				return yield* resolveAsyncQuestion(pendingQuestion, null);
 			if (
 				stored?.provider_process_id &&
 				!stored.provider_process_id.startsWith("opencode:") &&

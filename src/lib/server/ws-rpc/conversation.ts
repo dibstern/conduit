@@ -5,7 +5,11 @@ import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
 import { RecapServiceTag } from "../../domain/relay/Services/recap-service.js";
-import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+} from "../../domain/relay/Services/services.js";
 import {
 	type SessionInbox,
 	type SessionInboxOutcome,
@@ -80,11 +84,16 @@ export const conversationHandlers = {
 
 			return yield* Effect.gen(function* () {
 				const registry = yield* ProviderRegistryTag;
+				const call =
+					yield* (yield* OrchestrationEngineTag).resolveSessionCallContextEffect(
+						request.sessionId,
+					);
 				const providerInstance = registry.getInstance("claude");
 				if (providerInstance?.setPermissionModeEffect) {
 					yield* providerInstance.setPermissionModeEffect(
 						request.sessionId,
 						request.mode,
+						...(call ? ([call] as const) : []),
 					);
 				}
 				// OpenCode enforces a Side Thread's mode through session rules.
@@ -105,6 +114,7 @@ export const conversationHandlers = {
 						yield* opencode.setPermissionModeEffect(
 							request.sessionId,
 							request.mode,
+							...(call ? ([call] as const) : []),
 						);
 					}
 				}

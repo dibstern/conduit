@@ -374,16 +374,21 @@ export const getModelsResponse = (
 					yield* globalSync.withPermits(1)(
 						Effect.gen(function* () {
 							const state = yield* Ref.get(yield* OverridesStateTag);
+							const previous = state.nativeDefaultModels.get(config.slug);
 							if (
-								state.nativeDefaultModel?.providerID ===
-									nativeDefault?.providerID &&
-								state.nativeDefaultModel?.modelID === nativeDefault?.modelID
+								previous?.providerID === nativeDefault?.providerID &&
+								previous?.modelID === nativeDefault?.modelID
 							)
 								return;
-							yield* Ref.update(yield* OverridesStateTag, (current) => ({
-								...current,
-								nativeDefaultModel: nativeDefault,
-							}));
+							yield* Ref.update(yield* OverridesStateTag, (current) => {
+								const nativeDefaultModels = new Map(
+									current.nativeDefaultModels,
+								);
+								if (nativeDefault)
+									nativeDefaultModels.set(config.slug, nativeDefault);
+								else nativeDefaultModels.delete(config.slug);
+								return { ...current, nativeDefaultModels };
+							});
 							if (state.defaultModel === undefined)
 								yield* publishProjectSetting({
 									_tag: "defaultModel",
@@ -609,13 +614,21 @@ export const applyLiveSessionSettings = (sessionId: string) =>
 		const registry = yield* ProviderRegistryTag;
 		const instance = registry.getInstance(driver);
 		if (!instance?.applyLiveSettingsEffect) return;
+		const engine = yield* Effect.serviceOption(OrchestrationEngineTag);
+		const call =
+			engine._tag === "Some"
+				? yield* engine.value.resolveSessionCallContextEffect(sessionId)
+				: undefined;
+		const settings = {
+			modelId: row.model_id,
+			contextWindow: row.context_window ?? "",
+			variant: row.variant ?? "",
+		};
 
 		const result = yield* Effect.result(
-			instance.applyLiveSettingsEffect(sessionId, {
-				modelId: row.model_id,
-				contextWindow: row.context_window ?? "",
-				variant: row.variant ?? "",
-			}),
+			call
+				? instance.applyLiveSettingsEffect(sessionId, settings, call)
+				: instance.applyLiveSettingsEffect(sessionId, settings),
 		);
 		if (result._tag === "Failure") {
 			const log = yield* LoggerTag;
