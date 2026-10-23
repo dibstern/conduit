@@ -20,14 +20,20 @@ const SETTLE_MS = 220;
 export const settleMs = () =>
 	matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : SETTLE_MS;
 
+/**
+ * Separate values for `style:` directives: a whole `style` attribute would be
+ * rewritten on every frame, wiping the --sheet-top that sheetPosition sets.
+ */
 export const sheetScrimStyle = ({
 	progress,
 	settling,
 }: {
 	progress: number;
 	settling: boolean;
-}) =>
-	`opacity: ${1 - progress}; transition: ${settling ? `opacity ${SETTLE_MS}ms linear` : "none"}`;
+}) => ({
+	opacity: String(1 - progress),
+	transition: settling ? `opacity ${SETTLE_MS}ms linear` : "none",
+});
 
 /**
  * Offsets a sheet `offset` px from its resting place, of `away` px to be put

@@ -512,6 +512,26 @@ export const setSessionAutoSettleForClient = ({
 		}
 	});
 
+export const setSessionJevForClient = ({
+	clientId,
+	sessionId,
+	jev,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly jev: "on" | "off" | null;
+}) =>
+	Effect.gen(function* () {
+		const service = yield* SessionManagerServiceTag;
+		const log = yield* LoggerTag;
+		if (yield* service.setSessionJev(sessionId, jev)) {
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
+			log.info(`client=${clientId} Set Jev=${jev ?? "default"}: ${sessionId}`);
+		}
+	});
+
 export const snoozeSessionForClient = ({
 	clientId,
 	sessionId,

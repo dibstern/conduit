@@ -24,6 +24,16 @@ export type ProviderType = (typeof PROVIDER_TYPES)[number];
 export const SESSION_STATUSES = ["idle", "busy", "retry", "error"] as const;
 export type SessionStatusValue = (typeof SESSION_STATUSES)[number];
 
+/** Immutable Stop cohort and deadline, committed with its control intent. */
+export const ProviderStopSnapshotSchema = Schema.Struct({
+	deadlineAt: Schema.Number,
+	owners: Schema.Array(Schema.Struct({ runId: Schema.String })),
+	turnIds: Schema.Array(Schema.String),
+	runnerBacked: Schema.Boolean,
+	retainedSteers: Schema.Boolean,
+});
+export type ProviderStopSnapshot = typeof ProviderStopSnapshotSchema.Type;
+
 // Keep in sync with SessionPermissionModeSchema in src/lib/shared-types.ts.
 export const SESSION_PERMISSION_MODES = [
 	"ask",
@@ -122,6 +132,7 @@ export type SessionUnreadPayload = PayloadOf<"session.unread">;
 export type SessionSettledPayload = PayloadOf<"session.settled">;
 
 export type SessionAutoSettleSetPayload = PayloadOf<"session.auto_settle_set">;
+export type SessionJevSetPayload = PayloadOf<"session.jev_set">;
 
 export type SessionUnsettledPayload = PayloadOf<"session.unsettled">;
 export type SessionArchivedPayload = PayloadOf<"session.archived">;
@@ -318,6 +329,23 @@ const TokensSchema = Schema.Struct({
 	cacheWrite: Schema.optionalKey(Schema.Number),
 	/** Omission means capacity unknown; readers also treat legacy zero values as unknown. */
 	contextWindow: Schema.optionalKey(Schema.Number),
+});
+
+const CompletionPayloadSchema = Schema.Struct({
+	messageId: Schema.String,
+	providerStateUpdates: Schema.optionalKey(
+		Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String })),
+	),
+	/** Names the turn when no assistant message of its own answered it. */
+	userMessageId: Schema.optionalKey(Schema.String),
+	cost: Schema.optionalKey(Schema.Number),
+	/** Claude's session running total; cost is its delta at persistence time. */
+	providerCostTotalUsd: Schema.optionalKey(Schema.Number),
+	providerSessionId: Schema.optionalKey(Schema.String).pipe(SessionRef(false)),
+	/** Input and cache tokens in the final main request, excluding output. */
+	contextTokens: Schema.optionalKey(Schema.Number),
+	tokens: Schema.optionalKey(TokensSchema),
+	duration: Schema.optionalKey(Schema.Number),
 });
 
 const CanonicalToolInputSchema = Schema.Union([
@@ -638,29 +666,14 @@ export const CanonicalEvents = {
 	),
 	"turn.completed": live(
 		Schema.Struct({
-			messageId: Schema.String,
+			...CompletionPayloadSchema.fields,
 			continuationKind: Schema.optionalKey(
 				Schema.Literals(["native-thread", "transcript-digest"]),
 			),
-			providerStateUpdates: Schema.optionalKey(
-				Schema.Array(
-					Schema.Struct({ key: Schema.String, value: Schema.String }),
-				),
-			),
-			/** Names the turn when no assistant message of its own answered it. */
-			userMessageId: Schema.optionalKey(Schema.String),
-			cost: Schema.optionalKey(Schema.Number),
-			/** Claude's session running total; cost is its delta at persistence time. */
-			providerCostTotalUsd: Schema.optionalKey(Schema.Number),
-			providerSessionId: Schema.optionalKey(Schema.String).pipe(
-				SessionRef(false),
-			),
-			/** Input and cache tokens in the final main request, excluding output. */
-			contextTokens: Schema.optionalKey(Schema.Number),
-			tokens: Schema.optionalKey(TokensSchema),
-			duration: Schema.optionalKey(Schema.Number),
 		}),
 	),
+	/** Accounting for a background message after its run's terminal. */
+	"message.completed": live(CompletionPayloadSchema),
 	"turn.notice": live(Schema.Struct({ text: Schema.String })),
 	"turn.error": live(
 		Schema.Struct({
@@ -854,6 +867,12 @@ export const CanonicalEvents = {
 			disabled: Schema.Boolean,
 		}),
 	),
+	"session.jev_set": live(
+		Schema.Struct({
+			sessionId: Schema.String.pipe(SessionRef(false)),
+			jev: Schema.NullOr(Schema.Literals(["on", "off"])),
+		}),
+	),
 	"session.unsnoozed": live(
 		Schema.Struct({
 			sessionId: Schema.String.pipe(SessionRef(false)),
@@ -1009,6 +1028,20 @@ export const CanonicalEvents = {
 	// Preserve the empty payload type while accepting historical extra fields.
 	"session.resume_cancelled": live(
 		Schema.Struct({}) as Schema.Codec<Record<string, never>>,
+	),
+	"interrupt.requested": live(
+		Schema.Struct({
+			providerProcessId: Schema.String,
+			turnIds: Schema.optionalKey(Schema.Array(Schema.String)),
+			stop: Schema.optionalKey(ProviderStopSnapshotSchema),
+		}),
+	),
+	"session.end_requested": live(
+		Schema.Struct({
+			providerProcessId: Schema.String,
+			stop: Schema.optionalKey(ProviderStopSnapshotSchema),
+			retireRunIds: Schema.optionalKey(Schema.Array(Schema.String)),
+		}),
 	),
 	"permission.asked": live(
 		Schema.Struct({

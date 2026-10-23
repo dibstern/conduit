@@ -36,7 +36,6 @@ describe("Provider wiring with Claude provider instance", () => {
 			Effect.succeed({ models, commands: [], agents: [] }),
 		);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			capabilitiesService: { get: getCapabilities },
 		});
 		registry.registerInstance(instance);
@@ -46,6 +45,7 @@ describe("Provider wiring with Claude provider instance", () => {
 			engine.dispatchEffect({
 				type: "discover",
 				providerId: "claude",
+				workspaceRoot: workspace,
 			}),
 		);
 
@@ -57,9 +57,7 @@ describe("Provider wiring with Claude provider instance", () => {
 
 	it("shutdownAllEffect shuts down Claude provider instance", async () => {
 		const registry = new ProviderRegistry();
-		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
-		});
+		const instance = makeTestClaudeProviderInstance({});
 		registry.registerInstance(instance);
 
 		// Should not throw
@@ -77,7 +75,6 @@ describe("Provider wiring with Claude provider instance", () => {
 		// Wire up the full stack: ProviderRegistry + ClaudeProviderInstance + OrchestrationEngine
 		const registry = new ProviderRegistry();
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory,
 		});
 		registry.registerInstance(instance);

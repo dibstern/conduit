@@ -43,6 +43,10 @@ import { teeCursorSdkPort } from "../../../src/lib/provider/cursor/sdk-trace.js"
 import { createTraceCursorSdkPort } from "../../../src/lib/provider/cursor/sdk-trace-player.js";
 import { renderForkDigest } from "../../../src/lib/provider/fork-digest.js";
 import {
+	cursorAccountResourcesFixture,
+	cursorCredentialFixture,
+} from "../../helpers/cursor-account-resources-fixture.js";
+import {
 	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
@@ -75,6 +79,11 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 		`${replay.map((row) => JSON.stringify(row)).join("\n")}\n`,
 	);
 	const port = teeCursorSdkPort(createTraceCursorSdkPort(trace), capture);
+	const credential = cursorCredentialFixture();
+	const resources = cursorAccountResourcesFixture(port, {
+		_tag: "Ready",
+		credential,
+	});
 	const discover = vi.fn(() => Effect.die("Cursor called during creation"));
 	const account = {
 		driver: "cursor" as const,
@@ -190,12 +199,13 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 					);
 					expect(expectedDigest).toContain("Fork-local context at first turn");
 					expect(expectedDigest).not.toContain("Original source context");
-					const driver = makeCursorRunnerDriver(root, port, { read, state });
+					const driver = makeCursorRunnerDriver(resources, { read, state });
 					const runner = yield* makeCursorSessionRunner(
 						{
 							workspaceRoot: root,
 							daemonConfigDir: root,
 							port,
+							credential: () => credential,
 							environment: () => ({}),
 						},
 						(output) =>

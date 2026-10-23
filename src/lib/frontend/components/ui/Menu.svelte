@@ -107,6 +107,7 @@
 	let contentNode = $state<HTMLElement | null>(null);
 	let scrimInteractive = $state(false);
 	let scrimFade = $state({ progress: 0, settling: false });
+	const scrimStyle = $derived(sheetScrimStyle(scrimFade));
 	let openingClickDeadline = 0;
 
 	// bits-ui 2.18.1 DropdownMenuTrigger opens on touch pointerup, then its
@@ -252,7 +253,7 @@
 	<DropdownMenu.Portal {...portalProps}>
 		{#if presentation === "sheet"}
 			<div class={sheetEdge === "top" ? "pointer-events-none fixed inset-x-0 z-[var(--z-sheet)] overflow-hidden" : "contents"} style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} use:sheetPosition={sheetEdge}>
-			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} class:pointer-events-none={!scrimInteractive} class:pointer-events-auto={scrimInteractive} style={sheetScrimStyle(scrimFade)} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:exemptFromBackgroundInert></div>{/if}
+			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} class:pointer-events-none={!scrimInteractive} class:pointer-events-auto={scrimInteractive} style:opacity={scrimStyle.opacity} style:transition={scrimStyle.transition} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:exemptFromBackgroundInert></div>{/if}
 			<DropdownMenu.ContentStatic {...sheetContentProps}>
 				{#snippet child({ props })}
 					<!-- Keep the bits-ui focus target on the menu shell. SheetChrome gives the

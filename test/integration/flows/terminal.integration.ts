@@ -4,7 +4,7 @@
 // Verifies shell I/O, multi-client broadcast, close/cleanup, and edge cases.
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { Context, Effect, Option, Schema } from "effect";
+import { Cause, Context, Effect, Exit, Option, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodePtySchema } from "../../../src/lib/contracts/providers/opencode-sdk.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
@@ -393,7 +393,7 @@ describe("Integration: Terminal (PTY)", () => {
 
 	it("does not attach after relay stop while provider acquisition is pending", async () => {
 		const isolated = await createRelayHarness();
-		const client = await connect(isolated);
+		await connect(isolated);
 		const { manager, instances } = await relayServices(isolated);
 		const pty = await createExternalPty(isolated);
 		let release!: () => void;
@@ -401,6 +401,7 @@ describe("Integration: Terminal (PTY)", () => {
 			release = resolve;
 		});
 		const acquiring = vi.fn();
+		let acquisitionInterrupted = false;
 		const acquire = instances.useIfRunning;
 		const useIfRunning = vi
 			.spyOn(instances, "useIfRunning")
@@ -410,7 +411,15 @@ describe("Integration: Terminal (PTY)", () => {
 					if (session?.source !== "opencode" || session.upstream)
 						return acquire(id);
 					acquiring();
-					return Effect.promise(() => held).pipe(Effect.andThen(acquire(id)));
+					return Effect.promise(() => held).pipe(
+						Effect.andThen(acquire(id)),
+						Effect.onExit((exit) =>
+							Effect.sync(() => {
+								acquisitionInterrupted =
+									Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
+							}),
+						),
+					);
 				}),
 			);
 		const delivered = signalDelivered(isolated, pty.id);
@@ -418,21 +427,17 @@ describe("Integration: Terminal (PTY)", () => {
 			signal(isolated, "pty.created", pty);
 			await expect.poll(delivered).toBe(1);
 			await expect.poll(() => acquiring.mock.calls.length).toBeGreaterThan(0);
-			await isolated.stack.stop();
-			release();
-			await new Promise((resolve) => setTimeout(resolve, 100));
-			expect(
-				isolated.mock.diagnostics.filter(
-					({ event }) => event === "pty_connect",
-				),
-			).toHaveLength(0);
-			expect(manager.hasSession(pty.id)).toBe(false);
 		} finally {
+			// Shutdown awaits the scoped acquisition's interruption before release.
+			await isolated.stop();
 			release();
 			useIfRunning.mockRestore();
-			await client.close();
-			await isolated.stop();
 		}
+		expect(acquisitionInterrupted).toBe(true);
+		expect(
+			isolated.mock.diagnostics.filter(({ event }) => event === "pty_connect"),
+		).toHaveLength(0);
+		expect(manager.hasSession(pty.id)).toBe(false);
 	}, 20_000);
 
 	it("does not start a stopped instance in response to a lifecycle signal", async () => {

@@ -39,6 +39,7 @@ describe("daemon project shell env lifecycle", () => {
 		home = mkdtempSync(join(tmpdir(), "conduit-env-lifecycle-"));
 		configDir = mkdtempSync("/tmp/project-env-config-");
 		const project = join(home, "project");
+		const missing = join(home, "missing-project");
 		const added = join(home, "added");
 		mkdirSync(project);
 		mkdirSync(added);
@@ -60,6 +61,13 @@ describe("daemon project shell env lifecycle", () => {
 							folders: [project],
 							slug: "initial",
 							addedAt: 1,
+							shellEnv,
+						},
+						{
+							path: missing,
+							folders: [missing],
+							slug: "missing",
+							addedAt: 2,
 							shellEnv,
 						},
 					],
@@ -94,9 +102,20 @@ describe("daemon project shell env lifecycle", () => {
 				Effect.gen(function* () {
 					const env = yield* ProjectShellEnvTag;
 					// Registration must have started resolution before any query/get call.
-					expect(env.snapshot(project).resolving).toBe(true);
-					yield* Effect.tryPromise(() => env.refresh(project));
-					expect(env.get(project)).toMatchObject({
+					expect(env.snapshot(project, "initial").resolving).toBe(true);
+					yield* Effect.tryPromise(() => env.refresh(missing, "missing"));
+					expect(env.registrations()).toContainEqual({
+						directory: missing,
+						projectId: "missing",
+					});
+					expect(env.snapshot(missing, "missing").warnings).toEqual([
+						expect.stringContaining("could not start"),
+					]);
+					expect(env.get(missing, "missing")["PROJECT_CONFIG"]).toBe(
+						"persisted",
+					);
+					yield* Effect.tryPromise(() => env.refresh(project, "initial"));
+					expect(env.get(project, "initial")).toMatchObject({
 						FROM_LOGIN: "yes",
 						PROJECT_CONFIG: "persisted",
 					});
@@ -110,13 +129,13 @@ describe("daemon project shell env lifecycle", () => {
 					});
 					yield* Effect.tryPromise(() =>
 						vi.waitFor(() =>
-							expect(env.snapshot(added).sources).toEqual([
+							expect(env.snapshot(added, "added").sources).toEqual([
 								"login",
 								"overrides",
 							]),
 						),
 					);
-					expect(env.get(added)["PROJECT_CONFIG"]).toBe("added");
+					expect(env.get(added, "added")["PROJECT_CONFIG"]).toBe("added");
 					yield* remove("added");
 					yield* Effect.tryPromise(() =>
 						vi.waitFor(() => expect(env.directories()).not.toContain(added)),

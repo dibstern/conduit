@@ -1158,7 +1158,7 @@ test("a draft's first send places the session before any navigation frame", asyn
 });
 
 for (const changed of ["unchanged", "text", "images"] as const) {
-	test(`a side-thread start follows the parent and ${changed === "unchanged" ? "clears the unchanged" : `keeps edited ${changed} in the`} composer on Back`, async ({
+	test(`a side-thread start follows the parent and ${changed === "unchanged" ? "clears the unchanged composer" : changed === "text" ? "keeps edited text in the composer" : "keeps the prompt after attachment edits"} on Back`, async ({
 		page,
 		harness,
 	}) => {
@@ -1212,10 +1212,8 @@ for (const changed of ["unchanged", "text", "images"] as const) {
 		started({ sessionId: forked });
 		await expect(page).toHaveURL(new RegExp(`/s/${forked}$`));
 		await expect(page.locator("#input")).toHaveValue("");
-		if (changed === "images")
-			await expect(
-				page.locator('#image-preview img[alt="kept.png"]'),
-			).toBeVisible();
+		// Attachments are cleared on scope changes, including opening a Side Thread.
+		await expect(page.locator("#image-preview")).toBeHidden();
 		await expect(page.locator("#stop")).toBeHidden();
 		await page.goBack();
 		await expect(page).toHaveURL(new RegExp(`/s/${seed}$`));

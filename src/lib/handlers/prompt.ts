@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import {
 	AttachmentValidationError,
 	validateAttachmentDataUrls,
@@ -6,6 +6,7 @@ import {
 import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
 import type { InputDraftKey } from "../contracts/ws-rpc.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
+import { DraftPreWarmTag } from "../domain/relay/Services/draft-prewarm.js";
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
@@ -16,6 +17,8 @@ import {
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { ProviderRegistryTag } from "../provider/provider-registry.js";
+import { assertSessionRunnerAvailable } from "../provider/runner/runner-provider-instance.js";
 
 interface LegacyMessagePayload {
 	text: string;
@@ -70,6 +73,10 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				handedOff: false,
 			} satisfies SendMessageToSessionResult;
 		}
+		yield* assertSessionRunnerAvailable(
+			activeId,
+			Option.getOrUndefined(yield* Effect.serviceOption(ProviderRegistryTag)),
+		);
 		const originalActiveId = activeId;
 		const read = yield* ReadQueryEffectTag;
 		const originalSession = yield* read.getSession(activeId);
@@ -206,4 +213,8 @@ export const syncInputDraft = ({
 		const drafts = yield* InputDraftsTag;
 		const projectId = "draft" in key ? (yield* ConfigTag).slug : undefined;
 		yield* drafts.write(key, text, from, projectId);
+		if ("draft" in key && text === "") {
+			const warm = yield* Effect.serviceOption(DraftPreWarmTag);
+			if (Option.isSome(warm)) yield* warm.value.discardDraft(key.draft);
+		}
 	});

@@ -358,7 +358,11 @@
 		{@const accounts = instancesByDriver[driver] ?? []}
 		{@const presentation = PROVIDER_PRESENTATION[driver]}
 		{#if presentation.auth}
-			<CursorAuthSettings account={accounts[0]} />
+			{#each accounts as account (account.id)}
+				<CursorAuthSettings {account} />
+			{:else}
+				<CursorAuthSettings />
+			{/each}
 		{:else if accounts.length > 0}
 			<SettingsGroup title="{presentation.label} accounts" testId="{driver}-accounts-list">
 				{#snippet actions()}

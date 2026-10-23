@@ -8,7 +8,7 @@ import {
 	type ClaudeUsageReaderOptions,
 	makeClaudeUsageReader,
 } from "../../../provider/claude/claude-usage-probe.js";
-import { makeCodexUsageReader } from "../../../provider/codex/codex-usage.js";
+import { CodexAccountResources } from "../../../provider/codex/codex-account-resources.js";
 import { makeCursorUsage } from "../../../provider/cursor/cursor-usage.js";
 import { usageAccounts } from "../../../provider/usage-reader.js";
 import { AccountDirectory } from "../Services/account-directory.js";
@@ -72,6 +72,7 @@ export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
 		Effect.gen(function* () {
 			const state = yield* DaemonStateTag;
 			const directory = yield* AccountDirectory;
+			const codex = yield* CodexAccountResources;
 			const config = yield* Effect.serviceOption(DaemonConfigRefTag);
 			const accountList = Option.isSome(config)
 				? directory.list.pipe(
@@ -133,7 +134,10 @@ export const UsageLive = (options: ClaudeUsageReaderOptions = {}) =>
 							: undefined;
 					}),
 				readers: {
-					codex: makeCodexUsageReader(initial.configDir),
+					codex: {
+						read: (account) =>
+							codex.use(account.id, ({ usage }) => usage.read(account)),
+					},
 					cursor: cursor.reader,
 					claude: makeClaudeUsageReader({
 						...options,

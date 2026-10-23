@@ -158,6 +158,7 @@ export type ProcessMark =
 	  }
 	| { kind: "pre-assistant-held"; prompt: string; queryId: string }
 	| { kind: "assistant-held"; prompt: string; queryId: string }
+	| { kind: "intake-held"; prompt: string; queryId: string; inputId: string }
 	| {
 			kind: "resume-rejected";
 			prompt: string;
@@ -290,8 +291,9 @@ function mark(message: ProcessMark): void {
 	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
 	if (proof) appendFileSync(proof, `${JSON.stringify(message)}\n`);
 	const send = () => {
+		// The runner can outlive its daemon; diagnostic IPC may close mid-send.
 		if (process.connected)
-			process.send?.({ channel: "conduit-process-test", ...message });
+			process.send?.({ channel: "conduit-process-test", ...message }, () => {});
 	};
 	const delay =
 		message.kind === "enqueue"
@@ -621,6 +623,7 @@ function query(params: {
 	let taskStopHolding = false;
 	let taskStopHeldRequest: string | undefined;
 	let taskTurnInterrupted = false;
+	let interruptibleTurn = false;
 	let closed = false;
 	let promptIndex = 0;
 	let initializationFinished = false;
@@ -918,6 +921,8 @@ function query(params: {
 							.map((block) => block.text)
 							.join("");
 			const request = currentRequest(prompt);
+			interruptibleTurn =
+				request.startsWith("stall-") || request === "terminal-replay-interrupt";
 			const userUuid = input.uuid ?? randomUUID();
 			if (request === "fail-before-intake")
 				throw new Error("Harness SDK iterator failed before intake");
@@ -1005,6 +1010,28 @@ function query(params: {
 				readFileSync(rejectedResume, "utf8") === params.options.resume
 			) {
 				mark({ kind: "resume-rejected", prompt, queryId, sessionId });
+				if (
+					proof &&
+					existsSync(join(dirname(proof), "rejected-resume-as-result"))
+				) {
+					yield {
+						type: "result",
+						subtype: "error_during_execution",
+						uuid: randomUUID(),
+						session_id: sessionId,
+						is_error: true,
+						errors: [`No conversation found with session ID: ${sessionId}`],
+						duration_ms: 0,
+						duration_api_ms: 0,
+						num_turns: 0,
+						stop_reason: null,
+						total_cost_usd: 0,
+						usage: taskStopUsage,
+						modelUsage: {},
+						permission_denials: [],
+					};
+					return;
+				}
 				throw new Error(`No conversation found with session ID: ${sessionId}`);
 			}
 			if (request === "fail-before-assistant-restart") {
@@ -1061,7 +1088,41 @@ function query(params: {
 				};
 				continue;
 			}
+			if (request === "approval-rebind-1" && proof) {
+				const messageId = readFileSync(
+					join(
+						dirname(proof),
+						`rebind-first-${params.options?.env?.["CONDUIT_SESSION_ID"]}`,
+					),
+					"utf8",
+				);
+				// An old message can be replayed by a newly opened account query.
+				// Its ownership still belongs to the run that created that message.
+				yield stream(sessionId, {
+					type: "message_start",
+					message: { id: messageId, role: "assistant", content: [] },
+				});
+				yield stream(sessionId, {
+					type: "content_block_start",
+					index: 9,
+					content_block: { type: "text", text: "late-from-account-A" },
+				});
+				yield stream(sessionId, { type: "content_block_stop", index: 9 });
+			}
 			// Native resume validation precedes intake, as it does in the CLI.
+			if (
+				(request === "load-stream-stop-before-intake" ||
+					request === "relay-replacement-before-intake") &&
+				proof
+			) {
+				mark({ kind: "intake-held", prompt, queryId, inputId: userUuid });
+				while (
+					!existsSync(join(dirname(proof), "release-stop-intake")) &&
+					!closed
+				)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+			}
 			yield {
 				type: "command_lifecycle",
 				state: "started",
@@ -1619,6 +1680,14 @@ function query(params: {
 						? [existsSync(workspaceFile) ? "present" : "absent"]
 						: responseChunks(prompt);
 			const messageId = randomUUID();
+			if (request === "approval-rebind-0" && proof)
+				writeFileSync(
+					join(
+						dirname(proof),
+						`rebind-first-${params.options?.env?.["CONDUIT_SESSION_ID"]}`,
+					),
+					messageId,
+				);
 			const assistantUuid = request.startsWith("rewind-")
 				? randomUUID()
 				: messageId;
@@ -1634,17 +1703,6 @@ function query(params: {
 			for (const [index, text] of chunks.entries()) {
 				if (request === "upgrade-long-turn" && index === 1 && proof) {
 					const release = join(dirname(proof), "release-upgrade-turn");
-					turnHeld = true;
-					mark({ kind: "assistant-held", prompt, queryId });
-					while (!existsSync(release) && !closed) {
-						yield* outOfBand.splice(0);
-						await new Promise<void>((done) => setTimeout(done, 20));
-					}
-					turnHeld = false;
-					if (closed) return;
-				}
-				if (request === "upgrade-recovered-turn" && index === 1 && proof) {
-					const release = join(dirname(proof), "release-upgrade-recovered");
 					turnHeld = true;
 					mark({ kind: "assistant-held", prompt, queryId });
 					while (!existsSync(release) && !closed) {
@@ -1717,12 +1775,19 @@ function query(params: {
 					});
 				}
 			yield stream(sessionId, { type: "content_block_stop", index: 0 });
+			if (interruptibleTurn) {
+				if (request === "terminal-replay-interrupt")
+					mark({ kind: "assistant-held", prompt, queryId });
+				// A control receipt is separate from the native result that ends
+				// these interrupted turns.
+				while (!taskTurnInterrupted && !closed)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+			}
 			const correctionError = request === "task-stop-correction-error";
-			if (
-				(taskTurnInterrupted && request.startsWith("task-stop-foreground")) ||
-				correctionError
-			) {
+			if (taskTurnInterrupted || correctionError) {
 				taskTurnInterrupted = false;
+				interruptibleTurn = false;
 				if (request.includes("correction-duplicate") && proof)
 					while (
 						!existsSync(
@@ -1773,6 +1838,9 @@ function query(params: {
 					permission_denials: [],
 					user_message_uuid: userUuid,
 				};
+				// Exercise recreation after a native terminal and stream end, rather
+				// than depending on Stop to dispose a still-running query.
+				if (request.startsWith("stall-")) return;
 				if (request.includes("correction-steer-boundary") && proof) {
 					mark({
 						kind: "task-stop-turn",
@@ -1791,14 +1859,6 @@ function query(params: {
 				}
 				continue;
 			}
-			if (request.startsWith("stall-"))
-				await new Promise<void>((done) => {
-					params.options?.abortController?.signal.addEventListener(
-						"abort",
-						() => done(),
-						{ once: true },
-					);
-				});
 			const workspaceHintPrefix = "workspace-hint-tools ";
 			const workspaceHintRequest = request
 				.split("\n")
@@ -1813,6 +1873,7 @@ function query(params: {
 					holdBeforeResult?: boolean;
 					failAfterTools?: boolean;
 				};
+				interruptibleTurn = turn.holdBeforeResult === true;
 				const tools: readonly {
 					name: string;
 					input: Record<string, unknown>;
@@ -1882,12 +1943,107 @@ function query(params: {
 					if (!optionsFile)
 						throw new Error("Missing workspace hint fixture gate");
 					const release = join(dirname(optionsFile), "workspace-hint-release");
-					while (!existsSync(release) && !closed)
+					while (!existsSync(release) && !closed && !taskTurnInterrupted)
 						await new Promise<void>((done) => setTimeout(done, 20));
 					if (closed) return;
 				}
 				if (turn.failAfterTools)
 					throw new Error("Harness failure after workspace writes");
+			}
+			// Blocks after the opening text: "tool", "thinking" or text to stream.
+			const foldPrefix = "jev-fold-script ";
+			const foldScript = request
+				.split("\n")
+				.find((line) => line.startsWith(foldPrefix));
+			if (foldScript) {
+				const blocks = JSON.parse(
+					foldScript.slice(foldPrefix.length),
+				) as readonly string[];
+				for (const [offset, block] of blocks.entries()) {
+					const index = offset + 1;
+					const toolUseID = randomUUID();
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index,
+						content_block:
+							block === "tool"
+								? { type: "tool_use", id: toolUseID, name: "Read", input: {} }
+								: block === "thinking"
+									? { type: "thinking", thinking: "", signature: "" }
+									: { type: "text", text: "" },
+					});
+					yield stream(sessionId, {
+						type: "content_block_delta",
+						index,
+						delta:
+							block === "tool"
+								? {
+										type: "input_json_delta",
+										partial_json: JSON.stringify({ file_path: "a.txt" }),
+									}
+								: block === "thinking"
+									? { type: "thinking_delta", thinking: "Considering." }
+									: { type: "text_delta", text: block },
+					});
+					yield stream(sessionId, { type: "content_block_stop", index });
+					if (block === "tool")
+						yield {
+							type: "user",
+							uuid: randomUUID(),
+							session_id: sessionId,
+							parent_tool_use_id: null,
+							message: {
+								role: "user",
+								content: [
+									{
+										type: "tool_result",
+										tool_use_id: toolUseID,
+										content: "read",
+									},
+								],
+							},
+						} as unknown as SDKMessage;
+				}
+			}
+			if (request === "goal-rebind") {
+				yield {
+					type: "assistant",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					parent_tool_use_id: null,
+					message: {
+						id: randomUUID(),
+						role: "assistant",
+						model: "<synthetic>",
+						content: [{ type: "text", text: "Goal set: After rebinding" }],
+					},
+				} as SDKMessage;
+			}
+			if (request.startsWith("approval-rebind-")) {
+				// A resumed SDK query replays identical native facts. The controller
+				// must retain fact deduplication across account-bound queries.
+				yield {
+					type: "active_goal",
+					uuid: "00000000-0000-4000-8000-000000000001",
+					session_id: sessionId,
+					value: {
+						condition: "Finish the rebind",
+						iterations: 0,
+						set_at: 1234,
+						tokens_at_start: 0,
+					},
+				};
+				yield {
+					type: "user",
+					uuid: "00000000-0000-4000-8000-000000000002",
+					session_id: sessionId,
+					isSynthetic: true,
+					parent_tool_use_id: null,
+					message: {
+						role: "user",
+						content: "Stop hook feedback:\n[Finish the rebind]: Keep going",
+					},
+				};
 			}
 			if (request.startsWith("question-")) {
 				if (!params.options?.canUseTool)
@@ -1946,6 +2102,7 @@ function query(params: {
 			// A long Bash call. With a proof directory it stays running until the
 			// spec releases its result; without one it completes straight away.
 			if (request.startsWith("tool-long-")) {
+				interruptibleTurn = true;
 				const toolUseID = randomUUID();
 				yield stream(sessionId, {
 					type: "content_block_start",
@@ -1959,7 +2116,12 @@ function query(params: {
 				});
 				yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				const release = proof && join(dirname(proof), "release-tool-long");
-				while (release && !existsSync(release) && !closed)
+				while (
+					release &&
+					!existsSync(release) &&
+					!closed &&
+					!taskTurnInterrupted
+				)
 					await new Promise<void>((done) => setTimeout(done, 20));
 				if (closed) return;
 				yield {
@@ -1973,8 +2135,8 @@ function query(params: {
 							{
 								type: "tool_result",
 								tool_use_id: toolUseID,
-								content: LONG_RESULT,
-								is_error: false,
+								content: taskTurnInterrupted ? "Tool interrupted" : LONG_RESULT,
+								is_error: taskTurnInterrupted,
 							},
 						],
 					},
@@ -2137,64 +2299,6 @@ function query(params: {
 					],
 				} as unknown as SDKMessage;
 			}
-			if (
-				request === "upgrade-long-turn" &&
-				proof &&
-				existsSync(join(dirname(proof), "legacy-output-details"))
-			) {
-				for (const [index, name, id, input] of [
-					[
-						1,
-						"Bash",
-						"legacy-upgrade-bash",
-						{ command: "printf legacy-output" },
-					],
-					[
-						2,
-						"Agent",
-						"legacy-upgrade-agent",
-						{
-							description: "Legacy runner child",
-							prompt: "Review the changes",
-							subagent_type: "general-purpose",
-						},
-					],
-				] as const) {
-					yield stream(sessionId, {
-						type: "content_block_start",
-						index,
-						content_block: { type: "tool_use", id, name, input },
-					});
-					yield stream(sessionId, { type: "content_block_stop", index });
-				}
-				yield {
-					type: "user",
-					uuid: randomUUID(),
-					session_id: sessionId,
-					parent_tool_use_id: null,
-					message: {
-						role: "user",
-						content: [
-							{
-								type: "tool_result",
-								tool_use_id: "legacy-upgrade-bash",
-								content: "legacy-output",
-								is_error: false,
-							},
-						],
-					},
-				} as unknown as SDKMessage;
-				yield {
-					type: "system",
-					subtype: "task_started",
-					uuid: randomUUID(),
-					session_id: sessionId,
-					task_id: "legacy-upgrade-child",
-					tool_use_id: "legacy-upgrade-agent",
-					description: "Legacy runner child",
-					task_type: "local_agent",
-				} as unknown as SDKMessage;
-			}
 			if (request === "review-subagent-finalizer") {
 				// The SDK emits the Agent tool call before its task lifecycle messages.
 				yield stream(sessionId, {
@@ -2265,11 +2369,6 @@ function query(params: {
 					content: [{ type: "text", text: chunks.join("") }],
 				},
 			} as unknown as SDKMessage;
-			if (request === "terminal-replay-interrupt") {
-				mark({ kind: "assistant-held", prompt, queryId });
-				while (!closed) await new Promise<void>((done) => setTimeout(done, 20));
-				return;
-			}
 			if (request.startsWith("task-stop-foreground"))
 				mark({
 					kind: "task-stop-turn",
@@ -2277,17 +2376,24 @@ function query(params: {
 					queryId,
 					at: process.hrtime.bigint().toString(),
 				});
+			// Interrupting a held tool ends through a native result, independently
+			// of the interrupt acknowledgement, just like the earlier held turns.
+			const interrupted = taskTurnInterrupted;
+			taskTurnInterrupted = false;
+			interruptibleTurn = false;
 			yield {
 				type: "result",
-				subtype: "success",
+				subtype: interrupted ? "error_during_execution" : "success",
 				uuid: randomUUID(),
 				session_id: sessionId,
-				is_error: false,
+				is_error: interrupted,
 				duration_ms: 0,
 				duration_api_ms: 0,
 				num_turns: 1,
-				result: chunks.join(""),
-				stop_reason: "end_turn",
+				...(interrupted
+					? { errors: ["Execution ended"], user_message_uuid: userUuid }
+					: { result: chunks.join("") }),
+				stop_reason: interrupted ? null : "end_turn",
 				total_cost_usd: 0,
 				usage: {
 					input_tokens: 1,
@@ -2652,7 +2758,7 @@ function query(params: {
 				});
 				throw new Error("Fixture interrupt rejected");
 			}
-			if (taskStopHolding) taskTurnInterrupted = true;
+			if (taskStopHolding || interruptibleTurn) taskTurnInterrupted = true;
 			mark({
 				kind: "query-interrupted",
 				queryId,
@@ -2807,7 +2913,7 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 		if (file)
 			appendFileSync(
 				file,
-				`${JSON.stringify({ prompt: params.prompt, cwd: params.options?.cwd })}\n`,
+				`${JSON.stringify({ prompt: params.prompt, cwd: params.options?.cwd, configDir: params.options?.env?.["CLAUDE_CONFIG_DIR"] })}\n`,
 			);
 		const tuning = Schema.decodeUnknownOption(
 			Schema.fromJsonString(

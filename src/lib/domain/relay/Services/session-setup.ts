@@ -1,9 +1,9 @@
 import { Cause, Context, Deferred, Effect, Layer, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SessionSetupFinishedPayloadSchema } from "../../../contracts/project-setup.js";
-import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { readProjectFile } from "../../../daemon/project-file.js";
 import * as Failure from "../../../effect/failure-classification.js";
+import { ConfigSnapshotTag } from "../../daemon/Services/config-persistence-service.js";
 import {
 	allProjects,
 	ProjectRegistryTag,
@@ -32,6 +32,7 @@ export const SessionSetupLive = Layer.effect(
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
 		const registry = yield* Effect.serviceOption(ProjectRegistryTag);
+		const snapshot = yield* Effect.serviceOption(ConfigSnapshotTag);
 		const worktrees = yield* Effect.serviceOption(WorktreeServiceTag);
 		const sql = yield* SqlClient.SqlClient;
 		const scope = yield* Effect.scope;
@@ -73,14 +74,9 @@ export const SessionSetupLive = Layer.effect(
 								? yield* allProjects.pipe(
 										Effect.provideService(ProjectRegistryTag, registry.value),
 									)
-								: yield* Effect.suspend(() =>
-										Effect.fromResult(loadDaemonConfigResult(config.configDir)),
-									).pipe(
-										Effect.map((loaded) => loaded.projects),
-										Effect.catchTag("NotFound", () =>
-											Effect.succeed(undefined),
-										),
-									);
+								: snapshot._tag === "Some"
+									? (yield* snapshot.value.build).projects
+									: [];
 						const setting = projects?.find(
 							(project) => project.slug === config.slug,
 						)?.setupScript;

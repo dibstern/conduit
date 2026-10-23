@@ -130,9 +130,12 @@ export const hasProviderRecoveryCandidate = (
 		return yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ needs_recovery: number }>`SELECT EXISTS (
-				SELECT 1 FROM provider_command_outbox
-				WHERE project_key = ${project.slug} AND (provider_id = 'claude' OR provider_id IN ${sql.in(openCodeInstanceIds)})
-					AND effect_type = 'send_turn' AND status = 'running'
+				SELECT 1 FROM provider_command_outbox command
+				LEFT JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
+				WHERE command.project_key = ${project.slug} AND (command.provider_id = 'claude' OR command.provider_id IN ${sql.in(openCodeInstanceIds)})
+					AND command.effect_type = 'send_turn' AND (command.status = 'running'
+						OR (command.status = 'cancelled' AND command.error_code = 'project_inactive'
+							AND run.status IN ('pending', 'running')))
 			) OR EXISTS (
 				SELECT 1 FROM sessions AS session
 				JOIN session_providers AS binding ON binding.session_id = session.id

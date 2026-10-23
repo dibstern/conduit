@@ -146,6 +146,7 @@ export class OpenCodeApiError extends withTaggedRelayErrorMethods(
 		...RelayErrorFields,
 		endpoint: Schema.String,
 		responseStatus: Schema.Number,
+		retryAfter: Schema.optional(Schema.String),
 		responseBody: Schema.Unknown.pipe(
 			Schema.withDecodingDefaultType(Effect.sync(() => undefined)),
 			Schema.withConstructorDefault(Effect.sync(() => undefined)),
@@ -158,6 +159,7 @@ export class OpenCodeApiError extends withTaggedRelayErrorMethods(
 		message: string;
 		endpoint: string;
 		responseStatus: number;
+		retryAfter?: string;
 		responseBody?: unknown;
 		userVisible?: boolean;
 		context?: Record<string, unknown>;

@@ -103,6 +103,7 @@
 	});
 	const sheet = $derived(presentation === "sheet" || (presentation === "auto" && autoSheet));
 	let scrimFade = $state({ progress: 0, settling: false });
+	const scrimStyle = $derived(sheetScrimStyle(scrimFade));
 	let sheetEl = $state<HTMLDivElement | null>(null);
 	let triggerEl = $state<HTMLButtonElement | null>(null);
 
@@ -210,7 +211,7 @@
 {/snippet}
 
 {#snippet scrim()}
-	<button type="button" tabindex="-1" aria-label="Close details" data-testid={sheetScrim?.testId ?? "popover-sheet-scrim"} class="pointer-events-auto fixed inset-0 z-[var(--z-sheet)] border-0 bg-backdrop p-0" style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} style:z-index={sheetScrim?.zIndex} style={sheetScrimStyle(scrimFade)} onclick={() => handleOpenChange(false)} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:sheetPosition={sheetEdge} use:exemptFromBackgroundInert></button>
+	<button type="button" tabindex="-1" aria-label="Close details" data-testid={sheetScrim?.testId ?? "popover-sheet-scrim"} class="pointer-events-auto fixed inset-0 z-[var(--z-sheet)] border-0 bg-backdrop p-0" style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} style:z-index={sheetScrim?.zIndex} style:opacity={scrimStyle.opacity} style:transition={scrimStyle.transition} onclick={() => handleOpenChange(false)} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:sheetPosition={sheetEdge} use:exemptFromBackgroundInert></button>
 {/snippet}
 
 <BitsPopover.Root bind:open onOpenChange={handleOpenChange}>

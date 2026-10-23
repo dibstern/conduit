@@ -10,8 +10,11 @@ import { ProviderInstanceFailure } from "../errors.js";
 import { resolveRunnerForkDigest } from "../runner/runner-fork-digest.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
 import type { ModelInfo, ProviderCapabilities } from "../types.js";
-import { resolveCursorCredential } from "./cursor-credential.js";
-import { createCursorSdkPort } from "./cursor-sdk.js";
+import { CursorAccountResources } from "./cursor-account-resources.js";
+import {
+	type CursorCredentialLookup,
+	cursorCredentialMessage,
+} from "./cursor-credential.js";
 import { discoverCursorSkillsEffect } from "./cursor-skill-discovery.js";
 import { cursorTurnError } from "./sdk-error.js";
 import type {
@@ -116,7 +119,6 @@ const discoveryFailure = (reason: string, authRequired = false) =>
 		...(authRequired ? { code: "auth_required" as const } : {}),
 	});
 
-let defaultPort: CursorSdkPort | undefined;
 // Local SDK transcript paths use process-global environment variables. Session
 // agents live in child runners; serialize all in-daemon text calls across relays.
 const textGenerationLock = Semaphore.makeUnsafe(1);
@@ -134,15 +136,35 @@ const catalogs = new WeakMap<
 	}
 >();
 export const discoverCursorEffect = (
-	port?: CursorSdkPort,
+	account: Account,
+	workspaceRoot?: string,
+): Effect.Effect<
+	ProviderCapabilities,
+	ProviderInstanceFailure,
+	CursorAccountResources
+> =>
+	Effect.gen(function* () {
+		const resources = yield* CursorAccountResources;
+		return yield* resources
+			.use(account.id, ({ sdk, credential }) =>
+				discoverCursorCatalog(sdk, credential, account, workspaceRoot),
+			)
+			.pipe(
+				Effect.mapError((cause) =>
+					cause instanceof ProviderInstanceFailure
+						? cause
+						: discoveryFailure(cause.message),
+				),
+			);
+	});
+
+const discoverCursorCatalog = (
+	adapter: CursorSdkPort,
+	credentialEffect: Effect.Effect<CursorCredentialLookup, unknown>,
 	account?: Account,
 	workspaceRoot?: string,
 ): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> =>
 	Effect.gen(function* () {
-		const adapter = yield* Effect.try({
-			try: () => port ?? (defaultPort ??= createCursorSdkPort()),
-			catch: () => discoveryFailure("Cursor SDK could not load"),
-		});
 		const runtime = yield* Effect.tryPromise({
 			try: () => adapter.probeRuntime(),
 			catch: () => discoveryFailure("Cursor SDK could not load"),
@@ -151,18 +173,16 @@ export const discoverCursorEffect = (
 			return yield* Effect.fail(
 				discoveryFailure(runtime.reason ?? "Cursor SDK could not load"),
 			);
-		const credential = yield* Effect.tryPromise({
-			try: () =>
-				resolveCursorCredential(adapter, { ...process.env, ...account?.env }),
-			catch: () => discoveryFailure("Cursor credential lookup failed"),
-		});
-		if (!credential)
+		const lookup = yield* credentialEffect.pipe(
+			Effect.mapError(() =>
+				discoveryFailure("Cursor credential lookup failed"),
+			),
+		);
+		if (lookup._tag !== "Ready")
 			return yield* Effect.fail(
-				discoveryFailure(
-					"Cursor authentication required. Log in to Cursor in Settings.",
-					true,
-				),
+				discoveryFailure(cursorCredentialMessage(lookup), true),
 			);
+		const credential = lookup.credential;
 		// Keyed by credential, so a login or logout reads a fresh catalog.
 		const key = JSON.stringify([
 			account?.id ?? "cursor",
@@ -232,260 +252,323 @@ export const discoverCursorEffect = (
 	});
 
 export const makeCursorRunnerDriver = (
-	workspaceRoot: string,
-	port?: CursorSdkPort,
+	resources: CursorAccountResources["Service"],
 	persistence?: {
 		readonly read: ReadQueryEffect;
-		readonly state: ProviderStateEffect;
+		readonly state: Omit<ProviderStateEffect, "projectId">;
 	},
 	daemonConfigDir = DEFAULT_CONFIG_DIR,
-): RunnerDriverPieces => ({
-	driverKind: "cursor",
-	discoverEffect: (directory, account) =>
-		discoverCursorEffect(port, account, directory ?? workspaceRoot),
-	generateTextEffect: (input) =>
-		Effect.gen(function* () {
-			const account =
-				input.account.driver === "cursor" && input.model.providerId === "cursor"
-					? input.account
-					: yield* Effect.fail(
-							new Error(
-								"Cursor text generation requires a Cursor account and model",
-							),
-						);
-			const adapter = yield* Effect.try(
-				() => port ?? (defaultPort ??= createCursorSdkPort()),
-			);
-			const credential = yield* Effect.tryPromise(() =>
-				resolveCursorCredential(adapter, {
-					...process.env,
-					...account.env,
-				}),
-			);
-			if (!credential)
-				return yield* Effect.fail(
-					new ProviderInstanceFailure({
-						providerId: "cursor",
-						operation: "generateText",
-						code: "auth_required",
-						cause: new Error("Cursor authentication required"),
-					}),
-				);
-			const catalog = yield* discoverCursorEffect(adapter, account);
-			const model = catalog.models.find(({ id }) => id === input.model.modelId);
-			if (!model)
-				return yield* Effect.fail(
-					new Error("Cursor title model is not offered"),
-				);
-			// Captured parameter values are cheapest-first. Composer lists its paid
-			// Fast variant first, so neither variant order nor isDefault is suitable.
-			const variant =
-				input.effort ||
-				model.parameters?.combinations.find(({ values }) =>
-					model.parameters?.rows.every(
-						(row) => values[row.id] === row.values[0]?.value,
-					),
-				)?.variant;
-			if (
-				(input.effort && !model.variants?.[input.effort]) ||
-				(model.parameters && !variant)
-			)
-				return yield* Effect.fail(
-					new Error("Cursor title model parameter choice is not offered"),
-				);
-			const params = yield* Schema.decodeUnknownEffect(CursorModelParameters)(
-				variant ? model.variants?.[variant]?.["params"] : [],
-			);
-			const scratchRoot = join(daemonConfigDir, "text-generation");
-			return yield* Effect.acquireUseRelease(
-				Effect.tryPromise(async () => {
-					await mkdir(scratchRoot, { recursive: true });
-					return mkdtemp(join(scratchRoot, "cursor-"));
-				}),
-				(root) =>
-					Effect.uninterruptibleMask((restore) => {
-						const cwd = join(root, "cwd");
-						const storePath = join(root, "store");
-						let store: CursorStore | undefined;
-						let agent: CursorAgent | undefined;
-						let run: CursorRun | undefined;
-						let finished = false;
-						const previous = {
-							CURSOR_DATA_DIR: process.env["CURSOR_DATA_DIR"],
-							CURSOR_SANDBOX_POLICY_DIR:
-								process.env["CURSOR_SANDBOX_POLICY_DIR"],
-						};
-						// Register cleanup before any uncancellable SDK acquisition. Only the
-						// stream/wait is interruptible; late-created handles still get released.
-						return Effect.acquireUseRelease(
-							Effect.sync(() => {
-								// local.store does not redirect transcripts or sandbox-policy writes.
-								process.env["CURSOR_DATA_DIR"] = join(root, "data");
-								process.env["CURSOR_SANDBOX_POLICY_DIR"] = join(
-									root,
-									"sandbox-policies",
+): RunnerDriverPieces => {
+	return {
+		driverKind: "cursor",
+		discoverEffect: (directory, account, _options, call) => {
+			const selected = call?.account ?? account;
+			return selected
+				? discoverCursorEffect(selected, call?.workspaceRoot ?? directory).pipe(
+						Effect.provideService(CursorAccountResources, resources),
+					)
+				: Effect.fail(
+						discoveryFailure("Cursor discovery requires an account", true),
+					);
+		},
+		generateTextEffect: (input) => {
+			const generate = (
+				adapter: CursorSdkPort,
+				credentialEffect: Effect.Effect<CursorCredentialLookup, unknown>,
+			) =>
+				Effect.gen(function* () {
+					const account =
+						input.account.driver === "cursor" &&
+						input.model.providerId === "cursor"
+							? input.account
+							: yield* Effect.fail(
+									new Error(
+										"Cursor text generation requires a Cursor account and model",
+									),
 								);
+					const lookup = yield* credentialEffect;
+					if (lookup._tag !== "Ready")
+						return yield* Effect.fail(
+							new ProviderInstanceFailure({
+								providerId: "cursor",
+								operation: "generateText",
+								code: "auth_required",
+								cause: new Error(cursorCredentialMessage(lookup)),
 							}),
-							() =>
-								Effect.gen(function* () {
-									yield* Effect.tryPromise(() => mkdir(cwd));
-									store = yield* Effect.tryPromise(() =>
-										adapter.openStore(storePath, cwd),
-									);
-									const openedStore = store;
-									agent = yield* Effect.tryPromise(() =>
-										adapter.createAgent(
-											{
-												cwd,
-												dirs: [],
-												settingSources: [],
-												storePath,
-												sandboxOptions: { enabled: true },
-												autoReview: false,
-												tools: [],
-												disallowedTools: ["mcp", "task"],
-												customToolNames: [],
-												subagentInherit: { reportedWorkspacePath: cwd },
-												credentialFingerprint: credential.fingerprint,
-											},
-											credential,
-											openedStore,
-										),
-									);
-									const openedAgent = agent;
-									run = yield* Effect.tryPromise(() =>
-										openedAgent.send(
-											`${input.instructions}\n\n${input.prompt}`,
-											{
-												model: { id: model.id, params },
-												mode: "agent",
-											},
-											() => {},
-										),
-									);
-									const activeRun = run;
-									const result = yield* restore(
-										Effect.tryPromise(async () => {
-											const drained = (async () => {
-												for await (const _ of activeRun.stream) {
-													/* Drain the independent SDK stream. */
-												}
-											})();
-											const [terminal] = await Promise.all([
-												activeRun.wait(),
-												drained,
-											]);
-											return terminal;
-										}).pipe(
-											Effect.flatMap(
-												Schema.decodeUnknownEffect(
-													Schema.Struct({
-														status: Schema.Literal("finished"),
-														result: Schema.String,
-													}),
+						);
+					const credential = lookup.credential;
+					const catalog = yield* discoverCursorCatalog(
+						adapter,
+						Effect.succeed(lookup),
+						account,
+					);
+					const model = catalog.models.find(
+						({ id }) => id === input.model.modelId,
+					);
+					if (!model)
+						return yield* Effect.fail(
+							new Error("Cursor title model is not offered"),
+						);
+					// Captured parameter values are cheapest-first. Composer lists its paid
+					// Fast variant first, so neither variant order nor isDefault is suitable.
+					const variant =
+						input.effort ||
+						model.parameters?.combinations.find(({ values }) =>
+							model.parameters?.rows.every(
+								(row) => values[row.id] === row.values[0]?.value,
+							),
+						)?.variant;
+					if (
+						(input.effort && !model.variants?.[input.effort]) ||
+						(model.parameters && !variant)
+					)
+						return yield* Effect.fail(
+							new Error("Cursor title model parameter choice is not offered"),
+						);
+					const params = yield* Schema.decodeUnknownEffect(
+						CursorModelParameters,
+					)(variant ? model.variants?.[variant]?.["params"] : []);
+					const scratchRoot = join(daemonConfigDir, "text-generation");
+					return yield* Effect.acquireUseRelease(
+						Effect.tryPromise(async () => {
+							await mkdir(scratchRoot, { recursive: true });
+							return mkdtemp(join(scratchRoot, "cursor-"));
+						}),
+						(root) =>
+							Effect.uninterruptibleMask((restore) => {
+								const cwd = join(root, "cwd");
+								const storePath = join(root, "store");
+								let store: CursorStore | undefined;
+								let agent: CursorAgent | undefined;
+								let run: CursorRun | undefined;
+								let finished = false;
+								const previous = {
+									CURSOR_DATA_DIR: process.env["CURSOR_DATA_DIR"],
+									CURSOR_SANDBOX_POLICY_DIR:
+										process.env["CURSOR_SANDBOX_POLICY_DIR"],
+								};
+								// Register cleanup before any uncancellable SDK acquisition. Only the
+								// stream/wait is interruptible; late-created handles still get released.
+								return Effect.acquireUseRelease(
+									Effect.sync(() => {
+										// local.store does not redirect transcripts or sandbox-policy writes.
+										process.env["CURSOR_DATA_DIR"] = join(root, "data");
+										process.env["CURSOR_SANDBOX_POLICY_DIR"] = join(
+											root,
+											"sandbox-policies",
+										);
+									}),
+									() =>
+										Effect.gen(function* () {
+											yield* Effect.tryPromise(() => mkdir(cwd));
+											store = yield* Effect.tryPromise(() =>
+												adapter.openStore(storePath, cwd),
+											);
+											const openedStore = store;
+											agent = yield* Effect.tryPromise(() =>
+												adapter.createAgent(
+													{
+														cwd,
+														dirs: [],
+														settingSources: [],
+														storePath,
+														sandboxOptions: { enabled: true },
+														autoReview: false,
+														tools: [],
+														disallowedTools: ["mcp", "task"],
+														customToolNames: [],
+														subagentInherit: { reportedWorkspacePath: cwd },
+														credentialFingerprint: credential.fingerprint,
+													},
+													credential,
+													openedStore,
 												),
+											);
+											const openedAgent = agent;
+											run = yield* Effect.tryPromise(() =>
+												openedAgent.send(
+													`${input.instructions}\n\n${input.prompt}`,
+													{
+														model: { id: model.id, params },
+														mode: "agent",
+													},
+													() => {},
+												),
+											);
+											const activeRun = run;
+											const result = yield* restore(
+												Effect.tryPromise(async () => {
+													const drained = (async () => {
+														for await (const _ of activeRun.stream) {
+															/* Drain the independent SDK stream. */
+														}
+													})();
+													const [terminal] = await Promise.all([
+														activeRun.wait(),
+														drained,
+													]);
+													return terminal;
+												}).pipe(
+													Effect.flatMap(
+														Schema.decodeUnknownEffect(
+															Schema.Struct({
+																status: Schema.Literal("finished"),
+																result: Schema.String,
+															}),
+														),
+													),
+												),
+											);
+											finished = true;
+											return result.result;
+										}),
+									() =>
+										Effect.tryPromise(async () => {
+											try {
+												if (!finished) await run?.cancel();
+											} finally {
+												try {
+													await agent?.close();
+												} finally {
+													try {
+														if (agent && store)
+															await adapter.deleteAgent(agent.id, cwd, store);
+													} finally {
+														await store?.dispose();
+													}
+												}
+											}
+										}).pipe(
+											Effect.ensuring(
+												Effect.sync(() => {
+													for (const [key, value] of Object.entries(previous)) {
+														if (value === undefined) delete process.env[key];
+														else process.env[key] = value;
+													}
+												}),
 											),
 										),
-									);
-									finished = true;
-									return result.result;
-								}),
-							() =>
-								Effect.tryPromise(async () => {
-									try {
-										if (!finished) await run?.cancel();
-									} finally {
-										try {
-											await agent?.close();
-										} finally {
-											try {
-												if (agent && store)
-													await adapter.deleteAgent(agent.id, cwd, store);
-											} finally {
-												await store?.dispose();
-											}
-										}
-									}
-								}).pipe(
-									Effect.ensuring(
-										Effect.sync(() => {
-											for (const [key, value] of Object.entries(previous)) {
-												if (value === undefined) delete process.env[key];
-												else process.env[key] = value;
-											}
-										}),
-									),
-								),
+								);
+							}),
+						(root) =>
+							Effect.tryPromise(() =>
+								rm(root, { recursive: true, force: true }),
+							),
+					);
+				});
+			return resources
+				.use(input.account.id, ({ sdk, credential }) =>
+					generate(sdk, credential),
+				)
+				.pipe(
+					textGenerationLock.withPermits(1),
+					Effect.mapError(
+						(cause) =>
+							new ProviderInstanceFailure({
+								providerId: "cursor",
+								operation: "generateText",
+								cause,
+								...(cause instanceof ProviderInstanceFailure && cause.code
+									? { code: cause.code }
+									: {}),
+							}),
+					),
+				);
+		},
+		prepareTurnEffect: (input) => {
+			const prepare = (
+				adapter: CursorSdkPort,
+				credentialEffect: Effect.Effect<CursorCredentialLookup, unknown>,
+			) =>
+				Effect.gen(function* () {
+					const lookup = yield* credentialEffect.pipe(
+						Effect.mapError(() =>
+							discoveryFailure("Cursor credential lookup failed"),
+						),
+					);
+					if (lookup._tag !== "Ready")
+						return yield* Effect.fail(
+							discoveryFailure(cursorCredentialMessage(lookup), true),
 						);
-					}),
-				(root) =>
-					Effect.tryPromise(() => rm(root, { recursive: true, force: true })),
-			);
-		}).pipe(
-			textGenerationLock.withPermits(1),
-			Effect.mapError(
-				(cause) =>
-					new ProviderInstanceFailure({
-						providerId: "cursor",
-						operation: "generateText",
-						cause,
-						...(cause instanceof ProviderInstanceFailure && cause.code
-							? { code: cause.code }
-							: {}),
-					}),
-			),
-		),
-	prepareTurnEffect: (input) =>
-		Effect.gen(function* () {
-			const catalog = yield* discoverCursorEffect(port, input.account).pipe(
-				Effect.catch((failure) =>
-					// The runner owns the auth error and its durable turn terminal.
-					failure.code === "auth_required"
-						? Effect.succeed({ models: [] })
-						: Effect.fail(failure),
-				),
-			);
-			const model = catalog.models.find(
-				({ id }) => id === input.model?.modelId,
-			);
-			const variants = model?.variants ?? {};
-			const selected = input.variant ? variants[input.variant] : undefined;
-			if (model && input.variant && !selected)
-				return yield* Effect.fail(
-					discoveryFailure("Cursor model parameter choice is not offered"),
+					const credential = lookup.credential;
+					const catalog = yield* discoverCursorCatalog(
+						adapter,
+						Effect.succeed(lookup),
+						input.account,
+						input.workspaceRoot,
+					).pipe(
+						Effect.catch((failure) =>
+							// The runner owns the auth error and its durable turn terminal.
+							failure.code === "auth_required"
+								? Effect.succeed({ models: [] })
+								: Effect.fail(failure),
+						),
+					);
+					const model = catalog.models.find(
+						({ id }) => id === input.model?.modelId,
+					);
+					const variants = model?.variants ?? {};
+					const selected = input.variant ? variants[input.variant] : undefined;
+					if (model && input.variant && !selected)
+						return yield* Effect.fail(
+							discoveryFailure("Cursor model parameter choice is not offered"),
+						);
+					const variant =
+						selected ??
+						Object.values(variants).find(
+							(variant) => variant["isDefault"] === true,
+						);
+					const params = variant?.["params"] ?? [];
+					const digest = yield* resolveRunnerForkDigest(
+						input,
+						"cursor.forkDigest",
+						persistence,
+					).pipe(
+						Effect.mapError(
+							(cause) =>
+								new ProviderInstanceFailure({
+									providerId: "cursor",
+									operation: "fork seed",
+									cause,
+								}),
+						),
+					);
+					return {
+						cursorCredential: credential,
+						shellEnv: {},
+						input: {
+							...input,
+							// The runner receives the key only in its redacted envelope.
+							shellEnv: {},
+							...(input.account
+								? { account: { ...input.account, env: {} } }
+								: {}),
+							instanceId: input.account?.id ?? input.instanceId ?? "cursor",
+							providerState: {
+								...input.providerState,
+								"cursor.modelParams": params,
+								...(typeof digest === "string"
+									? { "cursor.forkDigest": digest }
+									: {}),
+							},
+						},
+					};
+				});
+			if (!input.account)
+				return Effect.fail(
+					discoveryFailure("Cursor turn requires an account", true),
 				);
-			const variant =
-				selected ??
-				Object.values(variants).find(
-					(variant) => variant["isDefault"] === true,
+			return resources
+				.use(input.account.id, ({ sdk, credential }) =>
+					prepare(sdk, credential),
+				)
+				.pipe(
+					Effect.mapError((cause) =>
+						cause instanceof ProviderInstanceFailure
+							? cause
+							: discoveryFailure(cause.message),
+					),
 				);
-			const params = variant?.["params"] ?? [];
-			const digest = yield* resolveRunnerForkDigest(
-				input,
-				"cursor.forkDigest",
-				persistence,
-			).pipe(
-				Effect.mapError(
-					(cause) =>
-						new ProviderInstanceFailure({
-							providerId: "cursor",
-							operation: "fork seed",
-							cause,
-						}),
-				),
-			);
-			return {
-				input: {
-					...input,
-					instanceId: input.account?.id ?? input.instanceId ?? "cursor",
-					providerState: {
-						...input.providerState,
-						"cursor.modelParams": params,
-						...(typeof digest === "string"
-							? { "cursor.forkDigest": digest }
-							: {}),
-					},
-				},
-			};
-		}),
-});
+		},
+	};
+};

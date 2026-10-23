@@ -209,6 +209,7 @@ export const AgentServiceLive: Layer.Layer<
 									type: "discover",
 									providerId: "claude",
 									account: claude,
+									...(activeSessionId ? { sessionId: activeSessionId } : {}),
 								}),
 							);
 							if (result._tag === "Failure")

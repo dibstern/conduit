@@ -375,6 +375,7 @@ export const SessionInfoSchema = Schema.Struct({
 	archivedAt: Schema.optional(Schema.Number),
 	settledAutomatically: Schema.optional(Schema.Boolean),
 	autoSettleDisabled: Schema.optional(Schema.Boolean),
+	jev: Schema.optional(Schema.NullOr(Schema.Literals(["on", "off"]))),
 	pinnedAt: Schema.optional(Schema.Number),
 	snoozedAt: Schema.optional(Schema.Number),
 	git: Schema.optional(SessionGitSchema),

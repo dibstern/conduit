@@ -243,10 +243,7 @@ function vector(reason: string): Vector {
  * A central observed reason minimises summed cosine distance to all reasons in its run.
  * This computes the exact cosine medoid in O(total tokens), without a pairwise matrix.
  */
-export function detectStuck(
-	checks: readonly Check[],
-	options: Options = {},
-): Result {
+function createStuckDetector(options: Options = {}, retainHistory = true) {
 	const threshold = options.threshold ?? 0.55;
 	const minChecks = options.minChecks ?? 2;
 	const maxGapMs = options.maxGapMs ?? Infinity;
@@ -265,6 +262,8 @@ export function detectStuck(
 	const runs: Run[] = [],
 		verdicts: Verdict[] = [];
 	let members: { check: Check; keys: number[]; inverseNorm: number }[] = [];
+	let count = 0;
+	let first: Check | undefined;
 	const vocabulary = new Map<string, number>();
 	const sum: number[] = [];
 	let sumSquared = 0;
@@ -289,6 +288,8 @@ export function detectStuck(
 			}
 		}
 		members = [];
+		count = 0;
+		first = undefined;
 		vocabulary.clear();
 		sum.length = 0;
 		sumSquared = 0;
@@ -297,7 +298,7 @@ export function detectStuck(
 		polarities = new Map();
 		confirmed = null;
 	};
-	for (const check of checks) {
+	const add = (check: Check) => {
 		if (
 			!Number.isSafeInteger(check.iteration) ||
 			!Number.isFinite(check.at) ||
@@ -317,24 +318,26 @@ export function detectStuck(
 		previous = check;
 		if (!check.reason?.trim()) {
 			finish();
-			verdicts.push({
-				iteration: check.iteration,
-				stuck: false,
-				blockerId: null,
-			});
-			continue;
+			if (retainHistory)
+				verdicts.push({
+					iteration: check.iteration,
+					stuck: false,
+					blockerId: null,
+				});
+			return;
 		}
 		const value = extract(check.reason);
 		if (!value.keys.length) {
 			finish();
-			verdicts.push({
-				iteration: check.iteration,
-				stuck: false,
-				blockerId: null,
-			});
-			continue;
+			if (retainHistory)
+				verdicts.push({
+					iteration: check.iteration,
+					stuck: false,
+					blockerId: null,
+				});
+			return;
 		}
-		if (members.length) {
+		if (count) {
 			let dot = 0;
 			for (const token of value.keys) {
 				const id = vocabulary.get(token);
@@ -398,54 +401,112 @@ export function detectStuck(
 			sum[id] = next;
 			sumSquared += next * next - old * old;
 		}
-		members.push({ check, keys, inverseNorm: value.inverseNorm });
+		if (!count) first = check;
+		count++;
+		if (retainHistory)
+			members.push({ check, keys, inverseNorm: value.inverseNorm });
 		for (const id of value.identifiers) known.add(id);
 		for (const [family, ids] of value.groups) groups.set(family, ids);
 		for (const [predicate, positive] of value.polarities)
 			polarities.set(predicate, positive);
-		if (members.length >= minChecks) {
+		if (count >= minChecks) {
 			if (!confirmed) {
-				const first = members[0]?.check;
-				if (!first) continue;
+				if (!first) return;
 				confirmed = {
 					id: `${first.iteration}@${first.at}`,
 					since: first.at,
 					sinceIteration: first.iteration,
-					count: members.length,
+					count,
 					blocker: first.reason ?? "",
 					until: check.at,
 					untilIteration: check.iteration,
 					detectedAt: check.at,
 					detectedIteration: check.iteration,
 				};
-				runs.push(confirmed);
+				if (retainHistory) runs.push(confirmed);
 			}
-			confirmed.count = members.length;
+			confirmed.count = count;
 			confirmed.until = check.at;
 			confirmed.untilIteration = check.iteration;
 		}
-		verdicts.push({
-			iteration: check.iteration,
-			stuck: confirmed !== null,
-			blockerId: confirmed?.id ?? null,
-		});
-	}
-	const current = confirmed;
-	finish();
+		if (retainHistory)
+			verdicts.push({
+				iteration: check.iteration,
+				stuck: confirmed !== null,
+				blockerId: confirmed?.id ?? null,
+			});
+	};
 	return {
-		stuck: current
-			? {
-					since: current.since,
-					sinceIteration: current.sinceIteration,
-					count: current.count,
-					blocker: current.blocker,
-				}
-			: null,
-		runs,
-		verdicts,
+		add,
+		get first() {
+			return first;
+		},
+		get current() {
+			return confirmed;
+		},
+		result: (): Result => {
+			const current = confirmed;
+			finish();
+			return {
+				stuck: current
+					? {
+							since: current.since,
+							sinceIteration: current.sinceIteration,
+							count: current.count,
+							blocker: current.blocker,
+						}
+					: null,
+				runs,
+				verdicts,
+			};
+		},
 	};
 }
+
+export function detectStuck(
+	checks: readonly Check[],
+	options: Options = {},
+): Result {
+	const detector = createStuckDetector(options);
+	for (const check of checks) detector.add(check);
+	return detector.result();
+}
 export default detectStuck;
+
+const goalOptions = { minChecks: 3, threshold: 0.55 };
+const goalReasonLimit = 4_096;
+
+/** Projection needs the run bounds/count, not the medoid or historical verdicts.
+ * The centroid and identifier context have no finite lookback, so retain those
+ * statistics across checks without retaining the run's reasons or row history.
+ */
+export function createGoalStuckTracker() {
+	const detector = createStuckDetector(goalOptions, false);
+	let at = -Infinity;
+	let since = 0;
+	let invalid = false;
+	return {
+		add(check: Check): { since: number; lastAt: number; count: number } | null {
+			if (invalid) return null;
+			try {
+				at = Math.max(at, check.at);
+				detector.add({
+					...check,
+					at,
+					reason: check.reason?.slice(0, goalReasonLimit) ?? null,
+				});
+				if (detector.first?.iteration === check.iteration) since = check.at;
+				return detector.current
+					? { since, lastAt: check.at, count: detector.current.count }
+					: null;
+			} catch {
+				// One invalid imported prefix invalidates every subsequent verdict too.
+				invalid = true;
+				return null;
+			}
+		},
+	};
+}
 
 /** Production boundary shared by projection and summary generation. */
 export function detectGoalStuck(checks: readonly Check[]): Result {
@@ -456,9 +517,13 @@ export function detectGoalStuck(checks: readonly Check[]): Result {
 				// Iteration owns chronology; leave persisted/display timestamps untouched.
 				at = Math.max(at, check.at);
 				// Real reasons are about 1.5 KB; cap pathological parser work without changing normal evidence.
-				return { ...check, at, reason: check.reason?.slice(0, 4_096) ?? null };
+				return {
+					...check,
+					at,
+					reason: check.reason?.slice(0, goalReasonLimit) ?? null,
+				};
 			}),
-			{ minChecks: 3, threshold: 0.55 },
+			goalOptions,
 		);
 	} catch {
 		// Imported/old histories can violate ordering. Never stall projection or reuse a run key.

@@ -1,5 +1,6 @@
 import {
 	Context,
+	Deferred,
 	Effect,
 	Layer,
 	Option,
@@ -31,9 +32,9 @@ import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
-import { makeCodexAuth } from "../../../provider/codex/codex-auth.js";
+import { CodexAccountResources } from "../../../provider/codex/codex-account-resources.js";
 import { discoverCodex } from "../../../provider/codex/codex-discovery.js";
-import { makeCursorAuth } from "../../../provider/cursor/cursor-auth.js";
+import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
 import {
 	loadRelaySettings,
 	saveRelaySettings,
@@ -146,6 +147,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			| UserAvatar
 			| RelayCacheTag
 			| AccountDirectory
+			| CursorAccountResources
 			| InstanceManagerStateTag
 			| PollerFibersTag
 			| InstanceHealthCheckTag
@@ -250,6 +252,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				| UserAvatar
 				| RelayCacheTag
 				| AccountDirectory
+				| CursorAccountResources
 				| InstanceManagerStateTag
 				| PollerFibersTag
 				| InstanceHealthCheckTag
@@ -277,6 +280,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				A,
 				E,
 				| AccountDirectory
+				| CursorAccountResources
 				| InstanceManagerStateTag
 				| PollerFibersTag
 				| ConfigPersistenceTag
@@ -346,40 +350,84 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
 			return Array.from(yield* discoverInstances);
 		});
-		const cursorAuth = yield* makeCursorAuth((authenticated) =>
+		const cursorResources = yield* CursorAccountResources;
+		const cursorScope = yield* Effect.scope;
+		const cursorSelection = yield* Semaphore.make(1);
+		const cursorAuth = (
+			operation: "read" | "start" | "cancel" | "logout",
+			accountId?: string,
+		) =>
 			run(
 				Effect.gen(function* () {
-					if (
-						authenticated &&
-						!(yield* getInstances).some(
-							(instance) => instance.driver === "cursor",
-						)
-					) {
-						yield* addInstance({ name: "Cursor", driver: "cursor" });
-						yield* persistConfig;
-					}
-					yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
-				}),
-			),
-		);
-		const codexAuth = yield* makeCodexAuth(
-			configDir,
-			(accountId) =>
-				run(
-					Effect.gen(function* () {
-						const account = yield* (yield* AccountDirectory).resolve({
-							_tag: "Id",
-							id: accountId,
-						});
-						if (account.driver === "codex") return account;
-						return yield* Effect.fail(
-							new WsRpcError({ message: "A Codex account is required." }),
+					const accounts = yield* AccountDirectory;
+					const selected = yield* cursorSelection.withPermits(1)(
+						Effect.gen(function* () {
+							let account = yield* accountId !== undefined
+								? Effect.map(accounts.snapshot, (state) =>
+										Option.fromUndefinedOr(
+											state.accounts.find(
+												(account) =>
+													account.id === accountId &&
+													account.driver === "cursor",
+											),
+										),
+									)
+								: accounts.defaultFor("cursor");
+							if (accountId !== undefined && Option.isNone(account))
+								return yield* Effect.fail(
+									new WsRpcError({
+										message: `Cursor account "${accountId}" is unavailable`,
+									}),
+								);
+							if (
+								Option.isNone(account) &&
+								operation === "start" &&
+								(yield* cursorResources.use(
+									{ _tag: "LoginSlot" } as const,
+									({ auth }) => auth.read,
+								)).source !== "environment"
+							) {
+								const added = yield* addInstance({
+									name: "Cursor",
+									driver: "cursor",
+								});
+								yield* persistConfig;
+								account = Option.some(
+									yield* accounts.resolve({ _tag: "Id", id: added.id }),
+								);
+							}
+							return account;
+						}),
+					);
+					const id = Option.isSome(selected)
+						? selected.value.id
+						: ({ _tag: "LoginSlot" } as const);
+					if (operation !== "start")
+						return yield* cursorResources.use(
+							id,
+							({ auth }) => auth[operation],
 						);
-					}),
-				),
-			() =>
-				PubSub.publish(bus, DaemonEvent.InstancesChanged()).pipe(Effect.asVoid),
-		);
+					const started = yield* Deferred.make<
+						import("../../../contracts/ws-rpc.js").CursorAuthState,
+						WsRpcError
+					>();
+					// The RPC returns promptly; demand lasts until the login settles.
+					yield* cursorResources
+						.use(id, ({ auth }) =>
+							auth.start.pipe(
+								Effect.tap((state) => Deferred.succeed(started, state)),
+								Effect.tap(() => auth.awaitLogin),
+							),
+						)
+						.pipe(
+							Effect.onExit((exit) => Deferred.done(started, exit)),
+							Effect.forkIn(cursorScope),
+						);
+					return yield* Deferred.await(started);
+				}),
+			);
+		const codexResources = yield* CodexAccountResources;
+		const codexScope = yield* Effect.scope;
 		// Join the subscriber set BEFORE the first read, so a change landing
 		// between the two still wakes this stream: snapshot, then a fresh list
 		// per change.
@@ -389,6 +437,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				A,
 				E,
 				| AccountDirectory
+				| CursorAccountResources
 				| InstanceManagerStateTag
 				| ProjectRegistryTag
 				| SessionDirectory
@@ -677,15 +726,41 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						})),
 					),
 				),
-			GetCursorAuth: () => cursorAuth.read,
-			StartCursorLogin: () => cursorAuth.start,
-			CancelCursorLogin: () => cursorAuth.cancel,
-			LogoutCursor: () => cursorAuth.logout,
-			GetCodexAuth: (request) => codexAuth.read(request.accountId),
+			GetCursorAuth: (request) => cursorAuth("read", request.accountId),
+			StartCursorLogin: (request) => cursorAuth("start", request.accountId),
+			CancelCursorLogin: (request) => cursorAuth("cancel", request.accountId),
+			LogoutCursor: (request) => cursorAuth("logout", request.accountId),
+			GetCodexAuth: (request) =>
+				codexResources.use(request.accountId, ({ auth }) =>
+					auth.read(request.accountId),
+				),
 			StartCodexLogin: (request) =>
-				codexAuth.start(request.accountId, request.method),
-			CancelCodexLogin: (request) => codexAuth.cancel(request.accountId),
-			LogoutCodex: (request) => codexAuth.logout(request.accountId),
+				Effect.gen(function* () {
+					const started = yield* Deferred.make<
+						import("../../../contracts/ws-rpc.js").CodexAuthState,
+						WsRpcError
+					>();
+					yield* codexResources
+						.use(request.accountId, ({ auth }) =>
+							auth.start(request.accountId, request.method).pipe(
+								Effect.tap((state) => Deferred.succeed(started, state)),
+								Effect.tap(() => auth.awaitLogin(request.accountId)),
+							),
+						)
+						.pipe(
+							Effect.onExit((exit) => Deferred.done(started, exit)),
+							Effect.forkIn(codexScope),
+						);
+					return yield* Deferred.await(started);
+				}),
+			CancelCodexLogin: (request) =>
+				codexResources.use(request.accountId, ({ auth }) =>
+					auth.cancel(request.accountId),
+				),
+			LogoutCodex: (request) =>
+				codexResources.use(request.accountId, ({ auth }) =>
+					auth.logout(request.accountId),
+				),
 			GetInstanceStatus: (request) =>
 				run(
 					getInstance(request.instanceId).pipe(

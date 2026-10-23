@@ -22,10 +22,10 @@ import {
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
 import {
-	createProjectRelay,
 	type ProjectRelay,
 	RelayCreationAbortedError,
 } from "../../../src/lib/relay/relay-stack.js";
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
 interface MockOpenCode {
 	server: Server;
@@ -294,7 +294,10 @@ describe("createProjectRelay override-state defaults", () => {
 			opencodeUrl: "http://127.0.0.1:9",
 			projectDir: process.cwd(),
 			slug: "test-aborted-relay",
-			persistenceDbPath: join(tmpdir(), "conduit-aborted-relay.db"),
+			persistenceDbPath: join(
+				mkdtempSync(join(tmpdir(), "conduit-aborted-relay-")),
+				"events.db",
+			),
 			publishGlobalSetting: () => Effect.void,
 			signal: controller.signal,
 			log: createSilentLogger(),

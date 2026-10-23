@@ -3212,7 +3212,7 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 			if (stuck) {
 				await expect(panel.getByTestId("goal-details-stuck")).toHaveTextContent(
 					paused
-						? "Paused while stuck"
+						? "Paused after 26 minutes stuck"
 						: `Stuck for ${state === "StuckStillCurrent" || state === "StuckUpdating" ? 26 : 24} minutes`,
 				);
 				await expect(panel.getByTestId("goal-details-stuck")).toHaveTextContent(

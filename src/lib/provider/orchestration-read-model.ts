@@ -35,7 +35,8 @@ export interface CommandReceiptSnapshot {
 }
 
 export interface CommandReadModelSnapshot {
-	readonly projectId: string;
+	/** Undefined for the daemon-wide command view. */
+	readonly projectId?: string | undefined;
 	readonly lastEventSequence: number;
 	readonly receipts: ReadonlyMap<string, CommandReceiptSnapshot>;
 	readonly tombstones: ReadonlySet<string>;
@@ -58,16 +59,26 @@ interface LastSequenceRow {
 function tombstoneKey(
 	scopeKind: CommandTombstoneScopeKind,
 	scopeId: string,
+	projectId?: string,
 ): string {
-	return `${scopeKind}:${scopeId}`;
+	return projectId === undefined
+		? `${scopeKind}:${scopeId}`
+		: JSON.stringify([projectId, scopeKind, scopeId]);
 }
 
 export function isCommandScopeTombstoned(
 	snapshot: CommandReadModelSnapshot,
 	scopeKind: CommandTombstoneScopeKind,
 	scopeId: string,
+	projectId = snapshot.projectId,
 ): boolean {
-	return snapshot.tombstones.has(tombstoneKey(scopeKind, scopeId));
+	return snapshot.tombstones.has(
+		tombstoneKey(
+			scopeKind,
+			scopeId,
+			snapshot.projectId === undefined ? projectId : undefined,
+		),
+	);
 }
 
 function toCommandReceiptStatus(status: string): CommandReceiptStatus {
@@ -106,7 +117,7 @@ export interface CommandReceiptCheck {
 export class CommandReadModelRepository {
 	constructor(
 		private readonly sql: SqlClient.SqlClient,
-		private readonly projectId: string,
+		private readonly projectId?: string,
 	) {}
 
 	/**
@@ -141,15 +152,16 @@ export class CommandReadModelRepository {
 			receiptRows: this.sql<CommandReceiptRow>`
 				SELECT project_key, command_id, session_id, status, result_sequence, error, created_at
 				FROM command_receipts
-				WHERE project_key = ${this.projectId}
+				WHERE ${this.projectId === undefined ? this.sql`1 = 1` : this.sql`project_key = ${this.projectId}`}
 				ORDER BY command_id`,
 			lastSequence: this.sql<LastSequenceRow>`
 				SELECT MAX(sequence) AS last_sequence FROM events`,
 			tombstoneRows: this.sql<{
+				readonly project_key: string;
 				readonly scope_kind: string;
 				readonly scope_id: string;
-			}>`SELECT scope_kind, scope_id FROM provider_command_tombstones
-				WHERE project_key = ${this.projectId}`,
+			}>`SELECT project_key, scope_kind, scope_id FROM provider_command_tombstones
+				WHERE ${this.projectId === undefined ? this.sql`1 = 1` : this.sql`project_key = ${this.projectId}`}`,
 		}).pipe(
 			Effect.map(({ receiptRows, lastSequence, tombstoneRows }) => ({
 				projectId: this.projectId,
@@ -165,6 +177,7 @@ export class CommandReadModelRepository {
 						tombstoneKey(
 							row.scope_kind as CommandTombstoneScopeKind,
 							row.scope_id,
+							this.projectId === undefined ? row.project_key : undefined,
 						),
 					),
 				),

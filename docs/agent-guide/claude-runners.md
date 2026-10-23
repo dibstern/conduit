@@ -114,31 +114,19 @@ Protocol mismatches still refuse adoption. A different build with the same
 protocol is adopted and scheduled for upgrade after a turn ends. An adopted idle
 runner upgrades without waiting for another prompt.
 
-A runner whose hello lacks `stampsRunIds` is adopted only to finish retained
-work. The same hello decision holds new sends and steers in the existing
-inbox/outbox until it retires through end-session restart; Stop, approval and
-question answers, and task Stop still reach it. Idle legacy runners retire
-immediately, and explicit Stop retires them after its claimed cohort settles.
-Adoption and retirement each log the session, runner and build identities.
+Every runner driver sends `stampsRunIds: true` in its hello. The daemon refuses
+runners without that capability through the protocol-mismatch failure path,
+with a message that names the build and says it predates run ownership.
+`RUNNER_PROTOCOL_VERSION` stays unchanged so current runners survive restart.
+The runner's check of the daemon hello is unchanged.
 
-A temporary daemon-side output adapter restores the run from each retained
-sink's exact command attempt and current outbox reservation. It stamps root
-messages, tools, usage and terminals before persistence, and restores the
-assistant parent reference to that command's turn for ordinary message
-finalization. Child-session events keep their own ownership. After prior output commits, recovery uses the
-preparation wrapper's final result, so a recoverable native-resume rejection
-cannot end the run before fallback. Authorized fallback sinks retain the
-original command attempt and turn under both input and command aliases. The
-final result emits an owned terminal only if its run is still open; it never
-synthesizes intake.
-Folded steer output follows its actual sink, which the genuine main-build trace
-observes as the steer's sink. A `joined` result never ends a joined target. A
-separate reservation follows the sole retained reply's actual terminal, even
-when that terminal arrives later. The old wire format names no joined target;
-ambiguous retained cohorts stay open until confirmed retirement or death
-settles them as an upgrade error. Projection settles turns, outbox and receipts
-atomically; recovery has no separate legacy completion. This adapter and the compatibility
-hold are removed together by 82tn.31.5.
+When adoption refuses an incompatible live runner, the daemon independently
+checks its registered process identity, stops it with bounded cleanup, and
+confirms its exit before ending its runs as errors. Their turns, commands and
+receipts settle through ordinary owned terminal projection. Startup continues
+without retrying that incompatible runner, and a new send starts a fresh runner.
+Current runners stamp their own output. Recovery restores transport and provider
+state; it never synthesizes completion from a command result.
 
 Project folder changes rebuild the relay. At send admission, the server compares
 an existing runner's launch snapshot with the current main and extra folders.
@@ -151,6 +139,22 @@ stops runners registered under the old folder, since their runtime directory
 uses its hash.
 File mentions, the file browser, terminal cwd and Conduit's Claude settings lookup
 continue to use only the main folder.
+
+Claude runners advertise `rebindsAccount: true` in hello. A same-driver account
+continuation retains the session controller and waits for quiescence before the
+next send closes its SDK query and opens one with the selected login. Login
+comparison includes account identity, account env and frozen shell env as well
+as the config folder. The new query reads its account's native settings; an old
+upgrade snapshot cannot supply another account's credentials. Goal fact
+deduplication, message/run ownership and interaction routing remain with the
+controller, including native-resume fallback. Old query callbacks keep their
+stopped context. Runners without the capability drain and restart on that send.
+Pre-warm hints leave a live controller on its current login; unused warm queries
+can still be replaced before the first send.
+
+The isolated regressions are `test/integration/daemon/claude-account-rebind.test.ts`
+and `claude-controller-failure.test.ts`. The process test writes its observations
+and runner cleanup evidence to `/tmp/82tn9-3-account-rebind.json`.
 
 ## Runner upgrades
 

@@ -35,11 +35,18 @@ import { makeDaemonRpcSocketLayer } from "../../../daemon/daemon-rpc-server.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV, resolveTraceConfig } from "../../../env.js";
 import { startContentionMetrics } from "../../../persistence/contention-metrics.js";
-import { PersistenceStore } from "../../../persistence/effect/live.js";
+import {
+	makePersistenceDaemonLayer,
+	PersistenceStore,
+} from "../../../persistence/effect/live.js";
+import { ClaudeAccountScopesLive } from "../../../provider/claude/claude-account-scopes.js";
 import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
+import { CodexAccountResourcesLive } from "../../../provider/codex/codex-account-resources.js";
+import { CursorAccountResourcesLive } from "../../../provider/cursor/cursor-account-resources.js";
+import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import {
 	ServerBuildUpdateLive,
 	serverExitCode,
@@ -48,11 +55,13 @@ import {
 	BrowserRpcConnectionsLive,
 	makeRoutedWsRpcServerLayer,
 } from "../../../server/ws-rpc.js";
+import { SessionWorkspaceLive } from "../../relay/Layers/session-workspace-layer.js";
 import {
 	InputDraftsLive,
 	releaseInputDraftClaims,
 } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
+import { makeOverridesStateLive } from "../../relay/Services/session-overrides-state.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -103,6 +112,7 @@ import {
 	removeProjectFromEffectRegistry,
 	saveProject,
 } from "../Services/project-registry-service.js";
+import { ProviderAdapters } from "../Services/provider-adapters.js";
 import {
 	makeRelayCacheService,
 	type RelayCache,
@@ -115,6 +125,7 @@ import {
 } from "../Services/session-directory.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AccountPictureLive } from "./account-picture-layer.js";
+import { makeAccountResourceScopesLive } from "./account-resource-scopes-layer.js";
 import { AutoSettleLive } from "./auto-settle-layer.js";
 import { CategorySetLive } from "./category-set-layer.js";
 import {
@@ -123,6 +134,7 @@ import {
 	ConfigSnapshotFromEffectStateLive,
 	makeConfigWriterLive,
 } from "./config-persistence-layer.js";
+import { DaemonOrchestrationLive } from "./daemon-orchestration-layer.js";
 import { makeDaemonSharedStoreLayer } from "./daemon-shared-store-layer.js";
 import {
 	DaemonWsRpcHandlersLive,
@@ -131,12 +143,15 @@ import {
 import { KeepAwakeLive } from "./keep-awake-layer.js";
 import { MessageSurfacingSettingsLive } from "./message-surfacing-settings-layer.js";
 import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
+import { OwnerScopesLive } from "./owner-scopes-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
+import { ProjectContextLive } from "./project-context-layer.js";
 import {
 	makeProjectShellEnvLive,
 	ProjectShellEnvWiringLive,
 } from "./project-shell-env-layer.js";
+import { makeProviderAdaptersLive } from "./provider-adapters-layer.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryLive,
@@ -335,11 +350,14 @@ export const makePortScannerLive = (
 export const DaemonWiringLive: Layer.Layer<
 	never,
 	never,
-	DaemonEventBusTag | ConfigPersistenceTag
+	DaemonEventBusTag | ConfigPersistenceTag | ProviderAdapters
 > = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const bus = yield* DaemonEventBusTag;
 		const persistence = yield* ConfigPersistenceTag;
+		const adapters = yield* ProviderAdapters;
+		// Drain native terminals while project borrows and their sinks remain live.
+		yield* Effect.addFinalizer(() => adapters.shutdown);
 		const sub = yield* PubSub.subscribe(bus);
 
 		yield* Effect.forkScoped(
@@ -714,12 +732,14 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provide(EnsureCertsLive),
 	);
 	const services = Layer.mergeAll(
+		Layer.suspend(() => makeOverridesStateLive(loadRelaySettings(configDir))),
 		CategorySetLive(configDir),
 		AuthManagerFromConfigLive,
 		tlsCertWithDeps,
 		EnsureCertsLive,
 		PushNotificationManagerLive(configDir),
 		makeProjectShellEnvLive(),
+		makeAccountResourceScopesLive(),
 	).pipe(Layer.provideMerge(foundation));
 
 	const versionCheckLayer = options.versionCheck
@@ -805,15 +825,23 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			)
 		: makeInstanceManagerStateLive(undefined, [], instanceManagerOptions);
 
-	const registryState = Layer.mergeAll(
+	const registryBase = Layer.mergeAll(
 		projectRegistryLayer,
 		instanceManagerLayer,
 	)
 		.pipe(Layer.provideMerge(stateLayer))
 		.pipe(Layer.provideMerge(auxiliaryServices));
+	const registryState = Layer.merge(
+		CursorAccountResourcesLive(configDir),
+		CodexAccountResourcesLive(configDir),
+	).pipe(Layer.provideMerge(registryBase));
 
 	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
-		Layer.provideMerge(registryState),
+		Layer.provideMerge(
+			ClaudeAccountScopesLive(configDir).pipe(
+				Layer.provideMerge(registryState),
+			),
+		),
 	);
 
 	const withConfigPersistence = ConfigPersistenceLive.pipe(
@@ -838,23 +866,46 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withOpenCodeInstances));
+	const withOwnerScopes = OwnerScopesLive.pipe(
+		Layer.provideMerge(withSessionDirectory),
+	);
+	const withProjectContext = ProjectContextLive.pipe(
+		Layer.provideMerge(withOwnerScopes),
+	);
 	const withInputDrafts = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;
 			yield* releaseInputDraftClaims().pipe(Effect.provide(store));
 			return InputDraftsLive.pipe(Layer.provide(Layer.succeedContext(store)));
 		}),
-	).pipe(Layer.provideMerge(withSessionDirectory));
+	).pipe(Layer.provideMerge(withProjectContext));
+	// Runner adapters record account usage readings (Codex), so Usage precedes them.
+	const withProviderAdapters = makeProviderAdaptersLive(configDir).pipe(
+		Layer.provideMerge(UsageLive().pipe(Layer.provideMerge(withInputDrafts))),
+	);
+	const withWorktrees = Layer.mergeAll(
+		makeWorktreeLive(configDir, {
+			setupTimeoutMs: ENV.worktreeSetupTimeoutMs,
+		}),
+		MessageSurfacingSettingsLive,
+	).pipe(Layer.provideMerge(withProviderAdapters));
+	const withSessionWorkspace = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			return SessionWorkspaceLive.pipe(
+				Layer.provide(
+					makePersistenceDaemonLayer().pipe(
+						Layer.provideMerge(Layer.succeedContext(store)),
+					),
+				),
+			);
+		}),
+	).pipe(Layer.provideMerge(withWorktrees));
+	const withOrchestration = DaemonOrchestrationLive.pipe(
+		Layer.provideMerge(withSessionWorkspace),
+	);
 	const registries = RelayFactoryLive(configDir).pipe(
-		Layer.provideMerge(
-			Layer.mergeAll(
-				makeWorktreeLive(configDir, {
-					setupTimeoutMs: ENV.worktreeSetupTimeoutMs,
-				}),
-				UsageLive(),
-				MessageSurfacingSettingsLive,
-			).pipe(Layer.provideMerge(withInputDrafts)),
-		),
+		Layer.provideMerge(withOrchestration),
 	);
 
 	const withRelayCache = makeRelayCacheLayer().pipe(

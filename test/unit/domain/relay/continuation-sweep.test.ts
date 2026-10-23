@@ -20,7 +20,7 @@
 // reschedules itself, or releasing the hold overrides a later Stop.
 // A pending rewind refuses a future schedule or quota-reset inbox admission;
 // permitting either to schedule must never permit an immediate continuation.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,6 +47,10 @@ import {
 	AccountDirectory,
 	makeAccountDirectory,
 } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
+import {
+	DaemonConfigRefLive,
+	makeDaemonConfigFromOptions,
+} from "../../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -244,14 +248,7 @@ const withContinuationAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 	);
 };
 
-it.each([
-	"missing",
-	"invalid",
-	"unreadable",
-] as const)("sweeps due continuations only for its own project with %s config", async (scenario) => {
-	if (scenario === "invalid")
-		writeFileSync(join(isolatedRoot, "daemon.json"), "invalid JSON");
-	if (scenario === "unreadable") mkdirSync(join(isolatedRoot, "daemon.json"));
+it("sweeps due continuations only for its own project", async () => {
 	const dispatched: string[] = [];
 	let probes = 0;
 	await Effect.runPromise(
@@ -580,13 +577,6 @@ const withResetInbox = <A, E, R>(
 // Resume provenance must survive the producing service, stored-event decoding,
 // and projection without scheduler tags in metadata.
 it("records Resume schedulers in the payload and projects policy, sweep, and user schedules", async () => {
-	writeFileSync(
-		join(isolatedRoot, "daemon.json"),
-		JSON.stringify({
-			...defaultDaemonConfig(),
-			usageLimits: { autoSwitch: false, autoResume: true, order: [] },
-		}),
-	);
 	const currentTime = Math.floor(Date.now() / 1000);
 	let resetsAt = currentTime + 10;
 	await Effect.runPromise(
@@ -690,7 +680,22 @@ it("records Resume schedulers in the payload and projects policy, sweep, and use
 						},
 					]);
 				}),
-		).pipe(Effect.scoped),
+		).pipe(
+			Effect.scoped,
+			// Daemon config is read from memory at runtime (82tn.18).
+			Effect.provide(
+				DaemonConfigRefLive(
+					makeDaemonConfigFromOptions({
+						usageLimits: {
+							autoSwitch: false,
+							autoResume: true,
+							warnAt: 80,
+							order: [],
+						},
+					}),
+				),
+			),
+		),
 	);
 });
 
@@ -1106,20 +1111,11 @@ for (const scenario of [
 	"unknown",
 ] as const) {
 	it(`due-row gate: ${scenario}`, async () => {
-		if (
+		const autoResume =
 			scenario === "unavailable" ||
 			scenario.endsWith("during-probe") ||
 			scenario === "available" ||
-			scenario === "unknown"
-		) {
-			writeFileSync(
-				join(isolatedRoot, "daemon.json"),
-				JSON.stringify({
-					...defaultDaemonConfig(),
-					usageLimits: { autoSwitch: false, autoResume: true, order: [] },
-				}),
-			);
-		}
+			scenario === "unknown";
 		let probes = 0;
 		let dispatches = 0;
 		await Effect.runPromise(
@@ -1276,6 +1272,23 @@ for (const scenario of [
 				}
 			}).pipe(
 				Effect.provideService(ConfigTag, config),
+				// Daemon config is read from memory at runtime (82tn.18).
+				Effect.provide(
+					DaemonConfigRefLive(
+						makeDaemonConfigFromOptions(
+							autoResume
+								? {
+										usageLimits: {
+											autoSwitch: false,
+											autoResume: true,
+											warnAt: 80,
+											order: [],
+										},
+									}
+								: {},
+						),
+					),
+				),
 				Effect.provideService(Usage, {
 					readings: Stream.empty,
 					latest: () => Effect.succeed(undefined),
@@ -1323,33 +1336,6 @@ for (const scenario of [
 	it(`limit policy: ${scenario}`, async () => {
 		const resetsAt = Math.floor(Date.now() / 1000) + 3600;
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-limit-policy-"));
-		writeFileSync(
-			join(configDir, "daemon.json"),
-			JSON.stringify({
-				pid: process.pid,
-				port: 0,
-				pinHash: null,
-				tls: false,
-				debug: false,
-				keepAwake: false,
-				projects: [],
-				instances: [
-					{
-						id: "target",
-						name: "Target",
-						driver: "claude",
-						port: 0,
-						managed: false,
-					},
-				],
-				usageLimits: {
-					autoSwitch: scenario !== "off",
-					autoResume: true,
-					warnAt: 80,
-					order: ["target"],
-				},
-			}),
-		);
 		const picked: string[] = [];
 		const probed: string[] = [];
 		const dispatched: string[] = [];
@@ -1640,6 +1626,18 @@ for (const scenario of [
 				}).pipe(
 					Effect.scoped,
 					Effect.provideService(ConfigTag, { ...config, configDir }),
+					Effect.provide(
+						DaemonConfigRefLive(
+							makeDaemonConfigFromOptions({
+								usageLimits: {
+									autoSwitch: scenario !== "off",
+									autoResume: true,
+									warnAt: 80,
+									order: ["target"],
+								},
+							}),
+						),
+					),
 					Effect.provideService(ProviderTurnServiceTag, {
 						holdUserTurnsForAccountSwitch: () => Effect.void,
 						prepareTurnSession: (input) => Effect.succeed(input.sessionId),

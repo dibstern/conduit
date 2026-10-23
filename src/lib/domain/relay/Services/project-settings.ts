@@ -278,8 +278,10 @@ const globalSettingRows = (
 	settings: RelaySettings,
 	defaults: OverridesState,
 	titleGeneration: TitleGenerationState,
+	projectId: string,
 ) => {
-	const defaultModel = defaults.defaultModel ?? defaults.nativeDefaultModel;
+	const defaultModel =
+		defaults.defaultModel ?? defaults.nativeDefaultModels.get(projectId);
 	return {
 		defaultModel: {
 			_tag: "defaultModel",
@@ -335,7 +337,10 @@ export const refreshGlobalDefaults = Effect.gen(function* () {
 					: "",
 			defaultPermissionMode: settings.defaultPermissionMode ?? "ask",
 		};
-		return [globalSettingRows(settings, next, titleGeneration), next];
+		return [
+			globalSettingRows(settings, next, titleGeneration, config.slug),
+			next,
+		];
 	});
 });
 
@@ -371,6 +376,7 @@ const readProjectSettings = Effect.gen(function* () {
 				loadRelaySettings(config.configDir),
 				defaults,
 				titleGeneration,
+				config.slug,
 			),
 		),
 		...Object.values(yield* Ref.get((yield* ProjectSettingsTag).live)).filter(

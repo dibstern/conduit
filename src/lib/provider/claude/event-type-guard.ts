@@ -24,6 +24,11 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"tool.running": { produced: true },
 	"tool.completed": { produced: true },
 	"turn.completed": { produced: true },
+	"message.completed": {
+		produced: false,
+		reason:
+			"Persistence separates late message accounting from the run terminal",
+	},
 	"turn.error": { produced: true },
 	"turn.interrupted": { produced: true },
 	"turn.notice": {
@@ -171,6 +176,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Relay-owned triage state",
 	},
+	"session.jev_set": {
+		produced: false,
+		reason: "Relay-owned Jev preference",
+	},
 	"session.unsnoozed": { produced: false, reason: "Relay-owned triage state" },
 	"permission.asked": {
 		produced: false,
@@ -206,6 +215,14 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason:
 			"Relay-owned: the Session Inbox commits it when a queued input is removed",
+	},
+	"interrupt.requested": {
+		produced: false,
+		reason: "Committed by the provider control outbox",
+	},
+	"session.end_requested": {
+		produced: false,
+		reason: "Committed by the provider control outbox",
 	},
 	"input.interrupt_requested": {
 		produced: false,

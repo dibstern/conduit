@@ -45,7 +45,6 @@ export const makeClaudeTextGenerationLayer = (
 						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				));
 			const provider = yield* makeClaudeProviderRuntime({
-				workspaceRoot: process.cwd(),
 				daemonConfigDir,
 				runnerFactory: makeClaudeSessionRunner,
 				generateTextQueryFactory: queryFactory,

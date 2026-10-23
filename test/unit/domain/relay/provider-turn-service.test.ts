@@ -1,12 +1,16 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
+import { Clock, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
 import { SqlClient, Statement } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { afterEach, expect, vi } from "vitest";
-import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
+import { accountsStateFromInstances } from "../../../../src/lib/account-directory.js";
+import {
+	AccountIdSchema,
+	type ClaudeAccount,
+} from "../../../../src/lib/contracts/account.js";
 import {
 	MessageVersion,
 	PartVersion,
@@ -15,6 +19,7 @@ import type { DaemonConfig } from "../../../../src/lib/daemon/config-persistence
 import {
 	AccountDirectory,
 	AccountDirectoryFromConfigLive,
+	AccountDirectoryStateLive,
 } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
@@ -92,6 +97,7 @@ import {
 	OrchestrationEngine,
 	type SendTurnCommand,
 } from "../../../../src/lib/provider/orchestration-engine.js";
+import { CommandReadModelRepository } from "../../../../src/lib/provider/orchestration-read-model.js";
 import {
 	ProviderRegistry,
 	ProviderRegistryTag,
@@ -100,9 +106,11 @@ import {
 	emptyProviderRuntimeDomainMapperState,
 	translateProviderRuntimeEventToDomain,
 } from "../../../../src/lib/provider/provider-runtime-event-to-domain.js";
+import { settleSessionRuns } from "../../../../src/lib/provider/session-run-settlement.js";
 import type {
 	EventSink,
 	ProviderInstance,
+	SendTurnInput,
 	TurnResult,
 } from "../../../../src/lib/provider/types.js";
 import {
@@ -116,6 +124,7 @@ import {
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	PassThroughSessionInbox,
 } from "../../../helpers/mock-factories.js";
 import { partialFake } from "../../../helpers/partial-fake.js";
 import { providerRuntimeEvent } from "../../../helpers/provider-runtime-event.js";
@@ -345,13 +354,17 @@ const makeIngestion = (
 const makeEngine = (input?: {
 	readonly providerId?: string | undefined;
 	readonly result?: TurnResult;
-	readonly dispatchEffect?: OrchestrationEngine["dispatchEffect"];
+	readonly dispatchEffect?: (
+		command: OrchestrationCommand,
+	) => ReturnType<OrchestrationEngine["dispatchEffect"]>;
 }) => {
 	const dispatchEffect =
 		input?.dispatchEffect ??
 		vi.fn(() => Effect.succeed(input?.result ?? completedTurn()));
 	let providerId: string | undefined = input?.providerId;
 	return {
+		resolveCallContextEffect: () => Effect.succeed(undefined),
+		resolveSessionCallContextEffect: () => Effect.succeed(undefined),
 		getProviderForSessionEffect: vi.fn(() => Effect.succeed(providerId)),
 		bindSession: vi.fn((_sessionId: string, nextProviderId: string) => {
 			providerId = nextProviderId;
@@ -504,6 +517,253 @@ const interruptTurn = () =>
 	});
 
 describe("ProviderTurnService", () => {
+	for (const mode of ["refresh", "rebound", "other-driver", "removed"] as const)
+		it.effect(
+			mode === "removed"
+				? "rejects steering after the admitted account is removed with a fallback available"
+				: `steers with current account credentials and the admitted account folder (${mode})`,
+			() => {
+				const account: ClaudeAccount = {
+					id: AccountIdSchema.make("steering-account"),
+					name: "Steering account",
+					driver: "claude",
+					colorSlot: 0,
+					folder: configuredClaudeConfigDir("/tmp/82tn9-current-folder"),
+					usageEligible: false,
+					env: { ANTHROPIC_API_KEY: "synthetic-current-steering-key" },
+				};
+				const admitted: ClaudeAccount = {
+					...account,
+					folder: configuredClaudeConfigDir("/tmp/82tn9-admitted-folder"),
+					env: { ANTHROPIC_API_KEY: "synthetic-admitted-steering-key" },
+				};
+				const extraFolder = mkdtempSync(
+					join(tmpdir(), "82tn9-steering-extra-"),
+				);
+				tempConfigDirs.push(extraFolder);
+				return Effect.gen(function* () {
+					const accountDirectory = yield* AccountDirectory.pipe(
+						Effect.provide(
+							AccountDirectoryStateLive(
+								accountsStateFromInstances(
+									[
+										admitted,
+										{
+											id: "steering-fallback",
+											name: "Fallback",
+											driver: mode === "other-driver" ? "cursor" : "claude",
+											env: { ANTHROPIC_API_KEY: "synthetic-fallback-key" },
+										},
+									],
+									admitted.folder,
+									5,
+									{ defaultAccountIds: { claude: admitted.id } },
+								),
+							),
+						),
+					);
+					const { liveLayer } = serviceLayer({ accountDirectory });
+					return yield* Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						const commit = yield* makeCommitAndSignal;
+						yield* commit([
+							canonicalEvent("session.created", "session-1", {
+								sessionId: "session-1",
+								provider: account.id,
+								title: "Steering credentials",
+							}),
+						]);
+						yield* sql`UPDATE sessions SET model_provider = 'claude', model_id = 'claude-sonnet-4-5', variant = '', context_window = '' WHERE id = 'session-1'`;
+						const running = yield* Deferred.make<SendTurnInput>();
+						const steering = yield* Deferred.make<SendTurnInput>();
+						const release = yield* Deferred.make<void>();
+						const ended = yield* Deferred.make<void>();
+						let ownerRunId: string | undefined;
+						const instance = partialFake<ProviderInstance>({
+							providerId: "claude",
+							sendTurnEffect: (input) =>
+								Effect.gen(function* () {
+									const runId = ownerRunId ?? input.runId;
+									if (!runId || !input.runId)
+										throw new Error("Missing steering run reservation");
+									ownerRunId = runId;
+									yield* input.eventSink.push(
+										providerRuntimeEvent(
+											"run.started",
+											input.sessionId,
+											{ inputId: input.inputId, requestedRunId: input.runId },
+											{ runId, eventId: `started:${input.inputId}` },
+										),
+									);
+									if (input.inputId === "running-input") {
+										yield* Deferred.succeed(running, input);
+										yield* Deferred.await(release);
+										yield* input.eventSink.push(
+											providerRuntimeEvent(
+												"turn.completed",
+												input.sessionId,
+												{ messageId: "" },
+												{ runId },
+											),
+										);
+										yield* Deferred.succeed(ended, undefined);
+										return completedTurn();
+									}
+									yield* Deferred.succeed(steering, input);
+									return completedTurn({ status: "joined" });
+								}).pipe(
+									Effect.mapError(
+										(cause) =>
+											new ProviderInstanceFailure({
+												providerId: "claude",
+												operation: "sendTurn",
+												cause,
+											}),
+									),
+								),
+						});
+						let sequence = 0;
+						const engine = new OrchestrationEngine({
+							registry: new ProviderRegistry([instance]),
+							accountDirectory,
+							durableCommands: {
+								sql,
+								projectKey: "test-project",
+								write: commit.write,
+								snapshot: yield* new CommandReadModelRepository(
+									sql,
+									"test-project",
+								).bootstrap(),
+								ingestion: yield* ProviderRuntimeIngestionTag,
+								persistUserMessage: (yield* ClaudeEventPersistEffectTag)
+									.persistUserMessage,
+								now: () => 1000,
+								generateId: () => `steering-dispatch-${++sequence}`,
+							},
+						});
+						const dispatch = vi.spyOn(engine, "dispatchEffect");
+						yield* Effect.gen(function* () {
+							const service = yield* ProviderTurnServiceTag;
+							yield* service.sendTurn(
+								defaultInput({ commandId: "running-input" }),
+							);
+							const first = yield* Deferred.await(running);
+							const runningStatus =
+								yield* (yield* ReadQueryEffectTag).getSessionStatus(
+									"session-1",
+								);
+							if (mode === "removed") {
+								const state = yield* accountDirectory.apply({
+									_tag: "Remove",
+									id: account.id,
+								});
+								expect(state.deleted).toContainEqual({
+									id: account.id,
+									driver: "claude",
+								});
+								expect(
+									(yield* accountDirectory.resolve({
+										_tag: "Id",
+										id: account.id,
+									})).id,
+								).toBe("steering-fallback");
+								const outcome = yield* Effect.result(
+									service.sendTurn(
+										defaultInput({ commandId: "steering-input", steer: true }),
+									),
+								);
+								expect.soft(outcome).toMatchObject({
+									_tag: "Failure",
+									failure: {
+										_tag: "ProviderInstanceFailure",
+										message: expect.stringContaining(account.id),
+									},
+								});
+								expect
+									.soft(
+										dispatch.mock.calls.filter(
+											([command]) => command.type === "send_turn",
+										),
+									)
+									.toHaveLength(1);
+								yield* Deferred.succeed(release, undefined);
+								yield* Deferred.await(ended);
+								return;
+							}
+							yield* accountDirectory.apply({
+								_tag: "Update",
+								id: account.id,
+								updates: { configDir: account.folder.path, env: account.env },
+							});
+							if (mode === "rebound" || mode === "other-driver") {
+								engine.bindSession("session-1", "steering-fallback");
+								yield* sql`UPDATE sessions SET provider = 'steering-fallback' WHERE id = 'session-1'`;
+							}
+							yield* service.sendTurn(
+								defaultInput({ commandId: "steering-input", steer: true }),
+							);
+							const command = dispatch.mock.calls
+								.map(([command]) => command)
+								.find(
+									(command) =>
+										command.type === "send_turn" &&
+										command.commandId === "steering-input",
+								);
+							if (!command || command.type !== "send_turn")
+								throw new Error("Missing steering dispatch");
+							const delivered = yield* Deferred.await(steering);
+							const observed = {
+								runningStatus,
+								dispatchAccount: command.input.account,
+								account: delivered.account,
+								workspaceRoot: delivered.workspaceRoot,
+								extraFolders: delivered.extraFolders,
+							};
+							mkdirSync("test-results/process-harness", { recursive: true });
+							writeFileSync(
+								`test-results/process-harness/82tn-9-credentials-steering-${mode}.json`,
+								JSON.stringify(observed, null, 2),
+							);
+							expect.soft(runningStatus).toBe("busy");
+							expect
+								.soft(command.input.account)
+								.toEqual({ ...admitted, env: account.env });
+							expect
+								.soft(delivered.account)
+								.toEqual({ ...admitted, env: account.env });
+							expect.soft(delivered.workspaceRoot).toBe(first.workspaceRoot);
+							expect.soft(delivered.extraFolders).toEqual(first.extraFolders);
+							expect.soft(delivered.extraFolders).toEqual([extraFolder]);
+							yield* Deferred.succeed(release, undefined);
+							yield* Deferred.await(ended);
+							expect(
+								yield* sql`SELECT status FROM command_receipts ORDER BY command_id`,
+							).toEqual([
+								{ status: "side_effect_completed" },
+								{ status: "side_effect_completed" },
+							]);
+						}).pipe(
+							Effect.provide(
+								ProviderTurnServiceLive.pipe(
+									Layer.provide(
+										Layer.mergeAll(
+											Layer.succeed(OrchestrationEngineTag)(engine),
+											Layer.succeed(ConfigTag)(
+												makeMockConfig({
+													projectDir: MOCK_PROJECT_DIR,
+													extraFolders: [extraFolder],
+												}),
+											),
+										),
+									),
+									Layer.fresh,
+								),
+							),
+						);
+					}).pipe(Effect.provide(liveLayer));
+				});
+			},
+		);
 	it.effect(
 		"pauses queued handoffs rejected before a provider reservation exists",
 		() => {
@@ -863,6 +1123,54 @@ describe("ProviderTurnService", () => {
 	// waking the inbox drain; the provider acknowledges before the turn ends; a
 	// continuation admitted behind the fence is stopped too.
 	describe("Stop fence", () => {
+		const seedCapturedStop = (commandId = "cmd-interrupt-default") =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const captured = yield* sql<{
+					runId: string;
+					inputId: string;
+				}>`SELECT run_id AS runId, command_id AS inputId FROM provider_command_outbox
+					WHERE session_id = 'session-1' AND effect_type = 'send_turn' AND status = 'running'`;
+				const payload = {
+					type: "interrupt_turn",
+					sessionId: "session-1",
+					providerProcessId: "original-process",
+					turnIds: captured.map(({ inputId }) => inputId),
+					stop: {
+						deadlineAt: (yield* Clock.currentTimeMillis) + STOP_ABORT_WAIT_MS,
+						owners: captured.map(({ runId }) => ({ runId })),
+						turnIds: captured.map(({ inputId }) => inputId),
+						runnerBacked: true,
+						retainedSteers: false,
+					},
+				};
+				yield* sql`INSERT INTO provider_command_outbox
+					(request_sequence, command_id, project_key, session_id, provider_id, effect_type, provider_process_id, payload_json, status, attempt_count, requested_at, updated_at)
+					VALUES (100, ${commandId}, 'test-project', 'session-1', 'claude', 'interrupt_turn', 'original-process', ${JSON.stringify(payload)}, 'running', 1, 1, 1)`;
+			});
+		const confirmProcessLoss = (
+			command: Extract<OrchestrationCommand, { type: "end_session" }>,
+		) =>
+			Effect.gen(function* () {
+				expect(command).toMatchObject({
+					retireProcess: true,
+					targetProviderId: "claude",
+					providerProcessId: "original-process",
+				});
+				const sql = yield* SqlClient.SqlClient;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const owners = yield* sql<{ runId: string }>`SELECT run_id AS runId
+					FROM provider_command_outbox WHERE session_id = ${command.sessionId}
+					AND effect_type = 'send_turn' AND provider_process_id = ${command.providerProcessId}`;
+				yield* settleSessionRuns(
+					sql,
+					command.sessionId,
+					"Provider process exited",
+					(events) => ingestion.ingestBatch(events),
+					{ owners },
+				);
+				return completedTurn();
+			});
 		const seedSession = Effect.flatMap(
 			SqlClient.SqlClient,
 			(
@@ -919,8 +1227,8 @@ describe("ProviderTurnService", () => {
 						: []),
 				]);
 				yield* sql`INSERT INTO provider_command_outbox
-					(request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
-					VALUES (${sequence}, ${inputId}, 'test-project', 'session-1', 'claude', 'send_turn', ${runId},
+					(request_sequence, command_id, project_key, session_id, provider_id, effect_type, provider_process_id, run_id, payload_json, status, attempt_count, requested_at, updated_at)
+					VALUES (${sequence}, ${inputId}, 'test-project', 'session-1', 'claude', 'send_turn', 'original-process', ${runId},
 						${JSON.stringify({ inputId })}, 'running', 1, 1, 1)`;
 				yield* sql`INSERT INTO command_receipts
 					(command_id, session_id, project_key, status, created_at, updated_at)
@@ -1103,65 +1411,16 @@ describe("ProviderTurnService", () => {
 			});
 		}
 
-		it.effect(
-			"notifies a held runner only after Stop's bound has durably settled its cohort",
-			() => {
-				const issued = Deferred.makeUnsafe<void>();
-				const afterStop = vi.fn(() => Effect.void);
-				const registry = new ProviderRegistry([
-					partialFake<ProviderInstance>({
-						providerId: "claude",
-						inputAdmission: {
-							isHeld: () => true,
-							changes: Effect.succeed(Stream.empty),
-							afterStop,
-						},
-					}),
-				]);
-				const engine = makeEngine({
-					providerId: "claude",
-					dispatchEffect: () =>
-						Deferred.succeed(issued, undefined).pipe(
-							Effect.andThen(Effect.never),
-						),
-				});
-				return Effect.gen(function* () {
-					const sql = yield* SqlClient.SqlClient;
-					yield* seedSession;
-					yield* seedClaimedRun("active-input", 1);
-					const stopped = yield* (yield* ProviderTurnServiceTag).beginStop({
-						clientId: "browser",
-						sessionId: "session-1",
-						commandId: "stop",
-					});
-					yield* Deferred.await(issued);
-					expect(afterStop).not.toHaveBeenCalled();
-					yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
-					yield* stopped;
-					expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
-						{ status: "interrupted" },
-					]);
-					expect(
-						yield* sql`SELECT status FROM provider_command_outbox`,
-					).toEqual([{ status: "failed" }]);
-					expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
-						{ status: "side_effect_failed" },
-					]);
-					expect(afterStop).toHaveBeenCalledExactlyOnceWith("session-1");
-				}).pipe(Effect.provide(serviceLayer({ engine, registry }).liveLayer));
-			},
-		);
-
 		for (const providerId of ["claude", "personal-claude"]) {
 			it.effect(
-				`Stop's bound preserves a pending steer on ${providerId} while retiring the running turn`,
+				`Stop preserves a pending steer on ${providerId} after the running turn's native terminal`,
 				() => {
 					const issued = Deferred.makeUnsafe<void>();
 					const engine = makeEngine({
 						providerId,
 						dispatchEffect: () =>
 							Deferred.succeed(issued, undefined).pipe(
-								Effect.andThen(Effect.never),
+								Effect.as(completedTurn()),
 							),
 					});
 					const accountDirectory = makeMockAccountDirectory([
@@ -1206,7 +1465,15 @@ describe("ProviderTurnService", () => {
 						yield* seedClaimedRun("queued-steer", 2, false, false);
 						const stopped = yield* Effect.forkChild(interruptTurn());
 						yield* Deferred.await(issued);
-						yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+						yield* commit([
+							canonicalEvent(
+								"turn.interrupted",
+								"session-1",
+								{ messageId: "" },
+								{ metadata: { runId: "run-active-input" } },
+							),
+						]);
+						yield* TestClock.adjust(100);
 						yield* Fiber.join(stopped);
 						expect(
 							yield* sql`SELECT id, status FROM provider_runs ORDER BY id`,
@@ -1272,14 +1539,14 @@ describe("ProviderTurnService", () => {
 			);
 		}
 
-		for (const replyEnd of ["native result", "Stop bound"] as const) {
+		for (const replyEnd of ["native result", "native interruption"] as const) {
 			it.effect(
 				`Stop after the ${replyEnd} preserves the pending steer and returns without interrupting`,
 				() => {
 					const issued = Deferred.makeUnsafe<void>();
 					const dispatchEffect = vi.fn(() =>
 						Deferred.succeed(issued, undefined).pipe(
-							Effect.andThen(Effect.never),
+							Effect.as(completedTurn()),
 						),
 					);
 					const engine = makeEngine({
@@ -1316,7 +1583,7 @@ describe("ProviderTurnService", () => {
 							}),
 						]);
 						yield* seedClaimedRun("queued-steer", 2, false, false);
-						if (replyEnd === "Stop bound") {
+						if (replyEnd === "native interruption") {
 							const stopped = yield* (yield* ProviderTurnServiceTag).beginStop({
 								clientId: "browser",
 								commandId: "first-stop",
@@ -1328,7 +1595,15 @@ describe("ProviderTurnService", () => {
 							yield* TestClock.adjust(1);
 							expect(repeated.pollUnsafe()).toBeUndefined();
 							expect(dispatchEffect).toHaveBeenCalledOnce();
-							yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+							yield* commit([
+								canonicalEvent(
+									"turn.interrupted",
+									"session-1",
+									{ messageId: "" },
+									{ metadata: { runId: "run-active-input" } },
+								),
+							]);
+							yield* TestClock.adjust(100);
 							yield* stopped;
 							yield* Fiber.join(repeated);
 						} else {
@@ -1359,7 +1634,7 @@ describe("ProviderTurnService", () => {
 							{ id: "run-queued-steer", status: "pending" },
 						]);
 						expect(dispatchEffect).toHaveBeenCalledTimes(
-							replyEnd === "Stop bound" ? 1 : 0,
+							replyEnd === "native interruption" ? 1 : 0,
 						);
 						expect(
 							yield* sql`SELECT state, started_at FROM turns WHERE id = 'queued-steer'`,
@@ -1422,9 +1697,11 @@ describe("ProviderTurnService", () => {
 				const dispatchEffect = vi.fn((command: OrchestrationCommand) =>
 					command.type === "send_turn"
 						? deliver(command)
-						: Deferred.succeed(issued, undefined).pipe(
-								Effect.andThen(Effect.never),
-							),
+						: command.type === "end_session"
+							? confirmProcessLoss(command)
+							: Deferred.succeed(issued, undefined).pipe(
+									Effect.andThen(Effect.never),
+								),
 				) as unknown as OrchestrationEngine["dispatchEffect"];
 				const engine = makeEngine({ providerId: "claude", dispatchEffect });
 				const dependencies = Layer.mergeAll(
@@ -1463,6 +1740,7 @@ describe("ProviderTurnService", () => {
 					]);
 					yield* sql`UPDATE sessions SET model_provider = 'claude', model_id = 'claude-sonnet-4-5', variant = '', context_window = '' WHERE id = 'session-1'`;
 					yield* seedClaimedRun("active-input", 1);
+					yield* seedCapturedStop("plain-stop");
 					deliver = (command) =>
 						Effect.gen(function* () {
 							yield* commit(command.events ?? []);
@@ -1504,7 +1782,7 @@ describe("ProviderTurnService", () => {
 						vi
 							.mocked(dispatchEffect)
 							.mock.calls.map(([command]) => command.type),
-					).toEqual(["interrupt_turn", "send_turn"]);
+					).toEqual(["interrupt_turn", "end_session", "send_turn"]);
 					expect(
 						yield* sql`SELECT input_id, state FROM pending_inputs`,
 					).toEqual([{ input_id: "queued-b", state: "removed" }]);
@@ -1520,7 +1798,7 @@ describe("ProviderTurnService", () => {
 						inputId: "queued-b",
 						interrupt: true,
 					});
-					expect(dispatchEffect).toHaveBeenCalledTimes(2);
+					expect(dispatchEffect).toHaveBeenCalledTimes(3);
 				}).pipe(
 					Effect.provide(
 						SessionInboxLive.pipe(Layer.provideMerge(dependencies)),
@@ -1536,11 +1814,13 @@ describe("ProviderTurnService", () => {
 					const issued = yield* Deferred.make<void>();
 					const engine = makeEngine({
 						providerId: "claude",
-						dispatchEffect: vi.fn(() =>
-							Deferred.succeed(issued, undefined).pipe(
-								Effect.andThen(Effect.never),
-							),
-						),
+						dispatchEffect: vi.fn((command: OrchestrationCommand) =>
+							command.type === "end_session"
+								? confirmProcessLoss(command)
+								: Deferred.succeed(issued, undefined).pipe(
+										Effect.andThen(Effect.never),
+									),
+						) as unknown as OrchestrationEngine["dispatchEffect"],
 					});
 					const { liveLayer } = serviceLayer({ engine });
 					yield* Effect.gen(function* () {
@@ -1549,6 +1829,7 @@ describe("ProviderTurnService", () => {
 						const commit = yield* makeCommitAndSignal;
 						yield* seedSession;
 						yield* seedClaimedRun("active-input", 1);
+						yield* seedCapturedStop();
 						yield* commit([
 							canonicalEvent("input.admitted", "session-1", {
 								sessionId: "session-1",
@@ -1565,6 +1846,7 @@ describe("ProviderTurnService", () => {
 						yield* Deferred.await(issued);
 						// A continuation can be admitted while the native interrupt is stalled.
 						yield* seedClaimedRun("fresh-input", 2);
+						yield* sql`UPDATE provider_command_outbox SET provider_process_id = 'replacement-process' WHERE command_id = 'fresh-input'`;
 						yield* TestClock.adjust(STOP_ABORT_WAIT_MS - 1);
 						expect(service.turnFences("session-1").stopping).toBe(true);
 						yield* TestClock.adjust(1);
@@ -1577,7 +1859,7 @@ describe("ProviderTurnService", () => {
 							{ id: "run-fresh-input", status: "running" },
 						]);
 						expect(
-							yield* sql`SELECT command_id, status FROM provider_command_outbox ORDER BY command_id`,
+							yield* sql`SELECT command_id, status FROM provider_command_outbox WHERE effect_type = 'send_turn' ORDER BY command_id`,
 						).toEqual([
 							{ command_id: "active-input", status: "failed" },
 							{ command_id: "fresh-input", status: "running" },
@@ -1671,11 +1953,13 @@ describe("ProviderTurnService", () => {
 					const issued = yield* Deferred.make<void>();
 					const engine = makeEngine({
 						providerId: "claude",
-						dispatchEffect: vi.fn(() =>
-							Deferred.succeed(issued, undefined).pipe(
-								Effect.andThen(Effect.never),
-							),
-						),
+						dispatchEffect: vi.fn((command: OrchestrationCommand) =>
+							command.type === "end_session"
+								? confirmProcessLoss(command)
+								: Deferred.succeed(issued, undefined).pipe(
+										Effect.andThen(Effect.never),
+									),
+						) as unknown as OrchestrationEngine["dispatchEffect"],
 					});
 					const { liveLayer } = serviceLayer({ engine });
 					yield* Effect.gen(function* () {
@@ -1684,9 +1968,11 @@ describe("ProviderTurnService", () => {
 						// Intake need not have occurred for a claimed input to belong to Stop.
 						yield* seedClaimedRun("active-input", 1, false);
 						yield* seedClaimedRun("queued-steer", 2, false, false);
+						yield* seedCapturedStop();
 						const stopped = yield* Effect.forkChild(interruptTurn());
 						yield* Deferred.await(issued);
 						yield* seedClaimedRun("continuation", 3, false);
+						yield* sql`UPDATE provider_command_outbox SET provider_process_id = 'replacement-process' WHERE command_id = 'continuation'`;
 						const [interrupt] = vi
 							.mocked(engine.dispatchEffect)
 							.mock.calls.map(([command]) => command);
@@ -2246,7 +2532,12 @@ describe("ProviderTurnService", () => {
 				throw new Error("prompt unavailable");
 			});
 			const registry = new ProviderRegistry();
-			registry.registerInstance(new OpenCodeProviderInstance({ client: api }));
+			registry.registerInstance(
+				new OpenCodeProviderInstance({
+					clientForSession: () => Effect.succeed(api),
+					clientForAccount: () => Effect.succeed(api),
+				}),
+			);
 			const inlineEngine = new OrchestrationEngine({ registry });
 			inlineEngine.bindSession("session-1", "opencode");
 			const dispatchEffect = vi.fn((command: SendTurnCommand) =>
@@ -2453,14 +2744,15 @@ describe("ProviderTurnService", () => {
 	);
 
 	it.effect(
-		"uses OpenCode abort for an unbound session and clears processing timeout",
+		"dispatches Stop for an unbound session through the engine and clears processing timeout",
 		() => {
 			const api = partialFake<OpenCodeAPI>({
 				session: partialFake<OpenCodeAPI["session"]>({
 					abort: vi.fn(async () => undefined),
 				}),
 			});
-			const { layer } = serviceLayer({ api });
+			const engine = makeEngine();
+			const { layer } = serviceLayer({ api, engine });
 
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -2474,7 +2766,20 @@ describe("ProviderTurnService", () => {
 				yield* interruptTurn();
 
 				expect(yield* hasActiveProcessingTimeout("session-1")).toBe(false);
-				expect(api.session.abort).toHaveBeenCalledWith("session-1");
+				expect(engine.dispatchEffect).toHaveBeenCalledWith({
+					type: "interrupt_turn",
+					commandId: "cmd-interrupt-default",
+					sessionId: "session-1",
+					turnIds: [],
+					stop: {
+						deadlineAt: STOP_ABORT_WAIT_MS,
+						owners: [],
+						turnIds: [],
+						runnerBacked: false,
+						retainedSteers: false,
+					},
+				});
+				expect(api.session.abort).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -2804,9 +3109,8 @@ describe("ProviderTurnService", () => {
 					]);
 					const interrupt = yield* Effect.forkChild(interruptTurn());
 					yield* Deferred.await(issued);
-					expect(
-						providerId === "opencode" ? abort : dispatchEffect,
-					).toHaveBeenCalledOnce();
+					expect(dispatchEffect).toHaveBeenCalledOnce();
+					expect(abort).not.toHaveBeenCalled();
 					expect(
 						yield* sql`SELECT status FROM provider_runs ORDER BY id`,
 					).toEqual([
@@ -2815,7 +3119,23 @@ describe("ProviderTurnService", () => {
 						{ status: "interrupted" },
 					]);
 					yield* Deferred.succeed(stopped, undefined);
-					if (!indeterminate) {
+					if (indeterminate) {
+						// Acknowledgement leaves delivered sends running until native terminal.
+						yield* commit(
+							["accepted-a", "indeterminate-b"].map((inputId) =>
+								canonicalEvent(
+									"turn.interrupted",
+									"session-1",
+									{ messageId: "" },
+									{
+										provider: providerId,
+										metadata: { runId: `run-${inputId}` },
+									},
+								),
+							),
+						);
+						yield* TestClock.adjust(100);
+					} else {
 						// An ordinary Stop preserves the pending steer's actual native answer.
 						yield* commit([
 							canonicalEvent(
@@ -2956,7 +3276,10 @@ describe("ProviderTurnService", () => {
 			() => {
 				const engine = makeEngine({ providerId });
 				const ingestion = makeIngestion();
-				const { layer } = serviceLayer({ engine, ingestion });
+				const { layer: dependencies } = serviceLayer({ engine, ingestion });
+				const layer = PassThroughSessionInbox.pipe(
+					Layer.provideMerge(dependencies),
+				);
 
 				return Effect.gen(function* () {
 					const interactions = yield* PendingInteractionServiceTag;
@@ -3157,7 +3480,7 @@ describe("ProviderTurnService", () => {
 					yield* Deferred.await(sendStarted);
 					yield* interruptTurn();
 
-					expect(interruptTurnEffect).toHaveBeenCalledWith("session-1");
+					expect(interruptTurnEffect).toHaveBeenCalledWith("session-1", []);
 					expect(api.session.abort).not.toHaveBeenCalled();
 
 					yield* Deferred.succeed(releaseSend, undefined);
@@ -3176,6 +3499,8 @@ describe("ProviderTurnService", () => {
 					return Effect.succeed(completedTurn());
 				}) as unknown as OrchestrationEngine["dispatchEffect"];
 				const engine = {
+					resolveCallContextEffect: () => Effect.succeed(undefined),
+					resolveSessionCallContextEffect: () => Effect.succeed(undefined),
 					getProviderForSessionEffect: vi.fn(() =>
 						Effect.succeed(boundProviderId),
 					),
@@ -3211,6 +3536,14 @@ describe("ProviderTurnService", () => {
 						type: "interrupt_turn",
 						commandId: "cmd-interrupt-1",
 						sessionId: "session-1",
+						turnIds: [],
+						stop: {
+							deadlineAt: STOP_ABORT_WAIT_MS,
+							owners: [],
+							turnIds: [],
+							runnerBacked: true,
+							retainedSteers: false,
+						},
 					});
 					expect(api.session.abort).not.toHaveBeenCalled();
 				}).pipe(Effect.provide(layer));
@@ -3234,6 +3567,8 @@ describe("ProviderTurnService", () => {
 					});
 				}) as unknown as OrchestrationEngine["dispatchEffect"];
 				const engine = {
+					resolveCallContextEffect: () => Effect.succeed(undefined),
+					resolveSessionCallContextEffect: () => Effect.succeed(undefined),
 					getProviderForSessionEffect: vi.fn(() =>
 						Effect.succeed(boundProviderId),
 					),
