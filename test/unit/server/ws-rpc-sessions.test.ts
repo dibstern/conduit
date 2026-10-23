@@ -728,7 +728,8 @@ describe("WsRpcServerLayer ListSessions", () => {
 									fork: sessionForkSdk,
 								},
 								shellEnv: () => ({
-									CLAUDE_CONFIG_DIR: "/current-project-config",
+									env: { CLAUDE_CONFIG_DIR: "/current-project-config" },
+									declared: {},
 								}),
 							}),
 						}),

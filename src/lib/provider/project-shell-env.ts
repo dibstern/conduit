@@ -13,7 +13,10 @@ import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { Data } from "effect";
-import type { ProjectShellEnvConfig } from "../contracts/project-shell-env.js";
+import type {
+	ProjectShellEnvConfig,
+	ProjectShellEnvSnapshot,
+} from "../contracts/project-shell-env.js";
 import { createLogger } from "../logger.js";
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -235,6 +238,10 @@ export class ProjectShellEnvResolver {
 	}
 
 	get(directory: string, projectId?: string): Env {
+		return this.getSnapshot(directory, projectId).env;
+	}
+
+	getSnapshot(directory: string, projectId?: string): ProjectShellEnvSnapshot {
 		const key = this.cacheKey(directory, projectId);
 		if (!this.entries.has(key))
 			this.registerEntry(
@@ -247,10 +254,12 @@ export class ProjectShellEnvResolver {
 		if (entry && Date.now() - entry.attemptedAt >= this.ttlMs) {
 			void this.refresh(directory, projectId);
 		}
-		return (
-			entry?.env ??
-			Object.freeze({ ...this.baseEnv, ...entry?.config.overrides })
-		);
+		return {
+			env:
+				entry?.env ??
+				Object.freeze({ ...this.baseEnv, ...entry?.config.overrides }),
+			declared: entry?.config ?? {},
+		};
 	}
 
 	/** Pre-warming waits for a current capture; sends keep reading the cache. */

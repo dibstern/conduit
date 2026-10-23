@@ -7,3 +7,8 @@ export const ProjectShellEnvConfigSchema = Schema.Struct({
 });
 
 export type ProjectShellEnvConfig = typeof ProjectShellEnvConfigSchema.Type;
+
+export interface ProjectShellEnvSnapshot {
+	readonly env: Readonly<Record<string, string | undefined>>;
+	readonly declared: ProjectShellEnvConfig;
+}

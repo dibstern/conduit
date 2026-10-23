@@ -168,7 +168,12 @@ export function makeClaudeRunnerWire(
 							command: {
 								...decoded.command,
 								input: normalizeClaudeSessionTurn(
-									decoded.command.input,
+									{
+										...decoded.command.input,
+										shellConfig:
+											decoded.command.input.shellConfig ??
+											decoded.command.shellConfig,
+									},
 									defaultFolder,
 								),
 							},

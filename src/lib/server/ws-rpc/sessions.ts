@@ -751,6 +751,7 @@ export const sessionsHandlers = {
 										sessionId: reservedSessionId,
 										projectId: draftLaunch.projectId,
 										shellEnv: draftLaunch.shellEnv,
+										shellConfig: draftLaunch.shellConfig,
 									}
 								: undefined;
 						const sessionId =

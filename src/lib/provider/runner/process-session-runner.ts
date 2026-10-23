@@ -153,14 +153,14 @@ export interface ProcessRunnerDriver {
 			readonly root: string;
 			readonly account?: SessionTurn["account"];
 			readonly instanceId?: string;
-			readonly shellEnv?: SessionTurn["shellEnv"];
+			readonly shellConfig?: SessionTurn["shellConfig"];
 		},
 		b: {
 			readonly configDir: import("./session-runner.js").SessionTurn["configDir"];
 			readonly root: string;
 			readonly account?: SessionTurn["account"];
 			readonly instanceId?: string;
-			readonly shellEnv?: SessionTurn["shellEnv"];
+			readonly shellConfig?: SessionTurn["shellConfig"];
 		},
 	) => boolean;
 	readonly recoverCommands: (
@@ -2780,6 +2780,8 @@ export const makeProcessSessionRunner = (
 												...command.input,
 												configDir: command.input.configDir,
 												root: command.input.workspaceRoot,
+												shellConfig:
+													command.input.shellConfig ?? command.shellConfig,
 											},
 										);
 									const legacyCursor =
@@ -3003,6 +3005,7 @@ export const makeProcessSessionRunner = (
 							? {
 									...command,
 									autoSettleAfterDays,
+									shellConfig: command.input.shellConfig ?? command.shellConfig,
 									...(entry.upgrade.state?.frozen
 										? driver.snapshotCommandSettings(
 												entry.upgrade.state.snapshot,
@@ -3016,6 +3019,8 @@ export const makeProcessSessionRunner = (
 							: command.type === "pre-warm"
 								? {
 										...command,
+										shellConfig:
+											command.input.shellConfig ?? command.shellConfig,
 										shellEnv: command.input.shellEnv ??
 											command.shellEnv ?? {
 												...process.env,

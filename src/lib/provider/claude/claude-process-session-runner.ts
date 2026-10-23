@@ -61,6 +61,7 @@ export const makeProcessClaudeSessionRunner = (
 					},
 					claudeSettingsOverrides: snapshot.claudeSettingsOverrides,
 					shellEnv: snapshot.options.env ?? {},
+					shellConfig: snapshot.input.shellConfig,
 					settingsSnapshot: snapshot,
 				};
 			},

@@ -35,13 +35,15 @@ export const ProjectContextLive = Layer.effect(
 						Effect.timeoutOption("10 seconds"),
 						Effect.catch(() => Effect.void),
 					);
+				const environment = environments.getSnapshot(effectiveDirectory, slug);
 				return {
 					projectId: slug,
 					mainFolder,
 					extraFolders: Object.freeze(project.folders.slice(1)),
 					shellEnv: Object.freeze({
-						...environments.get(effectiveDirectory, slug),
+						...environment.env,
 					}),
+					shellConfig: environment.declared,
 				};
 			});
 		return {

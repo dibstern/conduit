@@ -137,7 +137,10 @@ interface SendTurnOutboxPayload
 	readonly history?: SendTurnInput["history"];
 }
 
-type LiveSendContext = Pick<SendTurnInput, "account" | "shellEnv">;
+type LiveSendContext = Pick<
+	SendTurnInput,
+	"account" | "shellEnv" | "shellConfig"
+>;
 
 class UnknownProviderCommandEffect extends Data.TaggedError(
 	"UnknownProviderCommandEffect",
@@ -1723,6 +1726,10 @@ export class ProviderSideEffectReactor {
 							})
 						: undefined;
 				const shellEnv = liveContext?.shellEnv ?? call?.shellEnv;
+				const shellConfig =
+					liveContext?.shellEnv !== undefined
+						? liveContext.shellConfig
+						: call?.shellConfig;
 				// Daemon sends can outlive the caller's relay. Resolve its borrow
 				// when each interaction arrives, including after adapter intake.
 				const currentInteractions = this.options.makeInteractions?.(
@@ -1748,6 +1755,7 @@ export class ProviderSideEffectReactor {
 						return instance.sendTurnEffect({
 							...payload,
 							...(shellEnv ? { shellEnv } : {}),
+							...(shellConfig !== undefined ? { shellConfig } : {}),
 							awaitIntake: this.awaitIntake(row),
 							commandAttempt: row.attempt_count,
 							account:
@@ -2001,6 +2009,7 @@ export class ProviderSideEffectReactor {
 					userMessageId: _userMessageId,
 					commandId: _commandId,
 					shellEnv: _shellEnv,
+					shellConfig: _shellConfig,
 					...input
 				} = payload;
 				const normalized = {
