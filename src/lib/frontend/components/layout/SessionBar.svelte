@@ -608,7 +608,6 @@
 
 	{#if sessionViewState.compact}
 		{@render identityBlock()}
-		{#if !collapsed}{@render overflowMenu()}{/if}
 	{/if}
 
 	<!-- The session title, and the only string in the bar allowed to ellipse. It
@@ -754,7 +753,7 @@
 		/>
 	{/if}
 
-	{#if collapsed || !sessionViewState.compact}{@render overflowMenu()}{/if}
+	{@render overflowMenu()}
 	{#if backgroundTasks.length > 0 && !collapsed}
 		<BackgroundTasksRow tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(sessionState.currentId, taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
 	{/if}
