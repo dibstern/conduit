@@ -45,8 +45,14 @@ describe("project storage migration through the daemon", () => {
 		expect(existsSync(current)).toBe(false);
 	}
 
-	afterEach(async () => {
+	afterEach(async ({ task }) => {
 		if (!harness) return;
+		const report = join(harness.configDir, "daemon-store-import-report.txt");
+		evidence["importReport"] = existsSync(report)
+			? readFileSync(report, "utf8")
+			: null;
+		evidence["errors"] =
+			task.result?.errors?.map(({ message }) => message) ?? [];
 		try {
 			await harness.dispose();
 		} finally {

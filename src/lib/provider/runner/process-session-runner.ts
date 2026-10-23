@@ -970,7 +970,11 @@ export const makeProcessSessionRunner = (
 			runFork(stop(entry));
 		};
 
-		const attach = (sessionId: string, entry: RunnerChild) =>
+		const attach = (
+			sessionId: string,
+			entry: RunnerChild,
+			identityOnly = false,
+		) =>
 			Effect.gen(function* () {
 				const workspaceRoot =
 					entry.launch?.workspaceRoot ??
@@ -995,6 +999,7 @@ export const makeProcessSessionRunner = (
 					...(entry.pid !== undefined ? { pid: entry.pid } : {}),
 					helloTimeoutMs: entry.child ? startupTimeoutMs : 2000,
 					...(entry.lifecycle.candidate ? { preserveRole: true } : {}),
+					...(identityOnly ? { identityOnly: true as const } : {}),
 					deps: {
 						workspaceRoot,
 						...entry.launch,
@@ -1006,7 +1011,8 @@ export const makeProcessSessionRunner = (
 							? { subagentPollTimeoutMs: deps.subagentPollTimeoutMs }
 							: {}),
 					},
-					...(receipts ? { receipts } : {}),
+					// A verified orphan can be stopped without claiming history's cursor.
+					...(receipts && !identityOnly ? { receipts } : {}),
 					runFork,
 					onOutputCommitted: (output) => {
 						if (
@@ -1023,7 +1029,7 @@ export const makeProcessSessionRunner = (
 					emit: (received) => {
 						// Keep output in the runner's spool until its project can ingest it.
 						// The verified connection still permits native retirement meanwhile.
-						if (Entry.isAwaitingProject(entry.lifecycle))
+						if (identityOnly || Entry.isAwaitingProject(entry.lifecycle))
 							return Effect.interrupt;
 						const operation = Effect.suspend(() => {
 							// A retired query's shutdown notices must not clear its replacement.
@@ -1092,7 +1098,8 @@ export const makeProcessSessionRunner = (
 							};
 							entry.upgrade.state = hello.upgradeState;
 							// Identity and native controls suffice until the project can reattach.
-							if (Entry.isAwaitingProject(entry.lifecycle)) return;
+							if (identityOnly || Entry.isAwaitingProject(entry.lifecycle))
+								return;
 							// Warming candidates have not replaced the active process yet.
 							if (!entry.lifecycle.candidate)
 								yield* lock.withPermits(1)(
@@ -2010,7 +2017,7 @@ export const makeProcessSessionRunner = (
 						yield* Effect.gen(function* () {
 							yield* ensureRecovering;
 							let connected = yield* Effect.result(
-								attach(registration.sessionId, entry),
+								attach(registration.sessionId, entry, abandoned),
 							);
 							yield* ensureRecovering;
 							// A previous server may still own the socket while its shutdown
@@ -2027,7 +2034,7 @@ export const makeProcessSessionRunner = (
 								yield* Effect.sleep(100 * 2 ** retry);
 								yield* ensureRecovering;
 								connected = yield* Effect.result(
-									attach(registration.sessionId, entry),
+									attach(registration.sessionId, entry, abandoned),
 								);
 								yield* ensureRecovering;
 							}
