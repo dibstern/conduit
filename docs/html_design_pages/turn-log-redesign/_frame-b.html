@@ -185,6 +185,66 @@ svg.lucide{width:14px;height:14px;stroke-width:2}
 .ftab.on{color:var(--text);box-shadow:inset 0 2px 0 var(--accent)}
 .phone .ftab{padding:0 8px}
 .fright{margin-left:auto;display:flex;align-items:center;gap:6px;padding-right:6px;font:12px "Geist Mono",monospace;color:var(--text2);white-space:nowrap}
+/* round 4 */
+.top .jc{margin-top:10px}
+.pop.up{top:auto;bottom:calc(100% + 12px)}
+.pop.cp{--w:min(480px,100%);padding:0;border:0;background:none;box-shadow:none}
+.pop.cp .jc{box-shadow:0 14px 34px -12px light-dark(rgba(0,0,0,.3),rgba(0,0,0,.8))}
+.caret.up{top:auto;bottom:calc(100% + 6.5px);transform:rotate(225deg);background:var(--bg)}
+.caret.dn{background:var(--bg)}
+.caret.ask{border-color:color-mix(in srgb,var(--ask) 65%,var(--bg))}
+.hovup{padding-top:135px}.phone .hovup{padding-top:180px}
+.hovdn{padding-bottom:150px}.phone .hovdn{padding-bottom:205px}
+.menuw{padding-bottom:290px}
+.flab{display:flex;align-items:center;padding:0 6px;font:600 10px Geist,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+.fdv{flex:0 0 1px;margin:10px 4px;background:var(--border)}
+.ftabs{position:relative}
+.ftab{white-space:nowrap;gap:5px}
+.ftab.mt{padding:0 2px}
+.mbtn{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 6px 0 9px;border-radius:8px;background:var(--chip);font:500 12px Geist,sans-serif;color:var(--text);white-space:nowrap}
+.mbtn .k{color:var(--dim)}
+.menu{position:absolute;top:calc(100% + 6px);left:6px;z-index:4;width:min(310px,calc(100% - 12px));background:var(--raised);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px -10px light-dark(rgba(0,0,0,.25),rgba(0,0,0,.75));padding:4px}
+.mh{font:600 10px Geist,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);padding:6px 8px 4px}
+.mi{display:grid;grid-template-columns:14px 1fr auto;column-gap:8px;padding:6px 8px;border-radius:7px;align-items:center}
+.mi.on{background:var(--sel)}
+.mi b{font-weight:500}
+.mi>span:first-child{display:flex;color:var(--accent)}
+.mi small{grid-column:2/4;color:var(--dim);font-size:11.5px}
+.mi.sep{margin-top:5px;position:relative}
+.mi.sep::before{content:"";position:absolute;left:8px;right:8px;top:-3px;height:1px;background:var(--border)}
+.shrow{display:flex;align-items:center;gap:6px;margin-top:12px}
+.shrow .flab{padding:0 2px 0 0}
+.seg.sh span svg{margin-right:4px;vertical-align:-2px}
+.phone .shrow .seg{flex:1 1 auto;display:flex}
+.phone .shrow .seg>span{flex:1 1 auto;text-align:center;padding:3px 2px}
+.dr2{padding:0}
+.dr2 .din{padding:6px}
+.dr2 .ftabs{border-radius:0 0 12px 12px;background:var(--raised)}
+.dr2>.ftabs:only-child{border-top:0}
+.dcap{font-size:12px;color:var(--text2);padding:4px 6px 6px}
+.dcap b{color:var(--text);font-weight:500}
+.row.sel{background:var(--sel)}
+.sl{flex:1 1 auto;max-width:380px;min-width:0;padding:7px 0 4px;display:flex;flex-direction:column;gap:4px}
+.slt{position:relative;height:4px;border-radius:9px;background:var(--chip);margin:4px 10% 0}
+.slt b{position:absolute;left:0;top:0;bottom:0;width:var(--f);background:var(--accent);border-radius:9px}
+.slt i{position:absolute;top:50%;left:var(--x);width:8px;height:8px;border-radius:50%;background:var(--raised);border:1.5px solid var(--dim);transform:translate(-50%,-50%)}
+.slt i.in{background:var(--accent);border-color:var(--accent)}
+.slt i.on{width:14px;height:14px;border:2px solid var(--accent);background:var(--raised)}
+.sll{display:grid;grid-template-columns:repeat(5,1fr);text-align:center;font:11px Geist,sans-serif;color:var(--dim);white-space:nowrap}
+.sll .on{color:var(--text);font-weight:500}
+.phone .sll{font-size:10.5px}
+.phone .gf .flab,.phone .gf .fright{display:none}
+.phone .gf .sl{max-width:none}
+.stp{display:flex;align-items:center;gap:6px;padding-left:4px}
+.sbtn{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 8px;border-radius:8px;background:var(--chip);font:12px Geist,sans-serif;color:var(--text2);white-space:nowrap}
+.sbtn.off{opacity:.35}
+.scap{font:500 12px Geist,sans-serif;white-space:nowrap}
+.hangw{position:relative;margin-top:14px}
+.hangw .jc{margin-top:0!important}
+.hcaret{position:absolute;top:-5.5px;left:clamp(14px,var(--x),calc(100% - 14px));width:11px;height:11px;margin-left:-5.5px;background:var(--bg);border-left:1px solid var(--border);border-top:1px solid var(--border);transform:rotate(45deg);z-index:1}
+.hcaret.ask{border-color:color-mix(in srgb,var(--ask) 65%,var(--bg))}
+.offh{margin:36px 0 18px;padding-top:14px;border-top:1px dashed var(--border);font:600 12px Geist,sans-serif;color:var(--text2)}
+.offh span{font-weight:400;color:var(--dim)}
 </style>
 <script>
 const K={skill:['sparkles','--other','Loaded'],think:['brain','--thinking','Thought'],read:['file-text','--explore','Read'],search:['search','--explore','Searched'],edit:['pencil','--edit','Edited'],bash:['terminal','--shell','Ran'],msg:['message-square','--textc','']};
@@ -381,8 +441,9 @@ function strip2(steps,o={}){
  const ms=steps.map((s,i)=>s.m?{...M[s.m],x:xs[i]}:null).filter(Boolean);
  const dots=o.dots?ms.map(m=>`<span class="mdot ${m.ask?'ring':''}" style="--x:${m.x}%;--c:var(${m.c})"></span>`).join(''):'';
  const pins=o.pins?ms.filter(m=>o.pins.includes(m.n)).map(m=>`<span class="pin ${m.n===o.pinOn?'on':''}" style="--x:${m.x}%;--c:var(${m.c})"><span class="pc"><b>${m.g}</b><span class="n">${m.n}</span></span><span class="ps"></span></span>`).join(''):'';
- const hv=o.hover!=null?popover(steps,o.hover,xs[o.hover],o.live):'';
- return `<div class="stripw ${o.pins?'pins':''}"><div class="strip">${segs}</div>${dots}${pins}${hv}</div>`;
+ const hv=o.hover==null?'':o.card&&steps[o.hover].m?cardpop(steps,o.hover,xs[o.hover],o.card):popover(steps,o.hover,xs[o.hover],o.live);
+ const cur=o.cur!=null?`<span class="cur" style="--x:${xs[o.cur]}%"></span>`:'';
+ return `<div class="stripw ${o.pins?'pins':''}"><div class="strip">${segs}</div>${dots}${pins}${cur}${hv}</div>`;
 }
 function headJ(o={}){
  const lead=o.live?`<span class="spin">${lu('loader-circle')}</span><span class="w">Working</span><span class="dur">1m 31s</span>`
@@ -391,8 +452,8 @@ function headJ(o={}){
 }
 const lv=(on,steps)=>`<span class="seg ${steps?'dial':''}">${[['final','Final'],['key','Key'],['balanced','Balanced'],['all','All']].map(([k,l])=>`<span class="${on===k?'on':''}">${l}<span class="ct">${LV[k].length}</span></span>`).join('')}${steps?`<span class="dv"></span><span class="${on==='steps'?'on':''}">Steps<span class="ct">15</span></span>`:''}</span>`;
 const lvrow=(on,extra='',end='4:12',dial=0)=>`<div class="lvrow"><span class="t">0:00</span>${lv(on,dial)}<span class="t">${end}</span>${extra}</div>`;
-function jev(m,pos,live){
- return `<div class="jc ${m.ask?'ask':''}"><div class="jtop"><span class="tag" style="--c:var(${m.c})">${m.g} ${m.tag}</span>${m.ask?'<span class="tag" style="--c:var(--ask)">Needs reply</span>':''}${live?'<span class="tag" style="--c:var(--accent)">Following latest</span>':''}<span class="jmeta">#${m.n} · ${m.at} · ${pos}</span></div><div class="jtx">${m.text}</div><div class="jact"><span class="btn">${lu('reply')}Reply</span><span class="btn">${lu('arrow-down')}Lower</span><span class="btn rt">${lu('repeat-2')}Retype</span><span class="nav"><span>${lu('chevron-left')}</span><span>${lu('chevron-right')}</span><span>${lu('x')}</span></span></div></div>`;
+function jev(m,pos,o={}){
+ return `<div class="jc ${m.ask?'ask':''} ${o.pv?'pv':''}"><div class="jtop"><span class="tag" style="--c:var(${m.c})">${m.g} ${m.tag}</span>${m.ask?'<span class="tag" style="--c:var(--ask)">Needs reply</span>':''}${o.live?'<span class="tag" style="--c:var(--accent)">Following latest</span>':''}${o.pv?'<span class="tag" style="--c:var(--accent)">Preview · click to keep</span>':''}<span class="jmeta">#${m.n} · ${m.at} · ${pos}</span></div><div class="jtx">${m.text}</div><div class="jact"><span class="btn">${lu('reply')}Reply</span><span class="btn">${lu('arrow-down')}Lower</span><span class="btn rt">${lu('repeat-2')}Retype</span><span class="nav"><span>${lu('chevron-left')}</span><span>${lu('chevron-right')}</span><span>${lu('x')}</span></span></div>${o.foot??''}</div>`;
 }
 const tabs3=(on,live)=>`<span class="seg"><span class="${on==='m'?'on':''}">Messages<span class="ct">${live?3:5}</span></span><span class="${on==='s'?'on':''}">Steps<span class="ct">${live?11:15}</span></span><span class="${on==='u'?'on':''}">Usage</span></span>`;
 const allRows=()=>STEPS2.map(s=>row2(s)).join('');
@@ -420,7 +481,7 @@ D.jevsheet=p=>{
  const stepsBtn=open=>`<span class="btn ${open?'on':''}" style="font-family:Geist,sans-serif">${lu('list')}Steps<span class="ct">15</span></span>`;
  const drawer=(live,inner)=>`<div class="drawer"><div class="dtop"><span class="seg"><span class="on">Steps<span class="ct">${live?11:15}</span></span><span>Usage</span></span></div>${inner}</div>`;
  return state('Collapsed',`<div class="hov"><div class="card">${headJ({})}${strip2(STEPS2,{dots:1,hover:9})}</div></div>`,'Jev minimised; hovering the failed check')
-  +state('Live',`<div class="card">${headJ({live:1})}${jev(M[3],'3/3',1)}${strip2(LIVE2,{live:1,pins:LV.all,pinOn:3})}${lvrow('all',p?'':stepsBtn(1),'1:31')}</div>${drawer(1,earlier(9)+ticker2())}`,'the drawer follows the work under the latest message')
+  +state('Live',`<div class="card">${headJ({live:1})}${jev(M[3],'3/3',{live:1})}${strip2(LIVE2,{live:1,pins:LV.all,pinOn:3})}${lvrow('all',p?'':stepsBtn(1),'1:31')}</div>${drawer(1,earlier(9)+ticker2())}`,'the drawer follows the work under the latest message')
   +state('Expanded',`<div class="card">${headJ({open:1})}${jev(M[2],'2/5')}${strip2(STEPS2,{pins:LV.all,pinOn:2})}${lvrow('all',p?'':stepsBtn(1))}</div>${drawer(0,allRows())}`,'messages stay in the card; raw steps pull out underneath');
 };
 D.ftabs=p=>{
@@ -439,6 +500,98 @@ D.dial=p=>{
   +state('Live',`<div class="pnl">${top({live:1},'steps')}<div class="pbody">${earlier(9)+ticker2()}</div>${foot(1)}</div>`,'the dial sits on Steps while work runs')
   +state('Expanded, at Key',`<div class="pnl">${top({open:1},'key')}<div class="pbody jb">${jev(M[2],'1/3')}</div>${foot()}</div>`,'once done it returns to your saved level')
   +state('Expanded, at Steps',`<div class="pnl">${top({open:1},'steps')}<div class="pbody">${allRows()}</div>${foot()}</div>`,'one more stop on the same dial: everything');
+};
+/* ---------- round 4 ---------- */
+const SH=[['final','Answer'],['key','Key'],['balanced','Most'],['all','All messages'],['steps','Full log']];
+const cnt=(k,live)=>k==='steps'?(live?12:15):LV[k].filter(n=>!live||n<=3).length;
+const shName={final:'Answer only',key:'Key messages',balanced:'Most messages',all:'All messages',steps:'Full log'};
+const shDesc={final:'Just the final message',key:'Adds asks and risks',balanced:'Adds decisions',all:'Adds findings: every message',steps:'Adds every step, messages in place'};
+const PLAIN=STEPS2.map(s=>s.m?{k:'msg',text:s.text.replace(/<\/?b>/g,''),d:s.d,w:s.w,at:s.at}:s);
+const PLIVE=PLAIN.slice(0,12);
+const xsOf=steps=>{const tot=steps.reduce((a,s)=>a+(s.w||0),0);let acc=0;return steps.map(s=>{if(s.k==='compact')return acc/tot*100;const x=(acc+s.w/2)/tot*100;acc+=s.w;return x;});};
+const at=(steps,n)=>steps.findIndex(s=>s.m===n);
+function cardpop(steps,i,x,dir){
+ const m=M[steps[i].m];const up=dir==='up';
+ return `<span class="cur" style="--x:${x}%"></span><span class="caret ${up?'up':'dn'} ${m.ask?'ask':''}" style="--x:${x}%"></span><div class="pop cp ${up?'up':''}" style="--x:${x}%">${jev(m,m.n+'/5',{foot:'<div class="pfine" style="padding-top:7px">Hover preview · click to open the turn on this message</div>'})}</div>`;
+}
+function headK(o={}){
+ const ch=`<span class="chev">${lu(o.open||o.live?'chevron-down':'chevron-right')}</span>`;
+ const lead=o.live?`${ch}<span class="spin">${lu('loader-circle')}</span><span class="w">Working</span><span class="dur">1m 31s</span>`:`${ch}<span class="w">Worked</span><span class="dur">4m 12s</span>`;
+ const chips=o.jev===0?'':`<span class="chip ask">? #2</span><span class="chip unr">${o.live?2:3} unread</span>`;
+ return `<div class="hl">${lead}<span class="ph ${o.jev===0?'':'jh'}">· ${PHRASE} · 2 skills</span>${chips}${o.right?`<span class="hr">${o.right}</span>`:''}</div>`;
+}
+const costR=(live,p)=>live?'$0.21':p?'$0.41':'$0.4123 · ctx <span class="gauge"><b></b></span> 41%';
+const usageTab=(on,live,p,dv=1)=>`${dv?'<span class="fdv"></span>':''}<span class="ftab ${on?'on':''}">Usage</span><span class="fright">${costR(live,p)}</span>`;
+const logTab=(on,live)=>`<span class="ftab ${on?'on':''}">Log<span class="ct">${live?12:15}</span></span>`;
+const plainLog=live=>live?earlier(9)+PLIVE.slice(-3).map((s,i)=>row(s,{skill:'event',live:i===2})).join(''):PLAIN.map(s=>row(s,{skill:'event'})).join('');
+const pinsAt=on=>on&&on!=='u'?LV[on==='steps'?'all':on]:null;
+const mbtn=on=>`<span class="mbtn">Show${on&&on!=='u'?`<span class="k">·</span>${shName[on]}`:''}${lu('chevron-down')}</span>`;
+const menu=(on,live)=>`<div class="menu"><div class="mh">Show, least to most</div>${SH.map(([k])=>`<div class="mi ${on===k?'on':''} ${k==='steps'?'sep':''}"><span>${on===k?lu('check'):''}</span><b>${shName[k]}</b><span class="ct">${cnt(k,live)}</span><small>${shDesc[k]}</small></div>`).join('')}</div>`;
+const msgRows=(on,sel)=>LV[on].map(n=>{const m=M[n];return `<div class="row ${n===sel?'sel':''}">${mb(m)}<span class="msg" style="font-style:normal;color:var(--text)">${m.text.replace(/<\/?b>/g,'')}</span><time>${m.at}</time></div>`}).join('');
+const off=(c,l,e,notes=[])=>`<div class="offh">Jev off <span>· no surfacing or categories: no Show control, chips or pins; messages are plain rows in the log</span></div>`+state('Jev off · Collapsed',c,notes[0])+state('Jev off · Live',l,notes[1])+state('Jev off · Expanded',e,notes[2]);
+const jtop=(o,on,dir='up')=>`${headK(o)}${o.m?jev(M[o.m],o.pos,{live:o.live,pv:o.pv}):''}${strip2(o.live?LIVE2:STEPS2,{live:o.live,dots:!pinsAt(on),pins:pinsAt(on),pinOn:o.m,hover:o.hover,card:dir,cur:o.cur})}`;
+const offTop=o=>`${headK({...o,jev:0})}${strip2(o.live?PLIVE:PLAIN,{live:o.live,hover:o.hover})}`;
+
+D.e=p=>{
+ const stops=(on,live)=>p?`<span class="ftab mt">${mbtn(on)}</span>`:`<span class="flab">Show</span>`+SH.map(([k,l])=>`${k==='steps'?'<span class="fdv"></span>':''}<span class="ftab ${on===k?'on':''}">${l}<span class="ct">${cnt(k,live)}</span></span>`).join('');
+ const P=(o,on,body='',mo)=>`<div class="pnl"><div class="top">${jtop(o,on)}</div>${body?`<div class="pbody">${body}</div>`:''}<div class="ftabs">${stops(on,o.live)}${usageTab(on==='u',o.live,p)}${mo?menu(on,o.live):''}</div></div>`;
+ const O=(o,on,body='')=>`<div class="pnl"><div class="top">${offTop(o)}</div>${body?`<div class="pbody">${body}</div>`:''}<div class="ftabs">${logTab(on==='log',o.live)}${usageTab(on==='u',o.live,p)}</div></div>`;
+ return state('Collapsed, hovering the Ask',`<div class="hovup">${P({hover:6})}</div>`,'the full Jev card, as it would open; the bar is always there and any stop opens the turn at it')
+  +state('Live',P({live:1,m:3,pos:'3/3'},'steps',earlier(9)+ticker2()),'chevron left of the spinner collapses it; Full log while work runs')
+  +state('Expanded, Key messages',P({open:1,m:2,pos:'1/3'},'key'),'once done it returns to your saved stop')
+  +state('Expanded, Full log',P({open:1,m:2,pos:'2/5'},'steps',allRows()),'Full log is the last stop, so it includes every message')
+  +state('Expanded, Usage',P({open:1},'u',USAGE))
+  +(p?state('Show menu open',`<div class="menuw">${P({open:1,m:2,pos:'1/3'},'key','',1)}</div>`,'phone: the stops live in a menu that explains each one'):'')
+  +off(O({},''),O({live:1},'log',plainLog(1)),O({open:1},'log',plainLog()),['','Show becomes Log','']);
+};
+D.f=p=>{
+ const sel=(on,live)=>`<div class="shrow"><span class="flab">Show</span><span class="seg sh">${SH.map(([k,l])=>`${k==='steps'?'<span class="dv"></span>':''}<span class="${on===k?'on':''}">${k==='steps'&&!p?lu('panel-bottom-open'):''}${p&&k==='all'?'All msgs':l}${p?'':`<span class="ct">${cnt(k,live)}</span>`}</span>`).join('')}</span></div>`;
+ const card=(o,on)=>`<div class="card">${jtop(o,on)}${on?sel(on==='u'?o.sh:on,o.live):''}</div>`;
+ const lip=(on,live,inner='',tabs='')=>`<div class="drawer dr2">${inner?`<div class="din">${inner}</div>`:''}<div class="ftabs">${tabs}${usageTab(on==='u',live,p,!!tabs)}</div></div>`;
+ return state('Collapsed, hovering the Ask',`<div class="hovup"><div class="card">${jtop({hover:6},null)}</div></div>`)
+  +state('Live',card({live:1,m:3,pos:'3/3'},'steps')+lip(null,1,earlier(9)+ticker2()),'Full log pulls the drawer out under the card')
+  +state('Expanded, Key messages',card({open:1,m:2,pos:'1/3'},'key')+lip(),'no log, so the drawer is just its lip: Usage and cost')
+  +state('Expanded, scrubbing to #4',card({open:1,m:4,pos:'2/3',pv:1,cur:at(STEPS2,4)},'key')+lip(),'drag along the strip: the card swaps in place, as Jev does today')
+  +state('Expanded, Full log',card({open:1,m:2,pos:'2/5'},'steps')+lip(null,0,allRows()))
+  +state('Expanded, Usage',card({open:1,m:2,pos:'1/3',sh:'key'},'u')+lip('u',0,USAGE),'Usage opens the same drawer')
+  +off(`<div class="card">${offTop({})}</div>`,`<div class="card">${offTop({live:1})}</div>`+lip('',1,plainLog(1),logTab(1,1)),`<div class="card">${offTop({open:1})}</div>`+lip('',0,plainLog(),logTab(1,0)),['','the drawer is the log; its lip keeps Log · Usage','']);
+};
+D.g=p=>{
+ const slider=on=>{const i=SH.findIndex(([k])=>k===on);return `<div class="sl"><div class="slt" style="--f:${Math.max(i,0)*25}%"><b></b>${SH.map((_,j)=>`<i class="${j===i?'on':j<i?'in':''}" style="--x:${j*25}%"></i>`).join('')}</div><div class="sll">${SH.map(([k,l],j)=>`<span class="${j===i?'on':''}">${p&&k==='all'?'All msgs':l}</span>`).join('')}</div></div>`};
+ const card=o=>`<div class="card">${jtop(o,o.on)}</div>`;
+ const dr=(on,live,inner,u)=>`<div class="drawer dr2"><div class="din">${u?'':`<div class="dcap"><b>${shName[on]}</b> · ${shDesc[on].toLowerCase()}</div>`}${inner}</div><div class="ftabs gf"><span class="flab">Show</span>${slider(on)}${usageTab(u,live,p)}</div></div>`;
+ return state('Collapsed, hovering the risk',`<div class="hovup">${card({hover:at(STEPS2,4)})}</div>`)
+  +state('Live',card({live:1,m:3,pos:'3/3',on:'steps'})+dr('steps',1,earlier(9)+ticker2()),'')
+  +state('Expanded, Key messages',card({open:1,m:2,pos:'1/3',on:'key'})+dr('key',0,msgRows('key',2)),'the drawer is one list: here, just the 3 key messages, as an index for the card')
+  +state('Expanded, Full log',card({open:1,m:2,pos:'2/5',on:'steps'})+dr('steps',0,allRows()),'slide right and the same list fills in with every step')
+  +state('Expanded, Usage',card({open:1,m:2,pos:'1/3',on:'key'})+dr('key',0,USAGE,1))
+  +off(`<div class="card">${offTop({})}</div>`,`<div class="card">${offTop({live:1})}</div><div class="drawer dr2"><div class="din">${plainLog(1)}</div><div class="ftabs">${logTab(1,1)}${usageTab(0,1,p)}</div></div>`,`<div class="card">${offTop({open:1})}</div><div class="drawer dr2"><div class="din">${plainLog()}</div><div class="ftabs">${logTab(1,0)}${usageTab(0,0,p)}</div></div>`,['','the slider goes; the list is the log','']);
+};
+D.h=p=>{
+ const stepper=(on,live)=>{const i=SH.findIndex(([k])=>k===on);const pv=SH[i-1],nx=SH[i+1];
+  return `<span class="stp"><span class="sbtn ${pv?'':'off'}">${lu('minus')}${pv&&!p?pv[1]:''}</span><span class="scap">${shName[on]}<span class="ct">${cnt(on,live)}</span></span><span class="sbtn ${nx?'':'off'}">${nx&&!p?nx[1]:''}${lu('plus')}</span></span>`};
+ const P=(o,on,body='')=>`<div class="pnl"><div class="top">${jtop(o,on==='u'?null:on)}</div>${body?`<div class="pbody">${body}</div>`:''}${on?`<div class="ftabs">${stepper(on==='u'?o.sh:on,o.live)}${usageTab(on==='u',o.live,p)}</div>`:''}</div>`;
+ const O=(o,on,body='')=>`<div class="pnl"><div class="top">${offTop(o)}</div>${body?`<div class="pbody">${body}</div><div class="ftabs">${logTab(1,o.live)}${usageTab(0,o.live,p)}</div>`:''}</div>`;
+ return state('Collapsed, hovering a step',`<div class="hov">${P({hover:9})}</div>`,'steps keep the one-line popover')
+  +state('Collapsed, hovering the Ask',`<div class="hovup">${P({hover:6})}</div>`,'messages get the full card')
+  +state('Live',P({live:1,m:3,pos:'3/3'},'steps',earlier(9)+ticker2()))
+  +state('Expanded, Key messages',P({open:1,m:2,pos:'1/3'},'key'),'each button names the stop it goes to, so the order teaches itself')
+  +state('Expanded, Full log',P({open:1,m:2,pos:'2/5'},'steps',allRows()),'the end of the scale: + greys out')
+  +state('Expanded, Usage',P({open:1,sh:'key'},'u',USAGE))
+  +off(O({}),O({live:1},'',plainLog(1)),O({open:1},'',plainLog()),['collapsed stays footer-free','','']);
+};
+D.i=p=>{
+ const hang=(steps,o)=>{const m=M[o.m];return `<div class="hangw" style="--x:${xsOf(steps)[at(steps,o.m)]}%"><span class="hcaret ${m.ask?'ask':''}"></span>${jev(m,o.pos,{live:o.live})}</div>`};
+ const top=(o,on)=>{const steps=o.live?LIVE2:STEPS2;return `${headK(o)}${strip2(steps,{live:o.live,dots:!pinsAt(on),pins:pinsAt(on),pinOn:o.m,hover:o.hover,card:'down'})}${o.m?hang(steps,o):''}`};
+ const P=(o,on,body='',mo)=>`<div class="pnl"><div class="top">${top(o,on)}</div>${body?`<div class="pbody">${body}</div>`:''}${on?`<div class="ftabs"><span class="ftab mt">${mbtn(on)}</span>${usageTab(on==='u',o.live,p)}${mo?menu(on,o.live):''}</div>`:''}</div>`;
+ const O=(o,body='')=>`<div class="pnl"><div class="top">${offTop(o)}</div>${body?`<div class="pbody">${body}</div><div class="ftabs">${logTab(1,o.live)}${usageTab(0,o.live,p)}</div>`:''}</div>`;
+ return state('Collapsed, hovering the Ask',`<div class="hovdn">${P({hover:6})}</div>`,'the card hangs from the strip exactly where it sits when open')
+  +state('Live',P({live:1,m:3,pos:'3/3'},'steps',earlier(9)+ticker2()),'')
+  +state('Expanded, Key messages',P({open:1,m:2,pos:'1/3'},'key'),'the caret ties the card to its moment on the strip')
+  +state('Show menu open',`<div class="menuw">${P({open:1,m:2,pos:'1/3'},'key','',1)}</div>`,'one button, and the menu says what each stop adds')
+  +state('Expanded, Full log',P({open:1,m:2,pos:'2/5'},'steps',allRows()))
+  +state('Expanded, Usage',P({open:1},'u',USAGE))
+  +off(O({}),O({live:1},plainLog(1)),O({open:1},plainLog()));
 };
 function show(key,phone){if(phone)document.body.classList.add('phone');const d=document.createElement('div');d.innerHTML=D[key](!!phone);document.body.prepend(d);lucide.createIcons();}
 </script>

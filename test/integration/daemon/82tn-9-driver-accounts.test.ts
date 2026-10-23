@@ -243,6 +243,7 @@ it("proves daemon driver ownership, account isolation, launch context and contin
 	);
 	expect(constructors.map(({ driver }) => driver).sort()).toEqual([
 		"claude",
+		"codex",
 		"cursor",
 		"opencode",
 	]);

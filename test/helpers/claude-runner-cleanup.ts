@@ -57,7 +57,7 @@ function registrations(
 	return entries;
 }
 
-// Never signal a PID from a file until the process identifies itself on its socket.
+// PIDs learned only from files must identify themselves on their sockets.
 // A runner serves one client and hangs up on others until it has processed the
 // previous client's close, which a loaded machine can delay past cleanup.
 async function requestShutdown(
@@ -159,23 +159,27 @@ export async function cleanupTestClaudeRunners(
 	projectDir = join(root, "project"),
 ) {
 	const entries = registrations(projectDir, configDir);
+	// Known PIDs come from processes owned by the test, even if registration vanished.
+	const ownedPids = new Set(knownPids);
 	const pids = [
 		...new Set([...knownPids, ...entries.map((entry) => entry.pid)]),
 	];
 	for (const entry of entries) {
 		if (!testRunnerAlive(entry.pid)) continue;
-		const verified = await requestShutdown(projectDir, entry);
-		await waitForExit([entry.pid], 500);
-		if (verified && testRunnerAlive(entry.pid)) {
+		if (await requestShutdown(projectDir, entry)) ownedPids.add(entry.pid);
+	}
+	await waitForExit(pids, 500);
+	for (const pid of ownedPids) {
+		if (testRunnerAlive(pid)) {
 			try {
-				process.kill(entry.pid, "SIGTERM");
+				process.kill(pid, "SIGTERM");
 			} catch {
 				/* Already exited. */
 			}
-			await waitForExit([entry.pid], 500);
-			if (testRunnerAlive(entry.pid)) {
+			await waitForExit([pid], 500);
+			if (testRunnerAlive(pid)) {
 				try {
-					process.kill(entry.pid, "SIGKILL");
+					process.kill(pid, "SIGKILL");
 				} catch {
 					/* Already exited. */
 				}

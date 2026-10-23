@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Layer } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Redacted } from "effect";
 import { afterEach, expect } from "vitest";
 import { makeAccountResourceScopesLive } from "../../../src/lib/domain/daemon/Layers/account-resource-scopes-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -115,7 +115,13 @@ for (const operation of ["Update", "Remove"] as const) {
 				if (operation === "Update") {
 					const current = yield* resources.use("cursor-a", Effect.succeed);
 					expect(current.sdk).not.toBe(original.sdk);
-					expect((yield* current.credential)?.apiKey).toBe("synthetic-new-key");
+					const lookup = yield* current.credential;
+					expect(lookup._tag).toBe("Ready");
+					if (lookup._tag !== "Ready")
+						throw new Error("Missing updated credential");
+					expect(Redacted.value(lookup.credential.apiKey)).toBe(
+						"synthetic-new-key",
+					);
 				} else {
 					expect(
 						Exit.isFailure(
@@ -203,7 +209,13 @@ it.effect("an update cancelled before commit preserves the live resource", () =>
 			expect((yield* resources.use("cursor-a", Effect.succeed)).sdk).toBe(
 				original.sdk,
 			);
-			expect((yield* original.credential)?.apiKey).toBe("synthetic-old-key");
+			const lookup = yield* original.credential;
+			expect(lookup._tag).toBe("Ready");
+			if (lookup._tag !== "Ready")
+				throw new Error("Missing original credential");
+			expect(Redacted.value(lookup.credential.apiKey)).toBe(
+				"synthetic-old-key",
+			);
 		}).pipe(
 			Effect.provide(
 				fixture(
@@ -246,7 +258,11 @@ it.effect(
 				const current = yield* resources.use("cursor-a", Effect.succeed);
 				expect(saves).toBe(2);
 				expect(current.sdk).not.toBe(original.sdk);
-				expect((yield* current.credential)?.apiKey).toBe("latest-key");
+				const lookup = yield* current.credential;
+				expect(lookup._tag).toBe("Ready");
+				if (lookup._tag !== "Ready")
+					throw new Error("Missing latest credential");
+				expect(Redacted.value(lookup.credential.apiKey)).toBe("latest-key");
 			}).pipe(
 				Effect.provide(
 					fixture(

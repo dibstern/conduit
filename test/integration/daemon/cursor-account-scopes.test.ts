@@ -501,6 +501,7 @@ it("keeps the ambient key bound to the original compatibility account across def
 						credential: {
 							apiKey: `[REDACTED:${id}]`,
 							backendUrl: "https://api2.cursor.sh",
+							email: `${id}@example.test`,
 							createdAtMs: 0,
 						},
 					},

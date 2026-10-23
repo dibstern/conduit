@@ -7,19 +7,22 @@ import { teeCursorSdkPort } from "./sdk-trace.js";
 import { createTraceCursorSdkPort } from "./sdk-trace-player.js";
 
 export const cursorCredentialStorePath = (
-	id: string,
+	id: string | { readonly _tag: "LoginSlot" },
 	configDir = DEFAULT_CONFIG_DIR,
 ) =>
 	join(
 		configDir,
 		"cursor",
 		"accounts",
-		createHash("sha256").update(id).digest("hex"),
+		// Preserve the pre-C1 login slot's on-disk location.
+		createHash("sha256")
+			.update(typeof id === "string" ? id : "__cursor_login__")
+			.digest("hex"),
 		"auth.json",
 	);
 
 export function createCursorSdkPort(account?: {
-	readonly id: string;
+	readonly id: string | { readonly _tag: "LoginSlot" };
 	readonly configDir?: string;
 }): CursorSdkPort {
 	const tracePath = process.env["CONDUIT_CURSOR_SDK_TRACE"];
@@ -30,7 +33,9 @@ export function createCursorSdkPort(account?: {
 					tracePath,
 					process.env["NODE_ENV"] === "test"
 						? {
-								...(account ? { accountId: account.id } : {}),
+								...(account && typeof account.id === "string"
+									? { accountId: account.id }
+									: {}),
 								...(authStatePath ? { authStatePath } : {}),
 								loginDelayMs: Number(
 									process.env["CONDUIT_TEST_CURSOR_LOGIN_DELAY_MS"] ?? 0,
