@@ -244,8 +244,6 @@ export const LiveRefresh: Story = {
 		if (!slot) throw new Error("Session fixture missing");
 		const initialRequests = countRequests;
 		holdCounts = true;
-		slot.messages = [...slot.messages];
-		await waitFor(() => expect(releaseCounts).toHaveLength(1));
 		for (let frame = 0; frame < 10; frame++) {
 			slot.messages = [...slot.messages];
 			await tick();
@@ -255,6 +253,17 @@ export const LiveRefresh: Story = {
 				"surfacing-category-count",
 			),
 		).toHaveTextContent("2 here");
+		await expect(countRequests).toBe(initialRequests);
+		slot.messages = [
+			...slot.messages,
+			{ type: "system", uuid: "new-message", text: "A new message" },
+		];
+		await waitFor(() => expect(releaseCounts).toHaveLength(1));
+		slot.messages = [
+			...slot.messages,
+			{ type: "system", uuid: "latest-message", text: "A later message" },
+		];
+		await tick();
 		holdCounts = false;
 		releaseCounts[0]?.();
 		await waitFor(() => expect(countRequests).toBe(initialRequests + 2));

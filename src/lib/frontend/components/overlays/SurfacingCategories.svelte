@@ -31,11 +31,8 @@
 	let countsFailed = $state(false);
 	let countRevision = $state(0);
 	const sessionId = $derived(getCurrentSessionId());
-	const sessionRow = $derived(sessionId ? findSession(sessionId) : undefined);
-	let countKey = "";
-	let pendingCount: { sessionId: string; set: { categories: readonly Category[] }; key: string } | null = null;
-	let counting = false;
-	let countTimer: ReturnType<typeof setTimeout> | undefined;
+	const sessionMessageCount = $derived(sessionId ? (findSession(sessionId)?.messageCount ?? sessionMessages.get(sessionId)?.messages.length ?? 0) : 0);
+	const lastMessageId = $derived(sessionId ? sessionMessages.get(sessionId)?.messages.at(-1)?.uuid : undefined);
 	const active = $derived(draft.filter((c) => !c.retired));
 	const retired = $derived(draft.filter((c) => c.retired));
 	const dirty = $derived(current !== null && JSON.stringify(draft) !== JSON.stringify(current.categories));
@@ -51,42 +48,21 @@
 	});
 	$effect(() => {
 		void countRevision;
+		void sessionMessageCount;
+		void lastMessageId;
 		const id = sessionId;
 		const set = { categories: $state.snapshot(draft) };
-		const key = visible && current && valid && id ? JSON.stringify([id, set]) : "";
-		if (key !== countKey) { counts = null; countsFailed = false; }
-		countKey = key;
-		if (!key || !id) {
-			pendingCount = null;
-			clearTimeout(countTimer);
-			countTimer = undefined;
-			return;
-		}
-		// History is paged. Changes in this session refresh the server's full read.
-		void sessionMessages.get(id)?.messages;
-		void sessionRow;
-		pendingCount = { sessionId: id, set, key };
-		if (!counting && !countTimer) void loadCounts();
-	});
-	$effect(() => () => { countKey = ""; pendingCount = null; clearTimeout(countTimer); });
-
-	async function loadCounts(): Promise<void> {
-		countTimer = undefined;
-		const request = pendingCount;
-		if (!request) return;
-		pendingCount = null;
-		counting = true;
+		counts = null;
 		countsFailed = false;
-		try {
-			const result = await rpc("CountSessionCategories", { sessionId: request.sessionId, set: request.set });
-			if (request.key === countKey) { counts = result; countsFailed = false; }
-		} catch { if (request.key === countKey) countsFailed = true; }
-		finally {
-			counting = false;
-			// Space out full-session reads and coalesce streaming frames between them.
-			if (countKey) countTimer = setTimeout(() => { void loadCounts(); }, 500);
-		}
-	}
+		if (!visible || !current || !valid || !id) return;
+		let cancelled = false;
+		const timer = setTimeout(() => {
+			void rpc("CountSessionCategories", { sessionId: id, set }).then((result) => {
+				if (!cancelled) counts = result;
+			}).catch(() => { if (!cancelled) countsFailed = true; });
+		}, 300);
+		return () => { cancelled = true; clearTimeout(timer); };
+	});
 
 	async function load(): Promise<void> {
 		loading = true;
