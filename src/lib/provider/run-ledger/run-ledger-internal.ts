@@ -87,14 +87,18 @@ export interface AdmissionRef {
 	readonly inputId: string;
 	readonly index: number;
 }
-export type SendStatus =
-	| { readonly tag: "sent" }
-	| { readonly tag: "retry"; readonly at: number }
-	| { readonly tag: "unknown" }
-	| { readonly tag: "settled" }
-	| { readonly tag: "native" }
-	| { readonly tag: "observed" }
-	| { readonly tag: "failed"; readonly code: string };
+export type SendFact =
+	| {
+			readonly kind:
+				| "accepted"
+				| "observed"
+				| "transport_succeeded"
+				| "delivery_unknown"
+				| "native_completed"
+				| "probe_satisfied";
+	  }
+	| { readonly kind: "transport_failed"; readonly code: string }
+	| { readonly kind: "retryable"; readonly at: number };
 export interface Send extends IssuedEffect {
 	readonly order: number;
 	readonly live: boolean;
@@ -104,7 +108,9 @@ export interface Send extends IssuedEffect {
 	readonly admission?: AdmissionRef;
 	readonly interactionId?: string;
 	readonly cleanupDeadline?: Deadline;
-	readonly status: SendStatus;
+	/** Facts accumulate on this token, independently of retirement and obligations. */
+	readonly facts: readonly SendFact[];
+	readonly probeRetryAt?: number;
 }
 
 export interface SessionLedgerState {
@@ -116,6 +122,14 @@ export interface SessionLedgerState {
 	readonly paused: boolean;
 	readonly inactive: boolean;
 	readonly current?: string | undefined;
+	/** A finished Run's native query can still prevent the next start. */
+	readonly nativeFence?:
+		| {
+				readonly runId: string;
+				readonly tokens: readonly SendToken[];
+				readonly deadline?: Deadline;
+		  }
+		| undefined;
 	readonly nextOrder: number;
 }
 export interface Work {
@@ -180,8 +194,22 @@ export function runInputs(
 	state: SessionLedgerState,
 	runId: string,
 ): ReturnType<typeof admissions> {
-	return admissions(state).filter(
-		({ admission }) =>
-			admission.location.tag === "Run" && admission.location.runId === runId,
-	);
+	return admissions(state)
+		.filter(
+			({ admission }) =>
+				admission.location.tag === "Run" && admission.location.runId === runId,
+		)
+		.sort(
+			(a, b) =>
+				Math.min(
+					...a.admission.sends.map(
+						(token) => state.sends.get(token)?.order ?? Infinity,
+					),
+				) -
+				Math.min(
+					...b.admission.sends.map(
+						(token) => state.sends.get(token)?.order ?? Infinity,
+					),
+				),
+		);
 }

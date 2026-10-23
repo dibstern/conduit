@@ -19,6 +19,9 @@ export type NativeTerminal = Extract<
 
 /** Native boundaries and terminal meaning belong to the provider policy. */
 export interface NativePolicy {
+	readonly runEnd: "result" | "query_ended";
+	/** Whether the Run terminal also releases the native session. */
+	readonly resultReleasesFence: boolean;
 	readonly controlEffect: (
 		by: "stop" | "run_now" | "end",
 	) => "interrupt" | "end_session";

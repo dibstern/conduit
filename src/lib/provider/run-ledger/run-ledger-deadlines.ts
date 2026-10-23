@@ -6,7 +6,8 @@ import {
 	type SessionLedgerState,
 	type Work,
 } from "./run-ledger-internal.js";
-import { expireRun } from "./run-ledger-lifecycle.js";
+import { closeNative, expireRun } from "./run-ledger-lifecycle.js";
+import { sendProof } from "./run-ledger-send-proof.js";
 import {
 	cleanupDeadline,
 	retryPending,
@@ -15,6 +16,7 @@ import {
 
 type OpenDeadline = { readonly at: number; readonly owner: string } & (
 	| { readonly kind: "run"; readonly run: ActiveRun }
+	| { readonly kind: "fence"; readonly runId: string }
 	| {
 			readonly kind: "interaction";
 			readonly run: ActiveRun;
@@ -28,6 +30,14 @@ export function openDeadlines(
 	state: SessionLedgerState,
 ): readonly OpenDeadline[] {
 	const deadlines: OpenDeadline[] = [];
+	const fence = state.nativeFence;
+	if (fence?.deadline)
+		deadlines.push({
+			kind: "fence",
+			runId: fence.runId,
+			owner: `fence:${fence.runId}`,
+			at: fence.deadline.at,
+		});
 	const run = activeRun(state);
 	if (run) {
 		deadlines.push({
@@ -59,11 +69,12 @@ export function openDeadlines(
 				at: send.cleanupDeadline.at,
 				send,
 			});
-		if (send.status.tag === "retry" && retryPending(state, send))
+		const retryAt = sendProof(send).retryAt;
+		if (retryAt !== undefined && retryPending(state, send))
 			deadlines.push({
 				kind: "retry",
 				owner: `retry:${send.purpose}`,
-				at: send.status.at,
+				at: retryAt,
 				send,
 			});
 	}
@@ -81,6 +92,17 @@ export function fireAlarm(work: Work): void {
 		if (!next || next.at > work.ctx.now) return;
 		fired.add(next.owner);
 		switch (next.kind) {
+			case "fence": {
+				const fence = work.state.nativeFence;
+				if (!fence) break;
+				work.state = {
+					...work.state,
+					nativeFence: { runId: fence.runId, tokens: fence.tokens },
+				};
+				const owner = work.state.runs.get(next.runId);
+				if (owner) closeNative(work, owner);
+				break;
+			}
 			case "run":
 				expireRun(work, next.run);
 				break;

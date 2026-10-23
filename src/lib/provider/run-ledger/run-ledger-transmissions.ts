@@ -7,9 +7,9 @@ import {
 	inputAbsent,
 	issue,
 	liveSends,
+	recordSendFact,
 	retireSend,
 	retransmit,
-	setSendStatus,
 } from "./run-ledger-correlation.js";
 import {
 	acceptReceipt,
@@ -27,6 +27,7 @@ import {
 import { deadline, endQuery, finish } from "./run-ledger-lifecycle.js";
 import type { Evidence } from "./run-ledger-model.js";
 import { nativePolicy } from "./run-ledger-policy.js";
+import { sendProof } from "./run-ledger-send-proof.js";
 
 export function receipt(work: Work, input: Correlated): void {
 	const evidence = input.evidence;
@@ -44,13 +45,13 @@ export function receipt(work: Work, input: Correlated): void {
 			if (
 				send.effect.kind === "probe" &&
 				send.effect.target.tag === "input" &&
-				send.status.tag === "retry" &&
 				send.admission?.inputId === input.admission.ref.inputId &&
 				send.admission.index === input.admission.ref.index
 			)
-				setSendStatus(work, send, { tag: "settled" });
+				recordSendFact(work, send, { kind: "probe_satisfied" });
 	switch (evidence.kind) {
 		case "input_accepted":
+			recordSendFact(work, input.send, { kind: "accepted" });
 			if (input.admission)
 				acceptReceipt(work, input.admission.ref, evidence.nativeMessageId);
 			return;
@@ -63,8 +64,11 @@ export function receipt(work: Work, input: Correlated): void {
 			return;
 		case "probe_result": {
 			const finding = evidence.finding;
-			if (finding.tag === "input_present" && input.admission)
+			if (finding.tag === "input_present" && input.admission) {
+				if (input.probedInput)
+					recordSendFact(work, input.probedInput, { kind: "accepted" });
 				acceptReceipt(work, input.admission.ref, finding.nativeMessageId);
+			}
 			if (
 				finding.tag === "input_absent" &&
 				input.admission &&
@@ -118,24 +122,28 @@ function probe(work: Work, send: Send): void {
 		);
 }
 
-function scheduleRetry(work: Work, send: Send, at: number): void {
-	if (
-		send.status.tag === "unknown" ||
-		send.status.tag === "failed" ||
-		send.status.tag === "settled"
-	)
-		return;
-	setSendStatus(work, send, { tag: "retry", at });
-}
-
 function unknownDelivery(work: Work, input: Correlated): void {
+	const send = work.state.sends.get(input.send.token);
+	if (!send || !sendProof(send).needsInputProbe) return;
+	// A known covering probe already owns this reconciliation, even after retry
+	// or satisfaction. Replaying a receipt cannot replace it or move its deadline.
 	if (
-		input.send.status.tag === "unknown" ||
-		input.send.status.tag === "failed" ||
-		input.send.status.tag === "settled"
+		[...work.state.sends.values()].some(
+			(probe) =>
+				probe.effect.kind === "probe" &&
+				probe.order > send.order &&
+				probe.runId === send.runId &&
+				(probe.effect.target.tag === "input"
+					? probe.admission?.inputId === send.admission?.inputId &&
+						probe.admission?.index === send.admission?.index
+					: probe.effect.target.tag === "interaction"
+						? probe.interactionId === send.interactionId
+						: send.effect.kind !== "start" &&
+							send.effect.kind !== "steer" &&
+							send.effect.kind !== "deliver_answer"),
+		)
 	)
 		return;
-	setSendStatus(work, input.send, { tag: "unknown" });
 	if (
 		input.admission &&
 		input.admission.value.state.tag !== "Accepted" &&
@@ -155,19 +163,45 @@ export function effectOutcome(
 	input: Correlated,
 	outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
 ): void {
-	const send = input.send;
-	if (send.status.tag === "native") return;
+	// Backoff is an obligation update. A fulfilled probe has no retry obligation
+	// to update, including when its transport suggests a late retry.
+	if (
+		input.send.effect.kind === "probe" &&
+		outcome.tag === "retryable" &&
+		sendProof(input.send).retryAt === undefined
+	)
+		return;
+	recordSendFact(
+		work,
+		input.send,
+		outcome.tag === "succeeded"
+			? { kind: "transport_succeeded" }
+			: outcome.tag === "permanent"
+				? { kind: "transport_failed", code: outcome.code }
+				: outcome.tag === "retryable"
+					? { kind: "retryable", at: outcome.retryAt }
+					: { kind: "delivery_unknown" },
+	);
+	const send = work.state.sends.get(input.send.token);
+	if (!send) return;
+	const proof = sendProof(send);
+	if (
+		(send.effect.kind === "start" || send.effect.kind === "steer") &&
+		work.state.runs.get(send.runId)?.tag === "Ended"
+	) {
+		// Retained work has receipt authority only, never authority over its Run.
+		if (proof.obsoleteAfterEnd) retireSend(work, send);
+		return;
+	}
 	if (send.effect.kind === "probe") {
 		if (outcome.tag === "succeeded" || outcome.tag === "delivery_unknown")
 			return;
 		if (outcome.tag === "permanent") {
-			setSendStatus(work, send, { tag: "failed", code: outcome.code });
 			if (send.effect.target.tag !== "native_session") retireSend(work, send);
 			return;
 		}
 	}
 	if (outcome.tag === "retryable") {
-		scheduleRetry(work, send, outcome.retryAt);
 		return;
 	}
 	if (outcome.tag === "delivery_unknown") {
@@ -176,32 +210,23 @@ export function effectOutcome(
 	}
 	const succeeded = outcome.tag === "succeeded";
 	if (send.effect.kind === "deliver_answer") {
-		setSendStatus(
-			work,
-			send,
-			succeeded ? { tag: "settled" } : { tag: "failed", code: outcome.code },
-		);
 		answerOutcome(work, input, succeeded ? "sent" : "failed");
 		retireSend(work, send);
 		return;
 	}
-	setSendStatus(work, send, { tag: "settled" });
 	if (send.effect.kind === "start" || send.effect.kind === "steer") {
-		inputOutcome(work, input, succeeded, succeeded ? "" : outcome.code);
+		inputOutcome(work, input, send);
 		return;
 	}
 	cleanupOutcome(work, send, succeeded, succeeded ? "" : outcome.code);
 }
 
-function inputOutcome(
-	work: Work,
-	input: Correlated,
-	succeeded: boolean,
-	code: string,
-): void {
+function inputOutcome(work: Work, input: Correlated, send: Send): void {
 	const item = input.admission;
-	if (!item || item.value.state.tag === "Accepted") return;
-	if (succeeded) {
+	const proof = sendProof(send);
+	const outcome = proof.inputOutcome;
+	if (!item || !outcome) return;
+	if (outcome.tag === "sent") {
 		if (item.value.state.tag === "Queued")
 			putAdmission(work, item.ref, {
 				...item.value,
@@ -209,11 +234,18 @@ function inputOutcome(
 			});
 		return;
 	}
-	setSendStatus(work, input.send, { tag: "unknown" });
+	if (outcome.tag !== "failed") return;
+	const code = outcome.code;
 	const run = work.state.runs.get(input.send.runId);
-	if (input.send.effect.kind === "start" && run && run.tag !== "Ended")
-		finish(work, run, "error", { kind: "refused", code });
-	else if (item.value.state.tag !== "Declined") {
+	if (send.effect.kind === "start") {
+		if (run && run.tag !== "Ended" && proof.refusesStart)
+			finish(work, run, "error", { kind: "refused", code });
+		return;
+	}
+	if (
+		item.value.state.tag !== "Accepted" &&
+		item.value.state.tag !== "Declined"
+	) {
 		putAdmission(work, item.ref, {
 			...item.value,
 			state: { tag: "Declined", reason: code },
@@ -266,7 +298,7 @@ function cleanupOutcome(
 		(send.effect.kind === "kill_and_respawn" ||
 			(send.effect.kind === "interrupt" && policy.interruptFailure === "fence"))
 	) {
-		setSendStatus(work, send, { tag: "failed", code });
+		recordSendFact(work, send, { kind: "transport_failed", code });
 		if (send.effect.kind === "kill_and_respawn")
 			issue(
 				work,
@@ -293,7 +325,10 @@ export function nativeProbe(
 ): void {
 	const policy = nativePolicy(work.state.provider);
 	if (!idle) {
-		scheduleRetry(work, input.send, work.ctx.now + work.ctx.policy.closeMs);
+		recordSendFact(work, input.send, {
+			kind: "retryable",
+			at: work.ctx.now + work.ctx.policy.closeMs,
+		});
 		return;
 	}
 	const newerWork = hasNewerWork(
@@ -307,10 +342,7 @@ export function nativeProbe(
 		return;
 	}
 	confirmIdle(work, input.send, (send) =>
-		policy.idleCovers(
-			send.effect,
-			send.status.tag === "settled" || send.status.tag === "native",
-		),
+		policy.idleCovers(send.effect, sendProof(send).confirmed),
 	);
 	if (
 		liveSends(work.state).some(
@@ -324,9 +356,13 @@ export function nativeProbe(
 }
 
 export function retryPending(state: SessionLedgerState, send: Send): boolean {
-	if (send.status.tag !== "retry" || !send.live || state.inactive) return false;
+	if (sendProof(send).retryAt === undefined || !send.live || state.inactive)
+		return false;
 	if (send.effect.kind === "probe" && send.effect.target.tag === "input")
-		return true;
+		return (
+			!send.admission ||
+			getAdmission(state, send.admission)?.state.tag !== "Accepted"
+		);
 	const item = send.admission ? getAdmission(state, send.admission) : undefined;
 	const run = state.runs.get(send.runId);
 	if (
@@ -372,8 +408,8 @@ export function cleanupDeadline(work: Work, send: Send): void {
 		cleanupOutcome(work, send, false, "cancel_request_unconfirmed");
 		return;
 	}
-	setSendStatus(work, send, {
-		tag: "failed",
+	recordSendFact(work, send, {
+		kind: "transport_failed",
 		code: `${send.effect.kind}_unconfirmed`,
 	});
 	if (send.effect.kind === "kill_and_respawn")

@@ -14,6 +14,7 @@ import {
 	type Work,
 } from "./run-ledger-internal.js";
 import type { InputView, SendToken } from "./run-ledger-model.js";
+import { sendProof } from "./run-ledger-send-proof.js";
 
 export function uncertain(state: SessionLedgerState, inputId: string): boolean {
 	return (
@@ -31,14 +32,10 @@ function admissionUncertain(
 	return item.sends.some((token) => {
 		if (coveredByAbsence(state, token, item.absenceProofs)) return false;
 		const send = state.sends.get(token);
-		if (send?.status.tag === "unknown") return true;
-		if (send?.status.tag === "observed") return true;
-		if (
-			send?.status.tag !== "sent" &&
-			send?.status.tag !== "settled" &&
-			send?.status.tag !== "native"
-		)
-			return false;
+		if (!send) return false;
+		const proof = sendProof(send);
+		if (proof.uncertain) return true;
+		if (proof.retryAt !== undefined && send.live) return false;
 		if (item.state.tag === "Delivered") return true;
 		if (item.state.tag === "Declined") return item.state.reason === "cancelled";
 		return (
@@ -216,10 +213,15 @@ export function acceptReceipt(
 	const cancelled =
 		(item.state.tag === "Declined" && item.state.reason === "cancelled") ||
 		(item.state.tag === "Accepted" && item.state.cancelled);
+	const owner = item.runs.at(-1);
 	putAdmission(work, ref, {
 		...item,
 		location:
-			item.location.tag === "Inbox" ? { tag: "Resolved" } : item.location,
+			item.location.tag === "Inbox"
+				? owner !== undefined && work.state.current === owner
+					? { tag: "Run", runId: owner }
+					: { tag: "Resolved" }
+				: item.location,
 		state: {
 			tag: "Accepted",
 			...(nativeId !== undefined ? { nativeMessageId: nativeId } : {}),

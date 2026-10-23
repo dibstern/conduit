@@ -33,7 +33,7 @@ export type DeadlineKind =
 	| "interrupt"
 	/** Interrupting after the first deadline: waiting for close confirmation. */
 	| "close"
-	/** Settling: waiting for the native query to end after a result. */
+	/** After a result: bounds the native-session fence or the owned execution's end. */
 	| "settle"
 	/** Queued: waiting for the native-session fence or a probe to clear. */
 	| "fence"

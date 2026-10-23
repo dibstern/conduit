@@ -3,7 +3,7 @@ import {
 	getAdmission,
 	putAdmission,
 	type Send,
-	type SendStatus,
+	type SendFact,
 	type SessionLedgerState,
 	type Work,
 } from "./run-ledger-internal.js";
@@ -41,6 +41,8 @@ export interface Correlated {
 	readonly evidence: TokenEvidence;
 	readonly send: Send;
 	readonly receipt: boolean;
+	/** Admission-level presence identifies a send only without sibling ambiguity. */
+	readonly probedInput?: Send;
 	readonly admission?: {
 		readonly ref: AdmissionRef;
 		readonly value: NonNullable<ReturnType<typeof getAdmission>>;
@@ -110,12 +112,22 @@ export function correlate(
 		? getAdmission(state, send.admission)
 		: undefined;
 	const { token: _token, ...evidence } = raw;
+	const covered =
+		raw.kind === "probe_result" && raw.finding.tag === "input_present"
+			? (value?.sends.flatMap((token) => {
+					const inputSend = state.sends.get(token);
+					return inputSend && inputSend.order < send.order ? [inputSend] : [];
+				}) ?? [])
+			: [];
 	return {
 		tag: "correlated",
 		input: {
 			evidence,
 			send,
 			receipt,
+			...(covered.length === 1 && covered[0]
+				? { probedInput: covered[0] }
+				: {}),
 			...(send.admission && value
 				? { admission: { ref: send.admission, value } }
 				: {}),
@@ -139,53 +151,62 @@ function retireWhere(work: Work, predicate: (send: Send) => boolean): void {
 			sends.set(token, {
 				...retired,
 				live: false,
-				status: send.status.tag === "retry" ? { tag: "sent" } : send.status,
 			});
 			changed = true;
 		}
-	if (changed) work.state = { ...work.state, sends };
+	if (changed) {
+		const fence = work.state.nativeFence;
+		work.state = {
+			...work.state,
+			sends,
+			...(fence && !fence.tokens.some((token) => sends.get(token)?.live)
+				? { nativeFence: undefined }
+				: {}),
+		};
+	}
 }
 
-export function retireRun(work: Work, runId: string): void {
-	retireWhere(work, (send) => send.runId === runId);
+export function retireRun(
+	work: Work,
+	runId: string,
+	retain?: (send: Send) => boolean,
+): void {
+	retireWhere(work, (send) => send.runId === runId && !retain?.(send));
 }
 
 export function retireSession(work: Work): void {
 	retireWhere(work, () => true);
+	if (work.state.nativeFence)
+		work.state = { ...work.state, nativeFence: undefined };
 }
 
 export function retireSend(work: Work, send: Send): void {
 	retireWhere(work, (item) => item.token === send.token);
 }
 
-export function setSendStatus(
-	work: Work,
-	send: Send,
-	status: SendStatus,
-): void {
+export function recordSendFact(work: Work, send: Send, fact: SendFact): void {
 	const current = work.state.sends.get(send.token);
 	if (!current) return;
 	if (
-		status.tag === "settled" ||
-		status.tag === "native" ||
-		status.tag === "failed"
-	) {
-		const { cleanupDeadline: _deadline, ...settled } = current;
-		replaceSend(work, { ...settled, status });
-	} else replaceSend(work, { ...current, status });
-}
-
-export function confirmDelivery(
-	work: Work,
-	send: Send,
-	terminal: boolean,
-): void {
-	if (
-		send.status.tag === "native" ||
-		(!terminal && send.status.tag === "observed")
+		current.facts.some(
+			(known) =>
+				known.kind === fact.kind &&
+				(fact.kind !== "transport_failed" ||
+					(known.kind === "transport_failed" && known.code === fact.code)) &&
+				(fact.kind !== "retryable" ||
+					(known.kind === "retryable" && known.at === fact.at)),
+		)
 	)
 		return;
-	setSendStatus(work, send, { tag: terminal ? "native" : "observed" });
+	const facts = [...current.facts, fact];
+	if (
+		fact.kind === "transport_succeeded" ||
+		fact.kind === "native_completed" ||
+		fact.kind === "transport_failed"
+	) {
+		const { cleanupDeadline: _deadline, ...settled } = current;
+		replaceSend(work, { ...settled, facts });
+	} else replaceSend(work, { ...current, facts });
 }
 
 export function inputAbsent(state: SessionLedgerState, probe: Send): boolean {
@@ -253,8 +274,8 @@ export function issue(
 		order: work.state.nextOrder,
 		live: true,
 		runId: scope.runId,
-		status:
-			retryAt === undefined ? { tag: "sent" } : { tag: "retry", at: retryAt },
+		facts: [],
+		...(retryAt === undefined ? {} : { probeRetryAt: retryAt }),
 		...(attempt ? { attempt } : {}),
 		...(scope.admission ? { admission: scope.admission } : {}),
 		...(scope.cleanupDeadline

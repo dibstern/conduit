@@ -1,7 +1,9 @@
 import { answer, request } from "./run-ledger-answers.js";
 import {
 	type Correlated,
-	confirmDelivery,
+	liveSends,
+	recordSendFact,
+	retireSend,
 	retireSession,
 } from "./run-ledger-correlation.js";
 import { fireAlarm } from "./run-ledger-deadlines.js";
@@ -15,6 +17,7 @@ import {
 	recordResult,
 } from "./run-ledger-lifecycle.js";
 import type { Control, LedgerCommand } from "./run-ledger-model.js";
+import { nativePolicy } from "./run-ledger-policy.js";
 import { admitInput, queuedCancelled } from "./run-ledger-queue.js";
 import { effectOutcome, nativeProbe } from "./run-ledger-transmissions.js";
 
@@ -78,14 +81,54 @@ export function correlatedCommand(work: Work, input: Correlated): void {
 		return;
 	}
 	const owner = work.state.runs.get(input.send.runId);
-	if (!owner || owner.tag === "Ended") return;
+	if (
+		(evidence.kind === "query_ended" || evidence.kind === "process_lost") &&
+		owner?.tag === "Ended"
+	) {
+		// Query closure releases its retained work, never independent cleanup.
+		const fence = work.state.nativeFence;
+		if (
+			fence?.runId === owner.runId &&
+			(evidence.kind === "process_lost" ||
+				nativePolicy(work.state.provider).runEnd === "result")
+		) {
+			for (const send of liveSends(work.state))
+				if (fence.tokens.includes(send.token)) retireSend(work, send);
+		} else retireSend(work, input.send);
+		const policy = nativePolicy(work.state.provider);
+		const remaining = liveSends(work.state).filter(
+			(send) => send.runId === owner.runId,
+		);
+		if (
+			!remaining.some(
+				(send) => send.effect.kind !== "probe" && policy.fences(send.effect),
+			)
+		)
+			for (const send of remaining)
+				if (
+					send.effect.kind === "probe" &&
+					send.effect.target.tag === "native_session"
+				)
+					retireSend(work, send);
+	}
+	if (!owner) return;
 	if (
 		evidence.kind === "started" ||
 		evidence.kind === "activity" ||
 		evidence.kind === "result" ||
+		evidence.kind === "query_ended" ||
+		evidence.kind === "process_lost" ||
 		evidence.kind === "interaction_requested"
 	)
-		confirmDelivery(work, input.send, evidence.kind === "result");
+		recordSendFact(work, input.send, {
+			kind:
+				evidence.kind === "result" ||
+				evidence.kind === "query_ended" ||
+				evidence.kind === "process_lost"
+					? "native_completed"
+					: "observed",
+		});
+	if (owner.tag === "Ended") return;
 	if (evidence.kind === "process_lost") {
 		finish(work, owner, "error", { kind: "process_lost" });
 		return;

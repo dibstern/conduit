@@ -62,6 +62,8 @@ function classifyOpenCodeTerminal(
 }
 
 const claudePolicy: NativePolicy = {
+	runEnd: "result",
+	resultReleasesFence: false,
 	controlEffect: (by) => (by === "end" ? "end_session" : "interrupt"),
 	closeEffect: "close",
 	interruptFailure: "settle",
@@ -84,10 +86,14 @@ const claudePolicy: NativePolicy = {
 	classifyTerminal: classifyRunnerTerminal,
 };
 
-const cursorPolicy: NativePolicy = { ...claudePolicy };
+const cursorPolicy: NativePolicy = {
+	...claudePolicy,
+	resultReleasesFence: true,
+};
 
 const openCodePolicy: NativePolicy = {
 	...claudePolicy,
+	runEnd: "query_ended",
 	closeEffect: "cancel_request",
 	interruptFailure: "fence",
 	postTombstoneProbe: true,

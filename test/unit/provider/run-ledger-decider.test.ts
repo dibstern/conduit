@@ -10,6 +10,695 @@ import {
 	variants,
 } from "./run-ledger-scenarios.js";
 
+describe("Adapter-declared Run end", () => {
+	it.each([
+		"query_ended",
+		"process_lost",
+	] as const)("HL-K audit: retained %s retires exactly the native work it proves ended", (kind) => {
+		const l = ledger("opencode");
+		const a = l.start();
+		l.observe({ kind: "input_accepted", token: a.token });
+		const b = l.admit("B").effects[0]?.token ?? missing;
+		const d = l.admit("D").effects[0]?.token ?? missing;
+		l.observe({ kind: "input_accepted", token: b });
+		l.observe({ kind: "input_accepted", token: d });
+		const interrupt = l.control({ kind: "run_now", inputId: "C" }).effects[0];
+		l.observe({
+			kind: "effect_outcome",
+			token: interrupt?.token ?? missing,
+			outcome: { tag: "succeeded" },
+		});
+		l.observe({ kind: "result", token: a.token, outcome: "completed" });
+		l.observe({ kind: "query_ended", token: a.token });
+		const reserved = l.state.active;
+		expect(reserved?.tag).toBe("Queued");
+		const ended =
+			kind === "process_lost"
+				? l.send({ verb: "settle", settlement: { kind, token: b } })
+				: l.observe({ kind, token: b });
+		expect(ended.ended).toEqual([]);
+		expect(l.work.some(({ token }) => token === b)).toBe(false);
+		if (kind === "query_ended") {
+			expect(ended.effects).toEqual([]);
+			expect(l.work.some(({ token }) => token === d)).toBe(true);
+			expect(l.state.active).toEqual(reserved);
+			l.observe({ kind: "query_ended", token: d });
+		} else {
+			expect(l.work.some(({ token }) => token === d)).toBe(false);
+			expect(ended.effects.map(({ effect }) => effect)).toEqual([
+				{ kind: "start", runId: reserved?.runId, inputId: "C" },
+			]);
+		}
+		expect(l.state.active?.tag).toBe("Starting");
+		expect(l.ended).toEqual([
+			{ runId: a.runId, outcome: "completed", reason: { kind: "completed" } },
+		]);
+	});
+	it.each([
+		"before",
+		"after",
+	] as const)("HL-K audit: acceptance %s a retryable outcome preserves native work at Run end", (when) => {
+		const l = ledger("opencode");
+		const a = l.start();
+		l.observe({ kind: "input_accepted", token: a.token });
+		const steer = l.admit("B").effects[0]?.token ?? missing;
+		if (when === "before") l.observe({ kind: "input_accepted", token: steer });
+		l.observe({
+			kind: "effect_outcome",
+			token: steer,
+			outcome: { tag: "retryable", retryAt: 110 },
+		});
+		if (when === "after") l.observe({ kind: "input_accepted", token: steer });
+		const interrupt = l.control({ kind: "run_now", inputId: "C" }).effects[0];
+		l.observe({
+			kind: "effect_outcome",
+			token: interrupt?.token ?? missing,
+			outcome: { tag: "succeeded" },
+		});
+		l.observe({ kind: "result", token: a.token, outcome: "completed" });
+		l.observe({ kind: "query_ended", token: a.token });
+		expect(l.work.some(({ token }) => token === steer)).toBe(true);
+		const reserved = l.state.active;
+		const probe =
+			l.work.find(
+				({ effect }) =>
+					effect.kind === "probe" && effect.target.tag === "native_session",
+			)?.token ?? missing;
+		expect(
+			l.observe({
+				kind: "probe_result",
+				token: probe,
+				finding: { tag: "native_idle" },
+			}).effects,
+		).toEqual([]);
+		expect(l.state.active).toEqual(reserved);
+		l.observe({
+			kind: "effect_outcome",
+			token: steer,
+			outcome: { tag: "succeeded" },
+		});
+		const covered = l.observe({
+			kind: "probe_result",
+			token: probe,
+			finding: { tag: "native_idle" },
+		});
+		expect(covered.effects.map(({ effect }) => effect)).toEqual([
+			{ kind: "start", runId: reserved?.runId, inputId: "C" },
+		]);
+		expect(l.ended).toHaveLength(1);
+	});
+	it("HL-K round 2 P2: process loss releases a retained query before its cleanup deadline", () => {
+		const l = ledger();
+		const a = l.start();
+		l.observe({ kind: "input_accepted", token: a.token });
+		l.observe({ kind: "result", token: a.token, outcome: "completed" });
+		l.admit("B");
+		const reserved = l.state.active;
+		expect(reserved?.tag).toBe("Queued");
+		const lost = l.send({
+			verb: "settle",
+			settlement: { kind: "process_lost", token: a.token },
+		});
+		expect(lost.ended).toEqual([]);
+		expect(lost.effects.map(({ effect }) => effect)).toEqual([
+			{ kind: "start", runId: reserved?.runId, inputId: "B" },
+		]);
+		expect(l.work.some(({ token }) => token === a.token)).toBe(false);
+		expect(l.ended).toEqual([
+			{ runId: a.runId, outcome: "completed", reason: { kind: "completed" } },
+		]);
+		const duplicate = l.send({
+			verb: "settle",
+			settlement: { kind: "process_lost", token: a.token },
+		});
+		expect(duplicate.events).toEqual([]);
+		expect(duplicate.effects).toEqual([]);
+		expect(l.state.active?.tag).toBe("Starting");
+	});
+	it("HL-K round 2 P2: process loss preserves independent failed-kill quarantine", () => {
+		const l = ledger();
+		const a = l.start();
+		l.observe({ kind: "input_accepted", token: a.token });
+		l.observe({ kind: "result", token: a.token, outcome: "completed" });
+		const close = l.fire().effects[0];
+		const kill = l.observe({
+			kind: "effect_outcome",
+			token: close?.token ?? missing,
+			outcome: { tag: "permanent", code: "close_failed" },
+		}).effects[0];
+		l.observe({
+			kind: "effect_outcome",
+			token: kill?.token ?? missing,
+			outcome: { tag: "permanent", code: "kill_failed" },
+		});
+		l.admit("B");
+		const reserved = l.state.active;
+		const cleanup = l.work.filter(({ effect }) =>
+			["kill_and_respawn", "quarantine", "probe"].includes(effect.kind),
+		);
+		expect(cleanup.map(({ effect }) => effect.kind)).toEqual([
+			"kill_and_respawn",
+			"quarantine",
+			"probe",
+			"probe",
+		]);
+		const alarmAt = l.alarmAt;
+		const lost = l.send({
+			verb: "settle",
+			settlement: { kind: "process_lost", token: a.token },
+		});
+		expect(lost.ended).toEqual([]);
+		expect(lost.effects).toEqual([]);
+		expect(l.state.active).toEqual(reserved);
+		expect(l.work).toEqual(cleanup);
+		expect(lost.alarmAt).toBe(alarmAt);
+		expect(l.ended).toHaveLength(1);
+	});
+	it.each([
+		"before",
+		"after",
+	] as const)("HL-K round 2 P1: acceptance %s Run end survives a retained retryable outcome", (when) => {
+		const l = ledger("opencode");
+		const a = l.start();
+		l.observe({ kind: "input_accepted", token: a.token });
+		const steer = l.admit("B").effects[0]?.token ?? missing;
+		const interrupt = l.control({ kind: "run_now", inputId: "C" }).effects[0];
+		l.observe({
+			kind: "effect_outcome",
+			token: interrupt?.token ?? missing,
+			outcome: { tag: "succeeded" },
+		});
+		if (when === "before") l.observe({ kind: "input_accepted", token: steer });
+		l.observe({ kind: "result", token: a.token, outcome: "completed" });
+		l.observe({ kind: "query_ended", token: a.token });
+		if (when === "after") l.observe({ kind: "input_accepted", token: steer });
+		const reserved = l.state.active;
+		const retry = l.observe({
+			kind: "effect_outcome",
+			token: steer,
+			outcome: { tag: "retryable", retryAt: 110 },
+		});
+		expect(retry.ended).toEqual([]);
+		const probe =
+			l.work.find(
+				({ effect }) =>
+					effect.kind === "probe" && effect.target.tag === "native_session",
+			)?.token ?? missing;
+		const idle = l.observe({
+			kind: "probe_result",
+			token: probe,
+			finding: { tag: "native_idle" },
+		});
+		expect(idle.effects).toEqual([]);
+		expect(l.state.active).toEqual(reserved);
+		expect(l.work.some(({ token }) => token === steer)).toBe(true);
+		l.observe({
+			kind: "effect_outcome",
+			token: steer,
+			outcome: { tag: "succeeded" },
+		});
+		const covered = l.observe({
+			kind: "probe_result",
+			token: probe,
+			finding: { tag: "native_idle" },
+		});
+		expect(covered.effects.map(({ effect }) => effect)).toEqual([
+			{ kind: "start", runId: reserved?.runId, inputId: "C" },
+		]);
+		expect(l.ended).toEqual([
+			{ runId: a.runId, outcome: "completed", reason: { kind: "completed" } },
+		]);
+	});
+	it.each([
+		"started",
+		"activity",
+	] as const)("HL-K review 3: late %s cannot downgrade a retained send's delivery proof", (kind) => {
+		const l = ledger("opencode");
+		const a = l.start();
+		l.observe({ kind: "input_accepted", token: a.token });
+		const steer = l.admit("B").effects[0]?.token ?? missing;
+		l.observe({
+			kind: "effect_outcome",
+			token: steer,
+			outcome: { tag: "delivery_unknown" },
+		});
+		const interrupt = l.control({ kind: "run_now", inputId: "C" }).effects[0];
+		l.observe({
+			kind: "effect_outcome",
+			token: interrupt?.token ?? missing,
+			outcome: { tag: "succeeded" },
+		});
+		l.observe({ kind: "result", token: a.token, outcome: "completed" });
+		l.observe({ kind: "query_ended", token: a.token });
+		l.observe({
+			kind: "effect_outcome",
+			token: steer,
+			outcome: { tag: "succeeded" },
+		});
+		const reserved = l.state.active;
+		const late = l.observe({ kind, token: steer });
+		expect(late.ended).toEqual([]);
+		expect(late.effects).toEqual([]);
+		expect(l.state.active).toEqual(reserved);
+		const probe = l.work.find(
+			({ effect }) =>
+				effect.kind === "probe" && effect.target.tag === "native_session",
+		);
+		const idle = l.observe({
+			kind: "probe_result",
+			token: probe?.token ?? missing,
+			finding: { tag: "native_idle" },
+		});
+		expect(idle.effects.map(({ effect }) => effect)).toEqual([
+			{ kind: "start", runId: reserved?.runId, inputId: "C" },
+		]);
+		expect(idle.ended).toEqual([]);
+		expect(l.ended).toEqual([
+			{ runId: a.runId, outcome: "completed", reason: { kind: "completed" } },
+		]);
+	});
+	it.each([
+		"before",
+		"after",
+	] as const)("HL-K review 4: retryable OpenCode work %s Run end can retire and release the fence", (when) => {
+		const l = ledger("opencode");
+		const a = l.start();
+		l.observe({ kind: "input_accepted", token: a.token });
+		const steer = l.admit("B").effects[0]?.token ?? missing;
+		if (when === "before")
+			l.observe({
+				kind: "effect_outcome",
+				token: steer,
+				outcome: { tag: "retryable", retryAt: 110 },
+			});
+		l.control({ kind: "run_now", inputId: "C" });
+		l.observe({ kind: "result", token: a.token, outcome: "completed" });
+		l.observe({ kind: "query_ended", token: a.token });
+		const reserved = l.state.active;
+		if (when === "after") {
+			const retry = l.observe({
+				kind: "effect_outcome",
+				token: steer,
+				outcome: { tag: "retryable", retryAt: 110 },
+			});
+			expect(retry.ended).toEqual([]);
+			expect(l.state.active).toEqual(reserved);
+		}
+		expect(l.work.some(({ token }) => token === steer)).toBe(false);
+		const probe = l.work.find(
+			({ effect }) =>
+				effect.kind === "probe" && effect.target.tag === "native_session",
+		);
+		const idle = l.observe({
+			kind: "probe_result",
+			token: probe?.token ?? missing,
+			finding: { tag: "native_idle" },
+		});
+		expect(idle.ended).toEqual([]);
+		expect(idle.effects.map(({ effect }) => effect)).toEqual([
+			{ kind: "start", runId: reserved?.runId, inputId: "C" },
+		]);
+		const c = l.inputToken("C");
+		l.observe({ kind: "started", token: c });
+		l.control({ kind: "cancel_input", inputId: "B" });
+		l.observe({ kind: "result", token: c, outcome: "completed" });
+		l.observe({ kind: "query_ended", token: c });
+		expect(l.ended).toHaveLength(2);
+		expect(l.state.active).toBeUndefined();
+		expect(l.work).toEqual([]);
+		expect(l.alarmAt).toBeUndefined();
+	});
+	it.each([
+		"before",
+		"after",
+	] as const)("HL-K review 3: a retained OpenCode result %s execution end proves delivery for idle", (when) => {
+		const l = ledger("opencode");
+		const a = l.start();
+		l.observe({ kind: "input_accepted", token: a.token });
+		const steer = l.admit("B").effects[0]?.token ?? missing;
+		l.observe({
+			kind: "effect_outcome",
+			token: steer,
+			outcome: { tag: "delivery_unknown" },
+		});
+		const interrupt = l.control({ kind: "run_now", inputId: "C" }).effects[0];
+		l.observe({
+			kind: "effect_outcome",
+			token: interrupt?.token ?? missing,
+			outcome: { tag: "succeeded" },
+		});
+		if (when === "before")
+			l.observe({ kind: "result", token: steer, outcome: "completed" });
+		l.observe({ kind: "result", token: a.token, outcome: "completed" });
+		const closed = l.observe({ kind: "query_ended", token: a.token });
+		if (when === "before") {
+			expect(closed.effects.map(({ effect }) => effect)).toEqual([
+				{ kind: "start", runId: l.state.active?.runId, inputId: "C" },
+			]);
+			expect(l.ended).toEqual([
+				{ runId: a.runId, outcome: "completed", reason: { kind: "completed" } },
+			]);
+			return;
+		}
+		expect(l.state.active?.tag).toBe("Queued");
+		if (when === "after") {
+			const alarmAt = l.alarmAt;
+			const late = l.observe({
+				kind: "result",
+				token: steer,
+				outcome: "error",
+				error: { code: "LateFailure", retryable: false },
+			});
+			expect(late.ended).toEqual([]);
+			expect(late.effects).toEqual([]);
+			expect(late.alarmAt).toBe(alarmAt);
+		}
+		const probe = l.work.find(
+			({ effect }) =>
+				effect.kind === "probe" && effect.target.tag === "native_session",
+		);
+		const idle = l.observe({
+			kind: "probe_result",
+			token: probe?.token ?? missing,
+			finding: { tag: "native_idle" },
+		});
+		expect(idle.ended).toEqual([]);
+		expect(idle.effects.map(({ effect }) => effect)).toEqual([
+			{ kind: "start", runId: l.state.active?.runId, inputId: "C" },
+		]);
+		expect(l.work.some(({ token }) => token === steer)).toBe(false);
+		expect(l.ended).toEqual([
+			{ runId: a.runId, outcome: "completed", reason: { kind: "completed" } },
+		]);
+	});
+	it("HL-K review 2: retained failures cannot rehome a reserved admission or extend its fence", () => {
+		const l = ledger("opencode");
+		const a = l.start();
+		l.observe({ kind: "input_accepted", token: a.token });
+		const steer = l.admit("B").effects[0]?.token ?? missing;
+		l.observe({
+			kind: "effect_outcome",
+			token: steer,
+			outcome: { tag: "delivery_unknown" },
+		});
+		l.observe({ kind: "result", token: a.token, outcome: "completed" });
+		l.observe({ kind: "query_ended", token: a.token });
+		const reserved = l.state.active;
+		expect(reserved).toMatchObject({
+			tag: "Queued",
+			deadline: { kind: "fence", at: 140 },
+			inputs: [{ inputId: "B" }],
+		});
+		for (const now of [110, 130]) {
+			l.ctx.now = now;
+			const failed = l.observe({
+				kind: "effect_outcome",
+				token: steer,
+				outcome: { tag: "permanent", code: "late_failure" },
+			});
+			expect(failed.ended).toEqual([]);
+			expect(failed.effects).toEqual([]);
+			expect(l.state.active).toEqual(reserved);
+			expect(l.ended).toHaveLength(1);
+			const alarm = l.fire();
+			if (l.ctx.now < 140) {
+				expect(alarm.ended).toEqual([]);
+				expect(l.state.active).toEqual(reserved);
+			} else {
+				expect(l.ctx.now).toBe(140);
+				expect(alarm.ended).toEqual([
+					{
+						runId: reserved?.runId,
+						outcome: "error",
+						reason: { kind: "fence_unconfirmed" },
+					},
+				]);
+			}
+		}
+		const alarmAt = l.alarmAt;
+		expect(alarmAt).toBe(160);
+		for (const now of [150, 155]) {
+			l.ctx.now = now;
+			const duplicate = l.observe({
+				kind: "effect_outcome",
+				token: steer,
+				outcome: { tag: "permanent", code: "late_failure" },
+			});
+			expect(duplicate.ended).toEqual([]);
+			expect(duplicate.effects).toEqual([]);
+			expect(duplicate.alarmAt).toBe(alarmAt);
+			expect(l.state.active).toBeUndefined();
+		}
+		expect(l.ended).toHaveLength(2);
+	});
+	it("HL-K review 1: query end preserves failed-kill quarantine and its probes", () => {
+		const l = ledger();
+		const a = l.start();
+		l.observe({ kind: "input_accepted", token: a.token });
+		l.observe({ kind: "result", token: a.token, outcome: "completed" });
+		const close = l.fire().effects[0];
+		expect(close?.effect.kind).toBe("close");
+		const kill = l.observe({
+			kind: "effect_outcome",
+			token: close?.token ?? missing,
+			outcome: { tag: "permanent", code: "close_failed" },
+		}).effects[0];
+		expect(kill?.effect.kind).toBe("kill_and_respawn");
+		l.observe({
+			kind: "effect_outcome",
+			token: kill?.token ?? missing,
+			outcome: { tag: "permanent", code: "kill_failed" },
+		});
+		l.admit("B");
+		const reserved = l.state.active;
+		const cleanup = l.work.filter(({ effect }) =>
+			["kill_and_respawn", "quarantine", "probe"].includes(effect.kind),
+		);
+		expect(cleanup.map(({ effect }) => effect.kind)).toEqual([
+			"kill_and_respawn",
+			"quarantine",
+			"probe",
+			"probe",
+		]);
+		const alarmAt = l.alarmAt;
+		const ended = l.observe({ kind: "query_ended", token: a.token });
+		expect(ended.ended).toEqual([]);
+		expect(ended.effects).toEqual([]);
+		expect(l.state.active).toEqual(reserved);
+		expect(l.work).toEqual(cleanup);
+		expect(ended.alarmAt).toBe(alarmAt);
+		expect(l.ended).toHaveLength(1);
+	});
+	it.each([
+		"transport_and_idle",
+		"native_end",
+	] as const)("OpenCode keeps an unrelated unknown HTTP steer fenced until %s", (release) => {
+		const l = ledger("opencode");
+		const a = l.start();
+		l.observe({
+			kind: "effect_outcome",
+			token: a.token,
+			outcome: { tag: "succeeded" },
+		});
+		l.observe({ kind: "input_accepted", token: a.token });
+		const steer = l.admit("B").effects[0]?.token ?? missing;
+		l.observe({
+			kind: "effect_outcome",
+			token: steer,
+			outcome: { tag: "delivery_unknown" },
+		});
+		const stopped = l.control({ kind: "run_now", inputId: "C" });
+		l.observe({
+			kind: "effect_outcome",
+			token: stopped.effects[0]?.token ?? missing,
+			outcome: { tag: "succeeded" },
+		});
+		l.observe({ kind: "result", token: a.token, outcome: "completed" });
+		const closed = l.observe({ kind: "query_ended", token: a.token });
+		expect(closed.ended).toEqual([
+			{ runId: a.runId, outcome: "completed", reason: { kind: "completed" } },
+		]);
+		expect(closed.effects.some(({ effect }) => effect.kind === "start")).toBe(
+			false,
+		);
+		expect(l.state.active?.tag).toBe("Queued");
+		const probe =
+			l.work
+				.filter(
+					({ effect }) =>
+						effect.kind === "probe" && effect.target.tag === "native_session",
+				)
+				.at(-1)?.token ?? missing;
+		expect(
+			l.observe({
+				kind: "probe_result",
+				token: probe,
+				finding: { tag: "native_idle" },
+			}).effects,
+		).toEqual([]);
+		expect(l.state.active?.tag).toBe("Queued");
+		if (release === "native_end") {
+			l.observe({ kind: "started", token: steer });
+			const result = l.observe({
+				kind: "result",
+				token: steer,
+				outcome: "error",
+				error: { code: "LateFailure", retryable: false },
+			});
+			expect(result.ended).toEqual([]);
+			expect(l.state.active?.tag).toBe("Queued");
+			const ended = l.observe({ kind: "query_ended", token: steer });
+			expect(ended.ended).toEqual([]);
+			expect(ended.effects.map(({ effect }) => effect)).toEqual([
+				{ kind: "start", runId: l.state.active?.runId, inputId: "C" },
+			]);
+			expect(l.ended).toHaveLength(1);
+			return;
+		}
+		const delivered = l.observe({
+			kind: "effect_outcome",
+			token: steer,
+			outcome: { tag: "succeeded" },
+		});
+		expect(delivered.effects).toEqual([]);
+		const idle = l.observe({
+			kind: "probe_result",
+			token: probe,
+			finding: { tag: "native_idle" },
+		});
+		expect(idle.ended).toEqual([]);
+		expect(idle.effects.map(({ effect }) => effect)).toEqual([
+			{ kind: "start", runId: l.state.active?.runId, inputId: "C" },
+		]);
+		expect(l.ended).toHaveLength(1);
+	});
+	it.each([
+		"claude",
+		"cursor",
+		"opencode",
+	] as const)("%s uses the same result boundary before intake, while running and during Stop", (provider) => {
+		for (const phase of ["Starting", "Running", "Interrupting"]) {
+			const l = ledger(provider);
+			l.admit("A");
+			const query = l.queryToken();
+			const runId = l.state.active?.runId;
+			if (phase !== "Starting") l.observe({ kind: "started", token: query });
+			if (phase === "Interrupting") {
+				const stopped = l.control({ kind: "stop" });
+				l.observe({
+					kind: "effect_outcome",
+					token: stopped.effects[0]?.token ?? missing,
+					outcome: { tag: "succeeded" },
+				});
+			}
+			const result = l.observe({
+				kind: "result",
+				token: query,
+				outcome: "interrupted",
+			});
+			if (provider === "opencode") {
+				expect(result.ended, phase).toEqual([]);
+				expect(l.state.active?.runId).toBe(runId);
+				const closed = l.observe({ kind: "query_ended", token: query });
+				expect(closed.ended).toMatchObject([{ runId, outcome: "interrupted" }]);
+			} else {
+				expect(result.ended, phase).toMatchObject([
+					{ runId, outcome: "interrupted" },
+				]);
+				expect(l.state.active).toBeUndefined();
+				expect(result.alarmAt).toBe(provider === "claude" ? 130 : undefined);
+				expect(l.observe({ kind: "query_ended", token: query }).ended).toEqual(
+					[],
+				);
+			}
+			expect(l.alarmAt).toBeUndefined();
+			expect(l.ended).toHaveLength(1);
+		}
+	});
+	it("Claude keeps the next start fenced after its Run ends, until the query closes", () => {
+		const l = ledger();
+		const a = l.start();
+		l.observe({ kind: "input_accepted", token: a.token });
+		const result = l.observe({
+			kind: "result",
+			token: a.token,
+			outcome: "completed",
+		});
+		expect(result.ended).toEqual([
+			{ runId: a.runId, outcome: "completed", reason: { kind: "completed" } },
+		]);
+		const queued = l.admit("B");
+		expect(queued.effects.map(({ effect }) => effect.kind)).toEqual(["probe"]);
+		expect(l.state.active?.tag).toBe("Queued");
+		const closed = l.observe({ kind: "query_ended", token: a.token });
+		expect(closed.ended).toEqual([]);
+		expect(closed.effects.map(({ effect }) => effect)).toEqual([
+			{ kind: "start", runId: l.state.active?.runId, inputId: "B" },
+		]);
+		expect(closed.alarmAt).toBe(110);
+	});
+	it.each([
+		"claude",
+		"opencode",
+	] as const)("%s keeps result outcome identical during Stop and natural completion", (provider) => {
+		for (const stopping of [false, true]) {
+			const l = ledger(provider);
+			const a = l.start();
+			if (stopping) l.control({ kind: "stop" });
+			const result = l.observe({
+				kind: "result",
+				token: a.token,
+				outcome: "error",
+				error: { code: "ActualFailure", retryable: false },
+			});
+			const closed = l.observe({ kind: "query_ended", token: a.token });
+			expect([...result.ended, ...closed.ended]).toEqual([
+				{
+					runId: a.runId,
+					outcome: "error",
+					reason: {
+						kind: "provider_error",
+						code: "ActualFailure",
+						retryable: false,
+					},
+				},
+			]);
+			expect(provider === "claude" ? result.ended : closed.ended).toHaveLength(
+				1,
+			);
+		}
+	});
+	it("Claude's fence owns its original deadline after the Tombstone and late receipts", () => {
+		const l = ledger();
+		const a = l.start();
+		const result = l.observe({
+			kind: "result",
+			token: a.token,
+			outcome: "completed",
+		});
+		expect(result.ended).toHaveLength(1);
+		expect(result.alarmAt).toBe(130);
+		l.ctx.now = 115;
+		const receipt = l.observe({ kind: "input_accepted", token: a.token });
+		expect(receipt.alarmAt).toBe(130);
+		expect(l.state.active).toBeUndefined();
+		const expired = l.fire();
+		expect(expired.ended).toEqual([]);
+		expect(expired.effects.map(({ effect }) => effect)).toEqual([
+			{ kind: "close", runId: a.runId },
+		]);
+		expect(expired.alarmAt).toBe(150);
+		const confirmed = l.observe({
+			kind: "effect_outcome",
+			token: expired.effects[0]?.token ?? missing,
+			outcome: { tag: "succeeded" },
+		});
+		expect(confirmed.ended).toEqual([]);
+		expect(confirmed.alarmAt).toBeUndefined();
+		expect(l.ended).toHaveLength(1);
+	});
+});
+
 describe("Obligation-owned deadlines", () => {
 	it.each([
 		[0, 1],
@@ -694,16 +1383,20 @@ describe("Obligation-owned deadlines", () => {
 				outcome: { tag: "succeeded" },
 			}).alarmAt,
 		).toBe(200);
-		expect(
-			l.observe({ kind: "result", token: query, outcome: "completed" }).alarmAt,
-		).toBe(150);
+		const result = l.observe({
+			kind: "result",
+			token: query,
+			outcome: "completed",
+		});
+		expect(result.alarmAt).toBe(150);
+		expect(result.ended).toHaveLength(1);
 		l.ctx.now = 150;
 		const ended = l.send({
 			verb: "settle",
 			settlement: { kind: "alarm_fired" },
 		});
 		expect(ended.alarmAt).toBe(170);
-		expect(ended.ended).toHaveLength(1);
+		expect(ended.ended).toEqual([]);
 		expect(
 			l.observe({
 				kind: "effect_outcome",
@@ -795,7 +1488,7 @@ describe("Rebuild contract round-10 findings", () => {
 		expect(l.state.active).toBeUndefined();
 	});
 	it("contract R10.3: old answer confirmation cannot replace a later ActualFailure", () => {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		l.observe({
 			kind: "interaction_requested",
@@ -893,20 +1586,22 @@ describe("Rebuild contract round-10 findings", () => {
 			outcome: "completed",
 			token: l.queryToken(a.runId),
 		});
-		const deadline = l.state.active?.deadline;
+		const deadline = l.alarmAt;
+		expect(deadline).toBe(130);
 		l.ctx.now += 5;
-		const retry = l.send({
+		const expired = l.send({
 			verb: "settle",
 			settlement: {
 				kind: "alarm_fired",
 			},
-		}).effects[0];
+		});
+		expect(expired.effects).toEqual([]);
 		l.observe({
 			kind: "effect_outcome",
 			outcome: { tag: "succeeded" },
-			token: retry?.token ?? missing,
+			token: answer?.token ?? missing,
 		});
-		expect(l.state.active?.deadline).toEqual(deadline);
+		expect(l.alarmAt).toBe(deadline);
 	});
 });
 function preparedProbe(target: "input" | "interaction" | "native_session") {
@@ -1060,23 +1755,22 @@ describe("Run Ledger decider regressions", () => {
 		const l = ledger();
 		l.admit("A");
 		const runId = l.state.active?.runId ?? missing;
-		l.observe({
+		const result = l.observe({
 			kind: "result",
 			outcome: "completed",
 			token: l.queryToken(runId),
 		});
-		expect(l.state.active).toMatchObject({
-			tag: "Settling",
-			deadline: { kind: "settle", at: 130 },
-		});
-		expect(l.state.active?.inputs[0]?.state.tag).toBe("Queued");
+		expect(result.alarmAt).toBe(130);
+		expect(l.state.active).toBeUndefined();
+		expect(result.ended).toContainEqual(
+			expect.objectContaining({ runId, outcome: "completed" }),
+		);
 		const ended = l.observe({
 			kind: "query_ended",
 			token: l.queryToken(runId),
 		});
-		expect(ended.ended).toContainEqual(
-			expect.objectContaining({ outcome: "completed" }),
-		);
+		expect(ended.ended).toEqual([]);
+		expect(ended.effects).toEqual([]);
 		expect(l.ended.some((ended) => ended.runId === runId)).toBe(true);
 		expect(
 			l.observe({ kind: "started", token: l.queryToken(runId) }).ended,
@@ -1225,6 +1919,8 @@ describe("Run Ledger decider regressions", () => {
 			outcome: "interrupted",
 			token: l.queryToken(a.runId),
 		});
+		expect(l.state.active).toMatchObject({ tag: "Queued" });
+		l.observe({ kind: "query_ended", token: l.queryToken(a.runId) });
 		expect(l.state.active).toMatchObject({
 			tag: "Starting",
 			inputs: [{ inputId: "B" }],
@@ -1856,7 +2552,7 @@ describe("Run Ledger decider regressions", () => {
 	it.each([
 		"RL-037",
 		"RL-054",
-	])("%s: Delivery acknowledgement is not a result, while Claude result waits for query end", () => {
+	])("%s: Delivery acknowledgement is not a result, while Claude result ends the Run", () => {
 		const l = ledger("claude");
 		const a = l.start();
 		const delivery: CanonicalEvent = {
@@ -1876,9 +2572,14 @@ describe("Run Ledger decider regressions", () => {
 			a,
 		);
 		if (!result) expect.fail("Expected result");
-		l.observe(result);
-		expect(l.state.active?.tag).toBe("Settling");
-		l.fire();
+		const ended = l.observe(result);
+		expect(ended.ended).toContainEqual(
+			expect.objectContaining({ runId: a.runId, outcome: "completed" }),
+		);
+		expect(l.state.active).toBeUndefined();
+		expect(l.observe({ kind: "query_ended", token: a.token }).ended).toEqual(
+			[],
+		);
 		expect(l.ended.some((ended) => ended.runId === a.runId)).toBe(true);
 	});
 	it("RL-055: A provider-handled retry cannot create another start", () => {
@@ -1976,7 +2677,7 @@ describe("Run Ledger decider regressions", () => {
 	it("A local settle deadline closes the query without losing the observed outcome", () => {
 		const l = ledger();
 		const a = l.start();
-		l.observe({
+		const result = l.observe({
 			kind: "result",
 			...a,
 			outcome: "completed",
@@ -1984,9 +2685,10 @@ describe("Run Ledger decider regressions", () => {
 		});
 		const expired = l.fire();
 		expect(expired.effects[0]?.effect.kind).toBe("close");
-		expect(expired.ended).toContainEqual(
+		expect(result.ended).toContainEqual(
 			expect.objectContaining({ outcome: "completed" }),
 		);
+		expect(expired.ended).toEqual([]);
 	});
 	it("A tombstoned OpenCode start cannot be retried at a later effect deadline", () => {
 		const l = ledger("opencode");
@@ -2038,21 +2740,27 @@ describe("Run Ledger decider regressions", () => {
 	it("A duplicate result cannot keep extending the settle deadline", () => {
 		const l = ledger();
 		const a = l.start();
-		l.observe({
+		const result = l.observe({
 			kind: "result",
 			...a,
 			outcome: "completed",
 			token: l.queryToken(a.runId),
 		});
-		const original = l.state.active?.deadline;
+		expect(result.ended).toHaveLength(1);
+		expect(l.alarmAt).toBe(130);
+		expect(l.state.active).toBeUndefined();
 		l.ctx.now = 120;
-		l.observe({
+		const duplicate = l.observe({
 			kind: "result",
 			...a,
 			outcome: "completed",
 			token: l.queryToken(a.runId),
 		});
-		expect(l.state.active?.deadline).toEqual(original);
+		expect(duplicate.alarmAt).toBe(130);
+		expect(duplicate.ended).toEqual([]);
+		expect(l.alarmAt).toBe(130);
+		expect(l.state.active).toBeUndefined();
+		expect(l.ended).toHaveLength(1);
 	});
 	it("Late accounting cannot change a Tombstone or its successor lifecycle", () => {
 		const l = ledger();
@@ -2258,7 +2966,7 @@ describe("Run Ledger decider regressions", () => {
 		);
 	});
 	it("Late input presence confirms delivery without discarding an already observed result", () => {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		const steer = l.admit("B").effects[0];
 		const probe = l.observe({
@@ -2304,7 +3012,7 @@ describe("Run Ledger decider regressions", () => {
 		expect(l.state).toEqual(before);
 	});
 	it("Stop retains its interrupt deadline across ordinary results and activity", () => {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		l.control({ kind: "stop" });
 		const deadline = l.state.active?.deadline;
@@ -2492,12 +3200,8 @@ describe("Run Ledger round 5 regressions", () => {
 			outcome: { tag: "succeeded" },
 			token: interrupt?.token ?? missing,
 		});
-		const ended = l.observe({
-			kind: "result",
-			...a,
-			outcome: "interrupted",
-			token: l.queryToken(a.runId),
-		});
+		l.ctx.now = l.state.active?.deadline.at ?? l.ctx.now;
+		const ended = l.fire();
 		expect(ended.effects.some((item) => item.effect.kind === "start")).toBe(
 			false,
 		);
@@ -2631,12 +3335,8 @@ describe("Run Ledger round 5 regressions", () => {
 			outcome: { tag: "succeeded" },
 			token: interrupt?.token ?? missing,
 		});
-		l.observe({
-			kind: "result",
-			...a,
-			outcome: "interrupted",
-			token: l.queryToken(a.runId),
-		});
+		l.ctx.now = l.state.active?.deadline.at ?? l.ctx.now;
+		const expired = l.fire();
 		const late = l.observe({
 			kind: "effect_outcome",
 			outcome: { tag: "retryable", retryAt: l.ctx.now + 1 },
@@ -2646,6 +3346,22 @@ describe("Run Ledger round 5 regressions", () => {
 			false,
 		);
 		expect(l.state.active?.tag).toBe("Queued");
+		const cancel = expired.effects.find(
+			({ effect }) => effect.kind === "cancel_request",
+		);
+		const cancelled = l.observe({
+			kind: "effect_outcome",
+			token: cancel?.token ?? missing,
+			outcome: { tag: "succeeded" },
+		});
+		const abort = cancelled.effects.find(
+			({ effect }) => effect.kind === "interrupt",
+		);
+		l.observe({
+			kind: "effect_outcome",
+			token: abort?.token ?? missing,
+			outcome: { tag: "succeeded" },
+		});
 		const probe = l.work
 			.filter(
 				(item) =>
@@ -3347,7 +4063,7 @@ describe("Run Ledger round 6 regressions", () => {
 		"settle",
 		"interrupt",
 	] as const)("Round 6 / finding 2: interaction arrival restores liveness from %s and preserves Stop", (phase) => {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		if (phase === "fence") l.fire();
 		if (phase === "settle")
@@ -3458,7 +4174,7 @@ describe("Run Ledger round 7 regressions", () => {
 		"started",
 		"native_busy",
 	] as const)("Round 7 freshness sibling: old %s evidence preserves the newer provider error", (path) => {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		const probe = path === "native_busy" ? l.fire().effects[0] : undefined;
 		l.observe({
@@ -3492,7 +4208,7 @@ describe("Run Ledger round 7 regressions", () => {
 		);
 	});
 	it("Round 7 freshness sibling: a duplicate interaction request does not become post-result activity", () => {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		const request = {
 			kind: "interaction_requested" as const,
@@ -3581,7 +4297,7 @@ describe("Run Ledger round 7 regressions", () => {
 		"duplicate_resolution",
 		"consumption_probe",
 	] as const)("Round 7 / finding 2: delayed %s preserves the provider error", (path) => {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		l.observe({
 			kind: "interaction_requested",
@@ -3663,7 +4379,7 @@ describe("Run Ledger round 7 regressions", () => {
 			});
 	});
 	it("Round 7 / finding 3: a stale native_busy sample cannot supersede a newer error result", () => {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		const probe = l
 			.fire()
@@ -3775,7 +4491,7 @@ describe("Run Ledger round 8 regressions", () => {
 		).toBe(false);
 	});
 	it("Round 8 terminal sibling: retryability refines the same code and later generic evidence cannot erase it", () => {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		l.observe({
 			kind: "result",
@@ -3856,7 +4572,7 @@ describe("Run Ledger round 8 regressions", () => {
 		expect(inbox.some((input) => input.inputId === "B")).toBe(false);
 	});
 	it("Round 8 / finding 2: a resolved pending interaction retains its dedup identity until the run ends", () => {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		const request = {
 			kind: "interaction_requested" as const,
@@ -4106,7 +4822,7 @@ describe("Run Ledger round 9 review regressions", () => {
 
 		expect(l.state.inbox.some((input) => input.inputId === "B")).toBe(false);
 	});
-	it("Round 9 / finding 3: provider-handled retry evidence suppresses an earlier retryable error", () => {
+	it("Round 9 / finding 3: late provider-handled retry evidence cannot mutate a Cursor Tombstone", () => {
 		const l = ledger("cursor");
 		const a = l.start();
 		for (const retryHandled of [false, true]) {
@@ -4134,13 +4850,15 @@ describe("Run Ledger round 9 review regressions", () => {
 			...a,
 			token: l.queryToken(a.runId),
 		});
-		expect(ended.ended).toContainEqual(
+		expect(ended.ended).toEqual([]);
+		expect(l.ended).toHaveLength(1);
+		expect(l.ended).toContainEqual(
 			expect.objectContaining({
 				outcome: "error",
 				reason: {
 					kind: "provider_error",
 					code: "SameFailure",
-					retryable: false,
+					retryable: true,
 				},
 			}),
 		);
@@ -4166,7 +4884,7 @@ describe("Run Ledger round 9 review regressions", () => {
 		);
 	});
 	it("Round 9 / finding 5: an owned resolution preceding its request cannot resurrect the interaction", () => {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		l.observe({
 			kind: "interaction_resolved",
@@ -4265,7 +4983,7 @@ it("Round 9 cancellation sibling: local cancellation and closure do not prove un
 	expect(l.input("B")?.uncertain).toBe(true);
 });
 it("Round 9 refinement sibling: an answer issued before refined terminal evidence cannot supersede that evidence", () => {
-	const l = ledger();
+	const l = ledger("opencode");
 	const a = l.start();
 	l.observe({
 		kind: "interaction_requested",
@@ -4348,7 +5066,7 @@ it.each([
 	expect(l.work.some((item) => item.token === probe?.token)).toBe(false);
 });
 it("Round 9 bounded-evidence sibling: explicit failure evidence after Stop survives terminal history eviction", () => {
-	const l = ledger();
+	const l = ledger("opencode");
 	const a = l.start();
 	l.control({ kind: "stop" });
 	for (let i = 0; i < 130; i++)
@@ -4516,7 +5234,9 @@ it.each<ProviderKind>([
 		...a,
 		token: l.queryToken(a.runId),
 	});
-	expect(ended.ended).toContainEqual(
+	if (provider !== "opencode") expect(ended.ended).toEqual([]);
+	expect(l.ended).toHaveLength(1);
+	expect(l.ended).toContainEqual(
 		expect.objectContaining({
 			outcome: "error",
 			reason: {
@@ -4550,7 +5270,9 @@ it("Round 10 / finding 4 sibling: native completion during Stop survives more th
 		...a,
 		token: l.queryToken(a.runId),
 	});
-	expect(ended.ended).toContainEqual(
+	expect(ended.ended).toEqual([]);
+	expect(l.ended).toHaveLength(1);
+	expect(l.ended).toContainEqual(
 		expect.objectContaining({
 			outcome: "completed",
 			reason: { kind: "completed" },
@@ -4664,7 +5386,9 @@ it("Round 10 Stop sibling: a native completion observed before cleanup failure s
 		verb: "settle",
 		settlement: { kind: "process_lost", ...a, token: l.queryToken(a.runId) },
 	});
-	expect(ended.ended).toContainEqual(
+	expect(ended.ended).toEqual([]);
+	expect(l.ended).toHaveLength(1);
+	expect(l.ended).toContainEqual(
 		expect.objectContaining({
 			outcome: "completed",
 			reason: { kind: "completed" },
@@ -4851,12 +5575,8 @@ describe("Run Ledger round 12 review regressions", () => {
 			outcome: { tag: "succeeded" },
 			token: interrupt?.token ?? missing,
 		});
-		l.observe({
-			kind: "result",
-			...a,
-			outcome: "interrupted",
-			token: l.queryToken(a.runId),
-		});
+		l.ctx.now = l.state.active?.deadline.at ?? l.ctx.now;
+		l.fire();
 		const replay = l.observe(receipt);
 		expect(replay).toMatchObject({
 			tag: "Accepted",
@@ -4869,7 +5589,7 @@ describe("Run Ledger round 12 review regressions", () => {
 		expect(retried.effects[0]?.token).not.toBe(e?.token);
 	});
 	it("Round 12 / finding 2: conflicting terminal reports keep the original settlement deadline", () => {
-		const l = ledger();
+		const l = ledger("opencode");
 		l.ctx.now = 0;
 		const a = l.start();
 		l.observe({
@@ -5178,6 +5898,22 @@ describe("Deterministic public replacements for former oracle cases", () => {
 						error: { code: "prior-error", retryable: false },
 					});
 				if (afterResult) result();
+				if (afterResult && provider !== "opencode") {
+					expect(
+						l.inspect({
+							verb: "control",
+							control: { kind: "answer", interactionId: "q", answer: "yes" },
+						}),
+					).toMatchObject({ tag: "Rejected" });
+					expect(l.ended).toMatchObject([
+						{
+							runId: a.runId,
+							outcome: "error",
+							reason: { code: "prior-error" },
+						},
+					]);
+					continue;
+				}
 				const answer = l.control({
 					kind: "answer",
 					interactionId: "q",
@@ -5193,6 +5929,8 @@ describe("Deterministic public replacements for former oracle cases", () => {
 						: undefined;
 				if (!afterResult) result();
 				const deadline = l.state.active?.deadline;
+				if (provider !== "opencode")
+					expect(l.alarmAt).toBe(provider === "claude" ? 130 : undefined);
 				if (probe)
 					l.observe({
 						kind: "probe_result",
@@ -5211,10 +5949,16 @@ describe("Deterministic public replacements for former oracle cases", () => {
 						token: answer?.token ?? missing,
 						interactionId: "q",
 					});
-				expect(l.state.active?.deadline).toEqual(deadline);
-				expect(l.state.active?.tag).toBe("Settling");
+				if (provider === "opencode")
+					expect(l.state.active?.deadline).toEqual(deadline);
+				else expect(l.alarmAt).toBe(provider === "claude" ? 130 : undefined);
+				expect(l.state.active?.tag).toBe(
+					provider === "opencode" ? "Settling" : undefined,
+				);
 				const ended = l.observe({ kind: "query_ended", token: a.token });
-				expect(ended.ended[0]).toMatchObject({
+				if (provider !== "opencode") expect(ended.ended).toEqual([]);
+				expect(l.ended).toHaveLength(1);
+				expect(l.ended[0]).toMatchObject({
 					outcome: "error",
 					reason: {
 						kind: "provider_error",
@@ -5250,6 +5994,8 @@ describe("Deterministic public replacements for former oracle cases", () => {
 		});
 		l.control({ kind: "stop" });
 		l.observe({ kind: "result", token: a.token, outcome: "interrupted" });
+		if (provider === "opencode")
+			l.observe({ kind: "query_ended", token: a.token });
 		expect(l.state.inbox).toContainEqual({
 			inputId: "B",
 			state: { tag: "Queued" },
@@ -5303,6 +6049,23 @@ describe("Deterministic public replacements for former oracle cases", () => {
 		l.observe({
 			kind: "probe_result",
 			token: probe?.token ?? missing,
+			finding: { tag: "native_idle" },
+		});
+		expect(l.state.active?.tag).toBe("Queued");
+		l.observe({
+			kind: "effect_outcome",
+			token: steer?.token ?? missing,
+			outcome: { tag: "succeeded" },
+		});
+		const retry = l
+			.fire()
+			.effects.find(
+				({ effect }) =>
+					effect.kind === "probe" && effect.target.tag === "native_session",
+			);
+		l.observe({
+			kind: "probe_result",
+			token: retry?.token ?? missing,
 			finding: { tag: "native_idle" },
 		});
 		expect(l.state.active?.inputs[0]?.inputId).toBe("B");
@@ -5446,7 +6209,7 @@ it("successful End retains a live completion path until the Run terminates", () 
 });
 
 it("idle sample preceding renewed activity cannot retire the query's later ActualFailure", () => {
-	const l = ledger();
+	const l = ledger("opencode");
 	const a = l.start();
 	const probe = l.fire().effects.find(({ effect }) => effect.kind === "probe");
 	l.ctx.now++;
@@ -5506,7 +6269,7 @@ it("retried close retains its original cleanup deadline and escalates when it fi
 });
 
 it("native ActualFailure without input acceptance survives a contradictory late start transport failure", () => {
-	const l = ledger();
+	const l = ledger("opencode");
 	const a = l.start();
 	l.observe({
 		kind: "result",

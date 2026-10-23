@@ -270,7 +270,7 @@ describe("classifyRunTerminal", () => {
 
 it("Round 9 terminal sibling: conflicting native results have one answer regardless of the closure fallback", () => {
 	for (const stop of [false, true]) {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		if (stop) l.control({ kind: "stop" });
 		const result = l.observe({
@@ -285,7 +285,7 @@ it("Round 9 terminal sibling: conflicting native results have one answer regardl
 			outcome: "interrupted",
 		});
 		const ended = l.observe({ kind: "query_ended", token: a.token });
-		expect(ended.alarmAt).toBeUndefined();
+		expect(ended.alarmAt).toBe(stop ? 120 : undefined);
 		expect([...interrupted.ended, ...ended.ended]).toEqual([
 			{
 				runId: a.runId,
@@ -299,7 +299,7 @@ it("Round 9 terminal sibling: conflicting native results have one answer regardl
 });
 it("Round 10 supersession: new native work clears both completion and failure evidence", () => {
 	for (const before of [true, false]) {
-		const l = ledger();
+		const l = ledger("opencode");
 		const a = l.start();
 		const failure = {
 			kind: "result",

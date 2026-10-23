@@ -1,7 +1,12 @@
 import { closeInteractions } from "./run-ledger-answers.js";
 import { issue, liveSends, retireRun } from "./run-ledger-correlation.js";
 import { returnInputs } from "./run-ledger-input-records.js";
-import { type ActiveRun, putRun, type Work } from "./run-ledger-internal.js";
+import {
+	type ActiveRun,
+	putRun,
+	type RunState,
+	type Work,
+} from "./run-ledger-internal.js";
 import type {
 	Deadline,
 	EndReason,
@@ -9,6 +14,7 @@ import type {
 	RunOutcome,
 } from "./run-ledger-model.js";
 import { nativePolicy } from "./run-ledger-policy.js";
+import { sendProof } from "./run-ledger-send-proof.js";
 import {
 	accumulateTerminalEvidence,
 	classifyTerminalEvidence,
@@ -35,6 +41,29 @@ export function finish(
 		{ outcome, reason },
 		run.tag === "Interrupting" ? run.by : undefined,
 	);
+	// An owned execution ending cannot discharge a different HTTP request that
+	// the provider may still execute. Native policy decides how idle proves it safe.
+	const pendingQueries = new Set(
+		nativeEnded && policy.postTombstoneProbe
+			? liveSends(work.state)
+					.filter(
+						(send) =>
+							send.runId === run.runId &&
+							(send.effect.kind === "start" || send.effect.kind === "steer") &&
+							sendProof(send).retainAtNativeEnd,
+					)
+					.map((send) => send.token)
+			: [],
+	);
+	if (pendingQueries.size > 0)
+		work.state = {
+			...work.state,
+			nativeFence: {
+				runId: run.runId,
+				tokens: [...pendingQueries],
+				deadline: deadline(work, "fence", work.ctx.policy.fenceMs),
+			},
+		};
 	const needsProbe =
 		run.tag !== "Queued" &&
 		policy.postTombstoneProbe &&
@@ -43,7 +72,8 @@ export function finish(
 				send.runId === run.runId &&
 				policy.fences(send.effect) &&
 				(!nativeEnded ||
-					(send.effect.kind !== "start" && send.effect.kind !== "steer")),
+					(send.effect.kind !== "start" && send.effect.kind !== "steer") ||
+					pendingQueries.has(send.token)),
 		);
 	closeInteractions(work, run);
 	const closed = work.state.runs.get(run.runId) ?? run;
@@ -56,7 +86,11 @@ export function finish(
 		run.runId,
 		run.tag === "Queued" && reason.kind === "interrupted",
 	);
-	retireRun(work, run.runId);
+	retireRun(
+		work,
+		run.runId,
+		(send) => work.state.nativeFence?.tokens.includes(send.token) === true,
+	);
 	work.ended.push({ runId: run.runId, ...terminal });
 	if (
 		needsProbe &&
@@ -70,7 +104,7 @@ export function finish(
 		);
 }
 
-export function closeNative(work: Work, run: ActiveRun): void {
+export function closeNative(work: Work, run: RunState): void {
 	if (run.tag === "Queued" || work.state.inactive) return;
 	issue(
 		work,
@@ -140,9 +174,25 @@ export function recordResult(
 	const terminal = accumulateTerminalEvidence(run.terminal, evidence);
 	const updated = { ...run, terminal };
 	putRun(work, updated);
-	if (run.tag === "Interrupting") {
-		if (evidence.outcome === "interrupted") endQuery(work, updated, false);
-	} else if (run.tag !== "Settling")
+	const policy = nativePolicy(work.state.provider);
+	if (policy.runEnd === "result") {
+		if (!policy.resultReleasesFence)
+			work.state = {
+				...work.state,
+				nativeFence: {
+					runId: run.runId,
+					tokens: liveSends(work.state)
+						.filter(
+							(send) =>
+								send.runId === run.runId &&
+								(send.effect.kind === "start" || send.effect.kind === "steer"),
+						)
+						.map((send) => send.token),
+					deadline: deadline(work, "settle", work.ctx.policy.settleMs),
+				},
+			};
+		endQuery(work, updated, policy.resultReleasesFence);
+	} else if (run.tag !== "Settling" && run.tag !== "Interrupting")
 		putRun(work, {
 			...updated,
 			tag: "Settling",
