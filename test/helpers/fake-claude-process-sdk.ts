@@ -2055,6 +2055,51 @@ function query(params: {
 					},
 				};
 			}
+			if (
+				request === "background-question" ||
+				request === "background-permission"
+			) {
+				if (!params.options?.canUseTool)
+					throw new Error("Missing background interaction bridge");
+				void params.options
+					.canUseTool(
+						request === "background-question" ? "AskUserQuestion" : "Bash",
+						request === "background-question"
+							? {
+									questions: [
+										{
+											question: "Continue background work?",
+											header: "Background",
+											options: [],
+										},
+									],
+								}
+							: { command: "echo background" },
+						{
+							signal:
+								params.options.abortController?.signal ??
+								new AbortController().signal,
+							toolUseID: randomUUID(),
+							requestId: request,
+							agentID: "background-task",
+						},
+					)
+					.then((response) =>
+						mark({
+							kind: "prompt-answer",
+							prompt: request,
+							requestId: request,
+							pid: process.pid,
+							response,
+						}),
+					);
+				if (proof) {
+					const release = join(dirname(proof), "release-background-foreground");
+					while (!existsSync(release) && !closed)
+						await new Promise<void>((done) => setTimeout(done, 20));
+					if (closed) return;
+				}
+			}
 			if (request.startsWith("question-")) {
 				if (!params.options?.canUseTool)
 					throw new Error("Missing question bridge");

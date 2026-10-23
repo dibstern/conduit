@@ -1213,6 +1213,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					inFlightTools: new Map(),
 					eventSink: input.eventSink,
 					currentTurnId: input.inputId,
+					currentTurnStartedAt: Date.now(),
 					currentUserMessageId:
 						input.continuation?.cutOffMessageId ?? input.inputId,
 					resumeFallbackAllowed:
@@ -1634,6 +1635,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 								// A steer becomes current when the SDK starts it.
 								if (!joinsRunningTurn) {
 									ctx.currentTurnId = input.inputId;
+									ctx.currentTurnStartedAt = Date.now();
 									ctx.currentUserMessageId =
 										input.continuation?.cutOffMessageId ?? input.inputId;
 									ctx.resumeFallbackAllowed =
@@ -2281,6 +2283,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			// new members, including when the daemon has retired it at the bound.
 			if (ctx.currentRunId && ctx.closedRunIds?.has(ctx.currentRunId))
 				ctx.currentRunId = undefined;
+			if (ctx.currentTurnId !== message.command_uuid)
+				ctx.currentTurnStartedAt = Date.now();
 			ctx.currentTurnId = message.command_uuid;
 			ctx.currentUserMessageId =
 				unplaced.continuation?.cutOffMessageId ?? message.command_uuid;
@@ -2596,6 +2600,34 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						!(yield* isCurrentSession(this.stateRef, ctx)))
 				)
 					return Effect.void;
+				if (
+					ctx &&
+					bound &&
+					recoverBlocked &&
+					(!boundTurnId || !turnIds.includes(boundTurnId)) &&
+					ctx.turnInFlight &&
+					requestedAt !== undefined &&
+					ctx.currentTurnStartedAt !== undefined &&
+					ctx.currentTurnStartedAt > requestedAt
+				) {
+					// Recover the old waits without interrupting a later admission.
+					// Each callback's request cleanup also settles its daemon-side card.
+					for (const [id, pending] of ctx.pendingApprovals) {
+						if (Date.parse(pending.createdAt) <= requestedAt) {
+							ctx.pendingApprovals.delete(id);
+							yield* pending.resolve("reject").pipe(Effect.ignore);
+						}
+					}
+					for (const [id, pending] of ctx.pendingQuestions) {
+						if (Date.parse(pending.createdAt) <= requestedAt) {
+							ctx.pendingQuestions.delete(id);
+							yield* pending
+								.reject(new Error("Turn interrupted"))
+								.pipe(Effect.ignore);
+						}
+					}
+					return Effect.void;
+				}
 				if (bound) {
 					yield* FiberMap.remove(this.shutdownFibers, sessionId);
 					yield* this.warmedQueries.discardEffect(sessionId);
