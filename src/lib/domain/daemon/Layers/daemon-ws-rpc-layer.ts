@@ -147,6 +147,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			| UserAvatar
 			| RelayCacheTag
 			| AccountDirectory
+			| CursorAccountResources
 			| InstanceManagerStateTag
 			| PollerFibersTag
 			| InstanceHealthCheckTag
@@ -251,6 +252,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				| UserAvatar
 				| RelayCacheTag
 				| AccountDirectory
+				| CursorAccountResources
 				| InstanceManagerStateTag
 				| PollerFibersTag
 				| InstanceHealthCheckTag
@@ -278,6 +280,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				A,
 				E,
 				| AccountDirectory
+				| CursorAccountResources
 				| InstanceManagerStateTag
 				| PollerFibersTag
 				| ConfigPersistenceTag
@@ -380,7 +383,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 								Option.isNone(account) &&
 								operation === "start" &&
 								(yield* cursorResources.use(
-									"__cursor_login__",
+									{ _tag: "LoginSlot" } as const,
 									({ auth }) => auth.read,
 								)).source !== "environment"
 							) {
@@ -398,7 +401,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 					);
 					const id = Option.isSome(selected)
 						? selected.value.id
-						: "__cursor_login__";
+						: ({ _tag: "LoginSlot" } as const);
 					if (operation !== "start")
 						return yield* cursorResources.use(
 							id,
@@ -450,6 +453,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				A,
 				E,
 				| AccountDirectory
+				| CursorAccountResources
 				| InstanceManagerStateTag
 				| ProjectRegistryTag
 				| SessionDirectory

@@ -325,3 +325,20 @@ memory, then replies; callers never choose when a change reaches disk. Other
 code reads settings from the module, never from the file. The CLI changes
 settings over RPC when the daemon is up and writes the file only when it is
 down.
+
+## Cursor Credential
+
+A **Cursor Credential** is the effective key for one Credential Owner and the
+active backend. Account environment wins; the launch environment belongs only
+to the compatibility owner. A stored login must be unexpired and belong to the
+same backend. Account resources alone resolve it, including auth status,
+discovery, titles and turn preparation. Its fingerprint includes the active
+backend; its key stays redacted until SDK access or runner wire encoding.
+
+## Credential Owner
+
+A **Credential Owner** is a Cursor Account or the Login Slot used before an
+account exists. The adoption marker fixes which owner may use the daemon's
+launch key. Changing the default or deleting that account never transfers the
+key to another account. The daemon selects the backend and passes it explicitly
+to runners; a runner reporting another backend is retired for upgrade.

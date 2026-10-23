@@ -8,7 +8,7 @@ import type {
 	LegacyRunnerSettings as Settings,
 } from "../claude/claude-runner-snapshot.js";
 import type { ClaudeSubagentTranscriptSnapshot } from "../claude/types.js";
-import type { CursorCredential } from "../cursor/sdk-port.js";
+import type { CursorCredentialEnvelope } from "../cursor/cursor-credential.js";
 import type {
 	PermissionDecision,
 	PermissionRequest,
@@ -45,7 +45,7 @@ export type SessionCommand = (
 			/** Daemon memory snapshot retained until another turn is admitted. */
 			readonly autoSettleAfterDays?: number | null | undefined;
 			/** Ephemeral launch credentials, excluded from durable command inputs. */
-			readonly cursorCredential?: CursorCredential;
+			readonly cursorCredential?: CursorCredentialEnvelope;
 			readonly sinkId: string;
 			readonly aborted: boolean;
 			readonly claudeSettingsOverrides?: Settings | undefined;

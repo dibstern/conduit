@@ -648,7 +648,13 @@ it("removes an environment account while native send is awaiting its SDK handle"
 		}),
 	).toMatchObject({ source: "environment", status: "logged-in" });
 	const fingerprint = createHash("sha256")
-		.update(JSON.stringify(["environment", "", "[REDACTED:environment]"]))
+		.update(
+			JSON.stringify([
+				"environment",
+				"https://api2.cursor.sh",
+				"[REDACTED:environment]",
+			]),
+		)
 		.digest("hex");
 	const browser = await fixture.connect();
 	const sessionId = await browser.createSession(
@@ -828,7 +834,7 @@ it.each([
 			JSON.stringify(
 				source !== "default-environment"
 					? ["sdk-login", "https://api2.cursor.sh", "[REDACTED]"]
-					: ["environment", "", "[REDACTED:environment]"],
+					: ["environment", "https://api2.cursor.sh", "[REDACTED:environment]"],
 			),
 		)
 		.digest("hex");

@@ -11,13 +11,14 @@ import { resolveRunnerForkDigest } from "../runner/runner-fork-digest.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
 import type { ModelInfo, ProviderCapabilities } from "../types.js";
 import { CursorAccountResources } from "./cursor-account-resources.js";
-import { resolveCursorCredential } from "./cursor-credential.js";
-import { createCursorSdkPort } from "./cursor-sdk.js";
+import {
+	type CursorCredentialLookup,
+	cursorCredentialMessage,
+} from "./cursor-credential.js";
 import { discoverCursorSkillsEffect } from "./cursor-skill-discovery.js";
 import { cursorTurnError } from "./sdk-error.js";
 import type {
 	CursorAgent,
-	CursorCredential,
 	CursorModel,
 	CursorRun,
 	CursorSdkPort,
@@ -118,7 +119,6 @@ const discoveryFailure = (reason: string, authRequired = false) =>
 		...(authRequired ? { code: "auth_required" as const } : {}),
 	});
 
-let defaultPort: CursorSdkPort | undefined;
 // Local SDK transcript paths use process-global environment variables. Session
 // agents live in child runners; serialize all in-daemon text calls across relays.
 const textGenerationLock = Semaphore.makeUnsafe(1);
@@ -136,41 +136,35 @@ const catalogs = new WeakMap<
 	}
 >();
 export const discoverCursorEffect = (
-	port?: CursorSdkPort,
+	account: Account,
+	workspaceRoot?: string,
+): Effect.Effect<
+	ProviderCapabilities,
+	ProviderInstanceFailure,
+	CursorAccountResources
+> =>
+	Effect.gen(function* () {
+		const resources = yield* CursorAccountResources;
+		return yield* resources
+			.use(account.id, ({ sdk, credential }) =>
+				discoverCursorCatalog(sdk, credential, account, workspaceRoot),
+			)
+			.pipe(
+				Effect.mapError((cause) =>
+					cause instanceof ProviderInstanceFailure
+						? cause
+						: discoveryFailure(cause.message),
+				),
+			);
+	});
+
+const discoverCursorCatalog = (
+	adapter: CursorSdkPort,
+	credentialEffect: Effect.Effect<CursorCredentialLookup, unknown>,
 	account?: Account,
 	workspaceRoot?: string,
-	shellEnv?: Readonly<Record<string, string | undefined>>,
-	credentialEffect?: Effect.Effect<CursorCredential | undefined, unknown>,
 ): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> =>
 	Effect.gen(function* () {
-		const resources = yield* Effect.serviceOption(CursorAccountResources);
-		if (!port && account && resources._tag === "Some") {
-			return yield* resources.value
-				.use(account.id, ({ sdk, credential }) =>
-					discoverCursorEffect(
-						sdk,
-						account,
-						workspaceRoot,
-						shellEnv,
-						credential,
-					),
-				)
-				.pipe(
-					Effect.mapError((cause) =>
-						cause instanceof ProviderInstanceFailure
-							? cause
-							: discoveryFailure(cause.message),
-					),
-				);
-		}
-		const adapter = yield* Effect.try({
-			try: () =>
-				port ??
-				(account
-					? createCursorSdkPort({ id: account.id })
-					: (defaultPort ??= createCursorSdkPort())),
-			catch: () => discoveryFailure("Cursor SDK could not load"),
-		});
 		const runtime = yield* Effect.tryPromise({
 			try: () => adapter.probeRuntime(),
 			catch: () => discoveryFailure("Cursor SDK could not load"),
@@ -179,27 +173,16 @@ export const discoverCursorEffect = (
 			return yield* Effect.fail(
 				discoveryFailure(runtime.reason ?? "Cursor SDK could not load"),
 			);
-		const credential = yield* (
-			credentialEffect ??
-			Effect.tryPromise(() =>
-				resolveCursorCredential(adapter, {
-					NODE_ENV: process.env["NODE_ENV"],
-					...(account ? {} : (shellEnv ?? process.env)),
-					...account?.env,
-				}),
-			)
-		).pipe(
+		const lookup = yield* credentialEffect.pipe(
 			Effect.mapError(() =>
 				discoveryFailure("Cursor credential lookup failed"),
 			),
 		);
-		if (!credential)
+		if (lookup._tag !== "Ready")
 			return yield* Effect.fail(
-				discoveryFailure(
-					"Cursor authentication required. Log in to Cursor in Settings.",
-					true,
-				),
+				discoveryFailure(cursorCredentialMessage(lookup), true),
 			);
+		const credential = lookup.credential;
 		// Keyed by credential, so a login or logout reads a fresh catalog.
 		const key = JSON.stringify([
 			account?.id ?? "cursor",
@@ -269,36 +252,29 @@ export const discoverCursorEffect = (
 	});
 
 export const makeCursorRunnerDriver = (
-	port?: CursorSdkPort,
+	resources: CursorAccountResources["Service"],
 	persistence?: {
 		readonly read: ReadQueryEffect;
 		readonly state: Omit<ProviderStateEffect, "projectId">;
 	},
 	daemonConfigDir = DEFAULT_CONFIG_DIR,
-	resources?: CursorAccountResources["Service"],
 ): RunnerDriverPieces => {
-	const discover = (
-		account?: Account,
-		directory?: string,
-		shellEnv?: Readonly<Record<string, string | undefined>>,
-	) => {
-		const discovery = discoverCursorEffect(port, account, directory, shellEnv);
-		return resources
-			? discovery.pipe(Effect.provideService(CursorAccountResources, resources))
-			: discovery;
-	};
 	return {
 		driverKind: "cursor",
-		discoverEffect: (directory, account, _options, call) =>
-			discover(
-				call?.account ?? account,
-				call?.workspaceRoot ?? directory,
-				call?.shellEnv,
-			),
+		discoverEffect: (directory, account, _options, call) => {
+			const selected = call?.account ?? account;
+			return selected
+				? discoverCursorEffect(selected, call?.workspaceRoot ?? directory).pipe(
+						Effect.provideService(CursorAccountResources, resources),
+					)
+				: Effect.fail(
+						discoveryFailure("Cursor discovery requires an account", true),
+					);
+		},
 		generateTextEffect: (input) => {
 			const generate = (
 				adapter: CursorSdkPort,
-				credentialEffect?: Effect.Effect<CursorCredential | undefined, unknown>,
+				credentialEffect: Effect.Effect<CursorCredentialLookup, unknown>,
 			) =>
 				Effect.gen(function* () {
 					const account =
@@ -310,28 +286,21 @@ export const makeCursorRunnerDriver = (
 										"Cursor text generation requires a Cursor account and model",
 									),
 								);
-					const credential = yield* credentialEffect ??
-						Effect.tryPromise(() =>
-							resolveCursorCredential(adapter, {
-								NODE_ENV: process.env["NODE_ENV"],
-								...account.env,
-							}),
-						);
-					if (!credential)
+					const lookup = yield* credentialEffect;
+					if (lookup._tag !== "Ready")
 						return yield* Effect.fail(
 							new ProviderInstanceFailure({
 								providerId: "cursor",
 								operation: "generateText",
 								code: "auth_required",
-								cause: new Error("Cursor authentication required"),
+								cause: new Error(cursorCredentialMessage(lookup)),
 							}),
 						);
-					const catalog = yield* discoverCursorEffect(
+					const credential = lookup.credential;
+					const catalog = yield* discoverCursorCatalog(
 						adapter,
+						Effect.succeed(lookup),
 						account,
-						undefined,
-						undefined,
-						Effect.succeed(credential),
 					);
 					const model = catalog.models.find(
 						({ id }) => id === input.model.modelId,
@@ -487,58 +456,46 @@ export const makeCursorRunnerDriver = (
 							),
 					);
 				});
-			return (
-				resources
-					? resources.use(input.account.id, ({ sdk, credential }) =>
-							generate(sdk, credential),
-						)
-					: Effect.try(
-							() =>
-								port ??
-								createCursorSdkPort({
-									id: input.account.id,
-									configDir: daemonConfigDir,
-								}),
-						).pipe(Effect.flatMap(generate))
-			).pipe(
-				textGenerationLock.withPermits(1),
-				Effect.mapError(
-					(cause) =>
-						new ProviderInstanceFailure({
-							providerId: "cursor",
-							operation: "generateText",
-							cause,
-							...(cause instanceof ProviderInstanceFailure && cause.code
-								? { code: cause.code }
-								: {}),
-						}),
-				),
-			);
+			return resources
+				.use(input.account.id, ({ sdk, credential }) =>
+					generate(sdk, credential),
+				)
+				.pipe(
+					textGenerationLock.withPermits(1),
+					Effect.mapError(
+						(cause) =>
+							new ProviderInstanceFailure({
+								providerId: "cursor",
+								operation: "generateText",
+								cause,
+								...(cause instanceof ProviderInstanceFailure && cause.code
+									? { code: cause.code }
+									: {}),
+							}),
+					),
+				);
 		},
 		prepareTurnEffect: (input) => {
 			const prepare = (
 				adapter: CursorSdkPort,
-				credentialEffect: Effect.Effect<CursorCredential | undefined, unknown>,
+				credentialEffect: Effect.Effect<CursorCredentialLookup, unknown>,
 			) =>
 				Effect.gen(function* () {
-					const credential = yield* credentialEffect.pipe(
+					const lookup = yield* credentialEffect.pipe(
 						Effect.mapError(() =>
 							discoveryFailure("Cursor credential lookup failed"),
 						),
 					);
-					if (!credential)
+					if (lookup._tag !== "Ready")
 						return yield* Effect.fail(
-							discoveryFailure(
-								"Cursor authentication required. Log in to Cursor in Settings.",
-								true,
-							),
+							discoveryFailure(cursorCredentialMessage(lookup), true),
 						);
-					const catalog = yield* discoverCursorEffect(
+					const credential = lookup.credential;
+					const catalog = yield* discoverCursorCatalog(
 						adapter,
+						Effect.succeed(lookup),
 						input.account,
 						input.workspaceRoot,
-						input.shellEnv,
-						Effect.succeed(credential),
 					).pipe(
 						Effect.catch((failure) =>
 							// The runner owns the auth error and its durable turn terminal.
@@ -577,9 +534,15 @@ export const makeCursorRunnerDriver = (
 						),
 					);
 					return {
-						cursorCredential: { ...credential, apiKey: credential.apiKey },
+						cursorCredential: credential,
+						shellEnv: {},
 						input: {
 							...input,
+							// The runner receives the key only in its redacted envelope.
+							shellEnv: {},
+							...(input.account
+								? { account: { ...input.account, env: {} } }
+								: {}),
 							instanceId: input.account?.id ?? input.instanceId ?? "cursor",
 							providerState: {
 								...input.providerState,
@@ -591,41 +554,21 @@ export const makeCursorRunnerDriver = (
 						},
 					};
 				});
-			if (resources && input.account)
-				return resources
-					.use(input.account.id, ({ sdk, credential }) =>
-						prepare(sdk, credential),
-					)
-					.pipe(
-						Effect.mapError((cause) =>
-							cause instanceof ProviderInstanceFailure
-								? cause
-								: discoveryFailure(cause.message),
-						),
-					);
-			return Effect.try(
-				() =>
-					port ??
-					createCursorSdkPort(
-						input.account
-							? { id: input.account.id, configDir: daemonConfigDir }
-							: undefined,
+			if (!input.account)
+				return Effect.fail(
+					discoveryFailure("Cursor turn requires an account", true),
+				);
+			return resources
+				.use(input.account.id, ({ sdk, credential }) =>
+					prepare(sdk, credential),
+				)
+				.pipe(
+					Effect.mapError((cause) =>
+						cause instanceof ProviderInstanceFailure
+							? cause
+							: discoveryFailure(cause.message),
 					),
-			).pipe(
-				Effect.mapError(() => discoveryFailure("Cursor SDK could not load")),
-				Effect.flatMap((sdk) =>
-					prepare(
-						sdk,
-						Effect.tryPromise(() =>
-							resolveCursorCredential(sdk, {
-								NODE_ENV: process.env["NODE_ENV"],
-								...(input.account ? {} : (input.shellEnv ?? process.env)),
-								...input.account?.env,
-							}),
-						),
-					),
-				),
-			);
+				);
 		},
 	};
 };
