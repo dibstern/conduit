@@ -151,6 +151,7 @@ async function start(
 	const chat = new ChatPage(page);
 	await app.goto(`${harness.baseUrl}/s/${sessionId}`);
 	await app.sendMessage(`task-stop-foreground-${suffix}`);
+	const sentAt = await page.evaluate(() => performance.now());
 	await expect
 		.poll(() =>
 			marks(harness).find(
@@ -170,6 +171,11 @@ async function start(
 	expect(query?.["pid"]).not.toBe(harness.generations.at(-1)?.pid);
 	expect(harness.runnerPids()).toContain(query?.["pid"]);
 	await expect(chat.stopBtn).toBeVisible();
+	// The composer arms Stop 1.5s after an idle Send click.
+	await page.waitForFunction(
+		(sent) => performance.now() - sent >= 1500,
+		sentAt,
+	);
 	return { browser, sessionId, app, chat, queryId, pid: query?.["pid"] };
 }
 
@@ -529,6 +535,7 @@ test("correction: delayed idle cancel preserves the Monitor query and the next t
 	unlinkSync(join(harness.root, "task-stop-release-result"));
 	const next = "task-stop-foreground-correction-next-monitor";
 	await app.sendMessage(next);
+	const nextSentAt = await page.evaluate(() => performance.now());
 	await expect(chat.stopBtn).toBeVisible();
 	await expect
 		.poll(() =>
@@ -540,6 +547,10 @@ test("correction: delayed idle cancel preserves the Monitor query and the next t
 			),
 		)
 		.toBe(true);
+	await page.waitForFunction(
+		(sent) => performance.now() - sent >= 1500,
+		nextSentAt,
+	);
 	await chat.stopBtn.click();
 	await expect(chat.stopBtn).toBeHidden();
 	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);

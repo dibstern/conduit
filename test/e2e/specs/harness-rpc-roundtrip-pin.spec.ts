@@ -243,6 +243,7 @@ test.describe("cancel a running turn", () => {
 		const chat = new ChatPage(page);
 		await app.goto(`${harness.baseUrl}/s/${sessionId}`);
 		await app.sendMessage("task-stop-foreground-no-tasks");
+		const sentAt = await page.evaluate(() => performance.now());
 		const streaming = () =>
 			marks(harness).find(
 				(mark) =>
@@ -258,6 +259,11 @@ test.describe("cancel a running turn", () => {
 			).length;
 		expect(queryMarks("query-closed")).toBe(0);
 		await expect(chat.stopBtn).toBeVisible();
+		// The composer arms Stop 1.5s after an idle Send click.
+		await page.waitForFunction(
+			(sent) => performance.now() - sent >= 1500,
+			sentAt,
+		);
 		const started = performance.now();
 		await chat.stopBtn.click();
 		await expect.poll(() => queryMarks("query-closed")).toBe(1);
