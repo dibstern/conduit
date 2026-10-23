@@ -4,6 +4,7 @@ import {
 } from "../../contracts/category-set.js";
 import {
 	DEFAULT_MESSAGE_SURFACING_SETTINGS,
+	sessionJevEnabled as jevEnabledFor,
 	type MessageSurfacingStatus,
 } from "../../contracts/message-surfacing.js";
 import { rpc } from "../transport/ws-rpc-client.js";
@@ -51,16 +52,10 @@ export const messageSurfacing = $state<{
 	revision: 0,
 });
 
-export function sessionJevEnabled(
-	session: { readonly jev?: "on" | "off" | null | undefined } | undefined,
+export const sessionJevEnabled = (
+	session: Parameters<typeof jevEnabledFor>[0],
 	status: MessageSurfacingStatus = messageSurfacing.status,
-): boolean {
-	return (
-		status.key.source !== "none" &&
-		!status.key.rejected &&
-		(session?.jev === "on" || (session?.jev == null && status.enabled))
-	);
-}
+): boolean => jevEnabledFor(session, status);
 
 let loadVersion = 0;
 /** Reconnects fail closed; a partial or stale response cannot enable the UI. */

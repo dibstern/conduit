@@ -565,8 +565,9 @@ describe("message surfacing settings", () => {
 					enabled: false,
 					key: { source: "stored", rejected: false },
 				});
+				// The successor key still posts: a session can turn Jev on alone.
 				yield* Effect.result(settings.post({}));
-				expect(transport).toHaveBeenCalledTimes(3);
+				expect(transport).toHaveBeenCalledTimes(4);
 			}),
 	);
 	it.effect(

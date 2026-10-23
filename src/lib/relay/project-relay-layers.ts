@@ -103,6 +103,7 @@ import {
 	InstanceManagementServiceLive,
 	InstanceManagementServiceTag,
 } from "../domain/relay/Services/instance-management-service.js";
+import { makeMessageSurfacing } from "../domain/relay/Services/message-surfacing.js";
 import {
 	type EffectOpenCodeRuntimeIngressPort,
 	OpenCodeHistoryReconcileTag,
@@ -641,6 +642,36 @@ export function createProjectRelayLayers({
 		),
 	);
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
+	const recapSettingsLayer = Layer.suspend(() => {
+		const shared = config.daemonConfigContext ?? Context.empty();
+		const settings = Context.getOption(shared, MessageSurfacingSettings);
+		const categories = Context.getOption(shared, CategorySet);
+		const configDir = config.configDir ?? getConfigDir();
+		return Layer.merge(
+			Option.isSome(settings)
+				? Layer.succeedContext(
+						Context.make(MessageSurfacingSettings, settings.value),
+					)
+				: Layer.effect(
+						MessageSurfacingSettings,
+						makeMessageSurfacingSettings(configDir),
+					),
+			Option.isSome(categories)
+				? Layer.succeedContext(Context.make(CategorySet, categories.value))
+				: CategorySetLive(configDir),
+		);
+	}).pipe(
+		Layer.catch((cause) =>
+			Layer.effectContext(
+				Effect.fail(
+					new DaemonConfigUnreadable({
+						path: config.configDir ?? getConfigDir(),
+						cause,
+					}),
+				),
+			),
+		),
+	);
 	const providerRuntimeIngestionLayer = Layer.unwrap(
 		Effect.gen(function* () {
 			const ledger = yield* AlertLedgerTag;
@@ -738,6 +769,7 @@ export function createProjectRelayLayers({
 				},
 				compactions: (yield* SessionActivityTag).compactions,
 				retries: (yield* SessionActivityTag).retries,
+				surfacing: yield* makeMessageSurfacing,
 			});
 		}),
 	).pipe(
@@ -753,6 +785,7 @@ export function createProjectRelayLayers({
 				AlertsLive,
 				loggerLayer,
 				usageLayer,
+				recapSettingsLayer,
 			),
 		),
 	);
@@ -973,36 +1006,6 @@ export function createProjectRelayLayers({
 	const relayStateBridgesAndStatus = Layer.provideMerge(
 		StatusPollerLive,
 		Layer.provideMerge(SessionGitLive, relayStateAndBridges),
-	);
-	const recapSettingsLayer = Layer.suspend(() => {
-		const shared = config.daemonConfigContext ?? Context.empty();
-		const settings = Context.getOption(shared, MessageSurfacingSettings);
-		const categories = Context.getOption(shared, CategorySet);
-		const configDir = config.configDir ?? getConfigDir();
-		return Layer.merge(
-			Option.isSome(settings)
-				? Layer.succeedContext(
-						Context.make(MessageSurfacingSettings, settings.value),
-					)
-				: Layer.effect(
-						MessageSurfacingSettings,
-						makeMessageSurfacingSettings(configDir),
-					),
-			Option.isSome(categories)
-				? Layer.succeedContext(Context.make(CategorySet, categories.value))
-				: CategorySetLive(configDir),
-		);
-	}).pipe(
-		Layer.catch((cause) =>
-			Layer.effectContext(
-				Effect.fail(
-					new DaemonConfigUnreadable({
-						path: config.configDir ?? getConfigDir(),
-						cause,
-					}),
-				),
-			),
-		),
 	);
 	const relayStateWithRecaps = Layer.merge(
 		makeRecapServiceLive({

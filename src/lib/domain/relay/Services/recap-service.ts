@@ -14,6 +14,7 @@ import {
 	AskExplanationContentSchema,
 } from "../../../contracts/ask-explanation.js";
 import { surfacingLevel } from "../../../contracts/category-set.js";
+import { sessionJevEnabled } from "../../../contracts/message-surfacing.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type {
 	RecapScope,
@@ -396,10 +397,7 @@ export const makeRecapServiceLive = (
 						0,
 					);
 					if (automatic) {
-						const jevEnabled =
-							preferences.key.source !== "none" &&
-							!preferences.key.rejected &&
-							(turn.jev === "on" || (turn.jev == null && preferences.enabled));
+						const jevEnabled = sessionJevEnabled(turn, preferences);
 						const categorySet = yield* categories.current();
 						const nonRoutine = yield* Effect.forEach(allMessages, (message) =>
 							Effect.gen(function* () {

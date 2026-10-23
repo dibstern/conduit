@@ -1889,6 +1889,61 @@ function query(params: {
 				if (turn.failAfterTools)
 					throw new Error("Harness failure after workspace writes");
 			}
+			// Blocks after the opening text: "tool", "thinking" or text to stream.
+			const foldPrefix = "jev-fold-script ";
+			const foldScript = request
+				.split("\n")
+				.find((line) => line.startsWith(foldPrefix));
+			if (foldScript) {
+				const blocks = JSON.parse(
+					foldScript.slice(foldPrefix.length),
+				) as readonly string[];
+				for (const [offset, block] of blocks.entries()) {
+					const index = offset + 1;
+					const toolUseID = randomUUID();
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index,
+						content_block:
+							block === "tool"
+								? { type: "tool_use", id: toolUseID, name: "Read", input: {} }
+								: block === "thinking"
+									? { type: "thinking", thinking: "", signature: "" }
+									: { type: "text", text: "" },
+					});
+					yield stream(sessionId, {
+						type: "content_block_delta",
+						index,
+						delta:
+							block === "tool"
+								? {
+										type: "input_json_delta",
+										partial_json: JSON.stringify({ file_path: "a.txt" }),
+									}
+								: block === "thinking"
+									? { type: "thinking_delta", thinking: "Considering." }
+									: { type: "text_delta", text: block },
+					});
+					yield stream(sessionId, { type: "content_block_stop", index });
+					if (block === "tool")
+						yield {
+							type: "user",
+							uuid: randomUUID(),
+							session_id: sessionId,
+							parent_tool_use_id: null,
+							message: {
+								role: "user",
+								content: [
+									{
+										type: "tool_result",
+										tool_use_id: toolUseID,
+										content: "read",
+									},
+								],
+							},
+						} as unknown as SDKMessage;
+				}
+			}
 			if (request.startsWith("question-")) {
 				if (!params.options?.canUseTool)
 					throw new Error("Missing question bridge");
