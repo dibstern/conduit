@@ -50,7 +50,11 @@ export interface RunnerLaunch {
 	readonly wire?: RunnerWireCodec;
 	readonly capabilities?: Pick<
 		RunnerHello,
-		"stopsTasks" | "taggedConfigDir" | "rebindsAccount" | "cursorBackendUrl"
+		| "stopsTasks"
+		| "taggedConfigDir"
+		| "rebindsAccount"
+		| "declaresLogin"
+		| "cursorBackendUrl"
 	>;
 	readonly makeRunner: (
 		config: NonNullable<RunnerHello["config"]>,

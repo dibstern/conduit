@@ -338,6 +338,7 @@ export const makeClaudeRunnerLaunch = (
 			capabilities: {
 				stopsTasks: true,
 				taggedConfigDir: true,
+				declaresLogin: true,
 				...(process.env["NODE_ENV"] === "test" &&
 				process.env["CONDUIT_TEST_RUNNER_WITHOUT_ACCOUNT_REBIND"]
 					? {}

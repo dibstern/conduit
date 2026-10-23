@@ -179,6 +179,16 @@ stopped context. Runners without the capability drain and restart on that send.
 Pre-warm hints leave a live controller on its current login; unused warm queries
 can still be replaced before the first send.
 
+Claude runners also advertise `declaresLogin: true`. For peers without that
+flag, an unchanged declared login keeps the runner's reported account metadata
+and original shell capture in both command environment fields. Missing account
+or shell metadata in an adoption snapshot means unknown, so it cannot cause a
+rebind or an admission wait. Known account, account-env and shell-configuration
+differences still follow the rebind policy above. The process regressions in
+`claude-runner-login.test.ts` record replies, query identity, admission decisions
+and cleanup under `test-results/wh8g-legacy-shell-recapture.json` and
+`test-results/u1y3i-4-{legacy,current}-login-restart.json`.
+
 The isolated regressions are `test/integration/daemon/claude-account-rebind.test.ts`
 and `claude-controller-failure.test.ts`. The process test writes its observations
 and runner cleanup evidence to `/tmp/82tn9-3-account-rebind.json`.

@@ -104,6 +104,7 @@ interface RunnerChild {
 		readonly stopsTasks: boolean;
 		readonly rebindsAccount: boolean;
 		readonly settlesAnswers: boolean;
+		readonly declaresLogin: boolean;
 	};
 	interactionSinks?: Map<string, string>;
 	pendingSendCommands?: Map<string, number> | undefined;
@@ -1118,6 +1119,7 @@ export const makeProcessSessionRunner = (
 								stopsTasks: hello.stopsTasks === true,
 								rebindsAccount: hello.rebindsAccount === true,
 								settlesAnswers: hello.settlesAnswers === true,
+								declaresLogin: hello.declaresLogin === true,
 							};
 							log.info(
 								`${runnerLabel} attached for session ${sessionId}: build ${hello.buildId}, answers ${entry.capabilities.settlesAnswers ? "runner-settled" : "legacy answer-question/answer-permission"}`,
@@ -1330,6 +1332,7 @@ export const makeProcessSessionRunner = (
 									buildId: hello.buildId,
 									protocolVersion: hello.protocolVersion,
 									settlesAnswers: entry.capabilities.settlesAnswers,
+									declaresLogin: entry.capabilities.declaresLogin,
 									answerDialect: entry.capabilities.settlesAnswers
 										? "runner"
 										: "legacy",
@@ -2916,6 +2919,14 @@ export const makeProcessSessionRunner = (
 												existing.upgrade.settingsDeferred === true,
 										},
 									});
+									if (process.env["NODE_ENV"] === "test" && process.connected)
+										process.send?.({
+											channel: "conduit-process-test",
+											kind: "runner-admission",
+											sessionId,
+											command: command.type,
+											decision,
+										});
 									switch (decision) {
 										case "Refuse":
 											log.info(
@@ -3124,9 +3135,53 @@ export const makeProcessSessionRunner = (
 								`Runner build ${entry.buildId ?? "unknown"} cannot stop background tasks`,
 							),
 						);
+					const preserveReportedLogin = <
+						Command extends Extract<
+							SessionCommand,
+							{ type: "send-turn" | "pre-warm" }
+						>,
+					>(
+						payload: Command,
+					): Command => {
+						const snapshot = entry.upgrade.state?.snapshot;
+						const launch = snapshot?.input;
+						if (
+							driver.driverKind === "claude" &&
+							!entry.capabilities?.declaresLogin &&
+							launch &&
+							driver.loginChange(
+								{ ...launch, root: launch.workspaceRoot },
+								{
+									...payload.input,
+									configDir: payload.input.configDir,
+									root: payload.input.workspaceRoot,
+									shellConfig: payload.input.shellConfig ?? payload.shellConfig,
+								},
+							) === "None"
+						) {
+							// Old peers compare captures and absent account fields as values.
+							// Keep their reported login until a declared setting really changes.
+							const captured = {
+								...payload,
+								input: { ...payload.input },
+								shellEnv: launch.shellEnv ?? snapshot?.options.env ?? {},
+							};
+							delete captured.input.account;
+							delete captured.input.instanceId;
+							delete captured.input.shellEnv;
+							if (launch.account !== undefined)
+								captured.input.account = launch.account;
+							if (launch.instanceId !== undefined)
+								captured.input.instanceId = launch.instanceId;
+							if (launch.shellEnv !== undefined)
+								captured.input.shellEnv = launch.shellEnv;
+							return captured;
+						}
+						return payload;
+					};
 					const payload =
 						command.type === "send-turn"
-							? {
+							? preserveReportedLogin({
 									...command,
 									autoSettleAfterDays,
 									shellConfig: command.input.shellConfig ?? command.shellConfig,
@@ -3139,9 +3194,9 @@ export const makeProcessSessionRunner = (
 										command.shellEnv ?? {
 											...process.env,
 										},
-								}
+								})
 							: command.type === "pre-warm"
-								? {
+								? preserveReportedLogin({
 										...command,
 										shellConfig:
 											command.input.shellConfig ?? command.shellConfig,
@@ -3149,7 +3204,7 @@ export const makeProcessSessionRunner = (
 											command.shellEnv ?? {
 												...process.env,
 											},
-									}
+									})
 								: command;
 					let commandId =
 						command.control?.commandId ??
