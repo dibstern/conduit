@@ -63,6 +63,7 @@ type SendInput = {
 				readonly sessionId: string;
 				readonly title: string;
 			};
+			readonly onCreated?: (sessionId: string) => void;
 	  }
 );
 
@@ -260,6 +261,8 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 				...(input.images?.length ? { images: input.images } : {}),
 				originId: getBrowserClientId(),
 			});
+			// Settle the source composer before navigation resets its attachments.
+			input.onCreated?.(created.sessionId);
 			selection.follow(from, created.sessionId, "push");
 			return { kind: "started" };
 		}
