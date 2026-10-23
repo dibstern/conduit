@@ -26,6 +26,7 @@ import { ShutdownSignalTag } from "../../../src/lib/domain/daemon/Layers/daemon-
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { DaemonConfigRefTag } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { DaemonStateTag } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+import { ReadRequest } from "../../../src/lib/domain/daemon/Services/read-request.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import {
 	type DaemonRpcHandlers,
@@ -197,13 +198,26 @@ describe("daemon Unix RPC transport", () => {
 	it("serves the shared RPC group, preserves typed errors, and removes its 0600 socket", async () => {
 		const path = join(directory, "rpc.sock");
 		const shutdownCallbacks: string[] = [];
+		const readMarkers: Array<string | undefined> = [];
 		let shutdownDrain: Effect.Effect<void> = Effect.void;
 		const daemonHandlers = {
 			GetProjects: (request: typeof GetProjects.payloadSchema.Type) =>
-				request.projectSlug === "fail"
-					? Effect.fail(new WsRpcError({ message: "expected failure" }))
-					: Effect.succeed({ projectSlug: request.projectSlug, projects: [] }),
-			Shutdown: () => Effect.succeed({ ok: true as const }),
+				ReadRequest.pipe(
+					Effect.flatMap((method) => {
+						readMarkers.push(method);
+						return request.projectSlug === "fail"
+							? Effect.fail(new WsRpcError({ message: "expected failure" }))
+							: Effect.succeed({
+									projectSlug: request.projectSlug,
+									projects: [],
+								});
+					}),
+				),
+			Shutdown: () =>
+				ReadRequest.pipe(
+					Effect.tap((method) => Effect.sync(() => readMarkers.push(method))),
+					Effect.as({ ok: true as const }),
+				),
 			RestartWithConfig: () =>
 				Effect.fail(new WsRpcError({ message: "restart rejected" })),
 		};
@@ -254,6 +268,11 @@ describe("daemon Unix RPC transport", () => {
 						sendRpcRequest(path, { _tag: "Shutdown" }),
 					);
 					expect(shutdown).toEqual({ ok: true });
+					expect(readMarkers).toEqual([
+						"GetProjects",
+						"GetProjects",
+						undefined,
+					]);
 					yield* Effect.sleep("20 millis");
 					expect(shutdownCallbacks).toEqual(["Shutdown"]);
 					const idleClient = yield* Effect.promise(

@@ -2,10 +2,6 @@ import { statSync } from "node:fs";
 import { Data, Effect, Exit, Layer, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Failure from "../../../effect/failure-classification.js";
-import {
-	type createSessionGitCache,
-	daemonSessionGitCache,
-} from "../../../git/session-git.js";
 import type { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	makeReadQueryEffect,
@@ -65,7 +61,6 @@ type SessionReadOptions = NonNullable<
 const readProjectSessions = (
 	project: Pick<StoredProject, "slug" | "folders">,
 	options: SessionReadOptions,
-	gitCache: ReturnType<typeof createSessionGitCache>,
 ) =>
 	Effect.gen(function* () {
 		const {
@@ -95,8 +90,6 @@ const readProjectSessions = (
 			const rows = yield* makeSessionRows({
 				slug: projectSlug,
 				folders: project.folders,
-				gitCache,
-				refreshGit: true,
 			});
 			return yield* rows.listWith(
 				options,
@@ -229,7 +222,6 @@ export const hasColdAutoDeleteCandidate = (
 const listProjectSessions = (
 	projects: readonly Pick<StoredProject, "slug" | "folders">[],
 	options: SessionReadOptions,
-	gitCache: ReturnType<typeof createSessionGitCache>,
 ) =>
 	Effect.gen(function* () {
 		const unavailable = yield* DaemonStoreAvailability;
@@ -261,7 +253,7 @@ const listProjectSessions = (
 						};
 					}
 					const exit = yield* Effect.exit(
-						readProjectSessions(project, projectOptions, gitCache),
+						readProjectSessions(project, projectOptions),
 					);
 					if (Exit.isSuccess(exit)) {
 						return {
@@ -321,7 +313,6 @@ const listProjectSessions = (
 
 export const listDaemonSessions = (
 	options: DaemonSessionQueryOptions = {},
-	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
 ): Effect.Effect<
 	DaemonSessionQueryResult,
 	never,
@@ -335,19 +326,15 @@ export const listDaemonSessions = (
 				(options.scope === undefined || project.slug === options.scope) &&
 				project.slug !== options.exclude,
 		);
-		const result = yield* listProjectSessions(
-			projects,
-			{
-				excludeArchived: options.includeArchived !== true,
-				...(options.roots !== undefined ? { roots: options.roots } : {}),
-				...(options.limit !== undefined ? { limit: options.limit } : {}),
-				...(options.search !== undefined ? { titleQuery: options.search } : {}),
-				...(options.cursor !== undefined
-					? { before: { at: options.cursor.updatedAt, id: options.cursor.id } }
-					: {}),
-			},
-			gitCache,
-		);
+		const result = yield* listProjectSessions(projects, {
+			excludeArchived: options.includeArchived !== true,
+			...(options.roots !== undefined ? { roots: options.roots } : {}),
+			...(options.limit !== undefined ? { limit: options.limit } : {}),
+			...(options.search !== undefined ? { titleQuery: options.search } : {}),
+			...(options.cursor !== undefined
+				? { before: { at: options.cursor.updatedAt, id: options.cursor.id } }
+				: {}),
+		});
 		return {
 			...result,
 			nextCursor: result.nextCursor
@@ -358,26 +345,21 @@ export const listDaemonSessions = (
 
 export const listArchivedSessions = (
 	options: ArchivedSessionQueryOptions = {},
-	gitCache: ReturnType<typeof createSessionGitCache> = daemonSessionGitCache,
 ): Effect.Effect<
 	ArchivedSessionQueryResult,
 	never,
 	ProjectRegistryTag | AccountDirectory | SessionActivityTag | PersistenceStore
 > =>
 	Effect.gen(function* () {
-		const result = yield* listProjectSessions(
-			yield* allProjects,
-			{
-				roots: true,
-				archivedOnly: true,
-				orderColumn: "archived_at",
-				...(options.limit !== undefined ? { limit: options.limit } : {}),
-				...(options.cursor !== undefined
-					? { before: { at: options.cursor.archivedAt, id: options.cursor.id } }
-					: {}),
-			},
-			gitCache,
-		);
+		const result = yield* listProjectSessions(yield* allProjects, {
+			roots: true,
+			archivedOnly: true,
+			orderColumn: "archived_at",
+			...(options.limit !== undefined ? { limit: options.limit } : {}),
+			...(options.cursor !== undefined
+				? { before: { at: options.cursor.archivedAt, id: options.cursor.id } }
+				: {}),
+		});
 		return {
 			...result,
 			nextCursor: result.nextCursor

@@ -22,7 +22,6 @@ import {
 	type ShellProjectsFrame,
 } from "../../../contracts/ws-rpc.js";
 import * as Failure from "../../../effect/failure-classification.js";
-import { daemonSessionGitCache } from "../../../git/session-git.js";
 import {
 	makeReadQueryEffect,
 	type ReadQueryEffectError,
@@ -139,10 +138,6 @@ export const subscribeShellProjects = <E>(
 								.map((project) => ({
 									slug: project.slug,
 									folders: project.folders,
-									...(!standalone && {
-										gitCache: daemonSessionGitCache,
-										refreshGit: true,
-									}),
 								}));
 						const scopes = healthy();
 						const [head, ...tail] = scopes;
