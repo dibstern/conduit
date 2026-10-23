@@ -476,7 +476,7 @@ test("a Monitor counts as live work and the toast disappears on session navigati
 	await expect(page.getByTestId("background-task-description")).toHaveText([
 		taskStopMonitorFixture[0].description,
 	]);
-	await page.getByRole("button", { name: "Close background tasks" }).click();
+	await page.getByTestId("background-tasks-scrim").click();
 	await expect(page.getByTestId("background-tasks-scrim")).toBeHidden();
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 	const other = await browser.createSession("Another session");

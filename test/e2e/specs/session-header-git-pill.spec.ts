@@ -8,6 +8,7 @@ import type {
 } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, sendMockShellRowPatch } from "../helpers/rpc-mock.js";
+import { settleSheet } from "../helpers/sheet-drag.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({
@@ -828,10 +829,12 @@ for (const mode of [
 					await expect(
 						sheet.getByTestId(`overflow-view-${view}`),
 					).toBeVisible();
+				await settleSheet(page);
 				const box = await sheet.boundingBox();
+				const header = await page.getByTestId("session-bar").boundingBox();
 				expect(box?.x).toBe(0);
 				expect(box?.width).toBe(390);
-				expect((box?.y ?? 0) + (box?.height ?? 0)).toBeCloseTo(844, 0);
+				expect(box?.y).toBeCloseTo((header?.y ?? 0) + (header?.height ?? 0), 0);
 				await capture(page, testInfo, "phone-overflow-views-sheet");
 			});
 	});
