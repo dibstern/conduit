@@ -45,6 +45,7 @@
 		"test:pbt": "vitest run test/unit --testNamePattern 'property|PBT|fc\\.'",
 		"test:watch": "vitest",
 		"test:integration": "vitest run --config vitest.integration.config.ts",
+		"test:budget": "pnpm build && CONDUIT_TEST_DIST=dist vitest run --config vitest.budget.config.ts",
 		"test:media": "vitest run --config vitest.media.config.ts",
 		"bench:send-path": "tsx test/bench/send-path.ts",
 		"test:contract": "vitest run --config vitest.contract.config.ts",

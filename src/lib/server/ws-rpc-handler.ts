@@ -1,4 +1,5 @@
 import type { IncomingMessage } from "node:http";
+import { type EventLoopUtilization, performance } from "node:perf_hooks";
 import type { Duplex } from "node:stream";
 import { TLSSocket } from "node:tls";
 import type { ManagedRuntime } from "effect";
@@ -49,6 +50,7 @@ interface SlowRpcRequest {
 	readonly projectSlug?: string;
 	readonly sessionId?: string;
 	readonly receivedAt: number;
+	readonly loopAtReceipt: EventLoopUtilization;
 	readonly kind: "request" | "stream-startup";
 	startedAt?: number;
 	sqlCount: number;
@@ -76,6 +78,9 @@ export const withSlowRpcLogging = (
 			const endedAt = performance.now();
 			const totalMs = endedAt - request.receivedAt;
 			if (totalMs < thresholdMs) return Effect.void;
+			// Main-thread busy time over the request. Near totalMs means synchronous
+			// work (this handler's or anyone's) filled it, not I/O waits.
+			const loop = performance.eventLoopUtilization(request.loopAtReceipt);
 			return Effect.logWarning("slow rpc").pipe(
 				Effect.annotateLogs({
 					method: request.method,
@@ -92,6 +97,8 @@ export const withSlowRpcLogging = (
 					sqlMs: request.sqlMs,
 					outcome,
 					kind: request.kind,
+					loopActiveMs: loop.active,
+					loopUtilization: loop.utilization,
 				}),
 			);
 		});
@@ -117,6 +124,7 @@ export const withSlowRpcLogging = (
 							sessionId: payload["sessionId"],
 						}),
 						receivedAt: performance.now(),
+						loopAtReceipt: performance.eventLoopUtilization(),
 						kind: message.tag.startsWith("Subscribe")
 							? "stream-startup"
 							: "request",

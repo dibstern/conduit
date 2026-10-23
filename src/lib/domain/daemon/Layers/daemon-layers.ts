@@ -95,6 +95,7 @@ import {
 	DaemonStateTag,
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
+import { EventLoopBlockMonitorLive } from "../Services/event-loop-delay.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
 	ManagedOpenCodeLifecycleLive,
@@ -695,6 +696,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// These Layers have zero dependencies on other Tags. They form the base
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
+		EventLoopBlockMonitorLive.pipe(Layer.provide(PinoLoggerLive)),
 		Layer.effectDiscard(
 			Effect.acquireRelease(Effect.sync(startContentionMetrics), (metrics) =>
 				Effect.tryPromise(async () => {
