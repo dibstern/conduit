@@ -81,6 +81,7 @@ import {
 	resolveSessionCreationAccount,
 	setSessionArchivedForClient,
 	setSessionAutoSettleForClient,
+	setSessionJevForClient,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
 	snoozeSessionForClient,
@@ -437,6 +438,15 @@ export const sessionsHandlers = {
 		}).pipe(
 			Effect.andThen(readAutoSettleOutlook(request.sessionId)),
 			Effect.catch(mapRpcFailure("SetSessionAutoSettle")),
+		),
+	SetSessionJev: (request) =>
+		setSessionJevForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			jev: request.jev,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catch(mapRpcFailure("SetSessionJev")),
 		),
 	SnoozeSession: (request) =>
 		snoozeSessionForClient({
@@ -1072,6 +1082,7 @@ export const sessionsHandlers = {
 	| "SetSessionPinned"
 	| "GetSessionAutoSettleOutlook"
 	| "SetSessionAutoSettle"
+	| "SetSessionJev"
 	| "SnoozeSession"
 	| "UnsnoozeSession"
 	| "DismissCutOff"

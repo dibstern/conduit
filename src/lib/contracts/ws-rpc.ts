@@ -2275,6 +2275,16 @@ export const SetSessionAutoSettle = Rpc.make("SetSessionAutoSettle", {
 	error: WsRpcError,
 });
 
+export const SetSessionJev = Rpc.make("SetSessionJev", {
+	payload: Schema.TaggedStruct("SetSessionJev", {
+		sessionId: NonEmptyString,
+		jev: Schema.NullOr(Schema.Literals(["on", "off"])),
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
 export const SnoozeSession = Rpc.make("SnoozeSession", {
 	payload: Schema.TaggedStruct("SnoozeSession", {
 		sessionId: NonEmptyString,
@@ -3258,6 +3268,7 @@ const wsRpcRequests = [
 	SetSessionArchived,
 	SetSessionPinned,
 	SetSessionAutoSettle,
+	SetSessionJev,
 	GetSessionAutoSettleOutlook,
 	SnoozeSession,
 	UnsnoozeSession,

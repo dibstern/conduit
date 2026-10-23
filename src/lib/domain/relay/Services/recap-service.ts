@@ -158,13 +158,14 @@ export const makeRecapServiceLive = (
 						request: string;
 						finalReply: string | null;
 						workspace: string | null;
+						jev: "on" | "off" | null;
 					}>`SELECT t.state, COALESCE(u.text, '') AS request,
 				CASE WHEN t.state = 'completed' THEN (
 					SELECT p.text FROM message_parts p JOIN messages m ON m.id = p.message_id
 					WHERE m.turn_id = t.id AND m.session_id = t.session_id AND m.role = 'assistant'
 					AND p.type = 'text' AND p.surfacing_ordinal IS NULL
 					ORDER BY m.created_at DESC, p.sort_order DESC, p.created_at DESC LIMIT 1
-				) ELSE NULL END AS finalReply, s.workspace
+				) ELSE NULL END AS finalReply, s.workspace, s.jev
 				FROM turns t JOIN sessions s ON s.id = t.session_id
 				LEFT JOIN messages u ON u.id = t.user_message_id
 				WHERE t.id = ${target.turnId} AND t.session_id = ${target.sessionId} AND s.project_id = ${store.projectId}`;
@@ -399,10 +400,14 @@ export const makeRecapServiceLive = (
 						0,
 					);
 					if (automatic) {
+						const jevEnabled =
+							preferences.key.source !== "none" &&
+							!preferences.key.rejected &&
+							(turn.jev === "on" || (turn.jev == null && preferences.enabled));
 						const categorySet = yield* categories.current();
 						const nonRoutine = yield* Effect.forEach(allMessages, (message) =>
 							Effect.gen(function* () {
-								if (!message.probabilities) return !preferences.active;
+								if (!message.probabilities) return !jevEnabled;
 								const probabilities = yield* Schema.decodeUnknownEffect(
 									probabilitiesSchema,
 								)(message.probabilities);

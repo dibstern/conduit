@@ -132,6 +132,7 @@ export type SessionUnreadPayload = PayloadOf<"session.unread">;
 export type SessionSettledPayload = PayloadOf<"session.settled">;
 
 export type SessionAutoSettleSetPayload = PayloadOf<"session.auto_settle_set">;
+export type SessionJevSetPayload = PayloadOf<"session.jev_set">;
 
 export type SessionUnsettledPayload = PayloadOf<"session.unsettled">;
 export type SessionArchivedPayload = PayloadOf<"session.archived">;
@@ -864,6 +865,12 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			sessionId: Schema.String.pipe(SessionRef(false)),
 			disabled: Schema.Boolean,
+		}),
+	),
+	"session.jev_set": live(
+		Schema.Struct({
+			sessionId: Schema.String.pipe(SessionRef(false)),
+			jev: Schema.NullOr(Schema.Literals(["on", "off"])),
 		}),
 	),
 	"session.unsnoozed": live(

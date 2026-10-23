@@ -34,7 +34,7 @@
 	import { projectReferences, serializeReferences } from "../../../composer-references.js";
 	import { referenceEditing } from "./reference-editing.js";
 	import { provideComposerDraft } from "./composer-reference.svelte.js";
-	import { messageSurfacing } from "../../stores/message-surfacing.svelte.js";
+	import { sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
@@ -342,7 +342,7 @@
 			: currentSession?.settledAt != null ? "Message to un-settle…" :
 			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
 			sessionViewState.compact ? "Reply…" :
-			messageSurfacing.status.active ? "Reply… (↩ Reply on a message drops a reference here)" :
+			sessionJevEnabled(currentSession) ? "Reply… (↩ Reply on a message drops a reference here)" :
 			composerPresentation ? `Reply to ${composerPresentation.label}…` : "Reply…",
 	);
 
