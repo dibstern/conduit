@@ -385,6 +385,7 @@ export const runSessionRunner = (
 									process.env["CONDUIT_TEST_RUNNER_HELLO_WITHOUT_RUN_IDS"]
 										? {}
 										: { stampsRunIds: true as const }),
+									settlesAnswers: true,
 									...(driverKind === "cursor" &&
 									!(
 										overrideHello &&
