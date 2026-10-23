@@ -21,17 +21,32 @@ import {
 
 export type CanonicalDirectory = string & Brand.Brand<"CanonicalDirectory">;
 const directoryBrand = Brand.nominal<CanonicalDirectory>();
+const canonicalDirectories = new Map<string, CanonicalDirectory>();
+
+/** Only the SessionGit owner invalidates identities when presence changes. */
+export const forgetCanonicalDirectory = (directory: string): void => {
+	const key = resolve(directory);
+	const canonical = canonicalDirectories.get(key) ?? key;
+	canonicalDirectories.delete(key);
+	for (const [alias, value] of canonicalDirectories)
+		if (value === canonical) canonicalDirectories.delete(alias);
+};
 
 /** Preserve one identity through symlink aliases, including a missing child. */
 export const canonicalDirectory = (directory: string): CanonicalDirectory => {
-	let ancestor = resolve(directory);
+	const key = resolve(directory);
+	const cached = canonicalDirectories.get(key);
+	if (cached !== undefined) return cached;
+	let ancestor = key;
 	const children: string[] = [];
 	let links = 0;
+	let canonical: CanonicalDirectory;
 	for (;;) {
 		try {
-			return directoryBrand(
+			canonical = directoryBrand(
 				join(realpathSync(ancestor), ...children.reverse()),
 			);
+			break;
 		} catch {
 			try {
 				if (links < 40 && lstatSync(ancestor).isSymbolicLink()) {
@@ -43,11 +58,16 @@ export const canonicalDirectory = (directory: string): CanonicalDirectory => {
 				// Resolve missing children from the nearest existing ancestor.
 			}
 			const parent = dirname(ancestor);
-			if (parent === ancestor) return directoryBrand(resolve(directory));
+			if (parent === ancestor) {
+				canonical = directoryBrand(key);
+				break;
+			}
 			children.push(basename(ancestor));
 			ancestor = parent;
 		}
 	}
+	canonicalDirectories.set(key, canonical);
+	return canonical;
 };
 
 const decodeGit = Schema.decodeUnknownOption(
@@ -76,16 +96,17 @@ const readPublications = (directories: readonly string[]) =>
 		}>`SELECT directory, git, workspace_missing, version FROM session_git_published
 			WHERE directory IN ${sql.in(keys)}`;
 		return new Map(
-			[...rows]
+			rows
+				.map((row) => ({ row, directory: canonicalDirectory(row.directory) }))
 				.sort(
 					(left, right) =>
-						Number(left.directory === canonicalDirectory(left.directory)) -
-						Number(right.directory === canonicalDirectory(right.directory)),
+						Number(left.row.directory === left.directory) -
+						Number(right.row.directory === right.directory),
 				)
 				.map(
-					(row) =>
+					({ row, directory }) =>
 						[
-							canonicalDirectory(row.directory),
+							directory,
 							{
 								git:
 									row.git === null

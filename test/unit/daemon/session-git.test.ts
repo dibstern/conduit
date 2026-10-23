@@ -2,9 +2,19 @@
 // aliases split one checkout; secondary folders escape publication versions;
 // run end is delayed by the normal interval; missing worktrees stay missing;
 // closing an owner retains its timer/watch; list reads start subprocesses.
+// Status rewrites its watched index; watcher bursts escape the hint throttle or
+// lose their trailing state; listed folders never recover missed events;
+// published reads repeat canonicalization syscalls or retain stale aliases.
 import { execFileSync } from "node:child_process";
 import { channel } from "node:diagnostics_channel";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import fs, {
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
@@ -21,7 +31,7 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 import { OwnerScopesLive } from "../../../src/lib/domain/daemon/Layers/owner-scopes-layer.js";
 import { makeSubprocessLive } from "../../../src/lib/domain/daemon/Layers/subprocess-layer.js";
 import { makeWorktreeLive } from "../../../src/lib/domain/daemon/Layers/worktree-layer.js";
@@ -40,7 +50,10 @@ import {
 	SessionGit,
 	SessionGitLive,
 } from "../../../src/lib/domain/daemon/Services/session-git.js";
-import { Subprocess } from "../../../src/lib/domain/daemon/Services/subprocess.js";
+import {
+	Subprocess,
+	type SubprocessMetrics,
+} from "../../../src/lib/domain/daemon/Services/subprocess.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
 import {
 	makeSessionEventBusLive,
@@ -55,7 +68,11 @@ import {
 	UnboundEventStoreEffectTag,
 } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { canonicalDirectory } from "../../../src/lib/persistence/effect/session-git-publication.js";
+import {
+	canonicalDirectory,
+	readPublishedSessionGit,
+	withPublishedProjectGit,
+} from "../../../src/lib/persistence/effect/session-git-publication.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
 const gitCommand = (directory: string, ...args: string[]) =>
@@ -74,6 +91,8 @@ const fixture = (extraFolders = false, linked = false) =>
 		);
 		const repository = join(root, "repo");
 		gitCommand(root, "init", "--initial-branch=main", repository);
+		writeFileSync(join(repository, "tracked"), "initial");
+		gitCommand(repository, "add", "tracked");
 		gitCommand(
 			repository,
 			"-c",
@@ -168,6 +187,9 @@ const fixture = (extraFolders = false, linked = false) =>
 					...(checkout ? { ownership: checkout.ownership } : {}),
 				}),
 			]);
+		// macOS can deliver the fixture's own git writes to watchers created
+		// later under load, as forced ref changes.
+		yield* drainFileEvents(root);
 		const module = yield* Layer.build(
 			SessionGitLive.pipe(Layer.provide(Layer.succeedContext(context))),
 		);
@@ -205,7 +227,208 @@ const settle = Effect.gen(function* () {
 	);
 });
 
-describe("daemon session git", () => {
+// File events arrive in order, so seeing a marker written now means earlier
+// writes have been delivered. A new watcher starts asynchronously and can miss
+// one write, so keep writing until it is seen.
+const drainFileEvents = (directory: string) =>
+	Effect.callback<void>((resume) => {
+		const marker = join(directory, "events-drained");
+		const writes = setInterval(() => writeFileSync(marker, ""), 50);
+		const watcher = fs.watch(directory, (_kind, name) => {
+			if (name !== "events-drained") return;
+			clearInterval(writes);
+			watcher.close();
+			resume(Effect.void);
+		});
+		return Effect.sync(() => {
+			clearInterval(writes);
+			watcher.close();
+		});
+	});
+
+const waitForIdle = (
+	metrics: Effect.Effect<SubprocessMetrics>,
+	quietMs = 100,
+) =>
+	Effect.tryPromise(() => {
+		let previous = -1;
+		let idleSince = Date.now();
+		return expect
+			.poll(
+				() => {
+					const current = Effect.runSync(metrics);
+					if (
+						current.active + current.queued > 0 ||
+						current.spawnCount !== previous
+					)
+						idleSince = Date.now();
+					previous = current.spawnCount;
+					return (
+						current.active + current.queued === 0 &&
+						Date.now() - idleSince >= quietMs
+					);
+				},
+				{ timeout: eventTimeout, interval: 100 },
+			)
+			.toBe(true);
+	});
+
+// A due read does async filesystem checks before it spawns git, which can
+// outlast waitForIdle's quiet window under load. Wait for the spawn itself.
+const waitForSpawns = (
+	metrics: Effect.Effect<SubprocessMetrics>,
+	count: number,
+) =>
+	Effect.tryPromise(() =>
+		expect
+			.poll(() => Effect.runSync(metrics).spawnCount, {
+				timeout: eventTimeout,
+			})
+			.toBe(count),
+	).pipe(Effect.andThen(waitForIdle(metrics)));
+
+// File events reach watchers seconds late when fseventsd is saturated by other
+// work on the machine; waits for them assert eventual delivery, not latency.
+const eventTimeout = 20_000;
+
+describe("daemon session git", { timeout: 60_000 }, () => {
+	it.live("leaves a dormant watched repository idle for two seconds", () =>
+		Effect.gen(function* () {
+			const f = yield* fixture();
+			yield* f.service.read("one");
+			// Refresh the index's stat data without changing the tracked content.
+			writeFileSync(join(f.repository, "tracked"), "initial");
+			// Wait for that write's events, which can arrive seconds late under
+			// load, then drain their hints through the two-second throttle.
+			yield* drainFileEvents(f.root);
+			yield* waitForIdle(f.metrics, 2_300);
+			const before = yield* f.metrics;
+			yield* Effect.sleep(2_000);
+			expect((yield* f.metrics).spawnCount).toBe(before.spawnCount);
+		}),
+	);
+	it.live(
+		"throttles watcher bursts with a leading and trailing publication",
+		() =>
+			Effect.gen(function* () {
+				const f = yield* fixture();
+				yield* f.service.read("one");
+				yield* waitForIdle(f.metrics, 2_300);
+				const before = yield* f.metrics;
+				const dirty = join(f.repository, "dirty");
+				const burstStarted = Date.now();
+				// A saturated fseventsd can drop an event; rewriting yields a fresh one.
+				yield* Effect.tryPromise(() =>
+					expect
+						.poll(
+							() => {
+								writeFileSync(dirty, "0");
+								return Effect.runPromise(f.service.read("one"));
+							},
+							{ timeout: eventTimeout, interval: 500 },
+						)
+						.toMatchObject({ dirty: true }),
+				);
+				for (let index = 1; index < 20; index++) {
+					yield* Effect.sleep(50);
+					const next = join(f.repository, `dirty-${index}`);
+					writeFileSync(next, String(index));
+					if (index === 1) rmSync(dirty);
+					else rmSync(join(f.repository, `dirty-${index - 1}`));
+					if (index === 19) rmSync(next);
+				}
+				// The last write's event can be dropped too; one more hint lands in
+				// the same trailing window.
+				yield* f.service.invalidate({ directory: f.repository });
+				const burstDuration = Date.now() - burstStarted;
+				yield* Effect.tryPromise(() =>
+					expect
+						.poll(() => Effect.runPromise(f.service.read("one")), {
+							timeout: eventTimeout,
+						})
+						.toMatchObject({ dirty: false }),
+				);
+				yield* waitForIdle(f.metrics, 2_300);
+				const after = yield* f.metrics;
+				expect(after.spawnCount - before.spawnCount).toBeGreaterThanOrEqual(2);
+				// Scheduling can stretch the writes across additional throttle windows.
+				expect(after.spawnCount - before.spawnCount).toBeLessThanOrEqual(
+					2 + Math.floor(burstDuration / 2_000),
+				);
+			}),
+	);
+	it.effect("reads warm publications without canonicalization syscalls", () =>
+		Effect.gen(function* () {
+			const f = yield* fixture();
+			yield* f.service.read("one");
+			yield* f.service.read("shared");
+			const spies = [
+				vi.spyOn(fs, "realpathSync"),
+				vi.spyOn(fs, "lstatSync"),
+				vi.spyOn(fs, "readlinkSync"),
+			];
+			syncBuiltinESMExports();
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(() => {
+					for (const spy of spies) spy.mockRestore();
+					syncBuiltinESMExports();
+				}),
+			);
+			for (let index = 0; index < 10; index++) {
+				expect(
+					yield* readPublishedSessionGit("shared").pipe(
+						Effect.provideService(SqlClient.SqlClient, f.sql),
+						Effect.provideService(ProjectRegistryTag, f.projects),
+					),
+				).toMatchObject({ branch: "main" });
+				expect(
+					(yield* withPublishedProjectGit([
+						{ slug: "project", title: "Project", folders: [f.repository] },
+					]).pipe(Effect.provideService(SqlClient.SqlClient, f.sql)))[0]?.git,
+				).toMatchObject({ branch: "main" });
+			}
+			for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+		}),
+	);
+	it.effect(
+		"canonicalizes missing children and dangling symlinks on first use",
+		() =>
+			Effect.gen(function* () {
+				const f = yield* fixture();
+				const missing = join(
+					canonicalDirectory(f.repository),
+					"missing",
+					"child",
+				);
+				expect(canonicalDirectory(join(f.alias, "missing", "child"))).toBe(
+					missing,
+				);
+				const dangling = join(f.root, "dangling");
+				symlinkSync(missing, dangling, "dir");
+				expect(canonicalDirectory(dangling)).toBe(missing);
+			}),
+	);
+	it.effect("refreshes listed directories after a missed watcher event", () =>
+		Effect.gen(function* () {
+			const f = yield* fixture();
+			mkdirSync(join(f.repository, "nested"));
+			yield* f.service.read("one");
+			yield* settle;
+			yield* withReadRequest(f.service.read("one"), "ListSessions");
+			yield* TestClock.adjust(300);
+			yield* settle;
+			const before = (yield* f.metrics).spawnCount;
+			// fs.watch on the checkout is deliberately non-recursive.
+			writeFileSync(join(f.repository, "nested", "dirty"), "missed");
+			yield* TestClock.adjust(29_000);
+			yield* settle;
+			expect((yield* f.metrics).spawnCount).toBe(before);
+			yield* TestClock.adjust(1_000);
+			yield* settle;
+			yield* waitForSpawns(f.metrics, before + 1);
+			expect(yield* f.service.read("one")).toMatchObject({ dirty: true });
+		}),
+	);
 	for (const projectFirst of [true, false])
 		it.effect(
 			`releases a former project root shared with another project's session (${projectFirst ? "project first" : "session first"})`,
@@ -276,7 +499,6 @@ describe("daemon session git", () => {
 					yield* settle;
 					expect((yield* f.metrics).spawnCount).toBe(before);
 				}),
-			{ timeout: 30_000 },
 		);
 	it.effect(
 		"publishes the first unknown read and reuses one canonical folder across sessions",
@@ -327,18 +549,22 @@ describe("daemon session git", () => {
 	it.effect("never spawns on unknown or warm RPC list reads", () =>
 		Effect.gen(function* () {
 			const f = yield* fixture();
+			yield* waitForIdle(f.metrics);
 			const before = yield* f.metrics;
 			expect(
 				yield* withReadRequest(f.service.read("one"), "ListSessions"),
 			).toBeUndefined();
 			expect((yield* f.metrics).spawnCount - before.spawnCount).toBe(0);
 			yield* f.service.read("one");
+			yield* TestClock.adjust(2_100);
+			yield* settle;
+			yield* waitForIdle(f.metrics);
 			const warm = yield* f.metrics;
 			yield* withReadRequest(f.service.read("shared"), "SubscribeShell");
 			expect((yield* f.metrics).spawnCount - warm.spawnCount).toBe(0);
 			yield* TestClock.adjust(300);
 			yield* settle;
-			yield* TestClock.adjust(30_000);
+			yield* waitForIdle(f.metrics);
 
 			// Keep a stale directory read in flight while a second RPC asks for it.
 			// The slot is held by a real process; git and the owner stay unmodified.
@@ -348,29 +574,37 @@ describe("daemon session git", () => {
 				})
 				.pipe(Effect.forkScoped);
 			yield* Effect.tryPromise(() =>
-				expect.poll(() => Effect.runSync(f.metrics).active).toBe(1),
+				expect
+					.poll(() => Effect.runSync(f.metrics).active, {
+						timeout: eventTimeout,
+					})
+					.toBe(1),
 			);
-			yield* withReadRequest(f.service.read("one"), "ListSessions");
-			yield* TestClock.adjust(300);
-			yield* Effect.tryPromise(() =>
-				expect.poll(() => Effect.runSync(f.metrics).queued).toBe(1),
-			);
-			yield* withReadRequest(f.service.read("shared"), "SubscribeShell");
-			yield* TestClock.adjust(300);
-			yield* Fiber.interrupt(blocker);
+			// Hold the slot before the listed poll becomes due.
+			yield* TestClock.adjust(30_000);
 			yield* Effect.tryPromise(() =>
 				expect
-					.poll(() => {
-						const metrics = Effect.runSync(f.metrics);
-						return metrics.active + metrics.queued;
+					.poll(() => Effect.runSync(f.metrics).queued, {
+						timeout: eventTimeout,
 					})
-					.toBe(0),
+					.toBe(1),
 			);
+			const queued = yield* f.metrics;
+			yield* withReadRequest(f.service.read("one"), "ListSessions");
+			yield* withReadRequest(f.service.read("shared"), "SubscribeShell");
+			expect((yield* f.metrics).spawnCount).toBe(queued.spawnCount);
+			yield* TestClock.adjust(300);
+			yield* Fiber.interrupt(blocker);
+			yield* waitForIdle(f.metrics);
 			yield* settle;
+			yield* waitForIdle(f.metrics);
 			const completed = (yield* f.metrics).spawnCount;
-			yield* TestClock.adjust(30_000);
+			yield* TestClock.adjust(29_000);
 			yield* settle;
 			expect((yield* f.metrics).spawnCount).toBe(completed);
+			yield* TestClock.adjust(1_000);
+			yield* settle;
+			yield* waitForSpawns(f.metrics, completed + 1);
 		}),
 	);
 	for (const hintFirst of [true, false])
@@ -380,19 +614,29 @@ describe("daemon session git", () => {
 				Effect.gen(function* () {
 					const f = yield* fixture();
 					yield* f.service.read("one");
+					yield* TestClock.adjust(2_100);
 					yield* settle;
+					yield* waitForIdle(f.metrics);
 					const blocker = yield* f.owner
 						.run(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
 							timeoutMs: 30_000,
 						})
 						.pipe(Effect.forkScoped);
 					yield* Effect.tryPromise(() =>
-						expect.poll(() => Effect.runSync(f.metrics).active).toBe(1),
+						expect
+							.poll(() => Effect.runSync(f.metrics).active, {
+								timeout: eventTimeout,
+							})
+							.toBe(1),
 					);
 					yield* f.service.invalidate({ directory: f.repository });
 					yield* TestClock.adjust(100);
 					yield* Effect.tryPromise(() =>
-						expect.poll(() => Effect.runSync(f.metrics).queued).toBe(1),
+						expect
+							.poll(() => Effect.runSync(f.metrics).queued, {
+								timeout: eventTimeout,
+							})
+							.toBe(1),
 					);
 					const hint = f.service.invalidate({ directory: f.repository });
 					const listed = withReadRequest(hint, "GetProjects");
@@ -400,22 +644,20 @@ describe("daemon session git", () => {
 					yield* hintFirst ? listed : hint;
 					yield* TestClock.adjust(300);
 					yield* Fiber.interrupt(blocker);
-					yield* Effect.tryPromise(() =>
-						expect
-							.poll(() => {
-								const metrics = Effect.runSync(f.metrics);
-								return metrics.active + metrics.queued;
-							})
-							.toBe(0),
-					);
+					yield* waitForIdle(f.metrics);
 					yield* settle;
+					yield* waitForIdle(f.metrics);
 					const completed = (yield* f.metrics).spawnCount;
 					yield* TestClock.adjust(29_000);
 					yield* settle;
 					expect((yield* f.metrics).spawnCount).toBe(completed);
+					yield* withReadRequest(
+						f.service.invalidate({ directory: f.repository }),
+						"GetProjects",
+					);
 					yield* TestClock.adjust(1_000);
 					yield* settle;
-					expect((yield* f.metrics).spawnCount).toBe(completed + 1);
+					yield* waitForSpawns(f.metrics, completed + 1);
 				}),
 		);
 	it.effect("publishes secondary-folder changes with the session version", () =>
@@ -473,7 +715,9 @@ describe("daemon session git", () => {
 			Effect.gen(function* () {
 				const f = yield* fixture();
 				yield* f.service.read("one");
+				yield* TestClock.adjust(2_100);
 				yield* settle;
+				yield* waitForIdle(f.metrics);
 				const dormant = (yield* f.metrics).spawnCount;
 				yield* TestClock.adjust(60_000);
 				yield* settle;
@@ -481,20 +725,23 @@ describe("daemon session git", () => {
 				yield* withReadRequest(f.service.read("one"), "ListSessions");
 				yield* TestClock.adjust(300);
 				yield* settle;
+				yield* waitForIdle(f.metrics);
 				const leading = (yield* f.metrics).spawnCount;
 				yield* TestClock.adjust(29_000);
+				yield* settle;
 				expect((yield* f.metrics).spawnCount).toBe(leading);
 				yield* TestClock.adjust(1_000);
-				expect(yield* f.service.read("one")).toMatchObject({ dirty: false });
 				yield* settle;
-				expect((yield* f.metrics).spawnCount).toBe(leading + 1);
+				yield* waitForSpawns(f.metrics, leading + 1);
+				expect(yield* f.service.read("one")).toMatchObject({ dirty: false });
 				f.activity.viewers.set("one", 1);
 				f.activity.changed("one");
 				yield* settle;
+				yield* waitForIdle(f.metrics);
 				const viewed = (yield* f.metrics).spawnCount;
 				yield* TestClock.adjust(5_000);
 				yield* settle;
-				expect((yield* f.metrics).spawnCount).toBe(viewed + 1);
+				yield* waitForSpawns(f.metrics, viewed + 1);
 				f.activity.viewers.delete("one");
 				f.activity.changed("one");
 				yield* f.commit([
@@ -504,12 +751,13 @@ describe("daemon session git", () => {
 					}),
 				]);
 				yield* settle;
+				yield* waitForIdle(f.metrics);
 				const running = (yield* f.metrics).spawnCount;
 				yield* TestClock.adjust(14_000);
 				expect((yield* f.metrics).spawnCount).toBe(running);
 				yield* TestClock.adjust(1_000);
 				yield* settle;
-				expect((yield* f.metrics).spawnCount).toBe(running + 1);
+				yield* waitForSpawns(f.metrics, running + 1);
 				writeFileSync(join(f.repository, "dirty"), "changed");
 				yield* f.commit([
 					canonicalEvent("session.status", "one", {
@@ -521,7 +769,14 @@ describe("daemon session git", () => {
 					}),
 				]);
 				yield* settle;
-				expect(yield* f.service.read("one")).toMatchObject({ dirty: true });
+				yield* waitForIdle(f.metrics);
+				yield* Effect.tryPromise(() =>
+					expect
+						.poll(() => Effect.runPromise(f.service.read("one")), {
+							timeout: eventTimeout,
+						})
+						.toMatchObject({ dirty: true }),
+				);
 			}),
 	);
 	it.effect(
@@ -534,7 +789,13 @@ describe("daemon session git", () => {
 				rmSync(f.workspaceDirectory, { recursive: true, force: true });
 				yield* f.service.invalidate({ sessionId: "one" });
 				yield* settle;
-				expect(yield* f.service.read("one")).toBeUndefined();
+				yield* Effect.tryPromise(() =>
+					expect
+						.poll(() => Effect.runPromise(f.service.read("one")), {
+							timeout: eventTimeout,
+						})
+						.toBeUndefined(),
+				);
 				const missing = (yield* f.sql<{
 					workspace_missing: string | null;
 				}>`SELECT workspace_missing FROM session_git_published WHERE workspace_missing IS NOT NULL`)[0];
@@ -615,6 +876,5 @@ describe("daemon session git", () => {
 				).toBe(closed);
 			}),
 		// Real Git recovery also runs beside the commit gate's build and typechecks.
-		{ timeout: 30_000 },
 	);
 });

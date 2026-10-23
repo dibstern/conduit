@@ -44,7 +44,9 @@ const warmRead = async (directory: string) => {
 		(after.commands["git"]?.spawnCount ?? 0) -
 			(before.commands["git"]?.spawnCount ?? 0),
 	).toBe(1);
-	expect(runner.mock.calls.map(([, args]) => args[0])).toEqual(["status"]);
+	expect(runner.mock.calls.map(([, args]) => args.slice(0, 2))).toEqual([
+		["--no-optional-locks", "status"],
+	]);
 	expect(runner.mock.calls[0]?.[2].env?.["GIT_OPTIONAL_LOCKS"]).toBe("0");
 	return value;
 };
@@ -125,7 +127,7 @@ describe("readSessionGit", () => {
 		runner.mockClear();
 		await readSessionGit(linked, undefined, runner);
 		expect(
-			runner.mock.calls.some(([, args]) => args[0] === "for-each-ref"),
+			runner.mock.calls.some(([, args]) => args.includes("for-each-ref")),
 		).toBe(false);
 		expect(await warmRead(linked)).toMatchObject({
 			branch: "feature",
@@ -188,11 +190,11 @@ describe("readSessionGit", () => {
 		const { runner } = subprocess();
 		await readSessionGit(directory, undefined, runner);
 		expect(
-			runner.mock.calls.some(([, args]) => args[0] === "for-each-ref"),
+			runner.mock.calls.some(([, args]) => args.includes("for-each-ref")),
 		).toBe(true);
-		expect(runner.mock.calls.some(([, args]) => args[0] === "merge-base")).toBe(
-			true,
-		);
+		expect(
+			runner.mock.calls.some(([, args]) => args.includes("merge-base")),
+		).toBe(true);
 	});
 	it("falls back for a symlinked HEAD", async () => {
 		const directory = repo();

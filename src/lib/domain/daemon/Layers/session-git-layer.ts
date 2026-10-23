@@ -35,6 +35,7 @@ import { makeUnboundCommitAndSignal } from "../../../persistence/effect/commit-a
 import {
 	type CanonicalDirectory,
 	canonicalDirectory,
+	forgetCanonicalDirectory,
 	readPublishedSessionGit,
 } from "../../../persistence/effect/session-git-publication.js";
 import { readSessionWorktreeOwnershipSnapshot } from "../../../persistence/effect/session-worktree-ownership.js";
@@ -63,6 +64,7 @@ const intervals = {
 	listed: 30_000,
 	dormant: Number.POSITIVE_INFINITY,
 } satisfies Record<Tier, number>;
+const hintThrottleMs = 2_000;
 
 interface Membership {
 	readonly sessionId: string;
@@ -87,6 +89,7 @@ interface DirectoryState {
 	published: boolean;
 	needsCanonicalPublication: boolean;
 	lastRead: number;
+	lastHintRead: number;
 	listedUntil: number;
 	present: boolean | undefined;
 	hinted: boolean;
@@ -192,8 +195,10 @@ export const makeSessionGit = Effect.gen(function* () {
 	const checkPresence = (entry: DirectoryState) =>
 		Effect.gen(function* () {
 			const exists = yield* present(entry.directory);
-			if (entry.present !== undefined && exists !== entry.present)
+			if (entry.present !== undefined && exists !== entry.present) {
+				forgetCanonicalDirectory(entry.directory);
 				request(entry, true);
+			}
 			return exists;
 		});
 	const watchDirectory = (
@@ -350,6 +355,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				published: seed !== undefined,
 				needsCanonicalPublication: legacyAliases.has(directory),
 				lastRead: Number.NEGATIVE_INFINITY,
+				lastHintRead: Number.NEGATIVE_INFINITY,
 				listedUntil: 0,
 				present: undefined,
 				hinted: false,
@@ -548,6 +554,8 @@ export const makeSessionGit = Effect.gen(function* () {
 			entry.forced = false;
 			entry.hinted = false;
 			const exists = yield* present(entry.directory);
+			if (entry.present !== undefined && exists !== entry.present)
+				forgetCanonicalDirectory(entry.directory);
 			const workspaceMissing = yield* missingState(entry, exists);
 			const git = exists
 				? yield* Effect.tryPromise({
@@ -566,6 +574,8 @@ export const makeSessionGit = Effect.gen(function* () {
 						catch: (cause) => cause,
 					})
 				: undefined;
+			// Cadence runs from when git answered, not from queue wait or publication.
+			const readAt = yield* Clock.currentTimeMillis;
 			if (
 				directories.get(entry.directory) !== entry ||
 				entry.abort.signal.aborted
@@ -663,7 +673,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				entry.watchers.push(...watchDirectory(entry));
 			}
 			entry.present = exists;
-			entry.lastRead = yield* Clock.currentTimeMillis;
+			entry.lastRead = readAt;
 			yield* Deferred.succeed(entry.first, undefined);
 		}).pipe(
 			Effect.raceFirst(
@@ -750,18 +760,21 @@ export const makeSessionGit = Effect.gen(function* () {
 				entry.queued
 			)
 				continue;
+			if (entry.hinted && !entry.forced) yield* checkPresence(entry);
 			const currentTier = tier(entry, now);
 			const interval = intervals[currentTier];
 			if (
 				entry.forced ||
 				(!entry.published && entry.hinted) ||
 				(entry.hinted &&
+					now - entry.lastHintRead >= hintThrottleMs &&
 					(interval === Number.POSITIVE_INFINITY ||
 						now - entry.lastRead >= interval)) ||
-				((currentTier === "running" || currentTier === "viewed") &&
-					now - entry.lastRead >= interval)
-			)
+				(currentTier !== "dormant" && now - entry.lastRead >= interval)
+			) {
+				if (entry.hinted && !entry.forced) entry.lastHintRead = now;
 				yield* enqueue(entry);
+			}
 		}
 	});
 	// Delay initial scheduling: startup never launches an unbounded refresh fanout.

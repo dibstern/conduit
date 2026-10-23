@@ -32,7 +32,7 @@ const execGit = (
 		"GIT_COMMON_DIR",
 	])
 		delete env[key];
-	return runner("git", args, {
+	return runner("git", ["--no-optional-locks", ...args], {
 		cwd: directory,
 		timeoutMs: GIT_COMMAND_TIMEOUT_MS,
 		priority: "background",
