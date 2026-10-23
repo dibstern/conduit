@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,7 +56,6 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { Subprocess } from "../../../src/lib/domain/daemon/Services/subprocess.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
-import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
@@ -287,9 +292,11 @@ describe("RelayFactoryTag", () => {
 	});
 
 	it.effect(
-		"publishes cached project git when the relay reports changes",
+		"publishes stored project git when the daemon reports changes",
 		() => {
-			const directory = mkdtempSync(join(tmpdir(), "conduit-relay-git-"));
+			const directory = realpathSync(
+				mkdtempSync(join(tmpdir(), "conduit-relay-git-")),
+			);
 			const server = createServer();
 			execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], {
 				cwd: directory,
@@ -298,6 +305,7 @@ describe("RelayFactoryTag", () => {
 				stop: async () => undefined,
 			} as ProjectRelay);
 			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
 				const project = {
 					slug: "git-project",
 					title: "Git Project",
@@ -321,7 +329,7 @@ describe("RelayFactoryTag", () => {
 					Context.getOption(context, ProjectRegistryTag),
 				);
 
-				yield* Effect.promise(() => daemonSessionGitCache.refresh(directory));
+				yield* sql`INSERT INTO session_git_published (directory, git) VALUES (${directory}, ${JSON.stringify({ branch: "main", dirty: false })})`;
 				yield* broadcastProjectList.pipe(
 					Effect.provideService(ProjectRegistryTag, registry),
 					Effect.provideService(DaemonEventBusTag, bus),
@@ -340,7 +348,7 @@ describe("RelayFactoryTag", () => {
 				).toHaveLength(0);
 
 				writeFileSync(join(directory, "untracked"), "changed");
-				yield* Effect.promise(() => daemonSessionGitCache.refresh(directory));
+				yield* sql`UPDATE session_git_published SET git = ${JSON.stringify({ branch: "main", dirty: true })} WHERE directory = ${directory}`;
 				yield* broadcastProjectList.pipe(
 					Effect.provideService(ProjectRegistryTag, registry),
 					Effect.provideService(DaemonEventBusTag, bus),

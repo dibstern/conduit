@@ -257,17 +257,24 @@ fake Claude turn, one viewed session, and eight listed sessions.
 The normalized report is `test-results/daemon-budget.json`; the daemon log is
 `test-results/daemon-budget.log`. The report includes all command counts and
 rates, loop p50/p99/max in milliseconds, slow-RPC counts per phase, per-worktree
-git reads and tier limits, and cleanup evidence. A daemon-only `NODE_OPTIONS`
-preload instruments both async and sync child processes. Fixture git commands
-run outside that process and are excluded. One `git status` counts one git read,
-so this collector can later be replaced by the subprocess owner's metrics.
+git reads and tier limits, and cleanup evidence. The isolated daemon subscribes
+to the subprocess owner's `conduit:subprocess-metrics` diagnostics channel.
+Start events include command arguments and the working directory, so one
+`git status` counts one git read and long-running processes count in the phase
+where they start. Fixture git commands run outside that owner and are excluded.
+Idle measurement starts after all workspace and project-folder publications
+exist and the subprocess owner has finished its startup work.
+The external commit's pending refreshes settle in a separately recorded phase
+before the test establishes Running and Viewed activity for churn.
 
 The targets in `test/budget/daemon-idle.test.ts` are intentionally red until
 conduit-test-g43i.4/.5 land. They are 6 idle spawns/minute, loop p99 below 50 ms
 against a 500 ms slow-RPC threshold, external commit visibility within 1 second,
 at most one churn read per tier interval plus the leading read, and zero spawns
-during each list read. Read windows count all daemon spawns, so an overlapping
-background poll also fails the zero-spawn assertion. Run again on a quiet
+during each list RPC's actual start/end interval, including background spawns
+that overlap it. The report also preserves every raw control-phase spawn and
+counts those outside the RPC, including up to 50 ms spent polling for the end
+acknowledgment after the RPC has returned. Run again on a quiet
 machine to investigate timing variance; do not loosen the budgets.
 
 This suite has its own Vitest config. It is excluded from default unit,

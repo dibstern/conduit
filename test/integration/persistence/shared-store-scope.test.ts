@@ -46,7 +46,6 @@ import { readColdWorktreeCleanupCandidates } from "../../../src/lib/domain/daemo
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { SessionGitLive } from "../../../src/lib/domain/relay/Layers/session-git-layer.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
 	AlertsLive,
@@ -70,7 +69,6 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../../../src/lib/domain/relay/Services/session-attention.js";
-import { SessionGitServiceTag } from "../../../src/lib/domain/relay/Services/session-git-service.js";
 import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { restoreSessionSettings } from "../../../src/lib/domain/relay/Services/session-model-settings.js";
 import {
@@ -89,7 +87,6 @@ import {
 	SSEStreamTag,
 } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
 import { LocalPtyServiceTag } from "../../../src/lib/domain/relay/Services/terminal-service.js";
-import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
@@ -1251,33 +1248,6 @@ describe("shared-store relay project scope", () => {
 			dispatched.filter((session) => session === id(A, "continuation")).length,
 			dispatched.filter((session) => session.startsWith(`${B}-`)).length,
 		);
-	});
-
-	it("session Git refresh stamps only A's sessions and sidebar", async () => {
-		const before = daemonStoreManifest(store.filename);
-		vi.spyOn(daemonSessionGitCache, "refresh").mockResolvedValue({
-			branch: "refreshed",
-		});
-		const own = await store.runtime.runPromise(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const [beforeRow] = yield* sql<{
-					version: number;
-				}>`SELECT version FROM sessions WHERE id = ${id(A, "settings")}`;
-				yield* (yield* SessionGitServiceTag).refresh();
-				const [afterRow] = yield* sql<{
-					version: number;
-				}>`SELECT version FROM sessions WHERE id = ${id(A, "settings")}`;
-				return Number((afterRow?.version ?? 0) > (beforeRow?.version ?? 0));
-			}).pipe(
-				Effect.provide(
-					SessionGitLive.pipe(
-						Layer.provide(Layer.succeed(ConfigTag)(config())),
-					),
-				),
-			),
-		);
-		record("session-git-refresh", before, own);
 	});
 
 	for (const sweep of ["dropped-part", "reconnect"] as const) {

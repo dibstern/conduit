@@ -11,6 +11,7 @@ import type {
 	WorktreeCleanupReport,
 } from "../contracts/worktree.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import { SessionGit } from "../domain/daemon/Services/session-git.js";
 import { WorktreeServiceTag } from "../domain/daemon/Services/worktree-service.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { publishAlert } from "../domain/relay/Services/alerts.js";
@@ -21,7 +22,6 @@ import {
 	SessionRetriesTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
-import { SessionGitServiceTag } from "../domain/relay/Services/session-git-service.js";
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import {
@@ -31,8 +31,10 @@ import {
 } from "../domain/relay/Services/session-worktree-deletion.js";
 import { LocalPtyServiceTag } from "../domain/relay/Services/terminal-service.js";
 import * as Failure from "../effect/failure-classification.js";
-import { hasNoCommitsBeyondDefault } from "../git/session-git.js";
-import { realWorkspacePath } from "../git/worktrees.js";
+import {
+	hasNoCommitsBeyondDefault,
+	realWorkspacePath,
+} from "../git/worktrees.js";
 import { WORKTREE_CLEANUP_PATHS_SQL } from "../persistence/effect/session-worktree-ownership.js";
 import { readPersistedAutoSettleFacts } from "./auto-settle-reader.js";
 import {
@@ -135,7 +137,7 @@ export const cleanUpProjectWorktrees = (
 		const inbox = yield* SessionInboxTag;
 		const localPty = yield* Effect.serviceOption(LocalPtyServiceTag);
 		const instances = yield* OpenCodeInstancesTag;
-		const sessionGit = yield* Effect.serviceOption(SessionGitServiceTag);
+		const sessionGit = yield* Effect.serviceOption(SessionGit);
 		const viewers = yield* WebSocketHandlerTag;
 		const agentIsLive = yield* AgentLivenessTag;
 		const report: {
@@ -311,8 +313,9 @@ export const cleanUpProjectWorktrees = (
 								switch (check) {
 									case "nothing-missing": {
 										const inspectedHead = inspection.head;
-										gitChecks[check] = yield* Effect.tryPromise(() =>
-											hasNoCommitsBeyondDefault(checkout.path, inspectedHead),
+										gitChecks[check] = yield* hasNoCommitsBeyondDefault(
+											checkout.path,
+											inspectedHead,
 										);
 										break;
 									}
@@ -367,7 +370,7 @@ export const cleanUpProjectWorktrees = (
 						retries.delete(key);
 						report.removed.push({ ...entry, reason: decision.reason });
 						if (sessionGit._tag === "Some")
-							yield* sessionGit.value.refresh({ sessionId }).pipe(
+							yield* sessionGit.value.invalidate({ sessionId }).pipe(
 								Effect.catchCause((cause) => {
 									if (Failure.isInterruptedOnly(cause))
 										return Effect.failCause(cause);

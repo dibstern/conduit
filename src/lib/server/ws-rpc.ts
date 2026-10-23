@@ -21,6 +21,7 @@ import {
 	WsRpcError,
 	WsRpcGroup,
 } from "../contracts/ws-rpc.js";
+import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
 import { subscribeAlerts } from "../domain/relay/Services/alerts.js";
 import { subscribeApprovals } from "../domain/relay/Services/approvals-subscription.js";
@@ -66,9 +67,34 @@ const subscribeSessionDetailWithPresence = (
 	Stream.unwrap(
 		Effect.gen(function* () {
 			const wsHandler = yield* WebSocketHandlerTag;
+			const activity = yield* Effect.serviceOption(SessionActivityTag);
 			yield* Effect.acquireRelease(
-				Effect.sync(() => wsHandler.registerSessionViewer(options.sessionId)),
-				(removeViewer) => Effect.sync(removeViewer),
+				Effect.sync(() => {
+					const removeViewer = wsHandler.registerSessionViewer(
+						options.sessionId,
+					);
+					if (Option.isSome(activity)) {
+						const state = activity.value;
+						state.viewers.set(
+							options.sessionId,
+							(state.viewers.get(options.sessionId) ?? 0) + 1,
+						);
+						state.changed(options.sessionId);
+					}
+					return removeViewer;
+				}),
+				(removeViewer) =>
+					Effect.sync(() => {
+						removeViewer();
+						if (Option.isSome(activity)) {
+							const state = activity.value;
+							const remaining = (state.viewers.get(options.sessionId) ?? 1) - 1;
+							if (remaining > 0)
+								state.viewers.set(options.sessionId, remaining);
+							else state.viewers.delete(options.sessionId);
+							state.changed(options.sessionId);
+						}
+					}),
 			);
 			return subscribeSessionDetail(options);
 		}),

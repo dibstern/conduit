@@ -46,6 +46,39 @@ const git = (directory: string, ...args: string[]) =>
 		),
 	);
 
+/** Fresh local refs and ancestry for a destructive cleanup recheck. Never fetch. */
+export const hasNoCommitsBeyondDefault = (directory: string, head: string) =>
+	Effect.gen(function* () {
+		const refs = yield* git(
+			directory,
+			"for-each-ref",
+			"--format=%(refname) %(symref) %(objecttype)",
+			"refs/remotes/origin/HEAD",
+			"refs/heads/main",
+			"refs/heads/master",
+		).pipe(Effect.option);
+		if (refs._tag === "None") return false;
+		const candidates = refs.value.stdout.split("\n").flatMap((line) => {
+			const [ref, symref, type] = line.split(" ");
+			if (type !== "commit") return [];
+			if (ref === "refs/remotes/origin/HEAD") return symref ? [symref] : [];
+			return ref === "refs/heads/main" || ref === "refs/heads/master"
+				? [ref]
+				: [];
+		});
+		for (const ref of candidates) {
+			const ancestor = yield* git(
+				directory,
+				"merge-base",
+				"--is-ancestor",
+				head,
+				ref,
+			).pipe(Effect.option);
+			if (ancestor._tag === "Some") return true;
+		}
+		return false;
+	});
+
 /** The primary folder's local branch names, without tags or remote refs. */
 export const listLocalBranches = (directory: string) =>
 	Effect.gen(function* () {

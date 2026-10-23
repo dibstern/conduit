@@ -88,6 +88,7 @@ import {
 	DaemonLifecycleContextTag,
 } from "../Services/daemon-lifecycle-context.js";
 import {
+	DaemonEvent,
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../Services/daemon-pubsub.js";
@@ -124,6 +125,7 @@ import {
 	makeSharedSessionDirectoryLive,
 	SessionDirectory,
 } from "../Services/session-directory.js";
+import { SessionGit, SessionGitLive } from "../Services/session-git.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AccountPictureLive } from "./account-picture-layer.js";
 import { makeAccountResourceScopesLive } from "./account-resource-scopes-layer.js";
@@ -893,6 +895,30 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		}),
 		MessageSurfacingSettingsLive,
 	).pipe(Layer.provideMerge(withProviderAdapters));
+	const withSessionGit = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			return SessionGitLive.pipe(
+				Layer.provide(
+					makePersistenceDaemonLayer().pipe(
+						Layer.provideMerge(Layer.succeedContext(store)),
+					),
+				),
+			);
+		}),
+	).pipe(Layer.provideMerge(withWorktrees));
+	const withGitChanges = Layer.effectDiscard(
+		Effect.gen(function* () {
+			const git = yield* SessionGit;
+			const bus = yield* DaemonEventBusTag;
+			yield* git.changes.pipe(
+				Stream.runForEach(() =>
+					PubSub.publish(bus, DaemonEvent.ProjectsChanged()),
+				),
+				Effect.forkScoped,
+			);
+		}),
+	).pipe(Layer.provideMerge(withSessionGit));
 	const withSessionWorkspace = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;
@@ -904,7 +930,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				),
 			);
 		}),
-	).pipe(Layer.provideMerge(withWorktrees));
+	).pipe(Layer.provideMerge(withGitChanges));
 	const withOrchestration = DaemonOrchestrationLive.pipe(
 		Layer.provideMerge(withSessionWorkspace),
 	);

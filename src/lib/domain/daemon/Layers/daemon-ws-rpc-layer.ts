@@ -300,7 +300,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				),
 			);
 
-		const projectList = broadcastProjectList;
+		const projectList = broadcastProjectList.pipe(Effect.provide(shellContext));
 		// The project every client's new session prefills: the last one added
 		// or given a session. Persisted, and sent out with the project list.
 		const rememberNewSessionProject = (slug: string) =>
@@ -517,7 +517,9 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 					followList(
 						"projects",
 						Effect.gen(function* () {
-							const projects = yield* projectInfos;
+							const projects = yield* projectInfos.pipe(
+								Effect.provide(shellContext),
+							);
 							const { newSessionProject, projectOrder } = yield* Ref.get(
 								yield* DaemonConfigRefTag,
 							);
@@ -770,6 +772,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			GetProjects: (request) =>
 				run(
 					projectInfos.pipe(
+						Effect.provide(shellContext),
 						Effect.map((projects) => ({
 							projectSlug: request.projectSlug,
 							...(request.projectSlug ? { current: request.projectSlug } : {}),

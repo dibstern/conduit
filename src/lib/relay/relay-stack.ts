@@ -65,9 +65,9 @@ import {
 import * as Failure from "../effect/failure-classification.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
-import { withCachedProjectGit } from "../git/session-git.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger, type Logger } from "../logger.js";
+import { withPublishedProjectGit } from "../persistence/effect/session-git-publication.js";
 import type { OrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationSender } from "../server/push.js";
@@ -697,7 +697,13 @@ export async function createRelayStack(
 
 	const projectManagement = (slug: string): ProjectManagementService => ({
 		currentSlug: () => Effect.succeed(slug),
-		list: () => Effect.sync(() => withCachedProjectGit(getProjectList())),
+		list: () =>
+			withPublishedProjectGit(getProjectList()).pipe(
+				Effect.mapError(
+					(cause) =>
+						new ProjectManagementServiceError({ operation: "list", cause }),
+				),
+			),
 		save: (input) =>
 			Effect.tryPromise({
 				try: async () => {
@@ -710,7 +716,10 @@ export async function createRelayStack(
 					const project = await addProjectRelay(main);
 					return {
 						project,
-						projects: withCachedProjectGit(getProjectList()),
+						projects: getProjectList().map((project) => ({
+							...project,
+							missing: !existsSync(project.folders[0]),
+						})),
 						warnings: [],
 					};
 				},

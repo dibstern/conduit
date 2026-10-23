@@ -80,7 +80,7 @@ interface DirectoryState {
 	readonly watchers: { readonly close: () => void }[];
 	readonly first: Deferred.Deferred<void>;
 	readonly abort: AbortController;
-	projectFolder: boolean;
+	readonly rootProjects: Set<string>;
 	repositoryDirectory?: CanonicalDirectory;
 	git: GitState | undefined;
 	workspaceMissing: WorkspaceMissing | undefined;
@@ -121,7 +121,10 @@ export const makeSessionGit = Effect.gen(function* () {
 	const pendingSessions = new Set<string>();
 	const pendingReads = new Set<string>();
 	const pendingListed = new Map<string, number>();
-	const pendingDirectories = new Map<CanonicalDirectory, number>();
+	const pendingDirectories = new Map<
+		CanonicalDirectory,
+		{ listedUntil: number; invalidated: boolean }
+	>();
 	const statWatches = new Map<
 		string,
 		{ readonly listeners: Set<StatsListener>; readonly listener: StatsListener }
@@ -314,11 +317,18 @@ export const makeSessionGit = Effect.gen(function* () {
 		for (const key of session.directories) {
 			const entry = directories.get(key);
 			entry?.sessions.delete(session.sessionId);
-			if (entry && entry.sessions.size === 0 && !entry.projectFolder) {
-				releaseWatches(entry);
-				directories.delete(key);
-			}
+			if (entry) disposeUnused(entry);
 		}
+	};
+	const disposeUnused = (entry: DirectoryState) => {
+		if (
+			entry.projects.size > 0 &&
+			(entry.sessions.size > 0 || entry.rootProjects.size > 0)
+		)
+			return;
+		releaseWatches(entry);
+		if (directories.get(entry.directory) === entry)
+			directories.delete(entry.directory);
 	};
 	const getDirectory = (
 		directory: CanonicalDirectory,
@@ -334,7 +344,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				watchers: [],
 				first: yield* Deferred.make<void>(),
 				abort: new AbortController(),
-				projectFolder: false,
+				rootProjects: new Set(),
 				git: seed?.git,
 				workspaceMissing: seed?.missing,
 				published: seed !== undefined,
@@ -366,10 +376,8 @@ export const makeSessionGit = Effect.gen(function* () {
 					() =>
 						Effect.sync(() => {
 							entry.projects.delete(projectId);
-							if (entry.projects.size > 0) return;
-							releaseWatches(entry);
-							if (directories.get(entry.directory) === entry)
-								directories.delete(entry.directory);
+							entry.rootProjects.delete(projectId);
+							disposeUnused(entry);
 						}),
 				),
 			);
@@ -382,12 +390,30 @@ export const makeSessionGit = Effect.gen(function* () {
 			if (projectsInitialized && current === registeredProjects) return;
 			registeredProjects = current;
 			projectsInitialized = true;
+			const roots = new Map(
+				[...current].map(([projectId, project]) => [
+					projectId,
+					new Set(project.project.folders.map(canonicalDirectory)),
+				]),
+			);
+			for (const entry of directories.values()) {
+				for (const projectId of entry.rootProjects)
+					if (!roots.get(projectId)?.has(entry.directory))
+						entry.rootProjects.delete(projectId);
+				disposeUnused(entry);
+			}
 			for (const [projectId, project] of current)
 				for (const folder of project.project.folders) {
 					const entry = yield* getDirectory(canonicalDirectory(folder));
-					if (entry.projectFolder && entry.projects.has(projectId)) continue;
-					entry.projectFolder = true;
+					if (
+						entry.rootProjects.has(projectId) &&
+						entry.projects.has(projectId)
+					)
+						continue;
 					yield* holdDirectory(entry, projectId);
+					if (!entry.projects.has(projectId) || entry.abort.signal.aborted)
+						continue;
+					entry.rootProjects.add(projectId);
 					if (!Number.isFinite(entry.lastRead)) request(entry, true);
 				}
 		}).pipe(
@@ -516,7 +542,7 @@ export const makeSessionGit = Effect.gen(function* () {
 		Effect.gen(function* () {
 			if (
 				directories.get(entry.directory) !== entry ||
-				(entry.sessions.size === 0 && !entry.projectFolder)
+				(entry.sessions.size === 0 && entry.rootProjects.size === 0)
 			)
 				return;
 			entry.forced = false;
@@ -675,15 +701,16 @@ export const makeSessionGit = Effect.gen(function* () {
 	const schedule = Effect.gen(function* () {
 		yield* registerProjectFolders;
 		const now = yield* Clock.currentTimeMillis;
-		for (const [key, listedUntil] of pendingDirectories) {
+		for (const [key, { listedUntil, invalidated }] of pendingDirectories) {
 			if (listedUntil > 0 && now < readQuietUntil) continue;
 			const entry = directories.get(key);
 			if (entry) {
 				entry.listedUntil = Math.max(entry.listedUntil, listedUntil);
 				if (
-					listedUntil === 0 ||
-					!entry.published ||
-					now - entry.lastRead >= intervals[tier(entry, now)]
+					invalidated ||
+					(!entry.queued &&
+						(!entry.published ||
+							now - entry.lastRead >= intervals[tier(entry, now)]))
 				)
 					request(entry);
 			}
@@ -706,8 +733,9 @@ export const makeSessionGit = Effect.gen(function* () {
 					if (
 						entry &&
 						(hints.has(id) ||
-							!entry.published ||
-							now - entry.lastRead >= intervals[tier(entry, now)])
+							(!entry.queued &&
+								(!entry.published ||
+									now - entry.lastRead >= intervals[tier(entry, now)])))
 					)
 						request(entry);
 				}
@@ -717,7 +745,10 @@ export const makeSessionGit = Effect.gen(function* () {
 		if (pendingReads.size === 0 && pendingDirectories.size === 0)
 			readQuietUntil = 0;
 		for (const entry of directories.values()) {
-			if ((entry.sessions.size === 0 && !entry.projectFolder) || entry.queued)
+			if (
+				(entry.sessions.size === 0 && entry.rootProjects.size === 0) ||
+				entry.queued
+			)
 				continue;
 			const currentTier = tier(entry, now);
 			const interval = intervals[currentTier];
@@ -869,10 +900,11 @@ export const makeSessionGit = Effect.gen(function* () {
 							: 0;
 					if (listedUntil > 0 && readQuietUntil === 0)
 						readQuietUntil = listedUntil - 60_000 + 250;
-					pendingDirectories.set(
-						key,
-						Math.max(pendingDirectories.get(key) ?? 0, listedUntil),
-					);
+					const pending = pendingDirectories.get(key);
+					pendingDirectories.set(key, {
+						listedUntil: Math.max(pending?.listedUntil ?? 0, listedUntil),
+						invalidated: pending?.invalidated === true || listedUntil === 0,
+					});
 					return;
 				}
 				pendingSessions.add(target.sessionId);

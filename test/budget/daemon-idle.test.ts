@@ -10,8 +10,8 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import Database from "better-sqlite3";
 import { Effect, Result, Schema } from "effect";
 import { expect, it } from "vitest";
 import { SessionInfoSchema } from "../../src/lib/contracts/ws-rpc.js";
@@ -20,6 +20,7 @@ import { sessionPickEvents } from "../../src/lib/domain/relay/Services/session-p
 import { makeCommitAndSignal } from "../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../src/lib/persistence/events.js";
+import type { DaemonBudgetMeasurement } from "../helpers/daemon-budget-metrics.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -44,22 +45,9 @@ const exec = promisify(execFile);
 const git = async (cwd: string, ...args: string[]) =>
 	(await exec("git", args, { cwd, timeout: 10_000 })).stdout.trim();
 
-interface Spawn {
-	command: string;
-	args: string[];
-	cwd: string;
-	atMs: number;
-}
-interface Measurement {
-	id: number;
-	durationMs: number;
-	spawns: Spawn[];
-	loopDelayMs: { samples: number; p50: number; p99: number; max: number };
-}
-
 // One status command is one session git read, independent of the other
 // commands used to implement a read. Keep all subprocess counts as well.
-function gitCommand(spawn: Spawn) {
+function gitCommand(spawn: DaemonBudgetMeasurement["spawns"][number]) {
 	if (spawn.command !== "git") return spawn.command;
 	const args = spawn.args.slice();
 	while (args[0]?.startsWith("-")) {
@@ -69,7 +57,7 @@ function gitCommand(spawn: Spawn) {
 	return `git ${args[0] ?? "unknown"}`;
 }
 
-function summarize(measurement: Measurement) {
+function summarize(measurement: DaemonBudgetMeasurement) {
 	const commands: Record<string, number> = {};
 	const gitReads: Record<string, number> = {};
 	for (const spawn of measurement.spawns) {
@@ -82,6 +70,7 @@ function summarize(measurement: Measurement) {
 		a.localeCompare(b),
 	);
 	return {
+		startedAtMs: measurement.startedAtMs,
 		durationMs: Math.round(measurement.durationMs),
 		spawns: measurement.spawns.length,
 		spawnsPerMinute: Math.round(
@@ -98,6 +87,8 @@ function summarize(measurement: Measurement) {
 			Object.entries(gitReads).sort(([a], [b]) => a.localeCompare(b)),
 		),
 		loopDelayMs: measurement.loopDelayMs,
+		spawnEvents: measurement.spawns,
+		subprocess: measurement.subprocess,
 	};
 }
 
@@ -128,7 +119,8 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			platform: process.platform,
 			arch: process.arch,
 		},
-		instrumentation: "daemon child_process preload; git status counts one read",
+		instrumentation:
+			"conduit:subprocess-metrics diagnostics; git status counts one read",
 	};
 	const failures: string[] = [];
 	const check = (condition: boolean, description: string) => {
@@ -138,7 +130,7 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 	mkdirSync(metricsDir);
 	const logFile = join(metricsDir, "daemon.log");
 	let requestId = 0;
-	const request = async (action: "begin" | "end") => {
+	const request = async (action: "begin" | "end" | "snapshot") => {
 		const id = ++requestId;
 		writeFileSync(
 			join(metricsDir, "request.tmp"),
@@ -148,11 +140,11 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			join(metricsDir, "request.tmp"),
 			join(metricsDir, "request.json"),
 		);
-		let result: Measurement | undefined;
+		let result: DaemonBudgetMeasurement | undefined;
 		const received = await until(() => {
 			if (!existsSync(join(metricsDir, "response.json"))) return false;
 			try {
-				const value: Measurement = JSON.parse(
+				const value: DaemonBudgetMeasurement = JSON.parse(
 					readFileSync(join(metricsDir, "response.json"), "utf8"),
 				);
 				if (value.id === id) result = value;
@@ -164,13 +156,33 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 		if (!received || !result) throw new Error(`Missing budget snapshot ${id}`);
 		return result;
 	};
+	const waitForQuiescence = async () => {
+		const deadline = performance.now() + 10_000;
+		while (performance.now() < deadline) {
+			const snapshot = await request("snapshot");
+			if (
+				snapshot.subprocess.active === 0 &&
+				snapshot.subprocess.queued === 0 &&
+				snapshot.subprocess.quietForMs >= 500
+			)
+				return snapshot;
+		}
+		throw new Error("Subprocess work did not settle between budget phases");
+	};
 	const measure = async (run: () => Promise<unknown>) => {
 		await request("begin");
 		const logOffset = readFileSync(logFile, "utf8").length;
+		const runStartedAtMs = performance.timeOrigin + performance.now();
 		await run();
+		const runCompletedAtMs = performance.timeOrigin + performance.now();
 		const result = summarize(await request("end"));
 		const logs = readFileSync(logFile, "utf8").slice(logOffset);
-		return { ...result, slowRpcCount: (logs.match(/slow rpc/g) ?? []).length };
+		return {
+			...result,
+			runStartedAtMs,
+			runCompletedAtMs,
+			slowRpcCount: (logs.match(/slow rpc/g) ?? []).length,
+		};
 	};
 
 	try {
@@ -284,15 +296,11 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			join(metricsDir, "request.json"),
 			JSON.stringify({ id: 0, action: "begin" }),
 		);
-		const preload = pathToFileURL(
-			resolve("test/helpers/daemon-budget-preload.mjs"),
-		);
-		preload.searchParams.set("directory", metricsDir);
 		await harness.restart({
 			skipBrowserProbe: true,
 			logFile,
 			serviceEnvironment: {
-				NODE_OPTIONS: `--import=${preload.href}`,
+				CONDUIT_TEST_SUBPROCESS_BUDGET: metricsDir,
 				CONDUIT_SLOW_RPC_MS: String(BUDGET.slowRpcMs),
 			},
 		});
@@ -306,7 +314,28 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			sessions.every(({ id }) => latestRow(browser, id) !== undefined),
 			"all 30 sessions must reach the browser snapshot",
 		);
-		await delay(2_000);
+		const startupAt = performance.now();
+		const startupDb = new Database(join(harness.configDir, "events.db"), {
+			readonly: true,
+			fileMustExist: true,
+		});
+		try {
+			const publications = startupDb.prepare<[], { count: number }>(
+				"SELECT COUNT(*) AS count FROM session_git_published",
+			);
+			expect(
+				await until(() => publications.get()?.count === sessions.length + 2),
+				"all session workspaces and project folders must publish before idle measurement",
+			).toBe(true);
+			const settled = await waitForQuiescence();
+			report["startup"] = {
+				durationMs: Math.round(performance.now() - startupAt),
+				publications: publications.get()?.count,
+				subprocess: settled.subprocess,
+			};
+		} finally {
+			startupDb.close();
+		}
 		const idle = await measure(() => delay(BUDGET.idleMs));
 		report["idle"] = idle;
 		check(
@@ -325,6 +354,7 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 		// The shell subscription stays open. No list/read RPC forces this update.
 		let visibleMs: number | null = null;
 		let commitMs = 0;
+		let expectedHead: string | undefined;
 		const externalCommit = await measure(async () => {
 			const before = performance.now();
 			await git(
@@ -336,6 +366,7 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			);
 			commitMs = performance.now() - before;
 			const head = await git(changed.path, "rev-parse", "--short", "HEAD");
+			expectedHead = head;
 			if (
 				await until(
 					() => latestRow(browser, changed.id)?.git?.head === head,
@@ -344,15 +375,48 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			)
 				visibleMs = performance.now() - before - commitMs;
 		});
+		const publicationDb = new Database(join(harness.configDir, "events.db"), {
+			readonly: true,
+			fileMustExist: true,
+		});
+		let publicationEvidence: unknown;
+		try {
+			publicationEvidence = {
+				git: publicationDb
+					.prepare(
+						"SELECT directory, json_extract(git, '$.head') AS head, version FROM session_git_published WHERE directory LIKE ?",
+					)
+					.all(`%/${changed.id}`),
+				session: publicationDb
+					.prepare("SELECT id, version FROM sessions WHERE id = ?")
+					.get(changed.id),
+				sidebar: publicationDb
+					.prepare(
+						"SELECT session_id, version, json_extract(row, '$.version') AS rowVersion FROM session_sidebar WHERE session_id = ?",
+					)
+					.get(changed.id),
+			};
+		} finally {
+			publicationDb.close();
+		}
 		report["externalCommit"] = {
 			...externalCommit,
 			commitMs: Math.round(commitMs),
 			visibleMs: visibleMs === null ? null : Math.round(visibleMs),
+			expectedHead,
+			observedHead: latestRow(browser, changed.id)?.git?.head,
+			rowUpdates: browser.frames.filter(
+				({ message }) =>
+					message["type"] === "session_row" && message["id"] === changed.id,
+			).length,
+			publication: publicationEvidence,
 		};
 		check(
 			visibleMs !== null && visibleMs <= BUDGET.externalCommitVisibleMs,
 			`external commit: ${visibleMs ?? "not observed"}ms > ${BUDGET.externalCommitVisibleMs}ms`,
 		);
+		// Drain the commit's shared-ref refreshes before establishing churn tiers.
+		report["beforeChurn"] = await measure(waitForQuiescence);
 
 		// Real provider activity establishes Running, an open session establishes
 		// Viewed, and the other eight worktrees are Listed in the sidebar.
@@ -442,10 +506,23 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 						expect(result.sessions[0]?.workspaceMissing).toBeDefined();
 				}
 			});
-			listReads.push({ kind, ...measurement });
+			// The control-file end acknowledgment can arrive after a deferred
+			// refresh starts. Keep that phase evidence and count the RPC itself.
+			const readSpawns = measurement.spawnEvents.filter(({ atMs }) => {
+				const at = measurement.startedAtMs + atMs;
+				return (
+					at >= measurement.runStartedAtMs && at <= measurement.runCompletedAtMs
+				);
+			}).length;
+			listReads.push({
+				kind,
+				...measurement,
+				readSpawns,
+				outsideReadSpawns: measurement.spawns - readSpawns,
+			});
 			check(
-				measurement.spawns === BUDGET.listReadSpawns,
-				`${kind}: ${measurement.spawns} spawns during read`,
+				readSpawns === BUDGET.listReadSpawns,
+				`${kind}: ${readSpawns} spawns during read`,
 			);
 		}
 		report["listReads"] = listReads;

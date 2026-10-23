@@ -101,6 +101,7 @@ import {
 import { ProviderAdapters } from "../Services/provider-adapters.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionDirectory } from "../Services/session-directory.js";
+import { SessionGit } from "../Services/session-git.js";
 import { Subprocess } from "../Services/subprocess.js";
 import { Usage } from "../Services/usage.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
@@ -239,6 +240,7 @@ export const RelayFactoryLive = (
 			const unavailable = yield* DaemonStoreAvailability;
 			const configRef = yield* DaemonConfigRefTag;
 			const subprocess = yield* Subprocess;
+			const sessionGit = yield* Effect.serviceOption(SessionGit);
 			const envResolver = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
 			);
@@ -626,6 +628,11 @@ export const RelayFactoryLive = (
 										)
 										.pipe(
 											Context.add(Subprocess, subprocess),
+											Context.merge(
+												Option.isSome(sessionGit)
+													? Context.make(SessionGit, sessionGit.value)
+													: Context.empty(),
+											),
 											Context.merge(daemonServices),
 											Context.merge(
 												Option.isSome(sessionDirectory)

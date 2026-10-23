@@ -83,12 +83,22 @@ timeout, signal, output-limit and owner-shutdown failures are typed
 before background commands, with FIFO ordering within each priority. Keys share
 only pending work, and cancelling one waiter leaves other waiters intact.
 
-The existing process-wide session-git cache remains a Promise API until
-conduit-test-g43i.4. Its git entrypoints call `makeSubprocessRunner` before the
-first await. This captures the current fiber's owner and read marker, or the
-shared default outside Effect. All commands in that read use the captured
-runner. Existing cache signatures and callers stay unchanged; no separate
-Effect runtime or process owner is created for the cache.
+Session git belongs to one daemon module, exposed by
+`domain/daemon/Services/session-git.ts`. Its interface is `read(sessionId)`,
+`changes`, and `invalidate(target)`. Canonical folder keys share git reads across
+sessions and projects. Viewed folders refresh every 5 seconds and running
+folders every 15 seconds. Listed folders revalidate on reads or hints after
+30 seconds; dormant folders refresh on hints. Run ends and ref changes force a
+refresh. Scoped filesystem watches and session membership use `OwnerScopes`;
+commands use the shared Subprocess owner at background priority.
+
+Readers consume `session_git_published` in the same SQL snapshot as the session
+row. Git, missing-workspace recovery state and session/sidebar versions commit
+together. RPC list reads serve the publication, including absence, and leave
+membership and refresh scheduling to the daemon coordinator. A first non-RPC
+read may await publication. Project rows have folder identities rather than
+session IDs, so they read the same published SQL view directly. Repository
+identity discovery runs during registration and save, not project-list reads.
 
 Read RPC dispatch supplies `ReadRequest`, an Effect 4 `Context.Reference` inherited
 by request fibers. The owner warns at most once per minute when reads request

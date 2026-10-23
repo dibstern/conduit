@@ -1,20 +1,9 @@
 import { describe, it } from "@effect/vitest";
-import {
-	Deferred,
-	Effect,
-	Option as Effect4PollOption,
-	Exit,
-	Fiber,
-	Layer,
-	Logger,
-	Scope,
-} from "effect";
+import { Deferred, Effect, Exit, Layer, Logger, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
-import {
-	makeSessionStateProjectionNotifierLive,
-	SessionStateProjectionNotifierLive,
-} from "../../../src/lib/domain/relay/Layers/session-state-projection-notifier-layer.js";
+import { SessionGit } from "../../../src/lib/domain/daemon/Services/session-git.js";
+import { SessionStateProjectionNotifierLive } from "../../../src/lib/domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { WebSocketHandlerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -115,43 +104,8 @@ describe("SessionStateProjectionNotifier", () => {
 		}),
 	);
 
-	it.effect("returns while git refresh is still running", () =>
-		Effect.gen(function* () {
-			let releaseRefresh: (() => void) | undefined;
-			const refreshStarted = yield* Deferred.make<void>();
-			const wsHandler = makeMockWebSocketHandler();
-			const sessionManagerService = makeMockSessionManagerService();
-			const layer = makeSessionStateProjectionNotifierLive(() => {
-				Effect.runSync(Deferred.succeed(refreshStarted, undefined));
-				return new Promise<void>((resolve) => {
-					releaseRefresh = resolve;
-				});
-			}).pipe(
-				Layer.provide(
-					Layer.merge(
-						Layer.succeed(WebSocketHandlerTag)(wsHandler),
-						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
-					),
-				),
-			);
-			yield* Effect.gen(function* () {
-				const notifier = yield* SessionStateProjectionNotifierTag;
-				const call = yield* notifier
-					.sessionStateProjected("session-1", "turn.completed")
-					.pipe(Effect.forkChild);
-				yield* Deferred.await(refreshStarted);
-				expect(
-					(yield* Effect.sync(() =>
-						Effect4PollOption.fromUndefinedOr(call.pollUnsafe()),
-					))._tag,
-				).toBe("Some");
-				releaseRefresh?.();
-				yield* Fiber.join(call);
-			}).pipe(Effect.provide(layer, { local: true }));
-		}),
-	);
 	it.effect(
-		"refreshes git before refreshing lineage after a completed turn",
+		"invalidates git before refreshing lineage after a completed turn",
 		() =>
 			Effect.gen(function* () {
 				const order: string[] = [];
@@ -162,9 +116,17 @@ describe("SessionStateProjectionNotifier", () => {
 							order.push("lineage");
 						}),
 				});
-				const layer = makeSessionStateProjectionNotifierLive(async () => {
-					order.push("refresh");
-				}).pipe(
+				const layer = SessionStateProjectionNotifierLive.pipe(
+					Layer.provide(
+						Layer.succeed(SessionGit, {
+							read: () => Effect.succeed(undefined),
+							changes: Stream.empty,
+							invalidate: () =>
+								Effect.sync(() => {
+									order.push("invalidate");
+								}),
+						}),
+					),
 					Layer.provide(
 						Layer.merge(
 							Layer.succeed(WebSocketHandlerTag)(wsHandler),
@@ -176,37 +138,11 @@ describe("SessionStateProjectionNotifier", () => {
 					const notifier = yield* SessionStateProjectionNotifierTag;
 					yield* notifier.sessionStateProjected("session-1", "turn.completed");
 					yield* Effect.yieldNow;
-					expect(order).toEqual(["refresh"]);
+					expect(order).toEqual(["invalidate"]);
 					yield* TestClock.adjust("150 millis");
-					expect(order).toEqual(["refresh", "lineage"]);
+					expect(order).toEqual(["invalidate", "lineage"]);
 				}).pipe(Effect.provide(layer, { local: true }));
 			}),
-	);
-	it.effect("refreshes lineage after a git refresh failure", () =>
-		Effect.gen(function* () {
-			const wsHandler = makeMockWebSocketHandler();
-			const refreshSessionLineage = vi.fn(() => Effect.void);
-			const sessionManagerService = makeMockSessionManagerService({
-				refreshSessionLineage,
-			});
-			const layer = makeSessionStateProjectionNotifierLive(async () => {
-				throw new Error("git unavailable");
-			}).pipe(
-				Layer.provide(
-					Layer.merge(
-						Layer.succeed(WebSocketHandlerTag)(wsHandler),
-						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
-					),
-				),
-			);
-			yield* Effect.gen(function* () {
-				const notifier = yield* SessionStateProjectionNotifierTag;
-				yield* notifier.sessionStateProjected("session-1", "turn.error");
-				yield* Effect.yieldNow;
-				yield* TestClock.adjust("150 millis");
-				expect(refreshSessionLineage).toHaveBeenCalledTimes(1);
-			}).pipe(Effect.provide(layer, { local: true }));
-		}),
 	);
 	it.effect(
 		"coalesces a burst of projected events into one lineage refresh",

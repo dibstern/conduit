@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 
 import { readdirSync, readFileSync } from "node:fs";
-import { relative, resolve, sep } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 import { parse } from "svelte/compiler";
 import ts from "typescript";
 
 const owner = resolve("src/lib/domain/daemon/Services/subprocess.ts");
+const gitService = resolve("src/lib/domain/daemon/Services/session-git.ts");
+const gitLayer = resolve("src/lib/domain/daemon/Layers/session-git-layer.ts");
+const gitInternals = resolve("src/lib/domain/daemon/Layers/session-git") + sep;
+const isGitModule = (file) =>
+	file === gitService || file === gitLayer || file.startsWith(gitInternals);
 const longLivedOwners = new Set(
 	[
 		"src/lib/instance/managed-opencode-process.ts",
@@ -78,7 +83,31 @@ function checkTs(file, source, text = source, offset = 0) {
 		if (
 			module &&
 			ts.isStringLiteralLike(module) &&
-			["node:child_process", "child_process"].includes(module.text)
+			module.text.startsWith(".")
+		) {
+			const imported = resolve(dirname(file), module.text).replace(
+				/\.js$/,
+				".ts",
+			);
+			if (
+				(imported === gitLayer || imported.startsWith(gitInternals)) &&
+				!isGitModule(file)
+			) {
+				report(
+					file,
+					source,
+					node.getStart(ast) + offset,
+					"Session git consumers may import only the daemon public service.",
+				);
+			}
+		}
+		if (
+			module &&
+			ts.isStringLiteralLike(module) &&
+			["node:child_process", "child_process"].includes(module.text) &&
+			file !== owner &&
+			!longLivedOwners.has(file) &&
+			!remainingOneShotCallers.has(file)
 		) {
 			const typeOnly =
 				ts.isImportTypeNode(node) ||
@@ -122,12 +151,6 @@ function checkSvelte(file, source) {
 
 const files = collectSourceFiles(resolve("src")).sort();
 for (const file of files) {
-	if (
-		file === owner ||
-		longLivedOwners.has(file) ||
-		remainingOneShotCallers.has(file)
-	)
-		continue;
 	const source = readFileSync(file, "utf8");
 	if (file.endsWith(".svelte")) checkSvelte(file, source);
 	else checkTs(file, source);

@@ -81,4 +81,31 @@ describe("subprocess import boundary", () => {
 		expect(result.status, result.stderr || result.stdout).toBe(1);
 		expect(result.stdout).toContain("2 violation(s)");
 	});
+
+	it("keeps session git implementation imports behind its public service", () => {
+		const result = check({
+			"lib/caller.ts":
+				'import { makeSessionGit } from "./domain/daemon/Layers/session-git-layer.js";',
+			"lib/dynamic.ts":
+				'await import("./domain/daemon/Layers/session-git/git-reader.js");',
+			"lib/component.svelte":
+				'<script lang="ts">import type { DirectoryState } from "./domain/daemon/Layers/session-git-layer.js";</script>',
+			"lib/terminal/pty-host-client.ts":
+				'import { makeSessionGit } from "../domain/daemon/Layers/session-git-layer.js";',
+		});
+		expect(result.status, result.stderr || result.stdout).toBe(1);
+		expect(result.stdout).toContain("4 violation(s)");
+	});
+
+	it("allows session git public consumers and internal composition", () => {
+		const result = check({
+			"lib/caller.ts":
+				'import { SessionGit } from "./domain/daemon/Services/session-git.js";',
+			"lib/domain/daemon/Services/session-git.ts":
+				'import { makeSessionGit } from "../Layers/session-git-layer.js";',
+			"lib/domain/daemon/Layers/session-git-layer.ts":
+				'import { readSessionGit } from "./session-git/git-reader.js";',
+		});
+		expect(result.status, result.stderr || result.stdout).toBe(0);
+	});
 });

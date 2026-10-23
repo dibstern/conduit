@@ -18,7 +18,7 @@ import {
 // detached HEAD is lost; labels change to worktree names; restart loses mapping.
 // A non-git primary hides a sole git extra; detaching a mapped folder freezes
 // the legacy checkout fields even though the provider still uses that worktree.
-// A deleted settled folder keeps its record and is read on every restart.
+// A deleted settled folder retains a null publication across restarts.
 const git = (directory: string, ...args: string[]) =>
 	execFileSync("git", ["-C", directory, ...args], {
 		encoding: "utf8",
@@ -152,9 +152,16 @@ describe("Multi-folder git through the built daemon", () => {
 
 	it("reports each repository, independent dirty/upstream state and detached HEAD through live and cold reads", async () => {
 		const { fixture, socket, secondary, scratch } = await start("status");
-		const projects = await sendRpcRequest(socket, { _tag: "GetProjects" });
-		const project = projects.projects.find(
-			({ slug }) => slug === "process-test",
+		const project = await vi.waitFor(
+			async () => {
+				const projects = await sendRpcRequest(socket, { _tag: "GetProjects" });
+				const row = projects.projects.find(
+					({ slug }) => slug === "process-test",
+				);
+				expect(row?.git?.folders).toHaveLength(2);
+				return row;
+			},
+			{ timeout: 20_000 },
 		);
 		expect(project?.repositoryIdentities?.[fixture.projectDir]?.name).toBe(
 			"Frontend",
@@ -199,7 +206,7 @@ describe("Multi-folder git through the built daemon", () => {
 			{ timeout: 20_000 },
 		);
 		writeFileSync(join(secondary, "tracked.txt"), "secondary changed\n");
-		// No read RPC forces the update: the existing poller must publish it.
+		// The viewed-session tier publishes changes without another read RPC.
 		await vi.waitFor(
 			() => {
 				for (const feed of ["shell", "family"] as const)
@@ -376,7 +383,12 @@ describe("Multi-folder git through the built daemon", () => {
 						"SELECT json_extract(git, '$.dirty') AS dirty FROM session_git_published WHERE directory = ?",
 					)
 					.get(secondary)?.dirty;
-				return { sessions, published, secondaryDirty };
+				const worktreeGit = db
+					.prepare<[string], { git: string | null }>(
+						"SELECT git FROM session_git_published WHERE directory = ?",
+					)
+					.get(worktree)?.git;
+				return { sessions, published, secondaryDirty, worktreeGit };
 			} finally {
 				db.close();
 			}
@@ -502,17 +514,16 @@ describe("Multi-folder git through the built daemon", () => {
 		await fixture.shutdown();
 		rmSync(worktree, { recursive: true, force: true });
 		await fixture.restart();
-		await vi.waitFor(
-			() => expect(readGitState().published).not.toContain(worktree),
-			{ timeout: 20_000 },
-		);
+		await vi.waitFor(() => expect(readGitState().worktreeGit).toBeNull(), {
+			timeout: 20_000,
+		});
 		expect(readGitState().published).toEqual(
 			expect.arrayContaining([fixture.projectDir, secondary, scratch]),
 		);
 		await fixture.shutdown();
 		await fixture.restart();
 		await list();
-		expect(readGitState().published).not.toContain(worktree);
+		expect(readGitState().worktreeGit).toBeNull();
 		evidence["afterWorktreeDeleted"] = readGitState().published;
 	}, 90_000);
 });

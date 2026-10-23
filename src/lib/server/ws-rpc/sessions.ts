@@ -21,6 +21,7 @@ import { DraftAlreadySent, WsRpcError } from "../../contracts/ws-rpc.js";
 import { autoSettleIdleWindowMs } from "../../daemon/config-persistence.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
+import { SessionGit } from "../../domain/daemon/Services/session-git.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
 import { WorktreeServiceTag } from "../../domain/daemon/Services/worktree-service.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
@@ -42,7 +43,6 @@ import {
 } from "../../domain/relay/Services/services.js";
 import { setRead } from "../../domain/relay/Services/session-attention.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
-import { SessionGitServiceTag } from "../../domain/relay/Services/session-git-service.js";
 import {
 	createLocalSessionId,
 	SessionManagerServiceTag,
@@ -196,8 +196,9 @@ export const sessionsHandlers = {
 		Effect.gen(function* () {
 			const workspace = yield* SessionWorkspaceTag;
 			yield* workspace.renameBranch(request.sessionId, request.branchName);
-			const git = yield* Effect.serviceOption(SessionGitServiceTag);
-			if (git._tag === "Some") yield* git.value.refresh();
+			const git = yield* Effect.serviceOption(SessionGit);
+			if (git._tag === "Some")
+				yield* git.value.invalidate({ sessionId: request.sessionId });
 			return { ok: true as const };
 		}).pipe(
 			Effect.catch(
