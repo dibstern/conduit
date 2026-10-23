@@ -1,3 +1,4 @@
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 // Comprehensive verification of the monitoring reducer end-to-end (18 scenarios):
 //
 // Group 1 (1-4): SSE coverage and grace period
@@ -34,10 +35,7 @@ import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import {
-	createProjectRelay,
-	type ProjectRelay,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 
@@ -122,6 +120,11 @@ async function createMockOpenCode(
 		}
 
 		res.setHeader("Content-Type", "application/json");
+
+		if (url.pathname === "/global/health" && req.method === "GET") {
+			res.end(JSON.stringify({ healthy: true, version: "test" }));
+			return;
+		}
 
 		if (url.pathname === "/path") {
 			res.end(
@@ -305,14 +308,15 @@ async function createTestHarness(
 	const db = new Database(dbPath);
 	// parent_id matters: notification routing treats a session without one as top-level.
 	const upsertRow = db.prepare(`
-		INSERT INTO sessions (id, provider, title, parent_id, status, created_at, updated_at)
-		VALUES (?, 'opencode', 'Untitled', ?, ?, ?, ?)
+		INSERT INTO sessions (id, project_id, provider, title, parent_id, status, created_at, updated_at)
+		VALUES (?, ?, 'opencode', 'Untitled', ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET status = excluded.status,
 			updated_at = excluded.updated_at
 	`);
 	const upsertStatus = (sessionId: string, status: string, now: number) =>
 		upsertRow.run(
 			sessionId,
+			slug,
 			mock.sessionList.find((s) => s.id === sessionId)?.parentID ?? null,
 			status,
 			now,
@@ -337,6 +341,9 @@ async function createTestHarness(
 		deleteProperty(target, sessionId) {
 			if (typeof sessionId === "string") {
 				db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+				db.prepare("DELETE FROM session_sidebar WHERE session_id = ?").run(
+					sessionId,
+				);
 			}
 			return Reflect.deleteProperty(target, sessionId);
 		},

@@ -8,6 +8,7 @@ import {
 	accountsStateFromInstances,
 	apply,
 	list,
+	nextAccountColorSlot,
 } from "../../../src/lib/account-directory.js";
 import type { UsageLimitsSetting } from "../../../src/lib/contracts/limit-recovery.js";
 import {
@@ -19,6 +20,7 @@ import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/clau
 import { isRecord } from "../../../src/lib/utils.js";
 import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js";
 import { MOCK_SERVER_STATUS } from "../../../test/e2e/helpers/rpc-mock.js";
+import { closeSettings } from "../../../test/e2e/helpers/settings.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -28,6 +30,9 @@ import {
 	requireRelayControl,
 	requireRpcControl,
 } from "./shared.js";
+
+// Account Limit ignores pre-limit readings, so seeded usage predates projected limits.
+const SEEDED_USAGE_READ_AT_MS = PINNED_CLOCK_MS - 60_000;
 
 const usageLimits = (
 	autoResume: boolean,
@@ -86,6 +91,7 @@ function seedAccountDirectory(page: Page): void {
 			Schema.Struct({
 				id: Schema.String,
 				name: Schema.String,
+				colorSlot: Schema.optional(Schema.Number),
 				driver: KnownProviderDriverKindSchema,
 				configDir: Schema.optional(Schema.String),
 				env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
@@ -133,6 +139,7 @@ function seedAccountDirectory(page: Page): void {
 			...mockInstances.get(page)?.find((row) => row["id"] === account.id),
 			id: account.id,
 			name: account.name,
+			colorSlot: account.colorSlot,
 			driver: account.driver,
 			isDefault: account.isDefault,
 			configDir: account.configuredFolder ?? "",
@@ -147,7 +154,7 @@ function seedAccountDirectory(page: Page): void {
 					harness: "claude",
 					status: "available",
 					windows: [{ kind: "five_hour", utilization: 20 }],
-					readAt: PINNED_CLOCK_MS,
+					readAt: SEEDED_USAGE_READ_AT_MS,
 					stale: false,
 				})),
 		);
@@ -345,7 +352,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 				...(mockInstances.get(world.page) ?? []).filter(
 					(instance) => instance["driver"] !== "claude",
 				),
-				...names.map((name) => ({
+				...names.map((name, colorSlot) => ({
+					colorSlot,
 					id: instanceSlug(name),
 					name,
 					driver: "claude",
@@ -834,7 +842,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				"port 2633",
 			);
 			await expect(world.page.getByTestId("server-status-browsers")).toHaveText(
-				"2 browsers connected",
+				"· 2 browsers connected",
 			);
 		},
 	},
@@ -848,8 +856,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "open Server shutdown confirmation",
-		match: /^I open the Server Shut down confirmation$/,
+		name: "open Server Stop confirmation",
+		match: /^I open the Server Stop confirmation$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("server-shutdown-btn").click();
 			await expect(
@@ -858,8 +866,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert shutdown warning",
-		match: /^the Server Shut down warning says (.+)$/,
+		name: "assert Stop warning",
+		match: /^the Server Stop warning says (.+)$/,
 		run: async ({ world, match }) => {
 			await expect(
 				world.page.getByTestId("server-shutdown-confirmation"),
@@ -867,8 +875,8 @@ export const providerInstancesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "cancel Server shutdown confirmation",
-		match: /^I cancel the Server Shut down confirmation$/,
+		name: "cancel Server Stop confirmation",
+		match: /^I cancel the Server Stop confirmation$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("server-shutdown-cancel").click();
 			await expect(
@@ -1028,7 +1036,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				.getByTestId("instance-form")
 				.waitFor({ state: "hidden", timeout: 5_000 });
 			// Close settings so the composer/model-picker is interactable next.
-			await page.getByTestId("settings-close-btn").click();
+			await closeSettings(page);
 			await page
 				.locator("#settings-panel")
 				.waitFor({ state: "hidden", timeout: 5_000 });
@@ -1040,9 +1048,18 @@ export const providerInstancesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const driverName = (match[1] ?? "").toLowerCase();
 			const name = (match[2] ?? "").trim();
+			const existing = mockInstances.get(world.page) ?? [];
 			const inst: Record<string, unknown> = {
 				id: instanceSlug(name),
 				name,
+				colorSlot: nextAccountColorSlot(
+					existing.map((instance) => ({
+						colorSlot:
+							typeof instance["colorSlot"] === "number"
+								? instance["colorSlot"]
+								: undefined,
+					})),
+				),
 				port: driverName === "opencode" ? 4099 : 0,
 				managed: false,
 				status: "healthy",
@@ -1054,7 +1071,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 			};
 			// Seed BOTH the mock RPC store (so edit/remove RPCs stay consistent)
 			// and the live frontend state (via the mocked SubscribeInstances list).
-			const list = [...(mockInstances.get(world.page) ?? []), inst];
+			const list = [...existing, inst];
 			mockInstances.set(world.page, list);
 			seedAccountDirectory(world.page);
 			await requireRelayControl(world.page).sendMessages([
@@ -1097,6 +1114,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 				{
 					id,
 					name: match[1] ?? "",
+					colorSlot: 0,
 					configDir: match[2] ?? "",
 					driver: "claude",
 					isDefault: true,
@@ -1213,7 +1231,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 						harness: "claude",
 						status: "available",
 						windows: [{ kind: "five_hour", utilization: 20 }],
-						readAt: Date.now(),
+						readAt: SEEDED_USAGE_READ_AT_MS,
 						stale: false,
 					})),
 			});

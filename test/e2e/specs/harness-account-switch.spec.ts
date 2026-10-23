@@ -1,7 +1,9 @@
 import {
+	copyFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	writeFileSync,
 } from "node:fs";
@@ -16,6 +18,7 @@ import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
+import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 import { PermissionPage } from "../page-objects/permission.page.js";
@@ -31,6 +34,7 @@ const generalToolResult = "ACCOUNT-SWITCH-GENERAL-TOOL-RESULT";
 const handoffMarker = "[Conduit context handoff]";
 
 test.use({
+	locale: new Intl.DateTimeFormat().resolvedOptions().locale,
 	harnessOptions: {
 		// The fake SDK writes limit transcripts and gates beside the proof file.
 		restartProof: true,
@@ -475,6 +479,7 @@ for (const dismiss of [false, true]) {
 					.toEqual({
 						instanceId: account.id,
 						rateLimitType: "seven_day",
+						limitedAt: expect.any(Number),
 						resetsAt: 1791370800,
 						cutOffMessageId: expect.any(String),
 						rearms: 0,
@@ -503,13 +508,11 @@ for (const dismiss of [false, true]) {
 				const cutOffTag = page.getByTestId("cut-off-tag");
 				await test.step("limited-session strip and cut-off tag", async () => {
 					const phone = testInfo.project.name === "mobile";
-					const resets = `Resets at ${usageForecastTime(1791370800 * 1000, Date.now())}.`;
+					// The fixture's reset has passed, so the strip offers to continue.
 					await expect(strip.getByTestId("usage-limit-title")).toHaveText(
-						"Account 1 hit its weekly limit.",
+						"Limit looks reset · Continue now",
 					);
-					await expect(strip.getByTestId("usage-limit-detail")).toHaveText(
-						resets,
-					);
+					await expect(strip.getByTestId("usage-limit-detail")).toHaveCount(0);
 					await expect(cutOffTag).toHaveCount(1);
 					await expect(
 						chat.userMessages.last().getByTestId("cut-off-tag"),
@@ -549,6 +552,7 @@ for (const dismiss of [false, true]) {
 					).toEqual({
 						instanceId: account.id,
 						rateLimitType: "seven_day",
+						limitedAt: expect.any(Number),
 						resetsAt: 1791370800,
 						rearms: 0,
 						continued: false,
@@ -669,7 +673,7 @@ for (const decision of [
 		test.setTimeout(120_000);
 		const app = new AppPage(page);
 		const strip = page.getByTestId("usage-limit-strip");
-		const tryAgain = page.getByTestId("usage-limit-try-again");
+		const tryAgain = page.getByTestId("usage-limit-used-reset");
 		const artifacts = resolve(
 			"test-results/account-switch",
 			`${testInfo.project.name}-continue-${decision}-${testInfo.retry}`,
@@ -677,6 +681,8 @@ for (const decision of [
 		mkdirSync(artifacts, { recursive: true });
 		const browser = await harness.connect();
 		const configDir = mkdtempSync(join(harness.root, "retry-account-"));
+		// Keep the initial strip limited until the user's fresh retry probe.
+		writeFileSync(join(configDir, "conduit-test-quota"), "limited");
 		const { addedInstanceId } = await Effect.runPromise(
 			browser.rpc.AddInstance({
 				name: "Retry account",
@@ -762,6 +768,7 @@ for (const decision of [
 				.toEqual({
 					instanceId,
 					rateLimitType: "seven_day",
+					limitedAt: expect.any(Number),
 					cutOffMessageId: expect.any(String),
 					rearms: 0,
 					continued: false,
@@ -786,7 +793,7 @@ for (const decision of [
 				await expect(page.getByTestId("usage-limit-detail")).toHaveText(
 					"Reset time unavailable",
 				);
-				await expect(tryAgain).toHaveText("Try again");
+				await expect(tryAgain).toHaveText("I used a reset");
 				await page.screenshot({
 					path: join(artifacts, "01-no-reset-strip.png"),
 				});
@@ -840,7 +847,15 @@ for (const decision of [
 						),
 					)
 					.toContain(heldDelta.text);
+				// The reply cleared recovery; the same-account retry now loses silently.
+				await expect.poll(() => latest()?.limitRecovery).toBeNull();
 			}
+			const resetAt = Math.floor(Date.now() / 1000) + 3600;
+			if (decision === "limited")
+				writeFileSync(
+					join(configDir, "conduit-test-resets-at"),
+					String(resetAt),
+				);
 			writeFileSync(
 				join(configDir, "conduit-test-quota"),
 				["fail", "hang", "limited", "unavailable"].includes(decision)
@@ -881,34 +896,51 @@ for (const decision of [
 							: "available",
 					});
 			const refusal = {
-				limited: "AccountUnavailable",
+				limited: "AccountStillLimited",
 				unavailable: "AccountUnavailable",
-				busy: "SessionBusy",
 				stale: "StaleSwitch",
 			};
-			if (decision in refusal) {
-				expect(result?._tag).toBe("Failure");
-				if (result?._tag !== "Failure") throw new Error("Expected refusal");
-				expect(result.failure._tag).toBe(
-					refusal[decision as keyof typeof refusal],
-				);
+			if (decision === "busy" || decision in refusal) {
+				if (decision === "busy") expect(result?._tag).toBe("Success");
+				else {
+					expect(result?._tag).toBe("Failure");
+					if (result?._tag !== "Failure") throw new Error("Expected refusal");
+					expect(result.failure._tag).toBe(
+						refusal[decision as keyof typeof refusal],
+					);
+					if (decision === "limited") {
+						expect(result.failure).toMatchObject({
+							label: "weekly limit",
+							until: resetAt * 1000,
+						});
+					}
+				}
 				const after = await snapshot();
 				expect(after).toEqual(before);
 				evidence["after"] = after;
-				if (decision === "limited") {
-					await tryAgain.click();
-					await expect(
-						page.locator('.toast-card[data-variant="error"]'),
-					).toContainText(result.failure.message);
-					await expect(strip).toBeVisible();
-					await expect(tryAgain).toBeEnabled();
-					await page.screenshot({ path: join(artifacts, "02-refused.png") });
-				}
+				expect(latest()?.resumes ?? []).toEqual([]);
 				expect(
 					harness
 						.claudeOptions()
 						.some((call) => call.prompt === "Continue where you left off."),
 				).toBe(false);
+				if (decision === "limited") {
+					await tryAgain.click();
+					await expect(
+						page.locator('.toast-card[data-variant="error"]'),
+					).toContainText(
+						`Claude still shows the weekly limit until ${usageForecastTime(resetAt * 1000, Date.now())}.`,
+					);
+					await expect(strip).toBeVisible();
+					await expect(tryAgain).toBeEnabled();
+					await page.screenshot({ path: join(artifacts, "02-refused.png") });
+					expect(latest()?.resumes ?? []).toEqual([]);
+					expect(
+						harness
+							.claudeOptions()
+							.some((call) => call.prompt === "Continue where you left off."),
+					).toBe(false);
+				}
 			} else {
 				if (result) expect(result._tag).toBe("Success");
 				if (decision === "hang")
@@ -972,6 +1004,7 @@ for (const decision of [
 						.toEqual({
 							instanceId,
 							rateLimitType: "seven_day",
+							limitedAt: expect.any(Number),
 							cutOffMessageId,
 							rearms: 0,
 							continued: false,
@@ -1042,7 +1075,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		limited:
 			"scenario 5: auto-switch attempts once when the target's real turn is limited",
 		"probe-failed":
-			"scenario 13: auto-switch passes Unknown quota, then stops on the target's real limit",
+			"scenario 13: auto-switch skips Unknown quota and continues on the next account that answers go",
 		ordered:
 			"auto-switch follows the saved account order, skips Limited quota, and records its reason",
 	};
@@ -1055,9 +1088,9 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		mkdirSync(artifacts, { recursive: true });
 		const browser = await harness.connect();
 		const accounts: { id: string; configDir: string }[] = [];
-		for (const name of scenario === "ordered"
-			? ["Account 1", "Account 2", "Account 3"]
-			: ["Account 1", "Account 2"]) {
+		for (const name of scenario === "limited"
+			? ["Account 1", "Account 2"]
+			: ["Account 1", "Account 2", "Account 3"]) {
 			const configDir = mkdtempSync(join(harness.root, "auto-switch-account-"));
 			const { addedInstanceId } = await Effect.runPromise(
 				browser.rpc.AddInstance({ name, driver: "claude", configDir }),
@@ -1065,8 +1098,11 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 			if (!addedInstanceId) throw new Error(`No instance ID for ${name}`);
 			accounts.push({ id: addedInstanceId, configDir });
 		}
-		const [source, target, preferred] = accounts;
-		if (!source || !target) throw new Error("Two accounts are required");
+		const [source, firstTarget, third] = accounts;
+		const target = scenario === "probe-failed" ? third : firstTarget;
+		const preferred = scenario === "ordered" ? third : undefined;
+		if (!source || !firstTarget || !target)
+			throw new Error("Auto-switch accounts are missing");
 		const { savedSlug: projectSlug } = await Effect.runPromise(
 			browser.rpc.SaveProject({
 				folders: [mkdtempSync(join(harness.root, "auto-switch-project-"))],
@@ -1085,7 +1121,10 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 					autoResume: false,
 					autoSwitch: true,
 					warnAt: 80 as const,
-					order: [target.id, source.id],
+					order:
+						scenario === "probe-failed"
+							? [firstTarget.id, target.id, source.id]
+							: [target.id, source.id],
 				};
 		expect(
 			await Effect.runPromise(
@@ -1158,9 +1197,14 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 		try {
 			writeFileSync(join(harness.root, "release-limit-repeats"), "release");
 			writeFileSync(
-				join(target.configDir, "conduit-test-quota"),
+				join(firstTarget.configDir, "conduit-test-quota"),
 				scenario === "probe-failed" ? "fail" : "available",
 			);
+			if (scenario === "probe-failed")
+				writeFileSync(
+					join(target.configDir, "conduit-test-quota"),
+					"available",
+				);
 			writeFileSync(
 				join(target.configDir, "conduit-test-switch-turn"),
 				scenario === "ordered" ? "hold" : "limited",
@@ -1270,7 +1314,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 						'[data-testid="quota-meter"][data-state="checking"]',
 					),
 				).toHaveCount(0);
-				await page.getByTestId("settings-close-btn").click();
+				await closeSettings(page);
 				await expect(page.locator("#settings-panel")).toBeHidden();
 			}
 			const before = proofMarks().length;
@@ -1324,20 +1368,23 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 				proofMarks()
 					.slice(before)
 					.filter((mark) => mark.kind === "usage-probe");
+			// Ordered settings reads are shared with pickFailover for 30 seconds.
+			// The selected account still gets the continuation's fresh user check.
 			expect(
 				probes().filter((mark) => mark.configDir === target.configDir),
-			).toHaveLength(2);
-			if (scenario === "probe-failed")
+			).toHaveLength(scenario === "ordered" ? 1 : 2);
+			if (scenario === "probe-failed") {
 				expect(
-					probes().filter((mark) => mark.configDir === target.configDir),
-				).toEqual([
-					expect.objectContaining({ behavior: "fail" }),
-					expect.objectContaining({ behavior: "fail" }),
-				]);
+					probes().filter((mark) => mark.configDir === firstTarget.configDir),
+				).toEqual([expect.objectContaining({ behavior: "fail" })]);
+				expect(
+					harness
+						.claudeOptions()
+						.some((call) => call.configDir === firstTarget.configDir),
+				).toBe(false);
+			}
 			if (preferred) {
 				expect(probes().map((mark) => mark.configDir)).toEqual([
-					preferred.configDir,
-					target.configDir,
 					target.configDir,
 				]);
 				expect(
@@ -1408,7 +1455,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 
 // Failures: scheduling probes quota early; a restart loses the durable schedule;
 // cancel or Dismiss loses to the sweep; a resume changes the native account/thread
-// or adds a user bubble; still-Limited loops forever or uses the stale reset time.
+// or adds a user bubble; a due resume with Auto-resume off probes usage or stalls.
 for (const scenario of [
 	"reset",
 	"restart",
@@ -1422,7 +1469,8 @@ for (const scenario of [
 		restart:
 			"scenario 4: a reset passing while the daemon is down resumes on startup",
 		dismiss: "scenario 7: Dismiss cancels a scheduled resume",
-		limited: "a due resume re-arms from fresh quota at most three times",
+		limited:
+			"with Auto-resume off, a due resume fires on time without a usage read, even while usage reads limited",
 		cancel:
 			"CancelContinuation restores the plain limited state and is idempotent",
 	};
@@ -1542,6 +1590,7 @@ for (const scenario of [
 				.toEqual({
 					instanceId,
 					rateLimitType: "seven_day",
+					limitedAt: expect.any(Number),
 					resetsAt: at,
 					cutOffMessageId: expect.any(String),
 					rearms: 0,
@@ -1570,7 +1619,10 @@ for (const scenario of [
 				await app.goto(
 					`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(projectSlug)}`,
 				);
-				await expect(strip).toHaveAttribute("data-state", "limited");
+				await expect(strip).toHaveAttribute(
+					"data-state",
+					"can_resume_at_reset",
+				);
 				await expect.poll(() => probes().length).toBe(1);
 				viewed = 1;
 				await resumeAtReset.click();
@@ -1625,8 +1677,11 @@ for (const scenario of [
 					.poll(() => latest()?.limitRecovery)
 					.toEqual(scenario === "dismiss" ? dismissed : limited);
 				if (scenario === "cancel") {
-					// Back to frame A: the plain limited strip offers Resume at reset again.
-					await expect(strip).toHaveAttribute("data-state", "limited");
+					// Cancelling keeps the known reset and offers Resume at reset again.
+					await expect(strip).toHaveAttribute(
+						"data-state",
+						"can_resume_at_reset",
+					);
 					await expect(resumeAtReset).toBeEnabled();
 					await expect(cancelResume).toHaveCount(0);
 					await page.screenshot({ path: join(artifacts, "02-cancelled.png") });
@@ -1640,27 +1695,12 @@ for (const scenario of [
 				expect(continuations()).toHaveLength(0);
 				expect(probes()).toHaveLength(0);
 			} else if (scenario === "limited") {
-				// A limited reading re-arms only while its reset is still ahead
-				// (a past one is stale), so each re-arm moves the reset further out
-				// before the sweep reaches it; the fourth limited reading cancels.
-				const resetsAtFile = join(configDir, "conduit-test-resets-at");
-				let freshAt = at + 4;
-				writeFileSync(resetsAtFile, String(freshAt));
-				for (const rearms of [1, 2, 3]) {
-					await expect
-						.poll(() => latest()?.limitRecovery, {
-							timeout: 30_000,
-							intervals: [50],
-						})
-						.toEqual({ ...limited, scheduledAt: freshAt, rearms });
-					freshAt += 4;
-					writeFileSync(resetsAtFile, String(freshAt));
-				}
+				// With Auto-resume off, the due schedule fires without checking usage.
 				await expect
 					.poll(() => latest()?.limitRecovery, { timeout: 30_000 })
-					.toEqual({ ...limited, rearms: 3 });
-				expect(probes()).toHaveLength(4);
-				expect(continuations()).toHaveLength(0);
+					.toEqual({ ...limited, continued: true });
+				expect(probes()).toHaveLength(0);
+				await expect.poll(continuations).toHaveLength(1);
 			} else {
 				if (scenario === "restart") {
 					await Effect.runPromise(Fiber.interrupt(subscription));
@@ -1738,7 +1778,7 @@ for (const scenario of [
 				const dividerAboveReply = async (): Promise<void> => {
 					await expect(strip).toHaveCount(0);
 					await expect(divider).toHaveText(
-						`↻ Resumed on Reset account after reset · ${formatSnoozeTime(resume.at)}`,
+						`↻ Resumed on Reset account after reset · ${await page.evaluate(formatSnoozeTime, resume.at)}`,
 					);
 					await expect(reply).toBeVisible();
 					const [dividerBox, replyBox] = await Promise.all([
@@ -1907,9 +1947,10 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			// Off schedules nothing, so its reset can be far away.
 			const at =
 				Math.floor(Date.now() / 1000) + (scenario === "off" ? 3600 : 20);
-			writeFileSync(join(configDir, "conduit-test-resets-at"), String(at));
-			writeFileSync(join(configDir, "conduit-test-quota"), "available");
 			const noReset = scenario === "no-reset";
+			if (!noReset)
+				writeFileSync(join(configDir, "conduit-test-resets-at"), String(at));
+			writeFileSync(join(configDir, "conduit-test-quota"), "limited");
 			await Effect.runPromise(
 				browser.rpc["input.submit"]({
 					sessionId,
@@ -1924,6 +1965,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			const limited = {
 				instanceId,
 				rateLimitType: "seven_day",
+				limitedAt: expect.any(Number),
 				...(noReset ? {} : { resetsAt: at }),
 				cutOffMessageId: expect.any(String),
 				rearms: 0,
@@ -1947,10 +1989,13 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 				const settled = Date.now() / 1000 + 2;
 				await expect.poll(() => Date.now() / 1000).toBeGreaterThan(settled);
 				expect(latest()?.limitRecovery).toEqual(limited);
-				await expect(strip).toHaveAttribute("data-state", "limited");
+				await expect(strip).toHaveAttribute(
+					"data-state",
+					noReset ? "limited" : "can_resume_at_reset",
+				);
 				await expect(
 					page.getByTestId(
-						noReset ? "usage-limit-try-again" : "usage-limit-resume-at-reset",
+						noReset ? "usage-limit-used-reset" : "usage-limit-resume-at-reset",
 					),
 				).toBeEnabled();
 				await page.screenshot({ path: join(artifacts, "01-limited.png") });
@@ -2000,7 +2045,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			if (!resume) throw new Error("No reset resume");
 			await expect(strip).toHaveCount(0);
 			await expect(page.getByTestId("transcript-divider")).toHaveText(
-				`↻ Resumed on Reset account after reset · ${formatSnoozeTime(resume.at)}`,
+				`↻ Resumed on Reset account after reset · ${await page.evaluate(formatSnoozeTime, resume.at)}`,
 			);
 			await expect(
 				page
@@ -2481,8 +2526,29 @@ for (const behavior of [
 		mkdirSync(artifacts, { recursive: true });
 		const browser = await harness.connect();
 		const accounts: { id: string; configDir: string }[] = [];
+		const resetAt = Math.floor(Date.now() / 1000) + 3600;
 		for (const name of ["Account 1", "Account 2"]) {
 			const configDir = mkdtempSync(join(harness.root, "switch-account-"));
+			// Set the target's behavior before its first shared usage read.
+			if (name === "Account 2") {
+				writeFileSync(
+					join(configDir, "conduit-test-quota"),
+					[
+						"fail",
+						"hang",
+						"unavailable",
+						"limited",
+						"plan-unavailable",
+					].includes(behavior)
+						? behavior
+						: "available",
+				);
+				if (behavior === "limited")
+					writeFileSync(
+						join(configDir, "conduit-test-resets-at"),
+						String(resetAt),
+					);
+			}
 			if (behavior.startsWith("fork-"))
 				writeFileSync(join(configDir, "conduit-test-record-forks"), "record");
 			const { addedInstanceId } = await Effect.runPromise(
@@ -2493,10 +2559,9 @@ for (const behavior of [
 		}
 		const [source, target] = accounts;
 		if (!source || !target) throw new Error("Two accounts are required");
+		const projectDir = mkdtempSync(join(harness.root, "switch-project-"));
 		const { savedSlug: projectSlug } = await Effect.runPromise(
-			browser.rpc.SaveProject({
-				folders: [mkdtempSync(join(harness.root, "switch-project-"))],
-			}),
+			browser.rpc.SaveProject({ folders: [projectDir] }),
 		);
 		if (!projectSlug) throw new Error("No switch project slug");
 		// Project RPCs reset config persistence's debounce. Wait on disk once,
@@ -2649,14 +2714,6 @@ for (const behavior of [
 				expect(preview.success.tokens).toBeGreaterThan(0);
 			}
 			writeFileSync(
-				join(target.configDir, "conduit-test-quota"),
-				["fail", "hang", "unavailable", "limited", "plan-unavailable"].includes(
-					behavior,
-				)
-					? behavior
-					: "available",
-			);
-			writeFileSync(
 				join(target.configDir, "conduit-test-switch-turn"),
 				behavior === "die-once" || behavior === "fork-uncovered"
 					? "die-once"
@@ -2710,10 +2767,17 @@ for (const behavior of [
 						? "63% left"
 						: behavior === "unavailable"
 							? "unavailable"
-							: "quota unknown",
+							: "usage unknown",
 				);
-				await expect(row).not.toHaveAttribute("data-disabled");
+				if (behavior === "unavailable")
+					await expect(row).toHaveAttribute("data-disabled");
+				else await expect(row).not.toHaveAttribute("data-disabled");
 				await page.screenshot({ path: join(artifacts, "01-picker.png") });
+				if (behavior === "unavailable") {
+					await page.keyboard.press("Escape");
+					await expect(strip).toBeVisible();
+					return await continueSession();
+				}
 				await row.click();
 				const dialog = page.getByTestId("handoff-dialog");
 				await expect(dialog).toHaveAttribute("data-mode", "confirm");
@@ -2727,19 +2791,8 @@ for (const behavior of [
 				await page.screenshot({ path: join(artifacts, "02-confirm.png") });
 				await page.getByTestId("handoff-confirm").click();
 				await expect(dialog).toHaveCount(0);
-				if (behavior !== "unavailable") {
-					await expect(strip).toHaveCount(0);
-					return { _tag: "Success" } as const;
-				}
-				const toast = page.locator('.toast-card[data-variant="error"]');
-				await expect(toast).toContainText("Couldn't switch to Account 2");
-				await expect(strip).toBeVisible();
-				await page.screenshot({ path: join(artifacts, "03-refused.png") });
-				// The typed refusal behind the toast; asking again changes nothing either.
-				const refused = await continueSession();
-				if (refused._tag === "Failure")
-					await expect(toast).toContainText(refused.failure.message);
-				return refused;
+				await expect(strip).toHaveCount(0);
+				return { _tag: "Success" } as const;
 			};
 			const switching = viaStrip ? switchFromStrip() : continueSession();
 			let queuedSend: Promise<unknown> | undefined;
@@ -2777,7 +2830,12 @@ for (const behavior of [
 						_tag:
 							behavior === "too-large"
 								? "HandoffTooLarge"
-								: "AccountUnavailable",
+								: behavior === "limited"
+									? "AccountStillLimited"
+									: "AccountUnavailable",
+						...(behavior === "limited"
+							? { label: "weekly limit", until: resetAt * 1000 }
+							: {}),
 						message: expect.any(String),
 					},
 				});
@@ -2877,6 +2935,10 @@ for (const behavior of [
 				);
 				if (behavior !== "fork-uncovered" && nativeParent?.kind !== "query")
 					throw new Error("No native parent query");
+				const queriesBeforeFork = proofMarks().filter(
+					(mark) => mark.kind === "query",
+				);
+				const callsBeforeFork = harness.claudeOptions();
 				const fork = await Effect.runPromise(
 					browser.rpc.ForkSession({
 						sessionId,
@@ -2911,19 +2973,17 @@ for (const behavior of [
 				const nativeForks = proofMarks().filter(
 					(mark) => mark.kind === "native-fork",
 				);
-				if (behavior === "fork-uncovered") expect(nativeForks).toHaveLength(0);
-				else
-					expect(nativeForks).toEqual([
-						expect.objectContaining({
-							parentSessionId:
-								nativeParent?.kind === "query"
-									? nativeParent.sessionId
-									: undefined,
-							sessionId: fork.sessionId,
-							configDir: expectedAccount.configDir,
-							upToMessageId: point.id,
-						}),
-					]);
+				// conduit-test-hiuf.6: creation is provider-free; first input forks natively.
+				expect(nativeForks).toHaveLength(0);
+				expect(proofMarks().filter((mark) => mark.kind === "query")).toEqual(
+					queriesBeforeFork,
+				);
+				expect(harness.claudeOptions()).toEqual(callsBeforeFork);
+				const childTranscriptPath = join(
+					expectedAccount.configDir,
+					`conduit-test-transcript-${fork.sessionId}.ndjson`,
+				);
+				expect(existsSync(childTranscriptPath)).toBe(false);
 				const forkPrompt = `Continue the ${behavior} fork.`;
 				await Effect.runPromise(
 					browser.rpc["input.submit"]({
@@ -2941,12 +3001,25 @@ for (const behavior of [
 							.find((call) => call.prompt?.endsWith(forkPrompt)),
 					)
 					.toBeDefined();
-				const call = harness
+				const forkCalls = harness
 					.claudeOptions()
-					.find((call) => call.prompt?.endsWith(forkPrompt));
+					.filter((call) => call.prompt?.endsWith(forkPrompt));
+				expect(forkCalls).toHaveLength(1);
+				const call = forkCalls[0];
 				expect(call?.configDir).toBe(expectedAccount.configDir);
+				expect(call?.options).toMatchObject({
+					cwd: projectDir,
+					env: { CLAUDE_CONFIG_DIR: expectedAccount.configDir },
+				});
 				if (behavior === "fork-uncovered") {
 					expect(call?.resumeId).toBeNull();
+					for (const key of [
+						"resume",
+						"forkSession",
+						"sessionId",
+						"resumeSessionAt",
+					])
+						expect(call?.options).not.toHaveProperty(key);
 					expect(call?.prompt).toContain(handoffMarker);
 					expect(call?.prompt).toContain(first);
 					expect(call?.prompt).toContain(cutOff);
@@ -2960,9 +3033,98 @@ for (const behavior of [
 					).toBeLessThanOrEqual(16_000);
 					expect(call?.prompt).toMatch(/omitted [1-9]\d* messages/);
 				} else {
-					expect(call?.resumeId).toBe(fork.sessionId);
+					if (nativeParent?.kind !== "query")
+						throw new Error("No native parent query");
+					const parentTranscript = readFileSync(
+						join(
+							expectedAccount.configDir,
+							`conduit-test-transcript-${nativeParent.sessionId}.ndjson`,
+						),
+						"utf8",
+					)
+						.split("\n")
+						.filter(Boolean)
+						.map(
+							(line) =>
+								JSON.parse(line) as {
+									type: string;
+									uuid: string;
+									session_id: string;
+									message?: { id?: string; content?: unknown };
+								},
+						);
+					// These fixture turns have one assistant record. Match its visible
+					// message ID and text independently of the production cut resolver.
+					const cutIndex = parentTranscript.findIndex(
+						(entry) =>
+							entry.type === "assistant" &&
+							(entry.uuid === point.id || entry.message?.id === point.id),
+					);
+					const cut = parentTranscript[cutIndex];
+					if (!cut) throw new Error("Fork point absent from native parent");
+					evidence["nativeFork"] = { parentTranscript, cut, cutIndex, call };
+					expect(cut.message?.content).toEqual([
+						{ type: "text", text: point.text },
+					]);
+					expect(call?.resumeId).toBe(nativeParent.sessionId);
+					expect(call?.options).toMatchObject({
+						resume: nativeParent.sessionId,
+						forkSession: true,
+						sessionId: fork.sessionId,
+						resumeSessionAt: cut.uuid,
+					});
 					expect(call?.prompt).toBe(forkPrompt);
+					await expect
+						.poll(() => readFileSync(childTranscriptPath, "utf8"))
+						.toContain(`done(${forkPrompt})`);
+					const childTranscript = readFileSync(childTranscriptPath, "utf8")
+						.split("\n")
+						.filter(Boolean)
+						.map(
+							(line) => JSON.parse(line) as (typeof parentTranscript)[number],
+						);
+					evidence["nativeFork"] = {
+						parentTranscript,
+						cut,
+						cutIndex,
+						call,
+						childTranscript,
+					};
+					expect(childTranscript.slice(0, cutIndex + 1)).toEqual(
+						parentTranscript.slice(0, cutIndex + 1).map((entry) => ({
+							...entry,
+							session_id: fork.sessionId,
+						})),
+					);
+					// Exact suffix excludes every later parent record and extra input.
+					expect(childTranscript.slice(cutIndex + 1)).toEqual([
+						expect.objectContaining({
+							type: "user",
+							session_id: fork.sessionId,
+							parentUuid: cut.uuid,
+							uuid: `continue-${behavior}`,
+							message: expect.objectContaining({
+								content: [{ type: "text", text: forkPrompt }],
+							}),
+						}),
+						expect.objectContaining({
+							type: "assistant",
+							session_id: fork.sessionId,
+							parentUuid: `continue-${behavior}`,
+							message: expect.objectContaining({
+								content: [
+									{
+										type: "text",
+										text: `Echo(${forkPrompt}): stream(${forkPrompt}) done(${forkPrompt}).`,
+									},
+								],
+							}),
+						}),
+					]);
 				}
+				expect(
+					proofMarks().filter((mark) => mark.kind === "native-fork"),
+				).toHaveLength(0);
 				evidence["fork"] = {
 					fork,
 					point,
@@ -3110,6 +3272,21 @@ for (const behavior of [
 		} finally {
 			writeFileSync(join(harness.root, "release-switch-stop"), "release");
 			writeFileSync(join(harness.root, "release-switch-turn"), "release");
+			if (behavior.startsWith("fork-")) {
+				const transcripts = join(artifacts, "native-transcripts");
+				mkdirSync(transcripts, { recursive: true });
+				for (const account of accounts)
+					for (const file of readdirSync(account.configDir).filter((name) =>
+						name.startsWith("conduit-test-transcript-"),
+					))
+						copyFileSync(
+							join(account.configDir, file),
+							join(transcripts, `${account.id}-${file}`),
+						);
+				for (const file of ["sdk-proof.ndjson", "claude-options.jsonl"])
+					if (existsSync(join(harness.root, file)))
+						copyFileSync(join(harness.root, file), join(artifacts, file));
+			}
 			evidence["observed"] = observed;
 			evidence["sdkCalls"] = harness.claudeOptions();
 			evidence["sdkMarks"] = harness.marks;

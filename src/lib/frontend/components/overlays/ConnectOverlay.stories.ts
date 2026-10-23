@@ -35,7 +35,38 @@ type Story = StoryObj<typeof meta>;
  * Overlay visible — shows animated logo and "Connecting to Conduit server..."
  * status text. Simulates the disconnected/connecting state.
  */
-export const Connecting: Story = {};
+export const Connecting: Story = {
+	play: async ({ canvasElement }) => {
+		const hero = canvasElement.querySelector("[data-flow-hero]");
+		await expect(hero).toBeInTheDocument();
+		if (!hero) return;
+		const mark = hero.querySelector("[data-conduit-mark]");
+		await expect(mark).toBeInTheDocument();
+		await expect(mark?.getBoundingClientRect().width).toBe(96);
+		const ripples = hero.querySelectorAll("[data-flow-ripple]");
+		const sparkles = hero.querySelectorAll("[data-flow-sparkle]");
+		await expect(ripples).toHaveLength(2);
+		await expect(sparkles).toHaveLength(3);
+		const packet = hero.querySelector("[data-flow-packet]");
+		await expect(packet).toBeInTheDocument();
+		const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+		for (const element of [
+			...ripples,
+			...sparkles,
+			...(packet ? [packet] : []),
+		]) {
+			if (reduced) {
+				await expect(getComputedStyle(element).animationName).toBe("none");
+			} else {
+				await expect(getComputedStyle(element).animationName).not.toBe("none");
+			}
+		}
+		await expect(canvasElement.textContent).toContain("conduit");
+		await expect(canvasElement.textContent).toContain(
+			"Connecting to Conduit server...",
+		);
+	},
+};
 
 /**
  * Relay failed to start — overlay shows the error text.
@@ -91,6 +122,7 @@ export const InstanceActions: Story = {
 		instanceState.instances = [
 			{
 				id: "instance-stopped",
+				colorSlot: 0,
 				name: "Primary",
 				port: 4096,
 				managed: true,
@@ -102,6 +134,7 @@ export const InstanceActions: Story = {
 			},
 			{
 				id: "instance-other",
+				colorSlot: 1,
 				name: "Secondary",
 				port: 4097,
 				managed: true,

@@ -3,6 +3,7 @@ import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
 import { askContextHandlers } from "./steps/askContext.js";
 import { backgroundTasksHandlers } from "./steps/backgroundTasks.js";
 import { claudeSettingsHandlers } from "./steps/claudeSettings.js";
+import { codexAsyncQuestionHandlers } from "./steps/codexAsyncQuestion.js";
 import { composerHandlers } from "./steps/composer.js";
 import { composerAccountsHandlers } from "./steps/composerAccounts.js";
 import { composerContextWarningHandlers } from "./steps/composerContextWarning.js";
@@ -57,6 +58,7 @@ import { surfacingTuningHandlers } from "./steps/surfacingTuning.js";
 import { taskDrillInHandlers } from "./steps/taskDrillIn.js";
 import { terminalKeysHandlers } from "./steps/terminalKeys.js";
 import { terminalSettingsHandlers } from "./steps/terminalSettings.js";
+import { themeMenuHandlers } from "./steps/themeMenu.js";
 import { titleGenerationSettingsHandlers } from "./steps/titleGenerationSettings.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
@@ -83,6 +85,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...taskDrillInHandlers,
 	...terminalKeysHandlers,
 	...terminalSettingsHandlers,
+	...themeMenuHandlers,
 	...titleGenerationSettingsHandlers,
 	...sideThreadsHandlers,
 	...surfacingCardHandlers,
@@ -105,6 +108,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerSendAtResetHandlers,
 	...cursorModelParametersHandlers,
 	...cursorQuestionHandlers,
+	...codexAsyncQuestionHandlers,
 	...cursorSkillsHandlers,
 	...cursorSteerHandlers,
 	...cursorTurnHandlers,

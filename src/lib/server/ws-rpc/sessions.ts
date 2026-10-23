@@ -33,6 +33,7 @@ import {
 	DraftPreWarmTag,
 	draftLaunchKey,
 } from "../../domain/relay/Services/draft-prewarm.js";
+import { GoalSummaryServiceTag } from "../../domain/relay/Services/goal-summary-service.js";
 import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import {
 	BackgroundLivenessTag,
@@ -80,6 +81,7 @@ import {
 	resolveSessionCreationAccount,
 	setSessionArchivedForClient,
 	setSessionAutoSettleForClient,
+	setSessionJevForClient,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
 	snoozeSessionForClient,
@@ -211,10 +213,9 @@ export const sessionsHandlers = {
 		Effect.gen(function* () {
 			const workspace = yield* SessionWorkspaceTag;
 			return {
-				directory: yield* workspace.move(
+				directory: yield* workspace.withLaunch(
 					request.sessionId,
-					request.path,
-					"user",
+					workspace.move(request.sessionId, request.path, "user"),
 				),
 			};
 		}).pipe(
@@ -239,6 +240,7 @@ export const sessionsHandlers = {
 			const config = yield* ConfigTag;
 			const workspace = yield* SessionWorkspaceTag;
 			return yield* workspace.withLaunch(
+				request.sessionId,
 				workspace
 					.move(request.sessionId, config.projectDir, "user")
 					.pipe(Effect.map((directory) => ({ directory }))),
@@ -271,11 +273,38 @@ export const sessionsHandlers = {
 			});
 			if (!PROVIDER_DRIVERS[account.driver].supportsGoalState) {
 				return yield* new WsRpcError({
-					message: "Goal details are available only for Claude sessions",
+					message: "This provider does not support goal details",
 				});
 			}
-			return yield* read.getGoalDetails(request.sessionId);
+			const summaries = yield* GoalSummaryServiceTag;
+			return yield* (yield* SqlClient.SqlClient).withTransaction(
+				Effect.gen(function* () {
+					const details = yield* read.getGoalDetails(request.sessionId);
+					const summary = yield* summaries.metadata(request.sessionId);
+					return { ...details, ...summary };
+				}),
+			);
 		}).pipe(Effect.catch(mapRpcFailure("GetGoalDetails"))),
+	GenerateGoalSummary: (request) =>
+		Effect.gen(function* () {
+			const read = yield* ReadQueryEffectTag;
+			const session = yield* read.getSession(request.sessionId);
+			if (!session) {
+				return yield* new WsRpcError({
+					message: `Session ${request.sessionId} not found`,
+				});
+			}
+			const account = yield* (yield* AccountDirectory).resolve({
+				_tag: "Id",
+				id: session.provider,
+			});
+			if (!PROVIDER_DRIVERS[account.driver].supportsGoalState) {
+				return yield* new WsRpcError({
+					message: "Goal summaries are available only for Claude sessions",
+				});
+			}
+			return yield* (yield* GoalSummaryServiceTag).generate(request.sessionId);
+		}).pipe(Effect.catch(mapRpcFailure("GenerateGoalSummary"))),
 	PreWarmSession: (request) =>
 		preWarmSession(request.sessionId).pipe(
 			Effect.catch(mapRpcFailure("PreWarmSession")),
@@ -410,6 +439,15 @@ export const sessionsHandlers = {
 			Effect.andThen(readAutoSettleOutlook(request.sessionId)),
 			Effect.catch(mapRpcFailure("SetSessionAutoSettle")),
 		),
+	SetSessionJev: (request) =>
+		setSessionJevForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			jev: request.jev,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catch(mapRpcFailure("SetSessionJev")),
+		),
 	SnoozeSession: (request) =>
 		snoozeSessionForClient({
 			clientId: request.originId ?? "rpc",
@@ -473,9 +511,9 @@ export const sessionsHandlers = {
 			),
 		),
 	QuotaForAccounts: (_request) =>
-		Effect.flatMap(Usage, (usage) => usage.refresh()).pipe(
-			Effect.catch(mapRpcFailure("QuotaForAccounts")),
-		),
+		Effect.flatMap(Usage, (usage) =>
+			usage.refresh({ maxAge: "30 seconds" }),
+		).pipe(Effect.catch(mapRpcFailure("QuotaForAccounts"))),
 	GetContinuationHandoff: (request) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -642,6 +680,7 @@ export const sessionsHandlers = {
 					const worktrees = yield* WorktreeServiceTag;
 					const sessionId = createLocalSessionId();
 					const session = yield* workspace.withLaunch(
+						sessionId,
 						Effect.uninterruptibleMask((restore) =>
 							Effect.gen(function* () {
 								// The id belongs to this launch, but no session exists until Git succeeds.
@@ -712,13 +751,15 @@ export const sessionsHandlers = {
 										sessionId: reservedSessionId,
 										projectId: draftLaunch.projectId,
 										shellEnv: draftLaunch.shellEnv,
+										shellConfig: draftLaunch.shellConfig,
 									}
 								: undefined;
+						const sessionId =
+							reservedSessionId ??
+							(path === undefined ? undefined : createLocalSessionId());
 						const create = createSessionForClient({
 							...options,
-							...(reservedSessionId === undefined
-								? {}
-								: { sessionId: reservedSessionId }),
+							...(sessionId === undefined ? {} : { sessionId }),
 							...(path === undefined
 								? {}
 								: {
@@ -730,7 +771,9 @@ export const sessionsHandlers = {
 									}),
 						});
 						return yield* restore(
-							path === undefined ? create : workspace.withLaunch(create),
+							path === undefined || sessionId === undefined
+								? create
+								: workspace.withLaunch(sessionId, create),
 						).pipe(
 							Effect.onError(() =>
 								reservedSessionId && drafts._tag === "Some"
@@ -877,6 +920,9 @@ export const sessionsHandlers = {
 				clientId: request.originId,
 				...("sessionId" in request ? { sessionId: request.sessionId } : {}),
 				...(request.messageId != null ? { messageId: request.messageId } : {}),
+				...(request.instanceId != null
+					? { instanceId: request.instanceId }
+					: {}),
 			}).pipe(
 				Effect.flatMap((session) =>
 					session == null
@@ -1015,6 +1061,7 @@ export const sessionsHandlers = {
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "GetGoalDetails"
+	| "GenerateGoalSummary"
 	| "PreWarmSession"
 	| "PreWarmDraft"
 	| "ResolveSession"
@@ -1036,6 +1083,7 @@ export const sessionsHandlers = {
 	| "SetSessionPinned"
 	| "GetSessionAutoSettleOutlook"
 	| "SetSessionAutoSettle"
+	| "SetSessionJev"
 	| "SnoozeSession"
 	| "UnsnoozeSession"
 	| "DismissCutOff"

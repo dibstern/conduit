@@ -37,6 +37,8 @@ export interface SessionWorkspace {
 	readonly preview: (
 		account: Account,
 		path: string,
+		/** Required for daemon-owned previews before a session exists. */
+		projectId?: string,
 	) => Effect.Effect<
 		RecordedWorkspace,
 		WorkspaceMoveError | SessionCommandError
@@ -45,15 +47,22 @@ export interface SessionWorkspace {
 		sessionId: string,
 		branchName: string,
 	) => Effect.Effect<void, WorktreeBranchRenameError | SessionCommandError>;
-	/** Serialize launch-folder reads with draft and fork workspace initialization. */
+	/** Serialize one session's launch-folder reads and workspace initialization in the caller's project. Not reentrant. */
 	readonly withLaunch: <A, E, R>(
+		sessionId: string,
 		effect: Effect.Effect<A, E, R>,
 	) => Effect.Effect<A, E, R>;
+	/** Exclude all session work for shared checkout cleanup or project-wide batches. Never nest with withLaunch. */
+	readonly withProjectLaunch: <A, E, R>(
+		effect: Effect.Effect<A, E, R>,
+	) => Effect.Effect<A, E, R>;
+	/** Daemon registration removal retires its cached launch permit. */
+	readonly forgetProject?: (projectId: string) => void;
 	readonly get: (
 		sessionId: string,
 		/** Native directory before the session declares a stored workspace. */
 		nativeDirectory?: string,
-		/** A daemon call resolves the owning project's current primary folder. */
+		/** Legacy hint; the service resolves the session's owning project. */
 		mainFolder?: string,
 	) => Effect.Effect<string, SessionCommandError>;
 	readonly move: (
@@ -81,7 +90,7 @@ export interface SessionWorkspace {
 		ResolvedWorkspaceTarget,
 		WorkspaceMoveError | SessionCommandError
 	>;
-	/** Re-read and record through the command seam, optionally joining a caller's commit. */
+	/** Re-read and record through the commit seam, optionally joining a caller's commit. */
 	readonly record: (
 		sessionId: string,
 		target: ResolvedWorkspaceTarget,
@@ -124,6 +133,7 @@ export const makeSessionOpenCodeClient = Effect.gen(function* () {
 	return (sessionId: string, instanceId?: string, directory?: string) =>
 		Effect.gen(function* () {
 			const target = yield* workspace.withLaunch(
+				sessionId,
 				Effect.gen(function* () {
 					const row = yield* read.getSession(sessionId);
 					const owner = instanceId ?? row?.provider;
@@ -154,13 +164,18 @@ export const makeSessionOpenCodeClient = Effect.gen(function* () {
 
 // Snapshot-only callers have no event store; Git registration remains sufficient
 // for them. Recovery uses only recorded ownership, never legacy branch inference.
-const readRecordedWorktreeOwnership = (sessionId: string) =>
+const readRecordedWorktreeOwnership = (
+	sessionId: string,
+	projectSlug: string,
+) =>
 	Effect.gen(function* () {
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 		if (sql._tag === "None") return [];
-		return yield* readSessionWorktreeOwnership(sessionId, false).pipe(
-			Effect.provideService(SqlClient.SqlClient, sql.value),
-		);
+		return yield* readSessionWorktreeOwnership(
+			sessionId,
+			false,
+			projectSlug,
+		).pipe(Effect.provideService(SqlClient.SqlClient, sql.value));
 	});
 
 // Several project folders can share one checkout and its single ownership row.
@@ -183,6 +198,7 @@ export const recreateSessionWorktrees = (sessionId: string) =>
 		const worktrees = yield* WorktreeServiceTag;
 		const read = yield* ReadQueryEffectTag;
 		const result = yield* workspace.withLaunch(
+			sessionId,
 			Effect.gen(function* () {
 				const row = yield* read.getSession(sessionId);
 				const state =
@@ -201,7 +217,10 @@ export const recreateSessionWorktrees = (sessionId: string) =>
 						message:
 							"Could not recreate worktree: the session has no Conduit-owned worktree.",
 					});
-				const ownership = yield* readRecordedWorktreeOwnership(sessionId);
+				const ownership = yield* readRecordedWorktreeOwnership(
+					sessionId,
+					config.slug,
+				);
 				yield* worktrees.recreateAll(
 					folders.map(([path, directory]) => {
 						const recordedBranch = recordedBranchForFolder(
@@ -238,7 +257,7 @@ export const inspectSessionWorktree = (
 		const entries = Object.entries(session.workspace.worktrees);
 		const service = yield* Effect.serviceOption(WorktreeServiceTag);
 		const ownership = yield* Effect.cached(
-			readRecordedWorktreeOwnership(session.id).pipe(
+			readRecordedWorktreeOwnership(session.id, project.slug).pipe(
 				Effect.orElseSucceed(() => []),
 			),
 		);

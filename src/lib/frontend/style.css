@@ -2,6 +2,10 @@
 @import "./highlight-theme.css";
 @import "./fonts.css";
 
+:root {
+	--mono-scale: 0.92;
+}
+
 /* Keyboard hints only where a keyboard is likely: any fine pointer. */
 @media not (any-pointer: fine) {
 	.shortcut-hint {
@@ -21,12 +25,12 @@
 	--color-harness-opencode: #00e5ff; /* OpenCode cyan */
 
 	/* Approval modes, ordered from restrictive to permissive. */
-	--color-p-never: #4fd1c5;
+	--color-p-never: #2dd4bf;
 	--color-p-plan: #b07cff;
-	--color-p-ask: #a8afbb;
-	--color-p-edits: #f2c14e;
-	--color-p-auto: #ff9f0a;
-	--color-p-full: #f469c4;
+	--color-p-ask: #5b9cff;
+	--color-p-edits: #facc15;
+	--color-p-auto: #fb923c;
+	--color-p-full: #ff5a5f;
 
 	--animate-cascade-a: pixel-cascade-a 2.4s ease-in-out infinite;
 	--animate-cascade-b: pixel-cascade-b 2.4s ease-in-out infinite;
@@ -34,6 +38,8 @@
 	--animate-cascade-b-fast: pixel-cascade-b 1.4s ease-in-out infinite;
 
 	--color-bg: #111113;
+	/* Browser chrome with the default backdrop over --color-bg. */
+	--color-theme-scrim: #0b0c0e;
 	--color-bg-surface: #1a1a1d;
 	--color-bg-alt: #232327;
 	--color-bg-raised: #18181b;
@@ -42,6 +48,16 @@
 	--color-selection: #202024;
 	--color-hover: rgba(255, 255, 255, 0.06);
 	--color-chip: rgba(255, 255, 255, 0.07);
+	/* Work kinds share their paint with the expanded log's icons. */
+	--color-act-explore: #38bdf8;
+	--color-seg-edit: #d9a521;
+	--color-act-shell: #4ade80;
+	--color-act-fetch: #22d8ee;
+	--color-act-task: var(--color-harness-claude);
+	--color-act-other: #6366f1;
+	--color-act-thinking: var(--color-p-plan);
+	--color-act-text: #f472b6;
+	--color-seg-fail: #ff4f73;
 	--color-text: #ededf0;
 	--color-text-secondary: #a1a1aa;
 	--color-text-muted: #a1a1aa;
@@ -52,6 +68,11 @@
 	--color-accent: #8e9bff;
 	--color-accent-hover: #9faaff;
 	--color-accent-bg: rgba(142, 155, 255, 0.12);
+	/* Ink for the stronger Final chip fills. Light needs a darker foreground. */
+	--color-accent-ink: #8e9bff;
+	--color-snoozed-ink: #b07cff;
+	--color-pinned-ink: #f2c14e;
+	--color-success-ink: #3ecf8e;
 	--color-code-bg: #141416;
 	--color-border: #2b2b31;
 	--color-border-subtle: #1f1f23;
@@ -74,6 +95,7 @@
 	--color-settings-segment: #232327;
 	--color-settings-rail: #161618;
 	--color-settings-separator: rgba(255, 255, 255, 0.06);
+	--color-settings-icon: #6b6b74;
 	--color-settings-tile-neutral: #8e8e93;
 	--color-settings-tile-purple: #5e5ce6;
 	--color-settings-tile-clay: #d97757;
@@ -83,6 +105,9 @@
 	--shadow-settings-segment: 0 1px 2px rgba(0, 0, 0, 0.2);
 	--shadow-settings-dialog: 0 24px 60px rgba(0, 0, 0, 0.3);
 	--shadow-popover: 0 22px 60px rgba(0, 0, 0, 0.45);
+	/* Pulled in so none of it reaches above the island: the status bar takes the
+	   page's top-edge colour, so any shadow up there reads as a seam under it. */
+	--shadow-island: 0 24px 40px -16px rgba(0, 0, 0, 0.45);
 	--shadow-composer: 0 0 0 1px #2b2b31;
 
 	--color-thinking: #a1a1aa;
@@ -154,13 +179,14 @@
 	--shadow-rgb: 0, 0, 0;
 
 	/* Syntax highlighting defaults (conduit dark theme) */
+	/* Retain the approved quiet-tier contrast lift for comments. */
 	--hl-comment: #6c6c75;
-	--hl-keyword: #b07cff;
-	--hl-string: #3ecf8e;
-	--hl-number: #f2c14e;
-	--hl-function: #a1a1aa;
+	--hl-keyword: #ff7aa8;
+	--hl-string: #7ee2b8;
+	--hl-number: #ffcf70;
+	--hl-function: #8ab4ff;
 	--hl-variable: #ff6369;
-	--hl-type: #f2c14e;
+	--hl-type: #ffcf70;
 	--hl-constant: #3fd0bf;
 	--hl-tag: #ff6369;
 	--hl-attr: #a1a1aa;
@@ -173,6 +199,12 @@
 
 	--font-mono: "Geist Mono", ui-monospace, monospace;
 	--font-sans: "Geist", system-ui, sans-serif;
+	--text-mono-xs: calc(12px * var(--mono-scale));
+	--text-mono-code: calc(12.5px * var(--mono-scale));
+	--text-mono-inline: calc(13px * var(--mono-scale));
+	--text-mono-time: calc(11px * var(--mono-scale));
+	--color-avatar-start: #6f7dff;
+	--color-avatar-end: #b07cff;
 
 	/* Font Size Scale (overrides Tailwind defaults) */
 	--text-xs: 12px;
@@ -231,21 +263,40 @@
 	--radius-panel: 10px;
 }
 
+/* These tokens are referenced dynamically by category id, so retain every one. */
+@theme static {
+	--color-cat-ask: var(--color-status-ask);
+	--color-cat-blocked: var(--color-status-red);
+	--color-cat-risk: var(--color-status-risk);
+	--color-cat-scope: #b399ff;
+	--color-cat-replan: #42c8ef;
+	--color-cat-correction: #a2cf50;
+	--color-cat-decision: #689cff;
+	--color-cat-finding: #239c94;
+	--color-cat-milestone: var(--color-status-green);
+}
+
 :root.light-theme {
+	--color-cat-scope: #7a40d0;
+	--color-cat-replan: #007db3;
+	--color-cat-correction: #537c00;
+	--color-cat-decision: #255fcb;
+	--color-cat-finding: #087f76;
 	/* Minimal HSL lightness lifts preserve the two contrast tiers on opaque
 	   surfaces and rendered tints. See theme-contrast.test.ts. */
 	--color-accent-glow: rgba(76, 91, 212, 0.15);
 	--color-success-glow: rgba(20, 123, 59, 0.15);
 	--color-send-off-bg: #f1f1f3;
 	--color-send-off: #878792;
-	--color-p-never: #0b7d74;
+	--color-p-never: #0d9488;
 	--color-p-plan: #7441ff;
-	--color-p-ask: #4b525e;
-	--color-p-edits: #8d6400;
-	--color-p-auto: #a65600;
-	--color-p-full: #c0267f;
+	--color-p-ask: #2563eb;
+	--color-p-edits: #ab7c0a;
+	--color-p-auto: #e4560c;
+	--color-p-full: #dc2626;
 
 	--color-bg: #ffffff;
+	--color-theme-scrim: #b0b1b3;
 	--color-bg-surface: #ffffff;
 	--color-bg-alt: #f1f1f3;
 	--color-bg-raised: #f7f7f8;
@@ -254,6 +305,16 @@
 	--color-selection: #ececef;
 	--color-hover: rgba(0, 0, 0, 0.045);
 	--color-chip: rgba(0, 0, 0, 0.05);
+	--color-act-explore: #0369a1;
+	/* Gold and clay need darker light-theme fills for 3:1 on the chip track. */
+	--color-seg-edit: #a87e00;
+	--color-act-shell: #15803d;
+	--color-act-fetch: #00858a;
+	--color-act-task: color-mix(in srgb, var(--color-harness-claude) 90%, black);
+	--color-act-other: #3f40b2;
+	--color-act-thinking: var(--color-p-plan);
+	--color-act-text: #c0267f;
+	--color-seg-fail: #ff3b62;
 	--color-text: #0b0b0d;
 	--color-text-secondary: #5d5d66;
 	--color-text-muted: #5d5d66;
@@ -261,6 +322,10 @@
 	--color-accent: #4352d2;
 	--color-accent-hover: #4c5bd4;
 	--color-accent-bg: rgba(76, 91, 212, 0.12);
+	--color-accent-ink: #3f4dc5;
+	--color-snoozed-ink: #6935f0;
+	--color-pinned-ink: #855e00;
+	--color-success-ink: #116a33;
 	--color-code-bg: #fafafa;
 	--color-border: #e3e3e7;
 	--color-border-subtle: #eeeef0;
@@ -280,12 +345,13 @@
 	--color-settings-segment: #ffffff;
 	--color-settings-rail: #ffffff;
 	--color-settings-separator: rgba(0, 0, 0, 0.06);
+	--color-settings-icon: #9b9ba4;
 	--shadow-settings-dialog: 0 24px 60px rgba(0, 0, 0, 0.1);
 	--shadow-popover: 0 22px 60px rgba(0, 0, 0, 0.14);
+	--shadow-island: 0 24px 40px -16px rgba(0, 0, 0, 0.14);
 	--shadow-settings-segment:
 		0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
-	--shadow-composer:
-		0 0 0 1px rgba(0, 0, 0, 0.07), 0 8px 28px rgba(0, 0, 0, 0.05);
+	--shadow-composer: 0 0 0 1px rgba(0, 0, 0, 0.09);
 
 	--color-thinking: #5d5d66;
 	--color-thinking-bg: rgba(93, 93, 102, 0.06);
@@ -322,13 +388,15 @@
 	--color-backdrop-subtle: rgba(22, 26, 33, 0.15);
 	--shadow-rgb: 19, 26, 37;
 
+	--color-avatar-start: #6f7dff;
+	--color-avatar-end: #b07cff;
 	--hl-comment: #878792;
-	--hl-keyword: #7441ff;
-	--hl-string: #147b3b;
-	--hl-number: #8d6400;
-	--hl-function: #5d5d66;
+	--hl-keyword: #c4134f;
+	--hl-string: #11795a;
+	--hl-number: #9a5b00;
+	--hl-function: #2357d6;
 	--hl-variable: #d02222;
-	--hl-type: #8d6400;
+	--hl-type: #9a5b00;
 	--hl-constant: #0c786c;
 	--hl-tag: #d02222;
 	--hl-attr: #5d5d66;
@@ -631,7 +699,6 @@ body:has(dialog:modal) {
 		#session-skills-chip,
 		#side-threads-control,
 		#session-bar-settle,
-		[data-testid="session-bar-title-menu"],
 		button[data-testid="session-bar-unread-chip"],
 		button[data-testid="session-bar-state-chip"],
 		[data-testid="session-goal-subtitle"],
@@ -660,14 +727,6 @@ body:has(dialog:modal) {
 	button {
 	clip-path: inset(
 		calc(50% - 18.375px) 0 calc(50% + 18.375px - var(--phone-title-hit-height))
-	);
-}
-#session-bar[data-compact="true"][data-collapsed="false"]
-	#session-bar-title-row
-	[data-testid="session-bar-title-menu"] {
-	clip-path: inset(
-		calc(50% - 18.375px) -2px
-			calc(50% + 18.375px - var(--phone-title-hit-height)) -22px
 	);
 }
 #session-bar[data-compact="true"][data-collapsed="false"]
@@ -704,11 +763,6 @@ body:has(dialog:modal) {
 }
 #session-bar[data-compact="true"][data-collapsed="false"] #session-bar-meta {
 	z-index: 1;
-}
-/* Expand towards the noninteractive title, leaving the adjacent badge its own target. */
-#session-bar[data-compact="true"]
-	[data-testid="session-bar-title-menu"]::before {
-	left: calc(50% - 10px);
 }
 /* At 320px, share the spare space between the pill and the viewport edge. */
 #session-bar[data-compact="true"][data-collapsed="false"]
@@ -774,7 +828,7 @@ body:has(dialog:modal) {
 	backdrop-filter: blur(14px);
 	box-shadow:
 		0 0 0 1px var(--color-border-chip),
-		var(--shadow-popover);
+		var(--shadow-island);
 }
 
 #app.phone-session #session-bar[data-collapsed="true"] #session-bar-title-row {
@@ -874,8 +928,10 @@ body:has(dialog:modal) {
 /* Desktop keeps title and controls on one row. Only the title track yields;
    background tasks occupy their own track across the whole header. */
 #session-bar[data-compact="false"] {
+	--session-bar-padding-y: 3.5px;
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto auto auto;
+	grid-template-rows: minmax(44px, auto) auto;
 	grid-template-areas:
 		"title meta connection more"
 		"tasks tasks tasks tasks";
@@ -883,7 +939,7 @@ body:has(dialog:modal) {
 	min-height: 52px;
 	column-gap: 8px;
 	row-gap: 0;
-	padding: 4px 10px 4px 20px;
+	padding: var(--session-bar-padding-y) 10px var(--session-bar-padding-y) 20px;
 	white-space: nowrap;
 }
 #session-bar[data-compact="false"]:has(#session-bar-back) {
@@ -892,35 +948,24 @@ body:has(dialog:modal) {
 		"back title meta connection more"
 		"tasks tasks tasks tasks tasks";
 }
-/* Final's idle header is 52px: a 44px target, 7px padding and a 1px border.
-   Keep the existing room for the goal title's focus ring and the task row. */
-#session-bar[data-compact="false"]:not(
-		:has(
-				[data-testid="session-goal-subtitle"],
-				[data-testid="background-tasks-row"]
-			)
-	) {
-	padding-block: 3.5px;
-}
+/* Final's idle header is 52px: a 44px track, 7px padding and a 1px border. */
 #session-bar[data-compact="false"] [data-testid="background-tasks-row"] {
 	grid-area: tasks;
+	margin-inline: -20px -10px;
+	/* Continue below the complete header, through its padding and bottom border. */
+	margin-block: calc(var(--session-bar-padding-y) + 1px)
+		calc(-1 * (var(--session-bar-padding-y) + 1px));
 }
 #session-bar[data-compact="false"] #session-bar-title-row {
 	min-width: 0;
 }
 /* No width floor: in the grid the title track is the only one that yields, so a
-   floor would only overflow into the controls, and it parted short titles from ▾. */
+   floor would only overflow into the controls. */
 #session-bar[data-compact="false"] #session-bar-title {
 	flex: 0 1 auto;
 	font-size: 14.5px;
 	letter-spacing: -0.01em;
-}
-/* The markup's negative block margin stays: the target overhangs instead of
-   making the title line taller than its text. */
-#session-bar[data-compact="false"] [data-testid="session-bar-title-menu"] {
-	min-width: 24px;
-	min-height: 32px;
-	width: 24px;
+	line-height: 1.5;
 }
 #session-bar[data-compact="false"] #session-bar-meta {
 	min-width: auto;
@@ -929,15 +974,19 @@ body:has(dialog:modal) {
 	flex: none;
 }
 #session-bar[data-compact="false"] #session-bar-more {
-	min-width: 44px;
-	min-height: 44px;
+	min-width: 30px;
+	min-height: 30px;
+}
+#session-bar[data-compact="false"]:has([data-testid="session-goal-subtitle"]) {
+	--session-bar-padding-y: 6.5px;
+	grid-template-rows: auto auto;
 }
 #session-bar[data-compact="false"] [data-testid="session-goal-subtitle"] {
 	font-size: 12.5px;
+	line-height: 1.5;
 }
 #session-bar[data-compact="false"] #session-bar-connection {
 	grid-area: connection;
-	font-size: 12px;
 }
 @container session-bar (max-width: 600px) {
 	#session-bar-meta .segment-word {
@@ -967,33 +1016,35 @@ body:has(dialog:modal) {
 		column-gap: 4px;
 		padding-inline: 8px;
 	}
+	#session-bar[data-compact="false"] [data-testid="background-tasks-row"] {
+		margin-inline: -8px;
+	}
 }
 
-#compact-top-edge {
-	display: none;
-}
-
-/* See the comment on the element in ChatLayout.svelte. `pointer-events: none`
-   is safe: WebKit's sampler first hit-tests ignoring pointer-events. z-index 1
-   paints it over #app, which comes later and would otherwise be hit first;
-   #session-chrome (z-dropdown) still paints over it. */
-#layout.layout-compact #compact-top-edge {
-	display: block;
+/* The phone top edge iOS 26 samples for the status bar colour: see the comment
+   on #compact-top-edge in ChatLayout.svelte. Fullscreen dialogs carry their own
+   (Dialog.svelte). `pointer-events: none` is safe: WebKit's sampler first
+   hit-tests ignoring pointer-events. z-index 1 paints it over #app, which comes
+   later and would otherwise be hit first; #session-chrome (z-dropdown) still
+   paints over it. */
+.top-edge-strip {
 	position: fixed;
 	top: 0;
 	left: 0;
 	right: 0;
 	height: 12px;
 	z-index: 1;
-	background: var(--color-bg-surface);
+	background: var(--color-bg);
 	pointer-events: none;
 }
 
-/* The phone session list is bg-bg, not the session bar's bg-surface. #app is
-   hidden here, so stay under the list header's icon buttons (positioned), whose
+#layout:not(.layout-compact) #compact-top-edge {
+	display: none;
+}
+
+/* #app is hidden on the phone list, so stay under its icon buttons (positioned), whose
    pressed and focus states would lose their top 12px in a browser tab. */
 #layout.layout-compact.phone-list-screen #compact-top-edge {
-	background: var(--color-bg);
 	z-index: auto;
 }
 
@@ -1245,7 +1296,8 @@ body:has(dialog:modal) {
 	}
 
 	.md-content code {
-		@apply font-mono text-[13px] rounded-[5px] px-[5px] py-[2px];
+		@apply font-mono rounded-[4px] px-[3.5px] py-[1px];
+		font-size: calc(14px * var(--mono-scale));
 		background: var(--color-chip);
 	}
 
@@ -1255,13 +1307,19 @@ body:has(dialog:modal) {
 		border: 1px solid var(--color-border);
 	}
 	.md-content pre code {
-		@apply block px-[14px] py-[12px] text-[12.5px] leading-[1.7] whitespace-pre overflow-x-auto;
+		@apply block px-[14px] py-[12px] text-mono-code leading-[1.7] whitespace-pre overflow-x-auto;
 		background: transparent;
 		border-radius: 0;
 	}
+	.md-content pre .diff-line,
+	.md-content pre .hljs-addition,
+	.md-content pre .hljs-deletion {
+		display: block;
+		min-width: 100%;
+	}
 
 	.md-content table {
-		@apply my-3.5 text-base w-full;
+		@apply my-3.5 text-[14px] w-full;
 		border-collapse: separate;
 		border-spacing: 0;
 		border: 1px solid var(--color-border);
@@ -1326,8 +1384,8 @@ body:has(dialog:modal) {
 	.md-content th {
 		@apply px-3.5 py-2 text-left align-top font-semibold;
 		color: var(--color-text);
-		background: rgba(var(--overlay-rgb), 0.04);
-		border-bottom: 2px solid var(--color-success);
+		background: var(--color-bg-raised);
+		border-bottom: 1px solid var(--color-border-subtle);
 	}
 	.md-content td {
 		@apply px-3.5 py-[7px] text-left align-top;
@@ -1335,7 +1393,7 @@ body:has(dialog:modal) {
 		border-bottom: 1px solid var(--color-border-subtle);
 	}
 	.md-content tbody tr:nth-child(odd) {
-		background: rgba(255, 255, 255, 0.012);
+		background: color-mix(in srgb, var(--color-text) 3%, transparent);
 	}
 	.md-content tr:last-child td {
 		border-bottom: none;

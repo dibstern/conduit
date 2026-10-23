@@ -26,6 +26,42 @@ Event sequences, command receipts and projector cursors carry that owner in
 their in-memory contracts. List reads filter by Scope. Session-keyed reads,
 projections, projector cursors and the version counter stay store-wide.
 
+## Owner Scope
+
+An **Owner Scope** is a project's or session's daemon-owned lifetime. A project
+opens lazily beneath the daemon; a session opens beneath the project named by
+its Project Provenance. Resources are acquired through its checked `acquire`
+operation using `acquireRelease`. Closing unwinds sequential scopes in reverse
+registration order. Finalizers read `detach` or `remove` from the close Exit:
+detach releases server attachments while detached runners, the PTY host and
+OpenCode keep running; remove stops the owner's work. Browser reconnects do not
+create or close these lifetimes.
+Project lookups verify current registration. After close completes, a registered
+project can open a new owner generation; retained handles stay closed forever.
+
+## Audience
+
+An **Audience** names who an event is for: one session and its Project, one
+Project, every connection, or one PTY and its Project. A typed subscription table
+decides its Audience when it opens. Session Directory resolves ownership at open;
+relay-backed streams retain their producer's Project Provenance. Failed ownership
+lookups and requests for another producer's Project fail the subscription.
+Mixed-project streams carry an Audience per row. Approvals and questions have
+global Audience.
+Session Row deletion tombstones retain their producer's Project Provenance even
+after the Session disappears, so a resumed stream can address each removal.
+
+## Interests
+
+**Interests** are the sessions and Projects a connection views and the PTYs it
+is attached to, with each PTY attachment qualified by its Project. Each
+subscription holds its Interests until its scope closes. Overlapping views retain
+independent holds. Session selection replaces that client's selected Interests.
+If Interests stop covering an open subscription's Audience, the subscription is
+interrupted, including pending producer work. A reconnect starts empty and
+restores views by subscribing again. Interests are never persisted across daemon
+restarts.
+
 ## Repository Identity
 
 A Project Folder's Repository Identity is its canonical repository `key`, display
@@ -330,3 +366,110 @@ expired deadlines or provider-session termination; other lifecycle views derive
 from its decisions.
 
 _Avoid_: runner state or outbox status as an independent authority on a Run.
+
+## Usage Limits
+
+**Usage Reading** is one account's usage at a moment: how full each window is
+and when it resets, or that it couldn't be read. A reading ages; one taken
+before a limit was hit says nothing about whether that limit has cleared.
+_Avoid_: quota (for the reading itself), usage snapshot.
+
+**Limit Recovery** is a session's record that its account hit a limit: when,
+which limit, the reset time Claude reported, and any scheduled resume. A
+session with only held messages has one too.
+
+**Account Limit** is the single answer to "can this asker use this account
+now": go, wait until a time (naming the window), wait with no known time, or
+signed out. When a reading can't tell, the user's own actions go ahead and
+automatic ones wait. Model-only and overage limits are never judged free
+before their reset time.
+_Avoid_: quota check, blocked state, availability.
+
+**Held Message** is a queued message kept back because its account's Account
+Limit says wait. It goes on the session's Resume, or earlier if the user sends
+it now.
+_Avoid_: parked message.
+
+**Resume** is a session with a Limit Recovery continuing: cut-off work is sent
+again and Held Messages go. It happens because the reset arrived, the user
+asked, or the session moved to another account.
+_Avoid_: release, unpark.
+
+## Model Parameter Choice
+
+A **Model Parameter Choice** is a stored model choice and the parameter values it
+resolves to. Empty means Default and follows the provider's default without
+pinning its current key. An explicit key must be offered by the current model.
+The choice module owns validation, row changes and cheapest selection; pickers
+and provider launches read its answer. Empty title choices use the cheapest
+offered row values, while remaining empty in storage.
+
+## Turn Launcher
+
+**Turn Launcher** resolves everything a turn needs before it is sent: the
+provider instance, account, config dir, shell environment, settings and resume
+plan. It reads them from the stored turn command and the current Daemon
+Settings. First delivery and runner recovery both launch through it and differ
+only in how they send the prepared turn, so a recovered turn is planned exactly
+like a first delivery.
+
+## Turn Settlement
+
+**Turn Settlement** records a turn's result in one transaction: provider resume
+state, outbox and receipt. What it saves follows the result, never the provider
+driver. A failed save fails the turn instead of being logged. A turn that
+joined one already running only completes its receipt. The reactor, dispatch
+and runner recovery all settle through it.
+
+## Tool Outcome
+
+**Tool Outcome** is a completed tool's `succeeded` or `failed` result, recorded
+by its provider adapter in `tool.completed.outcome`. Cursor classifies live
+calls and reconciled conversation steps through one converter. Readers use
+that outcome; the message projection stores it as `completed` or `error`.
+The stored-event decoder fills a missing outcome from legacy
+`metadata.isError === true`, so existing events need no migration.
+
+## Sidebar Overlay
+
+**Sidebar Overlay** is sidebar state that is deliberately not a canonical
+event: background-work liveness, a dismissed Workspace Hint and Git status.
+The commit step finds sidebar changes by comparing rows, so it cannot see an
+overlay change. Overlays are announced through the commit module's one overlay
+operation, which bumps the row's version and wakes subscribers. No other code
+stamps a version or moves `session_sidebar` markers for an overlay.
+
+## Skill Location
+
+**Skill Location** is a provider discovery's answer to where a skill's content
+lives: a file with its containment root, or content managed by the provider.
+Discovery alone chooses it, using the session's account and Effective Working
+Directory. Commands expose an opaque `skillRef`; content requests resolve that
+reference through the same discovery and never interpret it as a file path.
+Provider-managed skills without a file report that content is unavailable.
+
+## Daemon Settings
+
+**Daemon Settings** is the one module that owns `daemon.json` while the daemon
+runs. Its single `update(patch)` writes the file atomically, then updates
+memory, then replies; callers never choose when a change reaches disk. Other
+code reads settings from the module, never from the file. The CLI changes
+settings over RPC when the daemon is up and writes the file only when it is
+down.
+
+## Cursor Credential
+
+A **Cursor Credential** is the effective key for one Credential Owner and the
+active backend. Account environment wins; the launch environment belongs only
+to the compatibility owner. A stored login must be unexpired and belong to the
+same backend. Account resources alone resolve it, including auth status,
+discovery, titles and turn preparation. Its fingerprint includes the active
+backend; its key stays redacted until SDK access or runner wire encoding.
+
+## Credential Owner
+
+A **Credential Owner** is a Cursor Account or the Login Slot used before an
+account exists. The adoption marker fixes which owner may use the daemon's
+launch key. Changing the default or deleting that account never transfers the
+key to another account. The daemon selects the backend and passes it explicitly
+to runners; a runner reporting another backend is retired for upgrade.

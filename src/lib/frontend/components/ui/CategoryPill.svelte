@@ -1,14 +1,9 @@
 <script lang="ts">
 	import type { Category } from "../../../contracts/category-set.js";
+	import { categoryColour } from "../../utils/category-colour.js";
 	/** `plain` drops the tinted pill: only the glyph takes the category colour, for tables and inline prose. */
 	let { category, plain = false }: { category: Category; plain?: boolean } = $props();
-	const colour = $derived(category.origin === "builtin"
-		? category.id === "ask" ? "var(--color-status-ask)"
-		: category.id === "blocked" ? "var(--color-status-red)"
-		: category.id === "risk" ? "var(--color-status-risk)"
-		: category.id === "milestone" ? "var(--color-status-green)"
-		: "var(--color-text-muted)"
-		: category.colour);
+	const colour = $derived(categoryColour(category));
 </script>
 
 {#if plain}

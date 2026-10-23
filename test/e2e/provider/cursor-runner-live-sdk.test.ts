@@ -2,12 +2,23 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import type { ProviderRuntimeEvent } from "../../../src/lib/contracts/providers/provider-runtime-event.js";
 import type { CursorSendOptions } from "../../../src/lib/provider/cursor/sdk-port.js";
+import {
+	cursorAccountResourcesFixture,
+	cursorCredentialFixture,
+} from "../../helpers/cursor-account-resources-fixture.js";
 
 const runLive =
 	process.env["RUN_CURSOR_LIVE_SMOKE"] === "1" &&
 	Boolean(process.env["CURSOR_API_KEY"]);
+const liveAccount = {
+	driver: "cursor" as const,
+	id: AccountIdSchema.make("cursor-live"),
+	name: "Cursor live",
+	usageEligible: false,
+};
 
 describe.skipIf(!runLive)("Cursor in-process runner live smoke", () => {
 	it.skipIf(process.env["CURSOR_LIVE_PREMIUM_PLAN"] !== "1")(
@@ -30,6 +41,13 @@ describe.skipIf(!runLive)("Cursor in-process runner live smoke", () => {
 		"records Composer 2.5 with fast off, plus Grok thinking only if needed",
 		{ timeout: 240_000 },
 		async () => {
+			const apiKey = process.env["CURSOR_API_KEY"]?.trim();
+			if (!apiKey) throw new Error("Missing gated Cursor credential");
+			const credential = cursorCredentialFixture(
+				apiKey,
+				"environment",
+				process.env["CURSOR_BACKEND_URL"],
+			);
 			const resultsRoot = resolve("test-results/xqsg-5-cursor-live");
 			mkdirSync(resultsRoot, { recursive: true });
 			const root = mkdtempSync(join(resultsRoot, "run-"));
@@ -93,7 +111,12 @@ describe.skipIf(!runLive)("Cursor in-process runner live smoke", () => {
 						Effect.scoped(
 							Effect.gen(function* () {
 								const runner = yield* makeCursorSessionRunner(
-									{ workspaceRoot, daemonConfigDir, port },
+									{
+										workspaceRoot,
+										daemonConfigDir,
+										port,
+										credential: () => credential,
+									},
 									(output) =>
 										Effect.sync(() => {
 											if (output.type === "event") events.push(output.event);
@@ -202,6 +225,13 @@ describe.skipIf(!runLive)("Cursor in-process runner live smoke", () => {
 });
 
 async function recordModelSelections(scenario: "parameter-change" | "reroute") {
+	const apiKey = process.env["CURSOR_API_KEY"]?.trim();
+	if (!apiKey) throw new Error("Missing gated Cursor credential");
+	const credential = cursorCredentialFixture(
+		apiKey,
+		"environment",
+		process.env["CURSOR_BACKEND_URL"],
+	);
 	const resultsRoot = resolve("test-results/xqsg-18-cursor-live");
 	mkdirSync(resultsRoot, { recursive: true });
 	const root = mkdtempSync(join(resultsRoot, `${scenario}-`));
@@ -257,7 +287,9 @@ async function recordModelSelections(scenario: "parameter-change" | "reroute") {
 			scenario: `cursor-${scenario}-live-smoke`,
 			model: { id: modelId },
 		});
-		const driver = makeCursorRunnerDriver(workspaceRoot, port);
+		const driver = makeCursorRunnerDriver(
+			cursorAccountResourcesFixture(port, { _tag: "Ready", credential }),
+		);
 		const paramsSchema = Schema.Struct({
 			params: Schema.Array(
 				Schema.Struct({ id: Schema.String, value: Schema.String }),
@@ -268,7 +300,12 @@ async function recordModelSelections(scenario: "parameter-change" | "reroute") {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const runner = yield* makeCursorSessionRunner(
-						{ workspaceRoot, daemonConfigDir, port },
+						{
+							workspaceRoot,
+							daemonConfigDir,
+							port,
+							credential: () => credential,
+						},
 						(output) =>
 							Effect.sync(() => {
 								if (output.type === "event") events.push(output.event);
@@ -281,7 +318,10 @@ async function recordModelSelections(scenario: "parameter-change" | "reroute") {
 						model: CursorSendOptions["model"];
 					}> = [];
 					if (scenario === "parameter-change") {
-						const catalogue = yield* driver.discoverEffect(workspaceRoot);
+						const catalogue = yield* driver.discoverEffect(
+							workspaceRoot,
+							liveAccount,
+						);
 						const model = catalogue.models.find(
 							(entry) => entry.id === modelId,
 						);
@@ -320,6 +360,7 @@ async function recordModelSelections(scenario: "parameter-change" | "reroute") {
 					} else selections.push({ model: { id: modelId } });
 					for (const [index, selection] of selections.entries()) {
 						const input = {
+							account: liveAccount,
 							inputId: `input-${scenario}-${index}`,
 							sessionId,
 							prompt:

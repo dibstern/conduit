@@ -7,6 +7,10 @@ import {
 	type InputDraftEnvelope,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	SessionDirectory,
+	SessionDirectoryReadError,
+} from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
@@ -35,9 +39,34 @@ const open = Effect.gen(function* () {
 });
 
 describe("SubscribeInputDraft", () => {
+	it.effect("EA22 ownership lookup errors reach the RPC client", () =>
+		Effect.gen(function* () {
+			const client = yield* RpcTest.makeClient(WsRpcGroup);
+			const result = yield* client
+				.SubscribeInputDraft({ key: { session: "unreadable" } })
+				.pipe(Stream.runHead, Effect.result);
+			expect(result).toMatchObject({
+				_tag: "Failure",
+				failure: { _tag: "WsRpcError", code: "ownership-lookup-failed" },
+			});
+		}).pipe(
+			Effect.provideService(SessionDirectory, {
+				projectOf: (sessionId) =>
+					Effect.fail(
+						new SessionDirectoryReadError({ sessionId, cause: "unavailable" }),
+					),
+			}),
+			Effect.provide(makeLayer(), { local: true }),
+		),
+	);
 	it.effect("a draft typed in one tab reaches every tab on that session", () =>
 		Effect.gen(function* () {
 			const { client, subscribe } = yield* open;
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions
+				(id, project_id, provider, title, status, created_at, updated_at)
+				VALUES ('s1', 'test-project', 'opencode', 'Session 1', 'idle', 1, 1),
+				       ('s2', 'test-project', 'opencode', 'Session 2', 'idle', 1, 1)`;
 			const tabA = yield* subscribe("s1");
 			const tabB = yield* subscribe("s1");
 			const elsewhere = yield* subscribe("s2");
@@ -61,6 +90,10 @@ describe("SubscribeInputDraft", () => {
 	it.effect("a cleared draft reaches open tabs as empty text", () =>
 		Effect.gen(function* () {
 			const { client, subscribe } = yield* open;
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions
+				(id, project_id, provider, title, status, created_at, updated_at)
+				VALUES ('s1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 			const q = yield* subscribe("s1");
 
 			yield* client.SyncInputDraft({

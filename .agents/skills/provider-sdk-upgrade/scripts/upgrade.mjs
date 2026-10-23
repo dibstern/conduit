@@ -302,9 +302,14 @@ function pin(flags) {
 		const dependencies =
 			slice === "cursor"
 				? manifest.optionalDependencies
-				: manifest.dependencies;
+				: { ...manifest.dependencies, ...manifest.devDependencies };
+		// The opencode-ai server is a devDependency so tests run the pinned build.
 		const names =
-			slice === "cursor" ? [s.package, ...cursorHelpers] : [s.package];
+			slice === "cursor"
+				? [s.package, ...cursorHelpers]
+				: slice === "opencode"
+					? [s.package, "opencode-ai"]
+					: [s.package];
 		for (const name of names) {
 			expected(dependencies[name], s, `${name} dependency`);
 			const key = RegExp.escape(name);
@@ -538,6 +543,16 @@ async function catalog(flags) {
 function gates(flags) {
 	const cursorOnly = only === "cursor";
 	const includeCursor = !only || cursorOnly;
+	if (includeCursor) {
+		try {
+			createRequire(file("package.json")).resolve("@cursor/sdk");
+		} catch (cause) {
+			throw new Error(
+				"Cursor upgrade gates require installed @cursor/sdk, including when checking with --dry-run. Install optional dependencies before running the gates.",
+				{ cause },
+			);
+		}
+	}
 	const v = read(file(".opencode-version")).trim();
 	version(v, ".opencode-version");
 	const prefix = temp(`oc-${v}`);
@@ -557,6 +572,21 @@ function gates(flags) {
 	];
 	if (includeCursor) {
 		entries.push(
+			[
+				"cursor-sdk-contract",
+				[
+					"pnpm",
+					"exec",
+					"vitest",
+					"run",
+					"--config",
+					"vitest.e2e.config.ts",
+					"test/e2e/provider/cursor-skills-real-sdk.test.ts",
+					"test/e2e/provider/cursor-credentials-real-sdk.test.ts",
+					"test/e2e/provider/cursor-errors-real-sdk.test.ts",
+				],
+				{ ...process.env, RUN_CURSOR_SKILLS_SMOKE: "0" },
+			],
 			[
 				"cursor-boundary",
 				[process.execPath, "scripts/check-cursor-sdk-boundary.mjs"],
@@ -620,6 +650,7 @@ function gates(flags) {
 					`contract preparation: ${display(["npm", "install", "--prefix", prefix, `opencode-ai@${v}`])} if missing; ${display([oc, "--version"])} must equal ${v}`,
 				);
 			const labels = {
+				"cursor-sdk-contract": "RUN_CURSOR_SKILLS_SMOKE=0 ",
 				contract: `PATH=${bin}:$PATH `,
 				"real-sdk": "RUN_EXPENSIVE_E2E=1 ",
 			};

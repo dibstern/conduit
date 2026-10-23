@@ -1,11 +1,7 @@
 import { Effect, Result } from "effect";
 import { SqlClient } from "effect/sql";
 import { accountsStateFromConfig, resolve } from "../../account-directory.js";
-import {
-	defaultDaemonConfig,
-	loadDaemonConfigResult,
-	resolveClaudeLaunchConfig,
-} from "../../daemon/config-persistence.js";
+import { defaultDaemonConfig } from "../../daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import {
 	makeProviderStateEffect,
@@ -29,7 +25,10 @@ import type {
 } from "../types.js";
 import type { ClaudeSessionRunnerDeps } from "./claude-provider-runtime.js";
 import type { ClaudeRunnerSocket } from "./claude-runner-protocol.js";
-import { normalizeClaudeSessionTurn } from "./claude-runner-wire.js";
+import {
+	claudeLaunchConfigFromAccounts,
+	normalizeClaudeSessionTurn,
+} from "./claude-runner-wire.js";
 import { captureClaudeLaunchLogin } from "./claude-sdk-env.js";
 import { sendPreparedClaudeTurn } from "./prepare-turn.js";
 export const recoverClaudeRunnerCommands = (
@@ -68,15 +67,13 @@ export const recoverClaudeRunnerCommands = (
 	) => replay,
 ) =>
 	Effect.gen(function* () {
-		const config = yield* Effect.suspend(() =>
-			Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
-		).pipe(
-			Effect.catchTag("NotFound", () => Effect.succeed(defaultDaemonConfig())),
-		);
-		const accounts = accountsStateFromConfig(
-			config,
-			captureClaudeLaunchLogin(process.env),
-		);
+		const accounts = yield* deps.accounts ??
+			Effect.sync(() =>
+				accountsStateFromConfig(
+					defaultDaemonConfig(),
+					captureClaudeLaunchLogin(process.env),
+				),
+			);
 		const accountForId = (id: string) =>
 			Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }));
 		const driverForAccount = (id: string) => accountForId(id)?.driver;
@@ -85,7 +82,7 @@ export const recoverClaudeRunnerCommands = (
 			decodeInput: (row) => {
 				const input = normalizeClaudeSessionTurn(
 					JSON.parse(row.payload_json) as SessionTurn,
-					() => resolveClaudeLaunchConfig(config),
+					() => claudeLaunchConfigFromAccounts(accounts),
 				);
 				// Credentials are omitted from the durable payload. Capture them
 				// once for this replay, preserving its admitted identity and folder.
@@ -107,6 +104,11 @@ export const recoverClaudeRunnerCommands = (
 			failTurn,
 			replay: (row, input) => {
 				const replay = Effect.gen(function* () {
+					// Commands admitted before policy snapshots existed fall back to daemon memory.
+					const autoSettleAfterDays =
+						input.autoSettleAfterDays !== undefined
+							? input.autoSettleAfterDays
+							: yield* deps.autoSettleAfterDays ?? Effect.succeed(undefined);
 					const admittedAccountId =
 						input.account?.id ?? input.instanceId ?? row.provider_id;
 					let call: ProviderCall | undefined;
@@ -138,24 +140,13 @@ export const recoverClaudeRunnerCommands = (
 									`Claude account "${admittedAccountId}" is unavailable for recovery`,
 								),
 							);
-					} else {
-						// Standalone compatibility runtimes still own their environment resolver.
-						const prepareShellEnv = deps.prepareShellEnv;
-						if (prepareShellEnv)
-							yield* Effect.tryPromise(() =>
-								prepareShellEnv(input.workspaceRoot),
-							).pipe(
-								Effect.timeoutOption("10 seconds"),
-								Effect.catch(() => Effect.void),
-							);
 					}
 					// The shared recovery drops a result that arrives while closing.
 					if (closing()) return undefined;
 					const instanceId =
 						call?.account.id ?? input.instanceId ?? row.provider_id;
-					const shellEnv = call
-						? call.shellEnv
-						: (deps.shellEnv?.(input.workspaceRoot) ?? { ...process.env });
+					const shellEnv = call?.shellEnv ??
+						input.shellEnv ?? { ...process.env };
 					const state = yield* makeProviderStateEffect.pipe(
 						Effect.provideService(PersistenceProjectTag, {
 							projectId: row.project_key,
@@ -194,7 +185,9 @@ export const recoverClaudeRunnerCommands = (
 										nativeResumeFallback,
 									),
 									aborted: false,
+									autoSettleAfterDays,
 									shellEnv,
+									shellConfig: call?.shellConfig ?? input.shellConfig,
 									claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
 									input: {
 										...input,
@@ -205,6 +198,7 @@ export const recoverClaudeRunnerCommands = (
 													workspaceRoot: call.workspaceRoot,
 													extraFolders: call.extraFolders,
 													shellEnv: call.shellEnv,
+													shellConfig: call.shellConfig,
 												}
 											: {}),
 										instanceId,

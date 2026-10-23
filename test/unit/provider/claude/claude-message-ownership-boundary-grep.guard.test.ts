@@ -17,7 +17,7 @@ const CHILD_METADATA_WRITE =
 // and transport wiring do not invoke operations.
 const IMPLEMENTATION_CALLS = [
 	{
-		file: "src/lib/provider/claude/claude-provider-runtime.ts",
+		file: "src/lib/provider/claude/claude-runner-payload.ts",
 		calls: ['emit({ type: "ensure-subagent-session"'],
 		// Runner transport emits only the ownership module's lineage command.
 	},
@@ -31,6 +31,22 @@ const IMPLEMENTATION_CALLS = [
 		calls: [],
 		childMetadataWrites: ["metadata: { childSessionId"],
 		// The Task translator owns Cursor child identity and its tool link.
+	},
+	{
+		file: "src/lib/provider/codex/codex-runner-payload.ts",
+		calls: ['emit({ type: "ensure-subagent-session"'],
+	},
+	{
+		file: "src/lib/provider/codex/codex-item-mapper.ts",
+		calls: [],
+		childMetadataWrites: [
+			"metadata: { ...metadata, ...(item.receiverThreadIds[0] ? { childSessionId",
+		],
+	},
+	{
+		file: "src/lib/provider/codex/codex-subagents.ts",
+		calls: [],
+		childMetadataWrites: ["metadata = { ...part.metadata, childSessionId"],
 	},
 ];
 

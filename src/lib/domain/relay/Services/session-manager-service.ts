@@ -119,6 +119,7 @@ import {
 	renameSession,
 	setSessionArchived,
 	setSessionAutoSettleDisabled,
+	setSessionJev,
 	setSessionPinned,
 	setSessionSettled,
 	snoozeSession,
@@ -495,6 +496,7 @@ export const deleteSession = (
 								sessionId,
 								targetProviderId: capturedInstanceId,
 								...(capturedCall ? { call: capturedCall } : {}),
+								...(account ? { account } : {}),
 								unbind: true,
 							}),
 						),
@@ -781,6 +783,10 @@ export interface SessionManagerService {
 	setSessionAutoSettleDisabled(
 		sessionId: string,
 		disabled: boolean,
+	): Effect.Effect<boolean, SessionManagerError>;
+	setSessionJev(
+		sessionId: string,
+		jev: "on" | "off" | null,
 	): Effect.Effect<boolean, SessionManagerError>;
 	setSessionPinned(
 		sessionId: string,
@@ -1359,15 +1365,17 @@ export const SessionManagerServiceLive: Layer.Layer<
 								}),
 						),
 					);
-				return workspace.withLaunch(
-					Option.isSome(retentionScheduler)
-						? Effect.provideService(
-								sweep,
-								EventRetentionSchedulerTag,
-								retentionScheduler.value,
-							)
-						: sweep,
-				);
+				return workspace
+					.withProjectLaunch(
+						Option.isSome(retentionScheduler)
+							? Effect.provideService(
+									sweep,
+									EventRetentionSchedulerTag,
+									retentionScheduler.value,
+								)
+							: sweep,
+					)
+					.pipe(Effect.provideService(ConfigTag, config));
 			},
 			renameSession: (sessionId, title) =>
 				withSessionCommandServices(renameSession(sessionId, title)),
@@ -1428,6 +1436,10 @@ export const SessionManagerServiceLive: Layer.Layer<
 					withSessionCommandServices(
 						setSessionAutoSettleDisabled(sessionId, disabled),
 					),
+				),
+			setSessionJev: (sessionId, jev) =>
+				triageLock.withPermits(1)(
+					withSessionCommandServices(setSessionJev(sessionId, jev)),
 				),
 			setSessionPinned: (sessionId, pinned) =>
 				triageLock.withPermits(1)(

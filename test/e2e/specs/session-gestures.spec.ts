@@ -359,7 +359,7 @@ test.describe("phone", () => {
 		const { row, title } = await setUp(page, relayUrl, harness);
 		// Short enough that the docked sheet rises under the first row, so the
 		// finger lifts over an item: the case the touchend guard exists for.
-		await page.setViewportSize({ width: 393, height: 480 });
+		await page.setViewportSize({ width: 393, height: 540 });
 		await gotoRelay(page, new URL("/", page.url()).toString());
 		await expect(row).toBeVisible();
 		const project = (
@@ -368,7 +368,7 @@ test.describe("phone", () => {
 			.split("·")[0]
 			?.trim();
 
-		// 30% across lands on the Snooze tile of the five-tile triage row
+		// 30% across lands on the Snooze tile of the four-tile triage row
 		// rather than a gap between tiles.
 		const finger = await longPress(page, row, 0.3);
 		const sheet = page.getByTestId("session-action-sheet");
@@ -390,7 +390,7 @@ test.describe("phone", () => {
 		expect(box).not.toBeNull();
 		expect(box?.x).toBe(0);
 		expect(box?.width).toBe(393);
-		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(480);
+		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(540);
 		await expect(page.getByTestId("session-sheet-header")).toContainText(title);
 		if (project)
 			await expect(page.getByTestId("session-sheet-header")).toContainText(
@@ -406,12 +406,13 @@ test.describe("phone", () => {
 			"session-ctx-snooze",
 			"session-ctx-pin",
 			"session-ctx-mark-unread",
-			"session-ctx-archive",
 			"session-ctx-auto-settle",
+			"session-ctx-archive",
 		]);
 		await page.getByTestId("session-ctx-pin").click();
 		await expect(sheet).toHaveCount(0);
-		await expect(row.getByTitle("Pinned session")).toBeVisible();
+		await expect(row).toBeVisible();
+		await expect(row).toHaveAccessibleName(/(?:^|, )Pinned(?:,|$)/);
 
 		await longPress(page, row);
 		await expect(sheet).toBeVisible();
@@ -419,7 +420,8 @@ test.describe("phone", () => {
 			.getByTestId("menu-sheet-scrim")
 			.click({ position: { x: 10, y: 10 } });
 		await expect(sheet).toHaveCount(0);
-		await expect(row.getByTitle("Pinned session")).toBeVisible();
+		await expect(row).toBeVisible();
+		await expect(row).toHaveAccessibleName(/(?:^|, )Pinned(?:,|$)/);
 		await expect(row).toBeFocused();
 	});
 
@@ -495,7 +497,7 @@ test.describe("phone", () => {
 		await expect(row).toBeVisible();
 	});
 
-	test("phone: title sheet shares sidebar commands and works without the list mounted", async ({
+	test("phone: overflow sheet shares sidebar commands and works without the list mounted", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -516,23 +518,23 @@ test.describe("phone", () => {
 		const sessionId = await row.getAttribute("data-session-id");
 		await gotoRelay(page, new URL(`/s/${sessionId}`, relayUrl).toString());
 		await expect(page.locator("#sidebar")).toBeHidden();
-		const trigger = page.getByTestId("session-bar-title-menu");
+		const trigger = page.getByTestId("session-bar-island-overflow");
 		await trigger.click();
-		const sheet = page.getByTestId("session-action-sheet");
+		const sheet = page.getByTestId("session-bar-island-menu");
 		await expect(sheet).toBeVisible();
 		const box = await sheet.boundingBox();
 		expect(box?.x).toBe(0);
 		expect(box?.width).toBe(393);
 		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(852);
 		await expect(page.getByTestId("menu-sheet-scrim")).toBeVisible();
-		const titleCommands = await sheet
+		const overflowCommands = await sheet
 			.locator(
 				'[data-testid^="session-ctx-"]:is([role="menuitem"], [role="menuitemcheckbox"])',
 			)
 			.evaluateAll((items) =>
 				items.map((item) => item.getAttribute("data-testid")),
 			);
-		expect(titleCommands).toEqual(
+		expect(overflowCommands).toEqual(
 			listCommands.filter((id) => id !== "session-ctx-select"),
 		);
 		await page.keyboard.press("Escape");

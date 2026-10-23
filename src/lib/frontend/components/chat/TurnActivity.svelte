@@ -3,6 +3,7 @@
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
+	import { on } from "svelte/events";
 	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
 	import SurfacingAskContext from "./SurfacingAskContext.svelte";
 	import { MediaQuery } from "svelte/reactivity";
@@ -11,7 +12,8 @@
 	import { numberTurnMessages } from "../../../turn-message-numbers.js";
 	import { TurnRecapState } from "../../stores/turn-recap.svelte.js";
 	import SurfacingSummary from "./SurfacingSummary.svelte";
-	import { messageSurfacing, sessionSurfaceLevel, setSessionSurfaceLevel, touchSurfaceSession, makeSurfaceDefault } from "../../stores/message-surfacing.svelte.js";
+	import { messageSurfacing, sessionJevEnabled, sessionSurfaceLevel, setSessionSurfaceLevel, touchSurfaceSession, makeSurfaceDefault } from "../../stores/message-surfacing.svelte.js";
+	import { findSession } from "../../stores/session.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { surfaceTurn, surfaceTime, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
 	import SurfacingCard, { type SurfacingRegions } from "./SurfacingCard.svelte";
@@ -26,6 +28,7 @@
 	import type { BackgroundTask } from "../../../shared-types.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
 	import {
 		countsPhrase,
@@ -78,6 +81,10 @@
 	} = $props();
 
 	let expanded = $state(false);
+	// Once shown, the full log stays mounted and hiding it only hides it:
+	// remounting hundreds of rows made showing a long turn's log slow, and
+	// reset each row's own open state.
+	let logMounted = $state(false);
 	let skillsOpen = $state(false);
 	let hovered = $state<number | null>(null);
 	let focusUuid = $state<string | null>(null);
@@ -130,7 +137,7 @@
 	});
 
 	const surfacingConfig = $derived(surfacing ?? messageSurfacing);
-	const surfacingActive = $derived(surfacingConfig.status.active && surfacingConfig.status.enabled && surfacingConfig.status.key.source !== "none" && !surfacingConfig.status.key.rejected);
+	const surfacingActive = $derived(sessionJevEnabled(sessionId ? findSession(sessionId) : undefined, surfacingConfig.status));
 	const override = $derived(sessionSurfaceLevel(sessionId));
 	const level = $derived(override ?? surfacingConfig.status.defaultLevel);
 	const recap = new TurnRecapState();
@@ -153,7 +160,7 @@
 		return parts.slice(0, Math.max(0, index)).reverse().find((part): part is SurfacePart => part.type === "assistant" && !!part.rawText.trim()) ?? null;
 	}
 	async function explainAsk(pin: SurfacePin) {
-		if (!sessionId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
+		if (!sessionId || !storeTurnId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
 		const identity = askIdentity;
 		generatingAsk = pin.part.uuid;
 		askError = null;
@@ -167,7 +174,7 @@
 		}
 	}
 	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
-	const storeTurnId = $derived(turn.user?.messageId ?? turn.id);
+	const storeTurnId = $derived(turn.storeId ?? turn.user?.messageId);
 	// jsdom has no matchMedia; real browsers always do.
 	const phone = typeof matchMedia === "function" ? new MediaQuery("(max-width: 599px)") : { current: false };
 	let summaryOpen = $state<boolean | null>(null);
@@ -176,15 +183,15 @@
 	let citedOrdinal = $state<number | null>(null);
 	const summarySettings = $derived(surfacingConfig.status.recap);
 	const summariesOn = $derived(surfacingConfig.status.summariesEnabled && summarySettings.model !== "off");
-	const summaryEnabled = $derived(summariesOn && final && !!sessionId);
-	const summaryLabel = $derived(recap.generating ? "✦ Summarising…" : recap.versions.length ? "✦ Summary" : "✦ Summarize");
+	const summaryEnabled = $derived(summariesOn && final && !!sessionId && !!storeTurnId);
+	const summaryLabel = $derived(recap.generating ? "✦ Summarizing…" : "✦ Summary");
 	$effect(() => {
 		const id = storeTurnId;
 		const session = sessionId;
 		const active = summaryEnabled;
 		const watch = latestTurn;
 		// A turn can settle while its asynchronous automatic recap is still running.
-		if (active && session) return untrack(() => recap.connect(session, id, watch));
+		if (active && session && id) return untrack(() => recap.connect(session, id, watch));
 		return;
 	});
 	$effect(() => {
@@ -281,7 +288,7 @@
 		generateSummary(recap.retry?.scope ?? (recap.versions.length && summaryNew > 0 ? "new" : "whole"), recap.retry?.sourceVersion);
 	}
 	function generateSummary(scope: "whole" | "new", sourceVersion?: number) {
-		if (!sessionId || !summaryEnabled) return;
+		if (!sessionId || !storeTurnId || !summaryEnabled) return;
 		summaryOpen = true;
 		void recap.generate(sessionId, storeTurnId, scope, sourceVersion);
 	}
@@ -320,10 +327,10 @@
 	function followLatest() { picked = null; folded = false; }
 	const replies = $derived(messageReplies(sessionId));
 	// Reply toggles: a message already replied to in the draft takes its reference back out.
-	function messageReference(pin: Pick<SurfacePin, "label" | "glyph" | "time" | "part">, ordinal: number, excerpt?: string): ReplyReference {
-		return { kind: excerpt === undefined ? "message" : "excerpt", ordinal, category: pin.label, glyph: pin.glyph, time: pin.time, text: excerpt ?? pin.part.rawText };
+	function messageReference(pin: Pick<SurfacePin, "label" | "glyph" | "time" | "part" | "builtinCategory">, ordinal: number, excerpt?: string): ReplyReference {
+		return { kind: excerpt === undefined ? "message" : "excerpt", ordinal, category: pin.label, builtinCategory: pin.builtinCategory, glyph: pin.glyph, time: pin.time, text: excerpt ?? pin.part.rawText };
 	}
-	function replyTo(pin: Pick<SurfacePin, "number" | "label" | "glyph" | "time" | "part">, excerpt?: string) {
+	function replyTo(pin: Pick<SurfacePin, "number" | "label" | "glyph" | "time" | "part" | "builtinCategory">, excerpt?: string) {
 		if (!sessionId || pin.number === undefined) return;
 		const replied = excerpt === undefined ? replies.get(pin.number) : undefined;
 		if (replied !== undefined) removeComposerReference(sessionId, replied);
@@ -437,15 +444,38 @@
 		return [at, span].filter(Boolean).join(" · ");
 	}
 
+	// While live, the newest steps already show, and opening the log inserts
+	// the earlier ones above them. The scroll controller can't see that growth,
+	// so hold the newest step where the reader saw it. Closing needs no help:
+	// the header the reader just clicked stays put.
+	async function toggleLog() {
+		openTurn();
+		const uuid = showTicker && !expanded ? segment.activity.at(-1)?.uuid : undefined;
+		const newestTop = () => uuid === undefined ? undefined : panelEl?.querySelector(`[data-log-part="${CSS.escape(uuid)}"]`)?.getBoundingClientRect().top;
+		const before = newestTop();
+		expanded = !expanded;
+		logMounted ||= expanded;
+		if (before === undefined) return;
+		await tick();
+		const after = newestTop();
+		const scroller = panelEl?.closest("#messages");
+		if (after !== undefined && scroller) scroller.scrollTop += after - before;
+	}
+
 	async function jumpTo(i: number) {
 		const part = segment.activity[i];
 		if (!part) return;
 		onjump?.();
 		openTurn();
-		expanded = true;
+		expanded = logMounted = true;
 		focusUuid = part.uuid;
 		await tick();
 		panelEl?.querySelector(`[data-part="${CSS.escape(part.uuid)}"]`)?.scrollIntoView({ block: "nearest" });
+	}
+
+	// Safari only paints :active when a touch listener covers the target.
+	function enableTouchActive(node: HTMLDivElement) {
+		return { destroy: on(node, "touchstart", () => {}, { passive: true }) };
 	}
 </script>
 
@@ -493,8 +523,8 @@
 
 <!-- Phones open the summary from its own row under the strip; wider screens use the head chip. -->
 {#snippet summaryPanel(view: ReturnType<typeof surfaceTurn>, onhover: (ordinal: number | null) => void)}
-	<Button variant="ghost" size="content" align="start" tone="inherit" touchTarget class="min-[600px]:hidden w-full min-h-[40px] gap-[8px] py-[8px] text-[13px]" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
-		<span>{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="ml-auto text-text-muted" />
+	<Button variant="ghost" size="content" align="start" tone="default" touchTarget class="min-[600px]:hidden w-full mt-[10px] mb-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
+		<span class="mr-auto">{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="text-text-dimmer" />
 	</Button>
 	<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} phone={phone.current} {live} {view}
 		plainCitations={!surfacingActive}
@@ -519,18 +549,18 @@
 			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
 				<Tooltip bind:open={detailsOpen}>
 					{#snippet trigger({ props })}
-						<Button {...props} variant="ghost" size="content" tone="secondary" hoverFill="none" align="start" touchTarget
+						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
 							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={expanded}
-							onclick={() => { openTurn(); expanded = !expanded; }}>
-							{#if live}<Icon name="loader-circle" size={13} class="animate-spin shrink-0 text-accent" />
-							{:else}<Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-muted" />{/if}
-							<span class="font-semibold">{live ? "Working" : "Worked"}</span>
+							onclick={toggleLog}>
+							{#if live}<ConduitMark size={16} variant="running" />
+							{:else}<Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-dimmer" />{/if}
+							<span class="text-[14px] font-semibold text-text">{live ? "Working" : "Worked"}</span>
 							{#if live && !turn.user}
-								<span class="text-[12px] text-text-muted" data-testid="turn-live-elapsed">(no prompt to time from)</span>
+								<span class="text-[12px] text-text-dimmer" data-testid="turn-live-elapsed">(no prompt to time from)</span>
 							{:else if duration !== undefined}
-								<span class="turn-duration font-mono text-[12px] text-text-muted shrink-0" data-testid={live ? "turn-live-elapsed" : undefined}>{live && duration < 1000 ? "0s" : fmtDuration(duration)}</span>
+								<span class="turn-duration font-mono text-[12px] text-text-dimmer shrink-0" data-testid={live ? "turn-live-elapsed" : undefined}>{live && duration < 1000 ? "0s" : fmtDuration(duration)}</span>
 							{/if}
-							{#if phrase}<span class="truncate text-[12px] text-text-muted {minimised ? 'max-[599px]:hidden' : ''}">· {phrase}</span>{/if}
+							{#if phrase}<span class="truncate text-[12px] text-text-muted {surfacingActive || minimised ? 'max-[599px]:hidden' : ''}">· {phrase}</span>{/if}
 						</Button>
 					{/snippet}
 					<div class="max-w-[340px] flex flex-col gap-[6px] text-[12px]">
@@ -548,11 +578,11 @@
 						{#if surfacingActive && surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
 						{#if surfacingActive && surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
 						{#if surfacingActive}{@render surfacingRegions.headChips?.(surface)}{/if}
-						{#if summaryEnabled}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="{minimised ? '' : 'max-[599px]:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[12px] bg-chip text-text-secondary" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised}<span class="max-[599px]:sr-only">{summaryLabel}</span><span class="min-[600px]:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised ? 'max-[599px]:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
+						{#if summaryEnabled}<Button variant="ghost" size="content" tone="default" hoverFill="none" touchTarget class="{minimised ? '' : 'max-[599px]:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[13px] leading-[normal] font-medium bg-chip" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised}<span class="max-[599px]:sr-only">{summaryLabel}</span><span class="min-[600px]:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised ? 'max-[599px]:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
 					</div>
 				{/if}
-				{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summarize</Button></span>{/if}
-				{#if surfacingActive}<Button variant="ghost" size="content" tone="muted" touchTarget class="ml-auto shrink-0 -my-[2px] h-[24px] w-[24px]" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Minimise turn"} aria-expanded={!minimised} onclick={toggleMinimised}><Icon name={minimised ? "chevron-down" : "chevron-up"} size={14} /></Button>{/if}
+					{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summary</Button></span>{/if}
+				{#if surfacingActive}<Button variant="ghost" size="content" tone="inherit" touchTarget class="ml-auto shrink-0 -my-[2px] h-[24px] w-[24px] text-text-dimmer" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Minimise turn"} aria-expanded={!minimised} onclick={toggleMinimised}><Icon name={minimised ? "chevron-down" : "chevron-up"} size={14} /></Button>{/if}
 			</div>
 			{#if minimised}
 				<MinimisedTurn view={surface} onopen={openMinimisedMessage}>
@@ -573,29 +603,32 @@
 					{/snippet}
 				</SurfacingCard>
 			{:else}
-			<div class="md:mt-[7px]">
+			<!-- The phone strip is a 44px tap target with its 4px bar centred; a summary row
+			     under it overlaps that empty area so it sits midway between bar and card edge. -->
+			<div class="md:mt-[7px] {summaryEnabled ? 'max-[599px]:-mb-[18px]' : ''}">
 				<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} emphasis={skillSteps}
 					onhover={(index) => { hovered = index; detailsOpen = index !== null; }} onjump={jumpTo} />
 			</div>
 			{#if summaryEnabled}{@render summaryPanel(surface, hoverCitation)}{/if}
 			{/if}
 			{#if onsummarize && !minimised}
-				<Button variant="ghost-accent" size="content" align="start" touchTarget class="md:hidden w-full gap-[8px] py-[8px] text-[13px]" onclick={onsummarize}>
-					<span>✦ Summarize</span><Icon name="chevron-right" size={14} class="ml-auto" />
+				<Button variant="ghost" size="content" tone="default" align="start" touchTarget class="md:hidden w-full -mt-[8px] mb-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" onclick={onsummarize}>
+					<span>✦ Summary</span><Icon name="chevron-right" size={14} class="ml-auto text-text-dimmer" />
 				</Button>
 			{/if}
 		</div>
-		{#if !minimised && (expanded || showTicker)}
-			<div class="step-log mt-[6px]" data-testid={live ? "turn-live-activity" : undefined}>
+		{#if !minimised && (logMounted || showTicker)}
+			<div class="step-log mt-[6px]" use:enableTouchActive hidden={!expanded && !showTicker} data-testid={live ? "turn-live-activity" : undefined}>
 				{#if !expanded && earlierCount > 0}
 					<Button variant="ghost" size="content" tone="muted" hoverFill="none" align="start" touchTarget
-						class="py-[8px] text-[12px]" onclick={() => (expanded = true)}>+ {earlierCount} earlier messages</Button>
+						class="py-[8px] text-[12px]" onclick={() => (expanded = logMounted = true)}>+ {earlierCount} earlier messages</Button>
 				{/if}
-				{#each expanded ? segment.activity : ticker as part, index (part.uuid)}
-					{@const i = expanded ? index : earlierCount + index}
+				{#each logMounted ? segment.activity : ticker as part, index (part.uuid)}
+					{@const i = logMounted ? index : earlierCount + index}
 					{@const latestLiveStep = live && i === segment.activity.length - 1}
-					<div data-log-part={part.uuid} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
-						<ActivityRow {part} {liveTasks} {taskListedAt} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} />
+					{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
+					<div data-log-part={part.uuid} hidden={!expanded && i < earlierCount} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+						<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category?.builtinCategory ? category : undefined} />
 						{#if surfacingActive && expanded && part.type === "assistant"}
 							{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}
 							{#if pin}
@@ -642,6 +675,7 @@
 </div>
 
 <style>
+	.step-log :global(::selection) { background:var(--color-accent-bg); color:inherit; }
 	.surface-head-chips { display:contents; }
 	.turn-activity[data-minimised="true"] .turn-duration { min-width:0; flex-shrink:1; overflow:hidden; text-overflow:ellipsis; }
 	.mark-toast { display:flex; align-items:center; gap:10px; width:fit-content; max-width:100%; min-height:34px; margin:10px auto 2px; padding:4px 5px 4px 14px; border-radius:999px; background:var(--color-inverse-bg); color:var(--color-inverse-text); font-size:13px; box-shadow:0 8px 24px rgb(0 0 0 / .22); }

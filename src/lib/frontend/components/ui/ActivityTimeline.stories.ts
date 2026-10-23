@@ -13,7 +13,7 @@ const meta = {
 				left: 0,
 				width: 34,
 				label: "Read src/unread.ts · 4s",
-				tone: "muted",
+				tone: "explore",
 			},
 			{
 				id: "thought",
@@ -27,7 +27,7 @@ const meta = {
 				left: 54.4,
 				width: 5,
 				label: "Failed pnpm check · 1s",
-				tone: "error",
+				tone: "fail",
 			},
 			{
 				id: "edit",
@@ -46,6 +46,7 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {};
 export const Light: Story = { globals: { theme: "light" } };
 export const Keyboard: Story = {
+	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const track = canvas.getByRole("slider", { name: /Activity timeline/ });
@@ -58,6 +59,7 @@ export const Keyboard: Story = {
 			"Read src/unread.ts · 4s",
 		);
 		await expect(track).toHaveFocus();
+		await expect(track.matches(":focus-visible")).toBe(true);
 	},
 };
 export const TouchScrub: Story = {

@@ -9,6 +9,7 @@ import type {
 } from "../../helpers/process-harness.js";
 import { openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
+import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -236,13 +237,12 @@ async function openPickedSession(
 	return picker;
 }
 
-/** Settings lives in the list overflow on a phone's list, and in the session
+/** Settings opens directly on a phone's list, and through the session
  *  bar (or phone island) overflow otherwise. */
 async function openSettingsPanel(page: Page): Promise<void> {
-	const listOverflow = page.getByTestId("list-bar-overflow");
-	if (await listOverflow.isVisible()) {
-		await listOverflow.click();
-		await page.getByTestId("list-overflow-settings").click();
+	const listSettings = page.getByTestId("list-bar-settings");
+	if (await listSettings.isVisible()) {
+		await listSettings.click();
 		return;
 	}
 	await page
@@ -531,7 +531,7 @@ test("opening model settings in a session keeps the session's model", async ({
 	await expect(panel, "the tab applied its models reply").toContainText(
 		"No models available",
 	);
-	await page.getByTestId("settings-close-btn").click();
+	await closeSettings(page);
 	await expect(
 		picker,
 		"the picker still shows the session's model",

@@ -1,12 +1,15 @@
 import { Effect } from "effect";
 import type { SqlClient } from "effect/sql";
-import { canonicalEvent } from "../events.js";
-import type { ClaudeEventPersistEffect } from "./claude-event-persist-effect.js";
+import { type CanonicalEvent, canonicalEvent } from "../events.js";
 
-/** A failed receipt proves the provider can no longer deliver this handoff. */
-export const requeueFailedSteers = (
+/** Requeue unplaced handoffs after failure or confirmed loss of a removed runner. */
+export const requeueFailedSteers = <E>(
 	sql: SqlClient.SqlClient,
-	persist: ClaudeEventPersistEffect,
+	persist: {
+		readonly persistEvents: (
+			events: readonly CanonicalEvent[],
+		) => Effect.Effect<void, E>;
+	},
 	sessionId?: string,
 	inputId?: string,
 ) =>
@@ -28,9 +31,13 @@ export const requeueFailedSteers = (
 				AND (${sessionId ?? null} IS NULL OR pending.session_id = ${sessionId ?? null})
 				AND (${inputId ?? null} IS NULL OR pending.input_id = ${inputId ?? null})
 				AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = pending.input_id)
-				AND (SELECT status FROM provider_command_outbox
-					WHERE command_id = pending.input_id AND session_id = pending.session_id
-					AND effect_type = 'send_turn' ORDER BY request_sequence DESC LIMIT 1) = 'failed'
+				AND (SELECT command.status = 'failed' OR (
+						command.status = 'cancelled' AND command.error_code = 'project_inactive'
+						AND EXISTS (SELECT 1 FROM provider_runs run
+							WHERE run.id = command.run_id AND run.session_id = command.session_id AND run.status = 'error'))
+					FROM provider_command_outbox command
+					WHERE command.command_id = pending.input_id AND command.session_id = pending.session_id
+					AND command.effect_type = 'send_turn' ORDER BY command.request_sequence DESC LIMIT 1)
 			ORDER BY pending.admitted_at DESC, pending.rowid DESC`;
 		if (rows.length === 0) return;
 		yield* persist.persistEvents(

@@ -91,7 +91,7 @@
 	);
 	const selectedDriver = $derived(target.pick.driver);
 	const selectedTraits = $derived(getDriverTraits(selectedDriver));
-	const hasAccountUsage = $derived(selectedTraits?.usageHarness === "claude");
+	const canSwitchAccounts = $derived(selectedTraits?.usageHarness === "claude" || selectedTraits?.usageHarness === "codex");
 	const accountLabel = $derived(selectedTraits?.accountKind === "config-directory" ? "Account" : "Instance");
 	const selectedLabel = $derived(
 		selectedInstance?.label ?? (locked ? "Account unavailable" : "Add account"),
@@ -125,8 +125,8 @@
 			? findSession(sessionState.currentId)?.projectSlug ?? ""
 			: getDraftProject() ?? "",
 	);
-	const accounts = $derived(getClaudeAccounts(accountProjectSlug));
-	const switchingTo = $derived(hasAccountUsage && accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId ? accounts.switchingTo : null);
+	const accounts = $derived(getClaudeAccounts(accountProjectSlug, selectedTraits?.usageHarness === "codex" ? "codex" : "claude"));
+	const switchingTo = $derived(canSwitchAccounts && accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId ? accounts.switchingTo : null);
 	const wordAccountName = $derived(selectedInstance ? accounts.nameOf(switchingTo ?? selectedLogoInstanceId, selectedInstance.label) : selectedLabel);
 	let presentedRequest = $state<number | undefined>();
 	const handoff = $derived(accounts.pendingHandoff?.requestId === presentedRequest ? accounts.pendingHandoff : undefined);
@@ -135,14 +135,14 @@
 		| { kind: "status"; status: InstanceStatus }
 	);
 	const accountCards = $derived.by<AccountCard[]>(() => {
-		if (hasAccountUsage) {
+		if (canSwitchAccounts) {
 			return [...accounts.accounts].sort((a, b) => Number(b.isDefault === true) - Number(a.isDefault === true)).map((account) => {
 				// Cards show every account's own usage; only the lock depends on the open session.
 				const availability = accounts.availabilityOf(account.id, "");
 				return {
 					value: account.id,
 					label: accounts.nameOf(account.id),
-					locked: availability.kind === "limited" || (locked && account.id === selectedLogoInstanceId),
+					locked: availability.kind === "limited" || availability.kind === "signed-out" || (locked && account.id === selectedLogoInstanceId),
 					kind: "usage",
 					availability,
 				};
@@ -164,7 +164,7 @@
 	const activeProviderId = $derived(selection.activeProviderId);
 	const activeModel = $derived(selection.activeModel);
 	const parameters = $derived(selection.parameters);
-	const defaultCombination = $derived(selection.defaultCombination);
+	const defaultValues = $derived(selection.defaultValues);
 	const parameterContext = $derived(selection.parameterContext);
 	const parameterEffortWord = $derived(selection.parameterEffortWord);
 	const contextOptions = $derived(selection.contextOptions);
@@ -174,7 +174,7 @@
 		(sessionState.currentId && contextOptions.length ? "Default" : modelContextLabel(activeModel)));
 	// Phones show the context word only when it differs from the default.
 	const showContextWord = $derived(!!contextLabel && (!phone || (parameterContext
-		? parameterContext.value !== defaultCombination?.values[parameterContext.id]
+		? parameterContext.value !== defaultValues[parameterContext.id]
 		: selectedContext !== null && !selectedContext.isDefault)));
 	const contextPercent = $derived(currentChat().contextPercent);
 	const contextWarning = $derived(isContextWarning(contextPercent, composerPreferences.contextWarning));
@@ -280,7 +280,7 @@
 		const card = accountCards.find((card) => card.value === id);
 		if (!card || card.locked) return;
 		if (locked) {
-			if (hasAccountUsage && sessionState.currentId) {
+			if (canSwitchAccounts && sessionState.currentId) {
 				closePicker();
 				void accounts.beginSwitch(sessionState.currentId, id, selectedLogoInstanceId);
 				presentedRequest = accounts.handoff.kind === "previewing" ? accounts.handoff.requestId : undefined;
@@ -453,7 +453,7 @@
 					<section data-testid="picker-account-section" tabindex="-1" aria-label={accountLabel} class="pb-[6px] outline-none">
 						<div class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-muted">
 							<span>{accountLabel}</span>
-							<span data-testid="picker-account-section-caption">{hasAccountUsage ? "5-hour use" : "status"}</span>
+							<span data-testid="picker-account-section-caption">{selectedTraits?.usageHarness === "claude" ? "5-hour use" : canSwitchAccounts ? "usage" : "status"}</span>
 						</div>
 						<OptionRow
 							variant="cards"
@@ -462,7 +462,7 @@
 							onChange={handleAccountSelect}
 							onActivate={locked ? undefined : target.selectAccount}
 							label={accountLabel}
-							lockedReason={hasAccountUsage ? "" : "Harness is fixed for this session"}
+							lockedReason={canSwitchAccounts ? "" : "Harness is fixed for this session"}
 							itemWidth={108}
 							testId="picker-account-options"
 							itemTestId={(id) => `picker-account-${id}`}
@@ -511,7 +511,7 @@
 								{/if}
 							{/snippet}
 						</OptionRow>
-						{#if locked && hasAccountUsage}
+						{#if locked && canSwitchAccounts}
 							<div data-testid="picker-account-note" class="mx-[4px] mt-[8px] border-t border-border-subtle pt-[6px] text-[10.5px] text-text-muted">You'll see what carries over before anything changes.</div>
 						{/if}
 					</section>
@@ -655,13 +655,13 @@
 		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 18} surface="box" />{/if}
 		<span class="model-label min-w-0 truncate">{displayName}</span>
 		{#if phone && attention}<span data-testid="composer-more-attention" class="size-[6px] shrink-0 rounded-full bg-status-ask" aria-hidden="true"></span>{/if}
-		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 font-mono text-[11.5px] text-text-muted">{contextLabel}</span>{/if}
+		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 {variant === 'words' ? '' : 'font-mono text-[11.5px] text-text-muted'}">{contextLabel}</span>{/if}
 		{#if variant === "words"}
 			{@const effortWord = parameters ? parameterEffortWord : effort.current}
 			{#if effortWord}<span aria-hidden="true">·</span><span class="shrink-0">{effortWord}</span>{/if}
 			<span aria-hidden="true">·</span>{@render phoneMode?.()}
 		{/if}
-		<span data-testid="model-chip-chevron" class="inline-flex shrink-0 text-text-muted"><Icon name="chevron-down" size={12} /></span>
+		<span data-testid="model-chip-chevron" class="inline-flex shrink-0 {variant === 'words' ? 'text-text-dimmer' : 'text-text-muted'}"><Icon name="chevron-down" size={12} /></span>
 	{/snippet}
 	<Button
 		{...props}
@@ -733,7 +733,7 @@
 				aria-controls={pickerOpen ? "model-picker" : undefined}
 				onclick={(event) => togglePicker(event, "account")}
 			><span class="block min-w-0 truncate">{wordAccountName}{switchingTo ? "…" : ""}</span></Button>
-			<span aria-hidden="true" class="text-border-chip">·</span>
+			<span aria-hidden="true" class="text-text-dimmer">·</span>
 		{/if}
 		<Button
 			variant="composer-word"
@@ -758,23 +758,23 @@
 			<span class="block min-w-0 truncate">{displayName}</span>
 		</Button>
 		{#if showContextWord}
-			<span aria-hidden="true" class="text-border-chip">·</span>
+			<span aria-hidden="true" class="text-text-dimmer">·</span>
 			<Button
 				variant="composer-word"
 				size="content"
 				data-testid="composer-word-context"
-				class="shrink-0 text-[11.5px] font-normal font-sans"
+				class="shrink-0"
 				ariaLabel={`Context window: ${contextLabel}. Open harness and model options`}
 				aria-haspopup="dialog"
 				aria-expanded={pickerOpen}
 				aria-controls={pickerOpen ? "model-picker" : undefined}
 				onclick={(event) => togglePicker(event, "model")}
 			>
-				<span class="border-b border-dotted border-border-chip">{contextLabel}</span>
+				<span>{contextLabel}</span>
 			</Button>
 		{/if}
 		{#if effort.options.length > 0 || (sessionState.currentId && effort.current)}
-			<span aria-hidden="true" class="text-border-chip">·</span>
+			<span aria-hidden="true" class="text-text-dimmer">·</span>
 		{/if}
 	{:else if !phone || !phoneControls}
 		{@render modelTrigger({ props: {} })}
@@ -782,8 +782,8 @@
 
 	{#if phone && phoneControls}
 		<!-- Keep the effort owner mounted so Ctrl+T also works with the sheet closed. -->
-		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant="row">
-			{#snippet children(effortRow)}
+		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant="row" wordLabel={parameters ? parameterEffortWord : undefined}>
+			{#snippet children(effortRow, effortControl)}
 				{#snippet rows()}
 					<Button
 						variant="composer-row" size="content"
@@ -816,24 +816,25 @@
 					{@render effortRow()}
 				{/snippet}
 				{@render phoneControls(rows, modelTrigger)}
+				{#if variant === "icons"}{@render effortControl()}{/if}
 			{/snippet}
 		</ModelVariant>
 	{:else}
 		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" ? "control" : variant} wordLabel={parameters ? parameterEffortWord : undefined} />
 	{/if}
 	{#if variant === "words" && !phone && selectedTraits?.composerModeControl === "agent"}
-		<span aria-hidden="true" class="text-border-chip">·</span>
+		<span aria-hidden="true" class="text-text-dimmer">·</span>
 		<Button
 			variant="composer-word"
 			size="content"
 			data-testid="composer-word-agent"
-			class="shrink-0 text-[11.5px] font-normal font-sans"
+			class="shrink-0"
 			ariaLabel={`Agent: ${activeAgent ? agentLabel(activeAgent) : "Default"}. Open agent options`}
 			aria-haspopup="dialog"
 			aria-expanded={pickerOpen}
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={(event) => togglePicker(event, "agent")}
-		><span class="border-b border-dotted border-border-chip">{activeAgent ? agentLabel(activeAgent).toLowerCase() : "default"}</span></Button>
+		><span>{activeAgent ? agentLabel(activeAgent).toLowerCase() : "default"}</span></Button>
 	{/if}
 
 	{#if pickerOpen}
@@ -862,7 +863,7 @@
 		summary={handoff.summary}
 		confirm={{
 			from: handoff.from,
-			fromQuota: accounts.fromQuota(handoff),
+			fromQuota: accounts.quotaOf(handoff.from),
 			quota: accounts.quotaOf(handoff.to),
 			cutOff: handoff.limit?.cutOffMessageId !== undefined,
 			busy: accounts.switching,

@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { CursorAuthState } from "../../../src/lib/contracts/ws-rpc.js";
+import { closeSettings } from "../../../test/e2e/helpers/settings.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { mockInstances, requireRpcControl } from "./shared.js";
@@ -23,6 +24,7 @@ function publishAccount(page: Page, available: boolean): void {
 		{
 			id: "cursor-work",
 			name: "Cursor",
+			colorSlot: 4,
 			driver: "cursor",
 			isDefault: true,
 			usageEligible: false,
@@ -239,7 +241,7 @@ export const cursorAuthHandlers: StepHandler[] = [
 		name: "close Cursor settings",
 		match: /^I close Cursor settings$/,
 		run: async ({ world }) => {
-			await world.page.getByTestId("settings-close-btn").click();
+			await closeSettings(world.page);
 			await expect(world.page.locator("#settings-panel")).toBeHidden();
 		},
 	},

@@ -3,7 +3,8 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Fiber } from "effect";
+import { Effect, Fiber, ManagedRuntime } from "effect";
+import { TestClock } from "effect/testing";
 import {
 	afterEach,
 	beforeEach,
@@ -158,7 +159,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		);
 		let received: SDKUserMessage | undefined;
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: ({ prompt }) =>
 				createQueryFromGenerator(
 					(async function* () {
@@ -263,7 +263,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const sink = createMockEventSink();
 		let consumed = false;
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: () =>
 				createQueryFromGenerator(
 					(async function* () {
@@ -329,7 +328,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 		const sink = createMockEventSink();
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: () =>
 				createQueryFromGenerator(
 					(async function* () {
@@ -367,7 +365,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 		const sink = createMockEventSink();
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: () =>
 				createMockQuery(
 					fixture.events.filter(
@@ -402,7 +399,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -450,7 +446,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 	}) => {
 		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -480,7 +475,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			return query;
 		});
 		instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -503,7 +497,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 	it("rejects a model-less direct Claude call before query creation", async () => {
 		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -528,7 +521,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([makeSuccessResult()]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -552,11 +544,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 	});
 
 	it("launches concurrent sessions with their admitted environment snapshots", async () => {
-		const capturedEnv = vi.fn(() => ({ CALL_MARKER: "constructor" }));
 		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
-			shellEnv: capturedEnv,
 			queryFactory: queryFactorySpy,
 		});
 		await Promise.all(
@@ -586,14 +575,11 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				})),
 			),
 		);
-		expect(capturedEnv).not.toHaveBeenCalled();
 	});
 
 	it("uses a session's changed folder and snapshot on its next launch", async () => {
 		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
-			shellEnv: () => ({ CALL_MARKER: "constructor" }),
 			queryFactory: queryFactorySpy,
 		});
 		for (const folder of ["first", "moved"]) {
@@ -641,7 +627,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			.mockReturnValueOnce(secondQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -674,7 +659,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			toolInput: Record<string, unknown>,
 			options: { signal: AbortSignal; toolUseID: string },
 		) => Promise<unknown>;
-		await canUseTool(
+		const permission = canUseTool(
 			"Bash",
 			{ command: "pwd" },
 			{
@@ -682,6 +667,20 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				toolUseID: "tool-session-two",
 			},
 		);
+		await waitForAssertion(() =>
+			expect(sink2.requestPermission).toHaveBeenCalledOnce(),
+		);
+		await Effect.runPromise(
+			instance.resolvePermissionEffect(
+				"session-two",
+				"tool-session-two",
+				"once",
+			),
+		);
+		await expect(permission).resolves.toEqual({
+			behavior: "allow",
+			updatedInput: { command: "pwd" },
+		});
 
 		expect(sink1.requestPermission).not.toHaveBeenCalled();
 		expect(sink2.requestPermission).toHaveBeenCalledTimes(1);
@@ -741,7 +740,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -888,7 +886,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		}) as unknown as Query;
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -1018,7 +1015,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		};
 		queryFactorySpy = vi.fn(() => createQueryFromGenerator(gen));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 			subagentSdk,
 			ensureClaudeSubagentSession: vi.fn(() =>
@@ -1123,7 +1119,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		);
 		const finalized = vi.fn();
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 			subagentSdk,
 			subagentPollIntervalMs: 10,
@@ -1171,6 +1166,8 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		"Stop",
 		"stream-end",
 	] as const)("completes %s before hung reads and bounds all end finalization to the configured deadline", async (ending) => {
+		const clock = ManagedRuntime.make(TestClock.layer());
+		const clockContext = await clock.context();
 		const parentClaudeSessionId = "sdk-parent-final-poll-timeout";
 		const sdkSubagentId = "task-final-poll-timeout";
 		const taskToolUse: SDKPartialAssistantMessage = {
@@ -1259,15 +1256,29 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				markTasksStarted();
 				await streamReleased;
 				if (ending === "parent result") yield result;
+				if (ending === "Stop")
+					yield makeErrorResult({ errors: ["Interrupted"] });
 			})(),
 		);
 		query.close = vi.fn(releaseStream);
+		vi.mocked(query.interrupt).mockImplementation(async () => {
+			releaseStream();
+			return undefined;
+		});
 		let runner: SessionRunner | undefined;
 		const finalized = vi.fn();
 		const onBackgroundTask = vi.fn();
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
-			queryFactory: () => query,
+			queryFactory: ({ prompt }) => {
+				const stream = query[Symbol.asyncIterator]();
+				return Object.assign({}, query, {
+					[Symbol.asyncIterator]: () =>
+						(async function* () {
+							await prompt[Symbol.asyncIterator]().next();
+							yield* stream;
+						})(),
+				});
+			},
 			subagentSdk,
 			subagentPollIntervalMs: 10,
 			subagentPollTimeoutMs: 100,
@@ -1277,6 +1288,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 					{ ...deps, onSubagentFinalizationComplete: finalized },
 					emit,
 				).pipe(
+					Effect.provide(clockContext),
 					Effect.tap((created) =>
 						Effect.sync(() => {
 							runner = created;
@@ -1285,7 +1297,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				),
 		});
 		const sink = createMockEventSink();
-		const turnPromise = Effect.runPromise(
+		const turnPromise = clock.runPromise(
 			Effect.result(
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
@@ -1296,17 +1308,10 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				),
 			),
 		);
-		let settledTurn: Awaited<typeof turnPromise> | undefined;
-		void turnPromise.then((result) => {
-			settledTurn = result;
-		});
-
 		try {
 			await tasksStarted;
-			await vi.waitFor(
-				() => expect(subagentSdk.getSubagentMessages).toHaveBeenCalledTimes(3),
-				{ timeout: 100, interval: 5 },
-			);
+			await clock.runPromise(TestClock.adjust("10 millis"));
+			expect(subagentSdk.getSubagentMessages).toHaveBeenCalledTimes(3);
 			const ctx = getClaudeRuntimeSessionForTest(
 				instance,
 				"parent-final-poll-timeout",
@@ -1321,19 +1326,12 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				resolve: denyApproval,
 				reject: () => Effect.void,
 			});
-			const startedAt = performance.now();
 			const stop =
 				ending === "Stop"
-					? Effect.runPromise(instance.interruptTurnEffect(ctx.sessionId))
+					? clock.runPromise(instance.interruptTurnEffect(ctx.sessionId))
 					: Promise.resolve(releaseStream());
-			const turnResult = await vi.waitFor(
-				() => {
-					if (!settledTurn)
-						throw new Error("Turn cleanup waited for a transcript");
-					return settledTurn;
-				},
-				{ timeout: 50, interval: 5 },
-			);
+			// Foreground cleanup must finish while every transcript and timeout is pending.
+			const turnResult = await turnPromise;
 			if (ending === "stream-end") expect(turnResult._tag).toBe("Failure");
 			else {
 				expect(turnResult._tag).toBe("Success");
@@ -1342,44 +1340,26 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 						ending === "Stop" ? "interrupted" : "completed",
 					);
 			}
-			let stopCompleted = false;
-			void stop.then(() => {
-				stopCompleted = true;
-			});
-			await vi.waitFor(() => expect(stopCompleted).toBe(true), {
-				timeout: 50,
-				interval: 5,
-			});
+			await stop;
 			if (ending === "Stop") {
 				expect(denyApproval).toHaveBeenCalledWith("reject");
 				expect(query.interrupt).toHaveBeenCalledOnce();
-				expect(query.close).toHaveBeenCalledOnce();
+				expect(query.close).not.toHaveBeenCalled();
 				expect(
 					vi
 						.mocked(sink.push)
 						.mock.calls.some(([event]) => event.type === "turn.interrupted"),
 				).toBe(true);
 			}
-			await vi.waitFor(
-				() => {
-					expect(onBackgroundTask).toHaveBeenCalledWith({
-						sessionId: ctx.sessionId,
-						kind: "session-ended",
-					});
-					expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
-						true,
-					);
-				},
-				{ interval: 5 },
-			);
-			await vi.waitFor(
-				() =>
-					expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(
-						false,
-					),
-				{ timeout: 200, interval: 5 },
-			);
-			expect(performance.now() - startedAt).toBeLessThan(200);
+			expect(onBackgroundTask).toHaveBeenCalledWith({
+				sessionId: ctx.sessionId,
+				kind: "session-ended",
+			});
+			await clock.runPromise(TestClock.adjust("99 millis"));
+			expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(true);
+			expect(finalized).not.toHaveBeenCalled();
+			await clock.runPromise(TestClock.adjust("1 millis"));
+			expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(false);
 			expect(finalized).toHaveBeenCalled();
 			expect(ctx.subagentPollers?.size).toBe(0);
 			// Completing abandoned SDK promises cannot resurrect a feed or emit history.
@@ -1393,6 +1373,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			await releasePendingPolls();
 			await Promise.race([turnPromise.catch(() => undefined), delay(25)]);
 			await Effect.runPromise(instance.shutdownEffect());
+			await clock.dispose();
 		}
 	});
 
@@ -1453,7 +1434,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			.mockReturnValueOnce(newQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 		const sink = createMockEventSink();
@@ -1525,7 +1505,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			.mockReturnValueOnce(newQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 		const sink = createMockEventSink();
@@ -1595,7 +1574,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			.mockReturnValueOnce(newQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 		const sink = createMockEventSink();
@@ -1678,7 +1656,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => query);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 		const sink = createMockEventSink();
@@ -1730,7 +1707,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -1763,7 +1739,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -1810,7 +1785,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		let query: Query | undefined;
 		const started: string[] = [];
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: ({ prompt }) => {
 				if (typeof prompt === "string") throw new Error("Expected stream");
 				const inputs = prompt[Symbol.asyncIterator]();
@@ -1962,7 +1936,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const inputId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 		let query: Query | undefined;
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: ({ prompt }) => {
 				if (typeof prompt === "string") throw new Error("Expected stream");
 				const inputs = prompt[Symbol.asyncIterator]();
@@ -2028,7 +2001,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const handed: string[] = [];
 		let query: Query | undefined;
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			runnerFactory: (deps, emit) =>
 				makeClaudeSessionRunner({ ...deps, prepareQuery }, emit),
 			queryFactory: ({ prompt }) => {
@@ -2099,7 +2071,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -2123,7 +2094,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -2153,7 +2123,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -2186,7 +2155,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			queryFactorySpy = vi.fn(() => mockQuery);
 
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
 				queryFactory: queryFactorySpy,
 			});
 
@@ -2235,7 +2203,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -2285,7 +2252,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			},
 		]);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => query),
 			capabilitiesService,
 		});
@@ -2327,7 +2293,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			},
 		]);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => createMockQuery([makeSuccessResult()])),
 			capabilitiesService,
 		});
@@ -2358,7 +2323,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			new Error("catalog unavailable"),
 		);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: vi.fn(() => createMockQuery([makeSuccessResult()])),
 			capabilitiesService,
 		});
@@ -2393,7 +2357,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			queryFactorySpy = vi.fn(() => mockQuery);
 
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
 				queryFactory: queryFactorySpy,
 			});
 
@@ -2428,7 +2391,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			queryFactorySpy = vi.fn(() => mockQuery);
 
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
 				queryFactory: queryFactorySpy,
 			});
 
@@ -2513,7 +2475,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 			capabilitiesService: makeCapabilitiesService([
 				{
@@ -2639,7 +2600,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -2697,7 +2657,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -2737,7 +2696,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const mockQuery = createMockQuery([streamMessage]);
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -2786,7 +2744,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -2812,7 +2769,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 	it("rejects a malformed caller input id before calling query", async () => {
 		queryFactorySpy = vi.fn(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 		const result = await Effect.runPromise(
@@ -2841,7 +2797,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -2914,7 +2869,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -2971,7 +2925,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			throw new Error("query setup failed");
 		});
 		instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -2998,7 +2951,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3039,7 +2991,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3058,7 +3009,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		queryFactorySpy = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3103,7 +3053,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const secondReady = new Promise<void>((r) => {
 			resolveSecond = r;
 		});
-
 		const gen = (async function* () {
 			yield result1;
 			await secondReady;
@@ -3140,7 +3089,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3179,22 +3127,31 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 	it("interruptTurn during second turn resolves second turn's deferred", async () => {
 		const result1 = makeSuccessResult();
 
-		// The second turn will never yield a result — we interrupt instead
+		// The SDK reports the interrupted terminal after acknowledging Stop.
 		let resolveSecond: (() => void) | undefined;
 		const secondReady = new Promise<void>((r) => {
 			resolveSecond = r;
 		});
+		let markSecondRead = () => {};
+		const secondRead = new Promise<void>((resolve) => {
+			markSecondRead = resolve;
+		});
+		let promptIterator: AsyncIterator<SDKUserMessage> | undefined;
 
 		const gen = (async function* () {
+			const input = promptIterator;
+			if (!input) throw new Error("Missing SDK prompt iterator");
+			await input.next();
 			yield result1;
-			// Block forever — interrupt will close the prompt queue
-			// which causes the generator to end
+			await input.next();
+			markSecondRead();
 			await secondReady;
+			yield makeErrorResult({ errors: ["Interrupted"] });
 		})();
 
 		const mockQuery = Object.assign(gen, {
 			interrupt: vi.fn(async () => {
-				// Simulate SDK interrupt by unblocking the generator so it finishes
+				// Simulate the SDK terminal after interrupt acknowledgement.
 				resolveSecond?.();
 			}),
 			close: vi.fn(),
@@ -3223,9 +3180,17 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			[Symbol.asyncIterator]: () => gen,
 		}) as unknown as Query;
 
-		queryFactorySpy = vi.fn(() => mockQuery);
+		queryFactorySpy = vi.fn(
+			({
+				prompt,
+			}: Parameters<
+				NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
+			>[0]) => {
+				promptIterator = prompt[Symbol.asyncIterator]();
+				return mockQuery;
+			},
+		);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3251,18 +3216,18 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		const turn2Promise = Effect.runPromise(instance.sendTurnEffect(input2));
 
 		// Interrupt the second turn
+		await secondRead;
 		await Effect.runPromise(
 			instance.interruptTurnEffect("session-interrupt-2nd"),
 		);
 
-		// The interrupt path settles the queued turn before the stream finishes.
+		// The terminal result settles the second turn.
 		const turn2Result = await turn2Promise;
-		expect(turn2Result).toEqual({
+		expect(turn2Result).toMatchObject({
 			status: "interrupted",
-			cost: 0,
-			tokens: { input: 0, output: 0 },
-			durationMs: 0,
-			providerStateUpdates: [],
+			cost: 0.01,
+			tokens: { input: 50, output: 10 },
+			durationMs: 500,
 		});
 	});
 
@@ -3313,7 +3278,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3377,7 +3341,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3446,7 +3409,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3532,7 +3494,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3578,7 +3539,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3663,7 +3623,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3732,7 +3691,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -3792,7 +3750,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			else throw new Error(message);
 		})();
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: () => createQueryFromGenerator(gen),
 		});
 		const sink = createMockEventSink();
@@ -3873,7 +3830,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				})(),
 			);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory,
 		});
 		const sink = createMockEventSink();
@@ -3896,13 +3852,32 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			}),
 		);
 		expect(rejected.status).toBe("error");
-		const fallback = await Effect.runPromise(
+		const fallbackPromise = Effect.runPromise(
 			instance.sendTurnEffect({
 				...input,
 				startFreshNativeSession: true,
 				nativeResumeFallback: true,
 			}),
 		);
+		await waitForAssertion(() =>
+			expect(sink.requestPermission).toHaveBeenCalledOnce(),
+		);
+		await Effect.runPromise(
+			instance.resolvePermissionEffect(
+				input.sessionId,
+				"fallback-permission",
+				"once",
+			),
+		);
+		await waitForAssertion(() =>
+			expect(sink.requestQuestion).toHaveBeenCalledOnce(),
+		);
+		await Effect.runPromise(
+			instance.resolveQuestionEffect(input.sessionId, "fallback-question", {
+				"0": "Yes",
+			}),
+		);
+		const fallback = await fallbackPromise;
 		expect(fallback.status).toBe("completed");
 		expect(sink.requestPermission).toHaveBeenCalledOnce();
 		expect(sink.requestQuestion).toHaveBeenCalledOnce();
@@ -3954,7 +3929,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -4019,7 +3993,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 
@@ -4082,7 +4055,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 
 		queryFactorySpy = vi.fn(() => mockQuery);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactorySpy,
 		});
 

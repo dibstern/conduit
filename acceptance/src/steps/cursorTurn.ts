@@ -129,6 +129,8 @@ export const cursorTurnHandlers: StepHandler[] = [
 		name: "interrupt Cursor turn",
 		match: /^I interrupt the Cursor turn$/,
 		run: async ({ world }) => {
+			// Stop ignores clicks for 1.5s after a send from idle (double-tap guard).
+			await world.page.waitForTimeout(1500);
 			await world.page.locator("#stop").click();
 		},
 	},

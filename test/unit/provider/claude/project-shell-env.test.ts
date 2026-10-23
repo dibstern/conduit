@@ -191,13 +191,12 @@ describe("project shell environment", () => {
 			NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
 		>(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		await Effect.runPromise(
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
+					shellEnv: env.get(project),
 					workspaceRoot: project,
 					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
 					configDir: configuredClaudeConfigDir("/named/claude"),
@@ -243,11 +242,10 @@ describe("project shell environment", () => {
 			NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
 		>(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const input = makeBaseSendTurnInput({
+			shellEnv: env.get(project),
 			workspaceRoot: project,
 			model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
 			account: {
@@ -284,13 +282,12 @@ describe("project shell environment", () => {
 		});
 		await env.refresh(project);
 		const resumed = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const resumedResult = await Effect.runPromise(
 			resumed.sendTurnEffect({
 				...input,
+				shellEnv: env.get(project),
 				nativeThread: { ...nativeThread, projectId: "test-project" },
 				resumeSessionId: nativeThread.resumeSessionId,
 				providerState: Object.fromEntries(
@@ -318,13 +315,12 @@ describe("project shell environment", () => {
 			});
 		const namedConfigDir = join(home, "explicit-instance");
 		const namedInstance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const namedResult = await Effect.runPromise(
 			namedInstance.sendTurnEffect({
 				...input,
+				shellEnv: env.get(project),
 				account: {
 					id: AccountIdSchema.make("claude"),
 					name: "Claude",
@@ -564,8 +560,6 @@ describe("project shell environment", () => {
 			NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
 		>(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const send = async (sessionId: string) => {
@@ -573,6 +567,7 @@ describe("project shell environment", () => {
 			await Effect.runPromise(
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
+						shellEnv: env.get(project),
 						workspaceRoot: project,
 						sessionId,
 						model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
@@ -642,22 +637,43 @@ describe("project shell environment", () => {
 	it("refreshes on file creation, atomic rc replacement and TTL without cross-project leakage", async () => {
 		const other = join(home, "other");
 		mkdirSync(other);
+		// Keep native file polling and shell processes real, but drive TTL explicitly.
+		vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
 		const env = resolver({ ttlMs: 80 });
 		env.register(project, { overrides: { PROJECT_ID: "first" } });
 		env.register(other, { overrides: { PROJECT_ID: "second" } });
 		await Promise.all([env.refresh(project), env.refresh(other)]);
+		const refresh = env.refresh.bind(env);
+		const nextRefresh = () =>
+			new Promise<void>((resolve, reject) => {
+				const observed = vi.spyOn(env, "refresh");
+				observed.mockImplementation((directory, projectId) => {
+					const pending = refresh(directory, projectId);
+					if (directory === project) {
+						observed.mockRestore();
+						void pending.then(resolve, reject);
+					}
+					return pending;
+				});
+			});
+		// Subscribe before each mutation, then await the capture the watcher started.
+		let refreshed = nextRefresh();
 		writeFileSync(join(home, ".zshenv"), 'export CREATED_RC="yes"\n');
-		await vi.waitFor(() => expect(env.get(project)["CREATED_RC"]).toBe("yes"));
+		await refreshed;
+		expect(env.get(project)["CREATED_RC"]).toBe("yes");
+		refreshed = nextRefresh();
 		writeFileSync(
 			join(home, "replacement"),
 			'export PATH="/usr/bin:/bin"\nexport REPLACED_RC="yes"\n',
 		);
 		renameSync(join(home, "replacement"), join(home, ".zprofile"));
-		await vi.waitFor(() => expect(env.get(project)["REPLACED_RC"]).toBe("yes"));
+		await refreshed;
+		expect(env.get(project)["REPLACED_RC"]).toBe("yes");
 		const resolvedAt = env.snapshot(project).resolvedAt;
-		await vi.waitFor(() =>
-			expect(env.snapshot(project).resolvedAt).not.toBe(resolvedAt),
-		);
+		refreshed = nextRefresh();
+		await vi.advanceTimersByTimeAsync(80);
+		await refreshed;
+		expect(env.snapshot(project).resolvedAt).not.toBe(resolvedAt);
 		expect(env.get(project)["PROJECT_ID"]).toBe("first");
 		expect(env.get(other)["PROJECT_ID"]).toBe("second");
 	});

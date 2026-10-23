@@ -26,10 +26,23 @@
 	let anchorNode = $state<HTMLElement | null>(null);
 	let panelNode = $state<HTMLElement | null>(null);
 	let notchOffset = $state(0);
+	let holdSide = $state<"top" | "bottom">("bottom");
 	const panelId = $props.id();
 	const attachmentKey = createAttachmentKey();
 	const open = $derived(gestureState.phase === "open" || gestureState.phase === "following");
 	const following = $derived(gestureState.phase === "following");
+	$effect(() => {
+		if (open) measure();
+	});
+
+	function measure() {
+		if (!triggerNode || !anchorNode) return;
+		const trigger = triggerNode.getBoundingClientRect();
+		const anchor = anchorNode.getBoundingClientRect();
+		notchOffset = trigger.left + trigger.width / 2 - anchor.left + 4;
+		// Keep a heading and at least one 38px option below the finger.
+		holdSide = anchor.bottom + 12 + 44 + 38 <= window.innerHeight ? "bottom" : "top";
+	}
 
 	function itemAt(event: PointerEvent) {
 		const row = triggerNode?.ownerDocument.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-hold-menu-item]");
@@ -40,13 +53,17 @@
 		triggerNode = node;
 		menuNode = node.closest<HTMLElement>("[data-dropdown-menu-content]");
 		anchorNode = node.closest<HTMLElement>("[data-menu-grid]") ?? node;
-		const measure = () => {
-			notchOffset = node.getBoundingClientRect().left + node.getBoundingClientRect().width / 2 - (anchorNode?.getBoundingClientRect().left ?? 0) + 4;
-		};
 		const observer = new ResizeObserver(measure);
 		observer.observe(anchorNode);
+		window.addEventListener("resize", measure);
+		window.addEventListener("scroll", measure, true);
+		const cleanup = () => {
+			observer.disconnect();
+			window.removeEventListener("resize", measure);
+			window.removeEventListener("scroll", measure, true);
+		};
 		measure();
-		if (activation === "click") return () => observer.disconnect();
+		if (activation === "click") return cleanup;
 		const action = hold(node, {
 			followPointer: true,
 			keyboard: false,
@@ -75,7 +92,7 @@
 				gestureState = { phase: gestureState.phase === "following" || open ? "open" : "closed" };
 			},
 		});
-		return () => { observer.disconnect(); action.destroy(); };
+		return () => { cleanup(); action.destroy(); };
 	}
 
 	function closeList(event: Event) {
@@ -111,8 +128,8 @@
 			<DropdownMenu.SubContent
 				id={panelId}
 				aria-label={title}
-				side="bottom" align="start" sideOffset={12} alignOffset={-4}
-				customAnchor={anchorNode} strategy="fixed" avoidCollisions={following || activation === "click"} collisionPadding={activation === "click" ? 8 : 0}
+				side={activation === "click" ? "bottom" : holdSide} align="start" sideOffset={12} alignOffset={-4}
+				customAnchor={anchorNode} strategy="fixed" avoidCollisions={activation === "click"} collisionPadding={activation === "click" ? 8 : 0}
 				preventOverflowTextSelection={false}
 				onInteractOutside={(event) => {
 					if (activation === "hold" && event.target instanceof Node && menuNode?.contains(event.target)) event.preventDefault();
@@ -126,11 +143,11 @@
 								<span aria-hidden="true" class="text-status-snoozed"><Icon name={icon} size={14} /></span>{title}
 								{#if following}<small class="ml-auto text-[11.5px] font-normal text-text-dimmer">{hint}</small>{/if}
 							</div>
-							<div class="max-h-[calc(var(--bits-menu-content-available-height)-44px)] overflow-y-auto overscroll-contain">
+							<div class="flex max-h-[calc(var(--bits-menu-content-available-height)-44px)] flex-col overflow-y-auto overscroll-contain">
 							{#each items as item (item.id)}
 								<DropdownMenu.Item textValue={item.label} onSelect={item.action} data-hold-menu-item={item.id} data-selected={activation === "click" && item.selected || undefined} aria-current={activation === "click" && item.selected ? "true" : undefined} data-followed={gestureState.phase === "following" && gestureState.highlighted === item.id || undefined}>
 									{#snippet child({ props })}
-										<div {...props} class={["hold-menu-row relative flex cursor-pointer select-none items-center gap-[10px] rounded-[10px] px-[10px] text-[14.5px] outline-hidden", following ? "h-[38px]" : "h-[32px]", item.separated && "mt-[7px] before:absolute before:inset-x-[10px] before:-top-[4px] before:border-t before:border-border-chip before:content-['']"]}>
+										<div {...props} class={["hold-menu-row relative flex min-h-[32px] cursor-pointer select-none items-center gap-[10px] rounded-[10px] px-[10px] text-[14.5px] outline-hidden", following ? "h-[38px]" : "h-[32px]", item.separated && "mt-[7px] before:absolute before:inset-x-[10px] before:-top-[4px] before:border-t before:border-border-chip before:content-['']"]}>
 											<span aria-hidden="true" class="hold-menu-icon text-text-dimmer"><Icon name={item.icon ?? "clock"} size={14} /></span>{item.label}
 											{#if item.detail}<small class="hold-menu-detail ml-auto font-mono text-[12px] text-text-dimmer">{item.detail}</small>{/if}
 										</div>

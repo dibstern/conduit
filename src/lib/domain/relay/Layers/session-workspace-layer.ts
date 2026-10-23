@@ -18,18 +18,24 @@ import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { readWorktrees, realWorkspacePath } from "../../../git/worktrees.js";
 import {
 	type CommitAndSignalProject,
-	makeCommitAndSignal,
+	makeUnboundCommitAndSignal,
 } from "../../../persistence/effect/commit-and-signal.js";
+import {
+	makeUnboundEventStoreEffect,
+	UnboundEventStoreEffectTag,
+} from "../../../persistence/effect/event-store-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import {
+	canonicalEvent,
+	type EventPayloadMap,
+} from "../../../persistence/events.js";
 import { readClaudeWorktreeState } from "../../../session/claude-worktree-state.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import { ProjectContext } from "../../daemon/Services/project-context.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { ConfigTag } from "../Services/services.js";
-import {
-	applySessionCommand,
-	SessionCommandError,
-} from "../Services/session-command.js";
+import { SessionCommandError } from "../Services/session-command.js";
 import {
 	type ResolvedWorkspaceTarget,
 	type SessionWorkspace,
@@ -37,20 +43,112 @@ import {
 } from "../Services/session-workspace.js";
 import { readSessionWorktreeOwnership } from "../Services/session-worktree-deletion.js";
 
-type Dependencies = Effect.Services<ReturnType<typeof applySessionCommand>>;
-
 export const SessionWorkspaceLive = Layer.effect(
 	SessionWorkspaceTag,
 	Effect.gen(function* () {
 		const accounts = yield* AccountDirectory;
-		const config = yield* ConfigTag;
+		const projects = yield* Effect.serviceOption(ProjectContext);
+		const config = yield* Effect.serviceOption(ConfigTag);
 		const read = yield* ReadQueryEffectTag;
 		const sql = yield* SqlClient.SqlClient;
-		const commitAndSignal = yield* makeCommitAndSignal;
-		// Capture the relay context so command commits retain its event bus.
-		const services = yield* Effect.context<Dependencies>();
-		const launches = yield* Semaphore.make(1);
-		const folders = [config.projectDir, ...(config.extraFolders ?? [])];
+		const store = yield* makeUnboundEventStoreEffect;
+		const commitAndSignal = yield* makeUnboundCommitAndSignal.pipe(
+			Effect.provideService(UnboundEventStoreEffectTag, store),
+		);
+		const worktreeService = yield* Effect.serviceOption(WorktreeServiceTag);
+		const ownershipServices = yield* Effect.context<SqlClient.SqlClient>();
+		// Each project has one launch semaphore. A session operation takes one
+		// permit, so sessions run in parallel; project-wide work takes them all.
+		// Keep this finite: Infinity - Infinity would break semaphore accounting.
+		const projectPermits = Number.MAX_SAFE_INTEGER;
+		interface ProjectLaunches {
+			readonly project: Semaphore.Semaphore;
+			readonly sessions: Map<
+				string,
+				{ readonly lock: Semaphore.Semaphore; users: number }
+			>;
+		}
+		const makeLaunches = (): ProjectLaunches => ({
+			project: Semaphore.makeUnsafe(projectPermits),
+			sessions: new Map(),
+		});
+		const launches = new Map<string, ProjectLaunches>();
+		const standaloneLaunches = makeLaunches();
+		const launchesFor = (projectId?: string) => {
+			if (!projectId) return standaloneLaunches;
+			let entry = launches.get(projectId);
+			if (!entry) {
+				entry = makeLaunches();
+				launches.set(projectId, entry);
+			}
+			return entry;
+		};
+		const callerProject = Effect.map(
+			Effect.serviceOption(ConfigTag),
+			(caller) =>
+				caller._tag === "Some"
+					? caller.value.slug
+					: config._tag === "Some"
+						? config.value.slug
+						: undefined,
+		);
+		const withSessionLaunch = <A, E, R>(
+			sessionId: string,
+			effect: Effect.Effect<A, E, R>,
+			projectId?: string,
+		): Effect.Effect<A, E, R> =>
+			Effect.suspend(() => {
+				const { project, sessions } = launchesFor(projectId);
+				return Effect.acquireUseRelease(
+					Effect.sync(() => {
+						let entry = sessions.get(sessionId);
+						if (!entry) {
+							entry = { lock: Semaphore.makeUnsafe(1), users: 0 };
+							sessions.set(sessionId, entry);
+						}
+						// Count waiters too, including those waiting for the project permit.
+						entry.users++;
+						return entry;
+					}),
+					(entry) => project.withPermits(1)(entry.lock.withPermits(1)(effect)),
+					(entry) =>
+						Effect.sync(() => {
+							if (--entry.users === 0) sessions.delete(sessionId);
+						}),
+				);
+			});
+		const projectFor = (session: string | Account, projectId?: string) =>
+			Effect.gen(function* () {
+				if (projects._tag === "Some") {
+					if (typeof session === "string")
+						return yield* projects.value.forSession(session);
+					if (projectId !== undefined)
+						return yield* projects.value.forProject(projectId);
+					return yield* new SessionCommandError({
+						operation: "workspace.project",
+						cause: "A draft workspace requires a project id",
+					});
+				}
+				if (config._tag === "Some")
+					return {
+						projectId: config.value.slug,
+						mainFolder: config.value.projectDir,
+						extraFolders: config.value.extraFolders ?? [],
+					};
+				return yield* new SessionCommandError({
+					operation: "workspace.project",
+					cause: "Workspace project context is unavailable",
+				});
+			}).pipe(
+				Effect.mapError((cause) =>
+					cause instanceof SessionCommandError
+						? cause
+						: new SessionCommandError({
+								operation: "workspace.project",
+								cause,
+							}),
+				),
+			);
 		const readWorkspace = (sessionId: string) =>
 			Effect.gen(function* () {
 				const row = yield* read
@@ -80,7 +178,26 @@ export const SessionWorkspaceLive = Layer.effect(
 										}),
 								),
 							);
-				return { row, workspace };
+				return { row, workspace, project: yield* projectFor(sessionId) };
+			});
+		// Workspace changes have no upstream sync. Use the same append/project/
+		// signal transaction for daemon writes and callers joining an existing commit.
+		const writeWorkspace = (
+			data: EventPayloadMap["session.workspace_changed"],
+			project?: CommitAndSignalProject,
+		) =>
+			Effect.gen(function* () {
+				const { row } = yield* readWorkspace(data.sessionId);
+				const events = [
+					canonicalEvent("session.workspace_changed", data.sessionId, data, {
+						provider: row.provider,
+						createdAt: Date.now(),
+						metadata: { source: "relay" },
+					}),
+				];
+				yield* project
+					? Effect.flatMap(store.appendBatch(events), project)
+					: commitAndSignal(events);
 			});
 		const latestMove = (sessionId: string) => sql<{
 			sequence: number;
@@ -94,6 +211,7 @@ export const SessionWorkspaceLive = Layer.effect(
 			target: ResolvedWorkspaceTarget,
 			previous: RecordedWorkspace | null,
 			cause: RecordedWorkspace["cause"],
+			mainFolder: string,
 		): Record<string, string> => {
 			if (!target.reset)
 				return {
@@ -103,9 +221,7 @@ export const SessionWorkspaceLive = Layer.effect(
 					[target.projectFolder]: target.path,
 				};
 			const worktrees =
-				target.projectFolder === config.projectDir
-					? {}
-					: { ...previous?.worktrees };
+				target.projectFolder === mainFolder ? {} : { ...previous?.worktrees };
 			delete worktrees[target.projectFolder];
 			return worktrees;
 		};
@@ -115,15 +231,22 @@ export const SessionWorkspaceLive = Layer.effect(
 			cause: RecordedWorkspace["cause"],
 			origin: RecordedWorkspace["origin"] = "existing",
 			requestedFolder?: string,
+			projectId?: string,
 		) =>
 			Effect.gen(function* () {
-				const { row, workspace: previous } =
-					typeof sessionId === "string"
-						? yield* readWorkspace(sessionId)
-						: {
-								row: { provider: sessionId.id, workspace_hint: null },
-								workspace: null,
-							};
+				const {
+					row,
+					workspace: previous,
+					project,
+				} = typeof sessionId === "string"
+					? yield* readWorkspace(sessionId)
+					: {
+							row: { provider: sessionId.id, workspace_hint: null },
+							workspace: null,
+							project: yield* projectFor(sessionId, projectId),
+						};
+				const { mainFolder } = project;
+				const folders = [mainFolder, ...project.extraFolders];
 				const account =
 					typeof sessionId !== "string"
 						? sessionId
@@ -151,15 +274,15 @@ export const SessionWorkspaceLive = Layer.effect(
 								"server-declaration" &&
 								(cause === "agent" ||
 									(cause === "missing" &&
-										path === config.projectDir &&
+										path === mainFolder &&
 										previous?.origin === "existing" &&
-										effectiveWorkingDirectory(config.projectDir, previous) !==
-											config.projectDir) ||
+										effectiveWorkingDirectory(mainFolder, previous) !==
+											mainFolder) ||
 									(cause === "user" &&
 										(row.workspace_hint === path ||
 											// Recovery of an owned launch stays in its original repository.
 											(previous?.origin === "conduit" &&
-												path === config.projectDir)))))
+												path === mainFolder)))))
 						))
 				)
 					return yield* new WorkspaceMoveError({
@@ -218,8 +341,7 @@ export const SessionWorkspaceLive = Layer.effect(
 				// A draft choosing a secondary checkout starts there; a later move back
 				// to a configured folder still resets its mapping.
 				const reset =
-					configured &&
-					!(cause === "launch" && projectFolder !== config.projectDir);
+					configured && !(cause === "launch" && projectFolder !== mainFolder);
 				const target = {
 					path: normalized,
 					projectFolder,
@@ -229,7 +351,7 @@ export const SessionWorkspaceLive = Layer.effect(
 				};
 				const workspace = {
 					cause,
-					worktrees: worktreesFor(target, previous, cause),
+					worktrees: worktreesFor(target, previous, cause, mainFolder),
 					origin,
 				};
 				// Warm outside the permit, using the key read-model consumers use.
@@ -237,7 +359,7 @@ export const SessionWorkspaceLive = Layer.effect(
 					Promise.all([
 						daemonSessionGitCache.refresh(normalized),
 						daemonSessionGitCache.refresh(
-							effectiveWorkingDirectory(config.projectDir, workspace),
+							effectiveWorkingDirectory(mainFolder, workspace),
 						),
 					]),
 				).pipe(
@@ -256,18 +378,22 @@ export const SessionWorkspaceLive = Layer.effect(
 		) => {
 			const append = (project: CommitAndSignalProject) =>
 				Effect.gen(function* () {
-					const { row, workspace: previous } = yield* readWorkspace(sessionId);
+					const {
+						row,
+						workspace: previous,
+						project: { mainFolder },
+					} = yield* readWorkspace(sessionId);
 					// A provider switch during resolution must not bypass capability validation.
 					if (row.provider !== target.provider)
 						return yield* new WorkspaceMoveError({
 							path: target.path,
 							reason: "unsupported-provider",
 						});
-					const worktrees = worktreesFor(target, previous, cause);
+					const worktrees = worktreesFor(target, previous, cause, mainFolder);
 					if (
 						(!target.reset &&
 							!(target.origin === "conduit" && cause === "launch") &&
-							effectiveWorkingDirectory(config.projectDir, previous) ===
+							effectiveWorkingDirectory(mainFolder, previous) ===
 								target.path) ||
 						isDeepStrictEqual(worktrees, previous?.worktrees ?? {})
 					) {
@@ -282,16 +408,13 @@ export const SessionWorkspaceLive = Layer.effect(
 							latestCause !== "missing" &&
 							!(
 								cause === "user" &&
-								(yield* readClaudeWorktreeState(
-									sql,
-									sessionId,
-									config.projectDir,
-								)).workspaceMismatch
+								(yield* readClaudeWorktreeState(sql, sessionId, mainFolder))
+									.workspaceMismatch
 							)
 						)
 							return target.path;
 					}
-					const directory = effectiveWorkingDirectory(config.projectDir, {
+					const directory = effectiveWorkingDirectory(mainFolder, {
 						cause,
 						worktrees,
 						origin: target.origin ?? "existing",
@@ -299,24 +422,21 @@ export const SessionWorkspaceLive = Layer.effect(
 					const path = yield* realWorkspacePath(directory).pipe(
 						Effect.orElseSucceed(() => directory),
 					);
-					yield* applySessionCommand(
+					yield* writeWorkspace(
 						{
-							type: "session.workspace_changed",
-							data: {
-								sessionId,
-								cause,
-								path,
-								worktrees,
-								origin: target.origin ?? "existing",
-								...(cause === "launch" &&
-								target.origin === "conduit" &&
-								target.ownership
-									? { ownership: target.ownership }
-									: {}),
-							},
+							sessionId,
+							cause,
+							path,
+							worktrees,
+							origin: target.origin ?? "existing",
+							...(cause === "launch" &&
+							target.origin === "conduit" &&
+							target.ownership
+								? { ownership: target.ownership }
+								: {}),
 						},
-						{ project, upstreamAdapter: null },
-					).pipe(Effect.provide(services));
+						project,
+					);
 					return target.path;
 				});
 			return (
@@ -342,21 +462,21 @@ export const SessionWorkspaceLive = Layer.effect(
 		) => {
 			const append = (project: CommitAndSignalProject) =>
 				Effect.gen(function* () {
-					const { workspace } = yield* readWorkspace(parentSessionId);
-					const path = effectiveWorkingDirectory(config.projectDir, workspace);
-					yield* applySessionCommand(
+					const {
+						workspace,
+						project: { mainFolder },
+					} = yield* readWorkspace(parentSessionId);
+					const path = effectiveWorkingDirectory(mainFolder, workspace);
+					yield* writeWorkspace(
 						{
-							type: "session.workspace_changed",
-							data: {
-								sessionId,
-								path,
-								cause: "launch",
-								worktrees: { ...workspace?.worktrees },
-								origin: workspace?.origin ?? "existing",
-							},
+							sessionId,
+							path,
+							cause: "launch",
+							worktrees: { ...workspace?.worktrees },
+							origin: workspace?.origin ?? "existing",
 						},
-						{ project, upstreamAdapter: null },
-					).pipe(Effect.provide(services));
+						project,
+					);
 					return path;
 				});
 			return (
@@ -375,102 +495,117 @@ export const SessionWorkspaceLive = Layer.effect(
 			);
 		};
 		return {
-			withLaunch: launches.withPermits(1),
+			withLaunch: (sessionId, effect) =>
+				Effect.flatMap(callerProject, (projectId) =>
+					withSessionLaunch(sessionId, effect, projectId),
+				),
+			withProjectLaunch: (effect) =>
+				Effect.flatMap(callerProject, (projectId) =>
+					launchesFor(projectId).project.withPermits(projectPermits)(effect),
+				),
+			// Held and queued callers keep the old semaphores. Their completion must
+			// never delete a replacement registration's semaphores for the same slug.
+			forgetProject: (projectId) => {
+				launches.delete(projectId);
+			},
 			renameBranch: (sessionId, branchName) =>
-				launches.withPermits(1)(
-					Effect.gen(function* () {
-						const { workspace } = yield* readWorkspace(sessionId);
-						const ownership = yield* readSessionWorktreeOwnership(
-							sessionId,
-							false,
-						).pipe(Effect.provideService(ConfigTag, config));
-						if (ownership.length === 0)
-							return yield* new WorktreeBranchRenameError({
-								folder: config.projectDir,
-								reason: "not-owned",
-								message: "This session has no Conduit launch ownership.",
-							});
-						const worktrees = yield* Effect.serviceOption(WorktreeServiceTag);
-						if (worktrees._tag === "None")
-							return yield* new SessionCommandError({
-								operation: "workspace.renameBranch",
-								cause: "Branch rename is unavailable.",
-							});
-						// Git and the canonical ownership update must finish together even if
-						// the requesting browser disconnects while Git is running.
-						yield* Effect.gen(function* () {
-							yield* worktrees.value.renameBranch(ownership, branchName);
-							if (ownership.every((owned) => owned.branchName === branchName))
-								return;
-							const renamed = ownership.map((owned) => ({
-								...owned,
-								branchName,
-							}));
-							yield* applySessionCommand({
-								type: "session.workspace_changed",
-								data: {
+				Effect.flatMap(projectFor(sessionId), ({ projectId }) =>
+					withSessionLaunch(
+						sessionId,
+						Effect.gen(function* () {
+							const {
+								workspace,
+								project: { mainFolder },
+							} = yield* readWorkspace(sessionId);
+							const ownership = yield* readSessionWorktreeOwnership(
+								sessionId,
+								false,
+							);
+							if (ownership.length === 0)
+								return yield* new WorktreeBranchRenameError({
+									folder: mainFolder,
+									reason: "not-owned",
+									message: "This session has no Conduit launch ownership.",
+								});
+							const worktrees = worktreeService;
+							if (worktrees._tag === "None")
+								return yield* new SessionCommandError({
+									operation: "workspace.renameBranch",
+									cause: "Branch rename is unavailable.",
+								});
+							// Git and the canonical ownership update must finish together even if
+							// the requesting browser disconnects while Git is running.
+							yield* Effect.gen(function* () {
+								yield* worktrees.value.renameBranch(ownership, branchName);
+								if (ownership.every((owned) => owned.branchName === branchName))
+									return;
+								const renamed = ownership.map((owned) => ({
+									...owned,
+									branchName,
+								}));
+								yield* writeWorkspace({
 									sessionId,
 									cause: "branch-rename",
 									worktrees: { ...workspace?.worktrees },
 									origin: workspace?.origin ?? "existing",
 									ownership: renamed,
-								},
-							}).pipe(
-								Effect.catchCause((cause) =>
-									Effect.gen(function* () {
-										// A post-COMMIT signal failure must not undo recorded ownership.
-										const recorded = yield* Effect.result(
-											readSessionWorktreeOwnership(sessionId, false),
-										);
-										if (Result.isFailure(recorded))
-											return yield* new WorktreeBranchRenameError({
-												folder: ownership[0]?.folder ?? config.projectDir,
-												reason: "git-failed",
-												message: `Git renamed the branch to ${branchName}, but its recorded ownership could not be checked. ${Failure.renderCause(cause).slice(0, 2_000)}. ${String(recorded.failure.cause).slice(0, 2_000)}`,
-											});
-										if (
-											recorded.success.length === renamed.length &&
-											recorded.success.every(
-												(owned) => owned.branchName === branchName,
+								}).pipe(
+									Effect.catchCause((cause) =>
+										Effect.gen(function* () {
+											// A post-COMMIT signal failure must not undo recorded ownership.
+											const recorded = yield* Effect.result(
+												readSessionWorktreeOwnership(sessionId, false),
+											);
+											if (Result.isFailure(recorded))
+												return yield* new WorktreeBranchRenameError({
+													folder: ownership[0]?.folder ?? mainFolder,
+													reason: "git-failed",
+													message: `Git renamed the branch to ${branchName}, but its recorded ownership could not be checked. ${Failure.renderCause(cause).slice(0, 2_000)}. ${String(recorded.failure.cause).slice(0, 2_000)}`,
+												});
+											if (
+												recorded.success.length === renamed.length &&
+												recorded.success.every(
+													(owned) => owned.branchName === branchName,
+												)
 											)
-										)
+												return yield* Effect.failCause(cause);
+											const originalName = ownership[0]?.branchName;
+											if (originalName !== undefined)
+												yield* worktrees.value
+													.renameBranch(renamed, originalName)
+													.pipe(
+														Effect.mapError(
+															(error) =>
+																new WorktreeBranchRenameError({
+																	folder: error.folder,
+																	reason: "git-failed",
+																	message: `${Failure.renderCause(cause).slice(0, 2_000)}. Branch rollback failed: ${error.message}`,
+																}),
+														),
+													);
 											return yield* Effect.failCause(cause);
-										const originalName = ownership[0]?.branchName;
-										if (originalName !== undefined)
-											yield* worktrees.value
-												.renameBranch(renamed, originalName)
-												.pipe(
-													Effect.mapError(
-														(error) =>
-															new WorktreeBranchRenameError({
-																folder: error.folder,
-																reason: "git-failed",
-																message: `${Failure.renderCause(cause).slice(0, 2_000)}. Branch rollback failed: ${error.message}`,
-															}),
-													),
-												);
-										return yield* Effect.failCause(cause);
-									}),
-								),
-							);
-						}).pipe(Effect.uninterruptible);
-					}).pipe(
-						Effect.provide(services),
-						Effect.provideService(ConfigTag, config),
-						Effect.mapError((cause) =>
-							cause instanceof WorktreeBranchRenameError ||
-							cause instanceof SessionCommandError
-								? cause
-								: new SessionCommandError({
-										operation: "workspace.renameBranch",
-										cause,
-									}),
+										}),
+									),
+								);
+							}).pipe(Effect.uninterruptible);
+						}).pipe(
+							Effect.provide(ownershipServices),
+							Effect.mapError((cause) =>
+								cause instanceof WorktreeBranchRenameError ||
+								cause instanceof SessionCommandError
+									? cause
+									: new SessionCommandError({
+											operation: "workspace.renameBranch",
+											cause,
+										}),
+							),
 						),
+						projectId,
 					),
 				),
-			get: (sessionId, nativeDirectory, mainFolder = config.projectDir) =>
+			get: (sessionId, nativeDirectory) =>
 				readWorkspace(sessionId).pipe(
-					Effect.flatMap(({ workspace }) =>
+					Effect.flatMap(({ workspace, project: { mainFolder } }) =>
 						Effect.gen(function* () {
 							// Native sessions retain their first observed directory until an
 							// explicit workspace move, including a reset, overrides it.
@@ -499,12 +634,17 @@ export const SessionWorkspaceLive = Layer.effect(
 					),
 				),
 			resolve,
-			preview: (account, path) =>
-				Effect.map(resolve(account, path, "launch"), (target) => ({
-					cause: "launch" as const,
-					origin: target.origin,
-					worktrees: worktreesFor(target, null, "launch"),
-				})),
+			preview: (account, path, projectId) =>
+				Effect.map(
+					resolve(account, path, "launch", "existing", undefined, projectId),
+					(target) => ({
+						cause: "launch" as const,
+						origin: target.origin,
+						worktrees: target.reset
+							? {}
+							: { [target.projectFolder]: target.path },
+					}),
+				),
 			record,
 			inherit,
 			move: (sessionId, path, cause, origin, projectFolder, ownership) =>
@@ -518,7 +658,9 @@ export const SessionWorkspaceLive = Layer.effect(
 					),
 				),
 			claudeWorktreeState: (sessionId) =>
-				readClaudeWorktreeState(sql, sessionId, config.projectDir).pipe(
+				Effect.flatMap(projectFor(sessionId), ({ mainFolder }) =>
+					readClaudeWorktreeState(sql, sessionId, mainFolder),
+				).pipe(
 					Effect.mapError(
 						(cause) =>
 							new SessionCommandError({

@@ -16,6 +16,7 @@ import type { TitleGenerationState } from "../../contracts/title-generation.js";
 import {
 	catalogFromProviderList,
 	findCatalogModel,
+	modelParameterChoices,
 	offeredOptions,
 	resolveTurnSettings,
 } from "../../provider/turn-settings.js";
@@ -158,7 +159,10 @@ export interface InstanceOption {
 	readonly status?: InstanceStatus;
 	readonly available?: boolean | undefined;
 	readonly unavailableReason?: string | undefined;
-	readonly unavailableCode?: "auth_required" | undefined;
+	readonly unavailableCode?:
+		| "auth_required"
+		| "codex_version_unsupported"
+		| undefined;
 	readonly capabilities?: ProviderSessionCapabilities | undefined;
 }
 
@@ -1592,6 +1596,7 @@ export function applyGetCommandsResponse(
 					? { description: command.description }
 					: {}),
 				...(command.args != null ? { args: command.args } : {}),
+				...(command.skillRef != null ? { skillRef: command.skillRef } : {}),
 				...(command.builtin ? { builtin: true } : {}),
 			})),
 		},
@@ -1791,15 +1796,17 @@ export function chooseModel(model: {
 	if (sessionState.currentId) {
 		const current = getSessionPick(sessionState.currentId);
 		const catalog = getActiveModel(model.modelId, model.providerId);
-		const variants = catalog?.variants ?? [];
+		const choices = catalog ? modelParameterChoices(catalog) : undefined;
+		const variants = choices?.offered() ?? [];
 		const options = catalog?.contextWindowOptions ?? [];
 		return chooseSessionPick(sessionState.currentId, {
 			...model,
 			variants,
 			contextWindowOptions: options,
-			variant: variants.includes(current?.variant ?? "")
-				? (current?.variant ?? "")
-				: "",
+			variant:
+				choices && Result.isSuccess(choices.resolve(current?.variant ?? ""))
+					? (current?.variant ?? "")
+					: "",
 			contextWindow: options.some(
 				(option) => option.value === current?.contextWindow,
 			)

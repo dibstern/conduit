@@ -1,6 +1,7 @@
 /**
  * iOS 26+ blurs the status-bar area unless WebKit finds a fixed or sticky box
- * at (width / 2, 4). #compact-top-edge is that box. While sampling, WebKit
+ * at (width / 2, 4). #compact-top-edge supplies it outside native modals,
+ * which provide their own fixed edge. While sampling, WebKit
  * skips any layer with no fixed or sticky element inside it or around it, so
  * a box painted over the strip is harmless until it holds one. #scroll-btn is
  * sticky, so once the transcript was scrolled up, #app (painted over the strip)
@@ -20,8 +21,8 @@ test.use({
 	isMobile: true,
 });
 
-/** What WebKit's sampler would hit before the strip, as "covering element (pinned element inside its layer)". */
-function sampledOverStrip(page: Page): Promise<string[]> {
+/** What WebKit's sampler would hit before a pinned edge, as "covering element (pinned element inside its layer)". */
+function sampledOverEdge(page: Page): Promise<string[]> {
 	return page.evaluate(() => {
 		// The sampler's first pass ignores pointer-events.
 		const override = document.createElement("style");
@@ -39,11 +40,10 @@ function sampledOverStrip(page: Page): Promise<string[]> {
 				element.checkVisibility()
 			);
 		};
-		const strip = stack.findIndex(
-			(element) => element.id === "compact-top-edge",
-		);
-		if (strip < 0) return ["#compact-top-edge is not at the sample point"];
-		return stack.slice(0, strip).flatMap((element) => {
+		// A fullscreen native modal occludes the strip and supplies its own edge.
+		const edge = stack.findIndex(isPinned);
+		if (edge < 0) return ["No fixed or sticky edge at the sample point"];
+		return stack.slice(0, edge).flatMap((element) => {
 			// Inside a fixed or sticky box, the sampler finds an edge anyway.
 			for (let at: Element | null = element; at; at = at.parentElement)
 				if (isPinned(at)) return [];
@@ -93,27 +93,62 @@ test("nothing the iOS sampler reads covers the top-edge strip", async ({
 	relayUrl,
 }, testInfo) => {
 	const samples: Record<string, string[]> = {};
+	const controls: Record<string, string[]> = {};
 	await gotoRelay(page, relayUrl);
 	await expect(page.locator("#session-bar-more")).toBeVisible();
-	samples["chat"] = await sampledOverStrip(page);
+	samples["chat"] = await sampledOverEdge(page);
+
+	await page.locator("#compact-top-edge").evaluate((strip) => {
+		strip.style.display = "none";
+	});
+	controls["missing edge"] = await sampledOverEdge(page);
+	await page.locator("#compact-top-edge").evaluate((strip) => {
+		strip.style.removeProperty("display");
+	});
 
 	await scrollTranscriptUp(page);
-	samples["chat, scrolled up"] = await sampledOverStrip(page);
+	samples["chat, scrolled up"] = await sampledOverEdge(page);
+
+	// Recreate the original paint order while the sticky jump rail is visible.
+	await page.locator("#compact-top-edge").evaluate((strip) => {
+		strip.style.zIndex = "auto";
+	});
+	controls["app over edge with sticky descendant"] =
+		await sampledOverEdge(page);
+	await page.locator("#compact-top-edge").evaluate((strip) => {
+		strip.style.removeProperty("z-index");
+	});
 
 	await page.locator("#messages").dispatchEvent("wheel", { deltaY: 120 });
 	await expect(page.getByTestId("session-bar")).toHaveAttribute(
 		"data-collapsed",
 		"true",
 	);
-	samples["island, scrolled up"] = await sampledOverStrip(page);
+	samples["island, scrolled up"] = await sampledOverEdge(page);
 
 	await page.locator("#session-bar-back").click();
-	await expect(page.locator("#list-bar-more")).toBeVisible();
-	samples["session list"] = await sampledOverStrip(page);
+	await expect(page.locator("#list-bar-settings")).toBeVisible();
+	samples["session list"] = await sampledOverEdge(page);
+	await page.getByTestId("list-bar-settings").click();
+	await expect(page.locator("#settings-panel")).toBeVisible();
+	samples["settings open"] = await sampledOverEdge(page);
+	await page.getByTestId("settings-close-btn").click();
+	await expect(page.locator("#settings-panel")).toHaveCount(0);
+	samples["settings closed"] = await sampledOverEdge(page);
 
 	writeFileSync(
 		testInfo.outputPath("samples.json"),
 		JSON.stringify(samples, null, "\t"),
+	);
+	writeFileSync(
+		testInfo.outputPath("controls.json"),
+		JSON.stringify(controls, null, "\t"),
+	);
+	expect(controls["missing edge"]).toEqual([
+		"No fixed or sticky edge at the sample point",
+	]);
+	expect(controls["app over edge with sticky descendant"]).toEqual(
+		expect.arrayContaining([expect.stringMatching(/^div#app \(.+\)$/)]),
 	);
 	expect(samples).toEqual(
 		Object.fromEntries(Object.keys(samples).map((state) => [state, []])),

@@ -1,19 +1,20 @@
 import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { Effect } from "effect";
+import { Clock, Effect, Option } from "effect";
 import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import { DirectoryListingServiceTag } from "../../domain/relay/Services/directory-listing-service.js";
 import { resolveSessionRequestFolders } from "../../domain/relay/Services/provider-turn-dispatch.js";
-import { ConfigTag } from "../../domain/relay/Services/services.js";
-import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
+import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { ToolContentServiceTag } from "../../domain/relay/Services/tool-content-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
+	FILE_TREE_TIMEOUT_MS,
 	getFileContentResponse,
 	getFileListResponse,
 	getFileTreeEntries,
 } from "../../handlers/files.js";
+import { getDiscoveredSkillForSession } from "../../handlers/settings.js";
 import { getSkillContentValue } from "../../handlers/skill-content.js";
 import { labelProjectFolders } from "../../project-folders.js";
 import {
@@ -71,27 +72,35 @@ export const filesHandlers = {
 		),
 	GetFileTree: (request) =>
 		Effect.flatMap(ConfigTag, (config) =>
-			resolveSessionRequestFolders(
-				"sessionId" in request ? request.sessionId : undefined,
-			).pipe(
-				Effect.flatMap(({ workspaceRoot, effectiveFolders }) =>
-					Effect.gen(function* () {
-						const entries = yield* getFileTreeEntries(workspaceRoot);
-						const roots = labelProjectFolders(
-							effectiveFolders.map(({ root }) => root),
-						).map((folder, index) => ({
-							...folder,
-							...(effectiveFolders[index]?.shared ? { shared: true } : {}),
-						}));
-						return {
-							projectSlug: config.slug,
-							entries,
-							...(roots.length > 1 || roots.some((folder) => folder.shared)
-								? { roots }
-								: {}),
-						};
-					}),
-				),
+			Effect.gen(function* () {
+				const startedAt = yield* Clock.currentTimeMillis;
+				const folders = yield* resolveSessionRequestFolders(
+					"sessionId" in request ? request.sessionId : undefined,
+				).pipe(Effect.timeoutOption(FILE_TREE_TIMEOUT_MS));
+				if (Option.isNone(folders)) {
+					const log = yield* LoggerTag;
+					const elapsed = (yield* Clock.currentTimeMillis) - startedAt;
+					log.warn(
+						`File tree deadline reached: "session folders" after ${elapsed} ms`,
+					);
+					return { projectSlug: config.slug, entries: [] };
+				}
+				const { workspaceRoot, effectiveFolders } = folders.value;
+				const entries = yield* getFileTreeEntries(workspaceRoot, startedAt);
+				const roots = labelProjectFolders(
+					effectiveFolders.map(({ root }) => root),
+				).map((folder, index) => ({
+					...folder,
+					...(effectiveFolders[index]?.shared ? { shared: true } : {}),
+				}));
+				return {
+					projectSlug: config.slug,
+					entries,
+					...(roots.length > 1 || roots.some((folder) => folder.shared)
+						? { roots }
+						: {}),
+				};
+			}).pipe(
 				Effect.catch((error) =>
 					Effect.fail(
 						new WsRpcError({
@@ -156,20 +165,28 @@ export const filesHandlers = {
 	GetSkillContent: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
-			const primaryFolder = config.projectDir;
-			const directory =
-				"sessionId" in request
-					? yield* (yield* SessionWorkspaceTag).get(request.sessionId)
-					: primaryFolder;
-			const result = yield* getSkillContentValue(request.name, directory);
-			if (result === undefined) {
+			const skill = yield* getDiscoveredSkillForSession(
+				request.skillRef,
+				"sessionId" in request ? request.sessionId : undefined,
+			);
+			if (skill?.location._tag === "Provider") {
+				return yield* Effect.fail(
+					new WsRpcError({
+						message: "Skill content not available: managed by the provider",
+					}),
+				);
+			}
+			const result = skill
+				? yield* getSkillContentValue(skill.location)
+				: undefined;
+			if (skill === undefined || result === undefined) {
 				return yield* Effect.fail(
 					new WsRpcError({ message: "Skill content not available" }),
 				);
 			}
 			return {
 				projectSlug: config.slug,
-				name: request.name,
+				name: skill.name,
 				...result,
 			};
 		}).pipe(Effect.catch(mapRpcFailure("GetSkillContent"))),

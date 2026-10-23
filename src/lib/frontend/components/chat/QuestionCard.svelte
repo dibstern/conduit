@@ -53,6 +53,7 @@
 	let singleSelected = $state(new Map<number, string>());
 
 	const canSubmit = $derived(isValidSubmission(selections, request.questions));
+	const isAsync = $derived(request.delivery === "async");
 	const canSkip = $derived(
 		getDriverTraits(request.providerId)?.supportsQuestionSkip ?? true,
 	);
@@ -186,10 +187,14 @@
 			originId: getBrowserClientId(),
 			commandId: crypto.randomUUID(),
 			toolId: request.toolId,
-		}).catch((error) => {
-			if (resolved === "skipped") resolved = null;
-			errorMessage = failureLine(error, "Could not skip this question.");
-		});
+		})
+			.then(() => {
+				if (isAsync) removeQuestion(request.toolId);
+			})
+			.catch((error) => {
+				if (resolved === "skipped") resolved = null;
+				errorMessage = failureLine(error, isAsync ? "Could not dismiss this question." : "Could not skip this question.");
+			});
 		resolved = "skipped";
 	}
 
@@ -203,13 +208,22 @@
 </script>
 
 <div
-	class={inline ? '' : 'my-[8px] mx-auto max-w-[760px] px-[16px]'}
+	class="question-form {inline ? '' : 'my-[8px] mx-auto max-w-[760px] px-[16px]'}"
 	data-question-tool-id={request.toolId}
 >
 	<Surface variant="raised" radius="lg" class="question-card p-[12px]">
-		<div class="question-title text-[13px] font-semibold mb-[8px] text-text-secondary">
-			Input Required
-		</div>
+		{#if isAsync}
+			<div class="flex items-center justify-between gap-[8px] mb-[8px]">
+				<div class="question-title text-[13px] font-semibold text-text-secondary">Answer anytime</div>
+				{#if !resolved}
+					<Button variant="ghost" size="sm" icon="x" iconOnly ariaLabel="Dismiss question" touchTarget onclick={handleSkip} />
+				{/if}
+			</div>
+		{:else}
+			<div class="question-title text-[13px] font-semibold mb-[8px] text-text-secondary">
+				Input Required
+			</div>
+		{/if}
 
 		{#if synthetic && !resolved}
 			<div class="question-synthetic-warning text-[12px] text-text-muted bg-bg-surface border border-border-subtle rounded-[6px] px-[12px] py-[8px] mb-[12px] leading-[1.6]">
@@ -223,7 +237,7 @@
 			{@const inputName = `question-${instanceId}-${request.toolId}-${qIdx}`}
 			<div class="question-section mb-[12px] last:mb-[8px]" data-q-idx={qIdx}>
 				<div
-					class="question-header text-[12px] font-semibold mb-[2px] text-text-dimmer font-mono"
+					class="question-header text-mono-xs font-semibold mb-[2px] text-text-dimmer font-mono"
 				>
 					{formatQuestionHeader(q.header)}
 				</div>
@@ -255,10 +269,9 @@
 												(e.target as HTMLInputElement)
 													.checked,
 											)}
-										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-[2px]"
+										class="question-option-content flex min-w-0 flex-col gap-[2px]"
 									>
 										<span
 											class="question-option-label text-[13px] font-medium text-text"
@@ -266,7 +279,7 @@
 										>
 										{#if opt.description}
 											<span
-												class="question-option-desc text-[12px] text-text-muted"
+												class="question-option-desc text-[12px] font-normal text-text-muted"
 												>{opt.description}</span
 											>
 										{/if}
@@ -290,10 +303,9 @@
 												qIdx,
 												opt.label,
 											)}
-										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-[2px]"
+										class="question-option-content flex min-w-0 flex-col gap-[2px]"
 									>
 										<span
 											class="question-option-label text-[13px] font-medium text-text"
@@ -301,7 +313,7 @@
 										>
 										{#if opt.description}
 											<span
-												class="question-option-desc text-[12px] text-text-muted"
+												class="question-option-desc text-[12px] font-normal text-text-muted"
 												>{opt.description}</span
 											>
 										{/if}
@@ -312,7 +324,7 @@
 					</div>
 				{/if}
 
-				{#if q.custom}
+				{#if q.custom || q.isSecret}
 					<div class="question-custom mt-[6px]">
 						{#if q.options.length > 0}
 							{@const customOptId = `${inputName}-custom-radio`}
@@ -336,10 +348,9 @@
 												(e.target as HTMLInputElement)
 													.checked,
 											)}
-										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-[2px]"
+										class="question-option-content flex min-w-0 flex-col gap-[2px]"
 									>
 										<span
 											class="question-option-label text-[13px] font-medium text-text"
@@ -365,10 +376,9 @@
 												qIdx,
 												"__custom__",
 											)}
-										class="mt-[2px]"
 									/>
 									<span
-										class="question-option-content flex flex-col gap-[2px]"
+										class="question-option-content flex min-w-0 flex-col gap-[2px]"
 									>
 										<span
 											class="question-option-label text-[13px] font-medium text-text"
@@ -380,6 +390,8 @@
 						{/if}
 						<TextInput
 							id={`${inputName}-custom`}
+							type={q.isSecret ? "password" : "text"}
+							autocomplete={q.isSecret ? "off" : undefined}
 							aria-label="Type your answer"
 							class="mt-[4px]"
 							placeholder="Type your answer"
@@ -405,27 +417,23 @@
 		{/if}
 
 		{#if !resolved}
-			<div class="question-actions flex gap-[8px] mt-[8px] max-sm:flex-col">
-				<!-- No `!` overrides left. Two are gone rather than moved: a
-				     `disabled:opacity-40!` that disagreed with the primitive's 50%
-				     for no stated reason, and a `disabled:hover:bg-success/10!`
-				     that cancelled the disabled hover tint one call site at a time.
-				     Button now drops every variant hover while the button is inert
-, so the whole app gets what this file had. -->
+			<div class="question-actions flex flex-wrap gap-[8px] mt-[12px]">
 				<Button
-					variant="secondary"
-					size="content"
-					class="question-submit-btn min-h-[44px] flex-1 px-[16px] py-[8px] text-[13px] font-medium font-sans"
+					variant="chip"
+					size="phone-card-action"
+					touchTarget="always"
+					class="question-submit-btn font-medium font-sans"
 					disabled={!canSubmit}
 					onclick={handleSubmit}
 				>
 					Submit
 				</Button>
-				{#if canSkip}
+				{#if canSkip && !isAsync}
 					<Button
-						variant="secondary"
-						size="content"
-						class="question-skip-btn min-h-[44px] flex-1 px-[16px] py-[8px] text-[13px] font-medium font-sans"
+						variant="chip"
+						size="phone-card-action"
+						touchTarget="always"
+						class="question-skip-btn font-medium font-sans"
 						onclick={handleSkip}
 					>
 						Skip
@@ -433,14 +441,15 @@
 				{/if}
 			</div>
 		{:else if resolved === "submitting"}
-			<div class="question-actions flex gap-[8px] mt-[8px] max-sm:flex-col">
+			<div class="question-actions flex gap-[8px] mt-[12px]">
 				<Button
-					variant="secondary"
-					size="content"
+					variant="chip"
+					size="phone-card-action"
+					touchTarget="always"
 					layout="flow"
 					hoverFill="none"
 					disabledStyle="none"
-					class="question-submit-btn min-h-[44px] flex-1 px-[16px] py-[8px] text-[13px] font-medium font-sans opacity-60 cursor-not-allowed"
+					class="question-submit-btn font-medium font-sans opacity-60 cursor-not-allowed"
 					disabled
 				>
 					Submitting&hellip;
@@ -449,8 +458,8 @@
 		{:else}
 			<div class="question-resolved text-[13px] py-[8px]">
 				{#if resolved === "skipped"}
-					<span class="question-resolved-skip text-error"
-						>Skipped &#x2717;</span
+					<span class="question-resolved-skip text-text-dimmer"
+						>{isAsync ? "Dismissed" : "Skipped"}</span
 					>
 				{:else}
 					<span class="question-resolved-ok text-success"
@@ -461,3 +470,62 @@
 		{/if}
 	</Surface>
 </div>
+
+<style>
+	.question-form :global(.question-option) {
+		border: 0;
+		min-height: 0;
+		align-items: baseline;
+		font-weight: 500;
+	}
+	.question-form :global(.question-option:has(input:checked)) {
+		background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+	}
+	@media (pointer: coarse) {
+		.question-form :global(.question-option) {
+			min-height: 44px;
+			flex-wrap: wrap;
+			align-content: center;
+		}
+		.question-form :global(.question-option-content) {
+			flex: 1;
+		}
+	}
+	.question-form :global(input[type="radio"]),
+	.question-form :global(input[type="checkbox"]) {
+		appearance: none;
+		position: relative;
+		margin: 0;
+		font: inherit;
+		width: 13px;
+		height: 13px;
+		border: 1.5px solid var(--color-text-dimmer);
+		background: transparent;
+		/* A replaced control's baseline is its bottom edge. Center it on the font's x-height. */
+		transform: translateY(calc(50% - 0.5ex));
+	}
+	.question-form :global(input[type="radio"]) {
+		border-radius: 50%;
+	}
+	.question-form :global(input[type="checkbox"]) {
+		border-radius: 3px;
+	}
+	.question-form :global(input:checked) {
+		border-color: var(--color-accent);
+		background: var(--color-accent);
+	}
+	.question-form :global(input[type="radio"]:checked) {
+		box-shadow: inset 0 0 0 3px var(--color-bg-surface);
+	}
+	.question-form :global(input[type="checkbox"]:checked)::after {
+		content: "";
+		position: absolute;
+		left: 3px;
+		top: 0;
+		width: 4px;
+		height: 7px;
+		border: solid var(--color-bg);
+		border-width: 0 1.5px 1.5px 0;
+		transform: rotate(45deg);
+	}
+</style>

@@ -81,6 +81,11 @@ function snapshotRowToHistory(
 				: {
 						state: {
 							...providerState,
+							...("status" in state && state.status === "error"
+								? { outcome: "failed" as const }
+								: "status" in state && state.status === "completed"
+									? { outcome: "succeeded" as const }
+									: {}),
 							...(metadata === undefined ? {} : { metadata }),
 							...projectTool({
 								name:
@@ -110,6 +115,7 @@ function snapshotRowToHistory(
 		...parsed,
 		id: parsed.id,
 		role: parsed.role,
+		...(row.turn_id == null ? {} : { turnId: row.turn_id }),
 		parts,
 		...(row.context_tokens != null
 			? { contextTokens: row.context_tokens }
@@ -140,13 +146,14 @@ const TOOL_STATUSES = new Map<string, ToolStatus>([
 	["error", "error"],
 ]);
 
-/** The tool metadata the browser reads: a subagent's session, a settled
- *  status, and a launching row's task, outcome, step, times and usage.
+/** The tool metadata the browser reads: live output, a subagent's session,
+ *  a settled status, and a launching row's task, outcome, step, times and usage.
  *  Everything else stays on the server — an OpenCode edit's metadata alone
  *  holds the whole file twice over. */
 const BROWSER_METADATA_KEYS = new Set([
 	"status",
 	"childSessionId",
+	"subagentResult",
 	"sessionId",
 	"providerTaskId",
 	"backgrounded",
@@ -171,7 +178,6 @@ const CURSOR_PRESENTATION_KEYS = new Set([
 	"truncated",
 	"movedToBackground",
 	"exitCode",
-	"isError",
 	"fileChange",
 	"plan",
 	"computerUse",
@@ -190,7 +196,7 @@ function browserMetadata(
 			([key, value]) =>
 				(BROWSER_METADATA_KEYS.has(key) ||
 					(cursor && CURSOR_PRESENTATION_KEYS.has(key)) ||
-					(cursor && inFlight && key === "output")) &&
+					(inFlight && key === "output" && typeof value === "string")) &&
 				(typeof value === "string" ||
 					typeof value === "number" ||
 					typeof value === "boolean" ||
@@ -353,6 +359,8 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 		const status =
 			row.status == null ? undefined : TOOL_STATUSES.get(row.status);
 		if (status) stateObj["status"] = status;
+		if (status === "error") stateObj.outcome = "failed";
+		else if (status === "completed") stateObj.outcome = "succeeded";
 		const metadata = browserMetadata(
 			row.metadata == null ? undefined : parseObjectJson(row.metadata),
 			row.result == null &&
@@ -360,8 +368,7 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 				row.status !== "error",
 		);
 		if (metadata) stateObj["metadata"] = metadata;
-		if (metadata?.["isError"] === true) {
-			stateObj["status"] = "error";
+		if (stateObj.outcome === "failed") {
 			stateObj["error"] = stateObj.output?.text ?? "Tool failed";
 		}
 		if (Object.keys(stateObj).length > 0) {
@@ -419,6 +426,7 @@ export function messageRowsToHistory(
 		return {
 			id: row.id,
 			role: row.role as "user" | "assistant",
+			...(row.turn_id == null ? {} : { turnId: row.turn_id }),
 			...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),
 			...(row.input_id ? { inputId: row.input_id } : {}),
 			...(row.steered === 1 ? { steered: true } : {}),

@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { tick } from "svelte";
 import { draftList } from "../../stores/draft-list.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import {
@@ -51,6 +52,7 @@ function resetSessionState() {
 	uiState.selectMode = false;
 	uiState.settledShelfOpen = false;
 	uiState.snoozedShelfOpen = false;
+	uiState.sessionGroupsOpen = { pinned: true, running: true, idle: true };
 	uiState.draftsTrayOpen = true;
 	draftList.rows = [];
 	clearSessionState();
@@ -71,8 +73,19 @@ const meta = {
 	tags: ["autodocs"],
 	parameters: { layout: "centered" },
 	beforeEach: () => {
+		const groupsOpen = { ...uiState.sessionGroupsOpen };
+		const storedGroups = (["pinned", "running", "idle"] as const).map(
+			(group) =>
+				[group, localStorage.getItem(`session-group-${group}-open`)] as const,
+		);
 		resetSessionState();
 		return () => {
+			uiState.sessionGroupsOpen = groupsOpen;
+			for (const [group, open] of storedGroups) {
+				const key = `session-group-${group}-open`;
+				if (open === null) localStorage.removeItem(key);
+				else localStorage.setItem(key, open);
+			}
 			uiState.selectMode = false;
 			attachedProjectState.slug = null;
 			routerState.search = "";
@@ -134,6 +147,197 @@ export const SelectMode: Story = {
 };
 
 const SNOOZE_STORY_NOW = new Date(2030, 9, 7, 9).getTime();
+
+export const AllGroups: Story = {
+	name: "All groups, shared collapsible headers",
+	beforeEach: () => {
+		sessionState.now = SNOOZE_STORY_NOW;
+		uiState.settledShelfOpen = true;
+		uiState.snoozedShelfOpen = true;
+		seedSessions(
+			(["pinned", "running", "idle", "settled", "snoozed"] as const).flatMap(
+				(group) =>
+					Array.from({ length: 3 }, (_, i) => ({
+						id: `${group}-${i}`,
+						accountId: null,
+						projectSlug: "conduit",
+						title: `${group} task ${i + 1}`,
+						attention:
+							group === "running" ? ("working" as const) : ("idle" as const),
+						...(group === "pinned" ? { pinnedAt: SNOOZE_STORY_NOW } : {}),
+						...(group === "settled"
+							? { settledAt: SNOOZE_STORY_NOW - 3_600_000 }
+							: {}),
+						...(group === "snoozed"
+							? {
+									snoozedAt: SNOOZE_STORY_NOW,
+									snoozedUntil: SNOOZE_STORY_NOW + 3_600_000,
+								}
+							: {}),
+					})),
+			),
+		);
+		openSessionForSetup("pinned-0");
+	},
+	play: async ({ canvasElement, mount }) => {
+		await mount();
+		const canvas = within(canvasElement);
+		const groups = ["pinned", "running", "idle", "settled", "snoozed"] as const;
+		const positions: {
+			chevron: number;
+			icon: number;
+			label: number;
+			height: number;
+		}[] = [];
+		for (const group of groups) {
+			const header = canvas.getByTestId(`${group}-shelf-toggle`);
+			await expect(header).toHaveRole("button");
+			await expect(header).toHaveAttribute("aria-expanded", "true");
+			await expect(header).toHaveAttribute(
+				"aria-controls",
+				`${group}-shelf-rows`,
+			);
+			await expect(header).toHaveTextContent(/3$/);
+			const chevron = header.querySelector("svg");
+			const icon = header.querySelector(".session-status-glyph");
+			const label = header.querySelector("[data-group-label]");
+			if (!chevron || !icon || !label)
+				throw new Error(`Missing ${group} header parts`);
+			const bounds = header.getBoundingClientRect();
+			const centre = (part: Element) => {
+				const rect = part.getBoundingClientRect();
+				return rect.y + rect.height / 2 - bounds.y;
+			};
+			const centres = {
+				chevron: centre(chevron),
+				icon: centre(icon),
+				label: centre(label),
+			};
+			await expect(
+				Math.max(...Object.values(centres)) -
+					Math.min(...Object.values(centres)),
+			).toBeLessThanOrEqual(1);
+			for (const centre of Object.values(centres)) {
+				await expect(Math.abs(centre - bounds.height / 2)).toBeLessThanOrEqual(
+					1,
+				);
+			}
+			positions.push({
+				...centres,
+				height: bounds.height,
+			});
+			if (matchMedia("(pointer: coarse)").matches)
+				await expect(bounds.height).toBeGreaterThanOrEqual(44);
+			await expect(icon).toHaveAttribute(
+				"data-state",
+				group === "running" ? "working" : group,
+			);
+		}
+		for (const part of ["chevron", "icon", "label", "height"] as const) {
+			const values = positions.map((position) => position[part]);
+			await expect(
+				Math.max(...values) - Math.min(...values),
+			).toBeLessThanOrEqual(1);
+		}
+		await expect(
+			canvas
+				.getByTestId("pinned-shelf-toggle")
+				.querySelector("svg.lucide-pin.text-status-pinned"),
+		).not.toBeNull();
+		await expect(
+			canvas
+				.getByTestId("settled-shelf-toggle")
+				.querySelector("svg.lucide-check"),
+		).not.toBeNull();
+		await expect(
+			canvas
+				.getByTestId("snoozed-shelf-toggle")
+				.querySelector("svg.lucide-moon"),
+		).not.toBeNull();
+		const running = canvas
+			.getByTestId("running-shelf-toggle")
+			.querySelector("[data-flow-packet]");
+		const idle = canvas
+			.getByTestId("idle-shelf-toggle")
+			.querySelector('[data-flow-glyph="idle"]');
+		if (!running || !idle) throw new Error("Missing Flow status glyphs");
+		await expect(getComputedStyle(running).animationName).toBe("none");
+		await expect(idle.querySelector("[data-flow-packet]")).toBeNull();
+
+		for (const group of ["pinned", "running", "idle"] as const) {
+			const header = canvas.getByTestId(`${group}-shelf-toggle`);
+			await expect(
+				canvasElement.querySelectorAll(`#${group}-shelf-rows .session-item`),
+			).toHaveLength(3);
+			await userEvent.click(header);
+			await expect(header).toHaveAttribute("aria-expanded", "false");
+			await expect(
+				canvasElement.querySelectorAll(`#${group}-shelf-rows .session-item`),
+			).toHaveLength(0);
+			await expect(localStorage.getItem(`session-group-${group}-open`)).toBe(
+				"false",
+			);
+		}
+		// Closing the active session's group leaves it closed, just like the shelves.
+		await expect(sessionState.currentId).toBe("pinned-0");
+		const previousHeader = canvas.getByTestId("pinned-shelf-toggle");
+		await mount();
+		await expect(canvas.getByTestId("pinned-shelf-toggle")).not.toBe(
+			previousHeader,
+		);
+		for (const group of ["pinned", "running", "idle"] as const) {
+			const header = canvas.getByTestId(`${group}-shelf-toggle`);
+			await expect(header).toHaveAttribute("aria-expanded", "false");
+			await expect(
+				canvasElement.querySelectorAll(`#${group}-shelf-rows .session-item`),
+			).toHaveLength(0);
+		}
+		// Search exposes matches without overwriting any of the saved closed states.
+		setSearchQuery("task");
+		await tick();
+		for (const group of ["pinned", "running", "idle"] as const) {
+			const header = canvas.getByTestId(`${group}-shelf-toggle`);
+			await expect(header).toHaveAttribute("aria-expanded", "true");
+			await userEvent.click(header);
+			await expect(localStorage.getItem(`session-group-${group}-open`)).toBe(
+				"false",
+			);
+		}
+		setSearchQuery("");
+		await tick();
+		await expect(canvas.getByTestId("pinned-shelf-toggle")).toHaveAttribute(
+			"aria-expanded",
+			"false",
+		);
+		canvas.getByTestId("pinned-shelf-toggle").focus();
+		await userEvent.keyboard("j");
+		await expect(
+			canvasElement.querySelector("#settled-shelf-rows .session-item"),
+		).toHaveFocus();
+		for (const group of ["pinned", "running", "idle"] as const) {
+			const header = canvas.getByTestId(`${group}-shelf-toggle`);
+			await userEvent.click(header);
+			await expect(header).toHaveAttribute("aria-expanded", "true");
+			await expect(
+				canvasElement.querySelectorAll(`#${group}-shelf-rows .session-item`),
+			).toHaveLength(3);
+			await expect(localStorage.getItem(`session-group-${group}-open`)).toBe(
+				"true",
+			);
+		}
+		await expect(canvas.getByTestId("settled-shelf-more")).toHaveTextContent(
+			"1 more",
+		);
+		await expect(canvas.getByTestId("snoozed-shelf-more")).toHaveTextContent(
+			"1 more",
+		);
+		// Keep all five headers in the phone capture after exercising every row.
+		for (const group of ["pinned", "running", "idle"] as const) {
+			await userEvent.click(canvas.getByTestId(`${group}-shelf-toggle`));
+		}
+		(document.activeElement as HTMLElement | null)?.blur();
+	},
+};
 
 export const SnoozedShelfCollapsed: Story = {
 	name: "Snoozed shelf collapsed",
@@ -201,8 +405,44 @@ export const SnoozedShelfOpen: Story = {
 			"aria-expanded",
 			"true",
 		);
-		await expect(canvas.getByText("Tue 9:00 AM")).toBeVisible();
+		await expect(canvas.getByText("Tue", { exact: true })).toBeVisible();
 		await expect(canvas.getByText("No timer")).toBeVisible();
+	},
+};
+
+export const SnoozedDeadlineFormats: Story = {
+	beforeEach: () => {
+		uiState.snoozedShelfOpen = true;
+		sessionState.now = SNOOZE_STORY_NOW;
+		seedSessions(
+			[7, 8, 13, 14].map((day) => ({
+				projectSlug: "conduit",
+				accountId: null,
+				id: `deadline-${day}`,
+				title: `Review on October ${day}`,
+				attention: "idle" as const,
+				snoozedAt: SNOOZE_STORY_NOW,
+				snoozedUntil: new Date(2030, 9, day, 18).getTime(),
+			})),
+		);
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByTestId("snoozed-shelf-more"));
+		await expect(
+			canvas.getByText(
+				new Intl.DateTimeFormat(undefined, {
+					hour: "numeric",
+					minute: "2-digit",
+				})
+					.format(new Date(2030, 9, 7, 18))
+					.toLowerCase(),
+				{ exact: true },
+			),
+		).toBeVisible();
+		await expect(canvas.getByText("Tue", { exact: true })).toBeVisible();
+		await expect(canvas.getByText("Sun", { exact: true })).toBeVisible();
+		await expect(canvas.getByText("14 Oct", { exact: true })).toBeVisible();
 	},
 };
 
@@ -283,6 +523,12 @@ const pinnedSession = {
 } as const;
 
 function seedDrafts() {
+	const root = document.getElementById("storybook-root");
+	const previousStyle = root?.getAttribute("style") ?? null;
+	root?.setAttribute(
+		"style",
+		"width:340px;max-width:100%;padding:0;box-sizing:border-box;border:1px solid var(--color-border);border-radius:12px;background:var(--color-sidebar-bg)",
+	);
 	const now = Date.now();
 	sessionState.now = now;
 	projectState.projects = [
@@ -328,6 +574,10 @@ function seedDrafts() {
 			updatedAt: now - 86_400_000,
 		},
 	]);
+	return () => {
+		if (previousStyle === null) root?.removeAttribute("style");
+		else root?.setAttribute("style", previousStyle);
+	};
 }
 
 export const DraftsTrayOpen: Story = {
@@ -350,7 +600,7 @@ export const DraftsTrayCollapsed: Story = {
 	name: "Drafts tray collapsed",
 	beforeEach: () => {
 		uiState.draftsTrayOpen = false;
-		seedDrafts();
+		return seedDrafts();
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -528,10 +778,10 @@ export const ShelvesWithMore: Story = {
 				Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 		await expect(canvas.getByTestId("settled-shelf-more")).toHaveTextContent(
-			"+ 12 more",
+			/^12 more$/,
 		);
 		await expect(canvas.getByTestId("snoozed-shelf-more")).toHaveTextContent(
-			"+ 2 more",
+			/^2 more$/,
 		);
 		await userEvent.click(canvas.getByTestId("settled-shelf-more"));
 		await expect(
@@ -644,6 +894,24 @@ export const Scoped: Story = {
 			"Acme",
 		);
 		await expect(canvas.getByText("No sessions in Acme")).toBeVisible();
+		const trigger = canvas.getByTestId("session-scope-chip");
+		const pill = trigger.parentElement;
+		if (!pill) throw new TypeError("Scope pill is missing");
+		const clear = canvas.getByRole("button", { name: "Clear project scope" });
+		await expect(pill.getBoundingClientRect().height).toBe(30);
+		await expect(getComputedStyle(pill).borderRadius).toBe("9px");
+		await expect(getComputedStyle(pill).backgroundColor).not.toBe(
+			"rgba(0, 0, 0, 0)",
+		);
+		await expect(getComputedStyle(trigger).backgroundColor).toBe(
+			"rgba(0, 0, 0, 0)",
+		);
+		await expect(
+			pill.getBoundingClientRect().right - clear.getBoundingClientRect().right,
+		).toBe(6);
+		if (matchMedia("(max-width: 767px)").matches) {
+			await expect(getComputedStyle(clear, "::before").minHeight).toBe("44px");
+		}
 	},
 };
 

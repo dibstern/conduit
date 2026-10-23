@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -159,6 +159,12 @@ describe("Session directory discovery through the built daemon", () => {
 
 	it("discovers, reads and uses a moved session's skills and settings without changing other views", async () => {
 		const { fixture, worktree, socket } = await start("discovery");
+		await sendRpcRequest(socket, {
+			_tag: "SetDefaultModel",
+			projectSlug: "process-test",
+			provider: "claude",
+			model: "sonnet",
+		});
 		const browser = await fixture.connect();
 		const unmoved = await browser.createSession("Unmoved directory");
 		const moved = await browser.createSession("Moved directory");
@@ -177,7 +183,6 @@ describe("Session directory discovery through the built daemon", () => {
 					: {
 							_tag: "GetCommands",
 							projectSlug: "process-test",
-							instanceId: "claude",
 						},
 			);
 			const { resolved } = await sendRpcRequest(
@@ -190,14 +195,18 @@ describe("Session directory discovery through the built daemon", () => {
 							instanceId: "claude",
 						},
 			);
+			const skillRef = commands.find(
+				(command) => command.name === "release-notes",
+			)?.skillRef;
+			if (!skillRef) throw new Error("Discovered skill reference is missing");
 			const skill = await sendRpcRequest(
 				socket,
 				sessionId
-					? { _tag: "GetSkillContent", sessionId, name: "release-notes" }
+					? { _tag: "GetSkillContent", sessionId, skillRef }
 					: {
 							_tag: "GetSkillContent",
 							projectSlug: "process-test",
-							name: "release-notes",
+							skillRef,
 						},
 			);
 			return {
@@ -207,10 +216,12 @@ describe("Session directory discovery through the built daemon", () => {
 			};
 		}
 		const beforeMove = await readView(moved);
-		expect(beforeMove.commands).toContainEqual({
-			name: "main-only",
-			description: "main main-only",
-		});
+		expect(beforeMove.commands).toContainEqual(
+			expect.objectContaining({
+				name: "main-only",
+				description: "main main-only",
+			}),
+		);
 		await sendRpcRequest(socket, {
 			_tag: "MoveSessionWorkspace",
 			sessionId: moved,
@@ -233,10 +244,12 @@ describe("Session directory discovery through the built daemon", () => {
 				name: "directory-command",
 				description: `${label} command`,
 			});
-			expect(view.commands).toContainEqual({
-				name: "release-notes",
-				description: `${label} release-notes`,
-			});
+			expect(view.commands).toContainEqual(
+				expect.objectContaining({
+					name: "release-notes",
+					description: `${label} release-notes`,
+				}),
+			);
 			expect(view.commands.some(({ name }) => name === "changelog-style")).toBe(
 				thinking,
 			);
@@ -257,18 +270,26 @@ describe("Session directory discovery through the built daemon", () => {
 		}
 		const unmovedContext = { sessionId: unmoved };
 		const movedContext = { sessionId: moved };
+		const changelogRef = views.moved.commands.find(
+			(command) => command.name === "changelog-style",
+		)?.skillRef;
+		const mainOnlyRef = views.unmoved.commands.find(
+			(command) => command.name === "main-only",
+		)?.skillRef;
+		if (!changelogRef || !mainOnlyRef)
+			throw new Error("Discovered isolation skill references are missing");
 		await expect(
 			sendRpcRequest(socket, {
 				_tag: "GetSkillContent",
 				...unmovedContext,
-				name: "changelog-style",
+				skillRef: changelogRef,
 			}),
 		).rejects.toMatchObject({ _tag: "WsRpcError" });
 		await expect(
 			sendRpcRequest(socket, {
 				_tag: "GetSkillContent",
 				...movedContext,
-				name: "main-only",
+				skillRef: mainOnlyRef,
 			}),
 		).rejects.toMatchObject({ _tag: "WsRpcError" });
 
@@ -325,7 +346,7 @@ describe("Session directory discovery through the built daemon", () => {
 		};
 		for (const request of [
 			{ _tag: "GetCommands", ...missingContext },
-			{ _tag: "GetSkillContent", ...missingContext, name: "release-notes" },
+			{ _tag: "GetSkillContent", ...missingContext, skillRef: mainOnlyRef },
 			{
 				_tag: "ResolveClaudeSettings",
 				...missingContext,
@@ -337,7 +358,7 @@ describe("Session directory discovery through the built daemon", () => {
 			});
 	}, 150_000);
 
-	it("generates titles and starts queries in each session's current directory", async () => {
+	it("isolates title generation and starts queries with each session's directory and settings", async () => {
 		const { fixture, worktree, socket } = await start("titles");
 		const browser = await fixture.connect();
 		const unmoved = await browser.createSession();
@@ -355,15 +376,21 @@ describe("Session directory discovery through the built daemon", () => {
 			await browser.preWarmSession(sessionId, 45_000);
 			const reply = await browser.send(sessionId, prompt);
 			expect(reply.chunks.join("")).toContain("notes ready");
-			await vi.waitFor(() => {
+			const titleDirectory = await vi.waitFor(() => {
 				const title = fixture
 					.claudeTitles()
 					.find(({ prompt: titlePrompt }) => titlePrompt.includes(prompt));
-				expect(title?.cwd).toBe(directory);
+				const cwd = title?.cwd ?? "";
+				expect(dirname(cwd)).toBe(join(fixture.configDir, "text-generation"));
+				expect(basename(cwd)).toMatch(/^run-/);
+				return cwd;
 			});
 			const used = providerQuery(fixture, sessionId);
 			expect(used).toEqual({ cwd: directory, alwaysThinkingEnabled: thinking });
-			evidence[label] = { provider: used, titleDirectory: directory };
+			evidence[label] = {
+				provider: used,
+				titleDirectory: join(dirname(titleDirectory), "run-<scratch>"),
+			};
 		}
 	}, 150_000);
 });

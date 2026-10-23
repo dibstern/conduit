@@ -30,9 +30,11 @@ describe("OpenCode Instances use during an idle stop", () => {
 				JSON.stringify(
 					req.url?.startsWith("/path")
 						? { state: "/", config: "/", worktree: "/", directory }
-						: req.url?.startsWith("/session/status")
-							? {}
-							: [],
+						: req.url?.startsWith("/global/health")
+							? { healthy: true }
+							: req.url?.startsWith("/session/status")
+								? {}
+								: [],
 				),
 			);
 		});

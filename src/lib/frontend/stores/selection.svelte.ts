@@ -50,7 +50,11 @@ import { closeFileViewer } from "./ui.svelte.js";
 
 export type Shown =
 	| { readonly kind: "none" }
-	| { readonly kind: "draft"; readonly project: string | null }
+	| {
+			readonly kind: "draft";
+			readonly project: string | null;
+			readonly draftId?: string | undefined;
+	  }
 	| { readonly kind: "drawn"; readonly sessionId: string }
 	| { readonly kind: "placing"; readonly sessionId: string }
 	| {
@@ -68,7 +72,12 @@ const placement = new SvelteMap<
 const shown: Shown = $derived.by(() => {
 	const route = getCurrentRoute();
 	if (route.page !== "chat") return { kind: "none" };
-	if (route.draft) return { kind: "draft", project: getDraftProject() };
+	if (route.draft)
+		return {
+			kind: "draft",
+			project: getDraftProject(),
+			draftId: route.draftId,
+		};
 	if (!route.sessionId) return { kind: "none" };
 	const sessionId = route.sessionId;
 	const placed = placement.get(sessionId);
@@ -87,11 +96,17 @@ const shown: Shown = $derived.by(() => {
 const scope = $derived<{
 	readonly project: string;
 	readonly sessionId: string | null;
+	/** Which draft, so work started in one draft never follows into another. */
+	readonly draftId?: string | undefined;
 } | null>(
 	shown.kind === "placed"
 		? { project: shown.project, sessionId: shown.sessionId }
 		: shown.kind === "draft" && shown.project
-			? { project: shown.project, sessionId: null }
+			? {
+					project: shown.project,
+					sessionId: null,
+					draftId: shown.draftId,
+				}
 			: shown.kind === "none" &&
 					getCurrentRoute().page === "chat" &&
 					attachedProjectState.slug
@@ -140,7 +155,11 @@ export const selection = {
 	): void {
 		if (!from) return;
 		placement.set(sessionId, { project: from.project });
-		if (scope?.project !== from.project || scope.sessionId !== from.sessionId)
+		if (
+			scope?.project !== from.project ||
+			scope.sessionId !== from.sessionId ||
+			scope.draftId !== from.draftId
+		)
 			return;
 		if (history === "replace") replaceRoute(`/s/${sessionId}`);
 		else navigate(`/s/${sessionId}`);
@@ -169,9 +188,6 @@ export function watchSelection(): () => void {
 		});
 		let alive = true;
 		const attaching = new Set<string>();
-		// An attach by session id places that session itself, so a row placing
-		// it while the reply is out must not send a second attach.
-		let sessionAttach = $state<string | null>(null);
 		const resolving = new Set<string>();
 		let attachedOnce = attachedProjectState.slug !== null;
 		let previousAttached = attachedProjectState.slug;
@@ -257,15 +273,12 @@ export function watchSelection(): () => void {
 			const current = shown;
 			const route = getCurrentRoute();
 			const connected = getIsConnected();
-			const pendingSession = sessionAttach;
 			untrack(() => {
 				if (previousAttached !== null && attached === null)
 					attachedOnce = false;
 				previousAttached = attached;
 				if (!connected || route.page !== "chat") return;
 				const routeSessionId = route.sessionId ?? null;
-				if (pendingSession !== null && pendingSession === routeSessionId)
-					return;
 				const sessionId =
 					current.kind === "placing" || current.kind === "drawn"
 						? current.sessionId
@@ -281,7 +294,6 @@ export function watchSelection(): () => void {
 					]);
 					if (attaching.has(key)) return;
 					attaching.add(key);
-					if (sessionId) sessionAttach = sessionId;
 					void rpc("AttachProject", {
 						originId: getBrowserClientId(),
 						...(sessionId
@@ -322,11 +334,7 @@ export function watchSelection(): () => void {
 							)
 								toastFailure("Failed to switch projects")(error);
 						})
-						.finally(() => {
-							attaching.delete(key);
-							if (sessionId && sessionAttach === sessionId)
-								sessionAttach = null;
-						});
+						.finally(() => attaching.delete(key));
 					return;
 				}
 				if (!sessionId || resolving.has(sessionId)) return;

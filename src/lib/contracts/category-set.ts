@@ -74,8 +74,9 @@ export const categoryIdFromLabel = (label: string): string =>
 		.replace(/[^\p{L}\p{N}]+/gu, "-")
 		.replace(/^-|-$/g, "");
 
-// Final prototype taxonomy and dark-theme colours. Routine stays implicit.
-export const BUILTIN_CATEGORIES: readonly Category[] = [
+// Built-in colours are legacy metadata; the frontend themes own their display.
+// Routine stays implicit.
+export const BUILTIN_CATEGORIES = [
 	{
 		id: "ask",
 		origin: "builtin",
@@ -172,7 +173,9 @@ export const BUILTIN_CATEGORIES: readonly Category[] = [
 		retired: false,
 		criteria: { what: "reports a completed deliverable or full gate" },
 	},
-];
+] as const satisfies readonly Category[];
+
+export type BuiltinCategoryId = (typeof BUILTIN_CATEGORIES)[number]["id"];
 
 export const DEFAULT_CATEGORY_SET: CategorySet = {
 	version: 1,
@@ -260,4 +263,37 @@ export function surfacingLevel(
 				? mark.category
 				: category,
 	};
+}
+
+/** Retired rows preview only their own restoration; verdicts stay untouched. */
+export function countSessionCategories(
+	verdicts: readonly {
+		readonly probabilities: Readonly<Record<string, number>> | null;
+		readonly mark?: SurfacingMark | undefined;
+	}[],
+	set: CategorySetContents,
+): Record<string, number> {
+	const counts: Record<string, number> = Object.fromEntries(
+		set.categories.map(({ id }) => [id, 0]),
+	);
+	for (const verdict of verdicts) {
+		const { category, level } = surfacingLevel(verdict, set, verdict.mark);
+		if (level !== "hidden" && category !== null)
+			counts[category] = (counts[category] ?? 0) + 1;
+	}
+	for (const category of set.categories) {
+		if (!category.retired) continue;
+		const restored = {
+			categories: set.categories.map((candidate) =>
+				candidate.id === category.id
+					? { ...candidate, retired: false }
+					: candidate,
+			),
+		};
+		counts[category.id] = verdicts.filter((verdict) => {
+			const result = surfacingLevel(verdict, restored, verdict.mark);
+			return result.level !== "hidden" && result.category === category.id;
+		}).length;
+	}
+	return counts;
 }

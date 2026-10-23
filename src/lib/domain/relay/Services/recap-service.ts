@@ -14,22 +14,20 @@ import {
 	AskExplanationContentSchema,
 } from "../../../contracts/ask-explanation.js";
 import { surfacingLevel } from "../../../contracts/category-set.js";
+import { sessionJevEnabled } from "../../../contracts/message-surfacing.js";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type {
 	RecapScope,
 	RecapSnapshot,
 	TurnRecap,
 } from "../../../contracts/turn-recap.js";
-import {
-	loadDaemonConfigResult,
-	resolveClaudeLaunchConfig,
-} from "../../../daemon/config-persistence.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { mapToolName } from "../../../relay/event-translator.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { numberTurnMessages } from "../../../turn-message-numbers.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { CategorySet } from "../../daemon/Services/category-set.js";
 import {
 	type ClaudeOneShotQueryFactory,
@@ -41,6 +39,7 @@ import { SessionEventBusTag } from "./session-event-bus.js";
 
 export class RecapFailure extends Data.TaggedError("RecapFailure")<{
 	readonly message: string;
+	readonly code?: "unknown-turn";
 }> {}
 
 interface RecapTarget {
@@ -90,6 +89,7 @@ export const makeRecapServiceLive = (
 			const settings = yield* MessageSurfacingSettings;
 			const categories = yield* CategorySet;
 			const config = yield* ConfigTag;
+			const accounts = yield* AccountDirectory;
 			const log = yield* LoggerTag;
 			const bus = yield* SessionEventBusTag;
 			const scope = yield* Effect.scope;
@@ -159,18 +159,22 @@ export const makeRecapServiceLive = (
 						request: string;
 						finalReply: string | null;
 						workspace: string | null;
+						jev: "on" | "off" | null;
 					}>`SELECT t.state, COALESCE(u.text, '') AS request,
 				CASE WHEN t.state = 'completed' THEN (
 					SELECT p.text FROM message_parts p JOIN messages m ON m.id = p.message_id
 					WHERE m.turn_id = t.id AND m.session_id = t.session_id AND m.role = 'assistant'
 					AND p.type = 'text' AND p.surfacing_ordinal IS NULL
 					ORDER BY m.created_at DESC, p.sort_order DESC, p.created_at DESC LIMIT 1
-				) ELSE NULL END AS finalReply, s.workspace
+				) ELSE NULL END AS finalReply, s.workspace, s.jev
 				FROM turns t JOIN sessions s ON s.id = t.session_id
 				LEFT JOIN messages u ON u.id = t.user_message_id
 				WHERE t.id = ${target.turnId} AND t.session_id = ${target.sessionId} AND s.project_id = ${store.projectId}`;
 					if (!turn)
-						return yield* new RecapFailure({ message: "Unknown turn" });
+						return yield* new RecapFailure({
+							message: "Unknown turn",
+							code: "unknown-turn",
+						});
 					return turn;
 				});
 			const readVersions = (target: RecapTarget) =>
@@ -271,9 +275,15 @@ export const makeRecapServiceLive = (
 				schema: Schema.Codec<A, I>,
 			) =>
 				Effect.gen(function* () {
-					const daemonConfig = yield* Effect.suspend(() =>
-						Effect.fromResult(loadDaemonConfigResult(config.configDir)),
-					).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
+					const account = yield* accounts.resolve({
+						_tag: "DriverDefault",
+						driver: "claude",
+					});
+					const configDir = "folder" in account ? account.folder : undefined;
+					if (configDir === undefined)
+						return yield* new RecapFailure({
+							message: "Claude account unavailable",
+						});
 					const workspace =
 						workspaceJson === null
 							? null
@@ -281,7 +291,7 @@ export const makeRecapServiceLive = (
 									Schema.fromJsonString(SessionWorkspaceSchema),
 								)(workspaceJson);
 					return yield* makeClaudeOneShot({
-						...resolveClaudeLaunchConfig(daemonConfig),
+						configDir,
 						cwd: effectiveWorkingDirectory(config.projectDir, workspace),
 						systemPrompt:
 							"You write short, factual summaries of coding-assistant turns with numbered citations.",
@@ -391,10 +401,11 @@ export const makeRecapServiceLive = (
 						0,
 					);
 					if (automatic) {
+						const jevEnabled = sessionJevEnabled(turn, preferences);
 						const categorySet = yield* categories.current();
 						const nonRoutine = yield* Effect.forEach(allMessages, (message) =>
 							Effect.gen(function* () {
-								if (!message.probabilities) return !preferences.active;
+								if (!message.probabilities) return !jevEnabled;
 								const probabilities = yield* Schema.decodeUnknownEffect(
 									probabilitiesSchema,
 								)(message.probabilities);

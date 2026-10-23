@@ -1,3 +1,4 @@
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 // Verifies that a standalone createProjectRelay recovers pending permissions on
 // stream connect: OpenCode Instances lists them from the OpenCode API and
 // re-emits them as ordinary permission.asked events, which reach the Effect
@@ -19,10 +20,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
-import {
-	createProjectRelay,
-	type ProjectRelay,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 
 // Returns one pending permission from GET /permission.
 
@@ -58,7 +56,12 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 
 		res.setHeader("Content-Type", "application/json");
 
-		// Health check
+		if (url.pathname === "/global/health" && req.method === "GET") {
+			res.end(JSON.stringify({ healthy: true, version: "1.0.0" }));
+			return;
+		}
+
+		// Project paths
 		if (url.pathname === "/path") {
 			res.end(
 				JSON.stringify({

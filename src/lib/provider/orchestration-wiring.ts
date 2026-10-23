@@ -1,50 +1,41 @@
 // src/lib/provider/orchestration-wiring.ts
-// Factory function to create the full orchestration layer (registry, provider
-// instances, engine) from an OpenCodeClient. Used by relay-stack.ts to
-// instantiate the provider layer alongside the existing relay pipeline.
+// Project orchestration borrows the daemon adapters and resolves ProviderCalls
+// from project-owned workspace, account and shell environment state.
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { Context, Effect, Layer, Option, Schema, type Scope } from "effect";
-import { SqlClient } from "effect/sql";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../contracts/account.js";
-import { AccountUnroutable } from "../contracts/limit-recovery.js";
-import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
-import { SessionWorkspaceSchema } from "../contracts/session-workspace.js";
 import {
-	type DaemonConfigLoadError,
-	loadDaemonConfigResult,
-} from "../daemon/config-persistence.js";
+	Context,
+	Effect,
+	Layer,
+	Option,
+	Ref,
+	Schema,
+	type Scope,
+} from "effect";
+import { SqlClient } from "effect/sql";
+import { AccountUnroutable } from "../contracts/limit-recovery.js";
+import { SessionWorkspaceSchema } from "../contracts/session-workspace.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
-import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import { ConfigSnapshotTag } from "../domain/daemon/Services/config-persistence-service.js";
+import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
+import { DaemonOrchestration } from "../domain/daemon/Services/daemon-orchestration.js";
 import { ProjectContext } from "../domain/daemon/Services/project-context.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
-import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-import { InstanceManagementServiceTag } from "../domain/relay/Services/instance-management-service.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
-import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { ClaudeEventPersistEffectTag } from "../persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import type { ProviderStateEffectTag } from "../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
-import { loadRelaySettings } from "../relay/relay-settings.js";
 import { effectiveSessionFolders } from "../session/session-workspace.js";
-import { defaultClaudeSubagentSdk } from "./claude/claude-subagent-materializer.js";
-import {
-	ClaudeDriver,
-	type ClaudeProviderInstanceDeps,
-} from "./claude/index.js";
-import { makeCursorProviderRuntime } from "./cursor/cursor-provider-runtime.js";
+import type { ClaudeSessionForkSdk } from "./claude/claude-session-fork.js";
 import { ProviderInstanceFailure } from "./errors.js";
-import {
-	OpenCodeDriver,
-	OpenCodeProviderInstance,
-} from "./opencode-provider-instance.js";
+import { OpenCodeProviderInstance } from "./opencode-provider-instance.js";
 import {
 	OrchestrationEngine,
 	type ProviderCallRequest,
@@ -55,49 +46,25 @@ import type {
 	ProviderCommandStoreFailure,
 } from "./orchestration-side-effect-reactor.js";
 import { ProjectShellEnvResolver } from "./project-shell-env.js";
-import { ProviderRegistry, ProviderRegistryTag } from "./provider-registry.js";
+import {
+	type ProviderRegistry,
+	ProviderRegistryTag,
+} from "./provider-registry.js";
 import {
 	type ProviderSessionBindingReadModel,
 	SqliteProviderSessionBindingReadModel,
 } from "./provider-session-binding-read-model.js";
 import type { ProviderCall } from "./types.js";
 
-export interface OrchestrationLayerOptions {
-	readonly shellEnv?: ClaudeProviderInstanceDeps["shellEnv"];
-	readonly prepareShellEnv?: ClaudeProviderInstanceDeps["prepareShellEnv"];
-	readonly onBackgroundTask?: (
-		input: import("../session/background-liveness.js").BackgroundTaskTransition,
-	) => void;
-	readonly client: OpenCodeAPI;
-	readonly workspaceRoot?: string;
-	readonly extraFolders?: readonly string[];
-	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
-	readonly configDir?: string;
-	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
-	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
-	readonly claudeGenerateTextQueryFactory?: ClaudeProviderInstanceDeps["generateTextQueryFactory"];
-	readonly claudeSessionForkSdk?: ClaudeProviderInstanceDeps["sessionForkSdk"];
-	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
-	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
-	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
-}
-
 export interface OrchestrationRuntimeLayerOptions {
-	readonly shellEnv?: ClaudeProviderInstanceDeps["shellEnv"];
-	readonly prepareShellEnv?: ClaudeProviderInstanceDeps["prepareShellEnv"];
-	readonly onBackgroundTask?: (
-		input: import("../session/background-liveness.js").BackgroundTaskTransition,
-	) => void;
+	readonly shellEnv?: (
+		directory: string,
+	) => import("../contracts/project-shell-env.js").ProjectShellEnvSnapshot;
+	readonly prepareShellEnv?: (directory: string) => Promise<boolean>;
 	readonly workspaceRoot?: string;
 	readonly extraFolders?: readonly string[];
 	readonly configDir?: string;
-	/** Test seam: replaces the Claude SDK query() (E2E trace replay). */
-	readonly claudeQueryFactory?: ClaudeProviderInstanceDeps["queryFactory"];
-	readonly claudeGenerateTextQueryFactory?: ClaudeProviderInstanceDeps["generateTextQueryFactory"];
-	readonly claudeSessionForkSdk?: ClaudeProviderInstanceDeps["sessionForkSdk"];
-	/** Test seam: replaces the SDK's agent transcript reads (E2E trace replay). */
-	readonly claudeSubagentSdk?: ClaudeProviderInstanceDeps["subagentSdk"];
-	readonly claudeRunnerFactory?: ClaudeProviderInstanceDeps["runnerFactory"];
+	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
 }
 
 export interface OrchestrationLayer {
@@ -128,143 +95,43 @@ class OrchestrationComponentsTag extends Context.Service<
 	OrchestrationComponents
 >()("OrchestrationComponents") {}
 
-const createOrchestrationComponentsEffect = (
-	options: OrchestrationLayerOptions,
-): Effect.Effect<
-	OrchestrationComponents,
-	DaemonConfigLoadError,
-	| Scope.Scope
-	| SqlClient.SqlClient
-	| PersistenceProjectTag
-	| AccountDirectory
-	| OpenCodeInstancesTag
-	| SessionWorkspaceTag
-	| ClaudeEventPersistEffectTag
-	| ProviderRuntimeIngestionTag
-	| EventStoreEffectTag
-	| ProjectionRunnerEffectTag
-	| ProviderStateEffectTag
-	| ReadQueryEffectTag
-> =>
+export const makeProviderCallContextResolver = (options: {
+	readonly projectId?: string;
+	readonly workspaceRoot?: string;
+	readonly extraFolders?: readonly string[];
+	readonly shellEnv: NonNullable<OrchestrationRuntimeLayerOptions["shellEnv"]>;
+	readonly prepareShellEnv?: OrchestrationRuntimeLayerOptions["prepareShellEnv"];
+	readonly sessionWorkspace: Pick<
+		import("../domain/relay/Services/session-workspace.js").SessionWorkspace,
+		"get"
+	>;
+	readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
+}) =>
 	Effect.gen(function* () {
-		const sharedAdapters = yield* Effect.serviceOption(ProviderAdapters);
-		const registry = Option.isSome(sharedAdapters)
-			? sharedAdapters.value.registry
-			: new ProviderRegistry();
-
-		// The relay's persistence SqlClient backs
-		// the session binding read model and durable command receipts, so
-		// orchestration shares the relay's single database connection.
-		const sql = yield* SqlClient.SqlClient;
-		const { projectId } = yield* PersistenceProjectTag;
-		const sessionBindingReadModel = new SqliteProviderSessionBindingReadModel(
-			sql,
-		);
-
-		// Sends use their admitted account snapshot. Other session operations
-		// resolve the historical binding through the in-memory directory.
-		const instances = yield* OpenCodeInstancesTag;
 		const accountDirectory = yield* AccountDirectory;
-		const sessionWorkspace = yield* SessionWorkspaceTag;
-		const instanceManagement = Option.getOrUndefined(
-			yield* Effect.serviceOption(InstanceManagementServiceTag),
-		);
-		const clientForSession = (sessionId: string) =>
-			Effect.gen(function* () {
-				const boundInstanceId =
-					yield* sessionBindingReadModel.getProviderForSession(sessionId);
-				const account = yield* accountDirectory.resolve(
-					boundInstanceId === undefined
-						? { _tag: "DriverDefault", driver: "opencode" }
-						: { _tag: "Id", id: boundInstanceId },
-				);
-				if (!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
-					return yield* Effect.fail(
-						new Error("OpenCode session requires an OpenCode account"),
-					);
-				}
-				const directory = yield* sessionWorkspace.get(sessionId);
-				return yield* instances.use(account.id, directory);
-			});
-
-		if (Option.isNone(sharedAdapters)) {
-			registry.registerInstance(
-				yield* OpenCodeDriver.create({
-					client: options.client,
-					...(options.configDir !== undefined
-						? { configDir: options.configDir }
-						: {}),
-					...(options.workspaceRoot != null
-						? { workspaceRoot: options.workspaceRoot }
-						: {}),
-					clientForSession,
-					clientForAccount: (account, directory) =>
-						instances.use(account.id, directory),
-					instanceIdForSession: (sessionId) =>
-						sessionBindingReadModel.getProviderForSession(sessionId),
-					hasWorktreeToolForSession: (sessionId, account) =>
-						(account
-							? Effect.succeed(account.id)
-							: sessionBindingReadModel.getProviderForSession(sessionId)
-						).pipe(
-							Effect.flatMap((instanceId) =>
-								instanceManagement
-									? instanceManagement.list().pipe(
-											Effect.map((configured) =>
-												configured.some(
-													(instance) =>
-														instance.id ===
-															(instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID) &&
-														instance.managed,
-												),
-											),
-											Effect.orElseSucceed(() => false),
-										)
-									: Effect.succeed(false),
-							),
-						),
-				}),
-			);
-		}
-
-		const persist = yield* ClaudeEventPersistEffectTag;
-		let shellEnv = options.shellEnv;
-		let prepareShellEnv = options.prepareShellEnv;
-		if (!shellEnv) {
-			const resolver = yield* Effect.acquireRelease(
-				Effect.sync(() => new ProjectShellEnvResolver()),
-				(value) => Effect.sync(() => value.close()),
-			);
-			const directory = options.workspaceRoot ?? process.cwd();
-			const daemonConfig = yield* Effect.suspend(() =>
-				Effect.fromResult(loadDaemonConfigResult(options.configDir)),
-			).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)));
-			const config =
-				daemonConfig?.projects.find((project) => project.slug === projectId) ??
-				daemonConfig?.projects.find(
-					(project) => resolve(project.path) === resolve(directory),
-				);
-			resolver.register(directory, config?.shellEnv, projectId);
-			shellEnv = (projectDir) => resolver.get(projectDir, projectId);
-			prepareShellEnv = (projectDir) =>
-				resolver.waitUntilReady(projectDir, projectId);
-		}
+		const { sessionWorkspace, sessionBindingReadModel } = options;
 		const read = yield* ReadQueryEffectTag;
 		const projectContexts = yield* Effect.serviceOption(ProjectContext);
 		const projectRoot = options.workspaceRoot ?? process.cwd();
-		const getShellEnv = shellEnv;
-		const prepareEnvironment = prepareShellEnv;
-		const resolveCallContext = (
+		const getShellEnv = options.shellEnv;
+		const prepareEnvironment = options.prepareShellEnv;
+		return (
 			request: ProviderCallRequest,
 		): Effect.Effect<ProviderCall, ProviderInstanceFailure> =>
 			Effect.gen(function* () {
+				const ambient = yield* Effect.serviceOption(PersistenceProjectTag);
+				const projectId =
+					request.projectId ??
+					(Option.isSome(ambient)
+						? ambient.value.projectId
+						: options.projectId);
 				const project = Option.isSome(projectContexts)
 					? yield* (
 							request.projectId
 								? projectContexts.value.forProject(request.projectId)
 								: request.sessionId
 									? projectContexts.value.forSession(request.sessionId)
-									: projectContexts.value.forProject(projectId)
+									: projectContexts.value.forProject(projectId ?? "")
 						).pipe(
 							Effect.catchTag("ProjectNotFound", (cause) =>
 								// Cleanup retains admitted folders when its project has been removed.
@@ -278,6 +145,7 @@ const createOrchestrationComponentsEffect = (
 											mainFolder: request.workspaceRoot,
 											extraFolders: request.extraFolders,
 											shellEnv: Object.freeze({}),
+											shellConfig: undefined,
 										})
 									: Effect.fail(cause),
 							),
@@ -354,76 +222,138 @@ const createOrchestrationComponentsEffect = (
 						Effect.catch(() => Effect.void),
 					);
 				}
-				const environment =
+				const environmentProject =
 					project && Option.isSome(projectContexts)
-						? (workspaceRoot !== project.mainFolder || request.prepareShellEnv
-								? yield* projectContexts.value.forProject(project.projectId, {
-										directory: workspaceRoot,
-										prepareShellEnv: request.prepareShellEnv === true,
-									})
-								: project
-							).shellEnv
-						: getShellEnv(workspaceRoot);
+						? workspaceRoot !== project.mainFolder || request.prepareShellEnv
+							? yield* projectContexts.value.forProject(project.projectId, {
+									directory: workspaceRoot,
+									prepareShellEnv: request.prepareShellEnv === true,
+								})
+							: project
+						: undefined;
+				const environment = environmentProject
+					? {
+							env: environmentProject.shellEnv,
+							declared: environmentProject.shellConfig,
+						}
+					: getShellEnv(workspaceRoot);
+				const owner = project?.projectId ?? projectId;
+				if (!owner)
+					return yield* Effect.fail(
+						new ProviderInstanceFailure({
+							providerId: account.driver,
+							operation: "resolveCallContext",
+							cause: "A provider call requires its owning project",
+						}),
+					);
 				return Object.freeze({
-					projectId: project?.projectId ?? projectId,
+					projectId: owner,
 					sessionId: request.sessionId,
 					account,
 					workspaceRoot,
 					extraFolders: Object.freeze([...extraFolders]),
-					shellEnv: Object.freeze({ ...environment }),
+					shellEnv: Object.freeze({ ...environment.env }),
+					shellConfig: environment.declared,
 				});
 			}).pipe(
-				Effect.mapError(
-					(cause) =>
-						new ProviderInstanceFailure({
-							providerId:
-								request.account?.driver ?? request.providerId ?? "unknown",
-							operation: "resolveCallContext",
-							cause,
-						}),
+				Effect.mapError((cause) =>
+					cause instanceof ProviderInstanceFailure
+						? cause
+						: new ProviderInstanceFailure({
+								providerId:
+									request.account?.driver ?? request.providerId ?? "unknown",
+								operation: "resolveCallContext",
+								cause,
+							}),
 				),
 			);
-		if (Option.isNone(sharedAdapters)) {
-			const claudeInstance = yield* ClaudeDriver.create({
-				shellEnv,
-				...(prepareShellEnv ? { prepareShellEnv } : {}),
-				...(options.onBackgroundTask
-					? { onBackgroundTask: options.onBackgroundTask }
-					: {}),
-				workspaceRoot: options.workspaceRoot ?? process.cwd(),
-				extraFolders: options.extraFolders ?? [],
-				...(options.configDir !== undefined
-					? { daemonConfigDir: options.configDir }
-					: {}),
-				claudeSettingsOverrides: () =>
-					loadRelaySettings(options.configDir).claudeSettings,
-				subagentSdk: options.claudeSubagentSdk ?? defaultClaudeSubagentSdk,
-				...(options.claudeSessionForkSdk
-					? { sessionForkSdk: options.claudeSessionForkSdk }
-					: {}),
-				persistUserMessage: persist.persistUserMessage,
-				...(options.claudeQueryFactory
-					? { queryFactory: options.claudeQueryFactory }
-					: {}),
-				...(options.claudeGenerateTextQueryFactory
-					? { generateTextQueryFactory: options.claudeGenerateTextQueryFactory }
-					: {}),
-				...(options.claudeRunnerFactory
-					? { runnerFactory: options.claudeRunnerFactory }
-					: {}),
-			});
-			registry.registerInstance(claudeInstance);
-			registry.registerInstance(
-				yield* makeCursorProviderRuntime({
-					workspaceRoot: options.workspaceRoot ?? process.cwd(),
-					accounts: accountDirectory.snapshot,
-					...(options.configDir !== undefined
-						? { daemonConfigDir: options.configDir }
-						: {}),
-					persistUserMessage: persist.persistUserMessage,
-				}),
-			);
+	});
+
+const createOrchestrationComponentsEffect = (
+	options: OrchestrationRuntimeLayerOptions,
+): Effect.Effect<
+	OrchestrationComponents,
+	Error,
+	| Scope.Scope
+	| SqlClient.SqlClient
+	| PersistenceProjectTag
+	| AccountDirectory
+	| ProviderAdapters
+	| SessionWorkspaceTag
+	| ClaudeEventPersistEffectTag
+	| ProviderRuntimeIngestionTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
+	| ProviderStateEffectTag
+	| ReadQueryEffectTag
+> =>
+	Effect.gen(function* () {
+		const { registry } = yield* ProviderAdapters;
+		const daemon = yield* Effect.serviceOption(DaemonOrchestration);
+		if (Option.isSome(daemon)) {
+			const openCodeInstance = yield* registry
+				.getInstanceEffect("opencode")
+				.pipe(Effect.orDie);
+			if (!(openCodeInstance instanceof OpenCodeProviderInstance))
+				return yield* Effect.fail(
+					new ProviderInstanceFailure({
+						providerId: "opencode",
+						operation: "createOrchestration",
+						cause: "opencode provider is not an OpenCodeProviderInstance",
+					}),
+				);
+			return { engine: daemon.value.engine, registry, openCodeInstance };
 		}
+		const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
+
+		// The relay's persistence SqlClient backs
+		// the session binding read model and durable command receipts, so
+		// orchestration shares the relay's single database connection.
+		const sql = yield* SqlClient.SqlClient;
+		const { projectId } = yield* PersistenceProjectTag;
+		const sessionBindingReadModel = new SqliteProviderSessionBindingReadModel(
+			sql,
+		);
+
+		// Sends use their admitted account snapshot. Other session operations
+		// resolve the historical binding through the in-memory directory.
+		const accountDirectory = yield* AccountDirectory;
+		const sessionWorkspace = yield* SessionWorkspaceTag;
+
+		const persist = yield* ClaudeEventPersistEffectTag;
+		let shellEnv = options.shellEnv;
+		let prepareShellEnv = options.prepareShellEnv;
+		if (!shellEnv) {
+			const resolver = yield* Effect.acquireRelease(
+				Effect.sync(() => new ProjectShellEnvResolver()),
+				(value) => Effect.sync(() => value.close()),
+			);
+			const directory = options.workspaceRoot ?? process.cwd();
+			const snapshot = yield* Effect.serviceOption(ConfigSnapshotTag);
+			const daemonConfig = Option.isSome(snapshot)
+				? yield* snapshot.value.build
+				: undefined;
+			const config =
+				daemonConfig?.projects.find((project) => project.slug === projectId) ??
+				daemonConfig?.projects.find(
+					(project) => resolve(project.path) === resolve(directory),
+				);
+			resolver.register(directory, config?.shellEnv, projectId);
+			shellEnv = (projectDir) => resolver.getSnapshot(projectDir, projectId);
+			prepareShellEnv = (projectDir) =>
+				resolver.waitUntilReady(projectDir, projectId);
+		}
+		const resolveCallContext = yield* makeProviderCallContextResolver({
+			projectId,
+			sessionWorkspace,
+			sessionBindingReadModel,
+			shellEnv,
+			...(prepareShellEnv ? { prepareShellEnv } : {}),
+			...(options.workspaceRoot
+				? { workspaceRoot: options.workspaceRoot }
+				: {}),
+			extraFolders: options.extraFolders ?? [],
+		});
 		// Durable command receipts share the persistence SqlClient with the
 		// session binding read model. `now`/`generateId` are supplied at this wiring edge
 		// (wall clock + random) so core orchestration stays free of Date.now /
@@ -452,7 +382,11 @@ const createOrchestrationComponentsEffect = (
 		};
 		const engine = new OrchestrationEngine({
 			registry,
-			ownsRegistry: Option.isNone(sharedAdapters),
+			...(Option.isSome(configRef) && {
+				autoSettleAfterDays: Ref.get(configRef.value).pipe(
+					Effect.map((config) => config.autoSettleAfterDays),
+				),
+			}),
 			accountDirectory,
 			resolveCallContext,
 			...(sessionBindingReadModel != null ? { sessionBindingReadModel } : {}),
@@ -486,12 +420,11 @@ export const makeOrchestrationRuntimeLayer = (
 	options: OrchestrationRuntimeLayerOptions = {},
 ): Layer.Layer<
 	ProviderRegistryTag | OrchestrationEngineTag,
-	DaemonConfigLoadError,
-	| OpenCodeAPITag
+	Error,
+	| ProviderAdapters
 	| SqlClient.SqlClient
 	| PersistenceProjectTag
 	| AccountDirectory
-	| OpenCodeInstancesTag
 	| SessionWorkspaceTag
 	| ClaudeEventPersistEffectTag
 	| ProviderRuntimeIngestionTag
@@ -503,41 +436,9 @@ export const makeOrchestrationRuntimeLayer = (
 	const componentsLayer = Layer.effect(
 		OrchestrationComponentsTag,
 		Effect.gen(function* () {
-			const client = yield* OpenCodeAPITag;
-			const components = yield* createOrchestrationComponentsEffect({
-				client,
-				...(options.shellEnv && { shellEnv: options.shellEnv }),
-				...(options.prepareShellEnv && {
-					prepareShellEnv: options.prepareShellEnv,
-				}),
-				...(options.onBackgroundTask
-					? { onBackgroundTask: options.onBackgroundTask }
-					: {}),
-				...(options.workspaceRoot != null
-					? { workspaceRoot: options.workspaceRoot }
-					: {}),
-				extraFolders: options.extraFolders ?? [],
-				...(options.configDir != null ? { configDir: options.configDir } : {}),
-				...(options.claudeQueryFactory
-					? { claudeQueryFactory: options.claudeQueryFactory }
-					: {}),
-				...(options.claudeGenerateTextQueryFactory
-					? {
-							claudeGenerateTextQueryFactory:
-								options.claudeGenerateTextQueryFactory,
-						}
-					: {}),
-				...(options.claudeSessionForkSdk
-					? { claudeSessionForkSdk: options.claudeSessionForkSdk }
-					: {}),
-				...(options.claudeSubagentSdk
-					? { claudeSubagentSdk: options.claudeSubagentSdk }
-					: {}),
-				...(options.claudeRunnerFactory
-					? { claudeRunnerFactory: options.claudeRunnerFactory }
-					: {}),
-			});
-			yield* Effect.addFinalizer(() => components.engine.shutdownEffect());
+			const components = yield* createOrchestrationComponentsEffect(options);
+			if (Option.isNone(yield* Effect.serviceOption(DaemonOrchestration)))
+				yield* Effect.addFinalizer(() => components.engine.shutdownEffect());
 			return components;
 		}),
 	);

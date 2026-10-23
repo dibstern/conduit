@@ -1,12 +1,18 @@
 // Use the real daemon's one-minute schedule and browser RPC with an isolated store.
 import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Result } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import {
+	createLocalSessionId,
+	SessionManagerServiceTag,
+} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {
@@ -20,24 +26,72 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 import { createRelayHarness } from "../helpers/relay-harness.js";
 
 it("reclaims a root-only archived tree with unarchived side threads and subagents on a live daemon cycle", async () => {
-	const harness = await ProcessHarness.start();
+	const fixtureStarted = performance.now();
+	const harness = ProcessHarness.create();
 	const evidence: Record<string, unknown> = {};
 	try {
-		let browser = await harness.connect();
-		await Effect.runPromise(
-			browser.rpc.SetAutoSettleSetting({ autoSettleAfterDays: null }),
-		);
-		await Effect.runPromise(
-			browser.rpc.SetAutoDeleteArchivedSetting({
+		writeFileSync(
+			join(harness.configDir, "daemon.json"),
+			JSON.stringify({
+				...Result.getOrThrow(loadDaemonConfigResult(harness.configDir)),
+				autoSettleAfterDays: null,
 				autoDeleteArchivedAfterDays: null,
+				newSessionProject: "process-test",
+				projects: [
+					{
+						path: harness.projectDir,
+						folders: [harness.projectDir],
+						slug: "process-test",
+						title: "process-test",
+						repositoryIdentities: {},
+						addedAt: Date.now(),
+						lastUsed: Date.now(),
+					},
+				],
 			}),
 		);
-		const root = await browser.createSession("Retention root");
-		const child = await browser.createSession("Retention side thread");
-		const grandchild = await browser.createSession("Retention subagent");
-		const source = await browser.createSession("Surviving fork source");
-		const fork = await browser.createSession("Surviving fork");
-		await harness.terminate();
+		const root = createLocalSessionId();
+		const child = createLocalSessionId();
+		const grandchild = createLocalSessionId();
+		const source = createLocalSessionId();
+		const fork = createLocalSessionId();
+		// These inert sessions need the canonical creation/pick projectors,
+		// without a separate daemon just to create the retention fixture.
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				for (const [sessionId, title] of [
+					[root, "Retention root"],
+					[child, "Retention side thread"],
+					[grandchild, "Retention subagent"],
+					[source, "Surviving fork source"],
+					[fork, "Surviving fork"],
+				] as const) {
+					yield* commit([
+						canonicalEvent(
+							"session.created",
+							sessionId,
+							{ sessionId, title, provider: "claude", permissionMode: "ask" },
+							{ provider: "claude", metadata: { source: "relay" } },
+						),
+						...sessionPickEvents(sessionId, {
+							harness: "claude",
+							model: { providerId: "claude", modelId: "sonnet" },
+							effort: "",
+							contextWindow: "200k",
+						}),
+					]);
+				}
+			}).pipe(
+				Effect.provide(
+					makePersistenceProjectLayer("process-test").pipe(
+						Layer.provideMerge(
+							makePersistenceStoreLayer(harness.daemonStorePath()),
+						),
+					),
+				),
+			),
+		);
 		let db = new Database(harness.daemonStorePath());
 		const ids = [root, child, grandchild];
 		const snapshot = () => ({
@@ -107,8 +161,18 @@ it("reclaims a root-only archived tree with unarchived side threads and subagent
 					),
 				),
 			);
+			evidence["seedMs"] = performance.now() - fixtureStarted;
 			await harness.restart();
-			browser = await harness.connect();
+			const browser = await harness.connect();
+			await Effect.runPromise(
+				browser.rpc.SetAutoSettleSetting({ autoSettleAfterDays: null }),
+			);
+			await Effect.runPromise(
+				browser.rpc.SetAutoDeleteArchivedSetting({
+					autoDeleteArchivedAfterDays: null,
+				}),
+			);
+			evidence["setupMs"] = performance.now() - fixtureStarted;
 			db = new Database(harness.daemonStorePath(), { readonly: true });
 			evidence["before"] = snapshot();
 			expect(snapshot().sessions).toHaveLength(3);

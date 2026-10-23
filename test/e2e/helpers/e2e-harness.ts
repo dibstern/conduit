@@ -1,3 +1,4 @@
+import { createTestRelayStack as createRelayStack } from "../../helpers/project-relay.js";
 // Two harness modes:
 //
 // 1. createE2EHarness()    — real relay + real OpenCode (live E2E tests)
@@ -38,10 +39,7 @@ import {
 } from "../../../src/lib/persistence/effect/live.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
-import {
-	createRelayStack,
-	type RelayStack,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { RelayStack } from "../../../src/lib/relay/relay-stack.js";
 import { stopPtyHost } from "../../../src/lib/terminal/pty-host-client.js";
 import { claudeSdk as fakeClaudeSdk } from "../../helpers/fake-claude-process-sdk.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
@@ -93,6 +91,13 @@ export async function createE2EHarness(opts?: {
 
 	const staticDir = path.resolve(import.meta.dirname, "../../../dist/frontend");
 	const dbDir = mkdtempSync(path.join(tmpdir(), "e2e-live-relay-"));
+	await saveDaemonConfig(
+		{
+			...defaultDaemonConfig(),
+			avatar: { kind: "initial" },
+		},
+		dbDir,
+	);
 
 	const startStack = (port: number) =>
 		createRelayStack({
@@ -278,14 +283,17 @@ export async function createReplayHarness(
 		{
 			...defaultDaemonConfig(),
 			avatar: { kind: "initial" },
-			...(claudeInstanceId !== undefined && {
+			...(claudeReplayer && {
 				instances: [
 					{
-						id: claudeInstanceId,
-						name: claudeInstanceId,
+						id: claudeInstanceId ?? "claude",
+						name: claudeInstanceId ?? "Claude",
 						port: 0,
 						managed: false,
 						driver: "claude",
+						configDir:
+							options.claudeReplay?.transcriptConfigDir ??
+							path.join(configDir, "claude"),
 					},
 				],
 			}),

@@ -4,7 +4,7 @@ import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import {
 	type Harness,
-	offeredOptions,
+	modelParameterChoices,
 } from "../../../provider/turn-settings.js";
 import type {
 	ContextWindowOption,
@@ -56,7 +56,7 @@ const providerFromCatalog = (
 	configured: true,
 	models: models
 		.map((model) => {
-			const { efforts } = offeredOptions(model);
+			const efforts = modelParameterChoices(model).offered();
 			return {
 				id: model.id,
 				name: model.name,
@@ -144,7 +144,7 @@ export const loadModelCatalog = (
 			log.warn(
 				`Failed to fetch OpenCode model catalog: ${formatErrorDetail(provListResult.failure)}`,
 			);
-			return [] as ModelInfo[];
+			return yield* Effect.fail(provListResult.failure);
 		}
 		yield* refreshModelSettings;
 		return provListResult.success.providers.flatMap((provider) =>

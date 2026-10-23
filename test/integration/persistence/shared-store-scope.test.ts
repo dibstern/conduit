@@ -565,15 +565,27 @@ describe("shared-store relay project scope", () => {
 						Effect.provideService(PersistenceProjectTag, { projectId: B }),
 					);
 					if (mode !== "empty") {
-						yield* sql`INSERT INTO pending_inputs (input_id, session_id, text, request, state, admitted_at, version)
-						VALUES (${commandId}, ${sessionId}, 'steer', '{}', 'steering', 1000, 1)`;
-						yield* eventStore.appendBatch([
-							canonicalEvent("input.sent", sessionId, {
-								sessionId,
-								inputId: commandId,
-								steer: true,
-							}),
-						]);
+						const runner = yield* ProjectionRunnerEffectTag;
+						yield* runner.projectBatch(
+							yield* eventStore.appendBatch([
+								canonicalEvent(
+									"input.admitted",
+									sessionId,
+									{
+										sessionId,
+										inputId: commandId,
+										delivery: "steer",
+										request: { text: "steer" },
+									},
+									{ createdAt: 1000 },
+								),
+								canonicalEvent("input.sent", sessionId, {
+									sessionId,
+									inputId: commandId,
+									steer: true,
+								}),
+							]),
+						);
 					}
 					let closing = mode === "closing";
 					let interrupted = mode === "interrupted";
@@ -814,7 +826,8 @@ describe("shared-store relay project scope", () => {
 		const workspace: SessionWorkspaceTag["Service"] = {
 			preview: unused,
 			renameBranch: unused,
-			withLaunch: (effect) => effect,
+			withLaunch: (_sessionId, effect) => effect,
+			withProjectLaunch: (effect) => effect,
 			get: unused,
 			move: unused,
 			inherit: unused,
@@ -1066,7 +1079,7 @@ describe("shared-store relay project scope", () => {
 						readings: Stream.empty,
 						latest: () => Effect.succeed(undefined),
 						turnEnded: () => Effect.void,
-						refresh: () =>
+						refresh: (_options) =>
 							Effect.succeed([usageReading("claude", { status: "available" })]),
 						pickFailover: () => Effect.succeed(undefined),
 					}),

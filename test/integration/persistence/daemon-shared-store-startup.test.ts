@@ -28,6 +28,7 @@ import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
 import { PortScannerTag } from "../../../src/lib/domain/daemon/Layers/port-scanner-layer.js";
+import { makeProviderAdaptersLive } from "../../../src/lib/domain/daemon/Layers/provider-adapters-layer.js";
 import {
 	HttpServerRefTag,
 	RelayFactoryLive,
@@ -80,7 +81,10 @@ import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-que
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import * as importer from "../../../src/lib/persistence/migrations/daemon-store-import.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
+import { CursorAccountResources } from "../../../src/lib/provider/cursor/cursor-account-resources.js";
+import { createCursorSdkPort } from "../../../src/lib/provider/cursor/cursor-sdk.js";
 import type { StoredProject } from "../../../src/lib/types.js";
+import { cursorAccountResourcesFixture } from "../../helpers/cursor-account-resources-fixture.js";
 import { daemonStoreManifest } from "../../helpers/daemon-store-import-manifest.js";
 import {
 	makeMockAccountDirectory,
@@ -188,34 +192,41 @@ function startup(root: string, projects: readonly StoredProject[]) {
 	return ManagedRuntime.make(
 		RelayFactoryLive(root).pipe(
 			Layer.provideMerge(
-				Layer.mergeAll(
-					store,
-					registry,
-					directory,
-					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
-					Layer.effect(SessionActivityTag, makeSessionActivity),
-					DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
-					makeOpenCodeRuntimeStateLive(),
-					DaemonEventBusLive,
-					SessionEventBusLive,
-					ConfigPersistenceNoopLive,
-					InstanceHealthCheckLive,
-					Layer.succeed(PortScannerTag)({
-						getKnownPorts: () => Effect.succeed(new Set<number>()),
-						scanNow: () =>
-							Effect.succeed({ discovered: [], lost: [], active: [] }),
-					}),
-					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
-					Layer.succeed(PushManagerTag)({
-						subscribe: () => Effect.void,
-						unsubscribe: () => Effect.void,
-						broadcast: () => Effect.void,
-						getPublicKey: Effect.succeed(undefined),
-						addSubscription: () => Effect.void,
-						removeSubscription: () => Effect.void,
-						sendToAll: () => Effect.void,
-						getLegacyManager: Effect.succeed(Option.none()),
-					}),
+				makeProviderAdaptersLive(root).pipe(
+					Layer.provideMerge(
+						Layer.mergeAll(
+							store,
+							registry,
+							directory,
+							Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
+							Layer.succeed(CursorAccountResources)(
+								cursorAccountResourcesFixture(createCursorSdkPort()),
+							),
+							Layer.effect(SessionActivityTag, makeSessionActivity),
+							DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
+							makeOpenCodeRuntimeStateLive(),
+							DaemonEventBusLive,
+							SessionEventBusLive,
+							ConfigPersistenceNoopLive,
+							InstanceHealthCheckLive,
+							Layer.succeed(PortScannerTag)({
+								getKnownPorts: () => Effect.succeed(new Set<number>()),
+								scanNow: () =>
+									Effect.succeed({ discovered: [], lost: [], active: [] }),
+							}),
+							Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
+							Layer.succeed(PushManagerTag)({
+								subscribe: () => Effect.void,
+								unsubscribe: () => Effect.void,
+								broadcast: () => Effect.void,
+								getPublicKey: Effect.succeed(undefined),
+								addSubscription: () => Effect.void,
+								removeSubscription: () => Effect.void,
+								sendToAll: () => Effect.void,
+								getLegacyManager: Effect.succeed(Option.none()),
+							}),
+						),
+					),
 				),
 			),
 		),

@@ -96,33 +96,142 @@ Examples:
   | baseline                | threshold |
   | usage-limit-strip-phone | 98        |
 
-Scenario Outline: a strip without a reset time offers Try again on the same account
+Scenario Outline: I used a reset continues the viewed session with or without a reset time
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And a session already exists on the Claude harness
   And the Claude account claude is named work2claude
   And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
-  When the session hits the seven_day limit on claude resetting at none
-  Then the usage limit strip shows Try again
-  When I press Try again on the usage limit strip
+  When the session hits the seven_day limit on claude resetting at <resets>
+  Then the usage limit strip is <state>
+  And the usage limit strip shows I used a reset
+  And the usage limit strip links to Claude usage settings in a new tab
+  And the usage limit strip keeps reset actions in order
+  When I press I used a reset on the usage limit strip
   Then the ContinueSession RPC continues the current session on claude now
   When the server starts the continuation
-  Then the usage limit strip has no Try again
-  And the usage limit strip is visible
+  Then the usage limit strip is visible
+  And the usage limit strip has no actions
+
+Examples:
+  | viewport | resets               | state               |
+  | desktop  | none                 | limited             |
+  | phone    | none                 | limited             |
+  | desktop  | 2026-01-05T09:00:00Z | can resume at reset |
+  | phone    | 2026-01-05T09:00:00Z | can resume at reset |
+
+Scenario Outline: a refused reset names the window and reset time in a toast
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the <limit> limit on claude resetting at 2026-01-05T09:00:00Z
+  And the daemon refuses the reset with the <window_label> until 2026-01-05T09:00:00Z
+  And I press I used a reset on the usage limit strip
+  Then the ContinueSession RPC continues the current session on claude now
+  And an error toast titled Couldn't continue the session says Claude still shows the <window_label> until Mon 9 am.
+  And the usage limit strip is can resume at reset
+  And the usage limit strip shows I used a reset
+
+Examples:
+  | viewport | limit          | window_label      |
+  | desktop  | seven_day      | weekly limit      |
+  | phone    | five_hour      | 5-hour limit      |
+  | desktop  | seven_day_opus | Opus weekly limit |
+
+Scenario Outline: a proven reset with Auto-resume off looks reset
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And auto-resume limited sessions is off on the daemon
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the reset Usage Reading for claude is fresh at 10 percent
+  Then the usage limit strip is looks reset
+  And the usage limit strip title reads Limit looks reset · Continue now
+  And the usage limit strip shows I used a reset
+  And the usage limit strip links to Claude usage settings in a new tab
+  And the layout region visually matches <baseline> at <threshold> percent
+  When I press I used a reset on the usage limit strip
+  Then the ContinueSession RPC continues the current session on claude now
+
+Examples:
+  | viewport | baseline                       | threshold |
+  | desktop  | usage-limit-looks-reset-desktop | 98        |
+  | phone    | usage-limit-looks-reset-phone   | 98        |
+
+Scenario Outline: Auto-resume or an unproven reading keeps the limit state
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal
+  And auto-resume limited sessions is <auto_resume> on the daemon
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the reset Usage Reading for <reading_account> is <reading> at <used> percent
+  Then the usage limit strip is can resume at reset
+  And the usage limit strip title reads work2claude hit its weekly limit.
+  And the usage limit strip shows I used a reset
+
+Examples:
+  | auto_resume | reading_account | reading    | used |
+  | on          | claude          | fresh      | 10   |
+  | off         | claude          | stale      | 10   |
+  | off         | claude          | older      | 10   |
+  | off         | claude          | unknown    | 10   |
+  | off         | claude          | signed-out | 10   |
+  | off         | claude          | fresh      | 100  |
+  | off         | self            | fresh      | 10   |
+
+Scenario Outline: a waiting Resume still offers I used a reset
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude account claude is named work2claude
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the server schedules the resume at reset
+  Then the usage limit strip is waiting
+  And the usage limit strip shows I used a reset
+  And the usage limit strip shows Cancel auto-resume
+  And the usage limit strip links to Claude usage settings in a new tab
+  And the usage limit strip keeps reset actions in order
+  When I press I used a reset on the usage limit strip
+  Then the ContinueSession RPC continues the current session on claude now
 
 Examples:
   | viewport |
   | desktop  |
   | phone    |
 
-Scenario: a strip with a reset time offers no Try again
+Scenario Outline: Held Messages keep their reset action in the tray
   Given the conduit app is served with the connected mockup
-  And the viewport is a desktop
+  And the viewport is a <viewport>
   And a session already exists on the Claude harness
   And the Claude account claude is named work2claude
-  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
   When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
-  Then the usage limit strip has no Try again
+  And the server clears the cut-off
+  And the server schedules the resume at reset
+  Then the usage limit strip is held
+  And the usage limit strip shows I used a reset
+  When the mock relay queues Run the provider tests
+  Then the usage limit strip is not visible
+  And the queued usage recovery is held
+  And the queued usage recovery title reads Waiting for work2claude's limit to reset
+  And the queued usage recovery shows I used a reset
+  And the queued usage recovery shows Cancel auto-resume
+  And the queued usage recovery links to Claude usage settings in a new tab
+  And the queued usage recovery keeps reset actions in order
+  And the composer region visually matches <baseline> at <threshold> percent
+  When I press I used a reset on the usage limit strip
+  Then the ContinueSession RPC continues the current session on claude now
+
+Examples:
+  | viewport | baseline                 | threshold |
+  | desktop  | usage-limit-held-desktop | 98        |
+  | phone    | usage-limit-held-phone   | 98        |
 
 Scenario Outline: a session that resumed keeps a divider above the reply
   Given the conduit app is served with the connected mockup
@@ -147,7 +256,7 @@ Scenario Outline: limited session without a reset time matches the no-reset stri
   And the Claude account claude is named work2claude
   And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
   When the session hits the seven_day limit on claude resetting at none
-  Then the usage limit strip shows Try again
+  Then the usage limit strip shows I used a reset
   And the layout region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -178,7 +287,7 @@ Scenario Outline: Resume at reset schedules the resume and Cancel auto-resume un
   And the Claude account claude is named work2claude
   And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
   When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
-  Then the usage limit strip is limited
+  Then the usage limit strip is can resume at reset
   And the usage limit strip shows Resume at reset
   When I press Resume at reset on the usage limit strip
   Then the ContinueSession RPC continues the current session on claude at 2026-01-05T09:00:00Z
@@ -191,7 +300,7 @@ Scenario Outline: Resume at reset schedules the resume and Cancel auto-resume un
   When I press Cancel auto-resume on the usage limit strip
   Then the CancelContinuation RPC names the current session
   When the server cancels the resume at reset
-  Then the usage limit strip is limited
+  Then the usage limit strip is can resume at reset
   And the usage limit strip shows Resume at reset
   And the usage limit strip has no Cancel auto-resume
 
@@ -209,7 +318,7 @@ Scenario Outline: a session that resumed at reset keeps a divider with the reset
   When the session hits the seven_day limit on claude resetting at 2026-01-01T09:40:00Z
   And the session resumes on claude by reset and replies All provider tests pass now.
   Then the usage limit strip is not visible
-  And the transcript divider reading ↻ Resumed on work2claude after reset · 9:40 AM sits directly above the reply All provider tests pass now.
+  And the transcript divider reading ↻ Resumed on work2claude after reset · 9:40 am sits directly above the reply All provider tests pass now.
 
 Examples:
   | viewport |
@@ -278,20 +387,18 @@ Scenario Outline: Switch account lists each account's fresh quota and pre-select
   And the quota check reads claude limited until 2026-01-05T09:00:00Z, self <quota>, team limited until 2026-01-01T14:30:00Z
   And I open Switch account on the usage limit strip
   Then the account picker row for personal reads <caption> and can be picked
-  And the account picker row for work2claude reads limited · Mon 9:00 AM and cannot be picked
-  And the account picker row for team-max reads limited · 2:30 PM and cannot be picked
+  And the account picker row for work2claude reads limited · Mon 9:00 am and cannot be picked
+  And the account picker row for team-max reads limited · 2:30 pm and cannot be picked
   And the account picker pre-selects personal
   And the account picker shows claude with a blue dot
-  And the account picker shows self with a teal dot
-  And the account picker shows team with a violet dot
+  And the account picker shows self with a green dot
+  And the account picker shows team with a pink dot
 
 Examples:
   | viewport | quota       | caption       |
   | desktop  | 23% used    | 77% left      |
   | desktop  | 85% used    | 15% left      |
-  | desktop  | unknown     | quota unknown |
   | phone    | 23% used    | 77% left      |
-  | phone    | unavailable | unavailable   |
 
 Scenario Outline: switching confirms what carries over, hands the session over and marks the transcript
   Given the conduit app is served with the connected mockup
@@ -307,9 +414,9 @@ Scenario Outline: switching confirms what carries over, hands the session over a
   Then the PreviewContinuation RPC previews the current session on self
   And the handoff dialog asks Continue on personal?
   And the handoff dialog carries <messages>
-  And the swap card hands work2claude at limited to personal at 77% left
+  And the swap card hands work2claude at limited · Mon 9:00 am to personal at 77% left
   And the handoff dialog shows claude with a blue dot
-  And the handoff dialog shows self with a teal dot
+  And the handoff dialog shows self with a green dot
   When I press Switch and continue
   Then the ContinueSession RPC switches the current session from claude to self
   And the handoff dialog is closed
@@ -318,7 +425,7 @@ Scenario Outline: switching confirms what carries over, hands the session over a
   And the cut-off tag is visible
   When the session resumes on self from claude by user and replies All provider tests pass now.
   Then the transcript divider reading <divider> sits directly above the reply All provider tests pass now.
-  And the transcript divider shows self with a teal dot
+  And the transcript divider shows self with a green dot
   And the What carried over? link sits <link> under the divider
   When I open What carried over? on the transcript divider
   Then the handoff dialog is read-only and carries <messages>
@@ -335,7 +442,7 @@ Scenario Outline: a switch the daemon refuses changes nothing and says why
   And the Claude accounts are claude as work2claude, self as personal
   And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
   When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
-  And the quota check reads claude limited until 2026-01-05T09:00:00Z, self unavailable
+  And the quota check reads claude limited until 2026-01-05T09:00:00Z, self unknown
   And the handoff carries 3 of 3 messages with the first
   And the daemon refuses the switch with Claude account authentication failed
   And I open Switch account on the usage limit strip
@@ -359,6 +466,7 @@ Scenario Outline: limited session with a second account matches frame A
   And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
   When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
   Then the usage limit strip is visible
+  And the usage limit strip keeps reset actions in order
   And the layout region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -429,7 +537,7 @@ Scenario Outline: auto-switch matches frame G: a divider and a toast say the ses
   When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
   And the session resumes on self from claude by auto-switch and replies All provider tests pass now.
   Then the transcript divider reading <divider> sits directly above the reply All provider tests pass now.
-  And the transcript divider shows self with a teal dot
+  And the transcript divider shows self with a green dot
   And a toast titled Switched to personal says work2claude reached its weekly limit.
   And the toast offers What carried over? at the left and Settings at the right
   And the layout region visually matches <baseline> at <threshold> percent

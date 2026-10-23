@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
 	mkdirSync,
@@ -69,20 +69,32 @@ const env = { ...process.env, CONDUIT_BUILD_ID: buildId };
 rmSync("dist/build-ready.json", { force: true });
 
 function run(...args) {
-	const result = spawnSync("pnpm", args, { env, stdio: "inherit" });
-	if (result.error) throw result.error;
-	if (result.status !== 0) process.exit(result.status ?? 1);
+	return new Promise((resolve, reject) => {
+		const child = spawn("pnpm", args, { env, stdio: "inherit" });
+		child.once("error", reject);
+		child.once("close", (code) => resolve(code ?? 1));
+	});
 }
 
 // Copy first: migrations now also contain TS modules emitted by tsgo.
-run("copy:assets");
-run("exec", "tsgo");
+const copyCode = await run("copy:assets");
+if (copyCode !== 0) process.exit(copyCode);
+const serverOnly = process.argv[2] === "server";
+// The compilers write separate directories. Even on failure, wait for both
+// before releasing the lock so another build cannot interleave their outputs.
+const results = await Promise.allSettled([
+	run("exec", "tsgo", "--project", "tsconfig.build.json"),
+	...(serverOnly ? [] : [run("exec", "vite", "build")]),
+]);
+for (const result of results) {
+	if (result.status === "rejected") throw result.reason;
+	if (result.value !== 0) process.exit(result.value);
+}
 writeFileSync(
 	"dist/src/lib/build-id.js",
 	`export const BUILD_ID = ${JSON.stringify(buildId)};\n`,
 );
-if (process.argv[2] !== "server") {
-	run("exec", "vite", "build");
+if (!serverOnly) {
 	const marker = `dist/build-ready.${process.pid}.tmp`;
 	writeFileSync(marker, JSON.stringify({ buildId }));
 	renameSync(marker, "dist/build-ready.json");

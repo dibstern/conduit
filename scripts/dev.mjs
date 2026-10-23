@@ -46,6 +46,11 @@ function fail(error) {
 	stop();
 }
 
+/** dev:all outlives a bad cycle; the next change or crash retries it. */
+function recover(error) {
+	console.error(`[dev] ${error.message ?? error}; waiting for the next change`);
+}
+
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 // Closing the terminal must not orphan the detached server on its port.
@@ -168,10 +173,13 @@ async function restart() {
 		const inode = statSync(rpc.DEFAULT_SOCKET_PATH, {
 			throwIfNoEntry: false,
 		})?.ino;
-		await rpc.sendRpcRequest(
-			rpc.DEFAULT_SOCKET_PATH,
-			new rpc.RestartWithConfig({}),
-		);
+		// A daemon busy booting relays can miss the default 10s reply window,
+		// yet still restart, so a timeout falls through to the socket check.
+		await rpc
+			.sendRpcRequest(rpc.DEFAULT_SOCKET_PATH, new rpc.RestartWithConfig({}), {
+				requestTimeoutMs: 60_000,
+			})
+			.catch((error) => log(`${error.message}; checking for a restart`));
 		if (await waitForServer(inode)) {
 			if (mode !== "service") {
 				log("dev:all is driving the conduit service");
@@ -198,11 +206,15 @@ async function restart() {
 	);
 	child = server;
 	childClosed = new Promise((resolve) => server.once("close", resolve));
-	server.once("error", fail);
+	server.once("error", recover);
 	server.once("exit", (code, signal) => {
-		if (child === server && !stopping) {
-			fail(new Error(`server exited (${signal ?? code})`));
-		}
+		if (child !== server || stopping) return;
+		child = undefined;
+		log(`server exited (${signal ?? code}); restarting in 2s`);
+		// Paced so a server that crashes on boot does not spin.
+		delay(2_000).then(() => {
+			if (!child) runRestart();
+		});
 	});
 	if (!(await waitForServer()) && !stopping) {
 		throw new Error("server did not become ready within 10s");
@@ -217,11 +229,22 @@ async function startVite() {
 	);
 	if (stopping) return;
 	const server = `${tlsEnabled ? "https" : "http"}://localhost:${port}`;
-	vite = spawn(process.execPath, ["node_modules/vite/bin/vite.js"], {
-		stdio: "inherit",
-		detached: true,
-		env: { ...process.env, CONDUIT_DEV_SERVER: server },
-	});
+	// Keep Conduit's startup screen visible while retaining Vite diagnostics.
+	vite = spawn(
+		process.execPath,
+		[
+			"node_modules/vite/bin/vite.js",
+			"--clearScreen",
+			"false",
+			"--logLevel",
+			"warn",
+		],
+		{
+			stdio: "inherit",
+			detached: true,
+			env: { ...process.env, CONDUIT_DEV_SERVER: server },
+		},
+	);
 	viteClosed = new Promise((resolve) => vite.once("close", resolve));
 	vite.once("error", fail);
 }
@@ -243,11 +266,7 @@ async function rebuild() {
 		const code = await build();
 		if (stopping) return;
 		if (code !== 0) {
-			log("build failed");
-			if (!rpc) {
-				process.exitCode = code;
-				stop();
-			}
+			log("build failed; waiting for the next change");
 		} else {
 			if (!rpc) {
 				const [
@@ -299,11 +318,27 @@ function runBuild() {
 		return activeBuild;
 	}
 	activeBuild = rebuild()
-		.catch(fail)
+		.catch(recover)
 		.finally(() => {
 			activeBuild = undefined;
 		});
 	return activeBuild;
+}
+
+/** Restart onto the current dist without rebuilding. */
+function runRestart() {
+	if (stopping || activeBuild || !rpc) return;
+	activeBuild = restart()
+		.then(async () => {
+			if (stopping) return;
+			log(`ready (${mode}${child ? ` PID ${child.pid}` : ""})`);
+			if (!vite) await startVite();
+		})
+		.catch(recover)
+		.finally(() => {
+			activeBuild = undefined;
+			if (pending && !stopping) runBuild();
+		});
 }
 
 function changed() {
@@ -333,7 +368,12 @@ try {
 	);
 	watchers.push(
 		watch(".", (_event, filename) => {
-			if (filename === "vite.config.ts" || filename === "package.json")
+			if (
+				filename === "vite.config.ts" ||
+				filename === "tsconfig.json" ||
+				filename === "tsconfig.build.json" ||
+				filename === "package.json"
+			)
 				changed();
 		}),
 	);
@@ -347,17 +387,7 @@ try {
 				if (!buildId || buildId === lastBuildId) return;
 				lastBuildId = buildId;
 				log(`external build ${buildId.slice(0, 8)} detected`);
-				activeBuild = restart()
-					.then(() => {
-						if (!stopping) {
-							log(`ready (${mode}${child ? ` PID ${child.pid}` : ""})`);
-						}
-					})
-					.catch(fail)
-					.finally(() => {
-						activeBuild = undefined;
-						if (pending && !stopping) runBuild();
-					});
+				runRestart();
 			}).on("error", fail),
 		);
 	}

@@ -183,6 +183,7 @@ function discoverRunnersInDirectory(directory: string): RunnerRegistration[] {
 				continue;
 			}
 			entries.push({
+				// Runner builds predating driverKind were all Claude.
 				driverKind:
 					typeof value["driverKind"] === "string"
 						? value["driverKind"]

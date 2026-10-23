@@ -528,7 +528,7 @@ describe("Missing session worktrees through the built daemon", () => {
 		).toEqual([]);
 	}, 60_000);
 
-	it("rejects a removed owned worktree whose branch no longer exists", async () => {
+	it("continues in the main folder when a removed owned worktree's branch no longer exists", async () => {
 		const { fixture, main, socket, list } = await start("owned-deleted-branch");
 		const browser = await fixture.connect();
 		const { sessionId } = await sendRpcRequest(socket, {
@@ -555,18 +555,25 @@ describe("Missing session worktrees through the built daemon", () => {
 			"--format=%(refname)",
 			"refs/heads",
 		);
-		await browser.send(sessionId, "Cannot recreate a deleted branch.");
+		await browser.send(sessionId, "Continue without the deleted branch.");
 		expect(
-			events(fixture, sessionId)
-				.filter(({ type }) => type === "turn.error")
-				.at(-1)?.data,
+			fixture
+				.claudeOptions()
+				.filter(({ prompt }) => prompt !== undefined)
+				.at(-1),
 		).toMatchObject({
-			code: "WORKTREE_MISSING",
-			error: `Worktree missing: ${directory}. Branch ${branch} no longer exists, so it cannot be recreated. Continue in main folder before sending another message.`,
+			prompt: "Continue without the deleted branch.",
+			options: { cwd: main },
 		});
 		expect(
-			fixture.claudeOptions().filter(({ prompt }) => prompt !== undefined),
+			events(fixture, sessionId).filter(
+				({ type, data }) =>
+					type === "turn.error" && data["code"] === "WORKTREE_MISSING",
+			),
 		).toEqual([]);
+		expect(
+			(await list()).sessions.find(({ id }) => id === sessionId)?.workspace,
+		).toMatchObject({ cause: "missing" });
 		expect(existsSync(directory)).toBe(false);
 		expect(git(main, "branch", "--list", branch).trim()).toBe("");
 		expect(git(main, "for-each-ref", "--format=%(refname)", "refs/heads")).toBe(

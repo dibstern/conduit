@@ -25,10 +25,11 @@ export const resolveDraftLaunchInput = (
 ) =>
 	Effect.gen(function* () {
 		const workspace = yield* SessionWorkspaceTag;
+		const config = yield* ConfigTag;
 		const state =
 			worktreePath === undefined
 				? null
-				: yield* workspace.preview(creation.account, worktreePath);
+				: yield* workspace.preview(creation.account, worktreePath, config.slug);
 		const folders = yield* resolveLaunchFolders(state);
 		const call =
 			yield* (yield* OrchestrationEngineTag).resolveCallContextEffect({
@@ -47,7 +48,13 @@ export const resolveDraftLaunchInput = (
 				folders,
 				yield* getDefaultAgent(),
 			),
-			...(call ? { projectId: call.projectId, shellEnv: call.shellEnv } : {}),
+			...(call
+				? {
+						projectId: call.projectId,
+						shellEnv: call.shellEnv,
+						shellConfig: call.shellConfig,
+					}
+				: {}),
 		};
 	});
 
@@ -57,37 +64,48 @@ export const preWarmDraft = (request: typeof PreWarmDraft.payloadSchema.Type) =>
 		const log = yield* LoggerTag;
 		yield* Effect.gen(function* () {
 			if (request.worktreeBase !== undefined) return;
-			const account = yield* resolveSessionCreationAccount(request);
 			const drafts = yield* DraftPreWarmTag;
-			if (PROVIDER_DRIVERS[account.driver].supportsNativeResume) {
-				const creation = yield* resolveSessionCreation({ ...request, account });
-				const launch = yield* resolveDraftLaunchInput(
-					creation,
-					request.worktreePath,
-				);
-				yield* drafts.warm(request.originId, request.draftId, {
-					...launch,
-					providerState: {},
-				});
-			} else if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
-				const config = yield* ConfigTag;
-				const directory = request.worktreePath ?? config.projectDir;
-				const instances = yield* OpenCodeInstancesTag;
-				yield* Effect.scoped(
-					Effect.gen(function* () {
-						const client = yield* instances.borrow(
-							account.id,
-							config.projectDir,
+			const config = yield* ConfigTag;
+			yield* drafts.warm(
+				request.originId,
+				request.draftId,
+				config.slug,
+				Effect.gen(function* () {
+					const account = yield* resolveSessionCreationAccount(request);
+					if (PROVIDER_DRIVERS[account.driver].supportsNativeResume) {
+						const creation = yield* resolveSessionCreation({
+							...request,
+							account,
+						});
+						const launch = yield* resolveDraftLaunchInput(
+							creation,
+							request.worktreePath,
 						);
-						yield* resolveSessionCreation(
-							{ ...request, account },
-							{ startIfStopped: false },
+						return {
+							...launch,
+							providerState: {},
+						};
+					} else if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
+						const directory = request.worktreePath ?? config.projectDir;
+						const instances = yield* OpenCodeInstancesTag;
+						yield* Effect.scoped(
+							Effect.gen(function* () {
+								const client = yield* instances.borrow(
+									account.id,
+									config.projectDir,
+								);
+								yield* resolveSessionCreation(
+									{ ...request, account },
+									{ startIfStopped: false },
+								);
+								if (directory !== config.projectDir)
+									yield* drafts.warmDirectory(account.id, client, directory);
+							}),
 						);
-						if (directory !== config.projectDir)
-							yield* drafts.warmDirectory(account.id, client, directory);
-					}),
-				);
-			}
+					}
+					return undefined;
+				}),
+			);
 		}).pipe(
 			Effect.catchCause((cause) =>
 				Effect.sync(() => log.debug(`Draft pre-warm failed: ${String(cause)}`)),

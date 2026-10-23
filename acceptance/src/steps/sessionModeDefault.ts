@@ -29,6 +29,7 @@ export const sessionModeDefaultHandlers: StepHandler[] = [
 				instances: [
 					{
 						id: "opencode",
+						colorSlot: 3,
 						name: "OpenCode",
 						driver: "opencode",
 						isDefault: true,

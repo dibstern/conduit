@@ -97,6 +97,8 @@ export type ChatMessage = (
 	| ResultMessage
 	| SystemMessage
 ) & {
+	/** Canonical turn identity, separate from the rendered part's uuid. */
+	turnId?: string | undefined;
 	/** Persisted message ordering, independent of each activity's display time. */
 	messageOrder?: { createdAt: number; id: string };
 };
@@ -170,6 +172,7 @@ export interface ToolMessage {
 	/** Tool input parameters — stored for tools that need rich rendering (e.g. task/subagent). */
 	input?: unknown;
 	status: ToolStatus;
+	outcome?: "succeeded" | "failed";
 	result?: string;
 	isError?: boolean;
 	/** Set while `input` or `result` is a preview: each cut field's full size.
@@ -289,6 +292,8 @@ export interface QuestionRequest {
 	toolUseId?: string;
 	/** Provider that owns this question, when known. */
 	providerId?: string;
+	/** Async questions remain answerable while the agent keeps working. */
+	delivery?: "async";
 	questions: AskUserQuestion[];
 }
 

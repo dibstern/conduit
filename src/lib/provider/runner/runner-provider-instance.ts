@@ -12,25 +12,19 @@ import { SqlClient } from "effect/sql";
 import type { AccountsState } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
-import type { DaemonConfigLoadError } from "../../daemon/config-persistence.js";
 import {
 	bindTurnTimelineSink,
 	observeTurnTimelineFrame,
 } from "../../domain/daemon/Services/turn-timeline.js";
 import {
-	type PendingInteractionService,
-	PendingInteractionServiceTag,
-} from "../../domain/relay/Services/pending-interaction-service.js";
-import {
-	type ProviderRuntimeIngestion,
-	type ProviderRuntimeIngestionError,
-	ProviderRuntimeIngestionTag,
+	Usage,
+	type UsageService,
+} from "../../domain/daemon/Services/usage.js";
+import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
+import type {
+	ProviderRuntimeIngestion,
+	ProviderRuntimeIngestionError,
 } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ConfigTag } from "../../domain/relay/Services/services.js";
-import {
-	makeProcessingTimeoutHooks,
-	type OverridesStateTag,
-} from "../../domain/relay/Services/session-overrides-state.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors-utils.js";
 import { createLogger } from "../../logger.js";
@@ -52,6 +46,7 @@ import type {
 	PreWarmSessionInput,
 	ProviderCall,
 	ProviderCapabilities,
+	ProviderControlCommandStatus,
 	ProviderControlContext,
 	ProviderInstance,
 	ProviderNativeSession,
@@ -64,7 +59,7 @@ import {
 	runnerFailure as sessionFailure,
 } from "./runner-protocol.js";
 import { settleUnclaimedRunnerCommands } from "./runner-recovery.js";
-import { discoverAllRunners, discoverRunners } from "./runner-registry.js";
+import { discoverAllRunners } from "./runner-registry.js";
 import { failRunnerTurn } from "./runner-turn-failure.js";
 import type {
 	SessionCommand,
@@ -81,6 +76,7 @@ const log = createLogger("runner-provider-instance");
 export const assertSessionRunnerAvailable = (
 	sessionId: string,
 	registry: ProviderRegistry | undefined,
+	account?: Account,
 ) =>
 	Effect.gen(function* () {
 		for (const providerId of registry?.listProviders() ?? []) {
@@ -93,6 +89,13 @@ export const assertSessionRunnerAvailable = (
 					operation: failure.operation,
 					cause: Object.assign(new Error(failure.message), failure),
 				});
+			if (account) {
+				const block = yield* provider.getAccountSwitchBlockEffect(
+					sessionId,
+					account,
+				);
+				if (block) return yield* block;
+			}
 		}
 	});
 
@@ -137,6 +140,10 @@ export interface RunnerRecoveryDependencies {
 	readonly resolveCallContext: OrchestrationEngine["resolveCallContextEffect"];
 	readonly retirePrompts: (
 		currentProcessId: string | null,
+		options?: {
+			readonly expiredProcessId?: string;
+			readonly exceptCommandId?: string;
+		},
 	) => ReturnType<Effect.Success<typeof makeRetireReplacedProcessPrompts>>;
 }
 
@@ -147,8 +154,8 @@ export interface RunnerProviderInstanceDeps {
 			work: (account: Account) => Effect.Effect<A, E, R>,
 		) => Effect.Effect<A, E | ProviderInstanceFailure, R>;
 	};
-	readonly workspaceRoot: string;
-	readonly accounts: Effect.Effect<AccountsState, DaemonConfigLoadError>;
+	readonly accounts: Effect.Effect<AccountsState>;
+	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
 	readonly daemonConfigDir?: string;
 	readonly projectRootForSession?: (
 		sessionId: string,
@@ -175,6 +182,7 @@ export const makeRunnerProviderInstance = (
 ): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const providerScope = yield* Effect.scope;
+		const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 		const abortFibers = yield* FiberMap.make<string, void, never>();
 		const interactionFibers = yield* FiberMap.make<string, void, never>();
 		const preWarmFibers = yield* FiberMap.make<
@@ -203,6 +211,7 @@ export const makeRunnerProviderInstance = (
 			accountResourceFibers,
 			providerScope,
 			shutdown,
+			usage,
 		);
 		yield* Effect.addFinalizer(() => shutdown.pipe(Effect.ignore));
 		return instance;
@@ -226,35 +235,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 		Deferred.Deferred<void>
 	>();
 
-	readonly recoverRunnerEffect = Effect.gen({ self: this }, function* () {
-		if (this.deps.recoveryForSession)
-			return yield* this.recoverProjectContextsEffect(
-				this.deps.recoveryForSession,
-			);
-		const ingestion = yield* ProviderRuntimeIngestionTag;
-		const pending = yield* PendingInteractionServiceTag;
-		const timeoutRuntime = yield* Effect.context<OverridesStateTag>();
-		return yield* this.recoverWithContexts((sessionId) =>
-			Effect.succeed({
-				ingestion,
-				pending,
-				timeoutHooks: makeProcessingTimeoutHooks(timeoutRuntime, sessionId),
-			}),
-		);
-	});
-
 	private recoverWithContexts = (
-		recoveryForSession: (
-			sessionId: string,
-		) => Effect.Effect<
-			| Pick<
-					RunnerRecoveryDependencies,
-					"ingestion" | "pending" | "timeoutHooks"
-			  >
-			| undefined
+		recoveryForSession: NonNullable<
+			RunnerProviderInstanceDeps["recoveryForSession"]
 		>,
-		daemonRecovery?: RunnerProviderInstanceDeps["recoveryForSession"],
 		sessionIds?: ReadonlySet<string>,
+		ownsPendingSend?: OrchestrationEngine["ownsPendingSend"],
 	) =>
 		Effect.gen({ self: this }, function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -284,16 +270,8 @@ export class RunnerProviderInstance implements ProviderInstance {
 				yield* sessionIds
 					? (this.runner.attachSessionsEffect?.([...sessionIds]) ?? Effect.void)
 					: this.runner.recoverEffect;
-				const config = yield* Effect.serviceOption(ConfigTag);
 				const registrations = yield* Effect.try(() =>
-					daemonRecovery
-						? discoverAllRunners(this.deps.daemonConfigDir)
-						: discoverRunners(
-								config._tag === "Some"
-									? config.value.projectDir
-									: this.deps.workspaceRoot,
-								this.deps.daemonConfigDir,
-							),
+					discoverAllRunners(this.deps.daemonConfigDir),
 				).pipe(
 					Effect.catch((error) =>
 						Effect.logError("Could not verify runner ownership", error).pipe(
@@ -310,6 +288,25 @@ export class RunnerProviderInstance implements ProviderInstance {
 				);
 			}
 			const accounts = yield* this.deps.accounts;
+			const sessions = yield* sql<{
+				id: string;
+				provider: string;
+			}>`SELECT id, provider FROM sessions`;
+			for (const session of sessions) {
+				if (sessionIds && !sessionIds.has(session.id)) continue;
+				const driver =
+					accounts.accounts.find((account) => account.id === session.provider)
+						?.driver ??
+					accounts.deleted.find((account) => account.id === session.provider)
+						?.driver;
+				if (
+					!claimed.has(session.id) &&
+					(driver ?? session.provider) === this.providerId
+				) {
+					const recovery = yield* recoveryForSession(session.id);
+					if (recovery) yield* recovery.retirePrompts(null);
+				}
+			}
 			for (const sessionId of claimed) {
 				if (sessionIds && !sessionIds.has(sessionId)) continue;
 				const native = yield* this.runner.getNativeSessionEffect?.(sessionId) ??
@@ -335,10 +332,18 @@ export class RunnerProviderInstance implements ProviderInstance {
 				(id) =>
 					accounts.accounts.find((account) => account.id === id)?.driver ??
 					accounts.deleted.find((account) => account.id === id)?.driver,
-				(sinkId, turn, failure) =>
+				(sinkId, turn, failure, beforeProject) =>
 					Effect.gen({ self: this }, function* () {
 						const recovery = yield* recoveryForSession(turn.sessionId);
 						if (!recovery) return;
+						const requestIds = new Set([
+							...(yield* recovery.pending.listPendingPermissions(
+								turn.sessionId,
+							)).map((request) => request.requestId),
+							...(yield* recovery.pending.listPendingQuestions(
+								turn.sessionId,
+							)).map((request) => request.requestId),
+						]);
 						let persistenceError: ProviderRuntimeIngestionError | undefined;
 						yield* failRunnerTurn(
 							(output) =>
@@ -348,13 +353,18 @@ export class RunnerProviderInstance implements ProviderInstance {
 										yield* recovery.ingestion.ingestBatch([output.event], {
 											publishToBus: false,
 											publishToRelay: false,
+											...(output.event.type === "turn.error"
+												? {
+														beforeProject,
+														beforeCommit:
+															recovery.pending.cancelSessionInteractions(
+																turn.sessionId,
+																failure.message,
+																{ recoverQuestions: false, requestIds },
+															),
+													}
+												: {}),
 										});
-									} else if (output.type === "cancel-interactions") {
-										yield* recovery.pending.cancelSessionInteractions(
-											turn.sessionId,
-											output.reason,
-											{ recoverQuestions: false },
-										);
 									}
 									return {};
 								}).pipe(
@@ -382,8 +392,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 						// failRunnerTurn logs errors; database failures still need a retry.
 						if (persistenceError) return yield* Effect.fail(persistenceError);
 					}),
-				daemonRecovery,
+				recoveryForSession,
 				sessionIds,
+				ownsPendingSend,
 			);
 		});
 
@@ -405,12 +416,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 		>,
 		private readonly providerScope: Scope.Scope,
 		private readonly shutdown: Effect.Effect<void, ProviderInstanceFailure>,
+		private readonly usage?: UsageService,
 	) {
 		this.providerId = driver.driverKind;
-	}
-
-	recoverEffect() {
-		return this.recoverRunnerEffect;
 	}
 
 	recoverProjectContextsEffect(
@@ -418,7 +426,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			RunnerProviderInstanceDeps["recoveryForSession"]
 		>,
 	) {
-		return this.recoverWithContexts(recoveryForSession, recoveryForSession);
+		return this.recoverWithContexts(recoveryForSession);
 	}
 
 	attachSessionsEffect(
@@ -426,11 +434,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 		recoveryForSession: NonNullable<
 			RunnerProviderInstanceDeps["recoveryForSession"]
 		>,
+		ownsPendingSend?: OrchestrationEngine["ownsPendingSend"],
 	) {
 		return this.recoverWithContexts(
 			recoveryForSession,
-			recoveryForSession,
 			new Set(sessionIds),
+			ownsPendingSend,
 		);
 	}
 
@@ -450,6 +459,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 						providerId: this.providerId,
 						operation: failure.operation,
 						cause: Object.assign(new Error(failure.message), failure),
+						...(failure.code === "provider_process_gone" ||
+						(command.type === "send-turn" && failure.code === "runner_detached")
+							? { code: failure.code }
+							: {}),
 					}),
 			),
 		);
@@ -477,10 +490,58 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return this.runner.hasLiveProcessEffect(sessionId, processId);
 	}
 
+	getControlProcessIdEffect(
+		sessionId: string,
+	): Effect.Effect<string | undefined, ProviderInstanceFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const failure = yield* this.getSessionFailureEffect(sessionId);
+			if (failure)
+				return yield* new ProviderInstanceFailure({
+					providerId: this.providerId,
+					operation: "getControlProcessId",
+					code: "provider_process_unavailable",
+					cause: new Error(failure.message),
+				});
+			return yield* this.runner.getControlProcessIdEffect?.(sessionId) ??
+				Effect.succeed(undefined);
+		});
+	}
+
 	getSessionFailureEffect(sessionId: string) {
 		return (
 			this.runner.getSessionFailureEffect?.(sessionId) ??
 			Effect.succeed(undefined)
+		);
+	}
+
+	getAccountSwitchBlockEffect(sessionId: string, account: Account) {
+		return (
+			this.runner.getAccountSwitchBlockEffect?.(sessionId, account) ??
+			Effect.succeed(undefined)
+		);
+	}
+
+	getControlCommandStatusEffect(
+		sessionId: string,
+		control: ProviderControlContext,
+	): Effect.Effect<ProviderControlCommandStatus, ProviderInstanceFailure> {
+		return (
+			this.runner.getControlCommandStatusEffect?.(sessionId, control) ??
+			Effect.fail(
+				sessionFailure(
+					"get control command status",
+					"Runner cannot reconcile commands",
+				),
+			)
+		).pipe(
+			Effect.mapError(
+				(failure) =>
+					new ProviderInstanceFailure({
+						providerId: this.providerId,
+						operation: failure.operation,
+						cause: Object.assign(new Error(failure.message), failure),
+					}),
+			),
 		);
 	}
 
@@ -742,7 +803,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		sessionId: string,
 		turnIds?: readonly string[],
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		// A bound Stop must leave a pre-warm for a replacement turn alone.
 		return (
@@ -754,6 +815,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				this.commandEffect({
 					type: "interrupt",
 					sessionId,
+					...(control ? { control } : {}),
 					...(call ? { call } : {}),
 					...(turnIds !== undefined ? { turnIds } : {}),
 				}),
@@ -780,11 +842,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 		decision: PermissionDecision,
 		_providerProcessId?: string,
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-permission",
 			sessionId,
+			...(control ? { control } : {}),
 			...(call ? { call } : {}),
 			requestId,
 			decision,
@@ -795,11 +858,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 		requestId: string,
 		answers: Record<string, unknown>,
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return this.commandEffect({
 			type: "resolve-question",
 			sessionId,
+			...(control ? { control } : {}),
 			...(call ? { call } : {}),
 			requestId,
 			answers,
@@ -836,13 +900,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 	endSessionEffect(
 		sessionId: string,
 		call?: ProviderCall,
-		_control?: ProviderControlContext,
+		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		return FiberMap.remove(this.preWarmFibers, sessionId).pipe(
 			Effect.andThen(
 				this.commandEffect({
 					type: "end-session",
 					sessionId,
+					...(control ? { control } : {}),
 					...(call ? { call } : {}),
 				}),
 			),
@@ -925,6 +990,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 	): Effect.Effect<SessionOutputReply, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			observeTurnTimelineFrame(output);
+			if (output.type === "account-usage") {
+				yield* this.usage?.update?.(
+					output.accountId,
+					output.harness,
+					output.reading,
+				) ?? Effect.void;
+				return;
+			}
 			if (output.type === "background-task") {
 				this.deps.onBackgroundTask?.(output.transition);
 				return;
@@ -960,28 +1033,11 @@ export class RunnerProviderInstance implements ProviderInstance {
 						? yield* Deferred.make<void>()
 						: undefined;
 					if (registered) this.recoveredRequests.set(requestKey, registered);
+					// Registration and UI waiters belong here; only the outbox delivers answers.
 					const request = Effect.suspend(() =>
 						output.type === "permission-request"
-							? sink.requestPermission(output.request).pipe(
-									Effect.flatMap((response) =>
-										this.runner.executeEffect({
-											type: "answer-permission",
-											sinkId: output.sinkId,
-											requestId: output.request.requestId,
-											response,
-										}),
-									),
-								)
-							: sink.requestQuestion(output.request).pipe(
-									Effect.flatMap((answers) =>
-										this.runner.executeEffect({
-											type: "answer-question",
-											sinkId: output.sinkId,
-											requestId: output.request.requestId,
-											answers,
-										}),
-									),
-								),
+							? sink.requestPermission(output.request).pipe(Effect.asVoid)
+							: sink.requestQuestion(output.request).pipe(Effect.asVoid),
 					);
 					yield* FiberMap.run(
 						this.interactionFibers,
@@ -1048,10 +1104,19 @@ export class RunnerProviderInstance implements ProviderInstance {
 							}) ?? Effect.void,
 					).pipe(Effect.catchCause(() => Effect.void));
 				case "cancel-interaction":
-					return yield* FiberMap.remove(
+					yield* FiberMap.remove(
 						this.interactionFibers,
 						`${output.sinkId}:${output.requestId}`,
 					);
+					if (output.kind && sink.withdrawInteraction)
+						yield* sink
+							.withdrawInteraction(output.requestId, output.kind)
+							.pipe(
+								Effect.mapError((cause) =>
+									sessionFailure("withdrawInteraction", cause),
+								),
+							);
+					return;
 				case "release-sink":
 					for (const [key] of Array.from(this.interactionFibers)) {
 						if (key.startsWith(`${output.sinkId}:`)) {

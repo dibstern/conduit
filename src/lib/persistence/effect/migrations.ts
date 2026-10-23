@@ -56,7 +56,9 @@ import {
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
+	SESSIONS_GOAL_STUCK_MIGRATION,
 	SESSIONS_HISTORY_COMPLETE_MIGRATION,
+	SESSIONS_JEV_MIGRATION,
 	SESSIONS_LAST_TURN_END_INPUT_ID_MIGRATION,
 	SESSIONS_LAST_TURN_ERROR_MIGRATION,
 	SESSIONS_LIMIT_RECOVERY_MIGRATION,
@@ -525,6 +527,8 @@ const appendedSessionColumns = [
 	"archived_at",
 	"archived_automatically",
 	"unarchived_at",
+	"goal_stuck",
+	"jev",
 ] as const;
 
 function sameStrings(
@@ -1509,7 +1513,17 @@ export const effectMigrationEntries = {
 		yield* sql`UPDATE turns SET state = 'interrupted', completed_at = COALESCE(completed_at, requested_at)
 			WHERE run_id IS NULL AND state IN ('pending', 'running')`;
 	}),
-	"0079_provider_control_process": Effect.gen(function* () {
+	"0079_sessions_goal_stuck": runAddColumnMigrationIfMissing(
+		"sessions",
+		"goal_stuck",
+		readMigrationSql(SESSIONS_GOAL_STUCK_MIGRATION),
+	),
+	"0080_sessions_jev": runAddColumnMigrationIfMissing(
+		"sessions",
+		"jev",
+		readMigrationSql(SESSIONS_JEV_MIGRATION),
+	),
+	"0081_provider_control_process": Effect.gen(function* () {
 		yield* runAddColumnMigrationIfMissing(
 			"provider_command_outbox",
 			"provider_process_id",

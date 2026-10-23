@@ -4,7 +4,8 @@ import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { BUILD_ID } from "../../build-id.js";
 import { isRecord } from "../../utils.js";
-import type { TurnResult } from "../types.js";
+import type { CursorBackendUrl } from "../cursor/cursor-credential.js";
+import type { ProviderControlCommandStatus, TurnResult } from "../types.js";
 import type { RunnerUpgradeState } from "./runner-upgrade.js";
 import type {
 	SessionCommand,
@@ -71,6 +72,7 @@ export interface RunnerHello {
 	readonly rebindsAccount?: true;
 	/** Cursor sends consume the daemon's admitted account credential envelope. */
 	readonly scopedCursorCredentials?: true;
+	readonly cursorBackendUrl?: CursorBackendUrl;
 	readonly taggedConfigDir?: true;
 	readonly bindings?: readonly {
 		readonly sinkId: string;
@@ -96,11 +98,22 @@ export interface RunnerHello {
 		readonly workspaceRoot: string;
 		readonly extraFolders?: readonly string[];
 		readonly daemonConfigDir?: string;
+		/** Null records an unavailable daemon default; absent is legacy compatibility. */
+		readonly claudeLaunchConfig?:
+			| import("../claude/claude-sdk-env.js").ClaudeLaunchConfig
+			| null;
+		readonly autoSettleAfterDays?: number | null | undefined;
 		readonly subagentPollTimeoutMs?: number;
 	};
 }
 
 type RunnerReply =
+	| {
+			readonly type: "command-status-reply";
+			readonly requestId: string;
+			readonly result: Exclude<ProviderControlCommandStatus, "gone">;
+			readonly failure?: SessionFailure;
+	  }
 	| {
 			readonly type: "thread-read-reply";
 			readonly requestId: string;
@@ -129,6 +142,11 @@ type RunnerReply =
 
 export type RunnerMessage =
 	| RunnerHello
+	| {
+			readonly type: "command-status";
+			readonly requestId: string;
+			readonly commandId: string;
+	  }
 	| {
 			readonly type: "thread-read";
 			readonly requestId: string;
@@ -175,6 +193,7 @@ export function runnerHelloFailure(
 	hello: RunnerHello,
 	peer: "server" | "runner",
 	expectedDriverKind?: string,
+	expectedCursorBackendUrl?: CursorBackendUrl,
 ): SessionFailure | undefined {
 	if (hello.protocolVersion !== RUNNER_PROTOCOL_VERSION)
 		return {
@@ -192,14 +211,30 @@ export function runnerHelloFailure(
 			),
 			code: "runner_incompatible",
 		};
+	// Runner builds predating driverKind were all Claude.
+	if (
+		peer === "runner" &&
+		expectedCursorBackendUrl !== undefined &&
+		hello.cursorBackendUrl !== expectedCursorBackendUrl
+	)
+		return {
+			...runnerFailure(
+				"runner hello",
+				`Cursor runner backend mismatch: runner uses ${hello.cursorBackendUrl ?? "an unreported backend"}, expected ${expectedCursorBackendUrl}`,
+			),
+			code: "runner_incompatible",
+		};
 	if (
 		expectedDriverKind !== undefined &&
 		(hello.driverKind ?? "claude") !== expectedDriverKind
 	)
-		return runnerFailure(
-			"runner hello",
-			`Runner driver mismatch: ${peer} speaks ${hello.driverKind ?? "claude"}, expected ${expectedDriverKind}`,
-		);
+		return {
+			...runnerFailure(
+				"runner hello",
+				`Runner driver mismatch: ${peer} speaks ${hello.driverKind ?? "claude"}, expected ${expectedDriverKind}`,
+			),
+			code: "runner_incompatible",
+		};
 	return undefined;
 }
 
@@ -281,16 +316,19 @@ export class RunnerSocket {
 					message.type === "command-reply" ||
 					message.type === "output-reply" ||
 					message.type === "upgrade-reply" ||
+					message.type === "command-status-reply" ||
 					message.type === "thread-read-reply"
 				) {
 					const key =
-						message.type === "thread-read-reply"
-							? `thread-read:${message.requestId}`
-							: message.type === "upgrade-reply"
-								? `upgrade:${message.requestId}`
-								: message.type === "command-reply"
-									? `command:${message.commandId}`
-									: `output:${message.outputId}`;
+						message.type === "command-status-reply"
+							? `command-status:${message.requestId}`
+							: message.type === "thread-read-reply"
+								? `thread-read:${message.requestId}`
+								: message.type === "upgrade-reply"
+									? `upgrade:${message.requestId}`
+									: message.type === "command-reply"
+										? `command:${message.commandId}`
+										: `output:${message.outputId}`;
 					const reply = this.pending.get(key);
 					if (reply) reply.reply(message);
 					else onMessage(message);
@@ -367,11 +405,48 @@ export class RunnerSocket {
 				),
 				code: "runner_incompatible",
 			});
+		if (
+			this.peerDriverKind === "cursor" &&
+			(command.type === "send-turn" || command.type === "pre-warm")
+		) {
+			const inputEnvironment = {
+				shellEnv: {},
+				...(command.input.account
+					? { account: { ...command.input.account, env: {} } }
+					: {}),
+			};
+			command =
+				command.type === "send-turn"
+					? {
+							...command,
+							shellEnv: {},
+							input: { ...command.input, ...inputEnvironment },
+						}
+					: {
+							...command,
+							shellEnv: {},
+							input: { ...command.input, ...inputEnvironment },
+						};
+		}
 		return this.requestEffect(`command:${commandId}`, {
 			type: "command",
 			commandId,
 			command,
 			...(attempt !== undefined ? { attempt } : {}),
+		});
+	}
+
+	commandStatusEffect(
+		commandId: string,
+	): Effect.Effect<
+		Exclude<ProviderControlCommandStatus, "gone">,
+		SessionFailure
+	> {
+		const requestId = randomUUID();
+		return this.requestEffect(`command-status:${requestId}`, {
+			type: "command-status",
+			requestId,
+			commandId,
 		});
 	}
 
@@ -447,8 +522,10 @@ export class RunnerSocket {
 		});
 	}
 
-	destroy(): void {
-		this.socket.destroy();
+	destroy(failure?: SessionFailure): void {
+		this.socket.destroy(
+			failure ? Object.assign(new Error(failure.message), failure) : undefined,
+		);
 	}
 
 	refuse(failure: SessionFailure): void {

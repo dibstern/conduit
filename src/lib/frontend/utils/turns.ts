@@ -52,6 +52,8 @@ export type Segment = OpenSegment | ClosedSegment;
 
 export interface Turn {
 	id: string;
+	/** Durable turns.id; absent for display-only placeholders. */
+	storeId?: string | undefined;
 	user?: UserMessage;
 	/** Always at least one. */
 	segments: Segment[];
@@ -97,6 +99,7 @@ export function segmentTurns(
 		if (msg.type === "user") {
 			turns.push({
 				id: msg.uuid,
+				storeId: msg.turnId ?? msg.messageId,
 				user: msg,
 				segments: [{ activity: [], reply: [] }],
 				notices: [],
@@ -109,6 +112,7 @@ export function segmentTurns(
 			// Transcript opens mid-turn (history trimmed above the prompt).
 			turn = {
 				id: `turn-${msg.uuid}`,
+				storeId: msg.turnId,
 				segments: [{ activity: [], reply: [] }],
 				notices: [],
 				live: false,
@@ -208,7 +212,7 @@ export function toolSubject(tool: ToolMessage): string {
 	const progress = tool.metadata?.["progress"];
 	if (
 		tool.result === undefined &&
-		tool.status !== "error" &&
+		tool.outcome !== "failed" &&
 		typeof tool.metadata?.["cursorToolType"] === "string" &&
 		typeof progress === "string" &&
 		progress
@@ -416,7 +420,7 @@ export function turnStats(segment: Segment): TurnStats {
 		}
 		if (part.type !== "tool") continue;
 		stats.tools++;
-		if (part.status === "error" || part.isError) stats.failed++;
+		if (part.outcome === "failed") stats.failed++;
 		const canonicalTool = ensureCanonical(part.name, part.input);
 		switch (canonicalTool.tool) {
 			case "Read":

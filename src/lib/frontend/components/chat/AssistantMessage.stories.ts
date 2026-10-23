@@ -32,6 +32,37 @@ export const SimpleParagraphLight: Story = {
 
 export const WithCodeBlock: Story = {
 	args: { message: mockAssistantWithCode },
+	play: async ({ canvasElement }) => {
+		await waitFor(
+			async () => {
+				const code = canvasElement.querySelector("pre code.hljs");
+				if (!code) throw new Error("Code has not highlighted yet");
+				await expect(
+					Number.parseFloat(getComputedStyle(code).fontSize),
+				).toBeCloseTo(11.5, 2);
+				await expect(
+					Number.parseFloat(getComputedStyle(code).lineHeight),
+				).toBeCloseTo(19.55, 2);
+				const light =
+					canvasElement.ownerDocument.documentElement.classList.contains(
+						"light-theme",
+					);
+				for (const [selector, color] of [
+					[".hljs-keyword", light ? "rgb(196, 19, 79)" : "rgb(255, 122, 168)"],
+					[".hljs-string", light ? "rgb(17, 121, 90)" : "rgb(126, 226, 184)"],
+					[
+						".hljs-title.function_",
+						light ? "rgb(35, 87, 214)" : "rgb(138, 180, 255)",
+					],
+				] as const) {
+					const token = code.querySelector(selector);
+					if (!token) throw new Error(`Missing syntax token ${selector}`);
+					await expect(getComputedStyle(token).color).toBe(color);
+				}
+			},
+			{ timeout: 10000 },
+		);
+	},
 };
 export const WithCodeBlockLight: Story = {
 	...WithCodeBlock,
@@ -59,6 +90,29 @@ export const FileDiff: Story = {
 		await expect(
 			canvas.getByRole("button", { name: "Copy code" }),
 		).toBeVisible();
+		await waitFor(
+			async () => {
+				const code = canvasElement.querySelector("pre code.hljs");
+				if (!code) throw new Error("Diff has not highlighted yet");
+				await expect(code.textContent).not.toMatch(/--- a\/|\+\+\+ b\//);
+				const row = code.querySelector(".hljs-addition");
+				if (!row) throw new Error("Missing diff addition");
+				const style = getComputedStyle(code);
+				await expect(row.getBoundingClientRect().width).toBeCloseTo(
+					code.clientWidth -
+						Number.parseFloat(style.paddingLeft) -
+						Number.parseFloat(style.paddingRight),
+					1,
+				);
+				await expect(Number.parseFloat(style.fontSize)).toBeCloseTo(11.5, 2);
+				const path = canvasElement.querySelector(".code-header .font-mono");
+				if (!path) throw new Error("Missing code path");
+				await expect(
+					Number.parseFloat(getComputedStyle(path).fontSize),
+				).toBeCloseTo(11.04, 2);
+			},
+			{ timeout: 10000 },
+		);
 	},
 };
 export const FileDiffLight: Story = {
@@ -76,10 +130,49 @@ export const Streaming: Story = {
 
 export const WithMermaid: Story = {
 	args: { message: mockAssistantWithMermaid },
+	play: async ({ canvasElement }) => {
+		await waitFor(
+			async () => {
+				const diagram = canvasElement.querySelector(".mermaid-diagram");
+				const label = diagram?.querySelector(".edgeLabel .labelBkg");
+				if (!diagram || !label)
+					throw new Error("Mermaid labels have not rendered yet");
+				await expect(getComputedStyle(label).backgroundColor).toBe(
+					getComputedStyle(diagram)
+						.backgroundColor.replace("rgb(", "rgba(")
+						.replace(")", ", 0.5)"),
+				);
+			},
+			{ timeout: 10000 },
+		);
+	},
+};
+export const WithMermaidLight: Story = {
+	...WithMermaid,
+	globals: { theme: "light" },
 };
 
 export const RichMarkdown: Story = {
 	args: { message: mockAssistantMarkdown },
+	play: async ({ canvasElement }) => {
+		const cell = canvasElement.querySelector("td");
+		const header = canvasElement.querySelector("th");
+		const stripe = canvasElement.querySelector("tbody tr");
+		const inline = canvasElement.querySelector("li code");
+		if (!cell || !header || !stripe || !inline)
+			throw new Error("Missing rich markdown");
+		await expect(getComputedStyle(cell).fontSize).toBe("14px");
+		await expect(getComputedStyle(header).borderBottomWidth).toBe("1px");
+		await expect(getComputedStyle(header).borderBottomColor).not.toBe(
+			getComputedStyle(
+				canvasElement.ownerDocument.documentElement,
+			).getPropertyValue("--color-success"),
+		);
+		await expect(getComputedStyle(stripe).backgroundColor).toContain("0.03");
+		await expect(
+			Number.parseFloat(getComputedStyle(inline).fontSize),
+		).toBeCloseTo(12.88, 2);
+	},
 };
 export const RichMarkdownLight: Story = {
 	...RichMarkdown,

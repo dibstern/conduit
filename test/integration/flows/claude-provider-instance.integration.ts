@@ -193,7 +193,6 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		const queryFactory = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory,
 		});
 
@@ -301,7 +300,6 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 			]),
 		);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory,
 			runnerFactory: (deps, emit) =>
 				Effect.gen(function* () {
@@ -496,18 +494,17 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactory as unknown as NonNullable<
 				ClaudeProviderInstanceDeps["queryFactory"]
 			>,
 		});
 
-		// Set up the event sink with a requestPermission that resolves with "once"
-		// after a short delay (simulating user interaction).
+		const permissionRequested = Effect.runSync(Deferred.make<void>());
 		const sink = createMockEventSink();
-		// Override requestPermission to resolve asynchronously
-		(sink.requestPermission as ReturnType<typeof vi.fn>).mockImplementation(
-			() => Effect.succeed({ decision: "once" as const }),
+		vi.mocked(sink.requestPermission).mockImplementation(() =>
+			Deferred.succeed(permissionRequested, undefined).pipe(
+				Effect.as({ decision: "once" as const }),
+			),
 		);
 
 		const input = makeBaseSendTurnInput({
@@ -531,15 +528,18 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		if (!capturedCanUseTool) throw new Error("canUseTool not captured");
 
 		const abortController = new AbortController();
-		const permissionResult = await capturedCanUseTool(
+		const permissionResultPromise = capturedCanUseTool(
 			"Bash",
 			{ command: "rm -rf /" },
 			{ signal: abortController.signal, toolUseID: toolUseId },
 		);
 
-		// The permission bridge calls eventSink.requestPermission, which we
-		// mocked to return { decision: "once" }. So permissionResult should
-		// resolve with { behavior: "allow" }.
+		// The sink registers the UI waiter; provider controls deliver answers.
+		await Effect.runPromise(Deferred.await(permissionRequested));
+		await Effect.runPromise(
+			instance.resolvePermissionEffect(input.sessionId, toolUseId, "once"),
+		);
+		const permissionResult = await permissionResultPromise;
 		expect(permissionResult.behavior).toBe("allow");
 
 		// Now unblock the post-permission messages

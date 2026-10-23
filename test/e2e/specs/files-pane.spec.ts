@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -241,12 +242,15 @@ test.describe("reading position", () => {
 	test("opening and closing Files keeps scrollTop within 2px with a replayed transcript", async ({
 		page,
 		relayUrl,
-	}) => {
+	}, testInfo) => {
 		test.setTimeout(60_000);
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
 		await app.sendMessage("Show the code block");
 		await expect(page.locator("#messages pre code").first()).toBeVisible();
+		await expect(page.locator(".turn-activity-toggle").last()).toContainText(
+			"Worked",
+		);
 		// Constrain the real transcript so this short recording has a reading position.
 		await app.messages.evaluate((el) => {
 			el.style.maxHeight = "200px";
@@ -255,24 +259,59 @@ test.describe("reading position", () => {
 			.poll(() =>
 				app.messages.evaluate((el) => el.scrollHeight - el.clientHeight),
 			)
-			.toBeGreaterThan(100);
+			.toBeGreaterThan(150);
+		let previous = "";
+		await expect
+			.poll(async () => {
+				const current = await app.messages.evaluate((el) =>
+					JSON.stringify([el.scrollTop, el.scrollHeight, el.clientHeight]),
+				);
+				const stable = current === previous;
+				previous = current;
+				return stable;
+			})
+			.toBe(true);
 		await app.messages.evaluate((el) => {
 			el.scrollTop = 100;
 		});
+		await expect(page.locator("#scroll-btn")).toBeVisible();
 		const before = await app.messages.evaluate((el) => el.scrollTop);
 		expect(before).toBeGreaterThan(0);
-		await page.getByTestId("views-rail-files").click();
-		await expect(page.getByTestId("side-pane-files")).toBeVisible();
-		await expect
-			.poll(async () =>
-				Math.abs((await app.messages.evaluate((el) => el.scrollTop)) - before),
-			)
-			.toBeLessThanOrEqual(2);
-		await page.getByTestId("views-rail-files").click();
-		await expect
-			.poll(async () =>
-				Math.abs((await app.messages.evaluate((el) => el.scrollTop)) - before),
-			)
-			.toBeLessThanOrEqual(2);
+		const positions = [before];
+		for (const filesOpen of [true, false]) {
+			await page.getByTestId("views-rail-files").click();
+			const pane = page.getByTestId("side-pane-files");
+			if (filesOpen) await expect(pane).toBeVisible();
+			else await expect(pane).toBeHidden();
+			previous = "";
+			await expect
+				.poll(async () => {
+					const geometry = await app.messages.evaluate((el) => ({
+						top: el.scrollTop,
+						height: el.scrollHeight,
+						clientHeight: el.clientHeight,
+						width: el.clientWidth,
+					}));
+					const current = JSON.stringify(geometry);
+					const stable = current === previous;
+					previous = current;
+					return stable && Math.abs(geometry.top - before) <= 2;
+				})
+				.toBe(true);
+			positions.push(await app.messages.evaluate((el) => el.scrollTop));
+		}
+		const evidence = testInfo.outputPath("files-reading-positions.json");
+		writeFileSync(
+			evidence,
+			JSON.stringify({
+				before,
+				open: positions[1],
+				closed: positions[2],
+			}),
+		);
+		await testInfo.attach("files-reading-positions.json", {
+			path: evidence,
+			contentType: "application/json",
+		});
 	});
 });

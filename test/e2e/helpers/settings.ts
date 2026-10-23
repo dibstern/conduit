@@ -1,5 +1,19 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
+/** Return through the phone settings pages before using Done. */
+export async function closeSettings(page: Page): Promise<void> {
+	const surfacingBack = page.getByRole("button", {
+		name: "Back to Jev",
+		exact: true,
+	});
+	if (await surfacingBack.isVisible()) await surfacingBack.click();
+	const sectionBack = page.getByTestId("settings-back-btn");
+	if (await sectionBack.isVisible()) await sectionBack.click();
+	await page
+		.getByRole("button", { name: "Close settings", exact: true })
+		.click();
+}
+
 export async function chooseSettingsOption(
 	page: Page,
 	trigger: Locator,

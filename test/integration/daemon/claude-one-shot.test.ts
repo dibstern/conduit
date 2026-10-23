@@ -81,8 +81,8 @@ it("runs the shared call against the process harness fake SDK and rejects schema
 			failure: { _tag: "ClaudeOneShotFailure", reason: "schema" },
 		});
 		expect(received).toEqual([
-			{ prompt: "plain reply", cwd: scratch },
-			{ prompt: "structured reply", cwd: scratch },
+			{ prompt: "plain reply", cwd: scratch, configDir: scratch },
+			{ prompt: "structured reply", cwd: scratch, configDir: scratch },
 		]);
 		expect(proof["calls"]).toEqual(
 			["opus", "sonnet"].map((model, index) => ({
@@ -134,7 +134,10 @@ it("persists the existing session title through the daemon process harness", asy
 			expect(harness.claudeTitles()).toEqual([
 				{
 					prompt: expect.stringContaining(`<message>\n${message}\n</message>`),
-					cwd: harness.projectDir,
+					cwd: expect.stringContaining(
+						join(harness.configDir, "text-generation", "run-"),
+					),
+					configDir: join(harness.root, "claude"),
 				},
 			]);
 			mkdirSync("test-results", { recursive: true });

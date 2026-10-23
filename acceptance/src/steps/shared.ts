@@ -33,6 +33,24 @@ export const mockInstances = new WeakMap<
 >();
 
 /** Mirror the relay's makeInstanceId slugging so rail test ids stay stable. */
+/** Waits for CSS transitions, such as a phone drop-down gliding in, so geometry reads its resting place. */
+export async function settleTransitions(page: Page): Promise<void> {
+	await page.evaluate(async () => {
+		// A transition replaced mid-flight rejects `finished`; wait on its successor instead.
+		for (let round = 0; round < 10; round += 1) {
+			const moving = document
+				.getAnimations()
+				.filter(
+					(animation) =>
+						animation instanceof CSSTransition &&
+						animation.playState === "running",
+				);
+			if (moving.length === 0) return;
+			await Promise.allSettled(moving.map((animation) => animation.finished));
+		}
+	});
+}
+
 export function instanceSlug(name: string): string {
 	return (
 		name

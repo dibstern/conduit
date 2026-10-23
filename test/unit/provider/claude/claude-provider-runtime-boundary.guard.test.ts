@@ -9,9 +9,11 @@ const source = (path: string) => readFileSync(join(REPO_ROOT, path), "utf8");
 
 describe("Claude provider runtime boundary", () => {
 	it("wires the persisted override getter into the scoped constructor", () => {
-		const wiring = source("src/lib/provider/orchestration-wiring.ts");
+		const wiring = source(
+			"src/lib/domain/daemon/Layers/provider-adapters-layer.ts",
+		);
 		const getters = wiring.match(
-			/claudeSettingsOverrides: \(\) =>\s*loadRelaySettings\(options\.configDir\)\.claudeSettings/g,
+			/claudeSettingsOverrides: \(\) =>\s*loadRelaySettings\(configDir\)\.claudeSettings/g,
 		);
 
 		expect(getters).toHaveLength(1);
@@ -31,12 +33,14 @@ describe("Claude provider runtime boundary", () => {
 
 	it("keeps Claude runtime state Effect-owned", () => {
 		const runtime = source(`${CLAUDE_PROVIDER_DIR}/claude-provider-runtime.ts`);
+		const payload = source(`${CLAUDE_PROVIDER_DIR}/claude-runner-payload.ts`);
 
 		expect(runtime).toContain("ClaudeProviderRuntimeTag");
-		expect(runtime).toContain("Ref.Ref<ClaudeProviderRuntimeState>");
-		expect(runtime).toContain("HashMap.HashMap<string, ClaudeSessionContext>");
-		expect(runtime).toContain("FiberMap.FiberMap<string");
+		expect(payload).toContain("Ref.Ref<ClaudeProviderRuntimeState>");
+		expect(payload).toContain("HashMap.HashMap<string, ClaudeSessionContext>");
+		expect(payload).toContain("FiberMap.FiberMap<string");
 		expect(runtime).not.toContain("streamConsumer");
+		expect(payload).not.toContain("streamConsumer");
 	});
 
 	it("removes stream consumer promises from session context", () => {

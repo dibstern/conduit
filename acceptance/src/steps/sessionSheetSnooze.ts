@@ -7,7 +7,7 @@ import {
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRpcControl } from "./shared.js";
+import { requireRpcControl, settleTransitions } from "./shared.js";
 
 const sheets =
 	'[data-testid="session-bar-island-menu"], [data-testid="session-action-sheet"]';
@@ -23,6 +23,7 @@ const gestures = new WeakMap<
 const targetSessions = new WeakMap<Page, string>();
 
 async function point(target: Locator) {
+	await settleTransitions(target.page());
 	const box = await target.boundingBox();
 	if (!box) throw new Error("Snooze touch target is missing");
 	return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -117,11 +118,11 @@ export const sessionSheetSnoozeHandlers: StepHandler[] = [
 				"pick",
 				"indefinite",
 			]);
-			await expect(row(world.page, "1h")).toContainText("10:41 AM");
-			await expect(row(world.page, "3h")).toContainText("12:41 PM");
-			await expect(row(world.page, "evening")).toContainText("6:00 PM");
-			await expect(row(world.page, "tomorrow")).toContainText("Fri 9:00 AM");
-			await expect(row(world.page, "next-week")).toContainText("Mon 9:00 AM");
+			await expect(row(world.page, "1h")).toContainText("10:41 am");
+			await expect(row(world.page, "3h")).toContainText("12:41 pm");
+			await expect(row(world.page, "evening")).toContainText("6:00 pm");
+			await expect(row(world.page, "tomorrow")).toContainText("Fri 9:00 am");
+			await expect(row(world.page, "next-week")).toContainText("Mon 9:00 am");
 			await expect(row(world.page, "indefinite").locator("small")).toHaveCount(
 				0,
 			);

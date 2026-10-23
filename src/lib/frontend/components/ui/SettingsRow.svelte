@@ -30,8 +30,10 @@
 
 	type Common = {
 		label: string;
+		icon?: string;
 		labelSuffix?: Snippet;
 		description?: string;
+		descriptionMono?: boolean;
 		descriptionTone?: "neutral" | "success" | "warning";
 		class?: string;
 		testId?: string;
@@ -63,10 +65,19 @@
 </script>
 
 {#snippet text()}
+	<span class="flex items-center gap-[12px]">
+	{#if props.icon}
+		<span data-settings-icon class="flex size-[16px] shrink-0 items-center justify-center text-settings-icon max-md:size-[28px] max-md:rounded-[8px] max-md:bg-settings-icon max-md:text-white">
+			<Icon name={props.icon} size={16} />
+		</span>
+	{/if}
+	<span class="min-w-0">
 	<span class="block text-[13.5px] max-md:text-[15px] text-text">{props.label}{#if props.labelSuffix}<span class="ml-1.5 inline-flex align-middle">{@render props.labelSuffix()}</span>{/if}</span>
 	{#if props.description}
-		<span class="mt-px block text-[12px] leading-[1.4] {props.descriptionTone === 'success' ? 'text-success' : props.descriptionTone === 'warning' ? 'text-warning' : 'text-text-muted'}">{props.description}</span>
+		<span class="mt-px block text-[12px] leading-[1.4] {props.descriptionTone === 'success' ? 'text-success' : props.descriptionTone === 'warning' ? 'text-warning' : 'text-text-dimmer'}">{#if props.descriptionMono}<code class="font-mono text-[11.5px] text-text-secondary">{props.description}</code>{:else}{props.description}{/if}</span>
 	{/if}
+	</span>
+	</span>
 {/snippet}
 
 {#if "onclick" in props}

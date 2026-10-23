@@ -98,12 +98,17 @@ export const TailscaleServe: Story = {
  * cross-origin ts.net URL threw a SecurityError (conduit-test-6qyv). */
 export const DoneOnLocalhost: Story = {
 	args: { initialSetupInfo: serveSetupInfo },
-	beforeEach: () => {
-		const requestPermission = Notification.requestPermission;
-		// Exercise "Finish anyway" without waiting on a real browser prompt.
-		Notification.requestPermission = async () => "denied";
+	beforeEach: async () => {
+		await import("../utils/notifications.js");
+		const register = navigator.serviceWorker.register;
+		navigator.serviceWorker.register = async () => {
+			throw new DOMException(
+				"Push setup is unavailable in this navigation story",
+				"InvalidStateError",
+			);
+		};
 		return () => {
-			Notification.requestPermission = requestPermission;
+			navigator.serviceWorker.register = register;
 		};
 	},
 	play: async ({ canvasElement }) => {
@@ -115,6 +120,12 @@ export const DoneOnLocalhost: Story = {
 			(
 				await canvas.findByRole("button", { name: /Enable Push Notifications/ })
 			).click();
+			// The lazy import and service-worker attempt must settle before pushStatus is warn.
+			await canvas.findByText(
+				/Could not enable push:|Notification permission was denied|Push notifications are not supported/,
+				{},
+				{ timeout: 15_000 },
+			);
 			(await canvas.findByRole("button", { name: "Finish anyway" })).click();
 			(await canvas.findByRole("button", { name: "Open Conduit" })).click();
 			expect(location.origin).toBe(new URL(startUrl).origin);

@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { tick } from "svelte";
 import type { SessionGoalChangedPayload } from "../../../contracts/stored-event.js";
-import type { GoalDetails } from "../../../contracts/ws-rpc.js";
+import type { GoalDetails, GoalSummary } from "../../../contracts/ws-rpc.js";
 import {
 	getOrCreateSessionActivity,
 	phaseToIdle,
@@ -36,7 +36,9 @@ import {
 	openPanel,
 	terminalState,
 } from "../../stores/terminal.svelte.js";
+import { dimThemeColor, setThemeMode } from "../../stores/theme.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
+import { wsDebugState } from "../../stores/ws-debug.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import {
@@ -107,8 +109,21 @@ async function desktopMenu() {
 	return menu;
 }
 
+/** Drop-down sheets glide in; measure them where they rest. */
+async function settleSheets() {
+	await new Promise(requestAnimationFrame);
+	await Promise.allSettled(
+		document
+			.getAnimations()
+			// Spinners loop forever; only the glide's transitions finish.
+			.filter((animation) => animation instanceof CSSTransition)
+			.map((animation) => animation.finished),
+	);
+}
+
 async function sessionSheet(testId: string) {
 	const sheet = await within(document.body).findByTestId(testId);
+	await settleSheets();
 	await waitFor(() =>
 		expect(sheet.querySelector("[data-switch-status]")).toHaveTextContent(
 			"On · waits for new activity",
@@ -153,9 +168,11 @@ const getGoalDetails = fn<
 >(async ({ sessionId }): Promise<GoalDetails> => {
 	const facts = sessionGoals.get(sessionId);
 	const goal = facts?.goal ?? facts?.endedGoal;
-	if (!goal) return { checks: [], tokensSinceStart: null };
+	if (!goal)
+		return { summaryEnabled: false, checks: [], tokensSinceStart: null };
 	const count = facts?.ended === "met" ? 4 : Math.min(goal.iterations, 3);
 	return {
+		summaryEnabled: false,
 		judgeModel: "Sonnet 5",
 		turnCount: goal.iterations + 1,
 		checks: goalCheckFixtures.slice(0, count).map((check, index) => ({
@@ -180,6 +197,7 @@ const meta = {
 	args: { getGoalDetails },
 	beforeEach: () => {
 		featureFlags.debug = false;
+		wsDebugState.panelOpen = false;
 		uiState.toasts = [];
 		const detailsOpen = goalDetails.open;
 		const now = sessionState.now;
@@ -250,7 +268,6 @@ export const Default: Story = {
 		);
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.queryByTestId("session-bar-attention")).toBeNull();
-		expect(canvas.getByTestId("session-bar-title-menu")).toBeVisible();
 		expect(canvas.getByTestId("session-bar-island-overflow")).toBeVisible();
 		expect(canvas.queryByTestId("session-bar-overflow")).toBeNull();
 		expect(canvas.queryByTestId("session-bar-views")).toBeNull();
@@ -378,7 +395,7 @@ export const GoalNotYet: Story = {
 		await assertGoalSubtitle(
 			canvasElement,
 			"Pursuing · All 38 scenarios pass",
-			"--color-status-amber",
+			"--color-status-goal",
 		);
 	},
 };
@@ -487,6 +504,11 @@ async function assertGoalDetails(
 		"All 38 scenarios pass",
 	);
 	await expect(details).toHaveTextContent(phase);
+	await expect(
+		panel.getByTestId("goal-details-history-toggle"),
+	).toHaveAttribute("aria-expanded", "false");
+	await expect(panel.queryByTestId("goal-details-history")).toBeNull();
+	await userEvent.click(panel.getByTestId("goal-details-history-toggle"));
 	const history = within(panel.getByTestId("goal-details-history"));
 	await waitFor(() =>
 		expect(history.queryAllByTestId("goal-details-check")).toHaveLength(
@@ -494,9 +516,9 @@ async function assertGoalDetails(
 		),
 	);
 	const checks = history.queryAllByTestId("goal-details-check");
-	const historyCount = Math.min(checkCount, phase === "Met" ? 4 : 3);
+	const historyCount = Math.min(checkCount, phase === "Goal met" ? 4 : 3);
 	const completed =
-		phase === "Checking" || phase === "Met" ? checks.slice(1) : checks;
+		phase === "Checking" || phase === "Goal met" ? checks.slice(1) : checks;
 	for (const [index, fixture] of goalCheckFixtures
 		.slice(0, historyCount)
 		.reverse()
@@ -524,7 +546,7 @@ const quietTierA11y = {
 				{
 					id: "color-contrast",
 					selector:
-						'*:not([data-testid="goal-details-meta"], [data-testid="goal-details-tokens"], [data-compact="false"] [data-goal-checks-heading], [data-testid="goal-details-check"] time, [data-testid="goal-details-check"] small, [aria-label="Snooze until"] .hold-menu-detail, [data-testid="session-bar-state-menu"] [data-menu-item-detail])',
+						'*:not([data-testid="goal-details-meta"], [data-testid="goal-details-tokens"], [data-testid="goal-details-summary-label"], [data-testid="goal-details-foot"], [data-testid="goal-details-summary-body"].text-text-dimmer, [data-compact="false"] [data-goal-checks-heading], [data-testid="goal-details-check"] time, [data-testid="goal-details-check"] small, [aria-label="Snooze until"] .hold-menu-detail, [data-testid="session-bar-state-menu"] [data-menu-item-detail])',
 				},
 			],
 		},
@@ -545,7 +567,7 @@ export const GoalDetailsOpen: Story = {
 		expect(setAt).toBeDefined();
 		if (setAt != null)
 			await expect(panel.getByTestId("goal-details-meta")).toHaveTextContent(
-				`Set ${fixtureClock(setAt)} · 3 checks · Sonnet 5 judges`,
+				`Set ${fixtureClock(setAt)} · Sonnet 5 judges · 1.24M tokens`,
 			);
 		await expect(panel.getByTestId("goal-details-pause")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-edit")).toBeVisible();
@@ -586,13 +608,24 @@ export const GoalDetailsMet: Story = {
 	tags: ["viewport-capture"],
 	beforeEach: () => setupGoalDetails("met"),
 	play: async ({ canvasElement }) => {
-		const { panel, checks } = await assertGoalDetails(canvasElement, "Met", 5);
+		const { panel, checks } = await assertGoalDetails(
+			canvasElement,
+			"Goal met",
+			5,
+		);
 		await expect(checks[1]).toHaveTextContent(
 			"38/38 once. Needs a second run.",
 		);
 		await expect(checks[0]).toHaveTextContent("38/38 on two runs in a row.");
+		await expect(
+			panel.getByTestId("goal-details-summary-body"),
+		).toHaveTextContent("38/38 on two runs in a row.");
 		const endedAt = sessionGoals.get(mockSession.id)?.endedAt;
 		expect(endedAt).toBeDefined();
+		if (endedAt != null)
+			await expect(
+				panel.getByTestId("goal-details-summary-label"),
+			).toHaveTextContent(fixtureClock(endedAt));
 		if (endedAt != null)
 			await expect(checks[0]?.querySelector("time")).toHaveTextContent(
 				fixtureClock(endedAt),
@@ -620,7 +653,7 @@ export const GoalDetailsEmpty: Story = {
 		await expect(panel.getByTestId("goal-details-history")).toHaveTextContent(
 			"No checks yet. The first runs when Claude finishes a turn.",
 		);
-		await expect(panel.getByTestId("goal-details-meta")).toHaveTextContent(
+		await expect(panel.getByTestId("goal-details-foot")).toHaveTextContent(
 			"0 checks",
 		);
 	},
@@ -630,6 +663,23 @@ export const GoalDetailsOpenLight: Story = {
 	...GoalDetailsOpen,
 	tags: ["viewport-capture"],
 	globals: { theme: "light" },
+};
+
+export const GoalSheetScrollable: Story = {
+	...GoalDetailsOpen,
+	args: {
+		...GoalDetailsOpen.args,
+		getGoalDetails: async (input: Parameters<typeof getGoalDetails>[0]) => {
+			const details = await getGoalDetails(input);
+			return {
+				...details,
+				checks: details.checks.map((check) => ({
+					...check,
+					reason: Array.from({ length: 20 }, () => check.reason).join(" "),
+				})),
+			};
+		},
+	},
 };
 export const GoalDetailsCheckingLight: Story = {
 	...GoalDetailsChecking,
@@ -657,6 +707,12 @@ export const ViewsSheetOpen: Story = {
 	beforeEach: answerAutoSettle,
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		await waitFor(() =>
+			expect(
+				getComputedStyle(canvas.getByTestId("session-bar-island-overflow"))
+					.pointerEvents,
+			).toBe("auto"),
+		);
 		await userEvent.click(canvas.getByTestId("session-bar-island-overflow"));
 		const sheet = await sessionSheet("session-bar-island-menu");
 		await expect(sheet).toBeVisible();
@@ -689,6 +745,9 @@ export const CloseSheetReturnsFocus: Story = {
 			"session-bar-island-overflow",
 		);
 		const body = within(canvasElement.ownerDocument.body);
+		await waitFor(() =>
+			expect(getComputedStyle(trigger).pointerEvents).toBe("auto"),
+		);
 		await userEvent.click(trigger);
 		await userEvent.click(await body.findByTestId("session-sheet-close"));
 		await waitFor(() =>
@@ -862,6 +921,7 @@ export const NarrowestPhone: Story = {
 const mockInstances: OpenCodeInstance[] = [
 	{
 		id: "inst-personal",
+		colorSlot: 0,
 		driver: "opencode",
 		isDefault: true,
 		name: "Personal",
@@ -873,6 +933,7 @@ const mockInstances: OpenCodeInstance[] = [
 	},
 	{
 		id: "inst-work",
+		colorSlot: 1,
 		driver: "opencode",
 		isDefault: false,
 		name: "Work",
@@ -885,8 +946,7 @@ const mockInstances: OpenCodeInstance[] = [
 ];
 
 /**
- * The collapsed bar keeps its overflow while the expanded bar uses the title
- * and Views sheets.
+ * The collapsed bar keeps the same overflow sheet as the expanded bar.
  */
 export const OverflowMenuOpen: Story = {
 	args: { island: true },
@@ -913,31 +973,13 @@ export const OverflowMenuOpen: Story = {
 		await expect(within(menu).getByTestId("session-ctx-snooze")).toBeVisible();
 		await expect(within(menu).getByTestId("session-ctx-delete")).toBeVisible();
 		for (const name of ["Share", "Settings"])
-			await expect(within(menu).getByRole("menuitem", { name })).toBeVisible();
-		await expect(menu).toHaveClass(/bottom-0/);
+			await expect(within(menu).getByRole("button", { name })).toBeVisible();
+		await expect(menu).toHaveAttribute("data-sheet-edge", "top");
 		await expect(
 			within(menu).getByRole("menuitemradio", { name: "Chat" }),
 		).toHaveAttribute("aria-checked", "true");
 		// Debug is behind its feature flag.
 		expect(within(menu).queryByTestId("overflow-debug")).toBeNull();
-	},
-};
-
-export const TitleChevronSheet: Story = {
-	tags: ["viewport-capture"],
-	beforeEach: [
-		answerAutoSettle,
-		() => {
-			sessionViewState.compact = true;
-		},
-	],
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByTestId("session-bar-title-menu"));
-		const menu = await sessionSheet("session-action-sheet");
-		await expect(menu).toHaveClass(/bottom-0/);
-		await expect(within(menu).getByTestId("session-ctx-settle")).toBeVisible();
-		await expect(within(menu).getByTestId("session-title-share")).toBeVisible();
 	},
 };
 
@@ -959,12 +1001,55 @@ export const OverflowMenuDebug: Story = {
 			within(canvasElement).getByTestId("session-bar-island-overflow"),
 		);
 		const menu = await sessionSheet("session-bar-island-menu");
-		await expect(
-			within(menu).getByTestId("overflow-debug"),
-		).toHaveAccessibleName("Debug panel");
-		await expect(within(menu).getByTestId("overflow-debug")).toHaveTextContent(
-			/Debug\s*dev/,
+		const debug = within(menu).getByRole("switch", { name: "Debug panel" });
+		await expect(debug.tagName).toBe("BUTTON");
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		await expect(debug).toHaveTextContent(/^Debug$/);
+		await expect(debug.getBoundingClientRect().height).toBeGreaterThanOrEqual(
+			44,
 		);
+		await expect(
+			debug.querySelectorAll("button, input, [role='switch']"),
+		).toHaveLength(0);
+		const label = within(debug).getByText("Debug", { exact: true });
+		const icon = debug.querySelector("svg");
+		const visualSwitch = debug.querySelector("[data-switch]");
+		if (!icon || !visualSwitch)
+			throw new Error("Debug icon or switch is missing");
+		await expect(visualSwitch).toHaveAttribute("aria-hidden", "true");
+		await expect(visualSwitch.getBoundingClientRect().width).toBe(30);
+		await expect(visualSwitch.getBoundingClientRect().height).toBe(18);
+		let checked = false;
+		for (const point of [label, icon, visualSwitch]) {
+			const box = point.getBoundingClientRect();
+			const coords = {
+				clientX: box.x + box.width / 2,
+				clientY: box.y + box.height / 2,
+			};
+			const target = document.elementFromPoint(coords.clientX, coords.clientY);
+			if (!target || !debug.contains(target))
+				throw new Error("Debug tap point is obscured");
+			await userEvent.pointer([
+				{ keys: "[TouchA>]", target, coords },
+				{ keys: "[/TouchA]", target, coords },
+			]);
+			checked = !checked;
+			await expect(debug).toHaveAttribute("aria-checked", String(checked));
+			await waitFor(() =>
+				expect(!!document.querySelector(".debug-panel")).toBe(checked),
+			);
+			if (checked)
+				await expect(document.querySelector(".debug-panel")).toBeVisible();
+			await expect(menu).toBeVisible();
+		}
+		// A keyboard activation uses the same single control and keeps the sheet open.
+		debug.focus();
+		await userEvent.keyboard(" ");
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		await waitFor(() =>
+			expect(document.querySelector(".debug-panel")).toBeNull(),
+		);
+		await expect(menu).toBeVisible();
 	},
 };
 export const OverflowMenuDebugLight: Story = {
@@ -1120,7 +1205,6 @@ export const PhoneTop: Story = {
 			"session-skills-chip",
 			"side-threads-control",
 			"session-bar-settle",
-			"session-bar-title-menu",
 			"session-bar-unread-chip",
 			"session-bar-island-overflow",
 			"session-goal-subtitle",
@@ -1133,7 +1217,6 @@ export const PhoneTop: Story = {
 					"session-skills-chip",
 					"side-threads-control",
 					"session-bar-settle",
-					"session-bar-title-menu",
 					"session-bar-unread-chip",
 					"session-goal-subtitle",
 				].includes(id)
@@ -1203,16 +1286,63 @@ export const PhoneGoalSheet: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const goal = canvas.getByTestId("session-goal-subtitle");
+		await waitFor(() =>
+			expect(getComputedStyle(goal).pointerEvents).toBe("auto"),
+		);
 		await userEvent.click(goal);
 		const sheet = await canvas.findByTestId("goal-details");
 		await waitFor(() => expect(sheet).toHaveTextContent("Sonnet 5 judges"));
+		await expect(sheet).toHaveAttribute("role", "dialog");
+		await expect(sheet).toHaveAttribute("aria-modal", "true");
+		await expect(sheet).toHaveFocus();
+		await userEvent.tab();
+		await expect(
+			canvas.getByTestId("goal-details-history-toggle"),
+		).toHaveFocus();
+		await userEvent.tab();
+		await expect(canvas.getByTestId("goal-details-pause")).toHaveFocus();
+		await userEvent.tab();
+		await expect(canvas.getByTestId("goal-details-edit")).toHaveFocus();
+		await userEvent.tab();
+		await expect(canvas.getByTestId("goal-details-clear")).toHaveFocus();
+		await userEvent.tab();
+		await expect(
+			canvas.getByTestId("goal-details-history-toggle"),
+		).toHaveFocus();
+		const theme = document.documentElement.classList.contains("light-theme")
+			? "light"
+			: "dark";
+		document.querySelector('meta[name="theme-color"]')?.remove();
+		const release = dimThemeColor();
+		try {
+			for (const mode of ["dark", "light"] as const) {
+				setThemeMode(mode);
+				expect(
+					document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+						?.content,
+				).toBe(mode === "dark" ? "#0b0c0e" : "#b0b1b3");
+			}
+		} finally {
+			release();
+			release();
+			setThemeMode(theme);
+		}
+		expect(
+			document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+				?.content,
+		).toBe(theme === "dark" ? "#0b0c0e" : "#b0b1b3");
+		// A drop-down: it hangs from the bar with its rounded corners at the bottom.
+		await settleSheets();
 		const box = sheet.getBoundingClientRect();
 		expect(box.x).toBe(0);
 		expect(box.width).toBe(393);
-		expect(box.bottom).toBe(852);
+		expect(box.top).toBeCloseTo(
+			canvas.getByTestId("session-bar").getBoundingClientRect().bottom,
+			0,
+		);
 		expect(
 			getComputedStyle(sheet.querySelector("[data-sheet-chrome]") ?? sheet)
-				.borderTopLeftRadius,
+				.borderBottomLeftRadius,
 		).toBe("22px");
 		for (const id of [
 			"goal-details-pause",
@@ -1226,6 +1356,13 @@ export const PhoneGoalSheet: Story = {
 			expect(canvas.queryByTestId("goal-details")).toBeNull();
 			expect(goal).toHaveFocus();
 			expect(getComputedStyle(goal).pointerEvents).toBe("auto");
+			const restoredColour = new Option().style;
+			restoredColour.color =
+				document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+					?.content ?? "";
+			expect(restoredColour.color).toBe(
+				theme === "dark" ? "rgb(17, 17, 19)" : "rgb(255, 255, 255)",
+			);
 		});
 		await userEvent.click(goal);
 		await userEvent.click(canvas.getByTestId("goal-details-scrim"));
@@ -1308,7 +1445,8 @@ export const DesktopNoCheckout: Story = {
 		expect(bar.getBoundingClientRect().height).toBe(52);
 		expect(
 			canvas.getByTestId("session-bar-overflow").getBoundingClientRect().height,
-		).toBeGreaterThanOrEqual(44);
+		).toBe(30);
+		expectTouchTarget(canvas.getByTestId("session-bar-overflow"));
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.queryByTitle("Uncommitted changes")).toBeNull();
 		await expect(canvas.getByTestId("session-bar-settle")).toBeVisible();
@@ -1381,6 +1519,9 @@ export const DesktopWithSkills: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		expect(
+			canvas.getByTestId("session-skills-chip").querySelector("svg"),
+		).toHaveClass("lucide-sparkles");
 		await userEvent.click(
 			canvas.getByRole("button", { name: "2 skills used" }),
 		);
@@ -1558,6 +1699,38 @@ export const DesktopUnread: Story = {
 		showState(session);
 	},
 	play: async ({ canvasElement }) => {
+		const chip = within(canvasElement)
+			.getByTestId("session-bar-unread-chip")
+			.querySelector("span");
+		const primary = within(canvasElement).getByTestId("session-bar-settle");
+		expect(chip).not.toBeNull();
+		const expected = document.createElement("span");
+		canvasElement.append(expected);
+		expect(getComputedStyle(chip ?? primary).backgroundColor).toMatch(
+			/\/ 0\.16\)/,
+		);
+		expect(getComputedStyle(primary).backgroundColor).toMatch(/\/ 0\.18\)/);
+		expected.style.borderBottomColor = "var(--color-border-subtle)";
+		expect(
+			getComputedStyle(within(canvasElement).getByTestId("session-bar"))
+				.borderBottomColor,
+		).toBe(getComputedStyle(expected).borderBottomColor);
+		expected.remove();
+		const connection =
+			canvasElement.querySelector<HTMLElement>("#session-bar-connection") ??
+			canvasElement;
+		expect(connection.id).toBe("session-bar-connection");
+		// Geist Mono's font face applies the design's .92 scale once.
+		expect(getComputedStyle(connection).fontSize).toBe("12px");
+		expect(
+			connection.querySelector("#status")?.getBoundingClientRect().width,
+		).toBe(7);
+		expect(getComputedStyle(connection).gap).toBe("5px");
+		expect(
+			canvasElement
+				.querySelector("#session-bar-more svg")
+				?.getBoundingClientRect().width,
+		).toBe(16);
 		await expect(
 			within(canvasElement).getByTestId("session-bar-unread-chip"),
 		).toBeVisible();
@@ -1687,8 +1860,7 @@ export const BannersRowExpands: Story = {
 	},
 };
 
-// The desktop chips once spilled out of the title column: the ▾ painted over
-// them, and at this width they ran on over the skills chip and the identity.
+// Desktop task chips stay within the title column at narrow widths.
 export const DesktopBackgroundTasks: Story = {
 	args: { width: 700 },
 	// The chip ages fail contrast (conduit-test-srt8); every other rule stays on.
@@ -1732,28 +1904,50 @@ export const DesktopBackgroundTasks: Story = {
 		const canvas = within(canvasElement);
 		const tasks = canvas.getByTestId("background-tasks-row");
 		const box = (el: Element) => el.getBoundingClientRect();
+		const bar = box(canvas.getByTestId("session-bar"));
+		expect(box(tasks).top - bar.top).toBe(52);
+		expect(box(tasks).bottom).toBe(bar.bottom);
+		const chip = canvas.getAllByTestId("background-task-chip")[0] ?? tasks;
+		const label = chip.querySelector("button span");
+		expect(label).not.toBeNull();
+		if (!label) throw new Error("Background task label is missing");
+		const fonts = await canvasElement.ownerDocument.fonts.load(
+			'400 11.5px "Geist Mono"',
+			label.textContent ?? "",
+		);
+		expect(fonts.length).toBeGreaterThan(0);
+		for (const font of fonts) expect(font.status).toBe("loaded");
+		const labelStyle = getComputedStyle(label);
+		expect(labelStyle.fontFamily).toContain("Geist Mono");
+		expect(labelStyle.fontSize).toBe("11.5px");
+		expect(labelStyle.fontWeight).toBe("400");
+		expect(labelStyle.lineHeight).toBe("normal");
+		const chipStyle = getComputedStyle(chip);
+		expect(box(chip).height).toBe(22);
+		expect(chipStyle.paddingLeft).toBe("9px");
+		expect(chipStyle.paddingRight).toBe("4px");
+		expect(chipStyle.columnGap).toBe("6px");
+		const range = canvasElement.ownerDocument.createRange();
+		range.selectNodeContents(label);
+		const textBox = range.getBoundingClientRect();
+		expect((textBox.top + textBox.bottom) / 2).toBeCloseTo(
+			(box(chip).top + box(chip).bottom) / 2,
+			1,
+		);
+		expect(textBox.top).toBeGreaterThanOrEqual(box(chip).top);
+		expect(textBox.bottom).toBeLessThanOrEqual(box(chip).bottom);
 		const overlaps = (a: DOMRect, b: DOMRect) =>
 			a.left < b.right &&
 			b.left < a.right &&
 			a.top < b.bottom &&
 			b.top < a.bottom;
 		const chips = box(tasks.firstElementChild ?? tasks);
-		// The ▾'s hit target overhangs by design; its icon is what must clear.
-		const menuIcon = canvas
-			.getByTestId("session-bar-title-menu")
-			.querySelector("svg");
 		for (const el of [
-			menuIcon,
-			...[
-				"session-bar-title",
-				"session-skills-chip",
-				"session-bar-overflow",
-			].map((id) => canvas.getByTestId(id)),
-		])
-			expect(
-				overlaps(chips, box(el ?? tasks)),
-				el?.outerHTML.slice(0, 60),
-			).toBe(false);
+			"session-bar-title",
+			"session-skills-chip",
+			"session-bar-overflow",
+		].map((id) => canvas.getByTestId(id)))
+			expect(overlaps(chips, box(el)), el.outerHTML.slice(0, 60)).toBe(false);
 		expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(2);
 		await expect(canvas.getByTestId("background-tasks-more")).toHaveTextContent(
 			"+1",
@@ -1763,6 +1957,12 @@ export const DesktopBackgroundTasks: Story = {
 		expect(
 			chips.top - box(canvas.getByTestId("session-bar-title")).bottom,
 		).toBeGreaterThanOrEqual(6);
+		await waitFor(() =>
+			expect(
+				getComputedStyle(canvas.getByTestId("background-tasks-more"))
+					.pointerEvents,
+			).toBe("auto"),
+		);
 		await userEvent.click(canvas.getByTestId("background-tasks-more"));
 		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
 		await userEvent.keyboard("{Escape}");
@@ -1794,8 +1994,33 @@ export const BackgroundTasks: Story = {
 		expect(tasks.getBoundingClientRect().top).toBeGreaterThanOrEqual(
 			canvas.getByTestId("session-bar-title").getBoundingClientRect().bottom,
 		);
+		await waitFor(() =>
+			expect(
+				getComputedStyle(canvas.getByTestId("background-tasks-toggle"))
+					.pointerEvents,
+			).toBe("auto"),
+		);
 		await userEvent.click(canvas.getByTestId("background-tasks-toggle"));
 		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
+		const theme = document.documentElement.classList.contains("light-theme")
+			? "light"
+			: "dark";
+		for (const mode of ["dark", "light"] as const) {
+			setThemeMode(mode);
+			await waitFor(() =>
+				expect(
+					getComputedStyle(canvas.getByTestId("background-tasks-scrim"))
+						.backgroundColor,
+				).toBe(
+					mode === "dark" ? "rgba(6, 7, 9, 0.55)" : "rgba(22, 26, 33, 0.34)",
+				),
+			);
+			expect(
+				document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+					?.content,
+			).toBe(mode === "dark" ? "#0b0c0e" : "#b0b1b3");
+		}
+		setThemeMode(theme);
 		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 		await tick();
@@ -1804,7 +2029,21 @@ export const BackgroundTasks: Story = {
 			"false",
 		);
 		await userEvent.keyboard("{Escape}");
-		await expect(canvas.getByTestId("background-tasks-toggle")).toHaveFocus();
+		await waitFor(() =>
+			expect(canvas.getByTestId("background-tasks-toggle")).toHaveFocus(),
+		);
+		await waitFor(() =>
+			expect(
+				getComputedStyle(canvas.getByTestId("background-tasks-toggle"))
+					.pointerEvents,
+			).toBe("auto"),
+		);
+		await waitFor(() =>
+			expect(
+				document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+					?.content,
+			).toBe(theme === "dark" ? "#111113" : "#ffffff"),
+		);
 		await userEvent.click(canvas.getByTestId("background-tasks-toggle"));
 		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
 	},
@@ -1849,16 +2088,20 @@ function setupSideThreads(rows: readonly Row[]) {
 	};
 }
 
-/** The list must hang under the bar, wholly on screen. */
+/** The list hangs under the bar: a full-width drop-down on phones, a card on desktop. */
 async function assertSideThreadsPanel(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
 	const panel = await canvas.findByTestId("side-threads-panel");
 	await expect(panel).toBeVisible();
+	await settleSheets();
 	const box = panel.getBoundingClientRect();
 	const bar = canvas.getByTestId("session-bar").getBoundingClientRect();
+	const bounds = panel.closest("[data-sheet-edge]")
+		? { left: 0, right: window.innerWidth }
+		: bar;
 	expect(box.top).toBeGreaterThanOrEqual(bar.bottom - 1);
-	expect(box.left).toBeGreaterThanOrEqual(bar.left);
-	expect(box.right).toBeLessThanOrEqual(bar.right);
+	expect(box.left).toBeGreaterThanOrEqual(bounds.left);
+	expect(box.right).toBeLessThanOrEqual(bounds.right);
 	return within(panel);
 }
 
@@ -1896,13 +2139,36 @@ export const SideThreadsOpen: Story = {
 	beforeEach: () => setupSideThreads(sideThreadRows),
 	play: async ({ canvasElement }) => {
 		await assertSideThreadRows(canvasElement);
+		const theme = document.documentElement.classList.contains("light-theme")
+			? "light"
+			: "dark";
+		expect(
+			getComputedStyle(within(canvasElement).getByTestId("side-threads-scrim"))
+				.backgroundColor,
+		).toBe(theme === "dark" ? "rgba(6, 7, 9, 0.55)" : "rgba(22, 26, 33, 0.34)");
+		expect(
+			document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+				?.content,
+		).toBe(theme === "dark" ? "#0b0c0e" : "#b0b1b3");
 		const panel = within(canvasElement).getByTestId("side-threads-panel");
-		const bar = within(canvasElement).getByTestId("session-bar");
-		// The phone sheet spans the bar.
-		expect(panel.getBoundingClientRect().width).toBe(
-			bar.getBoundingClientRect().width,
-		);
+		// The phone sheet spans the viewport.
+		expect(panel.getBoundingClientRect().width).toBe(window.innerWidth);
 	},
+};
+
+export const SideThreadsScrollable: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: () =>
+		setupSideThreads(
+			Array.from({ length: 30 }, (_, index) => ({
+				id: `scrollable-side-thread-${index}`,
+				title: `Side thread ${index + 1}`,
+				parentID: mockSession.id,
+				sideThread: true,
+				createdAt: sideThreadsNow - (index + 1) * 60_000,
+				updatedAt: sideThreadsNow - (index + 1) * 60_000,
+			})),
+		),
 };
 
 export const DesktopSideThreadsOpen: Story = {
@@ -1993,6 +2259,9 @@ export const DesktopSnoozed: Story = {
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
 			/^Until /,
 		);
+		expect(canvas.getByTestId("session-bar-settle").textContent).not.toMatch(
+			/\b[AP]M\b/,
+		);
 	},
 };
 
@@ -2065,6 +2334,15 @@ export const DesktopGoalPursuing: Story = {
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
 			"Pin to top",
 		);
+		expect(
+			getComputedStyle(canvas.getByTestId("session-bar-title")).lineHeight,
+		).toBe("21.75px");
+		expect(
+			getComputedStyle(canvas.getByTestId("session-goal-subtitle")).lineHeight,
+		).toBe("18.75px");
+		expect(
+			canvas.getByTestId("session-bar").getBoundingClientRect().height,
+		).toBeCloseTo(55.5, 1);
 	},
 };
 
@@ -2122,6 +2400,9 @@ export const DesktopGoalMet: Story = {
 			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
 		).toBe("Goal met · All 38 scenarios pass");
 		await expect(canvas.getByTestId("session-bar-unread-chip")).toBeVisible();
+		expect(
+			canvas.getByTestId("session-goal-subtitle").querySelector("svg"),
+		).toHaveClass("lucide-circle-check");
 		await expect(canvas.getByTestId("session-bar-settle")).toHaveTextContent(
 			"Settle",
 		);
@@ -2176,6 +2457,15 @@ export const DesktopSidebarCollapsed: Story = {
 		const badgeStyle = getComputedStyle(
 			canvas.getByTestId("session-bar-attention"),
 		);
+		expect(
+			canvas.getByTestId("session-bar-back").getBoundingClientRect().height,
+		).toBe(28);
+		expect(
+			canvas.getByTestId("session-bar-attention").getBoundingClientRect()
+				.height,
+		).toBe(17);
+		expect(badgeStyle.fontSize).toBe("10.5px");
+		expectTouchTarget(canvas.getByTestId("session-bar-back"));
 		const expected = new Option().style;
 		expected.backgroundColor = badgeStyle.getPropertyValue("--color-fill-ask");
 		expect(badgeStyle.backgroundColor).toBe(expected.backgroundColor);
@@ -2197,6 +2487,14 @@ export const DesktopBanners: Story = {
 		const canvas = within(canvasElement);
 		const banners = canvas.getAllByTestId("banner-action");
 		await expect(banners).toHaveLength(2);
+		const lead = canvasElement.querySelector(".banner-text b");
+		expect(lead).not.toBeNull();
+		expect(getComputedStyle(lead ?? canvasElement).fontWeight).toBe("600");
+		expect(
+			canvasElement.querySelector(
+				'[data-banner-variant="skip-permissions"] svg',
+			),
+		).toHaveClass("lucide-lock");
 		expect(banners[1]?.getBoundingClientRect().bottom).toBeLessThanOrEqual(
 			canvas.getByTestId("session-bar").getBoundingClientRect().top,
 		);
@@ -2247,7 +2545,7 @@ export const DesktopGoalDetails: Story = {
 				"Sonnet 5 judges",
 			),
 		);
-		await expect(card).toHaveTextContent("Checking · after turn 4");
+		await expect(card).toHaveTextContent("Checking after turn 4");
 		expect(card.getBoundingClientRect().width).toBeLessThan(450);
 		await userEvent.keyboard("{Escape}");
 		await waitFor(() =>
@@ -2285,6 +2583,39 @@ export const DesktopMenu: Story = {
 	},
 };
 
+export const DesktopDebugMenu: Story = {
+	...DesktopMenu,
+	tags: ["viewport-capture"],
+	beforeEach: [
+		answerDesktopAutoSettle,
+		() => {
+			sessionViewState.compact = false;
+			featureFlags.debug = true;
+		},
+	],
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-overflow"),
+		);
+		const menu = await desktopMenu();
+		const debug = within(menu).getByRole("menuitemcheckbox", {
+			name: "Debug panel",
+		});
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		await userEvent.click(within(debug).getByText("Debug", { exact: true }));
+		await expect(debug).toHaveAttribute("aria-checked", "true");
+		await expect(menu).toBeVisible();
+		await userEvent.click(within(debug).getByText("Debug", { exact: true }));
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		await expect(menu).toBeVisible();
+	},
+};
+export const DesktopDebugMenuLight: Story = {
+	...DesktopDebugMenu,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+
 export const DesktopSnoozeList: Story = {
 	...DesktopMenu,
 	parameters: quietTierA11y,
@@ -2305,6 +2636,9 @@ export const DesktopSnoozeList: Story = {
 			within(list).getByRole("menuitem", { name: "Until something happens" }),
 		).toBeVisible();
 		expect(list).not.toHaveTextContent("slide to a time");
+		for (const detail of list.querySelectorAll(".hold-menu-detail")) {
+			expect(detail.textContent).not.toMatch(/\b[AP]M\b/);
+		}
 	},
 };
 
@@ -2484,6 +2818,12 @@ export const DesktopTaskControls: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		expect(
+			canvas.getByTestId("background-tasks-row").getBoundingClientRect().height,
+		).toBe(36);
+		for (const chip of canvas.getAllByTestId("background-task-chip")) {
+			expect(chip.getBoundingClientRect().height).toBe(22);
+		}
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Stop Run tests" }),
 		);
@@ -2579,5 +2919,679 @@ export const DesktopSnoozeListLight: Story = {
 export const DesktopSnoozedMenuLight: Story = {
 	...DesktopSnoozedMenu,
 	tags: ["viewport-capture"],
+	globals: { theme: "light" },
+};
+
+type GoalSummaryState =
+	| "Pursuing"
+	| "Checking"
+	| "StuckSummarising"
+	| "StuckReady"
+	| "StuckStillCurrent"
+	| "StuckUpdating"
+	| "StuckNewCheckWhileOpen"
+	| "PausedWhileStuck"
+	| "Paused"
+	| "GoalMet"
+	| "SummaryFailed"
+	| "SummariesOff"
+	| "NoChecksYet";
+
+// Section 10 of the approved goal mock, with its emphasis rendered as plain text.
+const summaryCondition =
+	"Complete conduit-test-16c8 and merge it to main, then clean up the worktree";
+const summaryCopy = {
+	pursuing:
+		"Tests pass and the branch is rebased on main. Still to do: merge to main, close the beads, then remove the two worktrees.",
+	checking:
+		"Merged to main at 03dc05f8. Still to do: close conduit-test-16c8 and its 8 children, then remove the two worktrees.",
+	stuck:
+		"Merged to main at 03dc05f8 and closed the beads. Blocked on cleanup: worktrees effect4 and mainbase remain because killing their processes (pids 99950, 11588) was denied. Stop them or allow the kill, and the goal can finish.",
+	met: "Merged to main at 03dc05f8, closed conduit-test-16c8 and its 8 children, and removed both worktrees once their processes were stopped.",
+};
+const summaryLatestReason =
+	"The merge and bead closure are done (main at 03dc05f8, conduit-test-16c8 and .10-.17 closed, wt/16c8-* branches deleted), but the worktree cleanup is not. /src/conduit-16c8-effect4 and conduit-16c8-mainbase still exist, with pids 99950 and 11588 still running in them. The permission check denied killing those processes.";
+const summarySetAt = Date.UTC(2026, 9, 20, 10, 55);
+const summaryAt = (minutes: number) => summarySetAt + minutes * 60_000;
+
+function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
+	let details: GoalDetails = { checks: [], tokensSinceStart: null };
+	let generated: GoalSummary = {
+		text: summaryCopy.stuck,
+		generatedAt: summaryAt(26),
+		stale: false,
+	};
+	const read = fn<
+		(input: Parameters<typeof rpc<"GetGoalDetails">>[1]) => Promise<GoalDetails>
+	>(async () => details);
+	const generate = fn<
+		(
+			input: Parameters<typeof rpc<"GenerateGoalSummary">>[1],
+		) => Promise<GoalSummary>
+	>(async () => generated);
+	const paused = state === "Paused" || state === "PausedWhileStuck";
+	const stuck = state.startsWith("Stuck") || state === "PausedWhileStuck";
+	const met = state === "GoalMet";
+	const count =
+		state === "NoChecksYet"
+			? 0
+			: state === "Checking"
+				? 4
+				: state === "StuckStillCurrent" || state === "PausedWhileStuck"
+					? 208
+					: state === "StuckUpdating"
+						? 199
+						: state === "SummaryFailed"
+							? 197
+							: met
+								? 211
+								: stuck || state === "SummariesOff"
+									? 196
+									: 3;
+	const missing = state === "StuckSummarising" || state === "StuckReady";
+	const stale = state === "StuckUpdating" || state === "SummaryFailed";
+	const currentAt =
+		state === "Pursuing" || state === "NoChecksYet"
+			? 3
+			: state === "Checking"
+				? 6
+				: state === "Paused" || state === "PausedWhileStuck"
+					? 28
+					: met
+						? 46
+						: 26;
+	const text =
+		state === "Pursuing" || state === "NoChecksYet" || state === "Paused"
+			? summaryCopy.pursuing
+			: state === "Checking"
+				? summaryCopy.checking
+				: met
+					? summaryCopy.met
+					: summaryCopy.stuck;
+
+	function publishChecks(next: GoalDetails) {
+		details = next;
+		const facts = sessionGoals.get(mockSession.id);
+		expect(facts?.goal).toBeDefined();
+		if (!facts?.goal) return;
+		handleGoalChanged({
+			...facts,
+			goal: {
+				...facts.goal,
+				iterations: next.checks.length,
+				lastReason: next.checks.at(-1)?.reason ?? undefined,
+			},
+		});
+	}
+
+	return {
+		args: {
+			width: desktop ? "full" : 393,
+			island: !desktop,
+			height: 852,
+			getGoalDetails: read,
+			generateGoalSummary: generate,
+		},
+		tags: ["viewport-capture"],
+		parameters: {
+			...quietTierA11y,
+			docs: { story: { inline: false } },
+		},
+		beforeEach: () => {
+			const cleanup = setupGoal(
+				met
+					? "met"
+					: paused
+						? "paused"
+						: state === "Checking"
+							? "checking"
+							: "not_yet",
+			);
+			read.mockClear();
+			generate.mockReset();
+			sessionViewState.compact = !desktop;
+			const lastAt =
+				state === "StuckStillCurrent" ||
+				state === "PausedWhileStuck" ||
+				state === "StuckUpdating"
+					? 28
+					: currentAt;
+			details = {
+				setAt: summarySetAt,
+				judgeModel: "Sonnet 5",
+				turnCount: state === "Checking" ? 5 : count + 1,
+				metAt: met ? summaryAt(46) : null,
+				summaryEnabled: state !== "SummariesOff",
+				summary:
+					missing || !count
+						? null
+						: {
+								text,
+								generatedAt: summaryAt(currentAt),
+								stale,
+							},
+				checks: Array.from({ length: count }, (_, index) => ({
+					iteration: index + 1,
+					turnIndex: index + 1,
+					at: summaryAt(
+						index < 196
+							? (lastAt * (index + 1)) / Math.min(count, 196)
+							: 26 + ((lastAt - 26) * (index - 195)) / (count - 196),
+					),
+					reason:
+						state === "Pursuing" || state === "Paused"
+							? summaryCopy.pursuing
+							: summaryLatestReason,
+				})),
+				tokensSinceStart:
+					state === "Pursuing" || state === "Paused"
+						? 61_000
+						: state === "Checking"
+							? 84_000
+							: met
+								? 1_380_000
+								: count >= 208
+									? 1_310_000
+									: count
+										? 1_240_000
+										: 0,
+			};
+			if (
+				state === "StuckUpdating" ||
+				state === "SummaryFailed" ||
+				state === "StuckStillCurrent"
+			) {
+				details = {
+					...details,
+					summary: {
+						text: summaryCopy.stuck,
+						generatedAt: summaryAt(26),
+						stale,
+					},
+					checks: details.checks.map((check, index) => ({
+						...check,
+						at:
+							index < 196
+								? summaryAt((26 * (index + 1)) / 196)
+								: summaryAt(27 + (index - 196) / Math.max(1, count - 197)),
+					})),
+				};
+			}
+			generated = { text, generatedAt: summaryAt(currentAt), stale: false };
+			generate.mockImplementation(
+				state === "StuckSummarising" || state === "StuckUpdating"
+					? () => new Promise<GoalSummary>(() => {})
+					: state === "SummaryFailed"
+						? () => Promise.reject(new Error("Summary service unavailable"))
+						: async () => generated,
+			);
+			const facts: SessionGoalChangedPayload = {
+				sessionId: mockSession.id,
+				...(met
+					? {
+							goal: null,
+							ended: "met" as const,
+							endedAt: summaryAt(46),
+							endedGoal: {
+								condition: summaryCondition,
+								iterations: count,
+								setAt: summarySetAt,
+								tokensAtStart: 0,
+								lastReason: summaryCopy.met,
+							},
+						}
+					: {
+							goal: {
+								condition: summaryCondition,
+								iterations: count,
+								setAt: summarySetAt,
+								tokensAtStart: 0,
+								...(state === "Checking" || state === "NoChecksYet"
+									? {}
+									: { lastReason: details.checks.at(-1)?.reason ?? undefined }),
+							},
+							...(paused
+								? { pausedReason: "Waiting for the blocker to be fixed" }
+								: {}),
+						}),
+			};
+			seedSessions([
+				{
+					...mockSession,
+					title: "Finish 16c8 and tidy up",
+					status:
+						state === "Pursuing" || state === "NoChecksYet" ? "busy" : "idle",
+					...(stuck
+						? {
+								goalStuck: {
+									since: summaryAt(2),
+									lastAt: summaryAt(lastAt),
+									count: count - 3,
+								},
+							}
+						: {}),
+				},
+			]);
+			handleGoalChanged(facts);
+			sessionState.now = summaryAt(
+				state === "StuckStillCurrent" ? 27 : stuck && !paused ? 25 : currentAt,
+			);
+			goalDetails.open = true;
+			return cleanup;
+		},
+		play: async ({ canvasElement }) => {
+			const canvas = within(canvasElement);
+			const card = await canvas.findByTestId("goal-details");
+			const panel = within(card);
+			await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+			await waitFor(() =>
+				expect(panel.getByTestId("goal-details-meta")).toHaveTextContent(
+					"Sonnet 5 judges",
+				),
+			);
+			const label = met
+				? "Goal met"
+				: paused
+					? "Paused"
+					: stuck
+						? "Stuck"
+						: state === "Checking"
+							? "Checking"
+							: "Pursuing";
+			await expect(
+				canvas.getByTestId("session-goal-subtitle"),
+			).toHaveTextContent(`${label} · ${summaryCondition}`);
+			await expect(panel.getByTestId("goal-details-summary")).toHaveAttribute(
+				"aria-live",
+				"polite",
+			);
+			await expect(
+				panel.getByTestId("goal-details-history-toggle"),
+			).toHaveAttribute("aria-expanded", "false");
+			await expect(panel.queryByTestId("goal-details-history")).toBeNull();
+			if (stuck) {
+				await expect(panel.getByTestId("goal-details-stuck")).toHaveTextContent(
+					paused
+						? "Paused after 26 minutes stuck"
+						: `Stuck for ${state === "StuckStillCurrent" || state === "StuckUpdating" ? 26 : 24} minutes`,
+				);
+				await expect(panel.getByTestId("goal-details-stuck")).toHaveTextContent(
+					paused
+						? "Checks stopped after 205 found the same blocker. Resume once it is fixed."
+						: `${count - 3} checks in a row found the same blocker.`,
+				);
+			} else await expect(panel.queryByTestId("goal-details-stuck")).toBeNull();
+			if (state === "StuckSummarising") {
+				await expect(
+					panel.getByTestId("goal-details-summary-label"),
+				).toHaveTextContent("Summarising 196 checks");
+				await expect(
+					panel.getByTestId("goal-details-summary-skeleton").children,
+				).toHaveLength(3);
+			} else if (state === "StuckUpdating") {
+				await expect(
+					panel.getByTestId("goal-details-summary-label"),
+				).toHaveTextContent("Updating · 3 new checks");
+				await expect(
+					panel.getByTestId("goal-details-summary-body"),
+				).toHaveTextContent(summaryCopy.stuck);
+			} else if (state === "SummaryFailed") {
+				await waitFor(() =>
+					expect(
+						panel.getByTestId("goal-details-summary-label"),
+					).toHaveTextContent("Couldn't summarise · Retry"),
+				);
+				await expect(
+					panel.getByTestId("goal-details-summary-body"),
+				).toHaveTextContent(summaryCopy.stuck);
+				await userEvent.click(panel.getByRole("button", { name: "Retry" }));
+				await waitFor(() => expect(generate).toHaveBeenCalledTimes(2));
+				await waitFor(() =>
+					expect(panel.getByTestId("goal-details-retry")).toBeVisible(),
+				);
+				await expect(
+					panel.getByTestId("goal-details-summary-body"),
+				).toHaveTextContent(summaryCopy.stuck);
+			} else if (state === "NoChecksYet") {
+				await expect(panel.queryByRole("heading", { level: 3 })).toBeNull();
+				await expect(generate).not.toHaveBeenCalled();
+				const empty = details;
+				publishChecks({
+					...details,
+					checks: [
+						{
+							iteration: 1,
+							turnIndex: 1,
+							at: summaryAt(3),
+							reason: summaryCopy.pursuing,
+						},
+					],
+				});
+				await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+				await waitFor(() =>
+					expect(panel.getByTestId("goal-details-update")).toHaveTextContent(
+						"New check · Update",
+					),
+				);
+				await expect(generate).not.toHaveBeenCalled();
+				await userEvent.click(panel.getByTestId("goal-details-update"));
+				await waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+				await expect(
+					panel.getByTestId("goal-details-summary-body"),
+				).toHaveTextContent(summaryCopy.pursuing);
+				publishChecks(empty);
+				await waitFor(() => expect(read).toHaveBeenCalledTimes(3));
+				await waitFor(() =>
+					expect(panel.queryByRole("heading", { level: 3 })).toBeNull(),
+				);
+			} else {
+				await expect(
+					panel.getByRole("heading", { level: 3 }),
+				).toHaveTextContent(
+					state === "SummariesOff"
+						? "Latest check"
+						: met
+							? "How it ended"
+							: "Where it stands",
+				);
+				await expect(
+					panel.getByTestId("goal-details-summary-body"),
+				).toHaveTextContent(
+					state === "SummariesOff" ? summaryLatestReason : text,
+				);
+				if (state === "StuckStillCurrent")
+					await expect(
+						panel.getByTestId("goal-details-summary-label"),
+					).toHaveTextContent("Summary · 11:21 AM · still current");
+			}
+			if (state === "StuckNewCheckWhileOpen") {
+				await expect(generate).not.toHaveBeenCalled();
+				let finishRead: ((value: GoalDetails) => void) | undefined;
+				read.mockImplementationOnce(
+					() =>
+						new Promise<GoalDetails>((resolve) => {
+							finishRead = resolve;
+						}),
+				);
+				const next = {
+					...details,
+					summary: {
+						text: summaryCopy.stuck,
+						generatedAt: summaryAt(26),
+						stale: true,
+					},
+					checks: [
+						...details.checks,
+						{
+							iteration: 197,
+							turnIndex: 197,
+							at: summaryAt(27),
+							reason: "Both processes have stopped; cleanup can proceed.",
+						},
+					],
+				};
+				publishChecks(next);
+				await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+				await expect(
+					panel.getByTestId("goal-details-summary-body"),
+				).toHaveTextContent(summaryCopy.stuck);
+				await expect(panel.queryByText("Loading goal details…")).toBeNull();
+				finishRead?.(next);
+				await waitFor(() =>
+					expect(panel.getByTestId("goal-details-update")).toHaveTextContent(
+						"New check · Update",
+					),
+				);
+				await expect(generate).not.toHaveBeenCalled();
+				generated = {
+					text: summaryCopy.stuck,
+					generatedAt: summaryAt(27),
+					stale: false,
+				};
+				let finishGeneration: ((value: GoalSummary) => void) | undefined;
+				generate.mockImplementationOnce(
+					() =>
+						new Promise<GoalSummary>((resolve) => {
+							finishGeneration = resolve;
+						}),
+				);
+				await userEvent.click(
+					panel.getByRole("button", { name: "New check · Update" }),
+				);
+				await waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+				const newer = {
+					...next,
+					summary: {
+						text: summaryCopy.stuck,
+						generatedAt: generated.generatedAt,
+						stale: true,
+					},
+					checks: [
+						...next.checks,
+						{
+							iteration: 198,
+							turnIndex: 198,
+							at: summaryAt(28),
+							reason: "effect4 is removed; mainbase cleanup is next.",
+						},
+					],
+				};
+				publishChecks(newer);
+				await waitFor(() => expect(read).toHaveBeenCalledTimes(3));
+				await tick();
+				finishGeneration?.(generated);
+				// A refetch can invalidate this same generation before its response arrives.
+				await waitFor(() =>
+					expect(panel.getByTestId("goal-details-update")).toHaveTextContent(
+						"New check · Update",
+					),
+				);
+				// Leave a new, unrequested update visible in the baseline.
+				publishChecks({
+					...newer,
+					summary: { ...newer.summary, generatedAt: summaryAt(28) },
+					checks: [
+						...newer.checks,
+						{
+							iteration: 199,
+							turnIndex: 199,
+							at: summaryAt(29),
+							reason: "mainbase is ready for removal.",
+						},
+					],
+				});
+				await waitFor(() =>
+					expect(panel.getByTestId("goal-details-update")).toHaveTextContent(
+						"New check · Update",
+					),
+				);
+				await expect(generate).toHaveBeenCalledTimes(1);
+			} else if (state !== "NoChecksYet" && state !== "SummaryFailed") {
+				await expect(generate).toHaveBeenCalledTimes(missing || stale ? 1 : 0);
+				if (missing || stale)
+					await expect(generate).toHaveBeenCalledWith({
+						sessionId: mockSession.id,
+					});
+			}
+			if (state === "Pursuing" || state === "StuckStillCurrent") {
+				await userEvent.keyboard("{Escape}");
+				await waitFor(() =>
+					expect(canvas.queryByTestId("goal-details")).toBeNull(),
+				);
+				await expect(canvas.getByTestId("session-goal-subtitle")).toHaveFocus();
+				await waitFor(() =>
+					expect(
+						getComputedStyle(canvas.getByTestId("session-goal-subtitle"))
+							.pointerEvents,
+					).toBe("auto"),
+				);
+				await userEvent.click(canvas.getByTestId("session-goal-subtitle"));
+				await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+				await expect(generate).not.toHaveBeenCalled();
+			}
+		},
+	};
+}
+
+export const PhoneGoalSummaryPursuing = goalSummaryStory("Pursuing");
+export const PhoneGoalSummaryChecking = goalSummaryStory("Checking");
+export const PhoneGoalSummaryStuckSummarising =
+	goalSummaryStory("StuckSummarising");
+export const PhoneGoalSummaryStuckReady = goalSummaryStory("StuckReady");
+export const PhoneGoalSummaryStuckStillCurrent =
+	goalSummaryStory("StuckStillCurrent");
+export const PhoneGoalSummaryStuckUpdating = goalSummaryStory("StuckUpdating");
+export const PhoneGoalSummaryStuckNewCheckWhileOpen = goalSummaryStory(
+	"StuckNewCheckWhileOpen",
+);
+export const PhoneGoalSummaryPausedWhileStuck =
+	goalSummaryStory("PausedWhileStuck");
+export const PhoneGoalSummaryPaused = goalSummaryStory("Paused");
+export const PhoneGoalSummaryGoalMet = goalSummaryStory("GoalMet");
+export const PhoneGoalSummaryFailed = goalSummaryStory("SummaryFailed");
+export const PhoneGoalSummarySummariesOff = goalSummaryStory("SummariesOff");
+export const PhoneGoalSummaryNoChecksYet = goalSummaryStory("NoChecksYet");
+
+export const DesktopGoalSummaryPursuing = goalSummaryStory("Pursuing", true);
+export const DesktopGoalSummaryChecking = goalSummaryStory("Checking", true);
+export const DesktopGoalSummaryStuckSummarising = goalSummaryStory(
+	"StuckSummarising",
+	true,
+);
+export const DesktopGoalSummaryStuckReady = goalSummaryStory(
+	"StuckReady",
+	true,
+);
+export const DesktopGoalSummaryStuckStillCurrent = goalSummaryStory(
+	"StuckStillCurrent",
+	true,
+);
+export const DesktopGoalSummaryStuckUpdating = goalSummaryStory(
+	"StuckUpdating",
+	true,
+);
+export const DesktopGoalSummaryStuckNewCheckWhileOpen = goalSummaryStory(
+	"StuckNewCheckWhileOpen",
+	true,
+);
+export const DesktopGoalSummaryPausedWhileStuck = goalSummaryStory(
+	"PausedWhileStuck",
+	true,
+);
+export const DesktopGoalSummaryPaused = goalSummaryStory("Paused", true);
+export const DesktopGoalSummaryGoalMet = goalSummaryStory("GoalMet", true);
+export const DesktopGoalSummaryFailed = goalSummaryStory("SummaryFailed", true);
+export const DesktopGoalSummarySummariesOff = goalSummaryStory(
+	"SummariesOff",
+	true,
+);
+export const DesktopGoalSummaryNoChecksYet = goalSummaryStory(
+	"NoChecksYet",
+	true,
+);
+
+export const PhoneGoalSummaryPursuingLight: Story = {
+	...PhoneGoalSummaryPursuing,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummaryCheckingLight: Story = {
+	...PhoneGoalSummaryChecking,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummaryStuckSummarisingLight: Story = {
+	...PhoneGoalSummaryStuckSummarising,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummaryStuckReadyLight: Story = {
+	...PhoneGoalSummaryStuckReady,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummaryStuckStillCurrentLight: Story = {
+	...PhoneGoalSummaryStuckStillCurrent,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummaryStuckUpdatingLight: Story = {
+	...PhoneGoalSummaryStuckUpdating,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummaryStuckNewCheckWhileOpenLight: Story = {
+	...PhoneGoalSummaryStuckNewCheckWhileOpen,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummaryPausedWhileStuckLight: Story = {
+	...PhoneGoalSummaryPausedWhileStuck,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummaryPausedLight: Story = {
+	...PhoneGoalSummaryPaused,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummaryGoalMetLight: Story = {
+	...PhoneGoalSummaryGoalMet,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummaryFailedLight: Story = {
+	...PhoneGoalSummaryFailed,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummarySummariesOffLight: Story = {
+	...PhoneGoalSummarySummariesOff,
+	globals: { theme: "light" },
+};
+export const PhoneGoalSummaryNoChecksYetLight: Story = {
+	...PhoneGoalSummaryNoChecksYet,
+	globals: { theme: "light" },
+};
+
+export const DesktopGoalSummaryPursuingLight: Story = {
+	...DesktopGoalSummaryPursuing,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummaryCheckingLight: Story = {
+	...DesktopGoalSummaryChecking,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummaryStuckSummarisingLight: Story = {
+	...DesktopGoalSummaryStuckSummarising,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummaryStuckReadyLight: Story = {
+	...DesktopGoalSummaryStuckReady,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummaryStuckStillCurrentLight: Story = {
+	...DesktopGoalSummaryStuckStillCurrent,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummaryStuckUpdatingLight: Story = {
+	...DesktopGoalSummaryStuckUpdating,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummaryStuckNewCheckWhileOpenLight: Story = {
+	...DesktopGoalSummaryStuckNewCheckWhileOpen,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummaryPausedWhileStuckLight: Story = {
+	...DesktopGoalSummaryPausedWhileStuck,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummaryPausedLight: Story = {
+	...DesktopGoalSummaryPaused,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummaryGoalMetLight: Story = {
+	...DesktopGoalSummaryGoalMet,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummaryFailedLight: Story = {
+	...DesktopGoalSummaryFailed,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummarySummariesOffLight: Story = {
+	...DesktopGoalSummarySummariesOff,
+	globals: { theme: "light" },
+};
+export const DesktopGoalSummaryNoChecksYetLight: Story = {
+	...DesktopGoalSummaryNoChecksYet,
 	globals: { theme: "light" },
 };

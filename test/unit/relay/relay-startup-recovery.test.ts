@@ -13,14 +13,12 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import {
-	createProjectRelay,
-	type ProjectRelay,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import {
 	makeMockOpenCodeAPI,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
 it.each([
 	"ready",
@@ -73,7 +71,7 @@ it.each([
 			),
 		);
 		relay = await createProjectRelay({
-			shellEnv: () => shellEnv,
+			shellEnv: () => ({ env: shellEnv, declared: {} }),
 			prepareShellEnv,
 			httpServer: server,
 			opencodeUrl: "http://opencode.test",
@@ -85,46 +83,40 @@ it.each([
 			publishGlobalSetting: () => Effect.void,
 			log: createSilentLogger(),
 		});
-		let result: string | undefined;
 		const deliver = vi.spyOn(
 			relay.orchestration.openCodeInstance,
 			"sendTurnEffect",
 		);
 		if (readiness === "hung")
 			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-		const send = relay.effectRuntime.runtime
-			.runPromise(
-				Effect.gen(function* () {
-					const engine = yield* OrchestrationEngineTag;
-					return yield* engine.dispatchEffect({
-						type: "send_turn",
-						commandId: "input",
-						providerId: "opencode",
-						input: {
-							sessionId: "s",
-							inputId: "input",
-							runId: "r",
-							prompt: "Continue",
-							history: [],
-							providerState: {},
-							workspaceRoot: dir,
-							extraFolders: [],
-							abortSignal: new AbortController().signal,
-							eventSink: {
-								push: () => Effect.void,
-								requestPermission: () => Effect.succeed({ decision: "once" }),
-								requestQuestion: () => Effect.succeed({}),
-								resolvePermission: () => Effect.void,
-								resolveQuestion: () => Effect.void,
-							},
+		const send = relay.effectRuntime.runtime.runPromise(
+			Effect.gen(function* () {
+				const engine = yield* OrchestrationEngineTag;
+				return yield* engine.dispatchEffect({
+					type: "send_turn",
+					commandId: "input",
+					providerId: "opencode",
+					input: {
+						sessionId: "s",
+						inputId: "input",
+						runId: "r",
+						prompt: "Continue",
+						history: [],
+						providerState: {},
+						workspaceRoot: dir,
+						extraFolders: [],
+						abortSignal: new AbortController().signal,
+						eventSink: {
+							push: () => Effect.void,
+							requestPermission: () => Effect.succeed({ decision: "once" }),
+							requestQuestion: () => Effect.succeed({}),
+							resolvePermission: () => Effect.void,
+							resolveQuestion: () => Effect.void,
 						},
-					});
-				}),
-			)
-			.then((completion) => {
-				result = completion.status;
-				return completion;
-			});
+					},
+				});
+			}),
+		);
 		// Relay disposal interrupts this waiter if an earlier assertion fails.
 		void send.catch(() => undefined);
 		if (readiness === "hung") {
@@ -151,11 +143,11 @@ it.each([
 				},
 			}),
 		);
-		await vi.waitFor(() => expect(result).toBe("interrupted"), {
-			timeout: 500,
-			interval: 10,
-		});
-		expect((await send).error?.code).toBe("interrupted");
+		// Let the reactor's outcome poll advance while awaiting the send itself.
+		if (readiness === "hung") vi.setTimerTickMode("nextTimerAsync");
+		const completion = await send;
+		expect(completion.status).toBe("interrupted");
+		expect(completion.error?.code).toBe("interrupted");
 		expect(
 			await relay.effectRuntime.runtime.runPromise(
 				Effect.gen(function* () {
@@ -267,7 +259,7 @@ for (const native of [
 				),
 			);
 			relay = await createProjectRelay({
-				shellEnv: () => ({}),
+				shellEnv: () => ({ env: {}, declared: {} }),
 				httpServer: server,
 				opencodeUrl: "http://opencode.test",
 				openCodeInstances: instances,
@@ -351,7 +343,7 @@ it("recovers historical sessions before startup can create a live session", asyn
 		);
 
 		relay = await createProjectRelay({
-			shellEnv: () => ({}),
+			shellEnv: () => ({ env: {}, declared: {} }),
 			httpServer: server,
 			opencodeUrl: "http://opencode.test",
 			projectDir: dir,
@@ -449,7 +441,7 @@ it("rejects Claude permissions a crash left pending and leaves OpenCode's alone"
 		);
 
 		relay = await createProjectRelay({
-			shellEnv: () => ({}),
+			shellEnv: () => ({ env: {}, declared: {} }),
 			httpServer: server,
 			opencodeUrl: "http://opencode.test",
 			projectDir: dir,

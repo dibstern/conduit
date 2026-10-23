@@ -12,13 +12,14 @@
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { touch } from "../../utils/attention.js";
 	import { setSessionStatusFilter, type SessionStatusFilter } from "../../stores/session-scope.js";
-	import { setDraftsTrayOpen, setSettledShelfOpen, setSnoozedShelfOpen, uiState } from "../../stores/ui.svelte.js";
+	import { setDraftsTrayOpen, setSessionGroupOpen, setSettledShelfOpen, setSnoozedShelfOpen, uiState } from "../../stores/ui.svelte.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { toggleSessionRead } from "../../utils/session-read.js";
 	import { openSnoozePicker } from "../../stores/snooze-picker.svelte.js";
 	import { sessionCommandActions } from "./session-commands.js";
 	import SessionItem from "./SessionItem.svelte";
 	import DraftItem from "./DraftItem.svelte";
+	import DraftPencil from "./DraftPencil.svelte";
 	import { projectDisplayName, projectAccent } from "./session-list-project.js";
 	import SessionPager from "./SessionPager.svelte";
 	import Button from "../ui/Button.svelte";
@@ -35,7 +36,7 @@
 		type ProjectTreeNode,
 	} from "../../stores/project-tree.svelte.js";
 
-	let { arrangement, fullArrangement, settledCount, drafts = [], tree, reorderable, isEmpty, emptyMessage, statusFilter, searching, filteredLength, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
+	let { arrangement, fullArrangement, settledCount, drafts = [], tree, reorderable, isEmpty, emptyMessage, statusFilter, searching, filteredLength, groupsOpen, snoozedShelfOpen, settledShelfOpen, pagerPending, unavailableProjectLabels, selectMode, selectedSessionIds, menuOpenId, renamingSessionId, getProjectLabel, getProjectAccent, oncontextmenu, ontoggleselection, onrenamestart, onrenameend }: {
 		arrangement: SessionProjection;
 		fullArrangement: SessionProjection;
 		settledCount: { count: number; exact: boolean };
@@ -49,6 +50,7 @@
 		statusFilter: SessionStatusFilter | null;
 		searching: boolean;
 		filteredLength: number;
+		groupsOpen: typeof uiState.sessionGroupsOpen;
 		snoozedShelfOpen: boolean;
 		settledShelfOpen: boolean;
 		pagerPending: boolean;
@@ -95,6 +97,21 @@
 	}
 </script>
 
+	{#snippet groupHeader(group: "pinned" | "running" | "idle" | "settled" | "snoozed", label: string, count: number, open: boolean, ontoggle: () => void, exact = true)}
+		<TextButton
+			tone="dimmer"
+			class="session-group-label mt-[6px] flex w-full items-center gap-[6px] min-h-[30px] max-md:min-h-[44px] pointer-coarse:min-h-[44px] rounded-[8px] px-[8px] text-[12.5px] leading-[18px] font-medium font-sans"
+			data-testid="{group}-shelf-toggle"
+			aria-expanded={open}
+			aria-controls="{group}-shelf-rows"
+			onclick={() => { if (!searching) ontoggle(); }}
+		>
+			<Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
+			<SessionStatusGlyph pinned={group === "pinned"} settled={group === "settled"} snoozed={group === "snoozed"} attention={group === "running" ? "working" : "idle"} animate={false} />
+			<span data-group-label>{label}</span>{" "}<span class="font-mono text-[11px] font-normal">{count}{exact ? "" : "+"}</span>
+		</TextButton>
+	{/snippet}
+
 	<!-- Scrollable session list content -->
 	<!-- The region scrolls and has no tabbable descendant, so it must be focusable or a
 	     keyboard-only user cannot scroll it at all (axe scrollable-region-focusable);
@@ -105,17 +122,18 @@
 	     per section because the row is about to grow: the shelves and the
 	     per-row commands each land in their own ticket, and copies would mean one
 	     edit each with any divergence between them invisible. -->
-	{#snippet sessionRow(s: SessionInfo, underProject = false)}
+	{#snippet sessionRow(s: SessionInfo, underProject = false, inPinnedGroup = false)}
 		{@const settled = s.pinnedAt == null && s.settledAt != null}
 		{@const snoozed = !settled && s.pinnedAt == null && isSessionSnoozed(s, sessionState.now)}
 		{@const primary = projectState.projects.find((project) => project.slug === s.projectSlug)?.folders[0]}
 		<SessionItem
 			session={s}
 			pinned={s.pinnedAt != null}
+			{inPinnedGroup}
 			{settled}
 			{snoozed}
 			settledAt={settled ? formatTimeAgo(s.settledAt) : undefined}
-			snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now) : undefined}
+			snoozedUntilText={snoozed ? formatSnoozeTime(s.snoozedUntil ?? null, sessionState.now, "short") : undefined}
 			now={sessionState.now}
 			href={getSessionHref(s.id)}
 			projectLabel={underProject ? undefined : getProjectLabel(s)}
@@ -202,26 +220,26 @@
 	<div id="session-list-scroller" class="flex-1 overflow-y-auto px-[6px] pb-[8px]" role="region" aria-label="Sessions" tabindex="0" onscroll={(event) => { heldSessionId = null; scrolled = event.currentTarget.scrollTop > 0; }}>
 		{#if drafts.length > 0}
 			<!-- Boxed so unsent drafts never read as sessions; collapsed, the header previews the newest. -->
-			<div class="mx-[2px] mt-[8px] mb-[2px] rounded-[12px] border border-border bg-bg-raised p-[3px]" data-testid="drafts-tray">
+			<div class="mx-[2px] mt-[8px] mb-[2px] rounded-[12px] border border-border bg-bg-raised p-[3px] leading-[1.4]" data-testid="drafts-tray">
 				<div class="flex items-center rounded-[9px] hover:bg-hover">
 					<TextButton
 						tone={uiState.draftsTrayOpen ? "inherit" : "muted"}
-						class="flex min-w-0 flex-1 items-center gap-[6px] min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[12.5px] leading-[1.4] font-sans {uiState.draftsTrayOpen ? 'font-semibold text-text' : 'font-medium'}"
+						class="flex min-w-0 flex-1 items-center gap-[6px] min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[12.5px] leading-[1.4] font-sans enabled:hover:opacity-100 {uiState.draftsTrayOpen ? 'font-semibold text-text' : 'font-medium enabled:hover:text-text-muted'}"
 						data-testid="drafts-tray-toggle"
 						aria-expanded={uiState.draftsTrayOpen}
 						aria-controls="drafts-tray-rows"
 						onclick={() => setDraftsTrayOpen(!uiState.draftsTrayOpen)}
 					>
 						<Icon name={uiState.draftsTrayOpen ? "chevron-down" : "chevron-right"} size={12} />
-						<span class="flex text-text-dimmer"><Icon name="pencil-line" size={12} /></span>
+						<span class="flex text-text-dimmer"><DraftPencil size={12} /></span>
 						<span>Drafts</span>
-						<span class="font-mono text-[10.5px] font-normal tabular-nums text-text-dimmer">{drafts.length}</span>
+						<span class="font-mono text-mono-time text-text-dimmer">{drafts.length}</span>
 						{#if !uiState.draftsTrayOpen}
 							<span class="w-0 min-w-0 flex-1 truncate text-left font-normal text-text-dimmer">· {drafts[0]?.firstLine.trim() || "Untitled draft"}</span>
 						{/if}
 					</TextButton>
 					{#if uiState.draftsTrayOpen}
-						<TextButton tone="dimmer" class="shrink-0 min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[11.5px] leading-[1.4] font-medium font-sans hover:text-error" data-testid="drafts-tray-clear" onclick={() => drafts.forEach(discardDraft)}>Clear all</TextButton>
+						<TextButton tone="dimmer" class="shrink-0 min-h-[44px] md:min-h-0 px-[8px] py-[6px] text-[11.5px] leading-[1.4] font-medium font-sans enabled:hover:text-error" data-testid="drafts-tray-clear" onclick={() => drafts.forEach(discardDraft)}>Clear all</TextButton>
 					{/if}
 				</div>
 				<div id="drafts-tray-rows" class={uiState.draftsTrayOpen ? "pb-px" : ""}>
@@ -234,8 +252,12 @@
 			</div>
 		{/if}
 		{#if arrangement.pinned.length > 0}
-			<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans"><span>Pinned</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.pinned.length}</span></div>
-			{#each arrangement.pinned as s (s.id)}{@render sessionRow(s)}{/each}
+			{@render groupHeader("pinned", "Pinned", fullArrangement.pinned.length, groupsOpen.pinned, () => setSessionGroupOpen("pinned", !uiState.sessionGroupsOpen.pinned))}
+			<div id="pinned-shelf-rows">
+				{#if groupsOpen.pinned}
+					{#each arrangement.pinned as s (s.id)}{@render sessionRow(s, false, true)}{/each}
+				{/if}
+			</div>
 		{/if}
 		{#if isEmpty && drafts.length === 0 && !sessionState.settled}
 			<!-- First load: session-shaped rows breathe in a top-to-bottom wave. -->
@@ -272,58 +294,46 @@
 				{#each tree as node (node.slug)}{@render projectHeader(node)}{@render projectRows(node)}{/each}
 			{:else}
 				{#each arrangement.sections as section (section.key)}
-					<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans">
-						<span>{section.label}</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.sections.find((group) => group.key === section.key)?.sessions.length ?? section.sessions.length}</span>
-					</div>
-					{#each section.sessions as s (s.id)}
-						{@render sessionRow(s)}
-					{/each}
+					{#if section.key === "running" || section.key === "idle"}
+						{@const group = section.key}
+						{@render groupHeader(group, section.label, fullArrangement.sections.find((section) => section.key === group)?.sessions.length ?? section.sessions.length, groupsOpen[group], () => setSessionGroupOpen(group, !uiState.sessionGroupsOpen[group]))}
+						<div id="{group}-shelf-rows">
+							{#if groupsOpen[group]}
+								{#each section.sessions as s (s.id)}{@render sessionRow(s)}{/each}
+							{/if}
+						</div>
+					{:else}
+						<div class="session-group-label flex items-center gap-[6px] pt-[12px] pb-[4px] px-[10px] text-[12px] font-medium text-text-dimmer font-sans">
+							<span>{section.label}</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.sections.find((group) => group.key === section.key)?.sessions.length ?? section.sessions.length}</span>
+						</div>
+						{#each section.sessions as s (s.id)}
+							{@render sessionRow(s)}
+						{/each}
+					{/if}
 				{/each}
 			{/if}
 			{#if settledCount.count > 0}
-				<TextButton
-					tone="dimmer"
-					class="session-group-label mt-[6px] flex w-full items-center gap-[6px] min-h-[44px] md:min-h-[30px] rounded-[8px] px-[8px] text-[12.5px] font-medium font-sans"
-					data-testid="settled-shelf-toggle"
-					aria-expanded={settledShelfOpen}
-					aria-controls="settled-shelf-rows"
-					onclick={() => { if (searching) return; settledExpanded = false; setSettledShelfOpen(!uiState.settledShelfOpen); }}
-				>
-					<Icon name={settledShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-					<SessionStatusGlyph settled />
-					<span>Settled</span>{" "}<span class="font-mono text-[11px] font-normal">{settledCount.count}{settledCount.exact ? "" : "+"}</span>
-				</TextButton>
+				{@render groupHeader("settled", "Settled", settledCount.count, settledShelfOpen, () => { settledExpanded = false; setSettledShelfOpen(!uiState.settledShelfOpen); }, settledCount.exact)}
 				<div id="settled-shelf-rows">
 					{#if settledShelfOpen}
 						{#each searching || selectMode || settledExpanded ? arrangement.settled : arrangement.settled.slice(0, 2) as s (s.id)}
 							{@render sessionRow(s)}
 						{/each}
 						{#if !searching && !selectMode && !settledExpanded && settledMore > 0}
-							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="settled-shelf-more" onclick={() => { settledExpanded = true; }}>+ {settledMore} more</TextButton>
+							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="settled-shelf-more" onclick={() => { settledExpanded = true; }}>{settledMore} more</TextButton>
 						{/if}
 					{/if}
 				</div>
 			{/if}
 			{#if arrangement.snoozed.length > 0}
-				<TextButton
-					tone="dimmer"
-					class="session-group-label mt-[6px] flex w-full items-center gap-[6px] min-h-[44px] md:min-h-[30px] rounded-[8px] px-[8px] text-[12.5px] font-medium font-sans"
-					data-testid="snoozed-shelf-toggle"
-					aria-expanded={snoozedShelfOpen}
-					aria-controls="snoozed-shelf-rows"
-					onclick={() => { if (searching) return; snoozedExpanded = false; setSnoozedShelfOpen(!uiState.snoozedShelfOpen); }}
-				>
-					<Icon name={snoozedShelfOpen ? "chevron-down" : "chevron-right"} size={12} />
-					<SessionStatusGlyph snoozed />
-					<span>Snoozed</span>{" "}<span class="font-mono text-[11px] font-normal">{fullArrangement.snoozed.length}</span>
-				</TextButton>
+				{@render groupHeader("snoozed", "Snoozed", fullArrangement.snoozed.length, snoozedShelfOpen, () => { snoozedExpanded = false; setSnoozedShelfOpen(!uiState.snoozedShelfOpen); })}
 				<div id="snoozed-shelf-rows">
 					{#if snoozedShelfOpen}
 						{#each searching || selectMode || snoozedExpanded ? arrangement.snoozed : arrangement.snoozed.slice(0, 2) as s (s.id)}
 							{@render sessionRow(s)}
 						{/each}
 						{#if !searching && !selectMode && !snoozedExpanded && fullArrangement.snoozed.length > 2}
-							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="snoozed-shelf-more" onclick={() => { snoozedExpanded = true; }}>+ {fullArrangement.snoozed.length - 2} more</TextButton>
+							<TextButton tone="dimmer" class="min-h-[44px] md:min-h-[30px] px-[34px] text-[12px]" data-testid="snoozed-shelf-more" onclick={() => { snoozedExpanded = true; }}>{fullArrangement.snoozed.length - 2} more</TextButton>
 						{/if}
 					{/if}
 				</div>

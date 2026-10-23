@@ -53,20 +53,32 @@ export interface PermissionResponse {
 export interface ProviderControlContext {
 	readonly commandId: string;
 	readonly providerProcessId: string;
+	/** Conditional End for the original Stop cohort only. */
+	readonly retireRunIds?: readonly string[];
 	readonly response?: PermissionResponse;
 	readonly operation?: "reply" | "reject";
 }
+
+export type ProviderControlCommandStatus =
+	| "not_received"
+	| "running"
+	| "completed"
+	| "failed"
+	| "gone";
 
 export interface QuestionRequest {
 	readonly requestId: string;
 	readonly runId?: string;
 	readonly toolUseId?: string;
+	readonly delivery?: "async";
 	readonly questions: Array<{
 		question: string;
 		header: string;
 		options: Array<{ label: string; description: string }>;
 		multiSelect?: boolean;
 		custom?: boolean;
+		isOther?: boolean;
+		isSecret?: boolean;
 	}>;
 }
 
@@ -97,6 +109,11 @@ export interface EventSink {
 	resolveQuestion(
 		requestId: string,
 		answers: Record<string, unknown>,
+	): Effect.Effect<void, EventSinkError>;
+	/** Clear a provider-withdrawn request even when recovery restored no waiter. */
+	withdrawInteraction?(
+		requestId: string,
+		kind: "permission" | "question",
 	): Effect.Effect<void, EventSinkError>;
 	cancelSessionInteractions?(
 		reason: string,
@@ -138,7 +155,11 @@ export interface TurnTokens {
 }
 
 export type TurnErrorCode =
+	| "turn_unprepared"
 	| "auth_required"
+	| "usage_limited"
+	| "context_overflow"
+	| "codex_thread_missing"
 	| "agent_busy"
 	| "rate_limited"
 	| "model_unavailable"
@@ -146,6 +167,7 @@ export type TurnErrorCode =
 	| "sandbox_unavailable"
 	| "send_failed"
 	| "provider_error"
+	| "provider_unavailable"
 	| "interrupted"
 	| "timeout"
 	| "unknown";
@@ -227,11 +249,14 @@ export interface ProviderCall {
 	readonly workspaceRoot: string;
 	readonly extraFolders: readonly string[];
 	readonly shellEnv: Readonly<Record<string, string | undefined>>;
+	readonly shellConfig?:
+		| import("../contracts/project-shell-env.js").ProjectShellEnvConfig
+		| undefined;
 }
 
 export interface SendTurnInput
 	extends Pick<ProviderCall, "sessionId" | "workspaceRoot" | "extraFolders">,
-		Partial<Pick<ProviderCall, "projectId" | "shellEnv">> {
+		Partial<Pick<ProviderCall, "projectId" | "shellEnv" | "shellConfig">> {
 	/** Durable run reservation created by the send_turn outbox transaction. */
 	readonly runId?: string;
 	/** Durable acknowledgement of this reservation's intake or pre-intake end. */
@@ -287,6 +312,8 @@ export interface SendTurnInput
 	readonly goalState?: SessionGoalChangedPayload;
 	readonly cumulativeTokens?: number;
 	readonly eventSink: EventSink;
+	/** Config snapshot admitted with the durable turn, including disabled idle exit. */
+	readonly autoSettleAfterDays?: number | null | undefined;
 	readonly abortSignal: AbortSignal;
 	readonly permissionMode?: SessionPermissionMode;
 	/** Session rules enforce the Side Thread's mode. */
@@ -304,6 +331,7 @@ export type PreWarmSessionInput = Pick<
 	| "sessionId"
 	| "projectId"
 	| "shellEnv"
+	| "shellConfig"
 	| "workspaceRoot"
 	| "extraFolders"
 	| "providerState"
@@ -342,6 +370,16 @@ export interface CommandInfo {
 	readonly description?: string;
 	readonly args?: string;
 	readonly source: CommandSource;
+	readonly skillRef?: string;
+}
+
+export interface DiscoveredSkill {
+	readonly name: string;
+	readonly source: CommandSource;
+	readonly description?: string;
+	readonly location:
+		| { readonly _tag: "File"; readonly path: string; readonly root: string }
+		| { readonly _tag: "Provider" };
 }
 
 export interface ProviderAgentInfo {
@@ -361,6 +399,7 @@ export interface ProviderCapabilities {
 	readonly supportsFork: boolean;
 	readonly supportsRevert: boolean;
 	readonly commands: readonly CommandInfo[];
+	readonly skills?: readonly DiscoveredSkill[];
 	readonly agents?: readonly ProviderAgentInfo[];
 }
 
@@ -385,6 +424,17 @@ export interface ProviderNativeSession {
  * - No streamEvents -- instance pushes via EventSink, no output stream needed
  */
 export interface ProviderInstance {
+	/** Liveness includes quarantined runners that cannot accept controls. */
+	readonly hasLiveProcessEffect?: (sessionId: string) => Effect.Effect<boolean>;
+	/** Process identity captured without starting work; refuses unavailable sessions. */
+	readonly getControlProcessIdEffect?: (
+		sessionId: string,
+	) => Effect.Effect<string | undefined, ProviderInstanceFailure>;
+	/** Reconcile a committed command on its original process without starting work. */
+	readonly getControlCommandStatusEffect?: (
+		sessionId: string,
+		control: ProviderControlContext,
+	) => Effect.Effect<ProviderControlCommandStatus, ProviderInstanceFailure>;
 	/** Unique identifier for this provider (e.g. "opencode", "claude") */
 	readonly providerId: string;
 	/** Native identity used for a locally placed input before provider acceptance. */

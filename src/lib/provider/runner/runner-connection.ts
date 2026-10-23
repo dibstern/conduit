@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { Deferred, Effect, Semaphore } from "effect";
+import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../daemon/config-persistence.js";
 import { observeTurnTimelineFrame } from "../../domain/daemon/Services/turn-timeline.js";
 import * as Failure from "../../effect/failure-classification.js";
 import {
@@ -39,6 +40,7 @@ export const connectRunner = (options: {
 	readonly helloTimeoutMs?: number;
 	readonly preserveRole?: boolean;
 	readonly driverKind?: string;
+	readonly cursorBackendUrl?: import("../cursor/cursor-credential.js").CursorBackendUrl;
 	readonly wire?: RunnerWireCodec;
 	readonly readThread?: (
 		sessionId: string,
@@ -47,6 +49,15 @@ export const connectRunner = (options: {
 	readonly deps: {
 		readonly workspaceRoot: string;
 		readonly daemonConfigDir?: string;
+		readonly accounts?: Effect.Effect<
+			import("../../account-directory.js").AccountsState
+		>;
+		readonly claudeLaunchConfig?:
+			| import("../claude/claude-sdk-env.js").ClaudeLaunchConfig
+			| null;
+		readonly autoSettleAfterDays?:
+			| Effect.Effect<number | null | undefined>
+			| undefined;
 		readonly extraFolders?: readonly string[];
 		readonly subagentPollTimeoutMs?: number;
 	};
@@ -71,6 +82,13 @@ export const connectRunner = (options: {
 	readonly onOutputCommitted?: (output: SessionOutput) => void;
 }) =>
 	Effect.gen(function* () {
+		const autoSettleAfterDays = options.deps.autoSettleAfterDays
+			? yield* options.deps.autoSettleAfterDays.pipe(
+					Effect.map((days) =>
+						days === undefined ? DEFAULT_AUTO_SETTLE_AFTER_DAYS : days,
+					),
+				)
+			: undefined;
 		const outputLock = yield* Semaphore.make(1);
 		const attachmentId = randomUUID();
 		let acknowledged = 0;
@@ -182,13 +200,16 @@ export const connectRunner = (options: {
 					}
 					if (message.type === "hello") {
 						if (greeted) return;
-						const helloFailure = runnerHelloFailure(message, "runner");
+						const helloFailure = runnerHelloFailure(
+							message,
+							"runner",
+							options.driverKind ?? "claude",
+							options.cursorBackendUrl,
+						);
 						if (
 							helloFailure ||
 							message.runnerId !== options.runnerId ||
 							message.sessionId !== options.sessionId ||
-							(message.driverKind ?? "claude") !==
-								(options.driverKind ?? "claude") ||
 							(options.pid !== undefined && message.pid !== options.pid)
 						) {
 							finish(
@@ -501,6 +522,7 @@ export const connectRunner = (options: {
 			socket.once("connect", () =>
 				connection.write({
 					type: "hello",
+					// Runner builds predating driverKind were all Claude.
 					driverKind: options.driverKind ?? "claude",
 					protocolVersion:
 						process.env["NODE_ENV"] === "test" &&
@@ -513,6 +535,10 @@ export const connectRunner = (options: {
 					config: {
 						workspaceRoot: options.deps.workspaceRoot,
 						extraFolders: options.deps.extraFolders ?? [],
+						autoSettleAfterDays,
+						...(options.deps.claudeLaunchConfig !== undefined
+							? { claudeLaunchConfig: options.deps.claudeLaunchConfig }
+							: {}),
 						...(options.deps.daemonConfigDir !== undefined
 							? { daemonConfigDir: options.deps.daemonConfigDir }
 							: {}),

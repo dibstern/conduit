@@ -1,5 +1,8 @@
 import { expect } from "@playwright/test";
-import { chooseSettingsOption } from "../../../test/e2e/helpers/settings.js";
+import {
+	chooseSettingsOption,
+	closeSettings,
+} from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	mockInstances,
@@ -49,7 +52,7 @@ export const composerContextWarningHandlers: StepHandler[] = [
 			if (threshold !== "default")
 				await chooseSettingsOption(world.page, control, value);
 			await expect(control).toHaveAttribute("data-value", value);
-			await world.page.getByTestId("settings-close-btn").click();
+			await closeSettings(world.page);
 			await expect(world.page.locator("#settings-panel")).toBeHidden();
 		},
 	},

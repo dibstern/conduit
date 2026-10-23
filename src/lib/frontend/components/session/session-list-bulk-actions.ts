@@ -13,23 +13,33 @@ type BulkSelection = {
 	oncomplete: () => void;
 };
 
+const writeBulkChange = (
+	kind: "settle" | "pin" | "unread",
+	session: { sessionId: string; originId: string },
+	on: boolean,
+) => {
+	if (kind === "settle")
+		return rpc("SetSessionSettled", { ...session, settled: on });
+	if (kind === "pin")
+		return rpc("SetSessionPinned", { ...session, pinned: on });
+	return on
+		? rpc("MarkSessionUnread", session)
+		: rpc("MarkSessionRead", session);
+};
+
+/** Sets `kind` to `on` for each eligible session, with an Undo that sets it back. */
 export async function runBulkChange(
-	kind: "settle" | "pin",
+	kind: "settle" | "pin" | "unread",
 	{ eligible, selectedCount, oncomplete }: BulkSelection,
-	unpinSelected: boolean,
+	on: boolean,
 ): Promise<void> {
-	const pinned = !unpinSelected;
 	const skipped = selectedCount - eligible.length;
 	const input = eligible.map((session) => ({
 		sessionId: session.id,
 		originId: getBrowserClientId(),
 	}));
 	const results = await Promise.allSettled(
-		input.map((session) =>
-			kind === "settle"
-				? rpc("SetSessionSettled", { ...session, settled: true })
-				: rpc("SetSessionPinned", { ...session, pinned }),
-		),
+		input.map((session) => writeBulkChange(kind, session, on)),
 	);
 	const changed = input.filter(
 		(_, index) => results[index]?.status === "fulfilled",
@@ -37,15 +47,18 @@ export async function runBulkChange(
 	void refreshListedSessions();
 	oncomplete();
 	const count = changed.length;
-	let verb = "Unpinned";
-	if (kind === "settle") verb = "Settled";
-	else if (pinned) verb = "Pinned";
+	const verb = {
+		settle: "Settled",
+		pin: on ? "Pinned" : "Unpinned",
+		unread: "Marked",
+	}[kind];
 	const completedSessionLabel = count === 1 ? "session" : "sessions";
 	const inputSessionLabel = input.length === 1 ? "session" : "sessions";
 	const message =
 		(count === input.length
 			? `${verb} ${count} ${completedSessionLabel}`
 			: `${verb} ${count} of ${input.length} ${inputSessionLabel}`) +
+		(kind === "unread" ? (on ? " unread" : " read") : "") +
 		(skipped ? `, ${skipped} skipped` : "");
 	showToast(message, {
 		duration: 5000,
@@ -55,11 +68,7 @@ export async function runBulkChange(
 						label: "Undo",
 						run: () => {
 							void Promise.allSettled(
-								changed.map((session) =>
-									kind === "settle"
-										? rpc("SetSessionSettled", { ...session, settled: false })
-										: rpc("SetSessionPinned", { ...session, pinned: !pinned }),
-								),
+								changed.map((session) => writeBulkChange(kind, session, !on)),
 							).then((undoResults) => {
 								void refreshListedSessions();
 								const failed = undoResults.find(

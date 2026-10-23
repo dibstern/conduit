@@ -18,12 +18,7 @@ import type {
 	SessionMessage,
 	Settings,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import {
-	type CallToolResult,
-	CallToolResultSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { Option, Schema } from "effect";
 import { CategorySetSchema } from "../../src/lib/contracts/category-set.js";
 import { CategoryTuningHunkSchema } from "../../src/lib/contracts/category-tuning.js";
@@ -163,6 +158,7 @@ export type ProcessMark =
 	  }
 	| { kind: "pre-assistant-held"; prompt: string; queryId: string }
 	| { kind: "assistant-held"; prompt: string; queryId: string }
+	| { kind: "intake-held"; prompt: string; queryId: string; inputId: string }
 	| {
 			kind: "resume-rejected";
 			prompt: string;
@@ -295,8 +291,9 @@ function mark(message: ProcessMark): void {
 	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
 	if (proof) appendFileSync(proof, `${JSON.stringify(message)}\n`);
 	const send = () => {
+		// The runner can outlive its daemon; diagnostic IPC may close mid-send.
 		if (process.connected)
-			process.send?.({ channel: "conduit-process-test", ...message });
+			process.send?.({ channel: "conduit-process-test", ...message }, () => {});
 	};
 	const delay =
 		message.kind === "enqueue"
@@ -626,6 +623,7 @@ function query(params: {
 	let taskStopHolding = false;
 	let taskStopHeldRequest: string | undefined;
 	let taskTurnInterrupted = false;
+	let interruptibleTurn = false;
 	let closed = false;
 	let promptIndex = 0;
 	let initializationFinished = false;
@@ -923,6 +921,8 @@ function query(params: {
 							.map((block) => block.text)
 							.join("");
 			const request = currentRequest(prompt);
+			interruptibleTurn =
+				request.startsWith("stall-") || request === "terminal-replay-interrupt";
 			const userUuid = input.uuid ?? randomUUID();
 			if (request === "fail-before-intake")
 				throw new Error("Harness SDK iterator failed before intake");
@@ -1110,6 +1110,19 @@ function query(params: {
 				yield stream(sessionId, { type: "content_block_stop", index: 9 });
 			}
 			// Native resume validation precedes intake, as it does in the CLI.
+			if (
+				(request === "load-stream-stop-before-intake" ||
+					request === "relay-replacement-before-intake") &&
+				proof
+			) {
+				mark({ kind: "intake-held", prompt, queryId, inputId: userUuid });
+				while (
+					!existsSync(join(dirname(proof), "release-stop-intake")) &&
+					!closed
+				)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+			}
 			yield {
 				type: "command_lifecycle",
 				state: "started",
@@ -1271,6 +1284,12 @@ function query(params: {
 				};
 			}
 			if (request === "thread-read-omitted-history") {
+				const [{ Client }, { InMemoryTransport }, { CallToolResultSchema }] =
+					await Promise.all([
+						import("@modelcontextprotocol/sdk/client/index.js"),
+						import("@modelcontextprotocol/sdk/inMemory.js"),
+						import("@modelcontextprotocol/sdk/types.js"),
+					]);
 				const serverKey = "conduit";
 				const server = params.options?.mcpServers?.[serverKey];
 				if (server?.type !== "sdk")
@@ -1756,12 +1775,19 @@ function query(params: {
 					});
 				}
 			yield stream(sessionId, { type: "content_block_stop", index: 0 });
+			if (interruptibleTurn) {
+				if (request === "terminal-replay-interrupt")
+					mark({ kind: "assistant-held", prompt, queryId });
+				// A control receipt is separate from the native result that ends
+				// these interrupted turns.
+				while (!taskTurnInterrupted && !closed)
+					await new Promise<void>((done) => setTimeout(done, 20));
+				if (closed) return;
+			}
 			const correctionError = request === "task-stop-correction-error";
-			if (
-				(taskTurnInterrupted && request.startsWith("task-stop-foreground")) ||
-				correctionError
-			) {
+			if (taskTurnInterrupted || correctionError) {
 				taskTurnInterrupted = false;
+				interruptibleTurn = false;
 				if (request.includes("correction-duplicate") && proof)
 					while (
 						!existsSync(
@@ -1812,6 +1838,9 @@ function query(params: {
 					permission_denials: [],
 					user_message_uuid: userUuid,
 				};
+				// Exercise recreation after a native terminal and stream end, rather
+				// than depending on Stop to dispose a still-running query.
+				if (request.startsWith("stall-")) return;
 				if (request.includes("correction-steer-boundary") && proof) {
 					mark({
 						kind: "task-stop-turn",
@@ -1830,14 +1859,6 @@ function query(params: {
 				}
 				continue;
 			}
-			if (request.startsWith("stall-"))
-				await new Promise<void>((done) => {
-					params.options?.abortController?.signal.addEventListener(
-						"abort",
-						() => done(),
-						{ once: true },
-					);
-				});
 			const workspaceHintPrefix = "workspace-hint-tools ";
 			const workspaceHintRequest = request
 				.split("\n")
@@ -1852,6 +1873,7 @@ function query(params: {
 					holdBeforeResult?: boolean;
 					failAfterTools?: boolean;
 				};
+				interruptibleTurn = turn.holdBeforeResult === true;
 				const tools: readonly {
 					name: string;
 					input: Record<string, unknown>;
@@ -1921,12 +1943,67 @@ function query(params: {
 					if (!optionsFile)
 						throw new Error("Missing workspace hint fixture gate");
 					const release = join(dirname(optionsFile), "workspace-hint-release");
-					while (!existsSync(release) && !closed)
+					while (!existsSync(release) && !closed && !taskTurnInterrupted)
 						await new Promise<void>((done) => setTimeout(done, 20));
 					if (closed) return;
 				}
 				if (turn.failAfterTools)
 					throw new Error("Harness failure after workspace writes");
+			}
+			// Blocks after the opening text: "tool", "thinking" or text to stream.
+			const foldPrefix = "jev-fold-script ";
+			const foldScript = request
+				.split("\n")
+				.find((line) => line.startsWith(foldPrefix));
+			if (foldScript) {
+				const blocks = JSON.parse(
+					foldScript.slice(foldPrefix.length),
+				) as readonly string[];
+				for (const [offset, block] of blocks.entries()) {
+					const index = offset + 1;
+					const toolUseID = randomUUID();
+					yield stream(sessionId, {
+						type: "content_block_start",
+						index,
+						content_block:
+							block === "tool"
+								? { type: "tool_use", id: toolUseID, name: "Read", input: {} }
+								: block === "thinking"
+									? { type: "thinking", thinking: "", signature: "" }
+									: { type: "text", text: "" },
+					});
+					yield stream(sessionId, {
+						type: "content_block_delta",
+						index,
+						delta:
+							block === "tool"
+								? {
+										type: "input_json_delta",
+										partial_json: JSON.stringify({ file_path: "a.txt" }),
+									}
+								: block === "thinking"
+									? { type: "thinking_delta", thinking: "Considering." }
+									: { type: "text_delta", text: block },
+					});
+					yield stream(sessionId, { type: "content_block_stop", index });
+					if (block === "tool")
+						yield {
+							type: "user",
+							uuid: randomUUID(),
+							session_id: sessionId,
+							parent_tool_use_id: null,
+							message: {
+								role: "user",
+								content: [
+									{
+										type: "tool_result",
+										tool_use_id: toolUseID,
+										content: "read",
+									},
+								],
+							},
+						} as unknown as SDKMessage;
+				}
 			}
 			if (request === "goal-rebind") {
 				yield {
@@ -2025,6 +2102,7 @@ function query(params: {
 			// A long Bash call. With a proof directory it stays running until the
 			// spec releases its result; without one it completes straight away.
 			if (request.startsWith("tool-long-")) {
+				interruptibleTurn = true;
 				const toolUseID = randomUUID();
 				yield stream(sessionId, {
 					type: "content_block_start",
@@ -2038,7 +2116,12 @@ function query(params: {
 				});
 				yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				const release = proof && join(dirname(proof), "release-tool-long");
-				while (release && !existsSync(release) && !closed)
+				while (
+					release &&
+					!existsSync(release) &&
+					!closed &&
+					!taskTurnInterrupted
+				)
 					await new Promise<void>((done) => setTimeout(done, 20));
 				if (closed) return;
 				yield {
@@ -2052,8 +2135,8 @@ function query(params: {
 							{
 								type: "tool_result",
 								tool_use_id: toolUseID,
-								content: LONG_RESULT,
-								is_error: false,
+								content: taskTurnInterrupted ? "Tool interrupted" : LONG_RESULT,
+								is_error: taskTurnInterrupted,
 							},
 						],
 					},
@@ -2286,11 +2369,6 @@ function query(params: {
 					content: [{ type: "text", text: chunks.join("") }],
 				},
 			} as unknown as SDKMessage;
-			if (request === "terminal-replay-interrupt") {
-				mark({ kind: "assistant-held", prompt, queryId });
-				while (!closed) await new Promise<void>((done) => setTimeout(done, 20));
-				return;
-			}
 			if (request.startsWith("task-stop-foreground"))
 				mark({
 					kind: "task-stop-turn",
@@ -2298,17 +2376,24 @@ function query(params: {
 					queryId,
 					at: process.hrtime.bigint().toString(),
 				});
+			// Interrupting a held tool ends through a native result, independently
+			// of the interrupt acknowledgement, just like the earlier held turns.
+			const interrupted = taskTurnInterrupted;
+			taskTurnInterrupted = false;
+			interruptibleTurn = false;
 			yield {
 				type: "result",
-				subtype: "success",
+				subtype: interrupted ? "error_during_execution" : "success",
 				uuid: randomUUID(),
 				session_id: sessionId,
-				is_error: false,
+				is_error: interrupted,
 				duration_ms: 0,
 				duration_api_ms: 0,
 				num_turns: 1,
-				result: chunks.join(""),
-				stop_reason: "end_turn",
+				...(interrupted
+					? { errors: ["Execution ended"], user_message_uuid: userUuid }
+					: { result: chunks.join("") }),
+				stop_reason: interrupted ? null : "end_turn",
 				total_cost_usd: 0,
 				usage: {
 					input_tokens: 1,
@@ -2673,7 +2758,7 @@ function query(params: {
 				});
 				throw new Error("Fixture interrupt rejected");
 			}
-			if (taskStopHolding) taskTurnInterrupted = true;
+			if (taskStopHolding || interruptibleTurn) taskTurnInterrupted = true;
 			mark({
 				kind: "query-interrupted",
 				queryId,
@@ -2828,7 +2913,7 @@ export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
 		if (file)
 			appendFileSync(
 				file,
-				`${JSON.stringify({ prompt: params.prompt, cwd: params.options?.cwd })}\n`,
+				`${JSON.stringify({ prompt: params.prompt, cwd: params.options?.cwd, configDir: params.options?.env?.["CLAUDE_CONFIG_DIR"] })}\n`,
 			);
 		const tuning = Schema.decodeUnknownOption(
 			Schema.fromJsonString(

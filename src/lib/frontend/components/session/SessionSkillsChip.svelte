@@ -176,6 +176,8 @@
 {#if rows.length > 0}
 	<Menu
 		{presentation}
+		sheetEdge="top"
+		portalTo={presentation === "sheet" ? "#session-bar" : undefined}
 		appearance="final"
 		bind:open
 		onopenchange={(nextOpen) => {
@@ -194,7 +196,8 @@
 				id="session-skills-chip"
 				variant="ghost"
 				size={presentation === "popover" ? "capsule-segment" : "phone-capsule-segment"}
-				icon="book-open"
+				icon="sparkles"
+				iconSize={13}
 				touchTarget={presentation === "sheet" ? "always" : true}
 				class="shrink-0 tabular-nums"
 				ariaLabel={label}

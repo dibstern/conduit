@@ -188,7 +188,8 @@ describe("resolveClaudeSettingsFromDisk", () => {
 					preview: () => Effect.die("unused"),
 					record: () => Effect.die("unused"),
 					claudeWorktreeState: () => Effect.die("unused"),
-					withLaunch: (effect) => effect,
+					withLaunch: (_sessionId, effect) => effect,
+					withProjectLaunch: (effect) => effect,
 				}),
 				Effect.provideService(
 					AccountDirectory,
@@ -239,7 +240,8 @@ describe("resolveClaudeSettingsFromDisk", () => {
 					preview: () => Effect.die("unused"),
 					record: () => Effect.die("unused"),
 					claudeWorktreeState: () => Effect.die("unused"),
-					withLaunch: (effect) => effect,
+					withLaunch: (_sessionId, effect) => effect,
+					withProjectLaunch: (effect) => effect,
 				}),
 				Effect.provideService(
 					AccountDirectory,

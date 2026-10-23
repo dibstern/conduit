@@ -313,7 +313,6 @@ describe("Claude subagent materialization pipeline", () => {
 
 					const subagentsFinalized = yield* Deferred.make<void>();
 					const instance = makeTestClaudeProviderInstance({
-						workspaceRoot: dir,
 						queryFactory: () => createMockQuery(queryMessages),
 						subagentSdk: sdk,
 						ensureClaudeSubagentSession: persist.ensureClaudeSubagentSession,
@@ -711,7 +710,6 @@ describe("Claude subagent materialization pipeline", () => {
 						[Symbol.asyncIterator]: () => gen,
 					}) as unknown as Query;
 					const instance = makeTestClaudeProviderInstance({
-						workspaceRoot: dir,
 						queryFactory: () => query,
 						subagentSdk: sdk,
 						ensureClaudeSubagentSession: persist.ensureClaudeSubagentSession,

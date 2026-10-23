@@ -13,9 +13,11 @@ import { toRecord } from "../normalize-tool-input-helpers.js";
 import type { SessionOutput } from "../runner/session-runner.js";
 import type { EventSink, TurnTokens } from "../types.js";
 import {
-	type CursorToolCall,
 	CursorToolResults,
+	type CursorWireToolCall,
+	cursorToolCall,
 	cursorToolInput,
+	fromConversationStep,
 } from "./cursor-tool-events.js";
 
 const log = createLogger("cursor-turn-events");
@@ -143,7 +145,7 @@ export class CursorTurnEvents {
 			startedAt: number;
 			messageId: string;
 			toolName: string;
-			call: CursorToolCall;
+			call: CursorWireToolCall;
 			providerToolUseId: string;
 			completed?: ProviderRuntimeEventPayloadMap["tool.completed"];
 			completedAt?: number;
@@ -274,7 +276,7 @@ export class CursorTurnEvents {
 			const label = name ?? args["description"] ?? args["agentId"];
 			if (typeof label === "string") this.questionSources.set(callId, label);
 		} else if (parent) {
-			// 1.0.37 reports the parent in callback context.sessionId. Task's
+			// The SDK reports the parent in callback context.sessionId. Task's
 			// nested call ID, rather than that context, identifies the asker.
 			this.questionSources.set(callId, parent);
 		}
@@ -504,7 +506,7 @@ export class CursorTurnEvents {
 					const callId = parentCallId
 						? `${parentCallId}:${update.callId}`
 						: update.callId;
-					const { toolName, input } = cursorToolInput(toolCall);
+					const { toolName, input } = cursorToolInput(cursorToolCall(toolCall));
 					const toolMessageId =
 						this.tools.get(callId)?.messageId ?? this.messageId;
 					const child =
@@ -568,6 +570,7 @@ export class CursorTurnEvents {
 							);
 					}
 					const tool = this.tools.get(callId);
+					if (tool && !tool.completed) tool.call = toolCall;
 					if (child && tool) Object.assign(tool.metadata, child.metadata);
 					if (child && !tool?.completed)
 						yield* this.push(
@@ -625,6 +628,10 @@ export class CursorTurnEvents {
 							messageId: toolMessageId,
 							partId: `${toolMessageId}:tool:${callId}`,
 							result: completed.result,
+							outcome:
+								completed.outcome._tag === "Failed"
+									? ("failed" as const)
+									: ("succeeded" as const),
 							input,
 							metadata: {
 								...tool?.metadata,
@@ -646,7 +653,7 @@ export class CursorTurnEvents {
 						if (child) {
 							const envelope = toRecord(toolCall.result);
 							const value = toRecord(envelope["value"]);
-							if (envelope["status"] === "error") {
+							if (completed.outcome._tag === "Failed") {
 								yield* child.events.finishChild("error");
 								child.active = false;
 							} else if (
@@ -698,7 +705,7 @@ export class CursorTurnEvents {
 		});
 	}
 
-	private ensureChild(callId: string, call: CursorToolCall) {
+	private ensureChild(callId: string, call: CursorWireToolCall) {
 		return Effect.gen({ self: this }, function* () {
 			const existing = this.children.get(callId);
 			const childSessionId = `cursor-subagent-${createHash("sha256").update(`${this.sessionId}\0${callId}`).digest("hex").slice(0, 24)}`;
@@ -798,26 +805,13 @@ export class CursorTurnEvents {
 				const tool = toRecord(row["toolCall"]);
 				const callId = tool["toolCallId"];
 				if (typeof callId !== "string") continue;
+				const converted = fromConversationStep(row);
+				if (!converted || converted._tag !== "Known") continue;
 				if (!this.tools.get(callId)?.completed) {
-					const entry = Object.entries(tool).find(([key]) =>
-						key.endsWith("ToolCall"),
-					);
-					if (!entry) continue;
-					const [name, payload] = entry;
-					const wire = toRecord(payload);
-					const outcome = toRecord(wire["result"]);
-					// Serialized kinds absent from the public ToolCall union stay generic.
 					yield* this.delta({
 						type: "tool-call-completed",
 						callId,
-						toolCall: {
-							type: name,
-							args: toRecord(wire["args"]),
-							result:
-								"success" in outcome
-									? { status: "success", value: outcome["success"] }
-									: { status: "error", error: outcome["error"] ?? outcome },
-						},
+						toolCall: converted.call,
 					});
 				}
 				ordered.push({ kind: "tool", callId });
@@ -849,6 +843,10 @@ export class CursorTurnEvents {
 				return [{ id: part.partId, type: part.kind, text: part.text }];
 			const tool = this.tools.get(part.callId);
 			if (!tool) return [];
+			const output =
+				typeof tool.completed?.result === "string"
+					? tool.completed.result
+					: JSON.stringify(tool.completed?.result);
 			return [
 				{
 					id: `${tool.messageId}:tool:${part.callId}`,
@@ -863,15 +861,15 @@ export class CursorTurnEvents {
 					},
 					state: {
 						status: tool.completed
-							? tool.metadata["isError"] === true
+							? tool.completed.outcome === "failed"
 								? "error"
 								: "completed"
 							: "running",
-						input: tool.completed?.input ?? cursorToolInput(tool.call).input,
-						output:
-							typeof tool.completed?.result === "string"
-								? tool.completed.result
-								: JSON.stringify(tool.completed?.result),
+						input:
+							tool.completed?.input ??
+							cursorToolInput(cursorToolCall(tool.call)).input,
+						output,
+						...(tool.completed?.outcome === "failed" ? { error: output } : {}),
 						metadata: tool.metadata,
 					},
 				},
@@ -891,12 +889,9 @@ export class CursorTurnEvents {
 				if (tool) {
 					const metadata = {
 						...child.metadata,
-						outcome:
-							status === "completed"
-								? "completed"
-								: status === "interrupted"
-									? "stopped"
-									: "failed",
+						...(status !== "error"
+							? { outcome: status === "completed" ? "completed" : "stopped" }
+							: {}),
 					};
 					Object.assign(tool.metadata, metadata);
 					if (tool.completed)
@@ -904,6 +899,29 @@ export class CursorTurnEvents {
 							...tool.completed,
 							metadata: { ...tool.completed.metadata, ...metadata },
 						};
+					if (status === "error") {
+						const failed = yield* this.results.complete({
+							...tool.call,
+							result: {
+								status: "error",
+								error: { message: "Parent Cursor run failed" },
+							},
+						});
+						tool.completed = {
+							messageId: tool.messageId,
+							partId: `${tool.messageId}:tool:${callId}`,
+							input: failed.input,
+							duration: Date.now() - tool.startedAt,
+							...tool.completed,
+							metadata: { ...tool.metadata, ...failed.metadata },
+							result: tool.completed?.result || failed.result,
+							outcome:
+								failed.outcome._tag === "Failed" ? "failed" : "succeeded",
+						};
+						yield* this.push("tool.completed", tool.completed, {
+							providerToolUseId: callId,
+						});
+					}
 					yield* this.push(
 						"tool.running",
 						{

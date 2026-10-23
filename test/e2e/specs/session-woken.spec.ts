@@ -65,11 +65,14 @@ async function wake(
 	}
 	if (provider === "claude") {
 		// Sending brings a snoozed session back, so the turn starts first; its
-		// replay is slowed so the snooze lands before it asks to run its Agent
-		// tool, and then waits for the answer.
+		// replay holds before its Agent tool call until the snooze is durable.
+		const replay = harness.claudeReplayer;
+		if (!replay) throw new Error("Claude wake fixture has no replay");
 		await new AppPage(page).sendMessage("Wake me with an approval");
+		await replay.held();
 		await snooze(page, sessionId, null);
 		await expect(row(page, sessionId)).toHaveCount(0);
+		replay.release();
 		return "Woke · approval";
 	}
 	await snooze(page, sessionId, null);
@@ -187,7 +190,8 @@ test.describe("Woken badge", () => {
 				claudeReplay: {
 					turns: ["subagent-task-turn"],
 					askPermissionFor: "Agent",
-					delayMs: 300,
+					// The committed trace emits Agent tool_use at line 28.
+					holdBefore: { turn: 1, message: 28 },
 				},
 			});
 

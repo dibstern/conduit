@@ -549,7 +549,7 @@ describe("supervised server build updates", () => {
 		);
 		expect(restarted).toEqual({ ok: true });
 		await owned.waitForExit({ keepBrowsersOpen: true });
-		expect(generation.exitCode).toBe(0);
+		expect(generation.exitCode).toBe(75);
 		expect(generation.signal).toBeNull();
 		expect(testRunnerAlive(generation.pid)).toBe(false);
 		expect(testRunnerAlive(runner.pid)).toBe(true);
@@ -566,7 +566,11 @@ describe("supervised server build updates", () => {
 		).toEqual([]);
 
 		writeFileSync(markerPath, JSON.stringify({ buildId: BUILD_ID }));
-		await owned.restart({ serviceEnvironment, skipBrowserProbe: true });
+		await owned.restart({
+			serviceEnvironment,
+			opencodeUrl: probeUrl,
+			skipBrowserProbe: true,
+		});
 		const replacement = owned.generations[1];
 		if (!replacement)
 			throw new Error("Replacement server generation is missing");

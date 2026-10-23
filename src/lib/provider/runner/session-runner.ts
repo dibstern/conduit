@@ -1,4 +1,7 @@
 import type { Effect } from "effect";
+import type { Account } from "../../contracts/account.js";
+import type { AccountSwitchBusy } from "../../contracts/limit-recovery.js";
+import type { UsageHarness } from "../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
@@ -7,18 +10,21 @@ import type {
 	LegacyRunnerSettings as Settings,
 } from "../claude/claude-runner-snapshot.js";
 import type { ClaudeSubagentTranscriptSnapshot } from "../claude/types.js";
-import type { CursorCredential } from "../cursor/sdk-port.js";
+import type { CursorCredentialEnvelope } from "../cursor/cursor-credential.js";
 import type {
 	PermissionDecision,
 	PermissionRequest,
 	PermissionResponse,
 	PreWarmSessionInput,
 	ProviderCall,
+	ProviderControlCommandStatus,
+	ProviderControlContext,
 	ProviderNativeSession,
 	QuestionRequest,
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
+import type { UsageRead } from "../usage-reader.js";
 import type { RunnerSettingsSnapshot } from "./runner-upgrade.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
@@ -34,16 +40,20 @@ export type SessionCommand = (
 			readonly input: PreWarmSessionInput;
 			readonly claudeSettingsOverrides?: Settings | undefined;
 			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
+			readonly shellConfig?: ProviderCall["shellConfig"];
 			readonly settingsSnapshot?: RunnerSettingsSnapshot;
 	  }
 	| {
 			readonly type: "send-turn";
+			/** Daemon memory snapshot retained until another turn is admitted. */
+			readonly autoSettleAfterDays?: number | null | undefined;
 			/** Ephemeral launch credentials, excluded from durable command inputs. */
-			readonly cursorCredential?: CursorCredential;
+			readonly cursorCredential?: CursorCredentialEnvelope;
 			readonly sinkId: string;
 			readonly aborted: boolean;
 			readonly claudeSettingsOverrides?: Settings | undefined;
 			readonly shellEnv?: Readonly<Record<string, string | undefined>>;
+			readonly shellConfig?: ProviderCall["shellConfig"];
 			readonly input: SessionTurn;
 	  }
 	| {
@@ -110,10 +120,16 @@ export type SessionCommand = (
 			readonly mode: LegacyPermissionMode;
 	  }
 	| { readonly type: "shutdown" }
-) & { readonly call?: ProviderCall };
+) & { readonly call?: ProviderCall; readonly control?: ProviderControlContext };
 
 /** Runtime events and the existing EventSink interaction operations, all data. */
 export type SessionOutput =
+	| {
+			readonly type: "account-usage";
+			readonly accountId: string;
+			readonly harness: UsageHarness;
+			readonly reading: UsageRead;
+	  }
 	| {
 			readonly type: "background-task";
 			readonly transition: BackgroundTaskTransition;
@@ -125,7 +141,12 @@ export type SessionOutput =
 					readonly request: PermissionRequest;
 			  }
 			| { readonly type: "question-request"; readonly request: QuestionRequest }
-			| { readonly type: "cancel-interaction"; readonly requestId: string }
+			| {
+					readonly type: "cancel-interaction";
+					readonly requestId: string;
+					/** Persist provider withdrawal if recovery has no interaction fiber. */
+					readonly kind?: "permission" | "question";
+			  }
 			| {
 					readonly type: "resolve-permission";
 					readonly requestId: string;
@@ -200,6 +221,13 @@ export interface SessionRunner {
 		sinkId: string,
 		work: Effect.Effect<A, E, R>,
 	): Effect.Effect<A, E | SessionFailure, R>;
+	readonly getControlProcessIdEffect?: (
+		sessionId: string,
+	) => Effect.Effect<string | undefined>;
+	readonly getControlCommandStatusEffect?: (
+		sessionId: string,
+		control: ProviderControlContext,
+	) => Effect.Effect<ProviderControlCommandStatus, SessionFailure>;
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
@@ -212,6 +240,10 @@ export interface SessionRunner {
 	getSessionFailureEffect?(
 		sessionId: string,
 	): Effect.Effect<SessionFailure | undefined>;
+	getAccountSwitchBlockEffect?(
+		sessionId: string,
+		account: Account,
+	): Effect.Effect<AccountSwitchBusy | undefined>;
 	/** Local runner lifecycle state, including work outside the foreground turn. */
 	hasPendingSubagentFinalizers?(sessionId: string): boolean;
 	/** Undefined means no runtime session; null means its cursor is cleared. */

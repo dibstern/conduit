@@ -111,6 +111,21 @@ export const MixedAttachments: Story = {
 		],
 		onRemove: fn(),
 	},
+	play: async ({ canvasElement }) => {
+		for (const attachment of canvasElement.querySelectorAll(
+			".paste-thumb, [data-testid='file-attachment-chip']",
+		)) {
+			await expect(getComputedStyle(attachment).borderWidth).toBe("0px");
+			await expect(getComputedStyle(attachment).backgroundColor).not.toBe(
+				"rgba(0, 0, 0, 0)",
+			);
+		}
+		await expect(
+			canvasElement.querySelectorAll(
+				".paste-thumb, [data-testid='file-attachment-chip']",
+			),
+		).toHaveLength(4);
+	},
 };
 
 export const Hover: Story = {

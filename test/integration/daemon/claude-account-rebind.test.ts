@@ -8,6 +8,7 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
+import { AccountSwitchBusy } from "../../../src/lib/contracts/limit-recovery.js";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { discoverRunners } from "../../../src/lib/provider/runner/runner-registry.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -342,7 +343,7 @@ it("drops removed account credentials after upgrade and through A B A rebinding"
 	expect(controller()?.runnerId).toBe(upgraded?.runnerId);
 }, 40_000);
 
-it("cancels an undelivered account rebind while background work is running, then retries", async () => {
+it("refuses an account switch while background work runs, then rebinds on the next quiet send", async () => {
 	const fixture = ProcessHarness.create({ dist: "dist", restartProof: true });
 	harness = fixture;
 	await fixture.restart();
@@ -362,12 +363,8 @@ it("cancels an undelivered account rebind while background work is running, then
 	}
 	const [a, b] = accounts;
 	if (!a || !b) throw new Error("Missing fixture accounts");
-	const sessionId = await browser.createSession("Cancel pending rebind", a);
+	const sessionId = await browser.createSession("Busy account switch", a);
 	await browser.send(sessionId, "upgrade-background-work");
-	const controller = discoverRunners(
-		fixture.projectDir,
-		fixture.configDir,
-	).find((entry) => entry.sessionId === sessionId);
 	await fixture.requestRpc({
 		_tag: "ContinueSession",
 		sessionId,
@@ -375,7 +372,139 @@ it("cancels an undelivered account rebind while background work is running, then
 		expectedInstanceId: a,
 	});
 	const inputId = randomUUID();
-	const prompt = "cancel-pending-rebind";
+	const prompt = "refused-account-switch";
+	const refusal = await Effect.runPromise(
+		browser.rpc["input.submit"]({
+			sessionId,
+			originId: browser.originId,
+			inputId,
+			delivery: "queue",
+			text: prompt,
+		}).pipe(Effect.flip),
+	);
+	expect(refusal).toBeInstanceOf(AccountSwitchBusy);
+	expect(refusal).toMatchObject({
+		_tag: "AccountSwitchBusy",
+		sessionId,
+		fromAccountId: a,
+		toAccountId: b,
+		message:
+			"Background work is still running on A. Stop it or wait for it to finish, then resend to switch to B.",
+	});
+	const commandsWhileBusy = fixture
+		.proof()
+		.marks.filter(
+			(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
+		);
+	const launchesWhileBusy = fixture.claudeOptions();
+	expect(commandsWhileBusy).toHaveLength(1);
+	expect(launchesWhileBusy).toHaveLength(1);
+	const marks = () =>
+		readFileSync(join(fixture.root, "sdk-proof.ndjson"), "utf8")
+			.trim()
+			.split("\n")
+			.map(
+				(line) =>
+					JSON.parse(line) as {
+						kind: string;
+						request?: string;
+						phase?: string;
+						queryId?: string;
+					},
+			);
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
+	try {
+		expect(
+			db
+				.prepare<[string], { status: string }>(
+					"SELECT status FROM provider_command_outbox WHERE command_id = ? AND effect_type = 'send_turn'",
+				)
+				.get(inputId),
+		).toBeUndefined();
+	} finally {
+		db.close();
+	}
+	writeFileSync(join(fixture.root, "release-upgrade-background"), "release");
+	await vi.waitFor(
+		() =>
+			expect(
+				marks().some(
+					({ kind, phase }) =>
+						kind === "background-work" && phase === "completed",
+				),
+			).toBe(true),
+		{ timeout: 10_000 },
+	);
+	const backgroundMarks = marks();
+	// Usage probes open and close their own queries; only the query running
+	// the background work must survive until that work completes.
+	const backgroundQuery = backgroundMarks.find(
+		({ kind, request }) =>
+			kind === "enqueue" && request === "upgrade-background-work",
+	)?.queryId;
+	expect(backgroundQuery).toBeDefined();
+	expect(
+		backgroundMarks
+			.slice(
+				0,
+				backgroundMarks.findIndex(
+					({ kind, phase }) =>
+						kind === "background-work" && phase === "completed",
+				),
+			)
+			.filter(
+				({ kind, queryId }) =>
+					["query-interrupted", "query-closed"].includes(kind) &&
+					queryId === backgroundQuery,
+			),
+	).toEqual([]);
+	await browser.send(sessionId, "after-refused-account-switch");
+	const launches = fixture.claudeOptions();
+	const enqueued = marks().filter(({ kind }) => kind === "enqueue");
+	proofs.push({
+		sessionId,
+		refusal,
+		commandsWhileBusy,
+		launchesWhileBusy,
+		backgroundMarks,
+		launches,
+		enqueued,
+	});
+	expect(enqueued.map(({ request }) => request)).toEqual([
+		"upgrade-background-work",
+		"after-refused-account-switch",
+	]);
+	expect(enqueued[1]?.queryId).not.toBe(enqueued[0]?.queryId);
+	expect(launches.map(({ options }) => options["env"])).toEqual([
+		expect.objectContaining({ CLAUDE_CONFIG_DIR: join(fixture.root, "A") }),
+		expect.objectContaining({ CLAUDE_CONFIG_DIR: join(fixture.root, "B") }),
+	]);
+}, 60_000);
+
+it("defers a same-account login change while background work runs, then rebinds on the next quiet send", async () => {
+	const fixture = ProcessHarness.create({ dist: "dist", restartProof: true });
+	harness = fixture;
+	await fixture.restart();
+	const browser = await fixture.connect();
+	const configDir = join(fixture.root, "account-a");
+	mkdirSync(configDir);
+	const { addedInstanceId: a } = await fixture.requestRpc({
+		_tag: "AddInstance",
+		name: "A",
+		driver: "claude",
+		configDir,
+		env: { ACCOUNT_OWNER: "A" },
+	});
+	if (!a) throw new Error("Missing fixture account");
+	const sessionId = await browser.createSession("Deferred login settings", a);
+	await browser.send(sessionId, "upgrade-background-work");
+	await fixture.requestRpc({
+		_tag: "UpdateInstance",
+		instanceId: AccountIdSchema.make(a),
+		env: { ACCOUNT_OWNER: "A-new" },
+	});
+	const inputId = randomUUID();
+	const prompt = "deferred-login-settings";
 	await Effect.runPromise(
 		browser.rpc["input.submit"]({
 			sessionId,
@@ -385,70 +514,116 @@ it("cancels an undelivered account rebind while background work is running, then
 			text: prompt,
 		}),
 	);
-	const db = new Database(fixture.daemonStorePath(), { readonly: true });
-	try {
-		const command = () =>
-			db
-				.prepare<[string], { status: string }>(
-					"SELECT status FROM provider_command_outbox WHERE command_id = ? AND effect_type = 'send_turn'",
-				)
-				.get(inputId);
-		await vi.waitFor(() => expect(command()?.status).toBe("running"));
-		expect(fixture.claudeOptions()).toHaveLength(1);
-		const cancel = await Effect.runPromise(
-			browser.rpc
-				.CancelSession({ sessionId, commandId: randomUUID() })
-				.pipe(Effect.as("cancelled"), Effect.timeoutOption("5 seconds")),
-		);
-		writeFileSync(join(fixture.root, "release-upgrade-background"), "release");
-		await vi.waitFor(() => expect(command()?.status).not.toBe("running"), {
-			timeout: 10_000,
-		});
-		proofs.push({
-			sessionId,
-			inputId,
-			cancel,
-			command: command(),
-			launches: fixture.claudeOptions(),
-		});
-		expect(cancel).toMatchObject({ _tag: "Some", value: "cancelled" });
-		expect(fixture.claudeOptions()).toHaveLength(1);
-		await Effect.runPromise(
-			browser.rpc
-				.CancelSession({ sessionId, commandId: randomUUID() })
-				.pipe(Effect.timeout("3 seconds")),
-		);
-		await browser.send(sessionId, "retry-after-cancelled-rebind");
-		expect(
-			discoverRunners(fixture.projectDir, fixture.configDir).find(
-				(entry) => entry.sessionId === sessionId,
-			)?.runnerId,
-		).toBe(controller?.runnerId);
-		await fixture.kill();
-		await fixture.restart();
-		const reconnected = await fixture.connect(sessionId);
-		await reconnected.send(sessionId, "after-cancelled-rebind-restart");
-		const requests = readFileSync(
-			join(fixture.root, "sdk-proof.ndjson"),
-			"utf8",
-		)
+	const marks = () =>
+		readFileSync(join(fixture.root, "sdk-proof.ndjson"), "utf8")
 			.trim()
 			.split("\n")
-			.map((line) => JSON.parse(line) as { kind: string; request?: string })
-			.filter(({ kind }) => kind === "enqueue")
-			.map(({ request }) => request);
-		proofs.push({ sessionId, cancelledPrompt: prompt, requests });
-		expect(requests).toEqual([
-			"upgrade-background-work",
-			"retry-after-cancelled-rebind",
-			"after-cancelled-rebind-restart",
-		]);
+			.map(
+				(line) =>
+					JSON.parse(line) as {
+						kind: string;
+						request?: string;
+						phase?: string;
+						queryId?: string;
+					},
+			);
+	// The fake SDK takes its next prompt only after the background work ends,
+	// so the runner's receipt is the proof of delivery while busy.
+	const deliveredWhileBusy = await vi.waitFor(() => {
+		const delivered = fixture
+			.proof()
+			.marks.filter(
+				(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
+			);
+		expect(delivered).toHaveLength(2);
+		return delivered;
+	});
+	const launchesWhileBusy = fixture.claudeOptions();
+	expect(launchesWhileBusy).toHaveLength(1);
+	writeFileSync(join(fixture.root, "release-upgrade-background"), "release");
+	await vi.waitFor(
+		() =>
+			expect(
+				marks().some(
+					({ kind, phase }) =>
+						kind === "background-work" && phase === "completed",
+				),
+			).toBe(true),
+		{ timeout: 10_000 },
+	);
+	const backgroundMarks = marks();
+	// Usage probes open and close their own queries; only the query running
+	// the background work must survive until that work completes.
+	const backgroundQuery = backgroundMarks.find(
+		({ kind, request }) =>
+			kind === "enqueue" && request === "upgrade-background-work",
+	)?.queryId;
+	expect(backgroundQuery).toBeDefined();
+	expect(
+		backgroundMarks
+			.slice(
+				0,
+				backgroundMarks.findIndex(
+					({ kind, phase }) =>
+						kind === "background-work" && phase === "completed",
+				),
+			)
+			.filter(
+				({ kind, queryId }) =>
+					["query-interrupted", "query-closed"].includes(kind) &&
+					queryId === backgroundQuery,
+			),
+	).toEqual([]);
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
+	try {
+		await vi.waitFor(
+			() =>
+				expect(
+					db
+						.prepare<[string], { status: string }>(
+							"SELECT status FROM provider_command_outbox WHERE command_id = ? AND effect_type = 'send_turn'",
+						)
+						.get(inputId)?.status,
+				).toBe("completed"),
+			{ timeout: 10_000 },
+		);
 	} finally {
 		db.close();
 	}
-}, 45_000);
+	await browser.send(sessionId, "after-deferred-rebind");
+	const launches = fixture.claudeOptions();
+	const enqueued = marks().filter(({ kind }) => kind === "enqueue");
+	proofs.push({
+		sessionId,
+		deliveredWhileBusy,
+		launchesWhileBusy,
+		backgroundMarks,
+		launches,
+		enqueued,
+	});
+	expect(enqueued.map(({ request }) => request)).toEqual([
+		"upgrade-background-work",
+		prompt,
+		"after-deferred-rebind",
+	]);
+	const [first, deferred, quiet] = enqueued;
+	expect(deferred?.queryId).toBe(first?.queryId);
+	expect(quiet?.queryId).not.toBe(first?.queryId);
+	// The deferred turn runs on the busy query with the settings it started with.
+	expect(launches.map(({ options }) => options["env"])).toEqual(
+		["A", "A", "A-new"].map((owner) =>
+			expect.objectContaining({
+				CLAUDE_CONFIG_DIR: configDir,
+				ACCOUNT_OWNER: owner,
+			}),
+		),
+	);
+}, 60_000);
 
-it("cancels an ordinary account rebind during environment capture", async () => {
+// Volatile shell values (mise/starship session keys) change on every capture.
+// They must reach the launch but never count as a login change, or a send
+// waits on background work until the processing timeout.
+it("delivers a send after a volatile shell recapture while background work runs", async () => {
 	const fixture = ProcessHarness.create({
 		dist: "dist",
 		restartProof: true,
@@ -456,51 +631,133 @@ it("cancels an ordinary account rebind during environment capture", async () => 
 	});
 	harness = fixture;
 	await fixture.restart();
-	const browser = await fixture.connect();
-	const sessionId = await browser.createSession(
-		"Cancel during ordinary preparation",
-	);
-	await browser.send(sessionId, "upgrade-background-work");
-	const configDir = join(fixture.root, "account-b");
-	mkdirSync(configDir);
-	const { addedInstanceId } = await fixture.requestRpc({
-		_tag: "AddInstance",
-		name: "B",
-		driver: "claude",
-		configDir,
-	});
-	if (!addedInstanceId) throw new Error("Missing fixture account");
-	await fixture.requestRpc({
-		_tag: "ContinueSession",
-		sessionId,
-		instanceId: addedInstanceId,
-		expectedInstanceId: "claude",
-	});
 	const profile = join(fixture.root, "home/.zprofile");
-	const release = join(fixture.root, "home/release-send-env");
+	const captures = join(fixture.root, "home/captures");
+	const captureCount = () =>
+		existsSync(captures) ? readFileSync(captures, "utf8").length : 0;
 	writeFileSync(
 		profile,
-		'printf ready > "$ZDOTDIR/send-env-started"\nwhile [ ! -f "$ZDOTDIR/release-send-env" ]; do sleep 0.02; done\n' +
-			readFileSync(profile, "utf8"),
+		`${readFileSync(profile, "utf8")}export VOLATILE_SHELL_TOKEN="$$-$RANDOM"\nprintf x >> "$ZDOTDIR/captures"\n`,
+	);
+	await vi.waitFor(() => expect(captureCount()).toBeGreaterThan(0), {
+		timeout: 10_000,
+	});
+	const browser = await fixture.connect();
+	const sessionId = await browser.createSession("Volatile shell recapture");
+	await browser.send(sessionId, "upgrade-background-work");
+	const before = captureCount();
+	writeFileSync(profile, `${readFileSync(profile, "utf8")}\n`);
+	await vi.waitFor(() => expect(captureCount()).toBeGreaterThan(before), {
+		timeout: 10_000,
+	});
+	const prompt = "after-volatile-recapture";
+	await Effect.runPromise(
+		browser.rpc["input.submit"]({
+			sessionId,
+			originId: browser.originId,
+			inputId: randomUUID(),
+			delivery: "queue",
+			text: prompt,
+		}),
+	);
+	const marks = () =>
+		readFileSync(join(fixture.root, "sdk-proof.ndjson"), "utf8")
+			.trim()
+			.split("\n")
+			.map(
+				(line) =>
+					JSON.parse(line) as {
+						kind: string;
+						request?: string;
+						phase?: string;
+					},
+			);
+	const delivered = await vi
+		.waitFor(
+			() =>
+				expect(
+					fixture
+						.proof()
+						.marks.filter(
+							(mark) =>
+								mark.kind === "runner-command" && mark.type === "send-turn",
+						),
+				).toHaveLength(2),
+			{ timeout: 15_000 },
+		)
+		.then(
+			() => true,
+			() => false,
+		);
+	const launches = fixture.claudeOptions();
+	writeFileSync(join(fixture.root, "release-upgrade-background"), "release");
+	await vi.waitFor(
+		() =>
+			expect(
+				marks().some(
+					({ kind, phase }) =>
+						kind === "background-work" && phase === "completed",
+				),
+			).toBe(true),
+		{ timeout: 10_000 },
+	);
+	proofs.push({
+		sessionId,
+		delivered,
+		launches: launches.length,
+		token: (
+			launches[0]?.options["env"] as Record<string, string> | undefined
+		)?.["VOLATILE_SHELL_TOKEN"],
+		marks: marks(),
+	});
+	expect(delivered).toBe(true);
+	expect(launches).toHaveLength(1);
+	expect(
+		(launches[0]?.options["env"] as Record<string, string>)[
+			"VOLATILE_SHELL_TOKEN"
+		],
+	).toBeDefined();
+}, 60_000);
+
+// Only a runner that cannot rebind in place holds a login change undelivered:
+// a busy account switch is refused before admission, and a same-account
+// settings change on a runner that rebinds in place defers onto the busy query.
+it("cancels a login change held behind background work, then retries", async () => {
+	const fixture = ProcessHarness.create({ dist: "dist", restartProof: true });
+	harness = fixture;
+	await fixture.restart({
+		serviceEnvironment: { CONDUIT_TEST_RUNNER_WITHOUT_ACCOUNT_REBIND: "1" },
+	});
+	const browser = await fixture.connect();
+	const configDir = join(fixture.root, "account-a");
+	mkdirSync(configDir);
+	const { addedInstanceId: a } = await fixture.requestRpc({
+		_tag: "AddInstance",
+		name: "A",
+		driver: "claude",
+		configDir,
+		env: { ACCOUNT_OWNER: "A" },
+	});
+	if (!a) throw new Error("Missing fixture account");
+	const sessionId = await browser.createSession("Cancel held login change", a);
+	await browser.send(sessionId, "upgrade-background-work");
+	await fixture.requestRpc({
+		_tag: "UpdateInstance",
+		instanceId: AccountIdSchema.make(a),
+		env: { ACCOUNT_OWNER: "A-updated" },
+	});
+	const inputId = randomUUID();
+	await Effect.runPromise(
+		browser.rpc["input.submit"]({
+			sessionId,
+			originId: browser.originId,
+			inputId,
+			delivery: "queue",
+			text: "must-not-send-after-held-stop",
+		}),
 	);
 	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
-		await vi.waitFor(() =>
-			expect(existsSync(join(fixture.root, "home/send-env-started"))).toBe(
-				true,
-			),
-		);
-		const inputId = randomUUID();
-		const prompt = "must-not-send-after-preparation-stop";
-		await Effect.runPromise(
-			browser.rpc["input.submit"]({
-				sessionId,
-				originId: browser.originId,
-				inputId,
-				delivery: "queue",
-				text: prompt,
-			}),
-		);
 		const command = () =>
 			db
 				.prepare<[string], { status: string; error_code: string | null }>(
@@ -520,11 +777,11 @@ it("cancels an ordinary account rebind during environment capture", async () => 
 				.pipe(Effect.timeoutOption("3 seconds")),
 		);
 		const beforeRelease = command();
-		writeFileSync(release, "release");
 		writeFileSync(join(fixture.root, "release-upgrade-background"), "release");
 		await vi.waitFor(() => expect(command()?.status).not.toBe("running"), {
 			timeout: 10_000,
 		});
+		await browser.send(sessionId, "retry-after-held-stop");
 		const requests = readFileSync(
 			join(fixture.root, "sdk-proof.ndjson"),
 			"utf8",
@@ -534,6 +791,7 @@ it("cancels an ordinary account rebind during environment capture", async () => 
 			.map((line) => JSON.parse(line) as { kind: string; request?: string })
 			.filter(({ kind }) => kind === "enqueue")
 			.map(({ request }) => request);
+		const launches = fixture.claudeOptions();
 		proofs.push({
 			beforeStopCommands,
 			inputId,
@@ -542,6 +800,7 @@ it("cancels an ordinary account rebind during environment capture", async () => 
 			beforeRelease,
 			command: command(),
 			requests,
+			launches,
 		});
 		expect(cancel).toMatchObject({ _tag: "Some", value: { ok: true } });
 		expect(beforeRelease).toMatchObject({
@@ -552,10 +811,15 @@ it("cancels an ordinary account rebind during environment capture", async () => 
 			status: "failed",
 			error_code: "cancelled",
 		});
-		expect(requests).toEqual(["upgrade-background-work"]);
-		await browser.send(sessionId, "retry-after-preparation-stop");
+		expect(requests).toEqual([
+			"upgrade-background-work",
+			"retry-after-held-stop",
+		]);
+		expect(launches.map(({ options }) => options["env"])).toEqual([
+			expect.objectContaining({ ACCOUNT_OWNER: "A" }),
+			expect.objectContaining({ ACCOUNT_OWNER: "A-updated" }),
+		]);
 	} finally {
-		writeFileSync(release, "release");
 		db.close();
 	}
 }, 45_000);
@@ -674,60 +938,49 @@ it.each([
 	}
 }, 45_000);
 
-// Recovery must preserve admission, cancellation and the admitted account even
-// when the account directory changes while the old query is still busy.
+// The held login change of the cancellation test above, recovered across a
+// daemon restart. Removing a switch target after admission is no longer
+// reachable: an account switch is refused while the runner is busy.
 it.each([
-	{ action: "release", legacy: false },
-	{ action: "cancel", legacy: false },
-	{ action: "cancel-preparing", legacy: false },
-	{ action: "remove-account", legacy: false },
-	{ action: "control", legacy: false },
-	{ action: "end", legacy: false },
-	{ action: "release", legacy: true },
-] as const)("recovers an undelivered rebind across restart, then $action, legacy runner $legacy", async ({
-	action,
-	legacy,
-}) => {
+	"release",
+	"cancel",
+	"cancel-preparing",
+	"control",
+	"end",
+] as const)("recovers a login change held behind background work across restart, then %s", async (action) => {
 	const fixture = ProcessHarness.create({
 		dist: "dist",
 		restartProof: true,
 		shellEnvProof: action === "cancel-preparing",
 	});
 	harness = fixture;
-	await fixture.restart(
-		legacy
-			? {
-					serviceEnvironment: {
-						CONDUIT_TEST_RUNNER_WITHOUT_ACCOUNT_REBIND: "1",
-					},
-				}
-			: {},
-	);
+	await fixture.restart({
+		serviceEnvironment: { CONDUIT_TEST_RUNNER_WITHOUT_ACCOUNT_REBIND: "1" },
+	});
 	let browser = await fixture.connect();
-	const configDir = join(fixture.root, "account-b");
+	const configDir = join(fixture.root, "account-a");
 	mkdirSync(configDir);
-	const { addedInstanceId: b } = await fixture.requestRpc({
+	const { addedInstanceId: a } = await fixture.requestRpc({
 		_tag: "AddInstance",
-		name: "B",
+		name: "A",
 		driver: "claude",
 		configDir,
-		env: { ACCOUNT_OWNER: "B" },
+		env: { ACCOUNT_OWNER: "A" },
 	});
-	if (!b) throw new Error("Missing fixture account");
-	const sessionId = await browser.createSession("Recover pending rebind");
+	if (!a) throw new Error("Missing fixture account");
+	const sessionId = await browser.createSession("Recover held login change", a);
 	await browser.send(sessionId, "upgrade-background-work");
 	const controller = discoverRunners(
 		fixture.projectDir,
 		fixture.configDir,
 	).find((entry) => entry.sessionId === sessionId);
 	await fixture.requestRpc({
-		_tag: "ContinueSession",
-		sessionId,
-		instanceId: b,
-		expectedInstanceId: "claude",
+		_tag: "UpdateInstance",
+		instanceId: AccountIdSchema.make(a),
+		env: { ACCOUNT_OWNER: "A-updated" },
 	});
 	const inputId = randomUUID();
-	const prompt = `recovered-pending-rebind-${action}`;
+	const prompt = `recovered-held-login-${action}`;
 	await Effect.runPromise(
 		browser.rpc["input.submit"]({
 			sessionId,
@@ -747,6 +1000,12 @@ it.each([
 				.get(inputId);
 		await vi.waitFor(() => expect(command()?.status).toBe("running"));
 		expect(fixture.claudeOptions()).toHaveLength(1);
+		const deliveredBeforeRestart = fixture
+			.proof()
+			.marks.filter(
+				(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
+			);
+		expect(deliveredBeforeRestart).toHaveLength(1);
 		await fixture.kill();
 		if (action === "cancel-preparing") {
 			const profile = join(fixture.root, "home/.zprofile");
@@ -769,8 +1028,6 @@ it.each([
 					existsSync(join(fixture.root, "home/recovery-env-started")),
 				).toBe(true),
 			);
-		if (action === "remove-account")
-			await fixture.requestRpc({ _tag: "RemoveInstance", instanceId: b });
 		let cancel: unknown;
 		if (action === "control")
 			cancel = await Effect.runPromise(
@@ -778,13 +1035,12 @@ it.each([
 					.StopBackgroundTask({ sessionId, taskId: "upgrade-background-task" })
 					.pipe(Effect.timeoutOption("3 seconds")),
 			);
-		if (action === "cancel" || action === "cancel-preparing") {
+		if (action === "cancel" || action === "cancel-preparing")
 			cancel = await Effect.runPromise(
 				browser.rpc
 					.CancelSession({ sessionId, commandId: randomUUID() })
 					.pipe(Effect.as("cancelled"), Effect.timeoutOption("5 seconds")),
 			);
-		}
 		const beforeRelease = command();
 		if (action === "cancel-preparing")
 			writeFileSync(join(fixture.root, "home/release-recovery-env"), "release");
@@ -809,6 +1065,8 @@ it.each([
 			await vi.waitFor(() => expect(command()?.status).not.toBe("running"), {
 				timeout: 10_000,
 			});
+		if (action === "cancel" || action === "cancel-preparing")
+			await browser.send(sessionId, "retry-after-recovered-cancel");
 		const requests = readFileSync(
 			join(fixture.root, "sdk-proof.ndjson"),
 			"utf8",
@@ -820,11 +1078,11 @@ it.each([
 			.map(({ request }) => request);
 		proofs.push({
 			action,
-			legacy,
 			sessionId,
 			command: command(),
 			cancel,
 			beforeRelease,
+			deliveredBeforeRestart,
 			requests,
 		});
 		if (action === "control")
@@ -837,12 +1095,14 @@ it.each([
 				status: "failed",
 				error_code: "cancelled",
 			});
-			expect(requests).toEqual(["upgrade-background-work"]);
 			expect(command()).toMatchObject({
 				status: "failed",
 				error_code: "cancelled",
 			});
-			await browser.send(sessionId, "retry-after-recovered-cancel");
+			expect(requests).toEqual([
+				"upgrade-background-work",
+				"retry-after-recovered-cancel",
+			]);
 		} else {
 			expect(command()).toMatchObject({
 				status: "completed",
@@ -851,15 +1111,15 @@ it.each([
 			expect(requests).toEqual(["upgrade-background-work", prompt]);
 			expect(fixture.claudeOptions().at(-1)).toMatchObject({
 				configDir,
-				options: { env: { ACCOUNT_OWNER: "B" } },
+				options: { env: { ACCOUNT_OWNER: "A-updated" } },
 			});
 		}
+		// A runner without in-place rebind is replaced by the first quiet send.
 		const after = discoverRunners(fixture.projectDir, fixture.configDir).find(
 			(entry) => entry.sessionId === sessionId,
 		);
 		if (action === "end") expect(after).toBeUndefined();
-		else if (legacy) expect(after?.runnerId).not.toBe(controller?.runnerId);
-		else expect(after?.runnerId).toBe(controller?.runnerId);
+		else expect(after?.runnerId).not.toBe(controller?.runnerId);
 	} finally {
 		if (action === "cancel-preparing")
 			writeFileSync(join(fixture.root, "home/release-recovery-env"), "release");

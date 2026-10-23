@@ -1,7 +1,7 @@
 <!--
-  AccountDot — a Claude account's identity colour, fixed for the life of the
-  account because it is derived from the instance ID rather than its position
-  in a list. It says which account, never how the account is doing: amber and
+  AccountDot — an account's identity colour, assigned and persisted by the
+  server for the account's lifetime. It says which account,
+  never how the account is doing: amber and
   red stay out of the palette because they mean a limit everywhere else, and a
   limited account shows that through red text and dimmed rows instead.
 

@@ -1,4 +1,4 @@
-<!-- Displays system info/error messages with left-border accent. -->
+<!-- Displays system notices, using a tinted fill for failures. -->
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
@@ -43,10 +43,8 @@
 	// button rather than a child, so nothing but an id connects the two.
 	const detailsId = $props.id();
 
-	// The background is no longer here: both branches were bg-bg-surface, so it
-	// is Surface's `plain` variant and only the foreground actually varies.
 	const containerClasses = $derived(
-		isError ? "glow-tool-error text-error" : "text-text-muted",
+		isError ? "bg-error/14 text-error" : "bg-bg-surface text-text-muted",
 	);
 
 	// Hover is an affordance, so the card only gets one when it actually holds
@@ -56,11 +54,11 @@
 	const hoverClasses = $derived(hasDetails ? "hover:ring-1 hover:ring-border" : "");
 </script>
 
-<div class="max-w-[760px] mx-auto my-2 px-5" data-testid={message.setup ? "session-setup-block" : undefined} data-setup-status={message.setup?.status} data-setup-source={message.setup?.source} role={message.setup ? "status" : undefined} aria-label={message.setup ? setupTitle : undefined}>
+<div class="max-w-[760px] mx-auto my-2 px-5" data-testid={message.setup ? "session-setup-block" : isError ? "system-error-notice" : undefined} data-setup-status={message.setup?.status} data-setup-source={message.setup?.source} role={message.setup ? "status" : undefined} aria-label={message.setup ? setupTitle : undefined}>
 	<Surface
-		variant="plain"
+		variant="bare"
 		padding="sm"
-		class="flex flex-col gap-1 text-base {containerClasses} {hoverClasses}"
+		class="system-notice flex flex-col gap-1 text-base {containerClasses} {hoverClasses}"
 	>
 		{#if message.setup}
 			<div class="flex items-center gap-2 text-sm {setupTone}">
@@ -71,8 +69,8 @@
 				<p class="text-sm text-text-secondary break-words">{message.setup.message}</p>
 			{/if}
 			{#if message.setupOutput}
-				<Surface variant="inset" padding="sm" class="mt-1 max-h-64 overflow-auto">
-					<pre class="whitespace-pre-wrap break-words font-mono text-xs text-text-secondary">{message.setupOutput}</pre>
+				<Surface variant="bare" padding="sm" class="mt-1 max-h-64 overflow-auto bg-code-bg">
+					<pre class="whitespace-pre-wrap break-words font-mono text-mono-xs text-text-secondary">{message.setupOutput}</pre>
 				</Surface>
 			{/if}
 		{:else}

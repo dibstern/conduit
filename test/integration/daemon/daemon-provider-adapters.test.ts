@@ -25,6 +25,7 @@ interface AdapterObservation {
 		| "recovery-start"
 		| "recovery-end"
 		| "outbox-drain"
+		| "engine-drain-started"
 		| "account-scope-use"
 		| "invalidation-start"
 		| "invalidation-end";
@@ -36,6 +37,7 @@ interface AdapterObservation {
 	workspaceRoot?: string;
 	extraFolders?: string[];
 	resourceIdentity?: number;
+	engineIdentity?: number;
 }
 
 // Failure modes: project-local adapters/recovery, a project finalizer closing a
@@ -71,7 +73,7 @@ describe("daemon-owned provider adapters", () => {
 		].map((daemonPid) => ({
 			daemonPid,
 			registeredAdapterConstructions: Object.fromEntries(
-				["claude", "cursor", "opencode"].map((driver) => [
+				["claude", "codex", "cursor", "opencode"].map((driver) => [
 					driver,
 					rows.filter(
 						(row) =>
@@ -82,7 +84,7 @@ describe("daemon-owned provider adapters", () => {
 				]),
 			),
 			shutdownCalls: Object.fromEntries(
-				["claude", "cursor", "opencode"].map((driver) => [
+				["claude", "codex", "cursor", "opencode"].map((driver) => [
 					driver,
 					rows.filter(
 						(row) =>
@@ -166,7 +168,7 @@ describe("daemon-owned provider adapters", () => {
 		evidence["stoppedAfterBackgroundCompletion"] = true;
 	}, 60_000);
 
-	it("shares three adapters, isolates project and account removal, and detaches retained processes on restart", async () => {
+	it("shares four adapters, isolates project and account removal, and detaches retained processes on restart", async () => {
 		harness = ProcessHarness.create({
 			managedOpenCode: true,
 			restartProof: true,
@@ -339,19 +341,21 @@ describe("daemon-owned provider adapters", () => {
 		);
 		expect(constructions.map(({ driver }) => driver).sort()).toEqual([
 			"claude",
+			"codex",
 			"cursor",
 			"opencode",
 		]);
 		const recoveries = rows.filter(({ kind }) => kind === "recovery-end");
 		expect(recoveries.map(({ driver }) => driver).sort()).toEqual([
 			"claude",
+			"codex",
 			"cursor",
 		]);
 		const firstDrain = rows.findIndex(({ kind }) => kind === "outbox-drain");
 		expect(firstDrain).toBeGreaterThan(-1);
 		expect(
 			rows.slice(0, firstDrain).filter(({ kind }) => kind === "recovery-end"),
-		).toHaveLength(2);
+		).toHaveLength(3);
 		const initialPid = rows[0]?.daemonPid;
 		expect(initialPid).toBeGreaterThan(0);
 		const send = (id: string, text: string) =>
@@ -639,7 +643,7 @@ describe("daemon-owned provider adapters", () => {
 		);
 		expect(
 			observations().filter(({ kind }) => kind === "adapter-constructed"),
-		).toHaveLength(3);
+		).toHaveLength(4);
 		for (const { pid } of survivingPids)
 			expect(() => process.kill(pid, 0)).not.toThrow();
 		expect(openCodePid()).toBe(serverPid);
@@ -675,7 +679,7 @@ describe("daemon-owned provider adapters", () => {
 				)
 				.map(({ driver }) => driver)
 				.sort(),
-		).toEqual(["claude", "cursor", "opencode"]);
+		).toEqual(["claude", "codex", "cursor", "opencode"]);
 		await restart();
 		b = await fixture.connect(undefined, undefined, "project-b");
 		const nextRows = observations().filter(
@@ -686,7 +690,7 @@ describe("daemon-owned provider adapters", () => {
 				.filter(({ kind }) => kind === "adapter-constructed")
 				.map(({ driver }) => driver)
 				.sort(),
-		).toEqual(["claude", "cursor", "opencode"]);
+		).toEqual(["claude", "codex", "cursor", "opencode"]);
 		const nextDrain = nextRows.findIndex(({ kind }) => kind === "outbox-drain");
 		expect(nextDrain).toBeGreaterThan(-1);
 		expect(
@@ -695,7 +699,7 @@ describe("daemon-owned provider adapters", () => {
 				.filter(({ kind }) => kind === "recovery-end")
 				.map(({ driver }) => driver)
 				.sort(),
-		).toEqual(["claude", "cursor"]);
+		).toEqual(["claude", "codex", "cursor"]);
 		for (const { pid } of survivingPids)
 			expect(() => process.kill(pid, 0)).not.toThrow();
 		expect(openCodePid()).toBe(serverPid);
@@ -735,7 +739,7 @@ describe("daemon-owned provider adapters", () => {
 				)
 				.map(({ driver }) => driver)
 				.sort(),
-		).toEqual(["claude", "cursor", "opencode"]);
+		).toEqual(["claude", "codex", "cursor", "opencode"]);
 		await vi.waitFor(
 			() => {
 				for (const { pid } of survivingPids)
@@ -793,7 +797,7 @@ describe("daemon-owned provider adapters", () => {
 		).toEqual([fixture.projectDir, extra]);
 		expect(() => process.kill(started.pid, 0)).not.toThrow();
 		browser = await fixture.connect(sessionId);
-		await fixture.requestRpc({
+		const stop = fixture.requestRpc({
 			_tag: "CancelSession",
 			sessionId,
 			commandId: randomUUID(),
@@ -815,6 +819,7 @@ describe("daemon-owned provider adapters", () => {
 			),
 		).toBe(true);
 		writeFileSync(join(fixture.root, "release-tool-long"), "release");
+		await stop;
 		expect(
 			(
 				await browser.send(
@@ -942,16 +947,22 @@ describe("daemon-owned provider adapters", () => {
 		);
 		expect(recoveryStarts.map(({ driver }) => driver).sort()).toEqual([
 			"claude",
+			"codex",
 			"cursor",
 		]);
 		expect(recoveryEnds.map(({ driver }) => driver).sort()).toEqual([
 			"claude",
+			"codex",
 			"cursor",
 		]);
 		const drains = restarted.filter(({ kind }) => kind === "outbox-drain");
-		expect(new Set(drains.map(({ projectId }) => projectId))).toEqual(
-			new Set(["process-test", "project-b"]),
-		);
+		expect(
+			new Set(drains.map(({ engineIdentity }) => engineIdentity)).size,
+		).toBe(1);
+		expect(drains.every(({ projectId }) => projectId === undefined)).toBe(true);
+		expect(
+			restarted.filter(({ kind }) => kind === "engine-drain-started"),
+		).toHaveLength(1);
 		const firstDrain = restarted.findIndex(
 			({ kind }) => kind === "outbox-drain",
 		);
@@ -959,7 +970,7 @@ describe("daemon-owned provider adapters", () => {
 			restarted
 				.slice(0, firstDrain)
 				.filter(({ kind }) => kind === "recovery-end"),
-		).toHaveLength(2);
+		).toHaveLength(3);
 		for (const { sessionId, pid } of sessions) {
 			expect(() => process.kill(pid, 0)).not.toThrow();
 			const adoptions = fixture.marks.filter(
@@ -973,7 +984,7 @@ describe("daemon-owned provider adapters", () => {
 				),
 			).toBe(true);
 		}
-		await Promise.all(
+		const stops = Promise.all(
 			sessions.map(({ sessionId }) =>
 				fixture.requestRpc({
 					_tag: "CancelSession",
@@ -1002,6 +1013,7 @@ describe("daemon-owned provider adapters", () => {
 			{ timeout: 10_000 },
 		);
 		writeFileSync(join(fixture.root, "release-tool-long"), "release");
+		await stops;
 		for (const { sessionId, projectId, pid } of sessions) {
 			const browser = await fixture.connect(sessionId, undefined, projectId);
 			expect(

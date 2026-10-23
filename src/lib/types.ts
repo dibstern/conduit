@@ -144,7 +144,7 @@ export interface ProjectRelayConfig {
 	/** Immediate cached environment snapshot; shell resolution runs in the background. */
 	shellEnv?: (
 		directory: string,
-	) => Readonly<Record<string, string | undefined>>;
+	) => import("./contracts/project-shell-env.js").ProjectShellEnvSnapshot;
 	/** Await the existing shell capture before speculative Claude boot only. */
 	prepareShellEnv?: (directory: string) => Promise<boolean>;
 	/** Shared HTTP server owned by the caller. */
@@ -164,7 +164,7 @@ export interface ProjectRelayConfig {
 	worktreeContext?: import("effect").Context.Context<
 		import("./domain/daemon/Services/worktree-service.js").WorktreeServiceTag
 	>;
-	/** Daemon services shared with relay runtimes; omitted services use standalone adapters. */
+	/** Shared daemon services; must include the daemon-owned ProviderAdapters. */
 	daemonConfigContext?: import("effect").Context.Context<never>;
 	/** Id of the OpenCode instance selected for this relay (default instance when omitted). */
 	openCodeInstanceId?: string;

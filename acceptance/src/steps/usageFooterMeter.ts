@@ -15,6 +15,14 @@ const states = {
 	limit: [100, 71],
 } as const;
 
+const focusReads = new WeakMap<
+	Page,
+	{
+		before: number;
+		release: (readings: readonly UsageReading[]) => void;
+	}
+>();
+
 /** A real finger: CDP touch events, which the page also sees as pointer events. */
 async function touchFinger(page: Page, x: number, y: number) {
 	const touch = await page.context().newCDPSession(page);
@@ -81,7 +89,7 @@ function singleReading(state: string): UsageReading {
 			{
 				kind: "five_hour",
 				utilization: values[0],
-				resetsAt: "2026-01-01T03:13:00Z",
+				resetsAt: "2026-01-01T15:13:00Z",
 			},
 			{ kind: "seven_day", utilization: values[1] },
 		],
@@ -111,6 +119,21 @@ function setAccounts(
 	let instances = accounts.map(([id, name, driver = "claude"]) => ({
 		id,
 		name,
+		colorSlot:
+			Math.max(
+				0,
+				[
+					"claude",
+					"work",
+					"spare",
+					"unreadable",
+					"chatgpt",
+					"cursor",
+					"api-key",
+					"hidden",
+					"opencode",
+				].indexOf(id),
+			) % 6,
 		driver,
 		isDefault: id === "claude" || id === "opencode" || id === "cursor",
 		usageEligible: driver !== "opencode" && id !== "api-key",
@@ -166,6 +189,65 @@ export async function themeColour(page: Page, token: string): Promise<string> {
 }
 
 export const usageFooterMeterHandlers: StepHandler[] = [
+	{
+		name: "hold the tab focus usage re-read",
+		match: /^the next tab focus usage reading is held$/,
+		run: async ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			const before = rpc
+				.getRequests()
+				.filter((request) => request.tag === "QuotaForAccounts").length;
+			const reply = new Promise<readonly UsageReading[]>((resolve) => {
+				focusReads.set(world.page, { before, release: resolve });
+			});
+			rpc.setStubs({ QuotaForAccounts: () => reply });
+			// Thirty idle seconds also make the socket stale, so the re-read must
+			// survive the reconnect that the same tab return starts.
+			await world.page.evaluate((now: number) => {
+				Date.now = () => now;
+			}, PINNED_CLOCK_MS + 30_000);
+		},
+	},
+	{
+		name: "return to the tab through both browser focus notifications",
+		match: /^I return to the conduit tab$/,
+		run: async ({ world }) => {
+			await world.page.evaluate(() => {
+				document.dispatchEvent(new Event("visibilitychange"));
+				window.dispatchEvent(new Event("focus"));
+			});
+		},
+	},
+	{
+		name: "assert the tab focus quota request was throttled",
+		match: /^tab focus has requested one usage re-read$/,
+		run: async ({ world }) => {
+			const before = focusReads.get(world.page)?.before;
+			if (before === undefined)
+				throw new Error("No held tab focus usage reading");
+			await expect
+				.poll(
+					() =>
+						requireRpcControl(world.page)
+							.getRequests()
+							.filter((request) => request.tag === "QuotaForAccounts").length -
+						before,
+				)
+				.toBe(1);
+		},
+	},
+	{
+		name: "complete the held tab focus usage reading",
+		match: /^the tab focus usage re-read completes with the (\S+) reading$/,
+		run: ({ world, match }) => {
+			const pending = focusReads.get(world.page);
+			if (!pending) throw new Error("No held tab focus usage reading");
+			const readings = [singleReading(match[1] ?? "")];
+			requireRpcControl(world.page).setUsageReadings(readings);
+			pending.release(readings);
+			focusReads.delete(world.page);
+		},
+	},
 	{
 		name: "choose the default account from a usage row",
 		match: /^I make (\S+) the default from the (desktop meter|phone sheet)$/,
@@ -1159,6 +1241,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const footer = world.page.getByTestId("usage-footer-phone");
 			await expect(footer).toBeVisible();
+			const expectedRows = requireRpcControl(world.page).shellRows?.length;
 			await expect
 				.poll(async () => {
 					await world.page
@@ -1166,7 +1249,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 						.evaluate((element) => {
 							element.scrollTop = element.scrollHeight;
 						});
-					return footer.evaluate((element) => {
+					return footer.evaluate((element, rowCount) => {
 						const bounds = element.getBoundingClientRect();
 						const button = document
 							.querySelector("#new-session-btn")
@@ -1183,6 +1266,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 							item.getBoundingClientRect(),
 						).filter((box) => box.width > 0 && box.height > 0);
 						return {
+							allRowsLoaded: lastRow?.length === rowCount,
 							scrollable: scroller.scrollHeight > scroller.clientHeight,
 							dockAtBottom: Math.round(bounds.bottom) === window.innerHeight,
 							buttonAboveDock: button.bottom <= bounds.top,
@@ -1195,9 +1279,10 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 										(box.bottom <= button.top || box.top >= button.bottom),
 								),
 						};
-					});
+					}, expectedRows);
 				})
 				.toEqual({
+					allRowsLoaded: true,
 					scrollable: true,
 					dockAtBottom: true,
 					buttonAboveDock: true,

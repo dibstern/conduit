@@ -10,8 +10,39 @@ export const themeState = $state<{
 });
 
 let systemPreference: MediaQueryList | null = null;
+let openScrims = 0;
 
-function isThemeMode(value: string | null): value is ThemeMode {
+function syncThemeColor(): void {
+	const style = getComputedStyle(document.documentElement);
+	const colour = style
+		.getPropertyValue(openScrims > 0 ? "--color-theme-scrim" : "--color-bg")
+		.trim();
+	if (!colour) return;
+	let meta = document.querySelector<HTMLMetaElement>(
+		'meta[name="theme-color"]',
+	);
+	if (!meta) {
+		meta = document.createElement("meta");
+		meta.name = "theme-color";
+		document.head.append(meta);
+	}
+	meta.content = colour;
+}
+
+/** Keep browser chrome dimmed until the last phone scrim closes. */
+export function dimThemeColor(): () => void {
+	openScrims++;
+	syncThemeColor();
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		openScrims--;
+		syncThemeColor();
+	};
+}
+
+export function isThemeMode(value: string | null): value is ThemeMode {
 	return value === "light" || value === "dark" || value === "system";
 }
 
@@ -22,13 +53,7 @@ function applyResolvedTheme(resolved: ResolvedTheme): void {
 	themeState.resolved = resolved;
 
 	if (typeof getComputedStyle === "function") {
-		const background = getComputedStyle(root)
-			.getPropertyValue("--color-bg")
-			.trim();
-		const meta = document.querySelector<HTMLMetaElement>(
-			'meta[name="theme-color"]',
-		);
-		if (background && meta) meta.content = background;
+		syncThemeColor();
 	}
 }
 

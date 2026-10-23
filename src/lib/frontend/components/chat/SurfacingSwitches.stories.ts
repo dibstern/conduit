@@ -37,6 +37,7 @@ const segment: Segment = {
 };
 const turn: Turn = {
 	id: "split-turn",
+	storeId: "split-turn",
 	user: {
 		type: "user",
 		uuid: "split-turn",
@@ -93,8 +94,8 @@ type Story = StoryObj<typeof meta>;
 const summaryLog: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 	const canvas = within(canvasElement);
 	const body = within(canvasElement.ownerDocument.body);
-	// The head chip on wide screens, its own row on phones. The saved summary
-	// loads first, so the click opens it rather than racing its auto-open.
+	// Desktop opens the saved summary after it loads; phones open it on tap.
+	// The label is always Summary, so it cannot signal that loading has finished.
 	const trigger = await waitFor(() => {
 		const visible = canvas
 			.getAllByTestId("surfacing-summary-generate")
@@ -105,8 +106,12 @@ const summaryLog: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 	await expect(
 		canvas.getByRole("slider", { name: /Activity timeline/ }),
 	).toBeVisible();
-	if (trigger.getAttribute("aria-expanded") !== "true")
+	if (window.matchMedia("(max-width: 599px)").matches)
 		await userEvent.click(trigger);
+	else
+		await waitFor(() =>
+			expect(trigger).toHaveAttribute("aria-expanded", "true"),
+		);
 	const citation = await body.findByTestId("surfacing-recap-cite-3");
 	await expect(citation).toHaveAttribute("data-ask", "false");
 	await userEvent.click(citation);

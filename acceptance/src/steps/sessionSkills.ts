@@ -7,6 +7,7 @@ import {
 	mockSessionSkills,
 	requireRelayControl,
 	requireRpcControl,
+	settleTransitions,
 } from "./shared.js";
 
 const LOAD = /^\s*([\w:-]+) by (you|agent) in turn (\d+)(, loading)?\s*$/;
@@ -127,6 +128,7 @@ export const sessionSkillsHandlers: StepHandler[] = [
 				`[data-testid="session-skills-row"][data-skill="${match[1]}"]`,
 			);
 			await expect(row).toBeVisible();
+			await settleTransitions(world.page);
 			const box = await row.boundingBox();
 			if (!box) throw new Error("skill row has no touch target");
 			const touch = await world.page.context().newCDPSession(world.page);
@@ -250,13 +252,20 @@ export const sessionSkillsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "skill doc RPC requested name",
+		name: "skill doc RPC requested reference",
 		match: /^SKILL\.md was requested for "([\w:-]+)"$/,
 		run: async ({ world, match }) => {
+			const skillRef =
+				match[1] === "paged-skill"
+					? "skill-navigation-paged"
+					: match[1] === "user-skill"
+						? "skill-navigation-user"
+						: undefined;
+			if (!skillRef) throw new Error(`Unknown skill fixture: ${match[1]}`);
 			await requireRpcControl(world.page).waitForRequest(
 				(request) =>
 					request.tag === "GetSkillContent" &&
-					request.payload["name"] === match[1],
+					request.payload["skillRef"] === skillRef,
 			);
 		},
 	},

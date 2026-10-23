@@ -28,6 +28,7 @@ export interface SessionRow {
 	variant?: string | null;
 	context_window?: string | null;
 	goal_state?: string | null;
+	goal_stuck?: string | null;
 	limit_recovery?: string | null;
 	/** JSON array of SessionResume, oldest first. */
 	resumes?: string | null;
@@ -50,6 +51,7 @@ export interface SessionRow {
 	unarchived_at?: number | null;
 	unsettled_at?: number | null;
 	auto_settle_disabled_at?: number | null;
+	jev?: "on" | "off" | null;
 	settled_automatically?: number;
 	pinned_at: number | null;
 	snoozed_at: number | null;

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Effect, type Scope } from "effect";
 import type { TurnResult } from "../types.js";
 import type { RunnerPayload } from "./runner-payload.js";
@@ -32,6 +33,14 @@ export const makeInProcessSessionRunner = (
 /** Executes sends concurrently: only the payload decides how a steer is admitted. */
 export class InProcessSessionRunner implements SessionRunner {
 	private readonly sessions = new Set<string>();
+	private readonly processId = randomUUID();
+	getControlProcessIdEffect(
+		sessionId: string,
+	): Effect.Effect<string | undefined> {
+		return Effect.sync(() =>
+			this.sessions.has(sessionId) ? this.processId : undefined,
+		);
+	}
 	constructor(
 		private readonly payload: RunnerPayload,
 		private readonly sinks: RunnerSinkBindings,
@@ -124,6 +133,7 @@ export class InProcessSessionRunner implements SessionRunner {
 							command.sessionId,
 							command.requestId,
 							command.decision,
+							command.control?.response,
 						))
 					)
 						yield* this.payload.resolvePermission?.(
@@ -138,6 +148,7 @@ export class InProcessSessionRunner implements SessionRunner {
 							command.sessionId,
 							command.requestId,
 							command.answers,
+							command.control?.operation,
 						))
 					)
 						yield* this.payload.resolveQuestion?.(
@@ -157,7 +168,10 @@ export class InProcessSessionRunner implements SessionRunner {
 						command.settings,
 					);
 				case "end-session":
-					yield* this.payload.endSession(command.sessionId);
+					yield* this.payload.endSession(
+						command.sessionId,
+						command.control?.retireRunIds,
+					);
 					this.sessions.delete(command.sessionId);
 					return;
 				case "pre-warm":

@@ -25,6 +25,7 @@ import type {
 export const mockClaudeAccount = {
 	id: "claude",
 	name: "Claude",
+	colorSlot: 0,
 	driver: "claude",
 	isDefault: true,
 	port: 0,
@@ -37,6 +38,7 @@ export const mockClaudeAccount = {
 export const mockOpenCodeAccount = {
 	id: "opencode",
 	name: "OpenCode",
+	colorSlot: 3,
 	driver: "opencode",
 	isDefault: true,
 	port: 4096,
@@ -394,6 +396,7 @@ export const mockToolCompleted: ToolMessage = {
 	id: "tool-003",
 	name: "Read",
 	status: "completed",
+	outcome: "succeeded",
 	input: { filePath: "/home/user/repo/src/auth.ts" },
 	result:
 		"export function authenticate(token: string): boolean {\n  const decoded = jwt.verify(token, SECRET);\n  return decoded.exp > Date.now() / 1000;\n}",
@@ -406,6 +409,7 @@ export const mockToolError: ToolMessage = {
 	id: "tool-004",
 	name: "Bash",
 	status: "error",
+	outcome: "failed",
 	input: { command: "cat /src/auth.ts", description: "Read auth module" },
 	result:
 		"Error: ENOENT: no such file or directory, open '/src/auth.ts'\n  at Object.openSync (node:fs:603:3)\n  at readFileSync (node:fs:471:35)",
@@ -418,6 +422,7 @@ export const mockToolWithDiff: ToolMessage = {
 	id: "tool-005",
 	name: "Edit",
 	status: "completed",
+	outcome: "succeeded",
 	input: {
 		filePath: "/home/user/repo/src/auth.ts",
 		oldString: "const ttl = 900; // 15 min",
@@ -434,6 +439,7 @@ export const mockToolLongResult: ToolMessage = {
 	id: "tool-006",
 	name: "Glob",
 	status: "completed",
+	outcome: "succeeded",
 	input: { pattern: "src/components/**/*.ts" },
 	result: Array.from(
 		{ length: 30 },
@@ -448,6 +454,7 @@ export const mockToolBash: ToolMessage = {
 	id: "tool-007",
 	name: "Bash",
 	status: "completed",
+	outcome: "succeeded",
 	input: {
 		command: "git rev-parse HEAD",
 		description: "Get base SHA for reviews",
@@ -462,6 +469,7 @@ export const mockToolReadWithOffset: ToolMessage = {
 	id: "tool-008",
 	name: "Read",
 	status: "completed",
+	outcome: "succeeded",
 	input: { filePath: "/home/user/repo/src/model.ts", offset: 82, limit: 10 },
 	result: "// model code here...",
 	isError: false,
@@ -486,6 +494,7 @@ export const mockToolSubagentCompleted: ToolMessage = {
 	id: "tool-subagent-002",
 	name: "Task",
 	status: "completed",
+	outcome: "succeeded",
 	input: {
 		description: "Implement feature X",
 		subagentType: "general",
@@ -516,6 +525,7 @@ export const mockToolSubagentError: ToolMessage = {
 	id: "tool-subagent-004",
 	name: "Task",
 	status: "error",
+	outcome: "failed",
 	input: {
 		description: "Review the migration safety gate",
 		subagentType: "general",
@@ -531,6 +541,7 @@ export const mockToolSkillCompleted: ToolMessage = {
 	id: "tool-skill-001",
 	name: "Skill",
 	status: "completed",
+	outcome: "succeeded",
 	input: { name: "systematic-debugging" },
 	result:
 		'<skill_content name="systematic-debugging">\nReproduce the failure, isolate the cause, and verify the smallest corrective change.\n</skill_content>',
@@ -561,6 +572,7 @@ export const mockToolSkillError: ToolMessage = {
 	id: "tool-skill-004",
 	name: "Skill",
 	status: "error",
+	outcome: "failed",
 	input: { name: "missing-skill" },
 	result: "The requested skill could not be loaded.",
 	isError: true,
@@ -573,6 +585,7 @@ export const mockToolPreview: ToolMessage = {
 	id: "tool-009",
 	name: "Grep",
 	status: "completed",
+	outcome: "succeeded",
 	input: { pattern: "TODO|FIXME", path: "src/lib/frontend" },
 	result:
 		"src/lib/frontend/components/chat/MessageList.svelte:118:// TODO: preserve scroll anchor\nsrc/lib/frontend/stores/chat.svelte.ts:442:// FIXME: remove compatibility path",
@@ -615,6 +628,7 @@ export const mockQuestionAnswered: ToolMessage = {
 	id: "tool-q-002",
 	name: "AskUserQuestion",
 	status: "completed",
+	outcome: "succeeded",
 	input: {
 		questions: [
 			{
@@ -630,7 +644,7 @@ export const mockQuestionAnswered: ToolMessage = {
 			},
 		],
 	},
-	result: '["Yes, fix it (Recommended)"]',
+	result: '["Staging"]',
 	isError: false,
 };
 
@@ -640,6 +654,7 @@ export const mockQuestionSkipped: ToolMessage = {
 	id: "tool-q-003",
 	name: "AskUserQuestion",
 	status: "error",
+	outcome: "failed",
 	input: {
 		questions: [
 			{

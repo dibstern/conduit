@@ -24,6 +24,11 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"tool.running": { produced: true },
 	"tool.completed": { produced: true },
 	"turn.completed": { produced: true },
+	"message.completed": {
+		produced: false,
+		reason:
+			"Persistence separates late message accounting from the run terminal",
+	},
 	"turn.error": { produced: true },
 	"turn.interrupted": { produced: true },
 	"turn.notice": {
@@ -170,6 +175,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"session.auto_settle_set": {
 		produced: false,
 		reason: "Relay-owned triage state",
+	},
+	"session.jev_set": {
+		produced: false,
+		reason: "Relay-owned Jev preference",
 	},
 	"session.unsnoozed": { produced: false, reason: "Relay-owned triage state" },
 	"permission.asked": {

@@ -1,4 +1,27 @@
-Feature: Goal details reveal check history and goal actions
+Feature: Goal details reveal summaries, check history and goal actions
+
+Scenario Outline: Opening a stuck goal writes its summary once and reopening keeps it
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And goal details are available for a stuck goal
+  And the goal summary has been generated exactly 0 times
+  When I click the session goal subtitle
+  Then goal details open in the session header popover or phone sheet
+  And the stuck goal explains its repeated blocker
+  And the goal summary is written on open in a polite live region
+  And the goal summary has been generated exactly 1 time
+  And the layout region visually matches <baseline> at <threshold> percent
+  When I press Escape in goal details
+  And I click the session goal subtitle
+  Then the goal details have been fetched exactly 2 times
+  And the goal summary remains current without another generation
+
+Examples:
+  | viewport | baseline                   | threshold |
+  | phone    | session-goal-stuck-phone    | 98        |
+  | desktop  | session-goal-stuck-desktop | 98        |
 
 Scenario Outline: The phone goal sheet contains keyboard focus and restores it after keyboard and touch dismissal
   Given the conduit app is served with the connected mockup
@@ -34,9 +57,12 @@ Scenario Outline: The goal subtitle opens details and both dismissal paths work
   When I click the session goal subtitle
   Then goal details open in the session header popover or phone sheet
   And the goal details condition reads All 38 scenarios pass
-  And the goal details metadata describes its start, checks and tokens
-  And the goal details history shows all three checks in layout order
-  And goal details offer Pause, Edit and Clear
+  And the goal details metadata describes its start, judge and tokens
+  And the goal details history is collapsed
+  When I toggle goal details History
+  Then the goal details history shows all three checks in layout order
+  When I toggle goal details History
+  Then goal details offer Pause, Edit and Clear
   And the layout region visually matches <baseline> at <threshold> percent
   When I click the goal details scrim
   Then goal details are closed
@@ -58,6 +84,7 @@ Scenario: A running goal check appends a spinner to the returned history
   And goal details are available for a checking goal
   And the phone header controls own separate touch areas of at least 24 pixels, using 44 where space permits
   When I click the session goal subtitle
+  And I toggle goal details History
   Then the goal details history shows Checking now followed by three checks
   And goal details offer Pause, Edit and Clear
 
@@ -112,6 +139,7 @@ Scenario Outline: A met goal offers a new goal and dismissal
   When I click the session goal subtitle
   Then goal details open in the session header popover or phone sheet
   And the goal details condition reads All 38 scenarios pass
+  And the goal summary heading reads How it ended
   And goal details offer Set a new goal and Dismiss
   And the layout region visually matches <baseline> at <threshold> percent
   When I press Dismiss in goal details

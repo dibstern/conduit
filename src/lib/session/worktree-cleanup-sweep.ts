@@ -29,6 +29,7 @@ import { LocalPtyServiceTag } from "../domain/relay/Services/terminal-service.js
 import * as Failure from "../effect/failure-classification.js";
 import { hasNoCommitsBeyondDefault } from "../git/session-git.js";
 import { realWorkspacePath } from "../git/worktrees.js";
+import { WORKTREE_CLEANUP_PATHS_SQL } from "../persistence/effect/session-worktree-ownership.js";
 import { readPersistedAutoSettleFacts } from "./auto-settle-reader.js";
 import {
 	decideWorktreeCleanup,
@@ -40,13 +41,10 @@ import {
 export const readWorktreeCleanupPaths = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const { projectId } = yield* PersistenceProjectTag;
-	return yield* sql<{ session_id: string; path: string }>`
-		SELECT DISTINCT events.session_id, mapping.value AS path
-		FROM events, json_each(events.data, '$.worktrees') AS mapping
-		WHERE events.project_id = ${projectId}
-			AND events.type = 'session.workspace_changed'
-			AND json_extract(events.data, '$.cause') = 'launch'
-			AND json_extract(events.data, '$.origin') = 'conduit'`;
+	return yield* sql.unsafe<{ session_id: string; path: string }>(
+		WORKTREE_CLEANUP_PATHS_SQL,
+		[projectId],
+	);
 });
 
 /** Everything quiescence reads for one session, apart from its viewers and agent. */
@@ -270,7 +268,8 @@ export const cleanUpProjectWorktrees = (
 						// that order and retain its durable handoff until the turn settles.
 						const keptReason = yield* inbox.withSession(
 							sessionId,
-							workspace.withLaunch(
+							// Another session may be about to publish a move onto this checkout.
+							workspace.withProjectLaunch(
 								worktrees.withCheckoutUse(
 									worktrees.removeCheckout(
 										{

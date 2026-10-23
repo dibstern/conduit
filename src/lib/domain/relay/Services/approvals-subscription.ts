@@ -65,6 +65,12 @@ const normalizeQuestions = (raw: unknown): unknown =>
 							multiSelect:
 								question["multiSelect"] ?? question["multiple"] ?? false,
 							custom: question["custom"] ?? true,
+							...(question["isOther"] != null && {
+								isOther: question["isOther"],
+							}),
+							...(question["isSecret"] != null && {
+								isSecret: question["isSecret"],
+							}),
 						}
 					: question,
 			)

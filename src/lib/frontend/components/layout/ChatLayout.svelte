@@ -59,6 +59,7 @@
 	import { followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
+	import { wsDebugState } from "../../stores/ws-debug.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
 	import {
 		observeOpenSession,
@@ -71,7 +72,6 @@
 	let settingsEverOpened = $state(false);
 	let settingsInitialTab = $state<SettingsSection | undefined>();
 	let settingsInitialAnchor = $state<SettingsOpenDetail["anchor"]>();
-	let debugPanelVisible = $state(false);
 
 	const TERMINAL_MIN_HEIGHT = 100;
 	const TERMINAL_MAX_RATIO = 0.7; // 70% of parent height
@@ -582,17 +582,8 @@
 
 	$effect(() => {
 		if (featureFlags.debug) {
-			debugPanelVisible = true;
+			wsDebugState.panelOpen = true;
 		}
-	});
-
-	// Debug panel toggle event (from SessionBar menu)
-	$effect(() => {
-		function onDebugToggle() {
-			debugPanelVisible = !debugPanelVisible;
-		}
-		window.addEventListener("debug:toggle", onDebugToggle);
-		return () => window.removeEventListener("debug:toggle", onDebugToggle);
 	});
 </script>
 
@@ -602,14 +593,14 @@
 	<!--
 		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
 		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 4).
-		Both phone top bars are static, so this strip stands in for them. Same colour
-		as the bars, so it is invisible; compact-only, styled in style.css.
+		Both phone top bars are static, so this strip stands in for them. It shares
+		--color-bg with the session bar and theme-color; compact-only, styled in style.css.
 		It must paint over #app: WebKit skips boxes with no fixed or sticky element
 		in or around them, so #app is harmless until it holds one (the sticky
 		scroll-to-bottom button), and then it hides the strip. Guarded by
 		test/e2e/specs/phone-top-edge.spec.ts and test/e2e/ios/top-scroll-pocket.test.ts.
 	-->
-	<div id="compact-top-edge" aria-hidden="true"></div>
+	<div id="compact-top-edge" class="top-edge-strip" aria-hidden="true"></div>
 
 	<!-- Fixed and full-viewport, so it lives outside #app: the phone list screen
 	     hides #app but still needs to show the connection state. -->
@@ -807,6 +798,6 @@
 {/if}
 {#if featureFlags.debug}
 	{#await import("../debug/DebugPanel.svelte") then { default: DebugPanel }}
-		<DebugPanel visible={debugPanelVisible} onClose={() => (debugPanelVisible = false)} />
+		<DebugPanel visible={wsDebugState.panelOpen} onClose={() => (wsDebugState.panelOpen = false)} />
 	{/await}
 {/if}

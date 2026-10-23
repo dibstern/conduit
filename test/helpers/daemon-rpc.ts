@@ -72,6 +72,7 @@ import {
 	type ClaudeConfigDir,
 	configuredClaudeConfigDir,
 } from "../../src/lib/provider/claude/claude-sdk-env.js";
+import { CodexAccountResourcesLive } from "../../src/lib/provider/codex/codex-account-resources.js";
 import { CursorAccountResourcesLive } from "../../src/lib/provider/cursor/cursor-account-resources.js";
 import {
 	BrowserRpcConnectionsLive,
@@ -173,7 +174,14 @@ export const makeDaemonRpcTestLayer = (
 		}),
 		Layer.effect(
 			Usage,
-			makeUsage({ accounts: Effect.succeed([]), readers: {} }),
+			makeUsage({
+				accounts: Effect.succeed([]),
+				readers: {
+					codex: { read: () => Effect.die("Unexpected Codex usage read") },
+					claude: { read: () => Effect.die("Unexpected Claude usage read") },
+					cursor: { read: () => Effect.die("Unexpected Cursor usage read") },
+				},
+			}),
 		),
 		Layer.succeed(PortScannerTag)({
 			getKnownPorts: () => Effect.succeed(new Set<number>()),
@@ -183,8 +191,9 @@ export const makeDaemonRpcTestLayer = (
 	const withDirectory = (
 		options.sessionDirectory ?? makeSharedSessionDirectoryLive
 	).pipe(Layer.provideMerge(base));
-	const dependencies = Layer.merge(
+	const dependencies = Layer.mergeAll(
 		OpenCodeInstancesLive,
+		CodexAccountResourcesLive(options.configDir ?? "/tmp/daemon-rpc-fixture"),
 		CursorAccountResourcesLive(
 			options.configDir ?? "/tmp/daemon-rpc-fixture",
 			`${options.configDir ?? "/tmp/daemon-rpc-fixture"}/legacy-cursor-auth.json`,

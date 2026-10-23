@@ -27,12 +27,26 @@ const log = (file, entry) =>
 // Match ProcessBrowser's model selection without fetching a public catalog.
 const modelsPath = join(root, "opencode-models.json");
 writeFileSync(modelsPath, "{}");
+// OpenCode's --port 0 tries 4096 first, where unrelated clients may attach.
+const reservation = createServer();
+await new Promise((resolve, reject) => {
+	reservation.once("error", reject);
+	reservation.listen(0, "127.0.0.1", resolve);
+});
+const address = reservation.address();
+if (!address || typeof address === "string")
+	throw new Error("Missing private OpenCode port");
+await new Promise((resolve, reject) =>
+	reservation.close((error) => (error ? reject(error) : resolve())),
+);
 const real = spawn(
 	join(root, "bin", "opencode-real"),
-	["serve", "--hostname", "127.0.0.1", "--port", "0"],
+	["serve", "--hostname", "127.0.0.1", "--port", String(address.port)],
 	{
 		env: {
 			...process.env,
+			// The fixture's provider and plugin are local; don't fetch npm dependencies.
+			npm_config_offline: "true",
 			OPENCODE_MODELS_PATH: modelsPath,
 			OPENCODE_DISABLE_MODELS_FETCH: "true",
 			OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",

@@ -7,6 +7,7 @@
 	import ComposerStrip from "../ui/ComposerStrip.svelte";
 	import ComposerSendGroup from "../ui/ComposerSendGroup.svelte";
 	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
+	import { accountLimit } from "../../../contracts/account-limit.js";
 	import { tick, untrack, type Snippet } from "svelte";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
@@ -16,6 +17,7 @@
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import Textarea from "../ui/Textarea.svelte";
+	import FilePicker from "../ui/FilePicker.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this
@@ -32,13 +34,13 @@
 	import { projectReferences, serializeReferences } from "../../../composer-references.js";
 	import { referenceEditing } from "./reference-editing.js";
 	import { provideComposerDraft } from "./composer-reference.svelte.js";
-	import { messageSurfacing } from "../../stores/message-surfacing.svelte.js";
+	import { sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
 	import PendingInputTray from "./PendingInputTray.svelte";
 	import { openSideThreads } from "../session/side-threads.svelte.js";
-	import { currentChat, isProcessing, registerInputDraft, requestScrollOnNextContent } from "../../stores/chat.svelte.js";
+	import { currentChat, getSessionPhase, isProcessing, registerInputDraft } from "../../stores/chat.svelte.js";
 	import { send, stop, turn as readTurn } from "../../stores/turn.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { approvals } from "../../stores/composer-settings.svelte.js";
@@ -52,6 +54,7 @@
 		getAvailableInstances,
 		getEffectiveInstanceId,
 		getDraftPick,
+		getSessionPick,
 		getModelDisplayName,
 		toProviderCommands,
 	} from "../../stores/discovery.svelte.js";
@@ -63,7 +66,7 @@
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, prepareFileAttachment } from "./input-utils.js";
 	import { parseAttachmentDataUrl } from "../../../attachment-data-url.js";
-	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, isBusy, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -72,7 +75,7 @@
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getDriverTraits, instanceState } from "../../stores/instance.svelte.js";
-	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
@@ -82,7 +85,7 @@
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
-	import { planUsageWindows, usageForecastTime } from "../../utils/continuation.js";
+	import { planUsageWindows, usageForecastTime, usageWarning } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
@@ -125,6 +128,14 @@
 	let pendingDraftSessionMode: Promise<void> | undefined;
 	const draftRoute = $derived(getCurrentRoute());
 	const draftId = $derived(draftRoute.page === "chat" ? draftRoute.draftId : undefined);
+	// Attachments belong to the session or draft they were added in; InputArea
+	// outlives route changes, so drop them when the composer's scope changes.
+	const composerScope = $derived(draftRoute.page === "chat" ? draftRoute.sessionId ?? draftId ?? null : null);
+	$effect(() => {
+		composerScope;
+		pendingAttachments = [];
+		attachmentError = "";
+	});
 	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftId ?? "session"}`);
 	const sessionModeContext = $derived(`${draftContext}:${sessionState.currentId ? "" : getEffectiveInstanceId()}`);
 	$effect(() => {
@@ -150,6 +161,9 @@
 	const supportsGoal = $derived(discoveryState.currentTraits?.supportsGoalState === true);
 	const isGoalCommand = $derived(supportsGoal && /^[/$]goal(?:\s|$)/.test(composerDraft.text));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
+	let cameraPicker: FilePicker | undefined = $state();
+	let photosPicker: FilePicker | undefined = $state();
+	let filesPicker: FilePicker | undefined = $state();
 	const referenceEditor = referenceEditing({ read: () => composerDraft.text, write: (text) => { composerDraft.text = text; }, context: () => draftContext, element: () => textareaEl, changed: handleInput });
 	const referenceView = $derived(projectReferences(composerDraft.text));
 	$effect(() => provideComposerDraft({ sessionId: () => sessionState.currentId, draft: () => composerDraft.text, insert: (reference) => { if (!readOnlySubagent) referenceEditor.insert(reference); }, remove: referenceEditor.remove }));
@@ -185,6 +199,41 @@
 	});
 	const turnControl = $derived(readTurn());
 	const working = $derived(turnControl.working);
+	const turnSelections = $state<Record<string, { selection: string; agent: string | null | undefined }>>({});
+	const composerSelection = $derived(JSON.stringify([
+		discoveryState.currentProviderId,
+		discoveryState.currentModelId,
+		discoveryState.currentContextWindow,
+		discoveryState.currentVariant,
+		discoveryState.permissionMode,
+	]));
+	$effect.pre(() => {
+		const id = sessionState.currentId;
+		const running = working;
+		const selection = composerSelection;
+		const loaded = id !== null && getSessionPick(id) !== undefined;
+		const agentLoaded = discoveryState.agentProviderScope !== null;
+		const agent = discoveryState.activeAgentId;
+		const ended = untrack(() => Object.keys(turnSelections)).filter((saved) => saved !== id && getSessionPhase(saved) === "idle");
+		untrack(() => {
+			for (const saved of ended) delete turnSelections[saved];
+			if (!id) return;
+			if (!running) delete turnSelections[id];
+			else if (loaded) {
+				// Model and agent catalogues arrive independently. Their first read
+				// establishes the baseline; hydration is not a selection change.
+				const start = turnSelections[id];
+				if (!start) turnSelections[id] = { selection, agent: agentLoaded ? agent : undefined };
+				else if (start.agent === undefined && agentLoaded) start.agent = agent;
+			}
+		});
+	});
+	const nextTurnChanged = $derived(working && sessionState.currentId !== null &&
+		getSessionPick(sessionState.currentId) !== undefined &&
+		turnSelections[sessionState.currentId] !== undefined &&
+		(turnSelections[sessionState.currentId]?.selection !== composerSelection ||
+			(turnSelections[sessionState.currentId]?.agent !== undefined && discoveryState.agentProviderScope !== null &&
+				turnSelections[sessionState.currentId]?.agent !== discoveryState.activeAgentId)));
 	$effect(() => {
 		requestSessionPreWarm(readOnlySubagent ? null : sessionState.currentId);
 		return () => requestSessionPreWarm(null);
@@ -214,7 +263,6 @@
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
 	const composerDirectory = $derived(composerProject ? effectiveWorkingDirectory(composerProject.folders[0], currentSession?.workspace) : undefined);
 	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
-	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug));
 	const accountId = $derived(composerAccountId(currentSession));
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === accountId));
 	// Wait for accounts and session placement before showing settings. Catalog
@@ -226,6 +274,7 @@
 	);
 	const composerDriver = $derived(composerInstance?.driver);
 	const composerTraits = $derived(getDriverTraits(composerDriver));
+	const claudeAccounts = $derived(getClaudeAccounts(composerProjectSlug, composerTraits?.usageHarness === "codex" ? "codex" : "claude"));
 	const composerPresentation = $derived(getProviderPresentation(composerDriver));
 	const readOnlySubagent = $derived(
 		getProviderDriver(composerDriver)?.readOnlySubagents === true && !!sessionState.currentParentId &&
@@ -235,24 +284,46 @@
 	const composerNotice = $derived(composerNotices?.[approvals.current?.mode ?? "ask"]);
 	const supportsWorktree = $derived(composerInstance?.capabilities?.supportsWorktree ?? instanceState.providerCapabilities[composerDriver ?? ""]?.supportsWorktree);
 	const usageReading = $derived(claudeAccounts.readingOf(accountId));
+	const usageWindows = $derived(usageReading?.harness === "codex" ? usageReading.windows : usageReading ? planUsageWindows(usageReading) : []);
 	let sendMenuOpen = $state(false);
 	let switchingAccount = $state(false);
 	const hasOtherClaudeAccount = $derived(claudeAccounts.hasAlternative(accountId));
 	const sendAccounts = $derived(currentSession ? claudeAccounts.sendOptions(accountId) : []);
-	const switchTarget = $derived(sendAccounts[0]);
 	const sendsAt = $derived.by(() => {
-		if (usageReading?.status !== "limited") return undefined;
-		const resets = planUsageWindows(usageReading)
-			.filter((window) => window.utilization >= 100)
-			.map((window) => Date.parse(window.resetsAt ?? ""))
-			.filter((at) => at > clock.now);
-		return resets.length > 0 ? Math.max(...resets) : undefined;
+		const recovery = currentSession?.limitRecovery;
+		if (recovery && !recovery.switched && !recovery.continued && recovery.scheduledAt !== undefined)
+			return recovery.scheduledAt * 1000;
+		const limit = accountLimit({
+			asker: "user",
+			modelId: currentSession?.model?.model,
+			...(usageReading ? { reading: usageReading } : {}),
+			...(recovery && !recovery.switched ? { recovery } : {}),
+			now: clock.now,
+		});
+		return limit.kind === "wait-until" ? limit.until : undefined;
 	});
+	const sendPick = $derived.by(() => {
+		const pick = composerDraft.sendPick;
+		if (settingsPending || sendsAt === undefined || !hasOtherClaudeAccount) return undefined;
+		if (pick?.mode === "at-reset" && pick.accountId === accountId) return pick;
+		if (pick?.mode === "switch" && sendAccounts.some((account) => account.id === pick.accountId)) return pick;
+		return undefined;
+	});
+	$effect(() => {
+		if (!settingsPending && composerDraft.sendPick && !sendPick) composerDraft.sendPick = undefined;
+	});
+	const switchTarget = $derived(sendPick?.mode === "switch"
+		? sendAccounts.find((account) => account.id === sendPick.accountId)
+		: sendAccounts.find((account) => account.usageEligible && !account.usageUnknown));
 	const sendMode = $derived.by(() => {
-		if (sendsAt !== undefined) return usageState.limits.autoSwitch && switchTarget ? "switch" : "at-reset";
-		const warnAt = usageState.limits.warnAt;
-		return usageReading?.status === "available" && warnAt !== "off" &&
-			planUsageWindows(usageReading).some((window) => window.utilization >= warnAt && window.utilization < 100)
+		if (sendsAt !== undefined) return sendPick?.mode ?? (usageState.limits.autoSwitch && switchTarget ? "switch" : "at-reset");
+		if (composerTraits?.usageHarness === "codex") {
+			const warnAt = usageState.limits.warnAt;
+			return usageReading?.status === "available" && warnAt !== "off" &&
+				usageWindows.some((window) => window.utilization >= warnAt && window.utilization < 100)
+				? "warning" : "normal";
+		}
+		return usageWarning(usageReading, usageState.limits.warnAt, claudeAccounts.nameOf(accountId), hasOtherClaudeAccount, clock.now)
 			? "warning" : "normal";
 	});
 	const sendAtTime = $derived(usageForecastTime(sendsAt, clock.now));
@@ -266,18 +337,13 @@
 		if (sendsAt === undefined || !hasOtherClaudeAccount) sendMenuOpen = false;
 		claudeAccounts.invalidateSendQuotas();
 	});
-	const pendingSendsAt = $derived.by(() => {
-		const recovery = currentSession?.limitRecovery;
-		const scheduledAt = recovery && !recovery.continued && !recovery.switched ? recovery.scheduledAt : undefined;
-		return scheduledAt === undefined ? sendsAt : scheduledAt * 1000;
-	});
 	const placeholder = $derived(
 		sendsAt !== undefined
 			? `Message${composerPresentation ? ` ${composerPresentation.label}` : ""}… sends at ${sendAtTime}`
 			: currentSession?.settledAt != null ? "Message to un-settle…" :
 			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
 			sessionViewState.compact ? "Reply…" :
-			messageSurfacing.status.active ? "Reply… (↩ Reply on a message drops a reference here)" :
+			sessionJevEnabled(currentSession) ? "Reply… (↩ Reply on a message drops a reference here)" :
 			composerPresentation ? `Reply to ${composerPresentation.label}…` : "Reply…",
 	);
 
@@ -412,7 +478,7 @@
 			? `Send at ${sendAtTime}`
 			: sendMode === "switch" && switchTarget
 				? `Send on ${switchTarget.name}`
-			: permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId)
+			: permissionsState.pendingQuestions.some((question) => question.sessionId === sessionState.currentId && question.delivery !== "async")
 				? "Reply"
 				: working
 					? "Queue message"
@@ -425,6 +491,39 @@
 		const reason = currentChat().transcript?.steer;
 		if (!isProcessing() || reason === undefined || reason === "no_steering") return undefined;
 		return reason ?? "ready";
+	});
+	// [DEBUG-st33r] Temporary Steer diagnosis, remove after: when a queued row has had
+	// no Steer for 1.5s while the session is busy, report steer's inputs to the daemon
+	// log. A string, so streaming updates that leave it unchanged do not reset the timer.
+	const debugSteerReport = $derived.by(() => {
+		const chat = currentChat();
+		const id = sessionState.currentId;
+		const transcript = chat.transcript;
+		const listBusy = isBusy(findSession(id ?? ""));
+		if (!transcript?.pending.some((input) => input.state === "queued") || steer !== undefined || !(working || listBusy)) return null;
+		return JSON.stringify({
+			id,
+			shown: selection.shown.kind === "placed" ? selection.shown.sessionId : selection.shown.kind,
+			working,
+			listBusy,
+			processing: isProcessing(),
+			phase: chat.phase,
+			loadLifecycle: chat.loadLifecycle,
+			steerRow: transcript.steer === undefined ? "undefined" : transcript.steer,
+			feed: transcript.status,
+			paused: transcript.paused,
+			pending: transcript.pending.map((input) => input.state),
+			ua: navigator.userAgent.slice(0, 90),
+		});
+	});
+	$effect(() => {
+		const report = debugSteerReport;
+		if (report === null) return;
+		const timer = setTimeout(() => {
+			const socket = new WebSocket(`${location.origin.replace(/^http/, "ws")}/__debug-st33r?d=${encodeURIComponent(report)}`);
+			socket.onerror = () => {};
+		}, 1500);
+		return () => clearTimeout(timer);
 	});
 	const sendButtonTitle = $derived(
 		isGoalCommand ? "Set goal"
@@ -648,7 +747,8 @@
 		return sendMode === "switch" && switchTarget ? sendOnAccount(switchTarget.id, delivery) : sendMessage(undefined, delivery);
 	}
 
-	let creatingSession = false;
+	// One create per draft; another draft may start its own meanwhile.
+	const creatingDrafts = new Set<string | undefined>();
 	let startingSideThread = false;
 	// A retry of the same draft reuses its input id, so a reply lost to a
 	// dropped socket returns the Side Thread it made instead of a second one.
@@ -684,15 +784,15 @@
 				inputId,
 				text: serializeReferences(await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug)),
 				...(images.length > 0 ? { images } : {}),
+				onCreated: () => {
+					sideThreadAttempt = undefined;
+					const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, pendingAttachments === draftImages);
+					if (cleared.cleared) {
+						if (cleared.active) cursorPos = 0;
+						pendingAttachments = [];
+					}
+				},
 			});
-			if (outcome.kind === "started") {
-				sideThreadAttempt = undefined;
-				const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, pendingAttachments === draftImages);
-				if (cleared.cleared) {
-					if (cleared.active) cursorPos = 0;
-					pendingAttachments = [];
-				}
-			}
 			return outcome.kind === "started" || outcome.kind === "waiting";
 		} finally {
 			startingSideThread = false;
@@ -746,8 +846,9 @@
 
 		const sentFromSessionId = sessionState.currentId;
 		const projectSlug = sentFromSessionId ? findSession(sentFromSessionId)?.projectSlug ?? getCurrentSlug() : getDraftProject();
-		if (!sentFromSessionId && creatingSession) return false;
-		if (!sentFromSessionId) creatingSession = true;
+		const draftId = selection.scope?.draftId;
+		if (!sentFromSessionId && creatingDrafts.has(draftId)) return false;
+		if (!sentFromSessionId) creatingDrafts.add(draftId);
 		try {
 			let draft: Parameters<typeof rpc<"CreateSession">>[1] | undefined;
 			if (!sentFromSessionId) {
@@ -783,7 +884,8 @@
 			}
 			let createdSessionId: string | null = null;
 			const unsentImages = pendingAttachments;
-			if (!isProcessing()) requestScrollOnNextContent();
+			// Sending asks to see the reply, so bring back a reader who drifted up.
+			requestTranscriptFollow();
 			steerRefusal = null;
 			dismissedRefusal = null;
 			const clearOnSend = textOverride === undefined && delivery !== "steer";
@@ -820,7 +922,7 @@
 			}
 			return true;
 		} finally {
-			if (!sentFromSessionId) creatingSession = false;
+			if (!sentFromSessionId) creatingDrafts.delete(draftId);
 		}
 	}
 
@@ -838,26 +940,26 @@
 		if (await sendMessage(`/goal ${facts.endedGoal.condition}`)) undoneClearKey = key;
 	}
 
+	// A send from idle starts a turn, and Stop then takes Send's slot, so a repeat tap on
+	// Send would land on Stop. Mid-turn, Stop is already showing and nothing moves.
+	// performance.now, not Date.now: acceptance pins Date.
+	let idleSendClickedAt = -Infinity;
+
+	function handleStopClick() {
+		if (sessionState.currentId && performance.now() - idleSendClickedAt >= 1500) void stop(sessionState.currentId);
+	}
+
 	function handleSendClick(e: MouseEvent) {
+		idleSendClickedAt = working ? -Infinity : performance.now();
 		sendComposer(steer && (e.metaKey || e.ctrlKey) ? "steer" : "queue");
 	}
 
 	function handleAttachCamera() {
-		const fileInput = document.createElement("input");
-		fileInput.type = "file";
-		fileInput.accept = "image/*";
-		fileInput.capture = "environment";
-		fileInput.onchange = () => processSelectedFiles(fileInput.files);
-		fileInput.click();
+		cameraPicker?.open();
 	}
 
 	function handleAttachPhotos() {
-		const fileInput = document.createElement("input");
-		fileInput.type = "file";
-		fileInput.accept = "image/*";
-		fileInput.multiple = true;
-		fileInput.onchange = () => processSelectedFiles(fileInput.files);
-		fileInput.click();
+		photosPicker?.open();
 	}
 
 	function handleAttachFiles() {
@@ -865,11 +967,7 @@
 			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before attaching files.";
 			return;
 		}
-		const fileInput = document.createElement("input");
-		fileInput.type = "file";
-		fileInput.multiple = true;
-		fileInput.onchange = () => processSelectedFiles(fileInput.files);
-		fileInput.click();
+		filesPicker?.open();
 	}
 
 	function handleAttachSetGoal(condition = "") {
@@ -900,13 +998,12 @@
 	});
 
 	/** All picker entries share one attachment row and one send path. */
-	async function processSelectedFiles(files: FileList | null) {
-		if (!files || files.length === 0) return;
+	async function processSelectedFiles(files: File[]) {
 		const context = sessionModeContext;
 		attachmentError = "";
 		readingAttachments++;
 		try {
-			for (const file of Array.from(files)) {
+			for (const file of files) {
 				try {
 					const { dataUrl, resized } = await prepareFileAttachment(file);
 					if (context !== sessionModeContext) return;
@@ -1199,14 +1296,14 @@
 			</ComposerStrip>
 		{/if}
 
-		{#if !currentChat().transcript?.pending.length && currentSession?.limitRecovery && !currentSession.limitRecovery.switched && (currentSession.limitRecovery.scheduledAt === undefined || currentSession.limitRecovery.cutOffMessageId !== undefined)}
+		{#if !currentChat().transcript?.pending.length && currentSession?.limitRecovery && !currentSession.limitRecovery.switched}
 			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug} />
 		{/if}
 
 		<PendingInputTray
 			inputs={currentChat().transcript?.pending ?? []}
 			paused={currentChat().transcript?.paused ?? false}
-			sendsAt={pendingSendsAt}
+			{sendsAt}
 			limitRecovery={currentSession?.limitRecovery ?? undefined}
 			sessionId={currentSession?.id}
 			projectSlug={currentSession?.projectSlug}
@@ -1236,7 +1333,7 @@
 			{#if pendingAttachments.length > 0}
 				<PastePreview images={pendingAttachments} onRemove={removePendingAttachment} />
 			{/if}
-			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
+			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" data-phone-icons={composerPreferences.controls === "icons" && sessionViewState.composerTier === "phone" ? "" : undefined} splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
 				{#snippet field()}
 					<!-- Textarea row.
 					     The composer grows with its text and then scrolls, and both of those
@@ -1253,7 +1350,7 @@
 						     longer size the row: pin the row to the cap and let the textarea
 						     scroll itself. Safe only because the mirror is blank in that mode,
 						     so there is still just one scroll position in play. -->
-						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height={`max(${composerPreferences.controls === "words" ? 24 : sessionViewState.compact ? 34 : 36}px, var(--composer-placeholder-height, 0px))`}>
+						<div class="relative {plainText ? 'h-[120px]' : ''}" style:min-height="max(24px, var(--composer-placeholder-height, 0px))">
 							<SkillHighlightBackdrop
 								text={plainText ? "" : composerDraft.text}
 								onremove={referenceEditor.remove}
@@ -1289,7 +1386,7 @@
 								{placeholder}
 								autocomplete="off"
 								enterkeyhint={isMobile() ? "enter" : "send"}
-								class="composer-text-metrics absolute inset-0 z-10 caret-[var(--color-text)] resize-none placeholder:text-text-muted {plainText
+								class="composer-text-metrics absolute inset-0 z-10 caret-[var(--color-text)] resize-none placeholder:text-text-dimmer {plainText
 									? 'overflow-y-auto'
 									: 'overflow-hidden'} {composing || plainText
 									? 'text-text'
@@ -1353,7 +1450,7 @@
 						<div
 							in:fade={{ duration: 180 }}
 							id="input-bottom-right"
-							data-testid={sessionViewState.composerTier !== "phone" ? "composer-icons-left" : undefined}
+							data-testid="composer-icons-left"
 							class="flex w-full items-center min-w-0 gap-[2px]"
 						>
 							<!-- Harness instance + model picker -->
@@ -1362,11 +1459,12 @@
 							<!-- Approvals (permission mode) selector -->
 							<PermissionModeSelector />
 							<span class="grow"></span>
-							{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && !settingsPending && currentSession && composerDirectory}
+							{#if !settingsPending && currentSession && composerDirectory}
 								{@const session = currentSession}
 								{#key session.id}
 									<GitIdentity
 										presentation="control"
+										compact={sessionViewState.composerTier === "phone"}
 										directory={composerDirectory}
 										git={composerGit}
 										workspaceCause={session.workspace?.cause}
@@ -1436,16 +1534,16 @@
 							{#snippet trigger({ props })}
 								<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" iconOnly icon="chevron-down" iconSize={11} ariaLabel="Send options" data-testid="composer-send-menu-trigger" disabled={switchingAccount} class="h-full shrink-0 touch-manipulation" />
 							{/snippet}
-							<MenuItem density="compact" data-testid="composer-send-menu-reset" data-selected="true" disabled={!canSend || switchingAccount} class="rounded-[7px] bg-border-chip" onselect={() => void sendMessage()}>
+							<MenuItem density="compact" data-testid="composer-send-menu-reset" data-selected={sendMode === "at-reset" ? "true" : undefined} disabled={switchingAccount} class="rounded-[7px] {sendMode === 'at-reset' ? 'bg-border-chip' : ''}" onselect={() => { if (accountId) composerDraft.sendPick = { mode: "at-reset", accountId }; }}>
 								<Icon name="clock" size={13} class="shrink-0 text-status-red" />
 								<span class="flex-1">Send at {sendAtTime}</span>
 								<span class="font-mono text-[10.5px] text-text-dimmer">{claudeAccounts.nameOf(accountId)}</span>
 							</MenuItem>
 							{#each sendAccounts as option (option.id)}
-								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} disabled={!canSend || switchingAccount} class="rounded-[7px]" onselect={() => void sendOnAccount(option.id)}>
+								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} data-selected={sendMode === "switch" && switchTarget?.id === option.id ? "true" : undefined} disabled={switchingAccount} class="rounded-[7px] {sendMode === 'switch' && switchTarget?.id === option.id ? 'bg-border-chip' : ''}" onselect={() => { composerDraft.sendPick = { mode: "switch", accountId: option.id }; }}>
 									<AccountDot instanceId={option.id} size={7} />
 									<span class="flex-1">Send now on {option.name}</span>
-									<span class="font-mono text-[10.5px] text-text-dimmer">{option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%</span>
+									<span class="font-mono text-[10.5px] text-text-dimmer">{#if option.usageUnknown}usage unknown{:else if option.fullest}{composerTraits?.usageHarness === "codex" ? option.fullest.label ?? "usage" : option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%{/if}</span>
 								</MenuItem>
 							{/each}
 							<div data-testid="composer-send-menu-note" class="mt-[3px] border-t border-border px-[6px] pt-[5px] pb-[3px] font-mono text-[10.5px] text-text-dimmer whitespace-normal">Another account takes over the session, as Switch account does.</div>
@@ -1466,7 +1564,7 @@
 					{/if}
 					{/if}
 					{#if working}
-						<Button variant="inverse" size="composer-action" id="stop" title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"} ariaLabel="Stop generating" onclick={() => { if (sessionState.currentId) void stop(sessionState.currentId); }} touchTarget class="ml-[3px]">
+						<Button variant="inverse" size="composer-action" id="stop" title={steerPending ? "Stop generating · A pending steer still runs" : "Stop generating"} ariaLabel="Stop generating" onclick={handleStopClick} touchTarget class="ml-[3px]">
 							<i data-testid="stop-square" class="block size-[10px] rounded-[2px] bg-current"></i>
 						</Button>
 					{/if}
@@ -1476,7 +1574,7 @@
 		{#if composerPreferences.controls === "words"}
 			<div
 				data-testid="composer-words-row"
-				class="flex min-h-[36px] items-center justify-between gap-[12px] px-[14px] pt-[9px] text-[12px] text-text-muted whitespace-nowrap"
+				class="flex items-center justify-between gap-[12px] px-[14px] pt-[9px] text-[12px] text-text-dimmer whitespace-nowrap"
 			>
 				{#if settingsPending}
 					{@render settingsStatus()}
@@ -1486,7 +1584,7 @@
 						{#snippet phoneMode()}<PermissionModeSelector variant="summary" />{/snippet}
 					</InstanceModelPicker>
 					{#if sessionViewState.composerTier !== "phone" && (composerTraits?.composerModeControl ?? "permission-mode") === "permission-mode"}
-						<span aria-hidden="true" class="text-border-chip">·</span>
+						<span aria-hidden="true" class="text-text-dimmer">·</span>
 						<PermissionModeSelector variant="words" />
 					{/if}
 				</div>
@@ -1513,7 +1611,7 @@
 							{/key}
 						{/if}
 						{#if currentChat().contextPercent > 0}
-							{#if composerDirectory && sessionViewState.composerTier !== "phone"}<span aria-hidden="true" class="text-border-chip">·</span>{/if}
+							{#if composerDirectory && sessionViewState.composerTier !== "phone"}<span aria-hidden="true" class="text-text-dimmer">·</span>{/if}
 							<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0">{Math.round(currentChat().contextPercent)}%</span>
 						{/if}
 					{/if}
@@ -1521,8 +1619,8 @@
 				{/if}
 			</div>
 		{/if}
-		{#if working}
-			<p data-testid="composer-next-turn-note" class="px-[16px] pt-[8px] text-[12px] text-text-muted">Model and mode changes apply from the <span class="font-medium text-text-secondary">next turn</span>.</p>
+		{#if nextTurnChanged}
+			<p data-testid="composer-next-turn-note" class="px-[16px] pt-[8px] text-[12px] text-text-dimmer">Model and mode changes apply from the <span class="font-medium text-text-secondary">next turn</span>.</p>
 		{/if}
 		{#if composerNotice}
 			<p data-testid="composer-provider-notice" class="px-[6px] pt-2 text-[11px] text-text-muted">{composerNotice}</p>
@@ -1532,6 +1630,9 @@
 		{/if}
 		{/if}
 	</div>
+	<FilePicker bind:this={cameraPicker} accept="image/*" capture="environment" onpick={processSelectedFiles} />
+	<FilePicker bind:this={photosPicker} accept="image/*" multiple onpick={processSelectedFiles} />
+	<FilePicker bind:this={filesPicker} multiple onpick={processSelectedFiles} />
 </div>
 
 <style>

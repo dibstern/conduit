@@ -1,4 +1,5 @@
 import {
+	Clock,
 	Context,
 	Deferred,
 	Effect,
@@ -20,11 +21,12 @@ import type {
 	ClaudeEventPersistEffectTag,
 	ClaudeEventPersistFailure,
 } from "../../../persistence/effect/claude-event-persist-effect.js";
-import type { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
+import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { CanonicalEvent } from "../../../persistence/events.js";
+import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { settleSessionRuns } from "../../../provider/session-run-settlement.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
@@ -47,13 +49,11 @@ import {
 	interruptTurn,
 	prepareStop,
 	prepareTurnSession,
+	STOP_ABORT_WAIT_MS,
 } from "./provider-turn-session.js";
-import type {
-	ConfigTag,
-	LoggerTag,
-	OrchestrationEngineTag,
-	WebSocketHandlerTag,
-} from "./services.js";
+import type { ConfigTag, LoggerTag, WebSocketHandlerTag } from "./services.js";
+import { OrchestrationEngineTag } from "./services.js";
+import { SessionInboxTag } from "./session-inbox.js";
 import type { SessionManagerServiceTag } from "./session-manager-service.js";
 import {
 	clearProcessingTimeout,
@@ -108,7 +108,7 @@ export interface ProviderTurnServiceInterruptInput {
 // A Stop fences new handoffs until its abort settles, for at most this long.
 // OpenCode's abort is session-wide, and so is a retained runner's that predates
 // bound interrupts: an abort still running past the bound can hit a replacement.
-export const STOP_ABORT_WAIT_MS = 30_000;
+export { STOP_ABORT_WAIT_MS };
 
 type StopFailure =
 	| Effect.Error<ReturnType<typeof interruptTurn>>
@@ -143,7 +143,7 @@ export interface ProviderTurnService {
 	) => Effect.Effect<
 		string,
 		Effect.Error<ReturnType<typeof prepareTurnSession>>,
-		OverridesStateTag
+		OverridesStateTag | SessionInboxTag
 	>;
 	readonly sendTurn: (
 		input: ProviderTurnServiceSendInput,
@@ -191,6 +191,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| ProjectionRunnerEffectTag
 	>();
 	const sql = yield* SqlClient.SqlClient;
+	const { projectId } = yield* EventStoreEffectTag;
 	const ingestion = yield* ProviderRuntimeIngestionTag;
 	const scope = yield* Effect.scope;
 	// A Stop ends with session-wide frames (idle status, done) that can trail
@@ -203,13 +204,10 @@ const makeProviderTurnService = Effect.gen(function* () {
 	const lift = (sessionId: string) => PubSub.publish(lifts, sessionId);
 	const abort = (
 		input: ProviderTurnServiceInterruptInput,
-		cutoff: Result.Result<
-			Effect.Success<ReturnType<typeof prepareStop>>,
-			Effect.Error<ReturnType<typeof prepareStop>>
-		>,
+		snapshot: Effect.Success<ReturnType<typeof prepareStop>>,
+		recovered = false,
 	) =>
 		Effect.gen(function* () {
-			const snapshot = yield* Effect.fromResult(cutoff);
 			if (snapshot.owners.length === 0 && snapshot.retainedSteers) return;
 			const running =
 				snapshot.owners.length === 0
@@ -220,25 +218,103 @@ const makeProviderTurnService = Effect.gen(function* () {
 				AND status IN ('pending', 'running')) AS running`.pipe(
 							Effect.map(([row]) => row?.running === 1),
 						);
-			const ended = yield* interruptTurn(input, snapshot).pipe(
+			const remaining = Math.max(
+				0,
+				snapshot.deadlineAt - (yield* Clock.currentTimeMillis),
+			);
+			const delivery = recovered
+				? Effect.void
+				: interruptTurn(input, snapshot).pipe(
+						Effect.catch((error) =>
+							Effect.gen(function* () {
+								// Delivery failure cannot erase an already committed Stop deadline.
+								const [stored] =
+									yield* sql`SELECT 1 FROM provider_command_outbox
+						WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
+						AND json_type(payload_json, '$.stop') = 'object'`;
+								if (!stored) return yield* Effect.fail(error);
+							}),
+						),
+					);
+			const ended = yield* delivery.pipe(
 				Effect.andThen(
 					Effect.repeat(running, {
 						while: (still) => still,
 						schedule: Schedule.spaced("100 millis"),
 					}),
 				),
-				Effect.timeoutOption(STOP_ABORT_WAIT_MS),
+				Effect.timeoutOption(remaining),
 			);
 			if (Option.isSome(ended) || !(yield* running)) return;
-			// Explicit Stop retirement uses the same owned settlement as confirmed
-			// native Stop. It can never consume a reservation claimed afterwards.
+			if (snapshot.runnerBacked) {
+				const [target] = yield* sql<{
+					provider_process_id: string | null;
+					provider_id: string;
+				}>`SELECT provider_process_id, provider_id
+					FROM provider_command_outbox WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}`;
+				if (!target?.provider_process_id)
+					return yield* new ProviderInstanceFailure({
+						providerId: target?.provider_id ?? "conduit",
+						operation: "interrupt_turn",
+						cause: new Error(
+							"Stop unconfirmed: the captured provider process is unavailable",
+						),
+					});
+				yield* (yield* OrchestrationEngineTag).dispatchEffect({
+					type: "end_session",
+					retireProcess: true,
+					retireRunIds: snapshot.owners.map(({ runId }) => runId),
+					commandId: `${input.commandId}:retire`,
+					sessionId: input.sessionId,
+					targetProviderId: target.provider_id,
+					providerProcessId: target.provider_process_id,
+				});
+				// The runner's confirmed-exit path owns settlement, including sends
+				// whose provider intake never arrived.
+				if (yield* running)
+					return yield* new ProviderInstanceFailure({
+						providerId: target.provider_id,
+						operation: "interrupt_turn",
+						cause: new Error(
+							"Stop unconfirmed: provider process loss was not confirmed",
+						),
+					});
+				return;
+			}
 			yield* settleSessionRuns(
 				sql,
 				input.sessionId,
-				"Stopped by the user",
+				"Stop unconfirmed: OpenCode did not report a terminal event",
 				(events) => ingestion.ingestBatch(events),
-				{ owners: snapshot.owners },
+				{ owners: snapshot.owners, errorCode: "stop_unconfirmed" },
 			);
+		});
+	const startStop = (
+		input: ProviderTurnServiceInterruptInput,
+		cutoff: Result.Result<
+			Effect.Success<ReturnType<typeof prepareStop>>,
+			Effect.Error<ReturnType<typeof prepareStop>>
+		>,
+		recovered = false,
+	) =>
+		Effect.gen(function* () {
+			const done = yield* Deferred.make<void, StopFailure>();
+			stopping.set(input.sessionId, done);
+			yield* Effect.fromResult(cutoff).pipe(
+				Effect.flatMap((snapshot) => abort(input, snapshot, recovered)),
+				Effect.onExit((exit) =>
+					Effect.sync(() => stopping.delete(input.sessionId)).pipe(
+						Effect.andThen(Deferred.done(done, exit)),
+						Effect.andThen(
+							Exit.hasInterrupts(exit) ? Effect.void : lift(input.sessionId),
+						),
+					),
+				),
+				Effect.provide(providedContext),
+				Effect.interruptible,
+				Effect.forkIn(scope),
+			);
+			return Deferred.await(done);
 		});
 	const service: ProviderTurnService = {
 		holdUserTurnsForAccountSwitch: (sessionId) =>
@@ -268,7 +344,10 @@ const makeProviderTurnService = Effect.gen(function* () {
 				// Outside the inbox permit, so waiting cannot stall the switch's handoff.
 				const switching = accountSwitches.get(input.sessionId);
 				if (switching) yield* Deferred.await(switching);
-				return yield* prepareTurnSession(input);
+				const inbox = yield* SessionInboxTag;
+				return yield* prepareTurnSession(input, (stopInput) =>
+					inbox.withSession(stopInput.sessionId, service.beginStop(stopInput)),
+				);
 			}).pipe(Effect.provide(providedContext)),
 		sendTurn: (input) =>
 			// The handoff arms a non-steer turn's timeout; a failure that escapes
@@ -288,28 +367,40 @@ const makeProviderTurnService = Effect.gen(function* () {
 						Effect.provide(providedContext),
 						Effect.result,
 					);
-					const done = yield* Deferred.make<void, StopFailure>();
-					stopping.set(input.sessionId, done);
-					yield* abort(input, cutoff).pipe(
-						Effect.onExit((exit) =>
-							Effect.sync(() => stopping.delete(input.sessionId)).pipe(
-								Effect.andThen(Deferred.done(done, exit)),
-								// Scope close interrupts the worker; nothing is left to drain.
-								Effect.andThen(
-									Exit.hasInterrupts(exit)
-										? Effect.void
-										: lift(input.sessionId),
-								),
-							),
-						),
-						Effect.provide(providedContext),
-						Effect.interruptible,
-						Effect.forkIn(scope),
-					);
-					return Deferred.await(done);
+					return yield* startStop(input, cutoff);
 				}),
 			),
 	};
+	// Completed delivery receipts still own a deadline until their captured runs
+	// end. Restore the fences before the inbox can admit another foreground turn.
+	const recovered = yield* sql<{
+		command_id: string;
+		session_id: string;
+	}>`
+		SELECT command.command_id, command.session_id
+		FROM provider_command_outbox command
+		WHERE command.effect_type IN ('interrupt_turn', 'end_session')
+			AND command.project_key = ${projectId}
+			AND ((json_type(command.payload_json, '$.stop') = 'object'
+			AND EXISTS (SELECT 1 FROM provider_runs run, json_each(command.payload_json, '$.stop.owners') owner
+				WHERE run.id = json_extract(owner.value, '$.runId') AND run.session_id = command.session_id
+				AND run.status IN ('pending', 'running')))
+			OR (command.effect_type = 'interrupt_turn' AND json_type(command.payload_json, '$.stop') IS NULL
+				AND command.status IN ('pending', 'running')))
+		ORDER BY command.request_sequence`.pipe(Effect.orDie);
+	for (const row of recovered) {
+		if (stopping.has(row.session_id)) continue;
+		const input = {
+			commandId: row.command_id,
+			sessionId: row.session_id,
+			clientId: "stop-recovery",
+		};
+		const cutoff = yield* prepareStop(input).pipe(
+			Effect.provide(providedContext),
+			Effect.result,
+		);
+		yield* startStop(input, cutoff, true);
+	}
 	return service;
 });
 

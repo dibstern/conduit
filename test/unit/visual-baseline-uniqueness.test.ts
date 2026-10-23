@@ -21,6 +21,8 @@ import { beforeAll, describe, expect, it } from "vitest";
  * story name claims), recapture, and delete the line.
  */
 const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
+	"ui-sessionstatusglyph--running | ui-sessionstatusglyph--running-header":
+		"capture freezes the running packet to the same frame as the static header, while play() and flow.spec.ts assert their animation states",
 	// Verified legitimate: these interaction stories deliberately re-open the
 	// surface as their final step, so an open menu IS the terminal state. Their
 	// real assertions live in play(), not in the pixels.
@@ -28,10 +30,16 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"both interaction stories re-open the menu as their last step",
 	"ui-menu--arrow-key-navigation | ui-menu--typeahead":
 		"both end with focus on the same item",
+	"ui-menu--radio-leading-icon | ui-menu--radio-selection":
+		"both pick Private and re-open the menu; RadioLeadingIcon asserts the icon colours in play()",
 	"ui-popover--default | ui-popover--escape-restores-focus":
 		"escape story re-opens the popover as its last step",
 	"layout-sessionbar--banners-row-expands | layout-sessionbar--island-with-banners":
 		"tapping the collapsed banners row opens the full header with its banners",
+	"layout-sessionbar--overflow-menu-open | layout-sessionbar--views-sheet-open":
+		"opening the phone drop-down forces the island bar open, so both end on the same sheet; each asserts different rows in play()",
+	"layout-sessionbar--overflow-menu-open-light | layout-sessionbar--views-sheet-open-light":
+		"opening the phone drop-down forces the island bar open, so both end on the same sheet; each asserts different rows in play()",
 	"project-projectdialog--multi-folder-supported | project-projectdialog--multi-folder-unknown":
 		"an unknown multi-folder capability warns like a supported one, i.e. not at all; both assert the missing warning in play()",
 	"ui-useravatar--initial | ui-useravatar--missing-mac-picture":
@@ -101,8 +109,8 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"same running tool fixture, dispatched to ToolGenericCard",
 	"chat-toolgenericcard--with-tags | chat-toolitem--read-with-offset-limit":
 		"same Read-with-offset fixture, dispatched to ToolGenericCard",
-	"chat-toolitem--question-answered | chat-toolquestioncard--default":
-		"same answered question fixture, dispatched to ToolQuestionCard",
+	"chat-toolitem--question-answered | chat-toolquestioncard--claude-answer | chat-toolquestioncard--default | chat-toolquestioncard--structured-answers":
+		"ToolItem dispatches the answered fixture; its array result, Claude text and structured metadata all normalize to the same Staging option and Chosen capsule",
 	"chat-toolitem--question-pending | chat-toolquestioncard--waiting-without-question-data":
 		"same pending question without data, dispatched to ToolQuestionCard",
 	"chat-toolitem--question-running | chat-toolquestioncard--active":
@@ -166,6 +174,18 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	// the root through 320/180/360px in both, so one frame is the expected result.
 	"session-gitidentity--control-block-resize | session-gitidentity--control-grid-resize":
 		"the same resize assertions under block and grid parents end in one identical 360px frame",
+
+	// Final restyle fixtures with matching terminal frames and distinct play assertions.
+	"chat-subagentbackbar--default | chat-subagentbackbar--hover":
+		"Hover spreads Default and adds pseudo-hover; the Parent capsule explicitly uses hoverFill=none, so its appearance stays the same",
+	"input-inputarea--running-no-change | input-inputarea--working-queued":
+		"RunningNoChange spreads WorkingQueued without overriding its fixture or play assertions",
+	"input-inputarea--running-no-change-light | input-inputarea--working-queued-light":
+		"both light stories inherit the same WorkingQueued fixture and play assertions",
+	"layout-chatlayout--phone-top-colour | layout-chatlayout--sidebar-collapsed":
+		"on phone both show the same session with its sidebar collapsed; PhoneTopColour additionally asserts matching top-edge, header and browser theme colours, then restores the theme",
+	"ui-activitytimeline--default | ui-activitytimeline--touch-scrub":
+		"TouchScrub changes aria-valuetext and emits onjump; without emphasis both stories paint the same segments",
 };
 
 const BASELINE_DIRECTORY = resolve(

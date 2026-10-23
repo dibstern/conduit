@@ -59,18 +59,13 @@ async function unlock(page: Page, pin: string): Promise<void> {
 }
 
 async function openServerSettings(page: Page): Promise<void> {
-	const listOverflow = page.getByTestId("list-bar-overflow");
-	const titleMenu = page.getByTestId("session-bar-title-menu");
-	const sessionOverflow = page.getByTestId("session-bar-overflow");
-	await expect(
-		listOverflow.or(titleMenu).or(sessionOverflow).first(),
-	).toBeVisible();
-	if (await listOverflow.isVisible()) {
-		await listOverflow.click();
-		await page.getByTestId("list-overflow-settings").click();
-	} else if (await titleMenu.isVisible()) {
-		await titleMenu.click();
-		await page.getByTestId("session-title-settings").click();
+	const listSettings = page.getByTestId("list-bar-settings");
+	const sessionOverflow = page
+		.getByTestId("session-bar-overflow")
+		.or(page.getByTestId("session-bar-island-overflow"));
+	await expect(listSettings.or(sessionOverflow).first()).toBeVisible();
+	if (await listSettings.isVisible()) {
+		await listSettings.click();
 	} else {
 		await sessionOverflow.click();
 		await page.getByTestId("overflow-settings").click();
@@ -105,10 +100,10 @@ test("changing the PIN proves the current PIN and signs out both open tabs", asy
 	await openServerSettings(second);
 	// The second tab must have a live browser socket before the mutation.
 	await expect(second.getByTestId("server-status-browsers")).toHaveText(
-		"2 browsers connected",
+		"· 2 browsers connected",
 	);
 
-	// PIN editors, instance forms and Shut down all share one open form.
+	// PIN editors, instance forms and Stop all share one open form.
 	await page.getByTestId("add-instance-btn").click();
 	await page.getByTestId("server-pin-change-btn").click();
 	await expect(page.getByTestId("instance-form")).toBeHidden();

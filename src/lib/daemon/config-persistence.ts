@@ -21,6 +21,7 @@ import {
 	resolve as resolveAccount,
 } from "../account-directory.js";
 import { CursorUsageBindingSchema } from "../contracts/account.js";
+import { AccountColorSlotSchema } from "../contracts/account-color.js";
 import {
 	AccountUnroutable,
 	UsageLimitsSettingSchema,
@@ -49,6 +50,7 @@ import {
 	type ClaudeConfigDir,
 	type ClaudeLaunchConfig,
 	captureClaudeLaunchLogin,
+	resolveClaudeAccountFolder,
 } from "../provider/claude/claude-sdk-env.js";
 import { RepositoryIdentitySchema } from "../shared-types.js";
 import type { RecentProject } from "../types.js";
@@ -172,6 +174,7 @@ const DaemonInstanceSchema = Schema.Struct({
 	url: Schema.optionalKey(Schema.String),
 	driver: Schema.optionalKey(KnownProviderDriverKindSchema),
 	configDir: Schema.optionalKey(Schema.String),
+	colorSlot: Schema.optionalKey(AccountColorSlotSchema),
 }).mapFields(Struct.map(Schema.mutableKey));
 
 const DaemonConfigFields = {
@@ -416,7 +419,7 @@ export function resolveClaudeLaunchConfig(
 				account.success.configuredFolder === undefined
 					? "implicitDefault"
 					: "account",
-			configDir: account.success.folder,
+			configDir: resolveClaudeAccountFolder(account.success.folder),
 		};
 	throw new AccountUnroutable({ ref: { _tag: "Id", id: account.success.id } });
 }

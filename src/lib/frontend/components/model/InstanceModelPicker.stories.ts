@@ -29,6 +29,7 @@ const contextWindows = [
 const variants = ["low", "medium", "high", "xhigh", "max"];
 
 const claudeAccount = {
+	colorSlot: 0,
 	id: "claude",
 	name: "Claude",
 	driver: "claude",
@@ -40,6 +41,7 @@ const claudeAccount = {
 	createdAt: 0,
 } satisfies OpenCodeInstance;
 const opencodeAccount = {
+	colorSlot: 3,
 	id: "opencode",
 	name: "OpenCode",
 	driver: "opencode",

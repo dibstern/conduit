@@ -1,3 +1,4 @@
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 // Verifies that status-poller transitions reach RPC subscribers through the
 // session's shell row.
 
@@ -18,10 +19,7 @@ import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import {
-	createProjectRelay,
-	type ProjectRelay,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 
@@ -97,6 +95,11 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 		}
 
 		res.setHeader("Content-Type", "application/json");
+
+		if (url.pathname === "/global/health" && req.method === "GET") {
+			res.end(JSON.stringify({ healthy: true, version: "1.0.0" }));
+			return;
+		}
 
 		if (url.pathname === "/path") {
 			res.end(

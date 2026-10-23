@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { DEFAULT_USAGE_LIMITS } from "../../../contracts/limit-recovery.js";
+import type { CodexAuthState } from "../../../contracts/ws-rpc.js";
 import {
 	composerPreferences,
 	setComposerPreferences,
@@ -24,8 +25,10 @@ import { sessionViewState } from "../../stores/session-view.svelte.js";
 import {
 	applyUsageLimitsSetting,
 	applyUsageReadings,
+	usageState,
 } from "../../stores/usage.svelte.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
+import { usageResetTime } from "../../utils/continuation.js";
 import SettingsPanel from "./SettingsPanel.svelte";
 
 function resetState() {
@@ -81,6 +84,7 @@ function populateInstances() {
 			{
 				id: "claude",
 				name: "Personal Claude",
+				colorSlot: 0,
 				driver: "claude",
 				isDefault: true,
 				configDir: "~/.claude",
@@ -93,6 +97,7 @@ function populateInstances() {
 			{
 				id: "work-claude",
 				name: "Work Claude",
+				colorSlot: 1,
 				driver: "claude",
 				configDir: "~/.config/claude/work",
 				port: 0,
@@ -104,6 +109,7 @@ function populateInstances() {
 			{
 				id: "instance-local",
 				name: "Local OpenCode",
+				colorSlot: 3,
 				port: 4096,
 				managed: true,
 				status: "healthy",
@@ -113,6 +119,7 @@ function populateInstances() {
 			{
 				id: "instance-discovered",
 				name: "Team sandbox",
+				colorSlot: 4,
 				port: 4102,
 				managed: false,
 				status: "stopped",
@@ -186,7 +193,60 @@ export const Default: Story = {
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(body.getByRole("dialog", { name: "Settings" })).toBeVisible();
 		await expect(body.getByTestId("settings-close-btn")).toBeVisible();
+		await canvasElement.ownerDocument.fonts.ready;
+		const panel = body
+			.getByRole("dialog")
+			.querySelector<HTMLElement>("#settings-panel");
+		await expect(panel).not.toBeNull();
+		if (!panel) return;
+		const header = panel.querySelector<HTMLElement>(".settings-header");
+		await expect(header).not.toBeNull();
+		if (!header) return;
+		const dimmer = getComputedStyle(panel)
+			.getPropertyValue("--color-text-dimmer")
+			.trim();
+		const swatch = canvasElement.ownerDocument.createElement("span");
+		swatch.style.color = dimmer;
+		panel.append(swatch);
+		const secondaryColour = getComputedStyle(swatch).color;
+		swatch.remove();
 		if (sessionViewState.compact) {
+			const leftInset = parseFloat(getComputedStyle(header).paddingLeft);
+			const done = body
+				.getByTestId("settings-close-btn")
+				.getBoundingClientRect();
+			await expect(leftInset).toBeGreaterThanOrEqual(14);
+			await expect(
+				Math.abs(header.getBoundingClientRect().right - done.right - leftInset),
+			).toBeLessThanOrEqual(1);
+			await expect(getComputedStyle(header).backgroundColor).toBe(
+				canvasElement.ownerDocument.documentElement.classList.contains(
+					"light-theme",
+				)
+					? "rgb(255, 255, 255)"
+					: "rgb(17, 17, 19)",
+			);
+			const you = body.getByTestId("avatar-change-root");
+			const rootGap =
+				you.getBoundingClientRect().top - header.getBoundingClientRect().bottom;
+			await expect(you.getBoundingClientRect().height).toBeCloseTo(56.3, 1);
+			await expect(
+				body.getByTestId("settings-tab-general").getBoundingClientRect().top -
+					you.getBoundingClientRect().bottom,
+			).toBe(18);
+			const chevron = you.querySelector("svg");
+			await expect(chevron).not.toBeNull();
+			if (chevron)
+				await expect(getComputedStyle(chevron).color).toBe(
+					canvasElement.ownerDocument.documentElement.classList.contains(
+						"light-theme",
+					)
+						? "rgb(155, 155, 164)"
+						: "rgb(107, 107, 116)",
+				);
+			const subtitle = body.getByText("Avatar, on every device");
+			await expect(getComputedStyle(subtitle).fontSize).toBe("12px");
+			await expect(getComputedStyle(subtitle).color).toBe(secondaryColour);
 			const bounds = canvasElement.ownerDocument
 				.getElementById("settings-panel")
 				?.getBoundingClientRect();
@@ -198,6 +258,9 @@ export const Default: Story = {
 				"Done",
 			);
 			await expect(
+				getComputedStyle(body.getByTestId("settings-close-btn")).fontWeight,
+			).toBe("600");
+			await expect(
 				body.queryByTestId("settings-back-btn"),
 			).not.toBeInTheDocument();
 			await userEvent.click(body.getByTestId("settings-tab-general"));
@@ -206,6 +269,28 @@ export const Default: Story = {
 				name: "General",
 			});
 			await expect(heading).toBeVisible();
+			const youSection = panel.querySelector<HTMLElement>("#settings-you");
+			const appearance = panel.querySelector<HTMLElement>(
+				"#settings-appearance",
+			);
+			await expect(youSection).not.toBeNull();
+			await expect(appearance).not.toBeNull();
+			if (!youSection || !appearance) return;
+			const sectionGap =
+				appearance.getBoundingClientRect().top -
+				youSection.getBoundingClientRect().bottom;
+			await expect(sectionGap).toBe(16);
+			await expect(Math.abs(rootGap - sectionGap)).toBeLessThanOrEqual(1);
+			await expect(
+				Math.abs(
+					youSection.getBoundingClientRect().top -
+						header.getBoundingClientRect().bottom -
+						sectionGap,
+				),
+			).toBeLessThanOrEqual(1);
+			await expect(
+				body.queryByTestId("settings-close-btn"),
+			).not.toBeInTheDocument();
 			const title = heading.getBoundingClientRect();
 			await expect(title.x + title.width / 2).toBeCloseTo(
 				window.innerWidth / 2,
@@ -219,6 +304,45 @@ export const Default: Story = {
 				expect(body.getByTestId("settings-tab-general")).toHaveFocus(),
 			);
 		} else {
+			const close = body.getByTestId("settings-close-btn");
+			await expect(close.getBoundingClientRect().width).toBe(32);
+			await expect(close.getBoundingClientRect().height).toBe(32);
+			await expect(
+				close.querySelector("svg")?.getBoundingClientRect().width,
+			).toBe(13);
+			await expect(getComputedStyle(close).borderRadius).toBe("50%");
+			await expect(getComputedStyle(close).backgroundColor).not.toBe(
+				"rgba(0, 0, 0, 0)",
+			);
+			const label = body.getByRole("heading", { level: 3, name: "Appearance" });
+			await expect(label.getBoundingClientRect().height).toBe(18);
+			await expect(
+				body
+					.getByRole("heading", { level: 3, name: "Notifications" })
+					.getBoundingClientRect().top - panel.getBoundingClientRect().top,
+			).toBeCloseTo(431.59, 1);
+			await expect(getComputedStyle(label).color).toBe(secondaryColour);
+			await expect(
+				getComputedStyle(
+					body.getByText("Next to your messages, on every device"),
+				).color,
+			).toBe(secondaryColour);
+			await expect(
+				getComputedStyle(body.getByTestId("tabs-group-label")).color,
+			).toBe(secondaryColour);
+			const mark = body.getByTestId("settings-tab-claude").querySelector("g");
+			await expect(mark).not.toBeNull();
+			if (!mark) return;
+			await expect(getComputedStyle(mark).fill).toBe(
+				canvasElement.ownerDocument.documentElement.classList.contains(
+					"light-theme",
+				)
+					? "rgb(155, 155, 164)"
+					: "rgb(107, 107, 116)",
+			);
+			const change = body.getByTestId("avatar-change");
+			await expect(change.getBoundingClientRect().height).toBe(28);
+			await expect(getComputedStyle(change).borderTopWidth).toBe("0px");
 			await expect(body.getByRole("tablist")).toHaveAttribute(
 				"aria-orientation",
 				"vertical",
@@ -242,6 +366,8 @@ export const Default: Story = {
 		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
 	},
 };
+
+export const DefaultLight: Story = { ...Default, globals: { theme: "light" } };
 
 /** An explicit General open: on phone it lands drilled in, past the list. */
 export const NotificationsEnabled: Story = {
@@ -373,6 +499,7 @@ function populateVisibility() {
 			{
 				id: "claude",
 				name: "Personal Claude",
+				colorSlot: 0,
 				driver: "claude",
 				isDefault: true,
 				port: 0,
@@ -641,6 +768,7 @@ export const UsageAccounts: Story = {
 			instances: accounts.map(({ id, name }, index) => ({
 				id,
 				name,
+				colorSlot: index,
 				driver: "claude",
 				isDefault: index === 0,
 				port: 0,
@@ -663,7 +791,7 @@ export const UsageAccounts: Story = {
 				windows: [
 					{
 						kind: "five_hour",
-						utilization: [42, 86, 100][index] ?? 0,
+						utilization: [42, 91, 100][index] ?? 0,
 						resetsAt: at([185, 62, 140][index] ?? 0),
 					},
 					{
@@ -686,6 +814,42 @@ export const UsageAccounts: Story = {
 			})),
 		);
 	},
+	play: async ({ canvasElement }) => {
+		const body = within(canvasElement.ownerDocument.body);
+		await expect(
+			body.getByTestId("usage-settings-status-claude"),
+		).toHaveTextContent("Current");
+		await expect(
+			getComputedStyle(body.getByTestId("usage-settings-status-claude")).color,
+		).toBe(
+			canvasElement.ownerDocument.documentElement.classList.contains(
+				"light-theme",
+			)
+				? "rgb(18, 113, 54)"
+				: "rgb(62, 207, 142)",
+		);
+		await expect(
+			body.getByTestId("usage-settings-status-work-claude"),
+		).toHaveTextContent("91% of 5-hour window");
+		const limited = usageState.readings.find(
+			(account) => account.accountId === "lab-claude",
+		);
+		const time = usageResetTime(
+			limited?.windows.find((window) => window.kind === "five_hour")?.resetsAt,
+		);
+		await expect(
+			body.getByTestId("usage-settings-status-lab-claude"),
+		).toHaveTextContent(`Limited until ${time}`);
+		const value = body.getByTestId(
+			"usage-settings-card-lab-claude-five_hour-value",
+		);
+		await expect(value).toHaveTextContent(time);
+		await expect(getComputedStyle(value).fontFamily).toContain("Geist Mono");
+		await expect(getComputedStyle(value).color).toBe(
+			getComputedStyle(body.getByTestId("usage-settings-status-lab-claude"))
+				.color,
+		);
+	},
 };
 
 export const UsageAccountsLight: Story = {
@@ -700,6 +864,58 @@ export const Server: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
+		const stop = canvas.getByTestId("server-shutdown-btn");
+		await expect(stop).toHaveTextContent("Stop");
+		await expect(stop.querySelector("svg")).not.toBeNull();
+		await expect(
+			canvas.getByTestId("server-restart-btn").querySelector("svg"),
+		).not.toBeNull();
+		await expect(stop.getBoundingClientRect().height).toBe(
+			sessionViewState.compact ? 34 : 28,
+		);
+		await expect(
+			stop.getBoundingClientRect().left -
+				canvas.getByTestId("server-restart-btn").getBoundingClientRect().right,
+		).toBe(6);
+		await expect(getComputedStyle(stop).borderTopWidth).toBe("0px");
+		for (const id of ["server-pin-set-btn", "server-power-edit"]) {
+			const action = canvas.getByTestId(id);
+			await expect(action.getBoundingClientRect().height).toBe(28);
+			await expect(getComputedStyle(action).borderTopWidth).toBe("0px");
+		}
+		for (const id of [
+			"server-access-settings",
+			"server-security-settings",
+			"server-power-settings",
+		]) {
+			await expect(
+				canvas.getByTestId(id).querySelector("[data-settings-icon] svg"),
+			).not.toBeNull();
+		}
+		const url = canvas.getByText("https://conduit.example.ts.net");
+		await canvasElement.ownerDocument.fonts.ready;
+		const fonts = await canvasElement.ownerDocument.fonts.load(
+			'400 11.5px "Geist Mono"',
+			url.textContent ?? "",
+		);
+		await expect(fonts.length).toBeGreaterThan(0);
+		for (const font of fonts) await expect(font.status).toBe("loaded");
+		const urlStyle = getComputedStyle(url);
+		await expect(urlStyle.fontFamily).toContain("Geist Mono");
+		await expect(urlStyle.fontSize).toBe("11.5px");
+		await expect(urlStyle.fontWeight).toBe("400");
+		await expect(url).toBeVisible();
+		const description = url.parentElement;
+		if (!description) throw new Error("Server URL description is missing");
+		const urlBox = url.getBoundingClientRect();
+		const descriptionBox = description.getBoundingClientRect();
+		await expect(urlBox.left).toBeGreaterThanOrEqual(descriptionBox.left);
+		await expect(urlBox.right).toBeLessThanOrEqual(descriptionBox.right);
+		await expect(urlBox.top).toBeGreaterThanOrEqual(descriptionBox.top);
+		await expect(urlBox.bottom).toBeLessThanOrEqual(descriptionBox.bottom);
+		const browsers = canvas.getByTestId("server-status-browsers");
+		await expect(getComputedStyle(browsers).whiteSpace).toBe("nowrap");
+		await expect(browsers.textContent?.trim().startsWith("·")).toBe(true);
 		const logs = within(canvas.getByTestId("server-logs-group")).getByRole(
 			"button",
 			{ name: /^Logs\b/ },
@@ -744,7 +960,7 @@ export const Server: Story = {
 		);
 		await expect(
 			canvas.getByTestId("server-status-browsers"),
-		).toHaveTextContent("2 browsers connected");
+		).toHaveTextContent("· 2 browsers connected");
 		await userEvent.click(canvas.getByTestId("server-shutdown-btn"));
 		await expect(canvas.getByTestId("server-shutdown-cancel")).toHaveFocus();
 		await userEvent.click(canvas.getByTestId("server-shutdown-cancel"));
@@ -924,7 +1140,12 @@ export const InstanceExpanded: Story = {
 		await expect(row).toHaveAttribute("aria-expanded", "false");
 		await userEvent.click(row);
 
-		await expect(canvas.getByRole("button", { name: "Stop" })).toBeVisible();
+		await expect(
+			within(canvas.getByTestId("instance-row-instance-local")).getByRole(
+				"button",
+				{ name: "Stop" },
+			),
+		).toBeVisible();
 		await expect(canvas.getByTestId("edit-instance-btn")).toBeVisible();
 		await expect(canvas.getByText("Started by", { exact: true })).toBeVisible();
 		await expect(row).toHaveAttribute("aria-expanded", "true");
@@ -935,8 +1156,10 @@ export const ClaudeAccountExpanded: Story = {
 	args: { initialTab: "server" },
 	beforeEach: populateInstances,
 	play: async ({ canvasElement }) => {
+		await canvasElement.ownerDocument.fonts.ready;
 		const canvas = within(canvasElement);
-		const account = within(canvas.getByTestId("instance-row-work-claude"));
+		const accountElement = canvas.getByTestId("instance-row-work-claude");
+		const account = within(accountElement);
 		const row = account.getByRole("button", { name: /Work Claude/ });
 		await expect(row).toHaveAttribute("aria-expanded", "false");
 		await userEvent.click(row);
@@ -952,8 +1175,107 @@ export const ClaudeAccountExpanded: Story = {
 		await expect(
 			account.queryByTestId("rename-instance-btn"),
 		).not.toBeInTheDocument();
+		await scrollSettingsIntoView(accountElement, "nearest");
+		const scroller = accountElement.closest(".settings-content");
+		if (!scroller) throw new Error("Settings content is missing");
+		const accountBox = accountElement.getBoundingClientRect();
+		const viewport = scroller.getBoundingClientRect();
+		await expect(accountBox.top).toBeGreaterThanOrEqual(viewport.top);
+		await expect(accountBox.bottom).toBeLessThanOrEqual(viewport.bottom);
 	},
 };
+
+function codexSignIn(login: CodexAuthState["login"]): Story {
+	return {
+		args: { initialTab: "server" },
+		beforeEach: () => {
+			populateInstances();
+			applyInstanceListResponse({
+				instances: [
+					...getCachedInstances(),
+					{
+						id: "work-codex",
+						name: "Work Codex",
+						driver: "codex",
+						port: 0,
+						managed: false,
+						status: "healthy",
+						restartCount: 0,
+						createdAt: 1_772_011_860_000,
+					},
+				],
+			});
+			return replyRpc(
+				"GetCodexAuth",
+				() =>
+					({
+						accountId: "work-codex",
+						source: "none",
+						status: "logged-out",
+						login,
+					}) satisfies CodexAuthState,
+			);
+		},
+		play: async ({ canvasElement }) => {
+			const canvas = within(canvasElement);
+			const account = within(canvas.getByTestId("instance-row-work-codex"));
+			await userEvent.click(
+				account.getByRole("button", { name: /Work Codex/ }),
+			);
+			await expect(account.getByTestId("codex-auth-status")).toHaveTextContent(
+				"Not signed in",
+			);
+			if (login.state === "pending") {
+				await expect(account.getByTestId("codex-login-link")).toHaveAttribute(
+					"href",
+					login.verificationUrl ?? login.url,
+				);
+				await expect(account.getByTestId("codex-login-cancel")).toBeVisible();
+				if (login.userCode) {
+					await expect(
+						account.getByTestId("codex-login-code"),
+					).toHaveTextContent(login.userCode);
+					await expect(
+						account.getByTestId("codex-login-copy-code"),
+					).toBeVisible();
+				}
+			} else if (login.state === "error") {
+				await expect(
+					account.getByTestId("codex-login-result"),
+				).toHaveTextContent(login.error ?? "");
+			} else {
+				await expect(account.getByTestId("codex-login-browser")).toBeVisible();
+				await expect(
+					account.getByTestId("codex-login-device-code"),
+				).toBeVisible();
+			}
+			await scrollSettingsIntoView(
+				account.getByTestId("codex-auth-account"),
+				"center",
+			);
+		},
+	};
+}
+
+export const CodexSignInIdle: Story = codexSignIn({ state: "idle" });
+export const CodexSignInBrowserPending: Story = codexSignIn({
+	state: "pending",
+	method: "browser",
+	url: "https://auth.openai.com/authorize?state=storybook",
+	deadlineAtMs: 1_772_012_460_000,
+});
+export const CodexSignInDeviceCodePending: Story = codexSignIn({
+	state: "pending",
+	method: "device-code",
+	verificationUrl: "https://auth.openai.com/codex/device",
+	userCode: "ABCD-EFGH",
+	deadlineAtMs: 1_772_012_460_000,
+});
+export const CodexSignInError: Story = codexSignIn({
+	state: "error",
+	method: "device-code",
+	error: "Could not complete sign-in. Start again to get a new code.",
+});
 
 export const DefaultClaudeAccountEdit: Story = {
 	args: { initialTab: "server" },

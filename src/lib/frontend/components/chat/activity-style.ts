@@ -14,44 +14,36 @@ export interface PartStyle {
 	/** Foreground class, for the row icon. */
 	text: string;
 	/** Semantic paint chosen by the timeline primitive. */
-	tone:
-		| "muted"
-		| "secondary"
-		| "thinking"
-		| "success"
-		| "agent"
-		| "error"
-		| "compaction"
-		| "live";
+	tone: ToolCategory | "thinking" | "text" | "fail" | "compaction" | "live";
 }
 
 const CATEGORY_STYLE: Record<ToolCategory, PartStyle> = {
-	explore: { icon: "search", text: "text-text-muted", tone: "muted" },
+	explore: { icon: "search", text: "text-act-explore", tone: "explore" },
 	edit: {
 		icon: "pencil",
-		text: "text-text-secondary",
-		tone: "secondary",
+		text: "text-seg-edit",
+		tone: "edit",
 	},
-	shell: { icon: "terminal", text: "text-text", tone: "secondary" },
-	fetch: { icon: "external-link", text: "text-success", tone: "success" },
+	shell: { icon: "terminal", text: "text-act-shell", tone: "shell" },
+	fetch: { icon: "external-link", text: "text-act-fetch", tone: "fetch" },
 	task: {
 		icon: "git-fork",
-		text: "text-harness-claude",
-		tone: "agent",
+		text: "text-act-task",
+		tone: "task",
 	},
-	other: { icon: "settings-2", text: "text-text-muted", tone: "muted" },
+	other: { icon: "settings-2", text: "text-act-other", tone: "other" },
 };
 
 const THINKING_STYLE: PartStyle = {
 	icon: "brain",
-	text: "text-thinking",
+	text: "text-act-thinking",
 	tone: "thinking",
 };
 
 const TEXT_STYLE: PartStyle = {
 	icon: "message-square",
-	text: "text-text-secondary",
-	tone: "muted",
+	text: "text-act-text",
+	tone: "text",
 };
 
 /** Full contrast, so the seam reads as a cut through the strip rather than work. */
@@ -99,8 +91,7 @@ export function segmentAppearance(
 	running: ReadonlySet<string>,
 ): { tone: PartStyle["tone"]; running: boolean } {
 	if (part.type === "tool") {
-		if (part.status === "error" || part.isError)
-			return { tone: "error", running: false };
+		if (part.outcome === "failed") return { tone: "fail", running: false };
 		const taskId = part.metadata?.["providerTaskId"];
 		if (
 			typeof taskId === "string" && part.metadata?.["backgrounded"] === true

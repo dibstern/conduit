@@ -67,6 +67,40 @@ function makeMessageWithParts(
 
 describe("messageRowsToHistory", () => {
 	it.each([
+		{ status: "error", metadata: {}, outcome: "failed" },
+		{
+			status: "completed",
+			metadata: { cursorToolType: "shellToolCall", isError: true },
+			outcome: "succeeded",
+		},
+	])("carries the projected $outcome outcome without interpreting metadata", ({
+		status,
+		metadata,
+		outcome,
+	}) => {
+		const part = messageRowsToHistory(
+			[
+				makeMessageWithParts("m1", {
+					role: "assistant",
+					parts: [
+						makePartRow("tool1", "m1", {
+							type: "tool",
+							tool_name: "Bash",
+							status,
+							result: JSON.stringify("output"),
+							metadata: JSON.stringify(metadata),
+						}),
+					],
+				}),
+			],
+			{ pageSize: 10 },
+		).messages[0]?.parts?.[0];
+		expect(part?.state?.status).toBe(status);
+		expect(part?.state?.["outcome"]).toBe(outcome);
+		expect(part?.state?.["metadata"] ?? {}).not.toHaveProperty("isError");
+	});
+
+	it.each([
 		false,
 		true,
 	])("uses the canonical completion instead of a late revision timestamp (snapshot: %s)", (snapshot) => {
@@ -348,6 +382,83 @@ describe("messageRowsToHistory", () => {
 		expect(snapshot?.parts?.[0]?.state?.["metadata"]).toEqual(kept);
 		expect(snapshot?.parts?.[0]?.state?.["title"]).toBe("a");
 		expect(JSON.stringify([row, snapshot]).length).toBeLessThan(2_000);
+	});
+
+	it.each([
+		{
+			name: "provider-neutral running output",
+			status: "running",
+			metadata: {
+				output: "first line\n",
+				codexItemType: "commandExecution",
+				fileChange: { filePath: "/private.txt", diff: "private" },
+			},
+			expected: { output: "first line\n" },
+		},
+		{
+			name: "Cursor running output and presentation",
+			status: "running",
+			metadata: {
+				cursorToolType: "shellToolCall",
+				output: "first line\n",
+				truncated: true,
+			},
+			expected: {
+				cursorToolType: "shellToolCall",
+				output: "first line\n",
+				truncated: true,
+			},
+		},
+		{
+			name: "settled output omitted from metadata",
+			status: "completed",
+			metadata: { output: "stale live output" },
+			expected: undefined,
+		},
+		{
+			name: "non-string output omitted from metadata",
+			status: "running",
+			metadata: { output: 42 },
+			expected: undefined,
+		},
+	])("filters $name identically for rows and snapshots", ({
+		status,
+		metadata,
+		expected,
+	}) => {
+		const [row, snapshot] = messageRowsToHistory(
+			[
+				makeMessageWithParts("row", {
+					role: "assistant",
+					parts: [
+						makePartRow("row-tool", "row", {
+							type: "tool",
+							tool_name: "Bash",
+							status,
+							metadata: JSON.stringify(metadata),
+						}),
+					],
+				}),
+				makeMessageWithParts("snapshot", {
+					role: "assistant",
+					rest_payload: JSON.stringify({
+						id: "snapshot",
+						role: "assistant",
+						parts: [
+							{
+								id: "snapshot-tool",
+								type: "tool",
+								tool: "Bash",
+								state: { status, metadata },
+							},
+						],
+					}),
+				}),
+			],
+			{ pageSize: 50 },
+		).messages;
+		expect(row?.parts?.[0]?.state?.["metadata"]).toEqual(expected);
+		expect(snapshot?.parts?.[0]?.state?.["metadata"]).toEqual(expected);
 	});
 
 	// The projector stores an announced tool as "started"; read as nothing, the

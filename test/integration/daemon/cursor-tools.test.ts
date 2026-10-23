@@ -34,6 +34,7 @@ const kinds = {
 	readLints: "LSP",
 	semSearch: "Grep",
 	mcp: "mcp__spike__echo_hi",
+	"mcp-error": "mcp__spike__echo_hi",
 	updateTodos: "TodoWrite",
 	createPlan: "CreatePlan",
 	generateImage: "generateImage",
@@ -109,6 +110,10 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 		const tracePath = join(harness.root, "cursor-tools.jsonl");
 		writeFileSync(
 			join(harness.projectDir, "screen.png"),
+			Buffer.from(PNG, "base64"),
+		);
+		writeFileSync(
+			join(harness.projectDir, "generated.png"),
 			Buffer.from(PNG, "base64"),
 		);
 		writeFileSync(
@@ -249,6 +254,8 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 			const finalPart = history
 				.flatMap(({ parts }) => parts ?? [])
 				.find(({ id }) => id === completed.at(-1)?.data["partId"]);
+			if (kind === "mcp-error")
+				expect.soft(finalPart?.state?.["status"], kind).toBe("error");
 			expect(finalPart?.state?.["metadata"], kind).toMatchObject({
 				progress:
 					kind === "task" ? "Inspecting tool results" : "Running 3 tools",
@@ -332,7 +339,8 @@ describe("Cursor tool traces through the built daemon and detached runner", () =
 					},
 				});
 			if (kind === "shell-error" || kind === "computerUse-error") {
-				expect(metadata["isError"]).toBe(true);
+				expect(completed.at(-1)?.data["outcome"]).toBe("failed");
+				expect(metadata).not.toHaveProperty("isError");
 				const errorDb = new Database(harness.daemonStorePath(), {
 					readonly: true,
 				});

@@ -13,10 +13,10 @@ import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import type { SDKUserMessage } from "../../../src/lib/provider/claude/types.js";
-import { createProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
 import { claudeSdk as fakeClaudeSdk } from "../../helpers/fake-claude-process-sdk.js";
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
 // Failure modes at the browser RPC -> durable inbox/outbox -> provider seam:
 // - A queued input retains its text but loses attachments during replay.
@@ -83,6 +83,8 @@ describe("Integration: attachment delivery through the relay", () => {
 				new Response(JSON.stringify(value), {
 					headers: { "Content-Type": "application/json" },
 				});
+			if (pathname === "/global/health" && request.method === "GET")
+				return json({ healthy: true, version: "test" });
 			if (pathname === "/path")
 				return json({
 					state: root,

@@ -17,6 +17,7 @@ import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
+import { resolveRealOpenCode } from "../../helpers/real-opencode.js";
 
 describe("OpenCode sessions keep their effective working directories", () => {
 	let harness: ProcessHarness | undefined;
@@ -111,9 +112,7 @@ describe("OpenCode sessions keep their effective working directories", () => {
 			"GIT_COMMON_DIR",
 		])
 			vi.stubEnv(key, undefined);
-		const binary =
-			process.env["CONDUIT_TEST_REAL_OPENCODE"] ??
-			execFileSync("which", ["opencode"], { encoding: "utf8" }).trim();
+		const binary = resolveRealOpenCode();
 		const fixture = ProcessHarness.create({
 			managedOpenCode: true,
 			realOpenCode: binary,

@@ -13,7 +13,7 @@ import { Session } from "node:inspector/promises";
 import { join } from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Effect, Fiber, HashMap, Ref } from "effect";
+import { Context, Effect, Fiber, HashMap, Ref } from "effect";
 
 // Event-loop stalls and read-model reads for load tests, flushed to a file the
 // spec reads after each phase. Stalls are wall-clock end times and durations.
@@ -416,6 +416,37 @@ async function main(): Promise<void> {
 			},
 		});
 	}
+	if (existsSync(join(root, "hold-draft-launch"))) {
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const resolveCall = OrchestrationEngine.prototype.resolveCallContextEffect;
+		Object.assign(OrchestrationEngine.prototype, {
+			resolveCallContextEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				request: Parameters<typeof resolveCall>[0],
+			) {
+				const caller = this;
+				return Effect.gen(function* () {
+					const call = yield* resolveCall.call(caller, request);
+					yield* Effect.gen(function* () {
+						const hold = join(root, "hold-draft-launch");
+						if (
+							request.sessionId !== "" ||
+							!existsSync(hold) ||
+							request.workspaceRoot !== readFileSync(hold, "utf8")
+						)
+							return;
+						writeFileSync(join(root, "draft-launch-held"), "");
+						while (existsSync(hold)) yield* Effect.sleep(10);
+					});
+					return call;
+				});
+			},
+		});
+	}
 	if (existsSync(join(root, "thread-read-proof.json"))) {
 		const readProbe = (): { sessionId: string; projectId: string } =>
 			JSON.parse(readFileSync(join(root, "thread-read-proof.json"), "utf8"));
@@ -591,6 +622,114 @@ async function main(): Promise<void> {
 			},
 		});
 	}
+	if (existsSync(join(root, "daemon-session-workspace-proof"))) {
+		const { SessionWorkspaceTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/relay/Services",
+					`session-workspace.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/session-workspace.js");
+		const { OrchestrationEngine } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/provider", `orchestration-engine.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/provider/orchestration-engine.js");
+		const { ConfigTag } = (await import(
+			pathToFileURL(
+				join(codeRoot, "lib/domain/relay/Services", `services.${extension}`),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/services.js");
+		const { SessionManagerServiceTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/relay/Services",
+					`session-manager-service.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/session-manager-service.js");
+		const resolveCall = OrchestrationEngine.prototype.resolveCallContextEffect;
+		type Workspace =
+			import("../../src/lib/domain/relay/Services/session-workspace.js").SessionWorkspace;
+		const owners = new Map<Workspace, number>();
+		const heldLaunches = new Set<string>();
+		let first: Workspace | undefined;
+		Object.assign(OrchestrationEngine.prototype, {
+			resolveCallContextEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				request: Parameters<typeof resolveCall>[0],
+			) {
+				const caller = this;
+				return Effect.gen(function* () {
+					const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+					if (request.sessionId && workspace._tag === "Some") {
+						first ??= workspace.value;
+						if (!owners.has(workspace.value))
+							owners.set(workspace.value, owners.size + 1);
+						// Exercise the retained service without a caller-supplied root.
+						const directory = yield* first.get(request.sessionId);
+						const state = yield* first.claudeWorktreeState(request.sessionId);
+						appendFileSync(
+							join(root, "daemon-session-workspace.ndjson"),
+							`${JSON.stringify({
+								sessionId: request.sessionId,
+								owner: owners.get(workspace.value),
+								directory,
+								requestedPath: state.requestedPath,
+							})}\n`,
+						);
+						const gate = join(root, `workspace-launch-${request.sessionId}`);
+						if (existsSync(gate) && !heldLaunches.has(gate)) {
+							heldLaunches.add(gate);
+							// Keep a caller alive beyond relay disposal to prove a removed
+							// generation's held permit cannot block its replacement.
+							const hold = workspace.value.withLaunch(
+								request.sessionId,
+								Effect.gen(function* () {
+									writeFileSync(`${gate}-started`, "held");
+									while (!existsSync(`${gate}-release`))
+										yield* Effect.sleep("10 millis");
+									writeFileSync(`${gate}-finished`, "released");
+								}),
+							);
+							const mode = readFileSync(gate, "utf8");
+							yield* (
+								mode === "no-project"
+									? hold.pipe(Effect.updateContext(() => Context.empty()))
+									: mode === "empty-project"
+										? hold.pipe(
+												Effect.provideService(ConfigTag, {
+													...(yield* ConfigTag),
+													slug: "",
+												}),
+											)
+										: hold
+							).pipe(Effect.forkDetach);
+							if (existsSync(join(root, "workspace-retention-proof"))) {
+								const manager = yield* SessionManagerServiceTag;
+								yield* Effect.gen(function* () {
+									writeFileSync(`${gate}-retention-started`, "daemon callback");
+									// AutoSettle calls the captured manager from the daemon context.
+									yield* manager.deleteArchivedSessions(
+										30 * 86_400_000,
+										Date.now(),
+									);
+									writeFileSync(`${gate}-retention-finished`, "swept");
+								}).pipe(
+									Effect.updateContext(() => Context.empty()),
+									Effect.forkDetach,
+								);
+							}
+						}
+					}
+					return yield* resolveCall.call(caller, request);
+				});
+			},
+		});
+	}
 	if (existsSync(join(root, "project-context-proof"))) {
 		const { OrchestrationEngine } = (await import(
 			pathToFileURL(
@@ -636,8 +775,16 @@ async function main(): Promise<void> {
 			},
 		});
 	}
-	if (existsSync(join(root, "daemon-adapters-proof"))) {
-		const proofPath = join(root, "daemon-adapters.ndjson");
+	if (
+		existsSync(join(root, "daemon-adapters-proof")) ||
+		existsSync(join(root, "daemon-engine-proof"))
+	) {
+		const proofPath = join(
+			root,
+			existsSync(join(root, "daemon-engine-proof"))
+				? "daemon-engine.ndjson"
+				: "daemon-adapters.ndjson",
+		);
 		const record = (entry: Record<string, unknown>) =>
 			appendFileSync(
 				proofPath,
@@ -701,6 +848,11 @@ async function main(): Promise<void> {
 		const resourceIdentities = new WeakMap<object, number>();
 		const observedOwners = new WeakSet<object>();
 		const observedScopes = new WeakSet<object>();
+		const resourceGenerations = new Map<string, number>();
+		const activeResources = new Map<
+			string,
+			{ resourceIdentity: number; generation: number }
+		>();
 		let nextResourceIdentity = 0;
 		const createClaude = ClaudeDriver.create;
 		Object.assign(ClaudeDriver, {
@@ -726,6 +878,18 @@ async function main(): Promise<void> {
 											)
 												yield* Effect.sleep("10 millis");
 											yield* invalidate(accountId);
+											const resource = activeResources.get(accountId);
+											if (resource) {
+												// invalidate returns after closing the exact account scope.
+												record({
+													kind: "account-scope-close",
+													driver: "cursor",
+													accountId,
+													...resource,
+													cause: "invalidation-completed",
+												});
+												activeResources.delete(accountId);
+											}
 											record({ kind: "invalidation-end", accountId });
 										}),
 								});
@@ -741,23 +905,41 @@ async function main(): Promise<void> {
 							const owner = resources.value;
 							observedOwners.add(owner);
 							const use = owner.use;
-							const observedUse: typeof owner.use = (accountId, work) =>
-								use(accountId, (resource) =>
+							const observedUse: typeof owner.use = (selected, work) => {
+								const accountId =
+									typeof selected === "string" ? selected : "cursor-login-slot";
+								return use(selected, (resource) =>
 									Effect.suspend(() => {
 										let identity = resourceIdentities.get(resource);
 										if (identity === undefined) {
 											identity = ++nextResourceIdentity;
 											resourceIdentities.set(resource, identity);
+											const generation =
+												(resourceGenerations.get(accountId) ?? 0) + 1;
+											resourceGenerations.set(accountId, generation);
+											activeResources.set(accountId, {
+												resourceIdentity: identity,
+												generation,
+											});
+											record({
+												kind: "account-scope-open",
+												driver: "cursor",
+												accountId,
+												resourceIdentity: identity,
+												generation,
+											});
 										}
 										record({
 											kind: "account-scope-use",
 											driver: "cursor",
 											accountId,
 											resourceIdentity: identity,
+											generation: resourceGenerations.get(accountId),
 										});
 										return work(resource);
 									}),
 								);
+							};
 							Object.assign(owner, { use: observedUse });
 						}),
 					),
@@ -773,8 +955,19 @@ async function main(): Promise<void> {
 					kind: "adapter-constructed",
 					driver: instance.providerId,
 					identity,
+					constructorName: instance.constructor.name,
 				});
 				const send = instance.sendTurnEffect.bind(instance);
+				const interrupt = instance.interruptTurnEffect.bind(instance);
+				instance.interruptTurnEffect = (...args) =>
+					Effect.gen(function* () {
+						const gate = join(root, "hold-control-delivery");
+						if (existsSync(gate)) {
+							record({ kind: "control-gap" });
+							while (existsSync(gate)) yield* Effect.sleep("10 millis");
+						}
+						return yield* interrupt(...args);
+					});
 				instance.sendTurnEffect = (input) =>
 					Effect.suspend(() => {
 						record({
@@ -786,8 +979,33 @@ async function main(): Promise<void> {
 							accountId: input.account?.id,
 							workspaceRoot: input.workspaceRoot,
 							extraFolders: input.extraFolders,
+							shellMarker: input.shellEnv?.["PROJECT_OWNER"],
 						});
-						return send(input);
+						return Effect.gen(function* () {
+							const gate = join(root, "hold-provider-intake");
+							if (
+								existsSync(gate) &&
+								readFileSync(gate, "utf8") === input.sessionId
+							) {
+								record({ kind: "provider-intake-gap" });
+								while (existsSync(gate)) yield* Effect.sleep("10 millis");
+							}
+							return yield* send(input).pipe(
+								Effect.catch((error) => {
+									if (error.code !== "runner_detached")
+										return Effect.fail(error);
+									return Effect.gen(function* () {
+										const gate = join(root, "hold-detachment-error");
+										if (existsSync(gate)) {
+											record({ kind: "detachment-error-gap" });
+											while (existsSync(gate)) yield* Effect.sleep("10 millis");
+										}
+										record({ kind: "detachment-error-released" });
+										return yield* Effect.fail(error);
+									});
+								}),
+							);
+						});
 					});
 				const shutdown = instance.shutdownEffect.bind(instance);
 				instance.shutdownEffect = () =>
@@ -796,6 +1014,37 @@ async function main(): Promise<void> {
 						return shutdown();
 					});
 				if (instance instanceof RunnerProviderInstance) {
+					const attach = instance.attachSessionsEffect.bind(instance);
+					instance.attachSessionsEffect = (...args) =>
+						Effect.gen(function* () {
+							record({
+								kind: "attachment",
+								driver: instance.providerId,
+								sessionIds: args[0],
+							});
+							const gate = join(root, "hold-attachment");
+							if (
+								instance.providerId === "claude" &&
+								existsSync(gate) &&
+								args[0].includes(readFileSync(gate, "utf8"))
+							) {
+								record({ kind: "attachment-gap" });
+								while (existsSync(gate)) yield* Effect.sleep("10 millis");
+								if (existsSync(join(root, "fail-attachment")))
+									return yield* Effect.die(
+										new Error("Fixture attachment failure"),
+									);
+							}
+							yield* attach(...args);
+							if (existsSync(join(root, "repeat-attachment"))) {
+								yield* attach(...args);
+								record({
+									kind: "attachment-repeated",
+									driver: instance.providerId,
+									sessionIds: args[0],
+								});
+							}
+						});
 					const recover = instance.recoverProjectContextsEffect.bind(instance);
 					instance.recoverProjectContextsEffect = (...args) =>
 						Effect.suspend(() => {
@@ -821,12 +1070,167 @@ async function main(): Promise<void> {
 			return register.call(this, instance);
 		};
 		let nextIdentity = 0;
+		const engines = new WeakMap<object, number>();
+		let nextEngineIdentity = 0;
+		const engineIdentity = (engine: object) => {
+			let identity = engines.get(engine);
+			if (identity === undefined) {
+				identity = ++nextEngineIdentity;
+				engines.set(engine, identity);
+				record({ kind: "engine-observed", engineIdentity: identity });
+			}
+			return identity;
+		};
+		subscribe("conduit.orchestration.engine", (message) => {
+			const event = message as { event: string; engine: object };
+			record({
+				kind: `engine-${event.event}`,
+				engineIdentity: engineIdentity(event.engine),
+			});
+		});
+		const dispatch = OrchestrationEngine.prototype.dispatchEffect;
+		Object.assign(OrchestrationEngine.prototype, {
+			dispatchEffect(
+				this: InstanceType<typeof OrchestrationEngine>,
+				command: import("../../src/lib/provider/orchestration-engine.js").OrchestrationCommand,
+			) {
+				record({
+					kind: "engine-command",
+					engineIdentity: engineIdentity(this),
+					commandId: command.commandId,
+					commandType: command.type,
+				});
+				return dispatch.call(this, command).pipe(
+					Effect.onExit((exit) =>
+						Effect.sync(() =>
+							record({
+								kind: "engine-command-exit",
+								commandId: command.commandId,
+								outcome: exit._tag,
+							}),
+						),
+					),
+				);
+			},
+		});
 		const drain = OrchestrationEngine.prototype.drainSideEffects;
+		const ownsPending = OrchestrationEngine.prototype.ownsPendingSend;
+		OrchestrationEngine.prototype.ownsPendingSend = function (...args) {
+			const owned = ownsPending.apply(this, args);
+			record({
+				kind: "pending-send-owner",
+				sessionId: args[0],
+				commandId: args[1],
+				owned,
+			});
+			return owned;
+		};
+		const { RelayCacheTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`relay-cache.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/relay-cache.js");
+		const { InputDraftsTag } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/relay/Services",
+					`input-drafts.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/relay/Services/input-drafts.js");
+		const { AccountDirectory } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`account-directory.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/account-directory.js");
+		let relayGateInstalled = false;
 		OrchestrationEngine.prototype.drainSideEffects = function (...args) {
 			return Effect.gen({ self: this }, function* () {
+				const detach = join(root, "detach-relay");
+				if (existsSync(detach)) {
+					const slug = readFileSync(detach, "utf8");
+					renameSync(detach, `${detach}.done`);
+					const cache = yield* Effect.serviceOption(RelayCacheTag);
+					if (cache._tag === "Some") {
+						yield* cache.value.invalidate(slug);
+						record({ kind: "relay-gap", projectId: slug });
+					}
+				}
+				if (!relayGateInstalled) {
+					const accounts = yield* Effect.serviceOption(AccountDirectory);
+					if (accounts._tag === "Some") {
+						const resolve = accounts.value.resolve;
+						const gated: typeof resolve = (...args) =>
+							Effect.gen(function* () {
+								const gate = join(root, "hold-claimed-account");
+								if (existsSync(gate)) {
+									const db = new DatabaseSync(
+										join(root, "config", "events.db"),
+									);
+									const claimed = db
+										.prepare(
+											"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+										)
+										.get(readFileSync(gate, "utf8"));
+									db.close();
+									const entered = join(root, "claimed-account-entered");
+									if (
+										claimed?.["status"] === "running" &&
+										!existsSync(entered)
+									) {
+										writeFileSync(entered, "");
+										record({ kind: "claimed-account-gap" });
+										while (existsSync(gate)) yield* Effect.sleep("10 millis");
+									}
+								}
+								return yield* resolve(...args);
+							});
+						Object.assign(accounts.value, { resolve: gated });
+					}
+					const drafts = yield* Effect.serviceOption(InputDraftsTag);
+					if (drafts._tag === "Some") {
+						const invalidate = drafts.value.invalidateList;
+						Object.assign(drafts.value, {
+							invalidateList: () =>
+								Effect.gen(function* () {
+									const gate = join(root, "hold-import-publication");
+									if (existsSync(gate)) {
+										record({ kind: "import-gap" });
+										while (existsSync(gate)) yield* Effect.sleep("10 millis");
+									}
+									return yield* invalidate();
+								}),
+						});
+					}
+					const service = yield* Effect.serviceOption(RelayCacheTag);
+					if (service._tag === "Some") {
+						const cache = service.value;
+						const get = cache.get;
+						cache.get = (slug) =>
+							Effect.gen(function* () {
+								const gate = join(root, `hold-relay-${slug}`);
+								if (existsSync(gate)) {
+									record({ kind: "relay-gap", projectId: slug });
+									while (existsSync(gate)) yield* Effect.sleep("10 millis");
+								}
+								return yield* get(slug);
+							});
+						relayGateInstalled = true;
+					}
+				}
 				const project = yield* Effect.serviceOption(PersistenceProjectTag);
 				record({
 					kind: "outbox-drain",
+					engineIdentity: engineIdentity(this),
 					...(project._tag === "Some"
 						? { projectId: project.value.projectId }
 						: {}),
@@ -1044,7 +1448,12 @@ async function main(): Promise<void> {
 		opencodeUrl:
 			process.env["CONDUIT_TEST_OPENCODE_URL"] ?? "http://127.0.0.1:0",
 		keepAwake: false,
-		logLevel: process.env["LOG_LEVEL"] === "warn" ? "warn" : "error",
+		logLevel:
+			process.env["LOG_LEVEL"] === "info"
+				? "info"
+				: process.env["LOG_LEVEL"] === "warn"
+					? "warn"
+					: "error",
 	});
 	daemon = activeDaemon;
 	if (disconnected) {

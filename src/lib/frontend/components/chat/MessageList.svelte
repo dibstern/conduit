@@ -64,7 +64,7 @@
 	import PermissionCard from "../permissions/PermissionCard.svelte";
 	import QuestionCard from "./QuestionCard.svelte";
 	import HistoryLoader from "./HistoryLoader.svelte";
-	import BlockGrid from "../ui/BlockGrid.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TranscriptDivider from "../ui/TranscriptDivider.svelte";
 	import ContinuationDivider from "./ContinuationDivider.svelte";
@@ -369,19 +369,19 @@
 			: undefined,
 	);
 	$effect(() => {
-		if (!processing || chat.loadLifecycle !== "ready" || turns.at(-1)?.user) return;
+		const turn = turns.at(-1);
+		if (!processing || chat.loadLifecycle !== "ready" || !turn || turn.user) return;
 		const sessionId = viewedSessionId;
 		if (!sessionId) return;
-		const key = JSON.stringify([sessionId, turns.at(-1)?.id ?? null]);
+		const key = JSON.stringify([sessionId, turn.id]);
 		if (reportedMissingPrompts.has(key)) return;
 		reportedMissingPrompts.add(key);
-		const lastRow = chat.transcript?.rows.at(-1);
 		const last = chat.messages.at(-1);
 		console.error("[turn-clock] Working session has no prompt to time from", {
 			sessionId,
 			messageCount: chat.messages.length,
-			lastMessageRole: lastRow?.role ?? last?.type ?? null,
-			lastMessageId: lastRow?.id ?? (last && "messageId" in last ? last.messageId ?? last.uuid : last?.uuid) ?? null,
+			lastMessageRole: last?.type ?? null,
+			lastMessageId: (last && "messageId" in last ? last.messageId ?? last.uuid : last?.uuid) ?? null,
 		});
 	});
 	const localPermissions = $derived(getLocalPermissions(viewedSessionId));
@@ -512,6 +512,8 @@
 </script>
 
 <!-- Focusable so keyboard users can scroll it and `u` can target the open session. -->
+<!-- break-words is inherited, so a long path or URL in any row wraps instead of
+     widening the transcript (overflow-y-auto makes overflow-x scroll too). -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
 	id={messagesId}
@@ -519,7 +521,7 @@
 	role="region"
 	aria-label="Transcript"
 	tabindex="0"
-	class="flex-1 overflow-y-auto pt-5 pb-3 relative"
+	class="flex-1 overflow-y-auto pt-5 pb-3 relative break-words"
 	style="-webkit-overflow-scrolling: touch;"
 	bind:this={messagesEl}
 >
@@ -562,7 +564,7 @@
 	<!-- Loading indicator (was in HistoryView) -->
 	{#if chat.historyLoading}
 		<div class="history-loading flex items-center justify-center py-3 text-text-dimmer text-xs gap-2">
-			<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} />
+			<ConduitMark size={16} variant="running" />
 			<span>Loading history...</span>
 		</div>
 	{/if}

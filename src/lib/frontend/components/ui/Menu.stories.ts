@@ -202,6 +202,36 @@ export const RadioSelection: Story = {
 	},
 };
 
+export const RadioLeadingIcon: Story = {
+	args: { open: false, selected: "shared" },
+	parameters: { a11y: { test: "error" } },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		const trigger = canvas.getByRole("button", { name: "Open menu" });
+		const iconOf = (name: string) =>
+			body
+				.getByRole("menuitemradio", { name })
+				.querySelector("[data-menu-item-icon]");
+		const colorOf = (element: Element | null) =>
+			element ? getComputedStyle(element).color : "missing";
+
+		await userEvent.click(trigger);
+		const shared = body.getByRole("menuitemradio", { name: "Shared" });
+		const accent = colorOf(shared.querySelector("[data-menu-radio-check]"));
+		await expect(iconOf("Shared")).toBeInTheDocument();
+		await expect(iconOf("Private")).toBeNull();
+		await expect(colorOf(iconOf("Shared"))).toBe(accent);
+
+		await userEvent.click(body.getByRole("menuitemradio", { name: "Private" }));
+		await userEvent.click(trigger);
+		await expect(colorOf(iconOf("Shared"))).toBe(
+			colorOf(body.getByRole("menuitem", { name: "Duplicate" })),
+		);
+		await expect(colorOf(iconOf("Shared"))).not.toBe(accent);
+	},
+};
+
 export const CheckboxSelection: Story = {
 	args: { open: false, checked: true },
 	play: async ({ canvasElement }) => {

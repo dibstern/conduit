@@ -421,6 +421,29 @@ describe("daemon Worktree service", () => {
 			expect(readFileSync(join(path, "keep.txt"), "utf8")).toBe("keep\n");
 	});
 
+	it("lets a large checkout outlast the timeout for quick git commands", async () => {
+		const executable = join(context.fixture, "slow-checkout-git");
+		// Node startup can consume the deliberately short preflight budget under load.
+		writeFileSync(
+			executable,
+			`#!/bin/sh
+case " $* " in *" worktree add "*) sleep 1.5 ;; esac
+exec '${context.actualGit.replaceAll("'", "'\\''")}' "$@"
+`,
+			{ mode: 0o755 },
+		);
+		const created = await Effect.runPromise(
+			createEffect(undefined, {
+				gitExecutable: executable,
+				gitTimeoutMs: 1_000,
+			}),
+		);
+		expect(
+			existsSync(ownedWorktreePath(context.configDir, context.folder)),
+		).toBe(true);
+		expect(created.branchName).toBeTruthy();
+	}, 15_000);
+
 	it("reports missing git without creating anything", async () => {
 		const before = repositoryState();
 		const error = await creationError(undefined, {

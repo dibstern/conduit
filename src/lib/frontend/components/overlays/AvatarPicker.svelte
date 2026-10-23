@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import type { AvatarChoice } from "../../../contracts/user-avatar.js";
-	import { avatarState, saveAvatar } from "../../stores/avatar.svelte.js";
+	import { avatarState, loadAvatar, saveAvatar } from "../../stores/avatar.svelte.js";
 	import { face } from "../../utils/avatar-face.js";
 	import Popover from "../ui/Popover.svelte";
 	import UserAvatar from "../ui/UserAvatar.svelte";
@@ -23,6 +23,8 @@
 	function changeOpen(next: boolean): void {
 		open = next;
 		if (!next) return;
+		// The daemon doesn't keep a failed picture read, so this retries it.
+		void loadAvatar();
 		choice = avatarState.current.choice ?? { kind: "initial" };
 		if (choice.kind === "mac" && !avatarState.current.macPicture) choice = { kind: "initial" };
 		kind = choice.kind;
@@ -56,7 +58,7 @@
 			{:else if choice.kind === "mac"}
 				<p class="text-center text-[13px] leading-[1.55] text-text-secondary">From your Mac account. Change it in<br />System Settings › Users &amp; Groups.</p>
 			{:else}
-				<p class="text-center text-[13px] leading-[1.55] text-text-secondary">“{initial.kind === "letter" ? initial.char : "?"}”, the first letter of your git or account name.<br />The colour comes from the name.</p>
+				<p class="text-center text-[13px] leading-[1.55] text-text-secondary">“{initial.kind === "letter" ? initial.char : "?"}”, the first letter of your git or account name.<br />On the default blue-violet gradient.</p>
 			{/if}
 		</div>
 		{#if avatarState.error}<p role="alert" class="mt-[12px] text-[13px] text-error">{avatarState.error}</p>{/if}

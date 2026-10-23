@@ -18,10 +18,11 @@
 	import Modal from "../ui/Modal.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
-	let { directory, git: folderGit, presentation, workspaceCause, workspaceMissing, workspaceMismatch, workspaceHint, loadWorktrees, onmove, onrecreate, oncontinue, ondismiss, onrenamebranch, children }: {
+	let { directory, git: folderGit, presentation, compact = false, workspaceCause, workspaceMissing, workspaceMismatch, workspaceHint, loadWorktrees, onmove, onrecreate, oncontinue, ondismiss, onrenamebranch, children }: {
 		directory: string;
 		git: SessionGit | undefined;
 		presentation: "word" | "control" | "row";
+		compact?: boolean | undefined;
 		workspaceCause?: WorkspaceMoveCause | undefined;
 		workspaceMissing?: WorkspaceMissing | undefined;
 		workspaceMismatch?: { readonly actualPath: string } | undefined;
@@ -181,6 +182,7 @@
 	let hundredCh = $state(0);
 	const fit = $derived.by((): Fit => {
 		const available = room;
+		if (compact) return available === undefined || available >= 66 ? "full" : "icon";
 		if (row || available === undefined || !hundredCh) return "full";
 		const fits = (candidate: Fit) => {
 			const { ch, px } = floor(candidate);
@@ -192,7 +194,7 @@
 		const { ch, px } = floor(candidate);
 		return `calc(${ch}ch + ${px}px)`;
 	};
-	const minimumWidth = $derived(width(fit));
+	const minimumWidth = $derived(compact ? "44px" : width(fit));
 
 	async function copy(text: string) {
 		try {
@@ -208,7 +210,7 @@
 {/snippet}
 
 {#snippet identity()}
-			<span class="relative flex size-[12px] shrink-0 items-center text-text-muted" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
+			<span class="relative flex size-[12px] shrink-0 items-center {presentation === 'word' ? 'text-text-dimmer' : 'text-text-muted'}" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
 				{#if git && !git.branch}
 					<!-- Compose the commit glyph from the existing circle icon. -->
 					<span class="commit-icon"><Icon name="circle" size={4} /></span>
@@ -218,20 +220,20 @@
 				<!-- Without labels the dirty mark rides the icon; with them it follows the branch. -->
 				{#if git?.dirty && fit === "icon"}{@render dirtyMark("absolute -right-[2px] -bottom-[1px] ring-[1.5px] " + (row ? "ring-bg-surface" : "ring-input-bg"))}{/if}
 			</span>
-			{#if fit === "full" && (control || row || !checkout)}
-				<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: calc(${projectFloor}ch + 1px)`} title={project}>{project}</span>
+			{#if fit === "full" && ((!compact && (control || row)) || !checkout)}
+				<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: ${compact ? '0' : `calc(${projectFloor}ch + 1px)`}`} title={project}>{project}</span>
 				{#if checkout}<span class="shrink-0 text-text-dimmer" aria-hidden="true">{control ? "·" : "/"}</span>{/if}
 			{/if}
 			{#if fit !== "icon"}
 				{#if checkout}
-					<span data-part="branch" class="min-w-0 truncate {git?.branch ? 'text-text-secondary' : 'text-text-muted'}" style:min-width={`${branchFloor}ch`} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
+					<span data-part="branch" class="min-w-0 truncate {presentation === 'word' ? 'text-text-dimmer' : git?.branch ? 'text-text-secondary' : 'text-text-muted'}" style:min-width={compact ? '0' : `${branchFloor}ch`} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
 				{/if}
 				{#if git?.dirty}{@render dirtyMark("shrink-0")}{/if}
 				{#if !phone && upstreamMark}
 					<span data-part="upstream" class="shrink-0 tabular-nums text-text-muted">{upstreamMark}</span>
 				{/if}
-				{#if operation}<span data-part="operation" class="shrink-0 text-warning">{operation}</span>{/if}
-				{#if showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
+				{#if !compact && operation}<span data-part="operation" class="shrink-0 text-warning">{operation}</span>{/if}
+				{#if !compact && showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
 			{/if}
 			{#if warningLabel}
 				<span data-part="warning" class="text-warning {fit === 'icon' && !row ? 'absolute right-[2px] top-[2px]' : 'inline-flex shrink-0'}" role="img" aria-label={warningLabel} title={warningLabel} data-testid={warningMismatch ? "workspace-mismatch-indicator" : "workspace-hint"}><Icon name="circle-alert" size={12} /></span>
@@ -257,7 +259,7 @@
 		{:else}
 			<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
 			<!-- The wrapper, ruler and button share a font so the ch floors agree. -->
-			<span class="git-pill {control ? 'git-control font-mono' : 'git-word font-sans'} text-[11.5px] inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`} style:width={!control && !row && fit === "icon" ? width("full") : undefined} bind:clientWidth={room}>{#if !row}<span class="ruler" aria-hidden="true" bind:clientWidth={hundredCh}></span>{/if}<Button {...props} bind:element={identityElement} variant={control ? "composer-checkout" : "composer-word"} size={control ? "composer-chip" : "content"} touchTarget align="start" class="max-w-full"
+			<span class="git-pill {control ? 'git-control font-mono' : 'git-word font-sans'} text-[11.5px] inline-grid" class:compact style={`grid-template-columns: minmax(${minimumWidth}, max-content)`} style:width={!control && !row && fit === "icon" ? width("full") : undefined} bind:clientWidth={room}>{#if !row}<span class="ruler" aria-hidden="true" bind:clientWidth={hundredCh}></span>{/if}<Button {...props} bind:element={identityElement} variant={control ? "composer-checkout" : "composer-word"} size={control ? "composer-chip" : "content"} touchTarget align="start" class="max-w-full"
 				style={`min-width: ${minimumWidth}`}
 				title={label} ariaLabel={`Checkout: ${[label, ...noticeLabels].join(", ")}`} data-testid="composer-checkout">
 				{@render identity()}
@@ -390,6 +392,8 @@
 	.git-pill { max-width: 100%; flex-shrink: 1; }
 	/* A stable slot measures available room in block, grid and flex parents. Checkout still yields before the model. */
 	.git-pill.git-control { position: relative; width: 100%; flex: 0 1000000 220px; min-width: 30px; max-width: 220px; justify-content: end; }
+	/* Phone models yield their name first; checkout keeps a readable branch until then. */
+	.git-pill.git-control.compact { flex: 0 0 var(--composer-checkout-width, 90px); max-width: 110px; }
 	/* Content-sized, so it sits beside the context %. As an icon it still asks for its full width, or it could never grow back. */
 	.git-pill.git-word { position: relative; flex: 0 1 auto; min-width: 12px; justify-content: end; }
 	/* 100ch in the pill's font turns ch floors into px. It extends left from the pill, so it never adds scroll. */

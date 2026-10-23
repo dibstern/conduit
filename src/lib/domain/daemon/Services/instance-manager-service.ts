@@ -27,6 +27,7 @@ import {
 	type AccountChange,
 	type AccountsState,
 	accountsStateFromInstances,
+	assignAccountColorSlots,
 } from "../../../account-directory.js";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
 import {
@@ -35,7 +36,6 @@ import {
 } from "../../../contracts/account.js";
 import {
 	getProviderDriver,
-	type KnownProviderDriverKind,
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
@@ -59,6 +59,7 @@ import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
+import { discoverCodexEffect } from "../../../provider/codex/codex-discovery.js";
 import { discoverCursorEffect } from "../../../provider/cursor/cursor-runner-driver.js";
 import { cursorUsageSource } from "../../../provider/cursor/cursor-usage.js";
 import type { OpenCodeInstance } from "../../../shared-types.js";
@@ -323,19 +324,25 @@ export function makeInstanceManagerStateLive(
 		accountsState === undefined
 			? []
 			: accountsStateFromInstances(
-					seeded
-						.filter(
-							(instance) =>
-								getProviderDriver(instance.driver ?? "opencode")
-									?.runsOpenCodeServer &&
-								!accountsState.accounts.some(
-									(account) => account.id === instance.id,
-								) &&
-								!accountsState.deleted.some(
-									(account) => account.id === instance.id,
-								),
-						)
-						.map((instance) => ({ ...instance, driver: "opencode" as const })),
+					assignAccountColorSlots(
+						seeded
+							.filter(
+								(instance) =>
+									getProviderDriver(instance.driver ?? "opencode")
+										?.runsOpenCodeServer &&
+									!accountsState.accounts.some(
+										(account) => account.id === instance.id,
+									) &&
+									!accountsState.deleted.some(
+										(account) => account.id === instance.id,
+									),
+							)
+							.map((instance) => ({
+								...instance,
+								driver: "opencode" as const,
+							})),
+						accountsState.accounts,
+					),
 					accountsState.launchLogin,
 				).accounts;
 	return makeOpenCodeRuntimeStateLive(config, seeded, options).pipe(
@@ -613,10 +620,6 @@ function instanceInfo(instance: OpenCodeInstance): OpenCodeInstance {
 	};
 }
 
-const instanceDiscovery: Partial<
-	Record<KnownProviderDriverKind, typeof discoverCursorEffect>
-> = { cursor: discoverCursorEffect };
-
 /** Publish account metadata together with its OpenCode runtime status. */
 export const getInstances = Effect.gen(function* () {
 	const directory = yield* AccountDirectory;
@@ -641,6 +644,9 @@ export const getInstances = Effect.gen(function* () {
 				...(runtime ?? { status: "healthy", restartCount: 0, createdAt: 0 }),
 				id: account.id,
 				name: account.name,
+				...(account.colorSlot === undefined
+					? {}
+					: { colorSlot: account.colorSlot }),
 				driver: account.driver,
 				port:
 					account.driver === "opencode"
@@ -686,34 +692,49 @@ export const getInstances = Effect.gen(function* () {
 export const discoverInstances = Effect.gen(function* () {
 	const instances = yield* getInstances;
 	const accounts = yield* (yield* AccountDirectory).list;
+	const daemon = yield* Effect.serviceOption(DaemonStateTag);
+	const configDir = Option.isSome(daemon)
+		? (yield* Ref.get(daemon.value)).configDir
+		: undefined;
 	const availability = new Map<
 		string,
 		{
 			available: boolean;
 			unavailableReason?: string;
-			unavailableCode?: "auth_required";
+			unavailableCode?: "auth_required" | "codex_version_unsupported";
 		}
 	>();
-	for (const account of accounts) {
-		const discover = instanceDiscovery[account.driver];
-		if (!discover) continue;
-		const result = yield* Effect.result(discover(undefined, account));
-		availability.set(
-			account.id,
-			result._tag === "Success"
-				? { available: true }
-				: {
-						available: false,
-						unavailableReason:
-							result.failure.cause instanceof Error
-								? result.failure.cause.message
-								: "Provider discovery failed",
-						...(result.failure.code
-							? { unavailableCode: result.failure.code }
-							: {}),
-					},
-		);
-	}
+	yield* Effect.forEach(
+		accounts,
+		(account) =>
+			Effect.gen(function* () {
+				const discover =
+					account.driver === "codex"
+						? discoverCodexEffect(account, undefined, configDir)
+						: account.driver === "cursor"
+							? discoverCursorEffect(account)
+							: undefined;
+				if (!discover) return;
+				const result = yield* Effect.result(discover);
+				availability.set(
+					account.id,
+					result._tag === "Success"
+						? { available: true }
+						: {
+								available: false,
+								unavailableReason:
+									result.failure.cause instanceof Error
+										? result.failure.cause.message
+										: "Provider discovery failed",
+								...(result.failure.code === "auth_required" ||
+								result.failure.code === "codex_version_unsupported"
+									? { unavailableCode: result.failure.code }
+									: {}),
+							},
+				);
+			}),
+		{ concurrency: "unbounded", discard: true },
+	);
 	return instances.map((instance) => ({
 		...instance,
 		...availability.get(instance.id),
@@ -799,6 +820,9 @@ export function persistedInstanceConfigs(
 		return {
 			id: account.id,
 			name: account.name,
+			...(account.colorSlot === undefined
+				? {}
+				: { colorSlot: account.colorSlot }),
 			driver: account.driver,
 			port:
 				account.driver === "opencode"

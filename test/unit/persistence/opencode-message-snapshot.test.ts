@@ -38,6 +38,8 @@ const wirePart = <
 		...part,
 		state: {
 			...rest,
+			...(rest["status"] === "completed" && { outcome: "succeeded" as const }),
+			...(rest["status"] === "error" && { outcome: "failed" as const }),
 			...(input !== undefined && { input: { _tag: "whole", value: input } }),
 			...(typeof output === "string" && {
 				output: { _tag: "whole", text: output },
@@ -154,8 +156,10 @@ describe("OpenCode message snapshots", () => {
 		const history = messageRowsToHistory(rows, { pageSize: 50 }).messages;
 		const expectedHistory: HistoryMessage[] = rest.map((message) => {
 			const normalized = snapshotPayload(message).message;
+			const turnId = rows.find((row) => row.id === message.id)?.turn_id;
 			return {
 				...normalized,
+				...(turnId == null ? {} : { turnId }),
 				role: normalized.role === "user" ? "user" : "assistant",
 				isBackfilled: true,
 				...(normalized.role === "user"
@@ -459,10 +463,12 @@ describe("OpenCode message snapshots", () => {
 		};
 		await live.ingest(synthesizeSnapshotEvent(sessionId, corrected));
 		const projected = await live.sessionMessagesWithParts(sessionId);
+		const turnId = projected.find((row) => row.id === corrected.id)?.turn_id;
 		expect(
 			messageRowsToHistory(projected, { pageSize: 50 }).messages[1],
 		).toEqual({
 			...snapshotPayload(corrected).message,
+			...(turnId == null ? {} : { turnId }),
 			parts: snapshotPayload(corrected).message.parts.map(wirePart),
 		});
 		const replay = makeHarness();

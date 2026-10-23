@@ -17,6 +17,7 @@ import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { SessionWorkspaceChangedPayload } from "../../../src/lib/persistence/events.js";
 import worktreePlugin from "../../../src/lib/provider/opencode-worktree-plugin.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
+import { resolveRealOpenCode } from "../../helpers/real-opencode.js";
 
 // Failure cases: wrong project/instance attribution, invalid destinations changing
 // the workspace, duplicate moves, lost spawn config, and advertising an absent tool.
@@ -300,9 +301,7 @@ describe("OpenCode declared worktree moves", () => {
 	}) => {
 		let binary: string;
 		try {
-			binary =
-				process.env["CONDUIT_TEST_REAL_OPENCODE"] ??
-				execFileSync("which", ["opencode"], { encoding: "utf8" }).trim();
+			binary = resolveRealOpenCode();
 		} catch {
 			return skip("No real OpenCode binary available");
 		}

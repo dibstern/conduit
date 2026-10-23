@@ -1,7 +1,7 @@
 <!-- One step in the expanded log: icon · verb · subject · how long it took.      -->
 <!-- Click to see foreground output or open a background agent's task.            -->
 <script lang="ts">
-	import BlockGrid from "../ui/BlockGrid.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -27,10 +27,11 @@
 	import { selection } from "../../stores/selection.svelte.js";
 	import { openTask } from "../session/background-tasks.svelte.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
-	import { partStyle } from "./activity-style.js";
+	import { partStyle, segmentAppearance } from "./activity-style.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import SkillDoc from "./SkillDoc.svelte";
 	import ToolFullDetail from "./ToolFullDetail.svelte";
+	import ShellToolDetail from "./ShellToolDetail.svelte";
 
 	let {
 		part,
@@ -39,7 +40,9 @@
 		duration,
 		highlight = false,
 		messageNumber,
+		messageCategory,
 		live = false,
+		runningTasks = new Set<string>(),
 	}: {
 		part: ActivityPart;
 		liveTasks: readonly BackgroundTask[];
@@ -47,12 +50,17 @@
 		duration?: number | undefined;
 		highlight?: boolean;
 		messageNumber?: number | undefined;
+		messageCategory?: { glyph: string; colour: string | undefined } | undefined;
 		live?: boolean;
+		/** Shared with the strip so status overrides use the same snapshot. */
+		runningTasks?: ReadonlySet<string>;
 	} = $props();
 
 	let expanded = $state(false);
 
 	const style = $derived(partStyle(part));
+	const iconTone = $derived(segmentAppearance(part, runningTasks).tone);
+	const iconColor = $derived(iconTone === "fail" ? "text-seg-fail" : iconTone === "live" ? "text-accent" : style.text);
 	const meta = $derived(duration === undefined ? "" : fmtDuration(duration));
 	// A step that launched a background task tracks that task. Foreground tasks
 	// stay ordinary steps.
@@ -81,17 +89,28 @@
 		openTask({ id: taskId, sessionId: childSession, description }, { messageId, partId });
 	}
 
+	function hasRowSelection(event: MouseEvent) {
+		const selection = window.getSelection();
+		const row = event.currentTarget;
+		if (!selection || selection.isCollapsed || !(row instanceof Node)) return false;
+		for (let index = 0; index < selection.rangeCount; index++) {
+			if (selection.getRangeAt(index).intersectsNode(row)) return true;
+		}
+		return false;
+	}
+
 </script>
 
 {#if part.type === "tool"}
-	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.status !== "error" && !part.isError)}
-	{@const failed = part.status === "error" || part.isError}
+	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.outcome !== "failed")}
+	{@const failed = part.outcome === "failed"}
 	{@const movedToBackground = part.metadata?.['movedToBackground'] === true}
 	{@const verb = movedToBackground ? "Moved to background" : toolVerb(part, running ? "present" : "past")}
 	{@const command = toolCommand(part)}
 	{@const subject = part.name === "Skill" ? skillName(part) : toolSubject(part)}
 	{@const tag = toolTags(part)[0]}
 	{@const isSkill = part.name === "Skill"}
+	{@const hasLiveOutput = typeof part.metadata?.['output'] === "string"}
 	{@const cursorDetail = typeof part.metadata?.['cursorToolType'] === "string" && (part.metadata['fileChange'] || part.metadata['plan'] || part.metadata['computerUse'] || part.metadata['media'] || part.metadata['output'] !== undefined || ensureCanonical(part.name, part.input).tool === "Unknown")}
 	<!-- A compact row is still this tool's rendering, so it answers to the same
 	     .tool-item / data-tool-status hooks the expanded card used to. -->
@@ -104,7 +123,7 @@
 	>
 		<div class="flex items-center gap-[6px]">
 			<Button
-				variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" disabledStyle="undimmed"
+				variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="activity" disabledStyle="undimmed"
 				class="{launch ? '@container' : ''} {highlight ? 'bg-selection' : ''}"
 				disabled={!!launch && !childSession}
 				aria-expanded={launch ? undefined : expanded}
@@ -119,15 +138,16 @@
 							.filter(Boolean)
 							.join(", ")
 					: `${verb} ${subject}`}
-				onclick={() => {
+				onclick={(event) => {
+					if (hasRowSelection(event)) return;
 					if (launch) return openChildSession(subject);
 					expanded = !expanded;
 				}}
 			>
-				<span class="shrink-0 text-text-dimmer">
+				<span class="shrink-0 {iconColor}">
 					<Icon name={style.icon} size={14} />
 				</span>
-				<span class="shrink-0 font-medium {running ? 'text-text' : 'text-text-secondary'}">
+				<span class="tool-name shrink-0 font-normal text-text-muted">
 					{verb}
 				</span>
 				{#if tag}
@@ -135,7 +155,7 @@
 					     differ by this far more than by their descriptions. -->
 					<Badge variant="tag" size="sm" class="shrink-0 font-mono">{tag}</Badge>
 				{/if}
-				<span class="{launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1 min-w-0'} truncate font-mono text-[12.5px] text-text-secondary">
+				<span class="tool-desc {launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1 min-w-0'} truncate font-mono text-mono-code text-text-dimmer">
 					{subject}
 				</span>
 				{#if typeof part.metadata?.['cursorToolType'] === "string" && part.metadata['truncated'] === true}<span class="shrink-0 text-text-muted">Truncated</span>{/if}
@@ -151,14 +171,14 @@
 					{@const lead = launchMeta(launch)}
 					{@const usage = launchUsage(launch)}
 					<!-- Status and time stay whole; a narrow row drops the usage. -->
-					<span class="launch-meta ml-auto shrink-0 whitespace-nowrap font-mono text-[12px]"><span class={launchTone}>{lead}</span>{#if usage}<span class="text-text-dimmer @max-[480px]:hidden">{lead ? " · " : ""}{usage}</span>{/if}</span>
-				{:else if meta}<span class="ml-auto shrink-0 font-mono text-[12px] text-text-dimmer">{meta}</span>{/if}
+					<span class="launch-meta ml-auto shrink-0 whitespace-nowrap font-mono text-mono-time"><span class="{launchTone} {launchTone === 'text-text-dimmer' ? 'activity-time' : ''}">{lead}</span>{#if usage}<span class="text-text-dimmer @max-[480px]:hidden">{lead ? " · " : ""}{usage}</span>{/if}</span>
+				{:else if meta}<time class="activity-time ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</time>{/if}
 				{#if launch?.state.kind === "finished"}
 					<span class="shrink-0 {launchTone} [&_.lucide]:w-3 [&_.lucide]:h-3" aria-hidden="true">
 						<Icon name={{ completed: "circle-check", failed: "circle-x", stopped: "circle-stop" }[launch.state.outcome]} size={12} />
 					</span>
 				{:else if running}
-					<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+					<ConduitMark size={16} variant="running" />
 				{:else if failed}
 					<span class="shrink-0 text-error [&_.lucide]:w-3 [&_.lucide]:h-3">
 						<Icon name="circle-alert" size={12} />
@@ -186,31 +206,35 @@
 		{/if}
 		{#if !launch && expanded && isSkill}
 			<div class="ml-[22px] mr-[4px] my-[4px]"><SkillDoc name={subject} /></div>
-		{:else if !launch && expanded && (part.result || command || cursorDetail)}
-			<ToolFullDetail message={part} class="ml-[22px] mr-[4px] mb-[4px]">
+		{:else if !launch && expanded && (part.result || command || hasLiveOutput || cursorDetail)}
+			<ToolFullDetail message={part} showExitCode={ensureCanonical(part.name, part.input).tool !== "Bash"} class="ml-[22px] mr-[4px] mb-[4px]">
 				{#snippet children(tool)}
 					{@const fullCommand = toolCommand(tool)}
+					{#if ensureCanonical(tool.name, tool.input).tool === "Bash"}
+						<ShellToolDetail {tool} command={fullCommand ?? ""} />
+					{:else}
 					<div
-						class="tool-result my-[4px] py-[8px] px-[10px] font-mono text-[12px] leading-[1.6] whitespace-pre-wrap break-all bg-code-bg border rounded-[6px] max-h-[300px] overflow-y-auto {tool.isError ? 'border-error/30 text-error' : 'border-border-subtle text-text-secondary'}"
+						class="tool-result my-[4px] py-[8px] px-[10px] font-mono text-mono-xs leading-[1.6] whitespace-pre-wrap break-all bg-code-bg rounded-[6px] max-h-[300px] overflow-y-auto {tool.outcome === 'failed' ? 'text-error' : 'text-text-secondary'}"
 					>{#if fullCommand}<span class="text-text-muted">$ {fullCommand}</span>{#if tool.result}{"\n\n"}{/if}{/if}{tool.result ?? ""}</div>
+					{/if}
 				{/snippet}
 			</ToolFullDetail>
 		{/if}
 	</div>
 {:else if part.type === "thinking"}
 	<div class="thinking-block thinking-item" class:done={part.done} data-part={part.uuid}>
-		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
-			<span class="shrink-0 text-text-dimmer">
+		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="activity" aria-expanded={expanded} onclick={(event) => { if (!hasRowSelection(event)) expanded = !expanded; }}>
+			<span class="shrink-0 {style.text}">
 				<Icon name={style.icon} size={14} />
 			</span>
 			<span class="thinking-label shrink-0 font-medium text-text-secondary">{part.done ? "Thought" : thinkingVerb(part)}</span>
 			<span class="flex-1 truncate text-text-dimmer italic">{firstLine(part.text, 80)}</span>
-			{#if meta}<span class="thinking-duration shrink-0 font-mono text-[12px] text-text-dimmer">{meta}</span>{/if}
-			{#if !part.done}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />{/if}
+			{#if meta}<span class="activity-time thinking-duration shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}
+			{#if !part.done}<ConduitMark size={16} variant="running" />{/if}
 		</Button>
 		{#if expanded && part.text}
 			<div
-				class="ml-[22px] mr-[4px] my-[4px] py-[8px] px-[10px] font-mono text-[12px] leading-[1.6] whitespace-pre-wrap break-words text-text-secondary bg-code-bg border border-border-subtle rounded-[6px] max-h-[300px] overflow-y-auto"
+				class="ml-[22px] mr-[4px] my-[4px] py-[8px] px-[10px] font-mono text-mono-xs leading-[1.6] whitespace-pre-wrap break-words text-text-secondary bg-code-bg border border-border-subtle rounded-[6px] max-h-[300px] overflow-y-auto"
 			>{part.text}</div>
 		{/if}
 	</div>
@@ -236,11 +260,11 @@
 	</div>
 {:else}
 	<div data-part={part.uuid} data-message-number={messageNumber} data-highlighted={highlight || undefined}>
-		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" class={highlight ? "bg-selection" : ""} aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
-			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-[12px] text-text-dimmer">#{messageNumber}</span>
-			{:else}<span class="shrink-0 text-text-dimmer"><Icon name={style.icon} size={14} /></span>{/if}
+		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="activity" class={highlight ? "bg-selection" : ""} aria-expanded={expanded} onclick={(event) => { if (!hasRowSelection(event)) expanded = !expanded; }}>
+			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs {style.text}" style:color={messageCategory?.colour}>{#if messageCategory}<span aria-hidden="true">{messageCategory.glyph}</span>{" "}{/if}#{messageNumber}</span>
+			{:else}<span class="shrink-0 {style.text}"><Icon name={style.icon} size={14} /></span>{/if}
 			<span class="flex-1 truncate italic text-text-secondary">{firstLine(part.rawText, 120)}</span>
-			{#if meta}<span class="shrink-0 font-mono text-[12px] text-text-dimmer">{meta}</span>{/if}
+			{#if meta}<span class="activity-time shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}
 		</Button>
 		{#if expanded}
 			<div class="ml-[22px] mr-[4px] my-[4px] md-content text-[13px] leading-[1.6] italic text-text-secondary">{@html part.html}</div>

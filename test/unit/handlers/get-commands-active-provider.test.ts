@@ -13,6 +13,7 @@ import {
 	OpenCodeSettingsServiceLive,
 	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
+import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { getCommandsForSession } from "../../../src/lib/handlers/settings.js";
 import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
@@ -38,6 +39,7 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 	return Layer.merge(
 		apiLayer,
 		Layer.mergeAll(
+			makeOverridesStateLive(),
 			OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
 			Layer.succeed(LoggerTag)(makeHandlerLogger()),
 			Layer.succeed(ConfigTag)(
@@ -52,7 +54,8 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 				preview: () => Effect.die("unused"),
 				record: () => Effect.die("unused"),
 				claudeWorktreeState: () => Effect.die("unused"),
-				withLaunch: (effect) => effect,
+				withLaunch: (_sessionId, effect) => effect,
+				withProjectLaunch: (effect) => effect,
 			}),
 		),
 	);

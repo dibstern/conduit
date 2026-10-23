@@ -1,0 +1,1226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jev surfacing: minimising the turn</title>
+<style>
+:root {
+	--bg: #0d0e11; --bg-alt: #1b1e24; --surface: #141619;
+	--text: #eceef2; --text-2: #a8afbb; --muted: #838b98; --dim: #676e79;
+	--accent: #fe3781; --border: #2d323b; --border-subtle: #20242b; --chip: #3a414c;
+	--error: #f4607a; --success: #3fd69a; --tool: #5aa9f5; --warning: #f4b740;
+	--teal: #1aa3b3; --gold: #b8962e; --rose: #c2305a;
+	--mono: "JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+	--radius: 10px;
+	--accent-bg: rgba(254,55,129,.12);
+	--t-ask: #fe3781; --t-blocked: #f4607a; --t-risk: #f4b740; --t-scope: #f29a4a; --t-replan: #1aa3b3; --t-correction: #b58cf5; --t-decision: #5aa9f5; --t-finding: #3fd69a; --t-milestone: #9fb86a; --t-perf: #e0c341;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1.55; }
+a { color: var(--tool); }
+code { font-family: var(--mono); font-size: 0.92em; background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: 5px; padding: 0 5px; }
+button { font-family: inherit; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 1px solid var(--tool); outline-offset: 2px; }
+.t-ask { color: var(--t-ask); } .t-blocked { color: var(--t-blocked); } .t-risk { color: var(--t-risk); } .t-scope { color: var(--t-scope); } .t-replan { color: var(--t-replan); } .t-correction { color: var(--t-correction); } .t-decision { color: var(--t-decision); } .t-finding { color: var(--t-finding); } .t-milestone { color: var(--t-milestone); } .t-perf { color: var(--t-perf); } .t-recap { color: var(--text-2); } .t-routine { color: var(--dim); }
+
+/* Page chrome */
+.page { max-width: 1240px; margin: 0 auto; padding: 40px 24px 140px; }
+h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -0.01em; }
+.lede { color: var(--text-2); max-width: 860px; margin: 6px 0; }
+.how { margin: 16px 0 0; padding: 12px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--surface); color: var(--text-2); max-width: 900px; }
+.how b { color: var(--text); }
+nav.toc { position: sticky; top: 0; z-index: 50; background: rgba(13,14,17,.93); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border-subtle); margin: 22px -24px 0; padding: 10px 24px; display: flex; flex-wrap: wrap; gap: 6px 8px; }
+nav.toc a { color: var(--text-2); text-decoration: none; padding: 2px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; font-size: 12px; }
+nav.toc a:hover { color: var(--text); border-color: var(--chip); }
+nav.toc .tl { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; align-self: center; margin-left: 6px; }
+h2.part { margin: 56px 0 4px; font-size: 19px; }
+h2.part + p { color: var(--muted); margin: 0 0 8px; max-width: 900px; }
+.comp { margin: 30px 0 40px; padding-top: 18px; border-top: 1px solid var(--border-subtle); scroll-margin-top: 64px; }
+.comp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 10px; }
+.comp-head h3 { margin: 0; font-size: 16px; }
+.bead { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--chip); color: var(--muted); }
+.comp-head p { flex-basis: 100%; margin: 2px 0 0; color: var(--text-2); max-width: 920px; }
+.frames { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.frames.one { grid-template-columns: 1fr; }
+.frames.three { grid-template-columns: 1fr 1fr 1fr; }
+@media (max-width: 1000px) { .frames, .frames.three { grid-template-columns: 1fr; } }
+.state { margin: 0; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg); overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.state > figcaption { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 7px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--surface); display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.state > figcaption button { all: unset; cursor: pointer; text-transform: none; letter-spacing: 0; color: var(--text-2); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; font-size: 11px; }
+.state > figcaption button:hover { color: var(--text); }
+.state > figcaption button[disabled] { opacity: .4; cursor: default; }
+.stage { padding: 16px; display: flex; flex-direction: column; gap: 12px; position: relative; }
+dl.spec { display: grid; grid-template-columns: 130px 1fr; gap: 5px 14px; margin: 14px 0 0; color: var(--text-2); font-size: 12px; max-width: 1000px; }
+dl.spec dt { color: var(--muted); }
+dl.spec dd { margin: 0; }
+.user-msg { align-self: flex-end; max-width: 85%; background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: 14px 14px 4px 14px; padding: 8px 12px; }
+.reply p { margin: 0 0 6px; }
+.tchip { display: inline-block; font-size: 10.5px; padding: 0 6px; border-radius: 4px; border: 1px solid currentColor; line-height: 16px; white-space: nowrap; }
+.pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+.run { animation: pulse 1.6s ease-in-out infinite; }
+
+/* Review affordance on every component and departure */
+.verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 12px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; font-size: 11.5px; color: var(--muted); max-width: 1000px; }
+.verdict .sgc button { padding: 2px 9px; }
+.verdict input { flex: 1; min-width: 220px; background: var(--bg-alt); border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text); font: inherit; font-size: 11.5px; padding: 3px 8px; }
+.sgc { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; flex: none; }
+.sgc button { all: unset; cursor: pointer; padding: 1px 8px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.sgc button + button { border-left: 1px solid var(--border-subtle); }
+.sgc button:hover { color: var(--text); }
+.sgc button[aria-pressed="true"] { background: var(--bg-alt); color: var(--text); }
+.verdict .sgc button[data-v="ok"][aria-pressed="true"], .dep .sgc button[data-v="keep"][aria-pressed="true"] { color: var(--success); }
+.verdict .sgc button[data-v="change"][aria-pressed="true"], .dep .sgc button[data-v="reverse"][aria-pressed="true"] { color: var(--warning); }
+/* Round-3 shared primitives */
+.reply { color: var(--text); }
+.ta { border: 1px solid var(--border-subtle); border-radius: var(--radius); padding: 6px 10px 8px; }
+.ta.live { border-color: transparent; background: var(--surface); box-shadow: -4px 0 16px rgba(234, 179, 8, 0.15), -3px 0 0 var(--warning); }
+.ta-head { display: flex; gap: 8px; align-items: baseline; white-space: nowrap; overflow: hidden; }
+.ta-head .chev { color: var(--dim); }
+.ta-head .verb { color: var(--text); font-weight: 600; }
+.ta-head .meta { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.ta-head .bill { margin-left: auto; color: var(--dim); font-size: 11px; }
+.strip { display: flex; gap: 2px; height: 4px; margin-top: 6px; border-radius: 2px; overflow: hidden; }
+.strip .seg { background: var(--teal); flex: 1; }
+.strip .seg.gold { background: var(--gold); } .strip .seg.rose { background: var(--rose); } .strip .seg.dim { background: var(--chip); }
+.steps { margin-top: 6px; border-top: 1px solid var(--border-subtle); padding-top: 4px; }
+.step { display: flex; gap: 8px; color: var(--text-2); padding: 2px 0; white-space: nowrap; overflow: hidden; }
+.step .v { color: var(--text-2); font-weight: 600; } .step .t { margin-left: auto; color: var(--dim); }
+.step.narration { color: var(--dim); font-style: italic; }
+.pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.25; } }
+.mobile-row { display: grid; grid-template-columns: 390px 390px; justify-content: center; gap: 16px 24px; margin-top: 16px; align-items: start; }
+.mobile-row dl.spec { grid-column: 1 / -1; }
+@media (max-width: 820px) { .mobile-row { grid-template-columns: 1fr; justify-items: center; } }
+.phone { margin: 0; width: 390px; }
+.phone > figcaption { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); padding: 0 4px 6px; display: flex; justify-content: space-between; }
+.phone .screen { height: 760px; border: 1px solid var(--border); border-radius: 34px; background: var(--bg); overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 0 0 6px #07080a, 0 0 0 7px var(--border-subtle); position: relative; }
+.phone .sbar { flex: none; height: 40px; padding: 12px 22px 0; display: flex; justify-content: space-between; font-size: 11px; color: var(--text-2); }
+.phone .appbar { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 14px 8px; border-bottom: 1px solid var(--border-subtle); font-size: 12px; }
+.phone .appbar .back { color: var(--dim); }
+.phone .appbar .title { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.phone .body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px 16px; display: flex; flex-direction: column; gap: 10px; scrollbar-width: none; font-size: 12.5px; }
+.phone .dock { flex: none; padding: 8px 10px 22px; border-top: 1px solid var(--border-subtle); background: var(--bg); }
+.phone .dock .composer { font-size: 12px; }
+.composer { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--dim); }
+.composer .ph { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.composer .model { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border-subtle); color: var(--muted); }
+.composer .go { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--bg-alt); border: 1px solid var(--border); color: var(--text-2); flex: none; }
+.composer .go.stop i { width: 8px; height: 8px; border-radius: 2px; background: var(--warning); }
+.composer.live { flex-wrap: wrap; row-gap: 6px; }
+.composer .status { flex-basis: 100%; display: flex; align-items: center; gap: 7px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle); font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.composer .status b { color: var(--text-2); font-weight: 600; }
+.composer .status .jump { margin-left: auto; color: var(--text-2); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; }
+.phone .reply code { font-size: 12px; }
+.phone .composer .status { font-size: 12px; }
+
+/* B3 · Scrub and summary (ported) */
+button:focus-visible, .b3-hit:focus-visible, [contenteditable]:focus-visible, input:focus-visible { outline: 1px solid var(--tool); outline-offset: 2px; }
+.b3-hb { all: unset; display: flex; gap: 8px; align-items: baseline; min-width: 0; overflow: hidden; cursor: pointer; }
+.chev { display: inline-block; transition: transform .15s; }
+.ta.b3-open .b3-hb .chev { transform: rotate(90deg); }
+.b3-unread { margin-left: auto; flex: none; background: var(--accent-bg); border: 1px solid rgba(254, 55, 129, .4); color: var(--accent); border-radius: 999px; padding: 0 8px; line-height: 18px; font-size: 11px; cursor: pointer; }
+.ta-head .bill ~ .b3-unread { margin-left: 8px; }
+.b3-unread.b3-zero { background: none; border-color: var(--border-subtle); color: var(--dim); }
+.phone .b3-unread { font-size: 12px; }
+.b3-arg { overflow: hidden; text-overflow: ellipsis; color: var(--muted); min-width: 0; }
+
+/* Scrub strip (from M2) */
+.b3-sc { position: relative; margin-top: 6px; }
+.b3-lane { display: flex; align-items: flex-end; }
+.b3-sc[data-phase="live"] .b3-lane { min-height: 132px; padding-bottom: 9px; }
+.b3-sc.b3-nocard .b3-lane { min-height: 0; padding: 0; }
+.b3-card { position: relative; flex: none; width: 420px; max-width: 100%; background: var(--bg-alt); border: 1px solid var(--border); border-top: 3px solid currentColor; border-radius: 6px 6px 8px 8px; padding: 6px 10px 6px; box-shadow: 0 8px 22px rgba(0, 0, 0, .45); transition: margin-left .12s ease-out; }
+.b3-phone .b3-card { width: 100%; }
+.b3-card[hidden] { display: none; }
+.b3-card::after { content: ""; position: absolute; left: var(--cx, 50%); bottom: -6px; width: 10px; height: 10px; margin-left: -5px; background: var(--bg-alt); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: rotate(45deg); }
+.b3-ch { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 7px; }
+.b3-lab { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
+.b3-need { font-size: 10px; color: #1a0c12; background: var(--t-ask); border-radius: 3px; padding: 0 4px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; line-height: 15px; }
+.b3-mk { font-size: 10.5px; line-height: 15px; padding: 0 5px; border-radius: 3px; white-space: nowrap; }
+.b3-mk.up { color: var(--success); background: rgba(63, 214, 154, .12); }
+.b3-mk.dn { color: var(--warning); background: rgba(244, 183, 64, .12); }
+.b3-at { margin-left: auto; color: var(--dim); font-size: 11px; white-space: nowrap; }
+.b3-vw { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 6px; padding: 0 7px; line-height: 20px; font-size: 11px; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.b3-vw input { margin: 0; width: 12px; height: 12px; accent-color: var(--tool); cursor: pointer; }
+.b3-vw:has(input:checked) { border-color: rgba(90, 169, 245, .55); background: rgba(90, 169, 245, .1); color: var(--tool); }
+.b3-note { color: var(--dim); font-size: 11px; margin-top: 3px; }
+.b3-tx { color: var(--text); font-size: 12px; line-height: 1.5; margin: 4px 0 5px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; }
+.b3-cf { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; border-top: 1px solid var(--border-subtle); padding-top: 5px; color: var(--muted); font-size: 11px; }
+.b3-sp { flex: 1; }
+.b3-cb { background: none; border: 1px solid var(--border-subtle); color: var(--text-2); border-radius: 6px; padding: 0 7px; line-height: 20px; cursor: pointer; font-size: 11px; white-space: nowrap; }
+.b3-cb:hover { border-color: var(--border); color: var(--text); }
+.b3-cb:disabled { color: var(--chip); cursor: default; border-color: transparent; }
+.b3-cb.b3-hot { color: var(--warning); border-color: rgba(244, 183, 64, .4); }
+.b3-act[data-reply][aria-pressed="true"] { color: var(--tool); border-color: rgba(90, 169, 245, .5); }
+.b3-act.up[aria-pressed="true"] { color: var(--success); border-color: rgba(63, 214, 154, .5); background: rgba(63, 214, 154, .08); }
+.b3-act.dn[aria-pressed="true"] { color: var(--warning); border-color: rgba(244, 183, 64, .5); background: rgba(244, 183, 64, .08); }
+.b3-why { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 2px 0 6px; padding: 6px 8px; border: 1px dashed var(--border); border-radius: 6px; font-size: 11px; color: var(--text-2); }
+.b3-wq { flex-basis: 100%; }
+.b3-chip { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 0 9px; line-height: 20px; cursor: pointer; font-size: 11px; }
+.b3-chip:hover { border-color: var(--tool); }
+.b3-chip.b3-skip { color: var(--muted); border-style: dashed; }
+.b3-chip.s { cursor: default; }
+.b3-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text-2); border-radius: 6px; padding: 0 9px; line-height: 22px; cursor: pointer; font-size: 11px; white-space: nowrap; }
+.b3-btn:hover { color: var(--text); border-color: var(--chip); }
+.b3-btn.pri { background: rgba(63, 214, 154, .13); border-color: rgba(63, 214, 154, .5); color: var(--success); }
+.b3-btn.dng { color: var(--error); }
+.b3-btn.dng:hover { border-color: var(--error); }
+.b3-btn:disabled { opacity: .45; cursor: default; }
+
+.b3-hit { position: relative; cursor: ew-resize; touch-action: none; outline: none; user-select: none; }
+.b3-pins { position: relative; height: 38px; }
+.b3-pin { position: absolute; bottom: 0; transform: translateX(-50%); font: 700 10.5px/15px var(--mono); padding: 0 3px; border-radius: 4px; background: var(--bg); border: 1px solid currentColor; white-space: nowrap; letter-spacing: -.04em; }
+.b3-phone .b3-pin { font-size: 12px; line-height: 17px; }
+.b3-pin::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 4px; background: currentColor; opacity: .6; }
+.b3-pin.b3-r1 { bottom: 20px; }
+.b3-pin.b3-r1::after { height: 24px; opacity: .35; }
+.b3-pin.b3-seen:not(.b3-on) { opacity: .5; }
+.b3-pin.b3-x { border-style: dashed; }
+.b3-pin sup { font-size: 8px; line-height: 0; vertical-align: 4px; margin-left: 1px; }
+.b3-nd { position: absolute; top: -4px; right: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--bg); }
+.b3-pin.b3-on { background: currentColor; opacity: 1; }
+.b3-pin.b3-on b { color: #111318; }
+.b3-pin.b3-ask:not(.b3-on)::before { content: ""; position: absolute; inset: -3px; border-radius: 6px; border: 1px solid var(--t-ask); animation: b3-ring 1.8s ease-out infinite; }
+@keyframes b3-ring { from { opacity: .9; transform: scale(1); } to { opacity: 0; transform: scale(1.35); } }
+.b3-track { position: relative; padding: 4px 0; }
+.b3-track .strip { height: 8px; margin: 0; border-radius: 3px; }
+.b3-thumb { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 2px var(--bg); pointer-events: none; transition: left .12s ease-out; }
+.b3-thumb::after { content: ""; position: absolute; left: 50%; bottom: -5px; width: 11px; height: 11px; margin-left: -5.5px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--bg); }
+.b3-drag .b3-thumb, .b3-drag .b3-card { transition: none; }
+.b3-thumb[hidden] { display: none; }
+.b3-run { animation: b3-breathe 1.4s ease-in-out infinite; }
+@keyframes b3-breathe { 50% { opacity: .35; } }
+.b3-axis { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 8px; font-size: 11px; color: var(--dim); white-space: nowrap; }
+.b3-askb { background: rgba(254, 55, 129, .1); border: 1px solid rgba(254, 55, 129, .45); color: var(--t-ask); border-radius: 999px; padding: 0 7px; line-height: 18px; cursor: pointer; font-size: inherit; }
+.b3-prog { background: none; border: 1px solid var(--border-subtle); color: var(--text-2); border-radius: 999px; padding: 0 8px; line-height: 18px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: inherit; }
+.b3-prog:hover { border-color: var(--border); color: var(--text); }
+.b3-pb { width: 36px; height: 4px; border-radius: 2px; background: var(--chip); overflow: hidden; display: inline-block; }
+.b3-pb i { display: block; height: 100%; background: var(--tool); transition: width .2s; }
+.b3-lvs { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: 7px; overflow: hidden; margin-left: auto; }
+.b3-lvs button { background: none; border: 0; color: var(--muted); padding: 0 6px; line-height: 18px; cursor: pointer; font-size: inherit; }
+.b3-lvs button[aria-pressed="true"] { background: var(--bg-alt); color: var(--text); }
+.b3-end { background: none; border: 0; color: var(--dim); padding: 0; cursor: default; font-size: inherit; }
+.b3-end.b3-back { color: var(--warning); cursor: pointer; }
+.b3-fin { display: none; }
+.b3-final .b3-fin { display: inline; }
+.b3-final .b3-pins, .b3-final .b3-lane { display: none; }
+
+/* Turn summary */
+.b3-sum { margin-top: 9px; }
+.b3-sum:empty { display: none; }
+.b3-gen { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 4px 10px; border: 1px dashed var(--border); border-radius: 8px; color: var(--text-2); font-size: 11.5px; cursor: pointer; white-space: nowrap; overflow: hidden; }
+.b3-gen:hover { border-color: var(--chip); color: var(--text); }
+.b3-gen b { font-weight: 600; }
+.b3-gen span { margin-left: auto; color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+.b3-box { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.b3-sh { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 10px; cursor: pointer; white-space: nowrap; overflow: hidden; font-size: 11.5px; color: var(--muted); }
+.b3-sum.open .b3-sh { border-bottom: 1px solid var(--border-subtle); background: var(--bg-alt); }
+.b3-sum.open .b3-sh .chev { transform: rotate(90deg); }
+.b3-sh b { color: var(--text); font-weight: 600; }
+.b3-sm { overflow: hidden; text-overflow: ellipsis; color: var(--dim); }
+.b3-sr { margin-left: auto; color: var(--text-2); }
+.b3-sb { padding: 8px 10px; }
+.b3-fresh { animation: b3-fade .35s ease-out; }
+@keyframes b3-fade { from { opacity: .2; } }
+.b3-stx { margin: 0; color: var(--text); font-size: 12.5px; line-height: 1.7; }
+.b3-sf { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 7px; color: var(--dim); font-size: 11px; }
+
+/* Composer: pending replies */
+
+/* Phone sizes: text >= 12px, targets >= 32px */
+.b3-phone .b3-t0, .b3-phone .b3-sm { display: none; }
+.b3-phone .b3-tx { font-size: 12.5px; }
+.b3-phone .b3-at, .b3-phone .b3-lab, .b3-phone .b3-note, .b3-phone .b3-why, .b3-phone .b3-mk, .b3-phone .b3-need, .b3-phone .b3-sf { font-size: 12px; }
+.b3-phone .b3-need, .b3-phone .b3-mk { line-height: 18px; }
+.phone .b3-cb, .b3-phone .b3-chip, .phone .b3-btn { line-height: 30px; min-width: 32px; font-size: 12px; }
+.phone .b3-unread, .b3-phone .b3-askb, .b3-phone .b3-prog, .b3-phone .b3-end { line-height: 32px; }
+.b3-phone .b3-lvs button { line-height: 30px; }
+.phone .b3-hb { min-height: 32px; align-items: center; }
+.phone .ta-head .bill { font-size: 12px; }
+.phone .b3-stx .cite { position: relative; }
+.phone .b3-stx code { font-size: 12px; }
+.phone .b3-stx .cite::after { content: ""; position: absolute; inset: -5px -1px; }
+.b3-phone .b3-pin sup { font-size: 12px; vertical-align: 3px; }
+.b3-phone .b3-cf { font-size: 12px; gap: 4px; }
+.b3-phone .b3-cf .b3-cb { padding: 0 6px; }
+/* Phone: Raise, Lower and Retype go glyph-only so the foot stays one row. */
+.b3-phone .b3-cf .b3-wl, .b3-phone .b3-gen .b3-wl { display: none; }
+.b3-phone .b3-vw { line-height: 30px; font-size: 12px; padding: 0 9px; }
+.b3-phone .b3-vw input { width: 15px; height: 15px; }
+.b3-phone .b3-axis { font-size: 12px; }
+.b3-phone .b3-askb, .b3-phone .b3-prog, .b3-phone .b3-lvs button { line-height: 30px; }
+.b3-phone .b3-lvs button { padding: 0 8px; }
+.b3-phone .b3-gen, .b3-phone .b3-sh { font-size: 12px; min-height: 34px; align-items: center; }
+.phone .composer .model { font-size: 12px; }
+
+/* ── Spec adaptations on top of the B3 port ── */
+.ta { position: relative; }
+.b3-sc .b3-lane { min-height: 132px; padding-bottom: 9px; }
+.b3-sc.b3-nocard .b3-lane { min-height: 0; padding: 0; }
+.b3-tx { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.b3-tx p { margin: 0 0 4px; }
+.b3-hit { touch-action: pan-y; }
+.b3-lvs { margin-left: 0; }
+.b3-box { overflow: visible; }
+.b3-sh { cursor: auto; overflow: visible; flex-wrap: wrap; row-gap: 4px; }
+.b3-pin:hover, .b3-grp:hover { z-index: 3; }
+.b3-grp { position: absolute; bottom: 0; transform: translateX(-50%); font: 700 10.5px/15px var(--mono); padding: 0 3px; border-radius: 4px; background: var(--bg); border: 1px solid currentColor; white-space: nowrap; letter-spacing: -.04em; cursor: pointer; }
+.b3-grp::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1px; height: 4px; background: currentColor; opacity: .6; }
+.b3-grp.b3-r1 { bottom: 20px; }
+.b3-grp.b3-r1::after { height: 24px; opacity: .35; }
+.b3-grp.b3-on { background: currentColor; }
+.b3-grp.b3-on b, .b3-grp.b3-on i.k { color: #111318; }
+.b3-grp.b3-seen:not(.b3-on) { opacity: .5; }
+.b3-grp i.k { font-style: normal; opacity: .8; font-size: 9.5px; margin-left: 2px; }
+.b3-phone .b3-grp { font-size: 12px; line-height: 17px; }
+.b3-pin.b3-pend { border-style: dashed; color: var(--dim); }
+.b3-lift { transform: translateX(-50%) translateY(-4px); box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px currentColor; z-index: 4; }
+.b3-mk.rt { color: var(--tool); background: rgba(90, 169, 245, .12); }
+.b3-act.rt[aria-pressed="true"] { color: var(--tool); border-color: rgba(90, 169, 245, .5); background: rgba(90, 169, 245, .08); }
+.b3-u { color: var(--text); font-size: 10.5px; }
+.b3-wd { color: var(--dim); flex-basis: 100%; }
+.b3-wi { background: var(--bg); border: 1px solid var(--border); border-radius: 999px; color: var(--text); font: inherit; font-size: 11px; padding: 0 9px; line-height: 20px; width: 150px; }
+.b3-stog { all: unset; display: flex; gap: 8px; align-items: baseline; cursor: pointer; min-width: 0; }
+.b3-sum.open .b3-stog .chev { transform: rotate(90deg); }
+.b3-pw { position: relative; }
+.b3-pill { background: none; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 11px; line-height: 18px; padding: 0 8px; cursor: pointer; white-space: nowrap; }
+.b3-pill:hover { color: var(--text); border-color: var(--chip); }
+.b3-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 28px rgba(0,0,0,.5); min-width: 200px; padding: 4px; display: flex; flex-direction: column; white-space: nowrap; }
+.b3-menu button { all: unset; cursor: pointer; padding: 3px 8px; border-radius: 5px; color: var(--text-2); font-size: 11.5px; display: flex; justify-content: space-between; gap: 12px; }
+.b3-menu button:hover { background: var(--surface); color: var(--text); }
+.b3-menu button[aria-pressed="true"] { color: var(--text); }
+.b3-menu button[aria-pressed="true"]::after { content: "✓"; color: var(--success); }
+.b3-mh { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); padding: 5px 8px 2px; }
+.b3-mf { font-size: 10.5px; color: var(--dim); padding: 4px 8px 2px; white-space: normal; max-width: 240px; }
+.b3-lvw { position: relative; margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.b3-lvw .b3-menu { left: auto; right: 0; }
+.b3-dot { width: 8px; height: 8px; padding: 0; border: 0; border-radius: 50%; background: var(--accent); cursor: pointer; flex: none; }
+.b3-nj { color: var(--muted); }
+.b3-nj::first-letter { color: var(--warning); }
+.b3-none { color: var(--dim); }
+.b3-genrow { display: flex; gap: 6px; align-items: center; }
+.b3-genrow .b3-gen { flex: 1; }
+.b3-gen.b3-busy { cursor: default; color: var(--muted); }
+.b3-gen.b3-fail { border-color: rgba(194, 48, 90, .6); color: var(--text-2); cursor: default; }
+.b3-gen .lnk { color: var(--tool); }
+.b3-stale { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; }
+.b3-new { color: var(--warning); }
+.b3-ver { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.b3-ver button { background: none; border: 1px solid var(--border-subtle); color: var(--text-2); border-radius: 6px; padding: 0 6px; line-height: 18px; cursor: pointer; font-size: 11px; }
+.b3-ver button:disabled { color: var(--chip); cursor: default; border-color: transparent; }
+.b3-vl { color: var(--text-2); }
+.b3-vn { color: var(--dim); }
+.step .sm { margin-left: 6px; display: inline-flex; gap: 2px; flex: none; }
+.step .sm button { background: none; border: 1px solid transparent; color: var(--dim); border-radius: 4px; padding: 0 4px; line-height: 16px; font-size: 10.5px; cursor: pointer; }
+.step .sm button:hover:not(:disabled) { color: var(--text); border-color: var(--border); }
+.step .sm button:disabled { opacity: .35; cursor: default; }
+.step .sm button[aria-pressed="true"] { color: var(--success); border-color: rgba(63, 214, 154, .5); }
+.step .nt { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.state:has(.b3-menu) { overflow: visible; }
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px 18px; }
+.lg { display: flex; gap: 14px; align-items: center; color: var(--text-2); font-size: 12px; }
+.lp { width: 56px; height: 34px; position: relative; flex: none; }
+.lp > button { left: 50%; bottom: 6px; }
+:where(.ta, .legend) button { font: inherit; }
+
+.lnk { all: unset; cursor: pointer; color: var(--text-2); white-space: nowrap; }
+.lnk:hover { color: var(--text); }
+.lnk.on { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.cite { font: inherit; font-size: 10.5px; line-height: 16px; padding: 0 5px; border-radius: 4px; border: 1px solid currentColor; background: transparent; cursor: pointer; white-space: nowrap; vertical-align: 1px; position: relative; }
+.cite.unread { background: color-mix(in srgb, currentColor 20%, transparent); font-weight: 700; }
+.cite.followed { border-style: dashed; }
+.btn { all: unset; cursor: pointer; font-size: 11px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-2); white-space: nowrap; line-height: 18px; }
+.btn:hover { color: var(--text); border-color: var(--chip); }
+.btn[disabled] { opacity: .35; cursor: default; }
+.btn.pri { color: var(--text); border-color: var(--chip); background: var(--bg-alt); }
+.btn.on { color: var(--text); border-color: var(--text-2); background: var(--bg-alt); }
+.gen { color: var(--text-2); padding: 6px 0; }
+.toast { position: absolute; right: 10px; bottom: -14px; z-index: 25; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; font-size: 11.5px; display: flex; gap: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+.toast .lnk { color: var(--tool); }
+.composer { display: flex; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--dim); }
+.composer:focus-within { border-color: var(--chip); }
+.composer .model { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border-subtle); color: var(--muted); margin-bottom: 2px; }
+.composer .go { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--bg-alt); border: 1px solid var(--border); color: var(--text-2); flex: none; }
+.ed { flex: 1; min-width: 0; color: var(--text); outline: none; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+.ed:empty::before { content: attr(data-ph); color: var(--dim); }
+.ref { display: inline-flex; align-items: baseline; gap: 4px; padding: 0 6px; margin: 0 2px; border-radius: 5px; border: 1px solid currentColor; background: var(--bg-alt); font-size: 11px; line-height: 18px; white-space: nowrap; vertical-align: 1px; cursor: default; }
+.ref.pop { animation: pop .7s ease-out; }
+@keyframes pop { from { box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 35%, transparent); } }
+.rx { all: unset; cursor: pointer; color: var(--dim); font-size: 11px; }
+.rx:hover { color: var(--text); }
+.sends { font-size: 11px; color: var(--dim); margin-top: 6px; }
+.sends > summary { cursor: pointer; list-style: none; }
+.sends > summary::-webkit-details-marker { display: none; }
+.sends[open] > summary { color: var(--text-2); }
+.sends pre { margin: 4px 0 0; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 8px; white-space: pre-wrap; color: var(--text-2); font: inherit; font-size: 11px; line-height: 1.5; }
+/* Settings */
+.set { padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+.set h4 { margin: 0; font-size: 13px; }
+.set .fine { color: var(--dim); font-size: 11px; }
+.frow { display: grid; grid-template-columns: 170px 1fr; gap: 6px 14px; align-items: baseline; }
+.frow .fl { color: var(--muted); font-size: 12px; }
+.frow .fv { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.tog { all: unset; cursor: pointer; width: 30px; height: 16px; border-radius: 999px; background: var(--chip); position: relative; flex: none; }
+.tog::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-2); transition: left .15s; }
+.tog[aria-pressed="true"] { background: var(--success); }
+.tog[aria-pressed="true"]::after { left: 16px; background: var(--bg); }
+.fin { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font: inherit; font-size: 12px; padding: 3px 8px; }
+.kchip { font-size: 10.5px; padding: 0 7px; border-radius: 999px; border: 1px solid currentColor; line-height: 17px; white-space: nowrap; }
+.k-none { color: var(--muted); } .k-valid { color: var(--success); } .k-invalid { color: var(--error); } .k-env { color: var(--tool); }
+.disclose { color: var(--text-2); font-size: 11.5px; border-left: 2px solid var(--warning); padding: 2px 0 2px 10px; }
+.preview { border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface); padding: 8px 10px; font-size: 12px; color: var(--text-2); display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.preview b { color: var(--text); }
+.preview .flash { animation: flash .6s ease-out; }
+@keyframes flash { from { color: var(--warning); } }
+.catrow { display: grid; grid-template-columns: 118px 1fr 52px 116px 168px; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border-subtle); font-size: 12px; }
+.catrow .what { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.catrow .cnt { color: var(--dim); font-size: 11px; text-align: right; }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.stepper button { all: unset; cursor: pointer; width: 24px; text-align: center; color: var(--text-2); }
+.stepper button:hover { color: var(--text); background: var(--bg-alt); }
+.stepper input { width: 40px; text-align: center; background: var(--bg); border: 0; border-left: 1px solid var(--border-subtle); border-right: 1px solid var(--border-subtle); color: var(--text); font: inherit; font-size: 12px; padding: 2px 0; }
+.stepper.changed input { color: var(--warning); }
+.cacts { display: flex; gap: 8px; font-size: 11px; white-space: nowrap; }
+.cform { grid-column: 1 / -1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 11.5px; align-items: center; }
+.cform label { color: var(--muted); }
+.cform .fin { width: 100%; }
+.cform .err { color: var(--error); font-size: 11px; grid-column: 2; }
+.cform .acts { grid-column: 1 / -1; display: flex; gap: 6px; justify-content: flex-end; }
+.sw { display: inline-flex; gap: 4px; align-items: center; }
+.sw button { all: unset; cursor: pointer; width: 14px; height: 14px; border-radius: 4px; }
+.sw button[aria-pressed="true"] { outline: 1px solid var(--text); outline-offset: 1px; }
+.retired { border: 1px dashed var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--muted); }
+.retired .catrow { opacity: .6; }
+.draftbar { position: sticky; bottom: 0; display: flex; gap: 8px; align-items: center; padding: 8px 10px; background: var(--bg-alt); border: 1px solid var(--warning); border-radius: 8px; font-size: 12px; }
+.draftbar span { flex: 1; color: var(--text-2); }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+@media (max-width: 900px) { .tiles { grid-template-columns: 1fr 1fr; } }
+.tile { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 10px; background: var(--surface); }
+.tile .tk { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; }
+.tile .tv { font-size: 14px; margin-top: 2px; }
+.tile .ts { color: var(--dim); font-size: 11px; }
+table.fgrid { border-collapse: collapse; font-size: 11.5px; width: 100%; }
+table.fgrid th, table.fgrid td { padding: 4px 8px; border-bottom: 1px solid var(--border-subtle); text-align: left; color: var(--text-2); }
+table.fgrid th { color: var(--muted); font-weight: 500; }
+table.fgrid td.z { color: var(--chip); }
+.rec { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 11.5px; }
+.rec .m { color: var(--dim); }
+.rec .x { color: var(--text-2); grid-column: 1; }
+.rec .ag { color: var(--success); } .rec .dg { color: var(--warning); }
+.rec .c { grid-row: 1 / span 3; grid-column: 2; align-self: center; }
+.hunks { display: flex; flex-direction: column; gap: 10px; }
+.hsum { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 10px; background: var(--surface); font-size: 12px; color: var(--text-2); }
+.hsum b { color: var(--text); }
+.hunk { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: 11.5px; }
+.hunk.off { opacity: .55; }
+.hunk .hh { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--surface); border-bottom: 1px solid var(--border-subtle); }
+.hunk .hh label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.hunk .hh .cost { margin-left: auto; color: var(--dim); }
+.hunk .hb { padding: 8px 10px; display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; }
+.hunk .hb .k { color: var(--muted); }
+.del { color: var(--error); text-decoration: line-through; } .ins { color: var(--success); }
+.ev { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.ev .ok { color: var(--success); } .ev .no { color: var(--warning); }
+/* Departures */
+.dep { margin: 18px 0; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg); overflow: hidden; scroll-margin-top: 64px; }
+.dep .dh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--border-subtle); }
+.dep .dh .num { color: var(--dim); }
+.dep .dh h3 { margin: 0; font-size: 14px; }
+.dep .dh .src { font-size: 10.5px; color: var(--muted); border: 1px solid var(--chip); border-radius: 999px; padding: 0 7px; }
+.dep .dh .new { font-size: 10.5px; color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); border-radius: 999px; padding: 0 7px; }
+.dep .cols { display: grid; grid-template-columns: 1fr 1fr; }
+@media (max-width: 900px) { .dep .cols { grid-template-columns: 1fr; } }
+.dep .col { padding: 12px 14px; min-width: 0; }
+.dep .col + .col { border-left: 1px solid var(--border-subtle); }
+.dep .col .cl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 6px; }
+.dep .col.was .cl { color: var(--t-correction); } .dep .col.now .cl { color: var(--success); }
+.dep .col p { margin: 0 0 8px; color: var(--text-2); }
+.dep .mini { border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface); padding: 8px 10px; font-size: 11.5px; color: var(--text-2); margin-top: 6px; }
+.dep .why { padding: 10px 14px; border-top: 1px solid var(--border-subtle); display: grid; grid-template-columns: 110px 1fr; gap: 4px 14px; font-size: 12px; color: var(--text-2); }
+.dep .why dt { color: var(--muted); }
+.dep .why dd { margin: 0; }
+.dep .verdict { margin: 0 14px 12px; max-width: none; }
+.halfpin { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid currentColor; font-size: 9px; vertical-align: -3px; margin-right: 2px; }
+.halfpin.f { background: currentColor; } .halfpin.h { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.segstrip { display: flex; gap: 2px; height: 5px; border-radius: 2px; overflow: hidden; margin: 6px 0; }
+.segstrip i { flex: 1; background: var(--teal); } .segstrip i.g { background: var(--gold); } .segstrip i.r { background: var(--rose); } .segstrip i.d { background: var(--chip); }
+.ticks { display: flex; align-items: flex-end; gap: 2px; height: 30px; margin: 6px 0 4px; }
+.ticks i { flex: 1; background: var(--chip); border-radius: 1px; }
+.ticks i.on { background: var(--text-2); }
+.filebox { white-space: pre; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; color: var(--muted); background: var(--bg); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 6px 8px; margin-top: 6px; }
+.dockbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 60; display: flex; gap: 12px; align-items: center; padding: 8px 12px; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 999px; box-shadow: 0 10px 30px rgba(0,0,0,.5); font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.dockbar b { color: var(--text); }
+.dockbar .btn { font-size: 12px; }
+.copied { color: var(--success); }
+textarea.out { width: 100%; height: 220px; margin-top: 10px; background: var(--bg-alt); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 11.5px; padding: 8px; }
+table.keys { border-collapse: collapse; font-size: 12px; }
+table.keys td { padding: 4px 14px 4px 0; border-bottom: 1px solid var(--border-subtle); color: var(--text-2); vertical-align: top; }
+table.keys td:first-child { color: var(--text); white-space: nowrap; }
+kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--bg-alt); }
+
+/* ── Minimise ── */
+.b3-minb { flex: none; align-self: center; display: inline-grid; place-items: center; width: 22px; height: 20px; margin-left: 4px; background: none; border: 1px solid transparent; border-radius: 6px; color: var(--dim); cursor: pointer; padding: 0; }
+.b3-minb:hover { color: var(--text); border-color: var(--border); }
+.b3-minb svg { transition: transform .15s; }
+.ta.b3-min .b3-minb svg { transform: rotate(180deg); }
+.b3-hask:empty { display: none; }
+.b3-hask { flex: none; margin-left: auto; }
+.b3-hask .b3-askb { font-size: 11px; }
+.b3-hask:not(:empty) + .b3-unread { margin-left: 6px; }
+.ta-head .bill ~ .b3-hask:not(:empty) { margin-left: 8px; }
+.ta.b3-min .b3-sc { display: none; }
+.b3-mini { display: none; }
+.ta.b3-min .b3-mini:not(:empty) { display: flex; flex-direction: column; gap: 4px; margin-top: 5px; min-width: 0; }
+.b3-mrow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.b3-ms { position: relative; flex: 1; min-width: 0; height: 14px; display: flex; align-items: center; cursor: pointer; }
+.b3-ms .strip { flex: 1; height: 3px; margin: 0; gap: 1px; }
+.m-digest .b3-ms .strip { height: 5px; }
+.b3-ms.b3-peek::before { content: ""; position: absolute; left: var(--hx); top: 0; bottom: 0; width: 1px; background: var(--text); opacity: .6; }
+.b3-md { position: absolute; top: 50%; width: 6px; height: 6px; border-radius: 50%; background: var(--text); transform: translate(-50%, -50%); box-shadow: 0 0 0 1.5px var(--bg); pointer-events: none; }
+.ta.live .b3-md { box-shadow: 0 0 0 1.5px var(--surface); }
+.b3-md.ask { background: var(--t-ask); }
+.b3-md.ask::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; border: 1px solid var(--t-ask); animation: b3-ring 1.8s ease-out infinite; }
+.b3-mtip { position: absolute; bottom: 15px; transform: translateX(-50%); max-width: min(440px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 1px 7px; font-size: 11px; color: var(--text-2); pointer-events: none; z-index: 5; }
+.b3-tk { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1; cursor: pointer; font-size: 12px; line-height: 20px; color: var(--text-2); }
+.b3-tk:hover .b3-tt { color: var(--text); }
+.b3-tk:focus-visible { outline: 1px solid var(--tool); outline-offset: 2px; }
+.b3-tt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.b3-tg { flex: none; font-weight: 700; font-size: 10.5px; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; line-height: 15px; }
+.b3-ts { cursor: default; align-items: flex-start; }
+.b3-ts .b3-tt { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 19px; }
+.b3-ts .b3-tg, .b3-ts .lnk, .b3-ts .b3-new { line-height: 19px; }
+.b3-ts .b3-tg { color: var(--muted); border-color: transparent; padding: 0; }
+.b3-tn { flex: none; color: var(--dim); font-size: 11px; }
+.b3-ts .lnk { flex: none; font-size: 11px; }
+.b3-mini .b3-gen { flex: none; }
+.b3-phone .b3-minb { width: 32px; height: 32px; }
+.b3-phone .b3-ms { height: 32px; }
+.b3-phone .b3-tk { font-size: 12.5px; line-height: 32px; }
+.b3-phone .b3-hask .b3-askb { font-size: 12px; line-height: 30px; }
+/* Page bits */
+.mobile-row.solo { grid-template-columns: 390px minmax(0, 1fr); justify-content: start; align-items: center; }
+.mobile-row.solo dl.spec { grid-column: auto; }
+.solo .phone .screen { height: 560px; }
+.pick { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 4px 0 14px; color: var(--muted); font-size: 12px; }
+.pick .sgc button { padding: 0 10px; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.stack .user-msg { margin: 0; }
+.stack .reply { margin: 0; }
+.rule { color: var(--text-2); }
+kbd { font-family: var(--mono); font-size: .9em; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
+</style>
+</head>
+<body>
+<div class="page">
+<header>
+	<h1>Jev surfacing: minimising the turn</h1>
+	<p class="lede">Four ways to fold a turn's surfacing down to a line or two, and a setting for when it happens on its own. Each turn below starts minimised and is the real <a href="../spec-preview/">spec-preview</a> turn underneath. Press the chevron at the right of the head to expand it and again to minimise, or press <kbd>h</kbd> once the turn has focus.</p>
+	<div class="how"><b>What all four share.</b> Minimising hides the pins, card, strip, axis and summary. The head and the step log stay, so a minimised turn is today's turn block plus a little. Two things never hide: an open Ask joins the head as <code>? #24</code>, and <code>13 unread</code> stays. Both expand the turn and open their message, and so does anything else that opens one: a citation, <kbd>u</kbd>, a deep link. Each turn remembers its own state in the browser.</div>
+</header>
+<nav class="toc">
+	<span class="tl">Looks</span>
+	<a href="#v-head">A · Head only</a><a href="#v-strip">B · Thin strip</a><a href="#v-line">C · Summary line</a><a href="#v-digest">D · Digest</a>
+	<span class="tl">Behaviour</span>
+	<a href="#v-auto">E · When it happens</a>
+</nav>
+
+<section class="comp" id="v-head">
+	<div class="comp-head"><h3>A · Head only</h3><p>The turn folds to its head. An open Ask sits next to the unread count, and nothing else shows.</p></div>
+	<div class="frames">
+		<figure class="state"><figcaption><span>Desktop · Settled · minimised</span></figcaption><div class="stage"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-head-settled"></div><div class="reply"><p>Done. The session list, unread badges and push deep links now run on the typed stream. One open question: recapture <code>phone-sidebar</code>, or keep the old paint order?</p></div></div></figure>
+		<figure class="state"><figcaption><span>Desktop · Live · minimised</span></figcaption><div class="stage"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-head-live"></div></div></figure>
+	</div>
+	<div class="mobile-row solo">
+		<figure class="phone"><figcaption><span>Phone · Settled · minimised</span><span>44m 30s</span></figcaption><div class="screen"><div class="sbar"><span>9:41</span><span>● ● ●</span></div><div class="appbar"><span class="back">‹</span><span class="title">Typed session list</span></div><div class="body"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-head-phone"></div><div class="reply"><p>Done. The session list, unread badges and push deep links now run on the typed stream. One open question: recapture <code>phone-sidebar</code>, or keep the old paint order?</p></div></div><div class="dock"><div id="cmp-t-head-phone"></div></div></div></figure>
+		<dl class="spec"><dt>Shows</dt><dd>The head, <code>? #24</code>, <code>13 unread</code> and the chevron.</dd><dt>Height</dt><dd>No extra rows. A read turn with no Ask looks exactly like today’s.</dd><dt>Gives up</dt><dd>Where in the turn things happened, and the summary.</dd><dt>Suits</dt><dd>Reading the agent’s reply and dipping in only for Asks.</dd></dl>
+	</div>
+	<div class="verdict" data-key="v-head"></div>
+</section>
+
+<section class="comp" id="v-strip">
+	<div class="comp-head"><h3>B · Thin strip</h3><p>The head plus the activity strip at 3px, with a white dot for each unread message and a pulsing pink dot for the Ask. Hover the strip to peek at the nearest message in one line. Click to expand straight to it.</p></div>
+	<div class="frames">
+		<figure class="state"><figcaption><span>Desktop · Settled · minimised</span></figcaption><div class="stage"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-strip-settled"></div><div class="reply"><p>Done. The session list, unread badges and push deep links now run on the typed stream. One open question: recapture <code>phone-sidebar</code>, or keep the old paint order?</p></div></div></figure>
+		<figure class="state"><figcaption><span>Desktop · Live · minimised</span></figcaption><div class="stage"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-strip-live"></div></div></figure>
+	</div>
+	<div class="mobile-row solo">
+		<figure class="phone"><figcaption><span>Phone · Settled · minimised</span><span>44m 30s</span></figcaption><div class="screen"><div class="sbar"><span>9:41</span><span>● ● ●</span></div><div class="appbar"><span class="back">‹</span><span class="title">Typed session list</span></div><div class="body"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-strip-phone"></div><div class="reply"><p>Done. The session list, unread badges and push deep links now run on the typed stream. One open question: recapture <code>phone-sidebar</code>, or keep the old paint order?</p></div></div><div class="dock"><div id="cmp-t-strip-phone"></div></div></div></figure>
+		<dl class="spec"><dt>Shows</dt><dd>The head, the Ask chip, and the strip with unread dots. Read messages get no dot, so a finished turn is a plain bar.</dd><dt>Height</dt><dd>One 14px row.</dd><dt>Peek</dt><dd>A scrub without the card: the nearest surfaced message at your level, one line. On a phone the row is 32px tall and a tap expands to the nearest message.</dd><dt>Gives up</dt><dd>The summary and the level control.</dd><dt>Suits</dt><dd>Keeping the turn’s shape and where the unread ones sit.</dd></dl>
+	</div>
+	<div class="verdict" data-key="v-strip"></div>
+</section>
+
+<section class="comp" id="v-line">
+	<div class="comp-head"><h3>C · Summary line</h3><p>The head plus one line of words. A settled turn shows its summary’s first sentence with the citation chips. A live turn shows the newest surfaced message and updates as messages arrive.</p></div>
+	<div class="frames">
+		<figure class="state"><figcaption><span>Desktop · Settled · minimised</span></figcaption><div class="stage"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-line-settled"></div><div class="reply"><p>Done. The session list, unread badges and push deep links now run on the typed stream. One open question: recapture <code>phone-sidebar</code>, or keep the old paint order?</p></div></div></figure>
+		<figure class="state"><figcaption><span>Desktop · Live · minimised</span><button type="button" id="sim-line">Next message arrives ▸</button></figcaption><div class="stage"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-line-live"></div></div></figure>
+	</div>
+	<div class="mobile-row solo">
+		<figure class="phone"><figcaption><span>Phone · Settled · minimised</span><span>44m 30s</span></figcaption><div class="screen"><div class="sbar"><span>9:41</span><span>● ● ●</span></div><div class="appbar"><span class="back">‹</span><span class="title">Typed session list</span></div><div class="body"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-line-phone"></div><div class="reply"><p>Done. The session list, unread badges and push deep links now run on the typed stream. One open question: recapture <code>phone-sidebar</code>, or keep the old paint order?</p></div></div><div class="dock"><div id="cmp-t-line-phone"></div></div></div></figure>
+		<dl class="spec"><dt>Settled</dt><dd>The newest summary’s first sentence, <code>· k new</code> when it’s stale, and <b>More</b>, which expands with the summary open. With no summary yet it offers <code>✦ Summarize turn · N</code>, which runs without expanding.</dd><dt>Live</dt><dd>The newest surfaced message at your level. Click it to expand to it. Try <i>Next message arrives</i>.</dd><dt>Height</dt><dd>One line live, up to two settled.</dd><dt>Gives up</dt><dd>The turn’s shape.</dd><dt>Suits</dt><dd>Knowing what happened without opening anything.</dd></dl>
+	</div>
+	<div class="verdict" data-key="v-line"></div>
+</section>
+
+<section class="comp" id="v-digest">
+	<div class="comp-head"><h3>D · Digest</h3><p>B and C together in two rows: the thin strip with read progress, then the summary line. The most informative minimised state, and the tallest.</p></div>
+	<div class="frames">
+		<figure class="state"><figcaption><span>Desktop · Settled · minimised</span></figcaption><div class="stage"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-digest-settled"></div><div class="reply"><p>Done. The session list, unread badges and push deep links now run on the typed stream. One open question: recapture <code>phone-sidebar</code>, or keep the old paint order?</p></div></div></figure>
+		<figure class="state"><figcaption><span>Desktop · Live · minimised</span><button type="button" id="sim-digest">Next message arrives ▸</button></figcaption><div class="stage"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-digest-live"></div></div></figure>
+	</div>
+	<div class="mobile-row solo">
+		<figure class="phone"><figcaption><span>Phone · Settled · minimised</span><span>44m 30s</span></figcaption><div class="screen"><div class="sbar"><span>9:41</span><span>● ● ●</span></div><div class="appbar"><span class="back">‹</span><span class="title">Typed session list</span></div><div class="body"><div class="user-msg">Move the session list onto the typed streaming transport and delete the legacy <code>session_switched</code> path.</div><div id="t-digest-phone"></div><div class="reply"><p>Done. The session list, unread badges and push deep links now run on the typed stream. One open question: recapture <code>phone-sidebar</code>, or keep the old paint order?</p></div></div><div class="dock"><div id="cmp-t-digest-phone"></div></div></div></figure>
+		<dl class="spec"><dt>Row 1</dt><dd>The strip with unread dots, hover peek and click to open, then <code>21/30 read ›</code>, which opens the next unread.</dd><dt>Row 2</dt><dd>The summary line from C: the first sentence when settled, the newest message when live.</dd><dt>Height</dt><dd>Two rows, about a third of the expanded turn.</dd><dt>Gives up</dt><dd>The pins, card and level control.</dd><dt>Suits</dt><dd>Minimising for space while still triaging from the transcript.</dd></dl>
+	</div>
+	<div class="verdict" data-key="v-digest"></div>
+</section>
+
+
+<section class="comp" id="v-auto">
+	<div class="comp-head"><h3>E · When it happens on its own</h3><p>Minimising by hand works in every look. This adds one setting under Settings › Surfacing › General, <b>Turns open</b>, which decides how each turn starts. Pick an option to reopen the transcript below. Pick a look to see the setting with each design.</p></div>
+	<div class="pick"><span>Turns open</span><span class="sgc" id="pol"><button type="button" data-p="expanded">Expanded</button><button type="button" data-p="auto">Auto</button><button type="button" data-p="minimised">Minimised</button></span><span>Look</span><span class="sgc" id="look"><button type="button" data-l="head">A</button><button type="button" data-l="strip">B</button><button type="button" data-l="line">C</button><button type="button" data-l="digest">D</button></span></div>
+	<div class="frames">
+		<figure class="state" style="grid-column: 1 / -1"><figcaption><span>Desktop · one session, three turns</span></figcaption><div class="stage stack" id="stack"></div></figure>
+	</div>
+	<dl class="spec">
+		<dt>Expanded</dt><dd>Every turn opens expanded. This is what the spec builds today.</dd>
+		<dt>Auto</dt><dd>The live turn and the newest settled turn open expanded. An older turn opens minimised once everything in it is read and no Ask is open. In the transcript above, the first turn is read and folds, while the second still has unread messages and stays open.</dd>
+		<dt>Minimised</dt><dd>Every settled turn opens minimised. Only the live turn opens expanded.</dd>
+		<dt>Your choice wins</dt><dd>Once you expand or minimise a turn by hand, it stays that way, whatever the setting.</dd>
+	</dl>
+	<div class="verdict" data-key="v-auto" data-opts="expanded:Expanded,auto:Auto,minimised:Minimised"></div>
+</section>
+</div>
+<div class="dockbar"><span id="tally"></span><button type="button" class="btn pri" id="copy">Copy choices</button><span id="copied" class="copied" hidden>Copied</span></div>
+<div class="page" style="padding-top:0" id="outwrap" hidden><textarea class="out" id="out" readonly></textarea></div>
+
+<script>
+const MSGS = [{"n": 1, "t": "01:42", "type": "finding", "p": 0.93, "lvl": "Balanced ▲ you", "settledOnly": false, "text": "`session_switched` has three consumers, not one: MessageList history, the sidebar unread counter and the push deep link. The plan only lists the first."}, {"n": 2, "t": "02:20", "type": "finding", "p": 0.71, "lvl": "All", "settledOnly": false, "text": "MessageList reads history through `loadHistoryPage`, not the store."}, {"n": 3, "t": "03:10", "type": "scope", "p": 0.88, "lvl": "Key", "settledOnly": false, "text": "That makes this bigger than planned: the unread counter and the deep-link handler both have to move to `subscribeSessionDetail` too, or they break when the legacy path goes."}, {"n": 4, "t": "04:05", "type": "finding", "p": 0.66, "lvl": "All", "settledOnly": false, "text": "The unread counter already dedupes by session id, so the move is mostly wiring."}, {"n": 5, "t": "05:30", "type": "milestone", "p": 0.8, "lvl": "All", "settledOnly": false, "text": "Contracts for `subscribeSessionDetail` compile."}, {"n": 6, "t": "06:55", "type": "decision", "p": 0.84, "lvl": "Balanced", "settledOnly": false, "text": "I'm keeping `session_switched` behind `CONDUIT_LEGACY_SWITCH=1` for one release instead of deleting it, so a bad rollout can be reverted without a deploy."}, {"n": 7, "t": "08:10", "type": "finding", "p": 0.69, "lvl": "All", "settledOnly": false, "text": "Push deep links are built in `push-routing.ts`, not the service worker."}, {"n": 8, "t": "09:20", "type": "blocked", "p": 0.95, "lvl": "Key", "settledOnly": false, "text": "`pnpm check` fails at `ws-rpc.ts:1368`: the `ViewSession` schema lives on `feat/ni8-transport`, which isn't merged. I can't finish the sidebar without it."}, {"n": 9, "t": "09:48", "type": "replan", "p": 0.79, "lvl": "Balanced", "settledOnly": false, "text": "Changing order: I'll rebase onto `feat/ni8-transport` locally and build on top, rather than stubbing the schema and redoing it later."}, {"n": 10, "t": "11:02", "type": "finding", "p": 0.62, "lvl": "All", "settledOnly": false, "text": "`feat/ni8-transport` rebases cleanly; 3 trivial conflicts in `ws-rpc.ts`."}, {"n": 11, "t": "12:45", "type": "decision", "p": 0.74, "lvl": "Balanced", "settledOnly": false, "text": "Keeping `ViewSession` field names identical to the legacy payload so stores don't change shape."}, {"n": 12, "t": "14:30", "type": "correction", "p": 0.81, "lvl": "Balanced", "settledOnly": false, "text": "Correction: the deep link doesn't read `session_switched` directly. It goes through `history-logic.ts:178`, so there's one consumer fewer than I said at 01:42."}, {"n": 13, "t": "16:20", "type": "blocked", "p": 0.91, "lvl": "Key", "settledOnly": false, "text": "`pnpm lint` fails on 4 unused imports left by the rebase. Fixing before continuing."}, {"n": 14, "t": "17:30", "type": "finding", "p": 0.6, "lvl": "All", "settledOnly": false, "text": "The sidebar store re-renders on every summary event; it needs a keyed update."}, {"n": 15, "t": "19:05", "type": "risk", "p": 0.9, "lvl": "Key", "settledOnly": false, "text": "The unread counter now subscribes per session. With 293 sessions that's 293 open streams per tab on reconnect, which could exhaust the daemon's socket budget."}, {"n": 16, "t": "20:10", "type": "milestone", "p": 0.82, "lvl": "All", "settledOnly": false, "text": "Sidebar store is on the typed stream. Its unit tests pass."}, {"n": 17, "t": "21:05", "type": "correction", "p": 0.78, "lvl": "Balanced", "settledOnly": false, "text": "The keyed update I mentioned isn't needed: Svelte already skips unchanged rows."}, {"n": 18, "t": "22:40", "type": "decision", "p": 0.72, "lvl": "Balanced", "settledOnly": false, "text": "I'm batching unread subscriptions into one `subscribeSessionSummaries` stream instead of adding a cap, because a cap would silently drop badges."}, {"n": 19, "t": "24:00", "type": "finding", "p": 0.68, "lvl": "All", "settledOnly": false, "text": "Reconnect replays summaries in session order, so badges settle in under 200ms."}, {"n": 20, "t": "25:40", "type": "risk", "p": 0.89, "lvl": "Key", "settledOnly": false, "text": "Two open tabs double the summary stream. Acceptable for now; noting it for later."}, {"n": 21, "t": "27:15", "type": "milestone", "p": 0.86, "lvl": "All", "settledOnly": false, "text": "Sidebar and MessageList are on the typed stream. 523/523 unit files pass, 6,832 tests green."}, {"n": 22, "t": "28:30", "type": "finding", "p": 0.63, "lvl": "All", "settledOnly": false, "text": "The 2px shift only appears on the phone sidebar, not on desktop."}, {"n": 23, "t": "29:50", "type": "milestone", "p": 0.81, "lvl": "All", "settledOnly": false, "text": "Unread badges migrated. `pnpm check` clean."}, {"n": 24, "t": "31:02", "type": "ask", "p": 0.97, "lvl": "Key", "settledOnly": false, "text": "The phone sidebar baseline shifts 2px because the unread badge now paints before the first frame. Recapture it, or keep the old paint order? I'll carry on with the deep link meanwhile."}, {"n": 25, "t": "32:15", "type": "decision", "p": 0.73, "lvl": "Balanced", "settledOnly": false, "text": "Carrying on with the deep link while I wait on your phone-sidebar answer."}, {"n": 26, "t": "33:40", "type": "finding", "p": 0.64, "lvl": "All", "settledOnly": false, "text": "The push deep link opens the session before its history loads. That's why it flashed empty on iOS before this change too."}, {"n": 27, "t": "34:50", "type": "finding", "p": 0.61, "lvl": "All", "settledOnly": false, "text": "iOS Safari fires `visibilitychange` before `pageshow`, which is why the deep link raced."}, {"n": 28, "t": "35:30", "type": "milestone", "p": 0.84, "lvl": "All", "settledOnly": false, "text": "The deep link now waits for history. The empty flash is gone in the iOS simulator."}, {"n": 29, "t": "36:10", "type": "finding", "p": 0.65, "lvl": "All", "settledOnly": false, "text": "The sidebar's Storybook stories needed the typed fixture; 3 stories updated."}, {"n": 30, "t": "36:55", "type": "milestone", "p": 0.83, "lvl": "All", "settledOnly": false, "text": "Deep link migrated. `pnpm acceptance:visual` is green except `phone-sidebar`, which is waiting on your answer."}, {"n": 31, "t": "38:40", "type": "finding", "p": 0.67, "lvl": "All", "settledOnly": true, "text": "The legacy handler has no callers left when the flag is off."}, {"n": 32, "t": "40:20", "type": "decision", "p": 0.77, "lvl": "Balanced", "settledOnly": true, "text": "Leaving `phone-sidebar` unrecaptured until you answer. Everything else is committed on `feat/typed-session-list`."}, {"n": 33, "t": "41:30", "type": "decision", "p": 0.75, "lvl": "Balanced", "settledOnly": true, "text": "Defaulting `CONDUIT_LEGACY_SWITCH` to off, since you want it deleted next release."}, {"n": 34, "t": "43:50", "type": "milestone", "p": 0.88, "lvl": "All", "settledOnly": true, "text": "Branch pushed. The legacy path is off by default and can be removed next release."}];
+const CATS = {
+	ask: { g: '?', label: 'Ask', w: 100, what: 'asks the user for a choice, fact, approval or action' },
+	blocked: { g: '✕', label: 'Blocked', w: 80, what: 'reports a failed gate, missing access or stop condition that prevents the next step' },
+	risk: { g: '!', label: 'Risk', w: 80, what: 'names an unresolved plausible harm, regression or hazard' },
+	scope: { g: '±', label: 'Scope', w: 80, what: 'says the agreed deliverables must grow or shrink' },
+	replan: { g: '↻', label: 'Replan', w: 60, what: 'changes method or order because of new evidence' },
+	correction: { g: '↶', label: 'Correction', w: 60, what: 'retracts or materially revises an earlier claim' },
+	decision: { g: '◆', label: 'Decision', w: 60, what: "commits to a consequential choice or trade-off on the user's behalf" },
+	finding: { g: '●', label: 'Finding', w: 40, what: 'establishes a new fact or root cause' },
+	milestone: { g: '✓', label: 'Milestone', w: 40, what: 'reports a completed deliverable or full gate' },
+	perf: { g: '⚡', label: 'Perf', w: 70, custom: true, what: 'reports a measured change in latency, memory, bundle size or resource use' },
+};
+const URG = { ask: 0, blocked: 1, risk: 2, scope: 2, replan: 3, correction: 3, decision: 3, finding: 4, milestone: 4 };
+const weights = Object.fromEntries(Object.entries(CATS).map(([k, c]) => [k, c.w]));
+const retired = new Set();
+const RANK = { hidden: 0, all: 1, balanced: 2, key: 3 };
+const LV = { final: 'Final', key: 'Key', balanced: 'Balanced', all: 'All', hidden: 'hidden' };
+const UP = { hidden: 'all', all: 'balanced', balanced: 'key', key: 'key' };
+const DOWN = { key: 'balanced', balanced: 'all', all: 'hidden', hidden: 'hidden' };
+const ARROW = { up: '▲', down: '▼', retype: '⇄' };
+const REASONS = ['changed the plan', 'users saw this', 'needed my answer', 'just a compile', 'noise'];
+const RECAP_SETTLED = "The plan grew early: `session_switched` had three consumers, so the unread counter and the deep link had to move too [#1][#3], and the legacy path stays behind a flag for one release [#6]. A missing `ViewSession` schema blocked `pnpm check`, so the work was rebased onto `feat/ni8-transport` instead of stubbed [#8][#9]. Per-session unread subscriptions risked 293 open streams per tab, so they were batched into one summary stream [#15][#18]. The branch is pushed with the legacy path off by default [#33][#34], except the phone-sidebar baseline, which waits on your answer [#24].";
+const RECAP_LIVE = "So far: `session_switched` had three consumers, so the unread counter and deep link are moving too [#1][#3], behind a one-release flag [#6]. A missing schema forced a rebase onto `feat/ni8-transport` [#8][#9]. Unread subscriptions are batched into one stream to avoid 293 per tab [#15][#18]. The deep link is migrated and every baseline is green except phone-sidebar, which waits on your answer [#24][#30].";
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const md = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
+const plain = s => s.replace(/`/g, '');
+const secs = t => { const [m, s] = t.split(':').map(Number); return m * 60 + s; };
+const fmt = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.round(s) % 60).padStart(2, '0')}`;
+const clip = (s, n) => s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
+const cat = t => CATS[t] || { g: '·', label: t };
+
+// The spec's surfacingLevel: prominence = weight × p; Key ≥ 70, Balanced ≥ 40, else All. A retired category drops out.
+function jevLevel(m, w = weights, ret = retired) {
+	if (ret.has(m.type)) return 'hidden';
+	const x = (w[m.type] ?? 50) * m.p;
+	return x >= 70 ? 'key' : x >= 40 ? 'balanced' : 'all';
+}
+const effLevel = m => m.mark ? m.mark.level : m.routine ? 'hidden' : jevLevel(m);
+const effType = m => m.mark?.category && CATS[m.mark.category] ? m.mark.category : m.type;
+const shownAt = (m, lvl) => lvl !== 'final' && !m.pending && RANK[effLevel(m)] >= RANK[lvl];
+
+const cards = [];
+const rerenderAll = () => cards.forEach(c => c.render());
+
+class Composer {
+	constructor(root) {
+		root.innerHTML = `<div class="composer"><div class="ed" contenteditable="true" data-ph="Reply… (↩ Reply on a message drops a reference here)"></div><span class="model">sonnet-5</span><span class="go">↑</span></div><details class="sends" data-testid="surfacing-ref-preview" hidden><summary>▸ What the agent receives</summary><pre></pre></details>`;
+		this.ed = root.querySelector('.ed'); this.det = root.querySelector('.sends'); this.pre = root.querySelector('pre');
+		this.ed.addEventListener('input', () => this.update());
+		this.ed.addEventListener('click', e => { if (e.target.matches('.rx')) { e.target.closest('.ref').remove(); this.update(); } });
+	}
+	token(label, cls, block) {
+		const s = document.createElement('span');
+		s.className = `ref ${cls} pop`; s.contentEditable = 'false'; s.dataset.block = block; s.setAttribute('data-testid', 'surfacing-ref-token');
+		s.innerHTML = `${esc(label)}<button class="rx" type="button" aria-label="Remove reference">×</button>`;
+		return s;
+	}
+	insert(node) {
+		const sel = getSelection(), space = document.createTextNode(' ');
+		if (sel.rangeCount && this.ed.contains(sel.anchorNode)) {
+			const r = sel.getRangeAt(0); r.deleteContents(); r.insertNode(space); r.insertNode(node); r.setStartAfter(space); r.collapse(true);
+		} else this.ed.append(node, space);
+		this.update();
+	}
+	addMsg(m) { const c = cat(effType(m)); this.insert(this.token(`${c.g} #${m.n} ${c.label}`, `t-${effType(m)}`, `Re #${m.n} (${c.label}, ${m.t}): "${clip(plain(m.text), 280)}"`)); }
+	addExcerpt(m, text) { const c = cat(effType(m)); this.insert(this.token(`${c.g} #${m.n} "${clip(text, 24)}"`, `t-${effType(m)}`, `Re #${m.n} (${c.label}, ${m.t}): "${text}"`)); }
+	addRecap(text) { this.insert(this.token(`✦ Summary "${clip(text, 24)}"`, 't-recap', `Re summary: "${text}"`)); }
+	addText(t) { this.ed.append(document.createTextNode(t)); this.update(); }
+	update() {
+		const blocks = [], text = [];
+		for (const n of this.ed.childNodes) n.nodeType === 1 && n.dataset.block ? blocks.push(n.dataset.block) : text.push(n.textContent);
+		this.det.hidden = !blocks.length;
+		this.pre.textContent = [blocks.join('\n'), text.join('').replace(/\s+/g, ' ').trim()].filter(Boolean).join('\n\n');
+	}
+}
+// ── Turn widget: B3's strip, pins, card and summary, adapted to the spec ──
+// RS is the global Settings › Surfacing state; every widget reads it on render.
+const RS = { model: 'sonnet', when: 'turn-end', level: 'balanced' };
+const MODEL = { sonnet: 'sonnet-5', opus: 'opus-5', off: 'Off' };
+const WHEN = { 'turn-end': 'at turn end', 'on-request': 'on request' };
+const LVB = { final: 'Final', key: 'Key', balanced: 'Balanced', all: 'All' };
+const LNAME = { hidden: 'the log', all: 'All', balanced: 'Balanced', key: 'Key' };
+const byN = n => MSGS.find(m => m.n === n);
+
+const RC_LIVE_NEW = "Since 27:15: one question for you, recapture `phone-sidebar` or keep the old paint order [#24]. The agent found why push deep links flashed empty on iOS [#26] and migrated the deep link [#30]. Visual tests are green except `phone-sidebar`. It is now running `pnpm acceptance:visual`.";
+const RC_SETTLED_NEW = "While you were away (27:15 to 44:30): one answer needed, recapture `phone-sidebar` for a 2px shift or keep the old paint order [#24]. The agent found why push deep links opened empty on iOS [#26], migrated the deep link [#30], and left `phone-sidebar` unrecaptured until you answer [#32]. The branch is pushed and the legacy path is off by default [#34].";
+const RC_TURN = "The job grew: `session_switched` had three consumers, not one [#1], so the unread counter and deep link had to move too [#3], though one was later ruled out [#12]. Rather than delete the legacy path, the agent kept it behind `CONDUIT_LEGACY_SWITCH=1` for a release [#6]. An unmerged schema blocked it [#8], so it rebased onto `feat/ni8-transport` [#9]. Per-session unread streams risked exhausting sockets [#15], so it batched them into one stream [#18]. Everything is migrated and green [#21] [#30], and the branch is pushed [#34]. Waiting on you: `phone-sidebar` [#24].";
+const WHOLE21 = "The job grew: `session_switched` had three consumers, not one [#1], so the unread counter and deep link had to move too [#3]. Rather than delete the legacy path, the agent kept it behind `CONDUIT_LEGACY_SWITCH=1` for a release [#6]. An unmerged schema blocked it [#8], so it rebased onto `feat/ni8-transport` [#9]. Per-session unread streams risked exhausting sockets [#15], so it batched them into one stream [#18], and the sidebar and MessageList are on the typed stream [#21].";
+const DEFAULT_VERSIONS = [
+	{ scope: 'whole', upto: 21, at: '27:15', text: WHOLE21, model: 'sonnet', dur: '1.4s' },
+	{ scope: 'new', from: 22, since: '27:15', upto: 34, at: '44:30', text: RC_SETTLED_NEW, model: 'sonnet', dur: '1.8s' },
+];
+
+const SEG_LIVE = 'g3 _2 d1 _4 g2 _5 r1 _3 d2 _6 g2 _4 _3 r1 _5 g2 _3 d2 _6 g4 _3 _2 r1 _4 g3 _5 d2 G5';
+const SEG_SETTLED = 'g3 _2 d1 _4 g2 _5 r1 _3 d2 _6 g2 _4 _3 r1 _5 g2 _3 d2 _6 g4 _3 _2 r1 _4 g3 _5 d2 _3 g7 _2 _3';
+const SEG = { live: SEG_LIVE, settled: SEG_SETTLED, hb1: SEG_SETTLED.split(' ').slice(0, 10).join(' '), hb2: SEG_SETTLED.split(' ').slice(10).join(' '), short: 'g2 _3 d1 _2 g1' };
+const SEG_CLS = { g: 'gold', d: 'dim', r: 'rose', _: '', G: 'gold b3-run' };
+const segs = s => s.split(' ').map(t => `<span class="seg ${SEG_CLS[t[0]]}" style="flex:${t.slice(1)}"></span>`).join('');
+
+const ROUTINE = { n: 1000, t: '36:01', type: 'replan', p: .88, routine: true, text: "Waiting for the visual run to finish before the Storybook run, so they don't compete for CPU." };
+const STEPS = {
+	live: [{ v: 'Ran', arg: 'pnpm test:unit', t: '1m 48s' }, { msg: 1000 }, { v: 'Running', arg: 'pnpm acceptance:visual', t: '4m 10s', run: true }],
+	settled: [{ v: 'Searched', arg: 'session_switched', t: '1.2s' }, { v: 'Read', arg: 'src/lib/frontend/stores/sidebar.svelte.ts', t: '0.8s' }, { v: 'Edited', arg: 'src/lib/frontend/utils/history-logic.ts', t: '4s' }, { msg: 1000 }, { v: 'Ran', arg: 'pnpm acceptance:visual', t: '6m 10s' }, { more: '+ 166 more tool steps and 41 narration lines' }],
+};
+
+function mountTurn(root, o = {}) {
+	const live = !!o.live, phone = !!o.phone, seeded = !o.msgs;
+	const items = (o.msgs || MSGS.filter(m => live ? !m.settledOnly : true)).map(m => ({ ...m, s: secs(m.t) }));
+	if (seeded) {
+		items.find(m => m.n === 1).mark = { level: 'balanced', dir: 'up', reason: 'changed the plan' };
+		items.push({ ...ROUTINE, s: secs(ROUTINE.t) });
+	}
+	const steps = (o.steps || STEPS[live ? 'live' : 'settled']).filter(r => !r.msg || items.some(m => m.n === r.msg)).map(r => ({ ...r }));
+	const T0 = o.start || 0;
+	let T = o.end || (live ? 2292 : 2670);
+	const it = n => items.find(m => m.n === n);
+	const readUpTo = o.readUpTo ?? 21;
+	const unread = new Set(items.filter(m => m.n > readUpTo && m.n < 1000 && effLevel(m) !== 'hidden').map(m => m.n));
+	const versions = (o.versions ?? (!live && seeded && !o.noRecap ? DEFAULT_VERSIONS : [])).map(v => ({ ...v }));
+	const st = { cur: o.pick ?? null, follow: live && !o.pick, show: live ? !o.folded : !!o.pick, x: null, drag: false, press: null, extra: 0, why: o.why || null, toast: null, sumOpen: o.sumOpen ?? !live, ver: versions.length - 1, gen: o.recapState === 'gen' ? 'whole' : null, fail: o.recapState === 'fail', digits: '', lvMenu: o.menu === 'level', pillMenu: o.menu === 'pill', lv: o.level ?? null, lift: 0, keep: null, followed: new Set(), armedN: null, stepsOpen: !!o.stepsOpen };
+	const real = () => items.filter(m => m.n < 1000);
+	if (!live && !o.pick && real().length < 4) { st.cur = real().at(-1).n; st.show = true; }
+	if (st.why) { st.cur = st.why.n; st.show = true; }
+	st.min = !!(o.min && o.minimised);
+
+	const lv = () => st.lv ?? RS.level;
+	const recapModel = () => o.recapOff ? 'off' : RS.model;
+	const isAsk = m => effType(m) === 'ask';
+	const openAsk = () => o.noAsk ? null : [...items].filter(m => isAsk(m) && !m.pending).at(-1)?.n ?? null;
+	const urg = m => URG[effType(m)] ?? 5;
+	const list = () => items.filter(m => shownAt(m, lv()) || m.n === st.extra || m.pending).sort((a, b) => a.s - b.s);
+	const unreadN = () => [...unread].filter(n => it(n) && effLevel(it(n)) !== 'hidden').length;
+	if (st.cur && !shownAt(it(st.cur), lv())) st.extra = st.cur;
+
+	root.innerHTML = `<div class="ta${live ? ' live' : ''}${phone ? ' b3-phone' : ''}${st.stepsOpen ? ' b3-open' : ''}" data-testid="surfacing-turn">
+		<div class="ta-head">${live
+			? '<span class="chev">›</span><span class="verb">Working</span><span class="meta">38m 12s — Running pnpm acceptance:visual</span>'
+			: `<button type="button" class="b3-hb" aria-expanded="${st.stepsOpen}"><span class="chev">›</span><span class="verb">Worked</span><span class="meta">· 18 searches · 64 reads · 37 edits · 51 runs</span></button><span class="bill">${o.bill || '44m 30s'}</span>`}<span class="b3-hask"></span><button type="button" class="b3-unread" data-testid="surfacing-head-unread"></button>${o.min ? '<button type="button" class="b3-minb" data-min data-testid="surfacing-minimise"></button>' : ''}</div>${o.min ? '<div class="b3-mini" data-testid="surfacing-mini"></div>' : ''}
+		${live ? '' : `<div class="steps"${st.stepsOpen ? '' : ' hidden'}></div>`}
+		<div class="b3-sc">
+			<div class="b3-lane"><div class="b3-card" hidden data-testid="surfacing-card"></div></div>
+			<div class="b3-hit" role="slider" tabindex="0" data-testid="surfacing-scrub" aria-label="Surfaced messages. Drag or use arrows to step, a for the Ask, u next unread, s summary, r reply, + and − raise or lower, m read."><div class="b3-pins"></div><div class="b3-track"><div class="strip">${segs(SEG[o.seg || (live ? 'live' : 'settled')])}</div><span class="b3-thumb"></span></div></div>
+			<div class="b3-axis"></div>
+			<div class="b3-sum"></div>
+		</div>
+		${live ? '<div class="steps"></div>' : ''}
+		<div class="toast" hidden data-testid="surfacing-toast-undo"></div>
+	</div>`;
+	const ta = root.firstElementChild, q = s => ta.querySelector(s);
+	const sc = q('.b3-sc'), hit = q('.b3-hit'), pins = q('.b3-pins'), thumb = q('.b3-thumb'), card = q('.b3-card'), axis = q('.b3-axis'), sum = q('.b3-sum'), stepsEl = q('.steps'), headU = q('.b3-unread'), toast = q('.toast');
+	const minb = q('.b3-minb'), mini = q('.b3-mini'), hask = q('.b3-hask');
+	if (o.min) ta.classList.add('m-' + o.min);
+	// While you're tapping or scrubbing, pin the lane's height: an unclamped card then grows
+	// upward over the head instead of pushing the pins out from under the pointer.
+	const lane = q('.b3-lane');
+	hit.addEventListener('pointerdown', () => { if (!card.hidden && !lane.style.height) lane.style.height = lane.offsetHeight + 'px'; }, true);
+	const unpin = () => { if (lane.style.height) { lane.style.height = ''; } };
+	sc.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !st.press) unpin(); });
+	document.addEventListener('pointerdown', e => { if (!sc.contains(e.target)) unpin(); }, true);
+	if (phone) sc.classList.add('b3-phone');
+	const W = () => hit.clientWidth || 1, PAD = 8, xOf = m => PAD + (m.s - T0) / (T - T0) * (W() - 2 * PAD);
+	const nearest = x => { const L = list(); return L.length ? L.reduce((a, m) => Math.abs(xOf(m) - x) < Math.abs(xOf(a) - x) ? m : a) : null; };
+	const label = m => m.pending ? 'Waiting for Jev' : cat(effType(m)).label;
+	const glyph = m => m.pending ? '…' : m.n >= 1000 ? cat(effType(m)).g : cat(effType(m)).g + m.n;
+
+	// ── Head and step log ──
+	const drawHead = () => {
+		const u = unreadN();
+		headU.textContent = u ? `${u} unread` : 'All read ✓';
+		headU.classList.toggle('b3-zero', !u);
+		headU.setAttribute('aria-label', u ? `${u} unread. Open the next unread message` : 'All read');
+	};
+	const markBtns = m => {
+		const e = effLevel(m), pend = !!m.pending;
+		return `<span class="sm"><button type="button" data-smark="up" data-n="${m.n}" data-testid="surfacing-step-mark-${m.n}" aria-label="Raise #${m.n}"${pend ? ' disabled' : ''}>▲</button><button type="button" data-smark="down" data-n="${m.n}" aria-label="Lower #${m.n}"${pend || e === 'hidden' ? ' disabled' : ''}>▼</button></span>`;
+	};
+	const msgRow = m => `<div class="step${m.routine && !m.mark ? ' narration' : ''}"><span class="v t-${effType(m)}">${m.mark ? ARROW[m.mark.dir] : m.routine ? 'routine' : '▼ you'}</span><span class="nt">${md(m.text)}</span><span class="t">${m.t}</span>${markBtns(m)}</div>${st.why && st.why.src === 'step' && st.why.n === m.n ? whyRow(m) : ''}`;
+	const drawSteps = () => {
+		const listed = new Set(steps.filter(r => r.msg).map(r => r.msg));
+		const lowered = items.filter(m => m.n < 1000 && !listed.has(m.n) && effLevel(m) === 'hidden');
+		const rows = steps.flatMap(r => r.more ? [...lowered.map(msgRow), `<div class="step narration">${r.more}</div>`] : [r.msg ? msgRow(it(r.msg)) : `<div class="step"><span class="v">${r.v}</span><span class="b3-arg">${esc(r.arg)}</span><span class="t">${r.run ? '<span class="pulse"></span> ' : ''}${r.t}</span></div>`]);
+		if (!steps.some(r => r.more)) rows.push(...lowered.map(msgRow));
+		stepsEl.innerHTML = rows.join('');
+	};
+
+	// ── Axis ──
+	const drawAxis = () => {
+		const L = items.filter(m => shownAt(m, lv()));
+		const N = items.filter(m => m.n < 1000 && effLevel(m) !== 'hidden' && !m.pending).length, u = unreadN(), r = N - u, a = openAsk(), back = live && !st.follow;
+		const cnt = k => items.filter(m => shownAt(m, k)).length;
+		const lvBtns = Object.keys(LVB).map(k => `<button type="button" data-lv="${k}" aria-pressed="${k === lv()}">${k === 'balanced' ? 'Bal' : LVB[k]}${k === lv() && k !== 'final' ? ' ' + cnt(k) : ''}</button>`).join('');
+		const menu = st.lvMenu ? `<div class="b3-menu" role="menu"><div class="b3-mh">Level for this session</div><button type="button" role="menuitem" data-lvset="default">Make ${LVB[lv()]} the default</button><button type="button" role="menuitem" data-lvset="back">Back to default (${LVB[RS.level]})</button></div>` : '';
+		axis.innerHTML = `${phone || o.start ? '' : '<span class="b3-t0">00:00</span>'}${o.start ? `<span class="b3-t0">${fmt(T0)}</span>` : ''}`
+			+ (a ? `<button type="button" class="b3-askb" data-go="${a}" data-testid="surfacing-ask-chip">? 1 open · #${a}</button>` : '')
+			+ (N ? `<button type="button" class="b3-prog" data-next data-testid="surfacing-progress" aria-label="${r} of ${N} read. Open the next unread"><span class="b3-pb"><i style="width:${(r / N * 100).toFixed(1)}%"></i></span>${r}/${N} read${u ? ' ›' : ''}</button>` : '')
+			+ (o.notJudged ? `<span class="b3-nj" data-testid="surfacing-not-judged" title="Jev couldn't judge ${o.notJudged} messages. They stay in the step log.">⚠ ${o.notJudged} not judged</span>` : '')
+			+ `<span class="b3-fin">Final only · ${cnt('all')} hidden</span>`
+			+ (lv() !== 'final' && !L.length ? `<span class="b3-none">Nothing at ${LVB[lv()]} · <button type="button" class="lnk" data-lv="all">Show All</button></span>` : '')
+			+ (recapModel() === 'off' && u ? `<button type="button" class="b3-prog" data-allv>✓ Mark ${u} read</button>` : '')
+			+ `<span class="b3-lvw"><span class="b3-lvs" role="group" aria-label="Level" data-testid="surfacing-level">${lvBtns}</span>${st.lv && st.lv !== RS.level ? '<button type="button" class="b3-dot" data-lvmenu data-testid="surfacing-level-default-dot" aria-label="This session overrides the default level"></button>' : ''}${menu}</span>`
+			+ `<button type="button" class="b3-end${back ? ' b3-back' : ''}"${back ? ' data-now' : ' tabindex="-1"'}>${back ? 'now ⇥' : live ? (phone ? 'now' : '38:12 now') : fmt(T)}</button>`;
+	};
+
+	// ── Pins: B3's two rows, with group pills instead of dots ──
+	const drawPins = () => {
+		const L = list(), gap = phone ? 38 : 34, rows = [[], []], place = new Map(), a = openAsk();
+		[...L].sort((p, q2) => (isAsk(q2) - isAsk(p)) || urg(p) - urg(q2) || q2.p - p.p).forEach(m => {
+			const x = xOf(m), r = rows.findIndex(row => row.every(v => Math.abs(v - x) >= gap));
+			if (r >= 0) rows[r].push(x);
+			place.set(m.n, r);
+		});
+		const anchors = L.filter(m => place.get(m.n) >= 0), groups = new Map();
+		L.filter(m => place.get(m.n) < 0).forEach(m => {
+			const host = anchors.filter(h => !isAsk(h)).reduce((b, h) => !b || Math.abs(xOf(h) - xOf(m)) < Math.abs(xOf(b) - xOf(m)) ? h : b, null);
+			if (!host) return;
+			if (!groups.has(host.n)) groups.set(host.n, [host]);
+			groups.get(host.n).push(m);
+		});
+		const pinCls = m => `t-${m.pending ? 'routine' : effType(m)}${place.get(m.n) === 1 ? ' b3-r1' : ''}${m.n === st.cur && st.show ? ' b3-on' : ''}${m.n === a ? ' b3-ask' : ''}${unread.has(m.n) || m.pending ? '' : ' b3-seen'}${m.n === st.extra && !shownAt(m, lv()) && !m.pending ? ' b3-x' : ''}${m.pending ? ' b3-pend' : ''}${st.lift === m.n ? ' b3-lift' : ''}`;
+		const aria = m => m.pending ? 'Message waiting for Jev' : `#${m.n} ${label(m)}, ${m.t}${unread.has(m.n) ? ', unread' : ''}${m.n === a ? ', waiting on you' : ''}${m.mark ? `, marked ${m.mark.dir}` : ''}`;
+		const mk = m => m.mark ? `<sup>${ARROW[m.mark.dir]}</sup>` : '';
+		const nd = m => unread.has(m.n) ? '<i class="b3-nd"></i>' : '';
+		pins.innerHTML = anchors.map(h => {
+			const g = groups.get(h.n);
+			if (!g) return `<button type="button" class="b3-pin ${pinCls(h)}" data-n="${h.n}" style="left:${xOf(h).toFixed(1)}px" aria-label="${aria(h)}" data-testid="surfacing-pin-${h.n}"><b>${glyph(h)}</b>${mk(h)}${nd(h)}</button>`;
+			const lead = [...g].sort((p, q2) => urg(p) - urg(q2) || q2.p - p.p)[0];
+			const order = [lead, ...g.filter(m => m !== lead).sort((p, q2) => p.s - q2.s)];
+			const show = order.find(m => m.n === st.cur && st.show) || lead, on = show.n === st.cur && st.show;
+			const un = g.some(m => unread.has(m.n)), lifted = g.some(m => m.n === st.lift);
+			return `<button type="button" class="b3-grp t-${effType(show)}${place.get(h.n) === 1 ? ' b3-r1' : ''}${on ? ' b3-on' : ''}${un ? '' : ' b3-seen'}${lifted ? ' b3-lift' : ''}" data-grp="${order.map(m => m.n).join(',')}" style="left:${xOf(h).toFixed(1)}px" data-testid="surfacing-group" aria-label="${g.length} messages: ${order.map(m => `#${m.n} ${label(m)}`).join(', ')}"><b>${glyph(show)}</b> <i class="k">+${g.length - 1}</i>${mk(show)}${un ? '<i class="b3-nd"></i>' : ''}</button>`;
+		}).join('');
+	};
+
+	// ── Card ──
+	const whyRow = m => {
+		const w = st.why, e = effLevel(m), c = cat(effType(m));
+		const head = w.k === 'retype' && !w.cat
+			? `⇄ Retype #${m.n} as…`
+			: `${ARROW[w.k]} ${w.k === 'up' ? 'Raise' : w.k === 'down' ? 'Lower' : `Retype as ${cat(w.cat).label}`} #${m.n}: ${LNAME[e]} → ${LNAME[target(m, w)]}. Why?`;
+		const jev = m.routine ? `Jev: routine · p ${String(m.p).replace(/^0/, '')}` : `Jev: ${c.g} ${c.label} · p ${String(m.p).replace(/^0/, '')} × ${weights[m.type] ?? 50} = ${Math.round((weights[m.type] ?? 50) * m.p)}`;
+		const chips = w.k === 'retype' && !w.cat
+			? Object.keys(CATS).filter(k => !retired.has(k) && k !== effType(m)).map(k => `<button type="button" class="b3-chip t-${k}" data-rcat="${k}">${CATS[k].g} ${CATS[k].label}</button>`).join('')
+			: (w.k === 'down' ? REASONS.slice(3) : REASONS.slice(0, 3)).map(r => `<button type="button" class="b3-chip" data-why="${r}">${r}</button>`).join('') + `<input class="b3-wi" placeholder="Your reason… ↵" aria-label="Reason"><button type="button" class="b3-chip b3-skip" data-why="">no reason</button>`;
+		return `<div class="b3-why" role="group" aria-label="Reason for the mark" data-testid="surfacing-mark-why"><span class="b3-wq">${head}</span><span class="b3-wd">${jev}</span>${chips}<button type="button" class="b3-cb" data-whyx aria-label="Cancel">✕</button></div>`;
+	};
+	const target = (m, w) => w.k === 'up' ? UP[effLevel(m)] : w.k === 'down' ? DOWN[effLevel(m)] : jevLevel({ ...m, type: w.cat });
+	const drawCard = () => {
+		const L = list(), i = L.findIndex(m => m.n === st.cur), vis = i >= 0 && st.show;
+		card.hidden = !vis; thumb.hidden = !vis && !live; sc.classList.toggle('b3-nocard', !vis);
+		if (i < 0) { if (live && st.follow && L.length) { st.cur = L.at(-1).n; return drawCard(); } return; }
+		const m = L[i], x = st.x ?? xOf(m), c = cat(effType(m)), e = effLevel(m), pend = !!m.pending, a = openAsk();
+		thumb.style.left = x + 'px';
+		hit.setAttribute('aria-valuetext', `#${m.n} ${label(m)}, ${m.t}, ${i + 1} of ${L.length}`);
+		if (!vis) return;
+		card.className = `b3-card t-${pend ? 'routine' : effType(m)}`;
+		const mark = m.mark, act = d => mark && mark.dir === d;
+		const below = m.n === st.extra && !shownAt(m, lv()) && !pend;
+		card.innerHTML = `<div class="b3-ch"><span class="b3-lab">${pend ? '…' : c.g} ${label(m)}</span>${m.n === a ? '<span class="b3-need">needs reply</span>' : ''}${mark ? `<span class="b3-mk ${{ up: 'up', down: 'dn', retype: 'rt' }[mark.dir]}">${ARROW[mark.dir]} you${mark.reason ? ' · ' + esc(mark.reason) : ''}</span>` : ''}${unread.has(m.n) ? '<span class="b3-u">● unread</span>' : ''}<span class="b3-at">${pend ? '' : `#${m.n} · `}${m.t} · ${i + 1}/${L.length}</span>${pend ? '' : `<label class="b3-vw"><input type="checkbox" data-read data-testid="surfacing-read-toggle"${unread.has(m.n) ? '' : ' checked'}><span>Read</span></label>`}</div>`
+			+ (pend ? '<div class="b3-note">Waiting for Jev · the card holds here until it answers</div>' : below ? `<div class="b3-note">${e === 'hidden' ? 'Hidden at this level · in the step log' : `At ${LNAME[e]}, below ${LNAME[lv()] || 'this level'} · opened directly`}</div>` : '')
+			+ `<div class="b3-tx">${md(m.text)}</div>`
+			+ (st.why && st.why.src === 'card' && st.why.n === m.n ? whyRow(m) : '')
+			+ `<div class="b3-cf"><button type="button" class="b3-cb b3-act" data-reply${pend ? ' disabled' : ''}>↩ Reply</button><button type="button" class="b3-cb b3-act up" data-mark="up" aria-pressed="${act('up')}"${pend || (e === 'key' && !act('up')) ? ' disabled' : ''} aria-label="Raise">▲<span class="b3-wl"> Raise</span></button><button type="button" class="b3-cb b3-act dn" data-mark="down" aria-pressed="${act('down')}"${pend || (e === 'hidden' && !act('down')) ? ' disabled' : ''} aria-label="Lower">▼<span class="b3-wl"> Lower</span></button><button type="button" class="b3-cb b3-act rt" data-mark="retype" aria-pressed="${act('retype')}"${pend || m.routine ? ' disabled' : ''} aria-label="Retype">⇄<span class="b3-wl"> Retype</span></button><span class="b3-sp"></span>${live && !st.follow ? '<button type="button" class="b3-cb b3-hot" data-now>now ⇥</button>' : ''}<button type="button" class="b3-cb" data-d="-1" aria-label="Previous"${i === 0 ? ' disabled' : ''}>‹</button><button type="button" class="b3-cb" data-d="1" aria-label="Next"${i === L.length - 1 ? ' disabled' : ''}>›</button><button type="button" class="b3-cb" data-x aria-label="${live ? 'Fold card' : 'Close card'}">${live ? '–' : '✕'}</button></div>`;
+		const cw = card.offsetWidth, left = Math.max(0, Math.min(W() - cw, x - cw / 2));
+		card.style.marginLeft = left + 'px';
+		card.style.setProperty('--cx', Math.max(12, Math.min(cw - 12, x - left)) + 'px');
+		armRead(m);
+	};
+
+	// Read rule: 1s open, tab visible, card on screen. Unchecking Read keeps it unread while open.
+	let readTimer = 0;
+	const armRead = m => {
+		if (st.armedN === m.n) return;
+		st.armedN = m.n; clearTimeout(readTimer);
+		const tick = () => {
+			if (st.cur !== m.n || card.hidden || st.drag || !unread.has(m.n) || st.keep === m.n || m.pending) return;
+			const r = card.getBoundingClientRect();
+			if (document.visibilityState === 'visible' && r.bottom > 0 && r.top < innerHeight) { unread.delete(m.n); render(); }
+			else readTimer = setTimeout(tick, 1000);
+		};
+		readTimer = setTimeout(tick, 1000);
+	};
+
+	// ── Summary ──
+	const count = (from, upto) => items.filter(m => m.n >= from && m.n <= upto && m.n < 1000 && !m.pending).length;
+	const verLabel = v => v.scope === 'whole' ? `Whole turn · ${count(1, v.upto)}` : `New since ${v.since} · ${count(v.from, v.upto)}`;
+	const textFor = v => {
+		const canned = v.scope === 'whole' ? { 34: RC_TURN, 30: RECAP_LIVE, 21: WHOLE21 }[v.upto] : v.from === 22 ? { 30: RC_LIVE_NEW, 34: RC_SETTLED_NEW }[v.upto] : null;
+		if (seeded && canned) return canned;
+		const from = v.scope === 'whole' ? 1 : v.from;
+		const top = items.filter(m => m.n >= from && m.n <= v.upto && m.n < 1000 && !m.pending).sort((p, q2) => (weights[q2.type] ?? 50) * q2.p - (weights[p.type] ?? 50) * p.p).slice(0, 3).sort((p, q2) => p.n - q2.n);
+		return (v.scope === 'new' ? `Since ${v.since}: ` : '') + top.map(m => `${m.text.split(/(?<=\.)\s/)[0].replace(/[.:]$/, '')} [#${m.n}].`).join(' ');
+	};
+	const cites = s => md(s).replace(/\[#(\d+)\]/g, (_, n) => {
+		const m = it(+n); if (!m) return '';
+		const c = cat(effType(m));
+		return `<button type="button" class="cite t-${effType(m)}${unread.has(m.n) ? ' unread' : ''}${st.followed.has(m.n) ? ' followed' : ''}" data-go="${n}" data-cite="${n}" data-testid="surfacing-recap-cite-${n}" aria-label="Open #${n} ${c.label}">${c.g} #${n}</button>`;
+	});
+	const pill = () => `<span class="b3-pw"><button type="button" class="b3-pill" data-pill data-testid="surfacing-summary-settings" aria-expanded="${st.pillMenu}">${MODEL[RS.model]} · ${WHEN[RS.when]} ▾</button>${st.pillMenu ? `<div class="b3-menu" role="menu"><div class="b3-mh">Model</div>${['sonnet', 'opus', 'off'].map(v => `<button type="button" role="menuitemradio" data-rs="model" data-v="${v}" aria-pressed="${RS.model === v}">${{ sonnet: 'Sonnet', opus: 'Opus', off: 'Off' }[v]}</button>`).join('')}<div class="b3-mh">When</div>${[['turn-end', 'When a turn ends'], ['on-request', 'On request']].map(([v, l]) => `<button type="button" role="menuitemradio" data-rs="when" data-v="${v}" aria-pressed="${RS.when === v}">${l}</button>`).join('')}<div class="b3-mf">Applies to every session · Settings › Surfacing</div></div>` : ''}</span>`;
+	const staleK = () => { const top = Math.max(0, ...versions.map(v => v.upto)); return items.filter(m => m.n > top && m.n < 1000 && !m.pending && effLevel(m) !== 'hidden').length; };
+	const drawSum = () => {
+		if (recapModel() === 'off' || o.noRecap) { sum.className = 'b3-sum'; sum.innerHTML = ''; return; }
+		const N = real().filter(m => !m.pending).length;
+		if (st.gen && !versions.length) { sum.className = 'b3-sum'; sum.innerHTML = `<div class="b3-gen b3-busy" data-testid="surfacing-summary-generate"><b>✦ Summarising…</b> <span class="run">●</span></div>`; return; }
+		if (st.fail && !versions.length) { sum.className = 'b3-sum'; sum.innerHTML = `<div class="b3-gen b3-fail"><b>Summary failed</b><button type="button" class="lnk" data-gen>Retry</button><span>${pill()}</span></div>`; return; }
+		if (!versions.length) { sum.className = 'b3-sum'; sum.innerHTML = `<div class="b3-genrow"><button type="button" class="b3-gen" data-gen data-testid="surfacing-summary-generate"><b>✦ Summarize<span class="b3-wl"> ${live ? 'turn so far' : 'turn'}</span> · ${N}</b></button>${pill()}</div>`; return; }
+		const v = versions[st.ver], k = staleK(), top = versions.at(-1), open = st.sumOpen;
+		sum.className = `b3-sum b3-box${open ? ' open' : ''}`;
+		sum.setAttribute('data-testid', 'surfacing-summary');
+		const ver = versions.length > 1
+			? `<span class="b3-ver" data-testid="surfacing-summary-version"><button type="button" data-ver="-1" aria-label="Older summary"${st.ver === 0 ? ' disabled' : ''}>‹</button><span class="b3-vl">${verLabel(v)}</span><button type="button" data-ver="1" aria-label="Newer summary"${st.ver === versions.length - 1 ? ' disabled' : ''}>›</button><span class="b3-vn">${st.ver + 1}/${versions.length}</span></span>`
+			: `<span class="b3-ver" data-testid="surfacing-summary-version"><span class="b3-vl">${verLabel(v)}</span></span>`;
+		sum.innerHTML = `<div class="b3-sh"><button type="button" class="b3-stog" data-stog aria-expanded="${open}"><span class="chev">›</span><b>✦ ${live ? 'Summary so far' : 'Turn summary'}</b></button>${pill()}${k ? `<span class="b3-new">· ${k} new</span>` : ''}${ver}</div>`
+			+ (open ? `<div class="b3-sb">${k ? `<div class="b3-stale">${st.gen ? '<span class="b3-gen b3-busy"><b>✦ Summarising…</b> <span class="run">●</span></span>' : `<button type="button" class="b3-btn pri" data-gennew data-testid="surfacing-summary-new">✦ Summarize ${k} new · since ${top.at}</button><button type="button" class="b3-btn" data-genwhole>↻ Whole turn</button>`}</div>` : ''}<p class="b3-stx">${cites(v.text)}</p><div class="b3-sf"><span>${MODEL[v.model]} · ${count(v.scope === 'whole' ? 1 : v.from, v.upto)} updates · ${v.dur} · written at ${v.at}</span><span class="b3-sp"></span><button type="button" class="b3-btn" data-regen>↻ Regenerate</button>${unreadN() ? `<button type="button" class="b3-btn" data-allv>✓ Mark ${unreadN()} read</button>` : ''}</div></div>` : '');
+	};
+	const generate = scope => {
+		st.gen = scope; st.fail = false; st.sumOpen = true; render();
+		setTimeout(() => {
+			const top = versions.at(-1), upto = Math.max(...real().filter(m => !m.pending).map(m => m.n)), at = live ? '38:12' : fmt(T);
+			const v = scope === 'new' && top ? { scope: 'new', from: top.upto + 1, since: top.at, upto, at } : { scope: 'whole', upto, at };
+			versions.push({ ...v, text: textFor(v), model: RS.model, dur: '1.6s' });
+			st.gen = null; st.ver = versions.length - 1; render();
+		}, 1200);
+	};
+
+	// ── Marks ──
+	let undo = null, toastTimer = 0;
+	const showToast = html => { toast.innerHTML = html; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 6000); };
+	const setMark = (m, mark, word) => {
+		undo = { n: m.n, prev: m.mark ? { ...m.mark } : null };
+		if (mark) m.mark = mark; else delete m.mark;
+		st.why = null;
+		if (!shownAt(m, lv())) st.extra = m.n;
+		showToast(`${word} · <button type="button" class="lnk" data-undo>Undo</button>`);
+		rerenderAll();
+	};
+	const startMark = (m, k, src) => {
+		if (m.mark && m.mark.dir === k) return setMark(m, null, 'Cleared');
+		st.why = { n: m.n, k, src };
+		render();
+		ta.querySelector('.b3-wi')?.focus({ preventScroll: true });
+	};
+	const saveWhy = reason => {
+		const m = it(st.why.n), w = st.why;
+		setMark(m, { level: target(m, w), dir: w.k, ...(w.cat ? { category: w.cat } : {}), reason }, 'Saved');
+	};
+
+	// ── Navigation ──
+	const reveal = () => { if (phone && !card.hidden) card.scrollIntoView({ block: 'nearest' }); };
+	const go = (n, extra = {}) => {
+		const m = it(n); if (!m) return;
+		st.min = false;
+		if (lv() === 'final') st.lv = 'balanced';
+		st.extra = shownAt(m, lv()) || m.pending ? 0 : n;
+		st.cur = n; st.x = null; st.follow = false; st.show = true;
+		if (st.why && st.why.n !== n) st.why = null;
+		if (st.keep !== n) st.keep = null;
+		Object.assign(st, extra);
+		render();
+	};
+	const toNow = () => { const L = list(); st.follow = true; st.show = true; st.x = null; st.why = null; if (L.length) st.cur = L.at(-1).n; render(); };
+	const step = d => { const L = list(); if (!L.length) return; let i = L.findIndex(m => m.n === st.cur); i = i < 0 ? L.length - 1 : Math.max(0, Math.min(L.length - 1, i + d)); go(L[i].n); };
+	const nextUnread = () => { const L = list().filter(m => unread.has(m.n)), from = st.show && st.cur || 0, u = L.find(m => m.n > from) || L[0] || items.find(m => unread.has(m.n)); if (u) { go(u.n); reveal(); } };
+	const reply = m => { if (!m || m.pending) return; o.composer ? o.composer.addMsg(m) : showToast(`↩ #${m.n} would go to the composer`); };
+	const pickChip = el => {
+		if (el.dataset.n) return go(+el.dataset.n);
+		const ns = el.dataset.grp.split(',').map(Number), i = ns.indexOf(st.cur);
+		go(i >= 0 && st.show ? ns[(i + 1) % ns.length] : ns[0]);
+	};
+	const closeMenus = () => { const had = st.lvMenu || st.pillMenu; st.lvMenu = st.pillMenu = false; return had; };
+
+	// ── Minimised: everything below the head folds to one of four looks ──
+	const pct = m => (m.s - T0) / (T - T0) * 100;
+	const surfaced = () => list().filter(m => m.n < 1000 && !m.pending);
+	const miniStrip = () => {
+		const a = openAsk(), dots = items.filter(m => m.n < 1000 && !m.pending && effLevel(m) !== 'hidden' && (unread.has(m.n) || m.n === a));
+		return `<div class="b3-ms" data-testid="surfacing-mini-strip" title="Hover to peek, click to open"><div class="strip">${segs(SEG[o.seg || (live ? 'live' : 'settled')])}</div>${dots.map(m => `<i class="b3-md${m.n === a ? ' ask' : ''}" data-n="${m.n}" style="left:${pct(m).toFixed(2)}%"></i>`).join('')}<span class="b3-mtip" hidden></span></div>`;
+	};
+	const progress = () => {
+		const N = items.filter(m => m.n < 1000 && effLevel(m) !== 'hidden' && !m.pending).length, u = unreadN(), r = N - u;
+		return N ? `<button type="button" class="b3-prog" data-next aria-label="${r} of ${N} read. Open the next unread"><span class="b3-pb"><i style="width:${(r / N * 100).toFixed(1)}%"></i></span>${r}/${N} read${u ? ' ›' : ''}</button>` : '';
+	};
+	const newest = () => {
+		const m = surfaced().at(-1); if (!m) return '';
+		return `<button type="button" class="b3-tk" data-go="${m.n}" data-testid="surfacing-mini-line"><span class="b3-tg t-${effType(m)}">${cat(effType(m)).g}${m.n}</span><span class="b3-tt">${esc(plain(m.text))}</span><span class="b3-tn">${m.t}</span></button>`;
+	};
+	const line = () => {
+		if (live) return newest();
+		if (st.gen) return '<span class="b3-tk"><span class="b3-gen b3-busy"><b>✦ Summarising…</b> <span class="run">●</span></span></span>';
+		const v = versions.at(-1);
+		if (!v) return recapModel() === 'off' || o.noRecap ? newest() : `<button type="button" class="b3-gen" data-gen><b>✦ Summarize turn · ${real().filter(m => !m.pending).length}</b></button>`;
+		const k = staleK();
+		return `<div class="b3-tk b3-ts" data-testid="surfacing-mini-line"><span class="b3-tg">✦</span><span class="b3-tt">${cites(v.text.split(/(?<=[.!?])\s+/)[0])}</span>${k ? `<span class="b3-new">· ${k} new</span>` : ''}<button type="button" class="lnk" data-mopen>More</button></div>`;
+	};
+	const drawMini = () => {
+		if (!minb) return;
+		ta.classList.toggle('b3-min', st.min);
+		minb.setAttribute('aria-expanded', String(!st.min));
+		minb.setAttribute('aria-label', st.min ? 'Show surfaced messages' : 'Minimise surfaced messages');
+		minb.title = st.min ? 'Show (h)' : 'Minimise (h)';
+		minb.innerHTML = '<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M2 6.5 5 3.5 8 6.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+		const a = openAsk();
+		hask.innerHTML = st.min && a ? `<button type="button" class="b3-askb" data-go="${a}" data-testid="surfacing-mini-ask" aria-label="Open Ask #${a}">? #${a}</button>` : '';
+		if (!st.min) { mini.innerHTML = ''; return; }
+		mini.innerHTML = o.min === 'strip' ? miniStrip()
+			: o.min === 'line' ? line()
+			: o.min === 'digest' ? `<div class="b3-mrow">${miniStrip()}${progress()}</div><div class="b3-mrow">${line()}</div>`
+			: '';
+	};
+	const nearMini = (ms, cx) => {
+		const r = ms.getBoundingClientRect(), p = (cx - r.left) / r.width * 100, L = surfaced();
+		return L.length ? L.reduce((b, m) => Math.abs(pct(m) - p) < Math.abs(pct(b) - p) ? m : b) : null;
+	};
+
+	const render = () => {
+		sc.classList.toggle('b3-final', lv() === 'final');
+		drawHead(); drawAxis(); drawPins(); drawCard(); drawSum(); drawMini();
+		if (stepsEl) drawSteps();
+	};
+
+	// ── Events ──
+	q('.b3-hb')?.addEventListener('click', e => { st.stepsOpen = !st.stepsOpen; stepsEl.hidden = !st.stepsOpen; ta.classList.toggle('b3-open', st.stepsOpen); e.currentTarget.setAttribute('aria-expanded', String(st.stepsOpen)); });
+	headU.addEventListener('click', nextUnread);
+	mini?.addEventListener('pointermove', e => {
+		const ms = e.target.closest('.b3-ms'), tip = ms?.querySelector('.b3-mtip');
+		if (!tip || e.pointerType !== 'mouse') return;
+		const m = nearMini(ms, e.clientX); if (!m) return;
+		tip.innerHTML = `<b class="t-${effType(m)}">${cat(effType(m)).g}${m.n}</b> ${esc(clip(plain(m.text), 80))}`;
+		tip.hidden = false;
+		const w = ms.clientWidth, tw = tip.offsetWidth;
+		tip.style.left = Math.max(tw / 2, Math.min(w - tw / 2, pct(m) / 100 * w)) + 'px';
+		ms.style.setProperty('--hx', pct(m) + '%');
+		ms.classList.add('b3-peek');
+	});
+	mini?.addEventListener('pointerout', e => { const ms = e.target.closest('.b3-ms'); if (ms && !ms.contains(e.relatedTarget)) { ms.classList.remove('b3-peek'); ms.querySelector('.b3-mtip').hidden = true; } });
+	mini?.addEventListener('click', e => { const ms = e.target.closest('.b3-ms'); const m = ms && nearMini(ms, e.clientX); if (m) { go(m.n); reveal(); } });
+	ta.addEventListener('click', e => {
+		const b = e.target.closest('button');
+		if (!b || !ta.contains(b)) { if (closeMenus()) render(); return; }
+		const d = b.dataset;
+		if (b.matches('.b3-pin,.b3-grp')) { if (e.detail === 0) pickChip(b); return; }
+		if (!('pill' in d || 'rs' in d || 'lvmenu' in d || 'lvset' in d)) closeMenus();
+		const m = it(st.cur);
+		if (d.lv) { st.lv = d.lv; if (live && st.follow) { const L = list(); st.cur = L.length ? L.at(-1).n : null; } render(); }
+		else if ('lvmenu' in d) { st.lvMenu = !st.lvMenu; render(); }
+		else if (d.lvset) { if (d.lvset === 'default') RS.level = lv(); st.lv = null; st.lvMenu = false; rerenderAll(); }
+		else if ('pill' in d) { st.pillMenu = !st.pillMenu; render(); }
+		else if (d.rs) { RS[d.rs] = d.v; rerenderAll(); }
+		else if ('min' in d) { st.min = !st.min; render(); minb.focus({ preventScroll: true }); }
+		else if ('mopen' in d) { st.min = false; st.sumOpen = true; render(); }
+		else if (d.d) step(+d.d);
+		else if ('now' in d) toNow();
+		else if ('x' in d) { st.show = false; st.why = null; render(); }
+		else if (d.go) { if (d.cite) st.followed.add(+d.go); go(+d.go); reveal(); }
+		else if ('next' in d) nextUnread();
+		else if ('reply' in d) reply(m);
+		else if (d.mark) startMark(m, d.mark, 'card');
+		else if (d.smark) startMark(it(+d.n), d.smark, 'step');
+		else if (d.rcat) { st.why = { ...st.why, cat: d.rcat }; render(); ta.querySelector('.b3-wi')?.focus({ preventScroll: true }); }
+		else if ('why' in d) saveWhy(d.why);
+		else if ('whyx' in d) { st.why = null; render(); }
+		else if ('undo' in d && undo) { const u = it(undo.n); if (undo.prev) u.mark = undo.prev; else delete u.mark; undo = null; toast.hidden = true; rerenderAll(); }
+		else if ('gen' in d) generate('whole');
+		else if ('gennew' in d) generate('new');
+		else if ('genwhole' in d || 'regen' in d) generate('whole');
+		else if ('stog' in d) { st.sumOpen = !st.sumOpen; render(); }
+		else if (d.ver) { st.ver = Math.max(0, Math.min(versions.length - 1, st.ver + +d.ver)); render(); }
+		else if ('allv' in d) { unread.clear(); render(); }
+		else render();
+	});
+	ta.addEventListener('change', e => {
+		if (!e.target.matches('[data-read]')) return;
+		if (e.target.checked) { unread.delete(st.cur); st.keep = null; } else { unread.add(st.cur); st.keep = st.cur; }
+		render();
+	});
+	ta.addEventListener('keydown', e => { if (e.target.matches('.b3-wi') && e.key === 'Enter' && e.target.value.trim()) { e.preventDefault(); saveWhy(e.target.value.trim()); } });
+	const lift = n => { if (st.lift !== n) { st.lift = n; drawPins(); } };
+	sum.addEventListener('mouseover', e => lift(+(e.target.closest('[data-cite]')?.dataset.cite || 0)));
+	sum.addEventListener('mouseleave', () => lift(0));
+	sum.addEventListener('focusin', e => lift(+(e.target.closest('[data-cite]')?.dataset.cite || 0)));
+	sum.addEventListener('focusout', () => lift(0));
+
+	// Scrub: a press on a pin or pill picks it; any 4px drag scrubs the strip and pins alike.
+	const rx = e => Math.max(0, Math.min(W(), e.clientX - hit.getBoundingClientRect().left));
+	hit.addEventListener('pointerdown', e => {
+		if (!list().length || e.button > 0) return;
+		hit.setPointerCapture(e.pointerId);
+		const chip = e.target.closest('.b3-pin,.b3-grp');
+		st.press = { x0: e.clientX, chip, moved: false };
+		if (!chip) go(nearest(rx(e)).n, { x: rx(e) });
+	});
+	hit.addEventListener('pointermove', e => {
+		if (!st.press) return;
+		if (!st.press.moved && Math.abs(e.clientX - st.press.x0) < 4) return;
+		if (!st.press.moved) { st.press.moved = true; st.drag = true; sc.classList.add('b3-drag'); }
+		const x = rx(e), m = nearest(x);
+		if (!m) return;
+		st.x = x;
+		if (m.n !== st.cur || !st.show) go(m.n, { x }); else drawCard();
+	});
+	hit.addEventListener('pointerup', () => {
+		const p = st.press; st.press = null;
+		if (!p) return;
+		if (p.chip && !p.moved) return pickChip(p.chip);
+		st.drag = false; sc.classList.remove('b3-drag'); st.x = null; render();
+	});
+	hit.addEventListener('pointercancel', () => { st.press = null; st.drag = false; sc.classList.remove('b3-drag'); st.x = null; render(); });
+
+	// Keys work only while focus is inside this turn, never in inputs.
+	ta.addEventListener('keydown', e => {
+		const k = e.key;
+		if ((e.target.closest('input,textarea,[contenteditable="true"]') && k !== 'Escape') || e.metaKey || e.ctrlKey || e.altKey) return;
+		const m = it(st.cur), click = s => { const x = card.querySelector(s); if (x && !x.disabled) x.click(); };
+		let done = true;
+		if (/^[0-9]$/.test(k)) st.digits += k;
+		else if (k === 'Enter' && st.digits) { const n = +st.digits; st.digits = ''; go(n); }
+		else if (k === 'Enter' && e.target === hit) go(st.cur ?? list().at(-1)?.n);
+		else if (k === 'ArrowLeft' || k === 'ArrowRight') step(k === 'ArrowLeft' ? -1 : 1);
+		else if (k === 'Home' || k === 'End') { const L = list(); if (L.length) go((k === 'Home' ? L[0] : L.at(-1)).n); }
+		else if (k === 'a') { const a = openAsk(); if (a) go(a); }
+		else if (k === 'u') nextUnread();
+		else if (k === 's') { st.sumOpen = !st.sumOpen; render(); }
+		else if (k === 'r') reply(m);
+		else if (k === '+' || k === '=') click('[data-mark="up"]');
+		else if (k === '-' || k === '−') click('[data-mark="down"]');
+		else if (k === 'm') click('[data-read]');
+		else if (k === 'h' && minb) { st.min = !st.min; render(); }
+		else if (k === 'Escape') { if (st.why) st.why = null; else if (!closeMenus()) st.show = false; render(); }
+		else done = false;
+		if (done) { e.preventDefault(); if (!/^[0-9]$/.test(k)) st.digits = ''; if (!ta.contains(document.activeElement) || document.activeElement === document.body || !document.activeElement.offsetParent) (st.min ? minb : hit).focus({ preventScroll: true }); }
+	});
+
+	// Hold rule: a message waiting for Jev holds the card, then resolves.
+	const arrive = (msg, resolve) => {
+		const m = { ...msg, s: secs(msg.t), pending: true };
+		items.push(m); T = Math.max(T, m.s + 20);
+		if (st.follow) st.cur = m.n;
+		render();
+		return new Promise(done => setTimeout(() => { resolve(m); render(); done(); }, msg.routine ? 1200 : 700));
+	};
+	const simulate = async btn => {
+		btn.disabled = true; st.follow = true; st.show = true; st.why = null;
+		await arrive({ n: 1001, t: '38:20', type: 'finding', p: .91, routine: true, text: 'Re-running the phone sidebar story to confirm the 2px shift.' }, m => {
+			items.splice(items.indexOf(m), 1);
+			steps.splice(steps.length - 1, 0, { v: 'Ran', arg: 'pnpm storybook --story phone-sidebar', t: '12s' });
+			st.cur = list().at(-1)?.n ?? null;
+		});
+		for (const s of MSGS.filter(x => x.settledOnly)) {
+			await new Promise(r => setTimeout(r, 700));
+			await arrive(s, m => { delete m.pending; unread.add(m.n); if (st.follow) st.cur = m.n; });
+		}
+		btn.textContent = 'No more messages';
+	};
+
+	render();
+	addEventListener('load', render);
+	addEventListener('resize', render);
+	cards.push({ render });
+	return { simulate };
+}
+
+
+
+// ── Mount the turns ──
+const $ = id => document.getElementById(id);
+const sims = {};
+for (const look of ['head', 'strip', 'line', 'digest']) {
+	mountTurn($(`t-${look}-settled`), { min: look, minimised: true });
+	sims[look] = mountTurn($(`t-${look}-live`), { live: true, min: look, minimised: true });
+	mountTurn($(`t-${look}-phone`), { phone: true, min: look, minimised: true, composer: new Composer($(`cmp-t-${look}-phone`)) });
+	$(`sim-${look}`)?.addEventListener('click', e => sims[look].simulate(e.currentTarget));
+}
+
+// ── E: the same session under each "Turns open" setting ──
+const shortMsgs = [{ ...byN(3), n: 1, t: '01:10' }, { ...byN(6), n: 2, t: '02:40' }, { ...byN(8), n: 3, t: '03:30' }];
+const T2_SUMMARY = 'The plan missed two of `session_switched`\'s three consumers, so this grew [#3]. `pnpm check` is blocked until `ViewSession` lands [#8], so I\'m rebasing onto `feat/ni8-transport` locally [#9] and keeping the legacy path behind a flag for one release [#6].';
+const ex = { pol: 'auto', look: 'strip' };
+const drawStack = () => {
+	$('stack').innerHTML = `<div class="user-msg">Which consumers still read <code>session_switched</code>?</div><div id="s1"></div><div class="reply"><p>Three: MessageList history, the sidebar unread counter and the push deep link.</p></div>`
+		+ `<div class="user-msg">Move all three onto the typed stream.</div><div id="s2"></div><div class="reply"><p>Paused on the transport branch. I'll pick it up once it's merged.</p></div>`
+		+ `<div class="user-msg">It's merged. Carry on, and delete the legacy path.</div><div id="s3"></div>`;
+	mountTurn($('s1'), { msgs: shortMsgs, end: secs('04:10'), readUpTo: 3, seg: 'short', bill: '4m 10s', noAsk: true, min: ex.look, minimised: ex.pol !== 'expanded' });
+	mountTurn($('s2'), { msgs: MSGS.filter(m => m.n <= 12), end: secs('15:00'), readUpTo: 7, seg: 'hb1', bill: '15m 00s', noAsk: true, min: ex.look, minimised: ex.pol === 'minimised', versions: [{ scope: 'whole', upto: 12, at: '15:00', text: T2_SUMMARY, model: 'sonnet', dur: '1.3s' }] });
+	mountTurn($('s3'), { live: true, min: ex.look, minimised: false });
+	for (const [id, key, v] of [['pol', 'p', ex.pol], ['look', 'l', ex.look]]) $(id).querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset[key] === v)));
+};
+$('pol').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { ex.pol = b.dataset.p; drawStack(); } });
+$('look').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { ex.look = b.dataset.l; drawStack(); } });
+drawStack();
+
+// ── Choices ──
+const REVIEW_KEY = 'jev-minimise-designs-v1';
+const review = JSON.parse(localStorage.getItem(REVIEW_KEY) || '{}');
+const saveReview = () => { localStorage.setItem(REVIEW_KEY, JSON.stringify(review)); tally(); };
+const DEFAULT_OPTS = 'pick:Pick this,maybe:Maybe,no:No';
+const optsOf = v => (v.dataset.opts || DEFAULT_OPTS).split(',').map(x => x.split(':'));
+document.querySelectorAll('.verdict').forEach(v => {
+	const key = v.dataset.key, opts = optsOf(v);
+	const draw = () => {
+		const r = review[key] || {};
+		v.innerHTML = `<span>${v.dataset.opts ? 'Setting' : 'Choice'}</span><span class="sgc">${opts.map(([val, l]) => `<button type="button" data-v="${val}" aria-pressed="${r.v === val}">${l}</button>`).join('')}</span><input placeholder="Note (optional)" value="${esc(r.note || '')}" aria-label="Note">`;
+	};
+	v.addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if (!b) return; review[key] = { ...review[key], v: review[key]?.v === b.dataset.v ? undefined : b.dataset.v }; saveReview(); draw(); });
+	v.addEventListener('input', e => { review[key] = { ...review[key], note: e.target.value }; saveReview(); });
+	draw();
+});
+function tally() {
+	const vs = [...document.querySelectorAll('.verdict')], done = vs.filter(v => review[v.dataset.key]?.v).length;
+	const picks = vs.filter(v => review[v.dataset.key]?.v === 'pick').map(v => document.querySelector(`#${v.dataset.key} h3`).textContent.split(' · ')[0]);
+	$('tally').innerHTML = `<b>${done}</b> of ${vs.length} answered${picks.length ? ` · picked <b>${picks.join(', ')}</b>` : ''}`;
+}
+$('copy').addEventListener('click', async () => {
+	const lines = [...document.querySelectorAll('.verdict')].filter(v => review[v.dataset.key]?.v || review[v.dataset.key]?.note).map(v => {
+		const r = review[v.dataset.key], label = Object.fromEntries(optsOf(v))[r.v] || 'No answer';
+		return `- ${document.querySelector(`#${v.dataset.key} h3`).textContent}: ${label}${r.note ? ` (${r.note})` : ''}`;
+	});
+	const text = `Jev surfacing: minimise designs\n\n${lines.join('\n') || '(nothing chosen yet)'}`;
+	const out = $('out'); out.value = text; $('outwrap').hidden = false;
+	try { await navigator.clipboard.writeText(text); const c = $('copied'); c.hidden = false; setTimeout(() => c.hidden = true, 1800); } catch { out.select(); }
+});
+tally();
+</script>
+</body>
+</html>

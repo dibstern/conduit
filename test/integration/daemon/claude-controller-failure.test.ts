@@ -58,7 +58,6 @@ it.each([
 				Effect.gen(function* () {
 					const runner = yield* makeClaudeSessionRunner(
 						{
-							workspaceRoot: root,
 							daemonConfigDir: join(root, "config"),
 							readGoalStatus: async () => undefined,
 							capabilitiesService: {
@@ -226,7 +225,6 @@ it.each([
 				Effect.gen(function* () {
 					const runner = yield* makeClaudeSessionRunner(
 						{
-							workspaceRoot: root,
 							daemonConfigDir: join(root, "config"),
 							readGoalStatus: async () => undefined,
 							capabilitiesService: {

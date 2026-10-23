@@ -1,6 +1,6 @@
 <!--
-  AccountSwitch — moves one Claude session to another account: a picker of the
-  Claude accounts with each one's quota checked fresh on every open, then the
+  AccountSwitch — moves one session to another account of the same provider:
+  accounts with each one's quota checked fresh on every open, then the
   handoff confirm, then ContinueSession on the chosen account. The usage-limit
   strip's Switch account brings its own trigger; only the session moves, never
   the project's binding.
@@ -12,10 +12,13 @@
 -->
 <script lang="ts">
 	import type { Snippet } from "svelte";
+	import { accountLimit } from "../../../contracts/account-limit.js";
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
+	import { clock } from "../../stores/clock.svelte.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
+	import { getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { quotaBlocksSwitch, quotaReading } from "../../utils/continuation.js";
+	import { quotaReading } from "../../utils/continuation.js";
 	import HandoffDialog from "../overlays/HandoffDialog.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -44,7 +47,7 @@
 	} = $props();
 
 	const compact = $derived(sessionViewState.compact);
-	const claudeAccounts = $derived(getClaudeAccounts(projectSlug));
+	const claudeAccounts = $derived(getClaudeAccounts(projectSlug, getDriverTraits(getInstanceById(account)?.driver)?.usageHarness === "codex" ? "codex" : "claude"));
 	const accounts = $derived(claudeAccounts.configuredAccounts);
 
 	let pickerOpen = $state(false);
@@ -74,9 +77,10 @@
 	{#each accounts as option (option.id)}
 		{@const selected = option.id === suggested}
 		{@const quota = claudeAccounts.quotaOf(option.id)}
+		{@const choice = claudeAccounts.availabilityOf(option.id, account)}
 		<MenuItem
 			density="compact"
-			disabled={claudeAccounts.availabilityOf(option.id, account).kind !== "selectable"}
+			disabled={choice.kind !== "selectable"}
 			data-testid="account-switch-option"
 			data-account={option.id}
 			data-selected={selected}
@@ -91,7 +95,11 @@
 			{#if option.id === account}<span class="text-[11px] text-text-dimmer">current</span>{/if}
 			<span class="flex-1"></span>
 			<!-- A limited row's red caption says it all; a full red track would crowd its name out. -->
-			<QuotaMeter {...quotaReading(quota)} size={compact ? "sm" : "md"} track={!quotaBlocksSwitch(quota)} />
+			{#if choice.kind === "selectable" && choice.usageUnknown}
+				<QuotaMeter used="unknown" caption="usage unknown" size={compact ? "sm" : "md"} track={false} />
+			{:else}
+				<QuotaMeter {...quotaReading(quota, clock.now)} size={compact ? "sm" : "md"} track={accountLimit({ asker: "user", ...(quota ? { reading: quota } : {}), now: clock.now }).kind !== "wait-until"} />
+			{/if}
 		</MenuItem>
 	{/each}
 	{#if !compact}
@@ -108,7 +116,7 @@
 		summary={handoff.summary}
 		confirm={{
 			from: handoff.from,
-			fromQuota: claudeAccounts.fromQuota(handoff),
+			fromQuota: claudeAccounts.quotaOf(handoff.from),
 			quota: claudeAccounts.quotaOf(chosen),
 			cutOff: limit?.cutOffMessageId !== undefined,
 			busy: claudeAccounts.switching,

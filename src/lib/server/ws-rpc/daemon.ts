@@ -24,12 +24,18 @@ export const daemonOnlyHandlers = {
 	StartCursorLogin: (_request) => daemonRequired("StartCursorLogin"),
 	CancelCursorLogin: (_request) => daemonRequired("CancelCursorLogin"),
 	LogoutCursor: (_request) => daemonRequired("LogoutCursor"),
+	GetCodexAuth: (_request) => daemonRequired("GetCodexAuth"),
+	StartCodexLogin: (_request) => daemonRequired("StartCodexLogin"),
+	CancelCodexLogin: (_request) => daemonRequired("CancelCodexLogin"),
+	LogoutCodex: (_request) => daemonRequired("LogoutCodex"),
 	GetInstanceStatus: (_request) => daemonRequired("GetInstanceStatus"),
 	OpenCodeUseWorktree: (_request) => daemonRequired("OpenCodeUseWorktree"),
 	ResolveSessionMode: (_request) => daemonRequired("ResolveSessionMode"),
 	SetTerminalKeys: (_request) => daemonRequired("SetTerminalKeys"),
 	GetTerminalKeys: (_request) => daemonRequired("GetTerminalKeys"),
 	GetCategorySet: (_request) => daemonRequired("GetCategorySet"),
+	CountSessionCategories: (_request) =>
+		daemonRequired("CountSessionCategories"),
 	GetSurfacingFeedback: (_request) => daemonRequired("GetSurfacingFeedback"),
 	GetSurfacingLedger: (_request) => daemonRequired("GetSurfacingLedger"),
 	ScoreCategorySet: (_request) => daemonRequired("ScoreCategorySet"),
@@ -53,12 +59,17 @@ export const daemonOnlyHandlers = {
 	| "StartCursorLogin"
 	| "CancelCursorLogin"
 	| "LogoutCursor"
+	| "GetCodexAuth"
+	| "StartCodexLogin"
+	| "CancelCodexLogin"
+	| "LogoutCodex"
 	| "GetInstanceStatus"
 	| "OpenCodeUseWorktree"
 	| "ResolveSessionMode"
 	| "SetTerminalKeys"
 	| "GetTerminalKeys"
 	| "GetCategorySet"
+	| "CountSessionCategories"
 	| "GetSurfacingFeedback"
 	| "GetSurfacingLedger"
 	| "ScoreCategorySet"

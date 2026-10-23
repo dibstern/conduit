@@ -2,16 +2,28 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { it as effectIt } from "@effect/vitest";
 import Database from "better-sqlite3";
-import { Effect, Result as Either } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { Effect, Result as Either, Layer } from "effect";
+import { TestClock } from "effect/testing";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	defaultDaemonConfig,
 	loadDaemonConfigResult,
 } from "../../../src/lib/daemon/config-persistence.js";
+import {
+	DraftPreWarmLive,
+	DraftPreWarmTag,
+	draftLaunchKey,
+} from "../../../src/lib/domain/relay/Services/draft-prewarm.js";
+import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { createLogger } from "../../../src/lib/logger.js";
+import { ProviderRegistryLive } from "../../../src/lib/provider/provider-registry.js";
+import type { PreWarmSessionInput } from "../../../src/lib/provider/types.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import {
+	type ProcessBrowser,
 	ProcessHarness,
 	responseChunks,
 } from "../../helpers/process-harness.js";
@@ -105,7 +117,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		persistedModels?: ReturnType<typeof durableCounts>["models"];
 		sharedProbeAttempts?: number;
 	}> = [];
-	afterEach(async (context) => {
+	afterEach(async ({ task }) => {
 		const cleanup: Array<{ pid: number; alive: boolean }> = [];
 		const sdk: Array<
 			{ root: string; marks: ProcessMark[] } | { root: string; error: string }
@@ -137,9 +149,9 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			}
 		} finally {
 			evidence.push({
-				name: context.task.name,
+				name: task.name,
 				assertionErrors:
-					context.task.result?.errors?.map((error) => error.message) ?? [],
+					task.result?.errors?.map((error) => error.message) ?? [],
 				harnesses: harnesses.map((harness) => harness.proof()),
 				cleanup,
 				sdk,
@@ -176,6 +188,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 	it("draft pre-warm reserves the created session and its first send adopts the initialized runner", async () => {
 		const { harness, browser } = await start({
 			queryInitializationDelayMs: 80,
+			shellEnvProof: true,
 			capabilityModels: [
 				{
 					id: "sonnet",
@@ -205,6 +218,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		const query = harness.marks.find((mark) => mark.kind === "query");
 		if (runner?.kind !== "runner-started" || query?.kind !== "query")
 			throw new Error("Missing draft warm runner/query");
+		expect(query.env["CONDUIT_ENV_PROOF"]).toBe("server-cache");
+		expect(query.env["PATH"]).toMatch(/^\/tmp\/conduit-cached-env-bin:/);
+		expect(query.env["ANTHROPIC_API_KEY"]).toBeUndefined();
+		expect(query.env["ANTHROPIC_MODEL"]).toBeUndefined();
 		expect(durableCounts(harness, runner.sessionId).status).toBeUndefined();
 		expect(
 			harness.marks.filter((mark) => mark.kind === "enqueue"),
@@ -345,51 +362,84 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		expect(sessionId).not.toBe(runner.sessionId);
 	});
 
-	it("draft pre-warm refresh extends expiry without starting another query or runner", async () => {
-		const ttl = 6000;
-		const { harness, browser } = await start({ draftPreWarmTtlMs: ttl });
-		const draftId = randomUUID();
-		const sleepUntil = (at: number) =>
-			new Promise<void>((done) =>
-				setTimeout(done, Math.max(0, at - Date.now())),
-			);
-		// The reservation lands between sending the first warm and its reply.
-		const reservedAfter = Date.now();
-		await browser.preWarmDraft(draftId);
-		const reservedBefore = Date.now();
-		expect(
-			reservedBefore - reservedAfter,
-			"warm too slow to refresh inside the TTL",
-		).toBeLessThan(ttl - 1500);
-		await vi.waitFor(
-			() =>
-				expect(
-					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-				).toHaveLength(1),
-			{ timeout: 5000 },
-		);
-		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
-		if (runner?.kind !== "runner-started")
-			throw new Error("Missing refreshable draft runner");
-		// Refresh before the earliest original expiry, then check after the latest one.
-		await sleepUntil(reservedBefore + 1000);
-		await browser.preWarmDraft(draftId);
-		await sleepUntil(reservedBefore + ttl + 500);
-		expect(alive(runner.pid)).toBe(true);
-		expect(
-			harness.marks.filter((mark) => mark.kind === "runner-started"),
-		).toHaveLength(1);
-		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
-			1,
-		);
-		const sessionId = await browser.createSession(
-			"Refreshed draft",
-			undefined,
-			"claude",
-			{ draftId },
-		);
-		expect(sessionId).toBe(runner.sessionId);
-	});
+	// Failure cases: the original timer survives refresh, refresh starts another
+	// warm, or adoption loses the reserved session after the original deadline.
+	effectIt.effect(
+		"draft pre-warm refresh extends expiry without starting another query or runner",
+		() =>
+			Effect.gen(function* () {
+				vi.stubEnv("CONDUIT_TEST_DRAFT_PREWARM_TTL_MS", "6000");
+				yield* Effect.addFinalizer(() => Effect.sync(() => vi.unstubAllEnvs()));
+				const wallClock = vi.spyOn(Date, "now").mockReturnValue(0);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => wallClock.mockRestore()),
+				);
+				const warmed: PreWarmSessionInput[] = [];
+				const ended: string[] = [];
+				const input = {
+					workspaceRoot: "/project",
+					extraFolders: [],
+					providerState: {},
+				};
+				yield* Effect.gen(function* () {
+					const drafts = yield* DraftPreWarmTag;
+					yield* drafts.warm(
+						"origin",
+						"draft",
+						"project",
+						Effect.succeed(input),
+					);
+					wallClock.mockReturnValue(1000);
+					yield* TestClock.adjust(1000);
+					yield* drafts.warm(
+						"origin",
+						"draft",
+						"project",
+						Effect.succeed(input),
+					);
+					wallClock.mockReturnValue(6500);
+					yield* TestClock.adjust(5500);
+					expect(ended).toEqual([]);
+					expect(warmed).toHaveLength(1);
+					expect(
+						yield* drafts.take("origin", "draft", draftLaunchKey(input)),
+					).toBe(warmed[0]?.sessionId);
+				}).pipe(
+					Effect.provide(
+						DraftPreWarmLive.pipe(
+							Layer.provide(
+								Layer.mergeAll(
+									ProviderRegistryLive([
+										{
+											providerId: "claude",
+											discoverEffect: () =>
+												Effect.die("Pre-warm must not discover"),
+											generateTextEffect: () =>
+												Effect.die("Pre-warm must not generate text"),
+											sendTurnEffect: () =>
+												Effect.die("Pre-warm must not send"),
+											preWarmSessionEffect: (request) =>
+												Effect.sync(() => {
+													warmed.push(request);
+												}),
+											interruptTurnEffect: () => Effect.void,
+											resolvePermissionEffect: () => Effect.void,
+											resolveQuestionEffect: () => Effect.void,
+											endSessionEffect: (sessionId) =>
+												Effect.sync(() => {
+													ended.push(sessionId);
+												}),
+											shutdownEffect: () => Effect.void,
+										},
+									]),
+									Layer.succeed(LoggerTag, createLogger("draft-prewarm-test")),
+								),
+							),
+						),
+					),
+				);
+			}),
+	);
 
 	it("draft pre-warm evicts the least recently refreshed reservation when a ninth origin warms", async () => {
 		const { harness, browser } = await start();
@@ -557,53 +607,72 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		);
 		expect(otherId).not.toBe(runner.sessionId);
 		expect(alive(runner.pid)).toBe(true);
-		// The warm reservation is origin-local, but CreateSession's draft claim
-		// is shared across devices (d3c3661c). The losing origin discards its warm.
+		// The warm reservation is origin-local, but the draft claim is shared.
 		await expect(
 			browser.createSession("Owning origin", undefined, "claude", { draftId }),
 		).rejects.toMatchObject({ _tag: "DraftAlreadySent", draftId });
-		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
-			timeout: 5000,
+		await vi.waitFor(() => {
+			expect(alive(runner.pid)).toBe(false);
+			expect(existsSync(runner.socketPath)).toBe(false);
 		});
 		expect(durableCounts(harness, runner.sessionId).status).toBeUndefined();
 		expect(durableCounts(harness, otherId).status).toEqual({ status: "idle" });
 	});
 
-	it("draft pre-warm orphan runner is terminated when the daemon recovers after a crash", async () => {
-		const { harness, browser } = await start();
-		const draftId = randomUUID();
-		await browser.preWarmDraft(draftId);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(1),
-		);
-		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
-		if (runner?.kind !== "runner-started")
-			throw new Error("Missing unpersisted draft runner");
-		await harness.kill();
-		expect(alive(runner.pid)).toBe(true);
-		await harness.restart();
-		await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
-			timeout: 5000,
+	describe("Draft pre-warm crash recovery", () => {
+		let harness: ProcessHarness;
+		let browser: ProcessBrowser;
+		let draftId: string;
+		let runner: Extract<ProcessMark, { kind: "runner-started" }>;
+
+		beforeEach(async () => {
+			({ harness, browser } = await start());
+			draftId = randomUUID();
+			await browser.preWarmDraft(draftId);
+			await vi.waitFor(() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			);
+			const started = harness.marks.find(
+				(mark) => mark.kind === "runner-started",
+			);
+			if (started?.kind !== "runner-started")
+				throw new Error("Missing unpersisted draft runner");
+			runner = started;
 		});
-		expect(existsSync(runner.socketPath)).toBe(false);
-		const reconnected = await harness.connect(undefined, browser.originId);
-		const sessionId = await reconnected.createSession(
-			"After draft recovery",
-			undefined,
-			"claude",
-			{ draftId },
-		);
-		expect(sessionId).not.toBe(runner.sessionId);
-		const turn = await reconnected.send(
-			sessionId,
-			"draft-after-orphan-recovery",
-		);
-		expect(turn.done["status"]).toBe("idle");
-		expect(turn.chunks.join("")).toBe(
-			responseChunks("draft-after-orphan-recovery").join(""),
-		);
+
+		describe("after the daemon recovers", () => {
+			// Each cold process phase keeps its existing startup and hook deadlines.
+			beforeEach(async () => {
+				await harness.kill();
+				expect(alive(runner.pid)).toBe(true);
+				await harness.restart();
+			});
+
+			it("draft pre-warm orphan runner is terminated when the daemon recovers after a crash", async () => {
+				await vi.waitFor(() => expect(alive(runner.pid)).toBe(false), {
+					timeout: 5000,
+				});
+				expect(existsSync(runner.socketPath)).toBe(false);
+				const reconnected = await harness.connect(undefined, browser.originId);
+				const sessionId = await reconnected.createSession(
+					"After draft recovery",
+					undefined,
+					"claude",
+					{ draftId },
+				);
+				expect(sessionId).not.toBe(runner.sessionId);
+				const turn = await reconnected.send(
+					sessionId,
+					"draft-after-orphan-recovery",
+				);
+				expect(turn.done["status"]).toBe("idle");
+				expect(turn.chunks.join("")).toBe(
+					responseChunks("draft-after-orphan-recovery").join(""),
+				);
+			});
+		});
 	});
 
 	it("draft OpenCode pre-warm scopes one path request to an alternate directory and refreshes after process restart", async () => {
@@ -1012,334 +1081,367 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		}
 	});
 
-	it.each([
-		"delete",
-		"cancel",
-	] as const)("does not warm a session receiving %s during provider discovery", async (lifecycleAction) => {
-		const { harness, browser: creatingBrowser } = await start({
-			blockCapabilitiesProbe: true,
-		});
-		const markerPath = join(harness.root, "capabilities-probe-started");
-		const releasePath = join(harness.root, "capabilities-probe-release");
-		const capture: (typeof captures)[number] = {
-			markerPath,
-			pids: [],
-			noQueryBeforeRelease: false,
-			released: false,
-			lifecycleAction,
-		};
-		captures.push(capture);
-		let warm: Promise<{ error?: unknown }> | undefined;
-		let warmSettled = false;
-		try {
-			const sessionId = await creatingBrowser.createSession(
-				`${lifecycleAction} during discovery`,
-			);
-			// Restore a legacy session that predates mandatory model selection.
+	describe("Pre-warm provider discovery", () => {
+		let harness: ProcessHarness;
+		let browser: ProcessBrowser;
+		let sessionId: string;
+
+		beforeEach(async () => {
+			({ harness, browser } = await start({
+				blockCapabilitiesProbe: true,
+			}));
+			sessionId = await browser.createSession("Lifecycle during discovery");
+			// Restore legacy rows offline, outside the discovery cancellation interval.
 			await harness.kill();
 			seedSessionWithoutPick(harness, sessionId);
-			await harness.restart();
-			const browser = await harness.connect(
-				undefined,
-				creatingBrowser.originId,
-			);
-			writeFileSync(join(harness.root, "capabilities-probe-armed"), "armed");
-			warm = browser.preWarmSession(sessionId).then(
-				() => {
-					capture.warmOutcome = "ready";
-					warmSettled = true;
-					return {};
-				},
-				(error: unknown) => {
-					capture.warmOutcome = "cancelled";
-					warmSettled = true;
-					return { error };
-				},
-			);
-			await vi.waitFor(() => expect(existsSync(markerPath)).toBe(true), {
-				timeout: 3000,
+		});
+
+		describe("with persisted legacy rows", () => {
+			beforeEach(async () => {
+				await harness.restart();
+				browser = await harness.connect(undefined, browser.originId);
 			});
-			capture.probeWorkspace = readFileSync(markerPath, "utf8");
-			expect(capture.probeWorkspace).toBe(harness.projectDir);
-			expect(existsSync(releasePath)).toBe(false);
-			await new Promise<void>((done) => setTimeout(done, 200));
-			capture.noQueryBeforeRelease = !harness.marks.some(
-				(mark) => mark.kind === "query",
-			);
-			expect(capture.noQueryBeforeRelease).toBe(true);
-			expect(warmSettled).toBe(false);
-			if (lifecycleAction === "delete") {
-				await browser.deleteSession(sessionId);
-				capture.sessionDeletedBeforeRelease =
-					durableCounts(harness, sessionId).status === undefined;
-				expect(capture.sessionDeletedBeforeRelease).toBe(true);
-			} else {
-				await Effect.runPromise(
-					browser.rpc
-						.CancelSession({
-							sessionId,
-							commandId: randomUUID(),
-						})
-						.pipe(Effect.timeout("3 seconds")),
-				);
-				capture.sessionCancelledBeforeRelease =
-					durableCounts(harness, sessionId).status?.status === "idle";
-				expect(capture.sessionCancelledBeforeRelease).toBe(true);
-				await Effect.runPromise(
-					browser.rpc
-						.SetClaudeSettings({
-							projectSlug: "process-test",
-							overrides: { disableAllHooks: true },
-							originId: browser.originId,
-						})
-						.pipe(Effect.timeout("3 seconds")),
-				);
-			}
-			expect(existsSync(releasePath)).toBe(false);
-			writeFileSync(releasePath, "release");
-			capture.released = true;
-			const outcome = await warm;
-			capture.noRunnerAfterRelease = !harness.marks.some(
-				(mark) => mark.kind === "runner-started" || mark.kind === "query",
-			);
-			expect(capture.noRunnerAfterRelease).toBe(true);
-			expect(capture.warmOutcome).toBe("cancelled");
-			expect(String(outcome.error)).not.toMatch(/Timed out|timeout/i);
-			expect(
-				harness.marks.filter((mark) => mark.kind === "enqueue"),
-			).toHaveLength(0);
-			expect(durableCounts(harness, sessionId).commands).toEqual([]);
-			if (lifecycleAction === "cancel") {
-				await Effect.runPromise(
-					browser.rpc.SwitchModel({
-						sessionId,
-						originId: browser.originId,
-						providerId: "claude",
-						modelId: "opus",
-					}),
-				);
-				await Effect.runPromise(
-					browser.rpc.SwitchContextWindow({
-						sessionId,
-						originId: browser.originId,
-						contextWindow: "200k",
-					}),
-				);
-				expect(
-					(
-						await browser.send(sessionId, "send-after-discovery-cancel")
-					).chunks.join(""),
-				).toBe(responseChunks("send-after-discovery-cancel").join(""));
-				expect(
-					harness.marks.filter((mark) => mark.kind === "query"),
-				).toHaveLength(1);
-				const query = harness.marks.find((mark) => mark.kind === "query");
-				if (query?.kind !== "query")
-					throw new Error("Missing query after discovery cancellation");
-				expect(query.options).toMatchObject({
-					model: "opus",
-					settings: { disableAllHooks: true },
-				});
-				expect(
-					harness.marks.find((mark) => mark.kind === "enqueue"),
-				).toMatchObject({ queryId: query.queryId, promptIndex: 1 });
-			}
-		} finally {
-			writeFileSync(releasePath, "release");
-			capture.released = true;
-			await warm;
-		}
+
+			it.each([
+				"delete",
+				"cancel",
+			] as const)("does not warm a session receiving %s during provider discovery", async (lifecycleAction) => {
+				const markerPath = join(harness.root, "capabilities-probe-started");
+				const releasePath = join(harness.root, "capabilities-probe-release");
+				const capture: (typeof captures)[number] = {
+					markerPath,
+					pids: [],
+					noQueryBeforeRelease: false,
+					released: false,
+					lifecycleAction,
+				};
+				captures.push(capture);
+				let warm: Promise<{ error?: unknown }> | undefined;
+				let warmSettled = false;
+				try {
+					writeFileSync(
+						join(harness.root, "capabilities-probe-armed"),
+						"armed",
+					);
+					warm = browser.preWarmSession(sessionId).then(
+						() => {
+							capture.warmOutcome = "ready";
+							warmSettled = true;
+							return {};
+						},
+						(error: unknown) => {
+							capture.warmOutcome = "cancelled";
+							warmSettled = true;
+							return { error };
+						},
+					);
+					await vi.waitFor(() => expect(existsSync(markerPath)).toBe(true), {
+						timeout: 3000,
+					});
+					capture.probeWorkspace = readFileSync(markerPath, "utf8");
+					expect(capture.probeWorkspace).toBe(harness.projectDir);
+					expect(existsSync(releasePath)).toBe(false);
+					await new Promise<void>((done) => setTimeout(done, 200));
+					capture.noQueryBeforeRelease = !harness.marks.some(
+						(mark) => mark.kind === "query",
+					);
+					expect(capture.noQueryBeforeRelease).toBe(true);
+					expect(warmSettled).toBe(false);
+					if (lifecycleAction === "delete") {
+						await browser.deleteSession(sessionId);
+						capture.sessionDeletedBeforeRelease =
+							durableCounts(harness, sessionId).status === undefined;
+						expect(capture.sessionDeletedBeforeRelease).toBe(true);
+					} else {
+						await Effect.runPromise(
+							browser.rpc
+								.CancelSession({
+									sessionId,
+									commandId: randomUUID(),
+								})
+								.pipe(Effect.timeout("3 seconds")),
+						);
+						capture.sessionCancelledBeforeRelease =
+							durableCounts(harness, sessionId).status?.status === "idle";
+						expect(capture.sessionCancelledBeforeRelease).toBe(true);
+						await Effect.runPromise(
+							browser.rpc
+								.SetClaudeSettings({
+									projectSlug: "process-test",
+									overrides: { disableAllHooks: true },
+									originId: browser.originId,
+								})
+								.pipe(Effect.timeout("3 seconds")),
+						);
+					}
+					expect(existsSync(releasePath)).toBe(false);
+					writeFileSync(releasePath, "release");
+					capture.released = true;
+					const outcome = await warm;
+					capture.noRunnerAfterRelease = !harness.marks.some(
+						(mark) => mark.kind === "runner-started" || mark.kind === "query",
+					);
+					expect(capture.noRunnerAfterRelease).toBe(true);
+					expect(capture.warmOutcome).toBe("cancelled");
+					expect(String(outcome.error)).not.toMatch(/Timed out|timeout/i);
+					expect(
+						harness.marks.filter((mark) => mark.kind === "enqueue"),
+					).toHaveLength(0);
+					expect(durableCounts(harness, sessionId).commands).toEqual([]);
+					if (lifecycleAction === "cancel") {
+						await Effect.runPromise(
+							browser.rpc.SwitchModel({
+								sessionId,
+								originId: browser.originId,
+								providerId: "claude",
+								modelId: "opus",
+							}),
+						);
+						await Effect.runPromise(
+							browser.rpc.SwitchContextWindow({
+								sessionId,
+								originId: browser.originId,
+								contextWindow: "200k",
+							}),
+						);
+						expect(
+							(
+								await browser.send(sessionId, "send-after-discovery-cancel")
+							).chunks.join(""),
+						).toBe(responseChunks("send-after-discovery-cancel").join(""));
+						expect(
+							harness.marks.filter((mark) => mark.kind === "query"),
+						).toHaveLength(1);
+						const query = harness.marks.find((mark) => mark.kind === "query");
+						if (query?.kind !== "query")
+							throw new Error("Missing query after discovery cancellation");
+						expect(query.options).toMatchObject({
+							model: "opus",
+							settings: { disableAllHooks: true },
+						});
+						expect(
+							harness.marks.find((mark) => mark.kind === "enqueue"),
+						).toMatchObject({ queryId: query.queryId, promptIndex: 1 });
+					}
+				} finally {
+					writeFileSync(releasePath, "release");
+					capture.released = true;
+					await warm;
+				}
+			});
+		});
 	});
 
-	it.each([
-		"delete",
-		"cancel",
-	] as const)("preserves a shared catalog consumer and subsequent first send when another session's pre-warm receives %s", async (lifecycleAction) => {
-		const { harness, browser: creatingBrowser } = await start({
-			blockCapabilitiesProbe: true,
-			capabilityModels: [
-				{
-					id: "claude-opus-4",
-					name: "Review Opus default",
-					providerId: "claude",
-					contextWindowOptions: [{ value: "200k", label: "200K" }],
-				},
-				{
-					id: "sonnet",
-					name: "Review Sonnet",
-					providerId: "claude",
-					contextWindowOptions: [{ value: "200k", label: "200K" }],
-				},
-			],
+	describe("Shared pre-warm catalog", () => {
+		let harness: ProcessHarness;
+		let browser: ProcessBrowser;
+		let warmSessionId: string;
+		let sendSessionId: string;
+
+		// Seed legacy rows offline, keeping each cold daemon start outside the race.
+		beforeEach(async () => {
+			({ harness, browser } = await start({
+				blockCapabilitiesProbe: true,
+				capabilityModels: [
+					{
+						id: "claude-opus-4",
+						name: "Review Opus default",
+						providerId: "claude",
+						contextWindowOptions: [{ value: "200k", label: "200K" }],
+					},
+					{
+						id: "sonnet",
+						name: "Review Sonnet",
+						providerId: "claude",
+						contextWindowOptions: [{ value: "200k", label: "200K" }],
+					},
+				],
+			}));
+			warmSessionId = await browser.createSession("Shared probe owner");
+			sendSessionId = await browser.createSession(
+				"Shared probe first send",
+				undefined,
+				"claude",
+				{ modelId: "claude-opus-4" },
+			);
+			// The legacy warm discovers a model; the send retains its validated stored pick.
+			await harness.kill();
+			seedSessionWithoutPick(harness, warmSessionId);
 		});
-		const warmSessionId =
-			await creatingBrowser.createSession("Shared probe owner");
-		const sendSessionId = await creatingBrowser.createSession(
-			"Shared probe first send",
-			undefined,
-			"claude",
-			{ modelId: "claude-opus-4" },
-		);
-		// The legacy warm discovers a model; the send retains its validated stored pick.
-		await harness.kill();
-		seedSessionWithoutPick(harness, warmSessionId);
-		await harness.restart();
-		const browser = await harness.connect(undefined, creatingBrowser.originId);
-		writeFileSync(join(harness.root, "capabilities-probe-armed"), "armed");
-		const markerPath = join(harness.root, "capabilities-probe-started");
-		const releasePath = join(harness.root, "capabilities-probe-release");
-		const ownerPath = join(harness.root, "capabilities-consumer-1.json");
-		const joinedPath = join(harness.root, "capabilities-consumer-2.json");
-		const capture: (typeof captures)[number] = {
-			markerPath,
-			pids: [],
-			noQueryBeforeRelease: false,
-			released: false,
-			lifecycleAction,
-		};
-		captures.push(capture);
-		const warm = browser.preWarmSession(warmSessionId).then(
-			() => {
-				capture.warmOutcome = "ready";
-			},
-			() => {
-				capture.warmOutcome = "cancelled";
-			},
-		);
-		const loadCatalog = () =>
-			Effect.runPromise(
-				browser.rpc.GetModels({
-					sessionId: sendSessionId,
-					instanceId: "claude",
-				}),
-			);
-		let pending: ReturnType<typeof loadCatalog> | undefined;
-		const catalogCursor = browser.frames.length;
-		try {
-			await vi.waitFor(() => expect(existsSync(ownerPath)).toBe(true));
-			expect(JSON.parse(readFileSync(ownerPath, "utf8"))).toEqual({
-				workspaceRoot: harness.projectDir,
-				status: "Suspended",
+
+		describe("with persisted legacy rows", () => {
+			beforeEach(async () => {
+				await harness.restart();
+				browser = await harness.connect(undefined, browser.originId);
 			});
-			expect(existsSync(markerPath)).toBe(true);
-			expect(existsSync(joinedPath)).toBe(false);
-			// Turn dispatch validates the cached catalog; GetModels is the discovery consumer.
-			pending = loadCatalog();
-			await vi.waitFor(() => expect(existsSync(joinedPath)).toBe(true));
-			expect(JSON.parse(readFileSync(joinedPath, "utf8"))).toEqual({
-				workspaceRoot: harness.projectDir,
-				status: "Suspended",
-			});
-			capture.catalogJoinedBeforeLifecycle = true;
-			expect(
-				JSON.parse(
-					readFileSync(
-						join(harness.root, "capabilities-probe-attempts.json"),
-						"utf8",
-					),
-				),
-			).toEqual({ count: 1, workspaceRoot: harness.projectDir });
-			capture.noQueryBeforeRelease = !harness.marks.some(
-				(mark) => mark.kind === "query",
-			);
-			expect(capture.noQueryBeforeRelease).toBe(true);
-			expect(existsSync(releasePath)).toBe(false);
-			if (lifecycleAction === "delete")
-				await browser.deleteSession(warmSessionId);
-			else
-				await Effect.runPromise(
-					browser.rpc
-						.CancelSession({
-							sessionId: warmSessionId,
-							commandId: randomUUID(),
-						})
-						.pipe(Effect.timeout("3 seconds")),
+
+			it.each([
+				"delete",
+				"cancel",
+			] as const)("preserves a shared catalog consumer and subsequent first send when another session's pre-warm receives %s", async (lifecycleAction) => {
+				writeFileSync(join(harness.root, "capabilities-probe-armed"), "armed");
+				const markerPath = join(harness.root, "capabilities-probe-started");
+				const releasePath = join(harness.root, "capabilities-probe-release");
+				const ownerPath = join(harness.root, "capabilities-consumer-1.json");
+				const joinedPath = join(harness.root, "capabilities-consumer-2.json");
+				const capture: (typeof captures)[number] = {
+					markerPath,
+					pids: [],
+					noQueryBeforeRelease: false,
+					released: false,
+					lifecycleAction,
+				};
+				captures.push(capture);
+				const warm = browser.preWarmSession(warmSessionId).then(
+					() => {
+						capture.warmOutcome = "ready";
+					},
+					() => {
+						capture.warmOutcome = "cancelled";
+					},
 				);
-			await warm;
-			expect(capture.warmOutcome).toBe("cancelled");
-			writeFileSync(releasePath, "release");
-			capture.released = true;
-			const discoveredCatalog = await pending;
-			capture.catalogProviderIds = discoveredCatalog.providers.map(
-				(provider) => provider.id,
-			);
-			if (discoveredCatalog.active)
-				capture.catalogActiveModel = discoveredCatalog.active.model;
-			expect(discoveredCatalog.active).toEqual({
-				model: "claude-opus-4",
-				provider: "claude",
-			});
-			// Claude catalogs are published through project settings, not GetModels.providers.
-			const refreshed = await browser.waitFor(
-				(message) =>
-					message["type"] === "project_setting" &&
-					message["_tag"] === "providerModels",
-				catalogCursor,
-			);
-			expect(refreshed["providers"]).toEqual(
-				expect.arrayContaining([
-					expect.objectContaining({
-						id: "claude",
-						models: expect.arrayContaining([
+				const loadCatalog = () =>
+					Effect.runPromise(
+						browser.rpc.GetModels({
+							sessionId: sendSessionId,
+							instanceId: "claude",
+						}),
+					);
+				let pending: ReturnType<typeof loadCatalog> | undefined;
+				const catalogCursor = browser.frames.length;
+				try {
+					await vi.waitFor(() => expect(existsSync(ownerPath)).toBe(true));
+					expect(JSON.parse(readFileSync(ownerPath, "utf8"))).toEqual({
+						workspaceRoot: harness.projectDir,
+						status: "Suspended",
+					});
+					expect(existsSync(markerPath)).toBe(true);
+					expect(existsSync(joinedPath)).toBe(false);
+					// Turn dispatch validates the cached catalog; GetModels is the discovery consumer.
+					pending = loadCatalog();
+					await vi.waitFor(() => expect(existsSync(joinedPath)).toBe(true));
+					expect(JSON.parse(readFileSync(joinedPath, "utf8"))).toEqual({
+						workspaceRoot: harness.projectDir,
+						status: "Suspended",
+					});
+					capture.catalogJoinedBeforeLifecycle = true;
+					expect(
+						JSON.parse(
+							readFileSync(
+								join(harness.root, "capabilities-probe-attempts.json"),
+								"utf8",
+							),
+						),
+					).toEqual({ count: 1, workspaceRoot: harness.projectDir });
+					capture.noQueryBeforeRelease = !harness.marks.some(
+						(mark) => mark.kind === "query",
+					);
+					expect(capture.noQueryBeforeRelease).toBe(true);
+					expect(existsSync(releasePath)).toBe(false);
+					if (lifecycleAction === "delete")
+						await browser.deleteSession(warmSessionId);
+					else
+						await Effect.runPromise(
+							browser.rpc
+								.CancelSession({
+									sessionId: warmSessionId,
+									commandId: randomUUID(),
+								})
+								.pipe(Effect.timeout("3 seconds")),
+						);
+					await warm;
+					expect(capture.warmOutcome).toBe("cancelled");
+					writeFileSync(releasePath, "release");
+					capture.released = true;
+					const discoveredCatalog = await pending;
+					capture.catalogProviderIds = discoveredCatalog.providers.map(
+						(provider) => provider.id,
+					);
+					if (discoveredCatalog.active)
+						capture.catalogActiveModel = discoveredCatalog.active.model;
+					expect(discoveredCatalog.active).toEqual({
+						model: "claude-opus-4",
+						provider: "claude",
+					});
+					// Claude catalogs are published through project settings, not GetModels.providers.
+					const refreshed = await browser.waitFor(
+						(message) =>
+							message["type"] === "project_setting" &&
+							message["_tag"] === "providerModels",
+						catalogCursor,
+					);
+					expect(refreshed["providers"]).toEqual(
+						expect.arrayContaining([
 							expect.objectContaining({
-								id: "claude-opus-4",
-								name: "Review Opus default",
+								id: "claude",
+								models: expect.arrayContaining([
+									expect.objectContaining({
+										id: "claude-opus-4",
+										name: "Review Opus default",
+									}),
+								]),
 							}),
 						]),
-					}),
-				]),
-			);
-			const result = await browser.send(
-				sendSessionId,
-				"first-send-sharing-warm-catalog",
-			);
-			expect(result.chunks.join("")).toBe(
-				responseChunks("first-send-sharing-warm-catalog").join(""),
-			);
-			expect(result.done["status"]).toBe("idle");
-			await vi.waitFor(() =>
-				expect(
-					harness.marks.filter((mark) => mark.kind === "query"),
-				).toHaveLength(1),
-			);
-			const query = harness.marks.find((mark) => mark.kind === "query");
-			if (query?.kind !== "query") throw new Error("Missing first-send query");
-			if (query.options.model !== undefined)
-				capture.firstQueryModel = query.options.model;
-			capture.persistedModels = durableCounts(harness, sendSessionId).models;
-			capture.sharedProbeAttempts = JSON.parse(
-				readFileSync(
-					join(harness.root, "capabilities-probe-attempts.json"),
-					"utf8",
-				),
-			).count;
-			expect(query.options.model).toBe("claude-opus-4");
-			expect(capture.sharedProbeAttempts).toBe(1);
-			expect(capture.persistedModels).toEqual([
-				expect.objectContaining({ requested_model: "claude-opus-4" }),
-			]);
-			expect(
-				harness.marks.filter((mark) => mark.kind === "runner-started"),
-			).toHaveLength(1);
-			expect(harness.marks.filter((mark) => mark.kind === "enqueue")).toEqual([
-				expect.objectContaining({ queryId: query.queryId, promptIndex: 1 }),
-			]);
-			const catalog = await Effect.runPromise(
-				browser.rpc.GetModels({
-					sessionId: sendSessionId,
-					instanceId: "claude",
-				}),
-			);
-			expect(catalog.active).toEqual({
-				model: "claude-opus-4",
-				provider: "claude",
+					);
+					const result = await browser.send(
+						sendSessionId,
+						"first-send-sharing-warm-catalog",
+					);
+					expect(result.chunks.join("")).toBe(
+						responseChunks("first-send-sharing-warm-catalog").join(""),
+					);
+					expect(result.done["status"]).toBe("idle");
+					await vi.waitFor(() =>
+						expect(
+							harness.marks.filter((mark) => mark.kind === "query"),
+						).toHaveLength(1),
+					);
+					const query = harness.marks.find((mark) => mark.kind === "query");
+					if (query?.kind !== "query")
+						throw new Error("Missing first-send query");
+					if (query.options.model !== undefined)
+						capture.firstQueryModel = query.options.model;
+					capture.persistedModels = durableCounts(
+						harness,
+						sendSessionId,
+					).models;
+					capture.sharedProbeAttempts = JSON.parse(
+						readFileSync(
+							join(harness.root, "capabilities-probe-attempts.json"),
+							"utf8",
+						),
+					).count;
+					expect(query.options.model).toBe("claude-opus-4");
+					expect(capture.sharedProbeAttempts).toBe(1);
+					expect(capture.persistedModels).toEqual([
+						expect.objectContaining({ requested_model: "claude-opus-4" }),
+					]);
+					expect(
+						harness.marks.filter((mark) => mark.kind === "runner-started"),
+					).toHaveLength(1);
+					expect(
+						harness.marks.filter((mark) => mark.kind === "enqueue"),
+					).toEqual([
+						expect.objectContaining({ queryId: query.queryId, promptIndex: 1 }),
+					]);
+					const catalog = await Effect.runPromise(
+						browser.rpc.GetModels({
+							sessionId: sendSessionId,
+							instanceId: "claude",
+						}),
+					);
+					expect(catalog.active).toEqual({
+						model: "claude-opus-4",
+						provider: "claude",
+					});
+				} finally {
+					writeFileSync(releasePath, "release");
+					capture.released = true;
+					await warm;
+					await pending?.catch(() => undefined);
+				}
 			});
-		} finally {
-			writeFileSync(releasePath, "release");
-			capture.released = true;
-			await warm;
-			await pending?.catch(() => undefined);
-		}
+		});
 	});
 
 	it("pre-warms a named Claude instance with its configured directory and reuses that query for the first send", async () => {
@@ -1403,7 +1505,9 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		]);
 	});
 
-	it("settles a first send interrupted while initialization is pending and allows the next send", async () => {
+	it("settles a first send interrupted while initialization is pending and allows the next send", async ({
+		signal,
+	}) => {
 		const { harness, browser } = await start({
 			restartProof: true,
 			holdRunnerAck: "place-user-message",
@@ -1414,12 +1518,9 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			() => "ready" as const,
 			() => "cancelled" as const,
 		);
-		await vi.waitFor(
-			() =>
-				expect(
-					harness.marks.filter((mark) => mark.kind === "query"),
-				).toHaveLength(1),
-			{ timeout: 5000 },
+		await harness.waitForMark((mark) => mark.kind === "query", 0, signal);
+		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
+			1,
 		);
 		const pending = browser
 			.send(sessionId, "cancel-before-initialization")
@@ -1427,12 +1528,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				(response) => ({ response }),
 				(error: unknown) => ({ error }),
 			);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.some(
-					(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
-				),
-			).toBe(true),
+		await harness.waitForMark(
+			(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
+			0,
+			signal,
 		);
 		await vi.waitFor(async () =>
 			expect(
@@ -1486,24 +1585,29 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		);
 	});
 
-	it.each([
+	it.for([
 		0, 1,
-	])("preserves a send racing slow initialization with %s initialization failures", async (queryInitializationFailures) => {
+	])("preserves a send racing slow initialization with %s initialization failures", async (queryInitializationFailures, {
+		signal,
+	}) => {
 		const { harness, browser } = await start({
-			queryInitializationDelayMs: 500,
+			restartProof: true,
 			queryInitializationFailures,
 		});
 		const sessionId = await browser.createSession("Send racing initialization");
+		writeFileSync(join(harness.root, "hold-next-initialization"), "hold once");
 		const warm = browser.preWarmSession(sessionId).then(
 			() => "ready" as const,
 			() => "failed" as const,
 		);
-		await vi.waitFor(
-			() =>
-				expect(
-					harness.marks.filter((mark) => mark.kind === "query"),
-				).toHaveLength(1),
-			{ timeout: 5000 },
+		await harness.waitForMark((mark) => mark.kind === "query", 0, signal);
+		expect(harness.marks.filter((mark) => mark.kind === "query")).toHaveLength(
+			1,
+		);
+		await harness.waitForMark(
+			(mark) => mark.kind === "initialization-held",
+			0,
+			signal,
 		);
 		expect(
 			harness.marks.filter((mark) => mark.kind === "enqueue"),
@@ -1511,7 +1615,16 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		expect(
 			harness.marks.filter((mark) => mark.kind === "initialization-ready"),
 		).toHaveLength(0);
-		const result = await browser.send(sessionId, "racing-first-send");
+		const send = browser.send(sessionId, "racing-first-send");
+		void send.catch(() => undefined);
+		await harness.waitForMark(
+			(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
+			0,
+			signal,
+		);
+		// Release only after the send reaches the runner, regardless of startup time.
+		writeFileSync(join(harness.root, "release-held-initialization"), "release");
+		const result = await send;
 		expect(result.chunks.join("")).toBe(
 			responseChunks("racing-first-send").join(""),
 		);

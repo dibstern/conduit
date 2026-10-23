@@ -1,5 +1,105 @@
 Feature: The composer matches the Final desktop and phone designs
 
+Scenario Outline: idle phone footer restores its measured fit as the width changes
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  When I set effort to high
+  And I type Check the footer into the composer
+  Then the idle phone footer fits at 320, 393 and 320 pixels
+  And the composer region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | baseline                   | threshold |
+  | composer-priority-idle-320  | 98        |
+
+Scenario Outline: busy phone footer keeps Stop in its main position as the width changes
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  When I set effort to high
+  And I type Check the footer into the composer
+  And the open session starts working
+  Then the busy phone footer fits at 320, 393 and 320 pixels
+  And the composer region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | baseline                   | threshold |
+  | composer-priority-busy-320  | 98        |
+
+Scenario Outline: auto-switch and Stop yield phone effort before covering Send
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the Usage settings clock is pinned to 2026-01-01T14:25:00Z
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And Usage settings have several Claude accounts in the limit state
+  And the daemon's usage limits are auto-resume off, auto-switch on, order claude, work, spare
+  And the mock usage reading for claude becomes limited
+  When I set effort to high
+  And I type Check the footer into the composer
+  And the open session starts working
+  Then the composer send mode is switch
+  And the auto-switch phone footer fits at 320, 393 and 320 pixels
+  And the composer region visually matches <baseline> at <threshold> percent
+  When I tap the phone composer Effort row
+  Then the icons control opens the picker at Effort
+  And the picker is a phone bottom sheet
+
+Examples:
+  | baseline                          | threshold |
+  | composer-priority-auto-switch-320  | 98        |
+
+Scenario Outline: Set goal and Stop yield phone effort before covering permission
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  When I set effort to high
+  And I type $goal Check the footer into the composer
+  And the open session starts working
+  Then the composer shows goal send controls
+  And the goal phone footer fits at 320, 393 and 320 pixels
+  And the composer region visually matches <baseline> at <threshold> percent
+  When I tap the phone composer Effort row
+  Then the icons control opens the picker at Effort
+  And the picker is a phone bottom sheet
+
+Examples:
+  | baseline                   | threshold |
+  | composer-priority-goal-320  | 98        |
+
+Scenario Outline: reset and Stop keep the joined phone split pill as the width changes
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the Usage settings clock is pinned to 2026-01-01T14:25:00Z
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And Usage settings have several Claude accounts in the limit state
+  And the mock usage reading for claude becomes limited
+  When I set effort to high
+  And I type Check the footer into the composer
+  And the open session starts working
+  Then the composer send mode is at-reset
+  And the at-reset phone footer fits at 320, 393 and 320 pixels
+  And the composer region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | baseline                       | threshold |
+  | composer-priority-at-reset-320  | 98        |
+
 Scenario Outline: phone icons composer keeps text above its controls
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
@@ -23,6 +123,25 @@ Scenario Outline: phone icons composer keeps text above its controls
 Examples:
   | baseline                   | threshold |
   | composer-final-idle-phone  | 98        |
+
+Scenario: phone footer effort and checkout open their existing sheets directly
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  When I set effort to high
+  Then the phone footer effort meter names High
+  When I tap the phone footer effort control
+  Then the icons control opens the picker at Effort
+  And the picker is a phone bottom sheet
+  And the phone composer sheet is closed
+  When I close the model picker
+  And I tap the phone footer checkout control
+  Then the checkout menu is a phone bottom sheet
+  And the composer checkout menu shows conduit and account-chip in full
+  And the phone composer sheet is closed
 
 Scenario Outline: the phone model pill opens the Composer sheet
   Given the conduit app is served with the connected mockup
@@ -286,7 +405,7 @@ Scenario Outline: E2 desktop icons warn about auto approvals and a workspace hin
   And the session has a workspace hint at /workspace/conduit-hint
   When I set effort to high
   Then the composer has 2 rows
-  And the mode shield uses the warning tone
+  And the mode shield uses the auto tone
   And the composer checkout has a workspace hint icon without inline actions
   And the checkout pill yields room before the model label and send
   And the composer region visually matches <baseline> at <threshold> percent
@@ -312,12 +431,12 @@ Scenario Outline: desktop mode shields preserve every permission mode
 
 Examples:
   | mode        | label       | tone    | baseline                  | threshold |
-  | dontAsk     | Never ask   | neutral | composer-icons-mode-never | 98        |
-  | plan        | Plan        | neutral | composer-icons-mode-plan  | 98        |
-  | ask         | Ask before edits | neutral | composer-icons-mode-ask   | 98        |
-  | acceptEdits | Auto-accept edits | warning | composer-icons-mode-edits | 98        |
-  | auto        | Auto        | warning | composer-icons-mode-auto  | 98        |
-  | full        | Full access | danger  | composer-icons-mode-full  | 98        |
+  | dontAsk     | Never ask   | never   | composer-icons-mode-never | 98        |
+  | plan        | Plan        | plan    | composer-icons-mode-plan  | 98        |
+  | ask         | Ask before edits | ask     | composer-icons-mode-ask   | 98        |
+  | acceptEdits | Auto-accept edits | edits   | composer-icons-mode-edits | 98        |
+  | auto        | Auto        | auto    | composer-icons-mode-auto  | 98        |
+  | full        | Full access | full    | composer-icons-mode-full  | 98        |
 
 Scenario Outline: long checkout names collapse before the model label truncates
   Given the conduit app is served with the connected mockup

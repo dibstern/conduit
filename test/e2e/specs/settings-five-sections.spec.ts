@@ -5,6 +5,7 @@ import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js"
 import { dualDriverProviders } from "../fixtures/mockup-state.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { closeSettings } from "../helpers/settings.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 const sections = [
@@ -20,26 +21,22 @@ const sections = [
 		"Claude",
 		"[data-testid=claude-setting-defaultPermissionMode-select]",
 	],
-	["surfacing", "Surfacing", "[data-testid=surfacing-settings-general]"],
+	["surfacing", "Jev", "[data-testid=surfacing-settings-general]"],
 	["archived", "Archived", "section[aria-label='Archived sessions']"],
 	["usage", "Usage", "#usage-settings"],
 	["server", "Server", "#instances-settings"],
 ] as const;
 
 async function openSettingsPanel(page: Page): Promise<void> {
-	const listOverflow = page.getByTestId("list-bar-overflow");
-	if (await listOverflow.isVisible()) {
-		await listOverflow.click();
-		await page.getByTestId("list-overflow-settings").click();
+	const listSettings = page.getByTestId("list-bar-settings");
+	if (await listSettings.isVisible()) {
+		await listSettings.click();
 		return;
 	}
-	const titleMenu = page.getByTestId("session-bar-title-menu");
-	if (await titleMenu.isVisible()) {
-		await titleMenu.click();
-		await page.getByTestId("session-title-settings").click();
-		return;
-	}
-	await page.getByTestId("session-bar-overflow").click();
+	await page
+		.getByTestId("session-bar-overflow")
+		.or(page.getByTestId("session-bar-island-overflow"))
+		.click();
 	await page.getByTestId("overflow-settings").click();
 }
 
@@ -353,7 +350,7 @@ for (const [viewportName, viewport] of [
 				Math.round(anchorOffset * devicePixelRatio),
 			).toBeGreaterThanOrEqual(0);
 			if (!atScrollEnd) expect(anchorOffset).toBeLessThanOrEqual(15);
-			await page.getByTestId("settings-close-btn").click();
+			await closeSettings(page);
 			await expect(panel).toBeHidden();
 		});
 	});

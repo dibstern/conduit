@@ -86,8 +86,10 @@ test.describe("ToolGenericCard", () => {
 		await expect(subtitle).toBeVisible();
 		await expect(subtitle).toHaveText("Running…");
 
-		const activityIndicator = page.locator(".tool-header [style*='grid']");
-		await expect(activityIndicator).toBeAttached();
+		const activityIndicator = page.locator(
+			'.tool-header [data-flow-glyph="running"]',
+		);
+		await expect(activityIndicator).toBeVisible();
 	});
 
 	test("shows error styling for error state", async ({ page }) => {
@@ -142,10 +144,12 @@ test.describe("ToolQuestionCard", () => {
 		await expect(subtitle).toBeVisible();
 		await expect(subtitle).toHaveText(/Answered/);
 
-		// Should display the answer result
-		const answerText = page.locator(".font-mono.whitespace-pre-wrap");
-		await expect(answerText).toBeVisible();
-		await expect(answerText).toHaveText(/Yes, fix it/);
+		const chosen = page.locator('.question-tool-option[data-chosen="true"]');
+		await expect(chosen).toHaveCount(1);
+		await expect(chosen.getByText("Staging", { exact: true })).toBeVisible();
+		await expect(chosen.locator(".question-chosen")).toHaveText("Chosen");
+		await expect(page.locator(".question-raw-answer")).toHaveCount(0);
+		await expect(page.getByText('["Staging"]', { exact: true })).toHaveCount(0);
 	});
 
 	test("shows skipped state", async ({ page }) => {
@@ -215,7 +219,7 @@ test.describe("ToolSubagentCard", () => {
 		await expect(header).not.toBeDisabled();
 	});
 
-	test("shows running state with block grid", async ({ page }) => {
+	test("shows running state with Flow glyph", async ({ page }) => {
 		await page.goto(storyUrl("chat-toolitem--subagent-running"), {
 			waitUntil: "domcontentloaded",
 		});
@@ -226,9 +230,7 @@ test.describe("ToolSubagentCard", () => {
 		await expect(subtitle).toBeVisible();
 		await expect(subtitle).toHaveText("Running…");
 
-		// Should show the block grid animation instead of a static icon
-		// BlockGrid renders as a div with inline grid styles
-		const blockGrid = page.locator(".subagent-header [style*='grid']");
-		await expect(blockGrid).toBeAttached();
+		const glyph = page.locator('.subagent-header [data-flow-glyph="running"]');
+		await expect(glyph).toBeVisible();
 	});
 });
