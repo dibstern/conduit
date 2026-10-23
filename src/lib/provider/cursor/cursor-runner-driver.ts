@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { Effect, Schema, Semaphore } from "effect";
+import { Effect, Result, Schema, Semaphore } from "effect";
 import type { Account } from "../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
@@ -9,6 +9,7 @@ import type { ReadQueryEffect } from "../../persistence/effect/read-query-effect
 import { ProviderInstanceFailure } from "../errors.js";
 import { resolveRunnerForkDigest } from "../runner/runner-fork-digest.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
+import { modelParameterChoices } from "../turn-settings.js";
 import type { ModelInfo, ProviderCapabilities } from "../types.js";
 import { CursorAccountResources } from "./cursor-account-resources.js";
 import { resolveCursorCredential } from "./cursor-credential.js";
@@ -340,25 +341,12 @@ export const makeCursorRunnerDriver = (
 						return yield* Effect.fail(
 							new Error("Cursor title model is not offered"),
 						);
-					// Captured parameter values are cheapest-first. Composer lists its paid
-					// Fast variant first, so neither variant order nor isDefault is suitable.
-					const variant =
-						input.effort ||
-						model.parameters?.combinations.find(({ values }) =>
-							model.parameters?.rows.every(
-								(row) => values[row.id] === row.values[0]?.value,
-							),
-						)?.variant;
-					if (
-						(input.effort && !model.variants?.[input.effort]) ||
-						(model.parameters && !variant)
-					)
-						return yield* Effect.fail(
-							new Error("Cursor title model parameter choice is not offered"),
-						);
-					const params = yield* Schema.decodeUnknownEffect(
-						CursorModelParameters,
-					)(variant ? model.variants?.[variant]?.["params"] : []);
+					const choices = modelParameterChoices(model);
+					const choice = input.effort
+						? choices.resolve(input.effort)
+						: Result.succeed(choices.cheapest());
+					if (Result.isFailure(choice)) return yield* choice.failure;
+					const params = choice.success.values;
 					const scratchRoot = join(daemonConfigDir, "text-generation");
 					return yield* Effect.acquireUseRelease(
 						Effect.tryPromise(async () => {
@@ -550,18 +538,18 @@ export const makeCursorRunnerDriver = (
 					const model = catalog.models.find(
 						({ id }) => id === input.model?.modelId,
 					);
-					const variants = model?.variants ?? {};
-					const selected = input.variant ? variants[input.variant] : undefined;
-					if (model && input.variant && !selected)
+					const choice = modelParameterChoices(
+						model ?? { id: input.model?.modelId ?? "" },
+					).resolve(model ? (input.variant ?? "") : "");
+					if (Result.isFailure(choice))
 						return yield* Effect.fail(
-							discoveryFailure("Cursor model parameter choice is not offered"),
+							new ProviderInstanceFailure({
+								providerId: "cursor",
+								operation: "prepare turn",
+								cause: choice.failure,
+							}),
 						);
-					const variant =
-						selected ??
-						Object.values(variants).find(
-							(variant) => variant["isDefault"] === true,
-						);
-					const params = variant?.["params"] ?? [];
+					const params = choice.success.values;
 					const digest = yield* resolveRunnerForkDigest(
 						input,
 						"cursor.forkDigest",

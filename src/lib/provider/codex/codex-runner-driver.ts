@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
-import { Effect, Result, Schema } from "effect";
+import { Effect, Result } from "effect";
 import { SqlClient } from "effect/sql";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import type { ProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
@@ -10,6 +10,7 @@ import { renderForkDigest } from "../fork-digest.js";
 import { historicalMessageText } from "../historical-message-text.js";
 import { resolveRunnerForkDigest } from "../runner/runner-fork-digest.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
+import { modelParameterChoices } from "../turn-settings.js";
 import { discoverCodex, discoverCodexEffect } from "./codex-discovery.js";
 import { codexAccountHome, prepareCodexAccount } from "./codex-home.js";
 import { readCodexNativeTurns } from "./codex-native-history.js";
@@ -18,10 +19,6 @@ import {
 	writeCodexSessionIdentity,
 } from "./codex-session-store.js";
 import { generateCodexText } from "./codex-text-generation.js";
-
-const decodeParameters = Schema.decodeUnknownResult(
-	Schema.Array(Schema.Struct({ id: Schema.String, value: Schema.String })),
-);
 
 export const makeCodexRunnerDriver = (
 	persistence?: {
@@ -90,24 +87,21 @@ export const makeCodexRunnerDriver = (
 			const skill = catalog.signedIn
 				? catalog.skills.find(({ name }) => name === command)
 				: undefined;
-			const variants = model?.variants ?? {};
-			const selected = input.variant ? variants[input.variant] : undefined;
-			if (model && input.variant && !selected) {
+			const choice = modelParameterChoices(
+				model ?? { id: input.model?.modelId ?? "" },
+			).resolve(model ? (input.variant ?? "") : "");
+			if (Result.isFailure(choice)) {
 				return yield* Effect.fail(
 					new ProviderInstanceFailure({
 						providerId: "codex",
 						operation: "prepare turn",
-						cause: new Error("Codex reasoning effort is not offered"),
+						cause: choice.failure,
 					}),
 				);
 			}
-			const variant =
-				selected ??
-				Object.values(variants).find((value) => value["isDefault"] === true);
-			const params = decodeParameters(variant?.["params"] ?? []);
-			const resolvedEffort = Result.isSuccess(params)
-				? params.success.find(({ id }) => id === "effort")?.value
-				: undefined;
+			const resolvedEffort = choice.success.values.find(
+				({ id }) => id === "effort",
+			)?.value;
 			const digest = yield* resolveRunnerForkDigest(
 				input,
 				"codex.forkDigest",

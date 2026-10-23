@@ -291,6 +291,15 @@ again and Held Messages go. It happens because the reset arrived, the user
 asked, or the session moved to another account.
 _Avoid_: release, unpark.
 
+## Model Parameter Choice
+
+A **Model Parameter Choice** is a stored model choice and the parameter values it
+resolves to. Empty means Default and follows the provider's default without
+pinning its current key. An explicit key must be offered by the current model.
+The choice module owns validation, row changes and cheapest selection; pickers
+and provider launches read its answer. Empty title choices use the cheapest
+offered row values, while remaining empty in storage.
+
 ## Turn Launcher
 
 **Turn Launcher** resolves everything a turn needs before it is sent: the

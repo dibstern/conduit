@@ -446,4 +446,27 @@ describe("Cursor ephemeral text generation with captured SDK traffic", () => {
 		).toBe(true);
 		expect(port.createAgent).not.toHaveBeenCalled();
 	});
+
+	it("reports the shared not-offered error for a stale title choice", async () => {
+		const { driver } = setup();
+		const result = await Effect.runPromise(
+			Effect.result(
+				driver.generateTextEffect({
+					...input,
+					effort: "removed",
+				}),
+			),
+		);
+		expect(result).toMatchObject({
+			_tag: "Failure",
+			failure: {
+				cause: {
+					_tag: "ModelParametersUnavailable",
+					modelId: "composer-2.5",
+					choice: "removed",
+					reason: "not-offered",
+				},
+			},
+		});
+	});
 });
