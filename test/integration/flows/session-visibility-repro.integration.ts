@@ -13,6 +13,7 @@ import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
 import type {
 	OpenCodeInteraction,
@@ -402,11 +403,20 @@ describe("Integration: Session Visibility Repros", () => {
 	let harness: RelayHarness;
 
 	beforeEach(async () => {
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
 		harness = await createRelayHarness("chat-simple");
 	}, 30_000);
 
 	afterEach(async () => {
-		if (harness) await harness.stop();
+		try {
+			if (harness) await harness.stop();
+		} finally {
+			__setProbeOverrideForTesting(undefined);
+		}
 	});
 
 	it("second client connecting with ?session= gets populated history after a turn", async () => {

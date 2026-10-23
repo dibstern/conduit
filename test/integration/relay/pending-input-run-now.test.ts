@@ -4,7 +4,15 @@ import { join } from "node:path";
 import { Context, Effect, Exit, Fiber, Layer, Scope, Stream } from "effect";
 import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import {
+	afterAll,
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -48,6 +56,7 @@ import {
 } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { makeClaudeSessionRunner } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
@@ -102,6 +111,14 @@ function signal<T>() {
 // A continuation waiting for prewarm must not stall another session's queue
 // on the inbox's shared advance consumer.
 describe("Run now through RPC, inbox, durable orchestration and provider adapters", () => {
+	beforeEach(() => {
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
+	});
+	afterEach(() => __setProbeOverrideForTesting(undefined));
 	for (const provider of ["claude", "opencode"] as const) {
 		it.each([
 			"normal",
