@@ -50,6 +50,7 @@ import {
 	ResolvedClaudeSettingsSchema,
 } from "./claude-settings.js";
 import {
+	AccountSwitchBusy,
 	AccountUnroutable,
 	ContinuationErrorSchema,
 	HandoffSummarySchema,
@@ -2913,7 +2914,11 @@ export const SubmitInput = Rpc.make("input.submit", {
 		originId: Schema.optional(NonEmptyString),
 	}),
 	success: SubmitInputResponseSchema,
-	error: Schema.Union([WsRpcError, Schema.suspend(() => AccountUnroutable)]),
+	error: Schema.Union([
+		WsRpcError,
+		Schema.suspend(() => AccountUnroutable),
+		Schema.suspend(() => AccountSwitchBusy),
+	]),
 });
 
 /** Remove a queued input (the tray's Remove, and Edit before refilling). */
@@ -2936,7 +2941,7 @@ export const SendInputNow = Rpc.make("input.sendNow", {
 		originId: Schema.optional(NonEmptyString),
 	}),
 	success: InboxCommandResponseSchema,
-	error: WsRpcError,
+	error: Schema.Union([WsRpcError, Schema.suspend(() => AccountSwitchBusy)]),
 });
 
 export const InputDraftKeySchema = Schema.Union([

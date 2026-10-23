@@ -8,7 +8,6 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { createRequire } from "node:module";
 import { createServer, type Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -146,11 +145,10 @@ describe("Claude runner admission socket probes", () => {
 		vi.stubEnv("HOME", join(root, "home"));
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, "claude"));
 		vi.stubEnv("CONDUIT_CONFIG_DIR", configDir);
-		// No build step emits dist/test, so spawned runners load the fake SDK
-		// from source through tsx, as the process harness's runners do.
+		// Built dist omits test helpers, so respawned runners load the source fixture.
 		vi.stubEnv(
 			"NODE_OPTIONS",
-			`--import ${pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href}`,
+			`${process.env["NODE_OPTIONS"] ?? ""} --import=${import.meta.resolve("tsx")}`,
 		);
 		vi.stubEnv(
 			"CONDUIT_TEST_CLAUDE_QUERY_MODULE",

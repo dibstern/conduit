@@ -1,7 +1,7 @@
 <!-- One step in the expanded log: icon · verb · subject · how long it took.      -->
 <!-- Click to see foreground output or open a background agent's task.            -->
 <script lang="ts">
-	import BlockGrid from "../ui/BlockGrid.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -178,7 +178,7 @@
 						<Icon name={{ completed: "circle-check", failed: "circle-x", stopped: "circle-stop" }[launch.state.outcome]} size={12} />
 					</span>
 				{:else if running}
-					<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+					<ConduitMark size={16} variant="running" />
 				{:else if failed}
 					<span class="shrink-0 text-error [&_.lucide]:w-3 [&_.lucide]:h-3">
 						<Icon name="circle-alert" size={12} />
@@ -230,7 +230,7 @@
 			<span class="thinking-label shrink-0 font-medium text-text-secondary">{part.done ? "Thought" : thinkingVerb(part)}</span>
 			<span class="flex-1 truncate text-text-dimmer italic">{firstLine(part.text, 80)}</span>
 			{#if meta}<span class="activity-time thinking-duration shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}
-			{#if !part.done}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />{/if}
+			{#if !part.done}<ConduitMark size={16} variant="running" />{/if}
 		</Button>
 		{#if expanded && part.text}
 			<div

@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
 import {
 	mockAssistantSimple,
+	mockThinkingActive,
 	mockThinkingDone,
 	mockToolCompleted,
 	mockToolError,
@@ -40,6 +41,14 @@ export const ErrorState: Story = {
 export const Thinking: Story = {
 	args: { part: mockThinkingDone, duration: 42000 },
 };
+export const ThinkingLive: Story = {
+	args: { part: mockThinkingActive, live: true },
+	play: async ({ canvasElement }) => {
+		await expect(
+			canvasElement.querySelector('.thinking-item [data-flow-glyph="running"]'),
+		).toBeVisible();
+	},
+};
 export const ProjectedLive: Story = {
 	args: {
 		part: {
@@ -52,6 +61,11 @@ export const ProjectedLive: Story = {
 		},
 		live: true,
 		duration: 250000,
+	},
+	play: async ({ canvasElement }) => {
+		await expect(
+			canvasElement.querySelector('.tool-item [data-flow-glyph="running"]'),
+		).toBeVisible();
 	},
 };
 export const RunningCodexBash: Story = {

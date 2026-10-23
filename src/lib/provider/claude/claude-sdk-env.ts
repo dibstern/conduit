@@ -90,22 +90,30 @@ const claudeLoginKey = (login: ClaudeLogin): ClaudeLoginKey => ({
 });
 
 /** Captured shell values can change on every invocation without changing login. */
-export const sameClaudeLogin = (
+export const claudeLoginChange = (
 	first: ClaudeLogin,
 	second: ClaudeLogin,
-): boolean => {
+): "None" | "Settings" | "Account" => {
 	const a = claudeLoginKey(first);
 	const b = claudeLoginKey(second);
-	return (
-		isDeepStrictEqual(a.configDir, b.configDir) &&
-		a.accountId === b.accountId &&
-		isDeepStrictEqual(a.accountEnv, b.accountEnv) &&
+	if (
+		!isDeepStrictEqual(a.configDir, b.configDir) ||
+		a.accountId !== b.accountId
+	)
+		return "Account";
+	return isDeepStrictEqual(a.accountEnv, b.accountEnv) &&
 		// Older peers omit declared config; unknown alone must not trigger a rebind.
 		(a.shellConfig === undefined ||
 			b.shellConfig === undefined ||
 			isDeepStrictEqual(a.shellConfig, b.shellConfig))
-	);
+		? "None"
+		: "Settings";
 };
+
+export const sameClaudeLogin = (
+	first: ClaudeLogin,
+	second: ClaudeLogin,
+): boolean => claudeLoginChange(first, second) === "None";
 
 /** Read a recorded login, leaving absent launch metadata to the caller. */
 export function claudeLoginFromEnv(

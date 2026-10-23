@@ -3,7 +3,7 @@
 
 <script lang="ts">
 	import Icon from "../ui/Icon.svelte";
-	import BlockGrid from "../ui/BlockGrid.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import DetachedListbox from "../ui/DetachedListbox.svelte";
 
 	let {
@@ -111,14 +111,7 @@
 				<div
 					class="flex items-center gap-2 py-3 px-3.5 text-text-muted text-base"
 				>
-					<!-- A role="listbox" may own only options; BlockGrid hardcodes role="img" and
-					     takes no rest-spread, so aria-hidden has to come from the call site. The
-					     busy state is already carried by aria-busy on the listbox, making the
-					     spinner decorative to AT. `contents` generates no box, so BlockGrid stays
-					     the flex item and shrink-0 still applies — pixel-neutral by construction. -->
-					<span aria-hidden="true" class="contents">
-						<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
-					</span>
+					<ConduitMark size={16} variant="running" />
 					<span>Loading files…</span>
 				</div>
 			{:else}

@@ -18,7 +18,7 @@
 	let { onOpen, variant = "icons", children, wordLabel }: {
 		onOpen?: (() => void) | undefined;
 		variant?: "icons" | "words" | "control" | "row" | undefined;
-		children?: Snippet<[row: Snippet]> | undefined;
+		children?: Snippet<[row: Snippet, control: Snippet]> | undefined;
 		wordLabel?: string | undefined;
 	} = $props();
 
@@ -87,8 +87,34 @@
 		</Button>
 {/snippet}
 
+{#snippet effortControl()}
+	{#if showEffort && (!phone || levels > 0)}
+	<Button
+		variant="composer-model"
+		size="composer-chip"
+		touchTarget={phone}
+		class="shrink-0"
+		ariaLabel={`Effort: ${levelName}. Open effort options`}
+		loading={effort.pending}
+		disabled={variants.length === 0}
+		aria-haspopup="dialog"
+		aria-expanded={composerPickerState.request !== null}
+		aria-controls={composerPickerState.request ? "model-picker" : undefined}
+		data-testid="variant-badge"
+		title="Effort {levelName}. Ctrl+T to cycle"
+		onclick={(event) => {
+			openPicker("effort");
+			if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
+		}}
+	>
+		{#if !parameters || levels > 0}<EffortMeter {levels} {filled} />{/if}
+		{#if !phone && (sessionViewState.composerTier === "wide" || levels === 0)}<span data-testid="composer-effort-label">{levelName}</span>{/if}
+	</Button>
+	{/if}
+{/snippet}
+
 {#if variant === "row"}
-	{#if children}{@render children(effortRow)}{:else}{@render effortRow()}{/if}
+	{#if children}{@render children(effortRow, effortControl)}{:else}{@render effortRow()}{/if}
 {:else if showEffort && variant === "words"}
 		<Button
 			variant="composer-word"
@@ -106,28 +132,9 @@
 				if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
 			}}
 		><span>{displayedWord ?? (parameters ? currentEffort || levelName : currentVariant || "default")}</span></Button>
-{:else if showEffort && variant === "control" && sessionViewState.composerWidth >= 480}
-	<Button
-		variant="composer-model"
-		size="composer-chip"
-		class="shrink-0"
-		ariaLabel={`Effort: ${levelName}. Open effort options`}
-		loading={effort.pending}
-		disabled={variants.length === 0}
-		aria-haspopup="dialog"
-		aria-expanded={composerPickerState.request !== null}
-		aria-controls={composerPickerState.request ? "model-picker" : undefined}
-		data-testid="variant-badge"
-		title="Effort {levelName}. Ctrl+T to cycle"
-		onclick={(event) => {
-			openPicker("effort");
-			if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
-		}}
-	>
-		{#if !parameters || levels > 0}<EffortMeter {levels} {filled} />{/if}
-		{#if sessionViewState.composerTier === "wide" || levels === 0}<span data-testid="composer-effort-label">{levelName}</span>{/if}
-	</Button>
-{:else if showEffort && variant !== "control"}
+{:else if variant === "control"}
+	{#if sessionViewState.composerWidth >= 480}{@render effortControl()}{/if}
+{:else if showEffort}
 	<Menu
 		bind:open
 		onopenchange={(nextOpen) => { if (nextOpen) onOpen?.(); }}

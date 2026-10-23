@@ -21,6 +21,8 @@ import { beforeAll, describe, expect, it } from "vitest";
  * story name claims), recapture, and delete the line.
  */
 const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
+	"ui-sessionstatusglyph--running | ui-sessionstatusglyph--running-header":
+		"capture freezes the running packet to the same frame as the static header, while play() and flow.spec.ts assert their animation states",
 	// Verified legitimate: these interaction stories deliberately re-open the
 	// surface as their final step, so an open menu IS the terminal state. Their
 	// real assertions live in play(), not in the pixels.

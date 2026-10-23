@@ -13,6 +13,22 @@ export class AccountUnroutable extends Schema.TaggedError<AccountUnroutable>()(
 	}
 }
 
+export const accountSwitchBusyMessage = (
+	fromAccount: string,
+	toAccount: string,
+): string =>
+	`Background work is still running on ${fromAccount}. Stop it or wait for it to finish, then resend to switch to ${toAccount}.`;
+
+export class AccountSwitchBusy extends Schema.TaggedError<AccountSwitchBusy>()(
+	"AccountSwitchBusy",
+	{
+		sessionId: Schema.String,
+		fromAccountId: Schema.String,
+		toAccountId: Schema.String,
+		message: Schema.String,
+	},
+) {}
+
 export const ContinuationReasonSchema = Schema.Literals([
 	"user",
 	"auto-switch",

@@ -13,6 +13,7 @@
 	import { renderMarkdown } from "../../utils/markdown.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import Button from "../ui/Button.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 
 	const decodePresentation = Schema.decodeUnknownOption(Schema.Struct({
 		fileChange: Schema.optional(Schema.Struct({
@@ -190,6 +191,7 @@
 				Retry
 			</Button>
 		{:else}
+			<ConduitMark size={16} variant="running" />
 			<span>Loading full {cut}…</span>
 		{/if}
 	</div>
