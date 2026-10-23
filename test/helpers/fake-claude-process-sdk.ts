@@ -217,6 +217,8 @@ export type ProcessMark =
 			socketPath: string;
 			buildId: string;
 			protocolVersion: number;
+			settlesAnswers: boolean;
+			answerDialect: "legacy" | "runner";
 	  }
 	| { kind: "runner-command"; commandId: string; type: string }
 	| {

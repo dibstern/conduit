@@ -105,7 +105,9 @@ interface RunnerChild {
 	capabilities?: {
 		readonly stopsTasks: boolean;
 		readonly rebindsAccount: boolean;
+		readonly settlesAnswers: boolean;
 	};
+	interactionSinks?: Map<string, string>;
 	pendingSendCommands?: Map<string, number> | undefined;
 	ownedRunIds?: Set<string>;
 	readonly upgrade: RunnerUpgrade;
@@ -221,6 +223,11 @@ const CANCELLED_TURN: TurnResult = {
 	durationMs: 0,
 	providerStateUpdates: [],
 };
+
+const legacyAnswerCommandId = (entry: RunnerChild, commandId: string) =>
+	entry.capabilities?.settlesAnswers === true
+		? undefined
+		: `${commandId}:answer`;
 
 // Every lifecycle write goes through this boundary; reduction itself is pure.
 const transition = (
@@ -975,6 +982,26 @@ export const makeProcessSessionRunner = (
 
 		const attach = (sessionId: string, entry: RunnerChild) =>
 			Effect.gen(function* () {
+				const trackInteraction = (output: SessionOutput) => {
+					if (
+						output.type === "question-request" ||
+						output.type === "permission-request"
+					)
+						(entry.interactionSinks ??= new Map()).set(
+							`${output.type}:${output.request.requestId}`,
+							output.sinkId,
+						);
+					else if (output.type === "cancel-interaction") {
+						for (const kind of ["question-request", "permission-request"]) {
+							const key = `${kind}:${output.requestId}`;
+							if (entry.interactionSinks?.get(key) === output.sinkId)
+								entry.interactionSinks.delete(key);
+						}
+					} else if (output.type === "release-sink") {
+						for (const [key, sinkId] of entry.interactionSinks ?? [])
+							if (sinkId === output.sinkId) entry.interactionSinks?.delete(key);
+					}
+				};
 				const workspaceRoot =
 					entry.launch?.workspaceRoot ??
 					(yield* deps.projectRootForSession(sessionId)) ??
@@ -1029,6 +1056,7 @@ export const makeProcessSessionRunner = (
 						if (Entry.isAwaitingProject(entry.lifecycle))
 							return Effect.interrupt;
 						const operation = Effect.suspend(() => {
+							trackInteraction(received);
 							// A retired query's shutdown notices must not clear its replacement.
 							if (
 								entry.lifecycle.stop &&
@@ -1092,7 +1120,11 @@ export const makeProcessSessionRunner = (
 							entry.capabilities = {
 								stopsTasks: hello.stopsTasks === true,
 								rebindsAccount: hello.rebindsAccount === true,
+								settlesAnswers: hello.settlesAnswers === true,
 							};
+							log.info(
+								`${runnerLabel} attached for session ${sessionId}: build ${hello.buildId}, answers ${entry.capabilities.settlesAnswers ? "runner-settled" : "legacy answer-question/answer-permission"}`,
+							);
 							entry.upgrade.state = hello.upgradeState;
 							// Identity and native controls suffice until the project can reattach.
 							if (Entry.isAwaitingProject(entry.lifecycle)) return;
@@ -1248,6 +1280,7 @@ export const makeProcessSessionRunner = (
 								? []
 								: (hello.pendingOutputs ?? [])) {
 								yield* ensureAttached();
+								trackInteraction(pending.output);
 								if (pending.sequence <= (hello.acknowledgedSequence ?? 0))
 									yield* emit(pending.output, sessionId);
 							}
@@ -1299,6 +1332,10 @@ export const makeProcessSessionRunner = (
 									socketPath: entry.socketPath,
 									buildId: hello.buildId,
 									protocolVersion: hello.protocolVersion,
+									settlesAnswers: entry.capabilities.settlesAnswers,
+									answerDialect: entry.capabilities.settlesAnswers
+										? "runner"
+										: "legacy",
 								});
 						}),
 					onCommandAccepted: (sinkId) => {
@@ -1785,8 +1822,31 @@ export const makeProcessSessionRunner = (
 						!Entry.canControl(entry.lifecycle)
 					)
 						return yield* Effect.fail(unavailable());
+					const legacyAnswerId = legacyAnswerCommandId(
+						entry,
+						control.commandId,
+					);
+					const [command] =
+						legacyAnswerId && sql
+							? yield* sql<{
+									effect_type: string;
+								}>`SELECT effect_type FROM provider_command_outbox
+							WHERE session_id = ${sessionId} AND command_id = ${control.commandId} LIMIT 1`.pipe(
+									Effect.mapError((cause) =>
+										runnerFailure("get control command status", cause),
+									),
+								)
+							: [];
+					// Pre-outbox runners cannot answer command-status. Their final answer
+					// receipt, not the resolve receipt, proves the whole handoff completed.
 					const status = yield* Effect.result(
-						connection.commandStatusEffect(control.commandId),
+						legacyAnswerId &&
+							(command?.effect_type === "resolve_question" ||
+								command?.effect_type === "resolve_permission")
+							? Effect.sync(() =>
+									connection.observedCommandStatus(legacyAnswerId),
+								)
+							: connection.commandStatusEffect(control.commandId),
 					);
 					const current = children.get(sessionId);
 					if (current && current.runnerId !== control.providerProcessId)
@@ -3273,13 +3333,47 @@ export const makeProcessSessionRunner = (
 							commandId,
 							command.input.commandAttempt ?? 0,
 						);
-					return yield* connection.commandEffect(
+					const legacyAnswerId = legacyAnswerCommandId(entry, commandId);
+					// Some unflagged builds already settle and cancel during resolve.
+					// Retain their sink so the final handshake receipt is still recorded.
+					const legacySinkId =
+						legacyAnswerId &&
+						(command.type === "resolve-question" ||
+							command.type === "resolve-permission")
+							? entry.interactionSinks?.get(
+									`${command.type === "resolve-question" ? "question" : "permission"}-request:${command.requestId}`,
+								)
+							: undefined;
+					const result = yield* connection.commandEffect(
 						commandId,
 						payload,
 						command.type === "send-turn"
 							? command.input.commandAttempt
 							: undefined,
 					);
+					// Legacy resolve commands acknowledge the answer without releasing
+					// canUseTool. Complete that handshake inside the outbox attempt, using
+					// its original reply rather than the runner's redacted notification.
+					if (legacyAnswerId && legacySinkId) {
+						if (command.type === "resolve-question") {
+							yield* connection.commandEffect(legacyAnswerId, {
+								type: "answer-question",
+								sinkId: legacySinkId,
+								requestId: command.requestId,
+								answers: command.answers,
+							});
+						} else if (command.type === "resolve-permission") {
+							yield* connection.commandEffect(legacyAnswerId, {
+								type: "answer-permission",
+								sinkId: legacySinkId,
+								requestId: command.requestId,
+								response: command.control?.response ?? {
+									decision: command.decision,
+								},
+							});
+						}
+					}
+					return result;
 				}).pipe(
 					Effect.ensuring(
 						Effect.sync(() => {
