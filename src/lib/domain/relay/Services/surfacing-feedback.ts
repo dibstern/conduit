@@ -11,6 +11,12 @@ import { WsRpcError } from "../../../contracts/ws-rpc.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 
+const surfacingTextEligibility = (sql: SqlClient.SqlClient) => sql`
+	mp.type = 'text' AND m.role = 'assistant' AND m.turn_id IS NOT NULL
+	AND (mp.surfacing_ordinal IS NOT NULL
+		OR EXISTS (SELECT 1 FROM message_parts later WHERE later.message_id = m.id AND later.sort_order > mp.sort_order)
+		OR EXISTS (SELECT 1 FROM messages later WHERE later.turn_id = m.turn_id AND later.role = 'assistant' AND (later.created_at > m.created_at OR (later.created_at = m.created_at AND later.id > m.id))))`;
+
 /** Read every eligible part, independently of the browser's transcript window. */
 export const readSessionCategoryCounts = (
 	sessionId: string,
@@ -27,13 +33,10 @@ export const readSessionCategoryCounts = (
 		}>`SELECT mp.surfacing_probabilities, sm.level, sm.category, sm.reason, sm.direction
 			FROM message_parts mp JOIN messages m ON m.id = mp.message_id
 			LEFT JOIN surfacing_marks sm ON sm.session_id = m.session_id AND sm.part_id = mp.id AND sm.message_id = m.id
-			WHERE m.session_id = ${sessionId} AND mp.type = 'text' AND m.role = 'assistant' AND m.turn_id IS NOT NULL
+			WHERE m.session_id = ${sessionId} AND ${surfacingTextEligibility(sql)}
 			AND NOT EXISTS (
 				SELECT 1 FROM sessions s JOIN messages cut ON cut.id = s.pending_rewind_message_id AND cut.session_id = s.id
-				WHERE s.id = m.session_id AND (m.created_at > cut.created_at OR (m.created_at = cut.created_at AND m.id >= cut.id)))
-			AND (mp.surfacing_ordinal IS NOT NULL
-				OR EXISTS (SELECT 1 FROM message_parts later WHERE later.message_id = m.id AND later.sort_order > mp.sort_order)
-				OR EXISTS (SELECT 1 FROM messages later WHERE later.turn_id = m.turn_id AND later.role = 'assistant' AND (later.created_at > m.created_at OR (later.created_at = m.created_at AND later.id > m.id))))`;
+				WHERE s.id = m.session_id AND (m.created_at > cut.created_at OR (m.created_at = cut.created_at AND m.id >= cut.id)))`;
 		const verdicts = yield* Schema.decodeUnknownEffect(
 			Schema.Array(
 				Schema.Struct({
@@ -177,10 +180,7 @@ export const makeSurfacingFeedback = Effect.gen(function* () {
 						SELECT m.session_id, m.id AS message_id FROM message_parts mp
 					JOIN messages m ON m.id = mp.message_id JOIN sessions s ON s.id = m.session_id
 					WHERE mp.id = ${partId} AND s.project_id = ${projectId}
-					AND mp.type = 'text' AND m.role = 'assistant' AND m.turn_id IS NOT NULL
-					AND (mp.surfacing_ordinal IS NOT NULL
-						OR EXISTS (SELECT 1 FROM message_parts later WHERE later.message_id = m.id AND later.sort_order > mp.sort_order)
-						OR EXISTS (SELECT 1 FROM messages later WHERE later.turn_id = m.turn_id AND later.role = 'assistant' AND (later.created_at > m.created_at OR (later.created_at = m.created_at AND later.id > m.id))))`;
+					AND ${surfacingTextEligibility(sql)}`;
 						if (!part)
 							return yield* new WsRpcError({
 								message: "Unknown mid-turn text part",
