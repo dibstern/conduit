@@ -83,13 +83,17 @@ function inputState(harness: ProcessHarness, inputId: string) {
 	}));
 }
 
-function providerImages(harness: ProcessHarness, inputId: string) {
+function proofMarks(harness: ProcessHarness): Record<string, unknown>[] {
 	const path = join(harness.root, "sdk-proof.ndjson");
 	if (!existsSync(path)) return [];
 	return readFileSync(path, "utf8")
 		.split("\n")
 		.filter(Boolean)
-		.map((line): Record<string, unknown> => JSON.parse(line))
+		.map((line): Record<string, unknown> => JSON.parse(line));
+}
+
+function providerImages(harness: ProcessHarness, inputId: string) {
+	return proofMarks(harness)
 		.filter(
 			(mark) => mark["kind"] === "input-content" && mark["inputId"] === inputId,
 		)
@@ -688,6 +692,16 @@ test("an admitted queued input drains once after a crash before sent and its Dra
 	await app.goto(`${harness.baseUrl}${route(sessionId)}`);
 	await app.sendMessage("task-stop-foreground-draft-admission-crash");
 	await expect(new ChatPage(page).stopBtn).toBeVisible();
+	// Crash only once the runner holds the turn. A crash before the runner
+	// starts it fails the turn, which rightly pauses the queue instead.
+	await expect
+		.poll(() =>
+			proofMarks(harness).some(
+				(mark) =>
+					mark["kind"] === "task-stop-turn" && mark["phase"] === "streaming",
+			),
+		)
+		.toBe(true);
 	const attachmentId = await add(control, sessionId);
 	const text = "draft-admitted-before-crash";
 	await setText(control, sessionId, text);

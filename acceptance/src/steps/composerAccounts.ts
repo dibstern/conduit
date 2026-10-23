@@ -402,17 +402,23 @@ export const composerAccountsHandlers: StepHandler[] = [
 		match: /^the Account row has (a|no) right-edge fade$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId("picker-account-options");
-			await expect(row).toHaveAttribute(
-				"data-fade",
-				match[1] === "a" ? "true" : "false",
-			);
-			const mask = await row.evaluate(
-				(element) => getComputedStyle(element).maskImage,
-			);
-			if (match[1] === "a") {
-				expect(mask).toContain("linear-gradient");
-				expect(mask).toContain("28px");
-			} else expect(mask).toBe("none");
+			// The row measures its fade after opening and again after scrolling to
+			// the selection, so read the attribute and mask together and only once
+			// they hold across two frames.
+			const settled = () =>
+				// No named inner functions: tsx wraps them in a __name helper the
+				// page does not have.
+				row.evaluate(async (element) => {
+					const before = `${element.dataset["fade"]}|${getComputedStyle(element).maskImage}`;
+					await new Promise((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(resolve)),
+					);
+					const after = `${element.dataset["fade"]}|${getComputedStyle(element).maskImage}`;
+					return after === before ? after : "unsettled";
+				});
+			if (match[1] === "a")
+				await expect.poll(settled).toMatch(/^true\|.*linear-gradient.*28px/);
+			else await expect.poll(settled).toBe("false|none");
 		},
 	},
 	{
