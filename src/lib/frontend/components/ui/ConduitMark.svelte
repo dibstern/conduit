@@ -2,11 +2,13 @@
 	let {
 		size = "sm",
 		variant = "brand",
+		tone = "accent",
 		animated,
 		"data-testid": testId,
 	}: {
 		size?: "sm" | "md" | number;
 		variant?: "brand" | "running" | "unread" | "idle";
+		tone?: "accent" | "goal";
 		animated?: boolean;
 		"data-testid"?: string;
 	} = $props();
@@ -39,6 +41,7 @@
 	data-variant={variant}
 	data-flow-glyph={variant === "brand" ? undefined : variant}
 	class="conduit-mark {variant}"
+	class:goal={tone === "goal"}
 	style:width={`${pixels}px`}
 	style:height={`${pixels}px`}
 	style:border-radius={variant === "brand" ? `${pixels * 0.27}px` : undefined}
@@ -67,6 +70,7 @@
 	.conduit-mark { display: inline-grid; flex-shrink: 0; place-items: center; }
 	.brand { background: var(--color-accent); color: var(--color-white); }
 	.running { color: var(--color-accent); }
+	.running.goal { color: var(--color-status-goal); }
 	.unread { color: var(--color-white); }
 	.idle { color: var(--color-text-dimmer); }
 	.flowing { animation: flow 1.4s cubic-bezier(.45, 0, .55, 1) infinite; }

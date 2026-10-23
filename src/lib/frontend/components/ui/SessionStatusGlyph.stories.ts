@@ -22,6 +22,13 @@ const meta = {
 		await expect(glyph.getBoundingClientRect().height).toBe(16);
 		const packet = glyph.querySelector("[data-flow-packet]");
 		if (variant === "running") {
+			const expected = new Option().style;
+			expected.color = getComputedStyle(glyph).getPropertyValue(
+				args["attention"] === "monitoring"
+					? "--color-status-goal"
+					: "--color-accent",
+			);
+			await expect(getComputedStyle(glyph).color).toBe(expected.color);
 			await expect(packet).toBeInTheDocument();
 			if (!packet) return;
 			await expect(packet).toHaveAttribute("pathLength", "100");

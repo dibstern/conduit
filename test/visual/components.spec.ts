@@ -32,6 +32,7 @@ const LIGHT_STORY_IDS = new Set([
 	"overlays-connectoverlay--connecting",
 	"ui-conduitlogo--loading",
 	"ui-sessionstatusglyph--running",
+	"ui-sessionstatusglyph--monitoring",
 	"ui-sessionstatusglyph--unread",
 	"ui-sessionstatusglyph--idle",
 	"input-filemenu--loading",

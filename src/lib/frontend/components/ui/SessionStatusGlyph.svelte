@@ -24,7 +24,7 @@
 	{:else if needsYou}
 		<span class="grid size-[14px] place-items-center rounded-full border-[1.5px] border-status-ask"><span class="size-[6px] rounded-full bg-status-ask"></span></span>
 	{:else if attention === "working" || attention === "monitoring"}
-		<ConduitMark size={16} variant="running" animated={animate} />
+		<ConduitMark size={16} variant="running" tone={attention === "monitoring" ? "goal" : "accent"} animated={animate} />
 	{:else if attention === "done-unread"}
 		<ConduitMark size={16} variant="unread" data-testid="session-unread-dot" />
 	{:else if attention === "error"}
