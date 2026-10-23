@@ -173,9 +173,11 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		options: Parameters<typeof ProcessHarness.start>[0] = {},
 	) {
 		const harness = await ProcessHarness.start({
-			...(process.env["CONDUIT_PREWARM_E2E_DIST"]
-				? { dist: process.env["CONDUIT_PREWARM_E2E_DIST"] }
-				: {}),
+			// Source boot has dedicated coverage; prewarm exercises the built runners.
+			dist:
+				process.env["CONDUIT_PREWARM_E2E_DIST"] ??
+				process.env["CONDUIT_TEST_DIST"] ??
+				"dist",
 			...options,
 		});
 		harnesses.push(harness);
@@ -482,9 +484,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 
 	it("draft pre-warm for an existing Claude worktree adopts the same launch folders on the first turn", async () => {
 		const harness = ProcessHarness.create({
-			...(process.env["CONDUIT_PREWARM_E2E_DIST"]
-				? { dist: process.env["CONDUIT_PREWARM_E2E_DIST"] }
-				: {}),
+			dist:
+				process.env["CONDUIT_PREWARM_E2E_DIST"] ??
+				process.env["CONDUIT_TEST_DIST"] ??
+				"dist",
 		});
 		harnesses.push(harness);
 		const gitEnv = { ...process.env };
