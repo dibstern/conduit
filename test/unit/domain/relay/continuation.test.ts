@@ -118,12 +118,14 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 							events.filter((event) => event.type === "session.usage_limited"),
 						),
 					);
-			expect(yield* limits()).toHaveLength(1);
+			const limitEvents = yield* limits();
+			expect(limitEvents).toHaveLength(1);
 			expect(
 				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
 					?.limitRecovery,
 			).toEqual({
 				...signal,
+				limitedAt: limitEvents[0]?.createdAt,
 				rearms: 0,
 				continued: false,
 			});
@@ -137,6 +139,7 @@ it("records one limit per user turn, closes only the cut-off on Dismiss, and cle
 				instanceId: "account-1",
 				rateLimitType: "seven_day",
 				resetsAt: 1791234000,
+				limitedAt: limitEvents[0]?.createdAt,
 				rearms: 0,
 				continued: false,
 			});
@@ -250,12 +253,6 @@ for (const scenario of [
 	},
 	{ name: "busy before quota", busy: true, result: "SessionBusy", probes: 0 },
 	{
-		name: "fresh limited quota",
-		quota: "Limited",
-		result: "AccountUnavailable",
-		probes: 1,
-	},
-	{
 		name: "unavailable account",
 		quota: "Unavailable",
 		result: "AccountUnavailable",
@@ -322,7 +319,7 @@ for (const scenario of [
 							readings: Stream.empty,
 							latest: () => Effect.succeed(undefined),
 							turnEnded: () => Effect.void,
-							refresh: () =>
+							refresh: (_options) =>
 								Effect.gen(function* () {
 									probes++;
 									if ("duringProbe" in scenario) {
@@ -350,14 +347,7 @@ for (const scenario of [
 													reason: "Not logged in",
 												}),
 											]
-										: "quota" in scenario && scenario.quota === "Limited"
-											? [
-													usageReading("claude", {
-														status: "limited",
-														windows: [{ kind: "seven_day", utilization: 100 }],
-													}),
-												]
-											: [usageReading("claude")];
+										: [usageReading("claude")];
 								}).pipe(Effect.orDie),
 							pickFailover: () => Effect.succeed(undefined),
 						}),

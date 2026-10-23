@@ -22,6 +22,7 @@ import {
 	EventStoreEffectTag,
 	type EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
+import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { readPendingRewindCommit } from "../../../persistence/effect/pending-rewind.js";
 import type {
 	ProjectionRunnerEffectTag,
@@ -142,6 +143,12 @@ export interface ProviderRuntimeIngestionLiveOptions {
 		"observe"
 	>;
 	readonly retries?: Pick<ReturnType<typeof makeSessionRetries>, "observe">;
+	/** Sees each live commit's accepted events, after COMMIT; it never blocks. */
+	readonly surfacing?: {
+		readonly observe: (
+			events: readonly CanonicalEvent[],
+		) => Effect.Effect<void>;
+	};
 }
 
 export const makeProviderRuntimeIngestionLive = (
@@ -667,12 +674,31 @@ export const makeProviderRuntimeIngestionLive = (
 											}
 											if (pending.length > 0)
 												yield* project(yield* appendEvents(pending));
+											// Orphan settlement must commit its unplaced steers too;
+											// a terminal run no longer triggers startup recovery.
+											for (const event of accepted)
+												if (
+													event.type === "turn.error" &&
+													event.data.code === "runner_stopped"
+												)
+													yield* requeueFailedSteers(
+														sql,
+														{
+															persistEvents: (events) =>
+																Effect.gen(function* () {
+																	yield* project(yield* appendEvents(events));
+																}),
+														},
+														event.sessionId,
+													);
 											yield* beforeCommit;
 										}),
 									commitOptions,
 								)
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 							if (!appended) return 0;
+							if (options.surfacing)
+								yield* options.surfacing.observe(domainEvents);
 
 							// A compaction in progress and a retry live in memory, not the
 							// log (C1). Stamp their rows so the shell re-reads them.

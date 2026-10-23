@@ -166,6 +166,11 @@ export class ClaudePermissionService {
 		toolInput: Record<string, unknown>,
 		options: CanUseToolOptions,
 	): Effect.Effect<PermissionResult, ClaudeAdapterError> {
+		if (ctx.stopped)
+			return Effect.succeed({
+				behavior: "deny",
+				message: "Claude query has closed",
+			});
 		const attributes = {
 			providerId: "claude",
 			sessionId: ctx.sessionId,

@@ -148,6 +148,7 @@ describe("AgentService instance scoping", () => {
 				expect(engine.dispatchEffect).toHaveBeenCalledWith({
 					type: "discover",
 					providerId: "claude",
+					sessionId: "session-1",
 					account: expect.objectContaining({ driver: "claude", id: "claude" }),
 				});
 			}).pipe(Effect.provide(makeLayer({ api, engine })));

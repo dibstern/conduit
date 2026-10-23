@@ -10,12 +10,14 @@ import {
 	withReadMark,
 } from "../stores/session.svelte.js";
 import { sessionViewState } from "../stores/session-view.svelte.js";
-import { showToast } from "../stores/ui.svelte.js";
+import { expandSidebar, showToast } from "../stores/ui.svelte.js";
 import { toastFailure } from "../transport/rpc-errors.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../types.js";
 
 export function backToSessions(): void {
+	// Desktop's list is the sidebar, so make sure it is showing.
+	if (!sessionViewState.compact) expandSidebar();
 	if (previousHistoryEntryIsSessionList()) {
 		window.history.back();
 	} else {

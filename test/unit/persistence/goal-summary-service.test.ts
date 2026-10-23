@@ -6,11 +6,9 @@ import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
 import type { SessionGoalChangedPayload } from "../../../src/lib/contracts/stored-event.js";
-import {
-	defaultDaemonConfig,
-	saveDaemonConfig,
-} from "../../../src/lib/daemon/config-persistence.js";
+import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/domain/daemon/Services/claude-one-shot.js";
+import { ConfigSnapshotTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import { MessageSurfacingSettings } from "../../../src/lib/domain/daemon/Services/message-surfacing-settings.js";
 import {
 	GoalSummaryServiceTag,
@@ -478,24 +476,21 @@ describe("GoalSummaryService", () => {
 		"summaries use the recap model and daemon default Claude login",
 		() => {
 			const f = fixture();
+			const config = {
+				...defaultDaemonConfig(),
+				instances: [
+					{
+						id: "summary-default",
+						name: "Synthetic default",
+						driver: "claude" as const,
+						port: 0,
+						managed: false,
+						configDir: "/synthetic/default-claude",
+					},
+				],
+				accountDefaults: { claude: AccountIdSchema.make("summary-default") },
+			};
 			return Effect.gen(function* () {
-				const config = {
-					...defaultDaemonConfig(),
-					instances: [
-						{
-							id: "summary-default",
-							name: "Synthetic default",
-							driver: "claude" as const,
-							port: 0,
-							managed: false,
-							configDir: "/synthetic/default-claude",
-						},
-					],
-					accountDefaults: { claude: AccountIdSchema.make("summary-default") },
-				};
-				yield* Effect.tryPromise(() =>
-					saveDaemonConfig(config, f.config.configDir),
-				);
 				yield* seed();
 				yield* (yield* GoalSummaryServiceTag).generate("summary-goal");
 				const options = f.query.mock.calls[0]?.[0].options;
@@ -506,7 +501,18 @@ describe("GoalSummaryService", () => {
 				);
 				expect(options?.tools).toEqual([]);
 				expect(options?.persistSession).toBe(false);
-			}).pipe(Effect.provide(f.live));
+			}).pipe(
+				Effect.provide(
+					f.live.pipe(
+						// Daemon config is read from memory at runtime (82tn.18).
+						Layer.provide(
+							Layer.succeed(ConfigSnapshotTag, {
+								build: Effect.succeed(config),
+							}),
+						),
+					),
+				),
+			);
 		},
 	);
 });

@@ -1,12 +1,8 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { Effect, Fiber, Option, Schema } from "effect";
+import { join } from "node:path";
+import { Effect, Fiber, Schema } from "effect";
 import type { Account } from "../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
-import {
-	loadDaemonConfigResult,
-	resolveClaudeLaunchConfig,
-} from "../../daemon/config-persistence.js";
 import {
 	ClaudeOneShotFailure,
 	makeClaudeOneShot,
@@ -15,34 +11,86 @@ import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
-import type { ProviderCapabilities } from "../types.js";
+import type {
+	PreWarmSessionInput,
+	ProviderCall,
+	ProviderCapabilities,
+} from "../types.js";
+import type { ClaudeAccountScopes } from "./claude-account-scopes.js";
 import type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
-import { discoverCapabilitiesEffect } from "./claude-runtime-discovery.js";
+import {
+	discoverCapabilitiesEffect,
+	expectedApiModelIdEffect,
+} from "./claude-runtime-discovery.js";
 
 const log = createLogger("claude-runner-driver");
 
 export const makeClaudeRunnerDriver = (
 	deps: ClaudeProviderInstanceDeps,
+	accounts: ClaudeAccountScopes["Service"],
 ): RunnerDriverPieces => {
+	const expectedModel = (input: PreWarmSessionInput) =>
+		input.account
+			? accounts
+					.use(input.account, ({ account, capabilities }) =>
+						expectedApiModelIdEffect(
+							deps.capabilitiesService ?? capabilities,
+							input.model?.modelId,
+							input.contextWindow,
+							input.workspaceRoot,
+							input.agent,
+							{
+								...input,
+								account,
+								projectId: input.projectId ?? "",
+								shellEnv: input.shellEnv ?? process.env,
+							},
+						),
+					)
+					.pipe(
+						Effect.mapError(
+							(cause) =>
+								new ProviderInstanceFailure({
+									providerId: "claude",
+									operation: "probeCapabilities",
+									cause,
+								}),
+						),
+					)
+			: Effect.succeed(undefined);
 	const discoverEffect = (
 		workspaceRoot?: string,
 		account?: Account,
 		options?: { readonly refresh?: boolean },
+		call?: ProviderCall,
 	): Effect.Effect<ProviderCapabilities, ProviderInstanceFailure> => {
 		return Effect.gen(function* () {
-			const configDir =
-				account?.driver === "claude"
-					? account.folder
-					: resolveClaudeLaunchConfig(
-							yield* Effect.suspend(() =>
-								Effect.fromResult(loadDaemonConfigResult(deps.daemonConfigDir)),
-							).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null))),
-						).configDir;
-			return yield* discoverCapabilitiesEffect(
-				workspaceRoot ?? deps.workspaceRoot,
-				deps.capabilitiesService,
-				configDir,
-				options,
+			const selectedAccount =
+				call?.account ?? account ?? (yield* accounts.defaultAccount);
+			const root = call?.workspaceRoot ?? workspaceRoot;
+			if (!root)
+				return yield* Effect.fail(
+					new Error("Claude discovery requires a workspace directory"),
+				);
+			return yield* accounts.use(selectedAccount, ({ account, capabilities }) =>
+				discoverCapabilitiesEffect(
+					root,
+					deps.capabilitiesService ?? capabilities,
+					account.folder,
+					options,
+					call
+						? { ...call, account }
+						: deps.capabilitiesService
+							? undefined
+							: {
+									projectId: "",
+									sessionId: "",
+									workspaceRoot: root,
+									extraFolders: [],
+									shellEnv: process.env,
+									account,
+								},
+				),
 			);
 		}).pipe(
 			Effect.mapError(
@@ -59,63 +107,60 @@ export const makeClaudeRunnerDriver = (
 		driverKind: "claude",
 		discoverEffect,
 		generateTextEffect: (input) =>
-			Effect.gen(function* () {
-				const account =
-					input.account.driver === "claude"
-						? input.account
-						: yield* Effect.fail(
-								new Error("Claude text generation requires a Claude account"),
-							);
-				const scratchRoot = join(
-					deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR,
-					"text-generation",
-				);
-				return yield* Effect.acquireUseRelease(
-					Effect.tryPromise(async () => {
-						await mkdir(scratchRoot, { recursive: true });
-						return mkdtemp(join(scratchRoot, "run-"));
+			accounts
+				.use(input.account, ({ account }) =>
+					Effect.gen(function* () {
+						const scratchRoot = join(
+							deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR,
+							"text-generation",
+						);
+						return yield* Effect.acquireUseRelease(
+							Effect.tryPromise(async () => {
+								await mkdir(scratchRoot, { recursive: true });
+								return mkdtemp(join(scratchRoot, "run-"));
+							}),
+							(cwd) =>
+								makeClaudeOneShot({
+									configDir: account.folder,
+									...(account.env ? { accountEnv: account.env } : {}),
+									cwd,
+									systemPrompt: input.instructions,
+									isolation: {
+										settingSources: ["user"],
+										strictMcpConfig: true,
+										mcpServers: {},
+									},
+									onStderr: (data) =>
+										log.debug(`Claude text generation stderr: ${data}`),
+									...(deps.generateTextQueryFactory
+										? { queryFactory: deps.generateTextQueryFactory }
+										: {}),
+								}).ask(
+									input.prompt,
+									Schema.String,
+									input.model.modelId,
+									input.effort,
+								),
+							(cwd) =>
+								Effect.tryPromise(() =>
+									rm(cwd, { recursive: true, force: true }),
+								),
+						);
 					}),
-					(cwd) =>
-						makeClaudeOneShot({
-							configDir: {
-								...account.folder,
-								path: resolve(deps.workspaceRoot, account.folder.path),
-							},
-							...(account.env ? { accountEnv: account.env } : {}),
-							cwd,
-							systemPrompt: input.instructions,
-							isolation: {
-								settingSources: ["user"],
-								strictMcpConfig: true,
-								mcpServers: {},
-							},
-							onStderr: (data) =>
-								log.debug(`Claude text generation stderr: ${data}`),
-							...(deps.generateTextQueryFactory
-								? { queryFactory: deps.generateTextQueryFactory }
-								: {}),
-						}).ask(
-							input.prompt,
-							Schema.String,
-							input.model.modelId,
-							input.effort,
-						),
-					(cwd) =>
-						Effect.tryPromise(() => rm(cwd, { recursive: true, force: true })),
-				);
-			}).pipe(
-				Effect.mapError(
-					(cause) =>
-						new ProviderInstanceFailure({
-							providerId: "claude",
-							operation: "generateText",
-							cause:
-								cause instanceof ClaudeOneShotFailure
-									? (cause.cause ?? new Error("Claude returned no text"))
-									: cause,
-						}),
+				)
+				.pipe(
+					Effect.mapError(
+						(cause) =>
+							new ProviderInstanceFailure({
+								providerId: "claude",
+								operation: "generateText",
+								cause:
+									cause instanceof ClaudeOneShotFailure
+										? (cause.cause ?? new Error("Claude returned no text"))
+										: cause,
+							}),
+					),
 				),
-			),
 		nativeSession: true,
 		stopTask: true,
 		prepareTurnEffect: (input) =>
@@ -147,6 +192,9 @@ export const makeClaudeRunnerDriver = (
 					);
 				const turn = {
 					...input,
+					...(account
+						? { expectedApiModelId: (yield* expectedModel(input)) ?? null }
+						: {}),
 					configDir: folder,
 					folderSource: input.folderSource ?? "account",
 					...(account ? { instanceId: account.id } : {}),
@@ -191,9 +239,18 @@ export const makeClaudeRunnerDriver = (
 					);
 				let model = input.model;
 				if (!model) {
+					const call =
+						input.projectId !== undefined && account && input.shellEnv
+							? {
+									...input,
+									projectId: input.projectId,
+									account,
+									shellEnv: input.shellEnv,
+								}
+							: undefined;
 					// Discovery is shared with sends; cancellation only stops this waiter.
 					const discovery = yield* Effect.forkIn(
-						discoverEffect(input.workspaceRoot, account),
+						discoverEffect(input.workspaceRoot, account, undefined, call),
 						scope,
 					);
 					const { models } = yield* Fiber.join(discovery);
@@ -201,20 +258,6 @@ export const makeClaudeRunnerDriver = (
 						models.find((item) => item.id === "default") ?? models[0];
 					if (!inferred) return;
 					model = { providerId: inferred.providerId, modelId: inferred.id };
-				}
-				const prepareShellEnv = deps.prepareShellEnv;
-				if (prepareShellEnv) {
-					// Keep capture owned by the resolver when this request times out.
-					const ready = yield* Effect.tryPromise({
-						try: () => prepareShellEnv(input.workspaceRoot),
-						catch: (cause) =>
-							new ProviderInstanceFailure({
-								providerId: "claude",
-								operation: "preWarmSession",
-								cause,
-							}),
-					}).pipe(Effect.timeoutOption("10 seconds"));
-					if (Option.isNone(ready) || !ready.value) return;
 				}
 				const claudeSettingsOverrides = yield* Effect.try({
 					try: () => deps.claudeSettingsOverrides?.(),
@@ -231,6 +274,12 @@ export const makeClaudeRunnerDriver = (
 					input: {
 						...input,
 						model,
+						...(account
+							? {
+									expectedApiModelId:
+										(yield* expectedModel({ ...input, model })) ?? null,
+								}
+							: {}),
 						configDir: folder,
 						folderSource: input.folderSource ?? "account",
 						...(account ? { instanceId: account.id } : {}),

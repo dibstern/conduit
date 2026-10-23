@@ -197,16 +197,17 @@ export const makeWorktreeLive = (
 								// Pipe EOF also owns cleanup after abrupt daemon death. Save
 								// stdin before background shells substitute /dev/null; only
 								// the watchdog keeps it while exec preserves the PID/group.
+								// `kill 0` signals the watchdog's own group (the setup group);
+								// dash, Linux's /bin/sh, rejects `kill -KILL -- -<pgid>`.
 								const spawned = spawn(
 									"/bin/sh",
 									[
 										"-c",
 										`exec 2>&1
-setup_group=$$
 exec 3<&0
 (
   while IFS= read -r setup_line; do :; done
-  kill -KILL -- "-$setup_group"
+  kill -KILL 0
 ) <&3 3<&- >/dev/null 2>&1 &
 exec 3<&- </dev/null
 if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else exec /bin/sh -c "$2"; fi`,

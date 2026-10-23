@@ -598,7 +598,7 @@
 			{#if final}
 				{#each turn.notices as notice (notice.uuid)}
 					<div class="msg-container">
-						<SystemMessage message={notice} driver={viewedSessionId ? getSessionDriver(viewedSessionId) : undefined} />
+						<SystemMessage message={notice} driver={viewedSessionId ? getSessionDriver(viewedSessionId) : undefined} accountId={activeSession?.accountId ?? undefined} />
 					</div>
 				{/each}
 			{/if}

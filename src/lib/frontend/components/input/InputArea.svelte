@@ -7,6 +7,7 @@
 	import ComposerStrip from "../ui/ComposerStrip.svelte";
 	import ComposerSendGroup from "../ui/ComposerSendGroup.svelte";
 	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
+	import { accountLimit } from "../../../contracts/account-limit.js";
 	import { tick, untrack, type Snippet } from "svelte";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Button from "../ui/Button.svelte";
@@ -16,6 +17,7 @@
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import Textarea from "../ui/Textarea.svelte";
+	import FilePicker from "../ui/FilePicker.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
 	// biome-ignore lint/style/useImportType: CommandMenu is used as a value for bind:this
@@ -32,7 +34,7 @@
 	import { projectReferences, serializeReferences } from "../../../composer-references.js";
 	import { referenceEditing } from "./reference-editing.js";
 	import { provideComposerDraft } from "./composer-reference.svelte.js";
-	import { messageSurfacing } from "../../stores/message-surfacing.svelte.js";
+	import { sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
 	// biome-ignore lint/style/useImportType: SubagentBackBar is used as a value for bind:this
 	import SubagentBackBar from "../chat/SubagentBackBar.svelte";
 	import PastePreview from "../chat/PastePreview.svelte";
@@ -83,7 +85,7 @@
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
 	import { requestDraftPreWarm, requestSessionPreWarm } from "../../utils/session-prewarm.js";
-	import { planUsageWindows, usageForecastTime } from "../../utils/continuation.js";
+	import { planUsageWindows, usageForecastTime, usageWarning } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
@@ -126,6 +128,14 @@
 	let pendingDraftSessionMode: Promise<void> | undefined;
 	const draftRoute = $derived(getCurrentRoute());
 	const draftId = $derived(draftRoute.page === "chat" ? draftRoute.draftId : undefined);
+	// Attachments belong to the session or draft they were added in; InputArea
+	// outlives route changes, so drop them when the composer's scope changes.
+	const composerScope = $derived(draftRoute.page === "chat" ? draftRoute.sessionId ?? draftId ?? null : null);
+	$effect(() => {
+		composerScope;
+		pendingAttachments = [];
+		attachmentError = "";
+	});
 	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftId ?? "session"}`);
 	const sessionModeContext = $derived(`${draftContext}:${sessionState.currentId ? "" : getEffectiveInstanceId()}`);
 	$effect(() => {
@@ -151,6 +161,9 @@
 	const supportsGoal = $derived(discoveryState.currentTraits?.supportsGoalState === true);
 	const isGoalCommand = $derived(supportsGoal && /^[/$]goal(?:\s|$)/.test(composerDraft.text));
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
+	let cameraPicker: FilePicker | undefined = $state();
+	let photosPicker: FilePicker | undefined = $state();
+	let filesPicker: FilePicker | undefined = $state();
 	const referenceEditor = referenceEditing({ read: () => composerDraft.text, write: (text) => { composerDraft.text = text; }, context: () => draftContext, element: () => textareaEl, changed: handleInput });
 	const referenceView = $derived(projectReferences(composerDraft.text));
 	$effect(() => provideComposerDraft({ sessionId: () => sessionState.currentId, draft: () => composerDraft.text, insert: (reference) => { if (!readOnlySubagent) referenceEditor.insert(reference); }, remove: referenceEditor.remove }));
@@ -276,20 +289,41 @@
 	let switchingAccount = $state(false);
 	const hasOtherClaudeAccount = $derived(claudeAccounts.hasAlternative(accountId));
 	const sendAccounts = $derived(currentSession ? claudeAccounts.sendOptions(accountId) : []);
-	const switchTarget = $derived(sendAccounts[0]);
 	const sendsAt = $derived.by(() => {
-		if (usageReading?.status !== "limited") return undefined;
-		const resets = usageWindows
-			.filter((window) => window.utilization >= 100)
-			.map((window) => Date.parse(window.resetsAt ?? ""))
-			.filter((at) => at > clock.now);
-		return resets.length > 0 ? Math.max(...resets) : undefined;
+		const recovery = currentSession?.limitRecovery;
+		if (recovery && !recovery.switched && !recovery.continued && recovery.scheduledAt !== undefined)
+			return recovery.scheduledAt * 1000;
+		const limit = accountLimit({
+			asker: "user",
+			modelId: currentSession?.model?.model,
+			...(usageReading ? { reading: usageReading } : {}),
+			...(recovery && !recovery.switched ? { recovery } : {}),
+			now: clock.now,
+		});
+		return limit.kind === "wait-until" ? limit.until : undefined;
 	});
+	const sendPick = $derived.by(() => {
+		const pick = composerDraft.sendPick;
+		if (settingsPending || sendsAt === undefined || !hasOtherClaudeAccount) return undefined;
+		if (pick?.mode === "at-reset" && pick.accountId === accountId) return pick;
+		if (pick?.mode === "switch" && sendAccounts.some((account) => account.id === pick.accountId)) return pick;
+		return undefined;
+	});
+	$effect(() => {
+		if (!settingsPending && composerDraft.sendPick && !sendPick) composerDraft.sendPick = undefined;
+	});
+	const switchTarget = $derived(sendPick?.mode === "switch"
+		? sendAccounts.find((account) => account.id === sendPick.accountId)
+		: sendAccounts.find((account) => account.usageEligible && !account.usageUnknown));
 	const sendMode = $derived.by(() => {
-		if (sendsAt !== undefined) return usageState.limits.autoSwitch && switchTarget ? "switch" : "at-reset";
-		const warnAt = usageState.limits.warnAt;
-		return usageReading?.status === "available" && warnAt !== "off" &&
-			usageWindows.some((window) => window.utilization >= warnAt && window.utilization < 100)
+		if (sendsAt !== undefined) return sendPick?.mode ?? (usageState.limits.autoSwitch && switchTarget ? "switch" : "at-reset");
+		if (composerTraits?.usageHarness === "codex") {
+			const warnAt = usageState.limits.warnAt;
+			return usageReading?.status === "available" && warnAt !== "off" &&
+				usageWindows.some((window) => window.utilization >= warnAt && window.utilization < 100)
+				? "warning" : "normal";
+		}
+		return usageWarning(usageReading, usageState.limits.warnAt, claudeAccounts.nameOf(accountId), hasOtherClaudeAccount, clock.now)
 			? "warning" : "normal";
 	});
 	const sendAtTime = $derived(usageForecastTime(sendsAt, clock.now));
@@ -303,18 +337,13 @@
 		if (sendsAt === undefined || !hasOtherClaudeAccount) sendMenuOpen = false;
 		claudeAccounts.invalidateSendQuotas();
 	});
-	const pendingSendsAt = $derived.by(() => {
-		const recovery = currentSession?.limitRecovery;
-		const scheduledAt = recovery && !recovery.continued && !recovery.switched ? recovery.scheduledAt : undefined;
-		return scheduledAt === undefined ? sendsAt : scheduledAt * 1000;
-	});
 	const placeholder = $derived(
 		sendsAt !== undefined
 			? `Message${composerPresentation ? ` ${composerPresentation.label}` : ""}… sends at ${sendAtTime}`
 			: currentSession?.settledAt != null ? "Message to un-settle…" :
 			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
 			sessionViewState.compact ? "Reply…" :
-			messageSurfacing.status.active ? "Reply… (↩ Reply on a message drops a reference here)" :
+			sessionJevEnabled(currentSession) ? "Reply… (↩ Reply on a message drops a reference here)" :
 			composerPresentation ? `Reply to ${composerPresentation.label}…` : "Reply…",
 	);
 
@@ -755,15 +784,15 @@
 				inputId,
 				text: serializeReferences(await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug)),
 				...(images.length > 0 ? { images } : {}),
+				onCreated: () => {
+					sideThreadAttempt = undefined;
+					const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, pendingAttachments === draftImages);
+					if (cleared.cleared) {
+						if (cleared.active) cursorPos = 0;
+						pendingAttachments = [];
+					}
+				},
 			});
-			if (outcome.kind === "started") {
-				sideThreadAttempt = undefined;
-				const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, pendingAttachments === draftImages);
-				if (cleared.cleared) {
-					if (cleared.active) cursorPos = 0;
-					pendingAttachments = [];
-				}
-			}
 			return outcome.kind === "started" || outcome.kind === "waiting";
 		} finally {
 			startingSideThread = false;
@@ -926,21 +955,11 @@
 	}
 
 	function handleAttachCamera() {
-		const fileInput = document.createElement("input");
-		fileInput.type = "file";
-		fileInput.accept = "image/*";
-		fileInput.capture = "environment";
-		fileInput.onchange = () => processSelectedFiles(fileInput.files);
-		fileInput.click();
+		cameraPicker?.open();
 	}
 
 	function handleAttachPhotos() {
-		const fileInput = document.createElement("input");
-		fileInput.type = "file";
-		fileInput.accept = "image/*";
-		fileInput.multiple = true;
-		fileInput.onchange = () => processSelectedFiles(fileInput.files);
-		fileInput.click();
+		photosPicker?.open();
 	}
 
 	function handleAttachFiles() {
@@ -948,11 +967,7 @@
 			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before attaching files.";
 			return;
 		}
-		const fileInput = document.createElement("input");
-		fileInput.type = "file";
-		fileInput.multiple = true;
-		fileInput.onchange = () => processSelectedFiles(fileInput.files);
-		fileInput.click();
+		filesPicker?.open();
 	}
 
 	function handleAttachSetGoal(condition = "") {
@@ -983,13 +998,12 @@
 	});
 
 	/** All picker entries share one attachment row and one send path. */
-	async function processSelectedFiles(files: FileList | null) {
-		if (!files || files.length === 0) return;
+	async function processSelectedFiles(files: File[]) {
 		const context = sessionModeContext;
 		attachmentError = "";
 		readingAttachments++;
 		try {
-			for (const file of Array.from(files)) {
+			for (const file of files) {
 				try {
 					const { dataUrl, resized } = await prepareFileAttachment(file);
 					if (context !== sessionModeContext) return;
@@ -1282,14 +1296,14 @@
 			</ComposerStrip>
 		{/if}
 
-		{#if !currentChat().transcript?.pending.length && currentSession?.limitRecovery && !currentSession.limitRecovery.switched && (currentSession.limitRecovery.scheduledAt === undefined || currentSession.limitRecovery.cutOffMessageId !== undefined)}
+		{#if !currentChat().transcript?.pending.length && currentSession?.limitRecovery && !currentSession.limitRecovery.switched}
 			<UsageLimitStrip limitRecovery={currentSession.limitRecovery} sessionId={currentSession.id} projectSlug={currentSession.projectSlug} />
 		{/if}
 
 		<PendingInputTray
 			inputs={currentChat().transcript?.pending ?? []}
 			paused={currentChat().transcript?.paused ?? false}
-			sendsAt={pendingSendsAt}
+			{sendsAt}
 			limitRecovery={currentSession?.limitRecovery ?? undefined}
 			sessionId={currentSession?.id}
 			projectSlug={currentSession?.projectSlug}
@@ -1519,16 +1533,16 @@
 							{#snippet trigger({ props })}
 								<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" iconOnly icon="chevron-down" iconSize={11} ariaLabel="Send options" data-testid="composer-send-menu-trigger" disabled={switchingAccount} class="h-full shrink-0 touch-manipulation" />
 							{/snippet}
-							<MenuItem density="compact" data-testid="composer-send-menu-reset" data-selected="true" disabled={!canSend || switchingAccount} class="rounded-[7px] bg-border-chip" onselect={() => void sendMessage()}>
+							<MenuItem density="compact" data-testid="composer-send-menu-reset" data-selected={sendMode === "at-reset" ? "true" : undefined} disabled={switchingAccount} class="rounded-[7px] {sendMode === 'at-reset' ? 'bg-border-chip' : ''}" onselect={() => { if (accountId) composerDraft.sendPick = { mode: "at-reset", accountId }; }}>
 								<Icon name="clock" size={13} class="shrink-0 text-status-red" />
 								<span class="flex-1">Send at {sendAtTime}</span>
 								<span class="font-mono text-[10.5px] text-text-dimmer">{claudeAccounts.nameOf(accountId)}</span>
 							</MenuItem>
 							{#each sendAccounts as option (option.id)}
-								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} disabled={!canSend || switchingAccount} class="rounded-[7px]" onselect={() => void sendOnAccount(option.id)}>
+								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} data-selected={sendMode === "switch" && switchTarget?.id === option.id ? "true" : undefined} disabled={switchingAccount} class="rounded-[7px] {sendMode === 'switch' && switchTarget?.id === option.id ? 'bg-border-chip' : ''}" onselect={() => { composerDraft.sendPick = { mode: "switch", accountId: option.id }; }}>
 									<AccountDot instanceId={option.id} size={7} />
 									<span class="flex-1">Send now on {option.name}</span>
-									<span class="font-mono text-[10.5px] text-text-dimmer">{composerTraits?.usageHarness === "codex" ? option.fullest.label ?? "usage" : option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%</span>
+									<span class="font-mono text-[10.5px] text-text-dimmer">{#if option.usageUnknown}usage unknown{:else if option.fullest}{composerTraits?.usageHarness === "codex" ? option.fullest.label ?? "usage" : option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%{/if}</span>
 								</MenuItem>
 							{/each}
 							<div data-testid="composer-send-menu-note" class="mt-[3px] border-t border-border px-[6px] pt-[5px] pb-[3px] font-mono text-[10.5px] text-text-dimmer whitespace-normal">Another account takes over the session, as Switch account does.</div>
@@ -1615,6 +1629,9 @@
 		{/if}
 		{/if}
 	</div>
+	<FilePicker bind:this={cameraPicker} accept="image/*" capture="environment" onpick={processSelectedFiles} />
+	<FilePicker bind:this={photosPicker} accept="image/*" multiple onpick={processSelectedFiles} />
+	<FilePicker bind:this={filesPicker} multiple onpick={processSelectedFiles} />
 </div>
 
 <style>

@@ -1,6 +1,6 @@
 // Manages the list of registered projects and the current project slug.
 
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, Fiber, Schedule, Stream } from "effect";
 import type { ShellEnvelope } from "../../contracts/ws-rpc.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
@@ -9,17 +9,19 @@ import type {
 	ProjectMutationResponse,
 	WsRpcError,
 } from "../transport/ws-rpc.js";
-import { rpc } from "../transport/ws-rpc-client.js";
+import { rpc, rpcEffect } from "../transport/ws-rpc-client.js";
 import type { ProjectInfo } from "../types.js";
+import { getBrowserClientId } from "./client-identity.js";
 import { draftList } from "./draft-list.svelte.js";
 import { applyInstanceListResponse } from "./instance.svelte.js";
-import { projectState } from "./project-state.svelte.js";
+import { getDraftProject, projectState } from "./project-state.svelte.js";
 import {
 	attachedProjectState,
 	getCurrentSlug,
 	replaceRoute,
 } from "./router.svelte.js";
 import { applyServerStatus, serverStatusFeed } from "./server-status.svelte.js";
+import { findSession, sessionState } from "./session.svelte.js";
 import { confirm } from "./ui.svelte.js";
 import { applyUsageLimitsSetting, applyUsageReadings } from "./usage.svelte.js";
 
@@ -117,6 +119,30 @@ const toProjectInfoList = (
 let following = false;
 let generation = 0;
 let fiber: Fiber.Fiber<void, never> | null = null;
+let lastFocusRead = -Infinity;
+
+function refreshUsageOnFocus(): void {
+	if (document.visibilityState !== "visible") return;
+	// The request is routed by project; the readings it refreshes are daemon-wide.
+	const projectSlug =
+		findSession(sessionState.currentId ?? "")?.projectSlug ??
+		getCurrentSlug() ??
+		getDraftProject();
+	if (!projectSlug) return;
+	const now = Date.now();
+	if (now - lastFocusRead < 30_000) return;
+	lastFocusRead = now;
+	void runTransportEffect(
+		rpcEffect("QuotaForAccounts", {
+			projectSlug,
+			originId: getBrowserClientId(),
+		}).pipe(
+			// A tab idle past the stale threshold closes its socket on this same
+			// visibility change, so the first write can fail before the reconnect.
+			Effect.retry({ times: 2, schedule: Schedule.spaced("1 second") }),
+		),
+	).catch(() => undefined);
+}
 
 /**
  * Follow the daemon-global instance, usage and status lists over the
@@ -126,6 +152,13 @@ let fiber: Fiber.Fiber<void, never> | null = null;
 export function followDaemonLists(on: boolean): void {
 	if (following === on) return;
 	following = on;
+	if (on) {
+		document.addEventListener("visibilitychange", refreshUsageOnFocus);
+		window.addEventListener("focus", refreshUsageOnFocus);
+	} else {
+		document.removeEventListener("visibilitychange", refreshUsageOnFocus);
+		window.removeEventListener("focus", refreshUsageOnFocus);
+	}
 	const currentGeneration = ++generation;
 	const old = fiber;
 	fiber = null;

@@ -191,10 +191,11 @@ export const Default: Story = {
 		await expect(settings.getBoundingClientRect().width).toBe(44);
 		await expect(settings.getBoundingClientRect().height).toBe(44);
 		await userEvent.click(settings);
+		// Settings mounts lazily, so wait for it rather than query once.
 		await expect(
 			await body.findByRole("dialog", { name: "Settings" }),
 		).toBeVisible();
-		await expect(body.getByTestId("avatar-change-root")).toBeVisible();
+		await expect(await body.findByTestId("avatar-change-root")).toBeVisible();
 		await userEvent.click(body.getByTestId("settings-close-btn"));
 		await waitFor(() =>
 			expect(body.queryByRole("dialog", { name: "Settings" })).toBeNull(),

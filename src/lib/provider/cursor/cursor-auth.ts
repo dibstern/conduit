@@ -1,25 +1,29 @@
-import { Effect, Option, Result, Semaphore } from "effect";
+import { Effect, Fiber, Option, Result, Semaphore } from "effect";
 import type { CursorAuthState } from "../../contracts/ws-rpc.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
-	cursorEnvironmentKey,
-	resolveCursorCredential,
+	type CursorCredentialLookup,
+	cursorCredentialMessage,
 } from "./cursor-credential.js";
-import { createCursorSdkPort } from "./cursor-sdk.js";
+import type { CursorSdkPort } from "./sdk-port.js";
 
 const EXPIRY_WARNING_MS = 7 * 24 * 60 * 60 * 1_000;
 
 /** One daemon owns the interactive flow; only the SDK persists credentials. */
 export const makeCursorAuth = (
 	onChanged: (authenticated: boolean) => Effect.Effect<void, WsRpcError>,
+	options: {
+		readonly port: CursorSdkPort;
+		readonly credential: Effect.Effect<CursorCredentialLookup, WsRpcError>;
+	},
 ) =>
 	Effect.gen(function* () {
 		const scope = yield* Effect.scope;
 		const changes = yield* Semaphore.make(1);
-		let sdk: ReturnType<typeof createCursorSdkPort> | undefined;
-		const port = () => (sdk ??= createCursorSdkPort());
+		const port = () => options.port;
 		let login: CursorAuthState["login"] = { state: "idle" };
 		let controller: AbortController | undefined;
+		let loginFiber: Fiber.Fiber<void> | undefined;
 		const configuredTimeout = Number(
 			process.env["CONDUIT_TEST_CURSOR_LOGIN_TIMEOUT_MS"],
 		);
@@ -28,56 +32,65 @@ export const makeCursorAuth = (
 				? configuredTimeout
 				: 10 * 60 * 1_000;
 		const read = Effect.gen(function* () {
+			let environmentCredential = false;
 			const result = yield* Effect.result(
-				Effect.tryPromise(async () => {
-					const sdk = port();
-					const credential = cursorEnvironmentKey(sdk)
-						? await resolveCursorCredential(sdk)
-						: undefined;
-					if (credential?.source === "environment") {
-						// SDK status describes only stored login, never an environment key.
-						try {
-							await sdk.modelsList(credential);
-							return {
-								source: "environment",
-								status: "logged-in",
-								expiresSoon: false,
-							} as const;
-						} catch {
-							return {
-								source: "environment",
-								status: "error",
-								expiresSoon: false,
-								error:
-									"Cursor could not validate the key from the environment. Check CURSOR_API_KEY and refresh status.",
-							} as const;
-						}
+				Effect.gen(function* () {
+					const lookup = yield* options.credential;
+					if (lookup._tag !== "Ready") {
+						return lookup._tag === "LoggedOut"
+							? ({
+									source: "none",
+									status: "logged-out",
+									expiresSoon: false,
+								} as const)
+							: ({
+									source: "sdk-login",
+									status: "error",
+									expiresSoon: false,
+									error: cursorCredentialMessage(lookup),
+								} as const);
 					}
-					const status = await sdk.authStatus();
-					if (status.status === "logged-out")
+					const credential = lookup.credential;
+					environmentCredential = credential.source === "environment";
+					return yield* Effect.tryPromise(async () => {
+						if (credential.source === "environment") {
+							try {
+								await port().modelsList(credential);
+								return {
+									source: "environment",
+									status: "logged-in",
+									expiresSoon: false,
+								} as const;
+							} catch {
+								return {
+									source: "environment",
+									status: "error",
+									expiresSoon: false,
+									error:
+										"Cursor could not validate the key from the environment. Check CURSOR_API_KEY and refresh status.",
+								} as const;
+							}
+						}
+						const status = credential;
 						return {
-							source: "none",
-							status: "logged-out",
-							expiresSoon: false,
+							source: "sdk-login",
+							status: "logged-in",
+							...(status.email === undefined ? {} : { email: status.email }),
+							...(status.apiKeyExpiresAtMs === undefined
+								? {}
+								: { apiKeyExpiresAtMs: status.apiKeyExpiresAtMs }),
+							expiresSoon:
+								status.apiKeyExpiresAtMs !== undefined &&
+								status.apiKeyExpiresAtMs - Date.now() <= EXPIRY_WARNING_MS,
 						} as const;
-					return {
-						source: "sdk-login",
-						status: "logged-in",
-						...(status.email === undefined ? {} : { email: status.email }),
-						...(status.apiKeyExpiresAtMs === undefined
-							? {}
-							: { apiKeyExpiresAtMs: status.apiKeyExpiresAtMs }),
-						expiresSoon:
-							status.apiKeyExpiresAtMs !== undefined &&
-							status.apiKeyExpiresAtMs - Date.now() <= EXPIRY_WARNING_MS,
-					} as const;
+					});
 				}).pipe(Effect.timeout("15 seconds")),
 			);
 			const state: CursorAuthState = {
 				...(Result.isSuccess(result)
 					? result.success
 					: {
-							source: sdk && cursorEnvironmentKey(sdk) ? "environment" : "none",
+							source: environmentCredential ? "environment" : "none",
 							status: "error",
 							expiresSoon: false,
 							error:
@@ -96,6 +109,9 @@ export const makeCursorAuth = (
 		yield* Effect.addFinalizer(() => cancel);
 		return {
 			read,
+			awaitLogin: Effect.suspend(() =>
+				loginFiber ? Fiber.await(loginFiber).pipe(Effect.asVoid) : Effect.void,
+			),
 			start: changes.withPermits(1)(
 				Effect.gen(function* () {
 					const current = yield* read;
@@ -109,7 +125,7 @@ export const makeCursorAuth = (
 						controller === flow &&
 						login.state === "pending" &&
 						!flow.signal.aborted;
-					yield* Effect.gen(function* () {
+					loginFiber = yield* Effect.gen(function* () {
 						const result = yield* Effect.result(
 							Effect.tryPromise((signal) =>
 								port().authLogin({

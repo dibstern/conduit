@@ -8,8 +8,6 @@ import {
 	Fiber,
 	Layer,
 	Option,
-	PubSub,
-	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
@@ -120,6 +118,89 @@ function makeProvider(
 }
 
 describe("ProviderSideEffectReactor", () => {
+	for (const providerId of ["claude", "cursor"])
+		it.effect(`retains a detached ${providerId} send for runner recovery`, () =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql, { providerId });
+				const detached = yield* Deferred.make<void>();
+				let reactor: ProviderSideEffectReactor;
+				const recoverDetachedSession = vi.fn((sessionId: string) =>
+					Effect.sync(() => {
+						expect(sessionId).toBe("session-1");
+						expect(reactor.ownsPendingSend(sessionId, "cmd-1", 10, 1)).toBe(
+							false,
+						);
+					}),
+				);
+				reactor = yield* makeReactor({
+					recoverDetachedSession,
+					registry: new ProviderRegistry([
+						makeProvider(
+							() =>
+								Deferred.succeed(detached, undefined).pipe(
+									Effect.andThen(
+										Effect.fail(
+											new ProviderInstanceFailure({
+												providerId,
+												operation: "detach runner",
+												code: "runner_detached",
+												cause: "Project released its runner attachment",
+											}),
+										),
+									),
+								),
+							providerId,
+						),
+					]),
+				});
+				const worker = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+				yield* Deferred.await(detached);
+				yield* TestClock.adjust("1 second");
+				expect(recoverDetachedSession).toHaveBeenCalledExactlyOnceWith(
+					"session-1",
+				);
+				expect(
+					yield* sql`SELECT status, error_code, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "running", error_code: null, attempt_count: 1 }]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{ status: "side_effect_requested" },
+				]);
+				expect(
+					yield* sql`SELECT status, started_at FROM provider_runs`,
+				).toEqual([{ status: "pending", started_at: null }]);
+				expect(
+					yield* sql`SELECT type FROM events WHERE type = 'turn.error'`,
+				).toEqual([]);
+				expect(reactor.ownsPendingSend("session-1", "cmd-1", 10, 1)).toBe(
+					false,
+				);
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				for (const type of ["run.started", "turn.completed"] as const)
+					yield* ingestion.ingest({
+						eventId: `recovered:${type}`,
+						type,
+						providerId,
+						sessionId: "session-1",
+						runId: "run:cmd-1",
+						providerRefs: {},
+						rawSource: { kind: "test.runner-recovery" },
+						createdAt: 2000,
+						data:
+							type === "run.started"
+								? { inputId: "legacy-user-1", requestedRunId: "run:cmd-1" }
+								: { messageId: "", duration: 1 },
+					});
+				yield* TestClock.adjust("1 second");
+				expect(yield* Fiber.join(worker)).toMatchObject({
+					status: "completed",
+				});
+				expect(
+					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
+				).toEqual([{ status: "completed", attempt_count: 1 }]);
+			}).pipe(Effect.provide(reactorTestLayer)),
+		);
+
 	it.effect(
 		"places a claimed input and its failure before intake atomically",
 		() =>
@@ -178,317 +259,6 @@ describe("ProviderSideEffectReactor", () => {
 					FROM sessions JOIN events ON events.session_id = sessions.id
 					AND events.stream_version = sessions.last_turn_end_version`,
 				).toEqual([{ type: "turn.error", run_id: "run:cmd-1" }]);
-			}).pipe(Effect.provide(reactorTestLayer)),
-	);
-
-	it.effect("does not subscribe to admission changes for an unheld send", () =>
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			yield* seedSendTurnOutbox(sql);
-			const subscribe = vi.fn(() => Stream.empty);
-			const send = vi.fn(() => Effect.succeed(completedTurn));
-			const reactor = yield* makeReactor({
-				registry: new ProviderRegistry([
-					{
-						...makeProvider(send),
-						inputAdmission: {
-							isHeld: () => false,
-							changes: Effect.sync(subscribe),
-						},
-					},
-				]),
-			});
-			expect((yield* reactor.runCommand("cmd-1")).status).toBe("completed");
-			expect(send).toHaveBeenCalledOnce();
-			expect(subscribe).not.toHaveBeenCalled();
-			expect(
-				yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
-			).toEqual([{ status: "completed", attempt_count: 1 }]);
-		}).pipe(Effect.provide(reactorTestLayer)),
-	);
-
-	it.effect(
-		"retains background approval support after a legacy adoption retry",
-		() =>
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				yield* seedSendTurnOutbox(sql);
-				const changes = yield* PubSub.unbounded<string>();
-				let held = false;
-				const requestPermission = vi.fn(() =>
-					Effect.succeed<PermissionResponse>({ decision: "once" }),
-				);
-				const interactions: EventSink = {
-					push: () => Effect.void,
-					requestPermission,
-					requestQuestion: () => Effect.succeed({}),
-					resolvePermission: () => Effect.void,
-					resolveQuestion: () => Effect.void,
-				};
-				const makeInteractions = vi.fn(() => interactions);
-				const send = vi.fn((input: SendTurnInput) => {
-					if (send.mock.calls.length === 1) {
-						held = true;
-						return Effect.fail(
-							new ProviderInstanceFailure({
-								providerId: "claude",
-								operation: "send-turn",
-								cause: { code: "runner_input_held" },
-							}),
-						);
-					}
-					return input.eventSink
-						.requestPermission({
-							requestId: "approval-after-restart",
-							toolName: "Bash",
-							toolInput: { command: "whoami" },
-							sessionId: input.sessionId,
-							turnId: input.inputId,
-							providerItemId: "tool-1",
-						})
-						.pipe(
-							Effect.tap((answer) =>
-								Effect.sync(() => expect(answer.decision).toBe("once")),
-							),
-							Effect.as(completedTurn),
-							Effect.mapError(
-								(cause) =>
-									new ProviderInstanceFailure({
-										providerId: "claude",
-										operation: "approval",
-										cause,
-									}),
-							),
-						);
-				});
-				const reactor = yield* makeReactor({
-					registry: new ProviderRegistry([
-						{
-							...makeProvider(send),
-							inputAdmission: {
-								isHeld: () => held,
-								changes: PubSub.subscribe(changes).pipe(
-									Effect.map(Stream.fromSubscription),
-								),
-							},
-						},
-					]),
-				});
-				const waiting = yield* Effect.forkChild(
-					reactor.runOnce(makeInteractions),
-				);
-				yield* TestClock.adjust("100 millis");
-				expect(
-					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
-				).toEqual([{ status: "pending", attempt_count: 1 }]);
-				held = false;
-				yield* PubSub.publish(changes, "session-1");
-				yield* Fiber.join(waiting);
-				expect(requestPermission).toHaveBeenCalledOnce();
-				expect(makeInteractions).toHaveBeenCalledTimes(2);
-				expect(send).toHaveBeenCalledTimes(2);
-				expect(
-					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
-				).toEqual([{ status: "completed", attempt_count: 2 }]);
-				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
-					{ status: "side_effect_completed" },
-				]);
-			}).pipe(Effect.provide(reactorTestLayer)),
-	);
-
-	it.effect(
-		"returns the claimed attempt to pending on legacy adoption and delivers once after restart",
-		() =>
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				yield* seedSendTurnOutbox(sql);
-				const changes = yield* PubSub.unbounded<string>();
-				let held = false;
-				const delivered = vi.fn(() => Effect.succeed(completedTurn));
-				const send = vi.fn((input: SendTurnInput) => {
-					if (send.mock.calls.length > 1) return delivered();
-					held = true;
-					return Effect.fail(
-						new ProviderInstanceFailure({
-							providerId: "claude",
-							operation: "send-turn",
-							cause: Object.assign(new Error(`Held ${input.inputId}`), {
-								code: "runner_input_held",
-							}),
-						}),
-					);
-				});
-				const reactor = yield* makeReactor({
-					registry: new ProviderRegistry([
-						{
-							...makeProvider(send),
-							inputAdmission: {
-								isHeld: () => held,
-								changes: PubSub.subscribe(changes).pipe(
-									Effect.map(Stream.fromSubscription),
-								),
-							},
-						},
-					]),
-				});
-				const waiting = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
-				yield* TestClock.adjust("100 millis");
-				expect(
-					yield* sql`SELECT status, attempt_count, run_id FROM provider_command_outbox`,
-				).toEqual([
-					{ status: "pending", attempt_count: 1, run_id: "run:cmd-1" },
-				]);
-				expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
-					{ status: "pending" },
-				]);
-				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
-					{ status: "side_effect_requested" },
-				]);
-				expect(delivered).not.toHaveBeenCalled();
-				held = false;
-				yield* PubSub.publish(changes, "session-1");
-				expect((yield* Fiber.join(waiting)).status).toBe("completed");
-				expect(send).toHaveBeenCalledTimes(2);
-				expect(delivered).toHaveBeenCalledOnce();
-				expect(
-					yield* sql`SELECT status, attempt_count, run_id FROM provider_command_outbox`,
-				).toEqual([
-					{ status: "completed", attempt_count: 2, run_id: "run:cmd-1" },
-				]);
-				expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
-					{ status: "completed" },
-				]);
-				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
-					{ status: "side_effect_completed" },
-				]);
-			}).pipe(Effect.provide(reactorTestLayer)),
-	);
-
-	it.effect(
-		"returns a claim racing legacy adoption to pending; Stop fences its delivery after retirement",
-		() =>
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				yield* seedSendTurnOutbox(sql);
-				const changes = yield* PubSub.unbounded<string>();
-				let held = false;
-				const send = vi.fn(() => {
-					held = true;
-					return Effect.fail(
-						new ProviderInstanceFailure({
-							providerId: "claude",
-							operation: "send-turn",
-							cause: Object.assign(new Error("Legacy runner holds input"), {
-								code: "runner_input_held",
-							}),
-						}),
-					);
-				});
-				const reactor = yield* makeReactor({
-					registry: new ProviderRegistry([
-						{
-							...makeProvider(send),
-							inputAdmission: {
-								isHeld: () => held,
-								changes: PubSub.subscribe(changes).pipe(
-									Effect.map(Stream.fromSubscription),
-								),
-							},
-						},
-					]),
-				});
-				const waiting = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
-				yield* TestClock.adjust("100 millis");
-				expect(
-					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
-				).toEqual([{ status: "pending", attempt_count: 1 }]);
-				expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
-					{ status: "pending" },
-				]);
-				const commit = yield* makeCommitAndSignal;
-				yield* commit([
-					canonicalEvent(
-						"run.requested",
-						"session-1",
-						{ runId: "active-A", inputId: "input-A" },
-						{ provider: "claude" },
-					),
-					canonicalEvent(
-						"message.created",
-						"session-1",
-						{ sessionId: "session-1", messageId: "input-A", role: "user" },
-						{ provider: "claude", metadata: { runId: "active-A" } },
-					),
-					canonicalEvent(
-						"run.started",
-						"session-1",
-						{ inputId: "input-A", requestedRunId: "active-A" },
-						{ provider: "claude", metadata: { runId: "active-A" } },
-					),
-				]);
-				const [run] = yield* sql<{
-					run_id: string;
-				}>`SELECT run_id FROM provider_command_outbox`;
-				yield* commit([
-					canonicalEvent(
-						"turn.interrupted",
-						"session-1",
-						{ messageId: "" },
-						{
-							provider: "claude",
-							metadata: { runId: run?.run_id ?? "missing-run" },
-						},
-					),
-				]);
-				held = false;
-				yield* PubSub.publish(changes, "session-1");
-				expect((yield* Fiber.join(waiting)).status).toBe("interrupted");
-				expect(send).toHaveBeenCalledOnce();
-				expect(
-					yield* sql`SELECT status FROM provider_runs WHERE id = 'active-A'`,
-				).toEqual([{ status: "running" }]);
-				expect(
-					yield* sql`SELECT run_id, state FROM turns WHERE id = 'input-A'`,
-				).toEqual([{ run_id: "active-A", state: "running" }]);
-				expect(yield* sql`SELECT status FROM provider_command_outbox`).toEqual([
-					{ status: "failed" },
-				]);
-			}).pipe(Effect.provide(reactorTestLayer)),
-	);
-
-	it.effect(
-		"a genuinely waiting legacy send wakes on admission changes without advancing the clock",
-		() =>
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				yield* seedSendTurnOutbox(sql);
-				const changes = yield* PubSub.unbounded<string>();
-				let held = true;
-				const send = vi.fn(() => Effect.succeed(completedTurn));
-				const reactor = yield* makeReactor({
-					registry: new ProviderRegistry([
-						{
-							...makeProvider(send),
-							inputAdmission: {
-								isHeld: () => held,
-								changes: PubSub.subscribe(changes).pipe(
-									Effect.map(Stream.fromSubscription),
-								),
-							},
-						},
-					]),
-				});
-				const waiting = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
-				yield* TestClock.adjust("1 millis");
-				expect(send).not.toHaveBeenCalled();
-				expect(
-					yield* sql`SELECT status, attempt_count FROM provider_command_outbox`,
-				).toEqual([{ status: "pending", attempt_count: 0 }]);
-				held = false;
-				yield* PubSub.publish(changes, "session-1");
-				yield* Effect.repeat(Effect.yieldNow, { times: 10 });
-				expect(send).toHaveBeenCalledOnce();
-				expect((yield* Fiber.join(waiting)).status).toBe("completed");
 			}).pipe(Effect.provide(reactorTestLayer)),
 	);
 
@@ -1176,70 +946,67 @@ describe("ProviderSideEffectReactor", () => {
 		}).pipe(Effect.provide(reactorTestLayer)),
 	);
 
-	// Replay must retain the admitted account snapshot when its old binding no
-	// longer resolves, and preparation/receipts must use the resolved account id.
-	it.effect(
-		"replays the carried account without resolving its historical binding",
-		() =>
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const account = {
-					id: AccountIdSchema.make("current-account"),
-					name: "Current account",
-					driver: "claude" as const,
-					folder: configuredClaudeConfigDir("/tmp/test-claude-account"),
-					usageEligible: true,
-				};
-				yield* seedSendTurnOutbox(sql, {
-					providerId: "removed-account",
-					payloadJson: JSON.stringify({
-						sessionId: "session-1",
-						inputId: "turn-1",
-						prompt: "hello",
-						providerState: {},
-						workspaceRoot: "/tmp/test-project",
-						extraFolders: [],
-						account,
-						instanceId: account.id,
-						configDir: account.folder,
-						folderSource: "account",
-					}),
-				});
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
-					Effect.succeed(completedTurn),
-				);
-				const accountDirectory = makeAccountDirectory(
-					Effect.succeed(
-						accountsStateFromInstances(
-							[],
-							configuredClaudeConfigDir("/tmp/g4zp-test-default"),
-						),
+	it.effect("refuses the carried account when it is no longer registered", () =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const account = {
+				id: AccountIdSchema.make("current-account"),
+				name: "Current account",
+				driver: "claude" as const,
+				folder: configuredClaudeConfigDir("/tmp/test-claude-account"),
+				usageEligible: true,
+			};
+			yield* seedSendTurnOutbox(sql, {
+				providerId: "removed-account",
+				payloadJson: JSON.stringify({
+					sessionId: "session-1",
+					inputId: "turn-1",
+					prompt: "hello",
+					providerState: {},
+					workspaceRoot: "/tmp/test-project",
+					extraFolders: [],
+					account,
+					instanceId: account.id,
+					configDir: account.folder,
+					folderSource: "account",
+				}),
+			});
+			const sendTurn = vi.fn((_input: SendTurnInput) =>
+				Effect.succeed(completedTurn),
+			);
+			const accountDirectory = makeAccountDirectory(
+				Effect.succeed(
+					accountsStateFromInstances(
+						[],
+						configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 					),
-				);
-				const resolveAccount = vi.spyOn(accountDirectory, "resolve");
-				const reactor = yield* makeReactor({
-					registry: new ProviderRegistry([makeProvider(sendTurn)]),
-					accountDirectory,
-				});
+				),
+			);
+			const resolveAccount = vi.spyOn(accountDirectory, "resolve");
+			const reactor = yield* makeReactor({
+				registry: new ProviderRegistry([makeProvider(sendTurn)]),
+				accountDirectory,
+			});
 
-				yield* reactor.drain();
+			yield* reactor.drain();
 
-				expect(sendTurn).toHaveBeenCalledExactlyOnceWith(
-					expect.objectContaining({
-						account,
-						instanceId: account.id,
-						configDir: account.folder,
-						folderSource: "account",
-					}),
-				);
-				expect(resolveAccount).not.toHaveBeenCalled();
-				expect(
-					(yield* sql<{
-						provider_id: string;
-					}>`SELECT provider_id FROM provider_command_outbox WHERE command_id = 'cmd-1'`)[0]
-						?.provider_id,
-				).toBe("removed-account");
-			}).pipe(Effect.provide(reactorTestLayer)),
+			expect(sendTurn).not.toHaveBeenCalled();
+			expect(yield* readOutboxRetryState(sql, 10)).toMatchObject({
+				status: "failed",
+				attempt_count: 1,
+				next_attempt_at: null,
+			});
+			expect(resolveAccount).toHaveBeenCalledExactlyOnceWith({
+				_tag: "Id",
+				id: account.id,
+			});
+			expect(
+				(yield* sql<{
+					provider_id: string;
+				}>`SELECT provider_id FROM provider_command_outbox WHERE command_id = 'cmd-1'`)[0]
+					?.provider_id,
+			).toBe("removed-account");
+		}).pipe(Effect.provide(reactorTestLayer)),
 	);
 
 	it.effect("executes committed side effects once after commit", () =>
@@ -1532,6 +1299,71 @@ describe("ProviderSideEffectReactor", () => {
 			expect(ingest).toHaveBeenCalledWith(runtimeEvent);
 			expect(interactions.push).not.toHaveBeenCalled();
 		}).pipe(Effect.provide(reactorTestLayer)),
+	);
+
+	it.effect(
+		"uses the current project sink when a foreground interaction arrives",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql);
+				const sink = () => ({
+					push: vi.fn(() => Effect.void),
+					requestPermission: vi.fn(() =>
+						Effect.succeed<PermissionResponse>({ decision: "once" }),
+					),
+					requestQuestion: vi.fn(() => Effect.succeed({})),
+					resolvePermission: vi.fn(() => Effect.void),
+					resolveQuestion: vi.fn(() => Effect.void),
+					noteActivity: vi.fn(),
+				});
+				const original = sink();
+				const replacement = sink();
+				let current = original;
+				const entered = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				const request = {
+					requestId: "approval-after-replacement",
+					sessionId: "session-1",
+					turnId: "turn-1",
+					providerItemId: "tool-1",
+					toolName: "Bash",
+					toolInput: { command: "pwd" },
+				};
+				const reactor = yield* makeReactor({
+					makeInteractions: () => Effect.sync(() => current),
+					registry: new ProviderRegistry([
+						makeProvider((input) =>
+							Effect.gen(function* () {
+								yield* Deferred.succeed(entered, undefined);
+								yield* Deferred.await(release);
+								yield* input.eventSink.requestPermission(request);
+								return completedTurn;
+							}).pipe(
+								Effect.mapError(
+									(cause) =>
+										new ProviderInstanceFailure({
+											providerId: "claude",
+											operation: "sendTurn",
+											cause,
+										}),
+								),
+							),
+						),
+					]),
+				});
+				const worker = yield* Effect.forkChild(
+					reactor.runCommand("cmd-1", original),
+				);
+				yield* Deferred.await(entered);
+				current = replacement;
+				yield* Deferred.succeed(release, undefined);
+				yield* Fiber.join(worker);
+				expect(replacement.requestPermission).toHaveBeenCalledExactlyOnceWith(
+					request,
+				);
+				expect(original.requestPermission).not.toHaveBeenCalled();
+			}).pipe(Effect.provide(reactorTestLayer)),
 	);
 
 	// A direct waiter must not bypass backoff, and a failed claim must escape
@@ -1838,7 +1670,7 @@ describe("ProviderSideEffectReactor", () => {
 	}
 
 	it.effect(
-		"keeps non-send retry backoff tied to the claimed attempt count",
+		"cancels a legacy interrupt without a captured process instead of replaying it",
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -1863,10 +1695,10 @@ describe("ProviderSideEffectReactor", () => {
 				});
 				yield* reactor.drain();
 				expect(yield* readOutboxRetryState(sql, 10)).toEqual({
-					status: "retryable_failed",
+					status: "cancelled",
 					attempt_count: 1,
-					error_code: "rate_limit",
-					next_attempt_at: 100,
+					error_code: "provider_process_gone",
+					next_attempt_at: null,
 				});
 			}).pipe(Effect.provide(reactorTestLayer)),
 	);

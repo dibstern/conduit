@@ -1,6 +1,6 @@
-import { appendFileSync, chmodSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { Deferred, Effect, FiberSet, Scope } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
@@ -46,7 +46,10 @@ export interface RunnerLaunch {
 		result: TurnResult | undefined,
 	) => boolean;
 	readonly wire?: RunnerWireCodec;
-	readonly capabilities?: Pick<RunnerHello, "stopsTasks" | "taggedConfigDir">;
+	readonly capabilities?: Pick<
+		RunnerHello,
+		"stopsTasks" | "taggedConfigDir" | "rebindsAccount" | "cursorBackendUrl"
+	>;
 	readonly makeRunner: (
 		config: NonNullable<RunnerHello["config"]>,
 		emit: (
@@ -128,6 +131,7 @@ export const runSessionRunner = (
 		let runner: SessionRunner | undefined;
 		let sendJournal: RunnerSendJournal | undefined;
 		let initializing = false;
+		let helloCount = 0;
 		const spool = new RunnerSpool(`${socketPath}.spool`);
 		let backgroundSnapshot:
 			| Extract<SessionOutput, { type: "background-task" }>
@@ -221,6 +225,7 @@ export const runSessionRunner = (
 				attempt?: number;
 				fallback?: boolean;
 				providerRunId?: string;
+				released?: boolean;
 			}
 		>();
 		const commands = new Map<
@@ -294,6 +299,8 @@ export const runSessionRunner = (
 												output.type === "event"
 													? output.event.providerRefs.providerTurnId
 													: undefined;
+											if (output.type === "release-sink" && binding)
+												binding.released = true;
 											const recordRun =
 												runId &&
 												binding?.commandId &&
@@ -340,7 +347,7 @@ export const runSessionRunner = (
 											process.env["CONDUIT_TEST_RUNNER_IDLE_DAY_MS"]
 											? Number(process.env["CONDUIT_TEST_RUNNER_IDLE_DAY_MS"])
 											: undefined,
-										config.daemonConfigDir,
+										config.autoSettleAfterDays,
 										() =>
 											retiring ||
 											activeCommands > 0 ||
@@ -348,6 +355,7 @@ export const runSessionRunner = (
 											runner?.hasPendingSubagentFinalizers?.(sessionId) ===
 												true ||
 											spool.hasHeldWork,
+										config.daemonConfigDir,
 									);
 								}
 								if (
@@ -365,15 +373,32 @@ export const runSessionRunner = (
 								}
 								idle?.activity();
 								greeted = true;
+								const overrideHello =
+									process.env["NODE_ENV"] === "test" &&
+									(!process.env["CONDUIT_TEST_RUNNER_HELLO_AFTER_FIRST"] ||
+										helloCount > 0);
+								helloCount++;
 								peer.write({
 									type: "hello",
 									protocolVersion:
-										process.env["NODE_ENV"] === "test" &&
+										overrideHello &&
 										process.env["CONDUIT_TEST_RUNNER_HELLO_VERSION"]
 											? Number(process.env["CONDUIT_TEST_RUNNER_HELLO_VERSION"])
 											: RUNNER_PROTOCOL_VERSION,
 									buildId: runnerBuildId(),
-									stampsRunIds: true,
+									...(overrideHello &&
+									process.env["CONDUIT_TEST_RUNNER_HELLO_WITHOUT_RUN_IDS"]
+										? {}
+										: { stampsRunIds: true as const }),
+									...(driverKind === "cursor" &&
+									!(
+										overrideHello &&
+										process.env[
+											"CONDUIT_TEST_RUNNER_HELLO_WITHOUT_CURSOR_CREDENTIALS"
+										]
+									)
+										? { scopedCursorCredentials: true as const }
+										: {}),
 									runnerId,
 									driverKind,
 									sessionId,
@@ -384,6 +409,12 @@ export const runSessionRunner = (
 										...(binding.commandId
 											? { commandId: binding.commandId }
 											: {}),
+										...(process.env["NODE_ENV"] === "test" &&
+										process.env[
+											"CONDUIT_TEST_RUNNER_HELLO_WITHOUT_BINDING_RELEASE_STATE"
+										]
+											? {}
+											: { released: binding.released === true }),
 									})),
 									pendingOutputs: spool.pendingOutputs,
 									completedCommands: [...completedCommands.values()],
@@ -488,6 +519,36 @@ export const runSessionRunner = (
 					} else if (message.type === "upgrade-activate") {
 						role = undefined;
 						register();
+					} else if (message.type === "command-status" && greeted && runner) {
+						runFork(
+							Effect.gen(function* () {
+								if (process.env["NODE_ENV"] === "test") {
+									const gate = join(
+										dirname(socketPath),
+										"conduit-test-hold-command-status-reply",
+									);
+									const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+									if (existsSync(gate) && proof)
+										appendFileSync(
+											proof,
+											`${JSON.stringify({ kind: "runner-command-status-held", commandId: message.commandId, runnerId })}\n`,
+										);
+									while (existsSync(gate)) yield* Effect.sleep("20 millis");
+								}
+								const completed = completedCommands.get(message.commandId);
+								peer.write({
+									type: "command-status-reply",
+									requestId: message.requestId,
+									result: completed
+										? completed.failure
+											? "failed"
+											: "completed"
+										: commands.has(`${message.commandId}:0`)
+											? "running"
+											: "not_received",
+								});
+							}),
+						);
 					} else if (message.type === "command" && runner) {
 						const command = message.command;
 						if (exiting || retirementInputId !== undefined) {
@@ -511,7 +572,7 @@ export const runSessionRunner = (
 								commandId: message.commandId,
 								sinkId: command.sinkId,
 							});
-							idle?.beginTurn();
+							idle?.beginTurn(command.autoSettleAfterDays);
 						}
 						idle?.activity();
 						activeCommands++;
@@ -549,6 +610,15 @@ export const runSessionRunner = (
 									SessionFailure
 								>();
 								commands.set(deduplicationKey, result);
+								const proof =
+									process.env["NODE_ENV"] === "test"
+										? process.env["CONDUIT_TEST_PROCESS_PROOF"]
+										: undefined;
+								if (proof && command.control)
+									appendFileSync(
+										proof,
+										`${JSON.stringify({ kind: "runner-control", commandId: message.commandId, type: command.type, runnerId })}\n`,
+									);
 								if (!runner)
 									return yield* Effect.die("Runner is not initialized");
 								const execution = launch.executeEffect(runner, command);
@@ -574,7 +644,19 @@ export const runSessionRunner = (
 								),
 								Effect.matchCauseEffect({
 									onFailure: (cause) =>
-										Effect.sync(() => {
+										Effect.gen(function* () {
+											if (
+												process.env["NODE_ENV"] === "test" &&
+												command.type === "end-session" &&
+												command.control?.retireRunIds
+											) {
+												const gate = join(
+													dirname(socketPath),
+													"conduit-test-hold-retirement-reply",
+												);
+												while (existsSync(gate))
+													yield* Effect.sleep("20 millis");
+											}
 											completedCommands.set(message.commandId, {
 												commandId: message.commandId,
 												failure: runnerFailure(
@@ -606,6 +688,25 @@ export const runSessionRunner = (
 												commandId: message.commandId,
 												...(result ? { result } : {}),
 											});
+											if (
+												process.env["NODE_ENV"] === "test" &&
+												(command.type === "resolve-permission" ||
+													command.type === "resolve-question")
+											) {
+												const gate = join(
+													dirname(socketPath),
+													"conduit-test-hold-answer-reply",
+												);
+												const held = existsSync(gate);
+												while (existsSync(gate))
+													yield* Effect.sleep("20 millis");
+												const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+												if (held && proof)
+													appendFileSync(
+														proof,
+														`${JSON.stringify({ kind: "runner-answer-reply-released", commandId: message.commandId, runnerId })}\n`,
+													);
+											}
 											reportUpgradeState();
 											connection?.write({
 												type: "command-reply",

@@ -306,6 +306,23 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		writeFileSync(join(fixture.root, "claude-replay-release"), "release\n");
 		await enteredTurn;
 		await browser.send(sessionId, "Reply with pong in the worktree.");
+		// Declared moves keep the SDK query as well as its runner alive.
+		const queries = fixture
+			.claudeOptions()
+			.filter(({ prompt }) => prompt === undefined);
+		evidence["workspaceQueries"] = queries.map(({ pid, options }) => {
+			const env = options["env"] as Record<string, string>;
+			const original = queries[0]?.options["env"] as Record<string, string>;
+			return {
+				pid,
+				cwd: options["cwd"],
+				pwd: env["PWD"],
+				changedEnvKeys: Object.keys({ ...original, ...env }).filter(
+					(key) => original[key] !== env[key],
+				),
+			};
+		});
+		expect(queries).toHaveLength(1);
 		const runnerStarts = () =>
 			new Set(
 				fixture.marks.flatMap((mark) =>
@@ -348,6 +365,9 @@ describe("Claude declared workspace moves through the built daemon", () => {
 			"Exit the worktree and keep it.",
 			"Reply with pong back in the main folder.",
 		]);
+		expect(
+			fixture.claudeOptions().filter(({ prompt }) => prompt === undefined),
+		).toHaveLength(1);
 		expect(runnerStarts()).toBe(1);
 		expect(moves(fixture, sessionId)).toEqual([
 			{

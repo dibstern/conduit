@@ -14,7 +14,6 @@ import { SessionManagerError } from "./session-manager-error.js";
 import {
 	type ModelOverride,
 	OverridesStateTag,
-	type SessionState,
 	setContextWindow,
 	setModel,
 	setVariant,
@@ -155,7 +154,10 @@ export const restoreSessionSettings = () =>
 					!hasPermissionMode
 				)
 					continue;
-				const entry: SessionState = { ...sessions.get(row.id) };
+				const entry = {
+					...sessions.get(row.id),
+					projectId: store.projectId,
+				};
 				if (row.model_id != null && row.model_provider != null)
 					entry.model = {
 						modelID: row.model_id,

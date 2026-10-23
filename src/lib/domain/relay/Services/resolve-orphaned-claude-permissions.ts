@@ -4,19 +4,21 @@ import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-sign
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
+import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
+import { RunnerProviderInstance } from "../../../provider/runner/runner-provider-instance.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 
 /**
  * Reject the Claude permissions a crash left pending.
  *
- * Live runner callbacks are restored before this runs. Only asks without a
- * restored waiter are orphaned; leaving them pending would keep the session
- * "needing you". OpenCode's permissions are recovered from OpenCode, so the
- * owner is read from the provider that recorded the ask, not from whichever
- * provider the session uses now.
+ * A recovered turn can ask before its waiter registers. Its current live or
+ * quarantined process still owns that ask. Leaving orphaned asks pending would
+ * keep the session "needing you". OpenCode recovers its own
+ * permissions, so ownership comes from the provider that recorded the ask,
+ * regardless of the session's current provider.
  *
- * Runs at relay startup, before the command gate opens, so it cannot reach an
- * ask a new turn registered.
+ * Runs at relay startup, before the command gate opens. Recovered turns can
+ * still emit asks while cleanup runs.
  */
 export const resolveOrphanedClaudePermissions = Effect.gen(function* () {
 	const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
@@ -37,8 +39,12 @@ export const resolveOrphanedClaudePermissions = Effect.gen(function* () {
 			.recover()
 			.pipe(Effect.provideService(SqlClient.SqlClient, sql.value));
 
-	const orphans = yield* sql.value<{ id: string; session_id: string }>`
-		SELECT pa.id, pa.session_id
+	const orphans = yield* sql.value<{
+		id: string;
+		session_id: string;
+		provider_process_id: string | null;
+	}>`
+		SELECT pa.id, pa.session_id, pa.provider_process_id
 		FROM pending_approvals pa
 		JOIN sessions s ON s.id = pa.session_id
 		WHERE s.project_id = ${eventStore.value.projectId}
@@ -60,9 +66,22 @@ export const resolveOrphanedClaudePermissions = Effect.gen(function* () {
 				),
 			)
 		: new Set<string>();
-	const stale = orphans.filter(
-		(row) => !liveRequests.has(`${row.session_id}:${row.id}`),
-	);
+	const registry = yield* Effect.serviceOption(ProviderRegistryTag);
+	const claude = Option.getOrUndefined(registry)?.getInstance("claude");
+	const stale: (typeof orphans)[number][] = [];
+	for (const row of orphans) {
+		if (liveRequests.has(`${row.session_id}:${row.id}`)) continue;
+		if (
+			row.provider_process_id !== null &&
+			claude instanceof RunnerProviderInstance &&
+			(yield* claude.hasLiveProcessEffect(
+				row.session_id,
+				row.provider_process_id,
+			))
+		)
+			continue;
+		stale.push(row);
+	}
 	if (stale.length === 0) return 0;
 
 	const commitAndSignal = yield* makeCommitAndSignal.pipe(

@@ -50,6 +50,7 @@ const listSessionCommands = (
 						type: "discover",
 						providerId: selected.id,
 						account: selected,
+						...(activeSessionId ? { sessionId: activeSessionId } : {}),
 						workspaceRoot,
 					})
 					.pipe(

@@ -111,6 +111,7 @@ export function createTraceCursorSdkPort(
 		readonly sendGate?: string;
 		readonly streamGate?: string;
 		readonly authStatePath?: string;
+		readonly accountId?: string;
 		readonly loginDelayMs?: number;
 		readonly loginUrlDelayMs?: number;
 		readonly deltaDelayMs?: number;
@@ -222,7 +223,7 @@ export function createTraceCursorSdkPort(
 		if (row?.kind.endsWith(".error")) throw cursorSdkFailure(kind, row.data);
 		return row?.data;
 	};
-	const readAuthState = (): Record<string, unknown> | undefined => {
+	const readAuthStateFile = (): Record<string, unknown> | undefined => {
 		if (!playback.authStatePath) return undefined;
 		try {
 			const state: unknown = JSON.parse(
@@ -243,6 +244,15 @@ export function createTraceCursorSdkPort(
 			reason: "Invalid Cursor replay auth state",
 		});
 	};
+	const readAuthState = () => {
+		const state = readAuthStateFile();
+		if (!state || !object(state["accounts"])) return state;
+		const selected =
+			state["accounts"][playback.accountId ?? "__cursor_login__"];
+		return object(selected)
+			? selected
+			: { status: { status: "logged-out" }, credential: null };
+	};
 	const writeAuthState = (status: unknown, credential: unknown) => {
 		if (!playback.authStatePath) return;
 		const temporary = `${playback.authStatePath}.${process.pid}.tmp`;
@@ -250,21 +260,33 @@ export function createTraceCursorSdkPort(
 			recursive: true,
 			mode: 0o700,
 		});
+		const selected = {
+			status,
+			credential: object(credential)
+				? {
+						...credential,
+						apiKey:
+							typeof credential["apiKey"] === "string" &&
+							/^\[REDACTED(?::[a-zA-Z0-9_-]+)?\]$/.test(credential["apiKey"])
+								? credential["apiKey"]
+								: "[REDACTED]",
+					}
+				: null,
+		};
+		const state = readAuthStateFile();
 		writeFileSync(
 			temporary,
-			JSON.stringify({
-				status,
-				credential: object(credential)
+			JSON.stringify(
+				state && object(state["accounts"])
 					? {
-							...credential,
-							apiKey:
-								typeof credential["apiKey"] === "string" &&
-								/^\[REDACTED(?::[a-zA-Z0-9_-]+)?\]$/.test(credential["apiKey"])
-									? credential["apiKey"]
-									: "[REDACTED]",
+							...state,
+							accounts: {
+								...state["accounts"],
+								[playback.accountId ?? "__cursor_login__"]: selected,
+							},
 						}
-					: null,
-			}),
+					: selected,
+			),
 			{ mode: 0o600 },
 		);
 		renameSync(temporary, playback.authStatePath);
@@ -665,6 +687,7 @@ export function createTraceCursorSdkPort(
 						: "https://api2.cursor.sh",
 				createdAtMs:
 					typeof data["createdAtMs"] === "number" ? data["createdAtMs"] : 0,
+				...(typeof data["email"] === "string" ? { email: data["email"] } : {}),
 				...(typeof data["apiKeyExpiresAtMs"] === "number"
 					? { apiKeyExpiresAtMs: data["apiKeyExpiresAtMs"] }
 					: {}),

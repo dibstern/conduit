@@ -5,6 +5,7 @@ import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	hasActiveProcessingTimeout,
@@ -18,6 +19,7 @@ import {
 } from "../../../src/lib/relay/sse-wiring.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
 import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
+import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 const permissionAskedEvent = (
 	permission = "edit",
@@ -60,6 +62,39 @@ const makeEffectDeps = (
 };
 
 describe("handleSSEEventEffect", () => {
+	it("queues automatic approval with a stable command and the asking process", async () => {
+		const replyPermission = vi.fn(() => Effect.void);
+		const { effectDeps } = makeEffectDeps(replyPermission);
+		const dispatchEffect = vi.fn(() => Effect.void);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				yield* setPermissionMode("session-1", "full");
+				for (let attempt = 0; attempt < 2; attempt++) {
+					yield* handleSSEEventEffect(effectDeps, permissionAskedEvent(), {
+						providerProcessId: "opencode:original",
+					});
+				}
+			}).pipe(
+				Effect.provideService(
+					OrchestrationEngineTag,
+					withDispatchEffect({ dispatchEffect }),
+				),
+				Effect.provide(makeEffectLayer(), { local: true }),
+			),
+		);
+		expect(dispatchEffect).toHaveBeenCalledTimes(2);
+		expect(dispatchEffect).toHaveBeenNthCalledWith(1, {
+			type: "resolve_permission",
+			commandId: "auto-approve:opencode:original:session-1:perm-1",
+			sessionId: "session-1",
+			requestId: "perm-1",
+			nativeRequestId: "perm-1",
+			providerProcessId: "opencode:original",
+			decision: "once",
+		});
+		expect(dispatchEffect.mock.calls[1]).toEqual(dispatchEffect.mock.calls[0]);
+		expect(replyPermission).not.toHaveBeenCalled();
+	});
 	it("clears processing timeout through Effect state for done messages", async () => {
 		const deps = createMockSSEWiringDeps();
 		const effectDeps = deps;

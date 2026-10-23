@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { Schema } from "effect";
 import type { ClaudeConfigDir } from "../../contracts/claude-config-dir.js";
 import { ClaudeConfigDirSchema as ClaudeConfigDirWireSchema } from "../../contracts/claude-config-dir.js";
@@ -7,7 +8,10 @@ import { ClaudeBoundaryError } from "../event-sink-errors.js";
 
 export type { ClaudeConfigDir } from "../../contracts/claude-config-dir.js";
 
-import type { Options as SDKOptions } from "./types.js";
+import type {
+	ClaudePreWarmSessionInput,
+	Options as SDKOptions,
+} from "./types.js";
 
 const DIRECT_ANTHROPIC_ENV_KEYS = [
 	"ANTHROPIC_API_KEY",
@@ -47,13 +51,37 @@ export const configuredClaudeConfigDir = (path: string): ClaudeConfigDir => ({
 	path,
 });
 
-/** Whether two launches log in through the same folder; a relative folder resolves against its own workspace. */
-export const sameClaudeLogin = (
-	a: { readonly configDir: ClaudeConfigDir; readonly root: string },
-	b: { readonly configDir: ClaudeConfigDir; readonly root: string },
-): boolean =>
+/** Account folders belong to the daemon's launch cwd, independently of query cwd. */
+export const resolveClaudeAccountFolder = (
+	folder: ClaudeConfigDir,
+): ClaudeConfigDir => ({
+	...folder,
+	path: resolve(
+		folder.path === "~" || folder.path.startsWith("~/")
+			? homedir() + folder.path.slice(1)
+			: folder.path,
+	),
+});
+
+export interface ClaudeLogin {
+	readonly account?: ClaudePreWarmSessionInput["account"];
+	readonly instanceId?: string | undefined;
+	readonly shellEnv?: ClaudePreWarmSessionInput["shellEnv"];
+	readonly configDir: ClaudeConfigDir;
+	readonly root: string;
+}
+
+/** A login includes the admitted identity and env, even when accounts share a folder. */
+export const sameClaudeLogin = (a: ClaudeLogin, b: ClaudeLogin): boolean =>
 	a.configDir._tag === b.configDir._tag &&
-	resolve(a.root, a.configDir.path) === resolve(b.root, b.configDir.path);
+	resolve(a.root, a.configDir.path) === resolve(b.root, b.configDir.path) &&
+	(a.account?.id ?? a.instanceId) === (b.account?.id ?? b.instanceId) &&
+	isDeepStrictEqual(a.account?.env, b.account?.env) &&
+	// PWD follows declared workspace moves without changing the query's login.
+	isDeepStrictEqual(
+		{ ...a.shellEnv, PWD: undefined },
+		{ ...b.shellEnv, PWD: undefined },
+	);
 
 /** Read a recorded login, leaving absent launch metadata to the caller. */
 export function claudeLoginFromEnv(

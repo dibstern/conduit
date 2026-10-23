@@ -186,6 +186,97 @@ describe("Codex usage through the built daemon", () => {
 		TIMEOUT,
 	);
 
+	it.each([
+		{
+			name: "spark-free-main-full",
+			title: "sends on Spark when the main bucket is full and Spark is free",
+			limitedBucket: "codex",
+		},
+		{
+			name: "spark-full-main-free",
+			title: "holds a Spark send until its reset when only Spark is full",
+			limitedBucket: "codex_spark",
+		},
+	])(
+		"$title",
+		async ({ name, limitedBucket }) => {
+			const modelId = "gpt-6-luna";
+			const { fixture, accountId, id } = await createTurn(
+				name,
+				"turn-command",
+				modelId,
+			);
+			const reset =
+				Math.floor(Date.now() / 1000) + (limitedBucket === "codex" ? 3600 : 10);
+			const trace = fixtureRows("usage-read");
+			const result = trace.find(
+				(row) => row.message?.result?.["rateLimitsByLimitId"],
+			)?.message?.result;
+			const buckets = result?.["rateLimitsByLimitId"] as
+				| Record<string, Record<string, unknown>>
+				| undefined;
+			if (!buckets?.["codex_spark"] || !buckets[limitedBucket])
+				throw new Error("Missing Codex allowances");
+			// Use a captured catalog model as the Spark bucket's opaque model alias.
+			buckets["codex_spark"]["normalModelSlug"] = modelId;
+			buckets[limitedBucket]["primary"] = {
+				usedPercent: 100,
+				windowDurationMins: 300,
+				resetsAt: reset,
+			};
+			writeTrace(usagePath, trace);
+			evidence["reading"] = await quota(fixture, accountId);
+			expect(evidence["reading"]).toMatchObject({ status: "limited" });
+			const held = limitedBucket === "codex_spark";
+			const response = await fixture.requestRpc({
+				_tag: "input.submit",
+				sessionId: id,
+				inputId: randomUUID(),
+				delivery: "queue",
+				text: "Say hello",
+			});
+			evidence["submit"] = response;
+			expect(response).toMatchObject({ ok: true, handedOff: !held });
+			if (held) {
+				expect(snapshot(fixture, id).events).toContainEqual(
+					expect.objectContaining({
+						type: "session.resume_scheduled",
+						data: expect.objectContaining({ at: reset }),
+					}),
+				);
+				await vi.waitUntil(
+					() => {
+						if (Date.now() >= reset * 1000) return true;
+						expect(
+							rows<TraceRow>(capturePath).filter(
+								(row) =>
+									row.dir === "out" && row.message?.method === "turn/start",
+							),
+						).toHaveLength(0);
+						return false;
+					},
+					{ timeout: TIMEOUT, interval: 100 },
+				);
+			}
+			await vi.waitFor(
+				() =>
+					expect(snapshot(fixture, id).turns).toEqual([{ state: "completed" }]),
+				{ timeout: TIMEOUT },
+			);
+			const starts = rows<TraceRow>(capturePath).filter(
+				(row) => row.dir === "out" && row.message?.method === "turn/start",
+			);
+			expect(starts).toHaveLength(1);
+			if (!held)
+				expect(
+					snapshot(fixture, id).events.map(({ type }) => type),
+				).not.toContain("session.resume_scheduled");
+			evidence["turnStarts"] = starts;
+			evidence["reset"] = reset;
+		},
+		TIMEOUT,
+	);
+
 	it(
 		"reports signed-out usage as unavailable",
 		async () => {
@@ -449,7 +540,7 @@ describe("Codex usage through the built daemon", () => {
 			});
 			// As in the process continuation tests, use a short sweep and a controlled
 			// reset timestamp rather than fake timers in the parent process.
-			const reset = Math.floor(Date.now() / 1000) + 8;
+			const reset = Math.floor(Date.now() / 1000) + 30;
 			const quotaTrace = fixtureRows("usage-read");
 			const quotaResult = quotaTrace.find(
 				(row) => row.message?.result?.["rateLimitsByLimitId"],
@@ -463,6 +554,25 @@ describe("Codex usage through the built daemon", () => {
 				windowDurationMins: 300,
 				resetsAt: reset + 3600,
 			};
+			writeTrace(usagePath, quotaTrace);
+			expect(await quota(fixture, accountId)).toMatchObject({
+				status: "limited",
+				windows: expect.arrayContaining([
+					expect.objectContaining({ limitId: "codex", utilization: 40 }),
+					expect.objectContaining({ limitId: "codex_spark", utilization: 100 }),
+				]),
+			});
+			// Cache Spark-only exhaustion; subsequent probes reflect the main limit.
+			const primary = {
+				usedPercent: 100,
+				windowDurationMins: 300,
+				resetsAt: reset,
+			};
+			if (!buckets["codex"] || !quotaResult)
+				throw new Error("Missing Codex allowance");
+			buckets["codex"]["primary"] = primary;
+			(quotaResult["rateLimits"] as Record<string, unknown>)["primary"] =
+				primary;
 			writeTrace(usagePath, quotaTrace);
 			const limited = fixtureRows("usage-limit");
 			for (const row of limited) {

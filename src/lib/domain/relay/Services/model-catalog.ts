@@ -144,7 +144,7 @@ export const loadModelCatalog = (
 			log.warn(
 				`Failed to fetch OpenCode model catalog: ${formatErrorDetail(provListResult.failure)}`,
 			);
-			return [] as ModelInfo[];
+			return yield* Effect.fail(provListResult.failure);
 		}
 		yield* refreshModelSettings;
 		return provListResult.success.providers.flatMap((provider) =>

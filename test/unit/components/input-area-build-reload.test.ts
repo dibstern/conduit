@@ -64,7 +64,8 @@ async function attachImage() {
 		.spyOn(HTMLInputElement.prototype, "click")
 		.mockImplementation(function (this: HTMLInputElement) {
 			Object.defineProperty(this, "files", { value: [file] });
-			this.dispatchEvent(new Event("change"));
+			// Browsers bubble change, and Svelte listens for it at the root.
+			this.dispatchEvent(new Event("change", { bubbles: true }));
 		});
 	try {
 		await fireEvent.click(screen.getByRole("button", { name: "Attach" }));

@@ -135,6 +135,11 @@ export const makeCodexAuth = (
 				);
 			});
 		return {
+			awaitLogin: (accountId: string) =>
+				Effect.suspend(() => {
+					const flow = flows.get(accountId);
+					return flow ? Deferred.await(flow.stopped) : Effect.void;
+				}),
 			read: (accountId: string) => changes.withPermits(1)(read(accountId)),
 			start: (accountId: string, method: LoginMethod) =>
 				changes.withPermits(1)(
@@ -196,6 +201,7 @@ export const makeCodexAuth = (
 								flows.set(accountId, flow);
 								yield* Effect.addFinalizer(() =>
 									Effect.gen(function* () {
+										yield* Deferred.succeed(flow.stopped, undefined);
 										if (flows.get(accountId) !== flow) return;
 										flows.delete(accountId);
 										yield* client

@@ -11,6 +11,7 @@ export interface ReloadDraft {
 interface Draft extends ReloadDraft {
 	projectSlug: string | null;
 	projectChanged: boolean;
+	sendPick?: DraftState["sendPick"];
 }
 export interface DraftState {
 	key: InputDraftKey | null | undefined;
@@ -18,6 +19,7 @@ export interface DraftState {
 	acked: string;
 	projectSlug: string | null;
 	projectChanged: boolean;
+	sendPick?: { mode: "at-reset" | "switch"; accountId: string } | undefined;
 	drafts: ReadonlyMap<string, Draft>;
 	reloadBases: ReadonlyMap<string, string>;
 	legacy: { key: InputDraftKey; text: string } | null;
@@ -29,6 +31,7 @@ export interface DraftState {
 }
 export type DraftEvent =
 	| { _tag: "TextChanged"; text: string }
+	| { _tag: "SendPickChanged"; pick: DraftState["sendPick"] }
 	| { _tag: "LocalEdited" }
 	| {
 			_tag: "ServerTextReceived";
@@ -169,6 +172,8 @@ export function step(
 	const writable =
 		id !== null && !state.promoted.has(id) && !state.inFlight.has(id);
 	switch (event._tag) {
+		case "SendPickChanged":
+			return [{ ...state, sendPick: event.pick }, []];
 		case "TextChanged":
 			return [{ ...state, text: event.text }, []];
 		case "LocalEdited":
@@ -357,6 +362,7 @@ export function step(
 					acked: state.acked,
 					projectSlug: state.projectSlug,
 					projectChanged: state.projectChanged,
+					sendPick: state.sendPick,
 				});
 			const saved =
 				nextId && !state.promoted.has(nextId) ? drafts.get(nextId) : undefined;
@@ -370,6 +376,7 @@ export function step(
 					acked: saved?.acked ?? "",
 					projectSlug: event.projectSlug,
 					projectChanged: saved?.projectChanged ?? false,
+					sendPick: saved?.sendPick,
 					drafts,
 					throttled: false,
 					pending: false,
@@ -458,6 +465,7 @@ export function step(
 					reloadBases,
 					text: "",
 					acked: "",
+					sendPick: undefined,
 					pending: false,
 					throttled: false,
 					snapshot:
@@ -503,6 +511,17 @@ export function step(
 			return step({ ...next, text: event.text }, { _tag: "LocalEdited" });
 		}
 		case "SendSucceeded": {
+			if (event.sentTo) {
+				if (id === draftKeyId({ session: event.sentTo })) {
+					state = { ...state, sendPick: undefined };
+				} else {
+					const drafts = new Map(state.drafts);
+					const sentId = draftKeyId({ session: event.sentTo });
+					const draft = drafts.get(sentId);
+					if (draft) drafts.set(sentId, { ...draft, sendPick: undefined });
+					state = { ...state, drafts };
+				}
+			}
 			if (!event.steer) return [state, []];
 			if (
 				state.key &&
@@ -553,6 +572,7 @@ export function step(
 					...(active
 						? {
 								text: "",
+								sendPick: undefined,
 								throttled: false,
 								pending: false,
 								snapshot:

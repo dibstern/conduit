@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      # Project shell env tests capture a real zsh login shell; the runner image has none.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
       - uses: jdx/mise-action@v4
         with:
           install: true

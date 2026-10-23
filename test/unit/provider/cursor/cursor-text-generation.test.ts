@@ -1,7 +1,8 @@
 // Failure modes: wrong account/model/effort, tools or project context leaking,
 // transcript writes escaping the scratch root, partial text accepted as success,
 // leaked agents on rejection/interruption, acquisition racing cleanup, and
-// concurrent calls sharing the process-global Cursor data directory.
+// concurrent calls sharing the process-global Cursor data directory, and title
+// generation borrowing the shared login or another account's credential.
 import {
 	existsSync,
 	mkdtempSync,
@@ -11,7 +12,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Effect, Exit, Fiber } from "effect";
+import { it as effectIt } from "@effect/vitest";
+import { Effect, Exit, Fiber, Redacted, Result } from "effect";
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
 import {
@@ -23,6 +25,10 @@ import type {
 	CursorSdkPort,
 } from "../../../../src/lib/provider/cursor/sdk-port.js";
 import { createTraceCursorSdkPort } from "../../../../src/lib/provider/cursor/sdk-trace-player.js";
+import {
+	cursorAccountResourcesFixture,
+	cursorCredentialFixture,
+} from "../../../helpers/cursor-account-resources-fixture.js";
 
 const trace = resolve("test/fixtures/cursor-sdk-traces/title-generation.jsonl");
 const captured = readFileSync(trace, "utf8")
@@ -47,14 +53,23 @@ const input = {
 	prompt: "Fix login redirect loop",
 };
 const roots: string[] = [];
-function setup() {
+function setup(loggedIn = true) {
 	const root = mkdtempSync(join(tmpdir(), "cursor-title-replay-"));
 	roots.push(root);
 	const port = createTraceCursorSdkPort(trace);
 	return {
 		root,
 		port,
-		driver: makeCursorRunnerDriver(process.cwd(), port, undefined, root),
+		driver: makeCursorRunnerDriver(
+			cursorAccountResourcesFixture(
+				port,
+				loggedIn
+					? { _tag: "Ready", credential: cursorCredentialFixture() }
+					: { _tag: "LoggedOut" },
+			),
+			undefined,
+			root,
+		),
 	};
 }
 function observe(
@@ -88,6 +103,114 @@ afterEach(() => {
 });
 
 describe("Cursor ephemeral text generation with captured SDK traffic", () => {
+	for (const [loggedIn, ambient] of [
+		[true, false],
+		[false, false],
+		[true, true],
+		[false, true],
+	]) {
+		effectIt.live(
+			`${
+				loggedIn
+					? "uses each requested account's scoped credential for its catalog and title"
+					: "fails auth_required when the requested scoped store is empty despite other logins"
+			}${ambient ? " with an ambient daemon key" : ""}`,
+			() =>
+				Effect.gen(function* () {
+					vi.stubEnv("NODE_ENV", "test");
+					vi.stubEnv("CURSOR_API_KEY", ambient ? "[REDACTED:environment]" : "");
+					const { root, port: shared } = setup();
+					vi.spyOn(shared, "storedCredential").mockResolvedValue({
+						apiKey: "[REDACTED:shared]",
+						backendUrl: "https://api2.cursor.sh",
+						createdAtMs: 0,
+					});
+					vi.spyOn(shared, "createAgent");
+					vi.spyOn(shared, "modelsList");
+					const ports = new Map<string, CursorSdkPort>();
+					for (const id of [account.id, "cursor-other"]) {
+						const sdk = createTraceCursorSdkPort(trace);
+						vi.spyOn(sdk, "storedCredential").mockResolvedValue(
+							loggedIn || id !== account.id
+								? {
+										apiKey: `[REDACTED:${id}]`,
+										backendUrl: "https://api2.cursor.sh",
+										createdAtMs: 0,
+									}
+								: undefined,
+						);
+						observe(sdk);
+						vi.spyOn(sdk, "modelsList");
+						ports.set(id, sdk);
+					}
+					const resources = cursorAccountResourcesFixture(
+						(id) => {
+							const sdk = ports.get(id);
+							if (!sdk) throw new Error(`Unexpected account ${id}`);
+							return sdk;
+						},
+						(id) =>
+							loggedIn || id !== account.id
+								? {
+										_tag: "Ready",
+										credential: cursorCredentialFixture(`[REDACTED:${id}]`),
+									}
+								: { _tag: "LoggedOut" },
+					);
+					const driver = makeCursorRunnerDriver(resources, undefined, root);
+					for (const id of loggedIn ? ports.keys() : [account.id]) {
+						const sdk = ports.get(id);
+						if (!sdk) throw new Error(`Missing account ${id}`);
+						const result = yield* Effect.result(
+							driver.generateTextEffect({
+								...input,
+								account: { ...account, id: AccountIdSchema.make(id), env: {} },
+							}),
+						);
+						if (loggedIn) {
+							expect(Result.getOrThrow(result)).toBe(reply);
+							const expectedKey = `[REDACTED:${id}]`;
+							const fingerprint =
+								cursorCredentialFixture(expectedKey).fingerprint;
+							expect(
+								vi.mocked(sdk.modelsList).mock.calls.map(([credential]) => ({
+									apiKey: Redacted.value(credential.apiKey),
+									fingerprint: credential.fingerprint,
+								})),
+							).toEqual([{ apiKey: expectedKey, fingerprint }]);
+							expect(
+								vi
+									.mocked(sdk.createAgent)
+									.mock.calls.map(([options, credential]) => ({
+										apiKey: Redacted.value(credential.apiKey),
+										fingerprint: credential.fingerprint,
+										agentFingerprint: options.credentialFingerprint,
+									})),
+							).toEqual([
+								{
+									apiKey: expectedKey,
+									fingerprint,
+									agentFingerprint: fingerprint,
+								},
+							]);
+							expectClean(root, sdk);
+						} else {
+							expect(Result.isFailure(result)).toBe(true);
+							if (Result.isFailure(result))
+								expect(result.failure).toMatchObject({ code: "auth_required" });
+							for (const other of ports.values()) {
+								expect(other.modelsList).not.toHaveBeenCalled();
+								expect(other.createAgent).not.toHaveBeenCalled();
+							}
+						}
+					}
+					expect(shared.storedCredential).not.toHaveBeenCalled();
+					expect(shared.modelsList).not.toHaveBeenCalled();
+					expect(shared.createAgent).not.toHaveBeenCalled();
+				}),
+		);
+	}
+
 	it("returns the captured terminal text with no tools/settings and removes all state", async () => {
 		const { root, port, driver } = setup();
 		const before = process.env["CURSOR_DATA_DIR"];
@@ -142,11 +265,9 @@ describe("Cursor ephemeral text generation with captured SDK traffic", () => {
 	it("preserves an explicitly selected captured variant", async () => {
 		const { root, port, driver } = setup();
 		const observed = observe(port);
-		const models = await port.modelsList({
-			source: "environment",
-			apiKey: "[REDACTED]",
-			fingerprint: "replay",
-		});
+		const models = await port.modelsList(
+			cursorCredentialFixture("[REDACTED]", "environment"),
+		);
 		const model = models.find(({ id }) => id === "gpt-5.4");
 		if (!model) throw new Error("Missing captured GPT model");
 		const info = cursorModelInfo(model);
@@ -312,7 +433,7 @@ describe("Cursor ephemeral text generation with captured SDK traffic", () => {
 		"account",
 		"auth",
 	] as const)("rejects an unavailable %s without creating an agent", async (kind) => {
-		const { port, driver } = setup();
+		const { port, driver } = setup(kind !== "auth");
 		observe(port);
 		const request = {
 			...input,

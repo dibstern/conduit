@@ -1,0 +1,32 @@
+{
+	"events": [
+		{
+			"type": "session.created",
+			"payload": {
+				"title": "Usage reset sweep",
+				"provider": "claude"
+			}
+		},
+		{
+			"type": "message.created",
+			"payload": {
+				"role": "user"
+			}
+		},
+		{
+			"type": "session.usage_limited",
+			"payload": {
+				"instanceId": "claude",
+				"rateLimitType": "five_hour"
+			}
+		},
+		{
+			"type": "session.resume_scheduled",
+			"payload": {
+				"instanceId": "claude",
+				"by": "policy"
+			}
+		}
+	],
+	"usageChecks": 1
+}

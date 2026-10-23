@@ -1,3 +1,10 @@
+import { Schema } from "effect";
+import { AccountSchema } from "../contracts/account.js";
+import { ProviderStopSnapshotSchema } from "../contracts/stored-event.js";
+import { ProviderPermissionUpdateSchema } from "../shared-types.js";
+
+export const STOP_ABORT_WAIT_MS = 30_000;
+
 export const DURABLE_COMMAND_RECEIPT_STATUSES = [
 	"accepted",
 	"rejected",
@@ -77,7 +84,8 @@ export interface DurableCommandOutboxRequest {
 	readonly projectKey: string;
 	readonly sessionId: string;
 	readonly providerId: string;
-	readonly effectType: "send_turn" | "interrupt_turn";
+	readonly effectType: "send_turn" | ProviderControlPayload["type"];
+	readonly providerProcessId?: string;
 	readonly payloadJson: string;
 }
 
@@ -90,3 +98,52 @@ export interface DurableCommandCommitPlan {
 	>[];
 	readonly readModelRows: readonly DurableCommandTransactionRow[];
 }
+
+const controlTarget = {
+	sessionId: Schema.String,
+	providerProcessId: Schema.String,
+};
+
+/** Persisted control data; runtime handles and run reservations are absent. */
+export const ProviderControlPayloadSchema = Schema.Union([
+	Schema.Struct({
+		...controlTarget,
+		type: Schema.Literal("interrupt_turn"),
+		turnIds: Schema.optionalKey(Schema.Array(Schema.String)),
+		stop: Schema.optionalKey(ProviderStopSnapshotSchema),
+	}),
+	Schema.Struct({
+		...controlTarget,
+		type: Schema.Literal("resolve_permission"),
+		requestId: Schema.String,
+		nativeRequestId: Schema.optionalKey(Schema.String),
+		decision: Schema.Literals(["once", "always", "reject"]),
+		response: Schema.optionalKey(
+			Schema.Struct({
+				decision: Schema.Literals(["once", "always", "reject"]),
+				permissionUpdates: Schema.optionalKey(
+					Schema.Array(ProviderPermissionUpdateSchema),
+				),
+			}),
+		),
+	}),
+	Schema.Struct({
+		...controlTarget,
+		type: Schema.Literal("resolve_question"),
+		requestId: Schema.String,
+		nativeRequestId: Schema.optionalKey(Schema.String),
+		answers: Schema.Record(Schema.String, Schema.Unknown),
+		operation: Schema.optionalKey(Schema.Literals(["reply", "reject"])),
+	}),
+	Schema.Struct({
+		...controlTarget,
+		type: Schema.Literal("end_session"),
+		stop: Schema.optionalKey(ProviderStopSnapshotSchema),
+		retireProcess: Schema.optionalKey(Schema.Literal(true)),
+		retireRunIds: Schema.optionalKey(Schema.Array(Schema.String)),
+		targetProviderId: Schema.optionalKey(Schema.String),
+		account: Schema.optionalKey(AccountSchema),
+		unbind: Schema.optionalKey(Schema.Boolean),
+	}),
+]);
+export type ProviderControlPayload = typeof ProviderControlPayloadSchema.Type;

@@ -353,6 +353,8 @@ describe("Persistence Effect", () => {
 				},
 				{ migration_id: 78, name: "provider_run_ownership" },
 				{ migration_id: 79, name: "sessions_goal_stuck" },
+				{ migration_id: 80, name: "sessions_jev" },
+				{ migration_id: 81, name: "provider_control_process" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

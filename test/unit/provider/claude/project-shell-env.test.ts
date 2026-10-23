@@ -3,6 +3,7 @@ import {
 	chmodSync,
 	mkdirSync,
 	mkdtempSync,
+	realpathSync,
 	renameSync,
 	rmSync,
 	writeFileSync,
@@ -60,10 +61,112 @@ beforeEach(() => {
 
 afterEach(() => {
 	for (const value of resolvers.splice(0)) value.close();
+	vi.useRealTimers();
 	rmSync(home, { recursive: true, force: true });
 });
 
 describe("project shell environment", () => {
+	it("retires idle worktrees after one minute, preserves the root and recreates with current overrides", async () => {
+		const worktree = join(home, "idle-worktree");
+		mkdirSync(worktree);
+		vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+		const env = resolver({ ttlMs: 3_600_000 });
+		const observed = {
+			rootSurvives: false,
+			worktreeRetired: false,
+			recreatedOwner: "",
+		};
+		env.register(project, { overrides: { PROJECT_OWNER: "before" } }, "alpha");
+		await env.waitUntilReady(worktree, "alpha");
+		await env.refresh(project, "alpha");
+		try {
+			await vi.advanceTimersByTimeAsync(59_999);
+			expect(env.directories()).toContain(worktree);
+			await vi.advanceTimersByTimeAsync(1);
+			const retired = env.directories();
+			observed.rootSurvives = retired.includes(project);
+			observed.worktreeRetired = !retired.includes(worktree);
+			mkdirSync("test-results/process-harness", { recursive: true });
+			writeFileSync(
+				"test-results/process-harness/82tn-9-fix-review-idle.json",
+				JSON.stringify(observed, null, 2),
+			);
+			expect(retired).not.toContain(worktree);
+			expect(retired).toContain(project);
+		} finally {
+			vi.useRealTimers();
+		}
+		env.register(project, { overrides: { PROJECT_OWNER: "current" } }, "alpha");
+		expect(await env.waitUntilReady(worktree, "alpha")).toBe(true);
+		expect(env.get(worktree, "alpha")["PROJECT_OWNER"]).toBe("current");
+		observed.recreatedOwner = env.get(worktree, "alpha")["PROJECT_OWNER"] ?? "";
+		writeFileSync(
+			"test-results/process-harness/82tn-9-fix-review-idle.json",
+			JSON.stringify(observed, null, 2),
+		);
+	});
+
+	it("retires a deleted worktree at capture while retaining its project root", async () => {
+		const worktree = join(home, "deleted-worktree");
+		mkdirSync(worktree);
+		const env = resolver();
+		env.register(project, { overrides: { PROJECT_OWNER: "before" } }, "alpha");
+		await env.waitUntilReady(worktree, "alpha");
+		rmSync(worktree, { recursive: true });
+		await env.refresh(worktree, "alpha");
+		const retired = env.directories();
+		const observed = {
+			rootSurvives: retired.includes(project),
+			worktreeRetired: !retired.includes(worktree),
+			recreatedOwner: "",
+		};
+		mkdirSync("test-results/process-harness", { recursive: true });
+		writeFileSync(
+			"test-results/process-harness/82tn-9-fix-review-deleted.json",
+			JSON.stringify(observed, null, 2),
+		);
+		expect(retired).not.toContain(worktree);
+		expect(retired).toContain(project);
+		mkdirSync(worktree);
+		env.register(project, { overrides: { PROJECT_OWNER: "current" } }, "alpha");
+		expect(await env.waitUntilReady(worktree, "alpha")).toBe(true);
+		expect(env.get(worktree, "alpha")["PROJECT_OWNER"]).toBe("current");
+		observed.recreatedOwner = env.get(worktree, "alpha")["PROJECT_OWNER"] ?? "";
+		writeFileSync(
+			"test-results/process-harness/82tn-9-fix-review-deleted.json",
+			JSON.stringify(observed, null, 2),
+		);
+	});
+
+	it("keeps owning project overrides when projects share one directory", async () => {
+		const env = resolver();
+		env.register(project, { overrides: { PROJECT_OWNER: "alpha" } }, "alpha");
+		env.register(project, { overrides: { PROJECT_OWNER: "beta" } }, "beta");
+		await Promise.all([
+			env.refresh(project, "alpha"),
+			env.refresh(project, "beta"),
+		]);
+		expect(env.get(project, "alpha")["PROJECT_OWNER"]).toBe("alpha");
+		expect(env.get(project, "beta")["PROJECT_OWNER"]).toBe("beta");
+	});
+
+	it("inherits each owning project's overrides in a shared session worktree", async () => {
+		const other = join(home, "other-project");
+		const worktree = join(home, "session-worktree");
+		mkdirSync(other);
+		mkdirSync(worktree);
+		const env = resolver();
+		env.register(project, { overrides: { PROJECT_OWNER: "alpha" } }, "alpha");
+		env.register(other, { overrides: { PROJECT_OWNER: "beta" } }, "beta");
+		await Promise.all([
+			env.waitUntilReady(worktree, "alpha"),
+			env.waitUntilReady(worktree, "beta"),
+		]);
+		expect(env.get(worktree, "alpha")["PWD"]).toBe(realpathSync(worktree));
+		expect(env.get(worktree, "alpha")["PROJECT_OWNER"]).toBe("alpha");
+		expect(env.get(worktree, "beta")["PROJECT_OWNER"]).toBe("beta");
+	});
+
 	it("captures a noisy login shell and passes its env to a Claude query, sanitising last", async () => {
 		writeFileSync(
 			join(home, ".zprofile"),
@@ -88,13 +191,12 @@ describe("project shell environment", () => {
 			NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
 		>(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		await Effect.runPromise(
 			instance.sendTurnEffect(
 				makeBaseSendTurnInput({
+					shellEnv: env.get(project),
 					workspaceRoot: project,
 					model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
 					configDir: configuredClaudeConfigDir("/named/claude"),
@@ -140,11 +242,10 @@ describe("project shell environment", () => {
 			NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
 		>(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const input = makeBaseSendTurnInput({
+			shellEnv: env.get(project),
 			workspaceRoot: project,
 			model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
 			account: {
@@ -181,13 +282,12 @@ describe("project shell environment", () => {
 		});
 		await env.refresh(project);
 		const resumed = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const resumedResult = await Effect.runPromise(
 			resumed.sendTurnEffect({
 				...input,
+				shellEnv: env.get(project),
 				nativeThread: { ...nativeThread, projectId: "test-project" },
 				resumeSessionId: nativeThread.resumeSessionId,
 				providerState: Object.fromEntries(
@@ -215,13 +315,12 @@ describe("project shell environment", () => {
 			});
 		const namedConfigDir = join(home, "explicit-instance");
 		const namedInstance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const namedResult = await Effect.runPromise(
 			namedInstance.sendTurnEffect({
 				...input,
+				shellEnv: env.get(project),
 				account: {
 					id: AccountIdSchema.make("claude"),
 					name: "Claude",
@@ -461,8 +560,6 @@ describe("project shell environment", () => {
 			NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>
 		>(() => createMockQuery([makeSuccessResult()]));
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: project,
-			shellEnv: (directory) => env.get(directory),
 			queryFactory,
 		});
 		const send = async (sessionId: string) => {
@@ -470,6 +567,7 @@ describe("project shell environment", () => {
 			await Effect.runPromise(
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
+						shellEnv: env.get(project),
 						workspaceRoot: project,
 						sessionId,
 						model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
@@ -539,22 +637,43 @@ describe("project shell environment", () => {
 	it("refreshes on file creation, atomic rc replacement and TTL without cross-project leakage", async () => {
 		const other = join(home, "other");
 		mkdirSync(other);
+		// Keep native file polling and shell processes real, but drive TTL explicitly.
+		vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
 		const env = resolver({ ttlMs: 80 });
 		env.register(project, { overrides: { PROJECT_ID: "first" } });
 		env.register(other, { overrides: { PROJECT_ID: "second" } });
 		await Promise.all([env.refresh(project), env.refresh(other)]);
+		const refresh = env.refresh.bind(env);
+		const nextRefresh = () =>
+			new Promise<void>((resolve, reject) => {
+				const observed = vi.spyOn(env, "refresh");
+				observed.mockImplementation((directory, projectId) => {
+					const pending = refresh(directory, projectId);
+					if (directory === project) {
+						observed.mockRestore();
+						void pending.then(resolve, reject);
+					}
+					return pending;
+				});
+			});
+		// Subscribe before each mutation, then await the capture the watcher started.
+		let refreshed = nextRefresh();
 		writeFileSync(join(home, ".zshenv"), 'export CREATED_RC="yes"\n');
-		await vi.waitFor(() => expect(env.get(project)["CREATED_RC"]).toBe("yes"));
+		await refreshed;
+		expect(env.get(project)["CREATED_RC"]).toBe("yes");
+		refreshed = nextRefresh();
 		writeFileSync(
 			join(home, "replacement"),
 			'export PATH="/usr/bin:/bin"\nexport REPLACED_RC="yes"\n',
 		);
 		renameSync(join(home, "replacement"), join(home, ".zprofile"));
-		await vi.waitFor(() => expect(env.get(project)["REPLACED_RC"]).toBe("yes"));
+		await refreshed;
+		expect(env.get(project)["REPLACED_RC"]).toBe("yes");
 		const resolvedAt = env.snapshot(project).resolvedAt;
-		await vi.waitFor(() =>
-			expect(env.snapshot(project).resolvedAt).not.toBe(resolvedAt),
-		);
+		refreshed = nextRefresh();
+		await vi.advanceTimersByTimeAsync(80);
+		await refreshed;
+		expect(env.snapshot(project).resolvedAt).not.toBe(resolvedAt);
 		expect(env.get(project)["PROJECT_ID"]).toBe("first");
 		expect(env.get(other)["PROJECT_ID"]).toBe("second");
 	});

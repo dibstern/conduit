@@ -1,9 +1,7 @@
 import { Result, Schema } from "effect";
+import { type AccountsState, resolve } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
-import {
-	loadDaemonConfigResult,
-	resolveClaudeLaunchConfig,
-} from "../../daemon/config-persistence.js";
+import { AccountUnroutable } from "../../contracts/limit-recovery.js";
 import { isRecord } from "../../utils.js";
 import { ClaudeBoundaryError } from "../event-sink-errors.js";
 import type {
@@ -17,10 +15,35 @@ import {
 	ClaudeConfigDirSchema,
 	ClaudeFolderSourceSchema,
 	type ClaudeLaunchConfig,
+	captureClaudeLaunchLogin,
 	claudeLoginFromEnv,
 	configuredClaudeConfigDir,
 	makeClaudeSdkEnv,
 } from "./claude-sdk-env.js";
+
+/** Compatibility boundaries resolve defaults from the account owner's snapshot. */
+export function claudeLaunchConfigFromAccounts(
+	accounts?: AccountsState,
+): ClaudeLaunchConfig {
+	if (!accounts)
+		return {
+			configDir: captureClaudeLaunchLogin(process.env),
+			folderSource: "implicitDefault",
+		};
+	const account = Result.getOrElse(
+		resolve(accounts, { _tag: "DriverDefault", driver: "claude" }),
+		(error) => {
+			throw error;
+		},
+	);
+	if (account.driver === "claude")
+		return {
+			configDir: account.folder,
+			folderSource:
+				account.configuredFolder === undefined ? "implicitDefault" : "account",
+		};
+	throw new AccountUnroutable({ ref: { _tag: "Id", id: account.id } });
+}
 /** Missing legacy folders preserve the carried account, then use the default. Explicit blanks are invalid. */
 export function normalizeClaudeLaunchInput<
 	T extends {
@@ -30,13 +53,7 @@ export function normalizeClaudeLaunchInput<
 	},
 >(
 	input: T,
-	defaultFolder: () => ClaudeLaunchConfig = () =>
-		resolveClaudeLaunchConfig(
-			Result.getOrElse(loadDaemonConfigResult(), (error) => {
-				if (error._tag === "NotFound") return null;
-				throw error;
-			}),
-		),
+	defaultFolder: () => ClaudeLaunchConfig = claudeLaunchConfigFromAccounts,
 ): Omit<T, "configDir" | "folderSource"> & ClaudeLaunchConfig {
 	const { configDir: folder, folderSource: source, ...payload } = input;
 	const launch =
@@ -140,13 +157,7 @@ function normalizeClaudeSnapshotInput(
 }
 
 export function makeClaudeRunnerWire(
-	defaultFolder: () => ClaudeLaunchConfig = () =>
-		resolveClaudeLaunchConfig(
-			Result.getOrElse(loadDaemonConfigResult(), (error) => {
-				if (error._tag === "NotFound") return null;
-				throw error;
-			}),
-		),
+	defaultFolder: () => ClaudeLaunchConfig = claudeLaunchConfigFromAccounts,
 ): RunnerWireCodec {
 	return {
 		decode(decoded: RunnerMessage): RunnerMessage {
@@ -272,7 +283,13 @@ export function makeClaudeRunnerWire(
 					const configDir = Schema.decodeUnknownSync(ClaudeConfigDirSchema)(
 						value,
 					);
-					if (taggedConfigDir) return configDir;
+					// Only new runners use this hello metadata; old runners ignore it.
+					if (
+						taggedConfigDir ||
+						(frame.type === "hello" &&
+							this === frame.config?.claudeLaunchConfig)
+					)
+						return configDir;
 					if (configDir._tag === "Configured") return configDir.path;
 					return undefined;
 				},

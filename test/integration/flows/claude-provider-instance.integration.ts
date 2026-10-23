@@ -193,7 +193,6 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		const queryFactory = vi.fn(() => mockQuery);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory,
 		});
 
@@ -301,7 +300,6 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 			]),
 		);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory,
 			runnerFactory: (deps, emit) =>
 				Effect.gen(function* () {
@@ -496,7 +494,6 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 		);
 
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: queryFactory as unknown as NonNullable<
 				ClaudeProviderInstanceDeps["queryFactory"]
 			>,

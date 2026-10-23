@@ -855,29 +855,6 @@ describe("turn control sends over the browser RPC wire", () => {
 		expect(control.turn().working).toBe(false);
 	});
 
-	it("a usage-held send stays queued without working", async () => {
-		applySessionChange({
-			_tag: "upsert",
-			item: { ...row("idle"), accountId: "limited" },
-		});
-		usageState.readings = [
-			{
-				accountId: "limited",
-				harness: "claude",
-				status: "limited",
-				windows: [],
-				readAt: 0,
-				stale: false,
-			},
-		];
-		const sent = request();
-		expect(control.turn().working).toBe(false);
-		await received();
-		reply({ ok: true, sessionId: "s", handedOff: false });
-		await expect(sent).resolves.toEqual({ kind: "waiting" });
-		expect(control.turn().working).toBe(false);
-	});
-
 	it.each([
 		"upsert",
 		"cold snapshot",

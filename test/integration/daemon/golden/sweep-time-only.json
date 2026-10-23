@@ -1,0 +1,71 @@
+{
+	"events": [
+		{
+			"type": "session.created",
+			"payload": {
+				"title": "Usage reset sweep",
+				"provider": "claude"
+			}
+		},
+		{
+			"type": "message.created",
+			"payload": {
+				"role": "user"
+			}
+		},
+		{
+			"type": "session.usage_limited",
+			"payload": {
+				"instanceId": "claude",
+				"rateLimitType": "five_hour"
+			}
+		},
+		{
+			"type": "session.resume_scheduled",
+			"payload": {
+				"instanceId": "claude",
+				"by": "policy"
+			}
+		},
+		{
+			"type": "session.resumed",
+			"payload": {
+				"reason": "reset",
+				"instanceId": "claude"
+			}
+		},
+		{
+			"type": "session.status",
+			"payload": {
+				"status": "busy"
+			}
+		},
+		{
+			"type": "message.created",
+			"payload": {
+				"role": "assistant"
+			}
+		},
+		{
+			"type": "session.usage_limited",
+			"payload": {
+				"instanceId": "claude",
+				"rateLimitType": "five_hour"
+			}
+		},
+		{
+			"type": "session.status",
+			"payload": {
+				"status": "idle"
+			}
+		},
+		{
+			"type": "session.resume_scheduled",
+			"payload": {
+				"instanceId": "claude",
+				"by": "policy"
+			}
+		}
+	],
+	"usageChecks": 2
+}

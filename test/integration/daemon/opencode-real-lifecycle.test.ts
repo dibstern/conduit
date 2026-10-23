@@ -1,16 +1,13 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
-	accessSync,
-	constants,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
-	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { Result as Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,29 +19,16 @@ import {
 	type ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
+import { resolveRealOpenCode } from "../../helpers/real-opencode.js";
 
-/** The real binary from CONDUIT_TEST_REAL_OPENCODE or PATH, if it matches the pinned SDK. */
+/** The pinned executable (or explicit override), if it matches the pinned SDK. */
 function realOpenCode(): { path: string; version: string } | { skip: string } {
 	const pinned = (
 		JSON.parse(readFileSync("package.json", "utf8")) as {
 			dependencies: Record<string, string>;
 		}
 	).dependencies["@opencode-ai/sdk"];
-	const path = [
-		process.env["CONDUIT_TEST_REAL_OPENCODE"],
-		...(process.env["PATH"] ?? "")
-			.split(delimiter)
-			.map((directory) => join(directory, "opencode")),
-	].find((candidate) => {
-		if (!candidate) return false;
-		try {
-			accessSync(candidate, constants.X_OK);
-			return true;
-		} catch {
-			return false;
-		}
-	});
-	if (!path) return { skip: "no opencode binary on PATH" };
+	const path = resolveRealOpenCode();
 	// Even --version may initialise OpenCode's dirs, so point them at a temp root.
 	const scratch = mkdtempSync(join(tmpdir(), "conduit-opencode-version-"));
 	try {
@@ -61,7 +45,7 @@ function realOpenCode(): { path: string; version: string } | { skip: string } {
 			},
 		}).trim();
 		return version === pinned
-			? { path: realpathSync(path), version }
+			? { path, version }
 			: {
 					skip: `${path} is OpenCode ${version}, but @opencode-ai/sdk is pinned to ${pinned}`,
 				};
@@ -269,7 +253,12 @@ describe("Managed real OpenCode lifecycle", () => {
 			rootPrefix: "/tmp/conduit-real-opencode-",
 		});
 		harness = fixture;
-		await fixture.restart({ opencodeIdleTimeoutMs: graceMs });
+		// No prompts or external plugins are needed here. Cold plugin dependency
+		// installs can exceed the daemon's first /path connection deadline.
+		await fixture.restart({
+			opencodeIdleTimeoutMs: graceMs,
+			serviceEnvironment: { OPENCODE_PURE: "true" },
+		});
 		const directoryB = join(fixture.root, "project-b");
 		mkdirSync(directoryB);
 		const { savedSlug: slugB } = await sendRpcRequest(

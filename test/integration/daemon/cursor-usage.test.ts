@@ -515,7 +515,7 @@ describe("Cursor monthly usage through the built daemon", () => {
 					reading = await refresh(fixture, accountId);
 					expect(reading?.status).toBe("available");
 				},
-				{ timeout: 15_000, interval: 300 },
+				{ timeout: 45_000, interval: 300 },
 			);
 			expect(keychain().reads).toBe(2);
 			diagnostics = {

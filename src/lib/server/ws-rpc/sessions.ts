@@ -81,6 +81,7 @@ import {
 	resolveSessionCreationAccount,
 	setSessionArchivedForClient,
 	setSessionAutoSettleForClient,
+	setSessionJevForClient,
 	setSessionPinnedForClient,
 	setSessionSettledForClient,
 	snoozeSessionForClient,
@@ -438,6 +439,15 @@ export const sessionsHandlers = {
 			Effect.andThen(readAutoSettleOutlook(request.sessionId)),
 			Effect.catch(mapRpcFailure("SetSessionAutoSettle")),
 		),
+	SetSessionJev: (request) =>
+		setSessionJevForClient({
+			clientId: request.originId ?? "rpc",
+			sessionId: request.sessionId,
+			jev: request.jev,
+		}).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catch(mapRpcFailure("SetSessionJev")),
+		),
 	SnoozeSession: (request) =>
 		snoozeSessionForClient({
 			clientId: request.originId ?? "rpc",
@@ -501,9 +511,9 @@ export const sessionsHandlers = {
 			),
 		),
 	QuotaForAccounts: (_request) =>
-		Effect.flatMap(Usage, (usage) => usage.refresh()).pipe(
-			Effect.catch(mapRpcFailure("QuotaForAccounts")),
-		),
+		Effect.flatMap(Usage, (usage) =>
+			usage.refresh({ maxAge: "30 seconds" }),
+		).pipe(Effect.catch(mapRpcFailure("QuotaForAccounts"))),
 	GetContinuationHandoff: (request) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -627,9 +637,8 @@ export const sessionsHandlers = {
 								),
 							)
 						: undefined;
-				const launchKey = resolvedCreation
+				const draftLaunch = resolvedCreation
 					? yield* resolveDraftLaunchInput(resolvedCreation, path).pipe(
-							Effect.map(draftLaunchKey),
 							Effect.catchCause((cause) =>
 								Effect.gen(function* () {
 									const log = yield* LoggerTag;
@@ -639,6 +648,8 @@ export const sessionsHandlers = {
 							),
 						)
 					: undefined;
+				const launchKey =
+					draftLaunch === undefined ? undefined : draftLaunchKey(draftLaunch);
 				// A mismatched or missing key discards the reservation instead of adopting it.
 				const takeReservation =
 					draftId && drafts._tag === "Some"
@@ -731,6 +742,17 @@ export const sessionsHandlers = {
 				const session = yield* Effect.uninterruptibleMask((restore) =>
 					Effect.gen(function* () {
 						const reservedSessionId = yield* takeReservation;
+						const reservedCall =
+							reservedSessionId &&
+							draftLaunch?.projectId !== undefined &&
+							draftLaunch.shellEnv !== undefined
+								? {
+										...draftLaunch,
+										sessionId: reservedSessionId,
+										projectId: draftLaunch.projectId,
+										shellEnv: draftLaunch.shellEnv,
+									}
+								: undefined;
 						const sessionId =
 							reservedSessionId ??
 							(path === undefined ? undefined : createLocalSessionId());
@@ -754,7 +776,10 @@ export const sessionsHandlers = {
 						).pipe(
 							Effect.onError(() =>
 								reservedSessionId && drafts._tag === "Some"
-									? drafts.value.discardSession(reservedSessionId)
+									? drafts.value.discardSession(
+											reservedSessionId,
+											...(reservedCall ? ([reservedCall] as const) : []),
+										)
 									: Effect.void,
 							),
 						);
@@ -1057,6 +1082,7 @@ export const sessionsHandlers = {
 	| "SetSessionPinned"
 	| "GetSessionAutoSettleOutlook"
 	| "SetSessionAutoSettle"
+	| "SetSessionJev"
 	| "SnoozeSession"
 	| "UnsnoozeSession"
 	| "DismissCutOff"

@@ -82,21 +82,24 @@ Examples:
   | shortcut       |
   | transcript key |
 
-Scenario Outline: Settling on desktop keeps the viewed session open
+Scenario Outline: Settling the open desktop session opens a new draft with the sidebar open, only after success
   Given the conduit app is served with the long-transcript mockup
   And the phone session sheet state is idle
+  And the desktop sidebar is <sidebar>
   And the settle reply is held as success
   When I settle the open session using <entry>
   Then the viewed session stays open
   When the held settle reply is released
-  Then the viewed session stays open
+  Then a new draft opens with the desktop sidebar open
 
 Examples:
-  | entry          |
-  | header         |
-  | overflow       |
-  | shortcut       |
-  | transcript key |
+  | entry          | sidebar |
+  | header         | open    |
+  | overflow       | open    |
+  | shortcut       | open    |
+  | transcript key | open    |
+  | overflow       | closed  |
+  | shortcut       | closed  |
 
 Scenario: A delayed settle never leaves a newer phone session
   Given the viewport is a phone

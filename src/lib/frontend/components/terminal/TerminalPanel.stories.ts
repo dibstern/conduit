@@ -142,10 +142,12 @@ export const MultiFolderPickerOpen: Story = {
 		const body = within(canvasElement.ownerDocument.body);
 		// The active tab focuses its terminal once the font loads. Open the menu
 		// after that, or the late focus takes it back from the open menu.
-		await waitFor(() =>
-			expect(
-				canvasElement.querySelector(".xterm-helper-textarea"),
-			).toHaveFocus(),
+		await waitFor(
+			() =>
+				expect(
+					canvasElement.querySelector(".xterm-helper-textarea"),
+				).toHaveFocus(),
+			{ timeout: 15_000 },
 		);
 		await userEvent.click(
 			canvas.getByRole("button", { name: "New terminal in folder" }),

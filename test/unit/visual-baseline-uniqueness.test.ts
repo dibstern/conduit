@@ -30,6 +30,8 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"both interaction stories re-open the menu as their last step",
 	"ui-menu--arrow-key-navigation | ui-menu--typeahead":
 		"both end with focus on the same item",
+	"ui-menu--radio-leading-icon | ui-menu--radio-selection":
+		"both pick Private and re-open the menu; RadioLeadingIcon asserts the icon colours in play()",
 	"ui-popover--default | ui-popover--escape-restores-focus":
 		"escape story re-opens the popover as its last step",
 	"layout-sessionbar--banners-row-expands | layout-sessionbar--island-with-banners":

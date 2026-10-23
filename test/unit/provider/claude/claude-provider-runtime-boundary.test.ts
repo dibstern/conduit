@@ -111,18 +111,17 @@ describe("Claude provider runtime boundary", () => {
 			});
 		try {
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: "/tmp/g4zp-test-project",
-				shellEnv: () => ({
-					HOME: "/tmp/g4zp-test-home",
-					CLAUDE_CONFIG_DIR: "/tmp/g4zp-test-project-folder",
-					ANTHROPIC_API_KEY: "test-project-key",
-				}),
 				queryFactory: ({ options }) => {
 					if (options) capturedOptions.push(options);
 					return createMockQuery([makeSuccessResult()]);
 				},
 			});
 			const input = makeBaseSendTurnInput({
+				shellEnv: {
+					HOME: "/tmp/g4zp-test-home",
+					CLAUDE_CONFIG_DIR: "/tmp/g4zp-test-project-folder",
+					ANTHROPIC_API_KEY: "test-project-key",
+				},
 				account,
 				instanceId: "historical-account",
 				configDir: undefined,
@@ -154,7 +153,6 @@ describe("Claude provider runtime boundary", () => {
 	it("uses only the default SDK settings without an overrides getter", async () => {
 		const capturedSettings: SDKOptions["settings"][] = [];
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp/ws",
 			queryFactory: ({ options }: { options?: SDKOptions }) => {
 				capturedSettings.push(options?.settings);
 				return createMockQuery([makeSuccessResult()]);
@@ -184,7 +182,6 @@ describe("Claude provider runtime boundary", () => {
 			() => loadRelaySettings(configDir).claudeSettings,
 		);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp/ws",
 			queryFactory: ({ options }: { options?: SDKOptions }) => {
 				capturedSettings.push(options?.settings);
 				return createMockQuery([makeSuccessResult()]);
@@ -226,7 +223,6 @@ describe("Claude provider runtime boundary", () => {
 	it("removes trust-tiered keys from SDK settings overrides", async () => {
 		const capturedSettings: SDKOptions["settings"][] = [];
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: "/tmp/ws",
 			queryFactory: ({ options }: { options?: SDKOptions }) => {
 				capturedSettings.push(options?.settings);
 				return createMockQuery([makeSuccessResult()]);
@@ -261,7 +257,7 @@ describe("Claude provider runtime boundary", () => {
 				const runtime = yield* makeClaudeProviderRuntime({
 					runnerFactory: makeClaudeSessionRunner,
 					daemonConfigDir: configPersistence.getConfigDir(),
-					workspaceRoot: "/tmp/ws",
+
 					queryFactory: () => query,
 				}).pipe(Effect.provideService(Scope.Scope, scope));
 				const instance = runtime;
@@ -306,7 +302,7 @@ describe("Claude provider runtime boundary", () => {
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
 						daemonConfigDir: configPersistence.getConfigDir(),
-						workspaceRoot: "/tmp/ws",
+
 						queryFactory: (params) => {
 							options = params.options;
 							return query;
@@ -337,9 +333,9 @@ describe("Claude provider runtime boundary", () => {
 					);
 					expect(failure._tag).toBe("Failure");
 					expect(query.close).not.toHaveBeenCalled();
-					// Composer Stop retains its existing teardown behavior.
+					// Composer Stop leaves the query open for its native terminal.
 					yield* instance.interruptTurnEffect("task-stop");
-					expect(query.close).toHaveBeenCalledOnce();
+					expect(query.close).not.toHaveBeenCalled();
 					yield* Fiber.join(turn);
 				}),
 			),
