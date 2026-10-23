@@ -26,6 +26,22 @@ it(
 			const browser = await harness.connect();
 			const initial = await Effect.runPromise(browser.rpc.GetCategorySet({}));
 			expect(initial).toEqual(DEFAULT_CATEGORY_SET);
+			const emptyCounts = Object.fromEntries(
+				initial.categories.map(({ id }) => [id, 0]),
+			);
+			const countRequest = { sessionId: "empty-category-counts", set: initial };
+			expect(
+				await Effect.runPromise(
+					browser.rpc.CountSessionCategories(countRequest),
+				),
+			).toEqual(emptyCounts);
+			expect(
+				await harness.requestRpc({
+					_tag: "CountSessionCategories",
+					...countRequest,
+				}),
+			).toEqual(emptyCounts);
+			observations["emptyCounts"] = emptyCounts;
 			const verdict = { probabilities: { finding: 0.9, routine: 0.1 } };
 			const changed = await Effect.runPromise(
 				browser.rpc.ReplaceCategorySet({

@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { StepHandler } from "../runtime.js";
-import { requireRpcControl } from "./shared.js";
+import { requireRpcControl, settleTransitions } from "./shared.js";
 
 const PARENT_TITLE = "Stabilise visual suite";
 const NEW_SIDE_THREAD = "sess-side-new";
@@ -203,6 +203,7 @@ export const sideThreadsHandlers: StepHandler[] = [
 		name: "assert list position",
 		match: /^the Side Threads list hangs under the header on screen$/,
 		run: async ({ world }) => {
+			await settleTransitions(world.page);
 			const viewport = world.page.viewportSize();
 			const bar = await world.page.getByTestId("session-bar").boundingBox();
 			const panel = await sideThreadsPanel(world.page).boundingBox();

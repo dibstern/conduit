@@ -4,6 +4,7 @@
 
 	let {
 		active = true,
+		edge = "bottom",
 		class: className = "",
 		bodyClass = "",
 		maxHeight = "90dvh",
@@ -16,6 +17,7 @@
 	}: {
 		/** Let a responsive caller keep its desktop container unchanged. */
 		active?: boolean;
+		edge?: "bottom" | "top";
 		bodyClass?: string;
 		maxHeight?: string;
 		/** A menu's items all use roving tabindex, so its scroll body needs its own keyboard target. */
@@ -28,8 +30,8 @@
 </script>
 
 {#if active}
-	<div {...rest} data-sheet-chrome style:max-height={maxHeight} style:--sheet-bottom-padding={`${bottomPadding}px`} class:sheet-inset-max={safeAreaMode === "max"} class="sheet-chrome relative flex w-full flex-col overflow-hidden rounded-t-[22px] bg-bg-surface text-text shadow-modal {className}">
-		<div aria-hidden="true" data-sheet-handle class="mx-auto mt-[8px] mb-[6px] h-[5px] w-[36px] shrink-0 rounded-full bg-border-chip"></div>
+	<div {...rest} data-sheet-chrome style:max-height={maxHeight} style:--sheet-bottom-padding={`${bottomPadding}px`} style:--sheet-safe-area-bottom={edge === "top" ? "0px" : undefined} class:sheet-inset-max={safeAreaMode === "max"} class="sheet-chrome relative flex w-full flex-col overflow-hidden {edge === 'top' ? 'rounded-b-[22px]' : 'rounded-t-[22px]'} bg-bg-surface text-text shadow-modal {className}">
+		{#if edge === "bottom"}<div aria-hidden="true" data-sheet-handle class="mx-auto mt-[8px] mb-[6px] h-[5px] w-[36px] shrink-0 rounded-full bg-border-chip"></div>{/if}
 		<!-- A menu's items all use roving tabindex, so its scroll body takes focus for axe's
 		     scrollable-region-focusable. Inside role="menu" a focusable child must be an allowed
 		     menu child, hence role="group". Dialogs keep their first control as the focus target. -->
@@ -42,6 +44,7 @@
 				{@render footer()}
 			</div>
 		{/if}
+		{#if edge === "top"}<div aria-hidden="true" data-sheet-handle class="mx-auto mt-[6px] mb-[8px] h-[5px] w-[36px] shrink-0 rounded-full bg-border-chip"></div>{/if}
 	</div>
 {:else}
 	{@render children()}

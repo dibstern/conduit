@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { dragDown } from "../e2e/helpers/sheet-drag.js";
+import { dragSheet, settleSheet } from "../e2e/helpers/sheet-drag.js";
 
 test.use({
 	viewport: { width: 393, height: 852 },
@@ -14,13 +14,15 @@ const sheets = [
 		control: "summary-close-count",
 		scrim: "modal-sheet-scrim",
 		nativeDialog: true,
+		edge: "bottom",
 	},
 	{
 		name: "Side threads",
 		story: "layout-sessionbar--side-threads-scrollable",
 		control: "side-threads-control",
-		scrim: "modal-sheet-scrim",
-		nativeDialog: true,
+		scrim: "side-threads-scrim",
+		nativeDialog: false,
+		edge: "top",
 	},
 	{
 		name: "Goal",
@@ -28,6 +30,7 @@ const sheets = [
 		control: "session-goal-subtitle",
 		scrim: "goal-details-scrim",
 		nativeDialog: false,
+		edge: "top",
 	},
 ] as const;
 
@@ -48,7 +51,7 @@ test("locking sheet dismissal preserves its form and focus", async ({
 	).toBe(true);
 	await expect(toggle).toBeFocused();
 	const before = await sheet.boundingBox();
-	const { end } = await dragDown(page, sheet, 80, false, 10, {
+	const { end } = await dragSheet(page, sheet, 80, false, 10, {
 		durationMs: 600,
 	});
 	expect((await sheet.boundingBox())?.y).toBeCloseTo(before?.y ?? 0, 0);
@@ -58,7 +61,7 @@ test("locking sheet dismissal preserves its form and focus", async ({
 	await expect(toggle).toHaveAttribute("aria-pressed", "false");
 	await expect(draft).toHaveValue("Keep this draft");
 	expect(30).toBeLessThan((before?.height ?? 0) * 0.25);
-	const drag = await dragDown(page, sheet, 30, false, 10, { durationMs: 600 });
+	const drag = await dragSheet(page, sheet, 30, false, 10, { durationMs: 600 });
 	expect((await sheet.boundingBox())?.y).toBeCloseTo(drag.top + 30, 0);
 	await drag.end();
 	await expect
@@ -71,10 +74,14 @@ test("locking sheet dismissal preserves its form and focus", async ({
 });
 
 for (const surface of sheets) {
+	// Drop-down sheets dismiss upward from the handle on their bottom edge.
+	const away = surface.edge === "top" ? -1 : 1;
+	const handle = surface.edge === "top" ? -10 : 10;
 	test.describe(`${surface.name} phone sheet`, () => {
 		test.beforeEach(async ({ page }) => {
 			await page.goto(`/iframe.html?id=${surface.story}&viewMode=story`);
 			await expect(page.locator("[data-sheet-chrome]:visible")).toBeVisible();
+			await settleSheet(page);
 		});
 
 		test("tracks a slow short drag with its scrim and springs back", async ({
@@ -93,9 +100,16 @@ for (const surface of sheets) {
 				);
 			const before = await sheet.boundingBox();
 			const beforeOpacity = await opacity();
-			const { top, end } = await dragDown(page, sheet, 30, false, 10, {
-				durationMs: 600,
-			});
+			const { top, end } = await dragSheet(
+				page,
+				sheet,
+				away * 30,
+				false,
+				handle,
+				{
+					durationMs: 600,
+				},
+			);
 			const during = await sheet.boundingBox();
 			const duringOpacity = await opacity();
 			const transformY = await sheet.evaluate((node) => {
@@ -110,8 +124,8 @@ for (const surface of sheets) {
 				}
 				return 0;
 			});
-			expect((during?.y ?? top) - top).toBeCloseTo(30, 0);
-			expect(transformY).toBeCloseTo(30, 0);
+			expect((during?.y ?? top) - top).toBeCloseTo(away * 30, 0);
+			expect(transformY).toBeCloseTo(away * 30, 0);
 			expect(duringOpacity).toBeLessThan(beforeOpacity - 0.01);
 			await testInfo.attach("short-drag-midgesture", {
 				body: await page.screenshot(),
@@ -150,11 +164,18 @@ for (const surface of sheets) {
 			const box = await sheet.boundingBox();
 			if (!box) throw new Error("sheet is not rendered");
 			const distance = box.height * 0.35;
-			const { top, end } = await dragDown(page, sheet, distance, false, 10, {
-				durationMs: 1200,
-			});
+			const { top, end } = await dragSheet(
+				page,
+				sheet,
+				away * distance,
+				false,
+				handle,
+				{
+					durationMs: 1200,
+				},
+			);
 			const during = await sheet.boundingBox();
-			expect((during?.y ?? top) - top).toBeCloseTo(distance, 0);
+			expect((during?.y ?? top) - top).toBeCloseTo(away * distance, 0);
 			const opacity = await page
 				.getByTestId(surface.scrim)
 				.evaluate(
@@ -221,10 +242,20 @@ for (const surface of sheets) {
 			const box = await sheet.boundingBox();
 			if (!box) throw new Error("sheet is not rendered");
 			expect(50).toBeLessThan(box.height * 0.25);
-			const { top, end } = await dragDown(page, sheet, 50, false, 10, {
-				durationMs: 60,
-			});
-			expect(((await sheet.boundingBox())?.y ?? top) - top).toBeCloseTo(50, 0);
+			const { top, end } = await dragSheet(
+				page,
+				sheet,
+				away * 50,
+				false,
+				handle,
+				{
+					durationMs: 60,
+				},
+			);
+			expect(((await sheet.boundingBox())?.y ?? top) - top).toBeCloseTo(
+				away * 50,
+				0,
+			);
 			await end();
 			await expect(sheet).toBeHidden();
 			if (surface.control === "summary-close-count") {
@@ -254,12 +285,12 @@ for (const surface of sheets) {
 				.poll(() =>
 					body.evaluate((node) => node.scrollHeight - node.clientHeight),
 				)
-				.toBeGreaterThan(80);
+				.toBeGreaterThan(160);
 			await body.evaluate((node) => {
 				node.scrollTop = 80;
 			});
 			const before = await sheet.boundingBox();
-			const { end } = await dragDown(page, body, 30, false, 40, {
+			const { end } = await dragSheet(page, body, away * 30, false, away * 40, {
 				durationMs: 600,
 			});
 			const during = await sheet.boundingBox();
@@ -267,8 +298,10 @@ for (const surface of sheets) {
 			await end();
 			await expect(sheet).toBeVisible();
 			await expect
-				.poll(() => body.evaluate((node) => node.scrollTop))
-				.toBeLessThan(80);
+				.poll(() =>
+					body.evaluate((node, away) => (node.scrollTop - 80) * away, away),
+				)
+				.toBeLessThan(0);
 			await testInfo.attach("native-scroll-handoff", {
 				body: await page.screenshot(),
 				contentType: "image/png",

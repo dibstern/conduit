@@ -402,10 +402,26 @@ export class ProcessHarness {
 			join(this.root, "runner-identity-fixture.mjs"),
 			`import childProcess from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { syncBuiltinESMExports } from "node:module";
+import { registerHooks, syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 const root = ${JSON.stringify(this.root)};
 if (process.env.HOME !== join(root, "home")) throw new Error("Runner identity fixture requires isolated HOME");
+if (process.env.CONDUIT_TEST_NATIVE_RUNNER_LOADER === "1") {
+  // Built runners need only erasable fixture types, not tsx's async loader on every JS import.
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      try { return nextResolve(specifier, context); }
+      catch (cause) {
+        if (cause.code !== "ERR_MODULE_NOT_FOUND" || !context.parentURL?.endsWith(".ts") || !specifier.startsWith(".") || !specifier.endsWith(".js")) throw cause;
+        return nextResolve(specifier.slice(0, -3) + ".ts", context);
+      }
+    },
+  });
+  const tsx = ${JSON.stringify(pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href)};
+  for (let index = process.execArgv.length - 2; index >= 0; index--) {
+    if (process.execArgv[index] === "--import" && process.execArgv[index + 1] === tsx) process.execArgv.splice(index, 2);
+  }
+}
 if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
   writeFileSync(join(root, "runner-argv-" + process.pid + ".json"), JSON.stringify(process.argv));
 }
@@ -972,6 +988,9 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 							}
 						: {}),
 					CONDUIT_TEST_CLAUDE_QUERY_MODULE: sdkModule,
+					...(this.dist && !this.realSdk
+						? { CONDUIT_TEST_NATIVE_RUNNER_LOADER: "1" }
+						: {}),
 					...(this.managedOpenCodeStopGraceMs === undefined
 						? {}
 						: {
@@ -1636,18 +1655,20 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 	async waitForMark(
 		predicate: (mark: ProcessMark) => boolean,
 		cursor = 0,
+		signal?: AbortSignal,
 	): Promise<ProcessMark> {
 		const controller = new AbortController();
-		const timer = setTimeout(
-			() => controller.abort(),
-			remainingTimeout(this.deadline),
-		);
+		const timer = signal
+			? undefined
+			: setTimeout(() => controller.abort(), remainingTimeout(this.deadline));
 		try {
 			for (;;) {
 				const mark = this.marks.slice(cursor).find(predicate);
 				if (mark) return mark;
 				if (!this.child) throw new Error("No server to receive fixture marks");
-				await once(this.child, "message", { signal: controller.signal });
+				await once(this.child, "message", {
+					signal: signal ?? controller.signal,
+				});
 			}
 		} finally {
 			clearTimeout(timer);

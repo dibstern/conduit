@@ -1,5 +1,27 @@
 {
 	"src/lib/frontend/components/chat/ActivityRow.svelte :: tool.isError": "C4 replaces this JavaScript condition with tool.outcome. It is not a CSS class; the text-error and text-text-secondary classes are unchanged.",
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: bg-text-dimmer/30,border-b,h-[3px],mt-[10px],w-[34px]": "The phone top sheet replaces the fake 34x3 handle and bottom border with SheetChrome's real 36x5 drag handle, shared colour, spacing and shadow.",
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: inset-x-0": {
+		"movedTo": "src/lib/frontend/components/ui/Popover.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet positions the phone panel full-width below the measured session header."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: mx-auto,rounded-b-[22px],rounded-full": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet owns the bottom corners and centered rounded drag handle."
+	},
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: bg-text-dimmer/30,border-b,h-[3px],mt-[10px],w-[34px]": "The phone top sheet replaces the fake 34x3 handle and bottom border with SheetChrome's real 36x5 drag handle, shared colour, spacing and shadow.",
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: inset-x-0": {
+		"movedTo": "src/lib/frontend/components/ui/Popover.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet positions the phone panel full-width below the measured session header."
+	},
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: mx-auto,rounded-b-[22px]": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet owns the bottom corners and centered drag handle."
+	},
 	"src/lib/frontend/components/chat/SurfacingSummary.svelte :: animate-spin": "Approved Flow Set 1 replaces the summary content spinner with the shared ConduitMark running packet. Reduced motion is owned by that component.",
 	"src/lib/frontend/components/chat/TurnActivity.svelte :: animate-spin": "Approved Flow Set 1 replaces the live activity spinner with the shared 16px ConduitMark running packet.",
 	"src/lib/frontend/components/input/FileMenu.svelte :: contents": "The old wrapper hid BlockGrid's role=img from the listbox accessibility tree. ConduitMark is decorative with aria-hidden=true and has no image role, so the wrapper is unnecessary.",
@@ -9,7 +31,6 @@
 	"src/lib/frontend/components/layout/Sidebar.svelte :: min-h-[44px]": "The phone list overflow menu is replaced by a direct Settings cog. Its size-[44px] button retains the 44px touch target; the removed menu items no longer need their minimum height.",
 	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: pt-[4px]": "The phone account card now starts one standard settings section gap below the header. Its padding uses --settings-section-gap, shared with SettingsGroup, instead of the previous 4px inset.",
 	"src/lib/frontend/components/ui/SettingsGroup.svelte :: mt-[16px]": "SettingsGroup keeps its 16px gap through --settings-section-gap with a 16px fallback. SettingsPanel uses that same value above the first phone account section, so its top spacing matches the following groups.",
-	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: bg-text-dimmer/30,border-b,h-[3px],inset-x-0,mt-[10px],mx-auto,rounded-b-[22px],w-[34px]": "Phone Side threads now uses Dialog and SheetChrome for the requested bottom-sheet behavior. SheetChrome owns the top corners and grab handle; the old top-anchored card's bottom border, bottom corners, positioning and smaller bottom handle are intentionally removed. Desktop retains its floating Surface.",
 	"src/lib/frontend/components/model/HarnessLogo.svelte :: accountColorClass(instanceId,": "The class scanner tokenized the old function call as CSS. The badge now reads the persisted instance slot through accountColorClass(instanceId).",
 	"src/lib/frontend/components/model/HarnessLogo.svelte :: orderedUsageAccounts())": "The badge no longer derives identity from usage list order; accountColorClass reads the persisted slot.",
 	"src/lib/frontend/components/ui/AccountDot.svelte :: accountColorClass(instanceId,": "The class scanner tokenized the old function call as CSS. The dot now reads the persisted instance slot through accountColorClass(instanceId).",
@@ -1090,5 +1111,6 @@
 		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
 		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
 	},
-	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock."
+	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock.",
+	"src/lib/frontend/components/ui/Menu.svelte :: sheetEdge": "Not a class: the scrim's edge-dependent position expression became a plain fixed class with an inline top offset."
 }

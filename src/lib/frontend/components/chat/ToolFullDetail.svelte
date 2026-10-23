@@ -48,6 +48,7 @@
 		message,
 		load = loadFromServer,
 		children,
+		showExitCode = true,
 		class: className = "",
 	}: {
 		message: ToolMessage;
@@ -56,6 +57,7 @@
 			session: SessionRef | undefined,
 		) => Promise<ToolDetail | undefined>;
 		children: Snippet<[ToolMessage]>;
+		showExitCode?: boolean;
 		class?: string;
 	} = $props();
 
@@ -164,7 +166,7 @@
 {/each}
 {#if presentation?.movedToBackground}
 	<div data-testid="tool-moved-to-background" class="text-xs text-text-muted">Moved to background. The command may still be running.</div>
-{:else if presentation?.exitCode !== undefined}
+{:else if showExitCode && presentation?.exitCode !== undefined}
 	<div data-testid="tool-exit-code" class="text-xs text-text-muted">Exit code {presentation.exitCode}</div>
 {/if}
 {#if presentation?.truncated}
