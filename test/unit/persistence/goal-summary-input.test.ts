@@ -100,6 +100,28 @@ describe("goal summary identity and key", () => {
 			goalSummaryKey(input()),
 		);
 	});
+	it("retains the existing cached key after the same blocker is reconfirmed", () => {
+		const reason = repeated[0] ?? "";
+		const before = input([reason, reason, reason]);
+		const after = input([
+			reason,
+			reason,
+			reason,
+			`${reason} Reference samples/notes.csv.`,
+			reason,
+			reason,
+		]);
+		const cached = JSON.stringify([
+			goalSummaryIdentity(before),
+			["active", null, null],
+			["i1", "i2", "1@1000"],
+			"goal-summary-v1",
+			"sonnet",
+		]);
+		expect(goalSummaryKey(before)).toBe(cached);
+		expect(goalSummaryKey(after)).toBe(cached);
+		expect(evidence(after).history.segments).toHaveLength(1);
+	});
 
 	it.each([
 		[

@@ -1532,8 +1532,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			SELECT mp.id, mp.call_id, mp.message_id, mp.input, mp.created_at, m.session_id
 			FROM message_parts mp
 			JOIN messages m ON m.id = mp.message_id
-			JOIN sessions s ON s.id = m.session_id
-			WHERE s.provider = 'claude' AND m.session_id = ${sessionId}
+			WHERE m.session_id = ${sessionId}
 				AND mp.call_id = ${callId} AND mp.tool_name = 'AskUserQuestion'
 				AND mp.status IN ('started', 'running', 'pending')
 			LIMIT 1`.pipe(

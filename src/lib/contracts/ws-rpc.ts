@@ -1880,6 +1880,15 @@ export const GetCategorySet = Rpc.make("GetCategorySet", {
 	error: WsRpcError,
 });
 
+export const CountSessionCategories = Rpc.make("CountSessionCategories", {
+	payload: Schema.TaggedStruct("CountSessionCategories", {
+		sessionId: NonEmptyString,
+		set: CategorySetContentsSchema,
+	}),
+	success: Schema.Record(Schema.String, Schema.Int),
+	error: WsRpcError,
+});
+
 export const SetSurfacingMark = Rpc.make("SetSurfacingMark", {
 	payload: Schema.TaggedStruct("SetSurfacingMark", {
 		sessionId: NonEmptyString,
@@ -3183,6 +3192,7 @@ const wsRpcRequests = [
 	SetTerminalKeys,
 	GetTerminalKeys,
 	GetCategorySet,
+	CountSessionCategories,
 	SetSurfacingMark,
 	GetSurfacingFeedback,
 	GetSurfacingLedger,
@@ -3815,6 +3825,8 @@ const InputDraftEnvelopeSchema = Schema.Union([
 	}),
 	Schema.TaggedStruct("draft", {
 		text: Schema.String,
+		/** The refused input fragment, before merging with the stored draft. */
+		restored: Schema.optional(Schema.String),
 		projectId: Schema.optional(Schema.String),
 		/** The writer's SyncInputDraft originId; that tab drops its own echo. */
 		from: Schema.optional(Schema.String),
