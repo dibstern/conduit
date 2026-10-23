@@ -35,6 +35,8 @@ export interface RunnerLaunchCallbacks {
 	/** Fence admission before a payload publishes its final turn outcome. */
 	readonly retireAfterCommand?: (inputId: string) => void;
 	readonly isCandidate: () => boolean;
+	/** A rebind excludes the executing send's own command and admitted turn. */
+	readonly isBackgroundBusy: (ignoredCommands?: number) => boolean;
 	readonly turnStateChanged: (inFlight: boolean) => void;
 	readonly readThread: RunnerSocket["threadReadEffect"];
 }
@@ -143,14 +145,18 @@ export const runSessionRunner = (
 		let reportedSnapshot: RunnerUpgradeState["snapshot"];
 		let reportedResume: string | undefined;
 		let reportedConfiguration: RunnerUpgradeState["liveConfiguration"];
+		// A rebind check ignores the executing send's own command and turn.
+		const hostBusy = (ignoredCommands = 0) =>
+			activeCommands > ignoredCommands ||
+			activeOutputs > 0 ||
+			runner?.hasPendingSubagentFinalizers?.(sessionId) === true;
+		const isBackgroundBusy = (ignoredCommands = 0) =>
+			hostBusy(ignoredCommands) || idle?.isQuiescent(ignoredCommands) !== true;
 		const quiescent = () =>
 			!exiting &&
 			retirementInputId === undefined &&
 			!retiring &&
-			activeCommands === 0 &&
-			activeOutputs === 0 &&
-			!runner?.hasPendingSubagentFinalizers?.(sessionId) &&
-			idle?.quiescent === true;
+			!isBackgroundBusy();
 		const upgradeState = (): RunnerUpgradeState => ({
 			quiescent: quiescent(),
 			revision,
@@ -187,14 +193,7 @@ export const runSessionRunner = (
 				});
 		};
 		const retireWhenQuiescent = () => {
-			if (
-				retirementInputId !== undefined &&
-				activeCommands === 0 &&
-				activeOutputs === 0 &&
-				!runner?.hasPendingSubagentFinalizers?.(sessionId) &&
-				idle?.quiescent === true
-			)
-				beginExit();
+			if (retirementInputId !== undefined && !isBackgroundBusy()) beginExit();
 		};
 		const launch = yield* makeLaunch({
 			sessionId,
@@ -207,6 +206,7 @@ export const runSessionRunner = (
 				retirementInputId = inputId;
 			},
 			isCandidate: () => role === "candidate",
+			isBackgroundBusy,
 			turnStateChanged: (inFlight) => {
 				idle?.setTurnInFlight(inFlight);
 				reportUpgradeState();
@@ -348,13 +348,8 @@ export const runSessionRunner = (
 											? Number(process.env["CONDUIT_TEST_RUNNER_IDLE_DAY_MS"])
 											: undefined,
 										config.autoSettleAfterDays,
-										() =>
-											retiring ||
-											activeCommands > 0 ||
-											activeOutputs > 0 ||
-											runner?.hasPendingSubagentFinalizers?.(sessionId) ===
-												true ||
-											spool.hasHeldWork,
+										(ignoredTurns) =>
+											retiring || hostBusy(ignoredTurns) || spool.hasHeldWork,
 										config.daemonConfigDir,
 									);
 								}

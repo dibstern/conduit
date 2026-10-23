@@ -211,7 +211,7 @@ export function inheritedSettingsFingerprint(
 /** Owns empty queries until initialization succeeds and a real turn adopts them. */
 export const makeClaudeWarmedQueryOwner = (
 	queryFactory: NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>,
-	prepareQuery?: () => Promise<void>,
+	prepareQuery?: (input: ClaudePreWarmSessionInput) => Promise<void>,
 	readGoalStatus?: ReadClaudeGoalStatus,
 	onNativeSessionId?: (sessionId: string, nativeSessionId: string) => void,
 ) =>
@@ -300,7 +300,7 @@ export const makeClaudeWarmedQueryOwner = (
 									return options;
 								},
 								input,
-								prepareQuery,
+								prepareQuery ? () => prepareQuery(input) : undefined,
 							);
 							const resource: WarmedClaudeQuery = {
 								...empty,

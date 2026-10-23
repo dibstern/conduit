@@ -77,6 +77,7 @@ const log = createLogger("runner-provider-instance");
 export const assertSessionRunnerAvailable = (
 	sessionId: string,
 	registry: ProviderRegistry | undefined,
+	account?: Account,
 ) =>
 	Effect.gen(function* () {
 		for (const providerId of registry?.listProviders() ?? []) {
@@ -89,6 +90,13 @@ export const assertSessionRunnerAvailable = (
 					operation: failure.operation,
 					cause: Object.assign(new Error(failure.message), failure),
 				});
+			if (account) {
+				const block = yield* provider.getAccountSwitchBlockEffect(
+					sessionId,
+					account,
+				);
+				if (block) return yield* block;
+			}
 		}
 	});
 
@@ -503,6 +511,13 @@ export class RunnerProviderInstance implements ProviderInstance {
 	getSessionFailureEffect(sessionId: string) {
 		return (
 			this.runner.getSessionFailureEffect?.(sessionId) ??
+			Effect.succeed(undefined)
+		);
+	}
+
+	getAccountSwitchBlockEffect(sessionId: string, account: Account) {
+		return (
+			this.runner.getAccountSwitchBlockEffect?.(sessionId, account) ??
 			Effect.succeed(undefined)
 		);
 	}

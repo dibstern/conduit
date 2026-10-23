@@ -51,6 +51,7 @@ import {
 	ResolvedClaudeSettingsSchema,
 } from "./claude-settings.js";
 import {
+	AccountSwitchBusy,
 	AccountUnroutable,
 	ContinuationErrorSchema,
 	HandoffSummarySchema,
@@ -2938,6 +2939,7 @@ export const SubmitInput = Rpc.make("input.submit", {
 		WsRpcError,
 		DraftAttachmentMissing,
 		Schema.suspend(() => AccountUnroutable),
+		Schema.suspend(() => AccountSwitchBusy),
 	]),
 });
 
@@ -2962,7 +2964,7 @@ export const SendInputNow = Rpc.make("input.sendNow", {
 		originId: Schema.optional(NonEmptyString),
 	}),
 	success: InboxCommandResponseSchema,
-	error: WsRpcError,
+	error: Schema.Union([WsRpcError, Schema.suspend(() => AccountSwitchBusy)]),
 });
 
 export const InputDraftKeySchema = Schema.Union([

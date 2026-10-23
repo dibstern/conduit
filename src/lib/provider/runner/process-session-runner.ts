@@ -16,7 +16,12 @@ import {
 	Semaphore,
 } from "effect";
 import { SqlClient } from "effect/sql";
+import type { Account } from "../../contracts/account.js";
 import type { AttachmentRef } from "../../contracts/attachment-ref.js";
+import {
+	AccountSwitchBusy,
+	accountSwitchBusyMessage,
+} from "../../contracts/limit-recovery.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import {
 	type PendingInteractionService,
@@ -149,7 +154,7 @@ export interface ProcessRunnerDriver {
 		Extract<SessionCommand, { type: "send-turn" }>,
 		"type" | "sinkId" | "aborted" | "input"
 	>;
-	readonly sameAccountLogin: (
+	readonly loginChange: (
 		a: {
 			readonly configDir: import("./session-runner.js").SessionTurn["configDir"];
 			readonly root: string;
@@ -164,7 +169,7 @@ export interface ProcessRunnerDriver {
 			readonly instanceId?: string;
 			readonly shellConfig?: SessionTurn["shellConfig"];
 		},
-	) => boolean;
+	) => "None" | "Settings" | "Account";
 	readonly recoverCommands: (
 		sql: SqlClient.SqlClient,
 		sessionId: string,
@@ -425,6 +430,13 @@ export const makeProcessSessionRunner = (
 	Effect.gen(function* () {
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
 		const runnerLabel = `${driver.driverKind.charAt(0).toUpperCase()}${driver.driverKind.slice(1)} runner`;
+		const accountDisplayName = (
+			input: Pick<SessionTurn, "account" | "instanceId"> | undefined,
+		) =>
+			input?.account?.name ||
+			input?.account?.id ||
+			input?.instanceId ||
+			driver.driverKind;
 		const lock = yield* Semaphore.make(1);
 		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
 		const startupTimeoutMs =
@@ -2505,6 +2517,48 @@ export const makeProcessSessionRunner = (
 				return Effect.sync(() => quarantined.get(sessionId));
 			}
 
+			getAccountSwitchBlockEffect(sessionId: string, account: Account) {
+				return Effect.sync(() => {
+					const entry = children.get(sessionId);
+					const snapshot = entry?.upgrade.state?.snapshot;
+					if (
+						!entry ||
+						!Entry.canReconfigure(entry.lifecycle) ||
+						!snapshot ||
+						Entry.isQuiet(
+							entry.lifecycle,
+							entry.upgrade.state?.quiescent === true,
+						)
+					)
+						return undefined;
+					const live = snapshot.input;
+					const target = {
+						account,
+						instanceId: account.id,
+						configDir: "folder" in account ? account.folder : live.configDir,
+						root: live.workspaceRoot,
+						shellConfig: live.shellConfig,
+					};
+					if (
+						driver.loginChange(
+							{ ...live, root: live.workspaceRoot },
+							target,
+						) !== "Account"
+					)
+						return undefined;
+					return new AccountSwitchBusy({
+						sessionId,
+						fromAccountId:
+							live.account?.id ?? live.instanceId ?? driver.driverKind,
+						toAccountId: account.id,
+						message: accountSwitchBusyMessage(
+							accountDisplayName(live),
+							accountDisplayName(target),
+						),
+					});
+				});
+			}
+
 			getNativeSessionEffect(
 				sessionId: string,
 			): Effect.Effect<ProviderNativeSession | undefined> {
@@ -2777,22 +2831,23 @@ export const makeProcessSessionRunner = (
 										launch !== undefined &&
 										(launch.workspaceRoot !== command.input.workspaceRoot ||
 											(extraFoldersChanged && !canReconcileExtraFolders));
-									const accountFolderChanged =
-										launch !== undefined &&
-										!driver.sameAccountLogin(
-											{
-												...launch,
-												configDir: launch.configDir,
-												root: launch.workspaceRoot,
-											},
-											{
-												...command.input,
-												configDir: command.input.configDir,
-												root: command.input.workspaceRoot,
-												shellConfig:
-													command.input.shellConfig ?? command.shellConfig,
-											},
-										);
+									const loginChange =
+										launch === undefined
+											? "None"
+											: driver.loginChange(
+													{
+														...launch,
+														configDir: launch.configDir,
+														root: launch.workspaceRoot,
+													},
+													{
+														...command.input,
+														configDir: command.input.configDir,
+														root: command.input.workspaceRoot,
+														shellConfig:
+															command.input.shellConfig ?? command.shellConfig,
+													},
+												);
 									const legacyCursor =
 										driver.driverKind === "cursor" &&
 										existing.connection?.scopedCursorCredentials === false;
@@ -2804,13 +2859,28 @@ export const makeProcessSessionRunner = (
 											existing.capabilities?.rebindsAccount === true,
 										changes: {
 											folders: foldersChanged,
-											login: accountFolderChanged,
+											login: loginChange,
 											legacyCursor,
 											settingsDeferred:
 												existing.upgrade.settingsDeferred === true,
 										},
 									});
 									switch (decision) {
+										case "Refuse":
+											log.info(
+												`Account switch refused for session ${sessionId}: runner is busy`,
+											);
+											return yield* Effect.fail({
+												...runnerFailure(
+													command.type,
+													accountSwitchBusyMessage(
+														accountDisplayName(launch),
+														accountDisplayName(command.input),
+													),
+												),
+												code: "account_switch_busy",
+												retryable: false,
+											});
 										case "Skip":
 											return { entry: undefined, draining: false };
 										case "Wait":
@@ -2829,6 +2899,11 @@ export const makeProcessSessionRunner = (
 												draining: true,
 												retire: existing,
 											};
+										case "DeferRebind":
+											log.info(
+												`Account rebind deferred for session ${sessionId}: runner is busy`,
+											);
+											break;
 										case "Use":
 											break;
 										default: {
