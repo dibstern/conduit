@@ -218,7 +218,14 @@ export type ProcessMark =
 			buildId: string;
 			protocolVersion: number;
 			settlesAnswers: boolean;
+			declaresLogin: boolean;
 			answerDialect: "legacy" | "runner";
+	  }
+	| {
+			kind: "runner-admission";
+			sessionId: string;
+			command: "send-turn" | "pre-warm";
+			decision: "Use" | "DeferRebind" | "Refuse" | "Retire" | "Wait" | "Skip";
 	  }
 	| { kind: "runner-command"; commandId: string; type: string }
 	| {
@@ -2282,6 +2289,7 @@ function query(params: {
 				throw new Error("Harness adapter failure");
 			if (
 				request === "upgrade-background-work" ||
+				request === "login-background-work" ||
 				request.startsWith("notification-parent-turn")
 			) {
 				mark({

@@ -72,6 +72,8 @@ export interface RunnerHello {
 	readonly rebindsAccount?: true;
 	/** Resolving an interaction also settles its native answer waiter. */
 	readonly settlesAnswers?: true;
+	/** Login identity compares declared settings, never captured shell values. */
+	readonly declaresLogin?: true;
 	/** Cursor sends consume the daemon's admitted account credential envelope. */
 	readonly scopedCursorCredentials?: true;
 	readonly cursorBackendUrl?: CursorBackendUrl;
