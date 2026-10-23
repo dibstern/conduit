@@ -112,13 +112,26 @@ on a fresh runner. Pre-warm counts as activity without admitting a turn, includi
 after adoption, and becomes a no-op when racing exit or end-session.
 Protocol mismatches still refuse adoption. A different build with the same
 protocol is adopted and scheduled for upgrade after a turn ends. An adopted idle
-runner upgrades without waiting for another prompt.
+runner attempts an upgrade without waiting for another prompt. A failed warm-up
+keeps the old runner; retries wait for a later turn boundary.
 
 Every runner driver sends `stampsRunIds: true` in its hello. The daemon refuses
 runners without that capability through the protocol-mismatch failure path,
 with a message that names the build and says it predates run ownership.
 `RUNNER_PROTOCOL_VERSION` stays unchanged so current runners survive restart.
 The runner's check of the daemon hello is unchanged.
+
+Runners also advertise `settlesAnswers: true` when their resolve commands release
+the native question and permission waiters. Peers without that flag use the
+legacy answer dialect. The daemon follows their resolve command with an
+idempotent `answer-question` or `answer-permission` inside the same outbox
+attempt. The follow-up uses the original answer, since runner notifications
+redact secret question answers. Attach logs name the build and answer dialect;
+the protocol version is unchanged.
+Legacy answer recovery checks the final follow-up receipt in the hello and
+observed command replies. It does not treat the earlier resolve receipt as
+completion or wait for a command-status message that historical runners cannot
+answer. Missing final receipts permit idempotent retry or secret answer re-entry.
 
 When adoption refuses an incompatible live runner, the daemon independently
 checks its registered process identity, stops it with bounded cleanup, and
@@ -165,6 +178,16 @@ controller, including native-resume fallback. Old query callbacks keep their
 stopped context. Runners without the capability drain and restart on that send.
 Pre-warm hints leave a live controller on its current login; unused warm queries
 can still be replaced before the first send.
+
+Claude runners also advertise `declaresLogin: true`. For peers without that
+flag, an unchanged declared login keeps the runner's reported account metadata
+and original shell capture in both command environment fields. Missing account
+or shell metadata in an adoption snapshot means unknown, so it cannot cause a
+rebind or an admission wait. Known account, account-env and shell-configuration
+differences still follow the rebind policy above. The process regressions in
+`claude-runner-login.test.ts` record replies, query identity, admission decisions
+and cleanup under `test-results/wh8g-legacy-shell-recapture.json` and
+`test-results/u1y3i-4-{legacy,current}-login-restart.json`.
 
 The isolated regressions are `test/integration/daemon/claude-account-rebind.test.ts`
 and `claude-controller-failure.test.ts`. The process test writes its observations

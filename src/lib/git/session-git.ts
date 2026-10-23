@@ -99,7 +99,7 @@ export async function readSessionGit(
 			"status",
 			"--porcelain=v2",
 			"--branch",
-			"--untracked-files=normal",
+			"--untracked-files=all",
 		]).catch((error: { code?: string; stdout?: string }) =>
 			error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
 				? error.stdout
@@ -134,11 +134,29 @@ export async function readSessionGit(
 				: undefined;
 		const operation = operationAt(gitDir);
 		const counts = header("branch.ab")?.match(/^\+(\d+) -(\d+)$/);
+		const upstream = header("branch.upstream");
+		const files = lines.filter((line) => /^[12u?] /.test(line)).length;
+		const shortstat =
+			files && born
+				? await git(directory, "diff", "HEAD", "--shortstat", "--")
+				: undefined;
 		const result: SessionGit = {
 			...(branch ? { branch } : {}),
 			...(head ? { head } : {}),
+			...(born ? { oid } : {}),
+			...(upstream ? { upstream } : {}),
 			...(worktree ? { worktree } : {}),
-			dirty: lines.some((line) => line !== "" && !line.startsWith("#")),
+			dirty: files > 0,
+			// Untracked files add no lines; files is a lower bound if status hit maxBuffer.
+			...(files
+				? {
+						changes: {
+							files,
+							insertions: Number(shortstat?.match(/(\d+) insertion/)?.[1] ?? 0),
+							deletions: Number(shortstat?.match(/(\d+) deletion/)?.[1] ?? 0),
+						},
+					}
+				: {}),
 			...(counts
 				? { ahead: Number(counts[1]), behind: Number(counts[2]) }
 				: {}),

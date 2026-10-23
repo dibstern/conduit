@@ -11,6 +11,7 @@ import type { PersistenceError } from "../persistence/errors.js";
 import type { ClaudeSDKDecodeError } from "./claude/claude-sdk-validation.js";
 import type { MissingPendingInteractions } from "./errors.js";
 import type { ProviderSideEffectInteractionUnsupported } from "./orchestration-side-effect-reactor.js";
+import type { SendAdmissionTimeout } from "./runner/send-admission.js";
 import type { PickRejection } from "./turn-settings.js";
 
 /** An ingestion implementation failed with an error outside its declared store errors. */
@@ -106,6 +107,7 @@ export function isClaudeResumeFailure(error: unknown): boolean {
 
 export type ClaudeAdapterError =
 	| EventSinkError
+	| SendAdmissionTimeout
 	| ClaudeBoundaryError
 	| ClaudeRuntimeError
 	| ClaudeResumeRefused

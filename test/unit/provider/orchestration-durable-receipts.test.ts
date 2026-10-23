@@ -587,6 +587,7 @@ describe("OrchestrationEngine durable controls", () => {
 					const context = {
 						commandId: command.commandId,
 						providerProcessId: "process-1",
+						...(command.type === "interrupt_turn" ? { requestedAt: 1000 } : {}),
 					};
 					switch (command.type) {
 						case "interrupt_turn":
@@ -1705,6 +1706,7 @@ describe("OrchestrationEngine durable receipts", () => {
 							.soft(instance.interruptTurnEffect)
 							.toHaveBeenCalledExactlyOnceWith("session-1", undefined, call, {
 								commandId: "control-stop",
+								requestedAt: 1000,
 								providerProcessId: explicitProcessTarget
 									? "control-process"
 									: "absent:control-stop",

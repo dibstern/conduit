@@ -381,12 +381,14 @@ describe("listDaemonSessions", () => {
 			).toEqual({
 				branch: "main",
 				dirty: true,
+				changes: { files: 1, insertions: 0, deletions: 0 },
 				folders: [
 					{
 						root: gitProject,
 						label: "git-project",
 						branch: "main",
 						dirty: true,
+						changes: { files: 1, insertions: 0, deletions: 0 },
 					},
 				],
 			});

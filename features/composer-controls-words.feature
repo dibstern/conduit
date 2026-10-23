@@ -1,5 +1,18 @@
 Feature: Words composer keeps individual desktop controls and one phone sheet
 
+Scenario: phone checkout copies its branch and full commit hash
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the composer uses words controls
+  When I tap the phone composer Checkout row
+  And I tap the checkout Branch copy control
+  Then the checkout shows Branch copied and the clipboard contains account-chip
+  When I tap the checkout HEAD row
+  Then the checkout shows Commit hash copied and the clipboard contains 6b11104a9c2e88d27395d13c706d876fbab99aa1
+
 Scenario Outline: phone Settings selects Words and reload keeps the summary
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
