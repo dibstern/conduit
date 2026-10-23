@@ -245,7 +245,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 						title: "Effect Project",
 						folders: [projectDir],
 						missing: false,
-						repositoryIdentities: {},
 					},
 				]);
 				expect(instances).toEqual([

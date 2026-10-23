@@ -271,6 +271,7 @@ export interface ClaudeSessionContext {
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	currentTurnId: string | undefined;
+	currentTurnStartedAt?: number;
 	/** Set only when the SDK accepts an input, retained until its result. */
 	currentRunId?: string | undefined;
 	/** Native output can resume after a result while another input awaits intake. */

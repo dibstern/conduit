@@ -88,6 +88,7 @@ import {
 	DaemonLifecycleContextTag,
 } from "../Services/daemon-lifecycle-context.js";
 import {
+	DaemonEvent,
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../Services/daemon-pubsub.js";
@@ -95,6 +96,7 @@ import {
 	DaemonStateTag,
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
+import { EventLoopBlockMonitorLive } from "../Services/event-loop-delay.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
 	ManagedOpenCodeLifecycleLive,
@@ -123,6 +125,7 @@ import {
 	makeSharedSessionDirectoryLive,
 	SessionDirectory,
 } from "../Services/session-directory.js";
+import { SessionGit, SessionGitLive } from "../Services/session-git.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AccountPictureLive } from "./account-picture-layer.js";
 import { makeAccountResourceScopesLive } from "./account-resource-scopes-layer.js";
@@ -162,6 +165,7 @@ import {
 	StorageMonitorLive,
 	StorageMonitorTag,
 } from "./storage-monitor-layer.js";
+import { SubprocessLive } from "./subprocess-layer.js";
 import {
 	TailscaleCliLive,
 	TailscaleServeLive,
@@ -695,6 +699,8 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// These Layers have zero dependencies on other Tags. They form the base
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
+		EventLoopBlockMonitorLive.pipe(Layer.provide(PinoLoggerLive)),
+		SubprocessLive,
 		Layer.effectDiscard(
 			Effect.acquireRelease(Effect.sync(startContentionMetrics), (metrics) =>
 				Effect.tryPromise(async () => {
@@ -889,6 +895,30 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		}),
 		MessageSurfacingSettingsLive,
 	).pipe(Layer.provideMerge(withProviderAdapters));
+	const withSessionGit = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			return SessionGitLive.pipe(
+				Layer.provide(
+					makePersistenceDaemonLayer().pipe(
+						Layer.provideMerge(Layer.succeedContext(store)),
+					),
+				),
+			);
+		}),
+	).pipe(Layer.provideMerge(withWorktrees));
+	const withGitChanges = Layer.effectDiscard(
+		Effect.gen(function* () {
+			const git = yield* SessionGit;
+			const bus = yield* DaemonEventBusTag;
+			yield* git.changes.pipe(
+				Stream.runForEach(() =>
+					PubSub.publish(bus, DaemonEvent.ProjectsChanged()),
+				),
+				Effect.forkScoped,
+			);
+		}),
+	).pipe(Layer.provideMerge(withSessionGit));
 	const withSessionWorkspace = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;
@@ -900,7 +930,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				),
 			);
 		}),
-	).pipe(Layer.provideMerge(withWorktrees));
+	).pipe(Layer.provideMerge(withGitChanges));
 	const withOrchestration = DaemonOrchestrationLive.pipe(
 		Layer.provideMerge(withSessionWorkspace),
 	);

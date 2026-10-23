@@ -48,10 +48,7 @@ import {
 	forkOpenCodeSession,
 	forkSession,
 } from "../../../src/lib/domain/relay/Services/session-command.js";
-import {
-	SessionEventBusLive,
-	type SessionEventBusTag,
-} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { subscribeSessionFamily } from "../../../src/lib/domain/relay/Services/session-family-subscription.js";
 import { persistSessionPermissionMode } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
 import { deleteSession } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
@@ -1504,55 +1501,49 @@ describe("subscribeShell", () => {
 	);
 
 	it.effect(
-		"exactly-once across the base read: a commit during the read is not re-delivered",
+		"exactly-once across the base read: a commit before its transaction is not re-delivered",
 		() =>
 			Effect.gen(function* () {
 				yield* recoverProjections;
 				yield* commit([sessionCreated(SID)]);
 
-				const real = yield* ReadQueryEffectTag;
-				const services = yield* Effect.context<
-					| EventStoreEffectTag
-					| ProjectionRunnerEffectTag
-					| SessionEventBusTag
-					| SqlClient.SqlClient
-				>();
-				// A commit lands (and publishes its advance) WHILE the base is being
-				// read — after the advance subscription exists, before the rows are
-				// taken. The base therefore already carries it, and its buffered
-				// advance is at or below the base's version, so the orchestrator
-				// drops it rather than re-querying and re-sending the same row.
+				const sql = yield* SqlClient.SqlClient;
+				const withTransaction = sql.withTransaction;
+				// Commit after the advance subscription exists, before the base
+				// acquires its SQL snapshot. The snapshot includes the commit, so
+				// its buffered advance must not deliver the same row again.
 				const raced = yield* Ref.make(false);
-				const racingReadQuery: ReadQueryEffect = {
-					...real,
-					readSessionList: (...args) =>
+				const transaction = vi
+					.spyOn(sql, "withTransaction")
+					.mockImplementation((body) =>
 						Ref.getAndSet(raced, true).pipe(
 							Effect.flatMap((already) =>
 								already
 									? Effect.void
-									: Effect.orDie(
-											commit([sessionRenamed(SID, "Raced")]).pipe(
-												Effect.provide(services),
-											),
-										),
+									: Effect.orDie(commit([sessionRenamed(SID, "Raced")])),
 							),
-							Effect.andThen(real.readSessionList(...args)),
+							Effect.andThen(withTransaction(body)),
 						),
-				};
+					);
 
-				const { q } = yield* openShell({ readQuery: racingReadQuery });
-				const [snapshot, synchronized] = yield* takeN(q, 2);
-				if (snapshot?._tag !== "snapshot") throw new Error("expected snapshot");
-				expect(synchronized).toEqual({ _tag: "synchronized" });
-				expect(snapshot.rows[0]?.title).toBe("Raced");
+				yield* Effect.gen(function* () {
+					const { q } = yield* openShell();
+					const [snapshot, synchronized] = yield* takeN(q, 2);
+					if (snapshot?._tag !== "snapshot")
+						throw new Error("expected snapshot");
+					expect(synchronized).toEqual({ _tag: "synchronized" });
+					expect(yield* Ref.get(raced)).toBe(true);
+					expect(snapshot.rows[0]?.title).toBe("Raced");
+					expect(snapshot.sequence).toBe(yield* readModelVersion);
 
-				// A genuinely new change still flows exactly once. (The racing wrapper
-				// commits on every read, so this one arrives ahead of it in FIFO
-				// order and a re-delivered "Raced" would have to precede it.)
-				yield* commit([sessionRenamed(SID, "Fresh")]);
-				const delta = yield* Queue.take(q);
-				if (delta._tag !== "upsert") throw new Error("expected upsert");
-				expect(delta.item.title).toBe("Fresh");
+					// A re-delivered buffered row would precede this later change.
+					yield* commit([sessionRenamed(SID, "Fresh")]);
+					const delta = yield* Queue.take(q);
+					if (delta._tag !== "upsert") throw new Error("expected upsert");
+					expect(delta.item.title).toBe("Fresh");
+					expect(delta.sequence).toBe(yield* readModelVersion);
+					expect(yield* Queue.size(q)).toBe(0);
+				}).pipe(Effect.ensuring(Effect.sync(() => transaction.mockRestore())));
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true })),
 	);
 

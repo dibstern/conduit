@@ -60,6 +60,7 @@ export async function persistInputDraft(): Promise<boolean> {
 export function handleInputSyncReceived(msg: {
 	key: InputDraftKey;
 	text?: string | undefined;
+	restored?: string | undefined;
 	projectId?: string | undefined;
 	initial?: boolean;
 	attachments?: readonly {
@@ -80,6 +81,7 @@ export function handleInputSyncReceived(msg: {
 		_tag: "ServerTextReceived",
 		key: msg.key,
 		...(msg.text === undefined ? {} : { text: msg.text }),
+		...(msg.restored === undefined ? {} : { restored: msg.restored }),
 		...(msg.projectId === undefined ? {} : { projectId: msg.projectId }),
 		...(msg.initial ? { initial: true } : {}),
 	};

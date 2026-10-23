@@ -3292,7 +3292,23 @@ describe("ProviderTurnService", () => {
 			() => {
 				const engine = makeEngine({ providerId });
 				const ingestion = makeIngestion();
-				const { layer: dependencies } = serviceLayer({ engine, ingestion });
+				const { layer: dependencies } = serviceLayer({
+					engine,
+					ingestion,
+					readQuery: {
+						...makeReadQuery(() => Effect.succeed([])),
+						getSession: () => Effect.succeed(undefined),
+						getPendingClaudeQuestionTool: (sessionId, callId) =>
+							Effect.succeed({
+								id: callId,
+								call_id: callId,
+								message_id: "message-1",
+								input: null,
+								created_at: 1,
+								session_id: sessionId,
+							}),
+					},
+				});
 				const layer = PassThroughSessionInbox.pipe(
 					Layer.provideMerge(dependencies),
 				);
@@ -3408,15 +3424,19 @@ describe("ProviderTurnService", () => {
 					return yield* Effect.fail(
 						new Error("Missing recovered question handler"),
 					);
+				const question = {
+					requestId: "toolu-1",
+					sessionId: "session-1",
+					toolCallId: "toolu-1",
+					questions: [{ question: "Which colour?" }],
+					recovered: true as const,
+					timestamp: 1,
+				};
+				yield* (yield* PendingInteractionServiceTag).recoverPendingQuestions([
+					question,
+				]);
 				yield* service.completeRecoveredQuestion(
-					{
-						requestId: "toolu-1",
-						sessionId: "session-1",
-						toolCallId: "toolu-1",
-						questions: [{ question: "Which colour?" }],
-						recovered: true,
-						timestamp: 1,
-					},
+					question,
 					'Answer to your question "Which colour?": red',
 				);
 				expect(getPendingClaudeQuestionTool).toHaveBeenCalledWith(

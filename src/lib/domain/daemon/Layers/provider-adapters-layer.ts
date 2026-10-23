@@ -45,6 +45,7 @@ import {
 import { discoverRunners } from "../../../provider/runner/runner-registry.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { ProjectRelayConfig } from "../../../types.js";
+import { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
 import { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../../relay/Services/services.js";
@@ -148,6 +149,7 @@ export const makeProviderAdaptersLive = (
 									project.context,
 									ClaudeEventPersistEffectTag,
 								),
+								inputDrafts: Context.get(project.context, InputDraftsTag),
 								timeoutHooks: makeProcessingTimeoutHooks(
 									project.context,
 									sessionId,

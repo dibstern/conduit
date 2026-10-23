@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import * as Failure from "../../effect/failure-classification.js";
 import {
 	ClaudeEventPersistEffectTag,
@@ -126,7 +127,38 @@ export const recoverRunnerCommands = <T extends DurableSessionTurn>(
 					const execution = yield* Effect.result(options.replay(row, input));
 					if (options.closing()) return;
 					if (execution._tag === "Failure") {
-						yield* options.failTurn(sinkId, execution.failure);
+						if (execution.failure.code === "send_admission_timeout") {
+							// Replay has no live reactor waiter to place and restore a refusal.
+							const persist = yield* Effect.serviceOption(
+								ClaudeEventPersistEffectTag,
+							);
+							if (persist._tag === "Some")
+								yield* persist.value.persistUserMessage(
+									sessionId,
+									input.prompt,
+									{
+										messageId:
+											input.continuation?.cutOffMessageId ?? input.inputId,
+										inputId: input.inputId,
+										...(input.runId ? { runId: input.runId } : {}),
+										provider: driverKind,
+										...(input.images ? { images: input.images } : {}),
+										failure: {
+											message: execution.failure.message,
+											code: "send_admission_timeout",
+											retryable: false,
+										},
+									},
+								);
+							const drafts = yield* Effect.serviceOption(InputDraftsTag);
+							if (drafts._tag === "Some")
+								yield* drafts.value.restore(
+									sessionId,
+									input.inputId,
+									input.text ?? input.prompt,
+									input.images ?? [],
+								);
+						} else yield* options.failTurn(sinkId, execution.failure);
 						return yield* settleRunnerCommand(
 							sql,
 							row.project_key,

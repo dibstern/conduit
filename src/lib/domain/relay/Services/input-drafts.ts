@@ -83,6 +83,16 @@ export interface InputDrafts {
 		inputId: string,
 		refs: readonly AttachmentRef[],
 	) => DraftChange;
+	/**
+	 * Return a refused send to its session's composer, text and attachments,
+	 * without overwriting a newer draft.
+	 */
+	readonly restore: (
+		sessionId: string,
+		inputId: string,
+		text: string,
+		refs: readonly AttachmentRef[],
+	) => Effect.Effect<void>;
 	readonly claim: (
 		draftId: string,
 		projectId: string,
@@ -205,6 +215,22 @@ export const makeInputDrafts: Effect.Effect<
 			Effect.map((rows) =>
 				rows.map((row) => ({ ...row, name: row.name ?? "attachment" })),
 			),
+		);
+	// Ids derive from the input, so restoring the same refusal twice adds nothing.
+	const restoreAttachments = (
+		key: InputDraftKey,
+		inputId: string,
+		refs: readonly AttachmentRef[],
+	) =>
+		Effect.forEach(
+			refs,
+			(ref, index) =>
+				sql`INSERT OR IGNORE INTO draft_attachments
+				(id, draft_key, position, name, hash, state, created_at)
+				SELECT ${`${inputId}:${index}`}, ${keyOf(key)}, COALESCE(MAX(position), -1) + 1,
+				${ref.name ?? null}, ${ref.attachmentHash}, 'live', ${Date.now()}
+				FROM draft_attachments WHERE draft_key = ${keyOf(key)}`,
+			{ discard: true },
 		);
 	const ensureDraft = (key: InputDraftKey, projectId?: string) =>
 		Effect.gen(function* () {
@@ -486,14 +512,7 @@ export const makeInputDrafts: Effect.Effect<
 			write: Effect.gen(function* () {
 				const actualKey = yield* resolveKey(key).pipe(Effect.orDie);
 				if (!(yield* ensureDraft(actualKey).pipe(Effect.orDie))) return;
-				for (const [index, ref] of refs.entries())
-					yield* sql`INSERT OR IGNORE INTO draft_attachments
-					(id, draft_key, position, name, hash, state, created_at)
-					SELECT ${`${inputId}:${index}`}, ${keyOf(actualKey)}, COALESCE(MAX(position), -1) + 1,
-					${ref.name ?? null}, ${ref.attachmentHash}, 'live', ${Date.now()}
-					FROM draft_attachments WHERE draft_key = ${keyOf(actualKey)}`.pipe(
-						Effect.orDie,
-					);
+				yield* restoreAttachments(actualKey, inputId, refs).pipe(Effect.orDie);
 			}),
 			publish: snapshotGate.withPermits(1)(
 				Effect.gen(function* () {
@@ -501,6 +520,48 @@ export const makeInputDrafts: Effect.Effect<
 				}),
 			),
 		}),
+		restore: (sessionId, inputId, text, refs) =>
+			Effect.gen(function* () {
+				const key = { session: sessionId };
+				const restored = yield* sql.withTransaction(
+					Effect.gen(function* () {
+						const rows = yield* sql<{
+							text: string;
+						}>`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at)
+							SELECT id, project_id, 'session', ${text}, ${Date.now()}
+							FROM sessions WHERE id = ${sessionId}
+							ON CONFLICT (draft_key) DO UPDATE SET
+								text = excluded.text || CASE WHEN input_drafts.text != '' AND input_drafts.text != excluded.text
+									THEN '\n\n' || input_drafts.text ELSE '' END,
+								updated_at = excluded.updated_at
+							WHERE input_drafts.kind = 'session' AND input_drafts.promoted_session_id IS NULL
+							RETURNING text`;
+						if (rows[0]) yield* restoreAttachments(key, inputId, refs);
+						return rows[0]?.text;
+					}),
+				);
+				if (restored === undefined) return;
+				yield* snapshotGate.withPermits(1)(
+					Effect.gen(function* () {
+						const attachments = yield* snapshotAttachments(key);
+						yield* PubSub.publish(changes, {
+							key,
+							envelope: {
+								_tag: "draft",
+								text: restored,
+								attachments,
+								restored: text,
+							},
+						});
+					}),
+				);
+			}).pipe(
+				Effect.catch((cause) =>
+					Effect.logError(
+						`Could not restore input draft ${sessionId}: ${cause}`,
+					),
+				),
+			),
 		claim: (draftId, projectId) =>
 			sql<{ text: string }>`INSERT INTO input_drafts
 				(draft_key, project_id, kind, text, updated_at, promoted_session_id)

@@ -71,6 +71,66 @@ detail resumes keep their existing policy.
 - CLI commands use the same `WsRpcGroup` and daemon handlers over a filesystem-protected Unix socket with NDJSON framing. Browser PIN authentication remains required on network WebSockets.
 - Browser real-time transport remains WebSocket-based. Effect RPC runs over the WebSocket protocol for migrated browser operations; raw PTY input remains the terminal data-plane path.
 
+## Short-lived subprocesses
+
+`Subprocess` is an Effect `Context.Reference` with one shared default owner.
+`makeDaemonLive` supplies a scoped override, shared by its project relays.
+Standalone callers use the default; tests can supply an isolated owner.
+`run(command, args, { cwd, timeoutMs, key?, priority? })` returns an Effect with
+`stdout`, `stderr`, and `exitCode`. Nonzero exit codes are results; spawn,
+timeout, signal, output-limit and owner-shutdown failures are typed
+`SubprocessError`s. Commands share four slots. Queued interactive commands run
+before background commands, with FIFO ordering within each priority. Keys share
+only pending work, and cancelling one waiter leaves other waiters intact.
+
+Session git belongs to one daemon module, exposed by
+`domain/daemon/Services/session-git.ts`. Its interface is `read(sessionId)`,
+`changes`, and `invalidate(target)`. Canonical folder keys share git reads across
+sessions and projects. Viewed folders refresh every 5 seconds and running
+folders every 15 seconds. Listed folders older than 30 seconds get a safety-net
+refresh for missed watcher events, at most one every 20 seconds daemon-wide,
+oldest first, so idle cost does not grow with listed sessions; dormant folders
+refresh on hints. Reads only refresh a folder that was never published. Hints
+have a two-second leading/trailing throttle and retain the tier's cadence.
+Run ends, presence changes and ref changes force a refresh; a worktree's ref
+changes are its own branch and the default branches, not other worktrees'. A ref
+event forces a read only when the ref file's contents changed, because FSEvents
+replays and repeats events and can name a ref update after its lock file. A
+hinted folder's presence is checked once per hint, before the tick reads the
+clock. Scoped filesystem
+watches and session membership use `OwnerScopes`;
+commands use the shared Subprocess owner at background priority.
+
+Readers consume `session_git_published` in the same SQL snapshot as the session
+row. Git, missing-workspace recovery state and session/sidebar versions commit
+together. RPC list reads serve the publication, including absence, and leave
+membership and refresh scheduling to the daemon coordinator. A first non-RPC
+read may await publication. Canonical folder identities are memoized; the owner
+forgets them on presence changes. Project rows have folder identities rather than
+session IDs, so they read the same published SQL view directly. Repository
+identity discovery runs during registration and save, not project-list reads.
+
+Read RPC dispatch supplies `ReadRequest`, an Effect 4 `Context.Reference` inherited
+by request fibers. The owner warns at most once per minute when reads request
+commands. `CONDUIT_STRICT_READ_SPAWN=1` turns this into a defect. The legacy
+Promise runner also rejects before enqueueing; session git's existing best-effort
+catches still return no git state. Strict mode remains opt-in while existing
+read paths still refresh git state.
+
+`Subprocess.metrics` returns a JSON-serializable snapshot of spawn counts and
+cumulative wall and synchronous spawn time, globally and by command, plus active,
+queued and peak active counts. Snapshots also publish on the Node diagnostics
+channel `conduit:subprocess-metrics` when commands finish. Synchronous spawn time
+measures only time spent calling Node's `spawn`; wall time excludes queueing and
+ends after the child closes. The idle-budget E2E can subscribe before daemon
+startup and retain the last snapshot. Worker-thread hosting is deferred until
+that representative E2E measures the remaining main-thread cost after the
+session-git changes. Short-command tests alone do not settle that decision.
+
+`scripts/check-subprocess-boundary.mjs`, run by `pnpm lint:rules`, restricts direct
+child-process imports to the owner and explicit long-lived process owners. Its
+separate list of remaining one-shot callers must only shrink.
+
 ## PTY lifetime
 
 Local terminals belong to a detached per-user PTY host, not the server. The host

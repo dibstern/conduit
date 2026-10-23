@@ -30,6 +30,7 @@ import {
 } from "../domain/daemon/Services/secret-answers.js";
 import { mark } from "../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
+import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { PROCESSING_TIMEOUT_DURATION } from "../domain/relay/Services/session-overrides-state.js";
 import * as Failure from "../effect/failure-classification.js";
@@ -130,6 +131,7 @@ interface ProviderCommandOutboxRow {
 	readonly run_id: string | null;
 	readonly provider_process_id: string | null;
 	readonly attempt_count: number;
+	readonly requested_at: number;
 	readonly status: "pending" | "running" | "retryable_failed";
 }
 
@@ -379,7 +381,7 @@ export class ProviderSideEffectReactor {
 				// neither adapter recovery nor pending selection can settle those.
 				const commands = yield* this.options.sql<ProviderCommandOutboxRow>`
 					SELECT request_sequence, command_id, project_key, session_id, provider_id,
-						effect_type, payload_json, run_id, provider_process_id, attempt_count, status
+						effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
 					FROM provider_command_outbox
 					WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
 						AND status IN ('pending', 'running', 'retryable_failed')
@@ -918,6 +920,13 @@ export class ProviderSideEffectReactor {
 				const code = failure
 					? providerFailureCode(failure)
 					: (turn?.error?.code ?? turn?.status ?? "provider_failure");
+				const message =
+					typeof cause === "object" &&
+					cause !== null &&
+					"message" in cause &&
+					typeof cause.message === "string"
+						? cause.message
+						: (turn?.error?.message ?? code);
 				const retryAt = retryable
 					? failedAt +
 						Duration.toMillis(
@@ -949,7 +958,7 @@ export class ProviderSideEffectReactor {
 					const payload =
 						this.options.persistUserMessage &&
 						!placement?.placed &&
-						!placement?.steering &&
+						(!placement?.steering || code === "send_admission_timeout") &&
 						!interrupted
 							? yield* this.parseSendTurnPayload(row).pipe(
 									Effect.orElseSucceed(() => undefined),
@@ -970,10 +979,7 @@ export class ProviderSideEffectReactor {
 								provider: driver,
 								...(payload.images ? { images: payload.images } : {}),
 								failure: {
-									message:
-										cause instanceof Error
-											? cause.message
-											: (turn?.error?.message ?? code),
+									message,
 									code,
 									retryable,
 									retryAt,
@@ -996,16 +1002,29 @@ export class ProviderSideEffectReactor {
 								createdAt: failedAt,
 								data: {
 									messageId: `provider-command:${row.command_id}`,
-									error:
-										cause instanceof Error
-											? cause.message
-											: (turn?.error?.message ?? code),
+									error: message,
 									code,
 									retryable,
 									retryAt,
 								},
 							})
 							.pipe(Effect.mapError(storeFailure("failedRun")));
+					if (code === "send_admission_timeout") {
+						const unsent = yield* this.parseSendTurnPayload(row);
+						yield* this.withProjectContext(
+							row.project_key,
+							Effect.gen(function* () {
+								const drafts = yield* Effect.serviceOption(InputDraftsTag);
+								if (Option.isSome(drafts))
+									yield* drafts.value.restore(
+										row.session_id,
+										unsent.inputId,
+										unsent.text ?? unsent.prompt,
+										unsent.images ?? [],
+									);
+							}),
+						);
+					}
 				} else yield* this.writeFailure(row, retryable, code, failedAt);
 			} else if (row.effect_type !== "send_turn")
 				yield* this.markCompleted(row, yield* this.currentTimeMillis());
@@ -1129,7 +1148,7 @@ export class ProviderSideEffectReactor {
 			const nowMs = yield* this.currentTimeMillis();
 			return yield* this.options.sql<ProviderCommandOutboxRow>`
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
-			       effect_type, payload_json, run_id, provider_process_id, attempt_count, status
+			       effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
 			FROM provider_command_outbox AS candidate
 			WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
 				AND (${sessionId ?? null} IS NULL OR session_id = ${sessionId ?? null})
@@ -1201,7 +1220,7 @@ export class ProviderSideEffectReactor {
 					))
 					AND (status = 'pending' OR (status = 'retryable_failed' AND next_attempt_at <= ${updatedAt}))
 				RETURNING request_sequence, command_id, project_key, session_id, provider_id,
-					effect_type, payload_json, run_id, provider_process_id, attempt_count, status`;
+					effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at`;
 					if (claimed?.run_id === runId) {
 						const store = yield* makeEventStoreEffect.pipe(
 							Effect.provideService(SqlClient.SqlClient, this.options.sql),
@@ -1411,6 +1430,13 @@ export class ProviderSideEffectReactor {
 				const context = {
 					commandId: row.command_id,
 					providerProcessId: row.provider_process_id,
+					...(payload.type === "interrupt_turn"
+						? {
+								requestedAt: stop
+									? stop.deadlineAt - STOP_ABORT_WAIT_MS
+									: row.requested_at,
+							}
+						: {}),
 					...(payload.type === "end_session" && payload.retireRunIds
 						? { retireRunIds: payload.retireRunIds }
 						: {}),
@@ -1953,7 +1979,7 @@ export class ProviderSideEffectReactor {
 	> {
 		return this.options.sql<ProviderCommandOutboxRow>`
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
-			       effect_type, payload_json, run_id, provider_process_id, attempt_count, status
+			       effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
 			FROM provider_command_outbox
 			WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
 				AND command_id = ${commandId} AND status IN ('pending', 'retryable_failed')

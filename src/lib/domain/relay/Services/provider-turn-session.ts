@@ -49,49 +49,22 @@ export const completeRecoveredQuestion = (
 	answers: Record<string, unknown> = {},
 ) =>
 	Effect.gen(function* () {
-		let messageId = question.messageId;
-		let partId = question.partId ?? question.toolCallId ?? question.requestId;
-		if (!messageId) {
-			const readQuery = yield* ReadQueryEffectTag;
-			const tool = readQuery.getPendingClaudeQuestionTool
-				? yield* readQuery.getPendingClaudeQuestionTool(
-						question.sessionId,
-						question.toolCallId ?? question.requestId,
-					)
-				: undefined;
-			if (!tool)
-				return yield* Effect.fail(
-					new Error(
-						`Pending Claude question tool not found: ${question.requestId}`,
-					),
-				);
-			messageId = tool.message_id;
-			partId = tool.id;
-		}
+		const pending = yield* PendingInteractionServiceTag;
+		// Claim retirement before any I/O so racing sends warn only once.
+		if (!(yield* pending.markQuestionResolved(question.requestId)))
+			return false;
+		const readQuery = yield* ReadQueryEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
-		const completedEvent = {
+		const log = yield* LoggerTag;
+		const resolvedEvent = {
 			eventId: createEventId(),
-			type: "tool.completed" as const,
+			type: "question.resolved" as const,
 			providerId: CLAUDE_PROVIDER_ID,
 			sessionId: question.sessionId,
 			providerRefs: {
-				providerToolUseId: question.toolCallId ?? question.requestId,
-			},
-			rawSource: { kind: "relay.recovered-question" },
-			createdAt: Date.now(),
-			data: {
-				messageId,
-				partId,
-				result,
-				duration: 0,
-			},
-		};
-		const resolvedEvent = {
-			...completedEvent,
-			eventId: createEventId(),
-			type: "question.resolved" as const,
-			providerRefs: {
-				...completedEvent.providerRefs,
+				...(question.toolCallId
+					? { providerToolUseId: question.toolCallId }
+					: {}),
 				...(question.providerProcessId
 					? { providerProcessId: question.providerProcessId }
 					: {}),
@@ -99,30 +72,72 @@ export const completeRecoveredQuestion = (
 					? { providerRequestId: question.providerRequestId }
 					: {}),
 			},
+			rawSource: { kind: "relay.recovered-question" },
+			createdAt: Date.now(),
 			data: { id: question.providerRequestId ?? question.requestId, answers },
 		};
-		if (question.messageId) {
-			// A fresh mapper has not seen the stored tool start. Seed its identity
-			// so completion updates the existing card without an Unknown tool.
-			yield* ingestion.ingestBatch([
-				{
-					...completedEvent,
+		const completed = yield* Effect.result(
+			Effect.gen(function* () {
+				// Stored message/part ids can outlive the open tool too.
+				const tool =
+					question.toolCallId && readQuery.getPendingClaudeQuestionTool
+						? yield* readQuery.getPendingClaudeQuestionTool(
+								question.sessionId,
+								question.toolCallId,
+							)
+						: undefined;
+				if (!tool) return false;
+				const completedEvent = {
+					...resolvedEvent,
 					eventId: createEventId(),
-					type: "tool.started",
+					type: "tool.completed" as const,
 					data: {
-						messageId,
-						partId,
-						toolName: "AskUserQuestion",
-						callId: question.toolCallId ?? question.requestId,
-						input: { tool: "AskUserQuestion", questions: question.questions },
+						messageId: tool.message_id,
+						partId: tool.id,
+						result,
+						duration: 0,
 					},
-				},
-				completedEvent,
-				resolvedEvent,
-			]);
-		} else {
-			yield* ingestion.ingestBatch([completedEvent, resolvedEvent]);
-		}
+				};
+				const events = [completedEvent, resolvedEvent];
+				if (question.messageId) {
+					// A fresh mapper needs the stored identity before completion.
+					yield* ingestion.ingestBatch([
+						{
+							...completedEvent,
+							eventId: createEventId(),
+							type: "tool.started",
+							data: {
+								messageId: tool.message_id,
+								partId: tool.id,
+								toolName: "AskUserQuestion",
+								callId: question.toolCallId,
+								input: {
+									tool: "AskUserQuestion",
+									questions: question.questions,
+								},
+							},
+						},
+						...events,
+					]);
+				} else {
+					yield* ingestion.ingestBatch(events);
+				}
+				return true;
+			}),
+		);
+		if (completed._tag === "Success" && completed.success) return true;
+		// Old interaction bookkeeping must never reject a new input. Retire the
+		// durable card as well, without recreating or overwriting a closed tool.
+		yield* ingestion
+			.ingest({
+				...resolvedEvent,
+				data: { ...resolvedEvent.data, answers: {} },
+			})
+			.pipe(Effect.ignore);
+		log.warn(
+			`Recovered Claude question is no longer answerable: session=${question.sessionId} request=${question.requestId} toolCallId=${question.toolCallId ?? "missing"}${completed._tag === "Failure" ? `: ${formatErrorDetail(completed.failure)}` : ""}`,
+		);
+		return false;
 	});
 
 const resolvePendingClaudeQuestions = (
@@ -141,7 +156,6 @@ const resolvePendingClaudeQuestions = (
 		for (const question of pendingQuestions) {
 			if (!question.recovered) continue;
 			yield* completeRecoveredQuestion(question, null);
-			yield* pendingInteractionService.markQuestionResolved(question.requestId);
 		}
 		if (pendingQuestions.some((question) => !question.recovered)) {
 			const stop = {

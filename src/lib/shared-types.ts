@@ -261,8 +261,11 @@ export type BackgroundTask = typeof BackgroundTaskSchema.Type;
 export interface SessionGit {
 	branch?: string;
 	head?: string;
+	oid?: string;
+	upstream?: string;
 	worktree?: string;
 	dirty?: boolean;
+	changes?: { files: number; insertions: number; deletions: number };
 	ahead?: number;
 	behind?: number;
 	merged?: boolean;
@@ -278,8 +281,17 @@ export interface SessionGit {
 const GitStatusSchema = Schema.Struct({
 	branch: Schema.optionalKey(Schema.String),
 	head: Schema.optionalKey(Schema.String),
+	oid: Schema.optionalKey(Schema.String),
+	upstream: Schema.optionalKey(Schema.String),
 	worktree: Schema.optionalKey(Schema.String),
 	dirty: Schema.optionalKey(Schema.Boolean),
+	changes: Schema.optionalKey(
+		Schema.Struct({
+			files: Schema.Number,
+			insertions: Schema.Number,
+			deletions: Schema.Number,
+		}),
+	),
 	ahead: Schema.optionalKey(Schema.Number),
 	behind: Schema.optionalKey(Schema.Number),
 	merged: Schema.optionalKey(Schema.Boolean),

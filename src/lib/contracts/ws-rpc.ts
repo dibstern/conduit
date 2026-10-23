@@ -3892,6 +3892,8 @@ const InputDraftEnvelopeSchema = Schema.Union([
 	Schema.TaggedStruct("draft", {
 		text: Schema.String,
 		attachments: Schema.Array(DraftAttachmentSchema),
+		/** The refused input fragment, before merging with the stored draft. */
+		restored: Schema.optional(Schema.String),
 		projectId: Schema.optional(Schema.String),
 		/** The writer's SyncInputDraft originId; that tab drops its own echo. */
 		from: Schema.optional(Schema.String),

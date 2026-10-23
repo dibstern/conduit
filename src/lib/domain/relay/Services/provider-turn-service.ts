@@ -137,7 +137,7 @@ export interface ProviderTurnService {
 		result: string | null,
 		answers?: Record<string, unknown>,
 	) => Effect.Effect<
-		void,
+		boolean,
 		Effect.Error<ReturnType<typeof completeRecoveredQuestion>>
 	>;
 	readonly prepareTurnSession: (

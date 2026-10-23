@@ -177,9 +177,11 @@ const SHIPPED_MIGRATION_HASHES = {
 		"1fbac288a0c9c2222af84c24f867800e34d04398f3b0db04f6355075c70525e4",
 	"0078_provider_control_process.sql":
 		"a607deae2046849531fe0992a12fc09d602392ba73b8dd846fcef18977be9b93",
-	"0079_attachment_store.sql":
+	"0079_session_git_publication.sql":
+		"f3094c5335b3ef2bbfcec55d3068ba0db8f6c200c13c1c66037566e6eb3fe35d",
+	"0080_attachment_store.sql":
 		"6f85d25d46201a47412d53720047211f9e7685b9de3112e45da39a7b24c7ddfc",
-	"0080_session_draft_delete.sql":
+	"0081_session_draft_delete.sql":
 		"6acac0759e89bf6e0e1be1249c8393ef97baf23e502b22aa64b34bf8dadc71c5",
 } satisfies Record<string, string>;
 
@@ -200,10 +202,10 @@ describe("shipped migrations are immutable", () => {
 			.filter((f) => f.endsWith(".sql"))
 			.sort();
 		expect(onDisk).toEqual(Object.keys(SHIPPED_MIGRATION_HASHES).sort());
-		// Effect keys 10, 67 and 78 are code-only; SQL files run from 0001 to 0080.
-		expect(onDisk).toHaveLength(80);
+		// Effect keys 10, 67 and 78 are code-only; SQL files run from 0001 to 0081.
+		expect(onDisk).toHaveLength(81);
 		expect(onDisk.map((file) => Number(file.slice(0, 4)))).toEqual(
-			Array.from({ length: 80 }, (_, index) => index + 1),
+			Array.from({ length: 81 }, (_, index) => index + 1),
 		);
 	});
 });

@@ -14,7 +14,6 @@ import { Effect, Ref } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
-import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -316,40 +315,6 @@ async function createTestHarness(): Promise<TestHarness> {
 		},
 	};
 }
-
-it("checks cache freshness on the poll cadence without rereading fresh git", async () => {
-	// Install virtual time before this harness starts its background poller.
-	vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-	const isStale = vi
-		.spyOn(daemonSessionGitCache, "isStale")
-		.mockReturnValue(false);
-	const refresh = vi.spyOn(daemonSessionGitCache, "refresh");
-	let harness: TestHarness | undefined;
-	try {
-		harness = await createTestHarness();
-		for (let tick = 0; tick < 2; tick++) {
-			const checked = new Promise<void>((resolve) => {
-				isStale.mockImplementation(() => {
-					resolve();
-					return false;
-				});
-			});
-			const previousCalls = isStale.mock.calls.length;
-			await vi.advanceTimersByTimeAsync(100);
-			await checked;
-			expect(isStale.mock.calls.length).toBeGreaterThan(previousCalls);
-			expect(refresh).not.toHaveBeenCalled();
-		}
-	} finally {
-		try {
-			await harness?.stop();
-		} finally {
-			isStale.mockRestore();
-			refresh.mockRestore();
-			vi.useRealTimers();
-		}
-	}
-});
 
 describe("Status poller → browser shell transitions", () => {
 	let harness: TestHarness;

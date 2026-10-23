@@ -238,6 +238,63 @@ registration. Evidence and cleanup results go to
 `test-results/85kb-16-serve.json`. Inspect `ps -axo pid,command` for processes
 started by the tests; never signal processes belonging to the user's live server.
 
+#### Daemon git and event-loop budgets
+
+Run the isolated process-harness budget test on an otherwise quiet machine:
+
+```sh
+export npm_config_verify_deps_before_run=false pnpm_config_verify_deps_before_run=false
+pnpm test:budget </dev/null
+```
+
+This builds the daemon, seeds 30 sessions in real linked git worktrees across
+two projects, deletes one worktree folder, and holds the browser shell feed
+open. It measures 30 seconds idle, an external commit's arrival in that feed,
+16 seconds of status/add churn in ten worktrees, and project/session list reads.
+The cold project is never opened in a session view. Churn includes one running
+fake Claude turn, one viewed session, and eight listed sessions.
+
+The normalized report is `test-results/daemon-budget.json`; the daemon log is
+`test-results/daemon-budget.log`. The report includes all command counts and
+rates, loop p50/p99/max in milliseconds, slow-RPC counts per phase, per-worktree
+git reads and tier limits, and cleanup evidence. The isolated daemon subscribes
+to the subprocess owner's `conduit:subprocess-metrics` diagnostics channel.
+Start events include command arguments and the working directory, so one
+`git status` counts one git read and long-running processes count in the phase
+where they start. Fixture git commands run outside that owner and are excluded.
+Idle measurement starts after all workspace and project-folder publications
+exist and the subprocess owner has finished its startup work.
+The external commit's pending refreshes settle in a separately recorded phase
+before the test establishes Running and Viewed activity for churn.
+
+The targets in `test/budget/daemon-idle.test.ts` are intentionally red until
+conduit-test-g43i.4/.5 land. They are 6 idle spawns/minute, loop p99 below 50 ms
+against a 500 ms slow-RPC threshold, external commit visibility within 1 second,
+at most one churn read per tier interval plus the leading read, and zero spawns
+during each list RPC's actual start/end interval, including background spawns
+that overlap it. The report also preserves every raw control-phase spawn and
+counts those outside the RPC, including up to 50 ms spent polling for the end
+acknowledgment after the RPC has returned. Run again on a quiet
+machine to investigate timing variance; do not loosen the budgets.
+
+This suite has its own Vitest config. It is excluded from default unit,
+integration, E2E and `scripts/test-all.sh` release groups. Its expected red
+baseline must not block unrelated commits or releases.
+
+The [post-c329db13 baseline](../../test/budget/baselines/post-c329db13.json)
+measured 655 idle spawns/minute, idle loop p50/p99/max of 10.854/18.203/71.827 ms,
+and a 5,024 ms external commit arrival. Churn loop p99 was 45.580 ms; reads were
+2 Running, 1 Viewed, and 1 per Listed worktree. Project/warm-session/cold-session/
+missing-worktree list reads spawned 28/38/12/1 processes. No measured phase
+logged a slow RPC. Idle and churn p99 passed in this run; the spawn and arrival
+budgets failed. Timing and poll alignment vary between runs.
+
+Daemon loop monitoring runs by default. Slow-RPC lines include `loopActiveMs`
+and `loopUtilization`, the main thread's busy time over the request; near
+`totalMs` means synchronous work, not I/O, filled it. A native loop-delay
+histogram is checked every second and logs `event loop blocked` when a stall
+passes 250 ms, at most once every 30 seconds.
+
 #### Restart and create latency under load
 
 `harness-restart-load.spec.ts` seeds approximately 10,000 sessions, connects

@@ -116,8 +116,10 @@ export const SESSIONS_GOAL_STUCK_MIGRATION = "0076_sessions_goal_stuck.sql";
 export const SESSIONS_JEV_MIGRATION = "0077_sessions_jev.sql";
 export const PROVIDER_CONTROL_PROCESS_MIGRATION =
 	"0078_provider_control_process.sql";
-export const ATTACHMENT_STORE_MIGRATION = "0079_attachment_store.sql";
-export const SESSION_DRAFT_DELETE_MIGRATION = "0080_session_draft_delete.sql";
+export const SESSION_GIT_PUBLICATION_MIGRATION =
+	"0079_session_git_publication.sql";
+export const ATTACHMENT_STORE_MIGRATION = "0080_attachment_store.sql";
+export const SESSION_DRAFT_DELETE_MIGRATION = "0081_session_draft_delete.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

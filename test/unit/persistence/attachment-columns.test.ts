@@ -43,7 +43,7 @@ const cannotHoldRefs = {
 	provider_runs: "id session_id status joined_into",
 	provider_state: "session_id key value",
 	sent_alerts: "session_id alert_key anchor state claim_id",
-	session_git_published: "directory git",
+	session_git_published: "directory git workspace_missing",
 	session_goal_checks: "event_id session_id condition reason judge_model",
 	session_pick_backfill: "session_id retry_reason",
 	session_providers: "id session_id provider provider_sid status",
