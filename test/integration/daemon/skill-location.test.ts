@@ -1,6 +1,7 @@
 // Failure cases: content lookup guesses another provider/account's roots,
 // exposes filesystem paths as refs, or leaves fixture-owned runners alive.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
@@ -25,9 +26,8 @@ describe("Skill locations through daemon browser RPC", () => {
 	function create(name: string) {
 		scenario = name;
 		evidence = {};
-		mkdirSync("build", { recursive: true });
 		harness = ProcessHarness.create({
-			rootPrefix: resolve("build/c6-"),
+			rootPrefix: join(tmpdir(), "conduit-skill-location-"),
 		});
 		return harness;
 	}
