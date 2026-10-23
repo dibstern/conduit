@@ -91,6 +91,7 @@
 			<span aria-live="polite">{searchSummary ?? "Searching…"}</span>
 			<label class="flex items-center gap-1.5 whitespace-nowrap">
 				<Checkbox
+					variant="settings"
 					data-testid="search-include-archived"
 					checked={sessionState.searchIncludeArchived}
 					onchange={(event) => void setSearchIncludeArchived(event.currentTarget.checked)}
