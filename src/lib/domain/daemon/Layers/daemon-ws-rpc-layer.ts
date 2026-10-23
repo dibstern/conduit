@@ -32,7 +32,7 @@ import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
-import { makeCodexAuth } from "../../../provider/codex/codex-auth.js";
+import { CodexAccountResources } from "../../../provider/codex/codex-account-resources.js";
 import { discoverCodex } from "../../../provider/codex/codex-discovery.js";
 import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
 import {
@@ -426,24 +426,8 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 					return yield* Deferred.await(started);
 				}),
 			);
-		const codexAuth = yield* makeCodexAuth(
-			configDir,
-			(accountId) =>
-				run(
-					Effect.gen(function* () {
-						const account = yield* (yield* AccountDirectory).resolve({
-							_tag: "Id",
-							id: accountId,
-						});
-						if (account.driver === "codex") return account;
-						return yield* Effect.fail(
-							new WsRpcError({ message: "A Codex account is required." }),
-						);
-					}),
-				),
-			() =>
-				PubSub.publish(bus, DaemonEvent.InstancesChanged()).pipe(Effect.asVoid),
-		);
+		const codexResources = yield* CodexAccountResources;
+		const codexScope = yield* Effect.scope;
 		// Join the subscriber set BEFORE the first read, so a change landing
 		// between the two still wakes this stream: snapshot, then a fresh list
 		// per change.
@@ -746,11 +730,37 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			StartCursorLogin: (request) => cursorAuth("start", request.accountId),
 			CancelCursorLogin: (request) => cursorAuth("cancel", request.accountId),
 			LogoutCursor: (request) => cursorAuth("logout", request.accountId),
-			GetCodexAuth: (request) => codexAuth.read(request.accountId),
+			GetCodexAuth: (request) =>
+				codexResources.use(request.accountId, ({ auth }) =>
+					auth.read(request.accountId),
+				),
 			StartCodexLogin: (request) =>
-				codexAuth.start(request.accountId, request.method),
-			CancelCodexLogin: (request) => codexAuth.cancel(request.accountId),
-			LogoutCodex: (request) => codexAuth.logout(request.accountId),
+				Effect.gen(function* () {
+					const started = yield* Deferred.make<
+						import("../../../contracts/ws-rpc.js").CodexAuthState,
+						WsRpcError
+					>();
+					yield* codexResources
+						.use(request.accountId, ({ auth }) =>
+							auth.start(request.accountId, request.method).pipe(
+								Effect.tap((state) => Deferred.succeed(started, state)),
+								Effect.tap(() => auth.awaitLogin(request.accountId)),
+							),
+						)
+						.pipe(
+							Effect.onExit((exit) => Deferred.done(started, exit)),
+							Effect.forkIn(codexScope),
+						);
+					return yield* Deferred.await(started);
+				}),
+			CancelCodexLogin: (request) =>
+				codexResources.use(request.accountId, ({ auth }) =>
+					auth.cancel(request.accountId),
+				),
+			LogoutCodex: (request) =>
+				codexResources.use(request.accountId, ({ auth }) =>
+					auth.logout(request.accountId),
+				),
 			GetInstanceStatus: (request) =>
 				run(
 					getInstance(request.instanceId).pipe(
