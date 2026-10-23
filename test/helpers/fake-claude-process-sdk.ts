@@ -626,6 +626,7 @@ function query(params: {
 	let taskStopHeldRequest: string | undefined;
 	let taskTurnInterrupted = false;
 	let interruptibleTurn = false;
+	let interruptAwaitingDecision = false;
 	let closed = false;
 	let promptIndex = 0;
 	let initializationFinished = false;
@@ -2081,6 +2082,7 @@ function query(params: {
 					});
 					yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				}
+				interruptAwaitingDecision = request.endsWith("-after-decision");
 				const response = await params.options.canUseTool(
 					"AskUserQuestion",
 					questionInput,
@@ -2092,6 +2094,7 @@ function query(params: {
 						requestId,
 					},
 				);
+				interruptAwaitingDecision = false;
 				if (fixedId)
 					mark({
 						kind: "prompt-answer",
@@ -2206,6 +2209,7 @@ function query(params: {
 				yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				if (!params.options?.canUseTool)
 					throw new Error("Missing canUseTool bridge");
+				interruptAwaitingDecision = request.endsWith("-after-decision");
 				const approval = await params.options.canUseTool(toolName, toolInput, {
 					signal:
 						params.options.abortController?.signal ??
@@ -2230,6 +2234,7 @@ function query(params: {
 							}
 						: {}),
 				});
+				interruptAwaitingDecision = false;
 				if (!approval) throw new Error("Approval bridge returned no decision");
 				if (fixedId)
 					mark({
@@ -2766,6 +2771,9 @@ function query(params: {
 				queryId,
 				at: process.hrtime.bigint().toString(),
 			});
+			// Some SDK interrupts cannot acknowledge until canUseTool returns.
+			while (interruptAwaitingDecision && !closed)
+				await new Promise<void>((done) => setTimeout(done, 20));
 			const configDir =
 				params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
 				process.env["CLAUDE_CONFIG_DIR"];
