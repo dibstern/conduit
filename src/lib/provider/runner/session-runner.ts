@@ -1,4 +1,6 @@
 import type { Effect } from "effect";
+import type { Account } from "../../contracts/account.js";
+import type { AccountSwitchBusy } from "../../contracts/limit-recovery.js";
 import type { UsageHarness } from "../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
@@ -238,6 +240,10 @@ export interface SessionRunner {
 	getSessionFailureEffect?(
 		sessionId: string,
 	): Effect.Effect<SessionFailure | undefined>;
+	getAccountSwitchBlockEffect?(
+		sessionId: string,
+		account: Account,
+	): Effect.Effect<AccountSwitchBusy | undefined>;
 	/** Local runner lifecycle state, including work outside the foreground turn. */
 	hasPendingSubagentFinalizers?(sessionId: string): boolean;
 	/** Undefined means no runtime session; null means its cursor is cleared. */

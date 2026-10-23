@@ -110,6 +110,8 @@ export const canPreWarm = (state: RunnerEntryLifecycle) =>
 	canReconfigure(state) && !isRecovering(state);
 export const isCommandIdle = (state: RunnerEntryLifecycle) =>
 	!isRecovering(state) && state.commandsInFlight === 0;
+export const isQuiet = (state: RunnerEntryLifecycle, quiescent: boolean) =>
+	isCommandIdle(state) && quiescent;
 export const canUpgrade = (state: RunnerEntryLifecycle) =>
 	canPreWarm(state) && !isAwaitingProject(state) && isCommandIdle(state);
 export const canUseControlConnection = (state: RunnerEntryLifecycle) =>
@@ -119,7 +121,13 @@ export const canUseControlConnection = (state: RunnerEntryLifecycle) =>
 export const mustDrainBeforeSend = (state: RunnerEntryLifecycle) =>
 	state.failure !== undefined || state.idleExiting || state.end !== undefined;
 
-export type SendDecision = "Use" | "Retire" | "Wait" | "Skip";
+export type SendDecision =
+	| "Use"
+	| "DeferRebind"
+	| "Refuse"
+	| "Retire"
+	| "Wait"
+	| "Skip";
 
 export const decideSend = (input: {
 	readonly command: "send-turn" | "pre-warm";
@@ -128,7 +136,7 @@ export const decideSend = (input: {
 	readonly rebindsAccount: boolean;
 	readonly changes: {
 		readonly folders: boolean;
-		readonly login: boolean;
+		readonly login: "None" | "Settings" | "Account";
 		readonly legacyCursor: boolean;
 		readonly settingsDeferred: boolean;
 	};
@@ -141,11 +149,10 @@ export const decideSend = (input: {
 	const upgradeByRestart =
 		command === "send-turn" &&
 		changes.settingsDeferred &&
-		isCommandIdle(lifecycle) &&
-		quiescent;
+		isQuiet(lifecycle, quiescent);
 	if (
 		(changes.folders ||
-			changes.login ||
+			changes.login !== "None" ||
 			changes.legacyCursor ||
 			upgradeByRestart) &&
 		canReconfigure(lifecycle)
@@ -153,12 +160,17 @@ export const decideSend = (input: {
 		// A turn's completion can reach the browser before the
 		// runner reports quiescence. Do not admit the next turn
 		// on its old folders while that final output drains.
-		if (!isCommandIdle(lifecycle) || !quiescent) {
+		// An account switch needs a fresh native session and cannot preserve
+		// background work. Same-account settings can wait for a quiet send.
+		if (!isQuiet(lifecycle, quiescent)) {
 			if (command === "pre-warm") return "Skip";
+			if (changes.login === "Account") return "Refuse";
+			if (changes.login === "Settings" && !changes.folders && rebindsAccount)
+				return "DeferRebind";
 			return "Wait";
 		}
-		// New Claude payloads replace only the SDK query. Keep the
-		// quiescence wait above, and the old restart for older peers.
+		// New Claude payloads replace only the SDK query when quiet.
+		// Older peers still need a restart.
 		if (changes.folders || upgradeByRestart || !rebindsAccount) return "Retire";
 	}
 	return "Use";

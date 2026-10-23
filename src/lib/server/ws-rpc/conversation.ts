@@ -1,5 +1,8 @@
 import { Effect } from "effect";
-import { AccountUnroutable } from "../../contracts/limit-recovery.js";
+import {
+	AccountSwitchBusy,
+	AccountUnroutable,
+} from "../../contracts/limit-recovery.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
@@ -37,7 +40,6 @@ import type { PermissionId } from "../../shared-types.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 const inboxCommand = <E>(
-	name: string,
 	run: (inbox: SessionInbox) => Effect.Effect<SessionInboxOutcome, E, never>,
 ) =>
 	SessionInboxTag.pipe(
@@ -46,11 +48,6 @@ const inboxCommand = <E>(
 			outcome === "accepted"
 				? { ok: true as const }
 				: { ok: false as const, reason: outcome },
-		),
-		Effect.catch((error) =>
-			Effect.fail(
-				new WsRpcError({ message: `${name} failed: ${String(error)}` }),
-			),
 		),
 	);
 
@@ -210,7 +207,8 @@ export const conversationHandlers = {
 		}).pipe(
 			Effect.catch((error) =>
 				Effect.fail(
-					error instanceof AccountUnroutable
+					error instanceof AccountUnroutable ||
+						error instanceof AccountSwitchBusy
 						? error
 						: new WsRpcError({
 								message: `input.submit failed: ${String(error)}`,
@@ -219,21 +217,31 @@ export const conversationHandlers = {
 			),
 		),
 	"input.cancel": (request) =>
-		inboxCommand("input.cancel", (inbox) =>
+		inboxCommand((inbox) =>
 			inbox.cancel({
 				clientId: "rpc",
 				sessionId: request.sessionId,
 				inputId: request.inputId,
 			}),
-		),
+		).pipe(Effect.catch(mapRpcFailure("input.cancel"))),
 	"input.sendNow": (request) =>
-		inboxCommand("input.sendNow", (inbox) =>
+		inboxCommand((inbox) =>
 			inbox.sendNow({
 				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
 				inputId: request.inputId,
 				...(request.interrupt ? { interrupt: true } : {}),
 			}),
+		).pipe(
+			Effect.catch((error) =>
+				Effect.fail(
+					error instanceof AccountSwitchBusy
+						? error
+						: new WsRpcError({
+								message: `input.sendNow failed: ${String(error)}`,
+							}),
+				),
+			),
 		),
 	SyncInputDraft: (request) =>
 		Effect.gen(function* () {

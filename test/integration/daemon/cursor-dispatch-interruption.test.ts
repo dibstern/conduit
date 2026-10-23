@@ -162,7 +162,7 @@ it.live.each(["opening", "preparation"] as const)(
 							input: snapshot.input,
 						}),
 						snapshotCommandSettings: () => ({}),
-						sameAccountLogin: () => true,
+						loginChange: () => "None",
 						recoverCommands: () => Effect.succeed([]),
 					},
 				);
