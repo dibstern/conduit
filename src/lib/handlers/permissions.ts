@@ -542,6 +542,8 @@ export const handlePermissionResponse = (
 		const visibleSessionId = wsHandler.getClientSession(clientId) ?? "";
 		const stored = yield* readPromptReference(requestId, "permission");
 		if (stored?.status === "resolved") return;
+		if (stored?.provider_process_id?.startsWith("opencode:"))
+			yield* resolveOpenCodePromptTarget(stored.session_id, stored);
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		if (Option.isSome(engineOption)) {
 			const pending =
@@ -606,9 +608,6 @@ export const handlePermissionResponse = (
 			}
 			yield* restartProcessingTimeout(sessionId, stored?.run_id);
 			return;
-		}
-		if (stored?.provider_process_id?.startsWith("opencode:")) {
-			yield* resolveOpenCodeQuestionTarget(stored.session_id, stored);
 		}
 		const resultOption =
 			yield* pendingInteractions.resolvePermissionFromBrowser(
@@ -677,7 +676,7 @@ export const handlePermissionResponse = (
 					),
 				);
 				if (replied._tag === "Failure" && stored?.provider_process_id) {
-					yield* resolveOpenCodeQuestionTarget(sessionId, stored);
+					yield* resolveOpenCodePromptTarget(sessionId, stored);
 					return yield* Effect.fail(replied.failure);
 				}
 				if (replied._tag === "Success" && stored) {
@@ -706,7 +705,7 @@ export const handlePermissionResponse = (
 		}
 	}).pipe(Effect.scoped);
 
-const resolveOpenCodeQuestionTarget = (
+const resolveOpenCodePromptTarget = (
 	sessionId: string,
 	prompt?: StoredPromptReference,
 ) =>
@@ -716,10 +715,22 @@ const resolveOpenCodeQuestionTarget = (
 		const engine = yield* Effect.serviceOption(OrchestrationEngineTag);
 		const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
-		const directory =
-			workspace._tag === "Some"
-				? yield* workspace.value.get(sessionId)
+		const call =
+			prompt && engine._tag === "Some"
+				? yield* engine.value.resolveSessionCallContextEffect(
+						sessionId,
+						undefined,
+						{
+							...(prompt.run_id ? { runId: prompt.run_id } : {}),
+							prompt: { id: prompt.id, kind: prompt.type },
+						},
+					)
 				: undefined;
+		const directory =
+			call?.workspaceRoot ??
+			(workspace._tag === "Some"
+				? yield* workspace.value.get(sessionId)
+				: undefined);
 		if (engine._tag === "None" || instances._tag === "None") {
 			if (
 				providerProcessId &&
@@ -729,8 +740,14 @@ const resolveOpenCodeQuestionTarget = (
 			return { client: defaultClient, directory };
 		}
 		const instanceId =
-			yield* engine.value.getProviderForSessionEffect(sessionId);
-		const selectedId = instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
+			call?.account.id ??
+			(yield* engine.value.getProviderForSessionEffect(sessionId));
+		const boundId = instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
+		const selectedId =
+			!call && boundId === MANAGED_OPENCODE_ACCOUNT_ID
+				? (Option.getOrUndefined(yield* Effect.serviceOption(ConfigTag))
+						?.openCodeInstanceId ?? boundId)
+				: boundId;
 		const running = providerProcessId
 			? yield* instances.value.ifRunning(selectedId, directory)
 			: Option.some(yield* instances.value.use(selectedId, directory));
@@ -767,6 +784,8 @@ export const handleAskUserResponse = (
 			wsHandler.getClientSession(clientId),
 		);
 		if (stored?.status === "resolved") return;
+		if (stored?.provider_process_id?.startsWith("opencode:"))
+			yield* resolveOpenCodePromptTarget(stored.session_id, stored);
 		const pendingInteractionsOption = yield* Effect.serviceOption(
 			PendingInteractionServiceTag,
 		);
@@ -938,7 +957,7 @@ export const handleAskUserResponse = (
 		)
 			return yield* expirePrompt(stored);
 		// OpenCode REST API path with fallback for legacy prompt rows.
-		const { client, directory } = yield* resolveOpenCodeQuestionTarget(
+		const { client, directory } = yield* resolveOpenCodePromptTarget(
 			sessionId,
 			stored,
 		);
@@ -958,7 +977,7 @@ export const handleAskUserResponse = (
 		}
 		if (stored?.provider_request_id) {
 			if (stored.provider_process_id)
-				yield* resolveOpenCodeQuestionTarget(sessionId, stored);
+				yield* resolveOpenCodePromptTarget(sessionId, stored);
 			return yield* new WsRpcError({
 				message: `OpenCode could not answer this question: ${String(replyResult.failure)}`,
 			});
@@ -1036,6 +1055,8 @@ export const handleQuestionReject = (
 			wsHandler.getClientSession(clientId),
 		);
 		if (stored?.status === "resolved") return;
+		if (stored?.provider_process_id?.startsWith("opencode:"))
+			yield* resolveOpenCodePromptTarget(stored.session_id, stored);
 		const pendingInteractionsOption = yield* Effect.serviceOption(
 			PendingInteractionServiceTag,
 		);
@@ -1059,8 +1080,17 @@ export const handleQuestionReject = (
 			return yield* resolveAsyncQuestion(pendingQuestion, null);
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		if (Option.isSome(engineOption)) {
+			const call = yield* engineOption.value.resolveSessionCallContextEffect(
+				sessionId,
+				undefined,
+				{
+					...(stored?.run_id ? { runId: stored.run_id } : {}),
+					prompt: { id: stored?.id ?? toolId, kind: "question" },
+				},
+			);
 			const providerId =
-				yield* engineOption.value.getProviderForSessionEffect(sessionId);
+				call?.account.driver ??
+				(yield* engineOption.value.getProviderForSessionEffect(sessionId));
 			if (
 				getProviderDriver(providerId)?.interactionSink === "permission-asking"
 			)
@@ -1167,7 +1197,7 @@ export const handleQuestionReject = (
 		)
 			return yield* expirePrompt(stored);
 		// OpenCode REST API path with fallback for legacy prompt rows.
-		const { client, directory } = yield* resolveOpenCodeQuestionTarget(
+		const { client, directory } = yield* resolveOpenCodePromptTarget(
 			sessionId,
 			stored,
 		);
@@ -1182,7 +1212,7 @@ export const handleQuestionReject = (
 		}
 		if (stored?.provider_request_id) {
 			if (stored.provider_process_id)
-				yield* resolveOpenCodeQuestionTarget(sessionId, stored);
+				yield* resolveOpenCodePromptTarget(sessionId, stored);
 			return yield* new WsRpcError({
 				message: `OpenCode could not reject this question: ${String(rejectResult.failure)}`,
 			});

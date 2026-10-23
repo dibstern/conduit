@@ -75,6 +75,7 @@ import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
 	makeMockAgentService,
 	makeMockConfig,
+	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	NoopProviderRuntimeIngestionLive,
 	PassThroughSessionInbox,
@@ -214,7 +215,9 @@ for (const action of [
 	"recovered-permission",
 ] as const) {
 	it(`dispatches a persisted ${action} through the engine without releasing its waiter`, async () => {
-		const client = makeHandlerOpenCodeAPI();
+		const client = makeMockOpenCodeAPI({
+			promptProcessId: "opencode:original",
+		});
 		const commands: OrchestrationCommand[] = [];
 		const suggestions: ProviderPermissionUpdate[] = [
 			{ type: "setMode", mode: "acceptEdits", destination: "session" },
