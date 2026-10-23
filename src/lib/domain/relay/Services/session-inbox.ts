@@ -74,7 +74,7 @@ export interface InboxView {
 	readonly interruptRequested?: InboxInput | undefined;
 	/** An input was handed off as a steer and has not started yet. */
 	readonly steering: boolean;
-	/** A run is open, or Stop/account switching fences the next handoff. */
+	/** A native turn or run is open, or Stop/account switching fences handoff. */
 	readonly busy: boolean;
 	/** A Stop's abort is in flight, including after its turn becomes terminal. */
 	readonly stopping?: boolean;
@@ -524,6 +524,11 @@ export const SessionInboxLive = Layer.effect(
 					now: yield* Clock.currentTimeMillis,
 				});
 				const fences = providerTurnService.turnFences(sessionId);
+				const turnInFlight = Option.isSome(account)
+					? yield* registry
+							?.getInstance(account.value.driver)
+							?.hasActiveTurnsEffect?.(sessionId) ?? Effect.succeed(false)
+					: false;
 				return {
 					provider: facts?.provider ?? undefined,
 					queued,
@@ -532,6 +537,7 @@ export const SessionInboxLive = Layer.effect(
 					),
 					steering: rows.some((row) => row.state === "steering"),
 					busy:
+						turnInFlight ||
 						fences.stopping ||
 						fences.switching ||
 						facts?.run_status === "pending" ||
@@ -780,6 +786,12 @@ export const SessionInboxLive = Layer.effect(
 		// registered would fail and pause a queue for no reason.
 		const advances = yield* bus.subscribeAdvances();
 		const lifts = yield* providerTurnService.fenceLifts;
+		const turnEnds = yield* Effect.forEach(
+			registry?.listProviders() ?? [],
+			(providerId) =>
+				registry?.getInstance(providerId)?.turnEnds ??
+				Effect.succeed(Stream.empty),
+		);
 		const ready = yield* Deferred.make<void>();
 		yield* Effect.forkScoped(
 			Deferred.await(ready).pipe(
@@ -803,7 +815,13 @@ export const SessionInboxLive = Layer.effect(
 										? drainSessions(advance.sessionIds)
 										: Effect.void,
 							),
-							Stream.map(lifts, (sessionId) => drainSessions([sessionId])),
+							Stream.map(
+								turnEnds.reduce(
+									(merged, ends) => Stream.merge(merged, ends),
+									lifts,
+								),
+								(sessionId) => drainSessions([sessionId]),
+							),
 						),
 						(drain) => drain,
 					),

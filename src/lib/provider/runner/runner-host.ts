@@ -60,7 +60,7 @@ export interface RunnerLaunch {
 	) => Effect.Effect<SessionRunner, never, Scope.Scope>;
 	readonly upgradeState: () => Omit<
 		RunnerUpgradeState,
-		"quiescent" | "revision"
+		"quiescent" | "turnInFlight" | "revision"
 	>;
 	readonly acceptCommand: (command: SessionCommand) => void;
 	readonly executeEffect: (
@@ -141,6 +141,8 @@ export const runSessionRunner = (
 		let activeCommands = 0;
 		let activeOutputs = 0;
 		let revision = 0;
+		let turnInFlight = false;
+		let reportedTurnInFlight: boolean | undefined;
 		let reportedQuiescent: boolean | undefined;
 		let reportedSnapshot: RunnerUpgradeState["snapshot"];
 		let reportedResume: string | undefined;
@@ -159,6 +161,7 @@ export const runSessionRunner = (
 			!isBackgroundBusy();
 		const upgradeState = (): RunnerUpgradeState => ({
 			quiescent: quiescent(),
+			turnInFlight,
 			revision,
 			...launch.upgradeState(),
 		});
@@ -168,12 +171,14 @@ export const runSessionRunner = (
 			const quiet = quiescent();
 			if (
 				quiet === reportedQuiescent &&
+				turnInFlight === reportedTurnInFlight &&
 				snapshot === reportedSnapshot &&
 				resumeSessionId === reportedResume &&
 				liveConfiguration === reportedConfiguration
 			)
 				return;
 			reportedQuiescent = quiet;
+			reportedTurnInFlight = turnInFlight;
 			const changedSnapshot = snapshot !== reportedSnapshot;
 			reportedSnapshot = snapshot;
 			reportedResume = resumeSessionId;
@@ -184,6 +189,7 @@ export const runSessionRunner = (
 					type: "upgrade-state",
 					state: {
 						quiescent: quiet,
+						turnInFlight,
 						revision,
 						...(changedSnapshot && snapshot ? { snapshot } : {}),
 						...(resumeSessionId ? { resumeSessionId } : {}),
@@ -208,6 +214,7 @@ export const runSessionRunner = (
 			isCandidate: () => role === "candidate",
 			isBackgroundBusy,
 			turnStateChanged: (inFlight) => {
+				turnInFlight = inFlight;
 				idle?.setTurnInFlight(inFlight);
 				reportUpgradeState();
 				if (!inFlight) retireWhenQuiescent();

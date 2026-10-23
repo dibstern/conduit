@@ -12,8 +12,10 @@ import {
 	Fiber,
 	FiberSet,
 	Option,
+	PubSub,
 	Schedule,
 	Semaphore,
+	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../contracts/account.js";
@@ -429,6 +431,7 @@ export const makeProcessSessionRunner = (
 ) =>
 	Effect.gen(function* () {
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
+		const turnEnds = yield* PubSub.unbounded<string>();
 		const runnerLabel = `${driver.driverKind.charAt(0).toUpperCase()}${driver.driverKind.slice(1)} runner`;
 		const accountDisplayName = (
 			input: Pick<SessionTurn, "account" | "instanceId"> | undefined,
@@ -1341,12 +1344,19 @@ export const makeProcessSessionRunner = (
 						);
 					},
 					onUpgradeState: (state) => {
+						const wasInFlight = entry.upgrade.state?.turnInFlight === true;
 						const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
 						// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
 						entry.upgrade.state = {
 							...state,
 							...(snapshot ? { snapshot } : {}),
 						};
+						if (
+							children.get(sessionId) === entry &&
+							wasInFlight &&
+							state.turnInFlight === false
+						)
+							PubSub.publishUnsafe(turnEnds, sessionId);
 						upgrade(sessionId, entry);
 					},
 					onIdleExit: () => {
@@ -1737,6 +1747,21 @@ export const makeProcessSessionRunner = (
 		});
 
 		class ProcessSessionRunner implements SessionRunner {
+			readonly turnEnds = Effect.map(
+				PubSub.subscribe(turnEnds),
+				Stream.fromSubscription,
+			);
+
+			hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
+				return Effect.sync(() => {
+					const entry = children.get(sessionId);
+					return (
+						entry !== undefined &&
+						Entry.countsTowardDemand(entry.lifecycle) &&
+						entry.upgrade.state?.turnInFlight === true
+					);
+				});
+			}
 			getControlCommandStatusEffect(
 				sessionId: string,
 				control: ProviderControlContext,

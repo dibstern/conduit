@@ -1,4 +1,4 @@
-import type { Effect } from "effect";
+import type { Effect, Scope, Stream } from "effect";
 import type { Account } from "../../contracts/account.js";
 import type { AccountSwitchBusy } from "../../contracts/limit-recovery.js";
 import type { UsageHarness } from "../../contracts/provider-instance.js";
@@ -230,6 +230,8 @@ export interface SessionRunner {
 	) => Effect.Effect<ProviderControlCommandStatus, SessionFailure>;
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
+	/** Wake inbox drains after native activity ends, even without a stored event. */
+	readonly turnEnds?: Effect.Effect<Stream.Stream<string>, never, Scope.Scope>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
 	/** Without an ID, checks all live processes; with one, checks the current or quarantined owner. */
 	hasLiveProcessEffect(
