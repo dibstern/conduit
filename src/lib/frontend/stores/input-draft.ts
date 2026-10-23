@@ -27,13 +27,15 @@ export const applyInputDraft = (
 		handleDraftRetired(key, envelope.promotedSessionId);
 		return;
 	}
-	// The writing tab already shows its own text.
-	if (envelope._tag === "synchronized" || !isOwnBrowserClientId(envelope.from))
-		handleInputSyncReceived({
-			key,
-			...envelope,
-			...(envelope._tag === "synchronized" ? { initial: true } : {}),
-		});
+	// Own text already appears locally; attachment echoes still acknowledge saves.
+	handleInputSyncReceived({
+		key,
+		...envelope,
+		...(envelope._tag !== "synchronized" && isOwnBrowserClientId(envelope.from)
+			? { text: undefined }
+			: {}),
+		...(envelope._tag === "synchronized" ? { initial: true } : {}),
+	});
 };
 
 let viewed: { project: string; key: InputDraftKey | null } | null = null;

@@ -549,6 +549,23 @@ test("Queue Edit keeps a saved ref in the composer and resends identical bytes",
 			animations: "disabled",
 		});
 		report["savedThumbnail"] = await savedThumbnail.getAttribute("src");
+		await expect
+			.poll(() =>
+				withStore(
+					harness,
+					(db) =>
+						db
+							.prepare("SELECT text FROM input_drafts WHERE draft_key = ?")
+							.get(sessionId)?.["text"],
+				),
+			)
+			.toBe(text);
+		await page.reload();
+		await expect(app.input).toHaveValue(text);
+		await expect(savedThumbnail).toHaveAttribute(
+			"src",
+			`/p/process-test/attachments/${hash}`,
+		);
 		await app.sendBtn.click();
 		await expect(page.getByTestId("pending-input-text")).toHaveText(text);
 		const resentId = await page
@@ -560,7 +577,8 @@ test("Queue Edit keeps a saved ref in the composer and resends identical bytes",
 			.poll(() => submitted.some((input) => input["inputId"] === resentId))
 			.toBe(true);
 		const resent = submitted.find((input) => input["inputId"] === resentId);
-		expect(resent?.["images"]).toEqual([ref]);
+		expect(resent?.["attachmentIds"]).toEqual([`${inputId}:0`]);
+		expect(resent?.["images"] ?? []).toEqual([]);
 		expect(JSON.stringify(resent)).not.toContain("data:");
 		report["composerResend"] = resent;
 		report["resentInputId"] = resentId;
@@ -1139,6 +1157,116 @@ test.describe("OpenCode attachment ingress", () => {
 		).not.toContain("data:image/");
 		report["browserSnapshotsContainInlineImages"] = false;
 	});
+});
+
+test("provider preparation refusal preserves a Draft and admits nothing until retry", async ({
+	harness,
+	report,
+}) => {
+	report["bead"] = "conduit-test-mryl.4";
+	const browser = await harness.connect();
+	const sessionId = await browser.createSession("Draft preparation refusal");
+	const inputId = randomUUID();
+	const id = randomUUID();
+	const key = { session: sessionId };
+	const text = "Keep my Draft after a preparation failure";
+	await Effect.runPromise(
+		browser.rpc.AddDraftAttachment({
+			key,
+			id,
+			name: "draft.png",
+			mime: "image/png",
+			dataUrl,
+		}),
+	);
+	await Effect.runPromise(browser.rpc.SyncInputDraft({ key, text }));
+	const draft = () =>
+		withStore(harness, (db) => ({
+			text: db
+				.prepare("SELECT text FROM input_drafts WHERE draft_key = ?")
+				.get(sessionId),
+			attachments: db
+				.prepare(
+					"SELECT id, state, hash FROM draft_attachments WHERE draft_key = ? ORDER BY id",
+				)
+				.all(sessionId),
+		}));
+	const before = draft();
+	const pick = withStore(harness, (db) => {
+		const row = db
+			.prepare("SELECT model_provider, model_id FROM sessions WHERE id = ?")
+			.get(sessionId);
+		db.prepare(
+			"UPDATE sessions SET model_provider = NULL, model_id = NULL WHERE id = ?",
+		).run(sessionId);
+		return row;
+	});
+	const input = {
+		sessionId,
+		inputId,
+		text,
+		delivery: "queue" as const,
+		draftKey: key,
+		attachmentIds: [id],
+	};
+	const result = await Effect.runPromise(
+		browser.rpc["input.submit"](input).pipe(Effect.result),
+	);
+	expect(result).toMatchObject({ _tag: "Failure" });
+	expect(JSON.stringify(result)).toContain("model pick is required");
+	expect(draft()).toEqual(before);
+	const refused = storedInput(harness, inputId);
+	expect(refused.admitted).toEqual([]);
+	expect(refused.pending).toBeUndefined();
+	expect(refused.outbox).toEqual([]);
+	expect(
+		withStore(harness, (db) =>
+			db
+				.prepare(
+					"SELECT id FROM messages WHERE session_id = ? AND input_id = ?",
+				)
+				.all(sessionId, inputId),
+		),
+	).toEqual([]);
+	expect(providerImages(harness, inputId)).toEqual([]);
+	report["refusal"] = result;
+	report["unchangedDraft"] = before;
+	report["refusedInput"] = refused;
+	withStore(harness, (db) =>
+		db
+			.prepare(
+				"UPDATE sessions SET model_provider = ?, model_id = ? WHERE id = ?",
+			)
+			.run(
+				pick?.["model_provider"] ?? null,
+				pick?.["model_id"] ?? null,
+				sessionId,
+			),
+	);
+	expect(
+		await Effect.runPromise(browser.rpc["input.submit"](input)),
+	).toMatchObject({ ok: true });
+	await expect
+		.poll(() => storedInput(harness, inputId).admitted.length)
+		.toBe(1);
+	expect(draft()).toMatchObject({
+		text: { text: "" },
+		attachments: [{ id, state: "sent", hash: null }],
+	});
+	report["acceptedRetry"] = storedInput(harness, inputId);
+	const violations = await Effect.runPromise(
+		assertAttachmentCatalogue.pipe(
+			Effect.provide(
+				SqliteNode.layer({
+					filename: harness.daemonStorePath(),
+					readonly: true,
+				}).pipe(Layer.provide(Reactivity.layer)),
+			),
+			Effect.scoped,
+		),
+	);
+	expect(violations).toEqual([]);
+	report["catalogueViolations"] = violations;
 });
 
 test("a missing blob fails dispatch visibly with AttachmentMissing", async ({

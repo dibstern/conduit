@@ -177,6 +177,7 @@ export class MissingPendingInteractions extends Data.TaggedError(
 }
 
 export type OrchestrationError =
+	| import("../contracts/ws-rpc.js").DraftAttachmentMissing
 	| ProviderNotRegistered
 	| SessionProviderNotBound
 	| DuplicateCommand

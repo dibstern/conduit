@@ -17,15 +17,17 @@ import {
 	Schema,
 	Scope,
 } from "effect";
-import type { SqlClient } from "effect/sql";
+import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 
 import { type Account, AccountSchema } from "../contracts/account.js";
 import type { SessionScope } from "../contracts/session-scope.js";
 import type { ProviderStopSnapshot } from "../contracts/stored-event.js";
+import { DraftAttachmentMissing } from "../contracts/ws-rpc.js";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../daemon/config-persistence.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import type { DraftChange } from "../domain/relay/Services/input-drafts.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
 import type { AttachmentStore } from "../persistence/attachment-store.js";
@@ -99,6 +101,7 @@ class CommandPayloadSerializationFailed extends Data.TaggedError(
 }
 
 export interface SendTurnCommand {
+	readonly draftChange?: DraftChange;
 	readonly type: "send_turn";
 	readonly commandId: string;
 	readonly providerId: string;
@@ -1227,13 +1230,14 @@ export class OrchestrationEngine {
 				dispatchId,
 				nowMs,
 			).pipe(
-				Effect.mapError(
-					(cause) =>
-						new ProviderInstanceFailure({
-							providerId: command.providerId,
-							operation: "commitSendTurn",
-							cause,
-						}),
+				Effect.mapError((cause) =>
+					cause instanceof DraftAttachmentMissing
+						? cause
+						: new ProviderInstanceFailure({
+								providerId: command.providerId,
+								operation: "commitSendTurn",
+								cause,
+							}),
 				),
 			);
 
@@ -1286,12 +1290,16 @@ export class OrchestrationEngine {
 		| CommitAndSignalFailure
 		| Error
 		| CommandPayloadSerializationFailed
+		| DraftAttachmentMissing
 	> {
 		const driver = command.input.account?.driver ?? command.providerId;
 		const traits = getProviderDriver(driver);
 		// The rewind range and request sequence share ingestion's write boundary:
 		// a backfill accepted before this write must be removed by this commit.
 		const commit = Effect.gen(function* () {
+			yield* (command.draftChange?.write ?? Effect.void).pipe(
+				Effect.provideService(SqlClient.SqlClient, durable.sql),
+			);
 			const pendingRewind = command.input.continuation
 				? undefined
 				: yield* readPendingRewindCommit(durable.sql, command.input.sessionId);
@@ -1347,9 +1355,14 @@ export class OrchestrationEngine {
 		});
 		// Through the seam the events are projected in the same transaction and
 		// announced once it commits.
-		return durable.write((project) => Effect.flatMap(commit, project), {
-			projectId: durable.projectId,
-		});
+		return durable
+			.write((project) => Effect.flatMap(commit, project), {
+				projectId: durable.projectId,
+			})
+			.pipe(
+				Effect.tap(() => command.draftChange?.publish ?? Effect.void),
+				Effect.uninterruptible,
+			);
 	}
 
 	private handleInlineSendTurnEffect(

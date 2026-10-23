@@ -6,7 +6,6 @@
      comes back through the stream, on every client. Whether Steer shows, and
      whether it is enabled, is the server's call too (the inbox arm). -->
 <script lang="ts">
-	import type { AttachmentRef } from "../../../contracts/attachment-ref.js";
 	import type { SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
 	import type { PendingInput } from "../../stores/chat.svelte.js";
@@ -47,7 +46,7 @@
 		/** Steer on queued rows: hidden when undefined; Steer and Run now are disabled while a prompt is open. */
 		steer?: "ready" | "prompt_open" | undefined;
 		/** Takes back a queued input that Edit removed. */
-		onEdit: (text: string, images: readonly AttachmentRef[]) => void;
+		onEdit: (text: string) => void;
 		/** The server refused to steer a row, which stays queued. */
 		onSteerRefused: (reason: SteerBlocker) => void;
 	} = $props();
@@ -62,12 +61,13 @@
 		tag: "input.cancel" | "input.sendNow",
 		input: PendingInput,
 		interrupt = false,
+		restore = false,
 	): Promise<boolean> {
 		if (!queueSessionId) return false;
 		try {
 			const payload = { sessionId: queueSessionId, inputId: input.inputId };
 			const response = await (tag === "input.cancel"
-				? rpc("input.cancel", payload)
+				? rpc("input.cancel", { ...payload, ...(restore ? { restoreTo: { session: queueSessionId } } : {}) })
 				: rpc("input.sendNow", {
 						...payload,
 						...(interrupt ? { interrupt: true } : {}),
@@ -83,8 +83,8 @@
 	}
 
 	async function edit(input: PendingInput) {
-		if (await act("input.cancel", input))
-			onEdit(extractDisplayText(input.request.text), input.request.images ?? []);
+		if (await act("input.cancel", input, false, true))
+			onEdit(extractDisplayText(input.request.text));
 	}
 </script>
 

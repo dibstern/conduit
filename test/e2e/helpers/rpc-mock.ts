@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { expect, type Page, type WebSocketRoute } from "@playwright/test";
 import { Cause, Effect, Exit, Schema, Scope, Stream } from "effect";
 import { RpcSchema } from "effect/rpc";
@@ -15,11 +16,14 @@ import {
 import {
 	type Alert,
 	DraftAlreadySent,
+	type DraftAttachment,
 	GetAgentsResponseSchema,
 	GetCommandsResponseSchema,
 	GetModelsResponseSchema,
 	GetProjectsResponseSchema,
 	type GetStatusResponse,
+	type InputDraftEnvelope,
+	InputDraftKeySchema,
 	type ProjectSetting,
 	WsRpcError,
 	WsRpcGroup,
@@ -159,6 +163,15 @@ export class RpcMockControl {
 		string,
 		{ readonly text: string; readonly projectId?: string }
 	>();
+	private readonly draftAttachments = new Map<
+		string,
+		readonly DraftAttachment[]
+	>();
+	private readonly queuedAttachments = new Map<
+		string,
+		readonly Omit<DraftAttachment, "id">[]
+	>();
+	readonly attachmentData = new Map<string, { mime: string; bytes: Buffer }>();
 	private readonly draftClaims = new Set<string>();
 	private readonly promotedDrafts = new Map<string, string>();
 
@@ -394,23 +407,123 @@ export class RpcMockControl {
 				this.promotedDrafts.has(typedKey.draft))
 		)
 			return;
-		if (draft.text === "" && "draft" in typedKey) this.inputDrafts.delete(id);
+		if (
+			draft.text === "" &&
+			"draft" in typedKey &&
+			!this.draftAttachments.get(id)?.length
+		)
+			this.inputDrafts.delete(id);
 		else
 			this.inputDrafts.set(id, {
 				text: draft.text,
 				...(draft.projectId !== undefined && { projectId: draft.projectId }),
 			});
 		if (this.hasStream("SubscribeInputDraft", id))
-			this.sendChunk("SubscribeInputDraft", [{ _tag: "draft", ...draft }], id);
+			this.sendChunk(
+				"SubscribeInputDraft",
+				[
+					{
+						_tag: "draft",
+						...draft,
+						attachments: this.draftAttachments.get(id) ?? [],
+					},
+				],
+				id,
+			);
 	}
 
-	initialInputDraftFrames(key: DraftKey): readonly unknown[] {
+	addDraftAttachment(
+		key: DraftKey,
+		id: string,
+		name: string,
+		mime: string,
+		dataUrl: string,
+	): { attachment: DraftAttachment } {
+		const keyId = draftKeyId(key);
+		const attachments = this.draftAttachments.get(keyId) ?? [];
+		const existing = attachments.find((item) => item.id === id);
+		if (existing) return { attachment: existing };
+		const bytes = Buffer.from(
+			dataUrl.slice(dataUrl.indexOf(",") + 1),
+			"base64",
+		);
+		const hash = createHash("sha256")
+			.update(mime)
+			.update(Buffer.from([0]))
+			.update(bytes)
+			.digest("hex");
+		const attachment = { id, name, mime, size: bytes.length, hash };
+		this.attachmentData.set(hash, { mime, bytes });
+		this.draftAttachments.set(keyId, [...attachments, attachment]);
+		this.sendInputDraft(key, this.inputDrafts.get(keyId) ?? { text: "" });
+		return { attachment };
+	}
+
+	removeDraftAttachment(key: DraftKey, id: string): void {
+		const keyId = draftKeyId(key);
+		this.draftAttachments.set(
+			keyId,
+			(this.draftAttachments.get(keyId) ?? []).filter((item) => item.id !== id),
+		);
+		this.sendInputDraft(key, this.inputDrafts.get(keyId) ?? { text: "" });
+	}
+
+	rememberQueuedAttachments(inputId: string, images: unknown): void {
+		if (!Array.isArray(images)) return;
+		this.queuedAttachments.set(
+			inputId,
+			images.flatMap((image) => {
+				if (
+					!isRecord(image) ||
+					typeof image["attachmentHash"] !== "string" ||
+					typeof image["mime"] !== "string"
+				)
+					return [];
+				return [
+					{
+						hash: image["attachmentHash"],
+						mime: image["mime"],
+						name:
+							typeof image["name"] === "string" ? image["name"] : image["mime"],
+						size:
+							this.attachmentData.get(image["attachmentHash"])?.bytes.length ??
+							0,
+					},
+				];
+			}),
+		);
+	}
+
+	restoreDraftAttachments(key: DraftKey, inputId: string): void {
+		const keyId = draftKeyId(key);
+		const existing = this.draftAttachments.get(keyId) ?? [];
+		const restored = (this.queuedAttachments.get(inputId) ?? []).map(
+			(attachment, index) => ({ ...attachment, id: `${inputId}:${index}` }),
+		);
+		this.draftAttachments.set(keyId, [
+			...existing,
+			...restored.filter(
+				(item) => !existing.some((saved) => saved.id === item.id),
+			),
+		]);
+		this.sendInputDraft(key, this.inputDrafts.get(keyId) ?? { text: "" });
+	}
+
+	initialInputDraftFrames(
+		key: DraftKey,
+	): readonly Extract<InputDraftEnvelope, { _tag: "synchronized" }>[] {
 		if ("draft" in key) {
 			const promotedSessionId = this.promotedDrafts.get(key.draft);
 			if (promotedSessionId)
-				return [{ _tag: "synchronized", promotedSessionId }];
+				return [{ _tag: "synchronized", promotedSessionId, attachments: [] }];
 		}
-		return [{ _tag: "synchronized", ...this.inputDrafts.get(draftKeyId(key)) }];
+		return [
+			{
+				_tag: "synchronized",
+				...this.inputDrafts.get(draftKeyId(key)),
+				attachments: this.draftAttachments.get(draftKeyId(key)) ?? [],
+			},
+		];
 	}
 
 	claimInputDraft(draftId: string): void {
@@ -1005,6 +1118,16 @@ function socketTable(
 					)(response);
 					return response;
 				});
+				if (
+					rpc._tag === "input.cancel" &&
+					payload["restoreTo"] &&
+					isRecord(value) &&
+					value["ok"] === true
+				)
+					control.restoreDraftAttachments(
+						Schema.decodeUnknownSync(InputDraftKeySchema)(payload["restoreTo"]),
+						String(payload["inputId"]),
+					);
 				// Setting writes must survive the follow-up GetModels read.
 				if (isRecord(value)) {
 					if (rpc._tag === "SwitchVariant")
@@ -1060,6 +1183,14 @@ export async function mockWsRpc(
 	);
 	const control = controls.get(page) ?? new RpcMockControl(page);
 	controls.set(page, control);
+	await page.route("**/p/*/attachments/*", (route) => {
+		const hash =
+			new URL(route.request().url()).pathname.split("/").at(-1) ?? "";
+		const attachment = control.attachmentData.get(hash);
+		return attachment
+			? route.fulfill({ contentType: attachment.mime, body: attachment.bytes })
+			: route.fulfill({ status: 404 });
+	});
 	control.stubs = {
 		GetMessageSurfacing: () => ({
 			...DEFAULT_MESSAGE_SURFACING_SETTINGS,
@@ -1096,6 +1227,10 @@ export async function mockWsRpc(
 			});
 			return { ok: true };
 		},
+		AddDraftAttachment: ({ key, id, name, mime, dataUrl }) =>
+			control.addDraftAttachment(key, id, name, mime, dataUrl),
+		RemoveDraftAttachment: ({ key, id }) =>
+			control.removeDraftAttachment(key, id),
 		ViewSession: () => ({ ok: true }),
 		InspectSessionWorktrees: () => ({
 			worktrees: [],

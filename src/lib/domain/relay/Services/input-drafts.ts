@@ -1,24 +1,43 @@
 // Composer work in progress lives beside the event log. Each subscription
 // opens with the stored text, followed by live changes.
+import type { DatabaseSync } from "node:sqlite";
 import {
 	Context,
 	Effect,
 	Layer,
 	Option,
 	PubSub,
+	Schema,
 	Semaphore,
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import type { AttachmentValidationError } from "../../../attachment-data-url.js";
+import {
+	type AttachmentRef,
+	AttachmentRefSchema,
+} from "../../../contracts/attachment-ref.js";
 import type {
+	DraftAttachment,
 	DraftListItem,
 	InputDraftEnvelope,
 	InputDraftKey,
 } from "../../../contracts/ws-rpc.js";
+import { DraftAttachmentMissing } from "../../../contracts/ws-rpc.js";
+import { makeAttachmentStore } from "../../../persistence/attachment-store.js";
 import { inputDraftClaimMarker } from "../../../persistence/input-drafts.js";
 
 export type { InputDraftKey } from "../../../contracts/ws-rpc.js";
+
+export interface DraftChange {
+	readonly write: Effect.Effect<
+		void,
+		DraftAttachmentMissing,
+		SqlClient.SqlClient
+	>;
+	readonly publish: Effect.Effect<void>;
+}
 
 export interface InputDrafts {
 	readonly read: (
@@ -30,8 +49,40 @@ export interface InputDrafts {
 		from?: string,
 		projectId?: string,
 	) => Effect.Effect<void>;
-	/** Empty a session draft only if it still holds the text that was sent. */
-	readonly clearSent: (sessionId: string, sent: string) => Effect.Effect<void>;
+	readonly addAttachment: (
+		key: InputDraftKey,
+		id: string,
+		dataUrl: string,
+		name?: string,
+		projectId?: string,
+	) => Effect.Effect<
+		{ attachment: DraftAttachment } | { ended: "removed" | "sent" },
+		SqlError | AttachmentValidationError
+	>;
+	readonly removeAttachment: (
+		key: InputDraftKey,
+		id: string,
+		projectId?: string,
+	) => Effect.Effect<void, SqlError>;
+	readonly takeForSend: (
+		key: InputDraftKey,
+		ids: readonly string[],
+	) => Effect.Effect<
+		readonly AttachmentRef[],
+		SqlError | DraftAttachmentMissing
+	>;
+	readonly sendChange: (
+		key: InputDraftKey,
+		sessionId: string,
+		text: string,
+		ids: readonly string[],
+		refs: readonly AttachmentRef[],
+	) => DraftChange;
+	readonly restoreChange: (
+		key: InputDraftKey,
+		inputId: string,
+		refs: readonly AttachmentRef[],
+	) => DraftChange;
 	readonly claim: (
 		draftId: string,
 		projectId: string,
@@ -72,6 +123,23 @@ export const releaseInputDraftClaims = () =>
 		);
 	});
 
+/** Import owns its transaction; only release claims copied by that import. */
+export function releaseCopiedInputDraftClaims(
+	db: Pick<DatabaseSync, "prepare">,
+) {
+	db.prepare(`DELETE FROM main.input_drafts
+		WHERE promoted_session_id = ? AND text = ''
+		AND NOT EXISTS (SELECT 1 FROM main.draft_attachments WHERE draft_key = input_drafts.draft_key)
+		AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
+		inputDraftClaimMarker,
+	);
+	db.prepare(`UPDATE main.input_drafts SET promoted_session_id = NULL
+		WHERE promoted_session_id = ?
+		AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
+		inputDraftClaimMarker,
+	);
+}
+
 export const makeInputDrafts: Effect.Effect<
 	InputDrafts,
 	never,
@@ -82,6 +150,7 @@ export const makeInputDrafts: Effect.Effect<
 	const shared = yield* Effect.serviceOption(InputDraftsTag);
 	if (Option.isSome(shared)) return shared.value;
 	const sql = yield* SqlClient.SqlClient;
+	const attachments = yield* makeAttachmentStore;
 	const changes = yield* PubSub.unbounded<{
 		readonly key: InputDraftKey;
 		readonly envelope: InputDraftEnvelope;
@@ -98,10 +167,84 @@ export const makeInputDrafts: Effect.Effect<
 			WHERE draft_key = ${keyOf(key)} AND kind = ${kindOf(key)}`.pipe(
 			Effect.map((rows) => rows[0]),
 		);
+	const resolveKey = (key: InputDraftKey) =>
+		Effect.gen(function* () {
+			const row = yield* readRow(key);
+			return "draft" in key &&
+				row?.promoted_session_id != null &&
+				row.promoted_session_id !== inputDraftClaimMarker
+				? { session: row.promoted_session_id }
+				: key;
+		});
+	const readAttachments = (key: InputDraftKey) =>
+		sql<{
+			id: string;
+			name: string | null;
+			mime: AttachmentRef["mime"];
+			size: number;
+			hash: string;
+		}>`SELECT attachment.id, attachment.name, blob.mime, blob.size, attachment.hash
+			FROM draft_attachments attachment JOIN attachment_blobs blob ON blob.hash = attachment.hash
+			WHERE attachment.draft_key = ${keyOf(key)} AND attachment.state = 'live'
+			ORDER BY attachment.position, attachment.id`;
+	const snapshotAttachments = (key: InputDraftKey) =>
+		readAttachments(key).pipe(
+			Effect.map((rows) =>
+				rows.map((row) => ({ ...row, name: row.name ?? "attachment" })),
+			),
+		);
+	const ensureDraft = (key: InputDraftKey, projectId?: string) =>
+		Effect.gen(function* () {
+			if ("session" in key) {
+				yield* sql`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at)
+					SELECT id, project_id, 'session', '', ${Date.now()} FROM sessions WHERE id = ${key.session}
+					ON CONFLICT (draft_key) DO NOTHING`;
+			} else if (projectId !== undefined) {
+				yield* sql`INSERT OR IGNORE INTO input_drafts (draft_key, project_id, kind, text, updated_at)
+					VALUES (${key.draft}, ${projectId}, 'draft', '', ${Date.now()})`;
+			}
+			return (yield* readRow(key)) !== undefined;
+		});
+	const publishDraft = (key: InputDraftKey, from?: string) =>
+		Effect.gen(function* () {
+			const row = yield* readRow(key).pipe(Effect.orDie);
+			const liveAttachments = yield* snapshotAttachments(key).pipe(
+				Effect.orDie,
+			);
+			yield* PubSub.publish(changes, {
+				key,
+				envelope: {
+					_tag: "draft",
+					text: row?.text ?? "",
+					attachments: liveAttachments,
+					...(from === undefined ? {} : { from }),
+					...("draft" in key && row ? { projectId: row.project_id } : {}),
+				},
+			});
+			if ("draft" in key) yield* PubSub.publish(draftChanges, undefined);
+		});
+	const selectedAttachments = (key: InputDraftKey, ids: readonly string[]) =>
+		Effect.gen(function* () {
+			const actualKey = yield* resolveKey(key);
+			const rows = yield* readAttachments(actualKey);
+			const byId = new Map(rows.map((row) => [row.id, row]));
+			const missing = ids.filter((id) => !byId.has(id));
+			if (missing.length > 0)
+				return yield* new DraftAttachmentMissing({ ids: missing });
+			return {
+				actualKey,
+				rows: ids.flatMap((id) => {
+					const row = byId.get(id);
+					return row === undefined ? [] : [row];
+				}),
+			};
+		});
 	const readDrafts = sql<DraftListItem>`SELECT draft_key AS draftId,
 		project_id AS projectSlug, substr(text, 1, 160) AS firstLine,
 		updated_at AS updatedAt FROM input_drafts
-		WHERE kind = 'draft' AND text != '' AND promoted_session_id IS NULL
+		WHERE kind = 'draft' AND (text != '' OR EXISTS (
+			SELECT 1 FROM draft_attachments WHERE draft_key = input_drafts.draft_key AND state = 'live'
+		)) AND promoted_session_id IS NULL
 		ORDER BY updated_at DESC, draft_key ASC`.pipe(
 		Effect.map((rows) =>
 			rows.map((row) => ({
@@ -165,6 +308,14 @@ export const makeInputDrafts: Effect.Effect<
 											draft_key: string;
 										}>`DELETE FROM input_drafts
 											WHERE draft_key = ${key.draft} AND kind = 'draft'
+											AND promoted_session_id IS NULL
+											AND NOT EXISTS (SELECT 1 FROM draft_attachments WHERE draft_key = input_drafts.draft_key)
+											RETURNING draft_key`;
+										const cleared = yield* sql<{
+											draft_key: string;
+										}>`UPDATE input_drafts
+											SET text = '', updated_at = ${Date.now()}
+											WHERE draft_key = ${key.draft} AND kind = 'draft'
 											AND promoted_session_id IS NULL RETURNING draft_key`;
 										const blocked = yield* sql<{ draft_key: string }>`
 											SELECT draft_key FROM input_drafts
@@ -172,7 +323,7 @@ export const makeInputDrafts: Effect.Effect<
 											AND promoted_session_id IS NOT NULL`;
 										return {
 											writable: blocked.length === 0,
-											changed: deleted.length > 0,
+											changed: deleted.length > 0 || cleared.length > 0,
 										};
 									}),
 								)
@@ -203,37 +354,137 @@ export const makeInputDrafts: Effect.Effect<
 				} else {
 					return;
 				}
-				yield* PubSub.publish(changes, {
-					key,
-					envelope: {
-						_tag: "draft",
-						text,
-						...(from !== undefined ? { from } : {}),
-						...("draft" in key && projectId !== undefined ? { projectId } : {}),
-					},
-				});
+				yield* snapshotGate.withPermits(1)(
+					Effect.gen(function* () {
+						yield* PubSub.publish(changes, {
+							key,
+							envelope: {
+								_tag: "draft",
+								text,
+								attachments: yield* snapshotAttachments(key).pipe(Effect.orDie),
+								...(from !== undefined ? { from } : {}),
+								...("draft" in key && projectId !== undefined
+									? { projectId }
+									: {}),
+							},
+						});
+					}),
+				);
 			}),
-		// A send's clear can land after the user has typed and synced the next
-		// message; an unconditional write would erase it.
-		clearSent: (sessionId, sent) =>
-			sql<{
-				draft_key: string;
-			}>`UPDATE input_drafts SET text = '', updated_at = ${Date.now()}
-				WHERE draft_key = ${sessionId} AND kind = 'session' AND text = ${sent}
-				RETURNING draft_key`.pipe(
-				Effect.flatMap((rows) =>
-					rows.length > 0
-						? PubSub.publish(changes, {
-								key: { session: sessionId },
-								envelope: { _tag: "draft", text: "" },
-							})
-						: Effect.void,
-				),
-				Effect.asVoid,
-				Effect.catch((cause) =>
-					Effect.logError(`Could not clear input draft ${sessionId}: ${cause}`),
+		addAttachment: (key, id, dataUrl, name, projectId) =>
+			snapshotGate.withPermits(1)(
+				Effect.gen(function* () {
+					const result = yield* sql.withTransaction(
+						Effect.gen(function* () {
+							const actualKey = yield* resolveKey(key);
+							const [existing] = yield* sql<{
+								state: "live" | "removed" | "sent";
+								draft_key: string;
+							}>`
+						SELECT state, draft_key FROM draft_attachments WHERE id = ${id}`;
+							if (existing?.state === "removed" || existing?.state === "sent")
+								return { ended: existing.state };
+							if (!existing) {
+								if (!(yield* ensureDraft(actualKey, projectId)))
+									return { ended: "removed" as const };
+								const ref = yield* attachments.put(dataUrl);
+								yield* sql`INSERT INTO draft_attachments (id, draft_key, position, name, hash, state, created_at)
+							SELECT ${id}, ${keyOf(actualKey)}, COALESCE(MAX(position), -1) + 1,
+							${name ?? ref.name ?? null}, ${ref.attachmentHash}, 'live', ${Date.now()}
+							FROM draft_attachments WHERE draft_key = ${keyOf(actualKey)}`;
+								if ("draft" in actualKey)
+									yield* sql`UPDATE input_drafts SET updated_at = ${Date.now()}
+							WHERE draft_key = ${keyOf(actualKey)}`;
+							}
+							const item = (yield* snapshotAttachments(actualKey)).find(
+								(row) => row.id === id,
+							);
+							return item === undefined
+								? { ended: "removed" as const }
+								: { attachment: item };
+						}),
+					);
+					yield* publishDraft(yield* resolveKey(key).pipe(Effect.orDie));
+					return result;
+				}),
+			),
+		removeAttachment: (key, id, projectId) =>
+			snapshotGate.withPermits(1)(
+				Effect.gen(function* () {
+					const actualKey = yield* resolveKey(key);
+					yield* sql.withTransaction(
+						Effect.gen(function* () {
+							if (!(yield* ensureDraft(actualKey, projectId))) return;
+							yield* sql`INSERT INTO draft_attachments (id, draft_key, position, name, hash, state, created_at)
+						VALUES (${id}, ${keyOf(actualKey)}, 0, NULL, NULL, 'removed', ${Date.now()})
+						ON CONFLICT (id) DO UPDATE SET state = 'removed', hash = NULL
+						WHERE draft_attachments.draft_key = ${keyOf(actualKey)} AND draft_attachments.state = 'live'`;
+						}),
+					);
+					yield* publishDraft(actualKey);
+				}),
+			),
+		takeForSend: (key, ids) =>
+			selectedAttachments(key, ids).pipe(
+				Effect.map(({ rows }) =>
+					rows.map((row) =>
+						Schema.decodeUnknownSync(AttachmentRefSchema)({
+							attachmentHash: row.hash,
+							mime: row.mime,
+							...(row.name === null ? {} : { name: row.name }),
+						}),
+					),
 				),
 			),
+		sendChange: (key, sessionId, text, ids, refs) => ({
+			write: Effect.gen(function* () {
+				const { actualKey, rows } = yield* selectedAttachments(key, ids).pipe(
+					Effect.catchTag("SqlError", Effect.die),
+				);
+				const missing = ids.filter(
+					(_, index) => rows[index]?.hash !== refs[index]?.attachmentHash,
+				);
+				if (missing.length > 0)
+					return yield* new DraftAttachmentMissing({ ids: missing });
+				yield* sql`UPDATE input_drafts SET text = '', updated_at = ${Date.now()}
+					WHERE draft_key IN (${keyOf(key)}, ${keyOf(actualKey)}, ${sessionId}) AND text = ${text}`.pipe(
+					Effect.orDie,
+				);
+				for (const id of ids)
+					yield* sql`UPDATE draft_attachments SET state = 'sent', hash = NULL
+					WHERE id = ${id} AND draft_key = ${keyOf(actualKey)} AND state = 'live'`.pipe(
+						Effect.orDie,
+					);
+			}),
+			publish: snapshotGate.withPermits(1)(
+				Effect.gen(function* () {
+					const actualKey = yield* resolveKey(key).pipe(Effect.orDie);
+					yield* publishDraft(key);
+					if (keyOf(actualKey) !== keyOf(key)) yield* publishDraft(actualKey);
+					if (sessionId !== keyOf(key) && sessionId !== keyOf(actualKey))
+						yield* publishDraft({ session: sessionId });
+				}),
+			),
+		}),
+		restoreChange: (key, inputId, refs) => ({
+			write: Effect.gen(function* () {
+				const actualKey = yield* resolveKey(key).pipe(Effect.orDie);
+				if (!(yield* ensureDraft(actualKey).pipe(Effect.orDie))) return;
+				for (const [index, ref] of refs.entries())
+					yield* sql`INSERT OR IGNORE INTO draft_attachments
+					(id, draft_key, position, name, hash, state, created_at)
+					SELECT ${`${inputId}:${index}`}, ${keyOf(actualKey)}, COALESCE(MAX(position), -1) + 1,
+					${ref.name ?? null}, ${ref.attachmentHash}, 'live', ${Date.now()}
+					FROM draft_attachments WHERE draft_key = ${keyOf(actualKey)}`.pipe(
+						Effect.orDie,
+					);
+			}),
+			publish: snapshotGate.withPermits(1)(
+				Effect.gen(function* () {
+					yield* publishDraft(yield* resolveKey(key).pipe(Effect.orDie));
+				}),
+			),
+		}),
 		claim: (draftId, projectId) =>
 			sql<{ text: string }>`INSERT INTO input_drafts
 				(draft_key, project_id, kind, text, updated_at, promoted_session_id)
@@ -255,7 +506,9 @@ export const makeInputDrafts: Effect.Effect<
 						const deleted = yield* sql<{
 							draft_key: string;
 						}>`DELETE FROM input_drafts WHERE draft_key = ${draftId}
-						AND promoted_session_id = ${inputDraftClaimMarker} AND text = '' RETURNING draft_key`;
+						AND promoted_session_id = ${inputDraftClaimMarker} AND text = ''
+						AND NOT EXISTS (SELECT 1 FROM draft_attachments WHERE draft_key = input_drafts.draft_key)
+						RETURNING draft_key`;
 						const released = yield* sql<{
 							draft_key: string;
 						}>`UPDATE input_drafts SET promoted_session_id = NULL
@@ -329,6 +582,10 @@ export const makeInputDrafts: Effect.Effect<
 							return Stream.concat(
 								Stream.make<[InputDraftEnvelope]>({
 									_tag: "synchronized",
+									attachments:
+										promotedSessionId === undefined
+											? yield* snapshotAttachments(key).pipe(Effect.orDie)
+											: [],
 									...(row === undefined || promotedSessionId !== undefined
 										? {}
 										: { text: row.text }),
@@ -362,15 +619,11 @@ export const makeInputDrafts: Effect.Effect<
 				}),
 			),
 		forget: (sessionId) =>
-			sql<{ kind: string }>`DELETE FROM input_drafts
-				WHERE (draft_key = ${sessionId} AND kind = 'session')
-				OR promoted_session_id = ${sessionId} RETURNING kind`.pipe(
-				Effect.flatMap((rows) =>
-					rows.some((row) => row.kind === "draft")
-						? PubSub.publish(draftChanges, undefined)
-						: Effect.void,
+			snapshotGate.withPermits(1)(
+				PubSub.publish(draftChanges, undefined).pipe(
+					Effect.andThen(publishDraft({ session: sessionId })),
+					Effect.asVoid,
 				),
-				Effect.asVoid,
 			),
 	} satisfies InputDrafts;
 });

@@ -5,10 +5,7 @@
 // frontend code can import everything from "./types.js".
 // Types also used locally in this file are imported separately.
 
-import type {
-	AttachmentRef,
-	AttachmentSource,
-} from "../contracts/attachment-ref.js";
+import type { AttachmentSource } from "../contracts/attachment-ref.js";
 import type { SurfacingMark } from "../contracts/category-set.js";
 import type { ProjectSetupState } from "../contracts/project-setup.js";
 import type { InputCut, Utf8Bytes } from "../contracts/tool-wire.js";
@@ -422,11 +419,6 @@ export interface SplitRow {
 }
 
 // ProjectInfo is re-exported from shared-types.ts above.
-
-export type PendingAttachment = {
-	id: string;
-	name: string;
-} & ({ dataUrl: string; size: number } | { ref: AttachmentRef });
 
 export interface PlanApproval {
 	onApprove: () => void;

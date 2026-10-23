@@ -3,6 +3,25 @@ import type { InputDraftKey } from "../../../contracts/ws-rpc.js";
 export const draftKeyId = (key: InputDraftKey): string =>
 	"session" in key ? `session:${key.session}` : `draft:${key.draft}`;
 
+export interface DraftAttachmentItem {
+	id: string;
+	name: string;
+	mime: string;
+	size: number;
+	hash?: string;
+	dataUrl?: string;
+	projectSlug?: string;
+	status: "saving" | "saved" | "failed" | "removing";
+	previousStatus?: "saving" | "saved" | "failed";
+	error?: string;
+}
+type LocalAttachment = Required<
+	Pick<DraftAttachmentItem, "id" | "name" | "mime" | "size" | "dataUrl">
+> & { projectSlug?: string };
+type SavedAttachment = Required<
+	Pick<DraftAttachmentItem, "id" | "name" | "mime" | "size" | "hash">
+>;
+
 export interface ReloadDraft {
 	key: InputDraftKey;
 	text: string;
@@ -14,6 +33,7 @@ interface Draft extends ReloadDraft {
 	sendPick?: DraftState["sendPick"];
 }
 export interface DraftState {
+	attachments: ReadonlyMap<string, readonly DraftAttachmentItem[]>;
 	key: InputDraftKey | null | undefined;
 	text: string;
 	acked: string;
@@ -23,13 +43,46 @@ export interface DraftState {
 	drafts: ReadonlyMap<string, Draft>;
 	reloadBases: ReadonlyMap<string, string>;
 	legacy: { key: InputDraftKey; text: string } | null;
-	inFlight: ReadonlyMap<string, string>;
+	inFlight: ReadonlyMap<string, readonly string[]>;
 	promoted: ReadonlySet<string>;
 	throttled: boolean;
 	pending: boolean;
 	snapshot: "waiting" | "overlapped" | "ready";
 }
 export type DraftEvent =
+	| { _tag: "AttachmentAdded"; key: InputDraftKey; attachment: LocalAttachment }
+	| {
+			_tag: "AttachmentAddAcknowledged";
+			key: InputDraftKey;
+			id: string;
+			result: { attachment: SavedAttachment } | { ended: "removed" | "sent" };
+	  }
+	| {
+			_tag: "AttachmentAddFailed";
+			key: InputDraftKey;
+			id: string;
+			error: string;
+	  }
+	| {
+			_tag: "AttachmentsReceived";
+			key: InputDraftKey;
+			attachments: readonly SavedAttachment[];
+	  }
+	| { _tag: "AttachmentRemoved"; key: InputDraftKey; id: string }
+	| { _tag: "AttachmentRemoveAcknowledged"; key: InputDraftKey; id: string }
+	| {
+			_tag: "AttachmentRemoveFailed";
+			key: InputDraftKey;
+			id: string;
+			error: string;
+	  }
+	| { _tag: "ConnectionLost" }
+	| { _tag: "Reconnected" }
+	| {
+			_tag: "SendAttachmentsAccepted";
+			key: InputDraftKey;
+			ids: readonly string[];
+	  }
 	| { _tag: "TextChanged"; text: string }
 	| { _tag: "SendPickChanged"; pick: DraftState["sendPick"] }
 	| { _tag: "LocalEdited" }
@@ -84,6 +137,8 @@ export type DraftEvent =
 	  }
 	| {
 			_tag: "SendSucceeded";
+			key: InputDraftKey | null;
+			text: string;
 			sentTo: string | null;
 			steer: boolean;
 			clear: boolean;
@@ -98,6 +153,8 @@ export type DraftEvent =
 	| { _tag: "LegacyDraftFound"; key: InputDraftKey; text: string }
 	| { _tag: "PersistBeforeReload"; hasAttachments: boolean };
 export type DraftCommand =
+	| { _tag: "AddAttachment"; key: InputDraftKey; attachment: LocalAttachment }
+	| { _tag: "RemoveAttachment"; key: InputDraftKey; id: string }
 	| { _tag: "ScheduleSync"; delay: number }
 	| { _tag: "CancelSync" }
 	| { _tag: "StartDraft" }
@@ -114,6 +171,7 @@ export type DraftCommand =
 	| { _tag: "SaveReloadBackup"; entries: readonly ReloadDraft[] };
 export function initialState(): DraftState {
 	return {
+		attachments: new Map(),
 		key: undefined,
 		text: "",
 		acked: "",
@@ -129,6 +187,59 @@ export function initialState(): DraftState {
 		snapshot: "waiting",
 	};
 }
+export function hasContent(state: DraftState, key: InputDraftKey): boolean {
+	const id = draftKeyId(key);
+	const text =
+		state.key && draftKeyId(state.key) === id
+			? state.text
+			: state.drafts.get(id)?.text;
+	return (
+		Boolean(text) ||
+		(state.attachments.get(id) ?? []).some((item) => item.status !== "removing")
+	);
+}
+function settleSend(
+	state: DraftState,
+	key: InputDraftKey | null,
+	text: string,
+): DraftState {
+	if (!key) return state;
+	const id = draftKeyId(key);
+	const pending = [...(state.inFlight.get(id) ?? [])];
+	const index = pending.indexOf(text);
+	if (index < 0) return state;
+	pending.splice(index, 1);
+	const inFlight = new Map(state.inFlight);
+	if (pending.length) inFlight.set(id, pending);
+	else inFlight.delete(id);
+	return { ...state, inFlight };
+}
+
+function flushUnsentText(
+	state: DraftState,
+	key: InputDraftKey | null,
+): [DraftState, DraftCommand[]] {
+	if (!key) return [state, []];
+	const id = draftKeyId(key);
+	if (state.inFlight.has(id) || state.promoted.has(id)) return [state, []];
+	if (state.key && draftKeyId(state.key) === id)
+		return step(state, { _tag: "Flush" });
+	const cached = state.drafts.get(id);
+	return cached && (cached.text !== cached.acked || cached.projectChanged)
+		? [
+				state,
+				[
+					{
+						_tag: "SyncDraft",
+						key,
+						text: cached.text,
+						projectSlug: cached.projectSlug,
+					},
+				],
+			]
+		: [state, []];
+}
+
 function clear(state: DraftState): [DraftState, DraftCommand[]] {
 	const reloadBases = new Map(state.reloadBases);
 	if (state.key) reloadBases.delete(draftKeyId(state.key));
@@ -172,6 +283,154 @@ export function step(
 	const writable =
 		id !== null && !state.promoted.has(id) && !state.inFlight.has(id);
 	switch (event._tag) {
+		case "ConnectionLost":
+		case "Reconnected": {
+			const attachments = new Map(state.attachments);
+			const commands: DraftCommand[] = [];
+			for (const [keyId, items] of attachments) {
+				const key = keyId.startsWith("session:")
+					? { session: keyId.slice(8) }
+					: { draft: keyId.slice(6) };
+				attachments.set(
+					keyId,
+					items.map((item) => {
+						if (event._tag === "ConnectionLost" && item.status === "saving")
+							return { ...item, status: "failed", error: "Connection lost" };
+						if (
+							event._tag === "ConnectionLost" &&
+							item.status === "removing" &&
+							item.previousStatus === "saving"
+						)
+							return {
+								...item,
+								previousStatus: "failed",
+								error: "Connection lost",
+							};
+						if (
+							event._tag === "Reconnected" &&
+							item.status === "failed" &&
+							item.dataUrl
+						) {
+							const {
+								error: _error,
+								previousStatus: _previousStatus,
+								...retry
+							} = item;
+							commands.push({
+								_tag: "AddAttachment",
+								key,
+								attachment: {
+									id: item.id,
+									name: item.name,
+									mime: item.mime,
+									size: item.size,
+									dataUrl: item.dataUrl,
+									...(item.projectSlug
+										? { projectSlug: item.projectSlug }
+										: {}),
+								},
+							});
+							return { ...retry, status: "saving" };
+						}
+						return item;
+					}),
+				);
+			}
+			return [{ ...state, attachments }, commands];
+		}
+		case "AttachmentAdded":
+		case "AttachmentAddAcknowledged":
+		case "AttachmentAddFailed":
+		case "AttachmentsReceived":
+		case "AttachmentRemoved":
+		case "AttachmentRemoveAcknowledged":
+		case "AttachmentRemoveFailed":
+		case "SendAttachmentsAccepted": {
+			const keyId = draftKeyId(event.key);
+			const attachments = new Map(state.attachments);
+			let items = attachments.get(keyId) ?? [];
+			const commands: DraftCommand[] = [];
+			if (event._tag === "AttachmentAdded") {
+				if (items.some((item) => item.id === event.attachment.id))
+					return [state, []];
+				items = [...items, { ...event.attachment, status: "saving" }];
+				commands.push({
+					_tag: "AddAttachment",
+					key: event.key,
+					attachment: event.attachment,
+				});
+			} else if (event._tag === "AttachmentsReceived") {
+				const savedIds = new Set(event.attachments.map((item) => item.id));
+				items = [
+					...event.attachments.map((item): DraftAttachmentItem => {
+						const existing = items.find((local) => local.id === item.id);
+						return existing?.status === "removing"
+							? { ...item, status: "removing", previousStatus: "saved" }
+							: { ...item, status: "saved" };
+					}),
+					...items.filter(
+						(item) =>
+							!savedIds.has(item.id) &&
+							(item.status === "saving" || item.status === "failed"),
+					),
+				];
+			} else if (event._tag === "SendAttachmentsAccepted") {
+				items = items.filter((item) => !event.ids.includes(item.id));
+			} else if (event._tag === "AttachmentRemoved") {
+				items = items.map((item) =>
+					item.id !== event.id || item.status === "removing"
+						? item
+						: { ...item, status: "removing", previousStatus: item.status },
+				);
+				commands.push({
+					_tag: "RemoveAttachment",
+					key: event.key,
+					id: event.id,
+				});
+			} else if (event._tag === "AttachmentAddAcknowledged") {
+				const result = event.result;
+				items =
+					"ended" in result
+						? items.filter((item) => item.id !== event.id)
+						: items.map((item) =>
+								item.id !== event.id
+									? item
+									: item.status === "removing"
+										? {
+												...result.attachment,
+												status: "removing",
+												previousStatus: "saved",
+											}
+										: { ...result.attachment, status: "saved" },
+							);
+			} else if (event._tag === "AttachmentRemoveAcknowledged") {
+				items = items.filter(
+					(item) => item.id !== event.id || item.status !== "removing",
+				);
+			} else if (event._tag === "AttachmentRemoveFailed") {
+				items = items.map((item) =>
+					item.id !== event.id || item.status !== "removing"
+						? item
+						: {
+								...item,
+								status: item.previousStatus ?? "saved",
+								error: event.error,
+							},
+				);
+			} else {
+				items = items.map((item) =>
+					item.id !== event.id
+						? item
+						: item.status === "saving"
+							? { ...item, status: "failed", error: event.error }
+							: item.status === "removing" && item.previousStatus === "saving"
+								? { ...item, previousStatus: "failed", error: event.error }
+								: item,
+				);
+			}
+			attachments.set(keyId, items);
+			return [{ ...state, attachments }, commands];
+		}
 		case "SendPickChanged":
 			return [{ ...state, sendPick: event.pick }, []];
 		case "TextChanged":
@@ -207,7 +466,7 @@ export function step(
 				state.promoted.has(draftKeyId(event.key))
 			)
 				return [state, []];
-			if (!writable)
+			if (!writable && "draft" in event.key)
 				return [
 					{ ...state, snapshot: event.initial ? "ready" : state.snapshot },
 					[],
@@ -291,7 +550,7 @@ export function step(
 			const reloadBases = new Map(state.reloadBases);
 			const inFlight = new Map(state.inFlight);
 			const promoted = new Set(state.promoted);
-			const sentText = inFlight.get(promotedId);
+			const sentText = inFlight.get(promotedId)?.at(-1);
 			const sending =
 				sentText !== undefined &&
 				(event._tag === "Retired" || sentText === event.text);
@@ -475,15 +734,15 @@ export function step(
 			];
 		}
 		case "SendStarted": {
-			if (!state.key || !("draft" in state.key) || !id)
-				return event.clear ? clear(state) : [state, []];
 			const inFlight = new Map(state.inFlight);
-			inFlight.set(id, state.text);
+			if (id) inFlight.set(id, [...(inFlight.get(id) ?? []), state.text]);
 			return [
 				{
 					...state,
 					inFlight,
-					...(event.clear ? { text: "" } : {}),
+					...(event.clear && state.key && "draft" in state.key
+						? { text: "" }
+						: {}),
 					pending: false,
 					throttled: false,
 				},
@@ -491,10 +750,26 @@ export function step(
 			];
 		}
 		case "SendFailed": {
+			// The winning tab's promotion still needs this attempt's identity.
 			if (event.alreadySent) return [state, []];
-			const inFlight = new Map(state.inFlight);
-			if (event.key) inFlight.delete(draftKeyId(event.key));
-			const next = { ...state, inFlight };
+			let next = settleSend(state, event.key, event.text);
+			const restore =
+				event.restore && event.key !== null && "draft" in event.key;
+			const key =
+				event.key && !next.promoted.has(draftKeyId(event.key))
+					? event.key
+					: event.sentTo
+						? { session: event.sentTo }
+						: null;
+			if (restore && event.key && draftKeyId(event.key) !== id) {
+				const keyId = draftKeyId(event.key);
+				const cached = next.drafts.get(keyId);
+				if (cached && !cached.text) {
+					const drafts = new Map(next.drafts);
+					drafts.set(keyId, { ...cached, text: event.text });
+					next = { ...next, drafts };
+				}
+			}
 			if (
 				!event.sentTo &&
 				event.key &&
@@ -506,46 +781,60 @@ export function step(
 					"session" in state.key &&
 					state.key.session === event.sentTo
 				: event.key && draftKeyId(event.key) === id;
-			if (!event.restore || !sameScope || state.text || event.hasAttachments)
-				return [next, []];
+			if (!restore || !sameScope || state.text)
+				return flushUnsentText(next, key);
 			return step({ ...next, text: event.text }, { _tag: "LocalEdited" });
 		}
 		case "SendSucceeded": {
-			if (event.sentTo) {
-				if (id === draftKeyId({ session: event.sentTo })) {
-					state = { ...state, sendPick: undefined };
-				} else {
-					const drafts = new Map(state.drafts);
-					const sentId = draftKeyId({ session: event.sentTo });
-					const draft = drafts.get(sentId);
-					if (draft) drafts.set(sentId, { ...draft, sendPick: undefined });
-					state = { ...state, drafts };
-				}
-			}
-			if (!event.steer) return [state, []];
-			if (
-				state.key &&
-				"session" in state.key &&
-				state.key.session === event.sentTo
-			)
-				return event.clear ? clear(state) : [state, []];
+			state = settleSend(state, event.key, event.text);
+			const key =
+				event.key && !state.promoted.has(draftKeyId(event.key))
+					? event.key
+					: event.sentTo
+						? { session: event.sentTo }
+						: null;
+			if (!key) return [state, []];
+			const sentId = draftKeyId(key);
 			const drafts = new Map(state.drafts);
 			const reloadBases = new Map(state.reloadBases);
-			if (event.sentTo) {
-				const key = { session: event.sentTo };
-				drafts.set(draftKeyId(key), {
-					key,
-					text: "",
-					acked: "",
-					projectSlug: null,
-					projectChanged: false,
+			reloadBases.delete(sentId);
+			const active = sentId === id;
+			const draft = drafts.get(sentId);
+			const currentText = active ? state.text : draft?.text;
+			const cleared =
+				event.clear && (currentText === "" || currentText === event.text);
+			if (draft)
+				drafts.set(sentId, {
+					...draft,
+					sendPick: undefined,
+					...(cleared ? { acked: "", text: "" } : {}),
 				});
-				reloadBases.delete(draftKeyId(key));
-			}
-			return [{ ...state, drafts, reloadBases }, []];
+			state = {
+				...state,
+				drafts,
+				reloadBases,
+				...(active
+					? {
+							sendPick: undefined,
+							...(cleared
+								? {
+										acked: "",
+										text: "",
+										pending: false,
+										throttled: false,
+									}
+								: {}),
+						}
+					: {}),
+			};
+			// Only dirty local edits need a write. The inbox cleared the sent text.
+			const [next, commands] = flushUnsentText(state, key);
+			if (commands.length) return [next, commands];
+			return [state, active && cleared ? [{ _tag: "CancelSync" }] : []];
 		}
 		case "SideThreadSent": {
 			const key = { session: event.parentSessionId };
+			state = settleSend(state, key, event.text);
 			const parentId = draftKeyId(key);
 			const active = id === parentId;
 			if (
@@ -553,7 +842,7 @@ export function step(
 					event.text ||
 				!event.attachmentsUnchanged
 			)
-				return [state, []];
+				return flushUnsentText(state, key);
 			const drafts = new Map(state.drafts);
 			drafts.set(parentId, {
 				key,
@@ -572,6 +861,7 @@ export function step(
 					...(active
 						? {
 								text: "",
+								acked: "",
 								sendPick: undefined,
 								throttled: false,
 								pending: false,
@@ -582,10 +872,7 @@ export function step(
 							}
 						: {}),
 				},
-				[
-					...(active ? [{ _tag: "CancelSync" as const }] : []),
-					{ _tag: "SyncDraft", key, text: "", projectSlug: null },
-				],
+				[...(active ? [{ _tag: "CancelSync" as const }] : [])],
 			];
 		}
 		case "ReloadRestored": {

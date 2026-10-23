@@ -185,7 +185,12 @@ it("delivers a subscription and a unary response on the same client", async () =
 	const { WsRpcClients } = await import(
 		"../../../../src/lib/frontend/transport/shared-client.js"
 	);
-	const envelope = { _tag: "draft", text: "draft", from: "browser" } as const;
+	const envelope = {
+		_tag: "draft",
+		text: "draft",
+		from: "browser",
+		attachments: [],
+	} as const;
 	wire.stub({
 		SubscribeInputDraft: () => Stream.succeed(envelope),
 		ListWorktrees: () => ({ worktrees: [] }),

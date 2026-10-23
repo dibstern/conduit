@@ -64,6 +64,7 @@ import type { SessionTitleServiceTag } from "./session-title-service.js";
 import type { SessionWorkspaceTag } from "./session-workspace.js";
 
 export interface ProviderTurnServiceSendInput {
+	readonly draftChange?: import("./input-drafts.js").DraftChange;
 	/** Continuation admission may already have resolved this immutable snapshot. */
 	readonly account?: Account;
 	readonly clientId: string;

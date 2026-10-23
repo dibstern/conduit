@@ -3,14 +3,16 @@ import { untrack } from "svelte";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
 import { accountLimit } from "../../contracts/account-limit.js";
-import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import type {
 	InputDelivery,
 	SteerBlocker,
 } from "../../contracts/stored-event.js";
 import { WorktreeCreationError } from "../../contracts/worktree.js";
-import { DraftAlreadySent } from "../../contracts/ws-rpc.js";
+import {
+	DraftAlreadySent,
+	type InputDraftKey,
+} from "../../contracts/ws-rpc.js";
 import { stopBackgroundTasks } from "../components/session/background-tasks.svelte.js";
 import { toastFailure } from "../transport/rpc-errors.js";
 import { rpc } from "../transport/ws-rpc-client.js";
@@ -49,7 +51,10 @@ export type SendOutcome =
 
 type SendInput = {
 	readonly text: string;
-	readonly images?: readonly (string | AttachmentRef)[];
+	readonly images?: readonly string[];
+	readonly draftKey?: InputDraftKey;
+	readonly draftText?: string;
+	readonly attachmentIds?: readonly string[];
 	readonly delivery: InputDelivery;
 	readonly inputId?: string;
 	readonly from?: typeof selection.scope;
@@ -241,13 +246,6 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 		...(input.images?.length
 			? {
 					attachments: input.images.map((image) => {
-						if (typeof image !== "string")
-							return {
-								id: crypto.randomUUID(),
-								name: image.name ?? "Attachment",
-								mime: image.mime,
-								source: image,
-							};
 						const { mime, name, size } = parseAttachmentDataUrl(image);
 						return {
 							id: crypto.randomUUID(),
@@ -268,6 +266,11 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 				inputId,
 				text: input.text,
 				...(input.images?.length ? { images: input.images } : {}),
+				...(input.draftKey ? { draftKey: input.draftKey } : {}),
+				...(input.draftText !== undefined
+					? { draftText: input.draftText }
+					: {}),
+				...(input.attachmentIds ? { attachmentIds: input.attachmentIds } : {}),
 				originId: getBrowserClientId(),
 			});
 			// Settle the source composer before navigation resets its attachments.
@@ -332,6 +335,13 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 					inputId,
 					delivery: input.delivery,
 					...(input.images ? { images: input.images } : {}),
+					...(input.draftKey ? { draftKey: input.draftKey } : {}),
+					...(input.draftText !== undefined
+						? { draftText: input.draftText }
+						: {}),
+					...(input.attachmentIds
+						? { attachmentIds: input.attachmentIds }
+						: {}),
 					originId: getBrowserClientId(),
 				}).then(resolve, reject);
 			}),

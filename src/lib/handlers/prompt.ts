@@ -1,30 +1,24 @@
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
 import {
 	AttachmentValidationError,
 	validateAttachmentDataUrls,
 } from "../attachment-data-url.js";
-import type { AttachmentRef } from "../contracts/attachment-ref.js";
 import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
 import type { InputDraftKey } from "../contracts/ws-rpc.js";
 import { AttachmentStoreTag } from "../domain/persistence/Services/attachment-store.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
-import { DraftPreWarmTag } from "../domain/relay/Services/draft-prewarm.js";
-import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { ProviderTurnServiceTag } from "../domain/relay/Services/provider-turn-service.js";
 import {
-	ConfigTag,
 	LoggerTag,
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
-import { ProviderRegistryTag } from "../provider/provider-registry.js";
-import { assertSessionRunnerAvailable } from "../provider/runner/runner-provider-instance.js";
 
 interface LegacyMessagePayload {
 	text: string;
-	images?: (string | AttachmentRef)[];
+	images?: string[];
 	commandId?: string;
 }
 
@@ -32,7 +26,11 @@ export interface SendMessageToSessionInput {
 	readonly clientId: string;
 	readonly sessionId: string | undefined;
 	readonly text: string;
-	readonly images?: readonly (string | AttachmentRef)[];
+	readonly images?: readonly string[];
+	readonly draftKey?: InputDraftKey;
+	/** The composer text before command/reference expansion. */
+	readonly draftText?: string;
+	readonly attachmentIds?: readonly string[];
 	readonly commandId: string;
 	/** A steer joins the running turn of a busy session, or is refused. */
 	readonly delivery?: InputDelivery;
@@ -50,10 +48,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 	Effect.gen(function* () {
 		// Reject direct RPC payloads before preparing a session or writing its inbox.
 		yield* Effect.try({
-			try: () =>
-				validateAttachmentDataUrls(
-					input.images?.filter((image) => typeof image === "string"),
-				),
+			try: () => validateAttachmentDataUrls(input.images),
 			catch: (cause) =>
 				new AttachmentValidationError(
 					cause instanceof Error ? cause.message : String(cause),
@@ -66,17 +61,11 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const imageList = images?.length
 			? yield* Effect.gen(function* () {
 					const store = yield* AttachmentStoreTag;
-					return yield* Effect.forEach(images, (image) =>
-						Effect.gen(function* () {
-							if (typeof image === "string") return yield* store.put(image);
-							yield* store.get(image.attachmentHash);
-							return image;
-						}),
-					);
+					return yield* Effect.forEach(images, (image) => store.put(image));
 				})
 			: undefined;
 		let activeId = input.sessionId;
-		if (!text && !imageList)
+		if (!text && !imageList && !input.attachmentIds?.length)
 			return {
 				sessionId: activeId,
 				handedOff: false,
@@ -88,10 +77,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				handedOff: false,
 			} satisfies SendMessageToSessionResult;
 		}
-		yield* assertSessionRunnerAvailable(
-			activeId,
-			Option.getOrUndefined(yield* Effect.serviceOption(ProviderRegistryTag)),
-		);
 		const originalActiveId = activeId;
 		const read = yield* ReadQueryEffectTag;
 		const originalSession = yield* read.getSession(activeId);
@@ -146,6 +131,11 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			sessionId: activeId,
 			inputId: input.commandId,
 			delivery: input.delivery ?? "queue",
+			draft: {
+				key: input.draftKey ?? { session: originalActiveId },
+				text: input.draftText ?? text,
+				attachmentIds: input.attachmentIds ?? [],
+			},
 			request: {
 				text,
 				...(imageList ? { images: imageList } : {}),
@@ -161,10 +151,6 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				sessionId: activeId,
 				refused: submitted.refused,
 			} satisfies SendMessageToSessionResult;
-		const drafts = yield* InputDraftsTag;
-		if (originalActiveId !== activeId)
-			yield* drafts.clearSent(originalActiveId, text);
-		yield* drafts.clearSent(activeId, text);
 		return {
 			sessionId: activeId,
 			handedOff: submitted.handedOff,
@@ -215,21 +201,4 @@ export {
 	undoSessionRewind,
 } from "../domain/relay/Services/session-rewind.js";
 
-export const syncInputDraft = ({
-	key,
-	text,
-	from,
-}: {
-	key: InputDraftKey;
-	text: string;
-	from?: string;
-}) =>
-	Effect.gen(function* () {
-		const drafts = yield* InputDraftsTag;
-		const projectId = "draft" in key ? (yield* ConfigTag).slug : undefined;
-		yield* drafts.write(key, text, from, projectId);
-		if ("draft" in key && text === "") {
-			const warm = yield* Effect.serviceOption(DraftPreWarmTag);
-			if (Option.isSome(warm)) yield* warm.value.discardDraft(key.draft);
-		}
-	});
+export { syncInputDraft } from "./input-drafts.js";

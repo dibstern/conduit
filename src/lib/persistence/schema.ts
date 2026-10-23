@@ -117,6 +117,7 @@ export const SESSIONS_JEV_MIGRATION = "0077_sessions_jev.sql";
 export const PROVIDER_CONTROL_PROCESS_MIGRATION =
 	"0078_provider_control_process.sql";
 export const ATTACHMENT_STORE_MIGRATION = "0079_attachment_store.sql";
+export const SESSION_DRAFT_DELETE_MIGRATION = "0080_session_draft_delete.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

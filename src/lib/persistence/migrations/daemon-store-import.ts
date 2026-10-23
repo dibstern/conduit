@@ -24,6 +24,7 @@ import { Data, Effect, Layer } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { AttachmentStoreTag } from "../../domain/persistence/Services/attachment-store.js";
+import { releaseCopiedInputDraftClaims } from "../../domain/relay/Services/input-drafts.js";
 import { makeAttachmentStore } from "../attachment-store.js";
 import {
 	makePersistenceEffectLayer,
@@ -33,7 +34,6 @@ import {
 import { effectMigrationEntries } from "../effect/migrations.js";
 import { ProjectionRunnerEffectTag } from "../effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../effect/projectors-effect.js";
-import { inputDraftClaimMarker } from "../input-drafts.js";
 import { daemonStorePath } from "../project-storage.js";
 import {
 	type AttachmentNormalisationSummary,
@@ -1022,16 +1022,7 @@ function importOne(
 				);
 			copyProject(db, project, names, offsets);
 			// Release only copied claims, before another connection can claim these rows.
-			db.prepare(`DELETE FROM main.input_drafts
-				WHERE promoted_session_id = ? AND text = ''
-				AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
-				inputDraftClaimMarker,
-			);
-			db.prepare(`UPDATE main.input_drafts SET promoted_session_id = NULL
-				WHERE promoted_session_id = ?
-				AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
-				inputDraftClaimMarker,
-			);
+			releaseCopiedInputDraftClaims(db);
 			options.checkpoint?.("import-copied", project.projectId);
 			for (const table of ["events", "projection_failures"]) {
 				const target =

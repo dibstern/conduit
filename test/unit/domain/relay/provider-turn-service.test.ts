@@ -27,6 +27,7 @@ import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/ope
 import { SessionWorkspaceLive } from "../../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
+import { InputDraftsLive } from "../../../../src/lib/domain/relay/Services/input-drafts.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -835,7 +836,12 @@ describe("ProviderTurnService", () => {
 					yield* sql`SELECT input_id, state FROM pending_inputs WHERE state = 'queued'`,
 				).toEqual([{ input_id: "queued-b", state: "queued" }]);
 			}).pipe(
-				Effect.provide(SessionInboxLive.pipe(Layer.provideMerge(dependencies))),
+				Effect.provide(
+					SessionInboxLive.pipe(
+						Layer.provide(InputDraftsLive),
+						Layer.provideMerge(dependencies),
+					),
+				),
 			);
 		},
 	);
@@ -1111,7 +1117,10 @@ describe("ProviderTurnService", () => {
 					).toEqual([]);
 				}).pipe(
 					Effect.provide(
-						SessionInboxLive.pipe(Layer.provideMerge(dependencies)),
+						SessionInboxLive.pipe(
+							Layer.provide(InputDraftsLive),
+							Layer.provideMerge(dependencies),
+						),
 					),
 				);
 			},
@@ -1802,7 +1811,10 @@ describe("ProviderTurnService", () => {
 					expect(dispatchEffect).toHaveBeenCalledTimes(3);
 				}).pipe(
 					Effect.provide(
-						SessionInboxLive.pipe(Layer.provideMerge(dependencies)),
+						SessionInboxLive.pipe(
+							Layer.provide(InputDraftsLive),
+							Layer.provideMerge(dependencies),
+						),
 					),
 				);
 			},

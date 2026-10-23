@@ -6,15 +6,17 @@
 	import ImageAttachmentThumb from "../ui/ImageAttachmentThumb.svelte";
 	import FileAttachmentChip from "../ui/FileAttachmentChip.svelte";
 	import { formatFileSize } from "../../utils/format.js";
-	import type { PendingAttachment } from "../../types.js";
+	import type { DraftAttachmentItem } from "../../stores/composer-draft/state.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 
 	let {
 		images,
 		onRemove,
+		projectSlug,
 	}: {
-		images: PendingAttachment[];
+		images: readonly DraftAttachmentItem[];
 		onRemove: (id: string) => void;
+		projectSlug?: string | null;
 	} = $props();
 
 	const hasImages = $derived(images.length > 0);
@@ -27,16 +29,17 @@
 			style="-webkit-overflow-scrolling: touch"
 		>
 			{#each images as image (image.id)}
-				{@const src = "ref" in image ? `/p/${encodeURIComponent(getCurrentSlug() ?? "")}/attachments/${image.ref.attachmentHash}` : image.dataUrl}
-				{#if "ref" in image ? image.ref.mime.startsWith("image/") : image.dataUrl.startsWith("data:image/")}
+				{@const src = image.hash ? `/p/${encodeURIComponent(projectSlug ?? getCurrentSlug() ?? "")}/attachments/${image.hash}` : image.dataUrl ?? ""}
+				{#if image.mime.startsWith("image/")}
 				<ImageAttachmentThumb {src} name={image.name} imageId={image.id} onremove={(event) => {
 						event.preventDefault();
 						event.stopPropagation();
 						onRemove(image.id);
 				}} />
 				{:else}
-					<FileAttachmentChip testid="file-attachment-chip" name={image.name} detail={"ref" in image ? image.ref.mime : formatFileSize(image.size)} onremove={() => onRemove(image.id)} />
+					<FileAttachmentChip testid="file-attachment-chip" name={image.name} detail={formatFileSize(image.size)} onremove={() => onRemove(image.id)} />
 				{/if}
+				{#if image.error}<span role="status" class="text-[11px] text-text-muted">{image.error}</span>{/if}
 			{/each}
 		</div>
 	</div>

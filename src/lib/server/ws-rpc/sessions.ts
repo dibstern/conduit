@@ -17,7 +17,11 @@ import {
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../contracts/worktree.js";
-import { DraftAlreadySent, WsRpcError } from "../../contracts/ws-rpc.js";
+import {
+	DraftAlreadySent,
+	DraftAttachmentMissing,
+	WsRpcError,
+} from "../../contracts/ws-rpc.js";
 import { autoSettleIdleWindowMs } from "../../daemon/config-persistence.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
@@ -996,18 +1000,26 @@ export const sessionsHandlers = {
 				sessionId,
 				text: request.text,
 				commandId: request.inputId,
+				draftKey: request.draftKey ?? { session: request.sessionId },
+				...(request.draftText !== undefined
+					? { draftText: request.draftText }
+					: {}),
+				...(request.attachmentIds
+					? { attachmentIds: request.attachmentIds }
+					: {}),
 				...(request.images ? { images: request.images } : {}),
-			}).pipe(Effect.catch(mapRpcFailure("StartSideThread")));
+			});
 			return { sessionId };
 		}).pipe(
-			Effect.catchTag("SessionCommandError", (error) =>
-				Effect.fail(
-					new WsRpcError({ message: error.message ?? String(error.cause) }),
-				),
-			),
 			Effect.catch(
-				(error): Effect.Effect<never, AccountUnroutable | WsRpcError> =>
-					error instanceof AccountUnroutable
+				(
+					error,
+				): Effect.Effect<
+					never,
+					AccountUnroutable | WsRpcError | DraftAttachmentMissing
+				> =>
+					error instanceof AccountUnroutable ||
+					error instanceof DraftAttachmentMissing
 						? Effect.fail(error)
 						: mapRpcFailure("StartSideThread")(error),
 			),

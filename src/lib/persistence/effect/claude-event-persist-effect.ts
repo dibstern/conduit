@@ -6,6 +6,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import { sessionCreatedLineage } from "../../contracts/session-ref.js";
+import type { DraftChange } from "../../domain/relay/Services/input-drafts.js";
 import {
 	resolveServerSessionPick,
 	sessionPickEvents,
@@ -78,7 +79,11 @@ export interface ClaudeEventPersistEffect {
 
 	readonly persistEvents: (
 		events: readonly CanonicalEvent[],
-		options?: { readonly publish?: boolean; readonly projectId?: string },
+		options?: {
+			readonly publish?: boolean;
+			readonly projectId?: string;
+			readonly draftChange?: DraftChange;
+		},
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistUserMessage: (
@@ -603,10 +608,10 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 				);
 			}).pipe(Effect.mapError(mapPersistError("persistHandoffDelivered")));
 
-	const persistEvents = (
-		events: readonly CanonicalEvent[],
-		options?: { readonly publish?: boolean; readonly projectId?: string },
-	): Effect.Effect<void, ClaudeEventPersistFailure> =>
+	const persistEvents: ClaudeEventPersistEffect["persistEvents"] = (
+		events,
+		options,
+	) =>
 		Effect.gen(function* () {
 			const mismatch = boundProjectMismatch(
 				eventStore.projectId,
@@ -618,6 +623,9 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 			yield* commitAndSignal.write(
 				(project) =>
 					Effect.gen(function* () {
+						yield* (options?.draftChange?.write ?? Effect.void).pipe(
+							Effect.provideService(SqlClient.SqlClient, sql),
+						);
 						for (const sessionId of new Set(
 							events.map((event) => event.sessionId),
 						))
@@ -640,7 +648,11 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 					}),
 				options,
 			);
-		}).pipe(Effect.mapError(mapPersistError("persistEvents")));
+			yield* options?.draftChange?.publish ?? Effect.void;
+		}).pipe(
+			Effect.uninterruptible,
+			Effect.mapError(mapPersistError("persistEvents")),
+		);
 
 	const persistUserMessage: ClaudeEventPersistEffect["persistUserMessage"] = (
 		sessionId,

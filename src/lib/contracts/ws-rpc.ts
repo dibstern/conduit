@@ -13,10 +13,7 @@ import {
 } from "../shared-types.js";
 import { AccountChangeRejected } from "./account.js";
 import { AccountColorSlotSchema } from "./account-color.js";
-import {
-	AttachmentRefSchema,
-	AttachmentSourceSchema,
-} from "./attachment-ref.js";
+import { AttachmentSourceSchema } from "./attachment-ref.js";
 import {
 	CategorySetContentsSchema,
 	CategorySetRejected,
@@ -1125,6 +1122,15 @@ export class DraftAlreadySent extends Schema.TaggedError<DraftAlreadySent>()(
 ) {
 	override get message() {
 		return "This draft was already sent";
+	}
+}
+
+export class DraftAttachmentMissing extends Schema.TaggedError<DraftAttachmentMissing>()(
+	"DraftAttachmentMissing",
+	{ ids: Schema.Array(Schema.String) },
+) {
+	override get message() {
+		return "A Draft attachment was removed. Review the Draft before sending again.";
 	}
 }
 
@@ -2809,13 +2815,18 @@ export const StartSideThread = Rpc.make("StartSideThread", {
 		title: NonEmptyString,
 		inputId: NonEmptyString,
 		text: NonEmptyString,
-		images: Schema.optional(
-			Schema.Array(Schema.Union([Schema.String, AttachmentRefSchema])),
-		),
+		images: Schema.optional(Schema.Array(Schema.String)),
+		draftKey: Schema.optional(Schema.suspend(() => InputDraftKeySchema)),
+		draftText: Schema.optional(Schema.String),
+		attachmentIds: Schema.optional(Schema.Array(NonEmptyString)),
 		originId: Schema.optional(NonEmptyString),
 	}),
 	success: Schema.Struct({ sessionId: Schema.String }),
-	error: Schema.Union([WsRpcError, Schema.suspend(() => AccountUnroutable)]),
+	error: Schema.Union([
+		WsRpcError,
+		DraftAttachmentMissing,
+		Schema.suspend(() => AccountUnroutable),
+	]),
 });
 
 export const RespondPermission = Rpc.make("RespondPermission", {
@@ -2905,14 +2916,19 @@ export const SubmitInput = Rpc.make("input.submit", {
 		sessionId: NonEmptyString,
 		inputId: NonEmptyString,
 		text: Schema.String,
-		images: Schema.optional(
-			Schema.Array(Schema.Union([Schema.String, AttachmentRefSchema])),
-		),
+		images: Schema.optional(Schema.Array(Schema.String)),
+		draftKey: Schema.optional(Schema.suspend(() => InputDraftKeySchema)),
+		draftText: Schema.optional(Schema.String),
+		attachmentIds: Schema.optional(Schema.Array(NonEmptyString)),
 		delivery: Schema.Literals([...INPUT_DELIVERIES]),
 		originId: Schema.optional(NonEmptyString),
 	}),
 	success: SubmitInputResponseSchema,
-	error: Schema.Union([WsRpcError, Schema.suspend(() => AccountUnroutable)]),
+	error: Schema.Union([
+		WsRpcError,
+		DraftAttachmentMissing,
+		Schema.suspend(() => AccountUnroutable),
+	]),
 });
 
 /** Remove a queued input (the tray's Remove, and Edit before refilling). */
@@ -2920,6 +2936,7 @@ export const CancelInput = Rpc.make("input.cancel", {
 	payload: Schema.TaggedStruct("input.cancel", {
 		sessionId: NonEmptyString,
 		inputId: NonEmptyString,
+		restoreTo: Schema.optional(Schema.suspend(() => InputDraftKeySchema)),
 	}),
 	success: InboxCommandResponseSchema,
 	error: WsRpcError,
@@ -2943,6 +2960,41 @@ export const InputDraftKeySchema = Schema.Union([
 	Schema.Struct({ draft: NonEmptyString }),
 ]);
 export type InputDraftKey = typeof InputDraftKeySchema.Type;
+
+export const DraftAttachmentSchema = Schema.Struct({
+	id: NonEmptyString,
+	name: Schema.String,
+	mime: Schema.String,
+	size: Schema.Number,
+	hash: Schema.String,
+});
+export type DraftAttachment = typeof DraftAttachmentSchema.Type;
+
+export const AddDraftAttachment = Rpc.make("AddDraftAttachment", {
+	payload: Schema.TaggedStruct("AddDraftAttachment", {
+		key: InputDraftKeySchema,
+		id: NonEmptyString,
+		name: Schema.String,
+		mime: Schema.String,
+		dataUrl: Schema.String,
+		projectSlug: Schema.optional(NonEmptyString),
+	}),
+	success: Schema.Union([
+		Schema.Struct({ attachment: DraftAttachmentSchema }),
+		Schema.Struct({ ended: Schema.Literals(["removed", "sent"]) }),
+	]),
+	error: WsRpcError,
+});
+
+export const RemoveDraftAttachment = Rpc.make("RemoveDraftAttachment", {
+	payload: Schema.TaggedStruct("RemoveDraftAttachment", {
+		key: InputDraftKeySchema,
+		id: NonEmptyString,
+		projectSlug: Schema.optional(NonEmptyString),
+	}),
+	success: Schema.Void,
+	error: WsRpcError,
+});
 
 export const SyncInputDraft = Rpc.make("SyncInputDraft", {
 	payload: Schema.TaggedStruct("SyncInputDraft", {
@@ -3474,6 +3526,8 @@ const wsRpcRequests = [
 	CancelInput,
 	SendInputNow,
 	SyncInputDraft,
+	AddDraftAttachment,
+	RemoveDraftAttachment,
 	CancelSession,
 	StopBackgroundTask,
 	SetLogLevel,
@@ -3802,6 +3856,7 @@ export const SubscribeAlerts = Rpc.make("SubscribeAlerts", {
 const InputDraftEnvelopeSchema = Schema.Union([
 	Schema.Struct({
 		_tag: Schema.Literal("synchronized"),
+		attachments: Schema.Array(DraftAttachmentSchema),
 		text: Schema.optional(Schema.String),
 		projectId: Schema.optional(Schema.String),
 		/** A durable retirement marker; promoted draft text is never replayed. */
@@ -3809,6 +3864,7 @@ const InputDraftEnvelopeSchema = Schema.Union([
 	}),
 	Schema.TaggedStruct("draft", {
 		text: Schema.String,
+		attachments: Schema.Array(DraftAttachmentSchema),
 		projectId: Schema.optional(Schema.String),
 		/** The writer's SyncInputDraft originId; that tab drops its own echo. */
 		from: Schema.optional(Schema.String),

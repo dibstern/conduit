@@ -27,6 +27,7 @@ const open = Effect.gen(function* () {
 			).pipe(Effect.forkScoped);
 			expect(yield* Queue.take(q)).toEqual({
 				_tag: "synchronized",
+				attachments: [],
 				...(text === undefined ? {} : { text }),
 			});
 			return q;
@@ -51,6 +52,7 @@ describe("SubscribeInputDraft", () => {
 			for (const q of [tabA, tabB])
 				expect(yield* Queue.take(q)).toEqual({
 					_tag: "draft",
+					attachments: [],
 					text: "half a thought",
 					from: "tab-a",
 				});
@@ -68,7 +70,11 @@ describe("SubscribeInputDraft", () => {
 				text: "",
 			});
 
-			expect(yield* Queue.take(q)).toEqual({ _tag: "draft", text: "" });
+			expect(yield* Queue.take(q)).toEqual({
+				_tag: "draft",
+				attachments: [],
+				text: "",
+			});
 		}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 

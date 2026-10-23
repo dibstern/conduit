@@ -1,20 +1,22 @@
 import { untrack } from "svelte";
 import type { InputDraftKey } from "../../../contracts/ws-rpc.js";
 import { connectionState } from "../../transport/connection-status.svelte.js";
+import { toastFailure } from "../../transport/rpc-errors.js";
 import { rpc } from "../../transport/ws-rpc-client.js";
 import { getBrowserClientId } from "../client-identity.js";
 import {
 	DRAFT_PROJECT_PARAM,
 	getCurrentRoute,
 	getCurrentSearchParams,
-	noteDraftNavigation,
 	replaceRoute,
 } from "../router.svelte.js";
 import {
+	type DraftAttachmentItem,
 	type DraftCommand,
 	type DraftEvent,
 	type DraftState,
 	draftKeyId,
+	hasContent,
 	initialState,
 	type ReloadDraft,
 	step,
@@ -55,7 +57,20 @@ export function handleInputSyncReceived(msg: {
 	text?: string | undefined;
 	projectId?: string | undefined;
 	initial?: boolean;
+	attachments?: readonly {
+		id: string;
+		name: string;
+		mime: string;
+		size: number;
+		hash: string;
+	}[];
 }): void {
+	if (msg.attachments)
+		inputSyncEvents.push({
+			_tag: "AttachmentsReceived",
+			key: msg.key,
+			attachments: msg.attachments,
+		});
 	inputSyncState.received = {
 		_tag: "ServerTextReceived",
 		key: msg.key,
@@ -104,11 +119,12 @@ export function handleDraftDiscarded(key: InputDraftKey): void {
 export function createComposerDraft(options: {
 	key: () => InputDraftKey | null;
 	projectSlug: () => string | null;
-	hasAttachments: () => boolean;
 }) {
 	let state = initialState();
 	let text = $state("");
 	let sendPick = $state<DraftState["sendPick"]>();
+	let sending = $state(false);
+	let attachments = $state<readonly DraftAttachmentItem[]>([]);
 	let syncTimer: ReturnType<typeof setTimeout> | null = null;
 	function cancelSync() {
 		if (syncTimer) clearTimeout(syncTimer);
@@ -118,6 +134,58 @@ export function createComposerDraft(options: {
 		const pending: Promise<void>[] = [];
 		for (const command of commands) {
 			switch (command._tag) {
+				case "AddAttachment": {
+					const { key, attachment } = command;
+					const sent = rpc("AddDraftAttachment", { key, ...attachment }).then(
+						(result) => {
+							dispatch({
+								_tag: "AttachmentAddAcknowledged",
+								key,
+								id: attachment.id,
+								result,
+							});
+						},
+						(error: unknown) => {
+							dispatch({
+								_tag: "AttachmentAddFailed",
+								key,
+								id: attachment.id,
+								error:
+									error instanceof Error
+										? error.message
+										: "Attachment save failed",
+							});
+						},
+					);
+					pending.push(sent);
+					break;
+				}
+				case "RemoveAttachment": {
+					const { key, id } = command;
+					const projectSlug = options.projectSlug();
+					const sent = rpc("RemoveDraftAttachment", {
+						key,
+						id,
+						...(projectSlug ? { projectSlug } : {}),
+					}).then(
+						() => {
+							dispatch({ _tag: "AttachmentRemoveAcknowledged", key, id });
+						},
+						(error: unknown) => {
+							dispatch({
+								_tag: "AttachmentRemoveFailed",
+								key,
+								id,
+								error:
+									error instanceof Error
+										? error.message
+										: "Attachment removal failed",
+							});
+						},
+					);
+					pending.push(sent);
+					break;
+				}
 				case "CancelSync":
 					cancelSync();
 					break;
@@ -226,18 +294,13 @@ export function createComposerDraft(options: {
 		state = next;
 		text = state.text;
 		sendPick = state.sendPick;
-		// No key (the phone list) keeps the last draft; a session key ends it, and
-		// so does a send: its emptied text must not offer it as a fresh draft.
-		if (state.key) {
-			const id = draftKeyId(state.key);
-			noteDraftNavigation(
-				"draft" in state.key &&
-					!state.inFlight.has(id) &&
-					!state.promoted.has(id)
-					? { id: state.key.draft, text: state.text }
-					: null,
-			);
-		}
+		sending =
+			state.key !== null &&
+			state.key !== undefined &&
+			state.inFlight.has(draftKeyId(state.key));
+		attachments = state.key
+			? (state.attachments.get(draftKeyId(state.key)) ?? [])
+			: [];
 		return { commands, pending: execute(commands) };
 	}
 	try {
@@ -315,11 +378,14 @@ export function createComposerDraft(options: {
 		});
 	});
 	$effect(() => {
-		if (connectionState.status !== "connected")
-			untrack(() => {
+		const connected = connectionState.status === "connected";
+		untrack(() => {
+			dispatch({ _tag: connected ? "Reconnected" : "ConnectionLost" });
+			if (!connected) {
 				if (state.key)
 					dispatch({ _tag: "SubscriptionStarted", key: state.key });
-			});
+			}
+		});
 	});
 	$effect(() => {
 		const hidden = () => {
@@ -359,12 +425,60 @@ export function createComposerDraft(options: {
 				(state.key ? draftKeyId(state.key) : null) !== savedKey ||
 				state.projectSlug !== savedProject
 			);
-			const hasAttachments = options.hasAttachments();
-			dispatch({ _tag: "PersistBeforeReload", hasAttachments });
-			return !hasAttachments;
+			const deferReload =
+				state.inFlight.size > 0 ||
+				[...state.attachments.values()].some((items) =>
+					items.some(
+						(item) => item.status === "saving" || item.status === "failed",
+					),
+				);
+			dispatch({ _tag: "PersistBeforeReload", hasAttachments: deferReload });
+			return !deferReload;
 		}),
 	);
 	return {
+		get key() {
+			return state.key ?? null;
+		},
+		get sending() {
+			return sending;
+		},
+		get attachments() {
+			return attachments.filter((item) => item.status !== "removing");
+		},
+		get attachmentsReady() {
+			return !attachments.some(
+				(item) => item.status === "saving" || item.status === "failed",
+			);
+		},
+		get hasContent() {
+			return (
+				Boolean(text) || attachments.some((item) => item.status !== "removing")
+			);
+		},
+		hasContentFor(key: InputDraftKey) {
+			return hasContent(state, key);
+		},
+		addAttachment(
+			key: InputDraftKey,
+			attachment: {
+				id: string;
+				name: string;
+				mime: string;
+				size: number;
+				dataUrl: string;
+				projectSlug?: string;
+			},
+		) {
+			dispatch({ _tag: "AttachmentAdded", key, attachment });
+		},
+		removeAttachment(id: string) {
+			if (state.key)
+				dispatch({ _tag: "AttachmentRemoved", key: state.key, id });
+		},
+		attachmentsAccepted(key: InputDraftKey, ids: readonly string[]) {
+			dispatch({ _tag: "SendAttachmentsAccepted", key, ids });
+		},
 		get sendPick() {
 			return sendPick;
 		},
@@ -382,10 +496,31 @@ export function createComposerDraft(options: {
 			dispatch({ _tag: "LocalEdited" });
 		},
 		clear() {
+			if (state.key)
+				for (const item of attachments)
+					if (item.status !== "removing")
+						dispatch({
+							_tag: "AttachmentRemoved",
+							key: state.key,
+							id: item.id,
+						});
 			dispatch({ _tag: "Cleared" });
 		},
+		async flush() {
+			try {
+				await Promise.all(dispatch({ _tag: "Flush" }).pending);
+				return true;
+			} catch (error) {
+				toastFailure("Could not save draft")(error);
+				return false;
+			}
+		},
 		sendStarted(clear: boolean) {
-			const unsent = { text: state.text, key: state.key ?? null };
+			const unsent = {
+				text: state.text,
+				key: state.key ?? null,
+				attachmentIds: attachments.map(({ id }) => id),
+			};
 			dispatch({ _tag: "SendStarted", clear });
 			return unsent;
 		},
@@ -403,12 +538,21 @@ export function createComposerDraft(options: {
 				});
 		},
 		sendFailed(
-			unsent: { text: string; key: InputDraftKey | null },
+			unsent: {
+				text: string;
+				key: InputDraftKey | null;
+				attachmentIds?: readonly string[];
+			},
 			sentTo: string | null,
 			restore: boolean,
 			alreadySent = false,
 		): boolean {
 			const before = state;
+			const hasNewAttachments = attachments.some(
+				(item) =>
+					item.status !== "removing" &&
+					!unsent.attachmentIds?.includes(item.id),
+			);
 			const key = unsent.key ? draftKeyId(unsent.key) : null;
 			const sameScope = sentTo
 				? before.key && "session" in before.key && before.key.session === sentTo
@@ -421,12 +565,12 @@ export function createComposerDraft(options: {
 				!alreadySent &&
 				sameScope &&
 				!before.text &&
-				!options.hasAttachments();
+				!hasNewAttachments;
 			dispatch({
 				_tag: "SendFailed",
 				...unsent,
 				sentTo,
-				hasAttachments: options.hasAttachments(),
+				hasAttachments: hasNewAttachments,
 				restore,
 				alreadySent,
 			});
@@ -436,12 +580,15 @@ export function createComposerDraft(options: {
 			sentTo: string | null,
 			steer: boolean,
 			clear: boolean,
+			unsent: { key: InputDraftKey | null; text: string },
 		): boolean {
 			const { commands } = dispatch({
 				_tag: "SendSucceeded",
 				sentTo,
 				steer,
 				clear,
+				key: unsent.key,
+				text: unsent.text,
 			});
 			return commands.some((command) => command._tag === "CancelSync");
 		},
@@ -454,13 +601,19 @@ export function createComposerDraft(options: {
 				state.key &&
 				"session" in state.key &&
 				state.key.session === parentSessionId;
-			const { commands } = dispatch({
+			const before = active
+				? state.text
+				: state.drafts.get(draftKeyId({ session: parentSessionId }))?.text;
+			dispatch({
 				_tag: "SideThreadSent",
 				parentSessionId,
 				text: sentText,
 				attachmentsUnchanged,
 			});
-			return { cleared: commands.length > 0, active: Boolean(active) };
+			return {
+				cleared: before === sentText && attachmentsUnchanged,
+				active: Boolean(active),
+			};
 		},
 	};
 }
