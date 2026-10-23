@@ -492,7 +492,7 @@ test("a Monitor counts as live work and the toast disappears on session navigati
 	);
 });
 
-test("composer Stop with no live tasks closes the query and shows no task toast", async ({
+test("composer Stop with no live tasks waits for its terminal and shows no task toast", async ({
 	page,
 	harness,
 }) => {
@@ -500,8 +500,13 @@ test("composer Stop with no live tasks closes the query and shows no task toast"
 	await chat.stopBtn.click();
 	await expect(chat.stopBtn).toBeHidden();
 	await expect
-		.poll(() => queryMarks(harness, queryId, "query-closed").length)
-		.toBe(1);
+		.poll(() =>
+			queryMarks(harness, queryId, "task-stop-turn").map(
+				(mark) => mark["phase"],
+			),
+		)
+		.toContain("interrupted-result");
+	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);
 	await expect(
 		page.getByTestId("toast").filter({ hasText: "Turn stopped." }),

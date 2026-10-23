@@ -232,7 +232,7 @@ function marks(harness: ProcessHarness): ProofMark[] {
 test.describe("cancel a running turn", () => {
 	test.use({ harnessOptions: { restartProof: true } });
 
-	test("composer Stop interrupts and closes the provider query", async ({
+	test("composer Stop waits for the provider terminal and retains its query", async ({
 		page,
 		harness,
 	}, testInfo) => {
@@ -266,9 +266,19 @@ test.describe("cancel a running turn", () => {
 		);
 		const started = performance.now();
 		await chat.stopBtn.click();
-		await expect.poll(() => queryMarks("query-closed")).toBe(1);
+		await expect
+			.poll(() =>
+				marks(harness).some(
+					(mark) =>
+						mark["queryId"] === queryId &&
+						mark["kind"] === "task-stop-turn" &&
+						mark["phase"] === "interrupted-result",
+				),
+			)
+			.toBe(true);
 		const latencyMs = since(started);
 		expect(queryMarks("query-interrupted")).toBe(1);
+		expect(queryMarks("query-closed")).toBe(0);
 		await expect(chat.stopBtn).toBeHidden();
 		observe(testInfo, {
 			latencyMs,
