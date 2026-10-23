@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Turn log: skills and the footer</title>
+<title>Turn log: wider exploration</title>
 <script>document.documentElement.dataset.designTheme=localStorage.getItem('tsp-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
 <style>/* tsp chrome. Styles the page around designs only; designs render in their own iframes.
    The chrome is always light: the theme toggle switches the designs (data-design-theme), never the page. */
@@ -72,7 +72,7 @@ html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme
 @media (prefers-reduced-motion:reduce){.tsp-chev{transition:none}}
 </style></head>
 <body>
-<header class="tsp-bar"><div class="tsp-titles"><a class="tsp-home" href="/tsp/" hidden>tsp</a><h1>Turn log: skills and the footer</h1><p>Why the skill counter looks like a step, and three fixes</p></div>
+<header class="tsp-bar"><div class="tsp-titles"><a class="tsp-home" href="/tsp/" hidden>tsp</a><h1>Turn log: wider exploration</h1><p>Seven directions × collapsed, live, expanded × desktop and phone</p></div>
 <div class="tsp-actions"><button class="tsp-btn" type="button" data-tsp="toggle-all" hidden>Collapse all</button>
 <button class="tsp-btn tsp-theme" type="button" aria-label="Switch the designs between light and dark">
 <svg class="tsp-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
@@ -81,51 +81,77 @@ html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme
 <main class="tsp-main">
 
 
-<p><strong>Short answer:</strong> they're two separate features that were each built without the other in mind, and the counter was placed so it copies the layout of a step row.</p>
+<p><strong>You're right: skill chapters can't be known.</strong> Nothing links a step to a skill. Today's code guesses: <code>skillChapters</code> (<code>utils/turns.ts:742</code>) says a skill "governs" from its load until the next skill loads or the turn ends. But a loaded skill stays in context for the rest of the session. Two can apply at once, and the model can load one and then ignore it. So the "1m 12s in · 3m 0s" timing in today's skills list, and the strip highlight it drives, are guesses too.</p>
 
-<ul>
-<li><strong>"Loaded"</strong> is the generic tool row. The <code>Skill</code> tool's past-tense verb is <code>"Loaded"</code> in <code>VERBS</code> (<code>utils/turns.ts:194</code>), so every skill call becomes a row like any Read or Edit.</li>
-<li><strong>The counter</strong> (<code>✦ 2 skills</code>) is a separate toggle that opens a "chapters" list: which skill was in charge, when it started, how long it ran. <code>countsPhrase</code> leaves skills out of the header sentence on purpose ("each has its own control"), and that control went into the log footer (<code>TurnActivity.svelte:641</code>).</li>
-<li><strong>Why it looks like a step:</strong> the footer sits directly under the last row with no rule or gap. It starts at the same left edge, leads with the same <code>sparkles</code> icon the skill row uses, and has the same muted ghost-button look. Opening it adds a second list of skill rows under the first. So one fact gets shown three times, in three styles that all look alike.</li>
-</ul>
+<p><strong>What we can honestly show:</strong> a skill load is an <em>event</em>, with a name and a time. Every design below treats it that way and drops the span. The <code>✦ N skills</code> toggle goes everywhere.</p>
 
-<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Today: what the log looks like now</h2><span class="tsp-count">1</span></summary><div class="tsp-section-body">
-<div class="tsp-grid" style="--tsp-min:520px">
-<article class="tsp-card tsp-wide" id="d-0"><header class="tsp-card-head"><span class="tsp-n">0</span><h3>Current</h3><a class="tsp-open" href="_frame-0.html" target="_blank" aria-label="Open Current alone">↗</a></header><p class="tsp-why">Collapsed, live, expanded, and skills opened. The dashed outlines are where it reads wrong.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-0.html" title="Current" loading="lazy"></iframe></div></article>
+<p><strong>Each direction below shows Collapsed, Live and Expanded, on desktop and phone.</strong> Sections 2, 3 and 6 answer your container question: a single panel, a recessed tray, and a raised sheet. Sections 4 and 5 change how the log is structured. Sections 1 and 7 change only where the summary lives.</p>
+
+<details class="tsp-section"><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>0 · Today (reference)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-0"><header class="tsp-card-head"><span class="tsp-n">0</span><h3>Today, desktop</h3><a class="tsp-open" href="_frame-0.html" target="_blank" aria-label="Open Today, desktop alone">↗</a></header><p class="tsp-why">Dashed: the footer that reads as a step.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-0.html" title="Today, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-0x"><header class="tsp-card-head"><span class="tsp-n">0</span><h3>Today, phone</h3><a class="tsp-open" href="_frame-0x.html" target="_blank" aria-label="Open Today, phone alone">↗</a></header><p class="tsp-why">Same, at 390px.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-0x.html" title="Today, phone" loading="lazy"></iframe></div></article>
 </div>
 </div></details>
 
-<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Three directions</h2><span class="tsp-count">3</span></summary><div class="tsp-section-body">
-<div class="tsp-grid" style="--tsp-min:440px">
-
-<article class="tsp-card" id="d-a"><header class="tsp-card-head"><span class="tsp-n">A</span><h3>Ruled footer</h3><a class="tsp-open" href="_frame-a.html" target="_blank" aria-label="Open Ruled footer alone">↗</a></header><p class="tsp-why">Smallest change. A rule and a pill make the footer read as a summary, not a step. The repetition stays.</p><div class="tsp-stage" data-width="760"><iframe class="tsp-frame" src="_frame-a.html" title="Ruled footer" loading="lazy"></iframe></div></article>
-
-<article class="tsp-card" id="d-b"><header class="tsp-card-head"><span class="tsp-n">B</span><h3>Skill chapters</h3><a class="tsp-open" href="_frame-b.html" target="_blank" aria-label="Open Skill chapters alone">↗</a></header><p class="tsp-why">A skill row becomes a chapter heading over the steps it ran. The counter goes, because the log is the breakdown.</p><div class="tsp-stage" data-width="760"><iframe class="tsp-frame" src="_frame-b.html" title="Skill chapters" loading="lazy"></iframe></div></article>
-
-<article class="tsp-card" id="d-c"><header class="tsp-card-head"><span class="tsp-n">C</span><h3>Head ledger</h3><a class="tsp-open" href="_frame-c.html" target="_blank" aria-label="Open Head ledger alone">↗</a></header><p class="tsp-why">Skills, failures and the bill move into the head card under the strip, so they show even when the log is closed. The log holds only steps.</p><div class="tsp-stage" data-width="760"><iframe class="tsp-frame" src="_frame-c.html" title="Head ledger" loading="lazy"></iframe></div></article>
-
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>1 · Head ledger (your pick, refined)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Skills:</strong> named pills in the head card, with diamonds on the strip where each loaded. <strong>Bill:</strong> head card, right of the pills. <strong>Log:</strong> steps only; a skill row says "Skill", not "Loaded", and has no duration, since loading takes milliseconds and the number means nothing.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-1"><header class="tsp-card-head"><span class="tsp-n">1</span><h3>Head ledger, desktop</h3><a class="tsp-open" href="_frame-1.html" target="_blank" aria-label="Open Head ledger, desktop alone">↗</a></header><p class="tsp-why">Everything about the turn sits in the card; everything below it is a step.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-1.html" title="Head ledger, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-1x"><header class="tsp-card-head"><span class="tsp-n">1</span><h3>Head ledger, phone</h3><a class="tsp-open" href="_frame-1x.html" target="_blank" aria-label="Open Head ledger, phone alone">↗</a></header><p class="tsp-why">The bill drops to its own line under the pills.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-1x.html" title="Head ledger, phone" loading="lazy"></iframe></div></article>
 </div>
 </div></details>
 
-<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>B on a phone</h2><span class="tsp-count">1</span></summary><div class="tsp-section-body">
-<div class="tsp-grid" style="--tsp-min:300px">
-<article class="tsp-card" id="d-bx"><header class="tsp-card-head"><span class="tsp-n">B</span><h3>Skill chapters, 390px</h3><a class="tsp-open" href="_frame-bx.html" target="_blank" aria-label="Open Skill chapters, 390px alone">↗</a></header><p class="tsp-why">The rail costs 18px of width. Subjects still truncate cleanly; the bill wraps under the rule.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-bx.html" title="Skill chapters, 390px" loading="lazy"></iframe></div></article>
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>2 · One panel</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Container:</strong> the head card and the log become one bordered panel. The log is its body, the bill is its footer bar. <strong>Skills:</strong> inline event pills where they loaded, plus "2 skills" in the sentence.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-2"><header class="tsp-card-head"><span class="tsp-n">2</span><h3>One panel, desktop</h3><a class="tsp-open" href="_frame-2.html" target="_blank" aria-label="Open One panel, desktop alone">↗</a></header><p class="tsp-why">The border answers “does this belong to the turn?” and the footer bar can&#x27;t be mistaken for a row.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-2.html" title="One panel, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-2x"><header class="tsp-card-head"><span class="tsp-n">2</span><h3>One panel, phone</h3><a class="tsp-open" href="_frame-2x.html" target="_blank" aria-label="Open One panel, phone alone">↗</a></header><p class="tsp-why">Panel edges line up with the message column, so it reads as one block.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-2x.html" title="One panel, phone" loading="lazy"></iframe></div></article>
 </div>
 </div></details>
 
-<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Recommendation</h2></summary><div class="tsp-section-body">
-<p><strong>B, skill chapters.</strong> It fixes the cause, not the look: one concept (a skill governed these steps) gets one rendering, in the place you're already reading. The "Loaded" verb, the counter, and the chapters list all go away. Turns without skills only change by gaining the ruled totals line.</p>
-<table>
-<tr><th></th><th>Fixes repetition</th><th>Visible collapsed</th><th>Cost</th></tr>
-<tr><td>A Ruled footer</td><td>No</td><td>No</td><td>Tiny: CSS + pill</td></tr>
-<tr><td>B Chapters</td><td>Yes</td><td>Count in sentence</td><td>Medium: group rows by <code>skillChapters</code>, which already exists</td></tr>
-<tr><td>C Head ledger</td><td>Partly (rows still say Skill)</td><td>Yes, by name</td><td>Medium, and the head grows a line on every turn</td></tr>
-</table>
-<p><strong>Watch out for:</strong> the live ticker shows the last 3 steps, and in B those can span two chapters. Show the newest chapter's heading and let older rows sit above it without one. Also, the hover link from chapter to strip replaces the toggle's <code>emphasis</code> set, so the existing <code>SkillsOpen</code> stories need rewriting.</p>
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>3 · Recessed tray</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Container:</strong> the log opens as a sunken tray inside the head card, like a drawer pulled out. The raw output looks lower and quieter than the summary above it. <strong>Skills:</strong> labelled diamonds on the strip. <strong>Bill:</strong> cost in the head, full bill at the bottom of the tray.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-3"><header class="tsp-card-head"><span class="tsp-n">3</span><h3>Recessed tray, desktop</h3><a class="tsp-open" href="_frame-3.html" target="_blank" aria-label="Open Recessed tray, desktop alone">↗</a></header><p class="tsp-why">Raw steps read as machine output, set apart from the prose around them.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-3.html" title="Recessed tray, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-3x"><header class="tsp-card-head"><span class="tsp-n">3</span><h3>Recessed tray, phone</h3><a class="tsp-open" href="_frame-3x.html" target="_blank" aria-label="Open Recessed tray, phone alone">↗</a></header><p class="tsp-why">The tray bleeds almost to the card edge to keep row width.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-3x.html" title="Recessed tray, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>4 · Timeline rail</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Structure:</strong> steps hang off a vertical rail. A coloured dot replaces each icon, a diamond marks a skill load, and the rail ends in a "Done" node that carries the bill. <strong>No container</strong>: the rail does the grouping.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-4"><header class="tsp-card-head"><span class="tsp-n">4</span><h3>Timeline rail, desktop</h3><a class="tsp-open" href="_frame-4.html" target="_blank" aria-label="Open Timeline rail, desktop alone">↗</a></header><p class="tsp-why">A skill is a point on the line, which is exactly what we know about it.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-4.html" title="Timeline rail, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-4x"><header class="tsp-card-head"><span class="tsp-n">4</span><h3>Timeline rail, phone</h3><a class="tsp-open" href="_frame-4x.html" target="_blank" aria-label="Open Timeline rail, phone alone">↗</a></header><p class="tsp-why">Dropping icons gives back the width the rail costs.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-4x.html" title="Timeline rail, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>5 · Ledger table</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Structure:</strong> a bordered table, with columns for time into the turn, kind, step, and how long it took. Totals are the footer row. Most "raw" of the set, and best for scanning when things happened.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-5"><header class="tsp-card-head"><span class="tsp-n">5</span><h3>Ledger table, desktop</h3><a class="tsp-open" href="_frame-5.html" target="_blank" aria-label="Open Ledger table, desktop alone">↗</a></header><p class="tsp-why">The “At” column puts skills, failures and the compaction on one clock.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-5.html" title="Ledger table, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-5x"><header class="tsp-card-head"><span class="tsp-n">5</span><h3>Ledger table, phone</h3><a class="tsp-open" href="_frame-5x.html" target="_blank" aria-label="Open Ledger table, phone alone">↗</a></header><p class="tsp-why">Columns tighten; the bill wraps in the footer.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-5x.html" title="Ledger table, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>6 · Raised sheet with tabs</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Container:</strong> opening lifts the card into a raised sheet with two tabs. <strong>Steps</strong> holds only steps. <strong>Usage</strong> collects everything that isn't a step: cost, tokens, context, skills (with load times), failures and compactions. Has a fourth state for the Usage tab.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-6"><header class="tsp-card-head"><span class="tsp-n">6</span><h3>Raised sheet, desktop</h3><a class="tsp-open" href="_frame-6.html" target="_blank" aria-label="Open Raised sheet, desktop alone">↗</a></header><p class="tsp-why">The cleanest split: the metadata gets a real home instead of a footer.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-6.html" title="Raised sheet, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-6x"><header class="tsp-card-head"><span class="tsp-n">6</span><h3>Raised sheet, phone</h3><a class="tsp-open" href="_frame-6x.html" target="_blank" aria-label="Open Raised sheet, phone alone">↗</a></header><p class="tsp-why">Tabs move under the strip.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-6x.html" title="Raised sheet, phone" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>7 · Hairline gutter (minimal)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p><strong>Container:</strong> none. A hairline drops from the card and the log hangs off it. <strong>Skills:</strong> in the sentence and as "Skill" rows. <strong>Bill:</strong> just the cost, top right; the rest on hover. The smallest change that still fixes the bug.</p>
+<div class="tsp-grid" style="--tsp-min:360px">
+<article class="tsp-card tsp-wide" id="d-7"><header class="tsp-card-head"><span class="tsp-n">7</span><h3>Hairline gutter, desktop</h3><a class="tsp-open" href="_frame-7.html" target="_blank" aria-label="Open Hairline gutter, desktop alone">↗</a></header><p class="tsp-why">Nothing follows the last step, so nothing can pass for one.</p><div class="tsp-stage" data-width="820"><iframe class="tsp-frame" src="_frame-7.html" title="Hairline gutter, desktop" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-7x"><header class="tsp-card-head"><span class="tsp-n">7</span><h3>Hairline gutter, phone</h3><a class="tsp-open" href="_frame-7x.html" target="_blank" aria-label="Open Hairline gutter, phone alone">↗</a></header><p class="tsp-why">Phones lose hover, so the full bill needs a tap target. That&#x27;s the open question.</p><div class="tsp-stage" data-width="390"><iframe class="tsp-frame" src="_frame-7x.html" title="Hairline gutter, phone" loading="lazy"></iframe></div></article>
+</div>
 </div></details>
 
 </main>
-<footer class="tsp-foot">turn-log-redesign · 2026-10-23T11:38</footer>
+<footer class="tsp-foot">turn-log-redesign · 2026-10-23T12:26</footer>
 <script>(() => {
   const root = document.documentElement, KEY = 'tsp-theme';
   const frames = [...document.querySelectorAll('iframe.tsp-frame')];
