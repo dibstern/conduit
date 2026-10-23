@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -55,13 +55,37 @@ describe("readSessionGit", () => {
 		git(directory, "init", "--bare", "-q");
 		expect(await readSessionGit(directory)).toBeUndefined();
 	});
-	it("reads a named branch and its short head", async () => {
+	it("reads a clean named branch and its full and short head", async () => {
 		const directory = repo();
 		const head = commit(directory, "initial");
 		expect(await readSessionGit(directory)).toMatchObject({
 			branch: "main",
 			head,
+			oid: git(directory, "rev-parse", "HEAD"),
+			dirty: false,
 			merged: false,
+		});
+		expect(await readSessionGit(directory)).not.toHaveProperty("changes");
+	});
+	it("counts tracked edits and each untracked file, with line totals against HEAD", async () => {
+		const directory = repo();
+		// A file named HEAD makes `git diff HEAD` ambiguous without `--`.
+		writeFileSync(join(directory, "HEAD"), "one\ntwo\nthree\n");
+		git(directory, "add", "HEAD");
+		git(directory, "commit", "-qm", "initial");
+		writeFileSync(join(directory, "HEAD"), "one\nreplacement\nthree\n");
+		git(directory, "add", "HEAD");
+		writeFileSync(join(directory, "HEAD"), "one\nreplacement\nthree\nfour\n");
+		writeFileSync(
+			join(directory, "untracked"),
+			"not counted\nin line totals\n",
+		);
+		mkdirSync(join(directory, "newdir"));
+		writeFileSync(join(directory, "newdir", "a"), "a\n");
+		writeFileSync(join(directory, "newdir", "b"), "b\n");
+		expect(await readSessionGit(directory)).toMatchObject({
+			dirty: true,
+			changes: { files: 4, insertions: 2, deletions: 1 },
 		});
 	});
 	it("reports modifications to a tracked file as dirty", async () => {
@@ -86,6 +110,7 @@ describe("readSessionGit", () => {
 		commit(directory, "feature-only");
 		expect(await readSessionGit(directory)).toMatchObject({
 			branch: "feature",
+			upstream: "upstream",
 			ahead: 1,
 			behind: 1,
 			dirty: false,
@@ -97,12 +122,17 @@ describe("readSessionGit", () => {
 		const state = await readSessionGit(directory);
 		expect(state).not.toHaveProperty("ahead");
 		expect(state).not.toHaveProperty("behind");
+		expect(state).not.toHaveProperty("upstream");
 	});
 	it("omits the branch for detached HEAD", async () => {
 		const directory = repo();
 		const head = commit(directory, "initial");
 		git(directory, "checkout", "--detach", "-q");
-		expect(await readSessionGit(directory)).toEqual({ head, dirty: false });
+		expect(await readSessionGit(directory)).toEqual({
+			head,
+			oid: git(directory, "rev-parse", "HEAD"),
+			dirty: false,
+		});
 	});
 	it("identifies a linked worktree", async () => {
 		const directory = repo();
@@ -431,6 +461,17 @@ describe("readSessionGit", () => {
 			dirty: false,
 		});
 	});
+	it("counts staged and untracked files in an unborn branch without line totals", async () => {
+		const directory = repo();
+		writeFileSync(join(directory, "staged"), "staged\n");
+		git(directory, "add", "staged");
+		writeFileSync(join(directory, "untracked"), "untracked\n");
+		expect(await readSessionGit(directory)).toEqual({
+			branch: "main",
+			dirty: true,
+			changes: { files: 2, insertions: 0, deletions: 0 },
+		});
+	});
 });
 
 describe("createSessionGitCache", () => {
@@ -564,7 +605,15 @@ describe("cached folder git", () => {
 		const cache = createSessionGitCache(async (directory) => {
 			if (directory === "/scratch") return undefined;
 			return directory === "/worktree/api"
-				? { head: "abc1234", dirty: true, ahead: 2, behind: 1 }
+				? {
+						head: "abc1234",
+						oid: "abc1234".padEnd(40, "0"),
+						upstream: "origin/topic",
+						changes: { files: 2, insertions: 4, deletions: 1 },
+						dirty: true,
+						ahead: 2,
+						behind: 1,
+					}
 				: { branch: "main", dirty: false };
 		});
 		await Promise.all(
@@ -590,6 +639,9 @@ describe("cached folder git", () => {
 				root: "/two/app",
 				label: "/two/app",
 				head: "abc1234",
+				oid: "abc1234".padEnd(40, "0"),
+				upstream: "origin/topic",
+				changes: { files: 2, insertions: 4, deletions: 1 },
 				dirty: true,
 				ahead: 2,
 				behind: 1,

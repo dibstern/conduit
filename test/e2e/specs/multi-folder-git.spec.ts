@@ -52,6 +52,7 @@ for (const scenario of [
 								label: scenario === "colliding" ? secondary : "api",
 								branch: "feature/api",
 								dirty: true,
+								changes: { files: 3, insertions: 12, deletions: 4 },
 								ahead: 2,
 								behind: 1,
 							},
@@ -146,16 +147,18 @@ for (const scenario of [
 				await expect(rows.nth(index)).toContainText(folder.label);
 				await expect(rows.nth(index)).toContainText(folder.branch);
 				await expect(rows.nth(index)).toContainText(
-					folder.dirty ? "uncommitted" : "clean",
+					folder.dirty ? "3 files changed +12 -4" : "clean",
 				);
 				await expect(rows.nth(index)).toContainText(
 					`↑${folder.ahead} ↓${folder.behind}`,
 				);
 			}
 		} else {
-			await expect(menu).toContainText("Branch");
 			await expect(menu).toContainText("feature/web");
-			await expect(menu).toContainText("Folder");
+			await expect(menu).toContainText("Worktree");
+			await expect(menu.getByTestId("checkout-changes")).toHaveText(
+				"0files changed",
+			);
 			await expect(menu).toContainText(primary);
 		}
 		await page.screenshot({

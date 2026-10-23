@@ -439,6 +439,10 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 				throw new Error("Phone viewport is required");
 			const menu = world.page.getByTestId("composer-checkout-menu");
 			await expect(menu).toBeVisible();
+			await expect(
+				menu.getByRole("menuitem", { name: "Copy worktree path" }),
+			).toContainText("Worktree");
+			await expect(menu).toContainText("Tap a row to copy it.");
 			await expect(world.page.getByTestId("menu-sheet-scrim")).toBeVisible();
 			await expect
 				.poll(async () => {
