@@ -2205,6 +2205,8 @@ function query(params: {
 				yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				if (!params.options?.canUseTool)
 					throw new Error("Missing canUseTool bridge");
+				// Pending approval is native work, so interrupt must produce its terminal result.
+				interruptibleTurn = true;
 				const approval = await params.options.canUseTool(toolName, toolInput, {
 					signal:
 						params.options.abortController?.signal ??
