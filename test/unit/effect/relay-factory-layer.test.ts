@@ -15,6 +15,7 @@ import {
 	RelayFactoryLive,
 	RelayFactoryTag,
 } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
+import { makeSubprocessLive } from "../../../src/lib/domain/daemon/Layers/subprocess-layer.js";
 import { VersionCheckerTag } from "../../../src/lib/domain/daemon/Layers/version-checker-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
@@ -47,6 +48,7 @@ import {
 	makeSharedSessionDirectoryLive,
 	SessionDirectory,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import { Subprocess } from "../../../src/lib/domain/daemon/Services/subprocess.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -250,6 +252,7 @@ describe("RelayFactoryTag", () => {
 			const config = createProjectRelayMock.mock.calls.at(-1)?.[0];
 			const context = config?.daemonConfigContext;
 			if (!context) throw new Error("Missing daemon Effect context");
+			expect(Context.get(context, Subprocess)).toBe(yield* Subprocess);
 			expect(config).not.toHaveProperty("resolveSessionProject");
 			const relayDirectory = Option.getOrThrow(
 				Context.getOption(context, SessionDirectory),
@@ -266,6 +269,7 @@ describe("RelayFactoryTag", () => {
 					Layer.provideMerge(
 						Layer.mergeAll(
 							configLayer,
+							makeSubprocessLive(),
 							makeSharedSessionDirectoryLive.pipe(Layer.provide(configLayer)),
 							Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub()),
 						),

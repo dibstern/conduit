@@ -162,6 +162,7 @@ import {
 	StorageMonitorLive,
 	StorageMonitorTag,
 } from "./storage-monitor-layer.js";
+import { SubprocessLive } from "./subprocess-layer.js";
 import {
 	TailscaleCliLive,
 	TailscaleServeLive,
@@ -695,6 +696,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// These Layers have zero dependencies on other Tags. They form the base
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
+		SubprocessLive,
 		Layer.effectDiscard(
 			Effect.acquireRelease(Effect.sync(startContentionMetrics), (metrics) =>
 				Effect.tryPromise(async () => {

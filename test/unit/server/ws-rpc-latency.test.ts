@@ -23,6 +23,10 @@ import {
 } from "effect/rpc";
 import { SqlClient, Statement } from "effect/sql";
 import { describe, expect, it } from "vitest";
+import {
+	ReadRequest,
+	withReadRequestContext,
+} from "../../../src/lib/domain/daemon/Services/read-request.js";
 import { withSlowRpcLogging } from "../../../src/lib/server/ws-rpc-handler.js";
 
 const Probe = Rpc.make("Probe", {
@@ -40,7 +44,12 @@ const SubscribeProbe = Rpc.make("SubscribeProbe", {
 	error: Schema.String,
 	stream: true,
 });
-const group = RpcGroup.make(Probe, SubscribeProbe);
+const GetProbe = Rpc.make("GetProbe", {
+	payload: Probe.payloadSchema,
+	success: Schema.Void,
+	error: Schema.String,
+});
+const group = RpcGroup.make(Probe, GetProbe, SubscribeProbe);
 
 const connect = (
 	handler: (payload: Rpc.Payload<typeof Probe>) => Effect.Effect<void, string>,
@@ -102,11 +111,14 @@ const connect = (
 		}).pipe(
 			Effect.provideService(
 				RpcServer.Protocol,
-				withSlowRpcLogging(protocol, options.thresholdMs ?? 1),
+				withReadRequestContext(
+					withSlowRpcLogging(protocol, options.thresholdMs ?? 1),
+				),
 			),
 			Effect.provide(
 				group.toLayer({
 					Probe: handler,
+					GetProbe: handler,
 					SubscribeProbe: () => Rpc.fork(options.stream ?? Stream.never),
 				}),
 			),
@@ -120,11 +132,16 @@ const connect = (
 			responses,
 			warnings,
 			records,
-			submit: (id: string, sessionId: string, statements = 0) =>
+			submit: (
+				id: string,
+				sessionId: string,
+				statements = 0,
+				tag: "Probe" | "GetProbe" = "Probe",
+			) =>
 				Queue.offer(requests, {
 					_tag: "Request",
 					id,
-					tag: "Probe",
+					tag,
 					payload: { projectSlug: "project", sessionId, statements },
 					headers: [],
 				}),
@@ -132,6 +149,60 @@ const connect = (
 	});
 
 describe("slow browser RPC warnings", () => {
+	for (const thresholdMs of [0, 1]) {
+		it(`carries read context into request child fibers with threshold ${thresholdMs}`, async () => {
+			const observed: Array<string | undefined> = [];
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const server = yield* connect(
+							() =>
+								Effect.gen(function* () {
+									observed.push(yield* ReadRequest);
+									const child = yield* Effect.forkChild(ReadRequest);
+									observed.push(yield* Fiber.join(child));
+								}),
+							{ thresholdMs },
+						);
+						yield* server.submit("1", "read", 0, "GetProbe");
+						yield* Queue.take(server.responses);
+						yield* server.submit("2", "mutation");
+						yield* Queue.take(server.responses);
+						expect(yield* ReadRequest).toBeUndefined();
+					}),
+				),
+			);
+			expect(observed).toEqual(["GetProbe", "GetProbe", undefined, undefined]);
+		});
+	}
+
+	it("carries read context into forked subscription streams", async () => {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const observed = yield* Deferred.make<string | undefined>();
+					const server = yield* connect(() => Effect.void, {
+						thresholdMs: 0,
+						stream: Stream.fromEffect(
+							ReadRequest.pipe(
+								Effect.flatMap((method) => Deferred.succeed(observed, method)),
+								Effect.as(1),
+							),
+						),
+					});
+					yield* Queue.offer(server.requests, {
+						_tag: "Request",
+						id: "1",
+						tag: "SubscribeProbe",
+						payload: { projectSlug: "project" },
+						headers: [],
+					});
+					expect(yield* Deferred.await(observed)).toBe("SubscribeProbe");
+				}),
+			),
+		);
+	});
+
 	it("isolates SQL across concurrent request fibers without a file tracer", async () => {
 		let transformed = 0;
 		await Effect.runPromise(

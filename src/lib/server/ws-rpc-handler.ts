@@ -12,6 +12,7 @@ import {
 	type OnSuccessfulShutdownResponse,
 	withRpcShutdownResponse,
 } from "../daemon/daemon-rpc-server.js";
+import { withReadRequestContext } from "../domain/daemon/Services/read-request.js";
 import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
 import {
 	observeTurnTimelineSocketWrite,
@@ -347,7 +348,9 @@ const runRpcWebSocketConnection = <R>(
 						),
 					),
 			};
-			const requestProtocol = withSlowRpcLogging(pinChangeProtocol);
+			const requestProtocol = withReadRequestContext(
+				withSlowRpcLogging(pinChangeProtocol),
+			);
 
 			// RpcServer.make runs the protocol loop until interrupted, so it has
 			// to be forked. The scope then stays open only while the client is
