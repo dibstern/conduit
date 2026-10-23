@@ -30,6 +30,7 @@
 	let counts = $state<Readonly<Record<string, number>> | null>(null);
 	let countsFailed = $state(false);
 	let countRevision = $state(0);
+	let countsSessionId: string | null = null;
 	const sessionId = $derived(getCurrentSessionId());
 	const sessionMessageCount = $derived(sessionId ? (findSession(sessionId)?.messageCount ?? sessionMessages.get(sessionId)?.messages.length ?? 0) : 0);
 	const lastMessageId = $derived(sessionId ? sessionMessages.get(sessionId)?.messages.at(-1)?.uuid : undefined);
@@ -52,13 +53,13 @@
 		void lastMessageId;
 		const id = sessionId;
 		const set = { categories: $state.snapshot(draft) };
-		counts = null;
-		countsFailed = false;
+		if (id !== countsSessionId || !visible) { counts = null; countsFailed = false; }
+		countsSessionId = id;
 		if (!visible || !current || !valid || !id) return;
 		let cancelled = false;
 		const timer = setTimeout(() => {
 			void rpc("CountSessionCategories", { sessionId: id, set }).then((result) => {
-				if (!cancelled) counts = result;
+				if (!cancelled) { counts = result; countsFailed = false; }
 			}).catch(() => { if (!cancelled) countsFailed = true; });
 		}, 300);
 		return () => { cancelled = true; clearTimeout(timer); };
