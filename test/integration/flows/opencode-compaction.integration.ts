@@ -891,7 +891,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		);
 	});
 
-	it("keeps a failed submitted summarize indeterminate until Stop", async () => {
+	it("keeps a failed submitted summarize indeterminate across an unowned Stop idle", async () => {
 		const relay = await createRelayHarness(recording(500), {
 			defaultModel: "opencode/big-pickle",
 		});
@@ -931,19 +931,97 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				error_code: "delivery_indeterminate",
 			},
 		]);
+		const stopProof = () =>
+			Effect.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					return {
+						commands: yield* sql<{
+							status: string;
+							provider_process_id: string | null;
+							payload_json: string;
+						}>`SELECT status, provider_process_id, payload_json FROM provider_command_outbox
+							WHERE session_id = ${sessionId} AND effect_type = 'interrupt_turn'`,
+						nativeIdle: yield* sql`SELECT sequence, data, metadata FROM events
+							WHERE session_id = ${sessionId} AND provider = 'opencode' AND type = 'session.status'
+							AND json_extract(data, '$.status') = 'idle' AND json_extract(metadata, '$.runId') IS NULL
+							AND sequence > (SELECT MAX(sequence) FROM events WHERE session_id = ${sessionId} AND type = 'interrupt.requested')`,
+						terminals: yield* sql`SELECT type, data, metadata FROM events
+							WHERE session_id = ${sessionId} AND type IN ('run.started', 'turn.completed', 'turn.interrupted', 'turn.error')`,
+					};
+				}).pipe(
+					Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
+				),
+			);
 		relay.mock.setExactResponse(
 			"POST",
 			`/session/${sessionId}/abort`,
 			200,
 			true,
 		);
-		await client.cancelSession(sessionId);
+		let stopSettled = false;
+		const stopped = client
+			.cancelSession(sessionId)
+			.then(
+				() => ({ _tag: "completed" as const }),
+				(error: unknown) => ({ _tag: "failed" as const, error }),
+			)
+			.finally(() => {
+				stopSettled = true;
+			});
 		await expect
-			.poll(state)
-			.toEqual([
-				{ status: "interrupted", started_at: null, error_code: "interrupted" },
-			]);
-		saveEvidence("summarize-failed", { notice, stored, state: await state() });
+			.poll(() =>
+				relay.mock.diagnostics.some(
+					(request) =>
+						request.event === "request" &&
+						request.detail?.split("?")[0] ===
+							`POST /session/${sessionId}/abort`,
+				),
+			)
+			.toBe(true);
+		await expect
+			.poll(async () =>
+				(await stopProof()).commands.map(({ status }) => status),
+			)
+			.toEqual(["completed"]);
+		// Native idle has no intake identity: it cannot settle a submitted send
+		// whose user echo never arrived, even after the abort was acknowledged.
+		relay.mock.injectSSEEvents([
+			{
+				type: "session.status",
+				properties: { sessionID: sessionId, status: { type: "idle" } },
+			},
+		]);
+		await expect
+			.poll(async () => (await stopProof()).nativeIdle.length)
+			.toBeGreaterThan(0);
+		const proof = await stopProof();
+		expect(proof.commands).toMatchObject([
+			{
+				status: "completed",
+				provider_process_id: expect.stringMatching(/^opencode:/),
+			},
+		]);
+		expect(proof.terminals).toEqual([]);
+		expect(stopSettled).toBe(false);
+		await client.close();
+		expect(await stopped).toMatchObject({
+			_tag: "failed",
+			error: expect.any(Error),
+		});
+		await expect.poll(state).toEqual([
+			{
+				status: "pending",
+				started_at: null,
+				error_code: "delivery_indeterminate",
+			},
+		]);
+		saveEvidence("summarize-failed", {
+			notice,
+			stored,
+			state: await state(),
+			stop: proof,
+		});
 	});
 
 	it("translates delta-first progress and a provider compaction error", async () => {
