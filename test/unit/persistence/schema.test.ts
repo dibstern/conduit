@@ -45,6 +45,7 @@ describe("Schema Migration", () => {
 					[79, "sessions_goal_stuck"],
 					[80, "sessions_jev"],
 					[81, "provider_control_process"],
+					[83, "events_provider_identity_indexes"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -110,6 +111,7 @@ describe("Schema Migration", () => {
 					[79, "sessions_goal_stuck"],
 					[80, "sessions_jev"],
 					[81, "provider_control_process"],
+					[83, "events_provider_identity_indexes"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -257,6 +259,16 @@ describe("Schema Migration", () => {
 				},
 				{
 					name: "idx_events_lineage_parent",
+					table: "events",
+					unique: false,
+				},
+				{
+					name: "idx_events_message_created_identity",
+					table: "events",
+					unique: false,
+				},
+				{
+					name: "idx_events_run_started_identity",
 					table: "events",
 					unique: false,
 				},

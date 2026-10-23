@@ -62,6 +62,7 @@ function snapshotRowToHistory(
 								"status" in state &&
 								(state.status === "completed" || state.status === "error")
 							),
+						row.providerDriver,
 					)
 				: undefined;
 		const projected = projectedParts.get(part.id);
@@ -109,7 +110,7 @@ function snapshotRowToHistory(
 	parts.push(
 		...row.parts
 			.filter((part) => part.type === "compaction" && part.rest_payload == null)
-			.map(partRowToHistoryPart),
+			.map((part) => partRowToHistoryPart(part, row.providerDriver)),
 	);
 	return {
 		...parsed,
@@ -187,6 +188,7 @@ const CURSOR_PRESENTATION_KEYS = new Set([
 function browserMetadata(
 	metadata: object | undefined,
 	inFlight: boolean,
+	providerDriver?: "codex",
 ): Record<string, unknown> | undefined {
 	if (metadata === undefined) return undefined;
 	const cursor =
@@ -196,7 +198,13 @@ function browserMetadata(
 			([key, value]) =>
 				(BROWSER_METADATA_KEYS.has(key) ||
 					(cursor && CURSOR_PRESENTATION_KEYS.has(key)) ||
-					(inFlight && key === "output" && typeof value === "string")) &&
+					(inFlight &&
+						(cursor ||
+							providerDriver === "codex" ||
+							("codexItemType" in metadata &&
+								typeof metadata.codexItemType === "string")) &&
+						key === "output" &&
+						typeof value === "string")) &&
 				(typeof value === "string" ||
 					typeof value === "number" ||
 					typeof value === "boolean" ||
@@ -265,7 +273,10 @@ function partSurfacing(
 	};
 }
 
-function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
+function partRowToHistoryPart(
+	row: MessagePartRow,
+	providerDriver?: "codex",
+): HistoryMessagePart {
 	if (row.type === "text" && row.metadata != null) {
 		const metadata = parseObjectJson(row.metadata);
 		if (metadata?.["notice"] === true)
@@ -366,6 +377,7 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 			row.result == null &&
 				row.status !== "completed" &&
 				row.status !== "error",
+			providerDriver,
 		);
 		if (metadata) stateObj["metadata"] = metadata;
 		if (stateObj.outcome === "failed") {
@@ -421,7 +433,9 @@ export function messageRowsToHistory(
 							completed: row.completed_at,
 						},
 					};
-		const parts = row.parts.map(partRowToHistoryPart);
+		const parts = row.parts.map((part) =>
+			partRowToHistoryPart(part, row.providerDriver),
+		);
 
 		return {
 			id: row.id,

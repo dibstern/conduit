@@ -116,6 +116,8 @@ export const SESSIONS_GOAL_STUCK_MIGRATION = "0076_sessions_goal_stuck.sql";
 export const SESSIONS_JEV_MIGRATION = "0077_sessions_jev.sql";
 export const PROVIDER_CONTROL_PROCESS_MIGRATION =
 	"0078_provider_control_process.sql";
+export const EVENTS_PROVIDER_IDENTITY_INDEXES_MIGRATION =
+	"0080_events_provider_identity_indexes.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

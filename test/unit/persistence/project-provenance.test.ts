@@ -132,6 +132,7 @@ describe("Bound project provenance", () => {
 			"0079_sessions_goal_stuck",
 			"0080_sessions_jev",
 			"0081_provider_control_process",
+			"0083_events_provider_identity_indexes",
 		]);
 	});
 

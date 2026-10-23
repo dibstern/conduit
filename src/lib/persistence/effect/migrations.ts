@@ -12,6 +12,7 @@ import {
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
 	EVENTS_FORKED_FROM_INDEX_MIGRATION,
 	EVENTS_PARENT_ID_INDEX_MIGRATION,
+	EVENTS_PROVIDER_IDENTITY_INDEXES_MIGRATION,
 	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
 	EVENTS_UNSTAMPED_INDEX_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
@@ -1535,6 +1536,10 @@ export const effectMigrationEntries = {
 				.join(";"),
 		);
 	}),
+	// 0082 is main's session_git_publication migration.
+	"0083_events_provider_identity_indexes": executeSqlStatements(
+		readMigrationSql(EVENTS_PROVIDER_IDENTITY_INDEXES_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

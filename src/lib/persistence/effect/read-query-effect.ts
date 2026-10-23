@@ -834,6 +834,7 @@ export class ReadQueryEffectTag extends Context.Service<
 >()("ReadQueryEffect") {}
 
 type MessageWithTurnModelRow = MessageRow & {
+	turn_provider_driver: "codex" | null;
 	turn_cost: number | null;
 	turn_requested_model: string | null;
 	turn_expected_model: string | null;
@@ -914,6 +915,7 @@ function groupMessagesWithPartsAndTurnModels(
 	}
 	return messages.map((message) => {
 		const {
+			turn_provider_driver,
 			turn_cost,
 			turn_requested_model,
 			turn_expected_model,
@@ -926,6 +928,9 @@ function groupMessagesWithPartsAndTurnModels(
 		return {
 			...messageRow,
 			parts: partsByMessage.get(message.id) ?? [],
+			...(turn_provider_driver == null
+				? {}
+				: { providerDriver: turn_provider_driver }),
 			...(turn_cost === null ? {} : { turnCost: turn_cost }),
 			...(message.role === "user" && turn_started_at !== null
 				? {
@@ -1000,6 +1005,49 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	// ends, not when it was sent: waiting in the queue is not work. A steer
 	// joins the running turn and settles with it, so it starts when sent.
 	const turnMetadataColumns = sql`
+		CASE WHEN EXISTS (SELECT 1 FROM message_parts part
+			WHERE part.message_id = messages.id AND part.type = 'tool' AND part.result IS NULL
+				AND part.status IS NOT 'completed' AND part.status IS NOT 'error'
+				AND json_type(CASE WHEN json_valid(part.metadata) THEN part.metadata END, '$.output') = 'text')
+		THEN CASE COALESCE(CASE WHEN COALESCE(turns.run_id, t.run_id) IS NOT NULL THEN COALESCE((SELECT json_extract(command.payload_json, '$.account.driver')
+			FROM provider_command_outbox command
+			WHERE command.session_id = messages.session_id AND command.effect_type = 'send_turn'
+				AND json_valid(command.payload_json)
+				AND command.run_id = COALESCE(turns.run_id, t.run_id)
+			ORDER BY command.request_sequence LIMIT 1),
+			(SELECT event.provider FROM events event INDEXED BY idx_events_run_started_identity
+				WHERE event.session_id = messages.session_id AND event.type = 'run.started' AND json_valid(event.metadata)
+					AND json_extract(event.metadata, '$.runId') = COALESCE(turns.run_id, t.run_id)
+				ORDER BY event.sequence LIMIT 1)) END,
+			(
+				-- Retained creation events identify legacy output even when migration supplied a run ID.
+				-- Unary + removes column affinity so string message IDs use the JSON expression index.
+				WITH RECURSIVE ancestors(session_id, message_id, provider, through_sequence) AS (
+					SELECT messages.session_id, messages.id,
+						(SELECT owner.provider FROM events owner INDEXED BY idx_events_message_created_identity
+							WHERE owner.session_id = messages.session_id AND owner.type = 'message.created' AND json_valid(owner.data)
+								AND json_extract(owner.data, '$.messageId') = +messages.id AND owner.provider IS NOT NULL
+							ORDER BY owner.sequence LIMIT 1), NULL
+					UNION ALL
+					SELECT COALESCE(json_extract(created.data, '$.forkedFrom'), json_extract(created.data, '$.parentId')),
+						substr(ancestor.message_id, 1, length(ancestor.message_id) - length(ancestor.session_id) - 1),
+						(SELECT owner.provider FROM events owner INDEXED BY idx_events_message_created_identity
+							WHERE owner.session_id = COALESCE(json_extract(created.data, '$.forkedFrom'), json_extract(created.data, '$.parentId'))
+								AND owner.type = 'message.created' AND json_valid(owner.data)
+								AND json_extract(owner.data, '$.messageId') = substr(ancestor.message_id, 1, length(ancestor.message_id) - length(ancestor.session_id) - 1)
+								AND owner.provider IS NOT NULL AND owner.sequence < created.sequence
+							ORDER BY owner.sequence LIMIT 1),
+						created.sequence
+					FROM ancestors ancestor JOIN events created INDEXED BY idx_events_session_type
+						ON created.session_id = ancestor.session_id AND created.type = 'session.created'
+							AND CASE WHEN json_valid(created.data) THEN json_extract(created.data, '$.inheritsHistory') END = 1
+					WHERE ancestor.provider IS NULL
+						AND (ancestor.through_sequence IS NOT NULL OR messages.is_inherited = 1)
+						AND (ancestor.through_sequence IS NULL OR created.sequence < ancestor.through_sequence)
+						AND substr(ancestor.message_id, -length(ancestor.session_id) - 1) = '_' || ancestor.session_id
+				)
+				SELECT provider FROM ancestors WHERE provider IS NOT NULL LIMIT 1
+			)) WHEN 'codex' THEN 'codex' END END AS turn_provider_driver,
 		CASE WHEN (SELECT provider FROM sessions WHERE id = messages.session_id) = 'claude'
 			THEN turns.cost ELSE NULL END AS turn_cost,
 		CASE WHEN messages.steered = 1 THEN t.requested_at
