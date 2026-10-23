@@ -2,7 +2,7 @@ Feature: Draft attachment labels in the sidebar
   A Draft without text is recognisable by its paperclip and attachment counts.
 
   Scenario Outline: Textless Draft label counts images and files
-    Given the conduit app is served with the idle mockup
+    Given the conduit app is served with the connected mockup
     And the sidebar has a textless Draft with <images> images and <files> files
     Then the Draft sidebar label is <label> with a paperclip
     And the session-list region visually matches <baseline> at <threshold> percent

@@ -10,16 +10,16 @@ Scenario Outline: saving attachments block Send until acknowledged
   And I choose a draft <kind> attachment
   Then the draft attachment is saving
   And the send button is false
-  And the composer region visually matches <saving_baseline> at 98 percent
+  And the composer region visually matches <saving_baseline> at <threshold> percent
   When I acknowledge the held draft attachment save
   Then the draft attachment is saved
   And the send button is true
-  And the composer region visually matches <saved_baseline> at 98 percent
+  And the composer region visually matches <saved_baseline> at <threshold> percent
 
 Examples:
-  | viewport | kind  | saving_baseline             | saved_baseline             |
-  | desktop  | image | draft-image-saving-desktop  | draft-image-saved-desktop  |
-  | phone    | file  | draft-file-saving-phone     | draft-file-saved-phone     |
+  | viewport | kind  | saving_baseline             | saved_baseline             | threshold |
+  | desktop  | image | draft-image-saving-desktop  | draft-image-saved-desktop  | 98        |
+  | phone    | file  | draft-file-saving-phone     | draft-file-saved-phone     | 98        |
 
 Scenario Outline: failed attachments can be retried or removed
   Given the conduit app is served with the connected mockup
@@ -33,14 +33,14 @@ Scenario Outline: failed attachments can be retried or removed
   When I fail the held draft attachment save
   Then the draft attachment is failed
   And the send button is false
-  And the composer region visually matches <baseline> at 98 percent
+  And the composer region visually matches <baseline> at <threshold> percent
   When I <action> the failed draft attachment
   Then the draft attachment recovery is <result>
   And the send button is true
 
 Examples:
-  | viewport | kind  | action | result | baseline                   |
-  | desktop  | image | retry  | saved  | draft-image-failed-desktop  |
-  | phone    | image | remove | absent | draft-image-failed-phone    |
-  | desktop  | file  | remove | absent | draft-file-failed-desktop   |
-  | phone    | file  | retry  | saved  | draft-file-failed-phone     |
+  | viewport | kind  | action | result | baseline                   | threshold |
+  | desktop  | image | retry  | saved  | draft-image-failed-desktop  | 98        |
+  | phone    | image | remove | absent | draft-image-failed-phone    | 98        |
+  | desktop  | file  | remove | absent | draft-file-failed-desktop   | 98        |
+  | phone    | file  | retry  | saved  | draft-file-failed-phone     | 98        |

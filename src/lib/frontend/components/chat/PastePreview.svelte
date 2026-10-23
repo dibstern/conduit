@@ -33,7 +33,7 @@
 		>
 			{#each images as image (image.id)}
 				{@const src = image.hash ? `/p/${encodeURIComponent(projectSlug ?? getCurrentSlug() ?? "")}/attachments/${image.hash}` : image.dataUrl ?? ""}
-				<div data-testid="draft-attachment" data-attachment-id={image.id} data-status={image.status} class="flex shrink-0 items-center gap-2">
+				<div data-testid="draft-attachment" data-attachment-id={image.id} data-status={image.status} class="flex shrink-0 items-center gap-[14px]">
 				{#if image.mime.startsWith("image/")}
 				<ImageAttachmentThumb {src} name={image.name} imageId={image.id} onremove={(event) => {
 						event.preventDefault();
