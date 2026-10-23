@@ -29,6 +29,14 @@ const PHONE_VIEWPORT_TAG = "visual-phone-viewport";
 const POINTER_HOVER_TAG = "visual-pointer-hover";
 
 const LIGHT_STORY_IDS = new Set([
+	"overlays-connectoverlay--connecting",
+	"ui-conduitlogo--loading",
+	"ui-sessionstatusglyph--running",
+	"ui-sessionstatusglyph--monitoring",
+	"ui-sessionstatusglyph--unread",
+	"ui-sessionstatusglyph--idle",
+	"input-filemenu--loading",
+	"file-fileviewer--loading",
 	// The OpenCode mark is drawn from the text colour and must stay legible.
 	"ui-icon--open-code-mark",
 	// The sidebar and the file browser expose the main navigation palette.

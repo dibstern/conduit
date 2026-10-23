@@ -1190,7 +1190,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 			"700",
 		);
 		const mark = page.getByTestId("list-bar-mark");
-		await expect(mark).toHaveCSS("border-radius", "7px");
+		await expect(mark).toHaveCSS("border-radius", "7.02px");
 		const accent = await mark.evaluate(
 			(element) => getComputedStyle(element).backgroundColor,
 		);

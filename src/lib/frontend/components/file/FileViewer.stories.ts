@@ -1,10 +1,17 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import {
+	clearFileTreeState,
+	fileTreeState,
+} from "../../stores/file-tree.svelte.js";
+import { attachedProjectState } from "../../stores/router.svelte.js";
+import { closeFileViewer, openFileViewer } from "../../stores/ui.svelte.js";
+import {
 	applyGetFileContentResponse,
 	fileBrowserListeners,
 } from "../../stores/ws-listeners.js";
 import { mockFileContent } from "../../stories/mocks.js";
+import { connectedSocket } from "../../stories/sockets.js";
 import FileViewerHost from "./__fixtures__/FileViewerHost.svelte";
 
 const truncatedFileContent = "export const migrationBaseline = true;\n".repeat(
@@ -41,6 +48,42 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const Loading: Story = {
+	beforeEach: () => {
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = fn(async (input: RequestInfo | URL) => {
+			if (String(input) !== "/p/storybook/api/status")
+				throw new TypeError(`Unexpected story request: ${String(input)}`);
+			return Response.json({ status: "ready" });
+		});
+		const restoreSocket = connectedSocket();
+		const previousProject = attachedProjectState.slug;
+		attachedProjectState.slug = "storybook";
+		clearFileTreeState();
+		fileTreeState.scope = "storybook";
+		openFileViewer("src/lib/project.ts");
+		return () => {
+			restoreSocket();
+			globalThis.fetch = realFetch;
+			attachedProjectState.slug = previousProject;
+			closeFileViewer();
+			clearFileTreeState();
+		};
+	},
+	play: async ({ canvasElement }) => {
+		await waitFor(() =>
+			expect(globalThis.fetch).toHaveBeenCalledWith("/p/storybook/api/status"),
+		);
+		await expect(
+			await within(canvasElement).findByText("Loading…"),
+		).toBeVisible();
+		const glyph = canvasElement.querySelector('[data-flow-glyph="running"]');
+		await expect(glyph).toBeVisible();
+		await expect(glyph?.getBoundingClientRect().width).toBe(32);
+		await expect(glyph?.getBoundingClientRect().height).toBe(32);
+	},
+};
 
 export const Default: Story = {
 	play: async ({ canvasElement }) => {

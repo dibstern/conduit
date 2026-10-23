@@ -256,16 +256,13 @@ export const AllGroups: Story = {
 		).not.toBeNull();
 		const running = canvas
 			.getByTestId("running-shelf-toggle")
-			.querySelector(".session-status-glyph > span");
+			.querySelector("[data-flow-packet]");
 		const idle = canvas
 			.getByTestId("idle-shelf-toggle")
-			.querySelector(".session-status-glyph > span");
-		if (!running || !idle) throw new Error("Missing status rings");
+			.querySelector('[data-flow-glyph="idle"]');
+		if (!running || !idle) throw new Error("Missing Flow status glyphs");
 		await expect(getComputedStyle(running).animationName).toBe("none");
-		await expect(getComputedStyle(running).borderTopColor).not.toBe(
-			getComputedStyle(running).borderRightColor,
-		);
-		await expect(getComputedStyle(idle).borderTopStyle).toBe("dashed");
+		await expect(idle.querySelector("[data-flow-packet]")).toBeNull();
 
 		for (const group of ["pinned", "running", "idle"] as const) {
 			const header = canvas.getByTestId(`${group}-shelf-toggle`);
