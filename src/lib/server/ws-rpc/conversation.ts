@@ -1,7 +1,12 @@
 import { Effect } from "effect";
+import { AttachmentValidationError } from "../../attachment-data-url.js";
 import { AccountUnroutable } from "../../contracts/limit-recovery.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
-import { DraftAttachmentMissing, WsRpcError } from "../../contracts/ws-rpc.js";
+import {
+	DraftAttachmentMissing,
+	DraftAttachmentRejected,
+	WsRpcError,
+} from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
 import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
@@ -278,7 +283,16 @@ export const conversationHandlers = {
 				request.name,
 				projectId,
 			);
-		}).pipe(Effect.catch(mapRpcFailure("AddDraftAttachment"))),
+		}).pipe(
+			Effect.catch(
+				(error): Effect.Effect<never, DraftAttachmentRejected | WsRpcError> =>
+					error instanceof AttachmentValidationError
+						? Effect.fail(
+								new DraftAttachmentRejected({ message: error.message }),
+							)
+						: mapRpcFailure("AddDraftAttachment")(error),
+			),
+		),
 	RemoveDraftAttachment: (request) =>
 		Effect.gen(function* () {
 			const drafts = yield* InputDraftsTag;

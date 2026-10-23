@@ -9,7 +9,8 @@
 	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
 	import { accountLimit } from "../../../contracts/account-limit.js";
 	import { tick, untrack, type Snippet } from "svelte";
-	import { toastFailure } from "../../transport/rpc-errors.js";
+	import { failureLine, toastFailure } from "../../transport/rpc-errors.js";
+	import { refreshInputDraftAttachments } from "../../stores/input-draft.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
@@ -17,6 +18,7 @@
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import Textarea from "../ui/Textarea.svelte";
+	// biome-ignore lint/style/useImportType: FilePicker is rendered in the template and used by bind:this
 	import FilePicker from "../ui/FilePicker.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
@@ -163,6 +165,10 @@
 	const draftAttachments = $derived(composerDraft.attachments);
 	let readingAttachments = $state(0);
 	let attachmentError = $state("");
+	$effect(() => {
+		getCurrentRoute();
+		attachmentError = "";
+	});
 	let commandMenuRef: CommandMenu | undefined = $state();
 	let fileMenuRef: FileMenu | undefined = $state();
 	let commandMenuActiveIndex = $state(0);
@@ -746,7 +752,7 @@
 	let sideThreadAttempt: { draft: string; inputId: string } | undefined;
 
 	async function startSideThread(question: string | undefined): Promise<boolean> {
-		if (startingSideThread || composerDraft.sending) return false;
+		if (startingSideThread || composerDraft.sending || !composerDraft.attachmentsReady) return false;
 		const from = selection.scope;
 		const parentSessionId = sessionState.currentId;
 		const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? getCurrentSlug() : null;
@@ -792,9 +798,22 @@
 			});
 			const accepted = outcome.kind === "started" || outcome.kind === "waiting";
 			if (!accepted) composerDraft.sendFailed(unsentDraft, parentSessionId, false);
+			if (outcome.kind === "failed" && outcome.draftAttachmentMissing && sourceKey && projectSlug)
+				await recoverMissingDraftAttachment(outcome.draftAttachmentMissing, projectSlug, sourceKey);
+			if (accepted) attachmentError = "";
 			return accepted;
 		} finally {
 			startingSideThread = false;
+		}
+	}
+
+	async function recoverMissingDraftAttachment(message: string, project: string, key: NonNullable<typeof composerDraft.key>) {
+		if (composerDraft.key && draftKeyId(composerDraft.key) === draftKeyId(key)) attachmentError = message;
+		try {
+			await refreshInputDraftAttachments(project, key);
+		} catch (error) {
+			if (composerDraft.key && draftKeyId(composerDraft.key) === draftKeyId(key))
+				attachmentError = `${message}\n${failureLine(error, "Could not refresh attachments. Reconnect to try again.")}`;
 		}
 	}
 
@@ -918,8 +937,13 @@
 				if (composerDraft.sendFailed(unsentDraft, sentToSessionId, textOverride === undefined, outcome.kind === "failed" && outcome.alreadySent === true)) {
 					cursorPos = composerDraft.text.length;
 				}
+				if (outcome.kind === "failed" && outcome.draftAttachmentMissing && projectSlug) {
+					const key = sentToSessionId ? { session: sentToSessionId } : sourceKey;
+					if (key) await recoverMissingDraftAttachment(outcome.draftAttachmentMissing, projectSlug, key);
+				}
 				return false;
 			}
+			attachmentError = "";
 			if (sourceKey) composerDraft.attachmentsAccepted(sourceKey, attachmentIds);
 			if (composerDraft.sendSucceeded(sentToSessionId, delivery === "steer", textOverride === undefined, unsentDraft)) {
 				cursorPos = 0;
@@ -1329,7 +1353,7 @@
 		{/if}
 		<ComposerFrame id="input-row" compact={sessionViewState.compact} words={composerPreferences.controls === "words"} goal={goal.border}>
 			{#if draftAttachments.length > 0}
-				<PastePreview images={draftAttachments} projectSlug={composerProjectSlug} onRemove={removeDraftAttachment} />
+				<PastePreview images={draftAttachments} projectSlug={composerProjectSlug} onRemove={removeDraftAttachment} onRetry={(id) => composerDraft.retryAttachment(id)} />
 			{/if}
 			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
 				{#snippet field()}

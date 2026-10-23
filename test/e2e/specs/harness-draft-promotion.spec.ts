@@ -16,13 +16,12 @@ import type {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeAttachmentStore } from "../../../src/lib/persistence/attachment-store.js";
 import { inputDraftClaimMarker } from "../../../src/lib/persistence/input-drafts.js";
-import type { ModelInfo } from "../../../src/lib/provider/types.js";
 import { assertAttachmentCatalogue } from "../../helpers/attachment-catalogue.js";
 import type {
 	ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
-import { openPickerRoot } from "../helpers/model-picker.js";
+import { claudeModels, pickClaudeModel } from "../helpers/draft-model.js";
 import {
 	expect,
 	test as harnessTest,
@@ -248,38 +247,10 @@ const test = harnessTest.extend<{ report: Record<string, unknown> }>({
 		{ auto: true },
 	],
 });
-// The fake Claude SDK offers no models unless given some; a Draft needs one to send.
-const claudeModels: readonly ModelInfo[] = [
-	{
-		id: "sonnet",
-		name: "Sonnet",
-		providerId: "claude",
-		variants: { low: {}, high: {} },
-		contextWindowOptions: [
-			{ value: "200k", label: "200k", isDefault: true },
-			{ value: "1m", label: "1M" },
-		],
-	},
-];
 test.use({
 	harnessOptions: { restartProof: true, capabilityModels: claudeModels },
 });
 
-async function pickClaudeModel(page: Page) {
-	const picker = page.locator(
-		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
-	);
-	await openPickerRoot(page, picker);
-	if ((await picker.getAttribute("data-instance-id")) !== "claude")
-		await page.getByTestId("picker-harness-claude").click();
-	await page.getByTestId("picker-row-model").click();
-	await page
-		.getByTestId("model-picker-list")
-		.locator('[data-model-id="sonnet"]')
-		.click();
-	await page.keyboard.press("Escape");
-	await expect(page.getByTestId("model-picker")).toBeHidden();
-}
 test.describe.configure({ retries: 0, timeout: 120_000 });
 
 test("image-only Draft survives reload and sidebar counts include only live images and files", async ({
