@@ -425,8 +425,9 @@ describe("EventRetention through the relay", () => {
 			for (const target of order === "parent-first"
 				? [root, forkId]
 				: [forkId, root]) {
-				const before = events(db);
 				await client.deleteSession(target);
+				// The drain also reclaims the control event committed by deletion.
+				const before = events(db);
 				removed = [
 					...new Set([
 						...removed,
@@ -440,8 +441,8 @@ describe("EventRetention through the relay", () => {
 				);
 			}
 			if (firstFork) {
-				const before = events(db);
 				await client.deleteSession(firstFork);
+				const before = events(db);
 				await step(`${scenario}/${order}/middle-fork`, before, [
 					...removed,
 					firstFork,
@@ -474,8 +475,8 @@ describe("EventRetention through the relay", () => {
 				},
 			}),
 		);
-		const before = events(db);
 		await client.deleteSession(root);
+		const before = events(db);
 		const report = await step("single-call-chain", before, [root, child]);
 		expect(report.sessionsFreed).toBe(2);
 		expect(report.held).toEqual([]);

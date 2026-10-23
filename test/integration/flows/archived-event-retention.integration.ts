@@ -243,7 +243,15 @@ describe("archived event retention through the relay", () => {
 			const appended = afterSweep.filter(
 				(row) => !beforeSequences.has(row.sequence),
 			);
-			expect(appended).toHaveLength(removedIds.length);
+			const stopRequests = appended.filter(
+				(row) => row.type === "session.end_requested",
+			);
+			expect(stopRequests).toEqual(
+				removedIds.length > 0
+					? [expect.objectContaining({ session_id: root })]
+					: [],
+			);
+			expect(appended).toHaveLength(removedIds.length + stopRequests.length);
 			for (const sessionId of removedIds) {
 				expect(
 					database
