@@ -288,6 +288,9 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await expect(world.page.locator("#terminal-panel .term-tab")).toHaveCount(
 				1,
 			);
+			// The tab mounts its emulator a beat after its label; on-screen keys
+			// pressed before that have no terminal and are dropped.
+			await expect(world.page.locator("#terminal-panel .xterm")).toBeVisible();
 		},
 	},
 	{
