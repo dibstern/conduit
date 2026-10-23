@@ -407,7 +407,7 @@ import { join } from "node:path";
 const root = ${JSON.stringify(this.root)};
 if (process.env.HOME !== join(root, "home")) throw new Error("Runner identity fixture requires isolated HOME");
 if (process.env.CONDUIT_TEST_NATIVE_RUNNER_LOADER === "1") {
-  // Built runners need only erasable fixture types, not tsx's async loader on every JS import.
+  // Built daemons and runners need only erasable fixture types, not tsx's async loader on every JS import.
   registerHooks({
     resolve(specifier, context, nextResolve) {
       try { return nextResolve(specifier, context); }
@@ -900,8 +900,12 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			process.execPath,
 			[
 				"--disable-warning=DEP0205",
-				"--import",
-				pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
+				...(this.dist && !this.realSdk
+					? []
+					: [
+							"--import",
+							pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
+						]),
 				"--import",
 				pathToFileURL(join(this.root, "runner-identity-fixture.mjs")).href,
 				...(this.foregroundCli
