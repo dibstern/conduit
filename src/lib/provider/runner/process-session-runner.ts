@@ -75,6 +75,7 @@ import {
 } from "./runner-registry.js";
 import { failRunnerTurn, observeRunnerTurn } from "./runner-turn-failure.js";
 import { makeRunnerUpgrade, type RunnerUpgrade } from "./runner-upgrade.js";
+import { makeSendAdmissionWait } from "./send-admission.js";
 import type {
 	SessionCommand,
 	SessionFailure,
@@ -2772,6 +2773,13 @@ export const makeProcessSessionRunner = (
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
 				let cancelled: Deferred.Deferred<void> | undefined;
+				const waitForAdmission =
+					command.type === "send-turn"
+						? makeSendAdmissionWait(
+								command.input.sessionId,
+								command.input.inputId,
+							)
+						: undefined;
 				const execute = Effect.gen(function* () {
 					const autoSettleAfterDays =
 						command.type === "send-turn"
@@ -2975,6 +2983,11 @@ export const makeProcessSessionRunner = (
 												entry: existing,
 												draining: true,
 												foldersPending: true,
+												waitReason: foldersChanged
+													? ("foldersPending" as const)
+													: legacyCursor
+														? ("legacyCursor" as const)
+														: ("loginPending" as const),
 											};
 										case "Retire":
 											transition(existing, {
@@ -3087,8 +3100,13 @@ export const makeProcessSessionRunner = (
 							);
 							continue;
 						}
-						if ("foldersPending" in selection) {
-							yield* Effect.sleep("10 millis");
+						if ("foldersPending" in selection && selection.waitReason) {
+							yield* waitForAdmission
+								? waitForAdmission(
+										selection.waitReason,
+										Effect.sleep("10 millis"),
+									)
+								: Effect.sleep("10 millis");
 							continue;
 						}
 						if (selection.retire) {
@@ -3460,6 +3478,11 @@ export const makeProcessSessionRunner = (
 							: Effect.fail(failure),
 					),
 					Effect.onError((cause) => {
+						if (
+							runnerFailure(command.type, Failure.squashCause(cause)).code ===
+							"send_admission_timeout"
+						)
+							return Effect.void;
 						if (
 							command.type !== "send-turn" ||
 							recovered ||

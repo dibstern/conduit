@@ -29,6 +29,7 @@ import {
 } from "../domain/daemon/Services/secret-answers.js";
 import { mark } from "../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
+import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { PROCESSING_TIMEOUT_DURATION } from "../domain/relay/Services/session-overrides-state.js";
 import * as Failure from "../effect/failure-classification.js";
@@ -914,6 +915,13 @@ export class ProviderSideEffectReactor {
 				const code = failure
 					? providerFailureCode(failure)
 					: (turn?.error?.code ?? turn?.status ?? "provider_failure");
+				const message =
+					typeof cause === "object" &&
+					cause !== null &&
+					"message" in cause &&
+					typeof cause.message === "string"
+						? cause.message
+						: (turn?.error?.message ?? code);
 				const retryAt = retryable
 					? failedAt +
 						Duration.toMillis(
@@ -945,7 +953,7 @@ export class ProviderSideEffectReactor {
 					const payload =
 						this.options.persistUserMessage &&
 						!placement?.placed &&
-						!placement?.steering &&
+						(!placement?.steering || code === "send_admission_timeout") &&
 						!interrupted
 							? yield* this.parseSendTurnPayload(row).pipe(
 									Effect.orElseSucceed(() => undefined),
@@ -966,10 +974,7 @@ export class ProviderSideEffectReactor {
 								provider: driver,
 								...(payload.images ? { images: payload.images } : {}),
 								failure: {
-									message:
-										cause instanceof Error
-											? cause.message
-											: (turn?.error?.message ?? code),
+									message,
 									code,
 									retryable,
 									retryAt,
@@ -992,16 +997,27 @@ export class ProviderSideEffectReactor {
 								createdAt: failedAt,
 								data: {
 									messageId: `provider-command:${row.command_id}`,
-									error:
-										cause instanceof Error
-											? cause.message
-											: (turn?.error?.message ?? code),
+									error: message,
 									code,
 									retryable,
 									retryAt,
 								},
 							})
 							.pipe(Effect.mapError(storeFailure("failedRun")));
+					if (code === "send_admission_timeout") {
+						const unsent = yield* this.parseSendTurnPayload(row);
+						yield* this.withProjectContext(
+							row.project_key,
+							Effect.gen(function* () {
+								const drafts = yield* Effect.serviceOption(InputDraftsTag);
+								if (Option.isSome(drafts))
+									yield* drafts.value.restore(
+										row.session_id,
+										unsent.text ?? unsent.prompt,
+									);
+							}),
+						);
+					}
 				} else yield* this.writeFailure(row, retryable, code, failedAt);
 			} else if (row.effect_type !== "send_turn")
 				yield* this.markCompleted(row, yield* this.currentTimeMillis());
