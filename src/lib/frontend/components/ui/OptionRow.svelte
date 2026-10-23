@@ -47,17 +47,21 @@
 		moreToRight = !!row && scrolling && row.scrollWidth - row.clientWidth - row.scrollLeft > 1;
 	}
 
+	// A primitive, so rebuilding an identical options list does not scroll the
+	// row back to the selection after the user has scrolled it.
+	const selectedValue = $derived(options.find((option) => option.value === value)?.value);
+
 	$effect(() => {
 		const element = row;
-		const selected = options.find((option) => option.value === value);
+		const selected = selectedValue;
 		if (!element) return;
 		const scroll = scrolling;
 		let cancelled = false;
 		void tick().then(() => {
 			if (cancelled) return;
-			if (scroll && selected) {
+			if (scroll && selected !== undefined) {
 				const tab = Array.from(element.querySelectorAll<HTMLElement>("[data-radio-group-item]"))
-					.find((tab) => tab.dataset["value"] === selected.value);
+					.find((tab) => tab.dataset["value"] === selected);
 				tab?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
 			}
 			updateFade();
