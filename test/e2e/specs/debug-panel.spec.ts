@@ -265,8 +265,9 @@ test.describe("Debug Panel — Panel Content", () => {
 
 		// Get total events from snapshot (includes throttled messages)
 		const totalEvents = await page.evaluate(() => {
-			// biome-ignore lint/suspicious/noExplicitAny: e2e test
-			return (window as any).__wsDebug?.().eventCount;
+			return (
+				window as unknown as { __wsDebug: () => { eventCount: number } }
+			).__wsDebug().eventCount;
 		});
 
 		// Click to switch to verbose mode
@@ -282,11 +283,27 @@ test.describe("Debug Panel — Panel Content", () => {
 			expect(verboseCount).toBeGreaterThan(throttledCount);
 		}
 
-		// Toggle back should restore original count
 		await verboseBtn.click();
 		await expect(verboseBtn).toHaveText("verbose:off");
-		const restoredCount = await logContainer.locator("> div").count();
-		expect(restoredCount).toBe(throttledCount);
+		// Toggling emits new RPC events; compare with the current sampled buffer.
+		await expect
+			.poll(() =>
+				page.evaluate((selector) => {
+					const snapshot = (
+						window as unknown as {
+							__wsDebug: () => { events: { verbose?: boolean }[] };
+						}
+					).__wsDebug();
+					const shown = document
+						.querySelector(selector)
+						?.querySelectorAll(".overflow-y-auto > div").length;
+					return (
+						(shown ?? -1) -
+						snapshot.events.filter((event) => !event.verbose).length
+					);
+				}, DEBUG_PANEL),
+			)
+			.toBe(0);
 	});
 });
 
