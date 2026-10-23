@@ -849,15 +849,17 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							yield* Effect.sync(() => releaseContinuation.resolve());
 							yield* Fiber.join(stopping).pipe(Effect.timeout("3 seconds"));
 							// Run now reserved and returned; the continuation resumes on its own.
-							yield* sql`SELECT 1 FROM events WHERE session_id = ${sessionId} AND type = 'session.resumed'`.pipe(
-								Effect.delay("1 millis"),
-								Effect.repeat({ until: (rows) => rows.length > 0 }),
-								Effect.timeout("3 seconds"),
-							);
 							expect(
 								yield* sql`SELECT 1 FROM provider_command_outbox WHERE session_id = ${sessionId}
-								AND effect_type = 'send_turn' AND json_extract(payload_json, '$.continuation') IS NOT NULL`,
+								AND effect_type = 'send_turn' AND json_extract(payload_json, '$.continuation') IS NOT NULL`.pipe(
+									Effect.delay("1 millis"),
+									Effect.repeat({ until: (rows) => rows.length > 0 }),
+									Effect.timeout("3 seconds"),
+								),
 							).toHaveLength(1);
+							expect(
+								yield* sql`SELECT 1 FROM events WHERE session_id = ${sessionId} AND type = 'session.resumed'`,
+							).not.toEqual([]);
 							const [resumed] = yield* sql<{
 								limit_recovery: string;
 							}>`SELECT limit_recovery FROM sessions WHERE id = ${sessionId}`;
