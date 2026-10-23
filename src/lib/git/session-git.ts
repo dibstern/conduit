@@ -1,5 +1,11 @@
-import { existsSync, realpathSync } from "node:fs";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import {
+	existsSync,
+	lstatSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { SessionWorkspace } from "../contracts/session-workspace.js";
 import {
 	makeSubprocessRunner,
@@ -14,6 +20,11 @@ import {
 import type { ProjectInfo, SessionGit, SessionInfo } from "../shared-types.js";
 
 const GIT_COMMAND_TIMEOUT_MS = 2_000;
+const DEFAULT_REFS = [
+	"refs/remotes/origin/HEAD",
+	"refs/heads/main",
+	"refs/heads/master",
+];
 
 const execGit = (
 	directory: string,
@@ -67,23 +78,152 @@ const operationAt = (gitDir: string): SessionGit["operation"] => {
 	return undefined;
 };
 
+const readOptional = (path: string): string | undefined => {
+	try {
+		return readFileSync(path, "utf8").trim();
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+		throw error;
+	}
+};
+
+const fileStamp = (path: string): string => {
+	const file = statSync(path, { throwIfNoEntry: false });
+	return file
+		? `${file.mtimeMs}:${file.ctimeMs}:${file.size}:${file.ino}`
+		: "missing";
+};
+
+const unchanged = (files: ReadonlyMap<string, string>) =>
+	[...files].every(([path, stamp]) => fileStamp(path) === stamp);
+const isOid = (value: string) => /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);
+
+// Missing refs are unborn; null asks the caller to fall back to git.
+const readRef = (
+	common: string,
+	ref: string,
+	paths = new Set<string>(),
+	depth = 0,
+): string | null | undefined => {
+	if (
+		depth > 8 ||
+		!/^refs\/[^\s\\]+$/.test(ref) ||
+		ref.split("/").some((part) => !part || part === "." || part === "..")
+	)
+		return null;
+	const path = join(common, ref);
+	paths.add(path);
+	const value = readOptional(path);
+	if (value !== undefined) {
+		if (!lstatSync(path).isFile()) return null;
+		if (value.startsWith("ref: "))
+			return readRef(common, value.slice(5), paths, depth + 1);
+		return isOid(value) ? value : null;
+	}
+	const packed = join(common, "packed-refs");
+	paths.add(packed);
+	for (const line of readOptional(packed)?.split("\n") ?? []) {
+		if (!line || line.startsWith("#") || line.startsWith("^")) continue;
+		const [oid, name] = line.split(" ");
+		if (!oid || !isOid(oid) || !name) return null;
+		if (name === ref) return oid;
+	}
+	return undefined;
+};
+
+const readGitFiles = (directory: string) => {
+	try {
+		let root = realpathSync(directory);
+		let gitDir: string;
+		for (;;) {
+			const path = join(root, ".git");
+			const entry = lstatSync(path, { throwIfNoEntry: false });
+			if (entry) {
+				if (entry.isDirectory()) gitDir = path;
+				else if (entry.isFile()) {
+					const target = readOptional(path)?.match(/^gitdir: ([^\r\n]+)$/)?.[1];
+					if (!target) return undefined;
+					gitDir = resolve(root, target);
+				} else return undefined;
+				break;
+			}
+			const parent = dirname(root);
+			if (parent === root) return undefined;
+			root = parent;
+		}
+		gitDir = realpathSync(gitDir);
+		const shared = readOptional(join(gitDir, "commondir"));
+		if (shared !== undefined && (!shared || /[\r\n]/.test(shared)))
+			return undefined;
+		const common = realpathSync(shared ? resolve(gitDir, shared) : gitDir);
+		const config = readFileSync(join(common, "config"), "utf8");
+		if (
+			/^\s*refStorage\s*=/im.test(config) ||
+			existsSync(join(common, "reftable"))
+		)
+			return undefined;
+		const headPath = join(gitDir, "HEAD");
+		if (!lstatSync(headPath).isFile()) return undefined;
+		const head = readFileSync(headPath, "utf8").trim();
+		if (isOid(head)) return { gitDir, common, oid: head, branch: undefined };
+		if (!head.startsWith("ref: refs/heads/")) return undefined;
+		const ref = head.slice(5);
+		const oid = readRef(common, ref);
+		if (oid === null) return undefined;
+		return { gitDir, common, oid, branch: ref.slice(11) };
+	} catch {
+		return undefined;
+	}
+};
+
+const repositoryRefs = new Map<
+	string,
+	{
+		refs: string[];
+		files: Map<string, string>;
+		unmerged: Map<string, string>;
+	}
+>();
+
+/** The watcher can evict a repository without knowing its worktrees. */
+export function invalidateSessionGitRepository(commonDir: string): void {
+	try {
+		repositoryRefs.delete(realpathSync(commonDir));
+	} catch {
+		repositoryRefs.delete(resolve(commonDir));
+	}
+}
+
 // Every spawn blocks the daemon's event loop until the child execs, which takes
 // hundreds of ms on a loaded machine, so each read uses as few git calls as it can.
 const defaultRefs = async (
 	directory: string,
 	runner: SubprocessRunner,
+	common?: string,
 ): Promise<string[]> => {
+	const cached = common ? repositoryRefs.get(common) : undefined;
+	if (cached && unchanged(cached.files)) return cached.refs;
+	if (common) repositoryRefs.delete(common);
+	let files: Map<string, string> | undefined;
+	if (common) {
+		try {
+			const paths = new Set<string>();
+			if (DEFAULT_REFS.every((ref) => readRef(common, ref, paths) !== null))
+				files = new Map([...paths].map((path) => [path, fileStamp(path)]));
+		} catch {
+			// Unusual refs still use git, without caching an incomplete dependency set.
+		}
+	}
 	const refs = await git(
 		directory,
 		runner,
 		"for-each-ref",
 		"--format=%(refname) %(symref) %(objecttype)",
-		"refs/remotes/origin/HEAD",
-		"refs/heads/main",
-		"refs/heads/master",
+		...DEFAULT_REFS,
 	);
 	// Patterns also match refs nested below them, so keep exact names only.
-	return (refs?.split("\n") ?? []).flatMap((line) => {
+	const result = (refs?.split("\n") ?? []).flatMap((line) => {
 		const [ref, symref, type] = line.split(" ");
 		if (ref === "refs/remotes/origin/HEAD")
 			return symref && type === "commit" ? [symref] : [];
@@ -91,6 +231,9 @@ const defaultRefs = async (
 			? [ref]
 			: [];
 	});
+	if (common && files && refs !== undefined && unchanged(files))
+		repositoryRefs.set(common, { refs: result, files, unmerged: new Map() });
+	return result;
 };
 
 /** Local default refs only, sharing merge detection's candidates. Never fetch. */
@@ -99,7 +242,11 @@ export async function hasNoCommitsBeyondDefault(
 	head: string,
 	runner: SubprocessRunner = makeSubprocessRunner(),
 ): Promise<boolean> {
-	for (const ref of await defaultRefs(directory, runner))
+	for (const ref of await defaultRefs(
+		directory,
+		runner,
+		readGitFiles(directory)?.common,
+	))
 		if (
 			(await git(
 				directory,
@@ -140,16 +287,25 @@ export async function readSessionGit(
 			branchHead && branchHead !== "(detached)" ? branchHead : undefined;
 		// --short HEAD fails on a branch with no commits yet.
 		const born = oid !== undefined && oid !== "(initial)";
-		const dirs = await git(
-			directory,
-			runner,
-			"rev-parse",
-			"--absolute-git-dir",
-			"--git-common-dir",
-			...(born ? ["--short", "HEAD"] : []),
-		);
+		const files = readGitFiles(directory);
+		const fast =
+			files && files.branch === branch && files.oid === (born ? oid : undefined)
+				? files
+				: undefined;
+		const dirs = fast
+			? [fast.gitDir, fast.common, fast.oid?.slice(0, 7)]
+			: (
+					await git(
+						directory,
+						runner,
+						"rev-parse",
+						"--absolute-git-dir",
+						"--git-common-dir",
+						...(born ? ["--short", "HEAD"] : []),
+					)
+				)?.split("\n");
 		if (!dirs) return undefined;
-		const [gitDir, commonDir, head] = dirs.split("\n");
+		const [gitDir, commonDir, head] = dirs;
 		if (!gitDir || !commonDir) return undefined;
 		const common = isAbsolute(commonDir)
 			? resolve(commonDir)
@@ -171,7 +327,7 @@ export async function readSessionGit(
 			...(operation ? { operation } : {}),
 		};
 		if (!branch) return result;
-		const defaultBranches = await defaultRefs(directory, runner);
+		const defaultBranches = await defaultRefs(directory, runner, fast?.common);
 		if (defaultBranches.length === 0) return result;
 		if (
 			defaultBranches.some(
@@ -185,19 +341,32 @@ export async function readSessionGit(
 		if (!head || !born) return { ...result, merged: false };
 		// HEAD is the checked-out branch, so its oid is the branch tip.
 		const tip = oid;
+		const defaultOids = fast
+			? defaultBranches.map((ref) => readRef(common, ref))
+			: [];
+		const unmerged =
+			fast && defaultOids.every((oid) => oid != null)
+				? repositoryRefs.get(common)?.unmerged
+				: undefined;
+		const key = [tip, ...defaultOids].join(":");
+		if (unmerged?.get(gitDir) === key) return { ...result, merged: false };
 		const containingDefaults: string[] = [];
 		for (const ref of defaultBranches) {
-			const ancestor = await git(
-				directory,
-				runner,
+			const ancestor = await execGit(directory, runner, [
 				"merge-base",
 				"--is-ancestor",
 				tip,
 				ref,
-			);
+			]).catch((error: { code?: number }) => {
+				if (error.code !== 1) throw error;
+				return undefined;
+			});
 			if (ancestor !== undefined) containingDefaults.push(ref);
 		}
-		if (containingDefaults.length === 0) return { ...result, merged: false };
+		if (containingDefaults.length === 0) {
+			unmerged?.set(gitDir, key);
+			return { ...result, merged: false };
+		}
 		// A merged tip that has not moved stays merged; skip re-deriving it every poll.
 		if (
 			previous?.merged &&
@@ -247,7 +416,10 @@ export async function readSessionGit(
 				if (merged) break;
 			}
 		}
-		if (!merged) return { ...result, merged };
+		if (!merged) {
+			unmerged?.set(gitDir, key);
+			return { ...result, merged };
+		}
 		let mergedAt = previous?.mergedHead === tip ? previous.mergedAt : undefined;
 		if (mergedAt === undefined) {
 			for (const ref of containingDefaults) {
