@@ -109,12 +109,21 @@ export default {
 	child.stderr.on("data", (data: Buffer) => {
 		logs += data.toString();
 	});
+	const viteReady = join(root, "vite-listening.json");
 	try {
 		await expect
-			.poll(() => logs, { timeout: 20_000 })
-			.toContain(
-				scenario === "invalid" ? "waiting for the next change" : "[dev] ready",
-			);
+			.poll(
+				() => ({
+					ready: logs.includes(
+						scenario === "invalid"
+							? "waiting for the next change"
+							: "[dev] ready",
+					),
+					vite: scenario === "invalid" || existsSync(viteReady),
+				}),
+				{ timeout: 20_000 },
+			)
+			.toEqual({ ready: true, vite: true });
 		expect(logs).not.toContain("is not a function");
 		expect(logs).not.toContain("stopping old conduit");
 		expect(child.exitCode).toBeNull();
@@ -123,8 +132,6 @@ export default {
 		} else {
 			const response = await fetch(`http://127.0.0.1:${port}/health`);
 			expect(response.ok).toBe(true);
-			const viteReady = join(root, "vite-listening.json");
-			await expect.poll(() => existsSync(viteReady)).toBe(true);
 			const vite = JSON.parse(readFileSync(viteReady, "utf8")) as {
 				port: number;
 				clearScreen: boolean;
