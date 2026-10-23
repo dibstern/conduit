@@ -219,7 +219,7 @@ export const DaemonOrchestrationLive = Layer.effect(
 		const resolveCallContext = yield* makeProviderCallContextResolver({
 			sessionBindingReadModel: bindings,
 			sessionWorkspace,
-			shellEnv: () => ({}),
+			shellEnv: () => ({ env: {}, declared: {} }),
 		}).pipe(Effect.provideService(ReadQueryEffectTag, read));
 		const engine = new OrchestrationEngine({
 			registry: adapters.registry,

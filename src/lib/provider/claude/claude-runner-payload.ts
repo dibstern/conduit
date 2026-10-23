@@ -554,7 +554,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			)
 				return;
 			yield* this.warmedQueries.preWarmEffect(
-				normalizeClaudeLaunchInput(command.input),
+				normalizeClaudeLaunchInput({
+					...command.input,
+					shellConfig: command.input.shellConfig ?? command.shellConfig,
+				}),
 				command.claudeSettingsOverrides,
 				command.input.shellEnv ?? command.shellEnv,
 				this.getPermissionBridge(),
@@ -947,7 +950,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					{
 						...input,
 						root: input.workspaceRoot,
-						shellEnv: input.shellEnv,
+						shellConfig: input.shellConfig,
 					},
 				) &&
 				!(yield* hasPendingTurn(this.stateRef, sessionId))
@@ -1139,7 +1142,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				const warmed = yield* this.warmedQueries.takeEffect(
 					sessionId,
 					launchOptions,
-					input.configDir,
+					{ ...input, root: input.workspaceRoot },
 				);
 				if (!warmed && this.deps.prepareQuery)
 					yield* Effect.tryPromise({
@@ -1187,7 +1190,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					login: {
 						...input,
 						root: input.workspaceRoot,
-						shellEnv: input.shellEnv,
+						shellConfig: input.shellConfig,
 					},
 					instanceId: input.instanceId ?? "claude",
 					nativeThread: launchInput.nativeThread,

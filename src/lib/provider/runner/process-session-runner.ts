@@ -153,14 +153,14 @@ export interface ProcessRunnerDriver {
 			readonly root: string;
 			readonly account?: SessionTurn["account"];
 			readonly instanceId?: string;
-			readonly shellEnv?: SessionTurn["shellEnv"];
+			readonly shellConfig?: SessionTurn["shellConfig"];
 		},
 		b: {
 			readonly configDir: import("./session-runner.js").SessionTurn["configDir"];
 			readonly root: string;
 			readonly account?: SessionTurn["account"];
 			readonly instanceId?: string;
-			readonly shellEnv?: SessionTurn["shellEnv"];
+			readonly shellConfig?: SessionTurn["shellConfig"];
 		},
 	) => boolean;
 	readonly recoverCommands: (
@@ -2780,51 +2780,37 @@ export const makeProcessSessionRunner = (
 												...command.input,
 												configDir: command.input.configDir,
 												root: command.input.workspaceRoot,
+												shellConfig:
+													command.input.shellConfig ?? command.shellConfig,
 											},
 										);
 									const legacyCursor =
 										driver.driverKind === "cursor" &&
 										existing.connection?.scopedCursorCredentials === false;
-									if (legacyCursor && command.type === "pre-warm")
-										return { entry: undefined, draining: false };
-									if (foldersChanged && command.type === "pre-warm")
-										return { entry: undefined, draining: false };
-									// Only an idle runner restarts. Background tasks can keep one
-									// busy for hours, and it can still serve the send meanwhile.
-									const upgradeByRestart =
-										command.type === "send-turn" &&
-										existing.upgrade.settingsDeferred === true &&
-										Entry.isCommandIdle(existing.lifecycle) &&
-										existing.upgrade.state?.quiescent === true;
-									if (
-										(foldersChanged ||
-											accountFolderChanged ||
-											legacyCursor ||
-											upgradeByRestart) &&
-										Entry.canReconfigure(existing.lifecycle)
-									) {
-										// A turn's completion can reach the browser before the
-										// runner reports quiescence. Do not admit the next turn
-										// on its old folders while that final output drains.
-										if (
-											!Entry.isCommandIdle(existing.lifecycle) ||
-											existing.upgrade.state?.quiescent !== true
-										) {
-											if (command.type === "pre-warm")
-												return { entry: undefined, draining: false };
+									const decision = Entry.decideSend({
+										command: command.type,
+										lifecycle: existing.lifecycle,
+										quiescent: existing.upgrade.state?.quiescent === true,
+										rebindsAccount:
+											existing.capabilities?.rebindsAccount === true,
+										changes: {
+											folders: foldersChanged,
+											login: accountFolderChanged,
+											legacyCursor,
+											settingsDeferred:
+												existing.upgrade.settingsDeferred === true,
+										},
+									});
+									switch (decision) {
+										case "Skip":
+											return { entry: undefined, draining: false };
+										case "Wait":
 											return {
 												entry: existing,
 												draining: true,
 												foldersPending: true,
 											};
-										}
-										// New Claude payloads replace only the SDK query. Keep the
-										// quiescence wait above, and the old restart for older peers.
-										if (
-											foldersChanged ||
-											upgradeByRestart ||
-											!existing.capabilities?.rebindsAccount
-										) {
+										case "Retire":
 											transition(existing, {
 												_tag: "BeginEnd",
 												released: yield* Deferred.make<void>(),
@@ -2834,6 +2820,11 @@ export const makeProcessSessionRunner = (
 												draining: true,
 												retire: existing,
 											};
+										case "Use":
+											break;
+										default: {
+											const _exhaustive: never = decision;
+											return _exhaustive;
 										}
 									}
 								}
@@ -3003,6 +2994,7 @@ export const makeProcessSessionRunner = (
 							? {
 									...command,
 									autoSettleAfterDays,
+									shellConfig: command.input.shellConfig ?? command.shellConfig,
 									...(entry.upgrade.state?.frozen
 										? driver.snapshotCommandSettings(
 												entry.upgrade.state.snapshot,
@@ -3016,6 +3008,8 @@ export const makeProcessSessionRunner = (
 							: command.type === "pre-warm"
 								? {
 										...command,
+										shellConfig:
+											command.input.shellConfig ?? command.shellConfig,
 										shellEnv: command.input.shellEnv ??
 											command.shellEnv ?? {
 												...process.env,

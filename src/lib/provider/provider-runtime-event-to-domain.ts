@@ -326,6 +326,9 @@ export function translateProviderRuntimeEventToDomain(
 						partId,
 						result: data["result"] ?? "",
 						duration: numberFieldValue(data["duration"]) ?? 0,
+						...(data["outcome"] === "succeeded" || data["outcome"] === "failed"
+							? { outcome: data["outcome"] }
+							: {}),
 						...(isRecord(data["metadata"])
 							? { metadata: data["metadata"] }
 							: {}),

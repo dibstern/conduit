@@ -71,7 +71,7 @@ it.each([
 			),
 		);
 		relay = await createProjectRelay({
-			shellEnv: () => shellEnv,
+			shellEnv: () => ({ env: shellEnv, declared: {} }),
 			prepareShellEnv,
 			httpServer: server,
 			opencodeUrl: "http://opencode.test",
@@ -259,7 +259,7 @@ for (const native of [
 				),
 			);
 			relay = await createProjectRelay({
-				shellEnv: () => ({}),
+				shellEnv: () => ({ env: {}, declared: {} }),
 				httpServer: server,
 				opencodeUrl: "http://opencode.test",
 				openCodeInstances: instances,
@@ -343,7 +343,7 @@ it("recovers historical sessions before startup can create a live session", asyn
 		);
 
 		relay = await createProjectRelay({
-			shellEnv: () => ({}),
+			shellEnv: () => ({ env: {}, declared: {} }),
 			httpServer: server,
 			opencodeUrl: "http://opencode.test",
 			projectDir: dir,
@@ -441,7 +441,7 @@ it("rejects Claude permissions a crash left pending and leaves OpenCode's alone"
 		);
 
 		relay = await createProjectRelay({
-			shellEnv: () => ({}),
+			shellEnv: () => ({ env: {}, declared: {} }),
 			httpServer: server,
 			opencodeUrl: "http://opencode.test",
 			projectDir: dir,

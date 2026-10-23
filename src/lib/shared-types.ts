@@ -199,6 +199,7 @@ export interface CommandInfo {
 	name: string;
 	description?: string;
 	args?: string;
+	skillRef?: string;
 	/** The provider's own command or bundled skill; the composer offers these under `$`. */
 	builtin?: boolean;
 }
@@ -521,6 +522,7 @@ export interface HistoryMessagePart {
 	 */
 	state?: {
 		status?: ToolStatus;
+		outcome?: "succeeded" | "failed";
 		/** Whole, or a preview GetToolDetails serves in full. */
 		input?: ToolInput;
 		output?: ToolText;

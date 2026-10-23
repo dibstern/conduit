@@ -1360,6 +1360,7 @@ export class OrchestrationEngine {
 				abortSignal: _abortSignal,
 				history: _history,
 				shellEnv: _shellEnv,
+				shellConfig: _shellConfig,
 				account,
 				...payload
 			} = command.input;

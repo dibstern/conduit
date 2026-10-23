@@ -475,7 +475,10 @@ export const makeClaudeRunnerLaunch = (
 					if (command.type === "pre-warm" && command.settingsSnapshot)
 						frozenSnapshot = command.settingsSnapshot;
 					const input = normalizeClaudeLaunchInput(
-						command.input,
+						{
+							...command.input,
+							shellConfig: command.input.shellConfig ?? command.shellConfig,
+						},
 						defaultLaunchConfig,
 					);
 					if (
@@ -498,6 +501,9 @@ export const makeClaudeRunnerLaunch = (
 							: {}),
 						...(input.account ? { account: input.account } : {}),
 						...(input.shellEnv ? { shellEnv: input.shellEnv } : {}),
+						...(input.shellConfig !== undefined
+							? { shellConfig: input.shellConfig }
+							: {}),
 						workspaceRoot: input.workspaceRoot,
 						extraFolders: input.extraFolders ?? [],
 						providerState: input.providerState,

@@ -143,8 +143,9 @@ continue to use only the main folder.
 Claude runners advertise `rebindsAccount: true` in hello. A same-driver account
 continuation retains the session controller and waits for quiescence before the
 next send closes its SDK query and opens one with the selected login. Login
-comparison includes account identity, account env and frozen shell env as well
-as the config folder. The new query reads its account's native settings; an old
+identity includes the config folder, account id, account env and declared project
+shell configuration. Captured shell env is passed to the launch but never compared.
+The new query reads its account's native settings; an old
 upgrade snapshot cannot supply another account's credentials. Goal fact
 deduplication, message/run ownership and interaction routing remain with the
 controller, including native-resume fallback. Old query callbacks keep their

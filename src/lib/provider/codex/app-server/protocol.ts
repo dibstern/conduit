@@ -165,7 +165,7 @@ export const SkillMetadataSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.String,
 	enabled: Schema.Boolean,
-	path: Schema.String,
+	path: Schema.optional(Schema.NullOr(Schema.String)),
 	scope: SkillScopeSchema,
 });
 export const SkillErrorInfoSchema = Schema.Struct({

@@ -532,13 +532,16 @@ const off=(c,l,e,notes=[])=>`<div class="offh">Jev off <span>· no surfacing or 
 const jtop=(o,on,dir='up')=>`${headK(o)}${o.m?jev(M[o.m],o.pos,{live:o.live,pv:o.pv}):''}${strip2(o.live?LIVE2:STEPS2,{live:o.live,dots:!pinsAt(on),pins:pinsAt(on),pinOn:o.m,hover:o.hover,card:dir,cur:o.cur})}`;
 const offTop=o=>`${headK({...o,jev:0})}${strip2(o.live?PLIVE:PLAIN,{live:o.live,hover:o.hover})}`;
 
+const hangTop=(o,on)=>{const steps=o.live?LIVE2:STEPS2;const m=o.m&&M[o.m];
+ return `${headK(o)}${strip2(steps,{live:o.live,dots:!pinsAt(on),pins:pinsAt(on),pinOn:o.m,hover:o.hover,card:'down'})}${m?`<div class="hangw" style="--x:${xsOf(steps)[at(steps,o.m)]}%"><span class="hcaret ${m.ask?'ask':''}"></span>${jev(m,o.pos,{live:o.live})}</div>`:''}`};
+
 D.e=p=>{
  const stops=(on,live)=>p?`<span class="ftab mt">${mbtn(on)}</span>`:`<span class="flab">Show</span>`+SH.map(([k,l])=>`${k==='steps'?'<span class="fdv"></span>':''}<span class="ftab ${on===k?'on':''}">${l}<span class="ct">${cnt(k,live)}</span></span>`).join('');
- const P=(o,on,body='',mo)=>`<div class="pnl"><div class="top">${jtop(o,on)}</div>${body?`<div class="pbody">${body}</div>`:''}<div class="ftabs">${stops(on,o.live)}${usageTab(on==='u',o.live,p)}${mo?menu(on,o.live):''}</div></div>`;
- const O=(o,on,body='')=>`<div class="pnl"><div class="top">${offTop(o)}</div>${body?`<div class="pbody">${body}</div>`:''}<div class="ftabs">${logTab(on==='log',o.live)}${usageTab(on==='u',o.live,p)}</div></div>`;
- return state('Collapsed, hovering the Ask',`<div class="hovup">${P({hover:6})}</div>`,'the full Jev card, as it would open; the bar is always there and any stop opens the turn at it')
-  +state('Live',P({live:1,m:3,pos:'3/3'},'steps',earlier(9)+ticker2()),'chevron left of the spinner collapses it; Full log while work runs')
-  +state('Expanded, Key messages',P({open:1,m:2,pos:'1/3'},'key'),'once done it returns to your saved stop')
+ const P=(o,on,body='',mo)=>`<div class="pnl"><div class="top">${hangTop(o,on)}</div>${body?`<div class="pbody">${body}</div>`:''}${on?`<div class="ftabs">${stops(on,o.live)}${usageTab(on==='u',o.live,p)}${mo?menu(on,o.live):''}</div>`:''}</div>`;
+ const O=(o,on,body='')=>`<div class="pnl"><div class="top">${offTop(o)}</div>${body?`<div class="pbody">${body}</div><div class="ftabs">${logTab(on==='log',o.live)}${usageTab(on==='u',o.live,p)}</div>`:''}</div>`;
+ return state('Collapsed, hovering the Ask',`<div class="hovdn">${P({hover:6})}</div>`,'just the head and strip; the hover card hangs exactly where it sits when open')
+  +state('Live',P({live:1,m:3,pos:'3/3'},'steps',earlier(9)+ticker2()),'chevron left of the spinner collapses it; the card hangs from the latest pin')
+  +state('Expanded, Key messages',P({open:1,m:2,pos:'1/3'},'key'),'once done it returns to your saved stop; the caret ties the card to its moment')
   +state('Expanded, Full log',P({open:1,m:2,pos:'2/5'},'steps',allRows()),'Full log is the last stop, so it includes every message')
   +state('Expanded, Usage',P({open:1},'u',USAGE))
   +(p?state('Show menu open',`<div class="menuw">${P({open:1,m:2,pos:'1/3'},'key','',1)}</div>`,'phone: the stops live in a menu that explains each one'):'')
@@ -581,9 +584,7 @@ D.h=p=>{
   +off(O({}),O({live:1},'',plainLog(1)),O({open:1},'',plainLog()),['collapsed stays footer-free','','']);
 };
 D.i=p=>{
- const hang=(steps,o)=>{const m=M[o.m];return `<div class="hangw" style="--x:${xsOf(steps)[at(steps,o.m)]}%"><span class="hcaret ${m.ask?'ask':''}"></span>${jev(m,o.pos,{live:o.live})}</div>`};
- const top=(o,on)=>{const steps=o.live?LIVE2:STEPS2;return `${headK(o)}${strip2(steps,{live:o.live,dots:!pinsAt(on),pins:pinsAt(on),pinOn:o.m,hover:o.hover,card:'down'})}${o.m?hang(steps,o):''}`};
- const P=(o,on,body='',mo)=>`<div class="pnl"><div class="top">${top(o,on)}</div>${body?`<div class="pbody">${body}</div>`:''}${on?`<div class="ftabs"><span class="ftab mt">${mbtn(on)}</span>${usageTab(on==='u',o.live,p)}${mo?menu(on,o.live):''}</div>`:''}</div>`;
+ const P=(o,on,body='',mo)=>`<div class="pnl"><div class="top">${hangTop(o,on)}</div>${body?`<div class="pbody">${body}</div>`:''}${on?`<div class="ftabs"><span class="ftab mt">${mbtn(on)}</span>${usageTab(on==='u',o.live,p)}${mo?menu(on,o.live):''}</div>`:''}</div>`;
  const O=(o,body='')=>`<div class="pnl"><div class="top">${offTop(o)}</div>${body?`<div class="pbody">${body}</div><div class="ftabs">${logTab(1,o.live)}${usageTab(0,o.live,p)}</div>`:''}</div>`;
  return state('Collapsed, hovering the Ask',`<div class="hovdn">${P({hover:6})}</div>`,'the card hangs from the strip exactly where it sits when open')
   +state('Live',P({live:1,m:3,pos:'3/3'},'steps',earlier(9)+ticker2()),'')

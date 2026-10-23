@@ -36,6 +36,7 @@ import {
 	resolveTurnSettings,
 } from "../provider/turn-settings.js";
 import { saveRelaySettings } from "../relay/relay-settings.js";
+import { CurrentEventDelivery } from "../server/event-delivery.js";
 import type { SessionPermissionMode } from "../shared-types.js";
 import { RelaySettingsSaveError } from "./model.js";
 
@@ -147,7 +148,12 @@ const switchClientToSession = (
 		const wsHandler = yield* WebSocketHandlerTag;
 		const pollerManager = yield* PollerManagerTag;
 
-		wsHandler.setClientSession(clientId, sessionId);
+		wsHandler.setClientSession(
+			clientId,
+			sessionId,
+			(yield* ConfigTag).slug,
+			yield* CurrentEventDelivery,
+		);
 
 		const canUseOpenCodePoller = yield* shouldStartOpenCodePoller(sessionId);
 		if (

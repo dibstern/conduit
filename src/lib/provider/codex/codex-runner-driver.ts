@@ -242,7 +242,7 @@ export const makeCodexRunnerDriver = (
 						...(revertBeforeTurnId
 							? { "codex.revertBeforeTurnId": revertBeforeTurnId }
 							: {}),
-						"codex.skill": skill
+						"codex.skill": skill?.path
 							? { type: "skill", name: skill.name, path: skill.path }
 							: null,
 						...(resolvedEffort ? { "codex.effort": resolvedEffort } : {}),

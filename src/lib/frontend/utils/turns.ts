@@ -212,7 +212,7 @@ export function toolSubject(tool: ToolMessage): string {
 	const progress = tool.metadata?.["progress"];
 	if (
 		tool.result === undefined &&
-		tool.status !== "error" &&
+		tool.outcome !== "failed" &&
 		typeof tool.metadata?.["cursorToolType"] === "string" &&
 		typeof progress === "string" &&
 		progress
@@ -420,7 +420,7 @@ export function turnStats(segment: Segment): TurnStats {
 		}
 		if (part.type !== "tool") continue;
 		stats.tools++;
-		if (part.status === "error" || part.isError) stats.failed++;
+		if (part.outcome === "failed") stats.failed++;
 		const canonicalTool = ensureCanonical(part.name, part.input);
 		switch (canonicalTool.tool) {
 			case "Read":

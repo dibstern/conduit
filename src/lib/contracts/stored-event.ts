@@ -1,4 +1,4 @@
-import { Effect, Schema, type Types } from "effect";
+import { Effect, Option, Schema, type Types } from "effect";
 import { ContinuationReasonSchema } from "./limit-recovery.js";
 import {
 	SessionSetupFinishedPayloadSchema,
@@ -626,13 +626,31 @@ export const CanonicalEvents = {
 			result: Schema.Unknown.pipe(
 				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
 			),
+			outcome: Schema.UndefinedOr(
+				Schema.Literals(["succeeded", "failed"]),
+			).pipe(
+				Schema.withDecodingDefaultTypeKey(Effect.succeed(undefined)),
+				Schema.optionalKey,
+			),
 			duration: Schema.Number,
 			metadata: Schema.optionalKey(
 				Schema.Record(Schema.String, Schema.Unknown),
 			),
 			/** Final tool input when the provider streamed args after tool.started. */
 			input: Schema.optionalKey(CanonicalToolInputSchema),
-		}),
+		}).pipe(
+			Schema.middlewareDecoding((effect) =>
+				Effect.map(
+					effect,
+					Option.map((data) => ({
+						...data,
+						outcome:
+							data.outcome ??
+							(data.metadata?.["isError"] === true ? "failed" : "succeeded"),
+					})),
+				),
+			),
+		),
 	),
 	"file.attached": live(
 		Schema.Struct({

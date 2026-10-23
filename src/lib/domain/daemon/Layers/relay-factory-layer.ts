@@ -650,7 +650,7 @@ export const RelayFactoryLive = (
 									extraFolders: project.folders.slice(1),
 									...(envResolver && {
 										shellEnv: (directory: string) =>
-											envResolver.get(directory, project.slug),
+											envResolver.getSnapshot(directory, project.slug),
 										prepareShellEnv: (directory: string) =>
 											envResolver.waitUntilReady(directory, project.slug),
 									}),
