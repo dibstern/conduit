@@ -544,7 +544,8 @@ describe("Codex turns through the real daemon and detached runner", () => {
 					type: "tool",
 					tool: "Bash",
 					state: expect.objectContaining({
-						status: "completed",
+						status: "error",
+						outcome: "failed",
 						input: expect.objectContaining({ value: started?.data["input"] }),
 						output: expect.objectContaining({
 							text: "first line\nsecond line\nthird line\n",

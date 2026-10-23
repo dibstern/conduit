@@ -1880,6 +1880,15 @@ export const GetCategorySet = Rpc.make("GetCategorySet", {
 	error: WsRpcError,
 });
 
+export const CountSessionCategories = Rpc.make("CountSessionCategories", {
+	payload: Schema.TaggedStruct("CountSessionCategories", {
+		sessionId: NonEmptyString,
+		set: CategorySetContentsSchema,
+	}),
+	success: Schema.Record(Schema.String, Schema.Int),
+	error: WsRpcError,
+});
+
 export const SetSurfacingMark = Rpc.make("SetSurfacingMark", {
 	payload: Schema.TaggedStruct("SetSurfacingMark", {
 		sessionId: NonEmptyString,
@@ -3183,6 +3192,7 @@ const wsRpcRequests = [
 	SetTerminalKeys,
 	GetTerminalKeys,
 	GetCategorySet,
+	CountSessionCategories,
 	SetSurfacingMark,
 	GetSurfacingFeedback,
 	GetSurfacingLedger,
