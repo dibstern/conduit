@@ -74,6 +74,15 @@ test("reports provider folder and worktree capabilities through instance info", 
 			},
 		},
 		{
+			provider: "codex",
+			capabilities: {
+				supportsMultiFolder: false,
+				supportsWorktree: false,
+				supportsNewWorktree: false,
+				supportsTaskStop: false,
+			},
+		},
+		{
 			provider: "cursor",
 			capabilities: {
 				supportsMultiFolder: true,
