@@ -87,10 +87,17 @@ Session git belongs to one daemon module, exposed by
 `domain/daemon/Services/session-git.ts`. Its interface is `read(sessionId)`,
 `changes`, and `invalidate(target)`. Canonical folder keys share git reads across
 sessions and projects. Viewed folders refresh every 5 seconds and running
-folders every 15 seconds. Listed folders also refresh every 30 seconds as a
-safety net for missed watcher events; dormant folders refresh on hints. Hints
+folders every 15 seconds. Listed folders older than 30 seconds get a safety-net
+refresh for missed watcher events, at most one every 20 seconds daemon-wide,
+oldest first, so idle cost does not grow with listed sessions; dormant folders
+refresh on hints. Reads only refresh a folder that was never published. Hints
 have a two-second leading/trailing throttle and retain the tier's cadence.
-Run ends, presence changes and ref changes force a refresh. Scoped filesystem
+Run ends, presence changes and ref changes force a refresh; a worktree's ref
+changes are its own branch and the default branches, not other worktrees'. A ref
+event forces a read only when the ref file's contents changed, because FSEvents
+replays and repeats events and can name a ref update after its lock file. A
+hinted folder's presence is checked once per hint, before the tick reads the
+clock. Scoped filesystem
 watches and session membership use `OwnerScopes`;
 commands use the shared Subprocess owner at background priority.
 

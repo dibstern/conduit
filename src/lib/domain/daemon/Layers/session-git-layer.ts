@@ -65,6 +65,10 @@ const intervals = {
 	dormant: Number.POSITIVE_INFINITY,
 } satisfies Record<Tier, number>;
 const hintThrottleMs = 2_000;
+// Listed polling is only a safety net for missed watcher events, so it is one
+// daemon-wide rate (oldest first) rather than a per-folder cost that grows
+// with every listed session.
+const safetyNetGapMs = 20_000;
 
 interface Membership {
 	readonly sessionId: string;
@@ -93,6 +97,8 @@ interface DirectoryState {
 	listedUntil: number;
 	present: boolean | undefined;
 	hinted: boolean;
+	/** A hint arrived since presence was last checked. */
+	presenceUnchecked: boolean;
 	forced: boolean;
 	queued: boolean;
 }
@@ -133,6 +139,7 @@ export const makeSessionGit = Effect.gen(function* () {
 		{ readonly listeners: Set<StatsListener>; readonly listener: StatsListener }
 	>();
 	let readQuietUntil = 0;
+	let lastSafetyNet = Number.NEGATIVE_INFINITY;
 	const decodeWorkspace = Schema.decodeUnknownOption(
 		Schema.fromJsonString(SessionWorkspaceSchema),
 	);
@@ -185,6 +192,7 @@ export const makeSessionGit = Effect.gen(function* () {
 	};
 	const request = (entry: DirectoryState, force = false) => {
 		entry.hinted = true;
+		entry.presenceUnchecked = true;
 		entry.forced ||= force;
 	};
 	const present = (directory: string) =>
@@ -206,6 +214,8 @@ export const makeSessionGit = Effect.gen(function* () {
 	): DirectoryState["watchers"] => {
 		const watchers: DirectoryState["watchers"] = [];
 		const paths = new Set([entry.directory, dirname(entry.directory)]);
+		// Other worktrees' files in the repository's common directory.
+		const shared = new Set<string>();
 		try {
 			const dotgit = join(entry.directory, ".git");
 			let gitDir = dotgit;
@@ -227,11 +237,48 @@ export const makeSessionGit = Effect.gen(function* () {
 			try {
 				const common = readFileSync(join(gitDir, "commondir"), "utf8").trim();
 				entry.repositoryDirectory = canonicalDirectory(resolve(gitDir, common));
-				paths.add(resolve(gitDir, common));
-				paths.add(resolve(gitDir, common, "packed-refs"));
-				paths.add(resolve(gitDir, common, "refs", "heads"));
+				for (const path of [
+					resolve(gitDir, common),
+					resolve(gitDir, common, "packed-refs"),
+					resolve(gitDir, common, "refs", "heads"),
+				]) {
+					paths.add(path);
+					shared.add(path);
+				}
 			} catch {
 				/* A primary checkout is its own common directory. */
+			}
+			// FSEvents replays events from before the watch began, repeats them,
+			// and can fold a ref update into one event named after its lock file,
+			// so a ref event forces a read only when a ref's contents changed.
+			const contents = new Map<string, string | undefined>();
+			const read = (file: string) => {
+				try {
+					return readFileSync(file, "utf8");
+				} catch {
+					return undefined;
+				}
+			};
+			const changed = (file: string) => {
+				const next = read(file);
+				const same = contents.has(file) && contents.get(file) === next;
+				contents.set(file, next);
+				return !same;
+			};
+			// Only this checkout's branch and the default branches decide its
+			// state, so a commit in another worktree does not force a read here.
+			const refs = (heads: string) => {
+				const branch = /^ref: refs\/heads\/(.+)$/.exec(
+					read(join(gitDir, "HEAD"))?.trim() ?? "",
+				)?.[1];
+				return [branch, "main", "master"].flatMap((ref) =>
+					ref === undefined ? [] : [join(heads, ref)],
+				);
+			};
+			for (const path of paths) {
+				if (path.endsWith(join("refs", "heads"))) refs(path).forEach(changed);
+				else if (["HEAD", "packed-refs"].includes(basename(path)))
+					changed(path);
 			}
 			for (const path of paths) {
 				const fallback = () => {
@@ -282,13 +329,21 @@ export const makeSessionGit = Effect.gen(function* () {
 							name !== basename(entry.directory)
 						)
 							return;
-						if (name?.endsWith(".lock")) return;
-						request(
-							entry,
-							path.endsWith(join("refs", "heads")) ||
-								name === "HEAD" ||
-								name === "packed-refs",
-						);
+						if (path.endsWith(join("refs", "heads"))) {
+							if (refs(path).map(changed).includes(true)) request(entry, true);
+							return;
+						}
+						const file = name?.replace(/\.lock$/, "") ?? null;
+						if (
+							file === "packed-refs" ||
+							(file === "HEAD" && !shared.has(path))
+						) {
+							if (changed(basename(path) === file ? path : join(path, file)))
+								request(entry, true);
+							return;
+						}
+						if (shared.has(path) || name !== file) return;
+						request(entry, false);
 					});
 					watcher.on("error", () => {
 						watcher.close();
@@ -359,6 +414,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				listedUntil: 0,
 				present: undefined,
 				hinted: false,
+				presenceUnchecked: false,
 				forced: false,
 				queued: false,
 			};
@@ -553,6 +609,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				return;
 			entry.forced = false;
 			entry.hinted = false;
+			entry.presenceUnchecked = false;
 			const exists = yield* present(entry.directory);
 			if (entry.present !== undefined && exists !== entry.present)
 				forgetCanonicalDirectory(entry.directory);
@@ -710,19 +767,23 @@ export const makeSessionGit = Effect.gen(function* () {
 		});
 	const schedule = Effect.gen(function* () {
 		yield* registerProjectFolders;
+		// Filesystem checks come before reading the clock, so every decision
+		// below uses the time it is made at. A hint that waits for its tier's
+		// cadence is checked once, not on every tick.
+		for (const entry of directories.values())
+			if (entry.presenceUnchecked && !entry.forced && !entry.queued) {
+				entry.presenceUnchecked = false;
+				yield* checkPresence(entry);
+			}
 		const now = yield* Clock.currentTimeMillis;
 		for (const [key, { listedUntil, invalidated }] of pendingDirectories) {
 			if (listedUntil > 0 && now < readQuietUntil) continue;
 			const entry = directories.get(key);
 			if (entry) {
 				entry.listedUntil = Math.max(entry.listedUntil, listedUntil);
-				if (
-					invalidated ||
-					(!entry.queued &&
-						(!entry.published ||
-							now - entry.lastRead >= intervals[tier(entry, now)]))
-				)
-					request(entry);
+				// Stale published state is the schedule's job: refreshing every stale
+				// folder a list read touches would turn one sidebar read into a burst.
+				if (invalidated || (!entry.queued && !entry.published)) request(entry);
 			}
 			pendingDirectories.delete(key);
 		}
@@ -740,13 +801,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				pendingListed.delete(id);
 				for (const key of session.directories) {
 					const entry = directories.get(key);
-					if (
-						entry &&
-						(hints.has(id) ||
-							(!entry.queued &&
-								(!entry.published ||
-									now - entry.lastRead >= intervals[tier(entry, now)])))
-					)
+					if (entry && (hints.has(id) || (!entry.queued && !entry.published)))
 						request(entry);
 				}
 			}
@@ -754,13 +809,13 @@ export const makeSessionGit = Effect.gen(function* () {
 		}
 		if (pendingReads.size === 0 && pendingDirectories.size === 0)
 			readQuietUntil = 0;
+		let safetyNet: DirectoryState | undefined;
 		for (const entry of directories.values()) {
 			if (
 				(entry.sessions.size === 0 && entry.rootProjects.size === 0) ||
 				entry.queued
 			)
 				continue;
-			if (entry.hinted && !entry.forced) yield* checkPresence(entry);
 			const currentTier = tier(entry, now);
 			const interval = intervals[currentTier];
 			if (
@@ -770,11 +825,21 @@ export const makeSessionGit = Effect.gen(function* () {
 					now - entry.lastHintRead >= hintThrottleMs &&
 					(interval === Number.POSITIVE_INFINITY ||
 						now - entry.lastRead >= interval)) ||
-				(currentTier !== "dormant" && now - entry.lastRead >= interval)
+				((currentTier === "running" || currentTier === "viewed") &&
+					now - entry.lastRead >= interval)
 			) {
 				if (entry.hinted && !entry.forced) entry.lastHintRead = now;
 				yield* enqueue(entry);
-			}
+			} else if (
+				currentTier === "listed" &&
+				now - entry.lastRead >= interval &&
+				entry.lastRead < (safetyNet?.lastRead ?? Number.POSITIVE_INFINITY)
+			)
+				safetyNet = entry;
+		}
+		if (safetyNet && now - lastSafetyNet >= safetyNetGapMs) {
+			lastSafetyNet = now;
+			yield* enqueue(safetyNet);
 		}
 	});
 	// Delay initial scheduling: startup never launches an unbounded refresh fanout.

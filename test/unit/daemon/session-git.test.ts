@@ -287,6 +287,23 @@ const waitForSpawns = (
 			.toBe(count),
 	).pipe(Effect.andThen(waitForIdle(metrics)));
 
+// A read's cadence runs from when git answered, which under load can trail its
+// last spawn past an idle window: wait for its publication before moving time.
+const waitForDirty = <E, R>(
+	read: Effect.Effect<{ readonly dirty?: boolean } | undefined, E, R>,
+) =>
+	read.pipe(
+		Effect.tap(() =>
+			Effect.promise(
+				() => new Promise<void>((resolve) => setTimeout(resolve, 50)),
+			),
+		),
+		Effect.repeat({
+			until: (git) => git?.dirty === true,
+			times: eventTimeout / 50,
+		}),
+	);
+
 // File events reach watchers seconds late when fseventsd is saturated by other
 // work on the machine; waits for them assert eventual delivery, not latency.
 const eventTimeout = 20_000;
@@ -340,7 +357,6 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				// The last write's event can be dropped too; one more hint lands in
 				// the same trailing window.
 				yield* f.service.invalidate({ directory: f.repository });
-				const burstDuration = Date.now() - burstStarted;
 				yield* Effect.tryPromise(() =>
 					expect
 						.poll(() => Effect.runPromise(f.service.read("one")), {
@@ -348,12 +364,13 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 						})
 						.toMatchObject({ dirty: false }),
 				);
-				yield* waitForIdle(f.metrics, 2_300);
 				const after = yield* f.metrics;
 				expect(after.spawnCount - before.spawnCount).toBeGreaterThanOrEqual(2);
-				// Scheduling can stretch the writes across additional throttle windows.
+				// A loaded fseventsd delivers the burst in clumps seconds late, so the
+				// bound covers every throttle window until the final state published.
+				// One read per event would still exceed it many times over.
 				expect(after.spawnCount - before.spawnCount).toBeLessThanOrEqual(
-					2 + Math.floor(burstDuration / 2_000),
+					2 + Math.floor((Date.now() - burstStarted) / 2_000),
 				);
 			}),
 	);
@@ -541,7 +558,12 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 					f.service.invalidate({ sessionId: "one" }),
 				);
 				expect(yield* f.service.read("one")).toMatchObject({ dirty: false });
-				yield* settle;
+				// The refresh can take longer than one settle under load.
+				yield* settle.pipe(
+					Effect.andThen(f.service.read("one")),
+					Effect.repeat({ until: (git) => git?.dirty === true, times: 200 }),
+				);
+				yield* waitForIdle(f.metrics);
 				expect(yield* f.service.read("one")).toMatchObject({ dirty: true });
 				expect((yield* f.metrics).spawnCount - before.spawnCount).toBe(1);
 			}),
@@ -594,7 +616,9 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 			yield* withReadRequest(f.service.read("shared"), "SubscribeShell");
 			expect((yield* f.metrics).spawnCount).toBe(queued.spawnCount);
 			yield* TestClock.adjust(300);
+			writeFileSync(join(f.repository, "dirty"), "changed");
 			yield* Fiber.interrupt(blocker);
+			yield* waitForDirty(f.service.read("one"));
 			yield* waitForIdle(f.metrics);
 			yield* settle;
 			yield* waitForIdle(f.metrics);
@@ -643,7 +667,9 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 					yield* hintFirst ? hint : listed;
 					yield* hintFirst ? listed : hint;
 					yield* TestClock.adjust(300);
+					writeFileSync(join(f.repository, "dirty"), "changed");
 					yield* Fiber.interrupt(blocker);
+					yield* waitForDirty(f.service.read("one"));
 					yield* waitForIdle(f.metrics);
 					yield* settle;
 					yield* waitForIdle(f.metrics);
