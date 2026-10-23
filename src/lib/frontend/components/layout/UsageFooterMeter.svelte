@@ -11,6 +11,7 @@
 	import { usageDisplay, usageResetTime } from "../../utils/continuation.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
+	import HarnessLogo from "../model/HarnessLogo.svelte";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -202,7 +203,7 @@
 				{@const canSelect = interactive && getProviderDriver(getInstanceById(reading.accountId)?.driver)?.defaultAccountSource === "selection"}
 				{#snippet rowContent()}
 					<span class="flex min-w-0 items-center gap-[6px]">
-						<AccountDot instanceId={reading.accountId} size={7} data-testid="{prefix}-dot-{row.id}" />
+						<HarnessLogo driver={getInstanceById(reading.accountId)?.driver ?? reading.harness} instanceId={reading.accountId} size={15} aligned data-testid="{prefix}-logo-{row.id}" />
 						<span data-testid="{prefix}-name-{row.id}" class="min-w-0 truncate {isDefault ? 'text-text' : 'text-text-secondary'}">{row.name}</span>
 						{#if row.main}{@render defaultMarker(prefix, reading.accountId)}{/if}
 					</span>

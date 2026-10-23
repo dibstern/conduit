@@ -307,12 +307,15 @@ export const States: Story = {
 		await expect(
 			canvas.getByTestId("usage-footer-bar-stale-five_hour"),
 		).toBeEmptyDOMElement();
-		const dots = ["personal", "work", "lab", "stale"].map(
+		const badgeColours = ["personal", "work", "lab", "stale"].map(
 			(id) =>
-				getComputedStyle(canvas.getByTestId(`usage-footer-dot-${id}`))
-					.backgroundColor,
+				getComputedStyle(
+					within(canvas.getByTestId(`usage-footer-logo-${id}`)).getByTestId(
+						"harness-logo-badge",
+					),
+				).backgroundColor,
 		);
-		await expect(new Set(dots).size).toBe(dots.length);
+		await expect(new Set(badgeColours).size).toBe(badgeColours.length);
 		await expect(
 			getComputedStyle(
 				canvas.getByTestId("usage-footer-column-claude-five_hour"),

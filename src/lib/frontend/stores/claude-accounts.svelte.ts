@@ -239,6 +239,20 @@ class ClaudeAccounts {
 		return this.inFlightTarget !== null;
 	}
 
+	shouldAccountSpin(
+		sessionId: string | null,
+		instanceId: string | undefined,
+	): boolean {
+		const switchingTo = this.switchingTo;
+		const session = findSession(sessionId ?? "");
+		return (
+			switchingTo !== null &&
+			this.handoff.kind !== "idle" &&
+			this.handoff.sessionId === sessionId &&
+			(instanceId === switchingTo || instanceId === composerAccountId(session))
+		);
+	}
+
 	get pendingHandoff() {
 		return this.handoff.kind === "pending" || this.handoff.kind === "switching"
 			? this.handoff

@@ -288,10 +288,9 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await expect(world.page.locator("#terminal-panel .term-tab")).toHaveCount(
 				1,
 			);
-			// The tab's emulator loads lazily; a terminal key pressed before it
-			// mounts finds no terminal and is dropped. Mounting and connecting the
-			// keys happen in one task, so a mounted emulator is a connected one.
-			await expect(world.page.locator("#terminal-panel .xterm")).toHaveCount(1);
+			// The tab mounts its emulator a beat after its label; on-screen keys
+			// pressed before that have no terminal and are dropped.
+			await expect(world.page.locator("#terminal-panel .xterm")).toBeVisible();
 		},
 	},
 	{
@@ -1388,6 +1387,52 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await page
 				.locator("#confirm-modal")
 				.waitFor({ state: "hidden", timeout: 5_000 });
+		},
+	},
+	{
+		name: "assert Accounts glyph and configured-driver badge count",
+		match:
+			/^the Accounts row (.+) shows a (claude|codex|cursor|opencode) logo (with|without) a letter badge$/,
+		run: async ({ world, match }) => {
+			const name = match[1] ?? "";
+			const driver = match[2] ?? "";
+			const id = accountIdForName(world.page, name);
+			const badged = match[3] === "with";
+			const configured = (mockInstances.get(world.page) ?? []).filter(
+				(instance) => instance["driver"] === driver,
+			);
+			expect(configured.length >= 2).toBe(badged);
+			const row = world.page.getByTestId(`instance-row-${id}`);
+			const logo = row.getByTestId("account-logo");
+			await expect(logo).toBeVisible();
+			await expect(logo).toHaveAttribute("data-driver", driver);
+			await expect(logo).toHaveAttribute("data-account", id);
+			await expect(logo).toHaveCSS("width", "18px");
+			await expect(row.getByText(name, { exact: true })).toBeVisible();
+			const badge = logo.getByTestId("harness-logo-badge");
+			await expect(badge).toHaveCount(badged ? 1 : 0);
+			if (badged) {
+				await expect(badge).toHaveText(name.charAt(0).toUpperCase());
+				await expect(badge).toHaveAttribute("data-state", "idle");
+			}
+		},
+	},
+	{
+		name: "assert Accounts names align across driver groups",
+		match: /^the Accounts names (.+) are left aligned across harness groups$/,
+		run: async ({ world, match }) => {
+			const names = (match[1] ?? "").split(/, | and /);
+			const positions = await Promise.all(
+				names.map(async (name) => {
+					const id = accountIdForName(world.page, name);
+					return world.page
+						.getByTestId(`instance-row-${id}`)
+						.getByText(name, { exact: true })
+						.evaluate((element) => element.getBoundingClientRect().x);
+				}),
+			);
+			expect(positions.length).toBeGreaterThan(1);
+			for (const x of positions) expect(x).toBeCloseTo(positions[0] ?? 0, 0);
 		},
 	},
 	{

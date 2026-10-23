@@ -14,7 +14,7 @@
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
-	import AccountDot from "../ui/AccountDot.svelte";
+	import HarnessLogo from "../model/HarnessLogo.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import Textarea from "../ui/Textarea.svelte";
@@ -76,7 +76,7 @@
 	import { draftKeyId } from "../../stores/composer-draft/state.js";
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { getDriverTraits, instanceState } from "../../stores/instance.svelte.js";
+	import { getDriverTraits, getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
@@ -1534,7 +1534,7 @@
 						>
 							{#if sendMode === "switch" && switchTarget}
 								{#if !sessionViewState.compact}<span data-testid="composer-send-switch-prefix">Send on</span>{/if}
-								<AccountDot instanceId={switchTarget.id} size={7} />
+								<HarnessLogo driver={getInstanceById(switchTarget.id)?.driver ?? composerTraits?.usageHarness ?? "claude"} instanceId={switchTarget.id} size={15} data-testid="account-logo" />
 								<span data-testid="composer-send-switch-label">{switchTarget.name}</span>
 							{:else}
 								{@render sendAtLabel()}
@@ -1563,8 +1563,8 @@
 							</MenuItem>
 							{#each sendAccounts as option (option.id)}
 								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} data-selected={sendMode === "switch" && switchTarget?.id === option.id ? "true" : undefined} disabled={switchingAccount} class="rounded-[7px] {sendMode === 'switch' && switchTarget?.id === option.id ? 'bg-border-chip' : ''}" onselect={() => { composerDraft.sendPick = { mode: "switch", accountId: option.id }; }}>
-									<AccountDot instanceId={option.id} size={7} />
-									<span class="flex-1">Send now on {option.name}</span>
+									<HarnessLogo driver={getInstanceById(option.id)?.driver ?? composerTraits?.usageHarness ?? "claude"} instanceId={option.id} size={15} aligned data-testid="account-logo" />
+									<span class="min-w-0 flex-1 truncate">Send now on {option.name}</span>
 									<span class="font-mono text-[10.5px] text-text-dimmer">{#if option.usageUnknown}usage unknown{:else if option.fullest}{composerTraits?.usageHarness === "codex" ? option.fullest.label ?? "usage" : option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%{/if}</span>
 								</MenuItem>
 							{/each}
