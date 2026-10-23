@@ -3,6 +3,7 @@ import { SqlClient } from "effect/sql";
 import * as Migrator from "effect/sql/Migrator";
 import type { SqlError } from "effect/sql/SqlError";
 import {
+	ATTACHMENT_STORE_MIGRATION,
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	COMPACT_REDUNDANT_EVENTS_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
@@ -1535,6 +1536,9 @@ export const effectMigrationEntries = {
 				.join(";"),
 		);
 	}),
+	"0082_attachment_store": executeSqlStatements(
+		readMigrationSql(ATTACHMENT_STORE_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

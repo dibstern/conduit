@@ -88,6 +88,8 @@ export interface ProjectStoreImportResult {
 }
 
 const copiedTables = [
+	"attachment_blobs",
+	"draft_attachments",
 	"events",
 	"sessions",
 	"provider_runs",
@@ -126,6 +128,8 @@ const singletonTables = [
 	"session_pick_backfill_state",
 	"store_identity",
 	"effect_sql_migrations",
+	// Derived by destination triggers; never copied from a source store.
+	"attachment_uses",
 	"daemon_store_imports",
 	"sqlite_sequence",
 ];
@@ -603,6 +607,7 @@ function excludeSharedSessions(
 		// Capture references before deleting their owners. Parent/fork links are
 		// deliberately absent: a non-shared child must resolve to the first owner.
 		db.exec(`
+			CREATE TEMP TABLE shared_drafts AS SELECT draft_key AS id FROM input_drafts WHERE kind = 'session' AND draft_key IN shared_sessions;
 			CREATE TEMP TABLE shared_events AS SELECT sequence AS id FROM events WHERE session_id IN shared_sessions;
 			CREATE TEMP TABLE shared_turns AS SELECT id FROM turns WHERE session_id IN shared_sessions;
 			CREATE TEMP TABLE shared_messages AS SELECT id FROM messages WHERE session_id IN shared_sessions OR turn_id IN shared_turns;
@@ -615,6 +620,7 @@ function excludeSharedSessions(
 		`);
 		const references: Readonly<Record<string, string>> = {
 			session_id: "shared_sessions",
+			draft_key: "shared_drafts",
 			message_id: "shared_messages",
 			turn_id: "shared_turns",
 			command_id: "shared_commands",
@@ -684,6 +690,7 @@ function collisions(
 		...Object.keys(runnerTables).filter((name) => names.includes(name)),
 	];
 	for (const table of all) {
+		if (table === "attachment_blobs") continue;
 		const key = columns(db, "source", table)
 			.filter(({ pk }) => pk > 0)
 			.map(({ name }) => name);
@@ -884,7 +891,7 @@ function copyProject(
 				`ROW_NUMBER() OVER (ORDER BY rowid) + ${offsets.rowid[table] ?? 0}`;
 		}
 		db.prepare(
-			`INSERT INTO main.${table} (${fields.map(quote).join(", ")}) SELECT ${fields.map((field) => expressions[field] ?? quote(field)).join(", ")} FROM source.${table} ORDER BY rowid`,
+			`INSERT ${table === "attachment_blobs" ? "OR IGNORE " : ""}INTO main.${table} (${fields.map(quote).join(", ")}) SELECT ${fields.map((field) => expressions[field] ?? quote(field)).join(", ")} FROM source.${table} ORDER BY rowid`,
 		).run(
 			...(fields.includes("project_id") || fields.includes("project_key")
 				? [project.projectId]

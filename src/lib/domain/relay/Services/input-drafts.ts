@@ -64,7 +64,8 @@ export const releaseInputDraftClaims = () =>
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
 				yield* sql`DELETE FROM input_drafts
-					WHERE promoted_session_id = ${inputDraftClaimMarker} AND text = ''`;
+					WHERE promoted_session_id = ${inputDraftClaimMarker} AND text = ''
+					AND NOT EXISTS (SELECT 1 FROM draft_attachments WHERE draft_key = input_drafts.draft_key)`;
 				yield* sql`UPDATE input_drafts SET promoted_session_id = NULL
 					WHERE promoted_session_id = ${inputDraftClaimMarker}`;
 			}),
