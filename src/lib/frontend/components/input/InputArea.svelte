@@ -784,15 +784,15 @@
 				inputId,
 				text: serializeReferences(await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug)),
 				...(images.length > 0 ? { images } : {}),
+				onCreated: () => {
+					sideThreadAttempt = undefined;
+					const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, pendingAttachments === draftImages);
+					if (cleared.cleared) {
+						if (cleared.active) cursorPos = 0;
+						pendingAttachments = [];
+					}
+				},
 			});
-			if (outcome.kind === "started") {
-				sideThreadAttempt = undefined;
-				const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, pendingAttachments === draftImages);
-				if (cleared.cleared) {
-					if (cleared.active) cursorPos = 0;
-					pendingAttachments = [];
-				}
-			}
 			return outcome.kind === "started" || outcome.kind === "waiting";
 		} finally {
 			startingSideThread = false;
