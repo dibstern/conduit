@@ -34,6 +34,7 @@ const decideAccountLimit = (input: {
 	readonly asker: AccountLimitAsker;
 	readonly reading?: UsageReading;
 	readonly recovery?: LimitRecovery;
+	readonly modelId?: string | undefined;
 	readonly now: number;
 }): AccountLimit => {
 	const { asker, reading, recovery, now } = input;
@@ -121,7 +122,15 @@ export const narrowAccountLimit = (
 	let { reading } = input;
 	if (reading?.harness === "codex") {
 		// Codex allowances are independent buckets, identified by an opaque id.
-		const limitId = input.recovery?.rateLimitType ?? "codex";
+		const limitId =
+			input.recovery?.rateLimitType ??
+			reading.windows.find(
+				(window) =>
+					input.modelId !== undefined &&
+					(window.modelId === input.modelId ||
+						window.limitId === input.modelId),
+			)?.limitId ??
+			"codex";
 		const windows = reading.windows.filter(
 			(window) => window.limitId === limitId,
 		);
