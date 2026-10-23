@@ -716,9 +716,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				...(input.images ? { images: input.images } : {}),
 			}).pipe(
 				Effect.catchIf(
-					(error) =>
-						error._tag !== "ClaudeSessionLifecycleError" &&
-						error._tag !== "AttachmentMissing",
+					(error) => error._tag !== "ClaudeSessionLifecycleError",
 					(error) =>
 						Effect.sync(() =>
 							log.warn(

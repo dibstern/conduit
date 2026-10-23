@@ -14,6 +14,7 @@ const attachmentRef = Schema.Struct({
 		"text/plain",
 	]),
 	name: Schema.optional(Schema.String),
+	url: Schema.optionalKey(Schema.Never),
 }).pipe(Schema.brand("AttachmentRef"));
 
 export type AttachmentRef = typeof attachmentRef.Type;
@@ -27,3 +28,13 @@ export const AttachmentRefSchema: Schema.ConstraintCodec<
 		readonly name?: string | undefined;
 	}
 > = attachmentRef;
+
+export const AttachmentSourceSchema = Schema.Union([
+	AttachmentRefSchema,
+	Schema.Struct({
+		url: Schema.String.pipe(Schema.check(Schema.isPattern(/^(?!\s*data:)/i))),
+		attachmentHash: Schema.optionalKey(Schema.Never),
+	}),
+]);
+
+export type AttachmentSource = typeof AttachmentSourceSchema.Type;

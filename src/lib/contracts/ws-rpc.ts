@@ -13,7 +13,10 @@ import {
 } from "../shared-types.js";
 import { AccountChangeRejected } from "./account.js";
 import { AccountColorSlotSchema } from "./account-color.js";
-import { AttachmentRefSchema } from "./attachment-ref.js";
+import {
+	AttachmentRefSchema,
+	AttachmentSourceSchema,
+} from "./attachment-ref.js";
 import {
 	CategorySetContentsSchema,
 	CategorySetRejected,
@@ -384,6 +387,7 @@ export const PtyInfoSchema = Schema.Struct({
 export const HistoryMessagePartSchema = Schema.Struct({
 	id: Schema.String,
 	type: Schema.String,
+	source: Schema.optionalKey(AttachmentSourceSchema),
 	surfacingMark: Schema.optional(Schema.NullOr(SurfacingMarkSchema)),
 	surfacingRead: Schema.optionalKey(Schema.Boolean),
 	surfacingOrdinal: Schema.optionalKey(

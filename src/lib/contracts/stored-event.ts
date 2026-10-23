@@ -1,5 +1,8 @@
 import { Effect, Schema, type Types } from "effect";
-import { AttachmentRefSchema } from "./attachment-ref.js";
+import {
+	AttachmentRefSchema,
+	AttachmentSourceSchema,
+} from "./attachment-ref.js";
 import { ContinuationReasonSchema } from "./limit-recovery.js";
 import {
 	SessionSetupFinishedPayloadSchema,
@@ -467,8 +470,7 @@ export const QuestionAskedDetailsSchema = Schema.Struct({
 	partId: optionalString,
 });
 
-// The snapshot decoder deliberately validates only identity, role and part
-// identity. Keep the richer provider data typed without tightening old stores.
+// Validate identity and file sources while retaining provider-specific fields.
 type SnapshotMessage = {
 	readonly id: string;
 	readonly sessionID: string;
@@ -552,7 +554,11 @@ export const CanonicalEvents = {
 								"id" in part &&
 								typeof part.id === "string" &&
 								"type" in part &&
-								typeof part.type === "string",
+								typeof part.type === "string" &&
+								(part.type !== "file" ||
+									(!("url" in part) &&
+										"source" in part &&
+										Schema.is(AttachmentSourceSchema)(part.source))),
 						),
 				),
 			),
@@ -641,7 +647,7 @@ export const CanonicalEvents = {
 			partId: Schema.String,
 			mime: Schema.String,
 			filename: Schema.optionalKey(Schema.String),
-			url: Schema.String,
+			source: AttachmentSourceSchema,
 		}),
 	),
 	"tool.input_updated": retired(

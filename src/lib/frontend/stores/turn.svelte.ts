@@ -233,24 +233,27 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 	const inputId = input.inputId ?? crypto.randomUUID();
 	let sessionId: string | undefined;
 	let creating = false;
-	// Saved refs appear with the provider's persisted message until attachment URLs exist.
-	const inlineImages = input.images?.filter(
-		(image) => typeof image === "string",
-	);
 	const message = {
 		type: "user",
 		uuid: inputId,
 		text: input.text,
 		createdAt: Date.now(),
-		...(inlineImages?.length
+		...(input.images?.length
 			? {
-					attachments: inlineImages.map((url) => {
-						const { mime, name, size } = parseAttachmentDataUrl(url);
+					attachments: input.images.map((image) => {
+						if (typeof image !== "string")
+							return {
+								id: crypto.randomUUID(),
+								name: image.name ?? "Attachment",
+								mime: image.mime,
+								source: image,
+							};
+						const { mime, name, size } = parseAttachmentDataUrl(image);
 						return {
 							id: crypto.randomUUID(),
 							name: name ?? "Attachment",
 							mime,
-							url,
+							source: { url: image },
 							size,
 						};
 					}),

@@ -3,6 +3,7 @@
 // Pure conversion with no I/O.
 
 import { Option, Schema } from "effect";
+import { AttachmentSourceSchema } from "../contracts/attachment-ref.js";
 import { SurfacingMarkSchema } from "../contracts/category-set.js";
 import { ProjectSetupStateSchema } from "../contracts/project-setup.js";
 import { TextSurfacedPayloadSchema } from "../contracts/stored-event.js";
@@ -331,8 +332,8 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 			...(typeof metadata?.["filename"] === "string"
 				? { filename: metadata["filename"] }
 				: {}),
-			...(typeof metadata?.["url"] === "string"
-				? { url: metadata["url"] }
+			...(Schema.is(AttachmentSourceSchema)(metadata?.["source"])
+				? { source: metadata["source"] }
 				: {}),
 		};
 	}

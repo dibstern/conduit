@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type { Logger } from "../../../src/lib/logger.js";
-import { CanonicalEventTranslator } from "../../../src/lib/persistence/canonical-event-translator.js";
 import type { CanonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OpenCodeRuntimeEventTranslator } from "../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
 import {
@@ -172,69 +171,7 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 		).toMatchObject({ parentID: "msg-user-1" });
 	});
 
-	it("matches legacy OpenCode SSE domain translation for message and text deltas", () => {
-		const legacy = new CanonicalEventTranslator();
-		const runtime = new OpenCodeRuntimeEventTranslator();
-		const sessionId = "ses-opencode";
-		const events = [
-			makeSSEEvent("message.created", {
-				sessionID: sessionId,
-				messageID: "msg-1",
-				info: { role: "assistant" },
-			}),
-			makeSSEEvent("message.part.delta", {
-				sessionID: sessionId,
-				messageID: "msg-1",
-				partID: "part-1",
-				field: "text",
-				delta: "hello",
-			}),
-		];
-
-		expect(
-			comparable(
-				events.flatMap((event) => legacy.translate(event, sessionId) ?? []),
-			),
-		).toEqual(
-			comparable(
-				events.flatMap((event) => runtimeToDomain(runtime, event, sessionId)),
-			),
-		);
-	});
-
-	it("matches legacy OpenCode SSE domain translation for tool lifecycle and keeps provider refs", () => {
-		const legacy = new CanonicalEventTranslator();
-		const runtime = new OpenCodeRuntimeEventTranslator();
-		const sessionId = "ses-opencode";
-		const event = makeSSEEvent("message.part.updated", {
-			sessionID: sessionId,
-			messageID: "msg-1",
-			partID: "part-1",
-			part: {
-				type: "tool",
-				id: "part-1",
-				tool: "read",
-				callID: "call-1",
-				state: {
-					status: "pending",
-					input: { filePath: "/src/main.ts", offset: 5 },
-				},
-			},
-		});
-
-		expect(comparable(runtimeToDomain(runtime, event, sessionId))).toEqual(
-			comparable(legacy.translate(event, sessionId) ?? []),
-		);
-		const runtimeEvent = runtime.translate(event, sessionId)?.[0];
-		expect(runtimeEvent?.providerRefs).toEqual({
-			providerSessionId: sessionId,
-			providerMessageId: "msg-1",
-			providerToolUseId: "call-1",
-		});
-	});
-
-	it("matches legacy translation for session.error and strips the 'undefined: ' artifact", () => {
-		const legacy = new CanonicalEventTranslator();
+	it("strips the 'undefined: ' artifact from session.error", () => {
 		const runtime = new OpenCodeRuntimeEventTranslator();
 		const sessionId = "ses-opencode";
 		const event = makeSSEEvent("session.error", {
@@ -248,16 +185,12 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 		});
 
 		const domainEvents = runtimeToDomain(runtime, event, sessionId);
-		const legacyEvents = legacy.translate(event, sessionId) ?? [];
-		// messageId provenance differs between the pipelines (the runtime→domain
-		// mapper stamps the envelope id); compare the error payload fields.
 		const expected = {
 			error: "The provided model identifier is invalid.",
 			code: "APIError",
 		};
 		expect(domainEvents[0]?.type).toBe("turn.error");
 		expect(domainEvents[0]?.data).toMatchObject(expected);
-		expect(legacyEvents[0]?.data).toMatchObject(expected);
 	});
 
 	it("emits message.created once for a user message.updated event", () => {
@@ -689,7 +622,7 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 					type: "file",
 					mime: "image/png",
 					filename: "screenshot.png",
-					url: "data:image/png;base64,AAAA",
+					source: { url: "file:///screenshot.png" },
 				},
 			});
 
@@ -706,7 +639,7 @@ describe("OpenCodeRuntimeEventTranslator", () => {
 						partId,
 						mime: "image/png",
 						filename: "screenshot.png",
-						url: "data:image/png;base64,AAAA",
+						source: { url: "file:///screenshot.png" },
 					},
 				},
 			]);

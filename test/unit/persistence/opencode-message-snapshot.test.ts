@@ -88,7 +88,7 @@ const assistant: Message = {
 			type: "file",
 			mime: "text/plain",
 			filename: "a.txt",
-			url: "file://a",
+			source: { url: "file://a" },
 		},
 		{ id: "answer", type: "text", text: "done" },
 		{ id: "step-finish", type: "step-finish", cost: 0.5 },

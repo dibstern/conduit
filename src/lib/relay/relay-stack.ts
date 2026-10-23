@@ -68,6 +68,10 @@ import { formatErrorDetail } from "../errors.js";
 import { withCachedProjectGit } from "../git/session-git.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger, type Logger } from "../logger.js";
+import {
+	AttachmentMissing,
+	type AttachmentStore,
+} from "../persistence/attachment-store.js";
 import type { OrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { getClientIp, parseCookies } from "../server/http-utils.js";
 import type { PushNotificationSender } from "../server/push.js";
@@ -154,6 +158,7 @@ interface StandaloneProjectEntry {
 	slug: string;
 	folders: readonly [string, ...string[]];
 	title: string;
+	attachments?: Pick<AttachmentStore, "get"> | undefined;
 	getClientCount?: () => number;
 	getSessionCount?: () => number;
 	getIsProcessing?: () => boolean;
@@ -252,6 +257,12 @@ export class EffectRelayServer {
 			auth: this.auth,
 			staticDir: this.staticDir,
 			getProjects,
+			readAttachment: (slug, hash) =>
+				Effect.suspend(
+					() =>
+						this.projects.get(slug)?.attachments?.get(hash) ??
+						Effect.fail(new AttachmentMissing({ hash })),
+				),
 			getPort: () => this.actualPort,
 			getIsTls: () => this.protocol === "https",
 			pushManager: this.options.pushManager,
@@ -297,6 +308,7 @@ export class EffectRelayServer {
 
 /** Per-project relay: all relay components attached to a shared server. */
 export interface ProjectRelay {
+	readonly attachments?: Pick<AttachmentStore, "get"> | undefined;
 	/** Reload a global setting without writing or echoing its notification. */
 	syncGlobalSetting(tag: GlobalSettingTag): Effect.Effect<void>;
 	refreshGlobalDefaults(): Effect.Effect<void>;
@@ -538,6 +550,7 @@ export async function createProjectRelay(
 	}
 
 	return {
+		attachments: startup.attachments,
 		refreshGlobalDefaults: () =>
 			refreshGlobalDefaults.pipe(
 				Effect.asVoid,
@@ -809,6 +822,7 @@ export async function createRelayStack(
 				slug,
 				folders: [directory],
 				title,
+				attachments: newRelay.attachments,
 				getClientCount: () => newRelay.getStatusSnapshot().clients,
 				getSessionCount: () => newRelay.getStatusSnapshot().sessionCount,
 				getIsProcessing: () => newRelay.getStatusSnapshot().isProcessing,
@@ -864,6 +878,7 @@ export async function createRelayStack(
 		slug: config.slug,
 		folders: [config.projectDir],
 		title: config.slug,
+		attachments: relay.attachments,
 		getClientCount: () => relay.getStatusSnapshot().clients,
 		getSessionCount: () => relay.getStatusSnapshot().sessionCount,
 		getIsProcessing: () => relay.getStatusSnapshot().isProcessing,

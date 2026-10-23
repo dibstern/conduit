@@ -5,7 +5,10 @@
 // frontend code can import everything from "./types.js".
 // Types also used locally in this file are imported separately.
 
-import type { AttachmentRef } from "../contracts/attachment-ref.js";
+import type {
+	AttachmentRef,
+	AttachmentSource,
+} from "../contracts/attachment-ref.js";
 import type { SurfacingMark } from "../contracts/category-set.js";
 import type { ProjectSetupState } from "../contracts/project-setup.js";
 import type { InputCut, Utf8Bytes } from "../contracts/tool-wire.js";
@@ -113,7 +116,7 @@ export interface UserMessage {
 		id: string;
 		mime: string;
 		name: string;
-		url: string;
+		source: AttachmentSource;
 		size?: number;
 	}[];
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */

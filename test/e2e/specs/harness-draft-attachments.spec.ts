@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Effect } from "effect";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/account-directory.js";
 import { indexedAttachmentColumns } from "../../helpers/attachment-catalogue.js";
 import { responseChunks } from "../../helpers/fake-claude-process-sdk.js";
 import type { ProcessHarness } from "../../helpers/process-harness.js";
@@ -101,16 +102,43 @@ const test = harnessTest.extend<{ report: Record<string, unknown> }>({
 				const check = existsSync(harness.daemonStorePath())
 					? catalogue(harness)
 					: null;
+				const inlineTranscriptRows = existsSync(harness.daemonStorePath())
+					? withStore(harness, (db) =>
+							db
+								.prepare(
+									`SELECT 'events.file.attached' AS owner, event_id AS id
+									 FROM events WHERE type = 'file.attached' AND instr(data, 'data:') > 0
+									 UNION ALL
+									 SELECT 'events.message.snapshot', e.event_id
+									 FROM events e, json_each(e.data, '$.message.parts') p
+									 WHERE e.type = 'message.snapshot' AND json_extract(p.value, '$.type') = 'file'
+									 AND instr(p.value, 'data:') > 0
+									 UNION ALL
+									 SELECT 'message_parts', id FROM message_parts
+									 WHERE type IN ('file', 'attached-file')
+									 AND instr(COALESCE(metadata, '') || COALESCE(rest_payload, ''), 'data:') > 0
+									 UNION ALL
+									 SELECT 'messages.rest_payload', m.id
+									 FROM messages m, json_each(m.rest_payload, '$.parts') p
+									 WHERE json_extract(p.value, '$.type') = 'file' AND instr(p.value, 'data:') > 0`,
+								)
+								.all(),
+						)
+					: null;
 				report["catalogue"] = check;
+				report["inlineTranscriptRows"] = inlineTranscriptRows;
 				report["logTail"] = harness.logTail.slice(-3000);
 				report["passed"] =
-					testInfo.status === "passed" && check?.unknownCarriers.length === 0;
+					testInfo.status === "passed" &&
+					check?.unknownCarriers.length === 0 &&
+					inlineTranscriptRows?.length === 0;
 				writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
 				await testInfo.attach("draft-attachments", {
 					path,
 					contentType: "application/json",
 				});
 				expect(check?.unknownCarriers).toEqual([]);
+				expect(inlineTranscriptRows).toEqual([]);
 			}
 		},
 		{ auto: true },
@@ -404,6 +432,23 @@ test("Queue Edit keeps a saved ref in the composer and resends identical bytes",
 				"#image-preview .paste-thumb, #image-preview [data-testid='file-attachment-chip']",
 			),
 		).toHaveCount(1);
+		const savedThumbnail = page.locator("#image-preview .paste-thumb img");
+		await expect(savedThumbnail).toHaveAttribute(
+			"src",
+			`/p/process-test/attachments/${hash}`,
+		);
+		await expect
+			.poll(() =>
+				savedThumbnail.evaluate(
+					(image: HTMLImageElement) => image.complete && image.naturalWidth > 0,
+				),
+			)
+			.toBe(true);
+		await page.screenshot({
+			path: `test-results/draft-attachments/queue-edit-${sessionId}.png`,
+			animations: "disabled",
+		});
+		report["savedThumbnail"] = await savedThumbnail.getAttribute("src");
 		await app.sendBtn.click();
 		await expect(page.getByTestId("pending-input-text")).toHaveText(text);
 		const resentId = await page
@@ -431,6 +476,569 @@ test("Queue Edit keeps a saved ref in the composer and resends identical bytes",
 	} finally {
 		writeFileSync(join(harness.root, "task-stop-release-result"), "release");
 	}
+});
+
+test("Claude stores the attached-file ref and renders its route or image unavailable", async ({
+	harness,
+	page,
+	report,
+}) => {
+	test.setTimeout(120_000);
+	report["bead"] = "mryl.10";
+	const browser = await harness.connect();
+	const sessionId = await browser.createSession("Transcript attachment route");
+	const inputId = randomUUID();
+	const attached = () =>
+		withStore(harness, (db) =>
+			db
+				.prepare(
+					"SELECT data FROM events WHERE session_id = ? AND type = 'file.attached' ORDER BY sequence",
+				)
+				.all(sessionId),
+		);
+	expect(
+		await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId,
+				originId: browser.originId,
+				inputId,
+				text: "transcript-attachment-ref-proof",
+				delivery: "queue",
+				images: [dataUrl],
+			}),
+		),
+	).toMatchObject({ ok: true });
+	await expect.poll(() => attached().length, { timeout: 30_000 }).toBe(1);
+	const event = JSON.parse(String(attached()[0]?.["data"])) as {
+		source?: unknown;
+	};
+	expect(event.source).toEqual(ref);
+	expect(event).not.toHaveProperty("url");
+	report["attachedFileEvent"] = event;
+	const parts = withStore(harness, (db) =>
+		db
+			.prepare(
+				`SELECT p.metadata, p.rest_payload FROM message_parts p
+				 JOIN messages m ON m.id = p.message_id WHERE m.session_id = ?`,
+			)
+			.all(sessionId),
+	);
+	expect(JSON.stringify(parts)).toContain(hash);
+	expect(JSON.stringify(parts)).not.toContain("data:");
+	report["parts"] = parts;
+	// Routing requests through Playwright disables the browser HTTP cache so a
+	// reload after the deliberate corruption below really asks for the blob.
+	await page.route("**/attachments/**", (route) => route.continue());
+	const app = new AppPage(page);
+	await app.goto(`${harness.baseUrl}/s/${sessionId}?p=process-test`);
+	const image = page.getByTestId("user-message-attachments").locator("img");
+	await expect(image).toHaveAttribute(
+		"src",
+		`/p/process-test/attachments/${hash}`,
+	);
+	await expect
+		.poll(() =>
+			image.evaluate(
+				(element: HTMLImageElement) =>
+					element.complete && element.naturalWidth > 0,
+			),
+		)
+		.toBe(true);
+	await page.screenshot({
+		path: `test-results/draft-attachments/transcript-${sessionId}.png`,
+		animations: "disabled",
+	});
+	report["imageSource"] = await image.getAttribute("src");
+	withStore(harness, (db) => {
+		db.exec("PRAGMA foreign_keys = OFF");
+		db.prepare("DELETE FROM attachment_blobs WHERE hash = ?").run(hash);
+	});
+	try {
+		await page.reload();
+		await expect(
+			page
+				.getByTestId("user-message-attachments")
+				.getByText("image unavailable", {
+					exact: true,
+				}),
+		).toBeVisible();
+		await page.screenshot({
+			path: `test-results/draft-attachments/unavailable-${sessionId}.png`,
+			animations: "disabled",
+		});
+		report["missingBlobPlaceholder"] = "image unavailable";
+	} finally {
+		withStore(harness, (db) =>
+			db
+				.prepare(
+					"INSERT OR IGNORE INTO attachment_blobs (hash, mime, size, bytes, created_at) VALUES (?, ?, ?, ?, ?)",
+				)
+				.run(hash, "image/png", imageBytes.length, imageBytes, Date.now()),
+		);
+	}
+});
+
+test("attachment HTTP route enforces auth, hash validation and immutable safe headers", async ({
+	harness,
+	page,
+	report,
+}) => {
+	test.setTimeout(120_000);
+	report["bead"] = "mryl.10";
+	const browser = await harness.connect();
+	const sessionId = await browser.createSession("Attachment HTTP headers");
+	const textBytes = Buffer.from("attachment route text file\n");
+	const textHash = createHash("sha256")
+		.update("text/plain\0")
+		.update(textBytes)
+		.digest("hex");
+	expect(
+		await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId,
+				originId: browser.originId,
+				inputId: randomUUID(),
+				text: "attachment-http-proof",
+				delivery: "queue",
+				images: [
+					dataUrl,
+					`data:text/plain;base64,${textBytes.toString("base64")}`,
+				],
+			}),
+		),
+	).toMatchObject({ ok: true });
+	await expect
+		.poll(() =>
+			withStore(harness, (db) =>
+				Number(
+					db.prepare("SELECT COUNT(*) AS count FROM attachment_blobs").get()?.[
+						"count"
+					],
+				),
+			),
+		)
+		.toBe(2);
+	await harness.requestRpc({ _tag: "SetPin", pin: "4826" });
+	const url = `${harness.baseUrl}/p/process-test/attachments/${hash}`;
+	const unauthenticated = await fetch(url, { redirect: "manual" });
+	expect(unauthenticated.status).toBe(401);
+	report["unauthenticatedStatus"] = unauthenticated.status;
+	await page.goto(harness.baseUrl);
+	const pin = page.getByPlaceholder("PIN (4-8 digits)", { exact: true });
+	await expect(pin).toBeVisible();
+	await pin.fill("4826");
+	await pin.press("Enter");
+	await expect(pin).toHaveCount(0);
+	const responses: Record<string, unknown>[] = [];
+	for (const [attachmentHash, mime, disposition, bytes] of [
+		[hash, "image/png", "inline", imageBytes],
+		[textHash, "text/plain", "attachment", textBytes],
+	] as const) {
+		const response = await page.request.get(
+			`${harness.baseUrl}/p/process-test/attachments/${attachmentHash}`,
+			{ maxRedirects: 0 },
+		);
+		expect(response.status()).toBe(200);
+		const headers = response.headers();
+		expect(headers["content-type"]).toBe(mime);
+		expect(headers["cache-control"]).toBe(
+			"private, max-age=31536000, immutable",
+		);
+		expect(headers["x-content-type-options"]).toBe("nosniff");
+		expect(headers["content-security-policy"]).toBe("sandbox");
+		expect(headers["content-disposition"]).toBe(disposition);
+		expect(await response.body()).toEqual(bytes);
+		responses.push({ attachmentHash, status: response.status(), headers });
+	}
+	report["responses"] = responses;
+	const missing: Record<string, unknown>[] = [];
+	for (const candidate of ["a".repeat(64), hash.toUpperCase(), "invalid", ""]) {
+		const response = await page.request.get(
+			`${harness.baseUrl}/p/process-test/attachments/${candidate}`,
+			{ maxRedirects: 0 },
+		);
+		expect(response.status()).toBe(404);
+		missing.push({ candidate, status: response.status() });
+	}
+	report["missingAndMalformed"] = missing;
+});
+
+test("fork images survive parent retention and restart and are swept after the fork is deleted", async ({
+	harness,
+	page,
+	report,
+}) => {
+	test.setTimeout(180_000);
+	report["bead"] = "mryl.10";
+	const browser = await harness.connect();
+	const sessionId = await browser.createSession("Attachment fork parent");
+	const inputId = randomUUID();
+	expect(
+		await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId,
+				originId: browser.originId,
+				inputId,
+				text: "attachment-fork-proof",
+				delivery: "queue",
+				images: [dataUrl],
+			}),
+		),
+	).toMatchObject({ ok: true });
+	await expectTerminalScrub(harness, inputId);
+	const fork = await Effect.runPromise(
+		browser.rpc.ForkSession({ sessionId, originId: browser.originId }),
+	);
+	expect(fork.forkedFrom).toBe(sessionId);
+	report["parentSessionId"] = sessionId;
+	report["forkSessionId"] = fork.sessionId;
+	const bound = withStore(harness, (db) =>
+		Number(
+			db
+				.prepare(
+					"SELECT MAX(sequence) AS bound FROM events WHERE session_id = ? AND type IN ('session.created', 'session.forked')",
+				)
+				.get(fork.sessionId)?.["bound"],
+		),
+	);
+	expect(bound).toBeGreaterThan(0);
+	// This turn is newer than the fork. Retention must actually remove it,
+	// while the inherited event prefix remains held by the live fork.
+	const tailInput = randomUUID();
+	expect(
+		await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId,
+				originId: browser.originId,
+				inputId: tailInput,
+				text: "attachment-parent-retention-tail",
+				delivery: "queue",
+			}),
+		),
+	).toMatchObject({ ok: true });
+	await expectTerminalScrub(harness, tailInput);
+	const tailEvents = () =>
+		withStore(harness, (db) =>
+			db
+				.prepare(
+					"SELECT type FROM events WHERE session_id = ? AND sequence > ? AND type NOT IN ('session.deleted', 'session.provider_cleanup_failed')",
+				)
+				.all(sessionId, bound),
+		);
+	expect(tailEvents().length).toBeGreaterThan(0);
+	await browser.deleteSession(sessionId);
+	await expect.poll(tailEvents, { timeout: 30_000 }).toEqual([]);
+	report["parentTailRetainedAfterDrain"] = tailEvents();
+	await harness.kill();
+	await harness.restart({ keepPort: true });
+	const app = new AppPage(page);
+	await app.goto(`${harness.baseUrl}/s/${fork.sessionId}?p=process-test`);
+	// The inherited prefix renders collapsed under "Prior conversation".
+	await page.getByRole("button", { name: "Prior conversation" }).click();
+	const image = page.getByTestId("user-message-attachments").locator("img");
+	await expect(image).toHaveAttribute(
+		"src",
+		`/p/process-test/attachments/${hash}`,
+	);
+	await expect
+		.poll(() =>
+			image.evaluate(
+				(element: HTMLImageElement) =>
+					element.complete && element.naturalWidth > 0,
+			),
+		)
+		.toBe(true);
+	await page.screenshot({
+		path: `test-results/draft-attachments/fork-after-parent-retention-${fork.sessionId}.png`,
+		animations: "disabled",
+	});
+	report["forkImageSourceAfterRestart"] = await image.getAttribute("src");
+	const restarted = await harness.connect();
+	await restarted.deleteSession(fork.sessionId);
+	const remainingHistory = () =>
+		withStore(harness, (db) =>
+			db
+				.prepare(
+					"SELECT session_id, type FROM events WHERE session_id IN (?, ?) AND type NOT IN ('session.deleted', 'session.provider_cleanup_failed')",
+				)
+				.all(sessionId, fork.sessionId),
+		);
+	await expect.poll(remainingHistory, { timeout: 30_000 }).toEqual([]);
+	report["historyAfterBothRetentionDrains"] = remainingHistory();
+	expect(
+		withStore(harness, (db) =>
+			db.prepare("SELECT hash FROM attachment_blobs WHERE hash = ?").all(hash),
+		),
+	).toHaveLength(1);
+	await harness.kill();
+	await harness.restart({ keepPort: true });
+	const remainingBlobs = withStore(harness, (db) =>
+		db.prepare("SELECT hash FROM attachment_blobs WHERE hash = ?").all(hash),
+	);
+	expect(remainingBlobs).toEqual([]);
+	report["blobsAfterFinalRestart"] = remainingBlobs;
+});
+
+test.describe("OpenCode attachment ingress", () => {
+	test.use({
+		harnessOptions: {
+			restartProof: true,
+			managedOpenCode: true,
+			managedOpenCodeId: MANAGED_OPENCODE_ACCOUNT_ID,
+		},
+	});
+
+	test("echoed images reuse identical content and keep changed bytes as another ref", async ({
+		harness,
+		report,
+	}) => {
+		test.setTimeout(120_000);
+		report["bead"] = "mryl.10";
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession(
+			"OpenCode image echo",
+			MANAGED_OPENCODE_ACCOUNT_ID,
+			"opencode",
+		);
+		writeFileSync(join(harness.configDir, "fake-opencode-hold-turn"), "hold");
+		const inputId = randomUUID();
+		expect(
+			await Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId,
+					originId: browser.originId,
+					inputId,
+					text: "opencode-attachment-echo-proof",
+					delivery: "queue",
+					images: [dataUrl],
+				}),
+			),
+		).toMatchObject({ ok: true });
+		const sentPrompt = () =>
+			harness
+				.opencodeRequestBodies()
+				.find(({ path }) => path === `/session/${sessionId}/prompt_async`);
+		await expect.poll(sentPrompt, { timeout: 30_000 }).toBeDefined();
+		const prompt = JSON.parse(sentPrompt()?.body ?? "{}") as {
+			messageID?: string;
+			parts?: { type: string; url?: string }[];
+		};
+		if (!prompt.messageID) throw new Error("OpenCode send has no messageID");
+		expect(prompt.parts?.find((part) => part.type === "file")?.url).toBe(
+			dataUrl,
+		);
+		const messageId = prompt.messageID;
+		await harness.emitOpenCodeEvent({
+			directory: harness.projectDir,
+			payload: {
+				id: randomUUID(),
+				type: "message.updated",
+				properties: {
+					info: {
+						id: messageId,
+						sessionID: sessionId,
+						role: "user",
+						time: { created: Date.now() },
+					},
+				},
+			},
+		});
+		// The stand-in echoes another PNG encoding. Its hash must follow those
+		// actual bytes, rather than assuming that a provider preserves the upload.
+		const changedBytes = Buffer.from(
+			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+			"base64",
+		);
+		const changedDataUrl = `data:image/png;base64,${changedBytes.toString("base64")}`;
+		const changedHash = createHash("sha256")
+			.update("image/png\0")
+			.update(changedBytes)
+			.digest("hex");
+		const echoes: Record<string, unknown>[] = [];
+		for (const [partId, echoUrl, expectedHash, expectedBlobCount] of [
+			["echo-original", dataUrl, hash, 1],
+			["echo-reencoded", changedDataUrl, changedHash, 2],
+		] as const) {
+			await harness.emitOpenCodeEvent({
+				directory: harness.projectDir,
+				payload: {
+					id: randomUUID(),
+					type: "message.part.updated",
+					properties: {
+						part: {
+							id: partId,
+							messageID: messageId,
+							sessionID: sessionId,
+							type: "file",
+							mime: "image/png",
+							url: echoUrl,
+							filename: `${partId}.png`,
+						},
+					},
+				},
+			});
+			const eventRow = () =>
+				withStore(harness, (db) =>
+					db
+						.prepare(
+							"SELECT data FROM events WHERE session_id = ? AND type = 'file.attached' AND json_extract(data, '$.partId') = ?",
+						)
+						.get(sessionId, partId),
+				);
+			await expect.poll(eventRow, { timeout: 30_000 }).toBeDefined();
+			const event = JSON.parse(String(eventRow()?.["data"])) as Record<
+				string,
+				unknown
+			>;
+			expect(event["source"]).toMatchObject({
+				attachmentHash: expectedHash,
+				mime: "image/png",
+			});
+			expect(event).not.toHaveProperty("url");
+			expect(JSON.stringify(event)).not.toContain("data:");
+			const blobs = withStore(harness, (db) =>
+				db
+					.prepare(
+						"SELECT hash, mime, size FROM attachment_blobs ORDER BY hash",
+					)
+					.all(),
+			);
+			expect(blobs).toHaveLength(expectedBlobCount);
+			expect(blobs).toContainEqual({
+				hash: expectedHash,
+				mime: "image/png",
+				size: expectedHash === hash ? imageBytes.length : changedBytes.length,
+			});
+			echoes.push({ event, blobs });
+		}
+		report["echoes"] = echoes;
+		report["realOpenCodeObservation"] =
+			"Stand-in only; real OpenCode mime and bytes were not observed.";
+		await harness.setOpenCodeStatus(harness.projectDir, sessionId, {
+			type: "idle",
+		});
+	});
+
+	test("REST snapshots and reconnect backfill replace data file parts in every saved copy", async ({
+		harness,
+		page,
+		report,
+	}) => {
+		test.setTimeout(120_000);
+		report["bead"] = "mryl.10";
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession(
+			"OpenCode snapshot attachments",
+			MANAGED_OPENCODE_ACCOUNT_ID,
+			"opencode",
+		);
+		const created = Date.now();
+		const messageId = "snapshot-image-user";
+		const history = (name: string) => [
+			{
+				info: {
+					id: messageId,
+					sessionID: sessionId,
+					role: "user",
+					time: { created },
+					agent: "build",
+					model: { providerID: "fake", modelID: "fake-model" },
+				},
+				parts: [
+					{
+						id: "snapshot-image-file",
+						messageID: messageId,
+						sessionID: sessionId,
+						type: "file",
+						mime: "image/png",
+						filename: name,
+						url: dataUrl,
+					},
+				],
+			},
+		];
+		const snapshots = () =>
+			withStore(harness, (db) =>
+				db
+					.prepare(
+						"SELECT data FROM events WHERE session_id = ? AND type = 'message.snapshot' AND json_extract(data, '$.messageId') = ? ORDER BY sequence",
+					)
+					.all(sessionId, messageId),
+			);
+		const copies: Record<string, unknown>[] = [];
+		for (const [index, name] of ["first.png", "reconciled.png"].entries()) {
+			writeFileSync(
+				join(harness.configDir, "fake-opencode-history.json"),
+				JSON.stringify({ [sessionId]: history(name) }),
+			);
+			// Reconnect requests complete REST history, including messages that
+			// were never announced through SSE and later changed snapshots.
+			await harness.closeOpenCodeStreams();
+			await expect
+				.poll(() => snapshots().length, { timeout: 30_000 })
+				.toBe(index + 1);
+			const state = withStore(harness, (db) => ({
+				snapshots: snapshots(),
+				message: db
+					.prepare("SELECT rest_payload FROM messages WHERE id = ?")
+					.get(messageId),
+				parts: db
+					.prepare(
+						"SELECT type, metadata, rest_payload FROM message_parts WHERE message_id = ?",
+					)
+					.all(messageId),
+				blobs: db
+					.prepare("SELECT hash, mime, size FROM attachment_blobs")
+					.all(),
+			}));
+			expect(JSON.stringify(state)).not.toContain("data:");
+			const event = JSON.parse(String(state.snapshots.at(-1)?.["data"])) as {
+				message: { parts: { source?: unknown; url?: unknown }[] };
+			};
+			expect(event.message.parts[0]?.source).toMatchObject(ref);
+			expect(event.message.parts[0]).not.toHaveProperty("url");
+			const saved = JSON.parse(String(state.message?.["rest_payload"])) as {
+				parts: { source?: unknown; filename?: string }[];
+			};
+			expect(saved.parts[0]?.source).toMatchObject(ref);
+			expect(saved.parts[0]?.filename).toBe(name);
+			expect(state.parts).toHaveLength(1);
+			const part = JSON.parse(String(state.parts[0]?.["rest_payload"])) as {
+				source?: unknown;
+			};
+			expect(part.source).toMatchObject(ref);
+			expect(state.blobs).toEqual([
+				{ hash, mime: "image/png", size: imageBytes.length },
+			]);
+			copies.push(state);
+		}
+		report["savedCopies"] = copies;
+		const app = new AppPage(page);
+		await app.goto(`${harness.baseUrl}/s/${sessionId}?p=process-test`);
+		const image = page.getByTestId("user-message-attachments").locator("img");
+		await expect(image).toHaveAttribute(
+			"src",
+			`/p/process-test/attachments/${hash}`,
+		);
+		await expect
+			.poll(() =>
+				image.evaluate(
+					(element: HTMLImageElement) =>
+						element.complete && element.naturalWidth > 0,
+				),
+			)
+			.toBe(true);
+		await page.screenshot({
+			path: `test-results/draft-attachments/opencode-snapshot-${sessionId}.png`,
+			animations: "disabled",
+		});
+		expect(
+			JSON.stringify(browser.frames, (_key, value: unknown) =>
+				typeof value === "bigint" ? value.toString() : value,
+			),
+		).not.toContain("data:image/");
+		report["browserSnapshotsContainInlineImages"] = false;
+	});
 });
 
 test("a missing blob fails dispatch visibly with AttachmentMissing", async ({

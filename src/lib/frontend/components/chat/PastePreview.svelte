@@ -7,6 +7,7 @@
 	import FileAttachmentChip from "../ui/FileAttachmentChip.svelte";
 	import { formatFileSize } from "../../utils/format.js";
 	import type { PendingAttachment } from "../../types.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
 
 	let {
 		images,
@@ -26,8 +27,9 @@
 			style="-webkit-overflow-scrolling: touch"
 		>
 			{#each images as image (image.id)}
-				{#if "dataUrl" in image && image.dataUrl.startsWith("data:image/")}
-				<ImageAttachmentThumb src={image.dataUrl} name={image.name} imageId={image.id} onremove={(event) => {
+				{@const src = "ref" in image ? `/p/${encodeURIComponent(getCurrentSlug() ?? "")}/attachments/${image.ref.attachmentHash}` : image.dataUrl}
+				{#if "ref" in image ? image.ref.mime.startsWith("image/") : image.dataUrl.startsWith("data:image/")}
+				<ImageAttachmentThumb {src} name={image.name} imageId={image.id} onremove={(event) => {
 						event.preventDefault();
 						event.stopPropagation();
 						onRemove(image.id);

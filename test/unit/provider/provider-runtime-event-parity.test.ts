@@ -567,6 +567,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 	});
 
 	it("maps runtime file.attached to durable file.attached", () => {
+		const source = { attachmentHash: "a".repeat(64), mime: "image/png" };
 		const { events } = translateProviderRuntimeEventToDomain(
 			runtimeEvent({
 				eventId: "file-attached",
@@ -576,7 +577,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 					partId: "file-1",
 					mime: "image/png",
 					filename: "screenshot.png",
-					url: "data:image/png;base64,AAAA",
+					source,
 				},
 			}),
 		);
@@ -590,7 +591,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 					partId: "file-1",
 					mime: "image/png",
 					filename: "screenshot.png",
-					url: "data:image/png;base64,AAAA",
+					source,
 				},
 			}),
 		]);

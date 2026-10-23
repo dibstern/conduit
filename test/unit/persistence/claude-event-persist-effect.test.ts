@@ -732,7 +732,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 						messageId: "image-message",
 						partId: "image-part",
 						mime: "image/png",
-						url: "data:image/png;base64,aW1hZ2U=",
+						source: { url: "https://example.com/image.png" },
 					}),
 				);
 				yield* persist.persistUserMessage(sessionId, "Hello", {
@@ -757,7 +757,7 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 							messageId: "image-message",
 							partId: "image-part",
 							mime: "image/png",
-							url: "data:image/png;base64,aW1hZ2U=",
+							source: { url: "https://example.com/image.png" },
 						},
 					},
 					{

@@ -41,7 +41,7 @@ it("retains canonical user attachments through reopen, fork, browser history and
 	const layer = () =>
 		Layer.fresh(makePersistenceEffectLayer(filename, "test-project"));
 	try {
-		await Effect.runPromise(
+		const refs = await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
 					const persist = yield* ClaudeEventPersistEffectTag;
@@ -67,6 +67,7 @@ it("retains canonical user attachments through reopen, fork, browser history and
 								images: refs,
 							});
 					}
+					return refs;
 				}).pipe(Effect.provide(layer())),
 			),
 		);
@@ -106,16 +107,16 @@ it("retains canonical user attachments through reopen, fork, browser history and
 								(part) => part.type === "file",
 							);
 							expect(
-								files.map(({ filename, mime, url }) => ({
+								files.map(({ filename, mime, source }) => ({
 									filename,
 									mime,
-									url,
+									source,
 								})),
 							).toEqual(
 								attachments.map(({ name, mime }, attachmentIndex) => ({
 									filename: name,
 									mime,
-									url: images[attachmentIndex],
+									source: refs[attachmentIndex],
 								})),
 							);
 						}
@@ -127,9 +128,10 @@ it("retains canonical user attachments through reopen, fork, browser history and
 							["", "See attached"].map((content) =>
 								[
 									...(content ? [content] : []),
-									`Attachment: notes.txt (text/plain, ${attachments[0]?.data.length} bytes)\n${text}`,
-									`Attachment: brief.pdf (application/pdf, ${attachments[1]?.data.length} bytes)`,
-									`Attachment: diagram.png (image/png, ${attachments[2]?.data.length} bytes)`,
+									...attachments.map(
+										({ name, mime, data }) =>
+											`Attachment: ${name} (${mime}, ${data.length} bytes)${mime === "text/plain" ? `\n${text}` : ""}`,
+									),
 								].join("\n"),
 							),
 						);
@@ -152,7 +154,7 @@ it("retains attachment context when canonical parts become OpenCode REST snapsho
 			bytes: Buffer.from("%PDF-1.7\nfixture"),
 		},
 	];
-	const parts = files.map(({ filename, mime, bytes }, index) => ({
+	const providerParts = files.map(({ filename, mime, bytes }, index) => ({
 		id: `message-attachment-${index}`,
 		type: "file",
 		filename,
@@ -164,6 +166,12 @@ it("retains attachment context when canonical parts become OpenCode REST snapsho
 			Effect.gen(function* () {
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const attachmentStore = yield* makeAttachmentStore;
+				const parts = yield* Effect.forEach(providerParts, ({ url, ...part }) =>
+					Effect.map(attachmentStore.put(url), (source) => ({
+						...part,
+						source,
+					})),
+				);
 				const read = yield* ReadQueryEffectTag;
 				const threadRead = yield* makeClaudeThreadRead;
 				const commit = yield* makeCommitAndSignal;
@@ -177,15 +185,18 @@ it("retains attachment context when canonical parts become OpenCode REST snapsho
 				yield* persist.persistUserMessage("opencode-session", "", {
 					messageId: "message",
 					provider: "opencode",
-					images: yield* Effect.forEach(parts, ({ url }) =>
-						attachmentStore.put(url),
-					),
+					images: parts.map(({ source }) => source),
 				});
 				const before = yield* threadRead("opencode-session", { limit: 20 });
 				expect(
 					"items" in before && before.items.map(({ text: content }) => content),
 				).toEqual([
-					`Attachment: notes.txt (text/plain, ${files[0]?.bytes.length} bytes)\n${text}\nAttachment: brief.pdf (application/pdf, ${files[1]?.bytes.length} bytes)`,
+					files
+						.map(
+							({ filename, mime, bytes }) =>
+								`Attachment: ${filename} (${mime}, ${bytes.length} bytes)${mime === "text/plain" ? `\n${text}` : ""}`,
+						)
+						.join("\n"),
 				]);
 				yield* persist.persistEvent(
 					canonicalEvent(

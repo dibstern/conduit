@@ -1943,7 +1943,7 @@ describe("MessageProjector", () => {
 					partId: "file1",
 					mime: "image/png",
 					filename: "screenshot.png",
-					url: "data:image/png;base64,AAAA",
+					source: { url: "https://example.com/screenshot.png" },
 				} satisfies FileAttachedPayload,
 				1,
 			);
@@ -1969,7 +1969,7 @@ describe("MessageProjector", () => {
 			expect(JSON.parse(parts[0]?.metadata ?? "{}")).toEqual({
 				mime: "image/png",
 				filename: "screenshot.png",
-				url: "data:image/png;base64,AAAA",
+				source: { url: "https://example.com/screenshot.png" },
 			});
 		});
 	});

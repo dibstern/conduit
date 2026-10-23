@@ -100,14 +100,14 @@ it("retains files in history when queued dispatch cannot place the input and pau
 				const users = history.messages.filter(({ role }) => role === "user");
 				expect(users).toHaveLength(1);
 				expect(
-					users[0]?.parts?.map(({ filename, mime, url }) => ({
+					users[0]?.parts?.map(({ filename, mime, source }) => ({
 						filename,
 						mime,
-						url,
+						source,
 					})),
 				).toEqual([
-					{ filename: "notes.txt", mime: "text/plain", url: images[0] },
-					{ filename: "guide.pdf", mime: "application/pdf", url: images[1] },
+					{ filename: "notes.txt", mime: "text/plain", source: refs[0] },
+					{ filename: "guide.pdf", mime: "application/pdf", source: refs[1] },
 				]);
 				expect(
 					yield* sql`SELECT input_id FROM pending_inputs WHERE state = 'queued'`,

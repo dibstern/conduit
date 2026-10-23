@@ -17,7 +17,6 @@ import {
 	type PickRejection,
 } from "../../provider/turn-settings.js";
 import { isRecord } from "../../utils.js";
-import { AttachmentMissing, makeAttachmentStore } from "../attachment-store.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -61,8 +60,7 @@ export class ClaudeSessionLifecycleError extends Data.TaggedError(
 
 export type ClaudeEventPersistFailure =
 	| ClaudeEventPersistEffectError
-	| ClaudeSessionLifecycleError
-	| AttachmentMissing;
+	| ClaudeSessionLifecycleError;
 
 export interface ClaudeEventPersistEffect {
 	readonly persistHandoffDelivered: (
@@ -399,7 +397,6 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 	eventStore: UnboundEventStoreEffect & { readonly projectId?: string },
 ) {
 	const sql = yield* SqlClient.SqlClient;
-	const attachments = yield* makeAttachmentStore;
 	const requireUndeletedSession = (
 		sessionId: string,
 		operation: ClaudeSessionLifecycleError["operation"],
@@ -521,8 +518,7 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 		(operation: string) =>
 		(cause: unknown): ClaudeEventPersistFailure =>
 			cause instanceof ClaudeEventPersistEffectError ||
-			cause instanceof ClaudeSessionLifecycleError ||
-			cause instanceof AttachmentMissing
+			cause instanceof ClaudeSessionLifecycleError
 				? cause
 				: new ClaudeEventPersistEffectError({ operation, cause });
 
@@ -732,18 +728,6 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 					? []
 					: (options?.images ?? [])
 				).entries()) {
-					const blob = yield* attachments
-						.get(ref.attachmentHash)
-						.pipe(
-							Effect.catchTag("AttachmentMissing", (error) =>
-								options?.failure
-									? Effect.succeed(undefined)
-									: Effect.fail(error),
-							),
-						);
-					if (!blob) continue;
-					// TODO(conduit-test-mryl.10): remove this temporary ref-to-data-URL mapping.
-					const url = `data:${blob.mime}${ref.name !== undefined ? `;name=${encodeURIComponent(ref.name)}` : ""};base64,${Buffer.from(blob.bytes).toString("base64")}`;
 					events.push(
 						canonicalEvent(
 							"file.attached",
@@ -753,7 +737,7 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 								partId: `${userMsgId}-attachment-${index}`,
 								mime: ref.mime,
 								...(ref.name !== undefined ? { filename: ref.name } : {}),
-								url,
+								source: ref,
 							},
 							{ provider, createdAt: now },
 						),

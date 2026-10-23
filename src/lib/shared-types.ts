@@ -1,6 +1,7 @@
 // Types shared between server and frontend.
 // Imported by src/lib/types.ts (server) and frontend code.
 
+import type { AttachmentSource } from "./contracts/attachment-ref.js";
 import type { SurfacingMark } from "./contracts/category-set.js";
 import {
 	LimitRecoverySchema,
@@ -502,6 +503,8 @@ export interface PtyInfo {
  */
 export interface HistoryMessagePart {
 	id: string;
+	/** Stored file parts carry a blob reference or an external URL. */
+	source?: AttachmentSource;
 	surfacingMark?: SurfacingMark | null | undefined;
 	surfacingOrdinal?: number;
 	surfacingProbabilities?: Record<string, number> | null;

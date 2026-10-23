@@ -1455,7 +1455,7 @@ export const makeMessageProjector = defineProjector(() => ({
 					...(event.data.filename != null
 						? { filename: event.data.filename }
 						: {}),
-					url: event.data.url,
+					source: event.data.source,
 				});
 				yield* sql`
 					INSERT INTO message_parts

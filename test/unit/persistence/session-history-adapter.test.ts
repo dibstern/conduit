@@ -458,7 +458,7 @@ describe("messageRowsToHistory", () => {
 						metadata: JSON.stringify({
 							mime: "image/png",
 							filename: "screenshot.png",
-							url: "data:image/png;base64,AAAA",
+							source: { url: "https://example.com/screenshot.png" },
 						}),
 					}),
 				],
@@ -473,7 +473,7 @@ describe("messageRowsToHistory", () => {
 			type: "file",
 			mime: "image/png",
 			filename: "screenshot.png",
-			url: "data:image/png;base64,AAAA",
+			source: { url: "https://example.com/screenshot.png" },
 		});
 		expect(file).not.toHaveProperty("state");
 	});
