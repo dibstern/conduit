@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Effect, type Scope } from "effect";
 import type { TurnResult } from "../types.js";
 import type { RunnerPayload } from "./runner-payload.js";
+import { currentRunnerProcessId } from "./runner-receipts.js";
 import { RunnerSinkBindings } from "./runner-sink-bindings.js";
 import type {
 	SessionCommand,
@@ -21,9 +22,14 @@ export const makeInProcessSessionRunner = (
 ): Effect.Effect<SessionRunner, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const scope = yield* Effect.scope;
-		const sinks = new RunnerSinkBindings(emit);
+		const processId = randomUUID();
+		const sinks = new RunnerSinkBindings((output) =>
+			emit(output).pipe(
+				Effect.provideService(currentRunnerProcessId, processId),
+			),
+		);
 		const payload = yield* makePayload(sinks);
-		const runner = new InProcessSessionRunner(payload, sinks, scope);
+		const runner = new InProcessSessionRunner(payload, sinks, scope, processId);
 		yield* Effect.addFinalizer(() =>
 			runner.executeEffect({ type: "shutdown" }).pipe(Effect.ignore),
 		);
@@ -33,7 +39,6 @@ export const makeInProcessSessionRunner = (
 /** Executes sends concurrently: only the payload decides how a steer is admitted. */
 export class InProcessSessionRunner implements SessionRunner {
 	private readonly sessions = new Set<string>();
-	private readonly processId = randomUUID();
 	getControlProcessIdEffect(
 		sessionId: string,
 	): Effect.Effect<string | undefined> {
@@ -45,13 +50,16 @@ export class InProcessSessionRunner implements SessionRunner {
 		private readonly payload: RunnerPayload,
 		private readonly sinks: RunnerSinkBindings,
 		private readonly scope: Scope.Scope,
+		private readonly processId: string,
 	) {}
 	hasLiveProcessEffect(
 		sessionId: string,
 		processId?: string,
 	): Effect.Effect<boolean> {
 		return Effect.sync(
-			() => processId === undefined && this.sessions.has(sessionId),
+			() =>
+				(processId === undefined || processId === this.processId) &&
+				this.sessions.has(sessionId),
 		);
 	}
 	hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
