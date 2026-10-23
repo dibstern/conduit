@@ -273,6 +273,9 @@ const waitForIdle = (
 			.toBe(true);
 	});
 
+// A dirty refresh runs status, then a diff for its line totals.
+const dirtyRefresh = 2;
+
 // A due read does async filesystem checks before it spawns git, which can
 // outlast waitForIdle's quiet window under load. Wait for the spawn itself.
 const waitForSpawns = (
@@ -442,7 +445,7 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 			expect((yield* f.metrics).spawnCount).toBe(before);
 			yield* TestClock.adjust(1_000);
 			yield* settle;
-			yield* waitForSpawns(f.metrics, before + 1);
+			yield* waitForSpawns(f.metrics, before + dirtyRefresh);
 			expect(yield* f.service.read("one")).toMatchObject({ dirty: true });
 		}),
 	);
@@ -565,7 +568,9 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				);
 				yield* waitForIdle(f.metrics);
 				expect(yield* f.service.read("one")).toMatchObject({ dirty: true });
-				expect((yield* f.metrics).spawnCount - before.spawnCount).toBe(1);
+				expect((yield* f.metrics).spawnCount - before.spawnCount).toBe(
+					dirtyRefresh,
+				);
 			}),
 	);
 	it.effect("never spawns on unknown or warm RPC list reads", () =>
@@ -628,7 +633,7 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 			expect((yield* f.metrics).spawnCount).toBe(completed);
 			yield* TestClock.adjust(1_000);
 			yield* settle;
-			yield* waitForSpawns(f.metrics, completed + 1);
+			yield* waitForSpawns(f.metrics, completed + dirtyRefresh);
 		}),
 	);
 	for (const hintFirst of [true, false])
@@ -683,7 +688,7 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 					);
 					yield* TestClock.adjust(1_000);
 					yield* settle;
-					yield* waitForSpawns(f.metrics, completed + 1);
+					yield* waitForSpawns(f.metrics, completed + dirtyRefresh);
 				}),
 		);
 	it.effect("publishes secondary-folder changes with the session version", () =>

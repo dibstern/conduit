@@ -246,7 +246,7 @@ export const makeSessionGitReader = () => {
 				"status",
 				"--porcelain=v2",
 				"--branch",
-				"--untracked-files=normal",
+				"--untracked-files=all",
 			]).catch((error: { reason?: string; stdout?: string }) =>
 				error.reason === "output-limit" ? error.stdout : undefined,
 			);
@@ -293,11 +293,31 @@ export const makeSessionGitReader = () => {
 					: undefined;
 			const operation = operationAt(gitDir);
 			const counts = header("branch.ab")?.match(/^\+(\d+) -(\d+)$/);
+			const upstream = header("branch.upstream");
+			const changed = lines.filter((line) => /^[12u?] /.test(line)).length;
+			const shortstat =
+				changed && born
+					? await git(directory, runner, "diff", "HEAD", "--shortstat", "--")
+					: undefined;
 			const result: SessionGit = {
 				...(branch ? { branch } : {}),
 				...(head ? { head } : {}),
+				...(born ? { oid } : {}),
+				...(upstream ? { upstream } : {}),
 				...(worktree ? { worktree } : {}),
-				dirty: lines.some((line) => line !== "" && !line.startsWith("#")),
+				dirty: changed > 0,
+				// Untracked files add no lines; changed is a lower bound if status hit the output limit.
+				...(changed
+					? {
+							changes: {
+								files: changed,
+								insertions: Number(
+									shortstat?.match(/(\d+) insertion/)?.[1] ?? 0,
+								),
+								deletions: Number(shortstat?.match(/(\d+) deletion/)?.[1] ?? 0),
+							},
+						}
+					: {}),
 				...(counts
 					? { ahead: Number(counts[1]), behind: Number(counts[2]) }
 					: {}),

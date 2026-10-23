@@ -342,19 +342,21 @@ describe("listDaemonSessions", () => {
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`INSERT INTO session_git_published (directory, git, version)
-				VALUES (${realpathSync(gitProject)}, ${JSON.stringify({ branch: "main", dirty: true })}, 1)`;
+				VALUES (${realpathSync(gitProject)}, ${JSON.stringify({ branch: "main", dirty: true, changes: { files: 1, insertions: 0, deletions: 0 } })}, 1)`;
 			const result = yield* listDaemonSessions();
 			expect(
 				result.sessions.find((session) => session.id === "git-session")?.git,
 			).toEqual({
 				branch: "main",
 				dirty: true,
+				changes: { files: 1, insertions: 0, deletions: 0 },
 				folders: [
 					{
 						root: gitProject,
 						label: "git-project",
 						branch: "main",
 						dirty: true,
+						changes: { files: 1, insertions: 0, deletions: 0 },
 					},
 				],
 			});

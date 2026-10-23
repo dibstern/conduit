@@ -109,4 +109,22 @@ describe("input draft follower", () => {
 			text: "other tab draft",
 		});
 	});
+
+	it("passes the restored fragment to the composer", () => {
+		applyInputDraft(
+			{
+				_tag: "draft",
+				text: "refused message\n\nsynced draft",
+				restored: "refused message",
+			},
+			{ session: "s1" },
+		);
+
+		expect(inputSyncState.received).toEqual({
+			_tag: "ServerTextReceived",
+			key: { session: "s1" },
+			text: "refused message\n\nsynced draft",
+			restored: "refused message",
+		});
+	});
 });

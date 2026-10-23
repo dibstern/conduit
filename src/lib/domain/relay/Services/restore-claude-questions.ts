@@ -39,7 +39,7 @@ export const restoreClaudeQuestionsFromStore = Effect.gen(function* () {
 					? { providerRequestId: row.provider_request_id }
 					: {}),
 				sessionId: row.session_id,
-				toolCallId: row.call_id ?? row.id,
+				...(row.call_id ? { toolCallId: row.call_id } : {}),
 				partId: row.id,
 				messageId: row.message_id,
 				providerId: "claude",

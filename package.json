@@ -73,6 +73,7 @@
 		"acceptance:mutation:visual": "sh scripts/acceptance-mutation-visual.sh",
 		"storybook": "storybook dev -p 6006",
 		"storybook:build": "storybook build -o dist/storybook",
+		"artifact:spec-vs-app": "node scripts/spec-vs-app.mjs",
 		"test:storybook-visual": "pnpm storybook:build && pnpm exec playwright test --config test/visual/playwright.config.ts",
 		"test:storybook-visual:strict": "VISUAL_STRICT=1 pnpm test:storybook-visual",
 		"test:storybook-visual:update": "pnpm storybook:build && pnpm exec playwright test --config test/visual/playwright.config.ts --update-snapshots",
