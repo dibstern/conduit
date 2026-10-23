@@ -294,7 +294,12 @@ describe("createProjectRelay override-state defaults", () => {
 			opencodeUrl: "http://127.0.0.1:9",
 			projectDir: process.cwd(),
 			slug: "test-aborted-relay",
-			persistenceDbPath: join(tmpdir(), "conduit-aborted-relay.db"),
+			// A fresh directory per run: a shared path inherits stale databases
+			// from other branches, which fail with PersistenceError first.
+			persistenceDbPath: join(
+				mkdtempSync(join(tmpdir(), "conduit-aborted-relay-")),
+				"events.db",
+			),
 			publishGlobalSetting: () => Effect.void,
 			signal: controller.signal,
 			log: createSilentLogger(),
