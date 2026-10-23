@@ -5,10 +5,23 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Effect } from "effect";
+import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
+import { Effect, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/account-directory.js";
-import { indexedAttachmentColumns } from "../../helpers/attachment-catalogue.js";
+import {
+	assertAttachmentCatalogue,
+	indexedAttachmentColumns,
+} from "../../helpers/attachment-catalogue.js";
+import {
+	projectStoreBackup,
+	sourceChecksums,
+} from "../../helpers/daemon-store-import-manifest.js";
 import { responseChunks } from "../../helpers/fake-claude-process-sdk.js";
+import {
+	createLegacyInlineAttachmentStore,
+	legacyImageRef,
+} from "../../helpers/legacy-inline-attachment-store.js";
 import type { ProcessHarness } from "../../helpers/process-harness.js";
 import {
 	expect,
@@ -147,6 +160,93 @@ const test = harnessTest.extend<{ report: Record<string, unknown> }>({
 
 test.use({ harnessOptions: { restartProof: true } });
 test.describe.configure({ retries: 0 });
+
+test("runtime registration imports a legacy inline image and renders it through the attachment route", async ({
+	harness,
+	page,
+	report,
+}, testInfo) => {
+	test.setTimeout(120_000);
+	report["bead"] = "conduit-test-mryl.11";
+	const projectId = "legacy-inline-project";
+	const folder = join(harness.root, projectId);
+	const sourcePath = join(folder, ".conduit", "events.db");
+	const source = await createLegacyInlineAttachmentStore(
+		harness.root,
+		projectId,
+		{ sourcePath, unprojected: true },
+	);
+	const db = new DatabaseSync(sourcePath);
+	try {
+		// This history has no pending work. Registration only needs to import it.
+		db.exec(
+			"DELETE FROM provider_command_outbox; DELETE FROM pending_inputs; DELETE FROM events WHERE type = 'input.admitted'",
+		);
+	} finally {
+		db.close();
+	}
+	const before = sourceChecksums(sourcePath);
+	report["sourceBefore"] = before;
+	const control = await harness.connect();
+	const saved = await Effect.runPromise(
+		control.rpc.SaveProject({ folders: [folder] }),
+	);
+	expect(saved.savedSlug).toBe(projectId);
+	report["registeredProject"] = saved.savedSlug;
+	// Registration rewrites .conduit/events.db into project storage, imports
+	// that copy (leaving its backup there) and archives the untouched original.
+	projectStoreBackup(harness.legacyProjectStorePath(projectId));
+	const after = sourceChecksums(`${sourcePath}.migrated`);
+	expect(after).toEqual(before);
+	report["sourceArchiveAfter"] = after;
+	await new AppPage(page).goto(`${harness.baseUrl}/s/${source.sessionId}`);
+	const route = `/p/${saved.savedSlug}/attachments/${legacyImageRef.attachmentHash}`;
+	const image = page.locator(`.msg-user img[src='${route}']`).first();
+	await expect(image).toBeVisible();
+	await expect
+		.poll(() =>
+			image.evaluate(
+				(element: HTMLImageElement) =>
+					element.complete && element.naturalWidth > 0,
+			),
+		)
+		.toBe(true);
+	const response = await page.request.get(`${harness.baseUrl}${route}`);
+	expect(response.status()).toBe(200);
+	expect(response.headers()["content-type"]).toBe("image/png");
+	expect(await response.body()).toEqual(imageBytes);
+	report["image"] = {
+		route,
+		status: response.status(),
+		decoded: true,
+		bytes: (await response.body()).length,
+	};
+	report["importedUses"] = withStore(harness, (store) =>
+		store
+			.prepare(
+				"SELECT * FROM attachment_uses WHERE hash = ? ORDER BY source_table, source_column, source_row_key",
+			)
+			.all(legacyImageRef.attachmentHash),
+	);
+	expect(report["importedUses"]).not.toEqual([]);
+	const catalogue = await Effect.runPromise(
+		assertAttachmentCatalogue.pipe(
+			Effect.provide(
+				SqliteNode.layer({
+					filename: harness.daemonStorePath(),
+					readonly: true,
+				}).pipe(Layer.provide(Reactivity.layer)),
+			),
+			Effect.scoped,
+		),
+	);
+	report["importCatalogueViolations"] = catalogue;
+	expect(catalogue).toEqual([]);
+	await page.screenshot({
+		path: testInfo.outputPath("legacy-inline-import.png"),
+		fullPage: true,
+	});
+});
 
 function holdClaims(harness: ProcessHarness, sessionId: string): void {
 	withStore(harness, (db) => {

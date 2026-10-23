@@ -19,7 +19,12 @@ import {
 import { basename, join, resolve, sep } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
-import { Data, Effect } from "effect";
+import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
+import { Data, Effect, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
+import { AttachmentStoreTag } from "../../domain/persistence/Services/attachment-store.js";
+import { makeAttachmentStore } from "../attachment-store.js";
 import {
 	makePersistenceEffectLayer,
 	makePersistenceStoreLayer,
@@ -30,6 +35,10 @@ import { ProjectionRunnerEffectTag } from "../effect/projection-runner-effect.js
 import { createAllEffectProjectors } from "../effect/projectors-effect.js";
 import { inputDraftClaimMarker } from "../input-drafts.js";
 import { daemonStorePath } from "../project-storage.js";
+import {
+	type AttachmentNormalisationSummary,
+	normaliseInlineAttachments,
+} from "./normalise-inline-attachments.js";
 
 export interface ProjectStoreSource {
 	readonly projectId: string;
@@ -85,6 +94,7 @@ export interface ProjectStoreImportResult {
 	readonly error?: DaemonStoreImportError;
 	readonly backup?: string;
 	readonly backupError?: DaemonStoreImportError;
+	readonly attachmentNormalisation?: AttachmentNormalisationSummary;
 }
 
 const copiedTables = [
@@ -1195,9 +1205,29 @@ function withNormalisedSource(
 					}
 					return before;
 				});
-				yield* Effect.gen(function* () {
+				const attachmentNormalisation = yield* Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const destination = daemonStorePath(configDir);
+					// A seed promotes this copy, so its blobs already live at their
+					// destination. Runtime imports put directly into the shared store.
+					const summary = existsSync(destination)
+						? yield* Effect.gen(function* () {
+								return yield* normaliseInlineAttachments(
+									sql,
+									yield* makeAttachmentStore,
+								);
+							}).pipe(
+								Effect.provide(
+									SqliteNode.layer({
+										filename: destination,
+										busyTimeout: 5000,
+									}).pipe(Layer.provide(Reactivity.layer)),
+								),
+							)
+						: yield* normaliseInlineAttachments(sql, yield* AttachmentStoreTag);
 					const runner = yield* ProjectionRunnerEffectTag;
 					if (!(yield* runner.isRecovered())) yield* runner.recover();
+					return summary;
 				}).pipe(
 					Effect.provide(
 						makePersistenceEffectLayer(copyPath, project.projectId),
@@ -1219,7 +1249,7 @@ function withNormalisedSource(
 					} finally {
 						copy.close();
 					}
-					return use(copyPath, before);
+					return { ...use(copyPath, before), attachmentNormalisation };
 				});
 			}),
 		(copyPath) =>
@@ -1497,6 +1527,13 @@ export function formatDaemonStoreImportReport(
 					: `, ${result.importedEvents} events`) +
 				(result.sharedSessions?.length
 					? `, shared sessions left out: ${result.sharedSessions.join(",")}`
+					: "") +
+				(result.attachmentNormalisation &&
+				(Object.values(result.attachmentNormalisation.rowsChanged).some(
+					(count) => count > 0,
+				) ||
+					result.attachmentNormalisation.rowsSkipped > 0)
+					? `, attachments ${JSON.stringify(result.attachmentNormalisation)}`
 					: "") +
 				(result.error
 					? `, error ${result.error.kind}: ${result.error.message}`
