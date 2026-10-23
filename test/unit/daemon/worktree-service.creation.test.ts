@@ -422,8 +422,15 @@ describe("daemon Worktree service", () => {
 	});
 
 	it("lets a large checkout outlast the timeout for quick git commands", async () => {
-		const executable = gitWrapper(
-			`if (args.includes("worktree") && args.includes("add")) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_500);\n${context.runRealGit}\nprocess.exit(result.status ?? 1);`,
+		const executable = join(context.fixture, "slow-checkout-git");
+		// Node startup can consume the deliberately short preflight budget under load.
+		writeFileSync(
+			executable,
+			`#!/bin/sh
+case " $* " in *" worktree add "*) sleep 1.5 ;; esac
+exec '${context.actualGit.replaceAll("'", "'\\''")}' "$@"
+`,
+			{ mode: 0o755 },
 		);
 		const created = await Effect.runPromise(
 			createEffect(undefined, {
