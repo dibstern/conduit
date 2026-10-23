@@ -21,6 +21,10 @@ import { beforeAll, describe, expect, it } from "vitest";
  * story name claims), recapture, and delete the line.
  */
 const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
+	"overlays-surfacingcategories--counts-unavailable | overlays-surfacingcategories--live-refresh | overlays-surfacingcategories--retire-restore | overlays-surfacingcategories--session-counts":
+		"876c6e84: Retry counts recovers, LiveRefresh finishes its refresh, and RetireRestore restores Ask; all finish by asserting SessionCounts, so their desktop terminal frame is identical",
+	"overlays-surfacingcategories--counts-unavailable | overlays-surfacingcategories--live-refresh | overlays-surfacingcategories--session-counts":
+		"876c6e84: successful retry and completed refresh finish at SessionCounts; RetireRestore differs on phone because its interaction scrolls to the restored category",
 	"ui-sessionstatusglyph--running | ui-sessionstatusglyph--running-header":
 		"capture freezes the running packet to the same frame as the static header, while play() and flow.spec.ts assert their animation states",
 	// Verified legitimate: these interaction stories deliberately re-open the
