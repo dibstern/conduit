@@ -791,7 +791,7 @@
 	{#if phone && phoneControls}
 		<!-- Keep the effort owner mounted so Ctrl+T also works with the sheet closed. -->
 		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant="row" wordLabel={parameters ? parameterEffortWord : undefined}>
-			{#snippet children(effortRow)}
+			{#snippet children(effortRow, effortControl)}
 				{#snippet rows()}
 					<Button
 						variant="composer-row" size="content"
@@ -824,6 +824,7 @@
 					{@render effortRow()}
 				{/snippet}
 				{@render phoneControls(rows, modelTrigger)}
+				{#if variant === "icons"}{@render effortControl()}{/if}
 			{/snippet}
 		</ModelVariant>
 	{:else}

@@ -80,7 +80,7 @@ export function makeCursorProviderRuntime(
 							sessionId,
 							input: snapshot.input,
 						}),
-						sameAccountLogin: () => true,
+						loginChange: () => "None",
 						recoverCommands: makeRunnerCommandRecovery({
 							driverKind: "cursor",
 							accounts: deps.accounts,

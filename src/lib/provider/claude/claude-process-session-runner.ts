@@ -5,7 +5,7 @@ import { connectClaudeRunner } from "./claude-runner-connection.js";
 import { recoverClaudeRunnerCommands } from "./claude-runner-recovery.js";
 import { CLAUDE_SETTINGS_REPLAY_DEFERRED } from "./claude-runner-settings.js";
 import { normalizeClaudeLaunchInput } from "./claude-runner-wire.js";
-import { sameClaudeLogin } from "./claude-sdk-env.js";
+import { claudeLoginChange } from "./claude-sdk-env.js";
 
 export { stopRegisteredRunners as stopRegisteredClaudeRunners } from "../runner/process-session-runner.js";
 
@@ -65,8 +65,8 @@ export const makeProcessClaudeSessionRunner = (
 					settingsSnapshot: snapshot,
 				};
 			},
-			sameAccountLogin: (a, b) =>
-				sameClaudeLogin(
+			loginChange: (a, b) =>
+				claudeLoginChange(
 					{
 						...a,
 						root: a.root,

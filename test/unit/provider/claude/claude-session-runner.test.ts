@@ -71,6 +71,49 @@ it("rejects an account snapshot without a routable Claude default", () => {
 });
 
 describe("Claude runner idle exit", () => {
+	it("excludes only the current send from rebind quiescence", () => {
+		let heldWork = false;
+		const idle = makeRunnerIdleExit(
+			vi.fn(),
+			null,
+			undefined,
+			null,
+			() => heldWork,
+		);
+		try {
+			idle.beginTurn();
+			expect(idle.quiescent).toBe(false);
+			expect(idle.isQuiescent(1)).toBe(true);
+			idle.beginTurn();
+			expect(idle.isQuiescent(1)).toBe(false);
+			idle.endTurn();
+			idle.setTurnInFlight(true);
+			expect(idle.isQuiescent(1)).toBe(false);
+			idle.setTurnInFlight(false);
+			idle.activity({
+				type: "background-task",
+				transition: {
+					sessionId: "session-1",
+					kind: "snapshot",
+					tasks: [{ id: "task-1", type: "local_bash", description: "Task" }],
+				},
+			});
+			expect(idle.isQuiescent(1)).toBe(false);
+			idle.activity({
+				type: "background-task",
+				transition: { sessionId: "session-1", kind: "snapshot", tasks: [] },
+			});
+			heldWork = true;
+			expect(idle.isQuiescent(1)).toBe(false);
+			heldWork = false;
+			expect(idle.isQuiescent(1)).toBe(true);
+			idle.endTurn();
+			expect(idle.quiescent).toBe(true);
+		} finally {
+			idle.close();
+		}
+	});
+
 	it("keeps its admitted policy until the next turn receives a new memory snapshot", () => {
 		vi.useFakeTimers();
 		const onIdle = vi.fn();
@@ -145,6 +188,90 @@ describe("Claude runner idle exit", () => {
 });
 
 describe("in-process Claude session runner", () => {
+	it("delivers a deferred same-account settings change on the live query and rebinds when quiet", async () => {
+		let backgroundBusy = false;
+		const launches: Array<{
+			configDir: ReturnType<typeof configuredClaudeConfigDir>;
+			prompts: string[];
+		}> = [];
+		const queryFactory: NonNullable<
+			ClaudeProviderInstanceDeps["queryFactory"]
+		> = ({ prompt, configDir }) => {
+			const launch: (typeof launches)[number] = { configDir, prompts: [] };
+			launches.push(launch);
+			const stream = (async function* () {
+				for await (const message of prompt) {
+					const content = message.message.content;
+					launch.prompts.push(
+						typeof content === "string"
+							? content
+							: content
+									.filter((part) => part.type === "text")
+									.map((part) => part.text)
+									.join(""),
+					);
+					yield makeSuccessResult();
+				}
+			})();
+			return Object.assign(createMockQuery([]), {
+				[Symbol.asyncIterator]: () => stream,
+			});
+		};
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeClaudeSessionRunner(
+						{
+							daemonConfigDir: getConfigDir(),
+							queryFactory,
+							capabilitiesService,
+							isBackgroundBusy: () => backgroundBusy,
+						},
+						() => Effect.succeed({}),
+					);
+					if (!runner.getNativeSessionEffect)
+						throw new Error("Missing native session lookup");
+					const first = send("turn-1");
+					yield* runner.executeEffect({
+						...first,
+						input: { ...first.input, shellConfig: { interactive: false } },
+					});
+					const deferred = send("turn-2");
+					const configDir = deferred.input.configDir;
+					const input = {
+						...deferred.input,
+						shellConfig: { interactive: true },
+					};
+					backgroundBusy = true;
+					expect(
+						(yield* runner.executeEffect({ ...deferred, input })).status,
+					).toBe("completed");
+					expect(launches).toEqual([
+						{
+							configDir: send("turn-1").input.configDir,
+							prompts: ["turn-1", "turn-2"],
+						},
+					]);
+					expect(
+						yield* runner.getNativeSessionEffect("session-1"),
+					).toMatchObject({
+						configDir: send("turn-1").input.configDir,
+						instanceId: "claude",
+					});
+					backgroundBusy = false;
+					expect(
+						(yield* runner.executeEffect({
+							...send("turn-3"),
+							input: { ...input, inputId: "turn-3", prompt: "turn-3" },
+						})).status,
+					).toBe("completed");
+					expect(launches).toHaveLength(2);
+					expect(launches[1]).toEqual({ configDir, prompts: ["turn-3"] });
+				}),
+			),
+		);
+	});
+
 	it("routes subagent persistence and background bookkeeping through JSON messages", async () => {
 		const outputs: SessionOutput[] = [];
 		const onBackgroundTask = vi.fn();

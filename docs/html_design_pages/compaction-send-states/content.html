@@ -1,0 +1,426 @@
+<tsp-shared>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+@property --p { syntax: '<number>'; inherits: true; initial-value: 92; }
+html {
+  --bg: light-dark(#ffffff, #111113);
+  --surface: light-dark(#ffffff, #1a1a1d);
+  --raised: light-dark(#f7f7f8, #18181b);
+  --turn: light-dark(#f4f4f6, #1a1a1d);
+  --chip: light-dark(rgba(0,0,0,.05), rgba(255,255,255,.07));
+  --text: light-dark(#0b0b0d, #ededf0);
+  --sec: light-dark(#5d5d66, #a1a1aa);
+  --dim: light-dark(#868692, #6e6e77);
+  --accent: light-dark(#4352d2, #8e9bff);
+  --accent-bg: light-dark(rgba(76,91,212,.12), rgba(142,155,255,.14));
+  --border: light-dark(#e3e3e7, #2b2b31);
+  --subtle: light-dark(#eeeef0, #1f1f23);
+  --bubble: light-dark(#f1f1f3, #232327);
+  --warn: light-dark(#b45309, #f0b45b);
+  --ok: light-dark(#15803d, #5fd38d);
+  --claude: #d97757;
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 12px; background: var(--bg); color: var(--text); font: 13px/1.5 Geist, system-ui, sans-serif; }
+.mono { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: var(--dim); }
+.frame { border: 1px solid var(--subtle); border-radius: 12px; overflow: hidden; margin-bottom: 10px; background: var(--bg); position: relative; }
+.frame:last-child { margin-bottom: 0; }
+.fl { display: flex; gap: 8px; align-items: baseline; padding: 5px 12px; font-size: 10.5px; color: var(--dim); border-bottom: 1px solid var(--subtle); background: var(--raised); text-transform: uppercase; letter-spacing: .07em; font-weight: 500; }
+.fl b { color: var(--accent); font-family: 'Geist Mono'; }
+.fl i { margin-left: auto; font-style: normal; text-transform: none; letter-spacing: 0; font-family: 'Geist Mono'; }
+.chat { padding: 12px 14px 12px; }
+.prev { display: flex; gap: 10px; color: var(--sec); font-size: 14px; line-height: 1.6; margin-bottom: 16px; transition: opacity .3s; }
+.prev p { margin: 0; }
+.av { width: 24px; height: 24px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 600; }
+.av.u { background: linear-gradient(135deg, #f59e0b, #ec4899); color: #fff; }
+.av.c { background: light-dark(#f8ebe4, #3a2620); color: var(--claude); font-size: 14px; }
+.msg { display: grid; grid-template-columns: 24px 1fr; gap: 2px 10px; margin-bottom: 14px; }
+.who { font-weight: 600; font-size: 13.5px; display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.meta { color: var(--dim); font: 400 11px 'Geist Mono'; }
+.text { grid-column: 2; font-size: 14.5px; line-height: 1.6; }
+.foot { grid-column: 2; font-size: 11.5px; color: var(--dim); display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.ind { margin-left: 34px; }
+.turn { background: var(--turn); border-radius: 12px; padding: 9px 12px; display: flex; gap: 7px; align-items: center; font-size: 13px; }
+.turn b { font-size: 14px; font-weight: 600; }
+.turn .ph { color: var(--sec); font-size: 12px; }
+.spin { width: 12px; height: 12px; flex: none; border: 2px solid var(--accent-bg); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; display: inline-block; }
+.spin.dim { border-color: var(--chip); border-top-color: var(--dim); }
+.rule { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); padding: 6px 0; }
+.rule::before, .rule::after { content: ""; height: 1px; flex: 1; background: var(--border); }
+.rule.live::before, .rule.live::after { background: linear-gradient(90deg, var(--border) 0%, var(--accent) 50%, var(--border) 100%); background-size: 300% 100%; animation: sweep 1.8s linear infinite; }
+.rule.live::after { animation-direction: reverse; }
+.rule strong { color: var(--sec); font-weight: 500; }
+.notice { background: var(--turn); color: var(--sec); border-radius: 8px; padding: 7px 10px; display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.composer { border: 1px solid var(--border); border-radius: 14px; padding: 10px 10px 10px 14px; color: var(--dim); display: flex; align-items: center; gap: 10px; background: var(--surface); font-size: 14px; position: relative; }
+.composer .grow { flex: 1; }
+.send { width: 28px; height: 28px; border-radius: 9px; background: var(--accent); color: light-dark(#fff, #111113); display: grid; place-items: center; font-weight: 700; flex: none; }
+.send.stop { background: var(--chip); color: var(--text); }
+.send.stop::before { content: ""; width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
+.chipp { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; background: var(--chip); font-size: 11.5px; color: var(--sec); }
+.chipp.acc { background: var(--accent-bg); color: var(--accent); }
+.note { font-size: 11.5px; color: var(--dim); font-style: italic; padding: 2px 0 0; }
+.shimmer { background: linear-gradient(90deg, var(--dim) 0%, var(--text) 45%, var(--dim) 90%); background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.2s linear infinite; }
+.dots span { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--dim); margin-right: 3px; animation: bob 1.2s infinite; }
+.dots span:nth-child(2) { animation-delay: .15s; } .dots span:nth-child(3) { animation-delay: .3s; }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.4s ease-in-out infinite; flex: none; }
+.faded { opacity: .38; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes sweep { from { background-position: 100% 0; } to { background-position: -200% 0; } }
+@keyframes shimmer { from { background-position: 150% 0; } to { background-position: -100% 0; } }
+@keyframes bob { 0%, 60%, 100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-3px); opacity: 1; } }
+@keyframes pulse { 0%, 100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+<script>
+// Tiny macros so every card draws the same transcript without repeating markup.
+const PREV = "…so the retry path now backs off with jitter, and the flaky reconnect test is gone.";
+const ASK = "Now wire the same backoff into the websocket reconnect, and add an E2E for it.";
+const macros = {
+  "x-prev": (el) => `<div class="prev ${el.getAttribute("class") ?? ""}"><div class="av c">✳</div><p>${el.innerHTML || PREV}</p></div>`,
+  "x-user": (el) => `<div class="msg"><div class="av u">D</div><div class="who">You <span class="meta">${el.getAttribute("t") ?? "21:52"}</span>${el.getAttribute("tag") ?? ""}</div><div class="text">${el.innerHTML || ASK}</div>${el.hasAttribute("foot") ? `<div class="foot">${el.getAttribute("foot")}</div>` : ""}</div>`,
+  "x-head": (el) => `<div class="head"><div class="av c">✳</div><div class="who">Claude <span class="meta">opus-5.5</span>${el.innerHTML}</div></div>`,
+  "x-work": (el) => `<div class="ind"><div class="turn"><span class="spin"></span><b>Working</b><span class="mono">${el.getAttribute("t") ?? "0s"}</span>${el.hasAttribute("ph") ? `<span class="ph">· ${el.getAttribute("ph")}</span>` : ""}</div></div>`,
+  "x-frame": (el) => `<div class="frame"><div class="fl"><b>${el.getAttribute("n")}</b>${el.getAttribute("label")}<i>${el.getAttribute("at") ?? ""}</i></div><div class="chat">${el.innerHTML}</div></div>`,
+};
+function expand(root) {
+  for (const [tag, render] of Object.entries(macros)) {
+    for (const el of [...root.querySelectorAll(tag)].reverse()) {
+      expand(el);
+      el.outerHTML = render(el);
+    }
+  }
+}
+document.addEventListener("DOMContentLoaded", () => expand(document.body));
+</script>
+</tsp-shared>
+
+<p><strong>The bug:</strong> when you send a message and autocompaction kicks in, the transcript shows a <em>Working</em> turn card plus a separate "Compacting…" notice. Nothing is working on your request yet, so the card lies, and the two statuses compete.</p>
+
+<p><strong>The catch:</strong> at the moment you press send, conduit can't know whether compaction will happen. So the <em>sent</em> state has to be neutral enough to turn into either "compacting" or "working" without a flash of the wrong one. That's why this page has two sections.</p>
+
+<p>Every card is a 3-frame storyboard: <strong>1 Sent</strong> → <strong>2 Compacting</strong> → <strong>3 Replying</strong>. Use the toggle top right for dark mode.</p>
+
+<tsp-section title="Today (for reference)">
+<tsp-grid min="360">
+<tsp-card n="0" name="Current behaviour" why="Working card appears at send and keeps ticking through compaction, with a second status stacked under it." width="560">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head></x-head><x-work t="0s"></x-work>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head></x-head><x-work t="9s"></x-work>
+  <div class="ind" style="margin-top:8px"><div class="notice">ⓘ Compacting context…</div></div>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head></x-head><x-work t="41s" ph="Reading reconnect.ts"></x-work>
+  <div class="note ind">The 32s spent compacting is billed to this turn's timer.</div>
+</x-frame>
+</tsp-card>
+</tsp-grid>
+</tsp-section>
+
+<tsp-section title="A · The sent state (before anything is known)">
+<p>These cover the gap between pressing send and the first event. Each one must turn cleanly into <em>either</em> compacting or working.</p>
+<tsp-grid min="340">
+
+<tsp-card n="S1" name="Neutral presence" why="Claude's avatar appears with a quiet pulse and no label. It commits to 'Working' or 'Compacting' only once an event says which." width="520">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-user></x-user>
+  <x-head><span class="pulse"></span></x-head>
+</x-frame>
+<x-frame n="2a" label="→ becomes working" at="first step">
+  <x-user></x-user>
+  <x-head></x-head><x-work t="2s" ph="Reading reconnect.ts"></x-work>
+</x-frame>
+<x-frame n="2b" label="→ becomes compacting" at="compaction event">
+  <x-user></x-user>
+  <div class="rule live"><span class="spin dim"></span>Compacting context</div>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="S2" name="Message receipt" why="The status belongs to your message, not to Claude. A small line under the bubble moves Sending → Sent → Claude started." width="520">
+<x-frame n="1" label="Sending" at="t = 0">
+  <x-user foot='<span class="spin dim"></span>Sending'></x-user>
+</x-frame>
+<x-frame n="2" label="Delivered" at="t = 0.3s">
+  <x-user foot='<span style="color:var(--ok)">✓</span> Sent · waiting for Claude'></x-user>
+</x-frame>
+<x-frame n="3" label="Claude starts" at="first step">
+  <x-user foot='<span style="color:var(--ok)">✓</span> Sent'></x-user>
+  <x-head></x-head><x-work t="2s"></x-work>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="S3" name="Grace period" why="Show nothing new for ~700ms. Most sends get a first event in that window, so the right status appears first time and never flips." width="520">
+<x-frame n="1" label="Sent" at="0–700ms">
+  <x-user></x-user>
+  <div class="note">Nothing yet, on purpose.</div>
+</x-frame>
+<x-frame n="2" label="Still silent" at="> 700ms">
+  <x-user></x-user>
+  <x-head><span class="dots"><span></span><span></span><span></span></span></x-head>
+</x-frame>
+<x-frame n="3" label="Event arrives" at="first step">
+  <x-user></x-user>
+  <x-head></x-head><x-work t="1s"></x-work>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="S4" name="Composer carries it" why="The send button turns into Stop with a ring. The transcript only grows when there's something real to show." width="520">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-user></x-user>
+  <div class="composer"><span class="grow">Queue a follow-up…</span><span class="spin"></span><span class="send stop"></span></div>
+</x-frame>
+<x-frame n="2" label="Event arrives" at="first step">
+  <x-user></x-user>
+  <x-head></x-head><x-work t="1s"></x-work>
+  <div class="composer" style="margin-top:12px"><span class="grow">Queue a follow-up…</span><span class="send stop"></span></div>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="S5" name="Shimmering header" why="Claude's name itself shimmers, the way a live label does in a terminal. No card chrome until there's a step to show." width="520">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-user></x-user>
+  <div class="head"><div class="av c">✳</div><div class="who"><span class="shimmer">Claude</span> <span class="meta">opus-5.5</span></div></div>
+</x-frame>
+<x-frame n="2" label="Event arrives" at="first step">
+  <x-user></x-user>
+  <x-head></x-head><x-work t="1s"></x-work>
+</x-frame>
+</tsp-card>
+
+</tsp-grid>
+</tsp-section>
+
+<tsp-section title="B · Autocompaction starting (no turn card)">
+<p>In every option, the <em>Working</em> card only appears once compaction ends and the model actually starts on your message. Its timer starts then too.</p>
+<tsp-grid min="360">
+
+<tsp-card n="C1" name="Live seam" why="The 'Compacted context' rule already exists. Draw it early with a moving line, then let it settle in place. Zero layout jump." width="560">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head><span class="pulse"></span></x-head>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <x-prev></x-prev><x-user></x-user>
+  <div class="rule live"><span class="spin dim"></span>Compacting context <span class="mono">182k · 9s</span></div>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <x-prev></x-prev><x-user></x-user>
+  <div class="rule">Compacted context <span class="mono">182k → 41k</span> · <strong>141k saved</strong></div>
+  <x-head></x-head><x-work t="3s" ph="Reading reconnect.ts"></x-work>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="C2" name="Seam above your message" why="Compaction summarises everything before your message, so the line goes there. Older messages fade while it runs; yours stays crisp." width="560">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user></x-user>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <x-prev class="faded"></x-prev>
+  <div class="rule live" style="margin:-6px 0 10px">Summarising earlier conversation <span class="mono">9s</span></div>
+  <x-user foot='Claude replies once this finishes'></x-user>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <x-prev></x-prev>
+  <div class="rule" style="margin:-6px 0 10px">Earlier conversation summarised · <strong>141k saved</strong></div>
+  <x-user></x-user>
+  <x-head></x-head><x-work t="3s"></x-work>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="C3" name="Header status" why="Claude's header shows what it's doing in plain words. No card, no box, just a line, until the real turn starts." width="560">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head><span class="pulse"></span></x-head>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head><span style="display:inline-flex;align-items:center;gap:6px;font-weight:400;font-size:12.5px;color:var(--sec)"><span class="spin dim"></span>compacting context first <span class="mono">9s</span></span></x-head>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head><span class="meta">compacted · 141k saved</span></x-head><x-work t="3s"></x-work>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="C4" name="Receipt line" why="Compaction is something that happens to your message before it's read, so it's reported under your message. Claude isn't on screen yet." width="560">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user foot='<span style="color:var(--ok)">✓</span> Sent'></x-user>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <x-prev></x-prev><x-user foot='<span class="spin dim"></span>Compacting context before Claude reads this · <span class="mono">9s</span>'></x-user>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <x-prev></x-prev><x-user foot='<span style="color:var(--ok)">✓</span> Sent after compacting · 141k saved'></x-user>
+  <x-head></x-head><x-work t="3s"></x-work>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="C5" name="Composer dock" why="The transcript stays quiet. A slim tab docked to the top of the composer reports compaction, near where your eyes already are." width="560">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user></x-user>
+  <div class="composer"><span class="grow">Queue a follow-up…</span><span class="send stop"></span></div>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <x-prev></x-prev><x-user></x-user>
+  <div style="margin:0 14px;padding:5px 10px;border:1px solid var(--border);border-bottom:0;border-radius:10px 10px 0 0;background:var(--raised);display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sec);position:relative;overflow:hidden"><span class="spin dim"></span>Compacting context<span class="mono" style="margin-left:auto">182k · 9s</span><span style="position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);background-size:300% 100%;animation:sweep 1.6s linear infinite"></span></div>
+  <div class="composer"><span class="grow">Queue a follow-up…</span><span class="send stop"></span></div>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head></x-head><x-work t="3s"></x-work>
+  <div class="composer" style="margin-top:12px"><span class="grow">Queue a follow-up…</span><span class="send stop"></span></div>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="C6" name="Context meter drains" why="Show the thing compaction actually changes. The context ring beside send drains from 92% to 23% while it runs, and nothing else moves." width="560">
+<style>
+.ring { width: 26px; height: 26px; border-radius: 50%; flex: none; background: conic-gradient(var(--c, var(--warn)) calc(var(--p) * 1%), var(--chip) 0); display: grid; place-items: center; }
+.ring::after { content: ""; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); }
+.ring.drain { --c: var(--accent); animation: drain 3.5s ease-in-out infinite; }
+@keyframes drain { 0% { --p: 92; } 80%, 100% { --p: 23; } }
+</style>
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user></x-user>
+  <div class="composer"><span class="grow">Queue a follow-up…</span><span class="mono" style="color:var(--warn)">92%</span><span class="ring" style="--p:92"></span><span class="send stop"></span></div>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <x-prev></x-prev><x-user></x-user>
+  <div class="composer"><span class="grow">Queue a follow-up…</span><span class="mono" style="color:var(--accent)">compacting</span><span class="ring drain"></span><span class="send stop"></span></div>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head></x-head><x-work t="3s"></x-work>
+  <div class="composer" style="margin-top:12px"><span class="grow">Queue a follow-up…</span><span class="mono">23%</span><span class="ring" style="--p:23;--c:var(--dim)"></span><span class="send stop"></span></div>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="C7" name="Squeeze pill" why="A centred pill with arrows pressing inward: reads as 'shrinking' at a glance, even on a phone, without a word." width="560">
+<style>
+.sq { display: flex; justify-content: center; margin: 4px 0 6px; }
+.sq .chipp { height: 26px; gap: 8px; font-size: 12px; }
+.sq .l, .sq .r { display: inline-block; color: var(--accent); font-weight: 600; animation: inL 1.2s ease-in-out infinite; }
+.sq .r { animation-name: inR; }
+@keyframes inL { 0%, 100% { transform: translateX(-3px); } 50% { transform: translateX(1px); } }
+@keyframes inR { 0%, 100% { transform: translateX(3px); } 50% { transform: translateX(-1px); } }
+</style>
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head><span class="pulse"></span></x-head>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <x-prev></x-prev><x-user></x-user>
+  <div class="sq"><span class="chipp"><span class="l">›</span>Compacting context<span class="r">‹</span><span class="mono">9s</span></span></div>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <x-prev></x-prev><x-user></x-user>
+  <div class="sq"><span class="chipp">›‹ Compacted · 141k saved</span></div>
+  <x-head></x-head><x-work t="3s"></x-work>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="C8" name="Session bar chip" why="Compaction is a session state, like 'busy'. It shows in the session bar and sidebar dot. The transcript only shows the result." width="560">
+<style>.bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--subtle); font-weight: 600; font-size: 13px; margin: -12px -14px 12px; }</style>
+<x-frame n="1" label="Sent" at="t = 0">
+  <div class="bar">Websocket backoff <span class="chipp" style="margin-left:auto"><span class="pulse"></span>Busy</span></div>
+  <x-prev></x-prev><x-user></x-user>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <div class="bar">Websocket backoff <span class="chipp acc" style="margin-left:auto"><span class="spin"></span>Compacting · 9s</span></div>
+  <x-prev></x-prev><x-user></x-user>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <div class="bar">Websocket backoff <span class="chipp" style="margin-left:auto"><span class="pulse"></span>Busy</span></div>
+  <x-prev></x-prev><x-user></x-user>
+  <div class="rule">Compacted context · <strong>141k saved</strong></div>
+  <x-head></x-head><x-work t="3s"></x-work>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="C9" name="Quiet dots" why="The calmest option. Typing dots under Claude, with a dim word beside them. Nothing that reads as progress or work." width="560">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head><span class="dots"><span></span><span></span><span></span></span></x-head>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head><span class="dots"><span></span><span></span><span></span></span><span style="font-weight:400;font-size:12px;color:var(--dim)">tidying context</span></x-head>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head></x-head><x-work t="3s"></x-work>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="C10" name="Toast over composer" why="Transient by nature, so it gets a transient surface. Floats above the composer and leaves no trace; the seam is the record." width="560">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user></x-user>
+  <div class="composer"><span class="grow">Queue a follow-up…</span><span class="send stop"></span></div>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <x-prev></x-prev><x-user></x-user>
+  <div style="display:flex;justify-content:center;margin:0 0 8px"><div style="display:flex;gap:8px;align-items:center;padding:7px 12px;border-radius:10px;background:light-dark(#18181b,#ededf0);color:light-dark(#ededf0,#18181b);font-size:12.5px;box-shadow:0 6px 20px rgba(0,0,0,.18)"><span class="spin" style="border-color:rgba(127,127,127,.35);border-top-color:currentColor"></span>Compacting context, can take a minute<span style="opacity:.6;font-family:'Geist Mono';font-size:11.5px">9s</span></div></div>
+  <div class="composer"><span class="grow">Queue a follow-up…</span><span class="send stop"></span></div>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <x-prev></x-prev><x-user></x-user>
+  <div class="rule">Compacted context · <strong>141k saved</strong></div>
+  <x-head></x-head><x-work t="3s"></x-work>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="C11" name="Placeholder card (contrast)" why="Keeps a card in the turn's slot but strips it of everything turn-like: dashed, no timer, no Working. Least layout movement; closest to today." width="560">
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head></x-head>
+  <div class="ind"><div class="turn" style="background:transparent;border:1px dashed var(--border);color:var(--dim)"><span class="pulse"></span>Starting</div></div>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head></x-head>
+  <div class="ind"><div class="turn" style="background:transparent;border:1px dashed var(--border);color:var(--sec)"><span class="spin dim"></span>Compacting context before starting <span class="mono" style="margin-left:auto">182k</span></div></div>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <x-prev></x-prev><x-user></x-user>
+  <x-head></x-head><x-work t="3s"></x-work>
+</x-frame>
+</tsp-card>
+
+<tsp-card n="C12" name="History fold" why="Boldest. Earlier messages visibly fold into a summary stack while compaction runs, then stay folded as a clickable record." width="560">
+<style>
+.fold { position: relative; margin: 0 0 16px; }
+.fold .card { position: relative; z-index: 2; background: var(--turn); border-radius: 10px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--sec); }
+.fold::before, .fold::after { content: ""; position: absolute; left: 8px; right: 8px; height: 100%; border-radius: 10px; background: var(--turn); opacity: .6; top: 4px; z-index: 1; }
+.fold::after { left: 16px; right: 16px; top: 8px; opacity: .35; z-index: 0; }
+</style>
+<x-frame n="1" label="Sent" at="t = 0">
+  <x-prev></x-prev><x-user></x-user>
+</x-frame>
+<x-frame n="2" label="Compacting" at="t = 9s">
+  <div class="fold"><div class="card"><span class="spin dim"></span><span class="shimmer">Summarising 48 earlier messages</span><span class="mono" style="margin-left:auto">9s</span></div></div>
+  <x-user></x-user>
+</x-frame>
+<x-frame n="3" label="Replying" at="t = 41s">
+  <div class="fold"><div class="card">▸ 48 earlier messages summarised <span class="mono" style="margin-left:auto">182k → 41k</span></div></div>
+  <x-user></x-user>
+  <x-head></x-head><x-work t="3s"></x-work>
+</x-frame>
+</tsp-card>
+
+</tsp-grid>
+</tsp-section>
+
+<tsp-section title="My pick">
+<p><strong>S1 Neutral presence + C1 Live seam.</strong></p>
+<ul>
+<li><strong>No wrong first guess.</strong> The pulse commits to nothing, so it can become either state without a flash.</li>
+<li><strong>Reuses what exists.</strong> The live seam settles into the exact "Compacted context" rule conduit already renders, so frame 2 → 3 has no layout jump and no new component.</li>
+<li><strong>Turn timer stays honest.</strong> The Working card, and its clock, start when the model does.</li>
+</ul>
+<p><strong>Runner-up:</strong> C2 (seam above your message). It's the most truthful about <em>what</em> got compacted, but it moves the rule to a different spot than where completed compactions sit today.</p>
+</tsp-section>

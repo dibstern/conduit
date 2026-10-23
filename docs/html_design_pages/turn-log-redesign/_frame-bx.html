@@ -191,7 +191,10 @@ svg.lucide{width:14px;height:14px;stroke-width:2}
 .pop.cp{--w:min(480px,100%);padding:0;border:0;background:none;box-shadow:none}
 .pop.cp .jc{box-shadow:0 14px 34px -12px light-dark(rgba(0,0,0,.3),rgba(0,0,0,.8))}
 .caret.up{top:auto;bottom:calc(100% + 6.5px);transform:rotate(225deg);background:var(--bg)}
-.caret.dn{background:var(--bg)}
+.caret.dn{background:var(--bg);top:12.5px}
+.pop.cp.full{--w:100%;left:0;top:18px}
+.pop.cp .jc{margin-top:0!important}
+.row .mn{font:11px "Geist Mono",monospace;flex:none}
 .caret.ask{border-color:color-mix(in srgb,var(--ask) 65%,var(--bg))}
 .hovup{padding-top:135px}.phone .hovup{padding-top:180px}
 .hovdn{padding-bottom:150px}.phone .hovdn{padding-bottom:205px}
@@ -419,7 +422,7 @@ const mb=m=>`<span class="mb" style="--c:var(${m.c})">${m.g} ${m.n}</span>`;
 const lu=n=>`<i data-lucide="${n}"></i>`;
 function row2(s,o={}){
  if(!s.m)return row(s,{...o,skill:'event'});
- return `<div class="row">${mb(M[s.m])}<span class="msg" style="font-style:normal">${s.text.replace(/<\/?b>/g,'')}</span><time>${s.d}</time></div>`;
+ const m=M[s.m];return `<div class="row"><span class="mn" style="color:var(${m.c})">${m.g} #${m.n}</span><span class="msg">${s.text.replace(/<\/?b>/g,'')}</span><time>${s.d}</time></div>`;
 }
 const ticker2=()=>LIVE2.slice(-3).map((s,i)=>row2(s,{live:i===2})).join('');
 function popover(steps,i,x,live){
@@ -512,7 +515,7 @@ const xsOf=steps=>{const tot=steps.reduce((a,s)=>a+(s.w||0),0);let acc=0;return 
 const at=(steps,n)=>steps.findIndex(s=>s.m===n);
 function cardpop(steps,i,x,dir){
  const m=M[steps[i].m];const up=dir==='up';
- return `<span class="cur" style="--x:${x}%"></span><span class="caret ${up?'up':'dn'} ${m.ask?'ask':''}" style="--x:${x}%"></span><div class="pop cp ${up?'up':''}" style="--x:${x}%">${jev(m,m.n+'/5',{foot:'<div class="pfine" style="padding-top:7px">Hover preview · click to open the turn on this message</div>'})}</div>`;
+ return `<span class="cur" style="--x:${x}%"></span><span class="caret ${up?'up':'dn'} ${m.ask?'ask':''}" style="--x:${x}%"></span><div class="pop cp ${up?'up':'full'}" style="--x:${x}%">${jev(m,m.n+'/5',{foot:'<div class="pfine" style="padding-top:7px">Hover preview · click to open the turn on this message</div>'})}</div>`;
 }
 function headK(o={}){
  const ch=`<span class="chev">${lu(o.open||o.live?'chevron-down':'chevron-right')}</span>`;
@@ -527,7 +530,7 @@ const plainLog=live=>live?earlier(9)+PLIVE.slice(-3).map((s,i)=>row(s,{skill:'ev
 const pinsAt=on=>on&&on!=='u'?LV[on==='steps'?'all':on]:null;
 const mbtn=on=>`<span class="mbtn">Show${on&&on!=='u'?`<span class="k">·</span>${shName[on]}`:''}${lu('chevron-down')}</span>`;
 const menu=(on,live)=>`<div class="menu"><div class="mh">Show, least to most</div>${SH.map(([k])=>`<div class="mi ${on===k?'on':''} ${k==='steps'?'sep':''}"><span>${on===k?lu('check'):''}</span><b>${shName[k]}</b><span class="ct">${cnt(k,live)}</span><small>${shDesc[k]}</small></div>`).join('')}</div>`;
-const msgRows=(on,sel)=>LV[on].map(n=>{const m=M[n];return `<div class="row ${n===sel?'sel':''}">${mb(m)}<span class="msg" style="font-style:normal;color:var(--text)">${m.text.replace(/<\/?b>/g,'')}</span><time>${m.at}</time></div>`}).join('');
+const msgRows=(on,sel)=>LV[on].map(n=>{const m=M[n];return `<div class="row ${n===sel?'sel':''}"><span class="mn" style="color:var(${m.c})">${m.g} #${m.n}</span><span class="msg">${m.text.replace(/<\/?b>/g,'')}</span><time>${m.at}</time></div>`}).join('');
 const off=(c,l,e,notes=[])=>`<div class="offh">Jev off <span>· no surfacing or categories: no Show control, chips or pins; messages are plain rows in the log</span></div>`+state('Jev off · Collapsed',c,notes[0])+state('Jev off · Live',l,notes[1])+state('Jev off · Expanded',e,notes[2]);
 const jtop=(o,on,dir='up')=>`${headK(o)}${o.m?jev(M[o.m],o.pos,{live:o.live,pv:o.pv}):''}${strip2(o.live?LIVE2:STEPS2,{live:o.live,dots:!pinsAt(on),pins:pinsAt(on),pinOn:o.m,hover:o.hover,card:dir,cur:o.cur})}`;
 const offTop=o=>`${headK({...o,jev:0})}${strip2(o.live?PLIVE:PLAIN,{live:o.live,hover:o.hover})}`;
