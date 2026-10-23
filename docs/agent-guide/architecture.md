@@ -71,6 +71,46 @@ detail resumes keep their existing policy.
 - CLI commands use the same `WsRpcGroup` and daemon handlers over a filesystem-protected Unix socket with NDJSON framing. Browser PIN authentication remains required on network WebSockets.
 - Browser real-time transport remains WebSocket-based. Effect RPC runs over the WebSocket protocol for migrated browser operations; raw PTY input remains the terminal data-plane path.
 
+## Short-lived subprocesses
+
+`Subprocess` is an Effect `Context.Reference` with one shared default owner.
+`makeDaemonLive` supplies a scoped override, shared by its project relays.
+Standalone callers use the default; tests can supply an isolated owner.
+`run(command, args, { cwd, timeoutMs, key?, priority? })` returns an Effect with
+`stdout`, `stderr`, and `exitCode`. Nonzero exit codes are results; spawn,
+timeout, signal, output-limit and owner-shutdown failures are typed
+`SubprocessError`s. Commands share four slots. Queued interactive commands run
+before background commands, with FIFO ordering within each priority. Keys share
+only pending work, and cancelling one waiter leaves other waiters intact.
+
+The existing process-wide session-git cache remains a Promise API until
+conduit-test-g43i.4. Its git entrypoints call `makeSubprocessRunner` before the
+first await. This captures the current fiber's owner and read marker, or the
+shared default outside Effect. All commands in that read use the captured
+runner. Existing cache signatures and callers stay unchanged; no separate
+Effect runtime or process owner is created for the cache.
+
+Read RPC dispatch supplies `ReadRequest`, an Effect 4 `Context.Reference` inherited
+by request fibers. The owner warns at most once per minute when reads request
+commands. `CONDUIT_STRICT_READ_SPAWN=1` turns this into a defect. The legacy
+Promise runner also rejects before enqueueing; session git's existing best-effort
+catches still return no git state. Strict mode remains opt-in while existing
+read paths still refresh git state.
+
+`Subprocess.metrics` returns a JSON-serializable snapshot of spawn counts and
+cumulative wall and synchronous spawn time, globally and by command, plus active,
+queued and peak active counts. Snapshots also publish on the Node diagnostics
+channel `conduit:subprocess-metrics` when commands finish. Synchronous spawn time
+measures only time spent calling Node's `spawn`; wall time excludes queueing and
+ends after the child closes. The idle-budget E2E can subscribe before daemon
+startup and retain the last snapshot. Worker-thread hosting is deferred until
+that representative E2E measures the remaining main-thread cost after the
+session-git changes. Short-command tests alone do not settle that decision.
+
+`scripts/check-subprocess-boundary.mjs`, run by `pnpm lint:rules`, restricts direct
+child-process imports to the owner and explicit long-lived process owners. Its
+separate list of remaining one-shot callers must only shrink.
+
 ## PTY lifetime
 
 Local terminals belong to a detached per-user PTY host, not the server. The host

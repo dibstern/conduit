@@ -1,15 +1,12 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
-import { promisify } from "node:util";
 import { Effect } from "effect";
 import {
 	WorkspaceMoveError,
 	type WorktreeInfo,
 } from "../contracts/session-workspace.js";
-
-const execFileAsync = promisify(execFile);
+import { Subprocess } from "../domain/daemon/Services/subprocess.js";
 
 export const realWorkspacePath = (path: string) =>
 	Effect.tryPromise({
@@ -18,28 +15,36 @@ export const realWorkspacePath = (path: string) =>
 	});
 
 const git = (directory: string, ...args: string[]) =>
-	Effect.tryPromise({
-		try: () => {
-			const env: NodeJS.ProcessEnv = {
-				...process.env,
-				GIT_OPTIONAL_LOCKS: "0",
-			};
-			for (const key of [
-				"GIT_DIR",
-				"GIT_INDEX_FILE",
-				"GIT_WORK_TREE",
-				"GIT_COMMON_DIR",
-			])
-				delete env[key];
-			return execFileAsync("git", args, {
-				cwd: directory,
-				env,
-				timeout: 2_000,
+	Effect.gen(function* () {
+		const owner = yield* Subprocess;
+		const env: NodeJS.ProcessEnv = {
+			...process.env,
+			GIT_OPTIONAL_LOCKS: "0",
+		};
+		for (const key of [
+			"GIT_DIR",
+			"GIT_INDEX_FILE",
+			"GIT_WORK_TREE",
+			"GIT_COMMON_DIR",
+		])
+			delete env[key];
+		const result = yield* owner.run("git", args, {
+			cwd: directory,
+			env,
+			timeoutMs: 2_000,
+		});
+		if (result.exitCode !== 0)
+			return yield* new WorkspaceMoveError({
+				path: directory,
+				reason: "not-a-worktree",
 			});
-		},
-		catch: () =>
-			new WorkspaceMoveError({ path: directory, reason: "not-a-worktree" }),
-	});
+		return result;
+	}).pipe(
+		Effect.mapError(
+			() =>
+				new WorkspaceMoveError({ path: directory, reason: "not-a-worktree" }),
+		),
+	);
 
 /** The primary folder's local branch names, without tags or remote refs. */
 export const listLocalBranches = (directory: string) =>

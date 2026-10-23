@@ -10,7 +10,6 @@
 //
 // Relay lifecycle is delegated to RelayCacheTag.
 
-import { execFileSync } from "node:child_process";
 import {
 	lstatSync,
 	mkdirSync,
@@ -107,6 +106,7 @@ import {
 	transitionProjectUnavailable,
 } from "./daemon-store-availability.js";
 import { RelayCacheTag } from "./relay-cache.js";
+import { Subprocess } from "./subprocess.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
 
@@ -1218,29 +1218,40 @@ export const saveProject = (input: SaveProjectInput) =>
 								}),
 						});
 						if (folder.create.gitInit) {
-							yield* Effect.try({
-								try: () =>
-									execFileSync("git", ["init"], {
-										cwd: folder.path,
-										env: {
-											...process.env,
-											GIT_DIR: undefined,
-											GIT_INDEX_FILE: undefined,
-										},
-										stdio: "pipe",
-										timeout: 30_000,
-									}),
-								catch: (cause) =>
-									new ProjectSaveRejected({
-										issues: [
-											{
-												kind: "git-init-failed",
-												path: folder.path,
-												message: formatRelayFailure(cause),
-											},
-										],
-									}),
-							});
+							const owner = yield* Subprocess;
+							yield* owner
+								.run("git", ["init"], {
+									cwd: folder.path,
+									env: {
+										...process.env,
+										GIT_DIR: undefined,
+										GIT_INDEX_FILE: undefined,
+									},
+									timeoutMs: 30_000,
+								})
+								.pipe(
+									Effect.flatMap((result) =>
+										result.exitCode === 0
+											? Effect.void
+											: Effect.fail(
+													new Error(
+														result.stderr || `git exited ${result.exitCode}`,
+													),
+												),
+									),
+									Effect.mapError(
+										(cause) =>
+											new ProjectSaveRejected({
+												issues: [
+													{
+														kind: "git-init-failed",
+														path: folder.path,
+														message: formatRelayFailure(cause),
+													},
+												],
+											}),
+									),
+								);
 						}
 					}
 				}).pipe(

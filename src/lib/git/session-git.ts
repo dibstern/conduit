@@ -1,8 +1,10 @@
-import { execFile } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
-import { promisify } from "node:util";
 import type { SessionWorkspace } from "../contracts/session-workspace.js";
+import {
+	makeSubprocessRunner,
+	type SubprocessRunner,
+} from "../domain/daemon/Services/subprocess.js";
 import { DEFAULT_RECONCILIATION_INTERVAL_MS } from "../domain/relay/Services/session-status-poller.js";
 import { labelProjectFolders } from "../project-folders.js";
 import {
@@ -11,10 +13,13 @@ import {
 } from "../session/session-workspace.js";
 import type { ProjectInfo, SessionGit, SessionInfo } from "../shared-types.js";
 
-const execFileAsync = promisify(execFile);
 const GIT_COMMAND_TIMEOUT_MS = 2_000;
 
-const execGit = (directory: string, args: string[]): Promise<string> => {
+const execGit = (
+	directory: string,
+	runner: SubprocessRunner,
+	args: string[],
+): Promise<string> => {
 	const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0" };
 	for (const key of [
 		"GIT_DIR",
@@ -23,18 +28,28 @@ const execGit = (directory: string, args: string[]): Promise<string> => {
 		"GIT_COMMON_DIR",
 	])
 		delete env[key];
-	return execFileAsync("git", args, {
+	return runner("git", args, {
 		cwd: directory,
-		timeout: GIT_COMMAND_TIMEOUT_MS,
+		timeoutMs: GIT_COMMAND_TIMEOUT_MS,
+		priority: "background",
 		env,
-	}).then(({ stdout }) => stdout);
+	}).then(({ stdout, stderr, exitCode }) => {
+		if (exitCode !== 0)
+			throw Object.assign(new Error(stderr || `git exited ${exitCode}`), {
+				code: exitCode,
+				stdout,
+				stderr,
+			});
+		return stdout;
+	});
 };
 
 const git = (
 	directory: string,
+	runner: SubprocessRunner,
 	...args: string[]
 ): Promise<string | undefined> =>
-	execGit(directory, args).then(
+	execGit(directory, runner, args).then(
 		(stdout) => stdout.trim(),
 		() => undefined,
 	);
@@ -54,9 +69,13 @@ const operationAt = (gitDir: string): SessionGit["operation"] => {
 
 // Every spawn blocks the daemon's event loop until the child execs, which takes
 // hundreds of ms on a loaded machine, so each read uses as few git calls as it can.
-const defaultRefs = async (directory: string): Promise<string[]> => {
+const defaultRefs = async (
+	directory: string,
+	runner: SubprocessRunner,
+): Promise<string[]> => {
 	const refs = await git(
 		directory,
+		runner,
 		"for-each-ref",
 		"--format=%(refname) %(symref) %(objecttype)",
 		"refs/remotes/origin/HEAD",
@@ -78,11 +97,18 @@ const defaultRefs = async (directory: string): Promise<string[]> => {
 export async function hasNoCommitsBeyondDefault(
 	directory: string,
 	head: string,
+	runner: SubprocessRunner = makeSubprocessRunner(),
 ): Promise<boolean> {
-	for (const ref of await defaultRefs(directory))
+	for (const ref of await defaultRefs(directory, runner))
 		if (
-			(await git(directory, "merge-base", "--is-ancestor", head, ref)) !==
-			undefined
+			(await git(
+				directory,
+				runner,
+				"merge-base",
+				"--is-ancestor",
+				head,
+				ref,
+			)) !== undefined
 		)
 			return true;
 	return false;
@@ -91,19 +117,18 @@ export async function hasNoCommitsBeyondDefault(
 export async function readSessionGit(
 	directory: string,
 	previous?: SessionGit,
+	runner: SubprocessRunner = makeSubprocessRunner(),
 ): Promise<SessionGit | undefined> {
 	try {
 		// Fails outside a work tree. A huge change list can outgrow maxBuffer; the
 		// branch headers come first and one entry marks it dirty, so keep the cut output.
-		const status = await execGit(directory, [
+		const status = await execGit(directory, runner, [
 			"status",
 			"--porcelain=v2",
 			"--branch",
 			"--untracked-files=normal",
-		]).catch((error: { code?: string; stdout?: string }) =>
-			error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
-				? error.stdout
-				: undefined,
+		]).catch((error: { reason?: string; stdout?: string }) =>
+			error.reason === "output-limit" ? error.stdout : undefined,
 		);
 		if (status === undefined) return undefined;
 		const lines = status.split("\n");
@@ -117,6 +142,7 @@ export async function readSessionGit(
 		const born = oid !== undefined && oid !== "(initial)";
 		const dirs = await git(
 			directory,
+			runner,
 			"rev-parse",
 			"--absolute-git-dir",
 			"--git-common-dir",
@@ -145,7 +171,7 @@ export async function readSessionGit(
 			...(operation ? { operation } : {}),
 		};
 		if (!branch) return result;
-		const defaultBranches = await defaultRefs(directory);
+		const defaultBranches = await defaultRefs(directory, runner);
 		if (defaultBranches.length === 0) return result;
 		if (
 			defaultBranches.some(
@@ -163,6 +189,7 @@ export async function readSessionGit(
 		for (const ref of defaultBranches) {
 			const ancestor = await git(
 				directory,
+				runner,
 				"merge-base",
 				"--is-ancestor",
 				tip,
@@ -185,6 +212,7 @@ export async function readSessionGit(
 			};
 		const reflog = await git(
 			directory,
+			runner,
 			"reflog",
 			"show",
 			"--format=%H %gD",
@@ -206,13 +234,14 @@ export async function readSessionGit(
 			for (const ref of containingDefaults) {
 				const previousDefault = await git(
 					directory,
+					runner,
 					"rev-parse",
 					"--verify",
 					"-q",
 					`${ref}@{${createdAt}}`,
 				);
 				const base = previousDefault
-					? await git(directory, "merge-base", tip, previousDefault)
+					? await git(directory, runner, "merge-base", tip, previousDefault)
 					: undefined;
 				merged = base !== undefined && base !== tip;
 				if (merged) break;
@@ -224,6 +253,7 @@ export async function readSessionGit(
 			for (const ref of containingDefaults) {
 				const ancestry = await git(
 					directory,
+					runner,
 					"log",
 					"--ancestry-path",
 					"--format=%H %ct %P",
@@ -245,6 +275,7 @@ export async function readSessionGit(
 				if (refMergedAt === undefined) {
 					const defaultReflog = await git(
 						directory,
+						runner,
 						"reflog",
 						"show",
 						"--date=unix",
@@ -262,6 +293,7 @@ export async function readSessionGit(
 					// An underestimate can miss an auto-settle, but cannot hide newer work.
 					const committedAt = await git(
 						directory,
+						runner,
 						"log",
 						"-1",
 						"--format=%ct",
