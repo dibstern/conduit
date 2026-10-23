@@ -40,7 +40,7 @@ describe("built runner startup deadlines", () => {
 			await harness.kill();
 			appendFileSync(
 				join(harness.root, "runner-identity-fixture.mjs"),
-				`\nimport { installRunnerStartupFixture } from ${JSON.stringify(new URL("../../helpers/runner-startup-fixture.ts", import.meta.url).href)};\ninstallRunnerStartupFixture(${JSON.stringify(harness.root)});\n`,
+				`\nconst { installRunnerStartupFixture } = await import(${JSON.stringify(new URL("../../helpers/runner-startup-fixture.ts", import.meta.url).href)});\ninstallRunnerStartupFixture(${JSON.stringify(harness.root)});\n`,
 			);
 			await harness.restart({ runnerStartupTimeoutMs: 3000 });
 			browser = await harness.connect(retainedSession);
