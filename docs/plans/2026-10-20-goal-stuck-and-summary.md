@@ -32,13 +32,23 @@ missing shared entry point and the projection/summary ordering exceptions.
 
 ## Design
 
-`goal-stuck-detector.ts` preserves the final study detector's algorithm and
+`goal-stuck-detector.ts` preserves the final study detector's segmentation and
 defaults. Generic identifier syntax, shared-prefix identifier sets and subject
 polarity supply context guards. Times, dates, numbers and measured quantities
 never supply identity. Segmentation uses cosine similarity to the observed
 centroid, continuation hysteresis and the exact linear cosine medoid. Anchored
 run IDs and verdicts are prefix-causal. Identifier context survives inferred
 boundaries and resets on missing evidence or explicit gaps.
+
+Reconfirmed segments reuse the previous blocker identity when their first
+`minChecks` medoid matches the previous segment's last `minChecks` medoid at
+the continuation threshold. Identifier replacements introducing unseen values,
+changes to a repeated identifier family, and polarity changes prevent reuse.
+An intervening short segment must independently pass the same rule. Missing
+evidence and explicit gaps always clear the link. Verdict booleans and detection
+timing remain unchanged; merged bounds and counts cover the continuous blocker,
+and the displayed representative is the latest segment's observed medoid.
+Projection retains only the bounded medoid window alongside existing statistics.
 
 Only immutable extraction is memoized by exact reason string. FIFO retention is
 bounded by 4,096 entries and 4,194,304 weighted units. Reasons over 4,096 UTF-16
@@ -67,6 +77,13 @@ run preserves its key even when the representative changes. Prompt evidence
 keeps chronological runs and standalone checks, raw time bounds and differing
 latest evidence. History retains at most eight segments and 8,000 JSON characters
 with omission/truncation notices. Goal, lifecycle and reasons are quoted data.
+
+Reconfirmation gaps within a merged blocker no longer enter its summary key.
+The initial pre-confirmation iteration keys and prompt version remain unchanged.
+The causal detector recomputes the same key from the same history on restart;
+summary caches are in memory, so plain key equality remains sufficient. A late
+summary captured during an unconfirmed gap can require another call after
+reconfirmation. That rare race is accepted rather than adding cache machinery.
 
 `GoalSummaryService` keeps a per-relay 200-identity LRU and coalesces concurrent
 requests for a captured key. Details read cached metadata without generation;
