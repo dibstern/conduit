@@ -5821,7 +5821,7 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 async function assertPickRejected(
 	guard: GuardCase,
 	result: Either.Result<unknown, unknown>,
-	tag: "EffortNotOffered" | "ContextWindowNotOffered",
+	tag: "ModelParametersUnavailable" | "ContextWindowNotOffered",
 	testInfo: TestInfo,
 	evidence: {
 		shown: Pick;
@@ -6005,7 +6005,7 @@ test.describe("server pick rejections", () => {
 					result,
 					rejection === "context"
 						? "ContextWindowNotOffered"
-						: "EffortNotOffered",
+						: "ModelParametersUnavailable",
 					testInfo,
 					{
 						shown,
