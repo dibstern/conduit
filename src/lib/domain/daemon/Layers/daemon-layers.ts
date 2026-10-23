@@ -142,6 +142,7 @@ import {
 import { KeepAwakeLive } from "./keep-awake-layer.js";
 import { MessageSurfacingSettingsLive } from "./message-surfacing-settings-layer.js";
 import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
+import { OwnerScopesLive } from "./owner-scopes-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
 import { ProjectContextLive } from "./project-context-layer.js";
@@ -863,8 +864,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withOpenCodeInstances));
-	const withProjectContext = ProjectContextLive.pipe(
+	const withOwnerScopes = OwnerScopesLive.pipe(
 		Layer.provideMerge(withSessionDirectory),
+	);
+	const withProjectContext = ProjectContextLive.pipe(
+		Layer.provideMerge(withOwnerScopes),
 	);
 	const withInputDrafts = Layer.unwrap(
 		Effect.gen(function* () {
