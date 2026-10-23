@@ -3,6 +3,7 @@ import { untrack } from "svelte";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
 import { accountLimit } from "../../contracts/account-limit.js";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import { WorkspaceMoveError } from "../../contracts/session-workspace.js";
 import type {
 	InputDelivery,
@@ -48,7 +49,7 @@ export type SendOutcome =
 
 type SendInput = {
 	readonly text: string;
-	readonly images?: readonly string[];
+	readonly images?: readonly (string | AttachmentRef)[];
 	readonly delivery: InputDelivery;
 	readonly inputId?: string;
 	readonly from?: typeof selection.scope;
@@ -232,14 +233,18 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 	const inputId = input.inputId ?? crypto.randomUUID();
 	let sessionId: string | undefined;
 	let creating = false;
+	// Saved refs appear with the provider's persisted message until attachment URLs exist.
+	const inlineImages = input.images?.filter(
+		(image) => typeof image === "string",
+	);
 	const message = {
 		type: "user",
 		uuid: inputId,
 		text: input.text,
 		createdAt: Date.now(),
-		...(input.images?.length
+		...(inlineImages?.length
 			? {
-					attachments: input.images.map((url) => {
+					attachments: inlineImages.map((url) => {
 						const { mime, name, size } = parseAttachmentDataUrl(url);
 						return {
 							id: crypto.randomUUID(),

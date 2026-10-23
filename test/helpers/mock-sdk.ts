@@ -10,7 +10,10 @@ import type {
 	SDKMessage,
 	SDKResultMessage,
 } from "../../src/lib/provider/claude/types.js";
-import type { EventSink, SendTurnInput } from "../../src/lib/provider/types.js";
+import type {
+	EventSink,
+	ResolvedSendTurnInput,
+} from "../../src/lib/provider/types.js";
 
 /**
  * Build a mock `Query` (the async-iterable + methods object returned by the
@@ -118,10 +121,18 @@ export function makeErrorResult(
 	} as SDKResultMessage;
 }
 
-/** Create a base `SendTurnInput` with sensible defaults. */
+/** Create a base provider-boundary turn with sensible defaults. */
 export function makeBaseSendTurnInput(
-	overrides: Partial<SendTurnInput> = {},
-): SendTurnInput {
+	overrides?: Partial<Omit<ResolvedSendTurnInput, "images">> & {
+		readonly images?: never;
+	},
+): Omit<ResolvedSendTurnInput, "images">;
+export function makeBaseSendTurnInput(
+	overrides: Partial<ResolvedSendTurnInput>,
+): ResolvedSendTurnInput;
+export function makeBaseSendTurnInput(
+	overrides: Partial<ResolvedSendTurnInput> = {},
+): ResolvedSendTurnInput {
 	return {
 		sessionId: "session-1",
 		inputId: "turn-1",

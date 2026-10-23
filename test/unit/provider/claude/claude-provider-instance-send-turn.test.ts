@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Fiber, ManagedRuntime } from "effect";
+import { Effect, Fiber, ManagedRuntime, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import {
 	afterEach,
@@ -14,6 +14,7 @@ import {
 	type Mock,
 	vi,
 } from "vitest";
+import { AttachmentRefSchema } from "../../../../src/lib/contracts/attachment-ref.js";
 import { ClaudeEventPersistEffectError } from "../../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import type { CanonicalEvent } from "../../../../src/lib/persistence/events.js";
 import type { ClaudeCapabilitiesService } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
@@ -39,7 +40,7 @@ import { ClaudeBoundaryError } from "../../../../src/lib/provider/event-sink-err
 import type { SessionRunner } from "../../../../src/lib/provider/runner/session-runner.js";
 import type {
 	ModelInfo,
-	SendTurnInput,
+	ResolvedSendTurnInput,
 } from "../../../../src/lib/provider/types.js";
 import {
 	provisionalLimitReply,
@@ -56,8 +57,8 @@ import {
 } from "../../../helpers/mock-sdk.js";
 
 function makeBaseSendTurnInput(
-	overrides: Partial<SendTurnInput> = {},
-): SendTurnInput {
+	overrides: Partial<ResolvedSendTurnInput> = {},
+): ResolvedSendTurnInput {
 	return makeRawBaseSendTurnInput({
 		model: { providerId: "claude", modelId: "claude-sonnet-4-5" },
 		...overrides,
@@ -174,9 +175,29 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 				instance.sendTurnEffect(
 					makeBaseSendTurnInput({
 						images: [
-							`data:text/plain;name=R%C3%A9sum%C3%A9%20notes.txt;base64,${Buffer.from(text).toString("base64")}`,
-							`data:application/pdf;name=guide.pdf;base64,${Buffer.from(pdf).toString("base64")}`,
-							"data:image/jpeg;base64,/9j/",
+							{
+								ref: Schema.decodeUnknownSync(AttachmentRefSchema)({
+									attachmentHash: "a".repeat(64),
+									mime: "text/plain",
+									name: "Résumé notes.txt",
+								}),
+								dataUrl: `data:text/plain;name=R%C3%A9sum%C3%A9%20notes.txt;base64,${Buffer.from(text).toString("base64")}`,
+							},
+							{
+								ref: Schema.decodeUnknownSync(AttachmentRefSchema)({
+									attachmentHash: "b".repeat(64),
+									mime: "application/pdf",
+									name: "guide.pdf",
+								}),
+								dataUrl: `data:application/pdf;name=guide.pdf;base64,${Buffer.from(pdf).toString("base64")}`,
+							},
+							{
+								ref: Schema.decodeUnknownSync(AttachmentRefSchema)({
+									attachmentHash: "c".repeat(64),
+									mime: "image/jpeg",
+								}),
+								dataUrl: "data:image/jpeg;base64,/9j/",
+							},
 						],
 					}),
 				),

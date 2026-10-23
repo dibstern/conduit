@@ -19,7 +19,7 @@ import type { OrchestrationEngine } from "../orchestration-engine.js";
 import type { TurnResult } from "../types.js";
 import { runnerSinkId } from "./runner-protocol.js";
 import type { RunnerRecoveryDependencies } from "./runner-provider-instance.js";
-import type { SessionFailure, SessionTurn } from "./session-runner.js";
+import type { DurableSessionTurn, SessionFailure } from "./session-runner.js";
 
 export const runningRunnerCommands = (
 	sql: SqlClient.SqlClient,
@@ -72,7 +72,7 @@ type RunningCommand = Effect.Success<
 >[number];
 
 /** Reattach admitted commands to their payload without serializing live steers. */
-export const recoverRunnerCommands = <T extends SessionTurn>(
+export const recoverRunnerCommands = <T extends DurableSessionTurn>(
 	sql: SqlClient.SqlClient,
 	sessionId: string,
 	driverKind: string,
@@ -203,7 +203,8 @@ export const settleUnclaimedRunnerCommands = <E>(
 				runnerSinkId(
 					row.command_id,
 					row.attempt_count,
-					(JSON.parse(row.payload_json) as SessionTurn).nativeResumeFallback,
+					(JSON.parse(row.payload_json) as DurableSessionTurn)
+						.nativeResumeFallback,
 				),
 				{
 					sessionId: row.session_id,

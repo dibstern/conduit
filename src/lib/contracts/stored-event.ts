@@ -1,4 +1,5 @@
 import { Effect, Schema, type Types } from "effect";
+import { AttachmentRefSchema } from "./attachment-ref.js";
 import { ContinuationReasonSchema } from "./limit-recovery.js";
 import {
 	SessionSetupFinishedPayloadSchema,
@@ -435,7 +436,7 @@ const NonEmptyStringSchema = Schema.String.pipe(
 
 export const InputRequestSchema = Schema.Struct({
 	text: Schema.String,
-	images: Schema.optionalKey(Schema.Array(Schema.String)),
+	images: Schema.optionalKey(Schema.Array(AttachmentRefSchema)),
 	model: Schema.optionalKey(
 		Schema.Struct({ providerID: Schema.String, modelID: Schema.String }),
 	),

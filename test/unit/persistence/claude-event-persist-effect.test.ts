@@ -11,6 +11,7 @@ import {
 	SessionEventBusLive,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { makeAttachmentStore } from "../../../src/lib/persistence/attachment-store.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -253,11 +254,15 @@ describe("ClaudeEventPersistEffect session lifecycle", () => {
 					if (rejectTerminal)
 						yield* sql.unsafe(`CREATE TRIGGER reject_failure BEFORE UPDATE OF status ON provider_runs
 						WHEN NEW.status = 'error' BEGIN SELECT RAISE(ABORT, 'reject failure'); END`);
+					const attachmentStore = yield* makeAttachmentStore;
+					const image = yield* attachmentStore.put(
+						"data:image/png;base64,aW1hZ2U=",
+					);
 					const result = yield* Effect.result(
 						persist.persistUserMessage("failed", "Cannot send", {
 							messageId: "failed-user",
 							inputId: "failed-input",
-							images: ["data:image/png;base64,aW1hZ2U="],
+							images: [image],
 							failure: { message: "Missing folder", code: "SEND_FAILED" },
 						}),
 					);

@@ -37,7 +37,7 @@ import type {
 	ProviderControlContext,
 	ProviderDriver,
 	ProviderInstance,
-	SendTurnInput,
+	ResolvedSendTurnInput,
 	TurnResult,
 } from "./types.js";
 
@@ -414,7 +414,7 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 	}
 
 	sendTurnEffect(
-		input: SendTurnInput,
+		input: ResolvedSendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		const {
 			sessionId,
@@ -449,7 +449,9 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			...(model?.providerId && model?.modelId
 				? { model: { providerID: model.providerId, modelID: model.modelId } }
 				: {}),
-			...(images && images.length > 0 ? { images: [...images] } : {}),
+			...(images && images.length > 0
+				? { images: images.map(({ dataUrl }) => dataUrl) }
+				: {}),
 			...(input.permissionMode === "plan" && !input.sideThread
 				? { agent: "plan" }
 				: agent

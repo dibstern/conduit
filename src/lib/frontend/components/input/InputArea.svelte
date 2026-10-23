@@ -65,7 +65,7 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, prepareFileAttachment } from "./input-utils.js";
-	import { parseAttachmentDataUrl } from "../../../attachment-data-url.js";
+	import type { AttachmentRef } from "../../../contracts/attachment-ref.js";
 	import { findSession, isBusy, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
@@ -771,12 +771,12 @@
 		}
 		const draftText = composerDraft.text;
 		const draftImages = pendingAttachments;
-		const draft = JSON.stringify([parentSessionId, draftText, draftImages.map((image) => image.dataUrl)]);
+		const images = draftImages.map((image) => "ref" in image ? image.ref : image.dataUrl);
+		const draft = JSON.stringify([parentSessionId, draftText, images]);
 		if (sideThreadAttempt?.draft !== draft) sideThreadAttempt = { draft, inputId: crypto.randomUUID() };
 		const { inputId } = sideThreadAttempt;
 		startingSideThread = true;
 		try {
-			const images = draftImages.map((image) => image.dataUrl);
 			const outcome = await send({
 				from,
 				sideThread: { sessionId: parentSessionId, title: question },
@@ -822,7 +822,7 @@
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
 		if (readingAttachments > 0 || readOnlySubagent || !turnControl.ready) return false;
-		if (textOverride === undefined && pendingAttachments.some((attachment) => !attachment.dataUrl.startsWith("data:image/")) && !getProviderDriver(composerDriver)?.supportsFileAttachments) {
+		if (textOverride === undefined && pendingAttachments.some((attachment) => "ref" in attachment ? !attachment.ref.mime.startsWith("image/") : !attachment.dataUrl.startsWith("data:image/")) && !getProviderDriver(composerDriver)?.supportsFileAttachments) {
 			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before sending these files.";
 			return false;
 		}
@@ -839,9 +839,8 @@
 
 		const messageText = textOverride === undefined ? serializeReferences(await withReferences(text, composerProjectSlug)) : text;
 
-		// Send all attachments through the existing data URL field.
-		const imageUrls = textOverride === undefined && pendingAttachments.length > 0
-			? pendingAttachments.map((img) => img.dataUrl)
+		const images = textOverride === undefined && pendingAttachments.length > 0
+			? pendingAttachments.map((image) => "ref" in image ? image.ref : image.dataUrl)
 			: undefined;
 
 		const sentFromSessionId = sessionState.currentId;
@@ -905,7 +904,7 @@
 			const outcome = await send({
 				text: messageText,
 				delivery,
-				...(imageUrls ? { images: imageUrls } : {}),
+				...(images ? { images } : {}),
 				...destination,
 			});
 			const sentToSessionId = sentFromSessionId ?? createdSessionId;
@@ -1028,16 +1027,13 @@
 	}
 
 	/** Ask replies and queued edits use the same unsent composer draft. */
-	function addToDraft(text: string, images: readonly string[] = []) {
+	function addToDraft(text: string, images: readonly AttachmentRef[] = []) {
 		composerDraft.text = composerDraft.text.trim() ? `${composerDraft.text.trimEnd()}\n\n${text}` : text;
 		handleInput();
 		cursorPos = composerDraft.text.length;
 		pendingAttachments = [
 			...pendingAttachments,
-			...images.map((dataUrl) => {
-				const { mime, name, size } = parseAttachmentDataUrl(dataUrl);
-				return { id: crypto.randomUUID(), dataUrl, name: name ?? (mime.startsWith("image/") ? "image" : "file"), size };
-			}),
+			...images.map((ref) => ({ id: crypto.randomUUID(), ref, name: ref.name ?? ref.mime })),
 		];
 		textareaEl?.focus();
 	}

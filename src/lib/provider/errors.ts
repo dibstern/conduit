@@ -46,6 +46,7 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 	readonly cause: unknown;
 	/** A concrete remedy the account picker can present, or a process fence. */
 	readonly code?:
+		| "attachment_missing"
 		| "auth_required"
 		| "codex_version_unsupported"
 		| "provider_process_gone"

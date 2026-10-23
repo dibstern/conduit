@@ -1787,6 +1787,7 @@ function settleRunCommands(
 				: null;
 			yield* sql`UPDATE provider_command_outbox
 				SET status = ${status === "completed" ? "completed" : retryable ? "retryable_failed" : "failed"},
+					payload_json = CASE WHEN ${retryable} OR NOT json_valid(payload_json) THEN payload_json ELSE json_remove(payload_json, '$.images') END,
 					error_code = ${code}, next_attempt_at = ${retryAt}, updated_at = ${event.createdAt}
 				WHERE request_sequence = ${command.request_sequence} AND project_key = ${command.project_key}`;
 			yield* sql`UPDATE command_receipts

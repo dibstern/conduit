@@ -14,7 +14,11 @@ import {
 
 export class AttachmentMissing extends Data.TaggedError("AttachmentMissing")<{
 	readonly hash: string;
-}> {}
+}> {
+	get message(): string {
+		return `AttachmentMissing: attachment ${this.hash} is unavailable`;
+	}
+}
 
 export interface AttachmentStore {
 	readonly put: (

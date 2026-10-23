@@ -13,6 +13,7 @@ import {
 } from "../shared-types.js";
 import { AccountChangeRejected } from "./account.js";
 import { AccountColorSlotSchema } from "./account-color.js";
+import { AttachmentRefSchema } from "./attachment-ref.js";
 import {
 	CategorySetContentsSchema,
 	CategorySetRejected,
@@ -2804,7 +2805,9 @@ export const StartSideThread = Rpc.make("StartSideThread", {
 		title: NonEmptyString,
 		inputId: NonEmptyString,
 		text: NonEmptyString,
-		images: Schema.optional(Schema.Array(Schema.String)),
+		images: Schema.optional(
+			Schema.Array(Schema.Union([Schema.String, AttachmentRefSchema])),
+		),
 		originId: Schema.optional(NonEmptyString),
 	}),
 	success: Schema.Struct({ sessionId: Schema.String }),
@@ -2898,7 +2901,9 @@ export const SubmitInput = Rpc.make("input.submit", {
 		sessionId: NonEmptyString,
 		inputId: NonEmptyString,
 		text: Schema.String,
-		images: Schema.optional(Schema.Array(Schema.String)),
+		images: Schema.optional(
+			Schema.Array(Schema.Union([Schema.String, AttachmentRefSchema])),
+		),
 		delivery: Schema.Literals([...INPUT_DELIVERIES]),
 		originId: Schema.optional(NonEmptyString),
 	}),

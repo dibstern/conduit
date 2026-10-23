@@ -5,6 +5,7 @@
 
 import type { Effect, Scope } from "effect";
 import type { Account } from "../contracts/account.js";
+import type { AttachmentRef } from "../contracts/attachment-ref.js";
 import type { ProviderSessionCapabilities } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import type {
@@ -317,10 +318,18 @@ export interface SendTurnInput
 	readonly sideThread?: boolean;
 	readonly variant?: string;
 	readonly contextWindow?: string;
-	/** Base64 data URLs for images, plain text and PDFs. Retains the wire field name. */
-	readonly images?: readonly string[];
+	/** Stored references for images, plain text and PDFs. */
+	readonly images?: readonly AttachmentRef[];
 	readonly agent?: string;
 }
+
+/** Bytes exist only at adapter execution; placement keeps the original ref. */
+export type ResolvedSendTurnInput = Omit<SendTurnInput, "images"> & {
+	readonly images?: readonly {
+		readonly ref: AttachmentRef;
+		readonly dataUrl: string;
+	}[];
+};
 
 /** Launch inputs only: pre-warming never admits a user turn. */
 export type PreWarmSessionInput = Pick<
@@ -448,7 +457,7 @@ export interface ProviderInstance {
 
 	/** Send a user turn to the provider and stream response events via EventSink */
 	sendTurnEffect(
-		input: SendTurnInput,
+		input: ResolvedSendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure>;
 
 	/** Report a live cursor, including its cleared state, without writing a receipt. */

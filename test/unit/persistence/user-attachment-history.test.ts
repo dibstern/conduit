@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { expect, it } from "vitest";
+import { makeAttachmentStore } from "../../../src/lib/persistence/attachment-store.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -44,6 +45,8 @@ it("retains canonical user attachments through reopen, fork, browser history and
 			Effect.scoped(
 				Effect.gen(function* () {
 					const persist = yield* ClaudeEventPersistEffectTag;
+					const attachmentStore = yield* makeAttachmentStore;
+					const refs = yield* Effect.forEach(images, attachmentStore.put);
 					const commit = yield* makeCommitAndSignal;
 					yield* commit([
 						canonicalEvent("session.created", "parent", {
@@ -61,7 +64,7 @@ it("retains canonical user attachments through reopen, fork, browser history and
 							yield* persist.persistUserMessage("parent", content, {
 								messageId,
 								inputId: messageId,
-								images,
+								images: refs,
 							});
 					}
 				}).pipe(Effect.provide(layer())),
@@ -70,7 +73,6 @@ it("retains canonical user attachments through reopen, fork, browser history and
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const persist = yield* ClaudeEventPersistEffectTag;
 					const read = yield* ReadQueryEffectTag;
 					const source = yield* readForkSource("parent", { sideThread: false });
 					const commit = yield* makeCommitAndSignal;
@@ -161,6 +163,7 @@ it("retains attachment context when canonical parts become OpenCode REST snapsho
 		Effect.scoped(
 			Effect.gen(function* () {
 				const persist = yield* ClaudeEventPersistEffectTag;
+				const attachmentStore = yield* makeAttachmentStore;
 				const read = yield* ReadQueryEffectTag;
 				const threadRead = yield* makeClaudeThreadRead;
 				const commit = yield* makeCommitAndSignal;
@@ -174,7 +177,9 @@ it("retains attachment context when canonical parts become OpenCode REST snapsho
 				yield* persist.persistUserMessage("opencode-session", "", {
 					messageId: "message",
 					provider: "opencode",
-					images: parts.map(({ url }) => url),
+					images: yield* Effect.forEach(parts, ({ url }) =>
+						attachmentStore.put(url),
+					),
 				});
 				const before = yield* threadRead("opencode-session", { limit: 20 });
 				expect(

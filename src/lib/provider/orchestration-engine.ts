@@ -28,6 +28,7 @@ import type { AccountDirectory } from "../domain/daemon/Services/account-directo
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
+import type { AttachmentStore } from "../persistence/attachment-store.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
 import type {
 	CommitAndSignal,
@@ -73,6 +74,7 @@ import {
 	InMemoryProviderSessionBindingReadModel,
 	type ProviderSessionBindingReadModel,
 } from "./provider-session-binding-read-model.js";
+import { resolveTurnImages } from "./resolve-turn-images.js";
 import type {
 	EventSink,
 	PermissionDecision,
@@ -240,6 +242,7 @@ export interface ProviderCallRequest {
 
 export interface OrchestrationEngineOptions {
 	readonly registry: ProviderRegistry;
+	readonly attachmentStore?: Pick<AttachmentStore, "get">;
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
@@ -310,6 +313,7 @@ const admittedCallSchema = Schema.Struct({
 
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
+	private readonly attachmentStore: OrchestrationEngineOptions["attachmentStore"];
 	private readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
 	private readonly accountDirectory: OrchestrationEngineOptions["accountDirectory"];
 	private readonly resolveCallContext: OrchestrationEngineOptions["resolveCallContext"];
@@ -338,6 +342,7 @@ export class OrchestrationEngine {
 
 	constructor(options: OrchestrationEngineOptions) {
 		this.registry = options.registry;
+		this.attachmentStore = options.attachmentStore;
 		this.sessionBindingReadModel =
 			options.sessionBindingReadModel ??
 			new InMemoryProviderSessionBindingReadModel();
@@ -359,6 +364,9 @@ export class OrchestrationEngine {
 				),
 				reactor: new ProviderSideEffectReactor({
 					sql: durable.sql,
+					...(options.attachmentStore
+						? { attachmentStore: options.attachmentStore }
+						: {}),
 					...(durable.projectKey === undefined
 						? {}
 						: { projectId: durable.projectKey }),
@@ -1389,8 +1397,25 @@ export class OrchestrationEngine {
 					command.providerId,
 				),
 			);
+			const input = yield* resolveTurnImages(
+				command.input,
+				this.attachmentStore,
+			).pipe(
+				Effect.mapError(
+					(cause) =>
+						new ProviderInstanceFailure({
+							providerId: command.providerId,
+							operation: "resolveTurnImages",
+							...(cause._tag === "AttachmentMissing"
+								? { code: "attachment_missing" as const }
+								: {}),
+							cause,
+						}),
+				),
+				Effect.tapError(() => restorePreviousBinding),
+			);
 			const sendEffect = yield* Effect.try({
-				try: () => instance.sendTurnEffect(command.input),
+				try: () => instance.sendTurnEffect(input),
 				catch: (cause) =>
 					new ProviderInstanceFailure({
 						providerId: command.providerId,

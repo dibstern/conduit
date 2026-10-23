@@ -26,14 +26,14 @@
 			style="-webkit-overflow-scrolling: touch"
 		>
 			{#each images as image (image.id)}
-				{#if image.dataUrl.startsWith("data:image/")}
+				{#if "dataUrl" in image && image.dataUrl.startsWith("data:image/")}
 				<ImageAttachmentThumb src={image.dataUrl} name={image.name} imageId={image.id} onremove={(event) => {
 						event.preventDefault();
 						event.stopPropagation();
 						onRemove(image.id);
 				}} />
 				{:else}
-					<FileAttachmentChip testid="file-attachment-chip" name={image.name} detail={formatFileSize(image.size)} onremove={() => onRemove(image.id)} />
+					<FileAttachmentChip testid="file-attachment-chip" name={image.name} detail={"ref" in image ? image.ref.mime : formatFileSize(image.size)} onremove={() => onRemove(image.id)} />
 				{/if}
 			{/each}
 		</div>

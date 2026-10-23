@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { Context, Data, Effect, Result, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
-import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import { sessionCreatedLineage } from "../../contracts/session-ref.js";
 import {
@@ -17,6 +17,7 @@ import {
 	type PickRejection,
 } from "../../provider/turn-settings.js";
 import { isRecord } from "../../utils.js";
+import { AttachmentMissing, makeAttachmentStore } from "../attachment-store.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -60,7 +61,8 @@ export class ClaudeSessionLifecycleError extends Data.TaggedError(
 
 export type ClaudeEventPersistFailure =
 	| ClaudeEventPersistEffectError
-	| ClaudeSessionLifecycleError;
+	| ClaudeSessionLifecycleError
+	| AttachmentMissing;
 
 export interface ClaudeEventPersistEffect {
 	readonly persistHandoffDelivered: (
@@ -95,7 +97,7 @@ export interface ClaudeEventPersistEffect {
 			/** The reservation this placement belongs to; this does not prove intake. */
 			readonly runId?: string;
 			readonly provider?: string;
-			readonly images?: readonly string[];
+			readonly images?: readonly AttachmentRef[];
 			/** Place an unsent input and its owned failure in one transaction. */
 			readonly failure?: {
 				readonly message: string;
@@ -397,6 +399,7 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 	eventStore: UnboundEventStoreEffect & { readonly projectId?: string },
 ) {
 	const sql = yield* SqlClient.SqlClient;
+	const attachments = yield* makeAttachmentStore;
 	const requireUndeletedSession = (
 		sessionId: string,
 		operation: ClaudeSessionLifecycleError["operation"],
@@ -518,7 +521,8 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 		(operation: string) =>
 		(cause: unknown): ClaudeEventPersistFailure =>
 			cause instanceof ClaudeEventPersistEffectError ||
-			cause instanceof ClaudeSessionLifecycleError
+			cause instanceof ClaudeSessionLifecycleError ||
+			cause instanceof AttachmentMissing
 				? cause
 				: new ClaudeEventPersistEffectError({ operation, cause });
 
@@ -724,19 +728,22 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 						),
 					);
 				}
-				const attachments = yield* Effect.try({
-					try: () =>
-						(alreadyPlaced ? [] : (options?.images ?? [])).map((url) => ({
-							...parseAttachmentDataUrl(url),
-							url,
-						})),
-					catch: (cause) =>
-						new ClaudeEventPersistEffectError({
-							operation: "persistUserMessage",
-							cause,
-						}),
-				});
-				for (const [index, attachment] of attachments.entries()) {
+				for (const [index, ref] of (alreadyPlaced
+					? []
+					: (options?.images ?? [])
+				).entries()) {
+					const blob = yield* attachments
+						.get(ref.attachmentHash)
+						.pipe(
+							Effect.catchTag("AttachmentMissing", (error) =>
+								options?.failure
+									? Effect.succeed(undefined)
+									: Effect.fail(error),
+							),
+						);
+					if (!blob) continue;
+					// TODO(conduit-test-mryl.10): remove this temporary ref-to-data-URL mapping.
+					const url = `data:${blob.mime}${ref.name !== undefined ? `;name=${encodeURIComponent(ref.name)}` : ""};base64,${Buffer.from(blob.bytes).toString("base64")}`;
 					events.push(
 						canonicalEvent(
 							"file.attached",
@@ -744,11 +751,9 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 							{
 								messageId: userMsgId,
 								partId: `${userMsgId}-attachment-${index}`,
-								mime: attachment.mime,
-								...(attachment.name !== undefined
-									? { filename: attachment.name }
-									: {}),
-								url: attachment.url,
+								mime: ref.mime,
+								...(ref.name !== undefined ? { filename: ref.name } : {}),
+								url,
 							},
 							{ provider, createdAt: now },
 						),

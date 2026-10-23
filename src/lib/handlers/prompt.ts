@@ -3,8 +3,10 @@ import {
 	AttachmentValidationError,
 	validateAttachmentDataUrls,
 } from "../attachment-data-url.js";
+import type { AttachmentRef } from "../contracts/attachment-ref.js";
 import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
 import type { InputDraftKey } from "../contracts/ws-rpc.js";
+import { AttachmentStoreTag } from "../domain/persistence/Services/attachment-store.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
 import { DraftPreWarmTag } from "../domain/relay/Services/draft-prewarm.js";
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
@@ -22,7 +24,7 @@ import { assertSessionRunnerAvailable } from "../provider/runner/runner-provider
 
 interface LegacyMessagePayload {
 	text: string;
-	images?: string[];
+	images?: (string | AttachmentRef)[];
 	commandId?: string;
 }
 
@@ -30,7 +32,7 @@ export interface SendMessageToSessionInput {
 	readonly clientId: string;
 	readonly sessionId: string | undefined;
 	readonly text: string;
-	readonly images?: readonly string[];
+	readonly images?: readonly (string | AttachmentRef)[];
 	readonly commandId: string;
 	/** A steer joins the running turn of a busy session, or is refused. */
 	readonly delivery?: InputDelivery;
@@ -48,7 +50,10 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 	Effect.gen(function* () {
 		// Reject direct RPC payloads before preparing a session or writing its inbox.
 		yield* Effect.try({
-			try: () => validateAttachmentDataUrls(input.images),
+			try: () =>
+				validateAttachmentDataUrls(
+					input.images?.filter((image) => typeof image === "string"),
+				),
 			catch: (cause) =>
 				new AttachmentValidationError(
 					cause instanceof Error ? cause.message : String(cause),
@@ -58,8 +63,18 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
 		const { clientId, text, images } = input;
-		const imageList =
-			images && images.length > 0 ? Array.from(images) : undefined;
+		const imageList = images?.length
+			? yield* Effect.gen(function* () {
+					const store = yield* AttachmentStoreTag;
+					return yield* Effect.forEach(images, (image) =>
+						Effect.gen(function* () {
+							if (typeof image === "string") return yield* store.put(image);
+							yield* store.get(image.attachmentHash);
+							return image;
+						}),
+					);
+				})
+			: undefined;
 		let activeId = input.sessionId;
 		if (!text && !imageList)
 			return {

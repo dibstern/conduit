@@ -961,7 +961,10 @@ export const sessionsHandlers = {
 		Effect.gen(function* () {
 			// Validate before the fork creates any events or provider commands.
 			yield* Effect.try({
-				try: () => validateAttachmentDataUrls(request.images),
+				try: () =>
+					validateAttachmentDataUrls(
+						request.images?.filter((image) => typeof image === "string"),
+					),
 				catch: (cause) =>
 					new WsRpcError({
 						message: cause instanceof Error ? cause.message : String(cause),

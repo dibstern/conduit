@@ -549,7 +549,9 @@ export class CodexRunnerPayload implements RunnerPayload {
 											inputId: input.inputId,
 											...(input.runId ? { runId: input.runId } : {}),
 											text: input.text ?? input.prompt,
-											...(input.images?.length ? { images: input.images } : {}),
+											...(input.images?.length
+												? { images: input.images.map(({ ref }) => ref) }
+												: {}),
 										},
 									});
 							});
@@ -722,9 +724,9 @@ export class CodexRunnerPayload implements RunnerPayload {
 											text_elements: [],
 										},
 										...(skill._tag === "Some" ? [skill.value] : []),
-										...(input.images ?? []).map((url) => ({
+										...(input.images ?? []).map(({ dataUrl }) => ({
 											type: "image",
-											url,
+											url: dataUrl,
 										})),
 									],
 									cwd: current.cwd,
@@ -1048,7 +1050,9 @@ export class CodexRunnerPayload implements RunnerPayload {
 									inputId: input.inputId,
 									...(input.runId ? { runId: input.runId } : {}),
 									text: input.text ?? input.prompt,
-									...(input.images?.length ? { images: input.images } : {}),
+									...(input.images?.length
+										? { images: input.images.map(({ ref }) => ref) }
+										: {}),
 								},
 							});
 						if (input.runId && active.state.items.runId) {
@@ -1142,7 +1146,10 @@ export class CodexRunnerPayload implements RunnerPayload {
 							clientUserMessageId: input.inputId,
 							input: [
 								{ type: "text", text: input.prompt, text_elements: [] },
-								...(input.images ?? []).map((url) => ({ type: "image", url })),
+								...(input.images ?? []).map(({ dataUrl }) => ({
+									type: "image",
+									url: dataUrl,
+								})),
 							],
 						},
 						TurnSteerResponseSchema,

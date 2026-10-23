@@ -6,6 +6,7 @@
      comes back through the stream, on every client. Whether Steer shows, and
      whether it is enabled, is the server's call too (the inbox arm). -->
 <script lang="ts">
+	import type { AttachmentRef } from "../../../contracts/attachment-ref.js";
 	import type { SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { LimitRecovery } from "../../../contracts/limit-recovery.js";
 	import type { PendingInput } from "../../stores/chat.svelte.js";
@@ -46,7 +47,7 @@
 		/** Steer on queued rows: hidden when undefined; Steer and Run now are disabled while a prompt is open. */
 		steer?: "ready" | "prompt_open" | undefined;
 		/** Takes back a queued input that Edit removed. */
-		onEdit: (text: string, images: readonly string[]) => void;
+		onEdit: (text: string, images: readonly AttachmentRef[]) => void;
 		/** The server refused to steer a row, which stays queued. */
 		onSteerRefused: (reason: SteerBlocker) => void;
 	} = $props();
@@ -105,7 +106,7 @@
 		<ol aria-label="Queued messages" class="flex flex-col gap-[2px]">
 			{#each inputs as input, index (input.inputId)}
 				{@const images = input.request.images?.length ?? 0}
-				{@const hasFiles = input.request.images?.some((url) => !url.startsWith("data:image/")) ?? false}
+				{@const hasFiles = input.request.images?.some((ref) => !ref.mime.startsWith("image/")) ?? false}
 				{@const command = input.request.text.trimStart().startsWith("/")}
 				<ComposerQueueRow id={`${trayId}-row-${index}`} data-testid="pending-input-row" data-input-id={input.inputId}>
 					{#snippet badge()}

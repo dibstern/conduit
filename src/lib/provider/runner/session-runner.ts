@@ -1,4 +1,5 @@
 import type { Effect } from "effect";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { UsageHarness } from "../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
@@ -19,6 +20,7 @@ import type {
 	ProviderControlContext,
 	ProviderNativeSession,
 	QuestionRequest,
+	ResolvedSendTurnInput,
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
@@ -27,6 +29,12 @@ import type { RunnerSettingsSnapshot } from "./runner-upgrade.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
 export type SessionTurn = Omit<
+	ResolvedSendTurnInput,
+	"eventSink" | "abortSignal" | "awaitIntake" | "reconcileIntake"
+>;
+
+/** The outbox keeps refs until replay crosses the provider boundary. */
+export type DurableSessionTurn = Omit<
 	SendTurnInput,
 	"eventSink" | "abortSignal" | "awaitIntake" | "reconcileIntake"
 >;
@@ -167,7 +175,7 @@ export type SessionOutput =
 						readonly inputId: string;
 						readonly text: string;
 						readonly runId?: string;
-						readonly images?: readonly string[];
+						readonly images?: readonly AttachmentRef[];
 					};
 			  }
 			| {
@@ -212,8 +220,13 @@ export interface SessionRunner {
 		sessionIds: readonly string[],
 	): Effect.Effect<void, SessionFailure>;
 	/** Retains the admitted account before preparation and through native cleanup. */
-	withTurnEffect?<A, E, R>(
-		input: SessionTurn,
+	withTurnEffect?<
+		A,
+		E,
+		R,
+		T extends Pick<SessionTurn, "sessionId" | "inputId" | "account">,
+	>(
+		input: T,
 		sinkId: string,
 		work: Effect.Effect<A, E, R>,
 	): Effect.Effect<A, E | SessionFailure, R>;

@@ -23,7 +23,7 @@ import type {
 	EventSink,
 	PermissionDecision,
 	PreWarmSessionInput,
-	SendTurnInput,
+	ResolvedSendTurnInput,
 } from "../types.js";
 import type { ClaudeGoalTracker } from "./claude-goal-tracker.js";
 import type { ClaudeMessageOwnership } from "./claude-message-ownership.js";
@@ -39,7 +39,7 @@ export const THREAD_READ_MCP_SERVER = "conduit";
 export const THREAD_READ_TOOL_NAME = "conduit_thread_read";
 export const THREAD_READ_QUALIFIED_NAME = `mcp__${THREAD_READ_MCP_SERVER}__${THREAD_READ_TOOL_NAME}`;
 
-export type ClaudeSendTurnInput = SendTurnInput & ClaudeLaunchConfig;
+export type ClaudeSendTurnInput = ResolvedSendTurnInput & ClaudeLaunchConfig;
 export type ClaudePreWarmSessionInput = PreWarmSessionInput &
 	ClaudeLaunchConfig;
 
