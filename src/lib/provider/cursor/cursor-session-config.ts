@@ -15,6 +15,18 @@ export interface CursorSessionConfig {
 	};
 }
 
+export function cursorSessionDirs(
+	cwd: string | undefined,
+	workspaceRoot: string | undefined,
+	extraFolders: readonly string[],
+): string[] {
+	return [...new Set([workspaceRoot, ...extraFolders])]
+		.filter(
+			(folder): folder is string => folder !== undefined && folder !== cwd,
+		)
+		.sort();
+}
+
 /** cwd is the agent's original lookup identity; workspace changes become dirs. */
 export function cursorSessionConfig(input: {
 	readonly cwd: string;
@@ -30,9 +42,11 @@ export function cursorSessionConfig(input: {
 	return {
 		agent: {
 			cwd: input.cwd,
-			dirs: [...new Set([input.workspaceRoot, ...input.extraFolders])]
-				.filter((folder) => folder !== input.cwd)
-				.sort(),
+			dirs: cursorSessionDirs(
+				input.cwd,
+				input.workspaceRoot,
+				input.extraFolders,
+			),
 			settingSources: ["project", "user", "team", "mdm", "plugins"],
 			storePath: input.storePath,
 			sandboxOptions: { enabled: mode !== "full" },

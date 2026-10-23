@@ -78,7 +78,7 @@ export function cursorAskUserTool(
 			const existing = calls.get(callId);
 			if (existing) return existing;
 			const answer = new Promise<string>((resolve) => {
-				// cancel/close do not stop custom callbacks in SDK 1.0.37.
+				// The SDK's cancel/close do not stop custom tool callbacks.
 				const onAbort = () => resolve(CANCELLED);
 				signal.addEventListener("abort", onAbort, { once: true });
 				const aborted = Effect.callback<string>((resume) => {

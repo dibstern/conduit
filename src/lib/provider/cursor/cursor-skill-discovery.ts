@@ -1,13 +1,47 @@
+import { execFile } from "node:child_process";
 import { lstat, open, opendir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import {
+	basename,
+	dirname,
+	isAbsolute,
+	join,
+	relative,
+	resolve,
+	sep,
+} from "node:path";
+import { promisify } from "node:util";
 import { Effect, Schema } from "effect";
 import { parse } from "yaml";
 import type { DiscoveredSkill } from "../types.js";
+import type { CursorAgentOptions } from "./sdk-port.js";
 
-// @cursor/sdk 1.0.37, dist/esm/464.js: oh/ch/lh, rh/ih and vh.
-// Local SDK mode enables third-party extensibility. Keep this list in its order.
+// Pinned against SDK 1.0.40 by cursor-skills-real-sdk.test.ts's offline rows.
 const CONFIG_DIRS = [".cursor", ".claude", ".codex", ".grok", ".agents"];
+type SkillRoot = "workspace" | "nested" | "home" | "managed" | "plugin";
+// Root       | Rule
+// workspace  | Git toplevel for one root; deduplicated cwd + dirs otherwise.
+// nested     | Same realpath filter as workspace; follow directory symlinks.
+// home       | Realpath homedir, only with the user source enabled.
+// managed    | Team source; trust the on-disk managed cache.
+// plugin     | Plugin bootstrap rules only; no workspace/home filter.
+const SKILL_SOURCES: Record<SkillRoot, DiscoveredSkill["source"]> = {
+	workspace: "project-skill",
+	nested: "project-skill",
+	home: "user-skill",
+	managed: "user-skill",
+	plugin: "plugin-skill",
+};
+const execFileAsync = promisify(execFile);
+const gitToplevel = (cwd: string) =>
+	execFileAsync("git", ["rev-parse", "--show-toplevel"], {
+		cwd,
+		encoding: "utf8",
+		timeout: 5000,
+		maxBuffer: 64 * 1024,
+	})
+		.then(({ stdout }) => stdout.trim() || undefined)
+		.catch(() => undefined);
 const SKIPPED_DIRS = new Set(["node_modules", "__pycache__", "dist", "build"]);
 const MAX_DEPTH = 10;
 const MAX_ENTRIES = 8192;
@@ -116,9 +150,44 @@ async function readSkill(
 }
 
 export const discoverCursorSkillsEffect = (
-	workspaceRoot: string,
+	cwd: string,
+	options: Partial<Pick<CursorAgentOptions, "dirs" | "settingSources">> = {},
 ): Effect.Effect<DiscoveredSkill[]> =>
 	Effect.tryPromise(async () => {
+		const sources = options.settingSources ?? [
+			"project",
+			"user",
+			"team",
+			"mdm",
+			"plugins",
+		];
+		const folders = [
+			...new Map(
+				[cwd, ...(options.dirs ?? [])].map((path) => [resolve(path), path]),
+			).values(),
+		];
+		const gitRoot = folders.length === 1 ? await gitToplevel(cwd) : undefined;
+		const workspaceRoots =
+			folders.length === 1 && gitRoot ? [gitRoot] : folders;
+		const home = homedir();
+		const managedRoot = join(home, ".cursor", "skills-cursor");
+		// Treat the on-disk managed cache as synced; offline, the SDK excludes it.
+		const includeManaged = sources.includes("team");
+		// Match the SDK's case-sensitive, slash-normalized realpath comparison.
+		const normalize = (path: string) =>
+			path.replace(/\\/g, "/").replace(/\/+$/, "");
+		const canonical = async (path: string) =>
+			normalize(await realpath(path).catch(() => path));
+		const allowedRoots = await Promise.all(
+			[
+				...(sources.includes("project") ? workspaceRoots : []),
+				...(sources.includes("user") ? [home] : []),
+				...(includeManaged ? [managedRoot] : []),
+			].map(canonical),
+		);
+		const canonicalManaged = await canonical(managedRoot);
+		const inside = (path: string, root: string) =>
+			path === root || path.startsWith(`${root}/`);
 		const commands = new Map<string, DiscoveredSkill>();
 		const visited = new Set<string>();
 		let entries = 0;
@@ -129,15 +198,23 @@ export const discoverCursorSkillsEffect = (
 			commands.size >= MAX_SKILLS;
 		const collect = async (
 			directory: string,
-			source: DiscoveredSkill["source"],
+			kind: Exclude<SkillRoot, "plugin">,
 		) => {
-			const command = await readSkill(directory, source);
+			const path = await realpath(join(directory, "SKILL.md")).catch(
+				() => undefined,
+			);
+			if (!path) return;
+			const file = normalize(path);
+			if (
+				(!includeManaged && inside(file, canonicalManaged)) ||
+				!allowedRoots.some((root) => inside(file, root))
+			)
+				return;
+			const command = await readSkill(directory, SKILL_SOURCES[kind]);
 			if (command && !commands.has(command.name))
 				commands.set(command.name, command);
 		};
-		const scan = async (root: string, source: DiscoveredSkill["source"]) => {
-			const canonicalRoot = await realpath(root).catch(() => undefined);
-			if (!canonicalRoot) return;
+		const scan = async (root: string, kind: Exclude<SkillRoot, "plugin">) => {
 			const pending = [{ path: root, depth: 0 }];
 			for (let index = 0; index < pending.length && !exhausted(); index++) {
 				const current = pending[index];
@@ -146,16 +223,6 @@ export const discoverCursorSkillsEffect = (
 				if (!canonical || visited.has(canonical)) continue;
 				visited.add(canonical);
 				directories++;
-				const outside = relative(canonicalRoot, canonical);
-				if (
-					outside === ".." ||
-					outside.startsWith(`..${sep}`) ||
-					isAbsolute(outside)
-				) {
-					// Linked skills may expose their own document, never the target's descendants.
-					await collect(current.path, source);
-					continue;
-				}
 				const dir = await opendir(current.path).catch(() => undefined);
 				if (!dir) continue;
 				for await (const entry of dir) {
@@ -165,7 +232,7 @@ export const discoverCursorSkillsEffect = (
 						entry.name === "SKILL.md" &&
 						(entry.isFile() || entry.isSymbolicLink())
 					)
-						await collect(current.path, source);
+						await collect(current.path, kind);
 					if (
 						current.depth >= MAX_DEPTH ||
 						entry.name.startsWith(".") ||
@@ -180,23 +247,21 @@ export const discoverCursorSkillsEffect = (
 				}
 			}
 		};
-		for (const [directory, source] of [
-			[workspaceRoot, "project-skill"],
-			[homedir(), "user-skill"],
+		for (const [directory, kind] of [
+			...(sources.includes("project")
+				? workspaceRoots.map((root) => [root, "workspace"] as const)
+				: []),
+			...(sources.includes("user") ? [[home, "home"] as const] : []),
 		] as const) {
 			for (const config of CONFIG_DIRS) {
 				if (exhausted()) break;
-				await scan(join(directory, config, "skills"), source).catch(
+				await scan(join(directory, config, "skills"), kind).catch(
 					() => undefined,
 				);
 			}
 		}
-		// VC.prepareLocalExtensibility enables this managed cache after team sync.
-		if (!exhausted())
-			await scan(
-				join(homedir(), ".cursor", "skills-cursor"),
-				"user-skill",
-			).catch(() => undefined);
+		if (includeManaged && !exhausted())
+			await scan(managedRoot, "managed").catch(() => undefined);
 		const within = (root: string, path: string) => {
 			const offset = relative(root, path);
 			return (
@@ -276,7 +341,7 @@ export const discoverCursorSkillsEffect = (
 				if (!commands.has(name))
 					commands.set(name, {
 						name,
-						source: "plugin-skill",
+						source: SKILL_SOURCES.plugin,
 						location: { _tag: "File", path, root },
 						...(typeof fm["description"] === "string"
 							? { description: fm["description"] }
@@ -292,7 +357,7 @@ export const discoverCursorSkillsEffect = (
 		const localRoot = await realpath(
 			join(homedir(), ".cursor", "plugins", "local"),
 		).catch(() => undefined);
-		if (localRoot)
+		if (sources.includes("plugins") && localRoot)
 			for (const plugin of await pluginChildren(localRoot, localRoot, true)) {
 				if (exhausted()) break;
 				const root = await realpath(plugin).catch(() => undefined);
@@ -366,42 +431,47 @@ export const discoverCursorSkillsEffect = (
 				}
 			}
 		// SDK wh/NestedExtensibilityService also discovers package-local roots in Git workspaces.
-		let repository = false;
-		for (let path = workspaceRoot, depth = 0; depth <= MAX_DEPTH; depth++) {
-			if (await stat(join(path, ".git")).catch(() => undefined)) {
-				repository = true;
-				break;
-			}
-			const parent = dirname(path);
-			if (parent === path) break;
-			path = parent;
-		}
-		if (repository) {
-			const pending = [{ path: workspaceRoot, depth: 0 }];
-			for (let index = 0; index < pending.length && !exhausted(); index++) {
-				const current = pending[index];
-				if (!current) continue;
-				directories++;
-				const dir = await opendir(current.path).catch(() => undefined);
-				if (!dir) continue;
-				for await (const entry of dir) {
-					if (exhausted()) break;
-					entries++;
-					if (!entry.isDirectory()) continue;
-					if (current.depth > 0 && CONFIG_DIRS.includes(entry.name))
-						await scan(
-							join(current.path, entry.name, "skills"),
-							"project-skill",
-						).catch(() => undefined);
-					if (
-						current.depth < MAX_DEPTH &&
-						!entry.name.startsWith(".") &&
-						!SKIPPED_DIRS.has(entry.name)
-					)
-						pending.push({
-							path: join(current.path, entry.name),
-							depth: current.depth + 1,
-						});
+		if (sources.includes("project")) {
+			for (const workspaceRoot of workspaceRoots) {
+				if (!(await gitToplevel(workspaceRoot))) continue;
+				const pending = [{ path: workspaceRoot, depth: 0 }];
+				const visitedDirectories = new Set<string>();
+				for (let index = 0; index < pending.length && !exhausted(); index++) {
+					const current = pending[index];
+					if (!current) continue;
+					const canonical = await realpath(current.path).catch(() => undefined);
+					if (!canonical || visitedDirectories.has(canonical)) continue;
+					visitedDirectories.add(canonical);
+					directories++;
+					const dir = await opendir(current.path).catch(() => undefined);
+					if (!dir) continue;
+					for await (const entry of dir) {
+						if (exhausted()) break;
+						entries++;
+						const directory =
+							entry.isDirectory() ||
+							(entry.isSymbolicLink() &&
+								(
+									await stat(join(current.path, entry.name)).catch(
+										() => undefined,
+									)
+								)?.isDirectory());
+						if (!directory) continue;
+						if (current.depth > 0 && CONFIG_DIRS.includes(entry.name))
+							await scan(
+								join(current.path, entry.name, "skills"),
+								"nested",
+							).catch(() => undefined);
+						if (
+							current.depth < MAX_DEPTH &&
+							!entry.name.startsWith(".") &&
+							!SKIPPED_DIRS.has(entry.name)
+						)
+							pending.push({
+								path: join(current.path, entry.name),
+								depth: current.depth + 1,
+							});
+					}
 				}
 			}
 		}
