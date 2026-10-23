@@ -41,16 +41,27 @@ test.describe("Claude background work", () => {
 		const sessionId = decodeURIComponent(
 			harness.projectUrl.slice("/s/".length),
 		);
-		// The stored row: its status and how many turns have ended.
+		// Wake-up results complete messages after the run's one terminal.
 		const stored = () => {
 			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
 			try {
 				const row = db
 					.prepare(
-						"SELECT status, (SELECT COUNT(*) FROM events WHERE session_id = s.id AND type = 'turn.completed') AS turnEnds FROM sessions s WHERE id = ?",
+						`SELECT status,
+						 (SELECT COUNT(*) FROM events WHERE session_id = s.id AND type IN ('turn.completed', 'message.completed')) AS completedSegments,
+						 (SELECT COUNT(*) FROM events WHERE session_id = s.id AND type = 'turn.completed') AS terminals
+						 FROM sessions s WHERE id = ?`,
 					)
 					.get(sessionId);
-				return { status: row?.["status"], turnEnds: Number(row?.["turnEnds"]) };
+				return {
+					status: row?.["status"],
+					completedSegments: Number(row?.["completedSegments"]),
+					terminals: Number(row?.["terminals"]),
+					runs: db
+						.prepare("SELECT status FROM provider_runs WHERE session_id = ?")
+						.all(sessionId)
+						.map((run) => run["status"]),
+				};
 			} finally {
 				db.close();
 			}
@@ -87,7 +98,12 @@ test.describe("Claude background work", () => {
 
 			// The idle status is written just after the turn end, not with it.
 			// Wait for both, or the row is read while still busy from the turn.
-			await expect.poll(stored).toEqual({ status: "idle", turnEnds: 1 });
+			await expect.poll(stored).toEqual({
+				status: "idle",
+				completedSegments: 1,
+				terminals: 1,
+				runs: ["completed"],
+			});
 			// The sidebar stream is ordered, so once the second window shows a
 			// rename made after that, it has had the idle status too.
 			await page.getByTestId("session-bar-overflow").click();
@@ -141,7 +157,12 @@ test.describe("Claude background work", () => {
 			// The shell ending wakes the SDK into a turn of its own. Read the row
 			// once that has settled too, not in the gap before it starts.
 			harness.claudeReplayer?.release();
-			await expect.poll(stored).toEqual({ status: "idle", turnEnds: 2 });
+			await expect.poll(stored).toEqual({
+				status: "idle",
+				completedSegments: 2,
+				terminals: 1,
+				runs: ["completed"],
+			});
 			await expect(
 				row,
 				"the background shell ended but the sidebar still says working",

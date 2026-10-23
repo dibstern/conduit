@@ -1171,7 +1171,7 @@ test.describe("Claude replay lane", () => {
 					rpc((client) =>
 						client.SwitchModel({ ...target, providerId: "claude", modelId }),
 					),
-				/** Each provider result ends one turn; Stop adds no turn end. */
+				/** Run terminals; later message completions do not close another run. */
 				turnEnds: () =>
 					turnsOf.reduce(
 						(n, type) => n + countEvents(harness.eventsDbPath, type),
@@ -1908,9 +1908,13 @@ test.describe("Claude replay lane", () => {
 					)[0]?.status;
 				await s.app.sendMessage("Run sleep 8 in the background");
 				await expect.poll(s.turnEnds).toBe(1);
+				const completedSegments = () =>
+					countEvents(s.dbPath, "turn.completed") +
+					countEvents(s.dbPath, "message.completed");
 				// The shell ending wakes the SDK into a turn of its own.
 				harness.claudeReplayer?.release();
-				await expect.poll(s.turnEnds).toBe(2);
+				await expect.poll(completedSegments).toBe(2);
+				expect(s.turnEnds()).toBe(1);
 				await expect.poll(idle).toBe("idle");
 				// Stores from before user messages closed open turns kept turns that
 				// never started open, behind newer settled ones (live:
@@ -1928,7 +1932,8 @@ test.describe("Claude replay lane", () => {
 				const before = ledger(s.dbPath, s.sessionId);
 
 				await s.app.sendMessage("ping");
-				await expect.poll(s.turnEnds).toBe(3);
+				await expect.poll(completedSegments).toBe(3);
+				expect(s.turnEnds()).toBe(2);
 				await s.chat.waitForStreamingComplete();
 				const proof = ledger(s.dbPath, s.sessionId);
 				await testInfo.attach("idle-send-proof.json", {

@@ -930,8 +930,15 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			expect(state.commands).toHaveLength(1);
 			expect(state.commands[0]?.status).toBe("completed");
 			expect(
-				state.events.filter((event) => event.type === "turn.completed"),
+				state.events.filter(
+					(event) =>
+						event.type === "turn.completed" ||
+						event.type === "message.completed",
+				),
 			).toHaveLength(2);
+			expect(
+				state.events.filter((event) => event.type === "turn.completed"),
+			).toHaveLength(1);
 			expect(
 				state.events.filter(
 					(event) =>
