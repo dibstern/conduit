@@ -20,9 +20,8 @@ const meta = {
 		if (!hero) return;
 		await expect(hero.querySelectorAll("[data-conduit-mark]")).toHaveLength(1);
 		const ripples = hero.querySelectorAll("[data-flow-ripple]");
-		const sparkles = hero.querySelectorAll("[data-flow-sparkle]");
-		await expect(ripples).toHaveLength(2);
-		await expect(sparkles).toHaveLength(3);
+		await expect(ripples).toHaveLength(1);
+		await expect(hero.querySelectorAll("[data-flow-sparkle]")).toHaveLength(0);
 		await expect(hero.querySelectorAll("[data-flow-packet]")).toHaveLength(
 			args["animated"] ? 1 : 0,
 		);
@@ -38,11 +37,11 @@ const meta = {
 				await expect(style.animationName).toBe("none");
 			}
 		}
-		for (const sparkle of sparkles) {
-			const style = getComputedStyle(sparkle);
+		for (const packet of hero.querySelectorAll("[data-flow-packet]")) {
+			const style = getComputedStyle(packet);
 			if (moving) {
-				await expect(style.animationName).toContain("twinkle");
-				await expect(style.animationDuration).toBe("1.8s");
+				await expect(style.animationName).toContain("flow");
+				await expect(style.animationDuration).toBe("1.4s");
 			} else {
 				await expect(style.animationName).toBe("none");
 			}

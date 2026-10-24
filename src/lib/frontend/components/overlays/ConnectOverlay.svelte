@@ -142,7 +142,7 @@
 		<div class="absolute w-[400px] h-[400px] rounded-full pointer-events-none" style="top:50%;left:50%;transform:translate(-50%,-50%);background:radial-gradient(circle, rgb(from var(--color-accent) r g b / 0.08) 0%, rgb(from var(--color-success) r g b / 0.05) 40%, transparent 70%);"></div>
 
 		<div class="flex flex-col items-center gap-3 relative z-10">
-			<!-- Conduit logo with animated block grid -->
+			<!-- The shared Flow mark keeps connection progress consistent with sessions. -->
 			<ConduitLogo size="loading" animated={true} showText={true} />
 
 		<!-- Status text — only one of these renders at a time, no empty wrapper -->
