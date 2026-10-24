@@ -339,6 +339,7 @@ test("adds with the keyboard alone and cancels without creating a folder", async
 	await page.keyboard.press("Enter");
 	await page.keyboard.press("Escape");
 	await expect(dialog).toBeHidden();
+	await expect(page.getByTestId("session-scope-chip")).toBeFocused();
 	expect(existsSync(cancelled)).toBe(false);
 	await page.screenshot({
 		path: testInfo.outputPath("keyboard-current-scope.png"),

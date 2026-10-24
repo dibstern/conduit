@@ -40,6 +40,7 @@
 	let lookupError = $state("");
 	let input = $state<HTMLInputElement>();
 	let lookupVersion = 0;
+	const isPhone = $derived(sessionViewState.compact);
 	const isPathQuery = $derived(/^[/~]/.test(query.trim()));
 	const existing = $derived(entries.filter((entry) => entry.exists));
 	const newFolder = $derived(entries.find((entry) => !entry.exists));
@@ -131,8 +132,8 @@
 			bind:value={query}
 			size="content"
 			chrome="bare"
-			class="block h-[40px] w-full py-[8px] pl-[37px] pr-[12px] font-sans text-[14px] text-text placeholder:text-text-muted max-md:h-[42px] max-md:text-[16px]"
-			placeholder="Search folders, or type a path…"
+			class={isPhone ? "block h-[44px] w-full py-[8px] pl-[37px] pr-[12px] font-sans text-[16px] text-text placeholder:text-text-muted" : "block h-[40px] w-full py-[8px] pl-[37px] pr-[12px] font-sans text-[14px] text-text placeholder:text-text-muted max-md:h-[42px] max-md:text-[16px]"}
+			placeholder={isPhone ? "Search or type a path" : "Search folders, or type a path…"}
 			role="combobox"
 			aria-label="Add folder"
 			invalid={Boolean(lookupError)}
@@ -152,7 +153,7 @@
 	</div>
 	{#if expanded}
 		<div class="relative">
-			<DetachedListbox id={listboxId} ariaLabel="Folder matches" aria-multiselectable="true" class="overflow-y-auto" style={`border: none; background: transparent; box-shadow: none; ${sessionViewState.compact ? "" : `max-height: 280px; scroll-padding-bottom: ${newFolder ? 44 : 0}px;`}`}>
+			<DetachedListbox id={listboxId} ariaLabel="Folder matches" aria-multiselectable="true" class="overflow-y-auto" style={`border: none; background: transparent; box-shadow: none; ${isPhone ? "" : `max-height: 280px; scroll-padding-bottom: ${newFolder ? 44 : 0}px;`}`}>
 				{#each groups as group (group.label)}
 					{#if group.entries.length}
 						<div role="group" aria-label={group.label}>
@@ -161,10 +162,10 @@
 								{@const index = matches.indexOf(entry)}
 								{@const name = entry.path.split("/").filter(Boolean).at(-1) ?? entry.path}
 								{@const shown = home && (entry.path === home || entry.path.startsWith(`${home}/`)) ? `~${entry.path.slice(home.length)}` : entry.path}
-								<div role="option" id={optionId(index)} aria-label={entry.path} aria-selected={selectedPaths.includes(entry.path)} aria-disabled={disabled} tabindex={-1} data-testid="folder-picker-row" data-path={entry.path} class={`flex h-[44px] cursor-pointer items-center gap-[11px] rounded-[10px] px-[10px] text-text hover:bg-hover ${activeIndex === index ? "bg-hover" : ""} ${disabled ? "pointer-events-none opacity-50" : ""}`} onpointerdown={(event) => event.preventDefault()} onpointerenter={() => activeIndex = index} onclick={() => toggle(entry)} onkeydown={navigateMatches}>
+								<div role="option" id={optionId(index)} aria-label={entry.path} aria-selected={selectedPaths.includes(entry.path)} aria-disabled={disabled} tabindex={-1} data-testid="folder-picker-row" data-path={entry.path} class={`flex ${isPhone ? "h-[52px]" : "h-[44px]"} cursor-pointer items-center gap-[11px] rounded-[10px] px-[10px] text-text hover:bg-hover ${activeIndex === index ? "bg-hover" : ""} ${disabled ? "pointer-events-none opacity-50" : ""}`} onpointerdown={(event) => event.preventDefault()} onpointerenter={() => activeIndex = index} onclick={() => toggle(entry)} onkeydown={navigateMatches}>
 									{@render tickBox(selectedPaths.includes(entry.path))}
 									<div class="min-w-0 flex-1">
-										<div class="truncate text-[14px] leading-[20px]">{name}</div>
+										<div class={isPhone ? "truncate text-[15px] leading-[20px]" : "truncate text-[14px] leading-[20px]"}>{name}</div>
 										<div class="truncate font-mono text-[12px] leading-[16px] text-text-muted" title={entry.path}>{shown}</div>
 									</div>
 									{#if entry.isGitRepo}<Badge variant="chip">git</Badge>{/if}
@@ -175,7 +176,7 @@
 				{/each}
 				{#if newFolder}
 					<div class={`bg-bg-alt md:sticky md:bottom-0 ${matches.length ? "border-t border-border-subtle" : ""}`}>
-						<div role="option" id={optionId(matches.length)} aria-selected={selectedPaths.includes(newFolder.path)} aria-disabled={disabled} tabindex={-1} class={`flex min-h-[44px] cursor-pointer items-center gap-[7px] py-[6px] pl-[10px] pr-[90px] text-[12px] text-text ${activeIndex === matches.length ? "bg-hover" : ""} ${disabled ? "pointer-events-none opacity-50" : ""}`} onpointerdown={(event) => event.preventDefault()} onpointerenter={() => activeIndex = matches.length} onclick={() => newFolder && toggle(newFolder)} onkeydown={navigateMatches}>
+						<div role="option" id={optionId(matches.length)} aria-selected={selectedPaths.includes(newFolder.path)} aria-disabled={disabled} tabindex={-1} data-phone={isPhone || undefined} class={`flex min-h-[44px] data-[phone]:min-h-[52px] cursor-pointer items-center gap-[7px] py-[6px] pl-[10px] pr-[90px] text-[12px] text-text ${activeIndex === matches.length ? "bg-hover" : ""} ${disabled ? "pointer-events-none opacity-50" : ""}`} onpointerdown={(event) => event.preventDefault()} onpointerenter={() => activeIndex = matches.length} onclick={() => newFolder && toggle(newFolder)} onkeydown={navigateMatches}>
 							{#if selectedPaths.includes(newFolder.path)}{@render tickBox(true)}{:else}<Icon name="plus" size={16} class="shrink-0 text-text-muted" />{/if}<span class="min-w-0 truncate">New folder "{newFolder.path.split("/").filter(Boolean).at(-1) ?? newFolder.path}"</span>
 						</div>
 					</div>

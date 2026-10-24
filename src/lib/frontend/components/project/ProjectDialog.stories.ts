@@ -368,10 +368,16 @@ export const KeyboardSave: Story = {
 		await userEvent.type(input, docs);
 		await canvas.findByRole("option", { name: docs });
 		await userEvent.keyboard("{Enter}");
-		await userEvent.keyboard("{Tab}{Tab}");
-		await expect(
-			canvas.getByRole("button", { name: `Make main: ${docs}` }),
-		).toHaveFocus();
+		// The phone sheet pins the chips below the form, so the Tab count differs by layout.
+		const makeMain = canvas.getByRole("button", { name: `Make main: ${docs}` });
+		for (
+			let step = 0;
+			step < 12 && document.activeElement !== makeMain;
+			step++
+		) {
+			await userEvent.tab();
+		}
+		await expect(makeMain).toHaveFocus();
 		await userEvent.keyboard("{Enter}");
 		await expect(input).toHaveFocus();
 		await userEvent.keyboard("{Control>}{Enter}{/Control}");

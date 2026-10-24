@@ -32,6 +32,7 @@
 	import Dialog from "../ui/Dialog.svelte";
 	import Field from "../ui/Field.svelte";
 	import Select from "../ui/Select.svelte";
+	import SheetChrome from "../ui/SheetChrome.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextInput from "../ui/TextInput.svelte";
@@ -216,21 +217,72 @@
 	</Select>
 {/snippet}
 
+{#snippet folderChips()}
+	{#if draft.folders.length === 0}
+		<p class="py-[12px] text-[12px] text-text-muted">No folders added yet</p>
+	{:else}
+		<ul aria-label="Project folders" class="flex flex-wrap gap-[6px]">
+			{#each draft.folders as folder, index (folderPath(folder))}
+				{@const path = folderPath(folder)}
+				{@const label = folderRoots[index]?.label ?? path}
+				{@const repository = project?.repositoryIdentities?.[path]}
+				{@const git = project?.git?.folders?.find(({ root }) => root === path) ?? (path === project?.folders[0] && !project?.git?.folders ? project?.git : undefined)}
+				<li data-testid="project-folder-chip" data-path={path} aria-label={`${index === 0 ? "Main" : "Extra"} folder: ${path}`}>
+					<div class="flex min-h-[28px] max-w-full items-center gap-[6px] rounded-full bg-chip pl-[10px] pr-[6px] text-[13px] max-md:min-h-[44px]">
+						<div class="min-w-0" title={path}>
+							<span class="block truncate">{label}</span>
+							{#if repository || git}
+								<span class="block break-all text-[9px] text-text-muted">{repository?.name ?? label} · {git?.branch ?? (git?.head ? `Detached at ${git.head}` : "Branch unavailable")}</span>
+							{:else if project?.folders.includes(path) && project.repositoryIdentities !== undefined}
+								<span class="block text-[9px] text-text-muted">Not a git repository</span>
+							{/if}
+							{#if typeof folder !== "string" && folder.create.gitInit}<span class="text-[9px] text-text-muted">git init</span>{/if}
+						</div>
+						{#if typeof folder !== "string"}<Badge variant="quiet">new</Badge>{/if}
+						{#if index === 0}<Badge variant="accent-solid">Main</Badge>{:else}<Button variant="ghost" size="content" ariaLabel={`Make main: ${path}`} class="text-[10px] text-text-muted max-md:min-h-[44px]" disabled={saving} onclick={() => changeFolders(makeMain(draft, path))}>Make main</Button>{/if}
+						<Button variant="ghost" size="content" iconOnly icon="x" iconSize={12} class="h-[18px] w-[18px] max-md:h-[44px] max-md:w-[44px]" ariaLabel={`Remove folder: ${path}`} touchTarget disabled={saving} onclick={() => changeFolders(removeFolder(draft, path))} />
+					</div>
+				</li>
+			{/each}
+		</ul>
+	{/if}
+{/snippet}
+
+{#snippet saveButton()}
+	<Button variant="primary" size="content" ariaLabel={project ? "Save" : "Add project"} class={isPhone ? "h-[46px] w-full gap-[6px] rounded-full px-[14px] text-[15px] font-medium" : "h-[34px] gap-[6px] rounded-full px-[14px] text-[13.5px] font-medium max-md:min-h-[44px]"} loading={saving} disabled={!canSave} onclick={() => void save()}>{project ? "Save" : "Add project"} <span aria-hidden="true" class="font-mono text-[9px] max-md:hidden pointer-coarse:hidden">⌘↵</span></Button>
+{/snippet}
+
+{#snippet phoneFooter()}
+	<div class="flex flex-col gap-[10px] px-[16px] pt-[12px]">
+		{@render folderChips()}
+		{@render saveButton()}
+	</div>
+{/snippet}
+
 <Dialog {open} {onclose} {returnFocus} labelledBy={titleId} describedBy={hintId} placement={isPhone ? "sheet" : "top"} dismissible={!saving}>
+	<SheetChrome
+		active={isPhone}
+		bodyClass="flex-1"
+		maxHeight={`${Math.max(0, viewportHeight - 84)}px`}
+		style={isPhone ? `height: ${Math.max(0, viewportHeight - 84)}px; transform: translateY(-${keyboardInset}px);` : undefined}
+		bottomPadding={30}
+		footer={isPhone ? phoneFooter : undefined}
+		onkeydown={handleKeydown}
+	>
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<Surface
-		variant="card"
+		variant={isPhone ? "bare" : "card"}
 		radius="none"
-		elevation="modal"
-		class="project-dialog flex w-[540px] max-w-[calc(100vw-24px)] flex-col gap-[14px] rounded-[16px] p-[18px] max-md:w-screen max-md:max-w-none max-md:gap-[9px] max-md:rounded-none max-md:border-x-0 max-md:p-[16px]"
-		style={`max-height: ${isPhone ? `${viewportHeight}px` : "80dvh"}; ${isPhone ? `height: ${viewportHeight}px; transform: translateY(-${keyboardInset}px);` : ""}`}
+		elevation={isPhone ? "none" : "modal"}
+		class={isPhone ? "project-dialog flex w-full flex-col gap-[14px] px-[16px] pt-[4px]" : "project-dialog flex w-[540px] max-w-[calc(100vw-24px)] flex-col gap-[14px] rounded-[16px] p-[18px] max-md:w-screen max-md:max-w-none max-md:gap-[9px] max-md:rounded-none max-md:border-x-0 max-md:p-[16px]"}
+		style={isPhone ? undefined : "max-height: 80dvh; "}
 		data-testid="project-dialog"
-		onkeydown={handleKeydown}
+		onkeydown={isPhone ? undefined : handleKeydown}
 	>
 		<header class="flex shrink-0 items-start gap-[10px]">
 			<div class="min-w-0 flex-1">
 				<h2 id={titleId} class="text-[17px] font-semibold text-text">{project ? "Edit project" : "Add a project"}</h2>
-				<p id={hintId} class="mt-[2px] text-[13px] text-text-secondary">Pick one or more folders. The first is the project's main folder.</p>
+				<p id={hintId} class={isPhone ? "sr-only" : "mt-[2px] text-[13px] text-text-secondary"}>Pick one or more folders. The first is the project's main folder.</p>
 			</div>
 			<Button variant="ghost" size="sm" iconOnly icon="x" iconSize={18} ariaLabel="Close" touchTarget disabled={saving} onclick={onclose} />
 		</header>
@@ -238,34 +290,7 @@
 			<div class="flex flex-col gap-[9px]">
 				<FolderPicker bind:this={picker} selectedPaths={draft.folders.map(folderPath)} ontoggle={toggleFolder} {findFolders} bind:gitInit disabled={saving} />
 				{#if permissionIssues.length}<div role="alert" class="break-words text-[11px] text-error">{#each permissionIssues as issue}<p>{issueText(issue)}</p>{/each}</div>{/if}
-				{#if draft.folders.length === 0}
-					<p class="py-[12px] text-[12px] text-text-muted">No folders added yet</p>
-				{:else}
-					<ul aria-label="Project folders" class="flex flex-wrap gap-[6px]">
-						{#each draft.folders as folder, index (folderPath(folder))}
-							{@const path = folderPath(folder)}
-							{@const label = folderRoots[index]?.label ?? path}
-							{@const repository = project?.repositoryIdentities?.[path]}
-							{@const git = project?.git?.folders?.find(({ root }) => root === path) ?? (path === project?.folders[0] && !project?.git?.folders ? project?.git : undefined)}
-							<li data-testid="project-folder-chip" data-path={path} aria-label={`${index === 0 ? "Main" : "Extra"} folder: ${path}`}>
-								<div class="flex min-h-[28px] max-w-full items-center gap-[6px] rounded-full bg-chip pl-[10px] pr-[6px] text-[13px] max-md:min-h-[44px]">
-									<div class="min-w-0" title={path}>
-										<span class="block truncate">{label}</span>
-										{#if repository || git}
-											<span class="block break-all text-[9px] text-text-muted">{repository?.name ?? label} · {git?.branch ?? (git?.head ? `Detached at ${git.head}` : "Branch unavailable")}</span>
-										{:else if project?.folders.includes(path) && project.repositoryIdentities !== undefined}
-											<span class="block text-[9px] text-text-muted">Not a git repository</span>
-										{/if}
-										{#if typeof folder !== "string" && folder.create.gitInit}<span class="text-[9px] text-text-muted">git init</span>{/if}
-									</div>
-									{#if typeof folder !== "string"}<Badge variant="quiet">new</Badge>{/if}
-									{#if index === 0}<Badge variant="accent-solid">Main</Badge>{:else}<Button variant="ghost" size="content" ariaLabel={`Make main: ${path}`} class="text-[10px] text-text-muted max-md:min-h-[44px]" disabled={saving} onclick={() => changeFolders(makeMain(draft, path))}>Make main</Button>{/if}
-									<Button variant="ghost" size="content" iconOnly icon="x" iconSize={12} class="h-[18px] w-[18px] max-md:h-[44px] max-md:w-[44px]" ariaLabel={`Remove folder: ${path}`} touchTarget disabled={saving} onclick={() => changeFolders(removeFolder(draft, path))} />
-								</div>
-							</li>
-						{/each}
-					</ul>
-				{/if}
+				{#if !isPhone}{@render folderChips()}{/if}
 				{#if draft.folders.length > 1 && unsupportedProviders.length > 0}
 					<section aria-label="Provider folder support" data-testid="project-provider-capabilities" class="text-[11px] text-text-secondary">
 						{#each unsupportedProviders as instance (instance.id)}
@@ -294,15 +319,16 @@
 				{#if issues.warnings.length}<div role="status" class="flex flex-col gap-[5px] break-words text-[11px] text-warning">{#each issues.warnings as issue}<p>{issueText(issue)}</p>{/each}</div>{/if}
 			</div>
 		</div>
+		{#if !isPhone}
 		<footer class="flex shrink-0 items-center justify-end gap-[7px] pt-[2px] max-md:pb-[env(safe-area-inset-bottom)]">
-			{#if !isPhone}
-				<div class="mr-auto flex min-w-0 items-center gap-[8px]">
-					<span class="shrink-0 text-[12.5px] text-text-muted">New sessions in</span>
-					<div class="w-[160px] min-w-0">{@render sessionModeControl()}</div>
-				</div>
-			{/if}
+			<div class="mr-auto flex min-w-0 items-center gap-[8px]">
+				<span class="shrink-0 text-[12.5px] text-text-muted">New sessions in</span>
+				<div class="w-[160px] min-w-0">{@render sessionModeControl()}</div>
+			</div>
 			<Button variant="secondary" size="content" class="h-[34px] rounded-full px-[14px] text-[13.5px] font-medium max-md:min-h-[44px]" disabled={saving} onclick={onclose}>Cancel</Button>
-			<Button variant="primary" size="content" ariaLabel={project ? "Save" : "Add project"} class="h-[34px] gap-[6px] rounded-full px-[14px] text-[13.5px] font-medium max-md:min-h-[44px]" loading={saving} disabled={!canSave} onclick={() => void save()}>{project ? "Save" : "Add project"} <span aria-hidden="true" class="font-mono text-[9px] max-md:hidden pointer-coarse:hidden">⌘↵</span></Button>
+			{@render saveButton()}
 		</footer>
+		{/if}
 	</Surface>
+	</SheetChrome>
 </Dialog>
