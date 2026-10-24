@@ -75,6 +75,7 @@ export const makeClaudeProviderRuntime = (
 								),
 							}
 						: {}),
+					...(deps.queryFactory ? { queryFactory: deps.queryFactory } : {}),
 					...(deps.capabilitiesService
 						? { capabilitiesService: deps.capabilitiesService }
 						: {}),

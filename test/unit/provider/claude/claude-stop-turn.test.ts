@@ -13,6 +13,10 @@ import {
 	makeSuccessResult,
 } from "../../../helpers/mock-sdk.js";
 
+const capabilitiesService = {
+	get: () => Effect.succeed({ models: [], commands: [], agents: [] }),
+};
+
 describe("turn-only Stop interactions", () => {
 	it.each([
 		"Bash",
@@ -96,6 +100,7 @@ describe("turn-only Stop interactions", () => {
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
+						capabilitiesService,
 
 						queryFactory: factory,
 					});
@@ -179,6 +184,7 @@ describe("turn-only Stop interactions", () => {
 					Effect.gen(function* () {
 						const runtime = yield* makeClaudeProviderRuntime({
 							runnerFactory: makeClaudeSessionRunner,
+							capabilitiesService,
 
 							queryFactory: factory,
 						});
