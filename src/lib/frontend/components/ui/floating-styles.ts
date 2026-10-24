@@ -42,8 +42,11 @@ export const DETACHED_LISTBOX_SURFACE_CLASSES = `${FLOATING_SURFACE_BASE_CLASSES
 
 export const FLOATING_MENU_CONTENT_CLASSES = `${FLOATING_SURFACE_CLASSES} max-h-[var(--bits-dropdown-menu-content-available-height)] overflow-y-auto`;
 
-export const FINAL_MENU_CONTENT_CLASSES =
-	"z-[var(--z-popover)] max-h-[var(--bits-dropdown-menu-content-available-height)] overflow-y-auto rounded-[16px] bg-popover-bg p-[6px] text-text shadow-popover ring-1 ring-border-chip focus-visible:outline-hidden";
+// Keep the shadow theme-dependent; Tailwind expands the named shadow's colour at build time.
+export const FINAL_FLOATING_SURFACE_CLASSES =
+	"rounded-[16px] bg-popover-bg p-[6px] font-sans text-text shadow-[var(--shadow-popover)] ring-1 ring-border-chip focus-visible:outline-hidden";
+
+export const FINAL_MENU_CONTENT_CLASSES = `${FINAL_FLOATING_SURFACE_CLASSES} z-[var(--z-popover)] max-h-[var(--bits-dropdown-menu-content-available-height)] overflow-y-auto`;
 
 export const FLOATING_TOOLTIP_CLASSES = `${FLOATING_SURFACE_CLASSES} max-w-xs px-2 text-xs text-text`;
 
@@ -68,25 +71,16 @@ export const FLOATING_ITEM_BASE_CLASSES =
 // A closed union that REPLACES a row's gap and padding rather than appending
 // to them, so exactly one of each group is ever emitted.
 //
-// `touch` exists for exactly one call site: the composer's attach menu, whose
-// rows are thumb targets on a phone and were ~40% taller than a pointer menu's
-// before the migration. Shrinking a touch target is a product decision, not a
-// side effect of moving onto the shared primitive.
-//
-// The question was whether the two looks should converge, and the
-// answer is no. Every other convergence in this file collapsed a split that
-// ran along which feature owned the file; this one runs along which input
-// device the row is for, which is a distinction a reader can see and a user
-// can feel. Converging would mean either shrinking a thumb target or making
-// every pointer menu thumb-sized. The union member is the cheap way to say
-// "these are two things".
+// The composer's attach rows follow Final's 36px desktop popovers and retain
+// 44px touch targets on phones.
 export const MENU_ITEM_DENSITY_CLASSES = {
 	default: `gap-2 ${FLOATING_ITEM_PADDING_CLASSES} text-sm`,
 	final:
 		"min-h-[44px] gap-[10px] rounded-[10px] px-[10px] py-[7px] text-[13.5px]",
 	option:
 		"min-h-[44px] gap-[10px] rounded-[10px] px-[10px] py-[7px] text-[13px]",
-	touch: "gap-2.5 px-4 py-3 text-sm",
+	touch:
+		"min-h-[36px] max-md:min-h-[44px] gap-[10px] rounded-[10px] px-[10px] py-[6px] text-[13.5px]",
 	sheet: "min-h-[44px] gap-[13px] px-4 py-0 font-[system-ui] text-[14.5px]",
 	// Rows that carry a status read-out beside the label (the account picker's
 	// quota meters), kept to the 30px the design draws in a popover and a sheet.

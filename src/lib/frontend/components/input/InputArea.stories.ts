@@ -66,7 +66,8 @@ async function assertSwapStyles(
 	consumer: "FileMenu" | "CommandMenu",
 ) {
 	const radiusProbe = document.createElement("div");
-	radiusProbe.className = "rounded-lg";
+	// Final composer menus use the .vf .pop recipe in the redesign spec (4450d1b8).
+	radiusProbe.className = "rounded-[16px]";
 	const dropdownProbe = document.createElement("div");
 	dropdownProbe.className = "z-[var(--z-dropdown)]";
 	const popoverProbe = document.createElement("div");
@@ -2140,9 +2141,8 @@ export const DollarMenu: Story = {
 			expect(Math.abs(menuRect.left - composerRect.left)).toBeLessThanOrEqual(
 				1,
 			);
-			expect(Math.abs(menuRect.width - composerRect.width)).toBeLessThanOrEqual(
-				1,
-			);
+			// The Final $ panel is compact, and shrinks to fit a narrow composer.
+			expect(menuRect.width).toBeCloseTo(Math.min(340, composerRect.width), 0);
 		});
 	},
 };
