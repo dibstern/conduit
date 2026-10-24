@@ -93,12 +93,39 @@ test("settled shelf shows full scoped totals across pages and live session chang
 	page,
 }, testInfo) => {
 	test.setTimeout(120_000);
+	const shelf = page.getByTestId("settled-shelf-toggle");
+	const shelfGeometry = (shelf: Element) => {
+		const scroller = shelf.closest<HTMLElement>("#session-list-scroller");
+		if (!scroller) throw new Error("Missing session scroller");
+		const rows = Array.from(
+			scroller.querySelectorAll(".session-item[data-session-id]"),
+		);
+		const header = shelf.getBoundingClientRect();
+		const viewport = scroller.getBoundingClientRect();
+		return {
+			rows: rows.length,
+			precedingRows: rows.filter(
+				(row) =>
+					row.compareDocumentPosition(shelf) & Node.DOCUMENT_POSITION_FOLLOWING,
+			).length,
+			scrollTop: scroller.scrollTop,
+			header: { top: header.top, bottom: header.bottom },
+			viewport: { top: viewport.top, bottom: viewport.bottom },
+			focused: document.activeElement === shelf,
+		};
+	};
 	const evidence: {
 		passed: boolean;
 		page?: unknown;
 		search?: unknown;
 		steps: { action: string; count: number; text: string | null }[];
-	} = { passed: false, steps: [] };
+		pagination: {
+			queued: number;
+			before?: ReturnType<typeof shelfGeometry>;
+			after?: ReturnType<typeof shelfGeometry>;
+			collectionError?: string;
+		};
+	} = { passed: false, steps: [], pagination: { queued: 0 } };
 	try {
 		const setup = await harness.connect(undefined, undefined, undefined, false);
 		const foreignFolder = join(harness.root, "shelf-project");
@@ -171,8 +198,36 @@ test("settled shelf shows full scoped totals across pages and live session chang
 			counts: search.settledCounts,
 		};
 
+		await page.addInitScript(() => {
+			const NativeObserver = window.IntersectionObserver;
+			const delivery: { held: boolean; queued: (() => void)[] } = {
+				held: false,
+				queued: [],
+			};
+			window.IntersectionObserver = class extends NativeObserver {
+				constructor(
+					callback: IntersectionObserverCallback,
+					options?: IntersectionObserverInit,
+				) {
+					super((entries, observer) => {
+						if (
+							delivery.held &&
+							entries.some(
+								(entry) =>
+									entry.target.id === "session-list-sentinel" &&
+									entry.isIntersecting,
+							)
+						) {
+							delivery.queued.push(() => callback(entries, observer));
+							return;
+						}
+						callback(entries, observer);
+					}, options);
+				}
+			};
+			Object.assign(window, { __settledShelfPagination: delivery });
+		});
 		await new AppPage(page).goto(`${harness.baseUrl}/?p=process-test`);
-		const shelf = page.getByTestId("settled-shelf-toggle");
 		const observe = async (action: string, count: number) => {
 			await expect(shelf).toHaveText(
 				new RegExp(`^\\s*Settled\\s*${count}\\s*$`),
@@ -275,6 +330,21 @@ test("settled shelf shows full scoped totals across pages and live session chang
 			count: 0,
 			text: null,
 		});
+		const delivery = await page.evaluateHandle(
+			() =>
+				(
+					window as unknown as {
+						__settledShelfPagination: {
+							held: boolean;
+							queued: (() => void)[];
+						};
+					}
+				).__settledShelfPagination,
+		);
+		// Hold only the final search-clear's real intersecting sentinel delivery.
+		await delivery.evaluate((state) => {
+			state.held = true;
+		});
 		await searchInput.press("Escape");
 		await observe(
 			"clear search after the foreign command refreshes totals",
@@ -288,6 +358,29 @@ test("settled shelf shows full scoped totals across pages and live session chang
 		await expect(more).toHaveText("257 more");
 		await more.scrollIntoViewIfNeeded();
 		await expect(shelf).toBeInViewport();
+		await expect(shelf).toBeFocused();
+		await expect
+			.poll(() => delivery.evaluate((state) => state.queued.length))
+			.toBeGreaterThan(0);
+		evidence.pagination.queued = await delivery.evaluate(
+			(state) => state.queued.length,
+		);
+		const before = await shelf.evaluate(shelfGeometry);
+		evidence.pagination.before = before;
+		await delivery.evaluate((state) => {
+			state.held = false;
+			for (const deliver of state.queued.splice(0)) deliver();
+		});
+		await expect
+			.poll(async () => {
+				const after = await shelf.evaluate(shelfGeometry);
+				return (
+					after.rows > before.rows && after.precedingRows > before.precedingRows
+				);
+			})
+			.toBe(true);
+		await expect(shelf).toBeInViewport();
+		await expect(shelf).toBeFocused();
 		await page.screenshot({ path: testInfo.outputPath("settled-count.png") });
 		await testInfo.attach("settled-count-screenshot", {
 			path: testInfo.outputPath("settled-count.png"),
@@ -295,6 +388,11 @@ test("settled shelf shows full scoped totals across pages and live session chang
 		});
 		evidence.passed = true;
 	} finally {
+		try {
+			evidence.pagination.after = await shelf.evaluate(shelfGeometry);
+		} catch (error: unknown) {
+			evidence.pagination.collectionError = String(error);
+		}
 		const artifact = testInfo.outputPath("settled-count.json");
 		writeFileSync(artifact, `${JSON.stringify(evidence, null, 2)}\n`);
 		await testInfo.attach("settled-count", {
