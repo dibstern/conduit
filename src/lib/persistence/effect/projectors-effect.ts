@@ -1452,7 +1452,7 @@ export const makeMessageProjector = defineProjector(() => ({
 					...(event.data.filename != null
 						? { filename: event.data.filename }
 						: {}),
-					url: event.data.url,
+					source: event.data.source,
 				});
 				yield* sql`
 					INSERT INTO message_parts
@@ -1784,6 +1784,7 @@ function settleRunCommands(
 				: null;
 			yield* sql`UPDATE provider_command_outbox
 				SET status = ${status === "completed" ? "completed" : retryable ? "retryable_failed" : "failed"},
+					payload_json = CASE WHEN ${retryable} OR NOT json_valid(payload_json) THEN payload_json ELSE json_remove(payload_json, '$.images') END,
 					error_code = ${code}, next_attempt_at = ${retryAt}, updated_at = ${event.createdAt}
 				WHERE request_sequence = ${command.request_sequence} AND project_key = ${command.project_key}`;
 			yield* sql`UPDATE command_receipts
@@ -1933,7 +1934,17 @@ export const makeTurnProjector = defineProjector(() => ({
 							AND prior.session_id = turns.session_id AND prior.status IN ('completed', 'error', 'interrupted'))
 						AND EXISTS (SELECT 1 FROM provider_runs next WHERE next.id = excluded.run_id
 							AND next.session_id = excluded.session_id AND next.status IN ('pending', 'running')))) RETURNING session_id`;
-				return { sessions: owners(written), messages: [] };
+				// input.admitted freezes the request in pending_inputs. A native
+				// message id can differ from its input id, which owns these settings.
+				const settings = yield* sql<OwnedRow>`UPDATE turns
+					SET effort = NULLIF(json_extract(input.request, '$.variant'), ''),
+						context_window = NULLIF(json_extract(input.request, '$.contextWindow'), '')
+					FROM pending_inputs input
+					WHERE input.input_id = ${event.data.inputId ?? event.data.messageId}
+						AND input.session_id = turns.session_id
+						AND turns.id = ${event.data.messageId} AND turns.session_id = ${event.sessionId}
+					RETURNING session_id`;
+				return { sessions: owners([...written, ...settings]), messages: [] };
 			}
 
 			if (

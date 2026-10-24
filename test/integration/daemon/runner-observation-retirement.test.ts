@@ -133,7 +133,7 @@ it("retries an unperformed prompt retirement and caches a successful zero result
 								throw new Error("No warm commands in observation test");
 							},
 							snapshotCommandSettings: () => ({}),
-							sameAccountLogin: () => true,
+							loginChange: () => "None",
 							recoverCommands: () => Effect.succeed([]),
 						},
 					);

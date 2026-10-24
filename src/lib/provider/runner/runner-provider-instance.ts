@@ -11,6 +11,7 @@ import {
 import { SqlClient } from "effect/sql";
 import type { AccountsState } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import {
 	bindTurnTimelineSink,
@@ -20,6 +21,7 @@ import {
 	Usage,
 	type UsageService,
 } from "../../domain/daemon/Services/usage.js";
+import type { InputDrafts } from "../../domain/relay/Services/input-drafts.js";
 import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
 import type {
 	ProviderRuntimeIngestion,
@@ -50,7 +52,7 @@ import type {
 	ProviderControlContext,
 	ProviderInstance,
 	ProviderNativeSession,
-	SendTurnInput,
+	ResolvedSendTurnInput,
 	TurnResult,
 } from "../types.js";
 import { makeRecoveredEventSink } from "./runner-event-sink.js";
@@ -76,6 +78,7 @@ const log = createLogger("runner-provider-instance");
 export const assertSessionRunnerAvailable = (
 	sessionId: string,
 	registry: ProviderRegistry | undefined,
+	account?: Account,
 ) =>
 	Effect.gen(function* () {
 		for (const providerId of registry?.listProviders() ?? []) {
@@ -88,6 +91,13 @@ export const assertSessionRunnerAvailable = (
 					operation: failure.operation,
 					cause: Object.assign(new Error(failure.message), failure),
 				});
+			if (account) {
+				const block = yield* provider.getAccountSwitchBlockEffect(
+					sessionId,
+					account,
+				);
+				if (block) return yield* block;
+			}
 		}
 	});
 
@@ -129,6 +139,7 @@ export interface RunnerRecoveryDependencies {
 		"clearTimeout" | "resetTimeout"
 	>;
 	readonly persist: ClaudeEventPersistEffect;
+	readonly inputDrafts?: InputDrafts;
 	readonly resolveCallContext: OrchestrationEngine["resolveCallContextEffect"];
 	readonly retirePrompts: (
 		currentProcessId: string | null,
@@ -506,6 +517,23 @@ export class RunnerProviderInstance implements ProviderInstance {
 		);
 	}
 
+	hasActiveTurnsEffect(sessionId: string) {
+		return (
+			this.runner.hasActiveTurnsEffect?.(sessionId) ?? Effect.succeed(false)
+		);
+	}
+
+	get turnEnds() {
+		return this.runner.turnEnds;
+	}
+
+	getAccountSwitchBlockEffect(sessionId: string, account: Account) {
+		return (
+			this.runner.getAccountSwitchBlockEffect?.(sessionId, account) ??
+			Effect.succeed(undefined)
+		);
+	}
+
 	getControlCommandStatusEffect(
 		sessionId: string,
 		control: ProviderControlContext,
@@ -541,7 +569,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 	}
 
 	sendTurnEffect(
-		input: SendTurnInput,
+		input: ResolvedSendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		return input.account
 			? this.withAccountResources(
@@ -632,7 +660,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 	}
 
 	private sendTurnUnscopedEffect(
-		input: SendTurnInput,
+		input: ResolvedSendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		const {
 			eventSink,
@@ -697,7 +725,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		readonly inputId: string;
 		readonly text: string;
 		readonly runId?: string;
-		readonly images?: readonly string[];
+		readonly images?: readonly AttachmentRef[];
 	}): Effect.Effect<void, ClaudeEventPersistFailure> {
 		return Effect.gen({ self: this }, function* () {
 			const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);

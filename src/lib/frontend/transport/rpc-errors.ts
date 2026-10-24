@@ -15,6 +15,8 @@ export const copy: {
 		| null;
 } = {
 	DraftAlreadySent: (error) => error.message,
+	DraftAttachmentMissing: (error) => error.message,
+	DraftAttachmentRejected: (error) => error.message,
 	WorkspaceMoveError: (error) =>
 		({
 			missing: "That worktree no longer exists.",
@@ -34,6 +36,7 @@ export const copy: {
 		return `Too many tries. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
 	},
 	AccountUnroutable: (error) => error.message,
+	AccountSwitchBusy: (error) => error.message,
 	SessionBusy: (error) => error.message,
 	StaleSwitch: (error) => error.message,
 	AccountUnavailable: (error) => error.message,

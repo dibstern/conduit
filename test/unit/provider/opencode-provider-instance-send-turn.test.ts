@@ -2,8 +2,9 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Deferred, Effect } from "effect";
+import { Deferred, Effect, Schema } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AttachmentRefSchema } from "../../../src/lib/contracts/attachment-ref.js";
 import {
 	AccountIdSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
@@ -19,7 +20,7 @@ import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { OpenCodeProviderInstance } from "../../../src/lib/provider/opencode-provider-instance.js";
 import type {
 	EventSink,
-	SendTurnInput,
+	ResolvedSendTurnInput,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
 
@@ -78,7 +79,9 @@ function makeStubEventSink(): EventSink & {
 	};
 }
 
-function makeSendTurnInput(overrides?: Partial<SendTurnInput>): SendTurnInput {
+function makeSendTurnInput(
+	overrides?: Partial<ResolvedSendTurnInput>,
+): ResolvedSendTurnInput {
 	return {
 		sessionId: "s1",
 		inputId: "t1",
@@ -481,7 +484,15 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 
 	it("passes images and agent to sendMessageAsync", async () => {
 		const input = makeSendTurnInput({
-			images: ["data:image/png;base64,abc"],
+			images: [
+				{
+					ref: Schema.decodeUnknownSync(AttachmentRefSchema)({
+						attachmentHash: "a".repeat(64),
+						mime: "image/png",
+					}),
+					dataUrl: "data:image/png;base64,abc",
+				},
+			],
 			agent: "coder",
 		});
 

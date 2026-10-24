@@ -3,6 +3,7 @@
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
+	import { on } from "svelte/events";
 	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
 	import SurfacingAskContext from "./SurfacingAskContext.svelte";
 	import { MediaQuery } from "svelte/reactivity";
@@ -25,8 +26,10 @@
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
+	import type { ModelExecution } from "../../types.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
 	import {
 		countsPhrase,
@@ -54,7 +57,7 @@
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false }: {
+	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
@@ -63,7 +66,7 @@
 		taskNow?: number;
 		sessionId?: string | undefined;
 		forkMessageId?: string | undefined;
-		model?: string | undefined;
+		modelExecution?: ModelExecution | undefined;
 		providerId?: string | undefined;
 		onsummarize?: (() => void) | undefined;
 		onjump?: (() => void) | undefined;
@@ -470,6 +473,11 @@
 		await tick();
 		panelEl?.querySelector(`[data-part="${CSS.escape(part.uuid)}"]`)?.scrollIntoView({ block: "nearest" });
 	}
+
+	// Safari only paints :active when a touch listener covers the target.
+	function enableTouchActive(node: HTMLDivElement) {
+		return { destroy: on(node, "touchstart", () => {}, { passive: true }) };
+	}
 </script>
 
 {#snippet markLabel(pin: SurfacePin)}
@@ -534,7 +542,7 @@
 {/snippet}
 
 <div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfacingActive || summaryEnabled ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
-	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {model} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
+	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {modelExecution} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
 	<div class="md:ml-[42px]">
 		<!-- The active turn is a keyboard navigation group; inactive turns add no tab stop. -->
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -545,7 +553,7 @@
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
 							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={expanded}
 							onclick={toggleLog}>
-							{#if live}<Icon name="loader-circle" size={13} class="animate-spin shrink-0 text-accent" />
+							{#if live}<ConduitMark size={16} variant="running" />
 							{:else}<Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-dimmer" />{/if}
 							<span class="text-[14px] font-semibold text-text">{live ? "Working" : "Worked"}</span>
 							{#if live && !turn.user}
@@ -611,7 +619,7 @@
 			{/if}
 		</div>
 		{#if !minimised && (logMounted || showTicker)}
-			<div class="step-log mt-[6px]" hidden={!expanded && !showTicker} data-testid={live ? "turn-live-activity" : undefined}>
+			<div class="step-log mt-[6px]" use:enableTouchActive hidden={!expanded && !showTicker} data-testid={live ? "turn-live-activity" : undefined}>
 				{#if !expanded && earlierCount > 0}
 					<Button variant="ghost" size="content" tone="muted" hoverFill="none" align="start" touchTarget
 						class="py-[8px] text-[12px]" onclick={() => (expanded = logMounted = true)}>+ {earlierCount} earlier messages</Button>
@@ -668,6 +676,7 @@
 </div>
 
 <style>
+	.step-log :global(::selection) { background:var(--color-accent-bg); color:inherit; }
 	.surface-head-chips { display:contents; }
 	.turn-activity[data-minimised="true"] .turn-duration { min-width:0; flex-shrink:1; overflow:hidden; text-overflow:ellipsis; }
 	.mark-toast { display:flex; align-items:center; gap:10px; width:fit-content; max-width:100%; min-height:34px; margin:10px auto 2px; padding:4px 5px 4px 14px; border-radius:999px; background:var(--color-inverse-bg); color:var(--color-inverse-text); font-size:13px; box-shadow:0 8px 24px rgb(0 0 0 / .22); }

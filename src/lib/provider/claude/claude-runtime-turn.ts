@@ -5,7 +5,7 @@ import {
 	isClaudeResumeFailure,
 	isClaudeResumeRefused,
 } from "../event-sink-errors.js";
-import type { SendTurnInput, TurnResult } from "../types.js";
+import type { ResolvedSendTurnInput, TurnResult } from "../types.js";
 import { isInterruptedResult } from "./claude-event-translator.js";
 import type { ClaudeProviderRuntimeState } from "./claude-provider-runtime.js";
 import {
@@ -24,7 +24,7 @@ import type {
 export interface PendingIntake {
 	readonly deferred: Deferred.Deferred<TurnResult, Error>;
 	/** A held send's message, placed when the SDK starts the input. */
-	readonly unplaced?: SendTurnInput;
+	readonly unplaced?: ResolvedSendTurnInput;
 	/** Keeps delayed native intake output routable after an indeterminate reply. */
 	readonly releaseSink?: Effect.Effect<void>;
 }
@@ -290,10 +290,10 @@ export function sdkResultToTurnResult(
 	};
 }
 
-export function buildUserMessage(input: SendTurnInput): SDKUserMessage {
+export function buildUserMessage(input: ResolvedSendTurnInput): SDKUserMessage {
 	const content: Exclude<SDKUserMessage["message"]["content"], string> = [];
-	for (const value of input.images ?? []) {
-		const { mime, data, name } = parseAttachmentDataUrl(value);
+	for (const { dataUrl } of input.images ?? []) {
+		const { mime, data, name } = parseAttachmentDataUrl(dataUrl);
 		if (mime === "text/plain" || mime === "application/pdf") {
 			content.push({
 				type: "document",

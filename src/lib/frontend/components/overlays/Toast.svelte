@@ -25,6 +25,7 @@
 
 	const VARIANT_ICON = {
 		default: undefined,
+		success: { name: "check", class: "text-success" },
 		warn: { name: "triangle-alert", class: "text-warning" },
 		error: { name: "circle-x", class: "text-error" },
 		pinned: { name: "pin", class: "text-status-pinned" },

@@ -1,4 +1,4 @@
-Feature: The transcript carries live status above a single composer box
+Feature: The transcript carries live status and Flow activity above a single composer box
 
 Background:
   Given the viewport is a phone

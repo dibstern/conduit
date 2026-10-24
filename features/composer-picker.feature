@@ -77,7 +77,7 @@ Scenario Outline: C1 draft Claude accounts form a grid and bind the project on t
   Then the Account section has 2 equal-width cards and the caption 5-hour use
   And the picker has no account handoff note
   And the picker root sections and rows are harness, account, model, context, effort, agent
-  And the picker card claude is named personal and shows its AccountDot
+  And the picker card claude is named personal and shows its account logo
   And the claude Account card shows 62% usage
   And the self Account card shows 90% usage
   And the claude Account card is selected and in view
@@ -196,8 +196,8 @@ Scenario Outline: C2 open Claude cards lock current and limited accounts and swi
   When I view Account choices in the picker
   Then the client Account card is selected and in view
   And the client Account card is disabled
-  And the composer harness badge for client matches its AccountDot colour
-  And the picker harness badge for client matches its AccountDot colour
+  And the composer harness badge for client has its account identity colour
+  And the picker harness badge for client has its account identity colour
 
 Examples:
   | tier  | reading     | baseline                       | threshold |
@@ -240,7 +240,7 @@ Scenario Outline: C2 switching from an Account card preserves the project bindin
   Then the composer harness logo for self shows P on its badge
   When I view Account choices in the picker
   Then the self Account card is selected and in view
-  And the composer harness badge for self matches its AccountDot colour
+  And the composer harness badge for self has its account identity colour
 
 Examples:
   | tier  | messages                                            |
@@ -296,7 +296,7 @@ Scenario Outline: C5 draft OpenCode instances show status cards and bind immedia
   Then the Instance section has 2 equal-width cards and the caption status
   And the opencode Instance card shows healthy status
   And the bedrock Instance card shows stopped status
-  And the picker card bedrock is named Bedrock and shows its AccountDot
+  And the picker card bedrock is named Bedrock and shows its account logo
   And the opencode Instance card is selected and in view
   When I select the bedrock Instance card
   Then the bedrock Instance card is selected and in view

@@ -17,13 +17,13 @@ type Row = Partial<{
 	quiescent: boolean;
 	rebindsAccount: boolean;
 	folders: boolean;
-	login: boolean;
+	login: "None" | "Settings" | "Account";
 	legacyCursor: boolean;
 	settingsDeferred: boolean;
 }>;
 const unchanged = {
 	folders: false,
-	login: false,
+	login: "None" as const,
 	legacyCursor: false,
 	settingsDeferred: false,
 };
@@ -32,26 +32,56 @@ describe("decideSend", () => {
 	it.each<[string, Row, ReturnType<typeof decideSend>]>([
 		["unchanged, quiet", {}, "Use"],
 		["unchanged, busy", { quiescent: false }, "Use"],
-		["login change, quiet, rebinds in place", { login: true }, "Use"],
 		[
-			"login change, quiet, cannot rebind in place",
-			{ login: true, rebindsAccount: false },
+			"settings login change, quiet, rebinds in place",
+			{ login: "Settings" },
+			"Use",
+		],
+		[
+			"settings login change, quiet, cannot rebind in place",
+			{ login: "Settings", rebindsAccount: false },
 			"Retire",
 		],
 		[
-			"login change, background busy",
-			{ login: true, quiescent: false },
-			"Wait",
+			"settings login change, background busy",
+			{ login: "Settings", quiescent: false },
+			"DeferRebind",
 		],
 		[
-			"login change, command in flight",
-			{ login: true, lifecycle: busyCommand },
-			"Wait",
+			"settings login change, command in flight",
+			{ login: "Settings", lifecycle: busyCommand },
+			"DeferRebind",
 		],
 		[
-			"login change, busy, cannot rebind in place",
-			{ login: true, quiescent: false, rebindsAccount: false },
+			"settings login change, busy, cannot rebind in place",
+			{ login: "Settings", quiescent: false, rebindsAccount: false },
 			"Wait",
+		],
+		["account switch, quiet, rebinds in place", { login: "Account" }, "Use"],
+		[
+			"account switch, quiet, cannot rebind in place",
+			{ login: "Account", rebindsAccount: false },
+			"Retire",
+		],
+		[
+			"account switch, background busy",
+			{ login: "Account", quiescent: false },
+			"Refuse",
+		],
+		[
+			"account switch, command in flight",
+			{ login: "Account", lifecycle: busyCommand },
+			"Refuse",
+		],
+		[
+			"account switch, busy, cannot rebind in place",
+			{ login: "Account", quiescent: false, rebindsAccount: false },
+			"Refuse",
+		],
+		[
+			"account switch and folder change, busy",
+			{ login: "Account", folders: true, quiescent: false },
+			"Refuse",
 		],
 		["folder change, quiet", { folders: true }, "Retire"],
 		["folder change, busy", { folders: true, quiescent: false }, "Wait"],
@@ -67,12 +97,12 @@ describe("decideSend", () => {
 		],
 		[
 			"change on a runner that cannot reconfigure",
-			{ login: true, lifecycle: idleExiting },
+			{ login: "Account", lifecycle: idleExiting },
 			"Use",
 		],
 		[
 			"pre-warm, login change, busy",
-			{ command: "pre-warm", login: true, quiescent: false },
+			{ command: "pre-warm", login: "Account", quiescent: false },
 			"Skip",
 		],
 		[

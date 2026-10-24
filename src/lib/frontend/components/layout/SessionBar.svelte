@@ -43,7 +43,9 @@
 	import type { Immutable, SessionInfo } from "../../types.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
+	import DitherGlyph from "../ui/DitherGlyph.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import { getParentSessionContext, navigateBackToParent } from "../chat/SubagentBackBar.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
@@ -61,7 +63,6 @@
 	import { openSideThreads, sideThreadsPanel } from "../session/side-threads.svelte.js";
 	import { getPinCommand, getPrimaryCommand, getSessionCommands, globalKeyHint, runSessionCommandShortcut, sessionCommandActions, sessionCommandKeys, sessionCommandKeysHint, type SessionCommand } from "../session/session-commands.js";
 	import { uiState, expandSidebar } from "../../stores/ui.svelte.js";
-	import { dimThemeColor } from "../../stores/theme.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { chromeMenuActions } from "./chrome-actions.js";
 	import SessionSheetFooter from "../session/SessionSheetFooter.svelte";
@@ -84,6 +85,8 @@
 	// reads the same in the bar as it does in the list it came from.
 	const session = $derived(findSession(sessionState.currentId ?? ""));
 	const title = $derived(session?.title || "New Session");
+	const parent = $derived(getParentSessionContext());
+	const isSideThread = $derived(session?.sideThread === true && parent.id !== null);
 	const goalFacts = $derived(discoveryState.currentTraits?.supportsGoalState ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
 	const goal = $derived(goalView(
 		goalFacts,
@@ -338,10 +341,6 @@
 	}
 
 	let overflowOpen = $state(false);
-	$effect(() => {
-		if (sessionViewState.compact && !goalDetails.open && tasksPanel.open) return dimThemeColor();
-		return undefined;
-	});
 	let overflowOpener: HTMLElement | null = null;
 	// A selected phone action may open a dialog or move focus itself.
 	let overflowSelected = false;
@@ -368,8 +367,8 @@
 
 {#if goalDetails.open && detailsGoal}
 	{#if !sessionViewState.compact}<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => closeGoalDetails(true)} />{/if}
-{:else if tasksPanel.open && backgroundTasks.length > 0}
-	<Button variant={sessionViewState.compact ? "sheet-scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { tasksPanel.open = false; }} />
+{:else if tasksPanel.open && backgroundTasks.length > 0 && !sessionViewState.compact}
+	<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { tasksPanel.open = false; }} />
 {:else if sideThreadsPanel.open && !sessionViewState.compact}
 	<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { sideThreadsPanel.open = false; }} />
 {/if}
@@ -385,8 +384,10 @@
 {#snippet overflowMenu()}
 	<Menu
 		bind:open={overflowOpen}
-		onopenchange={(open) => { if (open) overflowSelected = false; }}
+		onopenchange={(open) => { if (open) { overflowSelected = false; if (sessionViewState.compact) forceBarOpen(); } }}
 		presentation={sessionViewState.compact ? "sheet" : "popover"}
+		sheetEdge="top"
+		portalTo={sessionViewState.compact ? "#session-bar" : undefined}
 		appearance="final"
 		class={sessionViewState.compact ? undefined : "w-[340px] max-w-[calc(100vw-16px)]"}
 		ariaLabel="More actions"
@@ -398,10 +399,12 @@
 				event.preventDefault();
 				// Yield to an item that moved focus on purpose: the Terminal view
 				// focuses xterm once its lazily loaded tab mounts, which can land
-				// either side of this restore.
+				// either side of this restore. The phone sheet keeps focus while it
+				// glides away.
 				setTimeout(() => {
 					requestAnimationFrame(() => {
-						if (opener.isConnected && document.activeElement === document.body) opener.focus();
+						const active = document.activeElement;
+						if (!overflowOpen && opener.isConnected && (active === document.body || active?.closest("[data-dropdown-menu-content]"))) opener.focus();
 					});
 				}, 0);
 			}
@@ -612,7 +615,7 @@
 		{#if !collapsed}{@render overflowMenu()}{/if}
 	{/if}
 
-	<!-- The session title, and the only string in the bar allowed to ellipse. It
+	<!-- The session title and its optional parent breadcrumb. It
 	     is the page heading on a phone; the global header's <h1> is suppressed at
 	     this width, so there is still exactly one — and there is still exactly
 	     one across the collapse, because this is the same element in both
@@ -626,12 +629,36 @@
 	{#if sessionViewState.compact || session}
 	<div id="session-bar-title-row" class="flex min-w-0 flex-col justify-center">
 	<div class="flex min-w-0 items-center {sessionViewState.compact ? 'gap-[3px]' : 'gap-1.5'}">
-		<div class="min-w-0">
-		<div class="flex min-w-0 items-center">
+		<div class="min-w-0 {isSideThread ? 'flex-1' : ''}">
+		<div class="flex min-w-0 items-center {isSideThread ? 'gap-1.5' : ''}">
+		{#if isSideThread}
+			{#if !collapsed}
+				<Button
+					variant="ghost"
+					size="content"
+					tone="secondary"
+					touchTarget
+					class="min-w-0 max-w-[30%] shrink gap-1.5 text-sm font-medium"
+					data-testid="side-thread-parent-crumb"
+					ariaLabel="Back to {parent.title}, parent {parent.status}"
+					title="Back to {parent.title}"
+					onclick={navigateBackToParent}
+				>
+					<span data-testid="parent-session-status" class="flex shrink-0 items-center">
+						<DitherGlyph state={parent.status} size={12} />
+						<span class="sr-only">{parent.status === "working" ? "Working" : parent.status === "monitoring" ? "Monitoring" : "Idle"}</span>
+					</span>
+					<span class="truncate">{parent.title}</span>
+				</Button>
+				<Icon name="chevron-right" size={14} class="shrink-0 text-text-dimmer" />
+			{/if}
+			<Icon name="messages-square" size={15} class="shrink-0 text-accent" />
+		{/if}
 		<h1
 			id="session-bar-title"
 			data-testid="session-bar-title"
 			class="min-w-0 truncate font-semibold leading-tight text-text"
+			class:flex-1={isSideThread}
 			class:text-lg={!collapsed}
 			class:text-base={collapsed}
 		>
@@ -715,7 +742,7 @@
 	{/if}
 
 	{#if sessionViewState.compact && !collapsed && goalShown}
-		<Popover bind:open={goalDetails.open} presentation="sheet" modal initialFocus="content" labelledBy="goal-details-title" id="goal-details" data-testid="goal-details" portalTo="#session-bar" sheetBottomPadding={34} class="px-[20px] pt-[2px] whitespace-normal text-[12px]" sheetScrim={{ portalTo: goalSubtitleEl?.closest("#session-bar")?.parentElement ?? undefined, zIndex: "var(--z-dropdown)", testId: "goal-details-scrim" }}
+		<Popover bind:open={goalDetails.open} presentation="sheet" sheetEdge="top" modal initialFocus="content" labelledBy="goal-details-title" id="goal-details" data-testid="goal-details" portalTo="#session-bar" sheetBottomPadding={16} class="px-[20px] pt-[16px] whitespace-normal text-[12px]" sheetScrim={{ portalTo: goalSubtitleEl?.closest("#session-bar")?.parentElement ?? undefined, zIndex: "var(--z-dropdown)", testId: "goal-details-scrim" }}
 			onopenchange={(open) => { if (open) { goalFocusHandedOff = false; tasksPanel.open = false; sideThreadsPanel.open = false; } }}
 			onCloseAutoFocus={(event) => { if (goalFocusHandedOff) event.preventDefault(); goalFocusHandedOff = false; }}
 		>

@@ -18,10 +18,11 @@
 	import Modal from "../ui/Modal.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
-	let { directory, git: folderGit, presentation, workspaceCause, workspaceMissing, workspaceMismatch, workspaceHint, loadWorktrees, onmove, onrecreate, oncontinue, ondismiss, onrenamebranch, children }: {
+	let { directory, git: folderGit, presentation, compact = false, workspaceCause, workspaceMissing, workspaceMismatch, workspaceHint, loadWorktrees, onmove, onrecreate, oncontinue, ondismiss, onrenamebranch, children }: {
 		directory: string;
 		git: SessionGit | undefined;
 		presentation: "word" | "control" | "row";
+		compact?: boolean | undefined;
 		workspaceCause?: WorkspaceMoveCause | undefined;
 		workspaceMissing?: WorkspaceMissing | undefined;
 		workspaceMismatch?: { readonly actualPath: string } | undefined;
@@ -36,6 +37,7 @@
 	} = $props();
 	const folders = $derived(folderGit?.folders ?? []);
 	const git = $derived(folderGit?.folders && !folderGit.branch && !folderGit.head && folderGit.dirty === undefined ? undefined : folderGit);
+	const multiFolder = $derived(folders.length > 1 || folders.some((folder) => folder.shared) || (!git && folders.length > 0));
 	let showWorktrees = $state(false);
 	let worktrees = $state<readonly WorktreeInfo[] | undefined>();
 	let currentDirectory = $state<string | undefined>();
@@ -138,7 +140,6 @@
 	const missingLabel = $derived(missingFolders.length ? `worktree missing: ${missingFolderLabels.map(({ label }) => label).join(", ")}` : "worktree missing");
 	const checkout = $derived(git?.branch || git?.head);
 	const label = $derived(checkout ? `${project} / ${checkout}` : project);
-	const upstream = $derived(`↑${git?.ahead ?? 0} ↓${git?.behind ?? 0}`);
 	const operation = $derived(git?.operation ? {
 		rebase: "rebasing", merge: "merging", "cherry-pick": "cherry-picking",
 		revert: "reverting", bisect: "bisecting",
@@ -181,6 +182,7 @@
 	let hundredCh = $state(0);
 	const fit = $derived.by((): Fit => {
 		const available = room;
+		if (compact) return available === undefined || available >= 66 ? "full" : "icon";
 		if (row || available === undefined || !hundredCh) return "full";
 		const fits = (candidate: Fit) => {
 			const { ch, px } = floor(candidate);
@@ -192,11 +194,12 @@
 		const { ch, px } = floor(candidate);
 		return `calc(${ch}ch + ${px}px)`;
 	};
-	const minimumWidth = $derived(width(fit));
+	const minimumWidth = $derived(compact ? "44px" : width(fit));
 
-	async function copy(text: string) {
+	async function copy(text: string, message: string) {
 		try {
 			await navigator.clipboard.writeText(text);
+			showToast(message, { variant: "success" });
 		} catch {
 			showToast("Could not copy to clipboard", { variant: "error" });
 		}
@@ -218,20 +221,20 @@
 				<!-- Without labels the dirty mark rides the icon; with them it follows the branch. -->
 				{#if git?.dirty && fit === "icon"}{@render dirtyMark("absolute -right-[2px] -bottom-[1px] ring-[1.5px] " + (row ? "ring-bg-surface" : "ring-input-bg"))}{/if}
 			</span>
-			{#if fit === "full" && (control || row || !checkout)}
-				<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: calc(${projectFloor}ch + 1px)`} title={project}>{project}</span>
+			{#if fit === "full" && ((!compact && (control || row)) || !checkout)}
+				<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: ${compact ? '0' : `calc(${projectFloor}ch + 1px)`}`} title={project}>{project}</span>
 				{#if checkout}<span class="shrink-0 text-text-dimmer" aria-hidden="true">{control ? "·" : "/"}</span>{/if}
 			{/if}
 			{#if fit !== "icon"}
 				{#if checkout}
-					<span data-part="branch" class="min-w-0 truncate {presentation === 'word' ? 'text-text-dimmer' : git?.branch ? 'text-text-secondary' : 'text-text-muted'}" style:min-width={`${branchFloor}ch`} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
+					<span data-part="branch" class="min-w-0 truncate {presentation === 'word' ? 'text-text-dimmer' : git?.branch ? 'text-text-secondary' : 'text-text-muted'}" style:min-width={compact ? '0' : `${branchFloor}ch`} title={git?.branch ? `Branch: ${checkout}` : `Detached at ${checkout}`}>{checkout}</span>
 				{/if}
 				{#if git?.dirty}{@render dirtyMark("shrink-0")}{/if}
 				{#if !phone && upstreamMark}
 					<span data-part="upstream" class="shrink-0 tabular-nums text-text-muted">{upstreamMark}</span>
 				{/if}
-				{#if operation}<span data-part="operation" class="shrink-0 text-warning">{operation}</span>{/if}
-				{#if showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
+				{#if !compact && operation}<span data-part="operation" class="shrink-0 text-warning">{operation}</span>{/if}
+				{#if !compact && showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
 			{/if}
 			{#if warningLabel}
 				<span data-part="warning" class="text-warning {fit === 'icon' && !row ? 'absolute right-[2px] top-[2px]' : 'inline-flex shrink-0'}" role="img" aria-label={warningLabel} title={warningLabel} data-testid={warningMismatch ? "workspace-mismatch-indicator" : "workspace-hint"}><Icon name="circle-alert" size={12} /></span>
@@ -244,8 +247,39 @@
 			{/if}
 {/snippet}
 
+{#snippet checkoutActions()}
+	{#if onrenamebranch}<MenuItem density={multiFolder ? undefined : "default"} class={multiFolder ? undefined : "min-h-[36px] px-[12px] max-md:min-h-[44px]"} data-testid="session-branch-rename" onselect={openBranchRename}>{#if !multiFolder}<span class="shrink-0 text-text-muted"><Icon name="pencil" size={15} /></span>{/if}Rename branch</MenuItem>{/if}
+	{#if multiFolder}
+		{#if git?.branch}<MenuItem onselect={() => void copy(git?.branch ?? "", "Branch copied")}>Copy branch name</MenuItem>{/if}
+		<MenuItem onselect={() => void copy(directory, "Path copied")}>Copy folder path</MenuItem>
+	{/if}
+	{#if loadWorktrees && onmove}
+		{#if multiFolder}<MenuSeparator />{/if}
+		<MenuItem density={multiFolder ? undefined : "default"} class={multiFolder ? undefined : "min-h-[36px] px-[12px] max-md:min-h-[44px]"} closeOnSelect={false} onselect={() => void openWorktrees()}>{#if !multiFolder}<span class="shrink-0 text-text-muted"><Icon name="folder-tree" size={15} /></span>{/if}<span class="flex-1">{multiFolder ? "Move to worktree…" : "Move to another worktree…"}</span>{#if !multiFolder}<span class="shrink-0 text-text-dimmer"><Icon name="chevron-right" size={13} /></span>{/if}</MenuItem>
+		{#if showWorktrees}
+			<MenuGroup label="Worktrees">
+				{#if worktrees === undefined}
+					<MenuItem disabled>Loading worktrees…</MenuItem>
+				{:else if worktrees.length === 0}
+					<MenuItem disabled>No worktrees available</MenuItem>
+				{:else}
+					{#each worktrees as worktree (worktree.path)}
+						<MenuItem disabled={moving} onselect={() => void move(worktree.path)}>
+							<span class="flex min-w-0 flex-1 flex-col">
+								<span>{worktree.branch ?? (worktree.main ? "Main folder" : "Detached HEAD")}{worktree.main ? " · main worktree" : ""}</span>
+								<span class="break-all text-text-muted">{worktree.path}</span>
+							</span>
+							{#if worktree.path === (currentDirectory ?? directory)}<span data-testid="current-worktree"><Icon name="check" size={12} /><span class="sr-only">Current worktree</span></span>{/if}
+						</MenuItem>
+					{/each}
+				{/if}
+			</MenuGroup>
+		{/if}
+	{/if}
+{/snippet}
+
 {#snippet checkoutMenu()}
-<Menu presentation={phone ? "sheet" : "popover"} side="top" align="end" ariaLabel="Checkout" class={phone ? undefined : "w-[280px]"} data-testid="composer-checkout-menu" onopenchange={(open) => { if (!open) showWorktrees = false; }} onCloseAutoFocus={(event) => { if (showBranchRename) event.preventDefault(); }}>
+<Menu presentation={phone ? "sheet" : "popover"} side="top" align="end" ariaLabel="Checkout" class={phone ? undefined : "w-[320px]"} data-testid="composer-checkout-menu" onopenchange={(open) => { if (!open) showWorktrees = false; }} onCloseAutoFocus={(event) => { if (showBranchRename) event.preventDefault(); }}>
 	{#snippet trigger({ props })}
 		{#if row}
 			<Button {...props} bind:element={identityElement} variant="composer-row" size="content"
@@ -257,15 +291,15 @@
 		{:else}
 			<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
 			<!-- The wrapper, ruler and button share a font so the ch floors agree. -->
-			<span class="git-pill {control ? 'git-control font-mono' : 'git-word font-sans'} text-[11.5px] inline-grid" style={`grid-template-columns: minmax(${minimumWidth}, max-content)`} style:width={!control && !row && fit === "icon" ? width("full") : undefined} bind:clientWidth={room}>{#if !row}<span class="ruler" aria-hidden="true" bind:clientWidth={hundredCh}></span>{/if}<Button {...props} bind:element={identityElement} variant={control ? "composer-checkout" : "composer-word"} size={control ? "composer-chip" : "content"} touchTarget align="start" class="max-w-full"
+			<span class="git-pill {control ? 'git-control font-mono' : 'git-word font-sans'} text-[11.5px] inline-grid" class:compact style={`grid-template-columns: minmax(${minimumWidth}, max-content)`} style:width={!control && !row && fit === "icon" ? width("full") : undefined} bind:clientWidth={room}>{#if !row}<span class="ruler" aria-hidden="true" bind:clientWidth={hundredCh}></span>{/if}<Button {...props} bind:element={identityElement} variant={control ? "composer-checkout" : "composer-word"} size={control ? "composer-chip" : "content"} touchTarget align="start" class="max-w-full"
 				style={`min-width: ${minimumWidth}`}
 				title={label} ariaLabel={`Checkout: ${[label, ...noticeLabels].join(", ")}`} data-testid="composer-checkout">
 				{@render identity()}
 			</Button></span>
 		{/if}
 	{/snippet}
-	<MenuGroup label="Checkout">
-		{#if folders.length > 1 || folders.some((folder) => folder.shared) || (!git && folders.length > 0)}
+	{#if multiFolder}
+		<MenuGroup label="Checkout">
 			{#each folders as folder (folder.root)}
 				<section class="px-[8px] py-[6px] text-[10px]" aria-label={folder.label} data-testid="session-folder-git" data-folder-root={folder.root}>
 					<p class="mb-[6px] break-all font-medium text-text" title={folder.root}>{folder.label}{#if folder.shared}<span class="ml-2 font-normal text-text-muted">shared</span>{/if}</p>
@@ -277,28 +311,49 @@
 							{#if folder.ahead !== undefined || folder.behind !== undefined}
 								<dt class="text-text-muted">Upstream</dt><dd class="text-right tabular-nums text-text">↑{folder.ahead ?? 0} ↓{folder.behind ?? 0}</dd>
 							{/if}
-							<dt class="text-text-muted">Changes</dt><dd class="text-right {folder.dirty ? 'text-warning' : 'text-text'}">{folder.dirty ? "uncommitted" : "clean"}</dd>
+							<dt class="text-text-muted">Changes</dt><dd class="text-right {folder.dirty ? 'text-warning' : 'text-text'}">{#if folder.changes}{folder.changes.files} file{folder.changes.files === 1 ? "" : "s"} changed{#if folder.changes.insertions}{" "}<span class="font-mono text-success">+{folder.changes.insertions}</span>{/if}{#if folder.changes.deletions}{" "}<span class="font-mono text-error">-{folder.changes.deletions}</span>{/if}{:else}{folder.dirty ? "uncommitted" : "clean"}{/if}</dd>
 						</dl>
 					{/if}
 				</section>
 			{/each}
+		</MenuGroup>
 		{:else}
-		<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-[12px] gap-y-[8px] px-[8px] py-[6px] text-[10px]">
-			<dt class="text-text-muted">Project</dt><dd class="min-w-0 break-all text-right text-text">{project}</dd>
+		<div role="group" aria-label="Checkout" class="px-[8px] pt-[6px] pb-[4px] max-md:px-4">
+			<div class="flex items-center gap-[10px]">
+				<span class="grid size-[34px] shrink-0 place-items-center rounded-[10px] bg-accent/14 text-accent"><Icon name={git?.worktree ? "folder-tree" : git ? "git-branch" : "folder"} size={18} /></span>
+				<div class="min-w-0 flex-1">
+					<p data-part="checkout-branch" class="break-all font-mono text-[15px] font-semibold text-text max-md:text-[17px]">{git?.branch || (git?.head ? `Detached at ${git.head}` : project)}</p>
+					{#if git}<p class="mt-[2px] break-words text-[12.5px] text-text-secondary">{folders[0]?.label ?? project}{#if git.worktree}{" · worktree "}<span class="font-mono text-[12px]">{git.worktree}</span>{/if}</p>{/if}
+				</div>
+				{#if git?.branch}<MenuItem density="compact" closeOnSelect={false} aria-label="Copy branch name" title="Copy branch name" class="size-[30px] shrink-0 justify-center rounded-[8px] text-text-muted max-md:size-[40px]" onselect={() => void copy(git?.branch ?? "", "Branch copied")}><Icon name="copy" size={15} /></MenuItem>{/if}
+			</div>
 			{#if git}
-				<dt class="text-text-muted">Branch</dt><dd class="min-w-0 break-all text-right text-text">{git.branch || `Detached at ${git.head ?? "unknown"}`}</dd>
-				{#if git.worktree}<dt class="text-text-muted">Worktree</dt><dd class="min-w-0 break-all text-right text-text">{git.worktree}</dd>{/if}
+				<div class="mt-[14px] grid grid-cols-[1fr_1fr_1.7fr] gap-[8px]">
+					{#each [{ label: "ahead", count: git.ahead }, { label: "behind", count: git.behind }] as tile (tile.label)}
+						<div data-testid={`checkout-${tile.label}`} title={tile.count === undefined ? "No upstream" : undefined} class="min-w-0 rounded-[12px] border border-border px-[10px] py-[9px]">
+							<p class="font-mono text-[17px] font-semibold tabular-nums text-text">{tile.count ?? "–"}</p><p class="text-[12px] text-text-secondary">{tile.label}</p>
+						</div>
+					{/each}
+					<div data-testid="checkout-changes" class="min-w-0 rounded-[12px] border border-border px-[10px] py-[9px]">
+						<p class="flex flex-wrap items-baseline gap-x-[5px] font-mono tabular-nums"><span class="text-[17px] font-semibold text-text">{git.changes?.files ?? (git.dirty ? "–" : 0)}</span>{#if git.changes?.insertions}<span class="text-[12px] text-success">+{git.changes.insertions}</span>{/if}{#if git.changes?.deletions}<span class="text-[12px] text-error">-{git.changes.deletions}</span>{/if}</p><p class="text-[12px] text-text-secondary">files changed</p>
+					</div>
+				</div>
+				{#if operation || git.merged}<div class="mt-[8px] flex flex-wrap gap-[6px] text-[11.5px]">{#if operation}<span class="rounded-full bg-warning/10 px-[8px] py-[2px] text-warning">{operation}</span>{/if}{#if git.merged}<span class="rounded-full bg-success/10 px-[8px] py-[2px] text-success">merged</span>{/if}</div>{/if}
 			{/if}
-			<dt class="text-text-muted">Folder</dt><dd class="min-w-0 break-all text-right text-text">{directory}</dd>
-			{#if git && (git.ahead !== undefined || git.behind !== undefined)}
-				<dt class="text-text-muted">Upstream</dt><dd class="text-right tabular-nums text-text">{upstream}</dd>
-			{/if}
-			{#if git}
-				<dt class="text-text-muted">Changes</dt><dd class="text-right {git.dirty ? 'text-warning' : 'text-text'}">{git.dirty ? "uncommitted" : "clean"}</dd>
-			{/if}
-		</dl>
+		</div>
+		<MenuGroup label="Location">
+			<div class="mx-[8px] overflow-hidden rounded-[12px] border border-border max-md:mx-4">
+				<MenuItem density="default" closeOnSelect={false} aria-label={`Copy worktree path, ${directory}`} class="min-h-[36px] gap-[10px] px-[12px] max-md:min-h-[44px]" onselect={() => void copy(directory, "Path copied")}>
+					<span class="shrink-0 text-text-muted">Worktree</span><span class="min-w-0 flex-1 truncate text-right font-mono text-[12px] text-text" dir="rtl" title={directory}><bdi>{directory}</bdi></span><span class="shrink-0 text-text-dimmer"><Icon name="copy" size={14} /></span>
+				</MenuItem>
+				{#if git?.upstream}<div class="flex min-h-[36px] items-center gap-[10px] border-t border-border px-[12px] text-sm max-md:min-h-[44px]"><span class="shrink-0 text-text-muted">Upstream</span><span class="min-w-0 flex-1 truncate text-right font-mono text-[12px] text-text" title={git.upstream}>{git.upstream}</span></div>{/if}
+				{#if git?.head}<MenuItem density="default" closeOnSelect={false} aria-label={`Copy commit hash, ${git.head}`} class="min-h-[36px] gap-[10px] border-t border-border px-[12px] max-md:min-h-[44px]" onselect={() => void copy(git?.oid ?? git?.head ?? "", "Commit hash copied")}>
+					<span class="shrink-0 text-text-muted">HEAD</span><span class="min-w-0 flex-1 truncate text-right font-mono text-[12px] text-text">{git.head}</span><span class="shrink-0 text-text-dimmer"><Icon name="copy" size={14} /></span>
+				</MenuItem>{/if}
+			</div>
+		</MenuGroup>
+		<p class="{phone ? 'px-4' : 'px-3'} pt-[7px] pb-[4px] text-[12px] text-text-muted">{phone ? "Tap" : "Click"} a row to copy it.</p>
 		{/if}
-	</MenuGroup>
 	{#if workspaceMissing}
 		<MenuSeparator />
 		{#if missingFolders.length}
@@ -325,32 +380,15 @@
 		{#if onmove}<MenuItem disabled={moving || dismissing} data-testid="workspace-hint-move" onselect={() => workspaceHint && void move(workspaceHint)}>Move</MenuItem>{/if}
 		{#if ondismiss}<MenuItem disabled={moving || dismissing} data-testid="workspace-hint-dismiss" onselect={() => workspaceHint && void dismiss(workspaceHint)}>Dismiss</MenuItem>{/if}
 	{/if}
-	<MenuSeparator />
-	{#if onrenamebranch}<MenuItem data-testid="session-branch-rename" onselect={openBranchRename}>Rename branch</MenuItem>{/if}
-	{#if git?.branch}<MenuItem onselect={() => void copy(git?.branch ?? "")}>Copy branch name</MenuItem>{/if}
-	<MenuItem onselect={() => void copy(directory)}>Copy folder path</MenuItem>
-	{#if loadWorktrees && onmove}
+	{#if multiFolder}
 		<MenuSeparator />
-		<MenuItem closeOnSelect={false} onselect={() => void openWorktrees()}>Move to worktree…</MenuItem>
-		{#if showWorktrees}
-			<MenuGroup label="Worktrees">
-				{#if worktrees === undefined}
-					<MenuItem disabled>Loading worktrees…</MenuItem>
-				{:else if worktrees.length === 0}
-					<MenuItem disabled>No worktrees available</MenuItem>
-				{:else}
-					{#each worktrees as worktree (worktree.path)}
-						<MenuItem disabled={moving} onselect={() => void move(worktree.path)}>
-							<span class="flex min-w-0 flex-1 flex-col">
-								<span>{worktree.branch ?? (worktree.main ? "Main folder" : "Detached HEAD")}{worktree.main ? " · main worktree" : ""}</span>
-								<span class="break-all text-text-muted">{worktree.path}</span>
-							</span>
-							{#if worktree.path === (currentDirectory ?? directory)}<span data-testid="current-worktree"><Icon name="check" size={12} /><span class="sr-only">Current worktree</span></span>{/if}
-						</MenuItem>
-					{/each}
-				{/if}
-			</MenuGroup>
-		{/if}
+		{@render checkoutActions()}
+	{:else if onrenamebranch || (loadWorktrees && onmove)}
+		<MenuGroup label="Actions">
+			<div class="mx-[8px] divide-y divide-border overflow-hidden rounded-[12px] border border-border max-md:mx-4">
+				{@render checkoutActions()}
+			</div>
+		</MenuGroup>
 	{/if}
 </Menu>
 {/snippet}
@@ -390,6 +428,8 @@
 	.git-pill { max-width: 100%; flex-shrink: 1; }
 	/* A stable slot measures available room in block, grid and flex parents. Checkout still yields before the model. */
 	.git-pill.git-control { position: relative; width: 100%; flex: 0 1000000 220px; min-width: 30px; max-width: 220px; justify-content: end; }
+	/* Phone models yield their name first; checkout keeps a readable branch until then. */
+	.git-pill.git-control.compact { flex: 0 0 var(--composer-checkout-width, 90px); max-width: 110px; }
 	/* Content-sized, so it sits beside the context %. As an icon it still asks for its full width, or it could never grow back. */
 	.git-pill.git-word { position: relative; flex: 0 1 auto; min-width: 12px; justify-content: end; }
 	/* 100ch in the pill's font turns ch floors into px. It extends left from the pill, so it never adds scroll. */

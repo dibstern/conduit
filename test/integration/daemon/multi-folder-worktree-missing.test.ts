@@ -171,6 +171,12 @@ process.exit(result.status ?? 1);
 			if (!session) throw new Error(`Session ${id} was not listed`);
 			return session;
 		};
+		// List reads serve the published state, which a forced read updates a
+		// scheduler tick after the daemon sees a checkout appear or disappear.
+		const settled = (
+			id: string,
+			check: (session: Awaited<ReturnType<typeof row>>) => void,
+		) => vi.waitFor(async () => check(await row(id)), { timeout: 15_000 });
 		const create = async (title: string, newWorktree = true) => {
 			const { sessionId } = await sendRpcRequest(socket, {
 				_tag: "CreateSession",
@@ -200,7 +206,16 @@ process.exit(result.status ?? 1);
 		};
 		const recreate = (sessionId: string) =>
 			sendRpcRequest(socket, { _tag: "RecreateSessionWorktree", sessionId });
-		return { fixture, socket, extra, row, create, recreate, failMarker };
+		return {
+			fixture,
+			socket,
+			extra,
+			row,
+			settled,
+			create,
+			recreate,
+			failMarker,
+		};
 	}
 
 	function workspaceEvents(fixture: ProcessHarness, id: string) {
@@ -332,7 +347,8 @@ process.exit(result.status ?? 1);
 
 	for (const missing of ["extra", "primary", "both"] as const) {
 		it(`reports and recovers ${missing} missing checkouts`, async () => {
-			const { fixture, extra, row, create, recreate } = await start(missing);
+			const { fixture, extra, row, settled, create, recreate } =
+				await start(missing);
 			const session = await create("owner");
 			const mappings = session.workspace?.worktrees ?? {};
 			const missingFolders = folders.filter(
@@ -369,6 +385,9 @@ process.exit(result.status ?? 1);
 			const present = original.filter(
 				({ folder }) => !missingFolders.includes(folder),
 			);
+			// Watcher events are best-effort hints, so the edit is observed
+			// through the viewed tier's polling rather than event delivery.
+			await (await fixture.connect()).view(session.id);
 			for (const { path } of present)
 				writeFileSync(join(path, "keep.txt"), "keep present checkout\n");
 			await vi.waitFor(
@@ -385,11 +404,13 @@ process.exit(result.status ?? 1);
 			await capture("healthy", fixture);
 			for (const folder of missingFolders)
 				rmSync(mappings[folder] ?? "", { recursive: true, force: true });
+			await settled(session.id, (state) =>
+				expect(
+					state.workspaceMissing?.folders?.map(({ folder }) => folder),
+				).toEqual(missingFolders),
+			);
 			await capture("beforeRecovery", fixture);
 			const state = await row(session.id);
-			expect(
-				state.workspaceMissing?.folders?.map(({ folder }) => folder),
-			).toEqual(missingFolders);
 			expect(state.workspaceMissing?.canRecreate).toBe(true);
 			for (const folder of missingFolders) {
 				const status = state.git?.folders?.find(({ root }) => root === folder);
@@ -412,7 +433,9 @@ process.exit(result.status ?? 1);
 				expect(readFileSync(join(path, "keep.txt"), "utf8")).toBe(
 					"keep present checkout\n",
 				);
-			expect((await row(session.id)).workspaceMissing).toBeUndefined();
+			await settled(session.id, (state) =>
+				expect(state.workspaceMissing).toBeUndefined(),
+			);
 			expect((await row(session.id)).workspace).toEqual(session.workspace);
 			expect(workspaceEvents(fixture, session.id)).toEqual(events);
 			await capture("afterRecovery", fixture);
@@ -425,10 +448,8 @@ process.exit(result.status ?? 1);
 
 	for (const failure of ["deleted-branch", "git-add"] as const) {
 		it(`rolls back every recreated checkout on ${failure}`, async () => {
-			const { fixture, extra, row, create, recreate, failMarker } = await start(
-				failure,
-				failure === "git-add",
-			);
+			const { fixture, extra, settled, create, recreate, failMarker } =
+				await start(failure, failure === "git-add");
 			const session = await create("owner");
 			const mappings = session.workspace?.worktrees ?? {};
 			const branch = git(mappings[extra] ?? "", "branch", "--show-current");
@@ -445,12 +466,15 @@ process.exit(result.status ?? 1);
 					"refs/heads",
 				),
 			);
+			await settled(session.id, (state) => {
+				expect(state.workspaceMissing?.folders).toHaveLength(2);
+				if (failure === "deleted-branch")
+					expect(state.workspaceMissing).toMatchObject({
+						canRecreate: false,
+						reason: "branch-missing",
+					});
+			});
 			await capture("beforeRecovery", fixture);
-			if (failure === "deleted-branch")
-				expect((await row(session.id)).workspaceMissing).toMatchObject({
-					canRecreate: false,
-					reason: "branch-missing",
-				});
 			await expect(recreate(session.id)).rejects.toMatchObject({
 				_tag: "WorktreeRecoveryError",
 				reason: failure === "deleted-branch" ? "branch-missing" : "git-failed",
@@ -468,7 +492,9 @@ process.exit(result.status ?? 1);
 					),
 				),
 			).toEqual(refs);
-			expect((await row(session.id)).workspaceMissing?.folders).toHaveLength(2);
+			await settled(session.id, (state) =>
+				expect(state.workspaceMissing?.folders).toHaveLength(2),
+			);
 			await capture("afterRecovery", fixture);
 			if (failure === "git-add") {
 				evidence["gitAddsBeforeFailure"] = readFileSync(
@@ -481,7 +507,9 @@ process.exit(result.status ?? 1);
 				expect(evidence["gitAddsBeforeFailure"]).toHaveLength(2);
 				rmSync(failMarker);
 				await recreate(session.id);
-				expect((await row(session.id)).workspaceMissing).toBeUndefined();
+				await settled(session.id, (state) =>
+					expect(state.workspaceMissing).toBeUndefined(),
+				);
 				await capture("retryRecovered", fixture);
 			}
 		}, 180_000);
@@ -491,9 +519,8 @@ process.exit(result.status ?? 1);
 		"directory",
 		"registration",
 	] as const)("recovers one checkout shared by sibling repository folders (%s removed)", async (removal) => {
-		const { fixture, socket, extra, row, create, recreate } = await start(
-			`same-repository-${removal}`,
-		);
+		const { fixture, socket, extra, row, settled, create, recreate } =
+			await start(`same-repository-${removal}`);
 		const app = join(fixture.projectDir, "app");
 		const api = join(fixture.projectDir, "api");
 		for (const directory of [app, api]) {
@@ -532,19 +559,21 @@ process.exit(result.status ?? 1);
 		if (removal === "registration")
 			git(app, "worktree", "remove", "--force", root);
 		else rmSync(root, { recursive: true, force: true });
+		await settled(session.id, (state) =>
+			expect(
+				state.workspaceMissing?.folders?.map(({ folder }) => folder),
+			).toEqual([app, api]),
+		);
 		await capture("beforeRecovery", fixture);
-		expect(
-			(await row(session.id)).workspaceMissing?.folders?.map(
-				({ folder }) => folder,
-			),
-		).toEqual([app, api]);
 		expect((await row(session.id)).workspaceMissing?.canRecreate).toBe(true);
 		await recreate(session.id);
 		for (const folder of [app, api])
 			expect(
 				readFileSync(join(mappings[folder] ?? "", "source.txt"), "utf8"),
 			).toBe(`${basename(folder)} committed\n`);
-		expect((await row(session.id)).workspaceMissing).toBeUndefined();
+		await settled(session.id, (state) =>
+			expect(state.workspaceMissing).toBeUndefined(),
+		);
 		expect(
 			git(app, "worktree", "list", "--porcelain").split("\n\n").filter(Boolean),
 		).toHaveLength(2);
@@ -553,7 +582,7 @@ process.exit(result.status ?? 1);
 	}, 180_000);
 
 	it("recovers a missing extra checkout shared with another session", async () => {
-		const { fixture, socket, extra, row, create, recreate } =
+		const { fixture, socket, extra, row, settled, create, recreate } =
 			await start("shared");
 		const owner = await create("owner");
 		const reader = await create("reader", false);
@@ -567,26 +596,38 @@ process.exit(result.status ?? 1);
 		expect(readerWorkspace?.worktrees[extra]).toBe(path);
 		const events = workspaceEvents(fixture, owner.id);
 		rmSync(path, { recursive: true, force: true });
+		await settled(owner.id, (state) =>
+			expect(
+				state.workspaceMissing?.folders?.map(({ folder }) => folder),
+			).toEqual([extra]),
+		);
 		await capture("beforeRecovery", fixture);
 		await recreate(owner.id);
-		expect((await row(owner.id)).workspaceMissing).toBeUndefined();
+		await settled(owner.id, (state) =>
+			expect(state.workspaceMissing).toBeUndefined(),
+		);
 		expect((await row(reader.id)).workspace).toEqual(readerWorkspace);
-		expect((await row(reader.id)).git?.branch).toBe(
-			git(path, "branch", "--show-current"),
+		await settled(reader.id, (state) =>
+			expect(state.git?.branch).toBe(git(path, "branch", "--show-current")),
 		);
 		expect(workspaceEvents(fixture, owner.id)).toEqual(events);
 		await capture("afterRecovery", fixture);
 	}, 180_000);
 
 	it("reports a missing extra after restart and publishes recovery to both feeds", async () => {
-		const { fixture, extra, row, create, recreate } = await start("restart");
+		const { fixture, extra, row, settled, create, recreate } =
+			await start("restart");
 		const session = await create("owner");
 		rmSync(session.workspace?.worktrees[extra] ?? "", {
 			recursive: true,
 			force: true,
 		});
+		await settled(session.id, (state) =>
+			expect(
+				state.workspaceMissing?.folders?.map(({ folder }) => folder),
+			).toEqual([extra]),
+		);
 		const missing = (await row(session.id)).workspaceMissing;
-		expect(missing?.folders?.map(({ folder }) => folder)).toEqual([extra]);
 		await capture("beforeRestart", fixture);
 		await fixture.shutdown();
 		await fixture.restart({

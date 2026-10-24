@@ -198,6 +198,49 @@ async function runtimeImportFixture() {
 describe("legacy history added after daemon startup", () => {
 	const evidence: Record<string, unknown> = {};
 
+	// Runtime registration must not sweep a newly uploaded blob that has not yet
+	// been referenced, including while opening and importing the private source.
+	it("keeps unreferenced attachments during runtime project registration", async () => {
+		const fixture = await runtimeImportFixture();
+		const { root, runtime, sql, unavailable } = fixture;
+		const folder = join(root, "attachment-history");
+		const liveHash = "a".repeat(64);
+		const importedHash = "b".repeat(64);
+		try {
+			await runtime.runPromise(sql`INSERT INTO attachment_blobs
+				(hash, mime, size, bytes, created_at)
+				VALUES (${liveHash}, 'text/plain', 4, ${Buffer.from("live")}, 1000)`);
+			const source = await createProjectStoreFixture(
+				root,
+				"attachment-history",
+				{
+					sourcePath: join(folder, ".conduit", "events.db"),
+					transcript: { prompt: "Prompt", reply: "Reply" },
+				},
+			);
+			const sourceDb = new Database(source.sourcePath);
+			try {
+				sourceDb
+					.prepare(
+						"INSERT INTO attachment_blobs (hash, mime, size, bytes, created_at) VALUES (?, 'text/plain', 6, ?, 1000)",
+					)
+					.run(importedHash, Buffer.from("source"));
+			} finally {
+				sourceDb.close();
+			}
+			const saved = await fixture.save(folder);
+			expect(saved.project.slug).toBe("attachment-history");
+			expect(unavailable.size).toBe(0);
+			expect(
+				await runtime.runPromise(
+					sql`SELECT hash FROM attachment_blobs ORDER BY hash`,
+				),
+			).toEqual([{ hash: liveHash }, { hash: importedHash }]);
+		} finally {
+			await fixture.close();
+		}
+	});
+
 	it.each([
 		false,
 		true,

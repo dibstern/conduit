@@ -2,7 +2,9 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
+import { AttachmentStoreTag } from "../../../../src/lib/domain/persistence/Services/attachment-store.js";
 import { PersistenceProjectTag } from "../../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { makeAttachmentStore } from "../../../../src/lib/persistence/attachment-store.js";
 import { makeEventStoreEffect } from "../../../../src/lib/persistence/effect/event-store-effect.js";
 import { makeEffectSqlMigrator } from "../../../../src/lib/persistence/effect/migrations.js";
 import { makeProjectionRunnerEffect } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -28,6 +30,12 @@ it("reads ordered, filtered history with bounded pages and recoverable errors", 
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
+			const attachments = yield* makeAttachmentStore;
+			const attachmentText = "Document bytes 🧪\nline two";
+			const attachment = yield* attachments.put(
+				`data:text/plain;name=notes.txt;base64,${Buffer.from(attachmentText).toString("base64")}`,
+			);
+			const firstText = `Message 0\nAttachment: notes.txt (text/plain, ${Buffer.byteLength(attachmentText)} bytes)\n${attachmentText}`;
 			const store = yield* makeEventStoreEffect.pipe(
 				Effect.provideService(PersistenceProjectTag, {
 					projectId: "test-project",
@@ -121,10 +129,22 @@ it("reads ordered, filtered history with bounded pages and recoverable errors", 
 								{
 									type: "file",
 									filename: "PRIVATE_ATTACHMENT",
-									url: "PRIVATE_URL",
+									source: { url: "PRIVATE_URL" },
 								},
 							]
-						: [{ type: "text", text: message.text }];
+						: [
+								{ type: "text", text: message.text },
+								...(index === 0
+									? [
+											{
+												type: "file",
+												filename: "notes.txt",
+												mime: "text/plain",
+												source: attachment,
+											},
+										]
+									: []),
+							];
 				events.push(
 					canonicalEvent("message.snapshot", "s1", {
 						messageId: message.id,
@@ -154,13 +174,14 @@ it("reads ordered, filtered history with bounded pages and recoverable errors", 
 			const readQuery = yield* makeReadQueryEffect;
 			const read = yield* makeClaudeThreadRead.pipe(
 				Effect.provideService(ReadQueryEffectTag, readQuery),
+				Effect.provideService(AttachmentStoreTag, attachments),
 			);
 			expect(yield* read("s1", { limit: 1 })).toEqual({
 				items: [
 					{
 						id: "m0000",
 						role: "user",
-						text: "Message 0",
+						text: firstText,
 						textOffset: 0,
 						interrupted: false,
 					},
@@ -221,7 +242,10 @@ it("reads ordered, filtered history with bounded pages and recoverable errors", 
 				if (cursor === undefined) break;
 			}
 			expect([...collected]).toEqual(
-				messages.map(({ id, text }) => [id, text]),
+				messages.map(({ id, text }, index) => [
+					id,
+					index === 0 ? firstText : text,
+				]),
 			);
 			const defaultPage = yield* read("s1", { cursor: "m0003" });
 			expect(defaultPage).toMatchObject({ nextCursor: "m0053" });

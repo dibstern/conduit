@@ -1,4 +1,7 @@
-import type { Effect } from "effect";
+import type { Effect, Scope, Stream } from "effect";
+import type { Account } from "../../contracts/account.js";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
+import type { AccountSwitchBusy } from "../../contracts/limit-recovery.js";
 import type { UsageHarness } from "../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
@@ -19,6 +22,7 @@ import type {
 	ProviderControlContext,
 	ProviderNativeSession,
 	QuestionRequest,
+	ResolvedSendTurnInput,
 	SendTurnInput,
 	TurnResult,
 } from "../types.js";
@@ -27,6 +31,12 @@ import type { RunnerSettingsSnapshot } from "./runner-upgrade.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
 export type SessionTurn = Omit<
+	ResolvedSendTurnInput,
+	"eventSink" | "abortSignal" | "awaitIntake" | "reconcileIntake"
+>;
+
+/** The outbox keeps refs until replay crosses the provider boundary. */
+export type DurableSessionTurn = Omit<
 	SendTurnInput,
 	"eventSink" | "abortSignal" | "awaitIntake" | "reconcileIntake"
 >;
@@ -169,7 +179,7 @@ export type SessionOutput =
 						readonly inputId: string;
 						readonly text: string;
 						readonly runId?: string;
-						readonly images?: readonly string[];
+						readonly images?: readonly AttachmentRef[];
 					};
 			  }
 			| {
@@ -214,8 +224,13 @@ export interface SessionRunner {
 		sessionIds: readonly string[],
 	): Effect.Effect<void, SessionFailure>;
 	/** Retains the admitted account before preparation and through native cleanup. */
-	withTurnEffect?<A, E, R>(
-		input: SessionTurn,
+	withTurnEffect?<
+		A,
+		E,
+		R,
+		T extends Pick<SessionTurn, "sessionId" | "inputId" | "account">,
+	>(
+		input: T,
 		sinkId: string,
 		work: Effect.Effect<A, E, R>,
 	): Effect.Effect<A, E | SessionFailure, R>;
@@ -228,6 +243,8 @@ export interface SessionRunner {
 	) => Effect.Effect<ProviderControlCommandStatus, SessionFailure>;
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
+	/** Wake inbox drains after native activity ends, even without a stored event. */
+	readonly turnEnds?: Effect.Effect<Stream.Stream<string>, never, Scope.Scope>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
 	/** Without an ID, checks all live processes; with one, checks the current or quarantined owner. */
 	hasLiveProcessEffect(
@@ -238,6 +255,10 @@ export interface SessionRunner {
 	getSessionFailureEffect?(
 		sessionId: string,
 	): Effect.Effect<SessionFailure | undefined>;
+	getAccountSwitchBlockEffect?(
+		sessionId: string,
+		account: Account,
+	): Effect.Effect<AccountSwitchBusy | undefined>;
 	/** Local runner lifecycle state, including work outside the foreground turn. */
 	hasPendingSubagentFinalizers?(sessionId: string): boolean;
 	/** Undefined means no runtime session; null means its cursor is cleared. */

@@ -145,10 +145,14 @@ describe("Claude runner admission socket probes", () => {
 		vi.stubEnv("HOME", join(root, "home"));
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, "claude"));
 		vi.stubEnv("CONDUIT_CONFIG_DIR", configDir);
+		// Built dist omits test helpers, so respawned runners load the source fixture.
+		vi.stubEnv(
+			"NODE_OPTIONS",
+			`${process.env["NODE_OPTIONS"] ?? ""} --import=${import.meta.resolve("tsx")}`,
+		);
 		vi.stubEnv(
 			"CONDUIT_TEST_CLAUDE_QUERY_MODULE",
-			pathToFileURL(resolve("dist/test/helpers/fake-claude-process-sdk.js"))
-				.href,
+			pathToFileURL(resolve("test/helpers/fake-claude-process-sdk.ts")).href,
 		);
 		const { BUILD_ID }: typeof import("../../../src/lib/build-id.js") =
 			await import(pathToFileURL(resolve("dist/src/lib/build-id.js")).href);

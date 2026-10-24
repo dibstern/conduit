@@ -34,6 +34,7 @@ export interface RunnerPayload {
 	interrupt(
 		sessionId: string,
 		turnIds?: readonly string[],
+		requestedAt?: number,
 	): Effect.Effect<void, PayloadFailure>;
 	applySettings(
 		sessionId: string,

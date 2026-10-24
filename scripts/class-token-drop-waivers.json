@@ -1,9 +1,40 @@
 {
+	"src/lib/frontend/components/project/FolderPicker.svelte :: bg-bg-alt,gap-[7px]": "The approved Add project frames use matching accent folder-plus rows on the dialog surface with an 11px icon gap. The pending folder row replaces its alternate background and 7px gap to follow the browse action.",
+	"src/lib/frontend/components/input/SkillHighlightBackdrop.svelte :: text-text": "The composer backdrop no longer paints glyphs: the textarea paints the text so the caret and visible text share one layout, and the mirror sets -webkit-text-fill-color: transparent. Its text colour has nothing left to colour.",
+	"src/lib/frontend/components/chat/AssistantHeader.svelte :: font-mono,text-mono-xs": "Approved card D replaces the separate dim monospace model span with the friendly model name as the existing semibold reply title.",
+	"src/lib/frontend/components/session/GitIdentity.svelte :: git.dirty": "The approved checkout sheet replaces the warning-coloured uncommitted label with neutral file counts and success/error line totals. git.dirty was a JavaScript condition in the removed class expression, not a CSS class.",
 	"src/lib/frontend/components/chat/ActivityRow.svelte :: tool.isError": "C4 replaces this JavaScript condition with tool.outcome. It is not a CSS class; the text-error and text-text-secondary classes are unchanged.",
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: bg-text-dimmer/30,border-b,h-[3px],mt-[10px],w-[34px]": "The phone top sheet replaces the fake 34x3 handle and bottom border with SheetChrome's real 36x5 drag handle, shared colour, spacing and shadow.",
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: inset-x-0": {
+		"movedTo": "src/lib/frontend/components/ui/Popover.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet positions the phone panel full-width below the measured session header."
+	},
+	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: mx-auto,rounded-b-[22px],rounded-full": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet owns the bottom corners and centered rounded drag handle."
+	},
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: bg-text-dimmer/30,border-b,h-[3px],mt-[10px],w-[34px]": "The phone top sheet replaces the fake 34x3 handle and bottom border with SheetChrome's real 36x5 drag handle, shared colour, spacing and shadow.",
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: inset-x-0": {
+		"movedTo": "src/lib/frontend/components/ui/Popover.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet positions the phone panel full-width below the measured session header."
+	},
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: mx-auto,rounded-b-[22px]": {
+		"movedTo": "src/lib/frontend/components/ui/SheetChrome.svelte",
+		"requires": "sheetEdge=\"top\"",
+		"reason": "The shared top sheet owns the bottom corners and centered drag handle."
+	},
+	"src/lib/frontend/components/chat/SurfacingSummary.svelte :: animate-spin": "Approved Flow Set 1 replaces the summary content spinner with the shared ConduitMark running packet. Reduced motion is owned by that component.",
+	"src/lib/frontend/components/chat/TurnActivity.svelte :: animate-spin": "Approved Flow Set 1 replaces the live activity spinner with the shared 16px ConduitMark running packet.",
+	"src/lib/frontend/components/input/FileMenu.svelte :: contents": "The old wrapper hid BlockGrid's role=img from the listbox accessibility tree. ConduitMark is decorative with aria-hidden=true and has no image role, so the wrapper is unnecessary.",
+	"src/lib/frontend/components/ui/ConduitMark.svelte :: bg-accent,grid,place-items-center,rounded-[5px],rounded-[7px],size,size-[20px],size-[26px],text-white": "Approved Flow Set 1 extends the existing accent mark with numeric sizes and status variants. Component CSS preserves brand accent/white colours and centering; numeric dimensions and a 0.27 times size radius preserve the brand shape. The scanner's size token was an expression fragment.",
+	"src/lib/frontend/components/ui/SessionRow.svelte :: grid-cols-[14px_minmax(0,1fr)_auto]": "Approved Flow Set 1 requires a 16px session glyph. The first grid column grows from 14px to 16px so the glyph fits without overflowing into the title gap.",
+	"src/lib/frontend/components/ui/SessionStatusGlyph.svelte :: animate,animate-spin,attention,bg-session-done,border-border-chip,border-dashed,border-t-accent,border-t-status-goal,border-text-dimmer,motion-reduce:animate-none,size-[8px]": "Approved Flow Set 1 replaces status rings and the unread dot with shared ConduitMark variants: accent running packet, session-done tile and dim outlined idle tile. The shared component owns reduced motion; static headings still pass animate=false. animate and attention were expression fragments, not class tokens.",
 	"src/lib/frontend/components/layout/Sidebar.svelte :: min-h-[44px]": "The phone list overflow menu is replaced by a direct Settings cog. Its size-[44px] button retains the 44px touch target; the removed menu items no longer need their minimum height.",
 	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: pt-[4px]": "The phone account card now starts one standard settings section gap below the header. Its padding uses --settings-section-gap, shared with SettingsGroup, instead of the previous 4px inset.",
 	"src/lib/frontend/components/ui/SettingsGroup.svelte :: mt-[16px]": "SettingsGroup keeps its 16px gap through --settings-section-gap with a 16px fallback. SettingsPanel uses that same value above the first phone account section, so its top spacing matches the following groups.",
-	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: bg-text-dimmer/30,border-b,h-[3px],inset-x-0,mt-[10px],mx-auto,rounded-b-[22px],w-[34px]": "Phone Side threads now uses Dialog and SheetChrome for the requested bottom-sheet behavior. SheetChrome owns the top corners and grab handle; the old top-anchored card's bottom border, bottom corners, positioning and smaller bottom handle are intentionally removed. Desktop retains its floating Surface.",
 	"src/lib/frontend/components/model/HarnessLogo.svelte :: accountColorClass(instanceId,": "The class scanner tokenized the old function call as CSS. The badge now reads the persisted instance slot through accountColorClass(instanceId).",
 	"src/lib/frontend/components/model/HarnessLogo.svelte :: orderedUsageAccounts())": "The badge no longer derives identity from usage list order; accountColorClass reads the persisted slot.",
 	"src/lib/frontend/components/ui/AccountDot.svelte :: accountColorClass(instanceId,": "The class scanner tokenized the old function call as CSS. The dot now reads the persisted instance slot through accountColorClass(instanceId).",
@@ -1084,5 +1115,14 @@
 		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
 		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
 	},
-	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock."
+	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock.",
+	"src/lib/frontend/components/ui/Menu.svelte :: sheetEdge": "Not a class: the scrim's edge-dependent position expression became a plain fixed class with an inline top offset.",
+	"src/lib/frontend/components/project/ProjectDialog.svelte :: bg-bg-alt,bottom-[3px],cursor-pointer,gap-[4px],md:bottom-0,md:sticky,pointer-events-none,pt-[4px],py-[6px],right-[8px],text-[14px],top-1/2,tracking-widest,translate-y-1/2,uppercase": {
+		"movedTo": "src/lib/frontend/components/project/FolderPicker.svelte",
+		"requires": "<FolderPicker",
+		"reason": "The search field, section headings, results and sticky new-folder action now belong to FolderPicker. ProjectDialog still renders that picker and owns the draft."
+	},
+	"src/lib/frontend/components/project/ProjectDialog.svelte :: gap-[8px],h-[28px],h-[32px],left-[8px],min-h-[30px],p-[14px],pb-[2px],pl-[28px],pl-[8px],pr-[80px],px-[8px],rounded-[14px],w-[150px],w-[420px]": "The approved Add project frame replaces the 420px dialog and compact inline name with a 540px shell, 18px padding, 16px corners and a labelled name field. FolderPicker uses a 42px search field and 44px two-line rows with 10px padding and space for git init. The old sizes and spacing are intentionally replaced.",
+	"src/lib/frontend/components/project/ProjectDialog.svelte :: max-md:min-h-[56px]": "Selected folders are removable chips instead of tall stacked cards. Phone chips retain a 44px minimum and removal keeps its existing expanded touch target.",
+	"src/lib/frontend/components/project/ProjectDialog.svelte :: highlighted,tracking-wider": "The old split-colour path snippet and uppercase folder hint are replaced by two-line picker rows, dimmed mono paths and the approved plain-language subtitle. highlighted was a template variable, not a utility."
 }

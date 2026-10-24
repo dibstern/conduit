@@ -125,7 +125,7 @@ export const makeCodexProviderRuntime = (
 						sessionId,
 						input: snapshot.input,
 					}),
-					sameAccountLogin: () => true,
+					loginChange: () => "None",
 					recoverCommands: makeRunnerCommandRecovery({
 						driverKind: "codex",
 						accounts: deps.accounts,

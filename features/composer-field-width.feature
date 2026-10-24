@@ -51,7 +51,7 @@ Examples:
   | message | baseline                   | threshold |
   | Hi      | composer-field-short-phone | 98        |
 
-Scenario Outline: send and stop do not squeeze text while typing
+Scenario Outline: send and stop leave the field full width
   When I type <message> into the composer
   And the mock relay sets composer status to processing
   Then send and stop are both visible

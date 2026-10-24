@@ -85,27 +85,40 @@ const claudeLoginKey = (login: ClaudeLogin): ClaudeLoginKey => ({
 		path: resolve(login.root, login.configDir.path),
 	},
 	accountId: login.account?.id ?? login.instanceId,
-	accountEnv: login.account?.env,
+	accountEnv:
+		login.account === undefined ? undefined : (login.account.env ?? {}),
 	shellConfig: login.shellConfig,
 });
 
 /** Captured shell values can change on every invocation without changing login. */
-export const sameClaudeLogin = (
+export const claudeLoginChange = (
 	first: ClaudeLogin,
 	second: ClaudeLogin,
-): boolean => {
+): "None" | "Settings" | "Account" => {
 	const a = claudeLoginKey(first);
 	const b = claudeLoginKey(second);
-	return (
-		isDeepStrictEqual(a.configDir, b.configDir) &&
-		a.accountId === b.accountId &&
-		isDeepStrictEqual(a.accountEnv, b.accountEnv) &&
-		// Older peers omit declared config; unknown alone must not trigger a rebind.
+	if (
+		!isDeepStrictEqual(a.configDir, b.configDir) ||
+		(a.accountId !== undefined &&
+			b.accountId !== undefined &&
+			a.accountId !== b.accountId)
+	)
+		return "Account";
+	// Missing legacy metadata is unknown; an account with no env declares none.
+	return (a.accountEnv === undefined ||
+		b.accountEnv === undefined ||
+		isDeepStrictEqual(a.accountEnv, b.accountEnv)) &&
 		(a.shellConfig === undefined ||
 			b.shellConfig === undefined ||
 			isDeepStrictEqual(a.shellConfig, b.shellConfig))
-	);
+		? "None"
+		: "Settings";
 };
+
+export const sameClaudeLogin = (
+	first: ClaudeLogin,
+	second: ClaudeLogin,
+): boolean => claudeLoginChange(first, second) === "None";
 
 /** Read a recorded login, leaving absent launch metadata to the caller. */
 export function claudeLoginFromEnv(

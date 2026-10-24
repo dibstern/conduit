@@ -1,9 +1,18 @@
 import { Effect } from "effect";
-import { AccountUnroutable } from "../../contracts/limit-recovery.js";
+import { AttachmentValidationError } from "../../attachment-data-url.js";
+import {
+	AccountSwitchBusy,
+	AccountUnroutable,
+} from "../../contracts/limit-recovery.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
-import { WsRpcError } from "../../contracts/ws-rpc.js";
+import {
+	DraftAttachmentMissing,
+	DraftAttachmentRejected,
+	WsRpcError,
+} from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
+import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import { RecapServiceTag } from "../../domain/relay/Services/recap-service.js";
 import {
 	ConfigTag,
@@ -37,7 +46,6 @@ import type { PermissionId } from "../../shared-types.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
 const inboxCommand = <E>(
-	name: string,
 	run: (inbox: SessionInbox) => Effect.Effect<SessionInboxOutcome, E, never>,
 ) =>
 	SessionInboxTag.pipe(
@@ -46,11 +54,6 @@ const inboxCommand = <E>(
 			outcome === "accepted"
 				? { ok: true as const }
 				: { ok: false as const, reason: outcome },
-		),
-		Effect.catch((error) =>
-			Effect.fail(
-				new WsRpcError({ message: `${name} failed: ${String(error)}` }),
-			),
 		),
 	);
 
@@ -198,6 +201,13 @@ export const conversationHandlers = {
 				text: request.text,
 				commandId: request.inputId,
 				delivery: request.delivery,
+				...(request.draftKey ? { draftKey: request.draftKey } : {}),
+				...(request.draftText !== undefined
+					? { draftText: request.draftText }
+					: {}),
+				...(request.attachmentIds
+					? { attachmentIds: request.attachmentIds }
+					: {}),
 				...(request.images ? { images: request.images } : {}),
 			});
 			return "refused" in sent
@@ -210,7 +220,9 @@ export const conversationHandlers = {
 		}).pipe(
 			Effect.catch((error) =>
 				Effect.fail(
-					error instanceof AccountUnroutable
+					error instanceof AccountUnroutable ||
+						error instanceof DraftAttachmentMissing ||
+						error instanceof AccountSwitchBusy
 						? error
 						: new WsRpcError({
 								message: `input.submit failed: ${String(error)}`,
@@ -219,21 +231,32 @@ export const conversationHandlers = {
 			),
 		),
 	"input.cancel": (request) =>
-		inboxCommand("input.cancel", (inbox) =>
+		inboxCommand((inbox) =>
 			inbox.cancel({
 				clientId: "rpc",
 				sessionId: request.sessionId,
 				inputId: request.inputId,
+				...(request.restoreTo ? { restoreTo: request.restoreTo } : {}),
 			}),
-		),
+		).pipe(Effect.catch(mapRpcFailure("input.cancel"))),
 	"input.sendNow": (request) =>
-		inboxCommand("input.sendNow", (inbox) =>
+		inboxCommand((inbox) =>
 			inbox.sendNow({
 				clientId: request.originId ?? "rpc",
 				sessionId: request.sessionId,
 				inputId: request.inputId,
 				...(request.interrupt ? { interrupt: true } : {}),
 			}),
+		).pipe(
+			Effect.catch((error) =>
+				Effect.fail(
+					error instanceof AccountSwitchBusy
+						? error
+						: new WsRpcError({
+								message: `input.sendNow failed: ${String(error)}`,
+							}),
+				),
+			),
 		),
 	SyncInputDraft: (request) =>
 		Effect.gen(function* () {
@@ -256,6 +279,35 @@ export const conversationHandlers = {
 				),
 			),
 		),
+	AddDraftAttachment: (request) =>
+		Effect.gen(function* () {
+			const drafts = yield* InputDraftsTag;
+			const projectId =
+				"draft" in request.key ? (yield* ConfigTag).slug : undefined;
+			return yield* drafts.addAttachment(
+				request.key,
+				request.id,
+				request.dataUrl,
+				request.name,
+				projectId,
+			);
+		}).pipe(
+			Effect.catch(
+				(error): Effect.Effect<never, DraftAttachmentRejected | WsRpcError> =>
+					error instanceof AttachmentValidationError
+						? Effect.fail(
+								new DraftAttachmentRejected({ message: error.message }),
+							)
+						: mapRpcFailure("AddDraftAttachment")(error),
+			),
+		),
+	RemoveDraftAttachment: (request) =>
+		Effect.gen(function* () {
+			const drafts = yield* InputDraftsTag;
+			const projectId =
+				"draft" in request.key ? (yield* ConfigTag).slug : undefined;
+			yield* drafts.removeAttachment(request.key, request.id, projectId);
+		}).pipe(Effect.catch(mapRpcFailure("RemoveDraftAttachment"))),
 	CancelSession: (request) =>
 		cancelSessionById("rpc", request.sessionId, request.commandId).pipe(
 			Effect.as({ ok: true as const }),
@@ -275,5 +327,7 @@ export const conversationHandlers = {
 	| "input.cancel"
 	| "input.sendNow"
 	| "SyncInputDraft"
+	| "AddDraftAttachment"
+	| "RemoveDraftAttachment"
 	| "CancelSession"
 >;

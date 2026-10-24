@@ -5,6 +5,7 @@
 // frontend code can import everything from "./types.js".
 // Types also used locally in this file are imported separately.
 
+import type { AttachmentSource } from "../contracts/attachment-ref.js";
 import type { SurfacingMark } from "../contracts/category-set.js";
 import type { ProjectSetupState } from "../contracts/project-setup.js";
 import type { InputCut, Utf8Bytes } from "../contracts/tool-wire.js";
@@ -112,7 +113,7 @@ export interface UserMessage {
 		id: string;
 		mime: string;
 		name: string;
-		url: string;
+		source: AttachmentSource;
 		size?: number;
 	}[];
 	/** Unix-ms timestamp from the source HistoryMessage. Used for timestamp-based fork splitting. */
@@ -305,7 +306,7 @@ export interface Turn {
 }
 
 /** `pinned` explains an action a pin blocks ("Unpin to snooze"). */
-export type ToastVariant = "default" | "warn" | "error" | "pinned";
+export type ToastVariant = "default" | "success" | "warn" | "error" | "pinned";
 
 /**
  * One button in a toast's action row. `primary` is the filled call to action,
@@ -419,13 +420,6 @@ export interface SplitRow {
 }
 
 // ProjectInfo is re-exported from shared-types.ts above.
-
-export interface PendingAttachment {
-	id: string;
-	dataUrl: string;
-	name: string;
-	size: number;
-}
 
 export interface PlanApproval {
 	onApprove: () => void;

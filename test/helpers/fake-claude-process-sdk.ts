@@ -63,6 +63,11 @@ function injectedResetAt(configDir: string | undefined): number | undefined {
 }
 
 export type ProcessMark =
+	| {
+			kind: "input-content";
+			inputId: string | undefined;
+			content: SDKUserMessage["message"]["content"];
+	  }
 	| { kind: "pre-warm-joined"; sessionId: string }
 	| {
 			kind: "native-fork";
@@ -217,6 +222,15 @@ export type ProcessMark =
 			socketPath: string;
 			buildId: string;
 			protocolVersion: number;
+			settlesAnswers: boolean;
+			declaresLogin: boolean;
+			answerDialect: "legacy" | "runner";
+	  }
+	| {
+			kind: "runner-admission";
+			sessionId: string;
+			command: "send-turn" | "pre-warm";
+			decision: "Use" | "DeferRebind" | "Refuse" | "Retire" | "Wait" | "Skip";
 	  }
 	| { kind: "runner-command"; commandId: string; type: string }
 	| {
@@ -624,6 +638,7 @@ function query(params: {
 	let taskStopHeldRequest: string | undefined;
 	let taskTurnInterrupted = false;
 	let interruptibleTurn = false;
+	let interruptAwaitingDecision = false;
 	let closed = false;
 	let promptIndex = 0;
 	let initializationFinished = false;
@@ -913,6 +928,11 @@ function query(params: {
 			const at = process.hrtime.bigint().toString();
 			if (closed) return;
 			const content = input.message.content;
+			if (
+				Array.isArray(content) &&
+				content.some((block) => block.type === "image")
+			)
+				mark({ kind: "input-content", inputId: input.uuid, content });
 			const prompt =
 				typeof content === "string"
 					? content
@@ -2045,6 +2065,51 @@ function query(params: {
 					},
 				};
 			}
+			if (
+				request === "background-question" ||
+				request === "background-permission"
+			) {
+				if (!params.options?.canUseTool)
+					throw new Error("Missing background interaction bridge");
+				void params.options
+					.canUseTool(
+						request === "background-question" ? "AskUserQuestion" : "Bash",
+						request === "background-question"
+							? {
+									questions: [
+										{
+											question: "Continue background work?",
+											header: "Background",
+											options: [],
+										},
+									],
+								}
+							: { command: "echo background" },
+						{
+							signal:
+								params.options.abortController?.signal ??
+								new AbortController().signal,
+							toolUseID: randomUUID(),
+							requestId: request,
+							agentID: "background-task",
+						},
+					)
+					.then((response) =>
+						mark({
+							kind: "prompt-answer",
+							prompt: request,
+							requestId: request,
+							pid: process.pid,
+							response,
+						}),
+					);
+				if (proof) {
+					const release = join(dirname(proof), "release-background-foreground");
+					while (!existsSync(release) && !closed)
+						await new Promise<void>((done) => setTimeout(done, 20));
+					if (closed) return;
+				}
+			}
 			if (request.startsWith("question-")) {
 				if (!params.options?.canUseTool)
 					throw new Error("Missing question bridge");
@@ -2079,6 +2144,7 @@ function query(params: {
 					});
 					yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				}
+				interruptAwaitingDecision = request.endsWith("-after-decision");
 				const response = await params.options.canUseTool(
 					"AskUserQuestion",
 					questionInput,
@@ -2090,6 +2156,7 @@ function query(params: {
 						requestId,
 					},
 				);
+				interruptAwaitingDecision = false;
 				if (fixedId)
 					mark({
 						kind: "prompt-answer",
@@ -2204,6 +2271,7 @@ function query(params: {
 				yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				if (!params.options?.canUseTool)
 					throw new Error("Missing canUseTool bridge");
+				interruptAwaitingDecision = request.endsWith("-after-decision");
 				const approval = await params.options.canUseTool(toolName, toolInput, {
 					signal:
 						params.options.abortController?.signal ??
@@ -2228,6 +2296,7 @@ function query(params: {
 							}
 						: {}),
 				});
+				interruptAwaitingDecision = false;
 				if (!approval) throw new Error("Approval bridge returned no decision");
 				if (fixedId)
 					mark({
@@ -2275,6 +2344,7 @@ function query(params: {
 				throw new Error("Harness adapter failure");
 			if (
 				request === "upgrade-background-work" ||
+				request === "login-background-work" ||
 				request.startsWith("notification-parent-turn")
 			) {
 				mark({
@@ -2764,6 +2834,9 @@ function query(params: {
 				queryId,
 				at: process.hrtime.bigint().toString(),
 			});
+			// Some SDK interrupts cannot acknowledge until canUseTool returns.
+			while (interruptAwaitingDecision && !closed)
+				await new Promise<void>((done) => setTimeout(done, 20));
 			const configDir =
 				params.options?.env?.["CLAUDE_CONFIG_DIR"] ??
 				process.env["CLAUDE_CONFIG_DIR"];

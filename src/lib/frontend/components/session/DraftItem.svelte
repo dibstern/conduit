@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { DraftListItem } from "../../types.js";
 	import Button from "../ui/Button.svelte";
+	import Icon from "../ui/Icon.svelte";
 	import DraftPencil from "./DraftPencil.svelte";
 	import ProjectSquare from "./ProjectSquare.svelte";
 
@@ -14,7 +15,12 @@
 		onopen?: () => void;
 		ondiscard?: () => void;
 	} = $props();
-	const title = $derived(draft.firstLine.trim() || "Untitled draft");
+	const attachmentLabel = $derived([
+		draft.imageCount ? `${draft.imageCount} image${draft.imageCount === 1 ? "" : "s"}` : "",
+		draft.fileCount ? `${draft.fileCount} file${draft.fileCount === 1 ? "" : "s"}` : "",
+	].filter(Boolean).join(", "));
+	const firstLine = $derived(draft.firstLine.trim());
+	const title = $derived(firstLine || attachmentLabel || "Untitled draft");
 	// Compact age ("2m", "1h", "3d") so the time fits the title line beside a long draft.
 	const age = $derived.by(() => {
 		const minutes = Math.floor((now - draft.updatedAt) / 60_000);
@@ -37,7 +43,9 @@
 			onopen();
 		}}
 	>
-		<span class="grid place-items-center text-text-dimmer"><DraftPencil /></span>
+		<span class="grid place-items-center text-text-dimmer">
+			{#if firstLine || !attachmentLabel}<DraftPencil />{:else}<span data-testid="draft-attachment-icon"><Icon name="paperclip" size={14} /></span>{/if}
+		</span>
 		<span class="min-w-0 truncate text-[13.5px] font-normal italic text-text-muted" title={title}>{title}</span>
 		<span class="font-mono text-mono-xs whitespace-nowrap text-text-dimmer pointer-coarse:invisible pointer-coarse:min-w-[36px] pointer-fine:group-hover:invisible pointer-fine:group-focus-within:invisible">{age}</span>
 		<span class="col-span-2 col-start-2 flex min-w-0 items-center gap-[5px] text-[11.5px] text-text-dimmer pointer-coarse:pr-[36px]">

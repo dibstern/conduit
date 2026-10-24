@@ -1,7 +1,70 @@
 // Failure modes: a launch inherits another account's folder, an empty folder
 // bypasses validation, the SDK login kind is lost, or daemon model aliases leak.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { makeClaudeSdkEnv } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
+import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
+import {
+	type ClaudeLogin,
+	claudeLoginChange,
+	makeClaudeSdkEnv,
+	sameClaudeLogin,
+} from "../../../../src/lib/provider/claude/claude-sdk-env.js";
+
+// Login changes must distinguish account boundaries from settings on one account.
+describe("claudeLoginChange", () => {
+	const login: ClaudeLogin = {
+		instanceId: "account-a",
+		root: "/project",
+		configDir: { _tag: "Configured", path: "/accounts/a" },
+		shellConfig: { overrides: { REGION: "a" }, interactive: false },
+	};
+	it.each<[string, Partial<ClaudeLogin>, "None" | "Settings" | "Account"]>([
+		["unchanged", {}, "None"],
+		["another account", { instanceId: "account-b" }, "Account"],
+		[
+			"another folder on the same account",
+			{ configDir: { _tag: "Configured", path: "/accounts/b" } },
+			"Account",
+		],
+		[
+			"equivalent resolved folder",
+			{ configDir: { _tag: "Configured", path: "../accounts/a" } },
+			"None",
+		],
+		[
+			"declared shell overrides",
+			{ shellConfig: { overrides: { REGION: "b" }, interactive: false } },
+			"Settings",
+		],
+		[
+			"declared interactive shell",
+			{ shellConfig: { overrides: { REGION: "a" }, interactive: true } },
+			"Settings",
+		],
+		["older peer without shell config", { shellConfig: undefined }, "None"],
+	])("classifies %s", (_, change, expected) => {
+		const next = { ...login, ...change };
+		expect(claudeLoginChange(login, next)).toBe(expected);
+		expect(sameClaudeLogin(login, next)).toBe(expected === "None");
+	});
+
+	it("classifies changed account env as settings, regardless of instance alias", () => {
+		const account = {
+			driver: "claude" as const,
+			id: AccountIdSchema.make("account-a"),
+			name: "Account A",
+			folder: login.configDir,
+			usageEligible: true,
+			env: { REGION: "a" },
+		};
+		const first = { ...login, account };
+		const second = {
+			...login,
+			instanceId: "alias",
+			account: { ...account, env: { REGION: "b" } },
+		};
+		expect(claudeLoginChange(first, second)).toBe("Settings");
+	});
+});
 
 describe("makeClaudeSdkEnv", () => {
 	afterEach(() => {

@@ -9,6 +9,7 @@
 	import Button from "../ui/Button.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
@@ -158,7 +159,7 @@
 				<p class="summary-error">{error}</p>
 			</div>
 		{:else if generating}
-			<div class="summary-actions"><span class="summary-busy" role="status"><Icon name="loader-circle" size={13} class="animate-spin" />Summarizing…</span></div>
+			<div class="summary-actions"><span class="summary-busy" role="status"><ConduitMark size={16} variant="running" />Summarizing…</span></div>
 		{:else if newer > 0 && latest || !selected}
 			<div class="summary-actions">
 				<Button variant="accent-soft" size="content" touchTarget class="h-[28px] rounded-full px-[12px] text-[13px] font-medium" data-testid="surfacing-summary-new" onclick={() => ongenerate(latest ? "new" : "whole")}>{latest ? `✦ Summarize ${newer} new · since ${writtenAt(latest)}` : `✦ Summarize ${live ? "so far" : "turn"} · ${view.numbers.length}`}</Button>
@@ -214,7 +215,7 @@
 	/* Matches .md-content a, so a URL reads the same here as in the chat. */
 	.summary-prose a { color:var(--color-accent); text-decoration:none; }
 	.summary-prose a:hover { text-decoration:underline; }
-	.summary-prose code { padding:1px 5px; border-radius:5px; background:var(--color-chip); font:12px var(--font-mono); }
+	.summary-prose code { padding:1px 3.5px; border-radius:4px; background:var(--color-chip); font:13px var(--font-mono); }
 	.regenerating { opacity:.45; }
 	.summary-prose :global(.recap-cite) { display:inline-flex; align-items:center; justify-content:center; margin-left:2px; padding:0 6px; border-radius:999px; background:var(--color-chip); color:var(--color-text-secondary); font:500 11px/18px var(--font-mono); vertical-align:1px; }
 	.summary-prose :global([data-category-colour="true"]) { background:color-mix(in srgb,var(--surface-colour) 14%,transparent); color:var(--surface-colour); }

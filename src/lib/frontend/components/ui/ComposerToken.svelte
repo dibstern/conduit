@@ -27,7 +27,6 @@
 	}
 
 	.goal-token {
-		color: var(--color-status-goal);
 		background: color-mix(in srgb, var(--color-status-goal) 16%, transparent);
 	}
 

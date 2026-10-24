@@ -70,6 +70,10 @@ export interface RunnerHello {
 	readonly stampsRunIds?: true;
 	/** The session controller survives an idle account/query rebind. */
 	readonly rebindsAccount?: true;
+	/** Resolving an interaction also settles its native answer waiter. */
+	readonly settlesAnswers?: true;
+	/** Login identity compares declared settings, never captured shell values. */
+	readonly declaresLogin?: true;
 	/** Cursor sends consume the daemon's admitted account credential envelope. */
 	readonly scopedCursorCredentials?: true;
 	readonly cursorBackendUrl?: CursorBackendUrl;
@@ -284,9 +288,14 @@ export class RunnerSocket {
 	private failure: SessionFailure | undefined;
 	private idleExiting = false;
 	private peerTaggedConfigDir = false;
+	private peerSettlesAnswers = false;
 	scopedCursorCredentials = false;
 	private peerDriverKind: string | undefined;
 	private helloSends: RunnerHello["sendCommands"];
+	private readonly completedCommands = new Map<
+		string,
+		"completed" | "failed"
+	>();
 
 	/** The original hello journal, unaffected by acknowledgements or new sends. */
 	get retainedSends(): RunnerHello["sendCommands"] {
@@ -307,11 +316,28 @@ export class RunnerSocket {
 				const message = this.wire?.decode(decoded) ?? decoded;
 				if (message.type === "hello") {
 					this.peerTaggedConfigDir = message.taggedConfigDir === true;
+					this.peerSettlesAnswers = message.settlesAnswers === true;
 					this.scopedCursorCredentials =
 						message.scopedCursorCredentials === true;
 					this.peerDriverKind = message.driverKind;
 					this.helloSends = message.sendCommands;
+					if (!this.peerSettlesAnswers)
+						for (const command of message.completedCommands ?? [])
+							if (command.commandId.endsWith(":answer"))
+								this.completedCommands.set(
+									command.commandId,
+									command.failure ? "failed" : "completed",
+								);
 				}
+				if (
+					message.type === "command-reply" &&
+					!this.peerSettlesAnswers &&
+					message.commandId.endsWith(":answer")
+				)
+					this.completedCommands.set(
+						message.commandId,
+						message.failure ? "failed" : "completed",
+					);
 				if (message.type === "idle-exit") this.idleExiting = true;
 				if (message.type === "command-accepted") {
 					const pending = this.pending.get(`command:${message.commandId}`);
@@ -439,6 +465,16 @@ export class RunnerSocket {
 			command,
 			...(attempt !== undefined ? { attempt } : {}),
 		});
+	}
+
+	/** Legacy answer settlement is synchronous and safe to retry if not retained. */
+	observedCommandStatus(
+		commandId: string,
+	): Exclude<ProviderControlCommandStatus, "gone"> {
+		return (
+			this.completedCommands.get(commandId) ??
+			(this.pending.has(`command:${commandId}`) ? "running" : "not_received")
+		);
 	}
 
 	commandStatusEffect(

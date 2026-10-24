@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { Context, Effect, Layer, Ref } from "effect";
 import { SqlClient } from "effect/sql";
 import type { DaemonConfig } from "../../../daemon/config-persistence.js";
+import { sweepAttachments } from "../../../persistence/attachment-store.js";
 import {
 	makePersistenceStoreLayer,
 	PersistenceStore,
@@ -119,6 +120,8 @@ export const makeDaemonSharedStoreLayer = (
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const unavailable = yield* DaemonStoreAvailability;
+			// All offline imports finished. No request or project consumer exists yet.
+			yield* sweepAttachments;
 			// Imported or previously cached families may include retained owners.
 			// Rebuild after offline preparation, before any daemon reader starts.
 			const projects = yield* SessionRollupProjects;

@@ -1,6 +1,10 @@
 // Failure modes: a partial import commits, clocks are confused, hidden primary
 // state disappears, rowid ties reorder, a WAL source is written, or a stale
-// projector cursor is advanced over an unprojected event.
+// projector cursor is advanced over an unprojected event. Attachment imports
+// reject known tables or shared hashes, copy referencing rows before their blobs,
+// copy stale uses instead of deriving them, sweep unreferenced source blobs, or
+// replace a shared session's first-owner Draft Attachments.
+import { createHash } from "node:crypto";
 import {
 	copyFileSync,
 	mkdirSync,
@@ -44,6 +48,164 @@ import {
 
 const artifact = "test-results/82tn4-import-manifest.json";
 type Project = ProjectStoreFixture;
+
+it("imports attachment blobs before references and derives uses without sweeping", async () => {
+	const root = mkdtempSync(join(tmpdir(), "conduit-attachment-import-"));
+	try {
+		const seed = await fixture(root, "attachment-seed");
+		const source = await fixture(root, "attachment-source");
+		const mime = "text/plain";
+		const sharedBytes = Buffer.from("shared attachment");
+		const uniqueBytes = Buffer.from("source attachment");
+		const orphanBytes = Buffer.from("unreferenced source attachment");
+		const hash = (bytes: Buffer) =>
+			createHash("sha256")
+				.update(mime)
+				.update("\0")
+				.update(bytes)
+				.digest("hex");
+		const sharedHash = hash(sharedBytes);
+		const uniqueHash = hash(uniqueBytes);
+		const orphanHash = hash(orphanBytes);
+		const seedDb = new DatabaseSync(seed.sourcePath);
+		try {
+			seedDb
+				.prepare(
+					"INSERT INTO attachment_blobs (hash, mime, size, bytes, created_at) VALUES (?, ?, ?, ?, ?)",
+				)
+				.run(sharedHash, mime, sharedBytes.length, sharedBytes, 1000);
+		} finally {
+			seedDb.close();
+		}
+		const sourceDb = new DatabaseSync(source.sourcePath);
+		try {
+			const insert = sourceDb.prepare(
+				"INSERT INTO attachment_blobs (hash, mime, size, bytes, created_at) VALUES (?, ?, ?, ?, ?)",
+			);
+			for (const bytes of [sharedBytes, uniqueBytes, orphanBytes])
+				insert.run(hash(bytes), mime, bytes.length, bytes, 2000);
+			sourceDb
+				.prepare(
+					"INSERT INTO draft_attachments (id, draft_key, position, name, state, hash, created_at) VALUES (?, ?, 0, ?, 'live', ?, 2000)",
+				)
+				.run(
+					"attachment-source-draft",
+					"ses_attachment-source",
+					"draft.txt",
+					uniqueHash,
+				);
+			const ref = JSON.stringify({ attachmentHash: sharedHash, mime });
+			for (const [table, column] of [
+				["events", "data"],
+				["messages", "rest_payload"],
+				["message_parts", "metadata"],
+				["message_parts", "rest_payload"],
+				["pending_inputs", "request"],
+				["pending_inputs", "images"],
+				["provider_command_outbox", "payload_json"],
+			])
+				sourceDb
+					.prepare(
+						`UPDATE ${table} SET ${column} = ${column === "images" ? "json_array(json(?))" : `json_set(COALESCE(${column}, '{}'), '$.attachment', json(?))`} WHERE rowid = (SELECT MIN(rowid) FROM ${table})`,
+					)
+					.run(ref);
+			// A copied index would preserve this false use and miss every real use.
+			sourceDb.exec("DELETE FROM attachment_uses");
+			sourceDb
+				.prepare(
+					"INSERT INTO attachment_uses (source_table, source_column, source_row_key, hash) VALUES ('events', 'data', 'stale-owner', ?)",
+				)
+				.run(orphanHash);
+		} finally {
+			sourceDb.close();
+		}
+		const configDir = join(root, "daemon");
+		mkdirSync(configDir);
+		await Effect.runPromise(importRegisteredProjectStores(configDir, [seed]));
+		const [result] = await Effect.runPromise(
+			importRegisteredProjectStores(configDir, [source]),
+		);
+		expect(result?.outcome).toBe("imported");
+		const destination = new DatabaseSync(daemonStorePath(configDir), {
+			readOnly: true,
+		});
+		try {
+			expect(
+				destination
+					.prepare("SELECT hash FROM attachment_blobs ORDER BY hash")
+					.all(),
+			).toEqual(
+				[sharedHash, uniqueHash, orphanHash].sort().map((hash) => ({ hash })),
+			);
+			expect(
+				destination
+					.prepare("SELECT created_at FROM attachment_blobs WHERE hash = ?")
+					.get(sharedHash),
+			).toEqual({ created_at: 1000 });
+			expect(
+				destination
+					.prepare("SELECT hash, state FROM draft_attachments WHERE id = ?")
+					.get("attachment-source-draft"),
+			).toEqual({ hash: uniqueHash, state: "live" });
+			expect(
+				destination
+					.prepare(
+						"SELECT source_table, source_column, hash FROM attachment_uses ORDER BY source_table, source_column",
+					)
+					.all(),
+			).toEqual(
+				[
+					["events", "data"],
+					["message_parts", "metadata"],
+					["message_parts", "rest_payload"],
+					["messages", "rest_payload"],
+					["pending_inputs", "images"],
+					["pending_inputs", "request"],
+					["provider_command_outbox", "payload_json"],
+				].map(([source_table, source_column]) => ({
+					source_table,
+					source_column,
+					hash: sharedHash,
+				})),
+			);
+		} finally {
+			destination.close();
+		}
+		const shared = await fixture(root, "attachment-shared", {
+			sessionId: "ses_attachment-source",
+		});
+		const sharedDb = new DatabaseSync(shared.sourcePath);
+		try {
+			sharedDb
+				.prepare(
+					"INSERT INTO attachment_blobs (hash, mime, size, bytes, created_at) VALUES (?, ?, ?, ?, 3000)",
+				)
+				.run(sharedHash, mime, sharedBytes.length, sharedBytes);
+			sharedDb
+				.prepare(
+					"INSERT INTO draft_attachments (id, draft_key, position, name, state, hash, created_at) VALUES ('attachment-source-draft', 'ses_attachment-source', 0, 'later-copy.txt', 'live', ?, 3000)",
+				)
+				.run(sharedHash);
+		} finally {
+			sharedDb.close();
+		}
+		expect(
+			await Effect.runPromise(importProjectStore(configDir, shared)),
+		).toMatchObject({ outcome: "imported", importedEvents: 0 });
+		const firstOwner = new DatabaseSync(daemonStorePath(configDir), {
+			readOnly: true,
+		});
+		try {
+			expect(
+				firstOwner.prepare("SELECT name, hash FROM draft_attachments").all(),
+			).toEqual([{ name: "draft.txt", hash: uniqueHash }]);
+		} finally {
+			firstOwner.close();
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 
 // Failure modes: the read table makes every normalized import unsupported, or
 // the import drops its rows or detaches them from their parts.

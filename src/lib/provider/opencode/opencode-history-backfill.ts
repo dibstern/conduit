@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
+import { Effect, Schema } from "effect";
+import { AttachmentSourceSchema } from "../../contracts/attachment-ref.js";
 import type {
 	ProviderRuntimeEvent,
 	ProviderRuntimeRawSource,
 } from "../../contracts/providers/provider-runtime-event.js";
 import type { MessageSnapshotPayload } from "../../contracts/stored-event.js";
 import type { Message } from "../../instance/sdk-types.js";
+import type { AttachmentStore } from "../../persistence/attachment-store.js";
 import { mapToolName } from "../../relay/event-translator.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 
@@ -73,6 +76,20 @@ export function isSettled(message: Message | undefined): boolean {
 	return message.role === "user"
 		? (message.parts?.length ?? 0) > 0
 		: message.time?.completed != null;
+}
+
+/** Resolve provider-native file URLs before SSE or REST translation. */
+export function openCodeAttachmentSource(
+	part: { readonly url?: unknown; readonly source?: unknown },
+	attachments: Pick<AttachmentStore, "put">,
+) {
+	return Effect.gen(function* () {
+		if (typeof part.url === "string" && part.url.startsWith("data:"))
+			return yield* attachments.put(part.url);
+		return yield* Schema.decodeUnknownEffect(AttachmentSourceSchema)(
+			typeof part.url === "string" ? { url: part.url } : part.source,
+		);
+	});
 }
 
 /** Stable across REST object key order, while keeping part order significant. */

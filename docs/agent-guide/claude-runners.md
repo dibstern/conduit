@@ -112,13 +112,26 @@ on a fresh runner. Pre-warm counts as activity without admitting a turn, includi
 after adoption, and becomes a no-op when racing exit or end-session.
 Protocol mismatches still refuse adoption. A different build with the same
 protocol is adopted and scheduled for upgrade after a turn ends. An adopted idle
-runner upgrades without waiting for another prompt.
+runner attempts an upgrade without waiting for another prompt. A failed warm-up
+keeps the old runner; retries wait for a later turn boundary.
 
 Every runner driver sends `stampsRunIds: true` in its hello. The daemon refuses
 runners without that capability through the protocol-mismatch failure path,
 with a message that names the build and says it predates run ownership.
 `RUNNER_PROTOCOL_VERSION` stays unchanged so current runners survive restart.
 The runner's check of the daemon hello is unchanged.
+
+Runners also advertise `settlesAnswers: true` when their resolve commands release
+the native question and permission waiters. Peers without that flag use the
+legacy answer dialect. The daemon follows their resolve command with an
+idempotent `answer-question` or `answer-permission` inside the same outbox
+attempt. The follow-up uses the original answer, since runner notifications
+redact secret question answers. Attach logs name the build and answer dialect;
+the protocol version is unchanged.
+Legacy answer recovery checks the final follow-up receipt in the hello and
+observed command replies. It does not treat the earlier resolve receipt as
+completion or wait for a command-status message that historical runners cannot
+answer. Missing final receipts permit idempotent retry or secret answer re-entry.
 
 When adoption refuses an incompatible live runner, the daemon independently
 checks its registered process identity, stops it with bounded cleanup, and
@@ -131,8 +144,8 @@ state; it never synthesizes completion from a command result.
 Project folder changes rebuild the relay. At send admission, the server compares
 an existing runner's launch snapshot with the current main and extra folders.
 An idle, quiescent runner with different folders drains through end-session;
-the send starts a new runner with its last reported resume cursor. A busy runner
-serves the current send and switches on a later send after it becomes idle.
+the send starts a new runner with its last reported resume cursor. Folder changes
+hold the send until the runner is idle and quiescent.
 Pre-warm skips an existing runner with different folders. An adopted runner that stamps run ids
 continues normally without a launch snapshot. Changing the main folder also
 stops runners registered under the old folder, since their runtime directory
@@ -141,10 +154,23 @@ File mentions, the file browser, terminal cwd and Conduit's Claude settings look
 continue to use only the main folder.
 
 Claude runners advertise `rebindsAccount: true` in hello. A same-driver account
-continuation retains the session controller and waits for quiescence before the
-next send closes its SDK query and opens one with the selected login. Login
-identity includes the config folder, account id, account env and declared project
-shell configuration. Captured shell env is passed to the launch but never compared.
+continuation retains the session controller. Same-account login changes, including
+account env and declared project shell configuration, defer while background work
+runs. The send uses the current login and the server logs the deferral. The runner
+keeps reporting its old snapshot, so the next quiet send closes its SDK query and
+opens one with the new settings. Snapshot and native settings replacement happen
+during query preparation, after the payload commits to the rebind.
+
+An account switch while busy is refused at `input.submit`, before admission, so
+the browser restores the text as a composer draft. `input.sendNow` checks the same
+boundary for queued inputs. The daemon also refuses a switched-account send if
+the runner becomes busy after submission. That backstop leaves the admitted user
+message visible and reports an error. An account switch needs a fresh native
+session on the new config dir; sending it to the old query would interrupt its
+background work. Account identity includes the account id and resolved config
+folder. Same-account settings include account env and declared shell overrides
+and interactive mode. Captured shell env is passed to the launch but never
+compared. Folder changes still wait for quiescence.
 The new query reads its account's native settings; an old
 upgrade snapshot cannot supply another account's credentials. Goal fact
 deduplication, message/run ownership and interaction routing remain with the
@@ -152,6 +178,16 @@ controller, including native-resume fallback. Old query callbacks keep their
 stopped context. Runners without the capability drain and restart on that send.
 Pre-warm hints leave a live controller on its current login; unused warm queries
 can still be replaced before the first send.
+
+Claude runners also advertise `declaresLogin: true`. For peers without that
+flag, an unchanged declared login keeps the runner's reported account metadata
+and original shell capture in both command environment fields. Missing account
+or shell metadata in an adoption snapshot means unknown, so it cannot cause a
+rebind or an admission wait. Known account, account-env and shell-configuration
+differences still follow the rebind policy above. The process regressions in
+`claude-runner-login.test.ts` record replies, query identity, admission decisions
+and cleanup under `test-results/wh8g-legacy-shell-recapture.json` and
+`test-results/u1y3i-4-{legacy,current}-login-restart.json`.
 
 The isolated regressions are `test/integration/daemon/claude-account-rebind.test.ts`
 and `claude-controller-failure.test.ts`. The process test writes its observations
@@ -167,8 +203,12 @@ are logged without failing the user's turn; retries at later turn boundaries use
 bounded backoff.
 
 The runner reports quiescence only after its turns, background work, subagent
-finalizers, approval waiters, and unacknowledged outputs settle. Before the server
-swaps its session route, the old runner atomically verifies that state and its
+finalizers, approval waiters, and unacknowledged outputs settle. Quiescence and
+retire-when-quiet share one background-busy predicate. Account rebind checks use
+that predicate while excluding the executing send's own command and admitted
+turn; other commands, SDK turns, background tasks, finalizers and held outputs
+still block a rebind. Before the server swaps its session route, the old runner
+atomically verifies that state and its
 activity revision. Retirement then uses the existing stop path. Shutdown notices from the retired
 query cannot clear the replacement's state; sink-specific releases still reach
 the server and dispose their retained sinks, abort fibers and history.

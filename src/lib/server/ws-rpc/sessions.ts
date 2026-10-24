@@ -17,10 +17,15 @@ import {
 	WorktreeCreationError,
 	WorktreeRecoveryError,
 } from "../../contracts/worktree.js";
-import { DraftAlreadySent, WsRpcError } from "../../contracts/ws-rpc.js";
+import {
+	DraftAlreadySent,
+	DraftAttachmentMissing,
+	WsRpcError,
+} from "../../contracts/ws-rpc.js";
 import { autoSettleIdleWindowMs } from "../../daemon/config-persistence.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
+import { SessionGit } from "../../domain/daemon/Services/session-git.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
 import { WorktreeServiceTag } from "../../domain/daemon/Services/worktree-service.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
@@ -42,7 +47,6 @@ import {
 } from "../../domain/relay/Services/services.js";
 import { setRead } from "../../domain/relay/Services/session-attention.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
-import { SessionGitServiceTag } from "../../domain/relay/Services/session-git-service.js";
 import {
 	createLocalSessionId,
 	SessionManagerServiceTag,
@@ -196,8 +200,9 @@ export const sessionsHandlers = {
 		Effect.gen(function* () {
 			const workspace = yield* SessionWorkspaceTag;
 			yield* workspace.renameBranch(request.sessionId, request.branchName);
-			const git = yield* Effect.serviceOption(SessionGitServiceTag);
-			if (git._tag === "Some") yield* git.value.refresh();
+			const git = yield* Effect.serviceOption(SessionGit);
+			if (git._tag === "Some")
+				yield* git.value.invalidate({ sessionId: request.sessionId });
 			return { ok: true as const };
 		}).pipe(
 			Effect.catch(
@@ -607,6 +612,8 @@ export const sessionsHandlers = {
 		),
 	CreateSession: (request) =>
 		Effect.gen(function* () {
+			const draftId = request.draftId;
+			let publishPromotion: Effect.Effect<void> = Effect.void;
 			const create = Effect.gen(function* () {
 				if (request.worktreeBase !== undefined && !request.newWorktree)
 					return yield* new WsRpcError({
@@ -662,6 +669,20 @@ export const sessionsHandlers = {
 					...(request.model != null ? { model: request.model } : {}),
 					permissionMode: request.permissionMode,
 					...(resolvedCreation === undefined ? {} : { resolvedCreation }),
+					...(draftId === undefined
+						? {}
+						: {
+								draftId,
+								draftChange: (sessionId: string) => {
+									const change = inputDrafts.promotionChange(
+										{ draft: draftId },
+										sessionId,
+										request.draftText ?? "",
+									);
+									publishPromotion = change.publish;
+									return { write: change.write, publish: Effect.void };
+								},
+							}),
 				};
 				if (request.newWorktree) {
 					yield* takeReservation;
@@ -791,8 +812,7 @@ export const sessionsHandlers = {
 					sessionId: session.id,
 				};
 			});
-			if (request.draftId === undefined) return yield* create;
-			const draftId = request.draftId;
+			if (draftId === undefined) return yield* create;
 			const inputDrafts = yield* InputDraftsTag;
 			const config = yield* ConfigTag;
 			return yield* Effect.uninterruptibleMask((restore) =>
@@ -818,43 +838,26 @@ export const sessionsHandlers = {
 								),
 						),
 					);
-					// Once creation succeeds the claim must stay a tombstone, even if
-					// finalizing it fails. Releasing it would permit a duplicate create,
-					// and failing the request would report a send that happened.
-					yield* inputDrafts
-						.promote(draftId, session.sessionId, request.draftText ?? "")
-						.pipe(
-							Effect.catch((cause) =>
-								Effect.logError(`Could not promote draft ${draftId}: ${cause}`),
+					if (request.worktreePath === undefined) {
+						yield* Effect.try(() =>
+							saveRelaySettings(
+								{ lastSessionMode: request.newWorktree ? "worktree" : "local" },
+								config.configDir,
+							),
+						).pipe(
+							Effect.catchCause((cause) =>
+								Effect.gen(function* () {
+									const log = yield* LoggerTag;
+									log.warn("Failed to persist last session mode", { cause });
+								}),
 							),
 						);
+					}
+					yield* publishPromotion;
 					return session;
 				}),
 			);
 		}).pipe(
-			Effect.tap(() =>
-				Effect.gen(function* () {
-					if (
-						request.draftId === undefined ||
-						request.worktreePath !== undefined
-					)
-						return;
-					const config = yield* ConfigTag;
-					yield* Effect.try(() =>
-						saveRelaySettings(
-							{ lastSessionMode: request.newWorktree ? "worktree" : "local" },
-							config.configDir,
-						),
-					).pipe(
-						Effect.catch((cause) =>
-							Effect.gen(function* () {
-								const log = yield* LoggerTag;
-								log.warn("Failed to persist last session mode", { cause });
-							}),
-						),
-					);
-				}),
-			),
 			Effect.catch(
 				(
 					error,
@@ -962,7 +965,10 @@ export const sessionsHandlers = {
 		Effect.gen(function* () {
 			// Validate before the fork creates any events or provider commands.
 			yield* Effect.try({
-				try: () => validateAttachmentDataUrls(request.images),
+				try: () =>
+					validateAttachmentDataUrls(
+						request.images?.filter((image) => typeof image === "string"),
+					),
 				catch: (cause) =>
 					new WsRpcError({
 						message: cause instanceof Error ? cause.message : String(cause),
@@ -994,18 +1000,26 @@ export const sessionsHandlers = {
 				sessionId,
 				text: request.text,
 				commandId: request.inputId,
+				draftKey: request.draftKey ?? { session: request.sessionId },
+				...(request.draftText !== undefined
+					? { draftText: request.draftText }
+					: {}),
+				...(request.attachmentIds
+					? { attachmentIds: request.attachmentIds }
+					: {}),
 				...(request.images ? { images: request.images } : {}),
-			}).pipe(Effect.catch(mapRpcFailure("StartSideThread")));
+			});
 			return { sessionId };
 		}).pipe(
-			Effect.catchTag("SessionCommandError", (error) =>
-				Effect.fail(
-					new WsRpcError({ message: error.message ?? String(error.cause) }),
-				),
-			),
 			Effect.catch(
-				(error): Effect.Effect<never, AccountUnroutable | WsRpcError> =>
-					error instanceof AccountUnroutable
+				(
+					error,
+				): Effect.Effect<
+					never,
+					AccountUnroutable | WsRpcError | DraftAttachmentMissing
+				> =>
+					error instanceof AccountUnroutable ||
+					error instanceof DraftAttachmentMissing
 						? Effect.fail(error)
 						: mapRpcFailure("StartSideThread")(error),
 			),

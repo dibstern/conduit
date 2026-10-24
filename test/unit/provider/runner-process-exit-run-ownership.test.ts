@@ -174,7 +174,7 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 					throw new Error("No upgrade expected");
 				},
 				snapshotCommandSettings: () => ({}),
-				sameAccountLogin: () => true,
+				loginChange: () => "None",
 				recoverCommands: () => Effect.succeed([]),
 			};
 			const runner = yield* makeProcessSessionRunner(
@@ -345,7 +345,7 @@ for (const [
 				throw new Error("No upgrade expected");
 			},
 			snapshotCommandSettings: () => ({}),
-			sameAccountLogin: () => true,
+			loginChange: () => "None",
 			recoverCommands: () => Effect.succeed([]),
 		};
 		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
