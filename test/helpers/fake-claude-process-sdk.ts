@@ -63,6 +63,28 @@ function injectedResetAt(configDir: string | undefined): number | undefined {
 }
 
 export type ProcessMark =
+	| {
+			kind: "startup-phase";
+			phase: "add-project-start" | "add-project-returned" | "ready-attempt";
+			pid: number;
+			at: number;
+	  }
+	| {
+			kind: "startup-phase";
+			phase: "persisted-project-check";
+			pid: number;
+			at: number;
+			expectedFolder: string;
+			folders: string[];
+			matches: boolean;
+	  }
+	| {
+			kind: "startup-phase";
+			phase: "startup-timeout" | "ready-received" | "ready-after-finish";
+			pid: number;
+			at: number;
+			elapsedMs: number;
+	  }
 	| { kind: "pre-warm-joined"; sessionId: string }
 	| {
 			kind: "native-fork";

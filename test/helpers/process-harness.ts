@@ -1342,6 +1342,14 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			let finished = false;
 			const timer = setTimeout(
 				() => {
+					if (child.pid !== undefined)
+						this.marks.push({
+							kind: "startup-phase",
+							phase: "startup-timeout",
+							pid: child.pid,
+							at: Date.now(),
+							elapsedMs: Math.round(performance.now() - startupAt),
+						});
 					finished = true;
 					fail(new Error(`Server startup timeout\n${this.logs}`));
 				},
@@ -1364,6 +1372,13 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			child.once("exit", onExit);
 			child.once("error", onError);
 			const ready = (value: Generation) => {
+				this.marks.push({
+					kind: "startup-phase",
+					phase: finished ? "ready-after-finish" : "ready-received",
+					pid: value.pid,
+					at: Date.now(),
+					elapsedMs: Math.round(performance.now() - startupAt),
+				});
 				if (finished) return;
 				finished = true;
 				clearTimeout(timer);
