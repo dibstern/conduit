@@ -1,61 +1,46 @@
 <script lang="ts">
+	import type { HTMLAttributes } from "svelte/elements";
 	import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 	import Icon from "../ui/Icon.svelte";
-	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
-	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
-	import { getDriverTraits } from "../../stores/instance.svelte.js";
-	import { getDraftProject } from "../../stores/project.svelte.js";
-	import { findSession, sessionState } from "../../stores/session.svelte.js";
-	import { composerAccountId } from "../../stores/usage.svelte.js";
+	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { accountColorClass } from "../../utils/account-color.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 
-	let { driver, instanceId, size, surface }: {
+	let { driver, instanceId, size, aligned = false, spinning = false, "data-testid": testId = "harness-logo", class: className = "", ...rest }: HTMLAttributes<HTMLSpanElement> & {
 		driver: ProviderDriverKind;
-		instanceId: string | undefined;
+		instanceId?: string | undefined;
 		/** The tile's edge; the mark inside is 60% of it, as in the Final design. */
 		size: 15 | 18;
-		surface: "box" | "surface" | "page";
+		aligned?: boolean | undefined;
+		spinning?: boolean | undefined;
+		"data-testid"?: string;
 	} = $props();
 
-	const session = $derived(findSession(sessionState.currentId ?? ""));
-	const projectSlug = $derived(
-		session ? session.projectSlug : getDraftProject() ?? "",
-	);
-	const instances = $derived(getAvailableInstances());
-	const traits = $derived(getDriverTraits(driver));
-	const accounts = $derived(getClaudeAccounts(projectSlug, traits?.usageHarness === "codex" ? "codex" : "claude"));
-	const canSwitchAccounts = $derived(traits?.usageHarness === "claude" || traits?.usageHarness === "codex");
 	const presentation = $derived(getProviderPresentation(driver));
 	const badged = $derived(
-		instanceId !== undefined && (canSwitchAccounts ? accounts.accounts.length >= 2 : instances.filter((instance) => instance.driver === driver).length >= 2),
+		instanceId !== undefined && instanceState.instances.filter((instance) => (instance.driver ?? "opencode") === driver).length >= 2,
 	);
-	const letter = $derived(accounts.nameOf(
-		instanceId,
-		traits?.accountKind === "config-directory" ? presentation?.label ?? driver : instances.find((instance) => instance.id === instanceId)?.label ?? driver,
-	).charAt(0).toUpperCase());
-	const spinning = $derived(
-		canSwitchAccounts && accounts.switchingTo !== null &&
-		accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId &&
-		(instanceId === accounts.switchingTo || instanceId === composerAccountId(session)),
-	);
+	const letter = $derived((getInstanceById(instanceId ?? "")?.name || presentation?.label || driver).charAt(0).toUpperCase());
 </script>
 
 <span
+	{...rest}
 	aria-hidden="true"
-	data-testid="harness-logo"
+	data-testid={testId}
 	data-driver={driver}
 	data-account={instanceId}
-	data-surface={surface}
-	class="logo {driver === 'claude' ? 'bg-harness-claude text-white [&_g]:fill-current' : 'bg-chip'}"
+	class="logo {className}"
 	class:badged
+	class:aligned
 	style="--s:{size}px"
 >
-	{#if presentation}
-		<Icon name={presentation.logo} size={Math.round(size * .6)} />
-	{:else}
-		<Icon name="bot" size={Math.round(size * .6)} class="text-text-secondary" />
-	{/if}
+	<span class="tile {driver === 'claude' ? 'bg-harness-claude text-white [&_g]:fill-current' : 'bg-chip'}">
+		{#if presentation}
+			<Icon name={presentation.logo} size={Math.round(size * .6)} />
+		{:else}
+			<Icon name="bot" size={Math.round(size * .6)} class="text-text-secondary" />
+		{/if}
+	</span>
 	{#if badged && instanceId !== undefined}
 		<span
 			data-testid="harness-logo-badge"
@@ -68,19 +53,24 @@
 
 <style>
 	.logo {
-		--ring: var(--color-bg);
 		position: relative;
 		display: inline-flex;
-		align-items: center;
-		justify-content: center;
 		flex-shrink: 0;
 		width: var(--s);
 		height: var(--s);
+	}
+	.tile {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		height: 100%;
 		border-radius: calc(var(--s) * .28);
 	}
-	.logo[data-surface="box"] { --ring: var(--color-input-bg); }
-	.logo[data-surface="surface"] { --ring: var(--color-bg-surface); }
-	.logo.badged { margin-right: calc(var(--s) * .4); }
+	.logo.badged, .logo.aligned { margin-right: calc(var(--s) * .4); }
+	.logo.badged .tile {
+		mask: radial-gradient(circle at 105% 101%, transparent calc(var(--s) * .37 + 1.5px), #000 calc(var(--s) * .37 + 2px));
+	}
 	.badge {
 		position: absolute;
 		right: calc(var(--s) * -.42);
@@ -94,7 +84,6 @@
 		font-size: calc(var(--s) * .5);
 		font-weight: 700;
 		line-height: calc(var(--s) * .74);
-		box-shadow: 0 0 0 1.5px var(--ring);
 	}
 	.badge[data-state="spinning"] {
 		background: var(--color-bg-alt);

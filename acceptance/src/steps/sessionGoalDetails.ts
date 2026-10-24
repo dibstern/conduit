@@ -119,7 +119,9 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 					touchPoints: [
 						{
 							x: scrim ? box.x + 10 : box.x + box.width / 2,
-							y: sheet ? (box.y + sheet.y) / 2 : box.y + box.height / 2,
+							y: sheet
+								? (sheet.y + sheet.height + box.y + box.height) / 2
+								: box.y + box.height / 2,
 						},
 					],
 				});
@@ -316,11 +318,9 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 								panel.y >= header.y + header.height
 							: Math.abs(panel.x - header.x) < 2 &&
 								Math.abs(panel.width - header.width) < 2 &&
-								Math.abs(
-									panel.y +
-										panel.height -
-										(world.page.viewportSize()?.height ?? 0),
-								) < 2)
+								Math.abs(panel.y - header.y - header.height) < 2 &&
+								panel.y + panel.height <=
+									(world.page.viewportSize()?.height ?? 0) - 64)
 					);
 				})
 				.toBe(true);
@@ -549,7 +549,12 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 				? await phoneSheet.boundingBox()
 				: null;
 			await scrim.click({
-				position: { x: 10, y: sheet ? (sheet.y - box.y) / 2 : box.height - 10 },
+				position: {
+					x: 10,
+					y: sheet
+						? (sheet.y + sheet.height - box.y + box.height) / 2
+						: box.height - 10,
+				},
 			});
 		},
 	},

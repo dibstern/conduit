@@ -67,11 +67,21 @@ export const composerFilesHandlers: StepHandler[] = [
 			await expect.poll(() => submissions().length).toBe(2);
 			for (const request of submissions()) {
 				expect(request.payload["text"]).toBe("");
-				expect(request.payload["images"]).toEqual(
+				const adds = requireRpcControl(world.page)
+					.getRequests()
+					.filter((entry) => entry.tag === "AddDraftAttachment");
+				expect(request.payload["images"]).toBeUndefined();
+				expect(request.payload["attachmentIds"]).toEqual(
+					adds.map((entry) => entry.payload["id"]),
+				);
+				expect(adds.map((entry) => entry.payload["dataUrl"])).toEqual(
 					files.map(
 						(file) =>
 							`data:${file.mimeType};name=${file.name};base64,${file.buffer.toString("base64")}`,
 					),
+				);
+				expect(adds.map((entry) => entry.payload["name"])).toEqual(
+					files.map((file) => file.name),
 				);
 			}
 		},
@@ -152,11 +162,21 @@ export const composerFilesHandlers: StepHandler[] = [
 			const request = await requireRpcControl(world.page).waitForRequest(
 				(entry) => entry.tag === "input.submit",
 			);
-			expect(request.payload["images"]).toEqual(
+			const adds = requireRpcControl(world.page)
+				.getRequests()
+				.filter((entry) => entry.tag === "AddDraftAttachment");
+			expect(request.payload["images"]).toBeUndefined();
+			expect(request.payload["attachmentIds"]).toEqual(
+				adds.map((entry) => entry.payload["id"]),
+			);
+			expect(adds.map((entry) => entry.payload["dataUrl"])).toEqual(
 				files.map(
 					(file) =>
 						`data:${file.mimeType};name=${file.name};base64,${file.buffer.toString("base64")}`,
 				),
+			);
+			expect(adds.map((entry) => entry.payload["name"])).toEqual(
+				files.map((file) => file.name),
 			);
 		},
 	},

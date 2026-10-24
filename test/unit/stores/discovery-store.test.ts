@@ -97,7 +97,7 @@ describe("formatModelName", () => {
 });
 
 describe("getModelDisplayName", () => {
-	it("resolves catalog names and falls back to the raw id", () => {
+	it("resolves catalog names and tidies an uncatalogued id", () => {
 		handleModelList({
 			providers: [
 				{
@@ -110,7 +110,7 @@ describe("getModelDisplayName", () => {
 		});
 
 		expect(getModelDisplayName("sonnet")).toBe("Sonnet 5");
-		expect(getModelDisplayName("claude-sonnet-5")).toBe("claude-sonnet-5");
+		expect(getModelDisplayName("claude-sonnet-5")).toBe("Sonnet 5");
 	});
 });
 

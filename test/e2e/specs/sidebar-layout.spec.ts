@@ -1115,7 +1115,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await page.getByTestId("session-scope-chip").click();
 		await page.getByRole("menuitem", { name: "Add a project…" }).click();
 		const addProject = page.getByRole("dialog", {
-			name: "Add project",
+			name: "Add a project",
 			exact: true,
 		});
 		await expect(addProject).toBeVisible();
@@ -1190,7 +1190,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 			"700",
 		);
 		const mark = page.getByTestId("list-bar-mark");
-		await expect(mark).toHaveCSS("border-radius", "7px");
+		await expect(mark).toHaveCSS("border-radius", "7.02px");
 		const accent = await mark.evaluate(
 			(element) => getComputedStyle(element).backgroundColor,
 		);

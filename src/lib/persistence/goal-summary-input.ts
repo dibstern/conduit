@@ -25,7 +25,21 @@ export function goalSummaryIdentity(input: GoalSummaryInput): string {
 
 export function goalSummaryKey(input: GoalSummaryInput): string {
 	const signature: string[] = [];
-	for (const verdict of detectGoalStuck(input.checks).verdicts) {
+	const { runs, verdicts } = detectGoalStuck(input.checks);
+	let runIndex = 0;
+	for (const verdict of verdicts) {
+		while (verdict.iteration > (runs[runIndex]?.untilIteration ?? Infinity))
+			runIndex++;
+		const run = runs[runIndex];
+		// Reconfirmation gaps inside one blocker must not invalidate its summary.
+		// Keep the original pre-confirmation iteration keys for existing caches.
+		if (
+			run &&
+			!verdict.stuck &&
+			verdict.iteration > run.detectedIteration &&
+			verdict.iteration <= run.untilIteration
+		)
+			continue;
 		const id = verdict.blockerId ?? `i${verdict.iteration}`;
 		if (signature.at(-1) !== id) signature.push(id);
 	}

@@ -13,6 +13,8 @@ export type {
 
 export interface RunnerUpgradeState {
 	readonly quiescent: boolean;
+	/** Native turn activity, excluding background work. Older runners omit it. */
+	readonly turnInFlight?: boolean;
 	readonly revision: number;
 	readonly snapshot?: RunnerSettingsSnapshot;
 	readonly resumeSessionId?: string;

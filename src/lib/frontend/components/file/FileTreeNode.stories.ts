@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { clearFileTreeState } from "../../stores/file-tree.svelte.js";
 import type { FileEntry } from "../../types.js";
 import FileTreeNode from "./FileTreeNode.svelte";
 
@@ -39,6 +40,19 @@ export const DirectoryNode: Story = {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByRole("button"));
 		await expect(canvas.getByText("index.ts")).toBeVisible();
+	},
+};
+
+export const LoadingDirectory: Story = {
+	args: { entry: { name: "src", type: "directory" } },
+	beforeEach: () => clearFileTreeState(),
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(canvas.getByRole("button"));
+		await expect(canvas.getByText("Loading…")).toBeVisible();
+		await expect(
+			canvasElement.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
 	},
 };
 

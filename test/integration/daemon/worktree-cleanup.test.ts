@@ -14,6 +14,7 @@ import {
 	mkdirSync,
 	readFileSync,
 	renameSync,
+	rmSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -773,6 +774,84 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 					({ sessionId }) => sessionId === session.id,
 				),
 			).toBe(true);
+		} finally {
+			host.disconnect();
+		}
+	}, 300_000);
+
+	it.each([
+		"missing-symlink",
+		"symlink-loop",
+	] as const)("Clean up now resets a failed checkout's retry budget: %s", async (failure) => {
+		const { fixture, socket, create, settle, set } = await start();
+		const session = await create("manual retry");
+		await sendRpcRequest(socket, {
+			_tag: "CreatePty",
+			projectSlug: "process-test",
+			originId: "cleanup-test",
+		});
+		const host = await PtyHostClient.connect({
+			configDir: fixture.configDir,
+			start: false,
+		});
+		const cwd = join(fixture.root, "stale-terminal");
+		if (failure === "missing-symlink") symlinkSync(session.path, cwd, "dir");
+		else mkdirSync(cwd);
+		try {
+			const terminal = await host.create({
+				cwd,
+				projectDir: fixture.root,
+				shell: "/bin/sh",
+				env: {
+					HOME: join(fixture.root, "home"),
+					PATH: process.env["PATH"] ?? "/usr/bin:/bin",
+				},
+			});
+			let output = "";
+			terminal.onData((data) => {
+				output = (output + data).slice(-2000);
+			});
+			terminal.upstream.send("printf 'cleanup-ready\\n'\r");
+			// The host publishes creation before the child has entered its cwd.
+			await vi.waitFor(() => expect(output).toContain("cleanup-ready\r\n"), {
+				timeout: 10_000,
+			});
+			// The shell can still occupy the checkout after its cwd alias is gone.
+			// Missing and unresolvable cwd paths must both keep cleanup conservative.
+			if (failure === "missing-symlink") rmSync(cwd);
+			else {
+				renameSync(cwd, `${cwd}-retained`);
+				symlinkSync(cwd, cwd, "dir");
+			}
+			await settle(session.id);
+			await set({ onSettle: "keep", settledAfterDays: 0 });
+			for (let attempt = 0; attempt < 2; attempt++) {
+				const result = await sendRpcRequest(socket, {
+					_tag: "CleanUpWorktreesNow",
+					projectSlug: "process-test",
+				});
+				expect(result.failed).toContainEqual(
+					expect.objectContaining({ sessionId: session.id }),
+				);
+				expect(result.kept).toEqual([]);
+				expect(existsSync(session.path)).toBe(true);
+				(evidence["sweeps"] as unknown[]).push({
+					label: `manual retry ${attempt}`,
+					...result,
+				});
+			}
+			terminal.upstream.close();
+			await vi.waitFor(
+				async () => {
+					const result = await sendRpcRequest(socket, {
+						_tag: "CleanUpWorktreesNow",
+						projectSlug: "process-test",
+					});
+					expect(result.failed).toEqual([]);
+					expect(existsSync(session.path)).toBe(false);
+				},
+				{ timeout: 10_000 },
+			);
 		} finally {
 			host.disconnect();
 		}

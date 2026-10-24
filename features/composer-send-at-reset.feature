@@ -177,6 +177,9 @@ Scenario Outline: send options show the selected reset then accounts in switch o
   Then the send menu is a <presentation>
   And the send menu starts with selected Send at 3:13 pm on Personal
   And the send menu account order is work, spare
+  And the send menu account work shows a claude logo with badge W
+  And the send menu account spare shows a claude logo with badge S
+  And the send menu names Send now on Work, Send now on Spare are left-aligned
   And the send menu has no Send now on this account option
   And send menu account work offers Send now on Work with wk 48%
   And send menu account spare offers Send now on Spare with wk 9%
@@ -352,6 +355,7 @@ Scenario Outline: choosing Send now changes the button and committing switches b
   And I choose Send now on work
   Then the composer send mode is switch
   And the auto-switch send button reads <label> for work
+  And the send button account work shows a claude logo with badge W
   And the composer still holds Check the next task
   And the composer has sent no message or account switch
   When I open the composer send menu

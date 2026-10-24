@@ -225,8 +225,59 @@ test.describe("OpenCode Side Threads", () => {
 			await expect(chat.assistantMessages.last()).toContainText(/alpha/i);
 			await chat.waitForStreamingComplete();
 			await expect(page.getByTestId("session-bar-title")).toHaveText(question);
-			await expect(chat.subagentBackBar).toContainText("Side Thread of");
-			await expect(chat.subagentBackBar).toContainText(parentTitle.trim());
+			await expect(chat.sideThreadParentCrumb).toContainText(
+				parentTitle.trim(),
+			);
+			const escapedTitle = parentTitle
+				.trim()
+				.replace(/[.*+?^$()|[\]{}\\]/g, "\\$&");
+			await expect(chat.sideThreadParentCrumb).toHaveAccessibleName(
+				new RegExp(
+					`^Back to ${escapedTitle}, parent (working|monitoring|idle)$`,
+				),
+			);
+			await expect(chat.subagentBackBar).toHaveCount(0);
+			await expect(app.input).toHaveAttribute(
+				"placeholder",
+				"Ask a side question…",
+			);
+			const viewport = page.viewportSize();
+			if (!viewport) throw new Error("Breadcrumb layout needs a viewport");
+			await page.setViewportSize({ width: 390, height: 844 });
+			await expect(page.getByTestId("session-bar")).toHaveAttribute(
+				"data-compact",
+				"true",
+			);
+			const expandBar = page.getByTestId("session-bar-expand");
+			if (await expandBar.isVisible()) await expandBar.click();
+			await expect(chat.sideThreadParentCrumb).toBeVisible();
+			const phoneLayout = await page
+				.locator("#session-bar-title-row")
+				.evaluate((row) => {
+					const heading = row.querySelector("h1");
+					const crumb = row.querySelector(
+						'[data-testid="side-thread-parent-crumb"]',
+					);
+					return {
+						width: row.clientWidth,
+						scrollWidth: row.scrollWidth,
+						right: row.getBoundingClientRect().right,
+						titleWidth: heading?.getBoundingClientRect().width ?? 0,
+						crumbWidth: crumb?.getBoundingClientRect().width ?? 0,
+						headingCount: row.querySelectorAll("h1").length,
+					};
+				});
+			expect(phoneLayout.scrollWidth).toBeLessThanOrEqual(
+				phoneLayout.width + 1,
+			);
+			expect(phoneLayout.right).toBeLessThanOrEqual(390);
+			expect(phoneLayout.titleWidth).toBeGreaterThan(phoneLayout.crumbWidth);
+			expect(phoneLayout.headingCount).toBe(1);
+			await testInfo.attach("breadcrumb-phone-layout", {
+				body: JSON.stringify(phoneLayout, null, 2),
+				contentType: "application/json",
+			});
+			await page.setViewportSize(viewport);
 			await expect(
 				page.locator(`#session-list [data-session-id="${sideId}"]`),
 			).toHaveCount(0);
@@ -320,7 +371,10 @@ test.describe("OpenCode Side Threads", () => {
 			).toBeVisible();
 			await expect(chat.assistantMessages.last()).toContainText(/alpha/i);
 			await expect(page.getByTestId("session-bar-title")).toHaveText(question);
-			await expect(chat.subagentBackBar).toBeVisible();
+			await expect(chat.sideThreadParentCrumb).toContainText(
+				parentTitle.trim(),
+			);
+			await expect(chat.subagentBackBar).toHaveCount(0);
 			await expect(
 				page.locator(`#session-list [data-session-id="${sideId}"]`),
 			).toHaveCount(0);
@@ -381,7 +435,6 @@ test.describe("OpenCode Side Threads", () => {
 			await agentRow.click();
 			await page.getByTestId("picker-agent-build").click();
 			await expect(agentRow).toContainText("Build");
-			// Escape in an empty Side Thread composer goes back to the parent.
 			await modelPicker.click();
 			await expect(page.getByTestId("model-picker")).toBeHidden();
 			await expect(approvalPill).toHaveAccessibleName(
@@ -439,9 +492,15 @@ test.describe("OpenCode Side Threads", () => {
 				contentType: "image/png",
 			});
 
-			await chat.subagentBackBtn.click();
+			// The hidden back bar stays mounted to handle Escape from an empty composer.
+			await expect(app.input).toHaveValue("");
+			await app.input.press("Escape");
 			await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
-			await expect(chat.subagentBackBar).not.toBeVisible();
+			await page.goBack();
+			await expect(page).toHaveURL(new RegExp(`/s/${sideId}(?:\\?|$)`));
+			await chat.sideThreadParentCrumb.click();
+			await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
+			await expect(chat.sideThreadParentCrumb).toHaveCount(0);
 			await expect(chat.userMessages).toHaveCount(parentUserText.length);
 			await expect(chat.assistantMessages).toHaveCount(
 				parentAssistantText.length,
@@ -575,8 +634,10 @@ test.describe("Claude Side Threads", () => {
 				await expect(page.getByTestId("session-bar-title")).toHaveText(
 					question,
 				);
-				await expect(chat.subagentBackBar).toContainText("Side Thread of");
-				await expect(chat.subagentBackBar).toContainText(parentTitle.trim());
+				await expect(chat.sideThreadParentCrumb).toContainText(
+					parentTitle.trim(),
+				);
+				await expect(chat.subagentBackBar).toHaveCount(0);
 				await expect(
 					page.getByTestId("permission-mode-badge"),
 				).toHaveAccessibleName("Approvals: Ask before edits. Open options");
@@ -646,9 +707,9 @@ test.describe("Claude Side Threads", () => {
 					contentType: "image/png",
 				});
 
-				await chat.subagentBackBtn.click();
+				await chat.sideThreadParentCrumb.click();
 				await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
-				await expect(chat.subagentBackBar).not.toBeVisible();
+				await expect(chat.sideThreadParentCrumb).toHaveCount(0);
 				await expect(chat.assistantMessages).toHaveText([/pong/i]);
 				await expect(
 					chat.userMessages.filter({ hasText: question }),

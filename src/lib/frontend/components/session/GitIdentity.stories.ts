@@ -127,9 +127,22 @@ export const Merged: Story = {
 export const DetailsOpen: Story = {
 	tags: ["viewport-capture"],
 	args: {
+		onrenamebranch: async () => {},
+		onmove: async () => {},
+		loadWorktrees: async () => ({
+			directory: "/src/conduit",
+			worktrees: [
+				{ path: "/src/conduit", branch: "fix/draft-menus", main: false },
+				{ path: "/src/conduit-main", branch: "main", main: true },
+			],
+		}),
 		git: {
 			branch: "fix/draft-menus",
 			worktree: "conduit-wt-draft",
+			upstream: "origin/fix/draft-menus",
+			head: "6b11104",
+			oid: "6b11104a9c2e88d27395d13c706d876fbab99aa1",
+			changes: { files: 9, insertions: 412, deletions: 38 },
 			ahead: 3,
 			behind: 1,
 			dirty: true,
@@ -142,6 +155,39 @@ export const DetailsOpen: Story = {
 		await expect(
 			within(document.body).getByRole("menu", { name: "Checkout" }),
 		).toHaveTextContent("/src/conduit");
+	},
+};
+
+export const NoUpstream: Story = {
+	...DetailsOpen,
+	// Storybook indexes tags statically, so a spread one is not seen.
+	tags: ["viewport-capture"],
+	args: {
+		...DetailsOpen.args,
+		git: {
+			branch: "local/topic",
+			head: "6b11104",
+			oid: "6b11104a9c2e88d27395d13c706d876fbab99aa1",
+			dirty: true,
+			changes: { files: 1, insertions: 2, deletions: 0 },
+		},
+	},
+};
+
+export const Clean: Story = {
+	...DetailsOpen,
+	tags: ["viewport-capture"],
+	args: {
+		...DetailsOpen.args,
+		git: {
+			branch: "main",
+			head: "6b11104",
+			oid: "6b11104a9c2e88d27395d13c706d876fbab99aa1",
+			upstream: "origin/main",
+			ahead: 0,
+			behind: 0,
+			dirty: false,
+		},
 	},
 };
 
@@ -165,6 +211,10 @@ export const FolderDetailsOpen: Story = {
 					label: "api",
 					branch: "feature/api",
 					dirty: true,
+					upstream: "origin/feature/api",
+					head: "6b11104",
+					oid: "6b11104a9c2e88d27395d13c706d876fbab99aa1",
+					changes: { files: 3, insertions: 12, deletions: 4 },
 					ahead: 2,
 					behind: 1,
 				},
@@ -188,7 +238,7 @@ export const FolderDetailsOpen: Story = {
 		await expect(rows[0]).toHaveTextContent("feature/web");
 		await expect(rows[0]).toHaveTextContent("clean");
 		await expect(rows[1]).toHaveTextContent("feature/api");
-		await expect(rows[1]).toHaveTextContent("uncommitted");
+		await expect(rows[1]).toHaveTextContent("3 files changed +12 -4");
 		await expect(rows[1]).toHaveTextContent("↑2 ↓1");
 		await expect(rows[2]).toHaveTextContent("Detached at a1b2c3d");
 	},
@@ -205,6 +255,7 @@ export const NonGitPrimary: Story = {
 					label: "api",
 					branch: "feature/api",
 					dirty: true,
+					changes: { files: 3, insertions: 12, deletions: 4 },
 					ahead: 2,
 					behind: 1,
 				},
@@ -223,7 +274,7 @@ export const NonGitPrimary: Story = {
 		await expect(rows).toHaveLength(1);
 		await expect(rows[0]).toHaveTextContent("api");
 		await expect(rows[0]).toHaveTextContent("feature/api");
-		await expect(rows[0]).toHaveTextContent("uncommitted");
+		await expect(rows[0]).toHaveTextContent("3 files changed +12 -4");
 		await expect(rows[0]).toHaveTextContent("↑2 ↓1");
 	},
 };
@@ -311,7 +362,7 @@ export const WorktreeMenu: Story = {
 		);
 		await userEvent.click(
 			within(document.body).getByRole("menuitem", {
-				name: "Move to worktree…",
+				name: "Move to another worktree…",
 			}),
 		);
 		await expect(
@@ -743,9 +794,7 @@ async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 			exact: true,
 		}),
 	).toBeVisible();
-	await expect(
-		within(menu).getByText("Worktree", { exact: true }),
-	).toBeVisible();
+	await expect(within(menu).getByText(/· worktree/)).toBeVisible();
 	if (!exit) return;
 	await userEvent.keyboard("{Escape}");
 	await waitFor(() => expect(menu).not.toBeVisible());
@@ -767,9 +816,7 @@ async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 	await expect(
 		within(menu).getByText("/src/conduit", { exact: true }),
 	).toBeVisible();
-	await expect(
-		within(menu).queryByText("Worktree", { exact: true }),
-	).not.toBeInTheDocument();
+	await expect(within(menu).queryByText(/· worktree/)).not.toBeInTheDocument();
 }
 
 export const AgentEntersWorktree: Story = {

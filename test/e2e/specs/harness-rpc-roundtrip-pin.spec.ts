@@ -77,14 +77,23 @@ async function openProjectDialog(page: Page, harness: ProcessHarness) {
 	await new AppPage(page).goto(harness.baseUrl);
 	await page.getByTestId("session-scope-chip").click();
 	await page.getByRole("menuitem", { name: "Add a project…" }).click();
-	const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+	const dialog = page.getByRole("dialog", {
+		name: "Add a project",
+		exact: true,
+	});
 	await expect(dialog).toBeVisible();
 	return dialog;
 }
 
-async function chooseExistingFolder(dialog: Locator, path: string) {
-	await dialog.getByRole("combobox", { name: "Add folder" }).fill(path);
-	await dialog.getByRole("option", { name: path, exact: true }).click();
+async function tickExistingFolder(dialog: Locator, path: string) {
+	const input = dialog.getByRole("combobox", { name: "Add folder" });
+	await input.fill(path);
+	const row = dialog.locator(
+		`[data-testid="folder-picker-row"][data-path=${JSON.stringify(path)}]`,
+	);
+	await row.click();
+	await expect(row).toHaveAttribute("aria-selected", "true");
+	await expect(input).toHaveValue(path);
 }
 
 test.describe("typed failures", () => {
@@ -170,7 +179,7 @@ test.describe("defect", () => {
 		page.on("websocket", (socket) => sockets.push(socket));
 		const folder = mkdtempSync(join(realpathSync(harness.root), "defect-"));
 		const dialog = await openProjectDialog(page, harness);
-		await chooseExistingFolder(dialog, folder);
+		await tickExistingFolder(dialog, folder);
 		const socketsBefore = sockets.filter((socket) => !socket.isClosed());
 		expect(socketsBefore.length).toBeGreaterThan(0);
 		const started = performance.now();
@@ -182,8 +191,8 @@ test.describe("defect", () => {
 		await expect(dialog).toBeVisible();
 		// The same page socket still answers its next request.
 		const other = mkdtempSync(join(realpathSync(harness.root), "after-"));
-		await chooseExistingFolder(dialog, other);
-		await expect(dialog.getByTestId("project-folder-row")).toHaveCount(2);
+		await tickExistingFolder(dialog, other);
+		await expect(dialog.getByTestId("project-folder-chip")).toHaveCount(2);
 		expect(sockets).toEqual(socketsBefore);
 		expect(sockets.some((socket) => socket.isClosed())).toBe(false);
 		expect(harness.generations.at(-1)?.pid).toBe(daemonPid);

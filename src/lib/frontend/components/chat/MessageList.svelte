@@ -64,7 +64,7 @@
 	import PermissionCard from "../permissions/PermissionCard.svelte";
 	import QuestionCard from "./QuestionCard.svelte";
 	import HistoryLoader from "./HistoryLoader.svelte";
-	import BlockGrid from "../ui/BlockGrid.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import TranscriptDivider from "../ui/TranscriptDivider.svelte";
 	import ContinuationDivider from "./ContinuationDivider.svelte";
@@ -564,7 +564,7 @@
 	<!-- Loading indicator (was in HistoryView) -->
 	{#if chat.historyLoading}
 		<div class="history-loading flex items-center justify-center py-3 text-text-dimmer text-xs gap-2">
-			<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} />
+			<ConduitMark size={16} variant="running" />
 			<span>Loading history...</span>
 		</div>
 	{/if}
@@ -591,7 +591,7 @@
 					onjump={scrollCtrl.requestJump}
 					onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
 					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
-					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
+					modelExecution={turn.user?.modelExecution} />
 			{/if}
 			<!-- Notices sit between the final work and reply: they are lifted out of
 			     the activity log so a failure is never hidden behind a collapsed panel. -->
@@ -607,7 +607,7 @@
 				<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
 					<AssistantMessage {sessionId} {providerId} message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)}
 						hideHeader={reply === segment.reply[0] && (segment.activity.length > 0 || (final && turn.live))}
-						model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
+						modelExecution={turn.user?.modelExecution} />
 				</div>
 			{/each}
 			{#if segment.handBack}

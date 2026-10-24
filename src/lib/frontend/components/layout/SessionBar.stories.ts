@@ -109,8 +109,21 @@ async function desktopMenu() {
 	return menu;
 }
 
+/** Drop-down sheets glide in; measure them where they rest. */
+async function settleSheets() {
+	await new Promise(requestAnimationFrame);
+	await Promise.allSettled(
+		document
+			.getAnimations()
+			// Spinners loop forever; only the glide's transitions finish.
+			.filter((animation) => animation instanceof CSSTransition)
+			.map((animation) => animation.finished),
+	);
+}
+
 async function sessionSheet(testId: string) {
 	const sheet = await within(document.body).findByTestId(testId);
+	await settleSheets();
 	await waitFor(() =>
 		expect(sheet.querySelector("[data-switch-status]")).toHaveTextContent(
 			"On · waits for new activity",
@@ -961,7 +974,7 @@ export const OverflowMenuOpen: Story = {
 		await expect(within(menu).getByTestId("session-ctx-delete")).toBeVisible();
 		for (const name of ["Share", "Settings"])
 			await expect(within(menu).getByRole("button", { name })).toBeVisible();
-		await expect(menu).toHaveClass(/bottom-0/);
+		await expect(menu).toHaveAttribute("data-sheet-edge", "top");
 		await expect(
 			within(menu).getByRole("menuitemradio", { name: "Chat" }),
 		).toHaveAttribute("aria-checked", "true");
@@ -1086,6 +1099,69 @@ export const Collapsed: Story = {
 		// off the screen.
 		const back = canvas.getByRole("button", { name: /Sessions/ });
 		expect(back.getBoundingClientRect().width).toBeGreaterThanOrEqual(44);
+	},
+};
+
+function setupSideThread() {
+	seedSessions([
+		{ ...mockSession, title: "Batch A polish", status: "busy" },
+		{
+			...mockSession,
+			id: "phone-side-thread",
+			title: "Why 12px root?",
+			parentID: mockSession.id,
+			sideThread: true,
+			status: "idle",
+		},
+	]);
+	openSessionForSetup("phone-side-thread", "conduit");
+}
+
+export const SideThread: Story = {
+	args: { width: 390, island: true },
+	tags: ["viewport-capture"],
+	beforeEach: setupSideThread,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const crumb = canvas.getByTestId("side-thread-parent-crumb");
+		await expect(crumb).toHaveTextContent("Batch A polish");
+		await expect(crumb).toHaveAccessibleName(
+			"Back to Batch A polish, parent working",
+		);
+		await expect(canvas.getByTestId("parent-session-status")).toHaveTextContent(
+			"Working",
+		);
+		const title = canvas.getByRole("heading", { level: 1 });
+		await expect(title).toHaveTextContent("Why 12px root?");
+		expect(title.getBoundingClientRect().width).toBeGreaterThan(
+			crumb.getBoundingClientRect().width,
+		);
+		const bar = canvas.getByTestId("session-bar");
+		expect(bar.scrollWidth).toBeLessThanOrEqual(bar.clientWidth);
+		expect(bar.getBoundingClientRect().right).toBeLessThanOrEqual(390);
+	},
+};
+
+export const SideThreadCollapsed: Story = {
+	...SideThread,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		setupSideThread();
+		sessionViewState.barOpen = false;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-bar")).toHaveAttribute(
+			"data-collapsed",
+			"true",
+		);
+		expect(canvas.queryByTestId("side-thread-parent-crumb")).toBeNull();
+		const title = canvas.getByRole("heading", { level: 1 });
+		await expect(title).toHaveTextContent("Why 12px root?");
+		await userEvent.click(canvas.getByTestId("session-bar-expand"));
+		await expect(canvas.getByTestId("side-thread-parent-crumb")).toBeVisible();
+		expect(canvas.getByRole("heading", { level: 1 })).toBe(title);
+		sessionViewState.barOpen = false;
 	},
 };
 
@@ -1318,13 +1394,18 @@ export const PhoneGoalSheet: Story = {
 			document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
 				?.content,
 		).toBe(theme === "dark" ? "#0b0c0e" : "#b0b1b3");
+		// A drop-down: it hangs from the bar with its rounded corners at the bottom.
+		await settleSheets();
 		const box = sheet.getBoundingClientRect();
 		expect(box.x).toBe(0);
 		expect(box.width).toBe(393);
-		expect(box.bottom).toBe(852);
+		expect(box.top).toBeCloseTo(
+			canvas.getByTestId("session-bar").getBoundingClientRect().bottom,
+			0,
+		);
 		expect(
 			getComputedStyle(sheet.querySelector("[data-sheet-chrome]") ?? sheet)
-				.borderTopLeftRadius,
+				.borderBottomLeftRadius,
 		).toBe("22px");
 		for (const id of [
 			"goal-details-pause",
@@ -2011,7 +2092,9 @@ export const BackgroundTasks: Story = {
 			"false",
 		);
 		await userEvent.keyboard("{Escape}");
-		await expect(canvas.getByTestId("background-tasks-toggle")).toHaveFocus();
+		await waitFor(() =>
+			expect(canvas.getByTestId("background-tasks-toggle")).toHaveFocus(),
+		);
 		await waitFor(() =>
 			expect(
 				getComputedStyle(canvas.getByTestId("background-tasks-toggle"))
@@ -2068,22 +2151,20 @@ function setupSideThreads(rows: readonly Row[]) {
 	};
 }
 
-/** Phone sheets reach the bottom edge; desktop cards hang under the bar. */
+/** The list hangs under the bar: a full-width drop-down on phones, a card on desktop. */
 async function assertSideThreadsPanel(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
 	const panel = await canvas.findByTestId("side-threads-panel");
 	await expect(panel).toBeVisible();
+	await settleSheets();
 	const box = panel.getBoundingClientRect();
 	const bar = canvas.getByTestId("session-bar").getBoundingClientRect();
-	if (panel.closest("dialog")) {
-		expect(box.bottom).toBe(window.innerHeight);
-		expect(box.left).toBe(0);
-		expect(box.right).toBe(window.innerWidth);
-	} else {
-		expect(box.top).toBeGreaterThanOrEqual(bar.bottom - 1);
-		expect(box.left).toBeGreaterThanOrEqual(bar.left);
-		expect(box.right).toBeLessThanOrEqual(bar.right);
-	}
+	const bounds = panel.closest("[data-sheet-edge]")
+		? { left: 0, right: window.innerWidth }
+		: bar;
+	expect(box.top).toBeGreaterThanOrEqual(bar.bottom - 1);
+	expect(box.left).toBeGreaterThanOrEqual(bounds.left);
+	expect(box.right).toBeLessThanOrEqual(bounds.right);
 	return within(panel);
 }
 
@@ -2124,16 +2205,16 @@ export const SideThreadsOpen: Story = {
 		const theme = document.documentElement.classList.contains("light-theme")
 			? "light"
 			: "dark";
-		const dialog = within(canvasElement).getByTestId("modal-sheet-scrim");
-		expect(getComputedStyle(dialog, "::backdrop").backgroundColor).toBe(
-			theme === "dark" ? "rgba(6, 7, 9, 0.55)" : "rgba(22, 26, 33, 0.34)",
-		);
+		expect(
+			getComputedStyle(within(canvasElement).getByTestId("side-threads-scrim"))
+				.backgroundColor,
+		).toBe(theme === "dark" ? "rgba(6, 7, 9, 0.55)" : "rgba(22, 26, 33, 0.34)");
 		expect(
 			document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
 				?.content,
 		).toBe(theme === "dark" ? "#0b0c0e" : "#b0b1b3");
 		const panel = within(canvasElement).getByTestId("side-threads-panel");
-		// The native dialog spans the phone viewport.
+		// The phone sheet spans the viewport.
 		expect(panel.getBoundingClientRect().width).toBe(window.innerWidth);
 	},
 };
@@ -2203,10 +2284,6 @@ export const SideThreadsClosed: Story = {
 		await userEvent.click(control);
 		await assertSideThreadsPanel(canvasElement);
 		await userEvent.keyboard("{Escape}");
-		// Synthetic keys do not trigger the browser's native dialog cancel event.
-		canvas
-			.getByTestId("modal-sheet-scrim")
-			.dispatchEvent(new Event("cancel", { cancelable: true }));
 		await waitFor(() =>
 			expect(canvas.queryByTestId("side-threads-panel")).toBeNull(),
 		);

@@ -85,7 +85,8 @@ const claudeLoginKey = (login: ClaudeLogin): ClaudeLoginKey => ({
 		path: resolve(login.root, login.configDir.path),
 	},
 	accountId: login.account?.id ?? login.instanceId,
-	accountEnv: login.account?.env,
+	accountEnv:
+		login.account === undefined ? undefined : (login.account.env ?? {}),
 	shellConfig: login.shellConfig,
 });
 
@@ -98,11 +99,15 @@ export const claudeLoginChange = (
 	const b = claudeLoginKey(second);
 	if (
 		!isDeepStrictEqual(a.configDir, b.configDir) ||
-		a.accountId !== b.accountId
+		(a.accountId !== undefined &&
+			b.accountId !== undefined &&
+			a.accountId !== b.accountId)
 	)
 		return "Account";
-	return isDeepStrictEqual(a.accountEnv, b.accountEnv) &&
-		// Older peers omit declared config; unknown alone must not trigger a rebind.
+	// Missing legacy metadata is unknown; an account with no env declares none.
+	return (a.accountEnv === undefined ||
+		b.accountEnv === undefined ||
+		isDeepStrictEqual(a.accountEnv, b.accountEnv)) &&
 		(a.shellConfig === undefined ||
 			b.shellConfig === undefined ||
 			isDeepStrictEqual(a.shellConfig, b.shellConfig))

@@ -70,6 +70,13 @@ export const Loading: Story = {
 		onClose: noopClose,
 		loading: true,
 	},
+	play: async ({ canvasElement }) => {
+		const list = within(canvasElement).getByRole("listbox");
+		await expect(list).toHaveAttribute("aria-busy", "true");
+		await expect(
+			list.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
+	},
 };
 
 /**

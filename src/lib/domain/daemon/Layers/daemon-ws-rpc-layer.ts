@@ -61,7 +61,10 @@ import {
 } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
-import { readSurfacingFeedback } from "../../relay/Services/surfacing-feedback.js";
+import {
+	readSessionCategoryCounts,
+	readSurfacingFeedback,
+} from "../../relay/Services/surfacing-feedback.js";
 import { AuthManagerTag } from "../../server/Layers/auth-middleware.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { CategorySet } from "../Services/category-set.js";
@@ -300,7 +303,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				),
 			);
 
-		const projectList = broadcastProjectList;
+		const projectList = broadcastProjectList.pipe(Effect.provide(shellContext));
 		// The project every client's new session prefills: the last one added
 		// or given a session. Persisted, and sent out with the project list.
 		const rememberNewSessionProject = (slug: string) =>
@@ -517,7 +520,9 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 					followList(
 						"projects",
 						Effect.gen(function* () {
-							const projects = yield* projectInfos;
+							const projects = yield* projectInfos.pipe(
+								Effect.provide(shellContext),
+							);
 							const { newSessionProject, projectOrder } = yield* Ref.get(
 								yield* DaemonConfigRefTag,
 							);
@@ -770,6 +775,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			GetProjects: (request) =>
 				run(
 					projectInfos.pipe(
+						Effect.provide(shellContext),
 						Effect.map((projects) => ({
 							projectSlug: request.projectSlug,
 							...(request.projectSlug ? { current: request.projectSlug } : {}),
@@ -1023,6 +1029,14 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 					}),
 				),
 			GetCategorySet: () => categorySet.current(),
+			CountSessionCategories: ({ sessionId, set }) =>
+				run(
+					Effect.flatMap(PersistenceStore, (store) =>
+						readSessionCategoryCounts(sessionId, set).pipe(
+							Effect.provide(store),
+						),
+					),
+				),
 			GetSurfacingFeedback: () =>
 				run(
 					Effect.flatMap(PersistenceStore, (store) =>

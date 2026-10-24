@@ -15,6 +15,8 @@ export const copy: {
 		| null;
 } = {
 	DraftAlreadySent: (error) => error.message,
+	DraftAttachmentMissing: (error) => error.message,
+	DraftAttachmentRejected: (error) => error.message,
 	WorkspaceMoveError: (error) =>
 		({
 			missing: "That worktree no longer exists.",

@@ -34,6 +34,8 @@ export const daemonOnlyHandlers = {
 	SetTerminalKeys: (_request) => daemonRequired("SetTerminalKeys"),
 	GetTerminalKeys: (_request) => daemonRequired("GetTerminalKeys"),
 	GetCategorySet: (_request) => daemonRequired("GetCategorySet"),
+	CountSessionCategories: (_request) =>
+		daemonRequired("CountSessionCategories"),
 	GetSurfacingFeedback: (_request) => daemonRequired("GetSurfacingFeedback"),
 	GetSurfacingLedger: (_request) => daemonRequired("GetSurfacingLedger"),
 	ScoreCategorySet: (_request) => daemonRequired("ScoreCategorySet"),
@@ -67,6 +69,7 @@ export const daemonOnlyHandlers = {
 	| "SetTerminalKeys"
 	| "GetTerminalKeys"
 	| "GetCategorySet"
+	| "CountSessionCategories"
 	| "GetSurfacingFeedback"
 	| "GetSurfacingLedger"
 	| "ScoreCategorySet"

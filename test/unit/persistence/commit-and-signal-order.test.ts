@@ -1,32 +1,18 @@
 import { describe, it } from "@effect/vitest";
-import {
-	Deferred,
-	Effect,
-	Option as Effect4PollOption,
-	Fiber,
-	Layer,
-	Stream,
-} from "effect";
+import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
-import { makeSessionStateProjectionNotifierLive } from "../../../src/lib/domain/relay/Layers/session-state-projection-notifier-layer.js";
-import { WebSocketHandlerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type SessionEventBus,
 	SessionEventBusLive,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import {
-	makeMockSessionManagerService,
-	makeMockWebSocketHandler,
-} from "../../helpers/mock-factories.js";
 
 const testLayer = Layer.merge(
 	makePersistenceEffectLayer(
@@ -122,48 +108,6 @@ describe("commit advance ordering", () => {
 			}).pipe(Effect.provide(testLayer)),
 	);
 
-	it.effect(
-		"returns after publishing a turn while git refresh remains pending",
-		() =>
-			Effect.gen(function* () {
-				let releaseRefresh: (() => void) | undefined;
-				const refreshStarted = yield* Deferred.make<void>();
-				const notifier = makeSessionStateProjectionNotifierLive(() => {
-					Effect.runSync(Deferred.succeed(refreshStarted, undefined));
-					return new Promise<void>((resolve) => {
-						releaseRefresh = resolve;
-					});
-				}).pipe(
-					Layer.provide(
-						Layer.merge(
-							Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
-							Layer.succeed(SessionManagerServiceTag)(
-								makeMockSessionManagerService(),
-							),
-						),
-					),
-				);
-				yield* Effect.gen(function* () {
-					const writer = yield* makeCommitAndSignal;
-					const call = yield* writer([
-						created("git-session"),
-						canonicalEvent("turn.completed", "git-session", {
-							messageId: "assistant-1",
-						}),
-					]).pipe(Effect.forkChild);
-					yield* Deferred.await(refreshStarted);
-					expect(
-						(yield* Effect.sync(() =>
-							Effect4PollOption.fromUndefinedOr(call.pollUnsafe()),
-						))._tag,
-					).toBe("Some");
-					releaseRefresh?.();
-					yield* Fiber.join(call);
-				}).pipe(
-					Effect.provide(Layer.merge(testLayer, notifier), { local: true }),
-				);
-			}),
-	);
 	it.effect("publishes committed events before invoking the notifier", () =>
 		Effect.gen(function* () {
 			const order: string[] = [];

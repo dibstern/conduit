@@ -5,6 +5,7 @@
 	import type { FileEntry } from "../../types.js";
 	import { formatFileSize } from "../../utils/format.js";
 	import Button from "../ui/Button.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import FileTreeNode from "./FileTreeNode.svelte";
 	import { fileBrowserKey, fileTreeState } from "../../stores/file-tree.svelte.js";
 
@@ -154,7 +155,8 @@
 				/>
 			{/each}
 		{:else}
-			<div class="py-1.5 text-sm text-text-dimmer" style="padding-left: {(depth + 1) * 16 + 8}px">
+			<div class="flex items-center gap-2 py-1.5 text-sm text-text-dimmer" style="padding-left: {(depth + 1) * 16 + 8}px">
+				<ConduitMark size={16} variant="running" />
 				Loading…
 			</div>
 		{/if}

@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Context, Effect, Fiber, HashMap, Ref } from "effect";
+import { recordDaemonBudgetMetrics } from "./daemon-budget-metrics.js";
 
 // Event-loop stalls and read-model reads for load tests, flushed to a file the
 // spec reads after each phase. Stalls are wall-clock end times and durations.
@@ -43,8 +44,10 @@ function recordServerMetrics(
 	});
 	const gitRefreshes: { at: number; read: number; changed: number }[] = [];
 	subscribe("conduit:session-git-refresh", (message) => {
-		const refresh =
-			message as import("../../src/lib/domain/relay/Layers/session-git-layer.js").SessionGitRefresh;
+		const refresh = message as {
+			readonly read: number;
+			readonly changed: number;
+		};
 		gitRefreshes.push({ at: Date.now(), ...refresh });
 	});
 	subscribe("conduit:read-model-read", (message) => {
@@ -333,6 +336,8 @@ async function main(): Promise<void> {
 			"Process harness requires an isolated HOME and IPC channel",
 		);
 	}
+	const subprocessBudget = process.env["CONDUIT_TEST_SUBPROCESS_BUDGET"];
+	if (subprocessBudget) recordDaemonBudgetMetrics(subprocessBudget);
 	let daemon:
 		| import("../../src/lib/domain/daemon/Layers/daemon-foreground.js").ForegroundDaemonHandle
 		| undefined;

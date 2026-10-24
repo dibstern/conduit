@@ -13,6 +13,7 @@ export class ChatPage {
 	readonly turnActivityToggles: Locator;
 	readonly stopBtn: Locator;
 	readonly subagentBackBar: Locator;
+	readonly sideThreadParentCrumb: Locator;
 	readonly subagentBackBtn: Locator;
 	readonly subagentLinks: Locator;
 	readonly subagentCards: Locator;
@@ -30,6 +31,7 @@ export class ChatPage {
 		this.turnActivityToggles = page.locator(".turn-activity-toggle");
 		this.stopBtn = page.locator("#stop");
 		this.subagentBackBar = page.locator(".subagent-back-bar");
+		this.sideThreadParentCrumb = page.getByTestId("side-thread-parent-crumb");
 		this.subagentBackBtn = page.locator(".subagent-back-btn");
 		this.subagentLinks = page.locator(".subagent-link");
 		this.subagentCards = page.locator(".subagent-header");

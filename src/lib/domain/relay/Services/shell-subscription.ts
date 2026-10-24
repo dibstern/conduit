@@ -5,7 +5,7 @@ import type {
 	ShellProjectsFrame,
 } from "../../../contracts/ws-rpc.js";
 import { readProjectFile } from "../../../daemon/project-file.js";
-import { withCachedProjectGit } from "../../../git/session-git.js";
+import { withPublishedProjectGit } from "../../../persistence/effect/session-git-publication.js";
 import { subscribeShellProjects } from "../../daemon/Services/shell-subscription.js";
 import { ConfigTag } from "./services.js";
 
@@ -28,7 +28,7 @@ export const subscribeShell = (
 			const file = yield* readProjectFile(config.projectDir);
 			const frame: ShellProjectsFrame = {
 				_tag: "projects",
-				projects: withCachedProjectGit([
+				projects: yield* withPublishedProjectGit([
 					{
 						slug: config.slug,
 						title: config.slug,

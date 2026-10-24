@@ -13,6 +13,8 @@ const meta = {
 			projectSlug: "conduit",
 			firstLine: "Plan the next release",
 			updatedAt: now - 120_000,
+			imageCount: 0,
+			fileCount: 0,
 		},
 		href: "/draft/draft-preview?project=conduit",
 		projectLabel: "Conduit",

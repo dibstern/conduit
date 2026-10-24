@@ -33,6 +33,7 @@ import {
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
 import { sessionFamilyWindowQuery } from "../../../src/lib/persistence/session-family-query.js";
+import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import { pendingClaudeQuestionToolsQuery } from "../../../src/lib/persistence/startup-restore-queries.js";
 
 const scope = { projectIds: ["test-project"] } as const;
@@ -1510,6 +1511,8 @@ describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 			const execution = yield* readQuery.getLatestTurnModelExecution("s1");
 
 			expect(execution).toEqual({
+				effort: null,
+				context_window: null,
 				requested_model: "sonnet",
 				expected_model: "claude-sonnet-5[1m]",
 				actual_model: "claude-sonnet-5[1m]",
@@ -1537,6 +1540,8 @@ describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 				const execution = yield* readQuery.getLatestTurnModelExecution("s1");
 
 				expect(execution).toEqual({
+					effort: null,
+					context_window: null,
 					requested_model: "sonnet",
 					expected_model: "claude-sonnet-5",
 					actual_model: "claude-fable-4-0",
@@ -1562,6 +1567,8 @@ describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 			const execution = yield* readQuery.getLatestTurnModelExecution("s1");
 
 			expect(execution).toEqual({
+				effort: null,
+				context_window: null,
 				requested_model: "opus",
 				expected_model: "claude-opus-4-6",
 				actual_model: "claude-opus-4-6",
@@ -1588,6 +1595,8 @@ describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 			const execution = yield* readQuery.getLatestTurnModelExecution("s1");
 
 			expect(execution).toEqual({
+				effort: null,
+				context_window: null,
 				requested_model: "sonnet",
 				expected_model: "claude-sonnet-5",
 				actual_model: "claude-sonnet-5",
@@ -1597,6 +1606,155 @@ describe("ReadQueryEffect.getLatestTurnModelExecution", () => {
 });
 
 describe("ReadQueryEffect.getSessionMessagesWithParts", () => {
+	// Request settings must follow the exact input, even with native message ids,
+	// later session changes, empty defaults, unresolved models and forked history.
+	it.effect("keeps effort and context window on each admitted turn", () =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const read = yield* ReadQueryEffectTag;
+			const sql = yield* SqlClient.SqlClient;
+			yield* commit([
+				canonicalEvent("session.created", "settings", {
+					sessionId: "settings",
+					provider: "claude",
+					title: "Settings",
+				}),
+			]);
+			for (const [index, request] of [
+				{ text: "First", variant: "high", contextWindow: "1m" },
+				{ text: "Second", variant: "max", contextWindow: "200k" },
+				{ text: "Defaults", variant: "", contextWindow: "" },
+				{ text: "Unknown" },
+			].entries()) {
+				const inputId = `input-${index}`;
+				const messageId = `native-${index}`;
+				const options = {
+					metadata: { runId: inputId },
+					createdAt: 100 + index,
+				};
+				yield* commit([
+					canonicalEvent(
+						"input.admitted",
+						"settings",
+						{
+							sessionId: "settings",
+							inputId,
+							delivery: "queue",
+							request,
+						},
+						options,
+					),
+					canonicalEvent(
+						"run.requested",
+						"settings",
+						{ runId: inputId, inputId },
+						options,
+					),
+					canonicalEvent(
+						"message.created",
+						"settings",
+						{
+							sessionId: "settings",
+							messageId,
+							inputId,
+							role: "user",
+						},
+						options,
+					),
+					canonicalEvent(
+						"run.started",
+						"settings",
+						{
+							inputId,
+							requestedRunId: inputId,
+							userMessageId: messageId,
+						},
+						options,
+					),
+				]);
+				expect(
+					(yield* read.getSessionMessagesWithParts("settings")).at(-1),
+				).not.toHaveProperty("modelExecution");
+				yield* commit([
+					canonicalEvent(
+						"turn.model_resolved",
+						"settings",
+						{
+							actualModel: "claude-opus-5-5[1m]",
+						},
+						options,
+					),
+				]);
+				const first = (yield* read.getSessionMessagesWithParts("settings"))[0];
+				expect(first?.modelExecution).toEqual({
+					actualModel: "claude-opus-5-5[1m]",
+					effort: "high",
+					contextWindow: "1m",
+				});
+			}
+			yield* commit([
+				canonicalEvent("session.variant_changed", "settings", {
+					sessionId: "settings",
+					variant: "low",
+				}),
+				canonicalEvent("session.context_window_changed", "settings", {
+					sessionId: "settings",
+					contextWindow: "other",
+				}),
+			]);
+			expect(
+				yield* sql`SELECT id, effort, context_window FROM turns ORDER BY requested_at`,
+			).toEqual([
+				{ id: "native-0", effort: "high", context_window: "1m" },
+				{ id: "native-1", effort: "max", context_window: "200k" },
+				{ id: "native-2", effort: null, context_window: null },
+				{ id: "native-3", effort: null, context_window: null },
+			]);
+			const messages = yield* read.getSessionMessagesWithParts("settings");
+			expect(messages.map(({ modelExecution }) => modelExecution)).toEqual([
+				{
+					actualModel: "claude-opus-5-5[1m]",
+					effort: "high",
+					contextWindow: "1m",
+				},
+				{
+					actualModel: "claude-opus-5-5[1m]",
+					effort: "max",
+					contextWindow: "200k",
+				},
+				{ actualModel: "claude-opus-5-5[1m]" },
+				{ actualModel: "claude-opus-5-5[1m]" },
+			]);
+			expect(
+				messageRowsToHistory(messages, { pageSize: 50 }).messages[0]
+					?.modelExecution,
+			).toEqual(messages[0]?.modelExecution);
+			yield* commit([
+				canonicalEvent("session.created", "settings-fork", {
+					sessionId: "settings-fork",
+					provider: "claude",
+					title: "Fork",
+					forkedFrom: "settings",
+					inheritsHistory: true,
+					forkPointMessageId: "native-3",
+					forkPointTimestamp: 103,
+				}),
+			]);
+			expect(
+				yield* sql`SELECT effort, context_window FROM turns WHERE session_id = 'settings-fork' ORDER BY requested_at`,
+			).toEqual([
+				{ effort: "high", context_window: "1m" },
+				{ effort: "max", context_window: "200k" },
+				{ effort: null, context_window: null },
+				{ effort: null, context_window: null },
+			]);
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+				local: true,
+			}),
+		),
+	);
+
 	it.effect("carries each turn's model execution on its messages", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();

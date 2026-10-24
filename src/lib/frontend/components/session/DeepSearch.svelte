@@ -202,7 +202,7 @@
 			onkeydown={handleInputKeydown}
 		/>
 		<label class="flex items-center gap-2 text-xs text-text-secondary">
-			<Checkbox data-testid="deep-search-include-archived" checked={includeArchived} onchange={toggleIncludeArchived} />
+			<Checkbox variant="settings" data-testid="deep-search-include-archived" checked={includeArchived} onchange={toggleIncludeArchived} />
 			Include archived
 		</label>
 		<div class="flex items-center justify-between text-xs text-text-dimmer">

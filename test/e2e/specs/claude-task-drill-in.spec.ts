@@ -157,7 +157,7 @@ test.describe("Claude task drill-in", () => {
 				.first();
 			await expect(launchingShell).toBeVisible();
 			await launchingShell.locator("button").first().click({ force: true });
-			await expect(launchingShell.locator(".tool-result")).toHaveCount(0);
+			await expect(launchingShell.locator(".shell-detail")).toHaveCount(0);
 			await expect(drawer).toHaveCount(0);
 
 			// The pull-down: agents open their tasks, shells only read.

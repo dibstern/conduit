@@ -351,8 +351,7 @@
 	--shadow-island: 0 24px 40px -16px rgba(0, 0, 0, 0.14);
 	--shadow-settings-segment:
 		0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
-	--shadow-composer:
-		0 0 0 1px rgba(0, 0, 0, 0.07), 0 8px 28px rgba(0, 0, 0, 0.05);
+	--shadow-composer: 0 0 0 1px rgba(0, 0, 0, 0.09);
 
 	--color-thinking: #5d5d66;
 	--color-thinking-bg: rgba(93, 93, 102, 0.06);
@@ -1297,7 +1296,8 @@ body:has(dialog:modal) {
 	}
 
 	.md-content code {
-		@apply font-mono text-mono-inline rounded-[5px] px-[5px] py-[2px];
+		@apply font-mono rounded-[4px] px-[3.5px] py-[1px];
+		font-size: calc(14px * var(--mono-scale));
 		background: var(--color-chip);
 	}
 

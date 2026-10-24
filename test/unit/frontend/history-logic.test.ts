@@ -1,6 +1,8 @@
 // Tests groupIntoTurns, findPageBoundary, historyToChatMessages, applyHistoryQueuedFlag.
 
+import { Schema } from "effect";
 import { assert, describe, expect, test } from "vitest";
+import { AttachmentRefSchema } from "../../../src/lib/contracts/attachment-ref.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
@@ -22,7 +24,18 @@ function assistantMsg(id: string): HistoryMessage {
 }
 
 describe("historyToChatMessages attachments", () => {
-	test("keeps file-only documents and decoded byte sizes after history reload", () => {
+	const notes = Schema.decodeUnknownSync(AttachmentRefSchema)({
+		attachmentHash: "a".repeat(64),
+		mime: "text/plain",
+		name: "notes.txt",
+	});
+	const pdf = Schema.decodeUnknownSync(AttachmentRefSchema)({
+		attachmentHash: "b".repeat(64),
+		mime: "application/pdf",
+		name: "guide.pdf",
+	});
+
+	test("keeps file-only documents and their refs after history reload", () => {
 		const [message] = historyToChatMessages([
 			{
 				id: "file-only",
@@ -33,14 +46,14 @@ describe("historyToChatMessages attachments", () => {
 						type: "file",
 						mime: "text/plain",
 						filename: "notes.txt",
-						url: "data:text/plain;name=notes.txt;base64,Y2Fmw6k=",
+						source: notes,
 					},
 					{
 						id: "pdf",
 						type: "file",
 						mime: "application/pdf",
 						filename: "guide.pdf",
-						url: "data:application/pdf;base64,JVBERi0xLjQ=",
+						source: pdf,
 					},
 				],
 			},
@@ -49,14 +62,18 @@ describe("historyToChatMessages attachments", () => {
 			type: "user",
 			text: "",
 			attachments: [
-				{ id: "notes", mime: "text/plain", name: "notes.txt", size: 5 },
-				{ id: "pdf", mime: "application/pdf", name: "guide.pdf", size: 8 },
+				{ id: "notes", mime: "text/plain", name: "notes.txt", source: notes },
+				{ id: "pdf", mime: "application/pdf", name: "guide.pdf", source: pdf },
 			],
 		});
 	});
 
-	test("preserves image URLs and external file references alongside text", () => {
-		const image = "data:image/png;base64,aW1hZ2U=";
+	test("preserves image refs and external file references alongside text", () => {
+		const image = Schema.decodeUnknownSync(AttachmentRefSchema)({
+			attachmentHash: "c".repeat(64),
+			mime: "image/png",
+			name: "screenshot.png",
+		});
 		const [message] = historyToChatMessages([
 			{
 				id: "mixed",
@@ -68,14 +85,14 @@ describe("historyToChatMessages attachments", () => {
 						type: "file",
 						mime: "image/png",
 						filename: "screenshot.png",
-						url: image,
+						source: image,
 					},
 					{
 						id: "external",
 						type: "file",
 						mime: "application/pdf",
 						filename: "external.pdf",
-						url: "https://example.com/external.pdf",
+						source: { url: "https://example.com/external.pdf" },
 					},
 				],
 			},
@@ -83,11 +100,11 @@ describe("historyToChatMessages attachments", () => {
 		expect(message).toMatchObject({
 			text: "Review these files",
 			attachments: [
-				{ id: "image", mime: "image/png", url: image, size: 5 },
+				{ id: "image", mime: "image/png", source: image },
 				{
 					id: "external",
 					mime: "application/pdf",
-					url: "https://example.com/external.pdf",
+					source: { url: "https://example.com/external.pdf" },
 				},
 			],
 		});

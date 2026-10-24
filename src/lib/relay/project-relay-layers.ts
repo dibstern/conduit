@@ -82,8 +82,7 @@ import {
 	ProjectRelayLoggerLive,
 } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeRelayStateLive } from "../domain/relay/Layers/relay-layer.js";
-import { SessionGitLive } from "../domain/relay/Layers/session-git-layer.js";
-import { makeSessionStateProjectionNotifierLive } from "../domain/relay/Layers/session-state-projection-notifier-layer.js";
+import { SessionStateProjectionNotifierLive } from "../domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { SessionWorkspaceLive } from "../domain/relay/Layers/session-workspace-layer.js";
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
@@ -1042,7 +1041,7 @@ export function createProjectRelayLayers({
 	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(
 		StatusPollerLive,
-		Layer.provideMerge(SessionGitLive, relayStateAndBridges),
+		relayStateAndBridges,
 	);
 	const relayStateWithRecaps = Layer.merge(
 		makeRecapServiceLive({
@@ -1072,7 +1071,7 @@ export function createProjectRelayLayers({
 		relayStateServicesAndBridges,
 	);
 	const baseLayersWithProjectionNotifier = Layer.provideMerge(
-		makeSessionStateProjectionNotifierLive(),
+		SessionStateProjectionNotifierLive,
 		baseLayers,
 	);
 	const fullBaseLayers = Layer.provideMerge(

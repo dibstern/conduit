@@ -13,16 +13,20 @@ import {
 	Fiber,
 	FiberSet,
 	Option,
+	PubSub,
 	Schedule,
 	Semaphore,
+	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../contracts/account.js";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import {
 	AccountSwitchBusy,
 	accountSwitchBusyMessage,
 } from "../../contracts/limit-recovery.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import {
 	type PendingInteractionService,
 	PendingInteractionServiceTag,
@@ -79,7 +83,9 @@ import {
 } from "./runner-registry.js";
 import { failRunnerTurn, observeRunnerTurn } from "./runner-turn-failure.js";
 import { makeRunnerUpgrade, type RunnerUpgrade } from "./runner-upgrade.js";
+import { makeSendAdmissionWait } from "./send-admission.js";
 import type {
+	DurableSessionTurn,
 	SessionCommand,
 	SessionFailure,
 	SessionOutput,
@@ -110,7 +116,10 @@ interface RunnerChild {
 	capabilities?: {
 		readonly stopsTasks: boolean;
 		readonly rebindsAccount: boolean;
+		readonly settlesAnswers: boolean;
+		readonly declaresLogin: boolean;
 	};
+	interactionSinks?: Map<string, string>;
 	pendingSendCommands?: Map<string, number> | undefined;
 	ownedRunIds?: Set<string>;
 	readonly upgrade: RunnerUpgrade;
@@ -191,7 +200,7 @@ export interface ProcessRunnerDriver {
 		) => string,
 		replayTurn: (
 			accountId: string,
-			input: SessionTurn,
+			input: Pick<SessionTurn, "sessionId" | "inputId" | "account">,
 			sinkId: string,
 			work: (
 				dispatch: (
@@ -210,9 +219,7 @@ export interface ProcessRunnerDriver {
 		) => Effect.Effect<TurnResult | undefined, SessionFailure>,
 	) => Effect.Effect<
 		Effect.Success<
-			ReturnType<
-				typeof recoverRunnerCommands<import("./session-runner.js").SessionTurn>
-			>
+			ReturnType<typeof recoverRunnerCommands<DurableSessionTurn>>
 		>,
 		unknown,
 		PersistenceProjectTag
@@ -227,6 +234,11 @@ const CANCELLED_TURN: TurnResult = {
 	durationMs: 0,
 	providerStateUpdates: [],
 };
+
+const legacyAnswerCommandId = (entry: RunnerChild, commandId: string) =>
+	entry.capabilities?.settlesAnswers === true
+		? undefined
+		: `${commandId}:answer`;
 
 // Every lifecycle write goes through this boundary; reduction itself is pure.
 const transition = (
@@ -485,6 +497,7 @@ export const makeProcessSessionRunner = (
 						: Effect.void;
 				}),
 			);
+		const turnEnds = yield* PubSub.unbounded<string>();
 		const runnerLabel = `${driver.driverKind.charAt(0).toUpperCase()}${driver.driverKind.slice(1)} runner`;
 		const accountDisplayName = (
 			input: Pick<SessionTurn, "account" | "instanceId"> | undefined,
@@ -586,7 +599,7 @@ export const makeProcessSessionRunner = (
 				placement?: {
 					inputId: string;
 					text: string;
-					images?: readonly string[];
+					images?: readonly AttachmentRef[];
 				};
 				messageId: string;
 				pending: boolean;
@@ -1367,6 +1380,26 @@ export const makeProcessSessionRunner = (
 
 		const attach = (sessionId: string, entry: RunnerChild) =>
 			Effect.gen(function* () {
+				const trackInteraction = (output: SessionOutput) => {
+					if (
+						output.type === "question-request" ||
+						output.type === "permission-request"
+					)
+						(entry.interactionSinks ??= new Map()).set(
+							`${output.type}:${output.request.requestId}`,
+							output.sinkId,
+						);
+					else if (output.type === "cancel-interaction") {
+						for (const kind of ["question-request", "permission-request"]) {
+							const key = `${kind}:${output.requestId}`;
+							if (entry.interactionSinks?.get(key) === output.sinkId)
+								entry.interactionSinks.delete(key);
+						}
+					} else if (output.type === "release-sink") {
+						for (const [key, sinkId] of entry.interactionSinks ?? [])
+							if (sinkId === output.sinkId) entry.interactionSinks?.delete(key);
+					}
+				};
 				const workspaceRoot =
 					entry.launch?.workspaceRoot ??
 					(yield* deps.projectRootForSession(sessionId)) ??
@@ -1424,6 +1457,7 @@ export const makeProcessSessionRunner = (
 						const releaseSinkId =
 							received.type === "release-sink" ? received.sinkId : undefined;
 						const operation = Effect.suspend(() => {
+							trackInteraction(received);
 							const binding =
 								"sinkId" in received ? sinks.get(received.sinkId) : undefined;
 							if (received.type === "release-sink" && binding?.pending) {
@@ -1502,7 +1536,12 @@ export const makeProcessSessionRunner = (
 							entry.capabilities = {
 								stopsTasks: hello.stopsTasks === true,
 								rebindsAccount: hello.rebindsAccount === true,
+								settlesAnswers: hello.settlesAnswers === true,
+								declaresLogin: hello.declaresLogin === true,
 							};
+							log.info(
+								`${runnerLabel} attached for session ${sessionId}: build ${hello.buildId}, answers ${entry.capabilities.settlesAnswers ? "runner-settled" : "legacy answer-question/answer-permission"}`,
+							);
 							entry.upgrade.state = hello.upgradeState;
 							// Identity and native controls suffice until the project can reattach.
 							if (Entry.isAwaitingProject(entry.lifecycle)) return;
@@ -1663,6 +1702,7 @@ export const makeProcessSessionRunner = (
 								? []
 								: (hello.pendingOutputs ?? [])) {
 								yield* ensureAttached();
+								trackInteraction(pending.output);
 								if (pending.sequence <= (hello.acknowledgedSequence ?? 0))
 									yield* withEntryOutput(
 										entry,
@@ -1723,6 +1763,11 @@ export const makeProcessSessionRunner = (
 									socketPath: entry.socketPath,
 									buildId: hello.buildId,
 									protocolVersion: hello.protocolVersion,
+									settlesAnswers: entry.capabilities.settlesAnswers,
+									declaresLogin: entry.capabilities.declaresLogin,
+									answerDialect: entry.capabilities.settlesAnswers
+										? "runner"
+										: "legacy",
 								});
 						}),
 					onCommandAccepted: (sinkId) =>
@@ -1769,12 +1814,19 @@ export const makeProcessSessionRunner = (
 						);
 					},
 					onUpgradeState: (state) => {
+						const wasInFlight = entry.upgrade.state?.turnInFlight === true;
 						const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
 						// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
 						entry.upgrade.state = {
 							...state,
 							...(snapshot ? { snapshot } : {}),
 						};
+						if (
+							children.get(sessionId) === entry &&
+							wasInFlight &&
+							state.turnInFlight === false
+						)
+							PubSub.publishUnsafe(turnEnds, sessionId);
 						upgrade(sessionId, entry);
 					},
 					onIdleExit: () => {
@@ -2177,6 +2229,21 @@ export const makeProcessSessionRunner = (
 		});
 
 		class ProcessSessionRunner implements SessionRunner {
+			readonly turnEnds = Effect.map(
+				PubSub.subscribe(turnEnds),
+				Stream.fromSubscription,
+			);
+
+			hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
+				return Effect.sync(() => {
+					const entry = children.get(sessionId);
+					return (
+						entry !== undefined &&
+						Entry.countsTowardDemand(entry.lifecycle) &&
+						entry.upgrade.state?.turnInFlight === true
+					);
+				});
+			}
 			getControlCommandStatusEffect(
 				sessionId: string,
 				control: ProviderControlContext,
@@ -2201,8 +2268,31 @@ export const makeProcessSessionRunner = (
 						!Entry.canControl(entry.lifecycle)
 					)
 						return yield* Effect.fail(unavailable());
+					const legacyAnswerId = legacyAnswerCommandId(
+						entry,
+						control.commandId,
+					);
+					const [command] =
+						legacyAnswerId && sql
+							? yield* sql<{
+									effect_type: string;
+								}>`SELECT effect_type FROM provider_command_outbox
+							WHERE session_id = ${sessionId} AND command_id = ${control.commandId} LIMIT 1`.pipe(
+									Effect.mapError((cause) =>
+										runnerFailure("get control command status", cause),
+									),
+								)
+							: [];
+					// Pre-outbox runners cannot answer command-status. Their final answer
+					// receipt, not the resolve receipt, proves the whole handoff completed.
 					const status = yield* Effect.result(
-						connection.commandStatusEffect(control.commandId),
+						legacyAnswerId &&
+							(command?.effect_type === "resolve_question" ||
+								command?.effect_type === "resolve_permission")
+							? Effect.sync(() =>
+									connection.observedCommandStatus(legacyAnswerId),
+								)
+							: connection.commandStatusEffect(control.commandId),
 					);
 					const current = children.get(sessionId);
 					if (current && current.runnerId !== control.providerProcessId)
@@ -2773,23 +2863,27 @@ export const makeProcessSessionRunner = (
 												}),
 												Effect.map((commands) =>
 													commands.map((command) => {
-														const wait = command.wait.pipe(
+														let wait = command.wait.pipe(
 															Effect.provideService(PersistenceProjectTag, {
 																projectId: persisted.project_id,
 															}),
 															Effect.provideService(SqlClient.SqlClient, sql),
 														);
-														return {
-															...command,
-															wait: recovery
-																? wait.pipe(
-																		Effect.provideService(
-																			ClaudeEventPersistEffectTag,
-																			recovery.persist,
-																		),
-																	)
-																: wait,
-														};
+														if (recovery)
+															wait = wait.pipe(
+																Effect.provideService(
+																	ClaudeEventPersistEffectTag,
+																	recovery.persist,
+																),
+															);
+														if (recovery?.inputDrafts)
+															wait = wait.pipe(
+																Effect.provideService(
+																	InputDraftsTag,
+																	recovery.inputDrafts,
+																),
+															);
+														return { ...command, wait };
 													}),
 												),
 												Effect.mapError((cause) =>
@@ -3083,8 +3177,13 @@ export const makeProcessSessionRunner = (
 				});
 			}
 
-			withTurnEffect<A, E, R>(
-				input: SessionTurn,
+			withTurnEffect<
+				A,
+				E,
+				R,
+				T extends Pick<SessionTurn, "sessionId" | "inputId" | "account">,
+			>(
+				input: T,
 				sinkId: string,
 				work: Effect.Effect<A, E, R>,
 				accountId: string | undefined = input.account?.id,
@@ -3174,7 +3273,11 @@ export const makeProcessSessionRunner = (
 												inputId: command.input.inputId,
 												text: command.input.text ?? command.input.prompt,
 												...(command.input.images
-													? { images: command.input.images }
+													? {
+															images: command.input.images.map(
+																({ ref }) => ref,
+															),
+														}
 													: {}),
 											},
 										}),
@@ -3192,6 +3295,13 @@ export const makeProcessSessionRunner = (
 				let ending: RunnerChild | undefined;
 				let cancelled: Deferred.Deferred<void> | undefined;
 				let pendingSend: ReturnType<typeof pendingSends.get>;
+				const waitForAdmission =
+					command.type === "send-turn"
+						? makeSendAdmissionWait(
+								command.input.sessionId,
+								command.input.inputId,
+							)
+						: undefined;
 				const execute = Effect.gen(function* () {
 					const autoSettleAfterDays =
 						command.type === "send-turn"
@@ -3363,6 +3473,14 @@ export const makeProcessSessionRunner = (
 												existing.upgrade.settingsDeferred === true,
 										},
 									});
+									if (process.env["NODE_ENV"] === "test" && process.connected)
+										process.send?.({
+											channel: "conduit-process-test",
+											kind: "runner-admission",
+											sessionId,
+											command: command.type,
+											decision,
+										});
 									switch (decision) {
 										case "Refuse":
 											log.info(
@@ -3386,6 +3504,11 @@ export const makeProcessSessionRunner = (
 												entry: existing,
 												draining: true,
 												foldersPending: true,
+												waitReason: foldersChanged
+													? ("foldersPending" as const)
+													: legacyCursor
+														? ("legacyCursor" as const)
+														: ("loginPending" as const),
 											};
 										case "Retire":
 											transition(existing, {
@@ -3502,8 +3625,13 @@ export const makeProcessSessionRunner = (
 							);
 							continue;
 						}
-						if ("foldersPending" in selection) {
-							yield* Effect.sleep("10 millis");
+						if ("foldersPending" in selection && selection.waitReason) {
+							yield* waitForAdmission
+								? waitForAdmission(
+										selection.waitReason,
+										Effect.sleep("10 millis"),
+									)
+								: Effect.sleep("10 millis");
 							continue;
 						}
 						if (selection.retire) {
@@ -3575,9 +3703,53 @@ export const makeProcessSessionRunner = (
 								`Runner build ${entry.buildId ?? "unknown"} cannot stop background tasks`,
 							),
 						);
+					const preserveReportedLogin = <
+						Command extends Extract<
+							SessionCommand,
+							{ type: "send-turn" | "pre-warm" }
+						>,
+					>(
+						payload: Command,
+					): Command => {
+						const snapshot = entry.upgrade.state?.snapshot;
+						const launch = snapshot?.input;
+						if (
+							driver.driverKind === "claude" &&
+							!entry.capabilities?.declaresLogin &&
+							launch &&
+							driver.loginChange(
+								{ ...launch, root: launch.workspaceRoot },
+								{
+									...payload.input,
+									configDir: payload.input.configDir,
+									root: payload.input.workspaceRoot,
+									shellConfig: payload.input.shellConfig ?? payload.shellConfig,
+								},
+							) === "None"
+						) {
+							// Old peers compare captures and absent account fields as values.
+							// Keep their reported login until a declared setting really changes.
+							const captured = {
+								...payload,
+								input: { ...payload.input },
+								shellEnv: launch.shellEnv ?? snapshot?.options.env ?? {},
+							};
+							delete captured.input.account;
+							delete captured.input.instanceId;
+							delete captured.input.shellEnv;
+							if (launch.account !== undefined)
+								captured.input.account = launch.account;
+							if (launch.instanceId !== undefined)
+								captured.input.instanceId = launch.instanceId;
+							if (launch.shellEnv !== undefined)
+								captured.input.shellEnv = launch.shellEnv;
+							return captured;
+						}
+						return payload;
+					};
 					const payload =
 						command.type === "send-turn"
-							? {
+							? preserveReportedLogin({
 									...command,
 									autoSettleAfterDays,
 									shellConfig: command.input.shellConfig ?? command.shellConfig,
@@ -3590,9 +3762,9 @@ export const makeProcessSessionRunner = (
 										command.shellEnv ?? {
 											...process.env,
 										},
-								}
+								})
 							: command.type === "pre-warm"
-								? {
+								? preserveReportedLogin({
 										...command,
 										shellConfig:
 											command.input.shellConfig ?? command.shellConfig,
@@ -3600,7 +3772,7 @@ export const makeProcessSessionRunner = (
 											command.shellEnv ?? {
 												...process.env,
 											},
-									}
+									})
 								: command;
 					let commandId =
 						command.control?.commandId ??
@@ -3764,13 +3936,47 @@ export const makeProcessSessionRunner = (
 							commandId,
 							command.input.commandAttempt ?? 0,
 						);
-					return yield* connection.commandEffect(
+					const legacyAnswerId = legacyAnswerCommandId(entry, commandId);
+					// Some unflagged builds already settle and cancel during resolve.
+					// Retain their sink so the final handshake receipt is still recorded.
+					const legacySinkId =
+						legacyAnswerId &&
+						(command.type === "resolve-question" ||
+							command.type === "resolve-permission")
+							? entry.interactionSinks?.get(
+									`${command.type === "resolve-question" ? "question" : "permission"}-request:${command.requestId}`,
+								)
+							: undefined;
+					const result = yield* connection.commandEffect(
 						commandId,
 						payload,
 						command.type === "send-turn"
 							? command.input.commandAttempt
 							: undefined,
 					);
+					// Legacy resolve commands acknowledge the answer without releasing
+					// canUseTool. Complete that handshake inside the outbox attempt, using
+					// its original reply rather than the runner's redacted notification.
+					if (legacyAnswerId && legacySinkId) {
+						if (command.type === "resolve-question") {
+							yield* connection.commandEffect(legacyAnswerId, {
+								type: "answer-question",
+								sinkId: legacySinkId,
+								requestId: command.requestId,
+								answers: command.answers,
+							});
+						} else if (command.type === "resolve-permission") {
+							yield* connection.commandEffect(legacyAnswerId, {
+								type: "answer-permission",
+								sinkId: legacySinkId,
+								requestId: command.requestId,
+								response: command.control?.response ?? {
+									decision: command.decision,
+								},
+							});
+						}
+					}
+					return result;
 				}).pipe(
 					Effect.ensuring(
 						Effect.sync(() => {
@@ -3802,6 +4008,11 @@ export const makeProcessSessionRunner = (
 							: Effect.fail(failure),
 					),
 					Effect.onError((cause) => {
+						if (
+							runnerFailure(command.type, Failure.squashCause(cause)).code ===
+							"send_admission_timeout"
+						)
+							return Effect.void;
 						if (
 							command.type !== "send-turn" ||
 							recovered ||

@@ -42,6 +42,8 @@
 	const scrolling = $derived(options.length >= scrollThreshold);
 	let row: HTMLDivElement | null = $state(null);
 	let moreToRight = $state(false);
+	// Reveal a selection once; options rebuild on every quota update and must not undo the user's scroll.
+	let revealed: string | undefined;
 
 	function updateFade() {
 		moreToRight = !!row && scrolling && row.scrollWidth - row.clientWidth - row.scrollLeft > 1;
@@ -55,10 +57,11 @@
 		let cancelled = false;
 		void tick().then(() => {
 			if (cancelled) return;
-			if (scroll && selected) {
+			if (scroll && selected && selected.value !== revealed) {
 				const tab = Array.from(element.querySelectorAll<HTMLElement>("[data-radio-group-item]"))
 					.find((tab) => tab.dataset["value"] === selected.value);
 				tab?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+				if (tab) revealed = selected.value;
 			}
 			updateFade();
 		});

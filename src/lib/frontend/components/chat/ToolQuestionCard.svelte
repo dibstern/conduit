@@ -9,7 +9,7 @@
 	import { fmtDuration } from "../../utils/turns.js";
 
 	import Icon from "../ui/Icon.svelte";
-	import BlockGrid from '../ui/BlockGrid.svelte';
+	import ConduitMark from '../ui/ConduitMark.svelte';
 	import QuestionCard from "./QuestionCard.svelte";
 	import Surface from "../ui/Surface.svelte";
 
@@ -216,7 +216,7 @@
 		<span class="question-tool-verb shrink-0 font-normal">{running ? "Asking" : "Asked"}</span>
 		<span class="question-tool-argument min-w-0 flex-1 truncate font-mono text-mono-code text-text-dimmer">{questionData?.[0]?.question ?? "Input required"}</span>
 		{#if duration !== undefined}<time class="ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{fmtDuration(duration)}</time>{/if}
-		{#if running}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+		{#if running}<ConduitMark size={16} variant="running" />
 		{:else if !isSkipped && (message.status === "error" || message.isError)}<span class="shrink-0 text-error"><Icon name="circle-alert" size={12} /></span>{/if}
 	</div>
 {#if isQuestionActive && questionRequest}

@@ -14,7 +14,6 @@ import {
 } from "../../../contracts/session-workspace.js";
 import { WorktreeBranchRenameError } from "../../../contracts/worktree.js";
 import * as Failure from "../../../effect/failure-classification.js";
-import { daemonSessionGitCache } from "../../../git/session-git.js";
 import { readWorktrees, realWorkspacePath } from "../../../git/worktrees.js";
 import {
 	type CommitAndSignalProject,
@@ -33,6 +32,7 @@ import { readClaudeWorktreeState } from "../../../session/claude-worktree-state.
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { ProjectContext } from "../../daemon/Services/project-context.js";
+import { SessionGit } from "../../daemon/Services/session-git.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { ConfigTag } from "../Services/services.js";
 import { SessionCommandError } from "../Services/session-command.js";
@@ -354,20 +354,14 @@ export const SessionWorkspaceLive = Layer.effect(
 					worktrees: worktreesFor(target, previous, cause, mainFolder),
 					origin,
 				};
-				// Warm outside the permit, using the key read-model consumers use.
-				yield* Effect.tryPromise(() =>
-					Promise.all([
-						daemonSessionGitCache.refresh(normalized),
-						daemonSessionGitCache.refresh(
-							effectiveWorkingDirectory(mainFolder, workspace),
-						),
-					]),
-				).pipe(
-					Effect.mapError(
-						(cause) =>
-							new SessionCommandError({ operation: "workspace.git", cause }),
-					),
-				);
+				const git = yield* Effect.serviceOption(SessionGit);
+				if (git._tag === "Some") {
+					yield* git.value.invalidate({ directory: normalized });
+					yield* git.value.invalidate({
+						directory: effectiveWorkingDirectory(mainFolder, workspace),
+					});
+				}
+
 				return target;
 			});
 		const record: SessionWorkspace["record"] = (

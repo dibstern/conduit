@@ -3,9 +3,10 @@ import { isDeepStrictEqual } from "node:util";
 import { Context, Data, Effect, Result, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
-import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import { sessionCreatedLineage } from "../../contracts/session-ref.js";
+import type { DraftChange } from "../../domain/relay/Services/input-drafts.js";
 import {
 	resolveServerSessionPick,
 	sessionPickEvents,
@@ -82,7 +83,11 @@ export interface ClaudeEventPersistEffect {
 
 	readonly persistEvents: (
 		events: readonly CanonicalEvent[],
-		options?: { readonly publish?: boolean; readonly projectId?: string },
+		options?: {
+			readonly publish?: boolean;
+			readonly projectId?: string;
+			readonly draftChange?: DraftChange;
+		},
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistUserMessage: (
@@ -99,7 +104,7 @@ export interface ClaudeEventPersistEffect {
 			/** The reservation this placement belongs to; this does not prove intake. */
 			readonly runId?: string;
 			readonly provider?: string;
-			readonly images?: readonly string[];
+			readonly images?: readonly AttachmentRef[];
 			/** Place an unsent input and its owned failure in one transaction. */
 			readonly failure?: {
 				readonly message: string;
@@ -607,10 +612,10 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 				);
 			}).pipe(Effect.mapError(mapPersistError("persistHandoffDelivered")));
 
-	const persistEvents = (
-		events: readonly CanonicalEvent[],
-		options?: { readonly publish?: boolean; readonly projectId?: string },
-	): Effect.Effect<void, ClaudeEventPersistFailure> =>
+	const persistEvents: ClaudeEventPersistEffect["persistEvents"] = (
+		events,
+		options,
+	) =>
 		Effect.gen(function* () {
 			const mismatch = boundProjectMismatch(
 				eventStore.projectId,
@@ -622,6 +627,9 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 			yield* commitAndSignal.write(
 				(project) =>
 					Effect.gen(function* () {
+						yield* (options?.draftChange?.write ?? Effect.void).pipe(
+							Effect.provideService(SqlClient.SqlClient, sql),
+						);
 						for (const sessionId of new Set(
 							events.map((event) => event.sessionId),
 						))
@@ -644,7 +652,11 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 					}),
 				options,
 			);
-		}).pipe(Effect.mapError(mapPersistError("persistEvents")));
+			yield* options?.draftChange?.publish ?? Effect.void;
+		}).pipe(
+			Effect.uninterruptible,
+			Effect.mapError(mapPersistError("persistEvents")),
+		);
 
 	const persistUserMessage: ClaudeEventPersistEffect["persistUserMessage"] = (
 		sessionId,
@@ -728,19 +740,10 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 						),
 					);
 				}
-				const attachments = yield* Effect.try({
-					try: () =>
-						(alreadyPlaced ? [] : (options?.images ?? [])).map((url) => ({
-							...parseAttachmentDataUrl(url),
-							url,
-						})),
-					catch: (cause) =>
-						new ClaudeEventPersistEffectError({
-							operation: "persistUserMessage",
-							cause,
-						}),
-				});
-				for (const [index, attachment] of attachments.entries()) {
+				for (const [index, ref] of (alreadyPlaced
+					? []
+					: (options?.images ?? [])
+				).entries()) {
 					events.push(
 						canonicalEvent(
 							"file.attached",
@@ -748,11 +751,9 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 							{
 								messageId: userMsgId,
 								partId: `${userMsgId}-attachment-${index}`,
-								mime: attachment.mime,
-								...(attachment.name !== undefined
-									? { filename: attachment.name }
-									: {}),
-								url: attachment.url,
+								mime: ref.mime,
+								...(ref.name !== undefined ? { filename: ref.name } : {}),
+								source: ref,
 							},
 							{ provider, createdAt: now },
 						),

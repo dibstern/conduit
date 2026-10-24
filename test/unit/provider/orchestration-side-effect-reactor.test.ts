@@ -25,6 +25,7 @@ import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { makeAttachmentStore } from "../../../src/lib/persistence/attachment-store.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -43,7 +44,7 @@ import type {
 	PermissionResponse,
 	ProviderCapabilities,
 	ProviderInstance,
-	SendTurnInput,
+	ResolvedSendTurnInput,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
 
@@ -214,9 +215,14 @@ describe("ProviderSideEffectReactor", () => {
 						title: "Named failure",
 					}),
 				]);
+				const attachmentStore = yield* makeAttachmentStore;
+				const ref = yield* attachmentStore.put(
+					"data:image/png;base64,aW1hZ2U=",
+				);
 				yield* sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json,
-				'$.images', json_array('data:image/png;base64,aW1hZ2U='))`;
+				'$.images', json(${JSON.stringify([ref])}))`;
 				const reactor = yield* makeReactor({
+					attachmentStore,
 					persistUserMessage: (yield* ClaudeEventPersistEffectTag)
 						.persistUserMessage,
 					registry: new ProviderRegistry([
@@ -302,7 +308,7 @@ describe("ProviderSideEffectReactor", () => {
 					expect(
 						yield* sql`SELECT run_id, state FROM turns WHERE id = 'cut-off'`,
 					).toEqual([{ run_id: "old-run", state: "completed" }]);
-					const send = vi.fn((input: SendTurnInput) =>
+					const send = vi.fn((input: ResolvedSendTurnInput) =>
 						Effect.gen(function* () {
 							expect(
 								yield* sql`SELECT run_id, state, started_at FROM turns WHERE id = 'cut-off'`,
@@ -386,8 +392,8 @@ describe("ProviderSideEffectReactor", () => {
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* seedSendTurnOutbox(sql);
-				const sent = yield* Deferred.make<SendTurnInput>();
-				const sendTurn = vi.fn((input: SendTurnInput) =>
+				const sent = yield* Deferred.make<ResolvedSendTurnInput>();
+				const sendTurn = vi.fn((input: ResolvedSendTurnInput) =>
 					Deferred.succeed(sent, input).pipe(
 						Effect.andThen(
 							Effect.callback<void>((resume) => {
@@ -599,7 +605,7 @@ describe("ProviderSideEffectReactor", () => {
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			yield* seedSendTurnOutbox(sql);
-			const dispatched = yield* Deferred.make<SendTurnInput>();
+			const dispatched = yield* Deferred.make<ResolvedSendTurnInput>();
 			const acknowledged = yield* Deferred.make<void>();
 			const reactor = yield* makeReactor({
 				registry: new ProviderRegistry([
@@ -932,7 +938,7 @@ describe("ProviderSideEffectReactor", () => {
 			});
 			yield* sql`UPDATE provider_command_outbox SET status = 'retryable_failed',
 				attempt_count = 1, next_attempt_at = 1000 WHERE command_id = 'first'`;
-			const sendTurn = vi.fn((_input: SendTurnInput) =>
+			const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
 			const reactor = yield* makeReactor({
@@ -971,7 +977,7 @@ describe("ProviderSideEffectReactor", () => {
 					folderSource: "account",
 				}),
 			});
-			const sendTurn = vi.fn((_input: SendTurnInput) =>
+			const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
 			const accountDirectory = makeAccountDirectory(
@@ -1012,7 +1018,7 @@ describe("ProviderSideEffectReactor", () => {
 	it.effect("executes committed side effects once after commit", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			const sendTurn = vi.fn((_input: SendTurnInput) =>
+			const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
 			const getNativeSession = vi.fn((_sessionId: string) =>
@@ -1083,7 +1089,7 @@ describe("ProviderSideEffectReactor", () => {
 						},
 					],
 				};
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				yield* seedSendTurnOutbox(sql, { providerId: "work-claude" });
@@ -1148,7 +1154,7 @@ describe("ProviderSideEffectReactor", () => {
 						resumeSessionId: "legacy-work-sdk-session",
 						claudeConfigDir: "/accounts/work",
 					})})) WHERE command_id = 'cmd-1'`;
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				const reactor = yield* makeReactor({
@@ -1212,7 +1218,7 @@ describe("ProviderSideEffectReactor", () => {
 			const ingest = vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1));
 			const sendTurn = vi.fn(
 				(
-					input: SendTurnInput,
+					input: ResolvedSendTurnInput,
 				): Effect.Effect<TurnResult, ProviderInstanceFailure> =>
 					input.eventSink.push(runtimeEvent).pipe(
 						Effect.as(completedTurn),
@@ -1271,7 +1277,7 @@ describe("ProviderSideEffectReactor", () => {
 			};
 			const sendTurn = vi.fn(
 				(
-					input: SendTurnInput,
+					input: ResolvedSendTurnInput,
 				): Effect.Effect<TurnResult, ProviderInstanceFailure> =>
 					input.eventSink.push(runtimeEvent).pipe(
 						Effect.as(completedTurn),
@@ -1374,7 +1380,7 @@ describe("ProviderSideEffectReactor", () => {
 			yield* seedSendTurnOutbox(sql);
 			yield* sql`UPDATE provider_command_outbox SET status = 'retryable_failed',
 				attempt_count = 1, next_attempt_at = 1000`;
-			const sendTurn = vi.fn((_input: SendTurnInput) =>
+			const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
 			const reactor = yield* makeReactor({
@@ -1408,7 +1414,7 @@ describe("ProviderSideEffectReactor", () => {
 				yield* sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.inputId', command_id)`;
 				yield* sql`UPDATE provider_command_outbox SET status = 'running' WHERE command_id = 'old'`;
 				const release = yield* Deferred.make<void>();
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Deferred.await(release).pipe(Effect.as(completedTurn)),
 				);
 				const reactor = yield* makeReactor({
@@ -1457,7 +1463,7 @@ describe("ProviderSideEffectReactor", () => {
 				yield* seedSendTurnOutbox(sql);
 				const held = yield* Deferred.make<void>();
 				const release = yield* Deferred.make<void>();
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				const reactor = yield* makeReactor({
@@ -1492,7 +1498,7 @@ describe("ProviderSideEffectReactor", () => {
 			yield* sql.unsafe(`CREATE TRIGGER fail_claim BEFORE UPDATE OF status
 				ON provider_command_outbox WHEN NEW.status = 'running'
 				BEGIN SELECT RAISE(FAIL, 'claim failed'); END`);
-			const sendTurn = vi.fn((_input: SendTurnInput) =>
+			const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
 			const reactor = yield* makeReactor({
@@ -1709,7 +1715,7 @@ describe("ProviderSideEffectReactor", () => {
 			let providerCalls = 0;
 			const sendTurn = vi.fn(
 				(
-					_input: SendTurnInput,
+					_input: ResolvedSendTurnInput,
 				): Effect.Effect<TurnResult, ProviderInstanceFailure> =>
 					Effect.suspend(() => {
 						providerCalls += 1;
@@ -1797,7 +1803,7 @@ describe("ProviderSideEffectReactor", () => {
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				yield* seedSendTurnOutbox(sql);
@@ -2041,7 +2047,7 @@ describe("ProviderSideEffectReactor", () => {
 				const sql = yield* SqlClient.SqlClient;
 				const winnerStarted = yield* Deferred.make<void>();
 				const releaseWinner = yield* Deferred.make<void>();
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.gen(function* () {
 						yield* Deferred.succeed(winnerStarted, undefined);
 						yield* Deferred.await(releaseWinner);
@@ -2193,7 +2199,7 @@ describe("ProviderSideEffectReactor", () => {
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				yield* seedSendTurnOutbox(sql, { payloadJson: "{not json" });
@@ -2225,7 +2231,7 @@ describe("ProviderSideEffectReactor", () => {
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				yield* seedSendTurnOutbox(sql, {
@@ -2256,7 +2262,7 @@ describe("ProviderSideEffectReactor", () => {
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const sendTurn = vi.fn((input: SendTurnInput) =>
+				const sendTurn = vi.fn((input: ResolvedSendTurnInput) =>
 					input.eventSink
 						.requestPermission({
 							requestId: "req-1",

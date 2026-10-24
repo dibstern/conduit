@@ -16,12 +16,16 @@ import {
 } from "../../../src/lib/contracts/category-set.js";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import {
+	CountSessionCategories,
 	GetSurfacingFeedback,
 	SetSurfacingMark,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { makeSurfacingFeedback } from "../../../src/lib/domain/relay/Services/surfacing-feedback.js";
+import {
+	makeSurfacingFeedback,
+	readSessionCategoryCounts,
+} from "../../../src/lib/domain/relay/Services/surfacing-feedback.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -352,5 +356,173 @@ it("reads the daemon-wide feedback ledger without starting a project relay", asy
 	} finally {
 		await daemon.dispose();
 		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+// Failure modes: only a loaded page is counted; another session, user, tool or
+// final reply leaks in; marks are ignored; reading retirement previews rewrites
+// raw probabilities or marks and makes restoration lose the original counts.
+it("counts the whole session through daemon RPC without changing its verdicts", async () => {
+	const directory = mkdtempSync(join(tmpdir(), "conduit-category-counts-"));
+	const filename = join(directory, "events.db");
+	const runtime = ManagedRuntime.make(
+		makePersistenceEffectLayer(filename, "test-project"),
+	);
+	const snapshot = Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		return {
+			parts:
+				yield* sql`SELECT id, surfacing_probabilities, version FROM message_parts ORDER BY id`,
+			marks:
+				yield* sql`SELECT part_id, session_id, message_id, level, category, reason, direction, created_at FROM surfacing_marks ORDER BY part_id`,
+		};
+	});
+	let before: Effect.Success<typeof snapshot>;
+	try {
+		before = await runtime.runPromise(
+			Effect.gen(function* () {
+				yield* seed;
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE messages SET created_at = 10000 WHERE id = 'final'`;
+				yield* sql`UPDATE message_parts SET surfacing_probabilities = '{"ask":1}' WHERE id IN ('final-p', 'user-p', 'tool-p')`;
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at) VALUES ('other', 'test-project', 'claude', 'Other session', 'idle', 1, 1)`;
+				yield* sql`INSERT INTO turns (id, session_id, state, requested_at) VALUES ('other-t', 'other', 'completed', 1), ('foreign-t', 'foreign', 'completed', 1)`;
+				yield* sql`UPDATE messages SET turn_id = 'foreign-t' WHERE id = 'fm'`;
+				const verdicts = [
+					...Array.from({ length: 125 }, (_, index) => ({
+						id: `older-${index}`,
+						probabilities: { finding: 0.9 },
+					})),
+					{ id: "mixed", probabilities: { ask: 0.9, finding: 0.8 } },
+					{ id: "to-hidden", probabilities: { ask: 0.9, routine: 0.8 } },
+					{ id: "routine", probabilities: { ask: 0.5, routine: 0.9 } },
+					{ id: "retyped", probabilities: null },
+					{ id: "lowered", probabilities: { finding: 1 } },
+				];
+				yield* sql`INSERT INTO messages ${sql.insert(
+					verdicts.map(({ id }, index) => ({
+						id,
+						session_id: "s",
+						turn_id: "t",
+						role: "assistant",
+						created_at: index + 10,
+						updated_at: index + 10,
+					})),
+				)}`;
+				yield* sql`INSERT INTO message_parts ${sql.insert(
+					verdicts.map(({ id, probabilities }, index) => ({
+						id: `${id}-p`,
+						message_id: id,
+						type: "text",
+						text: "Session message",
+						sort_order: 0,
+						created_at: index + 10,
+						updated_at: index + 10,
+						surfacing_ordinal: index + 2,
+						surfacing_probabilities:
+							probabilities === null ? null : JSON.stringify(probabilities),
+					})),
+				)}`;
+				yield* sql`INSERT INTO messages (id, session_id, turn_id, role, created_at, updated_at) VALUES ('other-m', 'other', 'other-t', 'assistant', 1, 1)`;
+				yield* sql`INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at, surfacing_ordinal, surfacing_probabilities) VALUES ('other-p', 'other-m', 'text', 'Other session', 0, 1, 1, 1, '{"ask":1}')`;
+				const feedback = yield* makeSurfacingFeedback;
+				yield* feedback.set("retyped-p", {
+					level: "key",
+					category: "risk",
+				});
+				yield* feedback.set("lowered-p", { level: "hidden" });
+				const read = yield* ReadQueryEffectTag;
+				const page = yield* read.readSessionTranscriptPage("s", { limit: 50 });
+				expect(page.hasMore).toBe(true);
+				expect(page.messages.some(({ id }) => id === "m")).toBe(false);
+				return yield* snapshot;
+			}),
+		);
+	} finally {
+		await runtime.dispose();
+	}
+	const daemon = ManagedRuntime.make(
+		makeDaemonRpcTestLayer([], undefined, { configDir: directory }),
+	);
+	try {
+		await daemon.runPromise(
+			Effect.gen(function* () {
+				const handlers = yield* DaemonWsRpcHandlersTag;
+				const original = yield* handlers.CountSessionCategories(
+					CountSessionCategories.payloadSchema.make({
+						sessionId: "s",
+						set: DEFAULT_CATEGORY_SET,
+					}),
+				);
+				expect(original).toMatchObject({ ask: 2, finding: 126, risk: 1 });
+				expect(
+					Object.values(original).reduce((sum, count) => sum + count, 0),
+				).toBe(129);
+				const retired = {
+					categories: DEFAULT_CATEGORY_SET.categories.map((category) => ({
+						...category,
+						retired: category.id === "ask",
+					})),
+				};
+				expect(
+					yield* handlers.CountSessionCategories(
+						CountSessionCategories.payloadSchema.make({
+							sessionId: "s",
+							set: retired,
+						}),
+					),
+				).toMatchObject({ ask: 2, finding: 127, risk: 1 });
+				expect(
+					yield* handlers.CountSessionCategories(
+						CountSessionCategories.payloadSchema.make({
+							sessionId: "s",
+							set: DEFAULT_CATEGORY_SET,
+						}),
+					),
+				).toEqual(original);
+			}),
+		);
+	} finally {
+		await daemon.dispose();
+	}
+	const reopened = ManagedRuntime.make(
+		makePersistenceEffectLayer(filename, "test-project"),
+	);
+	try {
+		expect(await reopened.runPromise(snapshot)).toEqual(before);
+	} finally {
+		await reopened.dispose();
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+// Failure mode: pending rewinds hide messages from the transcript while counts
+// still include them, especially after the provider reconciles their ordering.
+it("follows current transcript ordering around a pending rewind", async () => {
+	const runtime = ManagedRuntime.make(
+		makePersistenceEffectLayer(":memory:", "test-project"),
+	);
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				yield* seed;
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`UPDATE messages SET created_at = 3 WHERE id = 'm'`;
+				yield* sql`UPDATE sessions SET pending_rewind_message_id = 'user' WHERE id = 's'`;
+				expect(
+					(yield* readSessionCategoryCounts("s", DEFAULT_CATEGORY_SET))[
+						"finding"
+					],
+				).toBe(0);
+				yield* sql`UPDATE messages SET created_at = 1 WHERE id = 'm'`;
+				expect(
+					(yield* readSessionCategoryCounts("s", DEFAULT_CATEGORY_SET))[
+						"finding"
+					],
+				).toBe(1);
+			}),
+		);
+	} finally {
+		await runtime.dispose();
 	}
 });

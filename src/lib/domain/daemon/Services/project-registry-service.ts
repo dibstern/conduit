@@ -10,7 +10,6 @@
 //
 // Relay lifecycle is delegated to RelayCacheTag.
 
-import { execFileSync } from "node:child_process";
 import {
 	lstatSync,
 	mkdirSync,
@@ -49,14 +48,12 @@ import {
 	WsRpcError,
 } from "../../../contracts/ws-rpc.js";
 import { readProjectFile } from "../../../daemon/project-file.js";
+import { formatErrorDetail } from "../../../errors.js";
 import { readRepositoryIdentity } from "../../../git/repository-identity.js";
-import {
-	daemonSessionGitCache,
-	withCachedProjectGit,
-} from "../../../git/session-git.js";
 import { normalizeProjectTitle } from "../../../handlers/settings.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
+import { withPublishedProjectGit } from "../../../persistence/effect/session-git-publication.js";
 import { SessionRollupProjects } from "../../../persistence/effect/session-rollup-projects.js";
 import {
 	refreshCrossProjectSidebar,
@@ -89,10 +86,7 @@ import {
 } from "../../relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { isConduitWorktreePath } from "../Layers/worktree-layer.js";
-import {
-	ConfigPersistenceTag,
-	requestConfigSave,
-} from "./config-persistence-service.js";
+import { requestConfigSave } from "./config-persistence-service.js";
 import {
 	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
@@ -106,7 +100,11 @@ import {
 	markProjectUnavailable,
 	transitionProjectUnavailable,
 } from "./daemon-store-availability.js";
+import { OwnerScopes } from "./owner-scopes.js";
+import { ReadRequest } from "./read-request.js";
 import { RelayCacheTag } from "./relay-cache.js";
+import { SessionGit } from "./session-git.js";
+import { Subprocess } from "./subprocess.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
 
@@ -390,44 +388,17 @@ export const allProjects = Effect.gen(function* () {
 
 export const projectInfos = Effect.gen(function* () {
 	const unavailable = yield* DaemonStoreAvailability;
-	const ref = yield* ProjectRegistryTag;
 	const projects = yield* allProjects;
-	// Cold projects need branches too. Share the relay cache and its refresh interval.
-	yield* Effect.forEach(
-		[...new Set(projects.flatMap(({ folders }) => folders))].filter((folder) =>
-			daemonSessionGitCache.isStale(folder),
-		),
-		(folder) => Effect.tryPromise(() => daemonSessionGitCache.refresh(folder)),
-		{ concurrency: 4, discard: true },
-	);
-	for (const project of projects) {
-		if (project.repositoryIdentities !== undefined) continue;
-		const repositoryIdentities = yield* deriveRepositoryIdentities(
-			project.folders,
-		);
-		const changed = yield* Ref.modify(ref, (state) => {
-			const current = HashMap.get(state, project.slug);
-			if (
-				Option.isNone(current) ||
-				current.value.project.folders !== project.folders ||
-				current.value.project.repositoryIdentities !== undefined
-			)
-				return [false, state] as const;
-			return [
-				true,
-				HashMap.set(state, project.slug, {
-					...current.value,
-					project: { ...current.value.project, repositoryIdentities },
-				}),
-			] as const;
-		});
-		if (changed) {
-			const persistence = yield* Effect.serviceOption(ConfigPersistenceTag);
-			if (Option.isSome(persistence)) yield* persistence.value.requestSave;
-		}
+	const git = yield* Effect.serviceOption(SessionGit);
+	if (Option.isSome(git)) {
+		yield* Effect.forEach(
+			[...new Set(projects.flatMap(({ folders }) => folders))],
+			(directory) => git.value.invalidate({ directory }),
+			{ discard: true },
+		).pipe(Effect.provideService(ReadRequest, "GetProjects"));
 	}
-	return withCachedProjectGit(
-		(yield* allProjects).map((project) => {
+	return yield* withPublishedProjectGit(
+		projects.map((project) => {
 			const unavailableReason = unavailable.get(project.slug);
 			return {
 				slug: project.slug,
@@ -649,6 +620,16 @@ export const remove = (slug: string) =>
 				if (Option.isNone(removed)) return;
 
 				yield* Effect.gen(function* () {
+					const owners = yield* Effect.serviceOption(OwnerScopes);
+					if (Option.isSome(owners))
+						yield* owners.value
+							.close({ kind: "project", projectId: slug }, "remove")
+							.pipe(
+								Effect.mapError(
+									(cause) =>
+										new WsRpcError({ message: formatErrorDetail(cause) }),
+								),
+							);
 					// Relay disposal only detaches; removal ends every registered runner afterwards.
 					yield* relayCache.invalidate(slug);
 					const overrides = yield* Effect.serviceOption(OverridesStateTag);
@@ -1218,29 +1199,40 @@ export const saveProject = (input: SaveProjectInput) =>
 								}),
 						});
 						if (folder.create.gitInit) {
-							yield* Effect.try({
-								try: () =>
-									execFileSync("git", ["init"], {
-										cwd: folder.path,
-										env: {
-											...process.env,
-											GIT_DIR: undefined,
-											GIT_INDEX_FILE: undefined,
-										},
-										stdio: "pipe",
-										timeout: 30_000,
-									}),
-								catch: (cause) =>
-									new ProjectSaveRejected({
-										issues: [
-											{
-												kind: "git-init-failed",
-												path: folder.path,
-												message: formatRelayFailure(cause),
-											},
-										],
-									}),
-							});
+							const owner = yield* Subprocess;
+							yield* owner
+								.run("git", ["init"], {
+									cwd: folder.path,
+									env: {
+										...process.env,
+										GIT_DIR: undefined,
+										GIT_INDEX_FILE: undefined,
+									},
+									timeoutMs: 30_000,
+								})
+								.pipe(
+									Effect.flatMap((result) =>
+										result.exitCode === 0
+											? Effect.void
+											: Effect.fail(
+													new Error(
+														result.stderr || `git exited ${result.exitCode}`,
+													),
+												),
+									),
+									Effect.mapError(
+										(cause) =>
+											new ProjectSaveRejected({
+												issues: [
+													{
+														kind: "git-init-failed",
+														path: folder.path,
+														message: formatRelayFailure(cause),
+													},
+												],
+											}),
+									),
+								);
 						}
 					}
 				}).pipe(

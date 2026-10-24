@@ -7,6 +7,7 @@ import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider
 import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail, OpenCodeApiError } from "../../../errors.js";
 import type { Message, SessionStatus } from "../../../instance/sdk-types.js";
+import { makeAttachmentStore } from "../../../persistence/attachment-store.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import {
@@ -20,6 +21,7 @@ import { createEventId } from "../../../persistence/events.js";
 import {
 	completedCompactionEvent,
 	isSettled,
+	openCodeAttachmentSource,
 	snapshotPayload,
 	synthesizeSnapshotEvent,
 } from "../../../provider/opencode/opencode-history-backfill.js";
@@ -767,7 +769,29 @@ export class EffectOpenCodeRuntimeIngress
 					.map(({ id }) => id),
 			);
 			const stored = new Map(projected.map((row) => [row.id, row]));
-			const settled = rest.filter(isSettled);
+			const attachments = yield* this.withSql(makeAttachmentStore);
+			const settled = yield* Effect.forEach(rest.filter(isSettled), (message) =>
+				Effect.map(
+					Effect.forEach(message.parts ?? [], (part) => {
+						if (part.type !== "file") return Effect.succeed(part);
+						const { url, source: providerSource, ...fields } = part;
+						return Effect.map(
+							openCodeAttachmentSource(
+								{ url, source: providerSource },
+								attachments,
+							),
+							(source) => ({
+								...fields,
+								...(source.attachmentHash !== undefined
+									? { mime: source.mime }
+									: {}),
+								source,
+							}),
+						);
+					}),
+					(parts): Message => ({ ...message, parts }),
+				),
+			);
 			const digests = new Map(
 				settled.map((message) => [message.id, snapshotPayload(message).digest]),
 			);
@@ -1494,6 +1518,27 @@ export class EffectOpenCodeRuntimeIngress
 				return { ok: false, reason: "no-session" } as const;
 			}
 			const translation = this.translator.forkSession(sessionId);
+			let normalizedEvent = event;
+			if (isPartUpdatedEvent(event) && event.properties.part?.type === "file") {
+				const { url, source: providerSource, ...part } = event.properties.part;
+				const source = yield* openCodeAttachmentSource(
+					{ url, source: providerSource },
+					yield* this.withSql(makeAttachmentStore),
+				);
+				normalizedEvent = {
+					...event,
+					properties: {
+						...event.properties,
+						part: {
+							...part,
+							...(source.attachmentHash !== undefined
+								? { mime: source.mime }
+								: {}),
+							source,
+						},
+					},
+				};
+			}
 			// Reconnect clears announcement state, not a native echo's recorded
 			// input. A repeated marker must never consume a new summarize bridge.
 			const compactionMessageId =
@@ -1509,7 +1554,11 @@ export class EffectOpenCodeRuntimeIngress
 				? null
 				: yield* Effect.try({
 						try: () =>
-							this.translator.translateInto(event, sessionId, translation),
+							this.translator.translateInto(
+								normalizedEvent,
+								sessionId,
+								translation,
+							),
 						catch: (cause) => cause,
 					});
 

@@ -720,7 +720,11 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			);
 			if (match[3] === "can")
 				await expect(row).not.toHaveAttribute("data-disabled");
-			else await expect(row).toHaveAttribute("data-disabled");
+			else {
+				await expect(row).toHaveAttribute("data-disabled");
+				await expect(row).toHaveCSS("opacity", "0.5");
+				await expect(row.getByTestId("account-logo")).toBeVisible();
+			}
 		},
 	},
 	{
@@ -787,13 +791,31 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert an account picker badge colour",
+		match: /^the account picker shows (\S+) with a (blue|green|pink) badge$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.getByTestId("account-switch-picker")
+					.locator(`[data-testid="account-logo"][data-account="${match[1]}"]`)
+					.getByTestId("harness-logo-badge"),
+			).toHaveCSS(
+				"background-color",
+				{
+					blue: "rgb(90, 169, 245)",
+					green: "rgb(62, 207, 142)",
+					pink: "rgb(244, 105, 196)",
+				}[match[2] ?? ""] ?? "",
+			);
+		},
+	},
+	{
 		name: "assert an account dot colour",
 		match:
-			/^the (account picker|handoff dialog|transcript divider) shows (\S+) with a (blue|green|pink) dot$/,
+			/^the (handoff dialog|transcript divider) shows (\S+) with a (blue|green|pink) dot$/,
 		run: async ({ world, match }) => {
 			const region = world.page.getByTestId(
 				{
-					"account picker": "account-switch-picker",
 					"handoff dialog": "handoff-dialog",
 					"transcript divider": "transcript-divider",
 				}[match[1] ?? ""] ?? "",

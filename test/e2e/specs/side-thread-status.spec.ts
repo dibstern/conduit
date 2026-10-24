@@ -167,7 +167,7 @@ test.describe("OpenCode Side Thread status", () => {
 	test.use({ recording: "side-thread-status" });
 	test.describe.configure({ timeout: 90_000 });
 
-	test("an answering Side Thread leaves its parent idle in the sidebar, back bar and session-open response", async ({
+	test("an answering Side Thread leaves its parent idle in the sidebar, breadcrumb and session-open response", async ({
 		page,
 		harness,
 		mockServer,
@@ -214,7 +214,7 @@ test.describe("OpenCode Side Thread status", () => {
 				"side-working-parent-idle",
 			);
 
-			await chat.subagentBackBtn.click();
+			await chat.sideThreadParentCrumb.click();
 			await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
 			// The parent's shell row is its only busy signal (conduit-test-ni8.35):
 			// opening it must not show a running turn while the side thread works.
@@ -252,7 +252,7 @@ test.describe("OpenCode Side Thread status", () => {
 		}
 	});
 
-	test("the back bar follows its working parent through completion while viewing an existing Side Thread", async ({
+	test("the breadcrumb follows its working parent through completion while viewing an existing Side Thread", async ({
 		page,
 		harness,
 		mockServer,
@@ -267,7 +267,7 @@ test.describe("OpenCode Side Thread status", () => {
 		const sideId = sessionId(page);
 		await expect(chat.assistantMessages.last()).toContainText(/alpha/i);
 		await chat.waitForStreamingComplete();
-		await chat.subagentBackBtn.click();
+		await chat.sideThreadParentCrumb.click();
 		await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
 		const release = mockServer.holdNextPrompt();
 		try {

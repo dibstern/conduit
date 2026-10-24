@@ -17,6 +17,7 @@ import {
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import * as Failure from "../effect/failure-classification.js";
 import { createLogger } from "../logger.js";
+import { AttachmentMissing } from "../persistence/attachment-store.js";
 import { ClaudeEventPersistEffectError } from "../persistence/effect/claude-event-persist-effect.js";
 import { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerError } from "../persistence/effect/projection-runner-effect.js";
@@ -665,6 +666,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 
 export function toEventSinkError(cause: unknown): EventSinkError {
 	if (
+		cause instanceof AttachmentMissing ||
 		cause instanceof PersistenceError ||
 		cause instanceof EventStoreError ||
 		cause instanceof ClaudeEventPersistEffectError ||

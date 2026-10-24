@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { closeSettings } from "../../../test/e2e/helpers/settings.js";
 import { DESKTOP_VIEWPORT, PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
@@ -8,6 +8,7 @@ import {
 	openSessionRoute,
 	requireRpcControl,
 } from "./shared.js";
+import { themeColour } from "./usageFooterMeter.js";
 
 const heldAccountSwitches = new WeakMap<Page, () => void>();
 
@@ -247,23 +248,85 @@ export const harnessHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert harness badge matches AccountDot",
+		name: "assert harness badge has the account identity colour",
 		match:
-			/^the (composer|picker) harness badge for (\S+) matches its AccountDot colour$/,
+			/^the (composer|picker) harness badge for (\S+) has its account identity colour$/,
 		run: async ({ world, match }) => {
 			const account = match[2] ?? "";
-			const dot = world.page
-				.locator(`[data-testid="account-dot"][data-account="${account}"]`)
-				.first();
-			await expect(dot).toBeVisible();
-			const colour = await dot.evaluate(
-				(element) => getComputedStyle(element).backgroundColor,
+			const instance = mockInstances
+				.get(world.page)
+				?.find((item) => item["id"] === account);
+			expect(instance, `Configured account ${account}`).toBeDefined();
+			const slot = instance?.["colorSlot"];
+			const colour = await themeColour(
+				world.page,
+				[
+					"--color-project-5",
+					"--color-fill-green",
+					"--color-project-4",
+					"--color-project-1",
+					"--color-project-3",
+					"--color-project-2",
+				][typeof slot === "number" ? slot : 0] ?? "--color-project-5",
 			);
 			await expect(
 				harnessLogo(world.page, match[1] ?? "", account).getByTestId(
 					"harness-logo-badge",
 				),
 			).toHaveCSS("background-color", colour);
+		},
+	},
+	{
+		name: "assert account logo on a composer surface",
+		match:
+			/^the (picker card|account picker|send menu|send button) account (\S+) shows a (\S+) logo (without a badge|with badge (\S))$/,
+		run: async ({ world, match }) => {
+			const account = match[2] ?? "";
+			const regions: Record<string, Locator> = {
+				"picker card": world.page.getByTestId(`picker-account-${account}`),
+				"account picker": world.page.getByTestId("account-switch-picker"),
+				"send menu": world.page.getByTestId("composer-send-menu"),
+				"send button": world.page.locator("#send"),
+			};
+			const region = regions[match[1] ?? ""];
+			if (!region) throw new Error(`Unknown logo surface: ${match[1]}`);
+			const logo = region.locator(
+				`[data-testid="account-logo"][data-account="${account}"]`,
+			);
+			await expect(logo).toBeVisible();
+			await expect(logo).toHaveAttribute("data-driver", match[3] ?? "");
+			await expect(logo).toHaveAttribute("aria-hidden", "true");
+			await expect(logo).toHaveCSS("width", "15px");
+			await expect(logo).toHaveCSS("height", "15px");
+			const badge = logo.getByTestId("harness-logo-badge");
+			if (match[5]) {
+				await expect(badge).toBeVisible();
+				await expect(badge).toHaveText(match[5]);
+				await expect(badge).toHaveAttribute("data-state", "idle");
+			} else await expect(badge).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert account menu names align",
+		match: /^the (account picker|send menu) names (.+) are left-aligned$/,
+		run: async ({ world, match }) => {
+			const region = world.page.getByTestId(
+				match[1] === "account picker"
+					? "account-switch-picker"
+					: "composer-send-menu",
+			);
+			const positions = await Promise.all(
+				(match[2] ?? "").split(", ").map(async (text) => {
+					const name = region.getByText(text, { exact: true });
+					await expect(name).toBeVisible();
+					const box = await name.boundingBox();
+					if (!box) throw new Error(`Missing account name: ${text}`);
+					return box.x;
+				}),
+			);
+			expect(
+				Math.max(...positions) - Math.min(...positions),
+			).toBeLessThanOrEqual(0.5);
 		},
 	},
 	{

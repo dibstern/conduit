@@ -1,0 +1,412 @@
+{
+	"schemaVersion": 1,
+	"bead": "conduit-test-g43i.1",
+	"budgets": {
+		"idleMs": 30000,
+		"idleSpawnsPerMinute": 6,
+		"loopP99Ms": 50,
+		"slowRpcMs": 500,
+		"externalCommitVisibleMs": 1000,
+		"externalCommitTimeoutMs": 10000,
+		"churnMs": 16000,
+		"churnEveryMs": 500,
+		"tierIntervalMs": {
+			"Running": 15000,
+			"Viewed": 5000,
+			"Listed": 30000
+		},
+		"listReadSpawns": 0
+	},
+	"environment": {
+		"node": "v26.10.0",
+		"platform": "darwin",
+		"arch": "arm64"
+	},
+	"instrumentation": "daemon child_process preload; git status counts one read",
+	"revision": "b9613e7e1690f8b60e8d212f5f793b75c9e1b093",
+	"fixture": {
+		"sessions": 30,
+		"coldSessions": 3,
+		"missingSession": "budget-26"
+	},
+	"idle": {
+		"durationMs": 30047,
+		"spawns": 328,
+		"spawnsPerMinute": 655,
+		"spawnsPerMinuteByCommand": {
+			"git for-each-ref": 162,
+			"git merge-base": 156,
+			"git rev-parse": 170,
+			"git status": 168
+		},
+		"commands": {
+			"git for-each-ref": 81,
+			"git merge-base": 78,
+			"git rev-parse": 85,
+			"git status": 84
+		},
+		"gitReads": {
+			"<fixture>/budget-00": 3,
+			"<fixture>/budget-01": 3,
+			"<fixture>/budget-02": 3,
+			"<fixture>/budget-03": 3,
+			"<fixture>/budget-04": 3,
+			"<fixture>/budget-05": 3,
+			"<fixture>/budget-06": 3,
+			"<fixture>/budget-07": 3,
+			"<fixture>/budget-08": 3,
+			"<fixture>/budget-09": 3,
+			"<fixture>/budget-10": 3,
+			"<fixture>/budget-11": 3,
+			"<fixture>/budget-12": 3,
+			"<fixture>/budget-13": 3,
+			"<fixture>/budget-14": 3,
+			"<fixture>/budget-15": 3,
+			"<fixture>/budget-16": 3,
+			"<fixture>/budget-17": 3,
+			"<fixture>/budget-18": 3,
+			"<fixture>/budget-19": 3,
+			"<fixture>/budget-20": 3,
+			"<fixture>/budget-21": 3,
+			"<fixture>/budget-22": 3,
+			"<fixture>/budget-23": 3,
+			"<fixture>/budget-24": 3,
+			"<fixture>/budget-25": 3,
+			"<fixture>/budget-26": 3,
+			"<fixture>/process-test": 3
+		},
+		"loopDelayMs": {
+			"samples": 2729,
+			"p50": 10.854,
+			"p99": 18.203,
+			"max": 71.827
+		},
+		"slowRpcCount": 0
+	},
+	"externalCommit": {
+		"durationMs": 5054,
+		"spawns": 110,
+		"spawnsPerMinute": 1306,
+		"spawnsPerMinuteByCommand": {
+			"git for-each-ref": 321,
+			"git merge-base": 309,
+			"git rev-parse": 332,
+			"git status": 344
+		},
+		"commands": {
+			"git for-each-ref": 27,
+			"git merge-base": 26,
+			"git rev-parse": 28,
+			"git status": 29
+		},
+		"gitReads": {
+			"<fixture>/budget-00": 1,
+			"<fixture>/budget-01": 1,
+			"<fixture>/budget-02": 1,
+			"<fixture>/budget-03": 1,
+			"<fixture>/budget-04": 1,
+			"<fixture>/budget-05": 1,
+			"<fixture>/budget-06": 1,
+			"<fixture>/budget-07": 1,
+			"<fixture>/budget-08": 1,
+			"<fixture>/budget-09": 1,
+			"<fixture>/budget-10": 1,
+			"<fixture>/budget-11": 1,
+			"<fixture>/budget-12": 1,
+			"<fixture>/budget-13": 1,
+			"<fixture>/budget-14": 1,
+			"<fixture>/budget-15": 1,
+			"<fixture>/budget-16": 1,
+			"<fixture>/budget-17": 1,
+			"<fixture>/budget-18": 1,
+			"<fixture>/budget-19": 1,
+			"<fixture>/budget-20": 1,
+			"<fixture>/budget-21": 1,
+			"<fixture>/budget-22": 1,
+			"<fixture>/budget-23": 1,
+			"<fixture>/budget-24": 1,
+			"<fixture>/budget-25": 1,
+			"<fixture>/budget-26": 1,
+			"<fixture>/cold-project": 1,
+			"<fixture>/process-test": 1
+		},
+		"loopDelayMs": {
+			"samples": 470,
+			"p50": 10.764,
+			"p99": 13.074,
+			"max": 18.514
+		},
+		"slowRpcCount": 0,
+		"commitMs": 20,
+		"visibleMs": 5024
+	},
+	"churn": {
+		"durationMs": 16676,
+		"spawns": 152,
+		"spawnsPerMinute": 547,
+		"spawnsPerMinuteByCommand": {
+			"git for-each-ref": 137,
+			"git merge-base": 119,
+			"git rev-parse": 144,
+			"git status": 148
+		},
+		"commands": {
+			"git for-each-ref": 38,
+			"git merge-base": 33,
+			"git rev-parse": 40,
+			"git status": 41
+		},
+		"gitReads": {
+			"<fixture>/budget-00": 2,
+			"<fixture>/budget-01": 1,
+			"<fixture>/budget-02": 1,
+			"<fixture>/budget-03": 1,
+			"<fixture>/budget-04": 1,
+			"<fixture>/budget-05": 1,
+			"<fixture>/budget-06": 1,
+			"<fixture>/budget-07": 1,
+			"<fixture>/budget-08": 1,
+			"<fixture>/budget-09": 1,
+			"<fixture>/budget-10": 1,
+			"<fixture>/budget-11": 1,
+			"<fixture>/budget-12": 1,
+			"<fixture>/budget-13": 1,
+			"<fixture>/budget-14": 1,
+			"<fixture>/budget-15": 1,
+			"<fixture>/budget-16": 1,
+			"<fixture>/budget-17": 2,
+			"<fixture>/budget-18": 2,
+			"<fixture>/budget-19": 2,
+			"<fixture>/budget-20": 2,
+			"<fixture>/budget-21": 2,
+			"<fixture>/budget-22": 2,
+			"<fixture>/budget-23": 2,
+			"<fixture>/budget-24": 2,
+			"<fixture>/budget-25": 2,
+			"<fixture>/budget-26": 2,
+			"<fixture>/cold-project": 1,
+			"<fixture>/process-test": 2
+		},
+		"loopDelayMs": {
+			"samples": 1362,
+			"p50": 10.846,
+			"p99": 45.58,
+			"max": 236.716
+		},
+		"slowRpcCount": 0,
+		"worktrees": [
+			{
+				"id": "budget-00",
+				"tier": "Running",
+				"intervalMs": 15000,
+				"reads": 2,
+				"maxReads": 2,
+				"rounds": 23
+			},
+			{
+				"id": "budget-01",
+				"tier": "Viewed",
+				"intervalMs": 5000,
+				"reads": 1,
+				"maxReads": 4,
+				"rounds": 23
+			},
+			{
+				"id": "budget-02",
+				"tier": "Listed",
+				"intervalMs": 30000,
+				"reads": 1,
+				"maxReads": 1,
+				"rounds": 23
+			},
+			{
+				"id": "budget-03",
+				"tier": "Listed",
+				"intervalMs": 30000,
+				"reads": 1,
+				"maxReads": 1,
+				"rounds": 23
+			},
+			{
+				"id": "budget-04",
+				"tier": "Listed",
+				"intervalMs": 30000,
+				"reads": 1,
+				"maxReads": 1,
+				"rounds": 23
+			},
+			{
+				"id": "budget-05",
+				"tier": "Listed",
+				"intervalMs": 30000,
+				"reads": 1,
+				"maxReads": 1,
+				"rounds": 23
+			},
+			{
+				"id": "budget-06",
+				"tier": "Listed",
+				"intervalMs": 30000,
+				"reads": 1,
+				"maxReads": 1,
+				"rounds": 23
+			},
+			{
+				"id": "budget-07",
+				"tier": "Listed",
+				"intervalMs": 30000,
+				"reads": 1,
+				"maxReads": 1,
+				"rounds": 23
+			},
+			{
+				"id": "budget-08",
+				"tier": "Listed",
+				"intervalMs": 30000,
+				"reads": 1,
+				"maxReads": 1,
+				"rounds": 23
+			},
+			{
+				"id": "budget-09",
+				"tier": "Listed",
+				"intervalMs": 30000,
+				"reads": 1,
+				"maxReads": 1,
+				"rounds": 23
+			}
+		]
+	},
+	"listReads": [
+		{
+			"kind": "projects",
+			"durationMs": 484,
+			"spawns": 28,
+			"spawnsPerMinute": 3473,
+			"spawnsPerMinuteByCommand": {
+				"git for-each-ref": 1116,
+				"git merge-base": 496,
+				"git rev-parse": 992,
+				"git status": 868
+			},
+			"commands": {
+				"git for-each-ref": 9,
+				"git merge-base": 4,
+				"git rev-parse": 8,
+				"git status": 7
+			},
+			"gitReads": {
+				"<fixture>/budget-10": 1,
+				"<fixture>/budget-11": 1,
+				"<fixture>/budget-12": 1,
+				"<fixture>/budget-13": 1,
+				"<fixture>/budget-14": 1,
+				"<fixture>/budget-15": 1,
+				"<fixture>/cold-project": 1
+			},
+			"loopDelayMs": {
+				"samples": 13,
+				"p50": 26.853,
+				"p99": 87.884,
+				"max": 87.884
+			},
+			"slowRpcCount": 0
+		},
+		{
+			"kind": "warm-sessions",
+			"durationMs": 1253,
+			"spawns": 38,
+			"spawnsPerMinute": 1820,
+			"spawnsPerMinuteByCommand": {
+				"git for-each-ref": 431,
+				"git merge-base": 527,
+				"git rev-parse": 479,
+				"git status": 383
+			},
+			"commands": {
+				"git for-each-ref": 9,
+				"git merge-base": 11,
+				"git rev-parse": 10,
+				"git status": 8
+			},
+			"gitReads": {
+				"<fixture>/budget-01": 1,
+				"<fixture>/budget-02": 1,
+				"<fixture>/budget-03": 1,
+				"<fixture>/budget-04": 1,
+				"<fixture>/budget-05": 1,
+				"<fixture>/budget-06": 1,
+				"<fixture>/budget-07": 1,
+				"<fixture>/budget-08": 1
+			},
+			"loopDelayMs": {
+				"samples": 33,
+				"p50": 31.441,
+				"p99": 195.428,
+				"max": 195.428
+			},
+			"slowRpcCount": 1
+		},
+		{
+			"kind": "cold-sessions",
+			"durationMs": 262,
+			"spawns": 12,
+			"spawnsPerMinute": 2746,
+			"spawnsPerMinuteByCommand": {
+				"git for-each-ref": 687,
+				"git merge-base": 687,
+				"git rev-parse": 687,
+				"git status": 687
+			},
+			"commands": {
+				"git for-each-ref": 3,
+				"git merge-base": 3,
+				"git rev-parse": 3,
+				"git status": 3
+			},
+			"gitReads": {
+				"<fixture>/budget-27": 1,
+				"<fixture>/budget-28": 1,
+				"<fixture>/budget-29": 1
+			},
+			"loopDelayMs": {
+				"samples": 11,
+				"p50": 24.019,
+				"p99": 38.732,
+				"max": 38.732
+			},
+			"slowRpcCount": 0
+		},
+		{
+			"kind": "missing-worktree",
+			"durationMs": 102,
+			"spawns": 1,
+			"spawnsPerMinute": 588,
+			"spawnsPerMinuteByCommand": {
+				"git rev-parse": 588
+			},
+			"commands": {
+				"git rev-parse": 1
+			},
+			"gitReads": {},
+			"loopDelayMs": {
+				"samples": 7,
+				"p50": 11.264,
+				"p99": 16.859,
+				"max": 16.859
+			},
+			"slowRpcCount": 0
+		}
+	],
+	"failures": [
+		"idle: 655 spawns/min > 6",
+		"external commit: 5023.548125000001ms > 1000ms",
+		"projects: 28 spawns during read",
+		"warm-sessions: 38 spawns during read",
+		"cold-sessions: 12 spawns during read",
+		"missing-worktree: 1 spawns during read"
+	],
+	"cleanup": {
+		"remainingRunnerPids": []
+	}
+}

@@ -1,10 +1,12 @@
 <!--
 	Highlight backdrop for the composer textarea.
 
-	The textarea renders its text transparent (caret only); this mirror sits behind
-	it and paints the same text, styling recognised `/skill` and `$builtin` tokens as soft pills,
-	unknown ones as red underlines, and URLs in the link colour. Both wear `composer-text-metrics`, which is the
-	single definition of the layout that decides where a glyph lands.
+	The textarea paints the text and the caret; this mirror sits behind it and paints
+	only decorations: recognised `/skill` and `$builtin` tokens as soft pills, unknown
+	ones as red underlines, URLs with an accent underline. It never paints a glyph
+	(see `.mirror` below), so caret and text always come from one layout and cannot
+	drift apart. Both wear `composer-text-metrics` so the decorations land under the
+	right words.
 
 	This mirror is the one in flow, so its natural height sizes the composer row and
 	the textarea is stretched over it. That leaves the scroll container above them
@@ -13,8 +15,8 @@
 
 	Segments use a keyed `{#each}`: a token's node is only recreated when the token
 	itself changes, so the recognition shimmer plays exactly once and survives later
-	keystrokes. `dimmed` hides the mirror during IME composition, when the textarea
-	must show its own (pre-commit) text instead.
+	keystrokes. `dimmed` hides the decorations during IME composition, while the
+	textarea holds pre-commit text the mirror has not seen.
 -->
 <script lang="ts">
 	import { tokenizeSkills } from "../../../skill-recognition.js";
@@ -39,11 +41,20 @@
 
 <div
 	aria-hidden="true"
-	class="composer-text-metrics mirror pointer-events-none relative text-text"
+	class="composer-text-metrics mirror pointer-events-none relative"
 	class:opacity-0={dimmed}
 >{#each segments as seg (seg.key)}{#if seg.kind === "reference" && seg.reference}{@const reference = seg.reference}{@const category = "ordinal" in reference ? BUILTIN_CATEGORIES.find(({ id }) => id === reference.builtinCategory) : undefined}<ComposerReferenceToken label={referenceLabel(reference)} colour={categoryColour(category)} ask={"ordinal" in reference && !reference.builtinCategory && reference.category === "Ask"} title={reference.text} onremove={() => onremove?.(seg.start ?? 0)} />{:else if seg.kind === "skill"}<ComposerToken goal={/^[/$]goal$/.test(seg.text)}>{seg.text}</ComposerToken>{:else if seg.kind === "unknown"}<span class="skill-unknown">{seg.text}</span>{:else}{#each splitUrls(seg.text) as part, i}{#if i % 2}<span class="composer-url">{part}</span>{:else}{part}{/if}{/each}{/if}{/each}</div>
 
 <style>
+	/* The invariant that keeps the caret on the text: the mirror never paints a
+	   glyph. Text fill is inherited and wins over any child's `color`, which is
+	   left to drive underlines. iOS lays out text in the textarea that the mirror
+	   never sees (inline predictions, marked text), so painted mirror glyphs can
+	   disagree with the caret no matter how carefully the metrics match. */
+	.mirror {
+		-webkit-text-fill-color: transparent;
+	}
+
 	/* A zero-width space forcing a final line box, which the row's height depends
 	   on: an empty draft would otherwise collapse to its padding, and one ending in
 	   a newline would come up a line short of the textarea. It lives in a pseudo
@@ -53,10 +64,12 @@
 		content: "\200b";
 	}
 
-	/* Colour only: any change to font or spacing moves glyphs out from under the
-	   caret (see composer-text-metrics). */
+	/* Decoration only: any change to font or spacing moves pills off their words
+	   (see composer-text-metrics). */
 	.composer-url {
 		color: var(--color-accent);
+		text-decoration: underline;
+		text-underline-offset: 2px;
 	}
 
 	.skill-unknown {

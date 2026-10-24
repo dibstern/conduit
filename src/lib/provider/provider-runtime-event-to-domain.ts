@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Option, Result, Schema } from "effect";
+import { AttachmentSourceSchema } from "../contracts/attachment-ref.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import {
@@ -365,7 +366,9 @@ export function translateProviderRuntimeEventToDomain(
 				partId,
 				mime: stringField(data["mime"]) ?? "",
 				...(filename != null ? { filename } : {}),
-				url: stringField(data["url"]) ?? "",
+				source: Schema.decodeUnknownSync(AttachmentSourceSchema)(
+					data["source"],
+				),
 			});
 		}
 

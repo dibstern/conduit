@@ -101,7 +101,7 @@ describe("ActivityRow task actions", () => {
 		);
 		expect(openTask).not.toHaveBeenCalled();
 		expect(openSession).not.toHaveBeenCalled();
-		expect(container.querySelector(".tool-result")).toBeNull();
+		expect(container.querySelector(".shell-detail")).toBeNull();
 		expect(container.querySelector(".subagent-link")).toBeNull();
 	});
 

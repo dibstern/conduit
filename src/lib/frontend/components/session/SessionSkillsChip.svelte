@@ -176,6 +176,8 @@
 {#if rows.length > 0}
 	<Menu
 		{presentation}
+		sheetEdge="top"
+		portalTo={presentation === "sheet" ? "#session-bar" : undefined}
 		appearance="final"
 		bind:open
 		onopenchange={(nextOpen) => {

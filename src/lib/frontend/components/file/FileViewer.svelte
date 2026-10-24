@@ -12,7 +12,7 @@
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { loadHighlighter } from "../../utils/load-highlighter.js";
 	import Button from "../ui/Button.svelte";
-	import BlockGrid from "../ui/BlockGrid.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 
 	let {
 		visible = false,
@@ -314,7 +314,7 @@
 			<div bind:this={regionEl} class="flex-1 min-h-0 overflow-auto focus-visible:outline-none" role="region" aria-labelledby="file-viewer-path" tabindex="0">
 				{#if loading}
 					<div class="flex items-center justify-center py-12 text-text-muted text-sm">
-						<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+						<ConduitMark size={32} variant="running" />
 						<span class="ml-2">Loading…</span>
 					</div>
 				{:else if loadError}

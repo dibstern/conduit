@@ -8,7 +8,10 @@ import { MOCK_NOW_MS, type MockMessage } from "../fixtures/mockup-state.js";
 type PendingInput = {
 	inputId: string;
 	state: "queued" | "steering";
-	request: { text: string; images?: string[] };
+	request: {
+		text: string;
+		images?: { attachmentHash: string; mime: string; name?: string }[];
+	};
 	admittedAt: number;
 };
 type DetailItem =
@@ -253,7 +256,14 @@ export function projectLegacyRelayMessage(
 			state: event["state"] === "steering" ? "steering" : "queued",
 			request: {
 				text: event["text"],
-				...(Array.isArray(images) ? { images: images.map(String) } : {}),
+				...(Array.isArray(images)
+					? {
+							images: images.map((image) => ({
+								attachmentHash: String(image.attachmentHash),
+								mime: String(image.mime),
+							})),
+						}
+					: {}),
 			},
 			admittedAt:
 				state.pending.get(event["inputId"])?.admittedAt ?? nextTimestamp(state),

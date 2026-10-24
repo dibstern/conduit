@@ -307,6 +307,9 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 		match: /^I open the composer send menu$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("composer-send-menu-trigger").click();
+			// The viewport-only phone fixture has a mouse; do not leave it hovering a sheet row.
+			const viewport = world.page.viewportSize();
+			if (viewport && viewport.width < 768) await world.page.mouse.move(0, 0);
 			await expect(world.page.getByTestId("composer-send-menu")).toBeVisible();
 			await requireRpcControl(world.page).waitForRequest(
 				(request) => request.tag === "QuotaForAccounts",
@@ -387,7 +390,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 			for (const [index, account] of accounts.entries()) {
 				await expect(rows.nth(index)).toHaveAttribute("data-account", account);
 				await expect(
-					rows.nth(index).getByTestId("account-dot"),
+					rows.nth(index).getByTestId("account-logo"),
 				).toHaveAttribute("data-account", account);
 			}
 		},
@@ -656,7 +659,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 			await expect(button).toHaveAccessibleName(
 				`Send on ${match[1]?.replace(/^Send on /, "")}`,
 			);
-			await expect(button.getByTestId("account-dot")).toHaveAttribute(
+			await expect(button.getByTestId("account-logo")).toHaveAttribute(
 				"data-account",
 				match[2] ?? "",
 			);

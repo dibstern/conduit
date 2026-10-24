@@ -6,11 +6,12 @@
 		type DropdownMenuPortalProps,
 	} from "bits-ui";
 	import { setContext, type Snippet } from "svelte";
+	import { fade } from "svelte/transition";
 	import {
 		exemptFromBackgroundInert,
 		registerOpenSurface,
 	} from "./actions/use-background-inert.svelte.js";
-	import { dragToDismiss, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
+	import { dragToDismiss, sheetGlide, sheetPosition, settleMs, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
 	import {
 		FLOATING_MENU_CONTENT_CLASSES,
 		FINAL_MENU_CONTENT_CLASSES,
@@ -33,6 +34,7 @@
 		ariaLabel?: string | undefined;
 		/** MenuItem rows need DropdownMenu's dismissal model; a Modal sheet would require raw rows and a second model. */
 		presentation?: "popover" | "sheet" | undefined;
+		sheetEdge?: "bottom" | "top";
 		appearance?: "default" | "final";
 		side?: MenuSide | undefined;
 		align?: MenuAlign | undefined;
@@ -69,6 +71,7 @@
 		onopenchange,
 		ariaLabel,
 		presentation = "popover",
+		sheetEdge = "bottom",
 		appearance = "default",
 		side,
 		align = FLOATING_POSITIONING_DEFAULTS.align,
@@ -104,6 +107,7 @@
 	let contentNode = $state<HTMLElement | null>(null);
 	let scrimInteractive = $state(false);
 	let scrimFade = $state({ progress: 0, settling: false });
+	const scrimStyle = $derived(sheetScrimStyle(scrimFade));
 	let openingClickDeadline = 0;
 
 	// bits-ui 2.18.1 DropdownMenuTrigger opens on touch pointerup, then its
@@ -168,7 +172,7 @@
 	$effect(() => {
 		if (!open || presentation !== "sheet") {
 			scrimInteractive = false;
-			scrimFade = { progress: 0, settling: false };
+			if (sheetEdge === "bottom" || presentation !== "sheet") scrimFade = { progress: 0, settling: false };
 			return;
 		}
 		// Bits opens on pointerdown and installs outside dismissal after mount.
@@ -199,6 +203,21 @@
 		});
 	}
 
+	/**
+	 * The second mount first unmounts the first, which runs close-auto-focus
+	 * while the menu is still open and moves focus from the item to the
+	 * trigger; a key pressed then toggles the menu shut instead of choosing
+	 * the item. The move must still happen, since the next mount remembers
+	 * the trigger as where a real close returns focus, so the item takes
+	 * focus back in a microtask, before any key can arrive.
+	 */
+	function keepItemFocusOnRemount(event: Event) {
+		const focused = contentNode?.ownerDocument.activeElement;
+		if (open && focused instanceof HTMLElement && contentNode?.contains(focused))
+			queueMicrotask(() => { if (open && focused.isConnected) focused.focus(); });
+		rest.onCloseAutoFocus?.(event);
+	}
+
 	const portalProps: DropdownMenuPortalProps = $derived.by(() => {
 		const target = dialogTarget?.() ?? portalTo;
 		return target === undefined ? {} : { to: target };
@@ -210,6 +229,7 @@
 		...rest,
 		id: contentId,
 		onOpenAutoFocus: focusContentOnce,
+		onCloseAutoFocus: keepItemFocusOnRemount,
 		...(side === undefined ? {} : { side }),
 		align,
 		sideOffset,
@@ -231,11 +251,12 @@
 		...rest,
 		id: contentId,
 		onOpenAutoFocus: focusContentOnce,
+		onCloseAutoFocus: keepItemFocusOnRemount,
 		preventScroll: false,
 		loop: true,
 		preventOverflowTextSelection: false,
 		...(ariaLabel === undefined ? {} : { "aria-label": ariaLabel }),
-		class: "fixed inset-x-0 bottom-0 z-[var(--z-sheet)] w-full focus-visible:outline-hidden",
+		class: `${sheetEdge === "top" ? "relative pointer-events-auto" : "fixed inset-x-0 bottom-0"} z-[var(--z-sheet)] w-full focus-visible:outline-hidden`,
 	});
 </script>
 
@@ -248,19 +269,20 @@
 
 	<DropdownMenu.Portal {...portalProps}>
 		{#if presentation === "sheet"}
-			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:pointer-events-none={!scrimInteractive} style={sheetScrimStyle(scrimFade)} use:exemptFromBackgroundInert></div>{/if}
+			<div class={sheetEdge === "top" ? "pointer-events-none fixed inset-x-0 z-[var(--z-sheet)] overflow-hidden" : "contents"} style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} use:sheetPosition={sheetEdge}>
+			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} class:pointer-events-none={!scrimInteractive} class:pointer-events-auto={scrimInteractive} style:opacity={scrimStyle.opacity} style:transition={scrimStyle.transition} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:exemptFromBackgroundInert></div>{/if}
 			<DropdownMenu.ContentStatic {...sheetContentProps}>
 				{#snippet child({ props })}
 					<!-- Keep the bits-ui focus target on the menu shell. SheetChrome gives the
 					     scrolling body a keyboard target too; Bits intercepts Tab inside the menu.
 					     Svelte cannot see role="menu" through the spread. -->
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-					<div {...props} role={footer ? "dialog" : "menu"} aria-orientation={footer ? undefined : "vertical"} id={contentId} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} onkeydowncapture={(event: KeyboardEvent) => {
+					<div {...props} role={footer ? "dialog" : "menu"} aria-orientation={footer ? undefined : "vertical"} id={contentId} data-sheet-edge={sheetEdge} tabindex={0} bind:this={contentNode} onclickcapture={swallowOpeningClick} onkeydowncapture={(event: KeyboardEvent) => {
 						// Bits dismisses menus on Tab; dialog footers need native button traversal.
 						if (footer && event.key === "Tab") event.stopPropagation();
 						(props["onkeydowncapture"] as ((event: KeyboardEvent) => void) | undefined)?.(event);
-					}} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
-						<SheetChrome {footer} bottomPadding={sheetBottomPadding} class={className} menuBody>
+					}} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ edge: sheetEdge, ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }} transition:sheetGlide|global={{ edge: sheetEdge, onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
+						<SheetChrome edge={sheetEdge} maxHeight={sheetEdge === "top" ? "max(0px, calc(100dvh - var(--sheet-top, 0px) - 64px))" : "90dvh"} {footer} bottomPadding={sheetBottomPadding} class={className} menuBody>
 							{#if footer}
 								<!-- Menu commands and footer switches have different required ARIA parents. -->
 								<div role="menu" aria-label={ariaLabel} aria-orientation="vertical" data-state={open ? "open" : "closed"}>
@@ -273,6 +295,7 @@
 					</div>
 				{/snippet}
 			</DropdownMenu.ContentStatic>
+			</div>
 		{:else}
 		<DropdownMenu.Content {...contentProps}>
 			{#snippet child({ props, wrapperProps })}

@@ -9,7 +9,9 @@ const root = "src/lib/domain/daemon";
 const legacyCalls = new Map([
 	[`${root}/Layers/opencode-instances-reconcile.ts:setTimeout`, 1],
 	[`${root}/Layers/provider-adapters-layer.ts:Effect.runForkWith`, 1],
-	[`${root}/Layers/worktree-layer.ts:setTimeout`, 1],
+	// The subprocess owner now holds worktree timeouts and SIGKILL escalation;
+	// both timers are cleared when its child closes or its scope is released.
+	[`${root}/Services/subprocess.ts:setTimeout`, 2],
 	[`${root}/Services/local-trace-artifact.ts:setTimeout`, 1],
 	[`${root}/Services/turn-timeline.ts:setTimeout`, 1],
 ]);

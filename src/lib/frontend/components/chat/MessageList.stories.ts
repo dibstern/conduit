@@ -72,6 +72,20 @@ type Story = StoryObj<typeof meta>;
 
 export const Empty: Story = { beforeEach: () => seed([]) };
 
+export const LoadingHistory: Story = {
+	beforeEach: () => {
+		seed([mockUserMessage]);
+		getOrCreateSessionMessages(testId).historyLoading = true;
+	},
+	play: async ({ canvasElement }) => {
+		const loader = canvasElement.querySelector(".history-loading");
+		await expect(loader).toHaveTextContent("Loading history...");
+		await expect(
+			loader?.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
+	},
+};
+
 export const SingleUserMessage: Story = {
 	beforeEach: () => seed([mockUserMessage]),
 };
@@ -126,6 +140,11 @@ export const BusyEmpty: Story = {
 		await expect(canvas.getByTestId("turn-live-elapsed")).toHaveTextContent(
 			"(no prompt to time from)",
 		);
+		await expect(
+			canvas
+				.getByTestId("turn-live-head")
+				.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
 		await expect(
 			canvas.queryByTestId("composer-status-header"),
 		).not.toBeInTheDocument();

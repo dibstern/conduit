@@ -9,10 +9,13 @@ import {
 	type HttpServerResponse,
 } from "effect/http";
 import type { AuthManager } from "../../../auth.js";
+import { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
+	AttachmentsProvider,
 	CaCertProvider,
 	effectRouterWithCors,
 	HealthProvider,
+	type HttpAttachmentReader,
 	ProjectApiDelegateProvider,
 	ProjectsProvider,
 	PushProvider,
@@ -34,6 +37,7 @@ import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../../daemon/Services/relay-cache.js";
+import { AttachmentStoreTag } from "../../persistence/Services/attachment-store.js";
 import { PushManagerTag } from "../Services/push-service.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
 import {
@@ -69,6 +73,7 @@ export interface StandaloneHttpRouterOptions {
 	readonly auth: AuthManager;
 	readonly staticDir: string;
 	readonly getProjects: () => RouterProjectInfo[];
+	readonly readAttachment?: HttpAttachmentReader | undefined;
 	readonly delegateApiRequest?: (
 		slug: string,
 		subPath: string,
@@ -86,6 +91,7 @@ interface HttpRouterRequestHandlerOptions {
 	readonly setupInfoLayer: Layer.Layer<SetupInfoProvider>;
 	readonly staticDir: string;
 	readonly getProjects: () => Effect.Effect<RouterProjectInfo[]>;
+	readonly readAttachment?: HttpAttachmentReader | undefined;
 	readonly delegateApiRequest?: (
 		slug: string,
 		subPath: string,
@@ -106,6 +112,12 @@ const makeHttpRouterLayer = (options: HttpRouterRequestHandlerOptions) => {
 		NodeFileSystem.layer,
 		NodePath.layer,
 	);
+	if (options.readAttachment != null) {
+		routerLayer = Layer.merge(
+			routerLayer,
+			Layer.succeed(AttachmentsProvider, { read: options.readAttachment }),
+		);
+	}
 
 	if (options.delegateApiRequest != null) {
 		routerLayer = Layer.merge(
@@ -233,6 +245,7 @@ export const makeStandaloneHttpRouterRequestHandler = (
 			}),
 			staticDir: options.staticDir,
 			getProjects: () => Effect.sync(options.getProjects),
+			readAttachment: options.readAttachment,
 			delegateApiRequest:
 				options.delegateApiRequest ??
 				(() => Effect.fail(new Error("Project API route not found"))),
@@ -247,6 +260,10 @@ export const makeDaemonHttpRouterLive = (staticDir: string) =>
 		DaemonHttpRequestHandlerTag,
 		Effect.gen(function* () {
 			const auth: AuthManagerService = yield* AuthManagerTag;
+			const store = yield* Effect.serviceOption(PersistenceStore);
+			const attachments = Option.isSome(store)
+				? Context.get(store.value, AttachmentStoreTag)
+				: undefined;
 			const configRef = yield* DaemonConfigRefTag;
 			const daemonHandle = yield* DaemonHandleTag;
 			const tls = yield* TlsCertTag;
@@ -271,6 +288,9 @@ export const makeDaemonHttpRouterLive = (staticDir: string) =>
 						),
 				}),
 				staticDir,
+				readAttachment: attachments
+					? (_slug, hash) => attachments.get(hash)
+					: undefined,
 				getProjects: makeDaemonProjectsReader({
 					configRef,
 					projectRegistry,

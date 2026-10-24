@@ -1,4 +1,3 @@
-import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
@@ -12,7 +11,6 @@ import {
 	sep,
 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { promisify } from "node:util";
 import {
 	Effect,
 	Layer,
@@ -30,6 +28,7 @@ import {
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
 import * as Failure from "../../../effect/failure-classification.js";
+import { Subprocess } from "../Services/subprocess.js";
 import {
 	type CreatedWorktrees,
 	type WorktreeFolder,
@@ -39,7 +38,6 @@ import {
 	type WorktreeSetupUpdate,
 } from "../Services/worktree-service.js";
 
-const execFileAsync = promisify(execFile);
 const hasCode = (cause: unknown, code: string) =>
 	typeof cause === "object" &&
 	cause !== null &&
@@ -128,82 +126,40 @@ export const makeWorktreeLive = (
 ) =>
 	Layer.effect(
 		WorktreeServiceTag,
-		Effect.sync(() => {
+		Effect.gen(function* () {
+			const subprocess = yield* Subprocess;
 			const checkoutUse = Semaphore.makeUnsafe(1);
 			const runSetup: WorktreeService["runSetup"] = (cwd, script, env) =>
 				Stream.callback<WorktreeSetupUpdate>((emit) =>
-					Effect.acquireRelease(
-						Effect.sync(() => {
-							const timeoutMs = options.setupTimeoutMs ?? 10 * 60_000;
-							const limit = 64 * 1024;
-							let child: ChildProcess | undefined;
-							let timeout: ReturnType<typeof setTimeout> | undefined;
-							let finished = false;
-							let groupStopped = false;
-							let capturedBytes = 0;
-							let truncated = false;
-							const decoder = new StringDecoder("utf8");
-							const output = (text: string) => {
-								if (text && !finished)
-									Queue.offerUnsafe(emit, { _tag: "output", output: text });
-							};
-							const collect = (chunk: Buffer) => {
-								if (truncated || finished) return;
-								const remaining = limit - capturedBytes;
-								const accepted = chunk.subarray(0, remaining);
-								capturedBytes += accepted.length;
-								output(decoder.write(accepted));
-								if (chunk.length > remaining) {
-									truncated = true;
-									output("\n[Setup output truncated after 64 KiB]\n");
-								}
-							};
-							const killGroup = () => {
-								if (groupStopped || !child?.pid) return;
-								groupStopped = true;
-								try {
-									if (process.platform === "win32") child.kill("SIGKILL");
-									else process.kill(-child.pid, "SIGKILL");
-								} catch {
-									// The owned group may already be gone.
-								}
-							};
-							const finish = (result: WorktreeSetupResult) => {
-								if (finished) return;
-								clearTimeout(timeout);
-								killGroup();
-								if (!truncated) output(decoder.end());
-								finished = true;
-								Queue.offerUnsafe(emit, result);
-								Queue.endUnsafe(emit);
-							};
-							const failedToStart = (cause: unknown) =>
-								finish({
-									_tag: "finished",
-									status: "failed",
-									message: `Could not start setup script: ${cause instanceof Error ? cause.message : String(cause)}`,
-								});
-							timeout = setTimeout(
-								() =>
-									finish({
-										_tag: "finished",
-										status: "timed_out",
-										message: `Setup script timed out after ${timeoutMs}ms.`,
-									}),
-								timeoutMs,
-							);
-							timeout.unref();
-							try {
-								// Pipe EOF also owns cleanup after abrupt daemon death. Save
-								// stdin before background shells substitute /dev/null; only
-								// the watchdog keeps it while exec preserves the PID/group.
-								// `kill 0` signals the watchdog's own group (the setup group);
-								// dash, Linux's /bin/sh, rejects `kill -KILL -- -<pgid>`.
-								const spawned = spawn(
-									"/bin/sh",
-									[
-										"-c",
-										`exec 2>&1
+					Effect.gen(function* () {
+						const timeoutMs = options.setupTimeoutMs ?? 10 * 60_000;
+						const limit = 64 * 1024;
+						let capturedBytes = 0;
+						let truncated = false;
+						const decoder = new StringDecoder("utf8");
+						const output = (text: string) => {
+							if (text)
+								Queue.offerUnsafe(emit, { _tag: "output", output: text });
+						};
+						const collect = (chunk: Buffer) => {
+							if (truncated) return;
+							const remaining = limit - capturedBytes;
+							const accepted = chunk.subarray(0, remaining);
+							capturedBytes += accepted.length;
+							output(decoder.write(accepted));
+							if (chunk.length > remaining) {
+								truncated = true;
+								output("\n[Setup output truncated after 64 KiB]\n");
+							}
+						};
+						// Pipe EOF owns cleanup after abrupt daemon death. Only the watchdog
+						// retains stdin; exec preserves the setup process group for cancellation.
+						const result = yield* Effect.result(
+							subprocess.run(
+								"/bin/sh",
+								[
+									"-c",
+									`exec 2>&1
 exec 3<&0
 (
   while IFS= read -r setup_line; do :; done
@@ -211,99 +167,97 @@ exec 3<&0
 ) <&3 3<&- >/dev/null 2>&1 &
 exec 3<&- </dev/null
 if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else exec /bin/sh -c "$2"; fi`,
-										"conduit-setup",
-										env["SHELL"]?.trim() ?? "",
-										script,
-									],
-									{
-										cwd,
-										env,
-										stdio: ["pipe", "pipe", "ignore"],
-										detached: process.platform !== "win32",
-									},
-								);
-								child = spawned;
-								spawned.stdout.on("data", collect);
-								spawned.once("error", failedToStart);
-								spawned.once("exit", killGroup);
-								spawned.once("close", (code, signal) => {
-									finish({
+									"conduit-setup",
+									env["SHELL"]?.trim() ?? "",
+									script,
+								],
+								{
+									cwd,
+									env,
+									timeoutMs,
+									onStdout: collect,
+									captureOutput: false,
+									keepStdinOpen: true,
+									killProcessGroup: true,
+									killSignal: "SIGKILL",
+								},
+							),
+						);
+						if (!truncated) output(decoder.end());
+						const finished: WorktreeSetupResult = Result.isSuccess(result)
+							? {
+									_tag: "finished",
+									status:
+										result.success.exitCode === 0 ? "succeeded" : "failed",
+									exitCode: result.success.exitCode,
+								}
+							: result.failure.reason === "timeout"
+								? {
 										_tag: "finished",
-										status: code === 0 ? "succeeded" : "failed",
-										...(code !== null
-											? { exitCode: code }
-											: {
-													message: `Setup script terminated by ${signal ?? "an unknown signal"}.`,
-												}),
-									});
-								});
-							} catch (cause) {
-								failedToStart(cause);
-							}
-							return () => {
-								clearTimeout(timeout);
-								finished = true;
-								killGroup();
-								child?.stdin?.destroy();
-								child?.stdout?.destroy();
-							};
-						}),
-						(cleanup) => Effect.sync(cleanup),
-					),
+										status: "timed_out",
+										message: `Setup script timed out after ${timeoutMs}ms.`,
+									}
+								: {
+										_tag: "finished",
+										status: "failed",
+										message:
+											result.failure.reason === "signal"
+												? `Setup script terminated by ${result.failure.signal ?? "an unknown signal"}.`
+												: `Could not start setup script: ${result.failure.cause instanceof Error ? result.failure.cause.message : result.failure.message}`,
+									};
+						Queue.offerUnsafe(emit, finished);
+						Queue.endUnsafe(emit);
+					}),
 				);
 			const git = (folder: string, args: readonly string[], input?: string) => {
 				const timeoutMs =
 					args[0] === "worktree" && args[1] === "add"
 						? (options.checkoutTimeoutMs ?? 10 * 60_000)
 						: (options.gitTimeoutMs ?? 30_000);
-				return Effect.tryPromise({
-					try: async (signal) => {
-						const env: NodeJS.ProcessEnv = { ...process.env };
-						for (const name of Object.keys(env))
-							if (name.startsWith("GIT_")) delete env[name];
-						env["GIT_TERMINAL_PROMPT"] = "0";
-						env["GIT_OPTIONAL_LOCKS"] = "0";
-						env["LC_ALL"] = "C";
-						const result = execFileAsync(
-							options.gitExecutable ?? "git",
-							["-c", "core.hooksPath=/dev/null", ...args],
-							{
-								cwd: folder,
-								env,
-								encoding: "utf8",
-								timeout: timeoutMs,
-								maxBuffer: 1_048_576,
-								signal,
-							},
-						);
-						if (input !== undefined) result.child.stdin?.end(input);
-						return (await result).stdout.trim();
-					},
-					catch: (cause) => {
-						const detail =
-							typeof cause === "object" &&
-							cause !== null &&
-							"stderr" in cause &&
-							typeof cause.stderr === "string" &&
-							cause.stderr.trim().length > 0
-								? cause.stderr.trim()
-								: cause instanceof Error
-									? cause.message
-									: String(cause);
-						return new WorktreeCreationError({
-							path: folder,
-							reason: "git-failed",
-							message: hasCode(cause, "ENOENT")
-								? "Git executable was not found. Install Git to create a worktree."
-								: typeof cause === "object" &&
-										cause !== null &&
-										"killed" in cause &&
-										cause.killed === true
-									? `Git ${args[0]} timed out after ${Math.round(timeoutMs / 1_000)}s`
-									: `Git ${args[0]} failed: ${detail.slice(0, 2_000)}`,
-						});
-					},
-				});
+				const env: NodeJS.ProcessEnv = { ...process.env };
+				for (const name of Object.keys(env))
+					if (name.startsWith("GIT_")) delete env[name];
+				env["GIT_TERMINAL_PROMPT"] = "0";
+				env["GIT_OPTIONAL_LOCKS"] = "0";
+				env["LC_ALL"] = "C";
+				return subprocess
+					.run(
+						options.gitExecutable ?? "git",
+						["-c", "core.hooksPath=/dev/null", ...args],
+						{
+							cwd: folder,
+							env,
+							timeoutMs,
+							maxBuffer: 1_048_576,
+							...(input !== undefined && { input }),
+						},
+					)
+					.pipe(
+						Effect.mapError(
+							(cause) =>
+								new WorktreeCreationError({
+									path: folder,
+									reason: "git-failed",
+									message:
+										cause.code === "ENOENT"
+											? "Git executable was not found. Install Git to create a worktree."
+											: cause.reason === "timeout"
+												? `Git ${args[0]} timed out after ${Math.round(timeoutMs / 1_000)}s`
+												: `Git ${args[0]} failed: ${(cause.stderr.trim() || cause.message).slice(0, 2_000)}`,
+								}),
+						),
+						Effect.flatMap((result) =>
+							result.exitCode === 0
+								? Effect.succeed(result.stdout.trim())
+								: Effect.fail(
+										new WorktreeCreationError({
+											path: folder,
+											reason: "git-failed",
+											message: `Git ${args[0]} failed: ${(result.stderr.trim() || `Command exited with code ${result.exitCode}`).slice(0, 2_000)}`,
+										}),
+									),
+						),
+					);
 			};
 			const filesystem = <A>(path: string, operation: () => Promise<A>) =>
 				Effect.tryPromise({

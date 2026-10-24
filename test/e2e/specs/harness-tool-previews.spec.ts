@@ -520,12 +520,12 @@ test("tools open as previews and expand to full detail", async ({
 	await expect(bashRow.locator(".tool-full-detail")).toContainText(
 		"Injected failure",
 	);
-	await expect(bashRow.locator(".tool-result")).not.toContainText(
+	await expect(bashRow.locator(".shell-detail")).not.toContainText(
 		endOf("result"),
 	);
 	await bashRow.getByRole("button", { name: "Retry" }).click();
-	await expect(bashRow.locator(".tool-result")).toContainText(endOf("result"));
-	await expect(bashRow.locator(".tool-result")).toContainText(
+	await expect(bashRow.locator(".shell-detail")).toContainText(endOf("result"));
+	await expect(bashRow.locator(".shell-detail")).toContainText(
 		endOf("argument"),
 	);
 	await expect(bashRow.locator(".tool-full-detail")).toHaveCount(0);
@@ -536,9 +536,9 @@ test("tools open as previews and expand to full detail", async ({
 
 	// y7eo.10: expanding it again shows the whole tool and asks nothing.
 	await bashRow.locator("button").first().click();
-	await expect(bashRow.locator(".tool-result")).toHaveCount(0);
+	await expect(bashRow.locator(".shell-detail")).toHaveCount(0);
 	await bashRow.locator("button").first().click();
-	await expect(bashRow.locator(".tool-result")).toContainText(endOf("result"));
+	await expect(bashRow.locator(".shell-detail")).toContainText(endOf("result"));
 	await expect(bashRow.locator(".tool-full-detail")).toHaveCount(0);
 	expect(rpc.detailRequests).toHaveLength(2);
 
@@ -559,7 +559,7 @@ test("tools open as previews and expand to full detail", async ({
 	await expect(seqRow).toContainText("Loading full output…");
 	rpc.release();
 	for (const id of SEQ_IDS)
-		await expect(toolRow(page, id).locator(".tool-result")).toContainText(
+		await expect(toolRow(page, id).locator(".shell-output")).toContainText(
 			endOf("result"),
 		);
 	expect(rpc.detailRequests.slice(2)).toEqual([SEQ_IDS]);
@@ -596,7 +596,7 @@ test("tools open as previews and expand to full detail", async ({
 	const liveId = liveBash()?.callID ?? "missing";
 	const requestsBeforeLive = rpc.detailRequests.length;
 	const runningRow = await expandTool(page, toolRow(page, liveId));
-	await expect(runningRow.locator(".tool-result")).toContainText(
+	await expect(runningRow.locator(".shell-command")).toContainText(
 		endOf("argument"),
 	);
 	expect(rpc.detailRequests.slice(requestsBeforeLive)).toEqual([[liveId]]);
@@ -616,16 +616,16 @@ test("tools open as previews and expand to full detail", async ({
 		"false",
 	);
 	const liveRow = await expandTool(page, toolRow(page, liveId));
-	await expect(liveRow.locator(".tool-result")).toContainText(endOf("result"));
+	await expect(liveRow.locator(".shell-output")).toContainText(endOf("result"));
 	// The settled tool's detail was asked for once more, then kept.
 	expect(rpc.detailRequests.slice(requestsBeforeLive)).toEqual([
 		[liveId],
 		[liveId],
 	]);
 	await liveRow.locator("button").first().click();
-	await expect(liveRow.locator(".tool-result")).toHaveCount(0);
+	await expect(liveRow.locator(".shell-output")).toHaveCount(0);
 	await liveRow.locator("button").first().click();
-	await expect(liveRow.locator(".tool-result")).toContainText(endOf("result"));
+	await expect(liveRow.locator(".shell-output")).toContainText(endOf("result"));
 	expect(rpc.detailRequests.slice(requestsBeforeLive)).toHaveLength(2);
 
 	// The artifact: what each kind of frame cost, in bytes.
@@ -705,7 +705,7 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 	// Expanding a prefetched tool shows it whole and asks nothing.
 	await blocks.nth(1).locator(".turn-activity-toggle").click();
 	const row = await expandTool(page, toolRow(page, middle[0] ?? "missing"));
-	await expect(row.locator(".tool-result")).toContainText(endOf("result"));
+	await expect(row.locator(".shell-output")).toContainText(endOf("result"));
 	await expect(row.locator(".tool-full-detail")).toHaveCount(0);
 	expect(rpc.detailRequests).toEqual([newest, middle]);
 
@@ -763,7 +763,7 @@ test("resting on a turn activity block prefetches its tools, once loaded", async
 	);
 	const requestsAfterLive = rpc.detailRequests.length;
 	const liveRow = await expandTool(page, toolRow(page, liveId));
-	await expect(liveRow.locator(".tool-result")).toContainText(endOf("result"));
+	await expect(liveRow.locator(".shell-output")).toContainText(endOf("result"));
 	expect(rpc.detailRequests).toHaveLength(requestsAfterLive);
 	await driver.close();
 	await context.close();

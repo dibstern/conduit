@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -27,7 +27,6 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
-import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -37,7 +36,6 @@ import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-eng
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { settleIdleSessions } from "../../../src/lib/session/auto-settle-sweep.js";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
-import type { SessionGit } from "../../../src/lib/shared-types.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -52,45 +50,24 @@ const DAY = 86_400_000;
 afterEach(() => vi.restoreAllMocks());
 
 describe("relay automatic settlement sweep", () => {
-	it.effect("waits for fresh git before settling recent merged work", () => {
+	it.effect("settles recent merged work from published git", () => {
 		const projectDir = "/auto-settle-git";
 		const now = Date.now();
 		const directories = new Map([
 			["merged", `${projectDir}/merged`],
 			["unmerged", `${projectDir}/unmerged`],
 		]);
-		const cached = new Map<string, SessionGit>([
-			[`${projectDir}/merged`, { merged: false }],
-			[`${projectDir}/unmerged`, { merged: true, mergedAt: now - 500 }],
-		]);
-		let release!: () => void;
-		const held = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		vi.spyOn(daemonSessionGitCache, "isStale").mockReturnValue(true);
-		vi.spyOn(daemonSessionGitCache, "peek").mockImplementation((directory) =>
-			cached.get(directory),
-		);
-		const refresh = vi
-			.spyOn(daemonSessionGitCache, "refresh")
-			.mockImplementation(async (directory) => {
-				await held;
-				const git =
-					directory === directories.get("merged")
-						? { merged: true, mergedAt: now - 500 }
-						: { merged: false };
-				cached.set(directory, git);
-				return git;
-			});
 		const setSettled = vi.fn((_id: string) => Effect.succeed(true));
 		return Effect.scoped(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				for (const [id, directory] of directories)
+				for (const [id, directory] of directories) {
 					yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, workspace, last_message_at, created_at, updated_at)
 						VALUES (${id}, 'test-project', 'claude', ${id}, 'idle', ${JSON.stringify({ cause: "user", origin: "existing", worktrees: { [projectDir]: directory } })}, ${now}, ${now - 1_000}, ${now})`;
-				const settling = yield* Effect.forkChild(
-					settleIdleSessions(
+					yield* sql`INSERT INTO session_git_published (directory, git) VALUES (${directory}, ${JSON.stringify(id === "merged" ? { merged: true, mergedAt: now - 500 } : { merged: false })})`;
+				}
+				expect(
+					yield* settleIdleSessions(
 						{
 							projectDir,
 							hasViewer: () => false,
@@ -100,21 +77,11 @@ describe("relay automatic settlement sweep", () => {
 						3 * DAY,
 						now,
 					),
-				);
-				yield* Effect.tryPromise(() =>
-					vi.waitFor(() => expect(refresh).toHaveBeenCalled()),
-				);
-				expect(setSettled).not.toHaveBeenCalled();
-				release();
-				expect(yield* Fiber.join(settling)).toBe(1);
+				).toBe(1);
 				expect(setSettled.mock.calls).toEqual([["merged"]]);
-				expect(refresh.mock.calls.map(([directory]) => directory)).toContain(
-					directories.get("unmerged"),
-				);
 			}),
 		).pipe(
 			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
-			Effect.ensuring(Effect.sync(release)),
 		);
 	});
 

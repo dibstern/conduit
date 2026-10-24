@@ -5,6 +5,7 @@ import {
 	mockInstances,
 	requireRpcControl,
 	setSessionRowStatus,
+	settleTransitions,
 } from "./shared.js";
 
 // Oldest first, as the relay sends them. Ages are against the frozen clock.
@@ -148,6 +149,135 @@ export async function setLiveTasks(
 }
 
 export const backgroundTasksHandlers: StepHandler[] = [
+	{
+		name: "assert a header drop-down's scrim covers the composer",
+		match: /^the composer is covered by the drop-down's scrim$/,
+		run: async ({ world }) => {
+			await settleTransitions(world.page);
+			// A scrim trapped in the header's stacking context paints under the composer, leaving it live.
+			const hit = await world.page.evaluate(() => {
+				const box = document
+					.getElementById("input-area")
+					?.getBoundingClientRect();
+				if (!box) return "no composer";
+				const target = document.elementFromPoint(
+					box.left + box.width / 2,
+					box.top + box.height / 2,
+				);
+				return target?.closest("#input-area")
+					? `composer: ${target.outerHTML.slice(0, 120)}`
+					: "covered";
+			});
+			expect(hit).toBe("covered");
+		},
+	},
+	{
+		name: "assert top task sheet geometry after opening or springing back",
+		match: /^the task sheet rests below the phone header with scrim below it$/,
+		run: async ({ world }) => {
+			const panel = world.page.getByTestId("background-tasks-panel");
+			const sheet = world.page
+				.locator('[data-sheet-edge="top"]')
+				.filter({ has: panel });
+			await expect(panel).toBeVisible();
+			await expect
+				.poll(async () => {
+					const header = await world.page.locator("#session-bar").boundingBox();
+					const box = await sheet.boundingBox();
+					return header && box
+						? Math.abs(box.y - header.y - header.height)
+						: Infinity;
+				})
+				.toBeLessThan(1);
+			const box = await sheet.boundingBox();
+			const scrim = world.page.getByTestId("background-tasks-scrim");
+			const scrimBox = await scrim.boundingBox();
+			const viewport = world.page.viewportSize();
+			if (!box || !scrimBox || !viewport)
+				throw new Error("Task sheet is not laid out");
+			expect(box.x).toBe(0);
+			expect(box.width).toBe(viewport.width);
+			expect(viewport.height - box.y - box.height).toBeGreaterThanOrEqual(64);
+			expect(Math.abs(scrimBox.y - box.y)).toBeLessThan(1);
+			await expect(sheet.locator("[data-sheet-chrome]")).toHaveCSS(
+				"border-bottom-left-radius",
+				"22px",
+			);
+			await expect(sheet.locator("[data-sheet-chrome]")).toHaveCSS(
+				"border-bottom-right-radius",
+				"22px",
+			);
+			await expect(sheet.locator("[data-sheet-handle]")).toHaveCSS(
+				"width",
+				"36px",
+			);
+			await expect(sheet.locator("[data-sheet-handle]")).toHaveCSS(
+				"height",
+				"5px",
+			);
+		},
+	},
+	{
+		name: "drag the task sheet with a native touch",
+		match:
+			/^I drag (inside the task sheet (?:down|up)|the task sheet up) by (\d+) pixels$/,
+		run: async ({ world, match }) => {
+			const panel = world.page.getByTestId("background-tasks-panel");
+			const sheet = world.page
+				.locator('[data-sheet-edge="top"]')
+				.filter({ has: panel });
+			const inside = match[1]?.startsWith("inside") ?? false;
+			const target = sheet.locator(
+				inside ? "[data-sheet-body]" : "[data-sheet-handle]",
+			);
+			const box = await target.boundingBox();
+			if (!box) throw new Error("Task sheet touch target is missing");
+			const restingY = (await sheet.boundingBox())?.y;
+			if (restingY === undefined) throw new Error("Task sheet is missing");
+			const x = box.x + box.width / 2;
+			const y = box.y + box.height / 2;
+			const dy = Number(match[2]) * (match[1]?.endsWith("down") ? 1 : -1);
+			const touch = await world.page.context().newCDPSession(world.page);
+			try {
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchStart",
+					touchPoints: [{ x, y }],
+				});
+				for (let step = 1; step <= 12; step++) {
+					await touch.send("Input.dispatchTouchEvent", {
+						type: "touchMove",
+						touchPoints: [{ x, y: y + (dy * step) / 12 }],
+					});
+					// Keep a short pull below the shared flick threshold.
+					await world.page.waitForTimeout(35);
+				}
+				const draggedY = (await sheet.boundingBox())?.y;
+				if (draggedY === undefined)
+					throw new Error("Task sheet vanished before release");
+				if (inside) expect(Math.abs(draggedY - restingY)).toBeLessThan(1);
+				else expect(draggedY).toBeLessThan(restingY - Math.abs(dy) * 0.8);
+			} finally {
+				await touch.send("Input.dispatchTouchEvent", {
+					type: "touchEnd",
+					touchPoints: [],
+				});
+				await touch.detach();
+			}
+		},
+	},
+	{
+		name: "assert the task body scrolled without dismissing its sheet",
+		match: /^the task sheet body has scrolled$/,
+		run: async ({ world }) => {
+			await expect
+				.poll(() =>
+					world.page
+						.locator('[data-sheet-edge="top"] [data-sheet-body]')
+						.evaluate((node) => node.scrollTop),
+				)
+				.toBeGreaterThan(0);
+		},
+	},
 	{
 		name: "stop the composer turn with tasks",
 		match: /^I stop the composer turn$/,

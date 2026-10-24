@@ -110,6 +110,8 @@ export const HOVER_FILL_CLASSES = {
 	"overlay-soft": "hover:bg-[rgba(var(--overlay-rgb),0.03)]",
 	alt: "hover:bg-bg-alt",
 	surface: "hover:bg-bg-surface",
+	activity:
+		"hover:[&:not(.bg-selection)]:bg-[color-mix(in_srgb,var(--color-text)_4.5%,transparent)] active:[&:not(.bg-selection)]:bg-[color-mix(in_srgb,var(--color-text)_9%,transparent)] duration-[120ms] active:duration-0 hover:[&_.activity-time]:text-text-secondary select-text",
 	sidebar: "hover:bg-sidebar-hover",
 	base: "hover:bg-bg",
 	"success-faint": "hover:bg-success/[0.06]",

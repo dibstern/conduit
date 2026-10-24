@@ -153,7 +153,7 @@ export const cursorToolsHandlers: StepHandler[] = [
 				(request) => request.tag === "GetToolDetails",
 			);
 			await expect(
-				row(world.page, "shell").locator(".tool-result"),
+				row(world.page, "shell").locator(".shell-detail"),
 			).toContainText(fullCommandSuffix);
 		},
 	},
@@ -231,7 +231,7 @@ export const cursorToolsHandlers: StepHandler[] = [
 		match: /^the Cursor shell output contains (.+)$/,
 		run: async ({ world, match }) => {
 			await expect(
-				row(world.page, "shell").locator(".tool-result"),
+				row(world.page, "shell").locator(".shell-detail"),
 			).toContainText(match[1] ?? "");
 		},
 	},
@@ -269,7 +269,7 @@ export const cursorToolsHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await expect(
 				row(world.page, "shell").getByTestId("tool-exit-code"),
-			).toHaveText(`Exit code ${match[1]}`);
+			).toHaveText(new RegExp(`^[✓✗] exit ${match[1]}$`));
 		},
 	},
 	{

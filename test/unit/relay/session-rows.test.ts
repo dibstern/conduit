@@ -22,7 +22,6 @@ import { subscribeSessionFamily } from "../../../src/lib/domain/relay/Services/s
 import { makeSessionListOperations } from "../../../src/lib/domain/relay/Services/session-manager-list.js";
 import { emptySessionManagerState } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
-import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	makePersistenceEffectLayer,
@@ -325,7 +324,6 @@ describe("Session Rows read paths", () => {
 							projectFolders: folders,
 							projectSlug: slug,
 						});
-						const cache = createSessionGitCache(async () => undefined);
 						const readAll = Effect.gen(function* () {
 							const relay = yield* operations.serviceListSessions();
 							const shell = yield* Stream.runHead(
@@ -336,7 +334,7 @@ describe("Session Rows read paths", () => {
 							const family = yield* Stream.runHead(
 								subscribeSessionFamily({ sessionId }),
 							);
-							const daemon = yield* listDaemonSessions({}, cache);
+							const daemon = yield* listDaemonSessions();
 							expect(daemon.availability).toEqual([
 								{ projectSlug: slug, available: true },
 							]);

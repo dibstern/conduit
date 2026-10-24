@@ -27,6 +27,11 @@ export const Pending: Story = {
 
 export const Running: Story = {
 	args: { message: mockToolSubagent },
+	play: async ({ canvasElement }) => {
+		await expect(
+			canvasElement.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
+	},
 };
 
 export const ErrorState: Story = {

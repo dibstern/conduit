@@ -300,22 +300,24 @@ export async function createReplayHarness(
 		},
 		configDir,
 	);
-	if (claudeReplayer) {
-		// Capability discovery would otherwise spawn the real Claude CLI.
-		__setProbeOverrideForTesting(async () => ({
-			models: options.claudeReplay?.models ?? [
-				{
-					id: CLAUDE_TRACE_MODEL,
-					name: "Claude Fable 5",
-					providerId: "claude",
-					// The real catalog advertises effort levels for Fable.
-					variants: { low: {}, medium: {}, high: {} },
-				},
-			],
-			commands: [],
-			agents: [],
-		}));
-	}
+	// Capability discovery would otherwise spawn the real Claude CLI, even for
+	// OpenCode-only replays (GetModels also discovers the default Claude), and
+	// that process outlives stop() and writes into configDir.
+	__setProbeOverrideForTesting(async () => ({
+		models: claudeReplayer
+			? (options.claudeReplay?.models ?? [
+					{
+						id: CLAUDE_TRACE_MODEL,
+						name: "Claude Fable 5",
+						providerId: "claude",
+						// The real catalog advertises effort levels for Fable.
+						variants: { low: {}, medium: {}, high: {} },
+					},
+				])
+			: [],
+		commands: [],
+		agents: [],
+	}));
 
 	const daemonReads = options.daemonSessionQueries
 		? ManagedRuntime.make(
@@ -426,7 +428,7 @@ export async function createReplayHarness(
 				await mock.stop();
 			} finally {
 				await daemonReads?.dispose();
-				if (claudeReplayer) __setProbeOverrideForTesting(undefined);
+				__setProbeOverrideForTesting(undefined);
 				await stopPtyHost({ configDir, force: true });
 			}
 			rmSync(configDir, { recursive: true, force: true });

@@ -1,12 +1,18 @@
 import { Effect } from "effect";
+import { AttachmentValidationError } from "../../attachment-data-url.js";
 import {
 	AccountSwitchBusy,
 	AccountUnroutable,
 } from "../../contracts/limit-recovery.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
-import { WsRpcError } from "../../contracts/ws-rpc.js";
+import {
+	DraftAttachmentMissing,
+	DraftAttachmentRejected,
+	WsRpcError,
+} from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
+import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import { RecapServiceTag } from "../../domain/relay/Services/recap-service.js";
 import {
 	ConfigTag,
@@ -195,6 +201,13 @@ export const conversationHandlers = {
 				text: request.text,
 				commandId: request.inputId,
 				delivery: request.delivery,
+				...(request.draftKey ? { draftKey: request.draftKey } : {}),
+				...(request.draftText !== undefined
+					? { draftText: request.draftText }
+					: {}),
+				...(request.attachmentIds
+					? { attachmentIds: request.attachmentIds }
+					: {}),
 				...(request.images ? { images: request.images } : {}),
 			});
 			return "refused" in sent
@@ -208,6 +221,7 @@ export const conversationHandlers = {
 			Effect.catch((error) =>
 				Effect.fail(
 					error instanceof AccountUnroutable ||
+						error instanceof DraftAttachmentMissing ||
 						error instanceof AccountSwitchBusy
 						? error
 						: new WsRpcError({
@@ -222,6 +236,7 @@ export const conversationHandlers = {
 				clientId: "rpc",
 				sessionId: request.sessionId,
 				inputId: request.inputId,
+				...(request.restoreTo ? { restoreTo: request.restoreTo } : {}),
 			}),
 		).pipe(Effect.catch(mapRpcFailure("input.cancel"))),
 	"input.sendNow": (request) =>
@@ -264,6 +279,35 @@ export const conversationHandlers = {
 				),
 			),
 		),
+	AddDraftAttachment: (request) =>
+		Effect.gen(function* () {
+			const drafts = yield* InputDraftsTag;
+			const projectId =
+				"draft" in request.key ? (yield* ConfigTag).slug : undefined;
+			return yield* drafts.addAttachment(
+				request.key,
+				request.id,
+				request.dataUrl,
+				request.name,
+				projectId,
+			);
+		}).pipe(
+			Effect.catch(
+				(error): Effect.Effect<never, DraftAttachmentRejected | WsRpcError> =>
+					error instanceof AttachmentValidationError
+						? Effect.fail(
+								new DraftAttachmentRejected({ message: error.message }),
+							)
+						: mapRpcFailure("AddDraftAttachment")(error),
+			),
+		),
+	RemoveDraftAttachment: (request) =>
+		Effect.gen(function* () {
+			const drafts = yield* InputDraftsTag;
+			const projectId =
+				"draft" in request.key ? (yield* ConfigTag).slug : undefined;
+			yield* drafts.removeAttachment(request.key, request.id, projectId);
+		}).pipe(Effect.catch(mapRpcFailure("RemoveDraftAttachment"))),
 	CancelSession: (request) =>
 		cancelSessionById("rpc", request.sessionId, request.commandId).pipe(
 			Effect.as({ ok: true as const }),
@@ -283,5 +327,7 @@ export const conversationHandlers = {
 	| "input.cancel"
 	| "input.sendNow"
 	| "SyncInputDraft"
+	| "AddDraftAttachment"
+	| "RemoveDraftAttachment"
 	| "CancelSession"
 >;

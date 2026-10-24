@@ -16,7 +16,7 @@
 
 <script lang="ts">
 	import { tick, onDestroy, mount, unmount } from "svelte";
-	import type { AssistantMessage } from "../../types.js";
+	import type { AssistantMessage, ModelExecution } from "../../types.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { isLoading, sessionMessages } from "../../stores/chat.svelte.js";
 	import { initTableScrollShadows } from "../../utils/table-scroll.js";
@@ -25,12 +25,12 @@
 	import CodeBlockHeader from "../ui/CodeBlockHeader.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { message, forkMessageId, sessionId, hideHeader = false, model, providerId }: {
+	let { message, forkMessageId, sessionId, hideHeader = false, modelExecution, providerId }: {
 		message: AssistantMessage;
 		forkMessageId?: string | undefined;
 		sessionId?: string | undefined;
 		hideHeader?: boolean;
-		model?: string | undefined;
+		modelExecution?: ModelExecution | undefined;
 		providerId?: string | undefined;
 	} = $props();
 	let containerEl: HTMLDivElement | undefined = $state();
@@ -335,7 +335,7 @@
 	role="article"
 >
 	{#if !hideHeader}
-		<AssistantHeader {message} {forkMessageId} {sessionId} {model} {providerId} bind:copyState />
+		<AssistantHeader {message} {forkMessageId} {sessionId} {modelExecution} {providerId} bind:copyState />
 	{/if}
 	<div class="md-content min-w-0 text-[15px] leading-[1.65] md:ml-[42px] {hideHeader ? '' : 'mt-[2px]'} {copyState === 'primed' ? 'bg-selection' : copyState === 'done' ? 'bg-success/5' : ''}">
 		{@html message.html}

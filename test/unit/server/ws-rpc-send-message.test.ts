@@ -154,7 +154,12 @@ describe("WsRpcServerLayer input.submit", () => {
 					input: expect.objectContaining({
 						sessionId: "session-1",
 						prompt: "hello",
-						images: ["data:image/png;base64,abc"],
+						images: [
+							expect.objectContaining({
+								attachmentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+								mime: "image/png",
+							}),
+						],
 					}),
 				}),
 			);

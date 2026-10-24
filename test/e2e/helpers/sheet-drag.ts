@@ -1,8 +1,26 @@
 import type { Locator, Page } from "@playwright/test";
 
+/** Drop-down sheets glide in; geometry read mid-glide is not the resting place. */
+export async function settleSheet(page: Page) {
+	await page.evaluate(() =>
+		Promise.allSettled(
+			document
+				.getAnimations()
+				.filter(
+					(animation) =>
+						animation instanceof CSSTransition &&
+						animation.playState === "running",
+				)
+				.map((animation) => animation.finished),
+		),
+	);
+}
+
 // Chromium's trusted input pipeline includes native scrolling and pointercancel;
 // dispatchEvent would bypass both, and Playwright's touchscreen only taps.
-export async function dragDown(
+// A negative `distance` drags up; a negative `startOffset` counts from the bottom
+// edge, where a drop-down sheet's handle sits.
+export async function dragSheet(
 	page: Page,
 	sheet: Locator,
 	distance: number,
@@ -10,10 +28,12 @@ export async function dragDown(
 	startOffset = 10,
 	timing?: { durationMs: number; steps?: number },
 ) {
+	await settleSheet(page);
 	const box = await sheet.boundingBox();
 	if (!box) throw new Error("sheet is not rendered");
 	const x = box.x + box.width / 2;
-	const startY = box.y + startOffset;
+	const startY =
+		startOffset < 0 ? box.y + box.height + startOffset : box.y + startOffset;
 	const cdp = await page.context().newCDPSession(page);
 	const timestamp = Date.now() / 1000;
 	await cdp.send("Input.dispatchTouchEvent", {

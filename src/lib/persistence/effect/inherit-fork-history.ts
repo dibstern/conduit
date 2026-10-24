@@ -91,7 +91,7 @@ export const inheritForkHistory = (
 			INSERT INTO turns
 			(id, session_id, state, user_message_id, assistant_message_id,
 			 cost, tokens_in, tokens_out, requested_at, started_at, completed_at,
-			 requested_model, expected_model, actual_model)
+			 requested_model, expected_model, actual_model, effort, context_window)
 			SELECT t.id || ${suffix}, ${event.sessionId},
 				CASE WHEN t.whole AND t.state NOT IN ('pending', 'running')
 					THEN t.state ELSE 'completed' END,
@@ -117,7 +117,8 @@ export const inheritForkHistory = (
 				CASE WHEN a.turn_id IS NOT NULL THEN CASE WHEN t.whole THEN t.expected_model
 					ELSE json_extract(resolution.data, '$.expectedModel') END END,
 				CASE WHEN a.turn_id IS NOT NULL THEN CASE WHEN t.whole THEN t.actual_model
-					ELSE json_extract(resolution.data, '$.actualModel') END END
+					ELSE json_extract(resolution.data, '$.actualModel') END END,
+				t.effort, t.context_window
 			FROM bounded t JOIN retained prompt ON prompt.id = t.user_message_id
 			LEFT JOIN answers a ON a.turn_id = t.id
 			LEFT JOIN resolutions resolution ON resolution.turn_id = t.id AND resolution.ordinal = 1

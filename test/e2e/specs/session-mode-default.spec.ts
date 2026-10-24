@@ -721,15 +721,17 @@ for (const viewport of [
 			await press(page.getByTestId("session-scope-chip"));
 			await press(page.getByRole("menuitem", { name: "Add a project…" }));
 			const dialog = page.getByRole("dialog", {
-				name: "Add project",
+				name: "Add a project",
 				exact: true,
 			});
-			await dialog
-				.getByRole("combobox", { name: "Add folder" })
-				.fill("/workspace/new-app");
-			await press(
-				dialog.getByRole("option", { name: "/workspace/new-app", exact: true }),
+			const folders = dialog.getByRole("combobox", { name: "Add folder" });
+			await folders.fill("/workspace/new-app");
+			const folder = dialog.locator(
+				'[data-testid="folder-picker-row"][data-path="/workspace/new-app"]',
 			);
+			await press(folder);
+			await expect(folder).toHaveAttribute("aria-selected", "true");
+			await expect(folders).toHaveValue("/workspace/new-app");
 			await dialog
 				.getByRole("combobox", { name: "Default session mode" })
 				.selectOption("worktree");

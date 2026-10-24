@@ -9,14 +9,16 @@
 	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
 	import { accountLimit } from "../../../contracts/account-limit.js";
 	import { tick, untrack, type Snippet } from "svelte";
-	import { toastFailure } from "../../transport/rpc-errors.js";
+	import { failureLine, toastFailure } from "../../transport/rpc-errors.js";
+	import { refreshInputDraftAttachments } from "../../stores/input-draft.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
-	import AccountDot from "../ui/AccountDot.svelte";
+	import HarnessLogo from "../model/HarnessLogo.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import Textarea from "../ui/Textarea.svelte";
+	// biome-ignore lint/style/useImportType: FilePicker is rendered in the template and used by bind:this
 	import FilePicker from "../ui/FilePicker.svelte";
 	import TwoRowComposerLayout from "../ui/TwoRowComposerLayout.svelte";
 	import AttachMenu from "./AttachMenu.svelte";
@@ -65,16 +67,16 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, prepareFileAttachment } from "./input-utils.js";
-	import { parseAttachmentDataUrl } from "../../../attachment-data-url.js";
 	import { findSession, isBusy, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { createComposerDraft } from "../../stores/composer-draft/runner.svelte.js";
+	import { draftKeyId } from "../../stores/composer-draft/state.js";
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { getDriverTraits, instanceState } from "../../stores/instance.svelte.js";
+	import { getDriverTraits, getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
@@ -89,7 +91,7 @@
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
-	import type { PendingAttachment, SessionPermissionMode } from "../../types.js";
+	import type { SessionPermissionMode } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
 	import type { WorktreeInfo } from "../../../shared-types.js";
 
@@ -118,7 +120,6 @@
 			return route.page !== "chat" ? null : route.sessionId ? { session: route.sessionId } : route.draftId ? { draft: route.draftId } : null;
 		},
 		projectSlug: getDraftProject,
-		hasAttachments: () => pendingAttachments.length > 0 || readingAttachments > 0,
 	});
 	let draftWorktree = $state<WorktreeInfo | null>(null);
 	let draftNewWorktree = $state(false);
@@ -128,14 +129,6 @@
 	let pendingDraftSessionMode: Promise<void> | undefined;
 	const draftRoute = $derived(getCurrentRoute());
 	const draftId = $derived(draftRoute.page === "chat" ? draftRoute.draftId : undefined);
-	// Attachments belong to the session or draft they were added in; InputArea
-	// outlives route changes, so drop them when the composer's scope changes.
-	const composerScope = $derived(draftRoute.page === "chat" ? draftRoute.sessionId ?? draftId ?? null : null);
-	$effect(() => {
-		composerScope;
-		pendingAttachments = [];
-		attachmentError = "";
-	});
 	const draftContext = $derived(`${getDraftProject() ?? ""}:${sessionState.currentId ?? ""}:${draftId ?? "session"}`);
 	const sessionModeContext = $derived(`${draftContext}:${sessionState.currentId ? "" : getEffectiveInstanceId()}`);
 	$effect(() => {
@@ -169,9 +162,13 @@
 	$effect(() => provideComposerDraft({ sessionId: () => sessionState.currentId, draft: () => composerDraft.text, insert: (reference) => { if (!readOnlySubagent) referenceEditor.insert(reference); }, remove: referenceEditor.remove }));
 	let fieldScroller: HTMLDivElement | undefined = $state();
 	let composerFocused = $state(false);
-	let pendingAttachments = $state<PendingAttachment[]>([]);
+	const draftAttachments = $derived(composerDraft.attachments);
 	let readingAttachments = $state(0);
 	let attachmentError = $state("");
+	$effect(() => {
+		getCurrentRoute();
+		attachmentError = "";
+	});
 	let commandMenuRef: CommandMenu | undefined = $state();
 	let fileMenuRef: FileMenu | undefined = $state();
 	let commandMenuActiveIndex = $state(0);
@@ -342,6 +339,7 @@
 			? `Message${composerPresentation ? ` ${composerPresentation.label}` : ""}… sends at ${sendAtTime}`
 			: currentSession?.settledAt != null ? "Message to un-settle…" :
 			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
+			currentSession?.sideThread && sessionState.currentParentId ? "Ask a side question…" :
 			sessionViewState.compact ? "Reply…" :
 			sessionJevEnabled(currentSession) ? "Reply… (↩ Reply on a message drops a reference here)" :
 			composerPresentation ? `Reply to ${composerPresentation.label}…` : "Reply…",
@@ -472,7 +470,7 @@
 		if (plainText) enteredPlainText = true;
 	});
 
-	const canSend = $derived(readingAttachments === 0 && !readOnlySubagent && turnControl.ready && (composerDraft.text.trim().length > 0 || pendingAttachments.length > 0));
+	const canSend = $derived(!composerDraft.sending && readingAttachments === 0 && composerDraft.attachmentsReady && !readOnlySubagent && turnControl.ready && (composerDraft.text.trim().length > 0 || draftAttachments.length > 0));
 	const sendButtonLabel = $derived(
 		sendMode === "at-reset"
 			? `Send at ${sendAtTime}`
@@ -673,8 +671,8 @@
 		}
 	}
 
-	// During IME composition the textarea must show its own pre-commit text, so we
-	// reveal the textarea text and hide the backdrop until composition ends.
+	// During IME composition the textarea holds pre-commit text the backdrop has not
+	// seen, so its decorations would sit under the wrong glyphs: hide them until it ends.
 	function handleCompositionStart() {
 		composing = true;
 	}
@@ -729,13 +727,13 @@
 		const expectedInstanceId = accountId;
 		if (!sessionId || !projectSlug || !expectedInstanceId || !canSend || switchingAccount) return false;
 		const draft = composerDraft.text;
-		const images = pendingAttachments;
+		const attachmentIds = draftAttachments.map(({ id }) => id).join();
 		switchingAccount = true;
 		try {
 			if (!(await switchSessionAccount({ sessionId, instanceId, expectedInstanceId }))) return false;
 			await tick();
 			// Navigation or edits during the handoff leave the draft for its owner.
-			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || composerDraft.text !== draft || pendingAttachments !== images) return false;
+			if (sessionState.currentId !== sessionId || composerProjectSlug !== projectSlug || composerDraft.text !== draft || draftAttachments.map(({ id }) => id).join() !== attachmentIds) return false;
 			return await sendMessage(undefined, delivery);
 		} finally {
 			switchingAccount = false;
@@ -755,7 +753,7 @@
 	let sideThreadAttempt: { draft: string; inputId: string } | undefined;
 
 	async function startSideThread(question: string | undefined): Promise<boolean> {
-		if (startingSideThread) return false;
+		if (startingSideThread || composerDraft.sending || !composerDraft.attachmentsReady) return false;
 		const from = selection.scope;
 		const parentSessionId = sessionState.currentId;
 		const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? getCurrentSlug() : null;
@@ -770,32 +768,53 @@
 			return false;
 		}
 		const draftText = composerDraft.text;
-		const draftImages = pendingAttachments;
-		const draft = JSON.stringify([parentSessionId, draftText, draftImages.map((image) => image.dataUrl)]);
+		const sourceKey = composerDraft.key;
+		const attachmentIds = draftAttachments.map(({ id }) => id);
+		if (!(await composerDraft.flush())) return false;
+		if (!composerDraft.key || !("session" in composerDraft.key) || composerDraft.key.session !== parentSessionId || composerDraft.text !== draftText) return false;
+		const draft = JSON.stringify([parentSessionId, draftText, attachmentIds]);
 		if (sideThreadAttempt?.draft !== draft) sideThreadAttempt = { draft, inputId: crypto.randomUUID() };
 		const { inputId } = sideThreadAttempt;
 		startingSideThread = true;
+		const unsentDraft = composerDraft.sendStarted(false);
 		try {
-			const images = draftImages.map((image) => image.dataUrl);
+			const messageText = serializeReferences(await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug));
 			const outcome = await send({
 				from,
 				sideThread: { sessionId: parentSessionId, title: question },
 				delivery: "queue",
 				inputId,
-				text: serializeReferences(await withReferences(toProviderCommands(question, providerBuiltinNameSet), projectSlug)),
-				...(images.length > 0 ? { images } : {}),
+				text: messageText,
+				draftKey: sourceKey ?? { session: parentSessionId },
+				draftText,
+				attachmentIds,
 				onCreated: () => {
 					sideThreadAttempt = undefined;
-					const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, pendingAttachments === draftImages);
+					if (sourceKey) composerDraft.attachmentsAccepted(sourceKey, attachmentIds);
+					const cleared = composerDraft.sideThreadSent(parentSessionId, draftText, true);
 					if (cleared.cleared) {
 						if (cleared.active) cursorPos = 0;
-						pendingAttachments = [];
 					}
 				},
 			});
-			return outcome.kind === "started" || outcome.kind === "waiting";
+			const accepted = outcome.kind === "started" || outcome.kind === "waiting";
+			if (!accepted) composerDraft.sendFailed(unsentDraft, parentSessionId, false);
+			if (outcome.kind === "failed" && outcome.draftAttachmentMissing && sourceKey && projectSlug)
+				await recoverMissingDraftAttachment(outcome.draftAttachmentMissing, projectSlug, sourceKey);
+			if (accepted) attachmentError = "";
+			return accepted;
 		} finally {
 			startingSideThread = false;
+		}
+	}
+
+	async function recoverMissingDraftAttachment(message: string, project: string, key: NonNullable<typeof composerDraft.key>) {
+		if (composerDraft.key && draftKeyId(composerDraft.key) === draftKeyId(key)) attachmentError = message;
+		try {
+			await refreshInputDraftAttachments(project, key);
+		} catch (error) {
+			if (composerDraft.key && draftKeyId(composerDraft.key) === draftKeyId(key))
+				attachmentError = `${message}\n${failureLine(error, "Could not refresh attachments. Reconnect to try again.")}`;
 		}
 	}
 
@@ -821,13 +840,13 @@
 	}
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
-		if (readingAttachments > 0 || readOnlySubagent || !turnControl.ready) return false;
-		if (textOverride === undefined && pendingAttachments.some((attachment) => !attachment.dataUrl.startsWith("data:image/")) && !getProviderDriver(composerDriver)?.supportsFileAttachments) {
+		if (composerDraft.sending || readingAttachments > 0 || !composerDraft.attachmentsReady || readOnlySubagent || !turnControl.ready) return false;
+		if (textOverride === undefined && draftAttachments.some((attachment) => !attachment.mime.startsWith("image/")) && !getProviderDriver(composerDriver)?.supportsFileAttachments) {
 			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before sending these files.";
 			return false;
 		}
 		let text = textOverride ?? composerDraft.text.trim();
-		if (!text && (textOverride !== undefined || pendingAttachments.length === 0)) return false;
+		if (!text && (textOverride !== undefined || draftAttachments.length === 0)) return false;
 		if (textOverride === undefined) {
 			const match = text.match(/^\$(\S+)(?:\s+([\s\S]*))?$/);
 			const command = conduitCommands.find((command) =>
@@ -837,12 +856,16 @@
 			text = toProviderCommands(text, providerBuiltinNameSet);
 		}
 
+		const sourceKey = composerDraft.key;
+		const draftText = composerDraft.text;
+		const sourceId = sourceKey && draftKeyId(sourceKey);
+		const attachmentIds = textOverride === undefined ? draftAttachments.map(({ id }) => id) : [];
+		if (textOverride === undefined && !(await composerDraft.flush())) return false;
+		const currentKey = composerDraft.key;
+		if (sourceId !== (currentKey && draftKeyId(currentKey)) || composerDraft.text !== draftText) return false;
 		const messageText = textOverride === undefined ? serializeReferences(await withReferences(text, composerProjectSlug)) : text;
-
-		// Send all attachments through the existing data URL field.
-		const imageUrls = textOverride === undefined && pendingAttachments.length > 0
-			? pendingAttachments.map((img) => img.dataUrl)
-			: undefined;
+		const preparedKey = composerDraft.key;
+		if (sourceId !== (preparedKey && draftKeyId(preparedKey)) || composerDraft.text !== draftText) return false;
 
 		const sentFromSessionId = sessionState.currentId;
 		const projectSlug = sentFromSessionId ? findSession(sentFromSessionId)?.projectSlug ?? getCurrentSlug() : getDraftProject();
@@ -883,15 +906,15 @@
 				requestDraftPreWarm();
 			}
 			let createdSessionId: string | null = null;
-			const unsentImages = pendingAttachments;
 			// Sending asks to see the reply, so bring back a reader who drifted up.
 			requestTranscriptFollow();
 			steerRefusal = null;
 			dismissedRefusal = null;
+			const sendingKey = composerDraft.key;
+			if (composerDraft.sending || sourceId !== (sendingKey && draftKeyId(sendingKey)) || composerDraft.text !== draftText) return false;
 			const clearOnSend = textOverride === undefined && delivery !== "steer";
 			const unsentDraft = composerDraft.sendStarted(clearOnSend);
 			if (clearOnSend) {
-				pendingAttachments = [];
 				cursorPos = 0;
 			}
 			const destination = draft ? {
@@ -905,19 +928,25 @@
 			const outcome = await send({
 				text: messageText,
 				delivery,
-				...(imageUrls ? { images: imageUrls } : {}),
+				...(sourceKey ? { draftKey: sourceKey } : {}),
+				...(textOverride === undefined ? { draftText } : {}),
+				attachmentIds,
 				...destination,
 			});
 			const sentToSessionId = sentFromSessionId ?? createdSessionId;
 			if (outcome.kind === "failed" || outcome.kind === "refused") {
 				if (composerDraft.sendFailed(unsentDraft, sentToSessionId, textOverride === undefined, outcome.kind === "failed" && outcome.alreadySent === true)) {
 					cursorPos = composerDraft.text.length;
-					pendingAttachments = unsentImages;
+				}
+				if (outcome.kind === "failed" && outcome.draftAttachmentMissing && projectSlug) {
+					const key = sentToSessionId ? { session: sentToSessionId } : sourceKey;
+					if (key) await recoverMissingDraftAttachment(outcome.draftAttachmentMissing, projectSlug, key);
 				}
 				return false;
 			}
-			if (composerDraft.sendSucceeded(sentToSessionId, delivery === "steer", textOverride === undefined)) {
-				pendingAttachments = [];
+			attachmentError = "";
+			if (sourceKey) composerDraft.attachmentsAccepted(sourceKey, attachmentIds);
+			if (composerDraft.sendSucceeded(sentToSessionId, delivery === "steer", textOverride === undefined, unsentDraft)) {
 				cursorPos = 0;
 			}
 			return true;
@@ -927,7 +956,6 @@
 	}
 
 	function clearComposer() {
-		pendingAttachments = [];
 		attachmentError = "";
 		composerDraft.clear();
 		cursorPos = 0;
@@ -999,25 +1027,27 @@
 
 	/** All picker entries share one attachment row and one send path. */
 	async function processSelectedFiles(files: File[]) {
-		const context = sessionModeContext;
+		const key = composerDraft.key;
+		const projectSlug = composerProjectSlug;
+		if (!key) return;
 		attachmentError = "";
 		readingAttachments++;
 		try {
 			for (const file of files) {
 				try {
 					const { dataUrl, resized } = await prepareFileAttachment(file);
-					if (context !== sessionModeContext) return;
-					pendingAttachments = [...pendingAttachments, {
+					composerDraft.addAttachment(key, {
 						id: crypto.randomUUID(),
 						dataUrl,
+						...(projectSlug ? { projectSlug } : {}),
+						mime: dataUrl.slice(5).split(/[;,]/)[0] ?? file.type,
 						name: file.name,
 						size: file.size,
-					}];
+					});
 					if (resized) {
 						showToast(`"${file.name}" was resized to fit the 5 MB encoded size limit`, { variant: "warn" });
 					}
 				} catch (err) {
-					if (context !== sessionModeContext) return;
 					const message = err instanceof Error ? err.message : "Could not read the file.";
 					attachmentError += `${attachmentError ? "\n" : ""}"${file.name}" could not be attached. ${message}`;
 				}
@@ -1028,22 +1058,15 @@
 	}
 
 	/** Ask replies and queued edits use the same unsent composer draft. */
-	function addToDraft(text: string, images: readonly string[] = []) {
+	function addToDraft(text: string) {
 		composerDraft.text = composerDraft.text.trim() ? `${composerDraft.text.trimEnd()}\n\n${text}` : text;
 		handleInput();
 		cursorPos = composerDraft.text.length;
-		pendingAttachments = [
-			...pendingAttachments,
-			...images.map((dataUrl) => {
-				const { mime, name, size } = parseAttachmentDataUrl(dataUrl);
-				return { id: crypto.randomUUID(), dataUrl, name: name ?? (mime.startsWith("image/") ? "image" : "file"), size };
-			}),
-		];
 		textareaEl?.focus();
 	}
 
-	function removePendingAttachment(id: string) {
-		pendingAttachments = pendingAttachments.filter((img) => img.id !== id);
+	function removeDraftAttachment(id: string) {
+		composerDraft.removeAttachment(id);
 	}
 
 	function handleCommandSelect(command: string) {
@@ -1330,10 +1353,10 @@
 			</ComposerStrip>
 		{/if}
 		<ComposerFrame id="input-row" compact={sessionViewState.compact} words={composerPreferences.controls === "words"} goal={goal.border}>
-			{#if pendingAttachments.length > 0}
-				<PastePreview images={pendingAttachments} onRemove={removePendingAttachment} />
+			{#if draftAttachments.length > 0}
+				<PastePreview images={draftAttachments} projectSlug={composerProjectSlug} onRemove={removeDraftAttachment} onRetry={(id) => composerDraft.retryAttachment(id)} />
 			{/if}
-			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
+			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" data-phone-icons={composerPreferences.controls === "icons" && sessionViewState.composerTier === "phone" ? "" : undefined} splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
 				{#snippet field()}
 					<!-- Textarea row.
 					     The composer grows with its text and then scrolls, and both of those
@@ -1367,12 +1390,13 @@
 								and which only squatted on their utility group.
 								`outline-none` is load-bearing and now comes from `bare`.
 
-								The text colour moved from two `class:` directives into the
-								class string because Svelte has no `class:` directive on a
-								COMPONENT tag. That is also why `bare` emits no text colour:
-								this swap and a primitive `text-text` would be two utilities
-								in one Tailwind group, resolved by stylesheet order, and the
-								call site would lose.
+								The textarea paints the visible text, always. The caret is
+								placed from the textarea's own layout, so only glyphs from that
+								same layout can be guaranteed to sit under it: iOS lays out
+								text the backdrop never sees (inline predictions, marked text),
+								and any such disagreement used to show up as caret drift. The
+								backdrop only paints decorations behind these glyphs; if it
+								ever wraps differently, a pill shifts, never the caret.
 							-->
 							<Textarea
 								id="input"
@@ -1386,11 +1410,9 @@
 								{placeholder}
 								autocomplete="off"
 								enterkeyhint={isMobile() ? "enter" : "send"}
-								class="composer-text-metrics absolute inset-0 z-10 caret-[var(--color-text)] resize-none placeholder:text-text-dimmer {plainText
+								class="composer-text-metrics absolute inset-0 z-10 text-text caret-[var(--color-text)] resize-none placeholder:text-text-dimmer {plainText
 									? 'overflow-y-auto'
-									: 'overflow-hidden'} {composing || plainText
-									? 'text-text'
-									: 'text-transparent'}"
+									: 'overflow-hidden'}"
 								bind:value={() => referenceView.text, referenceEditor.input}
 								bind:element={textareaEl}
 								onbeforeinput={referenceEditor.beforeInput}
@@ -1450,7 +1472,7 @@
 						<div
 							in:fade={{ duration: 180 }}
 							id="input-bottom-right"
-							data-testid={sessionViewState.composerTier !== "phone" ? "composer-icons-left" : undefined}
+							data-testid="composer-icons-left"
 							class="flex w-full items-center min-w-0 gap-[2px]"
 						>
 							<!-- Harness instance + model picker -->
@@ -1459,11 +1481,12 @@
 							<!-- Approvals (permission mode) selector -->
 							<PermissionModeSelector />
 							<span class="grow"></span>
-							{#if composerPreferences.controls === "icons" && sessionViewState.composerTier !== "phone" && !settingsPending && currentSession && composerDirectory}
+							{#if !settingsPending && currentSession && composerDirectory}
 								{@const session = currentSession}
 								{#key session.id}
 									<GitIdentity
 										presentation="control"
+										compact={sessionViewState.composerTier === "phone"}
 										directory={composerDirectory}
 										git={composerGit}
 										workspaceCause={session.workspace?.cause}
@@ -1511,7 +1534,7 @@
 						>
 							{#if sendMode === "switch" && switchTarget}
 								{#if !sessionViewState.compact}<span data-testid="composer-send-switch-prefix">Send on</span>{/if}
-								<AccountDot instanceId={switchTarget.id} size={7} />
+								<HarnessLogo driver={getInstanceById(switchTarget.id)?.driver ?? composerTraits?.usageHarness ?? "claude"} instanceId={switchTarget.id} size={15} data-testid="account-logo" />
 								<span data-testid="composer-send-switch-label">{switchTarget.name}</span>
 							{:else}
 								{@render sendAtLabel()}
@@ -1540,8 +1563,8 @@
 							</MenuItem>
 							{#each sendAccounts as option (option.id)}
 								<MenuItem density="compact" data-testid="composer-send-menu-account" data-account={option.id} data-selected={sendMode === "switch" && switchTarget?.id === option.id ? "true" : undefined} disabled={switchingAccount} class="rounded-[7px] {sendMode === 'switch' && switchTarget?.id === option.id ? 'bg-border-chip' : ''}" onselect={() => { composerDraft.sendPick = { mode: "switch", accountId: option.id }; }}>
-									<AccountDot instanceId={option.id} size={7} />
-									<span class="flex-1">Send now on {option.name}</span>
+									<HarnessLogo driver={getInstanceById(option.id)?.driver ?? composerTraits?.usageHarness ?? "claude"} instanceId={option.id} size={15} aligned data-testid="account-logo" />
+									<span class="min-w-0 flex-1 truncate">Send now on {option.name}</span>
 									<span class="font-mono text-[10.5px] text-text-dimmer">{#if option.usageUnknown}usage unknown{:else if option.fullest}{composerTraits?.usageHarness === "codex" ? option.fullest.label ?? "usage" : option.fullest.kind === "five_hour" ? "5h" : "wk"} {Math.round(option.fullest.utilization)}%{/if}</span>
 								</MenuItem>
 							{/each}

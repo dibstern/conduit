@@ -121,6 +121,7 @@ async function setup(page: Page) {
 			SubscribeInputDraft: ({ key }) => [
 				{
 					_tag: "synchronized",
+					attachments: [],
 					...((key as { session?: string }).session && {
 						text: `Prompt for ${(key as { session?: string }).session}`,
 					}),

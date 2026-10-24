@@ -159,6 +159,13 @@ export const StaleLight: Story = { ...Stale, globals: { theme: "light" } };
 export const Generating: Story = {
 	...WholeTurn,
 	args: { ...WholeTurn.args, generating: true, live: true },
+	play: async ({ canvasElement }) => {
+		await expect(
+			canvasElement.ownerDocument.querySelector(
+				'.summary-busy [data-flow-glyph="running"]',
+			),
+		).toBeVisible();
+	},
 };
 export const GeneratingLight: Story = {
 	...Generating,

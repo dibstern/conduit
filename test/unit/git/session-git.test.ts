@@ -1,20 +1,55 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { Schema } from "effect";
+import { join, relative } from "node:path";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-	createSessionGitCache,
+	invalidateSessionGitRepository,
 	readSessionGit,
-	withCachedSessionGit,
-} from "../../../src/lib/git/session-git.js";
+} from "../../../src/lib/domain/daemon/Layers/session-git/git-reader.js";
 import {
-	type SessionInfo,
-	SessionInfoSchema,
-} from "../../../src/lib/shared-types.js";
+	makeSubprocess,
+	Subprocess,
+} from "../../../src/lib/domain/daemon/Services/subprocess.js";
+import { hasNoCommitsBeyondDefault } from "../../../src/lib/git/worktrees.js";
 
 const roots: string[] = [];
+const owners: ReturnType<typeof makeSubprocess>[] = [];
+const subprocess = () => {
+	const owner = makeSubprocess();
+	owners.push(owner);
+	return { owner, runner: vi.fn(owner.makeRunner()) };
+};
+const warmRead = async (directory: string) => {
+	const { owner, runner } = subprocess();
+	const previous = await readSessionGit(directory, undefined, runner);
+	expect(runner.mock.calls.some(([, args]) => args.includes("--short"))).toBe(
+		false,
+	);
+	const before = Effect.runSync(owner.metrics);
+	runner.mockClear();
+	const value = await readSessionGit(directory, previous, runner);
+	expect(value).toEqual(previous);
+	const after = Effect.runSync(owner.metrics);
+	expect(after.spawnCount - before.spawnCount).toBe(1);
+	expect(
+		(after.commands["git"]?.spawnCount ?? 0) -
+			(before.commands["git"]?.spawnCount ?? 0),
+	).toBe(1);
+	expect(runner.mock.calls.map(([, args]) => args.slice(0, 2))).toEqual([
+		["--no-optional-locks", "status"],
+	]);
+	expect(runner.mock.calls[0]?.[2].env?.["GIT_OPTIONAL_LOCKS"]).toBe("0");
+	return value;
+};
 const git = (cwd: string, ...args: string[]) =>
 	execFileSync("git", args, {
 		cwd,
@@ -37,16 +72,173 @@ const commit = (directory: string, name: string) => {
 	writeFileSync(join(directory, name), name);
 	git(directory, "add", name);
 	git(directory, "commit", "-qm", name);
-	return git(directory, "rev-parse", "--short", "HEAD");
+	return git(directory, "rev-parse", "HEAD").slice(0, 7);
 };
 
-afterEach(() => {
+afterEach(async () => {
 	vi.unstubAllEnvs();
+	for (const owner of owners.splice(0)) await Effect.runPromise(owner.shutdown);
 	for (const directory of roots.splice(0))
 		rmSync(directory, { recursive: true, force: true });
 });
 
 describe("readSessionGit", () => {
+	// Failure modes: HEAD lives in a gitfile/commondir or packed ref; unborn and
+	// detached heads differ; a cache misses external ref changes or crosses repos;
+	// unusual ref storage needs git.
+	it.each([
+		"branch",
+		"detached",
+		"unborn",
+		"packed",
+		"feature",
+	])("uses one subprocess for a warm %s read, preserving the pill", async (kind) => {
+		const directory = repo();
+		if (kind === "detached") git(directory, "config", "core.abbrev", "12");
+		let head: string | undefined;
+		if (kind !== "unborn") head = commit(directory, "initial");
+		if (kind === "detached") git(directory, "checkout", "--detach", "-q");
+		if (kind === "packed") git(directory, "pack-refs", "--all");
+		if (kind === "feature") {
+			git(directory, "checkout", "-qb", "feature");
+			head = commit(directory, "feature-file");
+		}
+		const value = await warmRead(directory);
+		expect(value).toMatchObject({ dirty: false });
+		if (head) expect(value?.head).toBe(head);
+		else expect(value).not.toHaveProperty("head");
+		if (kind === "detached") expect(value).not.toHaveProperty("branch");
+		else expect(value?.branch).toBe(kind === "feature" ? "feature" : "main");
+		expect(value).not.toHaveProperty("ahead");
+		expect(value).not.toHaveProperty("behind");
+	});
+	it("shares default refs across linked worktrees with relative gitfiles", async () => {
+		const directory = repo();
+		commit(directory, "initial");
+		const linked = join(root(), "linked");
+		git(directory, "worktree", "add", "-qb", "feature", linked);
+		const gitDir = git(linked, "rev-parse", "--absolute-git-dir");
+		writeFileSync(
+			join(linked, ".git"),
+			`gitdir: ${relative(realpathSync(linked), gitDir)}\n`,
+		);
+		const { runner } = subprocess();
+		await readSessionGit(directory, undefined, runner);
+		runner.mockClear();
+		await readSessionGit(linked, undefined, runner);
+		expect(
+			runner.mock.calls.some(([, args]) => args.includes("for-each-ref")),
+		).toBe(false);
+		expect(await warmRead(linked)).toMatchObject({
+			branch: "feature",
+			worktree: "linked",
+		});
+		const nested = join(linked, "nested");
+		mkdirSync(nested);
+		expect(await warmRead(nested)).toMatchObject({
+			branch: "feature",
+			worktree: "linked",
+		});
+	});
+	it("reads each folder of a multi-folder workspace with one warm spawn", async () => {
+		const folders = [repo(), repo()] as const;
+		const heads = folders.map((directory, index) =>
+			commit(directory, `file-${index}`),
+		);
+		const { owner, runner } = subprocess();
+		const previous = await Promise.all(
+			folders.map((directory) => readSessionGit(directory, undefined, runner)),
+		);
+		const before = Effect.runSync(owner.metrics).spawnCount;
+		const values = await Promise.all(
+			folders.map((directory, index) =>
+				readSessionGit(directory, previous[index], runner),
+			),
+		);
+		expect(Effect.runSync(owner.metrics).spawnCount - before).toBe(2);
+		expect(values.map((value) => value?.head)).toEqual(heads);
+	});
+	it("invalidates absent, loose, symbolic and packed default refs without a watcher", async () => {
+		const directory = repo();
+		commit(directory, "initial");
+		git(directory, "branch", "-m", "topic");
+		expect(await warmRead(directory)).not.toHaveProperty("merged");
+		git(directory, "branch", "main");
+		expect(await warmRead(directory)).toMatchObject({ merged: false });
+		git(directory, "branch", "-D", "main");
+		git(
+			directory,
+			"symbolic-ref",
+			"refs/remotes/origin/HEAD",
+			"refs/remotes/origin/trunk",
+		);
+		expect(await warmRead(directory)).not.toHaveProperty("merged");
+		git(directory, "update-ref", "refs/remotes/origin/trunk", "HEAD");
+		expect(await warmRead(directory)).toMatchObject({ merged: false });
+		git(directory, "pack-refs", "--all");
+		expect(await warmRead(directory)).toMatchObject({ merged: false });
+		git(directory, "update-ref", "-d", "refs/remotes/origin/trunk");
+		expect(await warmRead(directory)).not.toHaveProperty("merged");
+	});
+	it("can explicitly invalidate a repository shared by worktrees", async () => {
+		const directory = repo();
+		commit(directory, "initial");
+		git(directory, "checkout", "-qb", "feature");
+		commit(directory, "feature-file");
+		await warmRead(directory);
+		invalidateSessionGitRepository(join(directory, ".git"));
+		const { runner } = subprocess();
+		await readSessionGit(directory, undefined, runner);
+		expect(
+			runner.mock.calls.some(([, args]) => args.includes("for-each-ref")),
+		).toBe(true);
+		expect(
+			runner.mock.calls.some(([, args]) => args.includes("merge-base")),
+		).toBe(true);
+	});
+	it("falls back for a symlinked HEAD", async () => {
+		const directory = repo();
+		commit(directory, "initial");
+		git(directory, "config", "core.abbrev", "12");
+		const head = git(directory, "rev-parse", "--short", "HEAD");
+		const headFile = join(directory, ".git", "HEAD");
+		rmSync(headFile);
+		symlinkSync("refs/heads/main", headFile);
+		const { runner } = subprocess();
+		expect(await readSessionGit(directory, undefined, runner)).toMatchObject({
+			head,
+			branch: "main",
+		});
+		expect(
+			runner.mock.calls.some(([, args]) => args.includes("--absolute-git-dir")),
+		).toBe(true);
+	});
+	it("falls back for reftable repositories when supported", async (context) => {
+		const directory = root();
+		if (
+			spawnSync(
+				"git",
+				["init", "-q", "--ref-format=reftable", "--initial-branch=main"],
+				{ cwd: directory },
+			).status !== 0
+		) {
+			context.skip();
+			return;
+		}
+		git(directory, "config", "user.name", "Test User");
+		git(directory, "config", "user.email", "test@example.com");
+		commit(directory, "initial");
+		const head = git(directory, "rev-parse", "--short", "HEAD");
+		const { runner } = subprocess();
+		expect(await readSessionGit(directory, undefined, runner)).toMatchObject({
+			head,
+			branch: "main",
+			merged: false,
+		});
+		expect(
+			runner.mock.calls.some(([, args]) => args.includes("--absolute-git-dir")),
+		).toBe(true);
+	});
 	it("returns undefined outside a repository", async () => {
 		expect(await readSessionGit(root())).toBeUndefined();
 	});
@@ -55,13 +247,37 @@ describe("readSessionGit", () => {
 		git(directory, "init", "--bare", "-q");
 		expect(await readSessionGit(directory)).toBeUndefined();
 	});
-	it("reads a named branch and its short head", async () => {
+	it("reads a clean named branch and its full and short head", async () => {
 		const directory = repo();
 		const head = commit(directory, "initial");
 		expect(await readSessionGit(directory)).toMatchObject({
 			branch: "main",
 			head,
+			oid: git(directory, "rev-parse", "HEAD"),
+			dirty: false,
 			merged: false,
+		});
+		expect(await readSessionGit(directory)).not.toHaveProperty("changes");
+	});
+	it("counts tracked edits and each untracked file, with line totals against HEAD", async () => {
+		const directory = repo();
+		// A file named HEAD makes `git diff HEAD` ambiguous without `--`.
+		writeFileSync(join(directory, "HEAD"), "one\ntwo\nthree\n");
+		git(directory, "add", "HEAD");
+		git(directory, "commit", "-qm", "initial");
+		writeFileSync(join(directory, "HEAD"), "one\nreplacement\nthree\n");
+		git(directory, "add", "HEAD");
+		writeFileSync(join(directory, "HEAD"), "one\nreplacement\nthree\nfour\n");
+		writeFileSync(
+			join(directory, "untracked"),
+			"not counted\nin line totals\n",
+		);
+		mkdirSync(join(directory, "newdir"));
+		writeFileSync(join(directory, "newdir", "a"), "a\n");
+		writeFileSync(join(directory, "newdir", "b"), "b\n");
+		expect(await readSessionGit(directory)).toMatchObject({
+			dirty: true,
+			changes: { files: 4, insertions: 2, deletions: 1 },
 		});
 	});
 	it("reports modifications to a tracked file as dirty", async () => {
@@ -86,6 +302,7 @@ describe("readSessionGit", () => {
 		commit(directory, "feature-only");
 		expect(await readSessionGit(directory)).toMatchObject({
 			branch: "feature",
+			upstream: "upstream",
 			ahead: 1,
 			behind: 1,
 			dirty: false,
@@ -97,12 +314,17 @@ describe("readSessionGit", () => {
 		const state = await readSessionGit(directory);
 		expect(state).not.toHaveProperty("ahead");
 		expect(state).not.toHaveProperty("behind");
+		expect(state).not.toHaveProperty("upstream");
 	});
 	it("omits the branch for detached HEAD", async () => {
 		const directory = repo();
 		const head = commit(directory, "initial");
 		git(directory, "checkout", "--detach", "-q");
-		expect(await readSessionGit(directory)).toEqual({ head, dirty: false });
+		expect(await readSessionGit(directory)).toEqual({
+			head,
+			oid: git(directory, "rev-parse", "HEAD"),
+			dirty: false,
+		});
 	});
 	it("identifies a linked worktree", async () => {
 		const directory = repo();
@@ -431,9 +653,20 @@ describe("readSessionGit", () => {
 			dirty: false,
 		});
 	});
+	it("counts staged and untracked files in an unborn branch without line totals", async () => {
+		const directory = repo();
+		writeFileSync(join(directory, "staged"), "staged\n");
+		git(directory, "add", "staged");
+		writeFileSync(join(directory, "untracked"), "untracked\n");
+		expect(await readSessionGit(directory)).toEqual({
+			branch: "main",
+			dirty: true,
+			changes: { files: 2, insertions: 0, deletions: 0 },
+		});
+	});
 });
 
-describe("createSessionGitCache", () => {
+describe("previous session git state", () => {
 	// Reflog expiry must not move a known merge time; a changed branch tip must
 	// compute a new one, and an uncached fast-forward must fall back safely.
 	it("reuses mergedAt for an unchanged merged head after its reflog expires", async () => {
@@ -447,177 +680,75 @@ describe("createSessionGitCache", () => {
 		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:02:00Z");
 		git(directory, "merge", "--ff-only", "-q", "feature");
 		git(directory, "checkout", "-q", "feature");
-		const cache = createSessionGitCache();
+		const previous = await readSessionGit(directory);
 		const mergedAt = Date.parse("2026-01-01T00:02:00Z");
-		expect(await cache.refresh(directory)).toMatchObject({ mergedAt });
+		expect(previous).toMatchObject({ mergedAt });
 		git(directory, "reflog", "expire", "--expire=all", "refs/heads/main");
 		expect(await readSessionGit(directory)).toMatchObject({
 			mergedAt: Date.parse("2026-01-01T00:01:00Z"),
 		});
-		expect(await cache.refresh(directory)).toMatchObject({ mergedAt });
+		invalidateSessionGitRepository(join(directory, ".git"));
+		expect(await readSessionGit(directory, previous)).toMatchObject({
+			mergedAt,
+		});
+		expect(await readSessionGit(directory)).toMatchObject({
+			mergedAt: Date.parse("2026-01-01T00:01:00Z"),
+		});
 		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:03:00Z");
 		commit(directory, "more-work");
-		const unmerged = await cache.refresh(directory);
+		const unmerged = await readSessionGit(directory, previous);
 		expect(unmerged).toMatchObject({ merged: false });
 		expect(unmerged).not.toHaveProperty("mergedAt");
 		git(directory, "checkout", "-q", "main");
 		vi.stubEnv("GIT_COMMITTER_DATE", "2026-01-01T00:04:00Z");
 		git(directory, "merge", "--ff-only", "-q", "feature");
 		git(directory, "checkout", "-q", "feature");
-		expect(await cache.refresh(directory)).toMatchObject({
+		expect(await readSessionGit(directory, unmerged)).toMatchObject({
 			mergedAt: Date.parse("2026-01-01T00:04:00Z"),
 		});
 	});
-
-	it("shares one in-flight read and keeps peek synchronous", async () => {
-		let finish: (value: { branch: string }) => void = () => {
-			throw new Error("not started");
-		};
-		const read = vi.fn(
-			() =>
-				new Promise<{ branch: string }>((resolve) => {
-					finish = resolve;
-				}),
-		);
-		const cache = createSessionGitCache(read);
-		const first = cache.refresh("/project");
-		const second = cache.refresh("/project");
-		expect(read).toHaveBeenCalledTimes(1);
-		expect(cache.peek("/project")).toBeUndefined();
-		finish({ branch: "main" });
-		expect(await first).toEqual({ branch: "main" });
-		expect(await second).toEqual({ branch: "main" });
-		expect(cache.peek("/project")).toEqual({ branch: "main" });
-	});
 });
 
-// Failure modes: a secondary folder is omitted or uses the main checkout;
-// primary fields are replaced by a secondary status; labels collide; non-git
-// primary folders hide git extras; stale session git survives a failed read.
-// Conduit workspaces must report unmapped folders as shared, including non-git
-// folders, without giving those folders invented git status or storing flags.
-describe("cached folder git", () => {
-	const session: SessionInfo = {
-		projectSlug: "test-project",
-		accountId: null,
-		id: "session",
-		title: "Folders",
-		status: "idle",
-	};
-
-	it("derives shared non-git and later-attached git folders from a conduit workspace", async () => {
-		const cache = createSessionGitCache(async (directory) =>
-			directory === "/scratch"
-				? undefined
-				: {
-						branch: directory.startsWith("/worktree/")
-							? "feature/together"
-							: "main",
-						dirty: false,
-					},
+// Destructive rechecks must observe moved or removed default refs and must keep
+// a checkout when inspection fails or its head is not in any local default ref.
+describe("hasNoCommitsBeyondDefault", () => {
+	it("rechecks real default refs on every call, including remote HEAD", async () => {
+		const directory = repo();
+		commit(directory, "initial");
+		const initial = git(directory, "rev-parse", "HEAD");
+		git(directory, "checkout", "-qb", "feature");
+		commit(directory, "feature-file");
+		const head = git(directory, "rev-parse", "HEAD");
+		const { owner } = subprocess();
+		const check = () =>
+			Effect.runPromise(
+				hasNoCommitsBeyondDefault(directory, head).pipe(
+					Effect.provideService(Subprocess, owner),
+				),
+			);
+		expect(await check()).toBe(false);
+		git(directory, "update-ref", "refs/heads/main", head);
+		expect(await check()).toBe(true);
+		git(directory, "update-ref", "refs/heads/main", initial);
+		expect(await check()).toBe(false);
+		git(directory, "branch", "-D", "main");
+		git(
+			directory,
+			"symbolic-ref",
+			"refs/remotes/origin/HEAD",
+			"refs/remotes/origin/trunk",
 		);
-		await Promise.all(
-			["/worktree/app", "/worktree/api", "/scratch", "/late"].map(
-				cache.refresh,
-			),
-		);
-		const workspace = {
-			cause: "launch" as const,
-			origin: "conduit" as const,
-			worktrees: { "/app": "/worktree/app", "/api": "/worktree/api" },
-		};
-		const result = withCachedSessionGit(
-			{ ...session, workspace },
-			["/app", "/api", "/scratch", "/late"],
-			cache,
-		);
-		expect(result.git?.folders).toEqual([
-			{ root: "/app", label: "app", branch: "feature/together", dirty: false },
-			{ root: "/api", label: "api", branch: "feature/together", dirty: false },
-			{ root: "/scratch", label: "scratch", shared: true },
-			{
-				root: "/late",
-				label: "late",
-				branch: "main",
-				dirty: false,
-				shared: true,
-			},
-		]);
-		expect(Schema.decodeUnknownSync(SessionInfoSchema)(result).git).toEqual(
-			result.git,
-		);
-		expect(result.workspace).toEqual(workspace);
-		expect(
-			withCachedSessionGit(
-				{ ...session, workspace: { ...workspace, origin: "existing" } },
-				["/app", "/api", "/scratch", "/late"],
-				cache,
-			).git?.folders,
-		).toEqual([
-			{ root: "/app", label: "app", branch: "feature/together", dirty: false },
-			{ root: "/api", label: "api", branch: "feature/together", dirty: false },
-			{ root: "/late", label: "late", branch: "main", dirty: false },
-		]);
+		git(directory, "update-ref", "refs/remotes/origin/trunk", head);
+		expect(await check()).toBe(true);
+		git(directory, "update-ref", "refs/remotes/origin/trunk", initial);
+		expect(await check()).toBe(false);
 	});
-
-	it("keeps primary fields and labels each effective folder, skipping non-git", async () => {
-		const cache = createSessionGitCache(async (directory) => {
-			if (directory === "/scratch") return undefined;
-			return directory === "/worktree/api"
-				? { head: "abc1234", dirty: true, ahead: 2, behind: 1 }
-				: { branch: "main", dirty: false };
-		});
-		await Promise.all(
-			["/one/app", "/worktree/api", "/scratch"].map(cache.refresh),
-		);
-		const result = withCachedSessionGit(
-			{
-				...session,
-				workspace: {
-					cause: "user",
-					origin: "existing",
-					worktrees: { "/two/app": "/worktree/api" },
-				},
-			},
-			["/one/app", "/two/app", "/scratch"],
-			cache,
-		);
-		// The compatibility fields still describe the Effective Working Directory.
-		expect(result.git).toMatchObject({ head: "abc1234", dirty: true });
-		expect(result.git?.folders).toEqual([
-			{ root: "/one/app", label: "/one/app", branch: "main", dirty: false },
-			{
-				root: "/two/app",
-				label: "/two/app",
-				head: "abc1234",
-				dirty: true,
-				ahead: 2,
-				behind: 1,
-			},
-		]);
-		expect(Schema.decodeUnknownSync(SessionInfoSchema)(result).git).toEqual(
-			result.git,
-		);
-	});
-
-	it("reports git extras when the primary is non-git and removes obsolete git", async () => {
-		const cache = createSessionGitCache(async (directory) =>
-			directory === "/scratch" ? undefined : { branch: "topic", dirty: false },
-		);
-		await Promise.all(["/scratch", "/api", "/web"].map(cache.refresh));
+	it("keeps non-git directories and repositories with no usable default head", async () => {
 		expect(
-			withCachedSessionGit(
-				session,
-				["/scratch", "/api", "/web"],
-				cache,
-			).git?.folders?.map(({ root }) => root),
-		).toEqual(["/api", "/web"]);
+			await Effect.runPromise(hasNoCommitsBeyondDefault(root(), "HEAD")),
+		).toBe(false);
 		expect(
-			withCachedSessionGit(
-				{ ...session, git: { branch: "old" } },
-				["/scratch"],
-				cache,
-			),
-		).not.toHaveProperty("git");
+			await Effect.runPromise(hasNoCommitsBeyondDefault(repo(), "HEAD")),
+		).toBe(false);
 	});
 });

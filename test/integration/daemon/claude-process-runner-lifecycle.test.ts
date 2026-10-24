@@ -146,6 +146,11 @@ describe("Claude runner admission socket probes", () => {
 		vi.stubEnv("HOME", join(root, "home"));
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, "claude"));
 		vi.stubEnv("CONDUIT_CONFIG_DIR", configDir);
+		// Built dist omits test helpers, so respawned runners load the source fixture.
+		vi.stubEnv(
+			"NODE_OPTIONS",
+			`${process.env["NODE_OPTIONS"] ?? ""} --import=${import.meta.resolve("tsx")}`,
+		);
 		vi.stubEnv(
 			"NODE_OPTIONS",
 			`${process.env["NODE_OPTIONS"] ?? ""} --import ${pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href}`,
