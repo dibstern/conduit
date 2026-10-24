@@ -286,7 +286,12 @@ export class RunnerSocket {
 	private peerTaggedConfigDir = false;
 	scopedCursorCredentials = false;
 	private peerDriverKind: string | undefined;
-	private retainedSends: RunnerHello["sendCommands"];
+	private helloSends: RunnerHello["sendCommands"];
+
+	/** The original hello journal, unaffected by acknowledgements or new sends. */
+	get retainedSends(): RunnerHello["sendCommands"] {
+		return this.helloSends;
+	}
 
 	constructor(
 		private readonly socket: Socket,
@@ -305,7 +310,7 @@ export class RunnerSocket {
 					this.scopedCursorCredentials =
 						message.scopedCursorCredentials === true;
 					this.peerDriverKind = message.driverKind;
-					this.retainedSends = message.sendCommands;
+					this.helloSends = message.sendCommands;
 				}
 				if (message.type === "idle-exit") this.idleExiting = true;
 				if (message.type === "command-accepted") {
