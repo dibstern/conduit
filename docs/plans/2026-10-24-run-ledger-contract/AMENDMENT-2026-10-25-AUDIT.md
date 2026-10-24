@@ -5,9 +5,8 @@ bottlenecks, and deepening not yet taken. This file wins over every other file i
 folder, including `AMENDMENT-2026-10-25-RUNNER-AUTHORITY.md` (RA). BG is
 `AMENDMENT-2026-10-24-BACKGROUND-WORK.md`; FB is `AMENDMENT-2026-10-24-FACT-BOOK.md`.
 
-User-facing behaviour is unchanged except where a section says otherwise. The survivor
-notice wording (D1: "It can't make further changes") is still open: BG's Limit says a
-surviving process can still edit files.
+User-facing behaviour is unchanged except where a section says otherwise (A12 changes
+the survivor kill and its notice, Q18 = D).
 
 ## Supersedes
 
@@ -136,6 +135,25 @@ A runner event either answers a Send Token or is an unsolicited observation that
 only the host label (`runnerId:querySeq`): background snapshots and task events, a turn
 start with no active Run (a wake Run), process events. No fictitious send is minted.
 
+## A12. Kill the process group; the notice promises only what conduit controls (Q18 = D)
+
+The runner host is spawned detached, so it leads its own process group, but every kill
+signalled only its pid: the Claude CLI under it and the commands that CLI started could
+outlive it and keep editing files.
+
+- Every runner kill (Stop escalation, retirement, survivor retries) signals the process
+  group (`process.kill(-pid, signal)`), after the same identity check on the leader's
+  `{pid, startTime}`. An unverifiable leader is never signalled. A leader that is gone,
+  reused or a zombie counts as exited, as before; the group is not signalled again.
+- The "signalled but not exited" notice (replaces D1's wording): "The previous run (pid
+  P) was told to stop but hasn't exited yet. It can't change this session any more and
+  will exit when the system releases it." The "never signalled" wording is unchanged.
+- Limit, unchanged: a descendant that detached itself into another group, or a process
+  stuck in the kernel, can outlive the kill. Retired and confirmed-dead stay separate.
+
+Prior art: no competitor signals the group or shows a notice; t3code, bb, paseo, zeron
+and monocode respawn beside a survivor silently (D1).
+
 ## Already covered
 
 - 32.8's unconditional escalation at the interrupt deadline: 32.8 already defers the
@@ -152,7 +170,7 @@ start with no active Run (a wake Run), process events. No fictitious send is min
 
 | Ticket | Change |
 |---|---|
-| 32.17 (R2) | A1 before-ledger obligation, A2, A3's 60 s cadence |
+| 32.17 (R2) | A1 before-ledger obligation, A2, A3's 60 s cadence, A12 |
 | 32.2.5 | A6 |
 | 32.2.11 | A4 deadline as a ledger deadline; A11 unsolicited observations |
 | 32.3 | A5, A7, the per-session row of A8 |
