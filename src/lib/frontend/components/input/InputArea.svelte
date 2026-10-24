@@ -339,6 +339,7 @@
 			? `Message${composerPresentation ? ` ${composerPresentation.label}` : ""}… sends at ${sendAtTime}`
 			: currentSession?.settledAt != null ? "Message to un-settle…" :
 			currentSession && isSessionSnoozed(currentSession, sessionState.now) ? "Message to wake…" :
+			currentSession?.sideThread && sessionState.currentParentId ? "Ask a side question…" :
 			sessionViewState.compact ? "Reply…" :
 			sessionJevEnabled(currentSession) ? "Reply… (↩ Reply on a message drops a reference here)" :
 			composerPresentation ? `Reply to ${composerPresentation.label}…` : "Reply…",

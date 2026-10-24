@@ -100,7 +100,7 @@ test.describe("Side Threads list", () => {
 			).toHaveText([question]);
 			await attachScreenshot(other, testInfo, "second-client-list");
 
-			await chat.subagentBackBtn.click();
+			await chat.sideThreadParentCrumb.click();
 			await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
 			const control = page.getByTestId("side-threads-control");
 			await expect(control).toHaveAccessibleName("1 Side Thread");
@@ -148,7 +148,10 @@ test.describe("Side Threads list", () => {
 				chat.assistantMessages.filter({ hasText: /alpha/i }),
 			).toHaveCount(1);
 			await expect(chat.assistantMessages.last()).toContainText("ok, raised");
-			await expect(chat.subagentBackBar).toContainText("Side Thread of");
+			await expect(chat.sideThreadParentCrumb).toContainText(
+				await other.getByTestId("session-bar-title").innerText(),
+			);
+			await expect(chat.subagentBackBar).toHaveCount(0);
 			await attachScreenshot(page, testInfo, "follow-up-after-reload");
 		} finally {
 			await context.close();
@@ -166,7 +169,7 @@ test.describe("Side Threads list", () => {
 			relayUrl,
 			harness.eventsDbPath,
 		);
-		await chat.subagentBackBtn.click();
+		await chat.sideThreadParentCrumb.click();
 		await page.getByTestId("side-threads-control").click();
 		await page.getByTestId("side-thread-delete").click();
 		await expect(page.getByRole("dialog")).toContainText(
@@ -207,7 +210,7 @@ test.describe("Side Threads list", () => {
 			relayUrl,
 			harness.eventsDbPath,
 		);
-		await chat.subagentBackBtn.click();
+		await chat.sideThreadParentCrumb.click();
 		await page
 			.getByTestId("session-bar-overflow")
 			.or(page.getByTestId("session-bar-island-overflow"))
