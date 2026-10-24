@@ -14,6 +14,7 @@
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getActiveModel } from "../../stores/discovery.svelte.js";
 	import { resolveModelParameters } from "./model-parameters.js";
+	import { effortLevels as knownLevels } from "./effort-levels.js";
 
 	let { onOpen, variant = "icons", children, wordLabel }: {
 		onOpen?: (() => void) | undefined;
@@ -38,13 +39,6 @@
 		? parameterState.variantUnavailable ? 0 : (parameterEffort?.options.findIndex((option) => option.value === currentEffort) ?? -1) + 1
 		: currentVariant ? variants.indexOf(currentVariant) + 1 : 0);
 
-	const knownLevels = [
-		{ value: "low", name: "Low", label: "LOW", description: "Quick, light reasoning" },
-		{ value: "medium", name: "Medium", label: "MEDIUM", description: "Balanced" },
-		{ value: "high", name: "High", label: "HIGH", description: "Thinks harder, slower" },
-		{ value: "xhigh", name: "Extra high", label: "XHIGH", description: "Deeper still, for hard problems" },
-		{ value: "max", name: "Max", label: "MAX", description: "Most thorough, slowest" },
-	];
 	const currentLevel = $derived(knownLevels.find((level) => level.value === currentEffort));
 	const levelName = $derived(currentLevel?.name ?? (currentEffort || (parameters ? displayedWord : undefined) || "Default"));
 	const microLabel = $derived(

@@ -265,6 +265,8 @@ export const ModelExecutionSchema = Schema.Struct({
 	requestedModel: Schema.optional(Schema.String),
 	expectedModel: Schema.optional(Schema.String),
 	actualModel: Schema.String,
+	effort: Schema.optional(Schema.String),
+	contextWindow: Schema.optional(Schema.String),
 	drifted: Schema.optional(Schema.Boolean),
 }).pipe(
 	Schema.check(

@@ -23,7 +23,10 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const SimpleParagraph: Story = {
-	args: { message: mockAssistantSimple, model: "Sonnet 5" },
+	args: {
+		message: mockAssistantSimple,
+		modelExecution: { actualModel: "Sonnet 5" },
+	},
 };
 export const SimpleParagraphLight: Story = {
 	...SimpleParagraph,
@@ -73,7 +76,7 @@ const fileDiff =
 	"```diff\n--- a/src/lib/frontend/stores/unread.ts\n+++ b/src/lib/frontend/stores/unread.ts\n@@ -1,2 +1,3 @@\n-const unread = 0;\n+const unread = new Map<string, number>();\n+export { unread };\n```";
 export const FileDiff: Story = {
 	args: {
-		model: "Sonnet 5",
+		modelExecution: { actualModel: "Sonnet 5" },
 		message: {
 			...mockAssistantSimple,
 			rawText: fileDiff,

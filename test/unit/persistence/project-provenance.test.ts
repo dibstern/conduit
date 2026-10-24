@@ -135,6 +135,7 @@ describe("Bound project provenance", () => {
 			"0082_session_git_publication",
 			"0083_attachment_store",
 			"0084_session_draft_delete",
+			"0085_turn_request_settings",
 		]);
 	});
 

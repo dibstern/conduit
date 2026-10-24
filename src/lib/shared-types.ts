@@ -563,6 +563,8 @@ export interface ModelExecution {
 	requestedModel?: string | undefined;
 	expectedModel?: string | undefined;
 	actualModel: string;
+	effort?: string | undefined;
+	contextWindow?: string | undefined;
 	drifted?: boolean | undefined;
 }
 

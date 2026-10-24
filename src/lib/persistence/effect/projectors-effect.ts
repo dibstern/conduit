@@ -1934,7 +1934,17 @@ export const makeTurnProjector = defineProjector(() => ({
 							AND prior.session_id = turns.session_id AND prior.status IN ('completed', 'error', 'interrupted'))
 						AND EXISTS (SELECT 1 FROM provider_runs next WHERE next.id = excluded.run_id
 							AND next.session_id = excluded.session_id AND next.status IN ('pending', 'running')))) RETURNING session_id`;
-				return { sessions: owners(written), messages: [] };
+				// input.admitted freezes the request in pending_inputs. A native
+				// message id can differ from its input id, which owns these settings.
+				const settings = yield* sql<OwnedRow>`UPDATE turns
+					SET effort = NULLIF(json_extract(input.request, '$.variant'), ''),
+						context_window = NULLIF(json_extract(input.request, '$.contextWindow'), '')
+					FROM pending_inputs input
+					WHERE input.input_id = ${event.data.inputId ?? event.data.messageId}
+						AND input.session_id = turns.session_id
+						AND turns.id = ${event.data.messageId} AND turns.session_id = ${event.sessionId}
+					RETURNING session_id`;
+				return { sessions: owners([...written, ...settings]), messages: [] };
 			}
 
 			if (
