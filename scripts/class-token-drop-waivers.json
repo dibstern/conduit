@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/input/SkillHighlightBackdrop.svelte :: text-text": "The composer backdrop no longer paints glyphs: the textarea paints the text so the caret and visible text share one layout, and the mirror sets -webkit-text-fill-color: transparent. Its text colour has nothing left to colour.",
 	"src/lib/frontend/components/chat/AssistantHeader.svelte :: font-mono,text-mono-xs": "Approved card D replaces the separate dim monospace model span with the friendly model name as the existing semibold reply title.",
 	"src/lib/frontend/components/session/GitIdentity.svelte :: git.dirty": "The approved checkout sheet replaces the warning-coloured uncommitted label with neutral file counts and success/error line totals. git.dirty was a JavaScript condition in the removed class expression, not a CSS class.",
 	"src/lib/frontend/components/chat/ActivityRow.svelte :: tool.isError": "C4 replaces this JavaScript condition with tool.outcome. It is not a CSS class; the text-error and text-text-secondary classes are unchanged.",
