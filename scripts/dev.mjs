@@ -231,7 +231,7 @@ async function startVite() {
 		rpc.DEFAULT_SOCKET_PATH,
 		{ _tag: "GetStatus" },
 	);
-	if (stopping) return;
+	if (stopping || pending) return;
 	const server = `${tlsEnabled ? "https" : "http"}://localhost:${port}`;
 	// Keep Conduit's startup screen visible while retaining Vite diagnostics.
 	vite = spawn(
@@ -303,10 +303,9 @@ async function rebuild() {
 			if (stopping) return;
 			lastBuildId = readBuildId();
 			await restart();
-			if (!stopping) {
+			if (!stopping && !pending && !vite) await startVite();
+			if (!stopping && !pending)
 				log(`ready (${mode}${child ? ` PID ${child.pid}` : ""})`);
-				if (!vite) await startVite();
-			}
 		}
 	} while (pending && !stopping);
 }
@@ -330,9 +329,10 @@ function runRestart() {
 	if (stopping || activeBuild || !rpc) return;
 	activeBuild = restart()
 		.then(async () => {
-			if (stopping) return;
-			log(`ready (${mode}${child ? ` PID ${child.pid}` : ""})`);
+			if (stopping || pending) return;
 			if (!vite) await startVite();
+			if (!stopping && !pending)
+				log(`ready (${mode}${child ? ` PID ${child.pid}` : ""})`);
 		})
 		.catch(recover)
 		.finally(() => {
