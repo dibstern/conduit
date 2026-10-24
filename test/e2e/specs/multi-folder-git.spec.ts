@@ -180,7 +180,7 @@ for (const scenario of [
 			exact: true,
 		});
 		await expect(dialog).toBeVisible();
-		const folderRows = dialog.getByTestId("project-folder-row");
+		const folderRows = dialog.getByTestId("project-folder-chip");
 		await expect(folderRows).toHaveCount(project.folders.length);
 		if (gitPrimary) {
 			await expect(folderRows.nth(0)).toContainText("Frontend");

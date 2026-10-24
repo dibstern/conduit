@@ -118,7 +118,7 @@ for (const scenario of ["validation", "generic", "socket"] as const) {
 		await page.getByTestId("session-scope-chip").click();
 		await page.getByRole("menuitem", { name: "Add a project…" }).click();
 		const dialog = page.getByRole("dialog", {
-			name: "Add project",
+			name: "Add a project",
 			exact: true,
 		});
 		await dialog.getByRole("combobox", { name: "Add folder" }).fill("/src/new");

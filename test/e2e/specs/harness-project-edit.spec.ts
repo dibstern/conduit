@@ -96,7 +96,7 @@ for (const provider of providers) {
 			await openScopeMenu(page);
 			await page.getByRole("menuitem", { name: "Add a project…" }).click();
 			const addDialog = page.getByRole("dialog", {
-				name: "Add project",
+				name: "Add a project",
 				exact: true,
 			});
 			await expect(addDialog).toBeVisible();
@@ -110,7 +110,7 @@ for (const provider of providers) {
 			await addDialog
 				.getByRole("option", { name: existing, exact: true })
 				.click();
-			await expect(addDialog.getByTestId("project-folder-row")).toHaveCount(2);
+			await expect(addDialog.getByTestId("project-folder-chip")).toHaveCount(2);
 			await shot("1-add-folders");
 
 			// 2. The existing folder becomes main, and the name follows it.
@@ -118,7 +118,7 @@ for (const provider of providers) {
 				.getByRole("button", { name: `Make main: ${existing}` })
 				.click();
 			await expect(
-				addDialog.getByTestId("project-folder-row").first(),
+				addDialog.getByTestId("project-folder-chip").first(),
 			).toHaveAttribute("aria-label", `Main folder: ${existing}`);
 			await expect(addDialog.getByLabel("Project name")).toHaveValue(
 				"edit-app",
@@ -194,9 +194,11 @@ for (const provider of providers) {
 			await expect(editDialog.getByLabel("Project name")).toHaveValue(
 				"edit-app",
 			);
-			await expect(editDialog.getByTestId("project-folder-row")).toHaveCount(2);
+			await expect(editDialog.getByTestId("project-folder-chip")).toHaveCount(
+				2,
+			);
 			await expect(
-				editDialog.getByTestId("project-folder-row").first(),
+				editDialog.getByTestId("project-folder-chip").first(),
 			).toHaveAttribute("aria-label", `Main folder: ${existing}`);
 			const save = editDialog.getByRole("button", { name: /^Save/ });
 			await expect(save).toBeDisabled();

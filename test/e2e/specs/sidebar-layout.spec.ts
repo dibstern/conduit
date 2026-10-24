@@ -1115,7 +1115,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await page.getByTestId("session-scope-chip").click();
 		await page.getByRole("menuitem", { name: "Add a project…" }).click();
 		const addProject = page.getByRole("dialog", {
-			name: "Add project",
+			name: "Add a project",
 			exact: true,
 		});
 		await expect(addProject).toBeVisible();

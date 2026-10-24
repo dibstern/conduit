@@ -1,5 +1,6 @@
 import { PlaywrightDriver } from "./playwrightDriver.js";
 import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
+import { addProjectDialogHandlers } from "./steps/addProjectDialog.js";
 import { askContextHandlers } from "./steps/askContext.js";
 import { backgroundTasksHandlers } from "./steps/backgroundTasks.js";
 import { claudeSettingsHandlers } from "./steps/claudeSettings.js";
@@ -73,6 +74,7 @@ import { worktreeCleanupSettingsHandlers } from "./steps/worktreeCleanupSettings
 const driver = new PlaywrightDriver();
 
 export const conduitVisualHandlers: StepHandler[] = [
+	...addProjectDialogHandlers,
 	...draftAttachmentFailureHandlers,
 	...sessionPresentationHandlers,
 	...sessionSheetsHandlers,

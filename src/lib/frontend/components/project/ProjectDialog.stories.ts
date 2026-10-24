@@ -94,7 +94,7 @@ type Story = StoryObj<typeof meta>;
 const canvasFor = (canvasElement: HTMLElement) =>
 	within(canvasElement.ownerDocument.body);
 
-async function addPath(
+async function tickPath(
 	canvasElement: HTMLElement,
 	path: string,
 ): Promise<void> {
@@ -109,7 +109,7 @@ export const Empty: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
 		await expect(
-			canvas.getByRole("dialog", { name: "Add project" }),
+			canvas.getByRole("dialog", { name: "Add a project" }),
 		).toBeVisible();
 		await expect(
 			canvas.getByRole("combobox", { name: "Add folder" }),
@@ -151,7 +151,7 @@ export const FolderRepositories: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		const rows = canvasFor(canvasElement).getAllByTestId("project-folder-row");
+		const rows = canvasFor(canvasElement).getAllByTestId("project-folder-chip");
 		await expect(rows[0]).toHaveTextContent("Conduit");
 		await expect(rows[0]).toHaveTextContent("main");
 		await expect(rows[1]).toHaveTextContent("Documentation");
@@ -172,9 +172,13 @@ export const PathMatchesOpen: Story = {
 		await expect(input).toHaveFocus();
 		await expect(listbox.id).toBe(input.getAttribute("aria-controls"));
 		const options = within(listbox).getAllByRole("option");
-		await expect(options[0]).toHaveAttribute("aria-selected", "true");
+		await expect(options[0]).toHaveAttribute("aria-selected", "false");
+		await expect(input).toHaveAttribute(
+			"aria-activedescendant",
+			options[0]?.id,
+		);
 		await userEvent.keyboard("{ArrowDown}");
-		await expect(options[1]).toHaveAttribute("aria-selected", "true");
+		await expect(options[1]).toHaveAttribute("aria-selected", "false");
 		await expect(input).toHaveAttribute(
 			"aria-activedescendant",
 			options[1]?.id,
@@ -188,14 +192,14 @@ export const PathMatchesOpen: Story = {
 export const SeveralFolders: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
-		await addPath(canvasElement, app);
-		await addPath(canvasElement, docs);
-		await addPath(canvasElement, site);
+		await tickPath(canvasElement, app);
+		await tickPath(canvasElement, docs);
+		await tickPath(canvasElement, site);
 		await userEvent.click(
 			canvas.getByRole("button", { name: `Make main: ${docs}` }),
 		);
 		await expect(
-			canvas.getAllByTestId("project-folder-row")[0],
+			canvas.getAllByTestId("project-folder-chip")[0],
 		).toHaveAttribute("aria-label", `Main folder: ${docs}`);
 		await expect(
 			canvas.getByRole("textbox", { name: "Project name" }),
@@ -225,13 +229,46 @@ export const NewFolder: Story = {
 			canvas.getByRole("checkbox", { name: "git init" }),
 		).toBeChecked();
 		await userEvent.click(canvas.getByRole("option", { name: /New folder/ }));
-		await expect(canvas.getByTestId("project-folder-row")).toHaveTextContent(
+		await expect(canvas.getByTestId("project-folder-chip")).toHaveTextContent(
 			"new",
 		);
 		await expect(
 			canvas.getByRole("textbox", { name: "Project name" }),
 		).toHaveValue("conduit-notes");
-		await expect(canvas.getByText("git init", { exact: true })).toBeVisible();
+		await expect(
+			within(canvas.getByTestId("project-folder-chip")).getByText("git init", {
+				exact: true,
+			}),
+		).toBeVisible();
+	},
+};
+
+export const NewFolderWithoutGit: Story = {
+	play: async ({ canvasElement, args }) => {
+		const canvas = canvasFor(canvasElement);
+		const input = canvas.getByRole("combobox", { name: "Add folder" });
+		await userEvent.type(input, notes);
+		const row = await canvas.findByRole("option", { name: /New folder/ });
+		await userEvent.click(canvas.getByRole("checkbox", { name: "git init" }));
+		await userEvent.click(row);
+		await expect(input).toHaveValue(notes);
+		await expect(row).toHaveAttribute("aria-selected", "true");
+		await expect(
+			canvas.queryByRole("checkbox", { name: "git init" }),
+		).toBeNull();
+		await expect(
+			canvas.getByTestId("project-folder-chip"),
+		).not.toHaveTextContent("git init");
+		await userEvent.click(row);
+		await expect(
+			canvas.getByRole("checkbox", { name: "git init" }),
+		).not.toBeChecked();
+		await userEvent.click(row);
+		await userEvent.click(canvas.getByRole("button", { name: "Add project" }));
+		await expect(args["saveProject"]).toHaveBeenCalledWith({
+			title: "conduit-notes",
+			folders: [{ path: notes, create: { gitInit: false } }],
+		});
 	},
 };
 
@@ -247,7 +284,7 @@ export const Errors: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
-		await addPath(canvasElement, app);
+		await tickPath(canvasElement, app);
 		await userEvent.click(
 			canvas.getByRole("button", { name: `Make main: ${app}` }),
 		);
@@ -265,8 +302,8 @@ export const Errors: Story = {
 export const Warnings: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
-		await addPath(canvasElement, app);
-		await addPath(canvasElement, `${app}/packages/sdk`);
+		await tickPath(canvasElement, app);
+		await tickPath(canvasElement, `${app}/packages/sdk`);
 		await expect(canvas.getByRole("status")).toHaveTextContent("is inside");
 		await expect(
 			canvas.getByRole("button", { name: "Add project" }),
@@ -274,13 +311,19 @@ export const Warnings: Story = {
 	},
 };
 
-export const DuplicateFolder: Story = {
+export const UntickRow: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
-		await addPath(canvasElement, app);
-		await addPath(canvasElement, app);
-		await expect(canvas.getByRole("alert")).toHaveTextContent("already added");
-		await expect(canvas.getAllByTestId("project-folder-row")).toHaveLength(1);
+		await tickPath(canvasElement, app);
+		await tickPath(canvasElement, app);
+		await expect(canvas.queryByRole("alert")).toBeNull();
+		await expect(canvas.queryAllByTestId("project-folder-chip")).toHaveLength(
+			0,
+		);
+		await expect(canvas.getByRole("option", { name: app })).toHaveAttribute(
+			"aria-selected",
+			"false",
+		);
 	},
 };
 
@@ -309,7 +352,7 @@ export const DiskError: Story = {
 		await expect(await canvas.findByRole("alert")).toHaveTextContent(
 			"Permission denied",
 		);
-		await expect(canvas.getByTestId("project-folder-row")).toBeVisible();
+		await expect(canvas.getByTestId("project-folder-chip")).toBeVisible();
 	},
 };
 
@@ -321,6 +364,7 @@ export const KeyboardSave: Story = {
 		await canvas.findByRole("option", { name: /New folder/ });
 		await userEvent.keyboard("{Enter}");
 		await expect(input).toHaveFocus();
+		await userEvent.clear(input);
 		await userEvent.type(input, docs);
 		await canvas.findByRole("option", { name: docs });
 		await userEvent.keyboard("{Enter}");
@@ -338,38 +382,127 @@ export const KeyboardSave: Story = {
 	},
 };
 
+const suggestionArgs = {
+	findFolders: async ({
+		query,
+	}: Rpc.PayloadConstructor<typeof FindFolders>) => ({
+		home,
+		entries: suggestions.filter((entry) =>
+			entry.path.toLowerCase().includes(query.toLowerCase()),
+		),
+	}),
+};
+
 export const SuggestionsOpen: Story = {
-	args: {
-		findFolders: async ({
-			query,
-		}: Rpc.PayloadConstructor<typeof FindFolders>) => ({
-			home,
-			entries: suggestions.filter((entry) =>
-				entry.path.toLowerCase().includes(query.toLowerCase()),
-			),
-		}),
-	},
+	args: suggestionArgs,
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);
-		const group = await canvas.findByRole("group", { name: "Suggestions" });
+		const recent = await canvas.findByRole("group", { name: "Recent" });
+		const nearby = canvas.getByRole("group", { name: "Repositories nearby" });
+		await expect(within(recent).getAllByRole("option")).toHaveLength(2);
+		await expect(within(nearby).getAllByRole("option")).toHaveLength(2);
 		await expect(
-			canvas.getByRole("combobox", { name: "Add folder" }),
-		).toHaveAttribute("aria-expanded", "true");
-		const option = (path: string) =>
-			within(group).getByRole("option", { name: path });
-		await expect(option(app)).toHaveTextContent("recent · git");
-		await expect(option("/Users/dev/notes")).toHaveTextContent(/recent$/);
-		await expect(option(site)).toHaveTextContent(/git$/);
-		await expect(option(site)).not.toHaveTextContent("recent");
-		await userEvent.click(option(site));
-		await expect(canvas.getByTestId("project-folder-row")).toHaveAttribute(
+			within(recent).getByRole("option", { name: app }),
+		).toHaveTextContent("git");
+		await expect(
+			within(recent).getByRole("option", {
+				name: "/Users/dev/notes",
+			}),
+		).not.toHaveTextContent("git");
+		const row = within(nearby).getByRole("option", {
+			name: site,
+		});
+		await userEvent.click(row);
+		await expect(row).toBeVisible();
+		await expect(row).toHaveAttribute("aria-selected", "true");
+		await expect(canvas.getByTestId("project-folder-chip")).toHaveAttribute(
 			"aria-label",
 			`Main folder: ${site}`,
 		);
 		await expect(
-			within(group).queryByRole("option", { name: site }),
+			within(
+				canvas.getByRole("listbox", { name: "Folder matches" }),
+			).getAllByRole("option"),
+		).toHaveLength(4);
+	},
+};
+
+export const TickedFolders: Story = {
+	args: suggestionArgs,
+	play: async ({ canvasElement, args }) => {
+		const canvas = canvasFor(canvasElement);
+		await userEvent.click(await canvas.findByRole("option", { name: site }));
+		await userEvent.click(canvas.getByRole("option", { name: app }));
+		const chips = canvas.getAllByTestId("project-folder-chip");
+		await expect(chips.map((chip) => chip.getAttribute("data-path"))).toEqual([
+			site,
+			app,
+		]);
+		await expect(
+			within(canvas.getByLabelText(`Main folder: ${site}`)).getByText("Main"),
+		).toBeVisible();
+		await expect(
+			within(canvas.getByLabelText(`Extra folder: ${app}`)).queryByText("Main"),
 		).toBeNull();
-		await expect(within(group).getAllByRole("option")).toHaveLength(3);
+		await userEvent.click(canvas.getByRole("button", { name: "Add project" }));
+		await expect(args["saveProject"]).toHaveBeenCalledTimes(1);
+		await expect(args["saveProject"]).toHaveBeenCalledWith({
+			title: "conduit-site",
+			folders: [site, app],
+		});
+	},
+};
+
+export const TickedFilteredList: Story = {
+	args: suggestionArgs,
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		const input = canvas.getByRole("combobox", { name: "Add folder" });
+		await userEvent.type(input, "conduit-site");
+		const row = await canvas.findByRole("option", {
+			name: site,
+		});
+		await userEvent.keyboard("{Enter}");
+		await expect(input).toHaveValue("conduit-site");
+		await expect(input).toHaveFocus();
+		await expect(row).toHaveAttribute("aria-selected", "true");
+		await expect(
+			within(
+				canvas.getByRole("listbox", { name: "Folder matches" }),
+			).getAllByRole("option"),
+		).toHaveLength(1);
+		await expect(canvas.getByTestId("project-folder-chip")).toHaveAttribute(
+			"data-path",
+			site,
+		);
+	},
+};
+
+export const UntickByChipRemoval: Story = {
+	args: suggestionArgs,
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		const appRow = await canvas.findByRole("option", {
+			name: app,
+		});
+		await userEvent.click(appRow);
+		await userEvent.click(canvas.getByRole("option", { name: site }));
+		await userEvent.click(
+			canvas.getByRole("option", { name: "/Users/dev/notes" }),
+		);
+		await userEvent.click(
+			canvas.getByRole("button", { name: `Remove folder: ${app}` }),
+		);
+		await expect(appRow).toHaveAttribute("aria-selected", "false");
+		const chips = canvas.getAllByTestId("project-folder-chip");
+		await expect(chips).toHaveLength(2);
+		await expect(chips[0]).toHaveAttribute(
+			"aria-label",
+			`Main folder: ${site}`,
+		);
+		await expect(
+			canvas.getByRole("combobox", { name: "Add folder" }),
+		).toHaveFocus();
 	},
 };
 
@@ -429,7 +562,9 @@ export const MultiFolderSupported: Story = {
 			canvas.queryByTestId("project-provider-capabilities"),
 		).toBeNull();
 		await expect(
-			canvas.getByText("Folders · Sessions run in main and can edit all"),
+			canvas.getByText(
+				"Pick one or more folders. The first is the project's main folder.",
+			),
 		).toBeVisible();
 	},
 };
@@ -470,7 +605,7 @@ export const Edit: Story = {
 		).toBeVisible();
 		await expect(
 			canvas
-				.getAllByTestId("project-folder-row")
+				.getAllByTestId("project-folder-chip")
 				.map((row) => row.getAttribute("aria-label")),
 		).toEqual([`Main folder: ${app}`, `Extra folder: ${docs}`]);
 		const name = canvas.getByRole("textbox", { name: "Project name" });
