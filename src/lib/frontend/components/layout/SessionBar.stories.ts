@@ -1102,6 +1102,69 @@ export const Collapsed: Story = {
 	},
 };
 
+function setupSideThread() {
+	seedSessions([
+		{ ...mockSession, title: "Batch A polish", status: "busy" },
+		{
+			...mockSession,
+			id: "phone-side-thread",
+			title: "Why 12px root?",
+			parentID: mockSession.id,
+			sideThread: true,
+			status: "idle",
+		},
+	]);
+	openSessionForSetup("phone-side-thread", "conduit");
+}
+
+export const SideThread: Story = {
+	args: { width: 390, island: true },
+	tags: ["viewport-capture"],
+	beforeEach: setupSideThread,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const crumb = canvas.getByTestId("side-thread-parent-crumb");
+		await expect(crumb).toHaveTextContent("Batch A polish");
+		await expect(crumb).toHaveAccessibleName(
+			"Back to Batch A polish, parent working",
+		);
+		await expect(canvas.getByTestId("parent-session-status")).toHaveTextContent(
+			"Working",
+		);
+		const title = canvas.getByRole("heading", { level: 1 });
+		await expect(title).toHaveTextContent("Why 12px root?");
+		expect(title.getBoundingClientRect().width).toBeGreaterThan(
+			crumb.getBoundingClientRect().width,
+		);
+		const bar = canvas.getByTestId("session-bar");
+		expect(bar.scrollWidth).toBeLessThanOrEqual(bar.clientWidth);
+		expect(bar.getBoundingClientRect().right).toBeLessThanOrEqual(390);
+	},
+};
+
+export const SideThreadCollapsed: Story = {
+	...SideThread,
+	tags: ["viewport-capture"],
+	beforeEach: () => {
+		setupSideThread();
+		sessionViewState.barOpen = false;
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByTestId("session-bar")).toHaveAttribute(
+			"data-collapsed",
+			"true",
+		);
+		expect(canvas.queryByTestId("side-thread-parent-crumb")).toBeNull();
+		const title = canvas.getByRole("heading", { level: 1 });
+		await expect(title).toHaveTextContent("Why 12px root?");
+		await userEvent.click(canvas.getByTestId("session-bar-expand"));
+		await expect(canvas.getByTestId("side-thread-parent-crumb")).toBeVisible();
+		expect(canvas.getByRole("heading", { level: 1 })).toBe(title);
+		sessionViewState.barOpen = false;
+	},
+};
+
 function setupPhoneHeader() {
 	seedSkills();
 	instanceState.instances = mockInstances.slice(0, 1).map((instance) => ({

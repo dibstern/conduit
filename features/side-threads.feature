@@ -11,7 +11,7 @@ Scenario Outline: $btw and $side ask a Side Thread that points back to its paren
   And I send the composer message
   Then a Side Thread titled Which visual baseline is stale? is started from the session
   And the Side Thread receives the sent text Which visual baseline is stale?
-  And the back bar reads Side Thread of Stabilise visual suite
+  And the breadcrumb leads back to Stabilise visual suite
   And the layout region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -68,5 +68,5 @@ Scenario: The header control opens the list and a row opens its Side Thread
   When I click the Side Threads control
   And I open the Side Thread titled Why did the Linux gate skip?
   Then the Side Threads list is closed
-  And the back bar reads Side Thread of Stabilise visual suite
+  And the breadcrumb leads back to Stabilise visual suite
   And the Side Threads control is hidden

@@ -43,7 +43,9 @@
 	import type { Immutable, SessionInfo } from "../../types.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
+	import DitherGlyph from "../ui/DitherGlyph.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import { getParentSessionContext, navigateBackToParent } from "../chat/SubagentBackBar.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
@@ -83,6 +85,8 @@
 	// reads the same in the bar as it does in the list it came from.
 	const session = $derived(findSession(sessionState.currentId ?? ""));
 	const title = $derived(session?.title || "New Session");
+	const parent = $derived(getParentSessionContext());
+	const isSideThread = $derived(session?.sideThread === true && parent.id !== null);
 	const goalFacts = $derived(discoveryState.currentTraits?.supportsGoalState ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
 	const goal = $derived(goalView(
 		goalFacts,
@@ -611,7 +615,7 @@
 		{#if !collapsed}{@render overflowMenu()}{/if}
 	{/if}
 
-	<!-- The session title, and the only string in the bar allowed to ellipse. It
+	<!-- The session title and its optional parent breadcrumb. It
 	     is the page heading on a phone; the global header's <h1> is suppressed at
 	     this width, so there is still exactly one — and there is still exactly
 	     one across the collapse, because this is the same element in both
@@ -625,12 +629,36 @@
 	{#if sessionViewState.compact || session}
 	<div id="session-bar-title-row" class="flex min-w-0 flex-col justify-center">
 	<div class="flex min-w-0 items-center {sessionViewState.compact ? 'gap-[3px]' : 'gap-1.5'}">
-		<div class="min-w-0">
-		<div class="flex min-w-0 items-center">
+		<div class="min-w-0 {isSideThread ? 'flex-1' : ''}">
+		<div class="flex min-w-0 items-center {isSideThread ? 'gap-1.5' : ''}">
+		{#if isSideThread}
+			{#if !collapsed}
+				<Button
+					variant="ghost"
+					size="content"
+					tone="secondary"
+					touchTarget
+					class="min-w-0 max-w-[30%] shrink gap-1.5 text-sm font-medium"
+					data-testid="side-thread-parent-crumb"
+					ariaLabel="Back to {parent.title}, parent {parent.status}"
+					title="Back to {parent.title}"
+					onclick={navigateBackToParent}
+				>
+					<span data-testid="parent-session-status" class="flex shrink-0 items-center">
+						<DitherGlyph state={parent.status} size={12} />
+						<span class="sr-only">{parent.status === "working" ? "Working" : parent.status === "monitoring" ? "Monitoring" : "Idle"}</span>
+					</span>
+					<span class="truncate">{parent.title}</span>
+				</Button>
+				<Icon name="chevron-right" size={14} class="shrink-0 text-text-dimmer" />
+			{/if}
+			<Icon name="messages-square" size={15} class="shrink-0 text-accent" />
+		{/if}
 		<h1
 			id="session-bar-title"
 			data-testid="session-bar-title"
 			class="min-w-0 truncate font-semibold leading-tight text-text"
+			class:flex-1={isSideThread}
 			class:text-lg={!collapsed}
 			class:text-base={collapsed}
 		>

@@ -129,12 +129,13 @@ export const sideThreadsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert back bar",
-		match: /^the back bar reads (Side Thread of .+)$/,
+		name: "assert parent breadcrumb",
+		match: /^the breadcrumb leads back to (.+)$/,
 		run: async ({ world, match }) => {
-			await expect(world.page.locator(".subagent-back-bar")).toContainText(
-				match[1] ?? "",
-			);
+			await expect(
+				world.page.getByTestId("side-thread-parent-crumb"),
+			).toContainText(match[1] ?? "");
+			await expect(world.page.locator(".subagent-back-bar")).toHaveCount(0);
 		},
 	},
 	{
