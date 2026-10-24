@@ -143,14 +143,13 @@ describe("Integration: OpenCode text file attachment", () => {
 		const created = await client.createSession();
 		const sessionId = created["id"] as string;
 		capturedSessionId = sessionId;
-		const turnEnd = client.waitForTurnEnd(sessionId, 120_000);
 		await client.sendMessage(PROMPT, {
 			sessionId,
 			images: [
 				`data:text/plain;name=notes.txt;base64,${Buffer.from(CONTENTS).toString("base64")}`,
 			],
 		});
-		const terminal = await turnEnd;
+		const terminal = await client.waitForTurnEnd(sessionId, 120_000);
 		evidence["terminal"] = terminal;
 		expect(terminal.status).toBe("idle");
 		expect(terminal.lastTurnEndVersion).toBeGreaterThanOrEqual(0);
