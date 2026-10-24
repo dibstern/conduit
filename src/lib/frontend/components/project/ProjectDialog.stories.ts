@@ -253,6 +253,102 @@ export const BrowseWithBreadcrumbs: Story = {
 	},
 };
 
+export const BrowseNewFolder: Story = {
+	play: async ({ canvasElement, args }) => {
+		const canvas = canvasFor(canvasElement);
+		const input = canvas.getByRole<HTMLInputElement>("combobox", {
+			name: "Add folder",
+		});
+		await userEvent.type(input, "~/src/personal/");
+		await canvas.findByRole("option", {
+			name: `${root}/personal/conduit`,
+		});
+		const action = await canvas.findByTestId("folder-picker-new");
+		await expect(action).toHaveTextContent(
+			sessionViewState.compact ? "New folder here" : "New folder in personal…",
+		);
+		await expect(action).toHaveStyle({
+			minHeight: sessionViewState.compact ? "52px" : "44px",
+		});
+		await userEvent.keyboard("{ArrowUp}{Enter}");
+		await expect(input).toHaveValue("~/src/personal/untitled folder");
+		await expect(input).toHaveFocus();
+		await expect(
+			input.value.slice(input.selectionStart ?? 0, input.selectionEnd ?? 0),
+		).toBe("untitled folder");
+		await canvas.findByRole("option", { name: 'New folder "untitled folder"' });
+		const nameStart = input.value.lastIndexOf("/") + 1;
+		input.setSelectionRange(nameStart + 4, nameStart + 4);
+		await userEvent.keyboard(" ");
+		await expect(input).toHaveValue("~/src/personal/unti tled folder");
+		await expect(canvas.queryByTestId("project-folder-chip")).toBeNull();
+		input.setSelectionRange(nameStart, input.value.length);
+		await userEvent.keyboard("conduit");
+		await expect(
+			await canvas.findByRole("option", {
+				name: `${root}/personal/conduit`,
+			}),
+		).toBeVisible();
+		await expect(
+			canvas.queryByRole("option", { name: /New folder/ }),
+		).toBeNull();
+		await userEvent.click(canvas.getByRole("button", { name: "personal" }));
+		await expect(await canvas.findByTestId("folder-picker-new")).toBeVisible();
+		await expect(args["saveProject"]).not.toHaveBeenCalled();
+	},
+};
+
+export const BrowsePendingNewFolder: Story = {
+	play: async ({ canvasElement, args }) => {
+		const canvas = canvasFor(canvasElement);
+		const input = canvas.getByRole<HTMLInputElement>("combobox", {
+			name: "Add folder",
+		});
+		const path = `${root}/personal/scratch-notes`;
+		await userEvent.type(input, "~/src/personal/");
+		await userEvent.click(await canvas.findByTestId("folder-picker-new"));
+		await expect(input).toHaveFocus();
+		await expect(
+			input.value.slice(input.selectionStart ?? 0, input.selectionEnd ?? 0),
+		).toBe("untitled folder");
+		await userEvent.keyboard("scratch-notes");
+		const pending = await canvas.findByRole("option", {
+			name: 'New folder "scratch-notes"',
+		});
+		await expect(input).toHaveAttribute("aria-activedescendant", pending.id);
+		await expect(
+			canvas.getByRole("checkbox", { name: "git init" }),
+		).toBeChecked();
+		await userEvent.keyboard("{Enter}");
+		await expect(pending).toHaveAttribute("aria-selected", "true");
+		await expect(canvas.getByTestId("project-folder-chip")).toHaveAttribute(
+			"data-path",
+			path,
+		);
+		await expect(canvas.getByTestId("project-folder-chip")).toHaveTextContent(
+			"new",
+		);
+		await expect(canvas.getByTestId("project-folder-chip")).toHaveTextContent(
+			"git init",
+		);
+		await userEvent.clear(input);
+		await userEvent.type(input, "~/src/personal/");
+		await canvas.findByRole("option", {
+			name: `${root}/personal/conduit`,
+		});
+		await userEvent.keyboard("{ArrowUp}");
+		await userEvent.keyboard("{Enter}");
+		await userEvent.keyboard("scratch-notes");
+		await expect(
+			await canvas.findByRole("option", {
+				name: 'New folder "scratch-notes"',
+			}),
+		).toHaveAttribute("aria-selected", "true");
+		await expect(canvas.getAllByTestId("project-folder-chip")).toHaveLength(1);
+		await expect(args["saveProject"]).not.toHaveBeenCalled();
+	},
+};
+
 export const GhostCompletionVisible: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = canvasFor(canvasElement);

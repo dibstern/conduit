@@ -162,6 +162,131 @@ export const addProjectDialogHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "activate the browse new folder row",
+		match: /^I (click|tap) the "(New folder (?:in .+…|here))" row$/,
+		run: async ({ world, match }) => {
+			const option = dialog(world.page).getByRole("option", {
+				name: match[2] ?? "",
+				exact: true,
+			});
+			if (match[1] === "tap") await tapFolderControl(world.page, option);
+			else await option.click();
+		},
+	},
+	{
+		name: "assert only the placeholder folder name is selected",
+		match: /^only "untitled folder" is selected in the folder search$/,
+		run: async ({ world }) => {
+			const input = dialog(world.page).getByRole("combobox", {
+				name: "Add folder",
+			});
+			await expect(input).toBeFocused();
+			await expect
+				.poll(() =>
+					input.evaluate((element: HTMLInputElement) => ({
+						startsAtName:
+							element.selectionStart === element.value.lastIndexOf("/") + 1,
+						endsAtName: element.selectionEnd === element.value.length,
+						selected: element.value.slice(
+							element.selectionStart ?? 0,
+							element.selectionEnd ?? 0,
+						),
+					})),
+				)
+				.toEqual({
+					startsAtName: true,
+					endsAtName: true,
+					selected: "untitled folder",
+				});
+		},
+	},
+	{
+		name: "replace the selected folder name",
+		match: /^I replace the selected folder name with "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await world.page.keyboard.type(match[1] ?? "");
+		},
+	},
+	{
+		name: "choose git initialization for a pending folder",
+		match: /^I set new folder git init to (true|false)$/,
+		run: async ({ world, match }) => {
+			await dialog(world.page)
+				.getByRole("checkbox", { name: "git init" })
+				.setChecked(match[1] === "true");
+		},
+	},
+	{
+		name: "select the highlighted pending new folder",
+		match: /^I (press Enter on|tap) the pending new folder "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			const pending = dialog(world.page).getByRole("option", {
+				name: `New folder "${match[2]}"`,
+				exact: true,
+			});
+			await expect(pending).toBeVisible();
+			const input = dialog(world.page).getByRole("combobox", {
+				name: "Add folder",
+			});
+			await expect(input).toHaveAttribute(
+				"aria-activedescendant",
+				(await pending.getAttribute("id")) ?? "",
+			);
+			if (match[1] === "tap") await tapFolderControl(world.page, pending);
+			else await input.press("Enter");
+			await expect(pending).toHaveAttribute("aria-selected", "true");
+		},
+	},
+	{
+		name: "assert a project folder chip is pending creation",
+		match: /^the ([a-z0-9-]+) project folder chip is marked new$/,
+		run: async ({ world, match }) => {
+			const chip = dialog(world.page)
+				.getByTestId("project-folder-chip")
+				.filter({ has: world.page.getByText(match[1] ?? "", { exact: true }) });
+			await expect(chip.getByText("new", { exact: true })).toBeVisible();
+		},
+	},
+	{
+		name: "assert existing folder names have no creation option",
+		match: /^there is no new folder row$/,
+		run: async ({ world }) => {
+			await expect(
+				dialog(world.page).getByRole("option", { name: /New folder/ }),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "cancel Add project without saving",
+		match: /^I cancel the Add project dialog$/,
+		run: async ({ world }) => {
+			await dialog(world.page)
+				.getByRole("button", { name: "Cancel", exact: true })
+				.click();
+			await expect(dialog(world.page)).toBeHidden();
+		},
+	},
+	{
+		name: "assert SaveProject receives pending creation",
+		match:
+			/^one project is saved with new folder ([a-z0-9-]+) and git init (true|false)$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const saved = await rpc.waitForRequest(
+				(request) => request.tag === "SaveProject",
+			);
+			expect(saved.payload["folders"]).toEqual([
+				{
+					path: folderPath(match[1] ?? ""),
+					create: { gitInit: match[2] === "true" },
+				},
+			]);
+			expect(
+				rpc.getRequests().filter((request) => request.tag === "SaveProject"),
+			).toHaveLength(1);
+		},
+	},
+	{
 		name: "assert project folder query",
 		match: /^the folder search is "([^"]+)"$/,
 		run: async ({ world, match }) => {

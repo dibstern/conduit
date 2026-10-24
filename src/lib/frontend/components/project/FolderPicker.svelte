@@ -58,7 +58,9 @@
 		]);
 	const matches = $derived(groups.flatMap((group) => group.entries));
 	const choices = $derived(newFolder ? [...matches, newFolder] : matches);
-	const expanded = $derived(choices.length > 0);
+	const showNewFolderAction = $derived(isPathQuery && query.endsWith("/") && Boolean(parsed.folder));
+	const choiceCount = $derived(choices.length + Number(showNewFolderAction));
+	const expanded = $derived(choiceCount > 0);
 
 	export function focus(): void {
 		input?.focus({ preventScroll: true });
@@ -134,6 +136,15 @@
 		focus();
 	}
 
+	async function startNewFolder(): Promise<void> {
+		if (disabled) return;
+		const start = query.length;
+		query += "untitled folder";
+		await tick();
+		focus();
+		input?.setSelectionRange(start, query.length);
+	}
+
 	function navigateMatches(event: KeyboardEvent): void {
 		if (event.ctrlKey || event.metaKey || event.isComposing || disabled) return;
 		const atEnd = input?.selectionStart === query.length && input?.selectionEnd === query.length;
@@ -150,9 +161,10 @@
 		} else if (event.key === "Enter" || (event.code === "Space" && !isPhone && (query === "" || query.endsWith("/")))) {
 			event.preventDefault();
 			if (selected) toggle(selected);
+			else if (showNewFolderAction && activeIndex === choices.length) void startNewFolder();
 		} else if (expanded && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
 			event.preventDefault();
-			activeIndex = (activeIndex + (event.key === "ArrowDown" ? 1 : -1) + choices.length) % choices.length;
+			activeIndex = (activeIndex + (event.key === "ArrowDown" ? 1 : -1) + choiceCount) % choiceCount;
 			void tick().then(() => document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: "nearest" }));
 		}
 	}
@@ -238,15 +250,21 @@
 					{/if}
 				{/each}
 				{#if newFolder}
-					<div class={`bg-bg-alt md:sticky md:bottom-0 ${matches.length ? "border-t border-border-subtle" : ""}`}>
-						<div role="option" id={optionId(matches.length)} aria-selected={selectedPaths.includes(newFolder.path)} aria-disabled={disabled} tabindex={-1} data-phone={isPhone || undefined} class={`flex min-h-[44px] data-[phone]:min-h-[52px] cursor-pointer items-center gap-[7px] py-[6px] pl-[10px] pr-[90px] text-[12px] text-text ${activeIndex === matches.length ? "bg-hover" : ""} ${disabled ? "pointer-events-none opacity-50" : ""}`} onpointerdown={(event) => event.preventDefault()} onpointerenter={() => activeIndex = matches.length} onclick={() => newFolder && toggle(newFolder)} onkeydown={navigateMatches}>
-							{#if selectedPaths.includes(newFolder.path)}{@render tickBox(true)}{:else}<Icon name="plus" size={16} class="shrink-0 text-text-muted" />{/if}<span class="min-w-0 truncate">New folder "{newFolder.path.split("/").filter(Boolean).at(-1) ?? newFolder.path}"</span>
+					<div class="bg-bg-surface md:sticky md:bottom-0">
+						<div role="option" id={optionId(matches.length)} aria-selected={selectedPaths.includes(newFolder.path)} aria-disabled={disabled} tabindex={-1} data-phone={isPhone || undefined} data-active={activeIndex === matches.length || undefined} data-disabled={disabled || undefined} class="flex min-h-[44px] data-[phone]:min-h-[52px] cursor-pointer items-center gap-[11px] rounded-[10px] py-[6px] pl-[10px] data-[phone]:pl-[4px] pr-[90px] text-[14px] data-[phone]:text-[15px] text-accent hover:bg-hover data-[active]:bg-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50" onpointerdown={(event) => event.preventDefault()} onpointerenter={() => activeIndex = matches.length} onclick={() => newFolder && toggle(newFolder)} onkeydown={navigateMatches}>
+							{#if selectedPaths.includes(newFolder.path)}{@render tickBox(true)}{:else}<span aria-hidden="true" class="grid size-[20px] shrink-0 place-items-center"><Icon name="folder-plus" size={isPhone ? 18 : 16} /></span>{/if}<span class="min-w-0 truncate">New folder "{newFolder.path.split("/").filter(Boolean).at(-1) ?? newFolder.path}"</span>
 						</div>
+					</div>
+				{/if}
+				{#if showNewFolderAction}
+					<div role="option" id={optionId(choices.length)} aria-selected="false" aria-disabled={disabled} tabindex={-1} data-testid="folder-picker-new" data-phone={isPhone || undefined} data-active={activeIndex === choices.length || undefined} data-disabled={disabled || undefined} class="flex min-h-[44px] data-[phone]:min-h-[52px] cursor-pointer items-center gap-[11px] rounded-[10px] pl-[10px] data-[phone]:pl-[4px] pr-[6px] text-[14px] data-[phone]:text-[15px] text-accent hover:bg-hover data-[active]:bg-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50" onpointerdown={(event) => event.preventDefault()} onpointerenter={() => activeIndex = choices.length} onclick={() => void startNewFolder()} onkeydown={navigateMatches}>
+						<span aria-hidden="true" class="grid size-[20px] shrink-0 place-items-center"><Icon name="folder-plus" size={isPhone ? 18 : 16} /></span>
+						<span class="min-w-0 truncate">{isPhone ? "New folder here" : `New folder in ${parsed.crumbs.at(-1)?.label}…`}</span>
 					</div>
 				{/if}
 			</DetachedListbox>
 			{#if newFolder && !selectedPaths.includes(newFolder.path)}
-				<label class="absolute right-[8px] bottom-[3px] flex min-h-[38px] cursor-pointer items-center gap-[4px] font-mono text-[10px] text-text-secondary">
+				<label style:bottom={showNewFolderAction ? `${(isPhone ? 52 : 44) + 3}px` : undefined} class="absolute right-[8px] bottom-[3px] flex min-h-[38px] cursor-pointer items-center gap-[4px] font-mono text-[10px] text-text-secondary">
 					<Checkbox bind:checked={gitInit} aria-label="git init" {disabled} /><span>git init</span>
 				</label>
 			{/if}

@@ -103,6 +103,82 @@ Examples:
   | ghost_baseline                 | up_baseline                       | threshold |
   | add-project-dialog-browse-ghost | add-project-dialog-browse-crumb-up | 98        |
 
+Scenario Outline: Desktop stages a new folder from browsing and creates it only on Save
+  Given the viewport is a desktop
+  When I open the Add project dialog
+  And I type "~/src/" in the Add project folder search
+  And I click the "New folder in src…" row
+  Then the folder search is "~/src/untitled folder"
+  And only "untitled folder" is selected in the folder search
+  When I replace the selected folder name with "garden-notes"
+  And I set new folder git init to <git_init>
+  And I press Enter on the pending new folder "garden-notes"
+  Then the project folder chips are garden-notes with garden-notes as Main
+  And the garden-notes project folder chip is marked new
+  And no project has been saved from the dialog
+  And the screen region visually matches <baseline> at <threshold> percent
+  When I save the Add project dialog
+  Then one project is saved with new folder garden-notes and git init <git_init>
+
+Examples:
+  | git_init | baseline                              | threshold |
+  | true     | add-project-dialog-new-folder-git     | 98        |
+  | false    | add-project-dialog-new-folder-no-git  | 98        |
+
+Scenario Outline: Cancel discards a pending new folder without SaveProject
+  Given the viewport is a desktop
+  When I open the Add project dialog
+  And I type "~/src/" in the Add project folder search
+  And I click the "New folder in src…" row
+  Then only "untitled folder" is selected in the folder search
+  When I replace the selected folder name with "cancelled-notes"
+  And I press Enter on the pending new folder "cancelled-notes"
+  Then the cancelled-notes project folder chip is marked new
+  And the screen region visually matches <baseline> at <threshold> percent
+  When I cancel the Add project dialog
+  Then no project has been saved from the dialog
+
+Examples:
+  | baseline                              | threshold |
+  | add-project-dialog-new-folder-cancel   | 98        |
+
+Scenario Outline: An existing child replaces the new folder option
+  Given the viewport is a desktop
+  When I open the Add project dialog
+  And I type "~/src/" in the Add project folder search
+  And I click the "New folder in src…" row
+  Then only "untitled folder" is selected in the folder search
+  When I replace the selected folder name with "conduit"
+  Then the folder rows are conduit
+  And there is no new folder row
+  And the project has no folder chips
+  And no project has been saved from the dialog
+  And the screen region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | baseline                              | threshold |
+  | add-project-dialog-new-folder-clash    | 98        |
+
+Scenario Outline: Phone stages a new folder by tapping New folder here
+  Given the viewport is a phone
+  When I open the Add project dialog
+  And I type "~/src/" in the Add project folder search
+  And I tap the "New folder here" row
+  Then the folder search is "~/src/untitled folder"
+  And only "untitled folder" is selected in the folder search
+  When I replace the selected folder name with "phone-notes"
+  And I tap the pending new folder "phone-notes"
+  Then the project folder chips are phone-notes with phone-notes as Main
+  And the phone-notes project folder chip is marked new
+  And no project has been saved from the dialog
+  And the screen region visually matches <baseline> at <threshold> percent
+  When I save the Add project dialog
+  Then one project is saved with new folder phone-notes and git init true
+
+Examples:
+  | baseline                              | threshold |
+  | add-project-dialog-new-folder-phone    | 98        |
+
 Scenario Outline: Phone browse buttons open folders and breadcrumbs return without keyboard hints
   Given the viewport is a phone
   When I open the Add project dialog

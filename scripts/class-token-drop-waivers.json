@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/project/FolderPicker.svelte :: bg-bg-alt,gap-[7px]": "The approved Add project frames use matching accent folder-plus rows on the dialog surface with an 11px icon gap. The pending folder row replaces its alternate background and 7px gap to follow the browse action.",
 	"src/lib/frontend/components/input/SkillHighlightBackdrop.svelte :: text-text": "The composer backdrop no longer paints glyphs: the textarea paints the text so the caret and visible text share one layout, and the mirror sets -webkit-text-fill-color: transparent. Its text colour has nothing left to colour.",
 	"src/lib/frontend/components/chat/AssistantHeader.svelte :: font-mono,text-mono-xs": "Approved card D replaces the separate dim monospace model span with the friendly model name as the existing semibold reply title.",
 	"src/lib/frontend/components/session/GitIdentity.svelte :: git.dirty": "The approved checkout sheet replaces the warning-coloured uncommitted label with neutral file counts and success/error line totals. git.dirty was a JavaScript condition in the removed class expression, not a CSS class.",
