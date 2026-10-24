@@ -56,7 +56,7 @@ const cannotHoldRefs = {
 	tool_content: "tool_id session_id content",
 	turn_recaps: "turn_id session_id scope text model",
 	turns:
-		"id session_id state user_message_id assistant_message_id requested_model expected_model actual_model run_id",
+		"id session_id state user_message_id assistant_message_id requested_model expected_model actual_model run_id effort context_window",
 };
 
 it.effect(

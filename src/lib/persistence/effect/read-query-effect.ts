@@ -838,6 +838,8 @@ type MessageWithTurnModelRow = MessageRow & {
 	turn_requested_model: string | null;
 	turn_expected_model: string | null;
 	turn_actual_model: string | null;
+	turn_effort: string | null;
+	turn_context_window: string | null;
 	turn_started_at: number | null;
 	turn_completed_at: number | null;
 	turn_waits: string;
@@ -918,6 +920,8 @@ function groupMessagesWithPartsAndTurnModels(
 			turn_requested_model,
 			turn_expected_model,
 			turn_actual_model,
+			turn_effort,
+			turn_context_window,
 			turn_started_at,
 			turn_completed_at,
 			turn_waits,
@@ -953,6 +957,10 @@ function groupMessagesWithPartsAndTurnModels(
 								? {}
 								: { expectedModel: turn_expected_model }),
 							actualModel: turn_actual_model,
+							...(turn_effort === null ? {} : { effort: turn_effort }),
+							...(turn_context_window === null
+								? {}
+								: { contextWindow: turn_context_window }),
 						},
 					}),
 		};
@@ -1555,6 +1563,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					turns.requested_model AS turn_requested_model,
 					turns.expected_model AS turn_expected_model,
 					turns.actual_model AS turn_actual_model,
+					turns.effort AS turn_effort,
+					turns.context_window AS turn_context_window,
 					${turnMetadataColumns}
 				FROM messages
 				LEFT JOIN turns ON turns.id = messages.turn_id
@@ -1851,6 +1861,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									turns.requested_model AS turn_requested_model,
 										turns.expected_model AS turn_expected_model,
 										turns.actual_model AS turn_actual_model,
+										turns.effort AS turn_effort,
+										turns.context_window AS turn_context_window,
 										${turnMetadataColumns}
 									FROM messages
 									LEFT JOIN turns ON turns.id = messages.turn_id
@@ -1894,6 +1906,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								turns.requested_model AS turn_requested_model,
 								turns.expected_model AS turn_expected_model,
 								turns.actual_model AS turn_actual_model,
+								turns.effort AS turn_effort,
+								turns.context_window AS turn_context_window,
 								${turnMetadataColumns}
 							FROM messages
 							LEFT JOIN turns ON turns.id = messages.turn_id
@@ -2328,6 +2342,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							turns.requested_model AS turn_requested_model,
 							turns.expected_model AS turn_expected_model,
 							turns.actual_model AS turn_actual_model,
+							turns.effort AS turn_effort,
+							turns.context_window AS turn_context_window,
 							${turnMetadataColumns}
 						FROM messages
 						LEFT JOIN turns ON turns.id = messages.turn_id
@@ -2621,7 +2637,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	> =>
 		Effect.gen(function* () {
 			const rows = yield* sql<TurnModelExecutionRow>`
-				SELECT requested_model, expected_model, actual_model
+				SELECT requested_model, expected_model, actual_model, effort, context_window
 				FROM turns
 				WHERE session_id = ${sessionId}
 					AND actual_model IS NOT NULL

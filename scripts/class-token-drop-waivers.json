@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/chat/AssistantHeader.svelte :: font-mono,text-mono-xs": "Approved card D replaces the separate dim monospace model span with the friendly model name as the existing semibold reply title.",
 	"src/lib/frontend/components/session/GitIdentity.svelte :: git.dirty": "The approved checkout sheet replaces the warning-coloured uncommitted label with neutral file counts and success/error line totals. git.dirty was a JavaScript condition in the removed class expression, not a CSS class.",
 	"src/lib/frontend/components/chat/ActivityRow.svelte :: tool.isError": "C4 replaces this JavaScript condition with tool.outcome. It is not a CSS class; the text-error and text-text-secondary classes are unchanged.",
 	"src/lib/frontend/components/session/BackgroundTasksPanel.svelte :: bg-text-dimmer/30,border-b,h-[3px],mt-[10px],w-[34px]": "The phone top sheet replaces the fake 34x3 handle and bottom border with SheetChrome's real 36x5 drag handle, shared colour, spacing and shadow.",

@@ -85,6 +85,7 @@ import {
 	TOOL_RESULT_EVENT_REFS_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 	TURN_RECAPS_MIGRATION,
+	TURN_REQUEST_SETTINGS_MIGRATION,
 } from "../schema.js";
 import {
 	NEVER_CUT_TOOL_NAMES,
@@ -389,6 +390,8 @@ const expectedTableColumns = {
 		"requested_model",
 		"expected_model",
 		"actual_model",
+		"effort",
+		"context_window",
 	],
 } as const;
 
@@ -673,13 +676,9 @@ const verifyExistingBaselineSchema: Effect.Effect<
 			(tableName === "turns" &&
 				sameStrings(
 					actualColumns,
-					expectedColumns.filter(
-						(column) =>
-							column !== "requested_model" &&
-							column !== "expected_model" &&
-							column !== "actual_model",
-					),
-				));
+					expectedColumns.slice(0, actualColumns.length),
+				) &&
+				expectedColumns.length - actualColumns.length <= 5);
 		if (!matchesKnownSchema) {
 			return yield* failSchemaMismatch(
 				`Existing event-store columns differ for ${tableName}. Expected ${expectedColumns.join(", ")}, got ${actualColumns.join(", ")}`,
@@ -1557,6 +1556,15 @@ export const effectMigrationEntries = {
 	"0084_session_draft_delete": executeSqlStatements(
 		readMigrationSql(SESSION_DRAFT_DELETE_MIGRATION),
 	),
+	"0085_turn_request_settings": Effect.gen(function* () {
+		for (const [index, column] of ["effort", "context_window"].entries()) {
+			const statement = splitSqlStatements(
+				readMigrationSql(TURN_REQUEST_SETTINGS_MIGRATION),
+			)[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing("turns", column, statement);
+		}
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
