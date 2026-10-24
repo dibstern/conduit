@@ -331,11 +331,17 @@ export class ProcessHarness {
 		const clearTestEnv =
 			'for key in $(env | cut -d= -f1); do case "$key" in CONDUIT_TEST_*) unset "$key";; esac; done\n';
 		writeFileSync(join(this.root, "home/.profile"), clearTestEnv);
-		if (shellEnvProof)
+		if (shellEnvProof) {
+			// Keep real profile capture independent of host startup files and tools.
+			writeFileSync(
+				join(this.root, "home/.zshenv"),
+				"unsetopt GLOBAL_RCS\nexport PATH=/usr/bin:/bin\n",
+			);
 			writeFileSync(
 				join(this.root, "home/.zprofile"),
 				`${clearTestEnv}export CONDUIT_ENV_PROOF=server-cache\nexport ANTHROPIC_API_KEY=must-remove\nexport ANTHROPIC_MODEL=must-remove\nexport PATH="/tmp/conduit-cached-env-bin:$PATH"\n`,
 			);
+		}
 		if (foregroundCli && !dist)
 			throw new Error("Foreground CLI coverage requires a build");
 		if (managedOpenCode || foregroundCli) {
