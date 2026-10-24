@@ -29,6 +29,7 @@ import { cursorTurnHandlers } from "./steps/cursorTurn.js";
 import { cursorUsageHandlers } from "./steps/cursorUsage.js";
 import { cursorUsageErrorsHandlers } from "./steps/cursorUsageErrors.js";
 import { draftAttachmentFailureHandlers } from "./steps/draftAttachmentFailures.js";
+import { firstRunProjectsHandlers } from "./steps/firstRunProjects.js";
 import { harnessHandlers } from "./steps/harness.js";
 import { launchingRowsHandlers } from "./steps/launchingRows.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
@@ -75,6 +76,7 @@ const driver = new PlaywrightDriver();
 
 export const conduitVisualHandlers: StepHandler[] = [
 	...addProjectDialogHandlers,
+	...firstRunProjectsHandlers,
 	...draftAttachmentFailureHandlers,
 	...sessionPresentationHandlers,
 	...sessionSheetsHandlers,

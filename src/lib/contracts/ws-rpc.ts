@@ -987,6 +987,7 @@ export const FindFoldersResponseSchema = Schema.Struct({
 			isGitRepo: Schema.Boolean,
 			branch: Schema.optional(Schema.String),
 			repoCount: Schema.optional(Schema.Number),
+			lastUsed: Schema.optional(Schema.Number),
 			reason: Schema.Literals(["recent", "sibling", "match"]),
 			exists: Schema.Boolean,
 		}),

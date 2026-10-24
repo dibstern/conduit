@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Rpc } from "effect/rpc";
-	import { tick } from "svelte";
+	import { tick, untrack } from "svelte";
 	import {
 		type FindFolders,
 		type FindFoldersResponse,
@@ -21,12 +21,16 @@
 		selectedPaths,
 		ontoggle,
 		disabled = false,
+		initialQuery = "",
+		allowCreate = true,
 		gitInit = $bindable(true),
 		findFolders = (input) => rpc("FindFolders", input),
 	}: {
 		selectedPaths: readonly string[];
 		ontoggle: (entry: FindFoldersResponse["entries"][number]) => void;
 		disabled?: boolean;
+		initialQuery?: string;
+		allowCreate?: boolean;
 		gitInit?: boolean;
 		findFolders?: (input: Rpc.PayloadConstructor<typeof FindFolders>) => Promise<FindFoldersResponse>;
 	} = $props();
@@ -34,7 +38,7 @@
 	const uid = $props.id();
 	const listboxId = `${uid}-matches`;
 	const optionId = (index: number) => `${listboxId}-${index}`;
-	let query = $state("");
+	let query = $state(untrack(() => initialQuery));
 	let entries = $state<FindFoldersResponse["entries"]>([]);
 	let home = $state("");
 	let activeIndex = $state(0);
@@ -48,7 +52,7 @@
 	const isPathQuery = $derived(parsed.isPath);
 	const completion = $derived(ghost(query, entries.filter((entry) => entry.exists), home));
 	const existing = $derived(entries.filter((entry) => entry.exists && entry.path !== parsed.folder));
-	const newFolder = $derived(entries.find((entry) => !entry.exists));
+	const newFolder = $derived(allowCreate ? entries.find((entry) => !entry.exists) : undefined);
 	const groups = $derived(isPathQuery
 		? [{ label: "Matches", entries: existing }]
 		: [
@@ -58,7 +62,7 @@
 		]);
 	const matches = $derived(groups.flatMap((group) => group.entries));
 	const choices = $derived(newFolder ? [...matches, newFolder] : matches);
-	const showNewFolderAction = $derived(isPathQuery && query.endsWith("/") && Boolean(parsed.folder));
+	const showNewFolderAction = $derived(allowCreate && isPathQuery && query.endsWith("/") && Boolean(parsed.folder));
 	const choiceCount = $derived(choices.length + Number(showNewFolderAction));
 	const expanded = $derived(choiceCount > 0);
 

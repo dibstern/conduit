@@ -79,6 +79,9 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 			createdAt: 1_772_011_800_000,
 		},
 	];
+	const projects = [
+		{ slug: "myapp", title: "My app", folders: ["/myapp"] as const },
+	];
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			"input.submit": ({ sessionId }) => ({
@@ -87,7 +90,7 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 				handedOff: true,
 			}),
 			AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
-			GetProjects: () => ({ projects: [] }),
+			GetProjects: () => ({ projects }),
 			DetectProxy: () => ({ found: false, port: 8317 }),
 			UpdateInstance: (payload) => {
 				const name = payload["name"];
@@ -103,7 +106,7 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 	});
 	await mockRelayWebSocket(page, {
 		initMessages: [
-			{ type: "project_list", projects: [], current: null },
+			{ type: "project_list", projects, current: null },
 			{ type: "shell_snapshot", roots: true, sessions: [] },
 		],
 		responses: new Map(),
@@ -111,6 +114,13 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 	rpc.setDaemonList("SubscribeInstances", { instances });
 	await gotoRelay(page, new URL("/", relayUrl).toString());
 	await expect(page).toHaveURL(new URL("/", relayUrl).toString());
+	await expect(
+		page.locator('.session-empty, [data-testid="project-tree-empty"]').first(),
+	).toBeVisible();
+	// Remove projects after the initial shell settles so this remains a settings test.
+	projects.length = 0;
+	rpc.setProjects({ projects: [] });
+	await expect(page.getByTestId("project-tree-header")).toHaveCount(0);
 
 	await openServerSettings(page);
 	const panel = page.locator("#settings-panel");

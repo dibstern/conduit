@@ -125,25 +125,45 @@ const isGitRepo = (
 
 type FolderEntry = FindFoldersResponse["entries"][number];
 
+const gitDirectory = (path: string) =>
+	Effect.gen(function* () {
+		const gitDir = join(path, ".git");
+		const gitStats = yield* statPath(gitDir);
+		if (Option.isNone(gitStats)) return Option.none<string>();
+		if (gitStats.value.isDirectory()) return Option.some(gitDir);
+		if (!gitStats.value.isFile()) return Option.none<string>();
+		const pointer = yield* Effect.tryPromise(() => readFile(gitDir, "utf8"));
+		const target = pointer.match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
+		return target ? Option.some(resolve(path, target)) : Option.none<string>();
+	});
+
+const lastGitActivity = (path: string) =>
+	Effect.gen(function* () {
+		const gitDir = yield* gitDirectory(path);
+		if (Option.isNone(gitDir)) return Option.none<number>();
+		const metadata = yield* Effect.forEach(
+			["HEAD", "index", "logs/HEAD"],
+			(file) => statPath(join(gitDir.value, file)),
+			{ concurrency: 3 },
+		);
+		const times = metadata
+			.filter(Option.isSome)
+			.map((entry) => entry.value.mtimeMs);
+		return times.length > 0
+			? Option.some(Math.max(...times))
+			: Option.none<number>();
+	});
+
 const folderMetadata = (
 	path: string,
 	git: boolean,
 ): Effect.Effect<Pick<FolderEntry, "branch" | "repoCount">> =>
 	Effect.gen(function* () {
 		if (git) {
-			let gitDir = join(path, ".git");
-			const gitStats = yield* statPath(gitDir);
-			if (Option.isNone(gitStats)) return {};
-			if (gitStats.value.isFile()) {
-				const pointer = yield* Effect.tryPromise(() =>
-					readFile(gitDir, "utf8"),
-				);
-				const target = pointer.match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
-				if (!target) return {};
-				gitDir = resolve(path, target);
-			}
+			const gitDir = yield* gitDirectory(path);
+			if (Option.isNone(gitDir)) return {};
 			const head = yield* Effect.tryPromise(() =>
-				readFile(join(gitDir, "HEAD"), "utf8"),
+				readFile(join(gitDir.value, "HEAD"), "utf8"),
 			);
 			const branch = head.trim().match(/^ref: refs\/heads\/(.+)$/)?.[1];
 			return branch ? { branch } : {};
@@ -168,11 +188,71 @@ export interface FolderSuggestionSources {
 	readonly projectFolders: readonly string[];
 }
 
+// Reading these makes macOS show a privacy prompt (or they are huge), so the
+// scan never opens them; they stay reachable by browsing.
+const UNSCANNED_HOME_FOLDERS = new Set([
+	"Applications",
+	"Desktop",
+	"Documents",
+	"Downloads",
+	"Library",
+	"Movies",
+	"Music",
+	"Pictures",
+	"Public",
+]);
+
+/** Scan each home root breadth-first, so overlapping roots get their full depth. */
+const discoverGitRepos = Effect.gen(function* () {
+	const home = homedir();
+	let folders = [
+		home,
+		...["src", "code", "Developer", "projects", "dev", "work"].map((name) =>
+			join(home, name),
+		),
+	];
+	const visited = new Set<string>();
+	const repos: string[] = [];
+	for (let depth = 0; depth <= 2; depth++) {
+		const pending = [...new Set(folders)].filter((path) => !visited.has(path));
+		for (const path of pending) visited.add(path);
+		const listings = yield* Effect.forEach(
+			pending,
+			(path) =>
+				Effect.tryPromise(() => readdir(path, { withFileTypes: true })).pipe(
+					Effect.map((entries) => {
+						if (entries.length > MAX_PATH_MATCHES)
+							return { repos: [], folders: [] };
+						return {
+							repos: entries.some((entry) => entry.name === ".git")
+								? [path]
+								: [],
+							folders: entries
+								.filter(
+									(entry) =>
+										entry.isDirectory() &&
+										!entry.name.startsWith(".") &&
+										entry.name !== "node_modules" &&
+										!(path === home && UNSCANNED_HOME_FOLDERS.has(entry.name)),
+								)
+								.map((entry) => join(path, entry.name)),
+						};
+					}),
+					Effect.orElseSucceed(() => ({ repos: [], folders: [] })),
+				),
+			{ concurrency: 8 },
+		);
+		for (const listing of listings) repos.push(...listing.repos);
+		folders = listings.flatMap((listing) => listing.folders);
+	}
+	return repos;
+});
+
 /**
  * Existing folders from the recent-projects list, then git repos one level
- * beside each project folder, whose names contain `text`. One readdir per
- * distinct parent; nothing else on disk is scanned. Unreadable paths are
- * skipped rather than failing the lookup.
+ * beside each project folder, whose names contain `text`. An empty query also
+ * discovers recently active repositories under common home roots. Unreadable
+ * paths are skipped rather than failing the lookup.
  */
 const suggestFolders = (
 	text: string,
@@ -184,15 +264,28 @@ const suggestFolders = (
 			basename(path).toLowerCase().includes(needle);
 		// Folders already in a project are never suggested, recent or sibling.
 		const inProject = new Set(sources.projectFolders);
+		const discovered = text ? [] : yield* discoverGitRepos;
+		const recentPaths = new Set([...sources.recent, ...discovered]);
 		const recent = yield* Effect.forEach(
-			sources.recent.filter((path) => !inProject.has(path) && named(path)),
+			[...recentPaths].filter((path) => !inProject.has(path) && named(path)),
 			(path) =>
 				Effect.gen(function* () {
 					const stats = yield* statPath(path);
 					if (Option.isNone(stats) || !stats.value.isDirectory()) return [];
 					const git = yield* isGitRepo(path);
+					const lastUsed = git
+						? yield* lastGitActivity(path)
+						: Option.none<number>();
+					if (!sources.recent.includes(path) && Option.isNone(lastUsed))
+						return [];
 					return [
-						{ path, isGitRepo: git, reason: "recent", exists: true } as const,
+						{
+							path,
+							isGitRepo: git,
+							reason: "recent",
+							exists: true,
+							...(Option.isSome(lastUsed) ? { lastUsed: lastUsed.value } : {}),
+						} as const,
 					];
 				}).pipe(Effect.orElseSucceed(() => [])),
 			{ concurrency: 8 },
@@ -221,8 +314,14 @@ const suggestFolders = (
 			{ concurrency: 8 },
 		);
 		const unique = new Map<string, FolderEntry>();
+		const recentEntries = recent.flat();
+		if (!text)
+			recentEntries.sort(
+				(a, b) =>
+					(b.lastUsed ?? 0) - (a.lastUsed ?? 0) || a.path.localeCompare(b.path),
+			);
 		for (const entry of [
-			...recent.flat(),
+			...recentEntries,
 			...repos.map(
 				(path) =>
 					({ path, isGitRepo: true, reason: "sibling", exists: true }) as const,
@@ -327,7 +426,7 @@ export const findFolders = (
 		} as const;
 		return { entries: [typed, ...children.flat()] };
 	}).pipe(
-		Effect.flatMap((result) =>
+		Effect.flatMap((result: Pick<FindFoldersResponse, "entries">) =>
 			Effect.filter(result.entries, (entry) =>
 				configDir === undefined
 					? Effect.succeed(true)
