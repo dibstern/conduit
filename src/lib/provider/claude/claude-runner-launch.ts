@@ -457,6 +457,7 @@ export const makeClaudeRunnerLaunch = (
 								? { subagentPollTimeoutMs: testSubagentPollTimeoutMs }
 								: {}),
 							onSubagentFinalizationComplete: reportUpgradeState,
+							onSourceDelivery: callbacks.sourceDelivery,
 							isBackgroundBusy: () => callbacks.isBackgroundBusy(1),
 							onTurnStateChanged: (_sessionId, inFlight) =>
 								callbacks.turnStateChanged(inFlight),

@@ -258,6 +258,7 @@ export type ClaudeSessionRunnerDeps = Pick<
 	readonly isBackgroundBusy?: () => boolean;
 	readonly onSubagentFinalizationComplete?: () => void;
 	readonly onTurnStateChanged?: (sessionId: string, inFlight: boolean) => void;
+	readonly onSourceDelivery?: import("../runner/runner-host.js").RunnerLaunchCallbacks["sourceDelivery"];
 	readonly onAbandonedRun?: (inputId: string) => void;
 	readonly onNativeSessionId?: (
 		sessionId: string,
@@ -378,6 +379,10 @@ function sessionFailure(operation: string, cause: unknown): SessionFailure {
 
 class ClaudeRunnerPayload implements RunnerPayload {
 	readonly providerId = "claude";
+	private readonly sourceDeliveries = new WeakMap<
+		ClaudeSessionContext,
+		() => void
+	>();
 	private readonly endingOwnership = new WeakSet<ClaudeSessionContext>();
 	private readonly controllers = new Map<string, ClaudeSessionController>();
 	private readonly turnSettings = new WeakMap<
@@ -775,10 +780,17 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		);
 	}
 
+	private invalidateSourceDelivery(ctx: ClaudeSessionContext): void {
+		const finish = this.sourceDeliveries.get(ctx);
+		this.sourceDeliveries.delete(ctx);
+		finish?.();
+	}
+
 	private removeSessionEffect(sessionId: string): Effect.Effect<void> {
 		return Effect.gen({ self: this }, function* () {
 			yield* this.warmedQueries.discardEffect(sessionId);
 			const ctx = yield* getSession(this.stateRef, sessionId);
+			if (ctx) this.invalidateSourceDelivery(ctx);
 			yield* removeSession(this.stateRef, sessionId);
 			yield* this.recordBackgroundTaskEffect({
 				sessionId,
@@ -1618,6 +1630,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 										)
 										.pipe(Effect.ignore);
 								}
+								this.invalidateSourceDelivery(ctx);
 								// A held send is placed when the SDK starts it.
 								this.sinks.retainSink(input.eventSink);
 								yield* addPendingIntake(
@@ -2070,6 +2083,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					  })
 					| undefined;
 				let endsCurrentRun = true;
+				let deliverySource:
+					| { sessionId: string; inputId: string; runId: string }
+					| undefined;
 				if (message.type === "result") {
 					const pending = yield* pendingIntakes(this.stateRef, ctx.sessionId);
 					unacceptedResultInputs = unacceptedResultInputIds(
@@ -2108,86 +2124,140 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						acceptedOwner.some(({ runId }) => runId === ctx.currentRunId);
 					if (!ctx.currentRunId || !endsCurrentRun)
 						resultInput = unacceptedResultInputs[0] ?? acceptedOwner[0];
+					const owner = ctx.acceptedOutputOwner;
+					if (
+						endsCurrentRun &&
+						owner &&
+						owner.runId === ctx.currentRunId &&
+						owner.inputId === ctx.currentTurnId &&
+						terminalRunIds.includes(owner.runId)
+					)
+						deliverySource = {
+							sessionId: ctx.sessionId,
+							inputId: owner.inputId,
+							runId: owner.runId,
+						};
 					ctx.interruptRequested =
 						ctx.interruptInputId !== undefined &&
 						inputIds.includes(ctx.interruptInputId);
-					if (
-						endsCurrentRun &&
-						isInterruptedResult(message, ctx.interruptRequested)
-					) {
-						yield* this.completeTurnToolsEffect(ctx, false);
-						yield* this.cancelInteractionsEffect(
-							ctx,
-							"Turn interrupted",
-							false,
-						);
-					}
-					if (endsCurrentRun) ctx.turnInFlight = false;
+				} else if (
+					message.type === "rate_limit_event" &&
+					message.rate_limit_info?.status === "rejected" &&
+					!ctx.turnInFlight &&
+					!ctx.currentRunId &&
+					ctx.acceptedOutputOwner &&
+					ctx.acceptedOutputOwner.inputId === ctx.currentTurnId &&
+					ctx.acceptedOutputOwner.userMessageId === ctx.currentUserMessageId &&
+					ctx.eventSink &&
+					!ctx.stopped &&
+					!ctx.closedRunIds?.has(ctx.acceptedOutputOwner.runId) &&
+					(yield* isCurrentSession(this.stateRef, ctx)) &&
+					!(yield* isStreamEnded(this.stateRef, ctx.sessionId))
+				) {
+					deliverySource = {
+						sessionId: ctx.sessionId,
+						inputId: ctx.acceptedOutputOwner.inputId,
+						runId: ctx.acceptedOutputOwner.runId,
+					};
 				}
-				const detachedResult =
-					resultInput !== undefined &&
-					(unacceptedResultInputs.length > 0 ||
-						resultInput.inputId !==
-							(ctx.acceptedOutputOwner?.inputId ?? ctx.currentTurnId));
-				const translationContext: ClaudeSessionContext = resultInput
-					? {
-							...ctx,
-							currentRunId: resultInput.runId,
-							currentTurnId: resultInput.inputId,
-							currentUserMessageId:
-								resultInput.continuation?.cutOffMessageId ??
-								(ctx.acceptedOutputOwner?.inputId === resultInput.inputId
-									? ctx.acceptedOutputOwner.userMessageId
-									: undefined) ??
-								resultInput.inputId,
-							eventSink: resultInput.eventSink,
-							...(detachedResult
-								? {
-										lastAssistantUuid: undefined,
-										activeAssistantMessageId: "",
-										goalTracker: new ClaudeGoalTracker(ctx.sessionId),
-										usageLimit: undefined,
-										usageLimitReported: undefined,
-										pendingSyntheticMessages: undefined,
-									}
-								: {}),
-						}
-					: ctx;
-				const translatedMessages = yield* interceptClaudeUsageLimit(
-					translationContext,
-					message,
-				);
-				for (const translatedMessage of translatedMessages)
-					yield* translatedMessage.type === "result" && detachedResult
-						? translator.translateDetachedResult(
-								translationContext,
-								translatedMessage,
-								terminalRunIds,
-							)
-						: translator.translate(
-								translationContext,
-								translatedMessage,
-								decision.receivedAt,
-								terminalRunIds,
+				const delivery = Effect.gen({ self: this }, function* () {
+					if (message.type === "result") {
+						if (
+							endsCurrentRun &&
+							isInterruptedResult(message, ctx.interruptRequested)
+						) {
+							yield* this.completeTurnToolsEffect(ctx, false);
+							yield* this.cancelInteractionsEffect(
+								ctx,
+								"Turn interrupted",
+								false,
 							);
-				if (parentChildLink) {
-					yield* parentChildLink;
-					parentChildLink = undefined;
-				}
-				if (message.type === "result") {
-					const translatedResult = translatedMessages.find(
-						(message) => message.type === "result",
+						}
+						if (endsCurrentRun) ctx.turnInFlight = false;
+					}
+					const detachedResult =
+						resultInput !== undefined &&
+						(unacceptedResultInputs.length > 0 ||
+							resultInput.inputId !==
+								(ctx.acceptedOutputOwner?.inputId ?? ctx.currentTurnId));
+					const translationContext: ClaudeSessionContext = resultInput
+						? {
+								...ctx,
+								currentRunId: resultInput.runId,
+								currentTurnId: resultInput.inputId,
+								currentUserMessageId:
+									resultInput.continuation?.cutOffMessageId ??
+									(ctx.acceptedOutputOwner?.inputId === resultInput.inputId
+										? ctx.acceptedOutputOwner.userMessageId
+										: undefined) ??
+									resultInput.inputId,
+								eventSink: resultInput.eventSink,
+								...(detachedResult
+									? {
+											lastAssistantUuid: undefined,
+											activeAssistantMessageId: "",
+											goalTracker: new ClaudeGoalTracker(ctx.sessionId),
+											usageLimit: undefined,
+											usageLimitReported: undefined,
+											pendingSyntheticMessages: undefined,
+										}
+									: {}),
+							}
+						: ctx;
+					const translatedMessages = yield* interceptClaudeUsageLimit(
+						translationContext,
+						message,
 					);
-					if (endsCurrentRun)
-						this.deps.onTurnStateChanged?.(ctx.sessionId, false);
-					yield* settleUnacceptedResultEffect(
-						this.stateRef,
-						ctx,
-						translatedResult ?? message,
+					for (const translatedMessage of translatedMessages)
+						yield* translatedMessage.type === "result" && detachedResult
+							? translator.translateDetachedResult(
+									translationContext,
+									translatedMessage,
+									terminalRunIds,
+								)
+							: translator.translate(
+									translationContext,
+									translatedMessage,
+									decision.receivedAt,
+									terminalRunIds,
+								);
+					if (parentChildLink) {
+						yield* parentChildLink;
+						parentChildLink = undefined;
+					}
+					if (message.type === "result") {
+						const translatedResult = translatedMessages.find(
+							(message) => message.type === "result",
+						);
+						if (endsCurrentRun)
+							this.deps.onTurnStateChanged?.(ctx.sessionId, false);
+						yield* settleUnacceptedResultEffect(
+							this.stateRef,
+							ctx,
+							translatedResult ?? message,
+						);
+						if (ctx.interruptRequested) ctx.interruptInputId = undefined;
+						ctx.interruptRequested = false;
+					}
+				});
+				if (deliverySource)
+					yield* Effect.acquireUseRelease(
+						Effect.sync(() => {
+							if (!deliverySource) return;
+							this.invalidateSourceDelivery(ctx);
+							const finish = this.deps.onSourceDelivery?.(deliverySource);
+							if (finish) this.sourceDeliveries.set(ctx, finish);
+							return finish;
+						}),
+						() => delivery,
+						(finish) =>
+							Effect.sync(() => {
+								if (finish && this.sourceDeliveries.get(ctx) === finish)
+									this.sourceDeliveries.delete(ctx);
+								finish?.();
+							}),
 					);
-					if (ctx.interruptRequested) ctx.interruptInputId = undefined;
-					ctx.interruptRequested = false;
-				}
+				else yield* delivery;
 			}
 			// Ownership or launcher input can arrive after the live snapshot,
 			// including through an agent's transcript feed. Final reads still
@@ -2549,6 +2619,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				if (setup) yield* Deferred.await(setup).pipe(Effect.ignore);
 			}
 			const ctx = yield* getSession(this.stateRef, sessionId);
+			if (ctx) this.invalidateSourceDelivery(ctx);
 			const interrupt = Effect.gen({ self: this }, function* () {
 				if (ctx && bound && turnIds.length === 0) {
 					const foreground =
@@ -2915,6 +2986,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		interruptQuery = true,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
+			this.invalidateSourceDelivery(ctx);
 			// Explicit disposal ends the controller even after a resumable query
 			// failure left its context waiting for the next send.
 			ctx.rebinding = false;
@@ -2956,6 +3028,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				this.controllers.delete(sessionId);
 				return;
 			}
+			this.invalidateSourceDelivery(ctx);
 			log.info(`Ending Claude session: ${sessionId}`);
 			const dispose = Effect.gen({ self: this }, function* () {
 				// A retained steer can start while End crosses the runner socket.

@@ -72,7 +72,12 @@ import {
 	runnerPidMatchesRegistration,
 } from "./runner-registry.js";
 import { failRunnerTurn, observeRunnerTurn } from "./runner-turn-failure.js";
-import { makeRunnerUpgrade, type RunnerUpgrade } from "./runner-upgrade.js";
+import {
+	makeRunnerUpgrade,
+	type RunnerSourceDelivery,
+	type RunnerUpgrade,
+	type RunnerUpgradeState,
+} from "./runner-upgrade.js";
 import type {
 	SessionCommand,
 	SessionFailure,
@@ -106,6 +111,9 @@ interface RunnerChild {
 	};
 	pendingSendCommands?: Map<string, number> | undefined;
 	ownedRunIds?: Set<string>;
+	/** One verified terminal delivery, including its release-sink unwind. */
+	sourceDelivery?: RunnerSourceDelivery | undefined;
+	deliveryWaiters?: Set<Deferred.Deferred<void>>;
 	readonly upgrade: RunnerUpgrade;
 }
 
@@ -220,13 +228,23 @@ const CANCELLED_TURN: TurnResult = {
 	providerStateUpdates: [],
 };
 
+// Notification is private to admission; it never changes account eligibility.
+const notifyEntry = (entry: Pick<RunnerChild, "deliveryWaiters">): void => {
+	const waiters = [...(entry.deliveryWaiters ?? [])];
+	// Completing a Deferred can synchronously register its next observation.
+	entry.deliveryWaiters?.clear();
+	for (const waiter of waiters) Deferred.doneUnsafe(waiter, Effect.void);
+};
+
 // Every lifecycle write goes through this boundary; reduction itself is pure.
 const transition = (
-	entry: Pick<RunnerChild, "lifecycle">,
+	entry: Pick<RunnerChild, "lifecycle" | "deliveryWaiters" | "sourceDelivery">,
 	event: Entry.RunnerEntryTransition,
 ) => {
 	const ending = entry.lifecycle.end;
 	entry.lifecycle = Entry.nextRunnerLifecycle(entry.lifecycle, event);
+	if (!Entry.canReconfigure(entry.lifecycle)) entry.sourceDelivery = undefined;
+	notifyEntry(entry);
 	return event._tag === "FinishEnd" && ending?.pending === 1
 		? ending.released
 		: undefined;
@@ -239,6 +257,7 @@ const stop = (
 		| "stopped"
 		| "socketPath"
 		| "lifecycle"
+		| "deliveryWaiters"
 		| "pid"
 		| "child"
 		| "connection"
@@ -523,6 +542,8 @@ export const makeProcessSessionRunner = (
 				sessionId: string;
 				inputId?: string;
 				runId?: string | undefined;
+				commandId?: string;
+				runnerId?: string;
 				/** What a failed send places when the SDK never started it. */
 				placement?: {
 					inputId: string;
@@ -536,6 +557,37 @@ export const makeProcessSessionRunner = (
 				releaseRequested: boolean;
 			}
 		>();
+		const observeSourceDelivery = (
+			entry: RunnerChild,
+			state: RunnerUpgradeState | undefined,
+		) => {
+			const delivery = state?.sourceDelivery;
+			const previous = entry.sourceDelivery;
+			const binding = delivery ? sinks.get(delivery.sinkId) : undefined;
+			// A released sink may disappear while its already-verified delivery unwinds.
+			const retained =
+				delivery &&
+				previous &&
+				previous.generation === delivery.generation &&
+				previous.sinkId === delivery.sinkId &&
+				previous.commandId === delivery.commandId &&
+				previous.inputId === delivery.inputId &&
+				previous.runId === delivery.runId;
+			const owned =
+				delivery &&
+				binding?.sessionId === entry.sessionId &&
+				binding.runnerId === entry.runnerId &&
+				binding.commandId === delivery.commandId &&
+				binding.inputId === delivery.inputId &&
+				binding.runId === delivery.runId;
+			entry.sourceDelivery =
+				delivery?.sessionId === entry.sessionId &&
+				delivery.runnerId === entry.runnerId &&
+				Entry.canReconfigure(entry.lifecycle) &&
+				(owned || retained)
+					? delivery
+					: undefined;
+		};
 		// These sends have no runner ownership yet, including while rebinding.
 		const pendingSends = new Map<
 			string,
@@ -711,6 +763,8 @@ export const makeProcessSessionRunner = (
 		};
 
 		const evict = (sessionId: string, entry: RunnerChild) => {
+			entry.sourceDelivery = undefined;
+			notifyEntry(entry);
 			// A late close from an old child must not remove its replacement.
 			if (children.get(sessionId) !== entry) return;
 			children.delete(sessionId);
@@ -729,6 +783,7 @@ export const makeProcessSessionRunner = (
 			cause: Cause.Cause<SessionFailure>,
 		) =>
 			Effect.gen(function* () {
+				notifyEntry(entry);
 				yield* Deferred.failCause(entry.ready, cause);
 				yield* Deferred.succeed(entry.drained, undefined);
 				const ending = entry.lifecycle.end;
@@ -776,6 +831,8 @@ export const makeProcessSessionRunner = (
 				candidates.delete(entry);
 			});
 		const detach = (entry: RunnerChild, failure?: SessionFailure) => {
+			entry.sourceDelivery = undefined;
+			notifyEntry(entry);
 			entry.connection?.destroy(failure);
 			entry.child?.unref();
 			if (entry.child?.connected) entry.child.disconnect();
@@ -784,6 +841,8 @@ export const makeProcessSessionRunner = (
 			.withPermits(1)(
 				Effect.gen(function* () {
 					closing = true;
+					for (const entry of [...children.values(), ...candidates])
+						notifyEntry(entry);
 					for (const { finished } of accountDemands.values())
 						Deferred.doneUnsafe(finished, Effect.void);
 					const entries = [...children.values(), ...candidates];
@@ -1097,6 +1156,7 @@ export const makeProcessSessionRunner = (
 								rebindsAccount: hello.rebindsAccount === true,
 							};
 							entry.upgrade.state = hello.upgradeState;
+							notifyEntry(entry);
 							// Identity and native controls suffice until the project can reattach.
 							if (identityOnly || Entry.isAwaitingProject(entry.lifecycle))
 								return;
@@ -1180,6 +1240,10 @@ export const makeProcessSessionRunner = (
 								yield* ensureAttached();
 								sinks.set(binding.sinkId, {
 									sessionId,
+									runnerId: entry.runnerId,
+									...(binding.commandId
+										? { commandId: binding.commandId }
+										: {}),
 									...(inputId ? { inputId } : {}),
 									runId,
 									messageId,
@@ -1292,6 +1356,7 @@ export const makeProcessSessionRunner = (
 										}),
 									);
 							}
+							observeSourceDelivery(entry, hello.upgradeState);
 							yield* Effect.all(restoreAccounts, { discard: true });
 							yield* ensureAttached();
 							if (process.env["NODE_ENV"] === "test" && process.connected)
@@ -1348,12 +1413,14 @@ export const makeProcessSessionRunner = (
 						);
 					},
 					onUpgradeState: (state) => {
+						observeSourceDelivery(entry, state);
 						const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
 						// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
 						entry.upgrade.state = {
 							...state,
 							...(snapshot ? { snapshot } : {}),
 						};
+						notifyEntry(entry);
 						if (
 							state.snapshot &&
 							process.env["NODE_ENV"] === "test" &&
@@ -1725,6 +1792,8 @@ export const makeProcessSessionRunner = (
 							transition(replacement, { _tag: "Promote" });
 							replacement.connection?.write({ type: "upgrade-activate" });
 							children.set(sessionId, replacement);
+							old.sourceDelivery = undefined;
+							notifyEntry(old);
 							candidates.delete(replacement);
 							candidates.add(old);
 							upgradeMark(sessionId, old, "switched", replacement);
@@ -2702,6 +2771,9 @@ export const makeProcessSessionRunner = (
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
 				let cancelled: Deferred.Deferred<void> | undefined;
+				let deliveryRegistration:
+					| { entry: RunnerChild; changed: Deferred.Deferred<void> }
+					| undefined;
 				const execute = Effect.gen(function* () {
 					const autoSettleAfterDays =
 						command.type === "send-turn"
@@ -2860,6 +2932,29 @@ export const makeProcessSessionRunner = (
 									const legacyCursor =
 										driver.driverKind === "cursor" &&
 										existing.connection?.scopedCursorCredentials === false;
+									// Observe before checking, under selection. Await only after releasing it.
+									const changed = Deferred.makeUnsafe<void>();
+									(existing.deliveryWaiters ??= new Set()).add(changed);
+									deliveryRegistration = { entry: existing, changed };
+									const delivery = existing.sourceDelivery;
+									if (
+										command.type === "send-turn" &&
+										loginChange === "Account" &&
+										!foldersChanged &&
+										!legacyCursor &&
+										Entry.canReconfigure(existing.lifecycle) &&
+										delivery?.sessionId === sessionId &&
+										delivery.runnerId === existing.runnerId &&
+										delivery.generation > 0
+									) {
+										return {
+											entry: existing,
+											draining: true,
+											sourceDeliveryPending: changed,
+										};
+									}
+									existing.deliveryWaiters.delete(changed);
+									deliveryRegistration = undefined;
 									const decision = Entry.decideSend({
 										command: command.type,
 										lifecycle: existing.lifecycle,
@@ -2998,6 +3093,23 @@ export const makeProcessSessionRunner = (
 						);
 						entry = selection.entry;
 						draining = selection.draining;
+						if (
+							"sourceDeliveryPending" in selection &&
+							selection.sourceDeliveryPending
+						) {
+							const changed = selection.sourceDeliveryPending;
+							yield* Deferred.await(changed).pipe(
+								Effect.ensuring(
+									Effect.sync(() => {
+										deliveryRegistration?.entry.deliveryWaiters?.delete(
+											changed,
+										);
+										deliveryRegistration = undefined;
+									}),
+								),
+							);
+							continue;
+						}
 						if ("recoveryPending" in selection && entry) {
 							const waiting = entry;
 							yield* Deferred.await(waiting.ready).pipe(
@@ -3266,6 +3378,13 @@ export const makeProcessSessionRunner = (
 							commandId,
 							command.input.commandAttempt ?? 0,
 						);
+					if (command.type === "send-turn") {
+						const binding = sinks.get(command.sinkId);
+						if (binding) {
+							binding.commandId = commandId;
+							binding.runnerId = entry.runnerId;
+						}
+					}
 					return yield* connection.commandEffect(
 						commandId,
 						payload,
@@ -3276,6 +3395,10 @@ export const makeProcessSessionRunner = (
 				}).pipe(
 					Effect.ensuring(
 						Effect.sync(() => {
+							deliveryRegistration?.entry.deliveryWaiters?.delete(
+								deliveryRegistration.changed,
+							);
+							deliveryRegistration = undefined;
 							if (!admitted) return;
 							transition(admitted, { _tag: "FinishCommand" });
 							upgrade(admittedSessionId, admitted);

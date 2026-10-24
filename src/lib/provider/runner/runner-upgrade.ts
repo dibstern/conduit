@@ -11,9 +11,21 @@ export type {
 	RunnerSettingsSnapshot,
 } from "../claude/claude-runner-snapshot.js";
 
+/** The owned terminal delivery is unwinding; this grants no switch permission. */
+export interface RunnerSourceDelivery {
+	readonly sessionId: string;
+	readonly runnerId: string;
+	readonly commandId: string;
+	readonly sinkId: string;
+	readonly inputId: string;
+	readonly runId: string;
+	readonly generation: number;
+}
+
 export interface RunnerUpgradeState {
 	readonly quiescent: boolean;
 	readonly revision: number;
+	readonly sourceDelivery?: RunnerSourceDelivery;
 	readonly snapshot?: RunnerSettingsSnapshot;
 	readonly resumeSessionId?: string;
 	readonly liveConfiguration?: RunnerLiveQueryConfiguration;

@@ -1433,6 +1433,49 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 					.claudeOptions()
 					.filter((call) => call.configDir === target.configDir),
 			).toHaveLength(1);
+			if (scenario === "limited") {
+				let durableTargetJson = "null";
+				await expect
+					.poll(() => {
+						const db = new DatabaseSync(harness.daemonStorePath(), {
+							readOnly: true,
+						});
+						try {
+							const rows = db
+								.prepare(`
+									SELECT command.command_id, command.run_id, command.session_id,
+										command.provider_id, command.attempt_count, command.error_code,
+										json_extract(command.payload_json, '$.inputId') AS input_id,
+										run.status AS run_status, run.started_at
+									FROM provider_command_outbox command JOIN provider_runs run
+										ON run.id = command.run_id AND run.session_id = command.session_id
+									WHERE command.session_id = ?
+										AND command.project_key = (SELECT project_id FROM sessions WHERE id = ?)
+										AND command.effect_type = 'send_turn'
+										AND json_extract(command.payload_json, '$.inputId') NOT IN
+											('first-auto-limited', 'cut-off-auto-switch-limited')
+								`)
+								.all(sessionId, sessionId);
+							const row = rows.length === 1 ? rows[0] : null;
+							durableTargetJson = JSON.stringify(row, null, 2) ?? "null";
+							return row;
+						} finally {
+							db.close();
+						}
+					})
+					.toMatchObject({
+						session_id: sessionId,
+						provider_id: target.id,
+						attempt_count: 1,
+						error_code: null,
+						run_status: "completed",
+						started_at: expect.any(Number),
+					});
+				writeFileSync(
+					join(artifacts, "durable-continuation.json"),
+					durableTargetJson,
+				);
+			}
 		} finally {
 			writeFileSync(join(harness.root, "release-switch-turn"), "release");
 			writeFileSync(
