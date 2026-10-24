@@ -309,17 +309,60 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 		() =>
 			Effect.gen(function* () {
 				const f = yield* fixture();
+				const originalStat = fsPromises.stat;
+				const lastTarget = join(
+					canonicalDirectory(f.repository),
+					".git",
+					"refs/heads/master",
+				);
+				let completedProbes = 0;
+				const stat = vi
+					.spyOn(fsPromises, "stat")
+					.mockImplementation(async (path, options) => {
+						try {
+							return await originalStat(path, options);
+						} finally {
+							if (String(path) === lastTarget) completedProbes++;
+						}
+					});
+				syncBuiltinESMExports();
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => {
+						stat.mockRestore();
+						syncBuiltinESMExports();
+					}),
+				);
 				yield* f.service.read("one");
+				const initialTargets = completedProbes;
 				yield* settle;
+				// Finish the initial clean probe before changing its index baseline.
+				yield* Effect.tryPromise(() =>
+					expect
+						.poll(() => completedProbes, { timeout: eventTimeout })
+						.toBe(initialTargets + 1),
+				);
 				const before = yield* f.metrics;
 				const dirty = join(f.repository, "dirty");
 				const index = fs.readFileSync(join(f.repository, ".git", "index"));
 				writeFileSync(dirty, "changed");
 				gitCommand(f.repository, "add", "dirty");
 				yield* TestClock.adjust(10_000);
+				// Native stats must finish before the scheduler consumes their hint.
+				yield* Effect.tryPromise(() =>
+					expect
+						.poll(() => completedProbes, { timeout: eventTimeout })
+						.toBe(initialTargets + 2),
+				);
 				yield* settle;
 				yield* waitForSpawns(f.metrics, before.spawnCount + dirtyRefresh);
-				expect(yield* f.service.read("one")).toMatchObject({ dirty: true });
+				expect(yield* waitForDirty(f.service.read("one"))).toMatchObject({
+					dirty: true,
+				});
+				const cleaned = yield* f.service.changes.pipe(
+					Stream.take(1),
+					Stream.runCollect,
+					Effect.forkChild({ startImmediately: true }),
+				);
 				writeFileSync(join(f.repository, ".git", "index"), index);
 				rmSync(dirty);
 				for (let index = 0; index < 30; index++)
@@ -333,6 +376,7 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				yield* TestClock.adjust(1_000);
 				yield* settle;
 				yield* waitForSpawns(f.metrics, before.spawnCount + dirtyRefresh + 1);
+				yield* Fiber.join(cleaned);
 				expect(yield* f.service.read("one")).toMatchObject({ dirty: false });
 			}),
 	);
