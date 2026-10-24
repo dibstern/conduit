@@ -1,0 +1,42 @@
+/**
+ * Contract stub for the oracle lane only. The real module replaces this file;
+ * nothing here is behaviour. SessionLedgerState is opaque to callers.
+ */
+import type {
+	DecideContext,
+	Decision,
+	LedgerCommand,
+	LedgerView,
+	ProviderKind,
+} from "./run-ledger-model.js";
+
+declare const opaque: unique symbol;
+export interface SessionLedgerState {
+	readonly [opaque]: true;
+}
+export interface LedgerEvent {
+	readonly [opaque]: true;
+}
+
+export function initialSessionLedgerState(
+	_sessionId: string,
+	_provider: ProviderKind,
+): SessionLedgerState {
+	return {} as SessionLedgerState;
+}
+
+export function decide(
+	_state: SessionLedgerState,
+	_command: LedgerCommand,
+	_ctx: DecideContext,
+): Decision<LedgerEvent> {
+	return { tag: "Rejected", diagnostic: "contract stub: no decider in this worktree" };
+}
+
+export function evolve(state: SessionLedgerState, _event: LedgerEvent): SessionLedgerState {
+	return state;
+}
+
+export function viewLedger(_state: SessionLedgerState): LedgerView {
+	return { paused: false, inbox: [], live: [] };
+}
