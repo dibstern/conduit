@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { settleSheet } from "../helpers/sheet-drag.js";
 
 test.use({ recording: "chat-simple" });
 
@@ -144,6 +145,7 @@ test.describe("phone session island", () => {
 		}
 		const debug = sheet.getByRole("switch", { name: "Debug panel" });
 		await expect(debug).toHaveAttribute("aria-checked", "false");
+		await settleSheet(page);
 		for (const part of [
 			debug.getByText("Debug", { exact: true }),
 			debug.locator("svg").first(),
