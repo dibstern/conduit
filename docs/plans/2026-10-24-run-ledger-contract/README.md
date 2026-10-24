@@ -7,12 +7,13 @@ directory so tickets can cite a durable path. The documents are copied unchanged
 
 Later documents win over earlier ones:
 
-1. `AMENDMENT-2026-10-25-RUNNER-AUTHORITY.md` (runner authority, durable retirement, slices R1-R5)
-2. `AMENDMENT-2026-10-24-BACKGROUND-WORK.md` (background work, goals, runner lifecycle)
-3. `AMENDMENT-2026-10-24-FACT-BOOK.md`
-4. `AMENDMENT-2026-10-23-OUTSTANDING-WORK.md`, `RULINGS-2026-10-23-D1.md`, `RULINGS-2026-10-23.md`
-5. `AMENDMENT-2026-10-23.md`
-6. `CONTRACT.md`, `spec-82tn32.md`
+1. `AMENDMENT-2026-10-25-AUDIT.md` (single owners, bottlenecks, deepening; Q17 = A)
+2. `AMENDMENT-2026-10-25-RUNNER-AUTHORITY.md` (runner authority, durable retirement, slices R1-R5)
+3. `AMENDMENT-2026-10-24-BACKGROUND-WORK.md` (background work, goals, runner lifecycle)
+4. `AMENDMENT-2026-10-24-FACT-BOOK.md`
+5. `AMENDMENT-2026-10-23-OUTSTANDING-WORK.md`, `RULINGS-2026-10-23-D1.md`, `RULINGS-2026-10-23.md`
+6. `AMENDMENT-2026-10-23.md`
+7. `CONTRACT.md`, `spec-82tn32.md`
 
 ## Renamed files
 
