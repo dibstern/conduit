@@ -211,6 +211,7 @@
 {/snippet}
 
 {#snippet identity()}
+			{#if !row}
 			<span class="relative flex size-[12px] shrink-0 items-center {presentation === 'word' ? 'text-text-dimmer' : 'text-text-muted'}" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
 				{#if git && !git.branch}
 					<!-- Compose the commit glyph from the existing circle icon. -->
@@ -221,6 +222,7 @@
 				<!-- Without labels the dirty mark rides the icon; with them it follows the branch. -->
 				{#if git?.dirty && fit === "icon"}{@render dirtyMark("absolute -right-[2px] -bottom-[1px] ring-[1.5px] " + (row ? "ring-bg-surface" : "ring-input-bg"))}{/if}
 			</span>
+			{/if}
 			{#if fit === "full" && ((!compact && (control || row)) || !checkout)}
 				<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: ${compact ? '0' : `calc(${projectFloor}ch + 1px)`}`} title={project}>{project}</span>
 				{#if checkout}<span class="shrink-0 text-text-dimmer" aria-hidden="true">{control ? "·" : "/"}</span>{/if}
@@ -284,8 +286,9 @@
 		{#if row}
 			<Button {...props} bind:element={identityElement} variant="composer-row" size="content"
 				title={label} ariaLabel={`Checkout: ${[label, ...noticeLabels].join(", ")}`} data-testid="composer-checkout">
-				<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Checkout</span>
-				<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[5px] font-normal">{@render identity()}</span>
+				<Icon name="git-branch" size={16} class="shrink-0 text-text-dimmer" />
+				<span data-part="label" class="min-w-0 flex-1">Checkout</span>
+				<span data-part="value" class="flex min-w-0 items-center justify-end gap-[5px] text-right text-text-secondary">{@render identity()}</span>
 				<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 			</Button>
 		{:else}

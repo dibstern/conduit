@@ -801,13 +801,15 @@
 						aria-haspopup="dialog"
 						onclick={(event) => togglePicker(event, "harness")}
 					>
-						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Harness</span>
-						<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={18} spinning={selectedLogoSpinning} />{/if}<span class="min-w-0 truncate">{driverLabel(selectedDriver)}</span></span>
+						<Icon name="box" size={16} class="shrink-0 text-text-dimmer" />
+						<span data-part="label" class="min-w-0 flex-1">Harness</span>
+						<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{driverLabel(selectedDriver)}</span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
 					<Button variant="composer-row" size="content" data-testid="composer-more-account" ariaLabel={`Account: ${wordAccountName}. Open account options`} onclick={(event) => togglePicker(event, "account")}>
-						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Account</span>
-						<span data-part="value" class="min-w-0 flex-1 truncate font-semibold">{wordAccountName}</span>
+						<Icon name="user" size={16} class="shrink-0 text-text-dimmer" />
+						<span data-part="label" class="min-w-0 flex-1">Account</span>
+						<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{wordAccountName}</span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
 					<Button
@@ -817,8 +819,9 @@
 						aria-haspopup="dialog"
 						onclick={(event) => togglePicker(event, "model")}
 					>
-						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Model</span>
-						<span data-part="value" class="flex min-w-0 flex-1 flex-wrap items-center gap-[7px] font-semibold"><span>{displayName}</span>{#if contextLabel || contextPercent > 0}<small class="text-[10.5px] font-normal {contextWarning ? 'text-warning' : 'text-text-muted'}">{contextLabel}{contextLabel && contextPercent > 0 ? " · " : ""}{contextPercent > 0 ? `${Math.round(contextPercent)}% used` : ""}</small>{/if}</span>
+						{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={15} spinning={selectedLogoSpinning} />{:else}<Icon name="sparkles" size={16} class="shrink-0 text-text-dimmer" />{/if}
+						<span data-part="label" class="min-w-0 flex-1">Model</span>
+						<span data-part="value" class="flex min-w-0 flex-wrap items-center justify-end gap-x-[7px] text-right text-text-secondary"><span>{displayName}</span>{#if contextLabel || contextPercent > 0}<small class="text-[10.5px] {contextWarning ? 'text-warning' : 'text-text-muted'}">{contextLabel}{contextLabel && contextPercent > 0 ? " · " : ""}{contextPercent > 0 ? `${Math.round(contextPercent)}% used` : ""}</small>{/if}</span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
 					{@render effortRow()}
