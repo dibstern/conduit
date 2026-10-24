@@ -543,7 +543,7 @@
 			<Icon name={selected ? "circle-check" : "circle"} size={18} />
 		</Button>
 	{:else}
-		<span class="col-start-1 row-start-1 self-center">
+		<span class="col-start-1 row-start-1 self-center translate-y-[0.75px]">
 			<SessionStatusGlyph {attention} {settled} {snoozed} />
 		</span>
 	{/if}

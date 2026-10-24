@@ -11,6 +11,7 @@ import { clearSessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { applyUsageReadings } from "../../stores/usage.svelte.js";
+import { expectSessionGlyphAlignment } from "../../stories/glyph-alignment.js";
 import { mockClaudeAccount } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
@@ -221,6 +222,7 @@ export const Final: Story = {
 	play: async ({ canvasElement }) => {
 		await document.fonts.ready;
 		await expectSessionTitle(canvasElement);
+		await expectSessionGlyphAlignment(canvasElement);
 		const canvas = within(canvasElement);
 		await expect(canvas.getByText("Fix token refresh race")).toBeVisible();
 		await expect(canvas.getByTestId("usage-footer-row-work")).toBeVisible();

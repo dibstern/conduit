@@ -100,15 +100,15 @@
 	{#snippet groupHeader(group: "pinned" | "running" | "idle" | "settled" | "snoozed", label: string, count: number, open: boolean, ontoggle: () => void, exact = true)}
 		<TextButton
 			tone="dimmer"
-			class="session-group-label mt-[6px] flex w-full items-center gap-[6px] min-h-[30px] max-md:min-h-[44px] pointer-coarse:min-h-[44px] rounded-[8px] px-[8px] text-[12.5px] leading-[18px] font-medium font-sans"
+			class="session-group-label mt-[6px] flex w-full items-center gap-[10px] min-h-[30px] max-md:min-h-[44px] pointer-coarse:min-h-[44px] rounded-[8px] px-[10px] text-[12.5px] leading-[18px] font-medium font-sans"
 			data-testid="{group}-shelf-toggle"
 			aria-expanded={open}
 			aria-controls="{group}-shelf-rows"
 			onclick={() => { if (!searching) ontoggle(); }}
 		>
-			<Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
-			<SessionStatusGlyph pinned={group === "pinned"} settled={group === "settled"} snoozed={group === "snoozed"} attention={group === "running" ? "working" : "idle"} animate={false} />
-			<span data-group-label>{label}</span>{" "}<span class="font-mono text-[11px] font-normal">{count}{exact ? "" : "+"}</span>
+			<span class="grid translate-y-[0.25px]"><SessionStatusGlyph pinned={group === "pinned"} settled={group === "settled"} snoozed={group === "snoozed"} attention={group === "running" ? "working" : "idle"} animate={false} /></span>
+			<span class="flex items-baseline gap-[6px]"><span data-group-label>{label}</span>{" "}<span class="font-mono text-[11px] font-normal">{count}{exact ? "" : "+"}</span></span>
+			<span class="ml-auto"><Icon name={open ? "chevron-down" : "chevron-right"} size={12} /></span>
 		</TextButton>
 	{/snippet}
 
