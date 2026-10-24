@@ -13,6 +13,10 @@ import {
 } from "../../domain/relay/Services/session-pick.js";
 import type { ClaudeSubagentTranscriptSnapshot } from "../../provider/claude/types.js";
 import {
+	currentRunnerOutput,
+	ownsRunnerAttachment,
+} from "../../provider/runner/runner-receipts.js";
+import {
 	isPickRejection,
 	type PickRejection,
 } from "../../provider/turn-settings.js";
@@ -810,6 +814,9 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 				.write(
 					(project) =>
 						Effect.gen(function* () {
+							const receipt = yield* currentRunnerOutput;
+							if (receipt && !(yield* ownsRunnerAttachment(sql, receipt)))
+								return;
 							const provider = input.provider ?? "claude";
 							const binding = input.instanceId ?? provider;
 							yield* requireUndeletedSession(
@@ -925,7 +932,16 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 							);
 							yield* project(stored);
 						}),
-					input.projectId === undefined ? {} : { projectId: input.projectId },
+					{
+						...(input.projectId === undefined
+							? {}
+							: { projectId: input.projectId }),
+						beforeCommit: Effect.gen(function* () {
+							const receipt = yield* currentRunnerOutput;
+							if (receipt?.isCurrent?.() === false)
+								return yield* Effect.interrupt;
+						}),
+					},
 				)
 				.pipe(
 					Effect.mapError((cause) =>

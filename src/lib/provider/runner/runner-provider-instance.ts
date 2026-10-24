@@ -283,7 +283,11 @@ export class RunnerProviderInstance implements ProviderInstance {
 				if (!registrations) return;
 				claimed = new Set(
 					registrations
-						.filter((runner) => runner.driverKind === this.providerId)
+						.filter(
+							(runner) =>
+								runner.driverKind === this.providerId &&
+								runner.role !== "retired",
+						)
 						.map((runner) => runner.sessionId),
 				);
 			}

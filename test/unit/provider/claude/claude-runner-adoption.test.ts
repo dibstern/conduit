@@ -324,7 +324,7 @@ describe("Claude runner adoption", () => {
 		observations.push({ case: "legacy stop-task", refused: true });
 	});
 
-	it("quarantines within bounded backoff without deleting or signalling a live unverified runner", async () => {
+	it("retires within bounded backoff without deleting or signalling a live unverified runner", async () => {
 		const fixture = await runnerSocket({
 			rejections: Number.POSITIVE_INFINITY,
 		});
@@ -347,7 +347,7 @@ describe("Claude runner adoption", () => {
 							"adoption-session",
 							"abcdefabcdef",
 						),
-					).toBe(true);
+					).toBe(false);
 					expect(
 						yield* runner.hasLiveProcessEffect(
 							"adoption-session",

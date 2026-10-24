@@ -8,6 +8,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { createServer, type Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -146,9 +147,12 @@ describe("Claude runner admission socket probes", () => {
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, "claude"));
 		vi.stubEnv("CONDUIT_CONFIG_DIR", configDir);
 		vi.stubEnv(
+			"NODE_OPTIONS",
+			`${process.env["NODE_OPTIONS"] ?? ""} --import ${pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href}`,
+		);
+		vi.stubEnv(
 			"CONDUIT_TEST_CLAUDE_QUERY_MODULE",
-			pathToFileURL(resolve("dist/test/helpers/fake-claude-process-sdk.js"))
-				.href,
+			pathToFileURL(resolve("test/helpers/fake-claude-process-sdk.ts")).href,
 		);
 		const { BUILD_ID }: typeof import("../../../src/lib/build-id.js") =
 			await import(pathToFileURL(resolve("dist/src/lib/build-id.js")).href);

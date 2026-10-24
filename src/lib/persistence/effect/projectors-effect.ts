@@ -1498,15 +1498,16 @@ export const makeMessageProjector = defineProjector(() => ({
 			}
 
 			if (isEventType(event, "turn.notice")) {
-				if (!event.metadata.runId) return [];
-				const [owner] = yield* sql<{
-					id: string;
-				}>`SELECT run.id FROM provider_runs requested
+				if (event.metadata.runId) {
+					const [owner] = yield* sql<{
+						id: string;
+					}>`SELECT run.id FROM provider_runs requested
 					JOIN provider_runs run ON run.id = COALESCE(requested.joined_into, requested.id)
 						AND run.session_id = requested.session_id
 					WHERE requested.id = ${event.metadata.runId} AND requested.session_id = ${event.sessionId}
 						AND run.status = 'running' AND run.started_at IS NOT NULL`;
-				if (!owner) return [];
+					if (!owner) return [];
+				}
 				const messageId = `turn-notice-${event.sequence}`;
 				yield* sql`INSERT INTO messages
 					(id, session_id, role, text, is_streaming, created_at, updated_at, version)

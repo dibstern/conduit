@@ -1,7 +1,13 @@
-// Failure modes: failed adoption strands restored account demand; quarantine
+// Failure modes: failed adoption strands restored account demand; retirement
 // drops durable ownership; releasing one session cancels another; restart or
 // later recovery reuses a released account generation or releases it twice.
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { expect, it, vi } from "vitest";
@@ -11,7 +17,7 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 it.each([
 	"update",
 	"remove",
-] as const)("%s completes after Cursor attachment quarantine", async (change) => {
+] as const)("%s completes after Cursor attachment retirement", async (change) => {
 	const fixture = ProcessHarness.create({
 		dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 		logLevel: "warn",
@@ -50,7 +56,7 @@ it.each([
 		const browser = await fixture.connect();
 		const accounts: string[] = [];
 		const sessions: string[] = [];
-		for (const name of ["Quarantined", "Healthy"]) {
+		for (const name of ["Retired", "Healthy"]) {
 			const { addedInstanceId } = await fixture.requestRpc({
 				_tag: "AddInstance",
 				name,
@@ -64,7 +70,7 @@ it.each([
 		const otherAccountId = accounts[1];
 		if (!accountId || !otherAccountId) throw new Error("Missing accounts");
 		for (const [name, owner] of [
-			["Quarantined", accountId],
+			["Retired", accountId],
 			["Healthy same account", accountId],
 			["Healthy other account", otherAccountId],
 		] as const) {
@@ -84,14 +90,15 @@ it.each([
 			);
 		}
 		const sessionId = sessions[0];
-		if (!sessionId) throw new Error("Missing quarantined owner");
+		if (!sessionId) throw new Error("Missing retired owner");
 		db = new Database(fixture.daemonStorePath());
 		const turn = db.prepare<[string], { state: string }>(
 			"SELECT state FROM turns WHERE session_id = ? ORDER BY rowid DESC LIMIT 1",
 		);
 		const states = () => sessions.map((id) => turn.get(id)?.state);
-		await vi.waitFor(() =>
-			expect(states()).toEqual(["running", "running", "running"]),
+		await vi.waitFor(
+			() => expect(states()).toEqual(["running", "running", "running"]),
+			{ timeout: 30_000 },
 		);
 		const registrations = discoverRunners(
 			fixture.projectDir,
@@ -104,36 +111,44 @@ it.each([
 		await fixture.restart({ serviceEnvironment });
 		await vi.waitFor(
 			() =>
-				expect(fixture.logTail).toContain(
-					`Session ${sessionId} is quarantined`,
-				),
+				expect(
+					discoverRunners(fixture.projectDir, fixture.configDir).find(
+						(entry) => entry.runnerId === runner.runnerId,
+					)?.role,
+				).toBe("retired"),
 			{ timeout: 20_000 },
 		);
 		expect(rows(`${fault}.ndjson`)).toHaveLength(1);
 		expect(rows(`${fault}.attempts.ndjson`)).toHaveLength(5);
-		expect(discoverRunners(fixture.projectDir, fixture.configDir)).toEqual(
-			registrations,
-		);
+		expect(
+			discoverRunners(fixture.projectDir, fixture.configDir).find(
+				(entry) => entry.runnerId === runner.runnerId,
+			),
+		).toMatchObject({ role: "retired" });
 		expect(existsSync(`${runner.socketPath}.spool`)).toBe(true);
 		expect(() => process.kill(runner.pid, 0)).not.toThrow();
 		evidence["restoredAttachmentDrops"] = rows(`${fault}.ndjson`);
 		evidence["failedAttachments"] = rows(`${fault}.attempts.ndjson`);
-		// A second restart must retain quarantine ownership and settle its new holds.
+		// A second restart must keep the survivor retired without restoring its account holds.
 		await fixture.terminate();
 		await fixture.restart({ serviceEnvironment });
 		await vi.waitFor(
 			() =>
-				expect(fixture.logTail).toContain(
-					`Session ${sessionId} is quarantined`,
-				),
+				expect(
+					discoverRunners(fixture.projectDir, fixture.configDir).find(
+						(entry) => entry.runnerId === runner.runnerId,
+					)?.role,
+				).toBe("retired"),
 			{ timeout: 20_000 },
 		);
-		expect(rows(`${fault}.attempts.ndjson`)).toHaveLength(10);
-		expect(rows(`${fault}.ndjson`)).toHaveLength(2);
-		expect(discoverRunners(fixture.projectDir, fixture.configDir)).toEqual(
-			registrations,
-		);
-		evidence["restartWhileQuarantined"] = true;
+		expect(rows(`${fault}.attempts.ndjson`)).toHaveLength(5);
+		expect(rows(`${fault}.ndjson`)).toHaveLength(1);
+		expect(
+			discoverRunners(fixture.projectDir, fixture.configDir).find(
+				(entry) => entry.runnerId === runner.runnerId,
+			),
+		).toMatchObject({ role: "retired" });
+		evidence["restartWhileRetired"] = true;
 		let settled = false;
 		const changing = fixture
 			.requestRpc(
@@ -153,13 +168,13 @@ it.each([
 			() =>
 				expect(
 					settled,
-					"account change must not wait on a quarantined socket",
+					"account change must not wait on a retired socket",
 				).toBe(true),
 			{ timeout: 5000 },
 		);
 		await changing;
 		await vi.waitFor(
-			() => expect(states()).toEqual(["running", "interrupted", "running"]),
+			() => expect(states()).toEqual(["interrupted", "interrupted", "running"]),
 			{ timeout: 15_000 },
 		);
 		expect(
@@ -199,20 +214,15 @@ it.each([
 			)?.pid,
 		).toBe(runner.pid);
 		if (change === "update") {
-			expect(states()).toEqual(["running", "interrupted", "running"]);
-			// A recovered native turn must borrow the new scope so removal cancels it.
+			expect(states()).toEqual(["interrupted", "interrupted", "running"]);
+			// Removing the updated account must not reattach the retired native turn.
 			await fixture.requestRpc({
 				_tag: "RemoveInstance",
 				instanceId: accountId,
 			});
 		}
 		await vi.waitFor(
-			() =>
-				expect(states()).toEqual([
-					change === "update" ? "interrupted" : "error",
-					"interrupted",
-					"running",
-				]),
+			() => expect(states()).toEqual(["interrupted", "interrupted", "running"]),
 			{ timeout: 15_000 },
 		);
 		const terminals = db
@@ -220,9 +230,9 @@ it.each([
 				"SELECT type FROM events WHERE session_id = ? AND type IN ('turn.completed', 'turn.error', 'turn.interrupted') ORDER BY sequence",
 			)
 			.all(sessionId);
-		// Missing-account settlement can precede the native cancellation receipt.
+		// Retirement settled the old runner's exact turn before account changes.
 		expect(terminals).toContainEqual({
-			type: change === "update" ? "turn.interrupted" : "turn.error",
+			type: "turn.interrupted",
 		});
 		evidence["recoveredTerminal"] = terminals;
 		await fixture.requestRpc({
@@ -231,24 +241,20 @@ it.each([
 		});
 		await vi.waitFor(
 			() =>
-				expect(states()).toEqual([
-					change === "update" ? "interrupted" : "error",
-					"interrupted",
-					"interrupted",
-				]),
+				expect(states()).toEqual(["interrupted", "interrupted", "interrupted"]),
 			{ timeout: 15_000 },
 		);
 		evidence["finalStates"] = states();
 		await vi.waitFor(() =>
 			expect(
 				rows(capture).filter((row) => row["kind"] === "cancel.call"),
-			).toHaveLength(3),
+			).toHaveLength(2),
 		);
 		expect(
 			rows(capture).filter((row) => row["kind"] === "run.handle"),
 		).toHaveLength(3);
 		evidence["nativeRuns"] = 3;
-		evidence["nativeCancellations"] = 3;
+		evidence["nativeCancellations"] = 2;
 		evidence["passed"] = true;
 	} finally {
 		db?.close();
@@ -258,8 +264,9 @@ it.each([
 		rmSync(fault, { force: true });
 		await fixture.dispose();
 		evidence["remainingRunners"] = fixture.remainingRunnerPids();
+		mkdirSync("test-results/82tn-32-16", { recursive: true });
 		writeFileSync(
-			`/tmp/82tn9-7-fix5-${change}.json`,
+			`test-results/82tn-32-16/account-holds-${change}.json`,
 			JSON.stringify(evidence, null, 2),
 		);
 		expect(fixture.remainingRunnerPids()).toEqual([]);

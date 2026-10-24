@@ -424,7 +424,7 @@ export interface ProviderNativeSession {
  * - No streamEvents -- instance pushes via EventSink, no output stream needed
  */
 export interface ProviderInstance {
-	/** Liveness includes quarantined runners that cannot accept controls. */
+	/** Liveness includes retired survivors that cannot accept controls. */
 	readonly hasLiveProcessEffect?: (sessionId: string) => Effect.Effect<boolean>;
 	/** Process identity captured without starting work; refuses unavailable sessions. */
 	readonly getControlProcessIdEffect?: (

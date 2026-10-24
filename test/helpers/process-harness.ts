@@ -408,15 +408,19 @@ const root = ${JSON.stringify(this.root)};
 if (process.env.HOME !== join(root, "home")) throw new Error("Runner identity fixture requires isolated HOME");
 if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
   writeFileSync(join(root, "runner-argv-" + process.pid + ".json"), JSON.stringify(process.argv));
+  writeFileSync(join(root, "runner-birth-" + process.pid), process.pid + "-" + Date.now());
 }
 const executeFile = childProcess.execFileSync;
 childProcess.execFileSync = (command, args, options) => {
   try { return executeFile(command, args, options); }
   catch (cause) {
-    if (command !== "ps" || !Array.isArray(args) || !args.includes("command=") || cause.code !== "EPERM") throw cause;
+    if (command !== "ps" || !Array.isArray(args) || cause.code !== "EPERM") throw cause;
     const path = join(root, "runner-argv-" + args.at(-1) + ".json");
     if (!existsSync(path)) throw cause;
-    return process.execPath + " " + JSON.parse(readFileSync(path, "utf8")).slice(1).join(" ");
+    if (args.includes("command=")) return process.execPath + " " + JSON.parse(readFileSync(path, "utf8")).slice(1).join(" ");
+    const birth = join(root, "runner-birth-" + args.at(-1));
+    if (args.includes("lstart=") && args.includes("stat=") && existsSync(birth)) return readFileSync(birth, "utf8") + " S";
+    throw cause;
   }
 };
 syncBuiltinESMExports();\n`,

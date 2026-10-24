@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
 	lstatSync,
 	mkdirSync,
@@ -27,8 +27,52 @@ export interface RunnerRegistration {
 	readonly socketPath: string;
 	readonly buildId: string;
 	readonly pid: number;
-	readonly role?: "candidate" | "retiring";
+	readonly role?: "candidate" | "retiring" | "retired";
+	readonly startTime?: string;
+	readonly registeredAt?: number;
+	readonly signalled?: boolean;
+	readonly noticed?: boolean;
+	readonly ownedRunIds?: readonly string[];
 }
+
+export interface RunnerProcessTable {
+	readonly inspect: (pid: number) => {
+		readonly state: "running" | "zombie" | "gone" | "unknown";
+		readonly startTime?: string;
+	};
+	readonly signal: (pid: number, signal: NodeJS.Signals) => void;
+}
+
+const newestRunnerFirst = (a: RunnerRegistration, b: RunnerRegistration) =>
+	(a.role === "candidate" ? 2 : a.role === "retiring" ? 1 : 0) -
+		(b.role === "candidate" ? 2 : b.role === "retiring" ? 1 : 0) ||
+	(b.registeredAt ?? 0) - (a.registeredAt ?? 0);
+
+export const runnerProcessTable: RunnerProcessTable = {
+	inspect: (pid) => {
+		if (!runnerPidAlive(pid)) return { state: "gone" };
+		try {
+			const output = execFileSync(
+				"ps",
+				["-o", "lstart=", "-o", "stat=", "-p", String(pid)],
+				{
+					encoding: "utf8",
+					stdio: ["ignore", "pipe", "ignore"],
+					timeout: 1000,
+				},
+			).trim();
+			const match = /^(.*?)\s+(\S+)$/.exec(output);
+			if (!match?.[1] || !match[2]) return { state: "unknown" };
+			return {
+				state: match[2].startsWith("Z") ? "zombie" : "running",
+				startTime: match[1],
+			};
+		} catch {
+			return { state: runnerPidAlive(pid) ? "unknown" : "gone" };
+		}
+	},
+	signal: (pid, signal) => process.kill(pid, signal),
+};
 
 function runnerTargetDirectory(
 	workspaceRoot: string,
@@ -91,8 +135,44 @@ function prepareRunnerSocketDirectory(target: string): string {
 }
 
 export function registerRunner(entry: RunnerRegistration): void {
-	const temporary = `${entry.socketPath}.json.tmp`;
-	writeFileSync(temporary, JSON.stringify(entry), { mode: 0o600 });
+	if (entry.role === "retired") {
+		// Only the manager owns this marker. A late host registration cannot revive it.
+		const temporary = `${entry.socketPath}.retired.${randomUUID()}.tmp`;
+		writeFileSync(temporary, JSON.stringify(entry), { mode: 0o600 });
+		renameSync(temporary, `${entry.socketPath}.retired`);
+		try {
+			writeFileSync(`${entry.socketPath}.json`, JSON.stringify(entry), {
+				mode: 0o600,
+				flag: "wx",
+			});
+		} catch (cause) {
+			if (!isRecord(cause) || cause["code"] !== "EEXIST") throw cause;
+		}
+		return;
+	}
+	let previous: Partial<RunnerRegistration> = {};
+	try {
+		const value: unknown = JSON.parse(
+			readFileSync(`${entry.socketPath}.json`, "utf8"),
+		);
+		if (isRecord(value) && value["runnerId"] === entry.runnerId)
+			previous = value;
+	} catch {
+		/* First registration. */
+	}
+	const temporary = `${entry.socketPath}.${randomUUID()}.json.tmp`;
+	writeFileSync(
+		temporary,
+		JSON.stringify({
+			...entry,
+			startTime:
+				entry.startTime ??
+				previous.startTime ??
+				runnerProcessTable.inspect(entry.pid).startTime,
+			registeredAt: previous.registeredAt ?? entry.registeredAt ?? Date.now(),
+		}),
+		{ mode: 0o600 },
+	);
 	renameSync(temporary, `${entry.socketPath}.json`);
 }
 
@@ -127,7 +207,7 @@ export function runnerPidMatchesRegistration(
 }
 
 export function removeRunner(socketPath: string): void {
-	for (const suffix of ["", ".json", ".spool"])
+	for (const suffix of ["", ".json", ".spool", ".retired"])
 		rmSync(`${socketPath}${suffix}`, { force: true });
 }
 
@@ -142,6 +222,7 @@ export function discoverRunners(
 /** Daemon recovery includes retained projects whose folders are no longer registered. */
 export function discoverAllRunners(
 	configDir = DEFAULT_CONFIG_DIR,
+	processTable: RunnerProcessTable = runnerProcessTable,
 ): RunnerRegistration[] {
 	const root = join(resolve(configDir), "r");
 	let directories: string[];
@@ -151,23 +232,40 @@ export function discoverAllRunners(
 		if (isRecord(cause) && cause["code"] === "ENOENT") return [];
 		throw cause;
 	}
-	return directories.flatMap((directory) => {
-		if (!/^[0-9a-f]{12}$/.test(directory)) return [];
-		const target = join(root, directory);
-		if (!lstatSync(target).isDirectory()) return [];
-		return discoverRunnersInDirectory(prepareRunnerSocketDirectory(target));
-	});
+	return directories
+		.flatMap((directory) => {
+			if (!/^[0-9a-f]{12}$/.test(directory)) return [];
+			const target = join(root, directory);
+			if (!lstatSync(target).isDirectory()) return [];
+			return discoverRunnersInDirectory(
+				prepareRunnerSocketDirectory(target),
+				processTable,
+			);
+		})
+		.sort(newestRunnerFirst);
 }
 
-function discoverRunnersInDirectory(directory: string): RunnerRegistration[] {
+function discoverRunnersInDirectory(
+	directory: string,
+	processTable = runnerProcessTable,
+): RunnerRegistration[] {
 	const entries: RunnerRegistration[] = [];
 	for (const filename of readdirSync(directory)) {
 		if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
 		const socketPath = join(directory, filename.slice(0, -5));
 		try {
-			const value: unknown = JSON.parse(
+			let value: unknown = JSON.parse(
 				readFileSync(`${socketPath}.json`, "utf8"),
 			);
+			try {
+				const retirement: unknown = JSON.parse(
+					readFileSync(`${socketPath}.retired`, "utf8"),
+				);
+				if (isRecord(retirement) && retirement["role"] === "retired")
+					value = retirement;
+			} catch (cause) {
+				if (!isRecord(cause) || cause["code"] !== "ENOENT") throw cause;
+			}
 			if (
 				!isRecord(value) ||
 				value["socketPath"] !== socketPath ||
@@ -177,7 +275,8 @@ function discoverRunnersInDirectory(directory: string): RunnerRegistration[] {
 				typeof value["pid"] !== "number" ||
 				!Number.isSafeInteger(value["pid"]) ||
 				value["pid"] <= 0 ||
-				!runnerPidAlive(value["pid"])
+				(value["role"] !== "retired" &&
+					["gone", "zombie"].includes(processTable.inspect(value["pid"]).state))
 			) {
 				removeRunner(socketPath);
 				continue;
@@ -193,7 +292,22 @@ function discoverRunnersInDirectory(directory: string): RunnerRegistration[] {
 				sessionId: value["sessionId"],
 				buildId: value["buildId"],
 				pid: value["pid"],
-				...(value["role"] === "candidate" || value["role"] === "retiring"
+				...(typeof value["startTime"] === "string"
+					? { startTime: value["startTime"] }
+					: {}),
+				registeredAt:
+					typeof value["registeredAt"] === "number"
+						? value["registeredAt"]
+						: lstatSync(`${socketPath}.json`).mtimeMs,
+				...(value["signalled"] === true ? { signalled: true } : {}),
+				...(value["noticed"] === true ? { noticed: true } : {}),
+				...(Array.isArray(value["ownedRunIds"]) &&
+				value["ownedRunIds"].every((id) => typeof id === "string")
+					? { ownedRunIds: value["ownedRunIds"] }
+					: {}),
+				...(value["role"] === "candidate" ||
+				value["role"] === "retiring" ||
+				value["role"] === "retired"
 					? { role: value["role"] }
 					: {}),
 			});
@@ -201,9 +315,5 @@ function discoverRunnersInDirectory(directory: string): RunnerRegistration[] {
 			removeRunner(socketPath);
 		}
 	}
-	return entries.sort(
-		(a, b) =>
-			(a.role === "candidate" ? 2 : a.role === "retiring" ? 1 : 0) -
-			(b.role === "candidate" ? 2 : b.role === "retiring" ? 1 : 0),
-	);
+	return entries.sort(newestRunnerFirst);
 }

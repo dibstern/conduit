@@ -1,4 +1,4 @@
-import { Data, Effect, Option, Ref, Semaphore } from "effect";
+import { Context, Data, Effect, Option, Ref, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
@@ -31,6 +31,12 @@ export type CommitAndSignalFailure =
 	| EventStoreError
 	| ProjectionRunnerError
 	| SqlError;
+
+/** A bounded owner can revoke a write still waiting inside the transaction seam. */
+export const currentCommitGuard = Context.Reference<Effect.Effect<void>>(
+	"conduit/currentCommitGuard",
+	{ defaultValue: () => Effect.void },
+);
 
 /**
  * The seam was entered inside a transaction it does not own.
@@ -355,6 +361,8 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 									Math.max(0, ...advances.map((advance) => advance.version)),
 									projects ? yield* Ref.get(projects) : undefined,
 								).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+								yield* options.beforeCommit ?? Effect.void;
+								yield* yield* currentCommitGuard;
 								return result;
 							}),
 						);
@@ -440,7 +448,6 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 							options.projectId,
 						);
 						yield* project(appended);
-						yield* options.beforeCommit ?? Effect.void;
 					}),
 				options,
 			),

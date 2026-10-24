@@ -11,6 +11,8 @@ export interface RunnerOutputReceipt {
 	readonly committed: Deferred.Deferred<void>;
 	/** Called only after this receipt claims and commits its event transaction. */
 	readonly onCommitted?: (() => void) | undefined;
+	/** Installed by the manager; SQL fencing may itself fail during retirement. */
+	isCurrent?: (() => boolean) | undefined;
 	consumed: boolean;
 }
 
@@ -62,14 +64,19 @@ export const makeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 			);
 		return {
 			read,
-			// Claim the attachment before reading its cursor. A previous writer either
-			// committed before this transaction or is fenced by its attachment id.
+			// Atomically claim and read the cursor without masked transaction acquisition.
 			attach: (runnerId: string, attachmentId: string) =>
-				sql.withTransaction(
-					Effect.gen(function* () {
-						yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id) VALUES (${runnerId}, 0, ${attachmentId}) ON CONFLICT(runner_id) DO UPDATE SET attachment_id = excluded.attachment_id`;
-						return yield* read(runnerId);
-					}),
+				sql<{
+					sequence: number;
+					result_json: string;
+				}>`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id) VALUES (${runnerId}, 0, ${attachmentId}) ON CONFLICT(runner_id) DO UPDATE SET attachment_id = excluded.attachment_id
+				RETURNING sequence, result_json`.pipe(
+					Effect.map((rows) => ({
+						sequence: rows[0]?.sequence ?? 0,
+						result: JSON.parse(
+							rows[0]?.result_json ?? "{}",
+						) as SessionOutputReply,
+					})),
 				),
 			acknowledge: (
 				runnerId: string,
@@ -90,16 +97,30 @@ export const commitRunnerOutput = (
 	sql: SqlClient.SqlClient,
 	receipt: RunnerOutputReceipt,
 ) =>
-	sql`UPDATE claude_runner_cursors SET sequence = ${receipt.sequence}, result_json = '{}'
+	Effect.suspend(() =>
+		receipt.isCurrent?.() === false
+			? Effect.succeed(false)
+			: sql`UPDATE claude_runner_cursors SET sequence = ${receipt.sequence}, result_json = '{}'
 		WHERE runner_id = ${receipt.runnerId} AND attachment_id = ${receipt.attachmentId}
 		AND sequence = ${receipt.sequence - 1}
-		RETURNING sequence`.pipe(Effect.map((rows) => rows.length > 0));
+		RETURNING sequence`.pipe(
+					Effect.map(
+						(rows) => rows.length > 0 && receipt.isCurrent?.() !== false,
+					),
+				),
+	);
 
 /** Later interaction events inherit an already-consumed output receipt. */
 export const ownsRunnerAttachment = (
 	sql: SqlClient.SqlClient,
 	receipt: RunnerOutputReceipt,
 ) =>
-	sql`SELECT 1 FROM claude_runner_cursors WHERE runner_id = ${receipt.runnerId} AND attachment_id = ${receipt.attachmentId}`.pipe(
-		Effect.map((rows) => rows.length > 0),
+	Effect.suspend(() =>
+		receipt.isCurrent?.() === false
+			? Effect.succeed(false)
+			: sql`SELECT 1 FROM claude_runner_cursors WHERE runner_id = ${receipt.runnerId} AND attachment_id = ${receipt.attachmentId}`.pipe(
+					Effect.map(
+						(rows) => rows.length > 0 && receipt.isCurrent?.() !== false,
+					),
+				),
 	);

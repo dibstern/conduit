@@ -231,7 +231,7 @@ export interface SessionRunner {
 	/** Native execution and pending intake, independent of an intake reply. */
 	hasActiveTurnsEffect?(sessionId: string): Effect.Effect<boolean>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
-	/** Without an ID, checks all live processes; with one, checks the current or quarantined owner. */
+	/** Without an ID, includes retired survivors; with one, checks the current owner. */
 	hasLiveProcessEffect(
 		sessionId: string,
 		processId?: string,

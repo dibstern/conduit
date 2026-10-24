@@ -30,8 +30,8 @@ the runner's identity through its socket hello. Adoption never signals an
 unverified PID. Invalid registrations and entries whose PID is
 verifiably dead are removed without signalling their listed PID. A rejected
 hello from a live or unverified PID preserves its files and retries with
-100/200/400/800 ms backoff. Exhausting these retries fails startup before pending
-approvals can be marked orphaned. An inaccessible PID is not proof of death.
+100/200/400/800 ms backoff. Exhausting these retries retires the registration
+and releases the session. An inaccessible PID is not proof of death.
 
 Runners keep the warm SDK query, command-ID deduplication, and pending Session
 Approval callbacks alive when their parent or server socket disappears. Each
@@ -104,6 +104,18 @@ fails the running turn and outbox admission unless a live registration claims
 that session. Undelivered output can be lost on full stop; the SDK transcript
 retains the conversation history.
 
+Forced stop sends SIGTERM, then SIGKILL after three seconds, with a short exit
+deadline. A survivor loses its socket, output sinks and Run ownership. Its
+registration is durably retired; the next send starts a fresh runner resuming
+the same native conversation. The manager retries SIGKILL at 10, 30 and 60
+seconds after retirement, only after verifying the PID and its recorded start
+time. Gone, reused and zombie PIDs count as exited. A survivor still present
+after the third retry produces one session-scoped transcript notice, unless
+the session was deleted or archived. Restart retries retired registrations
+without adopting them. When multiple active registrations claim one session,
+the newer wins and the older retires. A live survivor still protects its
+workspace from cleanup.
+
 Attached and detached runners use the active config directory's
 `autoSettleAfterDays` inactivity policy. In-flight turns, background work,
 pending approvals, and unacknowledged outputs prevent idle exit until that work
@@ -121,10 +133,10 @@ with a message that names the build and says it predates run ownership.
 The runner's check of the daemon hello is unchanged.
 
 When adoption refuses an incompatible live runner, the daemon independently
-checks its registered process identity, stops it with bounded cleanup, and
-confirms its exit before ending its runs as errors. Their turns, commands and
+checks its registered process identity and stops it with bounded cleanup.
+It retires a survivor before ending its runs as errors. Their turns, commands and
 receipts settle through ordinary owned terminal projection. Startup continues
-without retrying that incompatible runner, and a new send starts a fresh runner.
+without adopting that incompatible runner, and a new send starts a fresh runner.
 Current runners stamp their own output. Recovery restores transport and provider
 state; it never synthesizes completion from a command result.
 

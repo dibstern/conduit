@@ -95,7 +95,6 @@ function isTransientProviderError(cause: unknown): boolean {
 		switch (cause.code) {
 			case "provider_process_gone":
 			case "provider_process_unavailable":
-			case "runner_quarantined":
 				return false;
 			case "ECONNREFUSED":
 			case "ECONNRESET":

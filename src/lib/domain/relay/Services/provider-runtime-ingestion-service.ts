@@ -346,7 +346,6 @@ export const makeProviderRuntimeIngestionLive = (
 							const completedAccounts = new Set<string>();
 							let skippedLimits = 0;
 							const beforeCommit = Effect.gen(function* () {
-								yield* ingestOptions.beforeCommit ?? Effect.void;
 								if (permissionReply) {
 									yield* createRunnerPermissionReplies(sql);
 									yield* sql`INSERT OR REPLACE INTO claude_runner_permission_replies (session_id, request_id, response_json) VALUES (${permissionReply.sessionId}, ${permissionReply.requestId}, ${JSON.stringify(permissionReply.response)})`;
@@ -448,6 +447,11 @@ export const makeProviderRuntimeIngestionLive = (
 								}
 							});
 							const commitOptions = {
+								beforeCommit: Effect.gen(function* () {
+									yield* ingestOptions.beforeCommit ?? Effect.void;
+									if (appended && context?.isCurrent?.() === false)
+										return yield* Effect.interrupt;
+								}),
 								publish: ingestOptions.publishToBus ?? true,
 								endedRunEvents,
 								afterCommit,
