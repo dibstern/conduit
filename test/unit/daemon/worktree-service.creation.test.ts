@@ -423,11 +423,12 @@ describe("daemon Worktree service", () => {
 
 	it("lets a large checkout outlast the timeout for quick git commands", async () => {
 		const executable = join(context.fixture, "slow-checkout-git");
-		// Node startup can consume the deliberately short preflight budget under load.
+		// The quick-command budget must exceed a real git spawn under full-suite
+		// load (over 1s was seen), and the checkout must outlast that budget.
 		writeFileSync(
 			executable,
 			`#!/bin/sh
-case " $* " in *" worktree add "*) sleep 1.5 ;; esac
+case " $* " in *" worktree add "*) sleep 6 ;; esac
 exec '${context.actualGit.replaceAll("'", "'\\''")}' "$@"
 `,
 			{ mode: 0o755 },
@@ -435,14 +436,14 @@ exec '${context.actualGit.replaceAll("'", "'\\''")}' "$@"
 		const created = await Effect.runPromise(
 			createEffect(undefined, {
 				gitExecutable: executable,
-				gitTimeoutMs: 1_000,
+				gitTimeoutMs: 5_000,
 			}),
 		);
 		expect(
 			existsSync(ownedWorktreePath(context.configDir, context.folder)),
 		).toBe(true);
 		expect(created.branchName).toBeTruthy();
-	}, 15_000);
+	}, 20_000);
 
 	it("reports missing git without creating anything", async () => {
 		const before = repositoryState();
