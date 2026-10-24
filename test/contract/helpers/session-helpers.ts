@@ -1,6 +1,7 @@
 // Create and clean up test sessions for contract tests.
 
 import { expect, vi } from "vitest";
+import { CONTROLLED_MODEL } from "../../helpers/controlled-opencode-inference.js";
 import {
 	apiDelete,
 	apiGet,
@@ -61,16 +62,8 @@ export async function sendPrompt(
 	text: string,
 ): Promise<void> {
 	await apiPost(`/session/${sessionId}/prompt_async`, {
-		// Ephemeral contract instances run with isolated XDG dirs and no
-		// credentials, so the prompt has to name a model the server can serve
-		// unauthenticated. Since 1.18.x a prompt with no model is dropped
-		// silently — the turn simply never runs, which surfaces downstream as
-		// "zero tool events" rather than as an error.
-		//
-		// The free roster churns with the binary: 1.18.32 retired
-		// `mimo-v2.5-free`, which failed exactly that way. Re-check with
-		// `opencode models` on an isolated XDG home when bumping OpenCode.
-		model: { providerID: "opencode", modelID: "mimo-v2.6-flash-free" },
+		// global-setup owns the loopback inference dependency.
+		model: CONTROLLED_MODEL,
 		parts: [{ type: "text", text }],
 	});
 }

@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, expect, it, vi } from "vitest";
+import { CONTROLLED_MODEL } from "../helpers/controlled-opencode-inference.js";
 import {
 	apiDelete,
 	apiGet,
@@ -292,8 +293,7 @@ it("pins global directory routing, session demand and pending-list scope from th
 				});
 				expect(session.directory).toBe(directory);
 				await apiPost(`/session/${session.id}/prompt_async${query}`, {
-					// Same unauthenticated model as helpers/session-helpers.ts.
-					model: { providerID: "opencode", modelID: "mimo-v2.6-flash-free" },
+					model: CONTROLLED_MODEL,
 					agent: "build",
 					parts: [
 						{
