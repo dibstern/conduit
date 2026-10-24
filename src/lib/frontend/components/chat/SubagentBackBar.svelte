@@ -2,22 +2,16 @@
 <!-- Shows parent session title and a "← Parent" button to navigate back. -->
 
 <script module lang="ts">
-	import { findSession, isSessionBusy, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, sessionAttention, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { returnFromTask } from "../session/background-tasks.svelte.js";
+	import { ATTENTION_DISPLAY } from "../session/SessionItem.svelte";
 
 	export function getParentSessionContext() {
 		const id = sessionState.currentParentId;
 		const session = id ? findSession(id) : undefined;
-		// Match the sidebar when background work outlives the parent's turn.
-		const status: "working" | "monitoring" | "idle" = !id
-			? "idle"
-			: isSessionBusy(id) || session?.processing === true || session?.backgroundWork === "working"
-				? "working"
-				: session?.backgroundWork === "monitoring"
-					? "monitoring"
-					: "idle";
-		return { id, title: session?.title ?? "parent session", status };
+		const status = session ? sessionAttention(session) : "idle";
+		return { id, title: session?.title ?? "parent session", status, label: ATTENTION_DISPLAY[status].spoken || "Idle" };
 	}
 
 	export function navigateBackToParent(): boolean {
@@ -33,7 +27,7 @@
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
-	import DitherGlyph from "../ui/DitherGlyph.svelte";
+	import SessionStatusGlyph from "../ui/SessionStatusGlyph.svelte";
 	import Surface from "../ui/Surface.svelte";
 
 	const activeSession = $derived(findSession(sessionState.currentId ?? ""));
@@ -53,9 +47,9 @@
 			<span class="flex-1 min-w-0 text-sm font-mono text-text-muted truncate max-md:text-xs">
 				Subagent of{" "}<strong class="text-text-secondary font-semibold">{parent.title}</strong>
 			</span>
-			<span data-testid="parent-session-status" aria-label="Parent {parent.status}" class="flex items-center gap-1.5 shrink-0 text-xs font-mono text-text-muted">
-				<DitherGlyph state={parent.status} size={12} />
-				{parent.status === "working" ? "Working" : parent.status === "monitoring" ? "Monitoring" : "Idle"}
+			<span data-testid="parent-session-status" aria-label="Parent {parent.label}" class="flex items-center gap-1.5 shrink-0 text-xs font-mono text-text-muted">
+				<SessionStatusGlyph attention={parent.status} size={12} />
+				{parent.label}
 			</span>
 			<Button
 				variant="capsule-primary"

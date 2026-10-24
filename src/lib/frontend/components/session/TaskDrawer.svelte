@@ -12,7 +12,7 @@
 	import MessageList from "../chat/MessageList.svelte";
 	import Button from "../ui/Button.svelte";
 	import BackgroundTaskList from "./BackgroundTaskList.svelte";
-	import TaskGlyph from "./TaskGlyph.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import { type OpenedTask, taskDrawer, taskKind } from "./background-tasks.svelte.js";
 
 	let { task }: { task: OpenedTask } = $props();
@@ -59,7 +59,7 @@
 
 <aside bind:this={drawerEl} data-testid="task-drawer" tabindex="-1" aria-label="Background task: {task.description}" class="flex w-[380px] shrink-0 min-h-0 flex-col border-l border-border bg-bg-surface text-[12px] outline-none">
 	<div class="flex items-center gap-[7px] px-[14px] pt-[12px] font-sans text-[11px] font-semibold uppercase tracking-[0.08em] text-tool">
-		<TaskGlyph />{tasks.length === 0 ? "Background tasks" : tasks.length === 1 ? "1 background task" : `${tasks.length} background tasks`}
+		<ConduitMark size={12} variant="running" tone="inherit" />{tasks.length === 0 ? "Background tasks" : tasks.length === 1 ? "1 background task" : `${tasks.length} background tasks`}
 		<Button variant="toolbar" size="content" tone="dimmer" hoverFill="overlay" class="ml-auto h-6 w-6 shrink-0 rounded-md" iconOnly icon="x" iconSize={14} ariaLabel="Close task drawer" title="Close (Esc)" data-testid="task-drawer-close" onclick={close} />
 	</div>
 	{#if tasks.length > 0}

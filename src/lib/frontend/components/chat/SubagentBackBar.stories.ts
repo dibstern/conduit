@@ -50,6 +50,9 @@ export const Default: Story = {
 		const button = within(canvasElement).getByRole("button", {
 			name: /Parent/,
 		});
+		const glyph = canvasElement.querySelector(".session-status-glyph");
+		expect(glyph).toBeVisible();
+		expect(glyph?.getBoundingClientRect().width).toBe(12);
 		expect(button).toHaveTextContent("Parent");
 		expect(button).not.toHaveTextContent("PARENT");
 		expect(button.getBoundingClientRect().height).toBe(28);
@@ -81,6 +84,11 @@ export const MissingParent: Story = {
 		]);
 		openSessionForSetup("sess_story_missing_parent", "conduit");
 	},
+	play: async ({ canvasElement }) => {
+		const glyph = canvasElement.querySelector(".session-status-glyph");
+		await expect(glyph).toHaveAttribute("data-state", "idle");
+		await expect(glyph?.getBoundingClientRect().width).toBe(12);
+	},
 };
 
 function seedSideThread(parentStatus: SessionInfo["status"] = "idle"): void {
@@ -93,7 +101,11 @@ function seedSideThread(parentStatus: SessionInfo["status"] = "idle"): void {
 		forkPointTimestamp: 1,
 	};
 	seedSessions([
-		{ ...mockSession, status: parentStatus },
+		{
+			...mockSession,
+			status: parentStatus,
+			attention: parentStatus === "busy" ? "working" : "idle",
+		},
 		{ ...sideThread, status: "busy" },
 	]);
 	openSessionForSetup(sideThread.id, "conduit");

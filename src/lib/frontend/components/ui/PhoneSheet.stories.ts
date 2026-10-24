@@ -58,6 +58,9 @@ export const SwitchSaving: Story = {
 			name: /Auto-settle/,
 		});
 		await expect(row).toHaveAttribute("aria-busy", "true");
+		await expect(
+			row.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
 		await expect(row).toHaveAttribute("aria-disabled", "true");
 		await userEvent.click(row);
 		await expect(row).toHaveAttribute("aria-checked", "true");

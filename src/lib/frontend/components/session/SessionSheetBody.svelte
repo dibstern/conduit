@@ -4,13 +4,11 @@
 	import { isSessionSnoozed, sessionAttention } from "../../stores/session.svelte.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
 	import { dismissToast, uiState } from "../../stores/ui.svelte.js";
-	import DitherGlyph from "../ui/DitherGlyph.svelte";
-	import Icon from "../ui/Icon.svelte";
+	import SessionStatusGlyph from "../ui/SessionStatusGlyph.svelte";
 	import MenuCloseItem from "../ui/MenuCloseItem.svelte";
 	import ProjectMark from "../ui/ProjectMark.svelte";
 	import SheetNotice from "../ui/SheetNotice.svelte";
 	import SessionCommandItems from "./SessionCommandItems.svelte";
-	import { ATTENTION_DISPLAY } from "./SessionItem.svelte";
 	import type { SessionCommand, SessionCommandEntry } from "./session-commands.js";
 
 	let { commands, onselect, header, views, now = Date.now() }: {
@@ -26,15 +24,10 @@
 		now?: number;
 	} = $props();
 	const toastHost = Symbol("session-sheet");
-	const status = $derived.by(() => {
-		const session = header.session;
-		const attention = sessionAttention(session);
-		if (attention === "needs-approval" || attention === "needs-reply" || attention === "error") return ATTENTION_DISPLAY[attention];
-		if (session.pinnedAt != null) return { glyph: { icon: "pin" }, colour: "text-status-pinned" };
-		if (isSessionSnoozed(session, now)) return { glyph: { icon: "moon" }, colour: "text-status-snoozed" };
-		if (session.settledAt != null) return { glyph: { icon: "check" }, colour: "text-success" };
-		return { glyph: { icon: "circle-dot" }, colour: session.unread ? "text-accent" : "text-text-dimmer" };
-	});
+	const attention = $derived(sessionAttention(header.session));
+	const blocking = $derived(attention === "needs-approval" || attention === "needs-reply" || attention === "error");
+	const settled = $derived(!blocking && header.session.pinnedAt == null && header.session.settledAt != null);
+	const snoozed = $derived(!blocking && !settled && header.session.pinnedAt == null && isSessionSnoozed(header.session, now));
 	const activity = $derived.by(() => {
 		const { pinnedAt, settledAt, snoozedUntil, updatedAt } = header.session;
 		if (pinnedAt == null && settledAt != null) return `settled ${formatTimeAgo(settledAt, new Date(now))}`;
@@ -50,7 +43,7 @@
 
 <div class="px-[16px]" data-session-sheet-body>
 	<div data-testid="session-sheet-header" class="grid grid-cols-[22px_minmax(0,1fr)_32px] items-start gap-[10px] px-[2px] pt-[3px] font-sans">
-		<span class="mt-[3px] grid size-[18px] place-items-center {status.colour}" aria-hidden="true">{#if "dither" in status.glyph}<DitherGlyph state={status.glyph.dither} />{:else}<Icon name={status.glyph.icon} size={18} />{/if}</span>
+		<span class="mt-[3px]"><SessionStatusGlyph size={18} {attention} {settled} {snoozed} /></span>
 		<div class="min-w-0">
 			<div class="line-clamp-2 break-words text-[17px] font-semibold leading-[1.3] tracking-[-0.01em] text-text">{header.session.title || "New Session"}</div>
 			<div class="mt-[4px] flex items-center gap-[7px] whitespace-nowrap text-[13px] text-text-muted">

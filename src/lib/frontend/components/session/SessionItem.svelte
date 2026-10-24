@@ -17,56 +17,47 @@
 			word: string;
 			spoken: string;
 			colour: string;
-			/** Blocking states get a line icon; the rest share the dither grid. */
-			glyph: { icon: "triangle-alert" | "message-square" | "octagon-alert" } | { dither: "working" | "monitoring" | "done" | "idle" };
 		}
 	> = {
 		"needs-approval": {
 			word: "Approve",
 			spoken: "Needs approval",
 			colour: "text-status-ask",
-			glyph: { icon: "triangle-alert" },
 		},
 		"needs-reply": {
 			word: "Reply",
 			spoken: "Needs reply",
 			colour: "text-status-ask",
-			glyph: { icon: "message-square" },
 		},
 		error: {
 			word: "Failed",
 			spoken: "Failed",
 			colour: "text-error",
-			glyph: { icon: "octagon-alert" },
 		},
 		working: {
-			// The spinner already says working,
+			// The glyph already says working,
 			// and the right column shows elapsed time instead, which is the only
 			// thing that changes while a turn runs. `word` is therefore the
 			// pill's text and its presence is what decides pill-vs-time.
 			word: "",
 			spoken: "Working",
 			colour: "text-session-working",
-			glyph: { dither: "working" },
 		},
 		monitoring: {
 			// A word, not elapsed time, because the wait has no expected end.
 			word: "Monitoring",
 			spoken: "Monitoring",
 			colour: "text-session-monitoring",
-			glyph: { dither: "monitoring" },
 		},
 		"done-unread": {
 			word: "",
 			spoken: "Done, unread",
 			colour: "text-session-done",
-			glyph: { dither: "done" },
 		},
 		idle: {
 			word: "",
 			spoken: "",
 			colour: "text-session-idle",
-			glyph: { dither: "idle" },
 		},
 	};
 

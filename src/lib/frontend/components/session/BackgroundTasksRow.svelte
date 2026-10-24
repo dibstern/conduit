@@ -9,7 +9,7 @@
 	import { goalDetails } from "../../stores/goal.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
-	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import { tasksPanel } from "./background-tasks.svelte.js";
 	import { sideThreadsPanel } from "./side-threads.svelte.js";
@@ -28,7 +28,7 @@
 
 {#if !compact}
 	<div data-testid="background-tasks-row" bind:clientWidth={width} class="flex min-h-[36px] min-w-0 basis-full items-center gap-[8px] pl-[20px] pr-[16px] border-t border-border-subtle text-[12.5px] text-text-secondary">
-		<Icon name="loader-circle" size={12} class="shrink-0 motion-safe:animate-spin" />
+		<ConduitMark size={12} variant="running" tone="inherit" />
 		<Button variant="ghost" size="content" tone="secondary" touchTarget class="shrink-0" data-testid="background-tasks-toggle" aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" onclick={togglePanel}>{tasks.length} background {tasks.length === 1 ? "task" : "tasks"}</Button>
 		{#each shown as task (task.id)}
 			<Badge variant="chip" size="command" shape="pill" wrap data-testid="background-task-chip" class="min-w-0 max-w-[230px]">
@@ -42,7 +42,7 @@
 {:else}
 	<Surface variant="task-strip" radius="none" data-testid="background-tasks-row" class="min-w-0">
 		<Button variant="ghost" size="phone-task" touchTarget="always" tone="secondary" align="start" class="flex-1" data-testid="background-tasks-toggle" aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" onclick={togglePanel}>
-			<Icon name="loader-circle" size={12} class="shrink-0 motion-safe:animate-spin" />
+			<ConduitMark size={12} variant="running" tone="inherit" />
 			<span class="truncate">{tasks.length} background {tasks.length === 1 ? "task" : "tasks"}</span>
 		</Button>
 		{#if onstopall}<Button variant="ghost" size="phone-task" touchTarget="always" tone="error" class="shrink-0 px-[8px]" data-testid="background-tasks-row-stop-all" onclick={onstopall}>Stop all</Button>{/if}

@@ -1059,6 +1059,11 @@ export const GoalChecking: Story = {
 			canvas.getByTestId("composer-checking-goal"),
 		).toHaveTextContent("Checking goal");
 		await expect(
+			canvas
+				.getByTestId("composer-checking-goal")
+				.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
+		await expect(
 			canvas.queryByTestId("composer-status-elapsed"),
 		).not.toBeInTheDocument();
 		// The line above names the check; the box keeps its goal outline.

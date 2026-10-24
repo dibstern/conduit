@@ -29,13 +29,16 @@ export const InProgress: Story = {
 		item: mockTodoInProgress,
 	},
 	play: ({ canvasElement }) => {
-		// The spinner must be frozen or the capture is flaky. A silent no-op here
-		// (renamed class) would reintroduce that flake, so assert before freezing.
+		// Freeze the packet for a repeatable visual capture.
 		const icon = canvasElement.querySelector<HTMLElement>(
 			".todo-icon-progress",
 		);
 		expect(icon).not.toBeNull();
-		if (icon) icon.style.animation = "none";
+		const glyph = icon?.querySelector('[data-flow-glyph="running"]');
+		expect(glyph).toBeVisible();
+		const packet = glyph?.querySelector<SVGElement>("[data-flow-packet]");
+		expect(packet).not.toBeNull();
+		if (packet) packet.style.animation = "none";
 	},
 };
 

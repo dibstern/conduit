@@ -3,6 +3,7 @@
 <script lang="ts">
 	import type { TodoItem, TodoStatus } from "../../types.js";
 	import { assertNever } from "../../../utils.js";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 
 	let { item }: { item: TodoItem } = $props();
 
@@ -11,7 +12,7 @@
 			case "pending":
 				return "todo-icon-pending border-2 border-text-muted bg-transparent";
 			case "in_progress":
-				return "todo-icon-progress border-2 border-border border-t-accent animate-todo-spin";
+				return "todo-icon-progress";
 			case "completed":
 				return "todo-icon-completed bg-success border-none";
 			case "cancelled":
@@ -29,7 +30,9 @@
 	<span
 		class="todo-icon inline-block w-3.5 h-3.5 shrink-0 mt-0.5 rounded-full relative {getStatusIconClass(item.status)}"
 	>
-		{#if item.status === "completed"}
+		{#if item.status === "in_progress"}
+			<ConduitMark size={14} variant="running" />
+		{:else if item.status === "completed"}
 			<span
 				class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-xs leading-none text-white font-bold"
 				>&#x2713;</span

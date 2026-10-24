@@ -2,6 +2,7 @@
 	import type { HTMLAttributes } from "svelte/elements";
 	import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import { getInstanceById, instanceState } from "../../stores/instance.svelte.js";
 	import { accountColorClass } from "../../utils/account-color.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
@@ -47,7 +48,7 @@
 			data-account={instanceId}
 			data-state={spinning ? "spinning" : "idle"}
 			class="badge font-mono {accountColorClass(instanceId)}"
-		>{spinning ? "" : letter}</span>
+		>{#if spinning}<ConduitMark size={size * .74} variant="running" />{:else}{letter}{/if}</span>
 	{/if}
 </span>
 
@@ -87,9 +88,8 @@
 	}
 	.badge[data-state="spinning"] {
 		background: var(--color-bg-alt);
-		border: 1.5px solid var(--color-text-muted);
-		border-top-color: transparent;
-		animation: spin .8s linear infinite;
+		display: grid;
+		place-items: center;
+		padding: 0;
 	}
-	@keyframes spin { to { transform: rotate(360deg); } }
 </style>
