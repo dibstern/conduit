@@ -1091,9 +1091,7 @@ export const handleQuestionReject = (
 			const providerId =
 				call?.account.driver ??
 				(yield* engineOption.value.getProviderForSessionEffect(sessionId));
-			if (
-				getProviderDriver(providerId)?.interactionSink === "permission-asking"
-			)
+			if (providerId === "claude")
 				return yield* new WsRpcError({
 					message:
 						"Claude questions require an answer before the turn can continue.",
@@ -1137,9 +1135,7 @@ export const handleQuestionReject = (
 								questionSessionId,
 							)
 						: undefined;
-				if (
-					getProviderDriver(providerId)?.interactionSink === "permission-asking"
-				) {
+				if (providerId === "claude") {
 					log.warn(
 						`client=${clientId} session=${questionSessionId} refused to skip Claude question ${toolId}`,
 					);
