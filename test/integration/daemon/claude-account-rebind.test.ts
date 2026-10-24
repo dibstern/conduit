@@ -3,6 +3,7 @@
 // output/approval is attributed to the next account's run.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -31,7 +32,7 @@ afterEach(async ({ task }) => {
 		},
 	});
 	writeFileSync(
-		"/tmp/82tn9-3-r3-account-rebind.json",
+		join(tmpdir(), `82tn9-3-r3-account-rebind-${process.pid}.json`),
 		JSON.stringify(proofs, null, 2),
 	);
 	harness = undefined;
