@@ -39,6 +39,7 @@ import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { turn as readTurn } from "../../stores/turn.svelte.js";
 import { usageState } from "../../stores/usage.svelte.js";
+import { _resetRateLimit } from "../../stores/ws-send.svelte.js";
 import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
@@ -1397,6 +1398,13 @@ function narrowComposer(
 		globals: { theme: "dark" },
 		beforeEach: ({ canvasElement }) => {
 			const cleanup = setupWords(canvasElement, false);
+			_resetRateLimit();
+			const restoreDraftSync = replyRpc("SyncInputDraft", () => ({ ok: true }));
+			const restoreSubmit = replyRpc("input.submit", () => ({
+				ok: true,
+				sessionId: testId,
+				handedOff: mode !== "limited",
+			}));
 			setComposerPreferences({ controls: "icons" });
 			const readings = usageState.readings;
 			const limits = usageState.limits;
@@ -1460,6 +1468,9 @@ function narrowComposer(
 				];
 			}
 			return () => {
+				_resetRateLimit();
+				restoreSubmit();
+				restoreDraftSync();
 				Date.now = realNow;
 				chat.messages = previousMessages;
 				usageState.readings = readings;
