@@ -150,7 +150,16 @@ it.each([
 				(index === 4 ? "question_pending" : "permission_pending"),
 			cursor,
 		);
-		if (index === 4) await browser.rejectQuestion(request);
+		if (index === 4)
+			await Effect.runPromise(
+				browser.rpc.AnswerQuestion({
+					projectSlug: "process-test",
+					originId: browser.originId,
+					commandId: randomUUID(),
+					toolId: String(request["toolId"]),
+					answers: { "0": "Continue" },
+				}),
+			);
 		else await browser.answerApproval(request, "allow");
 		await pending;
 		const controller = discoverRunners(
