@@ -73,6 +73,13 @@ export const SessionStateProjectionNotifierLive: Layer.Layer<
 		return {
 			sessionStateProjected: (sessionId, eventType) =>
 				Effect.gen(function* () {
+					// Tool results only flag git work. Lineage has not changed, and
+					// the daemon scheduler coalesces these hints before reading git.
+					if (eventType === "tool.completed") {
+						if (Option.isSome(sessionGit))
+							yield* sessionGit.value.invalidate({ sessionId });
+						return;
+					}
 					if (
 						eventType === "turn.completed" ||
 						eventType === "turn.error" ||

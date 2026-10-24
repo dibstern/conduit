@@ -88,17 +88,24 @@ Session git belongs to one daemon module, exposed by
 `changes`, and `invalidate(target)`. Canonical folder keys share git reads across
 sessions and projects. Viewed folders refresh every 5 seconds and running
 folders every 15 seconds. Listed folders older than 30 seconds get a safety-net
-refresh for missed watcher events, at most one every 20 seconds daemon-wide,
+refresh for changes outside the probe targets, at most one every 20 seconds daemon-wide,
 oldest first, so idle cost does not grow with listed sessions; dormant folders
 refresh on hints. Reads only refresh a folder that was never published. Hints
-have a two-second leading/trailing throttle and retain the tier's cadence.
+have a two-second leading/trailing throttle. Viewed folders can read at that
+throttle; other tiers retain their cadence. Tool results request a hint without
+refreshing lineage.
 Run ends, presence changes and ref changes force a refresh; a worktree's ref
-changes are its own branch and the default branches, not other worktrees'. A ref
-event forces a read only when the ref file's contents changed, because FSEvents
-replays and repeats events and can name a ref update after its lock file. A
-hinted folder's presence is checked once per hint, before the tick reads the
-clock. Scoped filesystem
-watches and session membership use `OwnerScopes`;
+changes are its own branch and the default branches, not other worktrees'. One
+scoped daemon fiber probes directories sequentially using async stat calls, every
+500 ms viewed, 1 second running, 5 seconds listed and 10 seconds dormant. Targets
+are the checkout directory, HEAD, index, packed-refs in the git and common
+directories, and exact loose refs for the current branch, main and master.
+HEAD changes update the branch target, including nested branch names. Stat
+changes to HEAD and refs trigger async content comparisons before forcing a
+read; index and checkout-directory changes are hints. A hinted folder's presence
+is checked once per hint, before the scheduler reads the clock. Releasing an
+owner drops its probe targets and interrupts in-flight work without waiting for
+native filesystem requests. Directory and session membership use `OwnerScopes`;
 commands use the shared Subprocess owner at background priority.
 
 Readers consume `session_git_published` in the same SQL snapshot as the session
