@@ -250,17 +250,28 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					const optionsBox = await box(options);
 					expect(optionsBox.width).toBe(28);
 					expect(optionsBox.height).toBe(34);
-					expect(optionsBox.x).toBe(sendBox.x + sendBox.width);
 					await expect(send).toHaveCSS("border-top-right-radius", "0px");
 					await expect(options).toHaveCSS("border-top-left-radius", "0px");
 				} else await expect(options).toHaveCount(0);
 				const stop = page.locator("#stop");
 				if (state === "idle") await expect(stop).toHaveCount(0);
-				else {
-					await expectSquare(stop, 34);
-					const preceding = await box(hasOptions ? options : send);
-					expect((await box(stop)).x - preceding.x - preceding.width).toBe(5);
-				}
+				else await expectSquare(stop, 34);
+				// Measure gaps together because fitting can move the whole action group.
+				const gaps = await layout.evaluate((element, hasOptions) => {
+					const send = element.querySelector("#send")?.getBoundingClientRect();
+					if (!send) throw new Error("Missing Send action");
+					const options = element
+						.querySelector('[data-testid="composer-send-menu-trigger"]')
+						?.getBoundingClientRect();
+					const stop = element.querySelector("#stop")?.getBoundingClientRect();
+					const preceding = hasOptions ? options : send;
+					return {
+						joined: options ? options.x - send.right : null,
+						stop: stop && preceding ? stop.x - preceding.right : null,
+					};
+				}, hasOptions);
+				if (hasOptions) expect(gaps.joined).toBe(0);
+				if (state !== "idle") expect(gaps.stop).toBe(5);
 			}
 		},
 	},
