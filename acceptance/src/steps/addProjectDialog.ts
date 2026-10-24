@@ -1,4 +1,5 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
+import type { FindFoldersResponse } from "../../../src/lib/contracts/ws-rpc.js";
 import type { ProjectInfo } from "../../../src/lib/shared-types.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
@@ -13,6 +14,43 @@ const row = (page: Page, name: string) =>
 	dialog(page).locator(
 		`[data-testid="folder-picker-row"][data-path="${folderPath(name)}"]`,
 	);
+const browseFolders: FindFoldersResponse["entries"] = [
+	{ path: home, isGitRepo: false },
+	{ path: `${home}/src`, isGitRepo: false, repoCount: 2 },
+	{ path: folderPath("api"), isGitRepo: true, branch: "main" },
+	{ path: folderPath("conduit"), isGitRepo: true, branch: "main" },
+	{ path: folderPath("conduit/lib"), isGitRepo: false },
+	{ path: folderPath("docs"), isGitRepo: false },
+	{ path: folderPath("personal"), isGitRepo: false, repoCount: 2 },
+	{ path: folderPath("personal/gym"), isGitRepo: true, branch: "main" },
+	{
+		path: folderPath("personal/site"),
+		isGitRepo: true,
+		branch: "feature/site",
+	},
+].map((entry) => ({ ...entry, reason: "match" as const, exists: true }));
+
+const tapFolderControl = async (page: Page, control: Locator) => {
+	await expect(control).toBeVisible();
+	await control.scrollIntoViewIfNeeded();
+	const bounds = await control.boundingBox();
+	if (!bounds) throw new Error("Folder control has no tap target");
+	const touch = await page.context().newCDPSession(page);
+	try {
+		await touch.send("Input.dispatchTouchEvent", {
+			type: "touchStart",
+			touchPoints: [
+				{ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 },
+			],
+		});
+		await touch.send("Input.dispatchTouchEvent", {
+			type: "touchEnd",
+			touchPoints: [],
+		});
+	} finally {
+		await touch.detach();
+	}
+};
 
 export const addProjectDialogHandlers: StepHandler[] = [
 	{
@@ -26,20 +64,56 @@ export const addProjectDialogHandlers: StepHandler[] = [
 			rpc.setProjects({ projects, current: "myapp" });
 			rpc.setStubs({
 				GetProjects: () => ({ projects, current: "myapp" }),
-				FindFolders: ({ query }) => ({
-					home,
-					entries: [
-						{ path: folderPath("conduit"), reason: "recent" as const },
-						{ path: folderPath("docs"), reason: "recent" as const },
-						{ path: folderPath("api"), reason: "sibling" as const },
-					]
-						.filter((entry) => entry.path.includes(query))
-						.map((entry) => ({
-							...entry,
-							isGitRepo: entry.path !== folderPath("docs"),
-							exists: true,
-						})),
-				}),
+				FindFolders: ({ query }) => {
+					if (query.startsWith("/") || query.startsWith("~")) {
+						const expanded = query.replace(/^~/, home).replace(/\/+/g, "/");
+						const path = expanded.replace(/\/$/, "") || "/";
+						const parent = expanded.endsWith("/")
+							? path
+							: path.slice(0, path.lastIndexOf("/")) || "/";
+						const prefix = expanded.endsWith("/")
+							? ""
+							: path.slice(path.lastIndexOf("/") + 1);
+						const typed = browseFolders.find(
+							(entry) => entry.path === path,
+						) ?? {
+							path,
+							isGitRepo: false,
+							reason: "match" as const,
+							exists: false,
+						};
+						return {
+							home,
+							entries: [
+								typed,
+								...browseFolders.filter(
+									(entry) =>
+										entry.path !== path &&
+										(entry.path.slice(0, entry.path.lastIndexOf("/")) ||
+											"/") === parent &&
+										entry.path
+											.slice(entry.path.lastIndexOf("/") + 1)
+											.toLowerCase()
+											.startsWith(prefix.toLowerCase()),
+								),
+							],
+						};
+					}
+					return {
+						home,
+						entries: [
+							{ path: folderPath("conduit"), reason: "recent" as const },
+							{ path: folderPath("docs"), reason: "recent" as const },
+							{ path: folderPath("api"), reason: "sibling" as const },
+						]
+							.filter((entry) => entry.path.includes(query))
+							.map((entry) => ({
+								...entry,
+								isGitRepo: entry.path !== folderPath("docs"),
+								exists: true,
+							})),
+					};
+				},
 				SaveProject: ({ folders, title }) => {
 					const [main, ...extra] = folders.map((folder) =>
 						typeof folder === "string" ? folder : folder.path,
@@ -76,6 +150,116 @@ export const addProjectDialogHandlers: StepHandler[] = [
 				.click();
 			await expect(dialog(world.page)).toBeVisible();
 			await expect(row(world.page, "conduit")).toBeVisible();
+		},
+	},
+	{
+		name: "type a project folder query",
+		match: /^I type "([^"]+)" in the Add project folder search$/,
+		run: async ({ world, match }) => {
+			await dialog(world.page)
+				.getByRole("combobox", { name: "Add folder" })
+				.fill(match[1] ?? "");
+		},
+	},
+	{
+		name: "assert project folder query",
+		match: /^the folder search is "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				dialog(world.page).getByRole("combobox", { name: "Add folder" }),
+			).toHaveValue(match[1] ?? "");
+		},
+	},
+	{
+		name: "assert folder breadcrumb trail",
+		match: /^the folder breadcrumbs are (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				dialog(world.page)
+					.getByRole("navigation", { name: "Folder breadcrumbs" })
+					.getByRole("button"),
+			).toHaveText(folderNames(match[1] ?? ""));
+		},
+	},
+	{
+		name: "assert listed project subfolders",
+		match: /^the folder rows are (.+)$/,
+		run: async ({ world, match }) => {
+			const names = folderNames(match[1] ?? "");
+			const rows = dialog(world.page).getByTestId("folder-picker-row");
+			await expect(rows).toHaveCount(names.length);
+			for (const [index, name] of names.entries()) {
+				await expect(rows.nth(index)).toHaveAttribute(
+					"data-path",
+					folderPath(name),
+				);
+			}
+		},
+	},
+	{
+		name: "assert folder row metadata",
+		match: /^the ([a-z0-9-]+) folder row shows "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				row(world.page, match[1] ?? "").getByText(match[2] ?? "", {
+					exact: true,
+				}),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert folder ghost completion suffix",
+		match: /^the folder ghost suffix is "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				dialog(world.page)
+					.getByTestId("folder-query-ghost")
+					.locator("span")
+					.last(),
+			).toHaveText(match[1] ?? "");
+		},
+	},
+	{
+		name: "accept a project folder ghost completion",
+		match: /^I accept the folder ghost with Tab$/,
+		run: async ({ world }) => {
+			await dialog(world.page)
+				.getByRole("combobox", { name: "Add folder" })
+				.press("Tab");
+		},
+	},
+	{
+		name: "open a folder using its browse button",
+		match: /^I tap the ([a-z0-9-]+) folder browse button$/,
+		run: async ({ world, match }) => {
+			await tapFolderControl(
+				world.page,
+				dialog(world.page).locator(
+					`[data-testid="folder-picker-open"][data-path="${folderPath(match[1] ?? "")}"]`,
+				),
+			);
+		},
+	},
+	{
+		name: "navigate a folder breadcrumb",
+		match: /^I (click|tap) the (.+) folder breadcrumb$/,
+		run: async ({ world, match }) => {
+			const crumb = dialog(world.page)
+				.getByRole("navigation", { name: "Folder breadcrumbs" })
+				.getByRole("button", { name: match[2] ?? "", exact: true });
+			if (match[1] === "tap") await tapFolderControl(world.page, crumb);
+			else await crumb.click();
+		},
+	},
+	{
+		name: "assert folder keyboard hint visibility",
+		match: /^the folder keyboard hints are (visible|hidden)$/,
+		run: async ({ world, match }) => {
+			const hints = dialog(world.page).locator(
+				'[aria-label="Folder keyboard shortcuts"]',
+			);
+			if (match[1] === "visible") await expect(hints).toBeVisible();
+			else await expect(hints).toHaveCount(0);
 		},
 	},
 	{

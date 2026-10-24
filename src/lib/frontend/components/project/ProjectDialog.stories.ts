@@ -1,12 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import type { Rpc } from "effect/rpc";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import {
 	type FindFolders,
 	type FindFoldersResponse,
 	ProjectSaveRejected,
 } from "../../../contracts/ws-rpc.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { parseFolderQuery } from "./folder-query.js";
 import ProjectDialog from "./ProjectDialog.svelte";
 
 const home = "/Users/dev";
@@ -15,28 +16,62 @@ const app = `${root}/conduit`;
 const docs = `${root}/conduit-docs`;
 const site = `${root}/conduit-site`;
 const notes = `${root}/conduit-notes`;
-const existing = [app, docs, site, `${app}/packages/sdk`];
+const existing = [
+	home,
+	root,
+	app,
+	docs,
+	site,
+	`${app}/packages`,
+	`${app}/packages/sdk`,
+	`${root}/personal`,
+	`${root}/personal/conduit`,
+	`${root}/personal/conduit-competitors`,
+	`${root}/personal/notes`,
+];
 
 async function findFolders({
 	query,
 }: Rpc.PayloadConstructor<typeof FindFolders>): Promise<FindFoldersResponse> {
 	if (!/^[/~]/.test(query)) return { home, entries: [] };
+	const expanded = query.replace(/^~(?=\/|$)/, home).replace(/\/+$/, "");
+	const { folder } = parseFolderQuery(query, home);
+	const prefix = query.endsWith("/")
+		? ""
+		: (expanded.split("/").at(-1)?.toLowerCase() ?? "");
 	return {
 		home,
 		entries: [
 			...existing
-				.filter((path) => path.startsWith(query))
+				.filter(
+					(path) =>
+						path === expanded ||
+						(path.slice(0, path.lastIndexOf("/")) === folder &&
+							path.split("/").at(-1)?.toLowerCase().startsWith(prefix)),
+				)
 				.map((path) => ({
 					path,
-					isGitRepo: true,
+					isGitRepo: ![
+						home,
+						root,
+						`${app}/packages`,
+						`${root}/personal`,
+						`${root}/personal/conduit-competitors`,
+						`${root}/personal/notes`,
+					].includes(path),
+					...(path.endsWith("/conduit-competitors")
+						? { repoCount: 7 }
+						: path.endsWith("/conduit") || path === docs || path === site
+							? { branch: "main" }
+							: {}),
 					reason: "match" as const,
 					exists: true,
 				})),
-			...(existing.includes(query)
+			...(existing.includes(expanded)
 				? []
 				: [
 						{
-							path: query,
+							path: expanded,
 							isGitRepo: false,
 							reason: "match" as const,
 							exists: false,
@@ -186,6 +221,169 @@ export const PathMatchesOpen: Story = {
 		await expect(
 			canvas.getByRole("checkbox", { name: "git init" }),
 		).toBeChecked();
+	},
+};
+
+export const BrowseWithBreadcrumbs: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		const input = canvas.getByRole("combobox", { name: "Add folder" });
+		await userEvent.type(input, "~/src/personal/");
+		const folder = `${root}/personal/conduit`;
+		const row = await canvas.findByRole("option", { name: folder });
+		const crumbs = within(
+			canvas.getByRole("navigation", { name: "Folder breadcrumbs" }),
+		);
+		await expect(
+			crumbs.getAllByRole("button").map((button) => button.textContent?.trim()),
+		).toEqual(["~", "src", "personal"]);
+		await expect(row).toHaveTextContent("git · main");
+		await expect(
+			canvas.getByRole("option", {
+				name: `${root}/personal/conduit-competitors`,
+			}),
+		).toHaveTextContent("7 repos");
+		await userEvent.click(row);
+		await expect(input).toHaveValue("~/src/personal/");
+		await expect(row).toHaveAttribute("aria-selected", "true");
+		await expect(canvas.getByTestId("project-folder-chip")).toHaveAttribute(
+			"data-path",
+			folder,
+		);
+	},
+};
+
+export const GhostCompletionVisible: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		const input = canvas.getByRole("combobox", { name: "Add folder" });
+		await userEvent.type(input, "~/src/per");
+		const completion = await canvas.findByTestId("folder-query-ghost");
+		await expect(completion).toHaveTextContent("~/src/personal/");
+		await expect(input).toHaveAttribute("aria-autocomplete", "both");
+	},
+};
+
+export const GhostCompletionAndCrumbNavigation: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		const input = canvas.getByRole("combobox", { name: "Add folder" });
+		await userEvent.type(input, "~/src/per");
+		await canvas.findByTestId("folder-query-ghost");
+		await userEvent.tab();
+		await expect(input).toHaveValue("~/src/personal/");
+		await expect(input).toHaveFocus();
+		await canvas.findByRole("option", { name: `${root}/personal/conduit` });
+		await expect(canvas.queryByTestId("folder-query-ghost")).toBeNull();
+		await userEvent.tab();
+		const crumbs = within(
+			canvas.getByRole("navigation", { name: "Folder breadcrumbs" }),
+		);
+		await expect(crumbs.getByRole("button", { name: "~" })).toHaveFocus();
+		await userEvent.click(crumbs.getByRole("button", { name: "src" }));
+		await expect(input).toHaveValue("~/src/");
+		await expect(
+			await canvas.findByRole("option", { name: app }),
+		).toBeVisible();
+	},
+};
+
+export const BrowseKeyboardNavigation: Story = {
+	play: async ({ canvasElement, args }) => {
+		const canvas = canvasFor(canvasElement);
+		const input = canvas.getByRole("combobox", { name: "Add folder" });
+		await userEvent.type(input, "~/src/");
+		await canvas.findByRole("option", { name: app });
+		await userEvent.keyboard("{ArrowDown}{Enter}");
+		await expect(canvas.getByTestId("project-folder-chip")).toHaveAttribute(
+			"data-path",
+			docs,
+		);
+		await userEvent.keyboard(" ");
+		await expect(canvas.queryByTestId("project-folder-chip")).toBeNull();
+		await userEvent.keyboard("{ArrowUp}{ArrowRight}");
+		await expect(input).toHaveValue("~/src/conduit/");
+		await canvas.findByRole("option", { name: `${app}/packages` });
+		await userEvent.keyboard("{Control>}{Enter}{/Control}");
+		await expect(canvas.getByTestId("project-folder-chip")).toHaveAttribute(
+			"data-path",
+			app,
+		);
+		await expect(args["saveProject"]).not.toHaveBeenCalled();
+		await userEvent.keyboard("{Control>}{Enter}{/Control}");
+		await expect(canvas.queryByTestId("project-folder-chip")).toBeNull();
+		await userEvent.keyboard("{Backspace}");
+		await expect(input).toHaveValue("~/src/");
+		await expect(
+			await canvas.findByRole("option", { name: app }),
+		).toBeVisible();
+	},
+};
+
+export const BrowseMissingParent: Story = {
+	play: async ({ canvasElement, args }) => {
+		const canvas = canvasFor(canvasElement);
+		await userEvent.type(
+			canvas.getByRole("combobox", { name: "Add folder" }),
+			"~/missing-parent/child",
+		);
+		await canvas.findByRole("option", { name: /New folder/ });
+		await userEvent.keyboard("{Control>}{Enter}{/Control}");
+		await expect(canvas.queryByTestId("project-folder-chip")).toBeNull();
+		await expect(args["saveProject"]).not.toHaveBeenCalled();
+	},
+};
+
+export const PhoneBrowseByTap: Story = {
+	args: {
+		findFolders: async (input: Rpc.PayloadConstructor<typeof FindFolders>) =>
+			/^[/~]/.test(input.query)
+				? findFolders(input)
+				: { home, entries: suggestions },
+	},
+	beforeEach: () => {
+		const compact = sessionViewState.compact;
+		sessionViewState.compact = true;
+		return () => {
+			sessionViewState.compact = compact;
+		};
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = canvasFor(canvasElement);
+		const input = canvas.getByRole("combobox", { name: "Add folder" });
+		await userEvent.click(
+			await waitFor(() => {
+				const open = canvasElement.ownerDocument.querySelector<HTMLElement>(
+					`[data-testid="folder-picker-open"][data-path="${app}"]`,
+				);
+				if (!open) throw new Error("open button not rendered");
+				return open;
+			}),
+		);
+		await expect(input).toHaveValue("~/src/conduit/");
+		await canvas.findByRole("option", { name: `${app}/packages` });
+		const crumbs = within(
+			canvas.getByRole("navigation", { name: "Folder breadcrumbs" }),
+		);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Check “conduit”" }),
+		);
+		await expect(canvas.getByTestId("project-folder-chip")).toHaveAttribute(
+			"data-path",
+			app,
+		);
+		await userEvent.click(crumbs.getByRole("button", { name: "src" }));
+		await expect(input).toHaveValue("~/src/");
+		await expect(
+			await canvas.findByRole("option", { name: app }),
+		).toBeVisible();
+		await expect(
+			canvas.queryByLabelText("Folder keyboard shortcuts"),
+		).toBeNull();
+		await expect(canvas.getByRole("dialog")).toHaveAttribute(
+			"data-placement",
+			"sheet",
+		);
 	},
 };
 
@@ -380,6 +578,7 @@ export const KeyboardSave: Story = {
 		await expect(makeMain).toHaveFocus();
 		await userEvent.keyboard("{Enter}");
 		await expect(input).toHaveFocus();
+		await userEvent.clear(input);
 		await userEvent.keyboard("{Control>}{Enter}{/Control}");
 		await expect(args["saveProject"]).toHaveBeenCalledWith({
 			title: "conduit-docs",
@@ -389,14 +588,15 @@ export const KeyboardSave: Story = {
 };
 
 const suggestionArgs = {
-	findFolders: async ({
-		query,
-	}: Rpc.PayloadConstructor<typeof FindFolders>) => ({
-		home,
-		entries: suggestions.filter((entry) =>
-			entry.path.toLowerCase().includes(query.toLowerCase()),
-		),
-	}),
+	findFolders: async ({ query }: Rpc.PayloadConstructor<typeof FindFolders>) =>
+		/^[/~]/.test(query)
+			? findFolders({ query })
+			: {
+					home,
+					entries: suggestions.filter((entry) =>
+						entry.path.toLowerCase().includes(query.toLowerCase()),
+					),
+				},
 };
 
 export const SuggestionsOpen: Story = {

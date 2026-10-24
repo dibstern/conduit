@@ -63,6 +63,69 @@ Examples:
   | baseline                       | threshold |
   | add-project-dialog-main-first | 98        |
 
+Scenario Outline: Desktop path browsing shows breadcrumbs and selects folders into the same chips
+  Given the viewport is a desktop
+  When I open the Add project dialog
+  And I type "~/src/" in the Add project folder search
+  Then the folder breadcrumbs are ~, src
+  And the folder rows are api, conduit, docs, personal
+  And the conduit folder row shows "git · main"
+  And the personal folder row shows "2 repos"
+  And the folder keyboard hints are visible
+  When I toggle the conduit folder row
+  Then the conduit folder row is ticked
+  And the project folder chips are conduit with conduit as Main
+  And no project has been saved from the dialog
+  And the screen region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | baseline                          | threshold |
+  | add-project-dialog-browse-desktop | 98        |
+
+Scenario Outline: Desktop completes a unique path with Tab and returns through a breadcrumb
+  Given the viewport is a desktop
+  When I open the Add project dialog
+  And I type "~/src/per" in the Add project folder search
+  Then the folder ghost suffix is "sonal/"
+  And the folder search is "~/src/per"
+  And the screen region visually matches <ghost_baseline> at <threshold> percent
+  When I accept the folder ghost with Tab
+  Then the folder search is "~/src/personal/"
+  And the folder breadcrumbs are ~, src, personal
+  And the folder rows are personal/gym, personal/site
+  When I click the src folder breadcrumb
+  Then the folder search is "~/src/"
+  And the folder breadcrumbs are ~, src
+  And the folder rows are api, conduit, docs, personal
+  And the screen region visually matches <up_baseline> at <threshold> percent
+
+Examples:
+  | ghost_baseline                 | up_baseline                       | threshold |
+  | add-project-dialog-browse-ghost | add-project-dialog-browse-crumb-up | 98        |
+
+Scenario Outline: Phone browse buttons open folders and breadcrumbs return without keyboard hints
+  Given the viewport is a phone
+  When I open the Add project dialog
+  Then the Add project dialog is a phone sheet with a handle
+  When I tap the conduit folder browse button
+  Then the folder search is "~/src/conduit/"
+  And the folder breadcrumbs are ~, src, conduit
+  And the folder rows are conduit/lib
+  And the folder keyboard hints are hidden
+  And the screen region visually matches <open_baseline> at <threshold> percent
+  When I tap the src folder breadcrumb
+  Then the folder search is "~/src/"
+  And the folder breadcrumbs are ~, src
+  And the folder rows are api, conduit, docs, personal
+  And the conduit folder row shows "git · main"
+  And the personal folder row shows "2 repos"
+  And the folder keyboard hints are hidden
+  And the screen region visually matches <up_baseline> at <threshold> percent
+
+Examples:
+  | open_baseline                        | up_baseline                        | threshold |
+  | add-project-dialog-browse-phone-open | add-project-dialog-browse-phone-up | 98        |
+
 Scenario Outline: Phone opens an inset sheet with a handle
   Given the viewport is a phone
   When I open the Add project dialog

@@ -1,5 +1,5 @@
 import type { Stats } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { Context, Data, Effect, Layer, Option } from "effect";
@@ -124,6 +124,43 @@ const isGitRepo = (
 	);
 
 type FolderEntry = FindFoldersResponse["entries"][number];
+
+const folderMetadata = (
+	path: string,
+	git: boolean,
+): Effect.Effect<Pick<FolderEntry, "branch" | "repoCount">> =>
+	Effect.gen(function* () {
+		if (git) {
+			let gitDir = join(path, ".git");
+			const gitStats = yield* statPath(gitDir);
+			if (Option.isNone(gitStats)) return {};
+			if (gitStats.value.isFile()) {
+				const pointer = yield* Effect.tryPromise(() =>
+					readFile(gitDir, "utf8"),
+				);
+				const target = pointer.match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
+				if (!target) return {};
+				gitDir = resolve(path, target);
+			}
+			const head = yield* Effect.tryPromise(() =>
+				readFile(join(gitDir, "HEAD"), "utf8"),
+			);
+			const branch = head.trim().match(/^ref: refs\/heads\/(.+)$/)?.[1];
+			return branch ? { branch } : {};
+		}
+		const entries = yield* Effect.tryPromise(() =>
+			readdir(path, { withFileTypes: true }),
+		);
+		if (entries.length > MAX_PATH_MATCHES) return {};
+		const repos = yield* Effect.filter(
+			entries
+				.filter((entry) => entry.isDirectory())
+				.map((entry) => join(path, entry.name)),
+			isGitRepo,
+			{ concurrency: 16 },
+		);
+		return repos.length > 0 ? { repoCount: repos.length } : {};
+	}).pipe(Effect.orElseSucceed(() => ({})));
 
 /** What plain-text queries suggest from: recent.json and every project folder. */
 export interface FolderSuggestionSources {
@@ -265,6 +302,7 @@ export const findFolders = (
 						{
 							path: candidate,
 							isGitRepo: git,
+							...(yield* folderMetadata(candidate, git)),
 							reason: "match",
 							exists: true,
 						} as const,
@@ -279,9 +317,11 @@ export const findFolders = (
 					{ path, isGitRepo: false, reason: "match", exists: false } as const,
 				],
 			};
+		const git = yield* isGitRepo(path);
 		const typed = {
 			path,
-			isGitRepo: yield* isGitRepo(path),
+			isGitRepo: git,
+			...(yield* folderMetadata(path, git)),
 			reason: "match",
 			exists: true,
 		} as const;

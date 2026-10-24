@@ -73,7 +73,7 @@
 	let saveIssues = $state<readonly FolderIssue[]>([]);
 	let addIssues = $state<readonly FolderIssue[]>([]);
 	let saveError = $state("");
-	let picker = $state<{ focus: () => void }>();
+	let picker = $state<FolderPicker>();
 	const isPhone = $derived(sessionViewState.compact);
 	let viewportHeight = $state(0);
 	let keyboardInset = $state(0);
@@ -184,9 +184,9 @@
 	}
 
 	function handleKeydown(event: KeyboardEvent): void {
-		if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
+		if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing && !event.defaultPrevented) {
 			event.preventDefault();
-			void save();
+			if (!picker?.toggleBrowsedFolder()) void save();
 		}
 	}
 
@@ -249,13 +249,19 @@
 {/snippet}
 
 {#snippet saveButton()}
-	<Button variant="primary" size="content" ariaLabel={project ? "Save" : "Add project"} class={isPhone ? "h-[46px] w-full gap-[6px] rounded-full px-[14px] text-[15px] font-medium" : "h-[34px] gap-[6px] rounded-full px-[14px] text-[13.5px] font-medium max-md:min-h-[44px]"} loading={saving} disabled={!canSave} onclick={() => void save()}>{project ? "Save" : "Add project"} <span aria-hidden="true" class="font-mono text-[9px] max-md:hidden pointer-coarse:hidden">⌘↵</span></Button>
+	<Button variant="primary" size="content" ariaLabel={project ? "Save" : "Add project"} class={isPhone ? "h-[46px] w-full gap-[6px] rounded-full px-[14px] text-[15px] font-medium" : "h-[34px] gap-[6px] rounded-full px-[14px] text-[13.5px] font-medium max-md:min-h-[44px]"} loading={saving} disabled={!canSave} onclick={() => void save()}>{project ? "Save" : "Add project"} {#if !picker?.folderQuery().isPath}<span aria-hidden="true" class="font-mono text-[9px] max-md:hidden pointer-coarse:hidden">⌘↵</span>{/if}</Button>
 {/snippet}
 
 {#snippet phoneFooter()}
+	{@const browse = picker?.folderQuery()}
 	<div class="flex flex-col gap-[10px] px-[16px] pt-[12px]">
 		{@render folderChips()}
-		{@render saveButton()}
+		<div class="flex gap-[8px]">
+			{#if browse?.folder}
+				<Button variant="secondary" size="content" class="h-[46px] min-w-0 flex-1 truncate rounded-full px-[14px] text-[15px] font-medium" aria-pressed={draft.folders.some((folder) => folderPath(folder) === browse.folder)} disabled={saving} onclick={() => picker?.toggleBrowsedFolder()}>Check “{browse.crumbs.at(-1)?.label}”</Button>
+			{/if}
+			<div class="min-w-0 flex-1">{@render saveButton()}</div>
+		</div>
 	</div>
 {/snippet}
 
