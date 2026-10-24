@@ -671,8 +671,8 @@
 		}
 	}
 
-	// During IME composition the textarea must show its own pre-commit text, so we
-	// reveal the textarea text and hide the backdrop until composition ends.
+	// During IME composition the textarea holds pre-commit text the backdrop has not
+	// seen, so its decorations would sit under the wrong glyphs: hide them until it ends.
 	function handleCompositionStart() {
 		composing = true;
 	}
@@ -1390,12 +1390,13 @@
 								and which only squatted on their utility group.
 								`outline-none` is load-bearing and now comes from `bare`.
 
-								The text colour moved from two `class:` directives into the
-								class string because Svelte has no `class:` directive on a
-								COMPONENT tag. That is also why `bare` emits no text colour:
-								this swap and a primitive `text-text` would be two utilities
-								in one Tailwind group, resolved by stylesheet order, and the
-								call site would lose.
+								The textarea paints the visible text, always. The caret is
+								placed from the textarea's own layout, so only glyphs from that
+								same layout can be guaranteed to sit under it: iOS lays out
+								text the backdrop never sees (inline predictions, marked text),
+								and any such disagreement used to show up as caret drift. The
+								backdrop only paints decorations behind these glyphs; if it
+								ever wraps differently, a pill shifts, never the caret.
 							-->
 							<Textarea
 								id="input"
@@ -1409,11 +1410,9 @@
 								{placeholder}
 								autocomplete="off"
 								enterkeyhint={isMobile() ? "enter" : "send"}
-								class="composer-text-metrics absolute inset-0 z-10 caret-[var(--color-text)] resize-none placeholder:text-text-dimmer {plainText
+								class="composer-text-metrics absolute inset-0 z-10 text-text caret-[var(--color-text)] resize-none placeholder:text-text-dimmer {plainText
 									? 'overflow-y-auto'
-									: 'overflow-hidden'} {composing || plainText
-									? 'text-text'
-									: 'text-transparent'}"
+									: 'overflow-hidden'}"
 								bind:value={() => referenceView.text, referenceEditor.input}
 								bind:element={textareaEl}
 								onbeforeinput={referenceEditor.beforeInput}
