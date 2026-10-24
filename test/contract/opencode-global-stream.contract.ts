@@ -18,11 +18,13 @@ import {
 	apiGet,
 	apiPost,
 	checkServerHealth,
-	connectSSE,
 	getPinnedVersion,
 	OPENCODE_BASE_URL,
 } from "./helpers/server-connection.js";
-import type { TestSession } from "./helpers/session-helpers.js";
+import {
+	startSSECollection,
+	type TestSession,
+} from "./helpers/session-helpers.js";
 
 interface Envelope {
 	directory?: string;
@@ -240,12 +242,16 @@ it("pins global directory routing, session demand and pending-list scope from th
 	}[] = [];
 	let passed = false;
 	let version: string | undefined;
-	const { controller, ready } = connectSSE("/global/event", ({ data }) => {
-		envelopes.push(JSON.parse(data) as Envelope);
+	let streamError: string | undefined;
+	const rest: Record<string, unknown> = {};
+	const stream = startSSECollection("/global/event", {
+		maxEvents: 10_000,
+		onEvent: (_event, wire) => envelopes.push(wire as Envelope),
 	});
 
 	try {
-		await ready;
+		await stream.ready;
+		expect(stream.evidence.stopReason).toBe("running");
 		await vi.waitFor(() => expect(envelopes.length).toBeGreaterThan(0));
 		const health = await checkServerHealth();
 		expect(health?.healthy).toBe(true);
@@ -417,48 +423,83 @@ it("pins global directory routing, session demand and pending-list scope from th
 			aliasStatusReads.push({ phase: "resolved", path, result });
 			expect(result).toEqual({});
 		}
-		controller.abort();
+		stream.stop();
+		await stream.done;
 		assertRouting(
 			envelopes,
 			new Map(sessions.map(({ id, directory }) => [id, directory])),
 		);
 		passed = true;
 	} finally {
-		controller.abort();
-		mkdirSync("test-results", { recursive: true });
-		writeFileSync(
-			"test-results/pa3r-1-opencode-global-stream.json",
-			JSON.stringify(
-				{
-					ticket: "conduit-test-pa3r.1",
-					capturedAt: new Date().toISOString(),
-					version,
-					passed,
-					directories,
-					directoryAlias,
-					aliasStatusReads,
-					sessions,
-					pendingLists,
-					retryObserved: envelopes.some(
-						({ payload }) =>
-							payload.type === "session.status" &&
-							(payload.properties?.["status"] as { type: string }).type ===
-								"retry",
-					),
-					envelopes,
-				},
-				null,
-				2,
-			),
-		);
-		for (const session of sessions) {
-			const query = `?directory=${encodeURIComponent(session.requestedDirectory)}`;
-			await apiPost(`/session/${session.id}/abort${query}`, {}).catch(() => {});
-			await apiDelete(`/session/${session.id}${query}`).catch(() => {});
+		stream.stop();
+		try {
+			await stream.done;
+		} catch (error) {
+			streamError = String(error).slice(0, 2048);
 		}
-		for (const directory of directories) {
-			rmSync(directory, { recursive: true, force: true });
+		try {
+			const diagnosticSignal = AbortSignal.timeout(5_000);
+			for (const session of sessions) {
+				const query = `?directory=${encodeURIComponent(session.directory)}`;
+				for (const path of [
+					`/session/${session.id}/message${query}`,
+					`/session/status${query}`,
+				]) {
+					try {
+						const body = JSON.stringify(await apiGet(path, diagnosticSignal));
+						rest[path] = {
+							body: body.slice(0, 262144),
+							truncated: body.length > 262144,
+						};
+					} catch (error) {
+						rest[`${path}:error`] = String(error).slice(0, 2048);
+					}
+				}
+			}
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/pa3r-1-opencode-global-stream.json",
+				JSON.stringify(
+					{
+						ticket: "conduit-test-pa3r.1",
+						capturedAt: new Date().toISOString(),
+						version,
+						passed,
+						directories,
+						directoryAlias,
+						aliasStatusReads,
+						sessions,
+						pendingLists,
+						collection: stream.evidence,
+						receivedAt: stream.events.map((event) => event.receivedAt),
+						streamError,
+						rest,
+						retryObserved: envelopes.some(
+							({ payload }) =>
+								payload.type === "session.status" &&
+								(payload.properties?.["status"] as { type: string }).type ===
+									"retry",
+						),
+						envelopes,
+					},
+					null,
+					2,
+				),
+			);
+		} finally {
+			for (const session of sessions) {
+				const query = `?directory=${encodeURIComponent(session.requestedDirectory)}`;
+				await apiPost(`/session/${session.id}/abort${query}`, {}).catch(
+					() => {},
+				);
+				await apiDelete(`/session/${session.id}${query}`).catch(() => {});
+			}
+			for (const directory of directories) {
+				rmSync(directory, { recursive: true, force: true });
+			}
+			if (aliasRoot) rmSync(aliasRoot, { recursive: true, force: true });
 		}
-		if (aliasRoot) rmSync(aliasRoot, { recursive: true, force: true });
 	}
+	if (streamError) throw new Error(streamError);
+	expect(Object.keys(rest).filter((key) => key.endsWith(":error"))).toEqual([]);
 }, 420_000);

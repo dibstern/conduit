@@ -100,71 +100,192 @@ export async function waitForIdle(
 	}
 }
 
-/**
- * Collect SSE events for a given duration or until a predicate is met.
- */
-export async function collectSSEEvents(
-	path: string,
-	opts: {
-		maxEvents?: number;
-		timeoutMs?: number;
-		until?: (event: {
-			type: string;
-			properties: Record<string, unknown>;
-		}) => boolean;
-	} = {},
-): Promise<Array<{ type: string; properties: Record<string, unknown> }>> {
-	const { maxEvents = 100, timeoutMs = 30_000, until } = opts;
-	const events: Array<{ type: string; properties: Record<string, unknown> }> =
-		[];
+export interface SSEEvent {
+	type: string;
+	properties: Record<string, unknown>;
+	receivedAt: number;
+}
 
+interface SSEOptions {
+	maxEvents?: number;
+	timeoutMs?: number;
+	until?: (event: SSEEvent) => boolean;
+	onEvent?: (event: SSEEvent, wire: unknown) => void;
+}
+
+/** Native subscription readiness means the first event has been parsed. */
+export function startSSECollection(path: string, opts: SSEOptions = {}) {
+	const { maxEvents = 100, timeoutMs, until, onEvent } = opts;
+	const events: SSEEvent[] = [];
+	const evidence: {
+		path: string;
+		startedAt: number;
+		readyAt?: number;
+		endedAt?: number;
+		httpStatus?: number;
+		stopReason:
+			| "running"
+			| "stopped"
+			| "predicate"
+			| "timeout"
+			| "limit"
+			| "eof"
+			| "error";
+		error?: string;
+		receivedBytes: number;
+		retainedBytes: number;
+		raw: { receivedAt: number; base64: string }[];
+	} = {
+		path,
+		startedAt: Date.now(),
+		stopReason: "running",
+		receivedBytes: 0,
+		retainedBytes: 0,
+		raw: [],
+	};
+	let resolveReady: () => void = () => {};
+	let rejectReady: (error: Error) => void = () => {};
+	const ready = new Promise<void>((resolve, reject) => {
+		resolveReady = resolve;
+		rejectReady = reject;
+	});
 	const controller = new AbortController();
-	const deadline = setTimeout(() => controller.abort(), timeoutMs);
-
-	try {
-		const res = await fetch(`${new URL(path, OPENCODE_BASE_URL).href}`, {
-			signal: controller.signal,
-			headers: { Accept: "text/event-stream", ...authHeaders() },
-		});
-
-		if (!res.ok || !res.body) return events;
-
-		const reader = res.body.getReader();
-		const decoder = new TextDecoder();
-		let buffer = "";
-
-		while (events.length < maxEvents) {
-			const { done, value } = await reader.read();
-			if (done) break;
-
-			buffer += decoder.decode(value, { stream: true });
-			const lines = buffer.split("\n");
-			buffer = lines.pop() ?? "";
-
-			for (const line of lines) {
-				if (line.startsWith("data: ")) {
-					try {
-						const parsed = JSON.parse(line.slice(6)) as {
-							type: string;
-							properties: Record<string, unknown>;
-						};
-						events.push(parsed);
-						if (until?.(parsed)) {
-							controller.abort();
-							return events;
-						}
-					} catch {
-						// Skip malformed data
+	const stop = () => {
+		if (evidence.stopReason === "running") evidence.stopReason = "stopped";
+		controller.abort();
+	};
+	const deadline =
+		timeoutMs === undefined
+			? undefined
+			: setTimeout(() => {
+					evidence.stopReason = "timeout";
+					controller.abort();
+				}, timeoutMs);
+	const done = (async () => {
+		let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+		try {
+			const res = await fetch(new URL(path, OPENCODE_BASE_URL), {
+				signal: controller.signal,
+				headers: { Accept: "text/event-stream", ...authHeaders() },
+			});
+			evidence.httpStatus = res.status;
+			if (
+				!res.ok ||
+				!res.body ||
+				!res.headers.get("content-type")?.includes("text/event-stream")
+			) {
+				throw new Error(
+					`SSE ${path} failed: ${res.status}, ${res.headers.get("content-type")}`,
+				);
+			}
+			reader = res.body.getReader();
+			const decoder = new TextDecoder();
+			let buffer = "";
+			while (events.length < maxEvents) {
+				const { done, value } = await reader.read();
+				if (done) {
+					if (buffer.trim()) throw new Error("Incomplete SSE data at EOF");
+					evidence.stopReason = "eof";
+					break;
+				}
+				const receivedAt = Date.now();
+				evidence.receivedBytes += value.byteLength;
+				const retained = value.subarray(
+					0,
+					Math.max(0, 1048576 - evidence.retainedBytes),
+				);
+				if (retained.length)
+					evidence.raw.push({
+						receivedAt,
+						base64: Buffer.from(retained).toString("base64"),
+					});
+				evidence.retainedBytes += retained.length;
+				if (evidence.receivedBytes > 16 * 1048576)
+					throw new Error("SSE byte limit exceeded");
+				buffer += decoder.decode(value, { stream: true });
+				if (Buffer.byteLength(buffer) > 1048576)
+					throw new Error("SSE frame limit exceeded");
+				const lines = buffer.split("\n");
+				buffer = lines.pop() ?? "";
+				for (const line of lines) {
+					if (!line.startsWith("data:")) continue;
+					const wire: unknown = JSON.parse(line.slice(5).trimStart());
+					if (typeof wire !== "object" || wire === null)
+						throw new Error("Invalid SSE object");
+					const record = wire as Record<string, unknown>;
+					const payload = (record["payload"] ?? record) as Record<
+						string,
+						unknown
+					>;
+					const properties = payload["properties"] ?? {};
+					if (
+						typeof payload["type"] !== "string" ||
+						typeof properties !== "object" ||
+						properties === null ||
+						Array.isArray(properties)
+					) {
+						throw new Error("Invalid native SSE event");
 					}
+					const event = {
+						type: payload["type"],
+						properties: properties as Record<string, unknown>,
+						receivedAt,
+					};
+					events.push(event);
+					onEvent?.(event, wire);
+					if (evidence.readyAt === undefined) {
+						evidence.readyAt = receivedAt;
+						resolveReady();
+					}
+					if (until?.(event)) {
+						evidence.stopReason = "predicate";
+						return events;
+					}
+					if (events.length >= maxEvents) break;
 				}
 			}
+			if (events.length >= maxEvents) evidence.stopReason = "limit";
+			return events;
+		} catch (error) {
+			if (
+				!controller.signal.aborted ||
+				(evidence.stopReason !== "stopped" && evidence.stopReason !== "timeout")
+			) {
+				evidence.stopReason = "error";
+				evidence.error = String(error).slice(0, 2048);
+				throw error;
+			}
+			return events;
+		} finally {
+			clearTimeout(deadline);
+			controller.abort();
+			reader?.releaseLock();
+			evidence.endedAt = Date.now();
+			if (evidence.readyAt === undefined)
+				rejectReady(
+					new Error(
+						evidence.error ??
+							`SSE ended before readiness: ${evidence.stopReason}`,
+					),
+				);
 		}
-	} catch {
-		// AbortError expected
-	} finally {
-		clearTimeout(deadline);
-		controller.abort();
-	}
+	})();
+	// The owner awaits the original promises. These handlers only prevent an
+	// early pump failure becoming unhandled while its prompt is still pending.
+	void ready.catch(() => {});
+	void done.catch(() => {});
+	return { events, evidence, ready, done, stop };
+}
 
-	return events;
+/** Preserve the existing Promise-of-events API and its default deadline. */
+export async function collectSSEEvents(
+	path: string,
+	opts: SSEOptions = {},
+): Promise<SSEEvent[]> {
+	const collection = startSSECollection(path, {
+		...opts,
+		timeoutMs: opts.timeoutMs ?? 30_000,
+	});
+	await collection.ready;
+	return collection.done;
 }
