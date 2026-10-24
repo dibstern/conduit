@@ -282,7 +282,11 @@ test.describe("phone session island", () => {
 			)
 			.toBe(true);
 		await addProbeMessages(page);
-		await page.locator("#messages").evaluate((scroller) => {
+		await page.locator("#messages").evaluate(async (scroller) => {
+			// Let the controller forget its own scrolls before this simulated reader move.
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
 			scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight - 300;
 		});
 		await expect(page.locator("#scroll-btn")).toBeVisible();
