@@ -46,7 +46,7 @@
 		/** Steer on queued rows: hidden when undefined; Steer and Run now are disabled while a prompt is open. */
 		steer?: "ready" | "prompt_open" | undefined;
 		/** Takes back a queued input that Edit removed. */
-		onEdit: (text: string, images: readonly string[]) => void;
+		onEdit: (text: string) => void;
 		/** The server refused to steer a row, which stays queued. */
 		onSteerRefused: (reason: SteerBlocker) => void;
 	} = $props();
@@ -61,12 +61,13 @@
 		tag: "input.cancel" | "input.sendNow",
 		input: PendingInput,
 		interrupt = false,
+		restore = false,
 	): Promise<boolean> {
 		if (!queueSessionId) return false;
 		try {
 			const payload = { sessionId: queueSessionId, inputId: input.inputId };
 			const response = await (tag === "input.cancel"
-				? rpc("input.cancel", payload)
+				? rpc("input.cancel", { ...payload, ...(restore ? { restoreTo: { session: queueSessionId } } : {}) })
 				: rpc("input.sendNow", {
 						...payload,
 						...(interrupt ? { interrupt: true } : {}),
@@ -82,8 +83,8 @@
 	}
 
 	async function edit(input: PendingInput) {
-		if (await act("input.cancel", input))
-			onEdit(extractDisplayText(input.request.text), input.request.images ?? []);
+		if (await act("input.cancel", input, false, true))
+			onEdit(extractDisplayText(input.request.text));
 	}
 </script>
 
@@ -105,7 +106,7 @@
 		<ol aria-label="Queued messages" class="flex flex-col gap-[2px]">
 			{#each inputs as input, index (input.inputId)}
 				{@const images = input.request.images?.length ?? 0}
-				{@const hasFiles = input.request.images?.some((url) => !url.startsWith("data:image/")) ?? false}
+				{@const hasFiles = input.request.images?.some((ref) => !ref.mime.startsWith("image/")) ?? false}
 				{@const command = input.request.text.trimStart().startsWith("/")}
 				<ComposerQueueRow id={`${trayId}-row-${index}`} data-testid="pending-input-row" data-input-id={input.inputId}>
 					{#snippet badge()}

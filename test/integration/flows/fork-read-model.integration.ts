@@ -203,7 +203,7 @@ function turn(sessionId: string, n: number, finished = true): CanonicalEvent[] {
 							partId: `${reply}-file`,
 							mime: "text/plain",
 							filename: "example.txt",
-							url: "file:///tmp/example.txt",
+							source: { url: "file:///tmp/example.txt" },
 						},
 						10,
 					),

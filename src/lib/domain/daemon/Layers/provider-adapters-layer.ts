@@ -268,6 +268,7 @@ export const makeProviderAdaptersLive = (
 						project
 							? makeClaudeThreadRead.pipe(
 									Effect.provide(project.context),
+									Effect.provide(store),
 									Effect.flatMap((read) => read(sessionId, input)),
 								)
 							: Effect.succeed<ClaudeThreadReadResult>({

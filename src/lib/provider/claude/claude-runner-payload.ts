@@ -74,7 +74,7 @@ import type {
 	ProviderCall,
 	ProviderCapabilities,
 	ProviderNativeSession,
-	SendTurnInput,
+	ResolvedSendTurnInput,
 	TurnResult,
 } from "../types.js";
 import { claudeApiModelId } from "./claude-api-model-id.js";
@@ -694,7 +694,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	 * continuation places nothing: it resumes the cut-off message's turn.
 	 */
 	private placeUserMessageEffect(
-		input: SendTurnInput,
+		input: ResolvedSendTurnInput,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		const sinkId = this.sinks.sinkId(input.eventSink);
 		if (!sinkId || input.continuation) return Effect.void;
@@ -706,7 +706,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				inputId: input.inputId,
 				...(input.runId ? { runId: input.runId } : {}),
 				text: input.text ?? input.prompt,
-				...(input.images ? { images: input.images } : {}),
+				...(input.images ? { images: input.images.map(({ ref }) => ref) } : {}),
 			},
 		}).pipe(
 			Effect.asVoid,
@@ -1772,14 +1772,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 	private hasAgentChanged(
 		ctx: ClaudeSessionContext,
-		input: SendTurnInput,
+		input: ResolvedSendTurnInput,
 	): boolean {
 		return input.agent !== ctx.currentAgent;
 	}
 
 	private agentSwitchDuringActiveTurnError(
 		ctx: ClaudeSessionContext,
-		input: SendTurnInput,
+		input: ResolvedSendTurnInput,
 	): ClaudeRuntimeError {
 		return new ClaudeRuntimeError({
 			code: "provider_error",
@@ -2084,10 +2084,13 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					ctx.turnInFlight = true;
 					this.deps.onTurnStateChanged?.(ctx.sessionId, true);
 				}
-				let unacceptedResultInputs: SendTurnInput[] = [];
+				let unacceptedResultInputs: ResolvedSendTurnInput[] = [];
 				let terminalRunIds: string[] = [];
 				let resultInput:
-					| (Pick<SendTurnInput, "inputId" | "runId" | "continuation"> & {
+					| (Pick<
+							ResolvedSendTurnInput,
+							"inputId" | "runId" | "continuation"
+					  > & {
 							readonly eventSink: ClaudeSessionContext["eventSink"];
 					  })
 					| undefined;
@@ -2101,7 +2104,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					)
 						.map((id) => pending.get(id)?.unplaced)
 						.filter(
-							(input): input is SendTurnInput => input?.runId !== undefined,
+							(input): input is ResolvedSendTurnInput =>
+								input?.runId !== undefined,
 						);
 					ctx.turnCount++;
 					const inputIds = message.user_message_uuids ?? [

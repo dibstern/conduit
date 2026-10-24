@@ -16,6 +16,7 @@ import {
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
+import type { AttachmentRef } from "../../../contracts/attachment-ref.js";
 import type { InputDelivery } from "../../../contracts/stored-event.js";
 import type {
 	ClaudeEventPersistEffectTag,
@@ -63,6 +64,7 @@ import type { SessionTitleServiceTag } from "./session-title-service.js";
 import type { SessionWorkspaceTag } from "./session-workspace.js";
 
 export interface ProviderTurnServiceSendInput {
+	readonly draftChange?: import("./input-drafts.js").DraftChange;
 	/** Continuation admission may already have resolved this immutable snapshot. */
 	readonly account?: Account;
 	readonly clientId: string;
@@ -71,7 +73,7 @@ export interface ProviderTurnServiceSendInput {
 	readonly text: string;
 	/** Hidden resumption of the original request, with no new user message. */
 	readonly continuation?: { readonly cutOffMessageId: string };
-	readonly images?: readonly string[];
+	readonly images?: readonly AttachmentRef[];
 	readonly model?: {
 		readonly providerID: string;
 		readonly modelID: string;

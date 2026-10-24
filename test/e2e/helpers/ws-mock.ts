@@ -247,6 +247,8 @@ export class WsMockControl {
 
 	/** Update RPC projection state, with or without a connected client. */
 	sendMessage(msg: MockMessage): void {
+		if (msg.type === "mock_pending_input" && typeof msg["inputId"] === "string")
+			this.rpcControl.rememberQueuedAttachments(msg["inputId"], msg["images"]);
 		if (
 			msg.type === "mock_transcript_snapshot" ||
 			msg.type === "mock_pending_input" ||

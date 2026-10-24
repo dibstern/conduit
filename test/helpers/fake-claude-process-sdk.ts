@@ -63,6 +63,11 @@ function injectedResetAt(configDir: string | undefined): number | undefined {
 }
 
 export type ProcessMark =
+	| {
+			kind: "input-content";
+			inputId: string | undefined;
+			content: SDKUserMessage["message"]["content"];
+	  }
 	| { kind: "pre-warm-joined"; sessionId: string }
 	| {
 			kind: "native-fork";
@@ -923,6 +928,11 @@ function query(params: {
 			const at = process.hrtime.bigint().toString();
 			if (closed) return;
 			const content = input.message.content;
+			if (
+				Array.isArray(content) &&
+				content.some((block) => block.type === "image")
+			)
+				mark({ kind: "input-content", inputId: input.uuid, content });
 			const prompt =
 				typeof content === "string"
 					? content

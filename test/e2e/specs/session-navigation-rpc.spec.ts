@@ -43,6 +43,7 @@ async function setup(
 				return [
 					{
 						_tag: "synchronized",
+						attachments: [],
 						...(session && {
 							text: session === seed ? "Seed draft" : `Draft for ${session}`,
 						}),
@@ -853,7 +854,7 @@ test("a draft's first send shows working before its session row arrives", async 
 			}),
 		SubscribeInputDraft: () =>
 			Stream.concat(
-				Stream.make({ _tag: "synchronized", text: "" }),
+				Stream.make({ _tag: "synchronized", text: "", attachments: [] }),
 				Stream.never,
 			),
 	});
@@ -1158,7 +1159,7 @@ test("a draft's first send places the session before any navigation frame", asyn
 });
 
 for (const changed of ["unchanged", "text", "images"] as const) {
-	test(`a side-thread start follows the parent and ${changed === "unchanged" ? "clears the unchanged composer" : changed === "text" ? "keeps edited text in the composer" : "keeps the prompt after attachment edits"} on Back`, async ({
+	test(`a side-thread start follows the parent and ${changed === "unchanged" ? "clears the unchanged composer" : changed === "text" ? "keeps edited text in the composer" : "keeps newer attachments after clearing sent text"} on Back`, async ({
 		page,
 		harness,
 	}) => {
@@ -1169,9 +1170,14 @@ for (const changed of ["unchanged", "text", "images"] as const) {
 					started = resolve;
 				}),
 			ViewSession: () => ({ ok: true }),
-			// No stored draft; the mock does not persist the parent's cleared draft.
-			SubscribeInputDraft: () =>
-				Stream.concat(Stream.make({ _tag: "synchronized" }), Stream.never),
+			// The client clears sent text; attachment snapshots survive navigation.
+			SubscribeInputDraft: ({ key }) =>
+				Stream.concat(
+					Stream.fromIterable(rpc.initialInputDraftFrames(key)).pipe(
+						Stream.map((snapshot) => ({ ...snapshot, text: undefined })),
+					),
+					Stream.never,
+				),
 		});
 		await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
 		await expect(page.locator("#input")).toBeVisible();
@@ -1186,6 +1192,9 @@ for (const changed of ["unchanged", "text", "images"] as const) {
 			title: "What changed?",
 			inputId: expect.any(String),
 			text: "What changed?",
+			draftKey: { session: seed },
+			draftText: "$btw What changed?",
+			attachmentIds: [],
 			originId: expect.any(String),
 		});
 		expect(
@@ -1208,22 +1217,26 @@ for (const changed of ["unchanged", "text", "images"] as const) {
 			await expect(
 				page.locator('#image-preview img[alt="kept.png"]'),
 			).toBeVisible();
+			await expect(
+				page.locator('#image-preview img[alt="kept.png"]'),
+			).toHaveAttribute("src", /^\/p\/e2e-replay\/attachments\/[a-f0-9]{64}$/);
 		}
 		started({ sessionId: forked });
 		await expect(page).toHaveURL(new RegExp(`/s/${forked}$`));
 		await expect(page.locator("#input")).toHaveValue("");
-		// Attachments are cleared on scope changes, including opening a Side Thread.
+		// The Side Thread has its own Draft.
 		await expect(page.locator("#image-preview")).toBeHidden();
 		await expect(page.locator("#stop")).toBeHidden();
 		await page.goBack();
 		await expect(page).toHaveURL(new RegExp(`/s/${seed}$`));
 		await expect(page.locator("#input")).toHaveValue(
-			changed === "text"
-				? "Keep this edited parent prompt"
-				: changed === "images"
-					? "$btw What changed?"
-					: "",
+			changed === "text" ? "Keep this edited parent prompt" : "",
 		);
+		if (changed === "images")
+			await expect(
+				page.locator('#image-preview img[alt="kept.png"]'),
+			).toBeVisible();
+		else await expect(page.locator("#image-preview")).toBeHidden();
 	});
 }
 
@@ -1310,6 +1323,8 @@ test("a side-thread prepared after opening another session still belongs to its 
 	expect(request.payload).toMatchObject({
 		sessionId: seed,
 		title: "Explain @notes.md",
+		draftKey: { session: seed },
+		draftText: "$btw Explain @notes.md",
 	});
 	expect(request.payload["text"]).toContain("Reference content for the parent");
 	started({ sessionId: forked });
@@ -1608,7 +1623,11 @@ test("New session pushes from a session and replaces an existing draft entry", a
 	);
 	await page.locator("#new-session-btn").click();
 	await expect(page).toHaveURL(
-		`${harness.relayBaseUrl}${draftPath}?keep=draft-history&project=${projectSlug}`,
+		new RegExp(`/draft/[^/?]+\\?keep=draft-history&project=${projectSlug}`),
+	);
+	expect(new URL(page.url()).pathname).not.toBe(draftPath);
+	await expect(page.getByTestId("draft-project-chip")).toContainText(
+		projectSlug,
 	);
 	await page.goBack();
 	await expect(page).toHaveURL(

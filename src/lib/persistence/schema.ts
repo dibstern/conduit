@@ -118,6 +118,8 @@ export const PROVIDER_CONTROL_PROCESS_MIGRATION =
 	"0078_provider_control_process.sql";
 export const SESSION_GIT_PUBLICATION_MIGRATION =
 	"0079_session_git_publication.sql";
+export const ATTACHMENT_STORE_MIGRATION = "0080_attachment_store.sql";
+export const SESSION_DRAFT_DELETE_MIGRATION = "0081_session_draft_delete.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

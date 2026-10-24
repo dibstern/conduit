@@ -73,7 +73,7 @@ afterEach(() => {
 });
 
 describe("input draft follower", () => {
-	it("ignores draft echoes from this browser tab", () => {
+	it("acknowledges own attachment echoes without replacing local text", () => {
 		const before = {
 			_tag: "ServerTextReceived" as const,
 			key: { session: "s1" },
@@ -84,19 +84,24 @@ describe("input draft follower", () => {
 		applyInputDraft(
 			{
 				_tag: "draft",
+				attachments: [],
 				text: "self echo",
 				from: getBrowserClientId(),
 			},
 			{ session: "s1" },
 		);
 
-		expect(inputSyncState.received).toEqual(before);
+		expect(inputSyncState.received).toEqual({
+			_tag: "ServerTextReceived",
+			key: { session: "s1" },
+		});
 	});
 
 	it("applies drafts from another browser tab", () => {
 		applyInputDraft(
 			{
 				_tag: "draft",
+				attachments: [],
 				text: "other tab draft",
 				from: "browser-tab-b",
 			},
@@ -114,6 +119,7 @@ describe("input draft follower", () => {
 		applyInputDraft(
 			{
 				_tag: "draft",
+				attachments: [],
 				text: "refused message\n\nsynced draft",
 				restored: "refused message",
 			},

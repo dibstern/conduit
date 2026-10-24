@@ -73,6 +73,7 @@ import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import type { DraftChange } from "./input-drafts.js";
 import { InputDraftsLive, InputDraftsTag } from "./input-drafts.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
@@ -189,6 +190,7 @@ export interface CreateSessionOptions {
 	readonly directory?: string;
 	/** Reserved locally before a draft creates its workspace. */
 	readonly sessionId?: string;
+	readonly draftChange?: (sessionId: string) => DraftChange;
 }
 
 export interface HistoryPage {
@@ -291,6 +293,7 @@ const createLocalSession = (
 	reservedSessionId: string | undefined,
 	pick: TurnSettings,
 	permissionMode: SessionPermissionMode,
+	draftChange?: CreateSessionOptions["draftChange"],
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
@@ -308,7 +311,11 @@ const createLocalSession = (
 				type: "session.created",
 				data: { sessionId, title: sessionTitle, provider, permissionMode },
 			},
-			{ pick, upstreamAdapter: null },
+			{
+				pick,
+				upstreamAdapter: null,
+				...(draftChange ? { draftChange: draftChange(sessionId) } : {}),
+			},
 		).pipe(
 			Effect.mapError(
 				(cause) =>
@@ -877,6 +884,7 @@ const makeServiceCreateSession = ({
 							options?.sessionId,
 							pick,
 							permissionMode,
+							options?.draftChange,
 						);
 					if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
 						const config = yield* ConfigTag;
@@ -892,6 +900,7 @@ const makeServiceCreateSession = ({
 							options?.sessionId,
 							permissionMode,
 							directory,
+							options?.draftChange,
 						).pipe(Effect.provideService(OpenCodeAPITag, instanceApi));
 					}
 					return yield* new SessionManagerError({

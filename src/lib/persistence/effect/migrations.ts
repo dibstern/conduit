@@ -3,6 +3,7 @@ import { SqlClient } from "effect/sql";
 import * as Migrator from "effect/sql/Migrator";
 import type { SqlError } from "effect/sql/SqlError";
 import {
+	ATTACHMENT_STORE_MIGRATION,
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	COMPACT_REDUNDANT_EVENTS_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
@@ -46,6 +47,7 @@ import {
 	SENT_ALERTS_MIGRATION,
 	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
+	SESSION_DRAFT_DELETE_MIGRATION,
 	SESSION_GIT_PUBLICATION_MIGRATION,
 	SESSION_GIT_PUBLISHED_MIGRATION,
 	SESSION_GOALS_MIGRATION,
@@ -1549,6 +1551,12 @@ export const effectMigrationEntries = {
 				);
 		}
 	}),
+	"0083_attachment_store": executeSqlStatements(
+		readMigrationSql(ATTACHMENT_STORE_MIGRATION),
+	),
+	"0084_session_draft_delete": executeSqlStatements(
+		readMigrationSql(SESSION_DRAFT_DELETE_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

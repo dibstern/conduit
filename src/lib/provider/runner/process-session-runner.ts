@@ -19,6 +19,7 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../contracts/account.js";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import {
 	AccountSwitchBusy,
 	accountSwitchBusyMessage,
@@ -78,6 +79,7 @@ import { failRunnerTurn, observeRunnerTurn } from "./runner-turn-failure.js";
 import { makeRunnerUpgrade, type RunnerUpgrade } from "./runner-upgrade.js";
 import { makeSendAdmissionWait } from "./send-admission.js";
 import type {
+	DurableSessionTurn,
 	SessionCommand,
 	SessionFailure,
 	SessionOutput,
@@ -190,7 +192,7 @@ export interface ProcessRunnerDriver {
 		) => string,
 		replayTurn: (
 			accountId: string,
-			input: SessionTurn,
+			input: Pick<SessionTurn, "sessionId" | "inputId" | "account">,
 			sinkId: string,
 			work: (
 				dispatch: (
@@ -209,9 +211,7 @@ export interface ProcessRunnerDriver {
 		) => Effect.Effect<TurnResult | undefined, SessionFailure>,
 	) => Effect.Effect<
 		Effect.Success<
-			ReturnType<
-				typeof recoverRunnerCommands<import("./session-runner.js").SessionTurn>
-			>
+			ReturnType<typeof recoverRunnerCommands<DurableSessionTurn>>
 		>,
 		unknown,
 		PersistenceProjectTag
@@ -540,7 +540,7 @@ export const makeProcessSessionRunner = (
 				placement?: {
 					inputId: string;
 					text: string;
-					images?: readonly string[];
+					images?: readonly AttachmentRef[];
 				};
 				messageId: string;
 				pending: boolean;
@@ -2671,8 +2671,13 @@ export const makeProcessSessionRunner = (
 				});
 			}
 
-			withTurnEffect<A, E, R>(
-				input: SessionTurn,
+			withTurnEffect<
+				A,
+				E,
+				R,
+				T extends Pick<SessionTurn, "sessionId" | "inputId" | "account">,
+			>(
+				input: T,
 				sinkId: string,
 				work: Effect.Effect<A, E, R>,
 				accountId: string | undefined = input.account?.id,
@@ -2762,7 +2767,11 @@ export const makeProcessSessionRunner = (
 												inputId: command.input.inputId,
 												text: command.input.text ?? command.input.prompt,
 												...(command.input.images
-													? { images: command.input.images }
+													? {
+															images: command.input.images.map(
+																({ ref }) => ref,
+															),
+														}
 													: {}),
 											},
 										}),

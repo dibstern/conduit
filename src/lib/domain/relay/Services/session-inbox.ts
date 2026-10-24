@@ -36,6 +36,10 @@ import {
 	type SteerBlocker,
 } from "../../../contracts/stored-event.js";
 import {
+	DraftAttachmentMissing,
+	type InputDraftKey,
+} from "../../../contracts/ws-rpc.js";
+import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../../persistence/effect/claude-event-persist-effect.js";
@@ -50,6 +54,7 @@ import { assertSessionRunnerAvailable } from "../../../provider/runner/runner-pr
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import { type Continuation, ContinuationTag } from "./continuation.js";
+import { type DraftChange, InputDraftsTag } from "./input-drafts.js";
 import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
@@ -342,11 +347,17 @@ export interface SessionInboxSubmitInput {
 	readonly inputId: string;
 	readonly delivery: InputDelivery;
 	readonly request: InputRequest;
+	readonly draft?: {
+		readonly key: InputDraftKey;
+		readonly text?: string;
+		readonly attachmentIds: readonly string[];
+	};
 }
 
 type SendTurnError = Effect.Error<ReturnType<ProviderTurnService["sendTurn"]>>;
 
 export type SessionInboxError =
+	| DraftAttachmentMissing
 	| SqlError
 	| ProviderInstanceFailure
 	| AccountSwitchBusy
@@ -378,7 +389,7 @@ export interface SessionInbox {
 	>;
 	/** Remove a queued input before it is sent. */
 	readonly cancel: (
-		target: SessionInboxTarget,
+		target: SessionInboxTarget & { readonly restoreTo?: InputDraftKey },
 	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
 	/** Hand a queued input off now: a steer on a busy session, else the next
 	 *  turn. With interrupt, stop the running turn and send this input next. */
@@ -414,6 +425,7 @@ export const SessionInboxLive = Layer.effect(
 		const eventStore = yield* EventStoreEffectTag;
 		const read = yield* ReadQueryEffectTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
+		const drafts = yield* InputDraftsTag;
 		const providerTurnService = yield* ProviderTurnServiceTag;
 		const registry = Option.getOrUndefined(
 			yield* Effect.serviceOption(ProviderRegistryTag),
@@ -608,6 +620,7 @@ export const SessionInboxLive = Layer.effect(
 			sessionId: string,
 			decision: InboxDecision,
 			delivery: Pick<SessionInboxSubmitInput, "clientId">,
+			draftChange?: DraftChange,
 		) =>
 			Effect.gen(function* () {
 				if (decision._tag === "Rejected") return;
@@ -623,7 +636,18 @@ export const SessionInboxLive = Layer.effect(
 						stopIssued.delete(event.data.inputId);
 				const { handoff } = decision;
 				if (!handoff) {
-					if (events.length > 0) yield* persist.persistEvents(events);
+					if (events.length > 0)
+						yield* persist
+							.persistEvents(events, draftChange ? { draftChange } : undefined)
+							.pipe(
+								Effect.catchTag("ClaudeEventPersistEffectError", (error) =>
+									Effect.fail(
+										error.cause instanceof DraftAttachmentMissing
+											? error.cause
+											: error,
+									),
+								),
+							);
 					const reserved = decision.events.find(
 						(event) => event.type === "input.interrupt_requested",
 					);
@@ -658,6 +682,7 @@ export const SessionInboxLive = Layer.effect(
 							events.find((event) => event.type === "input.sent")?.eventId,
 						),
 						events,
+						...(draftChange ? { draftChange } : {}),
 					})
 					.pipe(Effect.provideService(OverridesStateTag, overrides));
 				// An unplaced failed handoff remains queued. Record it once so it
@@ -683,7 +708,12 @@ export const SessionInboxLive = Layer.effect(
 		const runNowInFlight = new Set<string>();
 		const act =
 			(command: "Cancel" | "SendNow") =>
-			(target: SessionInboxTarget & { readonly interrupt?: boolean }) =>
+			(
+				target: SessionInboxTarget & {
+					readonly interrupt?: boolean;
+					readonly restoreTo?: InputDraftKey;
+				},
+			) =>
 				Effect.gen(function* () {
 					const runNow = command === "SendNow" && target.interrupt;
 					if (runNow && runNowInFlight.has(target.inputId))
@@ -717,6 +747,17 @@ export const SessionInboxLive = Layer.effect(
 									decision.handoff.inputId !== target.inputId
 									? DRAINED
 									: target,
+								command === "Cancel" &&
+									target.restoreTo &&
+									decision._tag === "Accepted"
+									? drafts.restoreChange(
+											target.restoreTo,
+											target.inputId,
+											view.queued.find(
+												(item) => item.inputId === target.inputId,
+											)?.request.images ?? [],
+										)
+									: undefined,
 							);
 							return decision;
 						}),
@@ -839,8 +880,9 @@ export const SessionInboxLive = Layer.effect(
 			submit: (input) =>
 				serialised(input.sessionId)(
 					Effect.gen(function* () {
-						// Busy and approval-blocked inputs may never reach runner execution.
 						const view = yield* readView(input.sessionId, input.inputId);
+						if (view.known) return { _tag: "Accepted" as const, events: [] };
+						// Busy and approval-blocked inputs may never reach runner execution.
 						const account = view.provider
 							? yield* accounts
 									.resolve({ _tag: "Id", id: view.provider })
@@ -851,17 +893,54 @@ export const SessionInboxLive = Layer.effect(
 							registry,
 							Option.getOrUndefined(account),
 						);
+						const refs = input.draft
+							? yield* drafts.takeForSend(
+									input.draft.key,
+									input.draft.attachmentIds,
+								)
+							: [];
+						const request =
+							refs.length > 0
+								? {
+										...input.request,
+										images: [...(input.request.images ?? []), ...refs],
+									}
+								: input.request;
 						const decision = decideInbox(input.sessionId, view, {
 							_tag: "Submit",
 							inputId: input.inputId,
 							delivery: input.delivery,
-							request: input.request,
+							request,
 						});
 						// Submit is only refused as a steer: a known id is accepted.
 						if (decision._tag === "Rejected") return decision;
+						const draftChange = input.draft
+							? drafts.sendChange(
+									input.draft.key,
+									input.sessionId,
+									input.draft.text ?? request.text,
+									input.draft.attachmentIds,
+									refs,
+								)
+							: undefined;
+						const delayMs =
+							process.env["NODE_ENV"] === "test"
+								? Number(
+										process.env["CONDUIT_TEST_DRAFT_SEND_BEFORE_COMMIT_MS"],
+									)
+								: 0;
+						if (draftChange && Number.isFinite(delayMs) && delayMs > 0) {
+							log.info(`draft-send-before-commit:${input.inputId}`);
+							yield* Effect.sleep(delayMs);
+						}
 						// A queued input handed off ahead of this one has no requesting client.
 						const own = decision.handoff?.inputId === input.inputId;
-						yield* commit(input.sessionId, decision, own ? input : DRAINED);
+						yield* commit(
+							input.sessionId,
+							decision,
+							own ? input : DRAINED,
+							draftChange,
+						);
 						if (
 							!decision.handoff &&
 							decision.events.length > 0 &&

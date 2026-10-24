@@ -11,6 +11,7 @@ import {
 import { SqlClient } from "effect/sql";
 import type { AccountsState } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import {
 	bindTurnTimelineSink,
@@ -51,7 +52,7 @@ import type {
 	ProviderControlContext,
 	ProviderInstance,
 	ProviderNativeSession,
-	SendTurnInput,
+	ResolvedSendTurnInput,
 	TurnResult,
 } from "../types.js";
 import { makeRecoveredEventSink } from "./runner-event-sink.js";
@@ -568,7 +569,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 	}
 
 	sendTurnEffect(
-		input: SendTurnInput,
+		input: ResolvedSendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		return input.account
 			? this.withAccountResources(
@@ -659,7 +660,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 	}
 
 	private sendTurnUnscopedEffect(
-		input: SendTurnInput,
+		input: ResolvedSendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		const {
 			eventSink,
@@ -724,7 +725,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		readonly inputId: string;
 		readonly text: string;
 		readonly runId?: string;
-		readonly images?: readonly string[];
+		readonly images?: readonly AttachmentRef[];
 	}): Effect.Effect<void, ClaudeEventPersistFailure> {
 		return Effect.gen({ self: this }, function* () {
 			const persist = yield* Effect.serviceOption(ClaudeEventPersistEffectTag);

@@ -27,6 +27,7 @@ import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/ope
 import { SessionWorkspaceLive } from "../../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
+import { InputDraftsLive } from "../../../../src/lib/domain/relay/Services/input-drafts.js";
 import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -66,6 +67,7 @@ import {
 import type { SessionTitleService } from "../../../../src/lib/domain/relay/Services/session-title-service.js";
 import { SessionTitleServiceTag } from "../../../../src/lib/domain/relay/Services/session-title-service.js";
 import type { OpenCodeAPI } from "../../../../src/lib/instance/opencode-api.js";
+import { makeAttachmentStore } from "../../../../src/lib/persistence/attachment-store.js";
 import {
 	type ClaudeEventPersistEffect,
 	ClaudeEventPersistEffectTag,
@@ -110,7 +112,7 @@ import { settleSessionRuns } from "../../../../src/lib/provider/session-run-sett
 import type {
 	EventSink,
 	ProviderInstance,
-	SendTurnInput,
+	ResolvedSendTurnInput,
 	TurnResult,
 } from "../../../../src/lib/provider/types.js";
 import {
@@ -574,8 +576,8 @@ describe("ProviderTurnService", () => {
 							}),
 						]);
 						yield* sql`UPDATE sessions SET model_provider = 'claude', model_id = 'claude-sonnet-4-5', variant = '', context_window = '' WHERE id = 'session-1'`;
-						const running = yield* Deferred.make<SendTurnInput>();
-						const steering = yield* Deferred.make<SendTurnInput>();
+						const running = yield* Deferred.make<ResolvedSendTurnInput>();
+						const steering = yield* Deferred.make<ResolvedSendTurnInput>();
 						const release = yield* Deferred.make<void>();
 						const ended = yield* Deferred.make<void>();
 						let ownerRunId: string | undefined;
@@ -834,7 +836,12 @@ describe("ProviderTurnService", () => {
 					yield* sql`SELECT input_id, state FROM pending_inputs WHERE state = 'queued'`,
 				).toEqual([{ input_id: "queued-b", state: "queued" }]);
 			}).pipe(
-				Effect.provide(SessionInboxLive.pipe(Layer.provideMerge(dependencies))),
+				Effect.provide(
+					SessionInboxLive.pipe(
+						Layer.provide(InputDraftsLive),
+						Layer.provideMerge(dependencies),
+					),
+				),
 			);
 		},
 	);
@@ -1110,7 +1117,10 @@ describe("ProviderTurnService", () => {
 					).toEqual([]);
 				}).pipe(
 					Effect.provide(
-						SessionInboxLive.pipe(Layer.provideMerge(dependencies)),
+						SessionInboxLive.pipe(
+							Layer.provide(InputDraftsLive),
+							Layer.provideMerge(dependencies),
+						),
 					),
 				);
 			},
@@ -1801,7 +1811,10 @@ describe("ProviderTurnService", () => {
 					expect(dispatchEffect).toHaveBeenCalledTimes(3);
 				}).pipe(
 					Effect.provide(
-						SessionInboxLive.pipe(Layer.provideMerge(dependencies)),
+						SessionInboxLive.pipe(
+							Layer.provide(InputDraftsLive),
+							Layer.provideMerge(dependencies),
+						),
 					),
 				);
 			},
@@ -2523,7 +2536,7 @@ describe("ProviderTurnService", () => {
 		() => {
 			// A submitted RPC failure cannot prove that OpenCode rejected the input.
 			// Keep attachments in its command until a native echo establishes placement.
-			const images = [
+			const imageUrls = [
 				"data:text/plain;name=notes.txt;base64,Y2Fmw6k=",
 				"data:application/pdf;name=guide.pdf;base64,JVBERi0xLjQ=",
 			];
@@ -2538,8 +2551,7 @@ describe("ProviderTurnService", () => {
 					clientForAccount: () => Effect.succeed(api),
 				}),
 			);
-			const inlineEngine = new OrchestrationEngine({ registry });
-			inlineEngine.bindSession("session-1", "opencode");
+			let inlineEngine: OrchestrationEngine;
 			const dispatchEffect = vi.fn((command: SendTurnCommand) =>
 				inlineEngine.dispatchEffect({
 					...command,
@@ -2550,6 +2562,10 @@ describe("ProviderTurnService", () => {
 			const persist = makePersistService(vi.fn(() => Effect.void));
 			const { layer, ingestion } = serviceLayer({ engine, api, persist });
 			return Effect.gen(function* () {
+				const attachmentStore = yield* makeAttachmentStore;
+				const images = yield* Effect.forEach(imageUrls, attachmentStore.put);
+				inlineEngine = new OrchestrationEngine({ registry, attachmentStore });
+				inlineEngine.bindSession("session-1", "opencode");
 				yield* sendTurn({
 					commandId: "cmd-error",
 					text: "",

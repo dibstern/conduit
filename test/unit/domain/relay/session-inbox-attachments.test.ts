@@ -5,6 +5,7 @@ import { Effect, Layer, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
+import { AttachmentStoreTag } from "../../../../src/lib/domain/persistence/Services/attachment-store.js";
 import { ContinuationTag } from "../../../../src/lib/domain/relay/Services/continuation.js";
 import { ProviderTurnServiceTag } from "../../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { SessionEventBusTag } from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
@@ -67,6 +68,8 @@ it("retains files in history when queued dispatch cannot place the input and pau
 				const inbox = yield* SessionInboxTag;
 				const read = yield* ReadQueryEffectTag;
 				const sql = yield* SqlClient.SqlClient;
+				const store = yield* AttachmentStoreTag;
+				const refs = yield* Effect.forEach(images, (image) => store.put(image));
 				yield* commit([
 					canonicalEvent("session.created", "session", {
 						sessionId: "session",
@@ -79,7 +82,9 @@ it("retains files in history when queued dispatch cannot place the input and pau
 							inputId,
 							delivery: "queue",
 							request:
-								inputId === "files" ? { text: "", images } : { text: "wait" },
+								inputId === "files"
+									? { text: "", images: refs }
+									: { text: "wait" },
 						}),
 					),
 				]);
@@ -95,14 +100,14 @@ it("retains files in history when queued dispatch cannot place the input and pau
 				const users = history.messages.filter(({ role }) => role === "user");
 				expect(users).toHaveLength(1);
 				expect(
-					users[0]?.parts?.map(({ filename, mime, url }) => ({
+					users[0]?.parts?.map(({ filename, mime, source }) => ({
 						filename,
 						mime,
-						url,
+						source,
 					})),
 				).toEqual([
-					{ filename: "notes.txt", mime: "text/plain", url: images[0] },
-					{ filename: "guide.pdf", mime: "application/pdf", url: images[1] },
+					{ filename: "notes.txt", mime: "text/plain", source: refs[0] },
+					{ filename: "guide.pdf", mime: "application/pdf", source: refs[1] },
 				]);
 				expect(
 					yield* sql`SELECT input_id FROM pending_inputs WHERE state = 'queued'`,
