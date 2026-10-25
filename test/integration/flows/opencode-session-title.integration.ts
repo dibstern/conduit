@@ -4,6 +4,7 @@
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { isRecord } from "../../../src/lib/utils.js";
 import {
 	type SpawnedOpenCode,
 	spawnOpenCode,
@@ -121,48 +122,135 @@ describe("Integration: OpenCode session titles", () => {
 	it("titles the first message in Conduit and OpenCode, and keeps it", async () => {
 		titleQuery = () => titleReply("Fix Header Selector");
 		titleCalls.mockClear();
-		const sessionId = await createUntitledSession();
+		let phase = "create untitled session";
+		let requestedId: string | undefined;
+		let dispatchedId: string | undefined;
+		try {
+			const sessionId = await createUntitledSession();
+			requestedId = sessionId;
 
-		const turnEnd = client.waitForTurnEnd(sessionId, 120_000);
-		await send(sessionId, "Reply with just the word 'pong'.");
-		await vi.waitFor(
-			async () => {
-				expect(conduitTitle(sessionId)).toBe("Fix Header Selector");
-				expect(await opencodeTitle(sessionId)).toBe("Fix Header Selector");
-			},
-			{ timeout: 15_000 },
-		);
-		expect(titleCalls).toHaveBeenCalledTimes(1);
-		expect(String(titleCalls.mock.calls[0]?.[0]?.prompt)).toContain(
-			"Reply with just the word 'pong'.",
-		);
+			phase = "first send";
+			dispatchedId = await send(sessionId, "Reply with just the word 'pong'.");
+			const turnEnd = client.waitForTurnEnd(sessionId, 120_000);
+			phase = "first title convergence";
+			await vi.waitFor(
+				async () => {
+					expect(conduitTitle(sessionId)).toBe("Fix Header Selector");
+					expect(await opencodeTitle(sessionId)).toBe("Fix Header Selector");
+				},
+				{ timeout: 15_000 },
+			);
+			expect(titleCalls).toHaveBeenCalledTimes(1);
+			expect(String(titleCalls.mock.calls[0]?.[0]?.prompt)).toContain(
+				"Reply with just the word 'pong'.",
+			);
 
-		// The turn ran in OpenCode, and its own titler left the session alone.
-		await turnEnd;
-		const messages = (await (
-			await fetch(`${opencode.url}/session/${sessionId}/message`)
-		).json()) as { info: { role: string } }[];
-		expect(messages.map((message) => message.info.role)).toContain("assistant");
-		expect(await opencodeTitle(sessionId)).toBe("Fix Header Selector");
-		expect(conduitTitle(sessionId)).toBe("Fix Header Selector");
+			// The turn ran in OpenCode, and its own titler left the session alone.
+			phase = "first terminal";
+			await turnEnd;
+			phase = "native history";
+			const messages = (await (
+				await fetch(`${opencode.url}/session/${sessionId}/message`)
+			).json()) as { info: { role: string } }[];
+			expect(messages.map((message) => message.info.role)).toContain(
+				"assistant",
+			);
+			phase = "native title after first terminal";
+			expect(await opencodeTitle(sessionId)).toBe("Fix Header Selector");
+			expect(conduitTitle(sessionId)).toBe("Fix Header Selector");
 
-		// OpenCode reporting a placeholder title later does not revert it.
-		await setOpenCodeTitle(sessionId, "Untitled");
-		await vi.waitFor(
-			() =>
-				expect(renameEvents(sessionId)).toContainEqual({
-					title: "Untitled",
-					source: null,
-				}),
-			{ timeout: 15_000 },
-		);
-		expect(conduitTitle(sessionId)).toBe("Fix Header Selector");
+			// OpenCode reporting a placeholder title later does not revert it.
+			phase = "placeholder update";
+			await setOpenCodeTitle(sessionId, "Untitled");
+			phase = "placeholder convergence";
+			await vi.waitFor(
+				() =>
+					expect(renameEvents(sessionId)).toContainEqual({
+						title: "Untitled",
+						source: null,
+					}),
+				{ timeout: 15_000 },
+			);
+			expect(conduitTitle(sessionId)).toBe("Fix Header Selector");
 
-		// A follow-up message is not titled again.
-		const followUpEnd = client.waitForTurnEnd(sessionId, 120_000);
-		await send(sessionId, "Reply with just the word 'ping'.");
-		await followUpEnd;
-		expect(titleCalls).toHaveBeenCalledTimes(1);
+			// A follow-up message is not titled again.
+			phase = "follow-up send";
+			dispatchedId = undefined;
+			dispatchedId = await send(sessionId, "Reply with just the word 'ping'.");
+			const followUpEnd = client.waitForTurnEnd(sessionId, 120_000);
+			phase = "follow-up terminal";
+			await followUpEnd;
+			expect(titleCalls).toHaveBeenCalledTimes(1);
+		} catch (error) {
+			try {
+				const signal = AbortSignal.timeout(5_000);
+				const frames = client.getReceived();
+				const rows = frames.flatMap((frame, frameIndex) => {
+					if (frame.type !== "shell" && frame.type !== "family") return [];
+					const items: unknown[] =
+						frame["_tag"] === "upsert"
+							? [frame["item"]]
+							: frame["_tag"] === "snapshot" && Array.isArray(frame["rows"])
+								? frame["rows"]
+								: [];
+					return items
+						.filter(isRecord)
+						.filter(
+							(row) => row["id"] === requestedId || row["id"] === dispatchedId,
+						)
+						.map((row) => ({
+							frameIndex,
+							type: frame.type,
+							id: row["id"],
+							title: row["title"],
+							status: row["status"],
+							lastTurnEndVersion: row["lastTurnEndVersion"],
+							lastTurnEndInputId: row["lastTurnEndInputId"],
+						}));
+				});
+				const live = JSON.stringify(rows.slice(-16));
+				const evidence: Record<string, unknown> = {
+					phase,
+					requestedSessionId: requestedId ?? null,
+					dispatchedSessionId: dispatchedId ?? null,
+					publicRows: {
+						frameCount: frames.length,
+						rowCount: rows.length,
+						body: live.slice(-32_768),
+						truncated: rows.length > 16 || live.length > 32_768,
+						kept: "suffix",
+					},
+				};
+				const paths = ["/session/status"];
+				for (const id of new Set([requestedId, dispatchedId])) {
+					if (id) paths.push(`/session/${id}`, `/session/${id}/message`);
+				}
+				for (const path of paths) {
+					try {
+						const res = await fetch(`${opencode.url}${path}`, { signal });
+						const body = await res.text();
+						evidence[path] = {
+							status: res.status,
+							ok: res.ok,
+							body: body.slice(0, 16_384),
+							truncated: body.length > 16_384,
+						};
+					} catch (snapshotError) {
+						evidence[`${path}:error`] = String(snapshotError).slice(0, 2048);
+					}
+				}
+				console.error(
+					"OpenCode title failure diagnostics:",
+					JSON.stringify(evidence),
+				);
+			} catch (diagnosticError) {
+				console.error(
+					"OpenCode title diagnostic snapshot failed:",
+					String(diagnosticError).slice(0, 2048),
+				);
+			}
+			throw error;
+		}
 	}, 300_000);
 
 	it("lets a manual rename made while titling win in Conduit and OpenCode", async () => {
