@@ -12,7 +12,7 @@
 	import Surface from "../ui/Surface.svelte";
 	import { tasksPanel } from "./background-tasks.svelte.js";
 	import BackgroundTaskList from "./BackgroundTaskList.svelte";
-	import TaskGlyph from "./TaskGlyph.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 
 	let { tasks, compact, onstop, onstopall }: { tasks: readonly BackgroundTask[]; compact: boolean; onstop?: ((taskId: string) => void) | undefined; onstopall?: (() => void) | undefined } = $props();
 </script>
@@ -20,7 +20,7 @@
 {#snippet panel()}
 <Surface id="background-tasks-panel" data-testid="background-tasks-panel" variant={compact ? "plain" : "floating"} radius="none" elevation={compact ? "none" : "popover"} role="region" aria-label="Background tasks" class="whitespace-normal border-border px-[14px] pt-[12px] pb-[10px] text-[12px] {compact ? '' : 'absolute top-full z-[var(--z-popover)] max-h-[70dvh] overflow-y-auto left-[20px] mt-[8px] w-[440px] max-w-[calc(100%-32px)] rounded-[16px]'}">
 	<div class="flex items-center gap-[7px] font-sans text-tool {compact ? 'text-[11px] font-semibold uppercase tracking-[0.08em]' : 'text-[12px] font-medium'}">
-		<TaskGlyph />{tasks.length === 1 ? "1 background task" : `${tasks.length} background tasks`}
+		<ConduitMark size={12} variant="running" tone="inherit" />{tasks.length === 1 ? "1 background task" : `${tasks.length} background tasks`}
 	</div>
 	<BackgroundTaskList {tasks} {onstop} />
 	<p class="m-0 mt-1.5 text-[11px] leading-[1.45] text-text-muted">Claude started these and moved on. They keep running between turns.</p>

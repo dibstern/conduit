@@ -233,6 +233,17 @@ export const IconOnly: Story = {
 
 export const Loading: Story = {
 	args: { variant: "primary", loading: true, children: label("Saving…") },
+	play: async ({ canvasElement }) => {
+		const button = canvasElement.querySelector("button");
+		const glyph = button?.querySelector('[data-flow-glyph="running"]');
+		await expect(button).toHaveAttribute("aria-busy", "true");
+		await expect(glyph).toBeVisible();
+		if (!button || !glyph)
+			throw new Error("Loading button Flow glyph is missing");
+		await expect(getComputedStyle(glyph).color).toBe(
+			getComputedStyle(button).color,
+		);
+	},
 };
 
 export const Disabled: Story = {

@@ -44,17 +44,12 @@ export const Connecting: Story = {
 		await expect(mark).toBeInTheDocument();
 		await expect(mark?.getBoundingClientRect().width).toBe(96);
 		const ripples = hero.querySelectorAll("[data-flow-ripple]");
-		const sparkles = hero.querySelectorAll("[data-flow-sparkle]");
-		await expect(ripples).toHaveLength(2);
-		await expect(sparkles).toHaveLength(3);
+		await expect(ripples).toHaveLength(1);
+		await expect(hero.querySelectorAll("[data-flow-sparkle]")).toHaveLength(0);
 		const packet = hero.querySelector("[data-flow-packet]");
 		await expect(packet).toBeInTheDocument();
 		const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-		for (const element of [
-			...ripples,
-			...sparkles,
-			...(packet ? [packet] : []),
-		]) {
+		for (const element of [...ripples, ...(packet ? [packet] : [])]) {
 			if (reduced) {
 				await expect(getComputedStyle(element).animationName).toBe("none");
 			} else {

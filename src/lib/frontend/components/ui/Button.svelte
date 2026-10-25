@@ -18,6 +18,7 @@
 	import type { HTMLAnchorAttributes, HTMLButtonAttributes } from "svelte/elements";
 	import type { Snippet } from "svelte";
 	import Icon from "./Icon.svelte";
+	import ConduitMark from "./ConduitMark.svelte";
 	import {
 		buttonClasses,
 		type ButtonAlign,
@@ -68,7 +69,7 @@
 		 * 2px-too-large icon in four toolbar buttons.
 		 */
 		iconSize?: number;
-		/** Spinner + `aria-busy`; stays focusable and swallows clicks. */
+		/** Running glyph + `aria-busy`; stays focusable and swallows clicks. */
 		loading?: boolean;
 		disabled?: boolean;
 		/**
@@ -254,7 +255,7 @@
 
 {#snippet content()}
 	{#if loading}
-		<Icon name="loader-circle" size={iconSize} class="animate-spin" />
+		<ConduitMark size={iconSize} variant="running" tone="inherit" />
 	{:else if icon}
 		<Icon name={icon} size={iconSize} />
 	{/if}

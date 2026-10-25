@@ -10,6 +10,7 @@
 	import type { BannerConfig } from "../../types.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import { bannerTone } from "./Banners.svelte";
 
 	let { banners, onexpand }: { banners: readonly BannerConfig[]; onexpand: () => void } = $props();
@@ -20,7 +21,7 @@
 
 {#if first}
 <Button variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" data-testid="session-bar-banners-row" aria-controls="session-bar" aria-expanded={false} ariaLabel={banners.length === 1 ? label : `${label}, and ${banners.length - 1} more`} title={first.text} class="flex items-center justify-start whitespace-nowrap select-none w-full gap-1.5 text-[11px] leading-[1.35] {bannerTone(first.variant)}" onclick={onexpand}>
-	<Icon name={first.icon} size={12} class="shrink-0" />
+	{#if first.icon === "loader"}<ConduitMark size={12} variant="running" />{:else}<Icon name={first.icon} size={12} class="shrink-0" />{/if}
 	<span class="min-w-0 truncate">{label}</span>
 	{#if banners.length > 1}<span data-testid="session-bar-banners-more" class="shrink-0 font-semibold">+{banners.length - 1}</span>{/if}
 </Button>

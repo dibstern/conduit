@@ -43,7 +43,8 @@
 	import type { Immutable, SessionInfo } from "../../types.js";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
-	import DitherGlyph from "../ui/DitherGlyph.svelte";
+	import SessionStatusGlyph from "../ui/SessionStatusGlyph.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import { getParentSessionContext, navigateBackToParent } from "../chat/SubagentBackBar.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -283,12 +284,11 @@
 	});
 	const goalButtonTone = $derived(goal.phase === "met" ? "goal-met" : stuck || (!sessionViewState.compact && goal.phase === "paused") ? "goal-paused" : "goal");
 	const desktopGoalLabel = $derived(goal.phase === "met" ? "Goal met" : goal.phase === "paused" ? "Paused" : stuck ? "Stuck" : goal.phase === "checking" ? "Checking" : "Pursuing");
-	const goalIcon = $derived(goal.phase === "met" ? "circle-check" : goal.phase === "paused" ? "pause" : stuck ? "circle-alert" : goal.phase === "checking" ? "loader-circle" : "target");
+	const goalIcon = $derived(goal.phase === "met" ? "circle-check" : goal.phase === "paused" ? "pause" : stuck ? "circle-alert" : "target");
 	const statusTitle = $derived(connectionState.statusText || "Connecting");
 	const statusClass = $derived.by(() => {
 		switch (connectionState.status) {
 			case "connected": return "bg-success";
-			case "processing": return "bg-success animate-[pulse-dot_1.2s_ease-in-out_infinite]";
 			case "error": return "bg-error";
 			default: return "bg-text-muted";
 		}
@@ -456,7 +456,7 @@
 {#snippet goalContent()}
 	{#if detailsGoal && goalFacts}
 		<div class={sessionViewState.compact ? "pt-[2px]" : ""}>
-			<Badge variant={goal.phase === "met" ? "success" : stuck ? "warning" : "goal"} shape="pill" size="session"><Icon name={goalIcon} size={12} class={goalIcon === "loader-circle" ? "motion-safe:animate-spin" : ""} />{desktopGoalLabel}</Badge>
+			<Badge variant={goal.phase === "met" ? "success" : stuck ? "warning" : "goal"} shape="pill" size="session">{#if goal.phase === "checking"}<ConduitMark size={12} variant="running" tone="goal" />{:else}<Icon name={goalIcon} size={12} />{/if}{desktopGoalLabel}</Badge>
 			<h2 id="goal-details-title" data-testid="goal-details-condition" class="mt-[10px] mb-[4px] text-[15px] font-semibold leading-[1.35] tracking-[-0.01em]">{detailsGoal.condition}</h2>
 			<p data-testid="goal-details-meta" class="m-0 font-mono text-[10.5px] text-text-dimmer">Set {goalClock(details?.setAt ?? detailsGoal.setAt)}{details?.judgeModel ? ` · ${details.judgeModel} judges` : ""}{#if details?.tokensSinceStart != null}<span data-testid="goal-details-tokens">{" · "}{goalTokens(details.tokensSinceStart)} tokens</span>{/if}</p>
 		</div>
@@ -473,7 +473,7 @@
 					<h3 class="m-0 text-[14px] font-semibold">{!summaryEnabled ? "Latest check" : goal.phase === "met" ? "How it ended" : "Where it stands"}</h3>
 					<span data-testid="goal-details-summary-label" class="inline-flex items-center gap-[5px] font-mono text-[10.5px] text-text-dimmer">
 						{#if !summaryEnabled}{latestCheck ? goalClock(latestCheck.at) : ""}
-						{:else if summaryLoading}<Icon name="loader-circle" size={11} class="motion-safe:animate-spin" />{summary ? `Updating · ${newCheckCount} new checks` : `Summarising ${detailsGoal.iterations} checks`}
+						{:else if summaryLoading}<ConduitMark size={11} variant="running" tone="inherit" />{summary ? `Updating · ${newCheckCount} new checks` : `Summarising ${detailsGoal.iterations} checks`}
 						{:else if summaryFailed}Couldn't summarise · <Button variant="ghost" size="content" tone="accent" touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-retry" onclick={updateGoalSummary}>Retry</Button>
 						{:else if !summary || summary.stale}<Button variant="ghost" size="content" tone="accent" touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-update" onclick={updateGoalSummary}>{newCheckCount > 1 ? `${newCheckCount} new checks` : "New check"} · Update</Button>
 						{:else if summary}Summary · {goalClock(summary.generatedAt)}{newCheckCount > 0 ? " · still current" : ""}{/if}
@@ -489,7 +489,7 @@
 		{#if detailsFailed}<p role="status" class="mt-[8px] mb-0 text-error">{detailsFailed}</p>{/if}
 		<div class="mt-[10px] flex items-center justify-between gap-[8px] text-[12px] text-text-dimmer">
 			<span data-testid="goal-details-foot" class="inline-flex items-center gap-[5px]">
-				{#if goal.phase === "checking"}<Icon name="loader-circle" size={12} class="motion-safe:animate-spin text-status-goal" /><span class="text-status-goal">Checking{details?.turnCount != null ? ` after turn ${details.turnCount}` : ""}</span>
+				{#if goal.phase === "checking"}<ConduitMark size={12} variant="running" tone="goal" /><span class="text-status-goal">Checking{details?.turnCount != null ? ` after turn ${details.turnCount}` : ""}</span>
 				{:else}{detailsGoal.iterations} checks · {#if goal.phase === "paused"}paused {goalClock(latestCheck?.at ?? detailsGoal.setAt)}{:else if goal.phase === "met"}met {goalClock(details?.metAt ?? goalFacts.endedAt ?? detailsGoal.setAt)}{:else}{goalDuration(sessionState.now - (details?.setAt ?? detailsGoal.setAt), true)}{/if}{/if}
 			</span>
 			<Button variant="ghost" size="content" tone="accent" touchTarget={sessionViewState.compact ? "always" : true} aria-expanded={historyOpen} aria-controls="goal-details-history" data-testid="goal-details-history-toggle" onclick={() => { historyOpen = !historyOpen; }}>History {historyOpen ? "⌄" : "›"}</Button>
@@ -497,7 +497,7 @@
 		{#if historyOpen}
 		<ol id="goal-details-history" data-testid="goal-details-history" class="mt-[10px] mb-0 flex list-none flex-col gap-[5px] p-0">
 			{#if goal.phase === "checking"}
-				<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="loader-circle" size={13} class="mt-[2px] motion-safe:animate-spin text-status-goal" /><span><b>Checking</b>{details?.turnCount != null ? ` · after turn ${details.turnCount}` : ""}</span><time class="text-text-dimmer">now</time></li>
+				<li data-testid="goal-details-check" class="desktop-goal-check"><span class="mt-[2px]"><ConduitMark size={13} variant="running" tone="goal" /></span><span><b>Checking</b>{details?.turnCount != null ? ` · after turn ${details.turnCount}` : ""}</span><time class="text-text-dimmer">now</time></li>
 			{:else if goalFacts.ended === "met"}
 				<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="circle-check" size={13} class="text-success" /><span><b>Met</b>{detailsGoal.lastReason ? ` · ${detailsGoal.lastReason}` : ""}</span><time class="text-text-dimmer">{goalFacts.endedAt == null ? "" : goalClock(goalFacts.endedAt)}</time></li>
 			{/if}
@@ -528,7 +528,7 @@
 
 {#snippet goalLine(props: Record<string, unknown> = {})}
 	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[1px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }} {...props}>
-		<Icon name={goalIcon} size={12} class="shrink-0 {goalIcon === 'loader-circle' ? 'motion-safe:animate-spin' : ''}" />
+		{#if goal.phase === "checking"}<ConduitMark size={12} variant="running" tone="goal" />{:else}<Icon name={goalIcon} size={12} class="shrink-0" />{/if}
 		<b class="shrink-0 font-medium">{desktopGoalLabel}</b>{" "}<span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
 	</Button>
 {/snippet}
@@ -542,7 +542,7 @@
 				<Button id="side-threads-control" variant="ghost" size={sessionViewState.compact ? "phone-capsule-segment" : "capsule-segment"} icon="messages-square" touchTarget={sessionViewState.compact ? "always" : true} class="shrink-0" ariaLabel={sideThreadsLabel} title={sideThreadsLabel} aria-expanded={sideThreadsPanel.open} aria-controls="side-threads-panel" data-testid="side-threads-control" onclick={() => openSideThreads(!sideThreadsPanel.open)}>
 					{sideThreads.length}
 					{#if !sessionViewState.compact}<span class="segment-word">{sideThreads.length === 1 ? "side thread" : "side threads"}</span>{/if}
-					{#if sideThreadsWaiting}<span data-testid="side-threads-waiting" class="inline-flex {sideThreadsWaiting.colour}"><Icon name={sideThreadsWaiting.icon} size={11} /></span>{/if}
+					{#if sideThreadsWaiting}<span data-testid="side-threads-waiting" class="inline-flex {sideThreadsWaiting.colour}"><SessionStatusGlyph attention={sideThreadsWaiting.attention} size={11} /></span>{/if}
 					{#if sideThreads.some((row) => sessionAttention(row) === "done-unread")}<span data-testid="side-threads-unread-dot" class="size-[7px] shrink-0 rounded-full bg-accent" aria-hidden="true"></span>{/if}
 				</Button>
 			{/if}
@@ -639,13 +639,13 @@
 					touchTarget
 					class="min-w-0 max-w-[30%] shrink gap-1.5 text-sm font-medium"
 					data-testid="side-thread-parent-crumb"
-					ariaLabel="Back to {parent.title}, parent {parent.status}"
+					ariaLabel="Back to {parent.title}, parent {parent.label.toLowerCase()}"
 					title="Back to {parent.title}"
 					onclick={navigateBackToParent}
 				>
 					<span data-testid="parent-session-status" class="flex shrink-0 items-center">
-						<DitherGlyph state={parent.status} size={12} />
-						<span class="sr-only">{parent.status === "working" ? "Working" : parent.status === "monitoring" ? "Monitoring" : "Idle"}</span>
+						<SessionStatusGlyph attention={parent.status} size={12} />
+						<span class="sr-only">{parent.label}</span>
 					</span>
 					<span class="truncate">{parent.title}</span>
 				</Button>
@@ -754,7 +754,7 @@
 
 	{#if !sessionViewState.compact}
 		<div id="session-bar-connection" class="flex shrink-0 items-center gap-[5px] pl-[8px] pr-[4px] font-mono text-[12px] leading-[normal] text-text-dimmer">
-			<span id="status" class="status-dot mr-[3px] size-[7px] shrink-0 rounded-full {statusClass}" title={statusTitle} role="status"><span class="sr-only">{statusTitle}</span></span>
+			<span id="status" class="status-dot mr-[3px] shrink-0 {connectionState.status === 'processing' ? 'inline-flex' : `size-[7px] rounded-full ${statusClass}`}" title={statusTitle} role="status">{#if connectionState.status === "processing"}<ConduitMark size={12} variant="running" />{/if}<span class="sr-only">{statusTitle}</span></span>
 			<Icon name="laptop" size={14} />
 			<span id="client-count-badge" class="font-mono tabular-nums">{uiState.clientCount}</span>
 		</div>

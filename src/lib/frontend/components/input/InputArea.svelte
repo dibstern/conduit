@@ -13,6 +13,7 @@
 	import { refreshInputDraftAttachments } from "../../stores/input-draft.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
 	import HarnessLogo from "../model/HarnessLogo.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -1281,7 +1282,7 @@
 
 		{#if goal.phase === "checking"}
 			<div data-testid="composer-checking-goal" class="flex items-center gap-[7px] px-[16px] pb-[9px] text-[12.5px] text-status-goal">
-				<Icon name="loader-circle" size={13} class="animate-spin" /><b class="font-semibold">Checking goal</b><span class="min-w-0 truncate text-text-muted">· {goalFacts?.goal?.condition}</span>
+				<ConduitMark size={13} variant="running" tone="goal" /><b class="font-semibold">Checking goal</b><span class="min-w-0 truncate text-text-muted">· {goalFacts?.goal?.condition}</span>
 			</div>
 		{/if}
 		{#if isGoalCommand}

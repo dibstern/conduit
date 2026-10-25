@@ -101,6 +101,7 @@
 <script lang="ts">
 	import { removeBanner } from "../../stores/ui.svelte.js";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Button from "../ui/Button.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 
@@ -151,7 +152,7 @@
 				data-banner-variant={banner.variant}
 			>
 				<span class="banner-icon shrink-0 {presentation === 'session-header' ? bannerTone(banner.variant) : ''}">
-					<Icon name={presentation === "session-header" && banner.variant === "skip-permissions" ? "lock" : banner.icon} size={presentation === "session-header" ? 16 : 14} />
+					{#if banner.icon === "loader"}<ConduitMark size={presentation === "session-header" ? 16 : 14} variant="running" />{:else}<Icon name={presentation === "session-header" && banner.variant === "skip-permissions" ? "lock" : banner.icon} size={presentation === "session-header" ? 16 : 14} />{/if}
 				</span>
 				<span class="banner-text flex-1 min-w-0">
 					{#if presentation === "session-header" && leadEnd !== -1}<b class="font-semibold">{banner.text.slice(0, leadEnd + 1)}</b>{" "}{banner.text.slice(leadEnd + 2)}{:else}{banner.text}{/if}

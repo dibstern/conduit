@@ -13,6 +13,7 @@
 	import CategoryPill from "../ui/CategoryPill.svelte";
 	import Checkbox from "../ui/Checkbox.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import SettingsBanner from "../ui/SettingsBanner.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 
@@ -202,8 +203,8 @@
 	{#if current}
 		{#if proposing}
 			<div class="prop run" data-testid="surfacing-proposal-status">
-				<Icon name="loader-circle" size={14} class="shrink-0 animate-spin text-accent" />
-				<div class="min-w-0" role="status"><span class="shimmer">✦ Reading {entries.length} marks and {current?.categories.length} categories…</span>
+				<ConduitMark size={14} variant="running" />
+				<div class="min-w-0" role="status"><span>✦ Reading {entries.length} marks and {current?.categories.length} categories…</span>
 					{#if avoiding.length}<small>Avoiding: {avoiding.map((hunk) => `${hunk.after.label} ${hunkDiff(hunk).map((change) => change.field).join(", ")}`).join("; ")}</small>{/if}
 				</div>
 			</div>
@@ -309,9 +310,6 @@
 	.prop:first-child { margin-top: 0; }
 	.prop.run { flex-direction: row; align-items: center; gap: 12px; }
 	.prop small { display: block; margin-top: 2px; font-size: 12px; color: var(--color-text-dimmer); }
-	.shimmer { background: linear-gradient(90deg, var(--color-text-muted) 0%, var(--color-text) 45%, var(--color-text-muted) 90%) 0 0 / 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.2s linear infinite; }
-	@keyframes shimmer { to { background-position: -220% 0; } }
-	@media (prefers-reduced-motion: reduce) { .shimmer { animation: none; color: var(--color-text); } }
 	.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 	.tiles > div { min-width: 0; padding: 10px; border-radius: 12px; background: var(--color-settings-card); }
 	.tiles small { display: block; font-size: 11.5px; color: var(--color-text-dimmer); }

@@ -172,7 +172,7 @@ export const sessionGoalHandlers: StepHandler[] = [
 							? "--color-status-green"
 							: "--color-status-goal";
 					expected.color = style.getPropertyValue(token);
-					const text = el.querySelector("span");
+					const text = el.querySelector("b + span");
 					return {
 						color: style.color,
 						tone: expected.color,
@@ -227,17 +227,22 @@ export const sessionGoalHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert session goal spinner",
-		match: /^the session goal subtitle has a spinner$/,
+		name: "assert session goal running glyph",
+		match: /^the session goal subtitle has a running glyph$/,
 		run: async ({ world }) => {
-			await expect
-				.poll(() =>
-					world.page
-						.getByTestId("session-goal-subtitle")
-						.locator("svg.lucide-loader-circle")
-						.evaluate((el) => getComputedStyle(el).animationName),
-				)
-				.toBe("spin");
+			const glyph = world.page
+				.getByTestId("session-goal-subtitle")
+				.locator('[data-flow-glyph="running"]');
+			await expect(glyph).toBeVisible();
+			const packet = glyph.locator("[data-flow-packet]");
+			await expect(packet).toBeVisible();
+			const reducedMotion = await world.page.evaluate(
+				() => matchMedia("(prefers-reduced-motion: reduce)").matches,
+			);
+			await expect(packet).toHaveCSS(
+				"animation-name",
+				reducedMotion ? "none" : /flow/,
+			);
 		},
 	},
 	{

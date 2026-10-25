@@ -8,9 +8,7 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
 			await page.emulateMedia({ reducedMotion });
 		});
 
-		test("overlay hero keeps its mark, ripples and sparkles", async ({
-			page,
-		}) => {
+		test("overlay hero keeps its mark and one ripple", async ({ page }) => {
 			await page.goto(
 				`http://localhost:${port}/iframe.html?id=overlays-connectoverlay--connecting&viewMode=story`,
 			);
@@ -25,13 +23,10 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
 				"height",
 				"96px",
 			);
-			await expect(hero.locator("[data-flow-ripple]")).toHaveCount(2);
-			await expect(hero.locator("[data-flow-sparkle]")).toHaveCount(3);
-			for (const selector of [
-				"[data-flow-ripple]",
-				"[data-flow-sparkle]",
-				"[data-flow-packet]",
-			]) {
+			await expect(hero.locator("[data-flow-ripple]")).toHaveCount(1);
+			await expect(hero.locator("[data-flow-sparkle]")).toHaveCount(0);
+			await expect(hero.locator("[data-flow-packet]")).toHaveCount(1);
+			for (const selector of ["[data-flow-ripple]", "[data-flow-packet]"]) {
 				for (const part of await hero.locator(selector).all()) {
 					if (reducedMotion === "reduce")
 						await expect(part).toHaveCSS("animation-name", "none");
@@ -42,10 +37,6 @@ for (const reducedMotion of ["no-preference", "reduce"] as const) {
 				await expect(hero.locator("[data-flow-ripple]").first()).toHaveCSS(
 					"animation-duration",
 					"2.4s",
-				);
-				await expect(hero.locator("[data-flow-sparkle]").first()).toHaveCSS(
-					"animation-duration",
-					"1.8s",
 				);
 				await expect(hero.locator("[data-flow-packet]")).toHaveCSS(
 					"animation-duration",

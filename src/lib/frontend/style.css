@@ -32,11 +32,6 @@
 	--color-p-auto: #fb923c;
 	--color-p-full: #ff5a5f;
 
-	--animate-cascade-a: pixel-cascade-a 2.4s ease-in-out infinite;
-	--animate-cascade-b: pixel-cascade-b 2.4s ease-in-out infinite;
-	--animate-cascade-a-fast: pixel-cascade-a 1.4s ease-in-out infinite;
-	--animate-cascade-b-fast: pixel-cascade-b 1.4s ease-in-out infinite;
-
 	--color-bg: #111113;
 	/* Browser chrome with the default backdrop over --color-bg. */
 	--color-theme-scrim: #0b0c0e;
@@ -131,7 +126,7 @@
 	--color-status-goal: #3fd0bf;
 	--color-status-risk: #f469c4;
 
-	/* The sidebar's dither glyph and status word. Blue marks unread results;
+	/* The sidebar's status glyph and word. Blue marks unread results;
 	   monitoring follows the teal goal, and active work stays neutral. */
 	--color-session-working: #a1a1aa;
 	--color-session-monitoring: #3fd0bf;
@@ -471,44 +466,6 @@
 	box-decoration-break: clone;
 }
 
-@keyframes pixel-cascade-a {
-	0% {
-		opacity: 0.15;
-	}
-	20% {
-		opacity: 1;
-	}
-	40% {
-		opacity: 0.3;
-	}
-	60% {
-		opacity: 0.8;
-	}
-	80% {
-		opacity: 0.15;
-	}
-	100% {
-		opacity: 0.5;
-	}
-}
-@keyframes pixel-cascade-b {
-	0% {
-		opacity: 0.5;
-	}
-	25% {
-		opacity: 0.15;
-	}
-	50% {
-		opacity: 1;
-	}
-	75% {
-		opacity: 0.3;
-	}
-	100% {
-		opacity: 0.15;
-	}
-}
-
 @layer base {
 	/* The house focus ring as a floor, not a rollout.
 	   Component migration aimed to hand components the ring as they moved onto
@@ -597,10 +554,6 @@
 }
 
 @custom-variant touch (@media (hover: none));
-
-@utility animate-todo-spin {
-	animation: spin 0.8s linear infinite;
-}
 
 .connect-overlay.hidden {
 	display: none;

@@ -1059,6 +1059,11 @@ export const GoalChecking: Story = {
 			canvas.getByTestId("composer-checking-goal"),
 		).toHaveTextContent("Checking goal");
 		await expect(
+			canvas
+				.getByTestId("composer-checking-goal")
+				.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
+		await expect(
 			canvas.queryByTestId("composer-status-elapsed"),
 		).not.toBeInTheDocument();
 		// The line above names the check; the box keeps its goal outline.
@@ -1400,8 +1405,7 @@ function narrowComposer(
 			// Each story owns its sends and the client limiter's queued callbacks.
 			_resetRateLimit();
 			const cleanup = setupWords(canvasElement, false);
-			// 61b38b1e waits for draft persistence before admitting the send.
-			const restoreDraft = replyRpc("SyncInputDraft", () => ({ ok: true }));
+			const restoreDraftSync = replyRpc("SyncInputDraft", () => ({ ok: true }));
 			const restoreSubmit = replyRpc("input.submit", () => ({
 				ok: true,
 				sessionId: testId,
@@ -1472,7 +1476,7 @@ function narrowComposer(
 			return () => {
 				_resetRateLimit();
 				restoreSubmit();
-				restoreDraft();
+				restoreDraftSync();
 				Date.now = realNow;
 				chat.messages = previousMessages;
 				usageState.readings = readings;

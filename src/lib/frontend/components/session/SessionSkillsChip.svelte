@@ -20,6 +20,7 @@
 	import SkillDoc from "../chat/SkillDoc.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuGroup from "../ui/MenuGroup.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
@@ -209,10 +210,10 @@
 				{#if loading}
 					<!-- Decorative: the open list says "loading now" in words. -->
 					<span
-						class="pointer-events-none absolute -top-0.5 -right-0.5 size-[7px] rounded-full bg-success ring-2 ring-bg motion-safe:animate-pulse"
+						class="pointer-events-none absolute -top-0.5 -right-0.5 inline-flex rounded-[3px] bg-bg ring-2 ring-bg"
 						aria-hidden="true"
 						data-testid="session-skills-chip-pulse"
-					></span>
+					><ConduitMark size={10} variant="running" /></span>
 				{/if}
 			</Button>
 		{/snippet}

@@ -383,9 +383,10 @@ export const GoalChecking: Story = {
 			"Checking · All 38 scenarios pass",
 			"--color-status-goal",
 		);
-		const spinner = subtitle.querySelector("svg");
-		if (!spinner) throw new Error("Checking spinner is missing");
-		await expect(getComputedStyle(spinner).animationName).toBe("spin");
+		const packet = subtitle.querySelector("[data-flow-packet]");
+		await expect(packet).toBeVisible();
+		if (!packet) throw new Error("Checking Flow packet is missing");
+		await expect(getComputedStyle(packet).animationName).toContain("flow");
 	},
 };
 
@@ -583,10 +584,10 @@ export const GoalDetailsChecking: Story = {
 		const { checks } = await assertGoalDetails(canvasElement, "Checking", 4);
 		await expect(checks[0]).toHaveTextContent("now");
 		await expect(checks[0]).toHaveTextContent("Checking");
-		const spinner = checks[0]?.querySelector("svg");
-		await expect(spinner).toBeVisible();
-		if (!spinner) return;
-		await expect(getComputedStyle(spinner).animationName).toBe("spin");
+		const packet = checks[0]?.querySelector("[data-flow-packet]");
+		await expect(packet).toBeVisible();
+		if (!packet) throw new Error("Checking Flow packet is missing");
+		await expect(getComputedStyle(packet).animationName).toContain("flow");
 	},
 };
 
@@ -729,6 +730,12 @@ export const ViewsSheetOpen: Story = {
 		await expect(
 			within(sheet).getByTestId("session-sheet-header"),
 		).toBeVisible();
+		const glyph = within(sheet)
+			.getByTestId("session-sheet-header")
+			.querySelector(".session-status-glyph");
+		await expect(glyph).toBeVisible();
+		await expect(glyph?.getBoundingClientRect().width).toBe(18);
+		await expect(glyph?.getBoundingClientRect().height).toBe(18);
 		await expect(sheet.querySelector(".shortcut-hint")).toBeNull();
 	},
 };
@@ -1104,7 +1111,12 @@ export const Collapsed: Story = {
 
 function setupSideThread() {
 	seedSessions([
-		{ ...mockSession, title: "Batch A polish", status: "busy" },
+		{
+			...mockSession,
+			title: "Batch A polish",
+			status: "busy",
+			attention: "working",
+		},
 		{
 			...mockSession,
 			id: "phone-side-thread",
@@ -1131,6 +1143,11 @@ export const SideThread: Story = {
 		await expect(canvas.getByTestId("parent-session-status")).toHaveTextContent(
 			"Working",
 		);
+		const parentGlyph = canvas
+			.getByTestId("parent-session-status")
+			.querySelector('[data-flow-glyph="running"]');
+		await expect(parentGlyph).toBeVisible();
+		await expect(parentGlyph?.getBoundingClientRect().width).toBe(12);
 		const title = canvas.getByRole("heading", { level: 1 });
 		await expect(title).toHaveTextContent("Why 12px root?");
 		expect(title.getBoundingClientRect().width).toBeGreaterThan(
@@ -1966,6 +1983,9 @@ export const DesktopBackgroundTasks: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const tasks = canvas.getByTestId("background-tasks-row");
+		await expect(
+			tasks.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
 		const box = (el: Element) => el.getBoundingClientRect();
 		const bar = box(canvas.getByTestId("session-bar"));
 		expect(box(tasks).top - bar.top).toBe(52);
@@ -2054,6 +2074,9 @@ export const BackgroundTasks: Story = {
 		const canvas = within(canvasElement);
 		const tasks = canvas.getByTestId("background-tasks-row");
 		await expect(tasks).toHaveTextContent("1 background task");
+		await expect(
+			tasks.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
 		expect(tasks.getBoundingClientRect().top).toBeGreaterThanOrEqual(
 			canvas.getByTestId("session-bar-title").getBoundingClientRect().bottom,
 		);
@@ -2065,6 +2088,16 @@ export const BackgroundTasks: Story = {
 		);
 		await userEvent.click(canvas.getByTestId("background-tasks-toggle"));
 		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
+		const taskGlyph = canvas
+			.getByTestId("background-tasks-panel")
+			.querySelector('[data-flow-glyph="running"]');
+		await expect(taskGlyph).toBeVisible();
+		if (!taskGlyph) throw new Error("Task Flow glyph is missing");
+		await expect(taskGlyph.getBoundingClientRect().width).toBe(12);
+		const expectedTool = new Option().style;
+		expectedTool.color =
+			getComputedStyle(taskGlyph).getPropertyValue("--color-tool");
+		await expect(getComputedStyle(taskGlyph).color).toBe(expectedTool.color);
 		const theme = document.documentElement.classList.contains("light-theme")
 			? "light"
 			: "dark";

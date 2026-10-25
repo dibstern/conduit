@@ -152,12 +152,16 @@ test.describe("TodoItemRow", () => {
 		await expect(pendingIcons).toHaveCount(4);
 	});
 
-	test("in-progress items have spinning icon", async ({ page }) => {
+	test("in-progress items have a flowing progress mark", async ({ page }) => {
 		await navigateToStory(page, "todo-todooverlay--mixed-progress");
 		const progressIcons = page.locator(".todo-icon-progress");
 		await expect(progressIcons).toHaveCount(1);
-		// The in-progress icon should have the spin animation class
-		await expect(progressIcons.first()).toHaveClass(/animate-todo-spin/);
+		const glyph = progressIcons.locator('[data-flow-glyph="running"]');
+		await expect(glyph).toBeVisible();
+		await expect(glyph.locator("[data-flow-packet]")).toHaveCSS(
+			"animation-name",
+			/flow/,
+		);
 	});
 
 	test("completed items have check icon", async ({ page }) => {

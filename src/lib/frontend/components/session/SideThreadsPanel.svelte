@@ -12,12 +12,12 @@
 	/** The sidebar's blocking glyph for the most urgent Side Thread waiting on you. */
 	export function waitingMarker(
 		threads: readonly Immutable<SessionInfo>[],
-	): { icon: "triangle-alert" | "message-square"; colour: string; spoken: string } | undefined {
+	): { attention: "needs-approval" | "needs-reply"; colour: string; spoken: string } | undefined {
 		const attentions = new Set(threads.map(sessionAttention));
 		const attention = (["needs-approval", "needs-reply"] as const).find((tier) => attentions.has(tier));
 		if (!attention) return undefined;
-		const { glyph, colour, spoken } = ATTENTION_DISPLAY[attention];
-		return "icon" in glyph && glyph.icon !== "octagon-alert" ? { icon: glyph.icon, colour, spoken } : undefined;
+		const { colour, spoken } = ATTENTION_DISPLAY[attention];
+		return { attention, colour, spoken };
 	}
 </script>
 
@@ -25,6 +25,7 @@
 	import { formatTimeAgo } from "../../utils/format.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import SessionStatusGlyph from "../ui/SessionStatusGlyph.svelte";
 	import Popover from "../ui/Popover.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import { sessionCommandActions } from "./session-commands.js";
@@ -57,7 +58,7 @@
 				<li data-testid="side-thread" class="flex items-center gap-1 border-t border-border-subtle py-[3px]">
 					<Button variant="ghost" size="content" layout="flow" tone="default" hoverFill="text" data-testid="side-thread-open" class="-ml-[6px] grid min-w-0 flex-1 grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2 rounded-[8px] py-[5px] pr-[4px] pl-[6px] text-left" onclick={() => open(thread)}>
 						{#if marker}
-							<span data-testid="side-thread-waiting" class="inline-flex {marker.colour}"><Icon name={marker.icon} size={14} /></span>
+							<span data-testid="side-thread-waiting" class="inline-flex {marker.colour}"><SessionStatusGlyph attention={marker.attention} size={14} /></span>
 						{:else}
 							<Icon name="messages-square" size={14} class="text-text-dimmer" />
 						{/if}
