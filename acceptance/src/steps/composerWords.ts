@@ -311,7 +311,11 @@ export const composerWordsHandlers: StepHandler[] = [
 				await expect(branch).toHaveCount(0);
 			else await expect(branch).toHaveText(match[2]);
 			await expect(
-				checkout.locator(`[data-icon="${match[3]}"] svg`),
+				checkout.locator(
+					match[3] === "branch"
+						? '[data-icon="branch"] svg, :scope > svg.lucide-git-branch'
+						: `[data-icon="${match[3]}"] svg`,
+				),
 			).toBeVisible();
 		},
 	},

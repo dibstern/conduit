@@ -802,13 +802,13 @@
 						onclick={(event) => togglePicker(event, "harness")}
 					>
 						<Icon name="box" size={16} class="shrink-0 text-text-dimmer" />
-						<span data-part="label" class="min-w-0 flex-1">Harness</span>
+						<span data-part="label" class="flex-1">Harness</span>
 						<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{driverLabel(selectedDriver)}</span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
 					<Button variant="composer-row" size="content" data-testid="composer-more-account" ariaLabel={`Account: ${wordAccountName}. Open account options`} onclick={(event) => togglePicker(event, "account")}>
 						<Icon name="user" size={16} class="shrink-0 text-text-dimmer" />
-						<span data-part="label" class="min-w-0 flex-1">Account</span>
+						<span data-part="label" class="flex-1">Account</span>
 						<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{wordAccountName}</span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
@@ -820,8 +820,8 @@
 						onclick={(event) => togglePicker(event, "model")}
 					>
 						{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={15} spinning={selectedLogoSpinning} />{:else}<Icon name="sparkles" size={16} class="shrink-0 text-text-dimmer" />{/if}
-						<span data-part="label" class="min-w-0 flex-1">Model</span>
-						<span data-part="value" class="flex min-w-0 flex-wrap items-center justify-end gap-x-[7px] text-right text-text-secondary"><span>{displayName}</span>{#if contextLabel || contextPercent > 0}<small class="text-[10.5px] {contextWarning ? 'text-warning' : 'text-text-muted'}">{contextLabel}{contextLabel && contextPercent > 0 ? " · " : ""}{contextPercent > 0 ? `${Math.round(contextPercent)}% used` : ""}</small>{/if}</span>
+						<span data-part="label" class="flex-1">Model</span>
+						<span data-part="value" class="flex min-w-0 flex-wrap items-center justify-end gap-x-[7px] text-right text-text-secondary"><span class="truncate">{displayName}</span>{#if contextLabel || contextPercent > 0}<small class="text-[10.5px] {contextWarning ? 'text-warning' : 'text-text-muted'}">{contextLabel}{contextLabel && contextPercent > 0 ? " · " : ""}{contextPercent > 0 ? `${Math.round(contextPercent)}% used` : ""}</small>{/if}</span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
 					{@render effortRow()}

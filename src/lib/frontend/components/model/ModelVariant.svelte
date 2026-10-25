@@ -76,7 +76,7 @@
 			onclick={() => openPicker("effort")}
 		>
 			<Icon name="sliders-horizontal" size={16} class="shrink-0 text-text-dimmer" />
-			<span data-part="label" class="min-w-0 flex-1">Effort</span>
+			<span data-part="label" class="flex-1">Effort</span>
 			<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{displayedWord ?? (variants.length === 0 && !currentVariant ? "Unavailable" : parameters ? levelName : currentVariant || "Default")}</span>
 			<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 		</Button>

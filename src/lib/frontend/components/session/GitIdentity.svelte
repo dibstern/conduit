@@ -287,7 +287,7 @@
 			<Button {...props} bind:element={identityElement} variant="composer-row" size="content"
 				title={label} ariaLabel={`Checkout: ${[label, ...noticeLabels].join(", ")}`} data-testid="composer-checkout">
 				<Icon name="git-branch" size={16} class="shrink-0 text-text-dimmer" />
-				<span data-part="label" class="min-w-0 flex-1">Checkout</span>
+				<span data-part="label" class="flex-1">Checkout</span>
 				<span data-part="value" class="flex min-w-0 items-center justify-end gap-[5px] text-right text-text-secondary">{@render identity()}</span>
 				<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 			</Button>

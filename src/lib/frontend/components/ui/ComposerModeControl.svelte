@@ -21,7 +21,7 @@
 {:else if variant === "row"}
 	<Button {...rest} variant="composer-row" size="content" {loading} ariaLabel={`Approvals: ${label}. Open options`}>
 		<PermissionShield {mode} size={16} />
-		<span data-part="label" class="min-w-0 flex-1">Mode</span>
+		<span data-part="label" class="flex-1">Mode</span>
 		<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{label}</span>
 		<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 	</Button>
