@@ -657,7 +657,6 @@ export const runSessionRunner = (
 						idle?.activity();
 						activeCommands++;
 						const deduplicationKey = `${message.commandId}:${message.attempt ?? 0}${command.type === "send-turn" && command.input.nativeResumeFallback ? ":native-resume-fallback" : ""}`;
-						launch.acceptCommand(command);
 						if (command.type === "send-turn") {
 							const binding = bindings.get(command.sinkId);
 							if (
@@ -705,8 +704,20 @@ export const runSessionRunner = (
 									);
 								if (!runner)
 									return yield* Effect.die("Runner is not initialized");
-								if (command.type === "send-turn") invalidateSourceDelivery();
-								const execution = launch.executeEffect(runner, command);
+								const payloadRunner = runner;
+								const execution = Effect.gen(function* () {
+									// A waiting send could outlive a later abort.
+									if (command.type === "send-turn" && sourceDeliveryInvalidated)
+										return yield* Effect.fail({
+											operation: "send-turn",
+											code: "account_switch_busy",
+											retryable: true,
+											message:
+												"Source delivery did not finish before send admission. Resend the turn.",
+										});
+									launch.acceptCommand(command);
+									return yield* launch.executeEffect(payloadRunner, command);
+								});
 								const exit = yield* Effect.exit(
 									command.type === "send-turn" && sendJournal
 										? sendJournal.execute(

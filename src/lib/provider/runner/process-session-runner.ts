@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	Cause,
+	Clock,
 	Data,
 	Deferred,
 	Effect,
@@ -2791,6 +2792,7 @@ export const makeProcessSessionRunner = (
 				let deliveryRegistration:
 					| { entry: RunnerChild; changed: Deferred.Deferred<void> }
 					| undefined;
+				let deliveryDeadline: number | undefined;
 				const execute = Effect.gen(function* () {
 					const autoSettleAfterDays =
 						command.type === "send-turn"
@@ -2977,7 +2979,12 @@ export const makeProcessSessionRunner = (
 										lifecycle: existing.lifecycle,
 										quiescent: existing.upgrade.state?.quiescent === true,
 										rebindsAccount:
-											existing.capabilities?.rebindsAccount === true,
+											existing.capabilities?.rebindsAccount === true &&
+											// The capability predates guarded account admission. The
+											// shared dev sentinel cannot establish the child's build.
+											(loginChange !== "Account" ||
+												(existing.buildId !== "dev" &&
+													existing.buildId === runnerBuildId())),
 										changes: {
 											folders: foldersChanged,
 											login: loginChange,
@@ -3000,7 +3007,7 @@ export const makeProcessSessionRunner = (
 													),
 												),
 												code: "account_switch_busy",
-												retryable: false,
+												retryable: true,
 											});
 										case "Skip":
 											return { entry: undefined, draining: false };
@@ -3115,7 +3122,22 @@ export const makeProcessSessionRunner = (
 							selection.sourceDeliveryPending
 						) {
 							const changed = selection.sourceDeliveryPending;
+							const now = yield* Clock.currentTimeMillis;
+							// Notifications and successor producers share this send's budget.
+							deliveryDeadline ??= now + STOP_ABORT_WAIT_MS;
+							const failure: SessionFailure = {
+								operation: command.type,
+								code: "account_switch_busy",
+								retryable: true,
+								message:
+									"Source delivery did not finish before account-switch admission. Resend the turn.",
+							};
+							if (now >= deliveryDeadline) return yield* Effect.fail(failure);
 							yield* Deferred.await(changed).pipe(
+								Effect.timeoutOrElse({
+									duration: deliveryDeadline - now,
+									orElse: () => Effect.fail(failure),
+								}),
 								Effect.ensuring(
 									Effect.sync(() => {
 										deliveryRegistration?.entry.deliveryWaiters?.delete(

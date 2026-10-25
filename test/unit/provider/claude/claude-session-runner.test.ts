@@ -1,5 +1,5 @@
 import { it as effectIt } from "@effect/vitest";
-import { Deferred, Effect, Fiber } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../../src/lib/account-directory.js";
@@ -270,6 +270,87 @@ describe("in-process Claude session runner", () => {
 					).toBe("completed");
 					expect(launches).toHaveLength(2);
 					expect(launches[1]).toEqual({ configDir, prompts: ["turn-3"] });
+				}),
+			),
+		);
+	});
+
+	it("refuses a busy account switch before prompt admission and rebinds on quiet retry", async () => {
+		let backgroundBusy = false;
+		const launches: Array<{
+			configDir: ReturnType<typeof configuredClaudeConfigDir>;
+			prompts: string[];
+		}> = [];
+		const queryFactory: NonNullable<
+			ClaudeProviderInstanceDeps["queryFactory"]
+		> = ({ prompt, configDir }) => {
+			const launch: (typeof launches)[number] = { configDir, prompts: [] };
+			launches.push(launch);
+			const stream = (async function* () {
+				for await (const message of prompt) {
+					const content = message.message.content;
+					launch.prompts.push(
+						typeof content === "string"
+							? content
+							: content
+									.filter((part) => part.type === "text")
+									.map((part) => part.text)
+									.join(""),
+					);
+					yield makeSuccessResult();
+				}
+			})();
+			return Object.assign(createMockQuery([]), {
+				[Symbol.asyncIterator]: () => stream,
+			});
+		};
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const runner = yield* makeClaudeSessionRunner(
+						{
+							daemonConfigDir: getConfigDir(),
+							queryFactory,
+							capabilitiesService,
+							isBackgroundBusy: () => backgroundBusy,
+						},
+						() => Effect.succeed({}),
+					);
+					const source = send("account-a");
+					expect((yield* runner.executeEffect(source)).status).toBe(
+						"completed",
+					);
+					const next = send("account-b");
+					const target = {
+						...next,
+						input: {
+							...next.input,
+							instanceId: "account-b",
+							configDir: configuredClaudeConfigDir("/tmp/claude-account-b"),
+						},
+					};
+					backgroundBusy = true;
+					const busyExit = yield* Effect.exit(runner.executeEffect(target));
+					expect(launches).toEqual([
+						{ configDir: source.input.configDir, prompts: ["account-a"] },
+					]);
+					expect(Exit.isFailure(busyExit)).toBe(true);
+					if (Exit.isFailure(busyExit)) {
+						expect(busyExit.cause.reasons).toHaveLength(1);
+						expect(
+							busyExit.cause.reasons
+								.filter(Cause.isFailReason)
+								.map((reason) => reason.error.retryable),
+						).toEqual([true]);
+					}
+					backgroundBusy = false;
+					expect((yield* runner.executeEffect(target)).status).toBe(
+						"completed",
+					);
+					expect(launches).toEqual([
+						{ configDir: source.input.configDir, prompts: ["account-a"] },
+						{ configDir: target.input.configDir, prompts: ["account-b"] },
+					]);
 				}),
 			),
 		);
