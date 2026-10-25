@@ -362,8 +362,18 @@ export const harnessHandlers: StepHandler[] = [
 			await expect(badge).toHaveAttribute("data-state", match[3] ?? "");
 			if (match[3] === "spinning") {
 				await expect(badge).toHaveText("");
+				const glyph = badge.locator('[data-flow-glyph="running"]');
+				await expect(glyph).toBeVisible();
+				const packet = glyph.locator("[data-flow-packet]");
+				await expect(packet).toBeVisible();
+				const reducedMotion = await world.page.evaluate(
+					() => matchMedia("(prefers-reduced-motion: reduce)").matches,
+				);
 				// Name, not duration: an earlier visual step freezes durations to 0s.
-				await expect(badge).not.toHaveCSS("animation-name", "none");
+				await expect(packet).toHaveCSS(
+					"animation-name",
+					reducedMotion ? "none" : /flow/,
+				);
 			}
 		},
 	},

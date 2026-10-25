@@ -189,7 +189,7 @@ Examples:
   | wide  | words    | harness-logo-opencode-multi-words | 98        |
   | phone | words    | harness-logo-opencode-multi-words | 98        |
 
-Scenario Outline: B1 switching replaces the letter with a spinner and restores the landed account
+Scenario Outline: B1 switching replaces the letter with a running glyph and restores the landed account
   Given a session already exists on the Claude harness
   And the harness logo is viewed in the <tier> tier
   And the Claude accounts are claude as Claude, self as personal

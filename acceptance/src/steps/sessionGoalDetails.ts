@@ -485,14 +485,17 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 				/Checking.*now/,
 				...checkText(world.page),
 			]);
-			await expect
-				.poll(() =>
-					checks
-						.first()
-						.locator("svg")
-						.evaluate((el) => getComputedStyle(el).animationName),
-				)
-				.toBe("spin");
+			const glyph = checks.first().locator('[data-flow-glyph="running"]');
+			await expect(glyph).toBeVisible();
+			const packet = glyph.locator("[data-flow-packet]");
+			await expect(packet).toBeVisible();
+			const reducedMotion = await world.page.evaluate(
+				() => matchMedia("(prefers-reduced-motion: reduce)").matches,
+			);
+			await expect(packet).toHaveCSS(
+				"animation-name",
+				reducedMotion ? "none" : /flow/,
+			);
 		},
 	},
 	{

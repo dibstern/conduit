@@ -76,7 +76,7 @@ Examples:
   | phone    | session-goal-details-phone   | 98        |
   | desktop  | session-goal-details-desktop | 98        |
 
-Scenario: A running goal check appends a spinner to the returned history
+Scenario: A running goal check appends a running glyph to the returned history
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And the composer status clock is frozen

@@ -192,18 +192,29 @@ function phoneSheet(state: Partial<SessionInfo> = {}): Story {
 					}
 				}
 			}
-			const icon = menu.querySelector(
-				'[data-testid="session-sheet-header"] > span svg',
+			const glyph = menu.querySelector(
+				'[data-testid="session-sheet-header"] .session-status-glyph',
 			);
-			const expectedIcon =
-				state.pinnedAt != null
-					? "pin"
-					: state.snoozedAt != null
-						? "moon"
-						: state.settledAt != null
-							? "check"
-							: "circle-dot";
-			expect(icon).toHaveClass(`lucide-${expectedIcon}`);
+			const expectedState =
+				state.pinnedAt == null && state.settledAt != null
+					? "settled"
+					: state.pinnedAt == null && state.snoozedAt != null
+						? "snoozed"
+						: (state.attention ?? "idle");
+			await expect(glyph).toBeVisible();
+			await expect(glyph).toHaveAttribute("data-state", expectedState);
+			await expect(glyph).toHaveStyle({ width: "18px", height: "18px" });
+			if (expectedState === "settled" || expectedState === "snoozed") {
+				await expect(glyph?.querySelector("svg")).toHaveClass(
+					`lucide-${expectedState === "settled" ? "check" : "moon"}`,
+				);
+			} else {
+				await expect(
+					glyph?.querySelector(
+						`[data-flow-glyph="${expectedState === "done-unread" ? "unread" : "idle"}"]`,
+					),
+				).toBeVisible();
+			}
 			await expect(
 				within(menu).getByTestId("session-ctx-auto-settle"),
 			).toHaveAttribute(
@@ -252,7 +263,10 @@ export const PhoneCloseReturnsFocus: Story = {
 		);
 	},
 };
-export const PhoneUnread: Story = phoneSheet({ unread: true });
+export const PhoneUnread: Story = phoneSheet({
+	unread: true,
+	attention: "done-unread",
+});
 export const PhoneUnreadLight: Story = {
 	...PhoneUnread,
 	globals: { theme: "light" },
