@@ -330,16 +330,14 @@ processTest.describe("Claude wake-up turn inbox", () => {
 	);
 });
 
-// The shell ending between turns, before the SDK's wake-up turn (the trace is
-// background-shell-turn cut there), restarts its Bash tool under a message id
-// no turn owns. Bug (conduit-test-jyr9.14): that reopened the finished turn
-// with no reply to close it, so the inbox queued every later message.
-// Failure cases: the turn reads as running again; the next message queues
-// instead of sending.
+// A shell completion before the wake-up used to reopen the finished run, with
+// no owned terminal left to close it (conduit-test-jyr9.14). Include the complete
+// wake-up result: 85d8a0ca correctly queues the next input while native work runs.
+// Failure cases: the ended run reopens, or the next input never drains.
 test.describe("Claude background shell ending between turns", () => {
 	test.use({
 		claudeReplay: {
-			turns: ["background-shell-ends-between-turns", "pong-thinking-text-turn"],
+			turns: ["background-shell-turn", "pong-thinking-text-turn"],
 		},
 	});
 
