@@ -822,6 +822,75 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "drag the desktop usage footer handle with a mouse",
+		match: /^I drag the usage footer handle (up|down) by (\d+) pixels$/,
+		run: async ({ world, match }) => {
+			const box = await world.page
+				.getByTestId("usage-footer-handle")
+				.boundingBox();
+			if (!box) throw new Error("Missing usage footer handle");
+			const x = box.x + box.width / 2;
+			const y = box.y + box.height / 2;
+			const dy = (match[1] === "up" ? -1 : 1) * Number(match[2]);
+			await world.page.mouse.move(x, y);
+			await world.page.mouse.down();
+			await world.page.mouse.move(x, y + dy, { steps: 12 });
+			await world.page.mouse.up();
+		},
+	},
+	{
+		name: "click a desktop usage footer fold control",
+		match: /^I click the usage footer (handle|more summary)$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId(
+					match[1] === "handle" ? "usage-footer-handle" : "usage-footer-more",
+				)
+				.click();
+		},
+	},
+	{
+		name: "assert the desktop usage footer is folded or open",
+		match:
+			/^the usage footer (is folded to the claude row with \+5 more|shows every account)$/,
+		run: async ({ world, match }) => {
+			const folded = match[1] !== "shows every account";
+			const footer = world.page.getByTestId("usage-footer-meter");
+			await expect(footer).toHaveAttribute("data-collapsed", String(folded));
+			// A folded row is clipped by its wrapper, so the wrapper's height is what the eye sees.
+			const shownHeight = (accountId: string) =>
+				world.page
+					.getByTestId(`usage-footer-row-${accountId}`)
+					.evaluate(
+						(row) => row.parentElement?.getBoundingClientRect().height ?? 0,
+					);
+			await expect.poll(() => shownHeight("claude")).toBe(24);
+			for (const accountId of [
+				"work",
+				"spare",
+				"unreadable",
+				"chatgpt",
+				"cursor",
+			])
+				await expect.poll(() => shownHeight(accountId)).toBe(folded ? 0 : 24);
+			await expect(
+				world.page.getByTestId("usage-footer-more-count"),
+			).toHaveText("+5 more");
+			await expect
+				.poll(() =>
+					world.page
+						.getByTestId("usage-footer-more")
+						.evaluate((more) =>
+							Number(getComputedStyle(more.parentElement ?? more).opacity),
+						),
+				)
+				.toBe(folded ? 1 : 0);
+			await expect(
+				world.page.getByTestId("usage-footer-handle"),
+			).toHaveAttribute("aria-expanded", String(!folded));
+		},
+	},
+	{
 		name: "assert the narrow layout removes second-window headings and cells",
 		match: /^the usage footer second window columns are hidden$/,
 		run: async ({ world }) => {

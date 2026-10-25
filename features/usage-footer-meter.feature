@@ -220,3 +220,23 @@ Scenario: changing a Cursor default preserves the Claude default
   Then the meter has sent 1 SetDefault requests for hidden
   And the desktop meter marks hidden as default
   And the desktop meter marks claude as default
+
+Scenario Outline: the footer handle folds the accounts that need no attention, like the phone dock
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the usage footer has several accounts with an unknown Claude reading
+  Then the usage footer shows every account
+  When I drag the usage footer handle down by 120 pixels
+  Then the usage footer is folded to the claude row with +5 more
+  And the sidebar region visually matches <baseline> at <threshold> percent
+  When I drag the usage footer handle up by 120 pixels
+  Then the usage footer shows every account
+  When I click the usage footer handle
+  Then the usage footer is folded to the claude row with +5 more
+  When I click the usage footer more summary
+  Then the usage footer shows every account
+
+Examples:
+  | baseline                    | threshold |
+  | usage-footer-folded-desktop | 98        |
