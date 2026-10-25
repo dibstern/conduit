@@ -1,5 +1,5 @@
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
 	Clock,
@@ -44,6 +44,7 @@ import {
 	SessionGitSchema,
 } from "../../../shared-types.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
 import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
 import { ReadRequest } from "../Services/read-request.js";
@@ -111,6 +112,7 @@ interface DirectoryState {
 export const makeSessionGit = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const registry = yield* ProjectRegistryTag;
+	const unavailable = yield* DaemonStoreAvailability;
 	const owners = yield* OwnerScopes;
 	const subprocess = yield* Subprocess;
 	const runner = subprocess.makeRunner();
@@ -411,8 +413,12 @@ export const makeSessionGit = Effect.gen(function* () {
 			if (projectsInitialized && current === registeredProjects) return;
 			registeredProjects = current;
 			projectsInitialized = true;
+			// Failed imports must not leave live cache rows that collide on retry.
+			const available = [...current].filter(
+				([projectId]) => !unavailable.has(projectId),
+			);
 			const roots = new Map(
-				[...current].map(([projectId, project]) => [
+				available.map(([projectId, project]) => [
 					projectId,
 					new Set(project.project.folders.map(canonicalDirectory)),
 				]),
@@ -423,7 +429,7 @@ export const makeSessionGit = Effect.gen(function* () {
 						entry.rootProjects.delete(projectId);
 				disposeUnused(entry);
 			}
-			for (const [projectId, project] of current)
+			for (const [projectId, project] of available)
 				for (const folder of project.project.folders) {
 					const entry = yield* getDirectory(canonicalDirectory(folder));
 					if (
@@ -523,8 +529,7 @@ export const makeSessionGit = Effect.gen(function* () {
 
 	const missingState = (entry: DirectoryState, exists: boolean) =>
 		Effect.gen(function* () {
-			if (exists) return undefined;
-			if (entry.present === exists) return entry.workspaceMissing;
+			if (!exists && entry.present === exists) return entry.workspaceMissing;
 			for (const id of entry.sessions) {
 				const session = sessions.get(id);
 				if (session?.workspace?.origin !== "conduit") continue;
@@ -532,16 +537,35 @@ export const makeSessionGit = Effect.gen(function* () {
 					([, path]) => canonicalDirectory(path) === entry.directory,
 				);
 				if (!pair) continue;
+				const ownership = yield* readSessionWorktreeOwnershipSnapshot(
+					session.projectId,
+					id,
+				).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+				const checkoutRoot =
+					ownership?._tag === "Owned"
+						? ownership.ownership.find(
+								({ path }) =>
+									entry.directory === canonicalDirectory(path) ||
+									entry.directory.startsWith(
+										`${canonicalDirectory(path)}${sep}`,
+									),
+							)?.path
+						: undefined;
+				if (exists) {
+					const checkout = yield* Effect.tryPromise(() =>
+						lstat(join(checkoutRoot ?? entry.directory, ".git")),
+					).pipe(
+						Effect.map((stat) => stat.isFile()),
+						Effect.orElseSucceed(() => false),
+					);
+					if (checkout) return undefined;
+				}
 				if (Option.isNone(worktrees))
 					return {
 						path: entry.directory,
 						canRecreate: false,
 						reason: "git-failed" as const,
 					};
-				const ownership = yield* readSessionWorktreeOwnershipSnapshot(
-					session.projectId,
-					id,
-				).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 				const recordedBranch =
 					ownership?._tag === "Owned"
 						? recordedBranchForFolder(ownership.ownership, ...pair)

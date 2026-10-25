@@ -1402,8 +1402,9 @@ function narrowComposer(
 		tags: ["autodocs"],
 		globals: { theme: "dark" },
 		beforeEach: ({ canvasElement }) => {
-			const cleanup = setupWords(canvasElement, false);
+			// Each story owns its sends and the client limiter's queued callbacks.
 			_resetRateLimit();
+			const cleanup = setupWords(canvasElement, false);
 			const restoreDraftSync = replyRpc("SyncInputDraft", () => ({ ok: true }));
 			const restoreSubmit = replyRpc("input.submit", () => ({
 				ok: true,

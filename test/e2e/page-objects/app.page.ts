@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect } from "@playwright/test";
+import type { ProcessHarness } from "../../helpers/process-harness.js";
 
 export class AppPage {
 	readonly page: Page;
@@ -75,6 +76,35 @@ export class AppPage {
 		// Compact list routes hide all of #app, so visibility cannot prove the
 		// socket connected. The overlay unmounts only after connection succeeds.
 		await this.connectOverlay.waitFor({ state: "detached", timeout: 30_000 });
+	}
+
+	/** A cold empty load opens setup; removing the last project keeps settings available. */
+	async mountWithoutProjects(
+		harness: ProcessHarness,
+		mount: () => Promise<void> = () => this.goto(harness.baseUrl),
+	): Promise<void> {
+		const project = await harness.requestRpc({
+			_tag: "SaveProject",
+			title: "Settings fixture",
+			folders: [harness.projectDir],
+		});
+		try {
+			await mount();
+			await expect(
+				this.page
+					.locator('.session-empty, [data-testid="project-tree-empty"]')
+					.first(),
+			).toBeVisible();
+		} finally {
+			await harness.requestRpc({
+				_tag: "RemoveProject",
+				slug: project.savedSlug,
+			});
+		}
+		expect(
+			(await harness.requestRpc({ _tag: "GetProjects" })).projects,
+		).toEqual([]);
+		await expect(this.page.getByTestId("project-tree-header")).toHaveCount(0);
 	}
 
 	async waitForConnected(): Promise<void> {

@@ -218,8 +218,13 @@ for (const typed of [false, true]) {
 		control.sendInputDraft("s", { text: "Queued draft", from: "another-tab" });
 		expect(await pending).toEqual({
 			value: [
-				...(typed ? [] : [{ _tag: "synchronized" }]),
-				{ _tag: "draft", text: "Queued draft", from: "another-tab" },
+				...(typed ? [] : [{ _tag: "synchronized", attachments: [] }]),
+				{
+					_tag: "draft",
+					text: "Queued draft",
+					from: "another-tab",
+					attachments: [],
+				},
 			],
 		});
 		await expect

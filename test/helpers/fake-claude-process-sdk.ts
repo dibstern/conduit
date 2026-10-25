@@ -64,6 +64,28 @@ function injectedResetAt(configDir: string | undefined): number | undefined {
 
 export type ProcessMark =
 	| {
+			kind: "startup-phase";
+			phase: "add-project-start" | "add-project-returned" | "ready-attempt";
+			pid: number;
+			at: number;
+	  }
+	| {
+			kind: "startup-phase";
+			phase: "persisted-project-check";
+			pid: number;
+			at: number;
+			expectedFolder: string;
+			folders: string[];
+			matches: boolean;
+	  }
+	| {
+			kind: "startup-phase";
+			phase: "startup-timeout" | "ready-received" | "ready-after-finish";
+			pid: number;
+			at: number;
+			elapsedMs: number;
+	  }
+	| {
 			kind: "input-content";
 			inputId: string | undefined;
 			content: SDKUserMessage["message"]["content"];
@@ -247,6 +269,7 @@ export type ProcessMark =
 			sessionId: string;
 			snapshotJson: string;
 	  }
+	| { kind: "runner-snapshot-observed"; sessionId: string }
 	| {
 			kind: "runtime-sink";
 			phase: "allocated" | "released";
@@ -1778,6 +1801,24 @@ function query(params: {
 					taskStopHeldRequest = undefined;
 					if (closed) return;
 					if (taskTurnInterrupted) break;
+					if (request.includes("correction-reject"))
+						yield {
+							type: "user",
+							uuid: randomUUID(),
+							session_id: sessionId,
+							parent_tool_use_id: null,
+							message: {
+								role: "user",
+								content: [
+									{
+										type: "tool_result",
+										tool_use_id: "correction-foreground",
+										content: "Fixture tool completed",
+										is_error: false,
+									},
+								],
+							},
+						} satisfies SDKUserMessage;
 				}
 			}
 			// A turn that keeps streaming until it is stopped, for load tests.
@@ -2271,6 +2312,8 @@ function query(params: {
 				yield stream(sessionId, { type: "content_block_stop", index: 1 });
 				if (!params.options?.canUseTool)
 					throw new Error("Missing canUseTool bridge");
+				// Pending approval is native work, so interrupt must produce its terminal result.
+				interruptibleTurn = true;
 				interruptAwaitingDecision = request.endsWith("-after-decision");
 				const approval = await params.options.canUseTool(toolName, toolInput, {
 					signal:

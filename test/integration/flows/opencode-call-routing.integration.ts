@@ -88,7 +88,9 @@ describe("OpenCode adapter call routing through OpenCode Instances", () => {
 				}
 				const sessionId = /^\/session\/([ab]-[^/]+)$/.exec(url.pathname)?.[1];
 				let body: unknown = true;
-				if (sessionId) {
+				if (url.pathname === "/global/health") {
+					body = { healthy: true, version: "1.19.1" };
+				} else if (sessionId) {
 					await sessionRead?.();
 					body = {
 						id: sessionId,

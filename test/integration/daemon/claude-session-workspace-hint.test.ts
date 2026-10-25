@@ -191,6 +191,21 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		const sessionId = await browser.createSession("Undeclared worktree work");
 		await anotherTab.view(sessionId);
 		await browser.send(sessionId, toolTurn(threePaths(first)));
+		// Turn completion precedes the hint reactor's filesystem and git work.
+		await Promise.all(
+			[browser, anotherTab].flatMap((tab) =>
+				(["shell", "family"] as const).map((feed) =>
+					tab.waitFor((message) => {
+						if (message["type"] !== feed || message["_tag"] !== "upsert")
+							return false;
+						const row = Schema.decodeUnknownSync(SessionInfoSchema)(
+							message["item"],
+						);
+						return row.id === sessionId && row.workspaceHint === first;
+					}),
+				),
+			),
+		);
 		await vi.waitFor(() => {
 			for (const tab of [browser, anotherTab])
 				for (const feed of ["shell", "family"] as const)

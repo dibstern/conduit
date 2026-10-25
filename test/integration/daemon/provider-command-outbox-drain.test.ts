@@ -2693,6 +2693,7 @@ describe("durable control outbox scheduling", () => {
 						{
 							commandId: "control-behind-send",
 							providerProcessId: "process-1",
+							requestedAt: 1000,
 						},
 					);
 					expect(

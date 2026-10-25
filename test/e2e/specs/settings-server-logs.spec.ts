@@ -109,7 +109,7 @@ test("Log level updates daemon status and survives reopening Settings", async ({
 	harness,
 }, testInfo) => {
 	const reads = observeStatus(page);
-	await new AppPage(page).goto(harness.baseUrl);
+	await new AppPage(page).mountWithoutProjects(harness);
 	await openServer(page);
 	const logs = page.getByTestId("server-logs-group");
 	const select = logs.getByRole("button", { name: /^Log level\b/ });
@@ -147,7 +147,7 @@ test("Log level updates daemon status and survives reopening Settings", async ({
 
 	// A new page must read the same level from the daemon, without a cached store.
 	const readsBeforeReload = reads.length;
-	await new AppPage(page).goto(harness.baseUrl);
+	await new AppPage(page).mountWithoutProjects(harness);
 	await openServer(page);
 	await expect.poll(() => reads.length).toBeGreaterThan(readsBeforeReload);
 	await expect.poll(() => reads.at(-1)?.logLevel).toBe(nextLevel);

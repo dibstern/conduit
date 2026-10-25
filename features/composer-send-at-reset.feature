@@ -255,7 +255,7 @@ Examples:
   | viewport | reading_state | label         | baseline                          | threshold |
   | desktop  | unknown       | Send on Spare | composer-send-menu-unknown-desktop | 98        |
   | phone    | unknown       | Spare         | composer-send-menu-unknown-phone   | 98        |
-  | desktop  | missing       | Send on Spare | composer-send-menu-unknown-desktop | 98        |
+  | desktop  | missing       | Send on Spare | composer-send-menu-missing-desktop | 98        |
   | desktop  | stale         | Send on Spare | composer-send-menu-unknown-desktop | 98        |
 
 Scenario Outline: unknown usage is used only after the user picks that account

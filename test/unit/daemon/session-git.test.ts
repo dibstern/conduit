@@ -74,6 +74,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import {
 	canonicalDirectory,
 	readPublishedSessionGit,
+	readPublishedWorkspaceMissing,
 	withPublishedProjectGit,
 } from "../../../src/lib/persistence/effect/session-git-publication.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -1009,6 +1010,101 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 			}),
 	);
 	it.effect(
+		"keeps healthy owned project subfolders out of worktree recovery",
+		() =>
+			Effect.gen(function* () {
+				const f = yield* fixture();
+				const folder = join(f.repository, "subfolder");
+				mkdirSync(folder);
+				writeFileSync(join(folder, "tracked"), "nested");
+				gitCommand(f.repository, "add", "subfolder");
+				gitCommand(
+					f.repository,
+					"-c",
+					"user.email=test@example.com",
+					"-c",
+					"user.name=Test",
+					"commit",
+					"-m",
+					"nested project",
+				);
+				yield* Ref.update(f.projects, (projects) =>
+					HashMap.set(projects, "project", {
+						_tag: "Ready",
+						project: { slug: "project", title: "Project", folders: [folder] },
+					}),
+				);
+				const checkout = yield* f.worktrees.create(
+					[{ path: folder, projectSlug: "project", sessionId: "nested" }],
+					undefined,
+					"nested-branch",
+				);
+				const directory = checkout.worktrees[folder];
+				if (!directory)
+					return yield* Effect.fail(new Error("Missing checkout"));
+				yield* f.commit([
+					canonicalEvent("session.created", "nested", {
+						sessionId: "nested",
+						title: "Nested",
+						provider: "claude",
+					}),
+					canonicalEvent("session.workspace_changed", "nested", {
+						sessionId: "nested",
+						cause: "launch",
+						origin: "conduit",
+						worktrees: checkout.worktrees,
+						ownership: checkout.ownership,
+					}),
+				]);
+				const recovery = vi.spyOn(f.worktrees, "inspectMissing");
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => recovery.mockRestore()),
+				);
+				expect(yield* f.service.read("nested")).toMatchObject({
+					branch: "nested-branch",
+					dirty: false,
+				});
+				expect(recovery).not.toHaveBeenCalled();
+				writeFileSync(join(directory, "changed"), "changed");
+				yield* f.service.invalidate({ sessionId: "nested" });
+				yield* TestClock.adjust(2_000);
+				yield* waitForDirty(f.service.read("nested"));
+				expect(recovery).not.toHaveBeenCalled();
+				expect(
+					yield* readPublishedWorkspaceMissing("nested", [folder]).pipe(
+						Effect.provideService(SqlClient.SqlClient, f.sql),
+					),
+				).toBeUndefined();
+			}),
+	);
+	it.effect("detects an ordinary directory replacing an owned checkout", () =>
+		Effect.gen(function* () {
+			const f = yield* fixture(false, true);
+			yield* f.service.read("one");
+			rmSync(f.workspaceDirectory, { recursive: true, force: true });
+			mkdirSync(f.workspaceDirectory);
+			yield* f.service.invalidate({ sessionId: "one" });
+			yield* TestClock.adjust(2_000);
+			yield* Effect.tryPromise(() =>
+				expect
+					.poll(
+						() =>
+							Effect.runPromise(
+								readPublishedWorkspaceMissing("one", [f.repository]).pipe(
+									Effect.provideService(SqlClient.SqlClient, f.sql),
+								),
+							),
+						{ timeout: eventTimeout },
+					)
+					.toMatchObject({
+						path: f.workspaceDirectory,
+						branch: "session-one",
+						canRecreate: true,
+					}),
+			);
+		}),
+	);
+	it.effect(
 		"detects a missing directory and its recreation, then releases session resources",
 		() =>
 			Effect.gen(function* () {
@@ -1028,6 +1124,15 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 					Effect.repeat({ until: (row) => row !== undefined, times: 200 }),
 				);
 				expect(yield* f.service.read("one")).toBeUndefined();
+				expect(
+					yield* readPublishedWorkspaceMissing("one", [f.repository]).pipe(
+						Effect.provideService(SqlClient.SqlClient, f.sql),
+					),
+				).toMatchObject({
+					path: f.workspaceDirectory,
+					branch: "session-one",
+					canRecreate: true,
+				});
 				expect(JSON.parse(missing?.workspace_missing ?? "null")).toMatchObject({
 					canRecreate: true,
 				});

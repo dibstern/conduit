@@ -5,6 +5,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	defaultDaemonConfig,
+	saveDaemonConfig,
+} from "../../../src/lib/daemon/config-persistence.js";
 import { forkSession } from "../../../src/lib/domain/relay/Services/session-command.js";
 import {
 	getPermissionMode,
@@ -32,7 +36,7 @@ describe("Integration: Claude Side Thread launch fence", () => {
 	let launches: Array<{ options: Options; query: Query }>;
 	const evidence: unknown[] = [];
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		root = mkdtempSync(join(tmpdir(), "conduit-side-thread-launch-"));
 		for (const folder of ["home", "login"]) mkdirSync(join(root, folder));
 		writeFileSync(join(root, "login", "conduit-test-record-forks"), "");
@@ -53,6 +57,22 @@ describe("Integration: Claude Side Thread launch fence", () => {
 			agents: [],
 		}));
 		launches = [];
+		await saveDaemonConfig(
+			{
+				...defaultDaemonConfig(),
+				instances: [
+					{
+						id: "claude",
+						name: "Claude",
+						driver: "claude",
+						configDir: join(root, "login"),
+						port: 0,
+						managed: false,
+					},
+				],
+			},
+			root,
+		);
 	});
 
 	afterEach(async ({ task }) => {

@@ -3,6 +3,7 @@
 // or cancellation releases the lock before an uncancellable write finishes.
 import { describe, expect, it } from "@effect/vitest";
 import {
+	Cause,
 	Context,
 	Duration,
 	Effect,
@@ -10,6 +11,7 @@ import {
 	Fiber,
 	Layer,
 	Ref,
+	Result,
 	Scope,
 } from "effect";
 import { TestClock } from "effect/testing";
@@ -412,50 +414,69 @@ describe("ConfigPersistenceLive", () => {
 		}),
 	);
 
-	it.effect("snapshot failure keeps pending save dirty for manual retry", () =>
-		Effect.gen(function* () {
-			const writes: DaemonConfig[] = [];
-			let attempts = 0;
-			const snapshotConfig = {
-				pid: process.pid,
-				port: 7777,
-				pinHash: null,
-				tls: false,
-				debug: false,
-				keepAwake: false,
-				projects: [],
-				instances: [],
-			} satisfies DaemonConfig;
-			const snapshotLayer = Layer.succeed(ConfigSnapshotTag)({
-				build: Effect.gen(function* () {
-					attempts += 1;
-					if (attempts === 1) {
-						return yield* Effect.fail(new Error("snapshot boom"));
+	for (const failureMode of ["typed failure", "defect"] as const) {
+		it.effect(
+			`snapshot ${failureMode} keeps pending save dirty for manual retry`,
+			() =>
+				Effect.gen(function* () {
+					const writes: DaemonConfig[] = [];
+					let attempts = 0;
+					const failure = new Error("snapshot boom");
+					const snapshotConfig = {
+						pid: process.pid,
+						port: 7777,
+						pinHash: null,
+						tls: false,
+						debug: false,
+						keepAwake: false,
+						projects: [],
+						instances: [],
+					} satisfies DaemonConfig;
+					const snapshotLayer = Layer.succeed(ConfigSnapshotTag)({
+						build: Effect.gen(function* () {
+							attempts += 1;
+							if (attempts === 1) {
+								if (failureMode === "defect") return yield* Effect.die(failure);
+								return yield* Effect.fail(failure);
+							}
+							return snapshotConfig;
+						}),
+					});
+					const writerLayer = Layer.succeed(ConfigWriterTag)({
+						write: (config: DaemonConfig) =>
+							Effect.sync(() => {
+								writes.push(config);
+							}),
+					});
+					const layer = ConfigPersistenceLive.pipe(
+						Layer.provideMerge(Layer.mergeAll(snapshotLayer, writerLayer)),
+					);
+					const ctx = yield* Layer.build(Layer.fresh(layer));
+					const persistence = Context.get(ctx, ConfigPersistenceTag);
+
+					yield* persistence.requestSave;
+					const failed = yield* Effect.exit(persistence.flush);
+					expect(failed).toEqual(
+						failureMode === "typed failure"
+							? Exit.fail(failure)
+							: Exit.die(failure),
+					);
+					if (Exit.isFailure(failed)) {
+						expect(
+							Result.getOrThrow(
+								failureMode === "typed failure"
+									? Cause.findError(failed.cause)
+									: Cause.findDefect(failed.cause),
+							),
+						).toBe(failure);
 					}
-					return snapshotConfig;
+
+					yield* persistence.flush;
+					expect(attempts).toBe(2);
+					expect(writes).toEqual([snapshotConfig]);
 				}),
-			});
-			const writerLayer = Layer.succeed(ConfigWriterTag)({
-				write: (config: DaemonConfig) =>
-					Effect.sync(() => {
-						writes.push(config);
-					}),
-			});
-			const layer = ConfigPersistenceLive.pipe(
-				Layer.provideMerge(Layer.mergeAll(snapshotLayer, writerLayer)),
-			);
-			const ctx = yield* Layer.build(Layer.fresh(layer));
-			const persistence = Context.get(ctx, ConfigPersistenceTag);
-
-			yield* persistence.requestSave;
-			const failed = yield* Effect.exit(persistence.flush);
-			expect(Exit.isFailure(failed)).toBe(true);
-
-			yield* persistence.flush;
-			expect(attempts).toBe(2);
-			expect(writes).toEqual([snapshotConfig]);
-		}),
-	);
+		);
+	}
 
 	it.effect("background flush retries after transient writer failure", () =>
 		Effect.gen(function* () {

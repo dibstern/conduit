@@ -2245,11 +2245,18 @@ export const makeApprovalProjector = defineProjector(() => ({
 						INSERT INTO pending_approvals
 						(id, session_id, type, status, tool_name, input, details, version, created_at, provider_process_id, provider_request_id)
 						VALUES (${id}, ${sessionId}, 'permission', 'pending', ${toolName}, ${encodeJson(input)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt}, ${providerProcessId ?? null}, ${providerRequestId ?? null})
-						ON CONFLICT(id) DO UPDATE SET status = 'pending', decision = NULL, resolved_at = NULL, version = excluded.version
+						ON CONFLICT(id) DO UPDATE SET status = 'pending', decision = NULL, resolved_at = NULL, version = excluded.version,
+							provider_process_id = excluded.provider_process_id, provider_request_id = excluded.provider_request_id
 						WHERE ${event.metadata.source === "conduit.control-reconciliation"}
 							AND pending_approvals.session_id = excluded.session_id
-							AND pending_approvals.provider_process_id = excluded.provider_process_id
-							AND pending_approvals.provider_request_id IS excluded.provider_request_id
+							AND pending_approvals.type = excluded.type
+							AND ((pending_approvals.provider_process_id = excluded.provider_process_id
+								AND pending_approvals.provider_request_id IS excluded.provider_request_id)
+								OR (pending_approvals.status = 'pending'
+									AND pending_approvals.provider_process_id IS NULL
+									AND pending_approvals.provider_request_id IS NULL
+									AND excluded.provider_process_id LIKE 'opencode:%'
+									AND excluded.provider_request_id = pending_approvals.id))
 						RETURNING session_id, created_at`;
 			}
 
@@ -2274,11 +2281,18 @@ export const makeApprovalProjector = defineProjector(() => ({
 						INSERT INTO pending_approvals
 						(id, session_id, type, status, input, details, version, created_at, provider_process_id, provider_request_id)
 						VALUES (${id}, ${sessionId}, 'question', 'pending', ${encodeJson(questions)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt}, ${providerProcessId ?? null}, ${providerRequestId ?? null})
-						ON CONFLICT(id) DO UPDATE SET status = 'pending', decision = NULL, resolved_at = NULL, version = excluded.version
+						ON CONFLICT(id) DO UPDATE SET status = 'pending', decision = NULL, resolved_at = NULL, version = excluded.version,
+							provider_process_id = excluded.provider_process_id, provider_request_id = excluded.provider_request_id
 						WHERE ${event.metadata.source === "conduit.control-reconciliation"}
 							AND pending_approvals.session_id = excluded.session_id
-							AND pending_approvals.provider_process_id = excluded.provider_process_id
-							AND pending_approvals.provider_request_id IS excluded.provider_request_id
+							AND pending_approvals.type = excluded.type
+							AND ((pending_approvals.provider_process_id = excluded.provider_process_id
+								AND pending_approvals.provider_request_id IS excluded.provider_request_id)
+								OR (pending_approvals.status = 'pending'
+									AND pending_approvals.provider_process_id IS NULL
+									AND pending_approvals.provider_request_id IS NULL
+									AND excluded.provider_process_id LIKE 'opencode:%'
+									AND excluded.provider_request_id = pending_approvals.id))
 						RETURNING session_id, created_at`;
 			}
 

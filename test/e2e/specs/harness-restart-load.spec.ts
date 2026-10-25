@@ -427,6 +427,7 @@ test("opens the heavy session after a restart under load", async ({
 	await driver.close();
 
 	const frames: Frame[] = [];
+	const shellSnapshots = new Set<number>();
 	const approvalFrames: { device: number; kind: string; id: string }[] = [];
 	// Whole /rpc payloads the opener receives, kept only while sizes are pinned.
 	let pinned: { bytes: number; payload: string }[] | undefined;
@@ -468,6 +469,7 @@ test("opens the heavy session after a restart under load", async ({
 							_tag?: string;
 							values?: {
 								_tag: string;
+								rows?: { id?: string }[];
 								item?: {
 									_tag?: string;
 									sessionId?: string;
@@ -477,6 +479,11 @@ test("opens the heavy session after a restart under load", async ({
 							}[];
 						} = JSON.parse(payload.toString());
 						for (const envelope of message.values ?? []) {
+							if (
+								envelope._tag === "snapshot" &&
+								envelope.rows?.some((row) => row.id === HEAVY_SESSION_ID)
+							)
+								shellSnapshots.add(device);
 							if (
 								envelope._tag === "upsert" &&
 								envelope.item?._tag === "permission" &&
@@ -538,6 +545,8 @@ test("opens the heavy session after a restart under load", async ({
 			).toBeVisible({ timeout: 30_000 });
 		}),
 	);
+	// Detail text can arrive while the sidebar snapshot is still in flight.
+	await expect.poll(() => shellSnapshots.size).toBe(DEVICES);
 	const warmStart = await serverMetrics(warmMetrics);
 	const warmFrom = Date.now();
 	// This fixed sampling window measures sustained stream load and read sharing.

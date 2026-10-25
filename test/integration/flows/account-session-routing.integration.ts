@@ -94,6 +94,11 @@ describe("Integration: account session routing", () => {
 	let deletedAccount: (typeof evidence)[number]["deletedAccount"];
 
 	beforeEach(() => {
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
 		root = mkdtempSync(join(tmpdir(), "conduit-account-sessions-"));
 		launchFolders = [];
 		forkFolders = [];
@@ -109,10 +114,14 @@ describe("Integration: account session routing", () => {
 	});
 
 	afterEach(async ({ task }) => {
-		await harness?.stop();
-		harness = undefined;
-		await disposeRegistry?.();
-		disposeRegistry = undefined;
+		try {
+			await harness?.stop();
+			harness = undefined;
+			await disposeRegistry?.();
+			disposeRegistry = undefined;
+		} finally {
+			__setProbeOverrideForTesting(undefined);
+		}
 		vi.unstubAllEnvs();
 		evidence.push({
 			name: task.name,

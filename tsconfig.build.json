@@ -1,4 +1,4 @@
 {
 	"extends": "./tsconfig.json",
-	"include": ["src/**/*.ts"]
+	"include": ["src/**/*.ts", "test/e2e/helpers/build-id-daemon.ts"]
 }

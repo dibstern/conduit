@@ -18,7 +18,7 @@
 -->
 
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { tick, untrack } from "svelte";
 	import { isProcessing } from "../../stores/chat.svelte.js";
 	import { discoveryState, getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
@@ -313,7 +313,7 @@
 	);
 	// The island is phone-only, so its commands and the keyboard share one list.
 	const commands = $derived(session
-		? getSessionCommands(session, sessionState.now, { rename: () => { forceBarOpen(); renaming = true; } }, sessionViewState.compact ? "sheet" : "center")
+		? getSessionCommands(session, sessionState.now, { rename: async () => { forceBarOpen(); await tick(); renaming = true; } }, sessionViewState.compact ? "sheet" : "center")
 		: []);
 	const snoozeCommand = $derived(commands.find((item) => item.testId === "session-ctx-snooze"));
 	const globalActions = $derived(chromeMenuActions());
@@ -612,7 +612,6 @@
 
 	{#if sessionViewState.compact}
 		{@render identityBlock()}
-		{#if !collapsed}{@render overflowMenu()}{/if}
 	{/if}
 
 	<!-- The session title and its optional parent breadcrumb. It
@@ -782,7 +781,7 @@
 		/>
 	{/if}
 
-	{#if collapsed || !sessionViewState.compact}{@render overflowMenu()}{/if}
+	{@render overflowMenu()}
 	{#if backgroundTasks.length > 0 && !collapsed}
 		<BackgroundTasksRow tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(sessionState.currentId, taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
 	{/if}

@@ -8,6 +8,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Effect, Fiber, Schema, Stream } from "effect";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -1432,6 +1433,49 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 					.claudeOptions()
 					.filter((call) => call.configDir === target.configDir),
 			).toHaveLength(1);
+			if (scenario === "limited") {
+				let durableTargetJson = "null";
+				await expect
+					.poll(() => {
+						const db = new DatabaseSync(harness.daemonStorePath(), {
+							readOnly: true,
+						});
+						try {
+							const rows = db
+								.prepare(`
+									SELECT command.command_id, command.run_id, command.session_id,
+										command.provider_id, command.attempt_count, command.error_code,
+										json_extract(command.payload_json, '$.inputId') AS input_id,
+										run.status AS run_status, run.started_at
+									FROM provider_command_outbox command JOIN provider_runs run
+										ON run.id = command.run_id AND run.session_id = command.session_id
+									WHERE command.session_id = ?
+										AND command.project_key = (SELECT project_id FROM sessions WHERE id = ?)
+										AND command.effect_type = 'send_turn'
+										AND json_extract(command.payload_json, '$.inputId') NOT IN
+											('first-auto-limited', 'cut-off-auto-switch-limited')
+								`)
+								.all(sessionId, sessionId);
+							const row = rows.length === 1 ? rows[0] : null;
+							durableTargetJson = JSON.stringify(row, null, 2) ?? "null";
+							return row;
+						} finally {
+							db.close();
+						}
+					})
+					.toMatchObject({
+						session_id: sessionId,
+						provider_id: target.id,
+						attempt_count: 1,
+						error_code: null,
+						run_status: "completed",
+						started_at: expect.any(Number),
+					});
+				writeFileSync(
+					join(artifacts, "durable-continuation.json"),
+					durableTargetJson,
+				);
+			}
 		} finally {
 			writeFileSync(join(harness.root, "release-switch-turn"), "release");
 			writeFileSync(
@@ -2743,8 +2787,6 @@ for (const behavior of [
 					quota.windows.find((window) => window.kind === "seven_day")
 						?.utilization,
 				).toBe(37);
-			if (behavior === "send-during-switch")
-				writeFileSync(join(source.configDir, "conduit-test-hold-stop"), "hold");
 			const continueSession = () =>
 				Effect.runPromise(
 					browser.rpc
@@ -2795,32 +2837,6 @@ for (const behavior of [
 				return { _tag: "Success" } as const;
 			};
 			const switching = viaStrip ? switchFromStrip() : continueSession();
-			let queuedSend: Promise<unknown> | undefined;
-			if (behavior === "send-during-switch") {
-				await expect
-					.poll(() => harness.marks.some((mark) => mark.kind === "stop-held"))
-					.toBe(true);
-				queuedSend = send(
-					"Next user message after switching.",
-					"send-during-stop",
-				);
-				queuedSend.catch((error) => {
-					evidence["queuedSendError"] = String(error);
-				});
-				// A later RPC on the same connection gives the held submit a chance to run.
-				const heldStop = await snapshot();
-				// The submit's permit wait has no public signal; retain a real pending-observation window.
-				expect(
-					await Promise.race([
-						queuedSend.then(() => true),
-						new Promise<boolean>((done) => setTimeout(() => done(false), 200)),
-					]),
-				).toBe(false);
-				expect(harness.claudeOptions()).toHaveLength(callsBefore);
-				expect(latest()?.resumes ?? []).toHaveLength(0);
-				evidence["heldStop"] = heldStop;
-				writeFileSync(join(harness.root, "release-switch-stop"), "release");
-			}
 			const result = await switching;
 			evidence["result"] = result;
 			if (["unavailable", "limited", "too-large"].includes(behavior)) {
@@ -2877,9 +2893,98 @@ for (const behavior of [
 			if (behavior !== "fail" && behavior !== "hang")
 				expect(await receipt()).toEqual({ handoff: null });
 			if (!hasCutOff) {
-				if (queuedSend) await queuedSend;
-				else {
+				expect(harness.claudeOptions()).toHaveLength(callsBefore);
+				if (behavior === "send-during-switch") {
+					const original = harness
+						.claudeOptions()
+						.find((call) => call.prompt === first);
+					if (!original) throw new Error("Missing source account query");
+					writeFileSync(join(harness.root, "hold-next-initialization"), "hold");
+					const admitted = await send(
+						"Next user message after switching.",
+						"send-during-rebind",
+					);
+					expect(admitted).toEqual({ ok: true, sessionId, handedOff: true });
+					await expect
+						.poll(() =>
+							proofMarks().find(
+								(mark) =>
+									mark.kind === "query" &&
+									mark.pid === original.pid &&
+									mark.env["CLAUDE_CONFIG_DIR"] === target.configDir,
+							),
+						)
+						.toBeDefined();
+					const targetQuery = proofMarks().find(
+						(mark) =>
+							mark.kind === "query" &&
+							mark.pid === original.pid &&
+							mark.env["CLAUDE_CONFIG_DIR"] === target.configDir,
+					);
+					const sourceQuery = proofMarks().find(
+						(mark) =>
+							mark.kind === "query" &&
+							mark.pid === original.pid &&
+							mark.env["CLAUDE_CONFIG_DIR"] === source.configDir,
+					);
+					if (targetQuery?.kind !== "query" || sourceQuery?.kind !== "query")
+						throw new Error("Missing replacement query identities");
+					await expect
+						.poll(() =>
+							proofMarks().some(
+								(mark) =>
+									mark.kind === "initialization-held" &&
+									mark.queryId === targetQuery.queryId,
+							),
+						)
+						.toBe(true);
+					expect(targetQuery.queryId).not.toBe(sourceQuery.queryId);
+					expect(
+						proofMarks().filter(
+							(mark) =>
+								mark.kind === "query-closed" &&
+								mark.queryId === sourceQuery.queryId,
+						),
+					).toHaveLength(1);
+					expect(
+						proofMarks().filter(
+							(mark) =>
+								mark.kind === "enqueue" && mark.queryId === targetQuery.queryId,
+						),
+					).toEqual([]);
+					const db = new DatabaseSync(harness.daemonStorePath(), {
+						readOnly: true,
+					});
+					try {
+						const owner = db
+							.prepare(
+								`SELECT command.provider_id, command.status AS delivery_status,
+									run.status AS run_status
+								 FROM provider_command_outbox command JOIN provider_runs run
+									ON run.id = command.run_id
+								 WHERE command.session_id = ? AND command.command_id = ?`,
+							)
+							.get(sessionId, "send-during-rebind");
+						expect(owner).toEqual({
+							provider_id: target.id,
+							delivery_status: "running",
+							run_status: "pending",
+						});
+						evidence["heldRebind"] = {
+							owner,
+							queryId: targetQuery.queryId,
+							pid: targetQuery.pid,
+						};
+					} finally {
+						db.close();
+					}
 					expect(harness.claudeOptions()).toHaveLength(callsBefore);
+					expect(await receipt()).toEqual({ handoff: null });
+					writeFileSync(
+						join(harness.root, "release-held-initialization"),
+						"release",
+					);
+				} else {
 					await send("Next user message after switching.", "deferred-handoff");
 				}
 			} else if (
@@ -2903,7 +3008,31 @@ for (const behavior of [
 			const original = harness
 				.claudeOptions()
 				.find((call) => call.prompt === first);
-			expect(switched?.pid).not.toBe(original?.pid);
+			if (!original || !switched) throw new Error("Missing account query call");
+			// Account continuation retains its controller and replaces the SDK query.
+			expect(switched.pid).toBe(original.pid);
+			const originalQuery = proofMarks().find(
+				(mark) =>
+					mark.kind === "query" &&
+					mark.pid === original.pid &&
+					mark.env["CLAUDE_CONFIG_DIR"] === source.configDir,
+			);
+			const switchedQuery = proofMarks().find(
+				(mark) =>
+					mark.kind === "query" &&
+					mark.pid === switched.pid &&
+					mark.env["CLAUDE_CONFIG_DIR"] === target.configDir,
+			);
+			if (originalQuery?.kind !== "query" || switchedQuery?.kind !== "query")
+				throw new Error("Missing account query identity");
+			expect(switchedQuery.queryId).not.toBe(originalQuery.queryId);
+			expect(
+				proofMarks().filter(
+					(mark) =>
+						mark.kind === "query-closed" &&
+						mark.queryId === originalQuery.queryId,
+				),
+			).toHaveLength(1);
 			const verifyFork = async (historyAfter: typeof historyBefore) => {
 				// Coverage must include both receipt bounds. While account 2's
 				// repeated handoff is held, its user message follows account 1's
@@ -3270,7 +3399,11 @@ for (const behavior of [
 			if (behavior === "fork-before" || behavior === "fork-after")
 				await verifyFork(historyAfter);
 		} finally {
-			writeFileSync(join(harness.root, "release-switch-stop"), "release");
+			if (behavior === "send-during-switch")
+				writeFileSync(
+					join(harness.root, "release-held-initialization"),
+					"release",
+				);
 			writeFileSync(join(harness.root, "release-switch-turn"), "release");
 			if (behavior.startsWith("fork-")) {
 				const transcripts = join(artifacts, "native-transcripts");

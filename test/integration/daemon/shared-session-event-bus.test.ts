@@ -121,24 +121,22 @@ describe("daemon-wide committed session signals", () => {
 			expect(await relayBus(alpha)).toBe(bus);
 			expect(await relayBus(beta)).toBe(bus);
 
-			// Resolver calls expose which relay consumed each turn. A second alpha
-			// turn is a completion barrier behind beta's turn in alpha's reactor.
-			const observed = relays.map((relay, index) =>
-				relay.effectRuntime.runtime.runPromise(
-					Effect.map(SessionWorkspaceTag, (workspace) =>
-						vi.spyOn(workspace, "resolve").mockImplementation(() =>
-							Effect.succeed({
-								path: projects[index]?.folders[0] ?? root,
-								projectFolder: projects[index]?.folders[0] ?? root,
-								provider: "claude",
-								reset: true,
-							}),
-						),
-					),
-				),
-			);
-			const [alphaResolve, betaResolve] = await Promise.all(observed);
-			if (!alphaResolve || !betaResolve) throw new Error("Resolvers missing");
+			// Relays borrow one workspace service; each turn must reach it once.
+			const workspace = await daemon.runPromise(SessionWorkspaceTag);
+			const resolve = vi
+				.spyOn(workspace, "resolve")
+				.mockImplementation((sessionId) => {
+					const project = projects.find(({ slug }) =>
+						sessionId.startsWith(`${slug}-`),
+					);
+					if (!project) return Effect.die(`Unexpected session ${sessionId}`);
+					return Effect.succeed({
+						path: project.folders[0],
+						projectFolder: project.folders[0],
+						provider: "claude",
+						reset: true,
+					});
+				});
 			const turn = (relay: ProjectRelay, sessionId: string, suffix: string) =>
 				relay.effectRuntime.runtime.runPromise(
 					Effect.gen(function* () {
@@ -177,19 +175,24 @@ describe("daemon-wide committed session signals", () => {
 			await turn(alpha, "alpha-marker", "alpha-second");
 			await vi.waitFor(
 				() => {
-					expect(alphaResolve).toHaveBeenCalledTimes(2);
-					expect(betaResolve).toHaveBeenCalledTimes(1);
+					expect(resolve).toHaveBeenCalledTimes(3);
+					expect(
+						resolve.mock.calls.filter(([sessionId]) =>
+							sessionId.startsWith("alpha-"),
+						),
+					).toHaveLength(2);
+					expect(
+						resolve.mock.calls.filter(([sessionId]) =>
+							sessionId.startsWith("beta-"),
+						),
+					).toHaveLength(1);
 				},
 				{ timeout: 5_000 },
 			);
-			expect(
-				alphaResolve.mock.calls.map(([sessionId]) => sessionId).sort(),
-			).toEqual(["alpha-marker", "alpha-session"]);
-			expect(betaResolve.mock.calls.map(([sessionId]) => sessionId)).toEqual([
-				"beta-session",
-			]);
-			alphaResolve.mockRestore();
-			betaResolve.mockRestore();
+			expect(resolve.mock.calls.map(([sessionId]) => sessionId).sort()).toEqual(
+				["alpha-marker", "alpha-session", "beta-session"],
+			);
+			resolve.mockRestore();
 
 			await alpha.stop();
 			relays.splice(0, 1);

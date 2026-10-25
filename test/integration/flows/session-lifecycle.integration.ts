@@ -163,7 +163,11 @@ describe("Integration: Session Lifecycle", () => {
 			Stream.runHead(rpc.SubscribeInputDraft({ key: { session: firstId } })),
 		);
 		expect(draft).toEqual(
-			Option.some({ _tag: "synchronized", text: "Unsent draft" }),
+			Option.some({
+				_tag: "synchronized",
+				text: "Unsent draft",
+				attachments: [],
+			}),
 		);
 
 		await client.close();

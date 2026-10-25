@@ -51,6 +51,7 @@ const versionTables = new Set([
 	"message_tombstones",
 	"message_part_tombstones",
 	"session_sidebar",
+	"session_git_published",
 ]);
 const eventColumns: Readonly<Record<string, readonly string[]>> = {
 	events: ["sequence"],
@@ -453,6 +454,8 @@ export function daemonStoreAssertions(
 	imported: {
 		readonly projectId: string;
 		readonly before: StoreImportPosition;
+		/** Startup can publish live versions after the importer rebases its horizon. */
+		readonly minimumHorizon?: number;
 	},
 ) {
 	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
@@ -494,6 +497,8 @@ export function daemonStoreAssertions(
 					}[]
 				).map((row) => row.version),
 			);
+			// Folder publications share the store clock without belonging to one project.
+			if (table === "session_git_published") continue;
 			const scope =
 				table === "sessions" || table === "session_sidebar"
 					? "project_id = ?"
@@ -553,7 +558,10 @@ export function daemonStoreAssertions(
 			),
 			counterMatchesVersions:
 				position.readModelVersion === Math.max(0, ...allVersions),
-			horizonMatchesCounter: horizon.version === position.readModelVersion,
+			horizonCoversImport:
+				horizon.version <= position.readModelVersion &&
+				horizon.version >=
+					(imported.minimumHorizon ?? position.readModelVersion),
 			cursorsCoverEvents:
 				cursors.length > 0 &&
 				cursors.every((row) => row.last_applied_seq >= position.eventSequence),
@@ -1216,7 +1224,7 @@ export async function createProjectStoreFixture(
 				yield* sql`INSERT INTO sent_alerts VALUES (${id}, 'turn-finished', ${assistant}, 1000, 'delivered', 'fixture-claim')`;
 				yield* sql`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at) VALUES (${id}, ${projectId}, 'session', 'saved composer draft', 1000)`;
 				yield* sql`INSERT INTO session_pick_backfill VALUES (${id}, 'driver_unresolved')`;
-				yield* sql`INSERT INTO session_git_published VALUES (${`/fixture/${projectId}`}, '{"branch":"fixture"}')`;
+				yield* sql`INSERT INTO session_git_published (directory, git) VALUES (${`/fixture/${projectId}`}, '{"branch":"fixture"}')`;
 				yield* sql`INSERT INTO session_goal_checks (event_id, session_id, condition, set_at, iterations, reason, created_at) VALUES (${`${id}_goal_check`}, ${id}, 'complete', 1000, 2, 'continue', 1000)`;
 				yield* sql`INSERT INTO provider_command_sessions (project_key, session_id, provider_id, provider_kind, status, created_at, updated_at) VALUES (${projectId}, ${id}, 'opencode', 'opencode', 'idle', 1000, 1000)`;
 				yield* sql`INSERT INTO provider_command_turns (project_key, session_id, turn_id, command_id, status, created_at, updated_at) VALUES (${projectId}, ${id}, ${user}, ${`${id}_command`}, 'completed', 1000, 1000)`;

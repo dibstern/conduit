@@ -121,6 +121,8 @@ export const SESSION_GIT_PUBLICATION_MIGRATION =
 export const ATTACHMENT_STORE_MIGRATION = "0080_attachment_store.sql";
 export const SESSION_DRAFT_DELETE_MIGRATION = "0081_session_draft_delete.sql";
 export const TURN_REQUEST_SETTINGS_MIGRATION = "0082_turn_request_settings.sql";
+export const EVENTS_PROVIDER_IDENTITY_INDEXES_MIGRATION =
+	"0083_events_provider_identity_indexes.sql";
 
 export const PROJECT_COMMAND_TABLES = [
 	"command_receipts",

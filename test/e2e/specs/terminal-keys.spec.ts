@@ -876,18 +876,33 @@ test.describe("Phone row", () => {
 
 		await page.setViewportSize({ width: 390, height: 480 });
 		// Inside the panel's 1px bottom border.
+		// Row layout can settle before xterm redraws, so wait for both together.
 		await expect
-			.poll(async () => {
-				const box = await row(page).boundingBox();
-				return box && 480 - Math.round(box.y + box.height);
-			})
-			.toBe(1);
-		const rowTop = (await row(page).boundingBox())?.y ?? 0;
-		const promptBox = await prompt.boundingBox();
-		expect(promptBox?.y).toBeGreaterThanOrEqual(0);
-		expect((promptBox?.y ?? 0) + (promptBox?.height ?? 0)).toBeLessThanOrEqual(
-			rowTop,
-		);
+			.poll(() =>
+				prompt.evaluateAll((prompts) => {
+					const rows = document.querySelectorAll(".term-key-row");
+					if (prompts.length !== 1 || rows.length !== 1) return null;
+					const promptBox = prompts[0]?.getBoundingClientRect();
+					const rowBox = rows[0]?.getBoundingClientRect();
+					if (
+						!promptBox?.width ||
+						!promptBox.height ||
+						!rowBox?.width ||
+						!rowBox.height
+					)
+						return null;
+					return {
+						bottomInset: 480 - Math.round(rowBox.bottom),
+						promptTopVisible: promptBox.top >= 0,
+						promptAboveRow: promptBox.bottom <= rowBox.top,
+					};
+				}),
+			)
+			.toEqual({
+				bottomInset: 1,
+				promptTopVisible: true,
+				promptAboveRow: true,
+			});
 		await attachScreen(page, testInfo);
 	});
 

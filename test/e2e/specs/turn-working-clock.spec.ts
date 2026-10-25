@@ -4,6 +4,7 @@
 // and the clock stops for good when the turn really ends.
 
 import { writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import type { Page } from "@playwright/test";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -422,6 +423,7 @@ test.describe("Turn working clock", () => {
 		test("an open permission prompt pauses the clock, through a reload", async ({
 			page,
 			relayUrl,
+			harness,
 		}, testInfo) => {
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
@@ -434,7 +436,35 @@ test.describe("Turn working clock", () => {
 				.getByRole("button", { name: "Allow", exact: true });
 			await expect(allow).toBeVisible({ timeout: 45_000 });
 			const liveClock = async () => (await readClocks(page)).activity ?? "";
-			await expect.poll(liveClock, { timeout: 5_000 }).toMatch(CLOCK);
+			const requestId = await page
+				.locator("[data-request-id]")
+				.filter({ has: allow })
+				.getAttribute("data-request-id");
+			if (!requestId) throw new Error("Permission card has no request ID");
+			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+			let timing: { startedAt: number; pausedAt: number } | undefined;
+			try {
+				timing = db
+					.prepare(`SELECT turns.requested_at AS startedAt, pa.created_at AS pausedAt
+						FROM pending_approvals pa JOIN turns ON turns.session_id = pa.session_id
+						WHERE pa.id = ? AND pa.type = 'permission' AND pa.status = 'pending'
+						ORDER BY turns.requested_at LIMIT 1`)
+					.get(requestId) as typeof timing;
+			} finally {
+				db.close();
+			}
+			if (!timing) throw new Error("Permission has no durable turn timing");
+			// Approvals and transcript headers arrive independently. Sample only
+			// after the clock reflects this permission's durable wait boundary.
+			await expect
+				.poll(
+					async () => {
+						const value = await liveClock();
+						return CLOCK.test(value) ? clockSeconds(value) : null;
+					},
+					{ timeout: 5_000 },
+				)
+				.toBe(Math.floor((timing.pausedAt - timing.startedAt) / 1000));
 			const waitStartedAt = Date.now();
 			const paused = await liveClock();
 			await page.waitForTimeout(3_000);
@@ -473,7 +503,11 @@ test.describe("Turn working clock", () => {
 			);
 			writeFileSync(
 				testInfo.outputPath("paused-readings.json"),
-				JSON.stringify({ paused, waitedMs, wallSeconds, worked }, null, 2),
+				JSON.stringify(
+					{ paused, timing, waitedMs, wallSeconds, worked },
+					null,
+					2,
+				),
 			);
 		});
 	});

@@ -278,14 +278,6 @@ describe("Conduit prompt identity through the daemon and Claude runner", () => {
 		});
 		await harness.restart({ startupTimeoutMs: 60_000 });
 		const recovered = await harness.connect(session);
-		// A live barrier follows the connect-time permission/question reconciliation.
-		await harness.emitOpenCodeEvent({
-			directory: realpathSync(harness.projectDir),
-			payload: {
-				type: "session.status",
-				properties: { sessionID: session, status: { type: "idle" } },
-			},
-		});
 		for (const type of ["permission", "question"] as const) {
 			await recovered.waitFor(
 				(frame) =>
@@ -293,7 +285,14 @@ describe("Conduit prompt identity through the daemon and Claude runner", () => {
 					(frame["requestId"] ?? frame["toolId"]) === `${type}-legacy`,
 			);
 		}
-		expect(rows(harness)).toHaveLength(2);
+		await vi.waitFor(() => {
+			expect(rows(harness)).toHaveLength(2);
+			for (const row of rows(harness)) {
+				expect(row.id).toBe(`${row.type}-legacy`);
+				expect(row.provider_request_id).toBe(row.id);
+				expect(row.provider_process_id).toMatch(/^opencode:/);
+			}
+		});
 		for (const row of rows(harness)) await answer(recovered, row);
 		await vi.waitFor(() =>
 			expect(rows(harness).map(({ status }) => status)).toEqual([
@@ -314,6 +313,206 @@ describe("Conduit prompt identity through the daemon and Claude runner", () => {
 					),
 			).toBe(true);
 		}
+
+		// Replayed asks cannot reopen resolved legacy cards or fill half a reference.
+		mutateStore(harness, (db) => {
+			db.prepare(
+				"UPDATE pending_approvals SET provider_process_id = NULL, provider_request_id = NULL WHERE id = 'permission-legacy'",
+			).run();
+			db.prepare(
+				"UPDATE pending_approvals SET status = 'pending', provider_process_id = NULL WHERE id = 'question-legacy'",
+			).run();
+		});
+		for (const type of ["permission", "question"] as const) {
+			await harness.emitOpenCodeEvent({
+				directory: realpathSync(harness.projectDir),
+				payload: {
+					type: `${type}.asked`,
+					properties: openCodePrompt(type, `${type}-legacy`, session),
+				},
+			});
+		}
+		await harness.addOpenCodePrompt(
+			"permission",
+			harness.projectDir,
+			openCodePrompt("permission", "guard-barrier", session),
+		);
+		await vi.waitFor(() => expect(rows(harness)).toHaveLength(3));
+		expect(
+			rows(harness).find(({ id }) => id === "permission-legacy"),
+		).toMatchObject({
+			status: "resolved",
+			provider_process_id: null,
+			provider_request_id: null,
+		});
+		expect(
+			rows(harness).find(({ id }) => id === "question-legacy"),
+		).toMatchObject({
+			status: "pending",
+			provider_process_id: null,
+			provider_request_id: "question-legacy",
+		});
+
+		const foreign = await recovered.createSession(
+			"Foreign prompts",
+			"opencode",
+			"opencode",
+		);
+		mutateStore(harness, (db) => {
+			db.prepare(
+				"UPDATE pending_approvals SET id = 'foreign-legacy', provider_process_id = NULL, provider_request_id = NULL WHERE provider_request_id = 'guard-barrier'",
+			).run();
+		});
+		await harness.addOpenCodePrompt(
+			"permission",
+			harness.projectDir,
+			openCodePrompt("permission", "foreign-legacy", foreign),
+		);
+		await vi.waitFor(() => expect(rows(harness)).toHaveLength(4));
+		expect(
+			rows(harness).find(({ id }) => id === "foreign-legacy"),
+		).toMatchObject({
+			session_id: session,
+			provider_process_id: null,
+			provider_request_id: null,
+		});
+		expect(
+			rows(harness).find(
+				({ provider_request_id }) => provider_request_id === "foreign-legacy",
+			),
+		).toMatchObject({
+			session_id: foreign,
+			provider_process_id: expect.stringMatching(/^opencode:/),
+		});
+	}, 150_000);
+
+	it("answers the admitted OpenCode prompts after selecting another provider", async () => {
+		artifact = "opencode-admitted-prompts";
+		harness = ProcessHarness.create({
+			dist: "dist",
+			foregroundCli: true,
+			autoStartOpenCode: true,
+		});
+		await harness.restart({ startupTimeoutMs: 60_000 });
+		const browser = await harness.connect();
+		const session = await browser.createSession(
+			"Admitted prompts",
+			"opencode",
+			"opencode",
+		);
+		writeFileSync(join(harness.configDir, "fake-opencode-hold-turn"), "hold");
+		const inputId = randomUUID();
+		await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId: session,
+				originId: browser.originId,
+				inputId,
+				delivery: "queue",
+				text: "Wait for the admitted provider's prompts",
+			}),
+		);
+		await vi.waitFor(() =>
+			expect(
+				harness
+					.opencodeRequests()
+					.some(
+						({ method, url }) =>
+							method === "POST" &&
+							url.split("?")[0] === `/session/${session}/prompt_async`,
+					),
+			).toBe(true),
+		);
+		// The held fake does not echo intake. Use the actual dispatched native id
+		// so these asks belong to this admitted run before model selection changes.
+		const request = harness
+			.opencodeRequestBodies()
+			.find(({ path }) => path === `/session/${session}/prompt_async`);
+		const prompt: unknown = JSON.parse(request?.body ?? "{}");
+		if (
+			typeof prompt !== "object" ||
+			prompt === null ||
+			!("messageID" in prompt) ||
+			typeof prompt.messageID !== "string"
+		)
+			throw new Error(
+				"Missing native message ID for the admitted OpenCode input",
+			);
+		await harness.emitOpenCodeEvent({
+			directory: realpathSync(harness.projectDir),
+			payload: {
+				id: randomUUID(),
+				type: "message.updated",
+				properties: {
+					info: {
+						id: prompt.messageID,
+						sessionID: session,
+						role: "user",
+						time: { created: Date.now() },
+					},
+				},
+			},
+		});
+		await vi.waitFor(() =>
+			mutateStore(harness, (db) =>
+				expect(
+					db
+						.prepare<[string], { status: string; started_at: number | null }>(
+							`SELECT run.status, run.started_at FROM provider_runs run
+							JOIN provider_command_outbox command ON command.run_id = run.id
+							WHERE command.command_id = ? AND command.effect_type = 'send_turn'`,
+						)
+						.get(inputId),
+				).toMatchObject({ status: "running", started_at: expect.any(Number) }),
+			),
+		);
+		for (const [type, id] of [
+			["permission", "live-permission"],
+			["question", "live-answer"],
+			["question", "live-reject"],
+		] as const) {
+			await harness.addOpenCodePrompt(
+				type,
+				harness.projectDir,
+				openCodePrompt(type, id, session),
+			);
+		}
+		await vi.waitFor(() => expect(rows(harness)).toHaveLength(3));
+		// Model selection changes the next turn, not the account owning these asks.
+		await Effect.runPromise(
+			browser.rpc.SwitchModel({
+				sessionId: session,
+				originId: browser.originId,
+				providerId: "claude",
+				modelId: "opus",
+			}),
+		);
+		for (const row of rows(harness)) {
+			if (row.provider_request_id === "live-reject")
+				await browser.rejectQuestion({ toolId: row.id });
+			else await answer(browser, row);
+		}
+		expect(rows(harness).map(({ status }) => status)).toEqual([
+			"resolved",
+			"resolved",
+			"resolved",
+		]);
+		for (const path of [
+			`/session/${session}/permissions/live-permission`,
+			"/question/live-answer/reply",
+			"/question/live-reject/reject",
+		]) {
+			expect(
+				harness
+					.opencodeRequests()
+					.filter(
+						({ method, url }) =>
+							method === "POST" && url.split("?")[0] === path,
+					),
+			).toHaveLength(1);
+		}
+		await harness.setOpenCodeStatus(harness.projectDir, session, {
+			type: "idle",
+		});
 	}, 150_000);
 
 	it("expires answers to stopped OpenCode prompts and retires the rest on replacement", async () => {
@@ -595,6 +794,15 @@ describe("Conduit prompt identity through the daemon and Claude runner", () => {
 						`${kind === "approval" ? "permission" : kind}_pending` &&
 					(frame["requestId"] ?? frame["toolId"]) === two.id,
 			);
+			if (kind === "question") {
+				await expect(a.rejectQuestion({ toolId: one.id })).rejects.toThrow(
+					"Claude questions require an answer",
+				);
+				expect(rows(harness).find((row) => row.id === one.id)?.status).toBe(
+					"pending",
+				);
+				expect(answers(harness)).toEqual([]);
+			}
 			await answer(a, one);
 			await firstTurn;
 			expect(rows(harness).find((row) => row.id === one.id)?.status).toBe(

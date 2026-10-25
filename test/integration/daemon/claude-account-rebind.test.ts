@@ -3,6 +3,7 @@
 // output/approval is attributed to the next account's run.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -31,7 +32,7 @@ afterEach(async ({ task }) => {
 		},
 	});
 	writeFileSync(
-		"/tmp/82tn9-3-r3-account-rebind.json",
+		join(tmpdir(), `82tn9-3-r3-account-rebind-${process.pid}.json`),
 		JSON.stringify(proofs, null, 2),
 	);
 	harness = undefined;
@@ -150,7 +151,16 @@ it.each([
 				(index === 4 ? "question_pending" : "permission_pending"),
 			cursor,
 		);
-		if (index === 4) await browser.rejectQuestion(request);
+		if (index === 4)
+			await Effect.runPromise(
+				browser.rpc.AnswerQuestion({
+					projectSlug: "process-test",
+					originId: browser.originId,
+					commandId: randomUUID(),
+					toolId: String(request["toolId"]),
+					answers: { "0": "Continue" },
+				}),
+			);
 		else await browser.answerApproval(request, "allow");
 		await pending;
 		const controller = discoverRunners(

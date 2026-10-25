@@ -316,26 +316,33 @@ describe("OpenCode project extra folders through the daemon", () => {
 		);
 		evidence["sessionId"] = sessionId;
 		rmSync(fixture.projectDir, { recursive: true });
-		const reply = await browser.send(sessionId, "Reply with pong.");
+		const reply = await browser
+			.send(sessionId, "Reply with pong.")
+			.catch(String);
 		evidence["reply"] = reply;
-		expect(reply.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
-		expect(reply.chunks).toEqual([]);
+		expect(reply).toEqual(
+			expect.stringContaining(
+				`Main project folder does not exist: ${fixture.projectDir}`,
+			),
+		);
 		expect(
 			requestBodies(fixture, "POST", `/session/${sessionId}/prompt_async`),
 		).toEqual([]);
-		// An identical failure is still its own turn error, not swallowed.
-		const repeat = await browser.send(sessionId, "Reply with pong.");
+		// Failed admission keeps both attempts outside the transcript.
+		const repeat = await browser
+			.send(sessionId, "Reply with pong.")
+			.catch(String);
 		evidence["repeat"] = repeat;
-		expect(repeat.done["lastTurnEndVersion"]).toEqual(expect.any(Number));
-		// The failure is a turn error in the transcript, so it survives a reload.
+		expect(repeat).toEqual(
+			expect.stringContaining(
+				`Main project folder does not exist: ${fixture.projectDir}`,
+			),
+		);
 		const history = await browser.history(sessionId);
 		evidence["history"] = history;
 		const notices = history
 			.flatMap(({ parts }) => parts ?? [])
 			.filter(({ type }) => type === "error");
-		expect(notices).toHaveLength(2);
-		for (const notice of notices) {
-			expect(String(notice.text)).toContain(fixture.projectDir);
-		}
+		expect(notices).toEqual([]);
 	}, 60_000);
 });

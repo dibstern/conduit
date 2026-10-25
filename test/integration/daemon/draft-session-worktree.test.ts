@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { SessionWorkspaceChangedPayload } from "../../../src/lib/persistence/events.js";
+import type { SessionGit } from "../../../src/lib/shared-types.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const gitEnv = { ...process.env };
@@ -238,6 +239,13 @@ describe("Draft worktree launches through the built daemon", () => {
 				...(path ? { worktreePath: path } : {}),
 			});
 			names.set(sessionId, name);
+			await browser.waitFor(
+				(frame) =>
+					frame["type"] === "session_row" &&
+					frame["id"] === sessionId &&
+					(frame["git"] as SessionGit | undefined)?.branch ===
+						(path ? "feature/draft" : "main"),
+			);
 			const { sessions } = await sendRpcRequest(socket, {
 				_tag: "ListDaemonSessions",
 				projectSlug: "process-test",
@@ -312,6 +320,12 @@ describe("Draft worktree launches through the built daemon", () => {
 				worktreePath: path,
 			});
 			names.set(sessionId, name);
+			await browser.waitFor(
+				(frame) =>
+					frame["type"] === "session_row" &&
+					frame["id"] === sessionId &&
+					(frame["git"] as SessionGit | undefined)?.branch === branch,
+			);
 			const { sessions } = await sendRpcRequest(socket, {
 				_tag: "ListDaemonSessions",
 				projectSlug: "process-test",

@@ -15,7 +15,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { SessionWorkspaceChangedPayloadSchema } from "../../../src/lib/persistence/events.js";
-import { SessionInfoSchema } from "../../../src/lib/shared-types.js";
+import {
+	type SessionGit,
+	SessionInfoSchema,
+} from "../../../src/lib/shared-types.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const gitEnv = { ...process.env };
@@ -126,7 +129,10 @@ describe("Claude declared workspace moves through the built daemon", () => {
 		])
 			vi.stubEnv(key, undefined);
 		scenario = name;
-		evidence = {};
+		evidence = {
+			phase: "setup",
+			distOverride: process.env["CONDUIT_TEST_DIST"] ?? null,
+		};
 		harness = ProcessHarness.create({ claudeReplay: replay });
 		initRepo(harness.projectDir);
 		const entered = join(
@@ -181,13 +187,15 @@ describe("Claude declared workspace moves through the built daemon", () => {
 				: [];
 			evidence["errors"] =
 				task.result?.errors?.map(({ message }) => message) ?? [];
-			if (task.result?.errors?.length)
+			if (task.result?.errors?.length) {
 				evidence["diagnosticLogs"] = fixture.logTail
 					.replace(/\(node:\d+\)/g, "(node:<pid>)")
 					.replace(/"time":\d+/g, '"time":"<time>"')
 					.replace(/"pid":\d+/g, '"pid":"<pid>"')
 					.replace(/"hostname":"[^"]+"/g, '"hostname":"<host>"')
 					.replace(/ses_[a-z0-9]+/g, "<session>");
+				evidence["fixtureProof"] = fixture.proof();
+			}
 		} finally {
 			// Release a paused trace even when its assertion fails.
 			writeFileSync(join(fixture.root, "claude-replay-release"), "release\n");
@@ -634,25 +642,36 @@ exec '${realGit}' "$@"
 		initRepo(extra);
 		const entered = join(extra, ".claude", "worktrees", "contract");
 		git(extra, "worktree", "add", "-b", "worktree-contract", entered);
+		evidence["phase"] = "save project";
 		await sendRpcRequest(socket, {
 			_tag: "SaveProject",
 			slug: "process-test",
 			folders: [fixture.projectDir, extra],
 		});
+		evidence["phase"] = "connect browser";
 		const browser = await fixture.connect();
+		evidence["phase"] = "create session";
 		const sessionId = await browser.createSession(
 			"Upgrade after declared move",
 		);
+		evidence["phase"] = "enter worktree";
 		await browser.send(sessionId, "Enter the secondary worktree.");
-		if (state === "consumed")
+		if (state === "consumed") {
+			evidence["phase"] = "consume move";
 			await browser.send(sessionId, "Reply with pong in the worktree.");
+		}
+		evidence["phase"] = "await original runner";
 		const old = await fixture.waitForMark(
 			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
 		);
 		if (old?.kind !== "runner-started")
 			throw new Error("Missing original runner");
+		evidence["originalRunner"] = old;
+		evidence["phase"] = "kill daemon";
 		await fixture.kill();
+		evidence["phase"] = "restart daemon";
 		await fixture.restart({ buildId: "q5u6-14-upgraded" });
+		evidence["phase"] = "await deferred upgrade";
 		await fixture.waitForMark(
 			(mark) =>
 				mark.kind === "runner-upgrade" &&
@@ -661,8 +680,11 @@ exec '${realGit}' "$@"
 				mark.oldPid === old.pid,
 		);
 		expect(() => process.kill(old.pid, 0)).not.toThrow();
+		evidence["phase"] = "reconnect browser";
 		const restored = await fixture.connect(sessionId);
+		evidence["phase"] = "send after restart";
 		await restored.send(sessionId, "Reply with pong after the daemon restart.");
+		evidence["phase"] = "await old runner exit";
 		await vi.waitFor(() => expect(() => process.kill(old.pid, 0)).toThrow(), {
 			timeout: 10_000,
 		});
@@ -674,6 +696,7 @@ exec '${realGit}' "$@"
 			[extra]: realpathSync(entered),
 		});
 		evidence["upgrade"] = { deferred: true, restartedOnSend: true };
+		evidence["phase"] = "complete";
 	});
 
 	it("reuses the runner when a declared path is a symlink to a valid worktree", async () => {
@@ -1327,6 +1350,13 @@ exec '${realGit}' "$@"
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Restored worktree");
 		await browser.send(sessionId, "Reply with pong.");
+		await browser.waitFor(
+			(frame) =>
+				frame["type"] === "session_row" &&
+				frame["id"] === sessionId &&
+				(frame["git"] as SessionGit | undefined)?.branch ===
+					"worktree-contract",
+		);
 		expect(
 			(await list()).sessions.find(({ id }) => id === sessionId),
 		).toMatchObject({

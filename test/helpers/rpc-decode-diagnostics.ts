@@ -171,11 +171,12 @@ export class RpcDecodeDiagnostics {
 	serialization(
 		endpoint: string,
 	): RpcSerialization.RpcSerialization["Service"] {
+		// RPC can encode initial requests before replacing its socket parser.
+		const requests = new Map<string, string>();
 		return RpcSerialization.RpcSerialization.of({
 			...RpcSerialization.json,
 			makeUnsafe: () => {
 				const parser = RpcSerialization.json.makeUnsafe();
-				const requests = new Map<string, string>();
 				return {
 					encode: (message) => {
 						if (isRecord(message)) {

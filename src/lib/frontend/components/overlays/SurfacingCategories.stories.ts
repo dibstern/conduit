@@ -46,6 +46,7 @@ let releaseCounts: (() => void)[] = [];
 const meta = {
 	title: "Overlays/SurfacingCategories",
 	component: SurfacingCategories,
+	tags: ["viewport-capture"],
 	parameters: { layout: "fullscreen" },
 	args: { active: true, onPageChange: () => {} },
 	beforeEach: ({ name }) => {

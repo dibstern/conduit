@@ -13,6 +13,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -22,7 +23,7 @@ it.each([
 	"explicit",
 	"invalid",
 ] as const)("dev startup handles %s configuration", async (scenario) => {
-	const root = mkdtempSync("/tmp/conduit-dev-startup-");
+	const root = mkdtempSync(join(tmpdir(), "conduit-dev-startup-"));
 	const configDir = join(root, "config");
 	for (const dir of ["bin", "scripts", "src", "config", "home"])
 		mkdirSync(join(root, dir));
@@ -59,6 +60,10 @@ export default {
 	// Reuse a real compiled build; this test exercises the dev process through
 	// actual config loading and server readiness, without rebuilding per case.
 	writeFileSync(join(root, "bin/pnpm"), "#!/bin/sh\nexit 0\n", {
+		mode: 0o755,
+	});
+	// This fixture owns its child; host listeners are never cleanup targets.
+	writeFileSync(join(root, "bin/lsof"), "#!/bin/sh\nexit 1\n", {
 		mode: 0o755,
 	});
 	const reservation = createServer();
@@ -104,21 +109,29 @@ export default {
 	child.stderr.on("data", (data: Buffer) => {
 		logs += data.toString();
 	});
+	const viteReady = join(root, "vite-listening.json");
 	try {
 		await expect
-			.poll(() => logs, { timeout: 20_000 })
-			.toContain(
-				scenario === "invalid" ? "waiting for the next change" : "[dev] ready",
-			);
+			.poll(
+				() => ({
+					ready: logs.includes(
+						scenario === "invalid"
+							? "waiting for the next change"
+							: "[dev] ready",
+					),
+					vite: scenario === "invalid" || existsSync(viteReady),
+				}),
+				{ timeout: 20_000 },
+			)
+			.toEqual({ ready: true, vite: true });
 		expect(logs).not.toContain("is not a function");
+		expect(logs).not.toContain("stopping old conduit");
 		expect(child.exitCode).toBeNull();
 		if (scenario === "invalid") {
 			expect(logs).not.toContain("[dev] ready");
 		} else {
 			const response = await fetch(`http://127.0.0.1:${port}/health`);
 			expect(response.ok).toBe(true);
-			const viteReady = join(root, "vite-listening.json");
-			await expect.poll(() => existsSync(viteReady)).toBe(true);
 			const vite = JSON.parse(readFileSync(viteReady, "utf8")) as {
 				port: number;
 				clearScreen: boolean;

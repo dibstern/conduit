@@ -1,7 +1,8 @@
 // Failure modes: child notifications contaminate the parent transcript, spawn
 // finishes the card early, control calls create duplicate children, child
 // approvals have no writable owner, Stop leaves children running, or restart
-// loses the child link and exposes a resumable input path.
+// loses the child link and exposes a resumable input path. Held command output
+// must survive reloads, nested forks and source deletion without run ownership.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -291,9 +292,16 @@ describe("Codex read-only children through the daemon and detached runner", () =
 						spawnCompleted,
 						...earlyChild.slice(liveAt + 1),
 					];
+					const outputAt = reordered.findIndex(
+						({ message }) =>
+							message?.method === "item/commandExecution/outputDelta" &&
+							message.params?.["threadId"] === CHILD_THREAD,
+					);
+					expect(outputAt).toBeGreaterThan(0);
+					expect(outputAt).toBeLessThan(liveAt);
 					return reordered.map((row, index) => ({
 						...row,
-						at: index > liveAt ? 1 : 0,
+						at: index > liveAt ? 2 : index > outputAt ? 1 : 0,
 					}));
 				},
 			);
@@ -314,6 +322,156 @@ describe("Codex read-only children through the daemon and detached runner", () =
 			await vi.waitFor(
 				() =>
 					expect(
+						snapshot(fixture, child.id).events.some(
+							({ type, data }) =>
+								type === "tool.running" &&
+								(data["metadata"] as Record<string, unknown> | undefined)?.[
+									"output"
+								] === CHILD_OUTPUT,
+						),
+					).toBe(true),
+				{ timeout: TIMEOUT, interval: 100 },
+			);
+			const liveEvents = snapshot(fixture, child.id).events;
+			expect(
+				liveEvents.filter(({ type }) =>
+					["tool.completed", "turn.completed"].includes(type),
+				),
+			).toEqual([]);
+			const liveRunId = liveEvents.find(({ type }) => type === "run.started")
+				?.metadata["runId"];
+			expect(liveRunId).toEqual(expect.any(String));
+			const liveDb = new Database(fixture.daemonStorePath(), {
+				readonly: true,
+			});
+			try {
+				expect(
+					liveDb
+						.prepare(
+							"SELECT status FROM provider_runs WHERE id = ? AND session_id = ?",
+						)
+						.get(liveRunId, child.id),
+				).toEqual({ status: "running" });
+				expect(
+					liveDb
+						.prepare(
+							"SELECT provider FROM events WHERE session_id = ? AND type = 'run.started' AND json_extract(metadata, '$.runId') = ? ORDER BY sequence LIMIT 1",
+						)
+						.get(child.id, liveRunId),
+				).toEqual({ provider: "codex" });
+				expect(
+					liveDb
+						.prepare(
+							"SELECT command_id FROM provider_command_outbox WHERE session_id = ?",
+						)
+						.all(child.id),
+				).toEqual([]);
+			} finally {
+				liveDb.close();
+			}
+			let forkSource = child.id;
+			const liveMessage = liveEvents.find(({ type }) => type === "tool.running")
+				?.data["messageId"];
+			if (typeof liveMessage !== "string")
+				throw new Error("Missing live child tool message");
+			let forkMessage = liveMessage;
+			const inheritedHistories = [];
+			for (let generation = 0; generation < 2; generation++) {
+				const forked = await fixture.requestRpc({
+					_tag: "ForkSession",
+					originId: browser.originId,
+					sessionId: forkSource,
+					messageId: forkMessage,
+				});
+				if (!forked.sessionId) throw new Error("Missing fork session id");
+				const history = await browser.history(forked.sessionId);
+				const toolMessage = history.find(({ parts }) =>
+					parts?.some((part) => part.tool === "Bash"),
+				);
+				if (!toolMessage) throw new Error("Missing inherited tool message");
+				const reopened = await fixture.connect(forked.sessionId);
+				inheritedHistories.push({
+					sessionId: forked.sessionId,
+					history,
+					reloadedHistory: await reopened.history(forked.sessionId),
+				});
+				const forkDb = new Database(fixture.daemonStorePath(), {
+					readonly: true,
+				});
+				try {
+					expect(
+						forkDb
+							.prepare(
+								"SELECT run_id FROM turns WHERE session_id = ? AND run_id IS NOT NULL",
+							)
+							.all(forked.sessionId),
+					).toEqual([]);
+				} finally {
+					forkDb.close();
+				}
+				forkSource = forked.sessionId;
+				forkMessage = toolMessage.id;
+			}
+			evidence["inheritedLiveOutput"] = inheritedHistories;
+			for (const { history, reloadedHistory } of inheritedHistories)
+				for (const rows of [history, reloadedHistory])
+					expect(rows.flatMap(({ parts }) => parts ?? [])).toContainEqual(
+						expect.objectContaining({
+							tool: "Bash",
+							state: expect.objectContaining({
+								status: "running",
+								metadata: { output: CHILD_OUTPUT },
+							}),
+						}),
+					);
+			const [middleFork, survivingFork] = inheritedHistories;
+			if (!middleFork || !survivingFork)
+				throw new Error("Missing nested fork history");
+			await fixture.requestRpc({
+				_tag: "DeleteSession",
+				originId: browser.originId,
+				sessionId: middleFork.sessionId,
+			});
+			expect(
+				sessions(fixture).some(({ id }) => id === middleFork.sessionId),
+			).toBe(false);
+			const afterSourceDelete = await browser.history(survivingFork.sessionId);
+			const survivingReload = await fixture.connect(survivingFork.sessionId);
+			const reloadedAfterSourceDelete = await survivingReload.history(
+				survivingFork.sessionId,
+			);
+			evidence["inheritedAfterSourceDelete"] = {
+				afterSourceDelete,
+				reloadedAfterSourceDelete,
+			};
+			for (const history of [afterSourceDelete, reloadedAfterSourceDelete])
+				expect(history.flatMap(({ parts }) => parts ?? [])).toContainEqual(
+					expect.objectContaining({
+						tool: "Bash",
+						state: expect.objectContaining({
+							status: "running",
+							metadata: { output: CHILD_OUTPUT },
+						}),
+					}),
+				);
+			const liveHistory = await browser.history(child.id);
+			const reloaded = await fixture.connect(child.id);
+			const reloadedHistory = await reloaded.history(child.id);
+			for (const history of [liveHistory, reloadedHistory])
+				expect(history.flatMap(({ parts }) => parts ?? [])).toContainEqual(
+					expect.objectContaining({
+						tool: "Bash",
+						state: expect.objectContaining({
+							status: "running",
+							metadata: { output: CHILD_OUTPUT },
+						}),
+					}),
+				);
+			evidence["childLiveOutput"] = { liveRunId, liveHistory, reloadedHistory };
+			writeFileSync(gatePath, "1");
+			await vi.waitFor(
+				() =>
+					expect(
 						content(snapshot(fixture, child.id).events, "text.delta"),
 					).toBe(CHILD_TEXT),
 				{ timeout: TIMEOUT, interval: 100 },
@@ -323,7 +481,7 @@ describe("Codex read-only children through the daemon and detached runner", () =
 				metadata: { childSessionId: child.id },
 			});
 			expect(snapshot(fixture, id).turns).toEqual([{ state: "running" }]);
-			writeFileSync(gatePath, "1");
+			writeFileSync(gatePath, "2");
 			await waitTurn(fixture, id, "completed");
 			await waitTurn(fixture, child.id, "completed");
 			const childEvents = snapshot(fixture, child.id).events;
@@ -412,6 +570,57 @@ describe("Codex read-only children through the daemon and detached runner", () =
 					?.status,
 			).toBe("idle");
 			await rejectChildInput(browser, child.id);
+			// 8dda48ab emitted Codex envelopes without runId. Migration 0078
+			// leaves closed history unowned; its frozen tool output still belongs
+			// to the original Codex event channel, even after source deletion.
+			const legacyDb = new Database(fixture.daemonStorePath());
+			try {
+				legacyDb
+					.prepare(
+						"UPDATE events SET metadata = json_remove(metadata, '$.runId') WHERE session_id = ?",
+					)
+					.run(child.id);
+				legacyDb
+					.prepare(
+						"UPDATE turns SET run_id = NULL WHERE session_id = ? AND state = 'completed'",
+					)
+					.run(child.id);
+				expect(
+					legacyDb
+						.prepare<[string], { count: number }>(
+							"SELECT count(*) AS count FROM events WHERE session_id = ? AND json_extract(metadata, '$.runId') IS NOT NULL",
+						)
+						.get(child.id)?.count,
+				).toBe(0);
+				expect(
+					legacyDb
+						.prepare<[string], { count: number }>(
+							"SELECT count(*) AS count FROM turns WHERE session_id = ? AND run_id IS NOT NULL",
+						)
+						.get(child.id)?.count,
+				).toBe(0);
+			} finally {
+				legacyDb.close();
+			}
+			const legacyHistory = await browser.history(survivingFork.sessionId);
+			const legacyReload = await fixture.connect(survivingFork.sessionId);
+			const reloadedLegacyHistory = await legacyReload.history(
+				survivingFork.sessionId,
+			);
+			evidence["inheritedLegacyOutput"] = {
+				legacyHistory,
+				reloadedLegacyHistory,
+			};
+			for (const history of [legacyHistory, reloadedLegacyHistory])
+				expect(history.flatMap(({ parts }) => parts ?? [])).toContainEqual(
+					expect.objectContaining({
+						tool: "Bash",
+						state: expect.objectContaining({
+							status: "running",
+							metadata: { output: CHILD_OUTPUT },
+						}),
+					}),
+				);
 		},
 		TIMEOUT * 2,
 	);

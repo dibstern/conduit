@@ -7,6 +7,7 @@ import { PNG } from "pngjs";
 import { createSession } from "../helpers/e2e-harness.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { settleSheet } from "../helpers/sheet-drag.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -626,7 +627,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		);
 	});
 
-	test("mobile: expanded and collapsed overflow menus use bottom sheets", async ({
+	test("mobile: expanded and collapsed overflow menus drop below the header", async ({
 		page,
 		relayUrl,
 	}) => {
@@ -639,10 +640,12 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(overflowButton).toBeVisible();
 		await overflowButton.click();
 		await expect(menu).toBeVisible();
+		await settleSheet(page);
 		const sheet = await menu.boundingBox();
+		const header = await bar.boundingBox();
 		expect(sheet).not.toBeNull();
 		expect(
-			Math.abs((sheet?.y ?? 0) + (sheet?.height ?? 0) - 852),
+			Math.abs((sheet?.y ?? 0) - (header?.y ?? 0) - (header?.height ?? 0)),
 		).toBeLessThanOrEqual(1);
 		expect(sheet?.x).toBe(0);
 		expect(sheet?.width).toBe(393);
@@ -662,14 +665,22 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await overflowButton.click();
 		const scrim = page.getByTestId("menu-sheet-scrim");
 		await expect(scrim).not.toHaveClass(/pointer-events-none/);
+		await settleSheet(page);
 		const scrimBox = await scrim.boundingBox();
 		const reopenedSheet = await menu.boundingBox();
 		if (!scrimBox || !reopenedSheet)
 			throw new Error("Sheet or scrim is missing");
-		expect(reopenedSheet.y).toBeGreaterThan(scrimBox.y);
+		expect(reopenedSheet.y + reopenedSheet.height).toBeLessThan(
+			scrimBox.y + scrimBox.height,
+		);
 		const scrimPoint = {
 			x: scrimBox.x + scrimBox.width / 2,
-			y: (scrimBox.y + reopenedSheet.y) / 2,
+			y:
+				(reopenedSheet.y +
+					reopenedSheet.height +
+					scrimBox.y +
+					scrimBox.height) /
+				2,
 		};
 		expect(
 			await scrim.evaluate(
@@ -736,7 +747,6 @@ test.describe("Sidebar Layout — Mobile", () => {
 			element.scrollTop = element.scrollHeight;
 		});
 		await expect(bar).toHaveAttribute("data-collapsed", "true");
-		const collapsedBefore = await bar.boundingBox();
 		await expect(overflowButton).toBeVisible();
 		await overflowButton.click();
 		const overflowMenu = page.getByTestId("session-bar-island-menu");
@@ -746,8 +756,8 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(
 			overflowMenu.getByRole("menuitemradio", { name: "Files" }),
 		).toBeVisible();
-		await expect(bar).toHaveAttribute("data-collapsed", "true");
-		expect(await bar.boundingBox()).toEqual(collapsedBefore);
+		await expect(bar).toHaveAttribute("data-collapsed", "false");
+		expect(await bar.boundingBox()).toEqual(before);
 	});
 
 	test("mobile: overflow settles, renames, and opens chrome actions", async ({

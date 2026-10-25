@@ -44,6 +44,7 @@ describe("Reply references through the built daemon", () => {
 		"opencode",
 	] as const)("sends the exact plain text to the %s agent", async (provider) => {
 		harness = await ProcessHarness.start({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			managedOpenCode: provider === "opencode",
 		});
 		const fixture = harness;

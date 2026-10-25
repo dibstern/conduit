@@ -10,6 +10,7 @@
 import { writeFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../helpers/replay-fixture.js";
+import { settleSheet } from "../helpers/sheet-drag.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -88,17 +89,18 @@ test("phone: scrolling the session sheet, then tapping an item, keeps chat text 
 		"pointer-events",
 		"auto",
 	);
-	const box = await sheet.boundingBox();
-	if (!box) throw new Error("sheet is not rendered");
+	const body = sheet.locator("[data-sheet-body]");
+	await expect
+		.poll(() => body.evaluate((node) => node.scrollHeight - node.clientHeight))
+		.toBeGreaterThan(0);
+	await settleSheet(page);
+	const box = await body.boundingBox();
+	if (!box) throw new Error("sheet body is not rendered");
 	await swipeUp(page, box.x + box.width * 0.6, box.y + box.height * 0.8, 100);
 	await expect
-		.poll(
-			() =>
-				sheet.locator("[data-sheet-body]").evaluate((node) => node.scrollTop),
-			{
-				message: "the swipe must scroll the sheet; that cancels the press",
-			},
-		)
+		.poll(() => body.evaluate((node) => node.scrollTop), {
+			message: "the swipe must scroll the sheet; that cancels the press",
+		})
 		.toBeGreaterThan(0);
 	// Pin keeps the chat on screen; Mark unread would send a phone back to the list.
 	await sheet.getByRole("menuitem", { name: "Pin to top" }).tap();

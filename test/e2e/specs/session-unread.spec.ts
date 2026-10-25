@@ -595,6 +595,16 @@ async function dwellAndViewport(
 		const viewport = A.viewportSize();
 		if (!viewport) throw new Error("window A has no viewport");
 		await A.setViewportSize({ width: viewport.width, height: 300 });
+		// Observe the resize's overflowing bottom pin before draining its scroll guard.
+		await expect
+			.poll(() =>
+				transcript(A).evaluate(
+					(el) =>
+						el.scrollHeight > el.clientHeight &&
+						el.scrollHeight - el.scrollTop - el.clientHeight < 5,
+				),
+			)
+			.toBe(true);
 		// ResizeObserver re-pins a following transcript. Finish that render cycle
 		// before scrolling, so its pending programmatic scrolls cannot swallow ours.
 		await A.evaluate(

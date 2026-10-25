@@ -40,7 +40,7 @@ describe("built runner startup deadlines", () => {
 			await harness.kill();
 			appendFileSync(
 				join(harness.root, "runner-identity-fixture.mjs"),
-				`\nimport { installRunnerStartupFixture } from ${JSON.stringify(new URL("../../helpers/runner-startup-fixture.ts", import.meta.url).href)};\ninstallRunnerStartupFixture(${JSON.stringify(harness.root)});\n`,
+				`\nconst { installRunnerStartupFixture } = await import(${JSON.stringify(new URL("../../helpers/runner-startup-fixture.ts", import.meta.url).href)});\ninstallRunnerStartupFixture(${JSON.stringify(harness.root)});\n`,
 			);
 			await harness.restart({ runnerStartupTimeoutMs: 3000 });
 			browser = await harness.connect(retainedSession);
@@ -95,10 +95,16 @@ describe("built runner startup deadlines", () => {
 					),
 				).toBeDefined();
 				expect(
-					proof().filter((mark) => mark["kind"] === "parent-kill"),
+					proof().filter(
+						(mark) =>
+							mark["kind"] === "parent-kill" && mark["childPid"] === childPid,
+					),
 				).toEqual([]);
 				expect(
-					proof().filter((mark) => mark["kind"] === "parent-exit"),
+					proof().filter(
+						(mark) =>
+							mark["kind"] === "parent-exit" && mark["childPid"] === childPid,
+					),
 				).toEqual([]);
 				expect(
 					proof().find((mark) => mark["kind"] === "parent-received")?.["at"],
@@ -109,16 +115,26 @@ describe("built runner startup deadlines", () => {
 				if (mode === "eperm") {
 					expect(() => process.kill(childPid, 0)).not.toThrow();
 					expect(
-						proof().find((mark) => mark["kind"] === "parent-exit"),
+						proof().find(
+							(mark) =>
+								mark["kind"] === "parent-exit" && mark["childPid"] === childPid,
+						),
 					).toBeUndefined();
 					expect(
-						proof().find((mark) => mark["kind"] === "parent-kill"),
+						proof().find(
+							(mark) =>
+								mark["kind"] === "parent-kill" && mark["childPid"] === childPid,
+						),
 					).toMatchObject({ childPid, error: "EPERM" });
 				} else {
 					await vi.waitFor(
 						() =>
 							expect(
-								proof().find((mark) => mark["kind"] === "parent-exit"),
+								proof().find(
+									(mark) =>
+										mark["kind"] === "parent-exit" &&
+										mark["childPid"] === childPid,
+								),
 							).toBeDefined(),
 						{ timeout: 5000 },
 					);

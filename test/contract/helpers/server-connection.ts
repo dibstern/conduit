@@ -74,9 +74,13 @@ export async function checkServerHealth(): Promise<{
 /**
  * Fetch JSON from an OpenCode API endpoint (without trailing slash).
  */
-export async function apiGet<T = unknown>(path: string): Promise<T> {
+export async function apiGet<T = unknown>(
+	path: string,
+	signal?: AbortSignal,
+): Promise<T> {
 	const res = await fetch(`${OPENCODE_BASE_URL}${path}`, {
 		headers: { Accept: "application/json", ...authHeaders() },
+		signal: signal ?? null,
 	});
 	if (!res.ok) {
 		throw new Error(`API GET ${path} failed: ${res.status} ${res.statusText}`);

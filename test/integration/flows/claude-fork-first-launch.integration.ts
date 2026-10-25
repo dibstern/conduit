@@ -68,7 +68,7 @@ describe("Integration: Claude forks at first launch", () => {
 	let transcriptReads: number;
 	const evidence: unknown[] = [];
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		root = mkdtempSync(join(tmpdir(), "conduit-fork-first-launch-"));
 		login = join(root, "login");
 		mkdirSync(login);
@@ -94,6 +94,22 @@ describe("Integration: Claude forks at first launch", () => {
 		launches = [];
 		providerForkCalls = 0;
 		transcriptReads = 0;
+		await saveDaemonConfig(
+			{
+				...defaultDaemonConfig(),
+				instances: [
+					{
+						id: "claude",
+						name: "Claude",
+						driver: "claude",
+						configDir: login,
+						port: 0,
+						managed: false,
+					},
+				],
+			},
+			root,
+		);
 	});
 
 	afterEach(async ({ task }) => {

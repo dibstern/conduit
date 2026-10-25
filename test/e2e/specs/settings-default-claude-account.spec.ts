@@ -77,10 +77,10 @@ if (process.env["CONDUIT_E2E_SINGLE_PROCESS"] === "1") {
 
 async function openServer(
 	page: Page,
-	baseUrl: string,
+	harness: ProcessHarness,
 	accountId: string = defaultId,
 ): Promise<void> {
-	await new AppPage(page).goto(baseUrl);
+	await new AppPage(page).mountWithoutProjects(harness);
 	const listSettings = page.getByTestId("list-bar-settings");
 	const sessionOverflow = page
 		.getByTestId("session-bar-overflow")
@@ -134,7 +134,7 @@ test("ordinary Claude accounts apply edits live, can be removed and stay deleted
 			pid: initialPid,
 			serviceEnvironment,
 		});
-		await openServer(page, harness.baseUrl);
+		await openServer(page, harness);
 		const row = page.getByTestId(`instance-row-${defaultId}`);
 		await row.getByRole("button").first().click();
 		await expect(row.getByTestId("remove-instance-btn")).toBeVisible();
@@ -207,7 +207,7 @@ test("ordinary Claude accounts apply edits live, can be removed and stay deleted
 			name: "Personal Claude",
 			configDir,
 		});
-		await openServer(page, harness.baseUrl);
+		await openServer(page, harness);
 		await expect(row).toContainText("Personal Claude");
 		await expect(row).toContainText(configDir);
 		record("after-login-service-restart", {
@@ -253,7 +253,7 @@ test("ordinary Claude accounts apply edits live, can be removed and stay deleted
 			startupTimeoutMs: 60_000,
 			skipBrowserProbe: true,
 		});
-		await openServer(page, harness.baseUrl, "personal");
+		await openServer(page, harness, "personal");
 		await expect(row).toHaveCount(0);
 		expect(await readDefault()).toBeUndefined();
 		expect(

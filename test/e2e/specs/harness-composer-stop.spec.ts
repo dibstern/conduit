@@ -151,6 +151,7 @@ async function start(
 	const chat = new ChatPage(page);
 	await app.goto(`${harness.baseUrl}/s/${sessionId}`);
 	await app.sendMessage(`task-stop-foreground-${suffix}`);
+	const sentAt = await page.evaluate(() => performance.now());
 	await expect
 		.poll(() =>
 			marks(harness).find(
@@ -170,6 +171,11 @@ async function start(
 	expect(query?.["pid"]).not.toBe(harness.generations.at(-1)?.pid);
 	expect(harness.runnerPids()).toContain(query?.["pid"]);
 	await expect(chat.stopBtn).toBeVisible();
+	// The composer arms Stop 1.5s after an idle Send click.
+	await page.waitForFunction(
+		(sent) => performance.now() - sent >= 1500,
+		sentAt,
+	);
 	return { browser, sessionId, app, chat, queryId, pid: query?.["pid"] };
 }
 
@@ -356,6 +362,8 @@ test("stop and run: Run now sends the command ahead of the queued message and dr
 		// Mobile Enter inserts a newline; its Send button uses the same queue delivery.
 		if (isMobile) await app.sendBtn.click();
 		else await app.input.press("Enter");
+		// The draft clears when this admission settles; earlier Enter is ignored.
+		await expect(app.input).toHaveValue("");
 	}
 	await expect(page.getByTestId("pending-input-text")).toHaveText([
 		"after-command",
@@ -429,6 +437,7 @@ test("stop and run: an interrupt failure keeps the command queued and first when
 	);
 	await app.sendMessage("after-command");
 	await app.input.fill("/goal clear");
+	await expect(app.sendBtn).toBeEnabled({ timeout: 2_000 });
 	await app.input.press("ControlOrMeta+Enter");
 	await expect
 		.poll(() => queryMarks(harness, queryId, "query-interrupt-rejected").length)
@@ -470,7 +479,7 @@ test("a Monitor counts as live work and the toast disappears on session navigati
 	await expect(page.getByTestId("background-task-description")).toHaveText([
 		taskStopMonitorFixture[0].description,
 	]);
-	await page.getByRole("button", { name: "Close background tasks" }).click();
+	await page.getByTestId("background-tasks-scrim").click();
 	await expect(page.getByTestId("background-tasks-scrim")).toBeHidden();
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 	const other = await browser.createSession("Another session");
@@ -486,7 +495,7 @@ test("a Monitor counts as live work and the toast disappears on session navigati
 	);
 });
 
-test("composer Stop with no live tasks closes the query and shows no task toast", async ({
+test("composer Stop with no live tasks waits for its terminal and shows no task toast", async ({
 	page,
 	harness,
 }) => {
@@ -494,8 +503,13 @@ test("composer Stop with no live tasks closes the query and shows no task toast"
 	await chat.stopBtn.click();
 	await expect(chat.stopBtn).toBeHidden();
 	await expect
-		.poll(() => queryMarks(harness, queryId, "query-closed").length)
-		.toBe(1);
+		.poll(() =>
+			queryMarks(harness, queryId, "task-stop-turn").map(
+				(mark) => mark["phase"],
+			),
+		)
+		.toContain("interrupted-result");
+	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);
 	await expect(
 		page.getByTestId("toast").filter({ hasText: "Turn stopped." }),
@@ -529,6 +543,7 @@ test("correction: delayed idle cancel preserves the Monitor query and the next t
 	unlinkSync(join(harness.root, "task-stop-release-result"));
 	const next = "task-stop-foreground-correction-next-monitor";
 	await app.sendMessage(next);
+	const nextSentAt = await page.evaluate(() => performance.now());
 	await expect(chat.stopBtn).toBeVisible();
 	await expect
 		.poll(() =>
@@ -540,6 +555,10 @@ test("correction: delayed idle cancel preserves the Monitor query and the next t
 			),
 		)
 		.toBe(true);
+	await page.waitForFunction(
+		(sent) => performance.now() - sent >= 1500,
+		nextSentAt,
+	);
 	await chat.stopBtn.click();
 	await expect(chat.stopBtn).toBeHidden();
 	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);
@@ -599,16 +618,32 @@ test("correction: repeated cancel belongs to one input and Stop preserves the pe
 			}),
 		),
 	).toMatchObject({ ok: true });
-	await Effect.runPromise(cancel(browser, sessionId));
+	let stopsCompleted = 0;
+	const stopping = Effect.runPromise(cancel(browser, sessionId)).then(
+		(result) => {
+			stopsCompleted++;
+			return result;
+		},
+	);
 	await expect
 		.poll(() => queryMarks(harness, queryId, "query-interrupted").length)
 		.toBe(1);
-	await Effect.runPromise(cancel(browser, sessionId));
+	const repeated = Effect.runPromise(cancel(browser, sessionId)).then(
+		(result) => {
+			stopsCompleted++;
+			return result;
+		},
+	);
+	// A later RPC observes the session while both Stops await the held terminal.
+	await browser.history(sessionId);
+	expect(stopsCompleted).toBe(0);
 	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);
 	writeFileSync(
 		join(harness.root, "task-stop-correction-release-interrupted-result"),
 		"release",
 	);
+	expect(await stopping).toMatchObject({ ok: true });
+	expect(await repeated).toMatchObject({ ok: true });
 	await expect
 		.poll(() =>
 			marks(harness).some(
@@ -688,7 +723,7 @@ test("correction: delayed cancel between a result and pending steer preserves th
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 });
 
-test("correction: interrupt rejection reaches RPC and leaves the running tool intact", async ({
+test("correction: interrupt rejection keeps Stop pending until the SDK terminal", async ({
 	page,
 	harness,
 }, testInfo) => {
@@ -714,11 +749,28 @@ test("correction: interrupt rejection reaches RPC and leaves the running tool in
 	await expect
 		.poll(() => toolStatus(browser, sessionId, "correction-foreground"))
 		.toBe("running");
-	const rejected = await Effect.runPromise(
-		Effect.result(cancel(browser, sessionId)),
+	let stopCompleted = false;
+	const stopping = Effect.runPromise(cancel(browser, sessionId)).then(
+		(result) => {
+			stopCompleted = true;
+			return result;
+		},
 	);
+	await expect
+		.poll(() => queryMarks(harness, queryId, "query-interrupt-rejected").length)
+		.toBe(1);
 	const rejectionPath = testInfo.outputPath("interrupt-rejection.json");
-	writeFileSync(rejectionPath, JSON.stringify(rejected, null, 2));
+	writeFileSync(
+		rejectionPath,
+		JSON.stringify(
+			{
+				stopPending: !stopCompleted,
+				marks: queryMarks(harness, queryId, "query-interrupt-rejected"),
+			},
+			null,
+			2,
+		),
+	);
 	await testInfo.attach("interrupt-rejection.json", {
 		path: rejectionPath,
 		contentType: "application/json",
@@ -734,14 +786,13 @@ test("correction: interrupt rejection reaches RPC and leaves the running tool in
 		path: historyAfterRejection,
 		contentType: "application/json",
 	});
-	expect(rejected._tag).toBe("Failure");
+	expect(stopCompleted).toBe(false);
 	await expect
 		.poll(() => toolStatus(browser, sessionId, "correction-foreground"))
 		.toBe("running");
-	await chat.stopBtn.click();
 	await expect(
 		page.getByTestId("toast").filter({ hasText: "Failed to stop session" }),
-	).toBeVisible();
+	).toHaveCount(0);
 	await expect(
 		page.getByTestId("toast").filter({ hasText: "Turn stopped." }),
 	).toHaveCount(0);
@@ -750,7 +801,7 @@ test("correction: interrupt rejection reaches RPC and leaves the running tool in
 		.poll(() => toolStatus(browser, sessionId, "correction-foreground"))
 		.toBe("running");
 	expect(queryMarks(harness, queryId, "query-interrupt-rejected")).toHaveLength(
-		2,
+		1,
 	);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 	const screenshot = testInfo.outputPath(
@@ -761,19 +812,20 @@ test("correction: interrupt rejection reaches RPC and leaves the running tool in
 		path: screenshot,
 		contentType: "image/png",
 	});
-	writeFileSync(
-		join(harness.root, "task-stop-correction-allow-interrupt"),
-		"release",
-	);
-	await chat.stopBtn.click();
+	writeFileSync(join(harness.root, "task-stop-release-result"), "release");
+	// A rejected SDK control cannot synthesize a terminal or abandon durable Stop.
+	expect(await stopping).toMatchObject({ ok: true });
 	await expect(chat.stopBtn).toBeHidden();
 	await expect
 		.poll(() => toolStatus(browser, sessionId, "correction-foreground"))
 		.toBe("completed");
 	await chat.turnActivityToggles.last().click();
 	await expect(tool).toHaveAttribute("data-tool-status", "completed");
-	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);
+	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(0);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
+	await expect(
+		page.getByRole("button", { name: "1 background task", exact: true }),
+	).toBeVisible();
 });
 
 test("correction: buffered foreground tools settle at the interrupted result", async ({

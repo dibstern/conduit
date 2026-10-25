@@ -39,6 +39,8 @@ export const connectRunner = (options: {
 	readonly pid?: number;
 	readonly helloTimeoutMs?: number;
 	readonly preserveRole?: boolean;
+	/** Orphan retirement verifies identity without replaying absent history. */
+	readonly identityOnly?: true;
 	readonly driverKind?: string;
 	readonly cursorBackendUrl?: import("../cursor/cursor-credential.js").CursorBackendUrl;
 	readonly wire?: RunnerWireCodec;
@@ -294,7 +296,7 @@ export const connectRunner = (options: {
 									onSuccess: () =>
 										Effect.sync(() => {
 											releaseOutputWaiters();
-											if (!replayRequested)
+											if (!replayRequested && !options.identityOnly)
 												connection.write({
 													type: "replay",
 													acknowledgedSequence: acknowledged,

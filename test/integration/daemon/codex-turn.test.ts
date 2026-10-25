@@ -613,7 +613,33 @@ describe("Codex turns through the real daemon and detached runner", () => {
 						}),
 					}),
 				);
-				evidence["liveOutputBeforeCompletion"] = { frame, history };
+				// A later selection cannot change the stored owner of this live output.
+				const db = new Database(fixture.daemonStorePath());
+				try {
+					db.prepare(
+						"UPDATE sessions SET provider = 'claude' WHERE id = ?",
+					).run(id);
+				} finally {
+					db.close();
+				}
+				const historyAfterSelection = await reloaded.history(id);
+				expect(
+					historyAfterSelection.flatMap(({ parts }) => parts ?? []),
+				).toContainEqual(
+					expect.objectContaining({
+						type: "tool",
+						tool: "Bash",
+						state: expect.objectContaining({
+							status: "running",
+							metadata: { output: "second line\n" },
+						}),
+					}),
+				);
+				evidence["liveOutputBeforeCompletion"] = {
+					frame,
+					history,
+					historyAfterSelection,
+				};
 			} finally {
 				writeFileSync(gatePath, "1");
 				await sending;

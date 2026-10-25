@@ -536,11 +536,13 @@ export const SessionInboxLive = Layer.effect(
 					now: yield* Clock.currentTimeMillis,
 				});
 				const fences = providerTurnService.turnFences(sessionId);
-				const turnInFlight = Option.isSome(account)
-					? yield* registry
-							?.getInstance(account.value.driver)
-							?.hasActiveTurnsEffect?.(sessionId) ?? Effect.succeed(false)
-					: false;
+				// Claude wake-up turns can hold a query without a durable run.
+				const turnInFlight =
+					Option.isSome(account) && account.value.driver === "claude"
+						? yield* registry
+								?.getInstance(account.value.driver)
+								?.hasActiveTurnsEffect?.(sessionId) ?? Effect.succeed(false)
+						: false;
 				return {
 					provider: facts?.provider ?? undefined,
 					queued,

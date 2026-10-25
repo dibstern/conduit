@@ -153,6 +153,106 @@ describe("daemon Worktree service", () => {
 		expect(git("rev-parse", "origin/main")).toBe(owned.head);
 	});
 
+	// Checkout cleanup retains the owned ref for recovery. A later deletion must
+	// still prove ownership, merge safety and usage before deleting that ref.
+	it("deletes its merged branch after checkout-only cleanup", async () => {
+		const created = await Effect.runPromise(createEffect("owned"));
+		const owned = created.ownership[0];
+		if (!owned) throw new Error("Missing ownership");
+		writeFileSync(join(owned.path, "feature.txt"), "feature\n");
+		git("-C", owned.path, "add", ".");
+		git("-C", owned.path, "commit", "-qm", "Feature");
+		const tip = git("rev-parse", "owned");
+		git("merge", "--ff-only", "-q", "owned");
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const service = yield* WorktreeServiceTag;
+				expect(
+					yield* service.removeCheckout(
+						context.folder,
+						owned,
+						"uncommitted-changes",
+						tip,
+						Effect.succeed(false),
+					),
+				).toBeUndefined();
+				expect(existsSync(owned.path)).toBe(false);
+				expect(git("rev-parse", "owned")).toBe(tip);
+				yield* service.remove(context.folder, owned);
+			}).pipe(Effect.provide(makeWorktreeLive(context.configDir))),
+		);
+		expect(git("for-each-ref", "--format=%(refname)", "refs/heads/owned")).toBe(
+			"",
+		);
+		expect(git("rev-parse", "main")).toBe(tip);
+	});
+
+	// An absent checkout must not bypass unmerged/default, ownership, use or path
+	// protection. Only a currently unused, proven merged owned ref is removable.
+	it.each([
+		"unmerged",
+		"unknown-default",
+		"in-use",
+		"unproven-ref",
+		"other-checkout",
+		"wrong-base",
+		"wrong-path",
+	])("preserves the branch after checkout cleanup when protection is %s", async (protection) => {
+		const created = await Effect.runPromise(createEffect("owned"));
+		const owned = created.ownership[0];
+		if (!owned) throw new Error("Missing ownership");
+		writeFileSync(join(owned.path, "feature.txt"), "feature\n");
+		git("-C", owned.path, "add", ".");
+		git("-C", owned.path, "commit", "-qm", "Feature");
+		const tip = git("rev-parse", "owned");
+		if (protection !== "unmerged") git("merge", "--ff-only", "-q", "owned");
+		await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.removeCheckout(
+					context.folder,
+					owned,
+					"uncommitted-changes",
+					tip,
+					Effect.succeed(false),
+				),
+			).pipe(Effect.provide(makeWorktreeLive(context.configDir))),
+		);
+		expect(existsSync(owned.path)).toBe(false);
+		if (protection === "unknown-default") git("branch", "-m", "main", "topic");
+		if (protection === "unproven-ref") {
+			git("branch", "-D", "owned");
+			git("branch", "owned", tip);
+		}
+		if (protection === "other-checkout")
+			git("worktree", "add", join(context.fixture, "other"), "owned");
+		const result = await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.remove(
+					context.folder,
+					{
+						...owned,
+						...(protection === "wrong-base" ? { head: tip } : {}),
+						...(protection === "wrong-path"
+							? { path: join(context.fixture, "not-owned") }
+							: {}),
+					},
+					Effect.succeed(protection === "in-use"),
+				),
+			).pipe(
+				Effect.result,
+				Effect.provide(makeWorktreeLive(context.configDir)),
+			),
+		);
+		if (protection === "in-use" || protection === "wrong-path") {
+			if (Either.isSuccess(result))
+				throw new Error("Expected protected removal to fail");
+			expect(result.failure.reason).toBe(
+				protection === "in-use" ? "branch-in-use" : "not-owned",
+			);
+		} else expect(Either.isSuccess(result)).toBe(true);
+		expect(git("rev-parse", "owned")).toBe(tip);
+	});
+
 	it.each([
 		false,
 		true,
@@ -216,10 +316,13 @@ describe("daemon Worktree service", () => {
 	});
 
 	it.each([
-		"main",
-		"master",
-		"trunk",
-	])("preserves a session branch renamed to default branch %s during removal", async (branch) => {
+		["main", false],
+		["main", true],
+		["master", false],
+		["master", true],
+		["trunk", false],
+		["trunk", true],
+	] as const)("preserves a session branch renamed to default branch %s during removal after cleanup=%s", async (branch, cleaned) => {
 		git("branch", "-m", "topic");
 		const created = await Effect.runPromise(createEffect("owned"));
 		const owned = created.ownership[0];
@@ -236,15 +339,30 @@ describe("daemon Worktree service", () => {
 			"refs/remotes/origin/trunk",
 		);
 		await Effect.runPromise(
-			Effect.flatMap(WorktreeServiceTag, (service) =>
-				service.remove(context.folder, { ...owned, branchName: branch }),
-			).pipe(Effect.provide(makeWorktreeLive(context.configDir))),
+			Effect.gen(function* () {
+				const service = yield* WorktreeServiceTag;
+				const renamed = { ...owned, branchName: branch };
+				if (cleaned)
+					expect(
+						yield* service.removeCheckout(
+							context.folder,
+							renamed,
+							"uncommitted-changes",
+							tip,
+							Effect.succeed(false),
+						),
+					).toBeUndefined();
+				yield* service.remove(context.folder, renamed);
+			}).pipe(Effect.provide(makeWorktreeLive(context.configDir))),
 		);
 		expect(existsSync(owned.path)).toBe(false);
 		expect(git("rev-parse", branch)).toBe(tip);
 	});
 
-	it("preserves the session branch if local main resets after the merge proof", async () => {
+	it.each([
+		false,
+		true,
+	])("preserves the session branch if local main resets after the merge proof and cleanup=%s", async (cleaned) => {
 		git("update-ref", "refs/remotes/origin/main", "HEAD");
 		git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
 		const created = await Effect.runPromise(createEffect("owned"));
@@ -255,6 +373,18 @@ describe("daemon Worktree service", () => {
 		git("-C", owned.path, "commit", "-qm", "Feature");
 		const tip = git("rev-parse", "owned");
 		git("merge", "--ff-only", "-q", "owned");
+		if (cleaned)
+			await Effect.runPromise(
+				Effect.flatMap(WorktreeServiceTag, (service) =>
+					service.removeCheckout(
+						context.folder,
+						owned,
+						"uncommitted-changes",
+						tip,
+						Effect.succeed(false),
+					),
+				).pipe(Effect.provide(makeWorktreeLive(context.configDir))),
+			);
 		const resettingGit = gitWrapper(`
 if (args.includes("update-ref") && args.includes("--stdin")) {
   spawnSync(${JSON.stringify(actualGit)}, ["-C", ${JSON.stringify(context.repository)}, "update-ref", "refs/heads/main", ${JSON.stringify(owned.head)}]);
@@ -278,6 +408,54 @@ process.exit(result.status ?? 1);
 		expect(existsSync(owned.path)).toBe(false);
 		expect(git("rev-parse", "owned")).toBe(tip);
 		expect(git("rev-parse", "main")).toBe(owned.head);
+	});
+
+	it("preserves a newer owned branch tip racing deletion after checkout cleanup", async () => {
+		const created = await Effect.runPromise(createEffect("owned"));
+		const owned = created.ownership[0];
+		if (!owned) throw new Error("Missing ownership");
+		const tip = git("rev-parse", "owned");
+		await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.removeCheckout(
+					context.folder,
+					owned,
+					"uncommitted-changes",
+					tip,
+					Effect.succeed(false),
+				),
+			).pipe(Effect.provide(makeWorktreeLive(context.configDir))),
+		);
+		const newer = git(
+			"commit-tree",
+			`${tip}^{tree}`,
+			"-p",
+			tip,
+			"-m",
+			"Concurrent work",
+		);
+		const advancingGit = gitWrapper(`
+if (args.includes("update-ref") && args.includes("--stdin")) {
+  spawnSync(${JSON.stringify(actualGit)}, ["-C", ${JSON.stringify(context.repository)}, "update-ref", "refs/heads/owned", ${JSON.stringify(newer)}]);
+}
+${runRealGit}
+process.exit(result.status ?? 1);
+`);
+		const result = await Effect.runPromise(
+			Effect.flatMap(WorktreeServiceTag, (service) =>
+				service.remove(context.folder, owned),
+			).pipe(
+				Effect.result,
+				Effect.provide(
+					makeWorktreeLive(context.configDir, { gitExecutable: advancingGit }),
+				),
+			),
+		);
+		if (Either.isSuccess(result))
+			throw new Error("Expected deletion transaction to fail");
+		expect(result.failure.message).toContain("refs/heads/owned");
+		expect(git("rev-parse", "owned")).toBe(newer);
+		expect(git("rev-parse", "main")).toBe(tip);
 	});
 
 	it("inspects every mapped folder while skipping Git for each present checkout", async () => {

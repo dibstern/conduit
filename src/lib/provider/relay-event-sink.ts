@@ -38,6 +38,7 @@ import { providerRefsFromRuntimeData } from "./provider-runtime-refs.js";
 import {
 	currentRunnerOutput,
 	currentRunnerPermissionReply,
+	currentRunnerProcessId,
 } from "./runner/runner-receipts.js";
 import type {
 	EventSink,
@@ -233,6 +234,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	): Effect.Effect<void> =>
 		Effect.gen(function* () {
 			const receipt = yield* currentRunnerOutput;
+			const processId = yield* currentRunnerProcessId;
 			yield* deliver(
 				{
 					eventId: createEventId(),
@@ -241,7 +243,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					sessionId,
 					providerRefs: {
 						...providerRefsFromRuntimeData(type, data),
-						providerProcessId: receipt?.runnerId ?? localProcessId,
+						providerProcessId: receipt?.runnerId ?? processId ?? localProcessId,
 					},
 					rawSource: { kind: "relay.event-sink" },
 					createdAt: Date.now(),

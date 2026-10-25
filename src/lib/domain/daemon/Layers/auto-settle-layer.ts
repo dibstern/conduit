@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { Clock, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect";
+import { Clock, Effect, Layer, Option, PubSub, Ref, Stream } from "effect";
 import {
 	autoSettleIdleWindowMs,
 	DEFAULT_AUTO_ARCHIVE_AFTER_DAYS,
@@ -129,8 +129,8 @@ export const AutoSettleLive = () =>
 				),
 			);
 
-			yield* sweep.pipe(
-				Effect.repeat(Schedule.spaced("1 minute")),
+			yield* Stream.tick("1 minute").pipe(
+				Stream.runForEach(() => sweep),
 				Effect.forkScoped,
 			);
 		}),

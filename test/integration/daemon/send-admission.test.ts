@@ -179,6 +179,7 @@ it.each([
 				_tag: "draft",
 				text: restoredText,
 				restored: text,
+				attachments: [],
 			});
 		observations["refusedAfterMs"] = Date.now() - sentAt;
 		expect(observations["refusedAfterMs"]).toBeGreaterThanOrEqual(900);

@@ -11,8 +11,11 @@ import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AttachmentSource } from "../../../src/lib/contracts/attachment-ref.js";
+import { attachmentFromDataUrl } from "../../../src/lib/persistence/attachment-store.js";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { SessionManager } from "../../../src/lib/session/session-manager.js";
 import type {
 	OpenCodeInteraction,
@@ -32,6 +35,7 @@ type DifferentialPart = {
 	tool?: string | undefined;
 	mime?: string | undefined;
 	filename?: string | undefined;
+	source?: AttachmentSource | undefined;
 	url?: string | undefined;
 	state?:
 		| { metadata?: Record<string, unknown>; readonly [key: string]: unknown }
@@ -402,11 +406,20 @@ describe("Integration: Session Visibility Repros", () => {
 	let harness: RelayHarness;
 
 	beforeEach(async () => {
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
 		harness = await createRelayHarness("chat-simple");
 	}, 30_000);
 
 	afterEach(async () => {
-		if (harness) await harness.stop();
+		try {
+			if (harness) await harness.stop();
+		} finally {
+			__setProbeOverrideForTesting(undefined);
+		}
 	});
 
 	it("second client connecting with ?session= gets populated history after a turn", async () => {
@@ -983,11 +996,20 @@ describe("Integration: Session Visibility Repros", () => {
 			const summarize = (messages: readonly DifferentialMessage[]) =>
 				messages.map((message) => ({
 					role: message.role,
-					parts: (message.parts ?? []).map((part) =>
-						part.type === "file"
-							? `file:${part.mime}:${part.filename ?? ""}:${part.url}`
-							: `${part.type}:${part.text ?? ""}`,
-					),
+					parts: (message.parts ?? []).map((part) => {
+						if (part.type !== "file") return `${part.type}:${part.text ?? ""}`;
+						// d8ba701c projects attachment refs; REST still returns provider URLs.
+						return {
+							type: part.type,
+							mime: part.mime,
+							filename: part.filename,
+							source:
+								part.source ??
+								(part.url?.startsWith("data:")
+									? attachmentFromDataUrl(part.url).ref
+									: { url: part.url }),
+						};
+					}),
 				}));
 			const restSummary = summarize(rest.messages as DifferentialMessage[]);
 			const projectedMessages =
@@ -1008,7 +1030,7 @@ describe("Integration: Session Visibility Repros", () => {
 			).toMatchObject({
 				mime: "image/png",
 				filename: "screenshot.png",
-				url: "data:image/png;base64,AAAA",
+				source: attachmentFromDataUrl("data:image/png;base64,AAAA").ref,
 			});
 			// Recorded time proves the REST side really came from the provider
 			// (the projection substitutes row wall-clock timestamps).

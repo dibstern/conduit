@@ -15,7 +15,10 @@ import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
+import {
+	ProviderTurnServiceLive,
+	ProviderTurnServiceTag,
+} from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -238,7 +241,10 @@ describe("handleMessage with Effect provider state persistence", () => {
 				INSERT INTO provider_state (session_id, key, value)
 				VALUES ('session-provider-state', 'resumeSessionId', 'sdk-session-prev')`;
 
-				yield* handleMessage("client-1", {
+				// The receipt already passed admission; a composer retry is a no-op.
+				yield* (yield* ProviderTurnServiceTag).sendTurn({
+					clientId: "client-1",
+					sessionId: "session-provider-state",
 					text: "continue",
 					commandId: "cmd-provider-state-continue",
 				});
@@ -501,7 +507,10 @@ describe("handleMessage with Effect provider state persistence", () => {
 						provider: "claude",
 					},
 				);
-				yield* handleMessage("client-1", {
+				// The receipt already passed admission; a composer retry is a no-op.
+				yield* (yield* ProviderTurnServiceTag).sendTurn({
+					clientId: "client-1",
+					sessionId: "session-claude-user-effect",
 					text: "persist this through effect",
 					commandId: "cmd-provider-state-persist-effect",
 				});

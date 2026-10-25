@@ -2,7 +2,17 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit, Layer, Logger, Option, References, Scope } from "effect";
+import {
+	Effect,
+	Exit,
+	Layer,
+	Logger,
+	Option,
+	PubSub,
+	References,
+	Scope,
+	Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -18,6 +28,10 @@ import {
 	type Relay,
 	RelayCacheTag,
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	SessionGit,
+	type SessionGitChange,
+} from "../../../src/lib/domain/daemon/Services/session-git.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -118,11 +132,15 @@ describe("daemon automatic settlement layer", () => {
 	);
 
 	it.effect(
-		"ticks a running relay, skips cold empty projects, and survives one project failure",
+		"ticks once per minute despite git publications, skips cold empty projects, and survives one project failure",
 		() =>
 			Effect.gen(function* () {
 				const dir = mkdtempSync(join(tmpdir(), "conduit-auto-layer-"));
 				const calls: string[] = [];
+				const changes = yield* Effect.acquireRelease(
+					PubSub.unbounded<SessionGitChange>(),
+					PubSub.shutdown,
+				);
 				const relays = new Map([
 					["broken", fakeRelay("broken", () => Effect.fail(new Error("boom")))],
 					[
@@ -173,6 +191,11 @@ describe("daemon automatic settlement layer", () => {
 								get,
 								invalidate: () => Effect.void,
 							}),
+							Layer.succeed(SessionGit)({
+								read: () => Effect.succeed(undefined),
+								changes: Stream.fromPubSub(changes),
+								invalidate: () => Effect.void,
+							}),
 							DaemonEventBusLive,
 						),
 					),
@@ -183,8 +206,17 @@ describe("daemon automatic settlement layer", () => {
 					yield* TestClock.adjust("1 millis");
 					expect(calls).toContain("running");
 					expect(get).not.toHaveBeenCalled();
+					const beforePublication = calls.length;
+					for (let version = 1; version <= 100; version++)
+						yield* PubSub.publish(changes, {
+							directory: dir,
+							sessionIds: ["running-s1"],
+							version,
+						});
+					yield* TestClock.adjust("1 millis");
+					expect(calls).toHaveLength(beforePublication);
 					yield* TestClock.adjust("1 minute");
-					expect(calls.length).toBeGreaterThanOrEqual(2);
+					expect(calls).toHaveLength(beforePublication + 1);
 				} finally {
 					yield* Scope.close(scope, Exit.void);
 					rmSync(dir, { recursive: true, force: true });
