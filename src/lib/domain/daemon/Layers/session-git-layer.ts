@@ -523,8 +523,7 @@ export const makeSessionGit = Effect.gen(function* () {
 
 	const missingState = (entry: DirectoryState, exists: boolean) =>
 		Effect.gen(function* () {
-			if (exists) return undefined;
-			if (entry.present === exists) return entry.workspaceMissing;
+			if (!exists && entry.present === exists) return entry.workspaceMissing;
 			for (const id of entry.sessions) {
 				const session = sessions.get(id);
 				if (session?.workspace?.origin !== "conduit") continue;
@@ -532,6 +531,15 @@ export const makeSessionGit = Effect.gen(function* () {
 					([, path]) => canonicalDirectory(path) === entry.directory,
 				);
 				if (!pair) continue;
+				if (exists) {
+					const checkout = yield* Effect.tryPromise(() =>
+						lstat(join(entry.directory, ".git")),
+					).pipe(
+						Effect.map((stat) => stat.isFile()),
+						Effect.orElseSucceed(() => false),
+					);
+					if (checkout) return undefined;
+				}
 				if (Option.isNone(worktrees))
 					return {
 						path: entry.directory,
