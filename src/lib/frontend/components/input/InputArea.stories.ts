@@ -39,6 +39,7 @@ import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { turn as readTurn } from "../../stores/turn.svelte.js";
 import { usageState } from "../../stores/usage.svelte.js";
+import { _resetRateLimit } from "../../stores/ws-send.svelte.js";
 import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
@@ -1396,6 +1397,8 @@ function narrowComposer(
 		tags: ["autodocs"],
 		globals: { theme: "dark" },
 		beforeEach: ({ canvasElement }) => {
+			// Each story owns its sends and the client limiter's queued callbacks.
+			_resetRateLimit();
 			const cleanup = setupWords(canvasElement, false);
 			// 61b38b1e waits for draft persistence before admitting the send.
 			const restoreDraft = replyRpc("SyncInputDraft", () => ({ ok: true }));
@@ -1467,6 +1470,7 @@ function narrowComposer(
 				];
 			}
 			return () => {
+				_resetRateLimit();
 				restoreSubmit();
 				restoreDraft();
 				Date.now = realNow;
