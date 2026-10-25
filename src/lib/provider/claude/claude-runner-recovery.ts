@@ -3,6 +3,7 @@ import { SqlClient } from "effect/sql";
 import { accountsStateFromConfig, resolve } from "../../account-directory.js";
 import { defaultDaemonConfig } from "../../daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import { makeAttachmentStore } from "../../persistence/attachment-store.js";
 import {
 	makeProviderStateEffect,
 	ProviderStateEffectTag,
@@ -11,12 +12,13 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../persistence/effect/read-query-effect.js";
+import { resolveTurnImages } from "../resolve-turn-images.js";
 import { runnerFailure, runnerSinkId } from "../runner/runner-protocol.js";
 import { recoverRunnerCommands } from "../runner/runner-recovery.js";
 import type {
+	DurableSessionTurn,
 	SessionCommand,
 	SessionFailure,
-	SessionTurn,
 } from "../runner/session-runner.js";
 import type {
 	ProviderCall,
@@ -67,6 +69,9 @@ export const recoverClaudeRunnerCommands = (
 	) => replay,
 ) =>
 	Effect.gen(function* () {
+		const attachments = yield* makeAttachmentStore.pipe(
+			Effect.provideService(SqlClient.SqlClient, sql),
+		);
 		const accounts = yield* deps.accounts ??
 			Effect.sync(() =>
 				accountsStateFromConfig(
@@ -80,15 +85,19 @@ export const recoverClaudeRunnerCommands = (
 		return yield* recoverRunnerCommands(sql, sessionId, "claude", {
 			driverForAccount,
 			decodeInput: (row) => {
-				const input = normalizeClaudeSessionTurn(
-					JSON.parse(row.payload_json) as SessionTurn,
-					() => claudeLaunchConfigFromAccounts(accounts),
-				);
+				const { images, ...turn } = JSON.parse(
+					row.payload_json,
+				) as DurableSessionTurn;
+				const { images: _resolvedImages, ...input } =
+					normalizeClaudeSessionTurn(turn, () =>
+						claudeLaunchConfigFromAccounts(accounts),
+					);
 				// Credentials are omitted from the durable payload. Capture them
 				// once for this replay, preserving its admitted identity and folder.
 				const account = accountForId(input.account?.id ?? row.provider_id);
 				return {
 					...input,
+					...(images ? { images } : {}),
 					...(account
 						? {
 								account: input.account
@@ -104,6 +113,17 @@ export const recoverClaudeRunnerCommands = (
 			failTurn,
 			replay: (row, input) => {
 				const replay = Effect.gen(function* () {
+					const resolved = yield* resolveTurnImages(input, attachments).pipe(
+						Effect.mapError(
+							(cause): SessionFailure => ({
+								operation: "resolveTurnImages",
+								message: cause.message,
+								...(cause._tag === "AttachmentMissing"
+									? { code: "attachment_missing", retryable: false }
+									: {}),
+							}),
+						),
+					);
 					// Commands admitted before policy snapshots existed fall back to daemon memory.
 					const autoSettleAfterDays =
 						input.autoSettleAfterDays !== undefined
@@ -190,7 +210,7 @@ export const recoverClaudeRunnerCommands = (
 									shellConfig: call?.shellConfig ?? input.shellConfig,
 									claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
 									input: {
-										...input,
+										...resolved,
 										...(call
 											? {
 													projectId: call.projectId,

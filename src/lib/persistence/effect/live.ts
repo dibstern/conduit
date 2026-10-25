@@ -9,6 +9,10 @@ import {
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import {
+	AttachmentStoreLive,
+	type AttachmentStoreTag,
+} from "../../domain/persistence/Services/attachment-store.js";
+import {
 	EventRetentionLive,
 	type EventRetentionTag,
 } from "../../domain/persistence/Services/event-retention.js";
@@ -63,6 +67,7 @@ import {
 } from "./read-query-effect.js";
 
 export type PersistenceEffectContext =
+	| AttachmentStoreTag
 	| SqlClient.SqlClient
 	| SqliteNode.SqliteClient
 	| PersistenceServiceTag
@@ -79,6 +84,7 @@ export type PersistenceEffectContext =
 export type PersistenceEffectError = PersistenceError | Config.ConfigError;
 
 export type PersistenceStoreContext =
+	| AttachmentStoreTag
 	| SqlClient.SqlClient
 	| SqliteNode.SqliteClient
 	| ProjectorCursorEffectTag
@@ -92,7 +98,10 @@ export class PersistenceStore extends Context.Service<
 
 export type PersistenceProjectContext = Exclude<
 	PersistenceEffectContext,
-	SqlClient.SqlClient | SqliteNode.SqliteClient | ProjectorCursorEffectTag
+	| SqlClient.SqlClient
+	| SqliteNode.SqliteClient
+	| ProjectorCursorEffectTag
+	| AttachmentStoreTag
 >;
 
 export type PersistenceEffectRuntime = ManagedRuntime.ManagedRuntime<
@@ -188,7 +197,13 @@ export function makePersistenceStoreLayer(
 		makeProjectionRunnerEffect(projectors),
 	).pipe(Layer.provide(Layer.merge(cursorLayer, baseLayer)));
 
-	return Layer.mergeAll(baseLayer, cursorLayer, projectionRunnerLayer);
+	const attachmentLayer = AttachmentStoreLive.pipe(Layer.provide(baseLayer));
+	return Layer.mergeAll(
+		baseLayer,
+		cursorLayer,
+		projectionRunnerLayer,
+		attachmentLayer,
+	);
 }
 
 type PersistenceProjectOptions = {

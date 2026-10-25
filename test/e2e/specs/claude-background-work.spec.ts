@@ -14,10 +14,16 @@
 // gets its own push, which would mask the sidebar stream this is about. Its
 // spoken status at each step is attached as a report, with a screenshot.
 
+import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { Effect } from "effect";
+import { responseChunks } from "../../helpers/fake-claude-process-sdk.js";
+import { test as processTest } from "../helpers/process-harness-fixture.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
+import { ChatPage } from "../page-objects/chat.page.js";
 
 test.describe("Claude background work", () => {
 	test.use({
@@ -185,6 +191,143 @@ test.describe("Claude background work", () => {
 	// Stop all stops the tasks, not the turn (conduit-test-va96.2). Recorded
 	// replay has no stopTask replies, so the stop, the row clearing and the
 	// sidebar leaving Monitoring are proven in harness-background-task-stop.spec.ts.
+});
+
+processTest.describe("Claude wake-up turn inbox", () => {
+	processTest.use({ harnessOptions: { restartProof: true } });
+
+	processTest(
+		"queues a send visibly until the wake-up turn ends, then answers it",
+		async ({ page, harness }, testInfo) => {
+			const browser = await harness.connect();
+			const sessionId = await browser.createSession("Wake-up inbox");
+			const foreground = "notification-parent-turn";
+			const text = "queued-during-wake-up";
+			const inputId = randomUUID();
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			const ledger = () => {
+				const db = new DatabaseSync(join(harness.configDir, "events.db"), {
+					readOnly: true,
+				});
+				try {
+					return {
+						runs: db
+							.prepare(
+								"SELECT status FROM provider_runs WHERE session_id = ? ORDER BY requested_at, rowid",
+							)
+							.all(sessionId),
+						input: db
+							.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
+							.get(inputId),
+						sent: db
+							.prepare(
+								"SELECT sequence FROM events WHERE session_id = ? AND type = 'input.sent' AND json_extract(data, '$.inputId') = ?",
+							)
+							.all(sessionId, inputId),
+					};
+				} finally {
+					db.close();
+				}
+			};
+			const report: Record<string, unknown> = {
+				bead: "conduit-test-s7zo",
+				sessionId,
+				inputId,
+				assertionsPassed: false,
+			};
+			try {
+				await app.goto(`${harness.baseUrl}/s/${sessionId}?p=process-test`);
+				await app.sendMessage(foreground);
+				await expect
+					.poll(() => ledger().runs)
+					.toEqual([{ status: "completed" }]);
+				await expect(page.getByTestId("background-task-chip")).toBeVisible();
+				writeFileSync(
+					join(harness.root, "release-notification-parent"),
+					"release",
+				);
+				await expect(
+					chat.assistantMessages.filter({
+						hasText: "Notification parent message.",
+					}),
+				).toBeVisible();
+				// The wake-up is held before its result and has no provider run of its own.
+				report["wakeUp"] = ledger();
+				expect(ledger().runs).toEqual([{ status: "completed" }]);
+				expect(
+					await Effect.runPromise(
+						browser.rpc["input.submit"]({
+							sessionId,
+							originId: browser.originId,
+							inputId,
+							text,
+							delivery: "queue",
+						}),
+					),
+				).toMatchObject({ ok: true });
+				await expect(page.getByTestId("pending-input-text")).toHaveText(text);
+				await expect(page.getByTestId("pending-input-state")).toHaveText(
+					"Queued",
+				);
+				await expect(chat.userMessages.filter({ hasText: text })).toHaveCount(
+					0,
+				);
+				report["queued"] = {
+					...ledger(),
+					chip: await page.getByTestId("pending-input-row").innerText(),
+				};
+				expect(ledger()).toMatchObject({
+					runs: [{ status: "completed" }],
+					input: { state: "queued" },
+					sent: [],
+				});
+				await page.reload();
+				await expect(page.getByTestId("pending-input-text")).toHaveText(text);
+				await expect(page.getByTestId("pending-input-state")).toHaveText(
+					"Queued",
+				);
+				writeFileSync(
+					join(harness.root, "release-notification-result"),
+					"release",
+				);
+				await expect(chat.userMessages.filter({ hasText: text })).toHaveCount(
+					1,
+				);
+				await expect(
+					chat.assistantMessages.filter({
+						hasText: responseChunks(text).join("").trim(),
+					}),
+				).toBeVisible();
+				await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
+				await expect
+					.poll(() => ledger().runs)
+					.toEqual([{ status: "completed" }, { status: "completed" }]);
+				expect(ledger().sent).toHaveLength(1);
+				const transcript = await browser.history(sessionId);
+				expect(
+					transcript.filter((message) => message.text === text),
+				).toHaveLength(1);
+				expect(
+					transcript.filter(
+						(message) => message.text === responseChunks(text).join(""),
+					),
+				).toHaveLength(1);
+				report["answered"] = {
+					...ledger(),
+					transcript: transcript.map(({ role, text }) => ({ role, text })),
+				};
+				report["assertionsPassed"] = true;
+			} finally {
+				const path = testInfo.outputPath("wake-up-inbox.json");
+				writeFileSync(path, JSON.stringify(report, null, 2));
+				await testInfo.attach("wake-up-inbox", {
+					path,
+					contentType: "application/json",
+				});
+			}
+		},
+	);
 });
 
 // The shell ending between turns, before the SDK's wake-up turn (the trace is

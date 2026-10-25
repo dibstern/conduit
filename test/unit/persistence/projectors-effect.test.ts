@@ -223,7 +223,7 @@ function makeFileAttached(
 			partId,
 			mime: "image/png",
 			filename: "screenshot.png",
-			url: "data:image/png;base64,AAAA",
+			source: { url: "https://example.com/screenshot.png" },
 		},
 		{
 			eventId: createEventId(),
@@ -2438,7 +2438,7 @@ describe("Effect Message Projector (via ProjectionRunner)", () => {
 				expect(JSON.parse(rows[0]?.metadata ?? "{}")).toEqual({
 					mime: "image/png",
 					filename: "screenshot.png",
-					url: "data:image/png;base64,AAAA",
+					source: { url: "https://example.com/screenshot.png" },
 				});
 			}),
 		));

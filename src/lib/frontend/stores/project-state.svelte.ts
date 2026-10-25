@@ -14,6 +14,8 @@ import {
 
 export const projectState = $state({
 	projects: [] as ProjectInfo[],
+	/** True once the shell feed has delivered a project list. */
+	projectsLoaded: false,
 	currentSlug: null as string | null,
 	terminalKeys: DEFAULT_TERMINAL_KEYS,
 	terminalKeysRevision: 0,

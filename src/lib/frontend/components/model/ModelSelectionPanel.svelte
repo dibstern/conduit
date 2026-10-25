@@ -138,7 +138,7 @@
 						<section data-testid="picker-harness-section" aria-label="Harness" class="pb-[6px]">
 							<div class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-muted"><span>Harness</span></div>
 							<OptionRow variant="joined" options={harnesses} value={target.pick.driver ?? ""} onChange={selectHarness} label="Harness" itemWidth={104} testId="picker-harness-options" itemTestId={(driver) => `picker-harness-${driver}`} class="mx-[4px]">
-								{#snippet item(option)}<HarnessLogo driver={option.value} instanceId={target.accounts.find((account) => account.driver === option.value && account.isDefault)?.id} size={18} surface="surface" />{option.label}{/snippet}
+								{#snippet item(option)}<HarnessLogo driver={option.value} instanceId={target.accounts.find((account) => account.driver === option.value && account.isDefault)?.id} size={18} />{option.label}{/snippet}
 							</OptionRow>
 						</section>
 					{/if}

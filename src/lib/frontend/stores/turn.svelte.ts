@@ -9,7 +9,11 @@ import type {
 	SteerBlocker,
 } from "../../contracts/stored-event.js";
 import { WorktreeCreationError } from "../../contracts/worktree.js";
-import { DraftAlreadySent } from "../../contracts/ws-rpc.js";
+import {
+	DraftAlreadySent,
+	DraftAttachmentMissing,
+	type InputDraftKey,
+} from "../../contracts/ws-rpc.js";
 import { stopBackgroundTasks } from "../components/session/background-tasks.svelte.js";
 import { toastFailure } from "../transport/rpc-errors.js";
 import { rpc } from "../transport/ws-rpc-client.js";
@@ -44,11 +48,18 @@ export type SendOutcome =
 	| { readonly kind: "started" }
 	| { readonly kind: "waiting" }
 	| { readonly kind: "refused"; readonly reason: SteerBlocker }
-	| { readonly kind: "failed"; readonly alreadySent?: boolean };
+	| {
+			readonly kind: "failed";
+			readonly alreadySent?: boolean;
+			readonly draftAttachmentMissing?: string;
+	  };
 
 type SendInput = {
 	readonly text: string;
 	readonly images?: readonly string[];
+	readonly draftKey?: InputDraftKey;
+	readonly draftText?: string;
+	readonly attachmentIds?: readonly string[];
 	readonly delivery: InputDelivery;
 	readonly inputId?: string;
 	readonly from?: typeof selection.scope;
@@ -239,13 +250,13 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 		createdAt: Date.now(),
 		...(input.images?.length
 			? {
-					attachments: input.images.map((url) => {
-						const { mime, name, size } = parseAttachmentDataUrl(url);
+					attachments: input.images.map((image) => {
+						const { mime, name, size } = parseAttachmentDataUrl(image);
 						return {
 							id: crypto.randomUUID(),
 							name: name ?? "Attachment",
 							mime,
-							url,
+							source: { url: image },
 							size,
 						};
 					}),
@@ -260,6 +271,11 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 				inputId,
 				text: input.text,
 				...(input.images?.length ? { images: input.images } : {}),
+				...(input.draftKey ? { draftKey: input.draftKey } : {}),
+				...(input.draftText !== undefined
+					? { draftText: input.draftText }
+					: {}),
+				...(input.attachmentIds ? { attachmentIds: input.attachmentIds } : {}),
 				originId: getBrowserClientId(),
 			});
 			// Settle the source composer before navigation resets its attachments.
@@ -324,6 +340,17 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 					inputId,
 					delivery: input.delivery,
 					...(input.images ? { images: input.images } : {}),
+					...("draft" in input
+						? { draftKey: { session: sentToSessionId } }
+						: input.draftKey
+							? { draftKey: input.draftKey }
+							: {}),
+					...(input.draftText !== undefined
+						? { draftText: input.draftText }
+						: {}),
+					...(input.attachmentIds
+						? { attachmentIds: input.attachmentIds }
+						: {}),
 					originId: getBrowserClientId(),
 				}).then(resolve, reject);
 			}),
@@ -353,6 +380,8 @@ export async function send(input: SendInput): Promise<SendOutcome> {
 	} catch (error) {
 		intents.delete(inputId);
 		localSends.delete(inputId);
+		if (Schema.is(DraftAttachmentMissing)(error))
+			return { kind: "failed", draftAttachmentMissing: error.message };
 		toastFailure(
 			"sideThread" in input
 				? "Failed to start Side Thread"

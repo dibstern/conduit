@@ -24,6 +24,8 @@ export interface RunnerSourceDelivery {
 
 export interface RunnerUpgradeState {
 	readonly quiescent: boolean;
+	/** Native turn activity, excluding background work. Older runners omit it. */
+	readonly turnInFlight?: boolean;
 	readonly revision: number;
 	readonly sourceDelivery?: RunnerSourceDelivery;
 	readonly snapshot?: RunnerSettingsSnapshot;

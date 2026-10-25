@@ -37,6 +37,7 @@ import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { retirePendingPrompts } from "../persistence/effect/retire-pending-prompts.js";
 import {
 	type CanonicalEvent,
@@ -850,6 +851,30 @@ export const handleAskUserResponse = (
 				message: "Secret answers require the secure command service.",
 			});
 		if (Option.isSome(engineOption)) {
+			if (pendingQuestion?.recovered) {
+				const read = Option.getOrUndefined(
+					yield* Effect.serviceOption(ReadQueryEffectTag),
+				);
+				const openTool = yield* Effect.result(
+					pendingQuestion.toolCallId && read?.getPendingClaudeQuestionTool
+						? read.getPendingClaudeQuestionTool(
+								sessionId,
+								pendingQuestion.toolCallId,
+							)
+						: Effect.succeed(undefined),
+				);
+				if (read && (openTool._tag === "Failure" || !openTool.success)) {
+					const turns = Option.getOrUndefined(
+						yield* Effect.serviceOption(ProviderTurnServiceTag),
+					);
+					if (turns?.completeRecoveredQuestion)
+						yield* turns.completeRecoveredQuestion(pendingQuestion, null);
+					return yield* new WsRpcError({
+						message:
+							"This question is no longer answerable. Send a new message to continue.",
+					});
+				}
+			}
 			yield* engineOption.value.dispatchEffect({
 				type: "resolve_question",
 				commandId: payload.commandId ?? createCommandId(),
@@ -878,6 +903,40 @@ export const handleAskUserResponse = (
 			) {
 				if (pendingQuestion?.recovered) return yield* expirePrompt(stored);
 			}
+			if (pendingQuestion?.recovered) {
+				const answerText = pendingQuestion.questions
+					.map(
+						(question, index) =>
+							`Answer to your question "${question.question}": ${answers[String(index)] ?? ""}`,
+					)
+					.join("\n");
+				const turnsOption = yield* Effect.serviceOption(ProviderTurnServiceTag);
+				const turns = Option.getOrUndefined(turnsOption);
+				if (!turns?.completeRecoveredQuestion) {
+					return yield* new WsRpcError({
+						message:
+							"This question cannot be answered right now. Send a new message to continue.",
+					});
+				}
+				const completed = yield* turns.completeRecoveredQuestion(
+					pendingQuestion,
+					answerText,
+					answers,
+				);
+				if (!completed)
+					return yield* new WsRpcError({
+						message:
+							"This question is no longer answerable. Send a new message to continue.",
+					});
+				yield* sendMessageToSession({
+					clientId,
+					sessionId: pendingQuestion.sessionId || sessionId,
+					text: answerText,
+					commandId: payload.commandId ?? createCommandId(),
+				});
+				// The follow-up send owns its new timeout, not this recovered prompt.
+				return;
+			}
 			const resolvedOption =
 				yield* pendingInteractionsOption.value.resolveQuestionFromBrowser(
 					toolId,
@@ -886,47 +945,6 @@ export const handleAskUserResponse = (
 			const resolved = Option.getOrUndefined(resolvedOption);
 			if (resolved) {
 				const questionSessionId = resolved.sessionId || sessionId;
-				if (resolved.question.recovered) {
-					const answerText = resolved.question.questions
-						.map(
-							(question, index) =>
-								`Answer to your question "${question.question}": ${answers[String(index)] ?? ""}`,
-						)
-						.join("\n");
-					const turnsOption = yield* Effect.serviceOption(
-						ProviderTurnServiceTag,
-					);
-					const turns = Option.getOrUndefined(turnsOption);
-					if (!turns?.completeRecoveredQuestion) {
-						yield* pendingInteractionsOption.value.recoverPendingQuestions([
-							resolved.question,
-						]);
-						return yield* Effect.fail(
-							new Error("Recovered question turn service unavailable"),
-						);
-					}
-					const completed = yield* Effect.result(
-						turns.completeRecoveredQuestion(
-							resolved.question,
-							answerText,
-							answers,
-						),
-					);
-					if (completed._tag === "Failure") {
-						yield* pendingInteractionsOption.value.recoverPendingQuestions([
-							resolved.question,
-						]);
-						return yield* Effect.fail(completed.failure);
-					}
-					yield* sendMessageToSession({
-						clientId,
-						sessionId: questionSessionId,
-						text: answerText,
-						commandId: payload.commandId ?? createCommandId(),
-					});
-					// The follow-up send owns its new timeout, not this recovered prompt.
-					return;
-				}
 				const engineOption = yield* Effect.serviceOption(
 					OrchestrationEngineTag,
 				);

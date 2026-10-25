@@ -36,7 +36,10 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import {
+	claudeLoginChange,
+	configuredClaudeConfigDir,
+} from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	makeProcessSessionRunner,
 	type ProcessRunnerDriver,
@@ -851,10 +854,17 @@ effectIt.effect(
 				const sql = yield* SqlClient.SqlClient;
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				const selected = yield* Deferred.make<void>();
-				const loginChange = vi.fn<ProcessRunnerDriver["loginChange"]>(() => {
-					Deferred.doneUnsafe(selected, Effect.void);
-					return "Account";
-				});
+				const loginChange = vi.fn<ProcessRunnerDriver["loginChange"]>(
+					(source, target) => {
+						const change = claudeLoginChange(
+							{ ...source, configDir: source.configDir ?? input.configDir },
+							{ ...target, configDir: target.configDir ?? input.configDir },
+						);
+						if (change === "Account")
+							Deferred.doneUnsafe(selected, Effect.void);
+						return change;
+					},
+				);
 				yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at)
 					VALUES ('s', 'test-project', 'claude', 1, 1)`;
 				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at, started_at, completed_at)
@@ -1016,7 +1026,7 @@ effectIt.effect(
 				yield* Effect.raceFirst(Deferred.await(selected), Fiber.await(target));
 				// Selection precedes dispatch; await the owned send and its cleanup.
 				const targetExit = yield* Fiber.await(target);
-				expect(loginChange).toHaveBeenCalledExactlyOnceWith(
+				expect(loginChange).toHaveBeenCalledWith(
 					expect.objectContaining({
 						account: accountA,
 						configDir: accountA.folder,

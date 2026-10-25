@@ -19,7 +19,13 @@ import {
 import { basename, join, resolve, sep } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
-import { Data, Effect } from "effect";
+import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
+import { Data, Effect, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
+import { AttachmentStoreTag } from "../../domain/persistence/Services/attachment-store.js";
+import { releaseCopiedInputDraftClaims } from "../../domain/relay/Services/input-drafts.js";
+import { makeAttachmentStore } from "../attachment-store.js";
 import {
 	makePersistenceEffectLayer,
 	makePersistenceStoreLayer,
@@ -28,8 +34,11 @@ import {
 import { effectMigrationEntries } from "../effect/migrations.js";
 import { ProjectionRunnerEffectTag } from "../effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../effect/projectors-effect.js";
-import { inputDraftClaimMarker } from "../input-drafts.js";
 import { daemonStorePath } from "../project-storage.js";
+import {
+	type AttachmentNormalisationSummary,
+	normaliseInlineAttachments,
+} from "./normalise-inline-attachments.js";
 
 export interface ProjectStoreSource {
 	readonly projectId: string;
@@ -85,9 +94,12 @@ export interface ProjectStoreImportResult {
 	readonly error?: DaemonStoreImportError;
 	readonly backup?: string;
 	readonly backupError?: DaemonStoreImportError;
+	readonly attachmentNormalisation?: AttachmentNormalisationSummary;
 }
 
 const copiedTables = [
+	"attachment_blobs",
+	"draft_attachments",
 	"events",
 	"sessions",
 	"provider_runs",
@@ -126,6 +138,8 @@ const singletonTables = [
 	"session_pick_backfill_state",
 	"store_identity",
 	"effect_sql_migrations",
+	// Derived by destination triggers; never copied from a source store.
+	"attachment_uses",
 	"daemon_store_imports",
 	"sqlite_sequence",
 ];
@@ -603,6 +617,7 @@ function excludeSharedSessions(
 		// Capture references before deleting their owners. Parent/fork links are
 		// deliberately absent: a non-shared child must resolve to the first owner.
 		db.exec(`
+			CREATE TEMP TABLE shared_drafts AS SELECT draft_key AS id FROM input_drafts WHERE kind = 'session' AND draft_key IN shared_sessions;
 			CREATE TEMP TABLE shared_events AS SELECT sequence AS id FROM events WHERE session_id IN shared_sessions;
 			CREATE TEMP TABLE shared_turns AS SELECT id FROM turns WHERE session_id IN shared_sessions;
 			CREATE TEMP TABLE shared_messages AS SELECT id FROM messages WHERE session_id IN shared_sessions OR turn_id IN shared_turns;
@@ -615,6 +630,7 @@ function excludeSharedSessions(
 		`);
 		const references: Readonly<Record<string, string>> = {
 			session_id: "shared_sessions",
+			draft_key: "shared_drafts",
 			message_id: "shared_messages",
 			turn_id: "shared_turns",
 			command_id: "shared_commands",
@@ -684,6 +700,7 @@ function collisions(
 		...Object.keys(runnerTables).filter((name) => names.includes(name)),
 	];
 	for (const table of all) {
+		if (table === "attachment_blobs") continue;
 		const key = columns(db, "source", table)
 			.filter(({ pk }) => pk > 0)
 			.map(({ name }) => name);
@@ -884,7 +901,7 @@ function copyProject(
 				`ROW_NUMBER() OVER (ORDER BY rowid) + ${offsets.rowid[table] ?? 0}`;
 		}
 		db.prepare(
-			`INSERT INTO main.${table} (${fields.map(quote).join(", ")}) SELECT ${fields.map((field) => expressions[field] ?? quote(field)).join(", ")} FROM source.${table} ORDER BY rowid`,
+			`INSERT ${table === "attachment_blobs" ? "OR IGNORE " : ""}INTO main.${table} (${fields.map(quote).join(", ")}) SELECT ${fields.map((field) => expressions[field] ?? quote(field)).join(", ")} FROM source.${table} ORDER BY rowid`,
 		).run(
 			...(fields.includes("project_id") || fields.includes("project_key")
 				? [project.projectId]
@@ -1005,16 +1022,7 @@ function importOne(
 				);
 			copyProject(db, project, names, offsets);
 			// Release only copied claims, before another connection can claim these rows.
-			db.prepare(`DELETE FROM main.input_drafts
-				WHERE promoted_session_id = ? AND text = ''
-				AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
-				inputDraftClaimMarker,
-			);
-			db.prepare(`UPDATE main.input_drafts SET promoted_session_id = NULL
-				WHERE promoted_session_id = ?
-				AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
-				inputDraftClaimMarker,
-			);
+			releaseCopiedInputDraftClaims(db);
 			options.checkpoint?.("import-copied", project.projectId);
 			for (const table of ["events", "projection_failures"]) {
 				const target =
@@ -1188,9 +1196,29 @@ function withNormalisedSource(
 					}
 					return before;
 				});
-				yield* Effect.gen(function* () {
+				const attachmentNormalisation = yield* Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const destination = daemonStorePath(configDir);
+					// A seed promotes this copy, so its blobs already live at their
+					// destination. Runtime imports put directly into the shared store.
+					const summary = existsSync(destination)
+						? yield* Effect.gen(function* () {
+								return yield* normaliseInlineAttachments(
+									sql,
+									yield* makeAttachmentStore,
+								);
+							}).pipe(
+								Effect.provide(
+									SqliteNode.layer({
+										filename: destination,
+										busyTimeout: 5000,
+									}).pipe(Layer.provide(Reactivity.layer)),
+								),
+							)
+						: yield* normaliseInlineAttachments(sql, yield* AttachmentStoreTag);
 					const runner = yield* ProjectionRunnerEffectTag;
 					if (!(yield* runner.isRecovered())) yield* runner.recover();
+					return summary;
 				}).pipe(
 					Effect.provide(
 						makePersistenceEffectLayer(copyPath, project.projectId),
@@ -1212,7 +1240,7 @@ function withNormalisedSource(
 					} finally {
 						copy.close();
 					}
-					return use(copyPath, before);
+					return { ...use(copyPath, before), attachmentNormalisation };
 				});
 			}),
 		(copyPath) =>
@@ -1490,6 +1518,13 @@ export function formatDaemonStoreImportReport(
 					: `, ${result.importedEvents} events`) +
 				(result.sharedSessions?.length
 					? `, shared sessions left out: ${result.sharedSessions.join(",")}`
+					: "") +
+				(result.attachmentNormalisation &&
+				(Object.values(result.attachmentNormalisation.rowsChanged).some(
+					(count) => count > 0,
+				) ||
+					result.attachmentNormalisation.rowsSkipped > 0)
+					? `, attachments ${JSON.stringify(result.attachmentNormalisation)}`
 					: "") +
 				(result.error
 					? `, error ${result.error.kind}: ${result.error.message}`

@@ -10,10 +10,10 @@ Examples:
   | baseline         | threshold |
   | model-drift-dark | 98        |
 
-Scenario: Drifted turn falls back to the raw model id
+Scenario: Drifted turn tidies an uncatalogued model id
   Given the conduit app is served with the raw-id-model-drift mockup
-  Then the composer model drift indicator reads ⚠ Running claude-unlisted-5 — you selected Opus
-  And the turn model drift marker reads Ran claude-unlisted-5, not Opus
+  Then the composer model drift indicator reads ⚠ Running Unlisted 5 — you selected Opus
+  And the turn model drift marker reads Ran Unlisted 5, not Opus
 
 Scenario: Normal turn renders no drift UI
   Given the conduit app is served with the matching-model mockup

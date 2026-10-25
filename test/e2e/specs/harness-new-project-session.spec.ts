@@ -115,7 +115,10 @@ test("a draft prefills the project last added or given a session, on every clien
 	await toList(page);
 	await page.getByTestId("session-scope-chip").click();
 	await page.getByRole("menuitem", { name: "Add a project…" }).click();
-	const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+	const dialog = page.getByRole("dialog", {
+		name: "Add a project",
+		exact: true,
+	});
 	await dialog.getByRole("combobox", { name: "Add folder" }).fill(folder);
 	await dialog.getByRole("option", { name: folder, exact: true }).click();
 	await dialog.getByRole("button", { name: /^Add project/ }).click();
@@ -190,7 +193,7 @@ test("a draft starts in the open session's project, keeps its pick, and lands in
 		page.screenshot({ path: testInfo.outputPath(`${name}.png`) });
 	const addFolder = async (target: Page, folder: string) => {
 		const dialog = target.getByRole("dialog", {
-			name: "Add project",
+			name: "Add a project",
 			exact: true,
 		});
 		await dialog.getByRole("combobox", { name: "Add folder" }).fill(folder);

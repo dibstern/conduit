@@ -169,6 +169,7 @@ export class InProcessSessionRunner implements SessionRunner {
 					return yield* this.payload.interrupt(
 						command.sessionId,
 						command.turnIds,
+						command.control?.requestedAt,
 					);
 				case "apply-live-settings":
 					return yield* this.payload.applySettings(

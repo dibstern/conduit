@@ -1,3 +1,5 @@
+import { Schema } from "effect";
+import { AttachmentSourceSchema } from "../../contracts/attachment-ref.js";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import { createLogger, type Logger } from "../../logger.js";
 import {
@@ -703,9 +705,12 @@ export class OpenCodeRuntimeEventTranslator {
 		}
 
 		if (rawPart.type === "file" && !existing) {
-			if (typeof rawPart.mime !== "string" || typeof rawPart.url !== "string") {
+			if (typeof rawPart.mime !== "string") {
 				return null;
 			}
+			const source = Schema.decodeUnknownSync(AttachmentSourceSchema)(
+				rawPart.source ?? { url: rawPart.url },
+			);
 			return [
 				opencodeRuntimeEvent("file.attached", sessionId, event, {
 					messageId,
@@ -714,7 +719,7 @@ export class OpenCodeRuntimeEventTranslator {
 					...(typeof rawPart.filename === "string"
 						? { filename: rawPart.filename }
 						: {}),
-					url: rawPart.url,
+					source,
 				}),
 			];
 		}

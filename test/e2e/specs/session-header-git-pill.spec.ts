@@ -207,7 +207,16 @@ for (const mode of [
 			const directory = "/workspace/conduit/";
 			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				directory,
-				git: { branch: "main", dirty: true, ahead: 0, behind: 0 },
+				git: {
+					branch: "main",
+					head: "6b11104",
+					oid: "6b11104a9c2e88d27395d13c706d876fbab99aa1",
+					upstream: "origin/main",
+					dirty: true,
+					ahead: 0,
+					behind: 0,
+					changes: { files: 3, insertions: 12, deletions: 4 },
+				},
 			});
 			await expect(trigger).toHaveAttribute("title", "conduit / main");
 			// Desktop Words names the branch alone; the phone sheet row keeps the project.
@@ -242,20 +251,36 @@ for (const mode of [
 			const details = page.getByTestId("composer-checkout-menu");
 			await expect(details).toBeVisible();
 			await expect(details.getByText(directory, { exact: true })).toBeVisible();
+			await expect(details.getByTestId("checkout-changes")).toHaveText(
+				"3+12-4files changed",
+			);
+			await expect(details.getByTestId("checkout-ahead")).toHaveText("0ahead");
+			await expect(details.getByTestId("checkout-behind")).toHaveText(
+				"0behind",
+			);
 			await expect(
-				details.getByText("uncommitted", { exact: true }),
+				details.getByText("origin/main", { exact: true }),
 			).toBeVisible();
-			await expect(details.getByText("↑0 ↓0", { exact: true })).toBeVisible();
+			await expect(details).toContainText(
+				`${mode.hasTouch ? "Tap" : "Click"} a row to copy it.`,
+			);
 			await capture(page, testInfo, `${mode.name}-checkout-details`);
-			await details.getByRole("menuitem", { name: "Copy folder path" }).click();
+			await details
+				.getByRole("menuitem", { name: "Copy worktree path" })
+				.click();
 			await expect
 				.poll(() => page.evaluate(() => navigator.clipboard.readText()))
 				.toBe(directory);
-			await trigger.click();
+			await expect(details).toBeVisible();
 			await details.getByRole("menuitem", { name: "Copy branch name" }).click();
 			await expect
 				.poll(() => page.evaluate(() => navigator.clipboard.readText()))
 				.toBe("main");
+			await expect(details).toBeVisible();
+			await details.getByRole("menuitem", { name: "Copy commit hash" }).click();
+			await expect
+				.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+				.toBe("6b11104a9c2e88d27395d13c706d876fbab99aa1");
 		});
 
 		test("linked worktree uses the worktree icon and keeps its name in details", async ({
@@ -382,22 +407,21 @@ for (const mode of [
 				await trigger.click();
 				const details = page.getByTestId("composer-checkout-menu");
 				await expect(details).toBeVisible();
-				const checkout = await details
-					.locator("dl")
-					.evaluate(
-						(list): Record<string, string> =>
-							Object.fromEntries(
-								Array.from(list.querySelectorAll("dt"), (label) => [
-									label.textContent?.trim() ?? "",
-									label.nextElementSibling?.textContent?.trim() ?? "",
-								]).sort(([left = ""], [right = ""]) =>
-									left.localeCompare(right),
-								),
-							),
-					);
-				expect(checkout["Folder"]).toBe(stage.directory);
+				const checkout = {
+					Worktree: await details
+						.getByRole("menuitem", { name: "Copy worktree path" })
+						.locator("bdi")
+						.innerText(),
+					Branch: await details
+						.locator('[data-part="checkout-branch"]')
+						.innerText(),
+				};
+				expect(checkout["Worktree"]).toBe(stage.directory);
 				expect(checkout["Branch"]).toBe(stage.git.branch);
-				expect(checkout["Worktree"]).toBe(stage.git.worktree);
+				if (stage.git.worktree)
+					await expect(
+						details.getByText(stage.git.worktree, { exact: true }),
+					).toBeVisible();
 				observations.push({
 					stage: stage.name,
 					tool: stage.tool,
@@ -481,7 +505,7 @@ for (const mode of [
 			const details = page.getByTestId("composer-checkout-menu");
 			await expect(details.getByText(moved, { exact: true })).toBeVisible();
 			await details
-				.getByRole("menuitem", { name: "Move to worktree…" })
+				.getByRole("menuitem", { name: "Move to another worktree…" })
 				.click();
 			const current = details.getByRole("menuitem", { name: /feature\/one/ });
 			await expect(
@@ -508,7 +532,7 @@ for (const mode of [
 				await trigger.click();
 				// An omitted override uses Claude's enabled driver capability.
 				await expect(
-					page.getByRole("menuitem", { name: "Move to worktree…" }),
+					page.getByRole("menuitem", { name: "Move to another worktree…" }),
 				).toHaveCount(supportsWorktree === false ? 0 : 1);
 			});
 		}
@@ -533,7 +557,7 @@ for (const mode of [
 			await trigger.click();
 			const details = page.getByTestId("composer-checkout-menu");
 			await details
-				.getByRole("menuitem", { name: "Move to worktree…" })
+				.getByRole("menuitem", { name: "Move to another worktree…" })
 				.click();
 			const destination = details
 				.getByRole("menuitem")
@@ -555,7 +579,9 @@ for (const mode of [
 				moveError: new WorkspaceMoveError({ path, reason: "missing" }),
 			});
 			await trigger.click();
-			await page.getByRole("menuitem", { name: "Move to worktree…" }).click();
+			await page
+				.getByRole("menuitem", { name: "Move to another worktree…" })
+				.click();
 			await page.getByRole("menuitem", { name: /feature\/removed/ }).click();
 			const toast = page.getByRole("alert");
 			await expect(
@@ -654,11 +680,9 @@ for (const mode of [
 			else await expect(trigger).toContainText("↑3 ↓1");
 			await capture(page, testInfo, `${mode.name}-checkout-marks`);
 			await trigger.click();
-			await expect(
-				page
-					.getByTestId("composer-checkout-menu")
-					.getByText("↑3 ↓1", { exact: true }),
-			).toBeVisible();
+			const menu = page.getByTestId("composer-checkout-menu");
+			await expect(menu.getByTestId("checkout-ahead")).toHaveText("3ahead");
+			await expect(menu.getByTestId("checkout-behind")).toHaveText("1behind");
 		});
 
 		test("a merged branch keeps its success mark", async ({
@@ -830,11 +854,19 @@ for (const mode of [
 						sheet.getByTestId(`overflow-view-${view}`),
 					).toBeVisible();
 				await settleSheet(page);
+				// The Views sheet drops down from under the header.
+				await expect
+					.poll(async () => {
+						const header = await page.locator("#session-bar").boundingBox();
+						const box = await sheet.boundingBox();
+						return header && box
+							? Math.abs(box.y - header.y - header.height)
+							: Infinity;
+					})
+					.toBeLessThan(1);
 				const box = await sheet.boundingBox();
-				const header = await page.getByTestId("session-bar").boundingBox();
 				expect(box?.x).toBe(0);
 				expect(box?.width).toBe(390);
-				expect(box?.y).toBeCloseTo((header?.y ?? 0) + (header?.height ?? 0), 0);
 				await capture(page, testInfo, "phone-overflow-views-sheet");
 			});
 	});

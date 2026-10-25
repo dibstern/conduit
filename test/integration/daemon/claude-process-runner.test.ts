@@ -547,6 +547,134 @@ describe("Claude session process runner", () => {
 		}
 	}, 45_000);
 
+	it("queues a send during a wake-up turn and answers after it ends", async () => {
+		const harness = await ProcessHarness.start({ restartProof: true });
+		harnesses.push(harness);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Wake-up queue");
+		const inputId = randomUUID();
+		const text = "queued-during-wake-up";
+		const report: Record<string, unknown> = {
+			bead: "conduit-test-s7zo",
+			sessionId,
+			inputId,
+			assertionsPassed: false,
+		};
+		const inbox = () => {
+			const db = new Database(harness.daemonStorePath(), { readonly: true });
+			try {
+				return {
+					runs: db
+						.prepare(
+							"SELECT status FROM provider_runs WHERE session_id = ? ORDER BY requested_at, rowid",
+						)
+						.all(sessionId),
+					input: db
+						.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
+						.get(inputId),
+				};
+			} finally {
+				db.close();
+			}
+		};
+		try {
+			await browser.send(sessionId, "notification-parent-turn");
+			await settled(harness, sessionId, 1);
+			writeFileSync(
+				join(harness.root, "release-notification-parent"),
+				"release",
+			);
+			await vi.waitFor(async () => {
+				expect(
+					(await browser.history(sessionId)).some(
+						(message) => message.text === "Notification parent message.",
+					),
+				).toBe(true);
+			});
+			report["wakeUp"] = inbox();
+			expect(inbox().runs).toEqual([{ status: "completed" }]);
+			expect(
+				await Effect.runPromise(
+					browser.rpc["input.submit"]({
+						sessionId,
+						originId: browser.originId,
+						inputId,
+						text,
+						delivery: "queue",
+					}),
+				),
+			).toMatchObject({ ok: true });
+			report["queued"] = inbox();
+			expect(inbox()).toEqual({
+				runs: [{ status: "completed" }],
+				input: { state: "queued" },
+			});
+			await vi.waitFor(() =>
+				expect(browser.frames.map(({ message }) => message)).toContainEqual(
+					expect.objectContaining({
+						type: "session_detail",
+						sessionId,
+						_tag: "upsert",
+						item: {
+							_tag: "pendingInput",
+							input: expect.objectContaining({
+								inputId,
+								state: "queued",
+								request: expect.objectContaining({ text }),
+							}),
+						},
+					}),
+				),
+			);
+			report["queuedBrowserFrames"] = browser.frames
+				.map(({ message }) => message)
+				.filter(
+					(frame) =>
+						frame["type"] === "session_detail" && frame["_tag"] === "upsert",
+				);
+			expect(
+				(await browser.history(sessionId)).filter(
+					(message) => message.text === text,
+				),
+			).toEqual([]);
+			writeFileSync(
+				join(harness.root, "release-notification-result"),
+				"release",
+			);
+			await vi.waitFor(
+				async () => {
+					const transcript = await browser.history(sessionId);
+					expect(
+						transcript.filter((message) => message.text === text),
+					).toHaveLength(1);
+					expect(
+						transcript.filter(
+							(message) => message.text === responseChunks(text).join(""),
+						),
+					).toHaveLength(1);
+				},
+				{ timeout: 10_000 },
+			);
+			await settled(harness, sessionId, 2);
+			expect(inbox()).toEqual({
+				runs: [{ status: "completed" }, { status: "completed" }],
+				input: { state: "removed" },
+			});
+			report["answered"] = {
+				...inbox(),
+				transcript: await browser.history(sessionId),
+				persisted: persisted(harness, sessionId),
+			};
+			report["assertionsPassed"] = true;
+		} finally {
+			mkdirSync("test-results/process-harness", { recursive: true });
+			writeFileSync(
+				"test-results/process-harness/s7zo-wake-up-inbox.json",
+				JSON.stringify(report, null, 2),
+			);
+		}
+	}, 45_000);
+
 	it.each([
 		"interrupt",
 		"interrupt-before-snapshot",

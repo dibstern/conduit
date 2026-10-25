@@ -258,7 +258,10 @@ test("explains only unsupported providers while adding several folders", async (
 	});
 	await page.getByTestId("session-scope-chip").click();
 	await page.getByRole("menuitem", { name: "Add a project…" }).click();
-	const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+	const dialog = page.getByRole("dialog", {
+		name: "Add a project",
+		exact: true,
+	});
 	const input = dialog.getByRole("combobox", { name: "Add folder" });
 	await input.fill("/src/client");
 	await dialog
@@ -273,9 +276,12 @@ test("explains only unsupported providers while adding several folders", async (
 	await expect(support).toHaveText("Main only works in the main folder only.");
 	await expect(support.locator("p")).toHaveCount(1);
 	await expect(
-		dialog.getByText("Folders · Sessions run in main and can edit all", {
-			exact: true,
-		}),
+		dialog.getByText(
+			"Pick one or more folders. The first is the project's main folder.",
+			{
+				exact: true,
+			},
+		),
 	).toBeVisible();
 	await page.screenshot({
 		path: testInfo.outputPath("provider-folder-support.png"),
@@ -482,7 +488,10 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 async function addProject(page: Page, folder: string): Promise<void> {
 	await page.getByTestId("session-scope-chip").click();
 	await page.getByRole("menuitem", { name: "Add a project…" }).click();
-	const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+	const dialog = page.getByRole("dialog", {
+		name: "Add a project",
+		exact: true,
+	});
 	await dialog.getByRole("combobox", { name: "Add folder" }).fill(folder);
 	await dialog.getByRole("option", { name: folder, exact: true }).click();
 	await dialog.getByRole("button", { name: /^Add project/ }).click();

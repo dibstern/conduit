@@ -62,6 +62,7 @@ test.describe("Notification → session navigation (replay)", () => {
 					SubscribeInputDraft: ({ key }) => [
 						{
 							_tag: "synchronized",
+							attachments: [],
 							...((key as { session?: string }).session && {
 								text: `Shown ${(key as { session?: string }).session}`,
 							}),
@@ -175,6 +176,7 @@ test.describe("Notification → session navigation (replay)", () => {
 				SubscribeInputDraft: ({ key }) => [
 					{
 						_tag: "synchronized",
+						attachments: [],
 						...((key as { session?: string }).session && {
 							text: `Shown ${(key as { session?: string }).session}`,
 						}),

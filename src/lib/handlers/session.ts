@@ -3,11 +3,13 @@ import { accountRefFromSelection } from "../account-directory.js";
 import type { Account, AccountRef } from "../contracts/account.js";
 import type { AccountId } from "../contracts/provider-instance.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
+import { WorkspaceMoveError } from "../contracts/session-workspace.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	DaemonEvent,
 	DaemonEventBusTag,
 } from "../domain/daemon/Services/daemon-pubsub.js";
+import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
 import { loadModelCatalog } from "../domain/relay/Services/model-catalog.js";
 import {
 	ProjectSettingsTag,
@@ -21,6 +23,7 @@ import {
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { forkSession } from "../domain/relay/Services/session-command.js";
+import type { CreateSessionOptions } from "../domain/relay/Services/session-manager-service.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
@@ -200,6 +203,8 @@ export const handleViewSession = (
 		sessionId: payload.sessionId,
 	});
 
+let draftWorkspaceFailureInjected = false;
+
 export const createSessionForClient = <E = never>({
 	clientId,
 	title,
@@ -213,6 +218,8 @@ export const createSessionForClient = <E = never>({
 	initializeWorkspace,
 	sessionId,
 	resolvedCreation,
+	draftChange,
+	draftId,
 }: {
 	readonly clientId: string;
 	readonly title?: string;
@@ -222,6 +229,8 @@ export const createSessionForClient = <E = never>({
 	readonly account?: Account;
 	readonly sessionId?: string;
 	readonly directory?: string;
+	readonly draftChange?: CreateSessionOptions["draftChange"];
+	readonly draftId?: string;
 	readonly resolvedCreation?: Effect.Success<
 		ReturnType<typeof resolveSessionCreation>
 	>;
@@ -252,6 +261,7 @@ export const createSessionForClient = <E = never>({
 			pick,
 			permissionMode,
 			...(directory === undefined ? {} : { directory }),
+			...(draftChange === undefined ? {} : { draftChange }),
 			...(sessionId === undefined ? {} : { sessionId }),
 		});
 
@@ -259,10 +269,27 @@ export const createSessionForClient = <E = never>({
 			Effect.gen(function* () {
 				// Protect the id handoff for workspace initialization, then allow
 				// discovery and Git checks to be interrupted with rollback installed.
-				const session = yield* initializeWorkspace ? create : restore(create);
+				const session = yield* initializeWorkspace || draftId !== undefined
+					? create
+					: restore(create);
 				return yield* restore(
 					Effect.gen(function* () {
 						if (initializeWorkspace) yield* initializeWorkspace(session.id);
+						// One-shot failure after real workspace setup and session.created.
+						if (
+							initializeWorkspace &&
+							draftId !== undefined &&
+							process.env["NODE_ENV"] === "test" &&
+							!draftWorkspaceFailureInjected &&
+							process.env["CONDUIT_TEST_DRAFT_WORKSPACE_FAILURE"] === draftId
+						) {
+							draftWorkspaceFailureInjected = true;
+							yield* Effect.logError("Test Draft workspace setup failure");
+							return yield* new WorkspaceMoveError({
+								path: directory ?? session.directory,
+								reason: "missing",
+							});
+						}
 						yield* switchClientToSession(clientId, session.id, {
 							skipPollerSeed: true,
 						});
@@ -311,10 +338,18 @@ export const createSessionForClient = <E = never>({
 					}),
 				).pipe(
 					Effect.onError(() =>
-						initializeWorkspace
-							? sessionManagerService
-									.deleteSession(session.id)
-									.pipe(Effect.orDie)
+						initializeWorkspace || draftId !== undefined
+							? Effect.gen(function* () {
+									if (draftId !== undefined) {
+										const drafts = yield* InputDraftsTag;
+										yield* drafts
+											.demote({ draft: draftId }, session.id)
+											.pipe(Effect.orDie);
+									}
+									yield* sessionManagerService
+										.deleteSession(session.id)
+										.pipe(Effect.orDie);
+								})
 							: Effect.void,
 					),
 				);

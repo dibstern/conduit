@@ -3,8 +3,9 @@
 // Instances are execution-only — they don't own sessions, messages, or history.
 // Conduit owns all state. Instances turn prompts into event streams.
 
-import type { Effect, Scope } from "effect";
+import type { Effect, Scope, Stream } from "effect";
 import type { Account } from "../contracts/account.js";
+import type { AttachmentRef } from "../contracts/attachment-ref.js";
 import type { ProviderSessionCapabilities } from "../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
 import type {
@@ -53,6 +54,8 @@ export interface PermissionResponse {
 export interface ProviderControlContext {
 	readonly commandId: string;
 	readonly providerProcessId: string;
+	/** Original Stop cutoff, before its owner snapshot and delivery. */
+	readonly requestedAt?: number;
 	/** Conditional End for the original Stop cohort only. */
 	readonly retireRunIds?: readonly string[];
 	readonly response?: PermissionResponse;
@@ -320,10 +323,18 @@ export interface SendTurnInput
 	readonly sideThread?: boolean;
 	readonly variant?: string;
 	readonly contextWindow?: string;
-	/** Base64 data URLs for images, plain text and PDFs. Retains the wire field name. */
-	readonly images?: readonly string[];
+	/** Stored references for images, plain text and PDFs. */
+	readonly images?: readonly AttachmentRef[];
 	readonly agent?: string;
 }
+
+/** Bytes exist only at adapter execution; placement keeps the original ref. */
+export type ResolvedSendTurnInput = Omit<SendTurnInput, "images"> & {
+	readonly images?: readonly {
+		readonly ref: AttachmentRef;
+		readonly dataUrl: string;
+	}[];
+};
 
 /** Launch inputs only: pre-warming never admits a user turn. */
 export type PreWarmSessionInput = Pick<
@@ -424,6 +435,11 @@ export interface ProviderNativeSession {
  * - No streamEvents -- instance pushes via EventSink, no output stream needed
  */
 export interface ProviderInstance {
+	/** Native turn activity can outlive the last owned provider run. */
+	readonly hasActiveTurnsEffect?: (sessionId: string) => Effect.Effect<boolean>;
+	readonly turnEnds?:
+		| Effect.Effect<Stream.Stream<string>, never, Scope.Scope>
+		| undefined;
 	/** Liveness includes quarantined runners that cannot accept controls. */
 	readonly hasLiveProcessEffect?: (sessionId: string) => Effect.Effect<boolean>;
 	/** Process identity captured without starting work; refuses unavailable sessions. */
@@ -463,7 +479,7 @@ export interface ProviderInstance {
 
 	/** Send a user turn to the provider and stream response events via EventSink */
 	sendTurnEffect(
-		input: SendTurnInput,
+		input: ResolvedSendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure>;
 
 	/** Report a live cursor, including its cleared state, without writing a receipt. */

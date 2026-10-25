@@ -39,10 +39,10 @@ import {
 } from "../../../src/lib/provider/runner/runner-recovery.js";
 import { failRunnerTurn } from "../../../src/lib/provider/runner/runner-turn-failure.js";
 import type {
+	DurableSessionTurn,
 	SessionFailure,
 	SessionOutput,
 	SessionOutputReply,
-	SessionTurn,
 } from "../../../src/lib/provider/runner/session-runner.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
@@ -187,7 +187,8 @@ it.each([
 						{
 							driverForAccount: (account) =>
 								account === "claude" ? "claude" : undefined,
-							decodeInput: (row) => JSON.parse(row.payload_json) as SessionTurn,
+							decodeInput: (row) =>
+								JSON.parse(row.payload_json) as DurableSessionTurn,
 							resolveSinkId: (commandId, _inputId, attempt) =>
 								runnerSinkId(commandId, attempt),
 							closing: () => false,

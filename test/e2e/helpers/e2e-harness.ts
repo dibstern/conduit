@@ -300,17 +300,21 @@ export async function createReplayHarness(
 		},
 		configDir,
 	);
-	// OpenCode replays also discover Claude while reading the model picker.
+	// Capability discovery would otherwise spawn the real Claude CLI, even for
+	// OpenCode-only replays (GetModels also discovers the default Claude), and
+	// that process outlives stop() and writes into configDir.
 	__setProbeOverrideForTesting(async () => ({
-		models: options.claudeReplay?.models ?? [
-			{
-				id: CLAUDE_TRACE_MODEL,
-				name: "Claude Fable 5",
-				providerId: "claude",
-				// The real catalog advertises effort levels for Fable.
-				variants: { low: {}, medium: {}, high: {} },
-			},
-		],
+		models: claudeReplayer
+			? (options.claudeReplay?.models ?? [
+					{
+						id: CLAUDE_TRACE_MODEL,
+						name: "Claude Fable 5",
+						providerId: "claude",
+						// The real catalog advertises effort levels for Fable.
+						variants: { low: {}, medium: {}, high: {} },
+					},
+				])
+			: [],
 		commands: [],
 		agents: [],
 	}));

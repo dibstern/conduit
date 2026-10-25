@@ -1,17 +1,24 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Option } from "effect";
+import { Effect, Layer } from "effect";
 import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
-import { afterEach, describe, expect, vi } from "vitest";
+import { afterEach, describe, expect } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
+import { makeSubprocessLive } from "../../../src/lib/domain/daemon/Layers/subprocess-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	findOpenCodeSession,
@@ -24,7 +31,7 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { createSessionGitCache } from "../../../src/lib/git/session-git.js";
+import { Subprocess } from "../../../src/lib/domain/daemon/Services/subprocess.js";
 import {
 	effectMigrationEntries,
 	makeEffectSqlMigrator,
@@ -162,62 +169,55 @@ afterEach(() => {
 });
 
 describe("listDaemonSessions", () => {
-	it.effect("releases SQL before awaiting git refresh", () => {
-		const root = makeTemporaryRoot();
-		const project = join(root, "project");
-		makeProjectStore(project, [
-			{ id: "session", title: "Settled", updatedAt: 1, settledAt: 100 },
-		]);
-		let release!: () => void;
-		const held = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const readGit = vi.fn(async () => {
-			await held;
-			return { branch: "fresh" };
-		});
-		return Effect.scoped(
-			Effect.gen(function* () {
+	it.effect(
+		"reads published git without changing its session version or spawning",
+		() => {
+			const root = makeTemporaryRoot();
+			const project = join(root, "project");
+			makeProjectStore(project, [
+				{ id: "session", title: "Settled", updatedAt: 1, settledAt: 100 },
+			]);
+			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const listing = yield* Effect.forkChild(
-					listDaemonSessions({}, createSessionGitCache(readGit)),
-				);
-				yield* Effect.tryPromise(() =>
-					vi.waitFor(() => expect(readGit).toHaveBeenCalledOnce(), {
-						timeout: 5_000,
+				const owner = yield* Subprocess;
+				yield* sql.withTransaction(
+					Effect.gen(function* () {
+						yield* sql`INSERT INTO session_git_published (directory, git, version)
+						VALUES (${realpathSync(project)}, ${JSON.stringify({ branch: "published" })}, 41)`;
+						yield* sql`UPDATE sessions SET version = 41 WHERE id = 'session'`;
 					}),
 				);
-				const unrelated = yield* Effect.forkChild(
-					sql`SELECT id FROM sessions WHERE id = 'session'`,
-				);
-				yield* Effect.tryPromise(() =>
-					vi.waitFor(() => expect(unrelated.pollUnsafe()).toBeDefined(), {
-						timeout: 5_000,
-					}),
-				);
-				expect(yield* Fiber.join(unrelated)).toEqual([{ id: "session" }]);
-				expect(listing.pollUnsafe()).toBeUndefined();
-				yield* sql`UPDATE sessions SET settled_at = NULL WHERE id = 'session'`;
-				release();
-				const result = yield* Fiber.join(listing);
+				const before = yield* owner.metrics;
+				const result = yield* listDaemonSessions();
 				expect(result.settledCounts).toEqual([
 					{ projectSlug: "project", count: 1 },
 				]);
 				expect(result.sessions).toMatchObject([
-					{ id: "session", settledAt: 100, git: { branch: "fresh" } },
+					{ id: "session", settledAt: 100, git: { branch: "published" } },
 				]);
-			}).pipe(Effect.ensuring(Effect.sync(release))),
-		).pipe(
-			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
-			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
-			Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
-			Effect.provide(
-				makeProjectRegistryLive([
-					{ slug: "project", title: "Project", folders: [project] },
-				]),
-			),
-		);
-	});
+				expect(
+					(yield* listDaemonSessions({ search: "absent" })).sessions,
+				).toEqual([]);
+				expect((yield* owner.metrics).spawnCount - before.spawnCount).toBe(0);
+				expect(
+					yield* sql`SELECT version FROM sessions WHERE id = 'session'`,
+				).toEqual([{ version: 41 }]);
+				expect(yield* sql`SELECT version FROM session_git_published`).toEqual([
+					{ version: 41 },
+				]);
+			}).pipe(
+				Effect.provide(makeSubprocessLive()),
+				Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
+				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
+				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
+				Effect.provide(
+					makeProjectRegistryLive([
+						{ slug: "project", title: "Project", folders: [project] },
+					]),
+				),
+			);
+		},
+	);
 
 	for (const read of ["list", "binding"] as const) {
 		it.effect(
@@ -283,7 +283,7 @@ describe("listDaemonSessions", () => {
 		);
 	}
 	it.effect(
-		"awaits fresh foreign git with at most four directory reads per project",
+		"reads each folder's published git for a cold multi-folder project",
 		() => {
 			const root = makeTemporaryRoot();
 			const project = join(root, "project");
@@ -297,51 +297,20 @@ describe("listDaemonSessions", () => {
 			makeProjectStore(project, [
 				{ id: "session", title: "Session", updatedAt: 1 },
 			]);
-			let release!: () => void;
-			const held = new Promise<void>((resolve) => {
-				release = resolve;
-			});
-			let concurrent = 0;
-			let maximum = 0;
-			const read = vi.fn(async () => {
-				concurrent++;
-				maximum = Math.max(maximum, concurrent);
-				await held;
-				concurrent--;
-				return { branch: "fresh" };
-			});
-			const cache = createSessionGitCache(read);
-			for (const folder of folders) cache.seed(folder, { branch: "cached" });
-			return Effect.scoped(
-				Effect.gen(function* () {
-					const unusedGit = vi.fn(async () => undefined);
-					const empty = yield* listDaemonSessions(
-						{ search: "absent" },
-						createSessionGitCache(unusedGit),
-					);
-					expect(empty.sessions).toEqual([]);
-					expect(unusedGit).not.toHaveBeenCalled();
-					const listing = yield* Effect.forkChild(
-						listDaemonSessions({}, cache),
-					);
-					yield* Effect.tryPromise(() =>
-						vi.waitFor(() => expect(read).toHaveBeenCalledTimes(4)),
-					);
-					expect(
-						Option.isNone(
-							yield* Effect.sync(() =>
-								Option.fromUndefinedOr(listing.pollUnsafe()),
-							),
-						),
-					).toBe(true);
-					expect(cache.peek(project)?.branch).toBe("cached");
-					release();
-					const result = yield* Fiber.join(listing);
-					expect(maximum).toBe(4);
-					expect(read).toHaveBeenCalledTimes(folders.length);
-					expect(result.sessions[0]?.git?.branch).toBe("fresh");
-				}),
-			).pipe(
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				for (const [index, folder] of folders.entries())
+					yield* sql`INSERT INTO session_git_published (directory, git, version)
+							VALUES (${realpathSync(folder)}, ${JSON.stringify({ branch: `folder-${index}` })}, 1)`;
+				const result = yield* listDaemonSessions();
+				expect(result.sessions[0]?.git).toMatchObject({
+					branch: "folder-0",
+					folders: folders.map((folder, index) => ({
+						root: folder,
+						branch: `folder-${index}`,
+					})),
+				});
+			}).pipe(
 				Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 				Effect.provideService(AccountDirectory, makeMockAccountDirectory()),
 				Effect.provide(Layer.effect(SessionActivityTag, makeSessionActivity)),
@@ -350,12 +319,11 @@ describe("listDaemonSessions", () => {
 						{ slug: "project", title: "Project", folders },
 					]),
 				),
-				Effect.ensuring(Effect.sync(release)),
 			);
 		},
 	);
 
-	it.effect("stamps cached git context only on git project sessions", () => {
+	it.effect("includes published git only on git project sessions", () => {
 		const root = makeTemporaryRoot();
 		const gitProject = join(root, "git-project");
 		const plainProject = join(root, "plain-project");
@@ -371,28 +339,30 @@ describe("listDaemonSessions", () => {
 			{ id: "plain-session", title: "Plain", updatedAt: 1 },
 		]);
 		writeFileSync(join(gitProject, "untracked.txt"), "fixture");
-		const cache = createSessionGitCache();
 		return Effect.gen(function* () {
-			yield* Effect.promise(() => cache.refresh(gitProject));
-			yield* Effect.promise(() => cache.refresh(plainProject));
-			const result = yield* listDaemonSessions({}, cache);
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO session_git_published (directory, git, version)
+				VALUES (${realpathSync(gitProject)}, ${JSON.stringify({ branch: "main", dirty: true, changes: { files: 1, insertions: 0, deletions: 0 } })}, 1)`;
+			const result = yield* listDaemonSessions();
 			expect(
 				result.sessions.find((session) => session.id === "git-session")?.git,
 			).toEqual({
 				branch: "main",
 				dirty: true,
+				changes: { files: 1, insertions: 0, deletions: 0 },
 				folders: [
 					{
 						root: gitProject,
 						label: "git-project",
 						branch: "main",
 						dirty: true,
+						changes: { files: 1, insertions: 0, deletions: 0 },
 					},
 				],
 			});
 			expect(
-				result.sessions.find((session) => session.id === "plain-session"),
-			).not.toHaveProperty("git");
+				result.sessions.find((session) => session.id === "plain-session")?.git,
+			).toBeUndefined();
 		}).pipe(
 			Effect.provide(makeDaemonSharedStoreLayer(root, defaultDaemonConfig())),
 			Effect.provideService(AccountDirectory, makeMockAccountDirectory()),

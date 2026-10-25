@@ -24,7 +24,10 @@ async function openDialog(
 	await new AppPage(page).goto(harness.baseUrl);
 	await page.getByTestId("session-scope-chip").click();
 	await page.getByRole("menuitem", { name: "Add a project…" }).click();
-	const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+	const dialog = page.getByRole("dialog", {
+		name: "Add a project",
+		exact: true,
+	});
 	await expect(dialog).toBeVisible();
 	return dialog;
 }
@@ -148,7 +151,9 @@ test("adds new and existing folders, promotes main, and reloads the persisted sc
 					.getByRole("option", { name: /New folder/ })
 					.boundingBox();
 				const match = await dialog
-					.getByRole("option", { name: matching, exact: true })
+					.locator(
+						`[data-testid="folder-picker-row"][data-path=${JSON.stringify(matching)}]`,
+					)
 					.boundingBox();
 				return Boolean(
 					button &&
@@ -174,22 +179,34 @@ test("adds new and existing folders, promotes main, and reloads the persisted sc
 		});
 	}
 	await dialog.getByRole("option", { name: /New folder/ }).click();
+	await expect(input).toHaveValue(created);
+	await expect(
+		dialog.getByRole("option", { name: /New folder/ }),
+	).toHaveAttribute("aria-selected", "true");
 	expect(existsSync(created)).toBe(false);
 	await expect(dialog.getByLabel("Project name")).toHaveValue("new-notes");
 	await input.fill(existing);
-	await dialog.getByRole("option", { name: existing, exact: true }).click();
+	await dialog
+		.locator(
+			`[data-testid="folder-picker-row"][data-path=${JSON.stringify(existing)}]`,
+		)
+		.click();
+	await expect(input).toHaveValue(existing);
 	await expect(dialog.getByTestId("project-provider-capabilities")).toHaveCount(
 		0,
 	);
 	await expect(
-		dialog.getByText("Folders · Sessions run in main and can edit all", {
-			exact: true,
-		}),
+		dialog.getByText(
+			"Pick one or more folders. The first is the project's main folder.",
+			{
+				exact: true,
+			},
+		),
 	).toBeVisible();
 	await dialog.getByRole("button", { name: `Make main: ${existing}` }).click();
 	await expect(dialog.getByLabel("Project name")).toHaveValue("existing-app");
 	await expect(
-		dialog.getByTestId("project-folder-row").first(),
+		dialog.getByTestId("project-folder-chip").first(),
 	).toHaveAttribute("aria-label", `Main folder: ${existing}`);
 	await dialog.getByLabel("Project name").fill("App and notes");
 	await page.screenshot({
@@ -260,7 +277,10 @@ test("adds with the keyboard alone and cancels without creating a folder", async
 		});
 	}).toPass();
 	await page.keyboard.press("Enter");
-	const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+	const dialog = page.getByRole("dialog", {
+		name: "Add a project",
+		exact: true,
+	});
 	await expect(dialog).toBeVisible();
 	const input = dialog.getByRole("combobox", { name: "Add folder" });
 	await expect(input).toBeFocused();
@@ -270,10 +290,14 @@ test("adds with the keyboard alone and cancels without creating a folder", async
 	).toBeVisible();
 	await page.keyboard.press("ArrowDown");
 	await page.keyboard.press("Enter");
-	await expect(dialog.getByTestId("project-folder-row")).toHaveCount(1);
+	await expect(dialog.getByTestId("project-folder-chip")).toHaveCount(1);
+	await expect(input).toHaveValue(created);
+	await page.keyboard.press("ControlOrMeta+A");
 	await page.keyboard.type(existing);
 	await expect(
-		dialog.getByRole("option", { name: existing, exact: true }),
+		dialog.locator(
+			`[data-testid="folder-picker-row"][data-path=${JSON.stringify(existing)}]`,
+		),
 	).toBeVisible();
 	await page.keyboard.press("ArrowDown");
 	await page.keyboard.press("ArrowUp");
@@ -324,6 +348,7 @@ test("adds with the keyboard alone and cancels without creating a folder", async
 	await page.keyboard.press("Enter");
 	await page.keyboard.press("Escape");
 	await expect(dialog).toBeHidden();
+	await expect(page.getByTestId("session-scope-chip")).toBeFocused();
 	expect(existsSync(cancelled)).toBe(false);
 	await page.screenshot({
 		path: testInfo.outputPath("keyboard-current-scope.png"),
@@ -367,7 +392,11 @@ test("adding an existing primary folder navigates directly to its project", asyn
 	for (const path of [directory, alias]) {
 		const dialog = await openDialog(page, harness);
 		await dialog.getByRole("combobox", { name: "Add folder" }).fill(path);
-		await dialog.getByRole("option", { name: path, exact: true }).click();
+		await dialog
+			.locator(
+				`[data-testid="folder-picker-row"][data-path=${JSON.stringify(path)}]`,
+			)
+			.click();
 		await dialog.getByRole("button", { name: /^Add project/ }).click();
 		await expect(dialog).toBeHidden();
 		await expect(page).toHaveURL(`${harness.baseUrl}/?p=process-test`);
@@ -392,14 +421,18 @@ test("permission denied stays inline and keeps the selected folder", async ({
 	mkdirSync(denied);
 	const dialog = await openDialog(page, harness);
 	await dialog.getByRole("combobox", { name: "Add folder" }).fill(denied);
-	await dialog.getByRole("option", { name: denied, exact: true }).click();
+	await dialog
+		.locator(
+			`[data-testid="folder-picker-row"][data-path=${JSON.stringify(denied)}]`,
+		)
+		.click();
 	chmodSync(denied, 0);
 	try {
 		await dialog.getByRole("button", { name: /^Add project/ }).click();
 		await expect(dialog.getByRole("alert")).toContainText("Permission denied");
 		await expect(dialog.getByRole("alert")).toContainText(denied);
 		await expect(dialog).toBeVisible();
-		await expect(dialog.getByTestId("project-folder-row")).toHaveAttribute(
+		await expect(dialog.getByTestId("project-folder-chip")).toHaveAttribute(
 			"aria-label",
 			`Main folder: ${denied}`,
 		);
@@ -445,7 +478,7 @@ test("permission denied during lookup keeps the folder input", async ({
 // Failure cases: suggestions could leak a missing recent folder, list a plain
 // or hidden sibling, mislabel git, repeat a folder found both ways, ignore the
 // text filter, or break path autocomplete; the dialog could hide them or fail
-// to add a picked one.
+// to tick a picked one or keep the row and chip selection in sync.
 function seedSuggestions(harness: ProcessHarness) {
 	const elsewhere = join(harness.root, "elsewhere");
 	const folder = (path: string, git: boolean) => {
@@ -541,30 +574,61 @@ test("FindFolders suggests recent and sibling folders for text and matches paths
 	);
 });
 
-test("opening the dialog shows suggestions and clicking one adds a folder row", async ({
+test("suggestions stay listed and synchronize row ticks with folder chips", async ({
 	page,
 	harness,
 }, testInfo) => {
 	const { recentRepo, recentPlain, sibling } = seedSuggestions(harness);
 	const dialog = await openDialog(page, harness);
-	const suggestions = dialog.getByRole("group", { name: "Suggestions" });
 	const option = (path: string) =>
-		suggestions.getByRole("option", { name: path, exact: true });
-	await expect(option(recentRepo)).toContainText("recent · git");
-	await expect(option(recentPlain)).toContainText("recent");
+		dialog.locator(
+			`[data-testid="folder-picker-row"][data-path=${JSON.stringify(path)}]`,
+		);
+	const chips = dialog.getByTestId("project-folder-chip");
+	const input = dialog.getByRole("combobox", { name: "Add folder" });
+	await expect(
+		dialog.getByRole("group", { name: "Recent", exact: true }),
+	).toBeVisible();
+	await expect(
+		dialog.getByRole("group", { name: "Repositories nearby", exact: true }),
+	).toBeVisible();
+	await expect(option(recentRepo)).toContainText("git");
+	await expect(option(recentPlain)).not.toContainText("git");
 	await expect(option(sibling)).toContainText("git");
-	await expect(suggestions.getByRole("option")).toHaveCount(4);
+	await expect(
+		dialog.getByRole("listbox", { name: "Folder matches" }).getByRole("option"),
+	).toHaveCount(4);
 	await page.screenshot({ path: testInfo.outputPath("suggestions-open.png") });
 	await option(sibling).click();
-	await expect(dialog.getByTestId("project-folder-row")).toHaveAttribute(
-		"aria-label",
-		`Main folder: ${sibling}`,
-	);
+	await expect(chips).toHaveAttribute("aria-label", `Main folder: ${sibling}`);
 	await expect(dialog.getByLabel("Project name")).toHaveValue("alpha-sibling");
-	await expect(option(sibling)).toHaveCount(0);
-	await dialog.getByRole("combobox", { name: "Add folder" }).fill("beta");
-	await expect(suggestions.getByRole("option")).toHaveCount(1);
+	await expect(option(sibling)).toHaveAttribute("aria-selected", "true");
+	await expect(
+		dialog.getByRole("listbox", { name: "Folder matches" }).getByRole("option"),
+	).toHaveCount(4);
+	await expect(input).toHaveValue("");
+	await option(recentRepo).click();
+	await expect(chips).toHaveCount(2);
+	await expect(chips.first()).toHaveAttribute("data-path", sibling);
+	await expect(chips.first().getByText("Main", { exact: true })).toBeVisible();
+	await expect(chips.nth(1)).toHaveAttribute("data-path", recentRepo);
+	await option(recentRepo).click();
+	await expect(option(recentRepo)).toHaveAttribute("aria-selected", "false");
+	await expect(chips).toHaveCount(1);
+	await dialog
+		.getByRole("button", { name: `Remove folder: ${sibling}`, exact: true })
+		.click();
+	await expect(chips).toHaveCount(0);
+	await expect(option(sibling)).toHaveAttribute("aria-selected", "false");
+	await input.fill("beta");
+	await expect(
+		dialog.getByRole("listbox", { name: "Folder matches" }).getByRole("option"),
+	).toHaveCount(1);
 	await expect(option(recentPlain)).toBeVisible();
+	await option(recentPlain).click();
+	await expect(input).toHaveValue("beta");
+	await expect(option(recentPlain)).toHaveAttribute("aria-selected", "true");
+	await expect(chips).toHaveAttribute("data-path", recentPlain);
 	await page.screenshot({
 		path: testInfo.outputPath("suggestion-added.png"),
 	});

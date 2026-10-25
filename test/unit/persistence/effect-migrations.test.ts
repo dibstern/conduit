@@ -41,9 +41,21 @@ it.effect(
 	"indexes exact event identities on fresh and upgraded stores with malformed historical JSON",
 	() =>
 		Effect.gen(function* () {
-			for (const upgrade of [false, true]) {
+			for (const upgrade of ["fresh", "main", "sweep"] as const) {
 				yield* Effect.gen(function* () {
-					yield* makeEffectSqlMigrator(upgrade ? prefix(81) : undefined);
+					yield* makeEffectSqlMigrator(
+						upgrade === "fresh"
+							? undefined
+							: upgrade === "main"
+								? prefix(85)
+								: {
+										...prefix(81),
+										"0083_events_provider_identity_indexes":
+											effectMigrationEntries[
+												"0086_events_provider_identity_indexes"
+											],
+									},
+					);
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`INSERT INTO events (event_id, session_id, stream_version, type, data, metadata, provider, created_at)
 						VALUES ('message', 'session', 1, 'message.created', '{"messageId":"reply"}', '{}', 'codex', 1),
@@ -65,12 +77,43 @@ it.effect(
 					expect(runPlan.map(({ detail }) => detail)).toEqual([
 						"SEARCH events USING INDEX idx_events_run_started_identity (session_id=? AND <expr>=?)",
 					]);
+					expect(
+						yield* sql<{
+							migration_id: number;
+							name: string;
+						}>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`,
+					).toEqual(
+						expectedNames.map((name, index) => ({
+							migration_id: index + 1,
+							name,
+						})),
+					);
 					expect(yield* makeEffectSqlMigrator()).toEqual([]);
 				}).pipe(
 					Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" })),
 				);
 			}
 		}),
+);
+
+it.effect(
+	"adds nullable turn request settings without backfilling old turns",
+	() =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator(prefix(84));
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, created_at, updated_at) VALUES ('old', 'claude', 1, 1)`;
+			yield* sql`INSERT INTO turns (id, session_id, user_message_id, state, requested_at)
+			VALUES ('old-turn', 'old', 'old-turn', 'completed', 1)`;
+			expect(yield* makeEffectSqlMigrator()).toEqual([
+				[85, "turn_request_settings"],
+				[86, "events_provider_identity_indexes"],
+			]);
+			expect(yield* sql`SELECT effort, context_window FROM turns`).toEqual([
+				{ effort: null, context_window: null },
+			]);
+			expect(yield* makeEffectSqlMigrator()).toEqual([]);
+		}).pipe(Effect.provide(makeFileSqlLayer())),
 );
 
 // Ownership comes from the exact command input, including native message ids
@@ -606,12 +649,11 @@ const expectedNames = [
 	"sessions_goal_stuck",
 	"sessions_jev",
 	"provider_control_process",
+	"session_git_publication",
+	"attachment_store",
+	"session_draft_delete",
+	"turn_request_settings",
 	"events_provider_identity_indexes",
-];
-// Main already owns 82; this branch adds its independent indexes at 83.
-const expectedIds = [
-	...Array.from({ length: 81 }, (_, index) => index + 1),
-	83,
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -659,7 +701,11 @@ it.effect(
 				[79, "sessions_goal_stuck"],
 				[80, "sessions_jev"],
 				[81, "provider_control_process"],
-				[83, "events_provider_identity_indexes"],
+				[82, "session_git_publication"],
+				[83, "attachment_store"],
+				[84, "session_draft_delete"],
+				[85, "turn_request_settings"],
+				[86, "events_provider_identity_indexes"],
 			]);
 			yield* sql`UPDATE sessions SET forked_from = 'source' WHERE id = 'fork'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
@@ -708,7 +754,11 @@ describe("Effect migration lineage", () => {
 				[79, "sessions_goal_stuck"],
 				[80, "sessions_jev"],
 				[81, "provider_control_process"],
-				[83, "events_provider_identity_indexes"],
+				[82, "session_git_publication"],
+				[83, "attachment_store"],
+				[84, "session_draft_delete"],
+				[85, "turn_request_settings"],
+				[86, "events_provider_identity_indexes"],
 			]);
 			expect(
 				yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 68 ORDER BY migration_id`,
@@ -761,9 +811,7 @@ describe("Effect migration lineage", () => {
 						yield* sql`SELECT * FROM ${sql(table)} ORDER BY rowid`,
 					);
 				expect(yield* makeEffectSqlMigrator()).toEqual(
-					expectedNames
-						.slice(63)
-						.map((name, index) => [expectedIds[index + 63], name]),
+					expectedNames.slice(63).map((name, index) => [index + 64, name]),
 				);
 				for (const table of tables)
 					expect(
@@ -784,7 +832,7 @@ describe("Effect migration lineage", () => {
 					yield* sql`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`,
 				).toEqual(
 					expectedNames.map((name, index) => ({
-						migration_id: expectedIds[index],
+						migration_id: index + 1,
 						name,
 					})),
 				);
@@ -804,7 +852,7 @@ describe("Effect migration lineage", () => {
 						const entries = {
 							...effectMigrationEntries,
 							...(migrationPath === "gap"
-								? { "0082_test_marker": Effect.void }
+								? { "0087_test_marker": Effect.void }
 								: {}),
 						};
 						yield* makeEffectSqlMigrator(entries);
@@ -858,7 +906,11 @@ describe("Effect migration lineage", () => {
 				[79, "sessions_goal_stuck"],
 				[80, "sessions_jev"],
 				[81, "provider_control_process"],
-				[83, "events_provider_identity_indexes"],
+				[82, "session_git_publication"],
+				[83, "attachment_store"],
+				[84, "session_draft_delete"],
+				[85, "turn_request_settings"],
+				[86, "events_provider_identity_indexes"],
 			]);
 			expect(
 				yield* sql`SELECT reason, turn_index, judge_model FROM session_goal_checks`,
@@ -893,7 +945,11 @@ describe("Effect migration lineage", () => {
 					[79, "sessions_goal_stuck"],
 					[80, "sessions_jev"],
 					[81, "provider_control_process"],
-					[83, "events_provider_identity_indexes"],
+					[82, "session_git_publication"],
+					[83, "attachment_store"],
+					[84, "session_draft_delete"],
+					[85, "turn_request_settings"],
+					[86, "events_provider_identity_indexes"],
 				]);
 				expect(
 					yield* sql`SELECT text, created_at, updated_at, surfacing_ordinal, surfacing_probabilities, surfacing_set_version, surfacing_model FROM message_parts`,
@@ -1031,7 +1087,11 @@ describe("Effect migration lineage", () => {
 					79,
 					80,
 					81,
+					82,
 					83,
+					84,
+					85,
+					86,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -1056,7 +1116,7 @@ describe("Effect migration lineage", () => {
 					after.map(({ migration_id, name }) => ({ migration_id, name })),
 				).toEqual(
 					expectedNames.map((name, index) => ({
-						migration_id: expectedIds[index],
+						migration_id: index + 1,
 						name,
 					})),
 				);
@@ -1156,13 +1216,13 @@ describe("Effect migration lineage", () => {
 				expect(yield* makeEffectSqlMigrator()).toEqual(
 					expectedNames
 						.slice(45)
-						.map((name, index) => [expectedIds[index + 45], name] as const),
+						.map((name, index) => [index + 46, name] as const),
 				);
 				expect(
 					yield* sql`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`,
 				).toEqual(
 					expectedNames.map((name, index) => ({
-						migration_id: expectedIds[index],
+						migration_id: index + 1,
 						name,
 					})),
 				);
@@ -1196,12 +1256,11 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the production chain through 83 with main's 82 reserved", () => {
-		expect(migrationEntries).toHaveLength(82);
+	it("registers the contiguous production chain from 1 through 86", () => {
+		expect(migrationEntries).toHaveLength(86);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
-				(name, index) =>
-					`${String(expectedIds[index]).padStart(4, "0")}_${name}`,
+				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
 			),
 		);
 	});
@@ -1216,7 +1275,7 @@ describe("Effect migration lineage", () => {
 					SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(before).toEqual(
 					expectedNames.slice(0, 47).map((name, index) => ({
-						migration_id: expectedIds[index],
+						migration_id: index + 1,
 						name,
 					})),
 				);
@@ -1396,7 +1455,11 @@ describe("Effect migration lineage", () => {
 					[79, "sessions_goal_stuck"],
 					[80, "sessions_jev"],
 					[81, "provider_control_process"],
-					[83, "events_provider_identity_indexes"],
+					[82, "session_git_publication"],
+					[83, "attachment_store"],
+					[84, "session_draft_delete"],
+					[85, "turn_request_settings"],
+					[86, "events_provider_identity_indexes"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -1429,7 +1492,7 @@ describe("Effect migration lineage", () => {
 				expect(after.slice(0, 47)).toEqual(before);
 				expect(after).toEqual(
 					expectedNames.map((name, index) => ({
-						migration_id: expectedIds[index],
+						migration_id: index + 1,
 						name,
 					})),
 				);
@@ -1499,7 +1562,11 @@ describe("Effect migration lineage", () => {
 					[79, "sessions_goal_stuck"],
 					[80, "sessions_jev"],
 					[81, "provider_control_process"],
-					[83, "events_provider_identity_indexes"],
+					[82, "session_git_publication"],
+					[83, "attachment_store"],
+					[84, "session_draft_delete"],
+					[85, "turn_request_settings"],
+					[86, "events_provider_identity_indexes"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -1581,7 +1648,11 @@ describe("Effect migration lineage", () => {
 					[79, "sessions_goal_stuck"],
 					[80, "sessions_jev"],
 					[81, "provider_control_process"],
-					[83, "events_provider_identity_indexes"],
+					[82, "session_git_publication"],
+					[83, "attachment_store"],
+					[84, "session_draft_delete"],
+					[85, "turn_request_settings"],
+					[86, "events_provider_identity_indexes"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1900,14 +1971,14 @@ describe("Effect migration lineage", () => {
 			Effect.gen(function* () {
 				const applied = yield* makeEffectSqlMigrator();
 				expect(applied).toEqual(
-					expectedNames.map((name, index) => [expectedIds[index], name]),
+					expectedNames.map((name, index) => [index + 1, name]),
 				);
 				const sql = yield* SqlClient.SqlClient;
 				const history = yield* sql<{ migration_id: number; name: string }>`
 				SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
 				expect(history).toEqual(
 					expectedNames.map((name, index) => ({
-						migration_id: expectedIds[index],
+						migration_id: index + 1,
 						name,
 					})),
 				);
@@ -2197,7 +2268,11 @@ describe("Effect migration lineage", () => {
 				[79, "sessions_goal_stuck"],
 				[80, "sessions_jev"],
 				[81, "provider_control_process"],
-				[83, "events_provider_identity_indexes"],
+				[82, "session_git_publication"],
+				[83, "attachment_store"],
+				[84, "session_draft_delete"],
+				[85, "turn_request_settings"],
+				[86, "events_provider_identity_indexes"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -2316,7 +2391,11 @@ describe("Effect migration lineage", () => {
 					[79, "sessions_goal_stuck"],
 					[80, "sessions_jev"],
 					[81, "provider_control_process"],
-					[83, "events_provider_identity_indexes"],
+					[82, "session_git_publication"],
+					[83, "attachment_store"],
+					[84, "session_draft_delete"],
+					[85, "turn_request_settings"],
+					[86, "events_provider_identity_indexes"],
 				]);
 				const rows = yield* sql<{
 					id: string;

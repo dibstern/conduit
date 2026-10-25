@@ -178,7 +178,9 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 		);
 		if (options.streamGate) writeFileSync(streamGate, "hold");
 		if (options.sendGate) writeFileSync(sendGate, "hold");
-		const restart = (overrides: { buildId?: string } = {}) =>
+		const restart = (
+			overrides: { buildId?: string; signedOut?: boolean } = {},
+		) =>
 			fixture.restart({
 				startupTimeoutMs: TIMEOUT,
 				runnerStartupTimeoutMs: TIMEOUT,
@@ -188,6 +190,14 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 					CONDUIT_CURSOR_SDK_CAPTURE: capture,
 					CONDUIT_TEST_CURSOR_STREAM_GATE: streamGate,
 					CONDUIT_TEST_CURSOR_SEND_GATE: sendGate,
+					...(overrides.signedOut
+						? {
+								CONDUIT_TEST_CURSOR_AUTH_STATE: join(
+									fixture.root,
+									"signed-out.json",
+								),
+							}
+						: {}),
 				},
 			});
 		await restart();
@@ -695,10 +705,16 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 	);
 
 	it(
-		"prunes a recovered admission that the runner had never seen before daemon restart",
+		"re-prepares the chosen Cursor model parameters for an unjournaled admission and prunes it",
 		async () => {
 			const { fixture, browser, id, capture, restart } = await start("basic", {
 				holdBeforeSend: true,
+			});
+			await fixture.requestRpc({
+				_tag: "SwitchVariant",
+				sessionId: id,
+				variant: "Fast",
+				originId: browser.originId,
 			});
 			const pending = browser
 				.send(id, "Say hi.", TIMEOUT)
@@ -717,6 +733,13 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 			).toEqual([]);
 			const original = await vi.waitFor(() => runner(fixture, id), {
 				timeout: TIMEOUT,
+			});
+			// Recovery must use the admitted choice even if the session has changed.
+			await fixture.requestRpc({
+				_tag: "SwitchVariant",
+				sessionId: id,
+				variant: "Standard",
+				originId: browser.originId,
 			});
 			await fixture.kill();
 			await restart();
@@ -737,6 +760,104 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 			expect(
 				rows(capture).filter(({ kind }) => kind === "send.options"),
 			).toHaveLength(1);
+			expect(
+				rows(capture).find(({ kind }) => kind === "send.options")?.data,
+			).toMatchObject({
+				options: {
+					model: {
+						id: "composer-2.5",
+						params: [{ id: "fast", value: "true" }],
+					},
+				},
+			});
+			await pending;
+		},
+		TIMEOUT * 3,
+	);
+
+	it(
+		"reattaches a journaled Cursor turn after logout without preparing or sending it again",
+		async () => {
+			const { fixture, browser, id, capture, streamGate, restart } =
+				await start("basic", { streamGate: true });
+			const pending = browser
+				.send(id, "Say hi.", TIMEOUT)
+				.catch(() => undefined);
+			await vi.waitFor(
+				() => {
+					expect(
+						persisted(fixture, id).events.some(
+							({ type }) => type === "thinking.delta",
+						),
+					).toBe(true);
+					expect(journal(fixture, id)).toHaveLength(1);
+				},
+				{ timeout: TIMEOUT },
+			);
+			const original = runner(fixture, id);
+			await fixture.kill();
+			writeFileSync(
+				join(fixture.root, "signed-out.json"),
+				JSON.stringify({
+					status: { status: "logged-out" },
+					credential: null,
+				}),
+			);
+			await restart({ signedOut: true });
+			expect(persisted(fixture, id).turns).toEqual(["running"]);
+			rmSync(streamGate);
+			await turns(fixture, id, ["completed"]);
+			expect(runner(fixture, id).pid).toBe(original.pid);
+			expect(
+				rows(capture).filter(({ kind }) => kind === "send.options"),
+			).toHaveLength(1);
+			expect(
+				persisted(fixture, id).events.filter(
+					({ type }) => type === "turn.error",
+				),
+			).toEqual([]);
+			await pending;
+		},
+		TIMEOUT * 3,
+	);
+
+	it(
+		"preserves auth_required when unjournaled Cursor recovery preparation finds a signed-out account",
+		async () => {
+			const { fixture, browser, id, capture, restart } = await start("basic", {
+				holdBeforeSend: true,
+			});
+			const pending = browser
+				.send(id, "Say hi.", TIMEOUT)
+				.catch(() => undefined);
+			await vi.waitFor(
+				() =>
+					expect(rows(join(fixture.root, "sdk-proof.ndjson"))).toContainEqual(
+						expect.objectContaining({ kind: "held-output", type: "send-turn" }),
+					),
+				{ timeout: TIMEOUT },
+			);
+			expect(journal(fixture, id)).toEqual([]);
+			await fixture.kill();
+			writeFileSync(
+				join(fixture.root, "signed-out.json"),
+				JSON.stringify({
+					status: { status: "logged-out" },
+					credential: null,
+				}),
+			);
+			await restart({ signedOut: true });
+			await turns(fixture, id, ["error"]);
+			expect(
+				persisted(fixture, id).events.find(({ type }) => type === "turn.error")
+					?.data,
+			).toMatchObject({ code: "auth_required" });
+			expect(persisted(fixture, id).commands).toMatchObject([
+				{ status: "failed", error_code: "auth_required" },
+			]);
+			expect(
+				rows(capture).filter(({ kind }) => kind === "send.options"),
+			).toEqual([]);
 			await pending;
 		},
 		TIMEOUT * 3,

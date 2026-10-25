@@ -26,6 +26,7 @@
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
+	import type { ModelExecution } from "../../types.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import ConduitMark from "../ui/ConduitMark.svelte";
@@ -56,7 +57,7 @@
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false }: {
+	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
@@ -65,7 +66,7 @@
 		taskNow?: number;
 		sessionId?: string | undefined;
 		forkMessageId?: string | undefined;
-		model?: string | undefined;
+		modelExecution?: ModelExecution | undefined;
 		providerId?: string | undefined;
 		onsummarize?: (() => void) | undefined;
 		onjump?: (() => void) | undefined;
@@ -541,7 +542,7 @@
 {/snippet}
 
 <div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfacingActive || summaryEnabled ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
-	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {model} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
+	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {modelExecution} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
 	<div class="md:ml-[42px]">
 		<!-- The active turn is a keyboard navigation group; inactive turns add no tab stop. -->
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->

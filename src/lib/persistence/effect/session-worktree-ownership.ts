@@ -1,3 +1,4 @@
+import { sep } from "node:path";
 import { Effect, Result, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import {
@@ -139,3 +140,16 @@ export const WORKTREE_CLEANUP_PATHS_SQL = `
 	FROM worktree_events AS events, json_each(events.data, '$.worktreeOwnership.discoveryPaths') AS mapping
 	WHERE events.type = 'session.deleted' AND json_extract(events.data, '$.sessionId') = events.session_id
 		AND mapping.type = 'text'`;
+
+// Several project folders can share one checkout and its single ownership row.
+export const recordedBranchForFolder = (
+	ownership: readonly SessionWorktreeOwnership[],
+	folder: string,
+	directory: string,
+) =>
+	ownership.find(
+		(owned) =>
+			owned.folder === folder ||
+			directory === owned.path ||
+			directory.startsWith(`${owned.path}${sep}`),
+	)?.branchName;

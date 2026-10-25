@@ -17,6 +17,7 @@
 	import Sidebar from "./Sidebar.svelte";
 	import InputArea from "../input/InputArea.svelte";
 	import ProjectSquare from "../session/ProjectSquare.svelte";
+	import FirstRunProjects from "../project/FirstRunProjects.svelte";
 	import { projectAccent, projectDisplayName } from "../session/session-list-project.js";
 	import MessageList from "../chat/MessageList.svelte";
 	import ConnectOverlay from "../overlays/ConnectOverlay.svelte";
@@ -47,7 +48,7 @@
 	import { clearMessages, localSendsIn } from "../../stores/chat.svelte.js";
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
 	import { clearSessionSearch, findSession, resetSessionFamily, sessionState } from "../../stores/session.svelte.js";
-	import { attachSessionList, detachSessionList, drawSavedShell } from "../../stores/session-list.svelte.js";
+	import { attachSessionList, detachSessionList, drawSavedShell, sessionList } from "../../stores/session-list.svelte.js";
 	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
 	import { selection, watchSelection } from "../../stores/selection.svelte.js";
 	import { openSavedShell } from "../../stores/saved-shell.js";
@@ -72,6 +73,13 @@
 	let settingsEverOpened = $state(false);
 	let settingsInitialTab = $state<SettingsSection | undefined>();
 	let settingsInitialAnchor = $state<SettingsOpenDetail["anchor"]>();
+	let firstRun = $state<boolean | undefined>();
+	$effect(() => {
+		if (firstRun === undefined && sessionList.settled) {
+			// A shell that never delivered a project list is not evidence of zero projects.
+			firstRun = untrack(() => projectState.projectsLoaded && projectState.projects.length === 0);
+		}
+	});
 
 	const TERMINAL_MIN_HEIGHT = 100;
 	const TERMINAL_MAX_RATIO = 0.7; // 70% of parent height
@@ -587,8 +595,11 @@
 	});
 </script>
 
-<AvatarFirstRun open={connected && avatarState.loaded && avatarState.current.choice === null} />
+<AvatarFirstRun open={firstRun === false && connected && avatarState.loaded && avatarState.current.choice === null} />
 
+{#if firstRun}
+	<FirstRunProjects oncomplete={() => { firstRun = false; }} />
+{:else}
 <div id="layout" class={layoutClass}>
 	<!--
 		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
@@ -776,6 +787,7 @@
 	{/if}
 </div>
 <!-- /#layout -->
+{/if}
 
 <!-- Global overlays + notification stack (outside layout for proper z-index stacking) -->
 <ImageLightbox />

@@ -22,6 +22,7 @@ import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.
 import { DaemonOrchestration } from "../domain/daemon/Services/daemon-orchestration.js";
 import { ProjectContext } from "../domain/daemon/Services/project-context.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
+import { AttachmentStoreTag } from "../domain/persistence/Services/attachment-store.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
@@ -276,6 +277,7 @@ const createOrchestrationComponentsEffect = (
 	Error,
 	| Scope.Scope
 	| SqlClient.SqlClient
+	| AttachmentStoreTag
 	| PersistenceProjectTag
 	| AccountDirectory
 	| ProviderAdapters
@@ -382,6 +384,7 @@ const createOrchestrationComponentsEffect = (
 		};
 		const engine = new OrchestrationEngine({
 			registry,
+			attachmentStore: yield* AttachmentStoreTag,
 			...(Option.isSome(configRef) && {
 				autoSettleAfterDays: Ref.get(configRef.value).pipe(
 					Effect.map((config) => config.autoSettleAfterDays),
@@ -423,6 +426,7 @@ export const makeOrchestrationRuntimeLayer = (
 	Error,
 	| ProviderAdapters
 	| SqlClient.SqlClient
+	| AttachmentStoreTag
 	| PersistenceProjectTag
 	| AccountDirectory
 	| SessionWorkspaceTag

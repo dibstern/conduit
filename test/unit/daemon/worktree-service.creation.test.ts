@@ -1,4 +1,3 @@
-import { ChildProcess, execFile } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -7,7 +6,6 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { Effect, Result as Either } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -15,19 +13,9 @@ import {
 	ownedWorktreePath,
 	worktreesRoot,
 } from "../../../src/lib/domain/daemon/Layers/worktree-layer.js";
+import { Subprocess } from "../../../src/lib/domain/daemon/Services/subprocess.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
 import { worktreeFixture } from "./worktree-service-fixture.js";
-
-vi.mock("node:child_process", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("node:child_process")>();
-	const { promisify } = await import("node:util");
-	return {
-		...actual,
-		execFile: Object.assign(vi.fn(actual.execFile), {
-			[promisify.custom]: vi.fn(promisify(actual.execFile)),
-		}),
-	};
-});
 
 describe("daemon Worktree service", () => {
 	const context = worktreeFixture();
@@ -435,40 +423,35 @@ describe("daemon Worktree service", () => {
 	});
 
 	it("gives checkout a separate budget from quick git commands", async () => {
-		const execute = vi.mocked(promisify(execFile));
-		const passthrough = execute.getMockImplementation();
-		if (!passthrough) throw new Error("Missing execFile passthrough");
-		const commands: { args: readonly string[]; timeout: number | undefined }[] =
-			[];
-		execute.mockImplementation((_file, args, options) => {
-			commands.push({ args: args ?? [], timeout: options?.timeout });
-			return Object.assign(
-				Promise.resolve({ stdout: git(...(args ?? [])), stderr: "" }),
-				{ child: new ChildProcess() },
-			);
-		});
-		try {
-			const created = await Effect.runPromise(
-				createEffect(undefined, { gitTimeoutMs: 1_000 }),
-			);
-			expect(
-				existsSync(ownedWorktreePath(context.configDir, context.folder)),
-			).toBe(true);
-			expect(created.branchName).toBeTruthy();
-			expect(commands).toEqual(
-				expect.arrayContaining([
-					{
-						args: expect.arrayContaining(["worktree", "add"]),
-						timeout: 600_000,
-					},
-				]),
-			);
-			for (const command of commands) {
-				if (command.args[2] !== "worktree" || command.args[3] !== "add")
-					expect(command.timeout).toBe(1_000);
-			}
-		} finally {
-			execute.mockImplementation(passthrough);
+		const subprocess = Effect.runSync(Subprocess);
+		const commands: { args: readonly string[]; timeout: number }[] = [];
+		const created = await Effect.runPromise(
+			createEffect(undefined, { gitTimeoutMs: 1_000 }).pipe(
+				Effect.provideService(Subprocess, {
+					...subprocess,
+					run: (_file, args, options) =>
+						Effect.sync(() => {
+							commands.push({ args, timeout: options.timeoutMs });
+							return { stdout: git(...args), stderr: "", exitCode: 0 };
+						}),
+				}),
+			),
+		);
+		expect(
+			existsSync(ownedWorktreePath(context.configDir, context.folder)),
+		).toBe(true);
+		expect(created.branchName).toBeTruthy();
+		expect(commands).toEqual(
+			expect.arrayContaining([
+				{
+					args: expect.arrayContaining(["worktree", "add"]),
+					timeout: 600_000,
+				},
+			]),
+		);
+		for (const command of commands) {
+			if (command.args[2] !== "worktree" || command.args[3] !== "add")
+				expect(command.timeout).toBe(1_000);
 		}
 	}, 15_000);
 

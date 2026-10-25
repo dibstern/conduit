@@ -10,7 +10,9 @@
      steered message carries a "Steered" chip: it joined a running turn. -->
 
 <script lang="ts">
+	import { SvelteSet } from "svelte/reactivity";
 	import type { UserMessage } from "../../types.js";
+	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import {
 		discoveryState,
 		getModelDisplayName,
@@ -47,6 +49,7 @@
 	const segments = $derived(
 		tokenizeSkills(extractDisplayText(message.text), commandNames),
 	);
+	const failedImages = new SvelteSet<string>();
 </script>
 
 <div class="msg-user mx-auto mb-[26px] grid max-w-[820px] grid-cols-[20px_minmax(0,1fr)] gap-x-[8px] px-[14px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px] md:px-[32px]" data-uuid={message.uuid}>
@@ -80,8 +83,13 @@
 		{#if message.attachments?.length}
 			<div data-testid="user-message-attachments" class="mt-[8px] flex min-w-0 flex-wrap items-start gap-[8px] max-md:col-span-2">
 				{#each message.attachments as attachment (attachment.id)}
+					{@const url = attachment.source.attachmentHash !== undefined ? `/p/${encodeURIComponent(getCurrentSlug() ?? "")}/attachments/${attachment.source.attachmentHash}` : attachment.source.url}
 					{#if attachment.mime.startsWith("image/")}
-						<img src={attachment.url} alt={attachment.name} class="size-[96px] rounded-[10px] bg-bg-raised object-contain" />
+						{#if failedImages.has(url)}
+							<span role="img" aria-label={attachment.name} class="flex size-[96px] items-center justify-center rounded-[10px] bg-bg-raised p-2 text-center text-xs text-text-muted">image unavailable</span>
+						{:else}
+							<img src={url} alt={attachment.name} class="size-[96px] rounded-[10px] bg-bg-raised object-contain" onerror={() => failedImages.add(url)} />
+						{/if}
 					{:else}
 						<FileAttachmentChip testid="user-message-file" name={attachment.name} detail={attachment.size === undefined ? attachment.mime : `${attachment.mime} · ${formatFileSize(attachment.size)}`} />
 					{/if}

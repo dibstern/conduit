@@ -57,6 +57,7 @@ import { createRunnerPermissionReplies } from "../../../src/lib/provider/runner/
 import type {
 	PermissionResponse,
 	ProviderInstance,
+	ResolvedSendTurnInput,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
 import { createMockEventSink } from "../../helpers/mock-sdk.js";
@@ -81,7 +82,7 @@ const COMPLETED: TurnResult = {
 // Receipts can strand if fixtures return an adapter result without provider
 // intake/end, skip projection, or omit the committed command's reservation.
 function finishTurn(
-	input: SendTurnCommand["input"],
+	input: ResolvedSendTurnInput,
 	providerId: string,
 	result = COMPLETED,
 	createdAt = 1000,
@@ -149,7 +150,7 @@ function makeStubInstance(
 				commands: [],
 			}),
 		),
-		sendTurnEffect: vi.fn((input: SendTurnCommand["input"]) =>
+		sendTurnEffect: vi.fn((input: ResolvedSendTurnInput) =>
 			finishTurn(input, providerId, COMPLETED, createdAt),
 		),
 		interruptTurnEffect: vi.fn(() => Effect.void),
@@ -587,6 +588,7 @@ describe("OrchestrationEngine durable controls", () => {
 					const context = {
 						commandId: command.commandId,
 						providerProcessId: "process-1",
+						...(command.type === "interrupt_turn" ? { requestedAt: 1000 } : {}),
 					};
 					switch (command.type) {
 						case "interrupt_turn":
@@ -1246,7 +1248,7 @@ describe("OrchestrationEngine durable receipts", () => {
 						}),
 					});
 					const delivered = instance.sendTurnEffect.mock.calls[0]?.[0] as
-						| SendTurnCommand["input"]
+						| ResolvedSendTurnInput
 						| undefined;
 					const observed = {
 						account: delivered?.account,
@@ -1705,6 +1707,7 @@ describe("OrchestrationEngine durable receipts", () => {
 							.soft(instance.interruptTurnEffect)
 							.toHaveBeenCalledExactlyOnceWith("session-1", undefined, call, {
 								commandId: "control-stop",
+								requestedAt: 1000,
 								providerProcessId: explicitProcessTarget
 									? "control-process"
 									: "absent:control-stop",
@@ -2061,7 +2064,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				);
 				yield* new OrchestrationEngine(options).drainSideEffects();
 				const delivered = instance.sendTurnEffect.mock.calls.at(-1)?.[0] as
-					| SendTurnCommand["input"]
+					| ResolvedSendTurnInput
 					| undefined;
 				reviewEvidence["redelivery"] = {
 					currentOverride: delivered?.shellEnv?.["ANTHROPIC_AUTH_TOKEN"],
@@ -2110,7 +2113,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				yield* TestClock.adjust("10 millis");
 				expect(instance.sendTurnEffect).toHaveBeenCalledOnce();
 				const first = instance.sendTurnEffect.mock
-					.calls[0]?.[0] as SendTurnCommand["input"];
+					.calls[0]?.[0] as ResolvedSendTurnInput;
 				yield* finishTurn(first, "opencode");
 				yield* engine.drainSideEffects();
 				expect(instance.sendTurnEffect).toHaveBeenCalledTimes(2);
@@ -2218,14 +2221,14 @@ describe("OrchestrationEngine durable receipts", () => {
 			const sql = yield* SqlClient.SqlClient;
 			const committed = yield* Deferred.make<void>();
 			const allowClaim = yield* Deferred.make<void>();
-			const started = yield* Deferred.make<SendTurnCommand["input"]>();
+			const started = yield* Deferred.make<ResolvedSendTurnInput>();
 			const instance = makeStubInstance("opencode");
 			const cancellation = new AbortController();
 			const command = sendTurnCommand({ abortSignal: cancellation.signal });
 			let signal: AbortSignal | undefined;
 			const result: TurnResult = { ...COMPLETED, cost: 7 };
 			instance.sendTurnEffect.mockImplementation(
-				(input: SendTurnCommand["input"]) =>
+				(input: ResolvedSendTurnInput) =>
 					Effect.gen(function* () {
 						signal = input.abortSignal;
 						yield* input.eventSink.push({
@@ -2565,7 +2568,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				let providerCalls = 0;
 				const instance = makeStubInstance("opencode");
 				instance.sendTurnEffect.mockImplementation(
-					(input: SendTurnCommand["input"]) =>
+					(input: ResolvedSendTurnInput) =>
 						Effect.suspend(() => {
 							providerCalls += 1;
 							if (providerCalls === 1) {
@@ -2622,7 +2625,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				const instance = makeStubInstance("opencode");
 				// Provider declares failure on the SUCCESS channel.
 				instance.sendTurnEffect.mockImplementation(
-					(input: SendTurnCommand["input"]) =>
+					(input: ResolvedSendTurnInput) =>
 						finishTurn(input, "opencode", errorTurn),
 				);
 				const engine = yield* makeEngine(instance, { sql });

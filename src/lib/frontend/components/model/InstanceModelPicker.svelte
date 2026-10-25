@@ -13,7 +13,6 @@
 	import { composerModelSelectionTarget as target } from "./composer-model-selection-target.svelte.js";
 	import { createModelSelectionState, modelContextLabel } from "./model-selection.svelte.js";
 	import OptionRow from "../ui/OptionRow.svelte";
-	import AccountDot from "../ui/AccountDot.svelte";
 	import QuotaMeter from "../ui/QuotaMeter.svelte";
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
 	import ModelVariant from "./ModelVariant.svelte";
@@ -37,7 +36,7 @@
 	import { composerPickerState, openPicker, type PickerSection } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { getClaudeAccounts, type AccountAvailability } from "../../stores/claude-accounts.svelte.js";
-	import { getDriverTraits, instanceStatusColor } from "../../stores/instance.svelte.js";
+	import { getDriverTraits, getInstanceById, instanceStatusColor } from "../../stores/instance.svelte.js";
 	import { usageState } from "../../stores/usage.svelte.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import { cursorAuthFor, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
@@ -99,6 +98,8 @@
 	const selectedLogoInstanceId = $derived(selectedId);
 	const harnesses = $derived(
 		[...new Set(instances.map((instance) => instance.driver))].map((driver) => {
+			const instanceId = driver === selectedDriver ? selectedLogoInstanceId : instanceForDriver(driver)?.id;
+			const usageHarness = getDriverTraits(driver)?.usageHarness;
 			const accounts = instances.filter((instance) => instance.driver === driver);
 			const unavailable = accounts.every((account) => account.available === false);
 			const unavailableReason = unavailable
@@ -106,6 +107,9 @@
 				: undefined;
 			return {
 				value: driver,
+				instanceId,
+				spinning: (usageHarness === "claude" || usageHarness === "codex") &&
+					getClaudeAccounts(accountProjectSlug, usageHarness).shouldAccountSpin(sessionState.currentId, instanceId),
 				label: driverLabel(driver),
 				locked: unavailable || (locked && driver !== selectedDriver),
 				lockedReason: unavailableReason,
@@ -126,6 +130,7 @@
 			: getDraftProject() ?? "",
 	);
 	const accounts = $derived(getClaudeAccounts(accountProjectSlug, selectedTraits?.usageHarness === "codex" ? "codex" : "claude"));
+	const selectedLogoSpinning = $derived(canSwitchAccounts && accounts.shouldAccountSpin(sessionState.currentId, selectedLogoInstanceId));
 	const switchingTo = $derived(canSwitchAccounts && accounts.handoff.kind !== "idle" && accounts.handoff.sessionId === sessionState.currentId ? accounts.switchingTo : null);
 	const wordAccountName = $derived(selectedInstance ? accounts.nameOf(switchingTo ?? selectedLogoInstanceId, selectedInstance.label) : selectedLabel);
 	let presentedRequest = $state<number | undefined>();
@@ -428,11 +433,12 @@
 							class="mx-[4px]"
 						>
 							{#snippet item(option)}
+								{@const harness = harnesses.find((harness) => harness.value === option.value)}
 								<HarnessLogo
 									driver={option.value}
-									instanceId={option.value === selectedDriver ? selectedLogoInstanceId : instanceForDriver(option.value)?.id}
+									instanceId={harness?.instanceId}
 									size={18}
-									surface="surface"
+									spinning={harness?.spinning}
 								/>
 								{option.label}
 								{#if option.locked}<Icon name="lock" size={10} />{/if}
@@ -479,7 +485,9 @@
 										data-locked={card.kind === "status" && locked && !selected ? "true" : undefined}
 									>
 										<span class="flex min-w-0 items-center gap-[6px]">
-											<AccountDot instanceId={card.value} size={7} />
+											{#if selectedDriver}
+												<HarnessLogo driver={getInstanceById(card.value)?.driver ?? selectedDriver} instanceId={card.value} size={15} aligned data-testid="account-logo" />
+											{/if}
 											<span data-testid="picker-account-name" class="min-w-0 truncate">{card.label}</span>
 										</span>
 										{#if card.kind === "status"}
@@ -652,7 +660,7 @@
 
 {#snippet modelTrigger({ props, attention = false }: { props: Record<string, unknown>; attention?: boolean })}
 	{#snippet summary()}
-		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 18} surface="box" />{/if}
+		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 18} spinning={selectedLogoSpinning} />{/if}
 		<span class="model-label min-w-0 truncate">{displayName}</span>
 		{#if phone && attention}<span data-testid="composer-more-attention" class="size-[6px] shrink-0 rounded-full bg-status-ask" aria-hidden="true"></span>{/if}
 		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 {variant === 'words' ? '' : 'font-mono text-[11.5px] text-text-muted'}">{contextLabel}</span>{/if}
@@ -719,7 +727,7 @@
 			aria-controls={pickerOpen ? "model-picker" : undefined}
 			onclick={(event) => togglePicker(event, "account")}
 		>
-			{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={15} surface="page" />{/if}
+			{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={15} spinning={selectedLogoSpinning} />{/if}
 		</Button>
 		{#if hasAccountWord}
 			<Button
@@ -793,13 +801,15 @@
 						aria-haspopup="dialog"
 						onclick={(event) => togglePicker(event, "harness")}
 					>
-						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Harness</span>
-						<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={18} surface="surface" />{/if}<span class="min-w-0 truncate">{driverLabel(selectedDriver)}</span></span>
+						<Icon name="box" size={16} class="shrink-0 text-text-dimmer" />
+						<span data-part="label" class="flex-1">Harness</span>
+						<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{driverLabel(selectedDriver)}</span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
 					<Button variant="composer-row" size="content" data-testid="composer-more-account" ariaLabel={`Account: ${wordAccountName}. Open account options`} onclick={(event) => togglePicker(event, "account")}>
-						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Account</span>
-						<span data-part="value" class="min-w-0 flex-1 truncate font-semibold">{wordAccountName}</span>
+						<Icon name="user" size={16} class="shrink-0 text-text-dimmer" />
+						<span data-part="label" class="flex-1">Account</span>
+						<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{wordAccountName}</span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
 					<Button
@@ -809,8 +819,9 @@
 						aria-haspopup="dialog"
 						onclick={(event) => togglePicker(event, "model")}
 					>
-						<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Model</span>
-						<span data-part="value" class="flex min-w-0 flex-1 flex-wrap items-center gap-[7px] font-semibold"><span>{displayName}</span>{#if contextLabel || contextPercent > 0}<small class="text-[10.5px] font-normal {contextWarning ? 'text-warning' : 'text-text-muted'}">{contextLabel}{contextLabel && contextPercent > 0 ? " · " : ""}{contextPercent > 0 ? `${Math.round(contextPercent)}% used` : ""}</small>{/if}</span>
+						{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={15} spinning={selectedLogoSpinning} />{:else}<Icon name="sparkles" size={16} class="shrink-0 text-text-dimmer" />{/if}
+						<span data-part="label" class="flex-1">Model</span>
+						<span data-part="value" class="flex min-w-0 flex-wrap items-center justify-end gap-x-[7px] text-right text-text-secondary"><span class="truncate">{displayName}</span>{#if contextLabel || contextPercent > 0}<small class="text-[10.5px] {contextWarning ? 'text-warning' : 'text-text-muted'}">{contextLabel}{contextLabel && contextPercent > 0 ? " · " : ""}{contextPercent > 0 ? `${Math.round(contextPercent)}% used` : ""}</small>{/if}</span>
 						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 					</Button>
 					{@render effortRow()}

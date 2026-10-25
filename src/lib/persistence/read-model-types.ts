@@ -163,6 +163,8 @@ export interface MessageWithParts extends MessageRow {
 		requestedModel?: string;
 		expectedModel?: string;
 		actualModel: string;
+		effort?: string;
+		contextWindow?: string;
 	};
 }
 
@@ -170,4 +172,6 @@ export interface TurnModelExecutionRow {
 	requested_model: string | null;
 	expected_model: string | null;
 	actual_model: string;
+	effort: string | null;
+	context_window: string | null;
 }

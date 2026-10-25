@@ -38,6 +38,10 @@ Scenario Outline: several accounts name the session's account and offer its pick
   Then the account picker row for Personal reads <quota> and cannot be picked
   And the account picker row for Work reads 52% left and can be picked
   And the account picker pre-selects Spare
+  And the account picker account claude shows a claude logo with badge P
+  And the account picker account work shows a claude logo with badge W
+  And the account picker account spare shows a claude logo with badge S
+  And the account picker names Personal, Work, Spare are left-aligned
 
 Examples:
   | viewport | state  | window    | title                             | detail            | quota    | baseline                                   | threshold |

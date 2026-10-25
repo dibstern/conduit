@@ -3,6 +3,7 @@ import type { Socket } from "node:net";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { BUILD_ID } from "../../build-id.js";
+import { attachmentFromDataUrl } from "../../persistence/attachment-store.js";
 import { isRecord } from "../../utils.js";
 import type { CursorBackendUrl } from "../cursor/cursor-credential.js";
 import type { ProviderControlCommandStatus, TurnResult } from "../types.js";
@@ -12,6 +13,7 @@ import type {
 	SessionFailure,
 	SessionOutput,
 	SessionOutputReply,
+	SessionTurn,
 } from "./session-runner.js";
 
 export interface ThreadReadInput {
@@ -35,7 +37,10 @@ export type ThreadReadResult =
 
 export interface RunnerWireCodec {
 	readonly decode: (message: RunnerMessage) => RunnerMessage;
-	readonly encode: (message: RunnerMessage, taggedConfigDir: boolean) => string;
+	readonly encode: (
+		message: RunnerWireMessage,
+		taggedConfigDir: boolean,
+	) => string;
 }
 
 export const RUNNER_PROTOCOL_VERSION = 5;
@@ -70,10 +75,16 @@ export interface RunnerHello {
 	readonly stampsRunIds?: true;
 	/** The session controller survives an idle account/query rebind. */
 	readonly rebindsAccount?: true;
+	/** Resolving an interaction also settles its native answer waiter. */
+	readonly settlesAnswers?: true;
+	/** Login identity compares declared settings, never captured shell values. */
+	readonly declaresLogin?: true;
 	/** Cursor sends consume the daemon's admitted account credential envelope. */
 	readonly scopedCursorCredentials?: true;
 	readonly cursorBackendUrl?: CursorBackendUrl;
 	readonly taggedConfigDir?: true;
+	/** Sends carry attachment refs beside their bytes; older runners take data URL strings. */
+	readonly attachmentRefs?: true;
 	readonly bindings?: readonly {
 		readonly sinkId: string;
 		readonly sessionId: string;
@@ -189,6 +200,73 @@ export type RunnerMessage =
 			readonly preserveRole?: boolean;
 	  };
 
+/** Only the outbound wire accepts the pre-attachment-ref send shape. */
+export type RunnerWireMessage =
+	| Exclude<RunnerMessage, { type: "command" }>
+	| (Omit<Extract<RunnerMessage, { type: "command" }>, "command"> & {
+			readonly command:
+				| Exclude<SessionCommand, { type: "send-turn" }>
+				| (Omit<Extract<SessionCommand, { type: "send-turn" }>, "input"> & {
+						readonly input: Omit<SessionTurn, "images"> & {
+							readonly images?: SessionTurn["images"] | readonly string[];
+						};
+				  });
+	  });
+
+// Compatibility for runners started before attachment refs. Remove once none can still be alive.
+function legacyAttachmentInput<T extends object>(
+	input: T & { readonly images?: SessionTurn["images"] },
+): Omit<T, "images"> & { readonly images?: readonly string[] } {
+	const { images, ...launch } = input;
+	return {
+		...launch,
+		...(images ? { images: images.map(({ dataUrl }) => dataUrl) } : {}),
+	};
+}
+
+function hasLegacyImages(
+	input: object,
+): input is { readonly images: readonly string[] } {
+	return (
+		"images" in input &&
+		Array.isArray(input.images) &&
+		input.images.every((image: unknown) => typeof image === "string")
+	);
+}
+
+function normalizeLegacyOutput(output: SessionOutput): SessionOutput {
+	if (output.type !== "place-user-message" || !hasLegacyImages(output.input))
+		return output;
+	const images: readonly string[] = output.input.images;
+	return {
+		...output,
+		input: {
+			...output.input,
+			images: images.map((image) => attachmentFromDataUrl(image).ref),
+		},
+	};
+}
+
+function normalizeLegacyUpgradeState(
+	state: RunnerUpgradeState,
+): RunnerUpgradeState {
+	if (!state.snapshot || !hasLegacyImages(state.snapshot.input)) return state;
+	const input = {
+		...state.snapshot.input,
+		images: state.snapshot.input.images.map((dataUrl) => ({
+			ref: attachmentFromDataUrl(dataUrl).ref,
+			dataUrl,
+		})),
+	};
+	return {
+		...state,
+		snapshot: {
+			...state.snapshot,
+			input,
+		},
+	};
+}
+
 export function runnerHelloFailure(
 	hello: RunnerHello,
 	peer: "server" | "runner",
@@ -284,9 +362,20 @@ export class RunnerSocket {
 	private failure: SessionFailure | undefined;
 	private idleExiting = false;
 	private peerTaggedConfigDir = false;
+	private peerAttachmentRefs = false;
+	private peerSettlesAnswers = false;
 	scopedCursorCredentials = false;
 	private peerDriverKind: string | undefined;
-	private retainedSends: RunnerHello["sendCommands"];
+	private helloSends: RunnerHello["sendCommands"];
+	private readonly completedCommands = new Map<
+		string,
+		"completed" | "failed"
+	>();
+
+	/** The original hello journal, unaffected by acknowledgements or new sends. */
+	get retainedSends(): RunnerHello["sendCommands"] {
+		return this.helloSends;
+	}
 
 	constructor(
 		private readonly socket: Socket,
@@ -299,14 +388,63 @@ export class RunnerSocket {
 		lines.on("line", (line) => {
 			try {
 				const decoded = JSON.parse(line) as RunnerMessage;
-				const message = this.wire?.decode(decoded) ?? decoded;
+				let message = this.wire?.decode(decoded) ?? decoded;
 				if (message.type === "hello") {
 					this.peerTaggedConfigDir = message.taggedConfigDir === true;
+					this.peerAttachmentRefs = message.attachmentRefs === true;
+					this.peerSettlesAnswers = message.settlesAnswers === true;
 					this.scopedCursorCredentials =
 						message.scopedCursorCredentials === true;
 					this.peerDriverKind = message.driverKind;
-					this.retainedSends = message.sendCommands;
+					this.helloSends = message.sendCommands;
+					if (!this.peerSettlesAnswers)
+						for (const command of message.completedCommands ?? [])
+							if (command.commandId.endsWith(":answer"))
+								this.completedCommands.set(
+									command.commandId,
+									command.failure ? "failed" : "completed",
+								);
 				}
+				if (!this.peerAttachmentRefs) {
+					if (message.type === "output")
+						message = {
+							...message,
+							output: normalizeLegacyOutput(message.output),
+						};
+					else if (message.type === "upgrade-state")
+						message = {
+							...message,
+							state: normalizeLegacyUpgradeState(message.state),
+						};
+					else if (message.type === "hello")
+						message = {
+							...message,
+							...(message.upgradeState
+								? {
+										upgradeState: normalizeLegacyUpgradeState(
+											message.upgradeState,
+										),
+									}
+								: {}),
+							...(message.pendingOutputs
+								? {
+										pendingOutputs: message.pendingOutputs.map((pending) => ({
+											...pending,
+											output: normalizeLegacyOutput(pending.output),
+										})),
+									}
+								: {}),
+						};
+				}
+				if (
+					message.type === "command-reply" &&
+					!this.peerSettlesAnswers &&
+					message.commandId.endsWith(":answer")
+				)
+					this.completedCommands.set(
+						message.commandId,
+						message.failure ? "failed" : "completed",
+					);
 				if (message.type === "idle-exit") this.idleExiting = true;
 				if (message.type === "command-accepted") {
 					const pending = this.pending.get(`command:${message.commandId}`);
@@ -364,9 +502,36 @@ export class RunnerSocket {
 
 	write(message: RunnerMessage): void {
 		if (this.socket.destroyed) return;
+		let frame: RunnerWireMessage = message;
+		if (!this.peerAttachmentRefs && message.type === "command") {
+			const command = message.command;
+			if (command.type === "send-turn")
+				frame = {
+					...message,
+					command: { ...command, input: legacyAttachmentInput(command.input) },
+				};
+			else if (command.type === "pre-warm")
+				frame = {
+					...message,
+					command: {
+						...command,
+						input: legacyAttachmentInput(command.input),
+						...(command.settingsSnapshot
+							? {
+									settingsSnapshot: {
+										...command.settingsSnapshot,
+										input: legacyAttachmentInput(
+											command.settingsSnapshot.input,
+										),
+									},
+								}
+							: {}),
+					},
+				};
+		}
 		this.socket.write(
-			this.wire?.encode(message, this.peerTaggedConfigDir) ??
-				`${JSON.stringify(message)}\n`,
+			this.wire?.encode(frame, this.peerTaggedConfigDir) ??
+				`${JSON.stringify(frame)}\n`,
 		);
 	}
 
@@ -434,6 +599,16 @@ export class RunnerSocket {
 			command,
 			...(attempt !== undefined ? { attempt } : {}),
 		});
+	}
+
+	/** Legacy answer settlement is synchronous and safe to retry if not retained. */
+	observedCommandStatus(
+		commandId: string,
+	): Exclude<ProviderControlCommandStatus, "gone"> {
+		return (
+			this.completedCommands.get(commandId) ??
+			(this.pending.has(`command:${commandId}`) ? "running" : "not_received")
+		);
 	}
 
 	commandStatusEffect(

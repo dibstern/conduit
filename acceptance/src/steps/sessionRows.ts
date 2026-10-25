@@ -18,6 +18,40 @@ const OPENCODE_ROW_ID = "row-opencode";
 
 export const sessionRowsHandlers: StepHandler[] = [
 	{
+		name: "seed textless Draft sidebar counts",
+		match:
+			/^the sidebar has a textless Draft with (\d+) images and (\d+) files$/,
+		run: async ({ world, match }) => {
+			const rows = [
+				{
+					draftId: "draft-label",
+					projectSlug: "myapp",
+					firstLine: "",
+					updatedAt: PINNED_CLOCK_MS,
+					imageCount: Number(match[1]),
+					fileCount: Number(match[2]),
+				},
+			];
+			const rpc = requireRpcControl(world.page);
+			await expect.poll(() => rpc.hasStream("SubscribeDrafts")).toBe(true);
+			rpc.sendChunk("SubscribeDrafts", [rows]);
+			if (!(await world.page.locator("#session-list").isVisible()))
+				await world.page.getByTestId("session-bar-back").click();
+		},
+	},
+	{
+		name: "textless Draft sidebar label",
+		match: /^the Draft sidebar label is (.+) with a paperclip$/,
+		run: async ({ world, match }) => {
+			const row = world.page.locator('[data-draft-id="draft-label"]');
+			await expect(row.locator("[title]")).toHaveAttribute(
+				"title",
+				match[1] ?? "",
+			);
+			await expect(row.getByTestId("draft-attachment-icon")).toBeVisible();
+		},
+	},
+	{
 		name: "seed Flow session states",
 		match: /^the sidebar has the Flow status fixture$/,
 		run: async ({ world }) => {

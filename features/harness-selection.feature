@@ -129,8 +129,10 @@ Scenario Outline: B1 the default Claude account counts and shows C
   Then the picker harness logo for claude shows C on its badge
   And the model-picker region visually matches <baseline> at <threshold> percent
   When I view Account choices in the picker
-  Then the picker card claude is named Claude and shows its AccountDot
-  And the picker card self is named personal and shows its AccountDot
+  Then the picker card claude is named Claude and shows its account logo
+  And the picker card self is named personal and shows its account logo
+  And the picker card account claude shows a claude logo with badge C
+  And the picker card account self shows a claude logo with badge P
 
 Examples:
   | tier   | controls | baseline                          | threshold |
@@ -140,7 +142,7 @@ Examples:
   | wide   | words    | harness-logo-default-claude-words | 98        |
   | phone  | words    | harness-logo-default-claude-words | 98        |
 
-Scenario Outline: B1 a resumed account's letter and colour match its AccountDot
+Scenario Outline: B1 a resumed account's letter and colour match its account identity
   Given a session already exists on the Claude harness
   And the harness logo is viewed in the <tier> tier
   And the Claude accounts are claude as Claude, self as personal, team as Work
@@ -148,14 +150,14 @@ Scenario Outline: B1 a resumed account's letter and colour match its AccountDot
   And the composer uses <controls> controls
   When the session resumes on <account> from claude by user and replies Ready on this account.
   Then the composer harness logo for <account> shows <letter> on its badge
-  And the composer harness badge for <account> matches its AccountDot colour
+  And the composer harness badge for <account> has its account identity colour
   When I open the model picker
   Then the picker harness logo for <account> shows <letter> on its badge
-  And the picker harness badge for <account> matches its AccountDot colour
+  And the picker harness badge for <account> has its account identity colour
   And the model-picker region visually matches <baseline> at <threshold> percent
   When I view Account choices in the picker
-  Then the picker card self is named personal and shows its AccountDot
-  And the picker card team is named Work and shows its AccountDot
+  Then the picker card self is named personal and shows its account logo
+  And the picker card team is named Work and shows its account logo
   And the <account> Account card is selected and in view
 
 Examples:
@@ -174,8 +176,10 @@ Scenario Outline: B1 OpenCode badges both its default and named instance when th
   When I open the model picker
   Then the picker harness logo for opencode shows O on its badge
   When I view Instance choices in the picker
-  Then the picker card opencode is named OpenCode and shows its AccountDot
-  And the picker card bedrock is named Bedrock and shows its AccountDot
+  Then the picker card opencode is named OpenCode and shows its account logo
+  And the picker card bedrock is named Bedrock and shows its account logo
+  And the picker card account opencode shows a opencode logo with badge O
+  And the picker card account bedrock shows a opencode logo with badge B
   And the model-picker region visually matches <baseline> at <threshold> percent
 
 Examples:
@@ -210,8 +214,8 @@ Scenario Outline: B1 switching replaces the letter with a spinner and restores t
   When I open the model picker
   Then the picker harness logo for self shows P on its badge
   And the picker harness badge for self is idle
-  And the composer harness badge for self matches its AccountDot colour
-  And the picker harness badge for self matches its AccountDot colour
+  And the composer harness badge for self has its account identity colour
+  And the picker harness badge for self has its account identity colour
 
 Examples:
   | tier   | controls |
