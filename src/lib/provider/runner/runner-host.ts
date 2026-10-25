@@ -70,6 +70,9 @@ export interface RunnerLaunch {
 		"quiescent" | "revision"
 	>;
 	readonly acceptCommand: (command: SessionCommand) => void;
+	readonly changesAccount?: (
+		command: Extract<SessionCommand, { type: "send-turn" }>,
+	) => boolean;
 	readonly executeEffect: (
 		runner: SessionRunner,
 		command: SessionCommand,
@@ -706,8 +709,12 @@ export const runSessionRunner = (
 									return yield* Effect.die("Runner is not initialized");
 								const payloadRunner = runner;
 								const execution = Effect.gen(function* () {
-									// A waiting send could outlive a later abort.
-									if (command.type === "send-turn" && sourceDeliveryInvalidated)
+									// A waiting replacement could outlive a later abort.
+									if (
+										command.type === "send-turn" &&
+										sourceDeliveryInvalidated &&
+										launch.changesAccount?.(command)
+									)
 										return yield* Effect.fail({
 											operation: "send-turn",
 											code: "account_switch_busy",

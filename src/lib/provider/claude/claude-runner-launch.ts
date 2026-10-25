@@ -42,6 +42,7 @@ import {
 import {
 	applyClaudeSdkProcessLogin,
 	type ClaudeLaunchConfig,
+	claudeLoginChange,
 	makeClaudeSdkEnv,
 	sameClaudeLogin,
 } from "./claude-sdk-env.js";
@@ -349,6 +350,22 @@ export const makeClaudeRunnerLaunch = (
 				...(liveConfiguration ? { liveConfiguration } : {}),
 				...(frozenSnapshot ? { frozen: true } : {}),
 			}),
+			changesAccount: (command) => {
+				if (!snapshot) return false;
+				const input = normalizeClaudeLaunchInput(
+					{
+						...command.input,
+						shellConfig: command.input.shellConfig ?? command.shellConfig,
+					},
+					defaultLaunchConfig,
+				);
+				return (
+					claudeLoginChange(
+						{ ...snapshot.input, root: snapshot.input.workspaceRoot },
+						{ ...input, root: input.workspaceRoot },
+					) === "Account"
+				);
+			},
 			makeRunner: (config, emit) =>
 				Effect.gen(function* () {
 					if (config.claudeLaunchConfig !== undefined)

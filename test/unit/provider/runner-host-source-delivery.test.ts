@@ -5,6 +5,14 @@ import { join } from "node:path";
 import { Cause, Deferred, Effect, Exit, Fiber } from "effect";
 import { expect, it, vi } from "vitest";
 import {
+	AccountIdSchema,
+	type ClaudeAccount,
+} from "../../../src/lib/contracts/account.js";
+import {
+	claudeLoginChange,
+	configuredClaudeConfigDir,
+} from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import {
 	type RunnerLaunch,
 	type RunnerLaunchCallbacks,
 	runSessionRunner,
@@ -106,10 +114,37 @@ for (const { name, mode } of [
 		name: "refuses a late fenced send before an acknowledged abort can be lost",
 		mode: "late-abort",
 	},
+	{
+		name: "admits a same-account send while source delivery is pending",
+		mode: "same-account",
+	},
+	{
+		name: "refuses a config-directory replacement during pending delivery",
+		mode: "late-abort-config",
+	},
 ]) {
 	it(name, async () => {
 		const directory = mkdtempSync(join(tmpdir(), "stale-host-"));
 		const socketPath = join(directory, "r.sock");
+		const sourceConfig = configuredClaudeConfigDir(
+			join(directory, "account-a"),
+		);
+		const sourceAccount: ClaudeAccount = {
+			driver: "claude",
+			id: AccountIdSchema.make("account-a"),
+			name: "Account A",
+			folder: sourceConfig,
+			usageEligible: true,
+		};
+		const sourceInput = {
+			sessionId: "session-1",
+			workspaceRoot: directory,
+			extraFolders: [],
+			providerState: {},
+			account: sourceAccount,
+			configDir: sourceConfig,
+			folderSource: "account" as const,
+		};
 		const argvDescriptor = Object.getOwnPropertyDescriptor(process, "argv");
 		const sendDescriptor = Object.getOwnPropertyDescriptor(process, "send");
 		const exit = vi.spyOn(process, "exit").mockImplementation(() => {
@@ -196,7 +231,18 @@ for (const { name, mode } of [
 												);
 												return Effect.succeed(payload.runner);
 											},
-											upgradeState: () => ({}),
+											upgradeState: () => ({
+												snapshot: { input: sourceInput, options: {} },
+											}),
+											changesAccount: (command) =>
+												claudeLoginChange(
+													{ ...sourceInput, root: directory },
+													{
+														...command.input,
+														configDir: command.input.configDir ?? sourceConfig,
+														root: command.input.workspaceRoot,
+													},
+												) === "Account",
 											acceptCommand: () => {},
 											executeEffect: (runner, command) =>
 												runner.executeEffect(command),
@@ -284,14 +330,11 @@ for (const { name, mode } of [
 								sinkId: "source-sink",
 								aborted: false,
 								input: {
-									sessionId: "session-1",
+									...sourceInput,
 									inputId: "source-input",
 									runId: "source-run",
 									prompt: "source",
 									history: [],
-									providerState: {},
-									workspaceRoot: directory,
-									extraFolders: [],
 								},
 							}),
 						).toEqual(payload.result);
@@ -329,7 +372,30 @@ for (const { name, mode } of [
 								expect(throughReply.length).toBeGreaterThan(0);
 								for (const state of throughReply)
 									expect(state.sourceDelivery).toEqual(token);
+							} else if (mode === "same-account") {
+								expect(
+									yield* client.commandEffect("same-account-command", {
+										type: "send-turn",
+										sinkId: "same-account-sink",
+										aborted: false,
+										input: {
+											...sourceInput,
+											inputId: "same-account-input",
+											runId: "same-account-run",
+											prompt: "same account",
+											history: [],
+										},
+									}),
+								).toEqual(payload.result);
+								expect(payload.admittedInputs).toEqual([
+									"source-input",
+									"same-account-input",
+								]);
+								expect(states.at(-1)?.sourceDelivery).toEqual(token);
 							} else {
+								const targetConfig = configuredClaudeConfigDir(
+									join(directory, "replacement-account"),
+								);
 								const beforeAbort = states.length;
 								const target = yield* Effect.forkChild(
 									client.commandEffect("target-command", {
@@ -337,14 +403,20 @@ for (const { name, mode } of [
 										sinkId: "target-sink",
 										aborted: false,
 										input: {
-											sessionId: "session-1",
+											...sourceInput,
+											account: {
+												...sourceAccount,
+												id:
+													mode === "late-abort-config"
+														? sourceAccount.id
+														: AccountIdSchema.make("account-b"),
+												folder: targetConfig,
+											},
+											configDir: targetConfig,
 											inputId: "target-input",
 											runId: "target-run",
 											prompt: "target",
 											history: [],
-											providerState: {},
-											workspaceRoot: directory,
-											extraFolders: [],
 										},
 									}),
 								);
@@ -386,10 +458,15 @@ for (const { name, mode } of [
 							producerReleased = true;
 							finish();
 							yield* Deferred.await(released);
-							expect(
-								states.slice(beforeFinish).map((state) => state.sourceDelivery),
-							).toEqual([undefined]);
-							if (mode === "late-abort")
+							const finishingStates = states
+								.slice(beforeFinish)
+								.map((state) => state.sourceDelivery);
+							if (mode === "same-account") {
+								for (const state of finishingStates.slice(0, -1))
+									expect(state).toEqual(token);
+								expect(finishingStates.at(-1)).toBeUndefined();
+							} else expect(finishingStates).toEqual([undefined]);
+							if (mode === "late-abort" || mode === "late-abort-config")
 								expect(payload.admittedInputs).toEqual(["source-input"]);
 						}).pipe(
 							Effect.ensuring(
