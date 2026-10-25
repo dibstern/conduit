@@ -14,6 +14,10 @@ import { join } from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Context, Effect, Fiber, HashMap, Ref } from "effect";
+import type {
+	SubprocessDiagnostic,
+	SubprocessMetrics,
+} from "../../src/lib/domain/daemon/Services/subprocess.js";
 import { recordDaemonBudgetMetrics } from "./daemon-budget-metrics.js";
 import type { ProcessMark } from "./fake-claude-process-sdk.js";
 
@@ -43,13 +47,17 @@ function recordServerMetrics(
 			message as import("../../src/lib/domain/relay/Services/shell-subscription.js").SidebarRead;
 		sidebarReads.push({ at: Date.now(), ms: read.ms, rows: read.rows });
 	});
-	const gitRefreshes: { at: number; read: number; changed: number }[] = [];
-	subscribe("conduit:session-git-refresh", (message) => {
-		const refresh = message as {
-			readonly read: number;
-			readonly changed: number;
-		};
-		gitRefreshes.push({ at: Date.now(), ...refresh });
+	let subprocess: SubprocessMetrics | undefined;
+	const gitStatusReads: Record<string, number> = {};
+	subscribe("conduit:subprocess-metrics", (message) => {
+		const { spawn, ...metrics } = message as SubprocessDiagnostic;
+		subprocess = metrics;
+		if (
+			spawn?.command === "git" &&
+			spawn.args.includes("status") &&
+			spawn.args.includes("--porcelain=v2")
+		)
+			gitStatusReads[spawn.cwd] = (gitStatusReads[spawn.cwd] ?? 0) + 1;
 	});
 	subscribe("conduit:read-model-read", (message) => {
 		const read =
@@ -121,7 +129,8 @@ function recordServerMetrics(
 				),
 				sidebarReads,
 				readModelReads,
-				gitRefreshes,
+				subprocess,
+				gitStatusReads,
 				...(timed && { familyReads: timed.familyReads }),
 				...(timed && { streamingWrites: timed.streamingWrites }),
 			}),
