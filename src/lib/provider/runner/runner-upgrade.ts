@@ -38,7 +38,6 @@ export interface RunnerUpgrade {
 	inFlight: boolean;
 	failures: number;
 	retryAt: number;
-	attemptActivity?: number;
 	boundaryWaiting?: boolean;
 	/** Changed settings rule out a warm switch, so only a restart upgrades. */
 	settingsDeferred?: boolean;
@@ -72,13 +71,12 @@ export function makeRunnerUpgrade<
 	const consider = (sessionId: string, runner: T): void => {
 		if (!options.eligible(sessionId, runner)) return;
 		if (runner.upgrade.inFlight) {
-			if (runner.upgrade.activity !== runner.upgrade.attemptActivity)
-				runner.upgrade.boundaryWaiting = true;
+			// Eligibility can return without a new admission.
+			runner.upgrade.boundaryWaiting = true;
 			return;
 		}
 		runner.upgrade.inFlight = true;
 		const activity = runner.upgrade.activity;
-		runner.upgrade.attemptActivity = activity;
 		let replacement: T | undefined;
 		let committed = false;
 		options.runFork(
