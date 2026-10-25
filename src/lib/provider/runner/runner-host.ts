@@ -544,7 +544,6 @@ export const runSessionRunner = (
 						reportUpgradeState();
 					} else if (message.type === "output-reply") {
 						spool.reply(message);
-						if (message.failure) invalidateSourceDelivery();
 						reportUpgradeState();
 						retireWhenQuiescent();
 					} else if (
@@ -658,12 +657,6 @@ export const runSessionRunner = (
 						idle?.activity();
 						activeCommands++;
 						const deduplicationKey = `${message.commandId}:${message.attempt ?? 0}${command.type === "send-turn" && command.input.nativeResumeFallback ? ":native-resume-fallback" : ""}`;
-						if (
-							["interrupt", "abort", "end-session", "shutdown"].includes(
-								command.type,
-							)
-						)
-							invalidateSourceDelivery();
 						launch.acceptCommand(command);
 						if (command.type === "send-turn") {
 							const binding = bindings.get(command.sinkId);

@@ -2619,7 +2619,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				if (setup) yield* Deferred.await(setup).pipe(Effect.ignore);
 			}
 			const ctx = yield* getSession(this.stateRef, sessionId);
-			if (ctx) this.invalidateSourceDelivery(ctx);
 			const interrupt = Effect.gen({ self: this }, function* () {
 				if (ctx && bound && turnIds.length === 0) {
 					const foreground =
@@ -2986,7 +2985,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		interruptQuery = true,
 	): Effect.Effect<void, ClaudeAdapterError> {
 		return Effect.gen({ self: this }, function* () {
-			this.invalidateSourceDelivery(ctx);
 			// Explicit disposal ends the controller even after a resumable query
 			// failure left its context waiting for the next send.
 			ctx.rebinding = false;
@@ -3028,7 +3026,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				this.controllers.delete(sessionId);
 				return;
 			}
-			this.invalidateSourceDelivery(ctx);
 			log.info(`Ending Claude session: ${sessionId}`);
 			const dispose = Effect.gen({ self: this }, function* () {
 				// A retained steer can start while End crosses the runner socket.

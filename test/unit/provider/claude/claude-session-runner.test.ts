@@ -1,4 +1,6 @@
+import { it as effectIt } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../../src/lib/account-directory.js";
 import { AccountUnroutable } from "../../../../src/lib/contracts/limit-recovery.js";
@@ -20,6 +22,7 @@ import type {
 	SessionCommand,
 	SessionOutput,
 } from "../../../../src/lib/provider/runner/session-runner.js";
+import { provisionalRejectedLimit } from "../../../fixtures/claude-sdk-traces/provisional-usage-limit-turn.js";
 import {
 	createMockQuery,
 	makeErrorResult,
@@ -621,3 +624,130 @@ describe("in-process Claude session runner", () => {
 		);
 	});
 });
+
+effectIt.effect(
+	"retains a late-notice producer while a stale Stop waits for message ownership",
+	() =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const inputId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+				const runId = "source-run";
+				const resultFinished = yield* Deferred.make<void>();
+				const allowNotice = yield* Deferred.make<void>();
+				const noticeHeld = yield* Deferred.make<SessionOutput>();
+				const releaseNotice = yield* Deferred.make<void>();
+				const noticeFinished = yield* Deferred.make<void>();
+				const stopStarted = yield* Deferred.make<void>();
+				const finishResult = vi.fn(() =>
+					Deferred.doneUnsafe(resultFinished, Effect.void),
+				);
+				const finishNotice = vi.fn(() =>
+					Deferred.doneUnsafe(noticeFinished, Effect.void),
+				);
+				let producers = 0;
+				const onSourceDelivery = vi.fn<
+					NonNullable<
+						Parameters<typeof makeClaudeSessionRunner>[0]["onSourceDelivery"]
+					>
+				>(() => (++producers === 1 ? finishResult : finishNotice));
+				const query = createMockQuery([]);
+				const queryFactory: NonNullable<
+					ClaudeProviderInstanceDeps["queryFactory"]
+				> = ({ prompt }) => {
+					const stream = (async function* (): AsyncGenerator<SDKMessage> {
+						for await (const _message of prompt) {
+							yield {
+								type: "command_lifecycle",
+								state: "started",
+								command_uuid: inputId,
+								uuid: inputId,
+								session_id: "sdk-session-1",
+							};
+							yield makeSuccessResult({ user_message_uuid: inputId });
+							await Effect.runPromise(Deferred.await(allowNotice));
+							yield provisionalRejectedLimit("sdk-session-1");
+						}
+					})();
+					return Object.assign(query, { [Symbol.asyncIterator]: () => stream });
+				};
+				const runner = yield* makeClaudeSessionRunner(
+					{
+						daemonConfigDir: getConfigDir(),
+						queryFactory,
+						capabilitiesService,
+						onSourceDelivery,
+					},
+					(output) =>
+						Effect.gen(function* () {
+							if (
+								output.type === "event" &&
+								output.event.type === "session.usage_limited"
+							) {
+								yield* Deferred.succeed(noticeHeld, output);
+								yield* Deferred.await(releaseNotice);
+								return {};
+							}
+							return {};
+						}),
+				);
+				yield* Effect.gen(function* () {
+					const command = send(inputId);
+					expect(
+						(yield* runner.executeEffect({
+							...command,
+							input: { ...command.input, runId },
+						})).status,
+					).toBe("accepted");
+					yield* Deferred.await(resultFinished);
+					expect(finishResult).toHaveBeenCalledOnce();
+					yield* Deferred.succeed(allowNotice, undefined);
+					expect(yield* Deferred.await(noticeHeld)).toMatchObject({
+						type: "event",
+						sinkId: inputId,
+						event: {
+							type: "session.usage_limited",
+							sessionId: "session-1",
+							data: { cutOffMessageId: inputId },
+						},
+					});
+					expect(onSourceDelivery.mock.calls).toEqual([
+						[{ sessionId: "session-1", inputId, runId }],
+						[{ sessionId: "session-1", inputId, runId }],
+					]);
+					expect(finishNotice).not.toHaveBeenCalled();
+					const stopping = yield* Effect.forkChild(
+						Deferred.succeed(stopStarted, undefined).pipe(
+							Effect.andThen(
+								runner.executeEffect({
+									type: "interrupt",
+									sessionId: "session-1",
+									turnIds: ["obsolete-input"],
+								}),
+							),
+						),
+					);
+					yield* Deferred.await(stopStarted);
+					// Drain runnable effects without releasing the producer or advancing time.
+					yield* TestClock.adjust("0 millis");
+					expect(stopping.pollUnsafe()).toBeUndefined();
+					expect(query.interrupt).not.toHaveBeenCalled();
+					expect(query.close).not.toHaveBeenCalled();
+					expect(finishNotice).not.toHaveBeenCalled();
+					yield* Deferred.succeed(releaseNotice, undefined);
+					yield* Fiber.join(stopping);
+					yield* Deferred.await(noticeFinished);
+					expect(finishNotice).toHaveBeenCalledOnce();
+					expect(finishResult).toHaveBeenCalledOnce();
+					expect(query.interrupt).not.toHaveBeenCalled();
+					expect(query.close).not.toHaveBeenCalled();
+				}).pipe(
+					Effect.ensuring(
+						Deferred.succeed(allowNotice, undefined).pipe(
+							Effect.andThen(Deferred.succeed(releaseNotice, undefined)),
+							Effect.asVoid,
+						),
+					),
+				);
+			}),
+		),
+);
