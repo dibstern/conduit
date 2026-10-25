@@ -74,6 +74,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import {
 	canonicalDirectory,
 	readPublishedSessionGit,
+	readPublishedWorkspaceMissing,
 	withPublishedProjectGit,
 } from "../../../src/lib/persistence/effect/session-git-publication.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -1028,6 +1029,15 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 					Effect.repeat({ until: (row) => row !== undefined, times: 200 }),
 				);
 				expect(yield* f.service.read("one")).toBeUndefined();
+				expect(
+					yield* readPublishedWorkspaceMissing("one", [f.repository]).pipe(
+						Effect.provideService(SqlClient.SqlClient, f.sql),
+					),
+				).toMatchObject({
+					path: f.workspaceDirectory,
+					branch: "session-one",
+					canRecreate: true,
+				});
 				expect(JSON.parse(missing?.workspace_missing ?? "null")).toMatchObject({
 					canRecreate: true,
 				});

@@ -184,6 +184,7 @@ const sessionPublication = (
 		const firstMissing = missing[0];
 		const workspaceMissing: WorkspaceMissing | undefined = firstMissing && {
 			path: firstMissing.path,
+			...(firstMissing.branch ? { branch: firstMissing.branch } : {}),
 			canRecreate: missing.every((entry) => entry.canRecreate),
 			...(missing.find((entry) => !entry.canRecreate)?.reason
 				? { reason: missing.find((entry) => !entry.canRecreate)?.reason }
