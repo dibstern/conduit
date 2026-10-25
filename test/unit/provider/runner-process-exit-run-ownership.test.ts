@@ -62,6 +62,182 @@ class TestChild extends EventEmitter {
 	disconnect() {}
 }
 
+it("observes a replacement's lower revisions without losing its launch snapshot", async () => {
+	vi.stubEnv("CONDUIT_TEST_BUILD_ID", "generation-current-build");
+	const root = mkdtempSync(join(tmpdir(), "run-generation-revision-"));
+	roots.push(root);
+	const children = [new TestChild(), new TestChild(99_999_998)];
+	let spawned = 0;
+	transport.alive.mockImplementation((pid: number) =>
+		children.some((child) => child.pid === pid && child.exitCode === null),
+	);
+	transport.spawn.mockImplementation(() => {
+		const child = children[spawned++];
+		if (!child) throw new Error("Unexpected third runner");
+		queueMicrotask(() =>
+			child.emit("message", {
+				channel: "conduit-claude-runner",
+				type: "listening",
+			}),
+		);
+		return child;
+	});
+	const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+		throw new Error("Revision fixture must never signal a PID");
+	});
+	try {
+		await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const promoted = yield* Deferred.make<void>();
+					const peers: Parameters<ProcessRunnerDriver["connect"]>[0][] = [];
+					const input = {
+						sessionId: "s",
+						workspaceRoot: root,
+						extraFolders: [],
+						providerState: {},
+						configDir: configuredClaudeConfigDir(root),
+						folderSource: "account" as const,
+					};
+					const snapshot = { input, options: {} };
+					const retire = vi.fn<RunnerSocket["retireEffect"]>(() =>
+						Effect.succeed(true),
+					);
+					const driver: ProcessRunnerDriver = {
+						driverKind: "claude",
+						connect: (options) =>
+							Effect.gen(function* () {
+								const index = peers.length;
+								peers.push(options);
+								const child = children[index];
+								if (!child) throw new Error("Unexpected third attachment");
+								const connection = new RunnerSocket(
+									new Socket(),
+									() => {},
+									options.onClose,
+								);
+								vi.spyOn(connection, "write").mockImplementation(() => {});
+								vi.spyOn(connection, "retireEffect").mockImplementation(retire);
+								vi.spyOn(connection, "commandEffect").mockImplementation(
+									(_id, command) =>
+										Effect.sync(() => {
+											// The old peer stops only after replacement ownership is published.
+											if (index === 0 && command.type === "shutdown")
+												Deferred.doneUnsafe(promoted, Effect.void);
+											if (index === 1 && command.type === "pre-warm")
+												options.onUpgradeState?.({
+													quiescent: true,
+													revision: 5,
+													resumeSessionId: "replacement-5",
+												});
+											return undefined;
+										}),
+								);
+								const destroy = connection.destroy.bind(connection);
+								vi.spyOn(connection, "destroy").mockImplementation(
+									(failure) => {
+										child.exitCode = 0;
+										destroy(failure);
+									},
+								);
+								yield* options.onHello(
+									{
+										type: "hello",
+										protocolVersion: RUNNER_PROTOCOL_VERSION,
+										buildId:
+											index === 0 ? "generation-old-build" : runnerBuildId(),
+										stampsRunIds: true,
+										runnerId: options.runnerId,
+										sessionId: options.sessionId,
+										pid: child.pid,
+										upgradeState:
+											index === 0
+												? {
+														quiescent: false,
+														revision: 100,
+														snapshot,
+														resumeSessionId: "source-100",
+													}
+												: { quiescent: true, revision: 0 },
+									},
+									connection,
+								);
+								return connection;
+							}),
+						settingsDeferredCode: "test-deferred",
+						warmCommand: (sessionId, state, launch) => {
+							expect(state.revision).toBe(100);
+							expect(launch).toEqual(snapshot);
+							return {
+								type: "pre-warm",
+								sessionId,
+								input: launch.input,
+								settingsSnapshot: launch,
+							};
+						},
+						snapshotCommandSettings: () => ({}),
+						loginChange: () => "None",
+						recoverCommands: () => Effect.succeed([]),
+					};
+					const runner = yield* makeProcessSessionRunner(
+						{
+							projectRootForSession: () => Effect.succeed(root),
+							daemonConfigDir: root,
+						},
+						() => Effect.succeed({}),
+						driver,
+					);
+					if (!runner.getNativeSessionEffect || !runner.hasDemandEffect)
+						throw new Error("Missing process runner observations");
+					yield* Effect.addFinalizer(() =>
+						Effect.sync(() => {
+							for (const child of children) child.exitCode = 0;
+						}),
+					);
+					yield* runner.executeEffect({
+						type: "pre-warm",
+						sessionId: "s",
+						input,
+					});
+					const source = peers[0];
+					if (!source?.onUpgradeState)
+						throw new Error("Missing source observer");
+					source.onUpgradeState({ quiescent: true, revision: 100 });
+					yield* Deferred.await(promoted);
+					expect(yield* runner.getNativeSessionEffect("s")).toMatchObject({
+						configDir: input.configDir,
+						resumeSessionId: "replacement-5",
+					});
+					expect(yield* runner.hasDemandEffect("s")).toBe(false);
+					const replacement = peers[1];
+					if (!replacement?.onUpgradeState)
+						throw new Error("Missing replacement observer");
+					replacement.onUpgradeState({
+						quiescent: false,
+						revision: 6,
+						resumeSessionId: "replacement-6",
+						snapshot: {
+							...snapshot,
+							input: {
+								...input,
+								configDir: configuredClaudeConfigDir(join(root, "replacement")),
+							},
+						},
+					});
+					expect(yield* runner.hasDemandEffect("s")).toBe(true);
+					expect(yield* runner.getNativeSessionEffect("s")).toMatchObject({
+						configDir: configuredClaudeConfigDir(join(root, "replacement")),
+						resumeSessionId: "replacement-6",
+					});
+				}),
+			),
+		);
+		expect(kill).not.toHaveBeenCalled();
+	} finally {
+		kill.mockRestore();
+	}
+});
+
 it("preserves an unaccepted reservation when idle exit retries on a replacement", async () => {
 	const root = mkdtempSync(join(tmpdir(), "run-idle-retry-"));
 	roots.push(root);

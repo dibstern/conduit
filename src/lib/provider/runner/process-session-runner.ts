@@ -92,6 +92,7 @@ interface RunnerChild {
 	readonly sessionId: string;
 	readonly registrationRoot?: string;
 	launch?: Pick<SessionTurn, "workspaceRoot" | "extraFolders"> | undefined;
+	launchSnapshot?: RunnerUpgradeState["snapshot"];
 	readonly ready: Deferred.Deferred<RunnerSocket, SessionFailure>;
 	readonly stopped: Deferred.Deferred<void>;
 	readonly drained: Deferred.Deferred<void>;
@@ -1164,7 +1165,10 @@ export const makeProcessSessionRunner = (
 									? observed
 									: helloState;
 							const snapshot =
-								latest?.snapshot ?? observed?.snapshot ?? helloState?.snapshot;
+								latest?.snapshot ??
+								observed?.snapshot ??
+								helloState?.snapshot ??
+								entry.launchSnapshot;
 							entry.upgrade.state = latest
 								? { ...latest, ...(snapshot ? { snapshot } : {}) }
 								: undefined;
@@ -1432,7 +1436,10 @@ export const makeProcessSessionRunner = (
 						)
 							return;
 						observeSourceDelivery(entry, state);
-						const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
+						const snapshot =
+							state.snapshot ??
+							entry.upgrade.state?.snapshot ??
+							entry.launchSnapshot;
 						// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
 						entry.upgrade.state = {
 							...state,
@@ -1706,7 +1713,8 @@ export const makeProcessSessionRunner = (
 						Effect.sync(() => {
 							transition(entry, { _tag: "MakeCandidate" });
 							entry.launch = old.launch ?? old.upgrade.state?.snapshot?.input;
-							entry.upgrade.state = old.upgrade.state;
+							// Host revisions are local to a child; only launch data crosses upgrades.
+							entry.launchSnapshot = old.upgrade.state?.snapshot;
 							candidates.add(entry);
 						}),
 					),
