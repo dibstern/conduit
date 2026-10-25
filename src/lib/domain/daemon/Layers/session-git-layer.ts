@@ -44,6 +44,7 @@ import {
 	SessionGitSchema,
 } from "../../../shared-types.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
 import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
 import { ReadRequest } from "../Services/read-request.js";
@@ -111,6 +112,7 @@ interface DirectoryState {
 export const makeSessionGit = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const registry = yield* ProjectRegistryTag;
+	const unavailable = yield* DaemonStoreAvailability;
 	const owners = yield* OwnerScopes;
 	const subprocess = yield* Subprocess;
 	const runner = subprocess.makeRunner();
@@ -411,8 +413,12 @@ export const makeSessionGit = Effect.gen(function* () {
 			if (projectsInitialized && current === registeredProjects) return;
 			registeredProjects = current;
 			projectsInitialized = true;
+			// Failed imports must not leave live cache rows that collide on retry.
+			const available = [...current].filter(
+				([projectId]) => !unavailable.has(projectId),
+			);
 			const roots = new Map(
-				[...current].map(([projectId, project]) => [
+				available.map(([projectId, project]) => [
 					projectId,
 					new Set(project.project.folders.map(canonicalDirectory)),
 				]),
@@ -423,7 +429,7 @@ export const makeSessionGit = Effect.gen(function* () {
 						entry.rootProjects.delete(projectId);
 				disposeUnused(entry);
 			}
-			for (const [projectId, project] of current)
+			for (const [projectId, project] of available)
 				for (const folder of project.project.folders) {
 					const entry = yield* getDirectory(canonicalDirectory(folder));
 					if (
