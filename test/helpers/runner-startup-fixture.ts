@@ -16,6 +16,7 @@ export function installRunnerStartupFixture(root: string): void {
 		throw new Error("Runner startup fixture requires isolated HOME");
 	const gate = join(root, "runner-startup-gate");
 	const selected = join(root, "runner-startup-selected.json");
+	const ready = join(root, "runner-startup-ready");
 	const blocked = join(root, "runner-startup-blocked");
 	const record = (kind: string, data: Record<string, unknown> = {}) =>
 		appendFileSync(
@@ -39,6 +40,7 @@ export function installRunnerStartupFixture(root: string): void {
 				if (!isRecord(selection) || selection["pid"] !== process.pid)
 					return send(...args);
 				record("child-ready");
+				writeFileSync(ready, "listening intercepted");
 				if (selection["mode"] === "never" || selection["mode"] === "eperm")
 					return true;
 				send({
@@ -113,6 +115,13 @@ export function installRunnerStartupFixture(root: string): void {
 					record("parent-unblocked", { childPid: child.pid });
 				});
 			});
+			// Bootstrap is fixture setup. Start the real three-second deadline only
+			// after the child reaches the controlled readiness gate, so module loading
+			// under suite load cannot consume the IPC race's entire timed window.
+			// Keep setup within the runner's ordinary ten-second startup budget.
+			const setupDeadline = Date.now() + 10_000;
+			while (!existsSync(ready) && Date.now() < setupDeadline)
+				Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
 			return child;
 		},
 	});

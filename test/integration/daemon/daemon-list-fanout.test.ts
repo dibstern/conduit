@@ -1,14 +1,21 @@
 // conduit-test-ni8.14: the instance and project lists are daemon-global. A
 // connection must learn about a change whichever project, connection, or CLI
 // call it came from, and a health transition must reach it with no request.
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber, Layer, Stream } from "effect";
 import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { run } from "../../../src/bin/cli-core.js";
 import {
 	type OpenCodeInstance,
@@ -17,6 +24,7 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
+import { signedInCodexDiscoveryTrace } from "../../helpers/codex-app-server.js";
 
 const browserProtocol = (port: number) =>
 	RpcClient.layerProtocolSocket().pipe(
@@ -95,6 +103,79 @@ const healthServer = async () => {
 };
 
 describe("daemon instance and project lists fan out to every connection", () => {
+	it("acknowledges an added instance while another provider's inventory is pending", async () => {
+		const root = mkdtempSync(join(tmpdir(), "conduit-list-inventory-"));
+		const configDir = join(root, "config");
+		const socketPath = join(root, "relay.sock");
+		const tracePath = join(root, "discovery.jsonl");
+		const gatePath = join(root, "gate");
+		const transportsPath = join(root, "transports.jsonl");
+		writeFileSync(
+			tracePath,
+			`${signedInCodexDiscoveryTrace()
+				.map((row) => JSON.stringify(row))
+				.join("\n")}\n`,
+		);
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		vi.stubEnv("CONDUIT_CODEX_APP_SERVER_TRACE", tracePath);
+		vi.stubEnv("CONDUIT_CODEX_APP_SERVER_TRACE_GATE", gatePath);
+		vi.stubEnv("CONDUIT_TEST_CODEX_TRANSPORTS", transportsPath);
+		let daemon: Awaited<ReturnType<typeof startForegroundDaemon>> | undefined;
+		let inventory:
+			| Promise<{ readonly instances: readonly OpenCodeInstance[] }>
+			| undefined;
+		try {
+			daemon = await startForegroundDaemon({
+				configDir,
+				socketPath,
+				port: 0,
+				host: "127.0.0.1",
+				keepAwake: false,
+				smartDefault: false,
+			});
+			const running = daemon;
+			await expect
+				.poll(() =>
+					running.getInstances().find(({ driver }) => driver === "codex"),
+				)
+				.toBeDefined();
+			writeFileSync(gatePath, "0");
+			inventory = browserCall(running.getStatus().port, (client) =>
+				client.GetInstances({}),
+			);
+			// The named account's first discovery is held at its initialize reply.
+			await expect
+				.poll(() =>
+					existsSync(transportsPath)
+						? readFileSync(transportsPath, "utf8").includes(configDir)
+						: false,
+				)
+				.toBe(true);
+			const added = await sendRpcRequest(socketPath, {
+				_tag: "AddInstance",
+				name: "added-during-discovery",
+				managed: false,
+				url: "http://127.0.0.1:1",
+			});
+			expect(
+				added.instances.find(({ id }) => id === added.addedInstanceId),
+			).toMatchObject({
+				name: "added-during-discovery",
+				driver: "opencode",
+			});
+			writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+			expect(
+				(await inventory).instances.find(({ driver }) => driver === "codex"),
+			).toMatchObject({ available: true });
+		} finally {
+			writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+			await inventory?.catch(() => undefined);
+			await daemon?.stop();
+			vi.unstubAllEnvs();
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("delivers changes made via another project's connection and via the CLI", async () => {
 		const root = mkdtempSync(join(tmpdir(), "conduit-list-fanout-"));
 		const socketPath = join(root, "relay.sock");
