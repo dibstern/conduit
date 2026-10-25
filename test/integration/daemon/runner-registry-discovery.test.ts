@@ -85,4 +85,25 @@ describe("daemon runner discovery", () => {
 		);
 		expect(readFileSync(otherFile, "utf8")).toBe("other owner's data");
 	});
+
+	it("discovers host registration without taking authority from a legacy sidecar", () => {
+		const registration = {
+			driverKind: "claude",
+			runnerId: "0123456789ab",
+			sessionId: "live-session",
+			socketPath: join(socketDirectory, "0123456789ab"),
+			buildId: "live-build",
+			pid: process.pid,
+			registeredAt: 1_792_699_200_000,
+			startTime: "Fri Oct 23 12:00:00 2026",
+		} satisfies RunnerRegistration;
+		registerRunner(registration);
+		// SQL owns retirement. Old files cannot replace a host's registration.
+		writeFileSync(
+			`${registration.socketPath}.retired`,
+			JSON.stringify({ ...registration, role: "retired", sessionId: "stale" }),
+		);
+
+		expect(discoverAllRunners(configDir)).toEqual([registration]);
+	});
 });

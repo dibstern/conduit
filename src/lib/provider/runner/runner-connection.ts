@@ -230,7 +230,12 @@ export const connectRunner = (options: {
 							Effect.gen(function* () {
 								const cursor = options.receipts
 									? yield* options.receipts
-											.attach(options.runnerId, attachmentId)
+											.attach(options.runnerId, attachmentId, {
+												sessionId: options.sessionId,
+												pid: message.pid ?? options.pid,
+												driverKind:
+													message.driverKind ?? options.driverKind ?? "claude",
+											})
 											.pipe(
 												Effect.mapError((cause) =>
 													runnerFailure("attach runner", cause),
@@ -413,6 +418,11 @@ export const connectRunner = (options: {
 											sequence,
 											attachmentId,
 											committed,
+											ownedRunId:
+												message.output.type === "event" &&
+												message.output.event.type === "run.started"
+													? message.output.event.runId
+													: undefined,
 											consumed: false,
 											onCommitted: () => {
 												// Durable terminal state must survive publication failure.

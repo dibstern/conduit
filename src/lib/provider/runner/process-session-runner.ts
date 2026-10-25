@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { appendFileSync, closeSync, openSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	Cause,
@@ -54,6 +54,7 @@ import type {
 	ProviderNativeSession,
 	TurnResult,
 } from "../types.js";
+import { makeRunnerAuthority, type RunnerRecord } from "./runner-authority.js";
 import { connectRunner } from "./runner-connection.js";
 import * as Entry from "./runner-entry-lifecycle.js";
 import {
@@ -73,14 +74,13 @@ import {
 	discoverRunners,
 	prepareRunnerDirectory,
 	type RunnerProcessTable,
-	type RunnerRegistration,
-	registerRunner,
 	removeRunner,
 	runnerDirectory,
 	runnerPidAlive,
 	runnerPidMatchesRegistration,
 	runnerProcessTable,
 } from "./runner-registry.js";
+import { runnerSendCommandsForProcess } from "./runner-send-journal.js";
 import { failRunnerTurn, observeRunnerTurn } from "./runner-turn-failure.js";
 import { makeRunnerUpgrade, type RunnerUpgrade } from "./runner-upgrade.js";
 import { makeSendAdmissionWait } from "./send-admission.js";
@@ -95,6 +95,9 @@ import type {
 } from "./session-runner.js";
 
 interface RunnerChild {
+	authorityRecord?: RunnerRecord<RunnerChild> | undefined;
+	attachmentId?: string | undefined;
+	readonly registeredAt?: number;
 	readonly sessionId: string;
 	readonly registrationRoot?: string;
 	launch?: Pick<SessionTurn, "workspaceRoot" | "extraFolders"> | undefined;
@@ -468,6 +471,7 @@ export const makeProcessSessionRunner = (
 	Effect.gen(function* () {
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
 		const processTable = deps.processTable ?? runnerProcessTable;
+		const clock = yield* Clock.Clock;
 		const pidAlive = (pid: number, startTime?: string) => {
 			const current = processTable.inspect(pid);
 			return (
@@ -488,7 +492,7 @@ export const makeProcessSessionRunner = (
 					const pid = entry.pid ?? entry.child?.pid;
 					return pid !== undefined &&
 						pidAlive(pid, entry.startTime) &&
-						entry.lifecycle.failure?.code !== "runner_retired"
+						entry.authorityRecord?.tag._tag !== "Retired"
 						? retireSurvivor(
 								entry,
 								runnerFailure("stop runner", "Runner survived Stop escalation"),
@@ -552,10 +556,65 @@ export const makeProcessSessionRunner = (
 							),
 						)
 				: (legacyRetirePrompts?.(currentProcessId, owner) ?? Effect.succeed(0));
-		const observedProcesses = new Map<string, string>();
+		const authority = yield* makeRunnerAuthority<RunnerChild>(receipts);
+		const currentEntry = (sessionId: string) => {
+			for (const record of authority.records.values())
+				if (
+					record.identity.sessionId === sessionId &&
+					(record.tag._tag === "Live" ||
+						(record.tag._tag === "Starting" &&
+							!record.identity.entry?.lifecycle.candidate))
+				)
+					return record.identity.entry;
+			return undefined;
+		};
+		const activeEntries = () =>
+			[...authority.records.values()].flatMap((record) => {
+				const entry = record.identity.entry;
+				return entry && currentEntry(entry.sessionId) === entry ? [entry] : [];
+			});
+		const attachedEntries = () =>
+			[...authority.records.values()].flatMap((record) =>
+				record.identity.entry && record.tag._tag !== "Retired"
+					? [record.identity.entry]
+					: [],
+			);
+		const tracked = (entry: RunnerChild) =>
+			authority.records.get(entry.runnerId)?.identity.entry === entry;
+		const identityFor = (entry: RunnerChild) => ({
+			runnerId: entry.runnerId,
+			sessionId: entry.sessionId,
+			driverKind: driver.driverKind,
+			pid: entry.pid ?? entry.child?.pid,
+			startTime: entry.startTime,
+			registeredAt: entry.registeredAt,
+			socketPath: entry.socketPath,
+			candidate: entry.lifecycle.candidate,
+			attachmentId: entry.attachmentId,
+			ownedRunIds: [...(entry.ownedRunIds ?? [])],
+			signalled: entry.lifecycle.stop?.signal === "Signalled",
+			entry,
+		});
+		const adoptEntry = (entry: RunnerChild, phase: "starting" | "live") =>
+			authority.adopt([identityFor(entry)], phase).pipe(
+				Effect.mapError((cause) => runnerFailure("adopt runner", cause)),
+				Effect.flatMap(({ grants }) => {
+					entry.authorityRecord = authority.records.get(entry.runnerId);
+					return grants.has(entry.runnerId)
+						? Effect.void
+						: Effect.fail(
+								runnerFailure("adopt runner", "Runner authority was revoked"),
+							);
+				}),
+			);
+		const forgetExited = (entry: RunnerChild) => {
+			const pid = entry.pid ?? entry.child?.pid;
+			if (pid === undefined || !pidAlive(pid, entry.startTime))
+				authority.records.delete(entry.runnerId);
+		};
 		const observeProcess = (sessionId: string, entry: RunnerChild) =>
 			Effect.gen(function* () {
-				if (observedProcesses.get(sessionId) === entry.runnerId) return;
+				if (entry.authorityRecord?.observed === true) return;
 				const retirement = deps.recoveryForSession
 					? (yield* deps.recoveryForSession(sessionId))?.retirePrompts(
 							entry.runnerId,
@@ -577,17 +636,9 @@ export const makeProcessSessionRunner = (
 						runnerFailure("retire replaced runner prompts", cause),
 					),
 				);
-				observedProcesses.set(sessionId, entry.runnerId);
+				if (entry.authorityRecord) entry.authorityRecord.observed = true;
 			});
-		const children = new Map<string, RunnerChild>();
-		const candidates = new Set<RunnerChild>();
-		const supersededEntries = new WeakSet<RunnerChild>();
-		const survivors = new Map<string, RunnerRegistration>();
-		const retiredEntries = new WeakSet<RunnerChild>();
 		let recovering = false;
-		// Liveness only: evicted children whose OS process may not have exited
-		// yet. Pruned lazily by pid, never consulted for ownership.
-		const exiting = new Set<RunnerChild>();
 		const sinks = new Map<
 			string,
 			{
@@ -666,20 +717,22 @@ export const makeProcessSessionRunner = (
 					const reply = yield* operation;
 					return reply ?? {};
 				});
-			const current = entry && children.get(entry.sessionId);
+			const current = entry && currentEntry(entry.sessionId);
 			// A superseded process may still release its own retained sinks.
 			const ownsRelease =
 				entry &&
-				supersededEntries.has(entry) &&
+				entry.authorityRecord?.tag._tag === "Exiting" &&
+				entry.authorityRecord.tag.reason === "superseded" &&
 				releaseSinkId !== undefined &&
 				sinks.get(releaseSinkId)?.runnerId === entry.runnerId;
 			if (
 				entry &&
-				(retiredEntries.has(entry) ||
+				(entry.authorityRecord?.tag._tag === "Retired" ||
 					(entry.lifecycle.candidate && entry.lifecycle.stop !== undefined) ||
 					(!ownsRelease &&
-						(supersededEntries.has(entry) ||
-							(current && current !== entry && !candidates.has(entry)))))
+						((entry.authorityRecord?.tag._tag === "Exiting" &&
+							entry.authorityRecord.tag.reason === "superseded") ||
+							(current && current !== entry && !tracked(entry)))))
 			) {
 				log.debug(
 					{ runnerId: entry.runnerId, sessionId: entry.sessionId },
@@ -807,7 +860,9 @@ export const makeProcessSessionRunner = (
 						Effect.andThen(
 							Effect.suspend(() =>
 								Effect.forEach(
-									[...children],
+									activeEntries().map(
+										(entry) => [entry.sessionId, entry] as const,
+									),
 									([sessionId, entry]) =>
 										entry.connection
 											? acknowledgeSends(sessionId, entry, entry.connection)
@@ -840,21 +895,35 @@ export const makeProcessSessionRunner = (
 			process.send?.(mark);
 		};
 
-		const evict = (sessionId: string, entry: RunnerChild) => {
-			// A late close from an old child must not remove its replacement.
-			if (children.get(sessionId) !== entry) return;
-			children.delete(sessionId);
-			// Usability ends before the OS process does; keep it visible to liveness.
-			if ((entry.pid ?? entry.child?.pid) !== undefined) exiting.add(entry);
-			// Undelivered sends belong to admission, including across retirement.
-			for (const [sinkId, binding] of sinks)
-				if (
-					binding.sessionId === sessionId &&
-					binding.runnerId === entry.runnerId &&
-					(binding.accepted || !binding.pending)
-				)
-					releaseSink(sinkId);
-		};
+		const evict = (sessionId: string, entry: RunnerChild) =>
+			Effect.gen(function* () {
+				const record = entry.authorityRecord;
+				if (record?.identity.entry !== entry) return;
+				if (entry.lifecycle.failure?.code === "runner_detached")
+					record.identity = {
+						...record.identity,
+						entry: undefined,
+						attachmentId: undefined,
+					};
+				else if (
+					record &&
+					record.tag._tag !== "Retired" &&
+					record.tag._tag !== "Exiting"
+				) {
+					record.identity = identityFor(entry);
+					// Confirmed exits retain the existing failure/orphan settlement path.
+					// Only survivor retirement takes durable cleanup ownership of runs.
+					yield* authority.revoke(record.grant, "exited");
+				}
+				forgetExited(entry);
+				for (const [sinkId, binding] of sinks)
+					if (
+						binding.sessionId === sessionId &&
+						binding.runnerId === entry.runnerId &&
+						(binding.accepted || !binding.pending)
+					)
+						releaseSink(sinkId);
+			});
 		const releaseEntryWaiters = (
 			entry: RunnerChild,
 			cause: Cause.Cause<SessionFailure>,
@@ -865,7 +934,10 @@ export const makeProcessSessionRunner = (
 				const ending = entry.lifecycle.end;
 				if (ending) yield* Deferred.succeed(ending.released, undefined);
 			});
-		const settleRetiredRuns = (registration: RunnerRegistration) =>
+		const settleRetiredRuns = (registration: {
+			readonly sessionId: string;
+			readonly ownedRunIds?: readonly string[] | undefined;
+		}) =>
 			Effect.gen(function* () {
 				if (!sql || !registration.ownedRunIds?.length) return;
 				const sessionIngestion = yield* ingestionForSession(
@@ -886,13 +958,30 @@ export const makeProcessSessionRunner = (
 					),
 				);
 			});
-		const watchSurvivor = (registration: RunnerRegistration) => {
-			if (survivors.has(registration.runnerId)) return;
-			survivors.set(registration.runnerId, registration);
+		const watchSurvivor = (record: RunnerRecord<RunnerChild>) => {
+			if (record.watching || record.identity.pid === undefined) return;
+			record.watching = true;
 			runFork(
 				Effect.gen(function* () {
-					let retired = registration;
+					const { runnerId, sessionId, pid, startTime, socketPath } =
+						record.identity;
+					if (pid === undefined) return;
 					const startedAt = yield* Clock.currentTimeMillis;
+					const exited = () => {
+						const current = processTable.inspect(pid);
+						return (
+							current.state === "gone" ||
+							current.state === "zombie" ||
+							(startTime !== undefined &&
+								current.startTime !== undefined &&
+								current.startTime !== startTime)
+						);
+					};
+					const prune = Effect.gen(function* () {
+						if (socketPath) removeRunner(socketPath);
+						if (receipts) yield* receipts.pruneRetired(runnerId);
+						authority.records.delete(runnerId);
+					});
 					for (const offset of [10_000, 30_000, 60_000]) {
 						yield* Effect.sleep(
 							Math.max(
@@ -900,76 +989,70 @@ export const makeProcessSessionRunner = (
 								startedAt + offset - (yield* Clock.currentTimeMillis),
 							),
 						);
-						const exited = () => {
-							const current = processTable.inspect(retired.pid);
-							return (
-								current.state === "gone" ||
-								current.state === "zombie" ||
-								(retired.startTime !== undefined &&
-									current.startTime !== undefined &&
-									current.startTime !== retired.startTime)
-							);
-						};
-						if (exited()) {
-							removeRunner(retired.socketPath);
-							survivors.delete(retired.runnerId);
-							return;
-						}
-						const current = processTable.inspect(retired.pid);
+						if (exited()) return yield* prune;
+						const current = processTable.inspect(pid);
 						if (
-							retired.startTime &&
+							startTime &&
 							current.state === "running" &&
-							current.startTime === retired.startTime
+							current.startTime === startTime
 						) {
 							try {
-								processTable.signal(retired.pid, "SIGKILL");
-								retired = { ...retired, signalled: true };
-								registerRunner(retired);
+								processTable.signal(pid, "SIGKILL");
+								record.identity = { ...record.identity, signalled: true };
+								if (receipts) yield* receipts.retire(record.identity);
 							} catch (cause) {
 								log.warn(
-									{ runnerId: retired.runnerId, pid: retired.pid, cause },
+									{ runnerId, pid, cause },
 									"Runner survivor signal failed",
 								);
 							}
 						}
 						log.warn(
-							{
-								runnerId: retired.runnerId,
-								pid: retired.pid,
-								signalled: retired.signalled === true,
-							},
+							{ runnerId, pid, signalled: record.identity.signalled === true },
 							"Retried retired runner stop",
 						);
-						if (exited()) {
-							removeRunner(retired.socketPath);
-							survivors.delete(retired.runnerId);
-							return;
-						}
+						if (exited()) return yield* prune;
 					}
-					if (retired.noticed || !sql) return;
-					const [session] = yield* sql<{
-						archived_at: number | null;
-					}>`SELECT archived_at FROM sessions WHERE id = ${retired.sessionId}`;
-					if (!session || session.archived_at !== null) return;
-					const sessionIngestion = yield* ingestionForSession(
-						retired.sessionId,
-					);
-					if (!sessionIngestion) return;
-					yield* sessionIngestion.ingest({
-						eventId: `runner-survivor-${retired.runnerId}`,
-						type: "turn.notice",
-						providerId: driver.driverKind,
-						sessionId: retired.sessionId,
-						providerRefs: {},
-						rawSource: { kind: "runner.manager" },
-						createdAt: yield* Clock.currentTimeMillis,
-						data: {
-							text: retired.signalled
-								? `The previous run (pid ${retired.pid}) was told to stop but hasn't exited yet. It can't make further changes and will exit when the system releases it.`
-								: `Conduit couldn't confirm pid ${retired.pid} is the previous run, so it didn't stop it. It may still be running. Stop it manually if it is.`,
-						},
+					const notice = Effect.gen(function* () {
+						if (!sql) return false;
+						const [session] = yield* sql<{
+							archived_at: number | null;
+						}>`SELECT archived_at FROM sessions WHERE id = ${sessionId}`;
+						if (!session || session.archived_at !== null) return true;
+						const sessionIngestion = yield* ingestionForSession(sessionId);
+						if (!sessionIngestion) return false;
+						yield* sessionIngestion.ingest({
+							eventId: `runner-survivor-${runnerId}`,
+							type: "turn.notice",
+							providerId: driver.driverKind,
+							sessionId,
+							providerRefs: {},
+							rawSource: { kind: "runner.manager" },
+							createdAt: yield* Clock.currentTimeMillis,
+							data: {
+								text: record.identity.signalled
+									? `The previous run (pid ${pid}) was told to stop but hasn't exited yet. It can't make further changes and will exit when the system releases it.`
+									: `Conduit couldn't confirm pid ${pid} is the previous run, so it didn't stop it. It may still be running. Stop it manually if it is.`,
+							},
+						});
+						return true;
 					});
-					registerRunner({ ...retired, noticed: true });
+					let noticed = false;
+					while (!exited()) {
+						if (!noticed)
+							noticed = yield* notice.pipe(
+								Effect.catchCause((cause) =>
+									Effect.logWarning(
+										"Runner survivor notice failed",
+										cause,
+									).pipe(Effect.as(false)),
+								),
+							);
+						// The deterministic event remains after exit. Missing project
+						// services or a failed commit can retry without a duplicate banner.
+						yield* Effect.sleep("10 seconds");
+					}
+					yield* prune;
 				}).pipe(
 					Effect.catchCause((cause) =>
 						Effect.logWarning("Runner survivor cleanup failed", cause),
@@ -977,164 +1060,124 @@ export const makeProcessSessionRunner = (
 				),
 			);
 		};
+		const retireRecord = (
+			record: RunnerRecord<RunnerChild>,
+			cause: SessionFailure,
+			exceptCommandId?: string,
+		) =>
+			Effect.gen(function* () {
+				const entry = record.identity.entry;
+				if (record.tag._tag === "Retired" && record.watching) {
+					watchSurvivor(record);
+					return;
+				}
+				if (entry) record.identity = identityFor(entry);
+				const cleanup = yield* authority.revoke(record.grant, "retired", {
+					ownedRunIds: record.identity.ownedRunIds ?? [],
+				});
+				const valid = () =>
+					record.cleanup?.grant === cleanup &&
+					record.cleanup.permitsCleanup &&
+					clock.currentTimeMillisUnsafe() < record.cleanup.deadline;
+				const guard = Effect.suspend(() =>
+					valid() ? Effect.void : Effect.interrupt,
+				);
+				const registration = {
+					...record.identity,
+					ownedRunIds:
+						authority.records.get(record.identity.runnerId)?.cleanup
+							?.ownedRunIds ?? [],
+				};
+				const releases: Effect.Effect<void, SessionFailure>[] = [];
+				if (entry) {
+					transition(entry, { _tag: "Fail", failure: cause });
+					transition(entry, { _tag: "Recovered" });
+					entry.connection?.destroy();
+					for (const [sinkId, binding] of [...sinks]) {
+						if (binding.runnerId !== entry.runnerId) continue;
+						releaseSink(sinkId);
+						releases.push(
+							emit({ type: "release-sink", sinkId }, entry.sessionId).pipe(
+								Effect.asVoid,
+							),
+						);
+					}
+					yield* releaseEntryWaiters(entry, Cause.fail(cause));
+					// A cancelled Starting runner never owned session background state.
+					if (!entry.lifecycle.candidate && !currentEntry(entry.sessionId))
+						releases.push(
+							emit(
+								{
+									type: "background-task",
+									transition: {
+										sessionId: entry.sessionId,
+										kind: "session-ended",
+									},
+								},
+								entry.sessionId,
+							).pipe(Effect.asVoid),
+						);
+				}
+				// Release admission before any cleanup SQL can acquire the write permit.
+				// The f4 commit fence stays until R2 installs grant-aware writes.
+				const detached = (operation: Effect.Effect<void, unknown>) =>
+					operation.pipe(
+						Effect.provideService(currentCommitGuard, guard),
+						Effect.interruptible,
+						Effect.timeout("3 seconds"),
+						Effect.catchCause((failure) =>
+							Effect.logWarning("Retired runner cleanup failed", failure),
+						),
+						Effect.forkDetach,
+					);
+				yield* detached(
+					Effect.all(
+						releases.map((release) => guard.pipe(Effect.andThen(release))),
+						{ concurrency: 4, discard: true },
+					),
+				);
+				if (record.cleanup) record.cleanup.settling = true;
+				yield* detached(
+					guard.pipe(
+						Effect.andThen(
+							Effect.gen(function* () {
+								const current = currentEntry(registration.sessionId);
+								yield* retireReplacedPrompts(current?.runnerId ?? null, {
+									sessionId: registration.sessionId,
+									expiredProcessId: registration.runnerId,
+									...(exceptCommandId ? { exceptCommandId } : {}),
+								});
+								yield* settleRetiredRuns(registration);
+							}),
+						),
+						Effect.ensuring(
+							Effect.sync(() => {
+								if (record.cleanup?.grant === cleanup)
+									record.cleanup.settling = false;
+							}),
+						),
+					),
+				);
+				watchSurvivor(record);
+				log.warn(
+					{ runnerId: registration.runnerId, pid: registration.pid },
+					"Retired surviving runner",
+				);
+			}).pipe(Effect.uninterruptible);
 		const retireSurvivor = (
 			entry: RunnerChild,
 			cause: SessionFailure,
 			exceptCommandId?: string,
 		) =>
-			Effect.gen(function* () {
-				if (retiredEntries.has(entry)) return;
-				retiredEntries.add(entry);
-				const failure: SessionFailure = {
-					...cause,
-					code: "runner_retired",
-				};
-				transition(entry, { _tag: "Fail", failure });
-				transition(entry, { _tag: "Recovered" });
-				const pid = entry.pid ?? entry.child?.pid;
-				let registration: RunnerRegistration | undefined;
-				if (pid !== undefined) {
-					registration = {
-						driverKind: driver.driverKind,
-						runnerId: entry.runnerId,
-						sessionId: entry.sessionId,
-						socketPath: entry.socketPath,
-						buildId: entry.buildId ?? runnerBuildId(),
-						pid,
-						role: "retired",
-						...(entry.startTime ? { startTime: entry.startTime } : {}),
-						signalled: entry.lifecycle.stop?.signal === "Signalled",
-						ownedRunIds: [...(entry.ownedRunIds ?? [])],
-					};
-					// This marker must survive even when SQL fencing fails or times out.
-					registerRunner(registration);
-				}
-				yield* Effect.gen(function* () {
-					if (receipts) yield* receipts.attach(entry.runnerId, randomUUID());
-					if (registration) {
-						const ownedRunIds = new Set(entry.ownedRunIds);
-						const current = children.get(entry.sessionId);
-						for (const [commandId, attempt] of entry.pendingSendCommands ??
-							[]) {
-							if (
-								!sql ||
-								(current !== entry &&
-									current?.pendingSendCommands?.has(commandId))
-							)
-								continue;
-							const [owner] = yield* sql<{
-								run_id: string | null;
-							}>`SELECT COALESCE(run.joined_into, run.id) AS run_id FROM provider_command_outbox command
-							JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
-							WHERE command.session_id = ${entry.sessionId} AND command.command_id = ${commandId} AND command.attempt_count = ${attempt}`;
-							if (
-								owner?.run_id &&
-								(current === entry || !current?.ownedRunIds?.has(owner.run_id))
-							)
-								ownedRunIds.add(owner.run_id);
-						}
-						registration = {
-							...registration,
-							ownedRunIds: [...ownedRunIds],
-						};
-						registerRunner(registration);
-					}
-				}).pipe(
-					// Match Stop's local shutdown/retirement acknowledgement deadline.
-					Effect.interruptible,
-					Effect.timeout("1 second"),
-					Effect.ensuring(
-						Effect.gen(function* () {
-							if (registration) watchSurvivor(registration);
-							// Retirement owns output cleanup; waiters cannot admit a replacement
-							// until its public sinks and background state have been released.
-							entry.connection?.destroy();
-							for (const [sinkId, binding] of [...sinks]) {
-								if (binding.runnerId !== entry.runnerId) continue;
-								yield* emit(
-									{ type: "release-sink", sinkId },
-									entry.sessionId,
-								).pipe(
-									Effect.interruptible,
-									Effect.timeout("1 second"),
-									Effect.ignore,
-									Effect.ensuring(
-										Effect.sync(() => {
-											if (sinks.get(sinkId) === binding) releaseSink(sinkId);
-										}),
-									),
-								);
-							}
-							const current = children.get(entry.sessionId);
-							if (!current || current === entry)
-								yield* emit(
-									{
-										type: "background-task",
-										transition: {
-											sessionId: entry.sessionId,
-											kind: "session-ended",
-										},
-									},
-									entry.sessionId,
-								).pipe(
-									Effect.interruptible,
-									Effect.timeout("1 second"),
-									Effect.ignore,
-								);
-							evict(entry.sessionId, entry);
-							candidates.delete(entry);
-							yield* releaseEntryWaiters(entry, Cause.fail(failure));
-						}),
-					),
-				);
-				if (registration) {
-					let settling = true;
-					// The write seam masks its transaction waits. Do not join those waits
-					// after the deadline; its transaction guards reject any delayed write.
-					const retired = registration;
-					const settlement = yield* Effect.gen(function* () {
-						const current = children.get(entry.sessionId);
-						yield* retireReplacedPrompts(
-							current && current !== entry ? current.runnerId : null,
-							{
-								sessionId: entry.sessionId,
-								expiredProcessId: entry.runnerId,
-								...(exceptCommandId ? { exceptCommandId } : {}),
-							},
-						);
-						yield* settleRetiredRuns(retired);
-					}).pipe(
-						Effect.provideService(
-							currentCommitGuard,
-							Effect.suspend(() => (settling ? Effect.void : Effect.interrupt)),
-						),
-						Effect.interruptible,
-						Effect.forkDetach,
-					);
-					yield* Fiber.join(settlement).pipe(
-						Effect.interruptible,
-						Effect.timeout("1 second"),
-						Effect.ensuring(
-							Effect.sync(() => {
-								settling = false;
-								settlement.interruptUnsafe();
-							}),
-						),
-					);
-				}
-				log.warn({ runnerId: entry.runnerId, pid }, "Retired surviving runner");
-			}).pipe(
-				// Keep the in-memory fence, durable registration and admission cleanup
-				// together even when cancellation arrives while receipt fencing waits.
-				Effect.uninterruptible,
-				Effect.mapError((cause) => runnerFailure("retire runner", cause)),
-			);
+			entry.authorityRecord?.identity.entry === entry
+				? retireRecord(entry.authorityRecord, cause, exceptCommandId)
+				: Effect.void;
 		const retireOrphan = (entry: RunnerChild) =>
 			Effect.gen(function* () {
 				const ownsEntry = () =>
 					entry.lifecycle.candidate
-						? candidates.has(entry)
-						: children.get(entry.sessionId) === entry;
+						? tracked(entry)
+						: currentEntry(entry.sessionId) === entry;
 				if (closing || !ownsEntry()) return;
 				yield* stopRunner(entry).pipe(
 					Effect.ensuring(
@@ -1150,8 +1193,8 @@ export const makeProcessSessionRunner = (
 						entry,
 						runnerFailure("recover runner", "Abandoned runner survived stop"),
 					);
-				withEntryOutput(entry, () => evict(entry.sessionId, entry));
-				candidates.delete(entry);
+				yield* withEntryOutput(entry, evict(entry.sessionId, entry));
+				forgetExited(entry);
 			});
 		const detach = (entry: RunnerChild, failure?: SessionFailure) => {
 			entry.connection?.destroy(failure);
@@ -1164,7 +1207,7 @@ export const makeProcessSessionRunner = (
 					closing = true;
 					for (const { finished } of accountDemands.values())
 						Deferred.doneUnsafe(finished, Effect.void);
-					const entries = [...children.values(), ...candidates];
+					const entries = attachedEntries();
 					const release = Effect.forEach(
 						entries,
 						(entry) =>
@@ -1187,7 +1230,7 @@ export const makeProcessSessionRunner = (
 					).pipe(
 						Effect.ensuring(
 							Effect.sync(() => {
-								children.clear();
+								authority.records.clear();
 								sinks.clear();
 							}),
 						),
@@ -1235,10 +1278,10 @@ export const makeProcessSessionRunner = (
 				if (
 					!closing &&
 					exitedPid !== undefined &&
-					(entry.lifecycle.failure?.code === "runner_retired" ||
+					(entry.authorityRecord?.tag._tag === "Retired" ||
 						!pidAlive(exitedPid, entry.startTime))
 				) {
-					const current = children.get(sessionId);
+					const current = currentEntry(sessionId);
 					yield* retireReplacedPrompts(
 						current && current !== entry ? current.runnerId : null,
 						{
@@ -1254,7 +1297,7 @@ export const makeProcessSessionRunner = (
 					);
 				const settlement = lock.withPermits(1)(
 					Effect.gen(function* () {
-						const retired = entry.lifecycle.failure?.code === "runner_retired";
+						const retired = entry.authorityRecord?.tag._tag === "Retired";
 						const owners = new Map<string, RunSettlementOwner>();
 						for (const runId of entry.ownedRunIds ?? [])
 							reservations.add(runId);
@@ -1269,7 +1312,7 @@ export const makeProcessSessionRunner = (
 							closing ||
 							entry.lifecycle.activity._tag === "Recovering" ||
 							entry.lifecycle.candidate ||
-							(children.get(sessionId) !== entry && !retired) ||
+							(currentEntry(sessionId) !== entry && !retired) ||
 							pid === undefined ||
 							(pidAlive(pid, entry.startTime) && !retired)
 						)
@@ -1295,7 +1338,7 @@ export const makeProcessSessionRunner = (
 						);
 					}),
 				);
-				yield* entry.lifecycle.failure?.code === "runner_retired"
+				yield* entry.authorityRecord?.tag._tag === "Retired"
 					? settlement
 					: entry.outputs.withPermits(1)(settlement);
 			});
@@ -1362,7 +1405,7 @@ export const makeProcessSessionRunner = (
 							withEntryOutput(
 								entry,
 								Effect.gen(function* () {
-									evict(sessionId, entry);
+									yield* evict(sessionId, entry);
 									yield* Deferred.succeed(entry.drained, undefined);
 								}),
 							),
@@ -1509,8 +1552,8 @@ export const makeProcessSessionRunner = (
 								entry.startTime ??= processTable.inspect(hello.pid).startTime;
 							const ownsEntry = () =>
 								(entry.lifecycle.candidate
-									? candidates.has(entry)
-									: children.get(sessionId) === entry) &&
+									? tracked(entry)
+									: currentEntry(sessionId) === entry) &&
 								Entry.canControl(entry.lifecycle) &&
 								!closing;
 							if (ownsEntry() && !connection.closed)
@@ -1532,6 +1575,11 @@ export const makeProcessSessionRunner = (
 									);
 								});
 							yield* ensureAttached();
+							entry.attachmentId = (yield* currentRunnerOutput)?.attachmentId;
+							yield* adoptEntry(
+								entry,
+								entry.lifecycle.candidate ? "starting" : "live",
+							);
 							entry.buildId = hello.buildId;
 							entry.capabilities = {
 								stopsTasks: hello.stopsTasks === true,
@@ -1822,7 +1870,7 @@ export const makeProcessSessionRunner = (
 							...(snapshot ? { snapshot } : {}),
 						};
 						if (
-							children.get(sessionId) === entry &&
+							currentEntry(sessionId) === entry &&
 							wasInFlight &&
 							state.turnInFlight === false
 						)
@@ -2031,6 +2079,7 @@ export const makeProcessSessionRunner = (
 				readonly ingestion?: ProviderRuntimeIngestion | undefined;
 				readonly pendingInteractions?: PendingInteractionService | undefined;
 			},
+			candidate = false,
 		): Effect.Effect<RunnerChild, SessionFailure> =>
 			Effect.gen(function* () {
 				const registrationRoot = yield* deps.projectRootForSession(
@@ -2045,12 +2094,22 @@ export const makeProcessSessionRunner = (
 						),
 					);
 				const runnerId = randomBytes(6).toString("hex");
-				return {
+				const entry = {
+					registeredAt: Math.max(
+						yield* Clock.currentTimeMillis,
+						...[...authority.records.values()].map(
+							(record) => (record.identity.registeredAt ?? 0) + 1,
+						),
+					),
 					sessionId,
 					registrationRoot,
 					ingestion: owner?.ingestion,
 					pendingInteractions: owner?.pendingInteractions,
-					lifecycle: Entry.initialRunnerLifecycle(),
+					lifecycle: candidate
+						? Entry.nextRunnerLifecycle(Entry.initialRunnerLifecycle(), {
+								_tag: "MakeCandidate",
+							})
+						: Entry.initialRunnerLifecycle(),
 					runnerId,
 					ready: yield* Deferred.make<RunnerSocket, SessionFailure>(),
 					stopped: yield* Deferred.make<void>(),
@@ -2062,11 +2121,13 @@ export const makeProcessSessionRunner = (
 						runnerId,
 					),
 				} satisfies RunnerChild;
+				yield* adoptEntry(entry, "starting");
+				return entry;
 			});
 		const eligible = (sessionId: string, entry: RunnerChild) =>
 			!closing &&
 			!recovering &&
-			children.get(sessionId) === entry &&
+			currentEntry(sessionId) === entry &&
 			Entry.canUpgrade(entry.lifecycle) &&
 			entry.buildId !== undefined &&
 			(entry.buildId !== runnerBuildId() ||
@@ -2079,13 +2140,12 @@ export const makeProcessSessionRunner = (
 			eligible,
 			runFork,
 			create: (sessionId, old) =>
-				createEntry(sessionId, old).pipe(
+				createEntry(sessionId, old, true).pipe(
 					Effect.tap((entry) =>
 						Effect.sync(() => {
 							transition(entry, { _tag: "MakeCandidate" });
 							entry.launch = old.launch ?? old.upgrade.state?.snapshot?.input;
 							entry.upgrade.state = old.upgrade.state;
-							candidates.add(entry);
 						}),
 					),
 				),
@@ -2187,18 +2247,18 @@ export const makeProcessSessionRunner = (
 							yield* observeProcess(sessionId, replacement);
 							transition(replacement, { _tag: "Promote" });
 							replacement.connection?.write({ type: "upgrade-activate" });
-							supersededEntries.add(old);
-							children.set(sessionId, replacement);
-							candidates.delete(replacement);
+							if (old.authorityRecord)
+								old.authorityRecord.identity = identityFor(old);
+							yield* adoptEntry(replacement, "live");
 							// Keep the old process visible to shutdown and liveness while
 							// stopping, without granting it the warming candidate's output.
-							candidates.add(old);
+
 							upgradeMark(sessionId, old, "switched", replacement);
 							runFork(
 								Effect.suspend(() =>
 									closing ? Effect.void : stopRunner(old),
 								).pipe(
-									Effect.ensuring(Effect.sync(() => candidates.delete(old))),
+									Effect.ensuring(Effect.sync(() => forgetExited(old))),
 									Effect.catchCause((cause) =>
 										Effect.logError("Retiring upgraded runner failed", cause),
 									),
@@ -2210,7 +2270,7 @@ export const makeProcessSessionRunner = (
 				}),
 			stop: (entry) =>
 				Effect.suspend(() => (closing ? Effect.void : stopRunner(entry))).pipe(
-					Effect.ensuring(Effect.sync(() => candidates.delete(entry))),
+					Effect.ensuring(Effect.sync(() => forgetExited(entry))),
 					Effect.catchCause((cause) =>
 						Effect.logError("Stopping upgrade candidate failed", cause),
 					),
@@ -2236,7 +2296,7 @@ export const makeProcessSessionRunner = (
 
 			hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
 				return Effect.sync(() => {
-					const entry = children.get(sessionId);
+					const entry = currentEntry(sessionId);
 					return (
 						entry !== undefined &&
 						Entry.countsTowardDemand(entry.lifecycle) &&
@@ -2249,7 +2309,7 @@ export const makeProcessSessionRunner = (
 				control: ProviderControlContext,
 			): Effect.Effect<ProviderControlCommandStatus, SessionFailure> {
 				return Effect.gen(function* () {
-					const entry = children.get(sessionId);
+					const entry = currentEntry(sessionId);
 					if (entry && entry.runnerId !== control.providerProcessId)
 						return "gone";
 					const unavailable = () =>
@@ -2294,7 +2354,7 @@ export const makeProcessSessionRunner = (
 								)
 							: connection.commandStatusEffect(control.commandId),
 					);
-					const current = children.get(sessionId);
+					const current = currentEntry(sessionId);
 					if (current && current.runnerId !== control.providerProcessId)
 						return "gone";
 					if (pid !== undefined && !pidAlive(pid, entry.startTime))
@@ -2315,7 +2375,7 @@ export const makeProcessSessionRunner = (
 				sessionId: string,
 			): Effect.Effect<string | undefined> {
 				return Effect.sync(() => {
-					const entry = children.get(sessionId);
+					const entry = currentEntry(sessionId);
 					return entry && Entry.canControl(entry.lifecycle)
 						? entry.runnerId
 						: undefined;
@@ -2325,7 +2385,7 @@ export const makeProcessSessionRunner = (
 				return lock
 					.withPermits(1)(
 						Effect.gen(function* () {
-							const entries = [...children.values(), ...candidates].filter(
+							const entries = attachedEntries().filter(
 								(entry) => entry.sessionId === sessionId,
 							);
 							for (const entry of entries)
@@ -2347,8 +2407,8 @@ export const makeProcessSessionRunner = (
 										yield* withEntryOutput(
 											entry,
 											Effect.gen(function* () {
-												evict(sessionId, entry);
-												candidates.delete(entry);
+												yield* evict(sessionId, entry);
+												forgetExited(entry);
 												yield* releaseEntryWaiters(entry, Cause.fail(detached));
 											}),
 										);
@@ -2386,25 +2446,162 @@ export const makeProcessSessionRunner = (
 					const recoveryPending = yield* Effect.serviceOption(
 						PendingInteractionServiceTag,
 					);
-					for (const registration of discoverAllRunners(
+					const registrations = discoverAllRunners(
 						configDir,
 						processTable,
-					)) {
-						// Runner builds predating driverKind were all Claude.
-						if ((registration.driverKind ?? "claude") !== driver.driverKind)
+					).filter(
+						(registration) =>
+							(registration.driverKind ?? "claude") === driver.driverKind &&
+							(!sessionIds || sessionIds.has(registration.sessionId)),
+					);
+					const retiredRows = receipts
+						? yield* receipts
+								.retirements()
+								.pipe(
+									Effect.mapError((cause) =>
+										runnerFailure("recover retired runners", cause),
+									),
+								)
+						: [];
+					const identities = registrations.map((registration) => ({
+						...registration,
+						candidate: registration.role === "candidate",
+						entry: undefined as RunnerChild | undefined,
+					}));
+					for (const retired of retiredRows) {
+						if (sessionIds && !sessionIds.has(retired.sessionId)) continue;
+						if (
+							identities.some(
+								(identity) => identity.runnerId === retired.runnerId,
+							)
+						)
 							continue;
-						if (registration.role === "retired") {
-							yield* settleRetiredRuns(registration);
-							watchSurvivor(registration);
+						if (retired.driverKind !== driver.driverKind) continue;
+						const adopted = yield* authority
+							.adopt([retired], "starting")
+							.pipe(
+								Effect.mapError((cause) =>
+									runnerFailure("recover retired runner", cause),
+								),
+							);
+						for (const record of adopted.survivors)
+							yield* retireRecord(
+								record,
+								runnerFailure(
+									"recover retired runner",
+									"Runner survived an earlier Stop",
+								),
+							);
+					}
+					// Legacy cursor rows have no owned_run_ids, and send_turn never
+					// stores provider_process_id. Read the host's send journal before
+					// adoption revokes a losing registration, without replaying output.
+					const cursorOwners = receipts
+						? yield* receipts
+								.owners(identities.map((identity) => identity.runnerId))
+								.pipe(
+									Effect.mapError((cause) =>
+										runnerFailure("recover runner cohort", cause),
+									),
+								)
+						: [];
+					const known = yield* Effect.forEach(identities, (identity) =>
+						Effect.gen(function* () {
+							const commands = yield* Effect.try({
+								try: () =>
+									runnerSendCommandsForProcess(
+										dirname(identity.socketPath),
+										identity.sessionId,
+										driver.driverKind,
+										identity.pid,
+									),
+								catch: (cause) =>
+									runnerFailure("recover runner journal", cause),
+							});
+							const owned =
+								sql && commands.length
+									? yield* sql<{
+											command_id: string;
+											attempt_count: number;
+											run_id: string;
+										}>`
+									SELECT command.command_id, command.attempt_count, COALESCE(run.joined_into, run.id) AS run_id
+									FROM provider_command_outbox command JOIN provider_runs run
+										ON run.id = command.run_id AND run.session_id = command.session_id
+									WHERE command.session_id = ${identity.sessionId}
+										AND command.project_key = (SELECT project_id FROM sessions WHERE id = ${identity.sessionId})
+										AND command.effect_type = 'send_turn'
+										AND command.command_id IN ${sql.in(commands.map((command) => command.commandId))}`.pipe(
+											Effect.mapError((cause) =>
+												runnerFailure("recover runner cohort", cause),
+											),
+										)
+									: [];
+							return {
+								...identity,
+								ownedRunIds: [
+									...new Set([
+										...(identity.ownedRunIds ?? []),
+										...(cursorOwners.find(
+											(owner) => owner.runnerId === identity.runnerId,
+										)?.ownedRunIds ?? []),
+										...owned
+											.filter((row) =>
+												commands.some(
+													(command) =>
+														command.commandId === row.command_id &&
+														command.attempt === row.attempt_count,
+												),
+											)
+											.map((row) => row.run_id),
+									]),
+								],
+							};
+						}),
+					);
+					// Discovery restores active process authority; hello still verifies
+					// the socket and attachment before replay. Warm candidates have no
+					// session authority until promotion, including after a restart.
+					const active = yield* authority
+						.adopt(
+							known.filter((identity) => !identity.candidate),
+							"live",
+						)
+						.pipe(
+							Effect.mapError((cause) =>
+								runnerFailure("recover runner authority", cause),
+							),
+						);
+					const warming = yield* authority
+						.adopt(
+							known.filter((identity) => identity.candidate),
+							"starting",
+						)
+						.pipe(
+							Effect.mapError((cause) =>
+								runnerFailure("recover warm runner authority", cause),
+							),
+						);
+					for (const record of [...active.survivors, ...warming.survivors])
+						yield* retireRecord(
+							record,
+							runnerFailure("recover runner", "Runner has no active authority"),
+						);
+
+					for (const registration of registrations) {
+						if (
+							!(
+								registration.role === "candidate" ? warming : active
+							).grants.has(registration.runnerId)
+						)
 							continue;
-						}
 						if (
 							sessionIds &&
 							(!sessionIds.has(registration.sessionId) ||
-								(children.get(registration.sessionId)?.runnerId ===
+								(currentEntry(registration.sessionId)?.runnerId ===
 									registration.runnerId &&
 									!Entry.isAwaitingProject(
-										children.get(registration.sessionId)?.lifecycle,
+										currentEntry(registration.sessionId)?.lifecycle,
 									)))
 						)
 							continue;
@@ -2453,7 +2650,7 @@ export const makeProcessSessionRunner = (
 						// Reattach their spool once the project's services become available.
 						if (
 							Entry.isAwaitingProject(
-								children.get(registration.sessionId)?.lifecycle,
+								currentEntry(registration.sessionId)?.lifecycle,
 							) &&
 							recovery
 						)
@@ -2470,10 +2667,13 @@ export const makeProcessSessionRunner = (
 						let abandoned =
 							(sql !== undefined && !persisted && !outstandingEnd) ||
 							registration.role === "candidate" ||
-							children.has(registration.sessionId);
+							Boolean(currentEntry(registration.sessionId));
 						const entry: RunnerChild = {
 							...registration,
-							ownedRunIds: new Set(registration.ownedRunIds),
+							ownedRunIds: new Set(
+								authority.records.get(registration.runnerId)?.identity
+									.ownedRunIds ?? registration.ownedRunIds,
+							),
 							...(outstandingEnd
 								? { registrationRoot: cleanupRoot ?? configDir }
 								: {}),
@@ -2508,10 +2708,12 @@ export const makeProcessSessionRunner = (
 											"Runners are shutting down",
 										),
 									);
-								abandoned ||= children.has(registration.sessionId);
+								abandoned ||= Boolean(currentEntry(registration.sessionId));
 								if (abandoned) transition(entry, { _tag: "MakeCandidate" });
-								if (abandoned) candidates.add(entry);
-								else children.set(registration.sessionId, entry);
+								yield* adoptEntry(
+									entry,
+									registration.role === "candidate" ? "starting" : "live",
+								);
 							}),
 						);
 						if (sql && outstandingEnd && !abandoned)
@@ -2544,8 +2746,8 @@ export const makeProcessSessionRunner = (
 							!closing &&
 							Entry.canControl(entry.lifecycle) &&
 							(entry.lifecycle.candidate
-								? candidates.has(entry)
-								: children.get(registration.sessionId) === entry)
+								? tracked(entry)
+								: currentEntry(registration.sessionId) === entry)
 								? Effect.void
 								: Effect.fail(
 										runnerFailure(
@@ -2624,8 +2826,8 @@ export const makeProcessSessionRunner = (
 								}
 								transition(entry, { _tag: "Recovered" });
 								transition(entry, { _tag: "Fail", failure });
-								evict(registration.sessionId, entry);
-								candidates.delete(entry);
+								yield* evict(registration.sessionId, entry);
+								forgetExited(entry);
 								yield* releaseEntryWaiters(entry, Cause.fail(failure));
 								return;
 							}
@@ -2662,8 +2864,8 @@ export const makeProcessSessionRunner = (
 											}
 										}),
 									);
-									evict(registration.sessionId, entry);
-									candidates.delete(entry);
+									yield* evict(registration.sessionId, entry);
+									forgetExited(entry);
 									yield* releaseEntryWaiters(
 										entry,
 										Cause.fail(abandonedFailure),
@@ -2777,7 +2979,7 @@ export const makeProcessSessionRunner = (
 												},
 												() =>
 													closing ||
-													children.get(registration.sessionId) !== entry,
+													currentEntry(registration.sessionId) !== entry,
 												runner.getNativeSessionEffect(registration.sessionId),
 												(commandId, inputId, attempt, nativeResumeFallback) => {
 													if (!driver.admitsRecoveredSends)
@@ -3056,8 +3258,8 @@ export const makeProcessSessionRunner = (
 											),
 										});
 										entry.connection?.destroy();
-										evict(registration.sessionId, entry);
-										candidates.delete(entry);
+										yield* evict(registration.sessionId, entry);
+										forgetExited(entry);
 										yield* releaseEntryWaiters(entry, exit.cause);
 									}),
 								);
@@ -3069,10 +3271,24 @@ export const makeProcessSessionRunner = (
 						Effect.sync(() => {
 							if (!sessionIds) recovering = false;
 							if (Exit.isSuccess(exit))
-								for (const [sessionId, entry] of children)
+								for (const entry of activeEntries()) {
+									const sessionId = entry.sessionId;
 									if (!sessionIds || sessionIds.has(sessionId))
 										upgrade(sessionId, entry);
+								}
 						}),
+					),
+				);
+			}
+			ownsRetirementCleanupEffect(sessionId: string, runId: string) {
+				return Effect.sync(() =>
+					[...authority.records.values()].some(
+						(record) =>
+							record.identity.sessionId === sessionId &&
+							record.cleanup?.settling === true &&
+							record.cleanup.permitsCleanup &&
+							clock.currentTimeMillisUnsafe() < record.cleanup.deadline &&
+							record.cleanup.ownedRunIds.includes(runId),
 					),
 				);
 			}
@@ -3081,34 +3297,37 @@ export const makeProcessSessionRunner = (
 				processId?: string,
 			): Effect.Effect<boolean> {
 				return Effect.sync(() => {
-					// Before hello only the spawned child's pid is known.
-					const alive = (entry: RunnerChild) => {
-						const pid = entry.pid ?? entry.child?.pid;
-						return pid !== undefined && pidAlive(pid, entry.startTime);
-					};
-					for (const entry of exiting) if (!alive(entry)) exiting.delete(entry);
-					const owns = (entry: RunnerChild | undefined) =>
-						entry?.sessionId === sessionId &&
-						(processId === undefined || entry.runnerId === processId) &&
-						alive(entry);
-					return (
-						owns(children.get(sessionId)) ||
-						(processId === undefined &&
-							[...survivors.values()].some(
-								(entry) =>
-									entry.sessionId === sessionId &&
-									pidAlive(entry.pid, entry.startTime),
-							)) ||
-						[...candidates, ...exiting].some(
-							(entry) => processId === undefined && owns(entry),
+					const records =
+						processId === undefined
+							? authority.records.values()
+							: [authority.records.get(processId)];
+					for (const record of records) {
+						if (!record || record.identity.sessionId !== sessionId) continue;
+						const runnerId = record.identity.runnerId;
+						const entry = record.identity.entry;
+						const pid = entry?.pid ?? entry?.child?.pid ?? record.identity.pid;
+						const alive =
+							pid !== undefined &&
+							pidAlive(pid, entry?.startTime ?? record.identity.startTime);
+						if (!alive && record.tag._tag === "Exiting")
+							authority.records.delete(runnerId);
+						if (
+							alive &&
+							record.identity.sessionId === sessionId &&
+							(processId === undefined ||
+								(runnerId === processId &&
+									(record.tag._tag === "Live" ||
+										record.tag._tag === "Starting")))
 						)
-					);
+							return true;
+					}
+					return false;
 				});
 			}
 
 			hasDemandEffect(sessionId: string): Effect.Effect<boolean> {
 				return Effect.sync(() => {
-					const entry = children.get(sessionId);
+					const entry = currentEntry(sessionId);
 					return (
 						entry !== undefined &&
 						Entry.countsTowardDemand(entry.lifecycle) &&
@@ -3119,7 +3338,7 @@ export const makeProcessSessionRunner = (
 
 			getAccountSwitchBlockEffect(sessionId: string, account: Account) {
 				return Effect.sync(() => {
-					const entry = children.get(sessionId);
+					const entry = currentEntry(sessionId);
 					const snapshot = entry?.upgrade.state?.snapshot;
 					if (
 						!entry ||
@@ -3163,7 +3382,7 @@ export const makeProcessSessionRunner = (
 				sessionId: string,
 			): Effect.Effect<ProviderNativeSession | undefined> {
 				return Effect.sync(() => {
-					const entry = children.get(sessionId);
+					const entry = currentEntry(sessionId);
 					const state = entry?.upgrade.state;
 					const snapshot = state?.snapshot;
 					if (!entry || !Entry.canReconfigure(entry.lifecycle) || !snapshot)
@@ -3369,7 +3588,7 @@ export const makeProcessSessionRunner = (
 									return yield* Effect.fail(
 										runnerFailure(command.type, "Runners are shutting down"),
 									);
-								const existing = children.get(sessionId);
+								const existing = currentEntry(sessionId);
 								if (
 									command.control &&
 									(!existing ||
@@ -3597,7 +3816,7 @@ export const makeProcessSessionRunner = (
 									};
 								transition(created, { _tag: "AdmitCommand" });
 								admitted = created;
-								children.set(sessionId, created);
+
 								if (turn && command.type === "send-turn") {
 									turn.runnerId = created.runnerId;
 									sinks.set(command.sinkId, turn);
@@ -3618,7 +3837,7 @@ export const makeProcessSessionRunner = (
 							const waiting = entry;
 							yield* Deferred.await(waiting.ready).pipe(
 								Effect.catch((failure) =>
-									children.get(sessionId) !== waiting && waiting.lifecycle.stop
+									currentEntry(sessionId) !== waiting && waiting.lifecycle.stop
 										? Effect.void
 										: Effect.fail(failure),
 								),
@@ -3678,7 +3897,7 @@ export const makeProcessSessionRunner = (
 							: yield* Deferred.await(entry.ready);
 					if (
 						command.control &&
-						(children.get(sessionId) !== entry ||
+						(currentEntry(sessionId) !== entry ||
 							entry.runnerId !== command.control.providerProcessId ||
 							!Entry.canControl(entry.lifecycle) ||
 							connection.closed)
@@ -3887,7 +4106,7 @@ export const makeProcessSessionRunner = (
 							yield* retireSurvivor(entry, failure, commandId);
 						}
 						// Retirement already owns bounded settlement of this runner's cohort.
-						if (retiredEntries.has(entry)) return;
+						if (entry.authorityRecord?.tag._tag === "Retired") return;
 						yield* settlement.pipe(
 							Effect.mapError((cause) =>
 								runnerFailure("settle stopped runner", cause),
@@ -3898,7 +4117,7 @@ export const makeProcessSessionRunner = (
 							: withEntryOutput(
 									entry,
 									Effect.gen(function* () {
-										evict(sessionId, entry);
+										yield* evict(sessionId, entry);
 										yield* Deferred.succeed(entry.drained, undefined);
 									}),
 								);

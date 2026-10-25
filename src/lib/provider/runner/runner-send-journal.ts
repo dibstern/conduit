@@ -31,6 +31,61 @@ interface SendRecord {
 	readonly failure?: SessionFailure;
 }
 
+const sendKey = (
+	driverKind: string,
+	sessionId: string,
+	commandId: string,
+	attempt: number,
+	fallback: boolean,
+) =>
+	createHash("sha256")
+		.update(
+			JSON.stringify([driverKind, sessionId, commandId, attempt, fallback]),
+		)
+		.digest("hex");
+
+/** Read legacy ownership before discovery can revoke a host, without replaying it. */
+export function runnerSendCommandsForProcess(
+	directory: string,
+	sessionId: string,
+	driverKind: string,
+	pid: number,
+): readonly Pick<SendRecord, "commandId" | "attempt">[] {
+	const sends = join(directory, "sends", sessionId);
+	let names: string[];
+	try {
+		names = readdirSync(sends);
+	} catch (cause) {
+		if (isRecord(cause) && cause["code"] === "ENOENT") return [];
+		throw cause;
+	}
+	const commands: Pick<SendRecord, "commandId" | "attempt">[] = [];
+	for (const name of names) {
+		if (!name.endsWith(".json")) continue;
+		try {
+			const record = JSON.parse(
+				readFileSync(join(sends, name), "utf8"),
+			) as SendRecord;
+			if (
+				record.runnerPid === pid &&
+				name ===
+					`${sendKey(driverKind, sessionId, record.commandId, record.attempt, record.nativeResumeFallback)}.json`
+			)
+				commands.push({ commandId: record.commandId, attempt: record.attempt });
+		} catch (cause) {
+			// Exclusive-create crash remnants contain no ownership evidence. A host
+			// can also acknowledge and remove a completed record during discovery.
+			if (
+				cause instanceof SyntaxError ||
+				(isRecord(cause) && cause["code"] === "ENOENT")
+			)
+				continue;
+			throw cause;
+		}
+	}
+	return commands;
+}
+
 class RunnerSendCleanupError extends Data.TaggedError(
 	"RunnerSendCleanupError",
 )<{
@@ -87,17 +142,13 @@ export class RunnerSendJournal {
 	}
 
 	private filename(commandId: string, attempt: number, fallback: boolean) {
-		const digest = createHash("sha256")
-			.update(
-				JSON.stringify([
-					this.driverKind,
-					this.sessionId,
-					commandId,
-					attempt,
-					fallback,
-				]),
-			)
-			.digest("hex");
+		const digest = sendKey(
+			this.driverKind,
+			this.sessionId,
+			commandId,
+			attempt,
+			fallback,
+		);
 		return join(this.directory, `${digest}.json`);
 	}
 

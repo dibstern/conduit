@@ -246,6 +246,11 @@ export interface SessionRunner {
 	/** Wake inbox drains after native activity ends, even without a stored event. */
 	readonly turnEnds?: Effect.Effect<Stream.Stream<string>, never, Scope.Scope>;
 	readonly recoverEffect?: Effect.Effect<void, SessionFailure>;
+	/** Only a running cleanup before its grant deadline excludes orphan recovery. */
+	readonly ownsRetirementCleanupEffect?: (
+		sessionId: string,
+		runId: string,
+	) => Effect.Effect<boolean>;
 	/** Without an ID, includes retired survivors; with one, checks the current owner. */
 	hasLiveProcessEffect(
 		sessionId: string,

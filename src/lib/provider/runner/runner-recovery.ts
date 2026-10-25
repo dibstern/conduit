@@ -8,6 +8,7 @@ import {
 	ClaudeEventPersistEffectTag,
 	makeClaudeEventPersistEffect,
 } from "../../persistence/effect/claude-event-persist-effect.js";
+import { currentCommitGuard } from "../../persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
 	makeEventStoreEffect,
@@ -186,7 +187,7 @@ export const recoverRunnerCommands = <T extends DurableSessionTurn>(
 		});
 	});
 
-/** A live runner, including a candidate or retiree, owns its session's admissions. */
+/** Attached runners claim admissions; live retirement cleanup owns its captured runs. */
 export const settleUnclaimedRunnerCommands = <E>(
 	sql: SqlClient.SqlClient,
 	claimedSessions: ReadonlySet<string>,
@@ -209,6 +210,10 @@ export const settleUnclaimedRunnerCommands = <E>(
 	) => Effect.Effect<RunnerRecoveryDependencies | undefined>,
 	sessionIds?: ReadonlySet<string>,
 	ownsPendingSend?: OrchestrationEngine["ownsPendingSend"],
+	ownsRetirementCleanup?: (
+		sessionId: string,
+		runId: string,
+	) => Effect.Effect<boolean, SqlError>,
 ) =>
 	Effect.gen(function* () {
 		for (const row of yield* runningRunnerCommands(
@@ -222,6 +227,21 @@ export const settleUnclaimedRunnerCommands = <E>(
 		)) {
 			if (sessionIds && !sessionIds.has(row.session_id)) continue;
 			if (claimedSessions.has(row.session_id)) continue;
+			const unclaimed = Effect.suspend(() =>
+				row.run_id && ownsRetirementCleanup
+					? ownsRetirementCleanup(row.session_id, row.run_id).pipe(
+							Effect.flatMap((owned) =>
+								owned ? Effect.interrupt : Effect.void,
+							),
+						)
+					: Effect.void,
+			);
+			if (
+				row.run_id &&
+				ownsRetirementCleanup &&
+				(yield* ownsRetirementCleanup(row.session_id, row.run_id))
+			)
+				continue;
 			const recovery = yield* recoveryForSession?.(row.session_id) ??
 				Effect.succeed(undefined);
 			if (recoveryForSession && !recovery) continue;
@@ -231,6 +251,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 				code: "runner_stopped",
 				retryable: false,
 			};
+			const inheritedCommitGuard = yield* currentCommitGuard;
 			const settled = yield* failTurn(
 				runnerSinkId(
 					row.command_id,
@@ -249,6 +270,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 				},
 				failure,
 				Effect.gen(function* () {
+					yield* unclaimed;
 					// Acquire the write lock and compare the snapshot in the same
 					// ingestion transaction that would append the orphan terminal.
 					const [current] =
@@ -269,6 +291,12 @@ export const settleUnclaimedRunnerCommands = <E>(
 						return yield* Effect.interrupt;
 				}),
 			).pipe(
+				Effect.provideService(
+					currentCommitGuard,
+					inheritedCommitGuard.pipe(
+						Effect.andThen(unclaimed.pipe(Effect.orDie)),
+					),
+				),
 				Effect.as(true),
 				Effect.catchCause((cause) =>
 					Failure.isInterruptedOnly(cause)

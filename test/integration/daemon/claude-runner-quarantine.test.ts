@@ -66,6 +66,19 @@ function ownership(harness: ProcessHarness, sessionId: string) {
 	}
 }
 
+function retirement(harness: ProcessHarness, runnerId: string) {
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		return db
+			.prepare(
+				"SELECT retired_at, attachment_id, pid FROM claude_runner_cursors WHERE runner_id = ?",
+			)
+			.get(runnerId);
+	} finally {
+		db.close();
+	}
+}
+
 describe("runner retirement through browser RPC", () => {
 	it("releases a failed forced kill and resumes on a fresh runner", async () => {
 		const evidence: Record<string, unknown> = { passed: false };
@@ -129,12 +142,14 @@ if (!/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
 				commandId: randomUUID(),
 			});
 			await pending;
-			const retired = discoverRunners(
-				harness.projectDir,
-				harness.configDir,
-			).find((entry) => entry.runnerId === owner.runnerId);
-			evidence["retired"] = retired;
-			expect(retired).toMatchObject({ role: "retired", pid: owner.pid });
+			await vi.waitFor(() =>
+				expect(retirement(harness, owner.runnerId)).toEqual({
+					retired_at: expect.any(Number),
+					attachment_id: "",
+					pid: owner.pid,
+				}),
+			);
+			evidence["retired"] = retirement(harness, owner.runnerId);
 			expect(() => process.kill(owner.pid, 0)).not.toThrow();
 			expect(ownership(harness, sessionId).runs).not.toContainEqual(
 				expect.objectContaining({ status: "running" }),
@@ -147,7 +162,8 @@ if (!/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
 				harness.projectDir,
 				harness.configDir,
 			).find(
-				(entry) => entry.sessionId === sessionId && entry.role !== "retired",
+				(entry) =>
+					entry.sessionId === sessionId && entry.runnerId !== owner.runnerId,
 			);
 			assert(replacement);
 			expect(replacement.pid).not.toBe(owner.pid);
@@ -232,10 +248,12 @@ syncBuiltinESMExports();
 			await harness.restart();
 			let restored = await harness.connect(sessionId);
 			expect(harness.logTail).toContain("Retired surviving runner");
-			expect(
-				discoverRunners(harness.projectDir, harness.configDir),
-			).toContainEqual(
-				expect.objectContaining({ runnerId: owner.runnerId, role: "retired" }),
+			await vi.waitFor(() =>
+				expect(retirement(harness, owner.runnerId)).toEqual({
+					retired_at: expect.any(Number),
+					attachment_id: "",
+					pid: owner.pid,
+				}),
 			);
 			expect(ownership(harness, sessionId).runs).not.toContainEqual(
 				expect.objectContaining({ status: "running" }),
@@ -264,7 +282,8 @@ syncBuiltinESMExports();
 				harness.projectDir,
 				harness.configDir,
 			).find(
-				(entry) => entry.sessionId === sessionId && entry.role !== "retired",
+				(entry) =>
+					entry.sessionId === sessionId && entry.runnerId !== owner.runnerId,
 			);
 			assert(replacement);
 			expect(replacement.pid).not.toBe(owner.pid);
@@ -341,9 +360,11 @@ syncBuiltinESMExports();
 				harness.projectDir,
 				harness.configDir,
 			);
-			expect(registrations).toContainEqual(
-				expect.objectContaining({ runnerId: owner.runnerId, role: "retired" }),
-			);
+			expect(retirement(harness, owner.runnerId)).toEqual({
+				retired_at: expect.any(Number),
+				attachment_id: "",
+				pid: owner.pid,
+			});
 			expect(registrations).toContainEqual(
 				expect.objectContaining({
 					runnerId: replacement.runnerId,
@@ -454,12 +475,10 @@ syncBuiltinESMExports();`
 			);
 			await harness.restart();
 			const restored = await harness.connect(sessionId);
-			expect(
-				discoverRunners(harness.projectDir, harness.configDir),
-			).toContainEqual(
-				expect.objectContaining({
-					runnerId: owner.runnerId,
-					role: "retired",
+			await vi.waitFor(() =>
+				expect(retirement(harness, owner.runnerId)).toEqual({
+					retired_at: expect.any(Number),
+					attachment_id: "",
 					pid: owner.pid,
 				}),
 			);

@@ -157,11 +157,36 @@ const deployedRedesignMigrationIds = new Map<string, readonly number[]>([
 const runnerTables: Readonly<Record<string, string>> = {
 	claude_runner_cursors: `CREATE TABLE claude_runner_cursors (
 		runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
-		result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '')`,
+		result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '',
+		retired_at INTEGER, pid INTEGER, start_time TEXT, owned_run_ids TEXT NOT NULL DEFAULT '[]',
+		session_id TEXT NOT NULL DEFAULT '', signalled INTEGER NOT NULL DEFAULT 0,
+		driver_kind TEXT NOT NULL DEFAULT 'claude')`,
 	claude_runner_permission_replies: `CREATE TABLE claude_runner_permission_replies (
 		session_id TEXT NOT NULL, request_id TEXT NOT NULL, response_json TEXT NOT NULL,
 		PRIMARY KEY (session_id, request_id))`,
 };
+
+// Runner cursor upgrades deliberately live outside the event-store migration
+// ledger. Normalise both the private source copy and the destination before the
+// importer's exact column comparison, retaining old checkpoints and retirements.
+function upgradeRunnerCursorColumns(db: DatabaseSync) {
+	if (!tables(db, "main").includes("claude_runner_cursors")) return;
+	const existing = new Set(
+		columns(db, "main", "claude_runner_cursors").map(({ name }) => name),
+	);
+	for (const [name, ddl] of Object.entries({
+		attachment_id: "TEXT NOT NULL DEFAULT ''",
+		retired_at: "INTEGER",
+		pid: "INTEGER",
+		start_time: "TEXT",
+		owned_run_ids: "TEXT NOT NULL DEFAULT '[]'",
+		session_id: "TEXT NOT NULL DEFAULT ''",
+		signalled: "INTEGER NOT NULL DEFAULT 0",
+		driver_kind: "TEXT NOT NULL DEFAULT 'claude'",
+	}))
+		if (!existing.has(name))
+			db.exec(`ALTER TABLE claude_runner_cursors ADD COLUMN ${name} ${ddl}`);
+}
 // Tables older builds created and later stopped using without dropping them.
 // Nothing reads them, so the import leaves them behind instead of rejecting.
 const retiredTables = [
@@ -590,7 +615,7 @@ function sessionIds(db: DatabaseSync, schema: string): string {
 				)
 				.map(
 					({ name }) =>
-						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}${table === "input_drafts" ? " WHERE kind = 'session'" : ""}`,
+						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}${table === "input_drafts" ? " WHERE kind = 'session'" : table === "claude_runner_cursors" ? " WHERE session_id <> ''" : ""}`,
 				),
 		)
 		.join(" UNION ");
@@ -951,6 +976,7 @@ function importOne(
 		const result = transaction(db, () => {
 			verifyStore(db, "main", project);
 			const names = verifySource(db, "source", project, true);
+			upgradeRunnerCursorColumns(db);
 			for (const [table, ddl] of Object.entries(runnerTables)) {
 				if (!names.includes(table)) continue;
 				if (!tables(db, "main").includes(table)) db.exec(ddl);
@@ -1191,6 +1217,7 @@ function withNormalisedSource(
 									);
 							}
 						}
+						upgradeRunnerCursorColumns(copy);
 					} finally {
 						copy.close();
 					}

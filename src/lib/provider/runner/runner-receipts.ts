@@ -1,13 +1,31 @@
-import { Context, type Deferred, Effect } from "effect";
+import { Clock, Context, type Deferred, Effect, Schedule } from "effect";
 import type { SqlClient } from "effect/sql";
+import {
+	flushRunnerRetirements,
+	pruneRunnerRetirement,
+	queueRunnerRetirement,
+	type RunnerRetirement,
+} from "../../persistence/effect/commit-and-signal.js";
 import type { PermissionResponse } from "../types.js";
 import type { SessionOutputReply } from "./session-runner.js";
+
+export type { RunnerRetirement };
+
+export interface RunnerCursorIdentity {
+	readonly sessionId: string;
+	readonly driverKind?: string | undefined;
+	readonly pid?: number | undefined;
+	readonly startTime?: string | undefined;
+	readonly ownedRunIds?: readonly string[] | undefined;
+}
 
 /** Only the server consumes this context and writes the durable checkpoint. */
 export interface RunnerOutputReceipt {
 	readonly runnerId: string;
 	readonly sequence: number;
 	readonly attachmentId: string;
+	/** Accepted Run ownership commits atomically with this output checkpoint. */
+	readonly ownedRunId?: string | undefined;
 	readonly committed: Deferred.Deferred<void>;
 	/** Called only after this receipt claims and commits its event transaction. */
 	readonly onCommitted?: (() => void) | undefined;
@@ -42,13 +60,31 @@ export const makeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 	Effect.gen(function* () {
 		yield* sql`CREATE TABLE IF NOT EXISTS claude_runner_cursors (
 		runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, result_json TEXT NOT NULL DEFAULT '{}',
-		attachment_id TEXT NOT NULL DEFAULT ''
+		attachment_id TEXT NOT NULL DEFAULT '', retired_at INTEGER,
+		pid INTEGER, start_time TEXT, owned_run_ids TEXT NOT NULL DEFAULT '[]',
+		session_id TEXT NOT NULL DEFAULT '', signalled INTEGER NOT NULL DEFAULT 0,
+		driver_kind TEXT NOT NULL DEFAULT 'claude'
 	)`;
 		const columns = yield* sql<{
 			name: string;
 		}>`PRAGMA table_info(claude_runner_cursors)`;
 		if (!columns.some(({ name }) => name === "attachment_id"))
 			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN attachment_id TEXT NOT NULL DEFAULT ''`;
+		if (!columns.some(({ name }) => name === "retired_at"))
+			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN retired_at INTEGER`;
+		if (!columns.some(({ name }) => name === "pid"))
+			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN pid INTEGER`;
+		if (!columns.some(({ name }) => name === "start_time"))
+			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN start_time TEXT`;
+		if (!columns.some(({ name }) => name === "owned_run_ids"))
+			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN owned_run_ids TEXT NOT NULL DEFAULT '[]'`;
+		// Retired rows must remain recoverable after their registration vanishes.
+		if (!columns.some(({ name }) => name === "session_id"))
+			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`;
+		if (!columns.some(({ name }) => name === "signalled"))
+			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN signalled INTEGER NOT NULL DEFAULT 0`;
+		if (!columns.some(({ name }) => name === "driver_kind"))
+			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN driver_kind TEXT NOT NULL DEFAULT 'claude'`;
 		yield* createRunnerPermissionReplies(sql);
 		const read = (runnerId: string) =>
 			sql<{
@@ -64,12 +100,103 @@ export const makeRunnerReceiptStore = (sql: SqlClient.SqlClient) =>
 			);
 		return {
 			read,
+			owners: (runnerIds: readonly string[]) =>
+				runnerIds.length === 0
+					? Effect.succeed([])
+					: sql<{
+							runner_id: string;
+							owned_run_ids: string;
+						}>`SELECT runner_id, owned_run_ids
+					FROM claude_runner_cursors WHERE runner_id IN ${sql.in(runnerIds)}`.pipe(
+							Effect.map((rows) =>
+								rows.map((row) => ({
+									runnerId: row.runner_id,
+									ownedRunIds: JSON.parse(
+										row.owned_run_ids,
+									) as readonly string[],
+								})),
+							),
+						),
+			retirements: (runnerIds?: readonly string[]) =>
+				sql<{
+					runner_id: string;
+					session_id: string;
+					driver_kind: string;
+					pid: number | null;
+					start_time: string | null;
+					owned_run_ids: string;
+					retired_at: number;
+					signalled: number;
+				}>`SELECT runner_id, session_id, driver_kind, pid, start_time, owned_run_ids, retired_at, signalled
+					FROM claude_runner_cursors WHERE retired_at IS NOT NULL`.pipe(
+					Effect.map((rows): readonly RunnerRetirement[] =>
+						rows
+							.filter((row) => !runnerIds || runnerIds.includes(row.runner_id))
+							.map((row) => ({
+								runnerId: row.runner_id,
+								sessionId: row.session_id,
+								driverKind: row.driver_kind,
+								...(row.pid === null ? {} : { pid: row.pid }),
+								...(row.start_time === null
+									? {}
+									: { startTime: row.start_time }),
+								ownedRunIds: JSON.parse(row.owned_run_ids) as readonly string[],
+								retiredAt: row.retired_at,
+								signalled: row.signalled !== 0,
+							})),
+					),
+				),
+			retire: (
+				identity: RunnerCursorIdentity & {
+					readonly runnerId: string;
+					readonly retiredAt?: number | undefined;
+					readonly signalled?: boolean | undefined;
+				},
+			) =>
+				Effect.gen(function* () {
+					const retiredAt =
+						identity.retiredAt ?? (yield* Clock.currentTimeMillis);
+					queueRunnerRetirement(sql, {
+						...identity,
+						ownedRunIds: identity.ownedRunIds ?? [],
+						driverKind: identity.driverKind ?? "claude",
+						retiredAt,
+						signalled: identity.signalled ?? false,
+					});
+					yield* flushRunnerRetirements(sql).pipe(
+						Effect.tapError((error) =>
+							Effect.logWarning(
+								"Runner retirement flush failed; retrying",
+								error,
+							),
+						),
+						Effect.retry({ schedule: Schedule.spaced("1 second") }),
+						// A detached fiber otherwise inherits its caller's transaction
+						// connection after that transaction has committed or rolled back.
+						Effect.updateContext((context: Context.Context<never>) =>
+							Context.omit(sql.transactionService)(context),
+						),
+						Effect.forkDetach,
+					);
+				}),
+			pruneRetired: (runnerId: string) => pruneRunnerRetirement(sql, runnerId),
 			// Atomically claim and read the cursor without masked transaction acquisition.
-			attach: (runnerId: string, attachmentId: string) =>
+			attach: (
+				runnerId: string,
+				attachmentId: string,
+				identity?: RunnerCursorIdentity,
+			) =>
 				sql<{
 					sequence: number;
 					result_json: string;
-				}>`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id) VALUES (${runnerId}, 0, ${attachmentId}) ON CONFLICT(runner_id) DO UPDATE SET attachment_id = excluded.attachment_id
+				}>`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, pid, start_time, owned_run_ids, driver_kind)
+					VALUES (${runnerId}, 0, ${attachmentId}, ${identity?.sessionId ?? ""}, ${identity?.pid ?? null}, ${identity?.startTime ?? null}, ${JSON.stringify(identity?.ownedRunIds ?? [])}, ${identity?.driverKind ?? "claude"})
+					ON CONFLICT(runner_id) DO UPDATE SET attachment_id = excluded.attachment_id,
+					session_id = COALESCE(NULLIF(excluded.session_id, ''), claude_runner_cursors.session_id),
+					pid = COALESCE(excluded.pid, claude_runner_cursors.pid), start_time = COALESCE(excluded.start_time, claude_runner_cursors.start_time),
+					owned_run_ids = CASE WHEN ${identity?.ownedRunIds !== undefined} THEN excluded.owned_run_ids ELSE claude_runner_cursors.owned_run_ids END,
+					driver_kind = CASE WHEN ${identity?.driverKind !== undefined} THEN excluded.driver_kind ELSE claude_runner_cursors.driver_kind END
+					WHERE claude_runner_cursors.retired_at IS NULL
 				RETURNING sequence, result_json`.pipe(
 					Effect.map((rows) => ({
 						sequence: rows[0]?.sequence ?? 0,
@@ -100,7 +227,10 @@ export const commitRunnerOutput = (
 	Effect.suspend(() =>
 		receipt.isCurrent?.() === false
 			? Effect.succeed(false)
-			: sql`UPDATE claude_runner_cursors SET sequence = ${receipt.sequence}, result_json = '{}'
+			: sql`UPDATE claude_runner_cursors SET sequence = ${receipt.sequence}, result_json = '{}',
+		owned_run_ids = CASE WHEN ${receipt.ownedRunId ?? null} IS NULL
+			OR EXISTS (SELECT 1 FROM json_each(owned_run_ids) WHERE value = ${receipt.ownedRunId ?? null})
+			THEN owned_run_ids ELSE json_insert(owned_run_ids, '$[#]', ${receipt.ownedRunId ?? null}) END
 		WHERE runner_id = ${receipt.runnerId} AND attachment_id = ${receipt.attachmentId}
 		AND sequence = ${receipt.sequence - 1}
 		RETURNING sequence`.pipe(

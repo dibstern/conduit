@@ -2600,7 +2600,36 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						return Effect.void;
 					// Stop captured no foreground run. Notification activity can still
 					// hold the query, but cannot reopen its completed durable owner.
-					yield* this.disposeSessionEffect(ctx, "Stopped by the user");
+					const sink = ctx.eventSink;
+					const runId = ctx.acceptedOutputOwner?.runId;
+					// 4d3d157b accepts wake busy on an ended run. Close its stream,
+					// then clear that activity before releasing the output sink.
+					this.sinks.retainSink(sink);
+					yield* this.disposeSessionEffect(ctx, "Stopped by the user").pipe(
+						Effect.andThen(() =>
+							sink && runId
+								? sink
+										.push(
+											claudeRuntimeEvent(
+												"session.status",
+												sessionId,
+												{ sessionId, status: "idle" },
+												runId,
+											),
+										)
+										.pipe(
+											Effect.mapError(
+												(cause) =>
+													new ClaudeBoundaryError({
+														operation: "stopWakeActivity",
+														cause,
+													}),
+											),
+										)
+								: Effect.void,
+						),
+						Effect.ensuring(this.sinks.releaseSinkEffect(sink)),
+					);
 					return Effect.void;
 				}
 				// A queued lifecycle start can change the active admission while Stop

@@ -1,4 +1,12 @@
-import { Context, Data, Effect, Option, Ref, Semaphore } from "effect";
+import {
+	Context,
+	Data,
+	Effect,
+	Option,
+	Ref,
+	Scheduler,
+	Semaphore,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
@@ -145,16 +153,139 @@ export interface CommitAndSignal {
 // client, not an individual writer. Weak keys retain no closed persistence stack.
 const commitPermits = new WeakMap<SqlClient.SqlClient, Semaphore.Semaphore>();
 
-const makeCommitAndSignalWithStore = Effect.fn(function* (
-	eventStore: UnboundEventStoreEffect & { readonly projectId?: string },
-) {
-	const sql = yield* SqlClient.SqlClient;
+export interface RunnerRetirement {
+	readonly runnerId: string;
+	readonly sessionId: string;
+	readonly driverKind: string;
+	readonly pid?: number | undefined;
+	readonly startTime?: string | undefined;
+	readonly ownedRunIds: readonly string[];
+	readonly retiredAt: number;
+	readonly signalled: boolean;
+}
+
+const pendingRunnerRetirements = new WeakMap<
+	SqlClient.SqlClient,
+	Map<string, RunnerRetirement>
+>();
+
+export const hasPendingRunnerRetirement = (
+	sql: SqlClient.SqlClient,
+	sessionId: string,
+	runId: string,
+) =>
+	[...(pendingRunnerRetirements.get(sql)?.values() ?? [])].some(
+		(retirement) =>
+			retirement.sessionId === sessionId &&
+			retirement.ownedRunIds.includes(runId),
+	);
+
+const commitPermit = (sql: SqlClient.SqlClient) => {
 	let permit = commitPermits.get(sql);
 	if (permit === undefined) {
 		permit = Semaphore.makeUnsafe(1);
 		commitPermits.set(sql, permit);
 	}
-	const withPermit = permit.withPermits(1);
+	return permit;
+};
+
+/** Synchronous: revocation must never wait for the connection or its permit. */
+export const queueRunnerRetirement = (
+	sql: SqlClient.SqlClient,
+	retirement: RunnerRetirement,
+) => {
+	let pending = pendingRunnerRetirements.get(sql);
+	if (pending === undefined) {
+		pending = new Map();
+		pendingRunnerRetirements.set(sql, pending);
+	}
+	// A crash before either this queue's standalone write or the seam's final
+	// hook commits can still re-adopt the runner. Once either commits, retired_at
+	// is the sole durable authority; the window is approximately one permit wait.
+	pending.set(retirement.runnerId, {
+		...retirement,
+		ownedRunIds: [...retirement.ownedRunIds],
+	});
+};
+
+const flushPendingRunnerRetirements = (sql: SqlClient.SqlClient) =>
+	Effect.gen(function* () {
+		const flushed: RunnerRetirement[] = [];
+		const applied = new Set<RunnerRetirement>();
+		while (true) {
+			const pending = [
+				...(pendingRunnerRetirements.get(sql)?.values() ?? []),
+			].filter((retirement) => !applied.has(retirement));
+			if (pending.length === 0) return flushed;
+			for (const retirement of pending) {
+				yield* sql`INSERT INTO claude_runner_cursors
+					(runner_id, sequence, attachment_id, retired_at, session_id, pid, start_time, owned_run_ids, signalled, driver_kind)
+					VALUES (${retirement.runnerId}, 0, '', ${retirement.retiredAt}, ${retirement.sessionId}, ${retirement.pid ?? null}, ${retirement.startTime ?? null}, ${JSON.stringify(retirement.ownedRunIds)}, ${retirement.signalled ? 1 : 0}, ${retirement.driverKind})
+					ON CONFLICT(runner_id) DO UPDATE SET
+					retired_at = COALESCE(claude_runner_cursors.retired_at, excluded.retired_at), attachment_id = '',
+					session_id = excluded.session_id, pid = excluded.pid, start_time = excluded.start_time,
+					owned_run_ids = excluded.owned_run_ids, signalled = MAX(claude_runner_cursors.signalled, excluded.signalled),
+					driver_kind = excluded.driver_kind`;
+				applied.add(retirement);
+				flushed.push(retirement);
+			}
+		}
+	});
+
+const clearCommittedRunnerRetirements = (
+	sql: SqlClient.SqlClient,
+	flushed: readonly RunnerRetirement[],
+) => {
+	const pending = pendingRunnerRetirements.get(sql);
+	for (const retirement of flushed)
+		if (pending?.get(retirement.runnerId) === retirement)
+			pending.delete(retirement.runnerId);
+};
+
+/** Standalone retirement flushes share the seam's permit and clear after COMMIT. */
+export const flushRunnerRetirements = (sql: SqlClient.SqlClient) =>
+	commitPermit(sql)
+		.withPermits(1)(
+			sql.withTransaction(flushPendingRunnerRetirements(sql)).pipe(
+				Effect.provideService(Scheduler.PreventSchedulerYield, true),
+				Effect.tap((flushed) =>
+					Effect.sync(() => clearCommittedRunnerRetirements(sql, flushed)),
+				),
+				Effect.asVoid,
+			),
+		)
+		.pipe(Effect.uninterruptible);
+
+/** A confirmed exit cannot be followed by a delayed standalone re-insert. */
+export const pruneRunnerRetirement = (
+	sql: SqlClient.SqlClient,
+	runnerId: string,
+) =>
+	commitPermit(sql)
+		.withPermits(1)(
+			sql
+				.withTransaction(
+					Effect.gen(function* () {
+						const flushed = yield* flushPendingRunnerRetirements(sql);
+						yield* sql`DELETE FROM claude_runner_cursors WHERE runner_id = ${runnerId} AND retired_at IS NOT NULL`;
+						return flushed;
+					}),
+				)
+				.pipe(
+					Effect.provideService(Scheduler.PreventSchedulerYield, true),
+					Effect.tap((flushed) =>
+						Effect.sync(() => clearCommittedRunnerRetirements(sql, flushed)),
+					),
+					Effect.asVoid,
+				),
+		)
+		.pipe(Effect.uninterruptible);
+
+const makeCommitAndSignalWithStore = Effect.fn(function* (
+	eventStore: UnboundEventStoreEffect & { readonly projectId?: string },
+) {
+	const sql = yield* SqlClient.SqlClient;
+	const withPermit = commitPermit(sql).withPermits(1);
 	const withCommitPermit = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 		contentionMetrics
 			? contentionMetrics.withCommitPermit(withPermit, effect)
@@ -204,7 +335,8 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 								.recover()
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 						}
-						const result = yield* sql.withTransaction(
+						let flushedRetirements: readonly RunnerRetirement[] = [];
+						const transaction = sql.withTransaction(
 							Effect.gen(function* () {
 								const seam = Option.getOrUndefined(
 									yield* Effect.serviceOption(sql.transactionService),
@@ -363,9 +495,18 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 								).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 								yield* options.beforeCommit ?? Effect.void;
 								yield* yield* currentCommitGuard;
+								flushedRetirements = yield* flushPendingRunnerRetirements(sql);
 								return result;
 							}),
 						);
+						const result = yield* transaction.pipe(
+							// SQL's COMMIT runs in withTransaction's finalizer, after the
+							// body context is restored. Cover the whole wrapper so no
+							// automatic yield can admit a revocation after the final flush.
+							// Explicit async body waits still suspend normally.
+							Effect.provideService(Scheduler.PreventSchedulerYield, true),
+						);
+						clearCommittedRunnerRetirements(sql, flushedRetirements);
 						observeTurnTimelineCommit(stored);
 						const { stamped, removed, collections } = mergeTouches(
 							advances.map((advance) => ({

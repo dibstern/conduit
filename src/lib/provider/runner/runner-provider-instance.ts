@@ -249,7 +249,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			const sql = yield* SqlClient.SqlClient;
 			// An in-process runner's turns ended with the relay that ran them, so
 			// every running command is unclaimed. Runner processes may outlive it.
-			let claimed = new Set<string>();
+			const claimed = new Set<string>();
 			if (this.runner.recoverEffect) {
 				this.recoveredSink = (sessionId, sinkId) =>
 					Effect.gen({ self: this }, function* () {
@@ -284,15 +284,16 @@ export class RunnerProviderInstance implements ProviderInstance {
 				);
 				// Discovery errors are not proof that a running command has no owner.
 				if (!registrations) return;
-				claimed = new Set(
-					registrations
-						.filter(
-							(runner) =>
-								runner.driverKind === this.providerId &&
-								runner.role !== "retired",
-						)
-						.map((runner) => runner.sessionId),
-				);
+				for (const runner of registrations) {
+					if (
+						runner.driverKind === this.providerId &&
+						(yield* this.runner.hasLiveProcessEffect(
+							runner.sessionId,
+							runner.runnerId,
+						))
+					)
+						claimed.add(runner.sessionId);
+				}
 			}
 			const accounts = yield* this.deps.accounts;
 			const sessions = yield* sql<{
@@ -402,6 +403,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 				recoveryForSession,
 				sessionIds,
 				ownsPendingSend,
+				(sessionId, runId) =>
+					this.runner.ownsRetirementCleanupEffect?.(sessionId, runId) ??
+					Effect.succeed(false),
 			);
 		});
 

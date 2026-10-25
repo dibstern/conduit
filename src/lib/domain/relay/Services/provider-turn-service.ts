@@ -271,16 +271,8 @@ const makeProviderTurnService = Effect.gen(function* () {
 					targetProviderId: target.provider_id,
 					providerProcessId: target.provider_process_id,
 				});
-				// The runner's confirmed-exit path owns settlement, including sends
-				// whose provider intake never arrived.
-				if (yield* running)
-					return yield* new ProviderInstanceFailure({
-						providerId: target.provider_id,
-						operation: "interrupt_turn",
-						cause: new Error(
-							"Stop unconfirmed: provider process loss was not confirmed",
-						),
-					});
+				// Release is final even if a survivor remains. Retirement settles its
+				// captured cohort detached; Stop must not wait on that SQL work.
 				return;
 			}
 			yield* settleSessionRuns(

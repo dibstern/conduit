@@ -94,10 +94,18 @@ describe("durable controls on retired runners", () => {
 				{ timeout: 15_000 },
 			);
 			expect(harness.logTail).toContain("Retired surviving runner");
-			expect(
-				discoverRunners(harness.projectDir, harness.configDir),
-			).toContainEqual(
-				expect.objectContaining({ runnerId: runner.runnerId, role: "retired" }),
+			await vi.waitFor(() =>
+				expect(
+					store
+						.prepare(
+							"SELECT retired_at, attachment_id, pid FROM claude_runner_cursors WHERE runner_id = ?",
+						)
+						.get(runner.runnerId),
+				).toEqual({
+					retired_at: expect.any(Number),
+					attachment_id: "",
+					pid: runner.pid,
+				}),
 			);
 			expect(() => process.kill(runner.pid, 0)).not.toThrow();
 			evidence["promptsBeforeReplacement"] = store
@@ -126,7 +134,8 @@ describe("durable controls on retired runners", () => {
 				harness.projectDir,
 				harness.configDir,
 			).find(
-				(entry) => entry.sessionId === sessionId && entry.role !== "retired",
+				(entry) =>
+					entry.sessionId === sessionId && entry.runnerId !== runner.runnerId,
 			);
 			assert(replacement);
 			expect(replacement.pid).not.toBe(runner.pid);

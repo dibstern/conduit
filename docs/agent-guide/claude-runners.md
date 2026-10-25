@@ -105,14 +105,19 @@ that session. Undelivered output can be lost on full stop; the SDK transcript
 retains the conversation history.
 
 Forced stop sends SIGTERM, then SIGKILL after three seconds, with a short exit
-deadline. A survivor loses its socket, output sinks and Run ownership. Its
-registration is durably retired; the next send starts a fresh runner resuming
-the same native conversation. The manager retries SIGKILL at 10, 30 and 60
+deadline. RunnerAuthority revokes a survivor synchronously and queues its
+set-only `claude_runner_cursors.retired_at` tombstone, clearing its attachment.
+Admission and sinks release immediately; run, prompt and control settlement
+runs detached under a cleanup grant that expires after about three seconds.
+Retirement never waits for SQL: a standalone write or the next write-seam commit
+flushes the tombstone. The next send starts a fresh runner resuming the same
+native conversation. The manager retries SIGKILL at 10, 30 and 60
 seconds after retirement, only after verifying the PID and its recorded start
 time. Gone, reused and zombie PIDs count as exited. A survivor still present
 after the third retry produces one session-scoped transcript notice, unless
-the session was deleted or archived. Restart retries retired registrations
-without adopting them. When multiple active registrations claim one session,
+the session was deleted or archived. Restart retries retired cursor rows,
+including those without a registration, without adopting them or replaying
+their spooled output. When multiple active registrations claim one session,
 the newer wins and the older retires. A live survivor still protects its
 workspace from cleanup.
 

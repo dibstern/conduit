@@ -92,6 +92,9 @@ it.each([
 		const sessionId = sessions[0];
 		if (!sessionId) throw new Error("Missing retired owner");
 		db = new Database(fixture.daemonStorePath());
+		const retirement = db.prepare<[string]>(
+			"SELECT retired_at, attachment_id, pid FROM claude_runner_cursors WHERE runner_id = ?",
+		);
 		const turn = db.prepare<[string], { state: string }>(
 			"SELECT state FROM turns WHERE session_id = ? ORDER BY rowid DESC LIMIT 1",
 		);
@@ -111,20 +114,17 @@ it.each([
 		await fixture.restart({ serviceEnvironment });
 		await vi.waitFor(
 			() =>
-				expect(
-					discoverRunners(fixture.projectDir, fixture.configDir).find(
-						(entry) => entry.runnerId === runner.runnerId,
-					)?.role,
-				).toBe("retired"),
+				expect(retirement.get(runner.runnerId)).toEqual({
+					retired_at: expect.any(Number),
+					attachment_id: "",
+					pid: runner.pid,
+				}),
 			{ timeout: 20_000 },
 		);
 		expect(rows(`${fault}.ndjson`)).toHaveLength(1);
 		expect(rows(`${fault}.attempts.ndjson`)).toHaveLength(5);
-		expect(
-			discoverRunners(fixture.projectDir, fixture.configDir).find(
-				(entry) => entry.runnerId === runner.runnerId,
-			),
-		).toMatchObject({ role: "retired" });
+		const retired = retirement.get(runner.runnerId);
+		evidence["retiredCursor"] = retired;
 		expect(existsSync(`${runner.socketPath}.spool`)).toBe(true);
 		expect(() => process.kill(runner.pid, 0)).not.toThrow();
 		evidence["restoredAttachmentDrops"] = rows(`${fault}.ndjson`);
@@ -133,21 +133,12 @@ it.each([
 		await fixture.terminate();
 		await fixture.restart({ serviceEnvironment });
 		await vi.waitFor(
-			() =>
-				expect(
-					discoverRunners(fixture.projectDir, fixture.configDir).find(
-						(entry) => entry.runnerId === runner.runnerId,
-					)?.role,
-				).toBe("retired"),
+			() => expect(retirement.get(runner.runnerId)).toEqual(retired),
 			{ timeout: 20_000 },
 		);
 		expect(rows(`${fault}.attempts.ndjson`)).toHaveLength(5);
 		expect(rows(`${fault}.ndjson`)).toHaveLength(1);
-		expect(
-			discoverRunners(fixture.projectDir, fixture.configDir).find(
-				(entry) => entry.runnerId === runner.runnerId,
-			),
-		).toMatchObject({ role: "retired" });
+		expect(retirement.get(runner.runnerId)).toEqual(retired);
 		evidence["restartWhileRetired"] = true;
 		let settled = false;
 		const changing = fixture

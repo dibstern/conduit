@@ -182,13 +182,58 @@ describe("run terminal ownership", () => {
 				"message.created",
 				{ messageId: "m2", sessionId: "s", role: "assistant" },
 			],
-			["turn.completed", { messageId: "m2" }],
 		]);
+		expect(
+			await harness.query("SELECT status FROM sessions WHERE id = 's'"),
+		).toEqual([{ status: "busy" }]);
+		await project(8, [["turn.completed", { messageId: "m2" }]]);
 		expect(
 			await harness.query(
 				"SELECT last_turn_end_version, unread FROM sessions WHERE id = 's'",
 			),
 		).toEqual([{ last_turn_end_version: 8, unread: 1 }]);
+		await project(9, [["session.status", { sessionId: "s", status: "idle" }]]);
+		expect(
+			await harness.query("SELECT status FROM sessions WHERE id = 's'"),
+		).toEqual([{ status: "idle" }]);
+	});
+	it.each([
+		"pending",
+		"running",
+	])("keeps wake cleanup idle from clearing a newer %s run", async (status) => {
+		harness = makeEffectProjectionHarness();
+		await harness.query(
+			"INSERT INTO sessions (id, provider, title, status, created_at, updated_at) VALUES ('s', 'claude', 'test', 'busy', 1, 1)",
+		);
+		await harness.query(
+			"INSERT INTO provider_runs (id, session_id, status, requested_at, completed_at) VALUES ('ended', 's', 'completed', 1, 2)",
+		);
+		await harness.query(
+			"INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('newer', 's', ?, 3)",
+			[status],
+		);
+		await harness.reproject([
+			{
+				eventId: createEventId(),
+				type: "session.status",
+				sessionId: "s",
+				projectId: "test-project",
+				provider: "claude",
+				createdAt: 4,
+				sequence: 1,
+				streamVersion: 1,
+				metadata: { runId: "ended" },
+				data: { sessionId: "s", status: "idle" },
+			} as StoredEvent,
+		]);
+		expect(
+			await harness.query("SELECT status FROM sessions WHERE id = 's'"),
+		).toEqual([{ status: "busy" }]);
+		expect(
+			await harness.query(
+				"SELECT status FROM provider_runs WHERE id = 'newer'",
+			),
+		).toEqual([{ status }]);
 	});
 	// OpenCode's idle ends its run, so a second idle on the ended run is
 	// dropped: a late busy taken there would never be lifted.

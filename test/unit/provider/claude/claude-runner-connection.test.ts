@@ -372,6 +372,66 @@ it("fires durable callbacks only for a claimed terminal receipt, never a fenced 
 	expect(f.published).toHaveLength(1);
 });
 
+it("persists accepted run ownership with its output checkpoint and deduplicates it", async () => {
+	const f = await fixture();
+	await f.runtime.runPromise(
+		f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+			VALUES ('owned-run', 'session', 'pending', 1)`,
+	);
+	await f.attach();
+	const started = (): SessionOutput => ({
+		type: "event",
+		sinkId: "owned-sink",
+		event: claudeRuntimeEvent(
+			"run.started",
+			"session",
+			{
+				inputId: "owned-input",
+				requestedRunId: "owned-run",
+			},
+			"owned-run",
+		),
+	});
+	await f.runtime.runPromise(
+		f.spool.emit(started()).pipe(Effect.timeout("2 seconds")),
+	);
+	await expect
+		.poll(
+			async () =>
+				(await f.runtime.runPromise(f.receipts.read("runner"))).sequence,
+		)
+		.toBe(1);
+	expect(
+		await f.runtime.runPromise(
+			f.sql`SELECT owned_run_ids, sequence, session_id, driver_kind FROM claude_runner_cursors WHERE runner_id = 'runner'`,
+		),
+	).toEqual([
+		{
+			owned_run_ids: '["owned-run"]',
+			sequence: 1,
+			session_id: "session",
+			driver_kind: "claude",
+		},
+	]);
+	await f.runtime.runPromise(
+		f.spool.emit(started()).pipe(Effect.timeout("2 seconds")),
+	);
+	await expect
+		.poll(
+			async () =>
+				(await f.runtime.runPromise(f.receipts.read("runner"))).sequence,
+		)
+		.toBe(2);
+	expect(
+		await f.runtime.runPromise(f.receipts.owners(["runner", "missing"])),
+	).toEqual([{ runnerId: "runner", ownedRunIds: ["owned-run"] }]);
+	expect(await f.runtime.runPromise(f.receipts.owners([]))).toEqual([]);
+	expect(await f.runtime.runPromise(f.receipts.read("runner"))).toEqual({
+		sequence: 2,
+		result: {},
+	});
+});
+
 it("does not acknowledge a rolled-back terminal transaction before its successful retry commits", async () => {
 	const publishing = await Effect.runPromise(Deferred.make<void>());
 	const releasePublication = await Effect.runPromise(Deferred.make<void>());

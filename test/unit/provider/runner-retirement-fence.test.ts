@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
@@ -9,18 +9,23 @@ import { SqlClient } from "effect/sql";
 import { SqlError, UnknownError } from "effect/sql/SqlError";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
+import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	makePendingInteractionServiceLive,
+	PendingInteractionServiceTag,
+} from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { STOP_ABORT_WAIT_MS } from "../../../src/lib/provider/orchestration-command-contracts.js";
 import {
 	makeProcessSessionRunner,
 	type ProcessRunnerDriver,
@@ -30,11 +35,13 @@ import {
 	runnerBuildId,
 	runnerFailure,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
-import { currentRunnerOutput } from "../../../src/lib/provider/runner/runner-receipts.js";
 import {
-	discoverAllRunners,
-	prepareRunnerDirectory,
-} from "../../../src/lib/provider/runner/runner-registry.js";
+	makeRunnerProviderInstance,
+	type RunnerProviderInstanceDeps,
+	type RunnerRecoveryDependencies,
+} from "../../../src/lib/provider/runner/runner-provider-instance.js";
+import { currentRunnerOutput } from "../../../src/lib/provider/runner/runner-receipts.js";
+import { prepareRunnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
 import type {
 	SessionFailure,
 	SessionOutput,
@@ -47,7 +54,10 @@ vi.mock("node:child_process", async (original) => ({
 	spawn: spawned.spawn,
 }));
 
-const retirementFixture = (recover = true) =>
+const retirementFixture = (
+	recover = true,
+	recoveryForSession?: RunnerProviderInstanceDeps["recoveryForSession"],
+) =>
 	Effect.gen(function* () {
 		const root = yield* Effect.acquireRelease(
 			Effect.sync(() => mkdtempSync(join(tmpdir(), "runner-cleanup-fence-"))),
@@ -185,6 +195,7 @@ const retirementFixture = (recover = true) =>
 				daemonConfigDir: root,
 				projectRootForSession: () => Effect.succeed(root),
 				processTable,
+				...(recoveryForSession ? { recoveryForSession } : {}),
 			},
 			output,
 			driver,
@@ -226,82 +237,231 @@ const runRetirement = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 	const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 	return Effect.scoped(effect).pipe(
 		Effect.provide(
-			Layer.merge(
+			Layer.mergeAll(
 				persistence,
 				ProviderRuntimeIngestionLive.pipe(Layer.provide(persistence)),
+				makePendingInteractionServiceLive(),
 			),
 		),
 	);
 };
 
-for (const blocked of [
-	"sql",
-	"receipt",
-	"release-sink",
-	"background-task",
-] as const) {
+it.effect(
+	"releases admission without waiting for busy SQL and commits its tombstone with the next seam write",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture();
+				const old = f.attachments[0];
+				if (!old?.receipts)
+					return yield* Effect.fail(runnerFailure("test", "No receipt store"));
+				const attach = vi.spyOn(old.receipts, "attach");
+				const commit = yield* makeCommitAndSignal;
+				const entered = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				const writer = yield* Effect.forkChild(
+					commit.write(() =>
+						Deferred.succeed(entered, undefined).pipe(
+							Effect.andThen(Deferred.await(release)),
+						),
+					),
+				);
+				yield* Deferred.await(entered);
+				yield* Effect.gen(function* () {
+					const stopping = yield* Effect.forkChild(
+						f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
+					);
+					// The signal sequence is 3 s TERM + 1 s KILL exit deadline.
+					// Retirement and admission release get no SQL wait after that.
+					yield* TestClock.adjust("4001 millis");
+					expect(stopping.pollUnsafe()).toMatchObject({ _tag: "Success" });
+					expect(f.retained.size).toBe(0);
+					expect(attach).not.toHaveBeenCalled();
+					expect(yield* f.manager.hasLiveProcessEffect("s", old.runnerId)).toBe(
+						false,
+					);
+					yield* Deferred.succeed(release, undefined);
+					yield* Fiber.join(writer);
+					yield* Fiber.join(stopping);
+					expect(
+						yield* f.sql`SELECT attachment_id FROM claude_runner_cursors WHERE runner_id = ${old.runnerId} AND retired_at IS NOT NULL`,
+					).toEqual([{ attachment_id: "" }]);
+				}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+			}),
+		),
+);
+
+for (const cleanupFailure of ["deadline", "unavailable services"] as const)
 	it.effect(
-		`bounds retirement waiting for ${blocked} before releasing admission`,
+		`orphan recovery settles a retired cohort after ${cleanupFailure} and remains idempotent`,
+		() =>
+			runRetirement(
+				Effect.gen(function* () {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
+					const ingestion = yield* ProviderRuntimeIngestionTag;
+					const pending = yield* PendingInteractionServiceTag;
+					const persist = yield* ClaudeEventPersistEffectTag;
+					let servicesAvailable = true;
+					const recovery: RunnerRecoveryDependencies = {
+						projectId: "test-project",
+						ingestion,
+						pending,
+						persist,
+						timeoutHooks: {},
+						retirePrompts: () => Effect.succeed(0),
+						resolveCallContext: () =>
+							Effect.die("Recovery does not send turns"),
+					};
+					const recoveryForSession = () =>
+						Effect.sync(() => (servicesAvailable ? recovery : undefined));
+					const f = yield* retirementFixture(true, recoveryForSession);
+					const old = f.attachments[0];
+					if (!old)
+						return yield* Effect.fail(
+							runnerFailure("test", "No old attachment"),
+						);
+					const commit = yield* makeCommitAndSignal;
+					yield* commit([
+						canonicalEvent("run.requested", "s", {
+							runId: "old-run",
+							inputId: "old-input",
+						}),
+						canonicalEvent(
+							"run.started",
+							"s",
+							{ requestedRunId: "old-run", inputId: "old-input" },
+							{ metadata: { runId: "old-run" } },
+						),
+					]);
+					yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at)
+			VALUES (1, 'old-command', 'test-project', 's', 'test-claude', 'send_turn', '{"inputId":"old-input"}', 'old-run', 'running', 1, 1, 1)`;
+					old.onOutputCommitted?.({
+						type: "event",
+						sinkId: "retained",
+						event: {
+							eventId: "old-run-started",
+							type: "run.started",
+							providerId: "claude",
+							sessionId: "s",
+							runId: "old-run",
+							providerRefs: {},
+							rawSource: { kind: "test" },
+							createdAt: 1,
+							data: { inputId: "old-input", requestedRunId: "old-run" },
+						},
+					});
+					const entered = yield* Deferred.make<void>();
+					const release = yield* Deferred.make<void>();
+					const ingest = ingestion.ingestBatch;
+					const blocked = vi
+						.spyOn(ingestion, "ingestBatch")
+						.mockImplementation((events, options) =>
+							Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Deferred.await(release)),
+								Effect.andThen(ingest(events, options)),
+							),
+						);
+					const instance = yield* makeRunnerProviderInstance(
+						{
+							daemonConfigDir: f.root,
+							accounts: Effect.succeed(
+								accountsStateFromInstances(
+									[
+										{
+											id: "test-claude",
+											name: "Test Claude",
+											driver: "claude",
+										},
+									],
+									configuredClaudeConfigDir(f.root),
+								),
+							),
+						},
+						{
+							driverKind: "claude",
+							discoverEffect: () => Effect.die("No provider discovery"),
+							generateTextEffect: () => Effect.die("No provider generation"),
+							prepareTurnEffect: () => Effect.die("No provider turns"),
+						},
+						() => Effect.succeed(f.manager),
+					);
+					yield* Effect.gen(function* () {
+						if (cleanupFailure === "unavailable services")
+							servicesAvailable = false;
+						const stopping = yield* Effect.forkChild(
+							f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
+						);
+						yield* TestClock.adjust("4 seconds");
+						if (cleanupFailure === "deadline") {
+							yield* Deferred.await(entered);
+							// A live cleanup owns the cohort until its deadline.
+							yield* instance.attachSessionsEffect(["s"], recoveryForSession);
+							expect(
+								yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
+							).toEqual([{ status: "running" }]);
+							yield* TestClock.adjust("3 seconds");
+						}
+						servicesAvailable = true;
+						blocked.mockRestore();
+						yield* Deferred.succeed(release, undefined);
+						yield* Fiber.join(stopping);
+						yield* instance.attachSessionsEffect(["s"], recoveryForSession);
+						yield* instance.attachSessionsEffect(["s"], recoveryForSession);
+						expect(
+							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
+						).toEqual([{ status: "error" }]);
+						expect(
+							yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'old-command'`,
+						).toEqual([{ status: "failed" }]);
+						expect(
+							yield* f.sql`SELECT type FROM events WHERE type IN ('turn.error', 'turn.interrupted')`,
+						).toEqual([{ type: "turn.error" }]);
+					}).pipe(
+						Effect.ensuring(Deferred.succeed(release, undefined)),
+						Effect.ensuring(Effect.sync(() => blocked.mockRestore())),
+					);
+				}),
+			),
+	);
+
+for (const blocked of ["release-sink", "background-task"] as const) {
+	it.effect(
+		`bounds retirement cleanup waiting for ${blocked} before releasing admission`,
 		() =>
 			runRetirement(
 				Effect.gen(function* () {
 					const f = yield* retirementFixture();
 					const old = f.attachments[0];
-					if (!old?.receipts)
+					if (!old)
 						return yield* Effect.fail(
-							runnerFailure("test", "No receipt store"),
+							runnerFailure("test", "No old attachment"),
 						);
 					const entered = yield* Deferred.make<void>();
 					const release = yield* Deferred.make<void>();
-					const attach = old.receipts.attach;
-					if (blocked === "sql" || blocked === "receipt")
-						vi.spyOn(old.receipts, "attach").mockImplementation((...args) =>
-							Deferred.succeed(entered, undefined).pipe(
-								Effect.andThen(
-									blocked === "receipt" ? Deferred.await(release) : Effect.void,
-								),
-								Effect.andThen(attach(...args)),
-							),
+					const record = f.output.getMockImplementation();
+					if (!record)
+						return yield* Effect.fail(
+							runnerFailure("test", "No output recorder"),
 						);
-					else {
-						const record = f.output.getMockImplementation();
-						if (!record)
-							return yield* Effect.fail(
-								runnerFailure("test", "No output recorder"),
-							);
-						f.output.mockImplementation((output, sessionId) =>
-							Effect.gen(function* () {
-								if (output.type === blocked) {
-									yield* Deferred.succeed(entered, undefined);
-									yield* Deferred.await(release);
-								}
-								return yield* record(output, sessionId);
-							}),
-						);
-					}
-					const locked = yield* Deferred.make<void>();
-					if (blocked === "sql") {
-						yield* Effect.forkChild(
-							f.sql.withTransaction(
-								Deferred.succeed(locked, undefined).pipe(
-									Effect.andThen(Deferred.await(release)),
-								),
-							),
-						);
-						yield* Deferred.await(locked);
-					}
+					f.output.mockImplementation((output, sessionId) =>
+						Effect.gen(function* () {
+							if (output.type === blocked) {
+								yield* Deferred.succeed(entered, undefined);
+								yield* Deferred.await(release);
+							}
+							return yield* record(output, sessionId);
+						}),
+					);
 					yield* Effect.gen(function* () {
 						const stopping = yield* Effect.forkChild(
 							f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
 						);
 						yield* TestClock.adjust("4 seconds");
 						yield* Deferred.await(entered);
-						yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
-						const completedWhileBlocked = stopping.pollUnsafe() !== undefined;
+						yield* TestClock.adjust("3 seconds");
+						expect(stopping.pollUnsafe()).toMatchObject({ _tag: "Success" });
 						yield* Deferred.succeed(release, undefined);
-						yield* Fiber.await(stopping);
-						expect(completedWhileBlocked).toBe(true);
-						expect(existsSync(`${f.socketPath}.retired`)).toBe(true);
+						yield* Fiber.join(stopping);
 						expect(
 							yield* f.manager.hasLiveProcessEffect("s", old.runnerId),
 						).toBe(false);
@@ -359,7 +519,7 @@ it.effect(
 					);
 					yield* TestClock.adjust("4 seconds");
 					yield* Deferred.await(entered);
-					yield* TestClock.adjust("1 second");
+					yield* TestClock.adjust("3 seconds");
 					const completedWhileBlocked = stopping.pollUnsafe() !== undefined;
 					yield* Deferred.succeed(release, undefined);
 					yield* Deferred.await(finished);
@@ -465,16 +625,19 @@ for (const failed of ["receipt", "ownership SQL"] as const) {
 								}),
 							),
 						);
-					else yield* f.sql`DROP TABLE provider_runs`;
+					else
+						yield* f.sql`ALTER TABLE provider_runs RENAME TO unavailable_provider_runs`;
 					const stopping = yield* Effect.forkChild(
 						f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
 					);
 					yield* TestClock.adjust("4 seconds");
 					yield* Fiber.await(stopping);
-					expect(existsSync(`${f.socketPath}.retired`)).toBe(true);
-					expect(discoverAllRunners(f.root, f.processTable)).toMatchObject([
-						{ role: "retired" },
-					]);
+					expect(
+						yield* f.sql`SELECT attachment_id FROM claude_runner_cursors WHERE runner_id = ${old.runnerId} AND retired_at IS NOT NULL`,
+					).toEqual([{ attachment_id: "" }]);
+
+					if (failed === "ownership SQL")
+						yield* f.sql`ALTER TABLE unavailable_provider_runs RENAME TO provider_runs`;
 					vi.mocked(f.driver.connect).mockClear();
 					const restarted = yield* makeProcessSessionRunner(
 						{
@@ -626,9 +789,16 @@ for (const boundary of ["before persistence", "inside write"] as const) {
 						);
 						yield* TestClock.adjust("5 seconds");
 						yield* Fiber.await(stopping);
-						expect(existsSync(`${f.socketPath}.retired`)).toBe(true);
+						expect(
+							yield* f.manager.hasLiveProcessEffect("s", old.runnerId),
+						).toBe(false);
 						yield* Deferred.succeed(release, undefined);
 						yield* Fiber.await(output);
+						const commit = yield* makeCommitAndSignal;
+						yield* commit.write(() => Effect.void);
+						expect(
+							yield* f.sql`SELECT attachment_id FROM claude_runner_cursors WHERE runner_id = ${old.runnerId} AND retired_at IS NOT NULL`,
+						).toEqual([{ attachment_id: "" }]);
 						expect(
 							yield* f.sql`SELECT id FROM sessions WHERE id = 'retired-child'`,
 						).toEqual([]);
@@ -642,7 +812,7 @@ for (const boundary of ["before persistence", "inside write"] as const) {
 }
 
 it.effect(
-	"finishes durable retirement before interrupted recovery releases admission",
+	"releases admission during interrupted recovery without waiting for SQL",
 	() =>
 		runRetirement(
 			Effect.gen(function* () {
@@ -651,22 +821,10 @@ it.effect(
 				const failConnect = yield* Deferred.make<void>();
 				const locked = yield* Deferred.make<void>();
 				const unlock = yield* Deferred.make<void>();
-				const retiring = yield* Deferred.make<void>();
 				let attempts = 0;
-				vi.mocked(f.driver.connect).mockImplementation((options) =>
+				vi.mocked(f.driver.connect).mockImplementation(() =>
 					Effect.gen(function* () {
 						if (++attempts === 5) {
-							if (!options.receipts)
-								return yield* Effect.fail(
-									runnerFailure("test", "No receipt store"),
-								);
-							const attach = options.receipts.attach;
-							vi.spyOn(options.receipts, "attach").mockImplementation(
-								(...args) =>
-									Deferred.succeed(retiring, undefined).pipe(
-										Effect.andThen(attach(...args)),
-									),
-							);
 							yield* Deferred.succeed(lastAttempt, undefined);
 							yield* Deferred.await(failConnect);
 						}
@@ -688,22 +846,24 @@ it.effect(
 				yield* Effect.gen(function* () {
 					yield* Deferred.await(locked);
 					yield* Deferred.succeed(failConnect, undefined);
-					yield* Deferred.await(retiring);
+					yield* TestClock.adjust("1 millis");
 					recovering.interruptUnsafe();
-					yield* TestClock.adjust(0);
-					const releasedWhileBlocked = f.outputs.some(
-						(output) =>
-							output.type === "background-task" &&
-							output.transition.kind === "session-ended",
-					);
+					yield* TestClock.adjust("1 millis");
+					expect(
+						f.outputs.some(
+							(output) =>
+								output.type === "background-task" &&
+								output.transition.kind === "session-ended",
+						),
+					).toBe(true);
 					yield* Deferred.succeed(unlock, undefined);
 					yield* Fiber.join(transaction);
 					yield* Fiber.await(recovering);
-					expect(releasedWhileBlocked).toBe(false);
-					expect(existsSync(`${f.socketPath}.retired`)).toBe(true);
-					expect(discoverAllRunners(f.root, f.processTable)).toMatchObject([
-						{ role: "retired" },
-					]);
+					const commit = yield* makeCommitAndSignal;
+					yield* commit.write(() => Effect.void);
+					expect(
+						yield* f.sql`SELECT attachment_id FROM claude_runner_cursors WHERE runner_id = '131313131313' AND retired_at IS NOT NULL`,
+					).toEqual([{ attachment_id: "" }]);
 					vi.mocked(f.driver.connect).mockClear();
 					const restarted = yield* makeProcessSessionRunner(
 						{
@@ -721,150 +881,202 @@ it.effect(
 		),
 );
 
-it.effect(
-	"fences a cancelled warming candidate while its stop is pending",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* retirementFixture(false);
-				const warmed = yield* Deferred.make<void>();
-				const releaseWarm = yield* Deferred.make<void>();
-				const stopping = yield* Deferred.make<void>();
-				const releaseStop = yield* Deferred.make<void>();
-				const stopped = yield* Deferred.make<void>();
-				const connect = vi.mocked(f.driver.connect).getMockImplementation();
-				if (!connect)
-					return yield* Effect.fail(
-						runnerFailure("test", "No connection factory"),
-					);
-				vi.mocked(f.driver.connect).mockImplementation((options) =>
-					connect({
-						...options,
-						onHello: (hello, connection, replay) =>
-							Effect.gen(function* () {
-								const original = options.runnerId === "131313131313";
-								if (!original) {
-									const command = connection.commandEffect.bind(connection);
-									vi.spyOn(connection, "commandEffect").mockImplementation(
-										(id, payload) => {
-											if (payload.type === "pre-warm")
-												return Deferred.succeed(warmed, undefined).pipe(
-													Effect.andThen(Deferred.await(releaseWarm)),
-													Effect.as(undefined),
-												);
-											if (payload.type === "shutdown")
-												return Effect.gen(function* () {
-													yield* Deferred.succeed(stopping, undefined);
-													yield* Deferred.await(releaseStop);
-													yield* options.emit(
-														{
-															type: "background-task",
-															transition: {
-																sessionId: "s",
-																kind: "session-ended",
-															},
-														},
-														"s",
+for (const survived of [false, true])
+	it.effect(
+		survived
+			? "refuses cleanup of owned runs from a cancelled Starting candidate that survives Stop"
+			: "fences a cancelled warming candidate while its stop is pending",
+		() =>
+			runRetirement(
+				Effect.gen(function* () {
+					const f = yield* retirementFixture(false);
+					const warmed = yield* Deferred.make<void>();
+					const releaseWarm = yield* Deferred.make<void>();
+					const stopping = yield* Deferred.make<void>();
+					const releaseStop = yield* Deferred.make<void>();
+					const stopped = yield* Deferred.make<void>();
+					const connect = vi.mocked(f.driver.connect).getMockImplementation();
+					if (!connect)
+						return yield* Effect.fail(
+							runnerFailure("test", "No connection factory"),
+						);
+					vi.mocked(f.driver.connect).mockImplementation((options) =>
+						connect({
+							...options,
+							onHello: (hello, connection, replay) =>
+								Effect.gen(function* () {
+									const original = options.runnerId === "131313131313";
+									if (!original) {
+										const command = connection.commandEffect.bind(connection);
+										vi.spyOn(connection, "commandEffect").mockImplementation(
+											(id, payload) => {
+												if (payload.type === "pre-warm")
+													return Deferred.succeed(warmed, undefined).pipe(
+														Effect.andThen(Deferred.await(releaseWarm)),
+														Effect.as(undefined),
 													);
-													if (hello.pid !== undefined) {
-														f.processes.delete(hello.pid);
-														f.childProcesses
-															.get(hello.pid)
-															?.emit("exit", 0, null);
-													}
-													yield* Deferred.succeed(stopped, undefined);
-													return undefined;
-												});
-											return command(id, payload);
+												if (payload.type === "shutdown")
+													return Effect.gen(function* () {
+														yield* Deferred.succeed(stopping, undefined);
+														yield* Deferred.await(releaseStop);
+														yield* options.emit(
+															{
+																type: "background-task",
+																transition: {
+																	sessionId: "s",
+																	kind: "session-ended",
+																},
+															},
+															"s",
+														);
+														if (hello.pid !== undefined && !survived) {
+															f.processes.delete(hello.pid);
+															f.childProcesses
+																.get(hello.pid)
+																?.emit("exit", 0, null);
+														}
+														yield* Deferred.succeed(stopped, undefined);
+														return undefined;
+													});
+												return command(id, payload);
+											},
+										);
+									}
+									yield* options.onHello(
+										{
+											...hello,
+											buildId: original ? "previous-build" : hello.buildId,
 										},
+										connection,
+										replay,
 									);
-								}
-								yield* options.onHello(
-									{
-										...hello,
-										buildId: original ? "previous-build" : hello.buildId,
-									},
-									connection,
-									replay,
-								);
-							}),
-					}),
-				);
-				yield* f.manager.recoverEffect;
-				const old = f.attachments[0];
-				if (!old?.onUpgradeState)
-					return yield* Effect.fail(runnerFailure("test", "No old attachment"));
-				old.onUpgradeState({
-					quiescent: true,
-					revision: 1,
-					snapshot: {
-						input: { ...f.input, folderSource: "implicitDefault" },
-						options: {},
-					},
-				});
-				yield* TestClock.adjust(0);
-				yield* Deferred.await(warmed);
-				const candidate = f.attachments[1];
-				if (!candidate)
-					return yield* Effect.fail(
-						runnerFailure("test", "No candidate attachment"),
+								}),
+						}),
 					);
-				const task: SessionOutput = {
-					type: "background-task",
-					transition: {
-						sessionId: "s",
-						kind: "snapshot",
-						tasks: [
-							{ id: "active", type: "local_bash", description: "Active task" },
-						],
-					},
-				};
-				yield* candidate.emit(task, "s");
-				expect(f.background.backgroundOf("s")?.tasks[0]?.id).toBe("active");
-				yield* old.emit(task, "s");
-				const sending = yield* Effect.forkChild(
-					f.manager.executeEffect({
-						type: "send-turn",
-						sinkId: "original-sink",
-						aborted: false,
-						input: {
-							...f.input,
-							inputId: "original-input",
-							prompt: "Keep using the original",
-							history: [],
+					yield* f.manager.recoverEffect;
+					const old = f.attachments[0];
+					if (!old?.onUpgradeState)
+						return yield* Effect.fail(
+							runnerFailure("test", "No old attachment"),
+						);
+					old.onUpgradeState({
+						quiescent: true,
+						revision: 1,
+						snapshot: {
+							input: { ...f.input, folderSource: "implicitDefault" },
+							options: {},
 						},
-					}),
-				);
-				yield* Deferred.await(f.sending);
-				yield* Deferred.succeed(releaseWarm, undefined);
-				yield* Deferred.await(stopping);
-				f.outputs.length = 0;
-				yield* candidate.emit(
-					{
+					});
+					yield* TestClock.adjust(0);
+					yield* Deferred.await(warmed);
+					const candidate = f.attachments[1];
+					if (!candidate)
+						return yield* Effect.fail(
+							runnerFailure("test", "No candidate attachment"),
+						);
+					if (survived) {
+						yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('candidate-run', 's', 'running', 1)`;
+						candidate.onOutputCommitted?.({
+							type: "event",
+							sinkId: "candidate-sink",
+							event: {
+								eventId: "candidate-run-started",
+								type: "run.started",
+								providerId: "claude",
+								sessionId: "s",
+								runId: "candidate-run",
+								providerRefs: {},
+								rawSource: { kind: "test" },
+								createdAt: 1,
+								data: {
+									inputId: "candidate-input",
+									requestedRunId: "candidate-run",
+								},
+							},
+						});
+					}
+					const task: SessionOutput = {
 						type: "background-task",
-						transition: { sessionId: "s", kind: "snapshot", tasks: [] },
-					},
-					"s",
-				);
-				yield* Deferred.succeed(releaseStop, undefined);
-				yield* Deferred.await(stopped);
-				const staleOutputs = [...f.outputs];
-				const background = f.background.backgroundOf("s");
-				const owner = yield* f.manager.getControlProcessIdEffect?.("s") ??
-					Effect.succeed(undefined);
-				f.processes.delete(100_088);
-				yield* Deferred.fail(
-					f.pending,
-					runnerFailure("test", "Finish test send"),
-				);
-				yield* Fiber.await(sending);
-				yield* TestClock.adjust("4 seconds");
-				expect(staleOutputs).toEqual([]);
-				expect(background?.tasks[0]?.id).toBe("active");
-				expect(owner).toBe(old.runnerId);
-			}),
-		),
-);
+						transition: {
+							sessionId: "s",
+							kind: "snapshot",
+							tasks: [
+								{
+									id: "active",
+									type: "local_bash",
+									description: "Active task",
+								},
+							],
+						},
+					};
+					yield* candidate.emit(task, "s");
+					expect(f.background.backgroundOf("s")?.tasks[0]?.id).toBe("active");
+					yield* old.emit(task, "s");
+					const sending = yield* Effect.forkChild(
+						f.manager.executeEffect({
+							type: "send-turn",
+							sinkId: "original-sink",
+							aborted: false,
+							input: {
+								...f.input,
+								inputId: "original-input",
+								prompt: "Keep using the original",
+								history: [],
+							},
+						}),
+					);
+					yield* Deferred.await(f.sending);
+					yield* Deferred.succeed(releaseWarm, undefined);
+					yield* Deferred.await(stopping);
+					f.outputs.length = 0;
+					yield* candidate.emit(
+						{
+							type: "background-task",
+							transition: { sessionId: "s", kind: "snapshot", tasks: [] },
+						},
+						"s",
+					);
+					yield* Deferred.succeed(releaseStop, undefined);
+					yield* Deferred.await(stopped);
+					const staleOutputs = [...f.outputs];
+					const background = f.background.backgroundOf("s");
+					const owner = yield* f.manager.getControlProcessIdEffect?.("s") ??
+						Effect.succeed(undefined);
+					f.processes.delete(100_088);
+					yield* Deferred.fail(
+						f.pending,
+						runnerFailure("test", "Finish test send"),
+					);
+					yield* Fiber.await(sending);
+					yield* TestClock.adjust("4 seconds");
+					expect(staleOutputs).toEqual([]);
+					expect(background?.tasks[0]?.id).toBe("active");
+					expect(owner).toBe(old.runnerId);
+					if (survived) {
+						expect(
+							yield* f.sql`SELECT attachment_id FROM claude_runner_cursors WHERE runner_id = ${candidate.runnerId} AND retired_at IS NOT NULL`,
+						).toEqual([{ attachment_id: "" }]);
+						expect(
+							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'candidate-run'`,
+						).toEqual([{ status: "running" }]);
+						const restarted = yield* makeProcessSessionRunner(
+							{
+								daemonConfigDir: f.root,
+								projectRootForSession: () => Effect.succeed(f.root),
+								processTable: f.processTable,
+							},
+							f.output,
+							f.driver,
+						);
+						yield* restarted.recoverEffect;
+						yield* TestClock.adjust(0);
+						expect(
+							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'candidate-run'`,
+						).toEqual([{ status: "running" }]);
+					}
+				}),
+			),
+	);
 
 it.effect(
 	"fences superseded upgrade output while preserving warming candidate output",
@@ -1052,7 +1264,7 @@ for (const interleaving of ["replacement", "retirement", "pending"] as const) {
 	const pendingReplacement = interleaving === "pending";
 	it.effect(
 		blockedRetirement
-			? "finishes retirement cleanup before admitting a replacement"
+			? "admits a replacement while retired sink cleanup is blocked"
 			: pendingReplacement
 				? "preserves cancellation of a replacement awaiting readiness"
 				: "drops stranded send cleanup after a replacement starts",
@@ -1223,7 +1435,7 @@ for (const interleaving of ["replacement", "retirement", "pending"] as const) {
 						).toEqual([]);
 						return;
 					}
-					expect(admittedBeforeCleanup).toBe(false);
+					expect(admittedBeforeCleanup).toBe(blockedRetirement);
 					expect(f.outputs).toEqual(
 						blockedRetirement
 							? []
