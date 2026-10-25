@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import {
 	AttachmentValidationError,
 	validateAttachmentDataUrls,
@@ -15,6 +15,8 @@ import {
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { ProviderRegistryTag } from "../provider/provider-registry.js";
+import { assertSessionRunnerAvailable } from "../provider/runner/runner-provider-instance.js";
 
 interface LegacyMessagePayload {
 	text: string;
@@ -77,6 +79,10 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				handedOff: false,
 			} satisfies SendMessageToSessionResult;
 		}
+		yield* assertSessionRunnerAvailable(
+			activeId,
+			Option.getOrUndefined(yield* Effect.serviceOption(ProviderRegistryTag)),
+		);
 		const originalActiveId = activeId;
 		const read = yield* ReadQueryEffectTag;
 		const originalSession = yield* read.getSession(activeId);
