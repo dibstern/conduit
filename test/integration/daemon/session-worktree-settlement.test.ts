@@ -3,7 +3,7 @@
  * - Two worktrees inherit the project's branch/merge result, or Local gets a badge.
  * - A merge into local main counts before the remote default branch is fetched.
  * - The merge never reaches the existing settlement sweep with the app closed.
- * - Settlement ends/archives a session or removes its workspace or checkout.
+ * - With cleanup set to Keep, settlement ends/archives a session or removes its workspace or checkout.
  * - A follow-up restarts Claude in the project folder instead of the worktree.
  * - A later default-branch advance, cache refresh or restart re-settles resumed work.
  * - Manual settlement fails to consume a merge, then hides a follow-up again.
@@ -14,6 +14,7 @@ import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { effectiveWorkingDirectory } from "../../../src/lib/session/session-workspace.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
@@ -193,6 +194,13 @@ describe("Worktree branch settlement through the built daemon", () => {
 			runnerStartupTimeoutMs: 90_000,
 		});
 		const socket = join(fixture.configDir, "relay.sock");
+		// Default cleanup removes merged settled checkouts; this scenario exercises retained workspaces.
+		evidence["worktreeCleanupSetting"] = await sendRpcRequest(socket, {
+			_tag: "SetWorktreeCleanupSetting",
+			scope: "project",
+			projectSlug: "process-test",
+			override: { ...DEFAULT_WORKTREE_CLEANUP, onSettle: "keep" },
+		});
 		const sessions = async () =>
 			(
 				await sendRpcRequest(socket, {
