@@ -7,17 +7,18 @@ directory so tickets can cite a durable path. The documents are copied unchanged
 
 Later documents win over earlier ones:
 
-1. `AMENDMENT-2026-10-25-SEND-SCOPE-3.md` (one admission path for every send; Q22 = A)
-2. `AMENDMENT-2026-10-25-SEND-SCOPE-2.md` (the send handle owns its runner assignment; Q21 = A)
-3. `AMENDMENT-2026-10-25-SEND-SCOPE.md` (per-send scopes, release leaves the authority; Q20 = A)
-4. `AMENDMENT-2026-10-25-AUDIT-2.md` (audit round 2, typed states; Q19 = A)
-5. `AMENDMENT-2026-10-25-AUDIT.md` (single owners, bottlenecks, deepening; Q17 = A)
-6. `AMENDMENT-2026-10-25-RUNNER-AUTHORITY.md` (runner authority, durable retirement, slices R1-R5)
-7. `AMENDMENT-2026-10-24-BACKGROUND-WORK.md` (background work, goals, runner lifecycle)
-8. `AMENDMENT-2026-10-24-FACT-BOOK.md`
-9. `AMENDMENT-2026-10-23-OUTSTANDING-WORK.md`, `RULINGS-2026-10-23-D1.md`, `RULINGS-2026-10-23.md`
-10. `AMENDMENT-2026-10-23.md`
-11. `CONTRACT.md`, `spec-82tn32.md`
+1. `AMENDMENT-2026-10-26-SEND-SCOPE-4.md` (requeue, don't replay; Q23 = A)
+2. `AMENDMENT-2026-10-25-SEND-SCOPE-3.md` (one admission path for every send; Q22 = A)
+3. `AMENDMENT-2026-10-25-SEND-SCOPE-2.md` (the send handle owns its runner assignment; Q21 = A)
+4. `AMENDMENT-2026-10-25-SEND-SCOPE.md` (per-send scopes, release leaves the authority; Q20 = A)
+5. `AMENDMENT-2026-10-25-AUDIT-2.md` (audit round 2, typed states; Q19 = A)
+6. `AMENDMENT-2026-10-25-AUDIT.md` (single owners, bottlenecks, deepening; Q17 = A)
+7. `AMENDMENT-2026-10-25-RUNNER-AUTHORITY.md` (runner authority, durable retirement, slices R1-R5)
+8. `AMENDMENT-2026-10-24-BACKGROUND-WORK.md` (background work, goals, runner lifecycle)
+9. `AMENDMENT-2026-10-24-FACT-BOOK.md`
+10. `AMENDMENT-2026-10-23-OUTSTANDING-WORK.md`, `RULINGS-2026-10-23-D1.md`, `RULINGS-2026-10-23.md`
+11. `AMENDMENT-2026-10-23.md`
+12. `CONTRACT.md`, `spec-82tn32.md`
 
 ## Renamed files
 
