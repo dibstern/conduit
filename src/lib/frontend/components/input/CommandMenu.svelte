@@ -130,7 +130,7 @@
 					}}
 				>
 					<div class="min-w-0 flex-1">
-						<span class="cmd-name block truncate text-[13.5px] text-text">{trigger}{cmd.name}{#if cmd.args}<span class="cmd-args font-normal text-text-muted"> {cmd.args}</span>{/if}</span>
+						<span class="cmd-name block truncate text-[13.5px] text-text">{trigger}{cmd.name}{#if cmd.args}<span class="cmd-args ml-[6px] font-normal text-text-muted"> {cmd.args}</span>{/if}</span>
 						{#if cmd.description}<span class="cmd-desc block truncate text-[12px] text-text-dimmer">{cmd.description}</span>{/if}
 					</div>
 					{#if trigger === "$" && cmd.name === "compact"}<span data-testid="command-context-percent" class="shrink-0 font-mono text-[11.5px] text-text-dimmer">{Math.round(contextPercent)}%</span>{/if}
