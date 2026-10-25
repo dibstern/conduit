@@ -413,6 +413,21 @@ process.exit(result.status ?? 1);
 		const cursor = browser.frames.length;
 		const branchName = "feature/renamed-session";
 		expect(await rename(session.id, branchName)).toEqual({ ok: true });
+		const row = await browser.waitFor(
+			(message) => {
+				if (message["type"] !== "session_row" || message["id"] !== session.id)
+					return false;
+				const status = message["git"] as SessionInfo["git"];
+				return (
+					status?.branch === branchName &&
+					status.folders?.length === 2 &&
+					status.folders.every((folder) => folder.branch === branchName)
+				);
+			},
+			cursor,
+			2_000,
+		);
+		evidence["publishedGitRow"] = row;
 		const current = await find(session.id);
 		expect(current.workspace).toEqual(session.workspace);
 		expect(current.git?.branch).toBe(branchName);
@@ -420,17 +435,6 @@ process.exit(result.status ?? 1);
 			branchName,
 			branchName,
 		]);
-		const row = await browser.waitFor(
-			(message) => {
-				if (message["type"] !== "session_row" || message["id"] !== session.id)
-					return false;
-				const status = message["git"] as SessionInfo["git"];
-				return status?.branch === branchName;
-			},
-			cursor,
-			2_000,
-		);
-		evidence["publishedGitRow"] = row;
 		expect(row["canRenameBranch"]).toBe(true);
 		for (const folder of [fixture.projectDir, secondary]) {
 			expect(git(checkout(session, folder), "branch", "--show-current")).toBe(
@@ -469,7 +473,14 @@ process.exit(result.status ?? 1);
 		const nextName = "feature/renamed-after-restart";
 		expect(await rename(session.id, nextName)).toEqual({ ok: true });
 		expect((await find(session.id)).workspace).toEqual(session.workspace);
-		expect((await find(session.id)).git?.branch).toBe(nextName);
+		await vi.waitFor(
+			async () =>
+				expect((await find(session.id)).git).toMatchObject({
+					branch: nextName,
+					folders: [{ branch: nextName }, { branch: nextName }],
+				}),
+			{ timeout: 2_000 },
+		);
 		for (const folder of [fixture.projectDir, secondary]) {
 			expect(git(checkout(session, folder), "branch", "--show-current")).toBe(
 				nextName,
@@ -959,9 +970,13 @@ process.exit(result.status ?? 1);
 		const branchName = "feature/shared-folders";
 		expect(await rename(session.id, branchName)).toEqual({ ok: true });
 		expect((await find(session.id)).workspace).toEqual(session.workspace);
-		expect(
-			(await find(session.id)).git?.folders?.map(({ branch }) => branch),
-		).toEqual([branchName, branchName, branchName]);
+		await vi.waitFor(
+			async () =>
+				expect(
+					(await find(session.id)).git?.folders?.map(({ branch }) => branch),
+				).toEqual([branchName, branchName, branchName]),
+			{ timeout: 2_000 },
+		);
 		expect(state().worktrees.map(({ head }) => head)).toEqual(
 			before.worktrees.map(({ head }) => head),
 		);
