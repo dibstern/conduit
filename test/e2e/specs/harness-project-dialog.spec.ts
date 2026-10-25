@@ -518,9 +518,9 @@ test("FindFolders suggests recent and sibling folders for text and matches paths
 		Effect.runPromise(browser.rpc.FindFolders({ query }));
 	const all = await find("");
 	expect(all.entries).toEqual([
+		{ path: both, isGitRepo: true, reason: "recent", exists: true },
 		{ path: recentRepo, isGitRepo: true, reason: "recent", exists: true },
 		{ path: recentPlain, isGitRepo: false, reason: "recent", exists: true },
-		{ path: both, isGitRepo: true, reason: "recent", exists: true },
 		{ path: sibling, isGitRepo: true, reason: "sibling", exists: true },
 	]);
 	const alpha = await find("ALPHA");
