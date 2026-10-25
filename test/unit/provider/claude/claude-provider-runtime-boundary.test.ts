@@ -260,6 +260,9 @@ describe("Claude provider runtime boundary", () => {
 				const scope = yield* Scope.make();
 				const runtime = yield* makeClaudeProviderRuntime({
 					runnerFactory: makeClaudeSessionRunner,
+					capabilitiesService: {
+						get: () => Effect.succeed({ models: [], commands: [], agents: [] }),
+					},
 					daemonConfigDir: configPersistence.getConfigDir(),
 					workspaceRoot: "/tmp/ws",
 					queryFactory: () => query,
@@ -305,6 +308,10 @@ describe("Claude provider runtime boundary", () => {
 					let options: SDKOptions | undefined;
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
+						capabilitiesService: {
+							get: () =>
+								Effect.succeed({ models: [], commands: [], agents: [] }),
+						},
 						daemonConfigDir: configPersistence.getConfigDir(),
 						workspaceRoot: "/tmp/ws",
 						queryFactory: (params) => {

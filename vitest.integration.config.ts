@@ -10,6 +10,9 @@ export default defineConfig({
 	plugins: [svelte()],
 	test: {
 		setupFiles: ["test/setup.ts"],
+		env: {
+			CONDUIT_TEST_DIST: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+		},
 		testTimeout: 30_000,
 		hookTimeout: 30_000,
 		// Each file owns its servers and temp dirs, so files can run in parallel.

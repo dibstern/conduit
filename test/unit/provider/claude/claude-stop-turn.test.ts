@@ -96,6 +96,10 @@ describe("turn-only Stop interactions", () => {
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
+						capabilitiesService: {
+							get: () =>
+								Effect.succeed({ models: [], commands: [], agents: [] }),
+						},
 						workspaceRoot: "/tmp/ws",
 						queryFactory: factory,
 					});
@@ -178,6 +182,10 @@ describe("turn-only Stop interactions", () => {
 					Effect.gen(function* () {
 						const runtime = yield* makeClaudeProviderRuntime({
 							runnerFactory: makeClaudeSessionRunner,
+							capabilitiesService: {
+								get: () =>
+									Effect.succeed({ models: [], commands: [], agents: [] }),
+							},
 							workspaceRoot: "/tmp/ws",
 							queryFactory: factory,
 						});

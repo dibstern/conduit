@@ -117,48 +117,58 @@ export function applyInstanceListResponse(
 		"instances" | "providerCapabilities" | "providerTraits"
 	>,
 ): void {
-	const instances: OpenCodeInstance[] = response.instances.map((instance) => ({
-		id: instance.id,
-		name: instance.name,
-		port: instance.port,
-		managed: instance.managed,
-		status: instance.status,
-		restartCount: instance.restartCount,
-		createdAt: instance.createdAt,
-		...(instance.driver != null ? { driver: instance.driver } : {}),
-		...(instance.isDefault !== undefined
-			? { isDefault: instance.isDefault }
-			: {}),
-		...(instance.usageEligible !== undefined
-			? { usageEligible: instance.usageEligible }
-			: {}),
-		...(instance.cursorUsageSource !== undefined
-			? { cursorUsageSource: instance.cursorUsageSource }
-			: {}),
-		...(instance.available !== undefined
-			? { available: instance.available }
-			: {}),
-		...(instance.unavailableReason !== undefined
-			? { unavailableReason: instance.unavailableReason }
-			: {}),
-		...(instance.unavailableCode !== undefined
-			? { unavailableCode: instance.unavailableCode }
-			: {}),
-		...(instance.capabilities != null
-			? { capabilities: instance.capabilities }
-			: {}),
-		...(instance.configDir != null ? { configDir: instance.configDir } : {}),
-		...(instance.url != null ? { url: instance.url } : {}),
-		...(instance.pid != null ? { pid: instance.pid } : {}),
-		...(instance.env != null ? { env: { ...instance.env } } : {}),
-		...(instance.needsRestart != null
-			? { needsRestart: instance.needsRestart }
-			: {}),
-		...(instance.exitCode != null ? { exitCode: instance.exitCode } : {}),
-		...(instance.lastHealthCheck != null
-			? { lastHealthCheck: instance.lastHealthCheck }
-			: {}),
-	}));
+	const instances: OpenCodeInstance[] = response.instances.map((instance) => {
+		// Mutations check their account; other rows retain their last availability.
+		const availability =
+			instance.available === undefined
+				? cachedInstances.find(
+						(known) =>
+							known.id === instance.id && known.driver === instance.driver,
+					)
+				: instance;
+		return {
+			id: instance.id,
+			name: instance.name,
+			port: instance.port,
+			managed: instance.managed,
+			status: instance.status,
+			restartCount: instance.restartCount,
+			createdAt: instance.createdAt,
+			...(instance.driver != null ? { driver: instance.driver } : {}),
+			...(instance.isDefault !== undefined
+				? { isDefault: instance.isDefault }
+				: {}),
+			...(instance.usageEligible !== undefined
+				? { usageEligible: instance.usageEligible }
+				: {}),
+			...(instance.cursorUsageSource !== undefined
+				? { cursorUsageSource: instance.cursorUsageSource }
+				: {}),
+			...(availability?.available !== undefined
+				? { available: availability.available }
+				: {}),
+			...(availability?.unavailableReason !== undefined
+				? { unavailableReason: availability.unavailableReason }
+				: {}),
+			...(availability?.unavailableCode !== undefined
+				? { unavailableCode: availability.unavailableCode }
+				: {}),
+			...(instance.capabilities != null
+				? { capabilities: instance.capabilities }
+				: {}),
+			...(instance.configDir != null ? { configDir: instance.configDir } : {}),
+			...(instance.url != null ? { url: instance.url } : {}),
+			...(instance.pid != null ? { pid: instance.pid } : {}),
+			...(instance.env != null ? { env: { ...instance.env } } : {}),
+			...(instance.needsRestart != null
+				? { needsRestart: instance.needsRestart }
+				: {}),
+			...(instance.exitCode != null ? { exitCode: instance.exitCode } : {}),
+			...(instance.lastHealthCheck != null
+				? { lastHealthCheck: instance.lastHealthCheck }
+				: {}),
+		};
+	});
 	// Only these fields change which account a session or draft resolves to.
 	const routingKey = (list: readonly OpenCodeInstance[]) =>
 		list.map((i) => `${i.id}:${i.driver}:${i.isDefault}`).join("|");

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -337,7 +337,7 @@ describe("Session directory discovery through the built daemon", () => {
 			});
 	}, 150_000);
 
-	it("generates titles and starts queries in each session's current directory", async () => {
+	it("generates isolated titles and starts queries in each session's current directory", async () => {
 		const { fixture, worktree, socket } = await start("titles");
 		const browser = await fixture.connect();
 		const unmoved = await browser.createSession();
@@ -359,11 +359,18 @@ describe("Session directory discovery through the built daemon", () => {
 				const title = fixture
 					.claudeTitles()
 					.find(({ prompt: titlePrompt }) => titlePrompt.includes(prompt));
-				expect(title?.cwd).toBe(directory);
+				// One-shot title generation must not load the session's project files.
+				expect(dirname(title?.cwd ?? "")).toBe(
+					join(fixture.configDir, "text-generation"),
+				);
+				expect(title?.cwd).toMatch(/\/run-[^/]+$/);
 			});
 			const used = providerQuery(fixture, sessionId);
 			expect(used).toEqual({ cwd: directory, alwaysThinkingEnabled: thinking });
-			evidence[label] = { provider: used, titleDirectory: directory };
+			evidence[label] = {
+				provider: used,
+				titleDirectory: "isolated-text-generation",
+			};
 		}
 	}, 150_000);
 });

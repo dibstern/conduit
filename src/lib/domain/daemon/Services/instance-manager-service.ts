@@ -647,52 +647,56 @@ export const getInstances = Effect.gen(function* () {
 		);
 }).pipe(Effect.withSpan("instance.getAll"));
 
-/** External inventory probes must not delay other providers' runtime operations. */
-export const discoverInstances = Effect.gen(function* () {
-	const instances = yield* getInstances;
-	const accounts = yield* (yield* AccountDirectory).list;
-	const daemon = yield* Effect.serviceOption(DaemonStateTag);
-	const configDir = Option.isSome(daemon)
-		? (yield* Ref.get(daemon.value)).configDir
-		: undefined;
-	const availability = new Map<
-		string,
-		{
-			available: boolean;
-			unavailableReason?: string;
-			unavailableCode?: "auth_required" | "codex_version_unsupported";
+/** Mutation replies validate only the affected account, leaving other probes to inventory reads. */
+export const discoverInstancesFor = (instanceId?: string) =>
+	Effect.gen(function* () {
+		const instances = yield* getInstances;
+		const accounts = yield* (yield* AccountDirectory).list;
+		const daemon = yield* Effect.serviceOption(DaemonStateTag);
+		const configDir = Option.isSome(daemon)
+			? (yield* Ref.get(daemon.value)).configDir
+			: undefined;
+		const availability = new Map<
+			string,
+			{
+				available: boolean;
+				unavailableReason?: string;
+				unavailableCode?: "auth_required" | "codex_version_unsupported";
+			}
+		>();
+		for (const account of accounts) {
+			if (instanceId !== undefined && account.id !== instanceId) continue;
+			const discover =
+				account.driver === "codex"
+					? discoverCodexEffect(account, undefined, configDir)
+					: account.driver === "cursor"
+						? discoverCursorEffect(undefined, account)
+						: undefined;
+			if (!discover) continue;
+			const result = yield* Effect.result(discover);
+			availability.set(
+				account.id,
+				result._tag === "Success"
+					? { available: true }
+					: {
+							available: false,
+							unavailableReason:
+								result.failure.cause instanceof Error
+									? result.failure.cause.message
+									: "Provider discovery failed",
+							...(result.failure.code
+								? { unavailableCode: result.failure.code }
+								: {}),
+						},
+			);
 		}
-	>();
-	for (const account of accounts) {
-		const discover =
-			account.driver === "codex"
-				? discoverCodexEffect(account, undefined, configDir)
-				: account.driver === "cursor"
-					? discoverCursorEffect(undefined, account)
-					: undefined;
-		if (!discover) continue;
-		const result = yield* Effect.result(discover);
-		availability.set(
-			account.id,
-			result._tag === "Success"
-				? { available: true }
-				: {
-						available: false,
-						unavailableReason:
-							result.failure.cause instanceof Error
-								? result.failure.cause.message
-								: "Provider discovery failed",
-						...(result.failure.code
-							? { unavailableCode: result.failure.code }
-							: {}),
-					},
-		);
-	}
-	return instances.map((instance) => ({
-		...instance,
-		...availability.get(instance.id),
-	}));
-}).pipe(Effect.withSpan("instance.discover"));
+		return instances.map((instance) => ({
+			...instance,
+			...availability.get(instance.id),
+		}));
+	}).pipe(Effect.withSpan("instance.discover"));
+
+export const discoverInstances = discoverInstancesFor();
 
 /** Get a live account's read model; status reads never apply routing fallbacks. */
 export const getInstance = (instanceId: string) =>

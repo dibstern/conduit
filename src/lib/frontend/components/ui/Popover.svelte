@@ -169,7 +169,11 @@
 		class: "fixed inset-x-0 bottom-0 z-[var(--z-sheet)] w-full outline-hidden",
 		onOpenAutoFocus: (event) => {
 			rest.onOpenAutoFocus?.(event);
-			if (!event.defaultPrevented && initialFocus === "content") {
+			if (event.defaultPrevented) return;
+			// bits-ui remounts its focus scope once the bound ref lands, re-running
+			// open focus; it must not pull focus the user already moved into the sheet.
+			if (sheetEl?.contains(document.activeElement)) event.preventDefault();
+			else if (initialFocus === "content") {
 				event.preventDefault();
 				sheetEl?.focus({ preventScroll: true });
 			}

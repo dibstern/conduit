@@ -146,6 +146,7 @@ import {
 	sameClaudeLogin,
 	sdkDefaultClaudeConfigDir,
 } from "./claude-sdk-env.js";
+import { loadClaudeSdkTestModule } from "./claude-sdk-module.js";
 import {
 	asError,
 	ClaudeSDKDecodeError,
@@ -297,9 +298,13 @@ export const makeClaudeSessionRunner = (
 						void,
 						never
 					>();
+					const testSdk = deps.capabilitiesService
+						? undefined
+						: yield* loadClaudeSdkTestModule.pipe(Effect.orDie);
 					const capabilitiesService =
 						deps.capabilitiesService ??
 						(yield* makeClaudeCapabilitiesService({
+							...(testSdk ? { queryFactory: testSdk.claudeSdk.query } : {}),
 							...(deps.daemonConfigDir !== undefined
 								? {
 										cacheDir: join(

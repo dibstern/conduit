@@ -1,4 +1,4 @@
-// OpenCode metadata stays server-side even when it shares Cursor presentation keys.
+// Live tool output is shared; Cursor presentation keys stay provider-specific.
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -14,7 +14,7 @@ describe("Tool presentation compatibility through the relay", () => {
 	afterAll(async () => {
 		if (harness) await harness.stop();
 	});
-	it("keeps OpenCode tool metadata out of browser rows without changing status", async () => {
+	it("streams OpenCode tool output while keeping private metadata out of browser rows", async () => {
 		const client = await harness.connectWsClient();
 		try {
 			await client.waitForInitialState();
@@ -65,7 +65,7 @@ describe("Tool presentation compatibility through the relay", () => {
 				"running",
 				sessionId,
 			);
-			expect(running.state).not.toHaveProperty("metadata");
+			expect(running.state?.["metadata"]).toEqual({ output });
 			expect(running.state).not.toHaveProperty("output");
 			inject("completed");
 			const completed = await client.waitForToolState(

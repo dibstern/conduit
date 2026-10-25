@@ -97,7 +97,7 @@ export async function createRelayHarness(
 		...(options.daemonConfigContext
 			? { daemonConfigContext: options.daemonConfigContext }
 			: {}),
-		...(options.claudeSdk ? { claudeSdk: options.claudeSdk } : {}),
+		claudeSdk: options.claudeSdk ?? fakeClaudeSdk,
 		// Stubbed session titles: no test makes a live title call.
 		titleQuery:
 			options.titleQuery ??

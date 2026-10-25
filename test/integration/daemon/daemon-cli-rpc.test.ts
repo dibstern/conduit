@@ -81,9 +81,17 @@ describe("CLI and browser daemon RPC parity", () => {
 						});
 						expect(loadRelaySettings(root).defaultModel).toBe("openai/gpt-4");
 						// Validating the pick loads the catalog, which republishes the
-						// harness defaults before the new default lands.
-						expect([...(yield* Queue.takeBetween(tab, 3, 3))]).toMatchObject([
+						// model-dependent settings before the new default lands.
+						expect([...(yield* Queue.takeBetween(tab, 5, 5))]).toMatchObject([
 							{ _tag: "upsert", item: { _tag: "harnessDefaults" } },
+							{
+								_tag: "upsert",
+								item: {
+									_tag: "titleGeneration",
+									selection: null,
+									status: "unverified",
+								},
+							},
 							{
 								_tag: "upsert",
 								item: {
@@ -100,6 +108,14 @@ describe("CLI and browser daemon RPC parity", () => {
 										status: "ok",
 										pick: { providerId: "openai", modelId: "gpt-4" },
 									},
+								},
+							},
+							{
+								_tag: "upsert",
+								item: {
+									_tag: "titleGeneration",
+									selection: null,
+									status: "unverified",
 								},
 							},
 						]);

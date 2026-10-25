@@ -1597,9 +1597,9 @@ describe("Fork read-model inheritance", () => {
 				});
 			}
 		}
-		mkdirSync("docs/performance", { recursive: true });
+		mkdirSync("test-results", { recursive: true });
 		writeFileSync(
-			"docs/performance/hiuf-3-fork-cost.json",
+			"test-results/hiuf-3-fork-cost.json",
 			`${JSON.stringify({ ticket: "conduit-test-hiuf.3", instrumentation: "effect/sql Statement.CurrentTransformer around production forkSession in the relay harness", measurements }, null, "\t")}\n`,
 		);
 		for (const kind of ["fork", "side-thread"]) {

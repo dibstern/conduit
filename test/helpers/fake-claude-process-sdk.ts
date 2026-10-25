@@ -568,6 +568,7 @@ function query(params: {
 	prompt: AsyncIterable<SDKUserMessage>;
 	options?: Options;
 }): Query {
+	const zeroTurn = params.options?.maxTurns === 0;
 	const sessionId = params.options?.forkSession
 		? (params.options.sessionId ?? randomUUID())
 		: (params.options?.resume ?? params.options?.sessionId ?? randomUUID());
@@ -691,15 +692,17 @@ function query(params: {
 		unlinkSync(file);
 		return true;
 	};
-	const failNext = consumeMarker("fail-next-initialization");
-	const holdNext = consumeMarker("hold-next-initialization");
+	// Capability and quota probes must leave the next session's fixture gates alone.
+	const failNext = !zeroTurn && consumeMarker("fail-next-initialization");
+	const holdNext = !zeroTurn && consumeMarker("hold-next-initialization");
 	const fails =
-		++initializationAttempts <=
+		!zeroTurn &&
+		(++initializationAttempts <=
 			Number(process.env["CONDUIT_TEST_QUERY_INITIALIZATION_FAILURES"] ?? 0) ||
-		failNext;
-	const delayMs = Number(
-		process.env["CONDUIT_TEST_QUERY_INITIALIZATION_DELAY_MS"] ?? 0,
-	);
+			failNext);
+	const delayMs = zeroTurn
+		? 0
+		: Number(process.env["CONDUIT_TEST_QUERY_INITIALIZATION_DELAY_MS"] ?? 0);
 	let initializationTimer: ReturnType<typeof setTimeout> | undefined;
 	const settings = params.options?.settings;
 	const flagSettings =
@@ -720,50 +723,52 @@ function query(params: {
 		).effective,
 		flagSettings,
 	);
-	mark({
-		kind: "query",
-		queryId,
-		...(params.options?.env?.["CONDUIT_SESSION_ID"]
-			? { runnerSessionId: params.options.env["CONDUIT_SESSION_ID"] }
-			: {}),
-		at: process.hrtime.bigint().toString(),
-		sessionId,
-		pid: process.pid,
-		effectiveSettingsJson: JSON.stringify(effectiveSettings),
-		optionsJson: JSON.stringify(
-			Object.fromEntries(
-				Object.entries(params.options ?? {}).filter(
-					([key]) => !["abortController", "canUseTool", "resume"].includes(key),
+	if (!zeroTurn)
+		mark({
+			kind: "query",
+			queryId,
+			...(params.options?.env?.["CONDUIT_SESSION_ID"]
+				? { runnerSessionId: params.options.env["CONDUIT_SESSION_ID"] }
+				: {}),
+			at: process.hrtime.bigint().toString(),
+			sessionId,
+			pid: process.pid,
+			effectiveSettingsJson: JSON.stringify(effectiveSettings),
+			optionsJson: JSON.stringify(
+				Object.fromEntries(
+					Object.entries(params.options ?? {}).filter(
+						([key]) =>
+							!["abortController", "canUseTool", "resume"].includes(key),
+					),
 				),
+				(key, value: unknown) => (key === "instance" ? undefined : value),
 			),
-			(key, value: unknown) => (key === "instance" ? undefined : value),
-		),
-		options: {
-			...(params.options?.model ? { model: params.options.model } : {}),
-			...(params.options?.effort ? { effort: params.options.effort } : {}),
-			...(params.options?.permissionMode
-				? { permissionMode: params.options.permissionMode }
-				: {}),
-			...(settings &&
-			typeof settings === "object" &&
-			typeof settings.disableAllHooks === "boolean"
-				? { settings: { disableAllHooks: settings.disableAllHooks } }
-				: {}),
-		},
-		env: Object.fromEntries(
-			[
-				"CONDUIT_ENV_PROOF",
-				"PATH",
-				"CLAUDE_CONFIG_DIR",
-				"ANTHROPIC_API_KEY",
-				"ANTHROPIC_MODEL",
-				"CLAUDE_AGENT_SDK_CLIENT_APP",
-				"ENABLE_CLAUDEAI_MCP_SERVERS",
-			].map((key) => [key, params.options?.env?.[key]]),
-		),
-	});
-	// Like the SDK, query construction starts initialization without input. The
-	// public system/init message remains a first-prompt event, not readiness.
+			options: {
+				...(params.options?.model ? { model: params.options.model } : {}),
+				...(params.options?.effort ? { effort: params.options.effort } : {}),
+				...(params.options?.permissionMode
+					? { permissionMode: params.options.permissionMode }
+					: {}),
+				...(settings &&
+				typeof settings === "object" &&
+				typeof settings.disableAllHooks === "boolean"
+					? { settings: { disableAllHooks: settings.disableAllHooks } }
+					: {}),
+			},
+			env: Object.fromEntries(
+				[
+					"CONDUIT_ENV_PROOF",
+					"PATH",
+					"CLAUDE_CONFIG_DIR",
+					"ANTHROPIC_API_KEY",
+					"ANTHROPIC_MODEL",
+					"CLAUDE_AGENT_SDK_CLIENT_APP",
+					"ENABLE_CLAUDEAI_MCP_SERVERS",
+				].map((key) => [key, params.options?.env?.[key]]),
+			),
+		});
+	// Initialization starts without input. Session queries emit system/init with
+	// their first prompt; zero-turn capability queries emit it without a turn.
 	const initialization = new Promise<SDKControlInitializeResponse>(
 		(done, fail) => {
 			rejectInitialization = fail;
@@ -784,11 +789,12 @@ function query(params: {
 					return;
 				}
 				initializationFinished = true;
-				mark({
-					kind: fails ? "initialization-failed" : "initialization-ready",
-					queryId,
-					at: process.hrtime.bigint().toString(),
-				});
+				if (!zeroTurn)
+					mark({
+						kind: fails ? "initialization-failed" : "initialization-ready",
+						queryId,
+						at: process.hrtime.bigint().toString(),
+					});
 				if (fails) fail(new Error("Synthetic Claude initialization failure"));
 				else {
 					// The real CLI creates the caller-chosen fork during initialize,
@@ -882,8 +888,37 @@ function query(params: {
 			},
 		};
 	}
+	const systemInit = (): SDKMessage => {
+		if (!zeroTurn)
+			mark({
+				kind: "system-init",
+				queryId,
+				at: process.hrtime.bigint().toString(),
+			});
+		return {
+			type: "system",
+			subtype: "init",
+			session_id: sessionId,
+			uuid: randomUUID(),
+			cwd: params.options?.cwd ?? "",
+			apiKeySource: "none",
+			claude_code_version: "process-test",
+			tools: ["Bash"],
+			mcp_servers: [],
+			model: params.options?.model ?? "claude-sonnet-4",
+			permissionMode: params.options?.permissionMode ?? "default",
+			slash_commands: [],
+			output_style: "default",
+			skills: [],
+			plugins: [],
+		} as unknown as SDKMessage;
+	};
 	const messages = (async function* (): AsyncGenerator<SDKMessage> {
 		await initialization;
+		if (zeroTurn) {
+			yield systemInit();
+			return;
+		}
 		const inputs = params.prompt[Symbol.asyncIterator]();
 		while (!closed) {
 			const nextInput = inputs.next();
@@ -1017,28 +1052,7 @@ function query(params: {
 				throw new Error("Harness failure before assistant message");
 			}
 			if (promptIndex === 1) {
-				mark({
-					kind: "system-init",
-					queryId,
-					at: process.hrtime.bigint().toString(),
-				});
-				yield {
-					type: "system",
-					subtype: "init",
-					session_id: sessionId,
-					uuid: randomUUID(),
-					cwd: params.options?.cwd ?? "",
-					apiKeySource: "none",
-					claude_code_version: "process-test",
-					tools: ["Bash"],
-					mcp_servers: [],
-					model: params.options?.model ?? "claude-sonnet-4",
-					permissionMode: params.options?.permissionMode ?? "default",
-					slash_commands: [],
-					output_style: "default",
-					skills: [],
-					plugins: [],
-				} as unknown as SDKMessage;
+				yield systemInit();
 			}
 			if (params.options?.resume && consumeAccountMarker("resume-drops-turn")) {
 				yield {
@@ -2631,11 +2645,12 @@ function query(params: {
 					new Error("Claude query closed before initialization"),
 				);
 			}
-			mark({
-				kind: "query-closed",
-				queryId,
-				at: process.hrtime.bigint().toString(),
-			});
+			if (!zeroTurn)
+				mark({
+					kind: "query-closed",
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
 		},
 		interrupt: async () => {
 			if (

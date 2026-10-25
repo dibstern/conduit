@@ -1,5 +1,6 @@
 /** Claude daemon launch composition; live SDK state belongs to the runner payload. */
 import { join } from "node:path";
+import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { Context, Effect, Layer, Result, type Scope } from "effect";
 import { accountsStateFromConfig } from "../../account-directory.js";
 import {
@@ -16,6 +17,7 @@ import { makeProcessClaudeSessionRunner } from "./claude-process-session-runner.
 import { makeClaudeRunnerDriver } from "./claude-runner-driver.js";
 import type { ClaudeProviderInstanceDeps } from "./claude-runner-payload.js";
 import { captureClaudeLaunchLogin } from "./claude-sdk-env.js";
+import { loadClaudeSdkTestModule } from "./claude-sdk-module.js";
 
 export type { ClaudeOneShotQueryFactory } from "../../domain/daemon/Services/claude-one-shot.js";
 export { RunnerProviderInstance as ClaudeProviderRuntime } from "../runner/runner-provider-instance.js";
@@ -35,9 +37,14 @@ export const makeClaudeProviderRuntime = (
 	deps: ClaudeProviderInstanceDeps,
 ): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
+		const testSdk = deps.capabilitiesService
+			? undefined
+			: yield* loadClaudeSdkTestModule.pipe(Effect.orDie);
+		const queryFactory = testSdk?.claudeSdk.query ?? deps.queryFactory;
 		const capabilitiesService =
 			deps.capabilitiesService ??
 			(yield* makeClaudeCapabilitiesService({
+				...(queryFactory && queryFactory !== sdkQuery ? { queryFactory } : {}),
 				...(deps.daemonConfigDir !== undefined
 					? {
 							cacheDir: join(

@@ -60,7 +60,9 @@ describe.skipIf(process.env["CONDUIT_CODEX_LIVE"] !== "1")(
 				const modelId =
 					process.env["CONDUIT_CODEX_LIVE_MODEL"] ?? "gpt-6.1-sol";
 				const codexHome =
-					process.env["CODEX_HOME"] ?? join(homedir(), ".codex");
+					process.env["CONDUIT_TEST_REAL_CODEX_HOME"] ??
+					process.env["CODEX_HOME"] ??
+					join(homedir(), ".codex");
 				const evidence: Record<string, unknown> = {
 					modelId,
 					capturePath,

@@ -82,14 +82,6 @@ export const makeClaudeRunnerLaunch = (
 			if (Number.isFinite(pollTimeout) && pollTimeout > 0)
 				testSubagentPollTimeoutMs = pollTimeout;
 			settingsResolver = module.resolveSettings;
-			const { __setProbeOverrideForTesting } = yield* Effect.tryPromise(
-				() => import("./claude-capabilities-probe.js"),
-			);
-			__setProbeOverrideForTesting(async () => ({
-				models: [],
-				agents: [],
-				commands: [],
-			}));
 		}
 		let shellEnv: Readonly<Record<string, string | undefined>> = process.env;
 		let snapshot: RunnerSettingsSnapshot | undefined;
