@@ -7,7 +7,7 @@ other file in this folder. RA is `AMENDMENT-2026-10-25-RUNNER-AUTHORITY.md`; BG 
 `AMENDMENT-2026-10-24-BACKGROUND-WORK.md`; FB is `AMENDMENT-2026-10-24-FACT-BOOK.md`.
 
 User-facing behaviour is unchanged except A16 (activity after a result always reaches
-the screen) and A13 (the notice says whether the kill was escalated).
+the screen).
 
 ## Supersedes
 
@@ -33,8 +33,8 @@ exit, so KILL never reaches descendants that ignore TERM.
   whether or not the leader is alive. A member that no longer matches is skipped.
 - A pgid cannot be reused while any member of the group lives, so a group signal is safe
   while one snapshotted member still matches.
-- The retirement row records which signal was sent (T3), so the notice can say "was told
-  to stop" or "was force-stopped".
+- The retirement row records which signal was sent and to which members (T3). The notice
+  keeps A12's wording ("was told to stop"), which is true after TERM and after KILL.
 
 ## A14. Ledger caches update inside the permit
 
