@@ -107,7 +107,7 @@
 			onclick={() => { if (!searching) ontoggle(); }}
 		>
 			<span class="grid translate-y-[0.25px]"><SessionStatusGlyph pinned={group === "pinned"} settled={group === "settled"} snoozed={group === "snoozed"} attention={group === "running" ? "working" : "idle"} animate={false} /></span>
-			<span class="flex items-baseline gap-[6px]"><span data-group-label>{label}</span>{" "}<span class="font-mono text-[11px] font-normal">{count}{exact ? "" : "+"}</span></span>
+			<span class="flex items-baseline gap-[6px]"><span data-group-label>{label}</span>{" "}<span data-testid="session-group-count" class="font-mono text-[11px] font-normal">{count}{exact ? "" : "+"}</span></span>
 			<span class="ml-auto"><Icon name={open ? "chevron-down" : "chevron-right"} size={12} /></span>
 		</TextButton>
 	{/snippet}

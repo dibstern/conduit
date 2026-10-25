@@ -421,7 +421,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 				}
 				return count;
 			});
-			await expect(heading.locator("span").last()).toHaveText(
+			await expect(heading.getByTestId("session-group-count")).toHaveText(
 				String(renderedRows),
 			);
 		}
