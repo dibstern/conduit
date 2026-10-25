@@ -106,7 +106,8 @@ export interface ProbeDeps {
 	readonly baseEnv?: Readonly<Record<string, string | undefined>>;
 	readonly accountEnv?: Readonly<Record<string, string>>;
 	readonly queryFactory?: (params: {
-		prompt: string | AsyncIterable<SDKUserMessage>;
+		configDir: ClaudeConfigDir;
+		prompt: AsyncIterable<SDKUserMessage>;
 		options?: SDKOptions;
 	}) => CapabilityQuery;
 	readonly logger?: Logger;
@@ -237,7 +238,6 @@ export async function probeClaudeCapabilities(
 ): Promise<ProbeResult> {
 	if (probeOverride) return probeOverride(deps.workspaceRoot);
 
-	const queryFactory = deps.queryFactory ?? sdkQuery;
 	const abortController = new AbortController();
 	const abort = () => abortController.abort();
 	deps.signal?.addEventListener("abort", abort, { once: true });
@@ -257,10 +257,13 @@ export async function probeClaudeCapabilities(
 			allowedTools: [],
 			stderr: () => {},
 		} satisfies SDKOptions;
-		const query = queryFactory({
+		const params = {
 			prompt: singleMessage(),
 			options: decodeClaudeSDKOptionsJsonShape(options),
-		});
+		};
+		const query = deps.queryFactory
+			? deps.queryFactory({ configDir: deps.configDir, ...params })
+			: sdkQuery(params);
 		const init = await query.initializationResult();
 		// Not query.reloadSkills(): this zero-turn query closes before answering it.
 		let skillNames: ReadonlySet<string> = new Set();

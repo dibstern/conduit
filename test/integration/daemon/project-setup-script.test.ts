@@ -316,7 +316,9 @@ describe("Project setup scripts through the built daemon", () => {
 					expect.arrayContaining([
 						expect.objectContaining({
 							prompt: expect.stringContaining("project-setup-read"),
-							cwd: session.path,
+							cwd: expect.stringContaining(
+								join(fixture.configDir, "text-generation", "run-"),
+							),
 						}),
 					]),
 				),

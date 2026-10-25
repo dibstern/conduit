@@ -208,10 +208,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			permissionMode: "full" as const,
 		};
 		await browser.preWarmDraft(draftId, pick);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(1),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		const query = harness.marks.find((mark) => mark.kind === "query");
@@ -269,10 +271,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		const { harness, browser } = await start();
 		const draftId = randomUUID();
 		await browser.preWarmDraft(draftId, { modelId: "sonnet" });
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(1),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
@@ -305,10 +309,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		);
 		const draftId = randomUUID();
 		await browser.preWarmDraft(draftId);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(1),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
@@ -449,10 +455,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 			await client.preWarmDraft(draftId);
 			origins.push({ client, draftId });
 		}
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(8),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(8),
+			{ timeout: 5000 },
 		);
 		const initial = harness.marks.filter(
 			(mark) => mark.kind === "runner-started",
@@ -462,10 +470,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		if (!first) throw new Error("Missing first draft origin");
 		await first.client.preWarmDraft(first.draftId);
 		await browser.preWarmDraft(randomUUID());
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(9),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(9),
+			{ timeout: 5000 },
 		);
 		const evicted = initial[1];
 		if (!evicted) throw new Error("Missing least recently refreshed runner");
@@ -518,10 +528,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		const browser = await harness.connect();
 		const draftId = randomUUID();
 		await browser.preWarmDraft(draftId, { worktreePath });
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(1),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		const query = harness.marks.find((mark) => mark.kind === "query");
@@ -552,20 +564,24 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		const { harness, browser } = await start();
 		const firstDraft = randomUUID();
 		await browser.preWarmDraft(firstDraft);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(1),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
 		);
 		const first = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (first?.kind !== "runner-started")
 			throw new Error("Missing first draft runner");
 		const secondDraft = randomUUID();
 		await browser.preWarmDraft(secondDraft);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(2),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(2),
+			{ timeout: 5000 },
 		);
 		await vi.waitFor(() => expect(alive(first.pid)).toBe(false), {
 			timeout: 5000,
@@ -589,10 +605,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		const { harness, browser } = await start();
 		const draftId = randomUUID();
 		await browser.preWarmDraft(draftId);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(1),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
@@ -622,10 +640,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		const { harness, browser } = await start();
 		const draftId = randomUUID();
 		await browser.preWarmDraft(draftId);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(1),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
@@ -739,10 +759,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		await Promise.all(
 			Array.from({ length: 6 }, () => browser.preWarmSession(sessionId)),
 		);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(1),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
 		);
 		const queries = harness.marks.filter((mark) => mark.kind === "query");
 		expect(queries).toHaveLength(1);
@@ -1714,10 +1736,12 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		const { harness, browser } = await start({ restartProof: true });
 		const sessionId = await browser.createSession(`${query} query shutdown`);
 		await browser.preWarmSession(sessionId);
-		await vi.waitFor(() =>
-			expect(
-				harness.marks.filter((mark) => mark.kind === "initialization-ready"),
-			).toHaveLength(1),
+		await vi.waitFor(
+			() =>
+				expect(
+					harness.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
 		);
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
