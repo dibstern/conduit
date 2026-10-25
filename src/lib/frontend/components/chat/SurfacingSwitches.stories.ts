@@ -37,6 +37,7 @@ const segment: Segment = {
 };
 const turn: Turn = {
 	id: "split-turn",
+	storeId: "split-turn",
 	user: {
 		type: "user",
 		uuid: "split-turn",

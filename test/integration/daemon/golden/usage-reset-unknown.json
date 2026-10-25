@@ -1,0 +1,70 @@
+{
+	"events": [
+		{
+			"sessionId": "s1",
+			"type": "session.created",
+			"payload": {
+				"title": "Cut off",
+				"provider": "claude"
+			}
+		},
+		{
+			"sessionId": "s1",
+			"type": "message.created",
+			"payload": {
+				"role": "user"
+			}
+		},
+		{
+			"sessionId": "s1",
+			"type": "session.usage_limited",
+			"payload": {
+				"instanceId": "claude",
+				"rateLimitType": "seven_day",
+				"resetsAt": 10,
+				"cutOffMessageId": "user-s1"
+			}
+		},
+		{
+			"sessionId": "s1",
+			"type": "session.resumed",
+			"payload": {
+				"reason": "user",
+				"instanceId": "claude"
+			}
+		},
+		{
+			"sessionId": "s1",
+			"type": "session.status",
+			"payload": {
+				"status": "busy"
+			}
+		},
+		{
+			"sessionId": "s2",
+			"type": "session.created",
+			"payload": {
+				"title": "Cut off",
+				"provider": "claude"
+			}
+		},
+		{
+			"sessionId": "s2",
+			"type": "message.created",
+			"payload": {
+				"role": "user"
+			}
+		},
+		{
+			"sessionId": "s2",
+			"type": "session.usage_limited",
+			"payload": {
+				"instanceId": "claude",
+				"rateLimitType": "seven_day",
+				"resetsAt": 10,
+				"cutOffMessageId": "user-s2"
+			}
+		}
+	],
+	"usageChecks": 1
+}

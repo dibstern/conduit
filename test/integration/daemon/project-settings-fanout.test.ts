@@ -140,8 +140,8 @@ it("fans global settings out to another live project's subscribers and defaults"
 				envelope.item._tag !== "clientCount" &&
 				envelope.item._tag !== "opencodeConnection" &&
 				envelope.item._tag !== "providerModels" &&
-				envelope.item._tag !== "harnessDefaults" &&
-				envelope.item._tag !== "titleGeneration"
+				envelope.item._tag !== "titleGeneration" &&
+				envelope.item._tag !== "harnessDefaults"
 					? [envelope.item]
 					: [],
 			);

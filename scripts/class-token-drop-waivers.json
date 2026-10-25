@@ -1,4 +1,13 @@
 {
+	"src/lib/frontend/components/layout/Sidebar.svelte :: min-h-[44px]": "The phone list overflow menu is replaced by a direct Settings cog. Its size-[44px] button retains the 44px touch target; the removed menu items no longer need their minimum height.",
+	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: pt-[4px]": "The phone account card now starts one standard settings section gap below the header. Its padding uses --settings-section-gap, shared with SettingsGroup, instead of the previous 4px inset.",
+	"src/lib/frontend/components/ui/SettingsGroup.svelte :: mt-[16px]": "SettingsGroup keeps its 16px gap through --settings-section-gap with a 16px fallback. SettingsPanel uses that same value above the first phone account section, so its top spacing matches the following groups.",
+	"src/lib/frontend/components/session/SideThreadsPanel.svelte :: bg-text-dimmer/30,border-b,h-[3px],inset-x-0,mt-[10px],mx-auto,rounded-b-[22px],w-[34px]": "Phone Side threads now uses Dialog and SheetChrome for the requested bottom-sheet behavior. SheetChrome owns the top corners and grab handle; the old top-anchored card's bottom border, bottom corners, positioning and smaller bottom handle are intentionally removed. Desktop retains its floating Surface.",
+	"src/lib/frontend/components/model/HarnessLogo.svelte :: accountColorClass(instanceId,": "The class scanner tokenized the old function call as CSS. The badge now reads the persisted instance slot through accountColorClass(instanceId).",
+	"src/lib/frontend/components/model/HarnessLogo.svelte :: orderedUsageAccounts())": "The badge no longer derives identity from usage list order; accountColorClass reads the persisted slot.",
+	"src/lib/frontend/components/ui/AccountDot.svelte :: accountColorClass(instanceId,": "The class scanner tokenized the old function call as CSS. The dot now reads the persisted instance slot through accountColorClass(instanceId).",
+	"src/lib/frontend/components/ui/AccountDot.svelte :: orderedUsageAccounts())": "The dot no longer derives identity from usage list order; accountColorClass reads the persisted slot.",
+	"src/lib/frontend/utils/account-color.ts :: bg-fill-amber,bg-fill-blue": "Amber is reserved for limits. Account identity uses the blue, green, pink, purple, turquoise and orange project/fill tokens in persisted slot order; the duplicate blue and amber hash palette is removed.",
 	"src/lib/frontend/components/chat/QuestionCard.svelte :: mt-[2px]": "Polish B3 aligns each choice control to the label baseline, then centers it on the font x-height with an ex-based transform. The fixed 2px top margin placed controls 2.04px above the measured x-height center and is intentionally removed.",
 	"src/lib/frontend/components/chat/ToolQuestionCard.svelte :: items-start,mt-0.5": "Polish B3 replaces top-aligned circle glyphs and their fixed top margin with baseline-aligned 13px radio or checkbox indicators. An ex-based transform centers each indicator on the label x-height while preserving the row's 6px vertical padding.",
 	"src/lib/frontend/components/session/DraftItem.svelte :: draft-age": "The restyle audit cleanup replaces the duplicate Drafts Mono face and draft-age font shorthand with the app's font-mono and text-mono-xs utilities.",
@@ -1073,5 +1082,6 @@
 	"src/lib/frontend/components/overlays/SettingsPanel.svelte :: bg-white/[0.08],border-border/50,px-1.5,py-0.5,space-y-1.5,text-text-dimmer": {
 		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
 		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
-	}
+	},
+	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock."
 }

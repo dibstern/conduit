@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
 	Clock,
 	Context,
+	Deferred,
 	Effect,
 	Layer,
 	Option,
@@ -16,6 +17,11 @@ import type {
 	ClaudeAccount,
 } from "../../../contracts/account.js";
 import {
+	type accountLimit,
+	narrowAccountLimit,
+} from "../../../contracts/account-limit.js";
+import {
+	AccountStillLimited,
 	AccountUnavailable,
 	type ContinuationError,
 	type ContinuationReason,
@@ -26,7 +32,6 @@ import {
 	SessionBusy,
 	StaleSwitch,
 } from "../../../contracts/limit-recovery.js";
-import { loadDaemonConfigResult } from "../../../daemon/config-persistence.js";
 import { preWarmSession } from "../../../handlers/session-prewarm.js";
 import {
 	type CommitAndSignalFailure,
@@ -52,7 +57,11 @@ import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
 } from "./provider-turn-service.js";
-import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
+import {
+	type ConfigTag,
+	LoggerTag,
+	OrchestrationEngineTag,
+} from "./services.js";
 import { applySessionCommand } from "./session-command.js";
 import { SessionInboxTag } from "./session-inbox.js";
 import {
@@ -125,6 +134,11 @@ const continuationPlanner = (account: Account) => {
 			return assertNever(account);
 	}
 };
+
+const continuationLimit = (
+	input: Parameters<typeof accountLimit>[0],
+	switched = false,
+) => narrowAccountLimit(input, switched ? undefined : input.recovery);
 
 /** The confirmation uses the same planner as delivery, without a live runner. */
 export const previewContinuation = (
@@ -221,7 +235,7 @@ export const makeContinuation = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const store = yield* EventStoreEffectTag;
 	const commit = yield* makeCommitAndSignal;
-	const requesting = new Set<string>();
+	const requesting = new Map<string, Deferred.Deferred<boolean>>();
 	const decodeRecovery = Schema.decodeUnknownSync(
 		Schema.fromJsonString(LimitRecoverySchema),
 	);
@@ -231,20 +245,14 @@ export const makeContinuation = Effect.gen(function* () {
 	) =>
 		recovery?.scheduledAt === expected.scheduledAt &&
 		recovery?.instanceId === expected.instanceId &&
+		recovery?.limitedAt === expected.limitedAt &&
 		recovery?.cutOffMessageId === expected.cutOffMessageId;
-	const cancelledEvent = (
-		sessionId: string,
-		driver: string,
-		releaseQueue = false,
-	) =>
+	const cancelledEvent = (sessionId: string, driver: string) =>
 		canonicalEvent(
 			"session.resume_cancelled",
 			sessionId,
 			{},
-			{
-				provider: driver,
-				...(releaseQueue ? { metadata: { source: "inbox-reset" } } : {}),
-			},
+			{ provider: driver },
 		);
 	const cancelContinuation = (sessionId: string, expected?: LimitRecovery) =>
 		commit.write((project) =>
@@ -263,13 +271,7 @@ export const makeContinuation = Effect.gen(function* () {
 				)
 					return;
 				yield* project(
-					yield* store.appendBatch([
-						cancelledEvent(
-							sessionId,
-							session.driver,
-							expected !== undefined && expected.cutOffMessageId === undefined,
-						),
-					]),
+					yield* store.appendBatch([cancelledEvent(sessionId, session.driver)]),
 				);
 			}),
 		);
@@ -288,12 +290,19 @@ export const makeContinuation = Effect.gen(function* () {
 			due,
 			policy = false,
 		}: {
-			readonly due?: { readonly recovery: LimitRecovery; readonly now: number };
+			readonly due?: {
+				readonly recovery: LimitRecovery;
+				readonly now: number;
+				readonly autoResume: boolean;
+			};
 			/** Limit recovery can run while the cut-off turn is still ending. */
 			readonly policy?: boolean;
 		} = {},
 	): ReturnType<Continuation["requestContinuation"]> =>
 		Effect.gen(function* () {
+			const isDue =
+				due?.recovery.scheduledAt !== undefined &&
+				due.recovery.scheduledAt <= due.now;
 			const read = yield* ReadQueryEffectTag;
 			const initialSession = yield* read.getSession(sessionId);
 			if (!initialSession)
@@ -301,6 +310,13 @@ export const makeContinuation = Effect.gen(function* () {
 					sessionId,
 					expectedInstanceId: options.expectedInstanceId,
 				});
+			if (
+				options.at === undefined &&
+				options.instanceId === options.expectedInstanceId &&
+				(initialSession.limit_recovery === null ||
+					decodeRecovery(initialSession.limit_recovery).continued)
+			)
+				return;
 			const directory = yield* AccountDirectory;
 			const accountRef: AccountRef = options.accountRef ?? {
 				_tag: "Id",
@@ -388,82 +404,53 @@ export const makeContinuation = Effect.gen(function* () {
 						? null
 						: decodeRecovery(initial.limit_recovery);
 				if (!sameSchedule(recovery, due.recovery)) return;
-				if (!recovery || !(yield* stillCutOff(sessionId, recovery)))
-					return yield* cancelContinuation(sessionId, due.recovery);
+				if (
+					!recovery ||
+					recovery.continued ||
+					(recovery.cutOffMessageId !== undefined &&
+						!(yield* stillCutOff(sessionId, recovery)))
+				)
+					return yield* isDue
+						? cancelContinuation(sessionId, due.recovery)
+						: Effect.void;
 			}
+			let resumed = false;
 			yield* Effect.acquireUseRelease(
 				Effect.gen(function* () {
 					if (requesting.has(sessionId))
 						return yield* new SessionBusy({ sessionId });
-					requesting.add(sessionId);
+					const finished = Deferred.makeUnsafe<boolean>();
+					requesting.set(sessionId, finished);
+					return finished;
 				}),
 				() =>
 					Effect.uninterruptibleMask((restore) =>
 						Effect.gen(function* () {
-							// Future quota cannot be checked now. Due and immediate resumes
-							// share the fresh probe and the recheck inside the commit.
+							// Auto-resume shares the daemon's five-minute Usage Reading.
+							// Explicit Claude schedules need no probe. Codex retains its
+							// native due-time sign-in and missing-reset checks.
 							// Shutdown may interrupt the probe, but an accepted resume must
 							// reach the existing turn dispatcher before this fiber stops.
 							const decision =
-								options.at === undefined
+								options.at === undefined &&
+								(!due || due.autoResume || account.driver === "codex")
 									? yield* restore(
 											Effect.flatMap(Usage, (usage) =>
-												usage.refresh([account.id]).pipe(
-													Effect.map((readings) => {
-														const reading = readings[0];
-														if (account.driver === "codex" && reading) {
-															const recovery = initial.limit_recovery
-																? decodeRecovery(initial.limit_recovery)
-																: undefined;
-															const limitId =
-																recovery?.rateLimitType ?? "codex";
-															const windows = reading.windows.filter(
-																(window) => window.limitId === limitId,
-															);
-															return {
-																...reading,
-																windows,
-																status:
-																	reading.status === "unknown" ||
-																	reading.status === "unavailable"
-																		? reading.status
-																		: windows.some(
-																					(window) => window.utilization >= 100,
-																				)
-																			? ("limited" as const)
-																			: ("available" as const),
-															};
-														}
-														return reading;
-													}),
-												),
+												usage
+													.refresh({
+														accountIds: [account.id],
+														maxAge: due ? "5 minutes" : 0,
+													})
+													.pipe(
+														Effect.map((readings) =>
+															readings.find(
+																(reading) => reading.accountId === account.id,
+															),
+														),
+													),
 											),
 										)
 									: undefined;
-							const exhausted =
-								decision?.windows.filter(
-									(window) =>
-										(account.driver === "codex" ||
-											window.kind === "five_hour" ||
-											window.kind === "seven_day") &&
-										window.utilization >= 100,
-								) ?? [];
-							const limit = exhausted[0];
-							const resetTimes = exhausted.map(
-								(window) => Date.parse(window.resetsAt ?? "") / 1000,
-							);
-							const futureResets = resetTimes.filter(
-								(at) => Number.isFinite(at) && (!due || at > due.now),
-							);
-							const resetsAt =
-								futureResets.length > 0 ? Math.max(...futureResets) : undefined;
-							// A cached or fresh limited result cannot re-arm past a reset it
-							// explicitly says has expired. Unknown reset times keep the
-							// cut-off continuation's existing retry policy.
-							const limitExpired =
-								due &&
-								resetTimes.length > 0 &&
-								resetTimes.every((at) => Number.isFinite(at) && at <= due.now);
 							const turns = yield* ProviderTurnServiceTag;
 							// The inbox constructs this service's scheduling context before
 							// it exists. Actual resumes run in the completed relay context.
@@ -481,26 +468,6 @@ export const makeContinuation = Effect.gen(function* () {
 									// A probe can take five seconds; selection and turn state must
 									// still agree when the continuation is committed.
 									const session = yield* checkSession(true);
-									if (
-										!due &&
-										decision &&
-										(decision.status === "limited" ||
-											decision.status === "unavailable" ||
-											(account.driver === "codex" &&
-												source.id !== account.id &&
-												decision.status === "unknown"))
-									)
-										return yield* new AccountUnavailable({
-											instanceId: account.id,
-											reason:
-												decision.status === "unavailable" ||
-												decision.status === "unknown"
-													? (decision.reason ??
-														(account.driver === "codex"
-															? "Codex sign-in could not be verified. Try again."
-															: "Claude account is unavailable"))
-													: `Account is still limited (${limit?.kind ?? "usage"}).`,
-										});
 									const recovery =
 										session.limit_recovery === null
 											? null
@@ -510,13 +477,16 @@ export const makeContinuation = Effect.gen(function* () {
 										if (!sameSchedule(recovery, due.recovery)) return;
 										if (
 											!recovery ||
-											!(yield* stillCutOff(sessionId, recovery))
+											recovery.continued ||
+											(recovery.cutOffMessageId !== undefined &&
+												!(yield* stillCutOff(sessionId, recovery)))
 										) {
-											yield* project(
-												yield* store.appendBatch([
-													cancelledEvent(sessionId, source.driver),
-												]),
-											);
+											if (isDue)
+												yield* project(
+													yield* store.appendBatch([
+														cancelledEvent(sessionId, source.driver),
+													]),
+												);
 											return;
 										}
 									}
@@ -540,12 +510,10 @@ export const makeContinuation = Effect.gen(function* () {
 													{
 														instanceId: session.provider,
 														at: options.at,
+														by: policy ? "policy" : "user",
 													},
 													{
 														provider: source.driver,
-														...(policy && {
-															metadata: { source: "limit-policy" },
-														}),
 													},
 												),
 											]),
@@ -553,30 +521,115 @@ export const makeContinuation = Effect.gen(function* () {
 										return;
 									}
 									// Dismiss or a reply may have closed it while the probe ran.
-									if (!switched && !recovery?.cutOffMessageId) return;
+									if (!switched && (!recovery || recovery.continued)) return;
+									const { reading, limit } = continuationLimit(
+										{
+											asker: due ? "automatic" : "user",
+											modelId: session.model_id ?? undefined,
+											...(decision === undefined ? {} : { reading: decision }),
+											...(recovery === null ? {} : { recovery }),
+											now: due
+												? due.now * 1000
+												: yield* Clock.currentTimeMillis,
+										},
+										switched,
+									);
+									if (
+										account.driver === "codex" &&
+										switched &&
+										reading?.status === "unknown"
+									)
+										return yield* new AccountUnavailable({
+											instanceId: account.id,
+											reason:
+												reading.reason ??
+												"Codex sign-in could not be verified. Try again.",
+										});
+									if (!due) {
+										if (
+											account.driver === "codex" &&
+											(limit.kind !== "go" || reading?.status === "limited")
+										)
+											return yield* new AccountUnavailable({
+												instanceId: account.id,
+												reason:
+													limit.kind === "signed-out"
+														? (reading?.reason ?? "Account is unavailable")
+														: `Account is still limited (${reading?.windows.find((window) => window.utilization >= 100)?.kind ?? "usage"}).`,
+											});
+										if (limit.kind === "wait-until")
+											return yield* new AccountStillLimited({
+												label: limit.label,
+												until: limit.until,
+											});
+										if (limit.kind === "signed-out" || limit.kind === "wait")
+											return yield* new AccountUnavailable({
+												instanceId: account.id,
+												reason: reading?.reason ?? "Account is unavailable",
+											});
+									}
 									if (
 										due &&
 										recovery &&
-										((decision?.status === "limited" && !limitExpired) ||
-											decision?.status === "unavailable")
+										(due.autoResume || account.driver === "codex")
 									) {
-										const event =
-											decision.status === "limited" && recovery.rearms < 3
-												? canonicalEvent(
-														"session.resume_scheduled",
-														sessionId,
-														{
-															instanceId: recovery.instanceId,
-															at: resetsAt ?? due.now + 300,
-														},
-														{
-															provider: source.driver,
-															metadata: { source: "continuation-sweep" },
-														},
-													)
-												: cancelledEvent(sessionId, source.driver);
-										yield* project(yield* store.appendBatch([event]));
-										return;
+										if (
+											account.driver === "codex" &&
+											isDue &&
+											(limit.kind === "signed-out" ||
+												(reading?.status === "limited" &&
+													(limit.kind === "wait" ||
+														(limit.kind !== "go" && recovery.rearms >= 3))))
+										) {
+											const event =
+												reading?.status === "limited" && recovery.rearms < 3
+													? canonicalEvent(
+															"session.resume_scheduled",
+															sessionId,
+															{
+																instanceId: recovery.instanceId,
+																at: due.now + 300,
+																by: "sweep",
+															},
+															{ provider: source.driver },
+														)
+													: cancelledEvent(sessionId, source.driver);
+											yield* project(yield* store.appendBatch([event]));
+											return;
+										}
+										if (
+											limit.kind !== "go" &&
+											!(isDue && limit.kind === "wait") &&
+											!(
+												account.driver === "codex" &&
+												isDue &&
+												reading?.status === "unknown"
+											)
+										) {
+											if (
+												limit.kind === "wait-until" &&
+												(isDue ||
+													recovery.scheduledAt === undefined ||
+													limit.until / 1000 > recovery.scheduledAt)
+											)
+												yield* project(
+													yield* store.appendBatch([
+														canonicalEvent(
+															"session.resume_scheduled",
+															sessionId,
+															{
+																instanceId: recovery.instanceId,
+																at: limit.until / 1000,
+																by: "sweep",
+															},
+															{
+																provider: source.driver,
+															},
+														),
+													]),
+												);
+											return;
+										}
 									}
 									if (switched) {
 										// Complete every refusal decision before any canonical write.
@@ -622,13 +675,17 @@ export const makeContinuation = Effect.gen(function* () {
 								yield* Effect.sync(() =>
 									engine.bindSession(sessionId, account.id),
 								);
-								yield* engine.dispatchEffect({
-									type: "end_session",
-									commandId: randomUUID(),
-									sessionId,
-									targetProviderId: continued.previousInstanceId,
-									account: source,
-								});
+								// Same-driver account switches rebind on the next send. The
+								// process adapter negotiates query reuse with the live runner;
+								// older runners still drain and restart at that boundary.
+								if (source.driver !== account.driver)
+									yield* engine.dispatchEffect({
+										type: "end_session",
+										commandId: randomUUID(),
+										sessionId,
+										targetProviderId: continued.previousInstanceId,
+										account: source,
+									});
 								yield* preWarmSession(sessionId, account).pipe(
 									Effect.catch((error) =>
 										Effect.flatMap(LoggerTag, (log) =>
@@ -654,6 +711,7 @@ export const makeContinuation = Effect.gen(function* () {
 									),
 								]);
 							}
+							resumed = true;
 							if (!continued.cutOffMessageId) return;
 							const row = yield* read.getSession(sessionId);
 							const model =
@@ -686,19 +744,53 @@ export const makeContinuation = Effect.gen(function* () {
 							);
 						}).pipe(Effect.scoped),
 					),
-				() => Effect.sync(() => requesting.delete(sessionId)),
+				(finished) =>
+					Effect.gen(function* () {
+						requesting.delete(sessionId);
+						yield* Deferred.succeed(finished, resumed);
+					}),
 			);
-		});
+		}).pipe(
+			Effect.catchTag("SessionBusy", (error) =>
+				Effect.gen(function* () {
+					if (
+						options.at === undefined &&
+						options.instanceId === options.expectedInstanceId
+					) {
+						const pending = requesting.get(sessionId);
+						if (pending) {
+							// A Resume wins even if its turn already hit another limit.
+							// The next sweep can reconsider waits or replacement schedules.
+							if ((yield* Deferred.await(pending)) || due) return;
+						}
+						const read = yield* ReadQueryEffectTag;
+						const session = yield* read.getSession(sessionId);
+						if (
+							session?.limit_recovery === null ||
+							(session?.limit_recovery != null &&
+								decodeRecovery(session.limit_recovery).continued)
+						)
+							return;
+					}
+					return yield* Effect.fail(error);
+				}),
+			),
+		);
 	const sweepDueContinuations: Continuation["sweepDueContinuations"] = (now) =>
 		Effect.gen(function* () {
 			const currentTime = now ?? (yield* Clock.currentTimeMillis) / 1000;
+			const autoResume = (yield* readUsageLimits)?.autoResume ?? false;
 			const rows = yield* sql<{
 				id: string;
 				limit_recovery: string;
-			}>`SELECT id, limit_recovery FROM sessions WHERE project_id = ${store.projectId} AND json_extract(limit_recovery, '$.scheduledAt') <= ${currentTime} ORDER BY id`;
+			}>`SELECT id, limit_recovery FROM sessions WHERE project_id = ${store.projectId} AND limit_recovery IS NOT NULL AND (json_extract(limit_recovery, '$.scheduledAt') <= ${currentTime} OR (${autoResume} AND COALESCE(json_extract(limit_recovery, '$.continued'), 0) = 0)) ORDER BY id`;
 			for (const row of rows) {
 				const recovery = decodeRecovery(row.limit_recovery);
-				const cancel = () => cancelContinuation(row.id, recovery);
+				const isDue =
+					recovery.scheduledAt !== undefined &&
+					recovery.scheduledAt <= currentTime;
+				const cancel = () =>
+					isDue ? cancelContinuation(row.id, recovery) : Effect.void;
 				yield* requestContinuation(
 					row.id,
 					{
@@ -706,13 +798,14 @@ export const makeContinuation = Effect.gen(function* () {
 						expectedInstanceId: recovery.instanceId,
 						reason: "reset",
 					},
-					{ due: { recovery, now: currentTime } },
+					{ due: { recovery, now: currentTime, autoResume } },
 				).pipe(
 					Effect.catchTags({
 						AccountUnroutable: cancel,
 						DriverMismatch: cancel,
 						StaleSwitch: cancel,
-						SessionBusy: cancel,
+						// A Held Message can wait for the next sweep without losing its Resume.
+						SessionBusy: recovery.cutOffMessageId ? cancel : () => Effect.void,
 					}),
 					Effect.catch((error) =>
 						Effect.logError("Scheduled continuation failed", row.id, error),
@@ -724,13 +817,7 @@ export const makeContinuation = Effect.gen(function* () {
 		const configRef = yield* Effect.serviceOption(DaemonConfigRefTag);
 		if (configRef._tag === "Some")
 			return (yield* Ref.get(configRef.value)).usageLimits;
-		const config = yield* ConfigTag;
-		return yield* Effect.suspend(() =>
-			Effect.fromResult(loadDaemonConfigResult(config.configDir)),
-		).pipe(
-			Effect.map((loaded) => loaded.usageLimits),
-			Effect.catchTag("NotFound", () => Effect.succeed(undefined)),
-		);
+		return undefined;
 	});
 	const tryAutoSwitch = (sessionId: string) =>
 		Effect.gen(function* () {
@@ -738,7 +825,8 @@ export const makeContinuation = Effect.gen(function* () {
 			if (!usageLimits?.autoSwitch) return false;
 			const rows = yield* sql<{
 				limit_recovery: string | null;
-			}>`SELECT limit_recovery FROM sessions WHERE id = ${sessionId}`;
+				model_id: string | null;
+			}>`SELECT limit_recovery, model_id FROM sessions WHERE id = ${sessionId}`;
 			const value = rows[0]?.limit_recovery;
 			const recovery = value == null ? null : decodeRecovery(value);
 			if (!recovery || recovery.continued) return false;
@@ -762,7 +850,10 @@ export const makeContinuation = Effect.gen(function* () {
 			)
 				return false;
 			const usage = yield* Usage;
-			const instanceId = yield* usage.pickFailover(recovery.instanceId);
+			const instanceId = yield* usage.pickFailover(
+				recovery.instanceId,
+				rows[0]?.model_id ?? undefined,
+			);
 			if (instanceId === undefined) return false;
 			yield* requestContinuation(
 				sessionId,
@@ -781,24 +872,37 @@ export const makeContinuation = Effect.gen(function* () {
 			if (!usageLimits?.autoResume) return false;
 			const rows = yield* sql<{
 				limit_recovery: string | null;
-			}>`SELECT limit_recovery FROM sessions WHERE id = ${sessionId}`;
+				model_id: string | null;
+			}>`SELECT limit_recovery, model_id FROM sessions WHERE id = ${sessionId}`;
 			const value = rows[0]?.limit_recovery;
 			const recovery = value == null ? null : decodeRecovery(value);
-			// No reset time leaves Try again to the user; a schedule already won.
-			if (
-				recovery?.resetsAt === undefined ||
-				recovery.scheduledAt !== undefined
-			)
+			if (!recovery || recovery.continued || recovery.scheduledAt !== undefined)
 				return false;
+			const usage = yield* Usage;
+			const now = yield* Clock.currentTimeMillis;
+			const reading = yield* usage.latest(recovery.instanceId);
+			const { limit } = continuationLimit({
+				asker: "automatic",
+				modelId: rows[0]?.model_id ?? undefined,
+				...(reading === undefined ? {} : { reading }),
+				recovery,
+				now,
+			});
+			if (limit.kind !== "go" && limit.kind !== "wait-until") return false;
 			yield* requestContinuation(
 				sessionId,
 				{
 					instanceId: recovery.instanceId,
 					expectedInstanceId: recovery.instanceId,
 					reason: "reset",
-					at: recovery.resetsAt,
+					...(limit.kind === "wait-until" ? { at: limit.until / 1000 } : {}),
 				},
-				{ policy: true },
+				{
+					policy: true,
+					...(limit.kind === "go"
+						? { due: { recovery, now: now / 1000, autoResume: true } }
+						: {}),
+				},
 			);
 			return true;
 		});
@@ -882,7 +986,7 @@ export const makeContinuation = Effect.gen(function* () {
 					driver: string;
 					cut_off: string | null;
 					scheduled_at: number | null;
-				}>`SELECT (SELECT provider FROM events WHERE session_id = ${sessionId} AND type = 'session.resume_scheduled' ORDER BY sequence DESC LIMIT 1) AS driver, json_extract(limit_recovery, '$.cutOffMessageId') AS cut_off, json_extract(limit_recovery, '$.scheduledAt') AS scheduled_at FROM sessions WHERE id = ${sessionId}`;
+				}>`SELECT (SELECT provider FROM events WHERE session_id = ${sessionId} AND type IN ('session.usage_limited', 'session.resume_scheduled') ORDER BY sequence DESC LIMIT 1) AS driver, json_extract(limit_recovery, '$.cutOffMessageId') AS cut_off, json_extract(limit_recovery, '$.scheduledAt') AS scheduled_at FROM sessions WHERE id = ${sessionId}`;
 				const session = rows[0];
 				if (!session) return;
 				const cutOffMessageId = session.cut_off;
@@ -894,7 +998,7 @@ export const makeContinuation = Effect.gen(function* () {
 									"session.cut_off_dismissed",
 									sessionId,
 									{ cutOffMessageId },
-									{ provider: "claude" },
+									{ provider: session.driver },
 								),
 							]),
 					...(session.scheduled_at == null

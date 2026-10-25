@@ -9,6 +9,7 @@ import {
 	planUsageWindows,
 	usageDisplay,
 } from "../utils/continuation.js";
+import { clock } from "./clock.svelte.js";
 import { getEffectiveInstanceId } from "./discovery.svelte.js";
 import {
 	getDriverTraits,
@@ -78,7 +79,7 @@ export function usageAlert(
 	| { level: "runs_out"; account: UsageReading; window: PlanUsageWindow }
 	| null {
 	const limited = accounts.find(
-		(account) => usageDisplay(account, warnAt).level === "limited",
+		(account) => usageDisplay(account, warnAt, clock.now).level === "limited",
 	);
 	if (limited) return { level: "limited", account: limited };
 	for (const kind of ["seven_day", "five_hour"] as const) {

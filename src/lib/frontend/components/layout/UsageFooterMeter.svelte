@@ -1,9 +1,10 @@
 <script lang="ts">
 	import SheetChrome from "../ui/SheetChrome.svelte";
 	import { flushSync } from "svelte";
+	import { clock } from "../../stores/clock.svelte.js";
 	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getProviderDriver } from "../../../contracts/provider-instance.js";
-	import { DISMISS_FRACTION, dragToDismiss, FLICK_PX_PER_MS, placeSheet } from "../../actions/drag-to-dismiss.js";
+	import { DISMISS_FRACTION, FLICK_PX_PER_MS, placeSheet } from "../../actions/drag-to-dismiss.js";
 	import { applyInstanceListResponse, getInstanceById } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { composerAccountId, orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
@@ -30,7 +31,7 @@
 	const docked = $derived.by(() => {
 		const shown = accounts.filter((reading) => {
 			if (reading.accountId === currentAccount) return true;
-			const { level } = usageDisplay(reading, usageState.limits.warnAt);
+			const { level } = usageDisplay(reading, usageState.limits.warnAt, clock.now);
 			return level === "warn" || level === "limited";
 		});
 		return shown.length > 0 ? shown : accounts.slice(0, 1);
@@ -136,7 +137,8 @@
 
 	function displayWindow(reading: UsageReading, window: UsageWindow) {
 		// A limited 5h window must not turn a healthy week red.
-		const display = usageDisplay({ ...reading, status: window.utilization >= 100 ? "limited" : "available", windows: [window] }, usageState.limits.warnAt);
+		const display = usageDisplay(reading, usageState.limits.warnAt, clock.now, window);
+		if (reading.stale && display.level !== "limited") return undefined;
 		const percentage = `${Math.round(window.utilization)}%`;
 		return {
 			...display,
@@ -155,7 +157,7 @@
 
 {#snippet cell(prefix: string, reading: UsageReading, kind: WindowKind, layout = "", rowId = reading.accountId)}
 	{@const window = reading.windows.find((window) => window.kind === kind)}
-	{@const display = window && !reading.stale && reading.status !== "unknown" && reading.status !== "unavailable" ? displayWindow(reading, window) : undefined}
+	{@const display = window && reading.status !== "unknown" && reading.status !== "unavailable" ? displayWindow(reading, window) : undefined}
 	{@const reset = window && usageResetTime(window.resetsAt, kind === "seven_day")}
 	<span
 		data-testid="{prefix}-cell-{rowId}-{kind}"
@@ -165,6 +167,7 @@
 	>
 		<QuotaMeter
 			used={display && window ? window.utilization : "unknown"}
+			limited={display?.level === "limited"}
 			warnAt={usageState.limits.warnAt}
 			caption={display?.label ?? "—"}
 			variant="usage"
@@ -289,8 +292,7 @@
 			</TextButton>
 		{/if}
 	</div>
-	<Dialog open={sheetOpen} onclose={() => { sheetOpen = false; }} placement="sheet" ariaLabel="Usage" returnFocus={() => document.querySelector<HTMLElement>('[data-testid="usage-phone-dock"]')}>
-		<div bind:this={sheet} use:dragToDismiss={{ ondismiss: () => { sheetOpen = false; }, dismissOffset: dockOffset }}>
+	<Dialog open={sheetOpen} onclose={() => { sheetOpen = false; }} placement="sheet" bind:sheetElement={sheet} sheetDismissOffset={dockOffset} ariaLabel="Usage" returnFocus={() => document.querySelector<HTMLElement>('[data-testid="usage-phone-dock"]')}>
 			<SheetChrome data-testid="usage-sheet" bottomPadding={16} class="text-[10.5px]" bodyClass="px-[4px]">
 				{@render peek("usage-sheet")}
 				<div class={folded.length > 0 ? "sheet-rest" : undefined}>
@@ -301,7 +303,6 @@
 					</div>
 				</div>
 			</SheetChrome>
-		</div>
 	</Dialog>
 {:else if single || grid}
 	<div data-testid="usage-footer-meter" class="flex shrink-0 flex-col border-t border-border-subtle px-[8px] pt-[8px] pb-[10px] text-left text-[12px]">

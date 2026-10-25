@@ -51,6 +51,16 @@ export const MessageSurfacingStatusSchema = Schema.Struct({
 });
 export type MessageSurfacingStatus = typeof MessageSurfacingStatusSchema.Type;
 
+/** Jev runs for a session with a usable key when the session or, by default,
+ *  the global switch says so. */
+export const sessionJevEnabled = (
+	session: { readonly jev?: "on" | "off" | null | undefined } | undefined,
+	status: Pick<MessageSurfacingStatus, "enabled" | "key">,
+): boolean =>
+	status.key.source !== "none" &&
+	!status.key.rejected &&
+	(session?.jev === "on" || (session?.jev == null && status.enabled));
+
 export const MessageSurfacingPatchSchema = Schema.Struct({
 	enabled: Schema.optional(Schema.Boolean),
 	summariesEnabled: Schema.optional(Schema.Boolean),

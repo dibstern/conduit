@@ -56,6 +56,19 @@ export class AccountUnavailable extends Schema.TaggedError<AccountUnavailable>()
 	}
 }
 
+export class AccountStillLimited extends Schema.TaggedError<AccountStillLimited>()(
+	"AccountStillLimited",
+	{
+		label: Schema.String,
+		/** Epoch milliseconds. */
+		until: Schema.Number,
+	},
+) {
+	get message() {
+		return `Claude still shows the ${this.label} until ${new Date(this.until).toUTCString()}.`;
+	}
+}
+
 export class DriverMismatch extends Schema.TaggedError<DriverMismatch>()(
 	"DriverMismatch",
 	{
@@ -82,6 +95,7 @@ export const ContinuationErrorSchema = Schema.Union([
 	SessionBusy,
 	StaleSwitch,
 	AccountUnavailable,
+	AccountStillLimited,
 	DriverMismatch,
 	HandoffTooLarge,
 ]);
@@ -92,6 +106,10 @@ export const LimitRecoverySchema = Schema.Struct({
 	rateLimitType: Schema.String,
 	/** Unix seconds, as reported by the Claude SDK. */
 	resetsAt: Schema.optional(Schema.Number),
+	/** Epoch milliseconds, from the session.usage_limited event's creation time. */
+	limitedAt: Schema.optional(Schema.Number),
+	/** Wait for the reset time even when a Usage Reading appears free. */
+	timeOnly: Schema.optional(Schema.Boolean),
 	cutOffMessageId: Schema.optional(Schema.String),
 	scheduledAt: Schema.optional(Schema.Number),
 	/** The limit policy scheduled the resume, not the user. */

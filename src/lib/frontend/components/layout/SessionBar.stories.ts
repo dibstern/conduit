@@ -38,6 +38,7 @@ import {
 } from "../../stores/terminal.svelte.js";
 import { dimThemeColor, setThemeMode } from "../../stores/theme.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
+import { wsDebugState } from "../../stores/ws-debug.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import {
@@ -183,6 +184,7 @@ const meta = {
 	args: { getGoalDetails },
 	beforeEach: () => {
 		featureFlags.debug = false;
+		wsDebugState.panelOpen = false;
 		uiState.toasts = [];
 		const detailsOpen = goalDetails.open;
 		const now = sessionState.now;
@@ -649,6 +651,23 @@ export const GoalDetailsOpenLight: Story = {
 	tags: ["viewport-capture"],
 	globals: { theme: "light" },
 };
+
+export const GoalSheetScrollable: Story = {
+	...GoalDetailsOpen,
+	args: {
+		...GoalDetailsOpen.args,
+		getGoalDetails: async (input: Parameters<typeof getGoalDetails>[0]) => {
+			const details = await getGoalDetails(input);
+			return {
+				...details,
+				checks: details.checks.map((check) => ({
+					...check,
+					reason: Array.from({ length: 20 }, () => check.reason).join(" "),
+				})),
+			};
+		},
+	},
+};
 export const GoalDetailsCheckingLight: Story = {
 	...GoalDetailsChecking,
 	tags: ["viewport-capture"],
@@ -889,6 +908,7 @@ export const NarrowestPhone: Story = {
 const mockInstances: OpenCodeInstance[] = [
 	{
 		id: "inst-personal",
+		colorSlot: 0,
 		driver: "opencode",
 		isDefault: true,
 		name: "Personal",
@@ -900,6 +920,7 @@ const mockInstances: OpenCodeInstance[] = [
 	},
 	{
 		id: "inst-work",
+		colorSlot: 1,
 		driver: "opencode",
 		isDefault: false,
 		name: "Work",
@@ -939,7 +960,7 @@ export const OverflowMenuOpen: Story = {
 		await expect(within(menu).getByTestId("session-ctx-snooze")).toBeVisible();
 		await expect(within(menu).getByTestId("session-ctx-delete")).toBeVisible();
 		for (const name of ["Share", "Settings"])
-			await expect(within(menu).getByRole("menuitem", { name })).toBeVisible();
+			await expect(within(menu).getByRole("button", { name })).toBeVisible();
 		await expect(menu).toHaveClass(/bottom-0/);
 		await expect(
 			within(menu).getByRole("menuitemradio", { name: "Chat" }),
@@ -967,12 +988,55 @@ export const OverflowMenuDebug: Story = {
 			within(canvasElement).getByTestId("session-bar-island-overflow"),
 		);
 		const menu = await sessionSheet("session-bar-island-menu");
-		await expect(
-			within(menu).getByTestId("overflow-debug"),
-		).toHaveAccessibleName("Debug panel");
-		await expect(within(menu).getByTestId("overflow-debug")).toHaveTextContent(
-			/Debug\s*dev/,
+		const debug = within(menu).getByRole("switch", { name: "Debug panel" });
+		await expect(debug.tagName).toBe("BUTTON");
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		await expect(debug).toHaveTextContent(/^Debug$/);
+		await expect(debug.getBoundingClientRect().height).toBeGreaterThanOrEqual(
+			44,
 		);
+		await expect(
+			debug.querySelectorAll("button, input, [role='switch']"),
+		).toHaveLength(0);
+		const label = within(debug).getByText("Debug", { exact: true });
+		const icon = debug.querySelector("svg");
+		const visualSwitch = debug.querySelector("[data-switch]");
+		if (!icon || !visualSwitch)
+			throw new Error("Debug icon or switch is missing");
+		await expect(visualSwitch).toHaveAttribute("aria-hidden", "true");
+		await expect(visualSwitch.getBoundingClientRect().width).toBe(30);
+		await expect(visualSwitch.getBoundingClientRect().height).toBe(18);
+		let checked = false;
+		for (const point of [label, icon, visualSwitch]) {
+			const box = point.getBoundingClientRect();
+			const coords = {
+				clientX: box.x + box.width / 2,
+				clientY: box.y + box.height / 2,
+			};
+			const target = document.elementFromPoint(coords.clientX, coords.clientY);
+			if (!target || !debug.contains(target))
+				throw new Error("Debug tap point is obscured");
+			await userEvent.pointer([
+				{ keys: "[TouchA>]", target, coords },
+				{ keys: "[/TouchA]", target, coords },
+			]);
+			checked = !checked;
+			await expect(debug).toHaveAttribute("aria-checked", String(checked));
+			await waitFor(() =>
+				expect(!!document.querySelector(".debug-panel")).toBe(checked),
+			);
+			if (checked)
+				await expect(document.querySelector(".debug-panel")).toBeVisible();
+			await expect(menu).toBeVisible();
+		}
+		// A keyboard activation uses the same single control and keeps the sheet open.
+		debug.focus();
+		await userEvent.keyboard(" ");
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		await waitFor(() =>
+			expect(document.querySelector(".debug-panel")).toBeNull(),
+		);
+		await expect(menu).toBeVisible();
 	},
 };
 export const OverflowMenuDebugLight: Story = {
@@ -2004,16 +2068,22 @@ function setupSideThreads(rows: readonly Row[]) {
 	};
 }
 
-/** The list must hang under the bar, wholly on screen. */
+/** Phone sheets reach the bottom edge; desktop cards hang under the bar. */
 async function assertSideThreadsPanel(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
 	const panel = await canvas.findByTestId("side-threads-panel");
 	await expect(panel).toBeVisible();
 	const box = panel.getBoundingClientRect();
 	const bar = canvas.getByTestId("session-bar").getBoundingClientRect();
-	expect(box.top).toBeGreaterThanOrEqual(bar.bottom - 1);
-	expect(box.left).toBeGreaterThanOrEqual(bar.left);
-	expect(box.right).toBeLessThanOrEqual(bar.right);
+	if (panel.closest("dialog")) {
+		expect(box.bottom).toBe(window.innerHeight);
+		expect(box.left).toBe(0);
+		expect(box.right).toBe(window.innerWidth);
+	} else {
+		expect(box.top).toBeGreaterThanOrEqual(bar.bottom - 1);
+		expect(box.left).toBeGreaterThanOrEqual(bar.left);
+		expect(box.right).toBeLessThanOrEqual(bar.right);
+	}
 	return within(panel);
 }
 
@@ -2054,21 +2124,33 @@ export const SideThreadsOpen: Story = {
 		const theme = document.documentElement.classList.contains("light-theme")
 			? "light"
 			: "dark";
-		expect(
-			getComputedStyle(within(canvasElement).getByTestId("side-threads-scrim"))
-				.backgroundColor,
-		).toBe(theme === "dark" ? "rgba(6, 7, 9, 0.55)" : "rgba(22, 26, 33, 0.34)");
+		const dialog = within(canvasElement).getByTestId("modal-sheet-scrim");
+		expect(getComputedStyle(dialog, "::backdrop").backgroundColor).toBe(
+			theme === "dark" ? "rgba(6, 7, 9, 0.55)" : "rgba(22, 26, 33, 0.34)",
+		);
 		expect(
 			document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
 				?.content,
 		).toBe(theme === "dark" ? "#0b0c0e" : "#b0b1b3");
 		const panel = within(canvasElement).getByTestId("side-threads-panel");
-		const bar = within(canvasElement).getByTestId("session-bar");
-		// The phone sheet spans the bar.
-		expect(panel.getBoundingClientRect().width).toBe(
-			bar.getBoundingClientRect().width,
-		);
+		// The native dialog spans the phone viewport.
+		expect(panel.getBoundingClientRect().width).toBe(window.innerWidth);
 	},
+};
+
+export const SideThreadsScrollable: Story = {
+	tags: ["viewport-capture"],
+	beforeEach: () =>
+		setupSideThreads(
+			Array.from({ length: 30 }, (_, index) => ({
+				id: `scrollable-side-thread-${index}`,
+				title: `Side thread ${index + 1}`,
+				parentID: mockSession.id,
+				sideThread: true,
+				createdAt: sideThreadsNow - (index + 1) * 60_000,
+				updatedAt: sideThreadsNow - (index + 1) * 60_000,
+			})),
+		),
 };
 
 export const DesktopSideThreadsOpen: Story = {
@@ -2121,6 +2203,10 @@ export const SideThreadsClosed: Story = {
 		await userEvent.click(control);
 		await assertSideThreadsPanel(canvasElement);
 		await userEvent.keyboard("{Escape}");
+		// Synthetic keys do not trigger the browser's native dialog cancel event.
+		canvas
+			.getByTestId("modal-sheet-scrim")
+			.dispatchEvent(new Event("cancel", { cancelable: true }));
 		await waitFor(() =>
 			expect(canvas.queryByTestId("side-threads-panel")).toBeNull(),
 		);
@@ -2481,6 +2567,39 @@ export const DesktopMenu: Story = {
 			"hold",
 		);
 	},
+};
+
+export const DesktopDebugMenu: Story = {
+	...DesktopMenu,
+	tags: ["viewport-capture"],
+	beforeEach: [
+		answerDesktopAutoSettle,
+		() => {
+			sessionViewState.compact = false;
+			featureFlags.debug = true;
+		},
+	],
+	play: async ({ canvasElement }) => {
+		await userEvent.click(
+			within(canvasElement).getByTestId("session-bar-overflow"),
+		);
+		const menu = await desktopMenu();
+		const debug = within(menu).getByRole("menuitemcheckbox", {
+			name: "Debug panel",
+		});
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		await userEvent.click(within(debug).getByText("Debug", { exact: true }));
+		await expect(debug).toHaveAttribute("aria-checked", "true");
+		await expect(menu).toBeVisible();
+		await userEvent.click(within(debug).getByText("Debug", { exact: true }));
+		await expect(debug).toHaveAttribute("aria-checked", "false");
+		await expect(menu).toBeVisible();
+	},
+};
+export const DesktopDebugMenuLight: Story = {
+	...DesktopDebugMenu,
+	tags: ["viewport-capture"],
+	globals: { theme: "light" },
 };
 
 export const DesktopSnoozeList: Story = {
@@ -3079,7 +3198,7 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 			if (stuck) {
 				await expect(panel.getByTestId("goal-details-stuck")).toHaveTextContent(
 					paused
-						? "Paused while stuck"
+						? "Paused after 26 minutes stuck"
 						: `Stuck for ${state === "StuckStillCurrent" || state === "StuckUpdating" ? 26 : 24} minutes`,
 				);
 				await expect(panel.getByTestId("goal-details-stuck")).toHaveTextContent(

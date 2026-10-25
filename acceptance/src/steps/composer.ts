@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { type CDPSession, expect, type Page } from "@playwright/test";
 import { sendMockFamily } from "../../../test/e2e/helpers/rpc-mock.js";
 import { InputPage } from "../../../test/e2e/page-objects/input.page.js";
 import { DESKTOP_VIEWPORT, PINNED_CLOCK_MS } from "../playwrightDriver.js";
@@ -13,6 +13,21 @@ import {
 } from "./shared.js";
 
 const composerMessages = new WeakMap<Page, string>();
+const sendTapPoints = new WeakMap<Page, { x: number; y: number }>();
+
+async function tapAt(
+	cdp: CDPSession,
+	point: { x: number; y: number },
+): Promise<void> {
+	await cdp.send("Input.dispatchTouchEvent", {
+		type: "touchStart",
+		touchPoints: [point],
+	});
+	await cdp.send("Input.dispatchTouchEvent", {
+		type: "touchEnd",
+		touchPoints: [],
+	});
+}
 
 async function openApprovalsMenu(page: Page): Promise<void> {
 	const menu = page.getByTestId("permission-mode-dropdown");
@@ -119,9 +134,9 @@ export const composerHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "tap send with the keyboard open",
-		match: /^I tap the send button with the keyboard open$/,
-		run: async ({ world }) => {
+		name: "tap send",
+		match: /^I tap the send button( with the keyboard open)?$/,
+		run: async ({ world, match }) => {
 			const page = world.page;
 			const cdp = await page.context().newCDPSession(page);
 			await cdp.send("Emulation.setTouchEmulationEnabled", {
@@ -132,19 +147,71 @@ export const composerHandlers: StepHandler[] = [
 			await cdp.send("Emulation.setSafeAreaInsetsOverride", {
 				insets: { bottom: 34, bottomMax: 34 },
 			});
-			await page.locator("#input-area textarea").focus();
+			const textarea = page.locator("#input-area textarea");
+			if (match[1]) await textarea.focus();
+			else {
+				await textarea.blur();
+				// Blur restores the bottom inset after 250ms; measure the settled layout.
+				await page.waitForTimeout(400);
+			}
 			const box = await page.locator("#send").boundingBox();
 			if (!box) throw new Error("Send button is not visible");
 			const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-			await cdp.send("Input.dispatchTouchEvent", {
-				type: "touchStart",
-				touchPoints: [point],
-			});
-			await cdp.send("Input.dispatchTouchEvent", {
-				type: "touchEnd",
-				touchPoints: [],
-			});
+			sendTapPoints.set(page, point);
+			await tapAt(cdp, point);
 			await cdp.detach();
+		},
+	},
+	{
+		name: "tap where send was",
+		match: /^I tap where the send button was$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const point = sendTapPoints.get(page);
+			if (!point) throw new Error("Send was never tapped");
+			// The double tap a phone user makes when the first one seemed not to land.
+			await page.waitForTimeout(500);
+			const target = await page.evaluate(
+				({ x, y }) => document.elementFromPoint(x, y)?.closest("button")?.id,
+				point,
+			);
+			// Without this the scenario passes whenever layout drifts and the tap misses.
+			if (target !== "stop")
+				throw new Error(
+					`Expected Stop where Send was; found ${target ?? "no button"}`,
+				);
+			const cdp = await page.context().newCDPSession(page);
+			await tapAt(cdp, point);
+			await cdp.detach();
+		},
+	},
+	{
+		name: "tap armed stop",
+		match: /^I tap the stop button after it arms$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await page.waitForTimeout(1500);
+			const box = await page.locator("#stop").boundingBox();
+			if (!box) throw new Error("Stop button is not visible");
+			const cdp = await page.context().newCDPSession(page);
+			await tapAt(cdp, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+			await cdp.detach();
+		},
+	},
+	{
+		name: "assert stop request",
+		match: /^the relay is (not )?asked to stop the turn$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const isCancel = (request: { tag: string }) =>
+				request.tag === "CancelSession";
+			if (!match[1]) {
+				await rpc.waitForRequest(isCancel);
+				return;
+			}
+			await world.page.waitForTimeout(300);
+			if (rpc.getRequests().some(isCancel))
+				throw new Error("Relay was asked to stop the turn");
 		},
 	},
 	{

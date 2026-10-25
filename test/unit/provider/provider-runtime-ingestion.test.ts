@@ -534,16 +534,19 @@ describe("ProviderRuntimeIngestion", () => {
 
 		expect(written).toBe(2);
 		expect(harness.appendBatch).toHaveBeenCalledTimes(1);
-		expect(harness.appendBatch).toHaveBeenCalledWith([
-			expect.objectContaining({
-				eventId: "runtime-session-created",
-				type: "session.created",
-			}),
-			expect.objectContaining({
-				eventId: "runtime-message-created",
-				type: "message.created",
-			}),
-		]);
+		expect(harness.appendBatch).toHaveBeenCalledWith(
+			[
+				expect.objectContaining({
+					eventId: "runtime-session-created",
+					type: "session.created",
+				}),
+				expect.objectContaining({
+					eventId: "runtime-message-created",
+					type: "message.created",
+				}),
+			],
+			undefined,
+		);
 		expect(harness.appended.map((event) => event.type)).toEqual([
 			"session.created",
 			"message.created",
@@ -962,10 +965,13 @@ describe("ProviderRuntimeIngestion", () => {
 		);
 
 		expect(harness.appendBatch).toHaveBeenCalledTimes(1);
-		expect(harness.appendBatch).toHaveBeenCalledWith([
-			expect.objectContaining({ type: "tool.started" }),
-			expect.objectContaining({ type: "tool.completed" }),
-		]);
+		expect(harness.appendBatch).toHaveBeenCalledWith(
+			[
+				expect.objectContaining({ type: "tool.started" }),
+				expect.objectContaining({ type: "tool.completed" }),
+			],
+			undefined,
+		);
 		expect(harness.appended.map((event) => event.type)).toEqual([
 			"tool.started",
 			"tool.completed",

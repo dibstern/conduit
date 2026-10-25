@@ -253,8 +253,9 @@ describe("Integration: account session routing", () => {
 		);
 		expect(defaultAccount.id).toBe(promotedId);
 		const nextText = "continue-after-account-deletion";
-		const completed = client.waitForTurnEnd(sessionId, 10_000);
 		await client.sendMessage(nextText, { sessionId });
+		// sendMessage captures this turn's completion fence.
+		const completed = client.waitForTurnEnd(sessionId, 10_000);
 		expect((await completed).attention).not.toBe("error");
 		expect(launchFolders.at(-1)).toBe(targetLogin);
 		expect(resumeIds.at(-1)).toBeUndefined();
@@ -333,8 +334,8 @@ describe("Integration: account session routing", () => {
 			expect(restored.id).toBe("removed-2");
 			expect(restored.isDefault).toBe(true);
 			const restoredText = "continue-after-account-restored";
-			const restoredTurn = client.waitForTurnEnd(sessionId, 10_000);
 			await client.sendMessage(restoredText, { sessionId });
+			const restoredTurn = client.waitForTurnEnd(sessionId, 10_000);
 			expect((await restoredTurn).attention).not.toBe("error");
 			expect(launchFolders.at(-1)).toBe(restoredLogin);
 			expect(prompts.at(-1)).toContain(historyText);

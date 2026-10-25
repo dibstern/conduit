@@ -109,6 +109,7 @@ export function spawnManagedOpenCode(
 	port: number,
 	env: Record<string, string>,
 	configDir = DEFAULT_CONFIG_DIR,
+	options: { cwd?: string; inheritEnv?: boolean } = {},
 ): Promise<{
 	pid: number;
 	process: ChildProcess;
@@ -130,7 +131,12 @@ export function spawnManagedOpenCode(
 		chmodSync(logPath, 0o600);
 		child = spawn(process.execPath, [supervisorPath, String(port)], {
 			detached: true,
-			env: { ...process.env, ...env, CONDUIT_OPENCODE_CONTROL_TOKEN: token },
+			...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+			env: {
+				...(options.inheritEnv === false ? {} : process.env),
+				...env,
+				CONDUIT_OPENCODE_CONTROL_TOKEN: token,
+			},
 			stdio: ["ignore", fd, fd, "ipc"],
 		});
 	} finally {

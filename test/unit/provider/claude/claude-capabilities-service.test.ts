@@ -22,8 +22,10 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, expect, vi } from "vitest";
+import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
 import {
 	__setProbeOverrideForTesting,
+	type ProbeDeps,
 	type ProbeResult,
 } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
@@ -33,6 +35,7 @@ import {
 } from "../../../../src/lib/provider/claude/claude-capabilities-service.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { ClaudeBoundaryError } from "../../../../src/lib/provider/event-sink-errors.js";
+import type { ProviderCall } from "../../../../src/lib/provider/types.js";
 
 const launchConfig = () => ({
 	folderSource: "account" as const,
@@ -84,6 +87,107 @@ describe("ClaudeCapabilitiesService", () => {
 				.map((path) => rm(path, { recursive: true, force: true })),
 		);
 	});
+
+	it.effect(
+		"uses the call account and immutable shell snapshot for discovery",
+		() =>
+			Effect.gen(function* () {
+				const constructorLaunch = vi.fn(launchConfig);
+				const queryFactory = vi.fn<NonNullable<ProbeDeps["queryFactory"]>>(
+					() => ({
+						initializationResult: async () => ({ models: [] }),
+						async *[Symbol.asyncIterator]() {
+							yield { type: "system", subtype: "init" };
+						},
+					}),
+				);
+				const service = yield* makeClaudeCapabilitiesService({
+					launchConfig: constructorLaunch,
+					queryFactory,
+				});
+				const call: ProviderCall = {
+					projectId: "project-two",
+					sessionId: "session-two",
+					account: {
+						driver: "claude",
+						id: AccountIdSchema.make("account-two"),
+						name: "Account two",
+						folder: configuredClaudeConfigDir("/tmp/account-two"),
+						env: { ANTHROPIC_API_KEY: "account-key", ACCOUNT_MARKER: "two" },
+						usageEligible: false,
+					},
+					workspaceRoot: "/tmp/call-workspace",
+					extraFolders: ["/tmp/call-extra"],
+					shellEnv: Object.freeze({
+						PATH: "/call/bin",
+						PROJECT_MARKER: "two",
+						ANTHROPIC_API_KEY: "inherited-key",
+					}),
+				};
+				yield* service.get(call.workspaceRoot, { call });
+				expect(queryFactory.mock.calls[0]?.[0].options).toMatchObject({
+					cwd: "/tmp/call-workspace",
+					additionalDirectories: ["/tmp/call-extra"],
+					env: {
+						CLAUDE_CONFIG_DIR: "/tmp/account-two",
+						PATH: "/call/bin",
+						PROJECT_MARKER: "two",
+						ACCOUNT_MARKER: "two",
+						ANTHROPIC_API_KEY: "account-key",
+					},
+				});
+				expect(constructorLaunch).not.toHaveBeenCalled();
+			}),
+	);
+
+	it.effect(
+		"isolates discovery calls by project, account, and shell snapshot",
+		() =>
+			Effect.gen(function* () {
+				const queryFactory = vi.fn<NonNullable<ProbeDeps["queryFactory"]>>(
+					() => ({
+						initializationResult: async () => ({ models: [] }),
+						async *[Symbol.asyncIterator]() {
+							yield { type: "system", subtype: "init" };
+						},
+					}),
+				);
+				const service = yield* makeClaudeCapabilitiesService({
+					launchConfig,
+					queryFactory,
+				});
+				const first: ProviderCall = {
+					projectId: "project-one",
+					sessionId: "session-one",
+					account: {
+						driver: "claude",
+						id: AccountIdSchema.make("account-one"),
+						name: "Account one",
+						folder: configuredClaudeConfigDir("/tmp/account-one"),
+						usageEligible: false,
+					},
+					workspaceRoot: "/tmp/shared-workspace",
+					extraFolders: [],
+					shellEnv: Object.freeze({ PROJECT_MARKER: "one" }),
+				};
+				const calls: readonly ProviderCall[] = [
+					first,
+					{ ...first, projectId: "project-two" },
+					{ ...first, shellEnv: Object.freeze({ PROJECT_MARKER: "updated" }) },
+					{
+						...first,
+						account: {
+							...first.account,
+							id: AccountIdSchema.make("account-two"),
+						},
+					},
+				];
+				for (const call of calls)
+					yield* service.get(call.workspaceRoot, { call });
+				yield* service.get(first.workspaceRoot, { call: first });
+				expect(queryFactory).toHaveBeenCalledTimes(4);
+			}),
+	);
 
 	it.effect(
 		"refreshes a fresh value and serves the new value on later gets",

@@ -129,6 +129,9 @@ export function applyInstanceListResponse(
 		return {
 			id: instance.id,
 			name: instance.name,
+			...(instance.colorSlot === undefined
+				? {}
+				: { colorSlot: instance.colorSlot }),
 			port: instance.port,
 			managed: instance.managed,
 			status: instance.status,

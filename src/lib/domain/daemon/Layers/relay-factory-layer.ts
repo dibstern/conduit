@@ -32,6 +32,8 @@ import {
 	projectStorageDir,
 	writeProjectStorageOwner,
 } from "../../../persistence/project-storage.js";
+import { ClaudeAccountScopes } from "../../../provider/claude/claude-account-scopes.js";
+import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { StoredProject } from "../../../types.js";
 import {
@@ -54,11 +56,18 @@ import {
 } from "../../relay/Services/project-management-service.js";
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
+import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
+import { AccountResourceScopesTag } from "../Services/account-resource-scopes.js";
 import { CategorySet } from "../Services/category-set.js";
-import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";
+import {
+	ConfigPersistenceTag,
+	ConfigSnapshotTag,
+} from "../Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
+import { DaemonOrchestration } from "../Services/daemon-orchestration.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
 	listArchivedSessions,
@@ -78,6 +87,7 @@ import {
 } from "../Services/instance-manager-service.js";
 import { MessageSurfacingSettings } from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import { ProjectContext } from "../Services/project-context.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	type broadcastProjectList,
@@ -88,11 +98,13 @@ import {
 	type removeProjectFromEffectRegistry,
 	type saveProject,
 } from "../Services/project-registry-service.js";
+import { ProviderAdapters } from "../Services/provider-adapters.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionDirectory } from "../Services/session-directory.js";
 import { Usage } from "../Services/usage.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
 import { WorktreeServiceTag } from "../Services/worktree-service.js";
+import { buildDaemonConfigSnapshot } from "./config-persistence-layer.js";
 import { PortScannerTag } from "./port-scanner-layer.js";
 import { ProjectShellEnvTag } from "./project-shell-env-layer.js";
 
@@ -197,14 +209,27 @@ export const RelayFactoryLive = (
 	| PushManagerTag
 	| OpenCodeInstancesTag
 	| PersistenceStore
+	| ProviderAdapters
 > =>
 	Layer.effect(
 		RelayFactoryTag,
 		Effect.gen(function* () {
 			const accounts = yield* AccountDirectory;
+			const claudeAccounts = yield* Effect.serviceOption(ClaudeAccountScopes);
+			const accountResources = yield* Effect.serviceOption(
+				AccountResourceScopesTag,
+			);
+			const providerAdapters = yield* ProviderAdapters;
+			const orchestration = yield* Effect.serviceOption(DaemonOrchestration);
+			const cursorResources = yield* Effect.serviceOption(
+				CursorAccountResources,
+			);
 			const surfacing = yield* Effect.serviceOption(MessageSurfacingSettings);
 			const categories = yield* Effect.serviceOption(CategorySet);
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
+			const projectContext = yield* Effect.serviceOption(ProjectContext);
+			const overrides = yield* Effect.serviceOption(OverridesStateTag);
+			const sessionWorkspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
@@ -223,6 +248,17 @@ export const RelayFactoryLive = (
 			const sessionEventBus = yield* SessionEventBusTag;
 			const cleanupQueue = yield* Effect.serviceOption(WorktreeCleanupQueueTag);
 			const configPersistence = yield* ConfigPersistenceTag;
+			const sharedSnapshot = yield* Effect.serviceOption(ConfigSnapshotTag);
+			const configSnapshot = Option.isSome(sharedSnapshot)
+				? sharedSnapshot.value
+				: {
+						build: buildDaemonConfigSnapshot.pipe(
+							Effect.provideService(DaemonConfigRefTag, configRef),
+							Effect.provideService(ProjectRegistryTag, projectRegistry),
+							Effect.provideService(InstanceManagerStateTag, instanceState),
+							Effect.provideService(AccountDirectory, accounts),
+						),
+					};
 			const portScanner = yield* PortScannerTag;
 			const pushManager = yield* PushManagerTag;
 			const openCodeInstances = yield* OpenCodeInstancesTag;
@@ -489,7 +525,11 @@ export const RelayFactoryLive = (
 							),
 						);
 						const selectedInstance = openCodeInstanceFor(instances);
-						envResolver?.register(project.folders[0], project.shellEnv);
+						envResolver?.register(
+							project.folders[0],
+							project.shellEnv,
+							project.slug,
+						);
 						const relayPushSender = yield* pushManager.getLegacyManager.pipe(
 							Effect.map(Option.getOrUndefined),
 						);
@@ -505,36 +545,94 @@ export const RelayFactoryLive = (
 									daemonConfigContext: Context.make(
 										DaemonConfigRefTag,
 										configRef,
-									).pipe(
-										Context.add(ConfigPersistenceTag, configPersistence),
-										Context.add(AccountDirectory, accounts),
-										Context.merge(
-											Option.isSome(surfacing)
-												? Context.make(
-														MessageSurfacingSettings,
-														surfacing.value,
-													)
-												: Context.empty(),
+									)
+										.pipe(
+											Context.add(ConfigPersistenceTag, configPersistence),
+											Context.add(ConfigSnapshotTag, configSnapshot),
+											Context.add(AccountDirectory, accounts),
+											Context.merge(
+												Option.isSome(claudeAccounts)
+													? Context.make(
+															ClaudeAccountScopes,
+															claudeAccounts.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(accountResources)
+													? Context.make(
+															AccountResourceScopesTag,
+															accountResources.value,
+														)
+													: Context.empty(),
+											),
+											Context.add(ProviderAdapters, providerAdapters),
+											Context.merge(
+												Option.isSome(orchestration)
+													? Context.make(
+															DaemonOrchestration,
+															orchestration.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(cursorResources)
+													? Context.make(
+															CursorAccountResources,
+															cursorResources.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(surfacing)
+													? Context.make(
+															MessageSurfacingSettings,
+															surfacing.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(categories)
+													? Context.make(CategorySet, categories.value)
+													: Context.empty(),
+											),
+											Context.add(SessionActivityTag, activity),
+											Context.add(SessionEventBusTag, sessionEventBus),
+											Context.merge(
+												Option.isSome(overrides)
+													? Context.make(OverridesStateTag, overrides.value)
+													: Context.empty(),
+											),
+											Context.add(InputDraftsTag, inputDrafts),
+											Context.add(DaemonEventBusTag, eventBus),
+											Context.add(ProjectRegistryTag, projectRegistry),
+											Context.merge(
+												Option.isSome(sessionWorkspace)
+													? Context.make(
+															SessionWorkspaceTag,
+															sessionWorkspace.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(projectContext)
+													? Context.make(ProjectContext, projectContext.value)
+													: Context.empty(),
+											),
+											Context.add(PortScannerTag, portScanner),
+											Context.merge(storeContext),
+										)
+										.pipe(
+											Context.merge(daemonServices),
+											Context.merge(
+												Option.isSome(sessionDirectory)
+													? Context.make(
+															SessionDirectory,
+															sessionDirectory.value,
+														)
+													: Context.empty(),
+											),
 										),
-										Context.merge(
-											Option.isSome(categories)
-												? Context.make(CategorySet, categories.value)
-												: Context.empty(),
-										),
-										Context.add(SessionActivityTag, activity),
-										Context.add(SessionEventBusTag, sessionEventBus),
-										Context.add(InputDraftsTag, inputDrafts),
-										Context.add(DaemonEventBusTag, eventBus),
-										Context.add(ProjectRegistryTag, projectRegistry),
-										Context.add(PortScannerTag, portScanner),
-										Context.merge(storeContext),
-										Context.merge(daemonServices),
-										Context.merge(
-											Option.isSome(sessionDirectory)
-												? Context.make(SessionDirectory, sessionDirectory.value)
-												: Context.empty(),
-										),
-									),
 									openCodeInstances,
 									...(Option.isSome(worktreeService)
 										? {
@@ -551,9 +649,10 @@ export const RelayFactoryLive = (
 									projectDir: project.folders[0],
 									extraFolders: project.folders.slice(1),
 									...(envResolver && {
-										shellEnv: (directory: string) => envResolver.get(directory),
+										shellEnv: (directory: string) =>
+											envResolver.get(directory, project.slug),
 										prepareShellEnv: (directory: string) =>
-											envResolver.waitUntilReady(directory),
+											envResolver.waitUntilReady(directory, project.slug),
 									}),
 									slug: project.slug,
 									noServer: true,

@@ -769,7 +769,7 @@ describe("Fork read-model inheritance", () => {
 				}),
 			),
 		).rejects.toThrow(
-			"This session has no Claude transcript yet. Send a message first.",
+			"This session has no messages yet. Send a message first.",
 		);
 		await runtime.runPromise(
 			applySessionCommand(
@@ -840,7 +840,7 @@ describe("Fork read-model inheritance", () => {
 					side: { title: "Unfinished", inputId: "unfinished-side" },
 				}),
 			),
-		).rejects.toThrow(/no completed turn/);
+		).rejects.toThrow("Wait for this session's first reply to finish.");
 	});
 
 	// Remove the point at the native-receipt lookup, which follows the command's

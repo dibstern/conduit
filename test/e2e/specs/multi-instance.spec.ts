@@ -548,14 +548,13 @@ async function mockInstanceRpc(page: Page): Promise<RpcMockControl> {
 }
 
 /**
- * Settings lives in the list overflow on a phone's list, and in the session
+ * Settings opens directly on a phone's list, and through the session
  * bar (or phone island) overflow otherwise.
  */
 async function openSettingsPanel(page: Page): Promise<void> {
-	const listOverflow = page.getByTestId("list-bar-overflow");
-	if (await listOverflow.isVisible()) {
-		await listOverflow.click();
-		await page.getByTestId("list-overflow-settings").click();
+	const listSettings = page.getByTestId("list-bar-settings");
+	if (await listSettings.isVisible()) {
+		await listSettings.click();
 		return;
 	}
 	await page

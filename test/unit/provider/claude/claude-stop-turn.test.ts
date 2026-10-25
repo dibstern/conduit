@@ -96,11 +96,7 @@ describe("turn-only Stop interactions", () => {
 				Effect.gen(function* () {
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
-						capabilitiesService: {
-							get: () =>
-								Effect.succeed({ models: [], commands: [], agents: [] }),
-						},
-						workspaceRoot: "/tmp/ws",
+
 						queryFactory: factory,
 					});
 					const input = makeBaseSendTurnInput({
@@ -145,23 +141,24 @@ describe("turn-only Stop interactions", () => {
 		);
 	});
 
-	// A send-now Stop closes the query while its interrupt is still unanswered.
+	// End closes the query while its interrupt is still unanswered.
 	// The SDK rejects that interrupt on close; unobserved, it crashes the runner.
 	it("closes the query without leaking the pending interrupt's rejection", async () => {
 		const started = await Effect.runPromise(Deferred.make<void>());
 		const query = createMockQuery([]);
-		let rejectInterrupt: (error: Error) => void = () => {};
+		const rejectInterrupts: Array<(error: Error) => void> = [];
 		let interrupted = false;
 		// Not vi.fn: a spy observes returned promises, which would hide the leak.
 		query.interrupt = () => {
 			interrupted = true;
 			return new Promise((_resolve, reject) => {
-				rejectInterrupt = reject;
+				rejectInterrupts.push(reject);
 			});
 		};
-		vi.mocked(query.close).mockImplementation(() =>
-			rejectInterrupt(new Error("Query closed before response received")),
-		);
+		vi.mocked(query.close).mockImplementation(() => {
+			for (const reject of rejectInterrupts)
+				reject(new Error("Query closed before response received"));
+		});
 		const factory = vi.fn<
 			NonNullable<Parameters<typeof makeClaudeSessionRunner>[0]["queryFactory"]>
 		>(({ prompt }) => {
@@ -182,11 +179,7 @@ describe("turn-only Stop interactions", () => {
 					Effect.gen(function* () {
 						const runtime = yield* makeClaudeProviderRuntime({
 							runnerFactory: makeClaudeSessionRunner,
-							capabilitiesService: {
-								get: () =>
-									Effect.succeed({ models: [], commands: [], agents: [] }),
-							},
-							workspaceRoot: "/tmp/ws",
+
 							queryFactory: factory,
 						});
 						const input = makeBaseSendTurnInput({
@@ -195,10 +188,19 @@ describe("turn-only Stop interactions", () => {
 						});
 						const turn = yield* Effect.forkChild(runtime.sendTurnEffect(input));
 						yield* Deferred.await(started);
-						yield* runtime.interruptTurnEffect(input.sessionId, [
-							input.inputId,
-						]);
-						expect((yield* Fiber.join(turn)).status).toBe("interrupted");
+						const stopping = yield* Effect.forkChild(
+							runtime
+								.interruptTurnEffect(input.sessionId, [input.inputId])
+								.pipe(Effect.result),
+						);
+						yield* Effect.promise(() =>
+							vi.waitFor(() => expect(interrupted).toBe(true)),
+						);
+						yield* runtime.endSessionEffect(input.sessionId);
+						expect((yield* Effect.result(Fiber.join(turn)))._tag).toBe(
+							"Failure",
+						);
+						expect((yield* Fiber.join(stopping))._tag).toBe("Failure");
 						expect(interrupted).toBe(true);
 						expect(query.close).toHaveBeenCalled();
 					}),

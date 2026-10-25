@@ -187,6 +187,7 @@ describe("Claude session pre-warm through daemon RPC", () => {
 	it("draft pre-warm reserves the created session and its first send adopts the initialized runner", async () => {
 		const { harness, browser } = await start({
 			queryInitializationDelayMs: 80,
+			shellEnvProof: true,
 			capabilityModels: [
 				{
 					id: "sonnet",
@@ -218,6 +219,10 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		const query = harness.marks.find((mark) => mark.kind === "query");
 		if (runner?.kind !== "runner-started" || query?.kind !== "query")
 			throw new Error("Missing draft warm runner/query");
+		expect(query.env["CONDUIT_ENV_PROOF"]).toBe("server-cache");
+		expect(query.env["PATH"]).toMatch(/^\/tmp\/conduit-cached-env-bin:/);
+		expect(query.env["ANTHROPIC_API_KEY"]).toBeUndefined();
+		expect(query.env["ANTHROPIC_MODEL"]).toBeUndefined();
 		expect(durableCounts(harness, runner.sessionId).status).toBeUndefined();
 		expect(
 			harness.marks.filter((mark) => mark.kind === "enqueue"),
@@ -383,10 +388,20 @@ describe("Claude session pre-warm through daemon RPC", () => {
 				};
 				yield* Effect.gen(function* () {
 					const drafts = yield* DraftPreWarmTag;
-					yield* drafts.warm("origin", "draft", input);
+					yield* drafts.warm(
+						"origin",
+						"draft",
+						"project",
+						Effect.succeed(input),
+					);
 					wallClock.mockReturnValue(1000);
 					yield* TestClock.adjust(1000);
-					yield* drafts.warm("origin", "draft", input);
+					yield* drafts.warm(
+						"origin",
+						"draft",
+						"project",
+						Effect.succeed(input),
+					);
 					wallClock.mockReturnValue(6500);
 					yield* TestClock.adjust(5500);
 					expect(ended).toEqual([]);

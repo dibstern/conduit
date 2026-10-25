@@ -41,6 +41,8 @@ export function createModelSelectionState(
 		),
 	);
 	const parameterEffortWord = $derived.by(() => {
+		if (parameters && parameterState.variantUnavailable)
+			return target.pick.effort ?? "";
 		const thinking = parameterRows.find((row) => row.kind === "thinking");
 		const fast =
 			parameterRows.find((row) => row.kind === "fast")?.value === "true";
@@ -115,6 +117,12 @@ export function createModelSelectionState(
 		},
 		get parameterContext() {
 			return parameterContext;
+		},
+		get parameterRows() {
+			return parameterRows;
+		},
+		get variantUnavailable() {
+			return parameterState.variantUnavailable;
 		},
 		get parameterEffortWord() {
 			return parameterEffortWord;

@@ -1,3 +1,4 @@
+import { createTestRelayStack as createRelayStack } from "../../helpers/project-relay.js";
 // OpenCode history backfill (conduit-test-iea)
 // An OpenCode session Conduit first sights mid-conversation — started in the
 // TUI, or while the daemon was down — must still project its whole history:
@@ -19,10 +20,7 @@ import {
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
-import {
-	createRelayStack,
-	type RelayStack,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { RelayStack } from "../../../src/lib/relay/relay-stack.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import { TestWsClient } from "../helpers/test-ws-client.js";

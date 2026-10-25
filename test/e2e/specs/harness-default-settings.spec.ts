@@ -89,10 +89,9 @@ async function openSettings(
 	harness: ProcessHarness,
 ): Promise<void> {
 	await new AppPage(page).goto(`${harness.baseUrl}/?p=process-test`);
-	const listOverflow = page.getByTestId("list-bar-overflow");
-	if (await listOverflow.isVisible()) {
-		await listOverflow.click();
-		await page.getByTestId("list-overflow-settings").click();
+	const listSettings = page.getByTestId("list-bar-settings");
+	if (await listSettings.isVisible()) {
+		await listSettings.click();
 	} else {
 		await page.getByTestId("session-bar-overflow").click();
 		await page.getByTestId("overflow-settings").click();

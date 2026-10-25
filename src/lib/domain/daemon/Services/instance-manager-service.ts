@@ -27,6 +27,7 @@ import {
 	type AccountChange,
 	type AccountsState,
 	accountsStateFromInstances,
+	assignAccountColorSlots,
 } from "../../../account-directory.js";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
 import {
@@ -68,6 +69,7 @@ import {
 	AccountDirectoryLive,
 	AccountDirectoryStateLive,
 } from "./account-directory.js";
+import { AccountResourceScopesTag } from "./account-resource-scopes.js";
 
 export { InstanceNotFound } from "../../../instance/instance-errors.js";
 
@@ -322,19 +324,25 @@ export function makeInstanceManagerStateLive(
 		accountsState === undefined
 			? []
 			: accountsStateFromInstances(
-					seeded
-						.filter(
-							(instance) =>
-								getProviderDriver(instance.driver ?? "opencode")
-									?.runsOpenCodeServer &&
-								!accountsState.accounts.some(
-									(account) => account.id === instance.id,
-								) &&
-								!accountsState.deleted.some(
-									(account) => account.id === instance.id,
-								),
-						)
-						.map((instance) => ({ ...instance, driver: "opencode" as const })),
+					assignAccountColorSlots(
+						seeded
+							.filter(
+								(instance) =>
+									getProviderDriver(instance.driver ?? "opencode")
+										?.runsOpenCodeServer &&
+									!accountsState.accounts.some(
+										(account) => account.id === instance.id,
+									) &&
+									!accountsState.deleted.some(
+										(account) => account.id === instance.id,
+									),
+							)
+							.map((instance) => ({
+								...instance,
+								driver: "opencode" as const,
+							})),
+						accountsState.accounts,
+					),
 					accountsState.launchLogin,
 				).accounts;
 	return makeOpenCodeRuntimeStateLive(config, seeded, options).pipe(
@@ -394,127 +402,157 @@ export const applyAccountChange = (change: AccountChange) =>
 		const usageOrder = Option.isSome(config)
 			? ((yield* Ref.get(config.value)).usageLimits?.order ?? [])
 			: [];
-		const committed = yield* directory.apply(change, usageOrder, (committed) =>
-			Effect.gen(function* () {
-				const account =
-					change._tag === "Add"
-						? committed.accounts.at(-1)
-						: committed.accounts.find((item) => item.id === change.id);
-				const id = account?.id ?? change.id ?? "";
-				const ref = yield* InstanceManagerStateTag;
-				const fibers = yield* PollerFibersTag;
-				const before = yield* Ref.get(ref);
-				const previous = HashMap.get(before.instances, id);
-				const record = HashMap.get(
-					before.managedProcesses ?? HashMap.empty(),
-					id,
-				);
-				if (
-					account === undefined ||
-					!getProviderDriver(account.driver)?.runsOpenCodeServer
-				) {
-					if (Option.isSome(record))
-						yield* stopRecordedManagedOpenCode(record.value);
-					yield* Ref.update(ref, (state) => ({
-						...state,
-						instances: HashMap.remove(state.instances, id),
-						externalUrls: HashMap.remove(state.externalUrls, id),
-						restartTimestamps: HashMap.remove(state.restartTimestamps, id),
-						managedProcesses: HashMap.remove(
-							state.managedProcesses ?? HashMap.empty(),
-							id,
-						),
-					}));
-					yield* FiberMap.remove(fibers, pollerKey(id));
-					yield* FiberMap.remove(fibers, restartKey(id));
-				} else if (account.driver === "opencode") {
-					const now = yield* Clock.currentTimeMillis;
-					const prior = Option.getOrUndefined(previous);
-					const {
-						configDir: _folder,
-						env: _env,
-						url: _url,
-						...runtime
-					} = prior ?? {};
-					const managed = prior?.managed ?? account.managed ?? false;
-					const port =
-						(change._tag === "Update" ? change.updates.port : undefined) ??
-						prior?.port ??
-						account.port ??
-						0;
-					const url = managed
-						? undefined
-						: (Option.getOrUndefined(HashMap.get(before.externalUrls, id)) ??
-							account.url);
-					const instance: OpenCodeInstance = {
-						...runtime,
-						id: account.id,
-						name: account.name,
-						driver: "opencode",
-						port,
-						managed,
-						status: prior?.status ?? "starting",
-						restartCount: prior?.restartCount ?? 0,
-						createdAt: prior?.createdAt ?? now,
-						...(account.configuredFolder === undefined
-							? {}
-							: { configDir: account.configuredFolder }),
-						...(url === undefined ? {} : { url }),
-						...(account.env === undefined
-							? {}
-							: {
-									env: managed
-										? publicManagedOpenCodeEnv(account.env)
-										: { ...account.env },
-								}),
-					};
-					yield* Ref.update(ref, (state) => ({
-						...state,
-						instances: HashMap.set(state.instances, id, instance),
-						externalUrls:
-							url === undefined
-								? HashMap.remove(state.externalUrls, id)
-								: HashMap.set(state.externalUrls, id, url),
-						managedProcesses: !managed
-							? (state.managedProcesses ?? HashMap.empty())
-							: HashMap.set(state.managedProcesses ?? HashMap.empty(), id, {
-									...(Option.isSome(record) ? record.value : {}),
-									port,
-									...(account.env === undefined
-										? {}
-										: {
-												env: {
-													...account.env,
-													...(Option.isSome(record) &&
-													record.value.env?.["OPENCODE_SERVER_PASSWORD"] !==
-														undefined &&
-													account.env["OPENCODE_SERVER_PASSWORD"] === undefined
-														? {
-																OPENCODE_SERVER_PASSWORD:
-																	record.value.env["OPENCODE_SERVER_PASSWORD"],
-																OPENCODE_SERVER_USERNAME:
-																	record.value.env[
-																		"OPENCODE_SERVER_USERNAME"
-																	] ?? "opencode",
-															}
-														: {}),
-												},
-											}),
-								}),
-					}));
-					if (Option.isNone(previous))
-						yield* FiberMap.run(
-							fibers,
-							pollerKey(id),
-							Effect.never.pipe(Effect.interruptible),
+		const cursorChange =
+			change._tag !== "Add" &&
+			(yield* directory.snapshot).accounts.some(
+				(account) => account.id === change.id && account.driver === "cursor",
+			);
+		let invalidateId: string | undefined;
+		const committed = yield* directory
+			.apply(change, usageOrder, (committed) =>
+				Effect.gen(function* () {
+					const account =
+						change._tag === "Add"
+							? committed.accounts.at(-1)
+							: committed.accounts.find((item) => item.id === change.id);
+					const id = account?.id ?? change.id ?? "";
+					const ref = yield* InstanceManagerStateTag;
+					const fibers = yield* PollerFibersTag;
+					const before = yield* Ref.get(ref);
+					const previous = HashMap.get(before.instances, id);
+					const record = HashMap.get(
+						before.managedProcesses ?? HashMap.empty(),
+						id,
+					);
+					if (
+						account === undefined ||
+						!getProviderDriver(account.driver)?.runsOpenCodeServer
+					) {
+						if (Option.isSome(record))
+							yield* stopRecordedManagedOpenCode(record.value);
+						yield* Ref.update(ref, (state) => ({
+							...state,
+							instances: HashMap.remove(state.instances, id),
+							externalUrls: HashMap.remove(state.externalUrls, id),
+							restartTimestamps: HashMap.remove(state.restartTimestamps, id),
+							managedProcesses: HashMap.remove(
+								state.managedProcesses ?? HashMap.empty(),
+								id,
+							),
+						}));
+						yield* FiberMap.remove(fibers, pollerKey(id));
+						yield* FiberMap.remove(fibers, restartKey(id));
+					} else if (account.driver === "opencode") {
+						const now = yield* Clock.currentTimeMillis;
+						const prior = Option.getOrUndefined(previous);
+						const {
+							configDir: _folder,
+							env: _env,
+							url: _url,
+							...runtime
+						} = prior ?? {};
+						const managed = prior?.managed ?? account.managed ?? false;
+						const port =
+							(change._tag === "Update" ? change.updates.port : undefined) ??
+							prior?.port ??
+							account.port ??
+							0;
+						const url = managed
+							? undefined
+							: (Option.getOrUndefined(HashMap.get(before.externalUrls, id)) ??
+								account.url);
+						const instance: OpenCodeInstance = {
+							...runtime,
+							id: account.id,
+							name: account.name,
+							driver: "opencode",
+							port,
+							managed,
+							status: prior?.status ?? "starting",
+							restartCount: prior?.restartCount ?? 0,
+							createdAt: prior?.createdAt ?? now,
+							...(account.configuredFolder === undefined
+								? {}
+								: { configDir: account.configuredFolder }),
+							...(url === undefined ? {} : { url }),
+							...(account.env === undefined
+								? {}
+								: {
+										env: managed
+											? publicManagedOpenCodeEnv(account.env)
+											: { ...account.env },
+									}),
+						};
+						yield* Ref.update(ref, (state) => ({
+							...state,
+							instances: HashMap.set(state.instances, id, instance),
+							externalUrls:
+								url === undefined
+									? HashMap.remove(state.externalUrls, id)
+									: HashMap.set(state.externalUrls, id, url),
+							managedProcesses: !managed
+								? (state.managedProcesses ?? HashMap.empty())
+								: HashMap.set(state.managedProcesses ?? HashMap.empty(), id, {
+										...(Option.isSome(record) ? record.value : {}),
+										port,
+										...(account.env === undefined
+											? {}
+											: {
+													env: {
+														...account.env,
+														...(Option.isSome(record) &&
+														record.value.env?.["OPENCODE_SERVER_PASSWORD"] !==
+															undefined &&
+														account.env["OPENCODE_SERVER_PASSWORD"] ===
+															undefined
+															? {
+																	OPENCODE_SERVER_PASSWORD:
+																		record.value.env[
+																			"OPENCODE_SERVER_PASSWORD"
+																		],
+																	OPENCODE_SERVER_USERNAME:
+																		record.value.env[
+																			"OPENCODE_SERVER_USERNAME"
+																		] ?? "opencode",
+																}
+															: {}),
+													},
+												}),
+									}),
+						}));
+						if (Option.isNone(previous))
+							yield* FiberMap.run(
+								fibers,
+								pollerKey(id),
+								Effect.never.pipe(Effect.interruptible),
+							);
+					}
+					if (change._tag === "Remove")
+						yield* publishProviderInstanceRemoved(id);
+					else if (change._tag === "Update")
+						yield* publishInstanceStatusChanged(id);
+					yield* requestConfigSave;
+					if (
+						change._tag === "Remove" ||
+						(cursorChange && change._tag === "Update")
+					)
+						invalidateId = change.id;
+				}),
+			)
+			.pipe(
+				// The commit can finish despite cancellation. Finalize outside its lock:
+				// interrupted account work may read the directory during cleanup.
+				Effect.ensuring(
+					Effect.gen(function* () {
+						if (invalidateId === undefined) return;
+						const resources = yield* Effect.serviceOption(
+							AccountResourceScopesTag,
 						);
-				}
-				if (change._tag === "Remove") yield* publishProviderInstanceRemoved(id);
-				else if (change._tag === "Update")
-					yield* publishInstanceStatusChanged(id);
-				yield* requestConfigSave;
-			}),
-		);
+						if (Option.isSome(resources))
+							yield* resources.value.invalidate(invalidateId);
+					}),
+				),
+			);
 		yield* PubSub.publish(
 			yield* DaemonEventBusTag,
 			DaemonEvent.DaemonSessionsChanged(),
@@ -606,6 +644,9 @@ export const getInstances = Effect.gen(function* () {
 				...(runtime ?? { status: "healthy", restartCount: 0, createdAt: 0 }),
 				id: account.id,
 				name: account.name,
+				...(account.colorSlot === undefined
+					? {}
+					: { colorSlot: account.colorSlot }),
 				driver: account.driver,
 				port:
 					account.driver === "opencode"
@@ -664,32 +705,39 @@ export const discoverInstancesFor = (instanceId?: string) =>
 				unavailableCode?: "auth_required" | "codex_version_unsupported";
 			}
 		>();
-		for (const account of accounts) {
-			if (instanceId !== undefined && account.id !== instanceId) continue;
-			const discover =
-				account.driver === "codex"
-					? discoverCodexEffect(account, undefined, configDir)
-					: account.driver === "cursor"
-						? discoverCursorEffect(undefined, account)
-						: undefined;
-			if (!discover) continue;
-			const result = yield* Effect.result(discover);
-			availability.set(
-				account.id,
-				result._tag === "Success"
-					? { available: true }
-					: {
-							available: false,
-							unavailableReason:
-								result.failure.cause instanceof Error
-									? result.failure.cause.message
-									: "Provider discovery failed",
-							...(result.failure.code
-								? { unavailableCode: result.failure.code }
-								: {}),
-						},
-			);
-		}
+		yield* Effect.forEach(
+			instanceId === undefined
+				? accounts
+				: accounts.filter((account) => account.id === instanceId),
+			(account) =>
+				Effect.gen(function* () {
+					const discover =
+						account.driver === "codex"
+							? discoverCodexEffect(account, undefined, configDir)
+							: account.driver === "cursor"
+								? discoverCursorEffect(undefined, account)
+								: undefined;
+					if (!discover) return;
+					const result = yield* Effect.result(discover);
+					availability.set(
+						account.id,
+						result._tag === "Success"
+							? { available: true }
+							: {
+									available: false,
+									unavailableReason:
+										result.failure.cause instanceof Error
+											? result.failure.cause.message
+											: "Provider discovery failed",
+									...(result.failure.code === "auth_required" ||
+									result.failure.code === "codex_version_unsupported"
+										? { unavailableCode: result.failure.code }
+										: {}),
+								},
+					);
+				}),
+			{ concurrency: "unbounded", discard: true },
+		);
 		return instances.map((instance) => ({
 			...instance,
 			...availability.get(instance.id),
@@ -777,6 +825,9 @@ export function persistedInstanceConfigs(
 		return {
 			id: account.id,
 			name: account.name,
+			...(account.colorSlot === undefined
+				? {}
+				: { colorSlot: account.colorSlot }),
 			driver: account.driver,
 			port:
 				account.driver === "opencode"

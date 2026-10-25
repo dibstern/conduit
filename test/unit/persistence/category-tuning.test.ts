@@ -18,6 +18,7 @@ import {
 } from "../../../src/lib/contracts/category-set.js";
 import type { MessageSurfacingStatus } from "../../../src/lib/contracts/message-surfacing.js";
 import { CategorySetLive } from "../../../src/lib/domain/daemon/Layers/category-set-layer.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { CategorySet } from "../../../src/lib/domain/daemon/Services/category-set.js";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/domain/daemon/Services/claude-one-shot.js";
 import { MessageSurfacingSettings } from "../../../src/lib/domain/daemon/Services/message-surfacing-settings.js";
@@ -28,6 +29,7 @@ import {
 	withTuningHunks,
 } from "../../../src/lib/frontend/utils/category-tuning.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 
 const current = DEFAULT_CATEGORY_SET;
 const draft: CategorySetContents = {
@@ -101,6 +103,7 @@ const fixture = (
 		query,
 		replace,
 		layer: Layer.mergeAll(
+			Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 			makePersistenceEffectLayer(":memory:", "test-project"),
 			Layer.succeed(CategorySet, {
 				current: () =>
@@ -142,6 +145,7 @@ it("reuses persisted verdict criteria after weight-only saves and full service r
 	const open = () =>
 		ManagedRuntime.make(
 			Layer.mergeAll(
+				Layer.succeed(AccountDirectory, makeMockAccountDirectory()),
 				makePersistenceEffectLayer(
 					join(directory, "events.db"),
 					"test-project",

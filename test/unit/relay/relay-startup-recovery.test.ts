@@ -13,16 +13,18 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import {
-	createProjectRelay,
-	type ProjectRelay,
-} from "../../../src/lib/relay/relay-stack.js";
+import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import {
 	makeMockOpenCodeAPI,
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
+import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
-it("wires a confirmed instance stop to the relay's exact pending send", async () => {
+it.each([
+	"ready",
+	"failed",
+	"hung",
+] as const)("wires a confirmed instance stop to the relay's exact pending send with %s shell readiness", async (readiness) => {
 	const dir = mkdtempSync(join(tmpdir(), "conduit-stop-recovery-"));
 	const filename = join(dir, "events.db");
 	const client = makeMockOpenCodeAPI();
@@ -37,6 +39,13 @@ it("wires a confirmed instance stop to the relay's exact pending send", async ()
 		events: () => Stream.fromPubSub(bus),
 	};
 	const server = createServer();
+	const shellEnv = { SYNTHETIC_ENV: "process-fallback" };
+	const prepareShellEnv = vi.fn(() => {
+		if (readiness === "failed")
+			return Promise.reject(new Error("Capture failed"));
+		if (readiness === "hung") return new Promise<boolean>(() => {});
+		return Promise.resolve(true);
+	});
 	let relay: ProjectRelay | undefined;
 	try {
 		await Effect.runPromise(
@@ -62,6 +71,8 @@ it("wires a confirmed instance stop to the relay's exact pending send", async ()
 			),
 		);
 		relay = await createProjectRelay({
+			shellEnv: () => shellEnv,
+			prepareShellEnv,
 			httpServer: server,
 			opencodeUrl: "http://opencode.test",
 			openCodeInstances: instances,
@@ -73,6 +84,12 @@ it("wires a confirmed instance stop to the relay's exact pending send", async ()
 			log: createSilentLogger(),
 		});
 		let result: string | undefined;
+		const deliver = vi.spyOn(
+			relay.orchestration.openCodeInstance,
+			"sendTurnEffect",
+		);
+		if (readiness === "hung")
+			vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 		const send = relay.effectRuntime.runtime
 			.runPromise(
 				Effect.gen(function* () {
@@ -108,9 +125,16 @@ it("wires a confirmed instance stop to the relay's exact pending send", async ()
 			});
 		// Relay disposal interrupts this waiter if an earlier assertion fails.
 		void send.catch(() => undefined);
+		if (readiness === "hung") {
+			await vi.waitFor(() => expect(prepareShellEnv).toHaveBeenCalledWith(dir));
+			expect(deliver).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(10_000);
+		}
 		await vi.waitFor(() =>
 			expect(client.session.prompt).toHaveBeenCalledTimes(1),
 		);
+		expect(prepareShellEnv).toHaveBeenCalledWith(dir);
+		expect(deliver).toHaveBeenCalledWith(expect.objectContaining({ shellEnv }));
 		await Effect.runPromise(
 			PubSub.publish(bus, {
 				_tag: "connection",
@@ -125,10 +149,15 @@ it("wires a confirmed instance stop to the relay's exact pending send", async ()
 				},
 			}),
 		);
-		await vi.waitFor(() => expect(result).toBe("interrupted"), {
-			timeout: 500,
-			interval: 10,
-		});
+		// With fake timers, waitFor only advances fake time by `interval` per check,
+		// so under load it never reaches the reactor's 500 ms outcome poll.
+		await vi.waitFor(
+			async () => {
+				if (readiness === "hung") await vi.advanceTimersByTimeAsync(500);
+				expect(result).toBe("interrupted");
+			},
+			{ timeout: 5_000, interval: 10 },
+		);
 		expect((await send).error?.code).toBe("interrupted");
 		expect(
 			await relay.effectRuntime.runtime.runPromise(
@@ -146,6 +175,7 @@ it("wires a confirmed instance stop to the relay's exact pending send", async ()
 			commands: [{ status: "failed" }],
 		});
 	} finally {
+		vi.useRealTimers();
 		await relay?.stop();
 		server.close();
 		await Effect.runPromise(PubSub.shutdown(bus));
@@ -240,6 +270,7 @@ for (const native of [
 				),
 			);
 			relay = await createProjectRelay({
+				shellEnv: () => ({}),
 				httpServer: server,
 				opencodeUrl: "http://opencode.test",
 				openCodeInstances: instances,
@@ -323,6 +354,7 @@ it("recovers historical sessions before startup can create a live session", asyn
 		);
 
 		relay = await createProjectRelay({
+			shellEnv: () => ({}),
 			httpServer: server,
 			opencodeUrl: "http://opencode.test",
 			projectDir: dir,
@@ -420,6 +452,7 @@ it("rejects Claude permissions a crash left pending and leaves OpenCode's alone"
 		);
 
 		relay = await createProjectRelay({
+			shellEnv: () => ({}),
 			httpServer: server,
 			opencodeUrl: "http://opencode.test",
 			projectDir: dir,

@@ -1,10 +1,13 @@
 import { Deferred, Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { accountsStateFromInstances } from "../../../../src/lib/account-directory.js";
+import { AccountUnroutable } from "../../../../src/lib/contracts/limit-recovery.js";
 import { getConfigDir } from "../../../../src/lib/daemon/config-persistence.js";
 import {
 	type ClaudeProviderInstanceDeps,
 	makeClaudeSessionRunner,
 } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { claudeLaunchConfigFromAccounts } from "../../../../src/lib/provider/claude/claude-runner-wire.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { claudeSubagentSessionId } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
@@ -19,6 +22,7 @@ import type {
 } from "../../../../src/lib/provider/runner/session-runner.js";
 import {
 	createMockQuery,
+	makeErrorResult,
 	makeSuccessResult,
 } from "../../../helpers/mock-sdk.js";
 
@@ -56,14 +60,44 @@ const capabilitiesService = {
 		),
 };
 
+it("rejects an account snapshot without a routable Claude default", () => {
+	const accounts = accountsStateFromInstances(
+		[],
+		configuredClaudeConfigDir("/tmp/claude-launch-login"),
+	);
+	expect(() => claudeLaunchConfigFromAccounts(accounts)).toThrow(
+		AccountUnroutable,
+	);
+});
+
 describe("Claude runner idle exit", () => {
+	it("keeps its admitted policy until the next turn receives a new memory snapshot", () => {
+		vi.useFakeTimers();
+		const onIdle = vi.fn();
+		const idle = makeRunnerIdleExit(onIdle, undefined, 100, null);
+		try {
+			idle.beginTurn(null);
+			vi.advanceTimersByTime(300);
+			idle.endTurn();
+			vi.advanceTimersByTime(300);
+			expect(onIdle).not.toHaveBeenCalled();
+			idle.beginTurn(1);
+			idle.endTurn();
+			vi.advanceTimersByTime(100);
+			expect(onIdle).toHaveBeenCalledOnce();
+		} finally {
+			idle.close();
+			vi.useRealTimers();
+		}
+	});
+
 	it.each([
 		"local_bash",
 		"local_agent",
 	])("stays alive for %s tasks and starts the idle window when they finish", (type) => {
 		vi.useFakeTimers();
 		const onIdle = vi.fn();
-		const idle = makeRunnerIdleExit(onIdle, 100, undefined, getConfigDir());
+		const idle = makeRunnerIdleExit(onIdle, 100);
 		try {
 			idle.activity({
 				type: "background-task",
@@ -94,7 +128,7 @@ describe("Claude runner idle exit", () => {
 	it("does not extend the idle window for empty snapshots", () => {
 		vi.useFakeTimers();
 		const onIdle = vi.fn();
-		const idle = makeRunnerIdleExit(onIdle, 100, undefined, getConfigDir());
+		const idle = makeRunnerIdleExit(onIdle, 100);
 		try {
 			vi.advanceTimersByTime(99);
 			idle.activity({
@@ -312,7 +346,7 @@ describe("in-process Claude session runner", () => {
 						} else {
 							await Effect.runPromise(Deferred.succeed(secondTurn, undefined));
 							await Effect.runPromise(Deferred.await(stop));
-							return;
+							yield makeErrorResult({ errors: ["Interrupted"] });
 						}
 					}
 				})();
@@ -330,7 +364,6 @@ describe("in-process Claude session runner", () => {
 				Effect.gen(function* () {
 					const runner = yield* makeClaudeSessionRunner(
 						{
-							workspaceRoot: "/tmp/ws",
 							daemonConfigDir: getConfigDir(),
 							queryFactory,
 							capabilitiesService,
@@ -434,7 +467,6 @@ describe("in-process Claude session runner", () => {
 				Effect.gen(function* () {
 					const runner = yield* makeClaudeSessionRunner(
 						{
-							workspaceRoot: "/tmp/ws",
 							daemonConfigDir: getConfigDir(),
 							queryFactory,
 							capabilitiesService,

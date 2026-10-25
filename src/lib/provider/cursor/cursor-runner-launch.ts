@@ -7,12 +7,14 @@ import type {
 	RunnerLaunchCallbacks,
 } from "../runner/runner-host.js";
 import { makeCursorSessionRunner } from "./cursor-runner-payload.js";
+import type { CursorCredential } from "./sdk-port.js";
 
 export const makeCursorRunnerLaunch = (
 	callbacks: RunnerLaunchCallbacks,
 ): Effect.Effect<RunnerLaunch> => {
 	let resumeSessionId: string | undefined;
 	let environment: Readonly<Record<string, string | undefined>> = process.env;
+	const credentials = new Map<string, CursorCredential>();
 	return Effect.succeed({
 		shouldExitAfterCommand: (_command, result) =>
 			result?.error?.code === "sandbox_unavailable",
@@ -36,6 +38,7 @@ export const makeCursorRunnerLaunch = (
 						workspaceRoot: config.workspaceRoot,
 						daemonConfigDir,
 						environment: () => environment,
+						credential: (inputId) => credentials.get(inputId),
 						onAbandonedRun: (inputId) =>
 							callbacks.retireAfterCommand?.(inputId),
 					},
@@ -45,17 +48,27 @@ export const makeCursorRunnerLaunch = (
 			}),
 		upgradeState: () => ({ ...(resumeSessionId ? { resumeSessionId } : {}) }),
 		acceptCommand: (command) => {
-			if (command.type === "send-turn")
+			if (command.type === "send-turn") {
 				environment = command.shellEnv ?? process.env;
+			}
 		},
 		executeEffect: (runner, command) =>
 			Effect.gen(function* () {
+				if (command.type === "send-turn" && command.cursorCredential)
+					credentials.set(command.input.inputId, command.cursorCredential);
 				const result = yield* runner.executeEffect(command);
 				resumeSessionId =
 					(yield* runner.getResumeSessionIdEffect?.(callbacks.sessionId) ??
 						Effect.succeed(undefined)) ?? undefined;
 				callbacks.stateChanged();
 				return result;
-			}),
+			}).pipe(
+				Effect.ensuring(
+					Effect.sync(() => {
+						if (command.type === "send-turn")
+							credentials.delete(command.input.inputId);
+					}),
+				),
+			),
 	});
 };

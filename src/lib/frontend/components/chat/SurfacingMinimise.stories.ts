@@ -60,6 +60,7 @@ const unread = segment(false);
 const read = segment(true);
 const turn: Turn = {
 	id: "minimise-story-turn",
+	storeId: "minimise-story-turn",
 	user: {
 		type: "user",
 		uuid: "minimise-story-turn",

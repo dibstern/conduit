@@ -23,7 +23,10 @@ import {
 	publishProjectSetting,
 	refreshModelSettings,
 } from "../domain/relay/Services/project-settings.js";
-import { OpenCodeModelServiceTag } from "../domain/relay/Services/services.js";
+import {
+	OpenCodeModelServiceTag,
+	OrchestrationEngineTag,
+} from "../domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
 import {
 	getPermissionMode,
@@ -35,7 +38,6 @@ import type { OpenCodeTerminalService } from "../domain/relay/Services/terminal-
 import * as Failure from "../effect/failure-classification.js";
 import type { Logger } from "../logger.js";
 import { notificationContent } from "../notification-content.js";
-import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import type {
 	PushDeliveryReport,
 	PushNotificationSender,
@@ -709,20 +711,22 @@ export const handleSSEEventEffect = (
 				? yield* getPermissionMode(input.sessionId)
 				: ("ask" as const);
 			const reply = deps.replyPermission;
-			const providers = yield* Effect.serviceOption(ProviderRegistryTag);
-			const adapter = Option.isSome(providers)
-				? providers.value.getInstance("opencode")
-				: undefined;
 			let autoApproved = false;
 			if (input?.sessionId && opencodeModeCoversAsk(mode, input.toolName)) {
+				const engine = yield* Effect.serviceOption(OrchestrationEngineTag);
 				const response: Effect.Effect<void, unknown> | undefined =
-					providerProcessId
-						? adapter?.resolvePermissionEffect(
-								input.sessionId,
-								input.requestId,
-								"once",
-								providerProcessId,
-							)
+					Option.isSome(engine)
+						? engine.value
+								.dispatchEffect({
+									type: "resolve_permission",
+									commandId: `auto-approve:${providerProcessId ?? "legacy"}:${input.sessionId}:${prompt?.id ?? input.requestId}`,
+									sessionId: input.sessionId,
+									requestId: prompt?.id ?? input.requestId,
+									nativeRequestId: input.requestId,
+									decision: "once",
+									...(providerProcessId ? { providerProcessId } : {}),
+								})
+								.pipe(Effect.asVoid)
 						: reply?.(input.sessionId, input.requestId, "once");
 				const replied = response ? yield* Effect.result(response) : undefined;
 				if (replied?._tag === "Success") {

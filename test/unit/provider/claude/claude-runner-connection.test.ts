@@ -14,6 +14,10 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, it } from "vitest";
+import {
+	type AccountsState,
+	accountsStateFromInstances,
+} from "../../../../src/lib/account-directory.js";
 import { BUILD_ID } from "../../../../src/lib/build-id.js";
 import {
 	makeProviderRuntimeIngestionLive,
@@ -26,10 +30,16 @@ import {
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { connectClaudeRunner } from "../../../../src/lib/provider/claude/claude-runner-connection.js";
 import { ClaudeRunnerSocket } from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
+import { makeClaudeRunnerWire } from "../../../../src/lib/provider/claude/claude-runner-wire.js";
 import { claudeRuntimeEvent } from "../../../../src/lib/provider/claude/claude-runtime-event.js";
+import {
+	configuredClaudeConfigDir,
+	sdkDefaultClaudeConfigDir,
+} from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
+	type RunnerHello,
 	type RunnerMessage,
 	runnerFailure,
 } from "../../../../src/lib/provider/runner/runner-protocol.js";
@@ -67,7 +77,11 @@ const terminalOutput = (id: string): SessionOutput => ({
 	event: claudeRuntimeEvent("turn.completed", "session", { messageId: id }),
 });
 
-async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
+async function fixture(
+	beforePublish: Effect.Effect<void> = Effect.void,
+	accounts?: AccountsState,
+	retainedState?: RunnerHello["upgradeState"],
+) {
 	const directory = mkdtempSync(join(tmpdir(), "conduit-runner-race-"));
 	const published: unknown[] = [];
 	const bus = Layer.succeed(SessionEventBusTag)({
@@ -103,6 +117,7 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 	const peers: ClaudeRunnerSocket[] = [];
 	const closedPeers = new Set<ClaudeRunnerSocket>();
 	const frames: RunnerMessage[] = [];
+	const attachedHellos: RunnerHello[] = [];
 	let closing = false;
 	const fibers: Fiber.Fiber<void, unknown>[] = [];
 	const spool = new RunnerSpool(join(directory, "runner.spool"));
@@ -116,9 +131,11 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 					peer.write({
 						type: "hello",
 						protocolVersion: RUNNER_PROTOCOL_VERSION,
+						stampsRunIds: true,
 						buildId: BUILD_ID,
 						runnerId: "runner",
 						sessionId: "session",
+						...(retainedState ? { upgradeState: retainedState } : {}),
 					});
 				else if (message.type === "replay")
 					spool.attach(peer, message.acknowledgedSequence);
@@ -164,11 +181,15 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 				deps: {
 					workspaceRoot: directory,
 					daemonConfigDir: join(directory, "config"),
+					...(accounts ? { accounts: Effect.succeed(accounts) } : {}),
 				},
 				receipts,
 				runFork: (effect) => fibers.push(runtime.runFork(effect)),
 				emit,
-				onHello: () => restore,
+				onHello: (hello) => {
+					attachedHellos.push(hello);
+					return restore;
+				},
 				onClose: () => {},
 			}),
 		);
@@ -180,12 +201,71 @@ async function fixture(beforePublish: Effect.Effect<void> = Effect.void) {
 		peers,
 		closedPeers,
 		frames,
+		attachedHellos,
 		spool,
 		attach,
 		ingest,
 		published,
 	};
 }
+
+it.each([
+	configuredClaudeConfigDir("/tmp/configured-account"),
+	sdkDefaultClaudeConfigDir("/tmp/daemon-home/.claude"),
+])("preserves the hello launch default before discovering tagged-folder support: $_tag", (configDir) => {
+	const wire = makeClaudeRunnerWire();
+	const hello: RunnerHello = {
+		type: "hello",
+		protocolVersion: RUNNER_PROTOCOL_VERSION,
+		buildId: BUILD_ID,
+		config: {
+			workspaceRoot: "/tmp/project",
+			claudeLaunchConfig: { configDir, folderSource: "implicitDefault" },
+		},
+	};
+	expect(wire.decode(JSON.parse(wire.encode(hello, false)))).toEqual(hello);
+});
+
+it("connects and controls a retained runner after its last Claude account is removed", async () => {
+	const accounts = accountsStateFromInstances(
+		[],
+		configuredClaudeConfigDir("/tmp/removed-claude-account"),
+	);
+	const retainedState: NonNullable<RunnerHello["upgradeState"]> = {
+		quiescent: true,
+		revision: 1,
+		snapshot: {
+			input: {
+				sessionId: "session",
+				providerState: {},
+				workspaceRoot: "/tmp/retained-worktree",
+				extraFolders: [],
+				configDir: configuredClaudeConfigDir("/tmp/removed-claude-account"),
+				folderSource: "account",
+			},
+			options: {},
+		},
+	};
+	const f = await fixture(Effect.void, accounts, retainedState);
+	const connection = await f.attach();
+	connection.write({
+		type: "command",
+		commandId: "shutdown",
+		command: { type: "shutdown" },
+	});
+	await expect
+		.poll(() =>
+			f.frames.some(
+				(message) =>
+					message.type === "command" && message.command.type === "shutdown",
+			),
+		)
+		.toBe(true);
+	expect(f.frames.find((message) => message.type === "hello")).toMatchObject({
+		config: { claudeLaunchConfig: null },
+	});
+	expect(f.attachedHellos[0]?.upgradeState).toEqual(retainedState);
+});
 
 it("acknowledges a durable terminal output while its event publication is still pending", async () => {
 	const publishing = await Effect.runPromise(Deferred.make<void>());

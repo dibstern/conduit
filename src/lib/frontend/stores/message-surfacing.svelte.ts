@@ -4,6 +4,7 @@ import {
 } from "../../contracts/category-set.js";
 import {
 	DEFAULT_MESSAGE_SURFACING_SETTINGS,
+	sessionJevEnabled as jevEnabledFor,
 	type MessageSurfacingStatus,
 } from "../../contracts/message-surfacing.js";
 import { rpc } from "../transport/ws-rpc-client.js";
@@ -51,6 +52,11 @@ export const messageSurfacing = $state<{
 	revision: 0,
 });
 
+export const sessionJevEnabled = (
+	session: Parameters<typeof jevEnabledFor>[0],
+	status: MessageSurfacingStatus = messageSurfacing.status,
+): boolean => jevEnabledFor(session, status);
+
 let loadVersion = 0;
 /** Reconnects fail closed; a partial or stale response cannot enable the UI. */
 export async function loadMessageSurfacing(): Promise<void> {
@@ -63,13 +69,15 @@ export async function loadMessageSurfacing(): Promise<void> {
 		if (version !== loadVersion) return;
 		messageSurfacing.categorySet = categorySet;
 		messageSurfacing.status = status;
-		if (status.active) void loadSurfacingFeedback();
+		if (status.key.source !== "none" && !status.key.rejected)
+			void loadSurfacingFeedback();
 	} catch {
 		if (version === loadVersion)
 			messageSurfacing.status = {
 				...messageSurfacing.status,
 				active: false,
 				summariesEnabled: false,
+				key: { source: "none", rejected: false },
 			};
 	}
 }

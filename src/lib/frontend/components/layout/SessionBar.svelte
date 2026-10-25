@@ -232,6 +232,7 @@
 	function handleGoalDetailsKeydown(event: KeyboardEvent) {
 		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open && !sideThreadsPanel.open) || uiState.confirmDialog) return;
 		if (goalDetails.open && sessionViewState.compact && !tasksPanel.open && !sideThreadsPanel.open) return;
+		if (sideThreadsPanel.open && sessionViewState.compact) return;
 		event.preventDefault();
 		event.stopPropagation();
 		if (sideThreadsPanel.open) {
@@ -338,7 +339,7 @@
 
 	let overflowOpen = $state(false);
 	$effect(() => {
-		if (sessionViewState.compact && !goalDetails.open && (tasksPanel.open || sideThreadsPanel.open)) return dimThemeColor();
+		if (sessionViewState.compact && !goalDetails.open && tasksPanel.open) return dimThemeColor();
 		return undefined;
 	});
 	let overflowOpener: HTMLElement | null = null;
@@ -369,8 +370,8 @@
 	{#if !sessionViewState.compact}<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close goal details" data-testid="goal-details-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => closeGoalDetails(true)} />{/if}
 {:else if tasksPanel.open && backgroundTasks.length > 0}
 	<Button variant={sessionViewState.compact ? "sheet-scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close background tasks" data-testid="background-tasks-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { tasksPanel.open = false; }} />
-{:else if sideThreadsPanel.open}
-	<Button variant={sessionViewState.compact ? "sheet-scrim" : "scrim-clear"} size="content" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { sideThreadsPanel.open = false; }} />
+{:else if sideThreadsPanel.open && !sessionViewState.compact}
+	<Button variant="scrim-clear" size="content" tabindex={-1} ariaLabel="Close Side Threads" data-testid="side-threads-scrim" class="fixed inset-0 z-[var(--z-dropdown)]" onclick={() => { sideThreadsPanel.open = false; }} />
 {/if}
 
 {#snippet viewCards()}
@@ -459,7 +460,7 @@
 		<div class="my-[12px] border-t border-border-chip"></div>
 		{#if stuck}
 			<div data-testid="goal-details-stuck" class="mb-[12px] rounded-[12px] border border-warning/30 bg-warning/5 px-[12px] py-[10px]">
-				<b class="text-[13.5px] font-semibold text-warning">{goal.phase === "paused" ? "Paused while stuck" : `Stuck for ${goalDuration(stuck.lastAt - stuck.since)}`}</b>
+				<b class="text-[13.5px] font-semibold text-warning">{goal.phase === "paused" ? `Paused after ${goalDuration(stuck.lastAt - stuck.since)} stuck` : `Stuck for ${goalDuration(stuck.lastAt - stuck.since)}`}</b>
 				<p class="mt-[3px] mb-0 text-[12.5px] leading-[1.45] text-text-secondary">{goal.phase === "paused" ? `Checks stopped after ${stuck.count} found the same blocker. Resume once it is fixed.` : `${stuck.count} checks in a row found the same blocker.`}</p>
 			</div>
 		{/if}

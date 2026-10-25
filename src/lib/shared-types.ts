@@ -375,6 +375,7 @@ export const SessionInfoSchema = Schema.Struct({
 	archivedAt: Schema.optional(Schema.Number),
 	settledAutomatically: Schema.optional(Schema.Boolean),
 	autoSettleDisabled: Schema.optional(Schema.Boolean),
+	jev: Schema.optional(Schema.NullOr(Schema.Literals(["on", "off"]))),
 	pinnedAt: Schema.optional(Schema.Number),
 	snoozedAt: Schema.optional(Schema.Number),
 	git: Schema.optional(SessionGitSchema),
@@ -556,6 +557,8 @@ export interface ModelExecution {
  */
 export interface HistoryMessage {
 	id: string;
+	/** Canonical turns.id, including when the prompt is outside this page. */
+	turnId?: string;
 	role: "user" | "assistant";
 	/** True when reconstructed from provider REST history rather than observed live. */
 	isBackfilled?: boolean;
@@ -854,6 +857,7 @@ export function tagWithSessionId(
 export type InstanceStatus = "starting" | "healthy" | "unhealthy" | "stopped";
 
 export interface OpenCodeInstance {
+	colorSlot?: number;
 	/** Published directory default marker; runtime records need not store it. */
 	isDefault?: boolean;
 	usageEligible?: boolean;

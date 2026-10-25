@@ -101,7 +101,6 @@ describe("Claude permission mode mapping", () => {
 		it(`puts the live query into "${sdkMode}" for conduit "${conduitMode}"`, async () => {
 			const { query, setPermissionMode } = makeMockQuery(singleTurn());
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: workspace,
 				queryFactory: vi.fn(() => query),
 				capabilitiesService: makeCapabilitiesService(),
 			});
@@ -142,7 +141,6 @@ describe("Claude permission mode mapping", () => {
 			},
 		);
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory,
 			capabilitiesService: makeCapabilitiesService(),
 		});
@@ -177,7 +175,6 @@ describe("Claude permission mode mapping", () => {
 			}
 		});
 		const instance = makeTestClaudeProviderInstance({
-			workspaceRoot: workspace,
 			queryFactory: vi.fn(
 				(args: { options?: { allowDangerouslySkipPermissions?: boolean } }) => {
 					optedIn = args.options?.allowDangerouslySkipPermissions === true;

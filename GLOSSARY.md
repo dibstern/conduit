@@ -103,8 +103,23 @@ _Avoid_: stored settings, cached config
 A Claude settings key whose acceptance depends on which settings tier supplied it (`permissions.defaultMode`, `autoMode`). Conduit never forwards these through the flag layer.
 _Avoid_: permissions setting
 
+**Draft Session**:
+A session that does not exist yet. Conduit creates it on the first send.
+_Avoid_: draft (alone), new session
+
+**Draft**:
+The unsent text and attachments waiting in one session's or Draft Session's composer.
+_Avoid_: unsent message, composer draft
+
+**Draft Attachment**:
+An image or file that belongs to a Draft.
+_Avoid_: pending attachment, pending image
+
 ## Relationships
 
+- A **Draft** belongs to exactly one session or **Draft Session**. Switching away never carries it into another.
+- A **Draft** with a **Draft Attachment** and no text is non-empty.
+- Sending a **Draft** gives its text and **Draft Attachments** to the session it is sent to.
 - A **Fork** is a **Family Root**. Its **Source** is lineage, not containment, so a busy or unread Fork never marks its Source's row (ADR-0007).
 - A **Side Thread** belongs to its **Source**'s **Family**.
 - Deleting a session deletes its **Family**, but never its **Forks**. A Fork whose Source was deleted keeps its transcript and fork point.
@@ -141,3 +156,4 @@ _Avoid_: permissions setting
 ## Flagged Ambiguities
 
 - "Always allow" can mean either **Session Approval** or **Approve And Remember**. The UI must name the scope instead of using ambiguous provider-neutral wording.
+- Code and older docs say "draft" for a **Draft Session** (`/draft/<id>`, `draftId`, the sidebar's draft list). In this glossary, **Draft** means the unsent content; say **Draft Session** for the not-yet-created session.

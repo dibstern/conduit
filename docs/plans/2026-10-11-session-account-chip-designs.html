@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session header: the account picker joins the chip</title>
+<style>
+:root, [data-theme="dark"] {
+	--page: #08090b; --bg: #0d0e11; --bg-alt: #1b1e24; --surface: #141619;
+	--text: #eceef2; --text-2: #a8afbb; --muted: #838b98; --dim: #676e79;
+	--accent: #fe3781; --border: #2d323b; --border-subtle: #20242b; --chip: #3a414c;
+	--success: #3fd69a; --warning: #f4b740; --error: #f4607a;
+	--acct-1: #b08cff; --acct-2: #2fd3c0;
+}
+[data-theme="light"] {
+	--page: #e6e8ee; --bg: #f5f6f9; --bg-alt: #eef0f5; --surface: #ffffff;
+	--text: #14171c; --text-2: #4b525e; --muted: #626975; --dim: #7e8591;
+	--accent: #c9004f; --border: #ccd2dc; --border-subtle: #dde1e8; --chip: #ccd2dc;
+	--success: #0c7750; --warning: #8a5500; --error: #c4314b;
+}
+:root { --mono: "JetBrains Mono", "Berkeley Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; --brand: "Chakra Petch", var(--mono); }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1.5; }
+main { max-width: 1240px; margin: 0 auto; padding: 32px 24px 80px; }
+h1 { font-size: 20px; margin: 0 0 6px; }
+h2 { font-size: 16px; margin: 48px 0 4px; padding-top: 20px; border-top: 1px solid var(--border-subtle); }
+h3 { font-size: 12px; color: var(--muted); margin: 18px 0 6px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; }
+p, li { color: var(--text-2); max-width: 860px; }
+.lede { color: var(--muted); }
+.tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--chip); color: var(--text-2); margin-left: 8px; vertical-align: 2px; }
+.tag.rec { border-color: var(--accent); color: var(--accent); }
+.theme { position: fixed; top: 12px; right: 12px; z-index: 10; font: 12px var(--mono); color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+code { color: var(--text); background: var(--bg-alt); padding: 0 4px; border-radius: 4px; font-size: 12px; }
+.notes li { margin: 3px 0; }
+.pro::marker { content: "+  "; color: var(--success); }
+.con::marker { content: "−  "; color: var(--error); }
+
+/* Frames are drawn at real app size (12px root) and scaled for reading. */
+.zoom { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+@media (min-width: 1100px) { .zoom { zoom: 1.3; } }
+/* On a phone, the phone frames fill the screen. Desktop frames keep their real width and open scrolled to the right (rtl scroller), so the chip shows first. */
+@media (max-width: 700px) { main { padding: 24px 12px 60px; } .frame.phone { width: 100%; } .frame.desk, .frame.narrow { width: auto; max-width: 100%; overflow-x: auto; direction: rtl; } .frame.desk > .bar { width: 640px; direction: ltr; } .frame.narrow > .bar { width: 540px; direction: ltr; } .theme { position: static; margin-bottom: 8px; } }
+.frames { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.frame { flex: none; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 6px; overflow: hidden; }
+.desk { width: 640px; }
+.narrow { width: 540px; }
+.phone { width: 390px; }
+
+/* Desktop bar: title row grows, meta + ⋯ pinned right. */
+.bar { display: flex; align-items: center; gap: 6px; min-height: 48px; padding: 4px 12px; white-space: nowrap; }
+.title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--text); }
+.tchev { width: 17px; height: 17px; color: var(--text-2); flex-shrink: 0; }
+.grow { flex: 1 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.more { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); border-radius: 6px; flex-shrink: 0; }
+.more svg { width: 17px; height: 17px; }
+
+/* Phone bar: row 1 back + meta + ⋯, row 2 title. */
+.pbar { padding: 4px 8px 8px; }
+.prow { display: flex; align-items: center; gap: 6px; min-height: 44px; }
+.back { color: var(--text); font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.back svg { width: 17px; height: 17px; }
+.count { min-width: 14px; height: 14px; padding: 0 4px; border-radius: 999px; background: var(--accent); color: var(--bg); font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.meta { display: flex; align-items: center; gap: 6px; justify-content: flex-end; min-width: 0; flex: 1 1 auto; }
+.pmore { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); flex-shrink: 0; }
+.pmore svg { width: 17px; height: 17px; }
+.ptitle { font-size: 15px; font-weight: 600; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+svg { stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* The real group: .session-bar-segments + Button size=segment. */
+.seg { display: inline-flex; align-items: stretch; height: 24px; border: 1px solid var(--border); border-radius: 6px; min-width: 0; flex-shrink: 1; }
+.cell { height: 22px; padding: 0 8px; display: inline-flex; align-items: center; gap: 5px; font: 500 10px/1 var(--mono); color: var(--text-2); white-space: nowrap; min-width: 0; flex-shrink: 0; cursor: pointer; }
+.cell:hover { color: var(--text); background: var(--bg); }
+.cell svg { width: 12px; height: 12px; flex-shrink: 0; }
+.seg > .cell + .cell { border-left: 1px solid var(--border); }
+.seg > .cell:first-child { border-radius: 5px 0 0 5px; }
+.seg > .cell:last-child { border-radius: 0 5px 5px 0; }
+.cell.git { flex-shrink: 1; }
+.cell .proj { color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex-shrink: 100000; min-width: 4ch; }
+.cell .sep { color: var(--dim); }
+.cell .br { color: var(--text); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cell .name { overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 140px; }
+.cell .caret { width: 10px; height: 10px; color: var(--dim); }
+.cell.dot-only { padding: 0 7px; }
+.dot { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; display: inline-block; }
+.a1 { background: var(--acct-1); } .a2 { background: var(--acct-2); }
+.ok { background: var(--success); }
+.spin { width: 10px; height: 10px; animation: spin 1s linear infinite; color: var(--muted); }
+@keyframes spin { to { transform: rotate(360deg); } }
+.cell.limited .name { color: var(--error); }
+
+/* Today's pill, verbatim from SessionAccountPill. */
+.oldpill { height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-alt); font: 400 10px/1 var(--mono); color: var(--text-2); display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.phone .oldpill { height: 20px; padding: 0 6px; font-size: 9px; }
+.oldbadge { height: 18px; padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-alt); font: 500 10px/1 var(--brand); color: var(--muted); display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+/* Variant C: overline label on the account group. */
+.seg.who { border-style: dashed; }
+
+/* Callouts. */
+.callout { display: grid; grid-template-columns: 120px max-content; gap: 6px 14px; align-items: center; margin-top: 10px; }
+.callout > .seg { justify-self: start; }
+.seg.fixed { flex-shrink: 0; }
+.callout .lbl { color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">light / dark</button>
+<svg width="0" height="0" style="position:absolute">
+	<defs>
+		<symbol id="branch" viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+		<symbol id="sparkles" viewBox="0 0 24 24"><path d="M9.94 14.06 4 12l5.94-2.06L12 4l2.06 5.94L20 12l-5.94 2.06L12 20Z"/></symbol>
+		<symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+		<symbol id="more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+		<symbol id="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+		<symbol id="updown" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></symbol>
+		<symbol id="left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+		<symbol id="loader" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+	</defs>
+</svg>
+
+<template id="t-skills"><span class="cell"><svg><use href="#sparkles"/></svg>3</span></template>
+<template id="t-git"><span class="cell git"><svg><use href="#branch"/></svg><span class="proj">conduit</span><span class="sep">/</span><span class="br">account-chip-consistency</span></span></template>
+<template id="t-settle"><span class="cell"><svg><use href="#check"/></svg>Settle</span></template>
+
+<main>
+<h1>Session header: the account picker joins the chip</h1>
+<p class="lede">2026-10-11. Frames are drawn at real app size (12px root) and shown at real size (1.3× on wide screens). On a phone, desktop frames open scrolled to the chip; swipe left for the title. Toggle light/dark top right.</p>
+
+<h2>Today</h2>
+<div class="zoom"><div class="frames">
+	<div class="frame desk"><div class="bar">
+		<div class="grow"><span class="title">Make the account picker match the header</span><svg class="tchev"><use href="#chev"/></svg></div>
+		<span class="seg" data-cells="skills git settle"></span>
+		<span class="oldpill"><span class="dot a1"></span>personal</span>
+		<span class="more"><svg><use href="#more"/></svg></span>
+	</div></div>
+	<div class="frame phone"><div class="pbar">
+		<div class="prow"><span class="back"><svg><use href="#left"/></svg>Sessions<span class="count">2</span></span>
+			<span class="meta"><span class="seg" data-cells="skills git"></span><span class="oldpill"><span class="dot a1"></span>personal</span></span>
+			<span class="pmore"><svg><use href="#more"/></svg></span></div>
+		<div class="ptitle">Make the account picker match the header</div>
+	</div></div>
+</div></div>
+<ul class="notes">
+	<li><b>Four mismatches with the chip:</b> fully round vs 6px corners, 22px (20px on phone) vs 24px tall, filled vs transparent, regular vs medium weight.</li>
+	<li><b>OpenCode has the same problem in the same spot.</b> <code>InstanceBadgeMenu</code> is a <code>variant="pill"</code> in Chakra Petch. Whatever wins here should be applied to both, since they occupy one slot.</li>
+</ul>
+
+<!-- ───────────────────────── A ───────────────────────── -->
+<h2>A · First segment: who, then where, then what <span class="tag rec">recommended</span></h2>
+<p>The account becomes the group's first cell: a plain <code>Button size="segment"</code> with the dot and name. The chip now reads left to right as who runs it, what it loaded, where it runs, and what you can do. Settle stays on the edge next to ⋯.</p>
+<div class="zoom"><div class="frames">
+	<div class="frame desk"><div class="bar">
+		<div class="grow"><span class="title">Make the account picker match the header</span><svg class="tchev"><use href="#chev"/></svg></div>
+		<span class="seg"><span class="cell"><span class="dot a1"></span><span class="name">personal</span></span><span data-cells="skills git settle"></span></span>
+		<span class="more"><svg><use href="#more"/></svg></span>
+	</div></div>
+	<div class="frame phone"><div class="pbar">
+		<div class="prow"><span class="back"><svg><use href="#left"/></svg>Sessions<span class="count">2</span></span>
+			<span class="meta"><span class="seg"><span class="cell"><span class="dot a1"></span><span class="name">personal</span></span><span data-cells="skills git"></span></span></span>
+			<span class="pmore"><svg><use href="#more"/></svg></span></div>
+		<div class="ptitle">Make the account picker match the header</div>
+	</div></div>
+</div>
+<div class="callout">
+	<span class="lbl">Switching</span><span class="seg"><span class="cell"><svg class="spin"><use href="#loader"/></svg><span class="name">work</span></span><span data-cells="skills git settle"></span></span>
+	<span class="lbl">At its limit</span><span class="seg"><span class="cell limited"><span class="dot a1"></span><span class="name">personal</span></span><span data-cells="skills git settle"></span></span>
+	<span class="lbl">OpenCode instance</span><span class="seg"><span class="cell"><span class="dot ok"></span><span class="name">local</span></span><span data-cells="skills git settle"></span></span>
+</div></div>
+<ul class="notes">
+	<li class="pro">Zero new styling: the cell is the same recipe as its neighbours.</li>
+	<li class="pro">One border in the corner instead of two shapes.</li>
+	<li class="con">On a phone it adds a divider and 8px padding, so the branch truncates a little sooner.</li>
+</ul>
+
+<!-- ───────────────────────── B ───────────────────────── -->
+<h2>B · Last segment</h2>
+<p>Same cell, at the far end of the group. Keeps the existing order untouched and puts the account where the pill stands today, so muscle memory carries over.</p>
+<div class="zoom"><div class="frames">
+	<div class="frame desk"><div class="bar">
+		<div class="grow"><span class="title">Make the account picker match the header</span><svg class="tchev"><use href="#chev"/></svg></div>
+		<span class="seg"><span data-cells="skills git settle"></span><span class="cell"><span class="dot a1"></span><span class="name">personal</span></span></span>
+		<span class="more"><svg><use href="#more"/></svg></span>
+	</div></div>
+	<div class="frame phone"><div class="pbar">
+		<div class="prow"><span class="back"><svg><use href="#left"/></svg>Sessions<span class="count">2</span></span>
+			<span class="meta"><span class="seg"><span data-cells="skills git"></span><span class="cell"><span class="dot a1"></span><span class="name">personal</span></span></span></span>
+			<span class="pmore"><svg><use href="#more"/></svg></span></div>
+		<div class="ptitle">Make the account picker match the header</div>
+	</div></div>
+</div></div>
+<ul class="notes">
+	<li class="pro">Smallest move from today.</li>
+	<li class="con">Settle, the one action in the chip, is buried mid-group on desktop, and "personal" sits between it and ⋯.</li>
+</ul>
+
+<!-- ───────────────────────── C ───────────────────────── -->
+<h2>C · Twin group beside the chip</h2>
+<p>The account keeps its own box, but the box is built from the chip's parts: 24px, 6px corners, transparent, one border. A trailing ⇕ says it's a picker, which a plain segment doesn't.</p>
+<div class="zoom"><div class="frames">
+	<div class="frame desk"><div class="bar">
+		<div class="grow"><span class="title">Make the account picker match the header</span><svg class="tchev"><use href="#chev"/></svg></div>
+		<span class="seg" data-cells="skills git settle"></span>
+		<span class="seg fixed"><span class="cell"><span class="dot a1"></span><span class="name">personal</span><svg class="caret"><use href="#updown"/></svg></span></span>
+		<span class="more"><svg><use href="#more"/></svg></span>
+	</div></div>
+	<div class="frame phone"><div class="pbar">
+		<div class="prow"><span class="back"><svg><use href="#left"/></svg>Sessions<span class="count">2</span></span>
+			<span class="meta"><span class="seg" data-cells="skills git"></span><span class="seg fixed"><span class="cell"><span class="dot a1"></span><span class="name">personal</span><svg class="caret"><use href="#updown"/></svg></span></span></span>
+			<span class="pmore"><svg><use href="#more"/></svg></span></div>
+		<div class="ptitle">Make the account picker match the header</div>
+	</div></div>
+</div></div>
+<ul class="notes">
+	<li class="pro">Keeps "which account" visibly apart from "this session's state", if you think of it as a different kind of thing.</li>
+	<li class="con">Two boxes side by side, and the widest of the four on a phone.</li>
+</ul>
+
+<!-- ───────────────────────── D ───────────────────────── -->
+<h2>D · Dot-only first segment</h2>
+<p>Variant A, but the cell shows only the account's colour. The name lives in the tooltip, the accessible label, and the switch menu's header. Optionally widens to dot + name when the bar has room (bottom frame, a container query).</p>
+<div class="zoom"><div class="frames">
+	<div class="frame desk"><div class="bar">
+		<div class="grow"><span class="title">Make the account picker match the header</span><svg class="tchev"><use href="#chev"/></svg></div>
+		<span class="seg"><span class="cell dot-only" title="Account: personal"><span class="dot a1"></span></span><span data-cells="skills git settle"></span></span>
+		<span class="more"><svg><use href="#more"/></svg></span>
+	</div></div>
+	<div class="frame phone"><div class="pbar">
+		<div class="prow"><span class="back"><svg><use href="#left"/></svg>Sessions<span class="count">2</span></span>
+			<span class="meta"><span class="seg"><span class="cell dot-only" title="Account: personal"><span class="dot a1"></span></span><span data-cells="skills git"></span></span></span>
+			<span class="pmore"><svg><use href="#more"/></svg></span></div>
+		<div class="ptitle">Make the account picker match the header</div>
+	</div></div>
+</div>
+<h3>Hybrid: name on wide bars, dot on narrow</h3>
+<div class="frames">
+	<div class="frame desk"><div class="bar">
+		<div class="grow"><span class="title">Make the account picker match the header</span><svg class="tchev"><use href="#chev"/></svg></div>
+		<span class="seg"><span class="cell"><span class="dot a1"></span><span class="name">personal</span></span><span data-cells="skills git settle"></span></span>
+		<span class="more"><svg><use href="#more"/></svg></span>
+	</div></div>
+	<div class="frame narrow"><div class="bar">
+		<div class="grow"><span class="title">Make the account picker match the header</span><svg class="tchev"><use href="#chev"/></svg></div>
+		<span class="seg"><span class="cell dot-only"><span class="dot a1"></span></span><span data-cells="skills git settle"></span></span>
+		<span class="more"><svg><use href="#more"/></svg></span>
+	</div></div>
+</div></div>
+<ul class="notes">
+	<li class="pro">Costs 21px. The branch keeps almost all its room on a phone.</li>
+	<li class="con">Colour alone names the account. Fine with two accounts you know by colour, weak with four, and it hides which one you're on until you tap.</li>
+</ul>
+</main>
+
+<script>
+	// Expand the shared skills | git | Settle cells so every frame uses one source.
+	for (const host of document.querySelectorAll("[data-cells]")) {
+		const cells = host.dataset.cells.split(" ").map((name) => document.getElementById(`t-${name}`).content.cloneNode(true));
+		if (host.classList.contains("seg")) host.append(...cells);
+		else host.replaceWith(...cells);
+	}
+</script>
+</body>
+</html>

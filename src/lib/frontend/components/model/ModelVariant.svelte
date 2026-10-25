@@ -4,6 +4,7 @@
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
+	import MenuGroup from "../ui/MenuGroup.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MicroLabelButton from "../ui/MicroLabelButton.svelte";
@@ -11,6 +12,8 @@
 	import { composerPickerState, openPicker } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
+	import { getActiveModel } from "../../stores/discovery.svelte.js";
+	import { resolveModelParameters } from "./model-parameters.js";
 
 	let { onOpen, variant = "icons", children, wordLabel }: {
 		onOpen?: (() => void) | undefined;
@@ -23,8 +26,16 @@
 	const phone = $derived(sessionViewState.composerTier === "phone");
 	const variants = $derived(effort.options);
 	const currentVariant = $derived(effort.current ?? "");
+	const parameters = $derived(getActiveModel()?.parameters);
+	const parameterState = $derived(resolveModelParameters(parameters, effort.current));
+	const parameterEffort = $derived(parameterState.rows.find((row) => row.kind === "effort"));
+	const levels = $derived(parameters ? parameterEffort?.options.length ?? 0 : variants.length);
+	const currentEffort = $derived(parameters && !parameterState.variantUnavailable ? parameterEffort?.value ?? "" : currentVariant);
+	const displayedWord = $derived(parameters && parameterState.variantUnavailable ? currentVariant : wordLabel);
 	const showEffort = $derived(variants.length > 0 || (!!sessionState.currentId && !!currentVariant));
-	const filled = $derived(currentVariant ? variants.indexOf(currentVariant) + 1 : 0);
+	const filled = $derived(parameters
+		? parameterState.variantUnavailable ? 0 : (parameterEffort?.options.findIndex((option) => option.value === currentEffort) ?? -1) + 1
+		: currentVariant ? variants.indexOf(currentVariant) + 1 : 0);
 
 	const knownLevels = [
 		{ value: "low", name: "Low", label: "LOW", description: "Quick, light reasoning" },
@@ -33,10 +44,10 @@
 		{ value: "xhigh", name: "Extra high", label: "XHIGH", description: "Deeper still, for hard problems" },
 		{ value: "max", name: "Max", label: "MAX", description: "Most thorough, slowest" },
 	];
-	const currentLevel = $derived(knownLevels.find((level) => level.value === currentVariant));
-	const levelName = $derived(currentLevel?.name ?? (currentVariant || "Default"));
+	const currentLevel = $derived(knownLevels.find((level) => level.value === currentEffort));
+	const levelName = $derived(currentLevel?.name ?? (currentEffort || (parameters ? displayedWord : undefined) || "Default"));
 	const microLabel = $derived(
-		currentLevel?.label ?? (currentVariant ? currentVariant.slice(0, 5).toUpperCase() : "DEF"),
+		currentLevel?.label ?? (currentEffort ? currentEffort.slice(0, 5).toUpperCase() : "DEF"),
 	);
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -62,7 +73,7 @@
 {#snippet effortRow()}
 		<Button
 			variant="composer-row" size="content"
-			ariaLabel={`Effort: ${levelName}. Open effort options`}
+			ariaLabel={`Effort: ${displayedWord ?? levelName}. Open effort options`}
 			loading={effort.pending}
 			disabled={variants.length === 0}
 			aria-haspopup="dialog"
@@ -70,7 +81,7 @@
 			onclick={() => openPicker("effort")}
 		>
 			<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Effort</span>
-			<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold"><EffortMeter levels={variants.length} {filled} />{variants.length === 0 && !currentVariant ? "Unavailable" : currentVariant || "Default"}</span>
+			<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{#if !parameters || levels > 0}<EffortMeter {levels} {filled} />{/if}{displayedWord ?? (variants.length === 0 && !currentVariant ? "Unavailable" : parameters ? levelName : currentVariant || "Default")}</span>
 			<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 		</Button>
 {/snippet}
@@ -82,7 +93,7 @@
 			variant="composer-word"
 			size="content"
 			class="shrink-0"
-			ariaLabel={`Effort: ${wordLabel ?? levelName}. Open effort options`}
+			ariaLabel={`Effort: ${displayedWord ?? levelName}. Open effort options`}
 			loading={effort.pending}
 			disabled={variants.length === 0}
 			aria-haspopup="dialog"
@@ -93,7 +104,7 @@
 				openPicker("effort");
 				if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
 			}}
-		><span>{wordLabel ?? (currentVariant || "default")}</span></Button>
+		><span>{displayedWord ?? (parameters ? currentEffort || levelName : currentVariant || "default")}</span></Button>
 {:else if showEffort && variant === "control" && sessionViewState.composerWidth >= 480}
 	<Button
 		variant="composer-model"
@@ -112,8 +123,8 @@
 			if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
 		}}
 	>
-		<EffortMeter levels={variants.length} {filled} />
-		{#if sessionViewState.composerTier === "wide" || variants.length === 0}<span data-testid="composer-effort-label">{levelName}</span>{/if}
+		{#if !parameters || levels > 0}<EffortMeter {levels} {filled} />{/if}
+		{#if sessionViewState.composerTier === "wide" || levels === 0}<span data-testid="composer-effort-label">{levelName}</span>{/if}
 	</Button>
 {:else if showEffort && variant !== "control"}
 	<Menu
@@ -146,7 +157,7 @@
 					data-testid="variant-badge"
 					title="Effort {levelName}. Ctrl+T to cycle"
 				>
-					<EffortMeter levels={variants.length} {filled} />
+					{#if !parameters || levels > 0}<EffortMeter {levels} {filled} />{/if}
 				</MicroLabelButton>
 			{:else}
 				<MicroLabelButton
@@ -162,7 +173,7 @@
 					data-testid="variant-badge"
 					title="Effort {levelName}. Ctrl+T to cycle"
 				>
-					<EffortMeter levels={variants.length} {filled} />
+					{#if !parameters || levels > 0}<EffortMeter {levels} {filled} />{/if}
 				</MicroLabelButton>
 			{/if}
 		{/snippet}
@@ -175,26 +186,48 @@
 				onselect={() => { effort.select(null); open = false; }}
 			>
 				<span class="grid grid-cols-[28px_1fr] items-center gap-x-1.5">
-					<span class="row-span-2 justify-self-center"><EffortMeter levels={variants.length} filled={0} /></span>
+					<span class="row-span-2 justify-self-center">{#if !parameters || levels > 0}<EffortMeter {levels} filled={0} />{/if}</span>
 					<span class="font-sans font-semibold">Default</span>
 					<span class="text-xs text-text-muted">Use the model default</span>
 				</span>
 			</MenuRadioItem>
-			{#each variants as v, index (v)}
-				{@const level = knownLevels.find((known) => known.value === v)}
-				<MenuRadioItem
-					value={v}
-					disabled={effort.pending}
-					data-testid="variant-option-{v}"
-					onselect={() => { effort.select(v); open = false; }}
-				>
-					<span class="grid grid-cols-[28px_1fr] items-center gap-x-1.5">
-						<span class="row-span-2 justify-self-center"><EffortMeter levels={variants.length} filled={index + 1} /></span>
-						<span class="font-sans font-semibold">{level?.name ?? v}</span>
-						<span class="text-xs text-text-muted">{level?.description ?? "Custom reasoning effort"}</span>
-					</span>
-				</MenuRadioItem>
-			{/each}
+			{#if !parameters}
+				{#each variants as v, index (v)}
+					{@const level = knownLevels.find((known) => known.value === v)}
+					<MenuRadioItem
+						value={v}
+						disabled={effort.pending}
+						data-testid="variant-option-{v}"
+						onselect={() => { effort.select(v); open = false; }}
+					>
+						<span class="grid grid-cols-[28px_1fr] items-center gap-x-1.5">
+							<span class="row-span-2 justify-self-center"><EffortMeter levels={variants.length} filled={index + 1} /></span>
+							<span class="font-sans font-semibold">{level?.name ?? v}</span>
+							<span class="text-xs text-text-muted">{level?.description ?? "Custom reasoning effort"}</span>
+						</span>
+					</MenuRadioItem>
+				{/each}
+			{/if}
 		</MenuRadioGroup>
+		{#if parameters}
+			{#each parameterState.rows as row (row.id)}
+				<MenuGroup label={row.title}>
+					<MenuRadioGroup value={row.value} aria-label={row.title}>
+						{#each row.options as option (option.value)}
+							<MenuRadioItem
+								value={option.value}
+								disabled={effort.pending || option.disabled}
+								data-testid="variant-{row.kind}-option-{option.value}"
+								onselect={() => {
+									const combination = parameterState.parameterCombination(row.id, option.value);
+									if (combination && !effort.pending) effort.select(combination.variant);
+									open = false;
+								}}
+							>{option.label}</MenuRadioItem>
+						{/each}
+					</MenuRadioGroup>
+				</MenuGroup>
+			{/each}
+		{/if}
 	</Menu>
 {/if}

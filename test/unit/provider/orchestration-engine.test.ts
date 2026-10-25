@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	AccountIdSchema,
+	OpenCodeAccountSchema,
+} from "../../../src/lib/contracts/account.js";
 import { makeTestClaudeProviderInstance } from "../../helpers/claude-provider-instance.js";
 
 // Mock the logger module so we can spy on log.error calls
@@ -171,6 +175,72 @@ describe("OrchestrationEngine", () => {
 		opencode = makeStubInstance("opencode");
 		registry.registerInstance(opencode);
 		engine = new OrchestrationEngine({ registry });
+	});
+
+	it("passes context to discovery and untargeted controls, leaving unresolved prompts without context", async () => {
+		const account = OpenCodeAccountSchema.make({
+			id: AccountIdSchema.make("opencode"),
+			name: "Selected account",
+			driver: "opencode",
+			usageEligible: false,
+		});
+		const call = {
+			projectId: "project-a",
+			sessionId: "s1",
+			account,
+			workspaceRoot: "/worktrees/current",
+			extraFolders: ["/worktrees/extra"],
+			shellEnv: Object.freeze({ PROJECT_MARKER: "project-a" }),
+		};
+		engine = new OrchestrationEngine({
+			registry,
+			resolveCallContext: () => Effect.succeed(call),
+		});
+		engine.bindSession("s1", "opencode");
+		await dispatch(engine, {
+			type: "discover",
+			providerId: "opencode",
+			account,
+			sessionId: "s1",
+		});
+		await dispatch(engine, {
+			type: "interrupt_turn",
+			commandId: "context-interrupt",
+			sessionId: "s1",
+		});
+		await dispatch(engine, {
+			type: "resolve_permission",
+			commandId: "context-permission",
+			sessionId: "s1",
+			requestId: "p1",
+			decision: "once",
+		});
+		await dispatch(engine, {
+			type: "resolve_question",
+			commandId: "context-question",
+			sessionId: "s1",
+			requestId: "q1",
+			answers: { choice: "yes" },
+		});
+		expect(opencode.discoverEffect).toHaveBeenCalledWith(
+			call.workspaceRoot,
+			account,
+			undefined,
+			call,
+		);
+		expect(opencode.interruptTurnEffect).toHaveBeenCalledWith(
+			"s1",
+			undefined,
+			call,
+		);
+		expect(opencode.resolvePermissionEffect).toHaveBeenCalledWith(
+			"s1",
+			"p1",
+			"once",
+		);
+		expect(opencode.resolveQuestionEffect).toHaveBeenCalledWith("s1", "q1", {
+			choice: "yes",
+		});
 	});
 
 	describe("dispatch: send_turn", () => {
@@ -742,12 +812,12 @@ describe("OrchestrationEngine", () => {
 	});
 
 	describe("shutdownEffect", () => {
-		it("delegates to registry.shutdownAllEffect", async () => {
+		it("leaves the daemon's borrowed adapters running", async () => {
 			const shutdownSpy = vi.spyOn(registry, "shutdownAllEffect");
 
 			await Effect.runPromise(engine.shutdownEffect());
 
-			expect(shutdownSpy).toHaveBeenCalledTimes(1);
+			expect(shutdownSpy).not.toHaveBeenCalled();
 		});
 
 		it("clears session bindings", async () => {
@@ -794,7 +864,6 @@ describe("OrchestrationEngine", () => {
 
 			const claudeRegistry = new ProviderRegistry();
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
 			claudeRegistry.registerInstance(instance);
@@ -832,7 +901,6 @@ describe("OrchestrationEngine", () => {
 
 			const claudeRegistry = new ProviderRegistry();
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
 			claudeRegistry.registerInstance(instance);
@@ -899,7 +967,6 @@ describe("OrchestrationEngine", () => {
 
 			const claudeRegistry = new ProviderRegistry();
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
 			claudeRegistry.registerInstance(instance);
@@ -1049,7 +1116,6 @@ describe("OrchestrationEngine", () => {
 
 			const claudeRegistry = new ProviderRegistry();
 			const instance = makeTestClaudeProviderInstance({
-				workspaceRoot: claudeWorkspace,
 				queryFactory,
 			});
 			claudeRegistry.registerInstance(instance);

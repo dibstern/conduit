@@ -81,14 +81,13 @@ async function openServer(
 	accountId: string = defaultId,
 ): Promise<void> {
 	await new AppPage(page).goto(baseUrl);
-	const listOverflow = page.getByTestId("list-bar-overflow");
+	const listSettings = page.getByTestId("list-bar-settings");
 	const sessionOverflow = page
 		.getByTestId("session-bar-overflow")
 		.or(page.getByTestId("session-bar-island-overflow"));
-	await expect(listOverflow.or(sessionOverflow).first()).toBeVisible();
-	if (await listOverflow.isVisible()) {
-		await listOverflow.click();
-		await page.getByTestId("list-overflow-settings").click();
+	await expect(listSettings.or(sessionOverflow).first()).toBeVisible();
+	if (await listSettings.isVisible()) {
+		await listSettings.click();
 	} else {
 		await sessionOverflow.click();
 		await page.getByTestId("overflow-settings").click();

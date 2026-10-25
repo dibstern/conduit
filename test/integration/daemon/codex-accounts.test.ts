@@ -311,7 +311,7 @@ describe("Codex accounts through the built daemon and detached runners", () => {
 	});
 
 	it(
-		"runs two named accounts in private homes sharing the base rollout directory",
+		"runs two named accounts in private homes sharing conduit's rollout directory",
 		async () => {
 			const { fixture, browser } = await start("independent-homes");
 			const first = await add(fixture, "Work");
@@ -323,7 +323,11 @@ describe("Codex accounts through the built daemon and detached runners", () => {
 						true,
 					);
 					expect(realpathSync(join(account.home, name))).toBe(
-						realpathSync(join(baseHome, name)),
+						realpathSync(
+							name === "sessions"
+								? join(fixture.configDir, "codex", "sessions")
+								: join(baseHome, name),
+						),
 					);
 				}
 				expect(existsSync(join(account.home, "auth.json"))).toBe(false);
@@ -401,7 +405,11 @@ describe("Codex accounts through the built daemon and detached runners", () => {
 			await codexModels(browser, account.id);
 			for (const name of ["sessions", "skills"])
 				expect(realpathSync(join(account.home, name))).toBe(
-					realpathSync(join(baseHome, name)),
+					realpathSync(
+						name === "sessions"
+							? join(fixture.configDir, "codex", "sessions")
+							: join(baseHome, name),
+					),
 				);
 			expect(lstatSync(join(account.home, "config.toml")).ino).toBe(unchanged);
 			expect(lstatSync(join(account.home, "AGENTS.md")).isSymbolicLink()).toBe(

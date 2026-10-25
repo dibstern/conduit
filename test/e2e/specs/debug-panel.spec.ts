@@ -88,6 +88,29 @@ test.describe("Debug Panel — Keyboard Shortcut", () => {
 });
 
 test.describe("Debug Panel — Settings Advanced", () => {
+	test("phone settings can reveal the debug panel from the session list", async ({
+		page,
+		relayUrl,
+	}) => {
+		await page.setViewportSize({ width: 393, height: 852 });
+		const app = new AppPage(page);
+		await app.goto(`${relayUrl}?feats=debug`);
+		await page.locator(CLOSE_BTN).click();
+		await app.sessionBarBack.click();
+		await expect(page.locator("#session-list")).toBeVisible();
+		await page.getByTestId("list-bar-settings").click();
+		await page.getByTestId("settings-tab-general").click();
+		await page.getByRole("button", { name: /^Advanced.*Debug on$/ }).click();
+		const toggle = page.locator(DEBUG_TOGGLE);
+		await toggle.click();
+		await expect(toggle).toHaveAttribute("aria-checked", "false");
+		await toggle.click();
+		await expect(toggle).toHaveAttribute("aria-checked", "true");
+		await page.getByTestId("settings-back-btn").click();
+		await page.getByTestId("settings-close-btn").click();
+		await expect(page.locator(DEBUG_PANEL)).toBeVisible();
+	});
+
 	test("Settings Advanced toggles the feature", async ({ page, relayUrl }) => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
@@ -156,8 +179,20 @@ test.describe("Debug Panel — Desktop Overflow", () => {
 
 		// Re-open from the merged bar.
 		await openMoreActions(page);
+		await expect(
+			page.getByRole("menuitemcheckbox", { name: "Debug panel" }),
+		).toHaveAttribute("aria-checked", "false");
 		await page.locator(DEBUG_BTN).click();
 		await expect(page.locator(DEBUG_PANEL)).toBeVisible();
+		await expect(
+			page.getByRole("menuitemcheckbox", { name: "Debug panel" }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(page.getByTestId("session-bar-overflow-menu")).toBeVisible();
+		await page.locator(DEBUG_BTN).click();
+		await expect(page.locator(DEBUG_PANEL)).toBeHidden();
+		await expect(
+			page.getByRole("menuitemcheckbox", { name: "Debug panel" }),
+		).toHaveAttribute("aria-checked", "false");
 	});
 });
 

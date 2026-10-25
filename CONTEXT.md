@@ -262,3 +262,66 @@ resets the dismissal. The hint works for writes back to the main checkout too.
 
 The checkout pill shows the folder suggestion with Move and Dismiss actions on
 desktop. Phones show an accessible icon and put both actions in the pill menu.
+
+## Usage Limits
+
+**Usage Reading** is one account's usage at a moment: how full each window is
+and when it resets, or that it couldn't be read. A reading ages; one taken
+before a limit was hit says nothing about whether that limit has cleared.
+_Avoid_: quota (for the reading itself), usage snapshot.
+
+**Limit Recovery** is a session's record that its account hit a limit: when,
+which limit, the reset time Claude reported, and any scheduled resume. A
+session with only held messages has one too.
+
+**Account Limit** is the single answer to "can this asker use this account
+now": go, wait until a time (naming the window), wait with no known time, or
+signed out. When a reading can't tell, the user's own actions go ahead and
+automatic ones wait. Model-only and overage limits are never judged free
+before their reset time.
+_Avoid_: quota check, blocked state, availability.
+
+**Held Message** is a queued message kept back because its account's Account
+Limit says wait. It goes on the session's Resume, or earlier if the user sends
+it now.
+_Avoid_: parked message.
+
+**Resume** is a session with a Limit Recovery continuing: cut-off work is sent
+again and Held Messages go. It happens because the reset arrived, the user
+asked, or the session moved to another account.
+_Avoid_: release, unpark.
+
+## Turn Launcher
+
+**Turn Launcher** resolves everything a turn needs before it is sent: the
+provider instance, account, config dir, shell environment, settings and resume
+plan. It reads them from the stored turn command and the current Daemon
+Settings. First delivery and runner recovery both launch through it and differ
+only in how they send the prepared turn, so a recovered turn is planned exactly
+like a first delivery.
+
+## Turn Settlement
+
+**Turn Settlement** records a turn's result in one transaction: provider resume
+state, outbox and receipt. What it saves follows the result, never the provider
+driver. A failed save fails the turn instead of being logged. A turn that
+joined one already running only completes its receipt. The reactor, dispatch
+and runner recovery all settle through it.
+
+## Sidebar Overlay
+
+**Sidebar Overlay** is sidebar state that is deliberately not a canonical
+event: background-work liveness, a dismissed Workspace Hint and Git status.
+The commit step finds sidebar changes by comparing rows, so it cannot see an
+overlay change. Overlays are announced through the commit module's one overlay
+operation, which bumps the row's version and wakes subscribers. No other code
+stamps a version or moves `session_sidebar` markers for an overlay.
+
+## Daemon Settings
+
+**Daemon Settings** is the one module that owns `daemon.json` while the daemon
+runs. Its single `update(patch)` writes the file atomically, then updates
+memory, then replies; callers never choose when a change reaches disk. Other
+code reads settings from the module, never from the file. The CLI changes
+settings over RPC when the daemon is up and writes the file only when it is
+down.

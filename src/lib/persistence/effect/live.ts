@@ -26,13 +26,17 @@ import {
 } from "../../domain/persistence/Services/persistence-service.js";
 import type { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
 import { reclaimStore } from "../rewrite-store.js";
+import { bindEventStoreEffect } from "./bind-event-store-effect.js";
 import {
 	ClaudeEventPersistEffectTag,
 	makeClaudeEventPersistEffect,
+	makeUnboundClaudeEventPersistEffect,
+	UnboundClaudeEventPersistEffectTag,
 } from "./claude-event-persist-effect.js";
 import {
 	EventStoreEffectTag,
-	makeEventStoreEffect,
+	makeUnboundEventStoreEffect,
+	UnboundEventStoreEffectTag,
 } from "./event-store-effect.js";
 import { makeEffectSqlMigrator } from "./migrations.js";
 import {
@@ -48,8 +52,10 @@ import {
 	type EffectProjector,
 } from "./projectors-effect.js";
 import {
-	makeProviderStateEffect,
+	bindProviderStateEffect,
+	makeUnboundProviderStateEffect,
 	ProviderStateEffectTag,
+	UnboundProviderStateEffectTag,
 } from "./provider-state-effect.js";
 import {
 	makeReadQueryEffect,
@@ -190,6 +196,50 @@ type PersistenceProjectOptions = {
 	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag> | undefined;
 };
 
+export type PersistenceDaemonContext =
+	| UnboundEventStoreEffectTag
+	| UnboundProviderStateEffectTag
+	| UnboundClaudeEventPersistEffectTag
+	| ReadQueryEffectTag
+	| ProjectionRunnerEffectTag;
+
+/** Daemon writers borrow one store and resolve project ownership per session. */
+export function makePersistenceDaemonLayer(
+	options: PersistenceProjectOptions = {},
+): Layer.Layer<PersistenceDaemonContext, never, PersistenceStoreContext> {
+	const eventStoreLayer = Layer.effect(
+		UnboundEventStoreEffectTag,
+		makeUnboundEventStoreEffect,
+	);
+	const providerStateLayer = Layer.effect(
+		UnboundProviderStateEffectTag,
+		makeUnboundProviderStateEffect,
+	);
+	const projectionRunnerLayer = Layer.effect(
+		ProjectionRunnerEffectTag,
+		ProjectionRunnerEffectTag,
+	);
+	const readQueryLayer = Layer.effect(ReadQueryEffectTag, makeReadQueryEffect);
+	const claudeDeps = Layer.merge(eventStoreLayer, projectionRunnerLayer);
+	const claudeLayer = Layer.effect(
+		UnboundClaudeEventPersistEffectTag,
+		makeUnboundClaudeEventPersistEffect,
+	).pipe(
+		Layer.provide(
+			options.sessionEventBusLayer
+				? Layer.merge(claudeDeps, options.sessionEventBusLayer)
+				: claudeDeps,
+		),
+	);
+	return Layer.mergeAll(
+		eventStoreLayer,
+		providerStateLayer,
+		projectionRunnerLayer,
+		readQueryLayer,
+		claudeLayer,
+	);
+}
+
 export function makePersistenceProjectLayer(
 	projectId: string,
 	options: PersistenceProjectOptions = {},
@@ -211,30 +261,26 @@ export function makePersistenceProjectLayer(
 	const retentionLayer = EventRetentionSchedulerLive.pipe(
 		Layer.provideMerge(EventRetentionLive.pipe(Layer.provideMerge(baseLayer))),
 	);
+	const daemonLayer = makePersistenceDaemonLayer(options);
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,
-		makeEventStoreEffect,
-	).pipe(Layer.provide(baseLayer));
-	const projectionRunnerLayer = Layer.effect(
-		ProjectionRunnerEffectTag,
-		ProjectionRunnerEffectTag,
-	);
-
-	const readQueryLayer = Layer.effect(
-		ReadQueryEffectTag,
-		makeReadQueryEffect,
-	).pipe(Layer.provide(baseLayer));
+		Effect.map(UnboundEventStoreEffectTag, (store) =>
+			bindEventStoreEffect(store, projectId),
+		),
+	).pipe(Layer.provide(daemonLayer));
 
 	const providerStateLayer = Layer.effect(
 		ProviderStateEffectTag,
-		makeProviderStateEffect,
-	).pipe(Layer.provide(baseLayer));
+		Effect.map(UnboundProviderStateEffectTag, (state) =>
+			bindProviderStateEffect(state, projectId),
+		),
+	).pipe(Layer.provide(daemonLayer));
 
 	const claudeEventPersistDeps = Layer.mergeAll(
 		baseLayer,
 		retentionLayer,
 		eventStoreLayer,
-		projectionRunnerLayer,
+		daemonLayer,
 	);
 	const claudeEventPersistLayer = Layer.effect(
 		ClaudeEventPersistEffectTag,
@@ -251,8 +297,7 @@ export function makePersistenceProjectLayer(
 		baseLayer,
 		retentionLayer,
 		eventStoreLayer,
-		projectionRunnerLayer,
-		readQueryLayer,
+		daemonLayer,
 		providerStateLayer,
 		claudeEventPersistLayer,
 	);

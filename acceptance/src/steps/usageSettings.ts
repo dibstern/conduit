@@ -14,7 +14,7 @@ import { seedUsageLimits } from "./providerInstances.js";
 import { mockInstances, requireRpcControl } from "./shared.js";
 import { themeColour } from "./usageFooterMeter.js";
 
-const clockTimes = new WeakMap<Page, number>();
+export const clockTimes = new WeakMap<Page, number>();
 const usageValues = {
 	normal: [41, 22],
 	warn5: [86, 58],
@@ -224,6 +224,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 			rpc.setDaemonList("SubscribeInstances", {
 				instances: ids.map((id) => ({
 					id,
+					colorSlot: id === "claude" ? 0 : id === "work" ? 1 : 2,
 					name: id === "claude" ? "Personal" : id === "work" ? "Work" : "Spare",
 					driver: "claude",
 					isDefault: id === "claude",
@@ -805,7 +806,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 	{
 		name: "assert reported single-account model rows, bars and absent reset lines",
 		match:
-			/^the Usage single-account model rows show Fable (\d+)% and Sonnet (\d+)% with values (.+) and (.+) without reset lines$/,
+			/^the Usage single-account model rows show Fable (\d+)% and Sonnet (\d+)% with values (.+) and (.+) without reset lines with Fable (ok|warn)$/,
 		run: async ({ world, match }) => {
 			const rows = world.page.getByTestId("usage-settings-single-model-row");
 			await expect(rows).toHaveCount(2);
@@ -817,7 +818,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 			for (const [index, model] of ["Fable", "Sonnet"].entries()) {
 				const row = rows.nth(index);
 				const used = Number(match[index + 1]);
-				const level = used >= 100 ? "limited" : used >= 80 ? "warn" : "ok";
+				const level = index === 0 ? (match[5] ?? "") : "ok";
 				await expect(row.getByTestId("usage-settings-model-label")).toHaveText(
 					`This week · ${model}`,
 				);
@@ -835,11 +836,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 					"background-color",
 					await themeColour(
 						world.page,
-						used >= 100
-							? "--color-fill-red"
-							: used >= 80
-								? "--color-fill-amber"
-								: "--color-text-secondary",
+						level === "warn" ? "--color-fill-amber" : "--color-text-secondary",
 					),
 				);
 				const geometry = await bar.evaluate((track) => ({

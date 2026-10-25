@@ -28,7 +28,6 @@
 				"unread": 0,
 				"history_complete": 0,
 				"goal_state": null,
-				"goal_stuck": null,
 				"model_id": "sonnet",
 				"model_provider": "claude",
 				"variant": "",
@@ -48,7 +47,9 @@
 				"archived_at": null,
 				"archived_automatically": 0,
 				"unarchived_at": null,
-				"last_user_message_at": null
+				"last_user_message_at": null,
+				"goal_stuck": null,
+				"jev": null
 			}
 		],
 		"turns": [
@@ -594,7 +595,6 @@
 				"unread": 0,
 				"history_complete": 0,
 				"goal_state": null,
-				"goal_stuck": null,
 				"model_id": "sonnet",
 				"model_provider": "claude",
 				"variant": "",
@@ -614,7 +614,9 @@
 				"archived_at": null,
 				"archived_automatically": 0,
 				"unarchived_at": null,
-				"last_user_message_at": null
+				"last_user_message_at": null,
+				"goal_stuck": null,
+				"jev": null
 			}
 		],
 		"turns": [
@@ -842,7 +844,6 @@
 				"unread": 0,
 				"history_complete": 0,
 				"goal_state": null,
-				"goal_stuck": null,
 				"model_id": "sonnet",
 				"model_provider": "claude",
 				"variant": "",
@@ -862,7 +863,9 @@
 				"archived_at": null,
 				"archived_automatically": 0,
 				"unarchived_at": null,
-				"last_user_message_at": null
+				"last_user_message_at": null,
+				"goal_stuck": null,
+				"jev": null
 			}
 		],
 		"turns": [

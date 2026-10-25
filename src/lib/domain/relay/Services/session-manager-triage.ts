@@ -215,6 +215,21 @@ export const setSessionAutoSettleDisabled = (
 		),
 	);
 
+export const setSessionJev = (sessionId: string, jev: "on" | "off" | null) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row || (row.jev ?? null) === jev) return false;
+		yield* applySessionCommand({
+			type: "session.jev_set",
+			data: { sessionId, jev },
+		});
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) => new SessionManagerError({ operation: "setSessionJev", cause }),
+		),
+	);
+
 export const snoozeSession = (sessionId: string, until: number | null) =>
 	Effect.gen(function* () {
 		const row = yield* readSessionForTriage(sessionId);

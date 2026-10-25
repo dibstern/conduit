@@ -56,6 +56,27 @@ export const sessionRunOwnersQuery = (
 		};
 	});
 
+/** Recover a predecessor Stop's cohort without altering its committed payload. */
+export const legacyStopOwnersQuery = (
+	sql: SqlClient.SqlClient,
+	sessionId: string,
+	commandId: string,
+) => sql<{ runId: string }>`
+	SELECT DISTINCT owner.id AS runId FROM provider_command_outbox control
+	JOIN provider_command_outbox command ON command.session_id = control.session_id
+		AND command.provider_id = control.provider_id AND command.effect_type = 'send_turn'
+		AND command.request_sequence < control.request_sequence
+	JOIN provider_runs requested ON requested.id = command.run_id AND requested.session_id = command.session_id
+	JOIN provider_runs owner ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = command.session_id
+	LEFT JOIN turns turn ON turn.run_id = owner.id AND turn.session_id = command.session_id
+	LEFT JOIN messages message ON message.id = turn.user_message_id AND message.session_id = turn.session_id
+	WHERE control.command_id = ${commandId} AND control.session_id = ${sessionId}
+		AND (control.effect_type = 'end_session' OR
+			COALESCE(json_extract(command.payload_json, '$.continuation.cutOffMessageId'), json_extract(command.payload_json, '$.inputId'), command.command_id)
+				IN (SELECT value FROM json_each(control.payload_json, '$.turnIds'))
+			OR COALESCE(message.input_id, turn.user_message_id)
+				IN (SELECT value FROM json_each(control.payload_json, '$.turnIds')))`;
+
 /** Only call after the provider confirms that this session or exact cohort cannot still run.
  * Guard publication against a changed session or process generation when the
  * confirmation came from an asynchronous probe. Never infer ownership by age.

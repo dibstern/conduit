@@ -36,7 +36,7 @@ export interface MessageSurfacingSettingsService {
 	readonly update: (
 		patch: MessageSurfacingPatch,
 	) => Effect.Effect<MessageSurfacingStatus, MessageSurfacingSettingsError>;
-	/** Future Jev calls share the active gate and persistent 401 handling. */
+	/** Jev calls share the key gate and persistent 401 handling. */
 	readonly post: (
 		body: unknown,
 	) => Effect.Effect<Response, MessageSurfacingSettingsError>;
@@ -303,7 +303,9 @@ export const makeMessageSurfacingSettings = (
 			);
 		const post: MessageSurfacingSettingsService["post"] = (body) =>
 			Effect.gen(function* () {
-				if (!status().active)
+				// Callers own the enabled rule: a session can turn Jev on alone.
+				const { key: keyState } = status();
+				if (keyState.source === "none" || keyState.rejected)
 					return yield* new MessageSurfacingSettingsError({
 						message: "Message surfacing is inactive",
 					});

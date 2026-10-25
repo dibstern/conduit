@@ -101,7 +101,9 @@ describe("permission/question processing timeouts through Effect state", () => {
 					makeProviderRuntimeIngestionLive().pipe(Layer.provide(persistence)),
 					Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 					Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
-					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
+					Layer.succeed(OrchestrationEngineTag)(
+						withDispatchEffect({ dispatchEffect: () => Effect.void }),
+					),
 				),
 			);
 
@@ -172,7 +174,9 @@ describe("permission/question processing timeouts through Effect state", () => {
 				makeOverridesStateLive(),
 				PendingInteractionServiceLive,
 				NoopProviderRuntimeIngestionLive,
-				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({})),
+				Layer.succeed(OrchestrationEngineTag)(
+					withDispatchEffect({ dispatchEffect: () => Effect.void }),
+				),
 			);
 
 			return Effect.gen(function* () {

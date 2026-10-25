@@ -10,8 +10,9 @@ export function makeRunnerIdleExit(
 	onIdle: () => void,
 	testIdleWindowMs?: number | null,
 	dayMs = 86_400_000,
-	configDir = DEFAULT_CONFIG_DIR,
+	autoSettleAfterDays?: number | null,
 	hasHeldWork?: () => boolean,
+	configDir = DEFAULT_CONFIG_DIR,
 ) {
 	let lastActivityAt = Date.now();
 	let turns = 0;
@@ -21,16 +22,20 @@ export function makeRunnerIdleExit(
 		() => {
 			if (turns > 0 || sdkTurnInFlight || backgroundWork || hasHeldWork?.())
 				return;
-			// Resolve configuration on the background sweep, never on send or output.
-			const loaded = loadDaemonConfigResult(configDir);
-			if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound") {
-				console.error(loaded.failure.message);
-				return;
+			let days = autoSettleAfterDays;
+			// Only an older daemon can launch us without a snapshot. Keep that
+			// peer's disk-based sweep until it supplies one, rather than guessing.
+			if (days === undefined && testIdleWindowMs === undefined) {
+				const loaded = loadDaemonConfigResult(configDir);
+				if (loaded._tag === "Failure" && loaded.failure._tag !== "NotFound") {
+					console.error(loaded.failure.message);
+					return;
+				}
+				days =
+					loaded._tag === "Success"
+						? loaded.success.autoSettleAfterDays
+						: undefined;
 			}
-			const days =
-				loaded._tag === "Success"
-					? loaded.success.autoSettleAfterDays
-					: undefined;
 			const idleWindowMs =
 				testIdleWindowMs !== undefined
 					? testIdleWindowMs
@@ -57,7 +62,9 @@ export function makeRunnerIdleExit(
 			sdkTurnInFlight = inFlight;
 			lastActivityAt = Date.now();
 		},
-		beginTurn() {
+		beginTurn(days?: number | null) {
+			// A rolled-back daemon omits this metadata; retain the last supplied snapshot.
+			if (days !== undefined) autoSettleAfterDays = days;
 			turns++;
 			lastActivityAt = Date.now();
 		},

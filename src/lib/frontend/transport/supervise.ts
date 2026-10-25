@@ -4,11 +4,11 @@
 // the session detail alike — so the sidebar and the transcript recover the same
 // way and say so in the same words (ni8.5 R5; decisions 6A, 6E, 6K, 3K, 6H).
 //
-// **Every ending is a failure.** The errors a feed can meet are mostly
+// **Retry transient endings.** The errors a feed can meet are mostly
 // temporary — a relay still starting, a busy database — and a feed that has
 // ended has stopped updating whether or not it meant to. So all three restart
 // the feed from scratch, and a defect is only different in being logged as a
-// bug. Only the consumer letting go stops it.
+// bug. An unknown turn is terminal: restarting cannot make its target valid.
 //
 // **Quietly, forever.** 1s, growing by half each
 // time, capped at 10s, and reset
@@ -44,6 +44,7 @@ export type FeedStatus =
 	| { readonly _tag: "cold" }
 	| { readonly _tag: "catchingUp" }
 	| { readonly _tag: "live" }
+	| { readonly _tag: "failed"; readonly lastError: string }
 	| {
 			readonly _tag: "failing";
 			/** When this run of failures began, in epoch millis. */
@@ -96,7 +97,7 @@ const nextWake = Effect.callback<void>((resume) => {
 /**
  * Runs `feed` for as long as the result is consumed, restarting it whenever it
  * fails or ends, and reports its status to `onStatus` as it changes. The result
- * never fails and never ends; interrupting it is the only way to stop.
+ * never fails. An unknown turn ends it; other endings restart until interrupted.
  *
  * Each restart runs `feed` again from the top, so a resuming subscription asks
  * for a fresh snapshot rather than resuming.
@@ -176,14 +177,23 @@ export const supervise = <A extends object>(
 				),
 				// A bare interruption is the consumer letting go: resumeStream has
 				// already restarted every interruption the transport caused.
-				Stream.catchCause((cause) =>
-					Failure.isInterruptedOnly(cause)
+				Stream.catchCause((cause) => {
+					const failure = Failure.soleFailure(cause);
+					if (Option.isSome(failure) && failure.value.code === "unknown-turn")
+						return Stream.fail(failure.value);
+					return Failure.isInterruptedOnly(cause)
 						? Stream.failCause(Failure.withoutFailures(cause))
-						: Stream.fromEffectDrain(restartAfter(cause)),
-				),
+						: Stream.fromEffectDrain(restartAfter(cause));
+				}),
 			);
 
 			yield* report({ _tag: "cold" });
-			return Stream.forever(attempt);
+			return Stream.forever(attempt).pipe(
+				Stream.catchTag("WsRpcError", (error) =>
+					Stream.fromEffectDrain(
+						report({ _tag: "failed", lastError: error.message }),
+					),
+				),
+			);
 		}),
 	);

@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { dragDown } from "../helpers/sheet-drag.js";
 
 test.use({
 	recording: "chat-simple",
@@ -7,46 +8,6 @@ test.use({
 	hasTouch: true,
 	isMobile: true,
 });
-
-// A real finger through Chromium's input pipeline, so native scrolling and
-// pointercancel behave as they do on a phone. Playwright's touchscreen only taps.
-async function dragDown(
-	page: Page,
-	sheet: Locator,
-	distance: number,
-	release = true,
-	startOffset = 10,
-) {
-	const box = await sheet.boundingBox();
-	if (!box) throw new Error("sheet is not rendered");
-	const x = box.x + box.width / 2;
-	const startY = box.y + startOffset;
-	const cdp = await page.context().newCDPSession(page);
-	await cdp.send("Input.dispatchTouchEvent", {
-		type: "touchStart",
-		touchPoints: [{ x, y: startY }],
-	});
-	const steps = 12;
-	for (let step = 1; step <= steps; step++) {
-		await cdp.send("Input.dispatchTouchEvent", {
-			type: "touchMove",
-			touchPoints: [{ x, y: startY + (distance * step) / steps }],
-		});
-		await page.evaluate(
-			() =>
-				new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
-		);
-	}
-	const end = async () => {
-		await cdp.send("Input.dispatchTouchEvent", {
-			type: "touchEnd",
-			touchPoints: [],
-		});
-		await cdp.detach();
-	};
-	if (release) await end();
-	return { top: box.y, end };
-}
 
 async function openOverflowSheet(
 	page: Page,

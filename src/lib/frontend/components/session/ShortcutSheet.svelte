@@ -1,12 +1,13 @@
 <script lang="ts">
-	import { messageSurfacing } from "../../stores/message-surfacing.svelte.js";
+	import { sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
+	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import Modal from "../ui/Modal.svelte";
 	import { sessionViews, viewShortcutHint } from "../layout/session-views.js";
 	import { globalKeyHint, sessionCommandKeys } from "./session-commands.js";
 
 	let { open, onclose, surfacingActive }: { open: boolean; onclose: () => void; surfacingActive?: boolean } = $props();
 
-	const active = $derived(surfacingActive ?? (messageSurfacing.status.active && messageSurfacing.status.enabled && messageSurfacing.status.key.source !== "none" && !messageSurfacing.status.key.rejected));
+	const active = $derived(surfacingActive ?? sessionJevEnabled(findSession(sessionState.currentId ?? "")));
 	const sections = $derived([
 		{
 			title: "Session list",

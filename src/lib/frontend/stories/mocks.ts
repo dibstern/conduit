@@ -25,6 +25,7 @@ import type {
 export const mockClaudeAccount = {
 	id: "claude",
 	name: "Claude",
+	colorSlot: 0,
 	driver: "claude",
 	isDefault: true,
 	port: 0,
@@ -37,6 +38,7 @@ export const mockClaudeAccount = {
 export const mockOpenCodeAccount = {
 	id: "opencode",
 	name: "OpenCode",
+	colorSlot: 3,
 	driver: "opencode",
 	isDefault: true,
 	port: 4096,

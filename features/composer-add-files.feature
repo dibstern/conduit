@@ -78,3 +78,20 @@ Scenario: explain that file delivery is unavailable on Cursor
   And I open the composer add menu
   And I select Add Files on the unsupported harness
   Then the composer explains which harnesses support file attachments
+
+Scenario: a new draft does not inherit an existing session's attachments
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  When I open the composer add menu
+  And I choose the text and PDF attachments
+  And I start a new session
+  Then the composer file chips are cleared
+
+Scenario: a new draft does not inherit the previous draft's attachments
+  Given the conduit app is served with the connected mockup
+  When I start a new session
+  And I type Read these files into the composer
+  And I open the composer add menu
+  And I choose the text and PDF attachments
+  And I start a new session
+  Then the composer file chips are cleared

@@ -65,6 +65,19 @@ export const RecognizedSkill: Story = {
 	},
 };
 
+/** URLs take the link colour without moving a glyph out from under the caret. */
+export const Url: Story = {
+	args: {
+		text: "See https://studio.example.ts.net/review/, then reload the page.",
+	},
+	play: async (context) => {
+		await RecognizedSkill.play?.(context);
+		await expect(
+			context.canvasElement.querySelector(".composer-url")?.textContent,
+		).toBe("https://studio.example.ts.net/review/");
+	},
+};
+
 export const UnknownSkill: Story = {
 	args: {
 		text: "Run /deploy-production after the checks pass.",

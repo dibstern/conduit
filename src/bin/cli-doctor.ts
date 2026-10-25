@@ -29,17 +29,17 @@ export async function handleDoctor(options: {
 		const projects = config?.projects ?? [];
 		if (projects.length === 0) stdout.write("No registered projects.\n");
 		for (const project of projects)
-			resolver.register(project.path, project.shellEnv);
+			resolver.register(project.path, project.shellEnv, project.slug);
 		for (const project of projects) {
-			await resolver.refresh(project.path);
-			const snapshot = resolver.snapshot(project.path);
+			await resolver.refresh(project.path, project.slug);
+			const snapshot = resolver.snapshot(project.path, project.slug);
 			const launch = resolveClaudeLaunchConfig(
 				config,
 				undefined,
-				resolver.get(project.path),
+				resolver.get(project.path, project.slug),
 			);
 			const env = makeClaudeSdkEnv({
-				baseEnv: resolver.get(project.path),
+				baseEnv: resolver.get(project.path, project.slug),
 				...launch,
 			});
 			stdout.write(`\n${project.slug} (${project.path})\n`);

@@ -220,7 +220,7 @@ for (const scenario of [
 						readings: Stream.empty,
 						latest: () => Effect.succeed(undefined),
 						turnEnded: () => Effect.void,
-						refresh: () =>
+						refresh: (_options) =>
 							Effect.gen(function* () {
 								if (scenario.changeDefault === "during-quota")
 									yield* directory.apply({ _tag: "SetDefault", id: "spare" });

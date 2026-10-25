@@ -40,7 +40,7 @@
 	import { getDriverTraits, instanceStatusColor } from "../../stores/instance.svelte.js";
 	import { usageState } from "../../stores/usage.svelte.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
-	import { cursorAuth, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
+	import { cursorAuthFor, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
 	import { usageResetTime } from "../../utils/continuation.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
@@ -117,7 +117,7 @@
 	const driverInstances = $derived(instances.filter((instance) => instance.driver === selectedDriver));
 	$effect(() => {
 		if (pickerOpen && harnesses.some((harness) => getProviderPresentation(harness.value)?.auth && harness.authRequired))
-			void refreshCursorAuth();
+			void refreshCursorAuth(selectedDriver === "cursor" ? selectedId : instanceForDriver("cursor")?.id);
 	});
 	const needsAccount = $derived(selectedTraits?.accountKind === "config-directory" && driverInstances.length === 0);
 	const accountProjectSlug = $derived(
@@ -142,7 +142,7 @@
 				return {
 					value: account.id,
 					label: accounts.nameOf(account.id),
-					locked: availability.kind === "limited" || (locked && account.id === selectedLogoInstanceId),
+					locked: availability.kind === "limited" || availability.kind === "signed-out" || (locked && account.id === selectedLogoInstanceId),
 					kind: "usage",
 					availability,
 				};
@@ -441,8 +441,10 @@
 						{#each harnesses.filter((harness) => harness.unavailableReason) as harness (harness.value)}
 							<p data-testid={`picker-harness-${harness.value}-unavailable`} class="mt-[6px] px-[10px] text-[12px] text-text-muted">{harness.label} unavailable · {harness.unavailableReason}</p>
 							{@const auth = getProviderPresentation(harness.value)?.auth}
+							{@const authAccountId = harness.value === selectedDriver ? selectedId : instanceForDriver(harness.value)?.id}
+							{@const authState = cursorAuthFor(authAccountId)}
 							{#if auth && harness.authRequired}
-								<Button variant="ghost-accent" size="sm" data-testid={`picker-harness-${harness.value}-login`} onclick={() => { closePicker(); openCursorLogin(); }}>{cursorAuth.current && cursorAuth.current.source !== "environment" ? auth.login : auth.manage}</Button>
+								<Button variant="ghost-accent" size="sm" data-testid={`picker-harness-${harness.value}-login`} onclick={() => { closePicker(); openCursorLogin(authAccountId); }}>{authState.current && authState.current.source !== "environment" ? auth.login : auth.manage}</Button>
 							{/if}
 						{/each}
 					</section>
@@ -780,7 +782,7 @@
 
 	{#if phone && phoneControls}
 		<!-- Keep the effort owner mounted so Ctrl+T also works with the sheet closed. -->
-		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant="row">
+		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant="row" wordLabel={parameters ? parameterEffortWord : undefined}>
 			{#snippet children(effortRow)}
 				{#snippet rows()}
 					<Button
@@ -860,7 +862,7 @@
 		summary={handoff.summary}
 		confirm={{
 			from: handoff.from,
-			fromQuota: accounts.fromQuota(handoff),
+			fromQuota: accounts.quotaOf(handoff.from),
 			quota: accounts.quotaOf(handoff.to),
 			cutOff: handoff.limit?.cutOffMessageId !== undefined,
 			busy: accounts.switching,
