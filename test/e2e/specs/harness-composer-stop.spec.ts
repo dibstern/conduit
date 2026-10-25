@@ -362,6 +362,8 @@ test("stop and run: Run now sends the command ahead of the queued message and dr
 		// Mobile Enter inserts a newline; its Send button uses the same queue delivery.
 		if (isMobile) await app.sendBtn.click();
 		else await app.input.press("Enter");
+		// The draft clears when this admission settles; earlier Enter is ignored.
+		await expect(app.input).toHaveValue("");
 	}
 	await expect(page.getByTestId("pending-input-text")).toHaveText([
 		"after-command",
@@ -435,6 +437,7 @@ test("stop and run: an interrupt failure keeps the command queued and first when
 	);
 	await app.sendMessage("after-command");
 	await app.input.fill("/goal clear");
+	await expect(app.sendBtn).toBeEnabled({ timeout: 2_000 });
 	await app.input.press("ControlOrMeta+Enter");
 	await expect
 		.poll(() => queryMarks(harness, queryId, "query-interrupt-rejected").length)
