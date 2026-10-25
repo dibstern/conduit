@@ -2,7 +2,17 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Exit, Layer, Logger, Option, References, Scope } from "effect";
+import {
+	Effect,
+	Exit,
+	Layer,
+	Logger,
+	Option,
+	PubSub,
+	References,
+	Scope,
+	Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -18,6 +28,10 @@ import {
 	type Relay,
 	RelayCacheTag,
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import {
+	SessionGit,
+	type SessionGitChange,
+} from "../../../src/lib/domain/daemon/Services/session-git.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -83,6 +97,11 @@ describe("daemon automatic settlement layer", () => {
 								get,
 								invalidate: () => Effect.void,
 							}),
+							Layer.succeed(SessionGit)({
+								read: () => Effect.succeed(undefined),
+								changes: Stream.empty,
+								invalidate: () => Effect.void,
+							}),
 							DaemonEventBusLive,
 							Logger.layer([logger]),
 						),
@@ -118,11 +137,15 @@ describe("daemon automatic settlement layer", () => {
 	);
 
 	it.effect(
-		"ticks a running relay, skips cold empty projects, and survives one project failure",
+		"ticks and reacts to git publications, skips cold empty projects, and survives one project failure",
 		() =>
 			Effect.gen(function* () {
 				const dir = mkdtempSync(join(tmpdir(), "conduit-auto-layer-"));
 				const calls: string[] = [];
+				const changes = yield* Effect.acquireRelease(
+					PubSub.unbounded<SessionGitChange>(),
+					PubSub.shutdown,
+				);
 				const relays = new Map([
 					["broken", fakeRelay("broken", () => Effect.fail(new Error("boom")))],
 					[
@@ -173,6 +196,11 @@ describe("daemon automatic settlement layer", () => {
 								get,
 								invalidate: () => Effect.void,
 							}),
+							Layer.succeed(SessionGit)({
+								read: () => Effect.succeed(undefined),
+								changes: Stream.fromPubSub(changes),
+								invalidate: () => Effect.void,
+							}),
 							DaemonEventBusLive,
 						),
 					),
@@ -183,6 +211,21 @@ describe("daemon automatic settlement layer", () => {
 					yield* TestClock.adjust("1 millis");
 					expect(calls).toContain("running");
 					expect(get).not.toHaveBeenCalled();
+					const beforePublication = calls.length;
+					yield* PubSub.publish(changes, {
+						directory: dir,
+						sessionIds: [],
+						version: 1,
+					});
+					yield* TestClock.adjust("1 millis");
+					expect(calls).toHaveLength(beforePublication);
+					yield* PubSub.publish(changes, {
+						directory: dir,
+						sessionIds: ["running-s1"],
+						version: 2,
+					});
+					yield* TestClock.adjust("1 millis");
+					expect(calls).toHaveLength(beforePublication + 1);
 					yield* TestClock.adjust("1 minute");
 					expect(calls.length).toBeGreaterThanOrEqual(2);
 				} finally {
@@ -246,6 +289,11 @@ describe("daemon automatic settlement layer", () => {
 								get,
 								invalidate: () => Effect.void,
 							}),
+							Layer.succeed(SessionGit)({
+								read: () => Effect.succeed(undefined),
+								changes: Stream.empty,
+								invalidate: () => Effect.void,
+							}),
 							DaemonEventBusLive,
 						),
 					),
@@ -293,6 +341,11 @@ describe("daemon automatic settlement layer", () => {
 								peek,
 								get: () => Effect.fail(new Error("must skip")),
 								invalidate,
+							}),
+							Layer.succeed(SessionGit)({
+								read: () => Effect.succeed(undefined),
+								changes: Stream.empty,
+								invalidate: () => Effect.void,
 							}),
 							DaemonEventBusLive,
 						),
