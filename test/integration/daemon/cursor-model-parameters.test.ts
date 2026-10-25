@@ -375,6 +375,7 @@ describe("Cursor model parameters, instance catalog cache and reroute", () => {
 		expect(user?.modelExecution).toEqual({
 			requestedModel: "sonnet",
 			actualModel: "sonnet",
+			contextWindow: "200k",
 		});
 		const refreshed = await fixture.connect(id);
 		const liveUser = await refreshed.waitFor(
