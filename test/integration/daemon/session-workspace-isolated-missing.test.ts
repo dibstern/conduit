@@ -762,6 +762,12 @@ const gate = ${JSON.stringify(gate)};
 		const isolated = await create(occupant);
 		const browser = await fixture.connect();
 		await browser.view(isolated.id);
+		// Replace only after the daemon has published the healthy checkout.
+		await expect
+			.poll(() => row(isolated.id))
+			.toMatchObject({
+				git: { branch: git(isolated.path, "branch", "--show-current") },
+			});
 		const beforeRemoval = browser.frames.length;
 		rmSync(isolated.path, { recursive: true, force: true });
 		if (occupant === "directory") {
