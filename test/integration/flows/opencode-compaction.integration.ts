@@ -264,45 +264,57 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
 			),
 		);
-		await client.sendMessage("/compact");
-		const notice = await client.waitForTranscriptMessage(
-			(message) =>
-				message.parts?.some(
-					(part) => part.type === "error" && part.text?.includes("model pick"),
-				) === true,
-			sessionId,
+		await client.syncInputDraft("/compact");
+		const refusal = await client.rpcCall((rpc) =>
+			Effect.result(
+				rpc["input.submit"]({
+					sessionId,
+					inputId: randomUUID(),
+					originId: client.getClientId(),
+					delivery: "queue",
+					text: "/compact",
+				}),
+			),
 		);
-		const errors = await Effect.runPromise(
+		expect(refusal).toMatchObject({
+			_tag: "Failure",
+			failure: {
+				_tag: "WsRpcError",
+				message: expect.stringContaining("A session model pick is required"),
+			},
+		});
+		// 61b38b1e keeps a pre-admission failure out of history and leaves the Draft.
+		const stored = await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				return yield* sql<{
-					code: string;
-				}>`SELECT json_extract(data, '$.code') AS code
-					FROM events WHERE session_id = ${sessionId} AND type = 'turn.error'`;
+				return {
+					events: yield* sql<{ type: string }>`SELECT type FROM events
+						WHERE session_id = ${sessionId}
+							AND type IN ('input.admitted', 'input.sent', 'run.requested', 'turn.error')`,
+					runs: yield* sql`SELECT status, started_at FROM provider_runs
+						WHERE session_id = ${sessionId}`,
+					commands:
+						yield* sql`SELECT command_id, status FROM provider_command_outbox
+						WHERE session_id = ${sessionId}`,
+					draft: yield* sql<{ text: string }>`SELECT text FROM input_drafts
+						WHERE draft_key = ${sessionId}`,
+				};
 			}).pipe(
 				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
 			),
 		);
-		expect(errors).toEqual([{ code: "PICK_REQUIRED" }]);
+		expect(stored).toEqual({
+			events: [],
+			runs: [],
+			commands: [],
+			draft: [{ text: "/compact" }],
+		});
 		expect(
 			relay.mock.requestBodies.some((request) =>
 				/\/(?:summarize|prompt_async|message)$/.test(request.path),
 			),
 		).toBe(false);
-		const runs = await Effect.runPromise(
-			Effect.gen(function* () {
-				return yield* (yield* SqlClient.SqlClient)`SELECT status, started_at,
-					(SELECT COUNT(*) FROM turns WHERE run_id = provider_runs.id
-						AND state = 'error' AND started_at IS NULL) AS failed_inputs
-					FROM provider_runs WHERE session_id = ${sessionId}`;
-			}).pipe(
-				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
-			),
-		);
-		expect(runs).toEqual([
-			{ status: "error", started_at: null, failed_inputs: 1 },
-		]);
-		saveEvidence("pick-required", { notice, errors, runs });
+		saveEvidence("pick-required", { refusal, stored });
 	});
 
 	it("keeps Claude context when compact_boundary omits post_tokens", async () => {

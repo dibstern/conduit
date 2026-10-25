@@ -788,16 +788,20 @@ const gate = ${JSON.stringify(gate)};
 			path: isolated.path,
 			reason: "target-exists",
 		});
-		await browser.send(
-			isolated.id,
-			"workspace-isolation-write unsafe path",
-			120_000,
+		await expect(
+			browser.send(
+				isolated.id,
+				"workspace-isolation-write unsafe path",
+				120_000,
+			),
+		).rejects.toThrow(
+			`Worktree missing: ${isolated.path}. Recreate worktree or Continue in main folder before sending another message.`,
 		);
 		expect(
-			workspaceEvents(fixture, isolated.id)
-				.filter(({ type }) => type === "turn.error")
-				.at(-1)?.data,
-		).toMatchObject({ code: "WORKTREE_MISSING" });
+			workspaceEvents(fixture, isolated.id).filter(
+				({ type }) => type === "turn.error",
+			),
+		).toEqual([]);
 		expect(sessionQueries(fixture, isolated.id)).toEqual([]);
 		expect(recordedWorkspace(fixture, isolated.id)).toEqual(recorded);
 		expect(git(fixture.projectDir, "status", "--porcelain")).toBe("");
