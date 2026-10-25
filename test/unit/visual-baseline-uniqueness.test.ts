@@ -21,6 +21,8 @@ import { beforeAll, describe, expect, it } from "vitest";
  * story name claims), recapture, and delete the line.
  */
 const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
+	"chat-subagentbackbar--side-thread | chat-subagentbackbar--side-thread-parent-working":
+		"ba794f06 / conduit-test-kvcx3 moves Side Thread navigation to the SessionBar breadcrumb; both stories assert in play that the back bar is absent for idle and working parents",
 	"overlays-surfacingcategories--counts-unavailable | overlays-surfacingcategories--live-refresh | overlays-surfacingcategories--retire-restore | overlays-surfacingcategories--session-counts":
 		"876c6e84: Retry counts recovers, LiveRefresh finishes its refresh, and RetireRestore restores Ask; all finish by asserting SessionCounts, so their desktop terminal frame is identical",
 	"overlays-surfacingcategories--counts-unavailable | overlays-surfacingcategories--live-refresh | overlays-surfacingcategories--session-counts":

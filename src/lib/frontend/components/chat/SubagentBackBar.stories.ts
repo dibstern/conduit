@@ -113,9 +113,15 @@ function seedSideThread(parentStatus: SessionInfo["status"] = "idle"): void {
 
 export const SideThread: Story = {
 	beforeEach: () => seedSideThread(),
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).queryByRole("button", { name: /Parent/ }),
+		).not.toBeInTheDocument();
+	},
 };
 
 export const SideThreadParentWorking: Story = {
+	...SideThread,
 	beforeEach: () => seedSideThread("busy"),
 };
 
