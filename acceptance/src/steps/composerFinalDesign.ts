@@ -281,8 +281,8 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert pinned teal goal command",
-		match: /^the built-in menu pins \$goal first in teal$/,
+		name: "assert pinned goal command with teal icon",
+		match: /^the built-in menu pins \$goal first with a teal icon$/,
 		run: async ({ world }) => {
 			const menu = world.page.getByRole("listbox", {
 				name: "Built-in commands",
@@ -295,21 +295,29 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			);
 			await expect
 				.poll(() =>
-					first.locator(".cmd-name").evaluate((element) => {
+					first.evaluate((element) => {
+						const icon = element.querySelector("svg");
+						const name = element.querySelector(".cmd-name");
+						if (!icon || !name) return false;
 						const probe = document.createElement("span");
 						probe.style.color = "var(--color-status-goal)";
 						element.append(probe);
-						const expected = getComputedStyle(probe).color;
+						const expectedIcon = getComputedStyle(probe).color;
+						probe.style.color = "var(--color-text)";
+						const expectedName = getComputedStyle(probe).color;
 						probe.remove();
-						return getComputedStyle(element).color === expected;
+						return (
+							getComputedStyle(icon).color === expectedIcon &&
+							getComputedStyle(name).color === expectedName
+						);
 					}),
 				)
 				.toBe(true);
 		},
 	},
 	{
-		name: "assert command menu spans composer",
-		match: /^the command menu spans the composer width$/,
+		name: "assert compact command menu fits composer",
+		match: /^the compact command menu fits the composer width$/,
 		run: async ({ world }) => {
 			await expect
 				.poll(async () => {
@@ -319,7 +327,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					const composer = await box(world.page.locator("#input-row"));
 					return (
 						Math.abs(menu.x - composer.x) <= 1 &&
-						Math.abs(menu.width - composer.width) <= 1
+						Math.abs(menu.width - Math.min(340, composer.width)) <= 1
 					);
 				})
 				.toBe(true);
