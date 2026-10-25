@@ -1,4 +1,5 @@
 import { Effect, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	AttachmentValidationError,
 	validateAttachmentDataUrls,
@@ -60,14 +61,23 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		const sessionManagerService = yield* SessionManagerServiceTag;
 
 		const { clientId, text, images } = input;
-		const imageList = images?.length
-			? yield* Effect.gen(function* () {
-					const store = yield* AttachmentStoreTag;
-					return yield* Effect.forEach(images, (image) => store.put(image));
-				})
-			: undefined;
 		let activeId = input.sessionId;
-		if (!text && !imageList && !input.attachmentIds?.length)
+		if (activeId) {
+			const sql = yield* SqlClient.SqlClient;
+			// A committed input owns its acknowledgment even if its runner is now unavailable.
+			const [known] = yield* sql<{ session_id: string }>`
+				SELECT session_id FROM pending_inputs WHERE input_id = ${input.commandId}
+				UNION ALL
+				SELECT session_id FROM messages
+				WHERE input_id = ${input.commandId} OR id = ${input.commandId}
+				LIMIT 1`;
+			if (known)
+				return {
+					sessionId: known.session_id,
+					handedOff: false,
+				} satisfies SendMessageToSessionResult;
+		}
+		if (!text && !images?.length && !input.attachmentIds?.length)
 			return {
 				sessionId: activeId,
 				handedOff: false,
@@ -83,6 +93,12 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 			activeId,
 			Option.getOrUndefined(yield* Effect.serviceOption(ProviderRegistryTag)),
 		);
+		const imageList = images?.length
+			? yield* Effect.gen(function* () {
+					const store = yield* AttachmentStoreTag;
+					return yield* Effect.forEach(images, (image) => store.put(image));
+				})
+			: undefined;
 		const originalActiveId = activeId;
 		const read = yield* ReadQueryEffectTag;
 		const originalSession = yield* read.getSession(activeId);
