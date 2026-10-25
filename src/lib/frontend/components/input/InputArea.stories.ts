@@ -1397,6 +1397,13 @@ function narrowComposer(
 		globals: { theme: "dark" },
 		beforeEach: ({ canvasElement }) => {
 			const cleanup = setupWords(canvasElement, false);
+			// 61b38b1e waits for draft persistence before admitting the send.
+			const restoreDraft = replyRpc("SyncInputDraft", () => ({ ok: true }));
+			const restoreSubmit = replyRpc("input.submit", () => ({
+				ok: true,
+				sessionId: testId,
+				handedOff: mode !== "limited",
+			}));
 			setComposerPreferences({ controls: "icons" });
 			const readings = usageState.readings;
 			const limits = usageState.limits;
@@ -1460,6 +1467,8 @@ function narrowComposer(
 				];
 			}
 			return () => {
+				restoreSubmit();
+				restoreDraft();
 				Date.now = realNow;
 				chat.messages = previousMessages;
 				usageState.readings = readings;
