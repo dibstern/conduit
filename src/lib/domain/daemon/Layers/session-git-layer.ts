@@ -29,7 +29,10 @@ import {
 	type CanonicalDirectory,
 	canonicalDirectory,
 	forgetCanonicalDirectory,
+	publicationDirectory,
 	readPublishedSessionGit,
+	rememberWorkspaceDirectories,
+	workspaceDirectory,
 } from "../../../persistence/effect/session-git-publication.js";
 import {
 	readSessionWorktreeOwnershipSnapshot,
@@ -156,6 +159,41 @@ export const makeSessionGit = Effect.gen(function* () {
 		{ git: GitState | undefined; missing: WorkspaceMissing | undefined }
 	>();
 	const legacyAliases = new Map<CanonicalDirectory, string[]>();
+	const ownedWorkspaces = new Map<string, string | null>();
+	const rememberWorkspace = (
+		id: string,
+		projectId: string,
+		stored: string | null,
+		workspace: SessionWorkspace | null,
+	) =>
+		Effect.gen(function* () {
+			if (ownedWorkspaces.has(id) && ownedWorkspaces.get(id) === stored) return;
+			if (workspace?.origin === "conduit") {
+				const ownership = yield* readSessionWorktreeOwnershipSnapshot(
+					projectId,
+					id,
+				);
+				if (ownership?._tag === "Owned")
+					rememberWorkspaceDirectories(workspace, ownership.ownership);
+			}
+			ownedWorkspaces.set(id, stored);
+		}).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+	// Capture ownership before normalizing persisted publication keys at startup.
+	const projectIds = [...HashMap.keys(yield* Ref.get(registry))];
+	if (projectIds.length > 0)
+		for (const row of yield* sql<{
+			id: string;
+			project_id: string;
+			workspace: string;
+		}>`SELECT id, project_id, workspace FROM sessions WHERE project_id IN ${sql.in(projectIds)} AND workspace IS NOT NULL`) {
+			const workspace = Option.getOrNull(decodeWorkspace(row.workspace));
+			yield* rememberWorkspace(
+				row.id,
+				row.project_id,
+				row.workspace,
+				workspace,
+			);
+		}
 	for (const row of yield* sql<{
 		directory: string;
 		git: string | null;
@@ -163,7 +201,7 @@ export const makeSessionGit = Effect.gen(function* () {
 	}>`SELECT directory, git, workspace_missing FROM session_git_published`) {
 		const git = row.git === null ? Option.some(undefined) : decodeGit(row.git);
 		if (Option.isNone(git)) continue;
-		const key = canonicalDirectory(row.directory);
+		const key = publicationDirectory(row.directory);
 		if (key !== row.directory)
 			legacyAliases.set(key, [
 				...(legacyAliases.get(key) ?? []),
@@ -466,6 +504,12 @@ export const makeSessionGit = Effect.gen(function* () {
 					row.workspace === null
 						? null
 						: Option.getOrNull(decodeWorkspace(row.workspace));
+				yield* rememberWorkspace(
+					sessionId,
+					row.project_id,
+					row.workspace,
+					workspace,
+				);
 				const keys = [
 					...new Set(
 						[
@@ -473,7 +517,7 @@ export const makeSessionGit = Effect.gen(function* () {
 							...effectiveSessionFolders(folders, workspace).map(
 								({ directory }) => directory,
 							),
-						].map(canonicalDirectory),
+						].map((directory) => workspaceDirectory(directory, workspace)),
 					),
 				];
 				const previous = sessions.get(sessionId);
@@ -508,6 +552,7 @@ export const makeSessionGit = Effect.gen(function* () {
 							Effect.sync(() => {
 								if (sessions.get(sessionId) !== session) return;
 								sessions.delete(sessionId);
+								ownedWorkspaces.delete(sessionId);
 								releaseMembership(session);
 							}),
 					),
@@ -534,7 +579,8 @@ export const makeSessionGit = Effect.gen(function* () {
 				const session = sessions.get(id);
 				if (session?.workspace?.origin !== "conduit") continue;
 				const pair = Object.entries(session.workspace.worktrees).find(
-					([, path]) => canonicalDirectory(path) === entry.directory,
+					([, path]) =>
+						workspaceDirectory(path, session.workspace) === entry.directory,
 				);
 				if (!pair) continue;
 				const ownership = yield* readSessionWorktreeOwnershipSnapshot(
@@ -545,19 +591,18 @@ export const makeSessionGit = Effect.gen(function* () {
 					ownership?._tag === "Owned"
 						? ownership.ownership.find(
 								({ path }) =>
-									entry.directory === canonicalDirectory(path) ||
-									entry.directory.startsWith(
-										`${canonicalDirectory(path)}${sep}`,
-									),
+									entry.directory === resolve(path) ||
+									entry.directory.startsWith(`${resolve(path)}${sep}`),
 							)?.path
 						: undefined;
 				if (exists) {
-					const checkout = yield* Effect.tryPromise(() =>
-						lstat(join(checkoutRoot ?? entry.directory, ".git")),
-					).pipe(
-						Effect.map((stat) => stat.isFile()),
-						Effect.orElseSucceed(() => false),
-					);
+					const checkout = yield* Effect.tryPromise(async () => {
+						const root = checkoutRoot ?? entry.directory;
+						return (
+							(await lstat(root)).isDirectory() &&
+							(await lstat(join(root, ".git"))).isFile()
+						);
+					}).pipe(Effect.orElseSucceed(() => false));
 					if (checkout) return undefined;
 				}
 				if (Option.isNone(worktrees))
@@ -602,23 +647,24 @@ export const makeSessionGit = Effect.gen(function* () {
 			if (entry.present !== undefined && exists !== entry.present)
 				forgetCanonicalDirectory(entry.directory);
 			const workspaceMissing = yield* missingState(entry, exists);
-			const git = exists
-				? yield* Effect.tryPromise({
-						try: (signal) =>
-							reader.read(
-								entry.directory,
-								entry.git,
-								(command, args, options) =>
-									runner(
-										command,
-										args,
-										{ ...options, priority: "background" },
-										AbortSignal.any([signal, entry.abort.signal]),
-									),
-							),
-						catch: (cause) => cause,
-					})
-				: undefined;
+			const git =
+				exists && workspaceMissing === undefined
+					? yield* Effect.tryPromise({
+							try: (signal) =>
+								reader.read(
+									entry.directory,
+									entry.git,
+									(command, args, options) =>
+										runner(
+											command,
+											args,
+											{ ...options, priority: "background" },
+											AbortSignal.any([signal, entry.abort.signal]),
+										),
+								),
+							catch: (cause) => cause,
+						})
+					: undefined;
 			// Cadence runs from when git answered, not from queue wait or publication.
 			const readAt = yield* Clock.currentTimeMillis;
 			if (
@@ -668,18 +714,20 @@ export const makeSessionGit = Effect.gen(function* () {
 														? null
 														: Option.getOrNull(decodeWorkspace(row.workspace));
 												if (
-													canonicalDirectory(
+													workspaceDirectory(
 														effectiveWorkingDirectory(
 															project.value.project.folders[0] ?? "",
 															workspace,
 														),
+														workspace,
 													) === entry.directory ||
 													effectiveSessionFolders(
 														project.value.project.folders,
 														workspace,
 													).some(
 														({ directory }) =>
-															canonicalDirectory(directory) === entry.directory,
+															workspaceDirectory(directory, workspace) ===
+															entry.directory,
 													)
 												)
 													affected.push(row.id);

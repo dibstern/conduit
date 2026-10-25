@@ -6,7 +6,8 @@
 // trailing state; listed folders never recover unprobed changes;
 // nested branch refs, HEAD retargets and sibling merges go unnoticed;
 // releasing many directories blocks or leaves an in-flight probe alive;
-// published reads repeat canonicalization syscalls or retain stale aliases.
+// published reads repeat canonicalization syscalls or retain stale aliases;
+// a symlink occupant replaces an initialized owned checkout's identity.
 import { execFileSync } from "node:child_process";
 import { channel } from "node:diagnostics_channel";
 import fs, {
@@ -1076,6 +1077,41 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 					),
 				).toBeUndefined();
 			}),
+	);
+	it.effect("detects a symlink replacing an initialized owned checkout", () =>
+		Effect.gen(function* () {
+			const f = yield* fixture(false, true);
+			expect(yield* f.service.read("one")).toMatchObject({
+				branch: "session-one",
+			});
+			// Publication completes before replacement, so presence flips from true.
+			yield* waitForIdle(f.metrics);
+			rmSync(f.workspaceDirectory, { recursive: true, force: true });
+			symlinkSync(f.repository, f.workspaceDirectory, "dir");
+			yield* f.service.invalidate({ sessionId: "one" });
+			yield* TestClock.adjust(2_000);
+			yield* Effect.tryPromise(() =>
+				expect
+					.poll(
+						() =>
+							Effect.runPromise(
+								readPublishedWorkspaceMissing("one", [f.repository]).pipe(
+									Effect.provideService(SqlClient.SqlClient, f.sql),
+								),
+							),
+						{ timeout: eventTimeout },
+					)
+					.toEqual({
+						path: f.workspaceDirectory,
+						branch: "session-one",
+						canRecreate: true,
+					}),
+			);
+			expect(fs.lstatSync(f.workspaceDirectory).isSymbolicLink()).toBe(true);
+			expect(fs.realpathSync(f.workspaceDirectory)).toBe(
+				fs.realpathSync(f.repository),
+			);
+		}),
 	);
 	it.effect("detects an ordinary directory replacing an owned checkout", () =>
 		Effect.gen(function* () {

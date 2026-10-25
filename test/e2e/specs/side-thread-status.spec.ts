@@ -303,7 +303,7 @@ test.describe("OpenCode Side Thread status", () => {
 			);
 			release();
 			await expect(page.getByTestId("parent-session-status")).toHaveText(
-				"Idle",
+				"Done, unread",
 			);
 			await expect
 				.poll(
@@ -652,7 +652,7 @@ for (const attention of ["permission", "question"] as const) {
 					attention === "permission" ? "Approve" : "Reply",
 				);
 				await expect(page.getByTestId("parent-session-status")).toHaveText(
-					"Idle",
+					attention === "permission" ? "Needs approval" : "Needs reply",
 				);
 				await expect(
 					page.locator(`#session-list [data-session-id="${sideId}"]`),
