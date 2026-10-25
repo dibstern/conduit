@@ -311,7 +311,11 @@ test("adds with the keyboard alone and cancels without creating a folder", async
 	await page.screenshot({
 		path: testInfo.outputPath("keyboard-project-dialog.png"),
 	});
-	await page.keyboard.press("Control+Enter");
+	await tabTo(
+		page,
+		dialog.getByRole("button", { name: "Add project", exact: true }),
+	);
+	await page.keyboard.press("Enter");
 	await expect(dialog).toBeHidden();
 	await expect(page.getByTestId("session-scope-chip")).toHaveText(
 		"keyboard-app",
