@@ -1,6 +1,6 @@
 // Auto-titling OpenCode sessions end to end (conduit-test-o4yo.2), against a
-// real, temporary OpenCode server. The title model is stubbed, so no test
-// makes a live title call; OpenCode turns use a free model.
+// real, temporary OpenCode server with controlled local inference.
+// Conduit's title model is stubbed; OpenCode keeps its native title-agent guard.
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ClaudeOneShotQueryFactory } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
@@ -10,14 +10,15 @@ import {
 	spawnOpenCode,
 } from "../../e2e/helpers/opencode-spawner.js";
 import {
+	CONTROLLED_MODEL_ID,
+	startControlledOpenCodeInference,
+} from "../../helpers/controlled-opencode-inference.js";
+import {
 	createRelayHarness,
 	type RelayHarness,
 } from "../helpers/relay-harness.js";
 import type { TestWsClient } from "../helpers/test-ws-client.js";
 
-// Re-check on an OpenCode bump: the free roster churns
-// (`opencode models | grep '^opencode/'` on an isolated instance).
-const FREE_MODEL = "opencode/mimo-v2.6-flash-free";
 const FALLBACK_TITLE = /^Session \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
 
 async function* titleReply(title: string): AsyncIterable<unknown> {
@@ -39,30 +40,51 @@ describe("Integration: OpenCode session titles", () => {
 	let opencode: SpawnedOpenCode;
 	let harness: RelayHarness;
 	let client: TestWsClient;
+	let inference:
+		| Awaited<ReturnType<typeof startControlledOpenCodeInference>>
+		| undefined;
 	// Each test installs its own title model behind the relay's stub.
 	let titleQuery: ClaudeOneShotQueryFactory = () => titleReply("Unused");
 	const titleCalls = vi.fn();
 
 	beforeAll(async () => {
-		opencode = await spawnOpenCode({
-			env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: FREE_MODEL }) },
-		});
-		harness = await createRelayHarness("chat-simple", {
-			opencodeUrl: opencode.url,
-			defaultModel: FREE_MODEL,
-			titleQuery: (params) => {
-				titleCalls(params);
-				return titleQuery(params);
-			},
-		});
-		client = await harness.connectWsClient();
-		await client.waitForInitialState();
+		try {
+			inference = await startControlledOpenCodeInference(
+				"test-results/controlled-title-inference.json",
+			);
+			opencode = await spawnOpenCode({ env: inference.env });
+			await inference.assertOpenCodeConfig(opencode.url);
+			harness = await createRelayHarness("chat-simple", {
+				opencodeUrl: opencode.url,
+				defaultModel: CONTROLLED_MODEL_ID,
+				titleQuery: (params) => {
+					titleCalls(params);
+					return titleQuery(params);
+				},
+			});
+			client = await harness.connectWsClient();
+			await client.waitForInitialState();
+		} catch (error) {
+			await inference?.close();
+			throw error;
+		}
 	}, 60_000);
 
 	afterAll(async () => {
-		await client?.close();
-		await harness?.stop();
-		opencode?.stop();
+		try {
+			await client?.close();
+		} finally {
+			try {
+				await harness?.stop();
+			} finally {
+				try {
+					opencode?.stop();
+				} finally {
+					await inference?.close();
+				}
+			}
+		}
+		expect(inference?.errors).toEqual([]);
 	});
 
 	const conduitTitle = (sessionId: string): string | undefined => {

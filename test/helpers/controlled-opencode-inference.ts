@@ -57,6 +57,10 @@ function answer(request: ChatRequest): {
 		.filter((message) => message.role === "user")
 		.map(messageText)
 		.join("\n");
+	const currentUser = request.messages
+		.filter((message) => message.role === "user")
+		.at(-1);
+	const prompt = currentUser ? messageText(currentUser) : "";
 	const permission = user.includes(
 		"Use the bash tool exactly once to run: printf 'global-stream-contract\\n'. Do not use any other tool. After it completes, say DONE and stop.",
 	);
@@ -67,8 +71,15 @@ function answer(request: ChatRequest): {
 		'Use the question tool exactly once, with one question: "Continue the contract test?", header "Contract", options [{"label":"Continue","description":"Finish this test"}], multiple false. You MUST invoke the question tool, do not ask in text. After I answer, say DONE and stop. Do not use any other tool.',
 	);
 	const attachment = user.includes("Reply with just the word 'ok'.");
+	const title = [
+		"Reply with just the word 'pong'.",
+		"Reply with just the word 'ping'.",
+		"Explain the session list sorting.",
+		"Summarise the failing tests.",
+	].includes(prompt);
 	if (
-		[permission, transition, question, attachment].filter(Boolean).length !== 1
+		[permission, transition, question, attachment, title].filter(Boolean)
+			.length !== 1
 	) {
 		throw new Error(`Unsupported main prompt: ${user.slice(0, 512)}`);
 	}
@@ -86,6 +97,21 @@ function answer(request: ChatRequest): {
 			);
 		}
 		return { content: "ok" };
+	}
+	if (title) {
+		if (calls.length) {
+			throw new Error("Unexpected assistant tool calls in a title turn");
+		}
+		switch (prompt) {
+			case "Reply with just the word 'pong'.":
+				return { content: "pong" };
+			case "Reply with just the word 'ping'.":
+				return { content: "ping" };
+			case "Explain the session list sorting.":
+				return { content: "Sessions are sorted by recent activity." };
+			case "Summarise the failing tests.":
+				return { content: "No failing tests were provided." };
+		}
 	}
 	const name = question ? "question" : "bash";
 	const advertised = request.tools?.find(
