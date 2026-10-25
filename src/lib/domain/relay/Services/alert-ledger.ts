@@ -12,7 +12,12 @@ import type { SqlError } from "effect/sql/SqlError";
 export interface SessionAlert {
 	readonly sessionId: string;
 	readonly originId: string;
-	readonly kind: "done" | "error" | "ask_user" | "permission_request";
+	readonly kind:
+		| "done"
+		| "error"
+		| "ask_user"
+		| "permission_request"
+		| "goal_stuck";
 	readonly detail?: string;
 	readonly recipientId?: string;
 }
