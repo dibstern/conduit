@@ -182,6 +182,11 @@ async function openCheckout(
 		await page.getByTestId("composer-words-sheet-trigger").tap();
 	const trigger = page.getByTestId("composer-checkout");
 	await expect(trigger).toBeVisible();
+	if ((page.viewportSize()?.width ?? 1440) < 768) {
+		// 2e40cde7 gives the Final phone row a stable Checkout label and icon.
+		await expect(trigger.locator('[data-part="label"]')).toHaveText("Checkout");
+		await expect(trigger.locator("[data-icon]")).toHaveCount(0);
+	}
 	const bar = page.getByTestId("session-bar");
 	await expect(bar.getByRole("button", { name: /^Checkout:/ })).toHaveCount(0);
 	await expect(
@@ -283,16 +288,17 @@ for (const mode of [
 				.toBe("6b11104a9c2e88d27395d13c706d876fbab99aa1");
 		});
 
-		test("linked worktree uses the worktree icon and keeps its name in details", async ({
+		test("linked worktree keeps its branch and name in checkout details", async ({
 			page,
 			harness,
 		}, testInfo) => {
 			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				git: { branch: "fix/draft-menus", worktree: "conduit-wt-draft" },
 			});
-			await expect(
-				trigger.locator('[data-part="worktree"][data-icon="worktree"] svg'),
-			).toBeVisible();
+			if (!mode.hasTouch)
+				await expect(
+					trigger.locator('[data-part="worktree"][data-icon="worktree"] svg'),
+				).toBeVisible();
 			await expect(trigger).not.toContainText("conduit-wt-draft");
 			await capture(page, testInfo, `${mode.name}-linked-worktree`);
 			await trigger.click();
@@ -392,10 +398,11 @@ for (const mode of [
 				await expect(trigger.locator('[data-part="branch"]')).toHaveText(
 					stage.git.branch ?? "",
 				);
-				await expect(trigger.locator("[data-icon]")).toHaveAttribute(
-					"data-icon",
-					stage.git.worktree ? "worktree" : "branch",
-				);
+				if (!mode.hasTouch)
+					await expect(trigger.locator("[data-icon]")).toHaveAttribute(
+						"data-icon",
+						stage.git.worktree ? "worktree" : "branch",
+					);
 				await expect(trigger.locator('[data-part="dirty"]')).toHaveCount(
 					stage.git.dirty ? 1 : 0,
 				);
@@ -428,7 +435,9 @@ for (const mode of [
 					selectedSession: new URL(page.url()).pathname,
 					running,
 					label: await trigger.getAttribute("title"),
-					icon: await trigger.locator("[data-icon]").getAttribute("data-icon"),
+					icon: mode.hasTouch
+						? null
+						: await trigger.locator("[data-icon]").getAttribute("data-icon"),
 					checkout,
 				});
 				await capture(
@@ -456,7 +465,8 @@ for (const mode of [
 			await expect(trigger).toHaveText(
 				mode.hasTouch ? /^\s*Checkout\s+ai-notes\s*$/ : "ai-notes",
 			);
-			await expect(trigger.locator('[data-icon="folder"] svg')).toBeVisible();
+			if (!mode.hasTouch)
+				await expect(trigger.locator('[data-icon="folder"] svg')).toBeVisible();
 			await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
 			await expect(
 				trigger.locator('[title="Uncommitted changes"]'),
@@ -500,7 +510,10 @@ for (const mode of [
 				"title",
 				"conduit-one / feature/one",
 			);
-			await expect(trigger.locator('[data-icon="worktree"] svg')).toBeVisible();
+			if (!mode.hasTouch)
+				await expect(
+					trigger.locator('[data-icon="worktree"] svg'),
+				).toBeVisible();
 			await trigger.click();
 			const details = page.getByTestId("composer-checkout-menu");
 			await expect(details.getByText(moved, { exact: true })).toBeVisible();
@@ -642,7 +655,7 @@ for (const mode of [
 			}
 		});
 
-		test("detached HEAD shows the commit glyph and short SHA", async ({
+		test("detached HEAD shows the short SHA and checkout details", async ({
 			page,
 			harness,
 		}, testInfo) => {
@@ -650,7 +663,8 @@ for (const mode of [
 				git: { head: "a1b2c3d" },
 			});
 			await expect(trigger).toHaveAttribute("title", "conduit / a1b2c3d");
-			await expect(trigger.locator('[data-icon="commit"] svg')).toBeVisible();
+			if (!mode.hasTouch)
+				await expect(trigger.locator('[data-icon="commit"] svg')).toBeVisible();
 			await trigger.click();
 			await expect(
 				page.getByText("Detached at a1b2c3d", { exact: true }),
