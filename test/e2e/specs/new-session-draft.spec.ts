@@ -5,7 +5,7 @@
 
 import type { Page, TestInfo } from "@playwright/test";
 import { expect, test } from "../helpers/replay-fixture.js";
-import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockWsRpc, sendMockDaemonList } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
@@ -95,9 +95,14 @@ test.describe("New session draft", () => {
 
 	test("start chip defaults to the current checkout and offers a new worktree", async ({
 		page,
-		relayUrl,
+		harness,
+		relayInstances,
 	}, testInfo) => {
-		await openDraft(page, relayUrl);
+		await mockTwoProjects(page);
+		sendMockDaemonList(page, "SubscribeInstances", {
+			instances: relayInstances,
+		});
+		await page.goto(`${harness.relayBaseUrl}/new?project=e2e-replay`);
 
 		await page.getByTestId("draft-start-chip").click();
 		await expect(

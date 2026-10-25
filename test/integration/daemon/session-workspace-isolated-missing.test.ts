@@ -26,7 +26,9 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { WorkspaceMissing } from "../../../src/lib/contracts/worktree.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
+import type { SessionGit } from "../../../src/lib/shared-types.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const gitOverrides = [
@@ -421,8 +423,20 @@ const gate = ${JSON.stringify(gate)};
 			({ type }) => type === "session.workspace_changed",
 		);
 		capture("before-removal", fixture);
+		const beforeRemoval = browser.frames.length;
 		rmSync(isolated.path, { recursive: true, force: true });
 		const missing = { path: isolated.path, branch, canRecreate: true };
+		await browser.waitFor((frame) => {
+			const missing = frame["workspaceMissing"] as WorkspaceMissing | undefined;
+			return (
+				frame["type"] === "session_row" &&
+				frame["id"] === isolated.id &&
+				missing?.path === isolated.path &&
+				missing?.branch === branch &&
+				missing?.canRecreate === true
+			);
+		}, beforeRemoval);
+
 		expect((await row(isolated.id)).workspaceMissing).toEqual(missing);
 		await browser.preWarmSession(isolated.id).catch(() => {});
 		expect(existsSync(isolated.path)).toBe(false);
@@ -457,9 +471,29 @@ const gate = ${JSON.stringify(gate)};
 			startupTimeoutMs: 120_000,
 			runnerStartupTimeoutMs: 90_000,
 		});
+		const restarted = await fixture.connect();
+		await restarted.waitFor((frame) => {
+			const missing = frame["workspaceMissing"] as WorkspaceMissing | undefined;
+			return (
+				frame["type"] === "session_row" &&
+				frame["id"] === isolated.id &&
+				missing?.path === isolated.path &&
+				missing?.canRecreate === true
+			);
+		});
 		expect((await row(isolated.id)).workspaceMissing).toEqual(missing);
 		expect(recordedWorkspace(fixture, isolated.id)).toEqual(recorded);
+		const beforeRecreate = restarted.frames.length;
 		expect(await recreate(isolated.id)).toEqual({ directory: isolated.path });
+		await restarted.waitFor(
+			(frame) =>
+				frame["type"] === "session_row" &&
+				frame["id"] === isolated.id &&
+				frame["workspaceMissing"] === undefined &&
+				(frame["git"] as SessionGit | undefined)?.branch === branch,
+			beforeRecreate,
+		);
+
 		expect(git(isolated.path, "branch", "--show-current")).toBe(branch);
 		expect(git(isolated.path, "rev-parse", "HEAD")).toBe(isolatedHead);
 		expect(readFileSync(join(isolated.path, "session-only.txt"), "utf8")).toBe(
@@ -473,7 +507,6 @@ const gate = ${JSON.stringify(gate)};
 			),
 		).toEqual(moves);
 		capture("recreated", fixture);
-		const restarted = await fixture.connect();
 		await restarted.view(isolated.id);
 		await restarted.send(
 			isolated.id,
@@ -503,12 +536,33 @@ const gate = ${JSON.stringify(gate)};
 			"workspace-isolation-write isolated",
 			120_000,
 		);
+		const beforeRemoval = browser.frames.length;
 		rmSync(isolated.path, { recursive: true, force: true });
+		await browser.waitFor((frame) => {
+			const missing = frame["workspaceMissing"] as WorkspaceMissing | undefined;
+			return (
+				frame["type"] === "session_row" &&
+				frame["id"] === isolated.id &&
+				missing?.path === isolated.path &&
+				missing?.canRecreate === true
+			);
+		}, beforeRemoval);
+
 		expect((await row(isolated.id)).workspaceMissing?.canRecreate).toBe(true);
 		capture("missing", fixture);
+		const beforeContinue = browser.frames.length;
 		expect(await continueInMain(isolated.id)).toEqual({
 			directory: fixture.projectDir,
 		});
+		await browser.waitFor(
+			(frame) =>
+				frame["type"] === "session_row" &&
+				frame["id"] === isolated.id &&
+				frame["workspace"] == null &&
+				frame["workspaceMissing"] === undefined,
+			beforeContinue,
+		);
+
 		expect(recordedWorkspace(fixture, isolated.id)).toBeNull();
 		expect((await row(isolated.id)).workspaceMissing).toBeUndefined();
 		const moved = workspaceEvents(fixture, isolated.id)
@@ -593,6 +647,8 @@ const gate = ${JSON.stringify(gate)};
 			`pruned-${renamed}`,
 		);
 		const isolated = await create("pruned");
+		const browser = await fixture.connect();
+		await browser.view(isolated.id);
 		if (renamed)
 			await sendRpcRequest(socket, {
 				_tag: "RenameSessionBranch",
@@ -602,14 +658,36 @@ const gate = ${JSON.stringify(gate)};
 		const branch = git(isolated.path, "branch", "--show-current");
 		const head = git(isolated.path, "rev-parse", "HEAD");
 		const recorded = recordedWorkspace(fixture, isolated.id);
+		const beforeRemoval = browser.frames.length;
 		rmSync(isolated.path, { recursive: true, force: true });
 		git(fixture.projectDir, "worktree", "prune");
+		await browser.waitFor((frame) => {
+			const missing = frame["workspaceMissing"] as WorkspaceMissing | undefined;
+			return (
+				frame["type"] === "session_row" &&
+				frame["id"] === isolated.id &&
+				missing?.path === isolated.path &&
+				missing?.branch === branch &&
+				missing?.canRecreate === true
+			);
+		}, beforeRemoval);
+
 		expect((await row(isolated.id)).workspaceMissing).toMatchObject({
 			path: isolated.path,
 			canRecreate: true,
 			branch,
 		});
+		const beforeRecreate = browser.frames.length;
 		expect(await recreate(isolated.id)).toEqual({ directory: isolated.path });
+		await browser.waitFor(
+			(frame) =>
+				frame["type"] === "session_row" &&
+				frame["id"] === isolated.id &&
+				frame["workspaceMissing"] === undefined &&
+				(frame["git"] as SessionGit | undefined)?.branch === branch,
+			beforeRecreate,
+		);
+
 		expect(git(isolated.path, "branch", "--show-current")).toBe(branch);
 		expect(git(isolated.path, "rev-parse", "HEAD")).toBe(head);
 		expect(recordedWorkspace(fixture, isolated.id)).toEqual(recorded);
@@ -621,10 +699,24 @@ const gate = ${JSON.stringify(gate)};
 		const { fixture, create, row, recreate, continueInMain } =
 			await start("branch-deleted");
 		const isolated = await create("deleted");
+		const browser = await fixture.connect();
+		await browser.view(isolated.id);
 		const branch = git(isolated.path, "branch", "--show-current");
+		const beforeRemoval = browser.frames.length;
 		rmSync(isolated.path, { recursive: true, force: true });
 		git(fixture.projectDir, "update-ref", "-d", `refs/heads/${branch}`);
 		const reason = "branch-missing";
+		await browser.waitFor((frame) => {
+			const missing = frame["workspaceMissing"] as WorkspaceMissing | undefined;
+			return (
+				frame["type"] === "session_row" &&
+				frame["id"] === isolated.id &&
+				missing?.path === isolated.path &&
+				missing?.canRecreate === false &&
+				missing?.reason === reason
+			);
+		}, beforeRemoval);
+
 		const missing = (await row(isolated.id)).workspaceMissing;
 		expect(missing).toMatchObject({
 			path: isolated.path,
@@ -647,8 +739,6 @@ const gate = ${JSON.stringify(gate)};
 			directory: fixture.projectDir,
 		});
 		expect(recordedWorkspace(fixture, isolated.id)).toBeNull();
-		const browser = await fixture.connect();
-		await browser.view(isolated.id);
 		await browser.send(
 			isolated.id,
 			"workspace-isolation-write branch unavailable",
@@ -672,11 +762,22 @@ const gate = ${JSON.stringify(gate)};
 		const isolated = await create(occupant);
 		const browser = await fixture.connect();
 		await browser.view(isolated.id);
+		const beforeRemoval = browser.frames.length;
 		rmSync(isolated.path, { recursive: true, force: true });
 		if (occupant === "directory") {
 			mkdirSync(isolated.path);
 			writeFileSync(join(isolated.path, "keep.txt"), "external files\n");
 		} else symlinkSync(fixture.projectDir, isolated.path);
+		await browser.waitFor((frame) => {
+			const missing = frame["workspaceMissing"] as WorkspaceMissing | undefined;
+			return (
+				frame["type"] === "session_row" &&
+				frame["id"] === isolated.id &&
+				missing?.path === isolated.path &&
+				missing?.canRecreate === true
+			);
+		}, beforeRemoval);
+
 		expect((await row(isolated.id)).workspaceMissing).toMatchObject({
 			path: isolated.path,
 			canRecreate: true,

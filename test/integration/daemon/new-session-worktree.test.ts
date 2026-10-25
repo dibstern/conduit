@@ -140,8 +140,16 @@ process.exit(result.status ?? 1);
 				...(worktreeBase === undefined ? {} : { worktreeBase }),
 			});
 			names.set(result.sessionId, title);
-			const session = (await sessions()).sessions.find(
-				({ id }) => id === result.sessionId,
+			// b9d67848 serves git from the daemon's asynchronous publication.
+			const session = await vi.waitFor(
+				async () => {
+					const row = (await sessions()).sessions.find(
+						({ id }) => id === result.sessionId,
+					);
+					expect(row?.git?.branch).toBeDefined();
+					return row;
+				},
+				{ timeout: 15_000 },
 			);
 			const path = session?.workspace?.worktrees[fixture.projectDir];
 			if (path) {

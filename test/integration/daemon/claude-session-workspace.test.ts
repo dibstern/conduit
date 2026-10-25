@@ -15,7 +15,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { SessionWorkspaceChangedPayloadSchema } from "../../../src/lib/persistence/events.js";
-import { SessionInfoSchema } from "../../../src/lib/shared-types.js";
+import {
+	type SessionGit,
+	SessionInfoSchema,
+} from "../../../src/lib/shared-types.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const gitEnv = { ...process.env };
@@ -1347,6 +1350,13 @@ exec '${realGit}' "$@"
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession("Restored worktree");
 		await browser.send(sessionId, "Reply with pong.");
+		await browser.waitFor(
+			(frame) =>
+				frame["type"] === "session_row" &&
+				frame["id"] === sessionId &&
+				(frame["git"] as SessionGit | undefined)?.branch ===
+					"worktree-contract",
+		);
 		expect(
 			(await list()).sessions.find(({ id }) => id === sessionId),
 		).toMatchObject({

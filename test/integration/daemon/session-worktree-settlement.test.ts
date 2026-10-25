@@ -280,6 +280,19 @@ describe("Worktree branch settlement through the built daemon", () => {
 			});
 			return rows;
 		};
+		const browser = await fixture.connect();
+		await browser.waitFor(
+			(frame) =>
+				frame["type"] === "session_row" &&
+				frame["id"] === ownedId &&
+				(frame["git"] as SessionInfo["git"])?.branch !== undefined,
+		);
+		await browser.waitFor(
+			(frame) =>
+				frame["type"] === "session_row" &&
+				frame["id"] === otherId &&
+				(frame["git"] as SessionInfo["git"])?.branch === "feature/existing",
+		);
 		const initial = await snapshot("initial");
 		const owned = row(initial, ownedId);
 		const ownedPath = owned.workspace?.worktrees[fixture.projectDir];
@@ -291,7 +304,6 @@ describe("Worktree branch settlement through the built daemon", () => {
 		expect(row(initial, otherId).git?.branch).toBe("feature/existing");
 		expect(ownedBranch).not.toBe("feature/existing");
 		expect(row(initial, localId).workspace ?? null).toBeNull();
-		const browser = await fixture.connect();
 		await browser.view(ownedId);
 		await browser.send(
 			ownedId,
@@ -456,6 +468,14 @@ describe("Worktree branch settlement through the built daemon", () => {
 			startupTimeoutMs: 120_000,
 			runnerStartupTimeoutMs: 90_000,
 		});
+		await vi.waitFor(
+			async () =>
+				expect(row(await sessions(), otherId).git).toMatchObject({
+					branch: "feature/existing",
+					merged: true,
+				}),
+			{ timeout: 30_000 },
+		);
 		const manualResumed = await snapshot("afterManualSettlementAndResume");
 		expect(row(manualResumed, otherId)).toMatchObject({
 			git: { merged: true },
