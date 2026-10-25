@@ -97,11 +97,6 @@ describe("daemon automatic settlement layer", () => {
 								get,
 								invalidate: () => Effect.void,
 							}),
-							Layer.succeed(SessionGit)({
-								read: () => Effect.succeed(undefined),
-								changes: Stream.empty,
-								invalidate: () => Effect.void,
-							}),
 							DaemonEventBusLive,
 							Logger.layer([logger]),
 						),
@@ -137,7 +132,7 @@ describe("daemon automatic settlement layer", () => {
 	);
 
 	it.effect(
-		"ticks and reacts to git publications, skips cold empty projects, and survives one project failure",
+		"ticks once per minute despite git publications, skips cold empty projects, and survives one project failure",
 		() =>
 			Effect.gen(function* () {
 				const dir = mkdtempSync(join(tmpdir(), "conduit-auto-layer-"));
@@ -212,22 +207,16 @@ describe("daemon automatic settlement layer", () => {
 					expect(calls).toContain("running");
 					expect(get).not.toHaveBeenCalled();
 					const beforePublication = calls.length;
-					yield* PubSub.publish(changes, {
-						directory: dir,
-						sessionIds: [],
-						version: 1,
-					});
+					for (let version = 1; version <= 100; version++)
+						yield* PubSub.publish(changes, {
+							directory: dir,
+							sessionIds: ["running-s1"],
+							version,
+						});
 					yield* TestClock.adjust("1 millis");
 					expect(calls).toHaveLength(beforePublication);
-					yield* PubSub.publish(changes, {
-						directory: dir,
-						sessionIds: ["running-s1"],
-						version: 2,
-					});
-					yield* TestClock.adjust("1 millis");
-					expect(calls).toHaveLength(beforePublication + 1);
 					yield* TestClock.adjust("1 minute");
-					expect(calls.length).toBeGreaterThanOrEqual(2);
+					expect(calls).toHaveLength(beforePublication + 1);
 				} finally {
 					yield* Scope.close(scope, Exit.void);
 					rmSync(dir, { recursive: true, force: true });
@@ -289,11 +278,6 @@ describe("daemon automatic settlement layer", () => {
 								get,
 								invalidate: () => Effect.void,
 							}),
-							Layer.succeed(SessionGit)({
-								read: () => Effect.succeed(undefined),
-								changes: Stream.empty,
-								invalidate: () => Effect.void,
-							}),
 							DaemonEventBusLive,
 						),
 					),
@@ -341,11 +325,6 @@ describe("daemon automatic settlement layer", () => {
 								peek,
 								get: () => Effect.fail(new Error("must skip")),
 								invalidate,
-							}),
-							Layer.succeed(SessionGit)({
-								read: () => Effect.succeed(undefined),
-								changes: Stream.empty,
-								invalidate: () => Effect.void,
 							}),
 							DaemonEventBusLive,
 						),

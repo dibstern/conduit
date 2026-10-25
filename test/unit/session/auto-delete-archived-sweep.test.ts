@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer, Option, PubSub, Ref, Stream } from "effect";
+import { Effect, Layer, Option, PubSub, Ref } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
@@ -31,7 +31,6 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
-import { SessionGit } from "../../../src/lib/domain/daemon/Services/session-git.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
@@ -235,13 +234,6 @@ describe("archived tree retention", () => {
 					});
 					yield* Layer.build(
 						AutoSettleLive().pipe(
-							Layer.provide(
-								Layer.succeed(SessionGit)({
-									read: () => Effect.succeed(undefined),
-									changes: Stream.empty,
-									invalidate: () => Effect.void,
-								}),
-							),
 							Layer.provide(
 								Layer.succeed(RelayCacheTag)({
 									peek: () => Effect.succeed(Option.none<Relay>()),

@@ -364,7 +364,16 @@ describe("Worktree branch settlement through the built daemon", () => {
 		);
 		git(seed, "push", remote, "trunk");
 		git(fixture.projectDir, "fetch", "origin");
-		// Startup runs the same background sweep and exercises the cold-project reader.
+		// The startup sweep reads published facts; Git refreshes publish asynchronously.
+		await vi.waitFor(
+			async () =>
+				expect(row(await sessions(), ownedId).git).toMatchObject({
+					branch: ownedBranch,
+					merged: true,
+				}),
+			{ timeout: 30_000 },
+		);
+		// Startup runs the periodic sweep and exercises the cold-project reader.
 		await fixture.shutdown();
 		await fixture.restart({
 			startupTimeoutMs: 120_000,

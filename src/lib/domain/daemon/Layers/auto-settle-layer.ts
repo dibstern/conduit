@@ -19,7 +19,6 @@ import {
 	ProjectRegistryTag,
 } from "../Services/project-registry-service.js";
 import { RelayCacheTag } from "../Services/relay-cache.js";
-import { SessionGit } from "../Services/session-git.js";
 
 export const AutoSettleLive = () =>
 	Layer.effectDiscard(
@@ -28,7 +27,6 @@ export const AutoSettleLive = () =>
 			const registry = yield* ProjectRegistryTag;
 			const cache = yield* RelayCacheTag;
 			const bus = yield* DaemonEventBusTag;
-			const git = yield* SessionGit;
 			const storeContext = yield* persistenceStoreContext;
 			const missingDirectories = new Set<string>();
 
@@ -131,13 +129,7 @@ export const AutoSettleLive = () =>
 				),
 			);
 
-			// Published Git facts can arrive after the startup sweep.
-			yield* Stream.merge(
-				Stream.tick("1 minute"),
-				git.changes.pipe(
-					Stream.filter((change) => change.sessionIds.length > 0),
-				),
-			).pipe(
+			yield* Stream.tick("1 minute").pipe(
 				Stream.runForEach(() => sweep),
 				Effect.forkScoped,
 			);
