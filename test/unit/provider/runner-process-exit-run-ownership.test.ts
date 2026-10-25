@@ -1,8 +1,10 @@
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
+import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Deferred, Effect, Fiber, Layer } from "effect";
+import { it as effectIt } from "@effect/vitest";
+import { Deferred, Effect, Exit, Fiber, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -22,6 +24,10 @@ vi.mock(
 );
 
 import {
+	AccountIdSchema,
+	type ClaudeAccount,
+} from "../../../src/lib/contracts/account.js";
+import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -36,7 +42,8 @@ import {
 	type ProcessRunnerDriver,
 } from "../../../src/lib/provider/runner/process-session-runner.js";
 import {
-	type RunnerSocket,
+	RUNNER_PROTOCOL_VERSION,
+	RunnerSocket,
 	runnerBuildId,
 	runnerFailure,
 	runnerIdleFailure,
@@ -244,6 +251,7 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 const roots: string[] = [];
 afterEach(() => {
 	vi.clearAllMocks();
+	vi.unstubAllEnvs();
 	for (const root of roots.splice(0))
 		rmSync(root, { recursive: true, force: true });
 });
@@ -610,3 +618,273 @@ for (const [
 		await Effect.runPromise(program);
 	});
 }
+
+effectIt.effect(
+	"dispatches an account switch after delivery completes during hello replay",
+	() => {
+		vi.stubEnv("CONDUIT_TEST_BUILD_ID", "hello-current-build");
+		const root = mkdtempSync(join(tmpdir(), "run-hello-delivery-"));
+		roots.push(root);
+		const child = new TestChild();
+		transport.alive.mockImplementation(() => child.exitCode === null);
+		transport.spawn.mockImplementation(() => {
+			queueMicrotask(() =>
+				child.emit("message", {
+					channel: "conduit-claude-runner",
+					type: "listening",
+				}),
+			);
+			return child;
+		});
+		const accountA: ClaudeAccount = {
+			driver: "claude",
+			id: AccountIdSchema.make("account-a"),
+			name: "Account A",
+			folder: configuredClaudeConfigDir(join(root, "account-a")),
+			usageEligible: true,
+		};
+		const accountB: ClaudeAccount = {
+			...accountA,
+			id: AccountIdSchema.make("account-b"),
+			name: "Account B",
+			folder: configuredClaudeConfigDir(join(root, "account-b")),
+		};
+		const input = {
+			sessionId: "s",
+			workspaceRoot: root,
+			extraFolders: [],
+			providerState: {},
+			account: accountA,
+			configDir: accountA.folder,
+			folderSource: "account" as const,
+		};
+		const result = {
+			status: "completed" as const,
+			cost: 0,
+			tokens: { input: 0, output: 0 },
+			durationMs: 0,
+			providerStateUpdates: [],
+		};
+		const dispatch = vi.fn<RunnerSocket["commandEffect"]>((_id, command) =>
+			Effect.succeed(command.type === "send-turn" ? result : undefined),
+		);
+		const restored: string[] = [];
+		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
+		return Effect.scoped(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				const selected = yield* Deferred.make<void>();
+				const loginChange = vi.fn<ProcessRunnerDriver["loginChange"]>(() => {
+					Deferred.doneUnsafe(selected, Effect.void);
+					return "Account";
+				});
+				yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at)
+					VALUES ('s', 'test-project', 'claude', 1, 1)`;
+				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at, started_at, completed_at)
+					VALUES ('source-run', 's', 'completed', 1, 1, 2)`;
+				yield* sql`INSERT INTO turns (id, session_id, user_message_id, run_id, state, requested_at, completed_at)
+					VALUES ('source-turn', 's', 'source-input', 'source-run', 'completed', 1, 2)`;
+				yield* sql`INSERT INTO messages (id, session_id, turn_id, input_id, role, text, created_at, updated_at)
+					VALUES ('source-input', 's', 'source-turn', 'source-input', 'user', 'source', 1, 1)`;
+				yield* sql`INSERT INTO provider_command_outbox
+					(request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
+					VALUES (1, 'source-command', 'test-project', 's', ${accountA.id}, 'send_turn', 'source-run', '{"inputId":"source-input"}', 'completed', 1, 1, 2)`;
+				const driver: ProcessRunnerDriver = {
+					driverKind: "claude",
+					withAccountScope: (_accountId, work) => work,
+					connect: (options) =>
+						Effect.gen(function* () {
+							const connection = new RunnerSocket(
+								new Socket(),
+								() => {},
+								options.onClose,
+							);
+							vi.spyOn(connection, "write").mockImplementation(() => {});
+							vi.spyOn(connection, "commandEffect").mockImplementation(
+								dispatch,
+							);
+							const destroy = connection.destroy.bind(connection);
+							vi.spyOn(connection, "destroy").mockImplementation((failure) => {
+								child.exitCode = 0;
+								destroy(failure);
+							});
+							const helloState = {
+								quiescent: false,
+								revision: 7,
+								snapshot: { input, options: {} },
+								sourceDelivery: {
+									sessionId: options.sessionId,
+									runnerId: options.runnerId,
+									commandId: "source-command",
+									sinkId: "source-command:1",
+									inputId: "source-input",
+									runId: "source-run",
+									generation: 1,
+								},
+							};
+							yield* options.onHello(
+								{
+									type: "hello",
+									protocolVersion: RUNNER_PROTOCOL_VERSION,
+									buildId: runnerBuildId(),
+									stampsRunIds: true,
+									rebindsAccount: true,
+									runnerId: options.runnerId,
+									sessionId: options.sessionId,
+									pid: child.pid,
+									upgradeState: helloState,
+									sendCommands: [],
+									// The completed turn's native query still owns its sink.
+									bindings: [
+										{
+											sinkId: "source-command:1",
+											sessionId: options.sessionId,
+											commandId: "source-command",
+											released: false,
+										},
+									],
+								},
+								connection,
+								Effect.gen(function* () {
+									yield* options.emit(
+										{
+											type: "event",
+											sinkId: "source-command:1",
+											event: {
+												eventId: "source-idle",
+												type: "session.status",
+												providerId: "claude",
+												sessionId: options.sessionId,
+												runId: "source-run",
+												providerRefs: {},
+												rawSource: { kind: "claude.sdk" },
+												createdAt: 3,
+												data: { sessionId: options.sessionId, status: "idle" },
+											},
+										},
+										options.sessionId,
+									);
+									restored.push("replayed-output");
+									if (!options.onUpgradeState)
+										throw new Error("Missing upgrade-state observer");
+									options.onUpgradeState({ quiescent: true, revision: 8 });
+									restored.push("newer-state");
+								}),
+							);
+							restored.push("hello-returned");
+							return connection;
+						}),
+					settingsDeferredCode: "test-deferred",
+					warmCommand: () => {
+						throw new Error("No upgrade expected");
+					},
+					snapshotCommandSettings: () => ({}),
+					loginChange,
+					recoverCommands: () => Effect.succeed([]),
+				};
+				const runner = yield* makeProcessSessionRunner(
+					{
+						projectRootForSession: () => Effect.succeed(root),
+						daemonConfigDir: root,
+					},
+					(output) =>
+						output.type === "event"
+							? ingestion.ingest(output.event).pipe(
+									Effect.as({}),
+									Effect.mapError((error) =>
+										runnerFailure("test output", error),
+									),
+								)
+							: Effect.succeed({}),
+					driver,
+				);
+				// Even a failed assertion must never signal the fake child's PID.
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => {
+						child.exitCode = 0;
+					}),
+				);
+				yield* runner.executeEffect({
+					type: "pre-warm",
+					sessionId: "s",
+					input,
+				});
+				expect(restored).toEqual([
+					"replayed-output",
+					"newer-state",
+					"hello-returned",
+				]);
+				expect(dispatch).toHaveBeenCalledExactlyOnceWith(
+					expect.any(String),
+					expect.objectContaining({ type: "pre-warm", input }),
+					undefined,
+				);
+				const target = yield* Effect.forkChild(
+					runner.executeEffect({
+						type: "send-turn",
+						sinkId: "target-sink",
+						aborted: false,
+						input: {
+							...input,
+							account: accountB,
+							configDir: accountB.folder,
+							inputId: "target-input",
+							runId: "target-run",
+							prompt: "target",
+							history: [],
+						},
+					}),
+				);
+				yield* Effect.addFinalizer(() => Fiber.interrupt(target));
+				yield* Effect.raceFirst(Deferred.await(selected), Fiber.await(target));
+				// Selection precedes dispatch; await the owned send and its cleanup.
+				const targetExit = yield* Fiber.await(target);
+				expect(loginChange).toHaveBeenCalledExactlyOnceWith(
+					expect.objectContaining({
+						account: accountA,
+						configDir: accountA.folder,
+					}),
+					expect.objectContaining({
+						account: accountB,
+						configDir: accountB.folder,
+					}),
+				);
+				if (dispatch.mock.calls.length !== 2 || targetExit?._tag !== "Success")
+					console.log(
+						JSON.stringify({
+							case: "hello-restoration",
+							restored,
+							accounts: [accountA.id, accountB.id],
+							dispatched: dispatch.mock.calls.map(
+								([, command]) => command.type,
+							),
+							targetExit: targetExit?._tag ?? "Pending",
+						}),
+					);
+				if (targetExit && Exit.isFailure(targetExit))
+					return yield* Effect.failCause(targetExit.cause);
+				expect(dispatch).toHaveBeenCalledTimes(2);
+				expect(dispatch).toHaveBeenLastCalledWith(
+					"target-input",
+					expect.objectContaining({
+						type: "send-turn",
+						input: expect.objectContaining({
+							account: accountB,
+							configDir: accountB.folder,
+						}),
+					}),
+					undefined,
+				);
+				expect(target.pollUnsafe()).toEqual(Exit.succeed(result));
+			}),
+		).pipe(
+			Effect.provide(
+				Layer.merge(
+					persistence,
+					ProviderRuntimeIngestionLive.pipe(Layer.provide(persistence)),
+				),
+			),
+		);
+	},
+);

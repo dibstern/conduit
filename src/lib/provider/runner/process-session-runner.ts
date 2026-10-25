@@ -1155,7 +1155,18 @@ export const makeProcessSessionRunner = (
 								stopsTasks: hello.stopsTasks === true,
 								rebindsAccount: hello.rebindsAccount === true,
 							};
-							entry.upgrade.state = hello.upgradeState;
+							const observed = entry.upgrade.state;
+							const helloState = hello.upgradeState;
+							const latest =
+								observed &&
+								(!helloState || observed.revision >= helloState.revision)
+									? observed
+									: helloState;
+							const snapshot =
+								latest?.snapshot ?? observed?.snapshot ?? helloState?.snapshot;
+							entry.upgrade.state = latest
+								? { ...latest, ...(snapshot ? { snapshot } : {}) }
+								: undefined;
 							notifyEntry(entry);
 							// Identity and native controls suffice until the project can reattach.
 							if (identityOnly || Entry.isAwaitingProject(entry.lifecycle))
@@ -1356,9 +1367,10 @@ export const makeProcessSessionRunner = (
 										}),
 									);
 							}
-							observeSourceDelivery(entry, hello.upgradeState);
 							yield* Effect.all(restoreAccounts, { discard: true });
 							yield* ensureAttached();
+							// Recovery can await output ACKs that publish a newer revision.
+							observeSourceDelivery(entry, entry.upgrade.state);
 							if (process.env["NODE_ENV"] === "test" && process.connected)
 								process.send?.({
 									channel: "conduit-process-test",
@@ -1413,6 +1425,11 @@ export const makeProcessSessionRunner = (
 						);
 					},
 					onUpgradeState: (state) => {
+						if (
+							entry.upgrade.state &&
+							state.revision < entry.upgrade.state.revision
+						)
+							return;
 						observeSourceDelivery(entry, state);
 						const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
 						// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
