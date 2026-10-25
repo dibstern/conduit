@@ -88,7 +88,7 @@ test("Access toggles Tailscale Serve, keeps it across a restart, and shows read-
 	const initial = await harness.requestRpc({ _tag: "GetStatus" });
 	expect(initial.tailscaleServeAvailable).toBe(true);
 	expect(initial.tailscaleServeEnabled ?? false).toBe(false);
-	await new AppPage(page).goto(harness.baseUrl);
+	await new AppPage(page).mountWithoutProjects(harness);
 	await openServerSettings(page);
 	const toggle = page
 		.getByTestId("server-access-settings")
@@ -119,7 +119,9 @@ test("Access toggles Tailscale Serve, keeps it across a restart, and shows read-
 	expect((await harness.requestRpc({ _tag: "GetStatus" })).projects).toEqual(
 		[],
 	);
-	await page.reload();
+	await new AppPage(page).mountWithoutProjects(harness, async () => {
+		await page.reload();
+	});
 	await openServerSettings(page);
 	await expect(toggle).toHaveAttribute("aria-checked", "true");
 	await expect(toggle).toContainText(url);
