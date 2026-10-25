@@ -7,14 +7,15 @@ directory so tickets can cite a durable path. The documents are copied unchanged
 
 Later documents win over earlier ones:
 
-1. `AMENDMENT-2026-10-25-AUDIT-2.md` (audit round 2, typed states; Q19 = A)
-2. `AMENDMENT-2026-10-25-AUDIT.md` (single owners, bottlenecks, deepening; Q17 = A)
-3. `AMENDMENT-2026-10-25-RUNNER-AUTHORITY.md` (runner authority, durable retirement, slices R1-R5)
-4. `AMENDMENT-2026-10-24-BACKGROUND-WORK.md` (background work, goals, runner lifecycle)
-5. `AMENDMENT-2026-10-24-FACT-BOOK.md`
-6. `AMENDMENT-2026-10-23-OUTSTANDING-WORK.md`, `RULINGS-2026-10-23-D1.md`, `RULINGS-2026-10-23.md`
-7. `AMENDMENT-2026-10-23.md`
-8. `CONTRACT.md`, `spec-82tn32.md`
+1. `AMENDMENT-2026-10-25-SEND-SCOPE.md` (per-send scopes, release leaves the authority; Q20 = A)
+2. `AMENDMENT-2026-10-25-AUDIT-2.md` (audit round 2, typed states; Q19 = A)
+3. `AMENDMENT-2026-10-25-AUDIT.md` (single owners, bottlenecks, deepening; Q17 = A)
+4. `AMENDMENT-2026-10-25-RUNNER-AUTHORITY.md` (runner authority, durable retirement, slices R1-R5)
+5. `AMENDMENT-2026-10-24-BACKGROUND-WORK.md` (background work, goals, runner lifecycle)
+6. `AMENDMENT-2026-10-24-FACT-BOOK.md`
+7. `AMENDMENT-2026-10-23-OUTSTANDING-WORK.md`, `RULINGS-2026-10-23-D1.md`, `RULINGS-2026-10-23.md`
+8. `AMENDMENT-2026-10-23.md`
+9. `CONTRACT.md`, `spec-82tn32.md`
 
 ## Renamed files
 
