@@ -18,6 +18,10 @@ import type { ProcessHarness } from "./process-harness.js";
 export const PRE_RUNNER_SETTLED_ANSWERS_COMMIT =
 	"312a926114d1b0feb54713208c3a7a380b4fc98e";
 
+// Last main before draft attachments; its runner accepts and echoes string images.
+export const PRE_DRAFT_ATTACHMENTS_COMMIT =
+	"69961516dd68627b2e86c2f84e631cfc5f77aece";
+
 export type HistoricalRunnerBundle =
 	| {
 			available: true;

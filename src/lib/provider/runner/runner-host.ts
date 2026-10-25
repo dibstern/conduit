@@ -397,6 +397,7 @@ export const runSessionRunner = (
 										? {}
 										: { stampsRunIds: true as const }),
 									settlesAnswers: true,
+									attachmentRefs: true,
 									...(driverKind === "cursor" &&
 									!(
 										overrideHello &&

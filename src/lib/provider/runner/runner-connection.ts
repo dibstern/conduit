@@ -531,6 +531,7 @@ export const connectRunner = (options: {
 							: RUNNER_PROTOCOL_VERSION,
 					buildId: runnerBuildId(),
 					taggedConfigDir: true,
+					attachmentRefs: true,
 					acknowledgedSequence: acknowledged,
 					config: {
 						workspaceRoot: options.deps.workspaceRoot,
