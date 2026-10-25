@@ -1,5 +1,5 @@
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
 	Clock,
@@ -537,9 +537,23 @@ export const makeSessionGit = Effect.gen(function* () {
 					([, path]) => canonicalDirectory(path) === entry.directory,
 				);
 				if (!pair) continue;
+				const ownership = yield* readSessionWorktreeOwnershipSnapshot(
+					session.projectId,
+					id,
+				).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+				const checkoutRoot =
+					ownership?._tag === "Owned"
+						? ownership.ownership.find(
+								({ path }) =>
+									entry.directory === canonicalDirectory(path) ||
+									entry.directory.startsWith(
+										`${canonicalDirectory(path)}${sep}`,
+									),
+							)?.path
+						: undefined;
 				if (exists) {
 					const checkout = yield* Effect.tryPromise(() =>
-						lstat(join(entry.directory, ".git")),
+						lstat(join(checkoutRoot ?? entry.directory, ".git")),
 					).pipe(
 						Effect.map((stat) => stat.isFile()),
 						Effect.orElseSucceed(() => false),
@@ -552,10 +566,6 @@ export const makeSessionGit = Effect.gen(function* () {
 						canRecreate: false,
 						reason: "git-failed" as const,
 					};
-				const ownership = yield* readSessionWorktreeOwnershipSnapshot(
-					session.projectId,
-					id,
-				).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 				const recordedBranch =
 					ownership?._tag === "Owned"
 						? recordedBranchForFolder(ownership.ownership, ...pair)
