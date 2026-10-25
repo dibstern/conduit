@@ -162,6 +162,11 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					const api = makeMockOpenCodeAPI({
 						promptProcessId: "opencode:silent-stop",
 					});
+					const replacementStarted = Deferred.makeUnsafe<void>();
+					api.session.prompt = vi.fn(() => {
+						Deferred.doneUnsafe(replacementStarted, Effect.void);
+						return Promise.resolve();
+					});
 					let acknowledgeAbort = () => {};
 					if (acknowledgement !== "before-terminal")
 						api.session.abort = vi.fn(
@@ -263,8 +268,7 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 							else yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
 						}
 						yield* stopped;
-						yield* TestClock.adjust(500);
-						yield* flushDispatch;
+						yield* Deferred.await(replacementStarted);
 						expect(api.session.prompt).toHaveBeenCalledOnce();
 						expect(turns.turnFences("session-1").stopping).toBe(false);
 						expect(
