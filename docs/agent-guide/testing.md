@@ -92,6 +92,7 @@ Process harnesses use `dist/` by default in this suite. Rebuild after changing
 `src/`. Set `CONDUIT_TEST_DIST` to another build directory, or to an empty string
 to use source for fixtures without an explicit build. Tests that verify source
 behavior opt out explicitly.
+Stale or missing dist fails fast in integration and E2E groups; bypass with `CONDUIT_SKIP_DIST_CHECK=1`.
 
 ### Claude process runners
 

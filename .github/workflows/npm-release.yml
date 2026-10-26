@@ -19,8 +19,8 @@ permissions:
 # ─── Parallelization Strategy ──────────────────────────────────────────────────
 # scripts/test-all.sh owns the shared stage list. Release CI is the gate:
 #
-#   lint-and-build ──► e2e (needs dist/), both on Ubuntu
-#   vitest, storybook run independently on Ubuntu
+#   lint-and-build ──► vitest, e2e (need dist/), all on Ubuntu
+#   storybook runs independently on Ubuntu
 #   visual runs independently on macOS for the strict Darwin baselines
 #
 # After all verification passes, the release job bumps the version, publishes,
@@ -54,9 +54,9 @@ jobs:
           retention-days: 1
 
   # ── Job 2: Vitest suites (unit + integration + contract) ───────────────────
-  # No build needed — vitest runs from source (build-output tests run in
-  # lint-and-build instead). Contract tests need OpenCode.
+  # Integration tests need the same dist/ artifact as E2E. Contract tests need OpenCode.
   vitest:
+    needs: lint-and-build
     runs-on: ubuntu-latest
     env:
       OPENCODE_SERVER_PASSWORD: ci-test-password
@@ -73,6 +73,11 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
       - name: Install and start OpenCode server
         run: |
           OPENCODE_VERSION=$(cat .opencode-version)

@@ -9,6 +9,7 @@ if (!Number.isSafeInteger(maxWorkers) || maxWorkers <= 0) {
 export default defineConfig({
 	plugins: [svelte()],
 	test: {
+		globalSetup: ["scripts/source-hash.mjs"],
 		setupFiles: ["test/setup.ts"],
 		env: {
 			CONDUIT_TEST_DIST: process.env["CONDUIT_TEST_DIST"] ?? "dist",
