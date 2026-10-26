@@ -11,9 +11,12 @@ test("snooze, undo, shelf, reload, search, unsnooze and a time wake", async ({
 	page,
 	relayUrl,
 }) => {
-	// A controllable clock lets the time wake happen without waiting an hour; the
-	// server still checks against real time, which the installed clock starts at.
-	await page.clock.install();
+	// Tomorrow noon stays ahead of the server clock without crossing a day
+	// boundary when the one-hour label and wake are exercised.
+	const noon = new Date();
+	noon.setDate(noon.getDate() + 1);
+	noon.setHours(12, 0, 0, 0);
+	await page.clock.install({ time: noon });
 	await gotoRelay(page, relayUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();

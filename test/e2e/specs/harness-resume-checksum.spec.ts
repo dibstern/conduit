@@ -33,6 +33,7 @@ import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -45,6 +46,7 @@ import type {
 	EventPayloadMap,
 	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
+import type { SubprocessMetrics } from "../../../src/lib/domain/daemon/Services/subprocess.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -630,19 +632,26 @@ test("a resume is checked against the server, and the server wins", async ({
 					{ timeout: 30_000 },
 				)
 				.toBeGreaterThanOrEqual(2);
-			// The counter is read next, so the refresh that must not move it
-			// has to have read the folder first.
+			// A second status read for this folder means the first owner refresh
+			// finished publication: its queued flag prevents overlapping refreshes.
 			await expect
 				.poll(
-					() =>
-						(
-							JSON.parse(
-								readFileSync(
-									join(harness.root, "server-metrics-git-unchanged.json"),
-									"utf8",
-								),
-							) as { gitRefreshes: { read: number }[] }
-						).gitRefreshes.some(({ read }) => read > 0),
+					() => {
+						const { subprocess, gitStatusReads } = JSON.parse(
+							readFileSync(
+								join(harness.root, "server-metrics-git-unchanged.json"),
+								"utf8",
+							),
+						) as {
+							subprocess?: SubprocessMetrics;
+							gitStatusReads: Record<string, number>;
+						};
+						return (
+							(gitStatusReads[realpathSync(harness.projectDir)] ?? 0) >= 2 &&
+							subprocess?.active === 0 &&
+							subprocess.queued === 0
+						);
+					},
 					{ timeout: 30_000 },
 				)
 				.toBe(true);

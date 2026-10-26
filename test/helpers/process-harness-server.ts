@@ -14,7 +14,12 @@ import { join } from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Context, Effect, Fiber, HashMap, Ref } from "effect";
+import type {
+	SubprocessDiagnostic,
+	SubprocessMetrics,
+} from "../../src/lib/domain/daemon/Services/subprocess.js";
 import { recordDaemonBudgetMetrics } from "./daemon-budget-metrics.js";
+import type { ProcessMark } from "./fake-claude-process-sdk.js";
 
 // Event-loop stalls and read-model reads for load tests, flushed to a file the
 // spec reads after each phase. Stalls are wall-clock end times and durations.
@@ -42,13 +47,17 @@ function recordServerMetrics(
 			message as import("../../src/lib/domain/relay/Services/shell-subscription.js").SidebarRead;
 		sidebarReads.push({ at: Date.now(), ms: read.ms, rows: read.rows });
 	});
-	const gitRefreshes: { at: number; read: number; changed: number }[] = [];
-	subscribe("conduit:session-git-refresh", (message) => {
-		const refresh = message as {
-			readonly read: number;
-			readonly changed: number;
-		};
-		gitRefreshes.push({ at: Date.now(), ...refresh });
+	let subprocess: SubprocessMetrics | undefined;
+	const gitStatusReads: Record<string, number> = {};
+	subscribe("conduit:subprocess-metrics", (message) => {
+		const { spawn, ...metrics } = message as SubprocessDiagnostic;
+		subprocess = metrics;
+		if (
+			spawn?.command === "git" &&
+			spawn.args.includes("status") &&
+			spawn.args.includes("--porcelain=v2")
+		)
+			gitStatusReads[spawn.cwd] = (gitStatusReads[spawn.cwd] ?? 0) + 1;
 	});
 	subscribe("conduit:read-model-read", (message) => {
 		const read =
@@ -120,7 +129,8 @@ function recordServerMetrics(
 				),
 				sidebarReads,
 				readModelReads,
-				gitRefreshes,
+				subprocess,
+				gitStatusReads,
 				...(timed && { familyReads: timed.familyReads }),
 				...(timed && { streamingWrites: timed.streamingWrites }),
 			}),
@@ -1291,14 +1301,22 @@ async function main(): Promise<void> {
 						Effect.sync(() => {
 							const endSession = instance.endSessionEffect.bind(instance);
 							instance.endSessionEffect = (sessionId, call, control) =>
-								Effect.suspend(() => {
+								Effect.gen(function* () {
+									const hold = join(root, `hold-end-session-${sessionId}`);
+									if (existsSync(hold)) {
+										writeFileSync(
+											join(root, `end-session-held-${sessionId}`),
+											"held\n",
+										);
+										while (existsSync(hold)) yield* Effect.sleep("20 millis");
+									}
 									if (!existsSync(join(root, `fail-end-session-${sessionId}`)))
-										return endSession(sessionId, call, control);
+										return yield* endSession(sessionId, call, control);
 									appendFileSync(
 										join(root, "end-session-failures.ndjson"),
 										`${JSON.stringify({ sessionId })}\n`,
 									);
-									return Effect.fail(
+									return yield* Effect.fail(
 										new ProviderInstanceFailure({
 											providerId: "claude",
 											operation: "endSession",
@@ -1473,17 +1491,49 @@ async function main(): Promise<void> {
 	) {
 		const changes = watch(configDir);
 		try {
+			process.send({
+				channel: "conduit-process-test",
+				...({
+					kind: "startup-phase",
+					phase: "add-project-start",
+					pid: process.pid,
+					at: Date.now(),
+				} satisfies ProcessMark),
+			});
 			await activeDaemon.addProject(join(root, "process-test"));
+			process.send({
+				channel: "conduit-process-test",
+				...({
+					kind: "startup-phase",
+					phase: "add-project-returned",
+					pid: process.pid,
+					at: Date.now(),
+				} satisfies ProcessMark),
+			});
+			let recordedCheck = false;
 			while (true) {
 				const stored = JSON.parse(
 					readFileSync(join(configDir, "daemon.json"), "utf8"),
 				) as { projects: { folders: string[] }[] };
-				if (
-					stored.projects.some((project) =>
-						project.folders.includes(join(root, "process-test")),
-					)
-				)
-					break;
+				const matches = stored.projects.some((project) =>
+					project.folders.includes(join(root, "process-test")),
+				);
+				if (!recordedCheck) {
+					process.send({
+						channel: "conduit-process-test",
+						...({
+							kind: "startup-phase",
+							phase: "persisted-project-check",
+							pid: process.pid,
+							at: Date.now(),
+							expectedFolder: join(root, "process-test"),
+							folders: stored.projects.flatMap((project) => project.folders),
+							matches,
+						} satisfies ProcessMark),
+					});
+					recordedCheck = true;
+				}
+				if (matches) break;
 				await once(changes, "change");
 			}
 			writeFileSync(defaultProjectRegistered, "registered\n");
@@ -1491,6 +1541,15 @@ async function main(): Promise<void> {
 			changes.close();
 		}
 	}
+	process.send({
+		channel: "conduit-process-test",
+		...({
+			kind: "startup-phase",
+			phase: "ready-attempt",
+			pid: process.pid,
+			at: Date.now(),
+		} satisfies ProcessMark),
+	});
 	process.send({
 		channel: "conduit-process-test",
 		kind: "ready",

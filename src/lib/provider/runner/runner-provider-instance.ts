@@ -55,6 +55,7 @@ import {
 } from "./runner-protocol.js";
 import {
 	currentPendingSendOwner,
+	runningRunnerCommands,
 	settleUnclaimedRunnerCommands,
 } from "./runner-recovery.js";
 import { discoverAllRunners } from "./runner-registry.js";
@@ -272,6 +273,24 @@ export class RunnerProviderInstance implements ProviderInstance {
 		Effect.gen({ self: this }, function* () {
 			this.recoveryForSession = recoveryForSession;
 			const sql = yield* SqlClient.SqlClient;
+			// Validate persisted launch folders before recovery can settle or requeue them.
+			if (this.providerId === "claude") {
+				const accounts = yield* this.deps.accounts;
+				const driverForAccount = (id: string) =>
+					accounts.accounts.find((account) => account.id === id)?.driver ??
+					accounts.deleted.find((account) => account.id === id)?.driver ??
+					(id === this.providerId ? this.providerId : undefined);
+				if (sessionIds)
+					for (const sessionId of sessionIds)
+						yield* runningRunnerCommands(
+							sql,
+							this.providerId,
+							driverForAccount,
+							sessionId,
+						);
+				else
+					yield* runningRunnerCommands(sql, this.providerId, driverForAccount);
+			}
 			// An in-process runner's turns ended with the relay that ran them, so
 			// every running command is unclaimed. Runner processes may outlive it.
 			const claimed = new Set<string>();
@@ -521,18 +540,41 @@ export class RunnerProviderInstance implements ProviderInstance {
 	private abortSendEffect(
 		send: SendScope,
 		startImmediately = false,
+		retireAccountId?: string,
 	): Effect.Effect<void> {
 		return this.sendScopes
 			.fork(
 				send,
 				"abort operation",
-				Effect.suspend(() =>
-					send.assignment._tag === "Closed"
-						? Effect.void
-						: this.runner
-								.executeEffect({ type: "abort", sinkId: send.sinkId }, send)
-								.pipe(Effect.ignore),
-				),
+				Effect.gen({ self: this }, function* () {
+					const assignment = send.assignment;
+					if (assignment._tag === "Closed") return;
+					yield* this.runner
+						.executeEffect({ type: "abort", sinkId: send.sinkId }, send)
+						.pipe(Effect.ignore);
+					if (!retireAccountId || assignment._tag !== "Dispatched") return;
+					const native = yield* this.runner.getNativeSessionEffect?.(
+						send.sessionId,
+					) ?? Effect.succeed(undefined);
+					const current = send.assignment;
+					if (
+						current._tag !== "Dispatched" ||
+						current.runnerId !== assignment.runnerId ||
+						native?.instanceId !== retireAccountId
+					)
+						return;
+					// Intake can already have replied while this account's SDK query runs.
+					yield* this.runner
+						.executeEffect({
+							type: "end-session",
+							sessionId: send.sessionId,
+							control: {
+								commandId: randomUUID(),
+								providerProcessId: assignment.runnerId,
+							},
+						})
+						.pipe(Effect.ignore);
+				}),
 				startImmediately,
 			)
 			.pipe(Effect.asVoid);
@@ -637,6 +679,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 
 	sendTurnEffect(
 		input: ResolvedSendTurnInput,
+		prepareCall?: Effect.Effect<
+			ProviderCall | undefined,
+			ProviderInstanceFailure
+		>,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		const sinkId = runnerSinkId(
 			input.inputId,
@@ -651,11 +697,15 @@ export class RunnerProviderInstance implements ProviderInstance {
 							input.account,
 							input.sessionId,
 							(account) =>
-								this.sendTurnUnscopedEffect({ ...input, account }, send),
+								this.sendTurnUnscopedEffect(
+									{ ...input, account },
+									send,
+									prepareCall,
+								),
 							sinkId,
 							send,
 						)
-					: this.sendTurnUnscopedEffect(input, send),
+					: this.sendTurnUnscopedEffect(input, send, prepareCall),
 		).pipe(
 			Effect.flatMap((result) =>
 				Option.isSome(result)
@@ -895,7 +945,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 							Effect.onInterrupt(() =>
 								this.detachingInteractions
 									? Effect.void
-									: this.abortSendEffect(ownedScope, true),
+									: this.abortSendEffect(ownedScope, true, admitted.id),
 							),
 							Effect.onExit((exit) =>
 								Exit.isFailure(exit)
@@ -1003,6 +1053,10 @@ export class RunnerProviderInstance implements ProviderInstance {
 	private sendTurnUnscopedEffect(
 		input: ResolvedSendTurnInput,
 		scope: SendScope,
+		prepareCall?: Effect.Effect<
+			ProviderCall | undefined,
+			ProviderInstanceFailure
+		>,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		const {
 			eventSink,
@@ -1017,7 +1071,16 @@ export class RunnerProviderInstance implements ProviderInstance {
 			input.nativeResumeFallback,
 		);
 		const send = Effect.gen({ self: this }, function* () {
-			const prepared = yield* this.driver.prepareTurnEffect(payload);
+			const call =
+				payload.shellEnv === undefined
+					? yield* prepareCall ?? Effect.succeed(undefined)
+					: undefined;
+			const prepared = yield* this.driver.prepareTurnEffect({
+				...payload,
+				...(call
+					? { shellEnv: call.shellEnv, shellConfig: call.shellConfig }
+					: {}),
+			});
 			if (scope.assignment._tag === "Closed") return yield* Effect.interrupt;
 			yield* this.bindSinkEffect(
 				scope,
@@ -1073,6 +1136,17 @@ export class RunnerProviderInstance implements ProviderInstance {
 		return (
 			this.runner.withTurnEffect?.(payload, sinkId, send, scope) ?? send
 		).pipe(
+			Effect.catchIf(
+				(failure) => failure.code === "cancelled",
+				() =>
+					Effect.succeed({
+						status: "cancelled" as const,
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						providerStateUpdates: [],
+					}),
+			),
 			Effect.mapError((cause) =>
 				cause instanceof ProviderInstanceFailure
 					? cause

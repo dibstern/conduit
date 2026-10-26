@@ -177,9 +177,9 @@ it.each([
 		if (!restart)
 			expect(drafts).toContainEqual({
 				_tag: "draft",
-				attachments: [],
 				text: restoredText,
 				restored: text,
+				attachments: [],
 			});
 		observations["refusedAfterMs"] = Date.now() - sentAt;
 		expect(observations["refusedAfterMs"]).toBeGreaterThanOrEqual(900);

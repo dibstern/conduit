@@ -16,6 +16,7 @@ import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persisten
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import type { SessionWorkspaceChangedPayload } from "../../../src/lib/persistence/events.js";
 import worktreePlugin from "../../../src/lib/provider/opencode-worktree-plugin.js";
+import type { SessionGit } from "../../../src/lib/shared-types.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { resolveRealOpenCode } from "../../helpers/real-opencode.js";
 
@@ -276,6 +277,15 @@ describe("OpenCode declared worktree moves", () => {
 		expect(result).toContain(worktree);
 		expect(result).toContain("moved");
 		evidence["toolResult"] = result;
+		await browser.waitFor((frame) => {
+			const git = frame["git"] as SessionGit | undefined;
+			return (
+				frame["type"] === "session_row" &&
+				frame["id"] === sessionId &&
+				git?.branch === "feature/worktree" &&
+				git.worktree === "linked-worktree"
+			);
+		});
 		const { sessions } = await sendRpcRequest(socket, {
 			_tag: "ListDaemonSessions",
 		});

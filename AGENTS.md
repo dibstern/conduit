@@ -206,6 +206,15 @@ Skip validation for low-risk changes and say so plainly.
 Use the cheapest useful check for risky changes.
 Do not run full test suites or full builds unless risk justifies it or the user asks.
 
+## Review Rounds
+
+Three review rounds in a row with material findings mean the design is wrong, not the code.
+
+- A round is one review of a ticket's diff (Codex, Claude or human) followed by its fixes. Material means a correctness, contract or regression finding (P1 or P2); nits, style and wording do not count. A round that finds nothing material resets the count.
+- Log every round on the ticket's bead: `bd update <id> --append-notes "review round N: K material findings (<one-line summary>)"`. The count lives there, so it survives compaction and new sessions.
+- After the third consecutive round with material findings, stop. Do not start a fourth fix round. Write up the pattern behind the findings (which state, owner or seam keeps producing them), propose redesign options, and ask the user. The count restarts after the redesign is approved.
+- A fix round that corrects the agent's own wrong instruction, not a review finding, is not a round.
+
 ## Subagents
 
 Use subagents only when they save context, save time, or materially improve output quality.

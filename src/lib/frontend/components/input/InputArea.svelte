@@ -13,6 +13,7 @@
 	import { refreshInputDraftAttachments } from "../../stores/input-draft.js";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
 	import HarnessLogo from "../model/HarnessLogo.svelte";
 	import Menu from "../ui/Menu.svelte";
@@ -1200,10 +1201,13 @@
 
 {#snippet phoneMore(rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>, checkout?: Snippet, warning?: Snippet, attention = false)}
 	{#snippet phoneTrigger({ props }: { props: Record<string, unknown> })}{@render trigger({ props, attention })}{/snippet}
-	<Popover bind:open={composerMoreOpen} presentation="auto" title="Composer" side="top" trigger={phoneTrigger} data-testid="composer-more-sheet" class="px-[16px]">
-		{@render rows()}
-		<PermissionModeSelector variant="row" />
-		{@render checkout?.()}
+	<!-- Focus the sheet on open; Tab gives a row its keyboard-only focus ring. -->
+	<Popover bind:open={composerMoreOpen} presentation="auto" initialFocus="content" title="Composer" side="top" trigger={phoneTrigger} data-testid="composer-more-sheet" class="px-[16px]">
+		<div class="divide-y divide-border-subtle">
+			{@render rows()}
+			<PermissionModeSelector variant="row" />
+			{@render checkout?.()}
+		</div>
 		{@render warning?.()}
 	</Popover>
 {/snippet}
@@ -1249,7 +1253,7 @@
 	class="shrink-0 px-[32px] pt-[8px] transition-[padding-bottom] duration-0 delay-250 has-[textarea:focus]:delay-0 pb-[calc(env(safe-area-inset-bottom,0px)+22px)] has-[textarea:focus]:pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
 	<div id="input-wrapper" bind:this={composerWrapperEl} bind:clientWidth={sessionViewState.composerWidth} class="max-w-[760px] mx-auto relative">
-		<!-- The listbox shares the composer's measured edges, including phone gutters. -->
+		<!-- The compact command panel stays within the composer's phone gutters. -->
 		{#if commandMenuVisible}
 			<div id="command-menu-wrap" class="relative w-full">
 				<CommandMenu
@@ -1278,7 +1282,7 @@
 
 		{#if goal.phase === "checking"}
 			<div data-testid="composer-checking-goal" class="flex items-center gap-[7px] px-[16px] pb-[9px] text-[12.5px] text-status-goal">
-				<Icon name="loader-circle" size={13} class="animate-spin" /><b class="font-semibold">Checking goal</b><span class="min-w-0 truncate text-text-muted">· {goalFacts?.goal?.condition}</span>
+				<ConduitMark size={13} variant="running" tone="goal" /><b class="font-semibold">Checking goal</b><span class="min-w-0 truncate text-text-muted">· {goalFacts?.goal?.condition}</span>
 			</div>
 		{/if}
 		{#if isGoalCommand}

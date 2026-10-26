@@ -56,6 +56,8 @@ export const runnerProcessTable: RunnerProcessTable = {
 				["-o", "lstart=", "-o", "stat=", "-p", String(pid)],
 				{
 					encoding: "utf8",
+					// lstart is persisted and compared across daemon environments.
+					env: { ...process.env, LC_ALL: "C" },
 					stdio: ["ignore", "pipe", "ignore"],
 					timeout: 1000,
 				},

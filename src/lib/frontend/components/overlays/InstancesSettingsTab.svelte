@@ -9,6 +9,7 @@
 	import Badge from "../ui/Badge.svelte";
 	import HarnessLogo from "../model/HarnessLogo.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
@@ -281,7 +282,7 @@
 		disabled={scanInFlight}
 		onclick={handleScanNow}
 	>
-		<Icon name="refresh-cw" size={12} class={scanInFlight ? "animate-spin" : ""} />
+		{#if scanInFlight}<ConduitMark size={12} variant="running" tone="inherit" />{:else}<Icon name="refresh-cw" size={12} />{/if}
 		{scanInFlight ? "Scanning..." : "Scan"}
 	</Button>
 	<Button touchTarget
@@ -480,7 +481,7 @@
 						<Disclosure expanded={state.expandedScenario === "ccs"} onToggle={() => toggleScenario("ccs")} chevron={false} look="section" density="list">
 							<Icon name={state.expandedScenario === "ccs" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 							<span>CCS</span>
-							{#if ccsDetected}<Icon name="circle-check" size={14} class="text-success ml-auto shrink-0" />{:else if proxyResult === null}<span class="text-xs text-text-muted animate-pulse ml-auto">detecting...</span>{/if}
+							{#if ccsDetected}<Icon name="circle-check" size={14} class="text-success ml-auto shrink-0" />{:else if proxyResult === null}<span class="ml-auto flex items-center gap-1.5 text-xs text-text-muted"><ConduitMark size={12} variant="running" />detecting...</span>{/if}
 						</Disclosure>
 						{#if state.expandedScenario === "ccs"}
 							<div class="p-[8px] flex flex-col gap-[6px] border-t border-settings-separator">

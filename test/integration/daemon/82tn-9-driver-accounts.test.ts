@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, expect, it, vi } from "vitest";
@@ -51,6 +57,9 @@ afterEach(async ({ task }) => {
 	const fixture = harness;
 	try {
 		evidence["observations"] = rows();
+		evidence["ambientMiseInvoked"] = existsSync(
+			join(fixture.root, "ambient-mise-invoked"),
+		);
 		await fixture.dispose();
 		const cleanup = fixture.proof();
 		evidence["cleanup"] = {
@@ -91,6 +100,17 @@ it("proves daemon driver ownership, account isolation, launch context and contin
 		managedOpenCodeStopGraceMs: 100,
 	});
 	const fixture = harness;
+	// Keep global startup files from reordering the inherited tool PATH.
+	appendFileSync(
+		join(fixture.root, "home", ".zshenv"),
+		"unsetopt GLOBAL_RCS\n",
+	);
+	// Ambient tool failures must not replace the profile proof with fallback env.
+	writeFileSync(
+		join(fixture.root, "bin", "mise"),
+		`#!/bin/sh\n: > "\${0%/*}/../ambient-mise-invoked"\nexit 91\n`,
+		{ mode: 0o755 },
+	);
 	writeFileSync(join(fixture.root, "daemon-adapters-proof"), "");
 	const projectB = join(fixture.root, "project-b");
 	const extraA = join(fixture.root, "extra-a");
@@ -316,6 +336,7 @@ it("proves daemon driver ownership, account isolation, launch context and contin
 				},
 			},
 		});
+	expect(existsSync(join(fixture.root, "ambient-mise-invoked"))).toBe(false);
 	const openCodePids = () =>
 		Object.fromEntries(
 			(JSON.parse(readFileSync(configPath, "utf8")) as DaemonConfig).instances

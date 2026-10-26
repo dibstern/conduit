@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { DropdownMenu, type DropdownMenuCheckboxItemProps } from "bits-ui";
 	import Icon from "./Icon.svelte";
+	import ConduitMark from "./ConduitMark.svelte";
 	import Switch from "./Switch.svelte";
 
 	let {
@@ -41,6 +42,6 @@
 		{label}
 		<span data-switch-status class="mt-[2px] block min-h-[18.75px] text-[12.5px] font-normal text-text-muted">{#if showState}<b class="font-semibold {checked ? 'text-success' : 'text-text-secondary'}">{checked ? "On" : "Off"}</b>{/if}{#if description}{showState ? ` · ${description}` : description}{/if}</span>
 	</span>
-	{#if saving}<span aria-hidden="true" class="size-[16px] shrink-0 animate-spin rounded-full border-2 border-border-chip border-t-accent [animation-duration:800ms]"></span>{/if}
+	{#if saving}<ConduitMark size={16} variant="running" />{/if}
 	<Switch {checked} size="lg" pending={saving} />
 </DropdownMenu.CheckboxItem>

@@ -68,14 +68,19 @@
 		appearance: none;
 		width: 16px;
 		height: 16px;
-		border: 1px solid var(--color-border-chip);
+		--checkbox-ink: var(--color-control-border);
+		border: 1px solid var(--checkbox-ink);
 		border-radius: 4px;
 		background: transparent;
+	}
+	.settings-checkbox:enabled:hover,
+	:global(label:hover) .settings-checkbox:enabled {
+		--checkbox-ink: var(--color-control-border-hover);
 	}
 	/* Preserve the fractional outline below the shared keyboard focus utilities. */
 	@layer components {
 		.settings-checkbox:not(:checked) {
-			box-shadow: inset 0 0 0 0.5px var(--color-border-chip);
+			box-shadow: inset 0 0 0 0.5px var(--checkbox-ink);
 		}
 	}
 	.settings-checkbox:checked {

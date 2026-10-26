@@ -356,7 +356,16 @@ describe("Project provenance through the built daemon", () => {
 				slug,
 				sessionId,
 				sessions,
-				history: await browser.history(sessionId),
+				// Schema 44 predates per-turn effort/context storage (30340031).
+				history: (await browser.history(sessionId)).map((message) => {
+					if (!message.modelExecution) return message;
+					const {
+						contextWindow: _contextWindow,
+						effort: _effort,
+						...modelExecution
+					} = message.modelExecution;
+					return { ...message, modelExecution };
+				}),
 			});
 		}
 		await fixture.terminate();

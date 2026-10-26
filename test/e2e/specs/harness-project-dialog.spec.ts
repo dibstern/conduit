@@ -77,6 +77,15 @@ test("reports provider folder and worktree capabilities through instance info", 
 			},
 		},
 		{
+			provider: "codex",
+			capabilities: {
+				supportsMultiFolder: false,
+				supportsWorktree: false,
+				supportsNewWorktree: false,
+				supportsTaskStop: false,
+			},
+		},
+		{
 			provider: "cursor",
 			capabilities: {
 				supportsMultiFolder: true,
@@ -302,7 +311,11 @@ test("adds with the keyboard alone and cancels without creating a folder", async
 	await page.screenshot({
 		path: testInfo.outputPath("keyboard-project-dialog.png"),
 	});
-	await page.keyboard.press("Control+Enter");
+	await tabTo(
+		page,
+		dialog.getByRole("button", { name: "Add project", exact: true }),
+	);
+	await page.keyboard.press("Enter");
 	await expect(dialog).toBeHidden();
 	await expect(page.getByTestId("session-scope-chip")).toHaveText(
 		"keyboard-app",
@@ -505,9 +518,9 @@ test("FindFolders suggests recent and sibling folders for text and matches paths
 		Effect.runPromise(browser.rpc.FindFolders({ query }));
 	const all = await find("");
 	expect(all.entries).toEqual([
+		{ path: both, isGitRepo: true, reason: "recent", exists: true },
 		{ path: recentRepo, isGitRepo: true, reason: "recent", exists: true },
 		{ path: recentPlain, isGitRepo: false, reason: "recent", exists: true },
-		{ path: both, isGitRepo: true, reason: "recent", exists: true },
 		{ path: sibling, isGitRepo: true, reason: "sibling", exists: true },
 	]);
 	const alpha = await find("ALPHA");

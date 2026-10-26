@@ -491,6 +491,9 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const sockets = new Set<Socket>();
 		const held: string[] = [];
 		const wire: Array<{ direction: string; message: RunnerMessage }> = [];
+		let cachedJournalAnswer:
+			| NonNullable<RunnerHello["sendAnswers"]>[number]
+			| undefined;
 		let cachedReceived: (socket: Socket) => void = () => {};
 		const cachedReady = new Promise<Socket>((resolve) => {
 			cachedReceived = resolve;
@@ -536,12 +539,21 @@ describe("Claude runners survive server replacement through built dist", () => {
 					outgoing = outgoing.slice(boundary + 1);
 					const message = JSON.parse(line) as RunnerMessage;
 					wire.push({ direction: "runner-to-server", message });
+					if (message.type === "hello")
+						cachedJournalAnswer = message.sendAnswers?.find(
+							(answer) =>
+								answer.commandId === command.command_id &&
+								answer.attempt === command.attempt_count &&
+								answer.status === "finished" &&
+								answer.result?.status === "accepted",
+						);
 					if (message.type === "hello" || released) client.write(`${line}\n`);
 					else held.push(`${line}\n`);
 					if (
-						message.type === "command-reply" &&
-						message.commandId === command.command_id &&
-						message.result?.status === "accepted"
+						cachedJournalAnswer &&
+						message.type === "output" &&
+						message.output.type === "event" &&
+						message.output.event.type === "turn.interrupted"
 					)
 						cachedReceived(client);
 				}
@@ -695,14 +707,23 @@ describe("Claude runners survive server replacement through built dist", () => {
 					message.output.type === "event" &&
 					message.output.event.type === "turn.interrupted",
 			);
-			const intakeReplyIndex = burst.findIndex(
-				(message) =>
-					message.type === "command-reply" &&
-					message.commandId === command.command_id &&
-					message.result?.status === "accepted",
-			);
 			expect(terminalIndex).toBeGreaterThanOrEqual(0);
-			expect(intakeReplyIndex).toBeGreaterThan(terminalIndex);
+			// SEND-SCOPE-6 S10.1: the journal answers in hello without a send replay.
+			expect(cachedJournalAnswer).toMatchObject({
+				commandId: command.command_id,
+				attempt: command.attempt_count,
+				nativeResumeFallback: false,
+				status: "finished",
+				result: { status: "accepted" },
+			});
+			expect(
+				wire.filter(
+					({ direction, message }) =>
+						direction === "server-to-runner" &&
+						message.type === "command" &&
+						message.command.type === "send-turn",
+				),
+			).toEqual([]);
 			expect(
 				harness.marks.filter((mark) => mark.kind === "runner-started").at(-1),
 			).toMatchObject({ pid: runner.pid, socketPath: runner.socketPath });
@@ -788,6 +809,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 				runner,
 				directHello,
 				cachedIntake,
+				cachedJournalAnswer,
 				burst,
 				retries,
 				blockedState,

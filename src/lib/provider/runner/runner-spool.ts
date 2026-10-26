@@ -48,8 +48,29 @@ export class RunnerSpool {
 				resume(Effect.void);
 				return;
 			}
-			const complete = () => resume(Effect.void);
+			const complete = () => {
+				if (this.retained.size > 0) return;
+				this.drainWaiters.delete(complete);
+				resume(Effect.void);
+			};
 			this.drainWaiters.add(complete);
+			return Effect.sync(() => {
+				this.drainWaiters.delete(complete);
+			});
+		});
+	}
+
+	/** Fence output already allocated now; subsequent background output cannot extend it. */
+	drainThroughEffect(throughSequence = this.sequence): Effect.Effect<void> {
+		return Effect.callback<void>((resume) => {
+			const complete = () => {
+				const first = this.retained.keys().next();
+				if (!first.done && first.value <= throughSequence) return;
+				this.drainWaiters.delete(complete);
+				resume(Effect.void);
+			};
+			this.drainWaiters.add(complete);
+			complete();
 			return Effect.sync(() => {
 				this.drainWaiters.delete(complete);
 			});
@@ -159,10 +180,7 @@ export class RunnerSpool {
 			if (this.spooled && retainedSequence <= this.spooledThroughSequence)
 				this.acknowledgedBytes += Buffer.byteLength(JSON.stringify(frame)) + 1;
 		}
-		if (this.retained.size === 0) {
-			for (const complete of this.drainWaiters) complete();
-			this.drainWaiters.clear();
-		}
+		for (const complete of [...this.drainWaiters]) complete();
 		// Reclaim at least half the file per rewrite, keeping replay compaction
 		// linear in backlog size. A complete ack always leaves an empty file.
 		if (

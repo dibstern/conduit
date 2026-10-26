@@ -64,13 +64,25 @@ export const worktreeCleanupSettingsHandlers: StepHandler[] = [
 		name: "clear the current cleanup project",
 		match: /^cleanup settings have no current project$/,
 		run: async ({ world }) => {
+			// Let the initial shell settle before removing its project from the mounted app.
+			await expect(
+				world.page.locator('[data-session-id="sess-mockup-001"]').first(),
+			).toBeVisible();
+			await world.page.evaluate(
+				() =>
+					new Promise<void>((resolve) =>
+						requestAnimationFrame(() => resolve()),
+					),
+			);
 			const rpc = requireRpcControl(world.page);
 			rpc.setStubs({
 				GetProjects: () => ({ projects: [] }),
 				AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
 			});
 			rpc.setProjects({ projects: [] });
-			await world.page.goto(new URL("/", world.page.url()).toString());
+			await expect(world.page.getByTestId("project-tree-header")).toHaveCount(
+				0,
+			);
 			await expect(world.page.locator("#layout")).toBeVisible();
 		},
 	},

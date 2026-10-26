@@ -81,11 +81,13 @@ export const makeFailTurn = Effect.gen(function* () {
 		{
 			beforeCommit,
 			beforeProject,
+			requeueFailedInputs,
 			settleSession = true,
 			retryable = false,
 		}: {
 			beforeCommit?: Effect.Effect<void, SqlError>;
 			beforeProject?: Effect.Effect<void, SqlError>;
+			requeueFailedInputs?: false;
 			settleSession?: boolean;
 			retryable?: boolean;
 		} = {},
@@ -148,8 +150,9 @@ export const makeFailTurn = Effect.gen(function* () {
 				effectiveRunId ? { ...event, runId: effectiveRunId } : event,
 			);
 			return yield* (
-				beforeCommit || beforeProject
+				beforeCommit || beforeProject || requeueFailedInputs === false
 					? ingestion.ingestBatch(ownedEvents, {
+							...(requeueFailedInputs === false ? { requeueFailedInputs } : {}),
 							...(beforeCommit ? { beforeCommit } : {}),
 							...(beforeProject ? { beforeProject } : {}),
 						})

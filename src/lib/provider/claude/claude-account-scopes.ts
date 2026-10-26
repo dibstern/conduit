@@ -10,6 +10,7 @@ import {
 import { ClaudeBoundaryError } from "../event-sink-errors.js";
 import {
 	type ClaudeCapabilitiesService,
+	type ClaudeCapabilitiesServiceDeps,
 	makeClaudeCapabilitiesService,
 } from "./claude-capabilities-service.js";
 
@@ -36,6 +37,7 @@ export const makeClaudeAccountScopes = (deps: {
 	readonly trustAdmission?: true;
 	readonly cacheDir?: string;
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
+	readonly queryFactory?: ClaudeCapabilitiesServiceDeps["queryFactory"];
 	readonly openCapabilities?: (
 		accountId: string,
 	) => Effect.Effect<
@@ -55,6 +57,7 @@ export const makeClaudeAccountScopes = (deps: {
 				Effect.gen(function* () {
 					const scope = yield* Effect.scope;
 					return yield* makeClaudeCapabilitiesService({
+						...(deps.queryFactory ? { queryFactory: deps.queryFactory } : {}),
 						...(deps.cacheDir !== undefined ? { cacheDir: deps.cacheDir } : {}),
 						launchConfig: () => {
 							throw new ClaudeBoundaryError({

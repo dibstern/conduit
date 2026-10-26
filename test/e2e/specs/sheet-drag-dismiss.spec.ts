@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
-import { dragSheet } from "../helpers/sheet-drag.js";
+import { dragSheet, settleSheet } from "../helpers/sheet-drag.js";
 
 test.use({
 	recording: "chat-simple",
@@ -62,6 +62,7 @@ test("phone: dragging a scrolled sheet body scrolls without dismissing", async (
 	await body.evaluate((node) => {
 		node.scrollTop = 40;
 	});
+	await settleSheet(page);
 	const top = (await sheet.boundingBox())?.y;
 	await dragSheet(page, body, -30, true, -30);
 	await expect(sheet).toBeVisible();

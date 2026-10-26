@@ -124,6 +124,8 @@ export interface CommitAndSignalOptions {
 	/** Required when appending before the session has an owner row. */
 	readonly projectId?: string;
 	readonly publish?: boolean;
+	/** The caller publishes failed inputs separately and owns their retry. */
+	readonly requeueFailedInputs?: false;
 	readonly endedRunEvents?: Set<string>;
 	/** Runs after projection, inside the append transaction, before COMMIT. */
 	readonly beforeCommit?: Effect.Effect<void, SqlError>;
@@ -525,19 +527,20 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 								).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 								yield* options.beforeCommit ?? Effect.void;
 								// Returning an unplaced failed steer belongs to its durable
-								// terminal fact, whichever writer settled the command first.
-								yield* requeueFailedSteers(
-									sql,
-									{
-										persistEvents: (events) =>
-											eventStore
-												.appendBatch(events, options.projectId)
-												.pipe(Effect.flatMap(project)),
-									},
-									undefined,
-									undefined,
-									eventStore.projectId ?? options.projectId,
-								);
+								// terminal fact unless its caller owns independent publication.
+								if (options.requeueFailedInputs !== false)
+									yield* requeueFailedSteers(
+										sql,
+										{
+											persistEvents: (events) =>
+												eventStore
+													.appendBatch(events, options.projectId)
+													.pipe(Effect.flatMap(project)),
+										},
+										undefined,
+										undefined,
+										eventStore.projectId ?? options.projectId,
+									);
 								flushedWrites = yield* applyPendingWrites(sql);
 								// Pending writes can suspend: authorize only after the last one.
 								yield* authority?.check ?? Effect.void;

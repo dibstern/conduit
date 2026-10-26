@@ -469,6 +469,9 @@ if (stories.length > 0) {
 		["ui-menu-in-modal--keyboard-and-pointer-selection", "all"],
 		["fixtures-modalfocus--default", "all"],
 		["ui-modal--escape-restores-focus", "all"],
+		// Behaviour-only: desktop keyboard browsing, asserted by play(). It ends on
+		// the same frame as ghost-completion-and-crumb-navigation.
+		["project-projectdialog--browse-keyboard-navigation", "all"],
 		["model-agentselector--single-agent", "all"],
 		["model-agentselector--no-agents", "all"],
 		["chat-pastepreview--empty", "all"],

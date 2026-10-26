@@ -1,4 +1,4 @@
-import { Effect, Result, Schema } from "effect";
+import { Effect, Result, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import { accountsStateFromConfig, resolve } from "../../account-directory.js";
 import { AccountSchema } from "../../contracts/account.js";
@@ -45,7 +45,10 @@ import {
 	type RunnerSocket,
 	runnerFailure,
 } from "./runner-protocol.js";
-import type { RunnerProviderInstanceDeps } from "./runner-provider-instance.js";
+import type {
+	RunnerDriverPieces,
+	RunnerProviderInstanceDeps,
+} from "./runner-provider-instance.js";
 import { runningRunnerCommands } from "./runner-recovery.js";
 import type {
 	DurableSessionTurn,
@@ -164,6 +167,11 @@ export type RunningRunnerCommand = Effect.Success<
 	ReturnType<typeof runningRunnerCommands>
 >[number];
 
+export interface LegacyReplayOutcome {
+	readonly result: TurnResult | undefined;
+	readonly nativeResumeFallback: boolean;
+}
+
 /** Main's replay is the owner until its one reply passes common settlement. */
 export const recoverLegacyRunnerCommands = (options: {
 	readonly sql: SqlClient.SqlClient;
@@ -173,13 +181,10 @@ export const recoverLegacyRunnerCommands = (options: {
 	readonly ownsPendingSend: (row: RunningRunnerCommand) => boolean;
 	readonly retain: (commandId: string, attempt: number) => void;
 	readonly ready: Effect.Effect<void, SessionFailure>;
-	readonly replay: (row: RunningRunnerCommand) => Effect.Effect<
-		{
-			readonly result: TurnResult | undefined;
-			readonly nativeResumeFallback: boolean;
-		},
-		SessionFailure
-	>;
+	readonly replay: (
+		row: RunningRunnerCommand,
+		replayLock: Semaphore.Semaphore,
+	) => Effect.Effect<LegacyReplayOutcome, SessionFailure>;
 	readonly settle: (
 		answer: Extract<RunnerSendAnswer, { readonly status: "finished" }>,
 	) => Effect.Effect<void, SessionFailure>;
@@ -189,6 +194,7 @@ export const recoverLegacyRunnerCommands = (options: {
 	readonly runFork: (effect: Effect.Effect<void>) => unknown;
 }): Effect.Effect<void, SessionFailure> =>
 	Effect.gen(function* () {
+		const replayLock = yield* Semaphore.make(1);
 		const accounts = yield* options.accounts ?? Effect.succeed(undefined);
 		const rows = yield* runningRunnerCommands(
 			options.sql,
@@ -215,7 +221,7 @@ export const recoverLegacyRunnerCommands = (options: {
 				// only once the attachment has finished its recovery transition.
 				yield* options.ready;
 				if (options.closing()) return;
-				const outcome = yield* Effect.result(options.replay(row));
+				const outcome = yield* Effect.result(options.replay(row, replayLock));
 				if (options.closing()) return;
 				yield* options.settle({
 					commandId: row.command_id,
@@ -262,18 +268,20 @@ export const replayLegacyRunnerSend = (options: {
 	readonly row: RunningRunnerCommand;
 	readonly driverKind: string;
 	readonly connection: RunnerSocket;
+	readonly replayLock: Semaphore.Semaphore;
+	readonly prepareTurnEffect?: RunnerDriverPieces["prepareTurnEffect"];
+	readonly admitReplay: (
+		input: DurableSessionTurn,
+		sinkId: string,
+		replay: Effect.Effect<LegacyReplayOutcome, SessionFailure>,
+		journaled?: boolean,
+	) => Effect.Effect<LegacyReplayOutcome, SessionFailure>;
 	readonly deps: {
 		readonly accounts?: RunnerProviderInstanceDeps["accounts"];
 		readonly autoSettleAfterDays?: RunnerProviderInstanceDeps["autoSettleAfterDays"];
 		readonly recoveryForSession?: RunnerProviderInstanceDeps["recoveryForSession"];
 		readonly sessionForkSdk?: ClaudeSessionRunnerDeps["sessionForkSdk"];
 		readonly claudeSettingsOverrides?: ClaudeSessionRunnerDeps["claudeSettingsOverrides"];
-		readonly replayCommandFields?: (
-			accountId: string,
-		) => Effect.Effect<
-			Partial<Extract<SessionCommand, { type: "send-turn" }>>,
-			SessionFailure
-		>;
 	};
 	readonly liveSession: Effect.Effect<ProviderNativeSession | undefined>;
 	readonly resolveSinkId: (
@@ -288,24 +296,9 @@ export const replayLegacyRunnerSend = (options: {
 		attempt: number,
 	) => Effect.Effect<TurnResult | undefined, SessionFailure>;
 	readonly closing: () => boolean;
-}): Effect.Effect<
-	{
-		readonly result: TurnResult | undefined;
-		readonly nativeResumeFallback: boolean;
-	},
-	SessionFailure
-> =>
+}): Effect.Effect<LegacyReplayOutcome, SessionFailure> =>
 	Effect.gen(function* () {
 		const { row, deps, driverKind } = options;
-		const accounts = yield* deps.accounts ??
-			Effect.sync(() =>
-				accountsStateFromConfig(
-					defaultDaemonConfig(),
-					captureClaudeLaunchLogin(process.env),
-				),
-			);
-		const accountForId = (id: string) =>
-			Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }));
 		const payload = yield* Schema.decodeUnknownEffect(
 			Schema.fromJsonString(LegacyTurn),
 		)(row.payload_json);
@@ -322,8 +315,7 @@ export const replayLegacyRunnerSend = (options: {
 				operation: "decodeRunnerTurn",
 				message: "Runner turn input id is required",
 			});
-		const account = accountForId(payload.account?.id ?? row.provider_id);
-		let input: DurableSessionTurn = {
+		const input: DurableSessionTurn = {
 			...turn,
 			sessionId: payload.sessionId ?? row.session_id,
 			inputId,
@@ -353,194 +345,267 @@ export const replayLegacyRunnerSend = (options: {
 				: {}),
 			...(row.run_id ? { runId: row.run_id } : {}),
 			commandAttempt: row.attempt_count,
-			...(driverKind === "claude" && account
-				? {
-						account: payload.account
-							? { ...payload.account, env: account.env }
-							: account,
-					}
-				: {}),
 		};
-		const state = yield* makeProviderStateEffect.pipe(
-			Effect.provideService(PersistenceProjectTag, {
-				projectId: row.project_key,
-			}),
+		const sinkId = options.resolveSinkId(
+			row.command_id,
+			input.inputId,
+			row.attempt_count,
+			input.nativeResumeFallback,
 		);
 		switch (driverKind) {
 			case "claude":
 				break;
-			default: {
-				const stored = yield* state.getState(row.session_id);
-				const key = `${driverKind}.forkDigest`;
-				input = {
-					...input,
-					providerState: {
-						...input.providerState,
-						...(stored[key] !== undefined &&
-						typeof input.providerState[key] !== "string"
-							? { [key]: stored[key] }
-							: {}),
-					},
-				};
-			}
+			default:
+				if (
+					options.connection.retainedSends?.some(
+						(send) =>
+							send.commandId === row.command_id &&
+							send.attempt === row.attempt_count,
+					)
+				) {
+					// The unchanged key makes main's journal answer without running this payload.
+					// No credentials, attachment bytes or provider preparation are needed.
+					const { images: _images, ...turn } = input;
+					return yield* options.admitReplay(
+						input,
+						sinkId,
+						options.connection
+							.commandEffect(
+								row.command_id,
+								{ type: "send-turn", sinkId, aborted: false, input: turn },
+								row.attempt_count,
+							)
+							.pipe(
+								Effect.map((result) => ({
+									result,
+									nativeResumeFallback: input.nativeResumeFallback === true,
+								})),
+							),
+						true,
+					);
+				}
 		}
-		const attachments = yield* makeAttachmentStore;
-		const resolved = yield* resolveTurnImages(input, attachments).pipe(
-			Effect.mapError(
-				(cause): SessionFailure => ({
-					operation: "resolveTurnImages",
-					message: cause.message,
-					...(cause._tag === "AttachmentMissing"
-						? { code: "attachment_missing", retryable: false }
-						: {}),
-				}),
-			),
-		);
-		const autoSettleAfterDays =
-			input.autoSettleAfterDays !== undefined
-				? input.autoSettleAfterDays
-				: yield* deps.autoSettleAfterDays ?? Effect.succeed(undefined);
-		let nativeResumeFallback = input.nativeResumeFallback === true;
-		switch (driverKind) {
-			case "claude":
-				break;
-			default: {
-				const fields = deps.replayCommandFields
-					? yield* deps.replayCommandFields(row.provider_id)
-					: {};
-				const result = yield* options.send(
-					row.command_id,
-					{
-						...fields,
-						type: "send-turn",
-						sinkId: options.resolveSinkId(
-							row.command_id,
-							input.inputId,
-							row.attempt_count,
-							input.nativeResumeFallback,
+		const admittedInput = input;
+		return yield* options.admitReplay(
+			input,
+			sinkId,
+			Effect.gen(function* () {
+				const accounts = yield* deps.accounts ??
+					Effect.sync(() =>
+						accountsStateFromConfig(
+							defaultDaemonConfig(),
+							captureClaudeLaunchLogin(process.env),
 						),
-						aborted: false,
-						autoSettleAfterDays,
-						input: resolved,
+					);
+				const account = Result.getOrUndefined(
+					resolve(accounts, {
+						_tag: "Id",
+						id: admittedInput.account?.id ?? row.provider_id,
+					}),
+				);
+				const input =
+					driverKind === "claude" && account
+						? {
+								...admittedInput,
+								account: admittedInput.account
+									? { ...admittedInput.account, env: account.env }
+									: account,
+							}
+						: admittedInput;
+				const state = yield* makeProviderStateEffect.pipe(
+					Effect.provideService(PersistenceProjectTag, {
+						projectId: row.project_key,
+					}),
+				);
+				const attachments = yield* makeAttachmentStore;
+				const resolved = yield* resolveTurnImages(input, attachments).pipe(
+					Effect.mapError(
+						(cause): SessionFailure => ({
+							operation: "resolveTurnImages",
+							message: cause.message,
+							...(cause._tag === "AttachmentMissing"
+								? { code: "attachment_missing", retryable: false }
+								: {}),
+						}),
+					),
+				);
+				const autoSettleAfterDays =
+					input.autoSettleAfterDays !== undefined
+						? input.autoSettleAfterDays
+						: yield* deps.autoSettleAfterDays ?? Effect.succeed(undefined);
+				let nativeResumeFallback = input.nativeResumeFallback === true;
+				switch (driverKind) {
+					case "claude":
+						break;
+					default: {
+						if (!account || account.driver !== driverKind)
+							return yield* Effect.fail({
+								operation: "prepare recovered turn",
+								message: `Account "${input.account?.id ?? row.provider_id}" is unavailable`,
+								code: "account_unavailable",
+								retryable: false,
+							});
+						if (!options.prepareTurnEffect)
+							return yield* Effect.fail({
+								operation: "prepare recovered turn",
+								message: `Recovery preparation is unavailable for ${driverKind}`,
+								retryable: false,
+							});
+						const prepared = yield* options
+							.prepareTurnEffect({
+								...resolved,
+								// Credentials are omitted from the outbox; keep the admitted identity.
+								account: input.account
+									? { ...input.account, env: account.env }
+									: account,
+								autoSettleAfterDays,
+							})
+							.pipe(
+								Effect.mapError((cause) =>
+									runnerFailure("prepare turn", cause),
+								),
+							);
+						const result = yield* options.send(
+							row.command_id,
+							{
+								type: "send-turn",
+								sinkId: options.resolveSinkId(
+									row.command_id,
+									input.inputId,
+									row.attempt_count,
+									input.nativeResumeFallback,
+								),
+								aborted: false,
+								autoSettleAfterDays,
+								...prepared,
+							},
+							row.attempt_count,
+						);
+						return { result, nativeResumeFallback };
+					}
+				}
+				const { images: _images, ...claudeTurn } = input;
+				const launch = yield* Effect.try(() =>
+					// Main selects the folder before filling or refreshing account credentials.
+					normalizeClaudeSessionTurn(
+						{ ...claudeTurn, account: payload.account },
+						() => claudeLaunchConfigFromAccounts(accounts),
+					),
+				);
+				const admittedAccountId =
+					input.account?.id ?? input.instanceId ?? row.provider_id;
+				let call: ProviderCall | undefined;
+				if (deps.recoveryForSession) {
+					const recovery = yield* deps.recoveryForSession(row.session_id);
+					if (!recovery)
+						return yield* Effect.fail({
+							operation: "recover turn",
+							message: `Project services unavailable for recovered session ${row.session_id}`,
+						});
+					const resolvedCall = yield* recovery.resolveCallContext({
+						sessionId: row.session_id,
+						...(input.account ? { account: input.account } : {}),
+						providerId: admittedAccountId,
+						workspaceRoot: input.workspaceRoot,
+						extraFolders: input.extraFolders,
+						prepareShellEnv: true,
+						requireRoutableAccount: true,
+					});
+					if (
+						resolvedCall?.account.id === admittedAccountId &&
+						resolvedCall.account.driver === "claude"
+					)
+						call = resolvedCall;
+					else
+						return yield* Effect.fail({
+							operation: "recover turn",
+							message: `Claude account "${admittedAccountId}" is unavailable for recovery`,
+						});
+				}
+				if (options.closing())
+					return { result: undefined, nativeResumeFallback };
+				const instanceId =
+					call?.account.id ?? input.instanceId ?? row.provider_id;
+				const shellEnv = call?.shellEnv ?? input.shellEnv ?? { ...process.env };
+				const read = yield* makeReadQueryEffect;
+				const result = yield* sendPreparedClaudeTurn({
+					sessionId: row.session_id,
+					instanceId,
+					commandId: row.command_id,
+					userText: input.prompt,
+					options: {
+						liveSession: yield* options.liveSession,
+						configDir: launch.configDir,
+						folderSource: launch.folderSource,
+						agent: input.agent,
+						userMessageId: input.continuation?.cutOffMessageId ?? input.inputId,
+						continuation: input.continuation,
+						nativeResumeFallback: input.nativeResumeFallback,
+						rewind: input.rewind,
+						sessionForkSdk: deps.sessionForkSdk,
+						workspaceRoot: input.workspaceRoot,
+						modelContextWindow:
+							input.contextWindow === "1m" ? 1000000 : undefined,
 					},
-					row.attempt_count,
+					send: (prepared, fallback) => {
+						nativeResumeFallback = fallback;
+						return options.send(
+							row.command_id,
+							{
+								type: "send-turn",
+								sinkId: options.resolveSinkId(
+									row.command_id,
+									input.inputId,
+									row.attempt_count,
+									fallback,
+								),
+								aborted: false,
+								autoSettleAfterDays,
+								shellEnv,
+								shellConfig: call?.shellConfig ?? input.shellConfig,
+								claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
+								input: {
+									...resolved,
+									...(call
+										? {
+												projectId: call.projectId,
+												account: call.account,
+												workspaceRoot: call.workspaceRoot,
+												extraFolders: call.extraFolders,
+												shellEnv: call.shellEnv,
+												shellConfig: call.shellConfig,
+											}
+										: {}),
+									instanceId,
+									prompt: prepared.prompt,
+									text: input.prompt,
+									configDir: prepared.configDir,
+									resumeSessionId: prepared.resumeSessionId,
+									resumeSessionAt: prepared.resumeSessionAt,
+									forkSession: prepared.forkSession,
+									clearInheritedGoal: prepared.clearInheritedGoal,
+									startFreshNativeSession:
+										prepared.resumeSessionId === undefined ||
+										input.rewind !== undefined,
+									nativeResumeFallback: fallback,
+									nativeThread: prepared.nativeThread,
+									...(prepared.handoff ? { handoff: prepared.handoff } : {}),
+								},
+							},
+							row.attempt_count,
+						);
+					},
+				}).pipe(
+					Effect.provideService(ProviderStateEffectTag, state),
+					Effect.provideService(ReadQueryEffectTag, read),
 				);
 				return { result, nativeResumeFallback };
-			}
-		}
-		const { images: _images, ...claudeTurn } = input;
-		const launch = yield* Effect.try(() =>
-			// Main selects the folder before filling or refreshing account credentials.
-			normalizeClaudeSessionTurn(
-				{ ...claudeTurn, account: payload.account },
-				() => claudeLaunchConfigFromAccounts(accounts),
+			}).pipe(
+				options.replayLock.withPermits(1),
+				Effect.provideService(SqlClient.SqlClient, options.sql),
+				Effect.mapError((cause) => runnerFailure("recover turn", cause)),
 			),
 		);
-		const admittedAccountId =
-			input.account?.id ?? input.instanceId ?? row.provider_id;
-		let call: ProviderCall | undefined;
-		if (deps.recoveryForSession) {
-			const recovery = yield* deps.recoveryForSession(row.session_id);
-			if (!recovery)
-				return yield* Effect.fail({
-					operation: "recover turn",
-					message: `Project services unavailable for recovered session ${row.session_id}`,
-				});
-			const resolvedCall = yield* recovery.resolveCallContext({
-				sessionId: row.session_id,
-				...(input.account ? { account: input.account } : {}),
-				providerId: admittedAccountId,
-				workspaceRoot: input.workspaceRoot,
-				extraFolders: input.extraFolders,
-				prepareShellEnv: true,
-				requireRoutableAccount: true,
-			});
-			if (
-				resolvedCall?.account.id === admittedAccountId &&
-				resolvedCall.account.driver === "claude"
-			)
-				call = resolvedCall;
-			else
-				return yield* Effect.fail({
-					operation: "recover turn",
-					message: `Claude account "${admittedAccountId}" is unavailable for recovery`,
-				});
-		}
-		if (options.closing()) return { result: undefined, nativeResumeFallback };
-		const instanceId = call?.account.id ?? input.instanceId ?? row.provider_id;
-		const shellEnv = call?.shellEnv ?? input.shellEnv ?? { ...process.env };
-		const read = yield* makeReadQueryEffect;
-		const result = yield* sendPreparedClaudeTurn({
-			sessionId: row.session_id,
-			instanceId,
-			commandId: row.command_id,
-			userText: input.prompt,
-			options: {
-				liveSession: yield* options.liveSession,
-				configDir: launch.configDir,
-				folderSource: launch.folderSource,
-				agent: input.agent,
-				userMessageId: input.continuation?.cutOffMessageId ?? input.inputId,
-				continuation: input.continuation,
-				nativeResumeFallback: input.nativeResumeFallback,
-				rewind: input.rewind,
-				sessionForkSdk: deps.sessionForkSdk,
-				workspaceRoot: input.workspaceRoot,
-				modelContextWindow: input.contextWindow === "1m" ? 1000000 : undefined,
-			},
-			send: (prepared, fallback) => {
-				nativeResumeFallback = fallback;
-				return options.send(
-					row.command_id,
-					{
-						type: "send-turn",
-						sinkId: options.resolveSinkId(
-							row.command_id,
-							input.inputId,
-							row.attempt_count,
-							fallback,
-						),
-						aborted: false,
-						autoSettleAfterDays,
-						shellEnv,
-						shellConfig: call?.shellConfig ?? input.shellConfig,
-						claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
-						input: {
-							...resolved,
-							...(call
-								? {
-										projectId: call.projectId,
-										account: call.account,
-										workspaceRoot: call.workspaceRoot,
-										extraFolders: call.extraFolders,
-										shellEnv: call.shellEnv,
-										shellConfig: call.shellConfig,
-									}
-								: {}),
-							instanceId,
-							prompt: prepared.prompt,
-							text: input.prompt,
-							configDir: prepared.configDir,
-							resumeSessionId: prepared.resumeSessionId,
-							resumeSessionAt: prepared.resumeSessionAt,
-							forkSession: prepared.forkSession,
-							clearInheritedGoal: prepared.clearInheritedGoal,
-							startFreshNativeSession:
-								prepared.resumeSessionId === undefined ||
-								input.rewind !== undefined,
-							nativeResumeFallback: fallback,
-							nativeThread: prepared.nativeThread,
-							...(prepared.handoff ? { handoff: prepared.handoff } : {}),
-						},
-					},
-					row.attempt_count,
-				);
-			},
-		}).pipe(
-			Effect.provideService(ProviderStateEffectTag, state),
-			Effect.provideService(ReadQueryEffectTag, read),
-		);
-		return { result, nativeResumeFallback };
 	}).pipe(
 		Effect.provideService(SqlClient.SqlClient, options.sql),
 		Effect.mapError((cause) => runnerFailure("recover turn", cause)),

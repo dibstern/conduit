@@ -702,7 +702,7 @@ describe("durable control outbox scheduling", () => {
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				const sendTurn = vi.fn(() =>
 					Effect.succeed({
-						status: "completed" as const,
+						status: "accepted" as const,
 						cost: 0,
 						tokens: { input: 0, output: 0 },
 						durationMs: 0,
@@ -2693,6 +2693,7 @@ describe("durable control outbox scheduling", () => {
 						{
 							commandId: "control-behind-send",
 							providerProcessId: "process-1",
+							requestedAt: 1000,
 						},
 					);
 					expect(

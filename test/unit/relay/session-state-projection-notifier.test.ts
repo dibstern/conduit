@@ -67,6 +67,41 @@ describe("SessionStateProjectionNotifier", () => {
 				}).pipe(Effect.provide(Logger.layer([logger, Logger.tracerLogger])));
 			}),
 	);
+	it.effect(
+		"requests git refreshes for tool results without refreshing lineage",
+		() =>
+			Effect.gen(function* () {
+				const invalidate = vi.fn(() => Effect.void);
+				const refreshSessionLineage = vi.fn(() => Effect.void);
+				const layer = SessionStateProjectionNotifierLive.pipe(
+					Layer.provide(
+						Layer.succeed(SessionGit, {
+							read: () => Effect.succeed(undefined),
+							changes: Stream.empty,
+							invalidate,
+						}),
+					),
+					Layer.provide(
+						Layer.succeed(
+							SessionManagerServiceTag,
+							makeMockSessionManagerService({ refreshSessionLineage }),
+						),
+					),
+				);
+				yield* Effect.gen(function* () {
+					const notifier = yield* SessionStateProjectionNotifierTag;
+					for (let index = 0; index < 30; index++)
+						yield* notifier.sessionStateProjected(
+							"session-1",
+							"tool.completed",
+						);
+					yield* TestClock.adjust(200);
+					expect(invalidate).toHaveBeenCalledTimes(30);
+					expect(invalidate).toHaveBeenCalledWith({ sessionId: "session-1" });
+					expect(refreshSessionLineage).not.toHaveBeenCalled();
+				}).pipe(Effect.provide(layer, { local: true }));
+			}),
+	);
 
 	it.effect("logs the underlying cause of a real lineage refresh failure", () =>
 		Effect.gen(function* () {

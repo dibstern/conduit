@@ -9,6 +9,7 @@ import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { attachmentFromDataUrl } from "../../../src/lib/persistence/attachment-store.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
@@ -240,9 +241,10 @@ describe("Integration: attachment delivery through the relay", () => {
 						request: string;
 					}>`SELECT state, request FROM pending_inputs WHERE input_id = ${inputId}`;
 					expect(queued?.state).toBe("queued");
+					// 5175bf37 persists references while transport inputs still carry data URLs.
 					expect(JSON.parse(queued?.request ?? "null")).toMatchObject({
 						text: "",
-						images: files,
+						images: files.map((file) => attachmentFromDataUrl(file).ref),
 					});
 					expect(
 						yield* sql`SELECT command_id FROM provider_command_outbox WHERE command_id = ${inputId}`,

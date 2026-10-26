@@ -20,8 +20,9 @@
 	<span style:color={tone}>{word}</span>
 {:else if variant === "row"}
 	<Button {...rest} variant="composer-row" size="content" {loading} ariaLabel={`Approvals: ${label}. Open options`}>
-		<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Mode</span>
-		<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold" style:color={tone}><PermissionShield {mode} size={15} />{label}</span>
+		<PermissionShield {mode} size={16} />
+		<span data-part="label" class="flex-1">Mode</span>
+		<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{label}</span>
 		<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 	</Button>
 {:else if variant === "words"}

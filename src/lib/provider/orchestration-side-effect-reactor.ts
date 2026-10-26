@@ -70,12 +70,14 @@ import type {
 import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
 import { resolveTurnImages } from "./resolve-turn-images.js";
+import { RunnerProviderInstance } from "./runner/runner-provider-instance.js";
 import { settleRunnerCommandReply } from "./runner/runner-recovery.js";
 import type { SessionFailure } from "./runner/session-runner.js";
 import { legacyStopOwnersQuery } from "./session-run-settlement.js";
 import type {
 	EventSink,
 	ProviderCall,
+	ResolvedSendTurnInput,
 	SendTurnInput,
 	TurnResult,
 } from "./types.js";
@@ -1667,24 +1669,31 @@ export class ProviderSideEffectReactor {
 			}
 			if (row.effect_type === "send_turn") {
 				const payload = yield* this.parseSendTurnPayload(row);
-				if (payload.continuation)
-					yield* this.options.ingestion
-						.ingest({
-							eventId: `continuation-placement:${payload.runId}`,
-							type: "message.created",
-							providerId: row.provider_id,
-							sessionId: payload.sessionId,
-							runId: payload.runId,
-							providerRefs: {},
-							rawSource: { kind: "conduit.continuation" },
-							createdAt: yield* this.currentTimeMillis(),
-							data: {
+				if (payload.continuation) {
+					const placementId = `continuation-placement:${payload.runId}`;
+					const [placed] = yield* this.options.sql<{ event_id: string }>`
+						SELECT event_id FROM events WHERE project_id = ${row.project_key}
+							AND session_id = ${payload.sessionId} AND event_id = ${placementId}
+						LIMIT 1`.pipe(Effect.mapError(storeFailure("placeContinuation")));
+					if (!placed)
+						yield* this.options.ingestion
+							.ingest({
+								eventId: placementId,
+								type: "message.created",
+								providerId: row.provider_id,
 								sessionId: payload.sessionId,
-								messageId: payload.continuation.cutOffMessageId,
-								role: "user",
-							},
-						})
-						.pipe(Effect.mapError(storeFailure("placeContinuation")));
+								runId: payload.runId,
+								providerRefs: {},
+								rawSource: { kind: "conduit.continuation" },
+								createdAt: yield* this.currentTimeMillis(),
+								data: {
+									sessionId: payload.sessionId,
+									messageId: payload.continuation.cutOffMessageId,
+									role: "user",
+								},
+							})
+							.pipe(Effect.mapError(storeFailure("placeContinuation")));
+				}
 				const admittedAccount = liveContext?.account ?? payload.account;
 				const currentAccount = this.options.accountDirectory
 					? yield* this.options.accountDirectory
@@ -1728,9 +1737,10 @@ export class ProviderSideEffectReactor {
 						}
 					: currentAccount;
 				const driver = account?.driver ?? row.provider_id;
-				const call =
+				const instance = yield* this.options.registry.getInstanceEffect(driver);
+				const prepareCall = yield* Effect.cached(
 					liveContext?.shellEnv === undefined && this.options.resolveCallContext
-						? yield* this.options.resolveCallContext({
+						? this.options.resolveCallContext({
 								sessionId: payload.sessionId,
 								projectId: row.project_key,
 								...(account ? { account } : {}),
@@ -1740,7 +1750,12 @@ export class ProviderSideEffectReactor {
 								prepareShellEnv: true,
 								requireRoutableAccount: true,
 							})
-						: undefined;
+						: Effect.succeed(undefined),
+				);
+				const call =
+					instance instanceof RunnerProviderInstance
+						? undefined
+						: yield* prepareCall;
 				const shellEnv = liveContext?.shellEnv ?? call?.shellEnv;
 				const shellConfig =
 					liveContext?.shellEnv !== undefined
@@ -1756,7 +1771,6 @@ export class ProviderSideEffectReactor {
 					? undefined
 					: (interactions ?? makeInteractions?.(payload.sessionId, driver));
 				const instanceId = account?.id ?? payload.instanceId ?? row.provider_id;
-				const instance = yield* this.options.registry.getInstanceEffect(driver);
 				const turnKey = {
 					sessionId: payload.sessionId,
 					inputId: payload.inputId,
@@ -1784,7 +1798,7 @@ export class ProviderSideEffectReactor {
 									}),
 							),
 						);
-						return yield* instance.sendTurnEffect({
+						const sendInput: ResolvedSendTurnInput = {
 							...input,
 							...(shellEnv ? { shellEnv } : {}),
 							...(shellConfig !== undefined ? { shellConfig } : {}),
@@ -1818,7 +1832,10 @@ export class ProviderSideEffectReactor {
 								currentInteractions,
 							),
 							abortSignal: abortSignal ?? new AbortController().signal,
-						});
+						};
+						return yield* instance instanceof RunnerProviderInstance
+							? instance.sendTurnEffect(sendInput, prepareCall)
+							: instance.sendTurnEffect(sendInput);
 					});
 				const result = getProviderDriver(driver)?.supportsNativeResume
 					? yield* Effect.gen({ self: this }, function* () {

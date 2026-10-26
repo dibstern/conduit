@@ -1,13 +1,5 @@
-import {
-	type FSWatcher,
-	readFileSync,
-	type StatsListener,
-	unwatchFile,
-	watch,
-	watchFile,
-} from "node:fs";
-import { lstat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
 	Clock,
@@ -37,7 +29,10 @@ import {
 	type CanonicalDirectory,
 	canonicalDirectory,
 	forgetCanonicalDirectory,
+	publicationDirectory,
 	readPublishedSessionGit,
+	rememberWorkspaceDirectories,
+	workspaceDirectory,
 } from "../../../persistence/effect/session-git-publication.js";
 import {
 	readSessionWorktreeOwnershipSnapshot,
@@ -52,6 +47,7 @@ import {
 	SessionGitSchema,
 } from "../../../shared-types.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
 import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
 import { ReadRequest } from "../Services/read-request.js";
@@ -68,8 +64,14 @@ const intervals = {
 	listed: 30_000,
 	dormant: Number.POSITIVE_INFINITY,
 } satisfies Record<Tier, number>;
+const probeIntervals = {
+	running: 1_000,
+	viewed: 500,
+	listed: 5_000,
+	dormant: 10_000,
+} satisfies Record<Tier, number>;
 const hintThrottleMs = 2_000;
-// Listed polling is only a safety net for missed watcher events, so it is one
+// Listed polling is a safety net for changes outside the probe targets, at one
 // daemon-wide rate (oldest first) rather than a per-folder cost that grows
 // with every listed session.
 const safetyNetGapMs = 20_000;
@@ -83,25 +85,23 @@ interface Membership {
 	running: boolean;
 	listedUntil: number;
 }
-interface WatchSubscriber {
-	readonly change: (name: string | null) => void;
-	readonly error: () => void;
-}
 interface DirectoryState {
 	readonly directory: CanonicalDirectory;
 	readonly sessions: Set<string>;
 	readonly projects: Set<string>;
-	readonly watchers: { readonly close: () => void }[];
+	readonly probes: Map<string, { stamp: string; contents: string | undefined }>;
 	readonly first: Deferred.Deferred<void>;
 	readonly abort: AbortController;
 	readonly rootProjects: Set<string>;
-	repositoryDirectory?: CanonicalDirectory;
+	repositoryDirectory?: string;
+	gitDirectory?: string;
 	git: GitState | undefined;
 	workspaceMissing: WorkspaceMissing | undefined;
 	published: boolean;
 	needsCanonicalPublication: boolean;
 	lastRead: number;
 	lastHintRead: number;
+	lastProbe: number;
 	listedUntil: number;
 	present: boolean | undefined;
 	hinted: boolean;
@@ -115,6 +115,7 @@ interface DirectoryState {
 export const makeSessionGit = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const registry = yield* ProjectRegistryTag;
+	const unavailable = yield* DaemonStoreAvailability;
 	const owners = yield* OwnerScopes;
 	const subprocess = yield* Subprocess;
 	const runner = subprocess.makeRunner();
@@ -142,51 +143,6 @@ export const makeSessionGit = Effect.gen(function* () {
 		CanonicalDirectory,
 		{ listedUntil: number; invalidated: boolean }
 	>();
-	const statWatches = new Map<
-		string,
-		{ readonly listeners: Set<StatsListener>; readonly listener: StatsListener }
-	>();
-	// Closing a directory watch rebuilds libuv's one FSEvents stream
-	// synchronously, so sibling worktrees and shared git directories share one.
-	const fsWatches = new Map<
-		string,
-		{
-			readonly watcher: FSWatcher;
-			readonly subscribers: Set<WatchSubscriber>;
-		}
-	>();
-	const watchShared = (path: string, subscriber: WatchSubscriber) => {
-		let shared = fsWatches.get(path);
-		if (!shared) {
-			const subscribers = new Set<WatchSubscriber>();
-			const watcher = watch(path, { persistent: false }, (_kind, name) => {
-				for (const each of subscribers) each.change(name);
-			});
-			const created = { watcher, subscribers };
-			watcher.on("error", () => {
-				watcher.close();
-				if (fsWatches.get(path) === created) fsWatches.delete(path);
-				for (const each of [...subscribers]) each.error();
-				subscribers.clear();
-			});
-			fsWatches.set(path, created);
-			shared = created;
-		}
-		const subscription = shared;
-		subscription.subscribers.add(subscriber);
-		return {
-			close: () => {
-				subscription.subscribers.delete(subscriber);
-				if (
-					subscription.subscribers.size === 0 &&
-					fsWatches.get(path) === subscription
-				) {
-					fsWatches.delete(path);
-					subscription.watcher.close();
-				}
-			},
-		};
-	};
 	let readQuietUntil = 0;
 	let lastSafetyNet = Number.NEGATIVE_INFINITY;
 	const decodeWorkspace = Schema.decodeUnknownOption(
@@ -203,6 +159,41 @@ export const makeSessionGit = Effect.gen(function* () {
 		{ git: GitState | undefined; missing: WorkspaceMissing | undefined }
 	>();
 	const legacyAliases = new Map<CanonicalDirectory, string[]>();
+	const ownedWorkspaces = new Map<string, string | null>();
+	const rememberWorkspace = (
+		id: string,
+		projectId: string,
+		stored: string | null,
+		workspace: SessionWorkspace | null,
+	) =>
+		Effect.gen(function* () {
+			if (ownedWorkspaces.has(id) && ownedWorkspaces.get(id) === stored) return;
+			if (workspace?.origin === "conduit") {
+				const ownership = yield* readSessionWorktreeOwnershipSnapshot(
+					projectId,
+					id,
+				);
+				if (ownership?._tag === "Owned")
+					rememberWorkspaceDirectories(workspace, ownership.ownership);
+			}
+			ownedWorkspaces.set(id, stored);
+		}).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+	// Capture ownership before normalizing persisted publication keys at startup.
+	const projectIds = [...HashMap.keys(yield* Ref.get(registry))];
+	if (projectIds.length > 0)
+		for (const row of yield* sql<{
+			id: string;
+			project_id: string;
+			workspace: string;
+		}>`SELECT id, project_id, workspace FROM sessions WHERE project_id IN ${sql.in(projectIds)} AND workspace IS NOT NULL`) {
+			const workspace = Option.getOrNull(decodeWorkspace(row.workspace));
+			yield* rememberWorkspace(
+				row.id,
+				row.project_id,
+				row.workspace,
+				workspace,
+			);
+		}
 	for (const row of yield* sql<{
 		directory: string;
 		git: string | null;
@@ -210,7 +201,7 @@ export const makeSessionGit = Effect.gen(function* () {
 	}>`SELECT directory, git, workspace_missing FROM session_git_published`) {
 		const git = row.git === null ? Option.some(undefined) : decodeGit(row.git);
 		if (Option.isNone(git)) continue;
-		const key = canonicalDirectory(row.directory);
+		const key = publicationDirectory(row.directory);
 		if (key !== row.directory)
 			legacyAliases.set(key, [
 				...(legacyAliases.get(key) ?? []),
@@ -258,163 +249,120 @@ export const makeSessionGit = Effect.gen(function* () {
 			}
 			return exists;
 		});
-	const watchDirectory = (
-		entry: DirectoryState,
-	): DirectoryState["watchers"] => {
-		const watchers: DirectoryState["watchers"] = [];
-		const paths = new Set([entry.directory, dirname(entry.directory)]);
-		// Other worktrees' files in the repository's common directory.
-		const shared = new Set<string>();
-		try {
+	const readText = (path: string) =>
+		Effect.tryPromise((signal) =>
+			readFile(path, { encoding: "utf8", signal }),
+		).pipe(Effect.orElseSucceed(() => undefined));
+	const probeStamp = (path: string) =>
+		Effect.tryPromise(() => stat(path)).pipe(
+			Effect.map(
+				(file) =>
+					`${file.isDirectory() ? "directory" : "file"}:${file.mtimeMs}:${file.ctimeMs}:${file.size}:${file.ino}:${file.nlink}`,
+			),
+			Effect.orElseSucceed(() => "missing"),
+		);
+	const setProbeTargets = (entry: DirectoryState) =>
+		Effect.gen(function* () {
 			const dotgit = join(entry.directory, ".git");
-			let gitDir = dotgit;
-			try {
-				const pointer = readFileSync(dotgit, "utf8")
-					.trim()
-					.replace(/^gitdir: /, "");
-				gitDir = isAbsolute(pointer)
+			const pointer = (yield* readText(dotgit))
+				?.trim()
+				.replace(/^gitdir: /, "");
+			const gitDir = pointer
+				? isAbsolute(pointer)
 					? pointer
-					: resolve(entry.directory, pointer);
-			} catch {
-				/* Normal repositories have a .git directory. */
-			}
-			paths.add(gitDir);
-			paths.add(join(gitDir, "HEAD"));
-			paths.add(join(gitDir, "packed-refs"));
-			entry.repositoryDirectory = canonicalDirectory(gitDir);
-			paths.add(join(gitDir, "refs", "heads"));
-			try {
-				const common = readFileSync(join(gitDir, "commondir"), "utf8").trim();
-				entry.repositoryDirectory = canonicalDirectory(resolve(gitDir, common));
-				for (const path of [
-					resolve(gitDir, common),
-					resolve(gitDir, common, "packed-refs"),
-					resolve(gitDir, common, "refs", "heads"),
-				]) {
-					paths.add(path);
-					shared.add(path);
-				}
-			} catch {
-				/* A primary checkout is its own common directory. */
-			}
-			// FSEvents replays events from before the watch began, repeats them,
-			// and can fold a ref update into one event named after its lock file,
-			// so a ref event forces a read only when a ref's contents changed.
-			const contents = new Map<string, string | undefined>();
-			const read = (file: string) => {
-				try {
-					return readFileSync(file, "utf8");
-				} catch {
-					return undefined;
-				}
+					: resolve(entry.directory, pointer)
+				: dotgit;
+			const common = (yield* readText(join(gitDir, "commondir")))?.trim();
+			const refDir = common ? resolve(gitDir, common) : gitDir;
+			entry.gitDirectory = gitDir;
+			entry.repositoryDirectory = yield* Effect.tryPromise(() =>
+				realpath(refDir),
+			).pipe(Effect.orElseSucceed(() => refDir));
+			const head = join(gitDir, "HEAD");
+			// Derive the branch from the baseline itself: rereading HEAD here
+			// could pair one branch's targets with another branch's contents.
+			const headProbe = entry.probes.get(head) ?? {
+				stamp: yield* probeStamp(head),
+				contents: yield* readText(head),
 			};
-			const changed = (file: string) => {
-				const next = read(file);
-				const same = contents.has(file) && contents.get(file) === next;
-				contents.set(file, next);
-				return !same;
-			};
-			// Only this checkout's branch and the default branches decide its
-			// state, so a commit in another worktree does not force a read here.
-			const refs = (heads: string) => {
-				const branch = /^ref: refs\/heads\/(.+)$/.exec(
-					read(join(gitDir, "HEAD"))?.trim() ?? "",
-				)?.[1];
-				return [branch, "main", "master"].flatMap((ref) =>
-					ref === undefined ? [] : [join(heads, ref)],
-				);
-			};
-			for (const path of paths) {
-				if (path.endsWith(join("refs", "heads"))) refs(path).forEach(changed);
-				else if (["HEAD", "packed-refs"].includes(basename(path)))
-					changed(path);
+			entry.probes.set(head, headProbe);
+			const branch = /^ref: refs\/heads\/(.+)$/.exec(
+				headProbe.contents?.trim() ?? "",
+			)?.[1];
+			// Exact loose refs include nested names such as wt/foo. Their parent
+			// refs/heads directory does not change when an existing ref is replaced.
+			const targets = new Set([
+				entry.directory,
+				head,
+				join(gitDir, "index"),
+				join(gitDir, "packed-refs"),
+				join(refDir, "packed-refs"),
+				...[branch, "main", "master"].flatMap((ref) =>
+					ref === undefined ? [] : [join(refDir, "refs", "heads", ref)],
+				),
+			]);
+			for (const path of entry.probes.keys())
+				if (!targets.has(path)) entry.probes.delete(path);
+			for (const path of targets) {
+				if (entry.probes.has(path)) continue;
+				const stamp = yield* probeStamp(path);
+				const contents =
+					path === entry.directory || path === join(gitDir, "index")
+						? undefined
+						: yield* readText(path);
+				entry.probes.set(path, { stamp, contents });
 			}
-			for (const path of paths) {
-				const fallback = () => {
-					const target =
-						path === dirname(entry.directory) ? entry.directory : path;
-					const listener: StatsListener = (current, previous) => {
-						if (
-							entry.abort.signal.aborted ||
-							(current.mtimeMs === previous.mtimeMs &&
-								current.ctimeMs === previous.ctimeMs &&
-								current.nlink === previous.nlink)
-						)
-							return;
-						request(
-							entry,
-							target.endsWith(join("refs", "heads")) ||
-								basename(target) === "HEAD" ||
-								basename(target) === "packed-refs" ||
-								(current.nlink === 0) !== (previous.nlink === 0),
-						);
-					};
-					let shared = statWatches.get(target);
-					if (!shared) {
-						const listeners = new Set<StatsListener>();
-						const forward: StatsListener = (current, previous) => {
-							for (const subscriber of listeners) subscriber(current, previous);
-						};
-						shared = { listeners, listener: forward };
-						statWatches.set(target, shared);
-						watchFile(target, { persistent: false, interval: 500 }, forward);
+		});
+	const probe = (entry: DirectoryState) =>
+		Effect.gen(function* () {
+			if (entry.abort.signal.aborted) return;
+			let retarget = false;
+			for (const [path, previous] of entry.probes) {
+				const stamp = yield* probeStamp(path);
+				if (stamp === previous.stamp) continue;
+				if (path === entry.directory) {
+					const flipped =
+						stamp.startsWith("directory:") !==
+						previous.stamp.startsWith("directory:");
+					if (flipped) {
+						forgetCanonicalDirectory(entry.directory);
+						retarget = true;
 					}
-					const subscription = shared;
-					subscription.listeners.add(listener);
-					return {
-						close: () => {
-							subscription.listeners.delete(listener);
-							if (subscription.listeners.size === 0) {
-								unwatchFile(target, subscription.listener);
-								statWatches.delete(target);
-							}
-						},
-					};
-				};
-				try {
-					const handle = watchShared(path, {
-						change: (name) => {
-							if (
-								path === dirname(entry.directory) &&
-								name !== basename(entry.directory)
-							)
-								return;
-							if (path.endsWith(join("refs", "heads"))) {
-								if (refs(path).map(changed).includes(true))
-									request(entry, true);
-								return;
-							}
-							const file = name?.replace(/\.lock$/, "") ?? null;
-							if (
-								file === "packed-refs" ||
-								(file === "HEAD" && !shared.has(path))
-							) {
-								if (changed(basename(path) === file ? path : join(path, file)))
-									request(entry, true);
-								return;
-							}
-							if (shared.has(path) || name !== file) return;
-							request(entry, false);
-						},
-						error: () => {
-							const index = entry.watchers.indexOf(handle);
-							if (index >= 0) entry.watchers.splice(index, 1);
-							if (!entry.abort.signal.aborted) entry.watchers.push(fallback());
-						},
-					});
-					watchers.push(handle);
-				} catch {
-					watchers.push(fallback());
+					request(entry, flipped);
+				} else if (path === join(entry.gitDirectory ?? "", "index")) {
+					request(entry);
+				} else {
+					// Atomic rewrites and stat-only changes are common. Ref changes
+					// force git only when the file's contents actually moved.
+					const contents = yield* readText(path);
+					if (contents !== previous.contents) {
+						request(entry, true);
+						if (path === join(entry.gitDirectory ?? "", "HEAD"))
+							retarget = true;
+					}
+					previous.contents = contents;
 				}
+				previous.stamp = stamp;
 			}
-		} catch {
-			/* Presence checks handle unavailable filesystems. */
-		}
-		return watchers;
-	};
+			if (retarget) yield* setProbeTargets(entry);
+		}).pipe(
+			Effect.raceFirst(
+				Effect.callback<void>((resume) => {
+					const cancel = () => resume(Effect.void);
+					if (entry.abort.signal.aborted) cancel();
+					else
+						entry.abort.signal.addEventListener("abort", cancel, {
+							once: true,
+						});
+					return Effect.sync(() =>
+						entry.abort.signal.removeEventListener("abort", cancel),
+					);
+				}),
+			),
+		);
 	const releaseWatches = (entry: DirectoryState) => {
 		entry.abort.abort();
-		for (const watcher of entry.watchers.splice(0)) watcher.close();
+		entry.probes.clear();
 		if (
 			![...directories.values()].some(
 				(other) =>
@@ -452,7 +400,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				directory,
 				sessions: new Set(),
 				projects: new Set(),
-				watchers: [],
+				probes: new Map(),
 				first: yield* Deferred.make<void>(),
 				abort: new AbortController(),
 				rootProjects: new Set(),
@@ -462,6 +410,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				needsCanonicalPublication: legacyAliases.has(directory),
 				lastRead: Number.NEGATIVE_INFINITY,
 				lastHintRead: Number.NEGATIVE_INFINITY,
+				lastProbe: Number.NEGATIVE_INFINITY,
 				listedUntil: 0,
 				present: undefined,
 				hinted: false,
@@ -469,6 +418,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				forced: false,
 				queued: false,
 			};
+			yield* setProbeTargets(entry);
 			directories.set(directory, entry);
 			return entry;
 		});
@@ -483,8 +433,6 @@ export const makeSessionGit = Effect.gen(function* () {
 				Effect.acquireRelease(
 					Effect.sync(() => {
 						entry.projects.add(projectId);
-						if (entry.watchers.length === 0)
-							entry.watchers.push(...watchDirectory(entry));
 					}),
 					() =>
 						Effect.sync(() => {
@@ -503,8 +451,12 @@ export const makeSessionGit = Effect.gen(function* () {
 			if (projectsInitialized && current === registeredProjects) return;
 			registeredProjects = current;
 			projectsInitialized = true;
+			// Failed imports must not leave live cache rows that collide on retry.
+			const available = [...current].filter(
+				([projectId]) => !unavailable.has(projectId),
+			);
 			const roots = new Map(
-				[...current].map(([projectId, project]) => [
+				available.map(([projectId, project]) => [
 					projectId,
 					new Set(project.project.folders.map(canonicalDirectory)),
 				]),
@@ -515,7 +467,7 @@ export const makeSessionGit = Effect.gen(function* () {
 						entry.rootProjects.delete(projectId);
 				disposeUnused(entry);
 			}
-			for (const [projectId, project] of current)
+			for (const [projectId, project] of available)
 				for (const folder of project.project.folders) {
 					const entry = yield* getDirectory(canonicalDirectory(folder));
 					if (
@@ -552,6 +504,12 @@ export const makeSessionGit = Effect.gen(function* () {
 					row.workspace === null
 						? null
 						: Option.getOrNull(decodeWorkspace(row.workspace));
+				yield* rememberWorkspace(
+					sessionId,
+					row.project_id,
+					row.workspace,
+					workspace,
+				);
 				const keys = [
 					...new Set(
 						[
@@ -559,7 +517,7 @@ export const makeSessionGit = Effect.gen(function* () {
 							...effectiveSessionFolders(folders, workspace).map(
 								({ directory }) => directory,
 							),
-						].map(canonicalDirectory),
+						].map((directory) => workspaceDirectory(directory, workspace)),
 					),
 				];
 				const previous = sessions.get(sessionId);
@@ -568,8 +526,7 @@ export const makeSessionGit = Effect.gen(function* () {
 					return previous;
 				}
 				const owner = yield* owners.sessionScope(sessionId);
-				// Directories the session keeps stay watched; closing and reopening
-				// a watch blocks the event loop.
+				// Keep probe baselines for directories the session still uses.
 				if (previous)
 					releaseMembership({
 						...previous,
@@ -595,6 +552,7 @@ export const makeSessionGit = Effect.gen(function* () {
 							Effect.sync(() => {
 								if (sessions.get(sessionId) !== session) return;
 								sessions.delete(sessionId);
+								ownedWorkspaces.delete(sessionId);
 								releaseMembership(session);
 							}),
 					),
@@ -616,25 +574,43 @@ export const makeSessionGit = Effect.gen(function* () {
 
 	const missingState = (entry: DirectoryState, exists: boolean) =>
 		Effect.gen(function* () {
-			if (exists) return undefined;
-			if (entry.present === exists) return entry.workspaceMissing;
+			if (!exists && entry.present === exists) return entry.workspaceMissing;
 			for (const id of entry.sessions) {
 				const session = sessions.get(id);
 				if (session?.workspace?.origin !== "conduit") continue;
 				const pair = Object.entries(session.workspace.worktrees).find(
-					([, path]) => canonicalDirectory(path) === entry.directory,
+					([, path]) =>
+						workspaceDirectory(path, session.workspace) === entry.directory,
 				);
 				if (!pair) continue;
+				const ownership = yield* readSessionWorktreeOwnershipSnapshot(
+					session.projectId,
+					id,
+				).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+				const checkoutRoot =
+					ownership?._tag === "Owned"
+						? ownership.ownership.find(
+								({ path }) =>
+									entry.directory === resolve(path) ||
+									entry.directory.startsWith(`${resolve(path)}${sep}`),
+							)?.path
+						: undefined;
+				if (exists) {
+					const checkout = yield* Effect.tryPromise(async () => {
+						const root = checkoutRoot ?? entry.directory;
+						return (
+							(await lstat(root)).isDirectory() &&
+							(await lstat(join(root, ".git"))).isFile()
+						);
+					}).pipe(Effect.orElseSucceed(() => false));
+					if (checkout) return undefined;
+				}
 				if (Option.isNone(worktrees))
 					return {
 						path: entry.directory,
 						canRecreate: false,
 						reason: "git-failed" as const,
 					};
-				const ownership = yield* readSessionWorktreeOwnershipSnapshot(
-					session.projectId,
-					id,
-				).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 				const recordedBranch =
 					ownership?._tag === "Owned"
 						? recordedBranchForFolder(ownership.ownership, ...pair)
@@ -671,23 +647,24 @@ export const makeSessionGit = Effect.gen(function* () {
 			if (entry.present !== undefined && exists !== entry.present)
 				forgetCanonicalDirectory(entry.directory);
 			const workspaceMissing = yield* missingState(entry, exists);
-			const git = exists
-				? yield* Effect.tryPromise({
-						try: (signal) =>
-							reader.read(
-								entry.directory,
-								entry.git,
-								(command, args, options) =>
-									runner(
-										command,
-										args,
-										{ ...options, priority: "background" },
-										AbortSignal.any([signal, entry.abort.signal]),
-									),
-							),
-						catch: (cause) => cause,
-					})
-				: undefined;
+			const git =
+				exists && workspaceMissing === undefined
+					? yield* Effect.tryPromise({
+							try: (signal) =>
+								reader.read(
+									entry.directory,
+									entry.git,
+									(command, args, options) =>
+										runner(
+											command,
+											args,
+											{ ...options, priority: "background" },
+											AbortSignal.any([signal, entry.abort.signal]),
+										),
+								),
+							catch: (cause) => cause,
+						})
+					: undefined;
 			// Cadence runs from when git answered, not from queue wait or publication.
 			const readAt = yield* Clock.currentTimeMillis;
 			if (
@@ -737,18 +714,20 @@ export const makeSessionGit = Effect.gen(function* () {
 														? null
 														: Option.getOrNull(decodeWorkspace(row.workspace));
 												if (
-													canonicalDirectory(
+													workspaceDirectory(
 														effectiveWorkingDirectory(
 															project.value.project.folders[0] ?? "",
 															workspace,
 														),
+														workspace,
 													) === entry.directory ||
 													effectiveSessionFolders(
 														project.value.project.folders,
 														workspace,
 													).some(
 														({ directory }) =>
-															canonicalDirectory(directory) === entry.directory,
+															workspaceDirectory(directory, workspace) ===
+															entry.directory,
 													)
 												)
 													affected.push(row.id);
@@ -782,10 +761,6 @@ export const makeSessionGit = Effect.gen(function* () {
 						});
 					}),
 				);
-			if (entry.present !== undefined && entry.present !== exists) {
-				for (const watcher of entry.watchers.splice(0)) watcher.close();
-				entry.watchers.push(...watchDirectory(entry));
-			}
 			entry.present = exists;
 			entry.lastRead = readAt;
 			yield* Deferred.succeed(entry.first, undefined);
@@ -880,7 +855,8 @@ export const makeSessionGit = Effect.gen(function* () {
 				(!entry.published && entry.hinted) ||
 				(entry.hinted &&
 					now - entry.lastHintRead >= hintThrottleMs &&
-					(interval === Number.POSITIVE_INFINITY ||
+					(currentTier === "viewed" ||
+						interval === Number.POSITIVE_INFINITY ||
 						now - entry.lastRead >= interval)) ||
 				((currentTier === "running" || currentTier === "viewed") &&
 					now - entry.lastRead >= interval)
@@ -903,6 +879,27 @@ export const makeSessionGit = Effect.gen(function* () {
 	yield* Effect.forever(Effect.sleep(100).pipe(Effect.andThen(schedule))).pipe(
 		Effect.forkScoped,
 	);
+	// One daemon-wide loop bounds filesystem work, including shared git dirs.
+	// Releasing an entry interrupts its probe without waiting for a native stat.
+	yield* Effect.forever(
+		Effect.sleep(100).pipe(
+			Effect.andThen(
+				Effect.gen(function* () {
+					for (const entry of directories.values()) {
+						const now = yield* Clock.currentTimeMillis;
+						if (
+							entry.projects.size === 0 ||
+							entry.abort.signal.aborted ||
+							now - entry.lastProbe < probeIntervals[tier(entry, now)]
+						)
+							continue;
+						entry.lastProbe = now;
+						yield* probe(entry);
+					}
+				}),
+			),
+		),
+	).pipe(Effect.forkScoped);
 	if (Option.isSome(events)) {
 		const stream = yield* events.value.subscribe();
 		yield* stream.pipe(

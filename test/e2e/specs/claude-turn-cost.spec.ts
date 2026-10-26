@@ -63,15 +63,16 @@ test.describe("Claude turn cost", () => {
 							cost: row["cost"] === null ? null : Number(row["cost"]),
 						})),
 					results: db
-						.prepare(`SELECT e.sequence, m.turn_id,
+						.prepare(`SELECT e.sequence, e.type, m.turn_id,
 						json_extract(e.data, '$.providerSessionId') AS provider_session_id,
 						json_extract(e.data, '$.providerCostTotalUsd') AS running_total,
 						json_extract(e.data, '$.cost') AS cost
 						FROM events e LEFT JOIN messages m ON m.id = json_extract(e.data, '$.messageId')
-						WHERE e.session_id = ? AND e.type = 'turn.completed' ORDER BY e.sequence`)
+							WHERE e.session_id = ? AND e.type IN ('turn.completed', 'message.completed') ORDER BY e.sequence`)
 						.all(parentId)
 						.map((row) => ({
 							sequence: Number(row["sequence"]),
+							type: String(row["type"]),
 							turnId: String(row["turn_id"]),
 							providerSessionId: String(row["provider_session_id"]),
 							runningTotal:
@@ -80,6 +81,12 @@ test.describe("Claude turn cost", () => {
 									: Number(row["running_total"]),
 							cost: row["cost"] === null ? null : Number(row["cost"]),
 						})),
+					runs: db
+						.prepare(
+							"SELECT status FROM provider_runs WHERE session_id = ? ORDER BY requested_at, rowid",
+						)
+						.all(parentId)
+						.map((row) => row["status"]),
 				};
 			} finally {
 				db.close();
@@ -119,6 +126,13 @@ test.describe("Claude turn cost", () => {
 			await chat.expandTurnActivity();
 			await expect(shownCosts.last()).toHaveText("$0.4128");
 			expect(stored().turns).toHaveLength(1);
+			expect(stored().runs).toEqual(["completed"]);
+			expect(stored().results.map((result) => result.type)).toEqual([
+				"turn.completed",
+				"message.completed",
+				"message.completed",
+				"message.completed",
+			]);
 			expect(stored().turns[0]?.cost).toBeCloseTo(0.4127606, 12);
 			await record("wake-ups-finished");
 
@@ -142,6 +156,14 @@ test.describe("Claude turn cost", () => {
 			await record("reloaded");
 			const final = stored();
 			expect(final.turns).toHaveLength(2);
+			expect(final.runs).toEqual(["completed", "completed"]);
+			expect(final.results.map((result) => result.type)).toEqual([
+				"turn.completed",
+				"message.completed",
+				"message.completed",
+				"message.completed",
+				"turn.completed",
+			]);
 			expect(final.results.map((result) => result.runningTotal)).toEqual(
 				traceResults.map((result) => result.total),
 			);

@@ -18,6 +18,9 @@ export const Live: Story = {
 			name: "Jump to live",
 		});
 		await expect(jump).toBeVisible();
+		await expect(
+			jump.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
 		await userEvent.click(jump);
 		await expect(args["onclick"]).toHaveBeenCalledOnce();
 		// Capture the resting pill, not the focus ring the click leaves behind.

@@ -102,6 +102,7 @@ import {
 	DraftPreWarmLive,
 	DraftPreWarmTag,
 } from "../domain/relay/Services/draft-prewarm.js";
+import { GoalStuckStopReactorLive } from "../domain/relay/Services/goal-stuck-stop.js";
 import { makeGoalSummaryServiceLive } from "../domain/relay/Services/goal-summary-service.js";
 import { HandoffReceiptsLive } from "../domain/relay/Services/handoff-receipts.js";
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
@@ -1115,6 +1116,9 @@ export function createProjectRelayLayers({
 					wiringLayers,
 					inboxLayer,
 					SessionWorkspaceHintReactorLive,
+					GoalStuckStopReactorLive.pipe(
+						Layer.provide(Layer.merge(inboxLayer, alertLedgerLayer)),
+					),
 				),
 				fullBaseLayers,
 			),

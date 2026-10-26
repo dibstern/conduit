@@ -245,7 +245,8 @@ describe("Session workspace through the built daemon", () => {
 			(frame) =>
 				frame["type"] === "session_row" &&
 				frame["id"] === one &&
-				frame["workspace"] == null,
+				frame["workspace"] == null &&
+				(frame["git"] as SessionGit | undefined)?.branch === "main-after-move",
 			beforeReset,
 		);
 		expect(resetRow["git"]).toMatchObject({ branch: "main-after-move" });

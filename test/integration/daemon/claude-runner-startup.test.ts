@@ -101,10 +101,16 @@ describe("built runner startup deadlines", () => {
 					),
 				).toBeDefined();
 				expect(
-					selectedProof().filter((mark) => mark["kind"] === "parent-kill"),
+					proof().filter(
+						(mark) =>
+							mark["kind"] === "parent-kill" && mark["childPid"] === childPid,
+					),
 				).toEqual([]);
 				expect(
-					selectedProof().filter((mark) => mark["kind"] === "parent-exit"),
+					proof().filter(
+						(mark) =>
+							mark["kind"] === "parent-exit" && mark["childPid"] === childPid,
+					),
 				).toEqual([]);
 				expect(
 					selectedProof().find((mark) => mark["kind"] === "parent-received")?.[
@@ -117,16 +123,26 @@ describe("built runner startup deadlines", () => {
 				if (mode === "eperm") {
 					expect(() => process.kill(childPid, 0)).not.toThrow();
 					expect(
-						selectedProof().find((mark) => mark["kind"] === "parent-exit"),
+						proof().find(
+							(mark) =>
+								mark["kind"] === "parent-exit" && mark["childPid"] === childPid,
+						),
 					).toBeUndefined();
 					expect(
-						selectedProof().find((mark) => mark["kind"] === "parent-kill"),
+						proof().find(
+							(mark) =>
+								mark["kind"] === "parent-kill" && mark["childPid"] === childPid,
+						),
 					).toMatchObject({ childPid, error: "EPERM" });
 				} else {
 					await vi.waitFor(
 						() =>
 							expect(
-								selectedProof().find((mark) => mark["kind"] === "parent-exit"),
+								proof().find(
+									(mark) =>
+										mark["kind"] === "parent-exit" &&
+										mark["childPid"] === childPid,
+								),
 							).toBeDefined(),
 						{ timeout: 5000 },
 					);

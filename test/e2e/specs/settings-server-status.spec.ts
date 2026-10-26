@@ -110,8 +110,8 @@ function observeStatus(page: Page) {
 	};
 }
 
-async function openServer(page: Page, baseUrl: string): Promise<void> {
-	await new AppPage(page).goto(baseUrl);
+async function openServer(page: Page, harness: ProcessHarness): Promise<void> {
+	await new AppPage(page).mountWithoutProjects(harness);
 	// Settings opens from whichever bar the landing view shows.
 	const listSettings = page.getByTestId("list-bar-settings");
 	const sessionOverflow = page
@@ -137,7 +137,7 @@ test("Server status reloads after two supervised restarts, with desktop and phon
 }, testInfo) => {
 	await page.setViewportSize({ width: 1280, height: 900 });
 	const observed = observeStatus(page);
-	await openServer(page, harness.baseUrl);
+	await openServer(page, harness);
 	await expect(page.getByTestId("server-status-uptime")).toHaveText(/^up /);
 	await expect(page.getByTestId("server-status-port")).toHaveText(
 		`port ${new URL(harness.baseUrl).port}`,
@@ -270,7 +270,7 @@ test.describe("unsupervised daemon", () => {
 		page,
 		harness,
 	}) => {
-		await openServer(page, harness.baseUrl);
+		await openServer(page, harness);
 		await expect(page.getByTestId("server-restart-btn")).toHaveCount(0);
 		await expect(page.getByTestId("server-status-card")).toContainText(
 			"conduit serve",

@@ -47,16 +47,27 @@ test.describe("Claude background work", () => {
 		const sessionId = decodeURIComponent(
 			harness.projectUrl.slice("/s/".length),
 		);
-		// The stored row: its status and how many turns have ended.
+		// Wake-up results complete messages after the run's one terminal.
 		const stored = () => {
 			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
 			try {
 				const row = db
 					.prepare(
-						"SELECT status, (SELECT COUNT(*) FROM events WHERE session_id = s.id AND type = 'turn.completed') AS turnEnds FROM sessions s WHERE id = ?",
+						`SELECT status,
+						 (SELECT COUNT(*) FROM events WHERE session_id = s.id AND type IN ('turn.completed', 'message.completed')) AS completedSegments,
+						 (SELECT COUNT(*) FROM events WHERE session_id = s.id AND type = 'turn.completed') AS terminals
+						 FROM sessions s WHERE id = ?`,
 					)
 					.get(sessionId);
-				return { status: row?.["status"], turnEnds: Number(row?.["turnEnds"]) };
+				return {
+					status: row?.["status"],
+					completedSegments: Number(row?.["completedSegments"]),
+					terminals: Number(row?.["terminals"]),
+					runs: db
+						.prepare("SELECT status FROM provider_runs WHERE session_id = ?")
+						.all(sessionId)
+						.map((run) => run["status"]),
+				};
 			} finally {
 				db.close();
 			}
@@ -93,7 +104,12 @@ test.describe("Claude background work", () => {
 
 			// The idle status is written just after the turn end, not with it.
 			// Wait for both, or the row is read while still busy from the turn.
-			await expect.poll(stored).toEqual({ status: "idle", turnEnds: 1 });
+			await expect.poll(stored).toEqual({
+				status: "idle",
+				completedSegments: 1,
+				terminals: 1,
+				runs: ["completed"],
+			});
 			// The sidebar stream is ordered, so once the second window shows a
 			// rename made after that, it has had the idle status too.
 			await page.getByTestId("session-bar-overflow").click();
@@ -147,7 +163,12 @@ test.describe("Claude background work", () => {
 			// The shell ending wakes the SDK into a turn of its own. Read the row
 			// once that has settled too, not in the gap before it starts.
 			harness.claudeReplayer?.release();
-			await expect.poll(stored).toEqual({ status: "idle", turnEnds: 2 });
+			await expect.poll(stored).toEqual({
+				status: "idle",
+				completedSegments: 2,
+				terminals: 1,
+				runs: ["completed"],
+			});
 			await expect(
 				row,
 				"the background shell ended but the sidebar still says working",
@@ -309,16 +330,14 @@ processTest.describe("Claude wake-up turn inbox", () => {
 	);
 });
 
-// The shell ending between turns, before the SDK's wake-up turn (the trace is
-// background-shell-turn cut there), restarts its Bash tool under a message id
-// no turn owns. Bug (conduit-test-jyr9.14): that reopened the finished turn
-// with no reply to close it, so the inbox queued every later message.
-// Failure cases: the turn reads as running again; the next message queues
-// instead of sending.
+// A shell completion before the wake-up used to reopen the finished run, with
+// no owned terminal left to close it (conduit-test-jyr9.14). Include the complete
+// wake-up result: 85d8a0ca correctly queues the next input while native work runs.
+// Failure cases: the ended run reopens, or the next input never drains.
 test.describe("Claude background shell ending between turns", () => {
 	test.use({
 		claudeReplay: {
-			turns: ["background-shell-ends-between-turns", "pong-thinking-text-turn"],
+			turns: ["background-shell-turn", "pong-thinking-text-turn"],
 		},
 	});
 

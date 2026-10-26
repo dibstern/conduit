@@ -241,7 +241,7 @@ function marks(harness: ProcessHarness): ProofMark[] {
 test.describe("cancel a running turn", () => {
 	test.use({ harnessOptions: { restartProof: true } });
 
-	test("composer Stop interrupts and closes the provider query", async ({
+	test("composer Stop waits for the provider terminal and retains its query", async ({
 		page,
 		harness,
 	}, testInfo) => {
@@ -252,6 +252,7 @@ test.describe("cancel a running turn", () => {
 		const chat = new ChatPage(page);
 		await app.goto(`${harness.baseUrl}/s/${sessionId}`);
 		await app.sendMessage("task-stop-foreground-no-tasks");
+		const sentAt = await page.evaluate(() => performance.now());
 		const streaming = () =>
 			marks(harness).find(
 				(mark) =>
@@ -267,11 +268,26 @@ test.describe("cancel a running turn", () => {
 			).length;
 		expect(queryMarks("query-closed")).toBe(0);
 		await expect(chat.stopBtn).toBeVisible();
+		// The composer arms Stop 1.5s after an idle Send click.
+		await page.waitForFunction(
+			(sent) => performance.now() - sent >= 1500,
+			sentAt,
+		);
 		const started = performance.now();
 		await chat.stopBtn.click();
-		await expect.poll(() => queryMarks("query-closed")).toBe(1);
+		await expect
+			.poll(() =>
+				marks(harness).some(
+					(mark) =>
+						mark["queryId"] === queryId &&
+						mark["kind"] === "task-stop-turn" &&
+						mark["phase"] === "interrupted-result",
+				),
+			)
+			.toBe(true);
 		const latencyMs = since(started);
 		expect(queryMarks("query-interrupted")).toBe(1);
+		expect(queryMarks("query-closed")).toBe(0);
 		await expect(chat.stopBtn).toBeHidden();
 		observe(testInfo, {
 			latencyMs,

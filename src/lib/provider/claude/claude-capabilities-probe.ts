@@ -77,7 +77,7 @@ interface SDKMessageSubset {
 
 // Iterated only until the system init message, whose skills list is the one
 // place the SDK says which commands are skills.
-interface CapabilityQuery extends AsyncIterable<SDKMessageSubset> {
+export interface CapabilityQuery extends AsyncIterable<SDKMessageSubset> {
 	initializationResult(): Promise<InitializationResultSubset>;
 }
 
@@ -106,7 +106,8 @@ export interface ProbeDeps {
 	readonly baseEnv?: Readonly<Record<string, string | undefined>>;
 	readonly accountEnv?: Readonly<Record<string, string>>;
 	readonly queryFactory?: (params: {
-		prompt: string | AsyncIterable<SDKUserMessage>;
+		configDir: ClaudeConfigDir;
+		prompt: AsyncIterable<SDKUserMessage>;
 		options?: SDKOptions;
 	}) => CapabilityQuery;
 	readonly logger?: Logger;
@@ -258,6 +259,7 @@ export async function probeClaudeCapabilities(
 			stderr: () => {},
 		} satisfies SDKOptions;
 		const query = queryFactory({
+			configDir: deps.configDir,
 			prompt: singleMessage(),
 			options: decodeClaudeSDKOptionsJsonShape(options),
 		});

@@ -13,6 +13,7 @@ import {
 	ownedWorktreePath,
 	worktreesRoot,
 } from "../../../src/lib/domain/daemon/Layers/worktree-layer.js";
+import { Subprocess } from "../../../src/lib/domain/daemon/Services/subprocess.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
 import { worktreeFixture } from "./worktree-service-fixture.js";
 
@@ -421,29 +422,38 @@ describe("daemon Worktree service", () => {
 			expect(readFileSync(join(path, "keep.txt"), "utf8")).toBe("keep\n");
 	});
 
-	it("lets a large checkout outlast the timeout for quick git commands", async () => {
-		const executable = join(context.fixture, "slow-checkout-git");
-		// The quick-command budget must exceed a real git spawn under full-suite
-		// load (over 1s was seen), and the checkout must outlast that budget.
-		writeFileSync(
-			executable,
-			`#!/bin/sh
-case " $* " in *" worktree add "*) sleep 6 ;; esac
-exec '${context.actualGit.replaceAll("'", "'\\''")}' "$@"
-`,
-			{ mode: 0o755 },
-		);
+	it("gives checkout a separate budget from quick git commands", async () => {
+		const subprocess = Effect.runSync(Subprocess);
+		const commands: { args: readonly string[]; timeout: number }[] = [];
 		const created = await Effect.runPromise(
-			createEffect(undefined, {
-				gitExecutable: executable,
-				gitTimeoutMs: 5_000,
-			}),
+			createEffect(undefined, { gitTimeoutMs: 1_000 }).pipe(
+				Effect.provideService(Subprocess, {
+					...subprocess,
+					run: (_file, args, options) =>
+						Effect.sync(() => {
+							commands.push({ args, timeout: options.timeoutMs });
+							return { stdout: git(...args), stderr: "", exitCode: 0 };
+						}),
+				}),
+			),
 		);
 		expect(
 			existsSync(ownedWorktreePath(context.configDir, context.folder)),
 		).toBe(true);
 		expect(created.branchName).toBeTruthy();
-	}, 20_000);
+		expect(commands).toEqual(
+			expect.arrayContaining([
+				{
+					args: expect.arrayContaining(["worktree", "add"]),
+					timeout: 600_000,
+				},
+			]),
+		);
+		for (const command of commands) {
+			if (command.args[2] !== "worktree" || command.args[3] !== "add")
+				expect(command.timeout).toBe(1_000);
+		}
+	}, 15_000);
 
 	it("reports missing git without creating anything", async () => {
 		const before = repositoryState();

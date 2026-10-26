@@ -52,6 +52,7 @@ const versionTables = new Set([
 	"message_tombstones",
 	"message_part_tombstones",
 	"session_sidebar",
+	"session_git_published",
 ]);
 const eventColumns: Readonly<Record<string, readonly string[]>> = {
 	events: ["sequence"],
@@ -457,6 +458,8 @@ export function daemonStoreAssertions(
 	imported: {
 		readonly projectId: string;
 		readonly before: StoreImportPosition;
+		/** Startup can publish live versions after the importer rebases its horizon. */
+		readonly minimumHorizon?: number;
 	},
 ) {
 	const db = new DatabaseSync(filename, { readOnly: true, timeout: 5000 });
@@ -498,6 +501,8 @@ export function daemonStoreAssertions(
 					}[]
 				).map((row) => row.version),
 			);
+			// Folder publications share the store clock without belonging to one project.
+			if (table === "session_git_published") continue;
 			const scope =
 				table === "sessions" || table === "session_sidebar"
 					? "project_id = ?"
@@ -557,7 +562,10 @@ export function daemonStoreAssertions(
 			),
 			counterMatchesVersions:
 				position.readModelVersion === Math.max(0, ...allVersions),
-			horizonMatchesCounter: horizon.version === position.readModelVersion,
+			horizonCoversImport:
+				horizon.version <= position.readModelVersion &&
+				horizon.version >=
+					(imported.minimumHorizon ?? position.readModelVersion),
 			cursorsCoverEvents:
 				cursors.length > 0 &&
 				cursors.every((row) => row.last_applied_seq >= position.eventSequence),

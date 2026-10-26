@@ -19,21 +19,32 @@ test.use({ harnessOptions: { opencodeRecording: "chat-simple" } });
 // Only OpenCode is recorded here, and a draft may default to another harness
 // with no model, which leaves Send disabled.
 async function createSession(page: Page, app: AppPage): Promise<void> {
+	const projectSlug = new URL(page.url()).searchParams.get("project");
+	expect(projectSlug).toBeTruthy();
+	// ChatLayout records the project after attachment is acknowledged.
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				localStorage.getItem("conduit:last-attached-project"),
+			),
+		)
+		.toBe(projectSlug);
 	const picker = page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 	);
 	await openPickerRoot(page, picker);
-	if ((await picker.getAttribute("data-instance-id")) !== "opencode")
-		await page.getByTestId("picker-harness-opencode").click();
+	await page.getByTestId("picker-harness-opencode").click();
+	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 	await page.getByTestId("picker-row-model").click();
 	await page
 		.getByTestId("model-picker-list")
-		.locator("[data-model-id]")
-		.first()
+		.locator('[data-model-id="claude-opus-4-6"][data-provider-id="anthropic"]')
 		.click();
 	await page.keyboard.press("Escape");
 	await expect(page.getByTestId("model-picker")).toBeHidden();
 	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
+	await expect(picker).toHaveAttribute("data-shown-provider", "anthropic");
+	await expect(picker).toHaveAttribute("data-shown-model", "claude-opus-4-6");
 	await app.sendMessage("Hello, reply with just the word pong");
 	await expect(page).toHaveURL(/\/s\/[^/?]+/);
 	await expect(page.locator(".md-content").last()).toContainText(/pong|done\(/);

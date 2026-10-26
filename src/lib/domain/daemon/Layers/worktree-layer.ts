@@ -959,29 +959,31 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 			const remove: WorktreeService["remove"] = (folder, owned, inUse) =>
 				Effect.gen(function* () {
 					const state = yield* readOwned(folder, owned);
-					if (state.missing) return;
-					// Git also rechecks dirtiness while removing, so a write racing this read is protected.
-					if (
-						yield* git(owned.path, [
-							"status",
-							"--porcelain",
-							"--untracked-files=all",
-						])
-					)
-						return yield* new WorktreeRecoveryError({
-							path: owned.path,
-							reason: "git-failed",
-							message: "Worktree kept because it has uncommitted changes.",
-						});
-					if (!(yield* git(owned.path, ["branch", "--show-current"]))) {
-						const defaults = yield* defaultBranches(state.source);
-						if (!(yield* mergedDefault(owned.path, "HEAD", defaults)))
+					// Automatic cleanup can remove the checkout while retaining its owned branch.
+					if (!state.missing) {
+						// Git also rechecks dirtiness while removing, so a write racing this read is protected.
+						if (
+							yield* git(owned.path, [
+								"status",
+								"--porcelain",
+								"--untracked-files=all",
+							])
+						)
 							return yield* new WorktreeRecoveryError({
 								path: owned.path,
 								reason: "git-failed",
-								message:
-									"Worktree kept because detached commits are not known to be merged into the default branch.",
+								message: "Worktree kept because it has uncommitted changes.",
 							});
+						if (!(yield* git(owned.path, ["branch", "--show-current"]))) {
+							const defaults = yield* defaultBranches(state.source);
+							if (!(yield* mergedDefault(owned.path, "HEAD", defaults)))
+								return yield* new WorktreeRecoveryError({
+									path: owned.path,
+									reason: "git-failed",
+									message:
+										"Worktree kept because detached commits are not known to be merged into the default branch.",
+								});
+						}
 					}
 					if (inUse && (yield* inUse))
 						return yield* new WorktreeRecoveryError({
@@ -989,7 +991,8 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 							reason: "branch-in-use",
 							message: "Worktree kept because another session uses it.",
 						});
-					yield* git(state.source, ["worktree", "remove", "--", owned.path]);
+					if (!state.missing)
+						yield* git(state.source, ["worktree", "remove", "--", owned.path]);
 					// Never infer ref ownership from whichever user branch happens to be checked out.
 					if (
 						(yield* creationBase(state.source, owned.branchName)) !== owned.head

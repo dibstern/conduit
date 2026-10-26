@@ -10,7 +10,6 @@ import {
 	type RunnerProviderInstanceDeps,
 } from "../runner/runner-provider-instance.js";
 import { CursorAccountResources } from "./cursor-account-resources.js";
-import { cursorCredentialMessage } from "./cursor-credential.js";
 import { makeCursorRunnerDriver } from "./cursor-runner-driver.js";
 import { cursorRunnerWire } from "./cursor-runner-wire.js";
 
@@ -28,80 +27,63 @@ export function makeCursorProviderRuntime(
 	return Effect.gen(function* () {
 		const { read, state } = persistence;
 		const resources = yield* CursorAccountResources;
-		return yield* makeRunnerProviderInstance(
-			deps,
-			makeCursorRunnerDriver(resources, { read, state }, deps.daemonConfigDir),
-			(emit) =>
-				makeProcessSessionRunner(
-					{
-						...deps,
-						projectRootForSession:
-							deps.projectRootForSession ?? (() => Effect.succeed(undefined)),
-					},
-					emit,
-					{
-						driverKind: "cursor",
-						legacyReplayCommandFields: (accountId) =>
-							resources
-								.use(accountId, ({ credential }) => credential)
-								.pipe(
-									Effect.mapError((cause) =>
-										runnerFailure("recover Cursor credentials", cause),
-									),
-									Effect.flatMap((lookup) =>
-										lookup._tag === "Ready"
-											? Effect.succeed({
-													cursorCredential: lookup.credential,
-													shellEnv: {},
-												})
-											: Effect.fail({
-													operation: "recover Cursor credentials",
-													message: cursorCredentialMessage(lookup),
-													code: "auth_required",
-												}),
-									),
-								),
-						withAccountScope: (accountId: string, work: Effect.Effect<void>) =>
-							Effect.gen(function* () {
-								const accounts = yield* deps.accounts;
-								if (
-									!accounts.accounts.some(
-										(account) =>
-											account.id === accountId && account.driver === "cursor",
-									)
+		const driver = makeCursorRunnerDriver(
+			resources,
+			{ read, state },
+			deps.daemonConfigDir,
+		);
+		return yield* makeRunnerProviderInstance(deps, driver, (emit) =>
+			makeProcessSessionRunner(
+				{
+					...deps,
+					projectRootForSession:
+						deps.projectRootForSession ?? (() => Effect.succeed(undefined)),
+				},
+				emit,
+				{
+					driverKind: "cursor",
+					legacyPrepareTurnEffect: driver.prepareTurnEffect,
+					withAccountScope: (accountId: string, work: Effect.Effect<void>) =>
+						Effect.gen(function* () {
+							const accounts = yield* deps.accounts;
+							if (
+								!accounts.accounts.some(
+									(account) =>
+										account.id === accountId && account.driver === "cursor",
 								)
-									return yield* Effect.fail({
-										operation: "retain account",
-										message: `Cursor account "${accountId}" is unavailable`,
-										code: "account_unavailable",
-										retryable: false,
-									});
-								return yield* resources.use(accountId, () => work);
-							}).pipe(
-								Effect.mapError((cause) =>
-									"operation" in cause
-										? cause
-										: runnerFailure("retain account", cause),
-								),
+							)
+								return yield* Effect.fail({
+									operation: "retain account",
+									message: `Cursor account "${accountId}" is unavailable`,
+									code: "account_unavailable",
+									retryable: false,
+								});
+							return yield* resources.use(accountId, () => work);
+						}).pipe(
+							Effect.mapError((cause) =>
+								"operation" in cause
+									? cause
+									: runnerFailure("retain account", cause),
 							),
-						coldUpgrade: true,
-						spawnEnvironment: { CURSOR_BACKEND_URL: resources.backendUrl },
-						connect: (options) =>
-							connectRunner({
-								...options,
-								cursorBackendUrl: resources.backendUrl,
-								wire: cursorRunnerWire,
-							}),
-						settingsDeferredCode: "cursor_settings_deferred",
-						snapshotCommandSettings: () => ({}),
-						warmCommand: (sessionId, _state, snapshot) => ({
-							type: "pre-warm",
-							sessionId,
-							input: snapshot.input,
+						),
+					coldUpgrade: true,
+					spawnEnvironment: { CURSOR_BACKEND_URL: resources.backendUrl },
+					connect: (options) =>
+						connectRunner({
+							...options,
+							cursorBackendUrl: resources.backendUrl,
+							wire: cursorRunnerWire,
 						}),
-						loginChange: () => "None",
-					},
-				),
+					settingsDeferredCode: "cursor_settings_deferred",
+					snapshotCommandSettings: () => ({}),
+					warmCommand: (sessionId, _state, snapshot) => ({
+						type: "pre-warm",
+						sessionId,
+						input: snapshot.input,
+					}),
+					loginChange: () => "None",
+				},
+			),
 		);
 	});
 }

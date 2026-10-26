@@ -47,8 +47,8 @@
 
 <style>
 	/* The invariant that keeps the caret on the text: the mirror never paints a
-	   glyph. Text fill is inherited and wins over any child's `color`, which is
-	   left to drive underlines. iOS lays out text in the textarea that the mirror
+	   glyph. Inherited text fill prevents decoration styles from painting a second
+	   copy of the text. iOS lays out text in the textarea that the mirror
 	   never sees (inline predictions, marked text), so painted mirror glyphs can
 	   disagree with the caret no matter how carefully the metrics match. */
 	.mirror {
@@ -65,17 +65,19 @@
 	}
 
 	/* Decoration only: any change to font or spacing moves pills off their words
-	   (see composer-text-metrics). */
+	   (see composer-text-metrics). Chromium also hides currentColor underlines
+	   when text fill is transparent, so decoration colours must be explicit. */
 	.composer-url {
 		color: var(--color-accent);
 		text-decoration: underline;
+		text-decoration-color: var(--color-accent);
 		text-underline-offset: 2px;
 	}
 
 	.skill-unknown {
 		color: var(--color-error);
 		text-decoration: underline;
-		text-decoration-color: currentColor;
+		text-decoration-color: var(--color-error);
 		text-underline-offset: 2px;
 	}
 </style>

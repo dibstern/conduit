@@ -264,45 +264,57 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
 			),
 		);
-		await client.sendMessage("/compact");
-		const notice = await client.waitForTranscriptMessage(
-			(message) =>
-				message.parts?.some(
-					(part) => part.type === "error" && part.text?.includes("model pick"),
-				) === true,
-			sessionId,
+		await client.syncInputDraft("/compact");
+		const refusal = await client.rpcCall((rpc) =>
+			Effect.result(
+				rpc["input.submit"]({
+					sessionId,
+					inputId: randomUUID(),
+					originId: client.getClientId(),
+					delivery: "queue",
+					text: "/compact",
+				}),
+			),
 		);
-		const errors = await Effect.runPromise(
+		expect(refusal).toMatchObject({
+			_tag: "Failure",
+			failure: {
+				_tag: "WsRpcError",
+				message: expect.stringContaining("A session model pick is required"),
+			},
+		});
+		// 61b38b1e keeps a pre-admission failure out of history and leaves the Draft.
+		const stored = await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				return yield* sql<{
-					code: string;
-				}>`SELECT json_extract(data, '$.code') AS code
-					FROM events WHERE session_id = ${sessionId} AND type = 'turn.error'`;
+				return {
+					events: yield* sql<{ type: string }>`SELECT type FROM events
+						WHERE session_id = ${sessionId}
+							AND type IN ('input.admitted', 'input.sent', 'run.requested', 'turn.error')`,
+					runs: yield* sql`SELECT status, started_at FROM provider_runs
+						WHERE session_id = ${sessionId}`,
+					commands:
+						yield* sql`SELECT command_id, status FROM provider_command_outbox
+						WHERE session_id = ${sessionId}`,
+					draft: yield* sql<{ text: string }>`SELECT text FROM input_drafts
+						WHERE draft_key = ${sessionId}`,
+				};
 			}).pipe(
 				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
 			),
 		);
-		expect(errors).toEqual([{ code: "PICK_REQUIRED" }]);
+		expect(stored).toEqual({
+			events: [],
+			runs: [],
+			commands: [],
+			draft: [{ text: "/compact" }],
+		});
 		expect(
 			relay.mock.requestBodies.some((request) =>
 				/\/(?:summarize|prompt_async|message)$/.test(request.path),
 			),
 		).toBe(false);
-		const runs = await Effect.runPromise(
-			Effect.gen(function* () {
-				return yield* (yield* SqlClient.SqlClient)`SELECT status, started_at,
-					(SELECT COUNT(*) FROM turns WHERE run_id = provider_runs.id
-						AND state = 'error' AND started_at IS NULL) AS failed_inputs
-					FROM provider_runs WHERE session_id = ${sessionId}`;
-			}).pipe(
-				Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
-			),
-		);
-		expect(runs).toEqual([
-			{ status: "error", started_at: null, failed_inputs: 1 },
-		]);
-		saveEvidence("pick-required", { notice, errors, runs });
+		saveEvidence("pick-required", { refusal, stored });
 	});
 
 	it("keeps Claude context when compact_boundary omits post_tokens", async () => {
@@ -891,7 +903,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		);
 	});
 
-	it("keeps a failed submitted summarize indeterminate until Stop", async () => {
+	it("keeps a failed submitted summarize indeterminate across an unowned Stop idle", async () => {
 		const relay = await createRelayHarness(recording(500), {
 			defaultModel: "opencode/big-pickle",
 		});
@@ -931,19 +943,97 @@ describe("Integration: OpenCode compaction through the relay", () => {
 				error_code: "delivery_indeterminate",
 			},
 		]);
+		const stopProof = () =>
+			Effect.runPromise(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					return {
+						commands: yield* sql<{
+							status: string;
+							provider_process_id: string | null;
+							payload_json: string;
+						}>`SELECT status, provider_process_id, payload_json FROM provider_command_outbox
+							WHERE session_id = ${sessionId} AND effect_type = 'interrupt_turn'`,
+						nativeIdle: yield* sql`SELECT sequence, data, metadata FROM events
+							WHERE session_id = ${sessionId} AND provider = 'opencode' AND type = 'session.status'
+							AND json_extract(data, '$.status') = 'idle' AND json_extract(metadata, '$.runId') IS NULL
+							AND sequence > (SELECT MAX(sequence) FROM events WHERE session_id = ${sessionId} AND type = 'interrupt.requested')`,
+						terminals: yield* sql`SELECT type, data, metadata FROM events
+							WHERE session_id = ${sessionId} AND type IN ('run.started', 'turn.completed', 'turn.interrupted', 'turn.error')`,
+					};
+				}).pipe(
+					Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
+				),
+			);
 		relay.mock.setExactResponse(
 			"POST",
 			`/session/${sessionId}/abort`,
 			200,
 			true,
 		);
-		await client.cancelSession(sessionId);
+		let stopSettled = false;
+		const stopped = client
+			.cancelSession(sessionId)
+			.then(
+				() => ({ _tag: "completed" as const }),
+				(error: unknown) => ({ _tag: "failed" as const, error }),
+			)
+			.finally(() => {
+				stopSettled = true;
+			});
 		await expect
-			.poll(state)
-			.toEqual([
-				{ status: "interrupted", started_at: null, error_code: "interrupted" },
-			]);
-		saveEvidence("summarize-failed", { notice, stored, state: await state() });
+			.poll(() =>
+				relay.mock.diagnostics.some(
+					(request) =>
+						request.event === "request" &&
+						request.detail?.split("?")[0] ===
+							`POST /session/${sessionId}/abort`,
+				),
+			)
+			.toBe(true);
+		await expect
+			.poll(async () =>
+				(await stopProof()).commands.map(({ status }) => status),
+			)
+			.toEqual(["completed"]);
+		// Native idle has no intake identity: it cannot settle a submitted send
+		// whose user echo never arrived, even after the abort was acknowledged.
+		relay.mock.injectSSEEvents([
+			{
+				type: "session.status",
+				properties: { sessionID: sessionId, status: { type: "idle" } },
+			},
+		]);
+		await expect
+			.poll(async () => (await stopProof()).nativeIdle.length)
+			.toBeGreaterThan(0);
+		const proof = await stopProof();
+		expect(proof.commands).toMatchObject([
+			{
+				status: "completed",
+				provider_process_id: expect.stringMatching(/^opencode:/),
+			},
+		]);
+		expect(proof.terminals).toEqual([]);
+		expect(stopSettled).toBe(false);
+		await client.close();
+		expect(await stopped).toMatchObject({
+			_tag: "failed",
+			error: expect.any(Error),
+		});
+		await expect.poll(state).toEqual([
+			{
+				status: "pending",
+				started_at: null,
+				error_code: "delivery_indeterminate",
+			},
+		]);
+		saveEvidence("summarize-failed", {
+			notice,
+			stored,
+			state: await state(),
+			stop: proof,
+		});
 	});
 
 	it("translates delta-first progress and a provider compaction error", async () => {

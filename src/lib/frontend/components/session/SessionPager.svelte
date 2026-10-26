@@ -4,7 +4,7 @@
 <!-- Renders nothing — the rows are rendered by SessionList's {#each}.          -->
 
 <script lang="ts">
-	import { onDestroy, onMount } from "svelte";
+	import { onDestroy, onMount, tick } from "svelte";
 	import { browsePage, currentSearchQuery, sessionList } from "../../stores/session-list.svelte.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
@@ -24,7 +24,7 @@
 		observer = new IntersectionObserver(
 			(entries) => {
 				for (const entry of entries) {
-					if (entry.isIntersecting) loadMore();
+					if (entry.isIntersecting) void loadMore();
 				}
 			},
 			// Ask one screen early so the next page is usually already in place by
@@ -52,13 +52,33 @@
 	});
 
 	// Search asks the server for another page; browse reveals rows already held.
-	function loadMore() {
+	async function loadMore() {
 		if (!hasMore) return;
 		const query = currentSearchQuery();
 		if (query !== null) {
 			void query.loadMore();
 			return;
 		}
-		void sessionList.loadMore(getCurrentSlug() ?? "");
+		const slug = getCurrentSlug();
+		const scroller = sentinelEl?.closest<HTMLElement>("#session-list-scroller");
+		const focused = document.activeElement;
+		const before = scroller?.contains(focused)
+			? focused?.getBoundingClientRect()
+			: undefined;
+		const viewport = scroller?.getBoundingClientRect();
+		const scrollTop = scroller?.scrollTop;
+		await sessionList.loadMore(slug ?? "");
+		await tick();
+		if (
+			before && viewport &&
+			before.bottom > viewport.top && before.top < viewport.bottom &&
+			scroller?.isConnected && focused?.isConnected &&
+			scroller.contains(focused) && document.activeElement === focused &&
+			scroller.scrollTop === scrollTop &&
+			getCurrentSlug() === slug && currentSearchQuery() === null
+		) {
+			// Keep the focused shelf in place when another page appears before it.
+			scroller.scrollTop += focused.getBoundingClientRect().top - before.top;
+		}
 	}
 </script>

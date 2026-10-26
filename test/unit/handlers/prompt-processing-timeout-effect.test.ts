@@ -36,10 +36,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { makeSilenceNotice } from "../../../src/lib/domain/relay/Services/turn-failure.js";
-import {
-	cancelSessionById,
-	handleMessage,
-} from "../../../src/lib/handlers/prompt.js";
+import { cancelSessionById } from "../../../src/lib/handlers/prompt.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -324,6 +321,7 @@ describe("prompt processing timeouts through Effect state", () => {
 								request: { text: "Charlie" },
 							}),
 						]);
+						// The receipt already passed admission; a composer retry is a no-op.
 						if (continuation)
 							yield* (yield* ProviderTurnServiceTag).sendTurn({
 								clientId: "client-1",
@@ -333,7 +331,9 @@ describe("prompt processing timeouts through Effect state", () => {
 								continuation: { cutOffMessageId: userId },
 							});
 						else
-							yield* handleMessage("client-1", {
+							yield* (yield* ProviderTurnServiceTag).sendTurn({
+								clientId: "client-1",
+								sessionId: "session-1",
 								text: "hello",
 								commandId: "cmd-timeout-send",
 							});

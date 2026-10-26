@@ -856,7 +856,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		await vi.waitFor(
 			() => {
 				const state = persisted(harness, sessionId);
-				// 4d3d157b: wake activity is busy on its completed run.
+				// A wake-up stays busy while retaining its completed run's ownership.
 				expect(state.session.status).toBe("busy");
 				expect(state.turns).toEqual([{ state: "completed" }]);
 				expect(
@@ -930,10 +930,14 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			expect(state.commands).toHaveLength(1);
 			expect(state.commands[0]?.status).toBe("completed");
 			expect(
-				state.events.filter((event) => event.type === "turn.completed"),
-			).toHaveLength(1);
+				state.events.filter(
+					(event) =>
+						event.type === "turn.completed" ||
+						event.type === "message.completed",
+				),
+			).toHaveLength(2);
 			expect(
-				state.events.filter((event) => event.type === "message.completed"),
+				state.events.filter((event) => event.type === "turn.completed"),
 			).toHaveLength(1);
 			expect(
 				state.events.filter(

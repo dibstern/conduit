@@ -222,7 +222,13 @@ describe("daemon shared RPC routing", () => {
 						yield* Stream.runHead(
 							rpcClient.SubscribeInputDraft({ key: { session: "session-b" } }),
 						),
-					).toEqual(Option.some({ _tag: "synchronized", text: "saved draft" }));
+					).toEqual(
+						Option.some({
+							_tag: "synchronized",
+							text: "saved draft",
+							attachments: [],
+						}),
+					);
 				for (const projectSlug of ["project-a", "project-b"]) {
 					expect(yield* rpcClient.GetCommands({ projectSlug })).toMatchObject({
 						projectSlug,

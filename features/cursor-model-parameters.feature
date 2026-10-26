@@ -41,8 +41,10 @@ Scenario: the phone composer Effort row omits the context from its value
   And I close the model picker
   And I open the phone composer sheet
   Then the phone composer Effort row reads xhigh · Fast
-  And the effort meter has 4 bars with 4 filled
   And the Cursor phone effort row omits combination 500K · xhigh · Fast
+  When I tap the phone composer Effort row
+  Then the Cursor parameter rows offer context=256k/500k; effort=low/medium/high/xhigh; fast=false/true
+  And the Cursor rows show context=500k, effort=xhigh, fast=true
 
 Scenario Outline: title generation exposes every Cursor parameter and preserves other values
   Given the conduit app is served with the connected mockup

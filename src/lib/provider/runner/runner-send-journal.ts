@@ -180,6 +180,7 @@ export class RunnerSendJournal {
 		directory: string,
 		private readonly sessionId: string,
 		private readonly driverKind: string,
+		options: { readonly allowOpaqueFences?: true } = {},
 	) {
 		this.directory = join(directory, "sends", sessionId);
 		mkdirSync(this.directory, { recursive: true, mode: 0o700 });
@@ -203,13 +204,23 @@ export class RunnerSendJournal {
 				this.records.set(filename, record);
 			} catch (cause) {
 				if (isRecord(cause) && cause["code"] === "ENOENT") continue;
-				// A partial snapshot could falsely call a retained send absent at n+1.
-				throw new RunnerSendJournalReadError({
-					message: runnerFailure("read retained runner send", cause).message,
-				});
+				// An unreadable key remains an opaque fence, as it does on main.
+				if (
+					!options.allowOpaqueFences ||
+					(!(cause instanceof SyntaxError) &&
+						!(cause instanceof RunnerSendJournalReadError))
+				)
+					throw new RunnerSendJournalReadError({
+						message: runnerFailure("read retained runner send", cause).message,
+					});
 			}
 			this.retained.add(filename);
 		}
+	}
+
+	/** Opaque fences can answer only a same-key command, never a complete snapshot. */
+	get canAnswerRetainedSends(): boolean {
+		return [...this.retained].every((filename) => this.records.has(filename));
 	}
 
 	/** Disk evidence gives the outcome; only a call in this journal gives ownership. */

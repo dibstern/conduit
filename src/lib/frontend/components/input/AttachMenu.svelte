@@ -37,21 +37,14 @@
 	const canSetGoal = $derived(discoveryState.currentTraits?.supportsGoalState);
 </script>
 
-<!-- `side="top"`: the composer sits at the bottom of the viewport, so the menu
-     opened upwards as-found. `sideOffset` restates the old
-     `bottom-[calc(100%+8px)]` gap rather than taking the 4px default.
-
-     `font-sans` was on each row as-found and is the composer's typeface --
-     the pills beside this button wear it too -- so it moves to the surface
-     rather than being repeated per row. This is the only menu in the app that
-     is not in the body font. -->
 <Menu
 	bind:open
 	ariaLabel="Attach"
 	side="top"
 	align="start"
 	sideOffset={8}
-	class="min-w-[240px] font-sans"
+	appearance="final"
+	class="w-[340px] max-w-[calc(100vw-24px)]"
 	data-testid="attach-menu"
 >
 	{#snippet trigger({ props })}
@@ -72,17 +65,17 @@
 	{/snippet}
 
 	<MenuItem id="attach-camera" density="touch" onselect={onCamera}>
-		<Icon name="camera" size={18} class="shrink-0" />
+		<Icon name="camera" size={16} class="shrink-0 text-text-dimmer" />
 		<span>Take Photo</span>
 	</MenuItem>
 
 	<MenuItem id="attach-photos" density="touch" onselect={onPhotos}>
-		<Icon name="image" size={18} class="shrink-0" />
+		<Icon name="image" size={16} class="shrink-0 text-text-dimmer" />
 		<span>Add Photos</span>
 	</MenuItem>
 
 	<MenuItem id="attach-files" density="touch" onselect={onFiles}>
-		<Icon name="file" size={18} class="shrink-0" />
+		<Icon name="file" size={16} class="shrink-0 text-text-dimmer" />
 		<span>Add Files</span>
 	</MenuItem>
 
@@ -93,10 +86,10 @@
 		disabled={!canSetGoal}
 		onselect={onSetGoal}
 	>
-		<Icon name="target" size={18} class="shrink-0 text-status-goal" />
+		<Icon name="target" size={16} class="shrink-0 text-status-goal" />
 		<span class="flex flex-col">
-			<span class="text-status-goal">{canSetGoal ? "Set goal" : "Goal"}</span>
-			<span class="text-[12px] text-text-muted">{canSetGoal ? "Same as $goal" : "Claude only"}</span>
+			<span>{canSetGoal ? "Set goal" : "Goal"}</span>
+			<span class="text-[12px] text-text-dimmer">{canSetGoal ? "Same as $goal" : "Claude only"}</span>
 		</span>
 	</MenuItem>
 </Menu>

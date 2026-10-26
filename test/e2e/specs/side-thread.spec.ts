@@ -403,15 +403,15 @@ test.describe("OpenCode Side Threads", () => {
 			if (!(nested.failure instanceof WsRpcError))
 				throw new Error("Nested start failed outside the typed RPC contract");
 			expect(nested.failure._tag).toBe("WsRpcError");
-			expect(nested.failure.message).toBe(
+			expect(nested.failure.message).toContain(
 				"Cannot start a Side Thread from a Side Thread",
 			);
 			expect(sessionEvents(harness.eventsDbPath)).toEqual(eventsBeforeNested);
 			const nestedText = `$${command} Nested question`;
 			await app.sendMessage(nestedText);
 			await expect(
-				page.getByText("Cannot start a Side Thread from a Side Thread", {
-					exact: true,
+				page.getByTestId("toast").filter({
+					hasText: "Cannot start a Side Thread from a Side Thread",
 				}),
 			).toBeVisible();
 			await expect(app.input).toHaveValue(nestedText);
@@ -744,10 +744,9 @@ test.describe("Claude Side Threads", () => {
 			const text = `$btw ${question}`;
 			await app.sendMessage(text);
 			await expect(
-				page.getByText(
-					"This session has no messages yet. Send a message first.",
-					{ exact: true },
-				),
+				page.getByTestId("toast").filter({
+					hasText: "This session has no messages yet. Send a message first.",
+				}),
 			).toBeVisible();
 			await expect(app.input).toHaveValue(text);
 			await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));

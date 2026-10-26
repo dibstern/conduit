@@ -11,6 +11,7 @@
 		type SaveProjectResponse,
 	} from "../../transport/ws-rpc.js";
 	import { type FolderIssue, labelProjectFolders } from "../../../project-folders.js";
+	import { issueText } from "./folder-issue-text.js";
 	import {
 		addFolder,
 		check,
@@ -73,7 +74,7 @@
 	let saveIssues = $state<readonly FolderIssue[]>([]);
 	let addIssues = $state<readonly FolderIssue[]>([]);
 	let saveError = $state("");
-	let picker = $state<{ focus: () => void }>();
+	let picker = $state<FolderPicker>();
 	const isPhone = $derived(sessionViewState.compact);
 	let viewportHeight = $state(0);
 	let keyboardInset = $state(0);
@@ -184,27 +185,9 @@
 	}
 
 	function handleKeydown(event: KeyboardEvent): void {
-		if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
+		if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing && !event.defaultPrevented) {
 			event.preventDefault();
-			void save();
-		}
-	}
-
-	function issueText(issue: FolderIssue): string {
-		switch (issue.kind) {
-			case "empty": return "Add at least one folder.";
-			case "duplicate": return `${issue.path} is already added.`;
-			case "main-taken": return `${issue.path} is already the main folder of`;
-			case "nested": return `${issue.path} is inside ${issue.parent}. Sessions can already edit it.`;
-			case "missing": return `${issue.path} no longer exists.`;
-			case "permission-denied": return `Permission denied: ${issue.path}. Check the folder permissions and try again.`;
-			case "not-a-folder": return `${issue.path} isn't a folder.`;
-			case "conduit-worktree": return `${issue.path} belongs to a session worktree and cannot be added to a project.`;
-			case "create-exists": return `${issue.path} already exists. Add it as an existing folder.`;
-			case "mkdir-failed": return `Couldn't create ${issue.path}: ${issue.message}`;
-			case "git-init-failed": return `Couldn't initialise git in ${issue.path}: ${issue.message}`;
-			case "unknown-project": return `Project ${issue.slug} no longer exists.`;
-			case "sessions-running": return `${issue.count} sessions are running. Save when they finish.`;
+			if (!picker?.toggleBrowsedFolder()) void save();
 		}
 	}
 </script>
@@ -249,13 +232,19 @@
 {/snippet}
 
 {#snippet saveButton()}
-	<Button variant="primary" size="content" ariaLabel={project ? "Save" : "Add project"} class={isPhone ? "h-[46px] w-full gap-[6px] rounded-full px-[14px] text-[15px] font-medium" : "h-[34px] gap-[6px] rounded-full px-[14px] text-[13.5px] font-medium max-md:min-h-[44px]"} loading={saving} disabled={!canSave} onclick={() => void save()}>{project ? "Save" : "Add project"} <span aria-hidden="true" class="font-mono text-[9px] max-md:hidden pointer-coarse:hidden">⌘↵</span></Button>
+	<Button variant="primary" size="content" ariaLabel={project ? "Save" : "Add project"} class={isPhone ? "h-[46px] w-full gap-[6px] rounded-full px-[14px] text-[15px] font-medium" : "h-[34px] gap-[6px] rounded-full px-[14px] text-[13.5px] font-medium max-md:min-h-[44px]"} loading={saving} disabled={!canSave} onclick={() => void save()}>{project ? "Save" : "Add project"} {#if !picker?.folderQuery().isPath}<span aria-hidden="true" class="font-mono text-[9px] max-md:hidden pointer-coarse:hidden">⌘↵</span>{/if}</Button>
 {/snippet}
 
 {#snippet phoneFooter()}
+	{@const browse = picker?.folderQuery()}
 	<div class="flex flex-col gap-[10px] px-[16px] pt-[12px]">
 		{@render folderChips()}
-		{@render saveButton()}
+		<div class="flex gap-[8px]">
+			{#if browse?.folder}
+				<Button variant="secondary" size="content" class="h-[46px] min-w-0 flex-1 truncate rounded-full px-[14px] text-[15px] font-medium" aria-pressed={draft.folders.some((folder) => folderPath(folder) === browse.folder)} disabled={saving} onclick={() => picker?.toggleBrowsedFolder()}>Check “{browse.crumbs.at(-1)?.label}”</Button>
+			{/if}
+			<div class="min-w-0 flex-1">{@render saveButton()}</div>
+		</div>
 	</div>
 {/snippet}
 

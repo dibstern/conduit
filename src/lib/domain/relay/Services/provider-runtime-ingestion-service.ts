@@ -97,6 +97,7 @@ export interface ProviderRuntimeIngestion {
 			/** Runs inside the append transaction, before any projection. */
 			readonly beforeProject?: Effect.Effect<void, SqlError>;
 			readonly beforeCommit?: Effect.Effect<void, SqlError>;
+			readonly requeueFailedInputs?: false;
 			readonly afterCommit?: Effect.Effect<void>;
 			readonly endedRunEvents?: Set<string>;
 		},
@@ -175,6 +176,7 @@ export const makeProviderRuntimeIngestionLive = (
 					readonly publishToRelay?: boolean;
 					readonly beforeProject?: Effect.Effect<void, SqlError>;
 					readonly beforeCommit?: Effect.Effect<void, SqlError>;
+					readonly requeueFailedInputs?: false;
 					readonly afterCommit?: Effect.Effect<void>;
 					readonly endedRunEvents?: Set<string>;
 					readonly onPrompt?: (id: string) => Effect.Effect<void>;
@@ -234,15 +236,19 @@ export const makeProviderRuntimeIngestionLive = (
 									event.type.startsWith("permission.") ||
 									event.type.startsWith("question.");
 								let redelivered = false;
+								let reconcileLegacyPrompt = false;
 								if (promptEvent) {
 									const data = isRecord(event.data) ? event.data : {};
 									const providerRequestId = requestId(event, data);
 									const processId = event.providerRefs.providerProcessId;
+									const type = event.type.startsWith("permission.")
+										? "permission"
+										: "question";
 									let [stored] = processId
 										? yield* sql<{
 												id: string;
 												status: string;
-											}>`SELECT id, status FROM pending_approvals WHERE session_id = ${event.sessionId} AND provider_process_id = ${processId} AND provider_request_id = ${providerRequestId}`
+											}>`SELECT id, status FROM pending_approvals WHERE session_id = ${event.sessionId} AND type = ${type} AND provider_process_id = ${processId} AND provider_request_id = ${providerRequestId}`
 										: [];
 									// Reconciled asks from any provider must retain legacy ids.
 									// Unknown resolutions still require the process reference or
@@ -253,10 +259,19 @@ export const makeProviderRuntimeIngestionLive = (
 											context?.consumed ||
 											nextState.promptIds?.has(promptKey(event)))
 									) {
-										[stored] = yield* sql<{
+										const [legacy] = yield* sql<{
 											id: string;
 											status: string;
-										}>`SELECT id, status FROM pending_approvals WHERE session_id = ${event.sessionId} AND id = ${providerRequestId} AND provider_process_id IS NULL`;
+											provider_request_id: string | null;
+										}>`SELECT id, status, provider_request_id FROM pending_approvals WHERE session_id = ${event.sessionId} AND type = ${type} AND id = ${providerRequestId} AND provider_process_id IS NULL`;
+										stored = legacy;
+										// A current OpenCode ask proves the legacy id's native owner.
+										reconcileLegacyPrompt =
+											event.providerId === "opencode" &&
+											processId?.startsWith("opencode:") === true &&
+											event.type.endsWith(".asked") &&
+											legacy?.status === "pending" &&
+											legacy.provider_request_id === null;
 									}
 									// A late answer from a replaced process cannot resolve an
 									// unrelated legacy row that happens to have its request id.
@@ -279,7 +294,8 @@ export const makeProviderRuntimeIngestionLive = (
 											),
 										};
 										redelivered =
-											event.type.endsWith(".asked") ||
+											(event.type.endsWith(".asked") &&
+												!reconcileLegacyPrompt) ||
 											stored.status === "resolved";
 									}
 								}
@@ -336,7 +352,22 @@ export const makeProviderRuntimeIngestionLive = (
 									)
 										promptIds.push(domain.data.id);
 								}
-								if (!redelivered) domainEvents.push(...result.events);
+								if (!redelivered)
+									domainEvents.push(
+										...result.events.map((domain) =>
+											reconcileLegacyPrompt &&
+											(domain.type === "permission.asked" ||
+												domain.type === "question.asked")
+												? {
+														...domain,
+														metadata: {
+															...domain.metadata,
+															source: "conduit.control-reconciliation",
+														},
+													}
+												: domain,
+										),
+									);
 								nextState = result.state;
 							}
 
@@ -468,6 +499,9 @@ export const makeProviderRuntimeIngestionLive = (
 								}
 							});
 							const commitOptions = {
+								...(ingestOptions.requeueFailedInputs === false
+									? { requeueFailedInputs: ingestOptions.requeueFailedInputs }
+									: {}),
 								...(ingestOptions.beforeCommit
 									? { beforeCommit: ingestOptions.beforeCommit }
 									: {}),

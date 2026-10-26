@@ -388,6 +388,8 @@ export async function createReplayHarness(
 			log: createSilentLogger(),
 		});
 	let stack: RelayStack = await startStack(0);
+	let stoppedStack: RelayStack | undefined;
+	let mockStopped = false;
 
 	const relayPort = stack.getPort();
 	const relayBaseUrl = `http://127.0.0.1:${relayPort}`;
@@ -424,8 +426,15 @@ export async function createReplayHarness(
 		},
 		async stop(): Promise<void> {
 			try {
-				await stack.stop();
-				await mock.stop();
+				// A later cleanup failure must not dispose the same runtime twice.
+				if (stoppedStack !== stack) {
+					await stack.stop();
+					stoppedStack = stack;
+				}
+				if (!mockStopped) {
+					await mock.stop();
+					mockStopped = true;
+				}
 			} finally {
 				await daemonReads?.dispose();
 				__setProbeOverrideForTesting(undefined);

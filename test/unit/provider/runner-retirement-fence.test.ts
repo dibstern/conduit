@@ -177,6 +177,10 @@ const retirementFixture = (
 		const replacementReady = yield* Deferred.make<void>();
 		const driver: ProcessRunnerDriver = {
 			driverKind,
+			legacyPrepareTurnEffect: (input) =>
+				Effect.succeed({
+					input: { ...input, prompt: input.text ?? "send", history: [] },
+				}),
 			...(withAccountScope ? { withAccountScope } : {}),
 			connect: vi.fn<ProcessRunnerDriver["connect"]>((options) =>
 				Effect.gen(function* () {
@@ -618,8 +622,14 @@ const s7Fixture = (
 			vi.mocked(f.driver.connect).mockImplementation((options) =>
 				connect({
 					...options,
-					onHello: (hello, connection, replay) =>
-						options.onHello(transform(hello), connection, replay),
+					onHello: (hello, connection, replay) => {
+						const retained = transform(hello);
+						Object.defineProperty(connection, "retainedSends", {
+							configurable: true,
+							get: () => retained.sendCommands,
+						});
+						return options.onHello(retained, connection, replay);
+					},
 				}),
 			);
 			return Effect.void;

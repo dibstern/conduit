@@ -81,7 +81,10 @@ import {
 	runnerFailure,
 	runnerSinkId,
 } from "./runner-protocol.js";
-import type { RunnerProviderInstanceDeps } from "./runner-provider-instance.js";
+import type {
+	RunnerDriverPieces,
+	RunnerProviderInstanceDeps,
+} from "./runner-provider-instance.js";
 import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
@@ -105,7 +108,12 @@ import {
 } from "./runner-registry.js";
 import { runnerSendCommandsForProcess } from "./runner-send-journal.js";
 import { failRunnerTurn, observeRunnerTurn } from "./runner-turn-failure.js";
-import { makeRunnerUpgrade, type RunnerUpgrade } from "./runner-upgrade.js";
+import {
+	makeRunnerUpgrade,
+	type RunnerSourceDelivery,
+	type RunnerUpgrade,
+	type RunnerUpgradeState,
+} from "./runner-upgrade.js";
 import { makeSendAdmissionWait } from "./send-admission.js";
 import { makeSendScopes, type SendScope } from "./send-scope.js";
 import type {
@@ -128,6 +136,7 @@ interface RunnerChild {
 	readonly sessionId: string;
 	readonly registrationRoot?: string;
 	launch?: Pick<SessionTurn, "workspaceRoot" | "extraFolders"> | undefined;
+	launchSnapshot?: RunnerUpgradeState["snapshot"];
 	readonly ready: Deferred.Deferred<RunnerSocket, SessionFailure>;
 	readonly stopped: Deferred.Deferred<void>;
 	readonly drained: Deferred.Deferred<void>;
@@ -152,6 +161,9 @@ interface RunnerChild {
 	interactionSinks?: Map<string, string>;
 	pendingSendCommands?: Map<string, number> | undefined;
 	ownedRunIds?: Set<string>;
+	/** One verified terminal delivery, including its release-sink unwind. */
+	sourceDelivery?: RunnerSourceDelivery | undefined;
+	deliveryWaiters?: Set<Deferred.Deferred<void>>;
 	readonly upgrade: RunnerUpgrade;
 }
 
@@ -179,12 +191,7 @@ interface ProcessRunnerDeps {
 export interface ProcessRunnerDriver {
 	readonly spawnEnvironment?: Readonly<Record<string, string>>;
 	readonly driverKind: string;
-	readonly legacyReplayCommandFields?: (
-		accountId: string,
-	) => Effect.Effect<
-		Partial<Extract<SessionCommand, { type: "send-turn" }>>,
-		SessionFailure
-	>;
+	readonly legacyPrepareTurnEffect?: RunnerDriverPieces["prepareTurnEffect"];
 	/** The account owner retains this demand until the native sink is released. */
 	readonly withAccountScope?: (
 		accountId: string,
@@ -232,6 +239,14 @@ const CANCELLED_TURN: TurnResult = {
 	providerStateUpdates: [],
 };
 
+// Notification is private to admission; it never changes account eligibility.
+const notifyEntry = (entry: Pick<RunnerChild, "deliveryWaiters">): void => {
+	const waiters = [...(entry.deliveryWaiters ?? [])];
+	// Completing a Deferred can synchronously register its next observation.
+	entry.deliveryWaiters?.clear();
+	for (const waiter of waiters) Deferred.doneUnsafe(waiter, Effect.void);
+};
+
 const legacyAnswerCommandId = (entry: RunnerChild, commandId: string) =>
 	entry.capabilities?.settlesAnswers === true
 		? undefined
@@ -239,11 +254,13 @@ const legacyAnswerCommandId = (entry: RunnerChild, commandId: string) =>
 
 // Every lifecycle write goes through this boundary; reduction itself is pure.
 const transition = (
-	entry: Pick<RunnerChild, "lifecycle">,
+	entry: Pick<RunnerChild, "lifecycle" | "deliveryWaiters" | "sourceDelivery">,
 	event: Entry.RunnerEntryTransition,
 ) => {
 	const ending = entry.lifecycle.end;
 	entry.lifecycle = Entry.nextRunnerLifecycle(entry.lifecycle, event);
+	if (!Entry.canReconfigure(entry.lifecycle)) entry.sourceDelivery = undefined;
+	notifyEntry(entry);
 	return event._tag === "FinishEnd" && ending?.pending === 1
 		? ending.released
 		: undefined;
@@ -256,6 +273,7 @@ const stop = (
 		| "stopped"
 		| "socketPath"
 		| "lifecycle"
+		| "deliveryWaiters"
 		| "pid"
 		| "child"
 		| "connection"
@@ -665,6 +683,7 @@ export const makeProcessSessionRunner = (
 				runnerId?: string | undefined;
 				inputId?: string;
 				runId?: string | undefined;
+				commandId?: string;
 				/** What a failed send places when the SDK never started it. */
 				placement?: {
 					inputId: string;
@@ -683,6 +702,37 @@ export const makeProcessSessionRunner = (
 			NonNullable<ReturnType<typeof sinks.get>>
 		>();
 		// Scope membership lasts through native cleanup; dispatched routes cancellation.
+		const observeSourceDelivery = (
+			entry: RunnerChild,
+			state: RunnerUpgradeState | undefined,
+		) => {
+			const delivery = state?.sourceDelivery;
+			const previous = entry.sourceDelivery;
+			const binding = delivery ? sinks.get(delivery.sinkId) : undefined;
+			// A released sink may disappear while its already-verified delivery unwinds.
+			const retained =
+				delivery &&
+				previous &&
+				previous.generation === delivery.generation &&
+				previous.sinkId === delivery.sinkId &&
+				previous.commandId === delivery.commandId &&
+				previous.inputId === delivery.inputId &&
+				previous.runId === delivery.runId;
+			const owned =
+				delivery &&
+				binding?.sessionId === entry.sessionId &&
+				binding.runnerId === entry.runnerId &&
+				binding.commandId === delivery.commandId &&
+				binding.inputId === delivery.inputId &&
+				binding.runId === delivery.runId;
+			entry.sourceDelivery =
+				delivery?.sessionId === entry.sessionId &&
+				delivery.runnerId === entry.runnerId &&
+				Entry.canReconfigure(entry.lifecycle) &&
+				(owned || retained)
+					? delivery
+					: undefined;
+		};
 		const pendingSends = new Map<
 			SendScope,
 			{
@@ -984,6 +1034,8 @@ export const makeProcessSessionRunner = (
 
 		const evict = (sessionId: string, entry: RunnerChild) =>
 			Effect.gen(function* () {
+				entry.sourceDelivery = undefined;
+				notifyEntry(entry);
 				const record = authority.records.get(entry.runnerId);
 				if (record?.identity.entry !== entry) return;
 				for (const [sinkId, binding] of [...sinks]) {
@@ -1038,6 +1090,26 @@ export const makeProcessSessionRunner = (
 					// Only survivor retirement takes durable cleanup ownership of runs.
 					yield* authority.revoke(record.grant, "exited");
 				}
+				const revoked = authority.records.get(entry.runnerId);
+				const pid = entry.pid ?? entry.child?.pid;
+				if (
+					receipts &&
+					pid !== undefined &&
+					!pidAlive(pid, entry.startTime) &&
+					(revoked?.tag._tag === "Exiting" ||
+						revoked?.tag._tag === "Retired") &&
+					revoked.identity.ownedRunIds.length === 0
+				)
+					yield* receipts
+						.pruneRetired(entry.runnerId)
+						.pipe(
+							Effect.catch((cause) =>
+								Effect.logWarning(
+									"Could not prune a settled exited runner",
+									cause,
+								),
+							),
+						);
 				forgetExited(entry);
 			}).pipe(
 				Effect.ensuring(
@@ -1051,6 +1123,7 @@ export const makeProcessSessionRunner = (
 			cause: Cause.Cause<SessionFailure>,
 		) =>
 			Effect.gen(function* () {
+				notifyEntry(entry);
 				yield* Deferred.failCause(entry.ready, cause);
 				yield* Deferred.succeed(entry.drained, undefined);
 				const ending = entry.lifecycle.end;
@@ -1319,6 +1392,8 @@ export const makeProcessSessionRunner = (
 				forgetExited(entry);
 			});
 		const detach = (entry: RunnerChild, failure?: SessionFailure) => {
+			entry.sourceDelivery = undefined;
+			notifyEntry(entry);
 			entry.connection?.destroy(failure);
 			entry.child?.unref();
 			if (entry.child?.connected) entry.child.disconnect();
@@ -1327,8 +1402,9 @@ export const makeProcessSessionRunner = (
 			.withPermits(1)(
 				Effect.gen(function* () {
 					closing = true;
-					yield* sendScopes.closeAll;
 					const entries = attachedEntries();
+					for (const entry of entries) notifyEntry(entry);
+					yield* sendScopes.closeAll;
 					const release = Effect.forEach(
 						entries,
 						(entry) =>
@@ -1556,7 +1632,11 @@ export const makeProcessSessionRunner = (
 			);
 		};
 
-		const attach = (sessionId: string, entry: RunnerChild) =>
+		const attach = (
+			sessionId: string,
+			entry: RunnerChild,
+			identityOnly = false,
+		) =>
 			Effect.gen(function* () {
 				const outputAuthority = { grant: entry.grant };
 				entry.outputAuthority = outputAuthority;
@@ -1699,7 +1779,7 @@ export const makeProcessSessionRunner = (
 																completed.result,
 																completed.failure,
 																now,
-																false,
+																true,
 																{
 																	project: projectEvents,
 																	nativeResumeFallback:
@@ -1805,21 +1885,154 @@ export const makeProcessSessionRunner = (
 								retain: (commandId, attempt) =>
 									entry.pendingSendCommands?.set(commandId, attempt),
 								ready: Deferred.await(entry.ready).pipe(Effect.asVoid),
-								replay: (row) =>
-									replayLegacyRunnerSend({
+								replay: (row, replayLock) => {
+									let admittedSend: SendScope | undefined;
+									const withAdmission = <A>(
+										input: Parameters<AdmitSend>[0]["input"],
+										sinkId: string,
+										work: (send: SendScope) => Effect.Effect<A, SessionFailure>,
+										journaled = false,
+									) => {
+										const retained = sinks.get(sinkId)?.sendScope;
+										return admitSend(
+											{
+												origin: { _tag: "Adopted" },
+												sinkId,
+												input,
+												...(retained
+													? { retained }
+													: admittedSend
+														? { previous: admittedSend }
+														: {}),
+												isEnded: runnerCommandEnded(
+													sql,
+													sessionId,
+													row.command_id,
+													row.attempt_count,
+												),
+												refuse: () => Effect.void,
+											},
+											(send) =>
+												Effect.gen(function* () {
+													admittedSend = send;
+													const pending = {
+														sessionId,
+														turnId:
+															input.continuation?.cutOffMessageId ??
+															input.inputId,
+														cancelled: yield* Deferred.make<void>(),
+														dispatched: journaled,
+													};
+													yield* authority
+														.guarded(
+															outputAuthority.grant,
+															{ kind: "output" },
+															Effect.gen(function* () {
+																yield* bindSink(sinkId, {
+																	sendScope: send,
+																	sessionId,
+																	commandId: row.command_id,
+																	inputId: input.inputId,
+																	runId: input.runId,
+																	messageId: row.assistant_message_id ?? "",
+																	runnerId: entry.runnerId,
+																	commandPending: true,
+																	accepted: journaled,
+																});
+																yield* bindPending(send, sinkId, pending);
+																if (journaled)
+																	sendScopes.dispatch(send, entry.runnerId);
+																if (
+																	!recoveryBindings.some(
+																		(binding) =>
+																			binding.commandId === row.command_id &&
+																			binding.sinkId === sinkId,
+																	)
+																)
+																	recoveryBindings = [
+																		...recoveryBindings,
+																		{
+																			sessionId,
+																			commandId: row.command_id,
+																			attempt: row.attempt_count,
+																			sinkId,
+																			released: false,
+																		},
+																	];
+															}),
+														)
+														.pipe(
+															Effect.flatMap(
+																Option.match({
+																	onNone: () => Effect.interrupt,
+																	onSome: Effect.succeed,
+																}),
+															),
+														);
+													return yield* Effect.raceFirst(
+														Deferred.await(pending.cancelled).pipe(
+															Effect.andThen(
+																Effect.fail({
+																	...runnerFailure(
+																		"send-turn",
+																		"Input cancelled before intake",
+																	),
+																	code: "cancelled",
+																}),
+															),
+														),
+														work(send),
+													);
+												}),
+										);
+									};
+									return replayLegacyRunnerSend({
 										sql,
 										row,
+										replayLock,
 										driverKind: driver.driverKind,
 										connection,
-										deps: {
-											...deps,
-											...(driver.legacyReplayCommandFields
-												? {
-														replayCommandFields:
-															driver.legacyReplayCommandFields,
-													}
-												: {}),
-										},
+										...(driver.legacyPrepareTurnEffect
+											? { prepareTurnEffect: driver.legacyPrepareTurnEffect }
+											: {}),
+										deps,
+										admitReplay: (input, sinkId, replay, journaled = false) =>
+											withAdmission(
+												input,
+												sinkId,
+												(send) =>
+													retainAccount(
+														send,
+														sinkId,
+														input.account?.id ?? row.provider_id,
+														connection,
+													).pipe(
+														Effect.catchIf(
+															() => journaled,
+															() => Effect.void,
+														),
+														Effect.andThen(replay),
+													),
+												journaled,
+											).pipe(
+												Effect.map(
+													(outcome) =>
+														Option.getOrUndefined(outcome) ?? {
+															result: undefined,
+															nativeResumeFallback:
+																input.nativeResumeFallback === true,
+														},
+												),
+												Effect.catchIf(
+													(failure) => failure.code === "cancelled",
+													() =>
+														Effect.succeed({
+															result: CANCELLED_TURN,
+															nativeResumeFallback:
+																input.nativeResumeFallback === true,
+														}),
+												),
+											),
 										liveSession: runner.getNativeSessionEffect(sessionId),
 										resolveSinkId: (commandId, inputId, attempt, fallback) => {
 											const inputSink = runnerSinkId(
@@ -1836,70 +2049,40 @@ export const makeProcessSessionRunner = (
 											currentEntry(sessionId) !== entry ||
 											entry.connection !== connection ||
 											connection.closed,
-										send: (commandId, command, attempt) =>
-											Effect.gen(function* () {
-												const existing = sinks.get(command.sinkId);
-												if (existing?.accepted)
+										send: (commandId, command, attempt) => {
+											const dispatch = (send: SendScope) =>
+												Effect.gen(function* () {
+													if (send.assignment._tag === "Closed")
+														return CANCELLED_TURN;
+													yield* retainAccount(
+														send,
+														command.sinkId,
+														row.provider_id,
+														connection,
+													);
+													const pending = pendingSends.get(send);
+													if (
+														pending &&
+														Deferred.isDoneUnsafe(pending.cancelled)
+													)
+														return CANCELLED_TURN;
+													sendScopes.dispatch(send, entry.runnerId);
+													if (pending) pending.dispatched = true;
 													return yield* connection.commandEffect(
 														commandId,
 														command,
 														attempt,
 													);
-												const admitted = yield* admitSend(
-													{
-														origin: { _tag: "Adopted" },
-														sinkId: command.sinkId,
-														input: command.input,
-														isEnded: runnerCommandEnded(
-															sql,
-															sessionId,
-															commandId,
-															attempt,
-														),
-														refuse: () => Effect.void,
-													},
-													(send) =>
-														Effect.gen(function* () {
-															sendScopes.dispatch(send, entry.runnerId);
-															yield* authority.guarded(
-																outputAuthority.grant,
-																{ kind: "output" },
-																bindSink(command.sinkId, {
-																	sendScope: send,
-																	sessionId,
-																	inputId: command.input.inputId,
-																	runId: command.input.runId,
-																	messageId: row.assistant_message_id ?? "",
-																	runnerId: entry.runnerId,
-																	commandPending: true,
-																	accepted: true,
-																}),
-															);
-															recoveryBindings = [
-																...recoveryBindings,
-																{
-																	sessionId,
-																	commandId,
-																	attempt,
-																	sinkId: command.sinkId,
-																	released: false,
-																},
-															];
-															yield* retainAccount(
-																send,
-																command.sinkId,
-																row.provider_id,
-																connection,
-															);
-															return yield* connection.commandEffect(
-																commandId,
-																command,
-																attempt,
-															);
-														}),
-												);
-												return Option.getOrUndefined(admitted);
-											}),
+												});
+											const retained = sinks.get(command.sinkId)?.sendScope;
+											return retained
+												? dispatch(retained)
+												: withAdmission(
+														command.input,
+														command.sinkId,
+														dispatch,
+													).pipe(Effect.map(Option.getOrUndefined));
+										},
 									}).pipe(
 										(effect) =>
 											authority.guarded(
@@ -1913,7 +2096,8 @@ export const makeProcessSessionRunner = (
 												onSome: Effect.succeed,
 											}),
 										),
-									),
+									);
+								},
 								settle: (answer) => settleRecoveredSends([answer], false),
 								release: (commandId) =>
 									Effect.gen(function* () {
@@ -1940,6 +2124,7 @@ export const makeProcessSessionRunner = (
 					...(entry.pid !== undefined ? { pid: entry.pid } : {}),
 					helloTimeoutMs: entry.child ? startupTimeoutMs : 2000,
 					...(entry.lifecycle.candidate ? { preserveRole: true } : {}),
+					...(identityOnly ? { identityOnly: true as const } : {}),
 					deps: {
 						workspaceRoot,
 						...entry.launch,
@@ -1951,7 +2136,8 @@ export const makeProcessSessionRunner = (
 							? { subagentPollTimeoutMs: deps.subagentPollTimeoutMs }
 							: {}),
 					},
-					...(receipts ? { receipts } : {}),
+					// A verified orphan can be stopped without claiming history's cursor.
+					...(receipts && !identityOnly ? { receipts } : {}),
 					checkpoint: (operation) =>
 						authority
 							// A receipt records transport progress, including discarded Starting
@@ -1977,6 +2163,7 @@ export const makeProcessSessionRunner = (
 								.pipe(Effect.asVoid),
 						),
 					emit: (output) => {
+						if (identityOnly) return Effect.interrupt;
 						if (output.type === "release-sink")
 							return Effect.gen(function* () {
 								const send = sinks.get(output.sinkId)?.sendScope;
@@ -2146,9 +2333,25 @@ export const makeProcessSessionRunner = (
 							log.info(
 								`${runnerLabel} attached for session ${sessionId}: build ${hello.buildId}, answers ${entry.capabilities.settlesAnswers ? "runner-settled" : "legacy answer-question/answer-permission"}`,
 							);
-							entry.upgrade.state = hello.upgradeState;
+							const observed = entry.upgrade.state;
+							const helloState = hello.upgradeState;
+							const latest =
+								observed &&
+								(!helloState || observed.revision >= helloState.revision)
+									? observed
+									: helloState;
+							const snapshot =
+								latest?.snapshot ??
+								observed?.snapshot ??
+								helloState?.snapshot ??
+								entry.launchSnapshot;
+							entry.upgrade.state = latest
+								? { ...latest, ...(snapshot ? { snapshot } : {}) }
+								: undefined;
+							notifyEntry(entry);
 							// Identity and native controls suffice until the project can reattach.
-							if (Entry.isAwaitingProject(entry.lifecycle)) return;
+							if (identityOnly || Entry.isAwaitingProject(entry.lifecycle))
+								return;
 							// Warming candidates have not replaced the active process yet.
 							if (!entry.lifecycle.candidate)
 								yield* lock.withPermits(1)(
@@ -2302,6 +2505,9 @@ export const makeProcessSessionRunner = (
 												sendScope,
 												sessionId,
 												runnerId: entry.runnerId,
+												...(binding.commandId
+													? { commandId: binding.commandId }
+													: {}),
 												...(inputId ? { inputId } : {}),
 												runId,
 												messageId,
@@ -2406,14 +2612,48 @@ export const makeProcessSessionRunner = (
 							}
 							yield* Effect.all(restoreAccounts, { discard: true });
 							yield* ensureAttached();
+							// Replay may publish a newer delivery state even without recovered sends.
+							if (
+								(!driver.withAccountScope || restoreAccounts.length === 0) &&
+								!entry.recoveringCommands &&
+								entry.upgrade.state?.sourceDelivery
+							)
+								yield* replay ?? Effect.void;
 							if (sql && entry.recoveringCommands) {
-								// Native output must commit before interpreting transport replies.
-								if (!driver.withAccountScope || restoreAccounts.length === 0)
-									yield* replay ?? Effect.void;
+								if (
+									replay &&
+									(!driver.withAccountScope || restoreAccounts.length === 0)
+								) {
+									// Request backlog now, without making startup wait for its commits.
+									runFork(
+										replay.pipe(
+											Effect.catchCause((cause) =>
+												Deferred.await(entry.ready).pipe(
+													Effect.ignore,
+													Effect.andThen(
+														Effect.sync(() =>
+															failed(
+																sessionId,
+																entry,
+																runnerFailure(
+																	"runner replay",
+																	Failure.squashCause(cause),
+																),
+															),
+														),
+													),
+												),
+											),
+										),
+									);
+								}
+								// Journal answers do not wait for backlog delivery to unblock startup.
 								if (hello.sendJournalAnswers === true)
 									yield* settleRecoveredSends(hello.sendAnswers ?? [], true);
 								else yield* recoverLegacySends(connection);
 							}
+							// Recovery can await output ACKs that publish a newer revision.
+							observeSourceDelivery(entry, entry.upgrade.state);
 							if (process.env["NODE_ENV"] === "test" && process.connected)
 								process.send?.({
 									channel: "conduit-process-test",
@@ -2519,13 +2759,34 @@ export const makeProcessSessionRunner = (
 						);
 					},
 					onUpgradeState: (state) => {
+						if (
+							entry.upgrade.state &&
+							state.revision < entry.upgrade.state.revision
+						)
+							return;
 						const wasInFlight = entry.upgrade.state?.turnInFlight === true;
-						const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
+						observeSourceDelivery(entry, state);
+						const snapshot =
+							state.snapshot ??
+							entry.upgrade.state?.snapshot ??
+							entry.launchSnapshot;
 						// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
 						entry.upgrade.state = {
 							...state,
 							...(snapshot ? { snapshot } : {}),
 						};
+						notifyEntry(entry);
+						if (
+							state.snapshot &&
+							process.env["NODE_ENV"] === "test" &&
+							process.env["CONDUIT_TEST_UPGRADE_SINK_PROOF"] === "1" &&
+							process.connected
+						)
+							process.send?.({
+								channel: "conduit-process-test",
+								kind: "runner-snapshot-observed",
+								sessionId,
+							});
 						if (
 							currentEntry(sessionId) === entry &&
 							wasInFlight &&
@@ -2804,7 +3065,8 @@ export const makeProcessSessionRunner = (
 						Effect.sync(() => {
 							transition(entry, { _tag: "MakeCandidate" });
 							entry.launch = old.launch ?? old.upgrade.state?.snapshot?.input;
-							entry.upgrade.state = old.upgrade.state;
+							// Host revisions are local to a child; only launch data crosses upgrades.
+							entry.launchSnapshot = old.upgrade.state?.snapshot;
 						}),
 					),
 				),
@@ -2912,6 +3174,8 @@ export const makeProcessSessionRunner = (
 							// Keep the old process visible to shutdown and liveness while
 							// stopping, without granting it the warming candidate's output.
 
+							old.sourceDelivery = undefined;
+							notifyEntry(old);
 							upgradeMark(sessionId, old, "switched", replacement);
 							runFork(
 								Effect.suspend(() =>
@@ -3008,22 +3272,19 @@ export const makeProcessSessionRunner = (
 							: [];
 					// Pre-outbox runners cannot answer command-status. Their final answer
 					// receipt, not the resolve receipt, proves the whole handoff completed.
-					const status = yield* Effect.result(
-						legacyAnswerId &&
-							(command?.effect_type === "resolve_question" ||
-								command?.effect_type === "resolve_permission")
-							? Effect.sync(() =>
-									connection.observedCommandStatus(legacyAnswerId),
-								)
-							: connection.commandStatusEffect(control.commandId),
-					);
+					// A failed status request stays uncertain even when its runner dies.
+					const status = yield* legacyAnswerId &&
+					(command?.effect_type === "resolve_question" ||
+						command?.effect_type === "resolve_permission")
+						? Effect.sync(() =>
+								connection.observedCommandStatus(legacyAnswerId),
+							)
+						: connection.commandStatusEffect(control.commandId);
 					const current = currentEntry(sessionId);
 					if (current && current.runnerId !== control.providerProcessId)
 						return "gone";
 					if (pid !== undefined && !pidAlive(pid, entry.startTime))
 						return "gone";
-					if (status._tag === "Failure")
-						return yield* Effect.fail(status.failure);
 					if (
 						current !== entry ||
 						entry.connection !== connection ||
@@ -3031,7 +3292,7 @@ export const makeProcessSessionRunner = (
 						!Entry.canControl(entry.lifecycle)
 					)
 						return yield* Effect.fail(unavailable());
-					return status.success;
+					return status;
 				});
 			}
 			getControlProcessIdEffect(
@@ -3422,7 +3683,7 @@ export const makeProcessSessionRunner = (
 						yield* Effect.gen(function* () {
 							yield* ensureRecovering;
 							let connected = yield* Effect.result(
-								attach(registration.sessionId, entry),
+								attach(registration.sessionId, entry, abandoned),
 							);
 							yield* ensureRecovering;
 							// A previous server may still own the socket while its shutdown
@@ -3439,7 +3700,7 @@ export const makeProcessSessionRunner = (
 								yield* Effect.sleep(100 * 2 ** retry);
 								yield* ensureRecovering;
 								connected = yield* Effect.result(
-									attach(registration.sessionId, entry),
+									attach(registration.sessionId, entry, abandoned),
 								);
 								yield* ensureRecovering;
 							}
@@ -3704,7 +3965,10 @@ export const makeProcessSessionRunner = (
 				A,
 				E,
 				R,
-				T extends Pick<SessionTurn, "sessionId" | "inputId" | "account">,
+				T extends Pick<
+					SessionTurn,
+					"sessionId" | "inputId" | "account" | "continuation"
+				>,
 			>(
 				input: T,
 				sinkId: string,
@@ -3712,44 +3976,66 @@ export const makeProcessSessionRunner = (
 				scope: SendScope,
 				accountId: string | undefined = input.account?.id,
 			): Effect.Effect<A, E | SessionFailure, R> {
-				return retainAccount(scope, sinkId, accountId).pipe(
-					Effect.andThen(() => {
-						const demand = accountDemands.get(scope);
-						return demand
-							? Effect.raceFirst(
-									work.pipe(
-										Effect.catchCause(
-											(cause): Effect.Effect<never, E | SessionFailure> =>
-												!closing &&
-												!Deferred.isDoneUnsafe(demand.dispatched) &&
-												Failure.isInterruptedOnly(cause)
-													? Effect.fail(
-															runnerFailure(
-																"prepare turn",
-																"Cursor account was invalidated",
-															),
-														)
-													: Effect.failCause(cause),
-										),
+				return Effect.gen(function* () {
+					const pending = pendingSends.get(scope) ?? {
+						sessionId: input.sessionId,
+						turnId: input.continuation?.cutOffMessageId ?? input.inputId,
+						cancelled: yield* Deferred.make<void>(),
+						dispatched: scope.assignment._tag === "Dispatched",
+					};
+					yield* bindPending(scope, sinkId, pending);
+					return yield* Effect.raceFirst(
+						Deferred.await(pending.cancelled).pipe(
+							Effect.andThen(
+								Effect.fail({
+									...runnerFailure(
+										"send-turn",
+										"Input cancelled before intake",
 									),
-									Deferred.await(demand.invalidated).pipe(
-										Effect.andThen(
-											Effect.suspend(() =>
-												Deferred.isDoneUnsafe(demand.dispatched)
-													? Effect.never
-													: Effect.fail(
-															runnerFailure(
-																"prepare turn",
-																"Cursor account was invalidated",
-															),
-														),
+									code: "cancelled",
+								}),
+							),
+						),
+						retainAccount(scope, sinkId, accountId).pipe(
+							Effect.andThen(() => {
+								const demand = accountDemands.get(scope);
+								return demand
+									? Effect.raceFirst(
+											work.pipe(
+												Effect.catchCause(
+													(cause): Effect.Effect<never, E | SessionFailure> =>
+														!closing &&
+														!Deferred.isDoneUnsafe(demand.dispatched) &&
+														Failure.isInterruptedOnly(cause)
+															? Effect.fail(
+																	runnerFailure(
+																		"prepare turn",
+																		"Cursor account was invalidated",
+																	),
+																)
+															: Effect.failCause(cause),
+												),
 											),
-										),
-									),
-								)
-							: work;
-					}),
-				);
+											Deferred.await(demand.invalidated).pipe(
+												Effect.andThen(
+													Effect.suspend(() =>
+														Deferred.isDoneUnsafe(demand.dispatched)
+															? Effect.never
+															: Effect.fail(
+																	runnerFailure(
+																		"prepare turn",
+																		"Cursor account was invalidated",
+																	),
+																),
+													),
+												),
+											),
+										)
+									: work;
+							}),
+						),
+					);
+				});
 			}
 
 			executeEffect(
@@ -3817,6 +4103,10 @@ export const makeProcessSessionRunner = (
 						unsentReleased = true;
 						return Effect.succeed({});
 					});
+				let deliveryRegistration:
+					| { entry: RunnerChild; changed: Deferred.Deferred<void> }
+					| undefined;
+				let deliveryDeadline: number | undefined;
 				const waitForAdmission =
 					command.type === "send-turn"
 						? makeSendAdmissionWait(
@@ -3991,12 +4281,40 @@ export const makeProcessSessionRunner = (
 									const legacyCursor =
 										driver.driverKind === "cursor" &&
 										existing.connection?.scopedCursorCredentials === false;
+									// Observe before checking, under selection. Await only after releasing it.
+									const changed = Deferred.makeUnsafe<void>();
+									(existing.deliveryWaiters ??= new Set()).add(changed);
+									deliveryRegistration = { entry: existing, changed };
+									const delivery = existing.sourceDelivery;
+									if (
+										command.type === "send-turn" &&
+										loginChange === "Account" &&
+										!foldersChanged &&
+										!legacyCursor &&
+										Entry.canReconfigure(existing.lifecycle) &&
+										delivery?.sessionId === sessionId &&
+										delivery.runnerId === existing.runnerId &&
+										delivery.generation > 0
+									) {
+										return {
+											entry: existing,
+											draining: true,
+											sourceDeliveryPending: changed,
+										};
+									}
+									existing.deliveryWaiters.delete(changed);
+									deliveryRegistration = undefined;
 									const decision = Entry.decideSend({
 										command: command.type,
 										lifecycle: existing.lifecycle,
 										quiescent: existing.upgrade.state?.quiescent === true,
 										rebindsAccount:
-											existing.capabilities?.rebindsAccount === true,
+											existing.capabilities?.rebindsAccount === true &&
+											// The capability predates guarded account admission. The
+											// shared dev sentinel cannot establish the child's build.
+											(loginChange !== "Account" ||
+												(existing.buildId !== "dev" &&
+													existing.buildId === runnerBuildId())),
 										changes: {
 											folders: foldersChanged,
 											login: loginChange,
@@ -4027,7 +4345,7 @@ export const makeProcessSessionRunner = (
 													),
 												),
 												code: "account_switch_busy",
-												retryable: false,
+												retryable: true,
 											});
 										case "Skip":
 											return { entry: undefined, draining: false };
@@ -4146,6 +4464,38 @@ export const makeProcessSessionRunner = (
 						);
 						entry = selection.entry;
 						draining = selection.draining;
+						if (
+							"sourceDeliveryPending" in selection &&
+							selection.sourceDeliveryPending
+						) {
+							const changed = selection.sourceDeliveryPending;
+							const now = yield* Clock.currentTimeMillis;
+							// Notifications and successor producers share this send's budget.
+							deliveryDeadline ??= now + STOP_ABORT_WAIT_MS;
+							const failure: SessionFailure = {
+								operation: command.type,
+								code: "account_switch_busy",
+								retryable: true,
+								message:
+									"Source delivery did not finish before account-switch admission. Resend the turn.",
+							};
+							if (now >= deliveryDeadline) return yield* Effect.fail(failure);
+							yield* Deferred.await(changed).pipe(
+								Effect.timeoutOrElse({
+									duration: deliveryDeadline - now,
+									orElse: () => Effect.fail(failure),
+								}),
+								Effect.ensuring(
+									Effect.sync(() => {
+										deliveryRegistration?.entry.deliveryWaiters?.delete(
+											changed,
+										);
+										deliveryRegistration = undefined;
+									}),
+								),
+							);
+							continue;
+						}
 						if ("recoveryPending" in selection && entry) {
 							const waiting = entry;
 							yield* Deferred.await(waiting.ready).pipe(
@@ -4483,6 +4833,13 @@ export const makeProcessSessionRunner = (
 							commandId,
 							command.input.commandAttempt ?? 0,
 						);
+					if (command.type === "send-turn") {
+						const binding = sinks.get(command.sinkId);
+						if (binding) {
+							binding.commandId = commandId;
+							binding.runnerId = entry.runnerId;
+						}
+					}
 					const legacyAnswerId = legacyAnswerCommandId(entry, commandId);
 					// Some unflagged builds already settle and cancel during resolve.
 					// Retain their sink so the final handshake receipt is still recorded.
@@ -4536,6 +4893,10 @@ export const makeProcessSessionRunner = (
 				}).pipe(
 					Effect.ensuring(
 						Effect.sync(() => {
+							deliveryRegistration?.entry.deliveryWaiters?.delete(
+								deliveryRegistration.changed,
+							);
+							deliveryRegistration = undefined;
 							if (!admitted) return;
 							transition(admitted, { _tag: "FinishCommand" });
 							upgrade(admittedSessionId, admitted);

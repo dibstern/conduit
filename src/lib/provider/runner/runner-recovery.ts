@@ -24,7 +24,13 @@ import {
 import { ProjectionRunnerEffectTag } from "../../persistence/effect/projection-runner-effect.js";
 import { runTerminalStatus } from "../../persistence/effect/projectors-effect.js";
 import { makeProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
+import { isRecord } from "../../utils.js";
+import {
+	ClaudeConfigDirSchema,
+	configuredClaudeConfigDir,
+} from "../claude/claude-sdk-env.js";
 import { recordClaudeNativeResumeFallback } from "../claude/prepare-turn.js";
+import { ProviderInstanceFailure } from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
 import { translateProviderRuntimeEventToDomain } from "../provider-runtime-event-to-domain.js";
 import type { TurnResult } from "../types.js";
@@ -121,9 +127,45 @@ export const runningRunnerCommands = (
 				AND run.status IN ('pending', 'running')))
 			AND outbox.effect_type = 'send_turn'
 		ORDER BY outbox.request_sequence`;
-		return rows.filter(
+		const commands = rows.filter(
 			(row) => driverForAccount(row.provider_id) === driverKind,
 		);
+		if (driverKind === "claude")
+			for (const row of commands) {
+				const payload = yield* Schema.decodeUnknownEffect(
+					Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+				)(row.payload_json).pipe(
+					Effect.mapError(
+						(cause) =>
+							new ProviderInstanceFailure({
+								providerId: "claude",
+								operation: "validate stored folders",
+								cause,
+							}),
+					),
+				);
+				const nativeThread = payload["nativeThread"];
+				for (const folder of [
+					payload["configDir"],
+					...(isRecord(nativeThread) ? [nativeThread["configDir"]] : []),
+				])
+					if (folder !== undefined)
+						yield* Schema.decodeUnknownEffect(ClaudeConfigDirSchema)(
+							typeof folder === "string"
+								? configuredClaudeConfigDir(folder)
+								: folder,
+						).pipe(
+							Effect.mapError(
+								(cause) =>
+									new ProviderInstanceFailure({
+										providerId: "claude",
+										operation: "validate stored folders",
+										cause,
+									}),
+							),
+						);
+			}
+		return commands;
 	});
 
 /** Live replies and reconnect hello settle through the caller's transaction. */

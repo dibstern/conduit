@@ -703,8 +703,7 @@ describe("Claude session process runner", () => {
 		writeFileSync(join(harness.root, "release-notification-parent"), "release");
 		await vi.waitFor(() => {
 			const state = persisted(harness, sessionId);
-			// 4d3d157b: a wake turn makes the session busy on its ended run
-			// while the durable turn stays completed.
+			// 4d3d157b keeps wake-up activity busy without reopening its ended run.
 			expect(state.session.status).toBe("busy");
 			expect(state.turns).toMatchObject([{ state: "completed" }]);
 			expect(

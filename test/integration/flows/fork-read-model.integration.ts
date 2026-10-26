@@ -505,6 +505,26 @@ describe("Fork read-model inheritance", () => {
 			branchName: "conduit/old-owner",
 			head: "a".repeat(40),
 		};
+		const worktreeOwnership =
+			state === "malformed"
+				? { _tag: "Owned", ownership: "invalid" }
+				: state === "conflict"
+					? { _tag: "Conflict", reason: "launch", discoveryPaths: [] }
+					: state === "null"
+						? null
+						: { _tag: "Owned", ownership: [], discoveryPaths: [] };
+		const newerData = JSON.stringify({ sessionId, worktreeOwnership });
+		const rewriteMarkers = Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			if (legacy)
+				yield* sql`UPDATE events SET data = json_remove(data, '$.worktreeOwnership')
+					WHERE project_id = 'integration-test' AND session_id = ${sessionId}
+						AND type = 'session.deleted' AND json_extract(data, '$.sessionId') = session_id`;
+			yield* sql`INSERT INTO events
+				(event_id, session_id, stream_version, type, data, metadata, provider, created_at, project_id)
+				SELECT event_id || '-newer', session_id, stream_version + 1, type, ${newerData}, metadata, provider, created_at + 1, project_id
+				FROM events WHERE session_id = ${sessionId} AND type = 'session.deleted'`;
+		});
 		await runtime.runPromise(
 			Effect.gen(function* () {
 				yield* applySessionCommand({
@@ -521,46 +541,40 @@ describe("Fork read-model inheritance", () => {
 						ownership: [owned],
 					},
 				});
-				yield* applySessionCommand({
-					type: "session.deleted",
-					data: { sessionId },
-				});
+				const commit = yield* makeCommitAndSignal;
+				yield* commit.write((project) =>
+					Effect.gen(function* () {
+						yield* applySessionCommand(
+							{ type: "session.deleted", data: { sessionId } },
+							{ project, upstreamAdapter: null },
+						);
+						if (legacy) {
+							expect(yield* readSessionWorktreeOwnership(sessionId)).toEqual([
+								owned,
+							]);
+							// A queued startup sweep may run despite the scoped kick override.
+							// Commit the historical fixture before any sweep can reclaim it.
+							yield* rewriteMarkers;
+						}
+					}),
+				);
 			}).pipe(
 				Effect.provideService(EventRetentionSchedulerTag, {
 					kick: Effect.void,
 				}),
 			),
 		);
-		if (!legacy) await harness.drainEventRetention();
-		expect(
-			await runtime.runPromise(readSessionWorktreeOwnership(sessionId)),
-		).toEqual([owned]);
-		const worktreeOwnership =
-			state === "malformed"
-				? { _tag: "Owned", ownership: "invalid" }
-				: state === "conflict"
-					? { _tag: "Conflict", reason: "launch", discoveryPaths: [] }
-					: state === "null"
-						? null
-						: { _tag: "Owned", ownership: [], discoveryPaths: [] };
-		const newerData = JSON.stringify({ sessionId, worktreeOwnership });
-		await runtime.runPromise(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				yield* sql.withTransaction(
-					Effect.gen(function* () {
-						if (legacy)
-							yield* sql`UPDATE events SET data = json_remove(data, '$.worktreeOwnership')
-						WHERE project_id = 'integration-test' AND session_id = ${sessionId}
-							AND type = 'session.deleted' AND json_extract(data, '$.sessionId') = session_id`;
-						yield* sql`INSERT INTO events
-					(event_id, session_id, stream_version, type, data, metadata, provider, created_at, project_id)
-					SELECT event_id || '-newer', session_id, stream_version + 1, type, ${newerData}, metadata, provider, created_at + 1, project_id
-					FROM events WHERE session_id = ${sessionId} AND type = 'session.deleted'`;
-					}),
-				);
-			}),
-		);
+		if (!legacy) {
+			await harness.drainEventRetention();
+			expect(
+				await runtime.runPromise(readSessionWorktreeOwnership(sessionId)),
+			).toEqual([owned]);
+			await runtime.runPromise(
+				Effect.flatMap(SqlClient.SqlClient, (sql) =>
+					sql.withTransaction(rewriteMarkers),
+				),
+			);
+		}
 		await harness.drainEventRetention();
 		const db = new Database(harness.eventsDbPath, { readonly: true });
 		try {

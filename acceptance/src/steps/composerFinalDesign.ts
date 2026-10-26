@@ -63,6 +63,12 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const page = world.page;
 			const state = match[1] ?? "";
+			const hasOptions = state === "auto-switch" || state === "at-reset";
+			const expectedActions = hasOptions
+				? ["send", "composer-send-menu-trigger", "stop"]
+				: state === "idle"
+					? ["send"]
+					: ["send", "stop"];
 			const touch = await page.context().newCDPSession(page);
 			await touch.send("Emulation.setTouchEmulationEnabled", {
 				enabled: true,
@@ -88,7 +94,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					await expect(control).toBeVisible();
 				await expect
 					.poll(() =>
-						layout.evaluate((element) => {
+						layout.evaluate((element, expectedActions) => {
 							const frame = document.querySelector("#input-row");
 							const actions = Array.from(
 								element.querySelectorAll<HTMLElement>(
@@ -96,6 +102,12 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 								),
 							);
 							if (!frame || !actions.length) return ["Missing footer actions"];
+							if (
+								actions
+									.map((action) => action.dataset["testid"] || action.id)
+									.join() !== expectedActions.join()
+							)
+								return ["Missing expected footer actions"];
 							const actionBoxes = actions.map((action) =>
 								action.getBoundingClientRect(),
 							);
@@ -107,6 +119,16 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 								),
 							);
 							const problems: string[] = [];
+							// Separate protocol reads can straddle a footer resize.
+							for (const [index, current] of actionBoxes.entries()) {
+								const previous = actionBoxes[index - 1];
+								if (!previous) continue;
+								const gap = actions[index]?.id === "stop" ? 5 : 0;
+								if (current.x - previous.right !== gap)
+									problems.push(
+										`Footer actions have a ${current.x - previous.right}px gap instead of ${gap}px`,
+									);
+							}
 							const targets = controls.flatMap((control) => {
 								if (!control.getClientRects().length) return [];
 								const body = control.getBoundingClientRect();
@@ -227,7 +249,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 							if (document.documentElement.scrollWidth > window.innerWidth)
 								problems.push("Footer causes horizontal scrolling");
 							return problems;
-						}),
+						}, expectedActions),
 					)
 					.toEqual([]);
 				const fit = await layout.getAttribute("data-footer-fit");
@@ -245,28 +267,22 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 				expect(sendBox.height).toBe(34);
 				if (state === "goal") await expect(send).toHaveText("Set goal");
 				const options = layout.getByTestId("composer-send-menu-trigger");
-				const hasOptions = state === "auto-switch" || state === "at-reset";
 				if (hasOptions) {
 					const optionsBox = await box(options);
 					expect(optionsBox.width).toBe(28);
 					expect(optionsBox.height).toBe(34);
-					expect(optionsBox.x).toBe(sendBox.x + sendBox.width);
 					await expect(send).toHaveCSS("border-top-right-radius", "0px");
 					await expect(options).toHaveCSS("border-top-left-radius", "0px");
 				} else await expect(options).toHaveCount(0);
 				const stop = page.locator("#stop");
 				if (state === "idle") await expect(stop).toHaveCount(0);
-				else {
-					await expectSquare(stop, 34);
-					const preceding = await box(hasOptions ? options : send);
-					expect((await box(stop)).x - preceding.x - preceding.width).toBe(5);
-				}
+				else await expectSquare(stop, 34);
 			}
 		},
 	},
 	{
-		name: "assert pinned teal goal command",
-		match: /^the built-in menu pins \$goal first in teal$/,
+		name: "assert pinned goal command with teal icon",
+		match: /^the built-in menu pins \$goal first with a teal icon$/,
 		run: async ({ world }) => {
 			const menu = world.page.getByRole("listbox", {
 				name: "Built-in commands",
@@ -279,21 +295,29 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			);
 			await expect
 				.poll(() =>
-					first.locator(".cmd-name").evaluate((element) => {
+					first.evaluate((element) => {
+						const icon = element.querySelector("svg");
+						const name = element.querySelector(".cmd-name");
+						if (!icon || !name) return false;
 						const probe = document.createElement("span");
 						probe.style.color = "var(--color-status-goal)";
 						element.append(probe);
-						const expected = getComputedStyle(probe).color;
+						const expectedIcon = getComputedStyle(probe).color;
+						probe.style.color = "var(--color-text)";
+						const expectedName = getComputedStyle(probe).color;
 						probe.remove();
-						return getComputedStyle(element).color === expected;
+						return (
+							getComputedStyle(icon).color === expectedIcon &&
+							getComputedStyle(name).color === expectedName
+						);
 					}),
 				)
 				.toBe(true);
 		},
 	},
 	{
-		name: "assert command menu spans composer",
-		match: /^the command menu spans the composer width$/,
+		name: "assert compact command menu fits composer",
+		match: /^the compact command menu fits the composer width$/,
 		run: async ({ world }) => {
 			await expect
 				.poll(async () => {
@@ -303,7 +327,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					const composer = await box(world.page.locator("#input-row"));
 					return (
 						Math.abs(menu.x - composer.x) <= 1 &&
-						Math.abs(menu.width - composer.width) <= 1
+						Math.abs(menu.width - Math.min(340, composer.width)) <= 1
 					);
 				})
 				.toBe(true);

@@ -7,6 +7,7 @@
 	import { DISMISS_FRACTION, FLICK_PX_PER_MS, placeSheet } from "../../actions/drag-to-dismiss.js";
 	import { applyInstanceListResponse, getInstanceById } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
+	import { setUsageFooterCollapsed, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, orderedUsageAccounts, usageState } from "../../stores/usage.svelte.js";
 	import { usageDisplay, usageResetTime } from "../../utils/continuation.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -49,6 +50,53 @@
 	// A pull ends in a click on the dock, which must not reopen a sheet the release put away.
 	let swallowClick = false;
 	let defaultSaving = $state(false);
+	// The desktop footer folds away the accounts the phone dock leaves out; its handle drags between the two.
+	const collapsed = $derived(uiState.usageFooterCollapsed && folded.length > 0);
+	const moreLabel = $derived(folded.length === 1 && folded[0] ? `+1 ${harnessLabels[folded[0].harness]} account` : `+${folded.length} more`);
+	// A mouse is precise: a few pixels tell a drag from a click.
+	const GRAB_SLOP_PX = 4;
+	let footer: HTMLElement | undefined = $state();
+	let grab: { startY: number; lastY: number; lastTime: number; velocity: number; from: number; range: number } | undefined;
+	// 1 shows every account, 0 only the docked ones; set while the handle is dragged.
+	let dragOpen: number | undefined = $state();
+	const footerOpen = $derived(dragOpen ?? (collapsed ? 0 : 1));
+
+	function foldsAway(accountId: string) {
+		return folded.some((reading) => reading.accountId === accountId);
+	}
+
+	function grabFooter(event: PointerEvent) {
+		if (!event.isPrimary || !footer) return;
+		swallowClick = false;
+		// Folded rows keep their full scrollHeight while clipped, so this is the distance the footer travels.
+		const range = [...footer.querySelectorAll<HTMLElement>(".fold")].reduce((sum, element) => sum + element.scrollHeight, 0);
+		grab = { startY: event.clientY, lastY: event.clientY, lastTime: event.timeStamp, velocity: 0, from: footerOpen, range };
+		if (event.currentTarget instanceof Element) event.currentTarget.setPointerCapture(event.pointerId);
+	}
+
+	function dragFooter(event: PointerEvent) {
+		if (!grab || grab.range === 0) return;
+		const travel = grab.startY - event.clientY;
+		if (dragOpen === undefined && Math.abs(travel) < GRAB_SLOP_PX) return;
+		swallowClick = true;
+		const elapsed = event.timeStamp - grab.lastTime;
+		if (elapsed > 0) grab.velocity = (event.clientY - grab.lastY) / elapsed;
+		grab.lastY = event.clientY;
+		grab.lastTime = event.timeStamp;
+		dragOpen = Math.min(Math.max(grab.from + travel / grab.range, 0), 1);
+	}
+
+	function releaseFooter(cancelled: boolean) {
+		const ended = grab;
+		grab = undefined;
+		if (!ended || dragOpen === undefined) return;
+		const wasOpen = ended.from === 1;
+		const pulled = wasOpen ? 1 - dragOpen : dragOpen;
+		const flicked = wasOpen ? ended.velocity > FLICK_PX_PER_MS : ended.velocity < -FLICK_PX_PER_MS;
+		const toggles = !cancelled && (pulled > DISMISS_FRACTION || flicked);
+		dragOpen = undefined;
+		setUsageFooterCollapsed(toggles === wasOpen);
+	}
 
 	async function makeDefault(instanceId: string) {
 		if (defaultSaving || getInstanceById(instanceId)?.isDefault) return;
@@ -185,13 +233,17 @@
 {#snippet meter(rows: readonly UsageReading[], prefix: "usage-footer" | "usage-sheet", size: "sidebar" | "phone", continues?: string)}
 	{@const rowClass = "account-row px-[6px]"}
 	{#each groupsOf(rows) as group, groupIndex (group.harness)}
-		<div data-testid="{prefix}-group-{group.harness}" class="meter-group w-full {groupIndex > 0 ? 'mt-[6px]' : ''}">
+		<!-- Only the desktop footer folds; a group goes with its last row. -->
+		{@const groupFolds = size === "sidebar" && group.rows.every((row) => foldsAway(row.reading.accountId))}
+		<div data-testid="{prefix}-group-{group.harness}" class="meter-group w-full {groupIndex > 0 ? (groupFolds ? 'fold-gap' : 'mt-[6px]') : ''}">
 			{#if group.harness !== continues && (size === "sidebar" || prefix === "usage-sheet" || accounts.length === 1)}
+				<div class:fold={groupFolds} class:fold-heading={groupFolds} inert={groupFolds && collapsed}>
 				<div class="{rowClass} grid items-center gap-[6px] text-text-dimmer {size === 'sidebar' ? 'h-[22px] text-[11.5px]' : 'h-[28px] text-[12.5px]'}">
 					<span data-testid="{prefix}-heading-{group.harness}" class="font-semibold text-text-secondary">{harnessLabels[group.harness]}</span>
 					{#each group.columns as kind, index (kind)}
 						<span data-testid="{prefix}-column-{group.harness}-{kind}" class="{group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : ''}">{windowLabels[kind]}</span>
 					{/each}
+				</div>
 				</div>
 			{/if}
 			{#each group.rows as row (row.id)}
@@ -211,6 +263,8 @@
 						{@render cell(prefix, reading, kind, group.columns.length === 1 ? 'spanning-window' : index === 1 ? 'second-window' : '', row.id)}
 					{/each}
 				{/snippet}
+				{@const rowFolds = size === "sidebar" && foldsAway(reading.accountId)}
+				<div class:fold={rowFolds} class:fold-row={rowFolds} inert={rowFolds && collapsed}>
 				{#if canSelect}
 					<TextButton tone="inherit" data-testid="{prefix}-row-{row.id}" data-default={isDefault} title={[isDefault ? "Current account" : "", row.detail].filter(Boolean).join(" · ") || undefined} aria-label="Make {accountName} the default {harnessLabels[group.harness]} account" onclick={() => makeDefault(reading.accountId)} class="{rowClass} grid w-full items-center gap-[6px] rounded-[7px] text-left {prefix === 'usage-sheet' ? 'h-[34px] text-[14px]' : size === 'phone' ? 'h-[30px] text-[13px]' : 'h-[24px] text-[12px]'} {isDefault ? 'bg-chip' : ''}">
 						{@render rowContent()}
@@ -220,6 +274,7 @@
 						{@render rowContent()}
 					</div>
 				{/if}
+				</div>
 			{/each}
 		</div>
 	{/each}
@@ -233,7 +288,7 @@
 	{#if folded.length > 0}
 		<!-- Its height is the distance the sheet's rest slides up to close the gap it leaves. -->
 		<span data-testid="{morePrefix}-more" aria-hidden={prefix === "usage-sheet" || undefined} class="flex h-[28px] items-center gap-[6px] px-[6px] text-[12.5px] text-text-dimmer {prefix === 'usage-sheet' ? 'sheet-fades' : ''}">
-			<span data-testid="{morePrefix}-more-count">{folded.length === 1 && folded[0] ? `+1 ${harnessLabels[folded[0].harness]} account` : `+${folded.length} more`}</span>
+			<span data-testid="{morePrefix}-more-count">{moreLabel}</span>
 			{#each folded as reading (reading.accountId)}
 				<AccountDot instanceId={reading.accountId} size={6} data-testid="{morePrefix}-folded-{reading.accountId}" />
 			{/each}
@@ -306,7 +361,34 @@
 			</SheetChrome>
 	</Dialog>
 {:else if single || grid}
-	<div data-testid="usage-footer-meter" class="flex shrink-0 flex-col border-t border-border-subtle px-[8px] pt-[8px] pb-[10px] text-left text-[12px]">
+	<div
+		bind:this={footer}
+		data-testid="usage-footer-meter"
+		data-collapsed={collapsed}
+		style:--usage-open={footerOpen}
+		class:folding={dragOpen !== undefined}
+		class="flex shrink-0 flex-col border-t border-border-subtle px-[8px] {single || folded.length === 0 ? 'pt-[8px]' : ''} pb-[10px] text-left text-[12px]"
+	>
+		{#if !single && folded.length > 0}
+			<!-- Like the phone dock's grab handle: drag it, or click it, to fold the accounts that need no attention. -->
+			<TextButton
+				tone="inherit"
+				data-testid="usage-footer-handle"
+				aria-label={collapsed ? "Show usage for every account" : "Fold usage to the current account"}
+				aria-expanded={!collapsed}
+				onclick={() => {
+					if (swallowClick) swallowClick = false;
+					else setUsageFooterCollapsed(!collapsed);
+				}}
+				onpointerdown={grabFooter}
+				onpointermove={dragFooter}
+				onpointerup={() => releaseFooter(false)}
+				onpointercancel={() => releaseFooter(true)}
+				class="flex h-[14px] w-full shrink-0 cursor-grab touch-none items-center justify-center"
+			>
+				<span aria-hidden="true" class="h-[4px] w-[32px] rounded-full bg-border-chip"></span>
+			</TextButton>
+		{/if}
 		{#if single}
 			<!-- A lone account is already its harness default, so the row is not a button. -->
 			<div data-testid="usage-footer-single" class="flex h-[26px] items-center gap-[8px] whitespace-nowrap px-[6px] text-[11.5px]">
@@ -316,7 +398,19 @@
 		{:else}
 			{@render meter(accounts, "usage-footer", "sidebar")}
 		{/if}
-		<TextButton tone="accent" data-testid="usage-footer-settings" onclick={() => openSettings("usage")} class="mt-[6px] self-end px-[6px] text-[11.5px]">Usage settings ›</TextButton>
+		<div class="mt-[6px] flex items-center">
+			{#if !single && folded.length > 0}
+				<span class="more-summary min-w-0" inert={!collapsed}>
+					<TextButton tone="dimmer" data-testid="usage-footer-more" onclick={() => setUsageFooterCollapsed(false)} class="flex max-w-full items-center gap-[6px] px-[6px] text-[11.5px]">
+						<span data-testid="usage-footer-more-count" class="truncate">{moreLabel}</span>
+						{#each folded as reading (reading.accountId)}
+							<AccountDot instanceId={reading.accountId} size={6} data-testid="usage-footer-folded-{reading.accountId}" />
+						{/each}
+					</TextButton>
+				</span>
+			{/if}
+			<TextButton tone="accent" data-testid="usage-footer-settings" onclick={() => openSettings("usage")} class="ml-auto shrink-0 px-[6px] text-[11.5px]">Usage settings ›</TextButton>
+		</div>
 	</div>
 {/if}
 
@@ -334,6 +428,42 @@
 
 	.spanning-window {
 		grid-column: span 2;
+	}
+
+	/* --usage-open runs from 1 (every account) to 0 (docked accounts only).
+	   Row and heading heights match their h-[24px] and h-[22px] classes. */
+	.fold {
+		overflow: hidden;
+		opacity: var(--usage-open);
+	}
+	.fold-heading {
+		height: calc(var(--usage-open) * 22px);
+	}
+	.fold-row {
+		height: calc(var(--usage-open) * 24px);
+	}
+	.fold-gap {
+		margin-top: calc(var(--usage-open) * 6px);
+	}
+	.more-summary {
+		opacity: calc(1 - var(--usage-open));
+	}
+	.fold,
+	.fold-gap,
+	.more-summary {
+		transition-property: height, margin-top, opacity;
+		transition-duration: 220ms;
+		transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+	}
+	.folding :is(.fold, .fold-gap, .more-summary) {
+		transition: none;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.fold,
+		.fold-gap,
+		.more-summary {
+			transition: none;
+		}
 	}
 
 	/* The "+N more" line only makes sense folded: as the sheet rises it fades,

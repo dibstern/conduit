@@ -15,6 +15,7 @@
  * - A subsequent rename reads updated ownership; deletion removes the renamed branches when merged.
  * - An owned branch can become a parent or child ref name when no other branch conflicts.
  * - Branch renames preserve workspace paths, cause, and pending user moves.
+ * - Checkout-only cleanup retains renamed branches; explicit deletion later removes them when merged.
  * Write every folder's refs and HEAD before and after each rename, including failures.
  */
 import { execFileSync } from "node:child_process";
@@ -413,6 +414,21 @@ process.exit(result.status ?? 1);
 		const cursor = browser.frames.length;
 		const branchName = "feature/renamed-session";
 		expect(await rename(session.id, branchName)).toEqual({ ok: true });
+		const row = await browser.waitFor(
+			(message) => {
+				if (message["type"] !== "session_row" || message["id"] !== session.id)
+					return false;
+				const status = message["git"] as SessionInfo["git"];
+				return (
+					status?.branch === branchName &&
+					status.folders?.length === 2 &&
+					status.folders.every((folder) => folder.branch === branchName)
+				);
+			},
+			cursor,
+			2_000,
+		);
+		evidence["publishedGitRow"] = row;
 		const current = await find(session.id);
 		expect(current.workspace).toEqual(session.workspace);
 		expect(current.git?.branch).toBe(branchName);
@@ -420,17 +436,6 @@ process.exit(result.status ?? 1);
 			branchName,
 			branchName,
 		]);
-		const row = await browser.waitFor(
-			(message) => {
-				if (message["type"] !== "session_row" || message["id"] !== session.id)
-					return false;
-				const status = message["git"] as SessionInfo["git"];
-				return status?.branch === branchName;
-			},
-			cursor,
-			2_000,
-		);
-		evidence["publishedGitRow"] = row;
 		expect(row["canRenameBranch"]).toBe(true);
 		for (const folder of [fixture.projectDir, secondary]) {
 			expect(git(checkout(session, folder), "branch", "--show-current")).toBe(
@@ -469,7 +474,14 @@ process.exit(result.status ?? 1);
 		const nextName = "feature/renamed-after-restart";
 		expect(await rename(session.id, nextName)).toEqual({ ok: true });
 		expect((await find(session.id)).workspace).toEqual(session.workspace);
-		expect((await find(session.id)).git?.branch).toBe(nextName);
+		await vi.waitFor(
+			async () =>
+				expect((await find(session.id)).git).toMatchObject({
+					branch: nextName,
+					folders: [{ branch: nextName }, { branch: nextName }],
+				}),
+			{ timeout: 2_000 },
+		);
 		for (const folder of [fixture.projectDir, secondary]) {
 			expect(git(checkout(session, folder), "branch", "--show-current")).toBe(
 				nextName,
@@ -959,9 +971,13 @@ process.exit(result.status ?? 1);
 		const branchName = "feature/shared-folders";
 		expect(await rename(session.id, branchName)).toEqual({ ok: true });
 		expect((await find(session.id)).workspace).toEqual(session.workspace);
-		expect(
-			(await find(session.id)).git?.folders?.map(({ branch }) => branch),
-		).toEqual([branchName, branchName, branchName]);
+		await vi.waitFor(
+			async () =>
+				expect(
+					(await find(session.id)).git?.folders?.map(({ branch }) => branch),
+				).toEqual([branchName, branchName, branchName]),
+			{ timeout: 2_000 },
+		);
 		expect(state().worktrees.map(({ head }) => head)).toEqual(
 			before.worktrees.map(({ head }) => head),
 		);
@@ -1027,6 +1043,76 @@ process.exit(result.status ?? 1);
 			expect(existsSync(checkout(session, folder))).toBe(false);
 			expect(git(folder, "branch", "--list", branchName)).toBe("");
 			expect(git(folder, "branch", "--list", oldName)).toBe("");
+			expect(
+				git(folder, "for-each-ref", "--format=%(refname:short)", "refs/heads"),
+			).toBe("main");
+		}
+	}, 300_000);
+
+	it("deletes merged renamed branches after checkout-only cleanup has already run", async () => {
+		const { fixture, socket, secondary, create, sessions, state, rename } =
+			await start("cleanup-then-delete-renamed");
+		const session = await create("Cleaned renamed worktrees");
+		const oldName = git(
+			checkout(session, fixture.projectDir),
+			"branch",
+			"--show-current",
+		);
+		for (const folder of [fixture.projectDir, secondary]) {
+			const path = checkout(session, folder);
+			writeFileSync(join(path, "session.txt"), "merged session work\n");
+			commit(path, "Session work");
+		}
+		const branchName = "feature/cleaned-renamed";
+		expect(await rename(session.id, branchName)).toEqual({ ok: true });
+		for (const folder of [fixture.projectDir, secondary])
+			git(folder, "merge", "--ff-only", branchName);
+		const mainTips = new Map(
+			[fixture.projectDir, secondary].map(
+				(folder) => [folder, git(folder, "rev-parse", "main")] as const,
+			),
+		);
+		await sendRpcRequest(socket, {
+			_tag: "SetSessionSettled",
+			sessionId: session.id,
+			settled: true,
+		});
+		await sendRpcRequest(socket, {
+			_tag: "SetWorktreeCleanupSetting",
+			scope: "global",
+			rules: {
+				onSettle: "nothing-missing",
+				onDelete: false,
+				settledAfterDays: null,
+				keepWhen: "uncommitted-changes",
+			},
+		});
+		const cleanup = await sendRpcRequest(socket, {
+			_tag: "CleanUpWorktreesNow",
+			projectSlug: "process-test",
+		});
+		evidence["cleanup"] = { response: cleanup, after: state() };
+		expect(cleanup.failed).toEqual([]);
+		for (const folder of [fixture.projectDir, secondary]) {
+			expect(existsSync(checkout(session, folder))).toBe(false);
+			expect(git(folder, "rev-parse", `refs/heads/${branchName}`)).toBe(
+				mainTips.get(folder),
+			);
+			expect(git(folder, "branch", "--list", oldName)).toBe("");
+		}
+		const before = state();
+		const response = await sendRpcRequest(socket, {
+			_tag: "DeleteSession",
+			sessionId: session.id,
+			removeWorktrees: true,
+		});
+		evidence["deletion"] = { before, response, after: state() };
+		expect(response.ok).toBe(true);
+		expect(response.worktreeWarnings ?? []).toEqual([]);
+		expect((await sessions()).some(({ id }) => id === session.id)).toBe(false);
+		for (const folder of [fixture.projectDir, secondary]) {
+			expect(existsSync(checkout(session, folder))).toBe(false);
+			expect(git(folder, "rev-parse", "main")).toBe(mainTips.get(folder));
 			expect(
 				git(folder, "for-each-ref", "--format=%(refname:short)", "refs/heads"),
 			).toBe("main");

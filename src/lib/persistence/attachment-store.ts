@@ -34,29 +34,41 @@ export interface AttachmentStore {
 
 const decodeRef = Schema.decodeUnknownSync(AttachmentRefSchema);
 
+/** Derive the stored identity and bytes without writing a blob. */
+export function attachmentFromDataUrl(dataUrl: string): {
+	ref: AttachmentRef;
+	bytes: Buffer;
+} {
+	const parsed = parseAttachmentDataUrl(dataUrl);
+	const bytes = Buffer.from(parsed.data, "base64");
+	const hash = createHash("sha256")
+		.update(parsed.mime)
+		.update("\0")
+		.update(bytes)
+		.digest("hex");
+	return {
+		ref: decodeRef({
+			attachmentHash: hash,
+			mime: parsed.mime,
+			...(parsed.name !== undefined ? { name: parsed.name } : {}),
+		}),
+		bytes,
+	};
+}
+
 export const makeAttachmentStore = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	const put = Effect.fn("AttachmentStore.put")(function* (dataUrl: string) {
-		const parsed = yield* Effect.try({
-			try: () => parseAttachmentDataUrl(dataUrl),
+		const { ref, bytes } = yield* Effect.try({
+			try: () => attachmentFromDataUrl(dataUrl),
 			catch: (cause) =>
 				cause instanceof AttachmentValidationError
 					? cause
 					: new AttachmentValidationError(String(cause)),
 		});
-		const bytes = Buffer.from(parsed.data, "base64");
-		const hash = createHash("sha256")
-			.update(parsed.mime)
-			.update("\0")
-			.update(bytes)
-			.digest("hex");
 		yield* sql`INSERT OR IGNORE INTO attachment_blobs (hash, mime, size, bytes, created_at)
-			VALUES (${hash}, ${parsed.mime}, ${bytes.length}, ${bytes}, ${Date.now()})`;
-		return decodeRef({
-			attachmentHash: hash,
-			mime: parsed.mime,
-			...(parsed.name !== undefined ? { name: parsed.name } : {}),
-		});
+			VALUES (${ref.attachmentHash}, ${ref.mime}, ${bytes.length}, ${bytes}, ${Date.now()})`;
+		return ref;
 	});
 	const get = Effect.fn("AttachmentStore.get")(function* (hash: string) {
 		const [blob] = yield* sql<{

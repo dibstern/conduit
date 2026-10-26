@@ -124,6 +124,8 @@ describe("provider call context through the daemon", () => {
 			a.createSession("Call A", first.addedInstanceId),
 			b.createSession("Call B", second.addedInstanceId),
 		]);
+		// Sends read the cache immediately; pre-warming waits for its capture.
+		await Promise.all([a.preWarmSession(sessionA), b.preWarmSession(sessionB)]);
 		await Promise.all([
 			a.send(sessionA, "call-context-a"),
 			b.send(sessionB, "call-context-b"),

@@ -86,6 +86,10 @@ function makeBlockingQuery(
 	}) as unknown as Query;
 }
 
+const capabilitiesService = {
+	get: () => Effect.succeed({ models: [], commands: [], agents: [] }),
+};
+
 describe("Claude provider runtime boundary", () => {
 	// Sends and warm-ups must use the admitted account even with conflicting
 	// native, project and process folders; neither may reread daemon accounts.
@@ -256,6 +260,7 @@ describe("Claude provider runtime boundary", () => {
 				const scope = yield* Scope.make();
 				const runtime = yield* makeClaudeProviderRuntime({
 					runnerFactory: makeClaudeSessionRunner,
+					capabilitiesService,
 					daemonConfigDir: configPersistence.getConfigDir(),
 
 					queryFactory: () => query,
@@ -301,6 +306,7 @@ describe("Claude provider runtime boundary", () => {
 					let options: SDKOptions | undefined;
 					const runtime = yield* makeClaudeProviderRuntime({
 						runnerFactory: makeClaudeSessionRunner,
+						capabilitiesService,
 						daemonConfigDir: configPersistence.getConfigDir(),
 
 						queryFactory: (params) => {

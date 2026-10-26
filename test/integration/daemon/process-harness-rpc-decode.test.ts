@@ -105,6 +105,7 @@ describe("process harness RPC decode evidence", () => {
 						frame["values"] = [
 							{
 								_tag: "upsert",
+								sequence: 0,
 								item: {
 									_tag: "opencodeConnection",
 									instanceId: "opencode",
@@ -144,7 +145,7 @@ describe("process harness RPC decode evidence", () => {
 					true,
 					harness.rpcDiagnostics,
 				),
-			).rejects.toThrow();
+			).rejects.toThrow(/status/);
 		}
 		expect(corrupted).toBe(true);
 		const proof = harness.proof();

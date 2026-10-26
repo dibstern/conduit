@@ -71,12 +71,13 @@ test("folder admission places a failed message and restores a resendable draft",
 		await expect(chat.userMessages.filter({ hasText: text })).toHaveCount(1, {
 			timeout: 2_000,
 		});
+		// Session drafts remain visible until admission succeeds; wait for refusal.
+		await expect(app.messages).toContainText("foldersPending");
 		await expect(app.input).toHaveValue(text, { timeout: 2_000 });
 		observations["refusedAfterMs"] = Date.now() - sentAt;
 		expect(observations["refusedAfterMs"]).toBeGreaterThanOrEqual(900);
 		expect(observations["refusedAfterMs"]).toBeLessThan(2_500);
 		await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
-		await expect(app.messages).toContainText("foldersPending");
 		const failedMessage = db
 			.prepare<[string], { input_id: string }>(
 				"SELECT message.input_id FROM messages message JOIN provider_command_outbox command ON command.command_id = message.input_id AND command.session_id = message.session_id WHERE message.session_id = ? AND message.role = 'user' AND command.error_code = 'send_admission_timeout'",

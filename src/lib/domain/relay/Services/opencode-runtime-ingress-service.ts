@@ -8,6 +8,8 @@ import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail, OpenCodeApiError } from "../../../errors.js";
 import type { Message, SessionStatus } from "../../../instance/sdk-types.js";
 import { makeAttachmentStore } from "../../../persistence/attachment-store.js";
+import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
+import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import {
 	type ProjectionRunnerEffect,
 	ProjectionRunnerEffectTag,
@@ -1067,6 +1069,7 @@ export class EffectOpenCodeRuntimeIngress
 				beforeCommit?: Effect.Effect<void, SqlError>;
 				beforeProject?: Effect.Effect<void, SqlError>;
 				settleSession?: boolean;
+				requeueFailedInputs?: false;
 			},
 		) => Effect.Effect<void>,
 	): Effect.Effect<void> {
@@ -1306,6 +1309,7 @@ export class EffectOpenCodeRuntimeIngress
 											{
 												beforeProject: current(),
 												settleSession,
+												requeueFailedInputs: false,
 											},
 										);
 									} else
@@ -1329,9 +1333,10 @@ export class EffectOpenCodeRuntimeIngress
 												: [],
 											{
 												beforeProject: current(),
+												requeueFailedInputs: false,
 											},
 										);
-									// Publication commits the terminal and any returned input together.
+									// A failed input publication is retried by the project-local sweep.
 									const terminal = yield* this
 										.sql`SELECT 1 FROM provider_command_outbox WHERE project_key = ${this.projectId}
 										AND command_id = ${command.command_id} AND request_sequence = ${command.request_sequence}
@@ -1356,6 +1361,40 @@ export class EffectOpenCodeRuntimeIngress
 							),
 						),
 					{ discard: true },
+				).pipe(
+					// A restart can leave only the publication half of settlement.
+					// Keep retrying the existing project-local inbox sweep as well.
+					Effect.andThen(
+						Effect.gen({ self: this }, function* () {
+							if (this.stopped) return;
+							const persist = yield* Effect.serviceOption(
+								ClaudeEventPersistEffectTag,
+							);
+							if (persist._tag === "Some") {
+								const sessions = yield* this.sql<{ session_id: string }>`
+									SELECT DISTINCT pending.session_id FROM pending_inputs pending
+									JOIN sessions session ON session.id = pending.session_id
+									JOIN provider_command_outbox outbox ON outbox.command_id = pending.input_id
+										AND outbox.session_id = pending.session_id
+									WHERE session.project_id = ${this.projectId} AND outbox.project_key = ${this.projectId}
+										AND pending.state = 'steering' AND outbox.effect_type = 'send_turn' AND outbox.status = 'failed'`;
+								for (const { session_id } of sessions)
+									yield* requeueFailedSteers(
+										this.sql,
+										persist.value,
+										session_id,
+									);
+							}
+						}).pipe(
+							Effect.catchCause((cause) =>
+								Effect.sync(() =>
+									this.log.warn("Input requeue recovery deferred", {
+										error: Failure.renderCause(cause),
+									}),
+								),
+							),
+						),
+					),
 				),
 			)
 			.pipe(Effect.asVoid);
