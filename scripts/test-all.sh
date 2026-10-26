@@ -223,7 +223,7 @@ else
   wait_for_lanes
 
   # Unit and interaction tests can use many cores. Finish them before pairing
-  # four integration forks with the eight browser-only visual workers.
+  # integration forks with the eight browser-only visual workers.
   if [[ "$selected" == *" vitest "* ]]; then
     start_lane unit unit
     wait_for_lanes

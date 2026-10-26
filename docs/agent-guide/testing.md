@@ -85,7 +85,8 @@ pnpm test:integration
 pnpm test:contract
 ```
 
-Integration files run in parallel in up to 4 fork workers. Set
+Integration files run in parallel in fork workers, half the CPU cores and at
+least 4. Set
 `CONDUIT_INTEGRATION_WORKERS=<positive integer>` to override the worker cap.
 
 Process harnesses use `dist/` by default in this suite. Rebuild after changing
