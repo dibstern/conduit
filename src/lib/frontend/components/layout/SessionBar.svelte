@@ -808,6 +808,9 @@
 	#session-bar-meta > :global(.session-bar-segments) > :global(* + *) { position: relative; }
 	#session-bar-meta > :global(.session-bar-segments) > :global(* + *)::after { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 1px; background: var(--color-border-chip); }
 	#session-bar-meta > :global(.session-bar-segments) > :global(#session-bar-settle[data-emphasis="primary"])::after { display: none; }
+	/* The track only groups; a lone Settle drops it and takes the track's height. */
+	#session-bar-meta > :global(.session-bar-segments:has(> #session-bar-settle:only-child)) { background: none; padding: 0; }
+	#session-bar-meta > :global(.session-bar-segments) > :global(#session-bar-settle:only-child) { height: 30px; padding-inline: 12px; font-size: 13px; }
 	.desktop-goal-check { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 7px 10px; font-size: 12.5px; line-height: 1.4; color: var(--color-text-secondary); }
 	.desktop-goal-check b { font-weight: 600; color: var(--color-text); }
 	.desktop-goal-check time { font-family: var(--font-mono); font-size: 11px; }
