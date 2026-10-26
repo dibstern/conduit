@@ -176,7 +176,7 @@
 
 <!-- aria-selected exposes the drawn checkbox; the open button is a sibling of the option. -->
 {#snippet tickBox(checked: boolean)}
-	<span aria-hidden="true" class="grid size-[20px] shrink-0 place-items-center rounded-[6px] border-[1.5px] {checked ? 'border-accent bg-accent text-bg' : 'border-border'}">
+	<span aria-hidden="true" class="grid size-[20px] shrink-0 place-items-center rounded-[6px] border-[1.5px] {checked ? 'border-accent bg-accent text-bg' : 'border-control-border group-hover/folder-option:border-control-border-hover'}">
 		{#if checked}<Icon name="check" size={13} />{/if}
 	</span>
 {/snippet}
@@ -236,7 +236,7 @@
 								{@const name = entry.path.split("/").filter(Boolean).at(-1) ?? entry.path}
 								{@const shown = home && (entry.path === home || entry.path.startsWith(`${home}/`)) ? `~${entry.path.slice(home.length)}` : entry.path}
 								{@const metadata = entry.isGitRepo ? (entry.branch ? `git · ${entry.branch}` : "git") : entry.repoCount ? `${entry.repoCount} repos` : ""}
-								<div data-active={activeIndex === index || undefined} data-disabled={disabled || undefined} class="flex items-center rounded-[10px] pr-[6px] text-text hover:bg-hover data-[active]:bg-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50">
+								<div data-active={activeIndex === index || undefined} data-disabled={disabled || undefined} class="{disabled ? '' : 'group/folder-option'} flex items-center rounded-[10px] pr-[6px] text-text hover:bg-hover data-[active]:bg-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50">
 								<div role="option" id={optionId(index)} aria-label={entry.path} aria-selected={selectedPaths.includes(entry.path)} aria-disabled={disabled} tabindex={-1} data-testid="folder-picker-row" data-path={entry.path} data-phone={isPhone || undefined} class="flex h-[44px] min-w-0 flex-1 cursor-pointer items-center gap-[11px] px-[10px] pr-[6px] data-[phone]:h-[52px] data-[phone]:pl-[4px]" onpointerdown={(event) => event.preventDefault()} onpointerenter={() => activeIndex = index} onclick={() => toggle(entry)} onkeydown={navigateMatches}>
 									{@render tickBox(selectedPaths.includes(entry.path))}
 									<div class="min-w-0 flex-1">

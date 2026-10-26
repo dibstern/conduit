@@ -829,6 +829,10 @@
 		"renamedTo": "font-sans",
 		"reason": "conduit-test-aoqb.1 Final token migration: font-brand becomes font-sans; preserve the replacement at this call site."
 	},
+	"src/lib/frontend/components/ui/MenuCheckboxItem.svelte :: border-border-chip": {
+		"renamedTo": "border-control-border",
+		"reason": "The approved ink stroke replaces the unticked checkbox's divider border with translucent text ink for 3:1+ contrast in both themes."
+	},
 	"src/lib/frontend/components/ui/MenuCheckboxItem.svelte :: text-on-brand": {
 		"renamedTo": "text-bg",
 		"reason": "conduit-test-aoqb.1 Final token migration: text-on-brand becomes text-bg; preserve the replacement at this call site."

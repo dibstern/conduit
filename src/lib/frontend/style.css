@@ -74,6 +74,17 @@
 	/* The brightest border, for chips and other outlined controls that have to
 	   read as interactive against a surface. */
 	--color-border-chip: #2b2b31;
+	/* Translucent ink keeps 3:1+ contrast on every surface, including hover washes. */
+	--color-control-border: color-mix(
+		in srgb,
+		var(--color-text) 50%,
+		transparent
+	);
+	--color-control-border-hover: color-mix(
+		in srgb,
+		var(--color-text) 72%,
+		transparent
+	);
 	--color-input-bg: #1a1a1d;
 	--color-user-bubble: #232327;
 	--color-error: #ff6369;

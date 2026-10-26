@@ -51,6 +51,7 @@
 			FLOATING_ITEM_BASE_CLASSES,
 			MENU_ITEM_DENSITY_CLASSES[resolvedDensity],
 			MENU_ITEM_VARIANT_CLASSES.default,
+			disabled ? "" : "group/menu-checkbox",
 			className,
 		]
 			.filter(Boolean)
@@ -83,7 +84,7 @@
 			{/if}
 			{@render children()}
 			<span
-				class="ml-auto grid size-[16px] shrink-0 place-items-center rounded-[5px] border-[1.5px] {itemChecked ? 'border-accent bg-accent text-bg' : 'border-border-chip'}"
+				class="ml-auto grid size-[16px] shrink-0 place-items-center rounded-[5px] border-[1.5px] {itemChecked ? 'border-accent bg-accent text-bg' : 'border-control-border group-hover/menu-checkbox:border-control-border-hover'}"
 				aria-hidden="true"
 			>
 				{#if itemChecked}<Icon name="check" size={10} />{/if}

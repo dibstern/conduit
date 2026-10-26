@@ -122,9 +122,9 @@
 					{@const name = row.path.split("/").filter(Boolean).at(-1) ?? row.path}
 					{@const shown = home && (row.path === home || row.path.startsWith(`${home}/`)) ? `~${row.path.slice(home.length)}` : row.path}
 					<li data-testid="first-run-repo" data-path={row.path}>
-						<label data-phone={isPhone || undefined} class="flex min-h-[46px] cursor-pointer items-center gap-[11px] rounded-[10px] py-[4px] pr-[6px] pl-[10px] hover:bg-hover data-[phone]:min-h-[54px]">
+						<label data-phone={isPhone || undefined} class="group flex min-h-[46px] cursor-pointer items-center gap-[11px] rounded-[10px] py-[4px] pr-[6px] pl-[10px] hover:bg-hover data-[phone]:min-h-[54px]">
 							<span class="relative grid size-[20px] shrink-0 place-items-center">
-								<Checkbox checked={selected.includes(row.path)} onchange={() => toggle(row.path)} disabled={saving} aria-label={name} aria-describedby={errors[row.path] ? `${uid}-error-${index}` : undefined} class="m-0 size-[20px] appearance-none rounded-[6px] border-[1.5px] border-border checked:border-accent checked:bg-accent" />
+								<Checkbox checked={selected.includes(row.path)} onchange={() => toggle(row.path)} disabled={saving} aria-label={name} aria-describedby={errors[row.path] ? `${uid}-error-${index}` : undefined} class="m-0 size-[20px] appearance-none rounded-[6px] border-[1.5px] border-control-border group-hover:enabled:not-checked:border-control-border-hover checked:border-accent checked:bg-accent" />
 								{#if selected.includes(row.path)}<span class="pointer-events-none absolute text-bg"><Icon name="check" size={13} /></span>{/if}
 							</span>
 							<span class="min-w-0 flex-1">
