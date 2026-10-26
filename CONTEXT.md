@@ -343,7 +343,8 @@ they are what Send Tokens replace.
 ## Steer
 
 A **Steer** is a Run Input admitted while a Run is active to redirect that
-same Run. If the provider declines it, the input returns to the inbox queue.
+same Run. If the provider declines it, or its Run ends before it provably
+reached the agent, the input returns to the inbox queue as the next message.
 
 _Avoid_: parallel Run or joined Run. Steering adds input to the one active Run.
 
