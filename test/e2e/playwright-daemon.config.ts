@@ -13,7 +13,9 @@ export default defineConfig({
 	testMatch: "daemon-*.spec.ts",
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
+	// The retry only labels a failure flaky with a trace; CI still fails on it.
 	retries: 1,
+	failOnFlakyTests: !!process.env["CI"],
 	workers: "100%",
 	// require-tests-reporter fails a run where every test skipped (conduit-test-g49a).
 	reporter: process.env["CI"]

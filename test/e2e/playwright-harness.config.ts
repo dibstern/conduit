@@ -15,7 +15,9 @@ export default defineConfig({
 	],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
+	// The retry only labels a failure flaky with a trace; CI still fails on it.
 	retries: 1,
+	failOnFlakyTests: !!process.env["CI"],
 	workers: "100%",
 	reporter: process.env["CI"]
 		? [
