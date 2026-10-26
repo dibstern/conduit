@@ -5,11 +5,14 @@
 		size = "standard",
 		animated = false,
 		showText = true,
+		hits,
 		class: className = "",
 	}: {
 		size?: "standard" | "loading" | "sidebar" | "inline";
 		animated?: boolean;
 		showText?: boolean;
+		/** Hands the mark to an outside effect (the connect overlay's rain), which replaces the ripple. */
+		hits?: number;
 		class?: string;
 	} = $props();
 
@@ -24,8 +27,8 @@
 
 <div class="conduit-logo flex flex-col items-center {className}">
 	<div data-flow-hero class="hero" style:--mark-size={`${config.markSize}px`}>
-		<span data-flow-ripple class:rippling={animated}></span>
-		<ConduitMark size={config.markSize} {animated} />
+		{#if hits === undefined}<span data-flow-ripple class:rippling={animated}></span>{/if}
+		<ConduitMark size={config.markSize} {animated} {hits} />
 	</div>
 	{#if showText}
 		<span class="font-medium tracking-[0.14em] text-text font-sans {config.textSize}">conduit</span>

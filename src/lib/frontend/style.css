@@ -61,6 +61,8 @@
 	   anything you read to understand the screen. See theme-contrast.test.ts. */
 	--color-text-dimmer: #6e6e77;
 	--color-accent: #8e9bff;
+	/* The logo tile keeps the light accent's deeper indigo in both themes. */
+	--color-brand: #4352d2;
 	--color-accent-hover: #9faaff;
 	--color-accent-bg: rgba(142, 155, 255, 0.12);
 	/* Ink for the stronger Final chip fills. Light needs a darker foreground. */

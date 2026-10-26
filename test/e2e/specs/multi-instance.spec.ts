@@ -627,7 +627,7 @@ test.describe("ConnectOverlay: Reconnect Message", () => {
 		await disconnectControl(page, control.rpc);
 		const overlay = page.locator(".connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
-		await expect(overlay).toContainText("Reconnecting...");
+		await expect(overlay).toContainText("Reconnecting…");
 	});
 
 	test("shows generic reconnecting message with a single instance", async ({
@@ -639,7 +639,7 @@ test.describe("ConnectOverlay: Reconnect Message", () => {
 		await disconnectControl(page, control.rpc);
 		const overlay = page.locator(".connect-overlay");
 		await expect(overlay).toBeVisible({ timeout: 5_000 });
-		await expect(overlay).toContainText("Reconnecting...");
+		await expect(overlay).toContainText("Reconnecting…");
 	});
 });
 

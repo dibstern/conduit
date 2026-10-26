@@ -1,4 +1,4 @@
-<!-- OpenCode "O" mark animation overlay shown during WebSocket connection.    -->
+<!-- Rain-on-the-grid overlay shown while the WebSocket connects. -->
 
 <script lang="ts">
 	import { connectionState, getIsConnected } from "../../transport/connection-status.svelte.js";
@@ -17,20 +17,25 @@
 	import { CONNECT_FADEOUT_MS } from "../../ui-constants.js";
 	import { openSettings } from "../layout/chrome-actions.js";
 	import ConduitLogo from '../ui/ConduitLogo.svelte';
+	import DripText from '../ui/DripText.svelte';
 	import Button from '../ui/Button.svelte';
+	import ConnectRain from './ConnectRain.svelte';
+
+	const VERBS = ["Plugging in", "Patching through", "Tuning in", "Dialing up", "Handshaking", "Waking the wires", "Routing", "Piping up", "Bridging", "Pinging", "Hailing", "Splicing", "Wiring up", "Channelling", "Relaying", "Conducting", "Knocking", "Syncing", "Unspooling", "Untangling", "Plumbing", "Beaming", "Signalling", "Percolating", "Summoning", "Rendezvousing"];
 
 	let fadeOut = $state(false);
 	let displayNone = $state(false);
+	let everConnected = $state(false);
+	let hits = $state(0);
+	let verb = $state("Connecting…");
+	let verbQueue: string[] = [];
+	let heroBox = $state<HTMLElement>();
+	const tile = $derived(heroBox?.querySelector<HTMLElement>("[data-conduit-mark]") ?? undefined);
 
 	const connected = $derived(getIsConnected());
 	const relayStatus = $derived(connectionState.relayStatus);
 	const relayError = $derived(connectionState.relayError);
 
-	// Cached instance name — survives store clearing on WS disconnect.
-	// Updated whenever a fresh value is derived from the store; retains
-	// last-known name so reconnect actions still target the right instance even
-	// after clearInstanceState() runs.
-	let cachedInstanceName = $state("OpenCode");
 	let cachedInstanceId = $state<string | null>(null);
 	let cachedInstanceStatus = $state<InstanceStatus | null>(null);
 	let cachedMultiInstance = $state(false);
@@ -43,18 +48,6 @@
 	const currentInstance = $derived(instanceId
 		? getInstanceById(instanceId) ?? getCachedInstanceById(instanceId)
 		: undefined);
-
-	const instanceName = $derived.by(() => {
-		if (currentInstance?.name) return currentInstance.name;
-		return instanceId && instanceId === cachedInstanceId ? cachedInstanceName : "Conduit";
-	});
-
-	// Keep the cache in sync whenever instanceName resolves from real data
-	$effect(() => {
-		if (instanceName && instanceName !== cachedInstanceName) {
-			cachedInstanceName = instanceName;
-		}
-	});
 
 	// Cache the current instance id, status, and whether multi-instance is active.
 	// Only update cached values when the store has real data — NOT when cleared
@@ -80,22 +73,16 @@
 		cachedInstanceStatus !== "healthy" && cachedInstanceStatus !== "starting",
 	);
 
-	// Keep reconnect copy generic; instance/provider names remain available for
-	// action buttons and connecting state.
+	// The first connect plays with verbs; after a drop, say plainly that it is reconnecting.
+	const reconnecting = $derived(everConnected && !connected);
+	const statusLine = $derived(reconnecting ? "Reconnecting…" : verb);
 
-	const displayStatusText = $derived.by(() => {
-		if (
-			connectionState.statusText === "Connecting" ||
-			connectionState.statusText === "" ||
-			!connectionState.statusText
-		) {
-			return instanceName ? `Connecting to ${instanceName} server...` : "Connecting...";
-		}
-		if (connectionState.statusText === "Disconnected") {
-			return "Reconnecting...";
-		}
-		return connectionState.statusText;
-	});
+	function handleTileHit() {
+		hits++;
+		if (connected || reconnecting) return;
+		if (!verbQueue.length) verbQueue = VERBS.map((v) => ({ v, k: Math.random() })).sort((a, b) => a.k - b.k).map(({ v }) => `${v}…`);
+		verb = verbQueue.pop() ?? verb;
+	}
 
 	$effect(() => {
 		if (!connected) {
@@ -107,6 +94,7 @@
 	$effect(() => {
 		if (!connected) return;
 
+		everConnected = true;
 		fadeOut = true;
 		const hideTimer = setTimeout(() => {
 			displayNone = true;
@@ -138,21 +126,21 @@
 		class="connect-overlay fixed inset-0 z-50 flex items-center justify-center bg-bg"
 		style="opacity: {fadeOut ? '0' : '1'}; transition: opacity 600ms ease; pointer-events: {fadeOut ? 'none' : 'auto'};"
 	>
+		<ConnectRain {tile} onhit={handleTileHit} />
 		<!-- Radial glow orb -->
 		<div class="absolute w-[400px] h-[400px] rounded-full pointer-events-none" style="top:50%;left:50%;transform:translate(-50%,-50%);background:radial-gradient(circle, rgb(from var(--color-accent) r g b / 0.08) 0%, rgb(from var(--color-success) r g b / 0.05) 40%, transparent 70%);"></div>
 
 		<div class="flex flex-col items-center gap-3 relative z-10">
-			<!-- The shared Flow mark keeps connection progress consistent with sessions. -->
-			<ConduitLogo size="loading" animated={true} showText={true} />
+			<div bind:this={heroBox}><ConduitLogo size="loading" showText={true} {hits} /></div>
 
 		<!-- Status text — only one of these renders at a time, no empty wrapper -->
 		{#if relayStatus === "registering"}
-		<div class="text-sm font-medium text-text-muted font-sans">
+		<div class="text-[14px] font-medium text-text-muted font-sans">
 			Starting relay...
 		</div>
 		{:else if relayStatus === "error"}
 			<div class="flex flex-col items-center gap-2">
-			<div class="text-sm font-medium text-red-400 font-sans">
+			<div class="text-[14px] font-medium text-red-400 font-sans">
 				Relay failed to start
 			</div>
 				{#if relayError}
@@ -164,11 +152,9 @@
 				{/if}
 			</div>
 		{:else}
-			<div
-				class="text-sm font-medium font-sans"
-				style="background: linear-gradient(90deg, var(--color-success), var(--color-accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;"
-			>
-				{displayStatusText}
+			<div class="text-[14px] font-medium font-sans" role="status">
+				<span class="sr-only">{reconnecting ? "Reconnecting…" : "Connecting…"}</span>
+				<DripText text={statusLine} />
 			</div>
 		{/if}
 

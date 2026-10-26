@@ -93,9 +93,9 @@ async function expectSessionTitle(canvasElement: HTMLElement) {
 		compact ? 15.6 : 12,
 		1,
 	);
-	const accent = new Option().style;
-	accent.color = getComputedStyle(mark).getPropertyValue("--color-accent");
-	await expect(getComputedStyle(mark).backgroundColor).toBe(accent.color);
+	const brand = new Option().style;
+	brand.color = getComputedStyle(mark).getPropertyValue("--color-brand");
+	await expect(getComputedStyle(mark).backgroundColor).toBe(brand.color);
 	const markBox = mark.getBoundingClientRect();
 	const textRange = document.createRange();
 	textRange.selectNodeContents(label);
