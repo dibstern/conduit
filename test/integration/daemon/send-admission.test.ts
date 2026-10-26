@@ -177,6 +177,7 @@ it.each([
 		if (!restart)
 			expect(drafts).toContainEqual({
 				_tag: "draft",
+				attachments: [],
 				text: restoredText,
 				restored: text,
 			});

@@ -32,7 +32,6 @@ import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
-import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import {
 	ReadQueryEffectTag,
@@ -394,16 +393,7 @@ const restoreFailedPlacement = (
 		if (unplaced) {
 			// A failed steer stays in the inbox. Settlement requeues it only once
 			// its provider can no longer deliver it; no synthetic message consumes it.
-			if (input.steer) {
-				const persist = yield* ClaudeEventPersistEffectTag;
-				yield* requeueFailedSteers(
-					sql,
-					persist,
-					input.sessionId,
-					input.commandId,
-				);
-				return false;
-			}
+			if (input.steer) return false;
 			if (driver === "codex" && runId) {
 				const [failedRewind] = yield* sql`
 					SELECT 1 FROM provider_command_outbox o
@@ -893,15 +883,16 @@ const dispatchEngineTurn = (
 		}).pipe(
 			Effect.flatten,
 			Effect.flatMap((result) =>
-				result.status === "steer-declined"
-					? (dispatchedInput.onSteerDeclined ?? Effect.void)
-					: result.error
-						? restoreFailedPlacement(
-								dispatchedInput,
-								driver,
-								reservedRunId,
-							).pipe(Effect.asVoid)
-						: Effect.void,
+				Effect.gen(function* () {
+					if (result.status === "steer-declined")
+						yield* dispatchedInput.onSteerDeclined ?? Effect.void;
+					else if (result.error)
+						yield* restoreFailedPlacement(
+							dispatchedInput,
+							driver,
+							reservedRunId,
+						);
+				}),
 			),
 			Effect.catch((error) =>
 				error instanceof DraftAttachmentMissing

@@ -54,6 +54,10 @@ import {
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+import {
+	admitRunnerCommand,
+	makeRunnerAdmission,
+} from "../../helpers/runner-provider-admission.js";
 
 it("creates Cursor forks and Side Threads locally and seeds their current inherited rows once", async () => {
 	const root = mkdtempSync(join(tmpdir(), "cursor-fork-flow-"));
@@ -233,6 +237,7 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 								})),
 							),
 					);
+					const admission = yield* makeRunnerAdmission(runner, "cursor");
 					const send = (sessionId: string, prompt: string) =>
 						Effect.gen(function* () {
 							const inputId = `${sessionId}:${prompt}`;
@@ -258,7 +263,7 @@ it("creates Cursor forks and Side Threads locally and seeds their current inheri
 								model: { providerId: "cursor", modelId: "composer-2.5" },
 								account,
 							});
-							const result = yield* runner.executeEffect({
+							const result = yield* admitRunnerCommand(admission, runner, {
 								type: "send-turn",
 								sinkId: `${sessionId}:${prompt}`,
 								aborted: false,

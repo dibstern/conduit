@@ -7,9 +7,10 @@
 // for focused translator and compatibility tests.
 
 import { randomUUID } from "node:crypto";
-import { Effect, Exit, Option } from "effect";
+import { Effect, Exit, Option, Schema } from "effect";
 import { SqlError } from "effect/sql/SqlError";
 import type { ProviderRuntimeEvent } from "../contracts/providers/provider-runtime-event.js";
+import { RunnerWriteOrigin } from "../contracts/stored-event.js";
 import {
 	PendingInteractionCancelled,
 	type PendingPermissionRequestInput,
@@ -19,11 +20,17 @@ import * as Failure from "../effect/failure-classification.js";
 import { createLogger } from "../logger.js";
 import { AttachmentMissing } from "../persistence/attachment-store.js";
 import { ClaudeEventPersistEffectError } from "../persistence/effect/claude-event-persist-effect.js";
+import { guardCurrentWrite } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerError } from "../persistence/effect/projection-runner-effect.js";
 import { PersistenceError } from "../persistence/errors.js";
 import { type CanonicalEvent, createEventId } from "../persistence/events.js";
-import type { PermissionId, SessionPermissionMode } from "../shared-types.js";
+import {
+	type PermissionId,
+	type SessionPermissionMode,
+	SessionPermissionModeSchema,
+} from "../shared-types.js";
+import { isRecord } from "../utils.js";
 import { MissingPendingInteractions } from "./errors.js";
 import {
 	type EventSinkError,
@@ -153,12 +160,14 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		Effect.gen(function* () {
 			const apply = deps.applyReportedPermissionMode;
 			if (!apply) return;
-			const mode = (event.data as { mode?: unknown }).mode;
-			if (typeof mode !== "string") return;
-			const result = yield* Effect.result(apply(mode as SessionPermissionMode));
+			const mode = Schema.decodeUnknownOption(SessionPermissionModeSchema)(
+				isRecord(event.data) ? event.data["mode"] : undefined,
+			);
+			if (Option.isNone(mode)) return;
+			const result = yield* Effect.result(guardCurrentWrite(apply(mode.value)));
 			if (result._tag === "Failure") {
 				log.warn(
-					`Failed to apply SDK-reported permission mode ${mode} (session=${sessionId}): ${result.failure instanceof Error ? result.failure.message : result.failure}`,
+					`Failed to apply SDK-reported permission mode ${mode.value} (session=${sessionId}): ${result.failure instanceof Error ? result.failure.message : result.failure}`,
 				);
 			}
 		});
@@ -172,9 +181,9 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	): Effect.Effect<void, unknown> =>
 		Effect.gen(function* () {
 			if (deps.ingestion) {
-				yield* deps.ingestion.ingest(event, onPrompt);
+				yield* guardCurrentWrite(deps.ingestion.ingest(event, onPrompt));
 				if (isTerminalRuntimeEvent(event)) {
-					yield* Effect.sync(finish);
+					yield* guardCurrentWrite(finish);
 				}
 				return;
 			}
@@ -199,23 +208,25 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			);
 			if (persist && persistentEvents.length > 0) {
 				if (persist.persistEvents) {
-					yield* persist.persistEvents(persistentEvents);
+					yield* guardCurrentWrite(persist.persistEvents(persistentEvents));
 				} else {
 					for (const domainEvent of persistentEvents) {
-						yield* persist.persistEvent(domainEvent);
+						yield* guardCurrentWrite(persist.persistEvent(domainEvent));
 					}
 				}
 			}
-			mapperState = result.state;
+			yield* guardCurrentWrite(() => {
+				mapperState = result.state;
+			});
 			for (const domain of result.events) {
 				if (
 					domain.type === "permission.asked" ||
 					domain.type === "question.asked"
 				)
-					yield* onPrompt?.(domain.data.id) ?? Effect.void;
+					yield* guardCurrentWrite(onPrompt?.(domain.data.id) ?? Effect.void);
 			}
 
-			if (isTerminalRuntimeEvent(event)) yield* Effect.sync(finish);
+			if (isTerminalRuntimeEvent(event)) yield* guardCurrentWrite(finish);
 		});
 
 	// Asks and their resolutions are canonical events, as they are for
@@ -244,6 +255,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						providerProcessId: receipt?.runnerId ?? localProcessId,
 					},
 					rawSource: { kind: "relay.event-sink" },
+					...(receipt ? { [RunnerWriteOrigin]: receipt.runnerId } : {}),
 					createdAt: Date.now(),
 					data,
 					...(runId ? { runId } : {}),
@@ -266,12 +278,12 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		noteActivity: (event) =>
 			isTerminalRuntimeEvent(event) ? finish() : reset(),
 		detachInteractions: () =>
-			Effect.sync(() => {
+			guardCurrentWrite(() => {
 				detachingInteractions = true;
-			}),
+			}).pipe(Effect.asVoid),
 		push(event: ProviderRuntimeEvent): Effect.Effect<void, EventSinkError> {
 			return Effect.gen(function* () {
-				yield* Effect.sync(reset);
+				if (Option.isNone(yield* guardCurrentWrite(reset))) return;
 				// Ahead of the ingestion short-circuit: the live override has to
 				// track the SDK on the durable path too, and it is relay state
 				// rather than an event, so ingestion never sees it.
@@ -279,11 +291,13 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					yield* applyReportedPermissionMode(event);
 				}
 				if (deps.ingestion) {
-					yield* deps.ingestion
-						.ingest(event)
-						.pipe(Effect.mapError(toEventSinkError));
+					yield* guardCurrentWrite(
+						deps.ingestion
+							.ingest(event)
+							.pipe(Effect.mapError(toEventSinkError)),
+					);
 					if (isTerminalRuntimeEvent(event)) {
-						yield* Effect.sync(finish);
+						yield* guardCurrentWrite(finish);
 					}
 					return;
 				}
@@ -291,7 +305,9 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					event,
 					mapperState,
 				);
-				mapperState = result.state;
+				yield* guardCurrentWrite(() => {
+					mapperState = result.state;
+				});
 
 				// Attempt persistence; failures are logged and timeout handling continues.
 				// Real persistence implements persistEvents for atomic multi-event mappings;
@@ -313,7 +329,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				if (persist && persistentEvents.length > 0) {
 					if (persist.persistEvents) {
 						const persistResult = yield* Effect.result(
-							persist.persistEvents(persistentEvents),
+							guardCurrentWrite(persist.persistEvents(persistentEvents)),
 						);
 						if (persistResult._tag === "Failure") {
 							yield* Effect.sync(() => {
@@ -326,7 +342,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					} else {
 						for (const domainEvent of persistentEvents) {
 							const persistResult = yield* Effect.result(
-								persist.persistEvent(domainEvent),
+								guardCurrentWrite(persist.persistEvent(domainEvent)),
 							);
 							if (persistResult._tag === "Failure") {
 								yield* Effect.sync(() => {
@@ -340,7 +356,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					}
 				}
 
-				if (isTerminalRuntimeEvent(event)) yield* Effect.sync(finish);
+				if (isTerminalRuntimeEvent(event)) yield* guardCurrentWrite(finish);
 			});
 		},
 
@@ -355,7 +371,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 				// instead of restarting it, or it fires a bogus PROCESSING_TIMEOUT
 				// while the prompt is still on screen. The handler restarts it once
 				// the user responds (restartProcessingTimeout in handlers/permissions).
-				yield* Effect.sync(finish);
+				yield* guardCurrentWrite(finish);
 				// Approval policy is delegated to the Claude Agent SDK via
 				// `permissionMode` at query creation, so an ask reaching here has
 				// already survived the SDK's own auto-approval. Re-deciding it
@@ -407,10 +423,17 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						},
 						(id) =>
 							Effect.gen(function* () {
-								conduitId = id;
-								promptIds.set(request.requestId, id);
-								const pending =
-									yield* pendingInteractions.beginPermissionRequest({
+								if (
+									Option.isNone(
+										yield* guardCurrentWrite(() => {
+											conduitId = id;
+											promptIds.set(request.requestId, id);
+										}),
+									)
+								)
+									return;
+								const pending = yield* guardCurrentWrite(
+									pendingInteractions.beginPermissionRequest({
 										requestId: id as PermissionId,
 										sessionId,
 										toolName: request.toolName,
@@ -431,8 +454,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 										...(request.permissionReason != null
 											? { permissionReason: request.permissionReason }
 											: {}),
-									});
-								awaitResponse = pending.awaitResponse;
+									}),
+								);
+								if (Option.isSome(pending))
+									awaitResponse = pending.value.awaitResponse;
 							}),
 						request.runId,
 					);
@@ -445,9 +470,11 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						Effect.gen(function* () {
 							if (detachingInteractions && Exit.isFailure(exit)) return;
 							if (Exit.isFailure(exit) && conduitId) {
-								yield* pendingInteractions.resolvePermissionRequest(conduitId, {
-									decision: "reject",
-								});
+								yield* guardCurrentWrite(
+									pendingInteractions.resolvePermissionRequest(conduitId, {
+										decision: "reject",
+									}),
+								);
 							}
 							yield* recordInteraction(
 								"permission.resolved",
@@ -485,7 +512,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 		> {
 			return Effect.gen(function* () {
 				// Same as requestPermission: awaiting the user is not inactivity.
-				yield* Effect.sync(finish);
+				yield* guardCurrentWrite(finish);
 				const pendingInteractions = deps.pendingInteractions;
 				if (!pendingInteractions) {
 					return yield* Effect.fail(
@@ -536,10 +563,17 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 						},
 						(id) =>
 							Effect.gen(function* () {
-								conduitId = id;
-								promptIds.set(request.requestId, id);
-								const pending = yield* pendingInteractions.beginQuestionRequest(
-									{
+								if (
+									Option.isNone(
+										yield* guardCurrentWrite(() => {
+											conduitId = id;
+											promptIds.set(request.requestId, id);
+										}),
+									)
+								)
+									return;
+								const pending = yield* guardCurrentWrite(
+									pendingInteractions.beginQuestionRequest({
 										requestId: id,
 										sessionId,
 										questions,
@@ -549,9 +583,10 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 										...(deps.providerId != null
 											? { providerId: deps.providerId }
 											: {}),
-									},
+									}),
 								);
-								awaitAnswers = pending.awaitAnswers;
+								if (Option.isSome(pending))
+									awaitAnswers = pending.value.awaitAnswers;
 							}),
 						request.runId,
 					);
@@ -589,9 +624,8 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 								failure.value.recovered === true;
 							if (keptForRecovery) return;
 							if (conduitId)
-								yield* pendingInteractions.resolveQuestionRequest(
-									conduitId,
-									{},
+								yield* guardCurrentWrite(
+									pendingInteractions.resolveQuestionRequest(conduitId, {}),
 								);
 							return yield* recordInteraction(
 								"question.resolved",
@@ -621,9 +655,11 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					});
 					return;
 				}
-				yield* deps.pendingInteractions.resolvePermissionRequest(
-					promptIds.get(requestId) ?? requestId,
-					response,
+				yield* guardCurrentWrite(
+					deps.pendingInteractions.resolvePermissionRequest(
+						promptIds.get(requestId) ?? requestId,
+						response,
+					),
 				);
 			});
 		},
@@ -641,9 +677,11 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					});
 					return;
 				}
-				yield* deps.pendingInteractions.resolveQuestionRequest(
-					promptIds.get(requestId) ?? requestId,
-					answers,
+				yield* guardCurrentWrite(
+					deps.pendingInteractions.resolveQuestionRequest(
+						promptIds.get(requestId) ?? requestId,
+						answers,
+					),
 				);
 			});
 		},
@@ -653,10 +691,9 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 			options?: { readonly recoverQuestions?: boolean },
 		): Effect.Effect<void> {
 			if (deps.pendingInteractions?.cancelSessionInteractions) {
-				return deps.pendingInteractions.cancelSessionInteractions(
-					reason,
-					options,
-				);
+				return guardCurrentWrite(
+					deps.pendingInteractions.cancelSessionInteractions(reason, options),
+				).pipe(Effect.asVoid);
 			}
 			return Effect.void;
 		},

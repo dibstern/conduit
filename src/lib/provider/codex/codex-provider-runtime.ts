@@ -8,7 +8,6 @@ import { Usage } from "../../domain/daemon/Services/usage.js";
 import type { ProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffect } from "../../persistence/effect/read-query-effect.js";
 import { makeProcessSessionRunner } from "../runner/process-session-runner.js";
-import { makeRunnerCommandRecovery } from "../runner/runner-command-recovery.js";
 import { connectRunner } from "../runner/runner-connection.js";
 import {
 	makeRunnerProviderInstance,
@@ -31,7 +30,7 @@ export const makeCodexProviderRuntime = (
 	},
 ): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
-		const { read, state } = persistence;
+		const { read } = persistence;
 		const usage = Option.getOrUndefined(yield* Effect.serviceOption(Usage));
 		return yield* makeRunnerProviderInstance(
 			deps,
@@ -127,15 +126,6 @@ export const makeCodexProviderRuntime = (
 							input: snapshot.input,
 						}),
 						loginChange: () => "None",
-						recoverCommands: makeRunnerCommandRecovery({
-							driverKind: "codex",
-							accounts: deps.accounts,
-							...(deps.autoSettleAfterDays
-								? { autoSettleAfterDays: deps.autoSettleAfterDays }
-								: {}),
-							state,
-							providerStateKeys: ["codex.forkDigest"],
-						}),
 					},
 				),
 		);

@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import type { EventPayloadMap } from "../stored-event.js";
+import type { EventPayloadMap, RunnerWriteOrigin } from "../stored-event.js";
 
 const NonBlankString = Schema.String.pipe(
 	Schema.check(
@@ -216,7 +216,7 @@ export const ProviderRuntimeEventSchema = Schema.Unknown.pipe(
 );
 export type ProviderRuntimeEvent = Schema.Schema.Type<
 	typeof ProviderRuntimeEventSchema
->;
+> & { readonly [RunnerWriteOrigin]?: string };
 
 export const ProviderRuntimeEventsSchema = Schema.Array(
 	ProviderRuntimeEventSchema,

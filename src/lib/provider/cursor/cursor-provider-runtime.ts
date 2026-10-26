@@ -2,7 +2,6 @@ import { Effect, type Scope } from "effect";
 import type { ProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffect } from "../../persistence/effect/read-query-effect.js";
 import { makeProcessSessionRunner } from "../runner/process-session-runner.js";
-import { makeRunnerCommandRecovery } from "../runner/runner-command-recovery.js";
 import { connectRunner } from "../runner/runner-connection.js";
 import { runnerFailure } from "../runner/runner-protocol.js";
 import {
@@ -42,6 +41,26 @@ export function makeCursorProviderRuntime(
 					emit,
 					{
 						driverKind: "cursor",
+						legacyReplayCommandFields: (accountId) =>
+							resources
+								.use(accountId, ({ credential }) => credential)
+								.pipe(
+									Effect.mapError((cause) =>
+										runnerFailure("recover Cursor credentials", cause),
+									),
+									Effect.flatMap((lookup) =>
+										lookup._tag === "Ready"
+											? Effect.succeed({
+													cursorCredential: lookup.credential,
+													shellEnv: {},
+												})
+											: Effect.fail({
+													operation: "recover Cursor credentials",
+													message: cursorCredentialMessage(lookup),
+													code: "auth_required",
+												}),
+									),
+								),
 						withAccountScope: (accountId: string, work: Effect.Effect<void>) =>
 							Effect.gen(function* () {
 								const accounts = yield* deps.accounts;
@@ -81,35 +100,6 @@ export function makeCursorProviderRuntime(
 							input: snapshot.input,
 						}),
 						loginChange: () => "None",
-						recoverCommands: makeRunnerCommandRecovery({
-							driverKind: "cursor",
-							accounts: deps.accounts,
-							...(deps.autoSettleAfterDays
-								? { autoSettleAfterDays: deps.autoSettleAfterDays }
-								: {}),
-							state,
-							providerStateKeys: ["cursor.forkDigest"],
-							replayCommandFields: (accountId: string) =>
-								resources
-									.use(accountId, ({ credential }) => credential)
-									.pipe(
-										Effect.mapError((cause) =>
-											runnerFailure("recover Cursor credentials", cause),
-										),
-										Effect.flatMap((lookup) =>
-											lookup._tag === "Ready"
-												? Effect.succeed({
-														cursorCredential: lookup.credential,
-														shellEnv: {},
-													})
-												: Effect.fail({
-														operation: "recover Cursor credentials",
-														message: cursorCredentialMessage(lookup),
-														code: "auth_required",
-													}),
-										),
-									),
-						}),
 					},
 				),
 		);

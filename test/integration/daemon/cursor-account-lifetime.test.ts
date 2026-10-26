@@ -163,8 +163,10 @@ it.each([
 			);
 			if (runner?.kind !== "runner-started")
 				throw new Error("No verified runner");
-			expect(readFileSync(`${runner.socketPath}.spool`, "utf8")).toContain(
-				`"type":"turn.${outcome === "error" ? "error" : "completed"}"`,
+			await vi.waitFor(() =>
+				expect(readFileSync(`${runner.socketPath}.spool`, "utf8")).toContain(
+					`"type":"turn.${outcome === "error" ? "error" : "completed"}"`,
+				),
 			);
 		}
 		expect(turn.get(sessionId)?.state).toBe("running");

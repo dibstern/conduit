@@ -15,23 +15,28 @@ import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { Cause, Deferred, Effect, Fiber } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
 import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
 	runnerIdleFailure,
+	runnerSinkId,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
+import { makeRunnerProviderInstance } from "../../../src/lib/provider/runner/runner-provider-instance.js";
 import {
 	discoverRunners,
 	registerRunner,
 	runnerDirectory,
 } from "../../../src/lib/provider/runner/runner-registry.js";
+import type { SessionCommand } from "../../../src/lib/provider/runner/session-runner.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import {
 	cleanupTestClaudeRunners,
 	testRunnerAlive,
 } from "../../helpers/claude-runner-cleanup.js";
+import { createMockEventSink } from "../../helpers/mock-sdk.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -301,7 +306,7 @@ describe("Claude runner admission socket probes", () => {
 					type: "output",
 					outputId: "probe-release",
 					sequence: 1,
-					output: { type: "release-sink", sinkId: "probe-send" },
+					output: { type: "release-sink", sinkId: runnerSinkId("probe-user") },
 				});
 			},
 			get attempts() {
@@ -311,21 +316,68 @@ describe("Claude runner admission socket probes", () => {
 				rejecting = false;
 				if (delayedPeer) replyHello(delayedPeer);
 			},
-			make: makeProcessClaudeSessionRunner(
-				{
-					projectRootForSession: () =>
-						Effect.succeed(orphan ? undefined : workspaceRoot),
-					daemonConfigDir: configDir,
-				},
-				(output) =>
-					Effect.sync(() => {
-						outputs.push(output);
-						return {};
-					}),
-			),
+			make: Effect.gen(function* () {
+				let retained:
+					| Effect.Success<ReturnType<typeof makeProcessClaudeSessionRunner>>
+					| undefined;
+				const instance = yield* makeRunnerProviderInstance(
+					{
+						daemonConfigDir: configDir,
+						accounts: Effect.succeed(
+							accountsStateFromInstances(
+								[],
+								configuredClaudeConfigDir(join(root, "claude")),
+							),
+						),
+					},
+					{
+						driverKind: "claude",
+						discoverEffect: () => Effect.die("unused discovery"),
+						generateTextEffect: () => Effect.die("unused text generation"),
+						prepareTurnEffect: (input) => Effect.succeed({ input }),
+					},
+					(emit) =>
+						makeProcessClaudeSessionRunner(
+							{
+								projectRootForSession: () =>
+									Effect.succeed(orphan ? undefined : workspaceRoot),
+								daemonConfigDir: configDir,
+							},
+							(output, sessionId, send) =>
+								Effect.sync(() => outputs.push(output)).pipe(
+									Effect.andThen(emit(output, sessionId, send)),
+								),
+						).pipe(
+							Effect.tap((runner) =>
+								Effect.sync(() => {
+									retained = runner;
+								}),
+							),
+						),
+				);
+				if (!retained) return yield* Effect.die("missing probe runner");
+				const runner = retained;
+				const execute = vi.spyOn(runner, "executeEffect");
+				return Object.assign(runner, {
+					sendHandle: () =>
+						execute.mock.calls.find(
+							([command]) => command.type === "send-turn",
+						)?.[1],
+					sendTurnEffect: (
+						command: Extract<SessionCommand, { type: "send-turn" }>,
+					) =>
+						instance.sendTurnEffect({
+							...command.input,
+							eventSink: createMockEventSink(),
+							abortSignal: command.aborted
+								? AbortSignal.abort()
+								: new AbortController().signal,
+						}),
+				});
+			}),
 			send: {
 				type: "send-turn" as const,
-				sinkId: "probe-send",
+				sinkId: runnerSinkId("probe-user"),
 				aborted: false,
 				input: {
 					sessionId,
@@ -412,7 +464,7 @@ describe("Claude runner admission socket probes", () => {
 		);
 	}, 15_000);
 
-	it("releases a pending send's retained sink when its caller is cancelled", async () => {
+	it("releases a pending send's retained sink once when release races caller cancellation", async () => {
 		const fixture = await probe("idle");
 		probes.push(fixture);
 		await Effect.runPromise(
@@ -421,22 +473,26 @@ describe("Claude runner admission socket probes", () => {
 					const runner = yield* fixture.make;
 					yield* runner.recoverEffect;
 					const send = yield* Effect.forkChild(
-						runner.executeEffect(fixture.send),
+						runner.sendTurnEffect(fixture.send),
 					);
 					yield* Deferred.await(fixture.received);
 					fixture.releaseSink();
 					yield* Deferred.await(fixture.released).pipe(
 						Effect.timeout("2 seconds"),
 					);
-					expect(fixture.outputs).not.toContainEqual({
-						type: "release-sink",
-						sinkId: "probe-send",
-					});
-					yield* Fiber.interrupt(send);
+					expect(runner.sendHandle()?.assignment._tag).toBe("Closed");
 					expect(fixture.outputs).toContainEqual({
 						type: "release-sink",
-						sinkId: "probe-send",
+						sinkId: fixture.send.sinkId,
 					});
+					yield* Fiber.interrupt(send);
+					expect(
+						fixture.outputs.filter(
+							(output) =>
+								output.type === "release-sink" &&
+								output.sinkId === fixture.send.sinkId,
+						),
+					).toHaveLength(1);
 				}),
 			),
 		);
@@ -451,7 +507,7 @@ describe("Claude runner admission socket probes", () => {
 					const runner = yield* fixture.make;
 					yield* runner.recoverEffect;
 					const send = yield* Effect.forkChild(
-						runner.executeEffect(fixture.send),
+						runner.sendTurnEffect(fixture.send),
 					);
 					yield* Deferred.await(fixture.received);
 					const end = yield* Effect.forkChild(
@@ -506,7 +562,7 @@ describe("Claude runner admission socket probes", () => {
 					const recovery = yield* Effect.forkChild(runner.recoverEffect);
 					yield* Deferred.await(fixture.received);
 					const send = yield* Effect.forkChild(
-						runner.executeEffect({
+						runner.sendTurnEffect({
 							...fixture.send,
 							aborted: mode === "already-aborted",
 							input: {
@@ -519,12 +575,18 @@ describe("Claude runner admission socket probes", () => {
 					);
 					if (mode !== "already-aborted") {
 						yield* Effect.sleep("20 millis");
-						if (mode === "abort")
-							yield* runner.executeEffect({
-								type: "abort",
-								sinkId: fixture.send.sinkId,
-							});
-						else {
+						if (mode === "abort") {
+							const handle = runner.sendHandle();
+							if (!handle)
+								return yield* Effect.die("missing admitted send handle");
+							yield* runner.executeEffect(
+								{
+									type: "abort",
+									sinkId: fixture.send.sinkId,
+								},
+								handle,
+							);
+						} else {
 							yield* Effect.forkChild(
 								runner.executeEffect({
 									type: "interrupt",
@@ -661,7 +723,7 @@ describe("Claude runner admission socket probes", () => {
 					);
 					yield* Deferred.await(fixture.received);
 					const send = yield* Effect.forkChild(
-						Effect.exit(runner.executeEffect(fixture.send)),
+						Effect.exit(runner.sendTurnEffect(fixture.send)),
 					);
 					yield* Effect.sleep("25 millis");
 					if (phase === "dead") {

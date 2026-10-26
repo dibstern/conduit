@@ -1,13 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-	Deferred,
-	Effect,
-	Exit,
-	Fiber,
-	FiberMap,
-	Option,
-	type Scope,
-} from "effect";
+import { Deferred, Effect, Exit, Fiber, FiberMap, Option, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import type { AccountsState } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
@@ -35,6 +27,7 @@ import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../persistence/effect/claude-event-persist-effect.js";
+import { guardCurrentWrite } from "../../persistence/effect/commit-and-signal.js";
 import type { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
@@ -60,10 +53,19 @@ import {
 	runnerSinkId,
 	runnerFailure as sessionFailure,
 } from "./runner-protocol.js";
-import { settleUnclaimedRunnerCommands } from "./runner-recovery.js";
+import {
+	currentPendingSendOwner,
+	settleUnclaimedRunnerCommands,
+} from "./runner-recovery.js";
 import { discoverAllRunners } from "./runner-registry.js";
 import { failRunnerTurn } from "./runner-turn-failure.js";
+import {
+	makeSendScopes,
+	type SendScope,
+	type SendScopes,
+} from "./send-scope.js";
 import type {
+	AdmitSend,
 	SessionCommand,
 	SessionFailure,
 	SessionOutput,
@@ -131,6 +133,7 @@ export interface RunnerDriverPieces {
 }
 
 export interface RunnerRecoveryDependencies {
+	readonly wakeReactor?: Effect.Effect<void>;
 	readonly projectId: string;
 	readonly ingestion: ProviderRuntimeIngestion;
 	readonly pending: PendingInteractionService;
@@ -180,6 +183,7 @@ export const makeRunnerProviderInstance = (
 		emit: (
 			output: SessionOutput,
 			sessionId?: string,
+			send?: SendScope,
 		) => Effect.Effect<SessionOutputReply, SessionFailure>,
 	) => Effect.Effect<SessionRunner, never, Scope.Scope>,
 ): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
@@ -199,23 +203,31 @@ export const makeRunnerProviderInstance = (
 			Effect.suspend(() => (instance ? instance.disposeEffect() : Effect.void)),
 		);
 		const shutdown = Effect.uninterruptible(dispose);
-		const runner = yield* makeRunner((output, sessionId) =>
+		// Dynamic send scopes must close after shutdown has detached their waiters.
+		const resourceScope = yield* Scope.fork(providerScope, "sequential");
+		const runner = yield* makeRunner((output, sessionId, send) =>
 			instance
-				? instance.handleOutputEffect(output, sessionId)
+				? instance.handleOutputEffect(output, sessionId, send)
 				: Effect.succeed({}),
-		);
+		).pipe(Scope.provide(resourceScope));
+		const sendScopes =
+			runner.sendScopes ??
+			(yield* makeSendScopes().pipe(Scope.provide(resourceScope)));
 		instance = new RunnerProviderInstance(
 			deps,
 			driver,
 			runner,
+			sendScopes,
 			abortFibers,
 			interactionFibers,
 			preWarmFibers,
 			accountResourceFibers,
 			providerScope,
+			resourceScope,
 			shutdown,
 			usage,
 		);
+		runner.setSendAdmission?.(instance.admitSendEffect);
 		yield* Effect.addFinalizer(() => shutdown.pipe(Effect.ignore));
 		return instance;
 	});
@@ -223,9 +235,21 @@ export const makeRunnerProviderInstance = (
 /** Provider API compatibility and event-store interaction routing only. */
 export class RunnerProviderInstance implements ProviderInstance {
 	readonly providerId: KnownProviderDriverKind;
-	private readonly sinks = new Map<string, EventSink>();
+	private readonly sends = new Map<
+		string,
+		{ send?: SendScope; readonly closed: Effect.Effect<void> }
+	>();
+	private readonly sendAdmissions = new WeakMap<
+		SendScope,
+		{ transferred: boolean; refused: boolean }
+	>();
+	private readonly sinks = new Map<
+		string,
+		{ readonly sink: EventSink; readonly send: SendScope }
+	>();
 	private readonly sinkSessions = new Map<string, string>();
 	private detachingInteractions = false;
+	private recoveryForSession: RunnerProviderInstanceDeps["recoveryForSession"];
 	private recoveredSink:
 		| ((
 				sessionId: string,
@@ -246,6 +270,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		ownsPendingSend?: OrchestrationEngine["ownsPendingSend"],
 	) =>
 		Effect.gen({ self: this }, function* () {
+			this.recoveryForSession = recoveryForSession;
 			const sql = yield* SqlClient.SqlClient;
 			// An in-process runner's turns ended with the relay that ran them, so
 			// every running command is unclaimed. Runner processes may outlive it.
@@ -270,9 +295,12 @@ export class RunnerProviderInstance implements ProviderInstance {
 							},
 						});
 					});
-				yield* sessionIds
-					? (this.runner.attachSessionsEffect?.([...sessionIds]) ?? Effect.void)
-					: this.runner.recoverEffect;
+				yield* (
+					sessionIds
+						? (this.runner.attachSessionsEffect?.([...sessionIds]) ??
+							Effect.void)
+						: this.runner.recoverEffect
+				).pipe(Effect.provideService(currentPendingSendOwner, ownsPendingSend));
 				const registrations = yield* Effect.try(() =>
 					discoverAllRunners(this.deps.daemonConfigDir),
 				).pipe(
@@ -413,6 +441,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		private readonly deps: RunnerProviderInstanceDeps,
 		private readonly driver: RunnerDriverPieces,
 		private readonly runner: SessionRunner,
+		private readonly sendScopes: SendScopes,
 		private readonly abortFibers: FiberMap.FiberMap<string, void, never>,
 		private readonly interactionFibers: FiberMap.FiberMap<string, void, never>,
 		private readonly preWarmFibers: FiberMap.FiberMap<
@@ -426,6 +455,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 			never
 		>,
 		private readonly providerScope: Scope.Scope,
+		private readonly resourceScope: Scope.Scope,
 		private readonly shutdown: Effect.Effect<void, ProviderInstanceFailure>,
 		private readonly usage?: UsageService,
 	) {
@@ -456,14 +486,23 @@ export class RunnerProviderInstance implements ProviderInstance {
 
 	private commandEffect(
 		command: Extract<SessionCommand, { type: "send-turn" }>,
+		send: SendScope,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure>;
 	private commandEffect(
 		command: Exclude<SessionCommand, { type: "send-turn" }>,
+		send?: SendScope,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 	private commandEffect(
 		command: SessionCommand,
+		send?: SendScope,
 	): Effect.Effect<TurnResult | undefined, ProviderInstanceFailure> {
-		return this.runner.executeEffect(command).pipe(
+		const executing: Effect.Effect<TurnResult | undefined, SessionFailure> =
+			command.type === "send-turn"
+				? send
+					? this.runner.executeEffect(command, send)
+					: Effect.die("Send command requires its admitted handle")
+				: this.runner.executeEffect(command, send).pipe(Effect.as(undefined));
+		return executing.pipe(
 			Effect.mapError(
 				(failure) =>
 					new ProviderInstanceFailure({
@@ -477,6 +516,26 @@ export class RunnerProviderInstance implements ProviderInstance {
 					}),
 			),
 		);
+	}
+
+	private abortSendEffect(
+		send: SendScope,
+		startImmediately = false,
+	): Effect.Effect<void> {
+		return this.sendScopes
+			.fork(
+				send,
+				"abort operation",
+				Effect.suspend(() =>
+					send.assignment._tag === "Closed"
+						? Effect.void
+						: this.runner
+								.executeEffect({ type: "abort", sinkId: send.sinkId }, send)
+								.pipe(Effect.ignore),
+				),
+				startImmediately,
+			)
+			.pipe(Effect.asVoid);
 	}
 
 	discoverEffect(
@@ -579,28 +638,302 @@ export class RunnerProviderInstance implements ProviderInstance {
 	sendTurnEffect(
 		input: ResolvedSendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
-		return input.account
-			? this.withAccountResources(
-					input.account,
-					input.sessionId,
-					(account) => this.sendTurnUnscopedEffect({ ...input, account }),
-					runnerSinkId(
-						input.inputId,
-						input.commandAttempt,
-						input.nativeResumeFallback,
-					),
-				)
-			: this.sendTurnUnscopedEffect(input);
+		const sinkId = runnerSinkId(
+			input.inputId,
+			input.commandAttempt,
+			input.nativeResumeFallback,
+		);
+		return this.admitSendEffect(
+			{ origin: { _tag: "Fresh" }, sinkId, input },
+			(send) =>
+				input.account
+					? this.withAccountResources(
+							input.account,
+							input.sessionId,
+							(account) =>
+								this.sendTurnUnscopedEffect({ ...input, account }, send),
+							sinkId,
+							send,
+						)
+					: this.sendTurnUnscopedEffect(input, send),
+		).pipe(
+			Effect.flatMap((result) =>
+				Option.isSome(result)
+					? Effect.succeed(result.value)
+					: Effect.die("Fresh admission cannot already be ended"),
+			),
+			Effect.mapError((cause) =>
+				cause instanceof ProviderInstanceFailure
+					? cause
+					: new ProviderInstanceFailure({
+							providerId: this.providerId,
+							operation: cause.operation,
+							cause,
+						}),
+			),
+		);
 	}
+
+	/** The only admission and the only creator of a send handle. */
+	readonly admitSendEffect: AdmitSend = (request, work) => {
+		const { sinkId, input } = request;
+		const admissionKey = JSON.stringify([input.sessionId, sinkId]);
+		return Effect.uninterruptibleMask((restore) =>
+			Effect.gen({ self: this }, function* () {
+				let send = request.retained;
+				if (send) {
+					if (
+						request.previous ||
+						send.sinkId !== sinkId ||
+						send.sessionId !== input.sessionId ||
+						!this.sendAdmissions.has(send)
+					)
+						return yield* Effect.fail(
+							sessionFailure(
+								"continue send",
+								"Retained handle does not belong to this admission",
+							),
+						);
+					if (
+						request.origin._tag !== "Fresh" &&
+						send.assignment._tag === "Closed"
+					) {
+						yield* send.close;
+						return Option.none();
+					}
+					if (this.sends.get(admissionKey)?.send !== send)
+						return yield* Effect.fail(
+							sessionFailure(
+								"continue send",
+								"Retained handle does not belong to this admission",
+							),
+						);
+				} else {
+					const previousAdmission = request.previous
+						? this.sendAdmissions.get(request.previous)
+						: undefined;
+					if (request.previous) {
+						if (
+							!previousAdmission ||
+							request.previous.sessionId !== input.sessionId ||
+							request.previous.sinkId === sinkId
+						)
+							return yield* Effect.fail(
+								sessionFailure(
+									"replace send",
+									"Previous handle does not belong to this send replacement",
+								),
+							);
+						yield* request.previous.close;
+					}
+					const completed = yield* Deferred.make<void>();
+					const reservation: {
+						send?: SendScope;
+						readonly closed: Effect.Effect<void>;
+					} = { closed: Deferred.await(completed) };
+					let previous = this.sends.get(admissionKey)?.closed;
+					while (previous) {
+						yield* restore(previous);
+						previous = this.sends.get(admissionKey)?.closed;
+					}
+					// The final free-key check and claim have no yield between them.
+					this.sends.set(admissionKey, reservation);
+					const release = Effect.sync(() => {
+						if (this.sends.get(admissionKey) === reservation)
+							this.sends.delete(admissionKey);
+					}).pipe(Effect.andThen(Deferred.succeed(completed, undefined)));
+					let opened: SendScope | undefined;
+					const admitted = yield* Effect.gen({ self: this }, function* () {
+						if (
+							request.origin._tag !== "Fresh" &&
+							(yield* restore(request.isEnded ?? Effect.succeed(false)))
+						) {
+							yield* release;
+							return Option.none();
+						}
+						const handle = yield* this.sendScopes.open(sinkId, input.sessionId);
+						opened = handle;
+						yield* this.sendScopes.acquire(
+							handle,
+							sinkId,
+							"provider admission",
+							Effect.sync(() => {
+								reservation.send = handle;
+								return reservation;
+							}),
+							(admission) =>
+								Effect.sync(() => {
+									delete admission.send;
+								}),
+						);
+						// A resource finalizer runs before the send's closed signal. Keep
+						// the claim until every finalizer, including close notification, ends.
+						yield* handle.closed.pipe(
+							Effect.ensuring(handle.close),
+							Effect.ensuring(release),
+							Effect.interruptible,
+							Effect.forkIn(this.resourceScope),
+						);
+						this.sendAdmissions.set(handle, {
+							transferred: false,
+							refused: false,
+						});
+						if (previousAdmission) previousAdmission.transferred = true;
+						return Option.some(handle);
+					}).pipe(
+						Effect.onError(() =>
+							(opened?.close ?? Effect.void).pipe(Effect.ensuring(release)),
+						),
+					);
+					if (Option.isNone(admitted)) return Option.none();
+					send = admitted.value;
+				}
+				const handle = send;
+				const ownership = this.sendAdmissions.get(handle);
+				if (!ownership)
+					return yield* Effect.die("Missing provider send admission");
+				return yield* restore(
+					Effect.gen(function* () {
+						if (request.origin._tag !== "Fresh") {
+							const ended = yield* request.isEnded ?? Effect.succeed(false);
+							if (ended || handle.assignment._tag === "Closed") {
+								yield* handle.close;
+								return Option.none();
+							}
+						}
+						return Option.some(yield* work(handle));
+					}),
+				).pipe(
+					Effect.catchCause((cause) =>
+						request.origin._tag !== "Fresh" &&
+						handle.assignment._tag === "Closed" &&
+						Failure.isInterruptedOnly(cause)
+							? Effect.succeed(Option.none())
+							: Effect.failCause(cause),
+					),
+					Effect.tap((admitted) =>
+						handle.assignment._tag === "Queued" ||
+						(Option.isSome(admitted) &&
+							typeof admitted.value === "object" &&
+							admitted.value !== null &&
+							"status" in admitted.value &&
+							admitted.value.status === "cancelled")
+							? handle.close
+							: Effect.void,
+					),
+					Effect.onError((cause) => {
+						// Detaching the intake waiter leaves an already queued native send live.
+						if (
+							Failure.isInterruptedOnly(cause) &&
+							this.runner.retainsSend?.(handle)
+						)
+							return Effect.void;
+						const failure = sessionFailure(
+							"recover turn",
+							Failure.squashCause(cause),
+						);
+						const showFailure =
+							!ownership.transferred &&
+							!ownership.refused &&
+							!Failure.isInterruptedOnly(cause);
+						if (showFailure) ownership.refused = true;
+						const notify =
+							request.refuse?.(
+								failure,
+								handle,
+								showFailure && failure.code !== "send_admission_timeout",
+							) ?? Effect.void;
+						const report =
+							request.origin._tag === "Adopted" && showFailure
+								? notify
+								: Effect.void;
+						return Effect.all(
+							[
+								report.pipe(
+									Effect.catchCause((error) =>
+										Effect.logError("Could not settle send refusal", error),
+									),
+								),
+								handle.close,
+							],
+							{ concurrency: 2, discard: true },
+						);
+					}),
+				);
+			}),
+		);
+	};
 
 	private withAccountResources<A>(
 		admitted: Account,
 		sessionId: string,
 		operation: (account: Account) => Effect.Effect<A, ProviderInstanceFailure>,
 		sinkId?: string,
+		ownedScope?: SendScope,
 	): Effect.Effect<A, ProviderInstanceFailure> {
 		const resources = this.deps.accountResources;
 		if (!resources) return operation(admitted);
+		if (ownedScope && sinkId)
+			return Effect.uninterruptibleMask((restore) =>
+				Effect.gen({ self: this }, function* () {
+					const ready = yield* Deferred.make<
+						Account,
+						ProviderInstanceFailure
+					>();
+					const finished = yield* Deferred.make<void>();
+					const invalidated = yield* Deferred.make<
+						never,
+						ProviderInstanceFailure
+					>();
+					const holder = resources
+						.use(admitted, (account) =>
+							Deferred.succeed(ready, account).pipe(
+								Effect.andThen(Deferred.await(finished)),
+							),
+						)
+						.pipe(
+							Effect.onInterrupt(() =>
+								this.detachingInteractions
+									? Effect.void
+									: this.abortSendEffect(ownedScope, true),
+							),
+							Effect.onExit((exit) =>
+								Exit.isFailure(exit)
+									? Deferred.failCause(ready, exit.cause).pipe(
+											Effect.andThen(
+												Deferred.failCause(invalidated, exit.cause),
+											),
+										)
+									: Effect.void,
+							),
+							Effect.catchCause(() => Effect.void),
+						);
+					yield* this.sendScopes.acquire(
+						ownedScope,
+						sinkId,
+						"provider account demand",
+						FiberMap.run(
+							this.accountResourceFibers,
+							randomUUID(),
+							Effect.interruptible(holder),
+						),
+						(fiber) =>
+							Deferred.succeed(finished, undefined).pipe(
+								Effect.andThen(Fiber.join(fiber)),
+							),
+					);
+					const account = yield* restore(Deferred.await(ready));
+					return yield* restore(
+						Effect.raceFirst(operation(account), Deferred.await(invalidated)),
+					).pipe(
+						Effect.onInterrupt(() =>
+							this.detachingInteractions
+								? Effect.void
+								: this.abortSendEffect(ownedScope, true),
+						),
+					);
+				}),
+			);
 		return Effect.uninterruptibleMask((restore) =>
 			Effect.gen({ self: this }, function* () {
 				const reply = yield* Deferred.make<A, ProviderInstanceFailure>();
@@ -669,6 +1002,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 
 	private sendTurnUnscopedEffect(
 		input: ResolvedSendTurnInput,
+		scope: SendScope,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		const {
 			eventSink,
@@ -684,37 +1018,61 @@ export class RunnerProviderInstance implements ProviderInstance {
 		);
 		const send = Effect.gen({ self: this }, function* () {
 			const prepared = yield* this.driver.prepareTurnEffect(payload);
-			this.sinks.set(sinkId, eventSink);
-			this.sinkSessions.set(sinkId, sessionId);
-			bindTurnTimelineSink(sinkId, {
+			if (scope.assignment._tag === "Closed") return yield* Effect.interrupt;
+			yield* this.bindSinkEffect(
+				scope,
+				sinkId,
 				sessionId,
-				inputId: input.inputId,
-			});
-			this.reportSinkForTesting("allocated", sinkId, sessionId);
-			const aborted = Effect.callback<void>((resume) => {
-				const onAbort = () => resume(Effect.void);
-				if (abortSignal.aborted) onAbort();
-				else abortSignal.addEventListener("abort", onAbort, { once: true });
-				return Effect.sync(() =>
-					abortSignal.removeEventListener("abort", onAbort),
-				);
-			});
-			yield* FiberMap.run(
-				this.abortFibers,
-				sinkId,
-				aborted.pipe(
-					Effect.andThen(this.runner.executeEffect({ type: "abort", sinkId })),
-					Effect.ignore,
-				),
+				eventSink,
+				input.inputId,
 			);
-			return yield* this.commandEffect({
-				type: "send-turn",
+			const aborted = yield* Deferred.make<void>();
+			const abortKey = randomUUID();
+			yield* this.sendScopes.acquire(
+				scope,
 				sinkId,
-				aborted: abortSignal.aborted,
-				...prepared,
-			});
+				"abort listener",
+				Effect.sync(() => {
+					const onAbort = () => {
+						this.runner.abortSend?.(scope);
+						Deferred.doneUnsafe(aborted, Effect.void);
+					};
+					if (abortSignal.aborted) onAbort();
+					else abortSignal.addEventListener("abort", onAbort, { once: true });
+					return onAbort;
+				}),
+				(onAbort) =>
+					Effect.sync(() => abortSignal.removeEventListener("abort", onAbort)),
+			);
+			yield* this.sendScopes.acquire(
+				scope,
+				sinkId,
+				"abort fiber",
+				FiberMap.run(
+					this.abortFibers,
+					abortKey,
+					Deferred.await(aborted).pipe(
+						Effect.andThen(this.abortSendEffect(scope)),
+						// Only the send finalizer removes this watcher. Running abort on a
+						// separate fiber prevents scope close from interrupting itself.
+						Effect.andThen(Effect.never),
+					),
+				),
+				() => FiberMap.remove(this.abortFibers, abortKey),
+			);
+			return yield* this.commandEffect(
+				{
+					type: "send-turn",
+					sinkId,
+					aborted: abortSignal.aborted,
+					...prepared,
+				},
+				scope,
+			);
 		});
-		return (this.runner.withTurnEffect?.(payload, sinkId, send) ?? send).pipe(
+		return (
+			this.runner.withTurnEffect?.(payload, sinkId, send, scope) ?? send
+		).pipe(
 			Effect.mapError((cause) =>
 				cause instanceof ProviderInstanceFailure
 					? cause
@@ -724,6 +1082,38 @@ export class RunnerProviderInstance implements ProviderInstance {
 							cause,
 						}),
 			),
+		);
+	}
+
+	private bindSinkEffect(
+		scope: SendScope,
+		sinkId: string,
+		sessionId: string,
+		sink: EventSink,
+		inputId?: string,
+	) {
+		return this.sendScopes.acquire(
+			scope,
+			sinkId,
+			"provider sink",
+			Effect.sync(() => {
+				this.sinks.set(sinkId, { sink, send: scope });
+				this.sinkSessions.set(sinkId, sessionId);
+				if (inputId) bindTurnTimelineSink(sinkId, { sessionId, inputId });
+				this.reportSinkForTesting("allocated", sinkId, sessionId);
+				return sink;
+			}),
+			() =>
+				Effect.gen({ self: this }, function* () {
+					if (this.sinks.get(sinkId)?.send !== scope) return;
+					this.sinks.delete(sinkId);
+					this.sinkSessions.delete(sinkId);
+					this.recoveredSinkIds.delete(sinkId);
+					this.reportSinkForTesting("released", sinkId, sessionId);
+					for (const [key] of Array.from(this.interactionFibers))
+						if (key.startsWith(`${sinkId}:`))
+							yield* FiberMap.remove(this.interactionFibers, key);
+				}),
 		);
 	}
 
@@ -951,16 +1341,14 @@ export class RunnerProviderInstance implements ProviderInstance {
 			}
 			for (const [sinkId, sessionId] of this.sinkSessions) {
 				if (!sessions.has(sessionId)) continue;
-				yield* this.sinks.get(sinkId)?.detachInteractions?.() ?? Effect.void;
+				yield* this.sinks.get(sinkId)?.sink.detachInteractions?.() ??
+					Effect.void;
 				for (const [key] of Array.from(this.interactionFibers))
 					if (key.startsWith(`${sinkId}:`))
 						yield* FiberMap.remove(this.interactionFibers, key);
-				yield* FiberMap.remove(this.abortFibers, sinkId);
-				this.sinks.delete(sinkId);
-				this.sinkSessions.delete(sinkId);
-				this.recoveredSinkIds.delete(sinkId);
-				this.reportSinkForTesting("released", sinkId, sessionId);
 			}
+			for (const sessionId of sessions)
+				yield* this.sendScopes.closeSession(sessionId);
 		});
 	}
 
@@ -968,7 +1356,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 	disposeEffect(): Effect.Effect<void, ProviderInstanceFailure> {
 		return Effect.gen({ self: this }, function* () {
 			this.detachingInteractions = true;
-			for (const sink of this.sinks.values()) {
+			for (const { sink } of this.sinks.values()) {
 				yield* sink.detachInteractions?.() ?? Effect.void;
 			}
 			yield* FiberMap.clear(this.preWarmFibers);
@@ -976,9 +1364,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 		}).pipe(
 			Effect.ensuring(
 				Effect.gen({ self: this }, function* () {
-					this.sinks.clear();
-					this.sinkSessions.clear();
-					yield* FiberMap.clear(this.abortFibers);
+					yield* this.sendScopes.closeAll;
 					yield* FiberMap.clear(this.interactionFibers);
 				}),
 			),
@@ -1008,9 +1394,21 @@ export class RunnerProviderInstance implements ProviderInstance {
 	handleOutputEffect(
 		output: SessionOutput,
 		recoveredSessionId?: string,
+		send?: SendScope,
 	): Effect.Effect<SessionOutputReply, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
-			observeTurnTimelineFrame(output);
+			if (output.type === "release-sink") {
+				// A process runner already validated and closed its captured scope.
+				// Its delayed notification must not close a new send with this id.
+
+				return;
+			}
+			if (
+				Option.isNone(
+					yield* guardCurrentWrite(() => observeTurnTimelineFrame(output)),
+				)
+			)
+				return;
 			if (output.type === "account-usage") {
 				yield* this.usage?.update?.(
 					output.accountId,
@@ -1020,30 +1418,50 @@ export class RunnerProviderInstance implements ProviderInstance {
 				return;
 			}
 			if (output.type === "background-task") {
-				this.deps.onBackgroundTask?.(output.transition);
+				yield* guardCurrentWrite(() =>
+					this.deps.onBackgroundTask?.(output.transition),
+				);
 				return;
 			}
-			let sink = this.sinks.get(output.sinkId);
+			const currentSink = this.sinks.get(output.sinkId);
+			let sink =
+				!send || currentSink?.send === send ? currentSink?.sink : undefined;
 			if (!sink && recoveredSessionId && this.recoveredSink) {
 				sink = yield* this.recoveredSink(recoveredSessionId, output.sinkId);
 				if (!sink) return;
-				this.sinks.set(output.sinkId, sink);
-				this.sinkSessions.set(output.sinkId, recoveredSessionId);
-				this.recoveredSinkIds.add(output.sinkId);
-				this.reportSinkForTesting(
-					"allocated",
-					output.sinkId,
-					recoveredSessionId,
-				);
+				const recovered = sink;
+				if (
+					Option.isNone(
+						yield* guardCurrentWrite(
+							Effect.gen({ self: this }, function* () {
+								const scope = send;
+								// Trailing authorized output uses this transient recovered sink;
+								// completed sends never regain resource ownership.
+								if (!scope || scope.assignment._tag === "Closed") return;
+								yield* this.bindSinkEffect(
+									scope,
+									output.sinkId,
+									recoveredSessionId,
+									recovered,
+								);
+								this.recoveredSinkIds.add(output.sinkId);
+							}),
+						),
+					)
+				)
+					return;
 			}
 			if (!sink) return;
 			if (this.detachingInteractions)
-				yield* sink.detachInteractions?.() ?? Effect.void;
+				yield* guardCurrentWrite(sink.detachInteractions?.() ?? Effect.void);
 			switch (output.type) {
 				case "event":
-					return yield* sink
-						.push(output.event)
-						.pipe(Effect.mapError((cause) => sessionFailure("push", cause)));
+					yield* guardCurrentWrite(
+						sink
+							.push(output.event)
+							.pipe(Effect.mapError((cause) => sessionFailure("push", cause))),
+					);
+					return;
 				case "permission-request":
 				case "question-request": {
 					const requestKey = JSON.stringify([
@@ -1053,111 +1471,126 @@ export class RunnerProviderInstance implements ProviderInstance {
 					const registered = this.recoveredSinkIds.has(output.sinkId)
 						? yield* Deferred.make<void>()
 						: undefined;
-					if (registered) this.recoveredRequests.set(requestKey, registered);
-					// Registration and UI waiters belong here; only the outbox delivers answers.
-					const request = Effect.suspend(() =>
-						output.type === "permission-request"
-							? sink.requestPermission(output.request).pipe(Effect.asVoid)
-							: sink.requestQuestion(output.request).pipe(Effect.asVoid),
-					);
-					yield* FiberMap.run(
-						this.interactionFibers,
-						`${output.sinkId}:${output.request.requestId}`,
-						request.pipe(
-							Effect.onExit((exit) =>
-								Effect.gen({ self: this }, function* () {
-									// Failed asks never register a waiter. Release recovery's
-									// readiness barrier before reporting their cancellation.
-									if (registered)
-										yield* Deferred.succeed(registered, undefined);
-									if (
-										Exit.isFailure(exit) &&
-										!Failure.isInterruptedOnly(exit.cause)
-									) {
-										yield* this.runner
-											.executeEffect({
-												type: "interaction-failed",
-												sinkId: output.sinkId,
-												requestId: output.request.requestId,
-												kind:
-													output.type === "permission-request"
-														? "permission"
-														: "question",
-												failure: sessionFailure(
-													"request interaction",
-													Failure.squashCause(exit.cause),
-												),
-											})
-											.pipe(Effect.ignore);
-									}
-								}),
+					if (
+						registered &&
+						Option.isNone(
+							yield* guardCurrentWrite(() =>
+								this.recoveredRequests.set(requestKey, registered),
 							),
-							Effect.catchCause(() => Effect.void),
+						)
+					)
+						return;
+					// Registration and UI waiters belong here; only the outbox delivers answers.
+					const request = guardCurrentWrite(
+						Effect.suspend(() =>
+							output.type === "permission-request"
+								? sink.requestPermission(output.request).pipe(Effect.asVoid)
+								: sink.requestQuestion(output.request).pipe(Effect.asVoid),
+						),
+					).pipe(Effect.asVoid);
+					const running = yield* guardCurrentWrite(
+						FiberMap.run(
+							this.interactionFibers,
+							`${output.sinkId}:${output.request.requestId}`,
+							request.pipe(
+								Effect.onExit((exit) =>
+									Effect.gen({ self: this }, function* () {
+										// Failed asks never register a waiter. Release recovery's
+										// readiness barrier before reporting their cancellation.
+										if (registered)
+											yield* Deferred.succeed(registered, undefined);
+										if (
+											Exit.isFailure(exit) &&
+											!Failure.isInterruptedOnly(exit.cause)
+										) {
+											yield* this.runner
+												.executeEffect({
+													type: "interaction-failed",
+													sinkId: output.sinkId,
+													requestId: output.request.requestId,
+													kind:
+														output.type === "permission-request"
+															? "permission"
+															: "question",
+													failure: sessionFailure(
+														"request interaction",
+														Failure.squashCause(exit.cause),
+													),
+												})
+												.pipe(Effect.ignore);
+										}
+									}),
+								),
+								Effect.catchCause(() => Effect.void),
+							),
 						),
 					);
+					if (Option.isNone(running)) return;
 					if (registered) {
 						yield* Deferred.await(registered);
-						this.recoveredRequests.delete(requestKey);
+						yield* guardCurrentWrite(() =>
+							this.recoveredRequests.delete(requestKey),
+						);
 					}
 					return;
 				}
 				case "resolve-permission":
-					return yield* sink
-						.resolvePermission(output.requestId, output.response)
-						.pipe(
-							Effect.mapError((cause) =>
-								sessionFailure("resolvePermission", cause),
-							),
-						);
-				case "resolve-question":
-					return yield* sink
-						.resolveQuestion(output.requestId, output.answers)
-						.pipe(
-							Effect.mapError((cause) =>
-								sessionFailure("resolveQuestion", cause),
-							),
-						);
-				case "cancel-interactions":
-					return yield* Effect.suspend(
-						() =>
-							sink.cancelSessionInteractions?.(output.reason, {
-								recoverQuestions: output.recoverQuestions,
-							}) ?? Effect.void,
-					).pipe(Effect.catchCause(() => Effect.void));
-				case "cancel-interaction":
-					yield* FiberMap.remove(
-						this.interactionFibers,
-						`${output.sinkId}:${output.requestId}`,
-					);
-					if (output.kind && sink.withdrawInteraction)
-						yield* sink
-							.withdrawInteraction(output.requestId, output.kind)
+					yield* guardCurrentWrite(
+						sink
+							.resolvePermission(output.requestId, output.response)
 							.pipe(
 								Effect.mapError((cause) =>
-									sessionFailure("withdrawInteraction", cause),
+									sessionFailure("resolvePermission", cause),
 								),
-							);
-					return;
-				case "release-sink":
-					for (const [key] of Array.from(this.interactionFibers)) {
-						if (key.startsWith(`${output.sinkId}:`)) {
-							yield* FiberMap.remove(this.interactionFibers, key);
-						}
-					}
-					this.sinks.delete(output.sinkId);
-					this.sinkSessions.delete(output.sinkId);
-					this.recoveredSinkIds.delete(output.sinkId);
-					yield* FiberMap.remove(this.abortFibers, output.sinkId);
-					this.reportSinkForTesting(
-						"released",
-						output.sinkId,
-						recoveredSessionId,
+							),
 					);
+					return;
+				case "resolve-question":
+					yield* guardCurrentWrite(
+						sink
+							.resolveQuestion(output.requestId, output.answers)
+							.pipe(
+								Effect.mapError((cause) =>
+									sessionFailure("resolveQuestion", cause),
+								),
+							),
+					);
+					return;
+				case "cancel-interactions":
+					yield* guardCurrentWrite(
+						Effect.suspend(
+							() =>
+								sink.cancelSessionInteractions?.(output.reason, {
+									recoverQuestions: output.recoverQuestions,
+								}) ?? Effect.void,
+						).pipe(Effect.catchCause(() => Effect.void)),
+					);
+					return;
+				case "cancel-interaction":
+					yield* guardCurrentWrite(
+						FiberMap.remove(
+							this.interactionFibers,
+							`${output.sinkId}:${output.requestId}`,
+						),
+					);
+					if (output.kind && sink.withdrawInteraction)
+						yield* guardCurrentWrite(
+							sink
+								.withdrawInteraction(output.requestId, output.kind)
+								.pipe(
+									Effect.mapError((cause) =>
+										sessionFailure("withdrawInteraction", cause),
+									),
+								),
+						);
 					return;
 				case "place-user-message":
-					return yield* this.placeUserMessageEffect(output.input).pipe(
-						Effect.mapError((cause) => sessionFailure(output.type, cause)),
+					yield* guardCurrentWrite(
+						this.placeUserMessageEffect(output.input).pipe(
+							Effect.mapError((cause) => sessionFailure(output.type, cause)),
+						),
 					);
+					return;
 				case "read-subagent-transcript": {
 					const project = yield* this.deps.recoveryForSession?.(
 						output.childSessionId,
@@ -1191,12 +1624,15 @@ export class RunnerProviderInstance implements ProviderInstance {
 						(persist._tag === "Some"
 							? persist.value.ensureClaudeSubagentSession
 							: undefined);
-					return yield* ensureSession?.({
-						...output.input,
-						provider: this.providerId,
-					}).pipe(
-						Effect.mapError((cause) => sessionFailure(output.type, cause)),
-					) ?? Effect.void;
+					yield* guardCurrentWrite(
+						ensureSession?.({
+							...output.input,
+							provider: this.providerId,
+						}).pipe(
+							Effect.mapError((cause) => sessionFailure(output.type, cause)),
+						) ?? Effect.void,
+					);
+					return;
 				}
 			}
 		}).pipe(

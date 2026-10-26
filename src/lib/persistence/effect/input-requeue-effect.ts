@@ -12,6 +12,7 @@ export const requeueFailedSteers = <E>(
 	},
 	sessionId?: string,
 	inputId?: string,
+	projectId?: string,
 ) =>
 	Effect.gen(function* () {
 		const rows = yield* sql<{
@@ -26,8 +27,9 @@ export const requeueFailedSteers = <E>(
 				(SELECT error_code FROM provider_command_outbox
 					WHERE command_id = pending.input_id AND session_id = pending.session_id
 					AND effect_type = 'send_turn' ORDER BY request_sequence DESC LIMIT 1) AS error_code
-			FROM pending_inputs pending
+			FROM pending_inputs pending JOIN sessions session ON session.id = pending.session_id
 			WHERE pending.state = 'steering'
+				AND (${projectId ?? null} IS NULL OR session.project_id = ${projectId ?? null})
 				AND (${sessionId ?? null} IS NULL OR pending.session_id = ${sessionId ?? null})
 				AND (${inputId ?? null} IS NULL OR pending.input_id = ${inputId ?? null})
 				AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = pending.input_id)

@@ -140,6 +140,16 @@ export const makeProviderAdaptersLive = (
 							);
 							return {
 								projectId: project.projectId,
+								wakeReactor: engine
+									.drainSideEffects()
+									.pipe(
+										Effect.catchCause((cause) =>
+											Effect.logError(
+												"Recovered command outbox drain failed",
+												cause,
+											),
+										),
+									),
 								ingestion: Context.get(
 									project.context,
 									ProviderRuntimeIngestionTag,

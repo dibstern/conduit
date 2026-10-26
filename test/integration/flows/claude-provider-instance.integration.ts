@@ -305,17 +305,23 @@ describe("Integration: ClaudeProviderInstance full lifecycle", () => {
 				Effect.gen(function* () {
 					const runner = yield* makeClaudeSessionRunner(deps, emit);
 					const execute = runner.executeEffect.bind(runner);
-					vi.spyOn(runner, "executeEffect").mockImplementation((command) =>
-						execute(command).pipe(
-							Effect.tap(() =>
-								command.type === "send-turn" &&
-								command.input.inputId === "prior-input"
-									? Deferred.succeed(priorReplyReady, undefined).pipe(
-											Effect.andThen(Deferred.await(releasePriorReply)),
-										)
-									: Effect.void,
-							),
-						),
+					vi.spyOn(runner, "executeEffect").mockImplementation(
+						(command, send) =>
+							Effect.gen(function* () {
+								const result = yield* command.type === "send-turn"
+									? send
+										? execute(command, send)
+										: Effect.die("Missing provider-admitted send handle")
+									: execute(command).pipe(Effect.as(undefined));
+								if (
+									command.type === "send-turn" &&
+									command.input.inputId === "prior-input"
+								)
+									yield* Deferred.succeed(priorReplyReady, undefined).pipe(
+										Effect.andThen(Deferred.await(releasePriorReply)),
+									);
+								return result;
+							}),
 					);
 					return runner;
 				}),

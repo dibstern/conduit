@@ -37,6 +37,7 @@ import {
 	sdkDefaultClaudeConfigDir,
 } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
+import { makeRunnerAuthority } from "../../../../src/lib/provider/runner/runner-authority.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
 	type RunnerHello,
@@ -81,6 +82,7 @@ async function fixture(
 	beforePublish: Effect.Effect<void> = Effect.void,
 	accounts?: AccountsState,
 	retainedState?: RunnerHello["upgradeState"],
+	phase: "starting" | "live" = "live",
 ) {
 	const directory = mkdtempSync(join(tmpdir(), "conduit-runner-race-"));
 	const published: unknown[] = [];
@@ -114,11 +116,32 @@ async function fixture(
 		VALUES ('session', 'claude', 'Runner session', 'idle', 0, 0)`);
 	const ingestion = await runtime.runPromise(ProviderRuntimeIngestionTag);
 	const receipts = await runtime.runPromise(makeRunnerReceiptStore(sql));
+	const authority = await runtime.runPromise(makeRunnerAuthority(receipts));
+	const adopt = (nextPhase: "starting" | "live") =>
+		Effect.gen(function* () {
+			const { grants } = yield* authority.adopt(
+				[{ runnerId: "runner", sessionId: "session" }],
+				nextPhase,
+			);
+			const adopted = grants.get("runner");
+			if (!adopted)
+				return yield* Effect.die("The retained runner must have a grant");
+			return adopted;
+		});
+	let grant = await runtime.runPromise(adopt(phase));
+	const promote = async () => {
+		grant = await runtime.runPromise(adopt("live"));
+	};
+	const checkpoint = <E>(operation: Effect.Effect<void, E>) =>
+		authority
+			.guarded(grant, { kind: "output" }, operation)
+			.pipe(Effect.map(Option.isSome));
 	const peers: ClaudeRunnerSocket[] = [];
 	const closedPeers = new Set<ClaudeRunnerSocket>();
 	const frames: RunnerMessage[] = [];
 	const attachedHellos: RunnerHello[] = [];
 	let closing = false;
+	const transport = { checkpointAllowed: true, checkpointAttempts: 0 };
 	const fibers: Fiber.Fiber<void, unknown>[] = [];
 	const spool = new RunnerSpool(join(directory, "runner.spool"));
 	const socketPath = join(directory, "runner.sock");
@@ -161,12 +184,18 @@ async function fixture(
 		rmSync(directory, { recursive: true, force: true });
 	});
 	const ingest = (output: SessionOutput) =>
-		output.type === "event"
-			? ingestion.ingest(output.event).pipe(
-					Effect.as({} satisfies SessionOutputReply),
-					Effect.mapError((cause) => runnerFailure("ingest", cause)),
-				)
-			: Effect.succeed({});
+		authority
+			.guarded(
+				grant,
+				{ kind: "output" },
+				output.type === "event"
+					? ingestion.ingest(output.event).pipe(
+							Effect.as({} satisfies SessionOutputReply),
+							Effect.mapError((cause) => runnerFailure("ingest", cause)),
+						)
+					: Effect.succeed({}),
+			)
+			.pipe(Effect.map((result) => Option.getOrElse(result, () => ({}))));
 	const attach = (
 		emit: (
 			output: SessionOutput,
@@ -184,11 +213,30 @@ async function fixture(
 					...(accounts ? { accounts: Effect.succeed(accounts) } : {}),
 				},
 				receipts,
+				checkpoint: (operation) =>
+					Effect.suspend(() => {
+						transport.checkpointAttempts++;
+						return transport.checkpointAllowed
+							? authority
+									.guarded(grant, { kind: "evidence" }, operation)
+									.pipe(Effect.map(Option.isSome))
+							: Effect.succeed(false);
+					}),
 				runFork: (effect) => fibers.push(runtime.runFork(effect)),
-				emit,
+				emit: (output) =>
+					authority.guarded(grant, { kind: "output" }, emit(output)).pipe(
+						Effect.tap((result) =>
+							Effect.gen(function* () {
+								const receipt = yield* currentRunnerOutput;
+								if (Option.isNone(result) && receipt)
+									yield* Deferred.succeed(receipt.committed, undefined);
+							}),
+						),
+						Effect.map((result) => Option.getOrElse(result, () => ({}))),
+					),
 				onHello: (hello) => {
 					attachedHellos.push(hello);
-					return restore;
+					return checkpoint(restore).pipe(Effect.asVoid);
 				},
 				onClose: () => {},
 			}),
@@ -198,6 +246,8 @@ async function fixture(
 		sql,
 		ingestion,
 		receipts,
+		checkpoint,
+		promote,
 		peers,
 		closedPeers,
 		frames,
@@ -206,6 +256,7 @@ async function fixture(
 		attach,
 		ingest,
 		published,
+		transport,
 	};
 }
 
@@ -609,14 +660,164 @@ it("replays a retained frame after one transient ingestion failure and continues
 	expect(f.published).toHaveLength(2);
 });
 
+it("drops Starting output and commits the next Live output after promotion", async () => {
+	const f = await fixture(Effect.void, undefined, undefined, "starting");
+	await f.attach();
+	await expect
+		.poll(() => f.frames.some((frame) => frame.type === "replay"))
+		.toBe(true);
+	await f.runtime.runPromise(
+		f.spool.emit(eventOutput("discarded")).pipe(Effect.timeout("2 seconds")),
+	);
+	expect(await f.runtime.runPromise(f.receipts.read("runner"))).toMatchObject({
+		sequence: 1,
+	});
+	expect(await f.runtime.runPromise(f.sql`SELECT id FROM messages`)).toEqual(
+		[],
+	);
+	await f.promote();
+	expect(await f.runtime.runPromise(f.checkpoint(Effect.void))).toBe(true);
+	await f.runtime.runPromise(
+		f.spool.emit(eventOutput("live")).pipe(Effect.timeout("2 seconds")),
+	);
+	expect(await f.runtime.runPromise(f.receipts.read("runner"))).toMatchObject({
+		sequence: 2,
+	});
+	expect(await f.runtime.runPromise(f.sql`SELECT id FROM messages`)).toEqual([
+		{ id: "live" },
+	]);
+});
+
+it("recovers a discarded Starting boundary after promotion and reconnect", async () => {
+	const f = await fixture(Effect.void, undefined, undefined, "starting");
+	const first = await f.attach();
+	await expect
+		.poll(() => f.frames.some((frame) => frame.type === "replay"))
+		.toBe(true);
+	await f.runtime.runPromise(
+		f.spool.emit(eventOutput("discarded")).pipe(Effect.timeout("2 seconds")),
+	);
+	expect(f.spool.hasHeldWork).toBe(false);
+	expect(await f.runtime.runPromise(f.sql`SELECT id FROM messages`)).toEqual(
+		[],
+	);
+	await f.promote();
+	first.destroy();
+	await expect
+		.poll(() => f.peers[0] !== undefined && f.closedPeers.has(f.peers[0]))
+		.toBe(true);
+	await f.attach();
+	await expect
+		.poll(() => f.frames.filter((frame) => frame.type === "replay").length)
+		.toBe(2);
+	expect(f.frames.filter((frame) => frame.type === "replay").at(-1)).toEqual({
+		type: "replay",
+		acknowledgedSequence: 1,
+	});
+	await f.runtime.runPromise(
+		f.spool.emit(eventOutput("live")).pipe(Effect.timeout("2 seconds")),
+	);
+	expect(await f.runtime.runPromise(f.receipts.read("runner"))).toMatchObject({
+		sequence: 2,
+	});
+	expect(await f.runtime.runPromise(f.sql`SELECT id FROM messages`)).toEqual([
+		{ id: "live" },
+	]);
+});
+
+for (const type of ["permission-request", "question-request"] as const) {
+	for (const refused of [false, true]) {
+		it(`recovers discarded Starting ${type} through reconnect${refused ? " after a refused checkpoint and replay" : ""}`, async () => {
+			const f = await fixture(Effect.void, undefined, undefined, "starting");
+			f.transport.checkpointAllowed = !refused;
+			const first = await f.attach();
+			await expect
+				.poll(() => f.frames.some((frame) => frame.type === "replay"))
+				.toBe(true);
+			const output: SessionOutput =
+				type === "permission-request"
+					? {
+							type,
+							sinkId: "sink",
+							request: {
+								requestId: "permission",
+								toolName: "Bash",
+								toolInput: {},
+								sessionId: "session",
+								turnId: "turn",
+								providerItemId: "item",
+							},
+						}
+					: {
+							type,
+							sinkId: "sink",
+							request: { requestId: "question", questions: [] },
+						};
+			const emission = f.runtime.runFork(f.spool.emit(output));
+			if (refused) {
+				await expect
+					.poll(
+						() =>
+							f.transport.checkpointAttempts > 0 ||
+							f.frames.some((frame) => frame.type === "output-reply"),
+					)
+					.toBe(true);
+				expect(
+					f.frames.filter((frame) => frame.type === "output-reply"),
+				).toEqual([]);
+				expect(f.spool.hasHeldWork).toBe(true);
+				expect(
+					await f.runtime.runPromise(f.receipts.read("runner")),
+				).toMatchObject({ sequence: 0 });
+				f.transport.checkpointAllowed = true;
+			}
+			await f.runtime.runPromise(
+				Fiber.join(emission).pipe(Effect.timeout("2 seconds")),
+			);
+			expect(
+				await f.runtime.runPromise(f.receipts.read("runner")),
+			).toMatchObject({ sequence: 1 });
+			// Interactions retain their prompt for hello independently of transport ack.
+			expect(f.spool.pendingOutputs).toHaveLength(1);
+			expect(f.published).toEqual([]);
+			await f.promote();
+			first.destroy();
+			await expect
+				.poll(() => f.peers[0] !== undefined && f.closedPeers.has(f.peers[0]))
+				.toBe(true);
+			const replays = f.frames.filter(
+				(frame) => frame.type === "replay",
+			).length;
+			await f.attach();
+			await expect
+				.poll(() => f.frames.filter((frame) => frame.type === "replay").length)
+				.toBe(replays + 1);
+			expect(
+				f.frames.filter((frame) => frame.type === "replay").at(-1),
+			).toEqual({ type: "replay", acknowledgedSequence: 1 });
+			await f.runtime.runPromise(
+				f.spool.emit(eventOutput("live")).pipe(Effect.timeout("2 seconds")),
+			);
+			expect(
+				await f.runtime.runPromise(f.receipts.read("runner")),
+			).toMatchObject({ sequence: 2 });
+			expect(
+				await f.runtime.runPromise(f.sql`SELECT id FROM messages`),
+			).toEqual([{ id: "live" }]);
+		});
+	}
+}
+
 it("keeps a replacement attachment's acknowledgement when a stale output request finishes", async () => {
 	const f = await fixture();
 	await f.runtime.runPromise(f.receipts.attach("runner", "old"));
 	await f.runtime.runPromise(f.receipts.attach("runner", "replacement"));
 	await f.runtime.runPromise(
-		f.receipts.acknowledge("runner", 1, {}, "replacement"),
+		f.checkpoint(f.receipts.acknowledge("runner", 1, {}, "replacement")),
 	);
-	await f.runtime.runPromise(f.receipts.acknowledge("runner", 2, {}, "old"));
+	await f.runtime.runPromise(
+		f.checkpoint(f.receipts.acknowledge("runner", 2, {}, "old")),
+	);
 	expect(await f.runtime.runPromise(f.receipts.read("runner"))).toEqual({
 		sequence: 1,
 		result: {},
@@ -649,16 +850,23 @@ it("fences a pending approval's later resolution after its ask receipt was consu
 		},
 	});
 	const request = f.runtime.runFork(
-		sink
-			.requestPermission({
-				requestId: "request",
-				sessionId: "session",
-				turnId: "turn",
-				providerItemId: "tool",
-				toolName: "Bash",
-				toolInput: { command: "pwd" },
-			})
-			.pipe(Effect.provideService(currentRunnerOutput, receipt)),
+		f
+			.checkpoint(
+				sink
+					.requestPermission({
+						requestId: "request",
+						sessionId: "session",
+						turnId: "turn",
+						providerItemId: "tool",
+						toolName: "Bash",
+						toolInput: { command: "pwd" },
+					})
+					.pipe(
+						Effect.provideService(currentRunnerOutput, receipt),
+						Effect.asVoid,
+					),
+			)
+			.pipe(Effect.asVoid),
 	);
 	cleanups.push(async () => {
 		await f.runtime.runPromise(Fiber.interrupt(request));
@@ -722,7 +930,9 @@ it("migrates a legacy cursor while retaining its sequence and cached reply", asy
 			}>`SELECT attachment_id FROM claude_runner_cursors WHERE runner_id = 'runner'`,
 		),
 	).toEqual([{ attachment_id: "replacement" }]);
-	await f.runtime.runPromise(migrated.acknowledge("runner", 8, {}, "stale"));
+	await f.runtime.runPromise(
+		f.checkpoint(migrated.acknowledge("runner", 8, {}, "stale")),
+	);
 	expect(await f.runtime.runPromise(migrated.read("runner"))).toMatchObject({
 		sequence: 7,
 	});

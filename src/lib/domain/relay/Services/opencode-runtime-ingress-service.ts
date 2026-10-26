@@ -8,8 +8,6 @@ import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail, OpenCodeApiError } from "../../../errors.js";
 import type { Message, SessionStatus } from "../../../instance/sdk-types.js";
 import { makeAttachmentStore } from "../../../persistence/attachment-store.js";
-import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
-import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import {
 	type ProjectionRunnerEffect,
 	ProjectionRunnerEffectTag,
@@ -1083,18 +1081,6 @@ export class EffectOpenCodeRuntimeIngress
 							if (this.stopped || !this.fetchSessionMessages) return;
 							const sessionId = command.session_id;
 							const instanceId = command.provider_id;
-							const requeue = Effect.gen({ self: this }, function* () {
-								const persist = yield* Effect.serviceOption(
-									ClaudeEventPersistEffectTag,
-								);
-								if (persist._tag === "Some")
-									yield* requeueFailedSteers(
-										this.sql,
-										persist.value,
-										sessionId,
-										command.command_id,
-									);
-							});
 							const [claim] = yield* this.sql<{
 								request_sequence: number;
 								latest_sequence: number;
@@ -1120,7 +1106,6 @@ export class EffectOpenCodeRuntimeIngress
 									AND EXISTS (SELECT 1 FROM provider_runs run WHERE run.id = outbox.run_id
 										AND run.session_id = outbox.session_id AND run.status IN ('pending', 'running'))))`;
 							if (!claim) {
-								yield* requeue;
 								pending.delete(command);
 								return;
 							}
@@ -1346,8 +1331,7 @@ export class EffectOpenCodeRuntimeIngress
 												beforeProject: current(),
 											},
 										);
-									// Publication owns its own CommitAndSignal transaction. A
-									// crash here is covered by the inbox startup requeue sweep.
+									// Publication commits the terminal and any returned input together.
 									const terminal = yield* this
 										.sql`SELECT 1 FROM provider_command_outbox WHERE project_key = ${this.projectId}
 										AND command_id = ${command.command_id} AND request_sequence = ${command.request_sequence}
@@ -1356,7 +1340,6 @@ export class EffectOpenCodeRuntimeIngress
 											AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.id = ${claim.run_id}
 												AND run.session_id = ${sessionId} AND run.status IN ('pending', 'running'))))`;
 									if (!terminal.length) return;
-									yield* requeue;
 									pending.delete(command);
 								}),
 							);
@@ -1373,40 +1356,6 @@ export class EffectOpenCodeRuntimeIngress
 							),
 						),
 					{ discard: true },
-				).pipe(
-					// A restart can leave only the publication half of settlement.
-					// Keep retrying the existing project-local inbox sweep as well.
-					Effect.andThen(
-						Effect.gen({ self: this }, function* () {
-							if (this.stopped) return;
-							const persist = yield* Effect.serviceOption(
-								ClaudeEventPersistEffectTag,
-							);
-							if (persist._tag === "Some") {
-								const sessions = yield* this.sql<{ session_id: string }>`
-									SELECT DISTINCT pending.session_id FROM pending_inputs pending
-									JOIN sessions session ON session.id = pending.session_id
-									JOIN provider_command_outbox outbox ON outbox.command_id = pending.input_id
-										AND outbox.session_id = pending.session_id
-									WHERE session.project_id = ${this.projectId} AND outbox.project_key = ${this.projectId}
-										AND pending.state = 'steering' AND outbox.effect_type = 'send_turn' AND outbox.status = 'failed'`;
-								for (const { session_id } of sessions)
-									yield* requeueFailedSteers(
-										this.sql,
-										persist.value,
-										session_id,
-									);
-							}
-						}).pipe(
-							Effect.catchCause((cause) =>
-								Effect.sync(() =>
-									this.log.warn("Input requeue recovery deferred", {
-										error: Failure.renderCause(cause),
-									}),
-								),
-							),
-						),
-					),
 				),
 			)
 			.pipe(Effect.asVoid);

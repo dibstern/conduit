@@ -8,6 +8,7 @@ import * as Failure from "../../effect/failure-classification.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
 	type RunnerHello,
+	type RunnerMessage,
 	RunnerSocket,
 	type RunnerWireCodec,
 	runnerBuildId,
@@ -62,6 +63,9 @@ export const connectRunner = (options: {
 		readonly subagentPollTimeoutMs?: number;
 	};
 	readonly receipts?: ReceiptStore;
+	readonly checkpoint?: (
+		op: Effect.Effect<void, SessionFailure>,
+	) => Effect.Effect<boolean, SessionFailure>;
 	readonly runFork: (effect: Effect.Effect<void>) => unknown;
 	readonly emit: (
 		output: SessionOutput,
@@ -75,6 +79,9 @@ export const connectRunner = (options: {
 	readonly onClose: (failure: SessionFailure) => void;
 	readonly onIdleExit?: () => void;
 	readonly onCommandAccepted?: (sinkId: string) => void;
+	readonly onCommandReply?: (
+		reply: Extract<RunnerMessage, { readonly type: "command-reply" }>,
+	) => Effect.Effect<void, SessionFailure>;
 	readonly onCommandsSettled?: (
 		commands: NonNullable<RunnerHello["sendCommands"]>,
 	) => void;
@@ -90,6 +97,7 @@ export const connectRunner = (options: {
 				)
 			: undefined;
 		const outputLock = yield* Semaphore.make(1);
+		const helloRestored = yield* Deferred.make<void, SessionFailure>();
 		const attachmentId = randomUUID();
 		let acknowledged = 0;
 		let lastReply: SessionOutputReply = {};
@@ -285,19 +293,18 @@ export const connectRunner = (options: {
 							}).pipe(
 								Effect.matchCauseEffect({
 									onFailure: (cause) =>
-										Effect.sync(() => {
-											finish(
-												Effect.fail(
-													runnerFailure(
-														"restore runner",
-														Failure.squashCause(cause),
-													),
-												),
+										Effect.gen(function* () {
+											const failure = runnerFailure(
+												"restore runner",
+												Failure.squashCause(cause),
 											);
+											yield* Deferred.fail(helloRestored, failure);
+											finish(Effect.fail(failure));
 											connection.destroy();
 										}),
 									onSuccess: () =>
-										Effect.sync(() => {
+										Effect.gen(function* () {
+											yield* Deferred.succeed(helloRestored, undefined);
 											releaseOutputWaiters();
 											if (!replayRequested)
 												connection.write({
@@ -310,6 +317,31 @@ export const connectRunner = (options: {
 											finish(Effect.succeed(connection));
 										}),
 								}),
+							),
+						);
+					} else if (message.type === "command-reply" && greeted) {
+						// Ordinary requests consume their own replies in RunnerSocket. A
+						// retained send has no waiter after reconnect, but still owns a row.
+						const precedingOutput = beforeCommandFailure();
+						options.runFork(
+							Effect.gen(function* () {
+								yield* Deferred.await(helloRestored);
+								yield* precedingOutput;
+								if (active)
+									yield* options.onCommandReply?.(message) ?? Effect.void;
+							}).pipe(
+								Effect.catchCause((cause) =>
+									Effect.sync(() => {
+										if (!active) return;
+										const failure = runnerFailure(
+											"settle runner reply",
+											Failure.squashCause(cause),
+										);
+										finish(Effect.fail(failure));
+										options.onClose(failure);
+										connection.destroy();
+									}),
+								),
 							),
 						);
 					} else if (message.type === "thread-read" && greeted) {
@@ -457,8 +489,8 @@ export const connectRunner = (options: {
 												message.output.type === "question-request"
 											)
 												yield* Deferred.await(committed);
-											else if (!receipt.consumed)
-												yield* options.receipts
+											if (!receipt.consumed) {
+												const checkpoint = options.receipts
 													.acknowledge(
 														options.runnerId,
 														sequence,
@@ -470,6 +502,17 @@ export const connectRunner = (options: {
 															runnerFailure("acknowledge runner", cause),
 														),
 													);
+												const checkpointed = yield* options.checkpoint?.(
+													checkpoint,
+												) ?? checkpoint.pipe(Effect.as(true));
+												if (!checkpointed)
+													return yield* Effect.fail(
+														runnerFailure(
+															"acknowledge runner",
+															"Runner checkpoint refused",
+														),
+													);
+											}
 										}
 										replayOutputCommitted(sequence);
 										acknowledged = sequence;
@@ -520,6 +563,9 @@ export const connectRunner = (options: {
 				},
 				(failure) => {
 					active = false;
+					options.runFork(
+						Deferred.fail(helloRestored, failure).pipe(Effect.asVoid),
+					);
 					replayed?.(Effect.fail(failure));
 					replayed = undefined;
 					releaseOutputWaiters();

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Schedule, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, it, vi } from "vitest";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -392,7 +392,10 @@ it.each([
 	}
 }, 60_000);
 
-it("retires prompts through the stored owner when adoption is refused and sends after restart", async () => {
+it.each([
+	false,
+	true,
+])("retires prompts through the stored owner when adoption is refused and sends after restart, unverifiable $0", async (unverifiable) => {
 	const fixture = ProcessHarness.create({
 		dist: "dist",
 		restartProof: true,
@@ -412,21 +415,45 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 	await fixture.kill();
 	await sending;
 	// The sandbox denies ps in this Vitest process. Use the same isolated,
-	// runner-written argv evidence as the process harness's identity fallback.
+	// runner-written evidence as the process harness's identity fallback.
 	vi.spyOn(runnerRegistry, "runnerPidMatchesRegistration").mockImplementation(
 		(registration) => {
-			const argv = JSON.parse(
-				readFileSync(
-					join(fixture.root, `runner-argv-${registration.pid}.json`),
-					"utf8",
+			const argv = Schema.decodeUnknownSync(Schema.Array(Schema.String))(
+				JSON.parse(
+					readFileSync(
+						join(fixture.root, `runner-argv-${registration.pid}.json`),
+						"utf8",
+					),
 				),
-			) as string[];
+			);
 			return (
 				argv.includes(registration.socketPath) &&
 				argv.includes(registration.runnerId)
 			);
 		},
 	);
+	const registrations = discoverRunners(fixture.projectDir, fixture.configDir);
+	expect(registrations).toHaveLength(1);
+	const identities = new Map(
+		registrations.map((registration) => {
+			const birth = readFileSync(
+				join(fixture.root, `runner-birth-${registration.pid}`),
+				"utf8",
+			);
+			expect(birth.startsWith(`${registration.pid}-`)).toBe(true);
+			return [registration.pid, registration.startTime ?? birth];
+		}),
+	);
+	vi.spyOn(runnerRegistry.runnerProcessTable, "inspect").mockImplementation(
+		(pid) => {
+			if (!runnerRegistry.runnerPidAlive(pid)) return { state: "gone" };
+			const startTime = identities.get(pid);
+			return unverifiable || startTime === undefined
+				? { state: "unknown" }
+				: { state: "running", startTime };
+		},
+	);
+	const signals = vi.spyOn(runnerRegistry.runnerProcessTable, "signal");
 	const store = makePersistenceStoreLayer(fixture.daemonStorePath());
 	const persistence = makePersistenceProjectLayer("project-b").pipe(
 		Layer.provideMerge(store),
@@ -511,7 +538,20 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 						projectId: "process-test",
 					}),
 				);
-				expect(yield* runner.hasLiveProcessEffect(sessionId)).toBe(false);
+				if (unverifiable) {
+					expect(yield* runner.hasLiveProcessEffect(sessionId)).toBe(true);
+					expect(signals).not.toHaveBeenCalled();
+					for (const registration of registrations)
+						expect(
+							yield* runner.hasLiveProcessEffect(
+								sessionId,
+								registration.runnerId,
+							),
+						).toBe(false);
+				} else {
+					expect(yield* runner.hasLiveProcessEffect(sessionId)).toBe(false);
+					expect(signals).toHaveBeenCalled();
+				}
 				expect(
 					yield* sql`SELECT status FROM pending_approvals WHERE session_id = ${sessionId}`,
 				).toEqual([
@@ -529,12 +569,30 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 					}),
 				);
 				expect(yield* ownerPending.listPendingQuestions(sessionId)).toEqual([]);
+				// Survivor settlement is detached from recovery; observe its durable
+				// result before closing the fixture's store.
+				if (unverifiable)
+					yield* sql<{
+						status: string;
+					}>`SELECT status FROM provider_command_outbox WHERE session_id = ${sessionId}`.pipe(
+						Effect.repeat({
+							while: (rows) => rows.some((row) => row.status === "running"),
+							schedule: Schedule.spaced("10 millis"),
+						}),
+						Effect.timeout("5 seconds"),
+					);
 				expect(
 					yield* sql`SELECT status FROM provider_command_outbox WHERE session_id = ${sessionId}`,
 				).toEqual([{ status: "failed" }]);
-				expect(
-					yield* sql`SELECT status FROM provider_runs WHERE session_id = ${sessionId}`,
-				).toEqual([{ status: "error" }]);
+				if (unverifiable) {
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE session_id = ${sessionId}`,
+					).toEqual([{ status: "interrupted" }]);
+				} else {
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE session_id = ${sessionId}`,
+					).toEqual([{ status: "error" }]);
+				}
 				expect(
 					yield* sql`SELECT project_id FROM events WHERE session_id = ${sessionId} AND type IN ('question.resolved', 'permission.resolved')`,
 				).toEqual([
@@ -562,6 +620,7 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 	).toBe("idle");
 	proof = {
 		scenario: "cross-project adoption refusal",
+		unverifiable,
 		sessionId,
 		promptResolutions: 3,
 		sentAfterRestart: true,

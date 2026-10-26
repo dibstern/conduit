@@ -17,6 +17,10 @@ import type {
 } from "../../../src/lib/provider/runner/session-runner.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { createMockQuery, makeSuccessResult } from "../../helpers/mock-sdk.js";
+import {
+	admitRunnerCommand,
+	makeRunnerAdmission,
+} from "../../helpers/runner-provider-admission.js";
 
 it.each([
 	{ end: false, failure: "open" },
@@ -127,7 +131,8 @@ it.each([
 								return {};
 							}),
 					);
-					yield* runner.executeEffect(send("first", "a"));
+					const admission = yield* makeRunnerAdmission(runner);
+					yield* admitRunnerCommand(admission, runner, send("first", "a"));
 					while (
 						!outputs.some(
 							(output) =>
@@ -137,20 +142,20 @@ it.each([
 					)
 						yield* Effect.sleep("10 millis");
 					const failedTurn = send("failed", "b");
-					const failed = yield* runner
-						.executeEffect(
-							failure === "open"
-								? failedTurn
-								: {
-										...failedTurn,
-										input: {
-											...failedTurn.input,
-											resumeSessionId: "missing",
-											clearInheritedGoal: true,
-										},
+					const failed = yield* admitRunnerCommand(
+						admission,
+						runner,
+						failure === "open"
+							? failedTurn
+							: {
+									...failedTurn,
+									input: {
+										...failedTurn.input,
+										resumeSessionId: "missing",
+										clearInheritedGoal: true,
 									},
-						)
-						.pipe(Effect.result);
+								},
+					).pipe(Effect.result);
 					expect(failed._tag).toBe(failure === "open" ? "Failure" : "Success");
 					if (failure === "open")
 						expect(
@@ -176,7 +181,7 @@ it.each([
 							type: "end-session",
 							sessionId: "session",
 						});
-					yield* runner.executeEffect(send("retry", "b"));
+					yield* admitRunnerCommand(admission, runner, send("retry", "b"));
 					while (
 						outputs.filter(
 							(output) =>
@@ -275,8 +280,9 @@ it.each([
 								return {};
 							}),
 					);
+					const admission = yield* makeRunnerAdmission(runner);
 					for (const [index, account] of ["a", "b"].entries()) {
-						yield* runner.executeEffect({
+						yield* admitRunnerCommand(admission, runner, {
 							type: "send-turn",
 							sinkId: account,
 							aborted: false,

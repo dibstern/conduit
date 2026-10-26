@@ -34,6 +34,7 @@ import {
 	runnerPidAlive,
 } from "../../../../src/lib/provider/runner/runner-registry.js";
 import type { SessionOutput } from "../../../../src/lib/provider/runner/session-runner.js";
+import { makeRunnerAdmission } from "../../../helpers/runner-provider-admission.js";
 
 const observations: Record<string, unknown>[] = [];
 const servers: Server[] = [];
@@ -147,7 +148,7 @@ async function runnerSocket(options: {
 						runnerId,
 						sessionId,
 						pid,
-						bindings: [{ sinkId: "adoption-sink", sessionId }],
+						bindings: [{ sinkId: "adoption-sink", sessionId, released: false }],
 						pendingOutputs: [{ sequence: 0, output: pending }],
 					});
 				else if (message.type === "command") {
@@ -232,6 +233,7 @@ describe("Claude runner adoption", () => {
 								return {};
 							}),
 					);
+					yield* makeRunnerAdmission(runner);
 					yield* runner.recoverEffect;
 					expect(
 						yield* runner.hasLiveProcessEffect(
@@ -303,6 +305,7 @@ describe("Claude runner adoption", () => {
 						},
 						() => Effect.succeed({}),
 					);
+					yield* makeRunnerAdmission(runner);
 					yield* runner.recoverEffect;
 					return yield* Effect.result(
 						runner.executeEffect({
@@ -341,6 +344,7 @@ describe("Claude runner adoption", () => {
 						},
 						() => Effect.succeed({}),
 					);
+					yield* makeRunnerAdmission(runner);
 					const result = yield* Effect.result(runner.recoverEffect);
 					expect(
 						yield* runner.hasLiveProcessEffect(
@@ -393,6 +397,7 @@ describe("Claude runner adoption", () => {
 						},
 						() => Effect.succeed({}),
 					);
+					yield* makeRunnerAdmission(runner);
 					const recovery = yield* Effect.forkChild(runner.recoverEffect);
 					yield* Deferred.await(rejected);
 					yield* Fiber.interrupt(recovery);
@@ -435,6 +440,7 @@ describe("Claude runner adoption", () => {
 						},
 						() => Effect.succeed({}),
 					);
+					yield* makeRunnerAdmission(runner);
 					yield* runner.recoverEffect;
 				}),
 			),

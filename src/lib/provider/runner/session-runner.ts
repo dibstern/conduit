@@ -1,4 +1,4 @@
-import type { Effect, Scope, Stream } from "effect";
+import type { Effect, Option, Scope, Stream } from "effect";
 import type { Account } from "../../contracts/account.js";
 import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { AccountSwitchBusy } from "../../contracts/limit-recovery.js";
@@ -28,6 +28,7 @@ import type {
 } from "../types.js";
 import type { UsageRead } from "../usage-reader.js";
 import type { RunnerSettingsSnapshot } from "./runner-upgrade.js";
+import type { SendScope, SendScopes } from "./send-scope.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
 export type SessionTurn = Omit<
@@ -40,6 +41,36 @@ export type DurableSessionTurn = Omit<
 	SendTurnInput,
 	"eventSink" | "abortSignal" | "awaitIntake" | "reconcileIntake"
 >;
+
+export type SendOrigin =
+	| { readonly _tag: "Fresh" }
+	| { readonly _tag: "Adopted" };
+
+export interface SendAdmissionRequest {
+	readonly origin: SendOrigin;
+	readonly sinkId: string;
+	readonly input: Pick<DurableSessionTurn, "sessionId" | "inputId"> &
+		Partial<Omit<DurableSessionTurn, "images">> & {
+			readonly images?: DurableSessionTurn["images"] | SessionTurn["images"];
+		};
+	/** Changing the sink creates a new send; admission retires the old handle. */
+	readonly previous?: SendScope;
+	/** Continue work for this provider's already-admitted logical send. */
+	readonly retained?: SendScope;
+	/** Read current durable completion, after the admission key is claimed. */
+	readonly isEnded?: Effect.Effect<boolean, SessionFailure> | undefined;
+	readonly refuse?: (
+		failure: SessionFailure,
+		send: SendScope,
+		showFailure: boolean,
+	) => Effect.Effect<void, unknown>;
+}
+
+/** None means this adopted send already ended; no work was run. */
+export type AdmitSend = <A, E, R>(
+	request: SendAdmissionRequest,
+	work: (send: SendScope) => Effect.Effect<A, E, R>,
+) => Effect.Effect<Option.Option<A>, E | SessionFailure, R>;
 
 export type SessionCommand = (
 	| {
@@ -215,6 +246,14 @@ export interface SessionFailure {
 
 /** Effects are execution carriers; only command/output/reply data crosses here. */
 export interface SessionRunner {
+	/** Installed by the provider before recovery or reattachment may admit work. */
+	setSendAdmission?(admit: AdmitSend): void;
+	/** Shared daemon owner of every admitted send's resources. */
+	readonly sendScopes?: SendScopes;
+	/** Native work can retain a local send after its intake waiter detaches. */
+	retainsSend?(send: SendScope): boolean;
+	/** Local runners observe cancellation before an asynchronous setup can resume. */
+	abortSend?(send: SendScope): void;
 	/** Native turns, prompts, background tasks and finalizers, including after intake. */
 	hasDemandEffect?(sessionId: string): Effect.Effect<boolean>;
 	/** Release one project's attachment while its started runner remains independent. */
@@ -233,6 +272,7 @@ export interface SessionRunner {
 		input: T,
 		sinkId: string,
 		work: Effect.Effect<A, E, R>,
+		send: SendScope,
 	): Effect.Effect<A, E | SessionFailure, R>;
 	readonly getControlProcessIdEffect?: (
 		sessionId: string,
@@ -275,11 +315,21 @@ export interface SessionRunner {
 	): Effect.Effect<ProviderNativeSession | undefined>;
 	executeEffect(
 		command: Extract<SessionCommand, { type: "send-turn" }>,
+		send: SendScope,
 	): Effect.Effect<TurnResult, SessionFailure>;
 	executeEffect(
 		command: Exclude<SessionCommand, { type: "send-turn" }>,
+		send?: SendScope,
 	): Effect.Effect<void, SessionFailure>;
 	executeEffect(
+		command: SessionCommand,
+		send: SendScope,
+	): Effect.Effect<TurnResult | undefined, SessionFailure>;
+}
+
+/** Native child execution owns payload sinks, never daemon send handles. */
+export interface NativeSessionRunner extends SessionRunner {
+	executeNativeEffect(
 		command: SessionCommand,
 	): Effect.Effect<TurnResult | undefined, SessionFailure>;
 }

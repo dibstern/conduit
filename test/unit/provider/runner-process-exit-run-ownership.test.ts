@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { Deferred, Effect, Fiber, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, it, vi } from "vitest";
+import {
+	admitRunnerCommand,
+	makeRunnerAdmission,
+} from "../../helpers/runner-provider-admission.js";
 
 const transport = vi.hoisted(() => ({ spawn: vi.fn(), alive: vi.fn() }));
 vi.mock("node:child_process", async (original) => ({
@@ -175,7 +179,6 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 				},
 				snapshotCommandSettings: () => ({}),
 				loginChange: () => "None",
-				recoverCommands: () => Effect.succeed([]),
 			};
 			const runner = yield* makeProcessSessionRunner(
 				{
@@ -191,6 +194,7 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 						: Effect.succeed({}),
 				driver,
 			);
+			const admission = yield* makeRunnerAdmission(runner);
 			const input = {
 				sessionId: "s",
 				workspaceRoot: root,
@@ -200,7 +204,7 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 			};
 			yield* runner.executeEffect({ type: "pre-warm", sessionId: "s", input });
 			const execution = yield* Effect.forkChild(
-				runner.executeEffect({
+				admitRunnerCommand(admission, runner, {
 					type: "send-turn",
 					sinkId: "retry-sink",
 					aborted: false,
@@ -329,6 +333,7 @@ for (const [
 							runnerId: options.runnerId,
 							sessionId: options.sessionId,
 							pid: child.pid,
+							crossAttemptNativeResumeFallback: true,
 							sendCommands: [{ commandId: "old-command", attempt: 1 }],
 							bindings: [],
 						},
@@ -346,7 +351,6 @@ for (const [
 			},
 			snapshotCommandSettings: () => ({}),
 			loginChange: () => "None",
-			recoverCommands: () => Effect.succeed([]),
 		};
 		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
 		const program = Effect.scoped(
@@ -481,6 +485,7 @@ for (const [
 								),
 					}),
 				);
+				yield* makeRunnerAdmission(runner);
 				yield* runner.executeEffect({
 					type: "pre-warm",
 					sessionId: "s",

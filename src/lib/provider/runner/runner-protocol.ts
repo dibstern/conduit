@@ -6,6 +6,10 @@ import { BUILD_ID } from "../../build-id.js";
 import { isRecord } from "../../utils.js";
 import type { CursorBackendUrl } from "../cursor/cursor-credential.js";
 import type { ProviderControlCommandStatus, TurnResult } from "../types.js";
+import {
+	legacyRunnerAnswerCompletions,
+	legacyRunnerRetainedSends,
+} from "./runner-legacy-recovery.js";
 import type { RunnerUpgradeState } from "./runner-upgrade.js";
 import type {
 	SessionCommand,
@@ -53,6 +57,20 @@ export const runnerSinkId = (
 ): string =>
 	`${commandId}:${attempt}${nativeResumeFallback ? ":native-resume-fallback" : ""}`;
 
+export type RunnerSendAnswer = {
+	readonly commandId: string;
+	readonly attempt: number;
+	readonly nativeResumeFallback: boolean;
+} & (
+	| { readonly status: "running" }
+	| { readonly status: "uncertain" }
+	| {
+			readonly status: "finished";
+			readonly result?: TurnResult;
+			readonly failure?: SessionFailure;
+	  }
+);
+
 export interface RunnerHello {
 	readonly type: "hello";
 	readonly driverKind?: string;
@@ -76,12 +94,19 @@ export interface RunnerHello {
 	readonly declaresLogin?: true;
 	/** Cursor sends consume the daemon's admitted account credential envelope. */
 	readonly scopedCursorCredentials?: true;
+	/** The journal accepts a fresh fallback after an earlier attempt's rejection. */
+	readonly crossAttemptNativeResumeFallback?: true;
+	/** The journal reports each retained send's outcome and process call ownership. */
+	readonly sendJournalAnswers?: true;
+	readonly sendAnswers?: readonly RunnerSendAnswer[];
 	readonly cursorBackendUrl?: CursorBackendUrl;
 	readonly taggedConfigDir?: true;
 	readonly bindings?: readonly {
 		readonly sinkId: string;
 		readonly sessionId: string;
 		readonly commandId?: string;
+		/** Absent on older runners; the sink identity supplies its legacy attempt. */
+		readonly attempt?: number;
 		/** Absent on older runners; the daemon falls back to its turn records. */
 		readonly released?: boolean;
 	}[];
@@ -91,6 +116,10 @@ export interface RunnerHello {
 	}[];
 	readonly completedCommands?: readonly {
 		readonly commandId: string;
+		/** Older runners did not report the attempt in completion receipts. */
+		readonly attempt?: number;
+		/** Identifies the send that replied, independently of daemon preparation. */
+		readonly nativeResumeFallback?: boolean;
 		readonly result?: TurnResult;
 		readonly failure?: SessionFailure;
 	}[];
@@ -133,6 +162,8 @@ type RunnerReply =
 	| {
 			readonly type: "command-reply";
 			readonly commandId: string;
+			readonly attempt?: number;
+			readonly nativeResumeFallback?: boolean;
 			readonly result?: TurnResult;
 			readonly failure?: SessionFailure;
 	  }
@@ -150,6 +181,7 @@ export type RunnerMessage =
 			readonly type: "command-status";
 			readonly requestId: string;
 			readonly commandId: string;
+			readonly attempt?: number;
 	  }
 	| {
 			readonly type: "thread-read";
@@ -171,6 +203,7 @@ export type RunnerMessage =
 	| {
 			readonly type: "command-accepted";
 			readonly commandId: string;
+			readonly attempt?: number;
 			readonly sinkId: string;
 	  }
 	| { readonly type: "refused"; readonly failure: SessionFailure }
@@ -283,6 +316,8 @@ export class RunnerSocket {
 			reply: (reply: RunnerReply) => void;
 			retryOnIdle: boolean;
 			accepted: boolean;
+			commandAttempt?: number;
+			nativeResumeFallback?: boolean;
 		}
 	>();
 	private failure: SessionFailure | undefined;
@@ -315,9 +350,12 @@ export class RunnerSocket {
 					this.scopedCursorCredentials =
 						message.scopedCursorCredentials === true;
 					this.peerDriverKind = message.driverKind;
-					this.retainedSends = message.sendCommands;
-					if (!this.peerSettlesAnswers)
-						for (const command of message.completedCommands ?? [])
+					this.retainedSends =
+						message.sendJournalAnswers === true
+							? (message.sendAnswers ?? [])
+							: legacyRunnerRetainedSends(message);
+					if (!this.peerSettlesAnswers && message.sendJournalAnswers !== true)
+						for (const command of legacyRunnerAnswerCompletions(message))
 							if (command.commandId.endsWith(":answer"))
 								this.completedCommands.set(
 									command.commandId,
@@ -336,7 +374,12 @@ export class RunnerSocket {
 				if (message.type === "idle-exit") this.idleExiting = true;
 				if (message.type === "command-accepted") {
 					const pending = this.pending.get(`command:${message.commandId}`);
-					if (pending) pending.accepted = true;
+					if (
+						pending &&
+						(message.attempt === undefined ||
+							message.attempt === pending.commandAttempt)
+					)
+						pending.accepted = true;
 				}
 				if (
 					message.type === "command-reply" ||
@@ -356,7 +399,15 @@ export class RunnerSocket {
 										? `command:${message.commandId}`
 										: `output:${message.outputId}`;
 					const reply = this.pending.get(key);
-					if (reply) reply.reply(message);
+					if (
+						reply &&
+						(message.type !== "command-reply" ||
+							((message.attempt === undefined ||
+								message.attempt === reply.commandAttempt) &&
+								(message.nativeResumeFallback === undefined ||
+									message.nativeResumeFallback === reply.nativeResumeFallback)))
+					)
+						reply.reply(message);
 					else onMessage(message);
 				} else onMessage(message);
 			} catch (cause) {
@@ -474,6 +525,7 @@ export class RunnerSocket {
 
 	commandStatusEffect(
 		commandId: string,
+		attempt?: number,
 	): Effect.Effect<
 		Exclude<ProviderControlCommandStatus, "gone">,
 		SessionFailure
@@ -483,6 +535,7 @@ export class RunnerSocket {
 			type: "command-status",
 			requestId,
 			commandId,
+			...(attempt !== undefined ? { attempt } : {}),
 		});
 	}
 
@@ -530,6 +583,14 @@ export class RunnerSocket {
 			this.pending.set(key, {
 				retryOnIdle,
 				accepted: false,
+				...(message.type === "command"
+					? {
+							commandAttempt: message.attempt ?? 0,
+							nativeResumeFallback:
+								message.command.type === "send-turn" &&
+								message.command.input.nativeResumeFallback === true,
+						}
+					: {}),
 				reply: (reply) => {
 					this.pending.delete(key);
 					// Capture the output boundary when the failed reply arrives.

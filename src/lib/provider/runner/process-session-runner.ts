@@ -25,6 +25,7 @@ import {
 	AccountSwitchBusy,
 	accountSwitchBusyMessage,
 } from "../../contracts/limit-recovery.js";
+import { RunnerWriteOrigin } from "../../contracts/stored-event.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import {
@@ -38,8 +39,13 @@ import {
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { createLogger } from "../../logger.js";
-import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
-import { currentCommitGuard } from "../../persistence/effect/commit-and-signal.js";
+import { makeClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../persistence/effect/commit-and-signal.js";
+import {
+	EventStoreEffectTag,
+	makeEventStoreEffect,
+} from "../../persistence/effect/event-store-effect.js";
+import { ProjectionRunnerEffectTag } from "../../persistence/effect/projection-runner-effect.js";
 import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import { isRecord } from "../../utils.js";
 import { STOP_ABORT_WAIT_MS } from "../orchestration-command-contracts.js";
@@ -54,10 +60,22 @@ import type {
 	ProviderNativeSession,
 	TurnResult,
 } from "../types.js";
-import { makeRunnerAuthority, type RunnerRecord } from "./runner-authority.js";
+import {
+	type Grant,
+	makeRunnerAuthority,
+	type RunnerRecord,
+} from "./runner-authority.js";
 import { connectRunner } from "./runner-connection.js";
 import * as Entry from "./runner-entry-lifecycle.js";
 import {
+	legacyRunnerBindings,
+	legacyRunnerRetainedSends,
+	recoverLegacyRunnerCommands,
+	replayLegacyRunnerSend,
+} from "./runner-legacy-recovery.js";
+import {
+	type RunnerHello,
+	type RunnerSendAnswer,
 	type RunnerSocket,
 	runnerBuildId,
 	runnerFailure,
@@ -68,7 +86,12 @@ import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
 } from "./runner-receipts.js";
-import type { recoverRunnerCommands } from "./runner-recovery.js";
+import {
+	currentPendingSendOwner,
+	runnerCommandEnded,
+	runningRunnerCommands,
+	settleRunnerCommandReply,
+} from "./runner-recovery.js";
 import {
 	discoverAllRunners,
 	discoverRunners,
@@ -84,8 +107,9 @@ import { runnerSendCommandsForProcess } from "./runner-send-journal.js";
 import { failRunnerTurn, observeRunnerTurn } from "./runner-turn-failure.js";
 import { makeRunnerUpgrade, type RunnerUpgrade } from "./runner-upgrade.js";
 import { makeSendAdmissionWait } from "./send-admission.js";
+import { makeSendScopes, type SendScope } from "./send-scope.js";
 import type {
-	DurableSessionTurn,
+	AdmitSend,
 	SessionCommand,
 	SessionFailure,
 	SessionOutput,
@@ -95,7 +119,10 @@ import type {
 } from "./session-runner.js";
 
 interface RunnerChild {
-	authorityRecord?: RunnerRecord<RunnerChild> | undefined;
+	readonly recoveringCommands?: boolean;
+	readonly ownsPendingSend?: Effect.Success<typeof currentPendingSendOwner>;
+	grant?: Grant | undefined;
+	outputAuthority?: { grant: Grant | undefined } | undefined;
 	attachmentId?: string | undefined;
 	readonly registeredAt?: number;
 	readonly sessionId: string;
@@ -141,6 +168,8 @@ interface ProcessRunnerDeps {
 	readonly processTable?: RunnerProcessTable;
 	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
 	readonly subagentPollTimeoutMs?: number;
+	readonly sessionForkSdk?: import("../claude/claude-provider-runtime.js").ClaudeSessionRunnerDeps["sessionForkSdk"];
+	readonly claudeSettingsOverrides?: import("../claude/claude-provider-runtime.js").ClaudeSessionRunnerDeps["claudeSettingsOverrides"];
 	readonly projectRootForSession: NonNullable<
 		RunnerProviderInstanceDeps["projectRootForSession"]
 	>;
@@ -149,9 +178,13 @@ interface ProcessRunnerDeps {
 
 export interface ProcessRunnerDriver {
 	readonly spawnEnvironment?: Readonly<Record<string, string>>;
-	/** Undelivered replays use the sendTurn callback's ordinary admission. */
-	readonly admitsRecoveredSends?: boolean;
 	readonly driverKind: string;
+	readonly legacyReplayCommandFields?: (
+		accountId: string,
+	) => Effect.Effect<
+		Partial<Extract<SessionCommand, { type: "send-turn" }>>,
+		SessionFailure
+	>;
 	/** The account owner retains this demand until the native sink is released. */
 	readonly withAccountScope?: (
 		accountId: string,
@@ -188,45 +221,6 @@ export interface ProcessRunnerDriver {
 			readonly shellConfig?: SessionTurn["shellConfig"];
 		},
 	) => "None" | "Settings" | "Account";
-	readonly recoverCommands: (
-		sql: SqlClient.SqlClient,
-		sessionId: string,
-		connection: RunnerSocket,
-		failTurn: (sinkId: string, failure: SessionFailure) => Effect.Effect<void>,
-		closing: () => boolean,
-		liveSession: Effect.Effect<ProviderNativeSession | undefined>,
-		resolveSinkId: (
-			commandId: string,
-			inputId: string,
-			attempt: number,
-			nativeResumeFallback?: boolean,
-		) => string,
-		replayTurn: (
-			accountId: string,
-			input: Pick<SessionTurn, "sessionId" | "inputId" | "account">,
-			sinkId: string,
-			work: (
-				dispatch: (
-					command: Effect.Effect<TurnResult | undefined, SessionFailure>,
-				) => Effect.Effect<TurnResult | undefined, SessionFailure>,
-			) => Effect.Effect<TurnResult | undefined, SessionFailure>,
-		) => Effect.Effect<TurnResult | undefined, SessionFailure>,
-		sendTurn: (
-			commandId: string,
-			command: Extract<SessionCommand, { type: "send-turn" }>,
-			attempt: number,
-		) => Effect.Effect<TurnResult | undefined, SessionFailure>,
-		admitReplay: (
-			sinkId: string,
-			replay: Effect.Effect<TurnResult | undefined, SessionFailure>,
-		) => Effect.Effect<TurnResult | undefined, SessionFailure>,
-	) => Effect.Effect<
-		Effect.Success<
-			ReturnType<typeof recoverRunnerCommands<DurableSessionTurn>>
-		>,
-		unknown,
-		PersistenceProjectTag
-	>;
 }
 
 const log = createLogger("process-session-runner");
@@ -462,14 +456,31 @@ export const stopRegisteredRunners = (
 
 export const makeProcessSessionRunner = (
 	deps: ProcessRunnerDeps,
-	emit: (
+	emitOutput: (
 		output: SessionOutput,
 		sessionId?: string,
+		send?: SendScope,
 	) => Effect.Effect<SessionOutputReply, SessionFailure>,
 	driver: ProcessRunnerDriver,
 ) =>
 	Effect.gen(function* () {
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
+		let providerAdmission: AdmitSend | undefined;
+		const admitSend: AdmitSend = (request, work) =>
+			providerAdmission
+				? providerAdmission(request, work)
+				: Effect.fail(
+						runnerFailure("admit send", "Provider admission is not installed"),
+					);
+		const emit = (output: SessionOutput, sessionId?: string) =>
+			emitOutput(
+				output,
+				sessionId,
+				"sinkId" in output ? sinks.get(output.sinkId)?.sendScope : undefined,
+			);
+		const sendScopes = yield* makeSendScopes((sinkId, sessionId) =>
+			emit({ type: "release-sink", sinkId }, sessionId),
+		);
 		const processTable = deps.processTable ?? runnerProcessTable;
 		const clock = yield* Clock.Clock;
 		const pidAlive = (pid: number, startTime?: string) => {
@@ -492,7 +503,7 @@ export const makeProcessSessionRunner = (
 					const pid = entry.pid ?? entry.child?.pid;
 					return pid !== undefined &&
 						pidAlive(pid, entry.startTime) &&
-						entry.authorityRecord?.tag._tag !== "Retired"
+						authority.records.get(entry.runnerId)?.tag._tag !== "Retired"
 						? retireSurvivor(
 								entry,
 								runnerFailure("stop runner", "Runner survived Stop escalation"),
@@ -520,6 +531,7 @@ export const makeProcessSessionRunner = (
 				: 10_000;
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
+		const projection = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
 		const ingestionOption = yield* Effect.serviceOption(
 			ProviderRuntimeIngestionTag,
 		);
@@ -587,9 +599,8 @@ export const makeProcessSessionRunner = (
 			driverKind: driver.driverKind,
 			pid: entry.pid ?? entry.child?.pid,
 			startTime: entry.startTime,
-			registeredAt: entry.registeredAt,
+			registeredAt: entry.registeredAt ?? 0,
 			socketPath: entry.socketPath,
-			candidate: entry.lifecycle.candidate,
 			attachmentId: entry.attachmentId,
 			ownedRunIds: [...(entry.ownedRunIds ?? [])],
 			signalled: entry.lifecycle.stop?.signal === "Signalled",
@@ -599,7 +610,8 @@ export const makeProcessSessionRunner = (
 			authority.adopt([identityFor(entry)], phase).pipe(
 				Effect.mapError((cause) => runnerFailure("adopt runner", cause)),
 				Effect.flatMap(({ grants }) => {
-					entry.authorityRecord = authority.records.get(entry.runnerId);
+					entry.grant = grants.get(entry.runnerId);
+					if (entry.outputAuthority) entry.outputAuthority.grant = entry.grant;
 					return grants.has(entry.runnerId)
 						? Effect.void
 						: Effect.fail(
@@ -610,11 +622,13 @@ export const makeProcessSessionRunner = (
 		const forgetExited = (entry: RunnerChild) => {
 			const pid = entry.pid ?? entry.child?.pid;
 			if (pid === undefined || !pidAlive(pid, entry.startTime))
-				authority.records.delete(entry.runnerId);
+				authority.forget(entry.runnerId);
 		};
 		const observeProcess = (sessionId: string, entry: RunnerChild) =>
 			Effect.gen(function* () {
-				if (entry.authorityRecord?.observed === true) return;
+				const grant = entry.grant;
+				if (authority.records.get(entry.runnerId)?.observation === "Observed")
+					return;
 				const retirement = deps.recoveryForSession
 					? (yield* deps.recoveryForSession(sessionId))?.retirePrompts(
 							entry.runnerId,
@@ -622,8 +636,10 @@ export const makeProcessSessionRunner = (
 					: legacyRetirePrompts?.(entry.runnerId, { sessionId });
 				// A skipped retirement must remain eligible when project services return.
 				if (!retirement) return;
-				yield* (
-					entry.pendingInteractions
+				const observed = yield* authority.guarded(
+					grant,
+					{ kind: "output" },
+					(entry.pendingInteractions
 						? retirement.pipe(
 								Effect.provideService(
 									PendingInteractionServiceTag,
@@ -631,18 +647,21 @@ export const makeProcessSessionRunner = (
 								),
 							)
 						: retirement
-				).pipe(
-					Effect.mapError((cause) =>
-						runnerFailure("retire replaced runner prompts", cause),
+					).pipe(
+						Effect.mapError((cause) =>
+							runnerFailure("retire replaced runner prompts", cause),
+						),
 					),
 				);
-				if (entry.authorityRecord) entry.authorityRecord.observed = true;
+				if (Option.isSome(observed)) authority.observe(entry.runnerId);
 			});
 		let recovering = false;
+		const refusedReleases = new Set<string>();
 		const sinks = new Map<
 			string,
 			{
 				sessionId: string;
+				sendScope?: SendScope;
 				runnerId?: string | undefined;
 				inputId?: string;
 				runId?: string | undefined;
@@ -653,177 +672,245 @@ export const makeProcessSessionRunner = (
 					images?: readonly AttachmentRef[];
 				};
 				messageId: string;
-				pending: boolean;
+				commandPending: boolean;
 				accepted: boolean;
+				outcomeEmitted?: boolean;
 				admission?: Deferred.Deferred<void>;
-				releaseRequested: boolean;
 			}
 		>();
-		// These sends have no runner ownership yet, including while rebinding.
+		const sendBindings = new WeakMap<
+			SendScope,
+			NonNullable<ReturnType<typeof sinks.get>>
+		>();
+		// Scope membership lasts through native cleanup; dispatched routes cancellation.
 		const pendingSends = new Map<
-			string,
+			SendScope,
 			{
 				sessionId: string;
 				turnId: string;
 				cancelled: Deferred.Deferred<void>;
+				dispatched: boolean;
 			}
 		>();
 		let closing = false;
 		const accountDemands = new Map<
-			string,
+			SendScope,
 			{
 				readonly ready: Deferred.Deferred<void, SessionFailure>;
 				readonly finished: Deferred.Deferred<void>;
 				readonly dispatched: Deferred.Deferred<RunnerSocket>;
 				readonly invalidated: Deferred.Deferred<void>;
+				readonly fiber: Fiber.Fiber<void, never>;
 			}
 		>();
-		const releaseSink = (sinkId: string) => {
-			sinks.delete(sinkId);
-			const demand = accountDemands.get(sinkId);
-			if (demand) Deferred.doneUnsafe(demand.finished, Effect.void);
-		};
-		// Check at execution time, including after an output-permit wait. Ordinary
-		// exited entries may finish cleanup until another entry owns the session.
-		function withEntryOutput(
-			entry: RunnerChild | undefined,
-			operation: () => void,
-			releaseSinkId?: string,
-		): void;
-		function withEntryOutput<E>(
-			entry: RunnerChild | undefined,
-			operation: Effect.Effect<SessionOutputReply, E> | Effect.Effect<void, E>,
-			releaseSinkId?: string,
-		): Effect.Effect<SessionOutputReply, E>;
-		function withEntryOutput<E>(
-			entry: RunnerChild | undefined,
-			operation:
-				| (() => void)
-				| Effect.Effect<SessionOutputReply, E>
-				| Effect.Effect<void, E>,
-			releaseSinkId?: string,
-		): undefined | Effect.Effect<SessionOutputReply, E> {
-			if (typeof operation !== "function")
-				return Effect.gen(function* () {
-					let allowed = false;
-					withEntryOutput(
-						entry,
-						() => {
-							allowed = true;
-						},
-						releaseSinkId,
-					);
-					if (!allowed) return {};
-					const reply = yield* operation;
-					return reply ?? {};
-				});
-			const current = entry && currentEntry(entry.sessionId);
-			// A superseded process may still release its own retained sinks.
-			const ownsRelease =
-				entry &&
-				entry.authorityRecord?.tag._tag === "Exiting" &&
-				entry.authorityRecord.tag.reason === "superseded" &&
-				releaseSinkId !== undefined &&
-				sinks.get(releaseSinkId)?.runnerId === entry.runnerId;
-			if (
-				entry &&
-				(entry.authorityRecord?.tag._tag === "Retired" ||
-					(entry.lifecycle.candidate && entry.lifecycle.stop !== undefined) ||
-					(!ownsRelease &&
-						((entry.authorityRecord?.tag._tag === "Exiting" &&
-							entry.authorityRecord.tag.reason === "superseded") ||
-							(current && current !== entry && !tracked(entry)))))
-			) {
-				log.debug(
-					{ runnerId: entry.runnerId, sessionId: entry.sessionId },
-					"Dropped output from a runner that no longer owns the session",
-				);
-				return undefined;
-			}
-			operation();
-			return undefined;
-		}
-		const retainAccount = (
+		const bindSink = (
 			sinkId: string,
-			accountId: string | undefined,
-			sessionId: string,
-			inputId?: string,
-			connection?: RunnerSocket,
+			binding: NonNullable<ReturnType<typeof sinks.get>>,
 		) =>
 			Effect.gen(function* () {
-				const withAccountScope = driver.withAccountScope;
-				if (!withAccountScope || !accountId) return;
-				const existing = accountDemands.get(sinkId);
-				if (existing) return yield* Deferred.await(existing.ready);
-				const ready = yield* Deferred.make<void, SessionFailure>();
-				const finished = yield* Deferred.make<void>();
-				const dispatched = yield* Deferred.make<RunnerSocket>();
-				const invalidated = yield* Deferred.make<void>();
-				if (connection) yield* Deferred.succeed(dispatched, connection);
-				accountDemands.set(sinkId, {
-					ready,
-					finished,
-					dispatched,
-					invalidated,
-				});
-				const interrupt = Deferred.await(dispatched).pipe(
-					Effect.flatMap((connection) =>
-						connection.commandEffect(randomUUID(), {
-							type: "interrupt",
-							sessionId,
-							...(inputId ? { turnIds: [inputId] } : {}),
+				const send = binding.sendScope;
+				if (!send) return yield* Effect.die("Missing admitted send handle");
+				if (sinks.get(sinkId) === binding) {
+					return binding;
+				}
+				return yield* sendScopes.acquire(
+					send,
+					sinkId,
+					"manager sink",
+					Effect.sync(() => {
+						sinks.set(sinkId, binding);
+						sendBindings.set(send, binding);
+						return binding;
+					}),
+					(binding) =>
+						Effect.sync(() => {
+							if (sinks.get(sinkId) === binding) sinks.delete(sinkId);
 						}),
-					),
 				);
-				runFork(
-					withAccountScope(
-						accountId,
-						Deferred.succeed(ready, undefined).pipe(
-							Effect.andThen(Deferred.await(finished)),
-							Effect.onInterrupt(() =>
-								Deferred.succeed(invalidated, undefined).pipe(
-									Effect.andThen(
-										Effect.suspend(() =>
-											closing
-												? Effect.void
-												: Effect.raceFirst(
-														Deferred.await(finished).pipe(Effect.interruptible),
-														interrupt.pipe(
-															Effect.ignore,
-															Effect.andThen(Deferred.await(finished)),
-															Effect.interruptible,
-														),
-													),
+			});
+		const bindPending = (
+			send: SendScope,
+			sinkId: string,
+			pending: NonNullable<ReturnType<typeof pendingSends.get>>,
+		) =>
+			sendScopes.acquire(
+				send,
+				sinkId,
+				"pending send",
+				Effect.sync(() => {
+					pendingSends.set(send, pending);
+					return pending;
+				}),
+				(pending) =>
+					Effect.sync(() => {
+						if (pendingSends.get(send) === pending) pendingSends.delete(send);
+					}),
+			);
+		const retryUnacceptedSend = (
+			binding: NonNullable<ReturnType<typeof sinks.get>>,
+			runnerId: string,
+		) => {
+			if (binding.accepted || !binding.commandPending) return;
+			const send = binding.sendScope;
+			if (send) sendScopes.requeue(send, runnerId);
+			if (binding.runnerId === runnerId) binding.runnerId = undefined;
+			const pending = send ? pendingSends.get(send) : undefined;
+			if (pending && send?.assignment._tag === "Queued")
+				pending.dispatched = false;
+		};
+		const failSendOnce = (
+			binding: NonNullable<ReturnType<typeof sinks.get>>,
+			failure: Effect.Effect<void>,
+		) =>
+			Effect.suspend(() => {
+				if (binding.outcomeEmitted) return Effect.void;
+				binding.outcomeEmitted = true;
+				return failure;
+			});
+		const failBoundSend = (
+			sinkId: string,
+			binding: NonNullable<ReturnType<typeof sinks.get>>,
+			entry: RunnerChild,
+			failure: SessionFailure,
+		) =>
+			authority
+				.guarded(
+					entry.grant,
+					{ kind: "output" },
+					failSendOnce(
+						binding,
+						failRunnerTurn(
+							(output) =>
+								output.type === "release-sink"
+									? Effect.succeed({})
+									: emitOutput(output, binding.sessionId, binding.sendScope),
+							sinkId,
+							binding,
+							failure,
+							driver.driverKind,
+						),
+					),
+				)
+				.pipe(Effect.asVoid);
+		const retainAccount = (
+			send: SendScope,
+			sinkId: string,
+			accountId: string | undefined,
+			connection?: RunnerSocket,
+		) =>
+			Effect.uninterruptibleMask((restore) =>
+				Effect.gen(function* () {
+					const withAccountScope = driver.withAccountScope;
+					if (!withAccountScope || !accountId) return;
+					const existing = accountDemands.get(send);
+					if (existing) return yield* restore(Deferred.await(existing.ready));
+					const ready = yield* Deferred.make<void, SessionFailure>();
+					const finished = yield* Deferred.make<void>();
+					const dispatched = yield* Deferred.make<RunnerSocket>();
+					const invalidated = yield* Deferred.make<void>();
+					if (connection) yield* Deferred.succeed(dispatched, connection);
+					const interrupt = Deferred.await(dispatched).pipe(
+						Effect.andThen(
+							Effect.suspend(() => {
+								if (send.assignment._tag === "Closed") return Effect.void;
+								const pending = pendingSends.get(send);
+								if (pending && !pending.dispatched)
+									return Deferred.succeed(pending.cancelled, undefined).pipe(
+										Effect.asVoid,
+									);
+								const assignment = send.assignment;
+								const entry = currentEntry(send.sessionId);
+								const binding = sinks.get(send.sinkId);
+								if (
+									assignment._tag !== "Dispatched" ||
+									!entry?.connection ||
+									entry.runnerId !== assignment.runnerId ||
+									binding?.sendScope !== send
+								)
+									return Effect.void;
+								return entry.connection
+									.commandEffect(randomUUID(), {
+										type: "interrupt",
+										sessionId: send.sessionId,
+										...(binding.inputId ? { turnIds: [binding.inputId] } : {}),
+									})
+									.pipe(Effect.asVoid);
+							}),
+						),
+					);
+					const fiber = runFork(
+						withAccountScope(
+							accountId,
+							Deferred.succeed(ready, undefined).pipe(
+								Effect.andThen(Deferred.await(finished)),
+								Effect.onInterrupt(() =>
+									Deferred.succeed(invalidated, undefined).pipe(
+										Effect.andThen(
+											Effect.suspend(() => {
+												if (closing) return Effect.void;
+												runFork(
+													sendScopes
+														.fork(
+															send,
+															"account invalidation abort",
+															interrupt.pipe(Effect.ignore),
+														)
+														.pipe(Effect.asVoid),
+												);
+												return Deferred.await(finished).pipe(
+													Effect.interruptible,
+												);
+											}),
 										),
 									),
 								),
 							),
+						).pipe(
+							Effect.onExit((exit) =>
+								Effect.gen(function* () {
+									yield* Deferred.done(
+										ready,
+										!closing &&
+											Exit.isFailure(exit) &&
+											Failure.isInterruptedOnly(exit.cause)
+											? Exit.fail(
+													runnerFailure(
+														"retain account",
+														"Cursor account was invalidated",
+													),
+												)
+											: exit,
+									);
+								}),
+							),
+							Effect.catchCause(() => Effect.void),
 						),
-					).pipe(
-						Effect.onExit((exit) =>
-							Effect.gen(function* () {
-								yield* Deferred.done(
-									ready,
-									!closing &&
-										Exit.isFailure(exit) &&
-										Failure.isInterruptedOnly(exit.cause)
-										? Exit.fail(
-												runnerFailure(
-													"retain account",
-													"Cursor account was invalidated",
-												),
-											)
-										: exit,
-								);
-								if (accountDemands.get(sinkId)?.finished === finished)
-									accountDemands.delete(sinkId);
-							}),
-						),
-						Effect.catchCause(() => Effect.void),
-					),
-				);
-				yield* Deferred.await(ready);
-			});
+					);
+					yield* sendScopes.acquire(
+						send,
+						sinkId,
+						"account demand",
+						Effect.sync(() => {
+							const demand = {
+								ready,
+								finished,
+								dispatched,
+								invalidated,
+								fiber,
+							};
+							accountDemands.set(send, demand);
+							return demand;
+						}),
+						(demand) =>
+							Effect.sync(() => {
+								if (accountDemands.get(send) === demand)
+									accountDemands.delete(send);
+								Deferred.doneUnsafe(demand.finished, Effect.void);
+							}).pipe(Effect.andThen(Fiber.join(demand.fiber))),
+					);
+					yield* restore(Deferred.await(ready));
+				}),
+			);
 		const acknowledgeSends = (
 			sessionId: string,
 			entry: RunnerChild,
@@ -897,33 +984,68 @@ export const makeProcessSessionRunner = (
 
 		const evict = (sessionId: string, entry: RunnerChild) =>
 			Effect.gen(function* () {
-				const record = entry.authorityRecord;
+				const record = authority.records.get(entry.runnerId);
 				if (record?.identity.entry !== entry) return;
+				for (const [sinkId, binding] of [...sinks]) {
+					if (binding.runnerId !== entry.runnerId) continue;
+					if (
+						!binding.accepted &&
+						binding.commandPending &&
+						(entry.lifecycle.idleExiting ||
+							entry.lifecycle.failure?.code === "runner_recovery_abandoned")
+					) {
+						retryUnacceptedSend(binding, entry.runnerId);
+						continue;
+					}
+					const send = binding.sendScope;
+					if (
+						send?.assignment._tag !== "Dispatched" &&
+						binding.commandPending
+					) {
+						const failure = entry.lifecycle.failure;
+						if (
+							failure?.code === "runner_idle_exit" ||
+							failure?.code === "runner_recovery_abandoned"
+						) {
+							continue;
+						}
+						if (failure && failure.code !== "runner_detached") {
+							yield* failSendOnce(
+								binding,
+								failRunnerTurn(
+									(output) =>
+										output.type === "release-sink"
+											? Effect.succeed({})
+											: emit(output, sessionId),
+									sinkId,
+									binding,
+									failure,
+									driver.driverKind,
+								),
+							);
+						}
+					}
+				}
 				if (entry.lifecycle.failure?.code === "runner_detached")
-					record.identity = {
-						...record.identity,
-						entry: undefined,
-						attachmentId: undefined,
-					};
+					authority.detach(entry.runnerId);
 				else if (
 					record &&
 					record.tag._tag !== "Retired" &&
 					record.tag._tag !== "Exiting"
 				) {
-					record.identity = identityFor(entry);
+					authority.captureBeforeRevoke(entry.runnerId, identityFor(entry));
 					// Confirmed exits retain the existing failure/orphan settlement path.
 					// Only survivor retirement takes durable cleanup ownership of runs.
 					yield* authority.revoke(record.grant, "exited");
 				}
 				forgetExited(entry);
-				for (const [sinkId, binding] of sinks)
-					if (
-						binding.sessionId === sessionId &&
-						binding.runnerId === entry.runnerId &&
-						(binding.accepted || !binding.pending)
-					)
-						releaseSink(sinkId);
-			});
+			}).pipe(
+				Effect.ensuring(
+					Effect.sync(() => {
+						runFork(sendScopes.closeRunner(entry.runnerId));
+					}),
+				),
+			);
 		const releaseEntryWaiters = (
 			entry: RunnerChild,
 			cause: Cause.Cause<SessionFailure>,
@@ -934,15 +1056,18 @@ export const makeProcessSessionRunner = (
 				const ending = entry.lifecycle.end;
 				if (ending) yield* Deferred.succeed(ending.released, undefined);
 			});
-		const settleRetiredRuns = (registration: {
-			readonly sessionId: string;
-			readonly ownedRunIds?: readonly string[] | undefined;
-		}) =>
+		const settleRetiredRuns = (
+			registration: {
+				readonly sessionId: string;
+				readonly ownedRunIds?: readonly string[] | undefined;
+			},
+			entryIngestion: typeof ingestion,
+		) =>
 			Effect.gen(function* () {
 				if (!sql || !registration.ownedRunIds?.length) return;
-				const sessionIngestion = yield* ingestionForSession(
-					registration.sessionId,
-				);
+				const sessionIngestion = deps.recoveryForSession
+					? yield* ingestionForSession(registration.sessionId)
+					: (entryIngestion ?? ingestion);
 				if (!sessionIngestion) return;
 				yield* settleSessionRuns(
 					sql,
@@ -959,8 +1084,9 @@ export const makeProcessSessionRunner = (
 				);
 			});
 		const watchSurvivor = (record: RunnerRecord<RunnerChild>) => {
-			if (record.watching || record.identity.pid === undefined) return;
-			record.watching = true;
+			if (record.watcher === "Watching" || record.identity.pid === undefined)
+				return;
+			if (!authority.startWatching(record.identity.runnerId)) return;
 			runFork(
 				Effect.gen(function* () {
 					const { runnerId, sessionId, pid, startTime, socketPath } =
@@ -980,7 +1106,7 @@ export const makeProcessSessionRunner = (
 					const prune = Effect.gen(function* () {
 						if (socketPath) removeRunner(socketPath);
 						if (receipts) yield* receipts.pruneRetired(runnerId);
-						authority.records.delete(runnerId);
+						authority.forget(runnerId);
 					});
 					for (const offset of [10_000, 30_000, 60_000]) {
 						yield* Effect.sleep(
@@ -998,8 +1124,12 @@ export const makeProcessSessionRunner = (
 						) {
 							try {
 								processTable.signal(pid, "SIGKILL");
-								record.identity = { ...record.identity, signalled: true };
-								if (receipts) yield* receipts.retire(record.identity);
+								authority.markSignalled(runnerId);
+								if (receipts)
+									yield* receipts.retire(
+										authority.records.get(runnerId)?.identity ??
+											record.identity,
+									);
 							} catch (cause) {
 								log.warn(
 									{ runnerId, pid, cause },
@@ -1021,20 +1151,24 @@ export const makeProcessSessionRunner = (
 						if (!session || session.archived_at !== null) return true;
 						const sessionIngestion = yield* ingestionForSession(sessionId);
 						if (!sessionIngestion) return false;
-						yield* sessionIngestion.ingest({
-							eventId: `runner-survivor-${runnerId}`,
-							type: "turn.notice",
-							providerId: driver.driverKind,
-							sessionId,
-							providerRefs: {},
-							rawSource: { kind: "runner.manager" },
-							createdAt: yield* Clock.currentTimeMillis,
-							data: {
-								text: record.identity.signalled
-									? `The previous run (pid ${pid}) was told to stop but hasn't exited yet. It can't make further changes and will exit when the system releases it.`
-									: `Conduit couldn't confirm pid ${pid} is the previous run, so it didn't stop it. It may still be running. Stop it manually if it is.`,
-							},
-						});
+						yield* authority.guarded(
+							record.grant,
+							{ kind: "evidence" },
+							sessionIngestion.ingest({
+								eventId: `runner-survivor-${runnerId}`,
+								type: "turn.notice",
+								providerId: driver.driverKind,
+								sessionId,
+								providerRefs: {},
+								rawSource: { kind: "runner.manager" },
+								createdAt: yield* Clock.currentTimeMillis,
+								data: {
+									text: authority.records.get(runnerId)?.identity.signalled
+										? `The previous run (pid ${pid}) was told to stop but hasn't exited yet. It can't make further changes and will exit when the system releases it.`
+										: `Conduit couldn't confirm pid ${pid} is the previous run, so it didn't stop it. It may still be running. Stop it manually if it is.`,
+								},
+							}),
+						);
 						return true;
 					});
 					let noticed = false;
@@ -1067,41 +1201,28 @@ export const makeProcessSessionRunner = (
 		) =>
 			Effect.gen(function* () {
 				const entry = record.identity.entry;
-				if (record.tag._tag === "Retired" && record.watching) {
+				if (record.tag._tag === "Retired" && record.watcher === "Watching") {
 					watchSurvivor(record);
 					return;
 				}
-				if (entry) record.identity = identityFor(entry);
+				if (entry)
+					authority.captureBeforeRevoke(entry.runnerId, identityFor(entry));
 				const cleanup = yield* authority.revoke(record.grant, "retired", {
-					ownedRunIds: record.identity.ownedRunIds ?? [],
+					ownedRunIds: entry
+						? [...(entry.ownedRunIds ?? [])]
+						: record.identity.ownedRunIds,
 				});
-				const valid = () =>
-					record.cleanup?.grant === cleanup &&
-					record.cleanup.permitsCleanup &&
-					clock.currentTimeMillisUnsafe() < record.cleanup.deadline;
-				const guard = Effect.suspend(() =>
-					valid() ? Effect.void : Effect.interrupt,
-				);
 				const registration = {
-					...record.identity,
-					ownedRunIds:
-						authority.records.get(record.identity.runnerId)?.cleanup
-							?.ownedRunIds ?? [],
+					...(authority.records.get(record.identity.runnerId)?.identity ??
+						record.identity),
+					ownedRunIds: cleanup.target.ownedRunIds,
 				};
 				const releases: Effect.Effect<void, SessionFailure>[] = [];
 				if (entry) {
 					transition(entry, { _tag: "Fail", failure: cause });
 					transition(entry, { _tag: "Recovered" });
 					entry.connection?.destroy();
-					for (const [sinkId, binding] of [...sinks]) {
-						if (binding.runnerId !== entry.runnerId) continue;
-						releaseSink(sinkId);
-						releases.push(
-							emit({ type: "release-sink", sinkId }, entry.sessionId).pipe(
-								Effect.asVoid,
-							),
-						);
-					}
+					runFork(sendScopes.closeRunner(entry.runnerId));
 					yield* releaseEntryWaiters(entry, Cause.fail(cause));
 					// A cancelled Starting runner never owned session background state.
 					if (!entry.lifecycle.candidate && !currentEntry(entry.sessionId))
@@ -1118,11 +1239,9 @@ export const makeProcessSessionRunner = (
 							).pipe(Effect.asVoid),
 						);
 				}
-				// Release admission before any cleanup SQL can acquire the write permit.
-				// The f4 commit fence stays until R2 installs grant-aware writes.
+				// Release admission before cleanup SQL can acquire the write permit.
 				const detached = (operation: Effect.Effect<void, unknown>) =>
 					operation.pipe(
-						Effect.provideService(currentCommitGuard, guard),
 						Effect.interruptible,
 						Effect.timeout("3 seconds"),
 						Effect.catchCause((failure) =>
@@ -1132,14 +1251,18 @@ export const makeProcessSessionRunner = (
 					);
 				yield* detached(
 					Effect.all(
-						releases.map((release) => guard.pipe(Effect.andThen(release))),
+						releases.map((release) =>
+							authority.guarded(cleanup, { kind: "cleanup" }, release),
+						),
 						{ concurrency: 4, discard: true },
 					),
 				);
-				if (record.cleanup) record.cleanup.settling = true;
+				authority.beginCleanup(registration.runnerId);
 				yield* detached(
-					guard.pipe(
-						Effect.andThen(
+					authority
+						.guarded(
+							cleanup,
+							{ kind: "cleanup" },
 							Effect.gen(function* () {
 								const current = currentEntry(registration.sessionId);
 								yield* retireReplacedPrompts(current?.runnerId ?? null, {
@@ -1147,18 +1270,20 @@ export const makeProcessSessionRunner = (
 									expiredProcessId: registration.runnerId,
 									...(exceptCommandId ? { exceptCommandId } : {}),
 								});
-								yield* settleRetiredRuns(registration);
+								yield* settleRetiredRuns(registration, entry?.ingestion);
 							}),
+						)
+						.pipe(
+							Effect.asVoid,
+							Effect.ensuring(
+								Effect.sync(() => {
+									authority.finishCleanup(registration.runnerId);
+								}),
+							),
 						),
-						Effect.ensuring(
-							Effect.sync(() => {
-								if (record.cleanup?.grant === cleanup)
-									record.cleanup.settling = false;
-							}),
-						),
-					),
 				);
-				watchSurvivor(record);
+				const retired = authority.records.get(registration.runnerId);
+				if (retired) watchSurvivor(retired);
 				log.warn(
 					{ runnerId: registration.runnerId, pid: registration.pid },
 					"Retired surviving runner",
@@ -1168,10 +1293,12 @@ export const makeProcessSessionRunner = (
 			entry: RunnerChild,
 			cause: SessionFailure,
 			exceptCommandId?: string,
-		) =>
-			entry.authorityRecord?.identity.entry === entry
-				? retireRecord(entry.authorityRecord, cause, exceptCommandId)
+		) => {
+			const record = authority.records.get(entry.runnerId);
+			return record?.identity.entry === entry
+				? retireRecord(record, cause, exceptCommandId)
 				: Effect.void;
+		};
 		const retireOrphan = (entry: RunnerChild) =>
 			Effect.gen(function* () {
 				const ownsEntry = () =>
@@ -1180,12 +1307,7 @@ export const makeProcessSessionRunner = (
 						: currentEntry(entry.sessionId) === entry;
 				if (closing || !ownsEntry()) return;
 				yield* stopRunner(entry).pipe(
-					Effect.ensuring(
-						withEntryOutput(
-							entry,
-							Deferred.succeed(entry.drained, undefined).pipe(Effect.asVoid),
-						),
-					),
+					Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
 				);
 				if (closing || !ownsEntry()) return;
 				if (entry.pid !== undefined && pidAlive(entry.pid, entry.startTime))
@@ -1193,7 +1315,7 @@ export const makeProcessSessionRunner = (
 						entry,
 						runnerFailure("recover runner", "Abandoned runner survived stop"),
 					);
-				yield* withEntryOutput(entry, evict(entry.sessionId, entry));
+				yield* evict(entry.sessionId, entry);
 				forgetExited(entry);
 			});
 		const detach = (entry: RunnerChild, failure?: SessionFailure) => {
@@ -1205,8 +1327,7 @@ export const makeProcessSessionRunner = (
 			.withPermits(1)(
 				Effect.gen(function* () {
 					closing = true;
-					for (const { finished } of accountDemands.values())
-						Deferred.doneUnsafe(finished, Effect.void);
+					yield* sendScopes.closeAll;
 					const entries = attachedEntries();
 					const release = Effect.forEach(
 						entries,
@@ -1230,8 +1351,8 @@ export const makeProcessSessionRunner = (
 					).pipe(
 						Effect.ensuring(
 							Effect.sync(() => {
-								authority.records.clear();
-								sinks.clear();
+								for (const runnerId of authority.records.keys())
+									authority.forget(runnerId);
 							}),
 						),
 						Effect.ensuring(release),
@@ -1253,6 +1374,8 @@ export const makeProcessSessionRunner = (
 			failure: SessionFailure,
 			endCommandId?: string,
 		) => {
+			const grant =
+				authority.records.get(entry.runnerId)?.cleanup?.grant ?? entry.grant;
 			const bindings = [...sinks].filter(
 				([, binding]) => binding.runnerId === entry.runnerId,
 			);
@@ -1278,18 +1401,24 @@ export const makeProcessSessionRunner = (
 				if (
 					!closing &&
 					exitedPid !== undefined &&
-					(entry.authorityRecord?.tag._tag === "Retired" ||
+					(authority.records.get(entry.runnerId)?.tag._tag === "Retired" ||
 						!pidAlive(exitedPid, entry.startTime))
 				) {
 					const current = currentEntry(sessionId);
-					yield* retireReplacedPrompts(
-						current && current !== entry ? current.runnerId : null,
-						{
-							sessionId,
-							expiredProcessId: entry.runnerId,
-							...(endCommandId ? { exceptCommandId: endCommandId } : {}),
-						},
-					);
+					yield* authority
+						.guarded(
+							grant,
+							{ kind: "cleanup" },
+							retireReplacedPrompts(
+								current && current !== entry ? current.runnerId : null,
+								{
+									sessionId,
+									expiredProcessId: entry.runnerId,
+									...(endCommandId ? { exceptCommandId: endCommandId } : {}),
+								},
+							),
+						)
+						.pipe(Effect.asVoid);
 				}
 				if (process.env["NODE_ENV"] === "test")
 					yield* Effect.sleep(
@@ -1297,7 +1426,8 @@ export const makeProcessSessionRunner = (
 					);
 				const settlement = lock.withPermits(1)(
 					Effect.gen(function* () {
-						const retired = entry.authorityRecord?.tag._tag === "Retired";
+						const retired =
+							authority.records.get(entry.runnerId)?.tag._tag === "Retired";
 						const owners = new Map<string, RunSettlementOwner>();
 						for (const runId of entry.ownedRunIds ?? [])
 							reservations.add(runId);
@@ -1312,12 +1442,14 @@ export const makeProcessSessionRunner = (
 							closing ||
 							entry.lifecycle.activity._tag === "Recovering" ||
 							entry.lifecycle.candidate ||
-							(currentEntry(sessionId) !== entry && !retired) ||
 							pid === undefined ||
 							(pidAlive(pid, entry.startTime) && !retired)
 						)
 							return Effect.void;
+						const cleanup = grant?._tag === "Cleanup" ? grant : undefined;
 						for (const reservation of reservations) {
+							if (cleanup && !cleanup.target.ownedRunIds.includes(reservation))
+								continue;
 							const [accepted] = yield* sql<{ run_id: string }>`
 									SELECT COALESCE(joined_into, id) AS run_id FROM provider_runs
 									WHERE session_id = ${sessionId} AND id = ${reservation}
@@ -1326,19 +1458,25 @@ export const makeProcessSessionRunner = (
 								owners.set(accepted.run_id, { runId: accepted.run_id });
 						}
 						if (!owners.size) return;
-						return yield* settleSessionRuns(
-							sql,
-							sessionId,
-							failure.message,
-							(events) => sessionIngestion.ingestBatch(events),
-							{
-								...(endCommandId ? {} : { errorCode: "runner_stopped" }),
-								owners: [...owners.values()],
-							},
-						);
+						return yield* authority
+							.guarded(
+								grant,
+								{ kind: "cleanup" },
+								settleSessionRuns(
+									sql,
+									sessionId,
+									failure.message,
+									(events) => sessionIngestion.ingestBatch(events),
+									{
+										...(endCommandId ? {} : { errorCode: "runner_stopped" }),
+										owners: [...owners.values()],
+									},
+								),
+							)
+							.pipe(Effect.asVoid);
 					}),
 				);
-				yield* entry.authorityRecord?.tag._tag === "Retired"
+				yield* authority.records.get(entry.runnerId)?.tag._tag === "Retired"
 					? settlement
 					: entry.outputs.withPermits(1)(settlement);
 			});
@@ -1370,8 +1508,7 @@ export const makeProcessSessionRunner = (
 				log.error(
 					`${runnerLabel} failed for session ${sessionId}: ${failure.message}`,
 				);
-			// Warm completed turns retain a sink for background output. A
-			// dead runner cannot release it, even when no send is waiting.
+			// Notify unaccepted sends before eviction revokes their output authority.
 			runFork(
 				settlement
 					.pipe(
@@ -1381,20 +1518,21 @@ export const makeProcessSessionRunner = (
 						Effect.andThen(
 							entry.outputs.withPermits(1)(
 								Effect.gen(function* () {
-									yield* withEntryOutput(
-										entry,
+									yield* authority.guarded(
+										entry.grant,
+										{ kind: "output" },
 										emit({
 											type: "background-task",
 											transition: { sessionId, kind: "session-ended" },
 										}),
 									);
-									for (const [sinkId, binding] of bindings) {
-										if (!binding.pending)
-											yield* withEntryOutput(
-												entry,
-												emit({ type: "release-sink", sinkId }),
-											);
-									}
+									for (const [sinkId, binding] of bindings)
+										if (
+											!binding.accepted &&
+											binding.sendScope?.assignment._tag === "Dispatched" &&
+											binding.sendScope.assignment.runnerId === entry.runnerId
+										)
+											yield* failBoundSend(sinkId, binding, entry, failure);
 								}),
 							),
 						),
@@ -1402,13 +1540,10 @@ export const makeProcessSessionRunner = (
 					.pipe(
 						Effect.ignore,
 						Effect.ensuring(
-							withEntryOutput(
-								entry,
-								Effect.gen(function* () {
-									yield* evict(sessionId, entry);
-									yield* Deferred.succeed(entry.drained, undefined);
-								}),
-							),
+							Effect.gen(function* () {
+								yield* evict(sessionId, entry);
+								yield* Deferred.succeed(entry.drained, undefined);
+							}),
 						),
 					),
 			);
@@ -1423,6 +1558,8 @@ export const makeProcessSessionRunner = (
 
 		const attach = (sessionId: string, entry: RunnerChild) =>
 			Effect.gen(function* () {
+				const outputAuthority = { grant: entry.grant };
+				entry.outputAuthority = outputAuthority;
 				const trackInteraction = (output: SessionOutput) => {
 					if (
 						output.type === "question-request" ||
@@ -1458,6 +1595,343 @@ export const makeProcessSessionRunner = (
 							`Session ${sessionId} has no registered project`,
 						),
 					);
+
+				let recoveredHello: RunnerHello | undefined;
+				let recoveryBindings: NonNullable<RunnerHello["bindings"]> = [];
+				const settleRecoveredSends = (
+					answers: readonly RunnerSendAnswer[],
+					requeueMissing: boolean,
+				) =>
+					Effect.gen(function* () {
+						if (!sql || !entry.recoveringCommands) return;
+						if (Option.isNone(projection))
+							return yield* Effect.fail(
+								runnerFailure(
+									"settle runner reply",
+									"Missing projection services",
+								),
+							);
+						const [session] = yield* sql<{
+							project_id: string;
+						}>`SELECT project_id FROM sessions WHERE id = ${sessionId}`.pipe(
+							Effect.mapError((cause) =>
+								runnerFailure("settle runner reply", cause),
+							),
+						);
+						if (session) {
+							const accounts = yield* deps.accounts ??
+								Effect.succeed(undefined);
+							const project = { projectId: session.project_id };
+							const store = yield* makeEventStoreEffect.pipe(
+								Effect.provideService(PersistenceProjectTag, project),
+								Effect.provideService(SqlClient.SqlClient, sql),
+							);
+							const commit = yield* makeCommitAndSignal.pipe(
+								Effect.provideService(EventStoreEffectTag, store),
+								Effect.provideService(SqlClient.SqlClient, sql),
+								Effect.provideService(
+									ProjectionRunnerEffectTag,
+									projection.value,
+								),
+							);
+							const persist = yield* makeClaudeEventPersistEffect.pipe(
+								Effect.provideService(EventStoreEffectTag, store),
+								Effect.provideService(SqlClient.SqlClient, sql),
+								Effect.provideService(
+									ProjectionRunnerEffectTag,
+									projection.value,
+								),
+							);
+							const recovery = yield* deps.recoveryForSession?.(sessionId) ??
+								Effect.succeed(undefined);
+							const drafts = yield* Effect.serviceOption(InputDraftsTag);
+							const restoreDraft =
+								recovery?.inputDrafts?.restore ??
+								(Option.isSome(drafts) ? drafts.value.restore : undefined);
+							const followUps: Effect.Effect<void>[] = [];
+							yield* authority
+								.guarded(
+									outputAuthority.grant,
+									{ kind: "output" },
+									commit.write(
+										(projectEvents, stamp) =>
+											Effect.gen(function* () {
+												const rows = yield* runningRunnerCommands(
+													sql,
+													driver.driverKind,
+													(accountId) =>
+														accounts?.accounts.find(
+															({ id }) => id === accountId,
+														)?.driver ??
+														accounts?.deleted.find(({ id }) => id === accountId)
+															?.driver ??
+														(accountId === driver.driverKind
+															? driver.driverKind
+															: undefined),
+													sessionId,
+												);
+												const now = clock.currentTimeMillisUnsafe();
+												let changed = false;
+												for (const row of rows) {
+													// A call still unwinding in this daemon retains its exact claim.
+													if (
+														entry.ownsPendingSend?.(
+															sessionId,
+															row.command_id,
+															row.request_sequence,
+															row.attempt_count,
+														)
+													)
+														continue;
+													const answer = answers.find(
+														({ commandId, attempt }) =>
+															commandId === row.command_id &&
+															attempt === row.attempt_count,
+													);
+													if (answer?.status === "running") continue;
+													const completed =
+														answer?.status === "finished" ? answer : undefined;
+													if (completed) {
+														changed =
+															(yield* settleRunnerCommandReply(
+																sql,
+																row,
+																completed.result,
+																completed.failure,
+																now,
+																false,
+																{
+																	project: projectEvents,
+																	nativeResumeFallback:
+																		completed.nativeResumeFallback === true,
+																	persistUserMessage:
+																		persist.persistUserMessage,
+																	...(restoreDraft ? { restoreDraft } : {}),
+																	afterCommit: (effect) =>
+																		followUps.push(effect),
+																},
+															)) || changed;
+														continue;
+													}
+													if (answer?.status === "uncertain") {
+														changed =
+															(yield* settleRunnerCommandReply(
+																sql,
+																row,
+																undefined,
+																{
+																	operation: "recover runner send",
+																	message:
+																		"The runner stopped after this message may have been sent. Retry the message explicitly.",
+																	code: "runner_send_uncertain",
+																	retryable: false,
+																},
+																now,
+																false,
+																{
+																	project: projectEvents,
+																	persistUserMessage:
+																		persist.persistUserMessage,
+																	...(restoreDraft ? { restoreDraft } : {}),
+																	afterCommit: (effect) =>
+																		followUps.push(effect),
+																},
+															)) || changed;
+														continue;
+													}
+													if (!requeueMissing) continue;
+													if (row.error_code === "delivery_indeterminate")
+														continue;
+													const requeued =
+														yield* sql`UPDATE provider_command_outbox
+									SET status = 'retryable_failed', next_attempt_at = ${now}, updated_at = ${now}
+									WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
+										AND session_id = ${sessionId} AND command_id = ${row.command_id}
+										AND status = 'running' AND attempt_count = ${row.attempt_count} RETURNING command_id`;
+													changed ||= requeued.length > 0;
+												}
+												if (changed)
+													yield* stamp((version) =>
+														sql<{
+															id: string;
+														}>`UPDATE sessions SET version = ${version} WHERE id = ${sessionId} RETURNING id`.pipe(
+															Effect.map((rows) => rows.map(({ id }) => id)),
+														),
+													);
+												return changed;
+											}),
+										{
+											runnerId: entry.runnerId,
+											projectId: session.project_id,
+											afterCommit: Effect.suspend(() =>
+												Effect.forEach(followUps, (effect) => effect, {
+													discard: true,
+												}),
+											),
+										},
+									),
+								)
+								.pipe(
+									Effect.tap((settled) =>
+										Effect.sync(() => {
+											if (
+												Option.isSome(settled) &&
+												settled.value &&
+												recovery?.wakeReactor
+											)
+												runFork(recovery.wakeReactor);
+										}),
+									),
+									Effect.mapError((cause) =>
+										runnerFailure("settle runner reply", cause),
+									),
+								);
+						}
+					});
+				const recoverLegacySends = (connection: RunnerSocket) =>
+					sql
+						? recoverLegacyRunnerCommands({
+								sql,
+								sessionId,
+								driverKind: driver.driverKind,
+								...(deps.accounts ? { accounts: deps.accounts } : {}),
+								ownsPendingSend: (row) =>
+									entry.ownsPendingSend?.(
+										sessionId,
+										row.command_id,
+										row.request_sequence,
+										row.attempt_count,
+									) === true,
+								retain: (commandId, attempt) =>
+									entry.pendingSendCommands?.set(commandId, attempt),
+								ready: Deferred.await(entry.ready).pipe(Effect.asVoid),
+								replay: (row) =>
+									replayLegacyRunnerSend({
+										sql,
+										row,
+										driverKind: driver.driverKind,
+										connection,
+										deps: {
+											...deps,
+											...(driver.legacyReplayCommandFields
+												? {
+														replayCommandFields:
+															driver.legacyReplayCommandFields,
+													}
+												: {}),
+										},
+										liveSession: runner.getNativeSessionEffect(sessionId),
+										resolveSinkId: (commandId, inputId, attempt, fallback) => {
+											const inputSink = runnerSinkId(
+												inputId,
+												attempt,
+												fallback,
+											);
+											return sinks.has(inputSink)
+												? inputSink
+												: runnerSinkId(commandId, attempt, fallback);
+										},
+										closing: () =>
+											closing ||
+											currentEntry(sessionId) !== entry ||
+											entry.connection !== connection ||
+											connection.closed,
+										send: (commandId, command, attempt) =>
+											Effect.gen(function* () {
+												const existing = sinks.get(command.sinkId);
+												if (existing?.accepted)
+													return yield* connection.commandEffect(
+														commandId,
+														command,
+														attempt,
+													);
+												const admitted = yield* admitSend(
+													{
+														origin: { _tag: "Adopted" },
+														sinkId: command.sinkId,
+														input: command.input,
+														isEnded: runnerCommandEnded(
+															sql,
+															sessionId,
+															commandId,
+															attempt,
+														),
+														refuse: () => Effect.void,
+													},
+													(send) =>
+														Effect.gen(function* () {
+															sendScopes.dispatch(send, entry.runnerId);
+															yield* authority.guarded(
+																outputAuthority.grant,
+																{ kind: "output" },
+																bindSink(command.sinkId, {
+																	sendScope: send,
+																	sessionId,
+																	inputId: command.input.inputId,
+																	runId: command.input.runId,
+																	messageId: row.assistant_message_id ?? "",
+																	runnerId: entry.runnerId,
+																	commandPending: true,
+																	accepted: true,
+																}),
+															);
+															recoveryBindings = [
+																...recoveryBindings,
+																{
+																	sessionId,
+																	commandId,
+																	attempt,
+																	sinkId: command.sinkId,
+																	released: false,
+																},
+															];
+															yield* retainAccount(
+																send,
+																command.sinkId,
+																row.provider_id,
+																connection,
+															);
+															return yield* connection.commandEffect(
+																commandId,
+																command,
+																attempt,
+															);
+														}),
+												);
+												return Option.getOrUndefined(admitted);
+											}),
+									}).pipe(
+										(effect) =>
+											authority.guarded(
+												outputAuthority.grant,
+												{ kind: "output" },
+												effect,
+											),
+										Effect.flatMap(
+											Option.match({
+												onNone: () => Effect.interrupt,
+												onSome: Effect.succeed,
+											}),
+										),
+									),
+								settle: (answer) => settleRecoveredSends([answer], false),
+								release: (commandId) =>
+									Effect.gen(function* () {
+										for (const binding of recoveryBindings) {
+											if (binding.commandId !== commandId) continue;
+											const send = sinks.get(binding.sinkId)?.sendScope;
+											if (send) yield* send.close;
+										}
+									}),
+								closing: () =>
+									closing ||
+									currentEntry(sessionId) !== entry ||
+									entry.connection !== connection ||
+									connection.closed,
+								fail: (failure) => failed(sessionId, entry, failure),
+								runFork,
+							})
+						: Effect.void;
 				return yield* driver.connect({
 					driverKind: driver.driverKind,
 					socketPath: entry.socketPath,
@@ -1478,74 +1952,156 @@ export const makeProcessSessionRunner = (
 							: {}),
 					},
 					...(receipts ? { receipts } : {}),
+					checkpoint: (operation) =>
+						authority
+							// A receipt records transport progress, including discarded Starting
+							// output. Persist it before allowing the runner to truncate its spool.
+							.guarded(outputAuthority.grant, { kind: "evidence" }, operation)
+							.pipe(Effect.map(Option.isSome)),
 					runFork,
 					onOutputCommitted: (output) =>
-						withEntryOutput(entry, () => {
-							if (
-								output.type === "event" &&
-								output.event.type === "run.started" &&
-								output.event.runId
-							)
-								(entry.ownedRunIds ??= new Set()).add(output.event.runId);
-							observeRunnerTurn(
-								output,
-								"sinkId" in output ? sinks.get(output.sinkId) : undefined,
-							);
-						}),
-					emit: (received) => {
-						// Keep output in the runner's spool until its project can ingest it.
-						// The verified connection still permits native retirement meanwhile.
+						runFork(
+							authority
+								.guarded(outputAuthority.grant, { kind: "output" }, () => {
+									if (
+										output.type === "event" &&
+										output.event.type === "run.started" &&
+										output.event.runId
+									)
+										(entry.ownedRunIds ??= new Set()).add(output.event.runId);
+									observeRunnerTurn(
+										output,
+										"sinkId" in output ? sinks.get(output.sinkId) : undefined,
+									);
+								})
+								.pipe(Effect.asVoid),
+						),
+					emit: (output) => {
+						if (output.type === "release-sink")
+							return Effect.gen(function* () {
+								const send = sinks.get(output.sinkId)?.sendScope;
+								if (
+									send?.assignment._tag !== "Dispatched" ||
+									send.assignment.runnerId !== entry.runnerId
+								) {
+									const key = `${entry.runnerId}:${output.sinkId}`;
+									if (!refusedReleases.has(key)) {
+										refusedReleases.add(key);
+										yield* Effect.logWarning(
+											"Ignored release-sink from another runner",
+											{
+												runnerId: entry.runnerId,
+												sinkId: output.sinkId,
+											},
+										);
+									}
+									return {};
+								}
+								trackInteraction(output);
+								yield* send.close;
+								return {};
+							});
+						const grant = outputAuthority.grant;
+						const received =
+							output.type === "event"
+								? {
+										...output,
+										event: {
+											...output.event,
+											[RunnerWriteOrigin]: entry.runnerId,
+										},
+									}
+								: output;
 						if (Entry.isAwaitingProject(entry.lifecycle))
 							return Effect.interrupt;
-						const releaseSinkId =
-							received.type === "release-sink" ? received.sinkId : undefined;
-						const operation = Effect.suspend(() => {
-							trackInteraction(received);
-							const binding =
-								"sinkId" in received ? sinks.get(received.sinkId) : undefined;
-							if (received.type === "release-sink" && binding?.pending) {
-								binding.releaseRequested = true;
-								return Effect.succeed({});
-							}
-							return emit(received, sessionId).pipe(
-								Effect.tap(() =>
-									withEntryOutput(
-										entry,
-										Effect.sync(() => {
-											observeRunnerTurn(received, binding);
-											if (received.type === "release-sink")
-												releaseSink(received.sinkId);
+						return entry.outputs.withPermits(1)(
+							authority
+								.guarded(
+									grant,
+									{ kind: "output" },
+									Effect.gen(function* () {
+										const prepared = yield* authority.guarded(
+											grant,
+											{ kind: "output" },
+											() => {
+												trackInteraction(received);
+												return "sinkId" in received
+													? sinks.get(received.sinkId)
+													: undefined;
+											},
+										);
+										if (Option.isNone(prepared)) return {};
+										const reply = yield* emit(received, sessionId);
+										yield* authority.guarded(grant, { kind: "output" }, () => {
+											observeRunnerTurn(received, prepared.value);
+											if (
+												prepared.value &&
+												received.type === "event" &&
+												received.event.sessionId === prepared.value.sessionId &&
+												(!prepared.value.runId ||
+													received.event.runId === prepared.value.runId) &&
+												[
+													"turn.completed",
+													"turn.error",
+													"turn.interrupted",
+												].includes(received.event.type)
+											)
+												prepared.value.outcomeEmitted = true;
+										});
+										return reply;
+									}),
+								)
+								.pipe(
+									Effect.tap((result) =>
+										Effect.gen(function* () {
+											if (Option.isSome(result)) return;
+											const receipt = yield* currentRunnerOutput;
+											if (receipt)
+												yield* Deferred.succeed(receipt.committed, undefined);
 										}),
-										releaseSinkId,
 									),
+									Effect.map(Option.getOrElse(() => ({}))),
 								),
-							);
-						});
-						const output =
-							received.type === "ensure-subagent-session"
-								? withEntryOutput(entry, operation)
-								: entry.outputs.withPermits(1)(
-										withEntryOutput(entry, operation, releaseSinkId),
-									);
-						return Effect.gen(function* () {
-							const receipt = yield* currentRunnerOutput;
-							if (receipt)
-								receipt.isCurrent = () => {
-									let allowed = false;
-									withEntryOutput(
-										entry,
-										() => {
-											allowed = true;
-										},
-										releaseSinkId,
-									);
-									return allowed;
-								};
-							return yield* output;
-						});
+						);
 					},
-					onHello: (hello, connection, replay) =>
+					onHello: (rawHello, connection, replay) =>
 						Effect.gen(function* () {
+							const hello = rawHello;
+							recoveredHello = hello;
+							recoveryBindings =
+								hello.sendJournalAnswers === true
+									? (hello.bindings ?? [])
+									: legacyRunnerBindings(hello);
+							if (hello.sendJournalAnswers === true) {
+								// The journal owns classification. A retained call needs an admission
+								// even when it has not emitted an output binding yet.
+								for (const answer of hello.sendAnswers ?? []) {
+									if (
+										answer.status !== "running" ||
+										recoveryBindings.some(
+											(binding) =>
+												binding.commandId === answer.commandId &&
+												binding.attempt === answer.attempt &&
+												binding.released !== true,
+										)
+									)
+										continue;
+									recoveryBindings = [
+										...recoveryBindings,
+										{
+											sessionId,
+											commandId: answer.commandId,
+											attempt: answer.attempt,
+											released: false,
+											sinkId: runnerSinkId(
+												answer.commandId,
+												answer.attempt,
+												answer.nativeResumeFallback,
+											),
+										},
+									];
+								}
+							}
 							transition(entry, { _tag: "Verify" });
 							entry.pid = hello.pid;
 							if (hello.pid !== undefined)
@@ -1603,28 +2159,36 @@ export const makeProcessSessionRunner = (
 									}),
 								);
 							yield* ensureAttached();
-							entry.pendingSendCommands = hello.sendCommands
-								? new Map(
-										hello.sendCommands.map(({ commandId, attempt }) => [
-											commandId,
-											attempt,
-										]),
-									)
-								: undefined;
+							// Acknowledgement retention is independent of recovery ownership.
+							entry.pendingSendCommands = new Map();
+							for (const command of hello.sendJournalAnswers === true
+								? (hello.sendAnswers ?? [])
+								: legacyRunnerRetainedSends(hello)) {
+								if (command.attempt === undefined) continue;
+								entry.pendingSendCommands.set(
+									command.commandId,
+									Math.max(
+										entry.pendingSendCommands.get(command.commandId) ?? -1,
+										command.attempt,
+									),
+								);
+							}
 							yield* acknowledgeSends(sessionId, entry, connection);
 							const restoreAccounts: Effect.Effect<void, SessionFailure>[] = [];
 							for (const binding of entry.lifecycle.candidate
 								? []
-								: (hello.bindings ?? [])) {
+								: recoveryBindings) {
+								if (binding.released === true) continue;
 								let inputId: string | undefined;
 								let runId: string | undefined;
 								let messageId = "";
 								let pending = false;
 								let accountId: string | undefined;
 								let activeTurn = false;
-								let turnInputId: string | undefined;
+								let commandAttempt: number | undefined;
 								if (sql) {
 									const rows = yield* sql<{
+										request_sequence: number;
 										provider_id: string;
 										input_id: string | null;
 										run_id: string | null;
@@ -1632,13 +2196,15 @@ export const makeProcessSessionRunner = (
 										attempt_count: number;
 										assistant_message_id: string | null;
 										turn_state: string | null;
-										turn_input_id: string | null;
-									}>`SELECT outbox.provider_id, COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
+										run_state: string | null;
+									}>`SELECT outbox.request_sequence, outbox.provider_id, COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
 										COALESCE(reservation.joined_into, reservation.id) AS run_id,
-										outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state AS turn_state, turns.user_message_id AS turn_input_id
+										outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state AS turn_state, owner.status AS run_state
 										FROM provider_command_outbox outbox
 										LEFT JOIN provider_runs reservation ON reservation.session_id = outbox.session_id
 											AND reservation.id = outbox.run_id
+										LEFT JOIN provider_runs owner ON owner.session_id = outbox.session_id
+											AND owner.id = COALESCE(reservation.joined_into, reservation.id)
 										LEFT JOIN turns ON turns.session_id = outbox.session_id
 											AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
 										WHERE outbox.project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND outbox.command_id = ${binding.commandId ?? binding.sinkId} AND outbox.session_id = ${sessionId}`.pipe(
@@ -1649,100 +2215,144 @@ export const makeProcessSessionRunner = (
 									yield* ensureAttached();
 									const row = rows[0];
 									if (row) {
+										if (
+											entry.ownsPendingSend?.(
+												sessionId,
+												binding.commandId ?? binding.sinkId,
+												row.request_sequence,
+												row.attempt_count,
+											)
+										)
+											continue;
+										if (
+											hello.sendJournalAnswers === true &&
+											row.status === "running"
+										) {
+											const answer = hello.sendAnswers?.find(
+												(answer) =>
+													answer.commandId ===
+														(binding.commandId ?? binding.sinkId) &&
+													answer.attempt === row.attempt_count,
+											);
+											if (!answer || answer.status === "uncertain") continue;
+											if (
+												answer.status === "finished" &&
+												(answer.failure ||
+													(answer.result &&
+														!["accepted", "joined", "indeterminate"].includes(
+															answer.result.status,
+														)))
+											)
+												continue;
+											if (binding.attempt !== row.attempt_count) continue;
+										}
+										commandAttempt = row.attempt_count;
 										accountId = row.provider_id;
-										turnInputId = row.turn_input_id ?? undefined;
-										activeTurn =
-											row.turn_state === "pending" ||
-											row.turn_state === "running";
+										const state = row.run_state ?? row.turn_state;
+										activeTurn = state === "pending" || state === "running";
 										inputId = row.input_id ?? undefined;
 										runId = row.run_id ?? undefined;
 										// Acknowledged events will not replay after adoption.
 										messageId = row.assistant_message_id ?? "";
-										pending =
-											row.status === "running" &&
-											(binding.sinkId ===
-												runnerSinkId(
-													binding.commandId ?? binding.sinkId,
-													row.attempt_count,
-												) ||
-												(inputId !== undefined &&
-													binding.sinkId ===
-														runnerSinkId(inputId, row.attempt_count)));
+										pending = row.status === "running";
 									}
 								}
+								if (binding.released === undefined && !activeTurn && !pending)
+									continue;
 								yield* ensureAttached();
-								sinks.set(binding.sinkId, {
-									sessionId,
-									runnerId: entry.runnerId,
-									...(inputId ? { inputId } : {}),
-									runId,
-									messageId,
-									pending,
-									accepted: true,
-									releaseRequested: false,
-								});
+								// A new socket attachment retains the native send's existing admission.
+								const adoption = {
+									origin: { _tag: "Adopted" as const },
+									sinkId: binding.sinkId,
+									input: {
+										sessionId,
+										inputId: inputId ?? binding.commandId ?? binding.sinkId,
+									},
+									isEnded: sql
+										? runnerCommandEnded(
+												sql,
+												sessionId,
+												binding.commandId ?? binding.sinkId,
+												commandAttempt,
+											)
+										: Effect.succeed(false),
+									refuse: (failure: SessionFailure, send: SendScope) => {
+										const turn = sinks.get(send.sinkId);
+										return turn
+											? failBoundSend(send.sinkId, turn, entry, failure).pipe(
+													Effect.andThen(
+														connection
+															.commandEffect(randomUUID(), {
+																type: "interrupt",
+																sessionId,
+																...(inputId ? { turnIds: [inputId] } : {}),
+															})
+															.pipe(Effect.ignore),
+													),
+												)
+											: Effect.void;
+									},
+								};
+								let admitted = sinks.get(binding.sinkId);
+								if (!admitted || admitted.runnerId !== entry.runnerId) {
+									const result = yield* admitSend(adoption, (sendScope) =>
+										Effect.gen(function* () {
+											sendScopes.dispatch(sendScope, entry.runnerId);
+											const adopted = {
+												sendScope,
+												sessionId,
+												runnerId: entry.runnerId,
+												...(inputId ? { inputId } : {}),
+												runId,
+												messageId,
+												commandPending: pending,
+												accepted: true,
+											};
+											yield* authority.guarded(
+												outputAuthority.grant,
+												{ kind: "output" },
+												bindSink(binding.sinkId, adopted),
+											);
+											return adopted;
+										}),
+									);
+									if (Option.isNone(result)) continue;
+									admitted = result.value;
+								}
+								const sendScope = admitted.sendScope;
+								if (!sendScope)
+									return yield* Effect.die(
+										"Missing recovered send admission handle",
+									);
 								// Historical sinks remain available for output replay, but their
 								// native lifetime ended. Older runners report only the history.
 								if (
 									binding.released === false ||
-									(binding.released === undefined && activeTurn)
+									(binding.released === undefined && (activeTurn || pending))
 								) {
+									const restoreAccount = Effect.gen(function* () {
+										yield* ensureAttached();
+										const turn = sinks.get(binding.sinkId);
+										if (turn?.sendScope !== sendScope) return;
+										yield* retainAccount(
+											sendScope,
+											binding.sinkId,
+											accountId ??
+												hello.upgradeState?.snapshot?.input.account?.id,
+											connection,
+										);
+									});
 									restoreAccounts.push(
-										Effect.gen(function* () {
-											yield* ensureAttached();
-											const turn = sinks.get(binding.sinkId);
-											if (!turn) return;
-											if (sql && turnInputId) {
-												const rows = yield* sql<{
-													state: string;
-												}>`SELECT state FROM turns
-												WHERE session_id = ${sessionId} AND user_message_id = ${turnInputId}`.pipe(
-													Effect.mapError((cause) =>
-														runnerFailure("restore runner history", cause),
-													),
-												);
-												if (
-													rows[0]?.state !== "pending" &&
-													rows[0]?.state !== "running"
-												)
-													return;
-											}
-											const retained = yield* Effect.result(
-												retainAccount(
-													binding.sinkId,
-													accountId ??
-														hello.upgradeState?.snapshot?.input.account?.id,
-													sessionId,
-													inputId,
-													connection,
-												),
-											);
-											if (retained._tag === "Failure") {
-												if (retained.failure.code !== "account_unavailable")
-													return yield* Effect.fail(retained.failure);
-												yield* failRunnerTurn(
-													(output) =>
-														withEntryOutput(entry, emit(output, sessionId)),
-													binding.sinkId,
-													turn,
-													retained.failure,
-													driver.driverKind,
-												);
-												yield* withEntryOutput(
-													entry,
-													Effect.sync(() => releaseSink(binding.sinkId)),
-												);
-												runFork(
-													connection
-														.commandEffect(randomUUID(), {
-															type: "interrupt",
-															sessionId,
-															...(inputId ? { turnIds: [inputId] } : {}),
-														})
-														.pipe(Effect.ignore, Effect.asVoid),
-												);
-											}
-										}),
+										admitSend(
+											{ ...adoption, retained: sendScope },
+											() => restoreAccount,
+										).pipe(
+											Effect.asVoid,
+											Effect.catchIf(
+												(failure) => failure.code === "account_unavailable",
+												() => Effect.void,
+											),
+										),
 									);
 								}
 							}
@@ -1750,10 +2360,15 @@ export const makeProcessSessionRunner = (
 								? []
 								: (hello.pendingOutputs ?? [])) {
 								yield* ensureAttached();
-								trackInteraction(pending.output);
+								yield* authority.guarded(
+									outputAuthority.grant,
+									{ kind: "output" },
+									() => trackInteraction(pending.output),
+								);
 								if (pending.sequence <= (hello.acknowledgedSequence ?? 0))
-									yield* withEntryOutput(
-										entry,
+									yield* authority.guarded(
+										outputAuthority.grant,
+										{ kind: "output" },
 										emit(pending.output, sessionId),
 									);
 							}
@@ -1765,9 +2380,9 @@ export const makeProcessSessionRunner = (
 								if (sql)
 									yield* entry.outputs.withPermits(1)(
 										Effect.gen(function* () {
-											for (const binding of hello.bindings ?? []) {
+											for (const binding of recoveryBindings) {
 												const turn = sinks.get(binding.sinkId);
-												if (!turn?.pending) continue;
+												if (!turn?.commandPending) continue;
 												const [command] = yield* sql<{ status: string }>`
 													SELECT status FROM provider_command_outbox
 													WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId}) AND session_id = ${sessionId}
@@ -1782,26 +2397,23 @@ export const makeProcessSessionRunner = (
 													command?.status !== "failed"
 												)
 													continue;
-												turn.pending = false;
-												if (turn.releaseRequested) {
-													yield* withEntryOutput(
-														entry,
-														emit(
-															{ type: "release-sink", sinkId: binding.sinkId },
-															sessionId,
-														),
-													);
-													yield* withEntryOutput(
-														entry,
-														Effect.sync(() => releaseSink(binding.sinkId)),
-													);
-												}
+												yield* Effect.sync(() => {
+													turn.commandPending = false;
+												});
 											}
 										}),
 									);
 							}
 							yield* Effect.all(restoreAccounts, { discard: true });
 							yield* ensureAttached();
+							if (sql && entry.recoveringCommands) {
+								// Native output must commit before interpreting transport replies.
+								if (!driver.withAccountScope || restoreAccounts.length === 0)
+									yield* replay ?? Effect.void;
+								if (hello.sendJournalAnswers === true)
+									yield* settleRecoveredSends(hello.sendAnswers ?? [], true);
+								else yield* recoverLegacySends(connection);
+							}
 							if (process.env["NODE_ENV"] === "test" && process.connected)
 								process.send?.({
 									channel: "conduit-process-test",
@@ -1818,15 +2430,47 @@ export const makeProcessSessionRunner = (
 										: "legacy",
 								});
 						}),
-					onCommandAccepted: (sinkId) =>
-						withEntryOutput(entry, () => {
-							const binding = sinks.get(sinkId);
-							if (binding) {
-								binding.accepted = true;
-								if (binding.admission)
-									runFork(Deferred.succeed(binding.admission, undefined));
-							}
+					onCommandReply: (reply) =>
+						Effect.gen(function* () {
+							if (
+								recoveredHello?.sendJournalAnswers !== true ||
+								reply.attempt === undefined
+							)
+								return;
+							const held = recoveredHello.sendAnswers?.find(
+								(answer) =>
+									answer.status === "running" &&
+									answer.commandId === reply.commandId &&
+									answer.attempt === reply.attempt &&
+									answer.nativeResumeFallback ===
+										(reply.nativeResumeFallback === true),
+							);
+							if (!held) return;
+							yield* settleRecoveredSends(
+								[
+									{
+										...held,
+										status: "finished",
+										...(reply.result ? { result: reply.result } : {}),
+										...(reply.failure ? { failure: reply.failure } : {}),
+									},
+								],
+								false,
+							);
 						}),
+					onCommandAccepted: (sinkId) =>
+						runFork(
+							authority
+								.guarded(outputAuthority.grant, { kind: "output" }, () => {
+									const binding = sinks.get(sinkId);
+									if (binding) {
+										binding.accepted = true;
+										if (binding.admission)
+											runFork(Deferred.succeed(binding.admission, undefined));
+									}
+								})
+								.pipe(Effect.asVoid),
+						),
 					onCommandsSettled: (commands) => {
 						runFork(
 							entry.outputs
@@ -1844,10 +2488,23 @@ export const makeProcessSessionRunner = (
 											AND attempt_count = ${pending}`;
 												for (const row of rows)
 													if (row.run_id)
-														(entry.ownedRunIds ??= new Set()).add(row.run_id);
+														yield* authority.guarded(
+															outputAuthority.grant,
+															{ kind: "output" },
+															() => {
+																if (row.run_id)
+																	(entry.ownedRunIds ??= new Set()).add(
+																		row.run_id,
+																	);
+															},
+														);
 											}
 											if (entry.pendingSendCommands?.get(commandId) === pending)
-												entry.pendingSendCommands.delete(commandId);
+												yield* authority.guarded(
+													outputAuthority.grant,
+													{ kind: "output" },
+													() => entry.pendingSendCommands?.delete(commandId),
+												);
 										}
 									}),
 								)
@@ -1879,6 +2536,8 @@ export const makeProcessSessionRunner = (
 					},
 					onIdleExit: () => {
 						transition(entry, { _tag: "IdleExit" });
+						for (const binding of sinks.values())
+							retryUnacceptedSend(binding, entry.runnerId);
 						if (process.env["NODE_ENV"] === "test" && process.connected)
 							process.send?.({
 								channel: "conduit-process-test",
@@ -2244,12 +2903,12 @@ export const makeProcessSessionRunner = (
 								connection.write({ type: "upgrade-cancel" });
 								return false;
 							}
-							yield* observeProcess(sessionId, replacement);
 							transition(replacement, { _tag: "Promote" });
 							replacement.connection?.write({ type: "upgrade-activate" });
-							if (old.authorityRecord)
-								old.authorityRecord.identity = identityFor(old);
+							authority.captureBeforeRevoke(old.runnerId, identityFor(old));
 							yield* adoptEntry(replacement, "live");
+							runFork(sendScopes.closeRunner(old.runnerId));
+							yield* observeProcess(sessionId, replacement);
 							// Keep the old process visible to shutdown and liveness while
 							// stopping, without granting it the warming candidate's output.
 
@@ -2289,6 +2948,10 @@ export const makeProcessSessionRunner = (
 		});
 
 		class ProcessSessionRunner implements SessionRunner {
+			setSendAdmission(admit: AdmitSend): void {
+				providerAdmission = admit;
+			}
+			readonly sendScopes = sendScopes;
 			readonly turnEnds = Effect.map(
 				PubSub.subscribe(turnEnds),
 				Stream.fromSubscription,
@@ -2388,32 +3051,23 @@ export const makeProcessSessionRunner = (
 							const entries = attachedEntries().filter(
 								(entry) => entry.sessionId === sessionId,
 							);
-							for (const entry of entries)
-								yield* withEntryOutput(
-									entry,
-									Effect.gen(function* () {
-										const failure = runnerFailure(
-											"detach runner",
-											"Project released its runner attachment",
-										);
-										const detached = { ...failure, code: "runner_detached" };
-										transition(entry, { _tag: "Fail", failure: detached });
-										if (
-											entry.pid === undefined ||
-											(entry.child && Entry.needsStartupStop(entry.lifecycle))
-										)
-											yield* stopRunner(entry);
-										else detach(entry, detached);
-										yield* withEntryOutput(
-											entry,
-											Effect.gen(function* () {
-												yield* evict(sessionId, entry);
-												forgetExited(entry);
-												yield* releaseEntryWaiters(entry, Cause.fail(detached));
-											}),
-										);
-									}),
+							for (const entry of entries) {
+								const failure = runnerFailure(
+									"detach runner",
+									"Project released its runner attachment",
 								);
+								const detached = { ...failure, code: "runner_detached" };
+								transition(entry, { _tag: "Fail", failure: detached });
+								if (
+									entry.pid === undefined ||
+									(entry.child && Entry.needsStartupStop(entry.lifecycle))
+								)
+									yield* stopRunner(entry);
+								else detach(entry, detached);
+								yield* evict(sessionId, entry);
+								forgetExited(entry);
+								yield* releaseEntryWaiters(entry, Cause.fail(detached));
+							}
 						}),
 					)
 					.pipe(
@@ -2431,6 +3085,7 @@ export const makeProcessSessionRunner = (
 
 			attachRegisteredSessions(sessionIds?: ReadonlySet<string>) {
 				return Effect.gen(function* () {
+					const ownsPendingSend = yield* currentPendingSendOwner;
 					// Discover every surviving candidate before scheduling replacements.
 					if (!sessionIds) recovering = true;
 					if (closing)
@@ -2446,10 +3101,7 @@ export const makeProcessSessionRunner = (
 					const recoveryPending = yield* Effect.serviceOption(
 						PendingInteractionServiceTag,
 					);
-					const registrations = discoverAllRunners(
-						configDir,
-						processTable,
-					).filter(
+					const discovered = discoverAllRunners(configDir, processTable).filter(
 						(registration) =>
 							(registration.driverKind ?? "claude") === driver.driverKind &&
 							(!sessionIds || sessionIds.has(registration.sessionId)),
@@ -2463,12 +3115,28 @@ export const makeProcessSessionRunner = (
 									),
 								)
 						: [];
+					// Scope discovery before adoption: an entry-less record still owns
+					// authority. Daemon-wide recovery supplies each session's owner.
+					const foreignSessions = new Set(
+						sql && !deps.recoveryForSession && recoveryScope._tag === "Some"
+							? (yield* sql<{ id: string }>`SELECT id FROM sessions
+								WHERE id IN ${sql.in([...discovered, ...retiredRows].map((runner) => runner.sessionId))}
+									AND project_id <> ${recoveryScope.value.projectId}`.pipe(
+									Effect.mapError((cause) =>
+										runnerFailure("scope recovered runners", cause),
+									),
+								)).map((row) => row.id)
+							: [],
+					);
+					const registrations = discovered.filter(
+						(registration) => !foreignSessions.has(registration.sessionId),
+					);
 					const identities = registrations.map((registration) => ({
 						...registration,
-						candidate: registration.role === "candidate",
 						entry: undefined as RunnerChild | undefined,
 					}));
 					for (const retired of retiredRows) {
+						if (foreignSessions.has(retired.sessionId)) continue;
 						if (sessionIds && !sessionIds.has(retired.sessionId)) continue;
 						if (
 							identities.some(
@@ -2564,7 +3232,7 @@ export const makeProcessSessionRunner = (
 					// session authority until promotion, including after a restart.
 					const active = yield* authority
 						.adopt(
-							known.filter((identity) => !identity.candidate),
+							known.filter((identity) => identity.role !== "candidate"),
 							"live",
 						)
 						.pipe(
@@ -2574,7 +3242,7 @@ export const makeProcessSessionRunner = (
 						);
 					const warming = yield* authority
 						.adopt(
-							known.filter((identity) => identity.candidate),
+							known.filter((identity) => identity.role === "candidate"),
 							"starting",
 						)
 						.pipe(
@@ -2636,13 +3304,6 @@ export const makeProcessSessionRunner = (
 									outstandingEnd.project_key,
 								)
 							: undefined;
-						if (
-							!deps.recoveryForSession &&
-							persisted &&
-							recoveryScope._tag === "Some" &&
-							persisted.project_id !== recoveryScope.value.projectId
-						)
-							continue;
 						const recovery = yield* deps.recoveryForSession?.(
 							registration.sessionId,
 						) ?? Effect.succeed(undefined);
@@ -2670,6 +3331,8 @@ export const makeProcessSessionRunner = (
 							Boolean(currentEntry(registration.sessionId));
 						const entry: RunnerChild = {
 							...registration,
+							recoveringCommands: !abandoned,
+							ownsPendingSend,
 							ownedRunIds: new Set(
 								authority.records.get(registration.runnerId)?.identity
 									.ownedRunIds ?? registration.ownedRunIds,
@@ -2849,21 +3512,7 @@ export const makeProcessSessionRunner = (
 										_tag: "Fail",
 										failure: abandonedFailure,
 									});
-									// Replay can allocate sinks before command waiters take ownership.
-									yield* entry.outputs.withPermits(1)(
-										Effect.gen(function* () {
-											for (const [sinkId, binding] of sinks) {
-												if (binding.runnerId !== entry.runnerId) continue;
-												yield* withEntryOutput(
-													entry,
-													emit(
-														{ type: "release-sink", sinkId },
-														registration.sessionId,
-													),
-												);
-											}
-										}),
-									);
+
 									yield* evict(registration.sessionId, entry);
 									forgetExited(entry);
 									yield* releaseEntryWaiters(
@@ -2881,356 +3530,15 @@ export const makeProcessSessionRunner = (
 								yield* Deferred.succeed(entry.ready, connected.success);
 								// Shutdown skips retirement; waiters must still be released.
 								yield* retireOrphan(entry).pipe(
-									Effect.ensuring(
-										withEntryOutput(
-											entry,
-											Deferred.succeed(entry.drained, undefined).pipe(
-												Effect.asVoid,
-											),
-										),
-									),
+									Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
 								);
 								return;
 							}
-							const commands =
-								sql && persisted && !Entry.isAwaitingProject(entry.lifecycle)
-									? yield* driver
-											.recoverCommands(
-												sql,
-												registration.sessionId,
-												connected.success,
-												(sinkId, failure) => {
-													const binding = sinks.get(sinkId);
-													if (!binding?.pending) return Effect.void;
-													if (
-														failure.code === "cancelled" &&
-														binding.runId &&
-														ingestion
-													)
-														return entry.outputs
-															.withPermits(1)(
-																settleSessionRuns(
-																	sql,
-																	registration.sessionId,
-																	failure.message,
-																	(events) => ingestion.ingestBatch(events),
-																	{
-																		errorCode: "cancelled",
-																		owners: [{ runId: binding.runId }],
-																	},
-																).pipe(
-																	Effect.ensuring(
-																		withEntryOutput(
-																			entry,
-																			emit(
-																				{ type: "release-sink", sinkId },
-																				registration.sessionId,
-																			),
-																		).pipe(
-																			Effect.ignore,
-																			Effect.ensuring(
-																				withEntryOutput(
-																					entry,
-																					Effect.sync(() =>
-																						releaseSink(sinkId),
-																					),
-																				),
-																			),
-																		),
-																	),
-																),
-															)
-															.pipe(
-																Effect.catch((cause) =>
-																	Effect.logError(
-																		"Could not settle recovered cancellation",
-																		cause,
-																	),
-																),
-															);
-													return (
-														entry.lifecycle.failure
-															? Deferred.await(entry.stopped)
-															: Effect.void
-													).pipe(
-														Effect.andThen(
-															entry.outputs.withPermits(1)(
-																failRunnerTurn(
-																	(output) =>
-																		withEntryOutput(
-																			entry,
-																			emit(output, registration.sessionId),
-																		),
-																	sinkId,
-																	binding,
-																	failure,
-																	driver.driverKind,
-																).pipe(
-																	Effect.ensuring(
-																		withEntryOutput(
-																			entry,
-																			Effect.sync(() => releaseSink(sinkId)),
-																		),
-																	),
-																),
-															),
-														),
-													);
-												},
-												() =>
-													closing ||
-													currentEntry(registration.sessionId) !== entry,
-												runner.getNativeSessionEffect(registration.sessionId),
-												(commandId, inputId, attempt, nativeResumeFallback) => {
-													if (!driver.admitsRecoveredSends)
-														entry.pendingSendCommands?.set(commandId, attempt);
-													const sinkId = runnerSinkId(
-														inputId,
-														attempt,
-														nativeResumeFallback,
-													);
-													return sinks.has(sinkId)
-														? sinkId
-														: runnerSinkId(
-																commandId,
-																attempt,
-																nativeResumeFallback,
-															);
-												},
-												(accountId, input, sinkId, work) =>
-													runner.withTurnEffect(
-														input,
-														sinkId,
-														work((command) =>
-															Effect.gen(function* () {
-																// Write the replay frame before invalidation can issue Stop.
-																const executing = yield* command.pipe(
-																	Effect.forkChild({ startImmediately: true }),
-																);
-																const demand = accountDemands.get(sinkId);
-																if (demand)
-																	yield* Deferred.succeed(
-																		demand.dispatched,
-																		connected.success,
-																	);
-																return yield* Fiber.join(executing);
-															}),
-														),
-														accountId,
-													),
-												(commandId, command, attempt) =>
-													sinks.get(command.sinkId)?.accepted
-														? connected.success.commandEffect(
-																commandId,
-																command,
-																attempt,
-															)
-														: runner.executeEffect(command, entry).pipe(
-																Effect.flatMap((result) =>
-																	result.status === "cancelled"
-																		? Effect.fail({
-																				...runnerFailure(
-																					"send-turn",
-																					"Input cancelled before intake",
-																				),
-																				code: "cancelled",
-																			})
-																		: Effect.succeed(result),
-																),
-															),
-												(sinkId, replay) =>
-													Effect.suspend(() => {
-														const pending = pendingSends.get(sinkId);
-														return pending
-															? Effect.raceFirst(
-																	Deferred.await(pending.cancelled).pipe(
-																		Effect.andThen(
-																			Effect.fail({
-																				...runnerFailure(
-																					"send-turn",
-																					"Input cancelled before intake",
-																				),
-																				code: "cancelled",
-																			}),
-																		),
-																	),
-																	replay,
-																)
-															: replay;
-													}),
-											)
-											.pipe(
-												Effect.provideService(PersistenceProjectTag, {
-													projectId: persisted.project_id,
-												}),
-												Effect.map((commands) =>
-													commands.map((command) => {
-														let wait = command.wait.pipe(
-															Effect.provideService(PersistenceProjectTag, {
-																projectId: persisted.project_id,
-															}),
-															Effect.provideService(SqlClient.SqlClient, sql),
-														);
-														if (recovery)
-															wait = wait.pipe(
-																Effect.provideService(
-																	ClaudeEventPersistEffectTag,
-																	recovery.persist,
-																),
-															);
-														if (recovery?.inputDrafts)
-															wait = wait.pipe(
-																Effect.provideService(
-																	InputDraftsTag,
-																	recovery.inputDrafts,
-																),
-															);
-														return { ...command, wait };
-													}),
-												),
-												Effect.mapError((cause) =>
-													runnerFailure("recover runner commands", cause),
-												),
-											)
-									: [];
 							yield* lock.withPermits(1)(
 								Effect.gen(function* () {
 									yield* ensureRecovering;
-									const admissions: Deferred.Deferred<void>[] = [];
-									for (const command of commands) {
-										let binding = sinks.get(command.sinkId);
-										// The server can persist admission before the runner sees it.
-										if (!binding) {
-											binding = {
-												sessionId: registration.sessionId,
-												runnerId: entry.runnerId,
-												inputId: command.input.inputId,
-												...(command.input.continuation
-													? {}
-													: {
-															placement: {
-																inputId: command.input.inputId,
-																text:
-																	command.input.text ?? command.input.prompt,
-																...(command.input.images
-																	? { images: command.input.images }
-																	: {}),
-															},
-														}),
-												messageId: command.messageId,
-												...(command.runId ? { runId: command.runId } : {}),
-												pending: true,
-												accepted: false,
-												releaseRequested: false,
-											};
-											sinks.set(command.sinkId, binding);
-										}
-										if (!binding.accepted) {
-											binding.admission ??= yield* Deferred.make<void>();
-											admissions.push(binding.admission);
-										}
-										const admission = binding.admission;
-										// Own cancellation before replay captures env or prepares continuation.
-										const reattaching =
-											binding.accepted || !driver.admitsRecoveredSends;
-										const pending = reattaching
-											? undefined
-											: {
-													sessionId: registration.sessionId,
-													turnId:
-														command.input.continuation?.cutOffMessageId ??
-														command.input.inputId,
-													cancelled: yield* Deferred.make<void>(),
-												};
-										if (reattaching)
-											transition(entry, { _tag: "AdmitCommand" });
-										else if (pending) pendingSends.set(command.sinkId, pending);
-										runFork(
-											command.wait.pipe(
-												Effect.onExit(() => {
-													return entry.outputs.withPermits(1)(
-														Effect.gen(function* () {
-															if (
-																!binding ||
-																sinks.get(command.sinkId) !== binding ||
-																closing
-															)
-																return;
-															binding.pending = false;
-															if (
-																binding.releaseRequested ||
-																entry.lifecycle.failure
-															) {
-																yield* withEntryOutput(
-																	entry,
-																	emit(
-																		{
-																			type: "release-sink",
-																			sinkId: command.sinkId,
-																		},
-																		registration.sessionId,
-																	),
-																);
-																yield* withEntryOutput(
-																	entry,
-																	Effect.sync(() =>
-																		releaseSink(command.sinkId),
-																	),
-																);
-															}
-														}),
-													);
-												}),
-												Effect.ensuring(
-													admission
-														? Deferred.succeed(admission, undefined)
-														: Effect.void,
-												),
-												Effect.catchCause((cause) =>
-													Effect.logError(
-														"Runner command recovery failed",
-														cause,
-													),
-												),
-												Effect.ensuring(
-													Effect.sync(() => {
-														if (reattaching)
-															transition(entry, { _tag: "FinishCommand" });
-														else if (
-															pendingSends.get(command.sinkId) === pending
-														)
-															pendingSends.delete(command.sinkId);
-														upgrade(registration.sessionId, entry);
-													}),
-												),
-											),
-										);
-									}
-									// Waiters own restored turns before commands or close callbacks run.
 									transition(entry, { _tag: "Recovered" });
-									if (admissions.length === 0)
-										yield* Deferred.succeed(entry.ready, connected.success);
-									else
-										runFork(
-											Effect.forEach(admissions, Deferred.await, {
-												discard: true,
-											}).pipe(
-												Effect.andThen(ensureRecovering),
-												Effect.flatMap(() =>
-													connected.success.closed
-														? Effect.fail(
-																runnerFailure(
-																	"recover runner",
-																	"Runner disconnected during recovery",
-																),
-															)
-														: Deferred.succeed(entry.ready, connected.success),
-												),
-												Effect.catch((failure) =>
-													Deferred.fail(entry.ready, failure),
-												),
-											),
-										);
+									yield* Deferred.succeed(entry.ready, connected.success);
 									if (connected.success.closed)
 										failed(
 											registration.sessionId,
@@ -3246,23 +3554,20 @@ export const makeProcessSessionRunner = (
 						}).pipe(
 							Effect.onExit((exit) => {
 								if (exit._tag === "Success") return Effect.void;
-								return withEntryOutput(
-									entry,
-									Effect.gen(function* () {
-										transition(entry, { _tag: "Recovered" });
-										transition(entry, {
-											_tag: "Fail",
-											failure: runnerFailure(
-												"recover runner",
-												Failure.squashCause(exit.cause),
-											),
-										});
-										entry.connection?.destroy();
-										yield* evict(registration.sessionId, entry);
-										forgetExited(entry);
-										yield* releaseEntryWaiters(entry, exit.cause);
-									}),
-								);
+								return Effect.gen(function* () {
+									transition(entry, { _tag: "Recovered" });
+									transition(entry, {
+										_tag: "Fail",
+										failure: runnerFailure(
+											"recover runner",
+											Failure.squashCause(exit.cause),
+										),
+									});
+									entry.connection?.destroy();
+									yield* evict(registration.sessionId, entry);
+									forgetExited(entry);
+									yield* releaseEntryWaiters(entry, exit.cause);
+								});
 							}),
 						);
 					}
@@ -3285,8 +3590,7 @@ export const makeProcessSessionRunner = (
 					[...authority.records.values()].some(
 						(record) =>
 							record.identity.sessionId === sessionId &&
-							record.cleanup?.settling === true &&
-							record.cleanup.permitsCleanup &&
+							record.cleanup?._tag === "Settling" &&
 							clock.currentTimeMillisUnsafe() < record.cleanup.deadline &&
 							record.cleanup.ownedRunIds.includes(runId),
 					),
@@ -3310,7 +3614,7 @@ export const makeProcessSessionRunner = (
 							pid !== undefined &&
 							pidAlive(pid, entry?.startTime ?? record.identity.startTime);
 						if (!alive && record.tag._tag === "Exiting")
-							authority.records.delete(runnerId);
+							authority.forget(runnerId);
 						if (
 							alive &&
 							record.identity.sessionId === sessionId &&
@@ -3405,16 +3709,12 @@ export const makeProcessSessionRunner = (
 				input: T,
 				sinkId: string,
 				work: Effect.Effect<A, E, R>,
+				scope: SendScope,
 				accountId: string | undefined = input.account?.id,
 			): Effect.Effect<A, E | SessionFailure, R> {
-				return retainAccount(
-					sinkId,
-					accountId,
-					input.sessionId,
-					input.inputId,
-				).pipe(
+				return retainAccount(scope, sinkId, accountId).pipe(
 					Effect.andThen(() => {
-						const demand = accountDemands.get(sinkId);
+						const demand = accountDemands.get(scope);
 						return demand
 							? Effect.raceFirst(
 									work.pipe(
@@ -3449,39 +3749,32 @@ export const makeProcessSessionRunner = (
 								)
 							: work;
 					}),
-					Effect.onError(() =>
-						Effect.sync(() => {
-							const demand = accountDemands.get(sinkId);
-							if (demand && !Deferred.isDoneUnsafe(demand.dispatched))
-								Deferred.doneUnsafe(demand.finished, Effect.void);
-						}),
-					),
 				);
 			}
 
 			executeEffect(
 				command: Extract<SessionCommand, { type: "send-turn" }>,
+				send: SendScope,
 				recovered?: RunnerChild,
 			): Effect.Effect<TurnResult, SessionFailure>;
 			executeEffect(
 				command: Exclude<SessionCommand, { type: "send-turn" }>,
+				send?: SendScope,
 				recovered?: RunnerChild,
 			): Effect.Effect<void, SessionFailure>;
 			executeEffect(
 				command: SessionCommand,
+				send: SendScope,
 				recovered?: RunnerChild,
 			): Effect.Effect<TurnResult | undefined, SessionFailure>;
 			executeEffect(
 				command: SessionCommand,
+				send?: SendScope,
 				recovered?: RunnerChild,
 			): Effect.Effect<TurnResult | undefined, SessionFailure> {
-				const recoveredTurn =
-					command.type === "send-turn" && recovered
-						? sinks.get(command.sinkId)
-						: undefined;
-				const turn =
+				const turn: NonNullable<ReturnType<typeof sinks.get>> | undefined =
 					command.type === "send-turn"
-						? (recoveredTurn ?? {
+						? {
 								sessionId: command.input.sessionId,
 								inputId: command.input.inputId,
 								runId: command.input.runId,
@@ -3502,10 +3795,9 @@ export const makeProcessSessionRunner = (
 										}),
 								messageId: "",
 								runnerId: undefined,
-								pending: true,
+								commandPending: true,
 								accepted: false,
-								releaseRequested: false,
-							})
+							}
 						: undefined;
 				let child: RunnerChild | undefined;
 				let sentToRunner = false;
@@ -3514,6 +3806,17 @@ export const makeProcessSessionRunner = (
 				let ending: RunnerChild | undefined;
 				let cancelled: Deferred.Deferred<void> | undefined;
 				let pendingSend: ReturnType<typeof pendingSends.get>;
+				let unsentReleased = false;
+				const emitUnsent = (output: SessionOutput) =>
+					Effect.suspend(() => {
+						if (command.type !== "send-turn" || unsentReleased)
+							return Effect.succeed({});
+						const binding = sinks.get(command.sinkId);
+						if (binding && binding !== turn) return Effect.succeed({});
+						if (output.type !== "release-sink") return emit(output);
+						unsentReleased = true;
+						return Effect.succeed({});
+					});
 				const waitForAdmission =
 					command.type === "send-turn"
 						? makeSendAdmissionWait(
@@ -3535,14 +3838,24 @@ export const makeProcessSessionRunner = (
 								command.input.continuation?.cutOffMessageId ??
 								command.input.inputId,
 							cancelled,
+							dispatched: false,
 						};
-						pendingSends.set(command.sinkId, pendingSend);
+						if (turn?.sendScope)
+							yield* bindPending(turn.sendScope, command.sinkId, pendingSend);
 						sentToRunner = false;
 					}
 					const outputOwner = yield* currentRunnerOutput;
 					if (command.type === "abort") {
-						const pending = pendingSends.get(command.sinkId);
-						if (pending) {
+						if (!send) return;
+						if (
+							send &&
+							(send.assignment._tag === "Closed" ||
+								(sinks.has(command.sinkId) &&
+									sinks.get(command.sinkId)?.sendScope !== send))
+						)
+							return;
+						const pending = pendingSends.get(send);
+						if (pending && !pending.dispatched) {
 							yield* Deferred.succeed(pending.cancelled, undefined);
 							return;
 						}
@@ -3550,6 +3863,7 @@ export const makeProcessSessionRunner = (
 					if (command.type === "interrupt") {
 						for (const pending of pendingSends.values())
 							if (
+								!pending.dispatched &&
 								pending.sessionId === command.sessionId &&
 								(command.turnIds === undefined ||
 									command.turnIds.includes(pending.turnId))
@@ -3572,12 +3886,11 @@ export const makeProcessSessionRunner = (
 								: sinks.get(command.sinkId)?.sessionId;
 					if (!sessionId) return;
 					admittedSessionId = sessionId;
-					if (command.type === "send-turn")
+					if (command.type === "send-turn" && turn?.sendScope)
 						yield* retainAccount(
+							turn.sendScope,
 							command.sinkId,
 							command.input.account?.id,
-							sessionId,
-							command.input.inputId,
 						);
 					let entry: RunnerChild | undefined;
 					let draining = false;
@@ -3788,7 +4101,7 @@ export const makeProcessSessionRunner = (
 										command.type === "send-turn"
 									) {
 										turn.runnerId = existing.runnerId;
-										sinks.set(command.sinkId, turn);
+										yield* bindSink(command.sinkId, turn);
 									}
 									if (existing && !draining) {
 										transition(existing, { _tag: "AdmitCommand" });
@@ -3819,7 +4132,7 @@ export const makeProcessSessionRunner = (
 
 								if (turn && command.type === "send-turn") {
 									turn.runnerId = created.runnerId;
-									sinks.set(command.sinkId, turn);
+									yield* bindSink(command.sinkId, turn);
 								}
 								runFork(
 									start(sessionId, created).pipe(
@@ -3856,7 +4169,11 @@ export const makeProcessSessionRunner = (
 						if (selection.retire) {
 							const retiring = selection.retire;
 							yield* runner
-								.executeEffect({ type: "end-session", sessionId }, retiring)
+								.executeEffect(
+									{ type: "end-session", sessionId },
+									undefined,
+									retiring,
+								)
 								.pipe(
 									Effect.ensuring(
 										Effect.gen(function* () {
@@ -4036,7 +4353,7 @@ export const makeProcessSessionRunner = (
 						if (!(yield* cohortRunning)) return;
 						if (!recovered)
 							for (const pending of pendingSends.values())
-								if (pending.sessionId === sessionId)
+								if (!pending.dispatched && pending.sessionId === sessionId)
 									yield* Deferred.succeed(pending.cancelled, undefined);
 						// A native rejection can arrive after the reply deadline. Terminal
 						// facts already committed by this runner still forbid killing its
@@ -4106,7 +4423,8 @@ export const makeProcessSessionRunner = (
 							yield* retireSurvivor(entry, failure, commandId);
 						}
 						// Retirement already owns bounded settlement of this runner's cohort.
-						if (entry.authorityRecord?.tag._tag === "Retired") return;
+						if (authority.records.get(entry.runnerId)?.tag._tag === "Retired")
+							return;
 						yield* settlement.pipe(
 							Effect.mapError((cause) =>
 								runnerFailure("settle stopped runner", cause),
@@ -4114,13 +4432,10 @@ export const makeProcessSessionRunner = (
 						);
 						yield* entry.lifecycle.failure
 							? Deferred.await(entry.drained)
-							: withEntryOutput(
-									entry,
-									Effect.gen(function* () {
-										yield* evict(sessionId, entry);
-										yield* Deferred.succeed(entry.drained, undefined);
-									}),
-								);
+							: Effect.gen(function* () {
+									yield* evict(sessionId, entry);
+									yield* Deferred.succeed(entry.drained, undefined);
+								});
 						return;
 					}
 					if (
@@ -4136,14 +4451,27 @@ export const makeProcessSessionRunner = (
 						yield* Effect.never;
 					}
 					if (command.type === "send-turn") {
-						const pending = pendingSends.get(command.sinkId);
+						const pending = turn?.sendScope
+							? pendingSends.get(turn.sendScope)
+							: undefined;
 						if (pending && Deferred.isDoneUnsafe(pending.cancelled))
 							return CANCELLED_TURN;
-						pendingSends.delete(command.sinkId);
+						if (pending) pending.dispatched = true;
+					}
+					if (command.type === "send-turn" && turn?.sendScope) {
+						const demand = accountDemands.get(turn.sendScope);
+						if (
+							turn.sendScope.assignment._tag === "Closed" ||
+							(demand && Deferred.isDoneUnsafe(demand.invalidated))
+						)
+							return CANCELLED_TURN;
+						sendScopes.dispatch(turn.sendScope, entry.runnerId);
 					}
 					sentToRunner = true;
 					if (command.type === "send-turn") {
-						const demand = accountDemands.get(command.sinkId);
+						const demand = turn?.sendScope
+							? accountDemands.get(turn.sendScope)
+							: undefined;
 						if (demand)
 							Deferred.doneUnsafe(
 								demand.dispatched,
@@ -4166,13 +4494,22 @@ export const makeProcessSessionRunner = (
 									`${command.type === "resolve-question" ? "question" : "permission"}-request:${command.requestId}`,
 								)
 							: undefined;
-					const result = yield* connection.commandEffect(
+					if (
+						command.type === "abort" &&
+						send &&
+						(send.assignment._tag === "Closed" ||
+							(sinks.has(command.sinkId) &&
+								sinks.get(command.sinkId)?.sendScope !== send))
+					)
+						return;
+					const execution = connection.commandEffect(
 						commandId,
 						payload,
 						command.type === "send-turn"
 							? command.input.commandAttempt
 							: undefined,
 					);
+					const result = yield* execution;
 					// Legacy resolve commands acknowledge the answer without releasing
 					// canUseTool. Complete that handshake inside the outbox attempt, using
 					// its original reply rather than the runner's redacted notification.
@@ -4206,12 +4543,19 @@ export const makeProcessSessionRunner = (
 						}),
 					),
 					Effect.retry({
-						while: (failure) =>
-							(failure.code === "runner_idle_exit" ||
-								failure.code === "runner_recovery_abandoned") &&
-							turn !== undefined &&
-							!turn.accepted &&
-							!closing,
+						while: (failure) => {
+							const retry =
+								(failure.code === "runner_idle_exit" ||
+									failure.code === "runner_recovery_abandoned") &&
+								turn !== undefined &&
+								!turn.accepted &&
+								!closing;
+							if (retry && command.type === "send-turn" && turn && child) {
+								retryUnacceptedSend(turn, child.runnerId);
+								sentToRunner = false;
+							}
+							return retry;
+						},
 					}),
 					Effect.catchDefect((cause) =>
 						Effect.fail(runnerFailure(command.type, cause)),
@@ -4234,7 +4578,6 @@ export const makeProcessSessionRunner = (
 							return Effect.void;
 						if (
 							command.type !== "send-turn" ||
-							recovered ||
 							!turn ||
 							closing ||
 							child?.lifecycle.failure?.code === "runner_detached" ||
@@ -4244,20 +4587,23 @@ export const makeProcessSessionRunner = (
 						// Explicit End owns settlement after confirmed exit. A socket
 						// failure during its graceful phase is not a process terminal.
 						if (child?.lifecycle.end) return Deferred.await(child.stopped);
-						const cleanup = failRunnerTurn(
-							(output) => withEntryOutput(child, emit(output)),
-							command.sinkId,
-							turn,
-							runnerFailure(command.type, Failure.squashCause(cause)),
-							driver.driverKind,
-						).pipe(
-							Effect.ensuring(
-								withEntryOutput(
-									child,
-									Effect.sync(() => releaseSink(command.sinkId)),
-								),
-							),
+						const failure = runnerFailure(
+							command.type,
+							Failure.squashCause(cause),
 						);
+						const cleanup =
+							child && sentToRunner
+								? failBoundSend(command.sinkId, turn, child, failure)
+								: failSendOnce(
+										turn,
+										failRunnerTurn(
+											emitUnsent,
+											command.sinkId,
+											turn,
+											failure,
+											driver.driverKind,
+										),
+									);
 						return (
 							// Abandoned adoption preserves a runner that never received this send.
 							(
@@ -4271,47 +4617,18 @@ export const makeProcessSessionRunner = (
 							)
 						);
 					}),
-					Effect.onExit((exit) =>
+					Effect.onExit(() =>
 						Effect.gen(function* () {
-							if (
-								command.type === "send-turn" &&
-								!sentToRunner &&
-								!recoveredTurn
-							)
-								yield* withEntryOutput(
-									child,
-									Effect.sync(() => releaseSink(command.sinkId)),
-								);
 							const entry = child;
-							if (
-								!recoveredTurn &&
-								turn &&
-								command.type === "send-turn" &&
-								entry
-							)
+							if (turn && command.type === "send-turn" && entry && sentToRunner)
 								yield* entry.outputs.withPermits(1)(
 									Effect.gen(function* () {
-										turn.pending = false;
-										if (
-											turn.releaseRequested ||
-											entry.lifecycle.failure ||
-											(recovered && Exit.isFailure(exit))
-										) {
-											yield* withEntryOutput(
-												entry,
-												emit({
-													type: "release-sink",
-													sinkId: command.sinkId,
-												}),
-											);
-											yield* withEntryOutput(
-												entry,
-												Effect.sync(() => releaseSink(command.sinkId)),
-											);
-										}
+										yield* Effect.sync(() => {
+											turn.commandPending = false;
+										});
 									}),
 								);
-							else if (!recoveredTurn && turn) turn.pending = false;
+							else if (turn) turn.commandPending = false;
 							const released =
 								ending && transition(ending, { _tag: "FinishEnd" });
 							if (released) yield* Deferred.succeed(released, undefined);
@@ -4320,33 +4637,19 @@ export const makeProcessSessionRunner = (
 				);
 				if (command.type !== "send-turn") return execute;
 				return Effect.gen(function* () {
+					if (!send)
+						return yield* Effect.die(
+							"Send command requires its admitted handle",
+						);
+					if (turn && !turn.sendScope) turn.sendScope = send;
 					cancelled =
-						pendingSends.get(command.sinkId)?.cancelled ??
-						(yield* Deferred.make<void>());
+						(turn?.sendScope
+							? pendingSends.get(turn.sendScope)?.cancelled
+							: undefined) ?? (yield* Deferred.make<void>());
 					if (command.aborted) yield* Deferred.succeed(cancelled, undefined);
 					return yield* Effect.raceFirst(
 						Deferred.await(cancelled).pipe(Effect.as(CANCELLED_TURN)),
 						execute,
-					).pipe(
-						Effect.ensuring(
-							Effect.gen(function* () {
-								if (pendingSends.get(command.sinkId) === pendingSend)
-									pendingSends.delete(command.sinkId);
-								if (!sentToRunner && !recoveredTurn) {
-									yield* withEntryOutput(
-										child,
-										Effect.sync(() => releaseSink(command.sinkId)),
-									);
-									yield* withEntryOutput(
-										child,
-										emit({
-											type: "release-sink",
-											sinkId: command.sinkId,
-										}),
-									).pipe(Effect.ignore);
-								}
-							}),
-						),
 					);
 				});
 			}

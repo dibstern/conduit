@@ -30,16 +30,11 @@ import {
 	createEventId,
 } from "../../../src/lib/persistence/events.js";
 import {
-	runnerFailure,
-	runnerSinkId,
-} from "../../../src/lib/provider/runner/runner-protocol.js";
-import {
-	recoverRunnerCommands,
+	runningRunnerCommands,
 	settleUnclaimedRunnerCommands,
 } from "../../../src/lib/provider/runner/runner-recovery.js";
 import { failRunnerTurn } from "../../../src/lib/provider/runner/runner-turn-failure.js";
 import type {
-	DurableSessionTurn,
 	SessionFailure,
 	SessionOutput,
 	SessionOutputReply,
@@ -48,15 +43,13 @@ import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 
 // Failure modes: upgrade declares an executing runner idle, guessing a legacy
 // turn owner places old events, recovery loses the reserved run id, or a
-// migrated turn ignores its own recovery terminal;
-// a successful joined replay leaves its migrated reservation running forever.
+// migrated turn ignores its own recovery terminal.
 it.each([
 	"stopped",
 	"completed",
-	"joined",
 	"superseded",
 ] as const)("keeps a migrated executing run busy until its exact %s owned runner terminal", async (result) => {
-	const succeeded = result === "completed" || result === "joined";
+	const succeeded = result === "completed";
 	const root = mkdtempSync(join(tmpdir(), "legacy-run-upgrade-"));
 	const database = join(root, "events.db");
 	const proof = {
@@ -180,64 +173,38 @@ it.each([
 							)
 						: Effect.succeed({});
 				if (result !== "stopped") {
-					const recovered = yield* recoverRunnerCommands(
+					const commands = yield* runningRunnerCommands(
 						sql,
-						"legacy",
 						"claude",
-						{
-							driverForAccount: (account) =>
-								account === "claude" ? "claude" : undefined,
-							decodeInput: (row) =>
-								JSON.parse(row.payload_json) as DurableSessionTurn,
-							resolveSinkId: (commandId, _inputId, attempt) =>
-								runnerSinkId(commandId, attempt),
-							closing: () => false,
-							failTurn: () =>
-								Effect.die("Successful legacy replay must not fail"),
-							replay: (_row, input) =>
-								Effect.gen(function* () {
-									expect(input.runId).toBe(reservation?.id);
-									// The adapter supplies ownership before this ingestion seam.
-									// A superseded attempt has no current binding and stays unowned.
-									if (result === "superseded")
-										yield* sql`UPDATE provider_command_outbox SET attempt_count = 2 WHERE command_id = 'legacy-input'`.pipe(
-											Effect.mapError((cause) =>
-												runnerFailure("supersede fixture attempt", cause),
-											),
-										);
-									yield* emit({
-										type: "event",
-										sinkId: "legacy-input:1",
-										event: {
-											eventId: createEventId(),
-											...(result === "superseded"
-												? {}
-												: { runId: input.runId }),
-											type: "turn.completed",
-											providerId: "claude",
-											sessionId: "legacy",
-											providerRefs: {},
-											rawSource: { kind: "claude.sdk.translator" },
-											createdAt: 20,
-											data: { messageId: "", duration: 10 },
-										},
-									});
-									return {
-										status: result === "joined" ? "joined" : "completed",
-										cost: 0,
-										tokens: { input: 0, output: 0 },
-										durationMs: 10,
-										providerStateUpdates: [],
-									};
-								}),
-						},
+						(account) => (account === "claude" ? "claude" : undefined),
+						"legacy",
 					);
-					expect(recovered).toHaveLength(1);
-					const [command] = recovered;
+					expect(commands).toHaveLength(1);
+					const [command] = commands;
 					if (!command)
-						return yield* Effect.die("Missing recovered legacy command");
+						return yield* Effect.die("Missing retained legacy command");
+					expect(command.run_id).toBe(reservation?.id);
+					if (result === "superseded")
+						yield* sql`UPDATE provider_command_outbox SET attempt_count = 2 WHERE command_id = 'legacy-input'`;
+					// Retained native output keeps its admitted owner, unless superseded.
+					yield* emit({
+						type: "event",
+						sinkId: "legacy-input:1",
+						event: {
+							eventId: createEventId(),
+							...(result === "superseded"
+								? {}
+								: { runId: command.run_id ?? undefined }),
+							type: "turn.completed",
+							providerId: "claude",
+							sessionId: "legacy",
+							providerRefs: {},
+							rawSource: { kind: "claude.sdk.translator" },
+							createdAt: 20,
+							data: { messageId: "", duration: 10 },
+						},
+					});
 					if (result === "superseded") {
-						yield* command.wait;
 						expect(
 							yield* sql`SELECT status FROM provider_runs WHERE id = ${reservation?.id}`,
 						).toEqual([{ status: "running" }]);
@@ -250,7 +217,6 @@ it.each([
 						proof.outcome = "passed";
 						return;
 					}
-					yield* command.wait;
 					proof.recoveredTerminalLegacyTurn = true;
 				} else
 					yield* settleUnclaimedRunnerCommands(
@@ -318,7 +284,7 @@ it.each([
 				expect(handoffs).toEqual(["next-input"]);
 				proof.handoffsAfterRecovery = handoffs.length;
 				proof.outcome = "passed";
-			}),
+			}).pipe(Effect.scoped),
 		);
 	} finally {
 		await dispose?.();

@@ -37,6 +37,7 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
+import { makeRunnerAuthority } from "../../../src/lib/provider/runner/runner-authority.js";
 import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
@@ -452,6 +453,13 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 					const receipts = yield* makeRunnerReceiptStore(sql);
 					const runnerId = "workspace-race-runner";
 					const attachmentId = "workspace-race-attachment";
+					const authority = yield* makeRunnerAuthority(receipts);
+					const grant = (yield* authority.adopt(
+						[{ runnerId, sessionId }],
+						"live",
+					)).grants.get(runnerId);
+					if (!grant)
+						return yield* Effect.die("Missing adopted workspace runner grant");
 					yield* receipts.attach(runnerId, attachmentId);
 					const committed = yield* Deferred.make<void>();
 					const resolved = yield* Deferred.make<void>();
@@ -481,18 +489,22 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 							consumed: false,
 						};
 						const append = yield* Effect.forkChild(
-							ingestion
-								.ingestBatch([
-									providerRuntimeEvent("workspace.changed", sessionId, {
-										path: projectDir,
-										source: "tool",
-									}),
-									providerRuntimeEvent("session.status", sessionId, {
-										sessionId,
-										status: "busy",
-									}),
-								])
-								.pipe(Effect.provideService(currentRunnerOutput, receipt)),
+							authority.guarded(
+								grant,
+								{ kind: "output" },
+								ingestion
+									.ingestBatch([
+										providerRuntimeEvent("workspace.changed", sessionId, {
+											path: projectDir,
+											source: "tool",
+										}),
+										providerRuntimeEvent("session.status", sessionId, {
+											sessionId,
+											status: "busy",
+										}),
+									])
+									.pipe(Effect.provideService(currentRunnerOutput, receipt)),
+							),
 						);
 						yield* Deferred.await(resolved);
 						yield* applySessionCommand(

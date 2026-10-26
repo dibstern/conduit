@@ -9,6 +9,10 @@ import {
 	cursorAccountResourcesFixture,
 	cursorCredentialFixture,
 } from "../../helpers/cursor-account-resources-fixture.js";
+import {
+	admitRunnerCommand,
+	makeRunnerAdmission,
+} from "../../helpers/runner-provider-admission.js";
 
 const runLive =
 	process.env["RUN_CURSOR_LIVE_SMOKE"] === "1" &&
@@ -128,28 +132,27 @@ describe.skipIf(!runLive)("Cursor in-process runner live smoke", () => {
 											return {};
 										}),
 								);
+								const admission = yield* makeRunnerAdmission(runner, "cursor");
 								const sessionId = `cursor-live-${modelId}`;
-								const completed = yield* runner
-									.executeEffect({
-										type: "send-turn",
-										sinkId: `sink-${modelId}`,
-										aborted: false,
-										input: {
-											inputId: `input-${modelId}`,
-											sessionId,
-											prompt:
-												"Do not call tools or create subagents. Think briefly about 17 times 19, then reply with exactly CURSOR_LIVE_SMOKE_OK.",
-											history: [],
-											providerState: {
-												"cursor.modelParams": model.params ?? [],
-											},
-											workspaceRoot,
-											extraFolders: [],
-											permissionMode: "full",
-											model: { providerId: "cursor", modelId },
+								const completed = yield* admitRunnerCommand(admission, runner, {
+									type: "send-turn",
+									sinkId: `sink-${modelId}`,
+									aborted: false,
+									input: {
+										inputId: `input-${modelId}`,
+										sessionId,
+										prompt:
+											"Do not call tools or create subagents. Think briefly about 17 times 19, then reply with exactly CURSOR_LIVE_SMOKE_OK.",
+										history: [],
+										providerState: {
+											"cursor.modelParams": model.params ?? [],
 										},
-									})
-									.pipe(Effect.timeout("100 seconds"));
+										workspaceRoot,
+										extraFolders: [],
+										permissionMode: "full",
+										model: { providerId: "cursor", modelId },
+									},
+								}).pipe(Effect.timeout("100 seconds"));
 								yield* runner.executeEffect({ type: "end-session", sessionId });
 								return completed;
 							}),
@@ -312,6 +315,7 @@ async function recordModelSelections(scenario: "parameter-change" | "reroute") {
 								return {};
 							}),
 					);
+					const admission = yield* makeRunnerAdmission(runner, "cursor");
 					const sessionId = `cursor-live-${scenario}`;
 					const selections: Array<{
 						variant?: string;
@@ -380,14 +384,12 @@ async function recordModelSelections(scenario: "parameter-change" | "reroute") {
 							scenario === "parameter-change"
 								? yield* driver.prepareTurnEffect(input)
 								: { input };
-						const result = yield* runner
-							.executeEffect({
-								type: "send-turn",
-								sinkId: `sink-${scenario}-${index}`,
-								aborted: false,
-								...prepared,
-							})
-							.pipe(Effect.timeout("110 seconds"));
+						const result = yield* admitRunnerCommand(admission, runner, {
+							type: "send-turn",
+							sinkId: `sink-${scenario}-${index}`,
+							aborted: false,
+							...prepared,
+						}).pipe(Effect.timeout("110 seconds"));
 						const rows = readFileSync(tracePath, "utf8")
 							.trim()
 							.split("\n")

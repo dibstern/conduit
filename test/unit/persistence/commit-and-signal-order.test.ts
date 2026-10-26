@@ -1,18 +1,23 @@
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
-import { SqlClient } from "effect/sql";
+import { SqlClient, Statement } from "effect/sql";
 import { expect, vi } from "vitest";
 import {
 	type SessionEventBus,
 	SessionEventBusLive,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import {
+	flushPendingWrites,
+	makeCommitAndSignal,
+	queuePendingWrite,
+} from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { makeRunnerAuthority } from "../../../src/lib/provider/runner/runner-authority.js";
 
 const testLayer = Layer.merge(
 	makePersistenceEffectLayer(
@@ -32,6 +37,125 @@ const created = (sessionId: string) =>
 	});
 
 describe("commit advance ordering", () => {
+	it.effect(
+		"S7round2 flushes maintenance queued while the input invariant reads before committing",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const write = yield* makeCommitAndSignal;
+				yield* sql`CREATE TABLE late_commit_maintenance (value TEXT)`;
+				const entered = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				let gated = false;
+				const committed = vi.fn();
+				const writing = yield* write
+					.write(() => Effect.void)
+					.pipe(
+						Effect.provideService(Statement.CurrentTransformer, (statement) => {
+							if (
+								gated ||
+								!statement.compile()[0].includes("FROM pending_inputs pending")
+							)
+								return Effect.succeed(statement);
+							gated = true;
+							return Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Deferred.await(release)),
+								Effect.as(statement),
+							);
+						}),
+						Effect.forkChild,
+					);
+				yield* Deferred.await(entered);
+				queuePendingWrite(sql, "during-input-invariant", {
+					apply:
+						sql`INSERT INTO late_commit_maintenance VALUES ('committed')`.pipe(
+							Effect.asVoid,
+						),
+					committed,
+				});
+				yield* Deferred.succeed(release, undefined);
+				yield* Fiber.join(writing);
+				expect(yield* sql`SELECT value FROM late_commit_maintenance`).toEqual([
+					{ value: "committed" },
+				]);
+				expect(committed).toHaveBeenCalledTimes(1);
+				yield* flushPendingWrites(sql);
+				expect(yield* sql`SELECT value FROM late_commit_maintenance`).toEqual([
+					{ value: "committed" },
+				]);
+				expect(committed).toHaveBeenCalledTimes(1);
+			}).pipe(Effect.provide(testLayer)),
+	);
+
+	it.live(
+		"does not flush a superseded grant's queued write after replacement",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const authority = yield* makeRunnerAuthority();
+				const old = (yield* authority.adopt(
+					[{ runnerId: "old", sessionId: "session", registeredAt: 1 }],
+					"live",
+				)).grants.get("old");
+				if (!old) return yield* Effect.die("missing old grant");
+				yield* sql`CREATE TABLE queued_runner_writes (value TEXT)`;
+				const entered = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				const committed: string[] = [];
+				queuePendingWrite(sql, "blocker", {
+					apply: Deferred.succeed(entered, undefined).pipe(
+						Effect.andThen(Deferred.await(release)),
+					),
+				});
+				queuePendingWrite(sql, "runner-write", {
+					apply: authority
+						.guarded(
+							old,
+							{ kind: "evidence" },
+							sql`INSERT INTO queued_runner_writes VALUES ('old')`,
+						)
+						.pipe(Effect.asVoid),
+					committed: () => committed.push("old"),
+				});
+				const flushing = yield* flushPendingWrites(sql).pipe(Effect.forkChild);
+				yield* Deferred.await(entered);
+				const fresh = (yield* authority.adopt(
+					[
+						{
+							runnerId: "fresh",
+							sessionId: "session",
+							registeredAt: 2,
+							entry: {},
+						},
+					],
+					"live",
+				)).grants.get("fresh");
+				if (!fresh) return yield* Effect.die("missing fresh grant");
+				expect(authority.records.get("old")?.tag).toEqual({
+					_tag: "Exiting",
+					reason: "superseded",
+				});
+				queuePendingWrite(sql, "runner-write", {
+					apply: authority
+						.guarded(
+							fresh,
+							{ kind: "evidence" },
+							sql`INSERT INTO queued_runner_writes VALUES ('fresh')`,
+						)
+						.pipe(Effect.asVoid),
+					committed: () => committed.push("fresh"),
+				});
+				yield* Deferred.succeed(release, undefined);
+				yield* Fiber.join(flushing);
+				expect(yield* sql`SELECT value FROM queued_runner_writes`).toEqual([
+					{ value: "fresh" },
+				]);
+				expect(committed).toEqual(["fresh"]);
+				yield* flushPendingWrites(sql);
+				expect(committed).toEqual(["fresh"]);
+			}).pipe(Effect.provide(testLayer)),
+	);
+
 	it.effect(
 		"publishes only committed run transitions despite rollback and a reused report",
 		() =>

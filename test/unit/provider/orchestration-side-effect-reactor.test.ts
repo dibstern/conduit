@@ -2160,10 +2160,8 @@ describe("ProviderSideEffectReactor", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* seedSendTurnOutbox(sql, { runId: "reserved-run" });
 
-				const ingest = vi.fn(() => Effect.succeed(1));
 				const reactor = yield* makeReactor({
 					registry: new ProviderRegistry(),
-					observe: ingest,
 				});
 
 				yield* reactor.runOnce();
@@ -2183,14 +2181,21 @@ describe("ProviderSideEffectReactor", () => {
 					attempt_count: 1,
 					error_code: "provider_not_registered",
 				});
-				expect(ingest).toHaveBeenCalledWith(
-					expect.objectContaining({
+				expect(
+					yield* sql`SELECT type, session_id,
+					json_extract(metadata, '$.runId') AS run_id,
+					json_extract(data, '$.code') AS code FROM events WHERE type = 'turn.error'`,
+				).toEqual([
+					{
 						type: "turn.error",
-						runId: "reserved-run",
-						sessionId: "session-1",
-						data: expect.objectContaining({ code: "provider_not_registered" }),
-					}),
-				);
+						session_id: "session-1",
+						run_id: "reserved-run",
+						code: "provider_not_registered",
+					},
+				]);
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE id = 'reserved-run'`,
+				).toEqual([{ status: "error" }]);
 			}).pipe(Effect.provide(reactorTestLayer)),
 	);
 

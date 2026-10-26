@@ -15,6 +15,7 @@ import {
 	PermissionAskedDetailsSchema,
 	type PermissionDecision,
 	QuestionAskedDetailsSchema,
+	RunnerWriteOrigin,
 	SESSION_PERMISSION_MODES,
 	type SessionCreatedPayload,
 	SessionGoalChangedPayloadSchema,
@@ -825,6 +826,9 @@ function eventMetadata(event: ProviderRuntimeEvent): EventMetadata {
 			: undefined;
 	return {
 		...runtimeMetadata(event.metadata),
+		...(event[RunnerWriteOrigin]
+			? { [RunnerWriteOrigin]: event[RunnerWriteOrigin] }
+			: {}),
 		...(event.providerId === "codex"
 			? {
 					providerRefs: Object.fromEntries(

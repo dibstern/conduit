@@ -721,7 +721,36 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 			});
 	});
 
-/** One gate for normal delivery and restart recovery; the fresh send is terminal. */
+/** The caller owns the transaction, including requeue after a recovered rejection. */
+export const recordClaudeNativeResumeFallback = (
+	sql: SqlClient.SqlClient,
+	input: {
+		readonly sessionId: string;
+		readonly instanceId: string;
+		readonly commandId?: string | undefined;
+		readonly requestSequence?: number | undefined;
+		readonly attempt?: number | undefined;
+		readonly forkRefused?: boolean | undefined;
+	},
+) =>
+	Effect.gen(function* () {
+		// Keep other accounts' receipts and any held catch-up intact.
+		yield* sql`DELETE FROM provider_state WHERE session_id = ${input.sessionId}
+			AND key IN (${nativeThreadKey(input.instanceId)}, 'resumeSessionId', 'claudeConfigDir')`;
+		if (input.forkRefused)
+			yield* sql`INSERT INTO provider_state (session_id, key, value)
+				VALUES (${input.sessionId}, ${`claude.forkRefused:${input.instanceId}`}, 'true')
+				ON CONFLICT (session_id, key) DO UPDATE SET value = excluded.value`;
+		if (input.commandId)
+			yield* sql`UPDATE provider_command_outbox
+				SET payload_json = json_set(payload_json, '$.nativeResumeFallback', json('true'))
+				WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
+					AND (${input.requestSequence ?? null} IS NULL OR request_sequence = ${input.requestSequence ?? null})
+					AND (${input.attempt ?? null} IS NULL OR attempt_count = ${input.attempt ?? null})
+					AND status = 'running'`;
+	});
+
+/** One gate for normal delivery; the fresh send is terminal. */
 export const sendPreparedClaudeTurn = <
 	A extends TurnResult | undefined,
 	E,
@@ -785,20 +814,11 @@ export const sendPreparedClaudeTurn = <
 		// Keep other accounts' receipts intact. The marker also gives this one
 		// fallback its own runner deduplication key, including after a restart.
 		yield* sql.withTransaction(
-			Effect.gen(function* () {
-				yield* sql`DELETE FROM provider_state WHERE session_id = ${input.sessionId}
-				AND key IN (${nativeThreadKey(input.instanceId)}, 'resumeSessionId', 'claudeConfigDir')`;
-				if (prepared.clearInheritedGoal || prepared.forkSession) {
-					const state = yield* ProviderStateEffectTag;
-					yield* state.saveUpdates(input.sessionId, [
-						{ key: `claude.forkRefused:${input.instanceId}`, value: "true" },
-					]);
-				}
-				if (input.commandId)
-					yield* sql`UPDATE provider_command_outbox
-					SET payload_json = json_set(payload_json, '$.nativeResumeFallback', json('true'))
-					WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
-						AND status = 'running'`;
+			recordClaudeNativeResumeFallback(sql, {
+				sessionId: input.sessionId,
+				instanceId: input.instanceId,
+				commandId: input.commandId,
+				forkRefused: prepared.clearInheritedGoal || prepared.forkSession,
 			}),
 		);
 		const prepareFresh = yield* makePrepareTurn({

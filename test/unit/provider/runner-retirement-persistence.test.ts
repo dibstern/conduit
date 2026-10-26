@@ -12,15 +12,14 @@ import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
-	currentCommitGuard,
 	flushRunnerRetirements,
 	hasPendingRunnerRetirement,
-	makeCommitAndSignal,
+	makeRunnerReceiptStore,
 	queueRunnerRetirement,
-} from "../../../src/lib/persistence/effect/commit-and-signal.js";
-import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
+} from "../../../src/lib/provider/runner/runner-receipts.js";
 
 const testLayer = Layer.merge(
 	makePersistenceEffectLayer(
@@ -170,7 +169,7 @@ it.effect(
 );
 
 it.effect(
-	"flushes after the retained f4 commit guard and isolates SQL clients",
+	"flushes writes queued in the final hook and isolates SQL clients",
 	() =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -186,14 +185,9 @@ it.effect(
 				expect(yield* otherReceipts.retirements()).toEqual([]);
 			}).pipe(Effect.provide(testLayer, { local: true }));
 			expect(yield* receipts.retirements()).toEqual([]);
-			yield* writer
-				.write(() => Effect.void)
-				.pipe(
-					Effect.provideService(
-						currentCommitGuard,
-						Effect.sync(() => queueRunnerRetirement(sql, retirement)),
-					),
-				);
+			yield* writer.write(() => Effect.void, {
+				beforeCommit: Effect.sync(() => queueRunnerRetirement(sql, retirement)),
+			});
 			expect(yield* receipts.retirements()).toEqual([retirement]);
 		}).pipe(Effect.provide(testLayer)),
 );

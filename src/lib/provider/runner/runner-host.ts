@@ -21,11 +21,11 @@ import { RunnerSendJournal } from "./runner-send-journal.js";
 import { RunnerSpool } from "./runner-spool.js";
 import type { RunnerUpgradeState } from "./runner-upgrade.js";
 import type {
+	NativeSessionRunner,
 	SessionCommand,
 	SessionFailure,
 	SessionOutput,
 	SessionOutputReply,
-	SessionRunner,
 } from "./session-runner.js";
 
 export interface RunnerLaunchCallbacks {
@@ -61,14 +61,14 @@ export interface RunnerLaunch {
 		emit: (
 			output: SessionOutput,
 		) => Effect.Effect<SessionOutputReply, SessionFailure>,
-	) => Effect.Effect<SessionRunner, never, Scope.Scope>;
+	) => Effect.Effect<NativeSessionRunner, never, Scope.Scope>;
 	readonly upgradeState: () => Omit<
 		RunnerUpgradeState,
 		"quiescent" | "turnInFlight" | "revision"
 	>;
 	readonly acceptCommand: (command: SessionCommand) => void;
 	readonly executeEffect: (
-		runner: SessionRunner,
+		runner: NativeSessionRunner,
 		command: SessionCommand,
 	) => Effect.Effect<TurnResult | undefined, SessionFailure>;
 }
@@ -134,7 +134,7 @@ export const runSessionRunner = (
 				),
 			);
 		}
-		let runner: SessionRunner | undefined;
+		let runner: NativeSessionRunner | undefined;
 		let sendJournal: RunnerSendJournal | undefined;
 		let initializing = false;
 		let helloCount = 0;
@@ -245,7 +245,13 @@ export const runSessionRunner = (
 		>();
 		const completedCommands = new Map<
 			string,
-			{ commandId: string; result?: TurnResult; failure?: SessionFailure }
+			{
+				commandId: string;
+				attempt: number;
+				nativeResumeFallback?: boolean;
+				result?: TurnResult;
+				failure?: SessionFailure;
+			}
 		>();
 		const server = createServer((socket) => {
 			if (connection) {
@@ -416,6 +422,9 @@ export const runSessionRunner = (
 										...(binding.commandId
 											? { commandId: binding.commandId }
 											: {}),
+										...(binding.attempt !== undefined
+											? { attempt: binding.attempt }
+											: {}),
 										...(process.env["NODE_ENV"] === "test" &&
 										process.env[
 											"CONDUIT_TEST_RUNNER_HELLO_WITHOUT_BINDING_RELEASE_STATE"
@@ -425,6 +434,9 @@ export const runSessionRunner = (
 									})),
 									pendingOutputs: spool.pendingOutputs,
 									completedCommands: [...completedCommands.values()],
+									crossAttemptNativeResumeFallback: true,
+									sendJournalAnswers: true,
+									sendAnswers: sendJournal?.answers ?? [],
 									sendCommands: sendJournal?.commands ?? [],
 									upgradeState: upgradeState(),
 									...launch.capabilities,
@@ -542,7 +554,8 @@ export const runSessionRunner = (
 										);
 									while (existsSync(gate)) yield* Effect.sleep("20 millis");
 								}
-								const completed = completedCommands.get(message.commandId);
+								const commandKey = `${message.commandId}:${message.attempt ?? 0}`;
+								const completed = completedCommands.get(commandKey);
 								peer.write({
 									type: "command-status-reply",
 									requestId: message.requestId,
@@ -550,7 +563,8 @@ export const runSessionRunner = (
 										? completed.failure
 											? "failed"
 											: "completed"
-										: commands.has(`${message.commandId}:0`)
+										: commands.has(commandKey) ||
+												commands.has(`${commandKey}:native-resume-fallback`)
 											? "running"
 											: "not_received",
 								});
@@ -562,6 +576,13 @@ export const runSessionRunner = (
 							peer.write({
 								type: "command-reply",
 								commandId: message.commandId,
+								attempt: message.attempt ?? 0,
+								...(command.type === "send-turn"
+									? {
+											nativeResumeFallback:
+												command.input.nativeResumeFallback === true,
+										}
+									: {}),
 								failure: runnerIdleFailure(),
 							});
 							return;
@@ -577,6 +598,7 @@ export const runSessionRunner = (
 							peer.write({
 								type: "command-accepted",
 								commandId: message.commandId,
+								attempt: message.attempt ?? 0,
 								sinkId: command.sinkId,
 							});
 							idle?.beginTurn(command.autoSettleAfterDays);
@@ -612,6 +634,10 @@ export const runSessionRunner = (
 							Effect.gen(function* () {
 								const existing = commands.get(deduplicationKey);
 								if (existing) return yield* Deferred.await(existing);
+								// A native-resume fallback replaces the primary reply within this attempt.
+								completedCommands.delete(
+									`${message.commandId}:${message.attempt ?? 0}`,
+								);
 								const result = yield* Deferred.make<
 									TurnResult | undefined,
 									SessionFailure
@@ -664,16 +690,33 @@ export const runSessionRunner = (
 												while (existsSync(gate))
 													yield* Effect.sleep("20 millis");
 											}
-											completedCommands.set(message.commandId, {
-												commandId: message.commandId,
-												failure: runnerFailure(
-													command.type,
-													Failure.squashCause(cause),
-												),
-											});
+											completedCommands.set(
+												`${message.commandId}:${message.attempt ?? 0}`,
+												{
+													commandId: message.commandId,
+													attempt: message.attempt ?? 0,
+													...(command.type === "send-turn"
+														? {
+																nativeResumeFallback:
+																	command.input.nativeResumeFallback === true,
+															}
+														: {}),
+													failure: runnerFailure(
+														command.type,
+														Failure.squashCause(cause),
+													),
+												},
+											);
 											connection?.write({
 												type: "command-reply",
 												commandId: message.commandId,
+												attempt: message.attempt ?? 0,
+												...(command.type === "send-turn"
+													? {
+															nativeResumeFallback:
+																command.input.nativeResumeFallback === true,
+														}
+													: {}),
 												failure: runnerFailure(
 													command.type,
 													Failure.squashCause(cause),
@@ -691,10 +734,20 @@ export const runSessionRunner = (
 												yield* spool
 													.drainEffect()
 													.pipe(Effect.timeout("500 millis"), Effect.ignore);
-											completedCommands.set(message.commandId, {
-												commandId: message.commandId,
-												...(result ? { result } : {}),
-											});
+											completedCommands.set(
+												`${message.commandId}:${message.attempt ?? 0}`,
+												{
+													commandId: message.commandId,
+													attempt: message.attempt ?? 0,
+													...(command.type === "send-turn"
+														? {
+																nativeResumeFallback:
+																	command.input.nativeResumeFallback === true,
+															}
+														: {}),
+													...(result ? { result } : {}),
+												},
+											);
 											if (
 												process.env["NODE_ENV"] === "test" &&
 												(command.type === "resolve-permission" ||
@@ -718,6 +771,13 @@ export const runSessionRunner = (
 											connection?.write({
 												type: "command-reply",
 												commandId: message.commandId,
+												attempt: message.attempt ?? 0,
+												...(command.type === "send-turn"
+													? {
+															nativeResumeFallback:
+																command.input.nativeResumeFallback === true,
+														}
+													: {}),
 												...(result ? { result } : {}),
 											});
 											if (

@@ -25,6 +25,10 @@ import {
 	makeErrorResult,
 	makeSuccessResult,
 } from "../../../helpers/mock-sdk.js";
+import {
+	admitRunnerCommand,
+	makeRunnerAdmission,
+} from "../../../helpers/runner-provider-admission.js";
 
 function roundTrip<T>(message: T): T {
 	return JSON.parse(JSON.stringify(message));
@@ -229,10 +233,11 @@ describe("in-process Claude session runner", () => {
 						},
 						() => Effect.succeed({}),
 					);
+					const admission = yield* makeRunnerAdmission(runner, "claude");
 					if (!runner.getNativeSessionEffect)
 						throw new Error("Missing native session lookup");
 					const first = send("turn-1");
-					yield* runner.executeEffect({
+					yield* admitRunnerCommand(admission, runner, {
 						...first,
 						input: { ...first.input, shellConfig: { interactive: false } },
 					});
@@ -244,7 +249,10 @@ describe("in-process Claude session runner", () => {
 					};
 					backgroundBusy = true;
 					expect(
-						(yield* runner.executeEffect({ ...deferred, input })).status,
+						(yield* admitRunnerCommand(admission, runner, {
+							...deferred,
+							input,
+						})).status,
 					).toBe("completed");
 					expect(launches).toEqual([
 						{
@@ -260,7 +268,7 @@ describe("in-process Claude session runner", () => {
 					});
 					backgroundBusy = false;
 					expect(
-						(yield* runner.executeEffect({
+						(yield* admitRunnerCommand(admission, runner, {
 							...send("turn-3"),
 							input: { ...input, inputId: "turn-3", prompt: "turn-3" },
 						})).status,
@@ -354,8 +362,13 @@ describe("in-process Claude session runner", () => {
 							return {};
 						}),
 					);
+					const admission = yield* makeRunnerAdmission(runner, "claude");
 					expect(
-						(yield* runner.executeEffect(roundTrip(send("turn-1")))).status,
+						(yield* admitRunnerCommand(
+							admission,
+							runner,
+							roundTrip(send("turn-1")),
+						)).status,
 					).toBe("completed");
 					yield* Effect.promise(() =>
 						vi.waitFor(() => {
@@ -508,8 +521,9 @@ describe("in-process Claude session runner", () => {
 								return {};
 							}),
 					);
+					const admission = yield* makeRunnerAdmission(runner, "claude");
 					const first = yield* Effect.forkChild(
-						runner.executeEffect(roundTrip(send("turn-1"))),
+						admitRunnerCommand(admission, runner, roundTrip(send("turn-1"))),
 					);
 					const request = yield* Deferred.await(approval);
 					expect(request.request.toolName).toBe("Bash");
@@ -541,7 +555,7 @@ describe("in-process Claude session runner", () => {
 					});
 
 					const second = yield* Effect.forkChild(
-						runner.executeEffect(roundTrip(send("turn-2"))),
+						admitRunnerCommand(admission, runner, roundTrip(send("turn-2"))),
 					);
 					yield* Deferred.await(secondTurn);
 					yield* runner.executeEffect(
@@ -603,8 +617,9 @@ describe("in-process Claude session runner", () => {
 								? Deferred.succeed(shutdown, undefined).pipe(Effect.as({}))
 								: Effect.succeed({}),
 					);
+					const admission = yield* makeRunnerAdmission(runner, "claude");
 					const turn = yield* Effect.forkChild(
-						runner.executeEffect(send("turn-1")),
+						admitRunnerCommand(admission, runner, send("turn-1")),
 					);
 					yield* Deferred.await(started);
 					yield* runner.executeEffect({

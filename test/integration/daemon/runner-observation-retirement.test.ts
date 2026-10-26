@@ -134,7 +134,6 @@ it("retries an unperformed prompt retirement and caches a successful zero result
 							},
 							snapshotCommandSettings: () => ({}),
 							loginChange: () => "None",
-							recoverCommands: () => Effect.succeed([]),
 						},
 					);
 					const detach = runner.detachSessionEffect?.bind(runner);

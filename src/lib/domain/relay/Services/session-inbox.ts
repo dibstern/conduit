@@ -43,8 +43,8 @@ import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
 } from "../../../persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
-import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { inboxRunStatusQuery } from "../../../persistence/inbox-run-status-query.js";
@@ -425,6 +425,7 @@ export const SessionInboxLive = Layer.effect(
 		const eventStore = yield* EventStoreEffectTag;
 		const read = yield* ReadQueryEffectTag;
 		const persist = yield* ClaudeEventPersistEffectTag;
+		const commitAndSignal = yield* makeCommitAndSignal;
 		const drafts = yield* InputDraftsTag;
 		const providerTurnService = yield* ProviderTurnServiceTag;
 		const registry = Option.getOrUndefined(
@@ -837,11 +838,13 @@ export const SessionInboxLive = Layer.effect(
 		yield* Effect.forkScoped(
 			Deferred.await(ready).pipe(
 				Effect.andThen(
-					requeueFailedSteers(sql, persist).pipe(
-						Effect.catchCause((cause) =>
-							Effect.sync(() => log.warn(`inbox recovery failed: ${cause}`)),
+					commitAndSignal
+						.write(() => Effect.void)
+						.pipe(
+							Effect.catchCause((cause) =>
+								Effect.sync(() => log.warn(`inbox recovery failed: ${cause}`)),
+							),
 						),
-					),
 				),
 				Effect.andThen(drainSessions()),
 				Effect.andThen(

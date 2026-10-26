@@ -73,7 +73,7 @@ export const makeCursorRunnerLaunch = (
 						});
 					credentials.set(command.input.inputId, command.cursorCredential);
 				}
-				const result = yield* runner.executeEffect(command);
+				const result = yield* runner.executeNativeEffect(command);
 				resumeSessionId =
 					(yield* runner.getResumeSessionIdEffect?.(callbacks.sessionId) ??
 						Effect.succeed(undefined)) ?? undefined;

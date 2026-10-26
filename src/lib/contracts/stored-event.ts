@@ -249,9 +249,14 @@ export type QuestionAskedPayload = PayloadOf<"question.asked">;
 
 export type QuestionResolvedPayload = PayloadOf<"question.resolved">;
 
+/** Ephemeral attribution survives object spreads and is omitted from stored JSON. */
+export const RunnerWriteOrigin = Symbol("RunnerWriteOrigin");
+
 export interface EventMetadata {
 	/** Conduit run ownership; only this run's terminal event can settle its turns. */
 	readonly runId?: string;
+	/** Runner origin survives a detached write losing its authority context. */
+	readonly [RunnerWriteOrigin]?: string;
 	readonly commandId?: string;
 	readonly causationEventId?: string;
 	readonly correlationId?: string;

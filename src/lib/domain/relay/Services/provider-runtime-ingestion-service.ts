@@ -1,28 +1,22 @@
-import {
-	Context,
-	Deferred,
-	Effect,
-	Layer,
-	Ref,
-	Schema,
-	Semaphore,
-} from "effect";
+import { Context, Deferred, Effect, Layer, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { sessionCreatedLineage } from "../../../contracts/session-ref.js";
+import { RunnerWriteOrigin } from "../../../contracts/stored-event.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { makeAppendEventsWithClaudeTurnCosts } from "../../../persistence/effect/claude-event-persist-effect.js";
 import {
 	type CommitAndSignalProject,
+	currentRunnerWriteOrigin,
+	guardCurrentWrite,
 	makeCommitAndSignal,
 } from "../../../persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
 	type EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
-import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { readPendingRewindCommit } from "../../../persistence/effect/pending-rewind.js";
 import type {
 	ProjectionRunnerEffectTag,
@@ -170,9 +164,7 @@ export const makeProviderRuntimeIngestionLive = (
 			const services = yield* Effect.context<
 				EventStoreEffectTag | ProjectionRunnerEffectTag | SqlClient.SqlClient
 			>();
-			const mapperStateRef = yield* Ref.make(
-				emptyProviderRuntimeDomainMapperState,
-			);
+			let mapperState = emptyProviderRuntimeDomainMapperState;
 			const ingestSemaphore = yield* Semaphore.make(1);
 
 			const ingestBatch = (
@@ -216,11 +208,21 @@ export const makeProviderRuntimeIngestionLive = (
 					return yield* ingestSemaphore.withPermits(1)(
 						Effect.gen(function* () {
 							const context = yield* currentRunnerOutput;
+							const attributedRunnerId = events
+								.map((event) => event[RunnerWriteOrigin])
+								.find((id): id is string => typeof id === "string");
+							const runnerId =
+								attributedRunnerId ??
+								context?.runnerId ??
+								(events.some((event) =>
+									event.rawSource.kind.startsWith("runner."),
+								)
+									? ((yield* currentRunnerWriteOrigin) ?? "unidentified-runner")
+									: undefined);
 							const permissionReply = yield* currentRunnerPermissionReply;
 							const receipt =
 								context && !context.consumed ? context : undefined;
-							const currentState = yield* Ref.get(mapperStateRef);
-							let nextState = currentState;
+							let nextState = mapperState;
 							let domainEvents: CanonicalEvent[] = [];
 							const promptIds: string[] = [];
 							const seedableSessions = new Set(
@@ -394,64 +396,82 @@ export const makeProviderRuntimeIngestionLive = (
 												);
 												continue;
 											}
-											yield* options.pendingInteractions.recordQuestionRequest({
-												requestId: event.data.id,
-												sessionId: event.sessionId ?? event.data.sessionId,
-												delivery: "async",
-												questions: questions.value,
-												...(event.data.providerProcessId
-													? { providerProcessId: event.data.providerProcessId }
-													: {}),
-												...(event.data.providerRequestId
-													? { providerRequestId: event.data.providerRequestId }
-													: {}),
-												...(event.data.providerId
-													? { providerId: event.data.providerId }
-													: {}),
-												...(event.data.toolUseId
-													? { toolCallId: event.data.toolUseId }
-													: {}),
-												...(event.data.messageId
-													? { messageId: event.data.messageId }
-													: {}),
-												...(event.data.partId
-													? { partId: event.data.partId }
-													: {}),
-											});
+											yield* guardCurrentWrite(
+												options.pendingInteractions.recordQuestionRequest({
+													requestId: event.data.id,
+													sessionId: event.sessionId ?? event.data.sessionId,
+													delivery: "async",
+													questions: questions.value,
+													...(event.data.providerProcessId
+														? {
+																providerProcessId: event.data.providerProcessId,
+															}
+														: {}),
+													...(event.data.providerRequestId
+														? {
+																providerRequestId: event.data.providerRequestId,
+															}
+														: {}),
+													...(event.data.providerId
+														? { providerId: event.data.providerId }
+														: {}),
+													...(event.data.toolUseId
+														? { toolCallId: event.data.toolUseId }
+														: {}),
+													...(event.data.messageId
+														? { messageId: event.data.messageId }
+														: {}),
+													...(event.data.partId
+														? { partId: event.data.partId }
+														: {}),
+												}),
+											);
 										}
 									}
 									for (const id of draftsToForget)
-										yield* drafts
-											.forget(id)
-											.pipe(
-												Effect.catch((cause) =>
-													Effect.logError(
-														`Could not forget input draft ${id}: ${cause}`,
+										yield* guardCurrentWrite(
+											drafts
+												.forget(id)
+												.pipe(
+													Effect.catch((cause) =>
+														Effect.logError(
+															`Could not forget input draft ${id}: ${cause}`,
+														),
 													),
 												),
-											);
-									yield* Ref.set(mapperStateRef, nextState);
+										);
+									yield* guardCurrentWrite(() => {
+										mapperState = nextState;
+									});
 									for (const id of promptIds)
-										yield* ingestOptions.onPrompt?.(id) ?? Effect.void;
+										yield* guardCurrentWrite(
+											ingestOptions.onPrompt?.(id) ?? Effect.void,
+										);
 									if (options.usage)
 										for (const accountId of completedAccounts)
-											yield* options.usage.turnEnded(accountId);
+											yield* guardCurrentWrite(
+												options.usage.turnEnded(accountId),
+											);
 									for (const sessionId of acceptedLimits)
-										yield* continuation.queueLimitPolicy(sessionId);
-									yield* ingestOptions.afterCommit ?? Effect.void;
+										yield* guardCurrentWrite(
+											continuation.queueLimitPolicy(sessionId),
+										);
+									yield* guardCurrentWrite(
+										ingestOptions.afterCommit ?? Effect.void,
+									);
 								}
 								if (receipt) {
 									receipt.consumed = true;
 									yield* Deferred.succeed(receipt.committed, undefined);
-									if (appended) receipt.onCommitted?.();
+									if (appended)
+										yield* guardCurrentWrite(() => receipt.onCommitted?.());
 								}
 							});
 							const commitOptions = {
-								beforeCommit: Effect.gen(function* () {
-									yield* ingestOptions.beforeCommit ?? Effect.void;
-									if (appended && context?.isCurrent?.() === false)
-										return yield* Effect.interrupt;
-								}),
+								...(ingestOptions.beforeCommit
+									? { beforeCommit: ingestOptions.beforeCommit }
+									: {}),
+								runnerId,
 								publish: ingestOptions.publishToBus ?? true,
 								endedRunEvents,
 								afterCommit,
@@ -678,23 +698,6 @@ export const makeProviderRuntimeIngestionLive = (
 											}
 											if (pending.length > 0)
 												yield* project(yield* appendEvents(pending));
-											// Orphan settlement must commit its unplaced steers too;
-											// a terminal run no longer triggers startup recovery.
-											for (const event of accepted)
-												if (
-													event.type === "turn.error" &&
-													event.data.code === "runner_stopped"
-												)
-													yield* requeueFailedSteers(
-														sql,
-														{
-															persistEvents: (events) =>
-																Effect.gen(function* () {
-																	yield* project(yield* appendEvents(events));
-																}),
-														},
-														event.sessionId,
-													);
 											yield* beforeCommit;
 										}),
 									commitOptions,
@@ -702,16 +705,24 @@ export const makeProviderRuntimeIngestionLive = (
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 							if (!appended) return 0;
 							if (options.surfacing)
-								yield* options.surfacing.observe(domainEvents);
+								yield* guardCurrentWrite(
+									options.surfacing.observe(domainEvents),
+								);
 
 							// A compaction in progress and a retry live in memory, not the
 							// log (C1). Stamp their rows so the shell re-reads them.
+							const transientSessions = yield* guardCurrentWrite(
+								() =>
+									new Set([
+										...(options.compactions?.observe(domainEvents) ?? []),
+										...(options.retries?.observe(domainEvents) ?? []),
+									]),
+							);
 							yield* Effect.forEach(
-								new Set([
-									...(options.compactions?.observe(domainEvents) ?? []),
-									...(options.retries?.observe(domainEvents) ?? []),
-								]),
-								announceBackgroundWork,
+								transientSessions._tag === "Some"
+									? transientSessions.value
+									: [],
+								(id) => guardCurrentWrite(announceBackgroundWork(id)),
 								{ discard: true },
 							).pipe(
 								Effect.provide(services),
@@ -727,11 +738,13 @@ export const makeProviderRuntimeIngestionLive = (
 								options.relayPublisher &&
 								ingestOptions.publishToRelay !== false
 							) {
-								yield* publishRelayMessages(
-									domainEvents.filter((event) =>
-										endedRunEvents.has(event.eventId),
+								yield* guardCurrentWrite(
+									publishRelayMessages(
+										domainEvents.filter((event) =>
+											endedRunEvents.has(event.eventId),
+										),
+										options.relayPublisher,
 									),
-									options.relayPublisher,
 								);
 							}
 

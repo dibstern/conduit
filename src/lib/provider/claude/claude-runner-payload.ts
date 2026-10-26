@@ -61,6 +61,7 @@ import type { RunnerProviderInstanceDeps } from "../runner/runner-provider-insta
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
 import { makeSendAdmissionWait } from "../runner/send-admission.js";
 import type {
+	NativeSessionRunner,
 	SessionCommand,
 	SessionFailure,
 	SessionOutput,
@@ -234,7 +235,9 @@ export interface ClaudeProviderInstanceDeps {
 	readonly subagentPollIntervalMs?: number;
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
 	/** Tests can host the session engine locally; production defaults to a process. */
-	readonly runnerFactory?: typeof makeClaudeSessionRunner;
+	readonly runnerFactory?: (
+		...args: Parameters<typeof makeClaudeSessionRunner>
+	) => Effect.Effect<SessionRunner, never, Scope.Scope>;
 }
 
 export type ClaudeSessionRunnerDeps = Pick<
@@ -294,7 +297,7 @@ export const makeClaudeSessionRunner = (
 	emit: (
 		output: SessionOutput,
 	) => Effect.Effect<SessionOutputReply, SessionFailure>,
-): Effect.Effect<SessionRunner, never, Scope.Scope> =>
+): Effect.Effect<NativeSessionRunner, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const stateRef = yield* Ref.make<ClaudeProviderRuntimeState>(
 			emptyClaudeProviderRuntimeState(),

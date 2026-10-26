@@ -11,6 +11,7 @@ import type {
 	PermissionResponse,
 	QuestionRequest,
 } from "../types.js";
+import type { SendScope } from "./send-scope.js";
 import type {
 	SessionCommand,
 	SessionFailure,
@@ -43,6 +44,7 @@ export class RunnerSinkBindings {
 		string,
 		{
 			readonly sessionId: string;
+			readonly send?: SendScope;
 			readonly sink: EventSink;
 			readonly abortController: AbortController;
 			readonly permissions: Map<
@@ -175,7 +177,11 @@ export class RunnerSinkBindings {
 		}).pipe(permit.withPermits(1));
 	}
 
-	makeSessionSink(sinkId: string, sessionId: string): EventSink {
+	makeSessionSink(
+		sinkId: string,
+		sessionId: string,
+		send?: SendScope,
+	): EventSink {
 		const permissions = new Map<
 			string,
 			Deferred.Deferred<PermissionResponse, SessionFailure>
@@ -195,10 +201,11 @@ export class RunnerSinkBindings {
 				cause: Object.assign(new Error(cause.message), cause),
 			});
 		const emit = (output: SessionOutput) =>
-			this.emitForSession(sessionId, output).pipe(
-				Effect.asVoid,
-				Effect.mapError(sinkFailure),
-			);
+			Effect.suspend(() =>
+				send?.assignment._tag === "Closed"
+					? Effect.succeed({})
+					: this.emitForSession(sessionId, output),
+			).pipe(Effect.asVoid, Effect.mapError(sinkFailure));
 		const sink: EventSink & { readonly runnerSinkId: string } = {
 			runnerSinkId: sinkId,
 			push: (event) => emit({ type: "event", sinkId, event }),
@@ -309,6 +316,7 @@ export class RunnerSinkBindings {
 		};
 		this.sinkBindings.set(sinkId, {
 			sessionId,
+			...(send ? { send } : {}),
 			sink,
 			abortController: new AbortController(),
 			permissions,
@@ -318,6 +326,16 @@ export class RunnerSinkBindings {
 		return sink;
 	}
 
+	retainsSend(send: SendScope): boolean {
+		const binding = this.sinkBindings.get(send.sinkId);
+		return binding?.send === send && binding.references > 0;
+	}
+	abortSend(send: SendScope): void {
+		const binding = this.sinkBindings.get(send.sinkId);
+		if (binding?.send === send && send.assignment._tag !== "Closed")
+			binding.abortController.abort();
+	}
+
 	retainSink(sink: EventSink | undefined): void {
 		if (
 			sink &&
@@ -325,7 +343,7 @@ export class RunnerSinkBindings {
 			typeof sink.runnerSinkId === "string"
 		) {
 			const binding = this.sinkBindings.get(sink.runnerSinkId);
-			if (binding) binding.references++;
+			if (binding?.sink === sink) binding.references++;
 		}
 	}
 
@@ -361,7 +379,7 @@ export class RunnerSinkBindings {
 			)
 				return;
 			const binding = this.sinkBindings.get(sink.runnerSinkId);
-			if (!binding || --binding.references > 0) return;
+			if (!binding || binding.sink !== sink || --binding.references > 0) return;
 			for (const pending of binding.permissions.values()) {
 				yield* Deferred.succeed(pending, { decision: "reject" });
 			}
@@ -377,7 +395,10 @@ export class RunnerSinkBindings {
 			yield* this.emitForSession(binding.sessionId, {
 				type: "release-sink",
 				sinkId: sink.runnerSinkId,
-			}).pipe(Effect.ignore);
+			}).pipe(
+				Effect.ignore,
+				Effect.ensuring(binding.send?.close ?? Effect.void),
+			);
 		});
 	}
 

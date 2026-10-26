@@ -37,6 +37,10 @@ import {
 } from "../../../src/lib/provider/runner/runner-registry.js";
 import type { SessionOutput } from "../../../src/lib/provider/runner/session-runner.js";
 import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
+import {
+	admitRunnerCommand,
+	makeRunnerAdmission,
+} from "../../helpers/runner-provider-admission.js";
 
 const spawned = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock("node:child_process", async (original) => ({
@@ -104,7 +108,6 @@ const setup = Effect.gen(function* () {
 		}),
 		snapshotCommandSettings: () => ({}),
 		loginChange: () => "None",
-		recoverCommands: () => Effect.succeed([]),
 	};
 	const directory = prepareRunnerDirectory(root, root);
 	const register = (
@@ -147,24 +150,28 @@ const setup = Effect.gen(function* () {
 			return entry;
 		});
 	const makeManager = () =>
-		makeProcessSessionRunner(
-			{
-				daemonConfigDir: root,
-				projectRootForSession: () => Effect.succeed(root),
-				processTable: {
-					inspect: (pid) => processes.get(pid) ?? { state: "gone" },
-					signal,
+		Effect.gen(function* () {
+			const manager = yield* makeProcessSessionRunner(
+				{
+					daemonConfigDir: root,
+					projectRootForSession: () => Effect.succeed(root),
+					processTable: {
+						inspect: (pid) => processes.get(pid) ?? { state: "gone" },
+						signal,
+					},
 				},
-			},
-			output,
-			driver,
-		);
+				output,
+				driver,
+			);
+			const admission = yield* makeRunnerAdmission(manager);
+			return { manager, admission };
+		});
 	const output = vi.fn<Parameters<typeof makeProcessSessionRunner>[1]>(() =>
 		Effect.succeed({}),
 	);
 	const managerScope = yield* Scope.make();
 	yield* Effect.addFinalizer(() => Scope.close(managerScope, Exit.void));
-	const manager = yield* makeManager().pipe(
+	const { manager, admission } = yield* makeManager().pipe(
 		Effect.provideService(Scope.Scope, managerScope),
 	);
 	const recover = Effect.gen(function* () {
@@ -177,6 +184,7 @@ const setup = Effect.gen(function* () {
 	}>`SELECT data FROM events WHERE type = 'turn.notice' ORDER BY sequence`;
 	return {
 		manager,
+		admission,
 		managerScope,
 		makeManager,
 		root,
@@ -354,7 +362,7 @@ it.effect(
 				yield* TestClock.adjust("60 seconds");
 				expect(f.signals).toEqual([]);
 				yield* Scope.close(f.managerScope, Exit.void);
-				const restarted = yield* f.makeManager();
+				const { manager: restarted } = yield* f.makeManager();
 				yield* restarted.recoverEffect;
 				yield* TestClock.adjust("60 seconds");
 				expect(f.signals).toEqual([]);
@@ -373,7 +381,7 @@ it.effect(
 				yield* TestClock.adjust("60 seconds");
 				expect(yield* f.notices).toHaveLength(1);
 				yield* Scope.close(f.managerScope, Exit.void);
-				const restarted = yield* f.makeManager();
+				const { manager: restarted } = yield* f.makeManager();
 				yield* restarted.recoverEffect;
 				yield* TestClock.adjust("60 seconds");
 				expect(f.connect).not.toHaveBeenCalled();
@@ -445,7 +453,8 @@ it.effect(
 								sessionId: options.sessionId,
 								pid: options.pid ?? 0,
 								bindings: [],
-								sendCommands: [],
+								sendJournalAnswers: true,
+								sendAnswers: [],
 							},
 							connection,
 						);
@@ -518,7 +527,8 @@ it.effect(
 								sessionId: options.sessionId,
 								pid: options.pid ?? 0,
 								bindings: [],
-								sendCommands: [],
+								sendJournalAnswers: true,
+								sendAnswers: [],
 							},
 							connection,
 						);
@@ -625,17 +635,21 @@ for (const crossDirectory of [false, true])
 									protocolVersion: 1,
 									buildId: runnerBuildId(),
 									stampsRunIds: true,
+									crossAttemptNativeResumeFallback: true,
 									runnerId: options.runnerId,
 									sessionId: "s",
 									pid: options.pid ?? 0,
 									bindings: [],
-									sendCommands: [
+									sendJournalAnswers: true,
+									sendAnswers: [
 										{
 											commandId:
 												options.runnerId === older.runnerId
 													? "old-command"
 													: "new-command",
 											attempt: 1,
+											nativeResumeFallback: false,
+											status: "running",
 										},
 									],
 								},
@@ -729,8 +743,18 @@ for (const outcome of ["retired", "exited"] as const)
 									runnerId: options.runnerId,
 									sessionId: "s",
 									pid: options.pid ?? 0,
-									bindings: [{ sinkId: "retained-sink", sessionId: "s" }],
-									sendCommands: [],
+									bindings: [
+										{
+											sinkId: "retained-sink",
+											sessionId: "s",
+											released: false,
+										},
+										...(options.runnerId === old.runnerId
+											? [{ sinkId: "blocked", sessionId: "s", released: false }]
+											: []),
+									],
+									sendJournalAnswers: true,
+									sendAnswers: [],
 								},
 								connection,
 							);
@@ -815,6 +839,16 @@ for (const outcome of ["retired", "exited"] as const)
 							"s",
 						);
 					}
+					if (outcome === "exited") {
+						expect(
+							outputs.filter(
+								(output) =>
+									output.type === "release-sink" &&
+									output.sinkId === "retained-sink",
+							),
+						).toHaveLength(1);
+						expect(background.backgroundOf("s")).toBeUndefined();
+					}
 					outputs.length = 0;
 					yield* Deferred.succeed(release, undefined);
 					yield* Fiber.join(blocked);
@@ -840,13 +874,7 @@ for (const outcome of ["retired", "exited"] as const)
 						).toBe(true);
 					} else {
 						expect(background.backgroundOf("s")).toBeUndefined();
-						expect(outputs).toEqual([
-							{
-								type: "background-task",
-								transition: { sessionId: "s", kind: "session-ended" },
-							},
-							{ type: "release-sink", sinkId: "retained-sink" },
-						]);
+						expect(outputs).toEqual([]);
 						expect(
 							yield* f.manager.hasLiveProcessEffect("s", old.runnerId),
 						).toBe(false);
@@ -895,7 +923,8 @@ it.effect(
 								sessionId: "s",
 								pid: options.pid ?? 0,
 								bindings: [],
-								sendCommands: [],
+								sendJournalAnswers: true,
+								sendAnswers: [],
 							},
 							connection,
 						);
@@ -968,7 +997,7 @@ it.effect(
 				expect(yield* f.manager.hasLiveProcessEffect("s", old?.runnerId)).toBe(
 					false,
 				);
-				yield* f.manager.executeEffect({
+				yield* admitRunnerCommand(f.admission, f.manager, {
 					type: "send-turn",
 					sinkId: "new-sink",
 					aborted: false,

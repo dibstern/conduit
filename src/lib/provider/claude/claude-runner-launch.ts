@@ -21,8 +21,8 @@ import type {
 	RunnerSettingsSnapshot,
 } from "../runner/runner-upgrade.js";
 import type {
+	NativeSessionRunner,
 	SessionFailure,
-	SessionRunner,
 } from "../runner/session-runner.js";
 import {
 	type ClaudeSessionRunnerDeps,
@@ -104,7 +104,7 @@ export const makeClaudeRunnerLaunch = (
 			claudeLaunchConfigFromAccounts();
 		let launchSettings: RunnerSettingsSnapshot["claudeSettingsOverrides"];
 		let resumeSessionId: string | undefined;
-		let sessionRunner: SessionRunner | undefined;
+		let sessionRunner: NativeSessionRunner | undefined;
 		let liveConfiguration: RunnerLiveQueryConfiguration | undefined;
 		const createQuery: NonNullable<ClaudeSessionRunnerDeps["queryFactory"]> = (
 			params,
@@ -632,7 +632,7 @@ export const makeClaudeRunnerLaunch = (
 							Effect.succeed(undefined))
 					)
 						return;
-					const result = yield* runner.executeEffect(command).pipe(
+					const result = yield* runner.executeNativeEffect(command).pipe(
 						Effect.tap(() => {
 							const frozen = frozenSnapshot;
 							const resolver = settingsResolver;

@@ -22,6 +22,7 @@ import {
 	canonicalEvent,
 } from "../../src/lib/persistence/events.js";
 import { DurableCommandCommitRepository } from "../../src/lib/provider/orchestration-command-commit.js";
+import { makeRunnerAuthority } from "../../src/lib/provider/runner/runner-authority.js";
 import { makeRunnerReceiptStore } from "../../src/lib/provider/runner/runner-receipts.js";
 
 type Row = Record<string, unknown>;
@@ -328,7 +329,10 @@ export function projectManifest(
 							return [key, visit(value, "event", transform)];
 						if ((outboxColumns[table] ?? []).includes(key))
 							return [key, visit(value, "outbox", transform)];
-						if (key === "version" && versionTables.has(table))
+						if (
+							key === "version" &&
+							(versionTables.has(table) || table === "session_git_published")
+						)
 							return [key, visit(value, "version", transform)];
 						if (
 							source === undefined &&
@@ -1204,11 +1208,21 @@ export async function createProjectStoreFixture(
 				yield* runner.projectBatch(committed);
 				const receipts = yield* makeRunnerReceiptStore(sql);
 				yield* receipts.attach(`${projectId}_runner`, "fixture-attachment");
-				yield* receipts.acknowledge(
-					`${projectId}_runner`,
-					1,
-					{},
-					"fixture-attachment",
+				const authority = yield* makeRunnerAuthority();
+				const grant = (yield* authority.adopt(
+					[{ runnerId: `${projectId}_runner`, sessionId: id }],
+					"live",
+				)).grants.get(`${projectId}_runner`);
+				if (!grant) return yield* Effect.die("missing fixture runner grant");
+				yield* authority.guarded(
+					grant,
+					{ kind: "evidence" },
+					receipts.acknowledge(
+						`${projectId}_runner`,
+						1,
+						{},
+						"fixture-attachment",
+					),
 				);
 				yield* sql`INSERT INTO claude_runner_permission_replies VALUES (${id}, ${`${id}_resolved`}, '{"decision":"allow"}')`;
 				// These primary/legacy records have no current canonical event producer.
@@ -1216,7 +1230,7 @@ export async function createProjectStoreFixture(
 				yield* sql`INSERT INTO sent_alerts VALUES (${id}, 'turn-finished', ${assistant}, 1000, 'delivered', 'fixture-claim')`;
 				yield* sql`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at) VALUES (${id}, ${projectId}, 'session', 'saved composer draft', 1000)`;
 				yield* sql`INSERT INTO session_pick_backfill VALUES (${id}, 'driver_unresolved')`;
-				yield* sql`INSERT INTO session_git_published VALUES (${`/fixture/${projectId}`}, '{"branch":"fixture"}')`;
+				yield* sql`INSERT INTO session_git_published (directory, git) VALUES (${`/fixture/${projectId}`}, '{"branch":"fixture"}')`;
 				yield* sql`INSERT INTO session_goal_checks (event_id, session_id, condition, set_at, iterations, reason, created_at) VALUES (${`${id}_goal_check`}, ${id}, 'complete', 1000, 2, 'continue', 1000)`;
 				yield* sql`INSERT INTO provider_command_sessions (project_key, session_id, provider_id, provider_kind, status, created_at, updated_at) VALUES (${projectId}, ${id}, 'opencode', 'opencode', 'idle', 1000, 1000)`;
 				yield* sql`INSERT INTO provider_command_turns (project_key, session_id, turn_id, command_id, status, created_at, updated_at) VALUES (${projectId}, ${id}, ${user}, ${`${id}_command`}, 'completed', 1000, 1000)`;
