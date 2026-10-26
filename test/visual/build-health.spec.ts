@@ -30,9 +30,6 @@ const mdxDocs = allEntries.filter(
 );
 const stories = allEntries.filter((entry) => entry.type === "story");
 
-// Console/page noise that predates this check and is not a render failure.
-const IGNORED_ERRORS = ["Unexpected token 'export'", "vite-inject-mocker"];
-
 // Stories whose whole point is a not-rendered state (hidden/closed/empty), so an
 // empty #storybook-root is the correct outcome rather than a render failure.
 // They are still loaded and still fail on HTTP or JS errors — only the
@@ -51,11 +48,6 @@ const EXPECTED_EMPTY_ROOT = new Set([
 	"chat-subagentbackbar--side-thread",
 	"chat-subagentbackbar--side-thread-parent-working",
 ]);
-
-const realErrors = (messages: string[]): string[] =>
-	messages.filter(
-		(message) => !IGNORED_ERRORS.some((noise) => message.includes(noise)),
-	);
 
 test.describe("Built Storybook render health", () => {
 	// Belt-and-braces behind `reuseExistingServer: false`. This is not
@@ -115,6 +107,12 @@ test.describe("Built Storybook render health", () => {
 						(await root.textContent())?.trim() ?? "",
 						`${entry.id} is exempt from the empty-root check but now renders visible text — remove it from EXPECTED_EMPTY_ROOT`,
 					).toBe("");
+					// Overlays portal into <body> (Bits UI Dialog does by default), so a
+					// root-only check would let a waived story render a visible dialog.
+					expect(
+						(await page.locator("body").innerText()).trim(),
+						`${entry.id} is exempt from the empty-root check but renders visible text outside #storybook-root — remove it from EXPECTED_EMPTY_ROOT`,
+					).toBe("");
 				} else {
 					// Child count, not text: a story can legitimately render only an
 					// icon or a spacer, but a story that renders *nothing* is the
@@ -146,7 +144,7 @@ test.describe("Built Storybook render health", () => {
 				// them. Without this, a story can fail loudly on screen and pass
 				// silently here.
 				await expect(page.locator("#error-message")).toBeEmpty();
-				expect(realErrors(pageErrors)).toEqual([]);
+				expect(pageErrors).toEqual([]);
 			});
 		}
 	});
@@ -169,7 +167,7 @@ test.describe("Built Storybook render health", () => {
 				await expect(page.locator("#storybook-docs")).toBeVisible();
 				await expect(page.locator("#storybook-docs")).not.toBeEmpty();
 				await expect(page.locator("#error-message")).toBeEmpty();
-				expect(realErrors(pageErrors)).toEqual([]);
+				expect(pageErrors).toEqual([]);
 			});
 		}
 	});
