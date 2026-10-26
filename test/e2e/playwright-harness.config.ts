@@ -1,5 +1,9 @@
 import { defineConfig } from "@playwright/test";
 
+// CI has no codex binary. Missing it locally too keeps test daemons from
+// cloning plugins off the network into the fixture root (conduit-test-lnm8.27).
+process.env["CONDUIT_CODEX_BINARY"] ??= "/nonexistent/conduit-e2e/codex";
+
 export default defineConfig({
 	testDir: "./specs",
 	testMatch: [
