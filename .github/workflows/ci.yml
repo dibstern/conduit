@@ -90,9 +90,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           opencode: "true"
-      # Playwright 1.58's unzip hangs forever on Node >= 24.16, so the browser
-      # install runs on Node 22 until Playwright is upgraded (conduit-test-lnm8.24).
-      - run: mise exec node@22 -- node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium
         timeout-minutes: 5
       - uses: actions/download-artifact@v8
         with:

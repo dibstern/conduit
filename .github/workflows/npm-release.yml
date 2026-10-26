@@ -122,8 +122,7 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
-      # Node 22: Playwright 1.58 hangs unzipping browsers on Node >= 24.16 (conduit-test-lnm8.24).
-      - run: mise exec node@22 -- node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium
         timeout-minutes: 5
       - name: Download build artifacts
         uses: actions/download-artifact@v8
@@ -169,8 +168,7 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
-      # Node 22: Playwright 1.58 hangs unzipping browsers on Node >= 24.16 (conduit-test-lnm8.24).
-      - run: mise exec node@22 -- node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium
         timeout-minutes: 5
       - run: bash scripts/test-all.sh storybook
 
@@ -190,8 +188,7 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
-      # Node 22: Playwright 1.58 hangs unzipping browsers on Node >= 24.16 (conduit-test-lnm8.24).
-      - run: mise exec node@22 -- node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium
         timeout-minutes: 5
       - run: pnpm storybook:build
       - run: bash scripts/test-all.sh visual
