@@ -179,6 +179,12 @@ export default defineConfig({
 		{
 			name: "mobile",
 			use: { viewport: { width: 393, height: 852 } },
+			// build-health catches load and lifecycle errors in the built bundle,
+			// which do not depend on the viewport. Running it twice doubled its
+			// cost for nothing (conduit-test-lnm8.5). Mobile render failures that
+			// paint Storybook's error surface or an empty root still fail
+			// components.spec's mobile screenshots.
+			testIgnore: "build-health.spec.ts",
 		},
 	],
 });
