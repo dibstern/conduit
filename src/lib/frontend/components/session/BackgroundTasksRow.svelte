@@ -41,7 +41,7 @@
 	</div>
 {:else}
 	<Surface variant="task-strip" radius="none" data-testid="background-tasks-row" class="min-w-0">
-		<Button variant="ghost" size="phone-task" touchTarget="always" tone="secondary" align="start" class="flex-1" data-testid="background-tasks-toggle" aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" onclick={togglePanel}>
+		<Button id="background-tasks-toggle" variant="ghost" size="phone-task" touchTarget="always" tone="secondary" align="start" class="flex-1 pointer-events-auto" data-testid="background-tasks-toggle" aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" onclick={togglePanel}>
 			<ConduitMark size={12} variant="running" tone="inherit" />
 			<span class="truncate">{tasks.length} background {tasks.length === 1 ? "task" : "tasks"}</span>
 		</Button>

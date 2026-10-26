@@ -54,6 +54,7 @@ import type {
 	OpenCodeInstance,
 	SessionInfo,
 } from "../../types.js";
+import { tasksPanel } from "../session/background-tasks.svelte.js";
 import { sideThreadsPanel } from "../session/side-threads.svelte.js";
 import SessionBarPhoneFrame from "./__fixtures__/SessionBarPhoneFrame.svelte";
 
@@ -2141,6 +2142,41 @@ export const BackgroundTasks: Story = {
 			).toBe(theme === "dark" ? "#111113" : "#ffffff"),
 		);
 		await userEvent.click(canvas.getByTestId("background-tasks-toggle"));
+		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
+		const toggle = canvas.getByTestId("background-tasks-toggle");
+		for (const reopened of [false, true]) {
+			// Back from a Child Session reopens the sheet without clicking its row.
+			if (reopened) {
+				toggle.blur();
+				tasksPanel.open = true;
+			}
+			await settleSheets();
+			await expect(toggle).toHaveAttribute("aria-expanded", "true");
+			const box = toggle.getBoundingClientRect();
+			expect(
+				toggle.contains(
+					document.elementFromPoint(
+						box.x + box.width / 2,
+						box.y + box.height / 2,
+					),
+				),
+			).toBe(true);
+			await userEvent.click(toggle, { delay: 20 });
+			await expect(toggle).toHaveAttribute("aria-expanded", "false");
+			await waitFor(() =>
+				expect(canvas.queryByTestId("background-tasks-panel")).toBeNull(),
+			);
+			await expect(toggle).toHaveFocus();
+		}
+		await userEvent.click(toggle);
+		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
+		await userEvent.click(canvas.getByTestId("background-tasks-scrim"));
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		await waitFor(() =>
+			expect(canvas.queryByTestId("background-tasks-panel")).toBeNull(),
+		);
+		await expect(toggle).toHaveFocus();
+		await userEvent.click(toggle);
 		await expect(canvas.getByTestId("background-tasks-panel")).toBeVisible();
 	},
 };

@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
 	import type { BackgroundTask } from "../../../shared-types.js";
+	import { sessionState } from "../../stores/session.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Popover from "../ui/Popover.svelte";
 	import Surface from "../ui/Surface.svelte";
@@ -15,6 +16,7 @@
 	import ConduitMark from "../ui/ConduitMark.svelte";
 
 	let { tasks, compact, onstop, onstopall }: { tasks: readonly BackgroundTask[]; compact: boolean; onstop?: ((taskId: string) => void) | undefined; onstopall?: (() => void) | undefined } = $props();
+	let openedForSession: string | null = null;
 </script>
 
 {#snippet panel()}
@@ -33,7 +35,28 @@
 {/snippet}
 
 {#if compact}
-	<Popover bind:open={tasksPanel.open} presentation="sheet" sheetEdge="top" ariaLabel="Background tasks" portalTo="#session-bar" sheetBottomPadding={0} sheetScrim={{ testId: "background-tasks-scrim" }}>
+	<Popover
+		bind:open={tasksPanel.open}
+		presentation="sheet"
+		sheetEdge="top"
+		ariaLabel="Background tasks"
+		portalTo="#session-bar"
+		sheetBottomPadding={0}
+		sheetScrim={{ testId: "background-tasks-scrim" }}
+		onInteractOutside={(event) => {
+			// The row owns its click; outside-dismiss must not close before it toggles.
+			if (event.target instanceof Element && event.target.closest("#background-tasks-toggle")) event.preventDefault();
+		}}
+		onOpenAutoFocus={() => { openedForSession = sessionState.currentId; }}
+		onCloseAutoFocus={(event) => {
+			// The trigger snippet is empty and the open sheet traps focus, so hand focus back to the row,
+			// unless the sheet closed because the user navigated into a Child Session.
+			const toggle = document.getElementById("background-tasks-toggle");
+			if (tasksPanel.open || sessionState.currentId !== openedForSession || !toggle) return;
+			event.preventDefault();
+			toggle.focus({ preventScroll: true });
+		}}
+	>
 		{#snippet trigger()}{/snippet}
 		{@render panel()}
 	</Popover>
