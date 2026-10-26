@@ -85,12 +85,12 @@ jobs:
           export OPENCODE_DATA_DIR=$(mktemp -d)
           opencode serve --port 4096 &
           for i in $(seq 1 30); do
-            if curl -sf -u "opencode:${OPENCODE_SERVER_PASSWORD}" http://localhost:4096/global/health > /dev/null 2>&1; then
+            if curl -sf --max-time 2 -u "opencode:${OPENCODE_SERVER_PASSWORD}" http://localhost:4096/global/health > /dev/null 2>&1; then
               echo "OpenCode server healthy on port 4096"
               break
             fi
             if [ "$i" -eq 30 ]; then
-              echo "OpenCode server failed to start within 30s"
+              echo "OpenCode server was not healthy after 30 tries"
               exit 1
             fi
             sleep 1
@@ -122,7 +122,9 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      # Node 22: Playwright 1.58 hangs unzipping browsers on Node >= 24.16 (conduit-test-lnm8.24).
+      - run: mise exec node@22 -- node node_modules/@playwright/test/cli.js install --with-deps chromium
+        timeout-minutes: 5
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
@@ -135,12 +137,12 @@ jobs:
           export OPENCODE_DATA_DIR=$(mktemp -d)
           opencode serve --port 4096 &
           for i in $(seq 1 30); do
-            if curl -sf -u "opencode:${OPENCODE_SERVER_PASSWORD}" http://localhost:4096/global/health > /dev/null 2>&1; then
+            if curl -sf --max-time 2 -u "opencode:${OPENCODE_SERVER_PASSWORD}" http://localhost:4096/global/health > /dev/null 2>&1; then
               echo "OpenCode server healthy on port 4096"
               break
             fi
             if [ "$i" -eq 30 ]; then
-              echo "OpenCode server failed to start within 30s"
+              echo "OpenCode server was not healthy after 30 tries"
               exit 1
             fi
             sleep 1
@@ -167,7 +169,9 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      # Node 22: Playwright 1.58 hangs unzipping browsers on Node >= 24.16 (conduit-test-lnm8.24).
+      - run: mise exec node@22 -- node node_modules/@playwright/test/cli.js install --with-deps chromium
+        timeout-minutes: 5
       - run: bash scripts/test-all.sh storybook
 
   # ── Job 5: Strict Darwin Storybook visual tests ────────────────────────────
@@ -186,7 +190,9 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      # Node 22: Playwright 1.58 hangs unzipping browsers on Node >= 24.16 (conduit-test-lnm8.24).
+      - run: mise exec node@22 -- node node_modules/@playwright/test/cli.js install --with-deps chromium
+        timeout-minutes: 5
       - run: pnpm storybook:build
       - run: bash scripts/test-all.sh visual
 

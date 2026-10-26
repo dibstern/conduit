@@ -28,7 +28,11 @@ async function waitForHealth(port: number, timeoutMs = 30_000): Promise<void> {
 		try {
 			// /global/health is the API probe; /health is the web UI, which
 			// answers 200 for any path and so is ready before the API is.
-			const res = await fetch(`http://localhost:${port}/global/health`);
+			// A request sent while OpenCode starts can hang until undici's
+			// 300 s header timeout, so each try gets its own deadline.
+			const res = await fetch(`http://localhost:${port}/global/health`, {
+				signal: AbortSignal.timeout(2_000),
+			});
 			if (res.ok) return;
 		} catch {
 			// Not ready yet
