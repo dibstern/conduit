@@ -654,6 +654,7 @@ async function observeSessionRpc(
 			arrived: () => void;
 			gate: Promise<void>;
 			once: boolean;
+			match: ((frame: RpcFrame, request: RpcFrame) => boolean) | undefined;
 		}
 	>();
 	await editRpc(page, async (frame, request) => {
@@ -666,7 +667,7 @@ async function observeSessionRpc(
 			const tag =
 				request.tag === "SubscribeDraftModels" ? "GetModels" : request.tag;
 			const hold = holds.get(`${tag}:${request.payload?.["sessionId"]}`);
-			if (hold) {
+			if (hold && (hold.match?.(frame, request) ?? true)) {
 				if (hold.once) holds.delete(`${tag}:${request.payload?.["sessionId"]}`);
 				hold.frames.push(frame);
 				hold.arrived();
@@ -718,7 +719,14 @@ async function observeSessionRpc(
 			);
 			return requestIds;
 		},
-		hold(tag: string, sessionId: string, options?: { once: boolean }) {
+		hold(
+			tag: string,
+			sessionId: string,
+			options?: {
+				once: boolean;
+				match?: (frame: RpcFrame, request: RpcFrame) => boolean;
+			},
+		) {
 			const key = `${tag}:${sessionId}`;
 			if (holds.has(key)) throw new Error(`A ${tag} reply is already held`);
 			let arrived = () => {};
@@ -730,7 +738,13 @@ async function observeSessionRpc(
 				release = resolve;
 			});
 			const frames: RpcFrame[] = [];
-			const held = { frames, arrived, gate, once: options?.once ?? false };
+			const held = {
+				frames,
+				arrived,
+				gate,
+				once: options?.once ?? false,
+				match: options?.match,
+			};
 			holds.set(key, held);
 			return {
 				wait,
@@ -1346,7 +1360,20 @@ test.describe("session composer owns its stored pick", () => {
 			"claude",
 			caseId,
 		);
-		const older = observed.hold("GetModels", sessionId, { once: true });
+		// Startup catalog reads can still be in flight here, so a hold only takes
+		// the reply to a read issued after it was armed that reports the switch.
+		const replyReporting = (variant: string) => {
+			const armedAt = observed.requests.length;
+			return (frame: RpcFrame, request: RpcFrame) =>
+				observed.requests.indexOf(request) >= armedAt &&
+				Schema.decodeUnknownOption(GetModelsResponseSchema)(
+					frame.exit?.value,
+				).pipe(Option.exists((reply) => reply.variant?.variant === variant));
+		};
+		const older = observed.hold("GetModels", sessionId, {
+			once: true,
+			match: replyReporting("high"),
+		});
 		let newer: ReturnType<typeof observed.hold> | undefined;
 		let stage = "older-row-read";
 		let shown: Pick | undefined;
@@ -1367,7 +1394,10 @@ test.describe("session composer owns its stored pick", () => {
 				).variant?.variant,
 			).toBe("high");
 			stage = "newer-row-read";
-			newer = observed.hold("GetModels", sessionId, { once: true });
+			newer = observed.hold("GetModels", sessionId, {
+				once: true,
+				match: replyReporting("low"),
+			});
 			await Effect.runPromise(
 				browser.rpc.SwitchVariant({
 					sessionId,
@@ -1820,7 +1850,9 @@ test.describe("session composer owns its stored pick", () => {
 					`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(slug)}`,
 				);
 				await expect(picker).toHaveAttribute("data-shown-harness", driver);
-				await held.wait;
+				// Startup reads agents twice, on connect and again once the shell
+				// synchronizes; count only after both so the tab's read is its own.
+				await expect.poll(() => held.frames.length).toBe(2);
 				const requestsBefore = observed.requests.length;
 				// Keep the initial agents read in flight so this tab must fetch agents.
 				await openModelsSettings(page);
