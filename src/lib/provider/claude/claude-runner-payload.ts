@@ -1096,6 +1096,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			}
 			let promptQueue: PromptQueueController | undefined;
 			let activeQuery: Query | undefined;
+			let streamFiber: Fiber.Fiber<void, unknown> | undefined;
 			const setup = Effect.gen({ self: this }, function* () {
 				if (previous) {
 					let retirementCommitted = false;
@@ -1429,7 +1430,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					onBackgroundTask: (transition) =>
 						this.recordBackgroundTaskEffect(transition),
 				});
-				yield* FiberMap.run(
+				streamFiber = yield* FiberMap.run(
 					this.streamFibers,
 					sessionId,
 					this.runStreamConsumerEffect(ctx, translator),
@@ -1483,7 +1484,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				),
 			);
 
-			return yield* this.awaitIntakeEffect(input, intake);
+			return yield* this.awaitIntakeEffect(input, intake, streamFiber);
 		});
 	}
 
@@ -1644,6 +1645,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			}
 
 			const turnAdmissionSemaphore = ctx.turnAdmissionSemaphore;
+			const streamFiber = getOrUndefined(
+				FiberMap.getUnsafe(this.streamFibers, ctx.sessionId),
+			);
 			if (!turnAdmissionSemaphore) {
 				return yield* Effect.fail(
 					new ClaudeRuntimeError({
@@ -1852,13 +1856,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				() => turnAdmissionSemaphore.release(1),
 			);
 
-			return yield* this.awaitIntakeEffect(input, intake);
+			return yield* this.awaitIntakeEffect(input, intake, streamFiber);
 		});
 	}
 
 	private awaitIntakeEffect(
 		input: ClaudeSendTurnInput,
 		intake: Deferred.Deferred<TurnResult, Error>,
+		streamFiber: Fiber.Fiber<void, unknown> | undefined,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		const aborted = Effect.callback<void>((resume) => {
 			const onAbort = () => resume(Effect.void);
@@ -1907,6 +1912,13 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				),
 			),
 		).pipe(
+			// Fallback must follow this query's session-ended acknowledgement.
+			// A hung finalizer fails the send rather than releasing fallback early.
+			Effect.tap((result) =>
+				result.nativeResumeRejected && streamFiber
+					? Fiber.await(streamFiber).pipe(Effect.timeout(STOP_ABORT_WAIT_MS))
+					: Effect.void,
+			),
 			Effect.mapError(
 				(cause) => new ClaudeBoundaryError({ operation: "awaitIntake", cause }),
 			),
