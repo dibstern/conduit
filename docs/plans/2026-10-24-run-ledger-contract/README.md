@@ -7,19 +7,20 @@ directory so tickets can cite a durable path. The documents are copied unchanged
 
 Later documents win over earlier ones:
 
-1. `AMENDMENT-2026-10-26-SEND-SCOPE-6.md` (the runner's journal answers what happened to a send; Q27 = A)
-2. `AMENDMENT-2026-10-26-SEND-SCOPE-5.md` (the Run Ledger is the one owner of a send's outcome; Q24-Q26)
-3. `AMENDMENT-2026-10-26-SEND-SCOPE-4.md` (requeue, don't replay; Q23 = A)
-4. `AMENDMENT-2026-10-25-SEND-SCOPE-3.md` (one admission path for every send; Q22 = A)
-5. `AMENDMENT-2026-10-25-SEND-SCOPE-2.md` (the send handle owns its runner assignment; Q21 = A)
-6. `AMENDMENT-2026-10-25-SEND-SCOPE.md` (per-send scopes, release leaves the authority; Q20 = A)
-7. `AMENDMENT-2026-10-25-AUDIT-2.md` (audit round 2, typed states; Q19 = A)
-8. `AMENDMENT-2026-10-25-AUDIT.md` (single owners, bottlenecks, deepening; Q17 = A)
-9. `AMENDMENT-2026-10-25-RUNNER-AUTHORITY.md` (runner authority, durable retirement, slices R1-R5)
-10. `AMENDMENT-2026-10-24-BACKGROUND-WORK.md` (background work, goals, runner lifecycle)
-11. `AMENDMENT-2026-10-24-FACT-BOOK.md`
-12. `AMENDMENT-2026-10-23-OUTSTANDING-WORK.md`, `RULINGS-2026-10-23-D1.md`, `RULINGS-2026-10-23.md`
-13. `AMENDMENT-2026-10-23.md`
+1. `AMENDMENT-2026-10-27-RUNNER-REAPER.md` (one durable owner for a stopped runner's processes: a reaper per runner, write-ahead retirement; Q28 = A + C)
+2. `AMENDMENT-2026-10-26-SEND-SCOPE-6.md` (the runner's journal answers what happened to a send; Q27 = A)
+3. `AMENDMENT-2026-10-26-SEND-SCOPE-5.md` (the Run Ledger is the one owner of a send's outcome; Q24-Q26)
+4. `AMENDMENT-2026-10-26-SEND-SCOPE-4.md` (requeue, don't replay; Q23 = A)
+5. `AMENDMENT-2026-10-25-SEND-SCOPE-3.md` (one admission path for every send; Q22 = A)
+6. `AMENDMENT-2026-10-25-SEND-SCOPE-2.md` (the send handle owns its runner assignment; Q21 = A)
+7. `AMENDMENT-2026-10-25-SEND-SCOPE.md` (per-send scopes, release leaves the authority; Q20 = A)
+8. `AMENDMENT-2026-10-25-AUDIT-2.md` (audit round 2, typed states; Q19 = A)
+9. `AMENDMENT-2026-10-25-AUDIT.md` (single owners, bottlenecks, deepening; Q17 = A)
+10. `AMENDMENT-2026-10-25-RUNNER-AUTHORITY.md` (runner authority, durable retirement, slices R1-R5)
+11. `AMENDMENT-2026-10-24-BACKGROUND-WORK.md` (background work, goals, runner lifecycle)
+12. `AMENDMENT-2026-10-24-FACT-BOOK.md`
+13. `AMENDMENT-2026-10-23-OUTSTANDING-WORK.md`, `RULINGS-2026-10-23-D1.md`, `RULINGS-2026-10-23.md`
+14. `AMENDMENT-2026-10-23.md`
 14. `CONTRACT.md`, `spec-82tn32.md`
 
 ## Renamed files
