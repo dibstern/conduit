@@ -378,734 +378,762 @@ const serverWindow = (
 
 test.describe.configure({ retries: 0 });
 
-test("opens the heavy session after a restart under load", async ({
-	browser,
-	harness,
-}, testInfo) => {
-	test.setTimeout(300_000);
-	const { viewport, isMobile, hasTouch } = testInfo.project.use;
+test(
+	"opens the heavy session after a restart under load",
+	{ tag: "@timed" },
+	async ({ browser, harness }, testInfo) => {
+		test.setTimeout(300_000);
+		const { viewport, isMobile, hasTouch } = testInfo.project.use;
 
-	// Seed into the store the first daemon created, then start on it.
-	await harness.terminate();
-	const fixture = await seedSessionLoadFixture(harness.daemonStorePath(), {
-		projectId: "process-test",
-		seen: true,
-	});
-	harness.disableIdlePolicies();
-	const storeBytes = statSync(harness.daemonStorePath()).size;
-	const warmMetrics = join(harness.root, "server-metrics-warm.json");
-	// The harness probe opens a detail stream per sidebar row; skip it here and
-	// confirm the fake SDK once the driver has attached instead.
-	await harness.restart({
-		keepPort: true,
-		metricsFile: warmMetrics,
-		skipBrowserProbe: true,
-	});
+		// Seed into the store the first daemon created, then start on it.
+		await harness.terminate();
+		const fixture = await seedSessionLoadFixture(harness.daemonStorePath(), {
+			projectId: "process-test",
+			seen: true,
+		});
+		harness.disableIdlePolicies();
+		const storeBytes = statSync(harness.daemonStorePath()).size;
+		const warmMetrics = join(harness.root, "server-metrics-warm.json");
+		// The harness probe opens a detail stream per sidebar row; skip it here and
+		// confirm the fake SDK once the driver has attached instead.
+		await harness.restart({
+			keepPort: true,
+			metricsFile: warmMetrics,
+			skipBrowserProbe: true,
+		});
 
-	const driver = await harness.connect(undefined, undefined, undefined, false);
-	await expect.poll(() => harness.generations.at(-1)?.fakeSdkActive).toBe(true);
-	const approvalSession = await driver.createSession(
-		"Approval read sharing",
-		undefined,
-		"claude",
-		{ permissionMode: "ask" },
-	);
-	const streams: string[] = [];
-	for (let index = 0; index < STREAMS; index++) {
-		const sessionId = await driver.createSession(`Stream ${index}`);
-		await Effect.runPromise(
-			driver.rpc["input.submit"]({
-				sessionId,
-				originId: driver.originId,
-				inputId: randomUUID(),
-				text: `load-stream-${index}`,
-				delivery: "queue",
+		const driver = await harness.connect(
+			undefined,
+			undefined,
+			undefined,
+			false,
+		);
+		await expect
+			.poll(() => harness.generations.at(-1)?.fakeSdkActive)
+			.toBe(true);
+		const approvalSession = await driver.createSession(
+			"Approval read sharing",
+			undefined,
+			"claude",
+			{ permissionMode: "ask" },
+		);
+		const streams: string[] = [];
+		for (let index = 0; index < STREAMS; index++) {
+			const sessionId = await driver.createSession(`Stream ${index}`);
+			await Effect.runPromise(
+				driver.rpc["input.submit"]({
+					sessionId,
+					originId: driver.originId,
+					inputId: randomUUID(),
+					text: `load-stream-${index}`,
+					delivery: "queue",
+				}),
+			);
+			streams.push(sessionId);
+		}
+		await driver.close();
+
+		const frames: Frame[] = [];
+		const shellSnapshots = new Set<number>();
+		const approvalFrames: { device: number; kind: string; id: string }[] = [];
+		// Whole /rpc payloads the opener receives, kept only while sizes are pinned.
+		let pinned: { bytes: number; payload: string }[] | undefined;
+		const pages: Page[] = [];
+		for (let device = 0; device < DEVICES; device++) {
+			const context = await browser.newContext({
+				...(viewport ? { viewport } : {}),
+				...(isMobile === undefined ? {} : { isMobile }),
+				...(hasTouch === undefined ? {} : { hasTouch }),
+			});
+			const page = await context.newPage();
+			// No turn activity block reports itself on screen, so nothing is
+			// prefetched (conduit-test-y7eo.11) and every window measures only
+			// what opening and restarting cost.
+			await page.addInitScript(() => {
+				const Observer = window.IntersectionObserver;
+				window.IntersectionObserver = class extends Observer {
+					constructor(
+						callback: IntersectionObserverCallback,
+						options?: IntersectionObserverInit,
+					) {
+						super((entries, observer) => {
+							const shown = entries.filter(
+								({ target }) => !target.matches(".turn-activity"),
+							);
+							if (shown.length > 0) callback(shown, observer);
+						}, options);
+					}
+				};
+			});
+			page.on("websocket", (socket) => {
+				const path = new URL(socket.url()).pathname;
+				const record =
+					(direction: Frame["direction"]) =>
+					({ payload }: { payload: string | Buffer }) => {
+						const bytes = Buffer.byteLength(payload);
+						if (direction === "received" && path === "/rpc") {
+							const message: {
+								_tag?: string;
+								values?: {
+									_tag: string;
+									rows?: { id?: string }[];
+									item?: {
+										_tag?: string;
+										sessionId?: string;
+										requestId?: string;
+									};
+									id?: string;
+								}[];
+							} = JSON.parse(payload.toString());
+							for (const envelope of message.values ?? []) {
+								if (
+									envelope._tag === "snapshot" &&
+									envelope.rows?.some((row) => row.id === HEAVY_SESSION_ID)
+								)
+									shellSnapshots.add(device);
+								if (
+									envelope._tag === "upsert" &&
+									envelope.item?._tag === "permission" &&
+									envelope.item.sessionId === approvalSession &&
+									envelope.item.requestId
+								)
+									approvalFrames.push({
+										device,
+										kind: "upsert",
+										id: envelope.item.requestId,
+									});
+								else if (envelope._tag === "remove" && envelope.id)
+									approvalFrames.push({
+										device,
+										kind: "remove",
+										id: envelope.id,
+									});
+							}
+						}
+						frames.push({
+							device,
+							socket: path,
+							direction,
+							at: Date.now(),
+							bytes,
+							head: payload.toString().slice(0, 120),
+						});
+						if (
+							pinned &&
+							device === DEVICES - 1 &&
+							direction === "received" &&
+							path === "/rpc"
+						)
+							pinned.push({ bytes, payload: payload.toString() });
+					};
+				socket.on("framereceived", record("received"));
+				socket.on("framesent", record("sent"));
+			});
+			pages.push(page);
+		}
+		const opener = pages[DEVICES - 1];
+		if (!opener) throw new Error("No opener device");
+		const heavyRow = opener.locator(
+			`[data-session-id="${HEAVY_SESSION_ID}"] .session-item-title:visible`,
+		);
+		await Promise.all(
+			pages.map(async (page, device) => {
+				const watched = WATCHED_STREAM[device];
+				const stream = watched === undefined ? undefined : streams[watched];
+				await new AppPage(page).goto(
+					stream === undefined
+						? `${harness.baseUrl}/?p=process-test`
+						: `${harness.baseUrl}/s/${stream}?p=process-test`,
+				);
+				await expect(
+					stream === undefined
+						? heavyRow
+						: page.locator(".msg-assistant").filter({ hasText: "tick(" }),
+				).toBeVisible({ timeout: 30_000 });
 			}),
 		);
-		streams.push(sessionId);
-	}
-	await driver.close();
+		// Detail text can arrive while the sidebar snapshot is still in flight.
+		await expect.poll(() => shellSnapshots.size).toBe(DEVICES);
+		const warmStart = await serverMetrics(warmMetrics);
+		const warmFrom = Date.now();
+		// This fixed sampling window measures sustained stream load and read sharing.
+		await opener.waitForTimeout(SETTLE_MS);
+		const warmTo = Date.now();
+		const warm = await serverMetrics(warmMetrics);
 
-	const frames: Frame[] = [];
-	const shellSnapshots = new Set<number>();
-	const approvalFrames: { device: number; kind: string; id: string }[] = [];
-	// Whole /rpc payloads the opener receives, kept only while sizes are pinned.
-	let pinned: { bytes: number; payload: string }[] | undefined;
-	const pages: Page[] = [];
-	for (let device = 0; device < DEVICES; device++) {
-		const context = await browser.newContext({
-			...(viewport ? { viewport } : {}),
-			...(isMobile === undefined ? {} : { isMobile }),
-			...(hasTouch === undefined ? {} : { hasTouch }),
-		});
-		const page = await context.newPage();
-		// No turn activity block reports itself on screen, so nothing is
-		// prefetched (conduit-test-y7eo.11) and every window measures only
-		// what opening and restarting cost.
-		await page.addInitScript(() => {
-			const Observer = window.IntersectionObserver;
-			window.IntersectionObserver = class extends Observer {
-				constructor(
-					callback: IntersectionObserverCallback,
-					options?: IntersectionObserverInit,
-				) {
-					super((entries, observer) => {
-						const shown = entries.filter(
-							({ target }) => !target.matches(".turn-activity"),
-						);
-						if (shown.length > 0) callback(shown, observer);
-					}, options);
-				}
-			};
-		});
-		page.on("websocket", (socket) => {
-			const path = new URL(socket.url()).pathname;
-			const record =
-				(direction: Frame["direction"]) =>
-				({ payload }: { payload: string | Buffer }) => {
-					const bytes = Buffer.byteLength(payload);
-					if (direction === "received" && path === "/rpc") {
-						const message: {
-							_tag?: string;
-							values?: {
-								_tag: string;
-								rows?: { id?: string }[];
-								item?: {
-									_tag?: string;
-									sessionId?: string;
-									requestId?: string;
-								};
-								id?: string;
-							}[];
-						} = JSON.parse(payload.toString());
-						for (const envelope of message.values ?? []) {
-							if (
-								envelope._tag === "snapshot" &&
-								envelope.rows?.some((row) => row.id === HEAVY_SESSION_ID)
-							)
-								shellSnapshots.add(device);
-							if (
-								envelope._tag === "upsert" &&
-								envelope.item?._tag === "permission" &&
-								envelope.item.sessionId === approvalSession &&
-								envelope.item.requestId
-							)
-								approvalFrames.push({
-									device,
-									kind: "upsert",
-									id: envelope.item.requestId,
-								});
-							else if (envelope._tag === "remove" && envelope.id)
-								approvalFrames.push({
-									device,
-									kind: "remove",
-									id: envelope.id,
-								});
-						}
-					}
-					frames.push({
-						device,
-						socket: path,
-						direction,
-						at: Date.now(),
-						bytes,
-						head: payload.toString().slice(0, 120),
-					});
-					if (
-						pinned &&
-						device === DEVICES - 1 &&
-						direction === "received" &&
-						path === "/rpc"
-					)
-						pinned.push({ bytes, payload: payload.toString() });
-				};
-			socket.on("framereceived", record("received"));
-			socket.on("framesent", record("sent"));
-		});
-		pages.push(page);
-	}
-	const opener = pages[DEVICES - 1];
-	if (!opener) throw new Error("No opener device");
-	const heavyRow = opener.locator(
-		`[data-session-id="${HEAVY_SESSION_ID}"] .session-item-title:visible`,
-	);
-	await Promise.all(
-		pages.map(async (page, device) => {
-			const watched = WATCHED_STREAM[device];
-			const stream = watched === undefined ? undefined : streams[watched];
-			await new AppPage(page).goto(
-				stream === undefined
-					? `${harness.baseUrl}/?p=process-test`
-					: `${harness.baseUrl}/s/${stream}?p=process-test`,
-			);
-			await expect(
-				stream === undefined
-					? heavyRow
-					: page.locator(".msg-assistant").filter({ hasText: "tick(" }),
-			).toBeVisible({ timeout: 30_000 });
-		}),
-	);
-	// Detail text can arrive while the sidebar snapshot is still in flight.
-	await expect.poll(() => shellSnapshots.size).toBe(DEVICES);
-	const warmStart = await serverMetrics(warmMetrics);
-	const warmFrom = Date.now();
-	// This fixed sampling window measures sustained stream load and read sharing.
-	await opener.waitForTimeout(SETTLE_MS);
-	const warmTo = Date.now();
-	const warm = await serverMetrics(warmMetrics);
-
-	const restartMetrics = join(harness.root, "server-metrics-restart.json");
-	const restartAt = Date.now();
-	await harness.terminate();
-	const stoppedAt = Date.now();
-	const storeRow = (query: string, ...params: (number | string)[]) => {
-		const db = new DatabaseSync(harness.daemonStorePath(), { readOnly: true });
-		try {
-			return db.prepare(query).get(...params) as {
-				n: number;
-				ids?: string | null;
-			};
-		} finally {
-			db.close();
-		}
-	};
-	const counterAtStop = storeRow("SELECT value AS n FROM read_model_counter").n;
-	const seqAtStop = storeRow("SELECT max(sequence) AS n FROM events").n;
-	await harness.restart({
-		keepPort: true,
-		metricsFile: restartMetrics,
-		profile: true,
-		skipBrowserProbe: true,
-	});
-	const readyAt = Date.now();
-	// Profile from here to the cold open below, leaving startup out.
-	writeFileSync(`${restartMetrics}.start`, "");
-
-	// Pick the row the way a user does, as soon as the server is back, and
-	// time it in the page to the frame that first shows the newest reply.
-	await expect(heavyRow).toBeVisible({ timeout: 30_000 });
-	await expect.poll(() => existsSync(`${restartMetrics}.started`)).toBe(true);
-	const clickAt = Date.now();
-	pinned = [];
-	const openMs = await opener.evaluate(
-		async ({ id, text }) => {
-			const started = performance.now();
-			document
-				.querySelector<HTMLElement>(
-					`[data-session-id="${id}"] .session-item-title`,
-				)
-				?.click();
-			await new Promise<void>((resolve) => {
-				const check = () =>
-					[...document.querySelectorAll(".msg-assistant")].some((message) =>
-						message.textContent?.includes(text),
-					)
-						? resolve()
-						: requestAnimationFrame(check);
-				check();
+		const restartMetrics = join(harness.root, "server-metrics-restart.json");
+		const restartAt = Date.now();
+		await harness.terminate();
+		const stoppedAt = Date.now();
+		const storeRow = (query: string, ...params: (number | string)[]) => {
+			const db = new DatabaseSync(harness.daemonStorePath(), {
+				readOnly: true,
 			});
-			return Math.round(performance.now() - started);
-		},
-		{ id: HEAVY_SESSION_ID, text: HEAVY_FINAL_TEXT },
-	);
-	const visibleAt = Date.now();
-	const heavyFirstPageBytes = Math.max(
-		0,
-		...pinned
-			.filter(({ payload }) => payload.includes(HEAVY_FINAL_TEXT))
-			.map(({ bytes }) => bytes),
-	);
-	pinned = undefined;
-	await expect(
-		opener.locator(".msg-assistant").filter({ hasText: HEAVY_FINAL_TEXT }),
-	).toBeVisible();
-	// Match the warm sampling window to measure sustained load after reconnecting.
-	await opener.waitForTimeout(SETTLE_MS);
-	const restartTo = Date.now();
-	// Rows versioned past the stopped store whose session took no event since:
-	// only a stamp, such as a git refresh, moves those. Opening the heavy
-	// session marks it seen, a stamp of its own, so it is left out.
-	const moved =
-		"SELECT session_id FROM events WHERE sequence > ? AND session_id IS NOT NULL UNION SELECT ?";
-	const stamped = storeRow(
-		`SELECT count(*) AS n, group_concat(id) AS ids FROM sessions WHERE project_id = 'process-test' AND version > ? AND id NOT IN (${moved})`,
-		counterAtStop,
-		seqAtStop,
-		HEAVY_SESSION_ID,
-	);
-	const restartStamps = {
-		counterAtStop,
-		counterAfter: storeRow("SELECT value AS n FROM read_model_counter").n,
-		sessions: stamped.n,
-		sessionIds: stamped.ids ?? "",
-		sidebarRows: storeRow(
-			`SELECT count(*) AS n FROM session_sidebar WHERE session_id IN (SELECT id FROM sessions WHERE project_id = 'process-test') AND version > ? AND session_id NOT IN (SELECT root_id FROM sessions WHERE id IN (${moved}))`,
+			try {
+				return db.prepare(query).get(...params) as {
+					n: number;
+					ids?: string | null;
+				};
+			} finally {
+				db.close();
+			}
+		};
+		const counterAtStop = storeRow(
+			"SELECT value AS n FROM read_model_counter",
+		).n;
+		const seqAtStop = storeRow("SELECT max(sequence) AS n FROM events").n;
+		await harness.restart({
+			keepPort: true,
+			metricsFile: restartMetrics,
+			profile: true,
+			skipBrowserProbe: true,
+		});
+		const readyAt = Date.now();
+		// Profile from here to the cold open below, leaving startup out.
+		writeFileSync(`${restartMetrics}.start`, "");
+
+		// Pick the row the way a user does, as soon as the server is back, and
+		// time it in the page to the frame that first shows the newest reply.
+		await expect(heavyRow).toBeVisible({ timeout: 30_000 });
+		await expect.poll(() => existsSync(`${restartMetrics}.started`)).toBe(true);
+		const clickAt = Date.now();
+		pinned = [];
+		const openMs = await opener.evaluate(
+			async ({ id, text }) => {
+				const started = performance.now();
+				document
+					.querySelector<HTMLElement>(
+						`[data-session-id="${id}"] .session-item-title`,
+					)
+					?.click();
+				await new Promise<void>((resolve) => {
+					const check = () =>
+						[...document.querySelectorAll(".msg-assistant")].some((message) =>
+							message.textContent?.includes(text),
+						)
+							? resolve()
+							: requestAnimationFrame(check);
+					check();
+				});
+				return Math.round(performance.now() - started);
+			},
+			{ id: HEAVY_SESSION_ID, text: HEAVY_FINAL_TEXT },
+		);
+		const visibleAt = Date.now();
+		const heavyFirstPageBytes = Math.max(
+			0,
+			...pinned
+				.filter(({ payload }) => payload.includes(HEAVY_FINAL_TEXT))
+				.map(({ bytes }) => bytes),
+		);
+		pinned = undefined;
+		await expect(
+			opener.locator(".msg-assistant").filter({ hasText: HEAVY_FINAL_TEXT }),
+		).toBeVisible();
+		// Match the warm sampling window to measure sustained load after reconnecting.
+		await opener.waitForTimeout(SETTLE_MS);
+		const restartTo = Date.now();
+		// Rows versioned past the stopped store whose session took no event since:
+		// only a stamp, such as a git refresh, moves those. Opening the heavy
+		// session marks it seen, a stamp of its own, so it is left out.
+		const moved =
+			"SELECT session_id FROM events WHERE sequence > ? AND session_id IS NOT NULL UNION SELECT ?";
+		const stamped = storeRow(
+			`SELECT count(*) AS n, group_concat(id) AS ids FROM sessions WHERE project_id = 'process-test' AND version > ? AND id NOT IN (${moved})`,
 			counterAtStop,
 			seqAtStop,
 			HEAVY_SESSION_ID,
-		).n,
-	};
-
-	const restarted = await serverMetrics(restartMetrics);
-
-	// Encoded sizes tool previews keep small (conduit-test-y7eo.6): the heavy
-	// session's first page above, then one live update of a Bash call with a
-	// long command and result, and that call's full detail when expanded.
-	pinned = [];
-	const toolDriver = await harness.connect(
-		undefined,
-		undefined,
-		undefined,
-		false,
-	);
-	const toolSession = await toolDriver.createSession("Long tool");
-	await new AppPage(opener).goto(
-		`${harness.baseUrl}/s/${toolSession}?p=process-test`,
-	);
-	await Effect.runPromise(
-		toolDriver.rpc["input.submit"]({
-			sessionId: toolSession,
-			originId: toolDriver.originId,
-			inputId: randomUUID(),
-			delivery: "queue",
-			text: "tool-long-pinned",
-		}),
-	);
-	const completedTool = () =>
-		pinned?.find(
-			({ payload }) =>
-				payload.includes('"tool":"Bash"') &&
-				payload.includes('"status":"completed"'),
 		);
-	await expect.poll(() => completedTool()?.bytes).toBeGreaterThan(0);
-	const toggle = opener.locator(".turn-activity-toggle").last();
-	await expect(toggle).toHaveAttribute("aria-expanded", "false");
-	await toggle.click();
-	const toolRow = opener.locator(".tool-item").last();
-	await toolRow.locator("button").first().click();
-	// Every call waits seconds on a server this loaded.
-	await expect(toolRow).toContainText("END-OF-result", { timeout: 30_000 });
-	const toolPreviews = {
-		heavyFirstPageBytes,
-		liveToolUpdateBytes: completedTool()?.bytes ?? 0,
-		detailResponseBytes:
-			pinned.find(({ payload }) => payload.includes('"tools":[{"toolId"'))
-				?.bytes ?? 0,
-		limits: TOOL_PREVIEW_LIMITS,
-	};
-	pinned = undefined;
-	await toolDriver.close();
+		const restartStamps = {
+			counterAtStop,
+			counterAfter: storeRow("SELECT value AS n FROM read_model_counter").n,
+			sessions: stamped.n,
+			sessionIds: stamped.ids ?? "",
+			sidebarRows: storeRow(
+				`SELECT count(*) AS n FROM session_sidebar WHERE session_id IN (SELECT id FROM sessions WHERE project_id = 'process-test') AND version > ? AND session_id NOT IN (SELECT root_id FROM sessions WHERE id IN (${moved}))`,
+				counterAtStop,
+				seqAtStop,
+				HEAVY_SESSION_ID,
+			).n,
+		};
 
-	// A long turn sends each change as the parts it moved (conduit-test-y7eo.8):
-	// its live frames stay flat however many tool calls the message holds.
-	const longDriver = await harness.connect(
-		undefined,
-		undefined,
-		undefined,
-		false,
-	);
-	const longSession = await longDriver.createSession("Long turn");
-	// Status paging puts 5,001 unread roots ahead of the read tool session.
-	// Keep both recent sessions in the page while switching away and back.
-	await new AppPage(opener).goto(
-		`${harness.baseUrl}/s/${longSession}?p=process-test&group=time`,
-	);
-	pinned = [];
-	// A loaded server takes a few hundred ms a call.
-	await longDriver.send(longSession, `load-tools-${LONG_TURN_CALLS}`, 120_000);
-	const lastResult = `load-tool-${LONG_TURN_CALLS}-${LONG_TURN_CALLS}-result`;
-	await expect
-		.poll(() => pinned?.some(({ payload }) => payload.includes(lastResult)))
-		.toBe(true);
-	const turnFrames = pinned
-		.filter(
-			({ payload }) =>
-				payload.includes('"_tag":"upsert"') &&
-				payload.includes(`load-tool-${LONG_TURN_CALLS}-`),
-		)
-		.map(({ bytes, payload }) => ({
-			bytes,
-			// One read can carry several changed parts; size each by its parts.
-			parts: payload.split('"_tag":"part"').length - 1,
-		}));
-	const perPart = turnFrames.map(
-		({ bytes, parts }) => bytes / Math.max(1, parts),
-	);
-	const quarter = Math.max(1, Math.floor(perPart.length / 4));
-	const median = (sizes: readonly number[]) =>
-		[...sizes].sort((a, b) => a - b)[Math.floor(sizes.length / 2)] ?? 0;
+		const restarted = await serverMetrics(restartMetrics);
 
-	// The heavy session opened cold, as a reload or a relaunched phone app does
-	// it: a fresh device, timed in the page from navigation to the newest reply.
-	// After the timed phases above, as it leaves seconds of queued reads behind.
-	const coldStart = await serverMetrics(restartMetrics);
-	const coldOpener = await (
-		await browser.newContext({
-			...(viewport ? { viewport } : {}),
-			...(isMobile === undefined ? {} : { isMobile }),
-			...(hasTouch === undefined ? {} : { hasTouch }),
-		})
-	).newPage();
-	const coldFrom = Date.now();
-	await coldOpener.goto(
-		`${harness.baseUrl}/s/${HEAVY_SESSION_ID}?p=process-test`,
-	);
-	const openedMs = async () =>
-		(
-			await coldOpener.waitForFunction(
-				(text) =>
-					[...document.querySelectorAll(".msg-assistant")].some((message) =>
-						message.textContent?.includes(text),
-					) && Math.round(performance.now()),
-				HEAVY_FINAL_TEXT,
-				{ polling: "raf", timeout: 30_000 },
-			)
-		).jsonValue();
-	const coldOpenMs = await openedMs();
-	const coldTo = Date.now();
-	// The same device reloads once the open has saved the session's page
-	// (conduit-test-y7eo.14): it draws that page, then resumes from it.
-	await expect
-		.poll(async () => HEAVY_SESSION_ID in (await savedTranscripts(coldOpener)))
-		.toBe(true);
-	await coldOpener.reload();
-	const cachedOpenMs = await openedMs();
-	await coldOpener.context().close();
-
-	writeFileSync(`${restartMetrics}.stop`, "");
-	const opened = await serverMetrics(restartMetrics);
-	await expect
-		.poll(() => existsSync(`${restartMetrics}.cpuprofile`), {
-			timeout: 30_000,
-		})
-		.toBe(true);
-	const profile = JSON.parse(
-		readFileSync(`${restartMetrics}.cpuprofile`, "utf8"),
-	) as CpuProfile;
-	await testInfo.attach("restart-server-cpuprofile", {
-		path: `${restartMetrics}.cpuprofile`,
-	});
-
-	// Away from the session, a follow-up turn lands and the server restarts;
-	// coming back resumes from the cursor the device holds.
-	const pick = (page: Page, id: string) =>
-		page
-			.locator(`[data-session-id="${id}"] .session-item-title`)
-			.dispatchEvent("click");
-	await pick(opener, toolSession);
-	await expect(opener).toHaveURL(new RegExp(toolSession));
-	await longDriver.send(longSession, `load-tools-${FOLLOW_UP_CALLS}`, 60_000);
-	await longDriver.close();
-	await harness.terminate();
-	const longRestartAt = Date.now();
-	const approvalMetrics = join(harness.root, "server-metrics-approvals.json");
-	await harness.restart({
-		keepPort: true,
-		skipBrowserProbe: true,
-		metricsFile: approvalMetrics,
-	});
-	await expect
-		.poll(
-			() =>
-				frames.some(
-					(frame) =>
-						frame.device === DEVICES - 1 &&
-						frame.direction === "received" &&
-						frame.at > longRestartAt,
-				),
-			{ timeout: 30_000 },
-		)
-		.toBe(true);
-	await expect(
-		opener.locator("#messages > div:not([inert]) .turn-activity-toggle").last(),
-	).toContainText("Worked");
-	pinned = [];
-	await pick(opener, longSession);
-	const followUp = `load-tools-${FOLLOW_UP_CALLS}`;
-	await expect(opener.locator("#messages")).toContainText(followUp);
-	await expect(
-		opener.locator("#messages > div:not([inert]) .turn-activity-toggle").last(),
-	).toContainText(new RegExp(`Worked.*${FOLLOW_UP_CALLS} commands`));
-	const resumed = pinned;
-	pinned = undefined;
-
-	// The same session opened cold, on a fresh device.
-	const cold = await (
-		await browser.newContext({
-			...(viewport ? { viewport } : {}),
-			...(isMobile === undefined ? {} : { isMobile }),
-			...(hasTouch === undefined ? {} : { hasTouch }),
-		})
-	).newPage();
-	let wholeMessageBytes = 0;
-	cold.on("websocket", (socket) =>
-		socket.on("framereceived", ({ payload }) => {
-			if (payload.toString().includes(lastResult))
-				wholeMessageBytes = Math.max(
-					wholeMessageBytes,
-					Buffer.byteLength(payload),
-				);
-		}),
-	);
-	await new AppPage(cold).goto(
-		`${harness.baseUrl}/s/${longSession}?p=process-test`,
-	);
-	await expect(cold.locator("#messages")).toContainText(followUp);
-	await expect(
-		cold.locator("#messages > div:not([inert]) .turn-activity-toggle").last(),
-	).toContainText(new RegExp(`Worked.*${FOLLOW_UP_CALLS} commands`));
-	const transcriptOf = async (page: Page) => {
-		const collapsed = page.locator(
-			'#messages .turn-activity-toggle[aria-expanded="false"]',
+		// Encoded sizes tool previews keep small (conduit-test-y7eo.6): the heavy
+		// session's first page above, then one live update of a Bash call with a
+		// long command and result, and that call's full detail when expanded.
+		pinned = [];
+		const toolDriver = await harness.connect(
+			undefined,
+			undefined,
+			undefined,
+			false,
 		);
-		while ((await collapsed.count()) > 0) await collapsed.first().click();
-		// The scroll button shows only while the view is detached: leave its rail
-		// out, so a scroll race can neither fake nor mask a difference in content.
-		return (
-			await page.locator("#messages > :not(:has(#scroll-btn))").allInnerTexts()
-		).join("\n");
-	};
-	await expect
-		.poll(() => opener.evaluate(() => localStorage.getItem("conduit-avatar")))
-		.not.toBeNull();
-	const avatarProfile = await opener.evaluate(() =>
-		localStorage.getItem("conduit-avatar"),
-	);
-	for (const device of [opener, cold]) {
+		const toolSession = await toolDriver.createSession("Long tool");
+		await new AppPage(opener).goto(
+			`${harness.baseUrl}/s/${toolSession}?p=process-test`,
+		);
+		await Effect.runPromise(
+			toolDriver.rpc["input.submit"]({
+				sessionId: toolSession,
+				originId: toolDriver.originId,
+				inputId: randomUUID(),
+				delivery: "queue",
+				text: "tool-long-pinned",
+			}),
+		);
+		const completedTool = () =>
+			pinned?.find(
+				({ payload }) =>
+					payload.includes('"tool":"Bash"') &&
+					payload.includes('"status":"completed"'),
+			);
+		await expect.poll(() => completedTool()?.bytes).toBeGreaterThan(0);
+		const toggle = opener.locator(".turn-activity-toggle").last();
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		await toggle.click();
+		const toolRow = opener.locator(".tool-item").last();
+		await toolRow.locator("button").first().click();
+		// Every call waits seconds on a server this loaded.
+		await expect(toolRow).toContainText("END-OF-result", { timeout: 30_000 });
+		const toolPreviews = {
+			heavyFirstPageBytes,
+			liveToolUpdateBytes: completedTool()?.bytes ?? 0,
+			detailResponseBytes:
+				pinned.find(({ payload }) => payload.includes('"tools":[{"toolId"'))
+					?.bytes ?? 0,
+			limits: TOOL_PREVIEW_LIMITS,
+		};
+		pinned = undefined;
+		await toolDriver.close();
+
+		// A long turn sends each change as the parts it moved (conduit-test-y7eo.8):
+		// its live frames stay flat however many tool calls the message holds.
+		const longDriver = await harness.connect(
+			undefined,
+			undefined,
+			undefined,
+			false,
+		);
+		const longSession = await longDriver.createSession("Long turn");
+		// Status paging puts 5,001 unread roots ahead of the read tool session.
+		// Keep both recent sessions in the page while switching away and back.
+		await new AppPage(opener).goto(
+			`${harness.baseUrl}/s/${longSession}?p=process-test&group=time`,
+		);
+		pinned = [];
+		// A loaded server takes a few hundred ms a call.
+		await longDriver.send(
+			longSession,
+			`load-tools-${LONG_TURN_CALLS}`,
+			120_000,
+		);
+		const lastResult = `load-tool-${LONG_TURN_CALLS}-${LONG_TURN_CALLS}-result`;
 		await expect
-			.poll(() => device.evaluate(() => localStorage.getItem("conduit-avatar")))
-			.toBe(avatarProfile);
-		// These two completed turns belong to the fixture's Claude session: the
-		// first ran on a known model, the second has none and keeps the provider.
-		const headers = device.locator("#messages .assistant-header");
-		await expect(headers).toHaveCount(2);
-		await expect(headers).toContainText(["Claude Sonnet (latest)", "Claude"]);
-	}
-	const [resumedTranscript, coldTranscript] = [
-		await transcriptOf(opener),
-		await transcriptOf(cold),
-	];
-	const longTurn = {
-		calls: LONG_TURN_CALLS,
-		liveFrames: turnFrames.length,
-		partsSent: turnFrames.reduce((total, { parts }) => total + parts, 0),
-		firstQuartileMedianBytesPerPart: Math.round(
-			median(perPart.slice(0, quarter)),
-		),
-		lastQuartileMedianBytesPerPart: Math.round(median(perPart.slice(-quarter))),
-		maxFrameBytes: Math.max(0, ...turnFrames.map(({ bytes }) => bytes)),
-		// What each late frame carried when a change re-sent the whole message.
-		wholeMessageBytes,
-		resume: {
-			frames: resumed.length,
-			bytes: resumed.reduce((total, { bytes }) => total + bytes, 0),
-			resentEarlierTurn: resumed.some(({ payload }) =>
-				payload.includes(`load-tool-${LONG_TURN_CALLS}-`),
-			),
-			carriedFollowUp: resumed.some(({ payload }) =>
-				payload.includes(`load-tool-${FOLLOW_UP_CALLS}-`),
-			),
-		},
-		resumedEqualsCold: resumedTranscript === coldTranscript,
-	};
-	await cold.context().close();
+			.poll(() => pinned?.some(({ payload }) => payload.includes(lastResult)))
+			.toBe(true);
+		const turnFrames = pinned
+			.filter(
+				({ payload }) =>
+					payload.includes('"_tag":"upsert"') &&
+					payload.includes(`load-tool-${LONG_TURN_CALLS}-`),
+			)
+			.map(({ bytes, payload }) => ({
+				bytes,
+				// One read can carry several changed parts; size each by its parts.
+				parts: payload.split('"_tag":"part"').length - 1,
+			}));
+		const perPart = turnFrames.map(
+			({ bytes, parts }) => bytes / Math.max(1, parts),
+		);
+		const quarter = Math.max(1, Math.floor(perPart.length / 4));
+		const median = (sizes: readonly number[]) =>
+			[...sizes].sort((a, b) => a - b)[Math.floor(sizes.length / 2)] ?? 0;
 
-	const report = {
-		schema: 1,
-		project: testInfo.project.name,
-		recordedAt: new Date().toISOString(),
-		fixture: { ...fixture, storeBytes },
-		devices: DEVICES,
-		streamingSessions: STREAMS,
-		restart: { stopMs: stoppedAt - restartAt, startMs: readyAt - stoppedAt },
-		restartStamps,
-		// Per device: from the old server stopping to the new one's first frame.
-		reconnectMs: pages.map(
-			(_, device) =>
-				(frames.find(
-					(frame) =>
-						frame.device === device &&
-						frame.direction === "received" &&
-						frame.at >= stoppedAt,
-				)?.at ?? Number.NaN) - stoppedAt,
-		),
-		open: {
-			sessionId: HEAVY_SESSION_ID,
-			ms: openMs,
-			fromReadyMs: visibleAt - readyAt,
-			wire: wire(
-				between(frames, clickAt, visibleAt).filter(
-					({ device }) => device === DEVICES - 1,
+		// The heavy session opened cold, as a reload or a relaunched phone app does
+		// it: a fresh device, timed in the page from navigation to the newest reply.
+		// After the timed phases above, as it leaves seconds of queued reads behind.
+		const coldStart = await serverMetrics(restartMetrics);
+		const coldOpener = await (
+			await browser.newContext({
+				...(viewport ? { viewport } : {}),
+				...(isMobile === undefined ? {} : { isMobile }),
+				...(hasTouch === undefined ? {} : { hasTouch }),
+			})
+		).newPage();
+		const coldFrom = Date.now();
+		await coldOpener.goto(
+			`${harness.baseUrl}/s/${HEAVY_SESSION_ID}?p=process-test`,
+		);
+		const openedMs = async () =>
+			(
+				await coldOpener.waitForFunction(
+					(text) =>
+						[...document.querySelectorAll(".msg-assistant")].some((message) =>
+							message.textContent?.includes(text),
+						) && Math.round(performance.now()),
+					HEAVY_FINAL_TEXT,
+					{ polling: "raf", timeout: 30_000 },
+				)
+			).jsonValue();
+		const coldOpenMs = await openedMs();
+		const coldTo = Date.now();
+		// The same device reloads once the open has saved the session's page
+		// (conduit-test-y7eo.14): it draws that page, then resumes from it.
+		await expect
+			.poll(
+				async () => HEAVY_SESSION_ID in (await savedTranscripts(coldOpener)),
+			)
+			.toBe(true);
+		await coldOpener.reload();
+		const cachedOpenMs = await openedMs();
+		await coldOpener.context().close();
+
+		writeFileSync(`${restartMetrics}.stop`, "");
+		const opened = await serverMetrics(restartMetrics);
+		await expect
+			.poll(() => existsSync(`${restartMetrics}.cpuprofile`), {
+				timeout: 30_000,
+			})
+			.toBe(true);
+		const profile = JSON.parse(
+			readFileSync(`${restartMetrics}.cpuprofile`, "utf8"),
+		) as CpuProfile;
+		await testInfo.attach("restart-server-cpuprofile", {
+			path: `${restartMetrics}.cpuprofile`,
+		});
+
+		// Away from the session, a follow-up turn lands and the server restarts;
+		// coming back resumes from the cursor the device holds.
+		const pick = (page: Page, id: string) =>
+			page
+				.locator(`[data-session-id="${id}"] .session-item-title`)
+				.dispatchEvent("click");
+		await pick(opener, toolSession);
+		await expect(opener).toHaveURL(new RegExp(toolSession));
+		await longDriver.send(longSession, `load-tools-${FOLLOW_UP_CALLS}`, 60_000);
+		await longDriver.close();
+		await harness.terminate();
+		const longRestartAt = Date.now();
+		const approvalMetrics = join(harness.root, "server-metrics-approvals.json");
+		await harness.restart({
+			keepPort: true,
+			skipBrowserProbe: true,
+			metricsFile: approvalMetrics,
+		});
+		await expect
+			.poll(
+				() =>
+					frames.some(
+						(frame) =>
+							frame.device === DEVICES - 1 &&
+							frame.direction === "received" &&
+							frame.at > longRestartAt,
+					),
+				{ timeout: 30_000 },
+			)
+			.toBe(true);
+		await expect(
+			opener
+				.locator("#messages > div:not([inert]) .turn-activity-toggle")
+				.last(),
+		).toContainText("Worked");
+		pinned = [];
+		await pick(opener, longSession);
+		const followUp = `load-tools-${FOLLOW_UP_CALLS}`;
+		await expect(opener.locator("#messages")).toContainText(followUp);
+		await expect(
+			opener
+				.locator("#messages > div:not([inert]) .turn-activity-toggle")
+				.last(),
+		).toContainText(new RegExp(`Worked.*${FOLLOW_UP_CALLS} commands`));
+		const resumed = pinned;
+		pinned = undefined;
+
+		// The same session opened cold, on a fresh device.
+		const cold = await (
+			await browser.newContext({
+				...(viewport ? { viewport } : {}),
+				...(isMobile === undefined ? {} : { isMobile }),
+				...(hasTouch === undefined ? {} : { hasTouch }),
+			})
+		).newPage();
+		let wholeMessageBytes = 0;
+		cold.on("websocket", (socket) =>
+			socket.on("framereceived", ({ payload }) => {
+				if (payload.toString().includes(lastResult))
+					wholeMessageBytes = Math.max(
+						wholeMessageBytes,
+						Buffer.byteLength(payload),
+					);
+			}),
+		);
+		await new AppPage(cold).goto(
+			`${harness.baseUrl}/s/${longSession}?p=process-test`,
+		);
+		await expect(cold.locator("#messages")).toContainText(followUp);
+		await expect(
+			cold.locator("#messages > div:not([inert]) .turn-activity-toggle").last(),
+		).toContainText(new RegExp(`Worked.*${FOLLOW_UP_CALLS} commands`));
+		const transcriptOf = async (page: Page) => {
+			const collapsed = page.locator(
+				'#messages .turn-activity-toggle[aria-expanded="false"]',
+			);
+			while ((await collapsed.count()) > 0) await collapsed.first().click();
+			// The scroll button shows only while the view is detached: leave its rail
+			// out, so a scroll race can neither fake nor mask a difference in content.
+			return (
+				await page
+					.locator("#messages > :not(:has(#scroll-btn))")
+					.allInnerTexts()
+			).join("\n");
+		};
+		await expect
+			.poll(() => opener.evaluate(() => localStorage.getItem("conduit-avatar")))
+			.not.toBeNull();
+		const avatarProfile = await opener.evaluate(() =>
+			localStorage.getItem("conduit-avatar"),
+		);
+		for (const device of [opener, cold]) {
+			await expect
+				.poll(() =>
+					device.evaluate(() => localStorage.getItem("conduit-avatar")),
+				)
+				.toBe(avatarProfile);
+			// These two completed turns belong to the fixture's Claude session: the
+			// first ran on a known model, the second has none and keeps the provider.
+			const headers = device.locator("#messages .assistant-header");
+			await expect(headers).toHaveCount(2);
+			await expect(headers).toContainText(["Claude Sonnet (latest)", "Claude"]);
+		}
+		const [resumedTranscript, coldTranscript] = [
+			await transcriptOf(opener),
+			await transcriptOf(cold),
+		];
+		const longTurn = {
+			calls: LONG_TURN_CALLS,
+			liveFrames: turnFrames.length,
+			partsSent: turnFrames.reduce((total, { parts }) => total + parts, 0),
+			firstQuartileMedianBytesPerPart: Math.round(
+				median(perPart.slice(0, quarter)),
+			),
+			lastQuartileMedianBytesPerPart: Math.round(
+				median(perPart.slice(-quarter)),
+			),
+			maxFrameBytes: Math.max(0, ...turnFrames.map(({ bytes }) => bytes)),
+			// What each late frame carried when a change re-sent the whole message.
+			wholeMessageBytes,
+			resume: {
+				frames: resumed.length,
+				bytes: resumed.reduce((total, { bytes }) => total + bytes, 0),
+				resentEarlierTurn: resumed.some(({ payload }) =>
+					payload.includes(`load-tool-${LONG_TURN_CALLS}-`),
 				),
-			),
-			server: {
-				...blocking(opened, clickAt, visibleAt),
-				cpu: cpuCosts(profile, clickAt, visibleAt),
-			},
-			// The settle after it: the load a cold open below arrives into.
-			settle: {
-				ms: restartTo - visibleAt,
-				...blocking(opened, visibleAt, restartTo),
-				cpu: cpuCosts(profile, visibleAt, restartTo),
-			},
-		},
-		cachedOpen: { sessionId: HEAVY_SESSION_ID, ms: cachedOpenMs },
-		coldOpen: {
-			sessionId: HEAVY_SESSION_ID,
-			ms: coldOpenMs,
-			server: {
-				...serverWindow(coldStart, opened, coldFrom, coldTo),
-				cpu: cpuCosts(profile, coldFrom, coldTo),
-			},
-		},
-		wire: {
-			warm: {
-				ms: warmTo - warmFrom,
-				...wire(between(frames, warmFrom, warmTo)),
-			},
-			restart: {
-				ms: restartTo - restartAt,
-				...wire(between(frames, restartAt, restartTo)),
-				byDevice: pages.map(
-					(_, device) =>
-						wire(
-							between(frames, restartAt, restartTo).filter(
-								(frame) => frame.device === device,
-							),
-						).received,
+				carriedFollowUp: resumed.some(({ payload }) =>
+					payload.includes(`load-tool-${FOLLOW_UP_CALLS}-`),
 				),
 			},
-		},
-		toolPreviews,
-		longTurn,
-		server: {
-			warm: serverWindow(warmStart, warm, warmFrom, warmTo),
-			restart: serverWindow(undefined, restarted, stoppedAt, restartTo),
-		},
-	};
-	mkdirSync("test-results", { recursive: true });
-	const output = join(
-		"test-results",
-		`restart-load.${testInfo.project.name}.json`,
-	);
-	writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
-	await testInfo.attach("restart-load-report", { path: output });
+			resumedEqualsCold: resumedTranscript === coldTranscript,
+		};
+		await cold.context().close();
 
-	// Sanity only; targets arrive with the tickets that move them.
-	expect(fixture.sessions).toBeGreaterThanOrEqual(10_000);
-	expect(openMs).toBeGreaterThan(0);
-	expect(coldOpenMs).toBeGreaterThan(0);
-	expect(report.open.wire.received.frames).toBeGreaterThan(0);
-	for (const device of report.wire.restart.byDevice)
-		expect(device.frames).toBeGreaterThan(0);
-	expect(report.reconnectMs.every(Number.isFinite)).toBe(true);
-	// Devices that keep pace ask the same window and share one read of it; one
-	// that falls behind catches up with one read of its own, a different window
-	// (conduit-test-y7eo.4).
-	// Only changed collections are read during plain streaming (8rdf.13).
-	const shared = report.server.warm.bySource;
-	const detailSource = `session-detail/${streams[0]}`;
-	expect(shared[detailSource]?.changesRead).toBeGreaterThan(0);
-	expect(shared[detailSource]?.reads["window"]).toBe(
-		shared[detailSource]?.windowsRead,
-	);
-	for (const name of ["shell", "approvals", `session-family/${streams[0]}`])
-		expect(shared[name]?.reads["window"] ?? 0, name).toBe(0);
-	// Family reads avoid scanning every session row (conduit-test-y7eo.15).
-	for (const [phase, server] of Object.entries({
-		restart: report.server.restart,
-		coldOpen: report.coldOpen.server,
-	}))
-		expect(server.familyReads?.fullSessionScans, phase).toBe(0);
-	// Every device reconnects with its cursor and is sent the sidebar changes
-	// past it, not the list again: no base read, and fewer rows across all four
-	// than one list holds (conduit-test-y7eo.3).
-	const afterRestart = report.server.restart;
-	expect(afterRestart.bySource["shell"]?.reads).not.toHaveProperty("base");
-	expect(afterRestart.bySource["shell"]?.reads["resume"]).toBe(DEVICES);
-	expect(afterRestart.sidebarReads.rows).toBeLessThan(fixture.families);
-	// Git did not move while the daemon was down, so the restart stamped
-	// nothing (conduit-test-y7eo.16).
-	expect(restartStamps).toMatchObject({ sessions: 0, sidebarRows: 0 });
-	for (const [name, limit] of Object.entries(TOOL_PREVIEW_LIMITS)) {
-		const bytes = toolPreviews[name as keyof typeof TOOL_PREVIEW_LIMITS];
-		expect(bytes, name).toBeGreaterThan(0);
-		expect(bytes, name).toBeLessThanOrEqual(limit);
-	}
-	// Flat: a part late in the turn costs about what one early in it did (a
-	// completed call carries its result, so a little more), though the message
-	// grew 40 calls; re-sending the message grew ~7x over the same span. And no
-	// frame comes near the message it belongs to.
-	expect(longTurn.liveFrames).toBeGreaterThanOrEqual(LONG_TURN_CALLS / 4);
-	expect(longTurn.lastQuartileMedianBytesPerPart).toBeLessThanOrEqual(
-		longTurn.firstQuartileMedianBytesPerPart * 1.5,
-	);
-	expect(longTurn.maxFrameBytes * 5).toBeLessThan(longTurn.wholeMessageBytes);
-	// Resume brings only what moved, and lands where a cold open does.
-	expect(longTurn.resume).toMatchObject({
-		resentEarlierTurn: false,
-		carriedFollowUp: true,
-	});
-	expect(resumedTranscript).toBe(coldTranscript);
-
-	const approvalStarted = Date.now();
-	await new AppPage(opener).goto(
-		`${harness.baseUrl}/s/${approvalSession}?p=process-test`,
-	);
-	const approvalStart = await serverMetrics(approvalMetrics);
-	await new AppPage(opener).sendMessage("approval-read-sharing");
-	await expect
-		.poll(
-			() =>
-				new Set(
-					approvalFrames
-						.filter((frame) => frame.kind === "upsert")
-						.map((frame) => frame.device),
-				).size,
-		)
-		.toBe(DEVICES);
-	const approvalId = approvalFrames.find(
-		(frame) => frame.kind === "upsert",
-	)?.id;
-	if (!approvalId) throw new Error("No approval delivered");
-	await opener
-		.locator(".permission-card")
-		.getByRole("button", { name: "Allow", exact: true })
-		.click();
-	await expect
-		.poll(
-			() =>
-				new Set(
-					approvalFrames
-						.filter(
-							(frame) => frame.kind === "remove" && frame.id === approvalId,
-						)
-						.map((frame) => frame.device),
-				).size,
-		)
-		.toBe(DEVICES);
-	const approvalEnd = await serverMetrics(approvalMetrics);
-	const approvalReads = serverWindow(
-		approvalStart,
-		approvalEnd,
-		approvalStarted,
-		Date.now(),
-	).bySource["approvals"];
-	expect(approvalReads?.reads["window"]).toBeGreaterThan(0);
-	expect(approvalReads?.reads["window"]).toBe(approvalReads?.windowsRead);
-	const approvalReport = testInfo.outputPath("approval-read-sharing.json");
-	writeFileSync(
-		approvalReport,
-		JSON.stringify(
-			{
-				frames: approvalFrames,
-				reads: approvalReads,
-				ms: Date.now() - approvalStarted,
+		const report = {
+			schema: 1,
+			project: testInfo.project.name,
+			recordedAt: new Date().toISOString(),
+			fixture: { ...fixture, storeBytes },
+			devices: DEVICES,
+			streamingSessions: STREAMS,
+			restart: { stopMs: stoppedAt - restartAt, startMs: readyAt - stoppedAt },
+			restartStamps,
+			// Per device: from the old server stopping to the new one's first frame.
+			reconnectMs: pages.map(
+				(_, device) =>
+					(frames.find(
+						(frame) =>
+							frame.device === device &&
+							frame.direction === "received" &&
+							frame.at >= stoppedAt,
+					)?.at ?? Number.NaN) - stoppedAt,
+			),
+			open: {
+				sessionId: HEAVY_SESSION_ID,
+				ms: openMs,
+				fromReadyMs: visibleAt - readyAt,
+				wire: wire(
+					between(frames, clickAt, visibleAt).filter(
+						({ device }) => device === DEVICES - 1,
+					),
+				),
+				server: {
+					...blocking(opened, clickAt, visibleAt),
+					cpu: cpuCosts(profile, clickAt, visibleAt),
+				},
+				// The settle after it: the load a cold open below arrives into.
+				settle: {
+					ms: restartTo - visibleAt,
+					...blocking(opened, visibleAt, restartTo),
+					cpu: cpuCosts(profile, visibleAt, restartTo),
+				},
 			},
-			null,
-			2,
-		),
-	);
-	await testInfo.attach("approval-read-sharing", { path: approvalReport });
-	for (const page of pages) await page.context().close();
-});
+			cachedOpen: { sessionId: HEAVY_SESSION_ID, ms: cachedOpenMs },
+			coldOpen: {
+				sessionId: HEAVY_SESSION_ID,
+				ms: coldOpenMs,
+				server: {
+					...serverWindow(coldStart, opened, coldFrom, coldTo),
+					cpu: cpuCosts(profile, coldFrom, coldTo),
+				},
+			},
+			wire: {
+				warm: {
+					ms: warmTo - warmFrom,
+					...wire(between(frames, warmFrom, warmTo)),
+				},
+				restart: {
+					ms: restartTo - restartAt,
+					...wire(between(frames, restartAt, restartTo)),
+					byDevice: pages.map(
+						(_, device) =>
+							wire(
+								between(frames, restartAt, restartTo).filter(
+									(frame) => frame.device === device,
+								),
+							).received,
+					),
+				},
+			},
+			toolPreviews,
+			longTurn,
+			server: {
+				warm: serverWindow(warmStart, warm, warmFrom, warmTo),
+				restart: serverWindow(undefined, restarted, stoppedAt, restartTo),
+			},
+		};
+		mkdirSync("test-results", { recursive: true });
+		const output = join(
+			"test-results",
+			`restart-load.${testInfo.project.name}.json`,
+		);
+		writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
+		await testInfo.attach("restart-load-report", { path: output });
+
+		// Sanity only; targets arrive with the tickets that move them.
+		expect(fixture.sessions).toBeGreaterThanOrEqual(10_000);
+		expect(openMs).toBeGreaterThan(0);
+		expect(coldOpenMs).toBeGreaterThan(0);
+		expect(report.open.wire.received.frames).toBeGreaterThan(0);
+		for (const device of report.wire.restart.byDevice)
+			expect(device.frames).toBeGreaterThan(0);
+		expect(report.reconnectMs.every(Number.isFinite)).toBe(true);
+		// Devices that keep pace ask the same window and share one read of it; one
+		// that falls behind catches up with one read of its own, a different window
+		// (conduit-test-y7eo.4).
+		// Only changed collections are read during plain streaming (8rdf.13).
+		const shared = report.server.warm.bySource;
+		const detailSource = `session-detail/${streams[0]}`;
+		expect(shared[detailSource]?.changesRead).toBeGreaterThan(0);
+		expect(shared[detailSource]?.reads["window"]).toBe(
+			shared[detailSource]?.windowsRead,
+		);
+		for (const name of ["shell", "approvals", `session-family/${streams[0]}`])
+			expect(shared[name]?.reads["window"] ?? 0, name).toBe(0);
+		// Family reads avoid scanning every session row (conduit-test-y7eo.15).
+		for (const [phase, server] of Object.entries({
+			restart: report.server.restart,
+			coldOpen: report.coldOpen.server,
+		}))
+			expect(server.familyReads?.fullSessionScans, phase).toBe(0);
+		// Every device reconnects with its cursor and is sent the sidebar changes
+		// past it, not the list again: no base read, and fewer rows across all four
+		// than one list holds (conduit-test-y7eo.3).
+		const afterRestart = report.server.restart;
+		expect(afterRestart.bySource["shell"]?.reads).not.toHaveProperty("base");
+		expect(afterRestart.bySource["shell"]?.reads["resume"]).toBe(DEVICES);
+		expect(afterRestart.sidebarReads.rows).toBeLessThan(fixture.families);
+		// Git did not move while the daemon was down, so the restart stamped
+		// nothing (conduit-test-y7eo.16).
+		expect(restartStamps).toMatchObject({ sessions: 0, sidebarRows: 0 });
+		for (const [name, limit] of Object.entries(TOOL_PREVIEW_LIMITS)) {
+			const bytes = toolPreviews[name as keyof typeof TOOL_PREVIEW_LIMITS];
+			expect(bytes, name).toBeGreaterThan(0);
+			expect(bytes, name).toBeLessThanOrEqual(limit);
+		}
+		// Flat: a part late in the turn costs about what one early in it did (a
+		// completed call carries its result, so a little more), though the message
+		// grew 40 calls; re-sending the message grew ~7x over the same span. And no
+		// frame comes near the message it belongs to.
+		expect(longTurn.liveFrames).toBeGreaterThanOrEqual(LONG_TURN_CALLS / 4);
+		expect(longTurn.lastQuartileMedianBytesPerPart).toBeLessThanOrEqual(
+			longTurn.firstQuartileMedianBytesPerPart * 1.5,
+		);
+		expect(longTurn.maxFrameBytes * 5).toBeLessThan(longTurn.wholeMessageBytes);
+		// Resume brings only what moved, and lands where a cold open does.
+		expect(longTurn.resume).toMatchObject({
+			resentEarlierTurn: false,
+			carriedFollowUp: true,
+		});
+		expect(resumedTranscript).toBe(coldTranscript);
+
+		const approvalStarted = Date.now();
+		await new AppPage(opener).goto(
+			`${harness.baseUrl}/s/${approvalSession}?p=process-test`,
+		);
+		const approvalStart = await serverMetrics(approvalMetrics);
+		await new AppPage(opener).sendMessage("approval-read-sharing");
+		await expect
+			.poll(
+				() =>
+					new Set(
+						approvalFrames
+							.filter((frame) => frame.kind === "upsert")
+							.map((frame) => frame.device),
+					).size,
+			)
+			.toBe(DEVICES);
+		const approvalId = approvalFrames.find(
+			(frame) => frame.kind === "upsert",
+		)?.id;
+		if (!approvalId) throw new Error("No approval delivered");
+		await opener
+			.locator(".permission-card")
+			.getByRole("button", { name: "Allow", exact: true })
+			.click();
+		await expect
+			.poll(
+				() =>
+					new Set(
+						approvalFrames
+							.filter(
+								(frame) => frame.kind === "remove" && frame.id === approvalId,
+							)
+							.map((frame) => frame.device),
+					).size,
+			)
+			.toBe(DEVICES);
+		const approvalEnd = await serverMetrics(approvalMetrics);
+		const approvalReads = serverWindow(
+			approvalStart,
+			approvalEnd,
+			approvalStarted,
+			Date.now(),
+		).bySource["approvals"];
+		expect(approvalReads?.reads["window"]).toBeGreaterThan(0);
+		expect(approvalReads?.reads["window"]).toBe(approvalReads?.windowsRead);
+		const approvalReport = testInfo.outputPath("approval-read-sharing.json");
+		writeFileSync(
+			approvalReport,
+			JSON.stringify(
+				{
+					frames: approvalFrames,
+					reads: approvalReads,
+					ms: Date.now() - approvalStarted,
+				},
+				null,
+				2,
+			),
+		);
+		await testInfo.attach("approval-read-sharing", { path: approvalReport });
+		for (const page of pages) await page.context().close();
+	},
+);

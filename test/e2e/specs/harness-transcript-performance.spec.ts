@@ -272,88 +272,97 @@ test("one streamed part renders markdown once in a 292-text-part message", async
 	expect(pageErrors).toEqual([]);
 });
 
-test("snapshot installation scales below 8x for 4x as many parts", async ({
-	harness,
-	page,
-}, testInfo) => {
-	test.setTimeout(180_000);
-	const sessions = [1, 2, 4].map((scale) => ({
-		id: `perf-snapshot-${scale}`,
-		parts: BASE_PARTS * scale,
-		textOnly: false,
-	}));
-	await harness.terminate();
-	await seed(harness.daemonStorePath(), sessions);
-	await harness.restart({ keepPort: true });
-	await page.addInitScript(() =>
-		Reflect.set(window, "__conduitMeasureTranscriptApply", true),
-	);
-	const detail = await watchDetail(page);
-	const pageErrors: string[] = [];
-	page.on("pageerror", (error) => pageErrors.push(error.message));
-	const times: { parts: number; samplesMs: number[]; medianMs: number }[] = [];
-	try {
-		for (const session of sessions) {
-			await new AppPage(page).goto(
-				`${harness.baseUrl}/s/${session.id}?p=process-test`,
-			);
-			await expect(
-				page.locator(".msg-assistant").filter({ hasText: marker(session.id) }),
-			).toBeVisible({ timeout: 30_000 });
-			await expect.poll(() => detail.synchronized).toBe(true);
-			const snapshot = detail.snapshot;
-			const send = detail.send;
-			if (!snapshot || !send)
-				throw new Error("No seeded detail snapshot captured");
-			const parts = snapshot.rows.filter(
-				(row) => row._tag === "part" && row.messageId === messageId(session.id),
-			);
-			expect(parts).toHaveLength(session.parts);
-			expect(
-				parts
-					.map((row) => (row._tag === "part" ? row.sortOrder : -1))
-					.sort((a, b) => a - b),
-			).toEqual(Array.from({ length: session.parts }, (_, index) => index));
-			// Initial installation warms the code. Measure repeated real applies;
-			// the median limits timer/JIT/GC noise without hiding quadratic growth.
-			await expect
-				.poll(() =>
-					measurements(page, session.parts).then((entries) => entries.length),
-				)
-				.toBeGreaterThan(0);
-			await page.evaluate(() =>
-				performance.clearMeasures("conduit:transcript-apply"),
-			);
-			for (let sample = 0; sample < SAMPLES; sample++) {
-				send({ ...snapshot, sequence: snapshot.sequence + sample + 1 });
+test(
+	"snapshot installation scales below 8x for 4x as many parts",
+	{ tag: "@timed" },
+	async ({ harness, page }, testInfo) => {
+		test.setTimeout(180_000);
+		const sessions = [1, 2, 4].map((scale) => ({
+			id: `perf-snapshot-${scale}`,
+			parts: BASE_PARTS * scale,
+			textOnly: false,
+		}));
+		await harness.terminate();
+		await seed(harness.daemonStorePath(), sessions);
+		await harness.restart({ keepPort: true });
+		await page.addInitScript(() =>
+			Reflect.set(window, "__conduitMeasureTranscriptApply", true),
+		);
+		const detail = await watchDetail(page);
+		const pageErrors: string[] = [];
+		page.on("pageerror", (error) => pageErrors.push(error.message));
+		const times: { parts: number; samplesMs: number[]; medianMs: number }[] =
+			[];
+		try {
+			for (const session of sessions) {
+				await new AppPage(page).goto(
+					`${harness.baseUrl}/s/${session.id}?p=process-test`,
+				);
+				await expect(
+					page
+						.locator(".msg-assistant")
+						.filter({ hasText: marker(session.id) }),
+				).toBeVisible({ timeout: 30_000 });
+				await expect.poll(() => detail.synchronized).toBe(true);
+				const snapshot = detail.snapshot;
+				const send = detail.send;
+				if (!snapshot || !send)
+					throw new Error("No seeded detail snapshot captured");
+				const parts = snapshot.rows.filter(
+					(row) =>
+						row._tag === "part" && row.messageId === messageId(session.id),
+				);
+				expect(parts).toHaveLength(session.parts);
+				expect(
+					parts
+						.map((row) => (row._tag === "part" ? row.sortOrder : -1))
+						.sort((a, b) => a - b),
+				).toEqual(Array.from({ length: session.parts }, (_, index) => index));
+				// Initial installation warms the code. Measure repeated real applies;
+				// the median limits timer/JIT/GC noise without hiding quadratic growth.
 				await expect
 					.poll(() =>
 						measurements(page, session.parts).then((entries) => entries.length),
 					)
-					.toBe(sample + 1);
+					.toBeGreaterThan(0);
+				await page.evaluate(() =>
+					performance.clearMeasures("conduit:transcript-apply"),
+				);
+				for (let sample = 0; sample < SAMPLES; sample++) {
+					send({ ...snapshot, sequence: snapshot.sequence + sample + 1 });
+					await expect
+						.poll(() =>
+							measurements(page, session.parts).then(
+								(entries) => entries.length,
+							),
+						)
+						.toBe(sample + 1);
+				}
+				const samplesMs = await measurements(page, session.parts);
+				times.push({
+					parts: session.parts,
+					samplesMs,
+					medianMs: median(samplesMs),
+				});
 			}
-			const samplesMs = await measurements(page, session.parts);
-			times.push({
-				parts: session.parts,
-				samplesMs,
-				medianMs: median(samplesMs),
-			});
+		} finally {
+			mkdirSync("test-results", { recursive: true });
+			const output = join(
+				"test-results",
+				`transcript-snapshot.${testInfo.project.name}.json`,
+			);
+			const ratio = (times[2]?.medianMs ?? 0) / (times[0]?.medianMs ?? 0);
+			writeFileSync(
+				output,
+				`${JSON.stringify({ project: testInfo.project.name, baseParts: BASE_PARTS, times, ratio4xTo1x: ratio, pageErrors }, null, 2)}\n`,
+			);
+			await testInfo.attach("transcript-snapshot-report", { path: output });
 		}
-	} finally {
-		mkdirSync("test-results", { recursive: true });
-		const output = join(
-			"test-results",
-			`transcript-snapshot.${testInfo.project.name}.json`,
+		expect(times).toHaveLength(3);
+		expect(times[0]?.medianMs).toBeGreaterThan(0);
+		expect((times[2]?.medianMs ?? 0) / (times[0]?.medianMs ?? 0)).toBeLessThan(
+			8,
 		);
-		const ratio = (times[2]?.medianMs ?? 0) / (times[0]?.medianMs ?? 0);
-		writeFileSync(
-			output,
-			`${JSON.stringify({ project: testInfo.project.name, baseParts: BASE_PARTS, times, ratio4xTo1x: ratio, pageErrors }, null, 2)}\n`,
-		);
-		await testInfo.attach("transcript-snapshot-report", { path: output });
-	}
-	expect(times).toHaveLength(3);
-	expect(times[0]?.medianMs).toBeGreaterThan(0);
-	expect((times[2]?.medianMs ?? 0) / (times[0]?.medianMs ?? 0)).toBeLessThan(8);
-	expect(pageErrors).toEqual([]);
-});
+		expect(pageErrors).toEqual([]);
+	},
+);
