@@ -38,6 +38,10 @@ quiescence sticky and blocks its idle exit. The real gaps are two:
   reconciler like any Stop (S3). Nothing is forked unawaited.
 - Every command the daemon sends to a runner bumps that runner's activity counter under the lock,
   so the re-check cancels a swap that a non-run command (settings change, MCP toggle) raced.
+  This covers commands sent while the session's runner manager exists, because only it can swap.
+  The standalone shutdown sent to registered runners after the manager is disposed (full stop,
+  project removal) is out of scope: no swap can be in flight, and its Stop is already committed,
+  so the swap's commit would refuse a retired old row anyway.
 
 ## S7. The database names each session's serving runner
 
