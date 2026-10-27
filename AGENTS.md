@@ -206,6 +206,29 @@ Skip validation for low-risk changes and say so plainly.
 Use the cheapest useful check for risky changes.
 Do not run full test suites or full builds unless risk justifies it or the user asks.
 
+## Review Rounds
+
+Three review rounds in a row with material findings mean the design is wrong, not the code.
+
+- A round is one review of a ticket's diff (Codex, Claude or human) followed by its fixes. Material means a correctness, contract or regression finding (P1 or P2); nits, style and wording do not count. A round that finds nothing material resets the count.
+- Log every round on the ticket's bead: `bd update <id> --append-notes "review round N: K material findings (<one-line summary>)"`. The count lives there, so it survives compaction and new sessions.
+- A fix round that corrects the agent's own wrong instruction, not a review finding, is not a round.
+
+### Redesign after the third round
+
+After the third consecutive round with material findings, stop fixing and redesign. The user stays out of the loop: answer the design skills' clarifying questions and approval gates yourself, from the code, the beads and the findings.
+
+1. **Name the pattern.** Write up which state, owner or seam keeps producing the findings. That seam is the redesign's scope.
+2. **Gather options.** Run `/conduit-brainstorm`, then `/conduit-codebase-design`, then `/conduit-improve-codebase-architecture` focused on that seam. Hold each skill's spec and ticket hand-off until step 4.
+3. **Pick.** Combine the options into the best long-term design and choose it. Append the choice and each rejected option, with a one-line reason, to the ticket's bead.
+4. **Update the spec and beads.** Revise the spec and every affected ticket (create, close, re-edge with `bd dep`) to match the design.
+5. **Review the spec and tickets, three rounds.** Each round runs both reviews in order and applies every improvement before the next:
+   1. `/ub-mode`: review, and make all possible improvements to the spec and tickets.
+   2. `/pstack:poteto-mode`: the same, and confirm every piece of state has exactly one owner.
+6. **Resume** implementation on the revised tickets. The review-round count restarts at zero.
+
+The `conduit-*` skills and `poteto-mode` are user-only, so the Skill tool refuses them. Read and follow their `SKILL.md` directly: `~/.agents/skills/<name>/`, and `poteto-mode` under the pstack plugin's `skills/` directory.
+
 ## Subagents
 
 Use subagents only when they save context, save time, or materially improve output quality.
