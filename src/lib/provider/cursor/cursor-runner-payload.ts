@@ -216,8 +216,10 @@ export class CursorRunnerPayload implements RunnerPayload {
 			};
 			this.sinks.retainSink(sink);
 			yield* this.runTurn(input, sink, claim, intake).pipe(
+				// A failed sandbox poisons the runner even when an abort already
+				// answered the command, so its result cannot be the only trigger.
 				Effect.onExit((exit) =>
-					Exit.isFailure(exit)
+					Exit.isFailure(exit) || this.sandboxFailed
 						? Effect.sync(() => this.deps.onAbandonedRun?.(input.inputId))
 						: Effect.void,
 				),
