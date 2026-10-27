@@ -14,14 +14,19 @@ import sharp from "sharp";
 const BRAND = "#4352d2"; // --color-brand in style.css
 const HOOK = "M2 4h5a2 2 0 0 1 0 4H5"; // ConduitMark's 12-unit hook
 
-// Favicons: the rounded tile on transparent (browser tabs, bookmarks)
-const FAVICON_OUTPUTS = [{ name: "favicon-96x96.png", size: 96 }];
-
-// App icons: full-bleed tile, because iOS and maskable launchers cut their own corners
-const APP_ICON_OUTPUTS = [
-	{ name: "apple-touch-icon.png", size: 180 },
+// The rounded tile on transparent: browser tabs, bookmarks, and manifest "any"
+// icons, which desktop installs show as drawn.
+const ROUNDED_OUTPUTS = [
+	{ name: "favicon-96x96.png", size: 96 },
 	{ name: "web-app-manifest-192x192.png", size: 192 },
 	{ name: "web-app-manifest-512x512.png", size: 512 },
+];
+
+// Full-bleed tile for iOS and manifest "maskable" icons: the OS cuts its own
+// corners, and iOS fills transparent ones with black.
+const FULL_BLEED_OUTPUTS = [
+	{ name: "apple-touch-icon.png", size: 180 },
+	{ name: "web-app-manifest-maskable-512x512.png", size: 512 },
 ];
 
 const STATIC_DIR = join(
@@ -56,7 +61,7 @@ async function main() {
 	writeFileSync(svgPath, svgFavicon);
 	console.log(`  ✓ favicon.svg (transparent)`);
 
-	for (const { name, size } of FAVICON_OUTPUTS) {
+	for (const { name, size } of ROUNDED_OUTPUTS) {
 		const svg = generateSVG(size);
 		const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
 		writeFileSync(join(STATIC_DIR, name), pngBuffer);
@@ -75,9 +80,9 @@ async function main() {
 	writeFileSync(join(STATIC_DIR, "favicon.ico"), icoBuffer);
 	console.log(`  ✓ favicon.ico (${icoSizes.join(", ")}px, transparent)`);
 
-	// App icons
+	// Full-bleed icons
 
-	for (const { name, size } of APP_ICON_OUTPUTS) {
+	for (const { name, size } of FULL_BLEED_OUTPUTS) {
 		const svg = generateSVG(size, { fullBleed: true });
 		const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
 		writeFileSync(join(STATIC_DIR, name), pngBuffer);
