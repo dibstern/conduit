@@ -509,7 +509,7 @@ describe("Surfacing in primary and child transcripts", () => {
 		expect(rpc.call).toHaveBeenCalledWith("UpdateMessageSurfacing", {
 			defaultLevel: "key",
 		});
-		await fireEvent.click(level.getByRole("radio", { name: "Balanced" }));
+		await fireEvent.click(level.getByRole("radio", { name: "Most" }));
 		await fireEvent.keyDown(
 			view.getByRole("button", { name: "Level options" }),
 			{ key: "Enter" },

@@ -1,4 +1,4 @@
-<!-- The Final turn head keeps counts and duration above a shared activity strip.
+<!-- The turn head keeps counts and duration above a shared activity strip.
      Skills, task status and the bill stay in the step log or duration hover.
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
@@ -17,6 +17,7 @@
 	import { findSession } from "../../stores/session.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { logSteps, stopCounts } from "../../utils/turn-stops.js";
 	import { surfaceTurn, surfaceTime, surfaceKey, type CardSelection, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
 	import SurfacingCard, { type ReadState, type SurfacingRegions } from "./SurfacingCard.svelte";
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
@@ -106,7 +107,9 @@
 	const logEntries = $derived(entries ?? segment.activity.map((part, index): TurnLogEntry => ({ kind: "step", uuid: part.uuid, index, part })));
 	const live = $derived(final && turn.live);
 	const showTicker = $derived(live && segment.reply.length === 0 && !segment.handBack);
-	const earlierCount = $derived(Math.max(0, segment.activity.length - TICKER_ROWS));
+	const steps = $derived(logSteps(turn));
+	const earlierCount = $derived(Math.max(0, steps.length - TICKER_ROWS));
+	const earlierIndex = $derived(Math.max(0, segment.activity.findIndex((part) => part.uuid === steps[earlierCount]?.uuid)));
 	const numberedMessages = $derived(numberTurnMessages(segment.activity.flatMap((part) => part.type === "assistant" ? [part] : [])));
 	function messageNumber(index: number): number | undefined {
 		const part = segment.activity[index];
@@ -191,6 +194,9 @@
 		});
 	}, pick, (uuid) => { const part = segment.activity.find((part) => part.uuid === uuid); return part?.type === "assistant" ? part : undefined; });
 	onDestroy(() => feedback.dispose());
+	const counts = $derived(stopCounts({ ...turn, segments: turn.segments.map((segment) => ({
+		...segment, activity: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), reply: segment.reply.map((part) => feedback.annotate(part)),
+	})) }, surfacingConfig.categorySet, live));
 	const surface = $derived(surfaceTurn({
 		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: numberedMessages.map((part) => feedback.annotate(part)),
 		positions: stripLayout(segment, turn, final, now), categorySet: surfacingConfig.categorySet,
@@ -562,7 +568,7 @@
 					{#snippet strip()}<ActivityStrip {turn} {segment} {final} {now} {running} interactive={false} />{/snippet}
 				</MinimisedTurn>
 			{:else if surfacingActive}
-				<SurfacingCard view={surface} {live} {level} overridden={panel.overridden} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
+				<SurfacingCard view={surface} {counts} {live} {level} overridden={panel.overridden} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readState} bind:cardEl={readCardEl} bind:scrubbing onread={readMessage}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={surface.card?.number !== undefined && replies.has(surface.card.number)}
@@ -590,16 +596,16 @@
 				</Button>
 			{/if}
 		</div>
-		<TurnLog class="step-log mt-[6px]" mode={minimised ? "collapsed" : fullLog ? "full" : showTicker ? "ticker" : "hidden"} {live} {earlierCount} entries={logEntries} onopen={() => panel.show("log")}>
+		<TurnLog class="step-log mt-[6px]" mode={minimised ? "collapsed" : fullLog ? "full" : showTicker ? "ticker" : "hidden"} {live} {earlierCount} {earlierIndex} stepCount={counts.log} entries={logEntries} onopen={() => panel.show("log")}>
 			{#snippet row(entry: TurnLogEntry)}
 				{@const i = entry.index}
 				{#if entry.kind === "resumed"}
-					<div hidden={!fullLog && i < earlierCount}>{@render renderResume?.(entry.resume)}</div>
+					<div hidden={!fullLog && i < earlierIndex}>{@render renderResume?.(entry.resume)}</div>
 				{:else}
 				{@const part = entry.part}
 				{@const latestLiveStep = live && i === segment.activity.length - 1}
 				{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
-				<div data-log-part={part.uuid} hidden={!fullLog && i < earlierCount} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+				<div data-log-part={part.uuid} hidden={!fullLog && i < earlierIndex} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
 					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category?.builtinCategory ? category : undefined} />
 					{#if surfacingActive && fullLog && part.type === "assistant"}
 						{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}

@@ -8,13 +8,14 @@
 </script>
 
 <script lang="ts">
-	let { segments, active = null, emphasis = null, onhover, onjump, interactive = true }: {
+	let { segments, active = null, emphasis = null, onhover, onjump, interactive = true, stepCount = segments.length }: {
 		segments: readonly { id: string; left: number; width: number; label: string; tone: keyof typeof TONES; running?: boolean }[];
 		active?: number | null;
 		emphasis?: ReadonlySet<number> | null;
 		onhover?: ((index: number | null) => void) | undefined;
 		onjump?: ((index: number) => void) | undefined;
 		interactive?: boolean;
+		stepCount?: number;
 	} = $props();
 	let cursor = $state(0);
 	let hovered = $state<number | null>(null);
@@ -81,7 +82,7 @@
 		class="absolute inset-0 cursor-pointer touch-pan-y select-none outline-none focus-visible:ring-1 focus-visible:ring-accent"
 		role={interactive ? "slider" : undefined}
 		tabindex={interactive ? 0 : undefined}
-		aria-label="Activity timeline — {segments.length} steps"
+		aria-label="Activity timeline — {stepCount} steps"
 		aria-valuemin={interactive ? 0 : undefined}
 		aria-valuemax={interactive ? Math.max(0, segments.length - 1) : undefined}
 		aria-valuenow={interactive ? selected : undefined}

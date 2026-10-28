@@ -112,7 +112,7 @@ export const RaiseWhy: Story = {
 		await userEvent.click(canvas.getByTestId("surfacing-pin-26"));
 		await userEvent.click(canvas.getByTestId("surfacing-mark-raise"));
 		await expect(canvas.getByTestId("surfacing-mark-why")).toHaveTextContent(
-			"▲ Raise #26: All → Balanced. Why?",
+			"▲ Raise #26: All messages → Most. Why?",
 		);
 		await expect(canvas.getByTestId("surfacing-mark-why")).toHaveTextContent(
 			"p .64 × 40 = 26",
@@ -240,7 +240,7 @@ export const RoutineInLog: Story = {
 		await expect(row.getByTestId("surfacing-mark-lower")).toBeDisabled();
 		await userEvent.click(row.getByTestId("surfacing-mark-raise"));
 		await expect(row.getByTestId("surfacing-mark-why")).toHaveTextContent(
-			"the log → All",
+			"Full log → All messages",
 		);
 		await canvasElement.ownerDocument.fonts.ready;
 		row

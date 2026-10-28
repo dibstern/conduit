@@ -9,6 +9,7 @@
 <!-- mouse — a tap fires `pointerenter` with no matching leave, so an ungated      -->
 <!-- caption would replace the summary sentence and stay there.                    -->
 <script lang="ts">
+	import { logSteps } from "../../utils/turn-stops.js";
 	import {
 		type ActivityPart,
 		fmtDuration,
@@ -64,4 +65,4 @@
 
 </script>
 
-<ActivityTimeline {segments} {active} {onhover} {onjump} {interactive} />
+<ActivityTimeline stepCount={logSteps(turn).length} {segments} {active} {onhover} {onjump} {interactive} />

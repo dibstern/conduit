@@ -8,6 +8,7 @@ import { categoryColour } from "./category-colour.js";
 import {
 	cardLevelFor,
 	type PanelView,
+	SURFACE_RANK as rank,
 	STOPS,
 	type SurfaceLevel,
 	stopForLevel,
@@ -68,8 +69,6 @@ export type SurfacePart = AssistantMessage & {
 	surfacingMark?: SurfacingMark | null;
 	surfacingRead?: boolean;
 };
-
-const rank = { hidden: 0, all: 1, balanced: 2, key: 3, final: 4 };
 
 /** The latest visible Ask belongs only to the transcript's last Turn. */
 export function openAsk(
@@ -175,11 +174,6 @@ export function surfaceTurn(input: {
 		messages.filter(
 			(message) => message.pending || rank[message.level] >= rank[level],
 		);
-	const counts = {
-		key: visibleAt("key").length,
-		balanced: visibleAt("balanced").length,
-		all: visibleAt("all").length,
-	};
 	const pickedUuid =
 		input.selection.kind === "picked" ? input.selection.uuid : null;
 	const picked = messages.find(
@@ -236,7 +230,6 @@ export function surfaceTurn(input: {
 		pins,
 		citedOrdinal: input.citedOrdinal ?? null,
 		messages,
-		counts,
 		card: target,
 		cardIndex,
 		folded,

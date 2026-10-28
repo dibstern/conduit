@@ -1,14 +1,28 @@
-import type { SurfacingLevel } from "../../contracts/category-set.js";
+import {
+	type CategorySet,
+	type SurfacingLevel,
+	surfacingLevel,
+} from "../../contracts/category-set.js";
 import type { MessageSurfacingPreferences } from "../../contracts/message-surfacing.js";
 import { assertNever } from "../../utils.js";
+import { type ActivityPart, type Turn, turnLog } from "./turns.js";
 
 export type SurfaceLevel = MessageSurfacingPreferences["defaultLevel"];
 export type ShowStop = SurfaceLevel | "log";
 export type PanelView<Stop extends ShowStop = ShowStop> =
 	| { kind: "show"; stop: Stop }
 	| { kind: "usage" };
+export type StopCounts = Record<Exclude<ShowStop, "final">, number>;
+export type Step = Exclude<ActivityPart, { type: "system" }>;
 
 export const SURFACE_LEVELS = ["final", "key", "balanced", "all"] as const;
+export const SURFACE_RANK = {
+	hidden: 0,
+	all: 1,
+	balanced: 2,
+	key: 3,
+	final: 4,
+};
 export const STOPS = {
 	final: {
 		short: "Answer",
@@ -78,4 +92,38 @@ export function cardLevelFor(view: PanelView | null): SurfaceLevel | null {
 		default:
 			return assertNever(view);
 	}
+}
+
+/** Work and message rows across the Turn; compaction rules are boundaries. */
+export function logSteps(turn: Turn): Step[] {
+	return turnLog(turn).segment.activity.flatMap((part) =>
+		part.type === "system" ? [] : [part],
+	);
+}
+
+export function stopCounts(
+	turn: Turn,
+	categorySet: CategorySet,
+	live = turn.live,
+): StopCounts {
+	const steps = logSteps(turn);
+	const newest = [...steps].reverse().find((part) => part.type === "assistant");
+	const counts: StopCounts = { key: 0, balanced: 0, all: 0, log: steps.length };
+	for (const part of steps) {
+		if (part.type !== "assistant") continue;
+		const pending =
+			live &&
+			part === newest &&
+			part.surfacingProbabilities === undefined &&
+			!part.surfacingMark;
+		const { level } = surfacingLevel(
+			{ probabilities: part.surfacingProbabilities ?? null },
+			categorySet,
+			part.surfacingMark ?? undefined,
+		);
+		for (const stop of ["key", "balanced", "all"] as const) {
+			if (pending || SURFACE_RANK[level] >= SURFACE_RANK[stop]) counts[stop]++;
+		}
+	}
+	return counts;
 }

@@ -117,6 +117,23 @@ Scenario: Full log treats an opened finding as visible at All messages
   And the card has no below-stop note
   And the messages region visually matches turn-full-log-card-level at 98 percent
 
+Scenario Outline: Stops count the whole Turn and compaction rules do not count as steps
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a counted-wake turn
+  Then the message stop counts are Key 1, Most 1, All messages 2
+  When I open the combined turn log
+  Then the activity strip announces 5 steps
+  And the Full log announces 5 steps
+  And the combined log keeps its compaction rule between the messages
+  And the messages region visually matches turn-stop-counts-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario Outline: Jev-off turns remember open and collapsed choices across reloads
   Given message surfacing is inactive at Most
   And the conduit app is served with the connected mockup

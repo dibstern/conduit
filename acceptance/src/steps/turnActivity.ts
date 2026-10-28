@@ -87,6 +87,57 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "assert turn message stop counts",
+		match:
+			/^the message stop counts are Key (\d+), Most (\d+), All messages (\d+)$/,
+		run: async ({ world, match }) => {
+			for (const [index, label] of ["Key", "Most", "All messages"].entries())
+				await expect(
+					world.page
+						.getByTestId("surfacing-level")
+						.getByRole("radio", { name: new RegExp(`^${label}\\b`) }),
+				).toContainText(match[index + 1] ?? "");
+		},
+	},
+	{
+		name: "assert turn step counts",
+		match: /^the (activity strip|Full log) announces (\d+) steps$/,
+		run: async ({ world, match }) => {
+			const region =
+				match[1] === "activity strip"
+					? panel(world.page).locator('[aria-label^="Activity timeline"]')
+					: panel(world.page).locator(".step-log");
+			await expect(region).toHaveAttribute(
+				"aria-label",
+				new RegExp(`\\b${match[2]} steps$`),
+			);
+		},
+	},
+	{
+		name: "assert compaction stays a rule in chronological order",
+		match: /^the combined log keeps its compaction rule between the messages$/,
+		run: async ({ world }) => {
+			const log = panel(world.page).locator(".step-log");
+			await expect(log.locator(".compaction-rule")).toHaveCount(1);
+			expect(
+				await log
+					.locator("[data-log-part]")
+					.evaluateAll((rows) =>
+						rows.map((row) =>
+							row.getAttribute("data-log-part")?.split("/").at(-1),
+						),
+					),
+			).toEqual([
+				"first-read",
+				"earlier",
+				"compacted",
+				"later-message",
+				"later-read",
+				"last-read",
+			]);
+		},
+	},
+	{
 		name: "open Full log message row",
 		match: /^I open message #(\d+) from the Full log row$/,
 		run: async ({ world, match }) => {
@@ -184,11 +235,12 @@ export const turnActivityHandlers: StepHandler[] = [
 	{
 		name: "seed multi-segment turn log",
 		match:
-			/^the turn log session has a (two-segment AskUserQuestion|two-segment ExitPlanMode|wake|wake-reply|wake-empty|waiting|async) turn$/,
+			/^the turn log session has a (two-segment AskUserQuestion|two-segment ExitPlanMode|wake|counted-wake|wake-reply|wake-empty|waiting|async) turn$/,
 		run: async ({ world, match }) => {
 			const kind = match[1] ?? "";
 			kinds.set(world.page, kind);
-			const wake = kind.startsWith("wake");
+			const wake = kind.startsWith("wake") || kind === "counted-wake";
+			const counted = kind === "counted-wake";
 			const waiting = kind === "waiting" || kind === "async";
 			const asyncQuestion = kind === "async";
 			const handBack = kind.endsWith("ExitPlanMode")
@@ -199,12 +251,36 @@ export const turnActivityHandlers: StepHandler[] = [
 					? []
 					: [
 							tool("first-read", "Read", 1000),
-							text("earlier", EARLIER, 4000, true),
+							{
+								...text("earlier", EARLIER, 4000, true),
+								...(counted ? { surfacingProbabilities: { ask: 1 } } : {}),
+							},
 						];
 			const after = [
+				...(counted
+					? [
+							{
+								id: "compacted",
+								type: "compaction",
+								text: "Context compacted.",
+								time: { start: START + 29_500 },
+							},
+							{
+								...text(
+									"later-message",
+									"The wake Run found the second route.",
+									30_000,
+									true,
+								),
+								surfacingOrdinal: 2,
+								surfacingProbabilities: { finding: 0.6 },
+							},
+						]
+					: []),
 				...(kind === "wake-reply" || kind === "wake-empty"
 					? []
 					: [tool("later-read", "Read", 30_000)]),
+				...(counted ? [tool("last-read", "Read", 33_000)] : []),
 				text("reply", REPLY, 35_000),
 			];
 			const messages: History[] = [
