@@ -208,6 +208,9 @@ export interface ClaudeSubagentTaskContext {
 	readonly startedAt?: number;
 	readonly pausedAt?: number | null;
 	readonly pausedMs?: number;
+	/** The task's terminal report, independent of transcript read success. */
+	readonly outcome?: "completed" | "error" | "interrupted";
+	readonly failureMessage?: string;
 }
 
 export interface ClaudeSubagentLivePoller {
@@ -236,6 +239,7 @@ export interface ClaudeSessionController {
 	readonly subagentPollers: Map<string, ClaudeSubagentLivePoller>;
 	readonly subagentTranscripts: Map<string, ClaudeSubagentTranscriptCursor>;
 	readonly failedSubagentSessions: Set<string>;
+	readonly subagentRunIds: Map<string, string>;
 }
 
 export interface ClaudeSessionContext {
@@ -268,6 +272,10 @@ export interface ClaudeSessionContext {
 	/** Shared by stream routing and transcript reads, retained across parent results. */
 	subagentTranscripts?: Map<string, ClaudeSubagentTranscriptCursor>;
 	failedSubagentSessions?: Set<string>;
+	/** The observed run each child session's transcript prompt opened, until its final read. */
+	subagentRunIds?: Map<string, string>;
+	/** Ownership-end settlement fences final reads that were already in flight. */
+	subagentRunsClosed?: boolean;
 	/** EventSink for this session — updated on each turn (latest sink wins). */
 	eventSink: EventSink | undefined;
 	currentTurnId: string | undefined;

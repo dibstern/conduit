@@ -1301,6 +1301,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					subagentPollers: new Map(),
 					subagentTranscripts: new Map(),
 					failedSubagentSessions: new Set(),
+					subagentRunIds: new Map(),
 				};
 				this.controllers.set(sessionId, controller);
 				const context = {
@@ -1457,12 +1458,35 @@ class ClaudeRunnerPayload implements RunnerPayload {
 									(yield* pendingIntakes(this.stateRef, sessionId)).get(
 										input.inputId,
 									)?.deferred === intake
-								)
-									yield* settlePendingIntakesEffect(
-										this.stateRef,
-										sessionId,
-										failure.message,
-									);
+								) {
+									if (
+										failure instanceof ClaudeBoundaryError &&
+										failure.operation === "awaitSetup" &&
+										failure.cause instanceof ClaudeRuntimeError &&
+										failure.cause.code === "interrupted"
+									) {
+										// The setup race has stopped launch work before persistence
+										// can wait for the daemon to acknowledge this terminal.
+										yield* input.eventSink.push(
+											claudeRuntimeEvent(
+												"turn.interrupted",
+												sessionId,
+												{ messageId: "" },
+												input.runId,
+											),
+										);
+										yield* cancelIntakeEffect(
+											this.stateRef,
+											sessionId,
+											input.inputId,
+										);
+									} else
+										yield* settlePendingIntakesEffect(
+											this.stateRef,
+											sessionId,
+											failure.message,
+										);
+								}
 								yield* Deferred.fail(setupLock, failure);
 								if (promptQueue) yield* Effect.exit(promptQueue.close());
 								if (activeQuery)
@@ -1479,6 +1503,21 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					Effect.gen({ self: this }, function* () {
 						// The stream owns the intake acknowledgement after setup.
 						yield* removeSetupLock(this.stateRef, sessionId);
+					}),
+				),
+				Effect.catch((error) =>
+					Effect.gen(function* () {
+						// Preserve cancellation after setup cleanup instead of reporting
+						// the error used to stop launch work.
+						if (yield* Deferred.isDone(intake)) {
+							const result = yield* Effect.result(Deferred.await(intake));
+							if (
+								result._tag === "Success" &&
+								result.success.status === "cancelled"
+							)
+								return;
+						}
+						return yield* Effect.fail(error);
 					}),
 				),
 			);
@@ -2288,6 +2327,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							endsCurrentRun &&
 							isInterruptedResult(message, ctx.interruptRequested)
 						) {
+							// Retain the parent's interruption after its result clears the
+							// transient interrupt flag and child final reads run separately.
+							for (const [taskId, task] of ctx.subagentTasks ?? [])
+								if (!task.outcome)
+									ctx.subagentTasks?.set(taskId, {
+										...task,
+										outcome: "interrupted",
+									});
 							yield* this.completeTurnToolsEffect(ctx, false);
 							yield* this.cancelInteractionsEffect(
 								ctx,
@@ -2808,8 +2855,24 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					if (!turnIds.some((turnId) => waiters.has(turnId)))
 						return Effect.void;
 					const setupLock = yield* getSetupLock(this.stateRef, sessionId);
-					if (setupLock)
-						yield* Deferred.fail(setupLock, new Error("Turn interrupted"));
+					if (
+						!setupLock ||
+						!(yield* Deferred.fail(
+							setupLock,
+							new ClaudeRuntimeError({
+								code: "interrupted",
+								message: "Turn interrupted",
+							}),
+						))
+					) {
+						if (yield* getSession(this.stateRef, sessionId))
+							yield* this.interruptSessionEffect(
+								sessionId,
+								turnIds,
+								requestedAt,
+							);
+						return Effect.void;
+					}
 				} else if (
 					ctx &&
 					bound &&

@@ -41,6 +41,7 @@ import {
 import { selection } from "./selection.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { refreshSessionSkills } from "./session-skills.svelte.js";
+import { settleTurnInput } from "./turn.svelte.js";
 
 type ProjectRef = string;
 export type TranscriptEntry = NonNullable<SessionMessages["transcript"]>;
@@ -691,6 +692,16 @@ function install(
 		entry,
 		slot.messages.messages,
 	);
+	// A run can end before its user message is placed, leaving no shell
+	// completion boundary for its send intent. The live row ends that exact input.
+	if (entry.status._tag === "live")
+		for (const row of entry.rows)
+			if (
+				row.role === "user" &&
+				row.inputId &&
+				row.turnTiming?.endedAt !== undefined
+			)
+				settleTurnInput(row.inputId);
 	// The placed send, or its tray row, takes over from the local copy in the
 	// same frame.
 	for (const [inputId, send] of localSends)

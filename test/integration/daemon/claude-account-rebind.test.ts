@@ -815,11 +815,11 @@ it("cancels a login change held behind background work, then retries", async () 
 		expect(cancel).toMatchObject({ _tag: "Some", value: { ok: true } });
 		expect(beforeRelease).toMatchObject({
 			status: "failed",
-			error_code: "cancelled",
+			error_code: "interrupted",
 		});
 		expect(command()).toMatchObject({
 			status: "failed",
-			error_code: "cancelled",
+			error_code: "interrupted",
 		});
 		expect(requests).toEqual([
 			"upgrade-background-work",
@@ -908,7 +908,7 @@ it.each([
 		await vi.waitFor(() =>
 			expect(command()).toMatchObject({
 				status: "failed",
-				error_code: "cancelled",
+				error_code: "interrupted",
 			}),
 		);
 		const beforeRelease = command();
@@ -939,7 +939,7 @@ it.each([
 		expect(cancel).toMatchObject({ _tag: "Some", value: { ok: true } });
 		expect(command()).toMatchObject({
 			status: "failed",
-			error_code: "cancelled",
+			error_code: "interrupted",
 		});
 		expect(requests).toEqual(["retry-after-preparation-stop"]);
 	} finally {
@@ -1103,11 +1103,11 @@ it.each([
 			expect(cancel).toMatchObject({ _tag: "Some", value: "cancelled" });
 			expect(beforeRelease).toMatchObject({
 				status: "failed",
-				error_code: "cancelled",
+				error_code: "interrupted",
 			});
 			expect(command()).toMatchObject({
 				status: "failed",
-				error_code: "cancelled",
+				error_code: "interrupted",
 			});
 			expect(requests).toEqual([
 				"upgrade-background-work",

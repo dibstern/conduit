@@ -774,6 +774,15 @@ describe("turn membership through provider ingestion", () => {
 				completed_at: null,
 			},
 		]);
+		// The browser can settle the exact input even if the shell feed has
+		// already advanced to a later run's boundary.
+		expect(
+			(await harness.sessionMessagesWithParts("s1")).find(
+				(message) => message.input_id === "u1",
+			),
+		).toMatchObject({
+			turnTiming: { endedAt: terminal.createdAt },
+		});
 	});
 
 	it("resolves a joined reservation when its member is placed after the effective run ends", async () => {
