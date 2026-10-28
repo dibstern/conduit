@@ -23,7 +23,14 @@ const banned: readonly Ban[] = [
 	},
 ];
 
+// Every ban's match contains one of these words. Omitting comments only turns
+// characters into spaces, so a source without any of them cannot match, and the
+// guard skips its Svelte parse: almost no component mentions one.
+const bannedWords =
+	/snapshot|upsert|synchronized|_tag|sequence|subscription|contracts\/ws-rpc/i;
+
 export const violations = (source: string): readonly string[] => {
+	if (!bannedWords.test(source)) return [];
 	const characters = source.split("");
 	const omit = (start: number, end: number): void => {
 		for (let i = start; i < end; i++) characters[i] = " ";
