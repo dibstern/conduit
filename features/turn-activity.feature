@@ -400,3 +400,16 @@ Examples:
   | phone    | waiting | turn-log-waiting-phone    |
   | desktop  | async   | turn-log-async-desktop    |
   | phone    | async   | turn-log-async-phone      |
+
+Scenario Outline: Cancelling a scrub discards its preview without picking a message
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  Then cancelling a strip scrub preserves the selected message and clears the caption
+  And the messages region visually matches turn-strip-cancel-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |

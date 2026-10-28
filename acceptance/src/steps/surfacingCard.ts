@@ -265,6 +265,32 @@ function trackReads(page: Page): void {
 
 export const surfacingCardHandlers: StepHandler[] = [
 	{
+		name: "cancel a strip scrub without committing its preview",
+		match:
+			/^cancelling a strip scrub preserves the selected message and clears the caption$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await pick(page, "2");
+			const strip = panel(page).locator(".surface-strip");
+			const box = await strip.boundingBox();
+			if (!box) throw new Error("Missing activity strip");
+			const x = async (ordinal: string) =>
+				box.x +
+				(box.width * Number(await pin(page, ordinal).getAttribute("data-x"))) /
+					100;
+			await page.mouse.move(await x("2"), box.y + box.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(await x("8"), box.y + box.height / 2, { steps: 8 });
+			await expect(card(page)).toHaveAttribute("data-ordinal", "8");
+			await panel(page)
+				.getByTestId("surfacing-scrub")
+				.dispatchEvent("pointercancel", { pointerId: 1 });
+			await page.mouse.up();
+			await expect(card(page)).toHaveAttribute("data-ordinal", "2");
+			await expect(page.getByRole("tooltip")).toHaveCount(0);
+		},
+	},
+	{
 		name: "opt into surfacing before app startup",
 		match:
 			/^message surfacing is (active|inactive|missing-key|invalid-key) at (Answer|Key|Most|All messages)$/,
