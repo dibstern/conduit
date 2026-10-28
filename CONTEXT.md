@@ -359,6 +359,14 @@ read actions. **Opened directly** marks a message reached through a citation
 or reveal even when its level would hide it. A **Reveal target** identifies
 the message or step a reveal request should open.
 
+A **Strip** is the Turn's activity timeline, with one pointer owner for the
+Collapsed dots and Open pins. A **Step** is one log row, identified by its
+part UUID; compaction rules mark boundaries rather than steps. A **Pin**
+identifies a message on the Open strip. Its Collapsed form is a **Dot**.
+A **Step popover** describes the hovered Step without opening the log.
+Until the full hover preview lands, a Collapsed strip peeks at the message
+nearest the pointer.
+
 ## Daemon Settings
 
 **Daemon Settings** is the one module that owns `daemon.json` while the daemon

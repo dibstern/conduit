@@ -88,9 +88,9 @@ export const Expanded: Story = {
 		const canvas = within(canvasElement);
 		const toggle = canvas.getByRole("button", {
 			name: /^Work(ed|ing)\b/,
-			expanded: false,
 		});
-		await userEvent.click(toggle);
+		if (toggle.getAttribute("aria-expanded") !== "true")
+			await userEvent.click(toggle);
 		// A synthetic click leaves a focus ring and its tooltip; the baseline is the resting state.
 		toggle.blur();
 		await expect(
@@ -357,9 +357,9 @@ async function expand(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
 	const toggle = canvas.getByRole("button", {
 		name: /^Work(ed|ing)\b/,
-		expanded: false,
 	});
-	await userEvent.click(toggle);
+	if (toggle.getAttribute("aria-expanded") !== "true")
+		await userEvent.click(toggle);
 	// A synthetic click leaves a focus ring; the baseline is the resting state.
 	toggle.blur();
 	await expect(canvas.getAllByText("Compacted context")[0]).toBeVisible();

@@ -1,5 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { createRawSnippet } from "svelte";
+import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
+import { type SurfacePin, surfaceTurn } from "../../utils/surface-turn.js";
 import ActivityTimeline from "./ActivityTimeline.svelte";
 
 const meta = {
@@ -84,10 +87,92 @@ export const TouchScrub: Story = {
 				coords: { ...coords, clientX: rect.left + rect.width * 0.56 },
 			},
 		]);
-		await expect(args["onjump"]).toHaveBeenLastCalledWith(2);
+		await expect(args["onjump"]).toHaveBeenLastCalledWith("error");
 		await expect(track).toHaveAttribute(
 			"aria-valuetext",
 			"Failed pnpm check · 1s",
 		);
+	},
+};
+
+const messages = surfaceTurn({
+	parts: [1, 2].map((number) => ({
+		type: "assistant" as const,
+		uuid: `message-${number}`,
+		rawText: `Message ${number}`,
+		html: `<p>Message ${number}</p>`,
+		finalized: true,
+		surfacingOrdinal: number,
+		surfacingRead: false,
+		surfacingProbabilities: { finding: 1 },
+	})),
+	positions: [
+		{ left: 0, width: 34 },
+		{ left: 59.6, width: 40.4 },
+	],
+	categorySet: DEFAULT_CATEGORY_SET,
+	level: "all",
+	view: { kind: "show", stop: "all" },
+	live: false,
+	latestTurn: true,
+	start: 0,
+	selection: { kind: "picked", uuid: "message-1" },
+});
+
+export const Pins: Story = {
+	args: {
+		markers: {
+			kind: "pins",
+			pins: messages.pins,
+			selected: "message-1",
+			thumbX: 17,
+		},
+		sliderText: messages.sliderText,
+		onpick: fn(),
+	},
+	play: async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByRole("slider")).toHaveAccessibleName(
+			"Surfaced messages",
+		);
+		await expect(canvas.getByTestId("surfacing-pin-1")).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
+		const pin = canvas.getByTestId("surfacing-pin-2");
+		const user = userEvent.setup();
+		await user.pointer({ keys: "[MouseLeft>]", target: pin });
+		await expect(args["onpick"]).not.toHaveBeenCalled();
+		await user.pointer({ keys: "[/MouseLeft]", target: pin });
+		await expect(args["onpick"]).toHaveBeenLastCalledWith(messages.pins[1]);
+		pin.focus();
+		await userEvent.keyboard("{Enter}");
+		await expect(args["onpick"]).toHaveBeenCalledTimes(2);
+	},
+};
+
+export const Collapsed: Story = {
+	args: {
+		markers: { kind: "dots", dots: messages.messages },
+		preview: createRawSnippet<[SurfacePin]>((pin) => ({
+			render: () =>
+				`<span>#${pin().number} · ${pin().part.rawText} · Click to open</span>`,
+		})),
+		onpick: fn(),
+	},
+	play: async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		const strip = canvas.getByRole("slider");
+		strip.focus();
+		await waitFor(() =>
+			expect(canvas.getByTestId("surfacing-minimised-peek")).toHaveTextContent(
+				"Message 1",
+			),
+		);
+		await userEvent.keyboard("{Enter}");
+		await expect(args["onpick"]).toHaveBeenLastCalledWith(messages.messages[0]);
+		await expect(
+			canvas.queryByTestId("surfacing-minimised-peek"),
+		).not.toBeInTheDocument();
 	},
 };
