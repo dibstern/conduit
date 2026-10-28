@@ -1,5 +1,30 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario: A settled log pick survives collapse and suspends during each wake Run
+  Given message surfacing is active at Balanced
+  And the conduit app is served with the connected mockup
+  And the panel choice session has a settled turn
+  When I open the plain turn log
+  And I collapse and reopen the panel choice turn
+  Then the panel shows the full log
+  When a wake Run starts in the panel choice turn
+  Then the panel shows the saved message stop
+  When the panel choice Run settles
+  Then the panel shows the full log
+  When a wake Run starts in the panel choice turn
+  Then the panel shows the saved message stop
+  And the messages region visually matches turn-panel-settled-pick-wake at 98 percent
+
+Scenario: A log picked while live returns to the saved stop on settle
+  Given message surfacing is active at Balanced
+  And the conduit app is served with the connected mockup
+  And the panel choice session has a live turn
+  When I open the plain turn log
+  Then the panel shows the full log
+  When the panel choice Run settles
+  Then the panel shows the saved message stop
+  And the messages region visually matches turn-panel-live-pick-settled at 98 percent
+
 Scenario Outline: Two skills appear where they happened with their own time column
   Given message surfacing is <jev> at Balanced
   And the conduit app is served with the connected mockup

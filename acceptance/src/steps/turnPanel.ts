@@ -1,0 +1,120 @@
+import { expect, type Page } from "@playwright/test";
+import type { HistoryMessageSchema } from "../../../src/lib/contracts/ws-rpc.js";
+import { detailRowsOf } from "../../../test/helpers/detail-rows.js";
+import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
+import type { StepHandler } from "../runtime.js";
+import {
+	openSessionRoute,
+	requireRpcControl,
+	setSessionRowStatus,
+} from "./shared.js";
+import { surfacingHistory } from "./surfacingCard.js";
+
+type History = typeof HistoryMessageSchema.Type;
+const SESSION = "sess-surfacing";
+const fixtures = new WeakMap<Page, History[]>();
+const panel = (page: Page) => page.locator("#messages .turn-activity").last();
+
+function publish(page: Page, messages: History[]) {
+	fixtures.set(page, messages);
+	requireRpcControl(page).setDetailRows(
+		SESSION,
+		messages.flatMap(detailRowsOf),
+	);
+}
+
+export const turnPanelHandlers: StepHandler[] = [
+	{
+		name: "seed panel choice lifecycle",
+		match: /^the panel choice session has a (live|settled) turn$/,
+		run: async ({ world, match }) => {
+			const live = match[1] === "live";
+			publish(world.page, surfacingHistory(live ? "live" : "settled"));
+			setSessionRowStatus(world.page, SESSION, live ? "busy" : "idle", {
+				title: "Turn panel choices",
+				accountId: "claude",
+				updatedAt: PINNED_CLOCK_MS,
+			});
+			await openSessionRoute(world.page, SESSION);
+			await expect(panel(world.page)).toBeVisible();
+		},
+	},
+	{
+		name: "settle panel choice Run",
+		match: /^the panel choice Run settles$/,
+		run: async ({ world }) => {
+			const messages = [...(fixtures.get(world.page) ?? [])];
+			const last = messages.at(-1);
+			if (!last) throw new Error("Missing panel choice fixture");
+			messages[messages.length - 1] = {
+				...last,
+				time: {
+					created: last.time?.created ?? PINNED_CLOCK_MS,
+					completed: PINNED_CLOCK_MS + messages.length * 1000,
+				},
+			};
+			publish(world.page, messages);
+			setSessionRowStatus(world.page, SESSION, "idle");
+			await expect(
+				panel(world.page).locator(".turn-activity-toggle"),
+			).toContainText("Worked");
+		},
+	},
+	{
+		name: "wake the same Turn",
+		match: /^a wake Run starts in the panel choice turn$/,
+		run: async ({ world }) => {
+			const messages = fixtures.get(world.page) ?? [];
+			const id = `panel-wake-${messages.length}`;
+			publish(world.page, [
+				...messages,
+				{
+					id,
+					role: "assistant",
+					parentID: "surfacing-user",
+					time: { created: PINNED_CLOCK_MS + messages.length * 2000 },
+					parts: [
+						{
+							id: `${id}-read`,
+							type: "tool",
+							tool: "Read",
+							callID: id,
+							state: {
+								status: "running",
+								input: { _tag: "whole", value: { filePath: "src/wake.ts" } },
+							},
+						},
+					],
+				},
+			]);
+			setSessionRowStatus(world.page, SESSION, "busy");
+			await expect(
+				panel(world.page).locator(".turn-activity-toggle"),
+			).toContainText("Working");
+		},
+	},
+	{
+		name: "collapse and reopen a picked panel",
+		match: /^I collapse and reopen the panel choice turn$/,
+		run: async ({ world }) => {
+			const toggle = panel(world.page).getByTestId("surfacing-minimise-toggle");
+			await toggle.click();
+			await expect(panel(world.page)).toHaveAttribute("data-minimised", "true");
+			await toggle.click();
+		},
+	},
+	{
+		name: "assert panel log choice",
+		match: /^the panel shows the (full log|saved message stop)$/,
+		run: async ({ world, match }) => {
+			const full = match[1] === "full log";
+			await expect(
+				panel(world.page).locator(".turn-activity-toggle"),
+			).toHaveAttribute("aria-expanded", String(full));
+			if (full)
+				await expect(
+					panel(world.page).locator(".step-log [data-log-part]").first(),
+				).toBeVisible();
+		},
+	},
+];
