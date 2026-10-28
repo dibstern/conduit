@@ -45,6 +45,7 @@
 		currentStepLabel,
 		economics,
 		fmtDuration,
+		isHandBack,
 		liveLaunchedTasks,
 		plural,
 		stepCaption,
@@ -102,6 +103,9 @@
 	const fullLog = $derived(panel.view.kind === "open" && panel.view.view.kind === "show" && panel.view.view.stop === "log");
 	const usage = $derived(panel.view.kind === "open" && panel.view.view.kind === "usage");
 	const qa = $derived(panel.view.kind === "open" && panel.view.view.kind === "qa");
+	// Like the kept log rows, Q&A retains unfinished answers when changing views.
+	let qaMounted = $state(false);
+	$effect(() => { if (qa) qaMounted = true; });
 	type StripInteraction = Parameters<NonNullable<ComponentProps<typeof ActivityStrip>["oninteraction"]>>[0];
 	type CardSlot = NonNullable<ComponentProps<typeof ActivityStrip>["cardSlot"]>;
 	let stripInteraction = $state<StripInteraction>({ hovered: null, scrubbing: false });
@@ -383,9 +387,20 @@
 	function stripJump(id: string) {
 		const index = segment.activity.findIndex((part) => part.uuid === id);
 		if (index < 0) return;
+		const part = segment.activity[index];
+		if (part?.type === "tool" && isHandBack(part)) { openQa(id); return; }
 		const pin = surfacingActive ? surface.pins.find((pin) => pin.part.uuid === id) : undefined;
 		if (pin) pick(pin);
 		else void jumpTo(index);
+	}
+	function openQa(id: string) {
+		panel.qa();
+		void tick().then(() => {
+			const entry = panelEl?.querySelector<HTMLElement>(`[data-qa-entry="${CSS.escape(id)}"]`);
+			if (!qa || !entry) return;
+			entry.scrollIntoView({ block: "nearest" });
+			entry.focus({ preventScroll: true });
+		});
 	}
 	function stripChanged(interaction: StripInteraction) { stripInteraction = interaction; }
 
@@ -538,7 +553,7 @@
 				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if minimised && surfacingActive}
 				<MinimisedTurn>
-					{#snippet strip(preview: Snippet<[SurfacePin]>)}<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} oninteraction={stripChanged} />{/snippet}
+					{#snippet strip(preview: Snippet<[SurfacePin]>)}<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />{/snippet}
 				</MinimisedTurn>
 			{:else if surfacingActive}
 				<SurfacingCard view={surface} card={cardSlot.kind === "selected" ? cardSlot.card : null} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
@@ -566,7 +581,7 @@
 			{/if}
 		</div>
 		{#if usage}<TurnUsage {turn} {bill} />{/if}
-		{#if qa}<TurnQa handBacks={turnLog(turn).handBacks} {sessionId} />{/if}
+		{#if qa || qaMounted}<div hidden={!qa}><TurnQa handBacks={turnLog(turn).handBacks} {sessionId} /></div>{/if}
 		<TurnLog class="step-log border-t border-border bg-bg px-[12px] py-[6px]" mode={minimised ? "collapsed" : usage ? "hidden" : fullLog ? "shown" : "hidden"} phase={panel.phase} pending={panel.pending} stepCount={counts.log} entries={logEntries}>
 			{#snippet row(entry: TurnLogEntry)}
 				{@const i = entry.index}
@@ -577,7 +592,7 @@
 				{@const latestLiveStep = live && i === segment.activity.length - 1}
 				{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
 				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, beforeScroll: onjump }} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
-					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category} onmessage={category && canOpenSurfaceMessage(category.part, live) ? () => pick(category) : undefined} />
+					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category} onmessage={category && canOpenSurfaceMessage(category.part, live) ? () => pick(category) : undefined} onhandback={() => openQa(part.uuid)} />
 				</div>
 				{/if}
 			{/snippet}

@@ -100,6 +100,36 @@ export const UsageSelected: Story = {
 	},
 };
 
+export const QaSelected: Story = {
+	args: {
+		panel: {
+			...panel({ kind: "open", view: { kind: "qa" } }),
+			hasHandBacks: true,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Show messages" }),
+		);
+		await expect(
+			body.getByRole("menuitemradio", { name: /^Q&A$/ }),
+		).toHaveAttribute("aria-checked", "true");
+	},
+};
+
+export const QaJevOff: Story = {
+	...QaSelected,
+	args: {
+		panel: {
+			...panel({ kind: "open", view: { kind: "qa" } }),
+			hasHandBacks: true,
+			stops: ["log"],
+		},
+	},
+};
+
 export const FullLogSelected: Story = {
 	args: { panel: panel({ kind: "open", view: { kind: "show", stop: "log" } }) },
 	play: async ({ canvasElement }) => {

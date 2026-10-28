@@ -42,10 +42,12 @@
 		messageNumber,
 		messageCategory,
 		onmessage,
+		onhandback,
 		live = false,
 		runningTasks = new Set<string>(),
 	}: {
 		part: ActivityPart;
+		onhandback?: (() => void) | undefined;
 		liveTasks: readonly BackgroundTask[];
 		taskListedAt: ReadonlyMap<string, number>;
 		duration?: number | undefined;
@@ -93,7 +95,7 @@
 </script>
 
 {#if part.type === "tool" && isHandBack(part)}
-	<div data-part={part.uuid}><ToolItem message={part} presentation="log" /></div>
+	<div data-part={part.uuid}><ToolItem message={part} presentation="log" onopen={onhandback} /></div>
 {:else if part.type === "tool"}
 	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.status !== "error" && !part.isError)}
 	{@const failed = part.status === "error" || part.isError}

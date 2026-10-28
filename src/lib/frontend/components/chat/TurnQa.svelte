@@ -12,7 +12,7 @@
 
 <section aria-label="Turn Q&A" class="flex flex-col gap-[16px] border-t border-border bg-bg px-[12px] py-[12px]">
 	{#each handBacks as handBack (handBack.uuid)}
-		<div data-qa-entry={handBack.uuid}>
+		<div data-qa-entry={handBack.uuid} tabindex="-1" class="focus:bg-selection focus:outline-none">
 			<ToolFullDetail message={handBack}>
 				{#snippet children(message: ToolMessage)}
 					{#if message.name === "AskUserQuestion"}

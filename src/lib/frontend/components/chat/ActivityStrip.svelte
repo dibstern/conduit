@@ -15,6 +15,7 @@
 	import {
 		type ActivityPart,
 		fmtDuration,
+		isHandBack,
 		partLabel,
 		stepDurations,
 		stripLayout,
@@ -62,6 +63,7 @@
 	}));
 
 	const seams = $derived(segment.activity.flatMap((part, index) => part.type === "system" ? [{ id: part.uuid, left: positions[index]?.left ?? 0, width: positions[index]?.width ?? 0 }] : []));
+	const handBacks = $derived(segment.activity.flatMap((part, index) => part.type === "tool" && isHandBack(part) ? [{ id: part.uuid, x: (positions[index]?.left ?? 0) + (positions[index]?.width ?? 0) / 2, label: part.name === "ExitPlanMode" ? "Plan approval" : "Question" }] : []));
 
 	function title(part: ActivityPart, i: number): string {
 		const duration = part.type === "system" ? undefined : durations?.[i];
@@ -70,4 +72,4 @@
 
 </script>
 
-<ActivityTimeline {segments} {seams} bind:width {active} {markers} {cardSlot} {card} {openAsk} {belowLevel} {cited} {preview} {sliderText} {oninteraction} {onpick} {onjump} {oncommand} {phone} />
+<ActivityTimeline {segments} {seams} {handBacks} bind:width {active} {markers} {cardSlot} {card} {openAsk} {belowLevel} {cited} {preview} {sliderText} {oninteraction} {onpick} {onjump} {oncommand} {phone} />

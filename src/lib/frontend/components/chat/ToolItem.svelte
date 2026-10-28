@@ -11,7 +11,7 @@
 	import Button from "../ui/Button.svelte";
 	import { firstLine } from "../../utils/turns.js";
 
-	let { message, presentation = "card" }: { message: ToolMessage; presentation?: "card" | "log" } = $props();
+	let { message, presentation = "card", onopen }: { message: ToolMessage; presentation?: "card" | "log"; onopen?: (() => void) | undefined } = $props();
 	let expanded = $state(false);
 
 	const isQuestion = $derived(message.name === "AskUserQuestion");
@@ -22,9 +22,9 @@
 	 only owns its own margin. -->
 <div class="tool-item my-[3px] min-w-0" data-tool-id={message.id} data-tool-status={message.status}>
 {#if isQuestion}
-	<ToolQuestionCard {message} {presentation} />
+	<ToolQuestionCard {message} {presentation} {onopen} />
 {:else if presentation === "log"}
-	<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={expanded} data-testid="turn-hand-back-row" onclick={() => expanded = !expanded}>
+	<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={onopen ? undefined : expanded} data-testid="turn-hand-back-row" onclick={() => { if (onopen) onopen(); else expanded = !expanded; }}>
 		<span class="text-text-muted">?</span><span class="truncate text-text-secondary">Plan approval → {firstLine(message.result ?? "No answer")}</span>
 	</Button>
 	{#if expanded}<ToolGenericCard {message} />{/if}
