@@ -15,7 +15,7 @@ How to read it:
   32.5's protocol bump. Section 12 says which design each ledger ticket builds to.
 - **Switch** names the ticket where an owner changes. Every owner change in section 2 names its
   switch ticket, so each piece of state has one owner at every point in the build order.
-- Failure modes are numbered F1 to F61 (section 10). Appendix B maps every old id (failure modes,
+- Failure modes are numbered F1 to F99 (section 10). Appendix B maps every old id (failure modes,
   invariants, S-, A-, T-, R- and C-numbers) to its place here.
 
 Source names used in the comments:
@@ -39,6 +39,7 @@ Source names used in the comments:
 | STOP-INTENT | `AMENDMENT-2026-10-27-STOP-INTENT.md` |
 | SWAP | `AMENDMENT-2026-10-28-RUNNER-SWAP.md` |
 | CONT | `AMENDMENT-2026-10-28-SEND-CONTINUATION.md` |
+| SETTLE | `AMENDMENT-2026-10-28-SEND-SETTLEMENT.md` |
 
 <!-- src: README (precedence, renamed files); task brief 2026-10-28 -->
 
@@ -128,7 +129,7 @@ provider have the new one, and no row has both.
 
 | State | Owner | Writers | Readers and caches | Switch |
 |---|---|---|---|---|
-| Run decisions and Tombstones | Run Ledger; the run's settlement path before the switch | `reconcile`, through `record`, under the write permit | every view; the outbox status (C1 rule) until the switch | per provider |
+| Run decisions and Tombstones | Run Ledger; the run's settlement path before the switch, with Send Settlement for explicit modern owner-send evidence and native terminal projection as the existing separate source | `reconcile`, through `record`, under the write permit; before the switch, `settleSend` for explicit modern owner-send evidence | every view; the outbox follows the run terminal projection until the switch | per provider; Send Settlement serves until Claude 32.6, Cursor 32.10 or Codex 32.21; the missing native attempt guard remains a Q26 ledger-chain item (32.2.6/32.6) |
 | Run Input records, inbox order, pause | Run Ledger | admit, control | the session inbox is a read view | per provider |
 | Steer association with a Run | Run Inputs for a switched provider; `joined_into` for one not yet switched | admit (Run Inputs); run joining (`joined_into`) | `holdRun`'s owner resolution (4.3) | per provider, at the later of 32.7 and its ledger ticket; `joined_into` deleted at 32.13 |
 | Send issue decisions and their evidence (sends with no hold) | Run Ledger | `record` | views; a runner-held send stores none: its chains are a view over its hold facts (4.11) | per provider |
@@ -143,9 +144,14 @@ provider have the new one, and no row has both.
 | `runnerId` | daemon | spawn | runner record, logs | none |
 | `querySeq` and the current query | runner host | host | the ledger reads the label only | none |
 | Who may write for a runner (grant tag) | `RunnerAuthority`, in memory | `adopt`, `revoke` | `guarded`; never copied | none |
-| Serving runner of a session | `claude_runner_cursors.role` (partial unique index) | `register`, `requestStop` | `serving(session)` (cache of the row) | none |
+| Serving runner of a session | `claude_runner_cursors.role` (partial unique index) | lifecycle module's register, retire and swap transactions (`register`, `requestStop`) | `serving(session)` (routing cache only); write decisions read the row in their transaction | none |
 | Runner role inside the host | runner host (`decideRunnerRole`) | host | reply to `upgrade-retire`, idle exit; not persisted | none |
 | Runner retired (fence) | retirement row `retired_at` | request stop (one transaction) | attach, `adopt`, `holdRun`, recovery | none |
+| Feeder queue and per-send I/O capabilities | the session's feeder | enqueue by reactor dispatch, committed release and restart; the feeder consumes each write capability once | live handle or `Adopted`; the released-through watermark revokes local I/O only, never persisted delivery or runner assignment | none |
+| Per-operation pacing ordinal | the pending store operation | its release/settlement owner, or the failed read's caller | 4.8's backoff only; reset on commit or staleness, never run liveness or transmission count | none |
+| `awaitRun` subscription | the live caller | arm the store's commit signal, then re-read the run | includes silent lifecycle commits; no waiter map | none |
+| Uncommitted Stop intent (`Committing`) | the reconciler | intent registration and its independently owned commit worker | Stop waiters; identity only, never a durable retirement record | none |
+| Retained release/settlement evidence | the evidence source's write owner | feeder write fiber for release or start-refusal settlement; reactor call for a live reply; reconciler cadence for Settle; attachment for adoption and retained replies | retained until commit or staleness; adoption release failure propagates through bounded attachment recovery, then retirement and Settle | none |
 | Stop progress (`RunnerStop`) | reconciler module (`runner-retirement.ts`) | the reconciler only | `state`, `awaitStop` (memory is a cache of the row) | none |
 | Group snapshot and signal log | retirement row | the reconciler's kill routine | restart recovery | none |
 | Survivor notice sent | the deterministic notice event id | reconciler | none | none |
@@ -167,7 +173,7 @@ Each layer owns one identity: the daemon owns `runnerId`, the host owns `querySe
 `run.dispatched` owns a runner-held Send Token's `n`, the ledger owns every other Send Token, the
 send module owns the assignment, the database owns the serving runner.
 
-<!-- src: RA §1, §2, §3, §8; AUDIT A2, A3, A4, A8; AUDIT-2 A19, A20, T11; SEND-SCOPE S1, S2; SEND-SCOPE-2 S5; SEND-SCOPE-3 S6; SEND-SCOPE-5 S8, S9.1; STOP-INTENT S1, S2, S3, S5; SWAP S5 refined, S7, M; CONT Data shape, C1, C2, C3; BG Decision 1; FB §1, §2; review 2026-10-28 (H1, H3, H4, H10, H11); model-gaps 2026-10-28 -->
+<!-- src: RA §1, §2, §3, §8; AUDIT A2, A3, A4, A8; AUDIT-2 A19, A20, T11; SEND-SCOPE S1, S2; SEND-SCOPE-2 S5; SEND-SCOPE-3 S6; SEND-SCOPE-5 S8, S9.1; STOP-INTENT S1, S2, S3, S5; SWAP S5 refined, S7, M; CONT Data shape, C1, C2, C3; BG Decision 1; FB §1, §2; review 2026-10-28 (H1, H3, H4, H10, H11); model-gaps 2026-10-28; SETTLE Data shape, S1, S2, S3, S5, Verified requirements 5 -->
 
 ## 3. Run Ledger model and decider
 
@@ -828,10 +834,13 @@ from it. Section 4.11 says how the ledger chain relates to it.
 ```ts
 type Hold =
   | { _tag: "Held"; runner: RunnerId; transmission: number }
-  | { _tag: "Unserved" }    // no live serving runner: start one, then call holdRun again
-  | { _tag: "Covered" }     // the user's Stop covers this run
-  | { _tag: "Exhausted" };  // the send's fifth transmission failed; the run has been settled failed
-holdRun(session, run, commandId): Effect<Hold, HoldFailed>
+  | { _tag: "Cleaning"; runner: RunnerId } // no serving row; retire this unretired candidate first
+  | { _tag: "Unserved"; predecessor: Option<{ runner: RunnerId; until: Millis }> } // no serving runner; a stopping runner of the session, if any
+  | { _tag: "Busy" }      // already held: the hold's owner ends or releases it
+  | { _tag: "Covered" }   // the user's Stop covers this run
+  | { _tag: "Exhausted" } // the fifth transmission failed; the run has been settled failed
+  | { _tag: "Ended" };    // terminal, no owner send, or not the run's commandId
+holdRun(session, run, commandId): Effect<Hold, StoreFault>
 ```
 
 One write transaction, in this order:
@@ -841,13 +850,22 @@ One write transaction, in this order:
    delivery") and return `Covered`. When it has a hold, change nothing and return `Covered`; the
    holder's interrupt or Stop settles it, and if the holder refuses (`interrupted` or `exiting`),
    4.5 releases it and this step settles it. Settlement is idempotent by the run's status guard.
-2. **Dispatchable?** The run is `pending` or `running`, unheld and not terminal. Otherwise return the
-   existing refusal.
+   Settlement goes through Send Settlement (4.7) inside this transaction.
+2. **Dispatchable?** The run is `pending` or `running`, unheld and not terminal. A terminal run,
+   a run with no owner send, or a `commandId` that is not the run's returns `Ended`. A held run
+   returns `Busy`.
+   Every domain answer is a value. Only store faults fail: retry unavailable, reject malformed
+   rows once through the existing decode error. Never retry all failures as unavailable.
 3. **Cap.** If the send already has 5 transmissions, report Settlement
    `hold_exhausted{commandId}` to the ledger, which settles the run `failed` with
    `provider_send_attempts_exhausted` and one `turn.error`, and return `Exhausted`. At most 5
    transmissions per send, the first included, across runs and restarts.
-4. **Serving?** Read the session's non-retired `serving` row (6.9). None: return `Unserved`.
+   Settlement goes through Send Settlement (4.7) inside this transaction.
+4. **Serving?** Read the session's non-retired `serving` row (6.9), its
+   candidates and retirement rows. With no serving row, first return `Cleaning` for an unretired
+   candidate in row-sequence order. Otherwise return `Unserved{predecessor}`: a retired runner of the
+   session not confirmed Gone whose Stop window end, `(stop_started_at ?? retired_at) + 4 s`, is
+   still in the future, or none. The rule reads only the row and the clock.
 5. **Bind.** Append `run.dispatched{runId, runnerId, commandId, transmission: n + 1}` and return
    `Held`.
 
@@ -856,6 +874,8 @@ One write transaction, in this order:
   its own `commandId`, 4.11). Settlement in steps 1 and 3 appends events
   through that write's projection handle. It never calls ingestion, `settleSessionRuns` or
   `flushPendingWrites`, which open their own write and would fail nested.
+- `holdRun` and `release` are the lifecycle module's calls (6.10); their runner SQL lives there,
+  inside the `commitAndSignal.write`.
 - The hold commits before the first byte of the transmission is written to the runner's socket, on
   every dispatch path, the legacy and fallback paths included.
 - No caller picks a runner; dispatch sends to the runner `holdRun` returns. A send therefore runs on
@@ -864,7 +884,7 @@ One write transaction, in this order:
   row is retired cannot be written. A send either lands before the Stop (and is settled with the
   runner) or is refused before the runner sees it.
 
-<!-- src: CONT C2, Confirm before building 1; SWAP S5 refined; STOP-INTENT S5; review 2026-10-28 (H9); model-gaps 2026-10-28 -->
+<!-- src: CONT C2, Confirm before building 1; SWAP S5 refined; STOP-INTENT S5; review 2026-10-28 (H9); model-gaps 2026-10-28; SETTLE Data shape 1, S1, S2 -->
 
 ### 4.4 The feeder
 
@@ -872,26 +892,62 @@ One write transaction, in this order:
   send. Nothing else appends `run.dispatched` and nothing else spawns a runner for a send. From
   32.5 it is also the caller for a joined steer's own transmission (4.11).
 - It takes a send when the send is claimed, when a release commits, and at restart.
-- `Held`: write to that runner and return the send to waiting on its run. `Unserved`: start a
-  serving runner (keeping the ordering against a stopping predecessor, 6.4) and call `holdRun`
-  again. `Covered` and `Exhausted`: drop it.
+- The feeder's memory is its queue, keyed by `(session, run, commandId)`, and each send's
+  capability (a live handle, or `Adopted`). Every step calls `holdRun`:
+  - `Held`: hand the transmission to its write fiber.
+  - `Busy`: drop; the hold's owner ends or releases it.
+  - `Cleaning`: request candidate retirement, await its commit, then re-enter the gate.
+  - `Unserved{Some({runner, until})}`: park until `awaitStop(runner, "Escalated")` returns or
+    `until` passes (6.4).
+  - `Unserved{None}`: start a serving runner.
+  - `Covered`, `Exhausted` and `Ended`: drop.
+  - `StoreUnavailable`: one backoff (4.8).
+
+  Every re-entry is a `holdRun` call. The feeder has no retry loop, no poll and no failure
+  handler of its own. A key being stepped is queued again when a release commits, so no
+  release is lost.
+- A start failure, or `Unserved` on the step right after a start (`StartLost`), settles the
+  send through Send Settlement (4.7): permanent unless the failure sets `retryable: true`. It
+  is never retried in the feeder (main parity).
+- The write fiber runs a release that fails on the store again after one backoff, until it
+  commits (4.5's no-op rule makes the repeat safe).
+- Interruption is not an outcome: an interrupted feeder writes nothing; the restart scan owns
+  its unheld sends, and Settle and adoption its held ones.
+- The live caller waits with `awaitRun(runId)`, which arms the commit signal and then re-reads
+  the run.
+- The queue's per-send I/O capability keeps the committed-release watermark and permits one
+  synchronous first write only while that held transmission has not been released. It does
+  not decide liveness. No waiter maps return.
+- Start, cleanup and predecessor waits race the head's run on the commit signal, ending when
+  it is terminal or covered by an accepted Stop; the feeder then steps again. Store-read
+  failures re-arm after backoff.
+- The resume mode is the outbox payload's `nativeResumeFallback`, not part of the key; at
+  `Held` the frame is built in the payload's mode, and a capability in the other mode is
+  replaced.
+- The reactor's recall of a still-unheld send settles it `failed` (`processing_timeout`)
+  through Send Settlement; a held send is untouched, including its marker. Only Settle writes
+  runner-held `delivery_indeterminate`; the reactor's marker remains direct-provider-only. No in-memory
+  cancellation of a queued owner send remains. Each write owner retains settlement evidence until commit or
+  staleness; a failed settlement never restarts the send. The native-resume preparation
+  caller still receives a typed attempt refusal immediately after its release commits.
 - A send waits on its run, never on the socket. A socket or write failure leaves it held until
   release evidence (4.5) or the run's settlement.
 - Every release, whoever commits it (the feeder's runner, the reconciler, adoption), wakes the
   feeder in the same step; its restart scan finds the run if the daemon dies first. For
   `ResumeRejected`, the ledger first issues the fresh fallback decision (4.8); the feeder never
-  re-holds that release itself. A held run never waits on a loop that has ended.
+  re-holds that release itself. A held run never waits on a loop that has ended. A release of a
+  send with no queue entry enqueues it as `Adopted`.
 - A re-hold after a release goes immediately and counts toward the cap, once the fresh fallback
   decision has issued when the reason is `ResumeRejected`.
 - **Adoption is not a transmission.** When restart adopts a live runner that still holds a run, it
   appends nothing, checks no coverage and counts nothing toward the cap (7.2).
 
-<!-- src: CONT C2 (feeder, adoption), C3 (release hands off), closing paragraph on S9.5; review 2026-10-28 (H9); model-gaps 2026-10-28 -->
+<!-- src: CONT C2 (feeder, adoption), C3 (release hands off), closing paragraph on S9.5; review 2026-10-28 (H9); model-gaps 2026-10-28; SETTLE S1, S4 -->
 
 ### 4.5 Release and its evidence
 
 ```ts
-release(run, runner, commandId, transmission, reason): Effect<void>
+release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
 ```
 
 - `release` appends `run.released`. Its projector clears the hold only when
@@ -932,7 +988,11 @@ release(run, runner, commandId, transmission, reason): Effect<void>
 - `release` is the lifecycle module's eighth call (6.10). The `Idle` stop reason is written by a
   refusal with `exiting` and by idle exit.
 
-<!-- src: CONT C3, Deleted or changed (lifecycle module); review 2026-10-28 (M7, H11); model-gaps 2026-10-28 -->
+- A failed release write is retried by its caller's owner: the feeder's write fiber (4.4), or the
+  reconciler's cadence for Settle. An adoption release failure propagates through attachment
+  recovery; bounded reconnect exhaustion retires the runner and hands its held runs to Settle.
+
+<!-- src: CONT C3, Deleted or changed (lifecycle module); review 2026-10-28 (M7, H11); model-gaps 2026-10-28; SETTLE S1, Verified requirements 5 -->
 
 ### 4.6 The host's interrupt refusal
 
@@ -962,6 +1022,38 @@ release(run, runner, commandId, transmission, reason): Effect<void>
   ledger chain lands, the owner is the run's settlement path: for a runner send, a socket failure,
   a write failure or a missing reply is never reported to the reactor as the send's outcome, and
   the reactor writes its terminal outbox status only from its run's terminal settlement.
+- **Send Settlement** owns explicit settlement of a modern owner send until each provider's
+  ledger switch. Native terminal projection remains the existing separate source at main's
+  Q26 bar; its attempt fence is assigned to 32.2.6/32.6:
+  - **Interface.** `settleSend(tx, evidence)`. The send reference belongs to each evidence variant.
+    Evidence is what the caller saw (`replied`, `journal_finished`, `failed`, `covered`,
+    `process_lost`, `delivery_unknown`); `classify` maps normalized terminal evidence onto the Run Effect vocabulary
+    (`succeeded`, `retryable`, `permanent`, `delivery_unknown`) plus `cancelled`. It returns
+    `Effect<void, StoreFault>`. Correlate the exact claim and held transmission inside
+    the transaction before any terminal or duty; stale evidence changes nothing.
+  - **Callers:** `holdRun` steps 1 and 3, the reactor's runner reply and its recall of an unheld
+    send, the feeder's start outcome, Settle (the only caller of `delivery_unknown`), adoption,
+    the attachment's retained reply after a reconnect (as `replied`), and Gone-time settlement.
+  - **Ending.** It appends one run terminal event, guarded by the run's status, carrying
+    `classify`'s flag rather than the source's; `delivery_unknown` is a `turn.error` coded
+    `delivery_indeterminate`, Settle's runner-held marker (section 2). The outbox row
+    follows in the same projection; no caller writes outbox status for a modern run, and pending
+    evidence writes nothing. A retryable outcome is a terminal `turn.error` with `retryable: true` and
+    `retryAt`; the reactor re-sends on a fresh run (4.8).
+  - **`classify`** decides send retry policy from normalized terminal evidence (`replied`,
+    `journal_finished` with a terminal result, `failed`, `covered`, `process_lost`,
+    `delivery_unknown`): retryable only when `=== true`, and a reply only when not
+    `steer-declined` and not `retryHandled`. Producers set or copy the flag and protocol
+    boundaries validate it; neither decides policy.
+  - **Wake.** An appending settlement stamps the session version in its transaction; every
+    non-reactor caller then wakes the reactor (an idempotent drain). The periodic outbox drain
+    is the backstop. A projection commit alone wakes nothing.
+  - **Switches.** The outbox adapter serves until 32.6 (Claude), 32.10 (Cursor), or 32.21
+    (Codex). That ticket migrates source evidence through 4.11, not a generic outcome-only
+    adapter. Journal finished is consumption only, interrupted replies are provider evidence,
+    coverage refers to an existing Stop, and process loss is settlement. No observed reply
+    creates a user control. Delete the old provider path atomically and the unused outbox
+    adapter at 32.13. No unused future adapter is built in R2.
 - Every outcome is decided from one piece of evidence and the session state. A Send Token that is no
   longer live changes nothing. Starting an effect (pick the next eligible send, wait behind an
   earlier or `delivery_unknown` send, apply the cap, bind the run, mint the next token) is part of
@@ -996,7 +1088,7 @@ release(run, runner, commandId, transmission, reason): Effect<void>
 - `delivery_indeterminate` keeps its meaning and is never re-sent. For a runner-held transmission
   the reconciler's Settle is its only writer.
 
-<!-- src: SEND-SCOPE-5 S8, S9.1, S9.2, S9.6; CONT C1 (Outcome stays with the Run Ledger; Delivery is owned by the hold); review 2026-10-28 (H1, H2) -->
+<!-- src: SEND-SCOPE-5 S8, S9.1, S9.2, S9.6; CONT C1 (Outcome stays with the Run Ledger; Delivery is owned by the hold); review 2026-10-28 (H1, H2); SETTLE Data shape 2, 3, S2 -->
 
 ### 4.8 Retries, the cap, the resume fallback and steers
 
@@ -1020,7 +1112,12 @@ release(run, runner, commandId, transmission, reason): Effect<void>
   re-send after `input_absent` or a
   release goes at once but counts. Past the cap, an input send fails, its message is shown once
   and its text returns to the composer; probes follow 3.7. A send retried onto a fresh run keeps
-  its transmission count.
+  its transmission count. The same backoff spaces the feeder's re-entries after
+  `StoreUnavailable`, the write fiber's repeated release, and the reconciler's retry of a failed
+  Stop commit. A runner-held send's retryable outcome ends its run and re-sends on a fresh run; the
+  cap counts by `commandId` across runs. A start failure precedes any hold and counts no
+  transmission, so a start failure that keeps setting `retryable: true` re-sends without a bound at
+  the 30 s cap, as on main.
 - **The resume fallback is a new transmission.** A rejected native resume ends that transmission
   (released `ResumeRejected` for a runner send). The ledger issues a new start decision under the
   same `commandId`; `holdRun` binds it as `n + 1`. The feeder does not re-hold the release itself.
@@ -1044,7 +1141,7 @@ release(run, runner, commandId, transmission, reason): Effect<void>
   the reactor's `writeFailure` as a send's outcome; the
   `Recovered` origin, the replay callbacks and per-driver recovery replays.
 
-<!-- src: SEND-SCOPE-5 S9.3, S9.4, S9.5; SEND-SCOPE-4 S7; CONT Data shape (Scope), C3 (ResumeRejected), closing paragraph, Out of scope, Deleted or changed; CONT failure mode 39; review 2026-10-28 (H1, H9, M6); model-gaps 2026-10-28 -->
+<!-- src: SEND-SCOPE-5 S9.3, S9.4, S9.5; SEND-SCOPE-4 S7; CONT Data shape (Scope), C3 (ResumeRejected), closing paragraph, Out of scope, Deleted or changed; CONT failure mode 39; review 2026-10-28 (H1, H9, M6); model-gaps 2026-10-28; SETTLE S1, S3, S4 -->
 
 ### 4.9 Journal answers
 
@@ -1057,7 +1154,7 @@ release(run, runner, commandId, transmission, reason): Effect<void>
   | Answer | Meaning | Daemon action | Ledger evidence (4.11) |
   |---|---|---|---|
   | `running` | a call in this process owns it | adopt | `journal_answer`, read as `input_present` |
-  | `finished` | the send's key (until 32.5 attempt and fallback flag; from 32.5 the token), result or failure | replay the runner reply or result separately; without one, the Run's own deadline applies | `journal_answer`, read as Consumption Observed only |
+  | `finished` | the send's key (until 32.5 attempt and fallback flag; from 32.5 the token), result or failure | before the provider switch, an actual terminal result/failure may settle through Send Settlement (4.7); after it, replay the runner reply or result separately; without one, the Run's own deadline applies | `journal_answer`, read as Consumption Observed only |
   | `uncertain` | retained record, no outcome, no owning call | at adoption: stays held, nothing written (7.2). At Settle: `delivery_indeterminate` (`runner_send_uncertain`), written by Settle only (4.7, 7.3). Never re-sent | Settle's `delivery_indeterminate`, read as Transport Unknown |
   | `absent` | no record | owner sends: 4.5 (adoption `not_received` is NotSent; an exited runner's `Absent` is JournalAbsent). Joined steers: requeue (4.8) | `run.released` `NotSent` or `JournalAbsent`, read as NotConsumed{absent} |
 
@@ -1068,7 +1165,7 @@ release(run, runner, commandId, transmission, reason): Effect<void>
   |---|---|---|
   | `received`, `running` | `running` | adopted |
   | `not_received` | `absent` | released `NotSent` |
-  | any other | `finished` | stays held; the separately replayed reply or result settles the run, otherwise its own deadline applies |
+  | any other | `finished` | before the provider switch, an actual terminal result/failure may settle through Send Settlement (4.7); after it, stays held for the separately replayed reply or result, otherwise its own deadline applies |
   | any other | `uncertain` | stays held; only Settle writes `delivery_indeterminate` |
 
 - The daemon maps each answer without inference. The ledger chain (32.6, 32.14) reads these
@@ -1076,7 +1173,13 @@ release(run, runner, commandId, transmission, reason): Effect<void>
   the runner side of its `probe` effect rather than building another.
 - Main-built runners: see 7.4.
 
-<!-- src: SEND-SCOPE-6 S10.1; RA §8 (32.13 send journal); CONT C2 (adoption), C3 (JournalAbsent); review 2026-10-28 (H2, H6, H9, D1); model-gaps 2026-10-28 -->
+- Before its provider switch, a finished journal with an actual terminal result/failure may
+  use the existing outbox settlement path through Send Settlement (4.7). Missing and intake-only
+  results do not settle. After the switch, 4.11's consumption-only mapping is authoritative:
+  finished never invents `result` or `runner_reply` evidence. `ResumeRejected` is a release in
+  both phases.
+
+<!-- src: SEND-SCOPE-6 S10.1; RA §8 (32.13 send journal); CONT C2 (adoption), C3 (JournalAbsent); review 2026-10-28 (H2, H6, H9, D1); model-gaps 2026-10-28; SETTLE Data shape 2, S2 -->
 
 ### 4.10 Direct providers
 
@@ -1124,8 +1227,12 @@ treat the hold as a cache of a ledger chain.
 Adoption appends nothing, so it is not a hold fact. A journal `uncertain` answer changes no chain
 by itself; Settle's `delivery_indeterminate` carries it (4.9).
 
-Journal `finished` proves consumption only. Outcome comes from the replayed `runner_reply` or
-`result`, emitted as separate evidence. Without one, the Run's own deadline applies.
+After its provider's switch, journal `finished` proves consumption only. Outcome comes from
+the replayed `runner_reply` or `result`, emitted as separate evidence. Without one, the Run's
+own deadline applies. Before the switch, an actual terminal journal result/failure may settle
+through Send Settlement's outbox path (4.7, 4.9); missing and intake-only results do not settle.
+`ResumeRejected` remains a release in both phases. A finished answer never invents `result` or
+`runner_reply` evidence for the ledger.
 
 Rejected: two stores (the ledger stores its own chains for every send and the hold becomes a cache
 of them, or is retired at 32.13), because it gives one fact two writers.
@@ -1150,7 +1257,7 @@ The feeder holds it through `holdRun` like any send: coverage is decided for the
 (4.1), and its transmissions count against its own cap. Until 32.5 the as-built rule of 4.8
 stands: the owner's holder carries it and the reactor re-sends it.
 
-<!-- src: AUDIT-2 T8; FB §3; CONT C1, C2, Data shape, Decisions (O); STOP-INTENT S5 (last bullet); SEND-SCOPE-5 S8, S9.1; SEND-SCOPE-6 S10.1; review 2026-10-28 (H1, H2, H9); model-gaps 2026-10-28 -->
+<!-- src: AUDIT-2 T8; FB §3; CONT C1, C2, Data shape, Decisions (O); STOP-INTENT S5 (last bullet); SEND-SCOPE-5 S8, S9.1; SEND-SCOPE-6 S10.1; review 2026-10-28 (H1, H2, H9); model-gaps 2026-10-28; SETTLE S2 (source-aware provider migration) -->
 
 ## 5. Stop and coverage
 
@@ -1345,11 +1452,24 @@ revoke(r: Live, reason: Revocation): Exiting | Retired
   commit (6.9).
 - The record is written before any signal to the runner, on every path (Stop, retirement, survivor
   retries, restart recovery). A crash after the commit leaves a record restart recovery finds.
-- **If the commit fails, nothing changed:** no fence, no revoke, no waiter, no signal, no shutdown
-  command. `requestStop` fails with the existing "stop runner" error and the runner keeps running
-  and serving. Retrying is calling it again.
+- **If the commit fails with a store fault, nothing durable changed:** no fence, no revoke, no
+  signal, no shutdown command. The runner keeps running and serving.
+- For every reason except `Superseded`:
+  - the intent stays `Committing`, and the reconciler re-runs the commit step after one backoff
+    (4.8) until it lands, logging each failure;
+  - waiters wait, and a second Stop joins;
+  - `requestStop` does not fail on a store outage. It waits for commit/rejection; a promoted
+    candidate returns Ignored, which no caller follows with awaitStop.
+- `requestStop` awaits commit or rejection; the reconciler owns its worker independently of
+  the waiter. Restart re-derives from durable control/candidate/dead-process facts per S3's
+  table. A healthy reattachment cannot recover an uncommitted direct Stop, as on main (Q26).
+- `Superseded` (the swap) fails with the existing "stop runner" error, and the upgrade's backoff
+  retries it (6.9).
+- `CandidateAbandoned` reads the row's role in its commit; a row already `serving` is not
+  stopped.
 - **If the runner's existing row is rejected on decode**, `requestStop` fails the same way and logs
-  the rejection. It never signals and never sends shutdown.
+  the rejection. It never signals and never sends shutdown. The state returns to `Running` and
+  the waiters fail.
 - `retired_at` is set-only and is the fence that outlives memory. A daemon starting up never
   re-adopts a retired runner as live; it hands the row to the reconciler.
 - The transaction-bound form of the stop mutation (4.5) lets a release and a stop commit together.
@@ -1367,14 +1487,14 @@ type Identity = { tag: "Verified"; pid: number; startTime: string }
   are this runner's". The signal log answers "what was sent to whom, and was it delivered". A
   refused or failed signal adds to the log and never removes a member.
 
-<!-- src: STOP-INTENT S1, S5; REAPER R3; RA §4; AUDIT-2 T3, A13; SWAP S7, K; CONT C3 (Refused, one commit for release and stop) -->
+<!-- src: STOP-INTENT S1, S5; REAPER R3; RA §4; AUDIT-2 T3, A13; SWAP S7, K; CONT C3 (Refused, one commit for release and stop); SETTLE S3 -->
 
 ### 6.4 The stop state, the reconciler and waiters
 
 ```ts
 type RunnerStop =
   | { _tag: "Running" }
-  | { _tag: "Committing"; waiters: Deferred<void, StopFailed> } // joins racing Stops; not durable
+  | { _tag: "Committing"; target: StopTarget; reason: StopReason; waiters: Deferred<"Requested" | "Ignored", StopFailed> } // identity only, no retirement/progress fields
   | { _tag: "Requested"; record: RunnerRetirement }             // row committed, nothing sent yet
   | { _tag: "Escalating"; record: RunnerRetirement }            // shutdown sent and/or signals in the log
   | { _tag: "Escalated"; record: RunnerRetirement }             // TERM, 3 s, KILL, 1 s window is over
@@ -1387,8 +1507,12 @@ decideRunnerStop(state, observation) -> { state, actions }
 - The reconciler module (`runner-retirement.ts`) owns this state. Callers read it; only the
   reconciler changes it. `entry.retirement` is a read of it.
 - `Committing` is the only state that is not durable. A second Stop joins it instead of committing
-  again. It does not guard dispatch; the database does (4.3). On commit failure it returns to
-  `Running` in the same step that fails its waiters.
+  again. It does not guard dispatch; the database does (4.3). On a store fault it stays `Committing`
+  and the reconciler retries the commit (6.3). Only a decode rejection or a `Superseded` refusal
+  returns it to `Running` and fails its waiters.
+- The worker starts at intent registration; `Committing` can only commit or reject. Durable
+  stop actions require the successful commit's retirement row. The generic durable-row tick
+  never treats `Committing` as `Requested`. `Ignored` resolves to `Running` without a Stop wait.
 - `Requested` to `Settled` map onto the row: its tag plus its signal log. Memory is a cache of the
   row and is rebuilt from it at startup.
 - `decideRunnerKill` is the signal part of `decideRunnerStop`.
@@ -1402,15 +1526,19 @@ decideRunnerStop(state, observation) -> { state, actions }
 - Each action is idempotent and keyed by the row. A failed write after the commit (signal log, Gone,
   settlement, prune) leaves the row where it was; the reconciler retries on its cadence and logs.
   It never fails a waiter and never rolls back the fence.
-- Settlement goes through the existing settlement path. The reconciler is not a new writer of a
-  send's outcome. Its Settle reads the journal first (4.5, 7.3); in the ledger chain its answers
-  are late evidence for an already Ended run (7.3).
+- Until each provider's switch, Settle's settlement goes through Send Settlement (4.7). The
+  reconciler is not a new writer of a send's outcome. Its Settle reads the journal first (4.5,
+  7.3); in the ledger chain its answers are late evidence for an already Ended run (7.3).
 - **Waiters.** Callers wait on the state: `awaitStop(runnerId, "Escalated")` for end-session and
   shutdown (the escalation window is over, not that every member is gone); `"Settled"` where a caller
   needs the runs settled. Once the row is committed no waiter sees a failure. Two racing Stops
   share one commit.
-- When the feeder starts a serving runner while a predecessor is stopping, it keeps the existing
-  ordering against the stopping predecessor, through these waiters.
+- `holdRun` names the stopping predecessor and its window end in `Unserved{predecessor}`; the
+  feeder parks until `awaitStop(predecessor, "Escalated")` returns or the window ends, then
+  starts a serving runner. The park also ends early, and the feeder steps, when the head's run
+  ends or a Stop commit covers it (4.4). No other code scans the stop states for a predecessor.
+- The release's stop step receives the `ServingRow` that `release` read in its transaction;
+  the in-memory registry is not read for who serves.
 - **One process watcher.** `RunnerAuthority` owns the only process watcher, over Exiting and Retired
   records; it is the reconciler's cadence. When a process is confirmed gone (exited, pid reused,
   zombie) it emits `runnerGone(runnerId)` once. 32.4 keeps only failed liveness checks, which are
@@ -1420,7 +1548,7 @@ decideRunnerStop(state, observation) -> { state, actions }
   `settleExitedRuns` await on `entry.stopped`, `evict`'s own revoke cohort, and the authority's
   `ownedRunIds` as a source of what to settle.
 
-<!-- src: STOP-INTENT S2, S3, S4, What is deleted; AUDIT A3; CONT C2 (feeder keeps the ordering against a stopping predecessor), C3 (Settle reads the journal); review 2026-10-28 (H4, H11) -->
+<!-- src: STOP-INTENT S2, S3, S4, What is deleted; AUDIT A3; CONT C2 (feeder keeps the ordering against a stopping predecessor), C3 (Settle reads the journal); review 2026-10-28 (H4, H11); SETTLE S1, S2, S3, S5 -->
 
 ### 6.5 Which runner holds a run
 
@@ -1539,6 +1667,11 @@ decideRunnerStop(state, observation) -> { state, actions }
   `session_id WHERE retired_at IS NULL AND role = 'serving'`.
 - `register(runner, session, role)` runs once the runner's pid and start time are known, before
   warming. `serving(session)` is a cache of the row.
+- The registration transaction refuses a new serving row while an unretired candidate exists
+  without a serving row. It returns `Lost` and re-enters `holdRun`, which returns `Cleaning`;
+  the unused spawned process is stopped. The check does not block a candidate warming alongside
+  an existing serving runner. Request-stop commit owns its full in-transaction row/role and
+  candidate snapshot recheck, including on retries; no stale outside snapshot decides retirement.
 - **The runner's role inside the host** is one typed state, not persisted, with an unchanged wire:
 
   ```ts
@@ -1585,28 +1718,29 @@ decideRunnerStop(state, observation) -> { state, actions }
   ignored. "Two live registrations, the newer wins" is replaced by the serving row.
 - Standalone shutdown after the manager is disposed is out of scope.
 
-<!-- src: SWAP S6, S7, S5 refined, J, K, M, crash table, Migration, What is deleted; RA §6; D1 Runner manager (restart); review 2026-10-28 (H11) -->
+<!-- src: SWAP S6, S7, S5 refined, J, K, M, crash table, Migration, What is deleted; RA §6; D1 Runner manager (restart); review 2026-10-28 (H11); SETTLE S3, S4, S5 -->
 
 ### 6.10 The runner lifecycle module
 
 The module has eight calls:
 
 ```ts
-register(runner, session, role: "serving" | "candidate"): Effect<void, RegisterFailed>
-requestStop(runner, reason: StopReason): Effect<void, StopFailed>
-holdRun(session, run, commandId): Effect<Hold, HoldFailed>
-release(run, runner, commandId, transmission, reason): Effect<void>
-serving(session): RunnerId | undefined
+register(runner, session, role: "serving" | "candidate"): Effect<"Registered" | "Lost", StoreFault>
+requestStop(runner, reason: StopReason): Effect<"Requested" | "Ignored", StopFailed> // StopFailed only for Superseded or a decode rejection
+holdRun(session, run, commandId): Effect<Hold, StoreFault>
+release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
+serving(session): RunnerId | undefined // a cache for routing a live caller; no write decision reads it
 state(runner): RunnerStop
 awaitStop(runner, "Escalated" | "Settled"): Effect<void>
 recover(): Effect<Recovered>
 ```
 
-- `StopFailed` is `runnerFailure("stop runner")`. `RegisterFailed` and the hold refusals reuse
-  existing errors.
+- `StopFailed` is `runnerFailure("stop runner")`. A lost registration race and every hold answer are values.
+  StoreFault distinguishes transient unavailability from the existing per-row rejection.
+  Only unavailability retries.
 - "Ending a session" is a request stop. The word "release" here means only 4.5's event.
 
-<!-- src: SWAP K; CONT C2, C3, Deleted or changed (lifecycle module) -->
+<!-- src: SWAP K; CONT C2, C3, Deleted or changed (lifecycle module); SETTLE Data shape 1, S1, S3, S4, S5 -->
 
 ### 6.11 Teardown after revoke (decided OPEN-7, 2026-10-28)
 
@@ -1651,11 +1785,13 @@ recover(): Effect<Recovered>
   spool all stay.
 - **Discovery is not evidence.** A runner's socket and registration file only find a live runner.
   Once full daemon shutdown confirms an owned runner `Gone`, it removes that runner's socket and
-  registration and nothing else. The retirement row, the send journal and any unacknowledged spool
-  stay for startup's Settle, so removing discovery files never changes a Settle outcome. A runner
-  not confirmed `Gone` keeps its discovery files.
+  registration and nothing else. The retirement row and the send journal stay for
+  startup's Settle, so removing discovery files never changes a Settle outcome. A retired
+  runner's unacknowledged spool stays on disk until Prune deletes it after Settle; nothing
+  reads it (3.8, 6.7). A live runner's spool is replayed at adoption. A runner not confirmed
+  `Gone` keeps its discovery files.
 
-<!-- src: REAPER R1; CONT Restart, Discovery is not evidence -->
+<!-- src: REAPER R1; CONT Restart, Discovery is not evidence; SETTLE Out of scope (retired spool) -->
 
 ### 7.2 `recover()`
 
@@ -1669,11 +1805,17 @@ At startup, in one recovery pass:
   runner for each held transmission's status from the hello: `received` or `running` is adopted;
   `not_received` is released `NotSent`; anything else stays held (the mapping to journal answers is
   in 4.9). `not_received` is final because the host answers a new connection's hello only after
-  reading the previous connection to end of file. At adoption only `not_received` writes; an
-  `uncertain` transmission stays held and only Settle writes its marker.
+  reading the previous connection to end of file. Before the provider switch, a `finished` answer with an actual
+  terminal result/failure may also settle through Send Settlement (4.7, 4.9); missing and
+  intake-only results do not settle. After the switch, only `not_received` writes at adoption;
+  terminal evidence is replayed separately. An `uncertain` transmission stays held and only
+  Settle writes its marker.
 - **The feeder's scan** takes every owner send whose outbox row is `running` and whose run is
   non-terminal and unheld, and holds it again (4.4). A send has no live handle at restart; the feeder
-  asks the provider instance to admit the durable send with origin `Adopted` (4.2).
+  asks the provider instance to admit the durable send with origin `Adopted` (4.2). A released
+  `ResumeRejected` transmission with unfinished fallback preparation resumes that preparation
+  in fresh mode before enqueue, reconstructed from the release and existing durable fallback
+  data. Ordinary unheld sends still enqueue as `Adopted`.
 - **Held transmissions of exited runners** go to the reconciler's Settle; those of live runners go to
   adoption. `settleUnclaimedRunnerCommands` no longer settles held transmissions itself; it hands
   those of exited runners to Settle.
@@ -1683,7 +1825,23 @@ At startup, in one recovery pass:
 - The reactor re-sends nothing on its own, except, until 32.5, a joined steer it moved to
   `retryable_failed` (4.8). Replay callbacks and per-driver recovery replays are gone (4.8).
 
-<!-- src: CONT C2 (Adoption is not a transmission), C3 (live handle), Restart, Required work 2; SWAP S7 (restart), K (recover); STOP-INTENT S1, S2; RA §4; SEND-SCOPE-4 S7; SEND-SCOPE-6 S10.1, S10.2; review 2026-10-28 (H6, H7, M6) -->
+- **Stop restart backstops.** `Committing` is not durable. Restart re-derives an uncommitted
+  Stop per source:
+
+  | caller | restart backstop |
+  |---|---|
+  | upgrade candidate stop, register failure (`CandidateAbandoned`) | `recover` stops every unretired candidate row (`runner-retirement.ts:758-787`) |
+  | idle exit, a dead process | `recover` stops a dead pid `Exited` |
+  | failure cleanup, dead process | pid/start-time recovery requests `Exited`; failed attachment retries up to four times, then retires the survivor (`process-session-runner.ts:3973-4045`) |
+  | durable end-session or explicit user Stop | reactor `prepareRecovery` resets uncompleted running controls to pending (`orchestration-side-effect-reactor.ts:344-363`, bounded by `maxControlAttempts`); their committed control/cohort is replayed. A control is not acknowledged before the retirement commit |
+  | live runner after a recoverable transport failure; direct lifecycle Stop with no durable control | if restart reconnects successfully, it cannot recover an uncommitted transient intent. Main also has no such persisted intent. This bounded Q26 limitation is explicit; 32.4/32.6/32.8 own durable process-loss/control reconciliation, not a new R2 intent table |
+
+  An already committed Stop is always recovered from its retirement row. A healthy live
+  reattachment cannot recover an uncommitted direct Stop, as on main (Q26); 32.4/32.6/32.8 own
+  durable process-loss/control reconciliation. End-session's deleted-session case additionally
+  retains the exact runner's outstanding end command (`process-session-runner.ts:3835-3854`).
+
+<!-- src: CONT C2 (Adoption is not a transmission), C3 (live handle), Restart, Required work 2; SWAP S7 (restart), K (recover); STOP-INTENT S1, S2; RA §4; SEND-SCOPE-4 S7; SEND-SCOPE-6 S10.1, S10.2; review 2026-10-28 (H6, H7, M6); SETTLE S1 (fallback restart), S2, S3 (restart backstops) -->
 
 ### 7.3 Settle for an exited runner
 
@@ -2022,8 +2180,9 @@ the ledger chain.
 
 ### 10.2 Stop intent (F12 to F21)
 
-- F12. The Stop commit fails: nothing changes, the runner keeps serving, request stop fails with
-  "stop runner", and a retry works.
+- F12. The Stop commit fails with a store fault: nothing durable changes, the runner keeps
+  serving, the reconciler retries the commit, and the waiters see the commit when it lands. For
+  `Superseded`, request stop fails with "stop runner" and the upgrade retries.
 - F13. This runner's row is rejected on decode: request stop fails, no shutdown, no signal, logged.
 - F14. The daemon crashes after the commit and before shutdown: the next daemon does not adopt the
   runner as live; the reconciler continues from `Requested`.
@@ -2043,7 +2202,7 @@ the ledger chain.
   and the first runner's reconciler leaves it alone.
 - F21. An old row with `owned_run_ids` and a run with no holder: settled through the fallback.
 
-<!-- src: STOP-INTENT failure modes 1-10; review 2026-10-28 (H5) -->
+<!-- src: STOP-INTENT failure modes 1-10; review 2026-10-28 (H5); SETTLE S3 -->
 
 ### 10.3 Swap (F22 to F29)
 
@@ -2141,6 +2300,60 @@ Behavioural statements the rebuilt decider must make impossible to violate:
   extends it except evidence this contract says extends it.
 
 <!-- src: REAPER failure modes 1-11; STOP-INTENT failure modes 1-10; SWAP failure modes 11-18; CONT failure modes 19-45; C0 Round-10 findings 1-5; SPEC Testing Decisions (failure catalogue) -->
+
+### 10.6 Send settlement (F62 to F99)
+
+- F62. A hold attempt fails on the store, then Stop settles the run: the next step is `Ended`; the
+  next send is held.
+- F63. A held run is fed again: `Busy`, dropped, one transmission.
+- F64. A run settled while queued: `Ended`, no write.
+- F65. The runner start fails with `retryable` unset: the send fails once, permanent; no second
+  start for it.
+- F66. A runner starts and is gone before the bind: the send fails once.
+- F67. A failure with `retryable` unset on the send path is permanent.
+- F68. Shutdown mid-step: no send is settled; restart feeds every unheld owner send.
+- F69. An adopted `finished` answer before replay: the run ends and the outbox follows in one
+  transaction; a failed connection before replay leaves nothing for Settle.
+- F70. An adopted `running` answer: nothing written; the run stays held.
+- F71. A failed `CandidateAbandoned` Stop commit: the reconciler commits it after the store
+  recovers.
+- F72. The same with a daemon crash first: restart stops the candidate row.
+- F73. A failed failure-cleanup Stop commit: as F71, with no caller retry.
+- F74. A failed user Stop commit: the runner serves until the commit lands; coverage holds.
+- F75. A release while memory shows a replaced runner as serving: the stop step stops the
+  transaction's row.
+- F76. A send behind a predecessor that survives TERM: `Unserved{predecessor}`, park, `Escalated`,
+  start, delivered once. A head that settles or is Stop-covered during the park is stepped at once.
+- F77. Two sends behind one stopping predecessor: both delivered, in order.
+- F78. A store outage past the backoff cap: re-entry every 30 s through `holdRun`; later sends wait
+  behind the head.
+- F79. A held transmission fails with `retryable: true`: the run ends retryable, the outbox row is
+  `retryable_failed`, the reactor re-sends on a fresh run, and the cap counts across runs.
+- F80. A release fails on the store: the write fiber repeats it after one backoff; delivered once.
+- F81. Adoption or Settle releases a send with no queue entry: it is enqueued and delivered once;
+  `ResumeRejected` is not enqueued.
+- F82. A predecessor the reconciler has not loaded, or a legacy row: parked only until its window
+  end, no poll.
+- F83. A start loses the serving-row race: the loser is stopped, the send is held on the winner.
+- F84. A start fails with `retryable: true`: re-sent at the backoff, as on main.
+- F85. A legacy replay fails with `retryable` unset: settled failed once, not retried.
+- F86. A candidate stop for a row already `serving`: nothing written; the runner keeps serving.
+- F87-F95. Apply SEND-SETTLEMENT 71-79 in order: settlement write retry, run-end wake during a
+  readiness or cleanup wait, native-resume fallback and its crash window, stale claim/transmission evidence,
+  uncommitted candidate cleanup, cancelled Stop waiter, source-aware provider migration,
+  nonterminal reply normalization, and permanent-versus-transient boundary errors.
+- F96. A delayed Held result after release has no local write capability; duplicate wakes
+  cannot write a transmission twice or close the handle of n+1 on the same runner.
+- F97. CandidateAbandoned of a promoted candidate returns Ignored, never awaits a Stop on
+  Running and leaves that runner serving. Other Stop reasons recheck instead of inheriting Ignored.
+- F98. Committing permits commit/rejection only; no shutdown, signal, settlement or prune
+  happens before the retirement transaction succeeds.
+- F99. The reactor recalls a still-unheld modern owner send: it fails once `processing_timeout`,
+  permanent, and is dropped as `Ended` with no write. A held send is untouched. The reactor
+  writes no runner-held uncertainty marker; only Settle may do so. An account revocation that
+  fails the reactor's call ends an unheld send once, by its flag, and leaves a held one alone.
+
+<!-- src: SETTLE failure modes 46-83 -->
 
 ## 11. Testing
 
@@ -2311,7 +2524,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 | 32.1 | failure catalogue and glossary | 1, 10 |
 | 32.15 | runner entry lifecycle as one tagged state; bead scope, state tags not specified here | 6.4, 6.9, 6.11 |
 | 32.16 (runner R1) | runner record and authority, `adopt` and `revoke`, survivors; deletes the `.retired` marker, the 11A hold and `runner_quarantined`. R3 is folded in. Merges to main together with 32.17 | 6.2, 6.7 |
-| 32.17 (runner R2, phase 1) | guarded writes, the policy table, the guard test and the listed deletions; grants (T1) as Starting and Live only, with the cleanup grant deleted (6.11), runner records (T2), the stop state (T3 as replaced); A1 before the ledger, A2, A3's 60 s cadence, A12, A13, A15 before the ledger; the Stop idle with no Run id; retirement tests through the interface; the reaper, stop intent, the swap and send continuation | 4.1 to 4.10, 5.1 to 5.3, 6, 7, 11 |
+| 32.17 (runner R2, phase 1) | guarded writes, the policy table, the guard test and the listed deletions; grants (T1) as Starting and Live only, with the cleanup grant deleted (6.11), runner records (T2), the stop state (T3 as replaced); A1 before the ledger, A2, A3's 60 s cadence, A12, A13, A15 before the ledger; the Stop idle with no Run id; retirement tests through the interface; the reaper, stop intent, the swap and send continuation; the send-path settlement, gate and stop-commit owner per SETTLE (built under 32.29) | 4.1 to 4.10, 5.1 to 5.3, 6, 7, 11 |
 | 32.18 (runner R3) | durable owner rows; folded into 32.16, with the older generation scheme superseded by runner authority | 6.1, 6.2, 6.8 |
 | 32.19 (runner R4) | the in-host query fence and `querySeq` on frames and hello; one protocol bump shared with 32.5. Readers of labels (stale confirm, a label change mid-interrupt) depend on it | 6.1, 9 |
 | 32.20 (runner R5) | remove the legacy generation rule; `legacy:<runnerId>` is deleted under runner authority | 6.1, 6.2, 9 |
@@ -2321,7 +2534,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 | 32.2.3 | contract-only oracle update for decider rules, background work and provider policies | 11.2, 3, 8, 9 |
 | 32.2.4 | public-interface trace harness, fake provider ground truth, oracle differential, coverage and fixed traces | 11.2 |
 | 32.2.5 | A6, A16 | 3.8 |
-| 32.2.6 | direct-provider uncertainty, outbox re-sends, one Stop rule for inbox and claimed rows, reading `stopCovers` (5.4) | 4.8, 4.10, 5.4 |
+| 32.2.6 | direct-provider uncertainty, outbox re-sends, one Stop rule for inbox and claimed rows, reading `stopCovers` (5.4); Q26: close native terminal projection's missing attempt fence with 32.6 | 4.7, 4.8, 4.10, 5.4 |
 | 32.2.7 | core authority, stopping, process labels, session and project gates | 3.3, 3.6, 3.11, 5.1, 6.1 |
 | 32.2.8 | core answers, steers, OpenCode and Cursor policies | 3.6, 3.9, 3.10, 9 |
 | 32.2.9 | integrate, verify and land the redesigned ledger | 11.2 |
@@ -2330,25 +2543,25 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 | 32.2.12 | core destructive confirm and lost work, including stale snapshots and labels | 8.3, 8.4 |
 | 32.2.14 | per-provider native-session fence membership, idle proof and `resultReleasesFence` | 9 |
 | 32.3 | ledger on SQLite with four verbs; the Run Effects table, empty and not yet authoritative for any provider (the outbox stays authoritative); A5, A7, A14, A18, A19, T9, T12, the per-session row of A8; owns the SQLite event-order test | 3.1, 3.7, 3.12, 11.3 |
-| 32.4 | deadlines as data and the process watcher; A1 with the ledger: builds `process_lost` with `retired_at` in the retirement commit for ledger-owned runs, while runner-held providers keep `Gone`-time settlement until their own ticket (6.5); A3, A8, A15 with the ledger | 3.7, 6.4, 6.5, 6.8 |
+| 32.4 | deadlines as data and the process watcher; A1 with the ledger: builds `process_lost` with `retired_at` in the retirement commit for ledger-owned runs, while runner-held providers keep `Gone`-time settlement until their own ticket (6.5); A3, A8, A15 with the ledger; Q26: durable process-loss recovery, including the uncommitted direct-Stop/live-reattachment limitation (7.2), with 32.6/32.8 | 3.7, 6.4, 6.5, 6.8, 7.2 |
 | 32.5 | stateless runner protocol; A11; the protocol bump with 32.19; Send Token identity on the wire, run ids as coverage labels only, wake labels on `interrupt_turn`; a joined steer's own `run.dispatched` and token (4.11) | 4.6, 4.9, 4.11, 9 |
-| 32.6 | Claude send and run end through the ledger; reuses the journal answers. Switch for Claude: Run Effects, run state and `delivery_indeterminate` become the ledger's; `process_lost` settlement moves to the retirement commit and `Gone`-time settlement is deleted for Claude | 3.12, 4.9, 4.11, 6.5 |
+| 32.6 | Claude send and run end through the ledger; reuses the journal answers. Switch for Claude: Run Effects, run state and `delivery_indeterminate` become the ledger's; `process_lost` settlement moves to the retirement commit and `Gone`-time settlement is deleted for Claude; migrate Send Settlement's Claude callers to the ledger's source-specific inputs (4.7, 4.11) and delete their outbox path; `processLost` is a no-op for Claude; Q26: close native terminal projection's missing attempt fence with 32.2.6 and durable process-loss/control recovery with 32.4/32.8 | 3.12, 4.9, 4.11, 6.5 |
 | 32.7, 32.23 | steering as a Run Input; wake admission. Run Inputs own steer association for each switched provider; `joined_into` stays for the rest until 32.13 | 3.9, 3.12, 8.3 |
-| 32.8 | Stop, interrupt and Run now; `interrupt_turn` built from the Stop commit, with wake labels and no input ids. The `control` `stop` records the Stop but is not read for coverage before 32.13 | 4.6, 5 |
+| 32.8 | Stop, interrupt and Run now; `interrupt_turn` built from the Stop commit, with wake labels and no input ids. The `control` `stop` records the Stop but is not read for coverage before 32.13; Q26: durable Stop/control reconciliation and recovery with 32.4/32.6 (7.2) | 4.6, 5, 7.2 |
 | 32.9 | answers through `control(answer)` | 3.10 |
-| 32.10 | Cursor on the ledger, runner-held; reuses 32.6's runner path. Switch for Cursor, as 32.6 does for Claude | 3.12, 6.5, 9 |
+| 32.10 | Cursor on the ledger, runner-held; reuses 32.6's runner path. Switch for Cursor, as 32.6 does for Claude; migrate Send Settlement's Cursor callers to the ledger's source-specific inputs (4.7, 4.11) and delete their outbox path; `processLost` is a no-op for Cursor | 3.12, 6.5, 9 |
 | 32.2.13 | Codex policy in the decider | 3, 8, 9 |
-| 32.21 | Codex on the ledger, runner-held; reuses 32.6's runner path. Switch for Codex, as 32.6 does for Claude | 3.12, 4, 6.5, 9 |
+| 32.21 | Codex on the ledger, runner-held; reuses 32.6's runner path. Switch for Codex, as 32.6 does for Claude; migrate Send Settlement's Codex callers to the ledger's source-specific inputs (4.7, 4.11) and delete their outbox path; `processLost` is a no-op for Codex | 3.12, 4, 6.5, 9 |
 | 32.11 | OpenCode on the ledger. Switch for OpenCode: Run Effects, run state and the direct-provider `delivery_indeterminate` marker (written by the interpreter) become the ledger's | 3.12, 4.10, 9 |
 | 32.12 | session-wide failures and removed projects | 3.11 |
-| 32.13 | deletes the old run-state copies: `owned_run_ids` and the fallback, main-built paths, `newestRunnerFirst`, run joining, `payload.stop.owners`, `stopCovers`, `joined_into` and the outbox; the ledger's `control` `stop` takes over coverage (5.4) | 3.12, 5.4, 6.5, 6.9, 7.4 |
+| 32.13 | deletes the old run-state copies: `owned_run_ids` and the fallback, main-built paths, `newestRunnerFirst`, run joining, `payload.stop.owners`, `stopCovers`, `joined_into` and the outbox; the ledger's `control` `stop` takes over coverage (5.4); Send Settlement's outbox adapter and its `settleRunnerCommandReply` call path | 3.12, 5.4, 6.5, 6.9, 7.4 |
 | 32.14 | full crash matrix and two-build upgrade, run once each for Claude, Codex and Cursor; reuses the journal answers | 4.9, 11.3 |
 | 32.22 | A9, A20, T6, T11 | 8.3 |
 | 32.24 | Stop tasks through per-task effects, without touching a turn | 8.4 |
 | 32.25 | destructive confirm and durable lost-work notice | 8.4 |
 | 32.26, 32.27 | A4, A17, T4 | 8.1, 8.4, 8.6 |
 | 32.28 | Codex background terminals as tasks | 8, 9 |
-| 32.29 | split the process session runner by state owner: feeder, adoption and recovery, retirement, live send | 4, 6 |
+| 32.29 | the send settlement redesign (SETTLE S1 to S5) and the split by state owner: send gate and feeder, Send Settlement, Starter, legacy recovery, retirement, live send | 2, 4.3-4.5, 4.7-4.9, 4.11, 6.3, 6.4, 6.9, 6.10, 7.1-7.2 |
 | 32.30 | SessionActivity as every surface's activity view; bead requires a contract extension before implementation | 2, 8.1 |
 
 - Lanes paused for this redesign: 82tn.10.6, 10.7, 10.9, 11, 12, 13, 14, 15 and 16. They build on
@@ -2356,7 +2569,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
   merges, before 82tn.10.6 onward resumes.
 - Background-work tickets depend on runner R1 and R2.
 
-<!-- src: AUDIT Tickets; AUDIT-2 Tickets; RA §9; SEND-SCOPE-5 S8; SEND-SCOPE-6 S10.1; SPEC children list, Implementation Decisions (Placement), Further Notes (paused lanes); CONT Out of scope; review 2026-10-28 (H4, H9, H10, M1); model-gaps 2026-10-28; read-only Beads 2026-10-28 -->
+<!-- src: AUDIT Tickets; AUDIT-2 Tickets; RA §9; SEND-SCOPE-5 S8; SEND-SCOPE-6 S10.1; SPEC children list, Implementation Decisions (Placement), Further Notes (paused lanes); CONT Out of scope; review 2026-10-28 (H4, H9, H10, M1); model-gaps 2026-10-28; read-only Beads 2026-10-28; SETTLE S2, S3, Required work, Decisions (AJ) -->
 
 ## 13. OPEN items
 
@@ -2524,6 +2737,22 @@ worries about. Competitor evidence came from t3code, bb, paseo, zeron, diri and 
 | OPEN-7 | no cleanup grant; scopes release memory, the reconciler settles (6.11) | a cohort at `revoke`; a cohortless cleanup grant; a time-bounded cleanup window; a durable cleanup effect |
 
 <!-- src: HLK header, Why, steps 1-5, Rules not tied to one step; RULINGS R1-R3; D1 header, D1-1 to D1-5; OW header, Why, Decision 1, Riders; FB header, Why, What stays, §3 rulings; BG header, Decision 1, Decision 3 (Claude goals); RA header, Why; AUDIT header, A12; AUDIT-2 header; SEND-SCOPE to SEND-SCOPE-6 headers, Why, Decisions; REAPER Decisions; STOP-INTENT header, Why, Decisions; SWAP header, Decisions; CONT Decisions; model-gaps 2026-10-28 -->
+
+### A.10 Send settlement (2026-10-28): T + U + V
+
+Decided autonomously under the Review Rounds rule after three material rounds on the
+SEND-CONTINUATION build of 32.17. Every round answered "is this send live", "is this failure
+terminal" or "who ends it, and who owns a failed write" in memory at a call site. Chosen: the gate
+returns every domain answer as a value and the feeder has no retry loop (T); one Send Settlement
+module ends a modern owner send by appending its run's terminal, with the outbox following in the
+projection until each provider switch moves its sources to the ledger's inputs (U); the reconciler retries a failed
+Stop commit (V); who serves is read in the transaction (AH); a start failure is classified as on
+main (AD-main). Rejected: patching in place, narrowing R2 to main, a candidate sweep, pulling Run
+Effects forward, at most once, an in-memory epoch, salvaging the spool in R2 (follow-up bead), a
+start budget, a `run.unserved` event, a pure feeder decider, a `Pacer`, Prune tokens, a provider
+port.
+
+<!-- src: SETTLE header, Why, Decisions -->
 
 **Decided (integration round 2, attrib-r2)**
 
