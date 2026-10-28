@@ -213,6 +213,7 @@
 		</div>
 		{/if}
 		<div class={collapsed ? "thin-track surface-strip" : pinMarkers ? "surface-strip relative h-[16px] min-w-[44px]" : "surface-strip absolute inset-0"} data-testid={collapsed ? "surfacing-thin-track" : undefined} role={pinMarkers ? "group" : undefined} aria-label={pinMarkers ? `Activity timeline — ${segments.length} steps` : undefined} bind:this={stripEl}>
+			{#if segments.length === 0}<div class="absolute top-1/2 inset-x-0 h-[4px] -translate-y-1/2 rounded-[2px] bg-chip" aria-hidden="true" data-testid="strip-empty-track"></div>{/if}
 			{#each segments as segment (segment.id)}
 				<Button variant="ghost" size="content" hoverFill="none" ariaLabel={segment.label} data-step-id={segment.id} class="absolute top-1/2 h-[4px] -translate-y-1/2 rounded-[1px] transition-opacity {TONES[segment.tone]} {segment.running ? 'live-segment' : ''} opacity-100" data-active={highlighted === segment.id} style="left:{segment.left}%;width:{segment.width}%;" onclick={(event) => { if (event.detail === 0) { cursor = segment.id; clear(); activateStep(segment.id); } }}><span class="sr-only">{segment.label}</span></Button>
 			{/each}

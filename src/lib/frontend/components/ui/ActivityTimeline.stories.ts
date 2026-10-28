@@ -273,3 +273,13 @@ export const Collapsed: Story = {
 		await expect(args["onpick"]).toHaveBeenLastCalledWith(messages.messages[0]);
 	},
 };
+
+/** A turn with no steps yet still draws a track, so its strip band is not blank. */
+export const NoSteps: Story = {
+	args: { segments: [] },
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement).getByTestId("strip-empty-track"),
+		).toBeVisible();
+	},
+};
