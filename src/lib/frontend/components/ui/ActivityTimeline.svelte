@@ -122,8 +122,24 @@
 		} else { cursor = stepAt(xAt(event.clientX))?.id ?? previous.id; onjump?.(cursor); }
 	}
 	function keyboard(event: KeyboardEvent) {
+		const button = (event.target as Element).closest<HTMLButtonElement>("button[data-surface-part], button[data-step-id]");
+		if (button) {
+			const buttons = [...trackEl?.querySelectorAll<HTMLButtonElement>(button.hasAttribute("data-step-id") ? ".surface-strip button[data-step-id]" : ".pin-lane button[data-surface-part]") ?? []];
+			const index = buttons.indexOf(button);
+			let next: number;
+			switch (event.key) {
+				case "ArrowLeft": case "ArrowUp": next = Math.max(0, index - 1); break;
+				case "ArrowRight": case "ArrowDown": next = Math.min(buttons.length - 1, index + 1); break;
+				case "Home": next = 0; break;
+				case "End": next = buttons.length - 1; break;
+				case "Enter": case " ": clear(); oncommand?.(event); event.stopPropagation(); return;
+				default: if (oncommand) { clear(); oncommand(event); } return;
+			}
+			event.preventDefault(); event.stopPropagation(); clear();
+			buttons[next]?.focus({ preventScroll: true });
+			return;
+		}
 		if (oncommand) { clear(); oncommand(event); return; }
-		if ((event.target as Element).closest("button")) return;
 		let index: number;
 		switch (event.key) {
 			case "ArrowLeft": index = Math.max(0, selected - 1); break;
@@ -166,10 +182,10 @@
 		{/each}
 		</div>
 		{/if}
-		<div class={collapsed ? "thin-track surface-strip" : markers.kind === "pins" ? "surface-strip relative h-[16px] min-w-[44px]" : "surface-strip absolute inset-0"} data-testid={collapsed ? "surfacing-thin-track" : undefined} role={markers.kind === "pins" ? "img" : undefined} aria-label={markers.kind === "pins" ? `Activity timeline — ${segments.length} steps` : undefined} bind:this={stripEl}>
+		<div class={collapsed ? "thin-track surface-strip" : markers.kind === "pins" ? "surface-strip relative h-[16px] min-w-[44px]" : "surface-strip absolute inset-0"} data-testid={collapsed ? "surfacing-thin-track" : undefined} role={markers.kind === "pins" ? "group" : undefined} aria-label={markers.kind === "pins" ? `Activity timeline — ${segments.length} steps` : undefined} bind:this={stripEl}>
 			<div class="absolute top-1/2 inset-x-0 h-[4px] -translate-y-1/2 rounded-[2px] bg-chip" aria-hidden="true"></div>
 			{#each [...segments, ...seams.map((seam) => ({ ...seam, label: "Compaction", tone: "compaction" as const, running: false }))] as segment (segment.id)}
-				<span data-step-id={segment.id} aria-hidden="true" class="absolute top-1/2 h-[4px] -translate-y-1/2 rounded-[1px] transition-opacity {TONES[segment.tone]} {segment.running ? 'animate-pulse' : ''} opacity-100" data-active={highlighted === segment.id} style="left:{segment.left}%;width:{segment.width}%;"></span>
+				<Button variant="ghost" size="content" hoverFill="none" ariaLabel={segment.label} data-step-id={segment.id} class="absolute top-1/2 h-[4px] -translate-y-1/2 rounded-[1px] transition-opacity {TONES[segment.tone]} {segment.running ? 'animate-pulse' : ''} opacity-100" data-active={highlighted === segment.id} style="left:{segment.left}%;width:{segment.width}%;" onclick={(event) => { if (event.detail === 0) { cursor = segment.id; clear(); onjump?.(segment.id); } }}><span class="sr-only">{segment.label}</span></Button>
 			{/each}
 			{#if markers.kind === "pins" && anchor}<i class="surface-thumb" style:left={anchor}></i>{/if}
 		</div>

@@ -1,5 +1,19 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Strip pins and steps have keyboard focus movement and activation
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  Then arrows move focus between strip pins and Enter picks the focused pin
+  And arrows move focus between strip steps and Enter opens the focused step
+  And the messages region visually matches turn-strip-keyboard-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario Outline: Open pins use compact tinted chips and only reserve occupied rows
   Given message surfacing is active at Most
   And surfacing read tracking starts with 1,8 read and summaries off

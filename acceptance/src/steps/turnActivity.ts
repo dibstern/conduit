@@ -87,6 +87,57 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "navigate and activate strip pins with the keyboard",
+		match:
+			/^arrows move focus between strip pins and Enter picks the focused pin$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const first = page.getByTestId("surfacing-pin-1");
+			const second = page.getByTestId("surfacing-pin-2");
+			await first.focus();
+			await page.keyboard.press("ArrowRight");
+			await expect(second).toBeFocused();
+			await expect(page.getByTestId("surfacing-msg-card")).toHaveAttribute(
+				"data-ordinal",
+				"8",
+			);
+			await page.keyboard.press("Enter");
+			await expect(page.getByTestId("surfacing-msg-card")).toHaveAttribute(
+				"data-ordinal",
+				"2",
+			);
+			await page.keyboard.press("End");
+			await expect(page.getByTestId("surfacing-pin-8")).toBeFocused();
+			await page.keyboard.press("Home");
+			await page.keyboard.press("Enter");
+			await expect(page.getByTestId("surfacing-msg-card")).toHaveAttribute(
+				"data-ordinal",
+				"1",
+			);
+		},
+	},
+	{
+		name: "navigate and activate strip steps with the keyboard",
+		match:
+			/^arrows move focus between strip steps and Enter opens the focused step$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const steps = panel(page).locator(".surface-strip [data-step-id]");
+			await steps.nth(0).focus();
+			await expect(steps.nth(0)).toBeFocused();
+			await expect(steps.nth(0)).toHaveRole("button");
+			await page.keyboard.press("ArrowRight");
+			await expect(steps.nth(1)).toBeFocused();
+			await page.keyboard.press("Enter");
+			await expect(panel(page).locator(".step-log")).toBeVisible();
+			await expect(
+				panel(page)
+					.locator('[data-log-part="surfacing-agent/surfacing-tool-1"] button')
+					.first(),
+			).toHaveClass(/bg-selection/);
+		},
+	},
+	{
 		name: "assert compact category pin chips",
 		match:
 			/^open pins use 19px category chips with 6px stems and (visible|hidden) numbers$/,

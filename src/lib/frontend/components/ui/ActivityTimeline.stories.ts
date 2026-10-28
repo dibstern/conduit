@@ -159,6 +159,10 @@ export const Pins: Story = {
 		await user.pointer({ keys: "[/MouseLeft]", target: pin });
 		await expect(args["onpick"]).toHaveBeenLastCalledWith(messages.pins[1]);
 		pin.focus();
+		await userEvent.keyboard("{ArrowLeft}");
+		await expect(canvas.getByTestId("surfacing-pin-1")).toHaveFocus();
+		await userEvent.keyboard("{ArrowRight}");
+		await expect(pin).toHaveFocus();
 		await userEvent.keyboard("{Enter}");
 		await expect(args["onpick"]).toHaveBeenCalledTimes(2);
 	},
