@@ -1104,7 +1104,7 @@
 	},
 	"test/integration/daemon/worktree-cleanup.test.ts": {
 		"polling": 12,
-		"timeout-override": 40
+		"timeout-override": 38
 	},
 	"test/integration/flows/archived-event-retention.integration.ts": {
 		"polling": 1
