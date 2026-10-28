@@ -900,7 +900,10 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 			yield* f.service.invalidate({ directory: f.second });
 			expect((yield* f.service.read("one"))?.folders?.[1]?.dirty).toBe(false);
 			yield* settle;
-			expect((yield* f.service.read("one"))?.folders?.[1]?.dirty).toBe(true);
+			const second = yield* waitForDirty(
+				f.service.read("one").pipe(Effect.map((git) => git?.folders?.[1])),
+			);
+			expect(second?.dirty).toBe(true);
 			expect(yield* f.version).toBeGreaterThan(before);
 		}),
 	);
