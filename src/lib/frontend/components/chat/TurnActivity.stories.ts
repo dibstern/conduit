@@ -94,7 +94,7 @@ export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const toggle = canvas.getByRole("button", {
-			name: /^Work(ed|ing)\b/,
+			name: /^(Expand|Collapse) turn$/,
 		});
 		if (toggle.getAttribute("aria-expanded") !== "true")
 			await userEvent.click(toggle);
@@ -255,7 +255,7 @@ export const HandBackExpanded: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			canvas.getByRole("button", { name: /^Worked\b/, expanded: false }),
+			canvas.getByRole("button", { name: "Expand turn", expanded: false }),
 		);
 		await userEvent.click(canvas.getByTestId("turn-hand-back-row"));
 		await expect(canvas.getByText("Use the staging project.")).toBeVisible();
@@ -303,7 +303,7 @@ export const PreviewedOutputRetry: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const toggle = canvas.getByRole("button", {
-			name: /^Work(ed|ing)\b/,
+			name: "Expand turn",
 			expanded: false,
 		});
 		await userEvent.click(toggle);
@@ -363,7 +363,7 @@ const [twiceSegment = EMPTY_SEGMENT] = twice.segments;
 async function expand(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
 	const toggle = canvas.getByRole("button", {
-		name: /^Work(ed|ing)\b/,
+		name: /^(Expand|Collapse) turn$/,
 	});
 	if (toggle.getAttribute("aria-expanded") !== "true")
 		await userEvent.click(toggle);
@@ -433,6 +433,7 @@ async function showSkillEvents(canvasElement: HTMLElement) {
 	);
 	if (head?.getAttribute("aria-expanded") === "false")
 		await userEvent.click(head);
+	await userEvent.click(canvas.getByRole("tab", { name: /^(Full log|Log)$/ }));
 	head?.blur();
 	const rows = canvas.getAllByRole("button", { name: /^Skill / });
 	await expect(rows).toHaveLength(2);

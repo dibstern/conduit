@@ -269,9 +269,20 @@ export const turnPanelHandlers: StepHandler[] = [
 		match: /^the panel shows the (full log|saved message stop)$/,
 		run: async ({ world, match }) => {
 			const full = match[1] === "full log";
-			await expect(
-				panel(world.page).locator(".turn-activity-toggle"),
-			).toHaveAttribute("aria-expanded", String(full));
+			if (!full) {
+				await expect(
+					panel(world.page).getByRole("tab", {
+						name: /^(Full log|Log)$/,
+						selected: true,
+					}),
+				).toHaveCount(0);
+				const menu = panel(world.page).getByRole("button", {
+					name: "Show messages",
+					exact: true,
+				});
+				if (await menu.count())
+					await expect(menu).not.toContainText("Full log");
+			}
 			if (full)
 				await expect(
 					panel(world.page).locator(".step-log [data-log-part]").first(),

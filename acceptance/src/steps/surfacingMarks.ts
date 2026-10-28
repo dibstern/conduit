@@ -9,6 +9,7 @@ import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
 import { setSurfacingFixtureMark } from "./surfacingCard.js";
+import { chooseShowStop } from "./turnActivityShow.js";
 
 const SESSION = "sess-surfacing";
 const ledgers = new WeakMap<Page, SurfacingFeedbackEntry[]>();
@@ -160,14 +161,14 @@ export const surfacingMarksHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const page = world.page;
 			const ordinal = match[2] ?? "";
-			const wrapper =
-				match[3] === "card"
-					? card(page)
-					: page.getByTestId(`surfacing-step-mark-${ordinal}`);
-			if (match[3] === "card") {
+			const wrapper = card(page);
+			if (match[3] === "card")
 				await page.getByTestId(`surfacing-pin-${ordinal}`).click();
-				await expect(wrapper).toHaveAttribute("data-ordinal", ordinal);
-			}
+			else
+				await page
+					.locator(`.step-log [data-message-number="${ordinal}"] button`)
+					.click();
+			await expect(wrapper).toHaveAttribute("data-ordinal", ordinal);
 			targets.set(page, wrapper);
 			await wrapper
 				.getByTestId(`surfacing-mark-${match[1]?.toLowerCase()}`)
@@ -388,9 +389,9 @@ export const surfacingMarksHandlers: StepHandler[] = [
 		name: "expand marked step log",
 		match: /^I open the surfacing step log$/,
 		run: async ({ world }) => {
-			await world.page.locator(".turn-activity-toggle").first().click();
+			await chooseShowStop(world.page, "Full log");
 			await expect(
-				world.page.getByTestId("surfacing-step-mark-6"),
+				world.page.locator('.step-log [data-message-number="6"]'),
 			).toBeVisible();
 		},
 	},
@@ -399,20 +400,20 @@ export const surfacingMarksHandlers: StepHandler[] = [
 		match:
 			/^the step log disables Raise at Key and Lower for a routine message$/,
 		run: async ({ world }) => {
+			await world.page
+				.locator('.step-log [data-message-number="2"] button')
+				.click();
 			await expect(
-				world.page
-					.getByTestId("surfacing-step-mark-2")
-					.getByTestId("surfacing-mark-raise"),
+				card(world.page).getByTestId("surfacing-mark-raise"),
+			).toBeDisabled();
+			await world.page
+				.locator('.step-log [data-message-number="6"] button')
+				.click();
+			await expect(
+				card(world.page).getByTestId("surfacing-mark-lower"),
 			).toBeDisabled();
 			await expect(
-				world.page
-					.getByTestId("surfacing-step-mark-6")
-					.getByTestId("surfacing-mark-lower"),
-			).toBeDisabled();
-			await expect(
-				world.page
-					.getByTestId("surfacing-step-mark-6")
-					.getByTestId("surfacing-mark-raise"),
+				card(world.page).getByTestId("surfacing-mark-raise"),
 			).toBeEnabled();
 		},
 	},

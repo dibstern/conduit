@@ -205,5 +205,7 @@ it("renders the base activity strip with both switches off and opens its unnumbe
 	);
 	expect(container.querySelector("[data-message-number]")).toBeNull();
 	expect(screen.queryByTestId("surfacing-summary-generate")).toBeNull();
-	expect(screen.queryByTestId("surfacing-minimise-toggle")).toBeNull();
+	expect(
+		screen.getByTestId("surfacing-minimise-toggle").getAttribute("aria-label"),
+	).toBe("Collapse turn");
 });

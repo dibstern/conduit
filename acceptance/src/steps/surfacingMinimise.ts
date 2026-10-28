@@ -167,7 +167,7 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 			// The visual capture waits a frame, which a paused clock never paints.
 			await world.page.clock.resume();
 			await panel(world.page, match[1] ?? "")
-				.getByRole("button", { name: "Minimise turn", exact: true })
+				.getByRole("button", { name: "Collapse turn", exact: true })
 				.click();
 			await world.page.mouse.move(0, 0);
 		},
@@ -221,7 +221,7 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 			const scope = panel(world.page, match[1] ?? "");
 			await expect(scope).toHaveAttribute("data-minimised", "false");
 			await expect(
-				scope.getByRole("button", { name: "Minimise turn", exact: true }),
+				scope.getByRole("button", { name: "Collapse turn", exact: true }),
 			).toHaveAttribute("aria-expanded", "true");
 			if (match[2])
 				await expect(scope.getByTestId("surfacing-msg-card")).toHaveAttribute(

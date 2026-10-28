@@ -18,7 +18,7 @@
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { logSteps, stopCounts } from "../../utils/turn-stops.js";
-	import { surfaceTurn, surfaceTime, surfaceKey, type CardSelection, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
+	import { canOpenSurfaceMessage, surfaceTurn, surfaceKey, type CardSelection, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
 	import SurfacingCard, { type ReadState, type SurfacingRegions } from "./SurfacingCard.svelte";
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
 	import SurfacingMarkActions from "./SurfacingMarkActions.svelte";
@@ -52,6 +52,7 @@
 	import ActivityStrip from "./ActivityStrip.svelte";
 	import MinimisedTurn from "./MinimisedTurn.svelte";
 	import TurnLog from "./TurnLog.svelte";
+	import TurnShowBar from "./TurnShowBar.svelte";
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
@@ -187,9 +188,10 @@
 		level, view: panel.view.kind === "open" ? panel.view.view : null, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, selection: stripInteraction.scrubbing && stripInteraction.hovered ? { kind: "picked", uuid: stripInteraction.hovered } : panel.target?.kind === "message" ? { kind: "picked", uuid: panel.target.uuid } : selection, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
-	const minimised = $derived(surfacingActive && panel.view.kind === "collapsed");
-	const hovered = $derived(minimised ? -1 : segment.activity.findIndex((part) => part.uuid === stripInteraction.hovered));
-	const summaryVisible = $derived(!minimised && summaryEnabled && (summaryOpen && summaryOpen.storeId === storeTurnId ? summaryOpen.open : (!phone && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
+	const minimised = $derived(panel.view.kind === "collapsed");
+	// A collapsed Jev turn previews in its strip, so only open strips caption the head.
+	const hovered = $derived(minimised && surfacingActive ? -1 : segment.activity.findIndex((part) => part.uuid === stripInteraction.hovered));
+	const summaryVisible = $derived((!surfacingActive || !minimised) && summaryEnabled && (summaryOpen && summaryOpen.storeId === storeTurnId ? summaryOpen.open : (!phone && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
 	function toggleMinimised() {
 		if (panel.view.kind === "collapsed") panel.open();
 		else panel.collapse();
@@ -252,7 +254,7 @@
 	function toggleSummary() {
 		if (!storeTurnId) return;
 		const visible = summaryVisible;
-		if (minimised) panel.open();
+		if (minimised && surfacingActive) panel.open();
 		summaryOpen = { storeId: storeTurnId, open: !visible };
 	}
 	function closeSummary() {
@@ -288,10 +290,7 @@
 		citedStep = uuid ?? null;
 	}
 	function selectLevel(next: SurfaceLevel) {
-		// The existing card's level control changes its pins without closing the log.
-		const keepLog = fullLog;
 		panel.show(next);
-		if (keepLog) panel.show("log");
 		selection = { kind: "latest" };
 	}
 	function followLatest() { selection = { kind: "latest" }; }
@@ -326,6 +325,7 @@
 			return;
 		}
 		if (!surfacingActive) {
+			if (command?.kind === "collapse") { event.preventDefault(); toggleMinimised(); return; }
 			if (command?.kind === "summary" && summaryEnabled) { event.preventDefault(); toggleSummary(); }
 			return;
 		}
@@ -395,30 +395,29 @@
 		return () => clearTimeout(resting);
 	});
 
-	// While live, the newest steps already show, and opening the log inserts
-	// the earlier ones above them. The scroll controller can't see that growth,
-	// so hold the newest step where the reader saw it. Closing needs no help:
-	// the header the reader just clicked stays put.
-	async function toggleLog() {
-		const uuid = showTicker && !fullLog ? segment.activity.at(-1)?.uuid : undefined;
-		const newestTop = () => uuid === undefined ? undefined : panelEl?.querySelector(`[data-log-part="${CSS.escape(uuid)}"]`)?.getBoundingClientRect().top;
-		const before = newestTop();
-		if (fullLog) {
-			if (surfacingActive) panel.show(panel.saved);
-			else panel.collapse();
-		} else panel.show("log");
-		if (before === undefined) return;
-		await tick();
-		const after = newestTop();
-		const scroller = panelEl?.closest("#messages");
-		if (after !== undefined && scroller) scroller.scrollTop += after - before;
-	}
-
 	async function jumpTo(i: number) {
 		const part = segment.activity[i];
 		if (!part) return;
 		await reveal({ sessionId, uuid: part.uuid });
 	}
+	// Full log inserts earlier rows above the ticker. Keep its newest step in place,
+	// unless a reveal opened the log: its target scrolls itself into view.
+	$effect.pre(() => {
+		if (!showTicker || fullLog) return;
+		return () => {
+			if (!fullLog || panel.pending) return;
+			const uuid = segment.activity.at(-1)?.uuid;
+			const row = uuid ? panelEl?.querySelector(`[data-log-part="${CSS.escape(uuid)}"]`) : undefined;
+			const before = row?.getBoundingClientRect().top;
+			const scroller = panelEl?.closest('[aria-label="Transcript"]');
+			if (before === undefined || !scroller) return;
+			void tick().then(() => {
+				// A reveal or unmount supersedes a queued ticker anchor.
+				if (!fullLog || panel.pending || !row?.isConnected || !scroller.isConnected) return;
+				scroller.scrollTop += row.getBoundingClientRect().top - before;
+			});
+		};
+	});
 </script>
 
 {#snippet markLabel(pin: SurfacePin)}
@@ -480,21 +479,23 @@
 	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
 {/snippet}
 
-<div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfacingActive || summaryEnabled ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
+<div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfaceCommand} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
 	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {model} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
 	<div class="md:ml-[42px]">
 		<!-- The active turn is a keyboard navigation group; inactive turns add no tab stop. -->
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-		<div role={surfacingActive ? "group" : undefined} tabindex={surfacingActive ? 0 : undefined} aria-label={surfacingActive ? "Turn messages" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} data-testid={surfacingActive ? "surfacing-card" : undefined} class="turn-head-card @container rounded-[14px] bg-turn-bg px-[12px] pt-[10px] pb-[2px] md:pb-[9px]">
+		<div role={surfacingActive ? "group" : undefined} tabindex={surfacingActive ? 0 : undefined} aria-label={surfacingActive ? "Turn messages" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} data-testid={surfacingActive ? "surfacing-card" : undefined} class="turn-head-card @container rounded-[14px] border border-border bg-turn-bg">
+			<div class="px-[12px] pt-[10px] pb-[2px] md:pb-[9px]">
 			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
 				<Tooltip bind:open={() => hovered >= 0 || headTooltip, (open) => { headTooltip = open; }}>
 					{#snippet trigger({ props })}
 						{@const headPhrase = phone && (surfacingActive || minimised) ? plural(stats.skills, "skill") : phrase}
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
-							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={fullLog}
-							onclick={toggleLog}>
+							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Collapse turn"} aria-expanded={!minimised}
+							onclick={toggleMinimised}>
+							<Icon name={minimised ? "chevron-right" : "chevron-down"} size={14} class="shrink-0 text-text-dimmer" />
 							{#if live}<Icon name="loader-circle" size={13} class="animate-spin shrink-0 text-accent" />
-							{:else}<Icon name={fullLog ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-dimmer" />{/if}
+							{/if}
 							<span class="text-[14px] font-semibold text-text">{live ? "Working" : "Worked"}</span>
 							{#if live && !turn.user}
 								<span class="text-[12px] text-text-dimmer" data-testid="turn-live-elapsed">(no prompt to time from)</span>
@@ -509,9 +510,7 @@
 						{#if phrase}<span>{phrase}</span>{/if}
 						{#if stats.compactions > 0}<span>Context compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
 						{#if stats.failed > 0}<span>{stats.failed} failed</span>{/if}
-						<TurnEconomics economics={bill} />
 						{#if final}<RunningPill count={running.size} />{/if}
-						<span>Click to {fullLog ? "hide" : "show"} the step log</span>
 					</div>
 				</Tooltip>
 				{#if surfacingActive || summaryEnabled}
@@ -519,25 +518,21 @@
 						{#if surfacingActive && surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
 						{#if surfacingActive && surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
 						{#if surfacingActive}{@render surfacingRegions.headChips?.(surface)}{/if}
-						{#if summaryEnabled}<Button variant="ghost" size="content" tone="default" hoverFill="none" touchTarget class="{minimised ? '' : 'max-md:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[13px] leading-[normal] font-medium bg-chip" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised}<span class="max-md:sr-only">{summaryLabel}</span><span class="md:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised ? 'max-md:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
+						{#if summaryEnabled}<Button variant="ghost" size="content" tone="default" hoverFill="none" touchTarget class="{minimised && surfacingActive ? '' : 'max-md:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[13px] leading-[normal] font-medium bg-chip" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised && surfacingActive}<span class="max-md:sr-only">{summaryLabel}</span><span class="md:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised && surfacingActive ? 'max-md:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
 					</div>
 				{/if}
 					{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summary</Button></span>{/if}
-				{#if surfacingActive}<Button variant="ghost" size="content" tone="inherit" touchTarget class="ml-auto shrink-0 -my-[2px] h-[24px] w-[24px] text-text-dimmer" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Minimise turn"} aria-expanded={!minimised} onclick={toggleMinimised}><Icon name={minimised ? "chevron-down" : "chevron-up"} size={14} /></Button>{/if}
 			</div>
-			{#if minimised}
+			{#if minimised && surfacingActive}
 				<MinimisedTurn>
 					{#snippet strip(preview: Snippet<[SurfacePin]>)}<ActivityStrip {turn} {segment} {final} {now} {running} {phone} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} oninteraction={stripChanged} />{/snippet}
 				</MinimisedTurn>
 			{:else if surfacingActive}
-				<SurfacingCard view={surface} {counts} {live} {level} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} overridden={panel.overridden} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
+				<SurfacingCard view={surface} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readState} bind:cardEl={readCardEl} onread={readMessage}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={surface.card?.number !== undefined && replies.has(surface.card.number)}
-					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}
-					endTime={surfaceTime(duration ?? 0)} onpick={pick} onlevel={selectLevel}
-					ondefault={() => panel.makeDefault()}
-					onreset={() => { panel.resetLevel(); selection = { kind: "latest" }; }}
+					onpick={pick} onlevel={selectLevel}
 					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand}>
 					{#snippet strip(cited: string | null)}
 						<ActivityStrip {turn} {segment} {final} {now} {running} {phone} {cited} markers={{ kind: "pins", pins: surface.pins, selected: surface.card?.part.uuid ?? null, thumbX: surface.card?.x ?? (live ? 100 : null) }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={pick} onjump={stripJump} oncommand={surfaceCommand} />
@@ -557,7 +552,7 @@
 				</Button>
 			{/if}
 		</div>
-		<TurnLog class="step-log mt-[6px]" mode={minimised ? "collapsed" : fullLog ? "full" : showTicker ? "ticker" : "hidden"} {live} {earlierCount} {earlierIndex} stepCount={counts.log} entries={logEntries} onopen={() => panel.show("log")}>
+		<TurnLog class="step-log border-t border-border bg-bg px-[12px] py-[6px]" mode={minimised ? "collapsed" : fullLog ? "full" : showTicker ? "ticker" : "hidden"} {live} {earlierCount} {earlierIndex} stepCount={counts.log} entries={logEntries} onopen={() => panel.show("log")}>
 			{#snippet row(entry: TurnLogEntry)}
 				{@const i = entry.index}
 				{#if entry.kind === "resumed"}
@@ -567,21 +562,7 @@
 				{@const latestLiveStep = live && i === segment.activity.length - 1}
 				{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
 				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, beforeScroll: onjump }} hidden={!fullLog && i < earlierIndex} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
-					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category?.builtinCategory ? category : undefined} />
-					{#if surfacingActive && fullLog && part.type === "assistant"}
-						{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}
-						{#if pin}
-							{@const place = `surfacing-step-mark-${pin.number ?? pin.part.uuid}`}
-							<div data-testid={place} class="mb-[8px] ml-[20px]">
-								<div class="flex flex-wrap items-center gap-[4px]">
-									<Button variant="ghost" size="content" tone="muted" class="h-[26px] max-md:h-[32px] px-[6px] rounded-full text-[12px]" ariaLabel={`Open message #${pin.number ?? "?"}`} data-testid="surfacing-step-open-{pin.number}" onclick={() => pick(pin)}>#{pin.number ?? "?"} ↗</Button>
-									{@render markLabel(pin)}
-									<SurfacingMarkActions {pin} {feedback} {place} canSave={!!sessionId} />
-								</div>
-								<SurfacingMarkWhy {pin} {feedback} {place} categorySet={surfacingConfig.categorySet} />
-							</div>
-						{/if}
-					{/if}
+					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category} onmessage={category && canOpenSurfaceMessage(category.part, live) ? () => pick(category) : undefined} />
 				</div>
 				{/if}
 			{/snippet}
@@ -593,6 +574,8 @@
 				</div>
 			{/snippet}
 		</TurnLog>
+		{#if !minimised}<TurnShowBar {panel} {counts} onlevelchange={followLatest} />{/if}
+		</div>
 	</div>
 </div>
 

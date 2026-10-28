@@ -136,9 +136,11 @@ export const MixedRead: Story = {
 		await expect(
 			canvas.queryByTestId("surfacing-mark-read"),
 		).not.toBeInTheDocument();
+		await expect(canvasElement.querySelector(".surface-axis")).toBeNull();
+		await expect(canvasElement.querySelector(".axis-notes")).toBeNull();
+		await expect(canvas.getByTestId("turn-show-bar")).toBeVisible();
 		for (const selector of [
 			".pin-chip.seen:not(.current)",
-			".surface-axis",
 			".turn-duration",
 			".turn-activity-toggle svg",
 			'[data-testid="surfacing-minimise-toggle"] svg',

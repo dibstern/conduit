@@ -11,6 +11,11 @@ import {
 	requireRpcControl,
 	setSessionRowStatus,
 } from "./shared.js";
+import {
+	chooseShowStop,
+	expectShowCounts,
+	showOptions,
+} from "./turnActivityShow.js";
 
 type History = typeof HistoryMessageSchema.Type;
 type Part = typeof HistoryMessagePartSchema.Type;
@@ -100,12 +105,11 @@ export const turnActivityHandlers: StepHandler[] = [
 		match:
 			/^the message stop counts are Key (\d+), Most (\d+), All messages (\d+)$/,
 		run: async ({ world, match }) => {
-			for (const [index, label] of ["Key", "Most", "All messages"].entries())
-				await expect(
-					world.page
-						.getByTestId("surfacing-level")
-						.getByRole("radio", { name: new RegExp(`^${label}\\b`) }),
-				).toContainText(match[index + 1] ?? "");
+			await expectShowCounts(world.page, [
+				["Key", match[1] ?? ""],
+				["Most", match[2] ?? ""],
+				["All messages", match[3] ?? ""],
+			]);
 		},
 	},
 	{
@@ -150,7 +154,9 @@ export const turnActivityHandlers: StepHandler[] = [
 		name: "open Full log message row",
 		match: /^I open message #(\d+) from the Full log row$/,
 		run: async ({ world, match }) => {
-			await world.page.getByTestId(`surfacing-step-open-${match[1]}`).click();
+			await world.page
+				.locator(`.step-log [data-message-number="${match[1]}"] button`)
+				.click();
 		},
 	},
 	{
@@ -193,17 +199,22 @@ export const turnActivityHandlers: StepHandler[] = [
 		match:
 			/^the (message|default message) stops read Answer, Key, Most and All messages$/,
 		run: async ({ world, match }) => {
-			const control =
+			const options =
 				match[1] === "message"
-					? world.page.getByTestId("surfacing-level")
-					: world.page.getByRole("radiogroup", {
-							name: "Default level",
-							exact: true,
-						});
-			for (const label of ["Answer", "Key", "Most", "All messages"])
+					? await showOptions(world.page)
+					: {
+							locator: world.page.getByRole("radiogroup", {
+								name: "Default level",
+								exact: true,
+							}),
+							role: "radio" as const,
+						};
+			for (const name of ["Answer", "Key", "Most", "All messages"])
 				await expect(
-					control.getByRole("radio", { name: new RegExp(`^${label}\\b`) }),
+					options.locator.getByRole(options.role, { name, exact: true }),
 				).toBeVisible();
+			if (options.role === "menuitem")
+				await world.page.keyboard.press("Escape");
 		},
 	},
 	{
@@ -305,7 +316,9 @@ export const turnActivityHandlers: StepHandler[] = [
 					id: "turn-log-agent",
 					role: "assistant",
 					parentID: "turn-log-user",
-					...(wake ? { cost: 0.01 } : {}),
+					...(wake || kind.endsWith("AskUserQuestion")
+						? { cost: wake ? 0.01 : 0.03 }
+						: {}),
 					time: {
 						created: START + 1000,
 						...(wake
@@ -417,14 +430,11 @@ export const turnActivityHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			await expect(panel(world.page)).toHaveCount(1);
 			await expect(
-				panel(world.page).locator(".turn-activity-toggle"),
+				panel(world.page).getByTestId("surfacing-minimise-toggle"),
 			).toHaveCount(1);
 			await expect(
 				panel(world.page).locator('[aria-label^="Activity timeline"]'),
 			).toHaveCount(1);
-			await panel(world.page).locator(".turn-activity-toggle").click();
-			await expect(panel(world.page).locator(".step-log")).toHaveCount(1);
-			await panel(world.page).locator(".turn-activity-toggle").click();
 		},
 	},
 	{
@@ -443,7 +453,10 @@ export const turnActivityHandlers: StepHandler[] = [
 		name: "open combined turn log",
 		match: /^I open the combined turn log$/,
 		run: async ({ world }) => {
-			await panel(world.page).locator(".turn-activity-toggle").click();
+			const toggle = panel(world.page).getByTestId("surfacing-minimise-toggle");
+			if ((await toggle.getAttribute("aria-expanded")) === "false")
+				await toggle.click();
+			await chooseShowStop(world.page, "Full log");
 		},
 	},
 	{

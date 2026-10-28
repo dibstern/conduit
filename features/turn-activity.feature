@@ -13,6 +13,99 @@ Examples:
   | desktop  |
   | phone    |
 
+Scenario: Opening Full log at an earlier live step keeps that step in view
+  Given message surfacing is active at Most
+  And the viewport is a short desktop
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a live turn
+  When I open the first tool step from the live strip
+  Then the first tool step is fully in view
+  And the messages region visually matches turn-show-live-step-jump at 98 percent
+
+Scenario Outline: Picking a message stop resumes reading its latest card
+  Given message surfacing is active at All messages
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I <action>
+  And I set the surfacing level to Key
+  Then the surfaced card shows #8 and announces its category and position
+  And the card has no below-stop note
+  And the messages region visually matches turn-show-resume-<state>-<viewport> at 98 percent
+
+Examples:
+  | viewport | action                    | state  |
+  | desktop  | close the surfaced message | folded |
+  | phone    | close the surfaced message | folded |
+  | desktop  | pick surfaced message #3   | picked |
+  | phone    | pick surfaced message #3   | picked |
+
+Scenario: Unjudged messages remain readable in Full log
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a live turn
+  When a new folded surfacing message awaits its verdict
+  And the surfacing turn settles without the pending verdict
+  When I open the plain turn log
+  And I read the unjudged message in Full log
+  Then the unjudged log message shows its full text
+  And the messages region visually matches turn-show-unjudged-log at 98 percent
+
+Scenario Outline: Opening the earlier live log keeps the newest step in place
+  Given message surfacing is active at Most
+  And the viewport is a short desktop
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a live turn
+  When I open the live Full log from <control>
+  Then the newest live step stays in place
+  And the messages region visually matches turn-show-live-scroll-<baseline> at 98 percent
+
+Examples:
+  | control       | baseline |
+  | the Show bar  | tabs     |
+  | earlier steps | earlier  |
+
+Scenario Outline: One left chevron owns the open and collapsed Turn
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a <phase> turn
+  Then the Turn has one left chevron and no separate log toggle
+  When I collapse and reopen the Turn with its chevron and h
+  Then the Turn has one left chevron and no separate log toggle
+  And the messages region visually matches turn-show-chevron-<jev>-<phase> at 98 percent
+
+Examples:
+  | jev      | phase   |
+  | active   | settled |
+  | active   | live    |
+  | inactive | settled |
+
+Scenario: The desktop Show bar controls message stops and Full log
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  Then the Show bar has flat accessible tabs with Answer, Key 3, Most 5, All messages 6 and Full log 16
+  When I navigate the Show tabs with arrow keys
+  Then the Show bar selects Full log without changing the saved Most stop
+  And the Full log pins are 1,2,3,4,5,8
+  And the open Turn is one bordered panel with one-line message rows and card-only actions
+  When I reload the surfacing session
+  Then the effective surfacing level is Most
+  When I set the surfacing level to Key
+  Then the panel shows the saved message stop
+  And the effective surfacing level is Key
+  And the messages region visually matches turn-show-tabs-desktop at 98 percent
+
+Scenario: The Show bar and bill cover the whole Turn across an AskUserQuestion hand-back
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the turn log session has a two-segment AskUserQuestion turn
+  Then the Turn has one Show bar with Key 0, Most 1, All messages 1 and Full log 4
+  When I open the combined turn log
+  Then the combined log orders the earlier message, hand-back and later work
+  And the whole Turn bill is $0.0300
+  And the messages region visually matches turn-show-hand-back-desktop at 98 percent
+
 Scenario: Message stops name what they show
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
@@ -111,8 +204,9 @@ Scenario Outline: Full log uses All messages pins and cards without changing the
   When I pick surfaced message #3
   Then the surfaced card shows #3 and announces its category and position
   And the card has no below-stop note
-  And the effective surfacing level is <saved>
   And the messages region visually matches turn-full-log-pins-<baseline>-<viewport> at 98 percent
+  When I reload the surfacing session
+  Then the effective surfacing level is <saved>
 
 Examples:
   | viewport | saved  | baseline |
@@ -129,8 +223,9 @@ Scenario Outline: Full log treats an opened finding as visible at All messages
   And I open message #3 from the Full log row
   Then the surfaced card shows #3 and announces its category and position
   And the card has no below-stop note
-  And the effective surfacing level is <saved>
   And the messages region visually matches turn-full-log-card-level-<baseline> at 98 percent
+  When I reload the surfacing session
+  Then the effective surfacing level is <saved>
 
 Examples:
   | saved  | baseline |
@@ -277,13 +372,13 @@ Scenario: Opening Summary with Jev off leaves the step log closed
   And the panel shows the saved message stop
   And the messages region visually matches turn-panel-plain-summary at 98 percent
 
-Scenario: The existing message level control leaves an open log in place
+Scenario: Picking a message stop leaves Full log
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the panel choice session has a settled turn
   When I open the plain turn log
   And I set the surfacing level to Key
-  Then the panel shows the full log
+  Then the panel shows the saved message stop
   And the effective surfacing level is Key
   And the messages region visually matches turn-panel-level-keeps-log at 98 percent
 

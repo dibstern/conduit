@@ -15,6 +15,11 @@ import {
 	requireRpcControl,
 	setSessionRowStatus,
 } from "./shared.js";
+import {
+	chooseShowStop,
+	expectShowCounts,
+	expectShowStop,
+} from "./turnActivityShow.js";
 
 type History = typeof HistoryMessageSchema.Type;
 type Part = typeof HistoryMessagePartSchema.Type;
@@ -950,10 +955,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 		name: "change surfacing level",
 		match: /^I set the surfacing level to (Answer|Key|Most|All messages)$/,
 		run: async ({ world, match }) => {
-			await panel(world.page)
-				.getByTestId("surfacing-level")
-				.getByRole("radio", { name: new RegExp(`^${match[1]}(?:\\b|$)`) })
-				.click();
+			await chooseShowStop(world.page, match[1] ?? "");
 		},
 	},
 	{
@@ -964,16 +966,11 @@ export const surfacingCardHandlers: StepHandler[] = [
 			await expect
 				.poll(() => pinNumbers(panel(world.page)))
 				.toEqual((match[1] ?? "").split(","));
-			for (const [label, count] of [
-				["Key", match[2]],
-				["Most", match[3]],
-				["All messages", match[4]],
-			])
-				await expect(
-					panel(world.page)
-						.getByTestId("surfacing-level")
-						.getByRole("radio", { name: new RegExp(`^${label}\\b`) }),
-				).toContainText(count ?? "");
+			await expectShowCounts(world.page, [
+				["Key", match[2] ?? ""],
+				["Most", match[3] ?? ""],
+				["All messages", match[4] ?? ""],
+			]);
 		},
 	},
 	{
@@ -1041,10 +1038,24 @@ export const surfacingCardHandlers: StepHandler[] = [
 		name: "use surfacing level options",
 		match: /^I choose surfacing (Make default|Back to default)$/,
 		run: async ({ world, match }) => {
-			await control(world.page, "Level options").click();
+			const options = world.page.getByTestId("turn-show-bar");
+			const trigger = options.getByRole("button", {
+				name: "Show messages",
+				exact: true,
+			});
+			if (await trigger.count()) await trigger.click();
 			await world.page
-				.getByRole("menuitem", { name: match[1] ?? "", exact: true })
+				.getByRole((await trigger.count()) ? "menuitem" : "button", {
+					name: match[1] ?? "",
+					exact: true,
+				})
 				.click();
+			if (
+				await world.page
+					.getByRole("menu", { name: "Show, least to most", exact: true })
+					.count()
+			)
+				await world.page.keyboard.press("Escape");
 		},
 	},
 	{
@@ -1071,11 +1082,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 		name: "assert effective surfacing level",
 		match: /^the effective surfacing level is (Answer|Key|Most|All messages)$/,
 		run: async ({ world, match }) => {
-			await expect(
-				panel(world.page)
-					.getByTestId("surfacing-level")
-					.getByRole("radio", { name: new RegExp(`^${match[1]}\\b`) }),
-			).toHaveAttribute("aria-checked", "true");
+			await expectShowStop(world.page, match[1] ?? "");
 		},
 	},
 	{
@@ -1352,15 +1359,15 @@ export const surfacingCardHandlers: StepHandler[] = [
 			await page.keyboard.press("3");
 			await page.keyboard.press("Enter");
 			await expect(card(page)).toHaveAttribute("data-ordinal", "3");
-			await expect(
-				panel(page)
-					.getByTestId("surfacing-level")
-					.getByRole("radio", { name: /^Most\b/ }),
-			).toHaveAttribute("aria-checked", "true");
+			await expectShowStop(page, "Most");
+			await card(page).focus();
 			// `s` toggles the turn summary (a modal sheet on phone), so it closes again before the card keys.
 			// `h` unmounts the card; surfacing-minimise covers its focus and toggle behavior.
 			for (const key of ["s", "s", "u", "r", "m", "a", "+", "−"]) {
-				await expect(card(page)).toBeVisible();
+				await expect(
+					card(page),
+					`Card remains open before ${key}`,
+				).toBeVisible();
 				const prevented = await card(page).evaluate(
 					(element, pressed) =>
 						!element.dispatchEvent(

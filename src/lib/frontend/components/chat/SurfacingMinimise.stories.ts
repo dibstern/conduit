@@ -121,7 +121,7 @@ export const Minimised: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			canvas.getByRole("button", { name: "Minimise turn" }),
+			canvas.getByRole("button", { name: "Collapse turn" }),
 		);
 		await expect(canvas.getByTestId("surfacing-thin-track")).toHaveStyle({
 			height: "4px",
@@ -204,7 +204,7 @@ export const HandExpanded: Story = {
 		canvas.getByTestId("surfacing-card").focus();
 		await userEvent.keyboard("h");
 		await expect(
-			canvas.getByRole("button", { name: "Minimise turn" }),
+			canvas.getByRole("button", { name: "Collapse turn" }),
 		).toBeVisible();
 		await expect(
 			canvas.getByRole("radio", { name: /^Most\b/ }),
@@ -244,14 +244,15 @@ export const MessageDestination: Story = {
 			"data-ordinal",
 			"4",
 		);
-		await expect(
-			canvas.getByRole("radio", { name: /^Most\b/ }),
-		).toHaveAttribute("aria-checked", "true");
+		await expect(canvas.getByRole("tab", { name: "Most" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
 		await expect(canvas.getByTestId("surfacing-msg-card")).toHaveTextContent(
 			"opened directly",
 		);
 		await expect(
-			canvas.getByRole("button", { name: "Minimise turn" }),
+			canvas.getByRole("button", { name: "Collapse turn" }),
 		).toBeVisible();
 	},
 };

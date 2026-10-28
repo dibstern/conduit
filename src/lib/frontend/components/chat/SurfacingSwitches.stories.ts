@@ -128,7 +128,9 @@ const summaryLog: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 	await expect(row).toBeVisible();
 	await expect(row?.parentElement).toHaveFocus();
 	await expect(body.queryByTestId("surfacing-recap-reader")).toBeNull();
-	await expect(canvas.queryByTestId("surfacing-minimise-toggle")).toBeNull();
+	await expect(
+		canvas.getByTestId("surfacing-minimise-toggle"),
+	).toHaveAccessibleName("Collapse turn");
 	await expect(canvas.queryByTestId("surfacing-pins")).toBeNull();
 };
 export const JevOffSummariesOn: Story = { play: summaryLog };
@@ -148,7 +150,7 @@ export const BothOff: Story = {
 		const timeline = canvas.getByRole("slider", { name: /Activity timeline/ });
 		await expect(timeline).toBeVisible();
 		await userEvent.click(timeline);
-		const toggle = canvas.getByRole("button", { name: /^Worked/ });
+		const toggle = canvas.getByRole("button", { name: "Collapse turn" });
 		await expect(toggle).toHaveAttribute("aria-expanded", "true");
 		timeline.blur();
 		await expect(
@@ -158,7 +160,9 @@ export const BothOff: Story = {
 			canvasElement.querySelector("[data-message-number]"),
 		).toBeNull();
 		await expect(canvas.queryByTestId("surfacing-summary-generate")).toBeNull();
-		await expect(canvas.queryByTestId("surfacing-minimise-toggle")).toBeNull();
+		await expect(
+			canvas.getByTestId("surfacing-minimise-toggle"),
+		).toHaveAccessibleName("Collapse turn");
 	},
 };
 export const BothOffLight: Story = { ...BothOff, globals: { theme: "light" } };

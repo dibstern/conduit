@@ -14,6 +14,7 @@ import {
 	setSessionRowStatus,
 } from "./shared.js";
 import { surfacingHistory } from "./surfacingCard.js";
+import { expectShowStop } from "./turnActivityShow.js";
 
 const SESSION = "sess-surfacing";
 const SETUP =
@@ -235,11 +236,7 @@ export const askContextHandlers: StepHandler[] = [
 			await expect(world.page.getByTestId("surfacing-msg-card")).toContainText(
 				SETUP,
 			);
-			await expect(
-				world.page
-					.getByTestId("surfacing-level")
-					.getByRole("radio", { name: /Most/ }),
-			).toBeChecked();
+			await expectShowStop(world.page, "Most");
 		},
 	},
 	{
