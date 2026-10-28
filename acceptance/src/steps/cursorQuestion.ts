@@ -137,6 +137,12 @@ export const cursorQuestionHandlers: StepHandler[] = [
 		match: /^the Cursor question is cleared after answering$/,
 		run: async ({ world }) => {
 			await expect(world.page.locator(".question-card")).toHaveCount(0);
+			const toggle = world.page.locator(".turn-activity-toggle").last();
+			if ((await toggle.getAttribute("aria-expanded")) === "false")
+				await toggle.click();
+			await expect(world.page.getByTestId("turn-hand-back-row")).toContainText(
+				"Which database should I use?",
+			);
 			await expect(
 				world.page.locator(`[data-tool-id="${toolUseId}"]`),
 			).toHaveAttribute("data-tool-status", "completed");
