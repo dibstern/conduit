@@ -3044,6 +3044,21 @@ a native command after `project_inactive` fails it (3.11, D34), and an older wak
   the declined message); not joining unsolicited turns (8.3's join exists because OpenCode cannot
   name the start).
 
+**Oracle round 10 (2026-10-29): no new decisions.** Its seven questions follow from 3.4, 8.3, 8.4,
+D28 and D47:
+- A retirement does not count toward `snapshotEntry`. With no current process there are no tasks
+  and no confirm (8.4).
+- A start's own Run-end answer under the joined label clears the joined execution. It is that
+  label's Run-end evidence (8.3).
+- Unsolicited Run-end evidence for a joined input Run clears the execution and leaves the Run, with
+  a diagnostic. Liveness clears without authority, state changes need it (8.3).
+- The producibility check (D46) comes before the unknown-token rule. Producibility is a property of
+  the kind, not the token (3.4).
+- A repeated `turn_started` re-arms its execution: there is one per (Run, label) (D28).
+- Run-end evidence for a label clears every outstanding execution with that label. 8.3 names the
+  label, not one execution.
+- `project_active` settles a joined execution as it does a wake one (D29, D47).
+
 ### A.11 REDESIGN-1 Process and address (2026-10-28): C + M1
 
 Decided autonomously under the Review Rounds rule after the harness rounds that added D15 to D42.
