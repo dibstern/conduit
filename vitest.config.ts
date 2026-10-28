@@ -6,6 +6,9 @@ const guardTests = ["test/unit/**/*.guard.test.ts"];
 
 export default defineConfig({
 	plugins: [svelte()],
+	// Parallel vitest processes sharing one cache race their cold dependency
+	// optimisers on the same directory (ENOTEMPTY); the pre-commit hook splits it.
+	cacheDir: process.env.CONDUIT_VITEST_CACHE_DIR,
 	test: {
 		// `related` cannot trace filesystem reads or spawned build artifacts.
 		// It resolves inputs to absolute paths, so keep the **/ prefixes.
