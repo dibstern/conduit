@@ -500,6 +500,8 @@ const draftModels = $state<Record<string, DraftPick["model"] | null>>({});
 const draftModel = $derived(draftModels[catalogScope().key] ?? null);
 // Snapshot listeners run after the effective account, and therefore its key, changes.
 let draftModelKey: string | undefined;
+/** Draft keys holding a model carried from another account before their catalogue loaded. */
+const unverifiedCarries = new Set<string>();
 let draftPermissionChosen = $state(false);
 /** Like the permission mode, an untouched draft pick follows the server default. */
 let draftPickChosen = false;
@@ -509,6 +511,13 @@ const modelMemory = new Map<string, Map<string, DraftPick["model"]>>();
 accountSnapshotChangedListeners.add(() => {
 	const pinned = draft.instanceId;
 	const model = draftModels[draftModelKey ?? catalogScope().key];
+	// A chosen model follows the account when its catalogue has it; an unread catalogue revalidates on arrival.
+	const carries = (instanceId: string, picked: DraftPick["model"]) => {
+		if (!draftPickChosen) return false;
+		if (modelsFor().loaded) return draftModelFits(instanceId, picked);
+		unverifiedCarries.add(catalogScope().key);
+		return true;
+	};
 	// A removed account, or an unpicked draft account, falls back to its driver's default.
 	if (
 		pinned &&
@@ -519,13 +528,13 @@ accountSnapshotChangedListeners.add(() => {
 		draft.instanceId = null;
 		const next = getEffectiveInstanceId();
 		if (next === pinned) draft.instanceId = pinned;
-		else if (next && model && draftPickChosen) {
-			// A chosen model follows the account; the account's catalogue read revalidates it.
+		else if (next && model && carries(next, model)) {
 			draft.instanceId = next;
 			draftModels[catalogScope().key] = model;
 		} else draftModels[catalogScope().key] = null;
-	} else if (!pinned && draft.driver !== null && model && draftPickChosen) {
-		draftModels[catalogScope().key] = model;
+	} else if (!pinned && draft.driver !== null && model) {
+		const next = getEffectiveInstanceId();
+		if (next && carries(next, model)) draftModels[catalogScope().key] = model;
 	}
 	draftModelKey = catalogScope().key;
 	fillDraftDefault();
@@ -626,20 +635,7 @@ export function getDraftPick(): Immutable<DraftPick> | undefined {
 		(draftModelInventory.loading || draftModelInventory.error)
 	)
 		return undefined;
-	if (!draftModel || !instanceId) return undefined;
-	if (
-		Result.isFailure(
-			resolveTurnSettings(
-				{
-					harness: draftDriver(instanceId),
-					model: draftModel,
-					effort: draftModel.variant,
-					contextWindow: draftModel.contextWindow,
-				},
-				catalogFromProviderList(getModelCatalogForInstance(instanceId)),
-			),
-		)
-	)
+	if (!draftModel || !instanceId || !draftModelFits(instanceId, draftModel))
 		return undefined;
 	return {
 		instanceId,
@@ -1209,6 +1205,23 @@ function draftDriver(instanceId: string | undefined): KnownProviderDriverKind {
 	return isKnownDriverKind(driver) ? driver : "opencode";
 }
 
+function draftModelFits(
+	instanceId: string,
+	model: DraftPick["model"],
+): boolean {
+	return Result.isSuccess(
+		resolveTurnSettings(
+			{
+				harness: draftDriver(instanceId),
+				model,
+				effort: model.variant,
+				contextWindow: model.contextWindow,
+			},
+			catalogFromProviderList(getModelCatalogForInstance(instanceId)),
+		),
+	);
+}
+
 /** Fill only an empty draft from the selected harness's resolved default. */
 function fillDraftDefault(): void {
 	if (
@@ -1305,6 +1318,7 @@ function setDraftModel(
 		draft.instanceId = instanceId;
 		draft.driver = harness;
 	}
+	unverifiedCarries.delete(target.key);
 	draftModels[target.key] = {
 		...resolved.success.model,
 		variant: resolved.success.effort,
@@ -1352,6 +1366,7 @@ export function selectInstance(selection: InstanceSelection): void {
 /** A created or viewed session consumes the draft's harness and model picks. */
 export function clearDraftSelection(): void {
 	for (const key of Object.keys(draftModels)) delete draftModels[key];
+	unverifiedCarries.clear();
 	draftModelKey = undefined;
 	draft.instanceId = null;
 	draft.driver = null;
@@ -1609,6 +1624,12 @@ export function applyGetModelsResponse(
 			? [...response.hiddenModels]
 			: previous.hiddenModels,
 	};
+	// A model carried from another account yields to this account's default when its catalogue lacks it.
+	const carried = unverifiedCarries.delete(scope.key)
+		? draftModels[scope.key]
+		: null;
+	if (carried && scope.instanceId && !draftModelFits(scope.instanceId, carried))
+		draftModels[scope.key] = null;
 	// A fresh account reply can supply its own native default. Never refill from a cached active pick.
 	if (
 		!scope.sessionId &&
