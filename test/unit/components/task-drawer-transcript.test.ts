@@ -527,7 +527,7 @@ describe("Surfacing in primary and child transcripts", () => {
 			(part) => part.type !== "assistant" || part.partId !== "ask",
 		);
 		await settle();
-		await fireEvent.click(view.getByRole("button", { name: "Show All" }));
+		await fireEvent.click(view.getByRole("button", { name: "Show All messages" }));
 		expect(sessionSurfaceLevel(parentId)).toBe("all");
 	});
 

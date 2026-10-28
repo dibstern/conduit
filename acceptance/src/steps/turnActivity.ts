@@ -87,6 +87,15 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "assert Full log notes use its active stop",
+		match: /^the Full log has no Answer-only note$/,
+		run: async ({ world }) => {
+			await expect(panel(world.page).locator(".axis-notes")).not.toContainText(
+				"Answer only",
+			);
+		},
+	},
+	{
 		name: "assert turn message stop counts",
 		match:
 			/^the message stop counts are Key (\d+), Most (\d+), All messages (\d+)$/,

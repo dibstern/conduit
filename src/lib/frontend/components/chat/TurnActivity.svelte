@@ -506,7 +506,7 @@
 	</Button>
 	<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} {phone} {live} {view}
 		plainCitations={!surfacingActive}
-		start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings} {level}
+		start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings}
 		generating={recap.generating} error={recap.error} settingsError={summarySettingsError} saving={summarySaving}
 		onclose={closeSummary} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
 		onsettings={updateSummarySettings} oncite={citeSummary} {replies}
@@ -613,7 +613,7 @@
 							{@const place = `surfacing-step-mark-${pin.number ?? pin.part.uuid}`}
 							<div data-testid={place} class="mb-[8px] ml-[20px]">
 								<div class="flex flex-wrap items-center gap-[4px]">
-									<Button variant="ghost" size="content" tone="muted" class="h-[26px] max-md:h-[32px] px-[6px] rounded-full text-[12px]" ariaLabel={`Open message #${pin.number ?? "?"}`} data-testid="surfacing-step-open-{pin.number}" onclick={() => { if (level === "final") selectLevel("all"); pick(pin); }}>#{pin.number ?? "?"} ↗</Button>
+									<Button variant="ghost" size="content" tone="muted" class="h-[26px] max-md:h-[32px] px-[6px] rounded-full text-[12px]" ariaLabel={`Open message #${pin.number ?? "?"}`} data-testid="surfacing-step-open-{pin.number}" onclick={() => pick(pin)}>#{pin.number ?? "?"} ↗</Button>
 									{@render markLabel(pin)}
 									<SurfacingMarkActions {pin} {feedback} {place} canSave={!!sessionId} />
 								</div>

@@ -217,6 +217,7 @@ export function surfaceTurn(input: {
 		target !== null && !target.pending && rank[target.level] < rank[level];
 	const unread = visible.filter(({ read }) => read === false);
 	return {
+		level,
 		nearestPin: (x: number) =>
 			cardLevel === null
 				? null

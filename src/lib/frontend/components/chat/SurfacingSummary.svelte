@@ -7,7 +7,7 @@
 	import type { MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
 	import type { TurnRecap } from "../../../contracts/turn-recap.js";
 	import { STOPS, stopForLevel } from "../../utils/turn-stops.js";
-	import { surfaceTime, type SurfaceLevel, type SurfaceTurn } from "../../utils/surface-turn.js";
+	import { surfaceTime, type SurfaceTurn } from "../../utils/surface-turn.js";
 	import Button from "../ui/Button.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -21,7 +21,7 @@
 	// jsdom has no matchMedia; real browsers always do.
 	const media = typeof matchMedia === "function";
 	const desktop = media ? new MediaQuery("(min-width: 1024px)") : { current: true };
-	let { versions, selected, open, phone = sessionViewState.compact, live, view, start, settings, level = "balanced", plainCitations = false, generating = false, error = "", settingsError = "", saving = false, onclose, onversion, ongenerate, onretry, onsettings, oncite, onhover, onreply, onquote, replies = new Map(), foot }: {
+	let { versions, selected, open, phone = sessionViewState.compact, live, view, start, settings, plainCitations = false, generating = false, error = "", settingsError = "", saving = false, onclose, onversion, ongenerate, onretry, onsettings, oncite, onhover, onreply, onquote, replies = new Map(), foot }: {
 		versions: readonly TurnRecap[];
 		selected: TurnRecap | undefined;
 		open: boolean;
@@ -30,7 +30,6 @@
 		view: SurfaceTurn;
 		start: number;
 		settings: MessageSurfacingPreferences["recap"];
-		level?: SurfaceLevel;
 		plainCitations?: boolean;
 		generating?: boolean;
 		error?: string;
@@ -111,7 +110,7 @@
 	{#if reading}
 		<section class="summary-reader" data-testid="surfacing-recap-reader" data-ordinal={reading.number} aria-label={`Cited message #${reading.number}`}>
 			<div class="reader-head"><span>#{reading.number} · {surfaceTime((reading.part.createdAt ?? start) - start)}</span><Button variant="ghost" size="content" tone="muted" touchTarget class="ml-auto size-[24px] rounded-full" ariaLabel="Close cited message" onclick={closeCitation}><Icon name="x" size={14} /></Button></div>
-			{#if reading.belowLevel}<p class="reader-note">At {STOPS[stopForLevel(reading.level)].short}, below {STOPS[level].short} · opened directly</p>{/if}
+			{#if reading.belowLevel}<p class="reader-note">At {STOPS[stopForLevel(reading.level)].short}, below {STOPS[view.level].short} · opened directly</p>{/if}
 			<div class="reader-body md-content select-text" bind:this={readerBodyEl}>{@html reading.part.html}</div>
 			{#if onreply}
 				{@const ordinal = reading.number}

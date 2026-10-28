@@ -94,6 +94,7 @@ Scenario Outline: Full log uses All messages pins and cards without changing the
   And the surfacing session has a settled turn
   When I open the plain turn log
   Then the Full log pins are 1,2,3,4,5,8
+  And the Full log has no Answer-only note
   When I pick surfaced message #3
   Then the surfaced card shows #3 and announces its category and position
   And the card has no below-stop note
@@ -107,15 +108,21 @@ Examples:
   | desktop  | Answer | answer   |
   | phone    | Answer | answer   |
 
-Scenario: Full log treats an opened finding as visible at All messages
-  Given message surfacing is active at Most
+Scenario Outline: Full log treats an opened finding as visible at All messages
+  Given message surfacing is active at <saved>
   And the conduit app is served with the connected mockup
   And the surfacing session has a settled turn
   When I open the plain turn log
   And I open message #3 from the Full log row
   Then the surfaced card shows #3 and announces its category and position
   And the card has no below-stop note
-  And the messages region visually matches turn-full-log-card-level at 98 percent
+  And the effective surfacing level is <saved>
+  And the messages region visually matches turn-full-log-card-level-<baseline> at 98 percent
+
+Examples:
+  | saved  | baseline |
+  | Most   | most     |
+  | Answer | answer   |
 
 Scenario Outline: Stops count the whole Turn and compaction rules do not count as steps
   Given message surfacing is active at Most
