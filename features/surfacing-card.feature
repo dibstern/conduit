@@ -1,5 +1,32 @@
 Feature: Surfaced messages share the activity strip's scale and preserve a reader's pick
 
+Scenario Outline: Final stays quiet on a live turn even while Jev is pending
+  Given message surfacing is active at Final
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a live turn
+  When a new folded surfacing message awaits its verdict
+  Then Final shows 7 hidden messages and keeps the strip
+  And the messages region visually matches turn-answer-live-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Final stays quiet on a settled turn
+  Given message surfacing is active at Final
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  Then Final shows 6 hidden messages and keeps the strip
+  And the messages region visually matches turn-answer-settled-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario Outline: Inactive surfacing preserves today's activity UI
   Given message surfacing is <state> at Balanced
   And the conduit app is served with the connected mockup

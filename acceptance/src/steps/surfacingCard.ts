@@ -1196,6 +1196,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 			await expect(panel(world.page)).toContainText(
 				`Final only · ${match[1]} hidden`,
 			);
+			await expect(panel(world.page)).not.toContainText("Nothing at Final");
 			await expect(
 				panel(world.page).locator("[data-step-id]").first(),
 			).toBeVisible();
