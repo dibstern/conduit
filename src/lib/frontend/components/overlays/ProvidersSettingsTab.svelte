@@ -25,9 +25,13 @@
 	const phoneDetail = $derived(sessionViewState.compact && detailPushed && selected !== undefined);
 	const plan = (account: OpenCodeInstance) => usageState.readings.find((reading) => reading.accountId === account.id)?.planLabel;
 	const signedOut = (account: OpenCodeInstance) => account.driver === "codex" && account.unavailableCode === "auth_required";
+	// Why a Claude, Codex or Cursor account can't be used (e.g. Cursor not installed), shown in amber.
+	const unavailable = (account: OpenCodeInstance) =>
+		signedOut(account) ? "Not signed in"
+		: (account.driver ?? "opencode") === "opencode" || account.available !== false ? undefined
+		: account.unavailableReason ?? "Unavailable";
 
 	$effect(() => {
-		if (selectedId !== selected?.id) selectedId = selected?.id;
 		// Keep the phone title in sync with renames and removals from other clients.
 		onPageChange?.(phoneDetail && selected ? { title: selected.name, back: () => void backToList() } : null);
 	});
@@ -77,7 +81,8 @@
 			!account.managed ? "discovered" : null,
 			account.status === "stopped" ? "stopped" : null,
 		].filter(Boolean).join(" · ");
-		if (signedOut(account)) return "Not signed in";
+		const reason = unavailable(account);
+		if (reason) return reason;
 		return [plan(account), account.isDefault ? "default" : null].filter(Boolean).join(" · ");
 	}
 </script>
@@ -111,11 +116,11 @@
 								{/if}
 								<span class="min-w-0 flex-1">
 									<span class="block truncate">{account.name}</span>
-									<span class="block truncate text-[11.5px] max-md:text-[12.5px] {signedOut(account) ? 'text-warning' : 'text-text-dimmer'}">{subline(account)}</span>
+									<span class="block truncate text-[11.5px] max-md:text-[12.5px] {unavailable(account) ? 'text-warning' : 'text-text-dimmer'}">{subline(account)}</span>
 								</span>
 							</Button>
 						{:else}
-							<p class="px-[8px] py-[10px] text-[11.5px] text-text-dimmer max-md:text-[12.5px]">{group.driver === "cursor" ? "Cursor is not installed." : `No ${group.label} ${group.driver === 'opencode' ? 'servers' : 'accounts'} configured.`}</p>
+							<p class="px-[8px] py-[10px] text-[11.5px] text-text-dimmer max-md:text-[12.5px]">{`No ${group.label} ${group.driver === 'opencode' ? 'servers' : 'accounts'} configured.`}</p>
 						{/each}
 					</section>
 				{/each}

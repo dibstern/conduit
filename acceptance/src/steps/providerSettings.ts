@@ -173,6 +173,33 @@ export const providerSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "make the Providers Cursor account unavailable",
+		match: /^the Providers Cursor account is unavailable because (.+)$/,
+		run: ({ world, match }) => {
+			publish(
+				world.page,
+				directory().map((account) =>
+					account.id === "cursor"
+						? {
+								...account,
+								available: false,
+								unavailableReason: match[1] ?? "",
+							}
+						: account,
+				),
+			);
+		},
+	},
+	{
+		name: "assert amber unavailable Cursor row",
+		match: /^the Providers cursor row says (.+) in amber$/,
+		run: async ({ world, match }) => {
+			await expect(
+				row(world.page, "cursor").getByText(match[1] ?? "", { exact: true }),
+			).toHaveClass(/text-warning/);
+		},
+	},
+	{
 		name: "assert read-only Providers scope",
 		match: /^Providers has no account actions, quota, models or defaults$/,
 		run: async ({ world }) => {
@@ -219,7 +246,7 @@ export const providerSettingsHandlers: StepHandler[] = [
 			for (const text of [
 				"No Claude accounts configured.",
 				"No Codex accounts configured.",
-				"Cursor is not installed.",
+				"No Cursor accounts configured.",
 				"No OpenCode servers configured.",
 				"Pick or add an account to see its details.",
 			])

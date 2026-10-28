@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/overlays/ProvidersSettingsTab.svelte :: signedOut(account)": "Not a class: the amber sub-line condition widened from signed-out Codex to any unavailable account (unavailable(account)), so Cursor's reason shows too.",
 	"src/lib/frontend/components/input/AttachMenu.svelte :: font-sans": {
 		"movedTo": "src/lib/frontend/components/ui/floating-styles.ts",
 		"requires": "appearance=\"final\"",
