@@ -21,8 +21,11 @@
 	const accounts = $derived(groups.flatMap((group) => group.accounts));
 	let selectedId = $state<string>();
 	const selected = $derived(accounts.find((account) => account.id === selectedId) ?? accounts[0]);
-	let detailPushed = $state(false);
-	const phoneDetail = $derived(sessionViewState.compact && detailPushed && selected !== undefined);
+	let focusedId = $state<string>();
+	const tabStopId = $derived(accounts.find((account) => account.id === focusedId)?.id ?? selected?.id);
+	let pushedAccountId = $state<string>();
+	const pushedAccount = $derived(accounts.find((account) => account.id === pushedAccountId));
+	const phoneDetail = $derived(sessionViewState.compact && pushedAccount !== undefined);
 	const plan = (account: OpenCodeInstance) => usageState.readings.find((reading) => reading.accountId === account.id)?.planLabel;
 	const signedOut = (account: OpenCodeInstance) => account.driver === "codex" && account.unavailableCode === "auth_required";
 	// Why a Claude, Codex or Cursor account can't be used (e.g. Cursor not installed), shown in amber.
@@ -31,6 +34,21 @@
 		: (account.driver ?? "opencode") === "opencode" || account.available !== false ? undefined
 		: account.unavailableReason ?? "Unavailable";
 
+	$effect.pre(() => {
+		if (pushedAccountId && !pushedAccount) pushedAccountId = undefined;
+		if (focusedId && !accounts.some((account) => account.id === focusedId)) focusedId = selected?.id;
+		const active = document.activeElement;
+		if (!(active instanceof HTMLButtonElement) || !active.id.startsWith("provider-account-")) return;
+		if (accounts.some((account) => active.id === `provider-account-${account.id}`)) return;
+		const nextId = selected?.id;
+		void tick().then(() => {
+			if (document.activeElement !== document.body && document.activeElement !== active) return;
+			const target = nextId ? document.getElementById(`provider-account-${nextId}`)
+				: document.querySelector<HTMLElement>('[data-testid="settings-tab-providers"], [data-testid="settings-back-btn"]');
+			target?.focus();
+		});
+	});
+
 	$effect(() => {
 		// Keep the phone title in sync with renames and removals from other clients.
 		onPageChange?.(phoneDetail && selected ? { title: selected.name, back: () => void backToList() } : null);
@@ -38,7 +56,7 @@
 
 	async function backToList(): Promise<void> {
 		const id = selected?.id;
-		detailPushed = false;
+		pushedAccountId = undefined;
 		await tick();
 		if (id) document.getElementById(`provider-account-${id}`)?.focus();
 	}
@@ -46,7 +64,7 @@
 	async function pick(account: OpenCodeInstance): Promise<void> {
 		selectedId = account.id;
 		if (!sessionViewState.compact) return;
-		detailPushed = true;
+		pushedAccountId = account.id;
 		await tick();
 		document.querySelector<HTMLElement>('[data-testid="settings-back-btn"]')?.focus();
 	}
@@ -104,19 +122,21 @@
 								data-testid={`provider-account-${account.id}`}
 								variant="provider-row" size="content" align="start"
 								ariaLabel={`${group.label} ${group.driver === 'opencode' ? 'server' : 'account'} ${account.name}`}
+								aria-describedby={`provider-account-${account.id}-description`}
 								aria-pressed={selected?.id === account.id}
-								tabindex={selected?.id === account.id ? 0 : -1}
+								tabindex={tabStopId === account.id ? 0 : -1}
+								onfocus={() => { focusedId = account.id; }}
 								onkeydown={navigate}
 								onclick={() => void pick(account)}
 							>
 								{#if group.driver === "opencode"}
-									<span aria-label={account.status} class="size-[7px] shrink-0 rounded-full {account.status === 'healthy' ? 'bg-success' : account.status === 'starting' ? 'bg-warning' : account.status === 'unhealthy' ? 'bg-error' : 'bg-text-dimmer'}"></span>
+									<span aria-hidden="true" class="size-[7px] shrink-0 rounded-full {account.status === 'healthy' ? 'bg-success' : account.status === 'starting' ? 'bg-warning' : account.status === 'unhealthy' ? 'bg-error' : 'bg-text-dimmer'}"></span>
 								{:else}
 									<AccountDot instanceId={account.id} size={7} />
 								{/if}
 								<span class="min-w-0 flex-1">
 									<span class="block truncate">{account.name}</span>
-									<span class="block truncate text-[11.5px] max-md:text-[12.5px] {unavailable(account) ? 'text-warning' : 'text-text-dimmer'}">{subline(account)}</span>
+									<span id={`provider-account-${account.id}-description`} class="block truncate text-[11.5px] max-md:text-[12.5px] {unavailable(account) ? 'text-warning' : 'text-text-dimmer'}">{subline(account)}{#if group.driver === "opencode" && account.status !== "stopped"}<span class="sr-only"> {account.status}</span>{/if}</span>
 								</span>
 							</Button>
 						{:else}

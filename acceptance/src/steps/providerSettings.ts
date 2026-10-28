@@ -48,7 +48,10 @@ function directory(): OpenCodeInstance[] {
 	];
 }
 
-function publish(page: Page, instances: OpenCodeInstance[]): void {
+function publish(
+	page: Page,
+	instances: readonly (OpenCodeInstance | Record<string, unknown>)[],
+): void {
 	mockInstances.set(
 		page,
 		instances.map((account) => ({ ...account })),
@@ -129,15 +132,19 @@ export const providerSettingsHandlers: StepHandler[] = [
 				"aria-pressed",
 				"true",
 			);
-			for (const [id, copy] of [
-				["personal", "Max · default"],
-				["codex", "Plus · default"],
-				["cursor", "Pro · default"],
-				["local", ":4098 · default"],
-				["ccs", ":4099 · discovered"],
-				["gpu-box", ":4100 · stopped"],
-			])
+			for (const [id, copy, status] of [
+				["personal", "Max · default", ""],
+				["codex", "Plus · default", ""],
+				["cursor", "Pro · default", ""],
+				["local", ":4098 · default", "healthy"],
+				["ccs", ":4099 · discovered", "healthy"],
+				["gpu-box", ":4100 · stopped", ""],
+			]) {
 				await expect(row(world.page, id ?? "")).toContainText(copy ?? "");
+				await expect(row(world.page, id ?? "")).toHaveAccessibleDescription(
+					[copy, status].filter(Boolean).join(" "),
+				);
+			}
 		},
 	},
 	{
@@ -170,6 +177,9 @@ export const providerSettingsHandlers: StepHandler[] = [
 					exact: true,
 				}),
 			).toHaveClass(/text-warning/);
+			await expect(row(world.page, "codex-lab")).toHaveAccessibleDescription(
+				"Not signed in",
+			);
 		},
 	},
 	{
@@ -197,6 +207,9 @@ export const providerSettingsHandlers: StepHandler[] = [
 			await expect(
 				row(world.page, "cursor").getByText(match[1] ?? "", { exact: true }),
 			).toHaveClass(/text-warning/);
+			await expect(row(world.page, "cursor")).toHaveAccessibleDescription(
+				match[1] ?? "",
+			);
 		},
 	},
 	{
@@ -288,11 +301,90 @@ export const providerSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "publish removal of one provider account",
+		match: /^another device removes the Providers account (.+)$/,
+		run: ({ world, match }) => {
+			publish(
+				world.page,
+				(mockInstances.get(world.page) ?? []).filter(
+					(account) => account["id"] !== match[1],
+				),
+			);
+		},
+	},
+	{
+		name: "publish a provider account after emptying the directory",
+		match:
+			/^another device adds a provider account after the directory is empty$/,
+		run: ({ world }) => {
+			publish(
+				world.page,
+				directory().filter((account) => account.id === "codex-lab"),
+			);
+		},
+	},
+	{
+		name: "focus a Providers row without selecting it",
+		match: /^I move Providers keyboard focus to work without selecting it$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("settings-tab-providers").click();
+			await world.page.keyboard.press("Tab");
+			await expect(row(world.page, "personal")).toBeFocused();
+			await world.page.keyboard.press("ArrowDown");
+			await expect(row(world.page, "work")).toBeFocused();
+		},
+	},
+	{
+		name: "assert independent Providers selection and focus",
+		match: /^Providers keeps (.+) selected while (.+) has keyboard focus$/,
+		run: async ({ world, match }) => {
+			await expect(row(world.page, match[1] ?? "")).toHaveAttribute(
+				"aria-pressed",
+				"true",
+			);
+			await expect(row(world.page, match[2] ?? "")).toBeFocused();
+			await expect(row(world.page, match[2] ?? "")).toHaveAttribute(
+				"tabindex",
+				"0",
+			);
+		},
+	},
+	{
+		name: "assert a useful focus target after every account is removed",
+		match: /^the Providers settings tab has keyboard focus$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("settings-tab-providers"),
+			).toBeFocused();
+		},
+	},
+	{
 		name: "navigate Providers with arrows and activation",
 		match: /^I navigate Providers accounts with the keyboard$/,
 		run: async ({ world }) => {
-			await row(world.page, "personal").focus();
+			await world.page.getByTestId("settings-tab-providers").click();
+			await world.page.keyboard.press("Tab");
+			await expect(row(world.page, "personal")).toBeFocused();
 			await world.page.keyboard.press("ArrowDown");
+			await expect(row(world.page, "work")).toBeFocused();
+			await expect(row(world.page, "work")).toHaveAttribute("tabindex", "0");
+			await expect(row(world.page, "personal")).toHaveAttribute(
+				"tabindex",
+				"-1",
+			);
+			await expect(row(world.page, "personal")).toHaveAttribute(
+				"aria-pressed",
+				"true",
+			);
+			await world.page.keyboard.press("Tab");
+			await expect(list(world.page).locator(":focus")).toHaveCount(0);
+			await world.page.keyboard.press("Shift+Tab");
+			await expect(row(world.page, "work")).toBeFocused();
+			await world.page.keyboard.press("Shift+Tab");
+			await expect(
+				world.page.getByTestId("settings-tab-providers"),
+			).toBeFocused();
+			await world.page.keyboard.press("Tab");
 			await expect(row(world.page, "work")).toBeFocused();
 			await world.page.keyboard.press("ArrowDown");
 			await expect(row(world.page, "codex")).toBeFocused();
@@ -307,7 +399,17 @@ export const providerSettingsHandlers: StepHandler[] = [
 			const first = accounts[0];
 			if (!first) throw new Error("Missing Claude fixture");
 			publish(world.page, [
-				...accounts,
+				...accounts.map((account) =>
+					account.id === first.id
+						? {
+								...account,
+								name: Array.from(
+									{ length: 220 },
+									() => "personal account",
+								).join(" "),
+							}
+						: account,
+				),
 				...Array.from({ length: 20 }, (_, index) => ({
 					...first,
 					id: `claude-${index}`,
@@ -323,25 +425,44 @@ export const providerSettingsHandlers: StepHandler[] = [
 			/^Providers has independent columns with a sticky header and a conditional fade$/,
 		run: async ({ world }) => {
 			const column = list(world.page);
-			await expect(column).toHaveAttribute("data-more", "true");
-			for (const pane of [column, detail(world.page)])
+			const accountDetail = detail(world.page);
+			for (const pane of [column, accountDetail]) {
+				await expect(pane).toHaveAttribute("data-more", "true");
 				expect(
 					await pane.evaluate((element) => getComputedStyle(element).overflowY),
 				).toBe("auto");
-			const before = await detail(world.page).boundingBox();
-			await column.evaluate((element) => {
-				element.scrollTop = 100;
-			});
+				expect(
+					await pane.evaluate((element) => element.scrollHeight),
+				).toBeGreaterThan(
+					await pane.evaluate((element) => element.clientHeight),
+				);
+			}
+			const offsets = () =>
+				Promise.all(
+					[column, accountDetail].map((pane) =>
+						pane.evaluate((element) => element.scrollTop),
+					),
+				);
+			expect(await offsets()).toEqual([0, 0]);
+			await column.hover();
+			await world.page.mouse.wheel(0, 100);
+			await expect.poll(async () => (await offsets())[0]).toBe(100);
+			expect((await offsets())[1]).toBe(0);
 			const header = await column
 				.getByRole("heading", { name: "Claude", exact: true })
 				.locator("..")
 				.boundingBox();
 			expect(header?.y).toBeCloseTo((await column.boundingBox())?.y ?? 0, 0);
-			expect(await detail(world.page).boundingBox()).toEqual(before);
-			await column.evaluate((element) => {
-				element.scrollTop = element.scrollHeight;
-			});
+			const listOffset = (await offsets())[0];
+			await accountDetail.hover();
+			await world.page.mouse.wheel(0, 140);
+			await expect.poll(async () => (await offsets())[1]).toBe(140);
+			expect((await offsets())[0]).toBe(listOffset);
+			const detailOffset = (await offsets())[1];
+			await column.hover();
+			await world.page.mouse.wheel(0, 10000);
 			await expect(column).toHaveAttribute("data-more", "false");
+			expect((await offsets())[1]).toBe(detailOffset);
 		},
 	},
 	{

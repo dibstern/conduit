@@ -61,6 +61,25 @@ Scenario: the account list is keyboard navigable across cards
   And I navigate Providers accounts with the keyboard
   Then the Providers detail shows codex with Plus and default
 
+Scenario: removing a keyboard-focused account restores focus to the selection
+  Given Providers has the approved account directory
+  When I open settings to the Providers section
+  And I move Providers keyboard focus to work without selecting it
+  Then Providers keeps personal selected while work has keyboard focus
+  When another device removes the Providers account work
+  Then Providers keeps personal selected while personal has keyboard focus
+  When another device removes the Providers account personal
+  Then Providers keeps codex selected while codex has keyboard focus
+  When another device removes every provider account
+  Then the Providers settings tab has keyboard focus
+
+Scenario: removing an unfocused account does not move keyboard focus
+  Given Providers has the approved account directory
+  When I open settings to the Providers section
+  And I move Providers keyboard focus to work without selecting it
+  And another device removes the Providers account codex
+  Then Providers keeps personal selected while work has keyboard focus
+
 Scenario: long account lists scroll inside the fixed split
   Given Providers has many accounts
   When I open settings to the Providers section
@@ -81,3 +100,16 @@ Scenario Outline: phone accounts push a named detail page
 Examples:
   | threshold |
   | 98        |
+
+Scenario: a phone returns to the list after every account is removed
+  Given the viewport is a phone
+  And Providers has the approved account directory
+  When I open settings to the Providers section
+  And I pick the Providers account codex-lab
+  Then the phone Providers detail is titled lab with a back button to Providers
+  When another device removes every provider account
+  Then the phone Providers page shows the account list only
+  When another device adds a provider account after the directory is empty
+  Then the phone Providers page shows the account list only
+  When I pick the Providers account codex-lab
+  Then the phone Providers detail is titled lab with a back button to Providers
