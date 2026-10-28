@@ -220,13 +220,7 @@ export const turnActivityShowHandlers: StepHandler[] = [
 			const step = panel(world.page).locator(
 				'[data-step-id="surfacing-agent/surfacing-tool-1"]',
 			);
-			await step.scrollIntoViewIfNeeded();
-			const box = await step.boundingBox();
-			if (!box) throw new Error("Missing first tool step");
-			await world.page.mouse.click(
-				box.x + box.width / 2,
-				box.y + box.height / 2,
-			);
+			await step.click();
 		},
 	},
 	{
@@ -350,7 +344,7 @@ export const turnActivityShowHandlers: StepHandler[] = [
 	{
 		name: "assert desktop footer tabs and counts",
 		match:
-			/^the Show bar has flat accessible tabs with Answer, Key 3, Most 5, All messages 6 and Full log 16$/,
+			/^the Show bar has flat accessible tabs with Answer, Key 3, Most 5, All messages 6, Full log 16 and Usage$/,
 		run: async ({ world }) => {
 			const bar = panel(world.page).getByTestId("turn-show-bar");
 			await expect(bar).toBeVisible();
@@ -362,6 +356,7 @@ export const turnActivityShowHandlers: StepHandler[] = [
 				"Most5",
 				"All messages6",
 				"Full log16",
+				"Usage",
 			]);
 			await expect(
 				tabs.getByRole("tab", { name: "Most", exact: true }),
@@ -401,6 +396,10 @@ export const turnActivityShowHandlers: StepHandler[] = [
 				panel(world.page).getByRole("tab", { name: "Most", exact: true }),
 			).toHaveAttribute("aria-selected", "true");
 			await world.page.keyboard.press("End");
+			await expect(
+				panel(world.page).getByRole("tab", { name: "Usage", exact: true }),
+			).toHaveAttribute("aria-selected", "true");
+			await world.page.keyboard.press("ArrowLeft");
 		},
 	},
 	{
@@ -464,7 +463,7 @@ export const turnActivityShowHandlers: StepHandler[] = [
 		match: /^the whole Turn bill is (\$[\d.]+)$/,
 		run: async ({ world, match }) => {
 			await expect(
-				panel(world.page).locator(".step-log .turn-meta"),
+				panel(world.page).getByTestId("turn-show-bar").locator(".turn-meta"),
 			).toContainText(match[1] ?? "");
 		},
 	},

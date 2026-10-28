@@ -4,7 +4,7 @@
 	import type { TurnLogEntry, TurnPhase } from "../../utils/turns.js";
 	import Button from "../ui/Button.svelte";
 
-	let { class: className, mode, phase, pending, stepCount, entries, row, footer }: {
+	let { class: className, mode, phase, pending, stepCount, entries, row }: {
 		class: string;
 		mode: "collapsed" | "hidden" | "shown";
 		phase: TurnPhase;
@@ -12,7 +12,6 @@
 		stepCount: number;
 		entries: readonly TurnLogEntry[];
 		row: Snippet<[TurnLogEntry]>;
-		footer: Snippet;
 	} = $props();
 	// A Turn keeps its reader's choice through collapse and phase changes.
 	let choice = $state<"ticker" | "all" | null>(null);
@@ -47,6 +46,5 @@
 		{#each visibleEntries as entry (entry.uuid)}
 			<div hidden={rowMode === "ticker" && entry.index < earlierIndex}>{@render row(entry)}</div>
 		{/each}
-		{@render footer()}
 	</div>
 {/if}

@@ -354,12 +354,11 @@ export const turnActivityHandlers: StepHandler[] = [
 			await expect(steps.nth(1)).toBeFocused();
 			await page.keyboard.press("Enter");
 			await expect(panel(page).locator(".step-log")).toBeVisible();
-			// The landed row takes focus, which is what tints it (.13's landTurnTarget).
-			await expect(
-				panel(page).locator(
-					'[data-log-part="surfacing-agent/surfacing-tool-1"]',
-				),
-			).toBeFocused();
+			const row = panel(page).locator(
+				'[data-log-part="surfacing-agent/surfacing-tool-1"]',
+			);
+			await expect(row).toBeFocused();
+			await expect(row).toBeInViewport();
 		},
 	},
 	{

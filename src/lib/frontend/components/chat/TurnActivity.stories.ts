@@ -50,7 +50,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Counts and duration stay in the head; the bill lives in its hover and log. */
+/** Counts and duration stay in the head; opening exposes the bill in the footer. */
 export const Settled: Story = {
 	args: { turn: settled, segment: settledSegment, final: true },
 	play: async ({ canvasElement }) => {
@@ -101,7 +101,7 @@ export const Expanded: Story = {
 		// A synthetic click leaves a focus ring and its tooltip; the baseline is the resting state.
 		toggle.blur();
 		await expect(
-			canvasElement.querySelector(".step-log .turn-meta"),
+			canvasElement.querySelector('[data-testid="turn-show-bar"] .turn-meta'),
 		).toBeVisible();
 		const colours = new Set<string>();
 		for (const part of settledSegment.activity) {
@@ -548,4 +548,62 @@ export const LiveCollapsed: Story = {
 			canvas.queryByTestId("surfacing-msg-card"),
 		).not.toBeInTheDocument();
 	},
+};
+
+const usageTurn = withSkills(once, { 0: "systematic-debugging", 7: "tdd" });
+const [usageSegment = EMPTY_SEGMENT] = usageTurn.segments;
+
+async function openUsage(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	const head = canvas.getByRole("button", { name: /^(Expand|Collapse) turn$/ });
+	if (head.getAttribute("aria-expanded") !== "true")
+		await userEvent.click(head);
+	const usage = canvas.getByRole("tab", { name: /^Usage$/ });
+	await userEvent.click(usage);
+	await expect(usage).toHaveAttribute("aria-selected", "true");
+	const content = within(canvas.getByRole("region", { name: "Turn usage" }));
+	for (const label of [
+		"Cost",
+		"Tokens",
+		"Context at end",
+		"Skills loaded",
+		"Worth a look",
+	])
+		await expect(content.getByText(label, { exact: true })).toBeVisible();
+	await expect(content.getAllByRole("listitem").length).toBeGreaterThanOrEqual(
+		2,
+	);
+	await expect(
+		canvas.queryByTestId("surfacing-msg-card"),
+	).not.toBeInTheDocument();
+	usage.blur();
+}
+
+/** Usage collects the bill, skill loads, failed command and compaction. */
+export const Usage: Story = {
+	args: {
+		turn: usageTurn,
+		segment: usageSegment,
+		final: true,
+		surfacing: skillSurfacing,
+	},
+	play: ({ canvasElement }) => openUsage(canvasElement),
+};
+
+export const UsageLight: Story = { ...Usage, globals: { theme: "light" } };
+
+export const UsageJevOff: Story = {
+	...Usage,
+	args: {
+		...Usage.args,
+		surfacing: {
+			...skillSurfacing,
+			status: { ...skillSurfacing.status, enabled: false, active: false },
+		},
+	},
+};
+
+export const UsageLive: Story = {
+	...Usage,
+	args: { ...Usage.args, turn: skilledLive, segment: skilledLiveSegment },
 };

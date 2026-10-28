@@ -31,6 +31,8 @@ const meta = {
 	args: {
 		panel: panel({ kind: "open", view: { kind: "show", stop: "balanced" } }),
 		counts: { key: 3, balanced: 5, all: 6, log: 16 },
+		bill: { cost: 0.42 },
+		running: 0,
 		onlevelchange: fn(),
 	},
 	beforeEach: () => {

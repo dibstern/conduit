@@ -10,6 +10,7 @@
 <!-- screen just as a phone does.                                                  -->
 <script lang="ts">
 	import { fmtDuration, fmtTokens, type TurnEconomics } from "../../utils/turns.js";
+	import QuotaMeter from "../ui/QuotaMeter.svelte";
 
 	// A turn with tools already counts its duration in the ledger header; a
 	// tool-less question and answer has no header, so it carries it here.
@@ -19,12 +20,6 @@
 	}: { economics: TurnEconomics; showDuration?: boolean } = $props();
 
 	const ctx = $derived(economics.context);
-	const gaugeClass = $derived.by(() => {
-		if (ctx === undefined) return "";
-		if (ctx.pct >= 80) return "bg-error";
-		if (ctx.pct >= 60) return "bg-thinking";
-		return "bg-success";
-	});
 </script>
 
 <!-- .turn-meta / .turn-duration are E2E hooks: the turn's bill wherever it lands,
@@ -49,11 +44,7 @@
 			class="inline-flex items-center gap-1.5 @max-[432px]:hidden"
 			title="{fmtTokens(ctx.used)} of {fmtTokens(ctx.window)} tokens in context when this turn finished"
 		>
-			<span>ctx</span>
-			<span class="inline-block w-[40px] h-[4px] rounded-full bg-chip overflow-hidden">
-				<span class="block h-full rounded-full {gaugeClass}" style="width: {ctx.pct}%"></span>
-			</span>
-			<span>{ctx.pct}%</span>
+			<QuotaMeter used={ctx.pct} caption={`${ctx.pct}%`} labelPrefix="ctx" size="sm" gap={6} />
 		</span>
 	{:else if economics.contextWithoutCapacity !== undefined}
 		<span title="{fmtTokens(economics.contextWithoutCapacity)} tokens in context; context window not reported">{fmtTokens(economics.contextWithoutCapacity)} ctx</span>
