@@ -136,6 +136,34 @@ export const ENV = {
 		1,
 		2_147_483_647,
 	),
+	/** Daemon retention sweep; tests shorten the interval. */
+	autoSettleSweepIntervalMs: parseBoundedInteger(
+		process.env["CONDUIT_AUTO_SETTLE_SWEEP_INTERVAL_MS"],
+		60_000,
+		1,
+		2_147_483_647,
+	),
+	/** Session status reconciliation; tests shorten the interval. */
+	statusReconciliationIntervalMs: parseBoundedInteger(
+		process.env["CONDUIT_STATUS_RECONCILIATION_INTERVAL_MS"],
+		7_000,
+		1,
+		2_147_483_647,
+	),
+	/** OpenCode message fallback polling; tests shorten the interval. */
+	messagePollerIntervalMs: parseBoundedInteger(
+		process.env["CONDUIT_MESSAGE_POLLER_INTERVAL_MS"],
+		750,
+		1,
+		2_147_483_647,
+	),
+	/** Quota RPC cache duration; tests shorten it to publish controlled resets. */
+	quotaReadMaxAgeMs: parseBoundedInteger(
+		process.env["CONDUIT_QUOTA_READ_MAX_AGE_MS"],
+		30_000,
+		0,
+		2_147_483_647,
+	),
 	/** Outbox polling matches the initial one-second provider retry backoff. */
 	outboxDrainIntervalMs: parseBoundedInteger(
 		process.env["CONDUIT_OUTBOX_DRAIN_INTERVAL_MS"],

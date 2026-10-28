@@ -7,6 +7,7 @@
 // MessagePollerManager: manages multiple concurrent MessagePoller instances.
 
 import { isOpenCodeNotRunningError } from "../domain/daemon/Services/opencode-instances-service.js";
+import { ENV } from "../env.js";
 import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { Message } from "../instance/sdk-types.js";
 import { createSilentLogger, type Logger } from "../logger.js";
@@ -19,7 +20,7 @@ import {
 } from "./message-poller.js";
 
 /** Polling interval when actively polling messages. */
-const POLL_INTERVAL_MS = 750;
+const POLL_INTERVAL_MS = ENV.messagePollerIntervalMs;
 
 /** How long to wait after the last SSE event before starting REST polling. */
 const SSE_SILENCE_THRESHOLD_MS = 2000;

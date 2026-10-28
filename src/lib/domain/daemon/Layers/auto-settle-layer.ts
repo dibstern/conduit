@@ -6,6 +6,7 @@ import {
 	DEFAULT_AUTO_DELETE_ARCHIVED_AFTER_DAYS,
 } from "../../../daemon/config-persistence.js";
 import * as Failure from "../../../effect/failure-classification.js";
+import { ENV } from "../../../env.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
@@ -129,7 +130,7 @@ export const AutoSettleLive = () =>
 				),
 			);
 
-			yield* Stream.tick("1 minute").pipe(
+			yield* Stream.tick(ENV.autoSettleSweepIntervalMs).pipe(
 				Stream.runForEach(() => sweep),
 				Effect.forkScoped,
 			);

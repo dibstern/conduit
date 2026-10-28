@@ -597,7 +597,7 @@
 		"timeout-override": 7
 	},
 	"test/integration/daemon/codex-goals.test.ts": {
-		"polling": 14,
+		"polling": 15,
 		"timeout-override": 9
 	},
 	"test/integration/daemon/codex-interactions.test.ts": {
@@ -623,6 +623,7 @@
 	},
 	"test/integration/daemon/codex-usage.test.ts": {
 		"polling": 13,
+		"real-wait": 1,
 		"timeout-override": 8
 	},
 	"test/integration/daemon/config-load-safety.test.ts": {
@@ -825,7 +826,7 @@
 		"timeout-override": 8
 	},
 	"test/integration/daemon/opencode-connection-health.test.ts": {
-		"polling": 9,
+		"polling": 10,
 		"real-wait": 2,
 		"timeout-override": 4
 	},
