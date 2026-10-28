@@ -669,9 +669,11 @@ export type RunEffect =
       readonly mode: "resume" | "fresh" }
   | { readonly kind: "steer"; readonly runId: string; readonly inputId: string }
   | { readonly kind: "interrupt"; readonly runId: string }
-  | { readonly kind: "close"; readonly runId: string }
-  | { readonly kind: "kill_and_respawn"; readonly runId: string | null } // null: idle End escalation (D4)
-  | { readonly kind: "end_session"; readonly runId: string | null }
+  // label: the execution label the destruction acts on; null only before any process has been
+  // seen for it, then it acts on the next process_started's runner (D23, D33)
+  | { readonly kind: "close"; readonly runId: string; readonly label: Label | null }
+  | { readonly kind: "kill_and_respawn"; readonly runId: string | null; readonly label: Label | null } // runId null: idle End escalation (D4)
+  | { readonly kind: "end_session"; readonly runId: string | null; readonly label: Label | null }
   | { readonly kind: "deliver_answer"; readonly runId: string; readonly interactionId: string; readonly answer: unknown }
   | { readonly kind: "cancel_request"; readonly runId: string } // OpenCode Stop fallback; fence stays held
   | { readonly kind: "probe"; readonly runId: string; readonly target:
@@ -727,7 +729,7 @@ export interface LedgerView {
   readonly live: readonly IssuedEffect[];   // work that may still act, in issue order
   readonly tasks: TasksView;                // none | unknown | live (kind, class per task)
   readonly anythingMayAct: boolean;
-  readonly pendingConfirm?: PendingConfirm; // action, snapshot entry, tasks it would destroy
+  readonly pendingConfirm?: PendingConfirm; // action, labels it acts on (D33), snapshot entry, tasks it would destroy
   readonly lostWork: readonly LostWork[];   // tasks, or "may have been lost"
   readonly nativeCommands: readonly NativeCommandView[];
 }
@@ -1991,7 +1993,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   still a member as the Tombstone cleanup expiry does (D29). `turn_started` with no active
   Run records a wake Run even while the project is inactive (LI9); having no authority, it
   issues no effect.
-- **`anythingMayAct`** is true for a non-ended Run, a send that may still act, or tasks live or
+- **`anythingMayAct`** is true for a non-ended Run, a send that may still act (a probe only reads,
+  so it never may act, D31), or tasks live or
   unknown. Tasks never block a new Run. Every liveness reader asks it: the worktree cleanup sweep,
   archive and delete `hasLiveWork`, the status poller's idle corrections, and the runner record
   deletion. The physical-process file guard stays.
@@ -2021,8 +2024,10 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   Ended or its interrupt deadline expired. Both steps are confirm-gated with tasks live or
   unknown. With no Run, `end` issues `end_session{runId: null}`; its deadline belongs to the
   send. When that deadline expires unconfirmed, the ledger issues `kill_and_respawn{runId:
-  null}`, confirm-gated with tasks live or unknown, and records lost work for the current
-  process label. Issuing it covers that runner's labels (5.1).
+  null}`, confirm-gated with tasks live or unknown, against the runner the `end_session` was
+  issued on: it records lost work for the latest label seen for that runner, and issuing it
+  covers that runner's labels (5.1). If that runner is already lost, the `end_session` is covered
+  and no kill issues (D32).
 - Lost work is always recorded for every destruction, unplanned loss included, under the
   latest label seen for the runner the destruction acts on.
 - A process that dies before confirming a native command: the tracker reloads from the transcript and
@@ -2052,6 +2057,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   (D27).
 - A covered native command's view is `Failed` with the covering cause as its code: `process_lost`,
   `kill_and_respawn` or `session_ended` (D24).
+- A command still deferred (requested while the project is inactive, not yet issued) when its
+  native session ends is `Failed{session_ended}` and is never issued: its target is gone (D30).
 
 <!-- src: BG Decision 3; AUDIT A4; AUDIT-2 T5 -->
 
@@ -2439,11 +2446,12 @@ Behavioural statements the rebuilt decider must make impossible to violate:
     snapshot, except unplanned loss; every destruction yields lost work.
   - LI6: a native command is issued in the requesting decision when the project is active, alive
     process or not; requested while the project is inactive, it is issued in the `project_active`
-    decision, ahead of any start or steer.
+    decision, ahead of any start or steer, unless its native session ends first (then it is
+    `Failed{session_ended}` and never issued, D30).
   - LI7: older-label evidence never changes authority or liveness; a send's own label is never older
     for that send (3.4).
-  - LI8: `anythingMayAct` is false only when the fake has no running turn, no unfinished send and no
-    live task; unknown counts as true.
+  - LI8: `anythingMayAct` is false only when the fake has no running turn, no unfinished send other
+    than a probe (D31) and no live task; unknown counts as true.
   - LI9: each self-started turn with no active Run yields exactly one wake Run.
   - LI10: a zero-turn result never ends or starts a Run.
 - **Spec properties**, checked against both the pure decider and the real ledger on SQLite: every Run
@@ -2837,6 +2845,10 @@ port.
 - D27: native-command confirmation starts at issue and keeps running while the project is inactive (8.5). Rejected: pausing it while inactive (a second clock rule for a view-only deadline).
 - D28: a turn joining a wake Run under another label is a wake execution of its own: live and a fence member until its own Run-end evidence or coverage; the Tombstone cleanup expiry runs fence expiry against every remaining member label (8.3). Rejected: killing the current process at the wake deadline (destruction would depend on arrival order); moving the wake label to the newest (hides work still running under the first label, LI8).
 - D29: a pending confirm names the destruction it gates (step and every execution label it acts on), and confirming issues exactly that, so a multi-label step waits on one confirm; `project_active` reconciliation of a wake Run acts on every execution label still a member (8.3, 8.4). Rejected: confirming against the Run's first label (a joined label's gated destruction would hit the wrong process).
+- D30: a native command still deferred for an inactive project when its native session ends is `Failed{session_ended}` and never issued (8.5, LI6). Rejected: issuing it at `project_active` (it would act on a fresh session the user never addressed).
+- D31: a probe only reads, so it never counts as a send that may still act; LI8 exempts unfinished probes (8.3). Rejected: counting probes (a read would hold worktree cleanup and archive).
+- D32: the `kill_and_respawn` escalating an unconfirmed `end_session` acts on the runner that `end_session` was issued on; if that runner is already lost, nothing issues (8.4). Rejected: the current process (a later, unrelated runner would be killed while the end_session's own runner keeps acting).
+- D33: `close`, `kill_and_respawn` and `end_session` effects carry the execution label they act on (null only before any process was seen for it, binding per D23), and `PendingConfirm` carries the labels its step acts on (3.13, 8.4). Rejected: the feeder inferring the target from `runId` (a joined wake label on another runner has no single process per Run).
 
 ## Appendix B. Old-id mapping
 
