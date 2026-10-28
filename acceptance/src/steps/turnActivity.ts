@@ -328,8 +328,8 @@ export const turnActivityHandlers: StepHandler[] = [
 				"data-ordinal",
 				"2",
 			);
-			await expect(page.getByTestId("surfacing-msg-card")).toBeFocused();
-			await second.focus();
+			// An open strip keeps focus so arrows keep moving between pins.
+			await expect(second).toBeFocused();
 			await page.keyboard.press("End");
 			await expect(page.getByTestId("surfacing-pin-8")).toBeFocused();
 			await page.keyboard.press("Home");
