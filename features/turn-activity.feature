@@ -40,17 +40,16 @@ Examples:
   | desktop  |
   | phone    |
 
-Scenario Outline: A settled card offers now whenever it is not following
+Scenario Outline: Folding a live card stops following and now resumes it
   Given message surfacing is active at Balanced
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
-  And the surfacing session has a settled turn
+  And the surfacing session has a live turn
+  When I fold the surfaced message
   Then the surfaced card offers Follow latest
-  When I pick surfaced message #2
-  And I follow the latest surfaced message
+  When I follow the latest surfaced message
   Then the surfaced card shows #8 and announces its category and position
-  And the surfaced card offers Follow latest
-  And the messages region visually matches turn-card-settled-latest-<viewport> at 98 percent
+  And the messages region visually matches turn-card-live-fold-now-<viewport> at 98 percent
 
 Examples:
   | viewport |
