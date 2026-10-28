@@ -1283,6 +1283,73 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["replacement"] = replacement;
 	}, 40_000);
 
+	it("failure mode 75: with no serving runner left, an abandoned candidate is cleaned before the next send starts fresh", async () => {
+		const {
+			harness,
+			details,
+			browser: initial,
+		} = await start("cleaning-no-serving");
+		const sessionId = await initial.createSession("Cleaning without serving");
+		details["sessionId"] = sessionId;
+		const before = "upgrade-before-cleaning";
+		await initial.send(sessionId, before);
+		await completed(harness, sessionId, [before]);
+		const old = runnerFor(harness, sessionId);
+		await harness.kill();
+		await harness.restart({
+			buildId: NEW_BUILD,
+			queryInitializationDelayMs: 5000,
+		});
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).filter((mark) => mark.kind === "query"),
+				).toHaveLength(2),
+			{ timeout: 5000 },
+		);
+		const candidate = sdkProof(harness).find(
+			(mark) => mark.kind === "query" && mark.pid !== old.pid,
+		);
+		assert(candidate?.kind === "query");
+		const abandoned = runnerFor(harness, sessionId, candidate.pid);
+		await harness.kill();
+		process.kill(old.pid, "SIGKILL");
+		await vi.waitFor(() => expect(() => process.kill(old.pid, 0)).toThrow(), {
+			timeout: 5000,
+		});
+		expect(() => process.kill(candidate.pid, 0)).not.toThrow();
+		details["runnersBeforeRestart"] = persisted(harness, sessionId).runners;
+		// This proves the outcome, not the gate's Cleaning answer: recover itself
+		// may stop the unretired candidate (CandidateAbandoned) before the send
+		// reaches the gate. The Cleaning path is covered by unit tests only.
+		await harness.restart({ buildId: NEW_BUILD });
+		const browser = await harness.connect(sessionId);
+		const after = "upgrade-after-cleaning";
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
+		);
+		expect(() => process.kill(candidate.pid, 0)).toThrow();
+		expect(existsSync(abandoned.socketPath)).toBe(false);
+		const enqueue = sdkProof(harness).find(
+			(mark) => mark.kind === "enqueue" && mark.prompt === after,
+		);
+		assert(enqueue?.kind === "enqueue");
+		const fresh = sdkProof(harness).find(
+			(mark) => mark.kind === "query" && mark.queryId === enqueue.queryId,
+		);
+		assert(fresh?.kind === "query");
+		expect([old.pid, candidate.pid]).not.toContain(fresh.pid);
+		expect(
+			sdkProof(harness).filter(
+				(mark) => mark.kind === "enqueue" && mark.queryId === candidate.queryId,
+			),
+		).toEqual([]);
+		await completed(harness, sessionId, [before, after]);
+		details["oldRunner"] = old;
+		details["abandonedCandidate"] = abandoned;
+		details["freshQuery"] = fresh;
+	}, 40_000);
+
 	it("review regression: persists a pending subagent finalizer before upgrading", async () => {
 		const {
 			harness,

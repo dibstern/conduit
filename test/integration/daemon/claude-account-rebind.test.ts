@@ -270,6 +270,63 @@ it.each([
 			expect(late).toHaveLength(1);
 			expect(JSON.parse(late[0]?.metadata ?? "{}").runId).toBe(runs[0]?.id);
 		}
+		if (rejectResume) {
+			// Failure mode 73: the refused native resume releases transmission 1 and
+			// fresh preparation sends the same run once more as transmission 2.
+			const rejected = runs[2]?.id;
+			const ledger = events.flatMap(({ type, data }) => {
+				const payload = JSON.parse(data) as {
+					runId?: string;
+					transmission?: number;
+					reason?: string;
+				};
+				return (type === "run.dispatched" || type === "run.released") &&
+					payload.runId === rejected
+					? [
+							{
+								type,
+								transmission: payload.transmission,
+								reason: payload.reason,
+							},
+						]
+					: [];
+			});
+			const evidenceDir =
+				process.env["CONDUIT_RUNNER_EVIDENCE_DIR"] ??
+				join(tmpdir(), "conduit-runner-evidence");
+			mkdirSync(evidenceDir, { recursive: true });
+			writeFileSync(
+				join(
+					evidenceDir,
+					`case-73-resume-rejected-${rejectResume}-${process.pid}.json`,
+				),
+				JSON.stringify(
+					{
+						rejectResume,
+						runId: rejected,
+						ledger,
+						resumeRejected: sdk.filter(
+							(mark) => mark.kind === "resume-rejected",
+						),
+						commands: db
+							.prepare<[string], { run_id: string; status: string }>(
+								"SELECT run_id, status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+							)
+							.all(sessionId),
+					},
+					null,
+					2,
+				),
+			);
+			expect(
+				sdk.filter((mark) => mark.kind === "resume-rejected"),
+			).toHaveLength(1);
+			expect(ledger).toEqual([
+				{ type: "run.dispatched", transmission: 1, reason: undefined },
+				{ type: "run.released", transmission: 1, reason: "ResumeRejected" },
+				{ type: "run.dispatched", transmission: 2, reason: undefined },
+			]);
+		}
 	} finally {
 		db.close();
 	}

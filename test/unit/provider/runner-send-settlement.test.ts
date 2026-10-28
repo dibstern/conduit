@@ -18,6 +18,7 @@ import {
 	Fiber,
 	Layer,
 	Option,
+	Random,
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -1398,6 +1399,312 @@ for (const pickup of ["live caller", "restart scan"] as const)
 				}),
 			),
 	);
+
+// The predecessor park (S1 step 4). Gate reads are counted at the gate's own
+// SQL, so a re-step or a poll shows up as an extra read.
+const countGates = (sql: SqlClient.SqlClient, runIds: readonly string[]) =>
+	Effect.gen(function* () {
+		const connection = yield* Effect.scoped(sql.reserve);
+		const execute = connection.execute;
+		const gates: string[] = [];
+		const injected = vi
+			.spyOn(connection, "execute")
+			.mockImplementation((query, params, transform) => {
+				if (
+					query.includes(
+						"SELECT owner.id, session.provider, owner.status, owner.runner_id",
+					)
+				)
+					for (const runId of runIds)
+						if (params.includes(runId)) gates.push(runId);
+				return execute(query, params, transform);
+			});
+		yield* Effect.addFinalizer(() => Effect.sync(() => injected.mockRestore()));
+		return gates;
+	});
+
+for (const outcome of ["delivered", "terminal", "covered"] as const)
+	it.effect(
+		outcome === "delivered"
+			? "F60 a send behind a TERM-surviving predecessor parks through TERM, KILL and Escalated, then starts and delivers once"
+			: `F60 a ${outcome} head is stepped at once during the predecessor park and starts nothing`,
+		() =>
+			runRetirement(
+				Effect.gen(function* () {
+					const f = yield* s7Fixture("claude");
+					yield* f.recover;
+					const clock = yield* Clock.Clock;
+					const signals: Array<{
+						readonly signal: string;
+						readonly at: number;
+					}> = [];
+					// The predecessor ignores TERM; KILL is recorded but the process
+					// is reaped only after the Stop window, so Escalated ends the park.
+					vi.spyOn(f.processTable, "signal").mockImplementation(
+						(_pid, signal) => {
+							signals.push({ signal, at: clock.currentTimeMillisUnsafe() });
+						},
+					);
+					const gates = yield* countGates(f.sql, ["run:park-head"]);
+					yield* f.manager
+						.executeEffect({ type: "end-session", sessionId: "s" })
+						.pipe(Effect.forkChild);
+					const head = yield* f.seed("park-head", 1, 1, "unheld");
+					const sending = yield* f.instance
+						.sendTurnEffect(head)
+						.pipe(Effect.forkChild);
+					yield* TestClock.adjust(0);
+					// The park is observable: the reconciler's Stop is in progress.
+					expect(
+						yield* f.sql`SELECT stop_state, stop_started_at, retired_at FROM claude_runner_cursors WHERE runner_id = '131313131313'`,
+					).toEqual([
+						{ stop_state: "Escalating", stop_started_at: 0, retired_at: 0 },
+					]);
+					expect(signals).toEqual([{ signal: "SIGTERM", at: 0 }]);
+					expect(gates).toEqual(["run:park-head"]);
+					yield* TestClock.adjust("1 second");
+					expect(gates).toEqual(["run:park-head"]);
+					if (outcome !== "delivered") {
+						if (outcome === "terminal")
+							yield* f.commit([
+								canonicalEvent(
+									"turn.interrupted",
+									"s",
+									{ messageId: "park-head" },
+									{
+										provider: "claude",
+										metadata: { runId: "run:park-head" },
+									},
+								),
+							]);
+						else
+							yield* f.commit.write(() =>
+								f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, requested_at, updated_at) VALUES (3, 'cover-park', 'test-project', 's', 'account', 'interrupt_turn', ${JSON.stringify({ type: "interrupt_turn", sessionId: "s", stop: { owners: [{ runId: "run:park-head" }], turnIds: ["park-head"], deadlineAt: 3000, runnerBacked: true, retainedSteers: false } })}, 'completed', 1, 1)`.pipe(
+									Effect.asVoid,
+								),
+							);
+						yield* TestClock.adjust(0);
+						// Stepped at once, at 1 s, not when the park would end at 4 s.
+						expect(gates).toEqual(["run:park-head", "run:park-head"]);
+						expect(
+							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'run:park-head'`,
+						).toEqual([{ status: "interrupted" }]);
+						expect((yield* Fiber.join(sending)).status).toBe("cancelled");
+						yield* TestClock.adjust("10 seconds");
+						expect(gates).toHaveLength(2);
+						expect(spawned.spawn).not.toHaveBeenCalled();
+						expect(f.commands.filter((c) => c.type === "send-turn")).toEqual(
+							[],
+						);
+						return;
+					}
+					yield* TestClock.adjust("2 seconds");
+					expect(signals).toEqual([
+						{ signal: "SIGTERM", at: 0 },
+						{ signal: "SIGKILL", at: 3000 },
+					]);
+					expect(gates).toEqual(["run:park-head"]);
+					yield* TestClock.adjust("999 millis");
+					expect(spawned.spawn).not.toHaveBeenCalled();
+					expect(gates).toEqual(["run:park-head"]);
+					yield* TestClock.adjust("1 milli");
+					expect(
+						yield* f.sql`SELECT stop_state FROM claude_runner_cursors WHERE runner_id = '131313131313'`,
+					).toEqual([{ stop_state: "Escalated" }]);
+					expect(spawned.spawn).toHaveBeenCalledTimes(1);
+					expect((yield* Fiber.join(sending)).status).toBe("completed");
+					const replacement = f.attachments.at(-1)?.runnerId;
+					expect(replacement).not.toBe("131313131313");
+					expect(f.commands.filter((c) => c.type === "send-turn")).toEqual([
+						{ runnerId: replacement, type: "send-turn" },
+					]);
+					expect(
+						yield* f.sql`SELECT json_extract(data, '$.commandId') AS commandId, json_extract(data, '$.runnerId') AS runnerId, json_extract(data, '$.transmission') AS transmission FROM events WHERE type = 'run.dispatched'`,
+					).toEqual([
+						{ commandId: "park-head", runnerId: replacement, transmission: 1 },
+					]);
+				}),
+			),
+	);
+
+it.effect(
+	"F61 two sends queued behind one stopping predecessor park once and are delivered in order",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				yield* f.recover;
+				const gates = yield* countGates(f.sql, [
+					"run:queued-a",
+					"run:queued-b",
+				]);
+				yield* f.manager
+					.executeEffect({ type: "end-session", sessionId: "s" })
+					.pipe(Effect.forkChild);
+				const first = yield* f.seed("queued-a", 1, 1, "unheld");
+				const second = yield* f.seed("queued-b", 2, 1, "unheld");
+				const sendingFirst = yield* f.instance
+					.sendTurnEffect(first)
+					.pipe(Effect.forkChild);
+				const sendingSecond = yield* f.instance
+					.sendTurnEffect(second)
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(
+					yield* f.sql`SELECT stop_state FROM claude_runner_cursors WHERE runner_id = '131313131313'`,
+				).toEqual([{ stop_state: "Escalating" }]);
+				// One park: only the head reads the gate while the predecessor stops.
+				expect(gates).toEqual(["run:queued-a"]);
+				yield* TestClock.adjust("3999 millis");
+				expect(gates).toEqual(["run:queued-a"]);
+				expect(spawned.spawn).not.toHaveBeenCalled();
+				yield* TestClock.adjust("1 milli");
+				expect((yield* Fiber.join(sendingFirst)).status).toBe("completed");
+				expect((yield* Fiber.join(sendingSecond)).status).toBe("completed");
+				expect(spawned.spawn).toHaveBeenCalledTimes(1);
+				const replacement = f.attachments.at(-1)?.runnerId;
+				expect(f.commands.filter((c) => c.type === "send-turn")).toEqual([
+					{ runnerId: replacement, type: "send-turn" },
+					{ runnerId: replacement, type: "send-turn" },
+				]);
+				expect(
+					yield* f.sql`SELECT json_extract(data, '$.commandId') AS commandId, json_extract(data, '$.transmission') AS transmission FROM events WHERE type = 'run.dispatched' ORDER BY sequence`,
+				).toEqual([
+					{ commandId: "queued-a", transmission: 1 },
+					{ commandId: "queued-b", transmission: 1 },
+				]);
+			}),
+		),
+);
+
+for (const predecessor of ["unloaded", "legacy"] as const)
+	it.effect(
+		`F66 ${predecessor === "unloaded" ? "a predecessor recover has not loaded" : "a loaded legacy retirement row"} parks the send only until its window end, with no poll, then starts`,
+		() => {
+			// A poll is a jittered retry schedule; every jitter draws here.
+			let draws = 0;
+			return runRetirement(
+				Effect.gen(function* () {
+					const f = yield* s7Fixture("claude");
+					if (predecessor === "unloaded")
+						// No recover: the reconciler has no state for this row.
+						yield* f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, driver_kind, retired_at, pid, start_time, stop_state, stop_reason, stop_started_at) VALUES ('666666666666', 0, 's', 'claude', 0, 100_099, 'unloaded', 'Escalating', 'EndSession', 1000)`;
+					else {
+						yield* f.recover;
+						// A row retired before Stop states existed; recover maps it to
+						// Escalated, while the gate still names it until its window ends.
+						yield* f.sql`UPDATE claude_runner_cursors SET retired_at = 1000 WHERE runner_id = '131313131313'`;
+						yield* f.recover;
+					}
+					const until = 5000;
+					const gates = yield* countGates(f.sql, ["run:window-head"]);
+					yield* TestClock.adjust("1 second");
+					const head = yield* f.seed("window-head", 1, 1, "unheld");
+					const before = draws;
+					const sending = yield* f.instance
+						.sendTurnEffect(head)
+						.pipe(Effect.forkChild);
+					yield* TestClock.adjust(0);
+					expect(gates).toEqual(["run:window-head"]);
+					yield* TestClock.adjust(`${until - 1000 - 1} millis`);
+					expect(gates).toEqual(["run:window-head"]);
+					expect(draws - before).toBe(0);
+					expect(spawned.spawn).not.toHaveBeenCalled();
+					yield* TestClock.adjust("1 milli");
+					expect(spawned.spawn).toHaveBeenCalledTimes(1);
+					expect((yield* Fiber.join(sending)).status).toBe("completed");
+					expect(f.commands.filter((c) => c.type === "send-turn")).toEqual([
+						{ runnerId: f.attachments.at(-1)?.runnerId, type: "send-turn" },
+					]);
+				}).pipe(
+					Effect.provideService(Random.Random, {
+						nextIntUnsafe: () => 0,
+						nextDoubleUnsafe: () => {
+							draws += 1;
+							return 0.5;
+						},
+					}),
+				),
+			);
+		},
+	);
+
+it.effect(
+	"F60 a predecessor whose Stop commit is in flight at park start and then rejected parks the send until its window end, then starts",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				yield* f.recover;
+				// The row is retired by a commit this reconciler has not loaded, so
+				// the gate names it while the end-session Stop is still Committing.
+				yield* f.sql`UPDATE claude_runner_cursors SET retired_at = 0, stop_state = 'Escalating', stop_reason = 'EndSession', stop_started_at = 0 WHERE runner_id = '131313131313'`;
+				const connection = yield* Effect.scoped(f.sql.reserve);
+				const execute = connection.execute;
+				const gates: string[] = [];
+				let commits = 0;
+				// The first commit hits an unavailable store and stays Committing
+				// through its backoff; every later commit is rejected by a defect.
+				const injected = vi
+					.spyOn(connection, "execute")
+					.mockImplementation((query, params, transform) => {
+						if (
+							query.includes(
+								"SELECT owner.id, session.provider, owner.status, owner.runner_id",
+							) &&
+							params.includes("run:rejected-head")
+						)
+							gates.push("run:rejected-head");
+						if (
+							!query.includes(
+								"SELECT retired_at, role, session_id FROM claude_runner_cursors",
+							) ||
+							!params.includes("131313131313")
+						)
+							return execute(query, params, transform);
+						commits++;
+						return commits === 1
+							? Effect.fail(
+									new SqlError({
+										reason: new ConnectionError({
+											cause: "Stop commit unavailable",
+										}),
+									}),
+								)
+							: Effect.die("Stop commit rejected");
+					});
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => injected.mockRestore()),
+				);
+				yield* f.manager
+					.executeEffect({ type: "end-session", sessionId: "s" })
+					.pipe(Effect.forkChild);
+				const head = yield* f.seed("rejected-head", 1, 1, "unheld");
+				const sending = yield* f.instance
+					.sendTurnEffect(head)
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(commits).toBe(1);
+				expect(gates).toEqual(["run:rejected-head"]);
+				// The rejection at the 1 s backoff fails only the Stop's waiters.
+				yield* TestClock.adjust("1 second");
+				expect(commits).toBe(2);
+				expect(sending.pollUnsafe()).toBeUndefined();
+				expect(gates).toEqual(["run:rejected-head"]);
+				yield* TestClock.adjust("2999 millis");
+				expect(spawned.spawn).not.toHaveBeenCalled();
+				expect(gates).toEqual(["run:rejected-head"]);
+				yield* TestClock.adjust("1 milli");
+				expect(spawned.spawn).toHaveBeenCalledTimes(1);
+				expect((yield* Fiber.join(sending)).status).toBe("completed");
+				const replacement = f.attachments.at(-1)?.runnerId;
+				expect(replacement).not.toBe("131313131313");
+				expect(f.commands.filter((c) => c.type === "send-turn")).toEqual([
+					{ runnerId: replacement, type: "send-turn" },
+				]);
+			}),
+		),
+);
 
 it.effect(
 	"S4 an unavailable Cleaning cleanup after a lost registration starts afresh instead of StartLost",

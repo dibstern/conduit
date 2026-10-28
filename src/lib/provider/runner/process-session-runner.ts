@@ -6144,16 +6144,28 @@ export const makeProcessSessionRunner = (
 						{ _tag: "CandidateAbandoned" },
 					);
 				}).pipe(Effect.mapError(toStoreFault)),
-			park: (predecessor) =>
-				stops.awaitStop(predecessor.runner, "Escalated").pipe(
-					Effect.timeoutOrElse({
-						duration: Math.max(
-							0,
-							predecessor.until - clock.currentTimeMillisUnsafe(),
-						),
-						orElse: () => Effect.void,
-					}),
-				),
+			park: (predecessor) => {
+				const window = Effect.sleep(
+					Math.max(0, predecessor.until - clock.currentTimeMillisUnsafe()),
+				);
+				// The Stop state is read once, here. Only a Stop in progress has an
+				// end to await. An unloaded (Running), legacy (already Escalated) or
+				// ended (Gone, Settled) predecessor holds the gate until its window
+				// ends; awaiting it would poll or return at once and re-step. A
+				// rejected commit fails only the Stop's waiters, so the window ends
+				// the park.
+				const stop = stops.state(predecessor.runner)._tag;
+				return stop === "Requested" ||
+					stop === "Escalating" ||
+					stop === "Committing"
+					? Effect.raceFirst(
+							stops
+								.awaitStop(predecessor.runner, "Escalated")
+								.pipe(Effect.catch(() => Effect.never)),
+							window,
+						)
+					: window;
+			},
 			transmitAdopted: transmitStoredOwner,
 		});
 

@@ -600,6 +600,7 @@ describe("runner forced stop with real processes", () => {
 			expect(resumed.chunks.join("")).toBe(
 				responseChunks("reaper-after-stop").join(""),
 			);
+			expect(resumed.done["status"]).toBe("idle");
 			const replacement = harness.marks
 				.filter(
 					(mark) =>
@@ -609,6 +610,7 @@ describe("runner forced stop with real processes", () => {
 				.at(-1);
 			assert(replacement?.kind === "runner-started");
 			members.push(identity(replacement.pid));
+			expect(replacement.pid).not.toBe(fixture.leader.pid);
 			const originalQuery = harness.marks.find(
 				(mark) => mark.kind === "query" && mark.pid === fixture.leader.pid,
 			);
@@ -617,8 +619,17 @@ describe("runner forced stop with real processes", () => {
 			);
 			assert(originalQuery?.kind === "query" && resumedQuery?.kind === "query");
 			expect(resumedQuery.sessionId).toBe(originalQuery.sessionId);
+			const resumedOptions = harness
+				.claudeOptions()
+				.find(
+					(options) =>
+						options.pid === replacement.pid &&
+						options.prompt === "reaper-after-stop",
+				);
+			expect(resumedOptions?.resumeId).toBe(originalQuery.sessionId);
 			evidence["replacement"] = replacement;
 			evidence["nativeSessionId"] = resumedQuery.sessionId;
+			evidence["resumeOption"] = resumedOptions?.resumeId;
 			evidence["passed"] = true;
 		} catch (cause) {
 			evidence["failure"] = String(cause);
@@ -986,11 +997,19 @@ describe("runner forced stop with real processes", () => {
 			evidence["daemonRestartedAt"] = Date.now();
 			browser = await harness.connect(sessionId);
 			expect(() => process.kill(first.pid, 0)).not.toThrow();
-			expect(cursor(harness, runnerId)).toMatchObject({
-				pid: retired.pid,
-				start_time: retired.start_time,
-				retired_at: retired.retired_at,
+			// Only the reconciler's Stop progress may move across the restart, and
+			// only forward: the runner is alive, so its Stop is still open, and
+			// the signal log only grows.
+			const restarted = cursor(harness, runnerId);
+			assert(restarted);
+			expect(restarted).toEqual({
+				...retired,
+				signal_log: expect.any(String),
+				stop_state: expect.stringMatching(/^(Escalating|Escalated)$/),
 			});
+			const retiredLog: unknown[] = JSON.parse(retired.signal_log);
+			const restartedLog: unknown[] = JSON.parse(restarted.signal_log);
+			expect(restartedLog.slice(0, retiredLog.length)).toEqual(retiredLog);
 			expect(
 				runnerRuns(harness, runnerId).find(({ id }) => id === held.id),
 			).toMatchObject({

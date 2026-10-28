@@ -1,6 +1,12 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { it } from "@effect/vitest";
@@ -6476,18 +6482,57 @@ it.effect(
 		),
 );
 
-// survived=true races the feeder's predecessor wait against a frozen TestClock and
-// hangs some runs. conduit-test-82tn.32.29.4 rewrites it to observe the predecessor
-// park and restores it (200 consecutive green runs).
+// The candidate's Stop is observed in progress while the send is still pending,
+// and the clock moves through the Stop window then, never after the send ends.
+// On failure `parks` and `stops` are written under CONDUIT_RUNNER_EVIDENCE_DIR.
+// `parks` records the gate's predecessor SQL read, a proxy for feeder parks:
+// the gate cannot answer Unserved{predecessor} without that read. `stops` is
+// the reconciler's durable Stop rows.
 for (const survived of [false, true])
-	(survived ? it.effect.skip : it.effect)(
+	it.effect(
 		survived
 			? "refuses cleanup of owned runs from a cancelled Starting candidate that survives Stop"
 			: "fences a cancelled warming candidate while its stop is pending",
-		() =>
-			runRetirement(
+		() => {
+			const parks: Array<{ at: number; predecessors: unknown }> = [];
+			const timeline: Array<{ at: number; sendDone: boolean; stops: unknown }> =
+				[];
+			return runRetirement(
 				Effect.gen(function* () {
 					const f = yield* retirementFixture(false);
+					const clock = yield* Clock.Clock;
+					const connection = yield* Effect.scoped(f.sql.reserve);
+					const execute = connection.execute;
+					const traced = vi
+						.spyOn(connection, "execute")
+						.mockImplementation((query, params, transform) =>
+							query.includes(
+								"SELECT runner_id AS runner, retired_at AS retiredAt",
+							)
+								? execute(query, params, transform).pipe(
+										Effect.tap((rows) =>
+											Effect.sync(() =>
+												parks.push({
+													at: clock.currentTimeMillisUnsafe(),
+													predecessors: rows,
+												}),
+											),
+										),
+									)
+								: execute(query, params, transform),
+						);
+					yield* Effect.addFinalizer(() =>
+						Effect.sync(() => traced.mockRestore()),
+					);
+					let sending: Fiber.Fiber<unknown, unknown> | undefined;
+					const record = Effect.gen(function* () {
+						timeline.push({
+							at: clock.currentTimeMillisUnsafe(),
+							sendDone: sending?.pollUnsafe() !== undefined,
+							stops:
+								yield* f.sql`SELECT runner_id, role, retired_at, stop_state, stop_started_at FROM claude_runner_cursors ORDER BY rowid`,
+						});
+					});
 					const warmed = yield* Deferred.make<void>();
 					const releaseWarm = yield* Deferred.make<void>();
 					const stopping = yield* Deferred.make<void>();
@@ -6610,7 +6655,7 @@ for (const survived of [false, true])
 					yield* candidate.emit(task, "s");
 					expect(f.background.backgroundOf("s")).toBeUndefined();
 					yield* old.emit(task, "s");
-					const sending = yield* Effect.forkChild(
+					sending = yield* Effect.forkChild(
 						f.admitCommand({
 							type: "send-turn",
 							sinkId: "original-sink",
@@ -6640,13 +6685,48 @@ for (const survived of [false, true])
 					const background = f.background.backgroundOf("s");
 					const owner = yield* f.manager.getControlProcessIdEffect?.("s") ??
 						Effect.succeed(undefined);
+					for (const step of [0, 1000, 1000, 1000, 999, 1]) {
+						yield* TestClock.adjust(step);
+						yield* record;
+					}
+					const stops = (stop: string) => [
+						{
+							runner_id: "131313131313",
+							role: "serving",
+							retired_at: null,
+							stop_state: "Requested",
+							stop_started_at: null,
+						},
+						...(survived
+							? [
+									{
+										runner_id: candidate.runnerId,
+										role: "candidate",
+										retired_at: 0,
+										stop_state: stop,
+										stop_started_at: 0,
+									},
+								]
+							: []),
+					];
+					// TERM is ignored, so the Stop escalates at its window end, 4 s;
+					// a Stop that observes exit is Gone and its row is pruned at once.
+					expect(timeline).toEqual([
+						{ at: 0, sendDone: false, stops: stops("Escalating") },
+						{ at: 1000, sendDone: false, stops: stops("Escalating") },
+						{ at: 2000, sendDone: false, stops: stops("Escalating") },
+						{ at: 3000, sendDone: false, stops: stops("Escalating") },
+						{ at: 3999, sendDone: false, stops: stops("Escalating") },
+						{ at: 4000, sendDone: false, stops: stops("Escalated") },
+					]);
+					// The old runner still serves, so the gate never names a predecessor.
+					expect(parks).toEqual([]);
 					f.processes.delete(100_088);
 					yield* Deferred.fail(f.pending, {
 						...runnerFailure("test", "Finish test send"),
 						replied: true,
 					});
 					yield* Fiber.await(sending);
-					yield* TestClock.adjust("4 seconds");
 					expect(staleOutputs).toEqual([]);
 					expect(background?.tasks[0]?.id).toBe("active");
 					expect(owner).toBe(old.runnerId);
@@ -6672,8 +6752,36 @@ for (const survived of [false, true])
 							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'candidate-run'`,
 						).toEqual([{ status: "running" }]);
 					}
-				}),
-			),
+				}).pipe(
+					Effect.onExit((exit) =>
+						Exit.isSuccess(exit)
+							? Effect.void
+							: Effect.sync(() => {
+									const directory =
+										process.env["CONDUIT_RUNNER_EVIDENCE_DIR"] ??
+										join(tmpdir(), "conduit-runner-evidence");
+									mkdirSync(directory, { recursive: true });
+									writeFileSync(
+										join(
+											directory,
+											`starting-candidate-survived-${survived}-${process.pid}-${Date.now()}.json`,
+										),
+										JSON.stringify(
+											{
+												survived,
+												cause: Cause.pretty(exit.cause),
+												parks,
+												timeline,
+											},
+											null,
+											2,
+										),
+									);
+								}),
+					),
+				),
+			);
+		},
 	);
 
 it.effect(
