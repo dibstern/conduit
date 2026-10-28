@@ -33,7 +33,7 @@ export type { InputDraftKey } from "../../../contracts/ws-rpc.js";
 export interface DraftChange {
 	readonly write: Effect.Effect<
 		void,
-		DraftAttachmentMissing,
+		DraftAttachmentMissing | SqlError,
 		SqlClient.SqlClient
 	>;
 	readonly publish: Effect.Effect<void>;
@@ -78,21 +78,16 @@ export interface InputDrafts {
 		ids: readonly string[],
 		refs: readonly AttachmentRef[],
 	) => DraftChange;
+	/**
+	 * Return a send's attachments, and with `text` a refused send's text ahead of
+	 * any newer session draft, to its composer; the push carries it as `restored`.
+	 */
 	readonly restoreChange: (
 		key: InputDraftKey,
 		inputId: string,
 		refs: readonly AttachmentRef[],
+		text?: string,
 	) => DraftChange;
-	/**
-	 * Return a refused send to its session's composer, text and attachments,
-	 * without overwriting a newer draft.
-	 */
-	readonly restore: (
-		sessionId: string,
-		inputId: string,
-		text: string,
-		refs: readonly AttachmentRef[],
-	) => Effect.Effect<void>;
 	readonly claim: (
 		draftId: string,
 		projectId: string,
@@ -244,7 +239,7 @@ export const makeInputDrafts: Effect.Effect<
 			}
 			return (yield* readRow(key)) !== undefined;
 		});
-	const publishDraft = (key: InputDraftKey, from?: string) =>
+	const publishDraft = (key: InputDraftKey, from?: string, restored?: string) =>
 		Effect.gen(function* () {
 			const row = yield* readRow(key).pipe(Effect.orDie);
 			const liveAttachments = yield* snapshotAttachments(key).pipe(
@@ -257,6 +252,7 @@ export const makeInputDrafts: Effect.Effect<
 					text: row?.text ?? "",
 					attachments: liveAttachments,
 					...(from === undefined ? {} : { from }),
+					...(restored === undefined ? {} : { restored }),
 					...("draft" in key && row ? { projectId: row.project_id } : {}),
 				},
 			});
@@ -508,60 +504,39 @@ export const makeInputDrafts: Effect.Effect<
 				}),
 			),
 		}),
-		restoreChange: (key, inputId, refs) => ({
-			write: Effect.gen(function* () {
-				const actualKey = yield* resolveKey(key).pipe(Effect.orDie);
-				if (!(yield* ensureDraft(actualKey).pipe(Effect.orDie))) return;
-				yield* restoreAttachments(actualKey, inputId, refs).pipe(Effect.orDie);
-			}),
-			publish: snapshotGate.withPermits(1)(
-				Effect.gen(function* () {
-					yield* publishDraft(yield* resolveKey(key).pipe(Effect.orDie));
-				}),
-			),
-		}),
-		restore: (sessionId, inputId, text, refs) =>
-			Effect.gen(function* () {
-				const key = { session: sessionId };
-				const restored = yield* sql.withTransaction(
-					Effect.gen(function* () {
-						const rows = yield* sql<{
-							text: string;
-						}>`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at)
+		restoreChange: (key, inputId, refs, text) => {
+			let restored: string | undefined;
+			return {
+				write: Effect.gen(function* () {
+					const actualKey = yield* resolveKey(key);
+					if (text !== undefined && "session" in actualKey) {
+						const rows =
+							yield* sql`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at)
 							SELECT id, project_id, 'session', ${text}, ${Date.now()}
-							FROM sessions WHERE id = ${sessionId}
+							FROM sessions WHERE id = ${actualKey.session}
 							ON CONFLICT (draft_key) DO UPDATE SET
 								text = excluded.text || CASE WHEN input_drafts.text != '' AND input_drafts.text != excluded.text
 									THEN '\n\n' || input_drafts.text ELSE '' END,
 								updated_at = excluded.updated_at
 							WHERE input_drafts.kind = 'session' AND input_drafts.promoted_session_id IS NULL
-							RETURNING text`;
-						if (rows[0]) yield* restoreAttachments(key, inputId, refs);
-						return rows[0]?.text;
-					}),
-				);
-				if (restored === undefined) return;
-				yield* snapshotGate.withPermits(1)(
+							RETURNING draft_key`;
+						if (rows.length === 0) return;
+						restored = text;
+					}
+					if (!(yield* ensureDraft(actualKey))) return;
+					yield* restoreAttachments(actualKey, inputId, refs);
+				}),
+				publish: snapshotGate.withPermits(1)(
 					Effect.gen(function* () {
-						const attachments = yield* snapshotAttachments(key);
-						yield* PubSub.publish(changes, {
-							key,
-							envelope: {
-								_tag: "draft",
-								text: restored,
-								attachments,
-								restored: text,
-							},
-						});
+						yield* publishDraft(
+							yield* resolveKey(key).pipe(Effect.orDie),
+							undefined,
+							restored,
+						);
 					}),
-				);
-			}).pipe(
-				Effect.catch((cause) =>
-					Effect.logError(
-						`Could not restore input draft ${sessionId}: ${cause}`,
-					),
 				),
-			),
+			};
+		},
 		claim: (draftId, projectId) =>
 			sql<{ text: string }>`INSERT INTO input_drafts
 				(draft_key, project_id, kind, text, updated_at, promoted_session_id)

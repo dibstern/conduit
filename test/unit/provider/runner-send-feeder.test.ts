@@ -9,49 +9,54 @@ import {
 import type { RunRelease } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { makeRunnerSendFeeder } from "../../../src/lib/provider/runner/runner-send-feeder.js";
 
-it.effect("settles a defective item and keeps serving the same session", () =>
-	Effect.gen(function* () {
-		const settled = yield* Deferred.make<void>();
-		const failures: string[] = [];
-		const writes: string[] = [];
-		const feeder = yield* makeRunnerSendFeeder({
-			hold: (input) =>
-				input.runId === "bad"
-					? Effect.die("broken hold")
-					: Effect.succeed({
-							_tag: "Held" as const,
-							runner: "runner",
-							transmission: 1,
-						}),
-			start: () => Effect.void,
-			release: () => Effect.void,
-			failed: (input) =>
-				Effect.sync(() => {
-					failures.push(input.runId);
-				}).pipe(Effect.andThen(Deferred.succeed(settled, undefined))),
-			settled: (input) =>
-				input.runId === "bad" ? Deferred.await(settled) : Effect.never,
-		});
-		const bad = yield* feeder
-			.send({ sessionId: "s", runId: "bad", commandId: "bad" }, () =>
-				Effect.die("bad item cannot transmit"),
-			)
-			.pipe(Effect.forkChild);
-		yield* TestClock.adjust(0);
-		const good = yield* feeder
-			.send({ sessionId: "s", runId: "good", commandId: "good" }, () =>
-				Effect.sync(() => {
-					writes.push("good");
-					return undefined;
-				}),
-			)
-			.pipe(Effect.forkChild);
-		yield* TestClock.adjust(0);
-		expect(failures).toEqual(["bad"]);
-		expect(writes).toEqual(["good"]);
-		expect(bad.pollUnsafe()?._tag).toBe("Success");
-		expect(good.pollUnsafe()?._tag).toBe("Success");
-	}).pipe(Effect.scoped),
+it.effect(
+	"surfaces a defective item without a terminal and keeps serving the session",
+	() =>
+		Effect.gen(function* () {
+			const settled = yield* Deferred.make<void>();
+			const failures: string[] = [];
+			const writes: string[] = [];
+			const feeder = yield* makeRunnerSendFeeder({
+				hold: (input) =>
+					input.runId === "bad"
+						? Effect.die("broken hold")
+						: Effect.succeed({
+								_tag: "Held" as const,
+								runner: "runner",
+								transmission: 1,
+							}),
+				start: () => Effect.void,
+				release: () => Effect.void,
+				failed: (input) =>
+					Effect.sync(() => {
+						failures.push(input.runId);
+					}).pipe(Effect.andThen(Deferred.succeed(settled, undefined))),
+				settled: (input) =>
+					input.runId === "bad" ? Deferred.await(settled) : Effect.never,
+			});
+			const bad = yield* feeder
+				.send({ sessionId: "s", runId: "bad", commandId: "bad" }, () =>
+					Effect.die("bad item cannot transmit"),
+				)
+				.pipe(Effect.exit, Effect.forkChild);
+			yield* TestClock.adjust(0);
+			const good = yield* feeder
+				.send({ sessionId: "s", runId: "good", commandId: "good" }, () =>
+					Effect.sync(() => {
+						writes.push("good");
+						return undefined;
+					}),
+				)
+				.pipe(Effect.forkChild);
+			yield* TestClock.adjust(0);
+			expect(failures).toEqual([]);
+			expect(writes).toEqual(["good"]);
+			expect(bad.pollUnsafe()).toMatchObject({
+				_tag: "Success",
+				value: { _tag: "Failure" },
+			});
+			expect(good.pollUnsafe()?._tag).toBe("Success");
+		}).pipe(Effect.scoped),
 );
 
 for (const outcome of ["Covered", "Exhausted"] as const)
@@ -88,7 +93,10 @@ it.effect("backs off persistent hold failures instead of polling SQLite", () =>
 			hold: () =>
 				Effect.suspend(() => {
 					holds++;
-					return Effect.fail(runnerFailure("hold", "SQLITE_BUSY"));
+					return Effect.fail({
+						...runnerFailure("hold", "SQLITE_BUSY"),
+						code: "StoreUnavailable",
+					});
 				}),
 			start: () => Effect.void,
 			release: () => Effect.void,
@@ -165,7 +173,10 @@ it.effect("retries a failed hold without reporting a transient outcome", () =>
 					holds++;
 					if (holds === 1) {
 						yield* Deferred.succeed(failed, undefined);
-						return yield* Effect.fail(runnerFailure("hold", "SQLITE_BUSY"));
+						return yield* Effect.fail({
+							...runnerFailure("hold", "SQLITE_BUSY"),
+							code: "StoreUnavailable",
+						});
 					}
 					return { _tag: "Held" as const, runner: "runner", transmission: 1 };
 				}),
@@ -313,39 +324,43 @@ it.effect("restores a released adopted send that has no live caller", () =>
 );
 
 it.effect(
-	"an unserved gate cannot spin when start returns before serving changes",
+	"settles StartLost once when start returns without a serving runner",
 	() =>
 		Effect.gen(function* () {
 			let holds = 0;
 			let starts = 0;
+			const failures: string[] = [];
+			const settled = yield* Deferred.make<void>();
 			const feeder = yield* makeRunnerSendFeeder({
 				hold: () =>
-					Effect.sync(() =>
-						++holds < 4
-							? { _tag: "Unserved" as const }
-							: { _tag: "Held" as const, runner: "runner", transmission: 1 },
-					),
+					Effect.sync(() => {
+						holds++;
+						return { _tag: "Unserved" as const };
+					}),
 				start: () =>
 					Effect.sync(() => {
 						starts++;
 					}),
 				release: () => Effect.void,
-				failed: () => Effect.void,
-
-				settled: () => Effect.never,
+				failed: (_input, failure) =>
+					Effect.sync(() => {
+						failures.push(String(failure.code));
+					}).pipe(Effect.andThen(Deferred.succeed(settled, undefined))),
+				settled: () => Deferred.await(settled),
 			});
 			const sending = yield* feeder
 				.send({ sessionId: "s", runId: "r", commandId: "c" }, () =>
-					Effect.succeed(undefined),
+					Effect.die("unheld send cannot transmit"),
 				)
 				.pipe(Effect.forkChild);
 			yield* TestClock.adjust(0);
-			expect({ holds, starts }).toEqual({ holds: 2, starts: 1 });
-			for (let attempt = 0; attempt < 3; attempt++)
-				yield* TestClock.adjust("150 millis");
-			yield* TestClock.adjust("1 second");
 			yield* Fiber.join(sending);
-			expect({ holds, starts }).toEqual({ holds: 4, starts: 3 });
+			yield* TestClock.adjust("30 seconds");
+			expect({ holds, starts, failures }).toEqual({
+				holds: 2,
+				starts: 1,
+				failures: ["runner_start_lost"],
+			});
 		}).pipe(Effect.scoped),
 );
 

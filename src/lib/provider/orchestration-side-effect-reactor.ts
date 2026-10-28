@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
 	Clock,
-	type Context,
+	Context,
 	Data,
 	Duration,
 	Effect,
@@ -11,6 +11,7 @@ import {
 	Ref,
 	Schedule,
 	Schema,
+	Scope,
 	Semaphore,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -30,7 +31,10 @@ import {
 } from "../domain/daemon/Services/secret-answers.js";
 import { mark } from "../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
-import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
+import {
+	type InputDrafts,
+	InputDraftsTag,
+} from "../domain/relay/Services/input-drafts.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { PROCESSING_TIMEOUT_DURATION } from "../domain/relay/Services/session-overrides-state.js";
 import * as Failure from "../effect/failure-classification.js";
@@ -71,7 +75,18 @@ import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
 import { resolveTurnImages } from "./resolve-turn-images.js";
 import { RunnerProviderInstance } from "./runner/runner-provider-instance.js";
-import { settleRunnerCommandReply } from "./runner/runner-recovery.js";
+import {
+	classify,
+	retrySettlementWrite,
+	type SettlementTx,
+	settleSend,
+	terminalTurnResult,
+} from "./runner/send-settlement.js";
+import {
+	LegacySendKey,
+	settleDirectSend,
+	settleLegacySend,
+} from "./runner/send-settlement-outbox.js";
 import type { SessionFailure } from "./runner/session-runner.js";
 import { legacyStopOwnersQuery, stopCovers } from "./session-run-settlement.js";
 import type {
@@ -216,6 +231,7 @@ type ProviderCommandExecutionError =
 	| ProviderInstanceFailure;
 
 export interface ProviderSideEffectReactorOptions {
+	readonly scope?: Scope.Scope;
 	readonly projectId?: string;
 	readonly secretAnswers?: SecretAnswers["Service"];
 	readonly sql: SqlClient.SqlClient;
@@ -300,6 +316,9 @@ export class ProviderSideEffectReactor {
 	private readonly liveCommands = new Set<string>();
 	private readonly drainingSessions = new Set<string>();
 	private readonly admission = Semaphore.makeUnsafe(1);
+	private retryWake:
+		| { readonly due: number; fiber?: Fiber.Fiber<void, never> }
+		| undefined;
 
 	constructor(private readonly options: ProviderSideEffectReactorOptions) {}
 
@@ -434,6 +453,8 @@ export class ProviderSideEffectReactor {
 					.pipe(Effect.mapError(storeFailure("cancelInactiveControls")));
 			}
 			const heads = yield* this.nextPendingRequests();
+			// Arm before running heads too: a held turn can outlast a later retryAt.
+			yield* this.armRetryWake(makeInteractions);
 			yield* Effect.forEach(
 				heads,
 				(head) =>
@@ -476,7 +497,52 @@ export class ProviderSideEffectReactor {
 					),
 				{ concurrency: Math.max(1, heads.length), discard: true },
 			);
+			yield* this.armRetryWake(makeInteractions);
 		});
+	}
+
+	private armRetryWake(
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
+		return this.admission.withPermit(
+			Effect.gen({ self: this }, function* () {
+				const currentScope = yield* Effect.serviceOption(Scope.Scope);
+				const scope =
+					this.options.scope ??
+					(Option.isSome(currentScope) ? currentScope.value : undefined);
+				if (!scope) return;
+				const now = yield* this.currentTimeMillis();
+				const [next] = yield* this.options.sql<{
+					due: number | null;
+				}>`SELECT MIN(next_attempt_at) AS due
+				FROM provider_command_outbox WHERE status = 'retryable_failed' AND next_attempt_at > ${now}
+					AND (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})`.pipe(
+					Effect.mapError(storeFailure("scheduleRetry")),
+				);
+				const due = next?.due ?? undefined;
+				if (due === this.retryWake?.due) return;
+				if (this.retryWake?.fiber) yield* Fiber.interrupt(this.retryWake.fiber);
+				this.retryWake = undefined;
+				if (due === undefined) return;
+				const wake: { readonly due: number; fiber?: Fiber.Fiber<void, never> } =
+					{ due };
+				this.retryWake = wake;
+				wake.fiber = yield* Effect.forkIn(
+					Effect.sleep(due - now).pipe(
+						Effect.andThen(
+							Effect.sync(() => {
+								if (this.retryWake === wake) this.retryWake = undefined;
+							}),
+						),
+						Effect.andThen(this.drain(makeInteractions)),
+						Effect.catch((cause) =>
+							Effect.logError("Provider command retry wake failed", cause),
+						),
+					),
+					scope,
+				);
+			}),
+		);
 	}
 
 	private withDrainSession<A, E, R>(
@@ -767,7 +833,20 @@ export class ProviderSideEffectReactor {
 							const wait = Fiber.join(pending);
 							// Recall only Conduit's queue. Missing acknowledgement is uncertainty,
 							// never permission to cancel native work or retry the command.
-							const recall = Effect.sync(() => cancellation.abort()).pipe(
+							const recall = Effect.gen({ self: this }, function* () {
+								yield* this.recordSendReply(
+									row,
+									undefined,
+									{
+										operation: "awaitIntake",
+										code: "processing_timeout",
+										message: "Input recalled before intake",
+									},
+									yield* this.currentTimeMillis(),
+									"unheld_runner",
+								);
+								cancellation.abort();
+							}).pipe(
 								Effect.andThen(wait),
 								Effect.timeoutOrElse({
 									duration: "1 second",
@@ -909,11 +988,9 @@ export class ProviderSideEffectReactor {
 				const failedAt = yield* this.currentTimeMillis();
 				const cause =
 					failure instanceof ProviderInstanceFailure ? failure.cause : failure;
-				const retryable = failure
-					? isRetryableProviderFailure(failure)
-					: turn?.status !== "steer-declined" &&
-						turn?.error?.retryable === true &&
-						turn.error.retryHandled !== true;
+				const rawFailure = failure
+					? providerSessionFailure(failure)
+					: undefined;
 				const code = failure
 					? providerFailureCode(failure)
 					: (turn?.error?.code ?? turn?.status ?? "provider_failure");
@@ -924,25 +1001,21 @@ export class ProviderSideEffectReactor {
 					typeof cause.message === "string"
 						? cause.message
 						: (turn?.error?.message ?? code);
-				const retryAt = retryable
-					? failedAt +
-						Duration.toMillis(
-							(this.options.retryBackoff ?? defaultRetryBackoff)(
-								row.attempt_count,
-							),
-						)
-					: undefined;
 				if (row.effect_type === "send_turn") {
 					yield* this.recordSendReply(
 						row,
 						turn,
-						failure
-							? { operation: "send-turn", message, code, retryable }
-							: undefined,
+						rawFailure ? { ...rawFailure, message, code } : undefined,
 						failedAt,
-						retryAt,
 					);
-				} else yield* this.writeFailure(row, retryable, code, failedAt);
+				} else {
+					const terminal = terminalTurnResult(turn);
+					const retryable = rawFailure
+						? classify({ _tag: "failed", failure: rawFailure }) === "retryable"
+						: terminal !== undefined &&
+							classify({ _tag: "replied", result: terminal }) === "retryable";
+					yield* this.writeFailure(row, retryable, code, failedAt);
+				}
 			} else if (row.effect_type !== "send_turn")
 				yield* this.markCompleted(row, yield* this.currentTimeMillis());
 			if (
@@ -980,22 +1053,28 @@ export class ProviderSideEffectReactor {
 		result: TurnResult | undefined,
 		failure: SessionFailure | undefined,
 		now: number,
-		retryAt?: number,
+		scope: "all" | "unheld_runner" = "all",
 	) {
 		return Effect.gen({ self: this }, function* () {
 			const followUps: Effect.Effect<void>[] = [];
-			return yield* this.options.write(
-				(project, stamp) =>
-					Effect.gen({ self: this }, function* () {
-						const changed = yield* settleRunnerCommandReply(
-							this.options.sql,
-							row,
-							result,
-							failure,
-							now,
-							true,
-							{
+			yield* retrySettlementWrite(
+				this.options.write(
+					(project, stamp) =>
+						Effect.gen({ self: this }, function* () {
+							followUps.length = 0;
+							const projectContext = this.options.projectContext?.(
+								row.project_key,
+							);
+							const drafts =
+								projectContext === undefined
+									? yield* Effect.serviceOption(InputDraftsTag)
+									: Option.isSome(projectContext)
+										? Context.getOption(projectContext.value, InputDraftsTag)
+										: Option.none<InputDrafts>();
+							const tx: SettlementTx = {
+								sql: this.options.sql,
 								project,
+								stamp,
 								...(this.options.persistUserMessage
 									? { persistUserMessage: this.options.persistUserMessage }
 									: {}),
@@ -1003,42 +1082,95 @@ export class ProviderSideEffectReactor {
 									this.options.registry
 										.getInstance(driver)
 										?.userMessageIdForInput?.(inputId),
-								...(retryAt !== undefined ? { retryAt } : {}),
-								restoreDraft: (sessionId, inputId, text, images) =>
-									this.withProjectContext(
-										row.project_key,
-										Effect.gen(function* () {
-											const drafts =
-												yield* Effect.serviceOption(InputDraftsTag);
-											if (Option.isSome(drafts))
-												yield* drafts.value.restore(
-													sessionId,
-													inputId,
-													text,
-													images,
-												);
-										}),
-									),
-								afterCommit: (effect) => {
-									followUps.push(effect);
-								},
-							},
-						);
-						if (changed)
-							yield* stamp((version) =>
-								this.options.sql<{ id: string }>`
-				UPDATE sessions SET version = ${version} WHERE id = ${row.session_id} RETURNING id`.pipe(
-									Effect.map((rows) => rows.map(({ id }) => id)),
-								),
+								...(Option.isSome(drafts) ? { inputDrafts: drafts.value } : {}),
+								afterCommit: (effect) => followUps.push(effect),
+							};
+							if (!row.run_id) return;
+							const [run] = yield* this.options.sql<{
+								runner_id: string | null;
+								held_transmission: number | null;
+								provider: string;
+							}>`SELECT run.runner_id, run.held_transmission, session.provider FROM provider_runs run
+						JOIN sessions session ON session.id = run.session_id
+						WHERE run.id = ${row.run_id} AND run.session_id = ${row.session_id}
+							AND run.status IN ('pending', 'running')`;
+							if (!run) return;
+							const payload = yield* this.parseSendTurnPayload(row).pipe(
+								Effect.catch(() => Effect.succeed(undefined)),
 							);
-						return changed;
-					}),
-				{
-					afterCommit: Effect.suspend(() =>
-						Effect.forEach(followUps, (effect) => effect, { discard: true }),
-					),
-				},
+							const driver =
+								payload?.account?.driver ??
+								(this.options.registry.getInstance(row.provider_id)
+									? row.provider_id
+									: run.provider);
+							const settlementTx: SettlementTx = {
+								...tx,
+								driverKind: driver,
+							};
+							if (
+								!(
+									this.options.registry.getInstance(driver) instanceof
+									RunnerProviderInstance
+								)
+							) {
+								if (scope === "unheld_runner") return;
+								return yield* settleDirectSend(
+									settlementTx,
+									row,
+									result,
+									failure,
+									now,
+									Duration.toMillis(
+										(this.options.retryBackoff ?? defaultRetryBackoff)(
+											row.attempt_count,
+										),
+									),
+								);
+							}
+							const legacy = yield* LegacySendKey.prove(this.options.sql, row);
+							if (legacy) {
+								if (scope === "unheld_runner") return;
+								return yield* settleLegacySend(
+									settlementTx,
+									legacy,
+									result,
+									failure,
+									now,
+								);
+							}
+							const send = {
+								sessionId: row.session_id,
+								runId: row.run_id,
+								commandId: row.command_id,
+								requestSequence: row.request_sequence,
+								attempt: row.attempt_count,
+							};
+							if (failure) {
+								// A transport failure after a hold is owned by reply recovery or Settle.
+								return yield* settleSend(settlementTx, {
+									_tag: "failed",
+									send,
+									failure,
+									observedAt: now,
+								});
+							}
+							const terminal = terminalTurnResult(result);
+							if (terminal && result?.runnerSend)
+								yield* settleSend(settlementTx, {
+									_tag: "replied",
+									send: { ...send, ...result.runnerSend },
+									result: terminal,
+									observedAt: now,
+								});
+						}),
+					{
+						afterCommit: Effect.suspend(() =>
+							Effect.forEach(followUps, (effect) => effect, { discard: true }),
+						),
+					},
+				),
 			);
+			yield* this.armRetryWake();
 		}).pipe(Effect.mapError(storeFailure("settleRunnerReply")));
 	}
 
@@ -2763,11 +2895,19 @@ export class ProviderSideEffectReactor {
 	}
 }
 
-function isRetryableProviderFailure(error: unknown): boolean {
-	if (error instanceof ProviderInstanceFailure) {
-		return isRecord(error.cause) && error.cause["retryable"] === true;
-	}
-	return isRecord(error) && error["retryable"] === true;
+function providerSessionFailure(error: unknown): SessionFailure {
+	const cause = error instanceof ProviderInstanceFailure ? error.cause : error;
+	return {
+		operation: "send-turn",
+		message:
+			isRecord(cause) && typeof cause["message"] === "string"
+				? cause["message"]
+				: String(cause),
+		code: providerFailureCode(error),
+		...(isRecord(cause) && typeof cause["retryable"] === "boolean"
+			? { retryable: cause["retryable"] }
+			: {}),
+	};
 }
 
 function providerFailureCode(error: unknown): string {

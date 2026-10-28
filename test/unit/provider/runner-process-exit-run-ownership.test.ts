@@ -1146,7 +1146,16 @@ effectIt.effect(
 					}),
 					undefined,
 				);
-				expect(target.pollUnsafe()).toEqual(Exit.succeed(result));
+				expect(target.pollUnsafe()).toEqual(
+					Exit.succeed({
+						...result,
+						runnerSend: {
+							runnerId: yield* runner.getControlProcessIdEffect?.("s") ??
+								Effect.die("Missing runner identity"),
+							transmission: 1,
+						},
+					}),
+				);
 			}),
 		).pipe(
 			Effect.provide(

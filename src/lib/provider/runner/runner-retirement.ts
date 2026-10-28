@@ -15,6 +15,7 @@ import {
 } from "./runner-receipts.js";
 import type { RunnerProcessTable } from "./runner-registry.js";
 import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
+import { toStoreFault } from "./send-settlement.js";
 import type { SessionFailure } from "./session-runner.js";
 
 export type RunnerStop =
@@ -686,13 +687,17 @@ export const makeRunnerStopReconciler = (options: {
 			): Effect.Effect<void, SessionFailure> =>
 				Effect.gen(function* () {
 					if (options.receipts)
-						yield* options.receipts
-							.register(runnerId, identity, role)
-							.pipe(
-								Effect.mapError((cause) =>
-									runnerFailure("register runner", cause),
-								),
-							);
+						yield* options.receipts.register(runnerId, identity, role).pipe(
+							Effect.mapError((cause) => {
+								const fault = toStoreFault(cause);
+								return {
+									...runnerFailure("register runner", cause),
+									code: fault._tag,
+									retryable: fault._tag === "StoreUnavailable",
+									cause: fault,
+								};
+							}),
+						);
 					else {
 						const current = serving(identity.sessionId);
 						if (

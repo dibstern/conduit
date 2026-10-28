@@ -53,20 +53,26 @@ describe("built runner startup deadlines", () => {
 			evidence["turn"] = turn;
 			evidence["parentOutcome"] =
 				turn.done["attention"] === "error" ? "turn-failed" : "turn-completed";
-			expect(turn.chunks.join("")).toBe(
-				responseChunks("startup-deadline-turn").join(""),
-			);
 			expect(turn.done["status"]).toBe("idle");
-			expect(turn.done["attention"]).not.toBe("error");
-			expect(
-				harness.marks.filter(
-					(mark) =>
-						mark.kind === "enqueue" && mark.prompt === "startup-deadline-turn",
-				),
-			).toHaveLength(1);
-			expect(JSON.stringify(await browser.history(sessionId))).not.toContain(
-				"Runner startup timed out",
+			const enqueues = harness.marks.filter(
+				(mark) =>
+					mark.kind === "enqueue" && mark.prompt === "startup-deadline-turn",
 			);
+			const history = JSON.stringify(await browser.history(sessionId));
+			if (mode === "queued") {
+				expect(turn.chunks.join("")).toBe(
+					responseChunks("startup-deadline-turn").join(""),
+				);
+				expect(turn.done["attention"]).not.toBe("error");
+				expect(enqueues).toHaveLength(1);
+				expect(history).not.toContain("Runner startup timed out");
+			} else {
+				// An unflagged startup rejection settles once, without a resend.
+				expect(turn.chunks).toEqual([]);
+				expect(turn.done["attention"]).toBe("error");
+				expect(enqueues).toHaveLength(0);
+				expect(history).toContain("Runner startup timed out");
+			}
 			const proof = () =>
 				readFileSync(
 					join(harness?.root ?? "", "runner-startup-evidence.jsonl"),

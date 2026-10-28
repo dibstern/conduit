@@ -1,4 +1,5 @@
 import {
+	Clock,
 	Context,
 	Data,
 	Effect,
@@ -14,6 +15,10 @@ import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
 import { EventRetentionSchedulerTag } from "../../domain/persistence/Services/event-retention-scheduler.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
+import {
+	type StoreFault,
+	settleSend,
+} from "../../provider/runner/send-settlement.js";
 import {
 	runSendCommandIdQuery,
 	stopCovers,
@@ -74,7 +79,10 @@ export class HoldCommandIdMismatch extends Data.TaggedError(
 	}
 }
 
-export type HoldFailed = CommitAndSignalFailure | HoldCommandIdMismatch;
+export type HoldFailed =
+	| CommitAndSignalFailure
+	| HoldCommandIdMismatch
+	| StoreFault;
 
 /** Generic final authorization supplied by the owner of a bounded write. */
 export const currentWriteAuthorization = Context.Reference<
@@ -205,6 +213,7 @@ export interface CommitAndSignal {
 		readonly sessionId: string;
 		readonly runId: string;
 		readonly commandId: string;
+		readonly observedAt?: number;
 	}) => Effect.Effect<Hold, HoldFailed>;
 
 	/** Release evidence and any resulting serving-runner Stop share this write. */
@@ -735,9 +744,11 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 						return { released, stop: serving ? yield* stop : undefined };
 					}),
 				),
-			holdRun: (input: Parameters<CommitAndSignal["holdRun"]>[0]) =>
-				write<Hold, HoldFailed, never>((project) =>
+			holdRun: (input: Parameters<CommitAndSignal["holdRun"]>[0]) => {
+				return write<Hold, HoldFailed, never>((project, stamp) =>
 					Effect.gen(function* () {
+						const observedAt =
+							input.observedAt ?? (yield* Clock.currentTimeMillis);
 						const [owner] = yield* sql<{
 							id: string;
 							provider: string;
@@ -773,23 +784,31 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 						const commandId = input.commandId;
 						const dispatchable =
 							owner.status === "pending" || owner.status === "running";
+						const [command] = yield* sql<{
+							request_sequence: number;
+							attempt_count: number;
+						}>`SELECT request_sequence, attempt_count FROM provider_command_outbox
+							WHERE session_id = ${input.sessionId} AND command_id = ${commandId}
+								AND run_id = ${owner.id} AND effect_type = 'send_turn'
+							ORDER BY request_sequence DESC LIMIT 1`;
+						const send = command
+							? {
+									sessionId: input.sessionId,
+									runId: owner.id,
+									commandId,
+									requestSequence: command.request_sequence,
+									attempt: command.attempt_count,
+								}
+							: undefined;
 						if (yield* stopCovers(sql, input.sessionId, owner.id)) {
-							if (owner.runner_id === null && dispatchable)
-								yield* project(
-									yield* eventStore.appendBatch([
-										canonicalEvent(
-											"turn.interrupted",
-											input.sessionId,
-											{
-												messageId: "",
-												reason: "Stopped before delivery",
-											},
-											{
-												provider: owner.provider,
-												metadata: { runId: owner.id },
-											},
-										),
-									]),
+							if (send && owner.runner_id === null && dispatchable)
+								yield* settleSend(
+									{ sql, project, stamp },
+									{
+										_tag: "covered",
+										send,
+										observedAt,
+									},
 								);
 							return { _tag: "Covered" };
 						}
@@ -806,21 +825,20 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 								AND json_valid(data) AND json_extract(data, '$.commandId') = ${commandId}`;
 						const transmission = (count?.n ?? 0) + 1;
 						if (transmission > 5) {
-							yield* project(
-								yield* eventStore.appendBatch([
-									canonicalEvent(
-										"turn.error",
-										input.sessionId,
-										{
-											messageId: "",
-											error: "Provider send attempts exhausted",
+							if (send)
+								yield* settleSend(
+									{ sql, project, stamp },
+									{
+										_tag: "failed",
+										send,
+										observedAt,
+										failure: {
+											operation: "holdRun",
+											message: "Provider send attempts exhausted",
 											code: "provider_send_attempts_exhausted",
-											retryable: false,
 										},
-										{ provider: owner.provider, metadata: { runId: owner.id } },
-									),
-								]),
-							);
+									},
+								);
 							return { _tag: "Exhausted" };
 						}
 						const [serving] = yield* sql<{
@@ -845,7 +863,8 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 						);
 						return { _tag: "Held", runner: serving.runner_id, transmission };
 					}),
-				),
+				);
+			},
 		},
 	);
 

@@ -23,7 +23,7 @@ import {
 	RpcServer,
 } from "effect/rpc";
 import { SqlClient, Statement } from "effect/sql";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { monitorEventLoopBlocks } from "../../../src/lib/domain/daemon/Services/event-loop-delay.js";
 import {
 	ReadRequest,
@@ -387,38 +387,58 @@ describe("slow browser RPC warnings", () => {
 	});
 
 	it("includes the time waiting for the RPC concurrency permit", async () => {
-		await Effect.runPromise(
-			Effect.scoped(
-				Effect.gen(function* () {
-					const firstStarted = yield* Deferred.make<void>();
-					const releaseFirst = yield* Deferred.make<void>();
-					const server = yield* connect(
-						(payload) =>
-							payload.sessionId === "first"
-								? Deferred.succeed(firstStarted, undefined).pipe(
-										Effect.andThen(Deferred.await(releaseFirst)),
-									)
-								: Effect.sleep("30 millis"),
-						{ concurrency: 1 },
-					);
-					yield* server.submit("1", "first");
-					yield* Deferred.await(firstStarted);
-					yield* server.submit("2", "second");
-					expect(yield* Queue.take(server.received)).toBe("1");
-					expect(yield* Queue.take(server.received)).toBe("2");
-					// Start the measured hold only after the second request has arrived.
-					yield* Effect.sleep("30 millis");
-					yield* Deferred.succeed(releaseFirst, undefined);
-					const first = yield* Queue.take(server.warnings);
-					const second = yield* Queue.take(server.warnings);
-					expect(first["requestId"]).toBe("1");
-					expect(second["requestId"]).toBe("2");
-					expect(second["queuedMs"]).toBeGreaterThanOrEqual(20);
-					expect(second["queuedMs"]).toBeGreaterThan(Number(first["queuedMs"]));
-					expect(second["totalMs"]).toBeGreaterThan(Number(second["queuedMs"]));
-				}),
-			),
-		);
+		let elapsedMs = 0;
+		const clock = vi
+			.spyOn(performance, "now")
+			.mockImplementation(() => elapsedMs);
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const firstStarted = yield* Deferred.make<void>();
+						const secondStarted = yield* Deferred.make<void>();
+						const releaseFirst = yield* Deferred.make<void>();
+						const releaseSecond = yield* Deferred.make<void>();
+						const server = yield* connect(
+							(payload) =>
+								Deferred.succeed(
+									payload.sessionId === "first" ? firstStarted : secondStarted,
+									undefined,
+								).pipe(
+									Effect.andThen(
+										Deferred.await(
+											payload.sessionId === "first"
+												? releaseFirst
+												: releaseSecond,
+										),
+									),
+								),
+							{ concurrency: 1 },
+						);
+						yield* server.submit("1", "first");
+						yield* Deferred.await(firstStarted);
+						yield* server.submit("2", "second");
+						expect(yield* Queue.take(server.received)).toBe("1");
+						expect(yield* Queue.take(server.received)).toBe("2");
+						// Advance only at observed receipt and handler boundaries.
+						elapsedMs = 30;
+						yield* Deferred.succeed(releaseFirst, undefined);
+						const first = yield* Queue.take(server.warnings);
+						yield* Deferred.await(secondStarted);
+						elapsedMs = 60;
+						yield* Deferred.succeed(releaseSecond, undefined);
+						const second = yield* Queue.take(server.warnings);
+						expect(first["requestId"]).toBe("1");
+						expect(first["queuedMs"]).toBe(0);
+						expect(second["requestId"]).toBe("2");
+						expect(second["queuedMs"]).toBe(30);
+						expect(second["totalMs"]).toBe(60);
+					}),
+				),
+			);
+		} finally {
+			clock.mockRestore();
+		}
 	});
 
 	it("disables warnings with a zero threshold", async () => {

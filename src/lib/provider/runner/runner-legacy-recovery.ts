@@ -50,7 +50,13 @@ import type {
 	RunnerProviderInstanceDeps,
 } from "./runner-provider-instance.js";
 import { runningRunnerCommands } from "./runner-recovery.js";
-import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
+import {
+	classify,
+	retrySettlementWrite,
+	sendRetryBackoff,
+	toStoreFault,
+} from "./send-settlement.js";
+import { LegacySendKey } from "./send-settlement-outbox.js";
 import type {
 	DurableSessionTurn,
 	SessionCommand,
@@ -173,6 +179,14 @@ export interface LegacyReplayOutcome {
 	readonly nativeResumeFallback: boolean;
 }
 
+const recoveryFailure = (operation: string, cause: unknown): SessionFailure => {
+	const failure = runnerFailure(operation, cause);
+	return failure.retryable === undefined &&
+		toStoreFault(cause)._tag === "StoreUnavailable"
+		? { ...failure, retryable: true }
+		: failure;
+};
+
 /** Main's replay is the owner until its one reply passes common settlement. */
 export const recoverLegacyRunnerCommands = (options: {
 	readonly sql: SqlClient.SqlClient;
@@ -188,6 +202,7 @@ export const recoverLegacyRunnerCommands = (options: {
 	) => Effect.Effect<LegacyReplayOutcome, SessionFailure>;
 	readonly settle: (
 		answer: Extract<RunnerSendAnswer, { readonly status: "finished" }>,
+		key: LegacySendKey,
 	) => Effect.Effect<void, SessionFailure>;
 	readonly release: (commandId: string) => Effect.Effect<void>;
 	readonly closing: () => boolean;
@@ -222,32 +237,56 @@ export const recoverLegacyRunnerCommands = (options: {
 				// only once the attachment has finished its recovery transition.
 				yield* options.ready;
 				if (options.closing()) return;
-				const outcome = yield* Effect.result(
-					Effect.suspend(() => options.replay(row, replayLock)).pipe(
-						Effect.retry({
-							while: (failure) =>
-								!options.closing() && failure.retryable !== false,
-							schedule: runnerRetrySchedule,
-						}),
-					),
-				);
-				if (options.closing()) return;
+				const observed = yield* Effect.gen(function* () {
+					let ordinal = 0;
+					while (!options.closing()) {
+						const live = yield* retrySettlementWrite(
+							Effect.gen(function* () {
+								const [current] =
+									yield* options.sql`SELECT 1 FROM provider_command_outbox command
+									LEFT JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
+									WHERE command.request_sequence = ${row.request_sequence} AND command.project_key = ${row.project_key}
+										AND command.session_id = ${row.session_id} AND command.command_id = ${row.command_id}
+										AND command.attempt_count = ${row.attempt_count} AND command.status = 'running'
+										AND COALESCE(run.joined_into, run.id) = ${row.run_id}`;
+								return (
+									current && (yield* LegacySendKey.prove(options.sql, row))
+								);
+							}),
+						);
+						if (!live || options.closing()) return;
+						const reply = yield* Effect.result(options.replay(row, replayLock));
+						if (
+							reply._tag === "Success" ||
+							classify({ _tag: "failed", failure: reply.failure }) !==
+								"retryable"
+						)
+							return { reply, key: live };
+						yield* Effect.sleep(sendRetryBackoff(++ordinal));
+					}
+					return undefined;
+				});
+				if (!observed || options.closing()) return;
+				const { reply: outcome, key } = observed;
 				yield* options
-					.settle({
-						commandId: row.command_id,
-						attempt: row.attempt_count,
-						status: "finished",
-						nativeResumeFallback:
-							outcome._tag === "Success"
-								? outcome.success.nativeResumeFallback
-								: true,
-						...(outcome._tag === "Success"
-							? outcome.success.result
-								? { result: outcome.success.result }
-								: {}
-							: { failure: outcome.failure }),
-					})
-					.pipe(retryRunnerPersistence);
+					.settle(
+						{
+							commandId: row.command_id,
+							attempt: row.attempt_count,
+							status: "finished",
+							nativeResumeFallback:
+								outcome._tag === "Success"
+									? outcome.success.nativeResumeFallback
+									: true,
+							...(outcome._tag === "Success"
+								? outcome.success.result
+									? { result: outcome.success.result }
+									: {}
+								: { failure: outcome.failure }),
+						},
+						key,
+					)
+					.pipe(retrySettlementWrite);
 				const pending =
 					outcome._tag === "Success" &&
 					(outcome.success.result === undefined ||
@@ -302,6 +341,11 @@ export const replayLegacyRunnerSend = (options: {
 		nativeResumeFallback?: boolean,
 	) => string;
 	readonly send: (
+		commandId: string,
+		command: Extract<SessionCommand, { type: "send-turn" }>,
+		attempt: number,
+	) => Effect.Effect<TurnResult | undefined, SessionFailure>;
+	readonly sendRetained?: (
 		commandId: string,
 		command: Extract<SessionCommand, { type: "send-turn" }>,
 		attempt: number,
@@ -385,21 +429,28 @@ export const replayLegacyRunnerSend = (options: {
 					// The unchanged key makes main's journal answer without running this payload.
 					// No credentials, attachment bytes or provider preparation are needed.
 					const { images: _images, ...turn } = input;
+					const command = {
+						type: "send-turn" as const,
+						sinkId,
+						aborted: false,
+						input: turn,
+					};
 					return yield* options.admitReplay(
 						input,
 						sinkId,
-						options.connection
-							.commandEffect(
-								row.command_id,
-								{ type: "send-turn", sinkId, aborted: false, input: turn },
-								row.attempt_count,
-							)
-							.pipe(
-								Effect.map((result) => ({
-									result,
-									nativeResumeFallback: input.nativeResumeFallback === true,
-								})),
-							),
+						(options.sendRetained
+							? options.sendRetained(row.command_id, command, row.attempt_count)
+							: options.connection.commandEffect(
+									row.command_id,
+									command,
+									row.attempt_count,
+								)
+						).pipe(
+							Effect.map((result) => ({
+								result,
+								nativeResumeFallback: input.nativeResumeFallback === true,
+							})),
+						),
 						true,
 					);
 				}
@@ -444,7 +495,9 @@ export const replayLegacyRunnerSend = (options: {
 							message: cause.message,
 							...(cause._tag === "AttachmentMissing"
 								? { code: "attachment_missing", retryable: false }
-								: {}),
+								: {
+										retryable: toStoreFault(cause)._tag === "StoreUnavailable",
+									}),
 						}),
 					),
 				);
@@ -481,7 +534,7 @@ export const replayLegacyRunnerSend = (options: {
 							})
 							.pipe(
 								Effect.mapError((cause) =>
-									runnerFailure("prepare turn", cause),
+									recoveryFailure("prepare turn", cause),
 								),
 							);
 						const result = yield* options.send(
@@ -622,10 +675,10 @@ export const replayLegacyRunnerSend = (options: {
 			}).pipe(
 				options.replayLock.withPermits(1),
 				Effect.provideService(SqlClient.SqlClient, options.sql),
-				Effect.mapError((cause) => runnerFailure("recover turn", cause)),
+				Effect.mapError((cause) => recoveryFailure("recover turn", cause)),
 			),
 		);
 	}).pipe(
 		Effect.provideService(SqlClient.SqlClient, options.sql),
-		Effect.mapError((cause) => runnerFailure("recover turn", cause)),
+		Effect.mapError((cause) => recoveryFailure("recover turn", cause)),
 	);

@@ -224,6 +224,8 @@ describe("durable run holder", () => {
 				yield* sql`UPDATE claude_runner_cursors SET retired_at = 1`;
 				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, requested_at, updated_at)
 				VALUES (1, 'stop', 'project', 'session', 'claude', 'end_session', '{"stop":{"owners":[{"runId":"run"}]} }', 'completed', 1, 1)`;
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at)
+					VALUES (2, 'send', 'project', 'session', 'claude', 'send_turn', '{"prompt":"hello"}', 'run', 'running', 1, 1)`;
 				for (let n = 0; n < 2; n++)
 					expect(
 						yield* commit.holdRun({
@@ -363,6 +365,8 @@ describe("durable run holder", () => {
 						),
 					]);
 				}
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at)
+					VALUES (1, 'send', 'project', 'session', 'claude', 'send_turn', '{"prompt":"hello"}', 'run-5', 'running', 1, 1)`;
 				yield* sql`UPDATE claude_runner_cursors SET retired_at = 1`;
 				expect(
 					yield* commit.holdRun({

@@ -1,4 +1,4 @@
-import { Context, Effect, Schema } from "effect";
+import { Clock, Context, Effect, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { AccountSchema } from "../../contracts/account.js";
@@ -29,13 +29,17 @@ import {
 	ClaudeConfigDirSchema,
 	configuredClaudeConfigDir,
 } from "../claude/claude-sdk-env.js";
-import { recordClaudeNativeResumeFallback } from "../claude/prepare-turn.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
 import { translateProviderRuntimeEventToDomain } from "../provider-runtime-event-to-domain.js";
 import type { TurnResult } from "../types.js";
 import { runnerFailure, runnerSinkId } from "./runner-protocol.js";
 import type { RunnerRecoveryDependencies } from "./runner-provider-instance.js";
+import {
+	retrySettlementWrite,
+	type SendOutcome,
+	settleSend,
+} from "./send-settlement.js";
 import type { DurableSessionTurn, SessionFailure } from "./session-runner.js";
 
 /** Same-daemon recovery keeps a row while its exact reactor attempt owns it. */
@@ -131,6 +135,7 @@ export const runningRunnerCommands = (
 	sessionId?: string,
 	includeInactive = false,
 	ownerSend?: { readonly runId: string; readonly commandId: string },
+	includeHeld = false,
 ) =>
 	Effect.gen(function* () {
 		const project = yield* Effect.serviceOption(PersistenceProjectTag);
@@ -164,7 +169,9 @@ export const runningRunnerCommands = (
 		LEFT JOIN turns ON turns.session_id = outbox.session_id
 			AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
 		WHERE ${scope} AND ${owner}
-			AND (outbox.status = 'running' OR (${includeInactive}
+			AND (outbox.status = 'running' OR (${includeHeld}
+				AND run.status IN ('pending', 'running') AND run.runner_id IS NOT NULL
+				AND run.held_transmission IS NOT NULL) OR (${includeInactive}
 				AND outbox.status = 'cancelled' AND outbox.error_code = 'project_inactive'
 				AND run.status IN ('pending', 'running')))
 			AND outbox.effect_type = 'send_turn'
@@ -210,7 +217,7 @@ export const runningRunnerCommands = (
 		return commands;
 	});
 
-/** Live replies and reconnect hello settle through the caller's transaction. */
+/** The outbox adapter appends one terminal; projection settles the command. */
 export const settleRunnerCommandReply = (
 	sql: SqlClient.SqlClient,
 	row: Pick<
@@ -227,7 +234,7 @@ export const settleRunnerCommandReply = (
 	result: TurnResult | undefined,
 	failure: SessionFailure | undefined,
 	now: number,
-	retained: boolean,
+	outcome: SendOutcome,
 	options: {
 		readonly project: CommitAndSignalProject;
 		readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
@@ -236,299 +243,59 @@ export const settleRunnerCommandReply = (
 			inputId: string,
 		) => string | undefined;
 		readonly retryAt?: number;
-		readonly restoreDraft?: InputDrafts["restore"];
+		readonly inputDrafts?: Pick<InputDrafts, "restoreChange">;
 		readonly afterCommit?: (effect: Effect.Effect<void>) => void;
-		/** The runner receipt's send identity; live preparation owns its own fallback. */
-		readonly nativeResumeFallback?: boolean;
-		/** Confirmed Gone journal replies also settle the run before the fallback sweep. */
-		readonly settleRun?: boolean;
 		readonly driverKind?: string;
+		readonly processLost?: boolean;
 	},
 ) =>
 	Effect.gen(function* () {
-		const pending =
-			!failure &&
-			(result === undefined ||
-				result.status === "accepted" ||
-				result.status === "joined" ||
-				result.status === "indeterminate");
-		if (pending && !options.settleRun && row.run_id) {
-			// C1 gives held uncertainty solely to reconciler Settle, regardless of
-			// whether it arrived through adoption, a live reply, or owner recovery.
-			const [held] = yield* sql`SELECT 1 FROM provider_runs requested
-				JOIN provider_runs owner ON owner.id = COALESCE(requested.joined_into, requested.id)
-					AND owner.session_id = requested.session_id
-				WHERE requested.id = ${row.run_id} AND requested.session_id = ${row.session_id}
-					AND owner.runner_id IS NOT NULL AND owner.held_transmission IS NOT NULL`;
-			if (held) return false;
-		}
-		if (pending && retained && result?.status !== "indeterminate") return false;
-		const completed = !failure && result?.status === "completed";
-		const retryable =
-			!pending &&
-			!completed &&
-			result?.status !== "steer-declined" &&
-			(failure?.retryable === true ||
-				(result?.error?.retryable === true &&
-					result.error.retryHandled !== true));
-		const code = pending
-			? "delivery_indeterminate"
-			: completed
-				? null
+		if (!row.run_id) return;
+		const completed = outcome === "succeeded";
+		const retryable = outcome === "retryable";
+		const interrupted = outcome === "cancelled";
+		const code = completed
+			? null
+			: interrupted
+				? "interrupted"
 				: String(
 						failure?.code ??
 							result?.error?.code ??
 							result?.status ??
 							"provider_failure",
 					);
-		const nextAttemptAt = retryable
-			? (options.retryAt ??
-				now + Math.min(1000 * 2 ** Math.max(0, row.attempt_count - 1), 30_000))
-			: null;
-		const [eligible] = yield* sql<{
-			payload_json: string;
-		}>`UPDATE provider_command_outbox SET status = status
-			WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
-				AND session_id = ${row.session_id} AND command_id = ${row.command_id}
-				AND status = 'running' AND attempt_count = ${row.attempt_count}
-			RETURNING payload_json`;
-		if (!eligible) return false;
-		const payload =
-			!pending && !completed
-				? yield* Effect.try({
-						try: (): unknown => JSON.parse(eligible.payload_json),
-						catch: (cause) => cause,
-					}).pipe(
-						Effect.flatMap(
-							Schema.decodeUnknownEffect(
-								Schema.Struct({
-									prompt: Schema.String,
-									text: Schema.optionalKey(Schema.String),
-									inputId: Schema.optionalKey(Schema.String),
-									commandId: Schema.optionalKey(Schema.String),
-									userMessageId: Schema.optionalKey(Schema.String),
-									turnId: Schema.optionalKey(Schema.String),
-									continuation: Schema.optionalKey(Schema.Unknown),
-									account: Schema.optionalKey(AccountSchema),
-									instanceId: Schema.optionalKey(Schema.String),
-									clearInheritedGoal: Schema.optionalKey(Schema.Boolean),
-									forkSession: Schema.optionalKey(Schema.Boolean),
-									images: Schema.optionalKey(Schema.Array(AttachmentRefSchema)),
-								}),
-							),
+		const message =
+			failure?.message ?? result?.error?.message ?? code ?? "provider_failure";
+		const payloadResult = !completed
+			? yield* Effect.result(
+					Schema.decodeUnknownEffect(
+						Schema.fromJsonString(
+							Schema.Struct({
+								prompt: Schema.String,
+								text: Schema.optionalKey(Schema.String),
+								inputId: Schema.optionalKey(Schema.String),
+								commandId: Schema.optionalKey(Schema.String),
+								userMessageId: Schema.optionalKey(Schema.String),
+								turnId: Schema.optionalKey(Schema.String),
+								continuation: Schema.optionalKey(Schema.Unknown),
+								account: Schema.optionalKey(AccountSchema),
+								images: Schema.optionalKey(Schema.Array(AttachmentRefSchema)),
+							}),
 						),
-						Effect.orElseSucceed(() => undefined),
-					)
-				: undefined;
-		if (
-			result?.nativeResumeRejected &&
-			payload &&
-			options.nativeResumeFallback === false
-		) {
-			// Older durable inputs did not retain the prepared native-fork flags.
-			// A refused fork must stay fresh even if this fallback never gets a receipt.
-			const [session] = yield* sql<{ forked_from: string | null }>`
-				SELECT forked_from FROM sessions WHERE id = ${row.session_id}`;
-			yield* recordClaudeNativeResumeFallback(sql, {
-				sessionId: row.session_id,
-				instanceId:
-					payload.account?.id ?? payload.instanceId ?? row.provider_id,
-				commandId: row.command_id,
-				requestSequence: row.request_sequence,
-				attempt: row.attempt_count,
-				forkRefused:
-					payload.clearInheritedGoal ||
-					payload.forkSession ||
-					session?.forked_from != null,
-			});
-			yield* sql`UPDATE provider_command_outbox
-				SET status = 'retryable_failed', error_code = NULL,
-					attempt_count = ${row.attempt_count},
-					next_attempt_at = ${now}, updated_at = ${now}
-				WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
-					AND session_id = ${row.session_id} AND command_id = ${row.command_id}
-					AND status = 'running' AND attempt_count = ${row.attempt_count}`;
-			yield* sql`UPDATE command_receipts
-				SET status = 'side_effect_requested', error_code = NULL, error = NULL, updated_at = ${now}
-				WHERE command_id = ${row.command_id} AND project_key = ${row.project_key}
-					AND ${row.request_sequence} = (SELECT MAX(request_sequence) FROM provider_command_outbox
-						WHERE command_id = ${row.command_id} AND project_key = ${row.project_key})`;
-			return true;
-		}
-		if (completed && options.settleRun && row.run_id) {
-			const store = yield* makeEventStoreEffect.pipe(
-				Effect.provideService(SqlClient.SqlClient, sql),
-				Effect.provideService(PersistenceProjectTag, {
-					projectId: row.project_key,
-				}),
-			);
-			const { events } = translateProviderRuntimeEventToDomain({
-				eventId: `provider-command-terminal:${row.request_sequence}:${row.attempt_count}`,
-				type: "turn.completed",
-				providerId: options.driverKind ?? row.provider_id,
-				sessionId: row.session_id,
-				runId: row.run_id,
-				providerRefs: {},
-				rawSource: { kind: "runner.command-reply" },
-				createdAt: now,
-				data: { messageId: `provider-command:${row.command_id}` },
-			});
-			yield* options.project(yield* store.appendBatch(events));
-		}
-		if (!pending && !completed) {
-			const [owner] = yield* sql<{ run_id: string }>`
-				SELECT COALESCE(joined_into, id) AS run_id FROM provider_runs
-				WHERE id = ${row.run_id} AND session_id = ${row.session_id}`;
-			const interrupted =
-				code === "interrupted" || result?.status === "steer-declined";
-			const [placement] = yield* sql<{
-				placed: number;
-				steering: number;
-			}>`SELECT
-				EXISTS (SELECT 1 FROM turns WHERE session_id = ${row.session_id}
-					AND run_id = ${owner?.run_id ?? null}) AS placed,
-				EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${row.session_id}
-					AND input_id = ${row.command_id} AND state = 'steering') AS steering`;
-			const unplacedPayload =
-				options.persistUserMessage &&
-				!placement?.placed &&
-				(!placement?.steering || code === "send_admission_timeout") &&
-				!interrupted
-					? payload
-					: undefined;
-			const message =
-				failure?.message ??
-				result?.error?.message ??
-				code ??
-				"provider_failure";
-			if (owner && unplacedPayload && options.persistUserMessage) {
-				const inputId =
-					unplacedPayload.continuation === true
-						? (unplacedPayload.commandId ?? row.command_id)
-						: (unplacedPayload.inputId ??
-							unplacedPayload.userMessageId ??
-							unplacedPayload.commandId ??
-							unplacedPayload.turnId ??
-							row.command_id);
-				const continuation = unplacedPayload.continuation;
-				const cutOffMessageId =
-					continuation === true
-						? unplacedPayload.userMessageId
-						: typeof continuation === "object" &&
-								continuation !== null &&
-								"cutOffMessageId" in continuation &&
-								typeof continuation.cutOffMessageId === "string"
-							? continuation.cutOffMessageId
-							: undefined;
-				const driver = unplacedPayload.account?.driver ?? row.provider_id;
-				yield* options.persistUserMessage(
-					row.session_id,
-					unplacedPayload.prompt,
-					{
-						projectId: row.project_key,
-						project: options.project,
-						messageId:
-							cutOffMessageId ??
-							options.userMessageIdForInput?.(driver, inputId) ??
-							inputId,
-						inputId,
-						runId: owner.run_id,
-						provider: driver,
-						...(unplacedPayload.images
-							? { images: unplacedPayload.images }
-							: {}),
-						failure: {
-							message,
-							...(code !== null ? { code } : {}),
-							retryable,
-							retryAt: nextAttemptAt ?? undefined,
-						},
-					},
-				);
-			} else if (owner) {
-				const store = yield* makeEventStoreEffect.pipe(
-					Effect.provideService(SqlClient.SqlClient, sql),
-					Effect.provideService(PersistenceProjectTag, {
-						projectId: row.project_key,
-					}),
-				);
-				const { events } = translateProviderRuntimeEventToDomain({
-					eventId: `provider-command-terminal:${row.request_sequence}:${row.attempt_count}`,
-					type: interrupted ? "turn.interrupted" : "turn.error",
-					providerId: row.provider_id,
-					sessionId: row.session_id,
-					runId: owner.run_id,
-					providerRefs: {},
-					rawSource: { kind: "runner.command-reply" },
-					createdAt: now,
-					data:
-						options.settleRun && interrupted
-							? { messageId: "", reason: message }
-							: {
-									messageId: `provider-command:${row.command_id}`,
-									...(interrupted ? { reason: message } : { error: message }),
-									...(code !== null ? { code } : {}),
-									retryable,
-									...(nextAttemptAt !== null ? { retryAt: nextAttemptAt } : {}),
-								},
-				});
-				yield* options.project(yield* store.appendBatch(events));
-			}
-		}
-		const changed = yield* sql`UPDATE provider_command_outbox
-			SET status = ${pending ? "running" : completed ? "completed" : retryable ? "retryable_failed" : "failed"},
-				payload_json = CASE WHEN ${pending || retryable} OR NOT json_valid(payload_json) THEN payload_json ELSE json_remove(payload_json, '$.images') END,
-				error_code = ${code}, next_attempt_at = ${nextAttemptAt}, updated_at = ${now}
-			WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
-				AND session_id = ${row.session_id} AND command_id = ${row.command_id}
-				AND status = 'running' AND attempt_count = ${row.attempt_count}
-			RETURNING command_id`;
-		if (changed.length)
-			yield* sql`UPDATE command_receipts
-			SET status = ${pending ? "side_effect_requested" : completed ? "side_effect_completed" : "side_effect_failed"},
-				error_code = ${code}, error = ${failure ? JSON.stringify(failure) : result?.error ? JSON.stringify(result.error) : null}, updated_at = ${now}
+					)(row.payload_json),
+				)
+			: undefined;
+		// An undecodable payload still settles; it only skips the payload's duties.
+		const payload =
+			payloadResult?._tag === "Success" ? payloadResult.success : undefined;
+		// Receipt and terminal stay in this caller-owned transaction.
+		yield* sql`UPDATE command_receipts
+			SET error = ${failure ? JSON.stringify(failure) : result?.error ? JSON.stringify(result.error) : null}
 			WHERE command_id = ${row.command_id} AND project_key = ${row.project_key}
+				AND status = 'side_effect_requested'
 				AND ${row.request_sequence} = (SELECT MAX(request_sequence) FROM provider_command_outbox
 					WHERE command_id = ${row.command_id} AND project_key = ${row.project_key})`;
-		if (options.settleRun && !pending && row.run_id) {
-			const store = yield* makeEventStoreEffect.pipe(
-				Effect.provideService(SqlClient.SqlClient, sql),
-				Effect.provideService(PersistenceProjectTag, {
-					projectId: row.project_key,
-				}),
-			);
-			const { events } = translateProviderRuntimeEventToDomain({
-				eventId: `provider-command-status:${row.request_sequence}:${row.attempt_count}`,
-				type: "session.status",
-				providerId: row.provider_id,
-				sessionId: row.session_id,
-				runId: row.run_id,
-				providerRefs: {},
-				rawSource: { kind: "runner.command-reply" },
-				createdAt: now,
-				data: { sessionId: row.session_id, status: "idle" },
-			});
-			yield* options.project(yield* store.appendBatch(events));
-		}
-		if (code === "send_admission_timeout" && payload && options.restoreDraft) {
-			const inputId =
-				payload.continuation === true
-					? (payload.commandId ?? row.command_id)
-					: (payload.inputId ??
-						payload.userMessageId ??
-						payload.commandId ??
-						payload.turnId ??
-						row.command_id);
-			options.afterCommit?.(
-				options.restoreDraft(
-					row.session_id,
-					inputId,
-					payload.text ?? payload.prompt,
-					payload.images ?? [],
-				),
-			);
-		}
-		if (completed && result.providerStateUpdates.length) {
+		if (completed && result?.providerStateUpdates.length) {
 			const state = yield* makeProviderStateEffect.pipe(
 				Effect.provideService(SqlClient.SqlClient, sql),
 				Effect.provideService(PersistenceProjectTag, {
@@ -543,7 +310,126 @@ export const settleRunnerCommandReply = (
 				})),
 			);
 		}
-		return true;
+		const inputId = payload
+			? payload.continuation === true
+				? (payload.commandId ?? row.command_id)
+				: (payload.inputId ??
+					payload.userMessageId ??
+					payload.commandId ??
+					payload.turnId ??
+					row.command_id)
+			: row.command_id;
+		const [placement] = yield* sql<{
+			placed: number;
+			shown: number;
+			steering: number;
+		}>`SELECT
+			EXISTS (SELECT 1 FROM turns WHERE session_id = ${row.session_id} AND run_id = ${row.run_id}) AS placed,
+			EXISTS (SELECT 1 FROM messages WHERE session_id = ${row.session_id} AND input_id = ${inputId}) AS shown,
+			EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${row.session_id}
+				AND input_id = ${row.command_id} AND state = 'steering') AS steering`;
+		if (
+			payload &&
+			options.persistUserMessage &&
+			!placement?.placed &&
+			(!placement?.steering || code === "send_admission_timeout") &&
+			!interrupted
+		) {
+			const continuation = payload.continuation;
+			const cutOffMessageId =
+				continuation === true
+					? payload.userMessageId
+					: isRecord(continuation) &&
+							typeof continuation["cutOffMessageId"] === "string"
+						? continuation["cutOffMessageId"]
+						: undefined;
+			const driver = payload.account?.driver ?? row.provider_id;
+			yield* options.persistUserMessage(row.session_id, payload.prompt, {
+				projectId: row.project_key,
+				project: options.project,
+				messageId:
+					cutOffMessageId ??
+					options.userMessageIdForInput?.(driver, inputId) ??
+					inputId,
+				inputId,
+				runId: row.run_id,
+				provider: driver,
+				...(payload.images ? { images: payload.images } : {}),
+			});
+		}
+		// A draft returns only for a message never shown before this settlement (4.8).
+		if (
+			outcome === "permanent" &&
+			payload &&
+			options.inputDrafts &&
+			!placement?.placed &&
+			!placement?.shown &&
+			!placement?.steering
+		) {
+			const change = options.inputDrafts.restoreChange(
+				{ session: row.session_id },
+				inputId,
+				payload.images ?? [],
+				payload.text ?? payload.prompt,
+			);
+			yield* change.write.pipe(Effect.provideService(SqlClient.SqlClient, sql));
+			options.afterCommit?.(change.publish);
+		}
+		const store = yield* makeEventStoreEffect.pipe(
+			Effect.provideService(SqlClient.SqlClient, sql),
+			Effect.provideService(PersistenceProjectTag, {
+				projectId: row.project_key,
+			}),
+		);
+		const { events } = translateProviderRuntimeEventToDomain({
+			eventId: `provider-command-terminal:${row.request_sequence}:${row.attempt_count}`,
+			type: completed
+				? "turn.completed"
+				: interrupted
+					? "turn.interrupted"
+					: "turn.error",
+			providerId: options.processLost
+				? "conduit"
+				: (options.driverKind ?? row.provider_id),
+			sessionId: row.session_id,
+			runId: row.run_id,
+			providerRefs: {},
+			rawSource: {
+				kind: options.processLost
+					? "conduit.session-run-settlement"
+					: "runner.command-reply",
+			},
+			createdAt: now,
+			data: completed
+				? { messageId: `provider-command:${row.command_id}` }
+				: interrupted
+					? { messageId: "", reason: message }
+					: {
+							messageId: options.processLost
+								? ""
+								: `provider-command:${row.command_id}`,
+							error: message,
+							code,
+							retryable,
+							...(retryable && options.retryAt !== undefined
+								? { retryAt: options.retryAt }
+								: {}),
+						},
+		});
+		const idle = options.processLost
+			? translateProviderRuntimeEventToDomain({
+					eventId: `provider-command-idle:${row.request_sequence}:${row.attempt_count}`,
+					type: "session.status",
+					providerId: "conduit",
+					sessionId: row.session_id,
+					runId: row.run_id,
+					providerRefs: {},
+					rawSource: { kind: "conduit.session-run-settlement" },
+					createdAt: now,
+					data: { sessionId: row.session_id, status: "idle" },
+				}).events
+			: [];
+		yield* options.project(yield* store.appendBatch([...events, ...idle]));
 	});
 
 /** Attached runners claim admissions; live retirement cleanup owns its captured runs. */
@@ -610,6 +496,105 @@ export const settleUnclaimedRunnerCommands = <E>(
 				code: "runner_stopped",
 				retryable: false,
 			};
+			const [requested] = yield* sql<{
+				joined_into: string | null;
+			}>`SELECT run.joined_into
+				FROM provider_command_outbox command JOIN provider_runs run
+					ON run.id = command.run_id AND run.session_id = command.session_id
+				WHERE command.request_sequence = ${row.request_sequence} AND command.project_key = ${row.project_key}`;
+			if (
+				row.run_id &&
+				requested?.joined_into === null &&
+				!(yield* legacyRunnerRunQuery(sql, row.session_id, row.run_id))
+			) {
+				const projector = yield* Effect.serviceOption(
+					ProjectionRunnerEffectTag,
+				);
+				if (projector._tag === "None") continue;
+				const eventStore = yield* makeUnboundEventStoreEffect.pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+				);
+				const commit = yield* makeUnboundCommitAndSignal.pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+					Effect.provideService(UnboundEventStoreEffectTag, eventStore),
+					Effect.provideService(ProjectionRunnerEffectTag, projector.value),
+				);
+				const evidence = {
+					_tag: "failed" as const,
+					send: {
+						sessionId: row.session_id,
+						runId: row.run_id,
+						commandId: row.command_id,
+						requestSequence: row.request_sequence,
+						attempt: row.attempt_count,
+					},
+					failure,
+					observedAt: yield* Clock.currentTimeMillis,
+				};
+				const followUps: Effect.Effect<void>[] = [];
+				yield* retrySettlementWrite(
+					commit.write(
+						(project, stamp) =>
+							Effect.gen(function* () {
+								followUps.length = 0;
+								if (
+									ownsPendingSend?.(
+										row.session_id,
+										row.command_id,
+										row.request_sequence,
+										row.attempt_count,
+									)
+								)
+									return;
+								if (
+									ownsRetirementCleanup &&
+									(yield* ownsRetirementCleanup(
+										row.session_id,
+										evidence.send.runId,
+									))
+								)
+									return;
+								if (
+									yield* legacyRunnerRunQuery(
+										sql,
+										row.session_id,
+										evidence.send.runId,
+									)
+								)
+									return;
+								yield* settleSend(
+									{
+										sql,
+										project,
+										stamp,
+										driverKind,
+										...(recovery
+											? {
+													persistUserMessage:
+														recovery.persist.persistUserMessage,
+												}
+											: {}),
+										...(recovery?.inputDrafts
+											? { inputDrafts: recovery.inputDrafts }
+											: {}),
+										afterCommit: (effect) => followUps.push(effect),
+									},
+									evidence,
+								);
+							}),
+						{
+							projectId: row.project_key,
+							afterCommit: Effect.suspend(() =>
+								Effect.forEach(followUps, (effect) => effect, {
+									discard: true,
+								}),
+							),
+						},
+					),
+				);
+				yield* recovery?.wakeReactor ?? Effect.void;
+				continue;
+			}
 			const settled = yield* failTurn(
 				runnerSinkId(
 					row.command_id,

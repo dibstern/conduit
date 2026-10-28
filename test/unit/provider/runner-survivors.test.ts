@@ -87,6 +87,8 @@ const setup = Effect.gen(function* () {
 	);
 	const sql = yield* SqlClient.SqlClient;
 	yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('s', 'test-project', 'claude', 1, 1)`;
+	// A live session has its provider binding, so settlement duties can place its message.
+	yield* sql`INSERT INTO session_providers (id, session_id, provider, activated_at) VALUES ('s', 's', 'claude', 1)`;
 	const processes = new Map<
 		number,
 		{
@@ -2006,8 +2008,16 @@ for (const first of ["send", "Stop"] as const)
 				Effect.gen(function* () {
 					const f = yield* stopIntentFixture;
 					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('racing-run', 's', 'running', 1)`;
+					const payload = JSON.stringify({
+						...f.input,
+						inputId: "input-racing-run",
+						runId: "racing-run",
+						commandAttempt: 1,
+						prompt: "racing-run",
+						history: [],
+					});
 					yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
-					VALUES (1, 'input-racing-run', 'test-project', 's', 'claude', 'send_turn', 'racing-run', '{"sessionId":"s","inputId":"input-racing-run"}', 'running', 1, 1, 1)`;
+					VALUES (1, 'input-racing-run', 'test-project', 's', 'claude', 'send_turn', 'racing-run', ${payload}, 'running', 1, 1, 1)`;
 					if (first === "Stop")
 						yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at)
 						VALUES (2, 'stop-racing-run', 'test-project', 's', 'claude', 'end_session', '{"type":"end_session","sessionId":"s","commandId":"stop-racing-run","stop":{"owners":[{"runId":"racing-run"}],"targets":[],"retained":[]}}', 'running', 1, 2, 2)`;
@@ -3842,11 +3852,20 @@ it.effect(
 						replied: true,
 					}),
 				);
-				expect((yield* Effect.result(f.dispatch("first")))._tag).toBe(
-					"Failure",
-				);
-				const commit = yield* makeCommitAndSignal;
-				yield* commit([
+				// A replied failure is a terminal result value at the manager seam.
+				expect(yield* f.dispatch("first")).toEqual({
+					...f.accepted,
+					status: "error",
+					error: {
+						message: "retry later",
+						code: "provider_retry",
+						retryable: true,
+					},
+					runnerSend: { runnerId: f.connections[0]?.runnerId, transmission: 1 },
+				});
+				// This manager fixture has no reactor. Native projection remains a
+				// terminal source in this phase, so project that one terminal here.
+				yield* (yield* makeCommitAndSignal)([
 					canonicalEvent(
 						"turn.error",
 						"s",
@@ -3859,6 +3878,17 @@ it.effect(
 						{ provider: "claude", metadata: { runId: "first" }, createdAt: 10 },
 					),
 				]);
+				expect(
+					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'first'`,
+				).toEqual([{ status: "error" }]);
+				expect(
+					yield* f.sql`SELECT status, error_code FROM provider_command_outbox WHERE run_id = 'first'`,
+				).toEqual([
+					{ status: "retryable_failed", error_code: "provider_retry" },
+				]);
+				expect(
+					yield* f.sql`SELECT json_extract(data, '$.retryable') AS retryable FROM events WHERE type = 'turn.error' AND json_extract(metadata, '$.runId') = 'first'`,
+				).toEqual([{ retryable: 1 }]);
 				yield* f.seed("second");
 				f.respond(f.complete);
 				yield* f.dispatch("second");
@@ -4965,12 +4995,18 @@ it.effect(
 				yield* TestClock.adjust("12 seconds");
 				yield* Fiber.join(sending);
 				expect(f.delivered).toEqual(["send"]);
-				expect(scans.mock.calls.length).toBe(before);
+				// A successor attachment snapshots only this session's held sends.
+				// The release must not launch the project-wide recovery scan.
+				expect(scans.mock.calls.slice(before)).toEqual([
+					[f.sql, "claude", expect.any(Function), "s", false, undefined, true],
+				]);
 				expect(
 					yield* f.manager.ownsRetirementCleanupEffect?.("s", "run") ??
 						Effect.die("missing retirement ownership seam"),
 				).toBe(false);
-				expect(scans.mock.calls.length).toBe(before);
+				expect(scans.mock.calls.slice(before)).toEqual([
+					[f.sql, "claude", expect.any(Function), "s", false, undefined, true],
+				]);
 			}),
 		),
 );

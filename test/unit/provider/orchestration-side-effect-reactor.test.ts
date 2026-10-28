@@ -453,10 +453,10 @@ describe("ProviderSideEffectReactor", () => {
 				const caller = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
 				yield* TestClock.adjust("1 second");
 				expect(caller.pollUnsafe()).toBeDefined();
-				expect((yield* Fiber.join(caller)).status).toBe("error");
+				expect((yield* Fiber.join(caller)).status).toBe("interrupted");
 				expect(
 					yield* sql`SELECT status, started_at FROM provider_runs`,
-				).toEqual([{ status: "error", started_at: null }]);
+				).toEqual([{ status: "interrupted", started_at: null }]);
 				expect(yield* sql`SELECT status FROM provider_command_outbox`).toEqual([
 					{ status: "failed" },
 				]);
@@ -1003,6 +1003,53 @@ describe("ProviderSideEffectReactor", () => {
 					attempt_count: 2,
 				});
 			}).pipe(Effect.provide(reactorTestLayer)),
+	);
+
+	// S-a: a retry that falls due while another session holds the drain is woken
+	// at its retryAt, not left for the periodic drain.
+	it.effect("wakes a retry that falls due during a held drain", () =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const started = yield* Deferred.make<void>();
+				const finish = yield* Deferred.make<void>();
+				const calls: string[] = [];
+				for (const [commandId, requestSequence, sessionId] of [
+					["first", 10, "session-a"],
+					["other", 30, "session-b"],
+				] as const) {
+					yield* seedSendTurnOutbox(sql, { commandId, requestSequence });
+					yield* sql`UPDATE provider_command_outbox SET session_id = ${sessionId},
+					payload_json = json_set(payload_json, '$.sessionId', ${sessionId}, '$.prompt', ${commandId})
+					WHERE command_id = ${commandId}`;
+					yield* sql`INSERT OR IGNORE INTO sessions (id, project_id, provider, created_at, updated_at)
+						VALUES (${sessionId}, 'test-project', 'claude', 1, 1)`;
+					yield* sql`UPDATE provider_runs SET session_id = ${sessionId} WHERE id = ${`run:${commandId}`}`;
+				}
+				yield* sql`UPDATE provider_command_outbox SET status = 'retryable_failed',
+				attempt_count = 1, next_attempt_at = 1000 WHERE command_id = 'other'`;
+				const reactor = yield* makeReactor({
+					registry: new ProviderRegistry([
+						makeProvider((input) =>
+							Effect.gen(function* () {
+								calls.push(input.prompt);
+								if (input.prompt === "first") {
+									yield* Deferred.succeed(started, undefined);
+									yield* Deferred.await(finish);
+								}
+								return completedTurn;
+							}),
+						),
+					]),
+				});
+				const held = yield* Effect.forkChild(reactor.drain());
+				yield* Deferred.await(started);
+				yield* TestClock.adjust("1 second");
+				expect(calls).toEqual(["first", "other"]);
+				yield* Deferred.succeed(finish, undefined);
+				yield* Fiber.join(held);
+			}),
+		).pipe(Effect.provide(reactorTestLayer)),
 	);
 
 	it.effect("does not overtake an earlier retry that is not due", () =>

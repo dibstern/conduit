@@ -16,6 +16,7 @@ import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-eng
 import { CommandReadModelRepository } from "../../../src/lib/provider/orchestration-read-model.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
 import { settleUnclaimedRunnerCommands } from "../../../src/lib/provider/runner/runner-recovery.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
@@ -43,6 +44,7 @@ it.each([
 		Effect.scoped(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				yield* makeRunnerReceiptStore(sql);
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				const commit = yield* makeCommitAndSignal;
 				yield* commit([
@@ -273,6 +275,7 @@ it.each([
 			Effect.scoped(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
+					yield* makeRunnerReceiptStore(sql);
 					const ingestion = yield* ProviderRuntimeIngestionTag;
 					const commit = yield* makeCommitAndSignal;
 					yield* commit([

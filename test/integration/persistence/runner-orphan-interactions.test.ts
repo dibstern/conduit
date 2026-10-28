@@ -21,6 +21,7 @@ import {
 	makeRunnerProviderInstance,
 	type RunnerRecoveryDependencies,
 } from "../../../src/lib/provider/runner/runner-provider-instance.js";
+import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
 
 // A newer attempt can register a question after recovery snapshots the old
 // command. Rejecting its stale terminal must also preserve the newer waiter.
@@ -44,6 +45,7 @@ it.each([
 				Effect.gen(function* () {
 					yield* (yield* ProjectionRunnerEffectTag).recover();
 					const sql = yield* SqlClient.SqlClient;
+					yield* makeRunnerReceiptStore(sql);
 					const pending = yield* PendingInteractionServiceTag;
 					const ingestion = yield* ProviderRuntimeIngestionTag;
 					const persist = yield* ClaudeEventPersistEffectTag;

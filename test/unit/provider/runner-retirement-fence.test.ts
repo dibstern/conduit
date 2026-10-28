@@ -18,7 +18,7 @@ import {
 	Stream,
 } from "effect";
 import { SqlClient, Statement } from "effect/sql";
-import { SqlError, UnknownError } from "effect/sql/SqlError";
+import { ConnectionError, SqlError, UnknownError } from "effect/sql/SqlError";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
@@ -965,8 +965,38 @@ const s7Fixture = (
 			);
 			return Effect.void;
 		};
+		const reply = (
+			input: Parameters<typeof f.instance.sendTurnEffect>[0],
+			result: TurnResult,
+		) =>
+			Effect.gen(function* () {
+				if (!input.runId) return yield* Effect.die("Missing send run");
+				if (yield* legacyRunnerRunQuery(f.sql, input.sessionId, input.runId))
+					return result;
+				const [command] = yield* f.sql<{
+					command_id: string;
+				}>`SELECT command_id FROM provider_command_outbox
+					WHERE session_id = ${input.sessionId} AND run_id = ${input.runId}
+					ORDER BY request_sequence DESC LIMIT 1`;
+				if (!command) return yield* Effect.die("Missing send command");
+				const hold = yield* commit.holdRun({
+					sessionId: input.sessionId,
+					runId: input.runId,
+					commandId: command.command_id,
+				});
+				if (hold._tag !== "Held")
+					return yield* Effect.die("Missing test transmission");
+				return {
+					...result,
+					runnerSend: {
+						runnerId: hold.runner,
+						transmission: hold.transmission,
+					},
+				};
+			}).pipe(Effect.orDie);
 		return {
 			...f,
+			reply,
 			persist,
 			ingestion,
 			reactor,
@@ -1068,7 +1098,7 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 				expect(f.sendHandles).toHaveLength(answer === "running" ? 1 : 0);
 				const send = vi
 					.spyOn(f.instance, "sendTurnEffect")
-					.mockReturnValue(Effect.succeed(result));
+					.mockImplementation((input) => f.reply(input, result));
 				yield* f.reactor.drain();
 				yield* f.reactor.drain();
 				if (answer === "running" || answer === "uncertain")
@@ -1303,7 +1333,7 @@ it.effect(
 				expect(f.account).toEqual({ acquired: 1, released: 1 });
 				const next = vi
 					.spyOn(f.instance, "sendTurnEffect")
-					.mockReturnValue(Effect.succeed(result));
+					.mockImplementation((input) => f.reply(input, result));
 				yield* f.reactor.drain();
 				yield* f.reactor.drain();
 				expect(next.mock.calls.map(([input]) => input.inputId)).toEqual([
@@ -1355,7 +1385,29 @@ it.effect(
 						completedCommands: [],
 					}),
 				);
-				yield* f.sql`CREATE TEMP TRIGGER s10_fail_cached_reply BEFORE UPDATE ON provider_command_outbox WHEN NEW.command_id='main-race' AND NEW.status='completed' BEGIN SELECT RAISE(ABORT,'S10 cached reply write failed'); END`;
+				const sqlConnection = yield* Effect.scoped(f.sql.reserve);
+				const execute = sqlConnection.execute;
+				let storeAvailable = false;
+				const failedWrite = vi
+					.spyOn(sqlConnection, "execute")
+					.mockImplementation((query, params, transform) =>
+						Effect.suspend(() =>
+							!storeAvailable &&
+							query.includes("UPDATE provider_command_outbox") &&
+							params.includes("completed")
+								? Effect.fail(
+										new SqlError({
+											reason: new ConnectionError({
+												cause: "S10 cached reply write unavailable",
+											}),
+										}),
+									)
+								: execute(query, params, transform),
+						),
+					);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => failedWrite.mockRestore()),
+				);
 				const helloDone = yield* Deferred.make<void>();
 				const releaseHello = yield* Deferred.make<void>();
 				const connect = vi.mocked(f.driver.connect).getMockImplementation();
@@ -1384,7 +1436,7 @@ it.effect(
 				expect(
 					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.error', 'turn.interrupted')`,
 				).toEqual([]);
-				yield* f.sql`DROP TRIGGER s10_fail_cached_reply`;
+				storeAvailable = true;
 				yield* TestClock.adjust("30 seconds");
 				expect(
 					yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id='main-race'`,
@@ -1443,7 +1495,7 @@ for (const binding of ["missing", "released"] as const)
 					} satisfies TurnResult;
 					const send = vi
 						.spyOn(f.instance, "sendTurnEffect")
-						.mockReturnValue(Effect.succeed(result));
+						.mockImplementation((input) => f.reply(input, result));
 					yield* f.reactor.drain();
 					expect(send).not.toHaveBeenCalled();
 					const attachment = f.attachments[0];
@@ -1480,6 +1532,18 @@ for (const scenario of [
 			runRetirement(
 				Effect.gen(function* () {
 					const f = yield* s7Fixture();
+					const committed = yield* Deferred.make<void>();
+					const wake = f.recovery.wakeReactor ?? Effect.void;
+					Object.assign(f.recovery, {
+						wakeReactor: Effect.gen(function* () {
+							yield* wake;
+							const [command] = yield* f.sql<{
+								status: string;
+							}>`SELECT status FROM provider_command_outbox WHERE command_id = 'main-command'`;
+							if (command?.status === "completed")
+								yield* Deferred.succeed(committed, undefined);
+						}).pipe(Effect.orDie),
+					});
 					const attempt =
 						scenario === "attemptless historical completion" ||
 						scenario === "input-keyed live retry"
@@ -1633,7 +1697,7 @@ for (const scenario of [
 						).toEqual([{ status: "running", error_code: null }]);
 						const later = vi
 							.spyOn(f.instance, "sendTurnEffect")
-							.mockReturnValue(Effect.succeed(result));
+							.mockImplementation((input) => f.reply(input, result));
 						yield* f.reactor.drain();
 						expect(later).not.toHaveBeenCalled();
 						yield* f.ingestion.ingest({
@@ -1663,6 +1727,8 @@ for (const scenario of [
 						);
 					}
 					yield* TestClock.adjust(0);
+					if (scenario === "transmitted before start without dispatch")
+						yield* Deferred.await(committed);
 					expect(
 						yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'main-command'`,
 					).toEqual([
@@ -1703,7 +1769,7 @@ for (const scenario of [
 					}
 					const next = vi
 						.spyOn(f.instance, "sendTurnEffect")
-						.mockReturnValue(Effect.succeed(result));
+						.mockImplementation((input) => f.reply(input, result));
 					yield* f.reactor.drain();
 					yield* f.reactor.drain();
 					expect(next.mock.calls.map(([input]) => input.inputId)).toEqual([
@@ -1835,7 +1901,7 @@ for (const current of [true, false])
 									.pipe(
 										Effect.flatMap((value) =>
 											value
-												? Effect.succeed(value)
+												? f.reply(input, value)
 												: Effect.die("missing fallback result"),
 										),
 										Effect.mapError(
@@ -2045,7 +2111,7 @@ for (const finished of [false, true])
 					]);
 					const send = vi
 						.spyOn(f.instance, "sendTurnEffect")
-						.mockReturnValue(Effect.succeed(result));
+						.mockImplementation((input) => f.reply(input, result));
 					yield* f.reactor.drain();
 					yield* f.reactor.drain();
 					expect(send.mock.calls.map(([input]) => input.inputId)).toEqual(
@@ -2474,7 +2540,7 @@ it.effect(
 				const f = yield* s7Fixture();
 				yield* f.seed("refused");
 				const drafts = yield* makeInputDrafts;
-				const restore = vi.spyOn(drafts, "restore");
+				const restore = vi.spyOn(drafts, "restoreChange");
 				const place = vi.spyOn(f.persist, "persistUserMessage");
 				const execute = f.manager.executeEffect.bind(f.manager);
 				vi.spyOn(f.manager, "executeEffect").mockImplementation(
@@ -2490,6 +2556,7 @@ it.effect(
 					yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'refused'`,
 				).toEqual([{ status: "retryable_failed" }]);
 				expect(restore).not.toHaveBeenCalled();
+				expect(yield* drafts.read({ session: "s" })).toBeUndefined();
 				expect(place).not.toHaveBeenCalled();
 				expect(
 					yield* f.reactor
@@ -2498,10 +2565,10 @@ it.effect(
 				).toMatchObject({ status: "error" });
 				expect(place).toHaveBeenCalledTimes(1);
 				expect(restore).toHaveBeenCalledExactlyOnceWith(
-					"s",
+					{ session: "s" },
 					"refused",
-					"text refused",
 					[],
+					"text refused",
 				);
 				expect(yield* drafts.read({ session: "s" })).toBe("text refused");
 				expect(
@@ -5669,12 +5736,12 @@ for (const cleanupFailure of ["deadline", "unavailable services"] as const)
 						runId: "old-run",
 						commandId: "old-command",
 					});
-					const received = yield* Deferred.make<void>();
 					const journal = new RunnerSendJournal(
 						runnerRegistry.runnerDirectory(f.root, f.root),
 						"s",
 						"claude",
 					);
+					const received = yield* Deferred.make<void>();
 					yield* journal
 						.execute(
 							"old-command",
@@ -5748,10 +5815,11 @@ for (const cleanupFailure of ["deadline", "unavailable services"] as const)
 						yield* TestClock.adjust("4 seconds");
 						if (cleanupFailure === "deadline") {
 							yield* Deferred.await(entered);
-							// Stop releases while durable settlement is still blocked.
+							// An explicit stop of a running journal settles the modern owner
+							// send before the blocked legacy ingestion and prompt cleanup.
 							expect(
 								yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
-							).toEqual([{ status: "running" }]);
+							).toEqual([{ status: "interrupted" }]);
 							yield* TestClock.adjust("3 seconds");
 						}
 						expect(
@@ -7642,7 +7710,7 @@ it.effect(
 				yield* f.sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.text', 'original text', '$.images', json(${JSON.stringify([image])}))`;
 				const drafts = yield* makeInputDrafts;
 				Object.assign(f.recovery, { inputDrafts: drafts });
-				const restore = vi.spyOn(drafts, "restore");
+				const restore = vi.spyOn(drafts, "restoreChange");
 				yield* f.hello((hello) => ({
 					...hello,
 					bindings: [],
@@ -7666,10 +7734,10 @@ it.effect(
 				yield* f.recover;
 				yield* f.reactor.drain();
 				expect(restore).toHaveBeenCalledExactlyOnceWith(
-					"s",
+					{ session: "s" },
 					"cached-timeout",
-					"original text",
 					[image],
+					"original text",
 				);
 				expect(yield* drafts.read({ session: "s" })).toBe("original text");
 				expect(
@@ -7701,7 +7769,7 @@ for (const admissionTimeout of [false, true])
 					yield* f.sql`UPDATE provider_command_outbox SET status = 'pending' WHERE command_id = 'socket-next'`;
 					const drafts = yield* makeInputDrafts;
 					Object.assign(f.recovery, { inputDrafts: drafts });
-					const restore = vi.spyOn(drafts, "restore");
+					const restore = vi.spyOn(drafts, "restoreChange");
 					const { makeAttachmentStore } = yield* Effect.promise(
 						() => import("../../../src/lib/persistence/attachment-store.js"),
 					);
@@ -7924,10 +7992,10 @@ for (const admissionTimeout of [false, true])
 					expect(f.sendHandles[0]?.assignment._tag).toBe("Closed");
 					if (admissionTimeout) {
 						expect(restore).toHaveBeenCalledExactlyOnceWith(
-							"s",
+							{ session: "s" },
 							"socket-held",
-							"original socket text",
 							[image],
+							"original socket text",
 						);
 						expect(yield* drafts.read({ session: "s" })).toBe(
 							"original socket text",
@@ -8392,10 +8460,9 @@ it.effect(
 				yield* f.seed("rollback-resume");
 				yield* f.sql`INSERT INTO provider_state (session_id, key, value) VALUES ('s','nativeThread:account','old-cursor')`;
 				yield* f.sql`CREATE TRIGGER abort_requeue BEFORE UPDATE ON provider_command_outbox WHEN NEW.status = 'retryable_failed' BEGIN SELECT RAISE(ABORT, 'probe rollback'); END`;
-				const { settleRunnerCommandReply, runningRunnerCommands } =
-					yield* Effect.promise(
-						() => import("../../../src/lib/provider/runner/runner-recovery.js"),
-					);
+				const { runningRunnerCommands } = yield* Effect.promise(
+					() => import("../../../src/lib/provider/runner/runner-recovery.js"),
+				);
 				const [row] = yield* runningRunnerCommands(
 					f.sql,
 					"claude",
@@ -8403,12 +8470,25 @@ it.effect(
 					"s",
 				);
 				if (!row) return yield* Effect.die("Missing recovery command");
+				const { LegacySendKey, settleLegacySend } = yield* Effect.promise(
+					() =>
+						import(
+							"../../../src/lib/provider/runner/send-settlement-outbox.js"
+						),
+				);
+				const key = yield* LegacySendKey.prove(f.sql, row);
+				if (!key) return yield* Effect.die("Missing legacy recovery key");
 				const commit = yield* makeCommitAndSignal;
 				const exit = yield* Effect.exit(
-					commit.write((project) =>
-						settleRunnerCommandReply(
-							f.sql,
-							row,
+					commit.write((project, stamp) =>
+						settleLegacySend(
+							{
+								sql: f.sql,
+								project,
+								stamp,
+								persistUserMessage: f.persist.persistUserMessage,
+							},
+							key,
 							{
 								status: "error",
 								nativeResumeRejected: true,
@@ -8423,10 +8503,7 @@ it.effect(
 							},
 							undefined,
 							2,
-							false,
 							{
-								project,
-								persistUserMessage: f.persist.persistUserMessage,
 								nativeResumeFallback: false,
 							},
 						),

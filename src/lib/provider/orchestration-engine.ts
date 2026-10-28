@@ -387,6 +387,7 @@ export class OrchestrationEngine {
 					durable.projectKey,
 				),
 				reactor: new ProviderSideEffectReactor({
+					scope: this.commandScope,
 					sql: durable.sql,
 					...(options.attachmentStore
 						? { attachmentStore: options.attachmentStore }

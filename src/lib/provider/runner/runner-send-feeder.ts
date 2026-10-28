@@ -1,4 +1,4 @@
-import { Deferred, Effect, FiberSet } from "effect";
+import { Deferred, Effect, Exit, FiberSet } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
 import type { Hold } from "../../persistence/effect/commit-and-signal.js";
 import { isClaudeResumeRefused } from "../event-sink-errors.js";
@@ -6,7 +6,6 @@ import type { TurnResult } from "../types.js";
 import {
 	runnerCommandReplied,
 	runnerDeliveryEvidence,
-	runnerFailure,
 } from "./runner-protocol.js";
 import type { RunRelease } from "./runner-retirement.js";
 import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
@@ -17,6 +16,8 @@ interface OwnerSend {
 	readonly runId: string;
 	readonly commandId: string;
 	readonly nativeResumeFallback?: boolean;
+	readonly requestSequence?: number;
+	readonly attempt?: number;
 }
 
 type Held = Extract<Hold, { _tag: "Held" }>;
@@ -69,9 +70,7 @@ export const makeRunnerSendFeeder = (options: {
 		const release = (input: RunRelease) =>
 			retryRunnerPersistence(Effect.suspend(() => options.release(input)));
 		const failed = (input: OwnerSend, failure: SessionFailure) =>
-			retryRunnerPersistence(
-				Effect.suspend(() => options.failed(input, failure)),
-			);
+			options.failed(input, failure);
 		const schedule = (item: WaitingSend): void => {
 			let queue = queues.get(item.input.sessionId);
 			if (!queue) {
@@ -102,50 +101,50 @@ export const makeRunnerSendFeeder = (options: {
 							next.cancelledBeforeWrite
 						)
 							continue;
-						const result = yield* Effect.result(
+						const result = yield* Effect.exit(
 							Effect.gen(function* () {
-								const hold = yield* options.hold(next.input);
+								const holdOnce = () =>
+									options.hold(next.input).pipe(
+										Effect.retry({
+											while: (failure) => failure.code === "StoreUnavailable",
+											schedule: runnerRetrySchedule,
+										}),
+									);
+								const hold = yield* holdOnce();
 								if (hold._tag !== "Unserved") return hold;
-								return yield* Effect.gen(function* () {
-									yield* options.start(next.input);
-									return yield* options.hold(next.input);
-								}).pipe(
-									Effect.repeat({
-										while: (next) => next._tag === "Unserved",
-										schedule: runnerRetrySchedule,
-									}),
-								);
-							}).pipe(
-								Effect.retry({
-									while: (failure) => failure.retryable !== false,
-									schedule: runnerRetrySchedule,
-								}),
-								Effect.catchCause((cause) =>
-									failed(
-										next.input,
-										runnerFailure(
-											"feed owner send",
-											Failure.squashCause(cause),
-										),
-									).pipe(Effect.as({ _tag: "Covered" as const })),
-								),
-							),
+								const started = yield* Effect.result(options.start(next.input));
+								if (started._tag === "Failure") {
+									yield* failed(next.input, started.failure);
+									return { _tag: "Covered" as const };
+								}
+								const afterStart = yield* holdOnce();
+								if (afterStart._tag !== "Unserved") return afterStart;
+								yield* failed(next.input, {
+									operation: "start runner",
+									code: "runner_start_lost",
+									message: "Runner exited before accepting the send",
+								});
+								return { _tag: "Covered" as const };
+							}),
 						);
 						if (waiting.get(key(next.input)) !== next) {
-							if (result._tag === "Success" && result.success._tag === "Held")
+							if (result._tag === "Success" && result.value._tag === "Held")
 								yield* release({
 									...next.input,
-									runnerId: result.success.runner,
-									transmission: result.success.transmission,
+									runnerId: result.value.runner,
+									transmission: result.value.transmission,
 									reason: "NotSent",
 								});
 							continue;
 						}
 						if (result._tag === "Failure") {
-							yield* failed(next.input, result.failure);
+							if (Failure.isInterruptedOnly(result.cause))
+								return yield* Effect.interrupt;
+							finish(next);
+							yield* Deferred.done(next.done, Exit.failCause(result.cause));
 							continue;
 						}
-						const hold = result.success;
+						const hold = result.value;
 						if (hold._tag !== "Held") {
 							// The ledger observer completes the caller after its handle
 							// closes. Covered may still belong to a stopping holder.
@@ -221,13 +220,12 @@ export const makeRunnerSendFeeder = (options: {
 								yield* Deferred.succeed(next.done, sent.success);
 							}).pipe(
 								Effect.catchCause((cause) =>
-									failed(
-										next.input,
-										runnerFailure(
-											"transmit owner send",
-											Failure.squashCause(cause),
-										),
-									),
+									Failure.isInterruptedOnly(cause)
+										? Effect.interrupt
+										: Effect.logWarning(
+												"Owner send transmission failed",
+												cause,
+											),
 								),
 							),
 						);

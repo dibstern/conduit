@@ -192,6 +192,11 @@ export interface ProviderStateUpdate {
 
 export interface TurnResult {
 	readonly status: TurnStatus;
+	/** Daemon correlation captured before a runner transmission is written. */
+	readonly runnerSend?: {
+		readonly runnerId: string;
+		readonly transmission: number;
+	};
 	readonly cost: number;
 	readonly tokens: TurnTokens;
 	readonly durationMs: number;

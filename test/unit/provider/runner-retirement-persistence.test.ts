@@ -1,6 +1,11 @@
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer } from "effect";
 import { SqlClient } from "effect/sql";
+import {
+	ConnectionError,
+	ConstraintError,
+	SqlError,
+} from "effect/sql/SqlError";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
@@ -11,7 +16,9 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	makeRunnerReceiptStore,
 	type RunnerRetirement,
+	RunnerRetirementDecodeError,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
+import { makeRunnerStopReconciler } from "../../../src/lib/provider/runner/runner-retirement.js";
 
 const testLayer = Layer.merge(
 	makePersistenceEffectLayer(
@@ -53,6 +60,60 @@ const decodedRetirement = {
 const seedLegacy = (sql: SqlClient.SqlClient, signalled = true) =>
 	sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, retired_at, session_id, pid, start_time, owned_run_ids, signalled, driver_kind)
 	VALUES ('runner', 0, '', 100, 'session', 123, 'process-start', '["owned-run"]', ${signalled ? 1 : 0}, 'cursor')`;
+
+it.effect(
+	"registration distinguishes unavailable storage from corrupt and constrained rows",
+	() =>
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const receipts = yield* makeRunnerReceiptStore(sql);
+			for (const [failure, retryable, code] of [
+				[
+					new SqlError({
+						reason: new ConnectionError({ cause: "temporary outage" }),
+					}),
+					true,
+					"StoreUnavailable",
+				],
+				[
+					new SqlError({
+						reason: new ConstraintError({ cause: "invalid registration" }),
+					}),
+					false,
+					"StoreRejected",
+				],
+				[
+					new RunnerRetirementDecodeError({
+						runnerId: "runner",
+						cause: "corrupt row",
+					}),
+					false,
+					"StoreRejected",
+				],
+			] as const) {
+				const stops = yield* makeRunnerStopReconciler({
+					receipts: { ...receipts, register: () => Effect.fail(failure) },
+					processTable: {
+						inspect: () => ({ state: "gone" }),
+						signal: () => undefined,
+					},
+					committed: () => Effect.void,
+					shutdown: () => Effect.void,
+					settle: () => Effect.succeed(true),
+					evict: () => Effect.void,
+					prune: () => Effect.void,
+					notice: () => Effect.succeed(true),
+				});
+				const result = yield* Effect.result(
+					stops.register("runner", retirement, "serving"),
+				);
+				expect(result._tag).toBe("Failure");
+				if (result._tag === "Failure")
+					expect(result.failure).toMatchObject({ retryable, code });
+				expect(stops.serving("session")).toBeUndefined();
+			}
+		}).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
 
 // Release evidence and retirement must roll back together; nesting the old
 // requestStop wrapper here would fail before reaching the projection handle.
