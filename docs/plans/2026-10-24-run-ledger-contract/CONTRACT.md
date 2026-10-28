@@ -2008,8 +2008,10 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   interrupt while paused) with tasks live or unknown waits with a pending confirm. The interrupt
   deadline never destroys on its own. A confirm must match the latest snapshot; a stale confirm is
   rejected. With no snapshot the UI says "background state unknown" and always asks. A pending
-  confirm names the destruction it gates, its step and the execution label it acts on; confirming
-  issues exactly that step against that label (D29).
+  confirm names the destruction it gates, its step and every execution label it acts on;
+  confirming issues exactly that step against those labels. One step that destroys several
+  member labels (Tombstone cleanup expiry, `project_active` reconciliation) waits on one confirm
+  (D29).
 - `snapshotEntry` is the 1-based count of task-set entries accepted by the session:
   `tasks_snapshot` evidence and `process_started` settlements, excluding older labels. A
   `process_started` that leaves a pending confirm open refreshes it with the new count, so a
@@ -2833,8 +2835,8 @@ port.
 - D25: a Claude wake member leaves at its label's `query_ended` with or without a result, as section 9 already says for `resultReleasesFence` no (9).
 - D26: for OpenCode, a trusted covering idle probe alone is work ended, for start sends and wake executions alike; the table's sequence is the usual path, not a conjunction (3.5, 9).
 - D27: native-command confirmation starts at issue and keeps running while the project is inactive (8.5). Rejected: pausing it while inactive (a second clock rule for a view-only deadline).
-- D28: a turn joining a wake Run under another label is a wake execution of its own: live and a fence member until its own Run-end evidence or coverage; the Tombstone cleanup expiry run- D29: a pending confirm names the destruction it gates (step and target execution label), and confirming issues exactly that; `project_active` reconciliation of a wake Run acts on every execution label still a member (8.3, 8.4). Rejected: confirming against the Run's first label (a joined label's gated destruction would hit the wrong process).
-s fence expiry against every remaining member label (8.3). Rejected: killing the current process at the wake deadline (destruction would depend on arrival order); moving the wake label to the newest (hides work still running under the first label, LI8).
+- D28: a turn joining a wake Run under another label is a wake execution of its own: live and a fence member until its own Run-end evidence or coverage; the Tombstone cleanup expiry runs fence expiry against every remaining member label (8.3). Rejected: killing the current process at the wake deadline (destruction would depend on arrival order); moving the wake label to the newest (hides work still running under the first label, LI8).
+- D29: a pending confirm names the destruction it gates (step and every execution label it acts on), and confirming issues exactly that, so a multi-label step waits on one confirm; `project_active` reconciliation of a wake Run acts on every execution label still a member (8.3, 8.4). Rejected: confirming against the Run's first label (a joined label's gated destruction would hit the wrong process).
 
 ## Appendix B. Old-id mapping
 
