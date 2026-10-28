@@ -11,6 +11,7 @@ import {
 	type SurfaceLevel,
 } from "../utils/turn-stops.js";
 import {
+	isOpenHandBack,
 	type Turn,
 	type TurnPhase,
 	turnLog,
@@ -22,6 +23,7 @@ import {
 	setSessionSurfaceLevel,
 	touchSurfaceSession,
 } from "./message-surfacing.svelte.js";
+import { pendingQuestionFor } from "./permissions.svelte.js";
 import { setTurnMinimised, turnMinimised } from "./turn-minimisation.svelte.js";
 
 export type TurnPanel<Stop extends ShowStop = ShowStop> =
@@ -158,6 +160,7 @@ export interface TurnPanelState<Stop extends ShowStop = ShowStop> {
 	show(stop: Stop): void;
 	usage(): void;
 	qa(): void;
+	hold(): void;
 	makeDefault(): Promise<void>;
 	resetLevel(): void;
 }
@@ -199,9 +202,15 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 				(part) => part.type !== "assistant" || part.surfacingRead === true,
 			),
 	);
+	// An unanswered async question outlives its runner, so it keeps Q&A in view.
+	const openHandBack = $derived(
+		log.handBacks.some((tool) =>
+			isOpenHandBack(tool, pendingQuestionFor(tool.id)),
+		),
+	);
 	const collapsed = $derived(
 		turnMinimised(input.sessionId, input.turn.id) ??
-			(!(phase !== "settled" && hasHandBacks) &&
+			(!((phase !== "settled" && hasHandBacks) || openHandBack) &&
 				(!input.jev ||
 					input.status.turnsOpen === "minimised" ||
 					(input.status.turnsOpen === "auto" &&
@@ -222,7 +231,7 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 						? "qa"
 						: "log";
 			case "settled":
-				return stored?.settled ?? null;
+				return stored?.settled ?? (openHandBack ? "qa" : null);
 			default:
 				return assertNever(phase);
 		}
@@ -344,6 +353,11 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 			if (!hasHandBacks) return;
 			pick("qa");
 			open();
+		},
+		hold() {
+			// Answering changes what Auto sees, so the Turn keeps the view it was answered in.
+			setTurnMinimised(input.sessionId, input.turn.id, false);
+			pick("qa");
 		},
 		async makeDefault() {
 			if (input.sessionId) await makeSurfaceDefault(input.sessionId, saved);

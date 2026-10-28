@@ -3,7 +3,7 @@
 
 <script lang="ts">
 	import type { ToolMessage, QuestionRequest, AskUserQuestion } from "../../types.js";
-	import { permissionsState } from "../../stores/permissions.svelte.js";
+	import { pendingQuestionFor, permissionsState } from "../../stores/permissions.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { fmtDuration, isOpenHandBack } from "../../utils/turns.js";
@@ -66,19 +66,10 @@
 	 * server-side que_ ID), or null if no match.
 	 */
 	const pendingQuestionRequest = $derived.by((): QuestionRequest | null => {
-		// Primary: match by toolUseId (toolu_ callID) — reliable 1:1 correlation
-		const byToolUseId = permissionsState.pendingQuestions.find(
-			(q) => q.toolUseId === message.id
-		);
-		if (byToolUseId) return byToolUseId;
+		const byId = pendingQuestionFor(message.id);
+		if (byId) return byId;
 
-		// Secondary: exact toolId match (for edge cases where toolId = message.id)
-		const byToolId = permissionsState.pendingQuestions.find(
-			(q) => q.toolId === message.id
-		);
-		if (byToolId) return byToolId;
-
-		// Tertiary: content-match against pending questions to find the correct que_ ID.
+		// Fallback: content-match against pending questions to find the correct que_ ID.
 		// Scoped to the viewed session: pending questions outlive switches, and
 		// another session's identical text must not bind (answers go by toolId).
 		const fallbackQuestions = questionDataFromInput;
