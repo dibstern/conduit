@@ -92,6 +92,7 @@
 	type StripInteraction = Parameters<NonNullable<ComponentProps<typeof ActivityStrip>["oninteraction"]>>[0];
 	type CardSlot = NonNullable<ComponentProps<typeof ActivityStrip>["cardSlot"]>;
 	let stripInteraction = $state<StripInteraction>({ hovered: null, scrubbing: false });
+	let stripWidth = $state(0);
 	let citedStep = $state<string | null>(null);
 	let focusUuid = $state<string | null>(null);
 	let panelEl = $state<HTMLDivElement | undefined>();
@@ -201,7 +202,7 @@
 	})) }, surfacingConfig.categorySet, live));
 	const surface = $derived(surfaceTurn({
 		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: numberedMessages.map((part) => feedback.annotate(part)),
-		positions: stripLayout(segment, turn, final, now), categorySet: surfacingConfig.categorySet,
+		positions: stripLayout(segment, turn, final, now, stripWidth), categorySet: surfacingConfig.categorySet,
 		level, view: panel.view.kind === "open" ? panel.view.view : null, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, selection: stripInteraction.scrubbing && stripInteraction.hovered ? { kind: "picked", uuid: stripInteraction.hovered } : selection, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
@@ -568,7 +569,7 @@
 			</div>
 			{#if minimised}
 				<MinimisedTurn>
-					{#snippet strip(preview: Snippet<[SurfacePin]>)}<ActivityStrip {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={openMinimisedMessage} oninteraction={stripChanged} />{/snippet}
+					{#snippet strip(preview: Snippet<[SurfacePin]>)}<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={openMinimisedMessage} oninteraction={stripChanged} />{/snippet}
 				</MinimisedTurn>
 			{:else if surfacingActive}
 				<SurfacingCard view={surface} card={cardSlot.kind === "selected" ? cardSlot.card : null} {counts} {live} {level} overridden={panel.overridden} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
@@ -581,14 +582,14 @@
 					onreset={() => { panel.resetLevel(); selection = { kind: "latest" }; }}
 					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand}>
 					{#snippet strip(cited: string | null, card: Snippet)}
-						<ActivityStrip {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} markers={{ kind: "pins", pins: surface.pins, selected: cardSlot.kind === "selected" ? cardSlot.card.part.uuid : null, thumbX: cardSlot.kind === "selected" ? cardSlot.card.x : null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={pick} onjump={stripJump} oncommand={surfaceCommand} />
+						<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} markers={{ kind: "pins", pins: surface.pins, selected: cardSlot.kind === "selected" ? cardSlot.card.part.uuid : null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={pick} onjump={stripJump} oncommand={surfaceCommand} />
 					{/snippet}
 				</SurfacingCard>
 			{:else}
 			<!-- The phone strip is a 44px tap target with its 4px bar centred; a summary row
 			     under it overlaps that empty area so it sits midway between bar and card edge. -->
 			<div class="md:mt-[7px] {summaryEnabled ? 'max-md:-mb-[18px]' : ''}">
-				<ActivityStrip {turn} {segment} {final} {now} {running} active={citedStep} oninteraction={stripChanged} onjump={stripJump} />
+				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} active={citedStep} oninteraction={stripChanged} onjump={stripJump} />
 			</div>
 			{#if summaryEnabled}{@render summaryPanel(surface, hoverCitation)}{/if}
 			{/if}

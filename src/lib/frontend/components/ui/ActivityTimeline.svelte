@@ -8,7 +8,7 @@
 		| { kind: "dragging"; id: string };
 	export type Markers =
 		| { kind: "dots"; dots: readonly SurfacePin[] }
-		| { kind: "pins"; pins: SurfacePin[]; selected: string | null; thumbX: number | null };
+		| { kind: "pins"; pins: SurfacePin[]; selected: string | null };
 	export type StripInteraction = { hovered: string | null; scrubbing: boolean };
 	export type CardSlot = { kind: "none" } | { kind: "selected"; card: SurfacePin } | { kind: "preview"; card: SurfacePin };
 	const TONES = {
@@ -25,9 +25,10 @@
 	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 	import Button from "./Button.svelte";
 
-	let { segments, seams = [], active = null, markers = { kind: "dots", dots: [] }, cardSlot = { kind: "none" }, card, openAsk = null, belowLevel = false, cited = null, phone = false, preview, sliderText, oninteraction, onpick, onjump, oncommand }: {
+	let { segments, seams = [], width = $bindable(0), active = null, markers = { kind: "dots", dots: [] }, cardSlot = { kind: "none" }, card, openAsk = null, belowLevel = false, cited = null, phone = false, preview, sliderText, oninteraction, onpick, onjump, oncommand }: {
 		segments: readonly { id: string; left: number; width: number; label: string; tone: keyof typeof TONES; running?: boolean }[];
 		seams?: readonly { id: string; left: number; width: number }[];
+		width?: number;
 		active?: string | null;
 		markers?: Markers | undefined;
 		cardSlot?: CardSlot | undefined;
@@ -160,7 +161,7 @@
 </script>
 
 <div class={collapsed ? "minimised-turn" : ""} onpointerleave={() => { if (gesture.kind === "idle") clear(); }} role="group" aria-label={collapsed ? "Minimised turn messages" : "Turn strip"}>
-	<div bind:this={trackEl} class={collapsed ? "minimised-scrub dots" : markers.kind === "pins" ? "surfacing-scrub select-none" : "relative h-[44px] md:h-[16px] min-w-[44px] cursor-pointer touch-pan-y select-none outline-none focus-visible:ring-1 focus-visible:ring-accent"}
+	<div bind:this={trackEl} bind:clientWidth={width} class={collapsed ? "minimised-scrub dots" : markers.kind === "pins" ? "surfacing-scrub select-none" : "relative h-[44px] md:h-[16px] min-w-[44px] cursor-pointer touch-pan-y select-none outline-none focus-visible:ring-1 focus-visible:ring-accent"}
 		data-testid={collapsed ? "surfacing-minimised-strip" : markers.kind === "pins" ? "surfacing-scrub" : undefined}
 		data-surfacing-region={markers.kind === "pins" ? "strip-overlay" : undefined}
 		role="slider" tabindex="0" aria-label={markers.kind === "pins" ? "Surfaced messages" : `Activity timeline — ${segments.length} steps`}
@@ -183,9 +184,11 @@
 		</div>
 		{/if}
 		<div class={collapsed ? "thin-track surface-strip" : markers.kind === "pins" ? "surface-strip relative h-[16px] min-w-[44px]" : "surface-strip absolute inset-0"} data-testid={collapsed ? "surfacing-thin-track" : undefined} role={markers.kind === "pins" ? "group" : undefined} aria-label={markers.kind === "pins" ? `Activity timeline — ${segments.length} steps` : undefined} bind:this={stripEl}>
-			<div class="absolute top-1/2 inset-x-0 h-[4px] -translate-y-1/2 rounded-[2px] bg-chip" aria-hidden="true"></div>
-			{#each [...segments, ...seams.map((seam) => ({ ...seam, label: "Compaction", tone: "compaction" as const, running: false }))] as segment (segment.id)}
-				<Button variant="ghost" size="content" hoverFill="none" ariaLabel={segment.label} data-step-id={segment.id} class="absolute top-1/2 h-[4px] -translate-y-1/2 rounded-[1px] transition-opacity {TONES[segment.tone]} {segment.running ? 'animate-pulse' : ''} opacity-100" data-active={highlighted === segment.id} style="left:{segment.left}%;width:{segment.width}%;" onclick={(event) => { if (event.detail === 0) { cursor = segment.id; clear(); onjump?.(segment.id); } }}><span class="sr-only">{segment.label}</span></Button>
+			{#each segments as segment (segment.id)}
+				<Button variant="ghost" size="content" hoverFill="none" ariaLabel={segment.label} data-step-id={segment.id} class="absolute top-1/2 h-[4px] -translate-y-1/2 rounded-[1px] transition-opacity {TONES[segment.tone]} {segment.running ? 'live-segment' : ''} opacity-100" data-active={highlighted === segment.id} style="left:{segment.left}%;width:{segment.width}%;" onclick={(event) => { if (event.detail === 0) { cursor = segment.id; clear(); onjump?.(segment.id); } }}><span class="sr-only">{segment.label}</span></Button>
+			{/each}
+			{#each seams as seam (seam.id)}
+				<span data-step-id={seam.id} aria-hidden="true" class="absolute top-1/2 h-[10px] w-[2px] -translate-y-1/2 bg-text-secondary" style:left="{seam.left}%"></span>
 			{/each}
 			{#if markers.kind === "pins" && anchor}<i class="surface-thumb" style:left={anchor}></i>{/if}
 		</div>
@@ -236,11 +239,13 @@
 	.hanging-card.ask { --card-background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); }
 	.card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--card-background); border-top:1px solid var(--color-border); border-left:1px solid var(--color-border); transform:translateX(-50%) rotate(45deg); }
 	.surface-thumb { position:absolute; top:50%; width:3px; height:14px; border-radius:2px; background:var(--color-text); transform:translate(-50%,-50%); pointer-events:none; }
+	.surface-strip :global(.live-segment) { animation:strip-breathe 1.2s ease-in-out infinite; }
+	@keyframes strip-breathe { 50% { opacity:.35; } }
+	@media(prefers-reduced-motion:reduce) { .surface-strip :global(.live-segment) { animation:none; } }
 	.minimised-turn { position:relative; }
 	.minimised-scrub { position:relative; display:block; width:100%; padding:6px 0; border-radius:4px; }
 	.minimised-scrub:focus-visible, :global(.peek:focus-visible) { outline:2px solid var(--color-accent); outline-offset:2px; }
-	.thin-track { height:4px; overflow:hidden; pointer-events:none; }
-	.thin-track :global(> div) { height:4px; }
+	.thin-track { height:4px; pointer-events:none; }
 	.dots .unread-dot { position:absolute; top:50%; width:7px; height:7px; border-radius:50%; background:var(--surface-colour,var(--color-accent)); transform:translate(-50%, -50%); box-shadow:0 0 0 1.5px var(--color-turn-bg); }
 	.dots .unread-dot.read { border:1px solid var(--surface-colour); background:var(--color-turn-bg); }
 	.dots .unread-dot.ask::after { content:""; position:absolute; inset:-4px; border:1px solid var(--color-status-ask); border-radius:50%; opacity:.55; }

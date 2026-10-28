@@ -16,9 +16,12 @@ The entries enumerate locally declared closed unions, booleans and required-prop
 owns the Turn strip, pin chips, collapsed dots, thumb and caret positioning.
 `ActivityStrip` supplies labelled segments from `logSteps(turn)` and separate
 compaction seams. Chat code chooses messages and handles picks.
+The primitive measures the track's `width`; the adapter and Turn share it with
+`stripLayout` so its 2px gaps and seams stay on the same scale as the pins.
 
 `markers` is `{ kind: "dots"; dots }` or
-`{ kind: "pins"; pins; selected; thumbX }`. Only pins can render the thumb.
+`{ kind: "pins"; pins; selected }`. Only pins can render the thumb, derived from
+the card slot.
 The existing `surfacePinRows` helper lays out the pin groups inside the primitive.
 `cardSlot` is `none | selected { card } | preview { card }`, chosen by the
 Turn owner. The `card` snippet fills the selected hanging slot under the strip;

@@ -48,6 +48,22 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Default: Story = {};
 export const Light: Story = { globals: { theme: "light" } };
+export const Compaction: Story = {
+	args: { seams: [{ id: "compacted", left: 54.2, width: 0.2 }] },
+	play: async ({ canvasElement }) => {
+		const seam = canvasElement.querySelector('[data-step-id="compacted"]');
+		if (!seam) throw new Error("Missing compaction seam");
+		await expect(getComputedStyle(seam).width).toBe("2px");
+		await expect(getComputedStyle(seam).height).toBe("10px");
+	},
+};
+export const LiveFade: Story = {
+	play: async ({ canvasElement }) => {
+		const step = canvasElement.querySelector('[data-step-id="edit"]');
+		if (!step) throw new Error("Missing live step");
+		await expect(getComputedStyle(step).animationDuration).toBe("1.2s");
+	},
+};
 export const Keyboard: Story = {
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
@@ -132,7 +148,6 @@ export const Pins: Story = {
 			kind: "pins",
 			pins: messages.pins,
 			selected: "message-1",
-			thumbX: 17,
 		},
 		sliderText: messages.sliderText,
 		onpick: fn(),

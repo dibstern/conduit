@@ -87,6 +87,121 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "assert the compaction seam appearance",
+		match:
+			/^the strip compaction is a 2px secondary-colour mark taller than its bar$/,
+		run: async ({ world }) => {
+			const seam = panel(world.page).locator(
+				'.surface-strip [data-step-id$="/compacted"]',
+			);
+			await expect(seam).toHaveCSS("width", "2px");
+			await expect(seam).toHaveCSS("height", "10px");
+			const paint = await seam.evaluate((element) => {
+				const probe = document.createElement("span");
+				probe.style.backgroundColor = "var(--color-text-secondary)";
+				element.append(probe);
+				const result = {
+					actual: getComputedStyle(element).backgroundColor,
+					expected: getComputedStyle(probe).backgroundColor,
+				};
+				probe.remove();
+				return result;
+			});
+			expect(paint.actual).toBe(paint.expected);
+		},
+	},
+	{
+		name: "assert clear pixel gaps in the activity bar",
+		match: /^the strip segments have 2px clear gaps$/,
+		run: async ({ world }) => {
+			const gaps = await panel(world.page)
+				.locator(".surface-strip")
+				.evaluate((element) => {
+					const boxes = [...element.querySelectorAll("[data-step-id]")]
+						.map((node) => node.getBoundingClientRect())
+						.sort((a, b) => a.left - b.left);
+					const probe = document.createElement("span");
+					probe.style.backgroundColor = "var(--color-chip)";
+					element.append(probe);
+					const chip = getComputedStyle(probe).backgroundColor;
+					probe.remove();
+					return boxes.slice(1).map((box, index) => {
+						const previous = boxes[index];
+						if (!previous) throw new Error("Missing preceding strip step");
+						const under = document.elementFromPoint(
+							(box.left + previous.right) / 2,
+							box.y + box.height / 2,
+						);
+						return {
+							width: box.left - previous.right,
+							background: under ? getComputedStyle(under).backgroundColor : "",
+							chip,
+						};
+					});
+				});
+			expect(gaps.length).toBeGreaterThan(0);
+			for (const gap of gaps) {
+				expect(Math.abs(gap.width - 2)).toBeLessThanOrEqual(0.1);
+				expect(gap.background).not.toBe(gap.chip);
+			}
+		},
+	},
+	{
+		name: "seed a running tool for the live strip",
+		match: /^the turn log has a running tool$/,
+		run: async ({ world }) => {
+			const messages: History[] = [
+				{
+					id: "strip-user",
+					role: "user",
+					time: { created: START },
+					parts: [
+						{ id: "prompt", type: "text", text: "Read the routing table." },
+					],
+				},
+				{
+					id: "strip-agent",
+					role: "assistant",
+					parentID: "strip-user",
+					time: { created: START + 1000 },
+					parts: [tool("running-task", "Task", 1000, true)],
+				},
+			];
+			requireRpcControl(world.page).setDetailRows(
+				SESSION,
+				messages.flatMap(detailRowsOf),
+			);
+			setSessionRowStatus(world.page, SESSION, "busy", {
+				title: "Running strip",
+				accountId: "claude",
+				updatedAt: PINNED_CLOCK_MS,
+			});
+			await openSessionRoute(world.page, SESSION);
+			await expect(
+				panel(world.page).locator('[data-step-id$="/running-task"]'),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert the live strip fade",
+		match: /^the live strip segment fades to 0.35 every 1.2 seconds$/,
+		run: async ({ world }) => {
+			const step = panel(world.page).locator('[data-step-id$="/running-task"]');
+			await expect(step).toHaveCSS("animation-duration", "1.2s");
+			await expect(step).toHaveCSS("animation-timing-function", "ease-in-out");
+			const frames = await step.evaluate((element) =>
+				element
+					.getAnimations()
+					.flatMap((animation) =>
+						animation.effect instanceof KeyframeEffect
+							? animation.effect.getKeyframes().map((frame) => frame["opacity"])
+							: [],
+					),
+			);
+			expect(frames).toContain("0.35");
+		},
+	},
+	{
 		name: "collapse the surfaced turn",
 		match: /^I collapse the surfaced turn$/,
 		run: async ({ world }) => {

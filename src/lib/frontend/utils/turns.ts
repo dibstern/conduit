@@ -760,21 +760,34 @@ export function stripLayout(
 	turn: Turn,
 	final: boolean,
 	now: number,
+	trackWidth = 1000,
 ): { left: number; width: number }[] {
 	const count = segment.activity.length;
 	if (count === 0) return [];
-	const gap = Math.min(0.2, 20 / Math.max(1, count - 1));
-	const available = 100 - gap * (count - 1);
-	const floor = Math.min(0.35, available / count);
+	const compactions = segment.activity.filter(
+		(part) => part.type === "system",
+	).length;
+	// Two physical pixels, shrinking only when the marks would consume the track.
+	const gap = Math.min(
+		200 / (trackWidth || 1000),
+		90 / Math.max(1, count - 1 + compactions),
+	);
+	const available = 100 - gap * (count - 1 + compactions);
+	const steps = count - compactions;
+	const floor = Math.min(0.35, available / Math.max(1, steps));
 	const weights = stepWeights(segment, turn, final, now).map((weight, i) =>
 		segment.activity[i]?.type === "system" ? 0 : weight,
 	);
 	const total = weights.reduce((sum, weight) => sum + weight, 0);
-	const remaining = available - floor * count;
+	const remaining = available - floor * steps;
 	let left = 0;
 	return weights.map((weight, i) => {
 		const width =
-			total === 0 ? available / count : floor + (remaining * weight) / total;
+			segment.activity[i]?.type === "system"
+				? gap
+				: total === 0
+					? available / Math.max(1, steps)
+					: floor + (remaining * weight) / total;
 		const position = { left, width: i === count - 1 ? 100 - left : width };
 		left += width + gap;
 		return position;

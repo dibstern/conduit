@@ -1,4 +1,9 @@
 {
+  "src/lib/frontend/components/ui/ActivityTimeline.svelte :: animate-pulse": {
+    "renamedTo": "live-segment",
+    "reason": "conduit-test-xdyjq.17 replaces the generic 2s pulse with design E's 1.2s fade to 0.35 opacity. The strip owns the live-segment animation and its reduced-motion rule."
+  },
+  "src/lib/frontend/components/ui/ActivityTimeline.svelte :: bg-chip,inset-x-0,rounded-[2px]": "conduit-test-xdyjq.17 removes the continuous chip track behind the activity segments. Design E leaves clear 2px gaps between the segments; the deleted background, full-width positioning and radius belonged only to that track.",
 	"src/lib/frontend/components/chat/TurnActivity.svelte :: max-[599px]:-mb-[18px],max-[599px]:hidden,max-[599px]:sr-only,min-[600px]:hidden": "conduit-test-xdyjq.16 aligns phone layout with sessionViewState.compact at 767px. The same spacing, visibility and screen-reader treatments now use max-md: and md: utilities; widths 600-767px intentionally gain the phone layout.",
 	"src/lib/frontend/components/chat/TurnActivity.svelte :: surfacingActive": "conduit-test-xdyjq.1 moves this responsive predicate from the head's class expression to its text selection. It was an expression fragment, not a CSS class; phone heads now show the skill count instead of hiding the entire count phrase.",
 	"src/lib/frontend/components/chat/TurnActivity.svelte :: flex-1,gap-[5px],pb-[8px],skill-chapters,skills-toggle": "conduit-test-xdyjq.1 removes the skills toggle and chapter list as required by design E. Their names and spacing disappear with those controls; skills now use ordinary ActivityRow entries and the head count phrase.",

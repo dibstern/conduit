@@ -1,5 +1,32 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Strip gaps and compaction seams match the Turn log design
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a counted-wake turn
+  Then the strip compaction is a 2px secondary-colour mark taller than its bar
+  And the strip segments have 2px clear gaps
+  And the messages region visually matches turn-strip-seam-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: A live strip segment breathes rather than pulsing
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log has a running tool
+  Then the live strip segment fades to 0.35 every 1.2 seconds
+  And the messages region visually matches turn-strip-live-fade-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario Outline: Collapsed dots retain every message and distinguish read from unread
   Given message surfacing is active at Most
   And surfacing read tracking starts with 1,4,8 read and summaries off
