@@ -32,8 +32,7 @@ const view = surfaceTurn({
 	level: "balanced",
 	live: false,
 	latestTurn: true,
-	picked: null,
-	folded: null,
+	selection: { kind: "auto" },
 	start: START,
 });
 const whole: TurnRecap = {

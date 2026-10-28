@@ -9,6 +9,54 @@ import { categoryColour } from "./category-colour.js";
 import type { ActivityPart } from "./turns.js";
 
 export type SurfaceLevel = MessageSurfacingPreferences["defaultLevel"];
+
+/** Which card the turn shows: auto follows the turn's default fold, latest pins the newest card open. */
+export type CardSelection =
+	| { kind: "auto" }
+	| { kind: "latest" }
+	| { kind: "picked"; uuid: string }
+	| { kind: "folded" };
+
+export type SurfaceCommand =
+	| { kind: "step"; to: "previous" | "next" | "first" | "last" }
+	| { kind: "number"; n: number }
+	| { kind: "ask" }
+	| { kind: "unread" }
+	| { kind: "summary" }
+	| { kind: "toggleRead" }
+	| { kind: "reply" }
+	| { kind: "fold" }
+	| { kind: "collapse" };
+
+const KEY_COMMANDS = new Map<string, SurfaceCommand>([
+	["ArrowLeft", { kind: "step", to: "previous" }],
+	["ArrowRight", { kind: "step", to: "next" }],
+	["Home", { kind: "step", to: "first" }],
+	["End", { kind: "step", to: "last" }],
+	["a", { kind: "ask" }],
+	["u", { kind: "unread" }],
+	["s", { kind: "summary" }],
+	["m", { kind: "toggleRead" }],
+	["r", { kind: "reply" }],
+	["Escape", { kind: "fold" }],
+	["h", { kind: "collapse" }],
+]);
+
+/** Parse one focused-turn key: digits accumulate a message number that Enter jumps to; any other key clears it. */
+export function surfaceKey(
+	buffer: string,
+	key: string,
+): { buffer: string; command: SurfaceCommand | null } {
+	if (/^\d$/.test(key))
+		return { buffer: (buffer + key).slice(-8), command: null };
+	if (key === "Enter")
+		return {
+			buffer: "",
+			command: buffer ? { kind: "number", n: Number(buffer) } : null,
+		};
+	return { buffer: "", command: KEY_COMMANDS.get(key) ?? null };
+}
+
 export type SurfacePart = AssistantMessage & {
 	/** Annotation owners supply these; surfacing never writes them. */
 	surfacingMark?: SurfacingMark | null;
@@ -61,8 +109,7 @@ export function surfaceTurn(input: {
 	latestTurn: boolean;
 	latestBlock?: boolean;
 	start: number;
-	picked: string | null;
-	folded: boolean | null;
+	selection: CardSelection;
 	hasRecap?: boolean;
 	/** A summary citation can reveal its pin without changing the chosen level. */
 	citedOrdinal?: number | null;
@@ -136,9 +183,11 @@ export function surfaceTurn(input: {
 		all: visibleAt("all").length,
 	};
 	const visible = visibleAt(input.level);
+	const pickedUuid =
+		input.selection.kind === "picked" ? input.selection.uuid : null;
 	const picked = messages.find(
 		({ part }) =>
-			part.uuid === input.picked &&
+			part.uuid === pickedUuid &&
 			(input.live ||
 				part.surfacingProbabilities !== undefined ||
 				!!part.surfacingMark),
@@ -146,10 +195,11 @@ export function surfaceTurn(input: {
 	const short =
 		turnMessages.filter(({ level }) => level !== "hidden").length < 4;
 	const folded =
-		input.folded ??
-		(!input.latestTurn ||
-			input.latestBlock === false ||
-			(!!input.hasRecap && !short));
+		input.selection.kind === "folded" ||
+		(input.selection.kind === "auto" &&
+			(!input.latestTurn ||
+				input.latestBlock === false ||
+				(!!input.hasRecap && !short)));
 	const pins =
 		input.level === "final"
 			? []
@@ -245,7 +295,9 @@ export function surfaceTurn(input: {
 				},
 			];
 		}),
-		following: input.live && input.picked === null,
+		following:
+			input.live &&
+			(input.selection.kind === "auto" || input.selection.kind === "latest"),
 		previous: pins[cardIndex - 1] ?? null,
 		next: pins[cardIndex + 1] ?? null,
 		first: pins[0] ?? null,

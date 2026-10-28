@@ -6,6 +6,7 @@
 	import type { Snippet } from "svelte";
 	import type { SessionResume } from "../../../contracts/limit-recovery.js";
 	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
+	import { assertNever } from "../../../utils.js";
 	import SurfacingAskContext from "./SurfacingAskContext.svelte";
 	import { MediaQuery } from "svelte/reactivity";
 	import type { CategorySet } from "../../../contracts/category-set.js";
@@ -17,7 +18,7 @@
 	import { createTurnPanel, type TurnPanelState } from "../../stores/turn-panel.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
-	import { surfaceTurn, surfaceTime, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
+	import { surfaceTurn, surfaceTime, surfaceKey, type CardSelection, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
 	import SurfacingCard, { type SurfacingRegions } from "./SurfacingCard.svelte";
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
 	import SurfacingMarkActions from "./SurfacingMarkActions.svelte";
@@ -194,13 +195,12 @@
 		void sessionId;
 		summaryOpen = null;
 	});
-	let picked = $state<string | null>(null);
-	let folded = $state<boolean | null>(null);
+	let selection = $state<CardSelection>({ kind: "auto" });
 	let readSaving = $state(false);
 	let readError = $state("");
 	let autoReadAttempt = $state<string | null>(null);
 	let readCard: string | null = null;
-	let digits = "";
+	let keyBuffer = $state("");
 	const feedback = new SurfacingFeedback(() => sessionId, () => surfacingConfig.categorySet, (place) => {
 		void tick().then(() => {
 			const target = place === "card" ? panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-msg-card"]') : panelEl?.querySelector<HTMLElement>(`[data-testid="${place}"] button`);
@@ -211,7 +211,7 @@
 	const surface = $derived(surfaceTurn({
 		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: numberedMessages.map((part) => feedback.annotate(part)),
 		positions: stripLayout(segment, turn, final, now), categorySet: surfacingConfig.categorySet,
-		level, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, picked, folded, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
+		level, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, selection, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	const minimised = $derived(surfacingActive && panel.view.kind === "collapsed");
@@ -262,8 +262,7 @@
 
 	function pick(pin: SurfacePin) {
 		panel.open();
-		picked = pin.part.uuid;
-		folded = false;
+		selection = { kind: "picked", uuid: pin.part.uuid };
 	}
 	function toggleSummary() {
 		const visible = summaryVisible;
@@ -310,10 +309,9 @@
 		const keepLog = fullLog;
 		panel.show(next);
 		if (keepLog) panel.show("log");
-		picked = null;
-		folded = false;
+		selection = { kind: "latest" };
 	}
-	function followLatest() { picked = null; folded = false; }
+	function followLatest() { selection = { kind: "latest" }; }
 	const replies = $derived(messageReplies(sessionId));
 	// Reply toggles: a message already replied to in the draft takes its reference back out.
 	function messageReference(pin: Pick<SurfacePin, "label" | "glyph" | "time" | "part" | "builtinCategory">, ordinal: number, excerpt?: string): ReplyReference {
@@ -326,7 +324,7 @@
 		else insertComposerReference(messageReference(pin, pin.number, excerpt), sessionId);
 	}
 	function foldMessage() {
-		folded = true;
+		selection = { kind: "folded" };
 		void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-scrub"]')?.focus({ preventScroll: true }));
 	}
 	function revealMessage(part: SurfacePart | null) {
@@ -336,40 +334,38 @@
 		const target = event.target;
 		if (!event.defaultPrevented && event.key === "Escape" && feedback.pending) { event.preventDefault(); feedback.cancel(); return; }
 		if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || (target instanceof HTMLInputElement && target.type !== "checkbox") || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return;
-		if (event.key === "Escape" && summaryVisible) {
-			digits = "";
+		const { buffer, command } = surfaceKey(keyBuffer, event.key);
+		if (surfacingActive) keyBuffer = buffer;
+		if (command?.kind === "fold" && summaryVisible) {
 			event.stopPropagation();
 			// Native dialog cancel owns the phone sheet's dismissal.
 			if (!phone.current) { event.preventDefault(); summaryOpen = false; }
 			return;
 		}
 		if (!surfacingActive) {
-			if (event.key === "s" && summaryEnabled) { event.preventDefault(); toggleSummary(); }
+			if (command?.kind === "summary" && summaryEnabled) { event.preventDefault(); toggleSummary(); }
 			return;
 		}
-		if (/^\d$/.test(event.key)) { event.preventDefault(); digits = (digits + event.key).slice(-8); return; }
-		const key = event.key;
-		if (key === "Enter" && !digits) return;
-		if (!["ArrowLeft", "ArrowRight", "Home", "End", "Enter", "Escape", "a", "u", "s", "r", "m", "h", "+", "-", "−"].includes(key)) { digits = ""; return; }
+		if (!buffer && !command && !["+", "-", "−"].includes(event.key)) return;
 		// Plain session shortcuts bubble to SessionBar; focused-turn keys own them first.
 		event.preventDefault();
-		if (onSurfacingShortcut?.(key)) return;
-		if (key === "h") { digits = ""; toggleMinimised(); return; }
-		if (feedback.command(key, surface.card)) return;
-		if (key === "s" && summaryEnabled) { toggleSummary(); return; }
-		if (key === "ArrowLeft" && surface.previous) pick(surface.previous);
-		else if (key === "ArrowRight" && surface.next) pick(surface.next);
-		else if (key === "Home" && surface.first) pick(surface.first);
-		else if (key === "End" && surface.last) pick(surface.last);
-		else if (key === "Enter" && digits) {
-			const target = surface.numbers.find(({ number }) => number === Number(digits));
-			if (target) { if (target.belowLevel) selectLevel("all"); revealMessage(target.part); }
-		} else if (key === "a") revealMessage(surface.openAsk);
-		else if (key === "u") revealMessage(surface.nextUnread?.part ?? null);
-		else if (key === "m" && surface.card?.read !== undefined) readMessage(surface.card, !surface.card.read);
-		else if (key === "r" && surface.card) replyTo(surface.card);
-		else if (key === "Escape") foldMessage();
-		digits = "";
+		if (buffer || onSurfacingShortcut?.(event.key) || feedback.command(event.key, surface.card) || !command) return;
+		switch (command.kind) {
+			case "step": { const pin = surface[command.to]; if (pin) pick(pin); return; }
+			case "number": {
+				const target = surface.numbers.find(({ number }) => number === command.n);
+				if (target) { if (target.belowLevel) selectLevel("all"); revealMessage(target.part); }
+				return;
+			}
+			case "ask": revealMessage(surface.openAsk); return;
+			case "unread": revealMessage(surface.nextUnread?.part ?? null); return;
+			case "summary": if (summaryEnabled) toggleSummary(); return;
+			case "toggleRead": if (surface.card?.read !== undefined) readMessage(surface.card, !surface.card.read); return;
+			case "reply": if (surface.card) replyTo(surface.card); return;
+			case "fold": foldMessage(); return;
+			case "collapse": toggleMinimised(); return;
+			default: assertNever(command);
+		}
 	}
 	function surfaceJump(x: number) {
 		const positions = stripLayout(segment, turn, final, now);
@@ -569,7 +565,7 @@
 					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}
 					endTime={surfaceTime(duration ?? 0)} onpick={pick} onlevel={selectLevel}
 					ondefault={() => panel.makeDefault()}
-					onreset={() => { panel.resetLevel(); picked = null; folded = false; }}
+					onreset={() => { panel.resetLevel(); selection = { kind: "latest" }; }}
 					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand} onjump={surfaceJump} onhover={surfaceHover}>
 					{#snippet strip()}
 						<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} interactive={false} />
