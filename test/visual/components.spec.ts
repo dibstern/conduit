@@ -640,8 +640,12 @@ if (stories.length > 0) {
 					}
 					await pinRandomness(page);
 					await pinClock(page);
+					// a11y.manual skips the addon's axe pass. Pixels never depend on it,
+					// and under the emulated Docker leg it costs ~1s of each story's 10s
+					// budget even with no contention (conduit-test-r5yy7).
+					// Accessibility stays covered by the Storybook Vitest project.
 					await page.goto(
-						`/iframe.html?id=${story.id}&viewMode=story${theme === "light" ? "&globals=theme:light" : ""}`,
+						`/iframe.html?id=${story.id}&viewMode=story&globals=a11y.manual:!true${theme === "light" ? ";theme:light" : ""}`,
 						{
 							waitUntil: "domcontentloaded",
 						},
