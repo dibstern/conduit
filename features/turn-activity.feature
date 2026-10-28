@@ -1,5 +1,21 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Collapsed dots retain every message and distinguish read from unread
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with 1,4,8 read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I collapse the surfaced turn
+  Then the collapsed strip shows 8 category dots, with 1,4,8 hollow and the rest filled
+  And the collapsed Ask dot keeps its outer ring
+  And the messages region visually matches turn-collapsed-category-dots-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario Outline: Strip pins and steps have keyboard focus movement and activation
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup

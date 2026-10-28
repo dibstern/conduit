@@ -87,6 +87,65 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "collapse the surfaced turn",
+		match: /^I collapse the surfaced turn$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("surfacing-minimise-toggle").click();
+			await world.page.mouse.move(0, 0);
+		},
+	},
+	{
+		name: "assert every collapsed message dot and read paint",
+		match:
+			/^the collapsed strip shows 8 category dots, with 1,4,8 hollow and the rest filled$/,
+		run: async ({ world }) => {
+			const dots = world.page.locator(".dots > .unread-dot:not(.peek-dot)");
+			await expect(dots).toHaveCount(8);
+			const colours = new Set<string>();
+			for (let number = 1; number <= 8; number++) {
+				const dot = dots.nth(number - 1);
+				await expect(dot).toHaveCSS("width", "7px");
+				await expect(dot).toHaveCSS("height", "7px");
+				const paint = await dot.evaluate((element) => {
+					const style = getComputedStyle(element);
+					const probe = document.createElement("span");
+					probe.style.color = "var(--surface-colour)";
+					probe.style.backgroundColor = "var(--color-turn-bg)";
+					element.append(probe);
+					const result = {
+						colour: getComputedStyle(probe).color,
+						turnBg: getComputedStyle(probe).backgroundColor,
+						fill: style.backgroundColor,
+						ring: style.borderColor,
+						width: style.borderWidth,
+					};
+					probe.remove();
+					return result;
+				});
+				colours.add(paint.colour);
+				if ([1, 4, 8].includes(number)) {
+					expect(paint.fill).toBe(paint.turnBg);
+					expect(paint.ring).toBe(paint.colour);
+					expect(paint.width).toBe("1px");
+				} else expect(paint.fill).toBe(paint.colour);
+			}
+			expect(colours.size).toBeGreaterThanOrEqual(5);
+		},
+	},
+	{
+		name: "assert collapsed Ask outer ring",
+		match: /^the collapsed Ask dot keeps its outer ring$/,
+		run: async ({ world }) => {
+			const ask = world.page.getByTestId("surfacing-minimised-ask");
+			const ring = await ask.evaluate((element) => ({
+				width: getComputedStyle(element, "::after").borderWidth,
+				style: getComputedStyle(element, "::after").borderStyle,
+			}));
+			expect(ring.width).toBe("1px");
+			expect(ring.style).toBe("solid");
+		},
+	},
+	{
 		name: "navigate and activate strip pins with the keyboard",
 		match:
 			/^arrows move focus between strip pins and Enter picks the focused pin$/,

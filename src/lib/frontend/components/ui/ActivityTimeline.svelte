@@ -190,8 +190,8 @@
 			{#if markers.kind === "pins" && anchor}<i class="surface-thumb" style:left={anchor}></i>{/if}
 		</div>
 		{#if markers.kind === "dots"}
-			{#each markers.dots.filter((pin) => pin.read === false || pin.part.uuid === openAsk?.uuid) as pin (pin.part.uuid)}
-				<span class="unread-dot" class:ask={pin.part.uuid === openAsk?.uuid} style:left="{pin.x}%" data-testid={pin.part.uuid === openAsk?.uuid ? "surfacing-minimised-ask" : "surfacing-minimised-unread"} aria-hidden="true"></span>
+			{#each markers.dots as pin (pin.part.uuid)}
+				<span class="unread-dot" class:read={pin.read === true} class:ask={pin.part.uuid === openAsk?.uuid} style:--surface-colour={pin.colour ?? "var(--color-text-dimmer)"} style:left="{pin.x}%" data-testid={pin.part.uuid === openAsk?.uuid ? "surfacing-minimised-ask" : pin.read === true ? "surfacing-minimised-read" : "surfacing-minimised-unread"} aria-hidden="true"></span>
 			{/each}
 			{#if messagePreview}<span class="unread-dot peek-dot" class:ask={messagePreview.part.uuid === openAsk?.uuid} style:left="{messagePreview.x}%" aria-hidden="true"></span>{/if}
 		{/if}
@@ -241,8 +241,8 @@
 	.minimised-scrub:focus-visible, :global(.peek:focus-visible) { outline:2px solid var(--color-accent); outline-offset:2px; }
 	.thin-track { height:4px; overflow:hidden; pointer-events:none; }
 	.thin-track :global(> div) { height:4px; }
-	.dots .unread-dot { position:absolute; top:50%; width:7px; height:7px; border-radius:50%; background:var(--color-accent); transform:translate(-50%, -50%); box-shadow:0 0 0 1.5px var(--color-turn-bg); }
-	.dots .unread-dot.ask { background:var(--color-status-ask); }
+	.dots .unread-dot { position:absolute; top:50%; width:7px; height:7px; border-radius:50%; background:var(--surface-colour,var(--color-accent)); transform:translate(-50%, -50%); box-shadow:0 0 0 1.5px var(--color-turn-bg); }
+	.dots .unread-dot.read { border:1px solid var(--surface-colour); background:var(--color-turn-bg); }
 	.dots .unread-dot.ask::after { content:""; position:absolute; inset:-4px; border:1px solid var(--color-status-ask); border-radius:50%; opacity:.55; }
 	.dots .peek-dot { width:11px; height:11px; box-shadow:0 0 0 2px var(--color-turn-bg), 0 0 0 3.5px var(--color-accent); }
 	.dots .peek-dot.ask { box-shadow:0 0 0 2px var(--color-turn-bg), 0 0 0 3.5px var(--color-status-ask); }
