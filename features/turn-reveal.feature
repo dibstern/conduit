@@ -33,7 +33,7 @@ Scenario Outline: A never-judged message opens its Full log step
   And the surfacing session has a settled turn
   When I open turn message #7 with digits and Enter
   Then turn message #7 is focused in the Full log
-  And the effective surfacing level is Answer
+  And the session surfacing override is absent
   And the messages region visually matches turn-reveal-unjudged-<viewport> at 98 percent
 
 Examples:
