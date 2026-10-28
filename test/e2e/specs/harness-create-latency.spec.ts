@@ -812,9 +812,25 @@ test("overflow catches up every sidebar through create and delete bursts", async
 				.toBeGreaterThan(setupRenderedAt);
 			const beforeTicks = ticks();
 			phaseStart = now();
-			// Withhold shell delivery acknowledgements throughout the burst, so a
-			// fast client cannot drain the capacity-one advance bus between commits.
+			// Withhold shell delivery acknowledgements throughout the burst. The
+			// server still buffers envelopes behind the held one: 16 in the shell
+			// queue (shell-subscription.ts), then a batch in hand and two queued in
+			// ws-rpc.ts, each at most 16. A burst smaller than that never stalls the
+			// capacity-one advance bus.
+			// Renaming one session 100 times fills that buffer first; either the
+			// reader stalls or it falls behind, and both drop advances, so the
+			// creates and deletes below land inside the overflow catch-up.
 			holdingAcknowledgements = true;
+			for (let index = 0; index < 100; index++)
+				await Effect.runPromise(
+					driver.rpc
+						.RenameSession({
+							sessionId: HEAVY_SESSION_ID,
+							title: `Overflow padding ${index}`,
+							originId: driver.originId,
+						})
+						.pipe(Effect.timeout("15 seconds")),
+				);
 			await Promise.all(
 				Array.from({ length: 20 }, async (_, index) => {
 					const title = `Overflow ${index}: ${randomUUID()}`;
