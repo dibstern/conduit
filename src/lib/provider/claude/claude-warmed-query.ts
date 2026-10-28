@@ -15,6 +15,7 @@ import type { ReadClaudeGoalStatus } from "./claude-goal-tracker.js";
 import type { ClaudePermissionBridge } from "./claude-permission-bridge.js";
 import type { ClaudeProviderInstanceDeps } from "./claude-provider-runtime.js";
 import { buildClaudeQueryOptions } from "./claude-query-options.js";
+import { makeClaudeQueryProcesses } from "./claude-query-processes.js";
 import {
 	type ClaudeConfigDir,
 	type ClaudeLaunchConfig,
@@ -39,6 +40,7 @@ export interface EmptyClaudeQuery<Q extends { close(): void }> {
 	readonly options: SDKOptions;
 	readonly configDir: ClaudeConfigDir;
 	readonly abortController: AbortController;
+	readonly stopProcesses: () => Promise<void>;
 }
 
 export interface WarmedClaudeQuery extends EmptyClaudeQuery<Query> {
@@ -54,7 +56,9 @@ export const makeClaudeEmptyQuery = <Q extends { close(): void }>(
 	}) => Q,
 	makeOptions: (abortController: AbortController) => SDKOptions,
 	launchConfig: Pick<ClaudeLaunchConfig, "configDir"> &
-		Pick<ClaudePreWarmSessionInput, "account">,
+		Pick<ClaudePreWarmSessionInput, "account"> & {
+			readonly killProcessGroup?: boolean;
+		},
 	prepareQuery?: () => Promise<void>,
 ): Effect.Effect<EmptyClaudeQuery<Q>, ClaudeAdapterError> =>
 	Effect.gen(function* () {
@@ -63,14 +67,27 @@ export const makeClaudeEmptyQuery = <Q extends { close(): void }>(
 				try: prepareQuery,
 				catch: (cause) =>
 					new ClaudeBoundaryError({ operation: "prepareQuery", cause }),
-			});
+			}).pipe(Effect.interruptible);
 		const promptQueue = yield* makeEffectPromptQueue();
 		const abortController = new AbortController();
+		let stderr: SDKOptions["stderr"];
+		const processes = makeClaudeQueryProcesses({
+			// Usage owns a group; adopted warm queries stay in their runner's group.
+			killProcessGroup: launchConfig.killProcessGroup ?? false,
+			stderr: (data) => stderr?.(data),
+		});
+		const drainProcesses = Effect.tryPromise({
+			try: processes.stop,
+			catch: (cause) =>
+				new ClaudeBoundaryError({ operation: "closeEmptyQuery", cause }),
+		}).pipe(Effect.orDie);
 		return yield* Effect.try({
 			try: () => {
 				const launch = makeOptions(abortController);
-				const options = {
+				stderr = launch.stderr;
+				const options: SDKOptions = {
 					...launch,
+					spawnClaudeCodeProcess: processes.spawnClaudeCodeProcess,
 					env: makeClaudeSdkEnv({
 						...launchConfig,
 						baseEnv: launch.env,
@@ -85,6 +102,7 @@ export const makeClaudeEmptyQuery = <Q extends { close(): void }>(
 					configDir: launchConfig.configDir,
 					promptQueue,
 					abortController,
+					stopProcesses: processes.stop,
 					options,
 					query: queryFactory({
 						configDir: launchConfig.configDir,
@@ -99,7 +117,10 @@ export const makeClaudeEmptyQuery = <Q extends { close(): void }>(
 			Effect.onError(() =>
 				promptQueue
 					.close()
-					.pipe(Effect.andThen(Effect.sync(() => abortController.abort()))),
+					.pipe(
+						Effect.andThen(Effect.sync(() => abortController.abort())),
+						Effect.andThen(drainProcesses),
+					),
 			),
 		);
 	});
@@ -112,6 +133,11 @@ export const closeClaudeEmptyQuery = <Q extends { close(): void }>(
 		yield* Effect.exit(resource.promptQueue.close());
 		resource.abortController.abort();
 		yield* Effect.try(() => resource.query.close()).pipe(Effect.ignore);
+		yield* Effect.tryPromise({
+			try: resource.stopProcesses,
+			catch: (cause) =>
+				new ClaudeBoundaryError({ operation: "closeEmptyQuery", cause }),
+		}).pipe(Effect.orDie);
 	});
 
 interface PendingWarmedQuery {
@@ -144,6 +170,7 @@ function immutableOptions(options: SDKOptions) {
 	const {
 		abortController: _abort,
 		canUseTool: _permission,
+		spawnClaudeCodeProcess: _spawn,
 		env: _env,
 		...launch
 	} = options;

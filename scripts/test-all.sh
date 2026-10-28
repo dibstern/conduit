@@ -116,23 +116,24 @@ run_group() {
   esac
 }
 
-# Keep the timed create contract separate from unrelated harness workers.
-# Both selections are mandatory, even when the regular selection fails.
-run_harness_playwright() {
-  local config="$1"
-  local selection='creates reach every sidebar under streaming write load$'
-  local output_dir="${log_dir:-test-results}/artifacts/harness"
+# Tests tagged @timed assert wall-clock budgets, which other workers' load
+# breaks on small runners, so they run afterwards on one worker. Both phases
+# are mandatory, even when the regular phase fails.
+run_timed_split_playwright() {
+  local suite="$1" config="$2"
+  shift 2
+  local output_dir="${log_dir:-test-results}/artifacts/$suite"
   local report_dir="${PLAYWRIGHT_HTML_OUTPUT_DIR:-playwright-report}"
-  local regular_rc=0 latency_rc=0
-  env CONDUIT_TEST_DIST=dist PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir/regular" \
-    pnpm exec playwright test --config "$config" --grep-invert "$selection" \
+  local regular_rc=0 timed_rc=0
+  env "$@" PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir/regular" \
+    pnpm exec playwright test --config "$config" --grep-invert @timed \
       --output "$output_dir/regular" || regular_rc=$?
-  echo "Harness regular phase exit: $regular_rc"
-  env CONDUIT_TEST_DIST=dist PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir/create-latency" \
-    pnpm exec playwright test --config "$config" test/e2e/specs/harness-create-latency.spec.ts \
-      --grep "$selection" --workers=1 --output "$output_dir/create-latency" || latency_rc=$?
-  echo "Harness create-latency phase exit: $latency_rc"
-  [[ "$regular_rc" -eq 0 && "$latency_rc" -eq 0 ]]
+  echo "E2E $suite regular phase exit: $regular_rc"
+  env "$@" PLAYWRIGHT_HTML_OUTPUT_DIR="$report_dir/timed" \
+    pnpm exec playwright test --config "$config" --grep @timed --workers=1 \
+      --output "$output_dir/timed" || timed_rc=$?
+  echo "E2E $suite timed phase exit: $timed_rc"
+  [[ "$regular_rc" -eq 0 && "$timed_rc" -eq 0 ]]
 }
 
 run_playwright() {
@@ -144,7 +145,8 @@ run_playwright() {
   fi
   # Keep the original env commands visible for single-group invocations.
   case "$suite" in
-    harness) run "$label" run_harness_playwright "$config" ;;
+    harness) run "$label" run_timed_split_playwright harness "$config" CONDUIT_TEST_DIST=dist ;;
+    daemon) run "$label" run_timed_split_playwright daemon "$config" ;;
     visual) run "$label" env VISUAL_STRICT=1 pnpm exec playwright test --config "$config" ${args[@]+"${args[@]}"} ;;
     *) run "$label" pnpm exec playwright test --config "$config" ${args[@]+"${args[@]}"} ;;
   esac

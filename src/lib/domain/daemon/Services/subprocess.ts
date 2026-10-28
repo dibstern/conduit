@@ -130,6 +130,100 @@ interface Job {
 const metricsChannel = channel("conduit:subprocess-metrics");
 const log = createLogger("subprocess");
 
+// macOS answers EPERM for a group whose members are all zombies; those cannot write.
+const groupExited = (error: unknown) => {
+	const code = (error as NodeJS.ErrnoException).code;
+	return code === "ESRCH" || code === "EPERM";
+};
+
+/** The caller owns stop(); delivery of a kill signal is not a termination barrier. */
+export const spawnOwnedSubprocess = (
+	command: string,
+	args: readonly string[],
+	options: {
+		readonly cwd?: string;
+		readonly env?: NodeJS.ProcessEnv;
+		readonly signal?: AbortSignal;
+		readonly killProcessGroup?: boolean;
+	},
+) => {
+	const ownsGroup =
+		options.killProcessGroup !== false && process.platform !== "win32";
+	const child = spawn(command, args, {
+		...options,
+		stdio: ["pipe", "pipe", "pipe"],
+		detached: ownsGroup,
+	});
+	let closed = false;
+	let groupGone = false;
+	let stopping: Promise<void> | undefined;
+	const signal = (value: NodeJS.Signals) => {
+		if (!child.pid || groupGone || (!ownsGroup && closed)) return;
+		try {
+			if (ownsGroup) process.kill(-child.pid, value);
+			else child.kill(value);
+		} catch (error) {
+			if (!groupExited(error)) throw error;
+			groupGone = true;
+		}
+	};
+	// As in the command owner, descendants must release inherited pipes before close.
+	child.once("exit", () => {
+		if (ownsGroup) {
+			try {
+				signal("SIGKILL");
+			} catch {
+				// stop() will report a failure to observe the group's termination.
+			}
+		}
+	});
+	child.once("close", () => {
+		closed = true;
+	});
+	child.on("error", () => {
+		// The caller handles spawn errors; close still owns the lifetime barrier.
+	});
+	child.stdin.on("error", () => {
+		// Shutdown may race a final SDK write.
+	});
+	const stop = () =>
+		(stopping ??= (async () => {
+			child.stdin.end();
+			child.stdout.resume();
+			child.stderr.resume();
+			if (!closed) signal("SIGTERM");
+			const started = Date.now();
+			let escalated = false;
+			while (true) {
+				let groupAlive = false;
+				if (ownsGroup && child.pid && !groupGone) {
+					try {
+						process.kill(-child.pid, 0);
+						groupAlive = true;
+					} catch (error) {
+						if (!groupExited(error)) throw error;
+						groupGone = true;
+					}
+				}
+				if (closed && !groupAlive) return;
+				const elapsed = Date.now() - started;
+				if (!escalated && elapsed >= 250) {
+					signal("SIGKILL");
+					escalated = true;
+				}
+				if (elapsed >= 5_250)
+					throw new SubprocessError({
+						command,
+						reason: "timeout",
+						stdout: "",
+						stderr: `Subprocess ${child.pid} did not terminate after SIGKILL`,
+					});
+				await new Promise<void>((resolve) => setTimeout(resolve, 10));
+			}
+		})());
+	return { child, stop };
+};
+
 export const makeSubprocess = (
 	options: { readonly concurrency?: number } = {},
 ): SubprocessService => {

@@ -206,9 +206,11 @@ const test = base.extend<{
 		let diagnostics = "";
 		const stop = async () => {
 			if (!child || child.exitCode !== null) return;
-			const exited = once(child, "exit");
+			const exited = once(child, "close");
 			child.send("stop");
-			await exited;
+			const [code, signal] = await exited;
+			if (code !== 0)
+				throw new Error(`Test daemon exited ${code ?? signal}: ${diagnostics}`);
 		};
 		const start = async (port = 0, buildId?: string) => {
 			const env: NodeJS.ProcessEnv = {
@@ -1980,62 +1982,63 @@ declare global {
 	}
 }
 
-test("500 human-paced characters stay responsive within the 300 ms throttle budget", async ({
-	page,
-	buildDaemon,
-}, testInfo) => {
-	test.setTimeout(90_000);
-	const calls = captureDraftCalls(page);
-	let measurement: object = {};
-	try {
-		await createDraftSession(page, buildDaemon.baseUrl);
-		await page.waitForTimeout(1_000);
-		await page.evaluate(() => {
-			if (!PerformanceObserver.supportedEntryTypes.includes("longtask"))
-				throw new Error("longtask observer unavailable");
-			const longTasks: number[] = [];
-			const observer = new PerformanceObserver((list) => {
-				for (const task of list.getEntries()) longTasks.push(task.duration);
+test(
+	"500 human-paced characters stay responsive within the 300 ms throttle budget",
+	{ tag: "@timed" },
+	async ({ page, buildDaemon }, testInfo) => {
+		test.setTimeout(90_000);
+		const calls = captureDraftCalls(page);
+		let measurement: object = {};
+		try {
+			await createDraftSession(page, buildDaemon.baseUrl);
+			await page.waitForTimeout(1_000);
+			await page.evaluate(() => {
+				if (!PerformanceObserver.supportedEntryTypes.includes("longtask"))
+					throw new Error("longtask observer unavailable");
+				const longTasks: number[] = [];
+				const observer = new PerformanceObserver((list) => {
+					for (const task of list.getEntries()) longTasks.push(task.duration);
+				});
+				observer.observe({ type: "longtask" });
+				window.draftPerformance = { longTasks, observer };
 			});
-			observer.observe({ type: "longtask" });
-			window.draftPerformance = { longTasks, observer };
-		});
-		const start = Date.now();
-		const before = calls.length;
-		const text = "A human keeps typing while the draft saves live. "
-			.repeat(11)
-			.slice(0, 500);
-		await page.locator("#input").pressSequentially(text, { delay: 100 });
-		const typedAt = Date.now();
-		await expect
-			.poll(() => syncCompleted(calls.slice(before), text))
-			.toBe(true);
-		const longTasks = await page.evaluate(() => {
-			window.draftPerformance?.observer.disconnect();
-			return window.draftPerformance?.longTasks ?? [];
-		});
-		const syncs = calls
-			.slice(before)
-			.filter((call) => call.request.frame.tag === "SyncInputDraft");
-		const budget = Math.floor((typedAt - start) / 300) + 2;
-		measurement = {
-			start,
-			typedAt,
-			characters: text.length,
-			delay: 100,
-			budget,
-			count: syncs.length,
-			longTasks,
-		};
-		await expect(page.locator("#input")).toHaveValue(text);
-		expect(syncs.length).toBeGreaterThan(2);
-		expect(syncs.length).toBeLessThanOrEqual(budget);
-		expect(syncs[0]?.request.at).toBeLessThan(start + 300);
-		expect(longTasks.filter((duration) => duration > 50)).toEqual([]);
-	} finally {
-		await saveDraftEvidence(testInfo, [page], { measurement, calls });
-	}
-});
+			const start = Date.now();
+			const before = calls.length;
+			const text = "A human keeps typing while the draft saves live. "
+				.repeat(11)
+				.slice(0, 500);
+			await page.locator("#input").pressSequentially(text, { delay: 100 });
+			const typedAt = Date.now();
+			await expect
+				.poll(() => syncCompleted(calls.slice(before), text))
+				.toBe(true);
+			const longTasks = await page.evaluate(() => {
+				window.draftPerformance?.observer.disconnect();
+				return window.draftPerformance?.longTasks ?? [];
+			});
+			const syncs = calls
+				.slice(before)
+				.filter((call) => call.request.frame.tag === "SyncInputDraft");
+			const budget = Math.floor((typedAt - start) / 300) + 2;
+			measurement = {
+				start,
+				typedAt,
+				characters: text.length,
+				delay: 100,
+				budget,
+				count: syncs.length,
+				longTasks,
+			};
+			await expect(page.locator("#input")).toHaveValue(text);
+			expect(syncs.length).toBeGreaterThan(2);
+			expect(syncs.length).toBeLessThanOrEqual(budget);
+			expect(syncs[0]?.request.at).toBeLessThan(start + 300);
+			expect(longTasks.filter((duration) => duration > 50)).toEqual([]);
+		} finally {
+			await saveDraftEvidence(testInfo, [page], { measurement, calls });
+		}
+	},
+);
 
 for (const event of ["visibilitychange", "pagehide"] as const) {
 	test(`${event} flushes the latest text mid-burst`, async ({

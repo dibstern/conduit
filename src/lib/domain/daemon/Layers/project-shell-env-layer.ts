@@ -18,7 +18,11 @@ export const makeProjectShellEnvLive = (
 		ProjectShellEnvTag,
 		Effect.acquireRelease(
 			Effect.sync(() => new ProjectShellEnvResolver(options)),
-			(resolver) => Effect.sync(() => resolver.close()),
+			(resolver) =>
+				Effect.tryPromise({
+					try: () => resolver.close(),
+					catch: (cause) => cause,
+				}).pipe(Effect.orDie),
 		),
 	);
 

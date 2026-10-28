@@ -611,10 +611,8 @@ test("tools open as previews and expand to full detail", async ({
 		.slice(liveFrom)
 		.filter(({ value }) => toolsIn(value).some(({ tool }) => tool === "Bash"));
 	// The finished turn folds its step log; open it after that, not before.
-	await expect(page.locator(".turn-activity-toggle").last()).toHaveAttribute(
-		"aria-expanded",
-		"false",
-	);
+	// The toggle reads collapsed while live too, so wait for the row to go.
+	await expect(toolRow(page, liveId)).toBeHidden();
 	const liveRow = await expandTool(page, toolRow(page, liveId));
 	await expect(liveRow.locator(".shell-output")).toContainText(endOf("result"));
 	// The settled tool's detail was asked for once more, then kept.

@@ -3,6 +3,7 @@
 // context bar never rendered; the [1m] context-window override was ignored;
 // and history replay never restored contextPercent after a reload.
 
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 
@@ -24,7 +25,7 @@ import {
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
-import { probeClaudeCapabilities } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
+import { probeClaudeCapabilitiesEffect } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 import { seedSessions } from "../stores/session-fixtures.js";
 
@@ -172,20 +173,24 @@ describe("context percent computation", () => {
 
 describe("claude capability probe — fable family limits", () => {
 	it("gives fable models a context limit and context-window options", async () => {
-		const result = await probeClaudeCapabilities({
-			workspaceRoot: "/tmp",
-			configDir: configuredClaudeConfigDir("/tmp/claude-account"),
-			queryFactory: () => ({
-				async *[Symbol.asyncIterator]() {
-					yield* [];
-				},
-				initializationResult: async () => ({
-					models: [{ value: "claude-fable-5", displayName: "Claude Fable 5" }],
-					commands: [],
-					agents: [],
+		const result = await Effect.runPromise(
+			probeClaudeCapabilitiesEffect({
+				workspaceRoot: "/tmp",
+				configDir: configuredClaudeConfigDir("/tmp/claude-account"),
+				queryFactory: () => ({
+					async *[Symbol.asyncIterator]() {
+						yield* [];
+					},
+					initializationResult: async () => ({
+						models: [
+							{ value: "claude-fable-5", displayName: "Claude Fable 5" },
+						],
+						commands: [],
+						agents: [],
+					}),
 				}),
 			}),
-		});
+		);
 		const fable = result.models.find((m) => m.id === "claude-fable-5");
 		expect(fable?.limit?.context).toBe(200_000);
 		expect(fable?.contextWindowOptions?.some((o) => o.value === "1m")).toBe(

@@ -275,11 +275,13 @@ test.describe("Permission mode with a bound session", () => {
 	});
 
 	test("an approved plan drops the pill back off Plan", async ({ page }) => {
-		const { rpc } = await setup(page, claudeBoundInit);
+		const { rpc, serverModes } = await setup(page, claudeBoundInit);
 		await page
 			.locator(".connect-overlay")
 			.waitFor({ state: "hidden", timeout: 10_000 });
 
+		// The server's live mode moves with each report; a catalog refetch reads it.
+		serverModes.set("sess-pm-001", "plan");
 		reportMode(rpc, "plan", "claude");
 		await expect(pill(page)).toHaveAccessibleName(
 			"Approvals: Plan. Open options",
@@ -289,6 +291,7 @@ test.describe("Permission mode with a bound session", () => {
 		// learns from the SDK's own report rather than from its stored request.
 		// A pill still reading "Plan" after that is the difference between "read
 		// only" on screen and a session that is now editing files.
+		serverModes.set("sess-pm-001", "ask");
 		reportMode(rpc, "ask", "claude");
 		await expect(pill(page)).toHaveAccessibleName(
 			"Approvals: Ask before edits. Open options",

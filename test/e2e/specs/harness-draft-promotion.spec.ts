@@ -934,14 +934,24 @@ test.describe(() => {
 		const text = "one first send while promotion is pending";
 		await sync(browser, draftId, text);
 		const sends: Array<Record<string, unknown>> = [];
+		const sessionSubscriptions = new Set<string>();
+		const sessionSnapshots: InputDraftEnvelope[] = [];
 		await page.routeWebSocket("**/rpc", (socket) => {
 			const server = socket.connectToServer();
 			socket.onMessage((data) => {
 				const frame = JSON.parse(String(data)) as {
 					_tag?: string;
+					id: string;
 					tag?: string;
-					payload?: Record<string, unknown>;
+					payload?: Record<string, unknown> & { key?: InputDraftKey };
 				};
+				if (
+					frame._tag === "Request" &&
+					frame.tag === "SubscribeInputDraft" &&
+					frame.payload?.key &&
+					"session" in frame.payload.key
+				)
+					sessionSubscriptions.add(frame.id);
 				if (
 					frame._tag === "Request" &&
 					frame.tag === "input.submit" &&
@@ -949,6 +959,20 @@ test.describe(() => {
 				)
 					sends.push(frame.payload);
 				server.send(data);
+			});
+			server.onMessage((data) => {
+				const frame = JSON.parse(String(data)) as {
+					_tag?: string;
+					requestId: string;
+					values?: InputDraftEnvelope[];
+				};
+				if (frame._tag === "Chunk" && sessionSubscriptions.has(frame.requestId))
+					sessionSnapshots.push(
+						...(frame.values ?? []).filter(
+							(envelope) => envelope._tag === "synchronized",
+						),
+					);
+				socket.send(data);
 			});
 		});
 		const app = new AppPage(page);
@@ -958,30 +982,42 @@ test.describe(() => {
 		await app.sendBtn.click();
 		await expect(page).toHaveURL(/\/s\/[^/?]+/);
 		await expect.poll(() => sends.length).toBe(1);
-		await expect(app.input).toHaveValue(text);
+		// The session subscription must see the retained send text before admission.
+		await expect.poll(() => sessionSnapshots).toMatchObject([{ text }]);
+		await expect(app.input).toHaveValue("");
+		const inputId = String(sends[0]?.["inputId"]);
+		const sessionId = String(sends[0]?.["sessionId"]);
+		const admissions = () =>
+			withStore(
+				harness,
+				(db) =>
+					db
+						.prepare(
+							"SELECT event_id FROM events WHERE type = 'input.admitted' AND json_extract(data, '$.inputId') = ?",
+						)
+						.all(inputId).length,
+			);
+		expect(admissions()).toBe(0);
+		const nextText = "next draft typed while sending";
+		await app.input.pressSequentially(nextText);
+		await expect(app.input).toHaveValue(nextText);
 		// Working composers may hide Send; neither a click nor the send shortcut
 		// may submit again. Ctrl+Enter sends on every viewport; phone Enter is a newline.
 		await expect(page.locator("#send:enabled")).toHaveCount(0);
 		await app.input.press("Control+Enter");
 		expect(sends).toHaveLength(1);
-		const inputId = String(sends[0]?.["inputId"]);
+		expect(admissions()).toBe(0);
+		await expect.poll(admissions, { timeout: 30_000 }).toBe(1);
+		await expect(app.input).toHaveValue(nextText);
 		await expect
-			.poll(
-				() =>
-					withStore(
-						harness,
-						(db) =>
-							db
-								.prepare(
-									"SELECT event_id FROM events WHERE type = 'input.admitted' AND json_extract(data, '$.inputId') = ?",
-								)
-								.all(inputId).length,
-					),
-				{ timeout: 30_000 },
-			)
-			.toBe(1);
-		await expect(app.input).toHaveValue("");
+			.poll(async () => (await snapshot(browser, { session: sessionId })).text)
+			.toBe(nextText);
+		expect(storedDraft(harness, sessionId)).toMatchObject({
+			draft: { text: nextText },
+		});
 		expect(sends).toHaveLength(1);
 		report["send"] = sends[0];
+		report["sessionSnapshots"] = sessionSnapshots;
+		report["sessionDraft"] = storedDraft(harness, sessionId);
 	});
 });
