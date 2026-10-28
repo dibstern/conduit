@@ -59,12 +59,12 @@ export async function expectTurnStop(
 		).toHaveAttribute("aria-selected", "true");
 }
 
-/** A selected pin keeps its secondary number and takes a category tint and ring (xdyjq.17). */
+/** A selected pin takes the primary number, a 22% category tint and a ring, as in design E. */
 export async function expectSelectedPin(pin: Element): Promise<void> {
 	const probe = pin.ownerDocument.createElement("span");
-	probe.style.color = "var(--color-text-secondary)";
+	probe.style.color = "var(--color-text)";
 	probe.style.backgroundColor =
-		"color-mix(in srgb, var(--surface-colour, var(--color-text-secondary)) 14%, var(--color-turn-bg))";
+		"color-mix(in srgb, var(--surface-colour, var(--color-text-secondary)) 22%, var(--color-turn-bg))";
 	probe.style.borderColor =
 		"var(--surface-colour, var(--color-text-secondary))";
 	pin.append(probe);

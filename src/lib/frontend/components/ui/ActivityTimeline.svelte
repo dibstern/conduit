@@ -267,7 +267,7 @@
 	.glyph { color:var(--surface-colour,var(--color-text-dimmer)); }
 	.mark-glyph { align-self:flex-start; margin:3px 0 0 1px; font-size:9px; line-height:1; }
 	.mark-glyph.raise { color:var(--color-success); } .mark-glyph.lower { color:var(--color-text-muted); } .mark-glyph.retype { color:var(--color-accent); }
-	.pin-chip.current { background:color-mix(in srgb,var(--surface-colour,var(--color-text-secondary)) 14%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1px var(--surface-colour,var(--color-text-secondary)); }
+	.pin-chip.current { color:var(--color-text); background:color-mix(in srgb,var(--surface-colour,var(--color-text-secondary)) 22%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1px var(--surface-colour,var(--color-text-secondary)); }
 	.cited { translate:0 -4px; box-shadow:0 0 0 1.5px var(--color-accent),0 4px 10px rgba(var(--shadow-rgb),.2); }
 	.open-ask { background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1px var(--color-status-ask); }
 	.pending { background:none; outline:1px dashed var(--color-accent); outline-offset:-1px; color:var(--color-accent); }
