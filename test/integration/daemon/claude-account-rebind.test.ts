@@ -16,6 +16,13 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 
 let harness: ProcessHarness | undefined;
 const proofs: Record<string, unknown>[] = [];
+/** CONTRACT 11.1: a covered never-received send produces one `turn.interrupted`. */
+const stoppedBeforeDelivery = (db: Database.Database, sessionId: string) =>
+	db
+		.prepare<[string], { count: number }>(
+			"SELECT COUNT(*) AS count FROM events WHERE session_id = ? AND type = 'turn.interrupted' AND json_extract(data, '$.reason') = 'Stopped before delivery'",
+		)
+		.get(sessionId)?.count;
 afterEach(async ({ task }) => {
 	if (!harness) return;
 	const fixture = harness;
@@ -870,14 +877,16 @@ it("cancels a login change held behind background work, then retries", async () 
 			launches,
 		});
 		expect(cancel).toMatchObject({ _tag: "Some", value: { ok: true } });
+		// CONTRACT 4.3 step 1: a covered send is settled `interrupted`, "Stopped before delivery".
 		expect(beforeRelease).toMatchObject({
 			status: "failed",
-			error_code: "cancelled",
+			error_code: "interrupted",
 		});
 		expect(command()).toMatchObject({
 			status: "failed",
-			error_code: "cancelled",
+			error_code: "interrupted",
 		});
+		expect(stoppedBeforeDelivery(db, sessionId)).toBe(1);
 		expect(requests).toEqual([
 			"upgrade-background-work",
 			"retry-after-held-stop",
@@ -962,10 +971,11 @@ it.each([
 				.CancelSession({ sessionId, commandId: randomUUID() })
 				.pipe(Effect.timeoutOption("3 seconds")),
 		);
+		// CONTRACT 4.3 step 1: a covered send is settled `interrupted`, "Stopped before delivery".
 		await vi.waitFor(() =>
 			expect(command()).toMatchObject({
 				status: "failed",
-				error_code: "cancelled",
+				error_code: "interrupted",
 			}),
 		);
 		const beforeRelease = command();
@@ -996,8 +1006,9 @@ it.each([
 		expect(cancel).toMatchObject({ _tag: "Some", value: { ok: true } });
 		expect(command()).toMatchObject({
 			status: "failed",
-			error_code: "cancelled",
+			error_code: "interrupted",
 		});
+		expect(stoppedBeforeDelivery(db, sessionId)).toBe(1);
 		expect(requests).toEqual(["retry-after-preparation-stop"]);
 	} finally {
 		writeFileSync(release, "release");
@@ -1158,14 +1169,16 @@ it.each([
 			expect(requests).toEqual(["upgrade-background-work"]);
 		} else if (action === "cancel" || action === "cancel-preparing") {
 			expect(cancel).toMatchObject({ _tag: "Some", value: "cancelled" });
+			// CONTRACT 4.3 step 1: a covered send is settled `interrupted`, "Stopped before delivery".
 			expect(beforeRelease).toMatchObject({
 				status: "failed",
-				error_code: "cancelled",
+				error_code: "interrupted",
 			});
 			expect(command()).toMatchObject({
 				status: "failed",
-				error_code: "cancelled",
+				error_code: "interrupted",
 			});
+			expect(stoppedBeforeDelivery(db, sessionId)).toBe(1);
 			expect(requests).toEqual([
 				"upgrade-background-work",
 				"retry-after-recovered-cancel",
