@@ -68,7 +68,7 @@
 	.setup-prose { margin-top:6px; font-size:13.5px; line-height:1.55; color:var(--color-text-secondary); }
 	.setup-prose :global(p:last-child) { margin-bottom:0; }
 	/* Phones show the setup's opening; its jump opens the whole message. */
-	@media(max-width:599px) { .setup-prose { display:-webkit-box; -webkit-line-clamp:4; line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; } }
+	@media(max-width:767px) { .setup-prose { display:-webkit-box; -webkit-line-clamp:4; line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; } }
 	.no-setup { margin:0; font-size:13.5px; line-height:1.55; font-style:italic; color:var(--color-text-muted); }
 	.ask-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 	.ask-context :global(.ask-action) { justify-self:start; min-height:28px; padding:0 12px; border-radius:999px; font-size:13px; font-weight:500; }

@@ -3,6 +3,7 @@ import { expect, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -169,7 +170,7 @@ export const MixedRead: Story = {
 		const style = getComputedStyle(summary);
 		await expect(style.color).toBe(ink.color);
 		await expect(style.fontWeight).toBe("500");
-		if (window.matchMedia("(max-width: 599px)").matches) {
+		if (sessionViewState.compact) {
 			await expect(style.fontSize).toBe("14px");
 			await expect(summary.getBoundingClientRect().height).toBe(38);
 			await expect(style.marginTop).toBe("10px");

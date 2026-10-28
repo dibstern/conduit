@@ -20,6 +20,20 @@ Examples:
   | Auto       |
   | Minimised  |
 
+Scenario Outline: Turn summaries follow the shared phone breakpoint
+  Given message surfacing is active at Balanced
+  And the conduit app is served with the connected mockup
+  And the viewport is <width> pixels wide
+  And the recap session has a settled turn with current summaries
+  Then the turn summary uses the <layout> layout
+  And the screen region visually matches turn-panel-summary-<width> at 98 percent
+
+Examples:
+  | width | layout  |
+  | 700   | phone   |
+  | 767   | phone   |
+  | 768   | desktop |
+
 Scenario: Opening Summary with Jev off leaves the step log closed
   Given Jev is off with summaries on and a valid key in the dark theme
   And the conduit app is served with the connected mockup

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import { MediaQuery } from "svelte/reactivity";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { splitCitations } from "../../utils/citations.js";
 	import { splitUrls } from "../../utils/links.js";
 	import type { MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
@@ -18,9 +19,8 @@
 
 	// jsdom has no matchMedia; real browsers always do.
 	const media = typeof matchMedia === "function";
-	const viewport = media ? new MediaQuery("(max-width: 599px)") : { current: false };
 	const desktop = media ? new MediaQuery("(min-width: 1024px)") : { current: true };
-	let { versions, selected, open, phone = viewport.current, live, view, start, settings, level = "balanced", plainCitations = false, generating = false, error = "", settingsError = "", saving = false, onclose, onversion, ongenerate, onretry, onsettings, oncite, onhover, onreply, onquote, replies = new Map(), foot }: {
+	let { versions, selected, open, phone = sessionViewState.compact, live, view, start, settings, level = "balanced", plainCitations = false, generating = false, error = "", settingsError = "", saving = false, onclose, onversion, ongenerate, onretry, onsettings, oncite, onhover, onreply, onquote, replies = new Map(), foot }: {
 		versions: readonly TurnRecap[];
 		selected: TurnRecap | undefined;
 		open: boolean;
@@ -227,7 +227,7 @@
 	.summary-foot { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px; padding-top:9px; border-top:1px solid var(--color-border-subtle); color:var(--color-text-muted); font:11.5px var(--font-mono); }
 	.summary-fail { display:flex; align-items:center; gap:8px; margin-top:10px; color:var(--color-error); font-size:13px; }
 	.summary-error { margin:6px 0 0; color:var(--color-error); font-size:12px; overflow-wrap:anywhere; }
-	@media(max-width:599px) {
+	@media(max-width:767px) {
 		.summary { margin:0; padding:8px 0 0; background:transparent; }
 		.summary-head { gap:4px; }
 		.scope { display:none; }

@@ -17,6 +17,7 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { surfacePinRows, SURFACE_LABELS, SURFACE_LEVELS, type SurfaceLevel, type SurfacePinGroup } from "../../utils/surface-turn.js";
 	import Button from "../ui/Button.svelte";
 	import SurfacingReplyActions from "./SurfacingReplyActions.svelte";
@@ -57,9 +58,8 @@
 	} = $props();
 	let scrubEl: HTMLDivElement;
 	let laneWidth = $state(0);
-	let viewportWidth = $state(1024);
 	let citedPart = $state<string | null>(null);
-	const groups = $derived(surfacePinRows(view, laneWidth, viewportWidth < 768));
+	const groups = $derived(surfacePinRows(view, laneWidth, sessionViewState.compact));
 	const currentGroup = $derived(groups.find((group) => group.members.some((pin) => pin.part.uuid === view.card?.part.uuid)));
 	let lastGroupTap: { source: string; picked: string } | null = null;
 	let cardEl = $state<HTMLElement>();
@@ -169,8 +169,6 @@
 		finally { saving = false; }
 	}
 </script>
-
-<svelte:window bind:innerWidth={viewportWidth} />
 
 {#snippet stepButton(label: string, glyph: string, onclick: () => void, disabled = false)}
 	<Button variant="ghost" size="content" tone="muted" touchTarget {disabled} class="size-[26px] max-md:size-[30px] rounded-full text-[14px]" ariaLabel={label} {onclick}>{glyph}</Button>

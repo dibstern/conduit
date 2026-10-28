@@ -73,5 +73,5 @@
 	.minimised-turn :global(.peek b), .minimised-turn :global(.peek small) { flex:none; }
 	.peek-text { min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--color-text-secondary); }
 	.minimised-turn :global(.peek small) { margin-left:auto; color:var(--color-text-muted); font-size:12px; }
-	@media (max-width:599px) { .minimised-turn :global(.minimised-scrub) { padding:20px 0; } .minimised-turn :global(.peek) { min-height:44px; } }
+	@media (max-width:767px) { .minimised-turn :global(.minimised-scrub) { padding:20px 0; } .minimised-turn :global(.peek) { min-height:44px; } }
 </style>
