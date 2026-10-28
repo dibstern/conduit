@@ -617,10 +617,32 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 							if (permission.length > 0) {
 								await client.session.update(sessionId, { permission });
 							}
-							if (!abortSignal.aborted) {
-								submitted = true;
+							// `$init` arrives as `/init`; OpenCode's prompt endpoint would
+							// send it to the model as plain text, so route known commands.
+							const slash = prompt.trim().match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
+							const command =
+								slash?.[1] &&
+								(await client.app.commands()).some(
+									({ name, source }) => name === slash[1] && source !== "skill",
+								)
+									? { name: slash[1], arguments: slash[2] ?? "" }
+									: undefined;
+							if (abortSignal.aborted) return;
+							submitted = true;
+							if (!command) {
 								await client.session.prompt(sessionId, promptOptions);
+								return;
 							}
+							// The command endpoint replies only when the turn ends, well past
+							// the client's request timeout. Submit it like promptAsync: the
+							// echo establishes intake and the event stream carries the turn.
+							client.session
+								.command(sessionId, command, promptOptions)
+								.catch((cause: unknown) =>
+									log.warn(
+										`OpenCode command /${command.name} for session ${sessionId} ended with: ${cause instanceof Error ? cause.message : String(cause)}`,
+									),
+								);
 						},
 						catch: (cause) => cause,
 					}),
