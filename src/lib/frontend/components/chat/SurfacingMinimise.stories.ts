@@ -8,6 +8,7 @@ import { sessionState } from "../../stores/session.svelte.js";
 import { setTurnMinimised } from "../../stores/turn-minimisation.svelte.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
+import { expectTurnStop } from "../../stories/turn-controls.js";
 import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
@@ -194,13 +195,14 @@ export const OpenPreview: Story = {
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		const strip = canvas.getByTestId("surfacing-scrub");
-		const step = canvasElement
-			.querySelector('[data-step-id="minimise-agent/part-1"]')
-			?.getBoundingClientRect();
-		if (!step) throw new Error("Missing message step");
+		// With pins showing, only the step strip (not the pin lane) previews a step on hover.
+		const target = canvasElement.querySelector<HTMLElement>(
+			'[data-step-id="minimise-agent/part-1"]',
+		);
+		if (!target) throw new Error("Missing message step");
+		const step = target.getBoundingClientRect();
 		await userEvent.pointer({
-			target: strip,
+			target,
 			coords: {
 				clientX: step.x + step.width / 2,
 				clientY: step.y + step.height / 2,
@@ -272,9 +274,7 @@ export const HandExpanded: Story = {
 		await expect(
 			canvas.getByRole("button", { name: "Collapse turn" }),
 		).toBeVisible();
-		await expect(
-			canvas.getByRole("radio", { name: /^Most\b/ }),
-		).toHaveAttribute("aria-checked", "true");
+		await expectTurnStop(canvasElement, "balanced");
 		await expect(canvas.getByTestId("surfacing-msg-card")).toBeVisible();
 		canvas.getByTestId("surfacing-card").blur();
 	},
@@ -310,10 +310,7 @@ export const MessageDestination: Story = {
 			"data-ordinal",
 			"4",
 		);
-		await expect(canvas.getByRole("tab", { name: "Most" })).toHaveAttribute(
-			"aria-selected",
-			"true",
-		);
+		await expectTurnStop(canvasElement, "balanced");
 		await expect(canvas.getByTestId("surfacing-msg-card")).toHaveTextContent(
 			"opened directly",
 		);

@@ -182,19 +182,19 @@ export const turnActivityHandlers: StepHandler[] = [
 	{
 		name: "assert selected below-stop pin paint",
 		match:
-			/^the selected pin keeps its category tint and secondary number below the saved stop$/,
+			/^the selected pin keeps its category tint and primary number below the saved stop$/,
 		run: async ({ world }) => {
 			const chip = world.page.locator(
 				'[data-x][aria-pressed="true"] .pin-chip',
 			);
 			const paint = await chip.evaluate((element) => {
 				const probe = document.createElement("span");
-				probe.style.color = "var(--color-text-secondary)";
+				probe.style.color = "var(--color-text)";
 				probe.style.backgroundColor = "var(--color-turn-bg)";
 				element.append(probe);
 				const result = {
 					number: getComputedStyle(element).color,
-					secondary: getComputedStyle(probe).color,
+					primary: getComputedStyle(probe).color,
 					fill: getComputedStyle(element).backgroundColor,
 					turnBg: getComputedStyle(probe).backgroundColor,
 					ring: getComputedStyle(element).boxShadow,
@@ -202,7 +202,7 @@ export const turnActivityHandlers: StepHandler[] = [
 				probe.remove();
 				return result;
 			});
-			expect(paint.number).toBe(paint.secondary);
+			expect(paint.number).toBe(paint.primary);
 			expect(paint.fill).not.toBe(paint.turnBg);
 			expect(paint.ring).toContain("1px");
 		},
@@ -482,15 +482,24 @@ export const turnActivityHandlers: StepHandler[] = [
 			expect(paint.glyph).not.toBe(paint.colour);
 			expect(paint.stem).toBe("6px");
 			const selected = page.locator('[data-x][aria-pressed="true"] .pin-chip');
-			const tint = await selected.evaluate((element) => ({
-				background: getComputedStyle(element).backgroundColor,
-				glyph: getComputedStyle(element.querySelector(".glyph") ?? element)
-					.color,
-				ring: getComputedStyle(element).boxShadow,
-			}));
+			const tint = await selected.evaluate((element) => {
+				const probe = document.createElement("span");
+				probe.style.color = "var(--color-text)";
+				element.append(probe);
+				const result = {
+					number: getComputedStyle(element).color,
+					primary: getComputedStyle(probe).color,
+					background: getComputedStyle(element).backgroundColor,
+					glyph: getComputedStyle(element.querySelector(".glyph") ?? element)
+						.color,
+					ring: getComputedStyle(element).boxShadow,
+				};
+				probe.remove();
+				return result;
+			});
 			expect(tint.background).not.toBe(tint.glyph);
 			expect(tint.ring).toContain("1px");
-			await expect(selected).toHaveCSS("color", paint.secondary);
+			expect(tint.number).toBe(tint.primary);
 		},
 	},
 	{

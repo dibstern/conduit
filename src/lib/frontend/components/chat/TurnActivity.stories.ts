@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import { Utf8Bytes } from "../../../contracts/tool-wire.js";
+import { expandTurn, showTurnStop } from "../../stories/turn-controls.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { ChatMessage, ToolMessage } from "../../types.js";
@@ -143,6 +144,8 @@ export const SummaryRow: Story = {
 		onsummarize: fn(),
 	},
 	play: async ({ canvasElement, args }) => {
+		// Jev-off turns start collapsed (xdyjq.8), and the phone row lives in the open turn.
+		await expandTurn(canvasElement);
 		const button = within(canvasElement).getByRole("button", {
 			name: "✦ Summary",
 		});
@@ -273,7 +276,7 @@ export const HandBackQa: Story = {
 		await userEvent.click(
 			canvas.getByRole("button", { name: "Expand turn", expanded: false }),
 		);
-		await userEvent.click(canvas.getByRole("tab", { name: /^Q&A$/ }));
+		await showTurnStop(canvasElement, "qa");
 		await expect(
 			canvas.getByRole("region", { name: "Turn Q&A" }),
 		).toHaveTextContent("Answered");
@@ -451,17 +454,12 @@ const [skilledLiveSegment = EMPTY_SEGMENT] = skilledLive.segments;
 
 async function showSkillEvents(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
-	const head = canvasElement.querySelector<HTMLButtonElement>(
-		".turn-activity-toggle",
-	);
-	if (head?.getAttribute("aria-expanded") === "false")
-		await userEvent.click(head);
-	await userEvent.click(canvas.getByRole("tab", { name: /^(Full log|Log)$/ }));
+	await expandTurn(canvasElement);
+	await showTurnStop(canvasElement, "log");
 	const earlier = canvas.queryByRole("button", {
 		name: /^\+ \d+ earlier steps$/,
 	});
 	if (earlier) await userEvent.click(earlier);
-	head?.blur();
 	const rows = canvas.getAllByRole("button", { name: /^Skill / });
 	await expect(rows).toHaveLength(2);
 	for (const row of rows) {

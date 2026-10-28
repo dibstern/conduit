@@ -136,6 +136,8 @@ const messages = surfaceTurn({
 });
 
 export const Pins: Story = {
+	// Pin touch targets are taller than the fitted lane, so they reach above the root.
+	tags: ["viewport-capture"],
 	args: {
 		cardSlot: messages.card
 			? { kind: "selected", card: messages.card }
@@ -185,6 +187,7 @@ export const Pins: Story = {
 
 export const PhonePins: Story = {
 	...Pins,
+	tags: ["viewport-capture"],
 	args: { ...Pins.args, phone: true },
 	play: async (context) => {
 		await Pins.play?.(context);
@@ -197,6 +200,7 @@ export const PhonePins: Story = {
 };
 export const SelectedBelowStop: Story = {
 	...Pins,
+	tags: ["viewport-capture"],
 	args: { ...Pins.args, belowLevel: true },
 	play: async (context) => {
 		await Pins.play?.(context);
@@ -210,7 +214,42 @@ export const SelectedBelowStop: Story = {
 };
 
 export const Collapsed: Story = {
+	// The message peek is a floating hover card below the strip.
+	tags: ["viewport-capture"],
 	args: {
+		// ActivityStrip keys message steps by their part, so the focused step names the pin.
+		segments: [
+			{
+				id: "message-1",
+				kind: "message",
+				left: 0,
+				width: 34,
+				label: "Message 1",
+				tone: "text",
+			},
+			{
+				id: "thought",
+				left: 34.2,
+				width: 20,
+				label: "Thought for 3s",
+				tone: "thinking",
+			},
+			{
+				id: "error",
+				left: 54.4,
+				width: 5,
+				label: "Failed pnpm check · 1s",
+				tone: "fail",
+			},
+			{
+				id: "message-2",
+				kind: "message",
+				left: 59.6,
+				width: 40.4,
+				label: "Message 2",
+				tone: "text",
+			},
+		],
 		cardSlot: messages.card
 			? { kind: "preview", card: messages.card }
 			: { kind: "none" },

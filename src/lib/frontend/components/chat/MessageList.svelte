@@ -505,7 +505,7 @@
 		(forkSplit && forkSplit.inherited.length > 0 ? [...inheritedTurns, ...currentTurns] : turns)
 			.filter((turn) => !turn.live).at(-1)?.id,
 	);
-	const latestTurnId = $derived((forkSplit ? currentTurns.at(-1) ?? inheritedTurns.at(-1) : turns.at(-1))?.id);
+	const latestTurnId = $derived((emptyLiveTurn ?? (forkSplit ? currentTurns.at(-1) ?? inheritedTurns.at(-1) : turns.at(-1)))?.id);
 
 </script>
 
