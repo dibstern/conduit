@@ -10,7 +10,6 @@
 		firstLine,
 		isHandBack,
 		fmtDuration,
-		fmtTokens,
 		launchMeta,
 		launchRow,
 		launchStatus,
@@ -31,6 +30,7 @@
 	import { partStyle, segmentAppearance } from "./activity-style.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import SkillDoc from "./SkillDoc.svelte";
+	import CompactionRule from "./CompactionRule.svelte";
 	import ToolFullDetail from "./ToolFullDetail.svelte";
 	import ToolItem from "./ToolItem.svelte";
 
@@ -227,25 +227,7 @@
 		{/if}
 	</div>
 {:else if part.type === "system"}
-	{@const { preTokens: pre, postTokens: post } = part}
-	<!-- A boundary, not a step: there is nothing to open, so it is a rule across
-	     the log rather than a row. The saving is the one number worth reading. -->
-	<div
-		class="compaction-rule flex items-center gap-[8px] py-[6px] text-[12px] text-text-dimmer {highlight ? 'bg-selection' : ''}"
-		data-part={part.uuid}
-	>
-		<span class="h-px flex-1 bg-border" aria-hidden="true"></span>
-		<span class="shrink-0 [&_.lucide]:w-3 [&_.lucide]:h-3" aria-hidden="true"><Icon name={style.icon} size={12} /></span>
-		<span class="shrink-0">Compacted context</span>
-		{#if pre !== undefined && post !== undefined}
-			<span class="shrink-0 font-mono text-text-dimmer">{fmtTokens(pre)} → {fmtTokens(post)}</span>
-			{#if pre > post}
-				<span class="shrink-0 text-text-dimmer">·</span>
-				<span class="shrink-0 font-medium text-text-secondary">{fmtTokens(pre - post)} saved</span>
-			{/if}
-		{/if}
-		<span class="h-px flex-1 bg-border" aria-hidden="true"></span>
-	</div>
+	<CompactionRule {part} {highlight} />
 {:else}
 	<div data-part={part.uuid} data-message-number={messageNumber} data-highlighted={highlight || undefined}>
 		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" class={highlight ? "bg-selection" : ""} aria-expanded={expanded} onclick={() => (expanded = !expanded)}>

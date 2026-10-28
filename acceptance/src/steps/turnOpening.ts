@@ -24,7 +24,8 @@ const opening = (page: Page) => page.getByTestId("turn-opening");
 export const turnOpeningHandlers: StepHandler[] = [
 	{
 		name: "seed a sent turn without steps",
-		match: /^the turn opening prompt was sent (\d+) seconds ago$/,
+		match:
+			/^the turn opening prompt was sent (\d+) seconds ago( but the turn is not live)?$/,
 		run: async ({ world, match }) => {
 			const prompt: typeof HistoryMessageSchema.Type = {
 				id: "turn-opening-user",
@@ -37,7 +38,7 @@ export const turnOpeningHandlers: StepHandler[] = [
 				SESSION,
 				detailRowsOf(prompt),
 			);
-			setSessionRowStatus(world.page, SESSION, "busy", {
+			setSessionRowStatus(world.page, SESSION, match[2] ? "idle" : "busy", {
 				title: "Turn opening acceptance",
 				accountId: "claude",
 				updatedAt: PINNED_CLOCK_MS,
@@ -46,6 +47,190 @@ export const turnOpeningHandlers: StepHandler[] = [
 			await expect(world.page.locator("#messages .msg-user")).toContainText(
 				PROMPT,
 			);
+		},
+	},
+	{
+		name: "report opening compaction on the session row",
+		match:
+			/^(the turn opening session starts compacting|a compacting row arrives before the turn is live)$/,
+		run: ({ world, match }) => {
+			setSessionRowStatus(
+				world.page,
+				SESSION,
+				match[1] === "the turn opening session starts compacting"
+					? "busy"
+					: "idle",
+				{ compacting: "Compacting…" },
+			);
+		},
+	},
+	{
+		name: "report busy after the compacting row",
+		match: /^the turn opening session becomes busy$/,
+		run: ({ world }) => {
+			setSessionRowStatus(world.page, SESSION, "busy");
+		},
+	},
+	{
+		name: "assert live compaction replaces the opening and notice",
+		match:
+			/^the turn opening shows Compacting context without a status message, card or timer$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("turn-opening-compacting"),
+			).toBeVisible();
+			await expect(opening(world.page)).toHaveText("Compacting context");
+			await expect(
+				opening(world.page).locator(".assistant-header"),
+			).toHaveCount(0);
+			await expect(world.page.locator("#messages .system-notice")).toHaveCount(
+				0,
+			);
+			await expect(world.page.locator("#messages .turn-activity")).toHaveCount(
+				0,
+			);
+			await expect(world.page.getByTestId("turn-live-elapsed")).toHaveCount(0);
+		},
+	},
+	{
+		name: "project opening compaction failure and clear its session status",
+		match: /^the turn opening compaction fails$/,
+		run: ({ world }) => {
+			const prompt = prompts.get(world.page);
+			if (!prompt) throw new Error("Turn opening prompt was not seeded");
+			const failure: typeof HistoryMessageSchema.Type = {
+				id: "turn-opening-compaction-failed",
+				role: "assistant",
+				time: { created: PINNED_CLOCK_MS - 1000 },
+				parts: [
+					{
+						id: "turn-opening-compaction-error",
+						type: "compaction",
+						text: "Compaction failed.",
+						failed: true,
+					},
+				],
+			};
+			requireRpcControl(world.page).setDetailRows(SESSION, [
+				...detailRowsOf(prompt),
+				...detailRowsOf(failure),
+			]);
+			setSessionRowStatus(world.page, SESSION, "idle", {
+				compacting: undefined,
+			});
+		},
+	},
+	{
+		name: "assert only the compaction error remains",
+		match: /^the opening compaction leaves only its error notice$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("system-error-notice")).toHaveText(
+				"Compaction failed.",
+			);
+			await expect(world.page.locator("#messages .system-notice")).toHaveCount(
+				1,
+			);
+			await expect(opening(world.page)).toHaveCount(0);
+			await expect(
+				world.page.locator("#messages .compaction-rule"),
+			).toHaveCount(0);
+			await expect(world.page.locator("#messages .turn-activity")).toHaveCount(
+				0,
+			);
+			await expect(world.page.getByTestId("turn-live-elapsed")).toHaveCount(0);
+		},
+	},
+	{
+		name: "stop during opening compaction through the composer",
+		match: /^I stop the turn during its opening compaction$/,
+		run: async ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			rpc.setStubs({
+				CancelSession: () => {
+					setSessionRowStatus(world.page, SESSION, "idle", {
+						compacting: undefined,
+					});
+					return { ok: true };
+				},
+			});
+			await world.page.locator("#stop").click();
+			await rpc.waitForRequest(
+				(request) =>
+					request.tag === "CancelSession" &&
+					request.payload["sessionId"] === SESSION,
+			);
+			await expect(world.page.locator("#stop")).toBeHidden();
+		},
+	},
+	{
+		name: "assert stopping leaves no compaction record",
+		match: /^the stopped opening compaction leaves no rule or notice$/,
+		run: async ({ world }) => {
+			await expect(opening(world.page)).toHaveCount(0);
+			await expect(
+				world.page.locator("#messages .compaction-rule"),
+			).toHaveCount(0);
+			await expect(world.page.locator("#messages .system-notice")).toHaveCount(
+				0,
+			);
+			await expect(world.page.locator("#messages .turn-activity")).toHaveCount(
+				0,
+			);
+			await expect(world.page.getByTestId("turn-live-elapsed")).toHaveCount(0);
+		},
+	},
+	{
+		name: "watch for even a transient plain compaction notice",
+		match: /^I watch for a plain opening compaction notice$/,
+		run: async ({ world }) => {
+			await world.page.locator("#messages").evaluate((messages) => {
+				messages.setAttribute("data-plain-compaction-seen", "false");
+				new MutationObserver((records) => {
+					if (
+						messages.textContent?.includes("Compacting…") ||
+						records.some(
+							(record) =>
+								record.oldValue?.includes("Compacting…") ||
+								[...record.addedNodes, ...record.removedNodes].some((node) =>
+									node.textContent?.includes("Compacting…"),
+								),
+						)
+					)
+						messages.setAttribute("data-plain-compaction-seen", "true");
+				}).observe(messages, {
+					childList: true,
+					subtree: true,
+					characterData: true,
+					characterDataOldValue: true,
+				});
+			});
+		},
+	},
+	{
+		name: "assert the plain compaction notice never appeared",
+		match: /^the plain opening compaction notice never appeared$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page
+					.locator("#messages")
+					.getByText("Compacting…", { exact: true }),
+			).toHaveCount(0);
+			await expect(world.page.locator("#messages")).toHaveAttribute(
+				"data-plain-compaction-seen",
+				"false",
+			);
+		},
+	},
+	{
+		name: "assert mid-turn compaction keeps its status message",
+		match: /^the mid-turn compaction is a status message$/,
+		run: async ({ world }) => {
+			await expect(world.page.locator("#messages .system-notice")).toHaveText(
+				"Compacting…",
+			);
+			await expect(
+				world.page.locator("#messages .compaction-rule"),
+			).toHaveCount(0);
 		},
 	},
 	{

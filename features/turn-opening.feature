@@ -52,6 +52,76 @@ Scenario: A notice before the first step changes the opening to Working
   Then the turn opening reads Working without a card or timer
   And the retry notice follows the turn opening
 
+Scenario Outline: Compaction before the first step is a live rule
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn opening prompt was sent 5 seconds ago
+  When the turn opening session starts compacting
+  Then the turn opening shows Compacting context without a status message, card or timer
+  And the messages region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                        | threshold |
+  | desktop  | turn-opening-compacting         | 98        |
+  | phone    | turn-opening-compacting         | 98        |
+
+Scenario Outline: Failed opening compaction leaves only the error notice
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn opening prompt was sent 5 seconds ago
+  When the turn opening session starts compacting
+  Then the turn opening shows Compacting context without a status message, card or timer
+  When the turn opening compaction fails
+  Then the opening compaction leaves only its error notice
+  And the messages region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                        | threshold |
+  | desktop  | turn-opening-compaction-failed  | 98        |
+  | phone    | turn-opening-compaction-failed  | 98        |
+
+Scenario Outline: Stopping opening compaction leaves no rule behind
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn opening prompt was sent 5 seconds ago
+  When the turn opening session starts compacting
+  Then the turn opening shows Compacting context without a status message, card or timer
+  When I stop the turn during its opening compaction
+  Then the stopped opening compaction leaves no rule or notice
+  And the messages region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | viewport | baseline                        | threshold |
+  | desktop  | turn-opening-compaction-stopped | 98        |
+  | phone    | turn-opening-compaction-stopped | 98        |
+
+Scenario: A compacting row before the turn is live never flashes a plain notice
+  Given the conduit app is served with the connected mockup
+  And the turn opening prompt was sent 5 seconds ago but the turn is not live
+  When I watch for a plain opening compaction notice
+  And a compacting row arrives before the turn is live
+  Then the turn opening shows Compacting context without a status message, card or timer
+  When the turn opening session becomes busy
+  Then the turn opening shows Compacting context without a status message, card or timer
+  And the plain opening compaction notice never appeared
+
+Scenario: Mid-turn compaction stays a status message
+  Given the conduit app is served with the connected mockup
+  And the turn opening prompt was sent 5 seconds ago
+  When the first ordinary turn opening step arrives
+  Then the turn opening is replaced by a Working card timed 5s
+  When the turn opening session starts compacting
+  Then the mid-turn compaction is a status message
+  And the turn opening is replaced by a Working card timed 5s
+
+Scenario: The live compaction rule stays still under reduced motion
+  Given the conduit app is served with the connected mockup
+  And reduced motion is enabled for the turn opening
+  And the turn opening prompt was sent 5 seconds ago
+  When the turn opening session starts compacting
+  Then the turn opening shows Compacting context without a status message, card or timer
+  And the turn opening has no running animation
+
 Scenario: A busy session with no transcript rows still shows Sending
   Given the conduit app is served with the connected mockup
   And the turn opening session is busy with no transcript rows

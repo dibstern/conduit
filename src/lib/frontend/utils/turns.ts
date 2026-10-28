@@ -26,7 +26,7 @@ export type ActivityPart =
 	| AssistantMessage
 	| CompactionPart;
 
-/** Started and failed compactions stay notices; only a completed one is activity. */
+/** Only a completed compaction is activity. */
 export function isCompaction(msg: ChatMessage): msg is CompactionPart {
 	return msg.type === "system" && msg.compaction === "completed";
 }
@@ -62,13 +62,13 @@ export interface Turn {
 	/** Always at least one. */
 	segments: Segment[];
 	/**
-	 * Transcript-level notices — errors and in-flight or failed compactions. Kept
-	 * out of the activity log so a failure is never hidden behind a collapsed panel.
+	 * Transcript-level notices — errors, failed compactions and mid-turn status.
+	 * Kept out of the log so a failure is never hidden behind a collapsed panel.
 	 */
 	notices: SystemMessage[];
 	live: boolean;
 	/** Quiet presence before the first activity, reply or hand-back. */
-	opening?: "sending" | "working";
+	opening?: "sending" | "compacting" | "working";
 }
 
 /** Earlier replies become steps once more work follows; only the last reply
@@ -230,16 +230,26 @@ export function segmentTurns(
 	// segment and the turn reads as live again.
 	if (last) {
 		last.live = processing && last.segments.at(-1)?.end === undefined;
+	}
+	for (const turn of turns) {
 		if (
-			last.live &&
-			last.segments.every(
+			turn.segments.some(
 				(segment) =>
-					segment.activity.length === 0 &&
-					segment.reply.length === 0 &&
-					!segment.handBack,
+					segment.activity.length > 0 ||
+					segment.reply.length > 0 ||
+					segment.handBack,
 			)
-		) {
-			last.opening = last.notices.length > 0 ? "working" : "sending";
+		)
+			continue;
+		// The row can report compaction before the turn counts as live. Its
+		// transient notice still belongs only in the opening rule in that gap.
+		if (turn.notices.some((notice) => notice.compaction === "started")) {
+			turn.opening = "compacting";
+			turn.notices = turn.notices.filter(
+				(notice) => notice.compaction !== "started",
+			);
+		} else if (turn.live) {
+			turn.opening = turn.notices.length > 0 ? "working" : "sending";
 		}
 	}
 	return turns;

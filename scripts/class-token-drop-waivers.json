@@ -1091,5 +1091,10 @@
 		"requires": "pending=",
 		"reason": "conduit-test-c4275.1 option 3: the pulse and its dim label now render inside AssistantHeader's name row via the `pending` prop."
 	},
-	"src/lib/frontend/components/chat/TurnOpening.svelte :: gap-[6px],h-[21px],md:ml-[42px],md:pb-[9px],min-[600px]:h-[24px],mx-[3.5px],pb-[2px],pt-[38px],px-[12px],summaryHead,text-[14px]": "conduit-test-c4275.1 option 3: these reserved the name row (pt-[38px]) and mimicked the Working card head so the swap would not jump. The opening is now AssistantHeader itself at TurnActivity's outer spacing, so the reservation and head mimicry are deliberately gone."
+	"src/lib/frontend/components/chat/TurnOpening.svelte :: gap-[6px],h-[21px],md:ml-[42px],md:pb-[9px],min-[600px]:h-[24px],mx-[3.5px],pb-[2px],pt-[38px],px-[12px],summaryHead,text-[14px]": "conduit-test-c4275.1 option 3: these reserved the name row (pt-[38px]) and mimicked the Working card head so the swap would not jump. The opening is now AssistantHeader itself at TurnActivity's outer spacing, so the reservation and head mimicry are deliberately gone.",
+	"src/lib/frontend/components/chat/ActivityRow.svelte :: bg-border,compaction-rule,gap-[8px],h-px,py-[6px]": {
+		"movedTo": "src/lib/frontend/components/chat/CompactionRule.svelte",
+		"requires": "<CompactionRule {part} {highlight} />",
+		"reason": "conduit-test-c4275.2 shares the expanded log's compaction rule and its box with the live turn opening. The class tokens moved intact to CompactionRule."
+	}
 }
