@@ -229,11 +229,20 @@ describe("Claude project extra folders through the built daemon", () => {
 		evidence["secondReply"] = second;
 		expect(second.done["status"]).toBe("idle");
 		expect(second.chunks.join("")).toBe("pong");
-		evidence["idleRunnerEndedAtSend"] = fixture.marks.some(
+		// CONTRACT 6.3: the send's admission retires the idle runner (main marked
+		// this runner-end-selected), and requestStop(EndSession) stops its process.
+		evidence["idleRunnerRetiredAtSend"] = fixture.marks.some(
 			(mark) =>
-				mark.kind === "runner-end-selected" && mark.sessionId === sessionId,
+				mark.kind === "runner-admission" &&
+				mark.sessionId === sessionId &&
+				mark.decision === "Retire",
 		);
-		expect(evidence["idleRunnerEndedAtSend"]).toBe(true);
+		expect(evidence["idleRunnerRetiredAtSend"]).toBe(true);
+		await vi.waitFor(
+			() => expect(() => process.kill(original.pid, 0)).toThrow(),
+			{ timeout: 10_000, interval: 20 },
+		);
+		evidence["idleRunnerStopped"] = true;
 		const current = runnerOptions(fixture, sessionId).at(-1);
 		evidence["replacementQuery"] = current;
 		expect(current?.pid).not.toBe(original.pid);

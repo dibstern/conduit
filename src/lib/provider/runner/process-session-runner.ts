@@ -1395,9 +1395,14 @@ export const makeProcessSessionRunner = (
 						// Release daemon resources after the durable fence, independently
 						// of process survival and Gone-only outcome settlement.
 						yield* closeStoppedSends(entry.runnerId);
-						const connection =
-							entry.connection ?? (yield* Deferred.await(entry.ready));
-						yield* connection.commandEffect(
+						// A runner that never became ready has no connection to stop; the
+						// Signal action owns its process. An interrupted adoption fails
+						// ready with interruption, which Effect.ignore would not absorb.
+						const ready = entry.connection
+							? Exit.succeed(entry.connection)
+							: yield* Effect.exit(Deferred.await(entry.ready));
+						if (Exit.isFailure(ready)) return;
+						yield* ready.value.commandEffect(
 							`runner-stop:${retirement.runnerId}`,
 							{
 								type: "shutdown",
@@ -4232,8 +4237,11 @@ export const makeProcessSessionRunner = (
 								log.warn(failure.message);
 								// A failed hello needs independent process identity before signalling.
 								transition(entry, { _tag: "Verify" });
+								// Fail, not a user Stop: Settle ends its uncertain sends as
+								// delivery_indeterminate (CONTRACT 4.9, 7.3).
+								transition(entry, { _tag: "Fail", failure });
 								yield* Deferred.fail(entry.ready, failure);
-								yield* stopRunner(entry);
+								yield* stopRunner(entry, undefined, "failure");
 								if (pidAlive(registration.pid, registration.startTime))
 									return yield* retireSurvivor(entry, failure);
 								transition(entry, { _tag: "Recovered" });
@@ -4300,12 +4308,10 @@ export const makeProcessSessionRunner = (
 							);
 						}).pipe(
 							Effect.onExit((exit) => {
-								if (
-									exit._tag === "Success" ||
-									closing ||
-									Failure.isInterruptedOnly(exit.cause)
-								)
-									return Effect.void;
+								if (exit._tag === "Success" || closing) return Effect.void;
+								// Interruption is no stop reason (6.3), but its waiters must settle.
+								if (Failure.isInterruptedOnly(exit.cause))
+									return releaseEntryWaiters(entry, exit.cause);
 								return Effect.gen(function* () {
 									transition(entry, { _tag: "Recovered" });
 									transition(entry, {
@@ -4958,6 +4964,27 @@ export const makeProcessSessionRunner = (
 										runnerFailure(command.type, "Runners are shutting down"),
 									);
 								const existing = selectedEntry;
+								// An interrupted adoption settles ready but leaves its survivor
+								// Recovering with no failure or stop. A send needs the serving
+								// slot, so it retires that survivor as a failed adoption would
+								// (CONTRACT 6.7, 6.3). Under the lock, after the closing check,
+								// shutdown can never see it retire a live survivor (Q28).
+								if (
+									existing &&
+									existing !== recovered &&
+									existing.lifecycle.activity._tag === "Recovering" &&
+									!existing.lifecycle.failure &&
+									!existing.lifecycle.stop &&
+									Deferred.isDoneUnsafe(existing.ready) &&
+									(command.type === "send-turn" || command.type === "pre-warm")
+								)
+									yield* retireSurvivor(
+										existing,
+										runnerFailure(
+											"recover runner",
+											"Runner adoption was interrupted",
+										),
+									);
 								if (held && (!existing || existing.runnerId !== held.runner))
 									return yield* Effect.fail({
 										...runnerFailure(

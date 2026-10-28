@@ -1959,6 +1959,68 @@ it.effect(
 		),
 );
 
+// CONTRACT 4.9, 6.7: a send that meets a refused runner during its failure
+// stop must not retire it again as an interrupted adoption; Settle still
+// reads the refusal's code for the runs it owned.
+it.effect(
+	"a send during an incompatible runner's failure stop keeps its failure code",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				const matches = vi
+					.spyOn(runnerRegistry, "runnerPidMatchesRegistration")
+					.mockReturnValue(true);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => matches.mockRestore()),
+				);
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, runner_id) VALUES ('owned', 's', 'running', 1, '131313131313')`;
+				// Hold the store so the failure stop's commit waits while the send
+				// selects the refused runner.
+				const locked = yield* Deferred.make<void>();
+				const unlock = yield* Deferred.make<void>();
+				vi.mocked(f.driver.connect).mockImplementation(() =>
+					Effect.gen(function* () {
+						yield* Effect.forkDetach(
+							f.sql.withTransaction(
+								Deferred.succeed(locked, undefined).pipe(
+									Effect.andThen(Deferred.await(unlock)),
+								),
+							),
+						);
+						yield* Deferred.await(locked);
+						return yield* Effect.fail({
+							...runnerFailure("hello", "unsupported runner protocol"),
+							code: "runner_incompatible",
+						});
+					}),
+				);
+				const recovering = yield* f.recover.pipe(Effect.forkChild);
+				yield* Deferred.await(locked);
+				yield* TestClock.adjust("1 millis");
+				const warming = yield* f.manager
+					.executeEffect({ type: "pre-warm", sessionId: "s", input: f.input })
+					.pipe(Effect.exit, Effect.forkChild);
+				yield* TestClock.adjust("1 millis");
+				yield* Deferred.succeed(unlock, undefined);
+				yield* TestClock.adjust("1 millis");
+				f.processes.clear();
+				yield* TestClock.adjust("10 seconds");
+				yield* Fiber.join(warming);
+				expect(recovering.pollUnsafe()).toMatchObject({ _tag: "Success" });
+				expect(yield* f.sql`SELECT status FROM provider_runs`).toEqual([
+					{ status: "error" },
+				]);
+				const [settled] = yield* f.sql<{
+					data: string;
+				}>`SELECT data FROM events WHERE type IN ('turn.error', 'turn.interrupted')`;
+				expect(JSON.parse(settled?.data ?? "{}")).toMatchObject({
+					code: "runner_incompatible",
+				});
+			}),
+		),
+);
+
 it.effect(
 	"legacy safe replay retains its dedup key through explicitly transient failure",
 	() =>
