@@ -62,10 +62,13 @@
 		});
 	});
 
+	// The prop getter tracks every catalogue read behind it; only a changed id may refetch,
+	// or each reply would trigger the next refresh.
+	const catalogAccount = $derived(accountId);
 	// Keep today's agents refresh; only models use the requested account.
 	$effect(() => {
 		const projectSlug = getCurrentSlug();
-		const instanceId = accountId;
+		const instanceId = catalogAccount;
 		if (!projectSlug) return;
 		let current = true;
 		untrack(() => {
