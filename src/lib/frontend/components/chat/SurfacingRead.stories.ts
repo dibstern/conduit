@@ -2,8 +2,8 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
-import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -115,9 +115,12 @@ const meta = {
 		// Persistence owns read state. The fixture keeps its initial state after a timer.
 		onMessagesRead: async () => {},
 	},
-	beforeEach: () => {
-		setSessionSurfaceLevel("read-story-session", null);
-	},
+	beforeEach: ({ args }) =>
+		setupTurnStory({
+			turn: args["turn"],
+			sessionId: args["sessionId"],
+			surfacing: args["surfacing"],
+		}),
 } satisfies Meta<typeof TurnActivity>;
 export default meta;
 type Story = StoryObj<typeof meta>;

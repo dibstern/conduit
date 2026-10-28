@@ -5,8 +5,8 @@ import {
 	type SurfacingMark,
 } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
-import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js";
 import { feedbackLedger } from "../../stores/surfacing-feedback.svelte.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -90,8 +90,12 @@ const meta = {
 			categorySet: DEFAULT_CATEGORY_SET,
 		},
 	},
-	beforeEach: () => {
-		setSessionSurfaceLevel("marks-story", null);
+	beforeEach: ({ args }) => {
+		const restore = setupTurnStory({
+			turn: args["turn"],
+			sessionId: args["sessionId"],
+			surfacing: args["surfacing"],
+		});
 		feedbackLedger.entries = [
 			"users saw this",
 			"root cause",
@@ -101,6 +105,7 @@ const meta = {
 			partId: String(index),
 			mark: { level: "balanced", direction: "raise", reason },
 		}));
+		return restore;
 	},
 } satisfies Meta<typeof TurnActivity>;
 export default meta;
@@ -235,7 +240,8 @@ export const RoutineInLog: Story = {
 			".turn-activity-toggle",
 		);
 		await expect(toggle).not.toBeNull();
-		if (toggle) await userEvent.click(toggle);
+		if (toggle && toggle.getAttribute("aria-expanded") !== "true")
+			await userEvent.click(toggle);
 		const row = within(canvas.getByTestId("surfacing-step-mark-28"));
 		await expect(row.getByTestId("surfacing-mark-lower")).toBeDisabled();
 		await userEvent.click(row.getByTestId("surfacing-mark-raise"));
@@ -279,10 +285,11 @@ export const LoweredInLog: Story = {
 			".turn-activity-toggle",
 		);
 		await expect(toggle).not.toBeNull();
-		if (toggle) await userEvent.click(toggle);
+		if (toggle && toggle.getAttribute("aria-expanded") !== "true")
+			await userEvent.click(toggle);
 		await userEvent.click(canvas.getByTestId("surfacing-step-open-26"));
 		await expect(canvas.getByTestId("surfacing-msg-card")).toHaveTextContent(
-			"Hidden at this level",
+			"opened directly",
 		);
 		await expect(
 			within(canvas.getByTestId("surfacing-msg-card")).getByTestId(

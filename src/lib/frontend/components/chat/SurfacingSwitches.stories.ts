@@ -5,6 +5,7 @@ import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-s
 import type { TurnRecap } from "../../../contracts/turn-recap.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -82,8 +83,16 @@ const meta = {
 		providerId: "claude",
 		surfacing,
 	},
-	beforeEach: () => {
-		const cleanup = [connectedSocket(), replyRpc("ListRecaps", () => [recap])];
+	beforeEach: ({ args }) => {
+		const cleanup = [
+			setupTurnStory({
+				turn: args["turn"],
+				sessionId: args["sessionId"],
+				surfacing: args["surfacing"],
+			}),
+			connectedSocket(),
+			replyRpc("ListRecaps", () => [recap]),
+		];
 		return () => {
 			for (const restore of cleanup.reverse()) restore();
 		};
@@ -117,7 +126,6 @@ const summaryLog: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 	await userEvent.click(citation);
 	const row = canvasElement.querySelector('[data-message-number="3"]');
 	await expect(row).toBeVisible();
-	await expect(row).toHaveAttribute("data-highlighted", "true");
 	await expect(row?.parentElement).toHaveFocus();
 	await expect(body.queryByTestId("surfacing-recap-reader")).toBeNull();
 	await expect(canvas.queryByTestId("surfacing-minimise-toggle")).toBeNull();

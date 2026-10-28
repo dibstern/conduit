@@ -2,16 +2,13 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
-import {
-	getOrCreateSessionMessages,
-	sessionMessages,
-} from "../../stores/chat.svelte.js";
-import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js";
-import { reveal, revealedPart } from "../../stores/reveal.svelte.js";
+import { getOrCreateSessionMessages } from "../../stores/chat.svelte.js";
+import { reveal } from "../../stores/reveal.svelte.js";
 import { sessionState } from "../../stores/session.svelte.js";
 import { setTurnMinimised } from "../../stores/turn-minimisation.svelte.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -99,19 +96,20 @@ const meta = {
 		surfacing: config,
 		onMessagesRead: async () => {},
 	},
-	beforeEach: () => {
-		setSessionSurfaceLevel(SESSION, null);
-		setTurnMinimised(SESSION, turn.id, null);
+	beforeEach: ({ args }) => {
 		const previousSession = sessionState.currentId;
-		const previousMessages = sessionMessages.get(SESSION);
-		const cleanup = [connectedSocket(), replyRpc("ListRecaps", () => [])];
+		const cleanup = [
+			setupTurnStory({
+				turn: args["turn"],
+				sessionId: args["sessionId"],
+				surfacing: args["surfacing"],
+			}),
+			connectedSocket(),
+			replyRpc("ListRecaps", () => []),
+		];
 		return () => {
 			for (const restore of cleanup.reverse()) restore();
-			setTurnMinimised(SESSION, turn.id, null);
-			revealedPart.request = null;
 			openSessionForSetup(previousSession);
-			if (previousMessages) sessionMessages.set(SESSION, previousMessages);
-			else sessionMessages.delete(SESSION);
 		};
 	},
 } satisfies Meta<typeof TurnActivity>;
@@ -208,6 +206,9 @@ export const HandExpanded: Story = {
 		await expect(
 			canvas.getByRole("button", { name: "Minimise turn" }),
 		).toBeVisible();
+		await expect(
+			canvas.getByRole("radio", { name: /^Most\b/ }),
+		).toHaveAttribute("aria-checked", "true");
 		await expect(canvas.getByTestId("surfacing-msg-card")).toBeVisible();
 		canvas.getByTestId("surfacing-card").blur();
 	},
@@ -223,9 +224,6 @@ export const MessageDestination: Story = {
 		const canvas = within(canvasElement);
 		canvasElement.dataset["sessionId"] = SESSION;
 		openSessionForSetup(SESSION);
-		getOrCreateSessionMessages(SESSION).messages = unread.activity.filter(
-			(part) => part.type !== "system",
-		);
 		// UUID destinations and message/part citations both enter through reveal().
 		await expect(
 			await reveal({ sessionId: SESSION, uuid: "minimise-agent/part-1" }),
@@ -247,6 +245,12 @@ export const MessageDestination: Story = {
 			"4",
 		);
 		await expect(
+			canvas.getByRole("radio", { name: /^Most\b/ }),
+		).toHaveAttribute("aria-checked", "true");
+		await expect(canvas.getByTestId("surfacing-msg-card")).toHaveTextContent(
+			"opened directly",
+		);
+		await expect(
 			canvas.getByRole("button", { name: "Minimise turn" }),
 		).toBeVisible();
 	},
@@ -254,4 +258,46 @@ export const MessageDestination: Story = {
 export const MessageDestinationLight: Story = {
 	...MessageDestination,
 	globals: { theme: "light" },
+};
+
+export const SupersededDestination: Story = {
+	args: { surfacing: minimisedConfig },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		openSessionForSetup(SESSION);
+		const first = reveal({ sessionId: SESSION, uuid: "minimise-agent/part-1" });
+		const second = reveal({
+			sessionId: SESSION,
+			uuid: "minimise-agent/part-4",
+		});
+		await expect(await first).toBe("missing");
+		await expect(await second).toBe("landed");
+		await expect(canvas.getByTestId("surfacing-msg-card")).toHaveAttribute(
+			"data-ordinal",
+			"4",
+		);
+	},
+};
+
+export const UnmountedDestination: Story = {
+	args: { surfacing: minimisedConfig },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		openSessionForSetup(SESSION);
+		getOrCreateSessionMessages(SESSION).messages = [
+			{
+				type: "user",
+				uuid: "unmounted-turn",
+				text: "A Turn that has no mounted panel",
+			},
+			...unread.activity,
+		];
+		await expect(
+			await reveal({ sessionId: SESSION, uuid: "minimise-agent/part-1" }),
+		).toBe("missing");
+		await expect(
+			canvas.getByRole("button", { name: "Expand turn" }),
+		).toBeVisible();
+		await expect(canvas.queryByTestId("surfacing-msg-card")).toBeNull();
+	},
 };

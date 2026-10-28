@@ -3,8 +3,8 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import type { AskExplanation } from "../../../contracts/ask-explanation.js";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
-import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js";
 import { connectedSocket, failRpc, replyRpc } from "../../stories/sockets.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -103,9 +103,13 @@ const meta = {
 		},
 		onReplyToAsk: fn(),
 	},
-	beforeEach: () => {
-		setSessionSurfaceLevel(SESSION, null);
+	beforeEach: ({ args }) => {
 		const cleanup = [
+			setupTurnStory({
+				turn: args["turn"],
+				sessionId: args["sessionId"],
+				surfacing: args["surfacing"],
+			}),
 			connectedSocket(),
 			replyRpc("ListRecaps", () => []),
 			replyRpc("ExplainAsk", () => explanation),
