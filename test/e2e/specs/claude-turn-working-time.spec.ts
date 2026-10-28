@@ -90,16 +90,16 @@ test.describe("Claude turn working time", () => {
 		const stamps = () => {
 			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
 			try {
-				// The clock starts when the run picks the prompt up, not when it was
-				// stored; under load that lag alone can tip a floored second over.
+				// The UI's clock starts at the first turn's requested_at
+				// (turn_started_at in read-query-effect.ts), not at run pickup.
 				const turn = db
 					.prepare(
-						"SELECT started_at FROM turns WHERE session_id = ? ORDER BY requested_at LIMIT 1",
+						"SELECT requested_at FROM turns WHERE session_id = ? ORDER BY requested_at LIMIT 1",
 					)
 					.get(parentId);
-				if (turn?.["started_at"] == null)
-					throw new Error("parent turn has not started");
-				const startedAt = Number(turn["started_at"]);
+				if (turn?.["requested_at"] == null)
+					throw new Error("parent turn has not been requested");
+				const startedAt = Number(turn["requested_at"]);
 				// A resumed message starts at its own first content part. Background
 				// updates to an earlier message must not start the next segment.
 				const events = db
