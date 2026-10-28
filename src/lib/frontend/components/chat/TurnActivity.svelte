@@ -1,6 +1,13 @@
 <!-- The turn head keeps counts and duration above a shared activity strip.
      Skills, task status and the bill stay in the step log or duration hover.
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
+<script module lang="ts">
+	export type RunLabel =
+		| { kind: "working" }
+		| { kind: "woken"; task?: string }
+		| { kind: "stopping"; stuck?: boolean };
+</script>
+
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
 	import type { ComponentProps, Snippet } from "svelte";
@@ -17,7 +24,7 @@
 	import { findSession } from "../../stores/session.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
-	import { logSteps, stopCounts } from "../../utils/turn-stops.js";
+	import { stopCounts } from "../../utils/turn-stops.js";
 	import { canOpenSurfaceMessage, surfaceTurn, surfaceKey, type CardSelection, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
 	import SurfacingCard, { type ReadState, type SurfacingRegions } from "./SurfacingCard.svelte";
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
@@ -57,7 +64,7 @@
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, entries, renderResume, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
+	let { turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
 		get sessionId() { return sessionId; }, get turn() { return turn; },
 		get jev() { return surfacingActive; }, get processing() { return turn.live; },
 		get latestTurn() { return latestTurn; }, get newestSettledTurn() { return newestSettledTurn; },
@@ -65,6 +72,7 @@
 	}) }: {
 		panel?: TurnPanelState;
 		turn: Turn;
+		runLabel?: RunLabel;
 		segment: Segment;
 		final: boolean;
 		entries?: readonly TurnLogEntry[];
@@ -107,13 +115,16 @@
 	const bill = $derived(economics(turn, now));
 	const running = $derived(liveLaunchedTasks(turn, liveTasks, liveTasks.length > 0 && turn.live ? clock.now : taskNow, taskListedAt));
 	const phrase = $derived(countsPhrase(stats));
-	const TICKER_ROWS = 3;
 	const logEntries = $derived(entries ?? segment.activity.map((part, index): TurnLogEntry => ({ kind: "step", uuid: part.uuid, index, part })));
-	const live = $derived(final && turn.live);
-	const showTicker = $derived(live && segment.reply.length === 0 && !segment.handBack);
-	const steps = $derived(logSteps(turn));
-	const earlierCount = $derived(Math.max(0, steps.length - TICKER_ROWS));
-	const earlierIndex = $derived(Math.max(0, segment.activity.findIndex((part) => part.uuid === steps[earlierCount]?.uuid)));
+	const live = $derived(panel.phase !== "settled");
+	function runText(label: RunLabel): string {
+		switch (label.kind) {
+			case "working": return "Working";
+			case "woken": return label.task ?? "Woken";
+			case "stopping": return label.stuck ? "Still stopping" : "Stopping";
+			default: return assertNever(label);
+		}
+	}
 	const numberedMessages = $derived(numberTurnMessages(segment.activity.flatMap((part) => part.type === "assistant" ? [part] : [])));
 	function messageNumber(index: number): number | undefined {
 		const part = segment.activity[index];
@@ -415,24 +426,6 @@
 		if (!part) return;
 		await reveal({ sessionId, uuid: part.uuid });
 	}
-	// Full log inserts earlier rows above the ticker. Keep its newest step in place,
-	// unless a reveal opened the log: its target scrolls itself into view.
-	$effect.pre(() => {
-		if (!showTicker || fullLog) return;
-		return () => {
-			if (!fullLog || panel.pending) return;
-			const uuid = segment.activity.at(-1)?.uuid;
-			const row = uuid ? panelEl?.querySelector(`[data-log-part="${CSS.escape(uuid)}"]`) : undefined;
-			const before = row?.getBoundingClientRect().top;
-			const scroller = panelEl?.closest('[aria-label="Transcript"]');
-			if (before === undefined || !scroller) return;
-			void tick().then(() => {
-				// A reveal or unmount supersedes a queued ticker anchor.
-				if (!fullLog || panel.pending || !row?.isConnected || !scroller.isConnected) return;
-				scroller.scrollTop += row.getBoundingClientRect().top - before;
-			});
-		};
-	});
 </script>
 
 {#snippet markLabel(pin: SurfacePin)}
@@ -511,7 +504,7 @@
 							<Icon name={minimised ? "chevron-right" : "chevron-down"} size={14} class="shrink-0 text-text-dimmer" />
 							{#if live}<Icon name="loader-circle" size={13} class="animate-spin shrink-0 text-accent" />
 							{/if}
-							<span class="text-[14px] font-semibold text-text">{live ? "Working" : "Worked"}</span>
+							<span class="text-[14px] font-semibold text-text">{live ? runText(runLabel) : "Worked"}</span>
 							{#if live && !turn.user}
 								<span class="text-[12px] text-text-dimmer" data-testid="turn-live-elapsed">(no prompt to time from)</span>
 							{:else if duration !== undefined}
@@ -567,16 +560,16 @@
 				</Button>
 			{/if}
 		</div>
-		<TurnLog class="step-log border-t border-border bg-bg px-[12px] py-[6px]" mode={minimised ? "collapsed" : fullLog ? "full" : showTicker ? "ticker" : "hidden"} {live} {earlierCount} {earlierIndex} stepCount={counts.log} entries={logEntries} onopen={() => panel.show("log")}>
+		<TurnLog class="step-log border-t border-border bg-bg px-[12px] py-[6px]" mode={minimised ? "collapsed" : fullLog ? "shown" : "hidden"} phase={panel.phase} pending={panel.pending} stepCount={counts.log} entries={logEntries}>
 			{#snippet row(entry: TurnLogEntry)}
 				{@const i = entry.index}
 				{#if entry.kind === "resumed"}
-					<div hidden={!fullLog && i < earlierIndex}>{@render renderResume?.(entry.resume)}</div>
+					{@render renderResume?.(entry.resume)}
 				{:else}
 				{@const part = entry.part}
 				{@const latestLiveStep = live && i === segment.activity.length - 1}
 				{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
-				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, beforeScroll: onjump }} hidden={!fullLog && i < earlierIndex} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, beforeScroll: onjump }} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
 					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category} onmessage={category && canOpenSurfaceMessage(category.part, live) ? () => pick(category) : undefined} />
 				</div>
 				{/if}

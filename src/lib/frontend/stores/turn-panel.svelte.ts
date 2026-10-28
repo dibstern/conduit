@@ -207,7 +207,7 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 			case "waiting":
 				return stored?.live?.segment === input.turn.segments.length - 1
 					? stored.live.choice
-					: null;
+					: "log";
 			case "settled":
 				return stored?.settled ?? null;
 			default:

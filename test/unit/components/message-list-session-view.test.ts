@@ -168,7 +168,7 @@ describe("MessageList session-view publication", () => {
 		).toHaveLength(1);
 		expect(container.textContent).toContain("Working");
 		expect(container.textContent).toContain(
-			kind === "assistant" ? "One more check" : "Reading",
+			kind === "assistant" ? "One more check" : "Running",
 		);
 
 		slot.messages.messages = [

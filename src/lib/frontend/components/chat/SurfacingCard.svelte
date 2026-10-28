@@ -67,6 +67,7 @@
 	<section bind:this={cardEl} use:landTurnTarget={{ pending, target: { kind: "message", uuid: card.part.uuid }, ack: onland, navigation: scrubbing ? "in-place" : "scroll" }} class="surfacing-msg-card" class:ask={card.category === "ask" && !card.pending} style:--surface-colour={card.colour} style:--category-tint={card.builtinCategory ? "14%" : undefined} data-testid="surfacing-msg-card" data-part={card.part.uuid} data-ordinal={card.number} aria-label={card.name} tabindex="-1" onkeydown={oncommand}>
 		<div class="card-head" data-surfacing-region="card-head">
 			<span class="type-label"><span class="glyph">{card.glyph}</span> {card.label}</span>
+			{#if live && view.following}<span class="following">Following latest</span>{/if}
 			{#if view.openAsk?.uuid === card.part.uuid}<span class="needs-reply">Needs reply</span>{/if}
 			{@render regions.cardHead?.(card)}
 			<span class="card-at">{card.number === undefined ? "Waiting for Jev" : `#${card.number}`}<span class="desktop-time">{` · ${card.time}`}</span>{` · ${view.cardIndex + 1}/${view.pins.length}`}</span>
@@ -110,6 +111,7 @@
 	.card-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
 	.type-label,.needs-reply { padding:2px 7px; border-radius:999px; font-size:11px; font-weight:600; background:color-mix(in srgb,var(--surface-colour,var(--color-text-dimmer)) var(--category-tint,16%),transparent); color:var(--surface-colour,var(--color-text)); }
 	.needs-reply { color:var(--color-status-ask); background:color-mix(in srgb,var(--color-status-ask) 16%,transparent); }
+	.following { font-size:11px; color:var(--color-text-secondary); }
 	.card-at { margin-left:auto; font:11.5px var(--font-mono); color:var(--color-text-muted); white-space:nowrap; }
 	.read-toggle { display:inline-flex; align-items:center; gap:5px; min-height:32px; font-size:12px; color:var(--color-text-muted); cursor:pointer; }
 	.card-note { margin-top:6px; font-size:12px; color:var(--color-text-muted); }
