@@ -60,8 +60,9 @@ import { terminalKeysHandlers } from "./steps/terminalKeys.js";
 import { terminalSettingsHandlers } from "./steps/terminalSettings.js";
 import { titleGenerationSettingsHandlers } from "./steps/titleGenerationSettings.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
-import { turnActivitySkillsHandlers } from "./steps/turnActivitySkills.js";
 import { turnActivityHandlers } from "./steps/turnActivity.js";
+import { turnActivitySkillsHandlers } from "./steps/turnActivitySkills.js";
+import { turnOpeningHandlers } from "./steps/turnOpening.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
 import { usageSettingsHandlers } from "./steps/usageSettings.js";
@@ -91,6 +92,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...surfacingCardHandlers,
 	...turnActivitySkillsHandlers,
 	...turnActivityHandlers,
+	...turnOpeningHandlers,
 	...surfacingMarksHandlers,
 	...surfacingMinimiseHandlers,
 	...surfacingRecapHandlers,

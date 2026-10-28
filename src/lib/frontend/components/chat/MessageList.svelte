@@ -57,6 +57,7 @@
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
 	import TurnActivity from "./TurnActivity.svelte";
+	import TurnOpening from "./TurnOpening.svelte";
 	import { insertComposerReference } from "../input/composer-reference.svelte.js";
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
@@ -347,7 +348,7 @@
 		return (messages: ChatMessage[], processing: boolean): Turn[] => {
 			const next = segmentTurns(messages, processing).map((turn) => {
 				const held = previous.get(turn.id);
-				return held && held.user === turn.user && held.live === turn.live &&
+				return held && held.user === turn.user && held.live === turn.live && held.opening === turn.opening &&
 					same(held.notices, turn.notices) &&
 					held.segments.length === turn.segments.length &&
 					turn.segments.every((segment, i) => {
@@ -364,11 +365,6 @@
 	const projectInheritedTurns = turnProjection();
 	const projectCurrentTurns = turnProjection();
 	const turns = $derived(projectTurns(chat.messages, processing));
-	const emptyLiveTurn = $derived<Turn | undefined>(
-		processing && chat.loadLifecycle === "ready" && turns.length === 0
-			? { id: `turn-${viewedSessionId ?? instanceId}`, segments: [{ activity: [], reply: [] }], notices: [], live: true }
-			: undefined,
-	);
 	$effect(() => {
 		const turn = turns.at(-1);
 		if (!processing || chat.loadLifecycle !== "ready" || !turn || turn.user) return;
@@ -570,7 +566,7 @@
 	{#snippet turnItem(turn: Turn)}
 		{@const log = turnLog(turn, resumeDividers)}
 		{@const segment = log.segment}
-		{@const hasActivity = log.entries.length > 0 || turn.live}
+		{@const hasActivity = log.entries.length > 0}
 		<div data-live-turn={turn.live ? "" : undefined}>
 		{#if turn.user}
 			<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
@@ -579,6 +575,9 @@
 		{/if}
 		{#if goal && turn.id === goalNoticeTurnId}
 			{@render goalNotice()}
+		{/if}
+		{#if turn.opening}
+			<TurnOpening opening={turn.opening} {turn} sessionId={viewedSessionId ?? undefined} />
 		{/if}
 		{#if hasActivity}
 			{@const reply = segment.reply[0]}
@@ -694,8 +693,8 @@
 			<UserMessage message={send.message} />
 		</div>
 	{/each}
-	{#if emptyLiveTurn}
-		{@render turnItem(emptyLiveTurn)}
+	{#if localSends.length > 0 || (processing && chat.loadLifecycle === "ready" && turns.length === 0)}
+		<TurnOpening opening="sending" />
 	{/if}
 
 	<!-- Cold open: turn-shaped placeholders fill the pane, bottom-anchored where
