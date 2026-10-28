@@ -13,7 +13,7 @@
 	import { TurnRecapState } from "../../stores/turn-recap.svelte.js";
 	import SurfacingSummary from "./SurfacingSummary.svelte";
 	import { messageSurfacing, sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
-	import { createTurnPanel, type TurnPanelState } from "../../stores/turn-panel.svelte.js";
+	import { createTurnPanel, landTurnTarget, type TurnPanelState } from "../../stores/turn-panel.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -25,7 +25,7 @@
 	import SurfacingMarkWhy from "./SurfacingMarkWhy.svelte";
 	import { insertComposerReference, messageReplies, removeComposerReference, type ReplyReference } from "../input/composer-reference.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { reveal, revealedPart } from "../../stores/reveal.svelte.js";
+	import { reveal } from "../../stores/reveal.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
@@ -90,7 +90,6 @@
 
 	const fullLog = $derived(panel.view.kind === "open" && panel.view.view.kind === "show" && panel.view.view.stop === "log");
 	let hovered = $state<number | null>(null);
-	let focusUuid = $state<string | null>(null);
 	let panelEl = $state<HTMLDivElement | undefined>();
 	let detailsOpen = $state(false);
 
@@ -118,22 +117,6 @@
 		if (part?.type !== "assistant" || (surfacingActive && turn.live && part.surfacingOrdinal == null)) return undefined;
 		return numbered || surfacingActive || summariesOn ? numberedMessages.find(({ uuid }) => uuid === part.uuid)?.surfacingOrdinal : undefined;
 	}
-
-	$effect(() => {
-		const request = revealedPart.request;
-		untrack(() => {
-			if (!request || request.sessionId !== sessionId) return;
-			const i = segment.activity.findIndex((part) => part.uuid === request.uuid);
-			if (minimised && (i >= 0 || turn.user?.uuid === request.uuid || segment.reply.some((part) => part.uuid === request.uuid))) panel.open();
-			if (i >= 0) {
-				const target = surfacingActive ? surface.messages.find(({ part }) => part.uuid === request.uuid) : undefined;
-				if (target && (live || target.part.surfacingProbabilities !== undefined)) {
-					if (level === "final") selectLevel("all");
-					pick(target);
-				} else void jumpTo(i);
-			}
-		});
-	});
 
 	const surfacingConfig = $derived(surfacing ?? messageSurfacing);
 	const surfacingActive = $derived(sessionJevEnabled(sessionId ? findSession(sessionId) : undefined, surfacingConfig.status));
@@ -200,7 +183,7 @@
 	const surface = $derived(surfaceTurn({
 		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: numberedMessages.map((part) => feedback.annotate(part)),
 		positions: stripLayout(segment, turn, final, now), categorySet: surfacingConfig.categorySet,
-		level, view: panel.view.kind === "open" ? panel.view.view : null, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, selection, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
+		level, view: panel.view.kind === "open" ? panel.view.view : null, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, selection: panel.target?.kind === "message" ? { kind: "picked", uuid: panel.target.uuid } : selection, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	const minimised = $derived(surfacingActive && panel.view.kind === "collapsed");
@@ -212,15 +195,6 @@
 		if (panel.view.kind === "collapsed") panel.open();
 		else panel.collapse();
 		void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-card"]')?.focus({ preventScroll: true }));
-	}
-	async function openMinimisedMessage(pin: SurfacePin) {
-		panel.open();
-		if (live || pin.part.surfacingProbabilities !== undefined || pin.part.surfacingMark) {
-			if (level === "final") selectLevel("all");
-			pick(pin);
-			await tick();
-			panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-msg-card"]')?.focus({ preventScroll: true });
-		} else await jumpTo(pin.step);
 	}
 	// Track scalars so the live strip's clock cannot restart the read dwell.
 	const readTarget = $derived(surface.card?.read === false ? surface.card.part.uuid : null);
@@ -269,8 +243,12 @@
 	}
 
 	function pick(pin: SurfacePin) {
-		panel.open();
-		selection = { kind: "picked", uuid: pin.part.uuid };
+		void reveal({ sessionId, uuid: pin.part.uuid });
+	}
+	function acknowledgeMessage(seq: number) {
+		if (panel.pending?.seq !== seq || panel.target?.kind !== "message") return;
+		selection = { kind: "picked", uuid: panel.target.uuid };
+		panel.ack(seq);
 	}
 	function toggleSummary() {
 		if (!storeTurnId) return;
@@ -301,14 +279,9 @@
 	}
 	async function citeSummary(ordinal: number) {
 		citedOrdinal = ordinal;
-		if (surfacingActive) return;
-		// Without Jev a citation opens the numbered step log at its line.
 		const target = numberedMessages.find((part) => part.surfacingOrdinal === ordinal);
 		if (!target) return;
-		const index = segment.activity.findIndex((part) => part.uuid === target.uuid);
-		if (index < 0) return void reveal({ sessionId, uuid: target.uuid });
-		await jumpTo(index);
-		panelEl?.querySelector<HTMLElement>(`[data-log-part="${CSS.escape(target.uuid)}"]`)?.focus({ preventScroll: true });
+		await reveal({ sessionId, uuid: target.uuid });
 	}
 	/** Without Jev, hovering a citation marks its step on the activity strip. */
 	function hoverCitation(ordinal: number | null) {
@@ -366,7 +339,7 @@
 			case "step": { const pin = surface[command.to]; if (pin) pick(pin); return; }
 			case "number": {
 				const target = surface.numbers.find(({ number }) => number === command.n);
-				if (target) { if (target.belowLevel) selectLevel("all"); revealMessage(target.part); }
+				if (target) revealMessage(target.part);
 				return;
 			}
 			case "ask": revealMessage(surface.openAsk); return;
@@ -451,11 +424,7 @@
 	async function jumpTo(i: number) {
 		const part = segment.activity[i];
 		if (!part) return;
-		onjump?.();
-		panel.show("log");
-		focusUuid = part.uuid;
-		await tick();
-		panelEl?.querySelector(`[data-part="${CSS.escape(part.uuid)}"]`)?.scrollIntoView({ block: "nearest" });
+		await reveal({ sessionId, uuid: part.uuid });
 	}
 </script>
 
@@ -564,11 +533,11 @@
 				{#if surfacingActive}<Button variant="ghost" size="content" tone="inherit" touchTarget class="ml-auto shrink-0 -my-[2px] h-[24px] w-[24px] text-text-dimmer" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Minimise turn"} aria-expanded={!minimised} onclick={toggleMinimised}><Icon name={minimised ? "chevron-down" : "chevron-up"} size={14} /></Button>{/if}
 			</div>
 			{#if minimised}
-				<MinimisedTurn view={surface} onopen={openMinimisedMessage}>
+				<MinimisedTurn view={surface} onopen={pick}>
 					{#snippet strip()}<ActivityStrip {turn} {segment} {final} {now} {running} interactive={false} />{/snippet}
 				</MinimisedTurn>
 			{:else if surfacingActive}
-				<SurfacingCard view={surface} {counts} {live} {level} overridden={panel.overridden} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
+				<SurfacingCard view={surface} {counts} {live} {level} pending={panel.pending} onland={acknowledgeMessage} overridden={panel.overridden} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readState} bind:cardEl={readCardEl} bind:scrubbing onread={readMessage}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={surface.card?.number !== undefined && replies.has(surface.card.number)}
@@ -605,8 +574,8 @@
 				{@const part = entry.part}
 				{@const latestLiveStep = live && i === segment.activity.length - 1}
 				{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
-				<div data-log-part={part.uuid} hidden={!fullLog && i < earlierIndex} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
-					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category?.builtinCategory ? category : undefined} />
+				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, beforeScroll: onjump }} hidden={!fullLog && i < earlierIndex} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category?.builtinCategory ? category : undefined} />
 					{#if surfacingActive && fullLog && part.type === "assistant"}
 						{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}
 						{#if pin}

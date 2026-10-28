@@ -291,7 +291,9 @@ export const surfacingMarksHandlers: StepHandler[] = [
 				"data-ordinal",
 				match[1] ?? "",
 			);
-			await expect(card(world.page)).toContainText(/hidden at this level/i);
+			await expect(card(world.page)).toContainText(
+				"At Full log, below All messages · opened directly",
+			);
 		},
 	},
 	{

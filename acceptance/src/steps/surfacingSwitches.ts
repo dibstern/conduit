@@ -66,7 +66,6 @@ export const surfacingSwitchesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const row = world.page.locator(`[data-message-number="${match[1]}"]`);
 			await expect(row).toBeVisible();
-			await expect(row).toHaveAttribute("data-highlighted", "true");
 			await expect(row.locator("..")).toBeFocused();
 			await expect(row).toBeInViewport();
 			await expect(

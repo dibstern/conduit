@@ -1,4 +1,4 @@
-import { untrack } from "svelte";
+import { tick, untrack } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
 import type { CategorySet } from "../../contracts/category-set.js";
 import type { MessageSurfacingStatus } from "../../contracts/message-surfacing.js";
@@ -28,6 +28,92 @@ export type TurnPanel<Stop extends ShowStop = ShowStop> =
 	| { kind: "collapsed" }
 	| { kind: "open"; view: PanelView<Stop> };
 type TurnChoice = "level" | "log" | "usage";
+
+export type TurnTarget =
+	| { kind: "message"; uuid: string }
+	| { kind: "step"; id: string };
+export type PendingReveal = { turnId: string; target: TurnTarget; seq: number };
+const pending = new SvelteMap<string, PendingReveal>();
+const receipts = new Map<number, (result: "landed" | "missing") => void>();
+let sequence = 0;
+
+/** A mounted destination, rather than a broadcast or DOM search, proves a landing. */
+export async function revealTurnTarget(
+	sessionId: string,
+	turnId: string,
+	target: TurnTarget,
+): Promise<"landed" | "missing"> {
+	const previous = pending.get(sessionId);
+	if (previous) receipts.get(previous.seq)?.("missing");
+	const seq = ++sequence;
+	const landed = new Promise<"landed" | "missing">((resolve) =>
+		receipts.set(seq, resolve),
+	);
+	pending.set(sessionId, { turnId, target, seq });
+	void tick().then(async () => {
+		for (let frame = 0; frame < 2; frame++)
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
+		if (pending.get(sessionId)?.seq === seq) pending.delete(sessionId);
+		receipts.get(seq)?.("missing");
+		receipts.delete(seq);
+	});
+	return landed;
+}
+
+/** Svelte action shared by the mounted log row and message card. */
+export function landTurnTarget(
+	node: HTMLElement,
+	input: {
+		pending: PendingReveal | null;
+		target: TurnTarget;
+		ack: (seq: number) => void;
+		navigation?: "scroll" | "in-place";
+		beforeScroll?: (() => void) | undefined;
+	},
+) {
+	let current = input;
+	function land(next: typeof input) {
+		current = next;
+		if (!next.pending) return;
+		const seq = next.pending.seq;
+		// Updates can reach a kept log row before its parent loses `hidden`.
+		void tick().then(() => {
+			const {
+				pending,
+				target,
+				ack,
+				navigation = "scroll",
+				beforeScroll,
+			} = current;
+			if (pending?.seq !== seq || !node.isConnected) return;
+			let matches: boolean;
+			switch (target.kind) {
+				case "message":
+					matches =
+						pending.target.kind === "message" &&
+						pending.target.uuid === target.uuid;
+					break;
+				case "step":
+					matches =
+						pending.target.kind === "step" && pending.target.id === target.id;
+					break;
+				default:
+					return assertNever(target);
+			}
+			if (!matches) return;
+			if (navigation === "scroll") {
+				beforeScroll?.();
+				node.scrollIntoView({ block: "nearest" });
+				node.focus({ preventScroll: true });
+			}
+			ack(pending.seq);
+		});
+	}
+	land(input);
+	return { update: land };
+}
 
 // Page-lifetime choices survive remounts and paging, but never go to storage.
 const choices = new SvelteMap<
@@ -59,6 +145,9 @@ export interface TurnPanelState<Stop extends ShowStop = ShowStop> {
 	readonly view: TurnPanel<Stop>;
 	readonly saved: SurfaceLevel;
 	readonly overridden: boolean;
+	readonly pending: PendingReveal | null;
+	readonly target: TurnTarget | null;
+	ack(seq: number): void;
 	open(): void;
 	collapse(): void;
 	show(stop: Stop): void;
@@ -73,6 +162,21 @@ export function createTurnPanel(
 export function createTurnPanel(input: PanelInput): TurnPanelState;
 export function createTurnPanel(input: PanelInput): TurnPanelState {
 	const key = $derived(JSON.stringify([input.sessionId ?? "", input.turn.id]));
+	const reveal = $derived.by(() => {
+		const entry = input.sessionId ? pending.get(input.sessionId) : undefined;
+		return entry?.turnId === input.turn.id ? entry : null;
+	});
+	const revealStop = $derived.by(() => {
+		if (!reveal) return null;
+		switch (reveal.target.kind) {
+			case "message":
+				return choice === "log" ? "log" : "level";
+			case "step":
+				return "log";
+			default:
+				return assertNever(reveal.target);
+		}
+	});
 	const phase = $derived(
 		turnPhase(input.turn, input.processing, input.latestTurn),
 	);
@@ -111,16 +215,19 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 		}
 	});
 	const view = $derived<TurnPanel>(
-		collapsed
+		collapsed && !reveal
 			? { kind: "collapsed" }
 			: {
 					kind: "open",
 					view:
-						choice === "usage"
+						!revealStop && choice === "usage"
 							? { kind: "usage" }
 							: {
 									kind: "show",
-									stop: !input.jev || choice === "log" ? "log" : saved,
+									stop:
+										!input.jev || (revealStop ?? choice) === "log"
+											? "log"
+											: saved,
 								},
 				},
 	);
@@ -165,6 +272,20 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 		},
 		get overridden() {
 			return sessionSurfaceLevel(input.sessionId) !== undefined;
+		},
+		get pending() {
+			return reveal;
+		},
+		get target() {
+			return reveal?.target ?? null;
+		},
+		ack(seq) {
+			if (!reveal || reveal.seq !== seq || !input.sessionId) return;
+			open();
+			pick(revealStop === "log" ? "log" : "level");
+			pending.delete(input.sessionId);
+			receipts.get(seq)?.("landed");
+			receipts.delete(seq);
 		},
 		open,
 		collapse() {

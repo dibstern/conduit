@@ -15,6 +15,7 @@ import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/m
 import type { TurnRecap } from "../../../src/lib/contracts/turn-recap.js";
 import ActivityStrip from "../../../src/lib/frontend/components/chat/ActivityStrip.svelte";
 import TurnActivity from "../../../src/lib/frontend/components/chat/TurnActivity.svelte";
+import { setupTurnStory } from "../../../src/lib/frontend/stories/turn-setup.js";
 import type { Segment, Turn } from "../../../src/lib/frontend/utils/turns.js";
 
 const rpc = vi.hoisted(() =>
@@ -96,6 +97,7 @@ const recap: TurnRecap = {
 	durationMs: 1000,
 	createdAt: START + 4000,
 };
+let restoreTurn: () => void;
 
 beforeEach(() => {
 	rpc.mockImplementation(async (tag) => {
@@ -105,9 +107,11 @@ beforeEach(() => {
 	});
 	Element.prototype.scrollIntoView = vi.fn();
 	vi.stubGlobal("CSS", { escape: (value: string) => value });
+	restoreTurn = setupTurnStory({ turn, sessionId: "session", surfacing });
 });
 afterEach(() => {
 	cleanup();
+	restoreTurn();
 	rpc.mockReset();
 	vi.unstubAllGlobals();
 });
@@ -126,11 +130,13 @@ it("keeps a summary generated without Jev clickable and its log numbered after e
 	);
 	await fireEvent.click(await screen.findByTestId("surfacing-summary-new"));
 	await fireEvent.click(await screen.findByTestId("surfacing-recap-cite-1"));
-	expect(
-		container.querySelector(
-			'[data-log-part="first"] [data-message-number="1"]',
-		),
-	).not.toBeNull();
+	await waitFor(() =>
+		expect(
+			container.querySelector(
+				'[data-log-part="first"] [data-message-number="1"]',
+			),
+		).not.toBeNull(),
+	);
 	await rerender({
 		surfacing: {
 			...surfacing,
@@ -169,6 +175,7 @@ it("renders the base activity strip with both switches off and opens its unnumbe
 		turn,
 		segment,
 		final: true,
+		sessionId: "session",
 		surfacing: {
 			...surfacing,
 			status: { ...surfacing.status, summariesEnabled: false },
@@ -192,11 +199,10 @@ it("renders the base activity strip with both switches off and opens its unnumbe
 		expect(screen.getByRole("tooltip").textContent).toContain("1s"),
 	);
 	await fireEvent.keyDown(timeline, { key: "Enter" });
-	// The strip opens the log at its step, as today, without moving focus into it.
+	// The mounted destination acknowledges the reveal and takes focus.
 	await waitFor(() =>
-		expect(container.querySelector('[data-highlighted="true"]')).not.toBeNull(),
+		expect(document.activeElement?.getAttribute("data-log-part")).toBe("first"),
 	);
-	expect(document.activeElement?.closest("[data-log-part]")).toBeNull();
 	expect(container.querySelector("[data-message-number]")).toBeNull();
 	expect(screen.queryByTestId("surfacing-summary-generate")).toBeNull();
 	expect(screen.queryByTestId("surfacing-minimise-toggle")).toBeNull();
