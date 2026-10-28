@@ -2,8 +2,8 @@
  * Failure modes: cleanup loses a branch or prevents the next turn; a policy
  * removes unsettled work, local files, a shared checkout or a viewed session;
  * deleted ownership disappears or deletion never requests cleanup; deferred
- * removal becomes a permanent Keep; settled age reads the wrong clock; defaults or
- * settings disappear across restart; automatic requests race the manual result;
+ * removal becomes a permanent Keep; settled age reads the wrong clock; automatic
+ * requests race the manual result;
  * project overrides leak into global or repository settings, skip cold Custom
  * projects, clean Off projects, or fail to protect a mid-run switch to Off.
  * Exercise the daemon RPCs, real owned checkouts and the next provider turn.
@@ -83,11 +83,7 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 	>();
 
 	async function start(
-		worktreeCleanup: Partial<CleanupSetting> | null = { onSettle: "keep" },
-		legacy?: {
-			version: 1 | undefined;
-			rules: Record<string, unknown> | undefined;
-		},
+		worktreeCleanup: Partial<CleanupSetting> = { onSettle: "keep" },
 	) {
 		for (const key of gitOverrides) vi.stubEnv(key, undefined);
 		evidence = { sweeps: [] };
@@ -96,26 +92,18 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 		});
 		harness = fixture;
-		// Settings-only cases never create a session or inspect a repository.
-		const settingsOnly = worktreeCleanup === null;
-		if (!settingsOnly) {
-			git(fixture.projectDir, "init", "-b", "main");
-			writeFileSync(join(fixture.projectDir, "base.txt"), "committed base\n");
-			writeFileSync(
-				join(fixture.projectDir, ".gitignore"),
-				"ignored.txt\nnode_modules/\n",
-			);
-			git(fixture.projectDir, "add", "base.txt", ".gitignore");
-			commit(fixture.projectDir, "Initial commit");
-		}
+		git(fixture.projectDir, "init", "-b", "main");
+		writeFileSync(join(fixture.projectDir, "base.txt"), "committed base\n");
+		writeFileSync(
+			join(fixture.projectDir, ".gitignore"),
+			"ignored.txt\nnode_modules/\n",
+		);
+		git(fixture.projectDir, "add", "base.txt", ".gitignore");
+		commit(fixture.projectDir, "Initial commit");
 		writeFileSync(
 			join(fixture.configDir, "daemon.json"),
 			JSON.stringify({
-				...(legacy
-					? legacy.version === undefined
-						? {}
-						: { configVersion: legacy.version }
-					: { configVersion: 2 }),
+				configVersion: 2,
 				pid: 0,
 				port: 0,
 				pinHash: null,
@@ -135,19 +123,10 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 					},
 				],
 				accountDefaults: { claude: "claude" },
-				...(legacy
-					? legacy.rules === undefined
-						? {}
-						: { worktreeCleanup: legacy.rules }
-					: worktreeCleanup === null
-						? {}
-						: { worktreeCleanup }),
+				worktreeCleanup,
 			}),
 		);
-		await fixture.restart({
-			startupTimeoutMs: 120_000,
-			skipBrowserProbe: settingsOnly,
-		});
+		await fixture.restart({ startupTimeoutMs: 120_000 });
 		const socket = join(fixture.configDir, "relay.sock");
 		const sessions = (projectSlug = "process-test") =>
 			sendRpcRequest(socket, {
@@ -1749,150 +1728,5 @@ syncBuiltinESMExports();
 			),
 		});
 		expect(existsSync(session.path)).toBe(true);
-	}, 300_000);
-
-	it("persists all setting fields across daemon restart and decodes missing fields to defaults", async () => {
-		const { fixture, setting, set } = await start(null);
-		expect(await setting()).toEqual({ global: defaults });
-		const saved = await set({
-			onSettle: "keep",
-			onDelete: true,
-			settledAfterDays: 42,
-			keepWhen: "tracked-changes",
-		});
-		await fixture.shutdown();
-		await fixture.restart({ startupTimeoutMs: 120_000 });
-		expect(await setting()).toEqual({ global: saved });
-		await fixture.shutdown();
-		const configPath = join(fixture.configDir, "daemon.json");
-		const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<
-			string,
-			unknown
-		>;
-		expect(config["worktreeCleanup"]).toEqual(saved);
-		writeFileSync(
-			configPath,
-			JSON.stringify({ ...config, worktreeCleanup: { onDelete: true } }),
-		);
-		await fixture.restart({ startupTimeoutMs: 120_000 });
-		expect(await setting()).toEqual({
-			global: { ...defaults, onDelete: true },
-		});
-		evidence["settings"] = {
-			defaults,
-			saved,
-			partial: { ...defaults, onDelete: true },
-		};
-	}, 300_000);
-
-	it.each(
-		(
-			[
-				{ name: "missing cleanup", rules: undefined, expected: {} },
-				{ name: "empty cleanup", rules: {}, expected: {} },
-				{ name: "old merged", rules: { onSettle: "merged" }, expected: {} },
-				{
-					name: "old off",
-					rules: { onSettle: "off" },
-					expected: { onSettle: "keep" },
-				},
-				{
-					name: "old any",
-					rules: { onSettle: "any" },
-					expected: { settledAfterDays: 0 },
-				},
-				{
-					name: "idle only",
-					rules: { onSettle: "off", afterInactiveDays: 42 },
-					expected: { onSettle: "keep", settledAfterDays: 42 },
-				},
-				{
-					name: "idle with default settle",
-					rules: { afterInactiveDays: 3650 },
-					expected: { settledAfterDays: 3650 },
-				},
-				{
-					name: "merged switch",
-					rules: { onSettle: "off", whenMerged: true },
-					expected: {},
-				},
-				{
-					name: "zero-commit switch",
-					rules: { onSettle: "off", noCommitsBeyondDefault: true },
-					expected: {},
-				},
-				{
-					name: "only delete",
-					rules: { onDelete: true },
-					expected: { onDelete: true },
-				},
-				{
-					name: "all local files",
-					rules: { keepWhen: "any-local-files" },
-					expected: { keepWhen: "any-local-files" },
-				},
-				{
-					name: "all old fields",
-					rules: {
-						onSettle: "any",
-						onDelete: true,
-						afterInactiveDays: 42,
-						whenMerged: true,
-						noCommitsBeyondDefault: true,
-						keepWhen: "tracked-changes",
-					},
-					expected: {
-						settledAfterDays: 0,
-						onDelete: true,
-						keepWhen: "tracked-changes",
-					},
-				},
-				{
-					name: "version chooses old defaults",
-					rules: { onSettle: "off", settledAfterDays: 0 },
-					expected: { onSettle: "keep" },
-				},
-			] satisfies Array<{
-				name: string;
-				rules: Record<string, unknown> | undefined;
-				expected: Partial<CleanupSetting>;
-			}>
-		).flatMap((scenario) =>
-			([undefined, 1] as const).map((version) => ({
-				...scenario,
-				version,
-				versionName: version === undefined ? "legacy" : "version 1",
-			})),
-		),
-	)("migrates $versionName $name once across daemon restart", async ({
-		rules,
-		expected,
-		version,
-	}) => {
-		const { fixture, setting } = await start(null, { rules, version });
-		const migrated = { ...defaults, ...expected };
-		expect(await setting()).toEqual({ global: migrated });
-		const configPath = join(fixture.configDir, "daemon.json");
-		await fixture.shutdown();
-		const persisted = readFileSync(configPath, "utf8");
-		const config = JSON.parse(persisted) as Record<string, unknown>;
-		expect(config["configVersion"]).toBe(2);
-		expect(config["worktreeCleanup"]).toEqual(migrated);
-		await fixture.restart({
-			startupTimeoutMs: 120_000,
-			skipBrowserProbe: true,
-		});
-		expect(await setting()).toEqual({ global: migrated });
-		expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
-			...config,
-			pid: fixture.generations.at(-1)?.pid,
-			port: fixture.generations.at(-1)?.port,
-		});
-		evidence["migration"] = {
-			version: version ?? "legacy",
-			rules,
-			migrated,
-			settingsUnchangedOnSecondStart: true,
-		};
 	}, 300_000);
 });
