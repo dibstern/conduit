@@ -1,7 +1,148 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario: Message stops name what they show
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  Then the message stops read Answer, Key, Most and All messages
+  And the messages region visually matches turn-stop-labels at 98 percent
+
+Scenario: Settings uses the same message stop names
+  Given the conduit app is served with the connected mockup
+  And Surfacing has a valid key in the dark theme
+  When I open settings to Surfacing
+  Then the default message stops read Answer, Key, Most and All messages
+  And the settings-panel region visually matches turn-stop-settings at 98 percent
+
+Scenario: Mark prompts use the message stop names
+  Given a surfacing marks ledger is available in the dark theme
+  And message surfacing is active at All messages
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I Raise surfaced message #3 from the card
+  Then the turn mark prompt contains All messages and Most
+  And the messages region visually matches turn-stop-mark-prompt at 98 percent
+
+Scenario: Mark feedback names the new stop
+  Given a surfacing marks ledger is available in the dark theme
+  And message surfacing is active at All messages
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I Raise surfaced message #3 from the card
+  And I save the mark without a reason
+  Then the surfacing mark toast says ▲ Raised #3 to Most
+  And the messages region visually matches turn-stop-mark-feedback at 98 percent
+
+Scenario: A hidden mark belongs to Full log
+  Given a surfacing marks ledger is available in the dark theme
+  And message surfacing is active at All messages
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I Lower surfaced message #3 from the card
+  Then the turn mark prompt contains All messages and Full log
+  And the messages region visually matches turn-stop-hidden-prompt at 98 percent
+
+Scenario: Hidden mark feedback names Full log
+  Given a surfacing marks ledger is available in the dark theme
+  And message surfacing is active at All messages
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I Lower surfaced message #3 from the card
+  And I save the mark without a reason
+  Then the surfacing mark toast says ▼ Lowered #3 to Full log
+  And the messages region visually matches turn-stop-hidden-feedback at 98 percent
+
+Scenario: A card opened below the saved stop names both stops
+  Given a surfacing marks ledger is available in the dark theme
+  And message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I Lower surfaced message #1 from the card
+  And I save the mark without a reason
+  Then the turn card note says At All messages, below Most · opened directly
+  And the messages region visually matches turn-stop-card-note at 98 percent
+
+Scenario: Summary citation notes name both stops
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the recap session has a settled turn with current summaries
+  When I open the turn summary
+  And I follow recap citation #3
+  Then the summary stop note says At All messages, below Most · opened directly
+  And the screen region visually matches turn-stop-summary-note at 98 percent
+
+Scenario: Feedback uses the same names for message and hidden levels
+  Given the conduit app is served with the connected mockup
+  And Surfacing tuning has 6 marks and a valid key in the dark theme
+  When I open settings to Surfacing
+  And I open Surfacing Feedback
+  Then the feedback ledger names Most and Full log
+  And the settings-panel region visually matches turn-stop-ledger at 98 percent
+
+Scenario: Category previews use the same stop names
+  Given the conduit app is served with the connected mockup
+  And Surfacing tuning has 6 marks and a valid key in the dark theme
+  When I open settings to Surfacing
+  And I open Surfacing Categories
+  Then the category preview says Most shows
+  And the settings-panel region visually matches turn-stop-category-preview at 98 percent
+
+Scenario Outline: Full log uses All messages pins and cards without changing the saved stop
+  Given message surfacing is active at <saved>
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I open the plain turn log
+  Then the Full log pins are 1,2,3,4,5,8
+  And the Full log has no Answer-only note
+  When I pick surfaced message #3
+  Then the surfaced card shows #3 and announces its category and position
+  And the card has no below-stop note
+  And the effective surfacing level is <saved>
+  And the messages region visually matches turn-full-log-pins-<baseline>-<viewport> at 98 percent
+
+Examples:
+  | viewport | saved  | baseline |
+  | desktop  | Key    | key      |
+  | phone    | Key    | key      |
+  | desktop  | Answer | answer   |
+  | phone    | Answer | answer   |
+
+Scenario Outline: Full log treats an opened finding as visible at All messages
+  Given message surfacing is active at <saved>
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I open the plain turn log
+  And I open message #3 from the Full log row
+  Then the surfaced card shows #3 and announces its category and position
+  And the card has no below-stop note
+  And the effective surfacing level is <saved>
+  And the messages region visually matches turn-full-log-card-level-<baseline> at 98 percent
+
+Examples:
+  | saved  | baseline |
+  | Most   | most     |
+  | Answer | answer   |
+
+Scenario Outline: Stops count the whole Turn and compaction rules do not count as steps
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a counted-wake turn
+  Then the message stop counts are Key 1, Most 1, All messages 2
+  When I open the combined turn log
+  Then the activity strip announces 5 steps
+  And the Full log announces 5 steps
+  And the combined log keeps its compaction rule between the messages
+  And the messages region visually matches turn-stop-counts-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario Outline: Jev-off turns remember open and collapsed choices across reloads
-  Given message surfacing is inactive at Balanced
+  Given message surfacing is inactive at Most
   And the conduit app is served with the connected mockup
   And minimising uses the dark theme with Turns open <preference>
   And the panel choice session has a settled turn
@@ -21,7 +162,7 @@ Examples:
   | Minimised  |
 
 Scenario Outline: Turn summaries follow the shared phone breakpoint
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is <width> pixels wide
   And the recap session has a settled turn with current summaries
@@ -35,7 +176,7 @@ Examples:
   | 768   | desktop |
 
 Scenario Outline: Collapsing during a scrub permits auto-read after reopening
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And surfacing read tracking starts with none read and summaries off
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
@@ -53,7 +194,7 @@ Examples:
   | phone    |
 
 Scenario Outline: A folded card keeps bulk read failures visible and retryable
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And surfacing read tracking starts with none read and summaries off
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
@@ -75,7 +216,7 @@ Examples:
   | phone    |
 
 Scenario Outline: Folding a live card stops following and now resumes it
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a live turn
@@ -91,7 +232,7 @@ Examples:
   | phone    |
 
 Scenario Outline: Marking a message Unread survives picking another card and returning
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And surfacing read tracking starts with none read and summaries off
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
@@ -124,7 +265,7 @@ Scenario: Opening Summary with Jev off leaves the step log closed
   And the messages region visually matches turn-panel-plain-summary at 98 percent
 
 Scenario: The existing message level control leaves an open log in place
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the panel choice session has a settled turn
   When I open the plain turn log
@@ -134,7 +275,7 @@ Scenario: The existing message level control leaves an open log in place
   And the messages region visually matches turn-panel-level-keeps-log at 98 percent
 
 Scenario: A settled log pick survives collapse and suspends during each wake Run
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the panel choice session has a settled turn
   When I open the plain turn log
@@ -149,7 +290,7 @@ Scenario: A settled log pick survives collapse and suspends during each wake Run
   And the messages region visually matches turn-panel-settled-pick-wake at 98 percent
 
 Scenario: A log picked while live returns to the saved stop on settle
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the panel choice session has a live turn
   When I open the plain turn log
@@ -159,7 +300,7 @@ Scenario: A log picked while live returns to the saved stop on settle
   And the messages region visually matches turn-panel-live-pick-settled at 98 percent
 
 Scenario Outline: Two skills appear where they happened with their own time column
-  Given message surfacing is <jev> at Balanced
+  Given message surfacing is <jev> at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the turn log has two skills in a settled turn
@@ -175,7 +316,7 @@ Examples:
   | phone    | inactive |
 
 Scenario Outline: Skills need no picker in a live or settled turn
-  Given message surfacing is <jev> at Balanced
+  Given message surfacing is <jev> at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the turn log has two skills in a <phase> turn
@@ -199,7 +340,7 @@ Examples:
   | phone    | inactive | live    |
 
 Scenario Outline: A hand-back stays in one turn log with its earlier message
-  Given message surfacing is active at All
+  Given message surfacing is active at All messages
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the turn log session has a two-segment <tool> turn
@@ -220,7 +361,7 @@ Examples:
   | phone    | ExitPlanMode    | turn-log-plan-phone        |
 
 Scenario Outline: Wake Runs continue inside the same turn log
-  Given message surfacing is active at All
+  Given message surfacing is active at All messages
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the turn log session has a <run> turn
@@ -240,7 +381,7 @@ Examples:
   | phone    | wake-empty | turn-log-wake-empty-phone    |
 
 Scenario Outline: A waiting Turn keeps its open question answerable below its reply
-  Given message surfacing is active at All
+  Given message surfacing is active at All messages
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the turn log session has a <kind> turn

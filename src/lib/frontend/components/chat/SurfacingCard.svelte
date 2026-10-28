@@ -23,7 +23,8 @@
 <script lang="ts">
 	import { onDestroy } from "svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { surfacePinRows, SURFACE_LABELS, SURFACE_LEVELS, type SurfaceLevel, type SurfacePinGroup } from "../../utils/surface-turn.js";
+	import { STOPS, SURFACE_LEVELS, type StopCounts } from "../../utils/turn-stops.js";
+	import { surfacePinRows, type SurfaceLevel, type SurfacePinGroup } from "../../utils/surface-turn.js";
 	import Button from "../ui/Button.svelte";
 	import SurfacingReplyActions from "./SurfacingReplyActions.svelte";
 	import Checkbox from "../ui/Checkbox.svelte";
@@ -32,8 +33,9 @@
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 
-	let { view, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onjump, onhover, onread, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), scrubbing = $bindable(false), markReadInAxis = false, onreply, replied = false }: {
+	let { view, counts, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onjump, onhover, onread, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), scrubbing = $bindable(false), markReadInAxis = false, onreply, replied = false }: {
 		view: SurfaceTurn;
+		counts: StopCounts;
 		live: boolean;
 		level: SurfaceLevel;
 		overridden: boolean;
@@ -73,11 +75,10 @@
 	onDestroy(() => { scrubbing = false; });
 	let suppressClick = false;
 	let cardBodyEl: HTMLDivElement | undefined = $state();
-	const levelOptions = $derived(SURFACE_LEVELS.filter((value) => value === "final" || value === "all" || value === level || view.counts[value] > 0).map((value) => ({
+	const levelOptions = $derived(SURFACE_LEVELS.filter((value) => value === "final" || value === "all" || value === level || counts[value] > 0).map((value) => ({
 		value,
-		label: SURFACE_LABELS[value],
-		...(value === "balanced" ? { shortLabel: "Bal" } : {}),
-		...(value === "final" ? {} : { detail: String(view.counts[value]) }),
+		label: STOPS[value].short,
+		...(value === "final" ? {} : { detail: String(counts[value]) }),
 	})));
 	// With summaries off, the axis carries the turn's bulk read in place of the start time.
 	const markCount = $derived(markReadInAxis && onmarkread ? view.unreadPartIds.length : 0);
@@ -198,7 +199,7 @@
 
 <div class="surface-axis">
 	{#if !markCount}<span class="axis-start">{startTime}</span>{/if}
-	<span class="axis-notes">{#if level === "final"}<span>Final only · {view.counts.all} hidden</span>{/if}{#if view.empty}<span>Nothing at {SURFACE_LABELS[level]} · <Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" onclick={() => onlevel("all")}>Show All</Button></span>{/if}{#if view.notJudgedCount}<span data-testid="surfacing-not-judged">⚠ {view.notJudgedCount} not judged</span>{/if}{#if markCount}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="h-[22px] shrink-0 rounded-full px-[8px] font-sans text-[11.5px] font-medium bg-accent/15 text-accent" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => onmarkread?.()}>✓ Mark {markCount} read</Button>{/if}</span>
+	<span class="axis-notes">{#if view.level === "final"}<span>{STOPS.final.menu} · {counts.all} hidden</span>{/if}{#if view.empty}<span>Nothing at {STOPS[view.level].short} · <Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" onclick={() => onlevel("all")}>Show {STOPS.all.short}</Button></span>{/if}{#if view.notJudgedCount}<span data-testid="surfacing-not-judged">⚠ {view.notJudgedCount} not judged</span>{/if}{#if markCount}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="h-[22px] shrink-0 rounded-full px-[8px] font-sans text-[11.5px] font-medium bg-accent/15 text-accent" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => onmarkread?.()}>✓ Mark {markCount} read</Button>{/if}</span>
 	<span class="grow"></span>
 	<div class="contents" data-testid="surfacing-level"><SegmentedControl variant="level" label="Surfacing level" options={levelOptions} bind:value={() => level, onlevel} /></div>
 	{#if overridden}<i class="override-dot" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}

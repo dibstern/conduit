@@ -30,6 +30,7 @@ const view = surfaceTurn({
 	positions: parts.map((_, index) => ({ left: index * 16, width: 16 })),
 	categorySet: DEFAULT_CATEGORY_SET,
 	level: "balanced",
+	view: { kind: "show", stop: "balanced" },
 	live: false,
 	latestTurn: true,
 	selection: { kind: "auto" },

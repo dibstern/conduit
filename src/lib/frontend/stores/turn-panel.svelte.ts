@@ -3,11 +3,13 @@ import { SvelteMap } from "svelte/reactivity";
 import type { CategorySet } from "../../contracts/category-set.js";
 import type { MessageSurfacingStatus } from "../../contracts/message-surfacing.js";
 import { assertNever } from "../../utils.js";
+import { openAsk } from "../utils/surface-turn.js";
 import {
-	openAsk,
+	type PanelView,
+	type ShowStop,
 	SURFACE_LEVELS,
 	type SurfaceLevel,
-} from "../utils/surface-turn.js";
+} from "../utils/turn-stops.js";
 import {
 	type Turn,
 	type TurnPhase,
@@ -22,10 +24,6 @@ import {
 } from "./message-surfacing.svelte.js";
 import { setTurnMinimised, turnMinimised } from "./turn-minimisation.svelte.js";
 
-export type ShowStop = SurfaceLevel | "log";
-export type PanelView<Stop extends ShowStop = ShowStop> =
-	| { kind: "show"; stop: Stop }
-	| { kind: "usage" };
 export type TurnPanel<Stop extends ShowStop = ShowStop> =
 	| { kind: "collapsed" }
 	| { kind: "open"; view: PanelView<Stop> };

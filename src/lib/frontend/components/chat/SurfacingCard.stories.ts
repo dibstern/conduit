@@ -479,7 +479,7 @@ export const Final: Story = {
 		await expect(
 			canvas.queryByTestId("surfacing-msg-card"),
 		).not.toBeInTheDocument();
-		await expect(canvas.getByText("Final only · 6 hidden")).toBeVisible();
+		await expect(canvas.getByText("Answer only · 6 hidden")).toBeVisible();
 	},
 };
 export const FinalLight: Story = { ...Final, globals: { theme: "light" } };

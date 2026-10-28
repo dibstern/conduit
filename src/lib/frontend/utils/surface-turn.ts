@@ -3,12 +3,19 @@ import {
 	type SurfacingMark,
 	surfacingLevel,
 } from "../../contracts/category-set.js";
-import type { MessageSurfacingPreferences } from "../../contracts/message-surfacing.js";
 import type { AssistantMessage } from "../types.js";
 import { categoryColour } from "./category-colour.js";
+import {
+	cardLevelFor,
+	type PanelView,
+	SURFACE_RANK as rank,
+	STOPS,
+	type SurfaceLevel,
+	stopForLevel,
+} from "./turn-stops.js";
 import type { ActivityPart } from "./turns.js";
 
-export type SurfaceLevel = MessageSurfacingPreferences["defaultLevel"];
+export type { SurfaceLevel } from "./turn-stops.js";
 
 /** Which card the turn shows: auto follows the turn's default fold, latest pins the newest card open. */
 export type CardSelection =
@@ -63,16 +70,6 @@ export type SurfacePart = AssistantMessage & {
 	surfacingRead?: boolean;
 };
 
-export const SURFACE_LEVELS = ["final", "key", "balanced", "all"] as const;
-export const SURFACE_LABELS = {
-	final: "Final",
-	key: "Key",
-	balanced: "Balanced",
-	all: "All",
-	hidden: "the log",
-};
-const rank = { hidden: 0, all: 1, balanced: 2, key: 3, final: 4 };
-
 /** The latest visible Ask belongs only to the transcript's last Turn. */
 export function openAsk(
 	turnParts: readonly ActivityPart[],
@@ -105,6 +102,7 @@ export function surfaceTurn(input: {
 	positions: readonly { left: number; width: number }[];
 	categorySet: CategorySet;
 	level: SurfaceLevel;
+	view: PanelView | null;
 	live: boolean;
 	latestTurn: boolean;
 	latestBlock?: boolean;
@@ -114,6 +112,8 @@ export function surfaceTurn(input: {
 	/** A summary citation can reveal its pin without changing the chosen level. */
 	citedOrdinal?: number | null;
 }) {
+	const cardLevel = cardLevelFor(input.view);
+	const level = cardLevel ?? input.level;
 	const newest = [...input.parts]
 		.reverse()
 		.find((part) => part.type === "assistant");
@@ -170,19 +170,10 @@ export function surfaceTurn(input: {
 			},
 		];
 	});
-	const visibleAt = (level: SurfaceLevel) =>
-		level === "final"
-			? []
-			: messages.filter(
-					(message) => message.pending || rank[message.level] >= rank[level],
-				);
-	const counts = {
-		final: 0,
-		key: visibleAt("key").length,
-		balanced: visibleAt("balanced").length,
-		all: visibleAt("all").length,
-	};
-	const visible = visibleAt(input.level);
+	const visibleAt = (level: Exclude<SurfaceLevel, "final">) =>
+		messages.filter(
+			(message) => message.pending || rank[message.level] >= rank[level],
+		);
 	const pickedUuid =
 		input.selection.kind === "picked" ? input.selection.uuid : null;
 	const picked = messages.find(
@@ -200,29 +191,35 @@ export function surfaceTurn(input: {
 			(!input.latestTurn ||
 				input.latestBlock === false ||
 				(!!input.hasRecap && !short)));
-	const pins =
-		input.level === "final"
-			? []
-			: messages.filter(
-					(message) =>
-						visible.includes(message) ||
-						(!folded && message === picked) ||
-						(input.citedOrdinal != null &&
-							message.number === input.citedOrdinal),
-				);
+	// Answer has no automatic content, even while Jev is pending. A direct pick
+	// can still open its one pin without admitting a citation or the live edge.
+	const shown = (() => {
+		if (level === "final")
+			return { visible: [], pins: picked ? [picked] : [], empty: false };
+		const visible = visibleAt(level);
+		return {
+			visible,
+			empty: visible.length === 0,
+			pins: messages.filter(
+				(message) =>
+					visible.includes(message) ||
+					(!folded && message === picked) ||
+					(input.citedOrdinal != null && message.number === input.citedOrdinal),
+			),
+		};
+	})();
+	const visible = shown.visible;
+	const pins = cardLevel === null ? [] : shown.pins;
 	const target =
-		input.level === "final" || folded
-			? null
-			: (picked ?? visible.at(-1) ?? null);
+		cardLevel === null || folded ? null : (picked ?? visible.at(-1) ?? null);
 	const cardIndex = target ? pins.indexOf(target) : -1;
 	const belowLevel =
-		target !== null &&
-		!target.pending &&
-		rank[target.level] < rank[input.level];
+		target !== null && !target.pending && rank[target.level] < rank[level];
 	const unread = visible.filter(({ read }) => read === false);
 	return {
+		level,
 		nearestPin: (x: number) =>
-			input.level === "final"
+			cardLevel === null
 				? null
 				: visible.reduce<(typeof visible)[number] | null>(
 						(nearest, pin) =>
@@ -234,7 +231,6 @@ export function surfaceTurn(input: {
 		pins,
 		citedOrdinal: input.citedOrdinal ?? null,
 		messages,
-		counts,
 		card: target,
 		cardIndex,
 		folded,
@@ -246,7 +242,7 @@ export function surfaceTurn(input: {
 			belowLevel && target
 				? target.level === "hidden"
 					? "Hidden at this level · in the step log"
-					: `At ${SURFACE_LABELS[target.level]}, below ${SURFACE_LABELS[input.level]} · opened directly`
+					: `At ${STOPS[stopForLevel(target.level)].short}, below ${STOPS[level].short} · opened directly`
 				: "",
 		openAsk: openAsk(
 			input.turnParts ?? input.parts,
@@ -258,7 +254,7 @@ export function surfaceTurn(input: {
 		unreadPartIds: turnMessages.flatMap(({ part, level }) =>
 			part.surfacingRead === false &&
 			part.partId &&
-			(rank[level] >= rank[input.level] ||
+			(rank[level] >= rank[cardLevel ?? input.level] ||
 				visible.some((pin) => pin.pending && pin.part === part))
 				? [part.partId]
 				: [],
@@ -272,29 +268,31 @@ export function surfaceTurn(input: {
 			({ part }) => part.surfacingProbabilities === null,
 		).length,
 		// Everything a reply reference names, for any message the turn's summary can cite.
-		numbers: turnMessages.flatMap(({ part, level, category: id }) => {
-			if (part.surfacingOrdinal === undefined) return [];
-			const category = input.categorySet.categories.find(
-				(candidate) => candidate.id === id,
-			);
-			return [
-				{
-					number: part.surfacingOrdinal,
-					part,
-					level,
-					belowLevel: rank[level] < rank[input.level],
-					label: category?.label ?? "Message",
-					builtinCategory:
-						category?.origin === "builtin" ? category.id : undefined,
-					glyph: category?.glyph ?? "·",
-					colour:
-						category?.origin === "builtin"
-							? categoryColour(category)
-							: undefined,
-					time: surfaceTime((part.createdAt ?? input.start) - input.start),
-				},
-			];
-		}),
+		numbers: turnMessages.flatMap(
+			({ part, level: messageLevel, category: id }) => {
+				if (part.surfacingOrdinal === undefined) return [];
+				const category = input.categorySet.categories.find(
+					(candidate) => candidate.id === id,
+				);
+				return [
+					{
+						number: part.surfacingOrdinal,
+						part,
+						level: messageLevel,
+						belowLevel: rank[messageLevel] < rank[level],
+						label: category?.label ?? "Message",
+						builtinCategory:
+							category?.origin === "builtin" ? category.id : undefined,
+						glyph: category?.glyph ?? "·",
+						colour:
+							category?.origin === "builtin"
+								? categoryColour(category)
+								: undefined,
+						time: surfaceTime((part.createdAt ?? input.start) - input.start),
+					},
+				];
+			},
+		),
 		following:
 			input.live &&
 			(input.selection.kind === "auto" || input.selection.kind === "latest"),
@@ -302,7 +300,7 @@ export function surfaceTurn(input: {
 		next: pins[cardIndex + 1] ?? null,
 		first: pins[0] ?? null,
 		last: pins.at(-1) ?? null,
-		empty: input.level !== "final" && visible.length === 0,
+		empty: shown.empty,
 	};
 }
 
