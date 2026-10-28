@@ -277,7 +277,7 @@ Only evidence and conduit's decisions, each once:
   the query, so a query ending never covers them.
 - **L1. Process.** One state per `runnerId`: live, with its latest `querySeq`, or retired. A runner
   is live from its first `process_started`; its latest `querySeq` is the highest one on its
-  `process_started` and later unsolicited labels. Before that it is not started: not live, with no
+  `process_started` and later unsolicited labels, counting only evidence that is not Rejected (3.4). Before that it is not started: not live, with no
   label, though a `run_dispatched` may already name it (L2); if it retires first, retiring records
   no lost work. This and 3.4 are the only places a label is split into
   `runnerId` and `querySeq`; everywhere else it is opaque. The split is at the last `:` when what
@@ -3007,6 +3007,12 @@ reattach (L1). A replaced query's sends are covered by its own `query_ended` (3.
 the host fence (6.1).
 
 - D44: amends L5. A label's lost-work scope also ends when it becomes older by a newer `querySeq` of its runner (a query replacement, 6.1), so retirement is one case of "becoming older" rather than its own trigger; the newer label's tasks are unknown until its first snapshot (8.4). Reason: the host drops its task cache on replacement (8.3), so the old query's tasks would otherwise vanish with no record. Rejected: carrying the old label's tasks to the newer one (contradicts the host's cache reset); recording nothing at replacement (LI8 work vanishes silently). Risk: a provider that keeps tasks across a replacement would show a spurious notice; 32.25 checks this per provider.
+
+**Oracle round 9 (2026-10-29): no new decisions.** Its five questions follow from 3.4, 8.1, 8.4
+and L5: Rejected evidence never raises a label (L1); Cursor and OpenCode task events are Rejected,
+so they mark no waking task; a wake joined under a newer label is confirm-gated until that label's
+first snapshot (8.4, D44); a newer label retiring before any snapshot records "may have been lost"
+(L5).
 
 ### A.11 REDESIGN-1 Process and address (2026-10-28): C + M1
 
