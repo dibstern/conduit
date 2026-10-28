@@ -19,6 +19,22 @@ Examples:
   | inactive | desktop  | wake                         | omits        |
   | inactive | phone    | wake                         | omits        |
 
+Scenario Outline: Q&A keeps each question, plan and answer in turn order
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a qa-history turn
+  When I select the Turn Q&A tab
+  Then Q&A lists the question and plan with their answers in order
+  And the messages region visually matches turn-qa-history-<jev>-<viewport> at 98 percent
+
+Examples:
+  | jev      | viewport |
+  | active   | desktop  |
+  | active   | phone    |
+  | inactive | desktop  |
+  | inactive | phone    |
+
 Scenario Outline: The phone Show menu explains each cumulative stop
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
@@ -754,14 +770,15 @@ Examples:
   | desktop  | wake-empty | turn-log-wake-empty-desktop  |
   | phone    | wake-empty | turn-log-wake-empty-phone    |
 
-Scenario Outline: A waiting Turn keeps its open question answerable below its reply
+Scenario Outline: Open questions remain answerable in Q&A
   Given message surfacing is active at All messages
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the turn log session has a <kind> turn
   Then the turn has one activity head, strip and log
   And only the final turn reply is outside the activity
-  And the open hand-back is below the reply
+  When I select the Turn Q&A tab
+  Then the open hand-back is in Q&A instead of below the reply
   When I answer the waiting turn question
   Then the waiting turn answer reaches the relay
   When I open the combined turn log

@@ -6,7 +6,7 @@
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { fmtDuration } from "../../utils/turns.js";
+	import { fmtDuration, isOpenHandBack } from "../../utils/turns.js";
 
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
@@ -101,16 +101,10 @@
 		(message.input as Record<string, unknown> | null | undefined)?.['delivery'] === "async",
 	);
 
-	/** Whether the question is actively pending and should show an interactive card.
-	 *  Async questions stay interactive after their turn and tool have completed.
-	 *  Blocking questions are interactive when either:
-	 *  1. The tool is running AND matched to a pendingQuestion (has server-side que_ ID), OR
-	 *  2. The tool is running AND we have question data from the tool input (cross-process
-	 *     case where GET /question returns empty, but the tool is still running). */
+	/** The shared hand-back rule also covers completed, unanswered async questions. */
 	const isQuestionActive = $derived(
-		pendingQuestionRequest?.delivery === "async" ||
-		((message.status === "pending" || message.status === "running") &&
-			(pendingQuestionRequest !== null || questionDataFromInput !== null))
+		isOpenHandBack(message, pendingQuestionRequest) &&
+			(pendingQuestionRequest !== null || questionDataFromInput !== null)
 	);
 
 	/**

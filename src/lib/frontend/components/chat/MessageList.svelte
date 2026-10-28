@@ -62,7 +62,6 @@
 	import { insertComposerReference } from "../input/composer-reference.svelte.js";
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
-	import ToolItem from "./ToolItem.svelte";
 	import SystemMessage from "./SystemMessage.svelte";
 	import PermissionCard from "../permissions/PermissionCard.svelte";
 	import QuestionCard from "./QuestionCard.svelte";
@@ -613,12 +612,6 @@
 				<AssistantMessage {sessionId} {providerId} message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)}
 					hideHeader={reply === segment.reply[0] && hasActivity}
 					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
-			</div>
-		{/each}
-		{#each log.handBacks as handBack (handBack.uuid)}
-			{#if !log.resumedParts.has(handBack.uuid)}{@render resumed(handBack.uuid)}{/if}
-			<div class="max-w-[820px] mx-auto px-[14px] md:px-[32px]">
-				<div class="md:ml-[42px]"><ToolItem message={handBack} /></div>
 			</div>
 		{/each}
 		<!-- A turn that did work carries its bill on the strip. A text-only

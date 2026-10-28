@@ -62,6 +62,8 @@
 	import TurnLog from "./TurnLog.svelte";
 	import TurnShowBar from "./TurnShowBar.svelte";
 	import TurnUsage from "./TurnUsage.svelte";
+	import TurnQa from "./TurnQa.svelte";
+	import { turnLog } from "../../utils/turns.js";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
 	let { turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
@@ -99,6 +101,7 @@
 
 	const fullLog = $derived(panel.view.kind === "open" && panel.view.view.kind === "show" && panel.view.view.stop === "log");
 	const usage = $derived(panel.view.kind === "open" && panel.view.view.kind === "usage");
+	const qa = $derived(panel.view.kind === "open" && panel.view.view.kind === "qa");
 	type StripInteraction = Parameters<NonNullable<ComponentProps<typeof ActivityStrip>["oninteraction"]>>[0];
 	type CardSlot = NonNullable<ComponentProps<typeof ActivityStrip>["cardSlot"]>;
 	let stripInteraction = $state<StripInteraction>({ hovered: null, scrubbing: false });
@@ -204,7 +207,7 @@
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	const minimised = $derived(panel.view.kind === "collapsed");
 	const cardSlot = $derived.by((): CardSlot => {
-		if (!surfacingActive || usage) return { kind: "none" };
+		if (!surfacingActive || usage || qa) return { kind: "none" };
 		if (panel.view.kind === "collapsed") {
 			const card = surface.messages.find((pin) => pin.part.uuid === stripInteraction.hovered);
 			return card ? { kind: "preview", card } : { kind: "none" };
@@ -531,7 +534,7 @@
 				{/if}
 					{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summary</Button></span>{/if}
 			</div>
-			{#if usage && surfacingActive}
+			{#if (usage || qa) && surfacingActive}
 				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if minimised && surfacingActive}
 				<MinimisedTurn>
@@ -563,6 +566,7 @@
 			{/if}
 		</div>
 		{#if usage}<TurnUsage {turn} {bill} />{/if}
+		{#if qa}<TurnQa handBacks={turnLog(turn).handBacks} {sessionId} />{/if}
 		<TurnLog class="step-log border-t border-border bg-bg px-[12px] py-[6px]" mode={minimised ? "collapsed" : usage ? "hidden" : fullLog ? "shown" : "hidden"} phase={panel.phase} pending={panel.pending} stepCount={counts.log} entries={logEntries}>
 			{#snippet row(entry: TurnLogEntry)}
 				{@const i = entry.index}

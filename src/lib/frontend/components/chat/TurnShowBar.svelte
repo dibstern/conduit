@@ -20,7 +20,7 @@
 	const active = $derived.by(() => {
 		const view = panel.view;
 		switch (view.kind) {
-			case "collapsed": return null;
+			case "collapsed": return "log" as const;
 			case "open": {
 				const tab = view.view;
 				switch (tab.kind) {
@@ -70,7 +70,7 @@
 	{:else}
 		<Menu ariaLabel="Show, least to most" presentation="popover" side="bottom" align="start">
 			{#snippet trigger({ props })}
-				<Button {...props} variant="ghost" size="content" tone="secondary" touchTarget class="min-h-[36px] gap-[6px] text-[12px]" data-testid="surfacing-level" ariaLabel="Show messages">{active === "usage" || active === null ? "Show ⌄" : `Show · ${active === "qa" ? "Q&A" : STOPS[active].menu} ⌄`}{#if panel.overridden && active !== "usage" && active !== "qa"}<i class="size-[6px] rounded-full bg-accent" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}</Button>
+				<Button {...props} variant="ghost" size="content" tone="secondary" touchTarget class="min-h-[36px] gap-[6px] text-[12px]" data-testid="surfacing-level" ariaLabel="Show messages">{active === "usage" ? "Show ⌄" : `Show · ${active === "qa" ? "Q&A" : STOPS[active].menu} ⌄`}{#if panel.overridden && active !== "usage" && active !== "qa"}<i class="size-[6px] rounded-full bg-accent" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}</Button>
 			{/snippet}
 			<MenuGroup label="Show, least to most">
 				<MenuRadioGroup value={active}>
@@ -94,7 +94,7 @@
 			{/if}
 		</Menu>
 	{/if}
-	<Tabs variant="footer" value={active ?? ""} {options} label="Show" data-testid={layout === "tabs" && panel.stops.length > 1 ? "surfacing-level" : undefined} onValueChange={(stop) => { if (stop === "usage") panel.usage(); else if (stop === "qa") panel.qa(); else show(stop); }}>
+	<Tabs variant="footer" value={active} {options} label="Show" data-testid={layout === "tabs" && panel.stops.length > 1 ? "surfacing-level" : undefined} onValueChange={(stop) => { if (stop === "usage") panel.usage(); else if (stop === "qa") panel.qa(); else show(stop); }}>
 		{#snippet optionContent(option)}{#if option.value === "usage"}Usage{:else if option.value === "qa"}Q&A{:else}{@render stopContent(option.value, option.label)}{/if}{/snippet}
 	</Tabs>
 	{#if layout === "tabs" && panel.stops.length > 1}{@render defaults()}{/if}

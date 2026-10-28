@@ -615,7 +615,7 @@ export const turnActivityHandlers: StepHandler[] = [
 	{
 		name: "seed multi-segment turn log",
 		match:
-			/^the turn log session has a (two-segment AskUserQuestion|two-segment ExitPlanMode|wake|counted-wake|wake-reply|wake-empty|waiting|async) turn$/,
+			/^the turn log session has a (two-segment AskUserQuestion|two-segment ExitPlanMode|qa-history|wake|counted-wake|wake-reply|wake-empty|waiting|async) turn$/,
 		run: async ({ world, match }) => {
 			const kind = match[1] ?? "";
 			kinds.set(world.page, kind);
@@ -692,6 +692,7 @@ export const turnActivityHandlers: StepHandler[] = [
 						: [
 								...before,
 								tool("answered", handBack, 8000),
+								...(kind === "qa-history" ? [tool("approved", "ExitPlanMode", 20_000)] : []),
 								...(asyncQuestion
 									? [
 											{
@@ -907,18 +908,12 @@ export const turnActivityHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert waiting question placement",
-		match: /^the open hand-back is below the reply$/,
+		match: /^the open hand-back is in Q&A instead of below the reply$/,
 		run: async ({ world }) => {
 			const form = world.page.locator(".question-card");
 			await expect(form).toBeVisible();
-			await expect(panel(world.page).locator(".question-card")).toHaveCount(0);
-			const reply = await world.page
-				.locator("#messages .msg-assistant")
-				.boundingBox();
-			const question = await form.boundingBox();
-			if (!reply || !question)
-				throw new Error("Reply or question has no bounds");
-			expect(question.y).toBeGreaterThanOrEqual(reply.y + reply.height);
+			await expect(panel(world.page).getByRole("region", { name: "Turn Q&A", exact: true }).locator(".question-card")).toBeVisible();
+			await expect(world.page.locator("#messages .tool-item").filter({ has: world.page.locator(".question-card") })).toHaveCount(1);
 		},
 	},
 	{
