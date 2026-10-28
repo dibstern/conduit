@@ -5,6 +5,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,6 +20,17 @@ const hookInstaller = join(repoRoot, "scripts/install-git-hooks.mjs");
 function writeExecutable(path: string, content: string) {
 	writeFileSync(path, content);
 	chmodSync(path, 0o755);
+}
+
+/**
+ * Creates `bin` with a silent `mise`. The gate loads the developer's real mise
+ * toolchain before Lefthook; outside a mise project that resolution took
+ * seconds under machine load and is not under test. A link to `true` also
+ * avoids the first-exec cost of a new script.
+ */
+function makeStubBin(bin: string) {
+	mkdirSync(bin);
+	symlinkSync("/usr/bin/true", join(bin, "mise"));
 }
 
 function readLog(path: string) {
@@ -52,7 +64,7 @@ describe("Beads pre-commit hook", () => {
 		const log = join(sandbox, "hook.log");
 
 		try {
-			mkdirSync(bin);
+			makeStubBin(bin);
 			writeFileSync(log, "");
 			writeExecutable(
 				join(bin, "lefthook"),
@@ -88,7 +100,7 @@ exit 0
 		const log = join(sandbox, "hook.log");
 
 		try {
-			mkdirSync(bin);
+			makeStubBin(bin);
 			writeFileSync(log, "");
 			writeExecutable(
 				join(bin, "lefthook"),
@@ -126,7 +138,7 @@ exit 0
 		const log = join(sandbox, "hook.log");
 
 		try {
-			mkdirSync(bin);
+			makeStubBin(bin);
 			writeFileSync(log, "");
 			writeExecutable(
 				join(bin, "lefthook"),
@@ -162,7 +174,7 @@ exit 0
 		const log = join(sandbox, "hook.log");
 
 		try {
-			mkdirSync(bin);
+			makeStubBin(bin);
 			mkdirSync(join(sandbox, ".beads/hooks"), { recursive: true });
 			writeFileSync(log, "");
 			writeExecutable(
