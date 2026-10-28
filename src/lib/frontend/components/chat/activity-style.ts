@@ -91,6 +91,8 @@ export function segmentAppearance(
 	running: ReadonlySet<string>,
 	live = false,
 ): { tone: PartStyle["tone"]; running: boolean } {
+	if (part.type === "thinking" && live && !part.done)
+		return { tone: "live", running: true };
 	if (part.type === "tool") {
 		if (part.status === "error" || part.isError)
 			return { tone: "fail", running: false };
