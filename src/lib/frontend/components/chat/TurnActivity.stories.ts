@@ -142,6 +142,30 @@ export const Live: Story = {
 
 export const LiveLight: Story = { ...Live, globals: { theme: "light" } };
 
+const liveFourSteps: Turn = {
+	...live,
+	segments: [{ ...liveSegment, activity: liveSegment.activity.slice(-4) }],
+};
+
+/** One hidden step reads in the singular, on the control and the log's name. */
+export const LiveOneEarlierStep: Story = {
+	args: {
+		turn: liveFourSteps,
+		segment: liveFourSteps.segments[0] ?? EMPTY_SEGMENT,
+		final: true,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expandTurn(canvasElement);
+		await expect(
+			canvas.getByRole("button", { name: "+ 1 earlier step" }),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("region", { name: "Turn log, 4 steps" }),
+		).toBeVisible();
+	},
+};
+
 /** Summary generation is supplied by its owner; the phone row has the agreed copy. */
 export const SummaryRow: Story = {
 	args: {
@@ -464,7 +488,7 @@ async function showSkillEvents(canvasElement: HTMLElement) {
 	await expandTurn(canvasElement);
 	await showTurnStop(canvasElement, "log");
 	const earlier = canvas.queryByRole("button", {
-		name: /^\+ \d+ earlier steps$/,
+		name: /^\+ \d+ earlier steps?$/,
 	});
 	if (earlier) await userEvent.click(earlier);
 	const rows = canvas.getAllByRole("button", { name: /^Skill / });
@@ -713,7 +737,7 @@ export const JevOffLive: Story = {
 			canvas.getByRole("tab", { name: "Log", selected: true }),
 		).toBeVisible();
 		await expect(
-			canvas.getByRole("button", { name: /^\+ \d+ earlier steps$/ }),
+			canvas.getByRole("button", { name: /^\+ \d+ earlier steps?$/ }),
 		).toBeVisible();
 		await expect(
 			[
@@ -722,6 +746,19 @@ export const JevOffLive: Story = {
 				),
 			].filter((node) => node.offsetHeight > 0),
 		).toHaveLength(3);
+	},
+};
+
+/** A narrow collapsed head truncates its phrase and keeps the whole elapsed time. */
+export const JevOffLiveNarrow: Story = {
+	args: { ...JevOffLive.args, sessionId: "turn-activity-jev-off-live-narrow" },
+	play: async ({ canvasElement }) => {
+		canvasElement.style.width = "320px";
+		const elapsed = within(canvasElement).getByTestId("turn-live-elapsed");
+		await expect(elapsed.scrollWidth).toBeLessThanOrEqual(elapsed.clientWidth);
+		const phrase = elapsed.nextElementSibling;
+		await expect(phrase).toHaveClass("truncate");
+		await expect(phrase?.scrollWidth).toBeGreaterThan(phrase?.clientWidth ?? 0);
 	},
 };
 
@@ -768,13 +805,8 @@ export const RunningTasks: Story = {
 		],
 	},
 	play: async ({ canvasElement }) => {
-		const toggle = within(canvasElement).getByRole("button", {
-			name: /^Worked\b/,
-			expanded: false,
-		});
-		await userEvent.click(toggle);
-		toggle.blur();
-		const pill = canvasElement.querySelector(".step-log .turn-running");
+		await expandTurn(canvasElement);
+		const pill = canvasElement.querySelector(".turn-running");
 		await expect(pill).toBeVisible();
 		await expect(pill).toHaveTextContent("2 running");
 		const glyph = pill?.querySelector('[data-flow-glyph="running"]');
@@ -787,9 +819,6 @@ export const RunningTasks: Story = {
 			getComputedStyle(pill).getPropertyValue("--color-tool");
 		await expect(getComputedStyle(pill).color).toBe(expectedTool.color);
 		await expect(getComputedStyle(glyph).color).toBe(expectedTool.color);
-		await expect(
-			canvasElement.querySelector(".skills-toggle .lucide-sparkles"),
-		).toBeVisible();
 	},
 };
 

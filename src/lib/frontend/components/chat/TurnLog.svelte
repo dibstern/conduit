@@ -2,7 +2,7 @@
 	import { tick, type Snippet } from "svelte";
 	import { on } from "svelte/events";
 	import type { PendingReveal } from "../../stores/turn-panel.svelte.js";
-	import type { TurnLogEntry, TurnPhase } from "../../utils/turns.js";
+	import { plural, type TurnLogEntry, type TurnPhase } from "../../utils/turns.js";
 	import Button from "../ui/Button.svelte";
 
 	let { class: className, mode, phase, pending, stepCount, entries, row }: {
@@ -44,10 +44,10 @@
 </script>
 
 {#if mode !== "collapsed" && (logMounted || mode === "shown")}
-	<div bind:this={logEl} class={className} use:enableTouchActive role="region" aria-label={`Turn log, ${stepCount} steps`} hidden={mode === "hidden"} data-testid={phase !== "settled" ? "turn-live-activity" : undefined}>
+	<div bind:this={logEl} class={className} use:enableTouchActive role="region" aria-label={`Turn log, ${stepCount} ${stepCount === 1 ? "step" : "steps"}`} hidden={mode === "hidden"} data-testid={phase !== "settled" ? "turn-live-activity" : undefined}>
 		{#if phase !== "settled" && earlierCount > 0}
 			<Button variant="ghost" size="content" tone="secondary" hoverFill="none" align="start" touchTarget
-				class="px-[6px] py-[7px] text-[12px]" aria-expanded={rowMode === "all"} onclick={toggleEarlier}>{rowMode === "ticker" ? `+ ${earlierCount} earlier steps` : "Hide earlier steps"}</Button>
+				class="px-[6px] py-[7px] text-[12px]" aria-expanded={rowMode === "all"} onclick={toggleEarlier}>{rowMode === "ticker" ? `+ ${plural(earlierCount, "earlier step")}` : "Hide earlier steps"}</Button>
 		{/if}
 		{#each visibleEntries as entry (entry.uuid)}
 			<div hidden={rowMode === "ticker" && entry.index < earlierIndex}>{@render row(entry)}</div>

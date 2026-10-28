@@ -31,7 +31,7 @@ export const turnPanelHandlers: StepHandler[] = [
 		match: /^I show every step in the open turn log$/,
 		run: async ({ world }) => {
 			const earlier = panel(world.page).getByRole("button", {
-				name: /^\+ \d+ earlier steps$/,
+				name: /^\+ \d+ earlier steps?$/,
 			});
 			if (await earlier.count()) await earlier.click();
 		},

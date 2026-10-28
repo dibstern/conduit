@@ -63,8 +63,9 @@ export const ProjectedLive: Story = {
 		duration: 250000,
 	},
 	play: async ({ canvasElement }) => {
+		// Design E marks the live step with the striped block, not the Flow loader.
 		await expect(
-			canvasElement.querySelector('.tool-item [data-flow-glyph="running"]'),
+			within(canvasElement).getByRole("img", { name: "Running" }),
 		).toBeVisible();
 	},
 };
