@@ -94,11 +94,11 @@
 	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.status !== "error" && !part.isError)}
 	{@const failed = part.status === "error" || part.isError}
 	{@const movedToBackground = part.metadata?.['movedToBackground'] === true}
-	{@const verb = movedToBackground ? "Moved to background" : toolVerb(part, running ? "present" : "past")}
+	{@const isSkill = part.name === "Skill"}
+	{@const verb = isSkill ? "Skill" : movedToBackground ? "Moved to background" : toolVerb(part, running ? "present" : "past")}
 	{@const command = toolCommand(part)}
 	{@const subject = part.name === "Skill" ? skillName(part) : toolSubject(part)}
 	{@const tag = toolTags(part)[0]}
-	{@const isSkill = part.name === "Skill"}
 	{@const hasLiveOutput = typeof part.metadata?.['output'] === "string"}
 	{@const cursorDetail = typeof part.metadata?.['cursorToolType'] === "string" && (part.metadata['fileChange'] || part.metadata['plan'] || part.metadata['computerUse'] || part.metadata['media'] || part.metadata['output'] !== undefined || ensureCanonical(part.name, part.input).tool === "Unknown")}
 	<!-- A compact row is still this tool's rendering, so it answers to the same
@@ -143,7 +143,7 @@
 					     differ by this far more than by their descriptions. -->
 					<Badge variant="tag" size="sm" class="shrink-0 font-mono">{tag}</Badge>
 				{/if}
-				<span class="tool-desc {launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1 min-w-0'} truncate font-mono text-mono-code text-text-dimmer">
+				<span class="tool-desc {launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1 min-w-0'} truncate font-mono text-mono-code {isSkill ? style.text : 'text-text-dimmer'}">
 					{subject}
 				</span>
 				{#if typeof part.metadata?.['cursorToolType'] === "string" && part.metadata['truncated'] === true}<span class="shrink-0 text-text-muted">Truncated</span>{/if}
