@@ -257,9 +257,12 @@ Only evidence and conduit's decisions, each once:
 - **Background facts:** process started and lost facts, the latest task snapshot per label, task
   events, lost-work records, pending confirms, native command sends (section 8).
 - **Labels, not generations.** The ledger never mints or bumps a generation. It records
-  `process_started`, `process_lost` and query-ended evidence, each naming the host's label. A kill or
-  process loss covers the sends of every label of that `runnerId`; a query ending covers the sends
-  of its own label.
+  `process_started`, `process_lost` and query-ended evidence, each naming the host's label. A
+  kill or process loss covers the sends of every label of that `runnerId`. For a runner-held
+  provider (Claude, Codex, Cursor), a query ending covers that label's `interrupt` and `close`
+  sends; it never ends `start` or `steer` work, which ends only by its provider's work-ended
+  rule (section 9). OpenCode `abort` and `cancel_request` act on the native session, not the
+  query, so a query ending never covers them.
 - **`hasAuthority(execution)`:** the execution is its Run's current one, the Run is not Ended, its
   label is not covered, the project is active, and its native session has not ended. This is the
   single read of Ended.
@@ -280,10 +283,12 @@ Only evidence and conduit's decisions, each once:
   transmission, including redispatch of an already-bound issue. Each transmission has its own
   token and chains; the issue folds over its transmissions. `holdRun` alone applies the cap
   (4.3, 4.11). Every effect with no hold gets its token from `ctx.newId()`, and `decide` applies its cap.
-- An observation either **answers** a send (it names that send's token) or is **unsolicited** (it
-  names only the host label and an event id). Unsolicited observations are background snapshots and
-  task events, a turn start with no active Run (a wake Run), process events, and `activity`, `result`,
-  `query_ended` for a wake Run (8.3). No fictitious send is minted.
+- An observation either **answers** a send (it names that send's token) or is **unsolicited**
+  (it names only the host label and an event id). Unsolicited observations are background
+  snapshots and task events, a turn start with no active Run (a wake Run), process events, and
+  `activity`, `result`, `query_ended` for a wake Run (8.3). No fictitious send is minted. An
+  unsolicited observation's identity is its (label, event id) pair; a repeat of the same pair
+  is Accepted with no events. Event ids are unique only within a label.
 - Which token an answer names: `started`, `activity`, `query_ended`, `interaction_requested` name
   the latest start or steer transmission delivered on that native query. Where a native result
   names an input (Claude), `result` names that input's send; otherwise it names the query's latest
@@ -307,8 +312,9 @@ Only evidence and conduit's decisions, each once:
 - Freshness compares issue order of sends. There are no version counters. A native-session idle
   probe covers only sends issued before it, and only where the native policy can prove the covered
   work can no longer execute. Idle never leaves a cleanup deadline behind.
-- Project inactive and session end retire every send of the session, probes included. Retired
-  tokens never revive.
+- Project inactive retires every send of the session, probes included. Session end covers
+  every send of the ended native session, probes included. Retired or covered tokens never
+  revive.
 - Native `run_id` order is unproven. Code must not assume it sorts by time; use arrival order, or
   cite evidence that it sorts.
 
@@ -384,17 +390,20 @@ For a runner-held send these chains are never stored: they are a view over the h
 - Deadlines are data on the obligation they bound. They are not sends and carry no token.
 - Each deadline is tagged by its owner (Run, send, interaction, native command, Tombstone) with a
   required target.
-- Derived deadlines: each Run phase (Queued, Starting, Running, Interrupting, Settling) from its
-  stored time and budget, with Settling fixed at the result; each send's cleanup or retry while it
+- Derived deadlines: each Run phase (Starting, Running, Interrupting, Settling) from its
+  stored time and budget, with Settling fixed at the result; a Queued Run shows the deadline of
+  the obligation that blocks it (the earliest outstanding send cleanup, Tombstone cleanup or
+  native command confirmation) and has no clock of its own; each send's cleanup or retry while it
   may still act; permission timeouts; native command confirmation (which does not run while the
   provider reports the command queued).
 - Every non-Ended Run is bounded by a deadline, including its answer obligation's deadline while
   delivery is pending after settle expiry (3.10), so "stuck busy" cannot be represented.
-- Every probe is an obligation and owns a retry deadline from the moment it is issued. A probe that
-  gets no answer is re-probed at that deadline. Re-probe retransmits the same probe obligation with
-  a fresh token and backoff, under its own cap of 5, never the probed send's cap (4.8). Past the
-  cap, the fence path ends `fence_unconfirmed`; an input stays Delivered{unknown} and is never
-  re-sent automatically.
+- Every probe is an obligation and owns a retry deadline from the moment it is issued. Probe
+  transmission `n` owns a retry deadline at its issue plus `max(probeMs, backoff(n))`. A probe
+  with no answer by then is re-probed in the decision that fires that deadline, as a fresh
+  transmission of the same obligation with a fresh token, under its own cap of 5, never the
+  probed send's cap (4.8). Past the cap, the fence path ends `fence_unconfirmed`; an input
+  stays Delivered{unknown} and is never re-sent automatically.
 - `retryAt` is a lower bound. The next transmission is at
   `max(retryAt, outcomeTime + backoff(n))`, with `n` the transmissions so far and backoff
   1 s, 2 s, 4 s, 8 s, capped at 30 s. It is anchored at the outcome, when the retry obligation opens.
@@ -410,17 +419,19 @@ For a runner-held send these chains are never stored: they are a view over the h
   time seen), so a clock going backwards cannot fire early or twice.
 - Finishing an obligation removes its deadline. Nothing else cancels, extends or re-arms a deadline
   unless this contract names that evidence as extending it (activity extends liveness).
-- The fence deadline sits on the outstanding send's cleanup obligation. Expiry probes where the
-  policy allows, otherwise ends with `fence_unconfirmed`.
+- The fence deadline sits on the outstanding send's cleanup obligation, or on the Tombstone
+  cleanup of a member held by a result (section 9). Expiry probes where the policy allows,
+  otherwise escalates by the provider's fence-expiry column; only when that column is exhausted
+  does the Queued Run end with `fence_unconfirmed`.
 - **One alarm per session row.** A decision writes the session's `alarmAt` and whether it has open
   work to a per-session ledger row, in the same transaction, only when the value changes. The row
   is `Quiescent | Open { alarmAt?: number }` with an index on the earliest alarm. The scheduler
   reads the earliest `alarmAt` across sessions. Deadlines with no Run (native commands, Tombstone
   obligations) are covered.
 - No in-memory retry or deadline fibers remain.
-- Default budgets come from `DecideContext.policy`; the interrupt budget is 30 s. `probeMs` bounds
-  a probe's retry deadline from its issue; `nativeCommandMs` bounds native command confirmation,
-  paused while the provider reports the command queued (8.5).
+- Default budgets come from `DecideContext.policy`; the interrupt budget is 30 s. `probeMs` is
+  the minimum retry deadline of a probe transmission from its issue; `nativeCommandMs` bounds
+  native command confirmation, paused while the provider reports the command queued (8.5).
 
 <!-- src: HLK step 1; RULINGS R1; FB §3, §4; OW Decision 4; AUDIT A4, A8; AUDIT-2 A19, T9, T12; SPEC Implementation Decisions (Deadlines as data); MODEL; model-gaps 2026-10-28 -->
 
@@ -488,6 +499,8 @@ For a runner-held send these chains are never stored: they are a view over the h
 - Answer delivery state (queued, sent, unknown, settled) is derived, not stored.
 - A settle deadline that expires while an answer awaits delivery is consumed once, never re-armed.
   The answer obligation owns the next alarm; when it finishes, the Run ends from the outcome fold.
+- An interaction's resolution, by any transmission or natively, ends the work of every
+  `deliver_answer` transmission for that interaction.
 
 <!-- src: FB §2, §4; RULINGS R2; HLK Rules not tied to one step (10B); SPEC user stories 8 to 12; MODEL InteractionView; model-gaps 2026-10-28 -->
 
@@ -498,6 +511,8 @@ For a runner-held send these chains are never stored: they are a view over the h
   never revive.
 - Retirement removes authority, never liveness. A retired send that may still act keeps
   `anythingMayAct` true until reconciled.
+- A retired probe is finished: it leaves `live` and owns no deadline. `project_active`
+  reconciliation issues fresh probes.
 - A removed project's pending effects are cancelled with a project-inactive reason; other projects
   keep their ordering. A project that returns reconciles its OpenCode work from what OpenCode
   reports.
@@ -658,7 +673,7 @@ export interface DecideContext {
   readonly newId: () => string; // mints Run ids and the tokens of effects with no hold; never repeats
   readonly policy: { readonly startMs: number; readonly livenessMs: number;
     readonly interruptMs: number; /* 30 s */ readonly closeMs: number;
-    readonly settleMs: number; readonly fenceMs: number;
+    readonly settleMs: number;
     readonly probeMs: number; readonly nativeCommandMs: number };
 }
 
@@ -1236,9 +1251,13 @@ The engine owns control acceptance. Its Stop acceptance operation runs inside on
   label. An older host has no counter, so its frames are labelled `runnerId` alone and it has no
   in-host fence; 32.5's old-runner rule refuses it new work. Logs carry `runnerId` and, where
   present, `querySeq`.
-- **The ledger never mints or bumps generations.** It records `process_started`, `process_lost` and
-  query-ended evidence, each naming the label. A kill or process loss covers the sends of every
-  label of that `runnerId`; a query ending covers the sends of its label.
+- **The ledger never mints or bumps generations.** It records `process_started`,
+  `process_lost` and query-ended evidence, each naming the label. A kill or process loss covers
+  the sends of every label of that `runnerId`. For a runner-held provider (Claude, Codex,
+  Cursor), a query ending covers that label's `interrupt` and `close` sends; it never ends
+  `start` or `steer` work, which ends only by its provider's work-ended rule (section 9).
+  OpenCode `abort` and `cancel_request` act on the native session, not the query, so a query
+  ending never covers them.
 
 <!-- src: RA §2, §7; FB §2 ("bumps" replaced by RA §7) -->
 
@@ -1781,6 +1800,16 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   equals the observation's label; otherwise they are recorded with a diagnostic and no change.
   A matching wake Run completes by its provider's Run-end policy (3.6, 9), including Codex's result
   policy. No fictitious token is minted.
+- A wake Run has no send, so its execution is outstanding work in its own right. From
+  `turn_started` until its label is covered or its provider's Run-end evidence for that label
+  is recorded, `anythingMayAct` is true, whether or not the Run has Ended (by deadline,
+  `project_inactive` or `session_ended`). Run-end evidence clears this liveness even without
+  authority; it changes Run state only with authority (3.4). A wake Run's deadline expiry runs
+  its provider's stop sequence against it (Claude and Codex `close`, Cursor `kill_and_respawn`,
+  OpenCode `probe native_session`), confirm-gated as in 8.4. While the project is inactive it
+  issues nothing, and `project_active` reconciliation settles it. `turn_started` with no active
+  Run records a wake Run even while the project is inactive (LI9); having no authority, it
+  issues no effect.
 - **`anythingMayAct`** is true for a non-ended Run, a send that may still act, or tasks live or
   unknown. Tasks never block a new Run. Every liveness reader asks it: the worktree cleanup sweep,
   archive and delete `hasLiveWork`, the status poller's idle corrections, and the runner record
@@ -1798,12 +1827,19 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   interrupt while paused) with tasks live or unknown waits with a pending confirm. The interrupt
   deadline never destroys on its own. A confirm must match the latest snapshot; a stale confirm is
   rejected. With no snapshot the UI says "background state unknown" and always asks.
-- `snapshotEntry` is the 1-based count of `tasks_snapshot` evidence accepted by the session,
-  excluding older-label snapshots. Callers copy it from `pendingConfirm`, never compute it.
-- With an active Run, `end` runs the stop sequence, then issues `end_session` once the Run is Ended
-  or its interrupt deadline expired. Both steps are confirm-gated with tasks live or unknown. With
-  no Run, `end` issues `end_session{runId: null}`; its deadline belongs to the send.
-- Lost work is always recorded for every destruction, unplanned loss included.
+- `snapshotEntry` is the 1-based count of task-set entries accepted by the session:
+  `tasks_snapshot` evidence and `process_started` settlements, excluding older labels. A
+  `process_started` that leaves a pending confirm open refreshes it with the new count, so a
+  confirm copied before the replacement is stale. Callers copy it from `pendingConfirm`, never
+  compute it.
+- With an active Run, `end` runs the stop sequence, then issues `end_session` once the Run is
+  Ended or its interrupt deadline expired. Both steps are confirm-gated with tasks live or
+  unknown. With no Run, `end` issues `end_session{runId: null}`; its deadline belongs to the
+  send. When that deadline expires unconfirmed, the ledger issues `kill_and_respawn{runId:
+  null}`, confirm-gated with tasks live or unknown, and records lost work for the current
+  process label. Issuing it covers that runner's labels (5.1).
+- Lost work is always recorded for every destruction, unplanned loss included, under the
+  latest label seen for the runner the destruction acts on.
 - A process that dies before confirming a native command: the tracker reloads from the transcript and
   re-sends first on the next launch, only if the confirmed status does not already match.
 
@@ -1891,10 +1927,14 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
     highest-attempt acks (two counts of one transmission, OPEN-2); input-id targeting (reusable ids);
     one ordered socket writer instead of a host record (a timing guarantee spread across daemon
     fibers); a Stop epoch (A.8 D).
-- **Decided (82tn.32.2.14, 2026-10-28): native-session fence membership and idle proof.** Members
-  are sends, never admissions. A member leaves the fence only by its own work ended (3.5),
-  NotConsumed, or coverage of its label (5.1, 6.1). Interactions, answers and background tasks are
-  never members (8.3).
+- **Decided (82tn.32.2.14, 2026-10-28): native-session fence membership and idle proof.**
+  Members are sends, never admissions. A member leaves the fence by NotConsumed, coverage of
+  its label (5.1, 6.1), or its own work ended (3.5). Where `resultReleasesFence` is no, work
+  ended by a result does not release membership; that member leaves at its label's
+  `query_ended` or coverage. A member held only by this rule has one cleanup obligation, its
+  Run's Tombstone cleanup (3.8: the Tombstone time plus `settleMs`), and its expiry runs the
+  provider's fence-expiry column. Interactions, answers and background tasks are never members
+  (8.3).
 
   | Provider | Members | Work ended | `resultReleasesFence` | Idle proof | Fence expiry |
   |---|---|---|---|---|---|
@@ -1903,9 +1943,15 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   | Cursor | start, steer | the native `wait()` result | yes | none | `kill_and_respawn` |
   | OpenCode | start, steer, `cancel_request`, abort | `query_ended` plus a covering probe | no | `probe native_session` returning `native_idle`; omission from `session.statuses` counts only after `session.get` confirms the identity; `retry` is busy | probe |
 
+  - Claude's `command_lifecycle` for a held start or steer is an Answer naming that
+    transmission's token. `cancelled` before any `started` is NotConsumed for that
+    transmission; after `started` it is Observed and ends nothing. Its `commandId` must equal
+    the hold's.
+
   - An OpenCode idle probe covers only sends issued before it whose delivery the native
-    user-message echo confirmed. Abort is session-wide, so an abort whose delivery is unknown stays
-    a member until a probe issued after its cleanup deadline returns `native_idle`.
+    user-message echo or a native result naming the send confirmed. Abort is session-wide, so
+    an abort whose delivery is unknown stays a member until a probe issued after its cleanup
+    deadline returns `native_idle`.
   - A Claude result ends only the inputs it names. An input still queued after it, or listed in an
     interrupt's `still_queued`, stays a member. `query_ended` does not end Claude work; journal
     `finished` is consumption proof only (4.11). `resultReleasesFence` stays no.
@@ -2120,9 +2166,11 @@ Behavioural statements the rebuilt decider must make impossible to violate:
   Claude, Codex, Cursor and OpenCode.
 - **Ledger invariants** against a fake provider as ground truth:
   - LI1: no start while the fake holds accepted, unended work on that native session.
-  - LI2: evidence the fake could deliver in either order yields the same `viewLedger` once both
-    arrive. A Tombstone decided between them may differ in outcome. Accounting is checked only by
-    a duplicate accounting receipt producing no events; values belong to the usage projection.
+  - LI2: evidence the fake could deliver in either order yields the same `viewLedger` once
+    both arrive. When one order decides a Tombstone between the two facts and the other does
+    not, that Run may be absent from `active` in one view and its outcome may differ; every
+    other view field agrees. Accounting is checked only by a duplicate accounting receipt
+    producing no events; values belong to the usage projection.
   - LI3: at most one terminal per Run; Tombstones are immutable.
   - LI4: replaying a decision's entries through `evolve` from the initial state gives the same view as
     the live state.
@@ -2476,6 +2524,24 @@ worries about. Competitor evidence came from t3code, bb, paseo, zeron, diri and 
 | OPEN-7 | no cleanup grant; scopes release memory, the reconciler settles (6.11) | a cohort at `revoke`; a cohortless cleanup grant; a time-bounded cleanup window; a durable cleanup effect |
 
 <!-- src: HLK header, Why, steps 1-5, Rules not tied to one step; RULINGS R1-R3; D1 header, D1-1 to D1-5; OW header, Why, Decision 1, Riders; FB header, Why, What stays, §3 rulings; BG header, Decision 1, Decision 3 (Claude goals); RA header, Why; AUDIT header, A12; AUDIT-2 header; SEND-SCOPE to SEND-SCOPE-6 headers, Why, Decisions; REAPER Decisions; STOP-INTENT header, Why, Decisions; SWAP header, Decisions; CONT Decisions; model-gaps 2026-10-28 -->
+
+**Decided (integration round 2, attrib-r2)**
+
+- D1: query end covers runner-held interrupt and close, never input work or OpenCode controls (3.3, 6.1).
+- D2: Claude result-held fence members use Tombstone cleanup and provider escalation (9).
+- D3: process starts count as task-set entries and refresh pending confirms (8.4).
+- D4: idle end-session expiry escalates to confirm-gated Run-less kill and respawn (8.4).
+- D5: tokened command lifecycle addresses a held query transmission and matches its command id (9).
+- D6: a named native result confirms delivery for OpenCode idle coverage (9).
+- D7: wake execution stays live after Run end and is recorded while the project is inactive (8.3).
+- D8: unsolicited identity is the label and event id pair (3.4).
+- D9: Queued borrows its blocking obligation's deadline; no fence clock or fenceMs (3.7, 3.13).
+- D10: session end covers sends; project inactive retires them (3.4).
+- D11: retired probes finish and lose their deadlines (3.11).
+- D12: interaction resolution ends every answer transmission for it (3.10).
+- D13: probe retry fires at issue plus max(probeMs, backoff(n)) in one decision (3.7).
+- D14: LI2 permits the Tombstoned Run's absence from active and a different outcome (11.2).
+- D15: destruction records lost work under the destroyed runner's latest label (8.4).
 
 ## Appendix B. Old-id mapping
 
