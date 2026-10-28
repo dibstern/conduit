@@ -331,7 +331,7 @@ AskUserQuestion or ExitPlanMode call that pauses for the reader.
 
 **Live**, **Waiting** and **Settled** are derived phases. Only the transcript's
 last Turn can be Live or Waiting. While the session is processing, an open
-last segment is Live and a last segment ended by a Hand-back is Waiting.
+last segment is Live and a last segment ended by an open Hand-back is Waiting.
 Otherwise the Turn is Settled. Waiting uses the same pick rules as Live.
 
 The **Turn panel** owns whether the Turn is **Collapsed** or **Open**, and
@@ -342,7 +342,13 @@ and messages in place. A **Message level** is one of the persisted values
 message-level override, or the global `defaultLevel` when there is no override.
 With Jev off, the only Show stop is Full log.
 
-A **Pick** chooses a message level, Full log or the **Usage tab**, which shows
+A **Q&A tab** lists a Turn's Hand-backs in order, with their questions or plans
+and answers. Open Hand-backs are answered there. Each has a ? pin and log row
+that opens Q&A at that entry, with Jev on or off. A Waiting Turn opens on Q&A
+unless the reader has picked a view. Answering returns to the Live default,
+Full log; a pick made while Waiting ends when work resumes.
+
+A **Pick** chooses a message level, Full log, Q&A or the **Usage tab**, which shows
 the Turn's economics and notable events. A **live pick** applies only to the
 last segment while the Turn is Live or Waiting. It stops applying on settle;
 a later wake Run starts fresh. A **settled pick** survives collapse, is

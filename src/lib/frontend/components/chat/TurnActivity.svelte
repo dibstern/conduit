@@ -46,6 +46,7 @@
 		currentStepLabel,
 		economics,
 		fmtDuration,
+		isHandBack,
 		liveLaunchedTasks,
 		plural,
 		stepDurations,
@@ -61,6 +62,8 @@
 	import TurnLog from "./TurnLog.svelte";
 	import TurnShowBar from "./TurnShowBar.svelte";
 	import TurnUsage from "./TurnUsage.svelte";
+	import TurnQa from "./TurnQa.svelte";
+	import { turnLog } from "../../utils/turns.js";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
 	let { turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
@@ -98,6 +101,10 @@
 
 	const fullLog = $derived(panel.view.kind === "open" && panel.view.view.kind === "show" && panel.view.view.stop === "log");
 	const usage = $derived(panel.view.kind === "open" && panel.view.view.kind === "usage");
+	const qa = $derived(panel.view.kind === "open" && panel.view.view.kind === "qa");
+	// Like the kept log rows, Q&A retains unfinished answers when changing views.
+	let qaMounted = $state(false);
+	$effect(() => { if (qa) qaMounted = true; });
 	type StripInteraction = Parameters<NonNullable<ComponentProps<typeof ActivityStrip>["oninteraction"]>>[0];
 	type CardSlot = NonNullable<ComponentProps<typeof ActivityStrip>["cardSlot"]>;
 	let stripInteraction = $state<StripInteraction>({ hovered: null, scrubbing: false });
@@ -204,7 +211,7 @@
 	const minimised = $derived(panel.view.kind === "collapsed");
 	const cardSlot = $derived.by((): CardSlot => {
 		if (!surfacingActive) return { kind: "none" };
-		const selected = minimised || usage ? null : surface.card;
+		const selected = minimised || usage || qa ? null : surface.card;
 		const hovered = surface.messages.find((pin) => pin.part.uuid === stripInteraction.hovered);
 		if (hovered && hovered.part.uuid !== selected?.part.uuid && (!stripInteraction.scrubbing || minimised)) return { kind: "preview", card: hovered };
 		return selected ? { kind: "selected", card: selected } : { kind: "none" };
@@ -376,13 +383,24 @@
 	function stripJump(id: string) {
 		const index = segment.activity.findIndex((part) => part.uuid === id);
 		if (index < 0) return;
+		const part = segment.activity[index];
+		if (part?.type === "tool" && isHandBack(part)) { openQa(id); return; }
 		const pin = surfacingActive ? surface.pins.find((pin) => pin.part.uuid === id) : undefined;
 		if (pin) pick(pin);
 		else void jumpTo(index);
 	}
+	function openQa(id: string) {
+		panel.qa();
+		void tick().then(() => {
+			const entry = panelEl?.querySelector<HTMLElement>(`[data-qa-entry="${CSS.escape(id)}"]`);
+			if (!qa || !entry) return;
+			entry.scrollIntoView({ block: "nearest" });
+			entry.focus({ preventScroll: true });
+		});
+	}
 	function stripChanged(interaction: StripInteraction) { stripInteraction = interaction; }
 	function pickFromStrip(pin: SurfacePin) {
-		if (minimised || usage) pick(pin);
+		if (minimised || usage || qa) pick(pin);
 		else selectPin(pin);
 	}
 
@@ -502,7 +520,7 @@
 			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
 				<Tooltip interaction="passive" bind:open={headTooltip}>
 					{#snippet trigger({ props })}
-						{@const headPhrase = phone && (surfacingActive || minimised) ? plural(stats.skills, "skill") : phrase}
+						{@const headPhrase = phone && surfacingActive ? plural(stats.skills, "skill") : phrase}
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
 							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Collapse turn"} aria-expanded={!minimised}
 							onclick={toggleMinimised}>
@@ -535,8 +553,8 @@
 				{/if}
 					{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summary</Button></span>{/if}
 			</div>
-			{#if usage && surfacingActive}
-				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} {preview} markers={{ kind: "dots", mode: "usage", dots: surface.messages }} openAsk={surface.openAsk} onpick={pickFromStrip} onjump={stripJump} oninteraction={stripChanged} />
+			{#if (usage || qa) && surfacingActive}
+				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} {preview} markers={{ kind: "dots", mode: "tab", dots: surface.messages }} openAsk={surface.openAsk} onpick={pickFromStrip} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if minimised && surfacingActive}
 				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", mode: "collapsed", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if surfacingActive}
@@ -565,6 +583,7 @@
 			{/if}
 		</div>
 		{#if usage}<TurnUsage {turn} {bill} />{/if}
+		{#if qa || qaMounted}<div hidden={!qa}><TurnQa handBacks={turnLog(turn).handBacks} {sessionId} /></div>{/if}
 		<TurnLog class="step-log border-t border-border bg-bg px-[12px] py-[6px]" mode={minimised ? "collapsed" : usage ? "hidden" : fullLog ? "shown" : "hidden"} phase={panel.phase} pending={panel.pending} stepCount={counts.log} entries={logEntries}>
 			{#snippet row(entry: TurnLogEntry)}
 				{@const i = entry.index}
@@ -575,7 +594,7 @@
 				{@const latestLiveStep = live && i === segment.activity.length - 1}
 				{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
 				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, beforeScroll: onjump }} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
-					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category} onmessage={category && canOpenSurfaceMessage(category.part, live) ? () => pick(category) : undefined} />
+					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category} onmessage={category && canOpenSurfaceMessage(category.part, live) ? () => pick(category) : undefined} onhandback={() => openQa(part.uuid)} />
 				</div>
 				{/if}
 			{/snippet}

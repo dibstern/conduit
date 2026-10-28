@@ -6,7 +6,7 @@
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { fmtDuration } from "../../utils/turns.js";
+	import { fmtDuration, isOpenHandBack } from "../../utils/turns.js";
 
 	import Icon from "../ui/Icon.svelte";
 	import BlockGrid from '../ui/BlockGrid.svelte';
@@ -14,9 +14,10 @@
 	import Surface from "../ui/Surface.svelte";
 	import Button from "../ui/Button.svelte";
 
-	let { message, presentation = "card" }: {
+	let { message, presentation = "card", onopen }: {
 		message: ToolMessage;
 		presentation?: "card" | "log";
+		onopen?: (() => void) | undefined;
 	} = $props();
 	let expanded = $state(false);
 
@@ -81,7 +82,9 @@
 		// Scoped to the viewed session: pending questions outlive switches, and
 		// another session's identical text must not bind (answers go by toolId).
 		const fallbackQuestions = questionDataFromInput;
-		if (fallbackQuestions) {
+		// Completed questions need an exact request match: identical historical
+		// wording cannot prove which async question is still pending.
+		if (fallbackQuestions && isOpenHandBack(message)) {
 			const contentMatch = permissionsState.pendingQuestions.find((pendingQuestion) => {
 				if (pendingQuestion.sessionId !== sessionState.currentId) return false;
 				if (pendingQuestion.questions.length !== fallbackQuestions.length) return false;
@@ -101,16 +104,10 @@
 		(message.input as Record<string, unknown> | null | undefined)?.['delivery'] === "async",
 	);
 
-	/** Whether the question is actively pending and should show an interactive card.
-	 *  Async questions stay interactive after their turn and tool have completed.
-	 *  Blocking questions are interactive when either:
-	 *  1. The tool is running AND matched to a pendingQuestion (has server-side que_ ID), OR
-	 *  2. The tool is running AND we have question data from the tool input (cross-process
-	 *     case where GET /question returns empty, but the tool is still running). */
+	/** The shared hand-back rule also covers completed, unanswered async questions. */
 	const isQuestionActive = $derived(
-		pendingQuestionRequest?.delivery === "async" ||
-		((message.status === "pending" || message.status === "running") &&
-			(pendingQuestionRequest !== null || questionDataFromInput !== null))
+		isOpenHandBack(message, pendingQuestionRequest) &&
+			(pendingQuestionRequest !== null || questionDataFromInput !== null)
 	);
 
 	/**
@@ -214,7 +211,7 @@
 </script>
 
 {#if presentation === "log"}
-	<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={expanded} data-testid="turn-hand-back-row" onclick={() => expanded = !expanded}>
+	<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={onopen ? undefined : expanded} data-testid="turn-hand-back-row" onclick={() => { if (onopen) onopen(); else expanded = !expanded; }}>
 		<span class="shrink-0 text-text-muted">?</span>
 		<span class="truncate text-text-secondary">{questionData?.map((question, index) => `${question.question} → ${question.isSecret ? "Secret answer hidden" : parsedAnswers?.[index]?.join(", ") || answerDisplay || "No answer"}`).join("; ") ?? answerDisplay ?? "No answer"}</span>
 	</Button>

@@ -62,7 +62,6 @@
 	import { insertComposerReference } from "../input/composer-reference.svelte.js";
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
-	import ToolItem from "./ToolItem.svelte";
 	import SystemMessage from "./SystemMessage.svelte";
 	import PermissionCard from "../permissions/PermissionCard.svelte";
 	import QuestionCard from "./QuestionCard.svelte";
@@ -462,8 +461,8 @@
 		const resumes = activeSession?.resumes ?? [];
 		if (resumes.length === 0) return dividers;
 		const slots = (forkSplit ? [...inheritedTurns, ...currentTurns] : turns).flatMap((turn) => {
-			const { segment, handBacks } = turnLog(turn);
-			return [...segment.activity, ...segment.reply, ...handBacks];
+			const { segment } = turnLog(turn);
+			return [...segment.activity, ...segment.reply];
 		});
 		for (const resume of resumes) {
 			const key = slots.find((part) => (part.createdAt ?? -Infinity) >= resume.at)?.uuid ?? END_OF_TRANSCRIPT;
@@ -615,12 +614,6 @@
 					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
 			</div>
 		{/each}
-		{#each log.handBacks as handBack (handBack.uuid)}
-			{#if !log.resumedParts.has(handBack.uuid)}{@render resumed(handBack.uuid)}{/if}
-			<div class="max-w-[820px] mx-auto px-[14px] md:px-[32px]">
-				<div class="md:ml-[42px]"><ToolItem message={handBack} /></div>
-			</div>
-		{/each}
 		<!-- A turn that did work carries its bill on the strip. A text-only
 		     turn has no ledger, so it renders the same bill on its own line —
 		     one formatter for both, rather than a second dialect of the same facts.
@@ -734,9 +727,11 @@
 
 	<!-- Pending permission requests for the viewed session. -->
 	{#each localPermissions as perm (perm.id)}
+		{#if perm.toolName !== "ExitPlanMode" || !perm.toolUseId || !transcriptToolIds.has(perm.toolUseId)}
 		<div class="max-w-[760px] mx-auto mb-3 px-5">
 			<PermissionCard request={perm} />
 		</div>
+		{/if}
 	{/each}
 
 	<!-- Keep questions answerable when their tool message has not reached the transcript. -->

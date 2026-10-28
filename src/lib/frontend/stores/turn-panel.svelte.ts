@@ -27,7 +27,7 @@ import { setTurnMinimised, turnMinimised } from "./turn-minimisation.svelte.js";
 export type TurnPanel<Stop extends ShowStop = ShowStop> =
 	| { kind: "collapsed" }
 	| { kind: "open"; view: PanelView<Stop> };
-type TurnChoice = "level" | "log" | "usage";
+type TurnChoice = "level" | "log" | "qa" | "usage";
 
 export type TurnTarget =
 	| { kind: "message"; uuid: string }
@@ -120,7 +120,11 @@ const choices = new SvelteMap<
 	string,
 	{
 		settled: TurnChoice | null;
-		live: { choice: TurnChoice; segment: number } | null;
+		live: {
+			choice: TurnChoice;
+			segment: number;
+			phase: "live" | "waiting";
+		} | null;
 	}
 >();
 const messageStops = [...SURFACE_LEVELS, "log"] as const;
@@ -139,6 +143,7 @@ interface PanelInput {
 
 export interface TurnPanelState<Stop extends ShowStop = ShowStop> {
 	readonly phase: TurnPhase;
+	readonly hasHandBacks: boolean;
 	readonly stops: [Stop] extends ["log"]
 		? typeof logStops
 		: typeof messageStops | typeof logStops;
@@ -152,6 +157,7 @@ export interface TurnPanelState<Stop extends ShowStop = ShowStop> {
 	collapse(): void;
 	show(stop: Stop): void;
 	usage(): void;
+	qa(): void;
 	makeDefault(): Promise<void>;
 	resetLevel(): void;
 }
@@ -161,6 +167,7 @@ export function createTurnPanel(
 ): TurnPanelState<"log">;
 export function createTurnPanel(input: PanelInput): TurnPanelState;
 export function createTurnPanel(input: PanelInput): TurnPanelState {
+	const stops = $derived(input.jev ? messageStops : logStops);
 	const key = $derived(JSON.stringify([input.sessionId ?? "", input.turn.id]));
 	const reveal = $derived.by(() => {
 		const entry = input.sessionId ? pending.get(input.sessionId) : undefined;
@@ -183,7 +190,9 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 	const saved = $derived(
 		sessionSurfaceLevel(input.sessionId) ?? input.status.defaultLevel,
 	);
-	const parts = $derived(turnLog(input.turn).segment.activity);
+	const log = $derived(turnLog(input.turn));
+	const parts = $derived(log.segment.activity);
+	const hasHandBacks = $derived(log.handBacks.length > 0);
 	const allRead = $derived(
 		parts.some((part) => part.type === "assistant") &&
 			parts.every(
@@ -192,45 +201,60 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 	);
 	const collapsed = $derived(
 		turnMinimised(input.sessionId, input.turn.id) ??
-			(!input.jev ||
-				input.status.turnsOpen === "minimised" ||
-				(input.status.turnsOpen === "auto" &&
-					phase === "settled" &&
-					!input.newestSettledTurn &&
-					allRead &&
-					!openAsk(parts, input.categorySet, input.latestTurn))),
+			(!(phase !== "settled" && hasHandBacks) &&
+				(!input.jev ||
+					input.status.turnsOpen === "minimised" ||
+					(input.status.turnsOpen === "auto" &&
+						phase === "settled" &&
+						!input.newestSettledTurn &&
+						allRead &&
+						!openAsk(parts, input.categorySet, input.latestTurn)))),
 	);
 	const choice = $derived.by(() => {
 		const stored = choices.get(key);
 		switch (phase) {
 			case "live":
 			case "waiting":
-				return stored?.live?.segment === input.turn.segments.length - 1
+				return stored?.live?.segment === input.turn.segments.length - 1 &&
+					(phase === "waiting" || stored.live.phase === "live")
 					? stored.live.choice
-					: "log";
+					: phase === "waiting"
+						? "qa"
+						: "log";
 			case "settled":
 				return stored?.settled ?? null;
 			default:
 				return assertNever(phase);
 		}
 	});
-	const view = $derived<TurnPanel>(
-		collapsed && !reveal
-			? { kind: "collapsed" }
-			: {
+	const view = $derived.by((): TurnPanel => {
+		if (collapsed && !reveal) return { kind: "collapsed" };
+		const selected = revealStop ?? choice;
+		// Jev off offers only Full log, so the saved level falls back to it.
+		const level = stops.find((stop) => stop === saved) ?? stops[0];
+		switch (selected) {
+			case "qa":
+				if (hasHandBacks) return { kind: "open", view: { kind: "qa" } };
+				return {
 					kind: "open",
-					view:
-						!revealStop && choice === "usage"
-							? { kind: "usage" }
-							: {
-									kind: "show",
-									stop:
-										!input.jev || (revealStop ?? choice) === "log"
-											? "log"
-											: saved,
-								},
-				},
-	);
+					view: { kind: "show", stop: level },
+				};
+			case "usage":
+				return { kind: "open", view: { kind: "usage" } };
+			case null:
+			case "level":
+			case "log":
+				return {
+					kind: "open",
+					view: {
+						kind: "show",
+						stop: selected === "log" ? "log" : level,
+					},
+				};
+			default:
+				return assertNever(selected);
+		}
+	});
 	function pick(choice: TurnChoice) {
 		const previous = choices.get(key) ?? { settled: null, live: null };
 		switch (phase) {
@@ -238,7 +262,7 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 			case "waiting":
 				choices.set(key, {
 					...previous,
-					live: { choice, segment: input.turn.segments.length - 1 },
+					live: { choice, segment: input.turn.segments.length - 1, phase },
 				});
 				return;
 			case "settled":
@@ -261,8 +285,11 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 		get phase() {
 			return phase;
 		},
+		get hasHandBacks() {
+			return hasHandBacks;
+		},
 		get stops() {
-			return input.jev ? messageStops : logStops;
+			return stops;
 		},
 		get view() {
 			return view;
@@ -292,7 +319,7 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 			setTurnMinimised(input.sessionId, input.turn.id, true);
 		},
 		show(stop) {
-			if (!input.jev && stop !== "log") return;
+			if (!stops.some((available) => available === stop)) return;
 			switch (stop) {
 				case "log":
 					pick("log");
@@ -311,6 +338,11 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 		},
 		usage() {
 			pick("usage");
+			open();
+		},
+		qa() {
+			if (!hasHandBacks) return;
+			pick("qa");
 			open();
 		},
 		async makeDefault() {

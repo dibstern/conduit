@@ -240,7 +240,7 @@ const handBackMessages = [
 const [handBack = EMPTY_TURN] = segmentTurns(handBackMessages, false);
 const handBackLog = turnLog(handBack);
 
-/** Both sides of a question share one head, strip and expandable log. */
+/** Both sides of a question share one head, strip and log. */
 export const HandBack: Story = {
 	args: {
 		turn: handBack,
@@ -258,8 +258,31 @@ export const HandBackExpanded: Story = {
 			canvas.getByRole("button", { name: "Expand turn", expanded: false }),
 		);
 		await userEvent.click(canvas.getByTestId("turn-hand-back-row"));
-		await expect(canvas.getByText("Use the staging project.")).toBeVisible();
+		await expect(
+			within(canvas.getByRole("region", { name: "Turn Q&A" })).getByText(
+				"Use the staging project.",
+			),
+		).toBeVisible();
 	},
+};
+
+export const HandBackQa: Story = {
+	...HandBack,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Expand turn", expanded: false }),
+		);
+		await userEvent.click(canvas.getByRole("tab", { name: /^Q&A$/ }));
+		await expect(
+			canvas.getByRole("region", { name: "Turn Q&A" }),
+		).toHaveTextContent("Answered");
+	},
+};
+
+export const HandBackQaLight: Story = {
+	...HandBackQa,
+	globals: { theme: "light" },
 };
 
 const truncatedMessages = [
@@ -606,4 +629,91 @@ export const UsageJevOff: Story = {
 export const UsageLive: Story = {
 	...Usage,
 	args: { ...Usage.args, turn: skilledLive, segment: skilledLiveSegment },
+};
+
+/** Jev-off keeps the plain head and strip at both viewport sizes. */
+export const JevOffCollapsed: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		sessionId: "turn-activity-jev-off-collapsed",
+		turn: settled,
+		segment: settledSegment,
+		final: true,
+		surfacing: {
+			...skillSurfacing,
+			status: {
+				...skillSurfacing.status,
+				enabled: false,
+				active: false,
+				summariesEnabled: false,
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("button", { name: "Expand turn" }),
+		).toHaveTextContent(/reads/);
+		await expect(
+			canvas.getByRole("slider", { name: /Activity timeline/ }),
+		).toBeVisible();
+		await expect(canvas.queryByTestId("turn-show-bar")).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByRole("region", { name: /^Turn log/ }),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const JevOffOpen: Story = {
+	...JevOffCollapsed,
+	args: { ...JevOffCollapsed.args, sessionId: "turn-activity-jev-off-open" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const head = canvas.getByRole("button", { name: "Expand turn" });
+		await userEvent.click(head);
+		head.blur();
+		await expect(
+			canvas.getByRole("tab", { name: "Log", selected: true }),
+		).toBeVisible();
+		await expect(canvas.getByRole("tab", { name: "Usage" })).toBeVisible();
+		await expect(
+			canvas.getByRole("region", { name: /^Turn log/ }),
+		).toBeVisible();
+		await expect(
+			canvas.queryByRole("button", { name: "Show messages" }),
+		).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByTestId("surfacing-msg-card"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const JevOffLive: Story = {
+	...JevOffOpen,
+	args: {
+		...JevOffCollapsed.args,
+		sessionId: "turn-activity-jev-off-live",
+		turn: live,
+		segment: liveSegment,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const head = canvas.getByRole("button", { name: "Expand turn" });
+		await userEvent.click(head);
+		head.blur();
+		await expect(head).toHaveTextContent("Working");
+		await expect(
+			canvas.getByRole("tab", { name: "Log", selected: true }),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: /^\+ \d+ earlier steps$/ }),
+		).toBeVisible();
+		await expect(
+			[
+				...canvasElement.querySelectorAll<HTMLElement>(
+					".step-log [data-log-part]",
+				),
+			].filter((node) => node.offsetHeight > 0),
+		).toHaveLength(3);
+	},
 };

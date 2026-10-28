@@ -93,6 +93,93 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "assert Jev-off collapsed head and strip",
+		match:
+			/^the Jev-off turn is collapsed with its head phrase and plain strip$/,
+		run: async ({ world }) => {
+			const turn = panel(world.page);
+			const head = turn.getByRole("button", {
+				name: "Expand turn",
+				exact: true,
+			});
+			await expect(head).toBeVisible();
+			await expect(head).toContainText("8 reads");
+			await expect(
+				turn.getByRole("slider", { name: /Activity timeline/ }),
+			).toBeVisible();
+			for (const selector of [
+				".step-log",
+				'[data-testid="turn-show-bar"]',
+				'[data-testid="surfacing-msg-card"]',
+				".surface-head-chips",
+				".pin-chip",
+				".unread-dot",
+				'[data-testid="surfacing-level"]',
+			])
+				await expect(turn.locator(selector)).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert Jev-off Log and Usage footer",
+		match: /^the Jev-off footer has Log 16 and Usage tabs with cost$/,
+		run: async ({ world }) => {
+			const turn = panel(world.page);
+			const bar = turn.getByTestId("turn-show-bar");
+			await expect(bar.getByRole("tab")).toHaveCount(2);
+			await expect(
+				bar.getByRole("tab", { name: "Log", exact: true }),
+			).toHaveText("Log16");
+			await expect(
+				bar.getByRole("tab", { name: "Usage", exact: true }),
+			).toBeVisible();
+			await expect(bar.locator(".turn-meta")).toHaveText("Cost unavailable");
+			for (const selector of [
+				'[data-testid="surfacing-level"]',
+				".pin-chip",
+				".unread-dot",
+				".surface-head-chips",
+				'[data-testid="surfacing-msg-card"]',
+			])
+				await expect(turn.locator(selector)).toHaveCount(0);
+			await expect(bar.getByText("Show", { exact: true })).toHaveCount(0);
+			await expect(
+				bar.getByRole("button", { name: "Make default", exact: true }),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert Jev-off plain log and live ticker",
+		match: /^the Jev-off Log shows (\d+) plain rows$/,
+		run: async ({ world, match }) => {
+			const turn = panel(world.page);
+			await expect(
+				turn.getByRole("tab", { name: "Log", exact: true }),
+			).toHaveAttribute("aria-selected", "true");
+			const log = turn.getByRole("region", {
+				name: "Turn log, 16 steps",
+				exact: true,
+			});
+			await expect(log.locator("[data-log-part]:visible")).toHaveCount(
+				Number(match[1]),
+			);
+			await expect(log.locator("[data-message-number]")).toHaveCount(0);
+			await expect(
+				log.getByText(
+					"Opening one subscription per session could exhaust the socket budget.",
+					{ exact: true },
+				),
+			).toBeVisible();
+			if (match[1] === "3") {
+				await expect(
+					log.getByRole("button", { name: "+ 13 earlier steps", exact: true }),
+				).toBeVisible();
+				await expect(
+					turn.getByTestId("surfacing-minimise-toggle"),
+				).toContainText("Working");
+			}
+		},
+	},
+	{
 		name: "assert selected below-stop pin paint",
 		match:
 			/^the selected pin keeps its category tint and secondary number below the saved stop$/,
@@ -615,17 +702,19 @@ export const turnActivityHandlers: StepHandler[] = [
 	{
 		name: "seed multi-segment turn log",
 		match:
-			/^the turn log session has a (two-segment AskUserQuestion|two-segment ExitPlanMode|wake|counted-wake|wake-reply|wake-empty|waiting|async) turn$/,
+			/^the turn log session has a (two-segment AskUserQuestion|two-segment ExitPlanMode|qa-history|wake|counted-wake|wake-reply|wake-empty|waiting|waiting-plan|async) turn$/,
 		run: async ({ world, match }) => {
 			const kind = match[1] ?? "";
 			kinds.set(world.page, kind);
 			const wake = kind.startsWith("wake") || kind === "counted-wake";
 			const counted = kind === "counted-wake";
-			const waiting = kind === "waiting" || kind === "async";
+			const waiting =
+				kind === "waiting" || kind === "async" || kind === "waiting-plan";
 			const asyncQuestion = kind === "async";
-			const handBack = kind.endsWith("ExitPlanMode")
-				? "ExitPlanMode"
-				: "AskUserQuestion";
+			const handBack =
+				kind.endsWith("ExitPlanMode") || kind === "waiting-plan"
+					? "ExitPlanMode"
+					: "AskUserQuestion";
 			const before =
 				kind === "wake-empty"
 					? []
@@ -692,6 +781,9 @@ export const turnActivityHandlers: StepHandler[] = [
 						: [
 								...before,
 								tool("answered", handBack, 8000),
+								...(kind === "qa-history"
+									? [tool("approved", "ExitPlanMode", 20_000)]
+									: []),
 								...(asyncQuestion
 									? [
 											{
@@ -709,7 +801,7 @@ export const turnActivityHandlers: StepHandler[] = [
 									: []),
 								...after,
 								...(waiting && !asyncQuestion
-									? [tool("waiting", "AskUserQuestion", 40_000, true)]
+									? [tool("waiting", handBack, 40_000, true)]
 									: []),
 							],
 				},
@@ -728,24 +820,32 @@ export const turnActivityHandlers: StepHandler[] = [
 			];
 			const rpc = requireRpcControl(world.page);
 			rpc.setDetailRows(SESSION, messages.flatMap(detailRowsOf));
+			const answer = (): { ok: true } => {
+				rpc.sendChunk("SubscribeApprovals", [
+					{ _tag: "remove", id: "waiting-question", sequence: 2 },
+				]);
+				rpc.setDetailRows(
+					SESSION,
+					messages
+						.map((message) => ({
+							...message,
+							parts: message.parts?.map((part) =>
+								part.id === "waiting"
+									? tool("waiting", handBack, 40_000)
+									: part,
+							),
+						}))
+						.flatMap(detailRowsOf),
+				);
+				return { ok: true };
+			};
 			rpc.setStubs({
-				AnswerQuestion: () => {
+				AnswerQuestion: answer,
+				RespondPermission: answer,
+				RejectQuestion: () => {
 					rpc.sendChunk("SubscribeApprovals", [
 						{ _tag: "remove", id: "waiting-question", sequence: 2 },
 					]);
-					rpc.setDetailRows(
-						SESSION,
-						messages
-							.map((message) => ({
-								...message,
-								parts: message.parts?.map((part) =>
-									part.id === "waiting"
-										? tool("waiting", "AskUserQuestion", 40_000)
-										: part,
-								),
-							}))
-							.flatMap(detailRowsOf),
-					);
 					return { ok: true };
 				},
 			});
@@ -768,15 +868,25 @@ export const turnActivityHandlers: StepHandler[] = [
 					{
 						_tag: "upsert",
 						sequence: 1,
-						item: {
-							_tag: "question",
-							sessionId: SESSION,
-							toolId: "waiting-question",
-							toolUseId: "waiting",
-							providerId: "claude",
-							...(asyncQuestion ? { delivery: "async" } : {}),
-							questions,
-						},
+						item:
+							kind === "waiting-plan"
+								? {
+										_tag: "permission",
+										sessionId: SESSION,
+										requestId: "waiting-question",
+										toolUseId: "waiting",
+										toolName: "ExitPlanMode",
+										toolInput: { plan: "Deploy to staging." },
+									}
+								: {
+										_tag: "question",
+										sessionId: SESSION,
+										toolId: "waiting-question",
+										toolUseId: "waiting",
+										providerId: "claude",
+										...(asyncQuestion ? { delivery: "async" } : {}),
+										questions,
+									},
 					},
 				]);
 			await expect(world.page.locator("#messages")).toContainText(
@@ -858,8 +968,8 @@ export const turnActivityHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "expand answered hand-back",
-		match: /^I expand the answered hand-back row$/,
+		name: "open answered hand-back in Q&A",
+		match: /^I open the answered hand-back row in Q&A$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("turn-hand-back-row").click();
 		},
@@ -868,10 +978,12 @@ export const turnActivityHandlers: StepHandler[] = [
 		name: "assert original hand-back details",
 		match: /^the answered hand-back shows its original tool details$/,
 		run: async ({ world }) => {
-			await expect(
-				panel(world.page).locator('.step-log [data-tool-id="answered"]'),
-			).toBeVisible();
-			await expect(panel(world.page).locator(".step-log")).toContainText(
+			const qa = panel(world.page).getByRole("region", {
+				name: "Turn Q&A",
+				exact: true,
+			});
+			await expect(qa).toBeVisible();
+			await expect(qa).toContainText(
 				kinds.get(world.page)?.endsWith("ExitPlanMode")
 					? "Deploy to staging."
 					: "Use staging.",
@@ -907,18 +1019,20 @@ export const turnActivityHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert waiting question placement",
-		match: /^the open hand-back is below the reply$/,
+		match: /^the open hand-back is in Q&A instead of below the reply$/,
 		run: async ({ world }) => {
 			const form = world.page.locator(".question-card");
 			await expect(form).toBeVisible();
-			await expect(panel(world.page).locator(".question-card")).toHaveCount(0);
-			const reply = await world.page
-				.locator("#messages .msg-assistant")
-				.boundingBox();
-			const question = await form.boundingBox();
-			if (!reply || !question)
-				throw new Error("Reply or question has no bounds");
-			expect(question.y).toBeGreaterThanOrEqual(reply.y + reply.height);
+			await expect(
+				panel(world.page)
+					.getByRole("region", { name: "Turn Q&A", exact: true })
+					.locator(".question-card"),
+			).toBeVisible();
+			await expect(
+				world.page
+					.locator("#messages .tool-item")
+					.filter({ has: world.page.locator(".question-card") }),
+			).toHaveCount(1);
 		},
 	},
 	{

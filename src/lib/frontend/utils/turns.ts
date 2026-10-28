@@ -6,6 +6,7 @@ import { skillNameFromTool } from "../../skill-recognition.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
+	QuestionRequest,
 	ResultMessage,
 	SystemMessage,
 	ThinkingMessage,
@@ -80,7 +81,11 @@ export function turnPhase(
 	if (!processing || !latestTurn) return "settled";
 	const last = turn.segments.at(-1);
 	if (last?.end === undefined) return "live";
-	return last.handBack ? "waiting" : "settled";
+	return last.handBack
+		? isOpenHandBack(last.handBack)
+			? "waiting"
+			: "live"
+		: "settled";
 }
 
 /** Earlier replies become steps once more work follows; only the last reply
@@ -102,24 +107,8 @@ export function turnLog(
 		if (segment !== last) activity.push(...segment.reply);
 		const handBack = segment.handBack;
 		if (!handBack) continue;
-		// Async questions can outlive their runner's completion and more work.
-		const asyncQuestion =
-			handBack.name === "AskUserQuestion" &&
-			typeof handBack.input === "object" &&
-			handBack.input !== null &&
-			"delivery" in handBack.input &&
-			handBack.input.delivery === "async";
-		if (
-			handBack.status === "running" ||
-			handBack.status === "pending" ||
-			(asyncQuestion &&
-				handBack.status === "completed" &&
-				(!handBack.result ||
-					handBack.result === "null" ||
-					handBack.result === '""'))
-		)
-			handBacks.push(handBack);
-		else activity.push(handBack);
+		handBacks.push(handBack);
+		activity.push(handBack);
 	}
 	const segment: Segment =
 		last?.end === undefined
@@ -128,7 +117,7 @@ export function turnLog(
 					activity,
 					reply: last.reply,
 					end: last.end,
-					...(last.handBack && handBacks.includes(last.handBack)
+					...(last.handBack && isOpenHandBack(last.handBack)
 						? { handBack: last.handBack }
 						: {}),
 				};
@@ -152,8 +141,7 @@ export function turnLog(
 	// A wake may produce only a reply, with no new activity step to carry its
 	// divider. It still belongs to this turn's log, before that trailing reply.
 	if (turn.segments.length > 1) {
-		for (const part of [...segment.reply, ...handBacks])
-			addResumes(part.uuid, activity.length);
+		for (const part of segment.reply) addResumes(part.uuid, activity.length);
 	}
 	return { segment, entries, handBacks, resumedParts };
 }
@@ -161,6 +149,18 @@ export function turnLog(
 /** AskUserQuestion or ExitPlanMode: the model stops and waits for the user. */
 export function isHandBack(tool: ToolMessage): boolean {
 	return tool.name === "AskUserQuestion" || tool.name === "ExitPlanMode";
+}
+
+/** Async questions remain answerable after the runner finishes, until answered or dismissed. */
+export function isOpenHandBack(
+	tool: ToolMessage,
+	question?: Pick<QuestionRequest, "delivery"> | null,
+): boolean {
+	if (!isHandBack(tool)) return false;
+	if (tool.status === "pending" || tool.status === "running") return true;
+	// A null async result also represents dismissal. Only a pending approval
+	// proves that a completed question is still answerable.
+	return tool.name === "AskUserQuestion" && question?.delivery === "async";
 }
 
 /** Only an open segment can receive new work. */
