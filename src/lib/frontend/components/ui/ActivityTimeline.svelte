@@ -24,6 +24,7 @@
 	import { surfacePinRows, type SurfacePinGroup } from "../../utils/surface-turn.js";
 	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 	import Button from "./Button.svelte";
+	import { FLOATING_ELEVATION_CLASSES } from "./floating-styles.js";
 
 	let { segments, seams = [], width = $bindable(0), active = null, markers = { kind: "dots", dots: [] }, cardSlot = { kind: "none" }, card, openAsk = null, belowLevel = false, cited = null, phone = false, preview, sliderText, oninteraction, onpick, onjump, oncommand }: {
 		segments: readonly { id: string; left: number; width: number; label: string; tone: keyof typeof TONES; running?: boolean }[];
@@ -206,10 +207,11 @@
 		</div>
 	{/if}
 	{#if messagePreview && preview}
-		<Button variant="ghost" size="content" tone="inherit" hoverFill="none" class="peek {previewPosition.above ? 'peek-above' : ''}" style="left:{previewPosition.left}px;--caret:{previewPosition.caret}px" data-testid="surfacing-minimised-peek" data-ordinal={messagePreview.number}
-			onpointerup={() => { const pin = messagePreview; clear(); if (pin) onpick?.(pin); }} onclick={(event) => { if (event.detail === 0) { const pin = messagePreview; clear(); if (pin) onpick?.(pin); } }}>
+		<div role="group" aria-label="Hover preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" class:ask={messagePreview.category === "ask" && !messagePreview.pending} data-side={previewPosition.above ? "top" : "bottom"} data-testid="surfacing-minimised-peek" data-ordinal={messagePreview.number}
+			onpointerup={() => { const pin = messagePreview; clear(); if (pin) onpick?.(pin); }}>
+			<i class="card-caret" style:left={anchor}></i>
 			{@render preview(messagePreview)}
-		</Button>
+		</div>
 	{/if}
 </div>
 
@@ -235,6 +237,8 @@
 	.unread-dot { position:absolute; top:-2px; right:-2px; width:7px; height:7px; border-radius:50%; background:var(--color-accent); box-shadow:0 0 0 1.5px var(--color-turn-bg); }
 	.hanging-card { position:relative; margin-top:10px; --card-background:var(--color-bg); }
 	.hanging-card.ask { --card-background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); }
+	.hover-card { position:absolute; top:100%; left:0; right:0; }
+	.hover-card[data-side="top"] { top:auto; bottom:calc(100% + 10px); }
 	.card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--card-background); border-top:1px solid var(--color-border); border-left:1px solid var(--color-border); transform:translateX(-50%) rotate(45deg); }
 	.surface-thumb { position:absolute; top:50%; width:3px; height:14px; border-radius:2px; background:var(--color-text); transform:translate(-50%,-50%); pointer-events:none; }
 	.surface-strip :global(.live-segment) { animation:strip-breathe 1.2s ease-in-out infinite; }

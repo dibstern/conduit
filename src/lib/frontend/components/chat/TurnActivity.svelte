@@ -27,6 +27,7 @@
 	import { stopCounts } from "../../utils/turn-stops.js";
 	import { canOpenSurfaceMessage, surfaceTurn, surfaceKey, type CardSelection, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
 	import SurfacingCard, { type ReadState, type SurfacingRegions } from "./SurfacingCard.svelte";
+	import SurfacingMessageCard from "./SurfacingMessageCard.svelte";
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
 	import SurfacingMarkActions from "./SurfacingMarkActions.svelte";
 	import SurfacingMarkWhy from "./SurfacingMarkWhy.svelte";
@@ -58,7 +59,6 @@
 	} from "../../utils/turns.js";
 	import ActivityRow from "./ActivityRow.svelte";
 	import ActivityStrip from "./ActivityStrip.svelte";
-	import MinimisedTurn from "./MinimisedTurn.svelte";
 	import TurnLog from "./TurnLog.svelte";
 	import TurnShowBar from "./TurnShowBar.svelte";
 	import TurnUsage from "./TurnUsage.svelte";
@@ -444,12 +444,12 @@
 	{@render surfacingRegions.cardFoot?.(pin)}
 	<SurfacingMarkActions {pin} {feedback} canSave={!!sessionId} />
 {/snippet}
-{#snippet askContext(pin: SurfacePin)}
+{#snippet askContext(pin: SurfacePin, onexplain: () => void)}
 	{@render surfacingRegions.cardContext?.(pin)}
 	{#if pin.category === "ask" && !pin.pending}
 		<SurfacingAskContext setup={setupFor(pin)} view={surface} start={turn.user?.createdAt ?? 0} ask={asks[pin.part.uuid]}
 			enabled={!!sessionId && !!pin.part.partId && summariesOn}
-			onexplain={() => { void explainAsk(pin); }} oncite={(part) => { askReturn = { ask: pin, cited: part.uuid }; revealMessage(part); }}
+			{onexplain} oncite={(part) => { askReturn = { ask: pin, cited: part.uuid }; revealMessage(part); }}
 			onReplyToAsk={(text) => { if (pin.number !== undefined) onReplyToAsk?.(messageReference(pin, pin.number), text); }} />
 	{:else if askReturn?.cited === pin.part.uuid && surface.openAsk?.uuid === askReturn.ask.part.uuid}
 		{@const ask = askReturn.ask}
@@ -486,6 +486,10 @@
 
 {#snippet summaryMarkRead(view: ReturnType<typeof surfaceTurn>)}
 	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
+{/snippet}
+
+{#snippet preview(pin: SurfacePin)}
+	<SurfacingMessageCard kind="preview" card={pin} />
 {/snippet}
 
 <div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfaceCommand} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
@@ -534,11 +538,9 @@
 			{#if usage && surfacingActive}
 				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if minimised && surfacingActive}
-				<MinimisedTurn>
-					{#snippet strip(preview: Snippet<[SurfacePin]>)}<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} oninteraction={stripChanged} />{/snippet}
-				</MinimisedTurn>
+				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} oninteraction={stripChanged} />
 			{:else if surfacingActive}
-				<SurfacingCard view={surface} card={cardSlot.kind === "selected" ? cardSlot.card : null} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
+				<SurfacingCard view={surface} card={cardSlot.kind === "selected" ? cardSlot.card : null} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} context={askContext} onexplain={(pin) => { void explainAsk(pin); }} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readState} bind:cardEl={readCardEl} onread={readMessage}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={cardSlot.kind === "selected" && cardSlot.card.number !== undefined && replies.has(cardSlot.card.number)}

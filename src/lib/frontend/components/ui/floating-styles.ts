@@ -23,11 +23,13 @@
 // against 6px. So the union collapsed to the canonical `rounded-lg` and the
 // `radius` prop came off DetachedListbox: every floating surface in conduit,
 // portaled or inline, now has one corner.
-const FLOATING_SURFACE_BASE_CLASSES =
-	"border border-border bg-popover-bg rounded-lg py-1 " +
-	"focus-visible:outline-hidden " +
+export const FLOATING_ELEVATION_CLASSES =
 	"data-[side=top]:shadow-menu data-[side=bottom]:shadow-dropdown " +
 	"data-[side=left]:shadow-panel data-[side=right]:shadow-panel";
+
+const FLOATING_SURFACE_BASE_CLASSES =
+	"border border-border bg-popover-bg rounded-lg py-1 " +
+	`focus-visible:outline-hidden ${FLOATING_ELEVATION_CLASSES}`;
 
 // The portaled overlays: Popover, Menu, Tooltip. They float above everything,
 // including the dropdowns.
