@@ -509,7 +509,7 @@
 		{:else if detailsFailed}
 			<li role="status" class="goal-details-check"><span class="col-span-full text-status-red">{detailsFailed}</span></li>
 		{:else if !details?.checks.length && goal.phase !== "checking" && goal.phase !== "met"}
-			<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when Claude finishes a turn.</span></li>
+			<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when the agent finishes a turn.</span></li>
 		{/if}
 		</ol>
 		{/if}

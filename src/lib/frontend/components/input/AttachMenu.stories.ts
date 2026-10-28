@@ -91,7 +91,9 @@ export const OpenCode: Story = {
 		await expect(entry).toHaveAttribute("aria-disabled", "true");
 		await expect(entry).toHaveAttribute("data-disabled");
 		await expect(within(entry).getByText("Goal")).toBeVisible();
-		await expect(within(entry).getByText("Claude only")).toBeVisible();
+		await expect(
+			within(entry).getByText("Not available for this agent"),
+		).toBeVisible();
 	},
 };
 

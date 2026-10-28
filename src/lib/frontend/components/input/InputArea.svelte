@@ -91,6 +91,7 @@
 	import { planUsageWindows, usageForecastTime, usageWarning } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
+	import { plural } from "../../utils/turns.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { SessionPermissionMode } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
@@ -1265,7 +1266,7 @@
 		{#if isGoalCommand}
 			<ComposerStrip tone="goal" data-testid="composer-goal-hint" class="flex items-center gap-[8px]">
 				<Icon name="target" size={16} class="shrink-0 text-status-goal" />
-				<div class="min-w-0 flex-1">Claude keeps working until this is true, and checks after each turn.
+				<div class="min-w-0 flex-1">{composerPresentation?.label ?? "The agent"} keeps working until this is true, and checks after each turn.
 					<small class="block text-[12px] text-text-muted">{#if goalFacts?.goal?.judgeModel}{getModelDisplayName(goalFacts.goal.judgeModel)} judges · {/if}Esc to cancel</small>
 				</div>
 			</ComposerStrip>
@@ -1275,7 +1276,7 @@
 			<ComposerStrip tone="success" data-testid="composer-goal-met" class="flex items-center gap-[8px]">
 				<Icon name="circle-check" size={16} class="shrink-0 text-status-green" />
 				<div class="min-w-0 flex-1"><b class="font-semibold text-text">Goal met</b> · {goalFacts.endedGoal?.condition ?? goalFacts.endedGoal?.lastReason ?? ""}
-					<small class="block text-[12px] text-text-muted">Checked {goalFacts.endedAt === undefined ? "just now" : new Date(goalFacts.endedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}{goalFacts.endedGoal?.turnCount === undefined ? "" : ` · ${goalFacts.endedGoal.turnCount} turns`}{goal.subtitle.slice("Goal met".length)}</small>
+					<small class="block text-[12px] text-text-muted">Checked {goalFacts.endedAt === undefined ? "just now" : new Date(goalFacts.endedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}{goalFacts.endedGoal?.turnCount ? ` · ${plural(goalFacts.endedGoal.turnCount, "turn")}` : ""}{goal.subtitle.slice("Goal met".length)}</small>
 				</div>
 				<Button variant="secondary" size="composer-chip" data-testid="composer-goal-met-details" onclick={() => { goalDetails.open = true; }}>Details</Button>
 				<Button variant="ghost" size="composer-icon" iconOnly icon="x" iconSize={14} ariaLabel="Dismiss" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); }} />

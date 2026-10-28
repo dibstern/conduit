@@ -89,7 +89,7 @@
 		<Icon name="target" size={16} class="shrink-0 text-status-goal" />
 		<span class="flex flex-col">
 			<span>{canSetGoal ? "Set goal" : "Goal"}</span>
-			<span class="text-[12px] text-text-dimmer">{canSetGoal ? "Same as $goal" : "Claude only"}</span>
+			<span class="text-[12px] text-text-dimmer">{canSetGoal ? "Same as $goal" : "Not available for this agent"}</span>
 		</span>
 	</MenuItem>
 </Menu>

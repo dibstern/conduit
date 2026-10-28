@@ -653,7 +653,7 @@ export const GoalDetailsEmpty: Story = {
 	play: async ({ canvasElement }) => {
 		const { panel } = await assertGoalDetails(canvasElement, "Pursuing", 0);
 		await expect(panel.getByTestId("goal-details-history")).toHaveTextContent(
-			"No checks yet. The first runs when Claude finishes a turn.",
+			"No checks yet. The first runs when the agent finishes a turn.",
 		);
 		await expect(panel.getByTestId("goal-details-foot")).toHaveTextContent(
 			"0 checks",
