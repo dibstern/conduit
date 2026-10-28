@@ -11,6 +11,7 @@ import type {
 	ToolMessage,
 	UserMessage,
 } from "../../../src/lib/frontend/types.js";
+import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
 	type ActivityPart,
 	appendActivity,
@@ -190,6 +191,26 @@ describe("forkMessageIdAtReply", () => {
 });
 
 describe("segmentTurns", () => {
+	it("keeps a sent prompt's turn when the server places it", () => {
+		const local: UserMessage = { type: "user", uuid: "input-1", text: "Hi" };
+		const placed = historyToChatMessages(
+			[
+				{
+					id: "server-1",
+					role: "user",
+					inputId: "input-1",
+					parts: [{ id: "p1", type: "text", text: "Hi" }],
+				},
+			],
+			undefined,
+			undefined,
+			(messageId, partId) => `${messageId}/${partId}`,
+		);
+		expect(segmentTurns(placed, true)[0]?.id).toBe(
+			segmentTurns([local], true)[0]?.id,
+		);
+	});
+
 	it.each([
 		"assistant",
 		"tool",

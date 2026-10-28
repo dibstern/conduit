@@ -460,6 +460,7 @@ export function historyToChatMessages(
 				type: "user",
 				uuid: uuidFor ? uuidFor(msg.id, "user") : generateUuid(),
 				messageId: msg.id,
+				...(msg.inputId != null ? { inputId: msg.inputId } : {}),
 				text: extractDisplayText(text),
 				...(attachments?.length ? { attachments } : {}),
 				...(msg.time?.created != null && { createdAt: msg.time.created }),

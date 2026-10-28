@@ -108,6 +108,8 @@ export interface UserMessage {
 	type: "user";
 	uuid: string;
 	messageId?: string;
+	/** The browser send it was placed for; its local copy's uuid. */
+	inputId?: string;
 	text: string;
 	attachments?: {
 		id: string;

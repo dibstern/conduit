@@ -191,7 +191,9 @@ export function segmentTurns(
 	for (const msg of messages) {
 		if (msg.type === "user") {
 			turns.push({
-				id: msg.uuid,
+				// A send keeps its turn, and the hand choices keyed by it, when the
+				// server's row replaces the local copy.
+				id: msg.inputId ?? msg.uuid,
 				storeId: msg.turnId ?? msg.messageId,
 				user: msg,
 				segments: [{ activity: [], reply: [] }],

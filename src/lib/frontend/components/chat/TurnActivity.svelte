@@ -166,7 +166,7 @@
 			asks[uuid] = { kind: "failed", message: error instanceof Error ? error.message : String(error) };
 		}
 	}
-	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
+	/** The event store keys a turn by its user message id; turn.id is only a view key. */
 	const storeTurnId = $derived(turn.storeId ?? turn.user?.messageId);
 	const phone = $derived(sessionViewState.compact);
 	let summaryOpen = $state<{ storeId: string; open: boolean } | null>(null);
