@@ -87,6 +87,93 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "assert compact category pin chips",
+		match:
+			/^open pins use 19px category chips with 6px stems and (visible|hidden) numbers$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const chip = page.getByTestId("surfacing-pin-1").locator(".pin-chip");
+			await expect(chip).toHaveCSS("height", "19px");
+			const number = chip.locator(".pin-number");
+			if (match[1] === "visible") await expect(number).toBeVisible();
+			else await expect(number).toBeHidden();
+			const paint = await chip.evaluate((element) => {
+				const style = getComputedStyle(element);
+				const glyph = element.querySelector(".glyph");
+				const probe = document.createElement("span");
+				probe.style.color = "var(--color-text-secondary)";
+				probe.style.backgroundColor = "var(--color-chip)";
+				element.append(probe);
+				const result = {
+					colour: style.color,
+					secondary: getComputedStyle(probe).color,
+					background: style.backgroundColor,
+					chip: getComputedStyle(probe).backgroundColor,
+					glyph: glyph ? getComputedStyle(glyph).color : "",
+					stem: getComputedStyle(element, "::after").height,
+				};
+				probe.remove();
+				return result;
+			});
+			expect(paint.colour).toBe(paint.secondary);
+			expect(paint.background).toBe(paint.chip);
+			expect(paint.glyph).not.toBe(paint.colour);
+			expect(paint.stem).toBe("6px");
+			const selected = page.locator('[data-x][aria-pressed="true"] .pin-chip');
+			const tint = await selected.evaluate((element) => ({
+				background: getComputedStyle(element).backgroundColor,
+				glyph: getComputedStyle(element.querySelector(".glyph") ?? element)
+					.color,
+				ring: getComputedStyle(element).boxShadow,
+			}));
+			expect(tint.background).not.toBe(tint.glyph);
+			expect(tint.ring).toContain("1px");
+			await expect(selected).toHaveCSS("color", paint.secondary);
+		},
+	},
+	{
+		name: "assert read and unread open pin paint",
+		match:
+			/^read pins keep their full colour while unread pins keep a corner dot$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("surfacing-pin-1").locator(".glyph"),
+			).toHaveCSS("opacity", "1");
+			await expect(
+				world.page.getByTestId("surfacing-pin-4").locator(".unread-dot"),
+			).toBeVisible();
+			await expect(
+				world.page.getByTestId("surfacing-pin-1").locator(".unread-dot"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert open Ask does not pulse",
+		match: /^the open Ask pin is tinted without a pulse$/,
+		run: async ({ world }) => {
+			const ask = world.page
+				.getByTestId("surfacing-pin-2")
+				.locator(".pin-chip");
+			await expect(ask).toHaveClass(/open-ask/);
+			expect(
+				await ask.evaluate(
+					(element) => getComputedStyle(element, "::before").animationName,
+				),
+			).toBe("none");
+			await expect(ask).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+		},
+	},
+	{
+		name: "assert pin lane follows occupied rows",
+		match: /^the pin lane reserves only its occupied rows$/,
+		run: async ({ world }) => {
+			const lane = world.page.getByTestId("surfacing-pins");
+			await expect(lane).toHaveAttribute("data-layout-ready", "true");
+			const upper = await lane.locator('[data-row="1"]').count();
+			await expect(lane).toHaveCSS("height", upper ? "49px" : "25px");
+		},
+	},
+	{
 		name: "assert Full log notes use its active stop",
 		match: /^the Full log has no Answer-only note$/,
 		run: async ({ world }) => {

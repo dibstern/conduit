@@ -154,15 +154,14 @@
 		onkeydown={keyboard} onpointerdown={pointerDown} onpointermove={pointerMove} onpointerup={pointerUp} onpointercancel={clear} onlostpointercapture={clear}
 		onfocus={() => { if (markers.kind === "dots" && gesture.kind === "idle") { const step = segments[selected]; gesture = { kind: "idle", hovered: collapsed && step ? nearest(markers.dots, step.left + step.width / 2)?.part.uuid ?? null : step?.id ?? null }; } }} onblur={() => { if (gesture.kind === "idle") clear(); }}>
 		{#if markers.kind === "pins"}
-		<div class="pin-lane" class:empty={markers.pins.length === 0} data-testid="surfacing-pins" bind:clientWidth={laneWidth} data-layout-ready={laneWidth > 0} data-lane-width={laneWidth}>
+		<div class="pin-lane" class:two-rows={groups.some((group) => group.row === 1)} class:empty={markers.pins.length === 0} data-testid="surfacing-pins" bind:clientWidth={laneWidth} data-layout-ready={laneWidth > 0} data-lane-width={laneWidth}>
 		{#each groups as group (group.leader.part.uuid)}
 			{@const pin = group.members.find((member) => member.part.uuid === (markers.kind === "pins" ? markers.selected : null)) ?? group.leader}
 			{@const current = markers.kind === "pins" && markers.selected === pin.part.uuid}
 			{@const isCited = group.members.some((member) => member.part.uuid === cited)}
-			{@const seen = group.members.every((member) => member.read === true) && !group.members.some((member) => member.part.uuid === openAsk?.uuid)}
 			{@const unread = group.members.some((member) => member.read === false && !member.pending && member.part.uuid !== (markers.kind === "pins" ? markers.selected : null) && member.part.uuid !== openAsk?.uuid)}
-			<Button variant="ghost" size="content" hoverFill="none" class="absolute h-[32px] rounded-full {group.row ? 'bottom-[27px] max-md:bottom-[43px]' : 'bottom-[3px] max-md:bottom-[5px]'}" style="left:{group.left}px;width:{group.width}px;--pin-tick:{group.tick}px" data-x={group.x} data-surface-part={group.leader.part.uuid} data-testid={group.members.length > 1 ? "surfacing-group" : `surfacing-pin-${pin.number ?? `pending-${pin.part.uuid}`}`} data-row={group.row} data-group-members={group.members.map((member) => member.number ?? "pending").join(",")} data-group-leader={group.leader.number} data-cited={isCited} ariaLabel={group.members.length > 1 ? `Group of ${group.members.length}, led by #${group.leader.number} ${group.leader.label}${current ? `; showing ${pin.name}` : ""}` : pin.name} aria-pressed={current} onclick={(event) => { if (event.detail === 0) { clear(); pickGroup(group); } }}>
-				<span class="pin-chip" class:builtin={!!pin.builtinCategory} class:upper={group.row === 1} class:current class:cited={isCited} class:open-ask={openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={belowLevel && markers.kind === "pins" && markers.selected === pin.part.uuid} class:seen={seen} style:--surface-colour={pin.colour} data-number={pin.number} data-category={pin.category}><span class="glyph">{pin.glyph}</span>{pin.number ?? ""}{#if pin.part.surfacingMark}<sup class="mark-glyph {pin.part.surfacingMark.direction ?? 'raise'}">{MARK_GLYPHS[pin.part.surfacingMark.direction ?? "raise"]}</sup>{/if}{#if group.members.length > 1}<small>+{group.members.length - 1}</small>{/if}{#if unread}<i class="unread-dot"></i>{/if}</span>
+			<Button variant="ghost" size="content" hoverFill="none" class="absolute h-[32px] rounded-full {group.row ? 'bottom-[24px]' : 'bottom-0'}" style="left:{group.left}px;width:{group.width}px;--pin-tick:{group.tick}px" data-x={group.x} data-surface-part={group.leader.part.uuid} data-testid={group.members.length > 1 ? "surfacing-group" : `surfacing-pin-${pin.number ?? `pending-${pin.part.uuid}`}`} data-row={group.row} data-group-members={group.members.map((member) => member.number ?? "pending").join(",")} data-group-leader={group.leader.number} data-cited={isCited} ariaLabel={group.members.length > 1 ? `Group of ${group.members.length}, led by #${group.leader.number} ${group.leader.label}${current ? `; showing ${pin.name}` : ""}` : pin.name} aria-pressed={current} onclick={(event) => { if (event.detail === 0) { clear(); pickGroup(group); } }}>
+				<span class="pin-chip" class:builtin={!!pin.builtinCategory} class:current class:cited={isCited} class:open-ask={openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={belowLevel && markers.kind === "pins" && markers.selected === pin.part.uuid} style:--surface-colour={pin.colour} data-number={pin.number} data-category={pin.category}><span class="glyph">{pin.glyph}</span><span class="pin-number" class:hidden={phone}>{pin.number ?? ""}</span>{#if pin.part.surfacingMark}<sup class="mark-glyph {pin.part.surfacingMark.direction ?? 'raise'}">{MARK_GLYPHS[pin.part.surfacingMark.direction ?? "raise"]}</sup>{/if}{#if group.members.length > 1 && !phone}<small>+{group.members.length - 1}</small>{/if}{#if unread}<i class="unread-dot"></i>{/if}</span>
 			</Button>
 		{/each}
 		</div>
@@ -196,28 +195,22 @@
 </div>
 
 <style>
-	.surfacing-scrub { position:relative; touch-action:pan-y; outline:none; }
+	.surfacing-scrub { position:relative; margin-top:9px; touch-action:pan-y; outline:none; }
 	.surfacing-scrub:focus-visible { outline:1px solid var(--color-accent); border-radius:6px; }
 	/* Ticks paint behind every pill, so an upper row's long tick never strikes through a lower pill. */
-	.pin-lane { position:relative; height:64px; isolation:isolate; }
+	.pin-lane { position:relative; height:25px; isolation:isolate; }
+	.pin-lane.two-rows { height:49px; }
 	.pin-lane.empty { height:8px; }
-	.pin-chip { position:relative; display:inline-flex; align-items:center; justify-content:center; gap:3px; flex:none; min-width:100%; box-sizing:border-box; height:20px; padding:0 6px; border-radius:999px; background:var(--color-chip); font:500 11px var(--font-mono); color:var(--color-text); white-space:nowrap; }
-	.pin-chip::after { content:""; position:absolute; top:100%; left:var(--pin-tick,50%); width:1px; height:13px; background:var(--color-border); pointer-events:none; z-index:-1; }
-	.pin-chip.upper::after { height:37px; }
+	.pin-lane + .surface-strip { margin-top:-8px; }
+	.pin-chip { position:relative; display:inline-flex; align-items:center; justify-content:center; gap:3px; flex:none; min-width:100%; box-sizing:border-box; height:19px; padding:0 6px; border-radius:999px; background:var(--color-chip); font:500 11px var(--font-mono); color:var(--color-text-secondary); white-space:nowrap; }
+	.pin-chip::after { content:""; position:absolute; top:100%; left:var(--pin-tick,50%); width:1px; height:6px; background:var(--color-border); pointer-events:none; z-index:-1; }
 	.pin-chip small { margin-left:1px; font-size:10px; color:var(--color-text-muted); }
 	.glyph { color:var(--surface-colour,var(--color-text-dimmer)); }
 	.mark-glyph { align-self:flex-start; margin:3px 0 0 1px; font-size:9px; line-height:1; }
 	.mark-glyph.raise { color:var(--color-success); } .mark-glyph.lower { color:var(--color-text-muted); } .mark-glyph.retype { color:var(--color-accent); }
-	.current { background:var(--surface-colour,var(--color-text)); color:var(--color-bg); }
-	.current .glyph,.current small { color:inherit; }
+	.current { background:color-mix(in srgb,var(--surface-colour,var(--color-text-secondary)) 14%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1px var(--surface-colour,var(--color-text-secondary)); }
 	.cited { translate:0 -4px; box-shadow:0 0 0 1.5px var(--color-accent),0 4px 10px rgba(var(--shadow-rgb),.2); color:var(--color-text); }
-	.current.builtin.cited:not(.below) { color:var(--color-bg); }
-	.seen:not(.current) { background:color-mix(in srgb,var(--color-chip) 55%,transparent); color:var(--color-text-dimmer); }
-	.seen:not(.current) .glyph { opacity:.7; }
-	.seen.builtin:not(.current) { background:color-mix(in srgb,var(--surface-colour) 14%,var(--color-turn-bg)); }
-	.seen.builtin:not(.current) .glyph { opacity:1; }
-	.open-ask:not(.current) { background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1.5px var(--color-status-ask); color:var(--color-status-ask); }
-	.open-ask::before { content:""; position:absolute; inset:-4px; border-radius:999px; box-shadow:0 0 0 1.5px color-mix(in srgb,var(--color-status-ask) 45%,transparent); animation:ask-pulse 1.6s ease-in-out infinite; }
+	.open-ask { background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1px var(--color-status-ask); }
 	.pending { background:none; outline:1px dashed var(--color-accent); outline-offset:-1px; color:var(--color-accent); }
 	.below { background:var(--color-turn-bg); outline:1px dashed var(--color-text); outline-offset:-1px; color:var(--color-text); }
 	.below .glyph { color:var(--color-text-dimmer); }
@@ -227,10 +220,6 @@
 	.hanging-card.ask { --card-background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); }
 	.card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--card-background); border-top:1px solid var(--color-border); border-left:1px solid var(--color-border); transform:translateX(-50%) rotate(45deg); }
 	.surface-thumb { position:absolute; top:50%; width:3px; height:14px; border-radius:2px; background:var(--color-text); transform:translate(-50%,-50%); pointer-events:none; }
-	@keyframes ask-pulse { 50% { opacity:.45; } }
-	@media(prefers-reduced-motion:reduce) { .open-ask::before { animation:none; } }
-
-	@media(max-width:767px) { .pin-lane:not(.empty) { height:80px; } .pin-chip { font-size:12px; height:24px; padding:0 7px; } .pin-chip.upper::after { height:51px; } }
 	.minimised-turn { position:relative; }
 	.minimised-scrub { position:relative; display:block; width:100%; padding:6px 0; border-radius:4px; }
 	.minimised-scrub:focus-visible, :global(.peek:focus-visible) { outline:2px solid var(--color-accent); outline-offset:2px; }

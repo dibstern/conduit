@@ -432,9 +432,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 			}
 			const first = chips.find(({ row }) => row === "0"),
 				upper = chips.find(({ row }) => row === "1");
-			expect((first?.top ?? 0) - (upper?.top ?? 0)).toBe(
-				(world.page.viewportSize()?.width ?? 1024) < 768 ? 38 : 24,
-			);
+			expect((first?.top ?? 0) - (upper?.top ?? 0)).toBe(24);
 			const members = chips.flatMap(
 				({ members }) => members?.split(",").map(Number) ?? [],
 			);

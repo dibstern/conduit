@@ -1,5 +1,22 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Open pins use compact tinted chips and only reserve occupied rows
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with 1,8 read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  Then open pins use 19px category chips with 6px stems and <numbers> numbers
+  And read pins keep their full colour while unread pins keep a corner dot
+  And the open Ask pin is tinted without a pulse
+  And the pin lane reserves only its occupied rows
+  And the messages region visually matches turn-pin-chips-<viewport> at 98 percent
+
+Examples:
+  | viewport | numbers |
+  | desktop  | visible |
+  | phone    | hidden  |
+
 Scenario Outline: The plain activity bar stays centred in its desktop and phone hit target
   Given message surfacing is inactive at Most
   And the conduit app is served with the connected mockup

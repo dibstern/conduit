@@ -147,6 +147,12 @@ export const Pins: Story = {
 			"true",
 		);
 		const pin = canvas.getByTestId("surfacing-pin-2");
+		await expect(
+			getComputedStyle(pin.querySelector(".pin-chip") ?? pin).height,
+		).toBe("19px");
+		await expect(
+			canvas.getByTestId("surfacing-pins").getBoundingClientRect().height,
+		).toBe(25);
 		const user = userEvent.setup();
 		await user.pointer({ keys: "[MouseLeft>]", target: pin });
 		await expect(args["onpick"]).not.toHaveBeenCalled();
