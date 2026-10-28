@@ -23,30 +23,21 @@
 <script lang="ts">
 	import { onDestroy } from "svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { STOPS, SURFACE_LEVELS, type StopCounts } from "../../utils/turn-stops.js";
+	import { STOPS, type StopCounts } from "../../utils/turn-stops.js";
 	import { surfacePinRows, type SurfaceLevel, type SurfacePinGroup } from "../../utils/surface-turn.js";
 	import Button from "../ui/Button.svelte";
 	import SurfacingReplyActions from "./SurfacingReplyActions.svelte";
 	import Checkbox from "../ui/Checkbox.svelte";
-	import Menu from "../ui/Menu.svelte";
-	import MenuItem from "../ui/MenuItem.svelte";
-	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 
-	let { view, counts, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onjump, onhover, onread, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), scrubbing = $bindable(false), markReadInAxis = false, onreply, replied = false }: {
+	let { view, counts, live, regions = {}, strip, onpick, onlevel, onfold, onfollow, oncommand, onjump, onhover, onread, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), scrubbing = $bindable(false), markReadInAxis = false, onreply, replied = false }: {
 		view: SurfaceTurn;
 		counts: StopCounts;
 		live: boolean;
-		level: SurfaceLevel;
-		overridden: boolean;
-		endTime: string;
-		startTime: string;
 		regions?: SurfacingRegions;
 		strip: Snippet;
 		onpick: (pin: SurfacePin) => void;
 		onlevel: (level: SurfaceLevel) => void;
-		ondefault: () => Promise<void>;
-		onreset: () => void;
 		onfold: () => void;
 		onfollow: () => void;
 		oncommand: (event: KeyboardEvent) => void;
@@ -68,19 +59,12 @@
 	const groups = $derived(surfacePinRows(view, laneWidth, sessionViewState.compact));
 	const currentGroup = $derived(groups.find((group) => group.members.some((pin) => pin.part.uuid === view.card?.part.uuid)));
 	let lastGroupTap: { source: string; picked: string } | null = null;
-	let menuOpen = $state(false);
-	let defaultState = $state<{ kind: "idle" } | { kind: "saving" } | { kind: "failed"; message: string }>({ kind: "idle" });
 	let drag: { id: number; x: number; y: number; moved: boolean; pin?: SurfacePin } | null = null;
 	// A card collapsed mid-scrub never sees pointerup; release the owner's auto-read gate.
 	onDestroy(() => { scrubbing = false; });
 	let suppressClick = false;
 	let cardBodyEl: HTMLDivElement | undefined = $state();
-	const levelOptions = $derived(SURFACE_LEVELS.filter((value) => value === "final" || value === "all" || value === level || counts[value] > 0).map((value) => ({
-		value,
-		label: STOPS[value].short,
-		...(value === "final" ? {} : { detail: String(counts[value]) }),
-	})));
-	// With summaries off, the axis carries the turn's bulk read in place of the start time.
+
 	const markCount = $derived(markReadInAxis && onmarkread ? view.unreadPartIds.length : 0);
 
 	function xAt(clientX: number): number {
@@ -135,11 +119,7 @@
 		scrubbing = false;
 		if (scrubEl.hasPointerCapture(event.pointerId)) scrubEl.releasePointerCapture(event.pointerId);
 	}
-	async function makeDefault() {
-		defaultState = { kind: "saving" };
-		try { await ondefault(); menuOpen = false; defaultState = { kind: "idle" }; }
-		catch { defaultState = { kind: "failed", message: "Couldn't save the default. Try again." }; }
-	}
+
 </script>
 
 {#snippet stepButton(label: string, glyph: string, onclick: () => void, disabled = false)}
@@ -197,20 +177,15 @@
 	</div>
 </div>
 
-<div class="surface-axis">
-	{#if !markCount}<span class="axis-start">{startTime}</span>{/if}
-	<span class="axis-notes">{#if view.level === "final"}<span>{STOPS.final.menu} · {counts.all} hidden</span>{/if}{#if view.empty}<span>Nothing at {STOPS[view.level].short} · <Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" onclick={() => onlevel("all")}>Show {STOPS.all.short}</Button></span>{/if}{#if view.notJudgedCount}<span data-testid="surfacing-not-judged">⚠ {view.notJudgedCount} not judged</span>{/if}{#if markCount}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="h-[22px] shrink-0 rounded-full px-[8px] font-sans text-[11.5px] font-medium bg-accent/15 text-accent" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => onmarkread?.()}>✓ Mark {markCount} read</Button>{/if}</span>
-	<span class="grow"></span>
-	<div class="contents" data-testid="surfacing-level"><SegmentedControl variant="level" label="Surfacing level" options={levelOptions} bind:value={() => level, onlevel} /></div>
-	{#if overridden}<i class="override-dot" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}
-	<Menu bind:open={menuOpen} side="top" align="end" ariaLabel="Level options">
-		{#snippet trigger({ props })}<Button {...props} variant="ghost" size="content" tone="muted" iconOnly icon="ellipsis" iconSize={14} touchTarget class="size-[22px] rounded-full" ariaLabel="Level options" />{/snippet}
-		<MenuItem disabled={defaultState.kind === "saving"} closeOnSelect={false} onselect={makeDefault}>Make default</MenuItem>
-		<MenuItem disabled={!overridden || defaultState.kind === "saving"} onselect={onreset}>Back to default</MenuItem>
-		{#if defaultState.kind === "failed"}<p role="alert" class="px-[8px] py-[6px] text-[12px] text-error">{defaultState.message}</p>{/if}
-	</Menu>
-	{#if live && !view.following}<Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" ariaLabel="Follow latest" onclick={onfollow}>now ⇥</Button>{:else}<span class:live-end={live}>{endTime}{live ? " now" : ""}</span>{/if}
+{#if view.level === "final" || view.empty || view.notJudgedCount || markCount || (live && !view.following)}
+<div class="axis-notes" data-testid="surfacing-notes">
+	{#if view.level === "final"}<span>{STOPS.final.menu} · {counts.all} hidden</span>{/if}
+	{#if view.empty}<span>Nothing at {STOPS[view.level].short} · <Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" onclick={() => onlevel("all")}>Show {STOPS.all.short}</Button></span>{/if}
+	{#if view.notJudgedCount}<span data-testid="surfacing-not-judged">⚠ {view.notJudgedCount} not judged</span>{/if}
+	{#if markCount}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="h-[22px] shrink-0 rounded-full px-[8px] font-sans text-[11.5px] font-medium bg-accent/15 text-accent" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => onmarkread?.()}>✓ Mark {markCount} read</Button>{/if}
+	{#if live && !view.following}<Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" ariaLabel="Follow latest" onclick={onfollow}>now ⇥</Button>{/if}
 </div>
+{/if}
 {#if readState.kind === "failed" && (!view.card || readState.uuid === view.card.part.uuid)}<p role="alert" class="mt-[4px] text-[12px] text-error">{readState.message}</p>{/if}
 <div data-surfacing-region="below-strip">{@render regions.belowStrip?.(view, (partId) => { citedPart = partId; })}</div>
 
@@ -258,19 +233,13 @@
 	.card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--color-bg); transform:translateX(-50%) rotate(45deg); }
 	.surface-strip { position:relative; }
 	.surface-thumb { position:absolute; top:50%; width:3px; height:14px; border-radius:2px; background:var(--color-text); transform:translate(-50%,-50%); pointer-events:none; }
-	.surface-axis { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; min-height:26px; margin-top:4px; color:var(--color-text-dimmer); font:11.5px var(--font-mono); }
-	.axis-notes { display:contents; }
-	.override-dot { width:6px; height:6px; border-radius:50%; background:var(--color-accent); }
-	.live-end { color:var(--color-accent); }
+	.axis-notes { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; margin-top:4px; color:var(--color-text-dimmer); font:11.5px var(--font-mono); }
 	@keyframes ask-pulse { 50% { opacity:.45; } }
 	@media(prefers-reduced-motion:reduce) { .open-ask::before { animation:none; } }
 	@media(max-width:767px) {
 		.pin-lane:not(.empty) { height:80px; }
 		.card-body { font-size:15px; }
-		.axis-start,.desktop-time { display:none; }
-		/* Notes take their own row so the controls and end time stay on one. */
-		.axis-notes { display:flex; flex-wrap:wrap; gap:6px 8px; flex-basis:100%; }
-		.axis-notes:empty { display:none; }
+		.desktop-time { display:none; }
 		.pin-chip { font-size:12px; height:24px; padding:0 7px; }
 		.pin-chip.upper::after { height:51px; }
 	}

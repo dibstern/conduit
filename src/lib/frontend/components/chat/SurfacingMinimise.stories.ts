@@ -123,7 +123,7 @@ export const Minimised: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			canvas.getByRole("button", { name: "Minimise turn" }),
+			canvas.getByRole("button", { name: "Collapse turn" }),
 		);
 		await expect(canvas.getByTestId("surfacing-thin-track")).toHaveStyle({
 			height: "4px",
@@ -206,7 +206,7 @@ export const HandExpanded: Story = {
 		canvas.getByTestId("surfacing-card").focus();
 		await userEvent.keyboard("h");
 		await expect(
-			canvas.getByRole("button", { name: "Minimise turn" }),
+			canvas.getByRole("button", { name: "Collapse turn" }),
 		).toBeVisible();
 		await expect(canvas.getByTestId("surfacing-msg-card")).toBeVisible();
 		canvas.getByTestId("surfacing-card").blur();
@@ -247,7 +247,7 @@ export const MessageDestination: Story = {
 			"4",
 		);
 		await expect(
-			canvas.getByRole("button", { name: "Minimise turn" }),
+			canvas.getByRole("button", { name: "Collapse turn" }),
 		).toBeVisible();
 	},
 };

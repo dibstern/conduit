@@ -235,8 +235,13 @@ export const RoutineInLog: Story = {
 			".turn-activity-toggle",
 		);
 		await expect(toggle).not.toBeNull();
-		if (toggle) await userEvent.click(toggle);
-		const row = within(canvas.getByTestId("surfacing-step-mark-28"));
+		await userEvent.click(canvas.getByRole("tab", { name: "Full log" }));
+		const message = canvasElement.querySelector<HTMLButtonElement>(
+			'.step-log [data-message-number="28"] button',
+		);
+		if (!message) throw new Error("Missing routine message row");
+		await userEvent.click(message);
+		const row = within(canvas.getByTestId("surfacing-msg-card"));
 		await expect(row.getByTestId("surfacing-mark-lower")).toBeDisabled();
 		await userEvent.click(row.getByTestId("surfacing-mark-raise"));
 		await expect(row.getByTestId("surfacing-mark-why")).toHaveTextContent(
@@ -279,8 +284,12 @@ export const LoweredInLog: Story = {
 			".turn-activity-toggle",
 		);
 		await expect(toggle).not.toBeNull();
-		if (toggle) await userEvent.click(toggle);
-		await userEvent.click(canvas.getByTestId("surfacing-step-open-26"));
+		await userEvent.click(canvas.getByRole("tab", { name: "Full log" }));
+		const message = canvasElement.querySelector<HTMLButtonElement>(
+			'.step-log [data-message-number="26"] button',
+		);
+		if (!message) throw new Error("Missing lowered message row");
+		await userEvent.click(message);
 		await expect(canvas.getByTestId("surfacing-msg-card")).toHaveTextContent(
 			"Hidden at this level",
 		);

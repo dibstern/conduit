@@ -1086,5 +1086,9 @@
 		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
 		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
 	},
-	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock."
+	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock.",
+	"src/lib/frontend/components/chat/SurfacingCard.svelte :: axis-start,contents,override-dot,py-[6px],size-[22px],surface-axis": "conduit-test-xdyjq.2 removes the axis times and level ellipsis. Conditional notes stay under the strip; the stop controls and override indicator now belong to TurnShowBar, with ui/Tabs owning the footer appearance.",
+	"src/lib/frontend/components/chat/TurnActivity.svelte :: gap-[4px],h-[26px],mb-[8px],ml-[20px],px-[6px]": "conduit-test-xdyjq.2 removes the separate per-message mark/open sub-row. Full log message rows open the card, where the existing mark controls live, so that sub-row spacing is deleted.",
+	"src/lib/frontend/components/chat/TurnActivity.svelte :: my-[2px],w-[24px]": "conduit-test-xdyjq.2 deletes the right-hand minimise button. The single left chevron in the head now owns expand and collapse.",
+	"src/lib/frontend/components/ui/segmented-styles.ts :: bg-bg,h-[21px]": "conduit-test-xdyjq.2 deletes SegmentedControl level appearance and its raised 21px pills. The Tabs footer variant is flat on turn-bg with a 2px accent top edge."
 }

@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import { Utf8Bytes } from "../../../contracts/tool-wire.js";
+import { setTurnMinimised } from "../../stores/turn-minimisation.svelte.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import type { ChatMessage, ToolMessage } from "../../types.js";
 import {
@@ -38,6 +39,10 @@ const meta = {
 	component: TurnActivity,
 	parameters: { layout: "padded" },
 	args: { providerId: "claude" },
+	beforeEach: () => {
+		for (const turn of [settled, live, handBack, truncated, once, twice])
+			setTurnMinimised(undefined, turn.id, null);
+	},
 } satisfies Meta<typeof TurnActivity>;
 
 export default meta;
@@ -87,7 +92,7 @@ export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const toggle = canvas.getByRole("button", {
-			name: /^Work(ed|ing)\b/,
+			name: "Expand turn",
 			expanded: false,
 		});
 		await userEvent.click(toggle);
@@ -248,7 +253,7 @@ export const HandBackExpanded: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(
-			canvas.getByRole("button", { name: /^Worked\b/, expanded: false }),
+			canvas.getByRole("button", { name: "Expand turn", expanded: false }),
 		);
 		await userEvent.click(canvas.getByTestId("turn-hand-back-row"));
 		await expect(canvas.getByText("Use the staging project.")).toBeVisible();
@@ -296,7 +301,7 @@ export const PreviewedOutputRetry: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const toggle = canvas.getByRole("button", {
-			name: /^Work(ed|ing)\b/,
+			name: "Expand turn",
 			expanded: false,
 		});
 		await userEvent.click(toggle);
@@ -356,7 +361,7 @@ const [twiceSegment = EMPTY_SEGMENT] = twice.segments;
 async function expand(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
 	const toggle = canvas.getByRole("button", {
-		name: /^Work(ed|ing)\b/,
+		name: "Expand turn",
 		expanded: false,
 	});
 	await userEvent.click(toggle);
@@ -426,6 +431,7 @@ async function showSkillEvents(canvasElement: HTMLElement) {
 	);
 	if (head?.getAttribute("aria-expanded") === "false")
 		await userEvent.click(head);
+	await userEvent.click(canvas.getByRole("tab", { name: /^(Full log|Log)$/ }));
 	head?.blur();
 	const rows = canvas.getAllByRole("button", { name: /^Skill / });
 	await expect(rows).toHaveLength(2);

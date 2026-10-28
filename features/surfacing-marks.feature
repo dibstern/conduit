@@ -106,7 +106,7 @@ Examples:
   | desktop  | light | marks-retyped-desktop-light | 98        |
   | phone    | light | marks-retyped-phone-light   | 98        |
 
-Scenario Outline: Step log marks report surfaced false alarms and routine misses within Key and log limits
+Scenario Outline: Full log rows open cards for marking false alarms and routine misses
   Given a surfacing marks ledger is available in the <theme> theme
   And message surfacing is active at All messages
   And the conduit app is served with the connected mockup

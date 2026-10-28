@@ -71,6 +71,16 @@ export type SurfacePart = AssistantMessage & {
 	surfacingRead?: boolean;
 };
 
+/** Settled messages without a verdict remain readable in the log. */
+export function canOpenSurfaceMessage(
+	part: SurfacePart,
+	live: boolean,
+): boolean {
+	return (
+		live || part.surfacingProbabilities !== undefined || !!part.surfacingMark
+	);
+}
+
 /** The latest visible Ask belongs only to the transcript's last Turn. */
 export function openAsk(
 	turnParts: readonly ActivityPart[],
@@ -173,10 +183,7 @@ export function surfaceTurn(input: {
 		input.selection.kind === "picked" ? input.selection.uuid : null;
 	const picked = messages.find(
 		({ part }) =>
-			part.uuid === pickedUuid &&
-			(input.live ||
-				part.surfacingProbabilities !== undefined ||
-				!!part.surfacingMark),
+			part.uuid === pickedUuid && canOpenSurfaceMessage(part, input.live),
 	);
 	const short =
 		turnMessages.filter(({ level }) => level !== "hidden").length < 4;

@@ -61,6 +61,7 @@ import { terminalSettingsHandlers } from "./steps/terminalSettings.js";
 import { titleGenerationSettingsHandlers } from "./steps/titleGenerationSettings.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { turnActivityHandlers } from "./steps/turnActivity.js";
+import { turnActivityShowHandlers } from "./steps/turnActivityShow.js";
 import { turnActivitySkillsHandlers } from "./steps/turnActivitySkills.js";
 import { turnPanelHandlers } from "./steps/turnPanel.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
@@ -92,6 +93,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...surfacingCardHandlers,
 	...turnActivitySkillsHandlers,
 	...turnActivityHandlers,
+	...turnActivityShowHandlers,
 	...turnPanelHandlers,
 	...surfacingMarksHandlers,
 	...surfacingMinimiseHandlers,

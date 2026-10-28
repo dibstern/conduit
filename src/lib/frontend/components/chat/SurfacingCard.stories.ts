@@ -599,11 +599,11 @@ export const OlderTurnLight: Story = {
 export const Override: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByRole("radio", { name: /^Key$/ }));
+		await userEvent.click(canvas.getByRole("tab", { name: /^Key$/ }));
 		await expect(
 			canvas.getByTestId("surfacing-level-default-dot"),
 		).toBeVisible();
-		canvas.getByRole("radio", { name: /^Key$/ }).blur();
+		canvas.getByRole("tab", { name: /^Key$/ }).blur();
 	},
 };
 export const OverrideLight: Story = {

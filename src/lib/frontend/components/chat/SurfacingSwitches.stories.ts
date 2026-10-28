@@ -4,6 +4,7 @@ import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import type { TurnRecap } from "../../../contracts/turn-recap.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { setTurnMinimised } from "../../stores/turn-minimisation.svelte.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import type { Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
@@ -83,6 +84,7 @@ const meta = {
 		surfacing,
 	},
 	beforeEach: () => {
+		setTurnMinimised("split-session", turn.id, null);
 		const cleanup = [connectedSocket(), replyRpc("ListRecaps", () => [recap])];
 		return () => {
 			for (const restore of cleanup.reverse()) restore();
@@ -120,7 +122,9 @@ const summaryLog: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 	await expect(row).toHaveAttribute("data-highlighted", "true");
 	await expect(row?.parentElement).toHaveFocus();
 	await expect(body.queryByTestId("surfacing-recap-reader")).toBeNull();
-	await expect(canvas.queryByTestId("surfacing-minimise-toggle")).toBeNull();
+	await expect(
+		canvas.getByTestId("surfacing-minimise-toggle"),
+	).toHaveAccessibleName("Collapse turn");
 	await expect(canvas.queryByTestId("surfacing-pins")).toBeNull();
 };
 export const JevOffSummariesOn: Story = { play: summaryLog };
@@ -140,7 +144,7 @@ export const BothOff: Story = {
 		const timeline = canvas.getByRole("slider", { name: /Activity timeline/ });
 		await expect(timeline).toBeVisible();
 		await userEvent.click(timeline);
-		const toggle = canvas.getByRole("button", { name: /^Worked/ });
+		const toggle = canvas.getByRole("button", { name: "Collapse turn" });
 		await expect(toggle).toHaveAttribute("aria-expanded", "true");
 		timeline.blur();
 		await expect(
@@ -150,7 +154,9 @@ export const BothOff: Story = {
 			canvasElement.querySelector("[data-message-number]"),
 		).toBeNull();
 		await expect(canvas.queryByTestId("surfacing-summary-generate")).toBeNull();
-		await expect(canvas.queryByTestId("surfacing-minimise-toggle")).toBeNull();
+		await expect(
+			canvas.getByTestId("surfacing-minimise-toggle"),
+		).toHaveAccessibleName("Collapse turn");
 	},
 };
 export const BothOffLight: Story = { ...BothOff, globals: { theme: "light" } };

@@ -42,6 +42,7 @@
 		highlight = false,
 		messageNumber,
 		messageCategory,
+		onmessage,
 		live = false,
 		runningTasks = new Set<string>(),
 	}: {
@@ -52,6 +53,7 @@
 		highlight?: boolean;
 		messageNumber?: number | undefined;
 		messageCategory?: { glyph: string; colour: string | undefined } | undefined;
+		onmessage?: (() => void) | undefined;
 		live?: boolean;
 		/** Shared with the strip so status overrides use the same snapshot. */
 		runningTasks?: ReadonlySet<string>;
@@ -248,7 +250,7 @@
 	</div>
 {:else}
 	<div data-part={part.uuid} data-message-number={messageNumber} data-highlighted={highlight || undefined}>
-		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" class={highlight ? "bg-selection" : ""} aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
+		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" class={highlight ? "bg-selection" : ""} aria-expanded={onmessage ? undefined : expanded} onclick={() => { if (onmessage) onmessage(); else expanded = !expanded; }}>
 			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs {style.text}" style:color={messageCategory?.colour}>{#if messageCategory}<span aria-hidden="true">{messageCategory.glyph}</span>{" "}{/if}#{messageNumber}</span>
 			{:else}<span class="shrink-0 {style.text}"><Icon name={style.icon} size={14} /></span>{/if}
 			<span class="flex-1 truncate italic text-text-secondary">{firstLine(part.rawText, 120)}</span>
