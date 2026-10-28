@@ -3,6 +3,7 @@
 import { Effect, Fiber, Result, Stream } from "effect";
 import { untrack } from "svelte";
 import { accountRefFromSelection } from "../../account-directory.js";
+import type { AccountRef } from "../../contracts/account.js";
 import type { DefaultSessionMode } from "../../contracts/project-file.js";
 import {
 	type BrowserDriverTraits,
@@ -425,6 +426,7 @@ export function watchCatalogs(): () => void {
 				for (const held of Object.keys(draftModels))
 					if (held !== key) delete draftModels[held];
 				const scope = catalogScope();
+				draftModelKey = key;
 				if (connected && scope.project === attached && selection.scope !== null)
 					void readCatalogs(scope, "models-agents");
 			});
@@ -496,6 +498,8 @@ const draft = $state<{
 }>({ instanceId: null, driver: null, permissionMode: "ask" });
 const draftModels = $state<Record<string, DraftPick["model"] | null>>({});
 const draftModel = $derived(draftModels[catalogScope().key] ?? null);
+// Snapshot listeners run after the effective account, and therefore its key, changes.
+let draftModelKey: string | undefined;
 let draftPermissionChosen = $state(false);
 /** Like the permission mode, an untouched draft pick follows the server default. */
 let draftPickChosen = false;
@@ -504,7 +508,7 @@ let draftAccountChosen = false;
 const modelMemory = new Map<string, Map<string, DraftPick["model"]>>();
 accountSnapshotChangedListeners.add(() => {
 	const pinned = draft.instanceId;
-	const model = draftModel;
+	const model = draftModels[draftModelKey ?? catalogScope().key];
 	// A removed account, or an unpicked draft account, falls back to its driver's default.
 	if (
 		pinned &&
@@ -520,7 +524,10 @@ accountSnapshotChangedListeners.add(() => {
 			draft.instanceId = next;
 			draftModels[catalogScope().key] = model;
 		} else draftModels[catalogScope().key] = null;
+	} else if (!pinned && draft.driver !== null && model && draftPickChosen) {
+		draftModels[catalogScope().key] = model;
 	}
+	draftModelKey = catalogScope().key;
 	fillDraftDefault();
 });
 
@@ -1154,6 +1161,32 @@ export function defaultInstanceFor(
 	);
 }
 
+/** A harness pick follows its usable default, falling back only when unusable. */
+export function accountRefForSelection(
+	selection: InstanceSelection,
+): AccountRef | undefined {
+	const available = getAvailableInstances();
+	if (typeof selection === "string") {
+		// An exact pick pins its account even when unknown, so it stays unroutable.
+		if (available.some((account) => account.id === selection))
+			return { _tag: "Id", id: selection };
+		const ref = accountRefFromSelection({ providerId: selection });
+		return ref._tag === "DriverDefault"
+			? accountRefForSelection({ driver: ref.driver })
+			: ref;
+	}
+	if (defaultInstanceFor(selection.driver)?.available === false) {
+		const usable = available.find(
+			(account) =>
+				account.driver === selection.driver && account.available !== false,
+		);
+		if (usable) return { _tag: "Id", id: usable.id };
+	}
+	return isKnownDriverKind(selection.driver)
+		? { _tag: "DriverDefault", driver: selection.driver }
+		: undefined;
+}
+
 /** Hold a live draft account; removed accounts fall back to their driver's default. */
 export function getEffectiveInstanceId(): string | undefined {
 	if (draft.instanceId !== null)
@@ -1277,6 +1310,7 @@ function setDraftModel(
 		variant: resolved.success.effort,
 		contextWindow: resolved.success.contextWindow,
 	};
+	if (target.key === catalogScope().key) draftModelKey = target.key;
 	// Prefilling a harness default must not erase this model's browser memory.
 	if ((effort === undefined && contextWindow === undefined) || !remembered)
 		rememberDraftModel(target);
@@ -1284,38 +1318,29 @@ function setDraftModel(
 
 /** Exact accounts stay pinned; driver defaults follow current health. */
 export function selectInstance(selection: InstanceSelection): void {
-	// A driver whose default can't be used starts on its first usable account.
+	const ref = accountRefForSelection(selection);
+	if (!ref) return;
 	if (
-		typeof selection !== "string" &&
-		defaultInstanceFor(selection.driver)?.available === false
-	) {
-		const usable = getAvailableInstances().find(
-			(account) =>
-				account.driver === selection.driver && account.available !== false,
-		);
-		if (usable) {
-			selectInstance(usable.id);
-			return;
-		}
-	}
+		ref._tag === "DriverDefault" &&
+		draft.instanceId === defaultInstanceFor(ref.driver)?.id
+	)
+		return;
+	const { instanceId, driver } =
+		ref._tag === "Id"
+			? {
+					instanceId: ref.id,
+					driver:
+						getAvailableInstances().find((account) => account.id === ref.id)
+							?.driver ?? null,
+				}
+			: { instanceId: null, driver: ref.driver };
 	draftPickChosen = true;
-	const available = getAvailableInstances();
-	const selected =
-		typeof selection === "string"
-			? available.find((account) => account.id === selection)
-			: undefined;
-	const ref =
-		typeof selection === "string"
-			? accountRefFromSelection({ providerId: selection })
-			: ({ _tag: "DriverDefault", driver: selection.driver } as const);
-	const instanceId = selected?.id ?? (ref._tag === "Id" ? ref.id : null);
-	const driver =
-		selected?.driver ?? (ref._tag === "DriverDefault" ? ref.driver : null);
 	draftAccountChosen = instanceId !== null;
 	if (draft.instanceId === instanceId && draft.driver === driver) return;
 	draft.instanceId = instanceId;
 	draft.driver = driver;
-	draftModels[catalogScope().key] = null;
+	draftModelKey = catalogScope().key;
+	draftModels[draftModelKey] = null;
 	if (
 		driver !== null &&
 		!getDriverTraits(driver)?.permissionModes.includes(draft.permissionMode)
@@ -1327,6 +1352,7 @@ export function selectInstance(selection: InstanceSelection): void {
 /** A created or viewed session consumes the draft's harness and model picks. */
 export function clearDraftSelection(): void {
 	for (const key of Object.keys(draftModels)) delete draftModels[key];
+	draftModelKey = undefined;
 	draft.instanceId = null;
 	draft.driver = null;
 	draft.permissionMode = serverDiscovery.defaultPermissionMode;

@@ -161,6 +161,13 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 		existing,
 		selectedDefaults: saved().accountDefaults,
 	};
+	const titleRequests = (text: string) =>
+		harness
+			.opencodeRequestBodies()
+			.filter(
+				({ method, path, body }) =>
+					method === "POST" && path.endsWith("/message") && body.includes(text),
+			);
 	const picker = page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 	);
@@ -206,6 +213,31 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 			join(harness.configDir, "fake-opencode-discovery.json"),
 			JSON.stringify({ agents: [{ name: "title", mode: "subagent" }] }),
 		);
+		await page
+			.locator(
+				'[data-testid="session-bar-overflow"]:visible, [data-testid="session-bar-island-overflow"]:visible',
+			)
+			.click();
+		await page.getByTestId("overflow-settings").click();
+		await page.getByTestId("settings-tab-models").click();
+		await page.getByTestId("settings-title-generation-picker").click();
+		const titlePicker = page.getByTestId("title-generation-picker");
+		await titlePicker.getByTestId("picker-harness-opencode").click();
+		await expect(titlePicker).toHaveAttribute("aria-busy", "false");
+		expect(JSON.parse(settings()).titleGeneration.account).toEqual({
+			_tag: "DriverDefault",
+			driver: "opencode",
+		});
+		await titlePicker.getByTestId("picker-row-model").click();
+		await titlePicker
+			.locator('[data-model-id="fake-model"][data-provider-id="fake"]')
+			.click();
+		await expect(titlePicker).toHaveAttribute("aria-busy", "false");
+		expect(JSON.parse(settings()).titleGeneration).toMatchObject({
+			account: { _tag: "DriverDefault", driver: "opencode" },
+			providerId: "fake",
+			modelId: "fake-model",
+		});
 		await Effect.runPromise(
 			rpc.SetTitleGeneration({
 				projectSlug: "process-test",
@@ -217,6 +249,29 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 				},
 			}),
 		);
+		const healthyTitleSession = await browser.createSession();
+		const healthyTitleMessage = "Generate an OpenCode title before the outage";
+		await browser.send(healthyTitleSession, healthyTitleMessage);
+		await expect
+			.poll(
+				async () =>
+					(
+						await Effect.runPromise(
+							rpc.ListDaemonSessions({ projectSlug: "process-test" }),
+						)
+					).sessions.find((s) => s.id === healthyTitleSession)?.title,
+			)
+			.toBe("Managed OpenCode title");
+		// Titles run on an isolated server that inherits the chosen account's
+		// env, so the state prefix (not the pid) names the account that served it.
+		evidence["healthyOpenCodeTitle"] = {
+			sessionId: healthyTitleSession,
+			expectedStatePrefix: "selected",
+			requests: titleRequests(healthyTitleMessage),
+		};
+		expect(
+			titleRequests(healthyTitleMessage).map((r) => r.statePrefix),
+		).toEqual(["selected"]);
 		await page.goto("about:blank");
 		await browser.stopInstance(selected);
 		const storedAfterStop = saved().accountDefaults;
@@ -257,10 +312,8 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 		);
 		evidence["duringOutageDefaults"] = saved().accountDefaults;
 		const openCodeTitleSession = await browser.createSession();
-		await browser.send(
-			openCodeTitleSession,
-			"Generate an OpenCode title during the outage",
-		);
+		const outageTitleMessage = "Generate an OpenCode title during the outage";
+		await browser.send(openCodeTitleSession, outageTitleMessage);
 		await expect
 			.poll(
 				async () =>
@@ -274,7 +327,13 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 		evidence["openCodeTitle"] = {
 			sessionId: openCodeTitleSession,
 			title: "Managed OpenCode title",
+			expectedStatePrefix: null,
+			requests: titleRequests(outageTitleMessage),
 		};
+		// The managed account sets no state prefix.
+		expect(titleRequests(outageTitleMessage).map((r) => r.statePrefix)).toEqual(
+			[undefined],
+		);
 		evidence["storedSettings"] = JSON.parse(settings());
 		expect(JSON.parse(settings()).titleGeneration.account).toEqual({
 			_tag: "DriverDefault",

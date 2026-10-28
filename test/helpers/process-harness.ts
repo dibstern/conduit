@@ -1527,6 +1527,8 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 
 	opencodeRequestBodies(): readonly {
 		pid?: number;
+		/** The serving process's CONDUIT_TEST_OPENCODE_STATE_PREFIX, which title servers inherit from managed accounts. */
+		statePrefix?: string;
 		method: string;
 		path: string;
 		body: string;
@@ -1543,6 +1545,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 							(line) =>
 								JSON.parse(line) as {
 									pid?: number;
+									statePrefix?: string;
 									method: string;
 									path: string;
 									body: string;

@@ -359,6 +359,7 @@ export function makeInstanceManagerStateLive(
 						),
 					),
 			);
+			const accounts = [...runtimeAccounts, ...(accountsState?.accounts ?? [])];
 			return accountsState === undefined
 				? AccountDirectoryLive(
 						options?.launchLogin ?? captureClaudeLaunchLogin(process.env),
@@ -369,11 +370,11 @@ export function makeInstanceManagerStateLive(
 				: AccountDirectoryStateLive(
 						{
 							...accountsState,
-							accounts: [...runtimeAccounts, ...accountsState.accounts],
+							accounts,
 							defaults: {
 								...accountsState.defaults,
 								opencode: materializeDefault(
-									[...runtimeAccounts, ...accountsState.accounts],
+									accounts,
 									"opencode",
 									Option.getOrUndefined(accountsState.defaults.opencode),
 									[],

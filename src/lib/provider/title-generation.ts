@@ -27,32 +27,28 @@ export function resolveTitleGeneration(
 	account: Account | undefined,
 	catalogFor: (account: Account) => readonly ModelInfo[] | undefined,
 ): {
-	readonly pick: TitleGenerationSelection;
 	readonly status: "ok" | "missing" | "invalid" | "unverified";
 	readonly problem?: string;
 } {
 	const selection = stored ?? BUILTIN_TITLE_GENERATION;
 	if (!account)
 		return {
-			pick: selection,
 			status: "missing",
 			problem: "Title generation account does not exist",
 		};
-	const pick = selection;
 	const catalog = catalogFor(account);
 	const resolved = resolveTurnSettings(
 		{
 			harness: account.driver,
-			model: { providerId: pick.providerId, modelId: pick.modelId },
-			effort: pick.effort,
+			model: { providerId: selection.providerId, modelId: selection.modelId },
+			effort: selection.effort,
 			contextWindow: "",
 		},
 		catalog,
 	);
 	if (Result.isFailure(resolved))
-		return { pick, status: "invalid", problem: resolved.failure.message };
+		return { status: "invalid", problem: resolved.failure.message };
 	return {
-		pick,
 		status: catalog === undefined ? "unverified" : "ok",
 	};
 }

@@ -5,7 +5,10 @@ import {
 	AUTO_TITLE_SOURCE,
 	isPlaceholderTitle,
 } from "../../../contracts/session-title.js";
-import type { TitleGenerationSelection } from "../../../contracts/title-generation.js";
+import {
+	BUILTIN_TITLE_GENERATION,
+	type TitleGenerationSelection,
+} from "../../../contracts/title-generation.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -201,8 +204,10 @@ export const makeSessionTitleServiceLive = (
 				readonly message: string;
 			}) =>
 				Effect.gen(function* () {
-					const selection = loadRelaySettings(config.configDir).titleGeneration;
-					let account = yield* resolveTitleGenerationAccount(
+					const selection =
+						loadRelaySettings(config.configDir).titleGeneration ??
+						BUILTIN_TITLE_GENERATION;
+					const selectedAccount = yield* resolveTitleGenerationAccount(
 						selection,
 						accounts,
 					);
@@ -218,20 +223,26 @@ export const makeSessionTitleServiceLive = (
 					};
 					const resolved = resolveTitleGeneration(
 						selection,
-						account,
+						selectedAccount,
 						catalogFor,
 					);
-					let pick = resolved.pick;
-					if (resolved.status === "missing" || resolved.status === "invalid") {
-						const ref = resolved.pick.account;
+					const fallback =
+						resolved.status === "missing" || resolved.status === "invalid";
+					if (fallback) {
+						const ref = selection.account;
 						const accountId = ref._tag === "Id" ? ref.id : ref.driver;
-						const harness = account?.driver ?? resolved.pick.providerId;
+						const harness = selectedAccount?.driver ?? selection.providerId;
 						log.warn(
-							`SESSION_TITLE_GENERATION_FALLBACK sessionId=${input.sessionId} harness=${harness} account=${accountId} model=${resolved.pick.providerId}/${resolved.pick.modelId} reason=${resolved.problem}`,
+							`SESSION_TITLE_GENERATION_FALLBACK sessionId=${input.sessionId} harness=${harness} account=${accountId} model=${selection.providerId}/${selection.modelId} reason=${resolved.problem}`,
 						);
-						account = yield* resolveTitleGenerationAccount(undefined, accounts);
-						pick = resolveTitleGeneration(undefined, account, catalogFor).pick;
 					}
+					const pick = fallback ? BUILTIN_TITLE_GENERATION : selection;
+					const account = fallback
+						? yield* resolveTitleGenerationAccount(
+								BUILTIN_TITLE_GENERATION,
+								accounts,
+							)
+						: selectedAccount;
 					const titleResult = yield* Effect.result(
 						account
 							? generateTitle(account, pick, input.message)

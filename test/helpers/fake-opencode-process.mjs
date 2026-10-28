@@ -135,7 +135,7 @@ const server = createServer(async (request, response) => {
 	if (body)
 		appendFileSync(
 			join(configDir, "fake-opencode-request-bodies.jsonl"),
-			`${JSON.stringify({ pid: process.pid, method: request.method, path, body })}\n`,
+			`${JSON.stringify({ pid: process.pid, statePrefix, method: request.method, path, body })}\n`,
 		);
 	appendFileSync(
 		join(configDir, "fake-opencode-requests.jsonl"),
