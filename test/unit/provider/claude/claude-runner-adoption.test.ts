@@ -8,7 +8,8 @@ import {
 } from "node:fs";
 import { createServer, type Server, Socket } from "node:net";
 import { join } from "node:path";
-import { Deferred, Effect, Result as Either, Fiber } from "effect";
+import { Deferred, Effect, Result as Either, Fiber, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const config = vi.hoisted(() => ({
@@ -21,17 +22,23 @@ vi.mock("../../../../src/lib/env.js", async (importOriginal) => ({
 }));
 
 import { BUILD_ID } from "../../../../src/lib/build-id.js";
+import { ProviderRuntimeIngestionLive } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import { makeProcessClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-process-session-runner.js";
 import { ClaudeRunnerSocket } from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
 	type RunnerMessage,
+	runnerFailure,
 } from "../../../../src/lib/provider/runner/runner-protocol.js";
+import { makeRunnerReceiptStore } from "../../../../src/lib/provider/runner/runner-receipts.js";
 import {
 	discoverRunners,
+	type RunnerProcessTable,
 	registerRunner,
 	runnerDirectory,
 	runnerPidAlive,
+	runnerProcessTable,
 } from "../../../../src/lib/provider/runner/runner-registry.js";
 import type { SessionOutput } from "../../../../src/lib/provider/runner/session-runner.js";
 import { makeRunnerAdmission } from "../../../helpers/runner-provider-admission.js";
@@ -39,15 +46,28 @@ import { makeRunnerAdmission } from "../../../helpers/runner-provider-admission.
 const observations: Record<string, unknown>[] = [];
 const servers: Server[] = [];
 const sockets = new Set<Socket>();
-const children: ChildProcess[] = [];
+const children = new Map<ChildProcess, string | undefined>();
 let cases = 0;
+
+function spawnRunnerChild() {
+	const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], {
+		stdio: "ignore",
+	});
+	children.set(
+		child,
+		child.pid === undefined
+			? undefined
+			: runnerProcessTable.inspect(child.pid).startTime,
+	);
+	return child;
+}
 
 beforeEach(() => {
 	vi.stubEnv("NODE_ENV", "development");
 });
 
 afterEach(async () => {
-	const runnerPids = children.flatMap((child) =>
+	const runnerPids = [...children.keys()].flatMap((child) =>
 		child.pid === undefined ? [] : [child.pid],
 	);
 	for (const socket of sockets) socket.destroy();
@@ -60,13 +80,19 @@ afterEach(async () => {
 					new Promise<void>((resolve) => server.close(() => resolve())),
 			),
 	);
-	for (const child of children.splice(0)) {
+	for (const [child, startTime] of children) {
 		if (child.exitCode !== null || child.signalCode !== null) continue;
 		await new Promise<void>((resolve) => {
 			child.once("exit", () => resolve());
-			child.kill("SIGKILL");
+			if (
+				child.pid !== undefined &&
+				startTime !== undefined &&
+				runnerProcessTable.inspect(child.pid).startTime === startTime
+			)
+				child.kill("SIGKILL");
 		});
 	}
+	children.clear();
 	vi.restoreAllMocks();
 	vi.unstubAllEnvs();
 	const remainingPids = runnerPids.filter(runnerPidAlive);
@@ -95,6 +121,51 @@ async function runnerSocket(options: {
 	mkdirSync(directory, { recursive: true });
 	const socketPath = join(directory, runnerId);
 	const pid = options.child?.pid ?? process.pid;
+	const inspect: RunnerProcessTable["inspect"] = (target) =>
+		target === process.pid
+			? { state: "unknown" }
+			: runnerProcessTable.inspect(target);
+	const processTable: RunnerProcessTable = {
+		...runnerProcessTable,
+		inspect,
+		inspectMany: (pids) =>
+			new Map(pids.map((target) => [target, inspect(target)])),
+		signal: (target, signal) => {
+			if (
+				options.child?.pid !== Math.abs(target) ||
+				children.get(options.child) === undefined ||
+				runnerProcessTable.inspect(Math.abs(target)).startTime !==
+					children.get(options.child) ||
+				(target < 0 && runnerProcessTable.inspect(-target).pgid !== -target)
+			)
+				throw runnerFailure("fixture signal", "Runner identity changed");
+			runnerProcessTable.signal(target, signal);
+		},
+	};
+	const persistence = makePersistenceEffectLayer(
+		":memory:",
+		"adoption-project",
+	);
+	const services = Layer.merge(
+		persistence,
+		ProviderRuntimeIngestionLive.pipe(Layer.provide(persistence)),
+	);
+	const registerServing = Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at)
+			VALUES (${sessionId}, 'adoption-project', 'claude', 1, 1)`;
+		const receipts = yield* makeRunnerReceiptStore(sql);
+		yield* receipts.register(
+			runnerId,
+			{
+				sessionId,
+				driverKind: "claude",
+				pid,
+				startTime: processTable.inspect(pid).startTime,
+			},
+			"serving",
+		);
+	});
 	const spool = '{"sequence":1,"output":"pending approval"}\n';
 	writeFileSync(`${socketPath}.spool`, spool);
 	registerRunner({
@@ -173,6 +244,13 @@ async function runnerSocket(options: {
 		attempts,
 		commands,
 		pending,
+		deps: {
+			projectRootForSession: () => Effect.succeed(workspaceRoot),
+			daemonConfigDir: config.root,
+			processTable,
+		},
+		registerServing,
+		services,
 	};
 }
 
@@ -209,24 +287,16 @@ describe("Claude runner adoption", () => {
 	});
 
 	it("retains a live runner's files through transient rejection and restores its pending approval", async () => {
-		const child = spawn(
-			process.execPath,
-			["-e", "setInterval(() => {}, 1000)"],
-			{ stdio: "ignore" },
-		);
-		children.push(child);
+		const child = spawnRunnerChild();
 		const fixture = await runnerSocket({ rejections: 2, child });
 		const kill = vi.spyOn(process, "kill");
 		const emitted: SessionOutput[] = [];
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* fixture.registerServing;
 					const runner = yield* makeProcessClaudeSessionRunner(
-						{
-							projectRootForSession: () =>
-								Effect.succeed(fixture.workspaceRoot),
-							daemonConfigDir: config.root,
-						},
+						fixture.deps,
 						(output) =>
 							Effect.sync(() => {
 								emitted.push(output);
@@ -267,7 +337,7 @@ describe("Claude runner adoption", () => {
 						},
 					]);
 				}),
-			),
+			).pipe(Effect.provide(fixture.services)),
 		);
 		expect(runnerPidAlive(child.pid ?? 0)).toBe(true);
 		expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);
@@ -287,22 +357,14 @@ describe("Claude runner adoption", () => {
 	});
 
 	it("refuses stop-task for a runner whose hello predates it, since that runner acknowledges unknown commands", async () => {
-		const child = spawn(
-			process.execPath,
-			["-e", "setInterval(() => {}, 1000)"],
-			{ stdio: "ignore" },
-		);
-		children.push(child);
+		const child = spawnRunnerChild();
 		const fixture = await runnerSocket({ rejections: 0, child });
 		const result = await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* fixture.registerServing;
 					const runner = yield* makeProcessClaudeSessionRunner(
-						{
-							projectRootForSession: () =>
-								Effect.succeed(fixture.workspaceRoot),
-							daemonConfigDir: config.root,
-						},
+						fixture.deps,
 						() => Effect.succeed({}),
 					);
 					yield* makeRunnerAdmission(runner);
@@ -315,7 +377,7 @@ describe("Claude runner adoption", () => {
 						}),
 					);
 				}),
-			),
+			).pipe(Effect.provide(fixture.services)),
 		);
 		expect(Either.isFailure(result)).toBe(true);
 		expect(
@@ -336,12 +398,9 @@ describe("Claude runner adoption", () => {
 		const outcome = await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* fixture.registerServing;
 					const runner = yield* makeProcessClaudeSessionRunner(
-						{
-							projectRootForSession: () =>
-								Effect.succeed(fixture.workspaceRoot),
-							daemonConfigDir: config.root,
-						},
+						fixture.deps,
 						() => Effect.succeed({}),
 					);
 					yield* makeRunnerAdmission(runner);
@@ -360,7 +419,7 @@ describe("Claude runner adoption", () => {
 					).toBe(false);
 					return result;
 				}),
-			),
+			).pipe(Effect.provide(fixture.services)),
 		);
 		const elapsed = Date.now() - started;
 		expect(Either.isSuccess(outcome)).toBe(true);
@@ -389,12 +448,9 @@ describe("Claude runner adoption", () => {
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* fixture.registerServing;
 					const runner = yield* makeProcessClaudeSessionRunner(
-						{
-							projectRootForSession: () =>
-								Effect.succeed(fixture.workspaceRoot),
-							daemonConfigDir: config.root,
-						},
+						fixture.deps,
 						() => Effect.succeed({}),
 					);
 					yield* makeRunnerAdmission(runner);
@@ -402,7 +458,7 @@ describe("Claude runner adoption", () => {
 					yield* Deferred.await(rejected);
 					yield* Fiber.interrupt(recovery);
 				}),
-			),
+			).pipe(Effect.provide(fixture.services)),
 		);
 		for (const suffix of ["", ".json", ".spool"])
 			expect(existsSync(`${fixture.socketPath}${suffix}`)).toBe(true);
@@ -415,35 +471,33 @@ describe("Claude runner adoption", () => {
 	});
 
 	it("removes registration and spool when the runner dies after rejecting adoption", async () => {
-		const child = spawn(
-			process.execPath,
-			["-e", "setInterval(() => {}, 1000)"],
-			{ stdio: "ignore" },
-		);
-		children.push(child);
+		const child = spawnRunnerChild();
 		const fixture = await runnerSocket({
 			rejections: Number.POSITIVE_INFINITY,
 			child,
 			onReject: (socket) => {
 				child.once("exit", () => socket.destroy());
-				child.kill("SIGTERM");
+				if (
+					child.pid !== undefined &&
+					children.get(child) !== undefined &&
+					runnerProcessTable.inspect(child.pid).startTime ===
+						children.get(child)
+				)
+					child.kill("SIGTERM");
 			},
 		});
 		await Effect.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
+					yield* fixture.registerServing;
 					const runner = yield* makeProcessClaudeSessionRunner(
-						{
-							projectRootForSession: () =>
-								Effect.succeed(fixture.workspaceRoot),
-							daemonConfigDir: config.root,
-						},
+						fixture.deps,
 						() => Effect.succeed({}),
 					);
 					yield* makeRunnerAdmission(runner);
 					yield* runner.recoverEffect;
 				}),
-			),
+			).pipe(Effect.provide(fixture.services)),
 		);
 		for (const suffix of ["", ".json", ".spool"])
 			expect(existsSync(`${fixture.socketPath}${suffix}`)).toBe(false);

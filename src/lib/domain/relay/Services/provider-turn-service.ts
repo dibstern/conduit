@@ -264,6 +264,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 					});
 				yield* (yield* OrchestrationEngineTag).dispatchEffect({
 					type: "end_session",
+					stop: snapshot,
 					retireProcess: true,
 					retireRunIds: snapshot.owners.map(({ runId }) => runId),
 					commandId: `${input.commandId}:retire`,

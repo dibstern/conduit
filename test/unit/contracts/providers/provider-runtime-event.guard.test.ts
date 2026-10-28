@@ -63,6 +63,8 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"src/lib/provider/orchestration-command-commit.ts",
 			// Retry claims reserve their attempt in the same durable transaction.
 			"src/lib/provider/orchestration-side-effect-reactor.ts",
+			// SEND-CONTINUATION C1 moves prepareStop's complete write into engine acceptance.
+			"src/lib/provider/orchestration-engine.ts",
 		]);
 		const unexpected = files.flatMap((file) => {
 			if (allowed.has(file)) return [];

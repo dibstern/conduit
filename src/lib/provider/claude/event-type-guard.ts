@@ -6,6 +6,15 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Committed by the provider command outbox",
 	},
+	"run.dispatched": {
+		produced: false,
+		reason: "Committed by the daemon before dispatching a run to its runner",
+	},
+	"run.released": {
+		produced: false,
+		reason:
+			"Committed by the daemon from evidence that a transmission was not delivered",
+	},
 	"run.started": {
 		produced: false,
 		reason: "Emitted at the runtime input acceptance boundary",

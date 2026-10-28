@@ -1303,6 +1303,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 					...(control ? { control } : {}),
 					...(call ? { call } : {}),
 					...(turnIds !== undefined ? { turnIds } : {}),
+					...(control?.stopRunIds !== undefined
+						? { runIds: control.stopRunIds }
+						: {}),
 				}),
 			),
 		);

@@ -1802,6 +1802,8 @@ export const makeTurnProjector = defineProjector(() => ({
 	name: "turn",
 	handles: [
 		"run.requested",
+		"run.dispatched",
+		"run.released",
 		"run.started",
 		"message.created",
 		"message.snapshot",
@@ -1825,6 +1827,21 @@ export const makeTurnProjector = defineProjector(() => ({
 			)
 				return { sessions: [], messages: [] };
 			const sql = yield* SqlClient.SqlClient;
+			if (isEventType(event, "run.dispatched")) {
+				yield* sql`UPDATE provider_runs SET runner_id = ${event.data.runnerId},
+					held_transmission = ${event.data.transmission ?? null}
+					WHERE session_id = ${event.sessionId} AND id = ${event.data.runId}
+					AND EXISTS (SELECT 1 FROM provider_runs owner
+						WHERE owner.id = ${event.data.runId} AND owner.session_id = ${event.sessionId}
+						AND owner.status IN ('pending', 'running'))`;
+				return { sessions: [], messages: [] };
+			}
+			if (isEventType(event, "run.released")) {
+				yield* sql`UPDATE provider_runs SET runner_id = NULL, held_transmission = NULL
+					WHERE id = ${event.data.runId} AND session_id = ${event.sessionId}
+					AND runner_id = ${event.data.runnerId} AND held_transmission = ${event.data.transmission}`;
+				return { sessions: [], messages: [] };
+			}
 			if (isEventType(event, "run.requested")) {
 				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
 					VALUES (${event.data.runId}, ${event.sessionId}, 'pending', ${event.createdAt})
@@ -1854,7 +1871,8 @@ export const makeTurnProjector = defineProjector(() => ({
 					started_at: number | null;
 					completed_at: number | null;
 				}>`
-					SELECT status, started_at, completed_at FROM provider_runs WHERE id = ${runId} AND session_id = ${event.sessionId}`;
+					SELECT status, started_at, completed_at
+					FROM provider_runs WHERE id = ${runId} AND session_id = ${event.sessionId}`;
 				if (!resolved || resolved.status === "joined")
 					return { sessions: [], messages: [] };
 				const open =

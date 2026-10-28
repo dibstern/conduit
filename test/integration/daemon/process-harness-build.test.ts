@@ -112,7 +112,11 @@ export async function startForegroundDaemon(options) {
 `,
 		);
 		harness = await ProcessHarness.start({ dist });
-		await harness.disconnectParent();
+		await expect(harness.disconnectParent()).rejects.toThrow(
+			"Child did not exit after parent disconnect",
+		);
+		// The caller's observation guard wins; the child's later leak guard still exits.
+		await harness.waitForExit();
 		expect(harness.generations[0]?.exitCode).toBe(1);
 		expect(harness.generations[0]?.signal).toBeNull();
 	});

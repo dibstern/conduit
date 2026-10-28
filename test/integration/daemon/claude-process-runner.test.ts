@@ -412,7 +412,7 @@ describe("Claude session process runner", () => {
 			throw new Error("Missing runner/server proof");
 		const boundMs = 15_000;
 		const started = performance.now();
-		process.kill(runner.pid, "SIGSTOP");
+		expect(harness.signalOwnedRunner(runner.pid, "SIGSTOP")).toBe(true);
 		try {
 			await browser.shutdown();
 			await vi.waitFor(
@@ -437,7 +437,7 @@ describe("Claude session process runner", () => {
 			);
 			// A failing regression must not leave a stopped child behind.
 			try {
-				process.kill(runner.pid, "SIGKILL");
+				harness.signalOwnedRunner(runner.pid, "SIGKILL");
 			} catch {
 				// Successful shutdown already reaped the child.
 			}
@@ -454,7 +454,7 @@ describe("Claude session process runner", () => {
 		const first = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (first?.kind !== "runner-started")
 			throw new Error("Missing runner proof");
-		process.kill(first.pid, "SIGKILL");
+		expect(harness.signalOwnedRunner(first.pid, "SIGKILL")).toBe(true);
 		await vi.waitFor(
 			() => {
 				expect(() => process.kill(first.pid, 0)).toThrow();

@@ -19,7 +19,6 @@ import {
 	makeRunnerAuthority,
 	type Write,
 } from "../../../src/lib/provider/runner/runner-authority.js";
-import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
 
 const testLayer = Layer.merge(
 	makePersistenceEffectLayer(
@@ -164,47 +163,40 @@ it.effect("snapshots cannot mutate records and stale grants never revive", () =>
 	}),
 );
 
-it.live(
-	"revocation rolls back an old write holding the permit and retains its tombstone",
-	() =>
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			const receipts = yield* makeRunnerReceiptStore(sql);
-			const authority = yield* makeRunnerAuthority(receipts);
-			const grant = (yield* authority.adopt(
-				[{ runnerId: "r", sessionId: "s" }],
-				"live",
-			)).grants.get("r");
-			if (!grant) return yield* Effect.die("missing grant");
-			yield* sql`CREATE TABLE guarded_writes (value TEXT)`;
-			const writer = yield* makeCommitAndSignal;
-			const entered = yield* Deferred.make<void>();
-			const release = yield* Deferred.make<void>();
-			const old = yield* authority
-				.guarded(
-					grant,
-					{ kind: "output" },
-					writer.write(
-						() =>
-							Effect.gen(function* () {
-								yield* sql`INSERT INTO guarded_writes VALUES ('stale')`;
-								yield* Deferred.succeed(entered, undefined);
-								yield* Deferred.await(release);
-							}),
-						{ runnerId: grant.runnerId },
-					),
-				)
-				.pipe(Effect.forkChild);
-			yield* Deferred.await(entered);
-			yield* authority.revoke(grant, "retired");
-			yield* Deferred.succeed(release, undefined);
-			expect(Option.isNone(yield* Fiber.join(old))).toBe(true);
-			expect(yield* sql`SELECT * FROM guarded_writes`).toEqual([]);
-			yield* writer.write(() => Effect.void);
-			expect(
-				(yield* receipts.retirements()).map((row) => row.runnerId),
-			).toEqual(["r"]);
-		}).pipe(Effect.provide(testLayer)),
+it.live("revocation rolls back an old write holding the permit", () =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const authority = yield* makeRunnerAuthority();
+		const grant = (yield* authority.adopt(
+			[{ runnerId: "r", sessionId: "s" }],
+			"live",
+		)).grants.get("r");
+		if (!grant) return yield* Effect.die("missing grant");
+		yield* sql`CREATE TABLE guarded_writes (value TEXT)`;
+		const writer = yield* makeCommitAndSignal;
+		const entered = yield* Deferred.make<void>();
+		const release = yield* Deferred.make<void>();
+		const old = yield* authority
+			.guarded(
+				grant,
+				{ kind: "output" },
+				writer.write(
+					() =>
+						Effect.gen(function* () {
+							yield* sql`INSERT INTO guarded_writes VALUES ('stale')`;
+							yield* Deferred.succeed(entered, undefined);
+							yield* Deferred.await(release);
+						}),
+					{ runnerId: grant.runnerId },
+				),
+			)
+			.pipe(Effect.forkChild);
+		yield* Deferred.await(entered);
+		yield* authority.revoke(grant, "retired");
+		yield* Deferred.succeed(release, undefined);
+		expect(Option.isNone(yield* Fiber.join(old))).toBe(true);
+		expect(yield* sql`SELECT * FROM guarded_writes`).toEqual([]);
+	}).pipe(Effect.provide(testLayer)),
 );
 
 it.effect(
@@ -437,8 +429,7 @@ it.live(
 		const warnings: string[] = [];
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			const receipts = yield* makeRunnerReceiptStore(sql);
-			const authority = yield* makeRunnerAuthority(receipts);
+			const authority = yield* makeRunnerAuthority();
 			const grant = (yield* authority.adopt(
 				[{ runnerId: "r", sessionId: "s" }],
 				"live",

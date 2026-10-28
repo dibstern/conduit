@@ -200,6 +200,10 @@ it("observes a replacement's lower revisions without losing its launch snapshot"
 						{
 							projectRootForSession: () => Effect.succeed(root),
 							daemonConfigDir: root,
+							processTable: {
+								inspect: runnerProcessTable.inspect,
+								signal: runnerProcessTable.signal,
+							},
 						},
 						() => Effect.succeed({}),
 						driver,
@@ -317,7 +321,13 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 										child.exitCode = 0;
 										child.emit("exit", 0, null);
 									});
-									return Effect.fail(runnerIdleFailure());
+									return Effect.fail({
+										...runnerIdleFailure(),
+										delivery: {
+											_tag: "Refused" as const,
+											reason: "exiting" as const,
+										},
+									});
 								}
 								return Effect.gen(function* () {
 									options.onCommandAccepted?.(command.sinkId);
@@ -381,6 +391,19 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 				{
 					projectRootForSession: () => Effect.succeed(root),
 					daemonConfigDir: root,
+					processTable: {
+						inspect: (pid) => ({
+							state: children.some(
+								(child) => child.pid === pid && child.exitCode === null,
+							)
+								? "running"
+								: "gone",
+							startTime: "idle-retry-fixture",
+						}),
+						signal: () => {
+							throw runnerFailure("test signal", "Unexpected runner signal");
+						},
+					},
 				},
 				(output) =>
 					output.type === "event"
@@ -485,6 +508,7 @@ for (const [
 			return child;
 		});
 		let completeNative: (() => Effect.Effect<void>) | undefined;
+		let legacyCommit: Effect.Success<typeof makeCommitAndSignal> | undefined;
 		const driver: ProcessRunnerDriver = {
 			driverKind: "claude",
 			connect: (options) =>
@@ -522,6 +546,24 @@ for (const [
 						},
 						commandEffect: () => Effect.succeed(undefined),
 					} as unknown as RunnerSocket;
+					// This fixture advertises the retained legacy sendCommands shape.
+					// Its command-less dispatch event selects that same recovery path;
+					// modern unheld owner sends belong to the continuation feeder.
+					const commit = legacyCommit;
+					if (!commit)
+						return yield* Effect.die("Missing fixture legacy commit");
+					yield* commit([
+						canonicalEvent(
+							"run.dispatched",
+							"s",
+							{ runId: "old-run", runnerId: options.runnerId },
+							{ provider: "claude", metadata: { runId: "old-run" } },
+						),
+					]).pipe(
+						Effect.mapError((cause) =>
+							runnerFailure("test legacy dispatch", cause),
+						),
+					);
 					yield* options.onHello(
 						{
 							type: "hello",
@@ -556,9 +598,9 @@ for (const [
 				const sql = yield* SqlClient.SqlClient;
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				const events = yield* EventStoreEffectTag;
+				legacyCommit = yield* makeCommitAndSignal;
 				const completionEntered = yield* Deferred.make<void>();
 				const releaseCompletion = yield* Deferred.make<void>();
-				const failureCleanup = yield* Deferred.make<void>();
 				const syntheticTerminalCommitted = yield* Deferred.make<void>();
 				yield* Effect.addFinalizer(() =>
 					Deferred.succeed(releaseCompletion, undefined),
@@ -646,6 +688,18 @@ for (const [
 					{
 						projectRootForSession: () => Effect.succeed(root),
 						daemonConfigDir: root,
+						processTable: {
+							inspect: (pid) => ({
+								state:
+									pid === child.pid && child.exitCode === null
+										? "running"
+										: "gone",
+								startTime: "exit-ownership-fixture",
+							}),
+							signal: () => {
+								throw runnerFailure("test signal", "Unexpected runner signal");
+							},
+						},
 					},
 					(output) =>
 						Effect.gen(function* () {
@@ -658,11 +712,7 @@ for (const [
 									yield* Deferred.await(releaseCompletion);
 								}
 								yield* ingestion.ingest(output.event);
-							} else if (
-								output.type === "background-task" &&
-								output.transition.kind === "session-ended"
-							)
-								yield* Deferred.succeed(failureCleanup, undefined);
+							}
 							return {};
 						}).pipe(
 							Effect.mapError((error) => runnerFailure("test output", error)),
@@ -695,15 +745,19 @@ for (const [
 						configDir: configuredClaudeConfigDir(root),
 					},
 				});
-				if (pendingCompletion) {
-					if (!completeNative)
-						throw new Error("Runner connection was not established");
-					yield* Effect.forkChild(completeNative());
+				const nativeCompletion = pendingCompletion
+					? yield* Effect.forkChild(
+							completeNative
+								? completeNative()
+								: Effect.die("Runner connection was not established"),
+						)
+					: undefined;
+				if (nativeCompletion) {
 					yield* Deferred.await(completionEntered);
 				}
 				child.exitCode = 0;
 				child.emit("exit", 0, null);
-				if (pendingCompletion) {
+				if (nativeCompletion) {
 					// A pending native commit owns the output permit. Give exit settlement
 					// a chance to contend for it before allowing that commit to finish.
 					yield* Effect.raceFirst(
@@ -711,7 +765,7 @@ for (const [
 						Effect.sleep(50),
 					);
 					yield* Deferred.succeed(releaseCompletion, undefined);
-					yield* Deferred.await(failureCleanup);
+					yield* Fiber.join(nativeCompletion);
 				}
 				yield* Effect.promise(() =>
 					vi.waitFor(
@@ -885,6 +939,8 @@ effectIt.effect(
 					VALUES ('s', 'test-project', 'claude', 1, 1)`;
 				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at, started_at, completed_at)
 					VALUES ('source-run', 's', 'completed', 1, 1, 2)`;
+				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+					VALUES ('target-run', 's', 'pending', 3)`;
 				yield* sql`INSERT INTO turns (id, session_id, user_message_id, run_id, state, requested_at, completed_at)
 					VALUES ('source-turn', 's', 'source-input', 'source-run', 'completed', 1, 2)`;
 				yield* sql`INSERT INTO messages (id, session_id, turn_id, input_id, role, text, created_at, updated_at)
@@ -988,6 +1044,18 @@ effectIt.effect(
 					{
 						projectRootForSession: () => Effect.succeed(root),
 						daemonConfigDir: root,
+						processTable: {
+							inspect: (pid) => ({
+								state:
+									pid === child.pid && child.exitCode === null
+										? "running"
+										: "gone",
+								startTime: "hello-replay-fixture",
+							}),
+							signal: () => {
+								throw runnerFailure("test signal", "Unexpected runner signal");
+							},
+						},
 					},
 					(output) =>
 						output.type === "event"

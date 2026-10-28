@@ -45,6 +45,44 @@ export const currentPendingSendOwner = Context.Reference<
 	defaultValue: () => undefined,
 });
 
+/** One predicate for legacy provenance, also usable in correlated ledger reads. */
+export const legacyRunnerRunPredicate = (
+	sql: SqlClient.SqlClient,
+	sessionId: string,
+	runId: string | import("effect/sql/Statement").Fragment,
+) => sql`EXISTS (
+	SELECT 1 FROM provider_runs legacy_run
+	WHERE legacy_run.id = ${runId} AND legacy_run.session_id = ${sessionId}
+	AND NOT EXISTS (SELECT 1 FROM events WHERE session_id = legacy_run.session_id
+		AND type = 'run.released' AND json_extract(data, '$.runId') = legacy_run.id)
+	AND NOT EXISTS (SELECT 1 FROM events WHERE session_id = legacy_run.session_id
+		AND type = 'run.dispatched' AND json_extract(data, '$.runId') = legacy_run.id
+		AND json_extract(data, '$.commandId') IS NOT NULL)
+	AND (EXISTS (
+		SELECT 1 FROM claude_runner_cursors legacy_cursor
+		JOIN json_each(CASE WHEN json_valid(legacy_cursor.owned_run_ids)
+			THEN CASE json_type(legacy_cursor.owned_run_ids) WHEN 'array' THEN legacy_cursor.owned_run_ids ELSE '[]' END
+			ELSE '[]' END) cohort
+		JOIN provider_runs legacy_owned ON legacy_owned.id = cohort.value AND legacy_owned.session_id = legacy_cursor.session_id
+		WHERE legacy_cursor.session_id = legacy_run.session_id AND cohort.type = 'text'
+			AND COALESCE(legacy_owned.joined_into, legacy_owned.id) = legacy_run.id
+	) OR EXISTS (SELECT 1 FROM events WHERE session_id = legacy_run.session_id AND type = 'run.dispatched'
+		AND json_extract(data, '$.runId') = legacy_run.id AND json_extract(data, '$.commandId') IS NULL)
+		OR (legacy_run.started_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM events
+			WHERE session_id = legacy_run.session_id AND type = 'run.dispatched' AND json_extract(data, '$.runId') = legacy_run.id)))
+)`;
+
+export const legacyRunnerRunQuery = (
+	sql: SqlClient.SqlClient,
+	sessionId: string,
+	runId: string,
+) =>
+	sql<{
+		legacy: number;
+	}>`SELECT ${legacyRunnerRunPredicate(sql, sessionId, runId)} AS legacy`.pipe(
+		Effect.map(([row]) => row?.legacy === 1),
+	);
+
 /** Adoption checks durable completion before admitting a retained runner send. */
 export const runnerCommandEnded = (
 	sql: SqlClient.SqlClient,
@@ -92,6 +130,7 @@ export const runningRunnerCommands = (
 	driverForAccount: (accountId: string) => string | undefined,
 	sessionId?: string,
 	includeInactive = false,
+	ownerSend?: { readonly runId: string; readonly commandId: string },
 ) =>
 	Effect.gen(function* () {
 		const project = yield* Effect.serviceOption(PersistenceProjectTag);
@@ -100,6 +139,9 @@ export const runningRunnerCommands = (
 			sessionId === undefined
 				? sql`(${projectId} IS NULL OR outbox.project_key = ${projectId})`
 				: sql`outbox.session_id = ${sessionId} AND outbox.project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})`;
+		const owner = ownerSend
+			? sql`outbox.command_id = ${ownerSend.commandId} AND COALESCE(run.joined_into, run.id) = ${ownerSend.runId}`
+			: sql`1`;
 		const rows = yield* sql<{
 			request_sequence: number;
 			project_key: string;
@@ -121,7 +163,7 @@ export const runningRunnerCommands = (
 		LEFT JOIN provider_runs run ON run.id = outbox.run_id AND run.session_id = outbox.session_id
 		LEFT JOIN turns ON turns.session_id = outbox.session_id
 			AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
-		WHERE ${scope}
+		WHERE ${scope} AND ${owner}
 			AND (outbox.status = 'running' OR (${includeInactive}
 				AND outbox.status = 'cancelled' AND outbox.error_code = 'project_inactive'
 				AND run.status IN ('pending', 'running')))
@@ -198,6 +240,9 @@ export const settleRunnerCommandReply = (
 		readonly afterCommit?: (effect: Effect.Effect<void>) => void;
 		/** The runner receipt's send identity; live preparation owns its own fallback. */
 		readonly nativeResumeFallback?: boolean;
+		/** Confirmed Gone journal replies also settle the run before the fallback sweep. */
+		readonly settleRun?: boolean;
+		readonly driverKind?: string;
 	},
 ) =>
 	Effect.gen(function* () {
@@ -207,6 +252,16 @@ export const settleRunnerCommandReply = (
 				result.status === "accepted" ||
 				result.status === "joined" ||
 				result.status === "indeterminate");
+		if (pending && !options.settleRun && row.run_id) {
+			// C1 gives held uncertainty solely to reconciler Settle, regardless of
+			// whether it arrived through adoption, a live reply, or owner recovery.
+			const [held] = yield* sql`SELECT 1 FROM provider_runs requested
+				JOIN provider_runs owner ON owner.id = COALESCE(requested.joined_into, requested.id)
+					AND owner.session_id = requested.session_id
+				WHERE requested.id = ${row.run_id} AND requested.session_id = ${row.session_id}
+					AND owner.runner_id IS NOT NULL AND owner.held_transmission IS NOT NULL`;
+			if (held) return false;
+		}
 		if (pending && retained && result?.status !== "indeterminate") return false;
 		const completed = !failure && result?.status === "completed";
 		const retryable =
@@ -300,6 +355,26 @@ export const settleRunnerCommandReply = (
 						WHERE command_id = ${row.command_id} AND project_key = ${row.project_key})`;
 			return true;
 		}
+		if (completed && options.settleRun && row.run_id) {
+			const store = yield* makeEventStoreEffect.pipe(
+				Effect.provideService(SqlClient.SqlClient, sql),
+				Effect.provideService(PersistenceProjectTag, {
+					projectId: row.project_key,
+				}),
+			);
+			const { events } = translateProviderRuntimeEventToDomain({
+				eventId: `provider-command-terminal:${row.request_sequence}:${row.attempt_count}`,
+				type: "turn.completed",
+				providerId: options.driverKind ?? row.provider_id,
+				sessionId: row.session_id,
+				runId: row.run_id,
+				providerRefs: {},
+				rawSource: { kind: "runner.command-reply" },
+				createdAt: now,
+				data: { messageId: `provider-command:${row.command_id}` },
+			});
+			yield* options.project(yield* store.appendBatch(events));
+		}
 		if (!pending && !completed) {
 			const [owner] = yield* sql<{ run_id: string }>`
 				SELECT COALESCE(joined_into, id) AS run_id FROM provider_runs
@@ -386,13 +461,16 @@ export const settleRunnerCommandReply = (
 					providerRefs: {},
 					rawSource: { kind: "runner.command-reply" },
 					createdAt: now,
-					data: {
-						messageId: `provider-command:${row.command_id}`,
-						error: message,
-						...(code !== null ? { code } : {}),
-						retryable,
-						...(nextAttemptAt !== null ? { retryAt: nextAttemptAt } : {}),
-					},
+					data:
+						options.settleRun && interrupted
+							? { messageId: "", reason: message }
+							: {
+									messageId: `provider-command:${row.command_id}`,
+									...(interrupted ? { reason: message } : { error: message }),
+									...(code !== null ? { code } : {}),
+									retryable,
+									...(nextAttemptAt !== null ? { retryAt: nextAttemptAt } : {}),
+								},
 				});
 				yield* options.project(yield* store.appendBatch(events));
 			}
@@ -412,6 +490,26 @@ export const settleRunnerCommandReply = (
 			WHERE command_id = ${row.command_id} AND project_key = ${row.project_key}
 				AND ${row.request_sequence} = (SELECT MAX(request_sequence) FROM provider_command_outbox
 					WHERE command_id = ${row.command_id} AND project_key = ${row.project_key})`;
+		if (options.settleRun && !pending && row.run_id) {
+			const store = yield* makeEventStoreEffect.pipe(
+				Effect.provideService(SqlClient.SqlClient, sql),
+				Effect.provideService(PersistenceProjectTag, {
+					projectId: row.project_key,
+				}),
+			);
+			const { events } = translateProviderRuntimeEventToDomain({
+				eventId: `provider-command-status:${row.request_sequence}:${row.attempt_count}`,
+				type: "session.status",
+				providerId: row.provider_id,
+				sessionId: row.session_id,
+				runId: row.run_id,
+				providerRefs: {},
+				rawSource: { kind: "runner.command-reply" },
+				createdAt: now,
+				data: { sessionId: row.session_id, status: "idle" },
+			});
+			yield* options.project(yield* store.appendBatch(events));
+		}
 		if (code === "send_admission_timeout" && payload && options.restoreDraft) {
 			const inputId =
 				payload.continuation === true

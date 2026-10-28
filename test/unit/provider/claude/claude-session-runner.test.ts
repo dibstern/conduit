@@ -195,6 +195,63 @@ describe("Claude runner idle exit", () => {
 });
 
 describe("in-process Claude session runner", () => {
+	effectIt.effect(
+		"emits plain idle for an empty-cohort Stop without an accepted Run id",
+		() =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const outputs: SessionOutput[] = [];
+					const runner = yield* makeClaudeSessionRunner(
+						{
+							daemonConfigDir: getConfigDir(),
+							capabilitiesService,
+							queryFactory: ({ prompt }) =>
+								Object.assign(createMockQuery([]), {
+									[Symbol.asyncIterator]: () =>
+										(async function* (): AsyncGenerator<SDKMessage> {
+											for await (const _message of prompt)
+												yield makeSuccessResult();
+										})(),
+								}),
+						},
+						(output) =>
+							Effect.sync(() => {
+								outputs.push(output);
+								return {};
+							}),
+					);
+					const admission = yield* makeRunnerAdmission(runner, "claude");
+					yield* admitRunnerCommand(admission, runner, send("turn-no-run"));
+					const before = outputs.length;
+					yield* runner.executeEffect({
+						type: "interrupt",
+						sessionId: "session-1",
+						turnIds: [],
+					});
+					const stopped = outputs
+						.slice(before)
+						.flatMap((output) =>
+							output.type === "event" ? [output.event] : [],
+						);
+					expect(stopped).toContainEqual(
+						expect.objectContaining({
+							type: "session.status",
+							data: { sessionId: "session-1", status: "idle" },
+						}),
+					);
+					expect(stopped.every((event) => event.runId === undefined)).toBe(
+						true,
+					);
+					expect(
+						stopped.some(
+							(event) =>
+								event.type === "turn.interrupted" ||
+								event.type === "turn.completed",
+						),
+					).toBe(false);
+				}),
+			),
+	);
 	it("delivers a deferred same-account settings change on the live query and rebinds when quiet", async () => {
 		let backgroundBusy = false;
 		const launches: Array<{

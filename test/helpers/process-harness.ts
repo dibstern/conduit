@@ -60,6 +60,10 @@ import {
 	stopManagedOpenCode,
 } from "../../src/lib/instance/managed-opencode-process.js";
 import { projectStorageDir } from "../../src/lib/persistence/project-storage.js";
+import {
+	runnerMembersGone,
+	runnerProcessTable,
+} from "../../src/lib/provider/runner/runner-registry.js";
 import type {
 	ModelInfo,
 	ProviderAgentInfo,
@@ -203,6 +207,7 @@ export class ProcessHarness {
 	private runnerCleanup:
 		| Awaited<ReturnType<typeof cleanupTestClaudeRunners>>
 		| undefined;
+	private readonly runnerStartTimes = new Map<number, string>();
 
 	private constructor(
 		private dist?: string,
@@ -844,6 +849,9 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_TEST_SUBPROCESS_BUDGET"
 					| "CONDUIT_TEST_ADVANCE_BUS_CAPACITY"
 					| "CONDUIT_TEST_DRAFT_SEND_BEFORE_COMMIT_MS"
+					| "CONDUIT_TEST_RUNNER_SWAP_PAUSE"
+					| "CONDUIT_TEST_STOP_ACCEPT_PAUSE"
+					| "CONDUIT_TEST_SEND_CONTINUATION_PAUSE"
 					| "CONDUIT_TEST_DRAFT_PROMOTION_WRITE_FAILURE"
 					| "CONDUIT_TEST_DRAFT_WORKSPACE_FAILURE"
 					| "CONDUIT_TEST_RPC_DEFECT"
@@ -1424,6 +1432,18 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 						}
 					}
 				} else {
+					const pid = value["pid"];
+					if (
+						typeof pid === "number" &&
+						["runner-spawned", "runner-started", "query"].includes(
+							String(value["kind"]),
+						) &&
+						!this.runnerStartTimes.has(pid)
+					) {
+						const current = runnerProcessTable.inspect(pid);
+						if (current.state === "running" && current.startTime !== undefined)
+							this.runnerStartTimes.set(pid, current.startTime);
+					}
 					this.marks.push(value as unknown as ProcessMark);
 				}
 			});
@@ -2151,7 +2171,30 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 	}
 
 	remainingRunnerPids(): number[] {
-		return this.runnerPids().filter(testRunnerAlive);
+		return this.runnerPids().filter((pid) => {
+			const startTime = this.runnerStartTimes.get(pid);
+			return startTime === undefined
+				? testRunnerAlive(pid)
+				: !runnerMembersGone(runnerProcessTable, [{ pid, startTime }]);
+		});
+	}
+
+	signalOwnedRunner(pid: number, signal: NodeJS.Signals): boolean {
+		const startTime = this.runnerStartTimes.get(pid);
+		const current = runnerProcessTable.inspect(pid);
+		if (
+			startTime === undefined ||
+			current.state !== "running" ||
+			current.startTime !== startTime
+		)
+			return false;
+		try {
+			process.kill(pid, signal);
+			return true;
+		} catch (cause) {
+			if (isRecord(cause) && cause["code"] === "ESRCH") return false;
+			throw cause;
+		}
 	}
 
 	assertNoRunners(): void {
@@ -2304,6 +2347,14 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 		// can disappear and suspended runners cannot answer a shutdown handshake.
 		for (const pid of this.remainingRunnerPids()) {
 			try {
+				const startTime = this.runnerStartTimes.get(pid);
+				const current = runnerProcessTable.inspect(pid);
+				if (
+					startTime === undefined ||
+					current.state !== "running" ||
+					current.startTime !== startTime
+				)
+					continue;
 				process.kill(pid, "SIGKILL");
 			} catch (cause) {
 				if (!(isRecord(cause) && cause["code"] === "ESRCH"))
@@ -2316,6 +2367,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 				this.runnerPids(),
 				this.configDir,
 				this.projectDir,
+				this.runnerStartTimes,
 			);
 		} catch (cause) {
 			failures.push(cause);

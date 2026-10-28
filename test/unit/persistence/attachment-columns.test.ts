@@ -40,7 +40,7 @@ const cannotHoldRefs = {
 		"project_key scope_kind scope_id session_id turn_id causation_command_id reason_code details_json",
 	provider_command_turns:
 		"project_key session_id turn_id command_id status user_message_id assistant_message_id error_code tombstone_reason",
-	provider_runs: "id session_id status joined_into",
+	provider_runs: "id session_id status joined_into runner_id",
 	provider_state: "session_id key value",
 	sent_alerts: "session_id alert_key anchor state claim_id",
 	session_git_published: "directory git workspace_missing",

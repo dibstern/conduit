@@ -14,17 +14,22 @@ import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
 import { EventRetentionSchedulerTag } from "../../domain/persistence/Services/event-retention-scheduler.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
+import {
+	runSendCommandIdQuery,
+	stopCovers,
+} from "../../provider/session-run-settlement.js";
 import { contentionMetrics } from "../contention-metrics.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
+	type EventPayloadMap,
 	type StoredEvent,
 } from "../events.js";
 import { SESSION_SUBTREE_SQL } from "../projectors/session-handlers.js";
 import { boundProjectMismatch } from "./bind-event-store-effect.js";
-import type { EventStoreError } from "./event-store-effect.js";
 import {
 	EventStoreEffectTag,
+	EventStoreError,
 	type UnboundEventStoreEffect,
 	UnboundEventStoreEffectTag,
 } from "./event-store-effect.js";
@@ -41,6 +46,35 @@ export type CommitAndSignalFailure =
 	| EventStoreError
 	| ProjectionRunnerError
 	| SqlError;
+
+export type Hold =
+	| {
+			readonly _tag: "Held";
+			readonly runner: string;
+			readonly transmission: number;
+	  }
+	| { readonly _tag: "Unserved" }
+	| { readonly _tag: "Covered" }
+	| { readonly _tag: "Exhausted" };
+
+export class HoldCommandIdMismatch extends Data.TaggedError(
+	"HoldCommandIdMismatch",
+)<{
+	readonly sessionId: string;
+	readonly runId: string;
+	readonly ownerRunId: string;
+	readonly commandId: string;
+	readonly expectedCommandId: string;
+}> {
+	readonly operation = "holdRun";
+	readonly code = "hold_command_id_mismatch";
+	readonly retryable = false;
+	get message(): string {
+		return `Command ${this.commandId} does not match owner send ${this.expectedCommandId}`;
+	}
+}
+
+export type HoldFailed = CommitAndSignalFailure | HoldCommandIdMismatch;
 
 /** Generic final authorization supplied by the owner of a bounded write. */
 export const currentWriteAuthorization = Context.Reference<
@@ -165,6 +199,23 @@ export interface CommitAndSignal {
 		events: readonly CanonicalEvent[],
 		options?: CommitAndSignalOptions,
 	): Effect.Effect<void, CommitAndSignalFailure>;
+
+	/** Assign the runner before dispatch, atomically excluding a committed Stop. */
+	readonly holdRun: (input: {
+		readonly sessionId: string;
+		readonly runId: string;
+		readonly commandId: string;
+	}) => Effect.Effect<Hold, HoldFailed>;
+
+	/** Release evidence and any resulting serving-runner Stop share this write. */
+	readonly releaseRun: <A, E, R>(
+		input: EventPayloadMap["run.released"] & { readonly sessionId: string },
+		stop: Effect.Effect<A, E, R>,
+	) => Effect.Effect<
+		{ readonly released: boolean; readonly stop: A | undefined },
+		CommitAndSignalFailure | E,
+		R
+	>;
 
 	/**
 	 * For the append sites a plain `appendBatch` does not describe: an idempotent
@@ -640,7 +691,162 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 					}),
 				options,
 			),
-		{ write },
+		{
+			write,
+			releaseRun: <A, E, R>(
+				input: Parameters<CommitAndSignal["releaseRun"]>[0],
+				stop: Effect.Effect<A, E, R>,
+			) =>
+				write((project) =>
+					Effect.gen(function* () {
+						const [held] = yield* sql<{
+							runner_id: string | null;
+							held_transmission: number | null;
+						}>`SELECT runner_id, held_transmission FROM provider_runs
+					WHERE id = ${input.runId} AND session_id = ${input.sessionId}`;
+						const released =
+							held?.runner_id === input.runnerId &&
+							held.held_transmission === input.transmission;
+						const [session] = yield* sql<{
+							provider: string;
+						}>`SELECT provider FROM sessions WHERE id = ${input.sessionId}`;
+						yield* project(
+							yield* eventStore.appendBatch([
+								canonicalEvent(
+									"run.released",
+									input.sessionId,
+									{
+										runId: input.runId,
+										runnerId: input.runnerId,
+										commandId: input.commandId,
+										transmission: input.transmission,
+										reason: input.reason,
+									},
+									{
+										provider: session?.provider ?? "conduit",
+										metadata: { runId: input.runId },
+									},
+								),
+							]),
+						);
+						if (!released) return { released, stop: undefined };
+						const [serving] = yield* sql`SELECT 1 FROM claude_runner_cursors
+					WHERE runner_id = ${input.runnerId} AND session_id = ${input.sessionId} AND role = 'serving' AND retired_at IS NULL`;
+						return { released, stop: serving ? yield* stop : undefined };
+					}),
+				),
+			holdRun: (input: Parameters<CommitAndSignal["holdRun"]>[0]) =>
+				write<Hold, HoldFailed, never>((project) =>
+					Effect.gen(function* () {
+						const [owner] = yield* sql<{
+							id: string;
+							provider: string;
+							status: string;
+							runner_id: string | null;
+						}>`SELECT owner.id, session.provider, owner.status, owner.runner_id
+							FROM provider_runs requested JOIN provider_runs owner
+								ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
+							JOIN sessions session ON session.id = requested.session_id
+							WHERE requested.id = ${input.runId} AND requested.session_id = ${input.sessionId}`;
+						if (!owner)
+							return yield* new EventStoreError({
+								operation: "holdRun",
+								sessionId: input.sessionId,
+								cause: "Run is not dispatchable",
+							});
+						const expectedCommandId = yield* runSendCommandIdQuery(
+							sql,
+							input.sessionId,
+							owner.id,
+						);
+						if (
+							expectedCommandId !== undefined &&
+							expectedCommandId !== input.commandId
+						)
+							return yield* new HoldCommandIdMismatch({
+								sessionId: input.sessionId,
+								runId: input.runId,
+								ownerRunId: owner.id,
+								commandId: input.commandId,
+								expectedCommandId,
+							});
+						const commandId = input.commandId;
+						const dispatchable =
+							owner.status === "pending" || owner.status === "running";
+						if (yield* stopCovers(sql, input.sessionId, owner.id)) {
+							if (owner.runner_id === null && dispatchable)
+								yield* project(
+									yield* eventStore.appendBatch([
+										canonicalEvent(
+											"turn.interrupted",
+											input.sessionId,
+											{
+												messageId: "",
+												reason: "Stopped before delivery",
+											},
+											{
+												provider: owner.provider,
+												metadata: { runId: owner.id },
+											},
+										),
+									]),
+								);
+							return { _tag: "Covered" };
+						}
+						if (!dispatchable || owner.runner_id !== null)
+							return yield* new EventStoreError({
+								operation: "holdRun",
+								sessionId: input.sessionId,
+								cause: "Run is not dispatchable",
+							});
+						const [count] = yield* sql<{
+							n: number;
+						}>`SELECT COUNT(*) AS n FROM events
+							WHERE session_id = ${input.sessionId} AND type = 'run.dispatched'
+								AND json_valid(data) AND json_extract(data, '$.commandId') = ${commandId}`;
+						const transmission = (count?.n ?? 0) + 1;
+						if (transmission > 5) {
+							yield* project(
+								yield* eventStore.appendBatch([
+									canonicalEvent(
+										"turn.error",
+										input.sessionId,
+										{
+											messageId: "",
+											error: "Provider send attempts exhausted",
+											code: "provider_send_attempts_exhausted",
+											retryable: false,
+										},
+										{ provider: owner.provider, metadata: { runId: owner.id } },
+									),
+								]),
+							);
+							return { _tag: "Exhausted" };
+						}
+						const [serving] = yield* sql<{
+							runner_id: string;
+						}>`SELECT runner_id FROM claude_runner_cursors
+							WHERE session_id = ${input.sessionId} AND retired_at IS NULL AND role = 'serving'`;
+						if (!serving) return { _tag: "Unserved" };
+						yield* project(
+							yield* eventStore.appendBatch([
+								canonicalEvent(
+									"run.dispatched",
+									input.sessionId,
+									{
+										runId: owner.id,
+										runnerId: serving.runner_id,
+										commandId,
+										transmission,
+									},
+									{ provider: owner.provider, metadata: { runId: owner.id } },
+								),
+							]),
+						);
+						return { _tag: "Held", runner: serving.runner_id, transmission };
+					}),
+				),
+		},
 	);
 
 	return commitAndSignal;

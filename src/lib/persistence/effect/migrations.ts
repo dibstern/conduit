@@ -1569,6 +1569,21 @@ export const effectMigrationEntries = {
 	"0086_events_provider_identity_indexes": executeSqlStatements(
 		readMigrationSql(EVENTS_PROVIDER_IDENTITY_INDEXES_MIGRATION),
 	),
+	"0087_provider_run_holder": Effect.gen(function* () {
+		yield* runAddColumnMigrationIfMissing(
+			"provider_runs",
+			"runner_id",
+			"ALTER TABLE provider_runs ADD COLUMN runner_id TEXT",
+		);
+		yield* executeSqlStatements(
+			"CREATE INDEX IF NOT EXISTS idx_provider_runs_runner_status ON provider_runs(runner_id, status)",
+		);
+	}),
+	"0088_provider_run_held_transmission": runAddColumnMigrationIfMissing(
+		"provider_runs",
+		"held_transmission",
+		"ALTER TABLE provider_runs ADD COLUMN held_transmission INTEGER",
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

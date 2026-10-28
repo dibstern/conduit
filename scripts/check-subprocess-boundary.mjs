@@ -17,6 +17,7 @@ const longLivedOwners = new Set(
 		"src/lib/instance/managed-opencode-supervisor.ts",
 		"src/lib/provider/codex/app-server/transport.ts",
 		"src/lib/provider/runner/process-session-runner.ts",
+		"src/lib/provider/runner/runner-host.ts",
 		"src/lib/terminal/pty-host-client.ts",
 	].map((path) => resolve(path)),
 );

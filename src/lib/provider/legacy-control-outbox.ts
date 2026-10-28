@@ -150,7 +150,7 @@ export const enqueueCommittedControlAnswers = (options: {
 								providerId: row.provider_id,
 								providerProcessId: row.provider_process_id,
 								effectType: payload.type,
-								payloadJson: JSON.stringify(payload),
+								payloadJson: JSON.stringify({ ...payload, stop: null }),
 							},
 						],
 						readModelRows: ["provider_command_meta"],

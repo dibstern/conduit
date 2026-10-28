@@ -423,7 +423,7 @@ it("fires durable callbacks only for a claimed terminal receipt, never a fenced 
 	expect(f.published).toHaveLength(1);
 });
 
-it("persists accepted run ownership with its output checkpoint and deduplicates it", async () => {
+it("persists accepted output checkpoints without copying run ownership into cursors", async () => {
 	const f = await fixture();
 	await f.runtime.runPromise(
 		f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
@@ -458,7 +458,7 @@ it("persists accepted run ownership with its output checkpoint and deduplicates 
 		),
 	).toEqual([
 		{
-			owned_run_ids: '["owned-run"]',
+			owned_run_ids: "[]",
 			sequence: 1,
 			session_id: "session",
 			driver_kind: "claude",
@@ -475,8 +475,14 @@ it("persists accepted run ownership with its output checkpoint and deduplicates 
 		.toBe(2);
 	expect(
 		await f.runtime.runPromise(f.receipts.owners(["runner", "missing"])),
-	).toEqual([{ runnerId: "runner", ownedRunIds: ["owned-run"] }]);
-	expect(await f.runtime.runPromise(f.receipts.owners([]))).toEqual([]);
+	).toEqual({
+		rows: [{ runnerId: "runner", ownedRunIds: [] }],
+		rejected: [],
+	});
+	expect(await f.runtime.runPromise(f.receipts.owners([]))).toEqual({
+		rows: [],
+		rejected: [],
+	});
 	expect(await f.runtime.runPromise(f.receipts.read("runner"))).toEqual({
 		sequence: 2,
 		result: {},

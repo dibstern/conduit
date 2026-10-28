@@ -103,6 +103,58 @@ const isSendRecord = Schema.is(
 	}),
 );
 
+export type RunnerSendJournalRead =
+	| { readonly _tag: "Absent" }
+	| { readonly _tag: "Present"; readonly state: RunnerSendAnswer }
+	| { readonly _tag: "Unreadable" };
+
+/** Absence proves non-delivery only after the caller confirms the host exited. */
+export function readRunnerSendJournal(input: {
+	readonly directory: string;
+	readonly sessionId: string;
+	readonly driverKind: string;
+	readonly commandId: string;
+	readonly attempt: number;
+	readonly nativeResumeFallback: boolean;
+}): RunnerSendJournalRead {
+	const filename = join(
+		input.directory,
+		"sends",
+		input.sessionId,
+		`${sendKey(input.driverKind, input.sessionId, input.commandId, input.attempt, input.nativeResumeFallback)}.json`,
+	);
+	try {
+		const record: unknown = JSON.parse(readFileSync(filename, "utf8"));
+		if (
+			!isSendRecord(record) ||
+			record.commandId !== input.commandId ||
+			record.attempt !== input.attempt ||
+			record.nativeResumeFallback !== input.nativeResumeFallback
+		)
+			return { _tag: "Unreadable" };
+		return {
+			_tag: "Present",
+			state: {
+				commandId: record.commandId,
+				attempt: record.attempt,
+				nativeResumeFallback: record.nativeResumeFallback,
+				...(record.completedAt === undefined
+					? { status: "uncertain" as const }
+					: {
+							status: "finished" as const,
+							...(record.result ? { result: record.result } : {}),
+							...(record.failure ? { failure: record.failure } : {}),
+						}),
+			},
+		};
+	} catch (cause) {
+		return {
+			_tag:
+				isRecord(cause) && cause["code"] === "ENOENT" ? "Absent" : "Unreadable",
+		};
+	}
+}
+
 /** Read legacy ownership before discovery can revoke a host, without replaying it. */
 export function runnerSendCommandsForProcess(
 	directory: string,

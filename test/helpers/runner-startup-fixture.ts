@@ -67,14 +67,23 @@ export function installRunnerStartupFixture(root: string): void {
 			if (
 				isRecord(selection) &&
 				selection["mode"] === "eperm" &&
-				selection["pid"] === pid
+				selection["pid"] === Math.abs(pid)
 			) {
-				record("parent-kill", { childPid: pid, signal, error: "EPERM" });
+				record("parent-kill", {
+					childPid: Math.abs(pid),
+					target: pid,
+					signal,
+					error: "EPERM",
+				});
 				throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
 			}
 		}
 		if (signal !== 0)
-			record("parent-kill", { childPid: pid, signal: signal ?? "SIGTERM" });
+			record("parent-kill", {
+				childPid: Math.abs(pid),
+				target: pid,
+				signal: signal ?? "SIGTERM",
+			});
 		return kill(pid, signal);
 	};
 	let active: { child: ChildProcess; deadline?: number } | undefined;

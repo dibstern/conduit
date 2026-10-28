@@ -17,6 +17,7 @@ import {
 	SessionEventBusLive,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	type EventStoreEffect,
 	EventStoreEffectTag,
@@ -29,10 +30,12 @@ import {
 	ProjectionRunnerError,
 } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { runTerminalStatus } from "../../../src/lib/persistence/effect/projectors-effect.js";
-import type {
-	CanonicalEvent,
-	StoredEvent,
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
+import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
 import { makeEffectProjectionHarness } from "../../helpers/effect-projection-harness.js";
 
 const BASE_EVENT = {
@@ -58,6 +61,222 @@ function runtimeEvent(event: Record<string, unknown>): ProviderRuntimeEvent {
 		...event,
 	});
 }
+
+const setupRunSettlement = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const commit = yield* makeCommitAndSignal;
+	const receipts = yield* makeRunnerReceiptStore(sql);
+	yield* commit([
+		canonicalEvent("session.created", "settlement-session", {
+			sessionId: "settlement-session",
+			title: "Settlement",
+			provider: "claude",
+		}),
+		canonicalEvent("run.requested", "settlement-session", {
+			runId: "held-run",
+			inputId: "input",
+		}),
+		canonicalEvent(
+			"run.started",
+			"settlement-session",
+			{ requestedRunId: "held-run", inputId: "input" },
+			{
+				provider: "claude",
+				metadata: { runId: "held-run" },
+			},
+		),
+	]);
+	yield* receipts.register(
+		"old-runner",
+		{ sessionId: "settlement-session" },
+		"serving",
+	);
+	yield* commit.holdRun({
+		sessionId: "settlement-session",
+		runId: "held-run",
+		commandId: "input",
+	});
+	yield* sql`UPDATE claude_runner_cursors SET retired_at = 1, owned_run_ids = '["held-run"]', retirement_state = 'GonePending' WHERE runner_id = 'old-runner'`;
+	const readOwners = vi.fn();
+	const owners = Effect.gen(function* () {
+		readOwners();
+		expect((yield* Effect.serviceOption(sql.transactionService))._tag).toBe(
+			"Some",
+		);
+		return yield* sql<{ runId: string }>`SELECT id AS runId FROM provider_runs
+			WHERE session_id = 'settlement-session' AND runner_id = 'old-runner' AND status IN ('pending', 'running')`;
+	});
+	return { sql, commit, receipts, owners, readOwners };
+});
+
+// Failure cases: an eager owner snapshot consumes a handoff, a native terminal
+// is replaced by synthetic failure, or settlement/receipt writes partially commit.
+describe("transactional runner settlement ingestion", () => {
+	it("leaves a run moved to another holder before the settlement transaction running", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const { sql, commit, receipts, owners, readOwners } =
+					yield* setupRunSettlement;
+				yield* receipts.register(
+					"new-runner",
+					{ sessionId: "settlement-session" },
+					"serving",
+				);
+				yield* commit([
+					canonicalEvent(
+						"run.released",
+						"settlement-session",
+						{
+							runId: "held-run",
+							runnerId: "old-runner",
+							commandId: "input",
+							transmission: 1,
+							reason: "NotSent",
+						},
+						{ provider: "claude", metadata: { runId: "held-run" } },
+					),
+				]);
+				yield* commit.holdRun({
+					sessionId: "settlement-session",
+					runId: "held-run",
+					commandId: "input",
+				});
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				expect(
+					yield* ingestion.ingestBatch([], {
+						settleRuns: {
+							sessionId: "settlement-session",
+							reason: "old runner gone",
+							owners,
+						},
+					}),
+				).toBe(0);
+				expect(readOwners).toHaveBeenCalledOnce();
+				expect(
+					yield* sql`SELECT status, runner_id FROM provider_runs WHERE id = 'held-run'`,
+				).toEqual([{ status: "running", runner_id: "new-runner" }]);
+				expect(
+					yield* sql`SELECT COUNT(*) AS n FROM events WHERE type = 'turn.interrupted'`,
+				).toEqual([{ n: 0 }]);
+			}).pipe(
+				Effect.provide(ProviderRuntimeIngestionLive),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+		);
+	});
+
+	it("preserves a native success committed before settlement reads its owners", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const { sql, receipts, owners, readOwners } = yield* setupRunSettlement;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingest(
+					runtimeEvent({
+						eventId: "native-success-before-settlement",
+						sessionId: "settlement-session",
+						type: "turn.completed",
+						runId: "held-run",
+						data: { messageId: "" },
+					}),
+				);
+				expect(
+					yield* ingestion.ingestBatch([], {
+						settleRuns: {
+							sessionId: "settlement-session",
+							reason: "runner gone",
+							owners,
+							errorCode: "process_lost",
+						},
+						beforeCommit: receipts.settled("old-runner"),
+					}),
+				).toBe(0);
+				expect(readOwners).toHaveBeenCalledOnce();
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE id = 'held-run'`,
+				).toEqual([{ status: "completed" }]);
+				expect(
+					yield* sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
+				).toEqual([{ type: "turn.completed" }]);
+				expect(
+					yield* sql`SELECT retirement_state FROM claude_runner_cursors WHERE runner_id = 'old-runner'`,
+				).toEqual([{ retirement_state: "Complete" }]);
+			}).pipe(
+				Effect.provide(ProviderRuntimeIngestionLive),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+		);
+	});
+
+	it("rolls owner reads, appended terminals and receipt settlement back together, then retries", async () => {
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const { sql, receipts, owners } = yield* setupRunSettlement;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* sql`CREATE TABLE settlement_query (run_id TEXT)`;
+				const queriedOwners =
+					sql`INSERT INTO settlement_query VALUES ('held-run')`.pipe(
+						Effect.andThen(owners),
+					);
+				const settlement = {
+					sessionId: "settlement-session",
+					reason: "runner gone",
+					owners: queriedOwners,
+				};
+				const failed = yield* Effect.exit(
+					ingestion.ingestBatch([], {
+						settleRuns: settlement,
+						beforeCommit: receipts
+							.settled("old-runner")
+							.pipe(
+								Effect.andThen(
+									sql.unsafe(
+										"SELECT missing_settlement_column FROM claude_runner_cursors",
+									),
+								),
+								Effect.asVoid,
+							),
+					}),
+				);
+				expect(failed._tag).toBe("Failure");
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE id = 'held-run'`,
+				).toEqual([{ status: "running" }]);
+				expect(
+					yield* sql`SELECT owned_run_ids, retirement_state FROM claude_runner_cursors WHERE runner_id = 'old-runner'`,
+				).toEqual([
+					{ owned_run_ids: '["held-run"]', retirement_state: "GonePending" },
+				]);
+				expect(yield* sql`SELECT COUNT(*) AS n FROM settlement_query`).toEqual([
+					{ n: 0 },
+				]);
+				expect(
+					yield* sql`SELECT COUNT(*) AS n FROM events WHERE type = 'turn.interrupted'`,
+				).toEqual([{ n: 0 }]);
+				expect(
+					yield* ingestion.ingestBatch([], {
+						settleRuns: settlement,
+						beforeCommit: receipts.settled("old-runner"),
+					}),
+				).toBe(2);
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE id = 'held-run'`,
+				).toEqual([{ status: "interrupted" }]);
+				expect(
+					yield* sql`SELECT owned_run_ids, retirement_state FROM claude_runner_cursors WHERE runner_id = 'old-runner'`,
+				).toEqual([{ owned_run_ids: "[]", retirement_state: "Complete" }]);
+				expect(yield* sql`SELECT COUNT(*) AS n FROM settlement_query`).toEqual([
+					{ n: 1 },
+				]);
+				expect(
+					yield* sql`SELECT COUNT(*) AS n FROM events WHERE type = 'turn.interrupted'`,
+				).toEqual([{ n: 1 }]);
+			}).pipe(
+				Effect.provide(ProviderRuntimeIngestionLive),
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
+		);
+	});
+});
 
 // Failure modes: the mapper drops the source, the transactional check misses a
 // reference, a born-dead creation hits a FK, or later content revives the child.

@@ -17,10 +17,7 @@ import {
 	RUNNER_PROTOCOL_VERSION,
 	RunnerSocket,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
-import {
-	discoverRunners,
-	registerRunner,
-} from "../../../src/lib/provider/runner/runner-registry.js";
+import { discoverRunners } from "../../../src/lib/provider/runner/runner-registry.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -79,6 +76,36 @@ function retirement(harness: ProcessHarness, runnerId: string) {
 	}
 }
 
+function sendState(harness: ProcessHarness, sessionId: string, prompt: string) {
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		const run = db
+			.prepare<
+				[string, string],
+				{
+					id: string;
+					status: string;
+					runner_id: string | null;
+					held_transmission: number | null;
+				}
+			>(
+				"SELECT run.id, run.status, run.runner_id, run.held_transmission FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id WHERE command.session_id = ? AND command.effect_type = 'send_turn' AND instr(command.payload_json, ?) > 0 ORDER BY command.request_sequence DESC LIMIT 1",
+			)
+			.get(sessionId, JSON.stringify(prompt));
+		assert(run, `Missing run for ${prompt}`);
+		return {
+			run,
+			terminals: db
+				.prepare<[string, string, string], { type: string; data: string }>(
+					"SELECT type, data FROM events WHERE session_id = ? AND type IN ('turn.completed', 'turn.error', 'turn.interrupted') AND (json_extract(metadata, '$.runId') = ? OR json_extract(data, '$.runId') = ?) ORDER BY sequence",
+				)
+				.all(sessionId, run.id, run.id),
+		};
+	} finally {
+		db.close();
+	}
+}
+
 describe("runner retirement through browser RPC", () => {
 	it("releases a failed forced kill and resumes on a fresh runner", async () => {
 		const evidence: Record<string, unknown> = { passed: false };
@@ -94,7 +121,7 @@ describe("runner retirement through browser RPC", () => {
 import { appendFileSync as d1RecordStop } from "node:fs";
 import { RunnerSocket as D1Socket } from ${JSON.stringify(pathToFileURL(resolve("dist/src/lib/provider/runner/runner-protocol.js")).href)};
 const d1Selection = join(root, "d1-denied-stop");
-const d1Selected = pid => existsSync(d1Selection) && JSON.parse(readFileSync(d1Selection, "utf8")).pid === pid;
+const d1Selected = pid => existsSync(d1Selection) && JSON.parse(readFileSync(d1Selection, "utf8")).pid === Math.abs(pid);
 if (!/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
   const write = D1Socket.prototype.write;
   let selectedSocket;
@@ -136,24 +163,69 @@ if (!/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
 				(mark) =>
 					mark.kind === "enqueue" && mark.prompt === "stall-failed-kill",
 			);
-			await harness.requestRpc({
+			const stop = harness.requestRpc({
 				_tag: "CancelSession",
 				sessionId,
 				commandId: randomUUID(),
 			});
-			await pending;
-			await vi.waitFor(() =>
-				expect(retirement(harness, owner.runnerId)).toEqual({
-					retired_at: expect.any(Number),
-					attachment_id: "",
-					pid: owner.pid,
-				}),
+			void stop.catch(() => undefined);
+			await vi.waitFor(
+				() =>
+					expect(retirement(harness, owner.runnerId)).toEqual({
+						retired_at: expect.any(Number),
+						attachment_id: "",
+						pid: owner.pid,
+					}),
+				{ timeout: 40_000 },
+			);
+			await vi.waitFor(
+				() =>
+					expect(
+						readFileSync(join(harness.root, "d1-denied-signals.jsonl"), "utf8"),
+					).toContain('"signal":"SIGKILL"'),
+				{ timeout: 5_000 },
 			);
 			evidence["retired"] = retirement(harness, owner.runnerId);
 			expect(() => process.kill(owner.pid, 0)).not.toThrow();
+			const held = sendState(harness, sessionId, "stall-failed-kill");
+			expect(held.run).toMatchObject({
+				status: "running",
+				runner_id: owner.runnerId,
+				held_transmission: 1,
+			});
+			expect(held.terminals).toEqual([]);
+			evidence["heldWhileAlive"] = held;
+			const denied = readFileSync(
+				join(harness.root, "d1-denied-signals.jsonl"),
+				"utf8",
+			);
+			expect(denied).toContain('"signal":"SIGTERM"');
+			expect(denied).toContain('"signal":"SIGKILL"');
+			evidence["signals"] = denied;
+			expect(harness.signalOwnedRunner(owner.pid, "SIGKILL")).toBe(true);
+			await vi.waitFor(() =>
+				expect(harness.remainingRunnerPids()).not.toContain(owner.pid),
+			);
+			await vi.waitFor(
+				() =>
+					expect(
+						sendState(harness, sessionId, "stall-failed-kill").run.status,
+					).toBe("interrupted"),
+				{ timeout: 15_000 },
+			);
+			const settled = sendState(harness, sessionId, "stall-failed-kill");
+			expect(settled.terminals.map(({ type }) => type)).toEqual([
+				"turn.interrupted",
+			]);
+			expect(JSON.parse(settled.terminals[0]?.data ?? "null")).toMatchObject({
+				reason: "Provider process stopped",
+			});
 			expect(ownership(harness, sessionId).runs).not.toContainEqual(
 				expect.objectContaining({ status: "running" }),
 			);
+			evidence["settledAfterGone"] = settled;
+			await stop;
+			await pending;
 			const next = await browser.send(sessionId, "after-failed-kill");
 			expect(next.chunks.join("")).toBe(
 				responseChunks("after-failed-kill").join(""),
@@ -172,10 +244,6 @@ if (!/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
 			);
 			assert(resumedQuery?.kind === "query");
 			expect(resumedQuery.sessionId).toBe(native.sessionId);
-			evidence["signals"] = readFileSync(
-				join(harness.root, "d1-denied-signals.jsonl"),
-				"utf8",
-			);
 			evidence["replacement"] = replacement;
 			evidence["resumedNativeSessionId"] = native.sessionId;
 			evidence["passed"] = true;
@@ -226,9 +294,11 @@ if (!/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
 				join(harness.root, "runner-identity-fixture.mjs"),
 				`
 import { unlinkSync as d1Unlink } from "node:fs";
+import { appendFileSync as d1DeniedRetired } from "node:fs";
 const d1Kill = process.kill;
 process.kill = function(pid, signal) {
-  if (pid === ${owner.pid} && signal !== 0) {
+  if (Math.abs(pid) === ${owner.pid} && signal !== 0) {
+    d1DeniedRetired(join(root, "retired-denied-signals.jsonl"), JSON.stringify({ pid, signal }) + "\\n");
     throw Object.assign(new Error("Fixture retained retired runner"), { code: "EPERM" });
   }
   return d1Kill.call(process, pid, signal);
@@ -255,43 +325,15 @@ syncBuiltinESMExports();
 					pid: owner.pid,
 				}),
 			);
-			expect(ownership(harness, sessionId).runs).not.toContainEqual(
-				expect.objectContaining({ status: "running" }),
-			);
-			writeFileSync(
-				join(harness.root, "refuse-next-runner-start"),
-				"refuse once",
-			);
-			const refused = await restored.send(
-				sessionId,
-				"replacement-start-refusal",
-			);
-			expect(refused.chunks).toEqual([]);
-			expect(refused.done).toMatchObject({
-				attention: "error",
-				status: "idle",
+			const held = sendState(harness, sessionId, "upgrade-long-turn");
+			expect(held.run).toMatchObject({
+				status: "running",
+				runner_id: owner.runnerId,
+				held_transmission: 1,
 			});
-			expect(JSON.stringify(await restored.history(sessionId))).toContain(
-				"Synthetic replacement spawn failure",
-			);
-			const next = await restored.send(sessionId, "after-retired-restart");
-			expect(next.chunks.join("")).toBe(
-				responseChunks("after-retired-restart").join(""),
-			);
-			const replacement = discoverRunners(
-				harness.projectDir,
-				harness.configDir,
-			).find(
-				(entry) =>
-					entry.sessionId === sessionId && entry.runnerId !== owner.runnerId,
-			);
-			assert(replacement);
-			expect(replacement.pid).not.toBe(owner.pid);
-			const resumedQuery = harness.marks.find(
-				(mark) => mark.kind === "query" && mark.pid === replacement.pid,
-			);
-			assert(resumedQuery?.kind === "query");
-			expect(resumedQuery.sessionId).toBe(native.sessionId);
+			expect(held.terminals).toEqual([]);
+			expect(() => process.kill(owner.pid, 0)).not.toThrow();
+			evidence["heldWhileAlive"] = held;
 			const lateText = responseChunks("upgrade-long-turn").at(-1);
 			assert(lateText);
 			let observer: RunnerSocket | undefined;
@@ -356,21 +398,13 @@ syncBuiltinESMExports();
 			expect(readFileSync(`${owner.socketPath}.spool`, "utf8")).toContain(
 				lateText,
 			);
-			const registrations = discoverRunners(
-				harness.projectDir,
-				harness.configDir,
-			);
 			expect(retirement(harness, owner.runnerId)).toEqual({
 				retired_at: expect.any(Number),
 				attachment_id: "",
 				pid: owner.pid,
 			});
-			expect(registrations).toContainEqual(
-				expect.objectContaining({
-					runnerId: replacement.runnerId,
-					pid: replacement.pid,
-				}),
-			);
+			expect(() => process.kill(owner.pid, 0)).not.toThrow();
+			expect(sendState(harness, sessionId, "upgrade-long-turn")).toEqual(held);
 			const db = new Database(harness.daemonStorePath(), { readonly: true });
 			try {
 				expect(
@@ -383,6 +417,108 @@ syncBuiltinESMExports();
 			} finally {
 				db.close();
 			}
+			evidence["lateSpoolFencedWhileAlive"] = {
+				lateText,
+				retired: retirement(harness, owner.runnerId),
+				held: sendState(harness, sessionId, "upgrade-long-turn"),
+			};
+			evidence["deniedSignals"] = readFileSync(
+				join(harness.root, "retired-denied-signals.jsonl"),
+				"utf8",
+			);
+			expect(harness.signalOwnedRunner(owner.pid, "SIGKILL")).toBe(true);
+			await vi.waitFor(() =>
+				expect(harness.remainingRunnerPids()).not.toContain(owner.pid),
+			);
+			await vi.waitFor(
+				() =>
+					expect(
+						sendState(harness, sessionId, "upgrade-long-turn").run.status,
+					).toBe("interrupted"),
+				{ timeout: 35_000 },
+			);
+			const settled = sendState(harness, sessionId, "upgrade-long-turn");
+			expect(settled.terminals.map(({ type }) => type)).toEqual([
+				"turn.interrupted",
+			]);
+			expect(JSON.parse(settled.terminals[0]?.data ?? "null")).toMatchObject({
+				reason: "Provider process stopped",
+			});
+			expect(ownership(harness, sessionId).runs).not.toContainEqual(
+				expect.objectContaining({ status: "running" }),
+			);
+			evidence["settledAfterGone"] = settled;
+			writeFileSync(
+				join(harness.root, "refuse-next-runner-start"),
+				"refuse once",
+			);
+			const runsBeforeTransientFailure = ownership(harness, sessionId).runs
+				.length;
+			const retried = await restored.send(
+				sessionId,
+				"replacement-start-refusal",
+			);
+			expect(retried.chunks.join("")).toBe(
+				responseChunks("replacement-start-refusal").join(""),
+			);
+			expect(retried.done).toMatchObject({ status: "idle" });
+			expect(retried.done).not.toMatchObject({ attention: "error" });
+			expect(JSON.stringify(await restored.history(sessionId))).not.toContain(
+				"Synthetic replacement spawn failure",
+			);
+			const retriedState = sendState(
+				harness,
+				sessionId,
+				"replacement-start-refusal",
+			);
+			expect(retriedState.run).toMatchObject({
+				status: "completed",
+				held_transmission: 1,
+			});
+			expect(retriedState.terminals.map(({ type }) => type)).toEqual([
+				"turn.completed",
+			]);
+			const retriedEnqueues = harness.marks.filter(
+				(mark) =>
+					mark.kind === "enqueue" &&
+					mark.prompt === "replacement-start-refusal",
+			);
+			expect(retriedEnqueues).toHaveLength(1);
+			expect(ownership(harness, sessionId).runs).toHaveLength(
+				runsBeforeTransientFailure + 1,
+			);
+			evidence["continuedAfterTransientSpawnFailure"] = {
+				state: retriedState,
+				nativeEnqueues: retriedEnqueues.length,
+			};
+			const next = await restored.send(sessionId, "after-retired-restart");
+			expect(next.chunks.join("")).toBe(
+				responseChunks("after-retired-restart").join(""),
+			);
+			const replacement = discoverRunners(
+				harness.projectDir,
+				harness.configDir,
+			).find(
+				(entry) =>
+					entry.sessionId === sessionId && entry.runnerId !== owner.runnerId,
+			);
+			assert(replacement);
+			expect(replacement.pid).not.toBe(owner.pid);
+			const resumedQuery = harness.marks.find(
+				(mark) => mark.kind === "query" && mark.pid === replacement.pid,
+			);
+			assert(resumedQuery?.kind === "query");
+			expect(resumedQuery.sessionId).toBe(native.sessionId);
+			const registrations = discoverRunners(
+				harness.projectDir,
+				harness.configDir,
+			);
+			expect(registrations).toContainEqual(
+				expect.objectContaining({
+					runnerId: replacement.runnerId,
+					pid: replacement.pid,
+				}),
+			);
 			expect(
 				(
 					await restored.send(sessionId, "after-retired-socket-returns")
@@ -437,8 +573,16 @@ syncBuiltinESMExports();
 				(entry) => entry.sessionId === sessionId,
 			);
 			assert(owner);
-			if (mode === "candidate-stop")
-				registerRunner({ ...owner, role: "candidate" });
+			if (mode === "candidate-stop") {
+				const db = new Database(harness.daemonStorePath());
+				try {
+					db.prepare(
+						"UPDATE claude_runner_cursors SET role = 'candidate' WHERE runner_id = ?",
+					).run(owner.runnerId);
+				} finally {
+					db.close();
+				}
+			}
 			await harness.kill();
 			appendFileSync(
 				join(harness.root, "runner-identity-fixture.mjs"),
@@ -446,7 +590,7 @@ syncBuiltinESMExports();
 import { appendFileSync as d1Denied } from "node:fs";
 const d1Kill = process.kill;
 process.kill = function(pid, signal) {
-  if (pid === ${owner.pid} && signal !== 0) {
+  if (Math.abs(pid) === ${owner.pid} && signal !== 0) {
     d1Denied(join(root, "denied-stops.jsonl"), JSON.stringify({ pid, signal }) + "\\n");
     throw Object.assign(new Error("Fixture denied runner signal"), { code: "EPERM" });
   }
@@ -601,7 +745,7 @@ syncBuiltinESMExports();`
 				// Once that specific owner is gone, the same ask becomes orphaned.
 				await harness.kill();
 				assert(current, "Missing permission owner");
-				process.kill(current.pid, "SIGKILL");
+				expect(harness.signalOwnedRunner(current.pid, "SIGKILL")).toBe(true);
 				await vi.waitFor(() =>
 					expect(() => process.kill(current.pid, 0)).toThrow(),
 				);

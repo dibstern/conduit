@@ -50,6 +50,7 @@ import type {
 	RunnerProviderInstanceDeps,
 } from "./runner-provider-instance.js";
 import { runningRunnerCommands } from "./runner-recovery.js";
+import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
 import type {
 	DurableSessionTurn,
 	SessionCommand,
@@ -221,22 +222,32 @@ export const recoverLegacyRunnerCommands = (options: {
 				// only once the attachment has finished its recovery transition.
 				yield* options.ready;
 				if (options.closing()) return;
-				const outcome = yield* Effect.result(options.replay(row, replayLock));
+				const outcome = yield* Effect.result(
+					Effect.suspend(() => options.replay(row, replayLock)).pipe(
+						Effect.retry({
+							while: (failure) =>
+								!options.closing() && failure.retryable !== false,
+							schedule: runnerRetrySchedule,
+						}),
+					),
+				);
 				if (options.closing()) return;
-				yield* options.settle({
-					commandId: row.command_id,
-					attempt: row.attempt_count,
-					status: "finished",
-					nativeResumeFallback:
-						outcome._tag === "Success"
-							? outcome.success.nativeResumeFallback
-							: true,
-					...(outcome._tag === "Success"
-						? outcome.success.result
-							? { result: outcome.success.result }
-							: {}
-						: { failure: outcome.failure }),
-				});
+				yield* options
+					.settle({
+						commandId: row.command_id,
+						attempt: row.attempt_count,
+						status: "finished",
+						nativeResumeFallback:
+							outcome._tag === "Success"
+								? outcome.success.nativeResumeFallback
+								: true,
+						...(outcome._tag === "Success"
+							? outcome.success.result
+								? { result: outcome.success.result }
+								: {}
+							: { failure: outcome.failure }),
+					})
+					.pipe(retryRunnerPersistence);
 				const pending =
 					outcome._tag === "Success" &&
 					(outcome.success.result === undefined ||
@@ -267,7 +278,7 @@ export const replayLegacyRunnerSend = (options: {
 	readonly sql: SqlClient.SqlClient;
 	readonly row: RunningRunnerCommand;
 	readonly driverKind: string;
-	readonly connection: RunnerSocket;
+	readonly connection?: RunnerSocket | undefined;
 	readonly replayLock: Semaphore.Semaphore;
 	readonly prepareTurnEffect?: RunnerDriverPieces["prepareTurnEffect"];
 	readonly admitReplay: (
@@ -301,7 +312,13 @@ export const replayLegacyRunnerSend = (options: {
 		const { row, deps, driverKind } = options;
 		const payload = yield* Schema.decodeUnknownEffect(
 			Schema.fromJsonString(LegacyTurn),
-		)(row.payload_json);
+		)(row.payload_json).pipe(
+			Effect.mapError((cause) => ({
+				...runnerFailure("decodeRunnerTurn", cause),
+				code: "invalid_runner_turn",
+				retryable: false,
+			})),
+		);
 		const { nativeThread, continuation, configDir, ...turn } = payload;
 		const inputId =
 			continuation === true
@@ -314,6 +331,8 @@ export const replayLegacyRunnerSend = (options: {
 			return yield* Effect.fail({
 				operation: "decodeRunnerTurn",
 				message: "Runner turn input id is required",
+				code: "invalid_runner_turn",
+				retryable: false,
 			});
 		const input: DurableSessionTurn = {
 			...turn,
@@ -357,7 +376,7 @@ export const replayLegacyRunnerSend = (options: {
 				break;
 			default:
 				if (
-					options.connection.retainedSends?.some(
+					options.connection?.retainedSends?.some(
 						(send) =>
 							send.commandId === row.command_id &&
 							send.attempt === row.attempt_count,

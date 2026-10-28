@@ -264,6 +264,15 @@ export type ProcessMark =
 			at: string;
 	  }
 	| {
+			kind: "runner-swap-paused";
+			phase: "after-prepare" | "after-commit";
+			sessionId: string;
+			oldRunnerId: string;
+			oldPid: number;
+			newRunnerId: string;
+			newPid: number;
+	  }
+	| {
 			kind: "runner-snapshot";
 			pid: number;
 			sessionId: string;

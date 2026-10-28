@@ -119,6 +119,8 @@ describe("commit advance ordering", () => {
 				});
 				const flushing = yield* flushPendingWrites(sql).pipe(Effect.forkChild);
 				yield* Deferred.await(entered);
+				// Serving-row ownership decides the replacement; adoption only grants access.
+				yield* authority.revoke(old, "superseded");
 				const fresh = (yield* authority.adopt(
 					[
 						{

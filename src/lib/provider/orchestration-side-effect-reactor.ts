@@ -73,7 +73,7 @@ import { resolveTurnImages } from "./resolve-turn-images.js";
 import { RunnerProviderInstance } from "./runner/runner-provider-instance.js";
 import { settleRunnerCommandReply } from "./runner/runner-recovery.js";
 import type { SessionFailure } from "./runner/session-runner.js";
-import { legacyStopOwnersQuery } from "./session-run-settlement.js";
+import { legacyStopOwnersQuery, stopCovers } from "./session-run-settlement.js";
 import type {
 	EventSink,
 	ProviderCall,
@@ -823,10 +823,28 @@ export class ProviderSideEffectReactor {
 				yield* this.options
 					.write((_project, stamp) =>
 						Effect.gen({ self: this }, function* () {
+							// Direct providers keep their nonterminal uncertainty marker.
+							// Runner sends wait for Settle, including between released holds.
 							const marked = yield* this.options
 								.sql`UPDATE provider_command_outbox
 						SET error_code = 'delivery_indeterminate' WHERE request_sequence = ${row.request_sequence}
-						AND status = 'running' AND attempt_count = ${row.attempt_count} RETURNING command_id`;
+						AND status = 'running' AND attempt_count = ${row.attempt_count}
+						AND NOT EXISTS (
+							SELECT 1 FROM provider_runs send
+							JOIN provider_runs owner ON owner.id = COALESCE(send.joined_into, send.id)
+							WHERE send.id = provider_command_outbox.run_id
+							AND (owner.runner_id IS NOT NULL OR owner.held_transmission IS NOT NULL)
+						)
+						AND NOT EXISTS (
+							SELECT 1 FROM events WHERE session_id = ${row.session_id}
+							AND type = 'run.dispatched' AND (
+								json_extract(data, '$.commandId') = ${row.command_id}
+								OR json_extract(data, '$.runId') = (
+									SELECT COALESCE(joined_into, id) FROM provider_runs
+									WHERE id = provider_command_outbox.run_id
+								)
+							)
+						) RETURNING command_id`;
 							if (marked.length) {
 								yield* this.options
 									.sql`UPDATE command_receipts SET error_code = 'delivery_indeterminate'
@@ -1321,7 +1339,7 @@ export class ProviderSideEffectReactor {
 					payload.type === "interrupt_turn" || payload.type === "end_session"
 						? payload.stop
 						: undefined;
-				const stopOwners = stop?.owners.length
+				const candidates = stop
 					? stop.owners
 					: !stop &&
 							payload.type === "interrupt_turn" &&
@@ -1332,6 +1350,13 @@ export class ProviderSideEffectReactor {
 								row.command_id,
 							).pipe(Effect.mapError(storeFailure("recoverStopCohort")))
 						: undefined;
+				const stopOwners = candidates
+					? yield* Effect.filter(candidates, ({ runId }) =>
+							stopCovers(this.options.sql, row.session_id, runId).pipe(
+								Effect.mapError(storeFailure("stopCoverage")),
+							),
+						)
+					: undefined;
 				const stopRunning = stopOwners?.length
 					? this.options.sql<{ running: number }>`
 						SELECT EXISTS (SELECT 1 FROM provider_runs WHERE session_id = ${row.session_id}
@@ -1419,6 +1444,9 @@ export class ProviderSideEffectReactor {
 					providerProcessId: row.provider_process_id,
 					...(payload.type === "interrupt_turn"
 						? {
+								...(stop
+									? { stopRunIds: stop.owners.map(({ runId }) => runId) }
+									: {}),
 								requestedAt: stop
 									? stop.deadlineAt - STOP_ABORT_WAIT_MS
 									: row.requested_at,

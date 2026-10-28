@@ -202,6 +202,86 @@ describe("ProviderSideEffectReactor", () => {
 			}).pipe(Effect.provide(reactorTestLayer)),
 		);
 
+	for (const joined of [false, true])
+		for (const released of [false, true])
+			it.effect(
+				`runner-held uncertainty waits for its ledger outcome (joined=${joined}, released=${released})`,
+				() =>
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						yield* seedSendTurnOutbox(sql);
+						const owner = joined ? "owner-run" : "run:cmd-1";
+						if (joined) {
+							yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+						VALUES (${owner}, 'session-1', 'running', 1)`;
+						}
+						const commit = yield* makeCommitAndSignal;
+						const commandId = joined ? "owner-command" : "cmd-1";
+						yield* commit([
+							canonicalEvent("run.dispatched", "session-1", {
+								runId: owner,
+								runnerId: "held-runner",
+								commandId,
+								transmission: 1,
+							}),
+							...(released
+								? [
+										canonicalEvent("run.released", "session-1", {
+											runId: owner,
+											runnerId: "held-runner",
+											commandId,
+											transmission: 1,
+											reason: "ResumeRejected",
+										}),
+									]
+								: []),
+						]);
+						const sent = yield* Deferred.make<void>();
+						const reply = yield* Deferred.make<void>();
+						const reactor = yield* makeReactor({
+							registry: new ProviderRegistry([
+								makeProvider(() =>
+									Deferred.succeed(sent, undefined).pipe(
+										Effect.andThen(Deferred.await(reply)),
+										Effect.as({
+											...completedTurn,
+											status: "indeterminate" as const,
+										}),
+									),
+								),
+							]),
+							outcomePollInterval: "10 millis",
+						});
+						const caller = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+						yield* Deferred.await(sent);
+						if (joined)
+							yield* sql`UPDATE provider_runs SET status = 'joined', joined_into = ${owner}
+						WHERE id = 'run:cmd-1'`;
+						yield* Deferred.succeed(reply, undefined);
+						yield* TestClock.adjust("100 millis");
+						expect(caller.pollUnsafe()).toBeUndefined();
+						expect(
+							yield* sql`SELECT error_code FROM provider_command_outbox`,
+						).toEqual([{ error_code: null }]);
+						expect(yield* sql`SELECT error_code FROM command_receipts`).toEqual(
+							[{ error_code: null }],
+						);
+						yield* (yield* ProviderRuntimeIngestionTag).ingest({
+							eventId: "held-run-completed",
+							type: "turn.completed",
+							providerId: "claude",
+							sessionId: "session-1",
+							runId: owner,
+							providerRefs: {},
+							rawSource: { kind: "test.runner" },
+							createdAt: 3,
+							data: { messageId: "", duration: 1 },
+						});
+						yield* TestClock.adjust("10 millis");
+						expect((yield* Fiber.join(caller)).status).toBe("completed");
+					}).pipe(Effect.provide(reactorTestLayer)),
+			);
+
 	it.effect(
 		"places a claimed input and its failure before intake atomically",
 		() =>

@@ -2776,7 +2776,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					this.sinks.retainSink(sink);
 					yield* this.disposeSessionEffect(ctx, "Stopped by the user").pipe(
 						Effect.andThen(() =>
-							runId && sink
+							sink
 								? sink
 										.push(
 											claudeRuntimeEvent(

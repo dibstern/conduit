@@ -1,14 +1,19 @@
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
+	appendFileSync,
 	existsSync,
 	mkdirSync,
+	mkdtempSync,
 	readFileSync,
 	renameSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
-import { basename, join } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -17,8 +22,14 @@ import type {
 	RunnerHello,
 	RunnerMessage,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
+import type { RunnerMember } from "../../../src/lib/provider/runner/runner-receipts.js";
+import {
+	runnerMembersGone,
+	runnerProcessTable,
+} from "../../../src/lib/provider/runner/runner-registry.js";
 import type { SessionTurn } from "../../../src/lib/provider/runner/session-runner.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
+import { isRecord } from "../../../src/lib/utils.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -94,6 +105,10 @@ function comparable(
 				)
 					return "<clock>";
 				if (typeof value !== "string") return value;
+				if (key === "runnerId") {
+					if (!ids.has(value)) ids.set(value, `id-${ids.size}`);
+					return ids.get(value) ?? value;
+				}
 				return value
 					.replaceAll(root, "<root>")
 					.replace(
@@ -1231,7 +1246,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		).toMatchObject({ pid: runner.pid, socketPath: runner.socketPath });
 		let reconnectProof: unknown;
 		try {
-			process.kill(runner.pid, "SIGKILL");
+			expect(harness.signalOwnedRunner(runner.pid, "SIGKILL")).toBe(true);
 			await vi.waitFor(
 				() => {
 					const state = persisted(harness, sessionId);
@@ -1424,6 +1439,237 @@ describe("Claude runners survive server replacement through built dist", () => {
 		}
 	}, 45_000);
 
+	it("keeps the same runner, reaper and fixture Claude child alive during mid-turn daemon replacement", async () => {
+		const directory =
+			process.env["CONDUIT_RUNNER_EVIDENCE_DIR"] ??
+			mkdtempSync(join(tmpdir(), "runner-reaper-evidence-"));
+		mkdirSync(directory, { recursive: true });
+		console.log(`Runner reaper evidence: ${directory}`);
+		const artifactPath = join(
+			directory,
+			`mid-turn-adoption-${randomUUID()}.json`,
+		);
+		const evidence: Record<string, unknown> = {
+			passed: false,
+			childKind: "bounded fixture Claude child, SDK fake runs in runner",
+		};
+		const harness = ProcessHarness.create({
+			dist: "dist",
+			restartProof: true,
+			deadline: performance.now() + 60_000,
+		});
+		const members: RunnerMember[] = [];
+		const proofPath = join(harness.root, "reaper-adoption.jsonl");
+		const readProof = () =>
+			existsSync(proofPath)
+				? readFileSync(proofPath, "utf8")
+						.trim()
+						.split("\n")
+						.map((line) => JSON.parse(line) as Record<string, unknown>)
+				: [];
+		try {
+			appendFileSync(
+				join(harness.root, "runner-identity-fixture.mjs"),
+				`
+import { RunnerSocket as ReaperProofSocket } from ${JSON.stringify(pathToFileURL(resolve("dist/src/lib/provider/runner/runner-protocol.js")).href)};
+if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
+  const startTime = pid => childProcess.execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", env: { ...process.env, LC_ALL: "C" } }).trim();
+  const record = entry => fs.appendFileSync(join(root, "reaper-adoption.jsonl"), JSON.stringify({ ...entry, at: Date.now() }) + "\\n");
+  setTimeout(() => process.exit(0), 90_000).unref();
+  record({ kind: "fixture-runner", pid: process.pid, startTime: startTime(process.pid) });
+  const child = childProcess.spawn(process.execPath, ["-e", 'setTimeout(() => process.exit(0), 85_000); setInterval(() => {}, 1000); process.send({ready:true});'], { stdio: ["ignore", "ignore", "ignore", "ipc"], env: { ...process.env, NODE_OPTIONS: "" } });
+  await new Promise(done => child.once("message", done));
+  record({ kind: "fixture-child", pid: child.pid, startTime: startTime(child.pid) });
+  const write = ReaperProofSocket.prototype.write;
+  ReaperProofSocket.prototype.write = function(message) {
+    if (message.type === "hello") record({ kind: "hello", pid: process.pid, startTime: startTime(process.pid), hello: message });
+    return write.call(this, message);
+  };
+}
+`,
+			);
+			await harness.restart();
+			const browser = await harness.connect();
+			const sessionId = await browser.createSession(
+				"Reaper adoption held turn",
+			);
+			const prompt = "upgrade-long-turn";
+			const pending = browser
+				.send(sessionId, prompt, 50_000)
+				.catch(() => undefined);
+			await harness.waitForMark(
+				(mark) => mark.kind === "assistant-held" && mark.prompt === prompt,
+			);
+			const runner = harness.marks.find(
+				(mark) =>
+					mark.kind === "runner-started" && mark.sessionId === sessionId,
+			);
+			assert(runner?.kind === "runner-started");
+			const helloProof = readProof().find(
+				(entry) => entry["kind"] === "hello" && entry["pid"] === runner.pid,
+			);
+			assert(
+				helloProof &&
+					typeof helloProof["startTime"] === "string" &&
+					isRecord(helloProof["hello"]),
+			);
+			const hello = helloProof["hello"];
+			const reaper = hello["reaper"];
+			assert(
+				isRecord(reaper) &&
+					typeof reaper["pid"] === "number" &&
+					typeof reaper["startTime"] === "string",
+			);
+			const child = readProof().find(
+				(entry) => entry["kind"] === "fixture-child",
+			);
+			assert(
+				child &&
+					typeof child["pid"] === "number" &&
+					typeof child["startTime"] === "string",
+			);
+			members.push(
+				{ pid: runner.pid, startTime: helloProof["startTime"] },
+				{ pid: reaper["pid"], startTime: reaper["startTime"] },
+				{ pid: child["pid"], startTime: child["startTime"] },
+			);
+			const observations: unknown[] = [];
+			const sample = (stage: string) => {
+				const current = members.map((member) => ({
+					...member,
+					observation: runnerProcessTable.inspect(member.pid),
+				}));
+				observations.push({ stage, at: Date.now(), current });
+				for (const member of current)
+					expect(member.observation).toMatchObject({
+						state: "running",
+						startTime: member.startTime,
+						pgid: runner.pid,
+					});
+			};
+			evidence["observations"] = observations;
+			evidence["beforeHello"] = hello;
+			sample("before daemon SIGKILL");
+			await harness.kill();
+			await pending;
+			sample("after daemon SIGKILL, held turn still running");
+			expect(persisted(harness, sessionId).turns).toMatchObject([
+				{ state: "running" },
+			]);
+			const helloCount = readProof().filter(
+				(entry) => entry["kind"] === "hello",
+			).length;
+			await harness.restart();
+			const adopted = await harness.connect(sessionId);
+			await vi.waitFor(
+				() =>
+					expect(
+						readProof().filter((entry) => entry["kind"] === "hello").length,
+					).toBeGreaterThan(helloCount),
+				{ timeout: harness.remainingTimeMs(10_000) },
+			);
+			const adoptedHello = readProof()
+				.filter((entry) => entry["kind"] === "hello")
+				.at(-1)?.["hello"];
+			expect(adoptedHello).toMatchObject({
+				reaper,
+				runnerId: hello["runnerId"],
+			});
+			sample("after adoption before releasing held turn");
+			writeFileSync(
+				join(harness.root, "release-upgrade-turn"),
+				"continue adopted turn",
+			);
+			await settled(harness, sessionId);
+			const history = await adopted.history(sessionId);
+			expect(history[1]?.parts?.map((part) => part.text ?? "").join("")).toBe(
+				responseChunks(prompt).join(""),
+			);
+			const continued = await adopted.send(
+				sessionId,
+				"same-session-after-reaper-adoption",
+			);
+			expect(continued.chunks.join("")).toBe(
+				responseChunks("same-session-after-reaper-adoption").join(""),
+			);
+			sample("after the continued session turn");
+			expect(
+				new Set(
+					harness.marks.flatMap((mark) =>
+						mark.kind === "runner-started" && mark.sessionId === sessionId
+							? [mark.pid]
+							: [],
+					),
+				),
+			).toEqual(new Set([runner.pid]));
+			const queries = sdkProof(harness).filter(
+				(entry) => entry["kind"] === "query",
+			);
+			expect(new Set(queries.map((entry) => entry["sessionId"])).size).toBe(1);
+			expect(new Set(queries.map((entry) => entry["pid"]))).toEqual(
+				new Set([runner.pid]),
+			);
+			evidence["queries"] = queries;
+			evidence["nativeSessionId"] = queries[0]?.["sessionId"];
+			evidence["afterHello"] = adoptedHello;
+			evidence["history"] = history;
+			evidence["passed"] = true;
+		} catch (cause) {
+			evidence["failure"] = String(cause);
+			throw cause;
+		} finally {
+			writeFileSync(join(harness.root, "release-upgrade-turn"), "cleanup");
+			for (const entry of readProof()) {
+				if (
+					typeof entry["pid"] === "number" &&
+					typeof entry["startTime"] === "string"
+				)
+					members.push({ pid: entry["pid"], startTime: entry["startTime"] });
+				const hello = entry["hello"];
+				if (
+					isRecord(hello) &&
+					isRecord(hello["reaper"]) &&
+					typeof hello["reaper"]["pid"] === "number" &&
+					typeof hello["reaper"]["startTime"] === "string"
+				)
+					members.push({
+						pid: hello["reaper"]["pid"],
+						startTime: hello["reaper"]["startTime"],
+					});
+			}
+			evidence["proof"] = readProof();
+			try {
+				for (const member of members) {
+					const current = runnerProcessTable.inspect(member.pid);
+					if (
+						current.state === "running" &&
+						current.startTime === member.startTime
+					) {
+						try {
+							process.kill(member.pid, "SIGKILL");
+						} catch (cause) {
+							if (!isRecord(cause) || cause["code"] !== "ESRCH")
+								await Promise.reject(cause);
+						}
+					}
+				}
+				await vi.waitFor(
+					() =>
+						expect(runnerMembersGone(runnerProcessTable, members)).toBe(true),
+					{ timeout: 5000 },
+				);
+				await harness.dispose();
+				evidence["cleanup"] = harness.proof();
+			} catch (cause) {
+				evidence["passed"] = false;
+				evidence["cleanupFailure"] = String(cause);
+				await Promise.reject(cause);
+			} finally {
+				writeFileSync(artifactPath, JSON.stringify(evidence, null, 2));
+			}
+		}
+	}, 80_000);
+
 	it("adopts a runner after SIGKILL and more than 60 seconds detached without losing its turn", async () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
@@ -1547,7 +1793,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started")
 			throw new Error("Missing verified runner");
-		process.kill(runner.pid, "SIGSTOP");
+		expect(harness.signalOwnedRunner(runner.pid, "SIGSTOP")).toBe(true);
 		try {
 			await harness.disconnectParent();
 			expect(() => process.kill(runner.pid, 0)).toThrow();
@@ -1563,7 +1809,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 		} finally {
 			// This PID was verified before this test suspended its runner.
 			try {
-				process.kill(runner.pid, "SIGKILL");
+				harness.signalOwnedRunner(runner.pid, "SIGKILL");
 			} catch {
 				/* Already exited. */
 			}

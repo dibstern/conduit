@@ -40,6 +40,10 @@ import {
 	currentRunnerPermissionReply,
 	ownsRunnerAttachment,
 } from "../../../provider/runner/runner-receipts.js";
+import {
+	type RunSettlementOwner,
+	settleSessionRuns,
+} from "../../../provider/session-run-settlement.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
 import { turnEndedAlert } from "../../../relay/turn-ended-alert.js";
 import type { makeSessionCompactions } from "../../../session/session-compactions.js";
@@ -97,6 +101,13 @@ export interface ProviderRuntimeIngestion {
 			/** Runs inside the append transaction, before any projection. */
 			readonly beforeProject?: Effect.Effect<void, SqlError>;
 			readonly beforeCommit?: Effect.Effect<void, SqlError>;
+			/** Read current owners and settle them inside the append transaction. */
+			readonly settleRuns?: {
+				readonly sessionId: string;
+				readonly reason: string;
+				readonly owners: Effect.Effect<readonly RunSettlementOwner[], SqlError>;
+				readonly errorCode?: string;
+			};
 			readonly requeueFailedInputs?: false;
 			readonly afterCommit?: Effect.Effect<void>;
 			readonly endedRunEvents?: Set<string>;
@@ -170,15 +181,9 @@ export const makeProviderRuntimeIngestionLive = (
 
 			const ingestBatch = (
 				events: readonly ProviderRuntimeEvent[],
-				ingestOptions: {
-					readonly sessionPicks?: ReadonlyMap<string, TurnSettings>;
-					readonly publishToBus?: boolean;
-					readonly publishToRelay?: boolean;
-					readonly beforeProject?: Effect.Effect<void, SqlError>;
-					readonly beforeCommit?: Effect.Effect<void, SqlError>;
-					readonly requeueFailedInputs?: false;
-					readonly afterCommit?: Effect.Effect<void>;
-					readonly endedRunEvents?: Set<string>;
+				ingestOptions: NonNullable<
+					Parameters<ProviderRuntimeIngestion["ingestBatch"]>[1]
+				> & {
 					readonly onPrompt?: (id: string) => Effect.Effect<void>;
 				} = {},
 			): Effect.Effect<number, ProviderRuntimeIngestionError> =>
@@ -522,6 +527,29 @@ export const makeProviderRuntimeIngestionLive = (
 													? yield* commitRunnerOutput(sql, receipt)
 													: yield* ownsRunnerAttachment(sql, context);
 											if (!appended) return;
+											if (ingestOptions.settleRuns) {
+												const settlement = ingestOptions.settleRuns;
+												const settlements = yield* settleSessionRuns(
+													sql,
+													settlement.sessionId,
+													settlement.reason,
+													Effect.succeed,
+													{
+														owners: yield* settlement.owners,
+														...(settlement.errorCode
+															? { errorCode: settlement.errorCode }
+															: {}),
+													},
+												);
+												for (const event of settlements) {
+													const result = translateProviderRuntimeEventToDomain(
+														event,
+														nextState,
+													);
+													domainEvents.push(...result.events);
+													nextState = result.state;
+												}
+											}
 											// Check under the same write permit and transaction as local
 											// deletion. Neither seeding nor publication may revive a deletion.
 											const sessionIds = new Set(

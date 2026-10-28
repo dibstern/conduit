@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
 import { createInterface } from "node:readline";
-import { Effect } from "effect";
+import { Deferred, Effect } from "effect";
 import { BUILD_ID } from "../../build-id.js";
 import { attachmentFromDataUrl } from "../../persistence/attachment-store.js";
 import { isRecord } from "../../utils.js";
@@ -77,6 +77,7 @@ export type RunnerSendAnswer = {
 );
 
 export interface RunnerHello {
+	readonly reaper?: { readonly pid: number; readonly startTime: string };
 	readonly type: "hello";
 	readonly driverKind?: string;
 	readonly protocolVersion: number;
@@ -103,6 +104,8 @@ export interface RunnerHello {
 	readonly crossAttemptNativeResumeFallback?: true;
 	/** The journal reports each retained send's outcome and process call ownership. */
 	readonly sendJournalAnswers?: true;
+	/** A new hello cannot overtake unread commands from the previous socket. */
+	readonly drainsConnections?: true;
 	readonly sendAnswers?: readonly RunnerSendAnswer[];
 	readonly cursorBackendUrl?: CursorBackendUrl;
 	readonly taggedConfigDir?: true;
@@ -151,7 +154,10 @@ type RunnerReply =
 	| {
 			readonly type: "command-status-reply";
 			readonly requestId: string;
-			readonly result: Exclude<ProviderControlCommandStatus, "gone">;
+			readonly nativeResumeFallback?: boolean;
+			readonly result:
+				| Exclude<ProviderControlCommandStatus, "gone">
+				| "unknown";
 			readonly failure?: SessionFailure;
 	  }
 	| {
@@ -185,10 +191,18 @@ type RunnerReply =
 export type RunnerMessage =
 	| RunnerHello
 	| {
+			readonly type: "command-refused";
+			readonly commandId: string;
+			readonly attempt?: number;
+			readonly nativeResumeFallback?: boolean;
+			readonly reason: "exiting" | "retiring" | "interrupted";
+	  }
+	| {
 			readonly type: "command-status";
 			readonly requestId: string;
 			readonly commandId: string;
 			readonly attempt?: number;
+			readonly nativeResumeFallback?: boolean;
 	  }
 	| {
 			readonly type: "thread-read";
@@ -229,8 +243,9 @@ export type RunnerMessage =
 	  }
 	| {
 			readonly type: "replay";
-			readonly acknowledgedSequence: number;
+			/** Legacy peers may send it; current runners ignore it. */
 			readonly preserveRole?: boolean;
+			readonly acknowledgedSequence: number;
 	  };
 
 /** Only the outbound wire accepts the pre-attachment-ref send shape. */
@@ -382,6 +397,37 @@ export const runnerIdleFailure = (): SessionFailure => ({
 	retryable: true,
 });
 
+export type RunnerDeliveryEvidence =
+	| {
+			readonly _tag: "Refused";
+			readonly reason: "exiting" | "retiring" | "interrupted";
+	  }
+	| { readonly _tag: "NotSent" };
+
+export interface RunnerCommandFailure extends SessionFailure {
+	readonly delivery?: RunnerDeliveryEvidence;
+	/** A real host reply, independent of whether it proves non-delivery. */
+	readonly replied?: true;
+}
+
+export const runnerCommandReplied = (failure: SessionFailure): boolean =>
+	"replied" in failure && failure.replied === true;
+
+export function runnerDeliveryEvidence(
+	failure: SessionFailure,
+): RunnerDeliveryEvidence | undefined {
+	if (!("delivery" in failure) || !isRecord(failure.delivery)) return undefined;
+	const evidence = failure.delivery;
+	if (evidence["_tag"] === "NotSent") return { _tag: "NotSent" };
+	const reason = evidence["reason"];
+	if (
+		evidence["_tag"] === "Refused" &&
+		(reason === "exiting" || reason === "retiring" || reason === "interrupted")
+	)
+		return { _tag: "Refused", reason };
+	return undefined;
+}
+
 /** Bidirectional NDJSON, including replies for server-owned output operations. */
 export class RunnerSocket {
 	private readonly pending = new Map<
@@ -406,6 +452,16 @@ export class RunnerSocket {
 		string,
 		"completed" | "failed"
 	>();
+	private readonly readEnded = Deferred.makeUnsafe<void>();
+	/** Resolves after the old NDJSON reader can produce no further frames. */
+	readonly readToEndEffect = Deferred.await(this.readEnded);
+	/** The daemon serializes command delivery with its serving-slot commit. */
+	commandDispatch?:
+		| ((
+				write: Effect.Effect<void, SessionFailure>,
+				message: RunnerMessage,
+		  ) => Effect.Effect<void, SessionFailure>)
+		| undefined;
 
 	/** The original hello journal, unaffected by acknowledgements or new sends. */
 	get retainedSends(): RunnerHello["sendCommands"] {
@@ -424,6 +480,22 @@ export class RunnerSocket {
 			try {
 				const decoded = JSON.parse(line) as RunnerMessage;
 				let message = this.wire?.decode(decoded) ?? decoded;
+				if (message.type === "command-refused") {
+					const failure: RunnerCommandFailure = {
+						operation: "runner admission",
+						message: `Runner refused the command: ${message.reason}`,
+						code: "runner_command_refused",
+						delivery: { _tag: "Refused", reason: message.reason },
+					};
+					message = { ...message, type: "command-reply", failure };
+				}
+				if (message.type === "command-reply" && message.failure) {
+					const failure: RunnerCommandFailure = {
+						...message.failure,
+						replied: true,
+					};
+					message = { ...message, failure };
+				}
 				if (message.type === "hello") {
 					this.peerTaggedConfigDir = message.taggedConfigDir === true;
 					this.peerAttachmentRefs = message.attachmentRefs === true;
@@ -518,9 +590,30 @@ export class RunnerSocket {
 								message.attempt === reply.commandAttempt) &&
 								(message.nativeResumeFallback === undefined ||
 									message.nativeResumeFallback === reply.nativeResumeFallback)))
-					)
+					) {
+						if (
+							message.type === "command-status-reply" &&
+							reply.nativeResumeFallback !== undefined &&
+							message.nativeResumeFallback !== reply.nativeResumeFallback
+						) {
+							// An older peer cannot distinguish the primary from its fallback.
+							message = { ...message, result: "unknown" };
+						}
+						// Only a legacy reply before acceptance proves non-delivery.
+						if (
+							message.type === "command-reply" &&
+							reply.retryOnIdle &&
+							!reply.accepted &&
+							message.failure?.code === "runner_idle_exit"
+						) {
+							const failure: RunnerCommandFailure = {
+								...message.failure,
+								delivery: { _tag: "Refused", reason: "exiting" },
+							};
+							message = { ...message, failure };
+						}
 						reply.reply(message);
-					else onMessage(message);
+					} else onMessage(message);
 				} else onMessage(message);
 			} catch (cause) {
 				socket.destroy(
@@ -535,10 +628,7 @@ export class RunnerSocket {
 				pending.reply({
 					type: "command-reply",
 					commandId: "",
-					failure:
-						this.idleExiting && pending.retryOnIdle && !pending.accepted
-							? runnerIdleFailure()
-							: this.failure,
+					failure: this.failure,
 				});
 			this.pending.clear();
 			onClose(this.failure);
@@ -548,6 +638,9 @@ export class RunnerSocket {
 		socket.on("close", () => {
 			lines.close();
 			fail(new Error("Runner socket closed"));
+			// The reader and disconnect bookkeeping finish before a successor
+			// connection can answer status from this host's command journal.
+			Deferred.doneUnsafe(this.readEnded, Effect.void);
 		});
 	}
 
@@ -603,7 +696,9 @@ export class RunnerSocket {
 		commandId: string,
 		command: SessionCommand,
 		attempt?: number,
-	): Effect.Effect<TurnResult | undefined, SessionFailure> {
+	): Effect.Effect<TurnResult | undefined, RunnerCommandFailure> {
+		if (command.type === "send-turn" && command.input.runId)
+			command = { ...command, runId: command.input.runId };
 		if (
 			this.peerDriverKind === "cursor" &&
 			!this.scopedCursorCredentials &&
@@ -668,6 +763,22 @@ export class RunnerSocket {
 	): Effect.Effect<
 		Exclude<ProviderControlCommandStatus, "gone">,
 		SessionFailure
+	>;
+	commandStatusEffect(
+		commandId: string,
+		attempt: number | undefined,
+		nativeResumeFallback: boolean | undefined,
+	): Effect.Effect<
+		Exclude<ProviderControlCommandStatus, "gone"> | "unknown",
+		SessionFailure
+	>;
+	commandStatusEffect(
+		commandId: string,
+		attempt?: number,
+		nativeResumeFallback?: boolean,
+	): Effect.Effect<
+		Exclude<ProviderControlCommandStatus, "gone"> | "unknown",
+		SessionFailure
 	> {
 		const requestId = randomUUID();
 		return this.requestEffect(`command-status:${requestId}`, {
@@ -675,6 +786,7 @@ export class RunnerSocket {
 			requestId,
 			commandId,
 			...(attempt !== undefined ? { attempt } : {}),
+			...(nativeResumeFallback !== undefined ? { nativeResumeFallback } : {}),
 		});
 	}
 
@@ -703,59 +815,76 @@ export class RunnerSocket {
 	private requestEffect<A>(
 		key: string,
 		message: RunnerMessage,
-	): Effect.Effect<A, SessionFailure> {
-		return Effect.callback<A, SessionFailure>((resume) => {
-			const retryOnIdle =
-				message.type === "command" && message.command.type === "send-turn";
-			if (this.idleExiting && retryOnIdle) {
-				resume(Effect.fail(runnerIdleFailure()));
-				return;
-			}
-			if (this.failure || this.socket.destroyed) {
-				resume(
-					Effect.fail(
-						this.failure ?? runnerFailure("runner socket", "Socket is closed"),
-					),
-				);
-				return;
-			}
-			this.pending.set(key, {
-				retryOnIdle,
-				accepted: false,
-				...(message.type === "command"
-					? {
-							commandAttempt: message.attempt ?? 0,
-							nativeResumeFallback:
-								message.command.type === "send-turn" &&
-								message.command.input.nativeResumeFallback === true,
-						}
-					: {}),
-				reply: (reply) => {
-					this.pending.delete(key);
-					// Capture the output boundary when the failed reply arrives.
-					const precedingOutputs =
-						reply.failure && message.type === "command"
-							? (this.beforeCommandFailure?.() ?? Effect.void)
-							: Effect.void;
-					resume(
-						reply.failure
-							? precedingOutputs.pipe(
-									Effect.andThen(Effect.fail(reply.failure)),
-								)
-							: Effect.succeed(reply.result as A),
-					);
+	): Effect.Effect<A, RunnerCommandFailure> {
+		const connection = this;
+		return Effect.gen(function* () {
+			const result = yield* Deferred.make<A, RunnerCommandFailure>();
+			const dispatch = Effect.try({
+				try: () => {
+					const retryOnIdle =
+						message.type === "command" && message.command.type === "send-turn";
+					if (connection.idleExiting && retryOnIdle) {
+						const failure: RunnerCommandFailure = {
+							...runnerIdleFailure(),
+							delivery: { _tag: "NotSent" },
+						};
+						throw failure;
+					}
+					if (connection.failure || connection.socket.destroyed) {
+						const failure: RunnerCommandFailure = {
+							...(connection.failure ??
+								runnerFailure("runner socket", "Socket is closed")),
+							...(retryOnIdle
+								? { delivery: { _tag: "NotSent" as const } }
+								: {}),
+						};
+						throw failure;
+					}
+					connection.pending.set(key, {
+						retryOnIdle,
+						accepted: false,
+						...(message.type === "command"
+							? {
+									commandAttempt: message.attempt ?? 0,
+									nativeResumeFallback:
+										message.command.type === "send-turn" &&
+										message.command.input.nativeResumeFallback === true,
+								}
+							: {}),
+						...(message.type === "command-status" &&
+						message.nativeResumeFallback !== undefined
+							? { nativeResumeFallback: message.nativeResumeFallback }
+							: {}),
+						reply: (reply) => {
+							connection.pending.delete(key);
+							// Capture the output boundary when the failed reply arrives.
+							const precedingOutputs =
+								reply.failure && message.type === "command"
+									? (connection.beforeCommandFailure?.() ?? Effect.void)
+									: Effect.void;
+							Deferred.doneUnsafe(
+								result,
+								reply.failure
+									? precedingOutputs.pipe(
+											Effect.andThen(Effect.fail(reply.failure)),
+										)
+									: Effect.succeed(reply.result as A),
+							);
+						},
+					});
+					connection.write(message);
 				},
+				catch: (cause) =>
+					isRecord(cause) && typeof cause["operation"] === "string"
+						? (cause as unknown as SessionFailure)
+						: runnerFailure("write runner frame", cause),
 			});
-			try {
-				this.write(message);
-			} catch (cause) {
-				this.pending.delete(key);
-				resume(Effect.fail(runnerFailure("write runner frame", cause)));
-			}
-			return Effect.sync(() => {
-				this.pending.delete(key);
-			});
-		});
+			yield* connection.commandDispatch &&
+			(message.type === "command" || message.type === "command-status")
+				? connection.commandDispatch(dispatch, message)
+				: dispatch;
+			return yield* Deferred.await(result);
+		}).pipe(Effect.ensuring(Effect.sync(() => connection.pending.delete(key))));
 	}
 
 	destroy(failure?: SessionFailure): void {

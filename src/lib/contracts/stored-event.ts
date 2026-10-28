@@ -687,6 +687,28 @@ export const CanonicalEvents = {
 	"run.requested": live(
 		Schema.Struct({ runId: Schema.String, inputId: Schema.String }),
 	),
+	"run.dispatched": live(
+		Schema.Struct({
+			runId: Schema.String,
+			runnerId: Schema.String,
+			commandId: Schema.optionalKey(Schema.String),
+			transmission: Schema.optionalKey(Schema.Number),
+		}),
+	),
+	"run.released": live(
+		Schema.Struct({
+			runId: Schema.String,
+			runnerId: Schema.String,
+			commandId: Schema.String,
+			transmission: Schema.Number,
+			reason: Schema.Literals([
+				"Refused",
+				"NotSent",
+				"JournalAbsent",
+				"ResumeRejected",
+			]),
+		}),
+	),
 	"run.started": live(
 		Schema.Struct({
 			inputId: Schema.String,
@@ -1063,13 +1085,13 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			providerProcessId: Schema.String,
 			turnIds: Schema.optionalKey(Schema.Array(Schema.String)),
-			stop: Schema.optionalKey(ProviderStopSnapshotSchema),
+			stop: Schema.optionalKey(Schema.NullOr(ProviderStopSnapshotSchema)),
 		}),
 	),
 	"session.end_requested": live(
 		Schema.Struct({
 			providerProcessId: Schema.String,
-			stop: Schema.optionalKey(ProviderStopSnapshotSchema),
+			stop: Schema.optionalKey(Schema.NullOr(ProviderStopSnapshotSchema)),
 			retireRunIds: Schema.optionalKey(Schema.Array(Schema.String)),
 		}),
 	),

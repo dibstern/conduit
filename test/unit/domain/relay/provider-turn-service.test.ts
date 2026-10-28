@@ -128,6 +128,7 @@ import {
 	makeOpenCodeInstancesStub,
 	PassThroughSessionInbox,
 } from "../../../helpers/mock-factories.js";
+import { withDurableStopAcceptance } from "../../../helpers/orchestration-engine-test-double.js";
 import { partialFake } from "../../../helpers/partial-fake.js";
 import { providerRuntimeEvent } from "../../../helpers/provider-runtime-event.js";
 
@@ -433,7 +434,6 @@ const serviceLayer = (input: {
 		Layer.succeed(ClaudeEventPersistEffectTag)(
 			input.persist ?? makePersistService(() => Effect.void),
 		),
-		Layer.succeed(OrchestrationEngineTag)(input.engine ?? makeEngine()),
 		Layer.succeed(ProviderRuntimeIngestionTag)(ingestion),
 		AlertsLive,
 		Layer.succeed(SessionTitleServiceTag)(
@@ -452,10 +452,17 @@ const serviceLayer = (input: {
 			Layer.succeed(ProviderStateEffectTag)(input.providerState),
 		);
 	}
+	const completeLayer = Layer.provideMerge(
+		Layer.effect(
+			OrchestrationEngineTag,
+			withDurableStopAcceptance(input.engine ?? makeEngine()),
+		),
+		baseLayer,
+	);
 	return {
 		layer: Layer.provideMerge(
 			ProviderTurnServiceLive,
-			Layer.provideMerge(SessionWorkspaceLive, baseLayer),
+			Layer.provideMerge(SessionWorkspaceLive, completeLayer),
 		),
 		liveLayer: Layer.provideMerge(
 			ProviderTurnServiceLive,
@@ -468,7 +475,7 @@ const serviceLayer = (input: {
 							ClaudeEventPersistEffectTag,
 							makeClaudeEventPersistEffect,
 						),
-						baseLayer,
+						completeLayer,
 					),
 				),
 			),
@@ -1167,6 +1174,9 @@ describe("ProviderTurnService", () => {
 					targetProviderId: "claude",
 					providerProcessId: "original-process",
 				});
+				expect(command.stop?.owners.map(({ runId }) => runId)).toEqual(
+					command.retireRunIds,
+				);
 				const sql = yield* SqlClient.SqlClient;
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				const owners = yield* sql<{ runId: string }>`SELECT run_id AS runId
@@ -1248,8 +1258,13 @@ describe("ProviderTurnService", () => {
 		it.effect(
 			"lifts and wakes the inbox in memory when the abort fails",
 			() => {
-				const dispatchEffect = vi.fn(() =>
-					Effect.fail(new ProviderNotRegistered({ providerId: "claude" })),
+				const issued = Deferred.makeUnsafe<void>();
+				const dispatchEffect = vi.fn((_command: OrchestrationCommand) =>
+					Deferred.succeed(issued, undefined).pipe(
+						Effect.andThen(
+							Effect.fail(new ProviderNotRegistered({ providerId: "claude" })),
+						),
+					),
 				);
 				const engine = makeEngine({ providerId: "claude", dispatchEffect });
 				const { liveLayer } = serviceLayer({ engine });
@@ -1274,7 +1289,12 @@ describe("ProviderTurnService", () => {
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`UPDATE provider_command_outbox SET status = 'pending', attempt_count = 0 WHERE command_id = 'unclaimed-input'`;
 					const lifts = yield* service.fenceLifts;
-					const failed = yield* interruptTurn().pipe(Effect.flip);
+					const stopping = yield* Effect.forkChild(
+						interruptTurn().pipe(Effect.flip),
+					);
+					yield* Deferred.await(issued);
+					yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+					const failed = yield* Fiber.join(stopping);
 					expect(failed).toMatchObject({ _tag: "ProviderNotRegistered" });
 					expect(service.turnFences("session-1").stopping).toBe(false);
 					expect(
@@ -1285,10 +1305,10 @@ describe("ProviderTurnService", () => {
 						{ state: "interrupted" },
 					]);
 					expect(
-						yield* sql`SELECT status FROM provider_command_outbox ORDER BY command_id`,
+						yield* sql`SELECT status FROM provider_command_outbox WHERE effect_type = 'send_turn' ORDER BY command_id`,
 					).toEqual([{ status: "running" }, { status: "failed" }]);
 					expect(
-						yield* sql`SELECT status FROM command_receipts ORDER BY command_id`,
+						yield* sql`SELECT status FROM command_receipts WHERE command_id <> 'cmd-interrupt-default' ORDER BY command_id`,
 					).toEqual([
 						{ status: "side_effect_requested" },
 						{ status: "side_effect_failed" },
@@ -1317,7 +1337,14 @@ describe("ProviderTurnService", () => {
 					]);
 					// A repeated Stop issues a fresh abort instead of awaiting the failed one.
 					yield* interruptTurn().pipe(Effect.flip);
-					expect(dispatchEffect).toHaveBeenCalledTimes(2);
+					expect(
+						dispatchEffect.mock.calls.map(([command]) => command.type),
+					).toEqual([
+						"interrupt_turn",
+						"end_session",
+						"interrupt_turn",
+						"end_session",
+					]);
 					expect(
 						yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id
 						FROM events WHERE type IN ('turn.interrupted', 'turn.error')`,
@@ -1334,7 +1361,7 @@ describe("ProviderTurnService", () => {
 			() => {
 				const issued = Deferred.makeUnsafe<void>();
 				const reject = Deferred.makeUnsafe<void>();
-				const dispatchEffect = vi.fn(() =>
+				const dispatchEffect = vi.fn((_command: OrchestrationCommand) =>
 					Deferred.succeed(issued, undefined).pipe(
 						Effect.andThen(Deferred.await(reject)),
 						Effect.andThen(
@@ -1358,23 +1385,26 @@ describe("ProviderTurnService", () => {
 					expect(first.pollUnsafe()).toBeUndefined();
 					expect(second.pollUnsafe()).toBeUndefined();
 					yield* Deferred.succeed(reject, undefined);
+					yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
 					for (const caller of [first, second]) {
 						expect(yield* Fiber.join(caller)).toMatchObject({
 							_tag: "Failure",
 							failure: { _tag: "ProviderNotRegistered" },
 						});
 					}
-					expect(dispatchEffect).toHaveBeenCalledOnce();
+					expect(
+						dispatchEffect.mock.calls.map(([command]) => command.type),
+					).toEqual(["interrupt_turn", "end_session"]);
 					expect(service.turnFences("session-1").stopping).toBe(false);
 					expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
 						{ status: "running" },
 					]);
 					expect(
-						yield* sql`SELECT status FROM provider_command_outbox`,
+						yield* sql`SELECT status FROM provider_command_outbox WHERE effect_type = 'send_turn'`,
 					).toEqual([{ status: "running" }]);
-					expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
-						{ status: "side_effect_requested" },
-					]);
+					expect(
+						yield* sql`SELECT status FROM command_receipts WHERE command_id <> 'cmd-interrupt-default'`,
+					).toEqual([{ status: "side_effect_requested" }]);
 					expect(
 						yield* sql`SELECT type FROM events WHERE type IN ('turn.error', 'turn.interrupted')`,
 					).toEqual([]);
@@ -1878,7 +1908,7 @@ describe("ProviderTurnService", () => {
 							{ command_id: "fresh-input", status: "running" },
 						]);
 						expect(
-							yield* sql`SELECT command_id, status FROM command_receipts ORDER BY command_id`,
+							yield* sql`SELECT command_id, status FROM command_receipts WHERE command_id <> 'cmd-interrupt-default' ORDER BY command_id`,
 						).toEqual([
 							{ command_id: "active-input", status: "side_effect_failed" },
 							{ command_id: "fresh-input", status: "side_effect_requested" },
@@ -2905,9 +2935,9 @@ describe("ProviderTurnService", () => {
 							? [{ status: "error" }, { status: "joined" }]
 							: [{ status: "error" }],
 					);
-					expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
-						{ status: "side_effect_failed" },
-					]);
+					expect(
+						yield* sql`SELECT status FROM command_receipts WHERE command_id <> 'cmd-interrupt-default'`,
+					).toEqual([{ status: "side_effect_failed" }]);
 					if (replay) {
 						yield* sql`DELETE FROM provider_command_outbox`;
 						yield* sql`DELETE FROM pending_inputs`;
@@ -2920,7 +2950,7 @@ describe("ProviderTurnService", () => {
 						).toEqual([{ input_id: "retry", state: "queued" }]);
 					}
 					expect(
-						yield* sql`SELECT command_id FROM provider_command_outbox`,
+						yield* sql`SELECT command_id FROM provider_command_outbox WHERE effect_type = 'send_turn'`,
 					).toEqual([]);
 					yield* commit([
 						canonicalEvent("input.cancelled", "session-1", {
@@ -3228,14 +3258,14 @@ describe("ProviderTurnService", () => {
 						{ state: "interrupted", started_at: null },
 					]);
 					expect(
-						yield* sql`SELECT status, error_code FROM provider_command_outbox ORDER BY command_id`,
+						yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE effect_type = 'send_turn' ORDER BY command_id`,
 					).toEqual([
 						{ status: "failed", error_code: "interrupted" },
 						{ status: "failed", error_code: "interrupted" },
 						{ status: "failed", error_code: "interrupted" },
 					]);
 					expect(
-						yield* sql`SELECT status FROM command_receipts ORDER BY command_id`,
+						yield* sql`SELECT status FROM command_receipts WHERE command_id <> 'cmd-interrupt-default' ORDER BY command_id`,
 					).toEqual([
 						{ status: "side_effect_failed" },
 						{ status: "side_effect_failed" },

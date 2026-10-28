@@ -63,7 +63,10 @@ import {
 	makeOpenCodeInstancesStub,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
-import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+import {
+	withDispatchEffect,
+	withDurableStopAcceptance,
+} from "../../helpers/orchestration-engine-test-double.js";
 
 const config = {
 	opencodeUrl: "http://127.0.0.1:1",
@@ -497,6 +500,7 @@ describe("prompt processing timeouts through Effect state", () => {
 
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				yield* withDurableStopAcceptance(engine);
 				yield* sql`INSERT INTO sessions (id, provider, title, created_at, updated_at)
 					VALUES ('session-1', 'opencode', 'Stored session', 1, 1)`;
 				yield* startProcessingTimeout(

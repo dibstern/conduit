@@ -4,7 +4,13 @@ import {
 	currentWriteAuthorization,
 	MissingWriteAuthorization,
 } from "../../persistence/effect/commit-and-signal.js";
-import type { makeRunnerReceiptStore } from "./runner-receipts.js";
+import type {
+	makeRunnerReceiptStore,
+	RunnerMember,
+	RunnerRetirement,
+	RunnerSignal,
+	RunnerSignalAttempt,
+} from "./runner-receipts.js";
 
 const grantTypeId = Symbol("RunnerGrant");
 const authorizedTypeId = Symbol("AuthorizedWrite");
@@ -48,10 +54,14 @@ export interface RunnerIdentity<A> {
 	readonly driverKind: string;
 	readonly pid: number | undefined;
 	readonly startTime: string | undefined;
+	readonly reaper: RunnerMember | undefined;
+	readonly members: readonly RunnerMember[];
+	readonly signalLog: readonly RunnerSignalAttempt[];
 	readonly registeredAt: number;
 	readonly socketPath: string | undefined;
 	readonly ownedRunIds: readonly string[];
 	readonly signalled: boolean;
+	readonly signal: RunnerSignal;
 	readonly attachmentId: string | undefined;
 	readonly entry: A | undefined;
 }
@@ -105,6 +115,7 @@ type GrantState =
 			readonly phase:
 				| "starting"
 				| "live"
+				| "stopping"
 				| "detached-starting"
 				| "detached-live"
 				| "forgotten";
@@ -121,6 +132,7 @@ export class AuthorityUnavailable extends Data.TaggedError(
 /** This module owns records and capabilities; callers only receive frozen snapshots. */
 export const makeRunnerAuthority = <A>(
 	receipts?: Effect.Success<ReturnType<typeof makeRunnerReceiptStore>>,
+	retirement?: (runnerId: string) => RunnerRetirement | undefined,
 ) =>
 	Effect.gen(function* () {
 		const clock = yield* Clock.Clock;
@@ -134,10 +146,38 @@ export const makeRunnerAuthority = <A>(
 				driverKind: identity.driverKind ?? "claude",
 				pid: identity.pid,
 				startTime: identity.startTime,
+				reaper: identity.reaper
+					? Object.freeze({ ...identity.reaper })
+					: undefined,
+				members: Object.freeze(
+					(identity.members ?? identity.signal?.members ?? []).map((member) =>
+						Object.freeze({ ...member }),
+					),
+				),
+				signalLog: Object.freeze([...(identity.signalLog ?? [])]),
 				registeredAt: identity.registeredAt ?? 0,
 				socketPath: identity.socketPath,
 				ownedRunIds: Object.freeze([...(identity.ownedRunIds ?? [])]),
 				signalled: identity.signalled ?? false,
+				signal: identity.signal?.members
+					? Object.freeze({
+							...identity.signal,
+							members: Object.freeze(
+								identity.signal.members.map((member) =>
+									Object.freeze({ ...member }),
+								),
+							),
+							...(identity.signal.tag === "KillSent"
+								? {
+										sent: Object.freeze(
+											identity.signal.sent.map((member) =>
+												Object.freeze({ ...member }),
+											),
+										),
+									}
+								: {}),
+						})
+					: Object.freeze({ tag: "None" } satisfies RunnerSignal),
 				attachmentId: identity.attachmentId,
 				entry: identity.entry,
 			});
@@ -176,7 +216,9 @@ export const makeRunnerAuthority = <A>(
 			const previous = state && "cleanup" in state ? state.cleanup : undefined;
 			if (previous) return previous;
 			const permitsCleanup =
-				state?.phase === "live" || state?.phase === "detached-live";
+				state?.phase === "live" ||
+				state?.phase === "stopping" ||
+				state?.phase === "detached-live";
 			const cleanup: CleanupGrant = Object.freeze({
 				[grantTypeId]: true,
 				_tag: "Cleanup",
@@ -207,6 +249,7 @@ export const makeRunnerAuthority = <A>(
 			if (write.kind === "cleanup")
 				allowed =
 					state.phase === "live" ||
+					state.phase === "stopping" ||
 					(grant._tag === "Cleanup" &&
 						state.phase === "cleanup" &&
 						now < grant.expiresAt);
@@ -283,7 +326,7 @@ export const makeRunnerAuthority = <A>(
 			reason: Revocation,
 			cohort?: { readonly ownedRunIds: readonly string[] },
 		) =>
-			Effect.gen(function* () {
+			Effect.sync(() => {
 				if (grant._tag === "Cleanup") return grant;
 				const existing = grants.get(grant);
 				const previousCleanup =
@@ -296,8 +339,8 @@ export const makeRunnerAuthority = <A>(
 						record?.grant !== grant)
 				)
 					return previousCleanup;
-				const cleanup =
-					previousCleanup ?? cleanupFor(grant, cohort?.ownedRunIds ?? []);
+				if (existing && "cleanup" in existing) return existing.cleanup;
+				const cleanup = cleanupFor(grant, cohort?.ownedRunIds ?? []);
 				if (!existing) return cleanup;
 				grants.set(grant, {
 					phase: reason,
@@ -322,15 +365,9 @@ export const makeRunnerAuthority = <A>(
 								: "Unavailable",
 					} satisfies Cleanup,
 				};
-				const revoked =
-					reason === "retired"
-						? save({ ...revokedBase, tag: { _tag: "Retired" } })
-						: save({ ...revokedBase, tag: { _tag: "Exiting", reason } });
-				if (receipts)
-					yield* receipts.retire({
-						...revoked.identity,
-						retiredAt: clock.currentTimeMillisUnsafe(),
-					});
+				if (reason === "retired")
+					save({ ...revokedBase, tag: { _tag: "Retired" } });
+				else save({ ...revokedBase, tag: { _tag: "Exiting", reason } });
 				return cleanup;
 			}).pipe(Effect.provideService(Scheduler.PreventSchedulerYield, true));
 		const isStarting = (record: RunnerRecord<A>): record is Starting<A> =>
@@ -349,18 +386,32 @@ export const makeRunnerAuthority = <A>(
 			phase: "starting" | "live",
 		) =>
 			Effect.gen(function* () {
-				const retired = receipts
-					? yield* receipts
-							.retirements(runners.map((runner) => runner.runnerId))
-							.pipe(
-								Effect.mapError((cause) => new AuthorityUnavailable({ cause })),
-							)
-					: [];
+				const retired = retirement
+					? {
+							rows: runners.flatMap((runner) => {
+								const row = retirement(runner.runnerId);
+								return row ? [row] : [];
+							}),
+							rejected: [],
+						}
+					: receipts
+						? yield* receipts
+								.retirements(runners.map((runner) => runner.runnerId))
+								.pipe(
+									Effect.mapError(
+										(cause) => new AuthorityUnavailable({ cause }),
+									),
+								)
+						: { rows: [], rejected: [] };
 				const adopted = new Map<string, Grant>();
 				const survivors: RunnerRecord<A>[] = [];
-				for (const registration of [...runners].sort(
-					(a, b) => (b.registeredAt ?? 0) - (a.registeredAt ?? 0),
-				)) {
+				for (const registration of runners) {
+					if (
+						retired.rejected.some(
+							(error) => error.runnerId === registration.runnerId,
+						)
+					)
+						continue;
 					let record = records.get(registration.runnerId);
 					if (
 						record?.tag._tag === "Retired" ||
@@ -369,27 +420,29 @@ export const makeRunnerAuthority = <A>(
 						survivors.push(record);
 						continue;
 					}
-					const tombstone = retired.find(
+					const tombstone = retired.rows.find(
 						(row) => row.runnerId === registration.runnerId,
 					);
-					const newer =
-						phase === "starting" &&
-						[...records.values()].some(
-							(other) =>
-								other !== record &&
-								other.identity.sessionId === registration.sessionId &&
-								other.tag._tag === "Starting" &&
-								other.identity.registeredAt >= (registration.registeredAt ?? 0),
-						);
 					const identity = normalize({
 						...record?.identity,
 						...registration,
 						entry: registration.entry ?? record?.identity.entry,
 						...tombstone,
+						...(tombstone
+							? {
+									pid: tombstone.identity.pid,
+									startTime:
+										tombstone.identity.tag === "Verified"
+											? tombstone.identity.startTime
+											: undefined,
+									signal: tombstone.signal,
+									signalled: tombstone.signal.tag !== "None",
+								}
+							: {}),
 					});
 					if (!record)
 						record = save(
-							phase === "live" || tombstone || newer
+							phase === "live" || tombstone
 								? {
 										identity,
 										tag: { _tag: "Live" },
@@ -439,37 +492,13 @@ export const makeRunnerAuthority = <A>(
 										});
 						} else record = save({ ...record, identity });
 					}
-					if (tombstone || newer) {
+					if (tombstone) {
 						yield* revoke(record.grant, "retired", {
 							ownedRunIds: identity.ownedRunIds,
 						});
 						const survivor = records.get(identity.runnerId);
 						if (survivor) survivors.push(survivor);
 						continue;
-					}
-					const previous = [...records.values()].find(
-						(other) =>
-							other !== record &&
-							other.identity.sessionId === identity.sessionId &&
-							other.tag._tag === (phase === "live" ? "Live" : "Starting"),
-					);
-					if (previous) {
-						if (previous.identity.registeredAt > identity.registeredAt) {
-							yield* revoke(record.grant, "retired", {
-								ownedRunIds: identity.ownedRunIds,
-							});
-							const survivor = records.get(identity.runnerId);
-							if (survivor) survivors.push(survivor);
-							continue;
-						}
-						const reason =
-							phase === "live" && identity.entry ? "superseded" : "retired";
-						yield* revoke(previous.grant, reason, {
-							ownedRunIds: previous.identity.ownedRunIds,
-						});
-						adopted.delete(previous.identity.runnerId);
-						const survivor = records.get(previous.identity.runnerId);
-						if (reason === "retired" && survivor) survivors.push(survivor);
 					}
 					if (phase === "live" && isStarting(record))
 						record = save(promote(record));
@@ -485,23 +514,40 @@ export const makeRunnerAuthority = <A>(
 			revoke,
 			authorize,
 			guarded,
+			beginStop: (grant: Grant) => {
+				if (grants.get(grant)?.phase === "live")
+					grants.set(grant, { phase: "stopping" });
+			},
 			observe: (runnerId: string) => {
 				const record = records.get(runnerId);
 				if (record) save({ ...record, observation: "Observed" });
 			},
-			markSignalled: (runnerId: string) => {
-				const record = records.get(runnerId);
+			recordRetirement: (retirement: RunnerRetirement) => {
+				const record = records.get(retirement.runnerId);
 				if (record)
 					save({
 						...record,
-						identity: normalize({ ...record.identity, signalled: true }),
+						identity: normalize({
+							...record.identity,
+							reaper: retirement.reaper,
+							members: retirement.members,
+							signalLog: retirement.signalLog,
+							signal: retirement.signal,
+							signalled:
+								record.identity.signalled || retirement.signal.tag !== "None",
+						}),
 					});
 			},
 			forget: (runnerId: string) => {
 				const record = records.get(runnerId);
 				if (record) {
 					const state = grants.get(record.grant);
-					if (state && (state.phase === "starting" || state.phase === "live"))
+					if (
+						state &&
+						(state.phase === "starting" ||
+							state.phase === "live" ||
+							state.phase === "stopping")
+					)
 						grants.set(record.grant, {
 							phase: "forgotten",
 						});
@@ -513,7 +559,12 @@ export const makeRunnerAuthority = <A>(
 				evidence: Pick<
 					RunnerIdentity<A>,
 					"pid" | "startTime" | "ownedRunIds" | "signalled"
-				>,
+				> & {
+					readonly signal?: RunnerSignal;
+					readonly reaper?: RunnerMember | undefined;
+					readonly members?: readonly RunnerMember[];
+					readonly signalLog?: readonly RunnerSignalAttempt[];
+				},
 			) => {
 				const record = records.get(runnerId);
 				if (
@@ -529,6 +580,10 @@ export const makeRunnerAuthority = <A>(
 						startTime: evidence.startTime,
 						ownedRunIds: evidence.ownedRunIds,
 						signalled: record.identity.signalled || evidence.signalled,
+						signal: evidence.signal ?? record.identity.signal,
+						reaper: evidence.reaper ?? record.identity.reaper,
+						members: evidence.members ?? record.identity.members,
+						signalLog: evidence.signalLog ?? record.identity.signalLog,
 					}),
 				});
 				return true;
@@ -551,12 +606,6 @@ export const makeRunnerAuthority = <A>(
 						}),
 					});
 				}
-			},
-			startWatching: (runnerId: string) => {
-				const record = records.get(runnerId);
-				if (!record || record.watcher === "Watching") return false;
-				save({ ...record, watcher: "Watching" });
-				return true;
 			},
 			beginCleanup: (runnerId: string) => {
 				const record = records.get(runnerId);

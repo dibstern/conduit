@@ -50,6 +50,8 @@ describe("Schema Migration", () => {
 					[84, "session_draft_delete"],
 					[85, "turn_request_settings"],
 					[86, "events_provider_identity_indexes"],
+					[87, "provider_run_holder"],
+					[88, "provider_run_held_transmission"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -120,6 +122,8 @@ describe("Schema Migration", () => {
 					[84, "session_draft_delete"],
 					[85, "turn_request_settings"],
 					[86, "events_provider_identity_indexes"],
+					[87, "provider_run_holder"],
+					[88, "provider_run_held_transmission"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -411,6 +415,11 @@ describe("Schema Migration", () => {
 				{
 					name: "idx_provider_command_turns_session",
 					table: "provider_command_turns",
+					unique: false,
+				},
+				{
+					name: "idx_provider_runs_runner_status",
+					table: "provider_runs",
 					unique: false,
 				},
 				{

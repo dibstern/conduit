@@ -1,8 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
+	closeSync,
+	fsyncSync,
 	lstatSync,
 	mkdirSync,
+	openSync,
 	readdirSync,
 	readFileSync,
 	readlinkSync,
@@ -11,10 +14,11 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Data } from "effect";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { isRecord } from "../../utils.js";
+import type { RunnerMember } from "./runner-receipts.js";
 
 class RunnerRegistryError extends Data.TaggedError("RunnerRegistryError")<{
 	readonly message: string;
@@ -27,7 +31,6 @@ export interface RunnerRegistration {
 	readonly socketPath: string;
 	readonly buildId: string;
 	readonly pid: number;
-	readonly role?: "candidate" | "retiring";
 	readonly startTime?: string;
 	readonly registeredAt?: number;
 	readonly signalled?: boolean;
@@ -38,22 +41,134 @@ export interface RunnerProcessTable {
 	readonly inspect: (pid: number) => {
 		readonly state: "running" | "zombie" | "gone" | "unknown";
 		readonly startTime?: string;
+		readonly pgid?: number;
 	};
 	readonly signal: (pid: number, signal: NodeJS.Signals) => void;
+	readonly members?: (pgid: number) => readonly RunnerMember[] | undefined;
+	readonly inspectMany?: (
+		pids: readonly number[],
+	) => ReadonlyMap<number, ReturnType<RunnerProcessTable["inspect"]>>;
 }
 
+export const runnerMembersGone = (
+	table: RunnerProcessTable,
+	members: readonly {
+		readonly pid: number;
+		readonly startTime?: string | undefined;
+	}[],
+) => {
+	if (members.length === 0) return true;
+	const current = table.inspectMany?.([
+		...new Set(members.map((member) => member.pid)),
+	]);
+	const inspect: RunnerProcessTable["inspect"] = (target) =>
+		current
+			? (current.get(target) ?? { state: "unknown" })
+			: table.inspect(target);
+	const gone = (target: number, started?: string) => {
+		const process = inspect(target);
+		return (
+			process.state === "gone" ||
+			process.state === "zombie" ||
+			(started !== undefined &&
+				process.startTime !== undefined &&
+				process.startTime !== started)
+		);
+	};
+	return members.every((member) => gone(member.pid, member.startTime));
+};
+
 const newestRunnerFirst = (a: RunnerRegistration, b: RunnerRegistration) =>
-	(a.role === "candidate" ? 2 : a.role === "retiring" ? 1 : 0) -
-		(b.role === "candidate" ? 2 : b.role === "retiring" ? 1 : 0) ||
 	(b.registeredAt ?? 0) - (a.registeredAt ?? 0);
 
+/** Legacy role ranking is used only by the one-time cursor backfill. Delete with 32.13. */
+export function legacyRunnerRanking(
+	configDir: string,
+): ReadonlyMap<
+	string,
+	{ readonly role?: "candidate" | "retiring"; readonly registeredAt: number }
+> {
+	const ranking = new Map<
+		string,
+		{ readonly role?: "candidate" | "retiring"; readonly registeredAt: number }
+	>();
+	const root = join(resolve(configDir), "r");
+	let directories: string[];
+	try {
+		directories = readdirSync(root);
+	} catch {
+		return ranking;
+	}
+	for (const directory of directories) {
+		if (!/^[0-9a-f]{12}$/.test(directory)) continue;
+		try {
+			for (const filename of readdirSync(join(root, directory))) {
+				if (!/^[0-9a-f]{12}\.json$/.test(filename)) continue;
+				try {
+					const path = join(root, directory, filename);
+					const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+					if (!isRecord(value)) continue;
+					ranking.set(filename.slice(0, -5), {
+						...(value["role"] === "candidate" || value["role"] === "retiring"
+							? { role: value["role"] }
+							: {}),
+						registeredAt:
+							typeof value["registeredAt"] === "number"
+								? value["registeredAt"]
+								: lstatSync(path).mtimeMs,
+					});
+				} catch {
+					// A missing or malformed legacy registry gives the cursor sequence precedence.
+				}
+			}
+		} catch {
+			// A removed legacy directory is equivalent to no registry entry.
+		}
+	}
+	return ranking;
+}
+
 export const runnerProcessTable: RunnerProcessTable = {
+	inspectMany: (pids) => {
+		const observed = new Map<
+			number,
+			ReturnType<RunnerProcessTable["inspect"]>
+		>();
+		if (pids.length === 0) return observed;
+		try {
+			const output = execFileSync(
+				"ps",
+				["-o", "pid=,pgid=,lstart=,stat=", "-p", pids.join(",")],
+				{
+					encoding: "utf8",
+					env: { ...process.env, LC_ALL: "C" },
+					stdio: ["ignore", "pipe", "ignore"],
+					timeout: 1000,
+				},
+			);
+			for (const line of output.split("\n")) {
+				const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s+(\S+)\s*$/.exec(line);
+				if (match?.[1] && match[2] && match[3] && match[4])
+					observed.set(Number(match[1]), {
+						state: match[4].startsWith("Z") ? "zombie" : "running",
+						startTime: match[3],
+						pgid: Number(match[2]),
+					});
+			}
+		} catch {
+			// A failed inspection is not proof that a process has exited.
+		}
+		for (const pid of pids)
+			if (!observed.has(pid))
+				observed.set(pid, { state: runnerPidAlive(pid) ? "unknown" : "gone" });
+		return observed;
+	},
 	inspect: (pid) => {
 		if (!runnerPidAlive(pid)) return { state: "gone" };
 		try {
 			const output = execFileSync(
 				"ps",
-				["-o", "lstart=", "-o", "stat=", "-p", String(pid)],
+				["-o", "pgid=,lstart=,stat=", "-p", String(pid)],
 				{
 					encoding: "utf8",
 					// lstart is persisted and compared across daemon environments.
@@ -62,17 +177,36 @@ export const runnerProcessTable: RunnerProcessTable = {
 					timeout: 1000,
 				},
 			).trim();
-			const match = /^(.*?)\s+(\S+)$/.exec(output);
-			if (!match?.[1] || !match[2]) return { state: "unknown" };
+			const match = /^(\d+)\s+(.*?)\s+(\S+)$/.exec(output);
+			if (!match?.[1] || !match[2] || !match[3]) return { state: "unknown" };
 			return {
-				state: match[2].startsWith("Z") ? "zombie" : "running",
-				startTime: match[1],
+				state: match[3].startsWith("Z") ? "zombie" : "running",
+				startTime: match[2],
+				pgid: Number(match[1]),
 			};
 		} catch {
 			return { state: runnerPidAlive(pid) ? "unknown" : "gone" };
 		}
 	},
 	signal: (pid, signal) => process.kill(pid, signal),
+	members: (pgid) => {
+		try {
+			const output = execFileSync("ps", ["-axo", "pid=,pgid=,lstart="], {
+				encoding: "utf8",
+				env: { ...process.env, LC_ALL: "C" },
+				stdio: ["ignore", "pipe", "ignore"],
+				timeout: 1000,
+			});
+			return output.split("\n").flatMap((line) => {
+				const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line);
+				return match?.[1] && match[2] && match[3] && Number(match[2]) === pgid
+					? [{ pid: Number(match[1]), startTime: match[3] }]
+					: [];
+			});
+		} catch {
+			return undefined;
+		}
+	},
 };
 
 function runnerTargetDirectory(
@@ -147,19 +281,78 @@ export function registerRunner(entry: RunnerRegistration): void {
 		/* First registration. */
 	}
 	const temporary = `${entry.socketPath}.${randomUUID()}.json.tmp`;
-	writeFileSync(
-		temporary,
-		JSON.stringify({
-			...entry,
-			startTime:
-				entry.startTime ??
-				previous.startTime ??
-				runnerProcessTable.inspect(entry.pid).startTime,
-			registeredAt: previous.registeredAt ?? entry.registeredAt ?? Date.now(),
-		}),
-		{ mode: 0o600 },
-	);
+	const contents = JSON.stringify({
+		...entry,
+		startTime:
+			entry.startTime ??
+			previous.startTime ??
+			runnerProcessTable.inspect(entry.pid).startTime,
+		registeredAt: previous.registeredAt ?? entry.registeredAt ?? Date.now(),
+	});
+	// Identity remains beside the journal/spool after discovery is removed.
+	// Publish it durably before this process can become discoverable or execute.
+	const evidence = `${entry.socketPath}.evidence.json`;
+	writeFileSync(temporary, contents, { mode: 0o600 });
+	const fd = openSync(temporary, "r");
+	try {
+		fsyncSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+	renameSync(temporary, evidence);
+	const directoryFd = openSync(dirname(evidence), "r");
+	try {
+		fsyncSync(directoryFd);
+	} finally {
+		closeSync(directoryFd);
+	}
+	writeFileSync(temporary, contents, { mode: 0o600 });
 	renameSync(temporary, `${entry.socketPath}.json`);
+}
+
+/** Recovery finds retained evidence independently of live-runner discovery. */
+export function readRunnerEvidence(
+	configDir: string,
+	runnerId: string,
+	sessionId: string,
+):
+	| Pick<RunnerRegistration, "socketPath" | "buildId" | "driverKind">
+	| undefined {
+	if (!/^[0-9a-f]{12}$/.test(runnerId)) return undefined;
+	const root = join(resolve(configDir), "r");
+	try {
+		for (const directory of readdirSync(root)) {
+			if (!/^[0-9a-f]{12}$/.test(directory)) continue;
+			try {
+				const socketPath = join(
+					runnerSocketDirectory(join(root, directory)),
+					runnerId,
+				);
+				const value: unknown = JSON.parse(
+					readFileSync(`${socketPath}.evidence.json`, "utf8"),
+				);
+				if (
+					isRecord(value) &&
+					value["runnerId"] === runnerId &&
+					value["sessionId"] === sessionId &&
+					value["socketPath"] === socketPath &&
+					typeof value["buildId"] === "string"
+				)
+					return {
+						socketPath,
+						buildId: value["buildId"],
+						...(typeof value["driverKind"] === "string"
+							? { driverKind: value["driverKind"] }
+							: {}),
+					};
+			} catch {
+				// Unreadable identity never proves that journal absence is safe.
+			}
+		}
+	} catch {
+		// Missing identity is unknown build evidence, never current-build proof.
+	}
+	return undefined;
 }
 
 export function runnerPidAlive(pid: number): boolean {
@@ -192,8 +385,14 @@ export function runnerPidMatchesRegistration(
 	}
 }
 
-export function removeRunner(socketPath: string): void {
-	for (const suffix of ["", ".json", ".spool"])
+export function removeRunnerDiscovery(socketPath: string): void {
+	for (const suffix of ["", ".json"])
+		rmSync(`${socketPath}${suffix}`, { force: true });
+}
+
+/** Only the Gone/Settle/prune lifecycle may discard retained output identity. */
+export function removeRunnerEvidence(socketPath: string): void {
+	for (const suffix of [".spool", ".evidence.json"])
 		rmSync(`${socketPath}${suffix}`, { force: true });
 }
 
@@ -251,12 +450,14 @@ function discoverRunnersInDirectory(
 				typeof value["buildId"] !== "string" ||
 				typeof value["pid"] !== "number" ||
 				!Number.isSafeInteger(value["pid"]) ||
-				value["pid"] <= 0 ||
-				["gone", "zombie"].includes(processTable.inspect(value["pid"]).state)
+				value["pid"] <= 0
 			) {
-				removeRunner(socketPath);
+				removeRunnerDiscovery(socketPath);
 				continue;
 			}
+			// A dead process is not a live discovery candidate. Settle uses evidence.
+			if (["gone", "zombie"].includes(processTable.inspect(value["pid"]).state))
+				continue;
 			entries.push({
 				// Runner builds predating driverKind were all Claude.
 				driverKind:
@@ -280,12 +481,9 @@ function discoverRunnersInDirectory(
 				value["ownedRunIds"].every((id) => typeof id === "string")
 					? { ownedRunIds: value["ownedRunIds"] }
 					: {}),
-				...(value["role"] === "candidate" || value["role"] === "retiring"
-					? { role: value["role"] }
-					: {}),
 			});
 		} catch {
-			removeRunner(socketPath);
+			removeRunnerDiscovery(socketPath);
 		}
 	}
 	return entries.sort(newestRunnerFirst);

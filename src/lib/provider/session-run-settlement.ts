@@ -8,6 +8,22 @@ export interface RunSettlementOwner {
 	readonly runId: string;
 }
 
+/** A joined run uses its owner's earliest live send, as the socket and hold do. */
+export const runSendCommandIdQuery = (
+	sql: SqlClient.SqlClient,
+	sessionId: string,
+	runId: string,
+) =>
+	sql<{ command_id: string }>`SELECT command.command_id
+		FROM provider_runs requested JOIN provider_command_outbox command
+			ON command.run_id = COALESCE(requested.joined_into, requested.id)
+			AND command.session_id = requested.session_id
+		WHERE requested.id = ${runId} AND requested.session_id = ${sessionId}
+			AND command.effect_type = 'send_turn' AND command.status = 'running'
+		ORDER BY command.request_sequence LIMIT 1`.pipe(
+		Effect.map((rows) => rows[0]?.command_id),
+	);
+
 export const sessionRunOwnersQuery = (
 	sql: SqlClient.SqlClient,
 	sessionId: string,
@@ -71,11 +87,42 @@ export const legacyStopOwnersQuery = (
 	LEFT JOIN turns turn ON turn.run_id = owner.id AND turn.session_id = command.session_id
 	LEFT JOIN messages message ON message.id = turn.user_message_id AND message.session_id = turn.session_id
 	WHERE control.command_id = ${commandId} AND control.session_id = ${sessionId}
+		AND json_type(control.payload_json, '$.stop') IS NULL
 		AND (control.effect_type = 'end_session' OR
 			COALESCE(json_extract(command.payload_json, '$.continuation.cutOffMessageId'), json_extract(command.payload_json, '$.inputId'), command.command_id)
 				IN (SELECT value FROM json_each(control.payload_json, '$.turnIds'))
 			OR COALESCE(message.input_id, turn.user_message_id)
 				IN (SELECT value FROM json_each(control.payload_json, '$.turnIds')))`;
+
+/** The committed cohort is authoritative even after a send is recommitted. */
+export const stopCovers = (
+	sql: SqlClient.SqlClient,
+	sessionId: string,
+	runId: string,
+) =>
+	Effect.gen(function* () {
+		const controls = yield* sql<{
+			command_id: string;
+			has_snapshot: number;
+			covered: number;
+		}>`SELECT command_id,
+			json_type(payload_json, '$.stop') IS NOT NULL AS has_snapshot,
+			EXISTS (SELECT 1 FROM json_each(payload_json, '$.stop.owners') owner
+				WHERE json_extract(owner.value, '$.runId') = ${runId}) AS covered
+		FROM provider_command_outbox WHERE session_id = ${sessionId}
+			AND effect_type IN ('interrupt_turn', 'end_session')`;
+		for (const control of controls) {
+			if (control.covered === 1) return true;
+			if (control.has_snapshot === 1) continue;
+			const owners = yield* legacyStopOwnersQuery(
+				sql,
+				sessionId,
+				control.command_id,
+			);
+			if (owners.some((owner) => owner.runId === runId)) return true;
+		}
+		return false;
+	});
 
 /** Only call after the provider confirms that this session or exact cohort cannot still run.
  * Guard publication against a changed session or process generation when the

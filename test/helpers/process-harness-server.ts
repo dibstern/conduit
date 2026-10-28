@@ -352,16 +352,24 @@ async function main(): Promise<void> {
 		| import("../../src/lib/domain/daemon/Layers/daemon-foreground.js").ForegroundDaemonHandle
 		| undefined;
 	let disconnected = false;
+	let disconnectDeadline: ReturnType<typeof setTimeout> | undefined;
 	// The parent cannot enforce its kill deadline after it disappears. Keep a
 	// local deadline, including disconnects during daemon startup.
 	process.once("disconnect", () => {
 		disconnected = true;
-		// Allow the runner's 1s reply window and 3s force-kill budget to finish.
-		setTimeout(() => process.exit(1), 6000);
-		void daemon?.stop().catch((error: unknown) => {
-			console.error(error);
-			process.exit(1);
-		});
+		// Active teardown drains scopes before the 2s hello and 4s Stop window.
+		// Keep its finite fallback after the parent's 8s observation guard.
+		disconnectDeadline = setTimeout(
+			() => process.exit(1),
+			daemon ? 9000 : 6000,
+		);
+		void daemon
+			?.stop()
+			.then(() => clearTimeout(disconnectDeadline))
+			.catch((error: unknown) => {
+				console.error(error);
+				process.exit(1);
+			});
 	});
 	if (!process.connected) process.exit(1);
 	const codeRoot = dist
@@ -1481,6 +1489,7 @@ async function main(): Promise<void> {
 	daemon = activeDaemon;
 	if (disconnected) {
 		await activeDaemon.stop();
+		clearTimeout(disconnectDeadline);
 		process.exit(0);
 	}
 	// Restarts must preserve a test's deliberate project removal.

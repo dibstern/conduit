@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Cause, Deferred, Effect, Exit, Fiber } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Scheduler } from "effect";
 import { expect, it, vi } from "vitest";
 import {
 	AccountIdSchema,
@@ -124,6 +124,42 @@ for (const { name, mode } of [
 		name: "refuses a config-directory replacement during pending delivery",
 		mode: "late-abort-config",
 	},
+	{
+		name: "reserves only a quiescent runner and clears its reservation on command or hello",
+		mode: "role-reservation",
+	},
+	{
+		name: "activates a candidate without resetting its role on hello or cancel",
+		mode: "role-candidate",
+	},
+	{
+		name: "35/45: remembers interrupted run ids while admitting a continuation with the same input id",
+		mode: "interrupted-runs",
+	},
+	{
+		name: "an older interrupt without run ids does not fence later sends",
+		mode: "legacy-interrupt",
+	},
+	{
+		name: "refuses a retiring send before command acceptance",
+		mode: "refusal-retiring",
+	},
+	{
+		name: "refuses an exiting send before command acceptance",
+		mode: "refusal-exiting",
+	},
+	{
+		name: "hello waits for the preceding connection to drain to EOF",
+		mode: "hello-drain",
+	},
+	{
+		name: "a drained reconnect sees a received command before its execution fiber starts",
+		mode: "status-before-execution",
+	},
+	{
+		name: "fallback status distinguishes a finished primary from a never-received fallback",
+		mode: "fallback-status",
+	},
 ]) {
 	it(name, async () => {
 		const directory = mkdtempSync(join(tmpdir(), "stale-host-"));
@@ -177,6 +213,7 @@ for (const { name, mode } of [
 					socketPath,
 					"session-1",
 					"runner-1",
+					...(mode === "role-candidate" ? ["upgrade"] : []),
 				],
 			});
 			await Effect.runPromise(
@@ -193,18 +230,58 @@ for (const { name, mode } of [
 						const targetAccepted = yield* Deferred.make<void>();
 						const clientClosed = yield* Deferred.make<void>();
 						const serverDisconnected = yield* Deferred.make<void>();
+						let disconnectSignal = serverDisconnected;
 						const disconnect = RunnerSpool.prototype.disconnect;
 						const disconnected = vi
 							.spyOn(RunnerSpool.prototype, "disconnect")
 							.mockImplementation(function (this: RunnerSpool, peer) {
 								disconnect.call(this, peer);
-								Deferred.doneUnsafe(serverDisconnected, Effect.void);
+								Deferred.doneUnsafe(disconnectSignal, Effect.void);
 							});
 						yield* Effect.addFinalizer(() =>
 							Effect.sync(() => disconnected.mockRestore()),
 						);
 						const states: RunnerUpgradeState[] = [];
+						const receivedFrames: import("../../../src/lib/provider/runner/runner-protocol.js").RunnerMessage[] =
+							[];
+						const wireFrames: import("../../../src/lib/provider/runner/runner-protocol.js").RunnerMessage[] =
+							[];
+						const rawRefusal =
+							yield* Deferred.make<
+								Extract<
+									import("../../../src/lib/provider/runner/runner-protocol.js").RunnerMessage,
+									{ type: "command-reply" }
+								>
+							>();
 						let producerReleased = false;
+						let pauseCommand = false;
+						let resumeCommand: (() => void) | undefined;
+						const scheduler = new Scheduler.MixedScheduler();
+						const pausedScheduler: Scheduler.Scheduler = {
+							executionMode: "async",
+							shouldYield: (fiber) =>
+								pauseCommand || scheduler.shouldYield(fiber),
+							makeDispatcher: () => {
+								const dispatcher = scheduler.makeDispatcher();
+								if (!pauseCommand) return dispatcher;
+								pauseCommand = false;
+								const pending: Array<() => void> = [];
+								let resumed = false;
+								resumeCommand = () => {
+									resumed = true;
+									for (const task of pending.splice(0)) task();
+								};
+								return {
+									scheduleTask: (task, priority) =>
+										resumed
+											? dispatcher.scheduleTask(task, priority)
+											: pending.push(() =>
+													dispatcher.scheduleTask(task, priority),
+												),
+									flush: () => dispatcher.flush(),
+								};
+							},
+						};
 						Object.defineProperty(process, "send", {
 							configurable: true,
 							writable: true,
@@ -228,6 +305,18 @@ for (const { name, mode } of [
 								runSessionRunner("claude", (callbacks) =>
 									Deferred.succeed(launched, callbacks).pipe(
 										Effect.as({
+											...(mode === "status-before-execution"
+												? {
+														wire: {
+															decode: (message) => message,
+															encode: (message) => {
+																if (message.type === "command-accepted")
+																	pauseCommand = true;
+																return `${JSON.stringify(message)}\n`;
+															},
+														} satisfies import("../../../src/lib/provider/runner/runner-protocol.js").RunnerWireCodec,
+													}
+												: {}),
 											makeRunner: (_config, emit) => {
 												const payload = makePayload(emit);
 												Deferred.doneUnsafe(
@@ -250,13 +339,42 @@ for (const { name, mode } of [
 												) === "Account",
 											acceptCommand: () => {},
 											executeEffect: (runner, command) =>
-												runner.executeNativeEffect(command),
+												mode === "status-before-execution"
+													? Effect.succeed({
+															status: "completed" as const,
+															cost: 0,
+															tokens: { input: 0, output: 0 },
+															durationMs: 0,
+															providerStateUpdates: [],
+														})
+													: mode === "fallback-status" &&
+															command.type === "send-turn" &&
+															!command.input.nativeResumeFallback
+														? Effect.succeed({
+																status: "error" as const,
+																cost: 0,
+																tokens: { input: 0, output: 0 },
+																durationMs: 0,
+																providerStateUpdates: [],
+																nativeResumeRejected: true,
+																error: {
+																	code: "claude_resume_refused",
+																	message: "rejected before native input",
+																},
+															})
+														: runner.executeNativeEffect(command),
 										} satisfies RunnerLaunch),
 									),
+								).pipe(
+									Effect.provideService(Scheduler.Scheduler, pausedScheduler),
 								),
 							),
 						);
-						yield* Effect.addFinalizer(() => Fiber.interrupt(host));
+						yield* Effect.addFinalizer(() =>
+							Effect.sync(() => resumeCommand?.()).pipe(
+								Effect.andThen(Fiber.interrupt(host)),
+							),
+						);
 						yield* Effect.raceFirst(
 							Deferred.await(listening),
 							Fiber.join(host),
@@ -270,6 +388,12 @@ for (const { name, mode } of [
 						const client = new RunnerSocket(
 							socket,
 							(message) => {
+								receivedFrames.push(message);
+								if (
+									message.type === "command-reply" &&
+									message.commandId === "covered-send"
+								)
+									Deferred.doneUnsafe(rawRefusal, Effect.succeed(message));
 								if (
 									message.type === "command-accepted" &&
 									message.commandId === "target-command" &&
@@ -291,7 +415,7 @@ for (const { name, mode } of [
 									else if (producerReleased)
 										Deferred.doneUnsafe(released, Effect.void);
 								}
-								if (message.type === "output")
+								if (message.type === "output" && !socket.writableEnded)
 									client.write({
 										type: "output-reply",
 										outputId: message.outputId,
@@ -300,6 +424,14 @@ for (const { name, mode } of [
 									});
 							},
 							(failure) => Deferred.doneUnsafe(hello, Effect.fail(failure)),
+							undefined,
+							{
+								decode: (message) => {
+									wireFrames.push(message);
+									return message;
+								},
+								encode: (message) => `${JSON.stringify(message)}\n`,
+							},
 						);
 						// Scope finalizers run in reverse order: close the client, then cancel host.
 						yield* Effect.addFinalizer(() =>
@@ -329,6 +461,354 @@ for (const { name, mode } of [
 						const payload = yield* Deferred.await(payloadReady);
 						client.write({ type: "replay", acknowledgedSequence: 0 });
 						yield* Deferred.await(replayed);
+						if (mode === "fallback-status") {
+							const primary: Extract<SessionCommand, { type: "send-turn" }> = {
+								type: "send-turn",
+								sinkId: "resume-sink",
+								aborted: false,
+								input: {
+									...sourceInput,
+									inputId: "resume-input",
+									runId: "resume-run",
+									prompt: "resume",
+									history: [],
+								},
+							};
+							yield* client.commandEffect("resume", primary, 1);
+							expect(yield* client.commandStatusEffect("resume", 1)).toBe(
+								"completed",
+							);
+							expect(
+								yield* client.commandStatusEffect("resume", 1, false),
+							).toBe("completed");
+							expect(yield* client.commandStatusEffect("resume", 1, true)).toBe(
+								"not_received",
+							);
+							expect(
+								wireFrames
+									.filter((frame) => frame.type === "command-status-reply")
+									.map((frame) =>
+										"nativeResumeFallback" in frame
+											? frame.nativeResumeFallback
+											: undefined,
+									),
+							).toEqual([undefined, false, true]);
+							yield* client.commandEffect(
+								"resume",
+								{
+									...primary,
+									input: { ...primary.input, nativeResumeFallback: true },
+								},
+								1,
+							);
+							expect(yield* client.commandStatusEffect("resume", 1, true)).toBe(
+								"completed",
+							);
+							expect(payload.admittedInputs).toEqual(["resume-input"]);
+							return;
+						}
+						if (
+							mode === "interrupted-runs" ||
+							mode === "legacy-interrupt" ||
+							mode === "refusal-retiring" ||
+							mode === "refusal-exiting"
+						) {
+							if (mode === "refusal-retiring" || mode === "refusal-exiting") {
+								callbacks.retireAfterCommand?.("finishing-input");
+								if (mode === "refusal-exiting")
+									callbacks.turnStateChanged(false);
+							} else
+								yield* client.commandEffect("stop-before-send", {
+									type: "interrupt",
+									sessionId: "session-1",
+									turnIds: ["shared-cut-off"],
+									...(mode === "interrupted-runs"
+										? { runIds: ["covered-run"] }
+										: {}),
+								});
+							const coveredSend: Extract<
+								SessionCommand,
+								{ type: "send-turn" }
+							> = {
+								type: "send-turn",
+								sinkId: "covered-sink",
+								aborted: false,
+								input: {
+									...sourceInput,
+									inputId: "shared-cut-off",
+									runId: "covered-run",
+									prompt: "covered",
+									history: [],
+								},
+							};
+							const first = yield* Effect.result(
+								mode === "refusal-exiting"
+									? Effect.gen(function* () {
+											// Bypass the daemon's pre-write idle guard to exercise the host wire branch.
+											client.write({
+												type: "command",
+												commandId: "covered-send",
+												command: coveredSend,
+											});
+											const reply = yield* Deferred.await(rawRefusal);
+											return reply.failure
+												? yield* Effect.fail(reply.failure)
+												: reply.result;
+										})
+									: client.commandEffect("covered-send", coveredSend),
+							);
+							if (mode === "legacy-interrupt") {
+								expect(first._tag).toBe("Success");
+								expect(payload.admittedInputs).toEqual(["shared-cut-off"]);
+							} else {
+								expect(first._tag).toBe("Failure");
+								const reason =
+									mode === "refusal-retiring"
+										? "retiring"
+										: mode === "refusal-exiting"
+											? "exiting"
+											: "interrupted";
+								if (first._tag === "Failure")
+									expect(first.failure).toMatchObject({
+										delivery: { _tag: "Refused", reason },
+									});
+								expect(
+									wireFrames.filter(
+										(frame) => frame.type === "command-refused",
+									),
+								).toEqual([
+									{
+										type: "command-refused",
+										commandId: "covered-send",
+										attempt: 0,
+										nativeResumeFallback: false,
+										reason,
+									},
+								]);
+								expect(payload.admittedInputs).toEqual([]);
+								expect(
+									receivedFrames.filter(
+										(frame) =>
+											frame.type === "command-accepted" &&
+											frame.commandId === "covered-send",
+									),
+								).toEqual([]);
+							}
+							if (mode === "interrupted-runs") {
+								expect(
+									yield* client.commandEffect("uncovered-send", {
+										type: "send-turn",
+										sinkId: "uncovered-sink",
+										aborted: false,
+										input: {
+											...sourceInput,
+											inputId: "shared-cut-off",
+											runId: "uncovered-run",
+											prompt: "after Stop",
+											history: [],
+										},
+									}),
+								).toEqual(payload.result);
+								expect(payload.admittedInputs).toEqual(["shared-cut-off"]);
+							}
+							return;
+						}
+						if (mode === "hello-drain" || mode === "status-before-execution") {
+							const nextSocket = new Socket();
+							const nextClosed = yield* Deferred.make<void>();
+							const nextDisconnected = yield* Deferred.make<void>();
+							let nextConnected = false;
+							nextSocket.once("close", () =>
+								Deferred.doneUnsafe(nextClosed, Effect.void),
+							);
+							const nextHello =
+								yield* Deferred.make<
+									import("../../../src/lib/provider/runner/runner-protocol.js").RunnerHello
+								>();
+							const nextReply = yield* Deferred.make<void>();
+							const next = new RunnerSocket(
+								nextSocket,
+								(message) => {
+									if (message.type === "hello")
+										Deferred.doneUnsafe(nextHello, Effect.succeed(message));
+									if (
+										message.type === "command-reply" &&
+										message.commandId === "last-old-command"
+									)
+										Deferred.doneUnsafe(nextReply, Effect.void);
+								},
+								() => {},
+							);
+							yield* Effect.addFinalizer(() =>
+								Effect.gen(function* () {
+									client.destroy();
+									yield* Deferred.await(clientClosed);
+									yield* Deferred.await(serverDisconnected);
+									disconnectSignal = nextDisconnected;
+									next.destroy();
+									yield* Deferred.await(nextClosed);
+									if (nextConnected) yield* Deferred.await(nextDisconnected);
+								}),
+							);
+							yield* Effect.tryPromise(
+								() =>
+									new Promise<void>((resolve, reject) => {
+										nextSocket.once("error", reject);
+										nextSocket.connect(socketPath, resolve);
+									}),
+							);
+							nextConnected = true;
+							next.write({
+								type: "hello",
+								protocolVersion: RUNNER_PROTOCOL_VERSION,
+								buildId: runnerBuildId(),
+								config: {
+									workspaceRoot: directory,
+									daemonConfigDir: directory,
+								},
+							});
+							// The old stream remains writable, so the new hello cannot answer absence yet.
+							expect(yield* Deferred.isDone(nextHello)).toBe(false);
+							client.write({
+								type: "command",
+								commandId: "last-old-command",
+								command: {
+									type: "send-turn",
+									sinkId: "last-old-sink",
+									aborted: false,
+									input: {
+										...sourceInput,
+										inputId: "last-old-input",
+										runId: "last-old-run",
+										prompt: "last",
+										history: [],
+									},
+								},
+							});
+							socket.end();
+							const answered = yield* Deferred.await(nextHello);
+							if (mode === "status-before-execution") {
+								expect(resumeCommand).toBeDefined();
+								expect(
+									yield* next.commandStatusEffect("last-old-command", 0),
+								).toBe("running");
+								resumeCommand?.();
+								yield* Deferred.await(nextReply);
+								expect(
+									yield* next.commandStatusEffect("last-old-command", 0),
+								).toBe("completed");
+								return;
+							}
+							expect(answered.sendCommands).toEqual([
+								{ commandId: "last-old-command", attempt: 0 },
+							]);
+							expect(payload.admittedInputs).toEqual(["last-old-input"]);
+							return;
+						}
+						if (mode === "role-candidate") {
+							expect(callbacks.isCandidate()).toBe(true);
+							client.write({ type: "upgrade-cancel" });
+							yield* client.commandEffect("candidate-barrier", {
+								type: "apply-live-settings",
+								sessionId: "session-1",
+								settings: {},
+							});
+							expect(callbacks.isCandidate()).toBe(true);
+							client.write({ type: "upgrade-activate" });
+							yield* client.commandEffect("activation-barrier", {
+								type: "apply-live-settings",
+								sessionId: "session-1",
+								settings: {},
+							});
+							expect(callbacks.isCandidate()).toBe(false);
+							return;
+						}
+						if (mode === "role-reservation") {
+							callbacks.turnStateChanged(true);
+							yield* Effect.tryPromise(() =>
+								vi.waitFor(() =>
+									expect(states.at(-1)?.turnInFlight).toBe(true),
+								),
+							);
+							expect(
+								yield* client.retireEffect(states.at(-1)?.revision ?? -1),
+							).toBe(false);
+							callbacks.turnStateChanged(false);
+							yield* Effect.tryPromise(() =>
+								vi.waitFor(() =>
+									expect(states.at(-1)?.turnInFlight).toBe(false),
+								),
+							);
+							expect(
+								yield* client.retireEffect(states.at(-1)?.revision ?? -1),
+							).toBe(true);
+							yield* client.commandEffect("reservation-command", {
+								type: "apply-live-settings",
+								sessionId: "session-1",
+								settings: {},
+							});
+							expect(states.at(-1)?.quiescent).toBe(true);
+							expect(
+								yield* client.retireEffect(states.at(-1)?.revision ?? -1),
+							).toBe(true);
+							client.destroy();
+							yield* Deferred.await(clientClosed);
+							yield* Deferred.await(serverDisconnected);
+							const reconnected = yield* Deferred.make<
+								RunnerUpgradeState,
+								SessionFailure
+							>();
+							const reconnectClosed = yield* Deferred.make<void>();
+							const reconnectDisconnected = yield* Deferred.make<void>();
+							disconnectSignal = reconnectDisconnected;
+							const reconnectSocket = new Socket();
+							reconnectSocket.once("close", () =>
+								Deferred.doneUnsafe(reconnectClosed, Effect.void),
+							);
+							const reconnect = new RunnerSocket(
+								reconnectSocket,
+								(message) => {
+									if (message.type === "hello" && message.upgradeState)
+										Deferred.doneUnsafe(
+											reconnected,
+											Effect.succeed(message.upgradeState),
+										);
+									if (message.type === "refused")
+										Deferred.doneUnsafe(
+											reconnected,
+											Effect.fail(message.failure),
+										);
+								},
+								(failure) =>
+									Deferred.doneUnsafe(reconnected, Effect.fail(failure)),
+							);
+							yield* Effect.addFinalizer(() =>
+								Effect.sync(() => reconnect.destroy()).pipe(
+									Effect.andThen(Deferred.await(reconnectClosed)),
+									Effect.andThen(Deferred.await(reconnectDisconnected)),
+								),
+							);
+							yield* Effect.tryPromise(
+								() =>
+									new Promise<void>((done, fail) => {
+										reconnectSocket.once("error", fail);
+										reconnectSocket.connect(socketPath, done);
+									}),
+							);
+							reconnect.write({
+								type: "hello",
+								driverKind: "claude",
+								protocolVersion: RUNNER_PROTOCOL_VERSION,
+								buildId: runnerBuildId(),
+								config: {
+									workspaceRoot: directory,
+									daemonConfigDir: directory,
+								},
+							});
+							// Hello clears Reserved before replay is sent, including legacy replay flags.
+							expect((yield* Deferred.await(reconnected)).quiescent).toBe(true);
+							return;
+						}
 						expect(
 							yield* client.commandEffect("source-command", {
 								type: "send-turn",

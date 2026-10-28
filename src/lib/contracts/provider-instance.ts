@@ -67,8 +67,6 @@ export interface ProviderDriverTraits {
 	readonly streamsSessionLifecycle: boolean;
 	/** session-manager-service.test.ts pins local session creation before a native turn. */
 	readonly usesLocalSessions: boolean;
-	/** provider-turn-service.test.ts pins durable interrupts versus server aborts. */
-	readonly interruptViaEngine: boolean;
 	/** provider-turn-service.test.ts pins goal state passed to the native runner. */
 	readonly supportsGoalState: boolean;
 	/** enter-worktree-turn / exit-worktree-keep-turn pin tool-directed workspace moves. */
@@ -118,7 +116,6 @@ export const PROVIDER_DRIVERS = {
 		modelIdFormat: "context-window-suffix",
 		streamsSessionLifecycle: true,
 		usesLocalSessions: true,
-		interruptViaEngine: true,
 		supportsGoalState: true,
 		worktreeMoves: "tool-directive",
 		emitsMessageParentIds: false,
@@ -158,7 +155,6 @@ export const PROVIDER_DRIVERS = {
 		modelIdFormat: "provider-qualified",
 		streamsSessionLifecycle: false,
 		usesLocalSessions: false,
-		interruptViaEngine: false,
 		supportsGoalState: false,
 		worktreeMoves: "server-declaration",
 		emitsMessageParentIds: true,
@@ -197,7 +193,6 @@ export const PROVIDER_DRIVERS = {
 		modelIdFormat: "provider-qualified", // Preserve ids until a trace establishes a suffix format.
 		streamsSessionLifecycle: true, // Runner lifecycle must never be polled through OpenCode.
 		usesLocalSessions: true, // Conduit owns sessions before a runner exists.
-		interruptViaEngine: true, // Interrupts must fail through runner lookup, never OpenCode abort.
 		supportsGoalState: false, // Goals need a captured Cursor runtime contract.
 		worktreeMoves: "tool-directive", // Never declare workspace moves through OpenCode.
 		emitsMessageParentIds: false, // No native message-lineage contract is established.
@@ -235,7 +230,6 @@ export const PROVIDER_DRIVERS = {
 		modelIdFormat: "provider-qualified", // model/list supplies native model ids without context suffixes.
 		streamsSessionLifecycle: true, // turn/completed supplies terminal events through the runner.
 		usesLocalSessions: true, // The daemon creates sessions before thread/start.
-		interruptViaEngine: true, // turn/interrupt is dispatched through the retained runner.
 		supportsGoalState: true, // Native thread goals hold one conduit turn across successors.
 		worktreeMoves: "tool-directive", // Codex never declares workspace moves through OpenCode.
 		emitsMessageParentIds: false, // The first slice consumes no native message lineage.

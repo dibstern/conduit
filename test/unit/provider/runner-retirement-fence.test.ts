@@ -37,7 +37,10 @@ import {
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
-import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import {
+	SessionEventBusLive,
+	SessionEventBusTag,
+} from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import {
 	SessionInboxLive,
 	SessionInboxTag,
@@ -62,6 +65,7 @@ import {
 	type ProcessRunnerDriver,
 } from "../../../src/lib/provider/runner/process-session-runner.js";
 import {
+	type RunnerCommandFailure,
 	type RunnerHello,
 	type RunnerSocket,
 	runnerBuildId,
@@ -73,7 +77,11 @@ import {
 	type RunnerProviderInstanceDeps,
 	type RunnerRecoveryDependencies,
 } from "../../../src/lib/provider/runner/runner-provider-instance.js";
-import { currentRunnerOutput } from "../../../src/lib/provider/runner/runner-receipts.js";
+import {
+	currentRunnerOutput,
+	makeRunnerReceiptStore,
+} from "../../../src/lib/provider/runner/runner-receipts.js";
+import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-recovery.js";
 import * as runnerRegistry from "../../../src/lib/provider/runner/runner-registry.js";
 import { prepareRunnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
 import { RunnerSendJournal } from "../../../src/lib/provider/runner/runner-send-journal.js";
@@ -122,6 +130,7 @@ const retirementFixture = (
 		yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('s', 'test-project', 'claude', 1, 1)`;
 		const runnerId = "131313131313";
 		const pid = 100_088;
+		const receipts = yield* makeRunnerReceiptStore(sql);
 		const socketPath = join(prepareRunnerDirectory(root, root), runnerId);
 		writeFileSync(
 			`${socketPath}.json`,
@@ -140,9 +149,10 @@ const retirementFixture = (
 			[pid, { state: "running" as const, startTime: "original" }],
 		]);
 		const childProcesses = new Map<number, EventEmitter>();
+		let spawnedProcesses = 0;
 		spawned.spawn.mockImplementation(() => {
 			const child = Object.assign(new EventEmitter(), {
-				pid: 100_020,
+				pid: 100_020 + spawnedProcesses++,
 				exitCode: null,
 				signalCode: null,
 				connected: false,
@@ -161,7 +171,7 @@ const retirementFixture = (
 		});
 		const attachments: Array<Parameters<ProcessRunnerDriver["connect"]>[0]> =
 			[];
-		const pending = yield* Deferred.make<TurnResult, SessionFailure>();
+		const pending = yield* Deferred.make<TurnResult, RunnerCommandFailure>();
 		const sending = yield* Deferred.make<void>();
 		const replaySend: {
 			execute?: (
@@ -185,6 +195,11 @@ const retirementFixture = (
 			connect: vi.fn<ProcessRunnerDriver["connect"]>((options) =>
 				Effect.gen(function* () {
 					attachments.push(options);
+					const journal = new RunnerSendJournal(
+						runnerRegistry.runnerDirectory(root, root),
+						"s",
+						driverKind,
+					);
 					if (options.runnerId !== runnerId && replacementGate.hold) {
 						yield* Deferred.succeed(replacementConnecting, undefined);
 						yield* Deferred.await(replacementReady);
@@ -206,17 +221,27 @@ const retirementFixture = (
 										return replaySend.execute(id, command, attempt);
 									return command.type === "send-turn" &&
 										options.runnerId === runnerId
-										? Deferred.succeed(sending, undefined).pipe(
-												Effect.andThen(Deferred.await(pending)),
+										? journal.execute(
+												id,
+												attempt ?? 0,
+												command.input.nativeResumeFallback === true,
+												Deferred.succeed(sending, undefined).pipe(
+													Effect.andThen(Deferred.await(pending)),
+												),
 											)
 										: command.type === "send-turn"
-											? Effect.succeed({
-													status: "completed" as const,
-													cost: 0,
-													tokens: { input: 0, output: 0 },
-													durationMs: 0,
-													providerStateUpdates: [],
-												})
+											? journal.execute(
+													id,
+													attempt ?? 0,
+													command.input.nativeResumeFallback === true,
+													Effect.succeed({
+														status: "completed" as const,
+														cost: 0,
+														tokens: { input: 0, output: 0 },
+														durationMs: 0,
+														providerStateUpdates: [],
+													}),
+												)
 											: Effect.succeed(undefined);
 								},
 							),
@@ -282,7 +307,7 @@ const retirementFixture = (
 					return {};
 				}),
 		);
-		const processTable = {
+		const processTable: runnerRegistry.RunnerProcessTable = {
 			inspect: (pid: number) =>
 				processes.get(pid) ?? { state: "gone" as const },
 			signal: () => {},
@@ -303,6 +328,25 @@ const retirementFixture = (
 			output,
 			driver,
 		);
+		// The registry fixture represents an already-created process. Seed its
+		// durable slot when a test elects to recover it; fresh-spawn tests do not.
+		const recoverRegistered = manager.recoverEffect;
+		let registered = false;
+		Object.defineProperty(manager, "recoverEffect", {
+			value: Effect.gen(function* () {
+				if (!registered) {
+					const [serving] =
+						yield* sql`SELECT runner_id FROM claude_runner_cursors WHERE session_id = 's' AND retired_at IS NULL AND role = 'serving'`;
+					yield* receipts.register(
+						runnerId,
+						{ sessionId: "s", pid, startTime: "original", driverKind },
+						serving ? "candidate" : "serving",
+					);
+					registered = true;
+				}
+				yield* recoverRegistered;
+			}),
+		});
 		const sendHandles: SendScope[] = [];
 		const owner = manager.sendScopes;
 		if (!owner) return yield* Effect.die("missing send owner");
@@ -362,6 +406,12 @@ it.effect(
 			Effect.gen(function* () {
 				const f = yield* sendScopeFixture(undefined, undefined, "cursor");
 				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('s7-run', 's', 'pending', 1)`;
+				yield* (yield* makeCommitAndSignal)([
+					canonicalEvent("run.dispatched", "s", {
+						runId: "s7-run",
+						runnerId: "131313131313",
+					}),
+				]);
 				yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id)
 		VALUES (7, 's7-command', 'test-project', 's', 'account', 'send_turn', ${JSON.stringify({ ...f.input, prompt: "queued", history: [] })}, 'running', 2, 1, 1, 's7-run')`;
 				yield* f.instance.recoverProjectContextsEffect(() =>
@@ -387,8 +437,47 @@ it.effect(
 		),
 );
 
+it.effect(
+	"R2 missing journal answer preserves owner intake and retained steer replay",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture();
+				yield* f.seed("active-owner");
+				yield* f.seed("joined-steer", 2);
+				yield* f.sql`UPDATE provider_runs SET status='running', started_at=1 WHERE id='run:active-owner'`;
+				yield* f.sql`UPDATE provider_runs SET status='joined', joined_into='run:active-owner' WHERE id='run:joined-steer'`;
+				yield* f.hello((hello) => ({
+					...hello,
+					bindings: [],
+					sendAnswers: [],
+					sendJournalAnswers: true,
+				}));
+				yield* f.recover;
+				expect(
+					yield* f.sql`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{ command_id: "active-owner", status: "running" },
+					{ command_id: "joined-steer", status: "retryable_failed" },
+				]);
+				expect(
+					yield* f.sql`SELECT id, status FROM provider_runs ORDER BY id`,
+				).toEqual([
+					{ id: "run:active-owner", status: "running" },
+					{ id: "run:joined-steer", status: "joined" },
+				]);
+				expect(
+					f.commands.filter((command) => command.type === "send-turn"),
+				).toEqual([]);
+			}),
+		),
+);
+
 const runRetirement = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
-	const persistence = makePersistenceEffectLayer(":memory:", "test-project");
+	const persistence = makePersistenceEffectLayer(
+		":memory:",
+		"test-project",
+	).pipe(Layer.provideMerge(SessionEventBusLive));
 	return Effect.scoped(effect).pipe(
 		Effect.provide(
 			Layer.mergeAll(
@@ -425,6 +514,7 @@ const sendScopeFixture = (
 			configuredClaudeConfigDir(f.root),
 		);
 		const commit = yield* makeCommitAndSignal;
+		const store = yield* EventStoreEffectTag;
 		yield* commit([
 			canonicalEvent(
 				"session.created",
@@ -446,6 +536,9 @@ const sendScopeFixture = (
 		const sinkId = runnerSinkId(input.inputId);
 		const record = f.output.getMockImplementation();
 		if (!record) return yield* Effect.die("missing output recorder");
+		let preparedRuns = 0;
+		let preparedRunId: string | undefined;
+		const ingestion = yield* ProviderRuntimeIngestionTag;
 		const instance = yield* makeRunnerProviderInstance(
 			{
 				daemonConfigDir: f.root,
@@ -457,8 +550,45 @@ const sendScopeFixture = (
 				discoverEffect: () => Effect.die("unused discovery"),
 				generateTextEffect: () => Effect.die("unused generation"),
 				prepareTurnEffect: (input) =>
-					Effect.succeed({
-						input: { ...input, prompt: input.text ?? "send", history: [] },
+					Effect.gen(function* () {
+						const runId = input.runId ?? `fixture-send-scope:${++preparedRuns}`;
+						preparedRunId = runId;
+						if (!input.runId)
+							yield* commit
+								.write((project) =>
+									Effect.gen(function* () {
+										yield* project(
+											yield* store.appendBatch([
+												canonicalEvent("run.requested", input.sessionId, {
+													runId,
+													inputId: input.inputId,
+												}),
+											]),
+										);
+										// A real send is claimed durably before manager dispatch. Its row
+										// lets retirement distinguish delivery evidence from an old cohort.
+										const [next] = yield* f.sql<{
+											sequence: number;
+										}>`SELECT COALESCE(MAX(request_sequence), 0) + 1 AS sequence FROM provider_command_outbox`;
+										const sequence = next?.sequence ?? 1;
+										const commandId = input.inputId;
+										yield* f.sql`INSERT INTO command_receipts (command_id, session_id, status, created_at, command_type, project_key, fingerprint_hash, fingerprint_version, side_effect_sequence, updated_at)
+										VALUES (${commandId}, ${input.sessionId}, 'side_effect_requested', 1, 'send_turn', 'test-project', 'sha256:send-scope', 1, ${sequence}, 1)
+										ON CONFLICT (command_id) DO UPDATE SET status = 'side_effect_requested'`;
+										yield* f.sql`DELETE FROM provider_command_outbox WHERE command_id = ${commandId}`;
+										yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id)
+										VALUES (${sequence}, ${commandId}, 'test-project', ${input.sessionId}, ${input.account?.id ?? driverKind}, 'send_turn', ${JSON.stringify({ ...input, runId })}, 'running', ${input.commandAttempt ?? 0}, 1, 1, ${runId})`;
+									}),
+								)
+								.pipe(Effect.orDie);
+						return {
+							input: {
+								...input,
+								runId,
+								prompt: input.text ?? "send",
+								history: [],
+							},
+						};
 					}),
 			},
 			(emit) => {
@@ -478,27 +608,35 @@ const sendScopeFixture = (
 						event.type,
 					),
 				).length;
-		const terminal = (type: "turn.completed" | "turn.interrupted") =>
+		const terminal = (
+			type: "turn.completed" | "turn.interrupted" | "turn.error",
+			runId = preparedRunId,
+		) =>
 			Effect.gen(function* () {
 				const attachment = f.attachments.at(-1);
 				if (!attachment) return yield* Effect.die("missing send attachment");
-				yield* attachment.emit(
-					{
-						type: "event",
-						sinkId,
-						event: {
-							eventId: `scoped-${type}`,
-							type,
-							providerId: "claude",
-							sessionId: "s",
-							providerRefs: {},
-							rawSource: { kind: "test" },
-							createdAt: 1,
-							data: {},
-						},
-					},
-					"s",
-				);
+				const event = {
+					eventId: `scoped-${type}:${runId ?? "unowned"}`,
+					type,
+					providerId: "claude",
+					sessionId: "s",
+					...(runId ? { runId } : {}),
+					providerRefs: {},
+					rawSource: { kind: "test" },
+					createdAt: 1,
+					data:
+						type === "turn.error"
+							? { code: "provider_failure", message: "native send rejected" }
+							: { messageId: "", duration: 0 },
+				};
+				yield* attachment.emit({ type: "event", sinkId, event }, "s");
+				yield* ingestion
+					.ingest(event)
+					.pipe(
+						Effect.mapError((cause) =>
+							runnerFailure("test native terminal", cause),
+						),
+					);
 			});
 		const assertReleased = (acceptCommands = true) =>
 			Effect.gen(function* () {
@@ -551,6 +689,175 @@ const sendScopeFixture = (
 		};
 	});
 
+it.effect(
+	"a send starts from the durable serving slot while the previous stop cache is stale",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* sendScopeFixture();
+				yield* f.manager.recoverEffect;
+				const old = f.attachments[0];
+				if (!old) return yield* Effect.die("missing old runner");
+				// release invokes its feeder wake after this commit and before afterStop
+				// refreshes the reconciler's route cache. Keep that committed snapshot.
+				yield* f.sql`UPDATE claude_runner_cursors SET retired_at = 1, stop_state = 'Requested', stop_reason = '{"_tag":"Idle"}' WHERE runner_id = ${old.runnerId}`;
+				const sending = yield* f.instance
+					.sendTurnEffect(f.input)
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(f.attachments).toHaveLength(2);
+				const replacement = f.attachments[1];
+				if (!replacement)
+					return yield* Effect.die("missing replacement runner");
+				expect((yield* Fiber.join(sending)).status).toBe("completed");
+				expect(
+					f.commands.filter((command) => command.type === "send-turn"),
+				).toEqual([{ runnerId: replacement.runnerId, type: "send-turn" }]);
+				expect(
+					yield* f.sql`SELECT runner_id, held_transmission FROM provider_runs WHERE id = (SELECT run_id FROM provider_command_outbox WHERE command_id = ${f.input.inputId})`,
+				).toEqual([{ runner_id: replacement.runnerId, held_transmission: 1 }]);
+				yield* f.terminal("turn.completed");
+			}),
+		),
+);
+
+it.effect(
+	"a held send releases NotSent after local admission times out before the socket write",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* sendScopeFixture();
+				yield* f.manager.recoverEffect;
+				const old = f.attachments[0];
+				if (!old?.onUpgradeState)
+					return yield* Effect.die("missing old runner");
+				old.onUpgradeState({
+					quiescent: false,
+					turnInFlight: true,
+					revision: 1,
+					snapshot: {
+						input: {
+							...f.input,
+							configDir: configuredClaudeConfigDir(f.root),
+							folderSource: "implicitDefault",
+						},
+						options: {},
+					},
+				});
+				const nextRoot = join(f.root, "next-workspace");
+				const sending = yield* f.instance
+					.sendTurnEffect({ ...f.input, workspaceRoot: nextRoot })
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust("1100 millis");
+				expect(
+					f.commands.filter((command) => command.type === "send-turn"),
+				).toEqual([]);
+				expect(
+					yield* f.sql`SELECT json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+				).toEqual([{ reason: "NotSent" }]);
+				expect(f.terminalCount()).toBe(0);
+				expect(sending.pollUnsafe()).toBeUndefined();
+				old.onUpgradeState({
+					quiescent: true,
+					turnInFlight: false,
+					revision: 2,
+					snapshot: {
+						input: {
+							...f.input,
+							configDir: configuredClaudeConfigDir(f.root),
+							workspaceRoot: nextRoot,
+							folderSource: "implicitDefault",
+						},
+						options: {},
+					},
+				});
+				yield* Deferred.succeed(f.pending, {
+					status: "completed",
+					cost: 0,
+					tokens: { input: 0, output: 0 },
+					durationMs: 0,
+					providerStateUpdates: [],
+				});
+				yield* TestClock.adjust("30 seconds");
+				expect((yield* Fiber.join(sending)).status).toBe("completed");
+				expect(
+					f.commands.filter((command) => command.type === "send-turn"),
+				).toHaveLength(1);
+				yield* f.terminal("turn.completed");
+			}),
+		),
+);
+
+it.effect(
+	"an interrupted caller's committed hold continues on the live manager without a restart",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* sendScopeFixture();
+				const bus = yield* SessionEventBusTag;
+				const committed = yield* Deferred.make<void>();
+				const reply = yield* Deferred.make<void>();
+				const publish = bus.publish;
+				let paused = false;
+				const block = vi
+					.spyOn(bus, "publish")
+					.mockImplementation((events, ended) =>
+						publish(events, ended).pipe(
+							Effect.andThen(
+								Effect.suspend(() => {
+									if (
+										paused ||
+										!events.some((event) => event.type === "run.dispatched")
+									)
+										return Effect.void;
+									paused = true;
+									return Deferred.succeed(committed, undefined).pipe(
+										Effect.andThen(Deferred.await(reply)),
+									);
+								}),
+							),
+						),
+					);
+				yield* Effect.gen(function* () {
+					const sending = yield* f.instance
+						.sendTurnEffect(f.input)
+						.pipe(Effect.forkChild);
+					yield* Deferred.await(committed);
+					yield* TestClock.adjust(0);
+					expect(
+						f.commands.filter((command) => command.type === "send-turn"),
+					).toEqual([]);
+					yield* Fiber.interrupt(sending);
+					expect(f.terminalCount()).toBe(0);
+					yield* Deferred.succeed(reply, undefined);
+					yield* TestClock.adjust(0);
+					expect(
+						yield* f.sql`SELECT type, json_extract(data, '$.transmission') AS transmission FROM events WHERE type IN ('run.dispatched', 'run.released') ORDER BY rowid`,
+					).toEqual([
+						{ type: "run.dispatched", transmission: 1 },
+						{ type: "run.released", transmission: 1 },
+						{ type: "run.dispatched", transmission: 2 },
+					]);
+					expect(
+						f.commands.filter((command) => command.type === "send-turn"),
+					).toHaveLength(1);
+					expect(
+						yield* f.sql`SELECT COUNT(DISTINCT id) AS runs FROM provider_runs`,
+					).toEqual([{ runs: 1 }]);
+					// The host fixture returns the command receipt separately from the
+					// native terminal event, just as a real runner delivers both frames.
+					yield* f.terminal("turn.completed");
+					expect(
+						yield* f.sql`SELECT COUNT(*) AS terminals FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
+					).toEqual([{ terminals: 1 }]);
+				}).pipe(
+					Effect.ensuring(Deferred.succeed(reply, undefined)),
+					Effect.ensuring(Effect.sync(() => block.mockRestore())),
+				);
+			}),
+		),
+);
+
 const s7Fixture = (
 	driverKind: "claude" | "cursor" = "cursor",
 	isProjectReady?: ProviderSideEffectReactorOptions["isProjectReady"],
@@ -599,7 +906,12 @@ const s7Fixture = (
 			...(isProjectReady ? { isProjectReady } : {}),
 			persistUserMessage: (...args) => persist.persistUserMessage(...args),
 		});
-		const seed = (commandId: string, sequence = 1, attempt = 1) =>
+		const seed = (
+			commandId: string,
+			sequence = 1,
+			attempt = 1,
+			transmission: "legacy" | "held" = "legacy",
+		) =>
 			Effect.gen(function* () {
 				const input = {
 					...f.input,
@@ -614,6 +926,25 @@ const s7Fixture = (
 				VALUES (${commandId}, 's', 'side_effect_requested', 1, 'send_turn', 'test-project', 'sha256:s7', 1, ${sequence}, 1)`;
 				yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id)
 				VALUES (${sequence}, ${commandId}, 'test-project', 's', 'account', 'send_turn', ${JSON.stringify(input)}, 'running', ${attempt}, 1, 1, ${input.runId})`;
+				if (attempt === 0)
+					yield* f.sql`UPDATE provider_command_outbox SET status = 'pending' WHERE command_id = ${commandId}`;
+				// Attempt zero is a queued successor that has never been transmitted.
+				// Older transmitted sends retain the command-less legacy dispatch.
+				if (attempt > 0)
+					yield* commit([
+						canonicalEvent(
+							"run.dispatched",
+							"s",
+							{
+								runId: input.runId,
+								runnerId: "131313131313",
+								...(transmission === "held"
+									? { commandId, transmission: 1 }
+									: {}),
+							},
+							{ provider: driverKind, metadata: { runId: input.runId } },
+						),
+					]);
 				return input;
 			});
 		const hello = (transform: (hello: RunnerHello) => RunnerHello) => {
@@ -655,7 +986,12 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 		runRetirement(
 			Effect.gen(function* () {
 				const f = yield* s7Fixture();
-				yield* f.seed("answer", 1, 1);
+				yield* f.seed(
+					"answer",
+					1,
+					1,
+					answer === "uncertain" ? "held" : "legacy",
+				);
 				yield* f.seed("answer-next", 2, 0);
 				if (answer === "finished") {
 					yield* f.sql`CREATE TEMP TABLE s10_finished_writes (command_id TEXT)`;
@@ -721,14 +1057,12 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 				).toEqual([
 					{
 						status:
-							answer === "running"
+							answer === "running" || answer === "uncertain"
 								? "running"
 								: answer === "finished"
 									? "completed"
-									: answer === "uncertain"
-										? "failed"
-										: "retryable_failed",
-						error_code: answer === "uncertain" ? "runner_send_uncertain" : null,
+									: "retryable_failed",
+						error_code: null,
 					},
 				]);
 				expect(f.sendHandles).toHaveLength(answer === "running" ? 1 : 0);
@@ -737,7 +1071,8 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 					.mockReturnValue(Effect.succeed(result));
 				yield* f.reactor.drain();
 				yield* f.reactor.drain();
-				if (answer === "running") expect(send).not.toHaveBeenCalled();
+				if (answer === "running" || answer === "uncertain")
+					expect(send).not.toHaveBeenCalled();
 				else {
 					expect(send.mock.calls.map(([input]) => input.inputId)).toEqual(
 						answer === "absent" ? ["answer", "answer-next"] : ["answer-next"],
@@ -748,8 +1083,14 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 				}
 				if (answer === "uncertain")
 					expect(
-						yield* f.sql`SELECT status FROM provider_runs WHERE id = 'run:answer'`,
-					).toEqual([{ status: "error" }]);
+						yield* f.sql`SELECT status, runner_id, held_transmission FROM provider_runs WHERE id = 'run:answer'`,
+					).toEqual([
+						{
+							status: "pending",
+							runner_id: "131313131313",
+							held_transmission: 1,
+						},
+					]);
 			}),
 		),
 	);
@@ -944,7 +1285,7 @@ it.effect(
 				);
 				const recovering = yield* f.recover.pipe(Effect.forkChild);
 				yield* Deferred.await(firstClosed);
-				yield* TestClock.adjust("100 millis");
+				yield* TestClock.adjust("150 millis");
 				yield* Fiber.join(recovering);
 				yield* TestClock.adjust("6 seconds");
 				expect(f.attachments).toHaveLength(2);
@@ -1039,10 +1380,18 @@ it.effect(
 				yield* Fiber.join(recovering);
 				expect(
 					yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id='main-race'`,
-				).not.toEqual([{ status: "running" }]);
+				).toEqual([{ status: "running" }]);
+				expect(
+					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.error', 'turn.interrupted')`,
+				).toEqual([]);
+				yield* f.sql`DROP TRIGGER s10_fail_cached_reply`;
+				yield* TestClock.adjust("30 seconds");
+				expect(
+					yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id='main-race'`,
+				).toEqual([{ status: "completed" }]);
 				expect(
 					yield* f.sql`SELECT status FROM provider_runs WHERE id='run:main-race'`,
-				).not.toEqual([{ status: "pending" }]);
+				).toEqual([{ status: "completed" }]);
 			}),
 		),
 );
@@ -1122,6 +1471,8 @@ for (const scenario of [
 	"unfinished inherited sendCommands",
 	"replayed cached key",
 	"input-keyed live retry",
+	"started without dispatch",
+	"transmitted before start without dispatch",
 ] as const)
 	it.effect(
 		`S10 main replay ${scenario} follows main journal semantics and unblocks the next send`,
@@ -1135,6 +1486,17 @@ for (const scenario of [
 							? 2
 							: 1;
 					yield* f.seed("main-command", 1, attempt);
+					if (scenario.endsWith("without dispatch")) {
+						yield* f.sql`DELETE FROM events WHERE type = 'run.dispatched' AND json_extract(data, '$.runId') = 'run:main-command'`;
+						yield* f.sql`UPDATE provider_runs SET runner_id = NULL, held_transmission = NULL,
+							status = ${scenario === "started without dispatch" ? "running" : "pending"},
+							started_at = ${scenario === "started without dispatch" ? 1 : null}
+						WHERE id = 'run:main-command'`;
+						yield* f.sql`CREATE TEMP TABLE r2_legacy_completed (command_id TEXT)`;
+						yield* f.sql`CREATE TEMP TRIGGER r2_legacy_completed_write AFTER UPDATE ON provider_command_outbox
+						WHEN OLD.status <> 'completed' AND NEW.command_id = 'main-command' AND NEW.status = 'completed'
+						BEGIN INSERT INTO r2_legacy_completed VALUES (NEW.command_id); END`;
+					}
 					yield* f.seed("main-next", 2, 0);
 					yield* f.sql`UPDATE provider_command_outbox SET status = 'pending' WHERE command_id = 'main-next'`;
 					const inputId =
@@ -1202,16 +1564,21 @@ for (const scenario of [
 								fallback: command.input.nativeResumeFallback === true,
 								sinkId: command.sinkId,
 							});
-							yield* Deferred.succeed(replayed, undefined);
 							// Main's host joins the already pending RPC before consulting its journal.
-							if (scenario === "input-keyed live retry" && active)
+							if (scenario === "input-keyed live retry" && active) {
+								yield* Deferred.succeed(replayed, undefined);
 								return yield* Fiber.join(active);
-							return yield* retained.execute(
-								commandId,
-								keyAttempt,
-								command.input.nativeResumeFallback === true,
-								Effect.sync(() => deliveries()).pipe(Effect.as(result)),
-							);
+							}
+							return yield* retained
+								.execute(
+									commandId,
+									keyAttempt,
+									command.input.nativeResumeFallback === true,
+									Effect.sync(() => deliveries()).pipe(Effect.as(result)),
+								)
+								.pipe(
+									Effect.onExit(() => Deferred.succeed(replayed, undefined)),
+								);
 						});
 					yield* f.hello(
 						({
@@ -1315,6 +1682,24 @@ for (const scenario of [
 							"Closed",
 						]);
 						expect(f.account).toEqual({ acquired: 1, released: 1 });
+					}
+					if (scenario.endsWith("without dispatch")) {
+						yield* f.instance.attachSessionsEffect(["s"], () =>
+							Effect.succeed(f.recovery),
+						);
+						yield* TestClock.adjust(0);
+						expect(deliveries).not.toHaveBeenCalled();
+						expect(
+							yield* f.sql`SELECT command_id FROM r2_legacy_completed`,
+						).toEqual([{ command_id: "main-command" }]);
+					}
+					if (scenario === "started without dispatch") {
+						expect(
+							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'run:main-command'`,
+						).toEqual([{ status: "completed" }]);
+						expect(
+							yield* f.sql`SELECT COUNT(*) AS count FROM events WHERE type = 'turn.completed' AND json_extract(metadata, '$.runId') = 'run:main-command'`,
+						).toEqual([{ count: 1 }]);
 					}
 					const next = vi
 						.spyOn(f.instance, "sendTurnEffect")
@@ -1606,7 +1991,7 @@ for (const finished of [false, true])
 			runRetirement(
 				Effect.gen(function* () {
 					const f = yield* s7Fixture();
-					yield* f.seed("predecessor");
+					yield* f.seed("predecessor", 1, 1, finished ? "legacy" : "held");
 					yield* f.seed("predecessor-next", 2, 0);
 					const directory = runnerRegistry.runnerDirectory(f.root, f.root);
 					const previous = new RunnerSendJournal(directory, "s", "cursor");
@@ -1654,8 +2039,8 @@ for (const finished of [false, true])
 						yield* f.sql`SELECT status,error_code FROM provider_command_outbox WHERE command_id='predecessor'`,
 					).toEqual([
 						{
-							status: finished ? "completed" : "failed",
-							error_code: finished ? null : "runner_send_uncertain",
+							status: finished ? "completed" : "running",
+							error_code: null,
 						},
 					]);
 					const send = vi
@@ -1663,9 +2048,13 @@ for (const finished of [false, true])
 						.mockReturnValue(Effect.succeed(result));
 					yield* f.reactor.drain();
 					yield* f.reactor.drain();
-					expect(send.mock.calls.map(([input]) => input.inputId)).toEqual([
-						"predecessor-next",
-					]);
+					expect(send.mock.calls.map(([input]) => input.inputId)).toEqual(
+						finished ? ["predecessor-next"] : [],
+					);
+					if (!finished)
+						expect(
+							yield* f.sql`SELECT runner_id, held_transmission FROM provider_runs WHERE id = 'run:predecessor'`,
+						).toEqual([{ runner_id: "131313131313", held_transmission: 1 }]);
 				}),
 			),
 	);
@@ -2218,6 +2607,18 @@ it.effect(
 		runRetirement(
 			Effect.gen(function* () {
 				const f = yield* s7Fixture();
+				// attachSessions adopts production's durable serving row directly;
+				// this path does not call the fixture's recoverEffect registration.
+				yield* (yield* makeRunnerReceiptStore(f.sql)).register(
+					"131313131313",
+					{
+						sessionId: "s",
+						pid: 100_088,
+						startTime: "original",
+						driverKind: "cursor",
+					},
+					"serving",
+				);
 				const input = yield* f.seed("live", 1, 0);
 				yield* f.sql`UPDATE provider_command_outbox SET status = 'pending'`;
 				const prior = Option.getOrThrow(
@@ -2439,7 +2840,7 @@ for (const fault of ["read", "settlement"] as const)
 					expect(f.wakes).toEqual([]);
 					if (fault === "settlement")
 						yield* f.sql`DROP TRIGGER fail_s7_requeue`;
-					yield* TestClock.adjust("100 millis");
+					yield* TestClock.adjust("150 millis");
 					yield* Fiber.join(recovering);
 					expect(
 						yield* f.sql`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`,
@@ -2589,6 +2990,11 @@ it.effect(
 			Effect.gen(function* () {
 				const f = yield* s7Fixture();
 				yield* f.seed("unreceived");
+				// Dispatch commits its holder before the runner can receive the command.
+				yield* f.sql`UPDATE provider_runs SET runner_id = '131313131313' WHERE id = 'run:unreceived'`;
+				vi.spyOn(f.processTable, "signal").mockImplementation(() => {
+					f.processes.delete(100_088);
+				});
 				yield* f.sql`CREATE TEMP TRIGGER reject_s7_requeue BEFORE UPDATE ON provider_command_outbox
 			WHEN NEW.status = 'retryable_failed' BEGIN SELECT RAISE(ABORT, 'persistent S7 settlement failure'); END`;
 				const firstHello = yield* Deferred.make<void>();
@@ -2616,13 +3022,13 @@ it.effect(
 				);
 				expect(
 					yield* f.sql`SELECT status, error_code FROM provider_command_outbox`,
-				).toEqual([{ status: "failed", error_code: "runner_stopped" }]);
+				).toEqual([{ status: "failed", error_code: "interrupted" }]);
 				expect(
 					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'run:unreceived'`,
-				).toEqual([{ status: "error" }]);
+				).toEqual([{ status: "interrupted" }]);
 				expect(
 					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-				).toEqual([{ type: "turn.error" }]);
+				).toEqual([{ type: "turn.interrupted" }]);
 				expect(f.wakes).toEqual([]);
 				expect(
 					f.commands.filter((command) => command.type === "send-turn"),
@@ -2648,35 +3054,30 @@ for (const invalidation of ["none", "after retry"] as const) {
 						),
 					);
 					yield* f.manager.recoverEffect;
-					const refusal: SessionFailure = {
+					const refusal = {
 						...runnerFailure("send-turn", "Runner exited while idle"),
 						code: "runner_idle_exit",
-					};
+						delivery: { _tag: "Refused", reason: "exiting" },
+					} as const;
 					const entered = yield* Deferred.make<void>();
 					const resume = yield* Deferred.make<void>();
-					let held = false;
+					let transmissions = 0;
+					f.replaySend.execute = () =>
+						++transmissions === 1
+							? Deferred.succeed(entered, undefined).pipe(
+									Effect.andThen(Deferred.await(resume)),
+									Effect.andThen(Deferred.await(f.pending)),
+								)
+							: Effect.succeed({
+									status: "completed",
+									cost: 0,
+									tokens: { input: 0, output: 0 },
+									durationMs: 0,
+									providerStateUpdates: [],
+								});
 					yield* Effect.gen(function* () {
 						const sending = yield* Effect.forkChild(
-							f.instance.sendTurnEffect({ ...f.input, commandAttempt: 0 }).pipe(
-								Effect.provideService(
-									Statement.CurrentTransformer,
-									(statement) => {
-										const [query] = statement.compile();
-										if (
-											held ||
-											!/SELECT\s+command_id\s+FROM\s+provider_command_outbox/.test(
-												query,
-											)
-										)
-											return Effect.succeed(statement);
-										held = true;
-										return Deferred.succeed(entered, undefined).pipe(
-											Effect.andThen(Deferred.await(resume)),
-											Effect.as(statement),
-										);
-									},
-								),
-							),
+							f.instance.sendTurnEffect({ ...f.input, commandAttempt: 0 }),
 						);
 						yield* Deferred.await(entered);
 						const old = f.attachments[0];
@@ -2742,7 +3143,7 @@ it.effect(
 				yield* f.instance.sendTurnEffect(f.input);
 				const old = f.attachments[0];
 				if (!old) return yield* Effect.die("missing retiring runner");
-				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('old-run', 's', 'running', 1)`;
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, runner_id) VALUES ('old-run', 's', 'running', 1, ${old.runnerId})`;
 				yield* f.sql`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, created_at)
 					VALUES ('old-prompt', 's', 'permission', 'pending', ${old.runnerId}, 1)`;
 				old.onOutputCommitted?.({
@@ -2761,6 +3162,7 @@ it.effect(
 					},
 				});
 				yield* Effect.gen(function* () {
+					f.processes.delete(old.pid ?? 100_020);
 					const stopping = yield* Effect.forkChild(
 						f.instance.endSessionEffect("s"),
 					);
@@ -2820,11 +3222,21 @@ it.effect(
 				const failure = runnerFailure("socket", "exit before send unwinds");
 				old.onClose(failure);
 				yield* TestClock.adjust(0);
-				expect(sending.pollUnsafe()).toBeUndefined();
+				expect(yield* Fiber.join(sending)).toMatchObject({
+					_tag: "Success",
+					success: { status: "cancelled" },
+				});
+				expect(Deferred.isDoneUnsafe(f.pending)).toBe(false);
 				yield* f.assertReleased();
 				yield* Deferred.fail(f.pending, failure);
 				yield* Fiber.join(sending);
-				expect(f.terminalCount()).toBe(1);
+				expect(f.terminalCount()).toBe(0);
+				expect(
+					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'fixture-send-scope:1'`,
+				).toEqual([{ status: "error" }]);
+				expect(
+					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
+				).toEqual([{ type: "turn.error" }]);
 				yield* old.emit({ type: "release-sink", sinkId: f.sinkId }, "s");
 				yield* f.assertReleased();
 			}),
@@ -2900,13 +3312,23 @@ it.effect(
 					f.processes.delete(100_088);
 					old.onClose(failure);
 					yield* TestClock.adjust(0);
-					expect(sending.pollUnsafe()).toBeUndefined();
+					expect(yield* Fiber.join(sending)).toMatchObject({
+						_tag: "Success",
+						success: { status: "cancelled" },
+					});
+					expect(Deferred.isDoneUnsafe(f.pending)).toBe(false);
 					expect(outer.acquired).toBe(1);
 					expect(outer.released).toBe(1);
 					yield* f.assertReleased();
 				}).pipe(Effect.ensuring(Deferred.fail(f.pending, failure)));
 				yield* Fiber.join(sending);
-				expect(f.terminalCount()).toBe(1);
+				expect(f.terminalCount()).toBe(0);
+				expect(
+					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'fixture-send-scope:1'`,
+				).toEqual([{ status: "error" }]);
+				expect(
+					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
+				).toEqual([{ type: "turn.error" }]);
 				expect(outer.released).toBe(1);
 			}),
 		),
@@ -2923,6 +3345,26 @@ for (const ending of [
 		runRetirement(
 			Effect.gen(function* () {
 				const f = yield* sendScopeFixture();
+				if (ending === "runner exit") {
+					const journal = new RunnerSendJournal(
+						runnerRegistry.runnerDirectory(f.root, f.root),
+						"s",
+						"claude",
+					);
+					f.replaySend.execute = (id, command, attempt) =>
+						journal.execute(
+							id,
+							attempt ?? 0,
+							command.input.nativeResumeFallback === true,
+							Effect.succeed({
+								status: "accepted",
+								cost: 0,
+								tokens: { input: 0, output: 0 },
+								durationMs: 0,
+								providerStateUpdates: [],
+							}),
+						);
+				}
 				if (ending === "supersede") {
 					const connect = vi.mocked(f.driver.connect).getMockImplementation();
 					if (!connect) return yield* Effect.die("missing connect");
@@ -2968,20 +3410,35 @@ for (const ending of [
 					});
 					yield* TestClock.adjust("4 seconds");
 					expect(f.attachments.length).toBeGreaterThan(1);
+					f.processes.delete(old.pid ?? 100_020);
+					yield* TestClock.adjust("6 seconds");
 				} else if (ending === "retire") {
 					const stopping = yield* Effect.forkChild(
 						f.instance.endSessionEffect("s"),
 					);
 					yield* TestClock.adjust("4 seconds");
 					yield* Fiber.join(stopping);
+					// Escalated releases Stop; Gone releases the stopped runner's resources.
+					f.processes.delete(old.pid ?? 100_020);
+					yield* TestClock.adjust("6 seconds");
 				} else {
 					yield* f.instance.shutdownEffect();
 				}
 				yield* f.assertReleased(ending !== "provider shutdown");
-				expect(f.terminalCount()).toBe(1);
+				expect(f.terminalCount()).toBe(ending === "runner exit" ? 0 : 1);
+				expect(
+					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'fixture-send-scope:1'`,
+				).toEqual([
+					{ status: ending === "runner exit" ? "error" : "completed" },
+				]);
+				expect(
+					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
+				).toEqual([
+					{ type: ending === "runner exit" ? "turn.error" : "turn.completed" },
+				]);
 				yield* old.emit({ type: "release-sink", sinkId: f.sinkId }, "s");
 				yield* f.assertReleased(ending !== "provider shutdown");
-				expect(f.terminalCount()).toBe(1);
+				expect(f.terminalCount()).toBe(ending === "runner exit" ? 0 : 1);
 			}),
 		),
 	);
@@ -3023,11 +3480,18 @@ it.effect(
 					f.instance.sendTurnEffect(f.input).pipe(Effect.result),
 				);
 				yield* Deferred.await(f.sending);
-				yield* Deferred.fail(
-					f.pending,
-					runnerFailure("send-turn", "native send rejected"),
-				);
-				expect((yield* Fiber.join(sending))._tag).toBe("Failure");
+				yield* f.terminal("turn.error");
+				yield* Deferred.fail(f.pending, {
+					...runnerFailure("send-turn", "native send rejected"),
+					replied: true,
+				});
+				expect(yield* Fiber.join(sending)).toMatchObject({
+					_tag: "Success",
+					success: { status: "cancelled" },
+				});
+				expect(
+					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'fixture-send-scope:1'`,
+				).toEqual([{ status: "error" }]);
 				yield* f.assertReleased();
 				expect(f.terminalCount()).toBe(1);
 			}),
@@ -3052,41 +3516,24 @@ it.effect(
 									command(id, payload).pipe(
 										Effect.tap(() =>
 											payload.type === "abort"
-												? options
-														.emit(
-															{
-																type: "event",
-																sinkId: f.sinkId,
-																event: {
-																	eventId: "native-cancel",
-																	type: "turn.interrupted",
-																	providerId: "claude",
-																	sessionId: "s",
-																	providerRefs: {},
-																	rawSource: { kind: "test" },
-																	createdAt: 1,
-																	data: {},
-																},
-															},
-															"s",
-														)
-														.pipe(
-															Effect.andThen(
-																options.emit(
-																	{ type: "release-sink", sinkId: f.sinkId },
-																	"s",
+												? f.terminal("turn.interrupted").pipe(
+														Effect.andThen(
+															options.emit(
+																{ type: "release-sink", sinkId: f.sinkId },
+																"s",
+															),
+														),
+														Effect.andThen(
+															Deferred.fail(f.pending, {
+																...runnerFailure(
+																	"send-turn",
+																	"native cancellation",
 																),
-															),
-															Effect.andThen(
-																Deferred.fail(f.pending, {
-																	...runnerFailure(
-																		"send-turn",
-																		"native cancellation",
-																	),
-																	code: "cancelled",
-																}),
-															),
-														)
+																code: "cancelled",
+																replied: true,
+															}),
+														),
+													)
 												: Effect.void,
 										),
 									),
@@ -3428,6 +3875,12 @@ it.effect(
 						Effect.andThen(work),
 					),
 				);
+				// This host refuses before receiving the command, so there is no
+				// journal record. RunnerSocket supplies the typed refusal below.
+				f.replaySend.execute = () =>
+					Deferred.succeed(f.sending, undefined).pipe(
+						Effect.andThen(Deferred.await(f.pending)),
+					);
 				yield* f.manager.recoverEffect;
 				const sending = yield* Effect.forkChild(
 					f.instance.sendTurnEffect(f.input),
@@ -3439,7 +3892,8 @@ it.effect(
 				const failure = {
 					...runnerFailure("send-turn", "idle retry"),
 					code: "runner_idle_exit",
-				};
+					delivery: { _tag: "Refused", reason: "exiting" },
+				} as const;
 				f.processes.delete(100_088);
 				old.onClose(failure);
 				yield* Deferred.fail(f.pending, failure);
@@ -3500,7 +3954,7 @@ it.effect(
 					),
 				);
 				yield* Deferred.await(firstReplay);
-				yield* TestClock.adjust("100 millis");
+				yield* TestClock.adjust("150 millis");
 				yield* Fiber.join(recovering);
 				expect(f.attachments).toHaveLength(2);
 				expect(f.sendHandles).toHaveLength(1);
@@ -3640,16 +4094,36 @@ it.effect(
 							),
 						),
 				);
-				const input = { ...f.input, prompt: "same input", history: [] };
+				const commit = yield* makeCommitAndSignal;
+				let admittedRuns = 0;
 				const admit = () =>
-					f.instance.admitSendEffect(
-						{ origin: { _tag: "Fresh" }, sinkId: f.sinkId, input },
-						(send) =>
-							f.manager.executeEffect(
-								{ type: "send-turn", sinkId: f.sinkId, input, aborted: false },
-								send,
-							),
-					);
+					Effect.gen(function* () {
+						const input = {
+							...f.input,
+							runId: `fresh-run:${++admittedRuns}`,
+							prompt: "same input",
+							history: [],
+						};
+						yield* commit([
+							canonicalEvent("run.requested", "s", {
+								runId: input.runId,
+								inputId: input.inputId,
+							}),
+						]);
+						return yield* f.instance.admitSendEffect(
+							{ origin: { _tag: "Fresh" }, sinkId: f.sinkId, input },
+							(send) =>
+								f.manager.executeEffect(
+									{
+										type: "send-turn",
+										sinkId: f.sinkId,
+										input,
+										aborted: false,
+									},
+									send,
+								),
+						);
+					});
 				yield* Effect.gen(function* () {
 					const fresh = yield* Effect.forkChild(admit());
 					yield* Deferred.await(opening);
@@ -3669,7 +4143,7 @@ it.effect(
 					expect(Option.getOrThrow(yield* Fiber.join(fresh)).status).toBe(
 						"completed",
 					);
-					yield* f.terminal("turn.completed");
+					yield* f.terminal("turn.completed", "fresh-run:1");
 					const attachment = f.attachments.at(-1);
 					if (!attachment) return yield* Effect.die("missing attachment");
 					const closing = yield* Effect.forkChild(
@@ -3686,7 +4160,7 @@ it.effect(
 					);
 					expect(f.sendHandles).toHaveLength(2);
 					expect(f.sendHandles[1]).not.toBe(f.sendHandles[0]);
-					yield* f.terminal("turn.completed");
+					yield* f.terminal("turn.completed", "fresh-run:2");
 					yield* attachment.emit(
 						{ type: "release-sink", sinkId: f.sinkId },
 						"s",
@@ -4059,6 +4533,12 @@ for (const origin of ["continuation", "retry"] as const)
 							: {}),
 					};
 					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('current-run', 's', 'pending', 1)`;
+					yield* (yield* makeCommitAndSignal)([
+						canonicalEvent("run.dispatched", "s", {
+							runId: "current-run",
+							runnerId: "131313131313",
+						}),
+					]);
 					yield* f.sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at, run_id) VALUES ('old-turn', 's', 'interrupted', ${origin === "continuation" ? "old-input" : input.inputId}, 1, 'old-run')`;
 					yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id)
 		VALUES (1, 'current-command', 'test-project', 's', 'account', 'send_turn', ${JSON.stringify(input)}, 'running', 0, 1, 1, 'current-run')`;
@@ -4573,9 +5053,18 @@ it.effect(
 		runRetirement(
 			Effect.gen(function* () {
 				const f = yield* sendScopeFixture();
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					canonicalEvent("run.requested", "s", {
+						runId: "current-run",
+						inputId: f.input.inputId,
+					}),
+				]);
 				yield* f.manager.recoverEffect;
 				const sending = yield* Effect.forkChild(
-					f.instance.sendTurnEffect(f.input).pipe(Effect.result),
+					f.instance
+						.sendTurnEffect({ ...f.input, runId: "current-run" })
+						.pipe(Effect.result),
 				);
 				yield* Deferred.await(f.sending);
 				const old = f.attachments[0];
@@ -4604,10 +5093,11 @@ it.effect(
 					);
 				yield* event("run.started", "current-run");
 				yield* event("turn.completed", "earlier-run");
-				yield* Deferred.fail(
-					f.pending,
-					runnerFailure("send-turn", "current run failed"),
-				);
+				yield* f.terminal("turn.error", "current-run");
+				yield* Deferred.fail(f.pending, {
+					...runnerFailure("send-turn", "current run failed"),
+					replied: true,
+				});
 				yield* Fiber.join(sending);
 				const delivered = vi
 					.mocked(f.eventSink.push)
@@ -4805,6 +5295,19 @@ it.effect("an unsent failure cannot release a sink rebound after detach", () =>
 	runRetirement(
 		Effect.gen(function* () {
 			const f = yield* retirementFixture(false);
+			const commit = yield* makeCommitAndSignal;
+			// This pre-amendment retry uses the legacy unsent-failure path. Its
+			// command-less dispatch must keep it outside C2 and C3.
+			yield* commit([
+				canonicalEvent("run.requested", "s", {
+					runId: "unsent-first",
+					inputId: "first",
+				}),
+				canonicalEvent("run.dispatched", "s", {
+					runId: "unsent-first",
+					runnerId: "131313131313",
+				}),
+			]);
 			const entered = yield* Deferred.make<void>();
 			const resume = yield* Deferred.make<void>();
 			const record = f.output.getMockImplementation();
@@ -4837,6 +5340,7 @@ it.effect("an unsent failure cannot release a sink rebound after detach", () =>
 						input: {
 							...f.input,
 							inputId: "first",
+							runId: "unsent-first",
 							prompt: "first",
 							history: [],
 						},
@@ -5067,7 +5571,7 @@ for (const failure of ["connection failure", "process exit"] as const) {
 }
 
 it.effect(
-	"releases admission without waiting for busy SQL and commits its tombstone with the next seam write",
+	"waits for the retirement commit before signalling a runner when SQL is busy",
 	() =>
 		runRetirement(
 			Effect.gen(function* () {
@@ -5076,6 +5580,7 @@ it.effect(
 				if (!old?.receipts)
 					return yield* Effect.fail(runnerFailure("test", "No receipt store"));
 				const attach = vi.spyOn(old.receipts, "attach");
+				const signal = vi.spyOn(f.processTable, "signal");
 				const commit = yield* makeCommitAndSignal;
 				const entered = yield* Deferred.make<void>();
 				const release = yield* Deferred.make<void>();
@@ -5091,21 +5596,27 @@ it.effect(
 					const stopping = yield* Effect.forkChild(
 						f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
 					);
-					// The signal sequence is 3 s TERM + 1 s KILL exit deadline.
-					// Retirement and admission release get no SQL wait after that.
+					// R3 forbids signalling before the write-ahead transaction commits.
 					yield* TestClock.adjust("4001 millis");
-					expect(stopping.pollUnsafe()).toMatchObject({ _tag: "Success" });
-					expect(f.retained.size).toBe(0);
+					expect(stopping.pollUnsafe()).toBeUndefined();
+					expect(signal).not.toHaveBeenCalled();
 					expect(attach).not.toHaveBeenCalled();
-					expect(yield* f.manager.hasLiveProcessEffect("s", old.runnerId)).toBe(
-						false,
-					);
 					yield* Deferred.succeed(release, undefined);
 					yield* Fiber.join(writer);
+					yield* TestClock.adjust("4 seconds");
 					yield* Fiber.join(stopping);
 					expect(
 						yield* f.sql`SELECT attachment_id FROM claude_runner_cursors WHERE runner_id = ${old.runnerId} AND retired_at IS NOT NULL`,
 					).toEqual([{ attachment_id: "" }]);
+					f.processes.delete(old.pid ?? 100_088);
+					yield* TestClock.adjust("6 seconds");
+					expect(f.retained.size).toBe(0);
+					expect(yield* f.manager.hasLiveProcessEffect("s", old.runnerId)).toBe(
+						false,
+					);
+					expect(
+						yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${old.runnerId}`,
+					).toEqual([]);
 				}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
 			}),
 		),
@@ -5153,6 +5664,28 @@ for (const cleanupFailure of ["deadline", "unavailable services"] as const)
 							{ metadata: { runId: "old-run" } },
 						),
 					]);
+					yield* commit.holdRun({
+						sessionId: "s",
+						runId: "old-run",
+						commandId: "old-command",
+					});
+					const received = yield* Deferred.make<void>();
+					const journal = new RunnerSendJournal(
+						runnerRegistry.runnerDirectory(f.root, f.root),
+						"s",
+						"claude",
+					);
+					yield* journal
+						.execute(
+							"old-command",
+							1,
+							false,
+							Deferred.succeed(received, undefined).pipe(
+								Effect.andThen(Effect.never),
+							),
+						)
+						.pipe(Effect.forkChild);
+					yield* Deferred.await(received);
 					yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at)
 			VALUES (1, 'old-command', 'test-project', 's', 'test-claude', 'send_turn', '{"inputId":"old-input"}', 'old-run', 'running', 1, 1, 1)`;
 					old.onOutputCommitted?.({
@@ -5208,34 +5741,41 @@ for (const cleanupFailure of ["deadline", "unavailable services"] as const)
 					yield* Effect.gen(function* () {
 						if (cleanupFailure === "unavailable services")
 							servicesAvailable = false;
+						f.processes.delete(old.pid ?? 100_088);
 						const stopping = yield* Effect.forkChild(
 							f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
 						);
 						yield* TestClock.adjust("4 seconds");
 						if (cleanupFailure === "deadline") {
 							yield* Deferred.await(entered);
-							// A live cleanup owns the cohort until its deadline.
-							yield* instance.attachSessionsEffect(["s"], recoveryForSession);
+							// Stop releases while durable settlement is still blocked.
 							expect(
 								yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
 							).toEqual([{ status: "running" }]);
 							yield* TestClock.adjust("3 seconds");
 						}
+						expect(
+							yield* f.sql`SELECT owned_run_ids FROM claude_runner_cursors WHERE runner_id = ${old.runnerId}`,
+						).toEqual([{ owned_run_ids: "[]" }]);
 						servicesAvailable = true;
 						blocked.mockRestore();
 						yield* Deferred.succeed(release, undefined);
 						yield* Fiber.join(stopping);
+						yield* TestClock.adjust("10 seconds");
 						yield* instance.attachSessionsEffect(["s"], recoveryForSession);
 						yield* instance.attachSessionsEffect(["s"], recoveryForSession);
 						expect(
 							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
-						).toEqual([{ status: "error" }]);
+						).toEqual([{ status: "interrupted" }]);
 						expect(
 							yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'old-command'`,
 						).toEqual([{ status: "failed" }]);
 						expect(
 							yield* f.sql`SELECT type FROM events WHERE type IN ('turn.error', 'turn.interrupted')`,
-						).toEqual([{ type: "turn.error" }]);
+						).toEqual([{ type: "turn.interrupted" }]);
+						expect(
+							yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${old.runnerId}`,
+						).toEqual([]);
 					}).pipe(
 						Effect.ensuring(Deferred.succeed(release, undefined)),
 						Effect.ensuring(Effect.sync(() => blocked.mockRestore())),
@@ -5273,6 +5813,7 @@ for (const blocked of ["release-sink", "background-task"] as const) {
 						}),
 					);
 					yield* Effect.gen(function* () {
+						f.processes.delete(old.pid ?? 100_088);
 						const stopping = yield* Effect.forkChild(
 							f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
 						);
@@ -5292,7 +5833,7 @@ for (const blocked of ["release-sink", "background-task"] as const) {
 }
 
 it.effect(
-	"bounds a masked retirement settlement and rejects its delayed commit",
+	"releases Stop while the commit permit is held past cleanup expiry and commits settlement",
 	() =>
 		runRetirement(
 			Effect.gen(function* () {
@@ -5303,7 +5844,7 @@ it.effect(
 				const old = f.attachments[0];
 				if (!old)
 					return yield* Effect.fail(runnerFailure("test", "No old attachment"));
-				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('old-run', 's', 'running', 1)`;
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, runner_id) VALUES ('old-run', 's', 'running', 1, ${old.runnerId})`;
 				old.onOutputCommitted?.({
 					type: "event",
 					sinkId: "retained",
@@ -5334,6 +5875,7 @@ it.effect(
 						}).pipe(Effect.ensuring(Deferred.succeed(finished, undefined))),
 				);
 				yield* Effect.gen(function* () {
+					f.processes.delete(old.pid ?? 100_088);
 					const stopping = yield* Effect.forkChild(
 						f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
 					);
@@ -5341,16 +5883,25 @@ it.effect(
 					yield* Deferred.await(entered);
 					yield* TestClock.adjust("3 seconds");
 					const completedWhileBlocked = stopping.pollUnsafe() !== undefined;
+					// A late close cannot discard the watcher's pending obligation.
+					f.processes.delete(old.pid ?? 100_088);
+					old.onClose(
+						runnerFailure("test", "retired process exited during settlement"),
+					);
 					yield* Deferred.succeed(release, undefined);
 					yield* Deferred.await(finished);
 					yield* Fiber.await(stopping);
 					expect(completedWhileBlocked).toBe(true);
 					expect(
-						yield* f.sql`SELECT event_id FROM events WHERE session_id = 's'`,
-					).toEqual([]);
+						yield* f.sql`SELECT type FROM events WHERE session_id = 's' AND type = 'turn.interrupted'`,
+					).toEqual([{ type: "turn.interrupted" }]);
 					expect(
 						yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
-					).toEqual([{ status: "running" }]);
+					).toEqual([{ status: "interrupted" }]);
+					yield* TestClock.adjust("10 seconds");
+					expect(
+						yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${old.runnerId}`,
+					).toEqual([]);
 				}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
 			}),
 		),
@@ -5385,6 +5936,11 @@ it.effect(
 				);
 				yield* TestClock.adjust("4 seconds");
 				yield* Fiber.join(stopping);
+				expect(
+					yield* f.sql`SELECT status FROM pending_approvals WHERE id = 'old-prompt'`,
+				).toEqual([{ status: "pending" }]);
+				f.processes.delete(old.pid ?? 100_088);
+				yield* TestClock.adjust("6 seconds");
 				const [prompt] = yield* f.sql<{
 					status: string;
 				}>`SELECT status FROM pending_approvals WHERE id = 'old-prompt'`;
@@ -5486,7 +6042,7 @@ for (const failed of ["receipt", "ownership SQL"] as const) {
 for (const boundary of ["before persistence", "inside write"] as const) {
 	for (const fencing of ["succeeds", "fails", "times out"] as const) {
 		it.effect(
-			`fences subagent persistence after retirement when receipt fencing ${fencing}, ${boundary}`,
+			`${boundary === "inside write" ? "preserves subagent output committed before Stop" : "fences subagent persistence after retirement"} when receipt fencing ${fencing}, ${boundary}`,
 			() =>
 				runRetirement(
 					Effect.gen(function* () {
@@ -5616,6 +6172,14 @@ for (const boundary of ["before persistence", "inside write"] as const) {
 							f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
 						);
 						yield* TestClock.adjust("5 seconds");
+						// The SQL writer orders output and Stop. Output already inside
+						// the write commits before Stop can install its durable fence.
+						if (boundary === "inside write") {
+							expect(stopping.pollUnsafe()).toBeUndefined();
+							yield* Deferred.succeed(release, undefined);
+							yield* Fiber.await(output);
+							yield* TestClock.adjust("4 seconds");
+						}
 						yield* Fiber.await(stopping);
 						expect(
 							yield* f.manager.hasLiveProcessEffect("s", old.runnerId),
@@ -5629,10 +6193,14 @@ for (const boundary of ["before persistence", "inside write"] as const) {
 						).toEqual([{ attachment_id: "" }]);
 						expect(
 							yield* f.sql`SELECT id FROM sessions WHERE id = 'retired-child'`,
-						).toEqual([]);
-						expect(
-							yield* f.sql`SELECT event_id FROM events WHERE session_id = 'retired-child'`,
-						).toEqual([]);
+						).toEqual(
+							boundary === "inside write" ? [{ id: "retired-child" }] : [],
+						);
+						const childEvents =
+							yield* f.sql`SELECT event_id FROM events WHERE session_id = 'retired-child'`;
+						if (boundary === "inside write")
+							expect(childEvents.length).toBeGreaterThan(0);
+						else expect(childEvents).toEqual([]);
 					}),
 				),
 		);
@@ -5662,7 +6230,7 @@ it.effect(
 					}),
 				);
 				const recovering = yield* Effect.forkChild(f.manager.recoverEffect);
-				yield* TestClock.adjust("1500 millis");
+				yield* TestClock.adjust("2 seconds");
 				yield* Deferred.await(lastAttempt);
 				const transaction = yield* Effect.forkChild(
 					f.sql.withTransaction(
@@ -5683,15 +6251,25 @@ it.effect(
 								output.type === "background-task" &&
 								output.transition.kind === "session-ended",
 						),
-					).toBe(true);
+					).toBe(false);
 					yield* Deferred.succeed(unlock, undefined);
 					yield* Fiber.join(transaction);
+					yield* TestClock.adjust("4 seconds");
 					yield* Fiber.await(recovering);
 					const commit = yield* makeCommitAndSignal;
 					yield* commit.write(() => Effect.void);
 					expect(
 						yield* f.sql`SELECT attachment_id FROM claude_runner_cursors WHERE runner_id = '131313131313' AND retired_at IS NOT NULL`,
 					).toEqual([{ attachment_id: "" }]);
+					f.processes.delete(100_088);
+					yield* TestClock.adjust("6 seconds");
+					expect(
+						f.outputs.some(
+							(output) =>
+								output.type === "background-task" &&
+								output.transition.kind === "session-ended",
+						),
+					).toBe(true);
 					vi.mocked(f.driver.connect).mockClear();
 					const restarted = yield* makeProcessSessionRunner(
 						{
@@ -5709,8 +6287,11 @@ it.effect(
 		),
 );
 
+// survived=true races the feeder's predecessor wait against a frozen TestClock and
+// hangs some runs. conduit-test-82tn.32.29.4 rewrites it to observe the predecessor
+// park and restores it (200 consecutive green runs).
 for (const survived of [false, true])
-	it.effect(
+	(survived ? it.effect.skip : it.effect)(
 		survived
 			? "refuses cleanup of owned runs from a cancelled Starting candidate that survives Stop"
 			: "fences a cancelled warming candidate while its stop is pending",
@@ -5871,10 +6452,10 @@ for (const survived of [false, true])
 					const owner = yield* f.manager.getControlProcessIdEffect?.("s") ??
 						Effect.succeed(undefined);
 					f.processes.delete(100_088);
-					yield* Deferred.fail(
-						f.pending,
-						runnerFailure("test", "Finish test send"),
-					);
+					yield* Deferred.fail(f.pending, {
+						...runnerFailure("test", "Finish test send"),
+						replied: true,
+					});
 					yield* Fiber.await(sending);
 					yield* TestClock.adjust("4 seconds");
 					expect(staleOutputs).toEqual([]);
@@ -6215,6 +6796,9 @@ for (const interleaving of ["replacement", "retirement", "pending"] as const) {
 					);
 					yield* Deferred.await(blockedEntered);
 					const failure = runnerFailure("socket", "Unexpected disconnect");
+					// The old process has exited; its daemon cleanup remains blocked.
+					// A live disconnected process would keep this transmission held.
+					f.processes.delete(old.pid ?? 100_088);
 					old.onClose(failure);
 					yield* Deferred.fail(f.pending, failure);
 					yield* TestClock.adjust("4 seconds");
@@ -6376,6 +6960,8 @@ it.effect(
 				);
 				yield* TestClock.adjust("4 seconds");
 				yield* Fiber.join(ending);
+				f.processes.delete(old.pid ?? 100_088);
+				yield* TestClock.adjust("6 seconds");
 				expect({
 					retainedSinks: [...f.retained],
 					background: f.background.backgroundOf("s"),
@@ -6422,6 +7008,12 @@ it.effect(
 				const runnerId = "111111111111";
 				const attachmentId = "attachment-before-retirement";
 				const pid = 100_099;
+				const receipts = yield* makeRunnerReceiptStore(sql);
+				yield* receipts.register(
+					runnerId,
+					{ sessionId: "s", pid, startTime: "original", driverKind: "claude" },
+					"serving",
+				);
 				const socketPath = join(prepareRunnerDirectory(root, root), runnerId);
 				writeFileSync(
 					`${socketPath}.json`,
@@ -7918,6 +8510,368 @@ it.effect(
 						subscribe: () => Effect.succeed(Stream.empty),
 						subscribeAdvances: () => Effect.succeed(Stream.empty),
 					}),
+				);
+			}),
+		),
+);
+
+for (const failure of ["attachment_missing", "account_unavailable"] as const)
+	it.effect(
+		`owner recovery settles permanent ${failure} once without retrying preparation`,
+		() =>
+			runRetirement(
+				Effect.gen(function* () {
+					const f = yield* s7Fixture("cursor");
+					const commandId = `permanent-${failure}`;
+					// An unheld pre-start owner is recovered by the owner feeder, rather
+					// than the compatibility path for command-less dispatch events.
+					const input = yield* f.seed(commandId, 1, 0);
+					const payload = {
+						...input,
+						...(failure === "attachment_missing"
+							? {
+									images: [
+										{ attachmentHash: "0".repeat(64), mime: "image/png" },
+									],
+								}
+							: { account: { ...input.account, id: "missing-account" } }),
+					};
+					// Keep provider_id='account': driver discovery must select the row
+					// before the missing payload account is classified permanently.
+					yield* f.sql`UPDATE provider_command_outbox
+						SET status = 'running', attempt_count = 1,
+							payload_json = ${JSON.stringify(payload)}
+						WHERE command_id = ${commandId}`;
+					const prepare = vi.spyOn(f.driver, "legacyPrepareTurnEffect");
+					yield* f.recover;
+					yield* TestClock.adjust("1 second");
+					expect(
+						yield* f.sql`SELECT status, error_code, attempt_count
+							FROM provider_command_outbox WHERE command_id = ${commandId}`,
+					).toEqual([
+						{ status: "failed", error_code: failure, attempt_count: 1 },
+					]);
+					expect(
+						yield* f.sql`SELECT status, runner_id FROM provider_runs
+							WHERE id = ${input.runId}`,
+					).toEqual([{ status: "error", runner_id: null }]);
+					expect(
+						yield* f.sql`SELECT type FROM events
+							WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')
+								AND json_extract(metadata, '$.runId') = ${input.runId}`,
+					).toEqual([{ type: "turn.error" }]);
+					expect(prepare).not.toHaveBeenCalled();
+					expect(f.sendHandles).toHaveLength(1);
+					expect(f.sendHandles.map((send) => send.assignment._tag)).toEqual([
+						"Closed",
+					]);
+					expect(
+						f.commands.filter((command) => command.type === "send-turn"),
+					).toEqual([]);
+					// Another public recovery sweep sees the settled owner and admits no
+					// new work; the completed recovery fiber retains no live handle.
+					yield* f.instance.attachSessionsEffect(["s"], () =>
+						Effect.succeed(f.recovery),
+					);
+					yield* TestClock.adjust("10 seconds");
+					expect(f.sendHandles).toHaveLength(1);
+					expect(prepare).not.toHaveBeenCalled();
+					expect(
+						yield* f.sql`SELECT COUNT(*) AS n FROM events
+							WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')
+								AND json_extract(metadata, '$.runId') = ${input.runId}`,
+					).toEqual([{ n: 1 }]);
+				}),
+			),
+	);
+
+it.effect(
+	"legacy recovery hides a transient preparation failure and retries the same owner",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("cursor");
+				yield* f.seed("legacy-transient");
+				yield* f.hello(
+					({
+						sendJournalAnswers: _capability,
+						sendAnswers: _answers,
+						...hello
+					}) => ({
+						...hello,
+						bindings: [],
+						sendCommands: [],
+						completedCommands: [],
+					}),
+				);
+				const originalPrepare = f.driver.legacyPrepareTurnEffect;
+				if (!originalPrepare)
+					return yield* Effect.die("missing fixture preparation");
+				const firstFailure = yield* Deferred.make<void>();
+				let attempts = 0;
+				vi.spyOn(f.driver, "legacyPrepareTurnEffect").mockImplementation(
+					(input) =>
+						Effect.gen(function* () {
+							attempts++;
+							if (attempts === 1) {
+								yield* Deferred.succeed(firstFailure, undefined);
+								return yield* Effect.fail(
+									new ProviderInstanceFailure({
+										providerId: "cursor",
+										operation: "prepare recovered turn",
+										cause: {
+											code: "SQLITE_BUSY",
+											message: "SQLite busy",
+											retryable: true,
+										},
+									}),
+								);
+							}
+							return yield* originalPrepare(input);
+						}),
+				);
+				f.replaySend.execute = () =>
+					Effect.succeed({
+						status: "completed",
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						providerStateUpdates: [],
+					});
+				yield* f.recover;
+				yield* Deferred.await(firstFailure);
+				yield* TestClock.adjust(0);
+				expect(
+					yield* f.sql`SELECT status, error_code, attempt_count
+						FROM provider_command_outbox WHERE command_id = 'legacy-transient'`,
+				).toEqual([{ status: "running", error_code: null, attempt_count: 1 }]);
+				expect(
+					yield* f.sql`SELECT type FROM events
+						WHERE type IN ('input.requeued', 'turn.error', 'turn.interrupted')`,
+				).toEqual([]);
+				expect(
+					f.commands.filter((command) => command.type === "send-turn"),
+				).toEqual([]);
+				yield* TestClock.adjust("1 second");
+				expect(attempts).toBe(2);
+				expect(
+					f.commands.filter((command) => command.type === "send-turn"),
+				).toHaveLength(1);
+				expect(
+					yield* f.sql`SELECT status, error_code, attempt_count
+						FROM provider_command_outbox WHERE command_id = 'legacy-transient'`,
+				).toEqual([
+					{ status: "completed", error_code: null, attempt_count: 1 },
+				]);
+				expect(
+					yield* f.sql`SELECT type FROM events
+						WHERE type IN ('input.requeued', 'turn.error', 'turn.interrupted')`,
+				).toEqual([]);
+			}),
+		),
+);
+
+for (const reason of ["ResumeRejected", "JournalAbsent"] as const)
+	it.effect(
+		`R2 released ${reason} run with legacy-shaped history is never legacy`,
+		() =>
+			runRetirement(
+				Effect.gen(function* () {
+					const f = yield* s7Fixture();
+					yield* f.seed("released-history");
+					// A run.released is definitive provenance even for imported history.
+					yield* (yield* makeCommitAndSignal)([
+						canonicalEvent("run.released", "s", {
+							runId: "run:released-history",
+							runnerId: "131313131313",
+							commandId: "released-history",
+							transmission: 1,
+							reason,
+						}),
+					]);
+					expect(
+						yield* legacyRunnerRunQuery(f.sql, "s", "run:released-history"),
+					).toBe(false);
+				}),
+			),
+	);
+
+for (const answerAtHello of [true, false])
+	it.effect(
+		`R2 held indeterminate ${answerAtHello ? "hello" : "reply"} remains owned without adoption writing uncertainty`,
+		() =>
+			runRetirement(
+				Effect.gen(function* () {
+					const f = yield* s7Fixture("claude");
+					yield* f.seed("held-uncertainty", 1, 1, "held");
+					const result: TurnResult = {
+						status: "indeterminate",
+						cost: 0,
+						tokens: { input: 0, output: 0 },
+						durationMs: 0,
+						providerStateUpdates: [],
+					};
+					yield* f.hello((hello) => ({
+						...hello,
+						bindings: [
+							{
+								commandId: "held-uncertainty",
+								attempt: 1,
+								sessionId: "s",
+								sinkId: runnerSinkId("held-uncertainty", 1),
+								released: false,
+							},
+						],
+						sendCommands: [],
+						sendJournalAnswers: true,
+						sendAnswers: [
+							{
+								commandId: "held-uncertainty",
+								attempt: 1,
+								nativeResumeFallback: false,
+								...(answerAtHello
+									? { status: "finished" as const, result }
+									: { status: "running" as const }),
+							},
+						],
+					}));
+					yield* f.recover;
+					if (!answerAtHello) {
+						const attachment = f.attachments[0];
+						if (!attachment?.onCommandReply)
+							return yield* Effect.die("Missing recovered reply boundary");
+						const reply = {
+							type: "command-reply" as const,
+							commandId: "held-uncertainty",
+							attempt: 1,
+							nativeResumeFallback: false,
+							result,
+						};
+						yield* attachment.onCommandReply(reply);
+						yield* attachment.onCommandReply(reply);
+					}
+					expect(
+						yield* f.sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'held-uncertainty'`,
+					).toEqual([{ status: "running", error_code: null }]);
+					expect(
+						yield* f.sql`SELECT status, runner_id, held_transmission FROM provider_runs WHERE id = 'run:held-uncertainty'`,
+					).toEqual([
+						{
+							status: "pending",
+							runner_id: "131313131313",
+							held_transmission: 1,
+						},
+					]);
+					expect(
+						yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted', 'run.released')`,
+					).toEqual([]);
+				}),
+			),
+	);
+
+it.effect(
+	"R2 registration without cursor verifies and cleans a host without serving authority",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* sendScopeFixture();
+				const signals: Array<{ pid: number; signal: string }> = [];
+				vi.spyOn(f.processTable, "signal").mockImplementation((pid, signal) => {
+					signals.push({ pid, signal });
+					f.processes.delete(pid);
+				});
+				const before = yield* f.sql`SELECT type FROM events`;
+				// This public entry bypasses only the fixture's cursor auto-registration.
+				if (
+					!f.manager.attachSessionsEffect ||
+					!f.manager.getControlProcessIdEffect
+				)
+					return yield* Effect.die("Missing public recovery boundary");
+				yield* f.manager.attachSessionsEffect(["s"]);
+				yield* TestClock.adjust("5 seconds");
+				expect(f.attachments).toHaveLength(1);
+				expect(f.attachments[0]?.identityOnly).toBe(true);
+				expect(yield* f.manager.getControlProcessIdEffect("s")).toBeUndefined();
+				expect(
+					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE retired_at IS NULL AND role = 'serving'`,
+				).toEqual([]);
+				expect(signals).toEqual([{ pid: 100_088, signal: "SIGTERM" }]);
+				expect(f.processes.has(100_088)).toBe(false);
+				expect(
+					f.commands.filter((command) => command.type === "send-turn"),
+				).toEqual([]);
+				expect(yield* f.sql`SELECT type FROM events`).toEqual(before);
+			}),
+		),
+);
+
+it.effect(
+	"R2 a command cancelled after its hold releases NotSent before returning",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* sendScopeFixture();
+				yield* f.manager.recoverEffect;
+				const committed = yield* Deferred.make<void>();
+				const resume = yield* Deferred.make<void>();
+				const bus = yield* SessionEventBusTag;
+				const publish = bus.publish;
+				let cancelled = false;
+				let paused = false;
+				const publication = vi
+					.spyOn(bus, "publish")
+					.mockImplementation((events, ended) =>
+						publish(events, ended).pipe(
+							Effect.andThen(
+								Effect.suspend(() => {
+									if (
+										paused ||
+										!events.some((event) => event.type === "run.dispatched")
+									)
+										return Effect.void;
+									paused = true;
+									return Deferred.succeed(committed, undefined).pipe(
+										Effect.andThen(Deferred.await(resume)),
+									);
+								}),
+							),
+						),
+					);
+				const execute = f.manager.executeEffect.bind(f.manager);
+				const execution = vi
+					.spyOn(f.manager, "executeEffect")
+					.mockImplementation((command, ...rest) => {
+						// A public command's abort state changes after hold acceptance, while
+						// no transmission or native cancel event has yet occurred.
+						if (command.type === "send-turn")
+							Object.defineProperty(command, "aborted", {
+								get: () => cancelled,
+							});
+						return execute(command, ...rest);
+					});
+				yield* Effect.gen(function* () {
+					const sending = yield* f.instance
+						.sendTurnEffect(f.input)
+						.pipe(Effect.forkChild);
+					yield* Deferred.await(committed);
+					cancelled = true;
+					yield* Deferred.succeed(resume, undefined);
+					yield* TestClock.adjust(0);
+					expect(
+						yield* f.sql`SELECT json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+					).toEqual([{ reason: "NotSent" }]);
+					expect(
+						f.commands.filter((command) => command.type === "send-turn"),
+					).toEqual([]);
+					expect((yield* Fiber.join(sending)).status).toBe("cancelled");
+				}).pipe(
+					Effect.ensuring(Deferred.succeed(resume, undefined)),
+					Effect.ensuring(
+						Effect.sync(() => {
+							publication.mockRestore();
+							execution.mockRestore();
+						}),
+					),
 				);
 			}),
 		),

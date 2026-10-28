@@ -1,4 +1,6 @@
 import { channel } from "node:diagnostics_channel";
+import { appendFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 
@@ -31,6 +33,7 @@ import {
 	SecretAnswerFailure,
 	type SecretAnswers,
 } from "../domain/daemon/Services/secret-answers.js";
+import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import type { DraftChange } from "../domain/relay/Services/input-drafts.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
@@ -40,9 +43,12 @@ import type {
 	CommitAndSignal,
 	CommitAndSignalFailure,
 } from "../persistence/effect/commit-and-signal.js";
-import type { EventStoreError } from "../persistence/effect/event-store-effect.js";
+import {
+	type EventStoreError,
+	makeEventStoreEffect,
+} from "../persistence/effect/event-store-effect.js";
 import { readPendingRewindCommit } from "../persistence/effect/pending-rewind.js";
-import type { CanonicalEvent } from "../persistence/events.js";
+import { type CanonicalEvent, canonicalEvent } from "../persistence/events.js";
 import type { ClaudeSessionForkSdk } from "./claude/claude-session-fork.js";
 import {
 	CommandFingerprintMismatch,
@@ -58,11 +64,13 @@ import { DurableCommandCommitRepository } from "./orchestration-command-commit.j
 import {
 	DURABLE_COMMAND_FINGERPRINT_VERSION,
 	ProviderControlPayloadSchema,
+	STOP_ABORT_WAIT_MS,
 } from "./orchestration-command-contracts.js";
 import {
 	controlFingerprintHash,
 	effectiveDispatchFingerprint,
 	fingerprintHash,
+	stopIntentFingerprintHash,
 } from "./orchestration-command-fingerprint.js";
 import { decideDurableSendTurnCommand } from "./orchestration-decider.js";
 import {
@@ -81,6 +89,10 @@ import {
 	type ProviderSessionBindingReadModel,
 } from "./provider-session-binding-read-model.js";
 import { resolveTurnImages } from "./resolve-turn-images.js";
+import {
+	legacyStopOwnersQuery,
+	sessionRunOwnersQuery,
+} from "./session-run-settlement.js";
 import type {
 	EventSink,
 	PermissionDecision,
@@ -638,6 +650,341 @@ export class OrchestrationEngine {
 				...(account ? { account } : {}),
 			});
 		});
+	}
+
+	/** Accept the user's Stop and its complete cohort under the command writer. */
+	acceptStopEffect({
+		commandId,
+		sessionId,
+	}: {
+		readonly commandId: string;
+		readonly sessionId: string;
+	}): Effect.Effect<ProviderStopSnapshot, OrchestrationError> {
+		const input = { commandId, sessionId };
+		return Effect.uninterruptible(
+			Effect.gen({ self: this }, function* () {
+				const command: InterruptTurnCommand = {
+					type: "interrupt_turn",
+					...input,
+				};
+				yield* this.ensureMutatingCommandHasId(command);
+				if (!this.durable)
+					return yield* new ProviderInstanceFailure({
+						providerId: "conduit",
+						operation: "acceptStop",
+						cause: new Error(
+							"Stop acceptance requires the durable command store",
+						),
+					});
+				const durable = yield* this.commandRuntimeEffect(command, this.durable);
+				const hash = stopIntentFingerprintHash(input);
+				let registered = false;
+				const accepted = yield* durable
+					.write(
+						(project) =>
+							Effect.gen({ self: this }, function* () {
+								// The receipt precedes provider resolution and every derived Stop read.
+								const existing = yield* durable.receipts.checkReceipt(
+									input.commandId,
+								);
+								if (existing) {
+									const [row] = yield* durable.sql<{
+										payload_json: string;
+										requested_at: number;
+										session_id: string;
+										provider_id: string;
+									}>`SELECT payload_json, requested_at, session_id, provider_id FROM provider_command_outbox WHERE command_id = ${input.commandId} AND project_key = ${durable.projectId}`;
+									const payload = row
+										? yield* Effect.try({
+												try: () =>
+													Schema.decodeSync(
+														Schema.fromJsonString(ProviderControlPayloadSchema),
+													)(row.payload_json),
+												catch: (cause) =>
+													new ProviderInstanceFailure({
+														providerId: "conduit",
+														operation: "recoverStop",
+														cause,
+													}),
+											})
+										: undefined;
+									if (
+										existing.projectId !== durable.projectId ||
+										row?.session_id !== input.sessionId ||
+										!payload ||
+										(payload.type !== "interrupt_turn" &&
+											payload.type !== "end_session") ||
+										(existing.fingerprintHash !== hash &&
+											existing.fingerprintHash !==
+												controlFingerprintHash(payload))
+									)
+										return yield* new CommandFingerprintMismatch({
+											commandId: input.commandId,
+										});
+									if (payload.stop)
+										return { stop: payload.stop, newlyAccepted: false };
+									// Old controls stay immutable and retain their original ordering cohort.
+									const providerId = row.provider_id;
+									const account = this.accountDirectory
+										? yield* this.accountDirectory.resolve({
+												_tag: "Id",
+												id: providerId,
+											})
+										: undefined;
+									return {
+										newlyAccepted: false,
+										stop: {
+											deadlineAt: row.requested_at + STOP_ABORT_WAIT_MS,
+											owners: yield* legacyStopOwnersQuery(
+												durable.sql,
+												input.sessionId,
+												input.commandId,
+											),
+											turnIds:
+												payload.type === "interrupt_turn"
+													? (payload.turnIds ?? [])
+													: [],
+											runnerBacked:
+												account !== undefined &&
+												!getProviderDriver(account.driver)?.runsOpenCodeServer,
+											retainedSteers: false,
+										},
+									};
+								}
+								const [session] =
+									yield* durable.sql`SELECT 1 FROM sessions WHERE id = ${input.sessionId} AND project_id = ${durable.projectId}`;
+								if (!session)
+									return yield* new StaleCommandRejected({
+										commandId: input.commandId,
+										scopeKind: "session",
+										scopeId: input.sessionId,
+									});
+								const providerId = yield* this.requireProviderForSessionEffect(
+									input.sessionId,
+								);
+								const account = this.accountDirectory
+									? yield* this.accountDirectory.resolve({
+											_tag: "Id",
+											id: providerId,
+										})
+									: undefined;
+								const traits = account
+									? getProviderDriver(account.driver)
+									: undefined;
+								const snapshot = yield* sessionRunOwnersQuery(
+									durable.sql,
+									input.sessionId,
+									{
+										confirmedStop: true,
+										excludeRetainedSteers:
+											traits?.keepsPendingSteersOnInterrupt ?? false,
+									},
+								);
+								const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+								if (
+									process.env["NODE_ENV"] === "test" &&
+									process.env["CONDUIT_TEST_STOP_ACCEPT_PAUSE"] === "1" &&
+									proof
+								) {
+									const gate = join(
+										dirname(proof),
+										"conduit-test-stop-acceptance",
+									);
+									if (existsSync(gate)) {
+										const mark = {
+											channel: "conduit-process-test",
+											kind: "stop-accept-paused",
+											...input,
+										};
+										appendFileSync(proof, `${JSON.stringify(mark)}\n`);
+										process.send?.(mark);
+										while (existsSync(gate)) yield* Effect.sleep("10 millis");
+									}
+								}
+								const pending = yield* durable.sql<{
+									command_id: string;
+									run_id: string;
+									provider_id: string;
+									status: string;
+									sent_sequence: number | null;
+								}>`SELECT command.command_id, command.run_id, command.provider_id, command.status,
+					(SELECT MAX(sequence) FROM events WHERE session_id = command.session_id AND type = 'input.sent' AND json_extract(data, '$.inputId') = command.command_id) AS sent_sequence
+					FROM provider_command_outbox command WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn' AND command.status IN ('pending', 'retryable_failed')`;
+								const events = pending.flatMap((row) => [
+									...(row.status === "pending"
+										? [
+												canonicalEvent(
+													"turn.interrupted",
+													input.sessionId,
+													{
+														messageId: "",
+														reason: "Stopped before delivery",
+														code: "interrupted",
+													},
+													{
+														provider: row.provider_id,
+														metadata: { runId: row.run_id },
+													},
+												),
+											]
+										: []),
+									...(row.sent_sequence === null
+										? []
+										: [
+												canonicalEvent(
+													"input.requeued",
+													input.sessionId,
+													{
+														sessionId: input.sessionId,
+														inputId: row.command_id,
+														sentSequence: row.sent_sequence,
+														reason: "failed",
+													},
+													{ metadata: { runId: row.run_id } },
+												),
+											]),
+								]);
+								if (events.length) {
+									const store = yield* makeEventStoreEffect.pipe(
+										Effect.provideService(SqlClient.SqlClient, durable.sql),
+										Effect.provideService(PersistenceProjectTag, {
+											projectId: durable.projectId,
+										}),
+									);
+									yield* project(yield* store.appendBatch(events));
+								}
+								yield* durable.sql`DELETE FROM provider_command_outbox WHERE session_id = ${input.sessionId} AND effect_type = 'send_turn' AND status = 'retryable_failed'`;
+								const identities =
+									snapshot.owners.length === 0
+										? []
+										: yield* durable.sql<{
+												input_id: string | null;
+											}>`SELECT COALESCE(json_extract(command.payload_json, '$.continuation.cutOffMessageId'), json_extract(command.payload_json, '$.inputId'), command.command_id) AS input_id
+					FROM provider_command_outbox command JOIN provider_runs requested ON requested.id = command.run_id AND requested.session_id = command.session_id
+					WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn' AND command.status = 'running' AND COALESCE(requested.joined_into, requested.id) IN ${durable.sql.in(snapshot.owners.map(({ runId }) => runId))}
+					UNION SELECT COALESCE(message.input_id, turn.user_message_id) AS input_id FROM turns turn LEFT JOIN messages message ON message.id = turn.user_message_id AND message.session_id = turn.session_id
+					WHERE turn.session_id = ${input.sessionId} AND turn.run_id IN ${durable.sql.in(snapshot.owners.map(({ runId }) => runId))}`;
+								const runnerBacked =
+									account !== undefined && !traits?.runsOpenCodeServer;
+								const stop: ProviderStopSnapshot = {
+									...snapshot,
+									deadlineAt: durable.now() + STOP_ABORT_WAIT_MS,
+									runnerBacked,
+									turnIds: [
+										...new Set(
+											identities.flatMap(({ input_id }) =>
+												input_id ? [input_id] : [],
+											),
+										),
+									],
+								};
+								const [indeterminate] =
+									runnerBacked && snapshot.owners.length
+										? yield* durable.sql<{
+												n: number;
+											}>`SELECT EXISTS (SELECT 1 FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn' AND command.status = 'running' AND command.error_code = 'delivery_indeterminate' AND run.id IN ${durable.sql.in(snapshot.owners.map(({ runId }) => runId))} AND run.status IN ('pending', 'running')) AS n`
+										: [];
+								const control =
+									indeterminate?.n === 1
+										? { type: "end_session" as const, ...input, stop }
+										: {
+												type: "interrupt_turn" as const,
+												...input,
+												stop,
+												turnIds: stop.turnIds,
+											};
+								const providerProcessId =
+									yield* this.resolveControlProcessEffect(control).pipe(
+										Effect.catch((error) =>
+											error instanceof ProviderInstanceFailure &&
+											error.code === "project_unavailable"
+												? Effect.succeed(`absent:${input.commandId}`)
+												: Effect.fail(error),
+										),
+									);
+								const [maxRow] = yield* durable.sql<{
+									m: number;
+								}>`SELECT COALESCE(MAX(request_sequence), 0) AS m FROM provider_command_outbox`;
+								const stored = yield* durable.commit.commitControl(
+									{
+										commandId: input.commandId,
+										providerId,
+										payload: { ...control, providerProcessId },
+										fingerprintHash: hash,
+										requestSequence: (maxRow?.m ?? 0) + 1,
+										nowMs: durable.now(),
+									},
+									durable.projectId,
+								);
+								durable.reactor.registerControl(input.commandId);
+								registered = true;
+								yield* project(stored);
+								return { stop, newlyAccepted: true };
+							}),
+						{ projectId: durable.projectId },
+					)
+					.pipe(
+						Effect.onExit((exit) =>
+							Effect.sync(() => {
+								if (Exit.isFailure(exit) && registered)
+									durable.reactor.unregisterControl(input.commandId);
+							}),
+						),
+						Effect.mapError((cause) =>
+							cause instanceof CommandFingerprintMismatch ||
+							cause instanceof ProviderInstanceFailure ||
+							cause instanceof StaleCommandRejected ||
+							cause instanceof SessionProviderNotBound
+								? cause
+								: new ProviderInstanceFailure({
+										providerId: "conduit",
+										operation: "acceptStop",
+										cause,
+									}),
+						),
+					);
+				if (accepted.newlyAccepted)
+					yield* this.cancelPreWarmPreparationEffect(input.sessionId);
+				return accepted.stop;
+			}),
+		);
+	}
+
+	/** Delivery uses the accepted id, so replay never recomputes the Stop intent. */
+	executeAcceptedStopEffect(input: {
+		readonly commandId: string;
+		readonly sessionId: string;
+	}): Effect.Effect<void, OrchestrationError> {
+		return Effect.uninterruptibleMask((restore) =>
+			Effect.gen({ self: this }, function* () {
+				if (!this.durable)
+					return yield* new ProviderInstanceFailure({
+						providerId: "conduit",
+						operation: "executeStop",
+						cause: new Error(
+							"Stop delivery requires the durable command store",
+						),
+					});
+				const durable = yield* this.commandRuntimeEffect(
+					{ type: "interrupt_turn", ...input },
+					this.durable,
+				);
+				const delivery = durable.reactor.runCommand(input.commandId).pipe(
+					Effect.asVoid,
+					Effect.mapError((cause) =>
+						cause instanceof ProviderInstanceFailure
+							? cause
+							: new ProviderInstanceFailure({
+									providerId: "conduit",
+									operation: "interrupt_turn",
+									cause,
+								}),
+					),
+				);
+				const worker = yield* Effect.forkIn(delivery, this.commandScope);
+				return yield* restore(Fiber.join(worker));
+			}),
+		);
 	}
 
 	dispatchEffect(

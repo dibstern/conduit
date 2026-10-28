@@ -9,6 +9,7 @@ import {
 	type DurableCommandCommitInput,
 	DurableCommandCommitRepository,
 } from "../../../src/lib/provider/orchestration-command-commit.js";
+import type { ProviderControlPayload } from "../../../src/lib/provider/orchestration-command-contracts.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
 
 function commitInput(
@@ -64,6 +65,43 @@ const withRepository = <A, E, R>(
 	);
 
 describe("DurableCommandCommitRepository", () => {
+	it.effect("marks every new non-Stop control explicitly", () =>
+		withRepository((sql, repository) =>
+			Effect.gen(function* () {
+				const target = { sessionId: "session-1", providerProcessId: "runner" };
+				const controls: readonly ProviderControlPayload[] = [
+					{ ...target, type: "interrupt_turn" },
+					{ ...target, type: "end_session" },
+					{
+						...target,
+						type: "resolve_permission",
+						requestId: "permission",
+						decision: "once",
+					},
+					{
+						...target,
+						type: "resolve_question",
+						requestId: "question",
+						answers: {},
+					},
+				];
+				for (const [index, payload] of controls.entries())
+					yield* repository.commitControl({
+						commandId: payload.type,
+						providerId: "claude",
+						payload,
+						fingerprintHash: payload.type,
+						requestSequence: index + 1,
+						nowMs: 1,
+					});
+				expect(
+					yield* sql`SELECT command_id, json_type(payload_json, '$.stop') AS marker FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual(
+					controls.map(({ type }) => ({ command_id: type, marker: "null" })),
+				);
+			}),
+		),
+	);
 	it.effect(
 		"reuses a pending reservation when replacing an unclaimed outbox row",
 		() =>

@@ -58,6 +58,8 @@ export interface ProviderControlContext {
 	readonly requestedAt?: number;
 	/** Conditional End for the original Stop cohort only. */
 	readonly retireRunIds?: readonly string[];
+	/** The committed cohort fenced by interrupt at the runner host. */
+	readonly stopRunIds?: readonly string[];
 	readonly response?: PermissionResponse;
 	readonly operation?: "reply" | "reject";
 }

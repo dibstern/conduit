@@ -1,5 +1,6 @@
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import {
 	makeRunnerUpgrade,
@@ -88,11 +89,15 @@ it.effect("rewarms when eligibility returns during replacement cleanup", () =>
 			expect(pending).toHaveLength(1);
 			const second = pending.shift();
 			if (!second) throw new Error("Eligible observation was not reconsidered");
-			yield* second;
+			const retry = yield* Effect.forkChild(second);
+			fibers.push(retry);
+			yield* TestClock.adjust("150 millis");
+			yield* Fiber.join(retry);
 			expect(warmed).toEqual([1, 2]);
 			expect(committed).toEqual([2]);
 			expect(cancelled).toEqual([1]);
-			expect(failures).toHaveLength(0);
+			expect(failures).toEqual(["Swap commit was refused"]);
+			expect(old.upgrade.failures).toBe(1);
 			expect(old.upgrade.activity).toBe(7);
 			expect(old.upgrade.inFlight).toBe(false);
 			expect(pending).toHaveLength(0);

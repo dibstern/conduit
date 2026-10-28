@@ -84,6 +84,8 @@ export type SessionCommand = (
 	  }
 	| {
 			readonly type: "send-turn";
+			/** Current daemons stamp this from input.runId; absent on older peers. */
+			readonly runId?: string;
 			/** Daemon memory snapshot retained until another turn is admitted. */
 			readonly autoSettleAfterDays?: number | null | undefined;
 			/** Ephemeral launch credentials, excluded from durable command inputs. */
@@ -132,6 +134,8 @@ export type SessionCommand = (
 			// No capability flag: runners predating it ignore the field and
 			// interrupt session-wide, bounded by the daemon's Stop wait like OpenCode.
 			readonly turnIds?: readonly string[];
+			/** The committed Stop cohort; never inferred from reusable input ids. */
+			readonly runIds?: readonly string[];
 	  }
 	| {
 			readonly type: "end-session" | "shutdown-after-turn";

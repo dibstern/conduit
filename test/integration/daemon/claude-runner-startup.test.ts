@@ -53,6 +53,20 @@ describe("built runner startup deadlines", () => {
 			evidence["turn"] = turn;
 			evidence["parentOutcome"] =
 				turn.done["attention"] === "error" ? "turn-failed" : "turn-completed";
+			expect(turn.chunks.join("")).toBe(
+				responseChunks("startup-deadline-turn").join(""),
+			);
+			expect(turn.done["status"]).toBe("idle");
+			expect(turn.done["attention"]).not.toBe("error");
+			expect(
+				harness.marks.filter(
+					(mark) =>
+						mark.kind === "enqueue" && mark.prompt === "startup-deadline-turn",
+				),
+			).toHaveLength(1);
+			expect(JSON.stringify(await browser.history(sessionId))).not.toContain(
+				"Runner startup timed out",
+			);
 			const proof = () =>
 				readFileSync(
 					join(harness?.root ?? "", "runner-startup-evidence.jsonl"),
@@ -118,8 +132,6 @@ describe("built runner startup deadlines", () => {
 					],
 				).toBeGreaterThan(deadline["deadline"]);
 			} else {
-				expect(turn.done["attention"]).toBe("error");
-				expect(turn.chunks).toEqual([]);
 				if (mode === "eperm") {
 					expect(() => process.kill(childPid, 0)).not.toThrow();
 					expect(
@@ -233,7 +245,7 @@ describe("built runner startup deadlines", () => {
 							typeof childPid === "number" &&
 							harness.remainingRunnerPids().includes(childPid)
 						) {
-							process.kill(childPid, "SIGKILL");
+							expect(harness.signalOwnedRunner(childPid, "SIGKILL")).toBe(true);
 							await vi.waitFor(
 								() =>
 									expect(readFileSync(path, "utf8")).toContain(
