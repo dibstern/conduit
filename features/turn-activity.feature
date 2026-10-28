@@ -1,5 +1,24 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario: Opening Summary with Jev off leaves the step log closed
+  Given Jev is off with summaries on and a valid key in the dark theme
+  And the conduit app is served with the connected mockup
+  And the recap session has a settled turn with no summaries
+  When I request the turn summary
+  Then recap version 1 of 1 says The routing review is complete.
+  And the panel shows the saved message stop
+  And the messages region visually matches turn-panel-plain-summary at 98 percent
+
+Scenario: The existing message level control leaves an open log in place
+  Given message surfacing is active at Balanced
+  And the conduit app is served with the connected mockup
+  And the panel choice session has a settled turn
+  When I open the plain turn log
+  And I set the surfacing level to Key
+  Then the panel shows the full log
+  And the effective surfacing level is Key
+  And the messages region visually matches turn-panel-level-keeps-log at 98 percent
+
 Scenario: A settled log pick survives collapse and suspends during each wake Run
   Given message surfacing is active at Balanced
   And the conduit app is served with the connected mockup
