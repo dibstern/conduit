@@ -67,6 +67,7 @@
 		"test:visual": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-preview.config.ts --project=desktop-visual",
 		"test:visual:update": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-preview.config.ts --project=desktop-visual --update-snapshots",
 		"test:visual:headed": "pnpm build:frontend && pnpm exec playwright test --config test/e2e/playwright-preview.config.ts --project=desktop-visual --headed",
+		"acceptance:functional": "VISUAL_ACCEPTANCE_MODE=skip sh scripts/acceptance-visual.sh",
 		"acceptance:visual": "sh scripts/acceptance-visual.sh",
 		"acceptance:visual:capture": "VISUAL_ACCEPTANCE_MODE=capture sh scripts/acceptance-visual.sh",
 		"acceptance:mutation:visual": "sh scripts/acceptance-mutation-visual.sh",

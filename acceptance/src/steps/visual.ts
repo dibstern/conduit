@@ -37,6 +37,8 @@ export const visualHandlers: StepHandler[] = [
 			const regionId = match[1] ?? "";
 			// The step text, so one scenario can compare several named states.
 			const baseline = match[2] ?? "";
+			const mode = currentVisualMode(baseline);
+			if (mode === "skip") return;
 			const threshold = thresholdExampleValue(example, "threshold");
 			const result = await world.driver.matchRegion(
 				world.page,
@@ -44,7 +46,7 @@ export const visualHandlers: StepHandler[] = [
 				REGION_SELECTORS[regionId] ?? `#${regionId}`,
 				baseline,
 				threshold,
-				currentVisualMode(baseline),
+				mode,
 			);
 			if (result.actualPath) world.artifacts.push(result.actualPath);
 			if (result.diffPath) world.artifacts.push(result.diffPath);

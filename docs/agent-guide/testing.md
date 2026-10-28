@@ -141,6 +141,20 @@ Each run writes `run.json` and raw turn traces to a unique directory under
 `test-results/q5u6-1.1-worktree/`, including failures and `CwdChanged` hook
 observations. If that hook fires, revisit it as the workspace move signal.
 
+### Acceptance
+
+Use `pnpm acceptance:functional` as the per-ticket behaviour check for
+`features/*.feature`. It skips screenshot steps and is not the visual gate.
+Select one feature the same way as with `pnpm acceptance:visual`:
+
+```bash
+ACCEPTANCE_FEATURE=composer-send-button pnpm acceptance:functional
+```
+
+Run `pnpm acceptance:visual` for the functional and visual gate. See
+[`acceptance/README.md`](../../acceptance/README.md) for baseline capture and
+the acceptance pipeline.
+
 ### E2E (Replay — Default)
 
 Run this when changing browser-visible workflows, WebSocket behavior, mobile flows, or end-to-end session lifecycles. Uses recorded WebSocket fixtures — no running OpenCode instance needed.

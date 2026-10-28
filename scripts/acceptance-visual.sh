@@ -6,6 +6,10 @@ cd "$ROOT_DIR"
 
 . "$ROOT_DIR/scripts/acceptance-env.sh"
 
+if [ "${VISUAL_ACCEPTANCE_MODE:-}" = "skip" ]; then
+  echo "Screenshots skipped (VISUAL_ACCEPTANCE_MODE=skip); this is not the visual gate."
+fi
+
 pnpm build:frontend
 
 rm -rf \

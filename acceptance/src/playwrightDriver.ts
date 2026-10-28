@@ -168,7 +168,7 @@ export class PlaywrightDriver {
 		selector: string,
 		baseline: string,
 		threshold: number,
-		mode: VisualMode,
+		mode: Exclude<VisualMode, "skip">,
 	): Promise<VisualMatchResult> {
 		if (!/^[a-z0-9-]+$/.test(regionId)) {
 			throw new Error(`Unsupported visual region: ${regionId}`);
