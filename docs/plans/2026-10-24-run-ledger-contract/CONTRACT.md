@@ -270,11 +270,11 @@ Only evidence and conduit's decisions, each once:
   sends; it never ends `start` or `steer` work, which ends only by its provider's work-ended
   rule (section 9). OpenCode `abort` and `cancel_request` act on the native session, not the
   query, so a query ending never covers them.
-- **A send's label is the process it went to.** A send issued while a process is live carries
-  that process's label, an `interrupt` of a Queued Run and OpenCode `abort` and `cancel_request`
-  included; only that process's loss covers its transport. The next-process binding (D23)
-  applies only when no process is live (D37). A `close`, `kill_and_respawn` or `end_session` of
-  a Run instead carries its execution label (D33).
+- **A send's label is the process it went to.** A send for a Run that has an execution carries
+  its execution label (D33, D42). Any other send, an `interrupt` of a Queued Run and OpenCode
+  `abort` and `cancel_request` included (they act on the native session), carries the label of
+  the latest live process (D37). Only that process's loss covers its transport. The
+  next-process binding (D23) applies only when no process is live.
 - **`hasAuthority(execution)`:** the execution is its Run's current one, the Run is not Ended, its
   label is not covered, the project is active, and its native session has not ended. This is the
   single read of Ended.
@@ -1971,8 +1971,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
 - Snapshots replace the set. Per-task events only name lost work, show outcomes and identify the
   waking task. A task is gone only when a later snapshot omits it.
 - Older-label evidence is recorded only when it changes a join, and never gives authority or
-  liveness. Older means `process_lost` is recorded for the runner, or `querySeq` is below the latest
-  seen for that runner; a send's own label is never older for that send (3.4).
+  liveness. Older means `process_lost` is recorded for the runner, a kill was issued on the runner after
+  the label was seen (D41), or `querySeq` is below the latest seen for that runner; a send's own label is never older for that send (3.4).
 - **Wake Runs.** A `turn_started` with no active Run records a wake Run as Launched, with no start
   effect. Its waking task is the one notified just before. With an active Run it joins that Run.
   Admission steers into an active user Run but queues behind a wake Run.
@@ -2026,8 +2026,9 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   the labels still members (D36).
 - `snapshotEntry` is the 1-based count of task-set entries accepted by the session:
   `tasks_snapshot` evidence and `process_started` settlements, excluding older labels. A
-  `process_started` that leaves a pending confirm open refreshes it with the new count, so a
-  confirm copied before the replacement is stale. Callers copy it from `pendingConfirm`, never
+  `process_started` that leaves a pending confirm open refreshes it with the new count and moves
+  each of its labels to the latest label of that label's runner (D39), so a confirm copied before
+  the replacement is stale. Callers copy it from `pendingConfirm`, never
   compute it.
 - With an active Run, `end` runs the stop sequence, then issues `end_session` once the Run is
   Ended or its interrupt deadline expired. Both steps are confirm-gated with tasks live or
@@ -2036,7 +2037,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   null}`, confirm-gated with tasks live or unknown, against the runner the `end_session` was
   issued on, carrying the latest label seen for that runner, a reattach included (D35): it
   records lost work for that label, and issuing it covers that runner's labels (5.1). If that runner is already lost, the `end_session` is covered
-  and no kill issues (D32).
+  and no kill issues (D32). If the `end_session` is not yet bound to a process (D23), the kill
+  binds with it to the next `process_started` and covers it, so it issues once (D40).
 - Lost work is always recorded for every destruction, unplanned loss included, under the
   latest label seen for the runner the destruction acts on. A destruction issued with no live
   process records none: that process's loss already recorded it (D38).
@@ -2866,6 +2868,10 @@ port.
 - D36: "against those labels" binds only a confirm; a gate cleared by evidence issues the step as decided at that moment, so a Run-less `end_session` acts on the current process (8.4). Rejected: the gated labels (they can name a replaced process, so the `end_session` is covered at issue and the session never ends).
 - D37: a send issued while a process is live carries that process's label, a Queued Run's `interrupt` and OpenCode `abort` and `cancel_request` included; D23's next-process binding applies only with no live process (3.3). Rejected: the Run's execution label (a Queued Run has none yet, and a later process never received the send). A Run's `close`, `kill_and_respawn` and `end_session` keep D33's execution label.
 - D38: a destruction issued with no live process records no lost work (8.4). Rejected: a session-level label (it is not a host label, and the last process's loss already recorded its tasks).
+- D39: a `process_started` refreshing an open pending confirm also moves each of its labels to that runner's latest label (8.4). Rejected: keeping the gate-time labels (a confirmed kill after a reattach would carry a label the runner no longer answers to while lost work is recorded under the newer one).
+- D40: an unconfirmed expiry of an `end_session` not yet bound to a process issues one `kill_and_respawn` that binds with it to the next `process_started` and covers it (8.4, 5.1). Rejected: a null kill that covers nothing until bound (it re-escalates on every alarm and holds anythingMayAct with nothing able to act).
+- D41: a label is older once a kill is issued on its runner after the label was seen, so its unsolicited events record no wake Run (8.3). Rejected: waking from a killed label (a Run is opened for a process conduit has already destroyed, outstanding until its loss arrives).
+- D42: a send for a Run that has an execution carries its execution label, even when a newer process is live; only other sends take the latest live process (3.3; refines D37). Rejected: always the latest live process (an interrupt would go to a process not running the Run's query).
 
 ## Appendix B. Old-id mapping
 
