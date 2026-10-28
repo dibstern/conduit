@@ -227,13 +227,11 @@
 	.glyph { color:var(--surface-colour,var(--color-text-dimmer)); }
 	.mark-glyph { align-self:flex-start; margin:3px 0 0 1px; font-size:9px; line-height:1; }
 	.mark-glyph.raise { color:var(--color-success); } .mark-glyph.lower { color:var(--color-text-muted); } .mark-glyph.retype { color:var(--color-accent); }
-	.current { background:color-mix(in srgb,var(--surface-colour,var(--color-text-secondary)) 14%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1px var(--surface-colour,var(--color-text-secondary)); }
-	.cited { translate:0 -4px; box-shadow:0 0 0 1.5px var(--color-accent),0 4px 10px rgba(var(--shadow-rgb),.2); color:var(--color-text); }
+	.pin-chip.current { background:color-mix(in srgb,var(--surface-colour,var(--color-text-secondary)) 14%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1px var(--surface-colour,var(--color-text-secondary)); }
+	.cited { translate:0 -4px; box-shadow:0 0 0 1.5px var(--color-accent),0 4px 10px rgba(var(--shadow-rgb),.2); }
 	.open-ask { background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); box-shadow:inset 0 0 0 1px var(--color-status-ask); }
 	.pending { background:none; outline:1px dashed var(--color-accent); outline-offset:-1px; color:var(--color-accent); }
-	.below { background:var(--color-turn-bg); outline:1px dashed var(--color-text); outline-offset:-1px; color:var(--color-text); }
-	.below .glyph { color:var(--color-text-dimmer); }
-	.below.builtin .glyph { color:var(--surface-colour); }
+	.below { outline:1px dashed var(--color-text); outline-offset:-1px; }
 	.unread-dot { position:absolute; top:-2px; right:-2px; width:7px; height:7px; border-radius:50%; background:var(--color-accent); box-shadow:0 0 0 1.5px var(--color-turn-bg); }
 	.hanging-card { position:relative; margin-top:10px; --card-background:var(--color-bg); }
 	.hanging-card.ask { --card-background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); }

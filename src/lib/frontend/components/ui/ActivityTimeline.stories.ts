@@ -183,6 +183,32 @@ export const Pins: Story = {
 	},
 };
 
+export const PhonePins: Story = {
+	...Pins,
+	args: { ...Pins.args, phone: true },
+	play: async (context) => {
+		await Pins.play?.(context);
+		await expect(
+			within(context.canvasElement)
+				.getByTestId("surfacing-pin-1")
+				.querySelector(".pin-number"),
+		).not.toBeVisible();
+	},
+};
+export const SelectedBelowStop: Story = {
+	...Pins,
+	args: { ...Pins.args, belowLevel: true },
+	play: async (context) => {
+		await Pins.play?.(context);
+		const chip = within(context.canvasElement)
+			.getByTestId("surfacing-pin-1")
+			.querySelector(".pin-chip");
+		if (!chip) throw new Error("Missing selected chip");
+		await expect(chip).toHaveClass(/below/);
+		await expect(getComputedStyle(chip).boxShadow).toContain("1px");
+	},
+};
+
 export const Collapsed: Story = {
 	args: {
 		cardSlot: messages.card

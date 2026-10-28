@@ -1,5 +1,15 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario: A selected pin below the saved stop keeps its category tint
+  Given a surfacing marks ledger is available in the dark theme
+  And message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I Lower surfaced message #1 from the card
+  And I save the mark without a reason
+  Then the selected pin keeps its category tint and secondary number below the saved stop
+  And the messages region visually matches turn-pin-below-stop-tint at 98 percent
+
 Scenario Outline: A collapsed strip opens its focused message step with Enter
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup

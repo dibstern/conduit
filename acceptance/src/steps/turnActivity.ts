@@ -87,6 +87,34 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "assert selected below-stop pin paint",
+		match:
+			/^the selected pin keeps its category tint and secondary number below the saved stop$/,
+		run: async ({ world }) => {
+			const chip = world.page.locator(
+				'[data-x][aria-pressed="true"] .pin-chip',
+			);
+			const paint = await chip.evaluate((element) => {
+				const probe = document.createElement("span");
+				probe.style.color = "var(--color-text-secondary)";
+				probe.style.backgroundColor = "var(--color-turn-bg)";
+				element.append(probe);
+				const result = {
+					number: getComputedStyle(element).color,
+					secondary: getComputedStyle(probe).color,
+					fill: getComputedStyle(element).backgroundColor,
+					turnBg: getComputedStyle(probe).backgroundColor,
+					ring: getComputedStyle(element).boxShadow,
+				};
+				probe.remove();
+				return result;
+			});
+			expect(paint.number).toBe(paint.secondary);
+			expect(paint.fill).not.toBe(paint.turnBg);
+			expect(paint.ring).toContain("1px");
+		},
+	},
+	{
 		name: "open a collapsed message step with the keyboard",
 		match: /^I activate the first collapsed message step with the keyboard$/,
 		run: async ({ world }) => {
