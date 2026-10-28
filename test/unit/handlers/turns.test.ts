@@ -1459,6 +1459,7 @@ describe("liveLaunchedTasks", () => {
 	});
 	const turnOf = (...segments: ActivityPart[][]): Turn => ({
 		id: id(),
+		preface: [],
 		segments: segments.map((activity) => ({ activity, reply: [] })),
 		notices: [],
 		live: false,
@@ -1673,7 +1674,7 @@ describe("compaction", () => {
 				[user(), compaction("completed", fields)],
 				false,
 			);
-			const part = turn?.segments[0]?.activity[0];
+			const part = turn?.preface[0];
 			return part && partLabel(part);
 		};
 		expect(label({ preTokens: 180_000, postTokens: 42_000 })).toBe(

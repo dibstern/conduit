@@ -8,22 +8,21 @@ Background:
   And the transcript is live
   And the transcript is pinned to the bottom
 
-Scenario Outline: the live turn head follows the lifecycle and restarts its clock
+Scenario Outline: the opening follows the lifecycle without an empty live turn head
   Then the composer status header is not visible
   And the live turn head is not visible
   When the mock relay starts a composer turn
-  Then the live turn head is visible
-  And the live turn elapsed label reads 0s
+  Then the turn opening reads Sending… without a card or timer
   And the composer status header is not visible
-  When the composer status clock advances by 65 seconds
-  Then the live turn elapsed label reads 1m 5s
   And the layout region visually matches <baseline> at <threshold> percent
   When the mock relay sets composer status to idle
   Then the live turn head is not visible
+  And the turn opening is not visible
   When the mock relay starts a composer turn
-  Then the live turn elapsed label reads 0s
+  Then the turn opening reads Sending… without a card or timer
   When the mock relay sets composer status to idle
   Then the live turn head is not visible
+  And the turn opening is not visible
 
 Examples:
   | baseline                       | threshold |

@@ -59,6 +59,7 @@
 	import TurnActivity from "./TurnActivity.svelte";
 	import { createTurnPanel } from "../../stores/turn-panel.svelte.js";
 	import { messageSurfacing, sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
+	import TurnOpening from "./TurnOpening.svelte";
 	import { insertComposerReference } from "../input/composer-reference.svelte.js";
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
@@ -348,7 +349,8 @@
 		return (messages: ChatMessage[], processing: boolean): Turn[] => {
 			const next = segmentTurns(messages, processing).map((turn) => {
 				const held = previous.get(turn.id);
-				return held && held.user === turn.user && held.live === turn.live &&
+				return held && held.user === turn.user && held.live === turn.live && held.opening === turn.opening &&
+					same(held.preface, turn.preface) &&
 					same(held.notices, turn.notices) &&
 					held.segments.length === turn.segments.length &&
 					turn.segments.every((segment, i) => {
@@ -365,11 +367,6 @@
 	const projectInheritedTurns = turnProjection();
 	const projectCurrentTurns = turnProjection();
 	const turns = $derived(projectTurns(chat.messages, processing));
-	const emptyLiveTurn = $derived<Turn | undefined>(
-		processing && chat.loadLifecycle === "ready" && turns.length === 0
-			? { id: `turn-${viewedSessionId ?? instanceId}`, segments: [{ activity: [], reply: [] }], notices: [], live: true }
-			: undefined,
-	);
 	$effect(() => {
 		const turn = turns.at(-1);
 		if (!processing || chat.loadLifecycle !== "ready" || !turn || turn.user) return;
@@ -505,7 +502,7 @@
 		(forkSplit && forkSplit.inherited.length > 0 ? [...inheritedTurns, ...currentTurns] : turns)
 			.filter((turn) => !turn.live).at(-1)?.id,
 	);
-	const latestTurnId = $derived((emptyLiveTurn ?? (forkSplit ? currentTurns.at(-1) ?? inheritedTurns.at(-1) : turns.at(-1)))?.id);
+	const latestTurnId = $derived((forkSplit ? currentTurns.at(-1) ?? inheritedTurns.at(-1) : turns.at(-1))?.id);
 
 </script>
 
@@ -571,7 +568,7 @@
 	{#snippet turnItem(turn: Turn)}
 		{@const log = turnLog(turn, resumeDividers)}
 		{@const segment = log.segment}
-		{@const hasActivity = log.entries.length > 0 || turn.live}
+		{@const hasActivity = log.entries.length > 0}
 		<div data-live-turn={turn.live ? "" : undefined}>
 		{#if turn.user}
 			<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
@@ -580,6 +577,12 @@
 		{/if}
 		{#if goal && turn.id === goalNoticeTurnId}
 			{@render goalNotice()}
+		{/if}
+		{#each turn.preface as part (part.uuid)}
+			<TurnOpening {part} />
+		{/each}
+		{#if turn.opening}
+			<TurnOpening opening={turn.opening} {providerId} />
 		{/if}
 		{#if hasActivity}
 			{@const reply = segment.reply[0]}
@@ -700,8 +703,8 @@
 			<UserMessage message={send.message} />
 		</div>
 	{/each}
-	{#if emptyLiveTurn}
-		{@render turnItem(emptyLiveTurn)}
+	{#if localSends.length > 0 || (processing && chat.loadLifecycle === "ready" && turns.length === 0)}
+		<TurnOpening opening="sending" {providerId} />
 	{/if}
 	{/key}
 

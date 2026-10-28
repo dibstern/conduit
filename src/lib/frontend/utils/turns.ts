@@ -27,7 +27,7 @@ export type ActivityPart =
 	| AssistantMessage
 	| CompactionPart;
 
-/** Started and failed compactions stay notices; only a completed one is activity. */
+/** Only a completed compaction is activity. */
 export function isCompaction(msg: ChatMessage): msg is CompactionPart {
 	return msg.type === "system" && msg.compaction === "completed";
 }
@@ -60,14 +60,18 @@ export interface Turn {
 	/** Durable turns.id; absent for display-only placeholders. */
 	storeId?: string | undefined;
 	user?: UserMessage;
+	/** Completed compactions before the turn's first activity, reply or hand-back. */
+	preface: CompactionPart[];
 	/** Always at least one. */
 	segments: Segment[];
 	/**
-	 * Transcript-level notices — errors and in-flight or failed compactions. Kept
-	 * out of the activity log so a failure is never hidden behind a collapsed panel.
+	 * Transcript-level notices — errors, failed compactions and mid-turn status.
+	 * Kept out of the log so a failure is never hidden behind a collapsed panel.
 	 */
 	notices: SystemMessage[];
 	live: boolean;
+	/** Quiet presence before the first activity, reply or hand-back. */
+	opening?: "sending" | "compacting" | "working";
 }
 
 export type TurnPhase = "live" | "waiting" | "settled";
@@ -194,6 +198,7 @@ export function segmentTurns(
 				id: msg.uuid,
 				storeId: msg.turnId ?? msg.messageId,
 				user: msg,
+				preface: [],
 				segments: [{ activity: [], reply: [] }],
 				notices: [],
 				live: false,
@@ -206,6 +211,7 @@ export function segmentTurns(
 			turn = {
 				id: `turn-${msg.uuid}`,
 				storeId: msg.turnId,
+				preface: [],
 				segments: [{ activity: [], reply: [] }],
 				notices: [],
 				live: false,
@@ -220,6 +226,19 @@ export function segmentTurns(
 		}
 		if (msg.type === "result") {
 			turn.segments[turn.segments.length - 1] = { ...segment, end: msg };
+			continue;
+		}
+		if (
+			isCompaction(msg) &&
+			turn.segments.every(
+				(segment) =>
+					segment.activity.length === 0 &&
+					segment.reply.length === 0 &&
+					!segment.handBack &&
+					segment.end === undefined,
+			)
+		) {
+			turn.preface.push(msg);
 			continue;
 		}
 		if (segment.end !== undefined) {
@@ -241,6 +260,30 @@ export function segmentTurns(
 	// mid-turn no longer strands the transcript: the next part opens a fresh
 	// segment and the turn reads as live again.
 	if (last) last.live = turnPhase(last, processing, true) === "live";
+	for (const turn of turns) {
+		if (
+			turn.segments.some(
+				(segment) =>
+					segment.activity.length > 0 ||
+					segment.reply.length > 0 ||
+					segment.handBack,
+			)
+		)
+			continue;
+		// The row can report compaction before the turn counts as live. Its
+		// transient notice still belongs only in the opening rule in that gap.
+		if (turn.notices.some((notice) => notice.compaction === "started")) {
+			turn.opening = "compacting";
+			turn.notices = turn.notices.filter(
+				(notice) => notice.compaction !== "started",
+			);
+		} else if (turn.live) {
+			turn.opening =
+				turn.preface.length > 0 || turn.notices.length > 0
+					? "working"
+					: "sending";
+		}
+	}
 	return turns;
 }
 
@@ -619,15 +662,19 @@ function firstStamp(segment: Segment): number | undefined {
 	return segment.handBack?.createdAt ?? segment.end?.createdAt;
 }
 
-/** Approval waits and gaps between segments stay out of the prompt's clock. */
+/** Opening compaction, approval waits and segment gaps stay out of the clock. */
 export function workingTime(
 	turn: Turn,
 	now: number,
 	until?: number,
 ): number | undefined {
 	const timing = turn.user?.turnTiming;
-	const start = timing?.startedAt ?? turn.user?.createdAt;
-	if (start === undefined) return undefined;
+	const startedAt = timing?.startedAt ?? turn.user?.createdAt;
+	if (startedAt === undefined) return undefined;
+	const start = Math.max(
+		startedAt,
+		turn.preface.at(-1)?.createdAt ?? startedAt,
+	);
 	let end = timing?.endedAt ?? (turn.live ? now : undefined);
 	if (end === undefined) {
 		for (const segment of turn.segments) {
