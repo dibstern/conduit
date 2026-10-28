@@ -1,13 +1,8 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
-	import type { WorkspaceMoveCause } from "../../../contracts/session-workspace.js";
-	import type { WorkspaceMissing } from "../../../contracts/worktree.js";
-	import type { SessionGit, WorktreeInfo } from "../../../shared-types.js";
-	import { labelProjectFolders } from "../../../project-folders.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
-	import { failureLine, toastFailure } from "../../transport/rpc-errors.js";
-	import type { rpc } from "../../transport/ws-rpc-client.js";
+	import { getWorkspaceCheckout } from "../../stores/workspace-checkout.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Field from "../ui/Field.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -18,126 +13,24 @@
 	import Modal from "../ui/Modal.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
-	let { directory, git: folderGit, presentation, compact = false, workspaceCause, workspaceMissing, workspaceMismatch, workspaceHint, loadWorktrees, onmove, onrecreate, oncontinue, ondismiss, onrenamebranch, children }: {
+	let { directory, presentation, compact = false, children }: {
 		directory: string;
-		git: SessionGit | undefined;
 		presentation: "word" | "control" | "row";
 		compact?: boolean | undefined;
-		workspaceCause?: WorkspaceMoveCause | undefined;
-		workspaceMissing?: WorkspaceMissing | undefined;
-		workspaceMismatch?: { readonly actualPath: string } | undefined;
-		workspaceHint?: string | undefined;
-		loadWorktrees?: (() => ReturnType<typeof rpc<"ListWorktrees">>) | undefined;
-		onmove?: ((path: string) => Promise<unknown>) | undefined;
-		onrecreate?: (() => Promise<unknown>) | undefined;
-		oncontinue?: (() => Promise<unknown>) | undefined;
-		ondismiss?: ((path: string) => Promise<unknown>) | undefined;
-		onrenamebranch?: ((branchName: string) => Promise<unknown>) | undefined;
 		children?: Snippet<[attention: boolean, checkout: Snippet, warning: Snippet]> | undefined;
 	} = $props();
-	const folders = $derived(folderGit?.folders ?? []);
-	const git = $derived(folderGit?.folders && !folderGit.branch && !folderGit.head && folderGit.dirty === undefined ? undefined : folderGit);
+	const checkoutState = $derived(getWorkspaceCheckout());
+	const folders = $derived(checkoutState.folders);
+	const git = $derived(checkoutState.git);
 	const multiFolder = $derived(folders.length > 1 || folders.some((folder) => folder.shared) || (!git && folders.length > 0));
-	let showWorktrees = $state(false);
-	let worktrees = $state<readonly WorktreeInfo[] | undefined>();
-	let currentDirectory = $state<string | undefined>();
-	let moving = $state(false);
-	let dismissing = $state(false);
-	let dismissedMismatch = $state<string | undefined>();
 	const control = $derived(presentation === "control");
 	const row = $derived(presentation === "row");
 	const phone = $derived(sessionViewState.composerTier === "phone");
-	const mismatchKey = $derived(workspaceMismatch ? `${directory}\0${workspaceMismatch.actualPath}` : undefined);
-	$effect(() => {
-		if (dismissedMismatch !== mismatchKey) dismissedMismatch = undefined;
-	});
-	let showBranchRename = $state(false);
-	let branchName = $state("");
-	let branchRenameError = $state<string | undefined>();
-	let renamingBranch = $state(false);
 	let identityElement = $state<HTMLButtonElement | HTMLAnchorElement>();
 	const componentId = $props.id();
 	const branchRenameFormId = `${componentId}-branch-rename`;
-
-	function openBranchRename() {
-		branchName = git?.branch ?? folders.find((folder) => !folder.shared && folder.branch)?.branch ?? "";
-		branchRenameError = undefined;
-		showBranchRename = true;
-	}
-
-	async function renameBranch() {
-		if (!onrenamebranch || renamingBranch || !branchName.trim()) return;
-		renamingBranch = true;
-		branchRenameError = undefined;
-		try {
-			await onrenamebranch(branchName);
-			showBranchRename = false;
-		} catch (error) {
-			branchRenameError = failureLine(error, "Could not rename branch");
-		} finally {
-			renamingBranch = false;
-		}
-	}
-
-	async function openWorktrees() {
-		showWorktrees = true;
-		worktrees = undefined;
-		currentDirectory = undefined;
-		try {
-			const result = await loadWorktrees?.();
-			worktrees = result?.worktrees ?? [];
-			currentDirectory = result?.directory;
-		} catch (error) {
-			worktrees = [];
-			toastFailure("Could not list worktrees")(error);
-		}
-	}
-
-	async function move(path: string) {
-		moving = true;
-		try {
-			await onmove?.(path);
-		} catch (error) {
-			toastFailure("Could not move session")(error);
-		} finally {
-			moving = false;
-		}
-	}
-	async function recover(action: "recreate" | "continue") {
-		moving = true;
-		try {
-			if (action === "recreate") await onrecreate?.();
-			else await oncontinue?.();
-		} catch (error) {
-			toastFailure(action === "recreate" ? "Could not recreate worktree" : "Could not continue in main folder")(error);
-		} finally {
-			moving = false;
-		}
-	}
-	async function dismiss(path: string, source: "hint" | "mismatch" = "hint") {
-		// Only workspace hints have a dismiss RPC. Acknowledge a mismatch here
-		// until the workspace changes; its checkout details stay available.
-		if (source === "mismatch" && warningMismatch?.actualPath === path) {
-			dismissedMismatch = mismatchKey;
-			return;
-		}
-		dismissing = true;
-		try {
-			await ondismiss?.(path);
-		} catch (error) {
-			toastFailure("Could not dismiss workspace hint")(error);
-		} finally {
-			dismissing = false;
-		}
-	}
+	const showBranchRename = $derived(checkoutState.showBranchRename && checkoutState.branchRenameOpener === identityElement);
 	const project = $derived(directory.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || directory);
-	const hintFolder = $derived(workspaceHint?.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || workspaceHint);
-	const hintLabel = $derived(`working in ${hintFolder}?`);
-	const movedBack = $derived(workspaceCause === "missing");
-	const movedBackLabel = "moved back: worktree removed";
-	const missingFolders = $derived(workspaceMissing?.folders ?? []);
-	const missingFolderLabels = $derived(labelProjectFolders(missingFolders.map(({ folder }) => folder)));
-	const missingLabel = $derived(missingFolders.length ? `worktree missing: ${missingFolderLabels.map(({ label }) => label).join(", ")}` : "worktree missing");
 	const checkout = $derived(git?.branch || git?.head);
 	const label = $derived(checkout ? `${project} / ${checkout}` : project);
 	const operation = $derived(git?.operation ? {
@@ -147,21 +40,8 @@
 	// Phones show one status word: an in-progress operation outranks merged.
 	const showMerged = $derived(git?.merged === true && !(phone && operation));
 	const upstreamMark = $derived([git?.ahead ? `↑${git.ahead}` : "", git?.behind ? `↓${git.behind}` : ""].filter(Boolean).join(" "));
-	const warningMismatch = $derived(workspaceMismatch && (!row || mismatchKey !== dismissedMismatch) ? workspaceMismatch : undefined);
-	const warningPath = $derived(warningMismatch?.actualPath ?? workspaceHint);
-	const warningDisplayPath = $derived.by(() => {
-		if (!warningPath) return "";
-		const path = warningPath.replaceAll("\\", "/");
-		if (!path.startsWith("/") && !/^[a-z]:\//i.test(path)) return warningPath;
-		const base = directory.replaceAll("\\", "/").split("/").filter(Boolean);
-		const target = path.split("/").filter(Boolean);
-		if (target[0]?.includes(":") && target[0] !== base[0]) return warningPath;
-		let common = 0;
-		while (common < base.length && base[common] === target[common]) common++;
-		return [...base.slice(common).map(() => ".."), ...target.slice(common)].join("/") || ".";
-	});
-	const warningLabel = $derived(warningMismatch ? `Workspace mismatch: Claude is working in ${warningMismatch.actualPath}` : workspaceHint ? hintLabel : undefined);
-	const noticeLabels = $derived([warningLabel, movedBack ? movedBackLabel : undefined, workspaceMissing ? missingLabel : undefined].filter((notice) => notice !== undefined));
+	const noticeLabels = $derived((row ? checkoutState.rowNotices : checkoutState.notices).map((notice) => notice.label));
+	const noticeLabel = $derived(noticeLabels.join(", "));
 	const projectFloor = $derived(Math.min(project.length, 4.5));
 	const branchFloor = $derived(Math.min(checkout?.length ?? 0, 6.5));
 	// Checkout gives up its labels before the model label needs to truncate.
@@ -175,7 +55,7 @@
 		].filter((width) => width !== null);
 		const labels = fit === "icon" ? [] : !control && !row && checkout ? [branchFloor] : checkout ? [projectFloor, 1, branchFloor] : [projectFloor];
 		const widths = [...labels, ...marks];
-		return { ch: widths.reduce((sum, width) => sum + width, 0), px: 12 + 5 * widths.length + (control ? 12 : 0) + (fit === "icon" ? 0 : 17 * noticeLabels.length + (git?.dirty ? 11 : 0)) };
+		return { ch: widths.reduce((sum, width) => sum + width, 0), px: 12 + 5 * widths.length + (control ? 12 : 0) + (fit === "icon" ? 0 : (noticeLabels.length ? 17 : 0) + (git?.dirty ? 11 : 0)) };
 	}
 	// Unmeasured until bound: a measured 0 means send left no room, which must fall to icon.
 	let room = $state<number>();
@@ -238,40 +118,34 @@
 				{#if !compact && operation}<span data-part="operation" class="shrink-0 text-warning">{operation}</span>{/if}
 				{#if !compact && showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
 			{/if}
-			{#if warningLabel}
-				<span data-part="warning" class="text-warning {fit === 'icon' && !row ? 'absolute right-[2px] top-[2px]' : 'inline-flex shrink-0'}" role="img" aria-label={warningLabel} title={warningLabel} data-testid={warningMismatch ? "workspace-mismatch-indicator" : "workspace-hint"}><Icon name="circle-alert" size={12} /></span>
-			{/if}
-			{#if movedBack}
-				<span class="text-warning {fit === 'icon' && !row ? 'absolute right-[2px] top-[2px]' : 'inline-flex shrink-0'}" role="img" aria-label={movedBackLabel} title={movedBackLabel} data-testid="workspace-moved-back"><Icon name="circle-alert" size={12} /></span>
-			{/if}
-			{#if workspaceMissing}
-				<span class="text-warning {fit === 'icon' && !row ? 'absolute right-[2px] top-[2px]' : 'inline-flex shrink-0'}" role="img" aria-label={missingLabel} title={missingLabel} data-testid="workspace-missing"><Icon name="circle-alert" size={12} /></span>
+			{#if noticeLabel}
+				<span data-part="warning" class="text-warning {fit === 'icon' && !row ? 'absolute right-[2px] top-[2px]' : 'inline-flex shrink-0'}" role="img" aria-label={noticeLabel} title={noticeLabel} data-testid="workspace-notice-indicator"><Icon name="circle-alert" size={12} /></span>
 			{/if}
 {/snippet}
 
 {#snippet checkoutActions()}
-	{#if onrenamebranch}<MenuItem density={multiFolder ? undefined : "default"} class={multiFolder ? undefined : "min-h-[36px] px-[12px] max-md:min-h-[44px]"} data-testid="session-branch-rename" onselect={openBranchRename}>{#if !multiFolder}<span class="shrink-0 text-text-muted"><Icon name="pencil" size={15} /></span>{/if}Rename branch</MenuItem>{/if}
+	{#if checkoutState.canRenameBranch}<MenuItem density={multiFolder ? undefined : "default"} class={multiFolder ? undefined : "min-h-[36px] px-[12px] max-md:min-h-[44px]"} data-testid="session-branch-rename" onselect={() => checkoutState.openBranchRename(identityElement)}>{#if !multiFolder}<span class="shrink-0 text-text-muted"><Icon name="pencil" size={15} /></span>{/if}Rename branch</MenuItem>{/if}
 	{#if multiFolder}
 		{#if git?.branch}<MenuItem onselect={() => void copy(git?.branch ?? "", "Branch copied")}>Copy branch name</MenuItem>{/if}
 		<MenuItem onselect={() => void copy(directory, "Path copied")}>Copy folder path</MenuItem>
 	{/if}
-	{#if loadWorktrees && onmove}
+	{#if checkoutState.canListWorktrees}
 		{#if multiFolder}<MenuSeparator />{/if}
-		<MenuItem density={multiFolder ? undefined : "default"} class={multiFolder ? undefined : "min-h-[36px] px-[12px] max-md:min-h-[44px]"} closeOnSelect={false} onselect={() => void openWorktrees()}>{#if !multiFolder}<span class="shrink-0 text-text-muted"><Icon name="folder-tree" size={15} /></span>{/if}<span class="flex-1">{multiFolder ? "Move to worktree…" : "Move to another worktree…"}</span>{#if !multiFolder}<span class="shrink-0 text-text-dimmer"><Icon name="chevron-right" size={13} /></span>{/if}</MenuItem>
-		{#if showWorktrees}
+		<MenuItem density={multiFolder ? undefined : "default"} class={multiFolder ? undefined : "min-h-[36px] px-[12px] max-md:min-h-[44px]"} closeOnSelect={false} onselect={() => void checkoutState.openWorktrees()}>{#if !multiFolder}<span class="shrink-0 text-text-muted"><Icon name="folder-tree" size={15} /></span>{/if}<span class="flex-1">{multiFolder ? "Move to worktree…" : "Move to another worktree…"}</span>{#if !multiFolder}<span class="shrink-0 text-text-dimmer"><Icon name="chevron-right" size={13} /></span>{/if}</MenuItem>
+		{#if checkoutState.showWorktrees}
 			<MenuGroup label="Worktrees">
-				{#if worktrees === undefined}
+				{#if checkoutState.worktrees === undefined}
 					<MenuItem disabled>Loading worktrees…</MenuItem>
-				{:else if worktrees.length === 0}
+				{:else if checkoutState.worktrees.length === 0}
 					<MenuItem disabled>No worktrees available</MenuItem>
 				{:else}
-					{#each worktrees as worktree (worktree.path)}
-						<MenuItem disabled={moving} onselect={() => void move(worktree.path)}>
+					{#each checkoutState.worktrees as worktree (worktree.path)}
+						<MenuItem disabled={checkoutState.moving} onselect={() => void checkoutState.move(worktree.path)}>
 							<span class="flex min-w-0 flex-1 flex-col">
 								<span>{worktree.branch ?? (worktree.main ? "Main folder" : "Detached HEAD")}{worktree.main ? " · main worktree" : ""}</span>
 								<span class="break-all text-text-muted">{worktree.path}</span>
 							</span>
-							{#if worktree.path === (currentDirectory ?? directory)}<span data-testid="current-worktree"><Icon name="check" size={12} /><span class="sr-only">Current worktree</span></span>{/if}
+							{#if worktree.path === (checkoutState.currentDirectory ?? directory)}<span data-testid="current-worktree"><Icon name="check" size={12} /><span class="sr-only">Current worktree</span></span>{/if}
 						</MenuItem>
 					{/each}
 				{/if}
@@ -281,7 +155,7 @@
 {/snippet}
 
 {#snippet checkoutMenu()}
-<Menu presentation={phone ? "sheet" : "popover"} side="top" align="end" ariaLabel="Checkout" class={phone ? undefined : "w-[320px]"} data-testid="composer-checkout-menu" onopenchange={(open) => { if (!open) showWorktrees = false; }} onCloseAutoFocus={(event) => { if (showBranchRename) event.preventDefault(); }}>
+<Menu presentation={phone ? "sheet" : "popover"} side="top" align="end" ariaLabel="Checkout" class={phone ? undefined : "w-[320px]"} data-testid="composer-checkout-menu" onopenchange={(open) => { if (!open) checkoutState.showWorktrees = false; }} onCloseAutoFocus={(event) => { if (showBranchRename) event.preventDefault(); }}>
 	{#snippet trigger({ props })}
 		{#if row}
 			<Button {...props} bind:element={identityElement} variant="composer-row" size="content"
@@ -357,36 +231,40 @@
 		</MenuGroup>
 		<p class="{phone ? 'px-4' : 'px-3'} pt-[7px] pb-[4px] text-[12px] text-text-muted">{phone ? "Tap" : "Click"} a row to copy it.</p>
 		{/if}
-	{#if workspaceMissing}
+	{#if checkoutState.workspaceMissing}
 		<MenuSeparator />
-		{#if missingFolders.length}
+		{#if checkoutState.missingFolders.length}
 			<div class="px-[8px] py-[6px] text-[10px] text-warning">
-				<p>{workspaceMissing.canRecreate ? "These worktrees are missing. They will be recreated from their branches on your next message:" : "Missing worktrees:"}</p>
-				{#each missingFolders as folder, index (folder.folder)}
-					<p class="mt-[4px] break-all" data-testid="workspace-missing-folder">{missingFolderLabels[index]?.label ?? folder.folder}<span class="block text-text-muted">{folder.path}</span>{#if folder.reason === "branch-missing"}<span class="block">Its branch no longer exists.</span>{/if}</p>
+				<p>{checkoutState.workspaceMissing.canRecreate ? "These worktrees are missing. They will be recreated from their branches on your next message:" : "Missing worktrees:"}</p>
+				{#each checkoutState.missingFolders as folder, index (folder.folder)}
+					<p class="mt-[4px] break-all" data-testid="workspace-missing-folder">{checkoutState.missingFolderLabels[index]?.label ?? folder.folder}<span class="block text-text-muted">{folder.path}</span>{#if folder.reason === "branch-missing"}<span class="block">Its branch no longer exists.</span>{/if}</p>
 				{/each}
 			</div>
 		{:else}
-			<p class="px-[8px] py-[6px] text-[10px] text-warning">{#if workspaceMissing.canRecreate}This worktree is missing. It will be recreated from its branch on your next message.{:else}The session's worktree is missing.{#if workspaceMissing.reason === "branch-missing"}<span class="mt-[4px] block">Its branch no longer exists.</span>{/if}{/if}</p>
+			<p class="px-[8px] py-[6px] text-[10px] text-warning">{#if checkoutState.workspaceMissing.canRecreate}This worktree is missing. It will be recreated from its branch on your next message.{:else}The session's worktree is missing.{#if checkoutState.workspaceMissing.reason === "branch-missing"}<span class="mt-[4px] block">Its branch no longer exists.</span>{/if}{/if}</p>
 		{/if}
-		{#if workspaceMissing.canRecreate && onrecreate}<MenuItem disabled={moving || dismissing} data-testid="workspace-recreate" onselect={() => void recover("recreate")}>Recreate worktree</MenuItem>{/if}
-		{#if oncontinue}<MenuItem disabled={moving || dismissing} data-testid="workspace-continue-main" onselect={() => void recover("continue")}>Continue in main folder</MenuItem>{/if}
+		{#each checkoutState.notices.find((notice) => notice.kind === "missing")?.actions ?? [] as action (action.kind)}
+			<MenuItem disabled={checkoutState.moving || checkoutState.dismissing} data-testid={action.kind === "recreate" ? "workspace-recreate" : "workspace-continue-main"} onselect={() => void action.run()}>{action.label}</MenuItem>
+		{/each}
 	{/if}
-	{#if workspaceMismatch}
+	{#if checkoutState.workspaceMismatch}
 		<MenuSeparator />
-		<p class="px-[8px] py-[6px] text-[10px] text-warning" data-testid="workspace-mismatch">Workspace mismatch: Claude is working in <span class="break-all">{workspaceMismatch.actualPath}</span>. The recorded folder is <span class="break-all">{directory}</span>.</p>
-		{#if onmove}<MenuItem disabled={moving} onselect={() => void move(directory)}>Retry move</MenuItem>{/if}
+		<p class="px-[8px] py-[6px] text-[10px] text-warning" data-testid="workspace-mismatch">Workspace mismatch: Claude is working in <span class="break-all">{checkoutState.workspaceMismatch.actualPath}</span>. The recorded folder is <span class="break-all">{directory}</span>.</p>
+		{#each checkoutState.notices.find((notice) => notice.kind === "mismatch")?.actions ?? [] as action (action.kind)}
+			{#if action.kind === "move"}<MenuItem disabled={checkoutState.moving} onselect={() => void action.run()}>{action.label}</MenuItem>{/if}
+		{/each}
 	{/if}
-	{#if workspaceHint}
+	{#if checkoutState.workspaceHint}
 		<MenuSeparator />
-		<p class="px-[8px] py-[6px] text-[10px] text-warning">{hintLabel}<span class="mt-[4px] block break-all text-text-muted">{workspaceHint}</span></p>
-		{#if onmove}<MenuItem disabled={moving || dismissing} data-testid="workspace-hint-move" onselect={() => workspaceHint && void move(workspaceHint)}>Move</MenuItem>{/if}
-		{#if ondismiss}<MenuItem disabled={moving || dismissing} data-testid="workspace-hint-dismiss" onselect={() => workspaceHint && void dismiss(workspaceHint)}>Dismiss</MenuItem>{/if}
+		<p class="px-[8px] py-[6px] text-[10px] text-warning">{checkoutState.hintLabel}<span class="mt-[4px] block break-all text-text-muted">{checkoutState.workspaceHint}</span></p>
+		{#each checkoutState.notices.find((notice) => notice.kind === "hint")?.actions ?? [] as action (action.kind)}
+			<MenuItem disabled={checkoutState.moving || checkoutState.dismissing} data-testid={`workspace-hint-${action.kind}`} onselect={() => void action.run()}>{action.label}</MenuItem>
+		{/each}
 	{/if}
 	{#if multiFolder}
 		<MenuSeparator />
 		{@render checkoutActions()}
-	{:else if onrenamebranch || (loadWorktrees && onmove)}
+	{:else if checkoutState.canRenameBranch || checkoutState.canListWorktrees}
 		<MenuGroup label="Actions">
 			<div class="mx-[8px] divide-y divide-border overflow-hidden rounded-[12px] border border-border max-md:mx-4">
 				{@render checkoutActions()}
@@ -397,26 +275,27 @@
 {/snippet}
 
 {#snippet warningRow()}
-	{#if warningPath}
+	{#if checkoutState.warningPath}
 		<div data-testid="composer-checkout-warning" class="flex min-h-[50px] flex-wrap items-center gap-x-[10px] gap-y-[6px] py-[8px] text-[11.5px] text-warning">
-			<span class="flex min-w-0 items-center gap-[5px]"><span class="inline-flex shrink-0"><Icon name="circle-alert" size={12} /></span><span class="min-w-0 break-all">Claude is working in {warningDisplayPath}</span></span>
+			<span class="flex min-w-0 items-center gap-[5px]"><span class="inline-flex shrink-0"><Icon name="circle-alert" size={12} /></span><span class="min-w-0 break-all">Claude is working in {checkoutState.warningDisplayPath}</span></span>
 			<span class="ml-auto flex shrink-0 gap-[6px]">
-				{#if onmove}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" class="rounded-[7px] border border-border px-[10px] py-[3px] text-[11.5px] font-normal text-text" disabled={moving || dismissing} data-testid="workspace-hint-move" onclick={() => warningPath && void move(warningMismatch ? directory : warningPath)}>Move</Button>{/if}
-				{#if ondismiss || warningMismatch}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" class="rounded-[7px] border border-border px-[10px] py-[3px] text-[11.5px] font-normal text-text" disabled={moving || dismissing} data-testid="workspace-hint-dismiss" onclick={() => warningPath && void dismiss(warningPath, warningMismatch ? "mismatch" : "hint")}>Dismiss</Button>{/if}
+				{#each checkoutState.warningNotice?.actions ?? [] as action (action.kind)}
+					<Button variant="ghost" size="content" tone="inherit" hoverFill="none" class="rounded-[7px] border border-border px-[10px] py-[3px] text-[11.5px] font-normal text-text" disabled={checkoutState.moving || checkoutState.dismissing} data-testid={`workspace-hint-${action.kind}`} onclick={() => void action.run()}>{action.kind === "move" ? "Move" : action.label}</Button>
+				{/each}
 			</span>
 		</div>
 	{/if}
 {/snippet}
 
-<Modal open={showBranchRename} title="Rename branch" description="Rename the branch in every worktree created for this session." size="sm" placement={phone ? "sheet" : "center"} dismissible={!renamingBranch} showClose={!renamingBranch} onclose={() => { if (!renamingBranch) showBranchRename = false; }} returnFocus={() => identityElement ?? null}>
-	<form id={branchRenameFormId} onsubmit={(event) => { event.preventDefault(); void renameBranch(); }} aria-busy={renamingBranch}>
-		<Field label="Branch name" error={branchRenameError}>
-			<TextInput bind:value={branchName} readonly={renamingBranch} autofocus={showBranchRename} autocomplete="off" autocapitalize="off" spellcheck={false} data-testid="session-branch-rename-input" oninput={() => { branchRenameError = undefined; }} />
+<Modal open={showBranchRename} title="Rename branch" description="Rename the branch in every worktree created for this session." size="sm" placement={phone ? "sheet" : "center"} dismissible={!checkoutState.renamingBranch} showClose={!checkoutState.renamingBranch} onclose={() => { if (!checkoutState.renamingBranch) checkoutState.showBranchRename = false; }} returnFocus={() => identityElement ?? null}>
+	<form id={branchRenameFormId} onsubmit={(event) => { event.preventDefault(); void checkoutState.renameBranch(); }} aria-busy={checkoutState.renamingBranch}>
+		<Field label="Branch name" error={checkoutState.branchRenameError}>
+			<TextInput bind:value={checkoutState.branchName} readonly={checkoutState.renamingBranch} autofocus={showBranchRename} autocomplete="off" autocapitalize="off" spellcheck={false} data-testid="session-branch-rename-input" oninput={() => { checkoutState.branchRenameError = undefined; }} />
 		</Field>
 	</form>
 	{#snippet footer()}
-		<Button variant="secondary" size="sm" disabled={renamingBranch} onclick={() => { showBranchRename = false; }} data-testid="session-branch-rename-cancel">Cancel</Button>
-		<Button variant="primary" size="sm" type="submit" form={branchRenameFormId} disabled={renamingBranch || !branchName.trim()} data-testid="session-branch-rename-submit">{renamingBranch ? "Renaming…" : "Rename"}</Button>
+		<Button variant="secondary" size="sm" disabled={checkoutState.renamingBranch} onclick={() => { checkoutState.showBranchRename = false; }} data-testid="session-branch-rename-cancel">Cancel</Button>
+		<Button variant="primary" size="sm" type="submit" form={branchRenameFormId} disabled={checkoutState.renamingBranch || !checkoutState.branchName.trim()} data-testid="session-branch-rename-submit">{checkoutState.renamingBranch ? "Renaming…" : "Rename"}</Button>
 	{/snippet}
 </Modal>
 

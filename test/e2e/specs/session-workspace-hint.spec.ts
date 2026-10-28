@@ -79,10 +79,9 @@ test("desktop hint acceptance uses the existing workspace move", async ({
 	await page.setViewportSize({ width: 1440, height: 900 });
 	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
 	const checkout = page.getByTestId("composer-checkout");
-	await expect(checkout.getByTestId("workspace-hint")).toHaveAttribute(
-		"aria-label",
-		"working in conduit-hint?",
-	);
+	await expect(
+		checkout.getByTestId("workspace-notice-indicator"),
+	).toHaveAttribute("aria-label", "working in conduit-hint?");
 	await expect(page.getByTestId("workspace-hint-dismiss")).toHaveCount(0);
 	await capture(page, testInfo, "workspace-hint-desktop");
 	await checkout.click();
@@ -110,7 +109,7 @@ test("desktop hint acceptance uses the existing workspace move", async ({
 		},
 		git: { branch: "hint", worktree: "conduit-hint" },
 	});
-	await expect(page.getByTestId("workspace-hint")).toHaveCount(0);
+	await expect(page.getByTestId("workspace-notice-indicator")).toHaveCount(0);
 	await expect(checkout).toHaveAttribute("title", "conduit-hint / hint");
 });
 
@@ -122,7 +121,7 @@ test("desktop dismissal targets the current hint and follows shell row updates",
 	const { rpc, session } = await openHint(page, harness.relayBaseUrl);
 	const changedPath = "/workspace/conduit-other";
 	const checkout = page.getByTestId("composer-checkout");
-	const hint = checkout.getByTestId("workspace-hint");
+	const hint = checkout.getByTestId("workspace-notice-indicator");
 	await expect(hint).toHaveAttribute("aria-label", "working in conduit-hint?");
 	rpc.upsertShellRow({ ...session, workspaceHint: changedPath });
 	await expect(hint).toHaveAttribute("aria-label", "working in conduit-other?");
@@ -146,7 +145,7 @@ test("desktop dismissal targets the current hint and follows shell row updates",
 			},
 		]);
 	rpc.upsertShellRow({ ...session, workspaceHint: undefined });
-	await expect(page.getByTestId("workspace-hint")).toHaveCount(0);
+	await expect(page.getByTestId("workspace-notice-indicator")).toHaveCount(0);
 	await expect(page.getByTestId("workspace-hint-move")).toHaveCount(0);
 	await expect(page.getByTestId("workspace-hint-dismiss")).toHaveCount(0);
 	await capture(page, testInfo, "workspace-hint-dismissed");
@@ -166,7 +165,7 @@ test("phone hint is an accessible icon with both actions in the checkout menu", 
 	const checkout = page
 		.getByTestId("composer-more-sheet")
 		.getByTestId("composer-checkout");
-	const hint = checkout.getByTestId("workspace-hint");
+	const hint = checkout.getByTestId("workspace-notice-indicator");
 	await expect(hint).toBeVisible();
 	await expect(hint).toHaveAttribute("aria-label", "working in conduit-hint?");
 	await expect(hint).toHaveText("");

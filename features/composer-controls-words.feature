@@ -234,6 +234,20 @@ Examples:
   | wide   | visible | composer-words-d3-git-wide   | 98        |
   | narrow | visible | composer-words-d3-git-narrow | 98        |
 
+Scenario: two workspace notices share one git chip warning mark
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the harness logo is viewed in the wide tier
+  And the composer checkout is conduit / account-chip as worktree
+  And the session has a workspace hint at /workspace/conduit-hint
+  And the session has a workspace mismatch at /workspace/conduit-actual
+  And the composer uses words controls
+  Then the composer checkout has exactly one warning mark naming Workspace mismatch: Claude is working in /workspace/conduit-actual and working in conduit-hint?
+  When I open the composer checkout menu
+  Then the composer checkout menu reports /workspace/conduit-actual and offers Retry move
+  And the composer checkout menu offers Move and Dismiss for /workspace/conduit-hint
+
 Scenario Outline: D3 workspace hints show an icon and put Move and Dismiss in the menu at every width
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness

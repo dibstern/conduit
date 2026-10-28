@@ -107,6 +107,8 @@ export default defineConfig({
 	// `browser has been closed` — starvation, not a real pixel change. Raising
 	// Docker's memory allocation is what would unlock 12; the worker count is the
 	// wrong knob for it. Use VISUAL_WORKERS=12 for a host-only run if you want it.
+	// On a busy host the emulated linux leg times out at 8 as well, so
+	// update-visual-snapshots.sh defaults Docker to 4 (conduit-test-r5yy7).
 	//
 	// A fixed count, not Playwright's `'50%'`, because that scales to the machine
 	// rather than to what else is running on it. For a pixel-diff suite a capture

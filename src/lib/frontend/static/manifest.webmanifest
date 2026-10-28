@@ -1,7 +1,7 @@
 {
 	"name": "Conduit",
 	"short_name": "Conduit",
-	"description": "Your AI coding sessions, on any device",
+	"description": "An agentic IDE for your AI coding sessions, on any device",
 	"start_url": "/",
 	"display": "standalone",
 	"orientation": "portrait",

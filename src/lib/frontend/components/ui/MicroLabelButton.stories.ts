@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { tick } from "svelte";
+import { hold } from "../../actions/hold.js";
 import MicroLabelButtonDemo from "./__fixtures__/MicroLabelButtonDemo.svelte";
-import { hold } from "./actions/hold.js";
 
 const onTap = fn<(event: MouseEvent) => void>();
 const onHold = fn<() => void>();
