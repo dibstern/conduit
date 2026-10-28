@@ -93,12 +93,13 @@ const unchanged = (files: ReadonlyMap<string, string>) =>
 const isOid = (value: string) => /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);
 
 // Missing refs are unborn; null asks the caller to fall back to git.
-const readRef = (
+// Yield every file needed to resolve a ref, including missing loose paths.
+// The reader supplies synchronous reads; the daemon probe supplies async baselines.
+function* refDependencies(
 	common: string,
 	ref: string,
-	paths = new Set<string>(),
 	depth = 0,
-): string | null | undefined => {
+): Generator<string, string | null | undefined, string | undefined> {
 	if (
 		depth > 8 ||
 		!/^refs\/[^\s\\]+$/.test(ref) ||
@@ -106,24 +107,48 @@ const readRef = (
 	)
 		return null;
 	const path = join(common, ref);
-	paths.add(path);
-	const value = readOptional(path);
+	const value = (yield path)?.trim();
 	if (value !== undefined) {
-		if (!lstatSync(path).isFile()) return null;
 		if (value.startsWith("ref: "))
-			return readRef(common, value.slice(5), paths, depth + 1);
+			return yield* refDependencies(common, value.slice(5), depth + 1);
 		return isOid(value) ? value : null;
 	}
 	const packed = join(common, "packed-refs");
-	paths.add(packed);
-	for (const line of readOptional(packed)?.split("\n") ?? []) {
+	for (const line of (yield packed)?.trim().split("\n") ?? []) {
 		if (!line || line.startsWith("#") || line.startsWith("^")) continue;
 		const [oid, name] = line.split(" ");
 		if (!oid || !isOid(oid) || !name) return null;
 		if (name === ref) return oid;
 	}
 	return undefined;
+}
+
+export function* defaultRefDependencies(
+	common: string,
+): Generator<string, boolean, string | undefined> {
+	let complete = true;
+	for (const ref of DEFAULT_REFS)
+		if ((yield* refDependencies(common, ref)) === null) complete = false;
+	return complete;
+}
+
+const readDependencies = <A>(
+	dependencies: Generator<string, A, string | undefined>,
+	paths = new Set<string>(),
+): A | null => {
+	let next = dependencies.next();
+	while (!next.done) {
+		const path = next.value;
+		paths.add(path);
+		const contents = readOptional(path);
+		if (contents !== undefined && !lstatSync(path).isFile()) return null;
+		next = dependencies.next(contents);
+	}
+	return next.value;
 };
+
+const readRef = (common: string, ref: string) =>
+	readDependencies(refDependencies(common, ref));
 
 const readGitFiles = (directory: string) => {
 	try {
@@ -207,7 +232,7 @@ export const makeSessionGitReader = () => {
 		if (common) {
 			try {
 				const paths = new Set<string>();
-				if (DEFAULT_REFS.every((ref) => readRef(common, ref, paths) !== null))
+				if (readDependencies(defaultRefDependencies(common), paths))
 					files = new Map([...paths].map((path) => [path, fileStamp(path)]));
 			} catch {
 				// Unusual refs still use git, without caching an incomplete dependency set.
