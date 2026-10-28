@@ -104,13 +104,24 @@ export const SEGMENTED_VARIANTS = {
 		selected: "bg-bg text-text shadow-settings-segment",
 		unselected: "text-text-secondary hover:text-text",
 	},
+	/** Flat tabs on the Turn panel's footer, with an accent top edge. */
+	footer: {
+		list: "flex items-stretch bg-turn-bg",
+		item: "relative inline-flex min-h-[36px] items-center gap-[4px] border-t-2 px-[9px] font-sans text-[12px] font-medium cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50",
+		selected: "border-accent text-text",
+		unselected: "border-transparent text-text-secondary hover:text-text",
+	},
 } as const satisfies Record<string, SegmentedRecipe>;
 
-export type SegmentedVariant = keyof typeof SEGMENTED_VARIANTS;
+export type TabVariant = keyof typeof SEGMENTED_VARIANTS;
+export type SegmentedVariant = Exclude<TabVariant, "footer">;
 
-export const SEGMENTED_VARIANT_NAMES = Object.keys(
+export const SEGMENTED_VARIANT_NAMES = Object.keys(SEGMENTED_VARIANTS).filter(
+	(variant): variant is SegmentedVariant => variant !== "footer",
+);
+export const TAB_VARIANT_NAMES = Object.keys(
 	SEGMENTED_VARIANTS,
-) as SegmentedVariant[];
+) as TabVariant[];
 
 /**
  * One option in a strip. Generic so a call site holding a narrowed union
@@ -136,7 +147,7 @@ export type SegmentedOption<T extends string = string> = {
  * two utilities in the same Tailwind group collide on stylesheet order.
  */
 export const segmentedItemClass = (
-	variant: SegmentedVariant,
+	variant: TabVariant,
 	isSelected: boolean,
 	className?: string,
 ): string => {
