@@ -355,6 +355,96 @@ for (const terminal of ["turn.error", "turn.interrupted"] as const) {
 	);
 }
 
+// CONTRACT 3.9: only an ordinary Stop pauses, and the inbox drains once the
+// active Run ends. A plain End clears only the pause of the turn it ended;
+// a failure or ordinary Stop since the handoff keeps main's pause (7.4).
+describe("plain End and the inbox pause", () => {
+	const plainEnd = canonicalEvent("session.end_requested", "end", {
+		providerProcessId: "process",
+		stop: null,
+	});
+	const userStop = canonicalEvent("interrupt.requested", "end", {
+		providerProcessId: "process",
+	});
+	const ended = (type: "turn.error" | "turn.interrupted") =>
+		canonicalEvent(
+			type,
+			"end",
+			{ messageId: "", error: "ended" },
+			{ provider: "claude", metadata: { runId: "run" }, createdAt: 300 },
+		);
+	for (const [name, events, paused] of [
+		[
+			"unpauses when End ends the turn",
+			[plainEnd, ended("turn.interrupted")],
+			false,
+		],
+		[
+			"keeps a failure before End paused",
+			[ended("turn.error"), plainEnd],
+			true,
+		],
+		["keeps a failure after End paused", [plainEnd, ended("turn.error")], true],
+		[
+			"keeps an interrupt before End paused",
+			[ended("turn.interrupted"), plainEnd],
+			true,
+		],
+		[
+			"keeps an ordinary Stop paused",
+			[userStop, ended("turn.interrupted"), plainEnd],
+			true,
+		],
+	] as const)
+		it.effect(name, () =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const read = yield* ReadQueryEffectTag;
+				yield* commit([
+					canonicalEvent("session.created", "end", {
+						sessionId: "end",
+						provider: "claude",
+						title: "End",
+					}),
+					canonicalEvent("input.admitted", "end", {
+						sessionId: "end",
+						inputId: "sent",
+						delivery: "queue",
+						request: { text: "first" },
+					}),
+					canonicalEvent("input.sent", "end", {
+						sessionId: "end",
+						inputId: "sent",
+					}),
+					canonicalEvent(
+						"run.requested",
+						"end",
+						{ runId: "run", inputId: "sent" },
+						{ createdAt: 100 },
+					),
+					canonicalEvent(
+						"run.started",
+						"end",
+						{ requestedRunId: "run", inputId: "sent" },
+						{ metadata: { runId: "run" }, createdAt: 200 },
+					),
+					canonicalEvent("input.admitted", "end", {
+						sessionId: "end",
+						inputId: "queued",
+						delivery: "queue",
+						request: { text: "next" },
+					}),
+					...events,
+				]);
+				expect(yield* read.readInboxState("end")).toMatchObject({ paused });
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+					local: true,
+				}),
+			),
+		);
+});
+
 describe("typed session row derivations", () => {
 	// Unread is the generated column alone (ADR-0004, Scope).
 	it.effect("takes unread from the generated column", () =>
