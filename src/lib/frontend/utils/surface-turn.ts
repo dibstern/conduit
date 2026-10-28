@@ -8,6 +8,7 @@ import { categoryColour } from "./category-colour.js";
 import {
 	cardLevelFor,
 	type PanelView,
+	pendingMessage,
 	SURFACE_RANK as rank,
 	STOPS,
 	type SurfaceLevel,
@@ -114,17 +115,11 @@ export function surfaceTurn(input: {
 }) {
 	const cardLevel = cardLevelFor(input.view);
 	const level = cardLevel ?? input.level;
-	const newest = [...input.parts]
-		.reverse()
-		.find((part) => part.type === "assistant");
+	const pendingPart = pendingMessage(input.parts, input.live);
 	const messages = input.parts.flatMap((part, step) => {
 		if (part.type !== "assistant") return [];
 		const message: SurfacePart = part;
-		const pending =
-			input.live &&
-			part === newest &&
-			part.surfacingProbabilities === undefined &&
-			!message.surfacingMark;
+		const pending = part === pendingPart;
 		const result = surfacingLevel(
 			{ probabilities: part.surfacingProbabilities ?? null },
 			input.categorySet,

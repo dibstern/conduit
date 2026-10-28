@@ -101,28 +101,38 @@ export function logSteps(turn: Turn): Step[] {
 	);
 }
 
+/** A live Turn's newest message, until Jev classifies or a mark places it; every message stop shows it. */
+export function pendingMessage(
+	parts: readonly ActivityPart[],
+	live: boolean,
+): ActivityPart | undefined {
+	const newest = [...parts].reverse().find((part) => part.type === "assistant");
+	return live &&
+		newest?.type === "assistant" &&
+		newest.surfacingProbabilities === undefined &&
+		!newest.surfacingMark
+		? newest
+		: undefined;
+}
+
 export function stopCounts(
 	turn: Turn,
 	categorySet: CategorySet,
 	live = turn.live,
 ): StopCounts {
 	const steps = logSteps(turn);
-	const newest = [...steps].reverse().find((part) => part.type === "assistant");
+	const pending = pendingMessage(steps, live);
 	const counts: StopCounts = { key: 0, balanced: 0, all: 0, log: steps.length };
 	for (const part of steps) {
 		if (part.type !== "assistant") continue;
-		const pending =
-			live &&
-			part === newest &&
-			part.surfacingProbabilities === undefined &&
-			!part.surfacingMark;
 		const { level } = surfacingLevel(
 			{ probabilities: part.surfacingProbabilities ?? null },
 			categorySet,
 			part.surfacingMark ?? undefined,
 		);
 		for (const stop of ["key", "balanced", "all"] as const) {
-			if (pending || SURFACE_RANK[level] >= SURFACE_RANK[stop]) counts[stop]++;
+			if (part === pending || SURFACE_RANK[level] >= SURFACE_RANK[stop])
+				counts[stop]++;
 		}
 	}
 	return counts;
