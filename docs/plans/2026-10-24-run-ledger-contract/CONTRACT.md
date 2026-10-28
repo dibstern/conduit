@@ -91,7 +91,11 @@ Source names used in the comments:
 - **Hold.** A run's open transmission: `provider_runs.runner_id` plus `held_transmission`.
   **Release:** the event that clears a hold, on evidence the transmission was never received.
 - **Coverage.** Whether the user's Stop covers a run: the run is in the Stop's committed cohort
-  (until 32.13; then the ledger's run state, 5.4).
+  (until 32.13; then the ledger's run state, 5.4). Distinct from a send's coverage in the ledger
+  (L1, L2, 3.3): its address retired, a pending kill or session end.
+- **Address.** The runner a ledger send is fixed to at issue, or **pending** until the next process
+  (L2, 3.3). **Current process:** the session's one live runner (L1). A **retired** runner (L1) is
+  distinct from a send retired by project inactive (3.11), which loses authority only.
 - **Feeder.** The one per-session caller of `holdRun` for owner sends.
 - **Settle (reconciler).** The reconciler's step that resolves the runs a stopped runner held.
   Distinct from the ledger verb **settle**.
@@ -248,35 +252,74 @@ Only evidence and conduit's decisions, each once:
 - **Session:** id, provider, an entry counter, stop/end/resume decisions, project inactive/active
   and session-ended evidence. Paused and the project gate are derived.
 - **Send (issue decision):** effect, entry number, time, the Run, admission or interaction it serves,
-  the execution and label it went to, an optional deadline. Probes also store the sends they cover,
+  its execution, its address (L2: a runner, or pending until it resolves once) and the label fixed
+  with that address, an optional deadline. Probes also store the sends they cover,
   captured at issue. Evidence: a transport chain and a consumption chain (sends with no hold only;
   a runner-held send stores no chains, they are a view over its hold facts, 4.11), a probe finding,
   accounting receipts (no values; usage has its own projection owner), and the native message id
   (first write wins; a contradiction is rejected).
-- **Execution (launch decision):** Run and label. Evidence: started, latest activity, results keyed
-  by the send they answer, query ended.
+- **Execution (launch decision):** Run and its start send; its runner and label are that send's
+  (L2), never a second copy. A wake execution has no send: its runner and label are its
+  `turn_started` label's (8.3). Evidence: started, latest activity, results keyed by the send they
+  answer, query ended.
 - **Run (decisions only):** Queued, Launched, Interrupting, Ended. Queued stores the timeout budget
   at reservation, because budgets arrive with each call and can change between calls. Launched
   names its execution. Ended carries the outcome from the fold.
 - **Admission:** input, priority, cancelled. **Interaction:** request evidence, an answer decision
   (first wins; user or timeout), resolved evidence.
-- **Background facts:** process started and lost facts, the latest task snapshot per label, task
-  events, lost-work records, pending confirms, native command sends (section 8).
+- **Background facts:** process state per runner (L1), the latest task snapshot per runner with
+  its label, task events, lost-work records, pending confirms, native command sends (section 8).
 - **Labels, not generations.** The ledger never mints or bumps a generation. It records
-  `process_started`, `process_lost` and query-ended evidence, each naming the host's label. A
-  kill, or recorded process loss, covers the sends of every label of that `runnerId`, the kill's
-  own send included. For a runner-held
-  provider (Claude, Codex, Cursor), a query ending covers that label's `interrupt` and `close`
-  sends; it never ends `start` or `steer` work, which ends only by its provider's work-ended
-  rule (section 9). OpenCode `abort` and `cancel_request` act on the native session, not the
-  query, so a query ending never covers them.
-- **A send's label is the process it went to.** A send for a Run that has an execution carries
-  its execution label (D33, D42). Any other send, an `interrupt` of a Queued Run and OpenCode
-  `abort` and `cancel_request` included (they act on the native session), carries the label of
-  the latest live process (D37). Only that process's loss covers its transport. The
-  next-process binding (D23) applies only when no process is live.
+  `process_started`, `process_lost` and query-ended evidence, each naming the host's label. For a
+  runner-held provider (Claude, Codex, Cursor), a query ending covers that label's `interrupt` and
+  `close` sends; it never ends `start` or `steer` work, which ends only by its provider's
+  work-ended rule (section 9). OpenCode `abort` and `cancel_request` act on the native session, not
+  the query, so a query ending never covers them.
+- **L1. Process.** One state per `runnerId`: live, with its latest `querySeq`, or retired. A runner
+  is live from its first `process_started`; its latest `querySeq` is the highest one on its
+  `process_started` and later unsolicited labels. Before that it is not started: not live, with no
+  label, though a `run_dispatched` may already name it (L2); if it retires first, retiring records
+  no lost work. This and 3.4 are the only places a label is split into
+  `runnerId` and `querySeq`; everywhere else it is opaque. The split is at the last `:` when what
+  follows is a decimal `querySeq`; otherwise the whole label is the `runnerId` (an older host). A
+  `runnerId` may itself contain `:` (OpenCode, 9). A runner retires at the first of: its
+  `process_lost`; an issued kill addressed to it; another runner's `process_started` (only for
+  totality: the host reports the loss first, H1, 6.9; it counts as that runner's `process_lost`).
+  Retired is final: its labels are older (item 4), so its later `process_started` changes nothing,
+  and a host never reuses a `runnerId` (6.1, 9). The current process is the one live
+  runner, if any. Retiring, in the same decision:
+  1. covers every send addressed to it, the kill's own included;
+  2. ends its executions: launched Runs end `process_lost` unless Ended; wake executions end;
+  3. records lost work (L5, 8.4);
+  4. makes its labels older (3.4).
+- **L2. Address at issue.** Every send is addressed once, when it issues, and never re-addressed:
+  1. an escalation (`close` to kill, `end_session` to kill) whose parent has a runner address goes
+     to that runner;
+  2. a runner-held send for a Run or wake Run with an execution goes to that execution's runner
+     (3.3 Execution; pending while a start is, below);
+  3. every other send goes to the current process, or to **pending** when there is none. An
+     escalation of a parent still pending is this case, and is pending too: an uncovered pending
+     parent means no `process_started` since it issued, and a covered one has no deadline left
+     to escalate. Every OpenCode send is case 3.
+
+  A pending send resolves, once, at the first of: its own `run_dispatched` (a held send), to the
+  runner it names; or the next `process_started`, to that runner. A case 2 send follows its
+  execution's start: it is pending while the start is, and resolves with it, to the same runner.
+  The label fixed with an address is the runner's latest label when the address is fixed; a
+  `run_dispatched` naming a runner with no `process_started` yet fixes the label of that runner's
+  `process_started`. A kill addressed to pending covers every pending send issued up to it,
+  itself included. Those sends never resolve; their executions end as at retirement (L1 item 2),
+  and the kill records nothing; the host acts on whatever process they reached (H3, 4.4). Every
+  other send is covered when its address is retired, or by session end (3.4). Coverage is
+  derived, never stored per send.
+- **Wire label.** Only `close`, `kill_and_respawn` and `end_session` carry a label (3.13). It
+  projects the address: `close` carries its execution's label; `kill_and_respawn` and
+  `end_session` carry their runner's latest label; any of the three whose address has no label yet
+  (pending, or a runner not started) carries null. Other effects carry no label; their address
+  lives only on the Send. A Queued Run's `interrupt` is addressed (to the
+  current process or pending) and carries no label.
 - **`hasAuthority(execution)`:** the execution is its Run's current one, the Run is not Ended, its
-  label is not covered, the project is active, and its native session has not ended. This is the
+  runner is live (L1), the project is active, and its native session has not ended. This is the
   single read of Ended.
 - Native message id (6C): immutable once known. Evidence that contradicts it is rejected with a
   diagnostic and no state change. A missing id is filled from evidence. Where a provider accepts a
@@ -284,7 +327,7 @@ Only evidence and conduit's decisions, each once:
 - No in-session pruning. Run Input records, interaction records and send history are kept for the
   session's life and reclaimed when the session is archived.
 
-<!-- src: FB §2; RA §7; HLK step 4, step 5; BG Decision 1, Decision 3; AUDIT-2 T6; review 2026-10-28 (H2); model-gaps 2026-10-28 -->
+<!-- src: FB §2; RA §7; HLK step 4, step 5; BG Decision 1, Decision 3; AUDIT-2 T6; review 2026-10-28 (H2); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1, L2; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (label split); REDESIGN review r3-1 (runner not started, authority at record) -->
 
 ### 3.4 Correlation and evidence
 
@@ -309,8 +352,10 @@ Only evidence and conduit's decisions, each once:
   name the start or steer that carried that input; `effect_outcome` names the effect's own token;
   `probe_result` names the probe's token; its target is read from the issued probe record named by
   that token. The execution is found through the send.
-- Lifecycle evidence is always recorded as a fact. It changes Run state only when `hasAuthority`
-  holds for its execution.
+- Lifecycle evidence is always recorded as a fact. It changes Run state only when, in the decision
+  that records it, the send it answers (if any) is neither retired nor covered (3.11) and
+  `hasAuthority` holds for its execution; a fact recorded without authority never changes Run state
+  later.
 - Receipt evidence (input acceptance and decline, accounting, answer confirmation, input and answer
   probe findings) updates only the record `receiptAddress(token)` names, and never changes or
   revives Run lifecycle.
@@ -320,8 +365,10 @@ Only evidence and conduit's decisions, each once:
   and no new error types.
 - Hold facts (`run_dispatched`, `run_released`, `delivery_indeterminate`, `runner_reply`,
   `journal_answer`) on a send with no hold are Rejected as evidence the send cannot produce.
-- A label is older when its runner has `process_lost` recorded, or its `querySeq` is below the
-  latest seen for that runner. A send's own label is never older for that send.
+- **Older labels (L1.4).** A label is older when its runner is retired (L1, 3.3) or its `querySeq`
+  is below the latest seen for that runner. Older-label evidence is recorded only where it changes
+  a join (3.8), and never gives authority, liveness or a wake Run. A send's own label is never
+  older for that send.
 - Freshness compares issue order of sends. There are no version counters. A native-session idle
   probe covers only sends issued before it, and only where the native policy can prove the covered
   work can no longer execute. Idle never leaves a cleanup deadline behind.
@@ -331,7 +378,7 @@ Only evidence and conduit's decisions, each once:
 - Native `run_id` order is unproven. Code must not assume it sorts by time; use arrival order, or
   cite evidence that it sorts.
 
-<!-- src: C0 §1; MODEL Observation doc comment; AUDIT-2 T7, Other changes (run_id); AUDIT A11; OW Decision 3; FB §4; HLK step 1, Rules not tied to one step (9B); review 2026-10-28 (H1); model-gaps 2026-10-28 -->
+<!-- src: C0 §1; MODEL Observation doc comment; AUDIT-2 T7, Other changes (run_id); AUDIT A11; OW Decision 3; FB §4; HLK step 1, Rules not tied to one step (9B); review 2026-10-28 (H1); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1.4; REDESIGN review r3-2 (retired send in the authority test) -->
 
 ### 3.5 Send chains and the views over them
 
@@ -348,7 +395,7 @@ Transport and consumption stay separate unions; they are never merged into one m
 to Retrying{at}, permanent to Failed{code}.
 
 **Work ended** is derived: the execution's evidence under the policy's work-ended rule, a covering
-idle probe the policy trusts, or coverage of its label.
+idle probe the policy trusts, or its send's coverage (L1, L2, 3.3).
 
 `mayStillAct`:
 
@@ -526,8 +573,9 @@ For a runner-held send these chains are never stored: they are a view over the h
   never revive.
 - Retirement removes authority, never liveness. A retired send that may still act keeps
   `anythingMayAct` true until reconciled.
-- Project inactive leaves a sent native command's view and liveness unchanged: its retired send
-  stays in `live` until `command_result`, NotConsumed or coverage of its label. Inactive never
+- Project inactive leaves a sent native command's view, liveness and deadline unchanged: its
+  retired send stays in `live`, and its deadline keeps running, until `command_result`,
+  NotConsumed or its coverage (L1, L2, 3.3). Inactive never
   fails a native command: its view becomes `Failed` only by coverage (process loss, a kill,
   session end) or a permanent `effect_outcome` (D17, D34).
 - A retired probe is finished: it leaves `live` and owns no deadline. `project_active`
@@ -537,11 +585,11 @@ For a runner-held send these chains are never stored: they are a view over the h
   reports.
 - **Session ended** removes authority over that native session's work. It does not block fresh
   authorized admission, which opens a new native session with start mode `fresh` (4.8).
-- `session_ended` with a live process records lost work for that label.
+- `session_ended` records lost work by L5 (8.4).
 - Session-scoped provider failures (usage-limit failover, vanished native session) settle every open
   Run on the session with its reason.
 
-<!-- src: HLK Rules not tied to one step (9B), step 3; FB §4; SPEC Implementation Decisions (Session-scoped provider failures, Removed project, OpenCode adapter), user stories 22 to 24; model-gaps 2026-10-28 -->
+<!-- src: HLK Rules not tied to one step (9B), step 3; FB §4; SPEC Implementation Decisions (Session-scoped provider failures, Removed project, OpenCode adapter), user stories 22 to 24; model-gaps 2026-10-28; REDESIGN review r1-2 -->
 
 ### 3.12 Persistence
 
@@ -586,7 +634,7 @@ export type ProviderKind = "claude" | "codex" | "cursor" | "opencode";
 // Opaque host string, never parsed. Runner-held start or steer: bound by run_dispatched's
 // commandId and transmission, n minted by holdRun (4.11). Every effect with no hold: from ctx.newId.
 export type SendToken = string & { readonly __brand: "SendToken" };
-export type Label = string; // `runnerId:querySeq`, or `runnerId` for an older host; opaque
+export type Label = string; // `runnerId:querySeq`, or `runnerId` for an older host; split at the last `:` only by L1 and 3.4
 
 export type InputState =
   | { readonly tag: "Queued" }
@@ -665,7 +713,7 @@ export type Settlement =
   | { readonly kind: "alarm_fired" }
   | { readonly kind: "hold_exhausted"; readonly commandId: string }
   | { readonly kind: "process_started"; readonly label: Label; readonly reattached: boolean }
-  | { readonly kind: "process_lost"; readonly runnerId: string } // covers every label of runnerId
+  | { readonly kind: "process_lost"; readonly runnerId: string } // retires runnerId (L1, 3.3)
   | { readonly kind: "session_ended"; readonly cause: "usage_limit_failover" | "native_session_vanished" }
   | { readonly kind: "project_inactive" }
   | { readonly kind: "project_active" };
@@ -675,8 +723,8 @@ export type RunEffect =
       readonly mode: "resume" | "fresh" }
   | { readonly kind: "steer"; readonly runId: string; readonly inputId: string }
   | { readonly kind: "interrupt"; readonly runId: string }
-  // label: the execution label the destruction acts on; null only before any process has been
-  // seen for it, then it acts on the next process_started's runner (D23, D33)
+  // label: a projection of the send's address (L2, 3.3); shapes unchanged. close: its execution
+  // label; kill_and_respawn, end_session: the runner's latest label; null while the address has no label
   | { readonly kind: "close"; readonly runId: string; readonly label: Label | null }
   | { readonly kind: "kill_and_respawn"; readonly runId: string | null; readonly label: Label | null } // runId null: idle End escalation (D4)
   | { readonly kind: "end_session"; readonly runId: string | null; readonly label: Label | null }
@@ -735,7 +783,7 @@ export interface LedgerView {
   readonly live: readonly IssuedEffect[];   // work that may still act, in issue order
   readonly tasks: TasksView;                // none | unknown | live (kind, class per task)
   readonly anythingMayAct: boolean;
-  readonly pendingConfirm?: PendingConfirm; // action, labels it acts on (D33), snapshot entry, tasks it would destroy
+  readonly pendingConfirm?: PendingConfirm; // step, snapshot entry, tasks it would destroy; its labels are a view (L3)
   readonly lostWork: readonly LostWork[];   // tasks, or "may have been lost"
   readonly nativeCommands: readonly NativeCommandView[];
 }
@@ -744,13 +792,13 @@ export interface LedgerView {
 
 type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancelled | Failed; // only waiting variants carry a deadline
 type TaskKey = { taskId: string; runId?: string };
-type Tasks = { tag: "Unknown"; label: Label } | { tag: "Known"; label: Label; tasks: ReadonlyMap<TaskKey, Task> };
+type Tasks = { tag: "Unknown"; label: Label } | { tag: "Known"; label: Label; tasks: ReadonlyMap<TaskKey, Task> }; // per runner
 ```
 
 `lastRefusal`'s field names are illustrative; the rule is that it names the exact answer attempt and
 refusal code.
 
-<!-- src: MODEL; HLK step 1, step 3, Rules (10B); RULINGS R3; FB §2 (model changes: live, project_active, Dispatching, lastRefusal, diagnostic, quarantine removed); D1-1; BG Decision 2; RA §2, §7; AUDIT A1, A3, A11; AUDIT-2 T5, T6, T7, T8, T9, T10; SEND-SCOPE-5 S9.1, S9.4; review 2026-10-28 (H1, H2); model-gaps 2026-10-28 -->
+<!-- src: MODEL; HLK step 1, step 3, Rules (10B); RULINGS R3; FB §2 (model changes: live, project_active, Dispatching, lastRefusal, diagnostic, quarantine removed); D1-1; BG Decision 2; RA §2, §7; AUDIT A1, A3, A11; AUDIT-2 T5, T6, T7, T8, T9, T10; SEND-SCOPE-5 S9.1, S9.4; review 2026-10-28 (H1, H2); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L2, L3 -->
 
 
 ## 4. Sends, admission and the hold
@@ -908,8 +956,13 @@ One write transaction, in this order:
   32.5 it is also the caller for a joined steer's own transmission (4.11).
 - It takes a send when the send is claimed, when a release commits, and at restart.
 - From the ledger switch (32.6) it also takes `send_native_command` effects, which have no Run:
-  with no runner alive it spawns one, and it transmits in issue order, so the command goes ahead of
-  every queued input (8.5, D22).
+  with no runner alive it spawns one (8.5).
+- **H3. Order.** The feeder transmits in issue order, is the only spawner, and drops a send the
+  ledger no longer wants: an owner send when `holdRun` returns `Covered` or `Ended` (a Run ends when
+  its runner retires, L1), a `send_native_command` once its send has left `live` (3.11). A send
+  covered by a pending kill may still be transmitted before that kill executes; the kill, issued
+  after it, then acts on the process it reached. The ledger relies on this for pending sends (L2,
+  3.3).
 - The feeder's memory is its queue, keyed by `(session, run, commandId)`, and each send's
   capability (a live handle, or `Adopted`). Every step calls `holdRun`:
   - `Held`: hand the transmission to its write fiber.
@@ -960,7 +1013,7 @@ One write transaction, in this order:
 - **Adoption is not a transmission.** When restart adopts a live runner that still holds a run, it
   appends nothing, checks no coverage and counts nothing toward the cap (7.2).
 
-<!-- src: CONT C2 (feeder, adoption), C3 (release hands off), closing paragraph on S9.5; review 2026-10-28 (H9); model-gaps 2026-10-28; SETTLE S1, S4 -->
+<!-- src: CONT C2 (feeder, adoption), C3 (release hands off), closing paragraph on S9.5; review 2026-10-28 (H9); model-gaps 2026-10-28; SETTLE S1, S4; REDESIGN 2026-10-28 (02-options-and-pick.md) H3 -->
 
 ### 4.5 Release and its evidence
 
@@ -1286,12 +1339,11 @@ stands: the owner's holder carries it and the reactor re-sends it.
 - If the deadline passes, the Run is ended `interrupted` (forced), tombstoned, and the runner is told
   to close the native query. If the close is not confirmed before a second deadline, the effect is
   `kill_and_respawn`.
-- **`kill_and_respawn` counts as released, whatever its outcome.** Issuing it covers every label
-  of the runner it acts on, the `kill_and_respawn` send included: a kill is never work that may
-  still act, so it never holds `anythingMayAct`, and its outcome is a diagnostic. Whether the
-  process still runs belongs to the kill routine and the process watcher (6.6), which report
-  `process_lost` (D16). The Run is Ended Interrupted,
-  forced. The native-session fence held for that Run's query is released at the same moment, with no
+- **`kill_and_respawn` counts as released, whatever its outcome.** Issuing it retires the runner
+  it is addressed to (L1, 3.3), which covers the kill's own send: a kill never holds
+  `anythingMayAct`, and its outcome is a diagnostic. Whether the process still runs belongs to the
+  kill routine and the process watcher (6.6). The Run is Ended Interrupted, forced. The
+  native-session fence held for that Run's query is released at the same moment, with no
   native-session probe; the next queued start proceeds normally. There is no quarantine. A
   replacement runner that cannot start is the ordinary start refusal of the next start, not a
   ledger concern at kill time. The process watcher still turns runner exit and failed liveness
@@ -1305,11 +1357,12 @@ stands: the owner's holder carries it and the reactor re-sends it.
   alone never destroys them.
 - Stop is not a goal action. Stop never pauses or clears a goal (8.6).
 
-<!-- src: SPEC Implementation Decisions (Stop that always stops; quarantine sentence withdrawn by D1-5); D1-1 to D1-5; D1 (OpenCode is unaffected); BG Decision 3 (goal flow separate from Stop), Decision 4 -->
+<!-- src: SPEC Implementation Decisions (Stop that always stops; quarantine sentence withdrawn by D1-5); D1-1 to D1-5; D1 (OpenCode is unaffected); BG Decision 3 (goal flow separate from Stop), Decision 4; REDESIGN 2026-10-28 (02-options-and-pick.md) L1 -->
 
 ### 5.2 Coverage
 
-- **Coverage is owned by the Run Ledger.** A run is covered when a committed Stop control row of its
+- **Stop coverage is owned by the Run Ledger.** It is decided per run, apart from a send's
+  ledger coverage (L1, L2, 3.3). A run is Stop-covered when a committed Stop control row of its
   session lists it in `payload.stop.owners`.
 - One predicate, `stopCovers(session, run)`, answers it. It lives in the ledger's settlement module
   beside `sessionRunOwnersQuery`. `holdRun` and the reactor's own stop-owner read both use it.
@@ -1319,7 +1372,7 @@ stands: the owner's holder carries it and the reactor re-sends it.
   `request_sequence` and would escape it. It is deleted with the legacy paths (32.13).
 - Coverage of a send is decided for the send's own run id (4.1).
 
-<!-- src: CONT C1 (Coverage), Data shape (Scope); CONT failure mode 33 -->
+<!-- src: CONT C1 (Coverage), Data shape (Scope); CONT failure mode 33; REDESIGN review r1-2 -->
 
 ### 5.3 Stop acceptance is one commit
 
@@ -1376,19 +1429,24 @@ The engine owns control acceptance. Its Stop acceptance operation runs inside on
 - **Evidence passes the host fence.** Acceptance and terminal facts from a replaced query still go
   to the daemon, so late acceptance reaches the ledger.
 - **Label `runnerId:querySeq`.** The host bumps `querySeq` on each query replacement and stamps it
-  on every frame; the hello carries the current value. Only the ledger reads it, as an opaque
-  label. An older host has no counter, so its frames are labelled `runnerId` alone and it has no
+  on every frame; the hello carries the current value. Only the ledger reads it; it splits the
+  label only for process state and older labels (L1, 3.4). An older host has no counter, so its frames are labelled `runnerId` alone and it has no
   in-host fence; 32.5's old-runner rule refuses it new work. Logs carry `runnerId` and, where
   present, `querySeq`.
-- **The ledger never mints or bumps generations.** It records `process_started`,
-  `process_lost` and query-ended evidence, each naming the label. Issuing a kill, or recording process
-  loss, covers the sends of every label of that `runnerId`, the kill's own send included. For a runner-held provider (Claude, Codex,
-  Cursor), a query ending covers that label's `interrupt` and `close` sends; it never ends
-  `start` or `steer` work, which ends only by its provider's work-ended rule (section 9).
-  OpenCode `abort` and `cancel_request` act on the native session, not the query, so a query
-  ending never covers them.
+- **The ledger never mints or bumps generations.** It folds one process state per `runnerId` from
+  the host's labels and its own kills (L1), and addresses each send at issue (L2). Query-ended
+  coverage is in 3.3.
+- **`process_started` is reported each time a serving runner becomes live**, labelled with its
+  hello's `runnerId:querySeq`, before any of its frames reach the ledger. `reattached` is false
+  when it first serves: a spawned serving runner at its hello's live adoption (6.2), before the
+  hello's send acknowledgements and replays; a candidate in the swap commit (6.9). It is true on
+  every `recover()` adoption after a daemon restart (7.2). A candidate, a starting adoption and a
+  query replacement report none; a replacement's frames advance the runner's latest `querySeq`
+  (L1). A `run_dispatched` may name a spawned runner before its hello (6.9 `register`); L1 and L2
+  decide that case. `process_lost` is recorded in the retirement commit (6.5). OpenCode's reporter
+  is in 9.
 
-<!-- src: RA §2, §7; FB §2 ("bumps" replaced by RA §7) -->
+<!-- src: RA §2, §7; FB §2 ("bumps" replaced by RA §7); REDESIGN 2026-10-28 (02-options-and-pick.md) L1, L2; REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r3-1 (one report per serving start; swap commit) -->
 
 ### 6.2 `RunnerAuthority`: grants and guarded writes
 
@@ -1441,7 +1499,7 @@ revoke(r: Live, reason: Revocation): Exiting | Retired
   - AI4: a revoked grant never revives. `adopt` refuses any runner whose row has `retired_at` set
     and returns it as a survivor.
   - AI5: `revoke` leaves no write window. A revoked runner's memory is released by its entry
-    scope, which the same post-commit step that calls `revoke` closes (6.11); it needs no grant.
+    scope, which its stop commit's post-commit step closes (6.11); it needs no grant.
     Durable settlement never depends on the runner. A cancelled warm candidate emits nothing.
   - AI6: `evidence` passes at any label, even after retirement.
   - AI7: memory thunks run immediately after the check, with no yield in between.
@@ -1460,7 +1518,7 @@ revoke(r: Live, reason: Revocation): Exiting | Retired
   ingestion's receipt `beforeCommit`, the f4 stopgap fences, the `.retired` marker and everything
   around it, `runner_generations`, the pre-commit SQL predicate, and `legacy:<runnerId>`.
 
-<!-- src: RA §3, §4, §9 (R1, R2); AUDIT A1 (cleanup grant), A2; AUDIT-2 T1, T2; SEND-SCOPE S3; STOP-INTENT What is deleted (revoke cohort); SWAP S7; review 2026-10-28 (H11) -->
+<!-- src: RA §3, §4, §9 (R1, R2); AUDIT A1 (cleanup grant), A2; AUDIT-2 T1, T2; SEND-SCOPE S3; STOP-INTENT What is deleted (revoke cohort); SWAP S7; review 2026-10-28 (H11); REDESIGN review r3-2 (AI5 wording for the swap) -->
 
 ### 6.3 Request stop and the retirement row
 
@@ -1589,7 +1647,7 @@ decideRunnerStop(state, observation) -> { state, actions }
   legacy recovery (4.1). New rows never write `owned_run_ids`. The fallback is deleted at 32.13.
 - **`process_lost` is recorded with `retired_at` (decided OPEN-4, 2026-10-28).** In the ledger
   chain, the transaction that sets a runner's `retired_at` also records `process_lost{runnerId}`,
-  covering every label of that runner. Settlement is decided once, in the commit that retires the
+  which retires that runner (L1, 3.3). Settlement is decided once, in the commit that retires the
   runner, so it cannot be lost between retirement and `Gone`.
   - The process may still be running after that commit. It is fenced (6.2), so it accepts no new
     work; evidence it still sends is recorded and folds by 3.8, and never reopens a run.
@@ -1633,6 +1691,12 @@ decideRunnerStop(state, observation) -> { state, actions }
   matches, whether or not the leader is alive. A member that no longer matches is skipped.
 - **One kill routine** serves Stop escalation, the watcher and restart recovery. It takes the
   retirement record and returns the record to commit, then the signals to send.
+- **H2. A kill is final.** A `kill_and_respawn` the ledger has issued is executed before its runner
+  could be reattached. Its path is the effect interpreter's (9): it claims the kill, and the
+  adapter's kill calls `requestStop` (6.3), which commits the retirement record before any signal.
+  Restart recovery reads issued, unfinished kills from the Run Effects table and runs each instead
+  of reattaching that runner. The ledger treats the runner as retired from the kill's issue (L1,
+  3.3).
 - A member is gone when its pid is gone, a zombie, or has a different start time. The runner is gone
   when every snapshotted member is gone; the reaper is a member, so a live reaper keeps the record
   open.
@@ -1644,7 +1708,7 @@ decideRunnerStop(state, observation) -> { state, actions }
   after the last refresh once the reaper and leader are gone, and a process stuck in the kernel can
   outlive the kill. Retired and confirmed-dead stay separate.
 
-<!-- src: REAPER R1, R2, R3, R4, R5, failure modes 10, 11; AUDIT A12; AUDIT-2 A13; D1 Runner manager (kill sequence) -->
+<!-- src: REAPER R1, R2, R3, R4, R5, failure modes 10, 11; AUDIT A12; AUDIT-2 A13; D1 Runner manager (kill sequence); REDESIGN 2026-10-28 (02-options-and-pick.md) H2 -->
 
 ### 6.7 Survivors and the notice
 
@@ -1701,25 +1765,33 @@ decideRunnerStop(state, observation) -> { state, actions }
   decideRunnerRole(role, Retire{revision, quiescent} | Cancel | Activate | Command | Hello)
   ```
 
-  A hello turns Reserved into Serving. Activate clears Candidate only.
+  A hello turns Reserved into Serving. Activate, or any command but a shutdown, turns Candidate into
+  Serving: only the serving row's runner is held a send (4.3), so such a command reaching a
+  Candidate means its swap has committed, and `upgrade-activate` may arrive after it. Activate
+  changes no other role.
 - **A swap is prepare, one commit, promote.**
   - *Prepare:* the old runner takes `Reserved{revision}` only when quiescent (no turn, no background
     work, no held spool frames, no subagent finalizers). Reserved refuses no command; any command
     cancels the reservation. Every command bumps the activity counter under the lock.
   - *Commit*, under the lock after the re-check: `requestStop(old, Superseded{successor: R})`. One
     transaction checks that old is not retired, that no non-terminal run is held by old, and that R is
-    a non-retired candidate. It retires old and sets R serving.
+    a non-retired candidate. It retires old, sets R serving and records R's `process_started`
+    after old's `process_lost` (6.1).
   - On failure or refusal: `upgrade-cancel` to old, stop R as `CandidateAbandoned`, mark the upgrade
     failed, back off.
-  - *Promote:* in-memory route, `upgrade-activate` to R, adopt R live, mark switched. Promote is
-    the post-commit step of old's stop commit, so old's revoke and the close of its entry scope run
-    through the same step as any stop (6.11); it is not a second closer. Nothing is forked
-    unawaited.
+  - *Promote* is the post-commit step of old's stop commit; it is not a second closer. Its memory
+    part runs in the commit's cache step, after COMMIT and before the permit is released (3.1):
+    revoke old, then make R's grant live (the commit has just checked R is not retired, AI4) and
+    route the session to R. So no hold binds R while R's grant is starting (6.2), and AI3 holds
+    throughout. The commit has checked that old holds no non-terminal run, so there is no release
+    to requeue first. After the release: `upgrade-activate` to R, mark switched, and close old's
+    entry scope as any stop does (6.11). Nothing is forked unawaited.
 - A send that commits its hold before the swap commit makes the swap refuse; a swap that commits
   first means the send is held by R. A plain Stop that wins makes the swap refuse.
 - `runner-upgrade.ts` owns no stop logic.
-- **Restart:** a serving row is adopted (`upgrade-activate` first if the host is still Candidate); a
-  candidate row is stopped as `CandidateAbandoned`; a retired row goes to the reconciler.
+- **Restart:** a serving row is adopted (`upgrade-activate` first if the host is still Candidate),
+  unless the ledger has an outstanding issued kill for it (H2, 6.6); a candidate row is stopped as
+  `CandidateAbandoned`; a retired row goes to the reconciler.
 - **Crash table:**
 
   | Crash during | Restart result |
@@ -1739,8 +1811,13 @@ decideRunnerStop(state, observation) -> { state, actions }
   the daemon-side hello retiring reset. The registry keeps identity only; older runners' roles are
   ignored. "Two live registrations, the newer wins" is replaced by the serving row.
 - Standalone shutdown after the manager is disposed is out of scope.
+- **H1. One process.** A session has at most one serving process. A new process's `process_started`
+  is reported only after its predecessor's `process_lost`, and before any of its frames (6.1): the
+  serving index above, the swap commit records old's `process_lost` before R's `process_started`,
+  the retiring commit records `process_lost` (6.5), and a candidate reports nothing (AI5, 6.2). OpenCode has one current server instance per session. The
+  ledger relies on this (L1, 3.3).
 
-<!-- src: SWAP S6, S7, S5 refined, J, K, M, crash table, Migration, What is deleted; RA §6; D1 Runner manager (restart); review 2026-10-28 (H11); SETTLE S3, S4, S5 -->
+<!-- src: SWAP S6, S7, S5 refined, J, K, M, crash table, Migration, What is deleted; RA §6; D1 Runner manager (restart); review 2026-10-28 (H11); SETTLE S3, S4, S5; REDESIGN 2026-10-28 (02-options-and-pick.md) H1, H2; REDESIGN review r3-1 (swap commit records process_started); REDESIGN review r3-2 (promote memory part in the commit cache step; a command activates a Candidate) -->
 
 ### 6.10 The runner lifecycle module
 
@@ -1776,7 +1853,8 @@ recover(): Effect<Recovered>
   dispatched to: a released send is re-held for a successor.
 - **Who closes the entry scope:** the stop commit's post-commit step, together with `revoke` and
   after the release's requeue (4.5, 6.2), and daemon shutdown. A swap's promote is the old runner's
-  stop commit's post-commit step and closes it the same way (6.9). The reconciler's Evict (6.4) only
+  stop commit's post-commit step and closes it the same way; only its revoke runs earlier, in the
+  commit's cache step (6.9). The reconciler's Evict (6.4) only
   removes the map entry; it closes nothing.
 - A finalizer touches only its own runner's resources and does no I/O on the runner socket, so it is
   safe at any label and runs whether or not the process ever answers. A finalizer still running
@@ -1796,7 +1874,7 @@ recover(): Effect<Recovered>
   policy column, and `revoke`'s cohort argument. The row's `owned_run_ids` fallback is unaffected and
   goes at 32.13 (6.5).
 
-<!-- src: AUDIT-2 T1; RA §3 (I5); SEND-SCOPE S3; AUDIT A1; STOP-INTENT S5, What is deleted; OPEN-7 decision; review 2026-10-28 (H3, H4, H11, W2) -->
+<!-- src: AUDIT-2 T1; RA §3 (I5); SEND-SCOPE S3; AUDIT A1; STOP-INTENT S5, What is deleted; OPEN-7 decision; review 2026-10-28 (H3, H4, H11, W2); REDESIGN review r3-2 (swap revoke) -->
 
 ## 7. Restart, adoption and Settle
 
@@ -1929,6 +2007,7 @@ At startup, in one recovery pass:
 | { kind: "turn_started"; wakeTask?: TaskKey }
 | { kind: "command_lifecycle"; commandId: string; state: "queued" | "started" | "completed" | "cancelled" }
 | { kind: "command_result"; commandId: string }
+// Settlement additions
 | { kind: "process_started"; label: Label; reattached: boolean }
 // Control additions
 | { kind: "stop_tasks"; tasks: "all" | readonly TaskKey[] }
@@ -1962,7 +2041,9 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
 ### 8.3 Task certainty and wake Runs
 
 - A fresh launch has no tasks (`Known`, empty). A reattach is `Unknown` until the catch-up snapshot,
-  and stays `Unknown` for a CLI declared not to send snapshots. An empty `Known` derives no tasks.
+  and stays `Unknown` for a CLI declared not to send snapshots. A provider that reports no
+  background tasks (OpenCode, Cursor, 8.1) is `Known`, empty, for every label, reattach included.
+  An empty `Known` derives no tasks.
 - The runner host keeps the latest snapshot even when empty, with its label, and replays it after
   the backlog on every attach.
 - The host's idle check uses the same reducer, and resets to `Unknown` when the query is replaced.
@@ -1970,9 +2051,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   the turns counter, and the host's task and idle caches are invalidated on query replacement.
 - Snapshots replace the set. Per-task events only name lost work, show outcomes and identify the
   waking task. A task is gone only when a later snapshot omits it.
-- Older-label evidence is recorded only when it changes a join, and never gives authority or
-  liveness. Older means `process_lost` is recorded for the runner, a kill was issued on the runner after
-  the label was seen (D41), or `querySeq` is below the latest seen for that runner; a send's own label is never older for that send (3.4).
+- Older-label evidence follows L1.4 (3.4): recorded only where it changes a join, never authority,
+  liveness or a wake Run.
 - **Wake Runs.** A `turn_started` with no active Run records a wake Run as Launched, with no start
   effect. Its waking task is the one notified just before. With an active Run it joins that Run.
   Admission steers into an active user Run but queues behind a wake Run.
@@ -1981,7 +2061,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   A matching wake Run completes by its provider's Run-end policy (3.6, 9), including Codex's result
   policy. No fictitious token is minted.
 - A wake Run has no send, so its execution is outstanding work in its own right. From
-  `turn_started` until its label is covered or its provider's Run-end evidence for that label
+  `turn_started` until its runner retires (L1) or its provider's Run-end evidence for that label
   is recorded, `anythingMayAct` is true, whether or not the Run has Ended (by deadline,
   `project_inactive` or `session_ended`). Run-end evidence clears this liveness even without
   authority; it changes Run state only with authority (3.4). An outstanding wake execution also holds
@@ -1989,7 +2069,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   waits for it as it would behind a user Run's retained start (D18). A `turn_started` that joins a wake
   Run under another label adds a wake execution for that label: every execution label of a wake
   Run is outstanding work and a fence member by these rules, each cleared by its own Run-end
-  evidence or coverage of its label (and, for membership only, session end). The deadline stop
+  evidence or its runner's retirement (and, for membership only, session end). The deadline stop
   sequence acts on the wake Run's first execution label; once the Run has Ended, the Tombstone
   cleanup expiry runs the provider's fence-expiry column against every execution label still a
   member (D28). A wake Run's deadline expiry runs
@@ -2005,76 +2085,73 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   archive and delete `hasLiveWork`, the status poller's idle corrections, and the runner record
   deletion. The physical-process file guard stays.
 
-<!-- src: BG Decision 3; AUDIT A9; AUDIT-2 T6, T11, A20, Other changes (wake admission); OW Decision 3; model-gaps 2026-10-28 -->
+<!-- src: BG Decision 3; AUDIT A9; AUDIT-2 T6, T11, A20, Other changes (wake admission); OW Decision 3; model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1; REDESIGN review r2-1 -->
 
 ### 8.4 Stop tasks, the confirm gate and lost work
 
-- `stop_tasks` `"all"` means the live tasks of the latest snapshot. It is rejected when tasks are
-  unknown or none, or when the provider has none. `stop_task` runs through the SDK's
+- **Tasks are read per runner.** `LedgerView.tasks`, `anythingMayAct`'s task term and
+  `stop_tasks` `"all"` read the current process's latest snapshot; with no current process there
+  are none. `"all"` means its live tasks. It is rejected, issuing nothing, when tasks are unknown or
+  none, or when the provider has none. `stop_task` runs through the SDK's
   `stopTask(taskId)` or Codex `thread/backgroundTerminals/terminate(processId)`. A failed stop is a
   diagnostic, with no retries.
-- **Confirm gate.** A destructive step (an ignored interrupt, restart, kill, end-session, an ignored
-  interrupt while paused) with tasks live or unknown waits with a pending confirm. The interrupt
-  deadline never destroys on its own. A confirm must match the latest snapshot; a stale confirm is
-  rejected. With no snapshot the UI says "background state unknown" and always asks. A pending
-  confirm names the destruction it gates, its step and every execution label it acts on;
-  confirming issues exactly that step against those labels. One step that destroys several
-  member labels (Tombstone cleanup expiry, `project_active` reconciliation) waits on one confirm
-  (D29). "Against those labels" binds only a confirm: when evidence clears the gate instead (a
-  `process_started` or snapshot leaves no task live or unknown), the step issues as decided at
-  that moment, so a Run-less `end_session` acts on the current process and a multi-label step on
-  the labels still members (D36).
+- **Confirm gate (L3).** A destructive step (an ignored interrupt, restart, kill, end-session, an
+  ignored interrupt while paused) with tasks live or unknown waits with a pending confirm. The
+  interrupt deadline never destroys on its own. A confirm must match the latest snapshot; a stale
+  confirm is rejected. With no snapshot the UI says "background state unknown" and always asks.
+  The gate stores its step, never its addresses. It reads the same tasks as above: by H1 a step's
+  address now is the current process, pending or a runner not started (no tasks), or retired. A
+  confirm releases it, and so does any decision after which those tasks are neither live nor
+  unknown: a snapshot, a `process_started`, or the current process retiring. The step is addressed by L2 when it issues,
+  so every release issues the same effects. A step whose every address is retired issues nothing:
+  its sends were covered at retirement. A step that destroys several member labels (Tombstone
+  cleanup expiry, `project_active` reconciliation) waits on one confirm. `PendingConfirm`'s labels
+  are a view.
 - `snapshotEntry` is the 1-based count of task-set entries accepted by the session:
   `tasks_snapshot` evidence and `process_started` settlements, excluding older labels. A
-  `process_started` that leaves a pending confirm open refreshes it with the new count and moves
-  each of its labels to the latest label of that label's runner (D39), so a confirm copied before
-  the replacement is stale. Callers copy it from `pendingConfirm`, never
-  compute it.
+  `process_started` that leaves a pending confirm open refreshes `snapshotEntry` only (D3), so a
+  confirm copied before it is stale. Callers copy it from `pendingConfirm`, never compute it.
 - With an active Run, `end` runs the stop sequence, then issues `end_session` once the Run is
   Ended or its interrupt deadline expired. Both steps are confirm-gated with tasks live or
   unknown. With no Run, `end` issues `end_session{runId: null}`; its deadline belongs to the
-  send. When that deadline expires unconfirmed, the ledger issues `kill_and_respawn{runId:
-  null}`, confirm-gated with tasks live or unknown, against the runner the `end_session` was
-  issued on, carrying the latest label seen for that runner, a reattach included (D35): it
-  records lost work for that label, and issuing it covers that runner's labels (5.1). If that runner is already lost, the `end_session` is covered
-  and no kill issues (D32). If the `end_session` is not yet bound to a process (D23), the kill
-  binds with it to the next `process_started` and covers it, so it issues once (D40).
-- Lost work is always recorded for every destruction, unplanned loss included, under the
-  latest label seen for the runner the destruction acts on. A destruction issued with no live
-  process records none: that process's loss already recorded it (D38).
+  send. When that deadline expires unconfirmed, the ledger issues `kill_and_respawn{runId: null}`,
+  confirm-gated with tasks live or unknown and addressed by L2 (3.3): where the `end_session` went,
+  or pending when it went to pending. Only runner-held providers escalate; OpenCode has no runner
+  to kill (5.1).
+- **Lost work (L5).** Each label is decided once, in the decision that first ends its scope: a
+  `close` issued for its query (at issue, for its execution label), its runner's retirement (for
+  that runner's latest label), or `session_ended` (for the current process's latest label). That
+  decision records the live tasks of the label's latest snapshot; "may have been lost" when the
+  label has no snapshot or its tasks are unknown; and nothing when they are `Known` with none live
+  (a fresh launch, and every Cursor and OpenCode label, 8.3). A destruction addressed to pending
+  records nothing.
 - A process that dies before confirming a native command: the tracker reloads from the transcript and
   re-sends first on the next launch, only if the confirmed status does not already match.
 
-<!-- src: BG Decision 2, Decision 3, Decision 4; AUDIT Already covered (32.8 defers to 32.25); AUDIT A4 (recovery); model-gaps 2026-10-28 -->
+<!-- src: BG Decision 2, Decision 3, Decision 4; AUDIT Already covered (32.8 defers to 32.25); AUDIT A4 (recovery); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L2, L3, L5; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (L5 Known empty); REDESIGN review r3-1 (runner not started) -->
 
 ### 8.5 Native command issue
 
-- A native command is issued in the same decision that admits it, after already-issued sends and
-  ahead of queued inputs, when the project is active, whether or not a process is alive. While
-  the project is inactive it is recorded and issued in the `project_active` decision, after that
-  decision's reconciliation probes and ahead of any start or steer (D17). The ledger never waits
-  for `process_started` to issue it: the feeder (4.4) takes it like any send, spawns a runner when
-  none is alive, and transmits in issue order, so it is the first send on that runner (D22). A send issued with no process takes the label of
-  the session's next `process_started`, the runner the feeder spawned for it (D23).
-- Its confirmation never holds back a start: issue order alone places it ahead of queued inputs,
-  and its confirmation deadline drives only its view (D19).
-- The provider may report it queued ("queued by Claude"). Its confirmation deadline is an ordinary
-  ledger deadline that does not run while the provider reports it queued. When it fires, the command
-  shows `unconfirmed`; the tracker re-reads native state (Claude's transcript, Codex's
-  `thread/goal/get`) and shows "Clear not confirmed" or "Pause not confirmed" with Retry. The tracker
-  runs no timer.
-- The confirmation deadline starts at issue: a command recorded while the project is inactive has
-  none until the `project_active` decision issues it. A sent command's deadline keeps running while
-  the project is inactive; `Unconfirmed` is a view, and the tracker's re-read needs no authority
-  (D27).
-- A covered native command's view is `Failed` with the covering cause as its code: `process_lost`,
-  `kill_and_respawn` or `session_ended` (D24). A permanent `effect_outcome` on its send means the
-  provider never received it: the view is `Failed` with the outcome's code and the send leaves
-  `live` (3.4, D34).
-- A command still deferred (requested while the project is inactive, not yet issued) when its
-  native session ends is `Failed{session_ended}` and is never issued: its target is gone (D30).
+- **A native command is a session send (L4).** L2 case 3 addresses it: to the current process, or
+  to pending when there is none. The ledger never waits for `process_started`; the feeder spawns
+  for it (H3, 4.4). It issues in the decision that admits it, after already-issued sends and ahead
+  of queued inputs, so issue order alone puts it first and its confirmation never holds back a
+  start.
+- **D17.** A sent command under project inactive follows 3.11. One admitted while the project is
+  inactive is recorded and issued in the `project_active` decision, after that decision's
+  reconciliation probes and ahead of any start or steer.
+- **Its view is a projection of its send:** `Sent` while unfinished; `Queued`, `Started`,
+  `Completed` or `Cancelled` from receipts; `Unconfirmed` when its deadline fires; `Failed` with
+  the covering cause (`process_lost`, `kill_and_respawn` or `session_ended`) when covered; `Failed`
+  with the outcome's code on a permanent `effect_outcome`, which also finishes the send (3.4). The
+  deadline starts at issue and drives only the view. A deferred command is an unissued send:
+  session end covers it, so it is `Failed{session_ended}` and never issued.
+- The provider may report it queued ("queued by Claude"). The deadline does not run while the
+  provider reports it queued. When it fires, the tracker re-reads native state (Claude's
+  transcript, Codex's `thread/goal/get`), with no authority needed, and shows "Clear not confirmed"
+  or "Pause not confirmed" with Retry. The tracker runs no timer.
 
-<!-- src: BG Decision 3; AUDIT A4; AUDIT-2 T5 -->
+<!-- src: BG Decision 3; AUDIT A4; AUDIT-2 T5; REDESIGN 2026-10-28 (02-options-and-pick.md) L4; REDESIGN review r2-1 -->
 
 ### 8.6 Goals
 
@@ -2119,7 +2196,21 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   through `observe`. It contains no lifecycle decisions. Outcomes: retryable (backoff), permanent
   (typed reason), delivery unknown (never re-sent blindly; the decider probes).
 - **OpenCode adapter.** Prompt message ids become Run Inputs; busy and idle and message events go to
-  `observe`; a project that returns reconciles from what OpenCode reports.
+  `observe`; a project that returns reconciles from what OpenCode reports. It is the process
+  reporter for the session's one server instance (H1, 6.9), to every session bound to it. The
+  label is `<promptProcessId>:0`: the instance's existing `promptProcessId`,
+  `openCodePromptProcessId(instanceId, identity)` (the id the control path already checks), as
+  `runnerId`, with `querySeq` 0. For a managed instance `identity` is the per-spawn token the
+  daemon persists in `ManagedOpenCodeRecord.processIdentity.token`, so `restartInstance` (same
+  instance id, new process) gets a new id, and a daemon restart that reuses the running server
+  (`canReuseManagedOpenCode`) keeps it and reports `reattached` true. For an unmanaged instance
+  (a configured URL) `identity` is the URL. No second id is stored. `process_started` is reported when a session binds the
+  instance, or when a daemon restart reattaches it; `process_lost` when conduit stops or replaces
+  that process (a URL change replaces it), or its supervisor reports it gone. A failed health
+  check alone is not loss. An unmanaged server exposes no process token, so conduit cannot see
+  it restart: its id stays live, and work the restart dropped ends only by OpenCode's work-ended
+  rule (`query_ended`, or a covering idle probe, D26). L1 and `hasAuthority` read these as for
+  any runner; without them no OpenCode execution has a live runner.
 - **Runner protocol (32.5).** Runners from older builds are refused new work and their turns are
   settled, using the 82tn.31 compatibility pattern; the protocol version is bumped, together with
   `querySeq` on frames and hello (32.19). The host journal stays as the duplicate check (4.9). 82tn.31
@@ -2147,14 +2238,14 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
     one ordered socket writer instead of a host record (a timing guarantee spread across daemon
     fibers); a Stop epoch (A.8 D).
 - **Decided (82tn.32.2.14, 2026-10-28): native-session fence membership and idle proof.**
-  Members are sends, never admissions. A member leaves the fence by NotConsumed, coverage of
-  its label (5.1, 6.1), or its own work ended (3.5). Where `resultReleasesFence` is no, work
-  ended by a result does not release membership; that member leaves at its label's
-  `query_ended` or coverage. A member held only by this rule has one cleanup obligation, its
+  Members are sends, never admissions. A member leaves the fence by NotConsumed, its coverage
+  (L1, L2, 3.3), or its own work ended (3.5). Where `resultReleasesFence` is no, work ended by a
+  result does not release membership; that member leaves at its label's `query_ended` or its
+  coverage. A member held only by this rule has one cleanup obligation, its
   Run's Tombstone cleanup (3.8: the Tombstone time plus `settleMs`), and its expiry runs the
   provider's fence-expiry column. A wake execution is a member from `turn_started`, as a
   delivered start send of its execution would be: it leaves by its provider's work-ended rule for
-  its label (with `resultReleasesFence` applied), coverage of its label, or session end. Once its
+  its label (with `resultReleasesFence` applied), its runner's retirement, or session end. Once its
   wake Run has Ended, its cleanup obligation is that Run's Tombstone cleanup, and expiry runs the
   provider's fence-expiry column, confirm-gated as in 8.4 (D18). Interactions, answers and
   background tasks are never members
@@ -2202,7 +2293,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
     successor self-starts after it); OpenCode idle covering unconfirmed sends (a request in flight
     joins the loop after the sample); counting the abandoned Cursor terminal as a result (the native
     run may still act).
-<!-- src: 82tn.32.2.14; OW Decision 2; FB §4 (idle covers confirmed delivery); claude-sdk-traces steer-misses-boundary, queued-input-promoted-to-steer; cursor-sdk-traces steer, steer-shell, cancel; codex-app-server-traces goal-chain, steer-race; opencode-wire-traces classic-prompt-during-tool; model-gaps 2026-10-28 -->
+<!-- src: 82tn.32.2.14; OW Decision 2; FB §4 (idle covers confirmed delivery); claude-sdk-traces steer-misses-boundary, queued-input-promoted-to-steer; cursor-sdk-traces steer, steer-shell, cancel; codex-app-server-traces goal-chain, steer-race; opencode-wire-traces classic-prompt-during-tool; model-gaps 2026-10-28; REDESIGN review r1-2 -->
 - **Decided (OPEN-6, 2026-10-28): Codex is a ledger provider, runner-held.** Codex runs in the
   runner host like Claude and Cursor (`makeRunnerProviderInstance` with the Codex runner driver), so
   its sends take the hold, the feeder, the journal, the reaper and the swap (4, 6, 7) unchanged, and
@@ -2216,7 +2307,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   provider (a daemon exit would end its sessions); Claude's policy with capability flags (Codex's
   goal, interrupt and wake rules differ).
 
-<!-- src: SPEC Implementation Decisions (Effect interpreter, Runner protocol, OpenCode adapter), Further Notes (82tn.31 compatibility); RA §2, §8, §9 (R4); CONT C3 (host's interrupt refusal), Required work 3; FB §5; OW Decision 5; BG Decision 1, 2, 5; D1 (OpenCode unaffected); review 2026-10-28 (M1, M2); model-gaps 2026-10-28 -->
+<!-- src: SPEC Implementation Decisions (Effect interpreter, Runner protocol, OpenCode adapter), Further Notes (82tn.31 compatibility); RA §2, §8, §9 (R4); CONT C3 (host's interrupt refusal), Required work 3; FB §5; OW Decision 5; BG Decision 1, 2, 5; D1 (OpenCode unaffected); review 2026-10-28 (M1, M2); model-gaps 2026-10-28; REDESIGN review r2-1 (OpenCode process id); REDESIGN review r2-2 (process id is promptProcessId; unmanaged restart) -->
 
 ## 10. Failure-mode catalogue
 
@@ -2457,7 +2548,8 @@ Behavioural statements the rebuilt decider must make impossible to violate:
   - LI4: replaying a decision's entries through `evolve` from the initial state gives the same view as
     the live state.
   - LI5: live or unknown tasks are never destroyed without a confirm that matches the latest
-    snapshot, except unplanned loss; every destruction yields lost work.
+    snapshot, except unplanned loss; lost work is recorded at most once per label, in the decision
+    that ends its scope, and never for a label `Known` to have no live task (L5, 8.4).
   - LI6: a native command is issued in the requesting decision when the project is active, alive
     process or not; requested while the project is inactive, it is issued in the `project_active`
     decision, ahead of any start or steer, unless its native session ends first (then it is
@@ -2466,7 +2558,8 @@ Behavioural statements the rebuilt decider must make impossible to violate:
     for that send (3.4).
   - LI8: `anythingMayAct` is false only when the fake has no running turn, no unfinished send other
     than a probe (D31) and no live task; unknown counts as true.
-  - LI9: each self-started turn with no active Run yields exactly one wake Run.
+  - LI9: each self-started turn on a label that is not older (3.4), with no active Run, yields
+    exactly one wake Run.
   - LI10: a zero-turn result never ends or starts a Run.
 - **Spec properties**, checked against both the pure decider and the real ledger on SQLite: every Run
   ends exactly once; every unfinished Run has a deadline; at most one active Run per session; no
@@ -2506,7 +2599,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
   set; an environment variable enables long runs.
 - Each decider step lands as its own commit with the oracle and the differential green.
 
-<!-- src: FB §5; OW Decision 5; HLK Oracle, header; C0 §4; BG Decision 5; SPEC Testing Decisions (property invariants); D1 Testing; model-gaps 2026-10-28 -->
+<!-- src: FB §5; OW Decision 5; HLK Oracle, header; C0 §4; BG Decision 5; SPEC Testing Decisions (property invariants); D1 Testing; model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L5, LI9 -->
 
 ### 11.3 The ledger, runners and end to end
 
@@ -2616,14 +2709,15 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 | 32.3 | ledger on SQLite with four verbs; the Run Effects table, empty and not yet authoritative for any provider (the outbox stays authoritative); A5, A7, A14, A18, A19, T9, T12, the per-session row of A8; owns the SQLite event-order test | 3.1, 3.7, 3.12, 11.3 |
 | 32.4 | deadlines as data and the process watcher; A1 with the ledger: builds `process_lost` with `retired_at` in the retirement commit for ledger-owned runs, while runner-held providers keep `Gone`-time settlement until their own ticket (6.5); A3, A8, A15 with the ledger; Q26: durable process-loss recovery, including the uncommitted direct-Stop/live-reattachment limitation (7.2), with 32.6/32.8 | 3.7, 6.4, 6.5, 6.8, 7.2 |
 | 32.5 | stateless runner protocol; A11; the protocol bump with 32.19; Send Token identity on the wire, run ids as coverage labels only, wake labels on `interrupt_turn`; a joined steer's own `run.dispatched` and token (4.11) | 4.6, 4.9, 4.11, 9 |
-| 32.6 | Claude send and run end through the ledger; reuses the journal answers. Switch for Claude: Run Effects, run state and `delivery_indeterminate` become the ledger's; `process_lost` settlement moves to the retirement commit and `Gone`-time settlement is deleted for Claude; migrate Send Settlement's Claude callers to the ledger's source-specific inputs (4.7, 4.11) and delete their outbox path; `processLost` is a no-op for Claude; Q26: close native terminal projection's missing attempt fence with 32.2.6 and durable process-loss/control recovery with 32.4/32.8 | 3.12, 4.9, 4.11, 6.5 |
+| 32.6 | Claude send and run end through the ledger; reuses the journal answers. Switch for Claude: Run Effects, run state and `delivery_indeterminate` become the ledger's; `process_lost` settlement moves to the retirement commit and `Gone`-time settlement is deleted for Claude; migrate Send Settlement's Claude callers to the ledger's source-specific inputs (4.7, 4.11) and delete their outbox path; `processLost` is a no-op for Claude; Claude's `process_started` reporter (6.1), the swap commit's included, with promote's memory part before the permit's release and a command activating a Candidate host (6.9); Q26: close native terminal projection's missing attempt fence with 32.2.6 and durable process-loss/control recovery with 32.4/32.8 | 3.12, 4.9, 4.11, 6.1, 6.5, 6.9 |
 | 32.7, 32.23 | steering as a Run Input; wake admission. Run Inputs own steer association for each switched provider; `joined_into` stays for the rest until 32.13 | 3.9, 3.12, 8.3 |
 | 32.8 | Stop, interrupt and Run now; `interrupt_turn` built from the Stop commit, with wake labels and no input ids. The `control` `stop` records the Stop but is not read for coverage before 32.13; Q26: durable Stop/control reconciliation and recovery with 32.4/32.6 (7.2) | 4.6, 5, 7.2 |
 | 32.9 | answers through `control(answer)` | 3.10 |
+| 32.32 | H2: restart recovery runs an issued, unfinished `kill_and_respawn` from the Run Effects table instead of reattaching its runner; needs 32.3, and blocks the first ledger switch that issues kills (32.6, 32.10) | 6.6, 6.9 |
 | 32.10 | Cursor on the ledger, runner-held; reuses 32.6's runner path. Switch for Cursor, as 32.6 does for Claude; migrate Send Settlement's Cursor callers to the ledger's source-specific inputs (4.7, 4.11) and delete their outbox path; `processLost` is a no-op for Cursor | 3.12, 6.5, 9 |
 | 32.2.13 | Codex policy in the decider | 3, 8, 9 |
 | 32.21 | Codex on the ledger, runner-held; reuses 32.6's runner path. Switch for Codex, as 32.6 does for Claude; migrate Send Settlement's Codex callers to the ledger's source-specific inputs (4.7, 4.11) and delete their outbox path; `processLost` is a no-op for Codex | 3.12, 4, 6.5, 9 |
-| 32.11 | OpenCode on the ledger. Switch for OpenCode: Run Effects, run state and the direct-provider `delivery_indeterminate` marker (written by the interpreter) become the ledger's | 3.12, 4.10, 9 |
+| 32.11 | OpenCode on the ledger. Switch for OpenCode: Run Effects, run state and the direct-provider `delivery_indeterminate` marker (written by the interpreter) become the ledger's; the OpenCode process reporter, labelled with the instance's `promptProcessId` (9) | 3.12, 4.10, 9 |
 | 32.12 | session-wide failures and removed projects | 3.11 |
 | 32.13 | deletes the old run-state copies: `owned_run_ids` and the fallback, main-built paths, `newestRunnerFirst`, run joining, `payload.stop.owners`, `stopCovers`, `joined_into` and the outbox; the ledger's `control` `stop` takes over coverage (5.4); Send Settlement's outbox adapter and its `settleRunnerCommandReply` call path | 3.12, 5.4, 6.5, 6.9, 7.4 |
 | 32.14 | full crash matrix and two-build upgrade, run once each for Claude, Codex and Cursor; reuses the journal answers | 4.9, 11.3 |
@@ -2841,37 +2935,63 @@ port.
 - D12: interaction resolution ends every answer transmission for it (3.10).
 - D13: probe retry fires at issue plus max(probeMs, backoff(n)) in one decision (3.7).
 - D14: LI2 permits the Tombstoned Run's absence from active and a different outcome (11.2).
-- D15: destruction records lost work under the destroyed runner's latest label (8.4).
+- D15: derived from L5: lost work is recorded under the label whose scope ended, the runner's latest at retirement (8.4). A label `Known` to have no live task records nothing. Reason: the record is the notice that background work was cancelled (32.25); under 8.3 an empty one would follow every fresh-launch kill and every Cursor or OpenCode retirement.
 
 **Decided (integration round 3, attrib-r3)**
 
-- D16: issuing a kill covers its runner's labels, the kill's own send included; process liveness belongs to the kill routine and watcher (5.1).
-- D17: a native command admitted while the project is inactive issues in the `project_active` decision; inactive leaves a sent command's view and liveness unchanged (3.11, 8.5).
-- D18: an outstanding wake execution is a native-session fence member until its work ends, its label is covered or the session ends (8.3, 9).
-- D19: native-command confirmation is not a dispatch barrier; the Queued deadline is a send or Tombstone cleanup only (3.7, 8.5).
+- D16: derived from L1: a kill retires its runner at issue, covering its sends, its own included (3.3, 5.1).
+- D17: a native command admitted while the project is inactive issues in the `project_active` decision; inactive leaves a sent command's view, liveness and deadline unchanged (3.11, 8.5).
+- D18: an outstanding wake execution is a native-session fence member until its work ends, its runner retires or the session ends (8.3, 9).
+- D19: derived from L4: a native command is a session send with no Run, so never a Run's barrier; its deadline drives only its view (8.5).
 - D20: a retry is anchored where its obligation opens: the outcome for a send, the issue for a probe; `retryAt` only raises it (3.7).
 - D21: a command receipt naming another commandId is Rejected, retired or not (3.4, 9).
-- D22: the ledger issues a native command without waiting for a process; the feeder spawns a runner and sends it first (8.5). Rejected: waiting for `process_started` (only the feeder spawns, so a lone command deadlocks every later start); letting the start spawn first (breaks command-before-inputs order); a ledger spawn effect (a second spawner).
-- D23: a send issued with no process takes the label of the session's next `process_started` (8.5). Rejected: the first answer's label, or none (loss before any answer would pin `anythingMayAct` until session end).
-- D24: a covered native command shows `Failed` with code `process_lost`, `kill_and_respawn` or `session_ended` (8.5).
+- D22: derived from L2 case 3 and H3: with no process the command goes to pending, and the feeder spawns (8.5, 4.4). Rejected: waiting for `process_started` (only the feeder spawns, so a lone command deadlocks); a ledger spawn effect (a second spawner).
+- D23: derived from L2: pending resolution, which also fixes the send's label (3.3).
+- D24: derived from L4: a covered command is `Failed` with its cause, from L1 and 3.4 (8.5).
 - D25: a Claude wake member leaves at its label's `query_ended` with or without a result, as section 9 already says for `resultReleasesFence` no (9).
 - D26: for OpenCode, a trusted covering idle probe alone is work ended, for start sends and wake executions alike; the table's sequence is the usual path, not a conjunction (3.5, 9).
-- D27: native-command confirmation starts at issue and keeps running while the project is inactive (8.5). Rejected: pausing it while inactive (a second clock rule for a view-only deadline).
-- D28: a turn joining a wake Run under another label is a wake execution of its own: live and a fence member until its own Run-end evidence or coverage; the Tombstone cleanup expiry runs fence expiry against every remaining member label (8.3). Rejected: killing the current process at the wake deadline (destruction would depend on arrival order); moving the wake label to the newest (hides work still running under the first label, LI8).
-- D29: a pending confirm names the destruction it gates (step and every execution label it acts on), and confirming issues exactly that, so a multi-label step waits on one confirm; `project_active` reconciliation of a wake Run acts on every execution label still a member (8.3, 8.4). Rejected: confirming against the Run's first label (a joined label's gated destruction would hit the wrong process).
-- D30: a native command still deferred for an inactive project when its native session ends is `Failed{session_ended}` and never issued (8.5, LI6). Rejected: issuing it at `project_active` (it would act on a fresh session the user never addressed).
+- D27: derived from L4: the deadline starts at issue and runs while inactive, because D17 leaves a sent command's deadline unchanged (8.5).
+- D28: derived from L1.2: under H1 a joining label is a newer `querySeq` of the same runner, and each execution ends at its own Run-end evidence or its runner's retirement. A turn joining a wake Run under another label is a wake execution of its own: live and a fence member until then; the Tombstone cleanup expiry runs fence expiry against every remaining member label (8.3). Rejected: killing the current process at the wake deadline (destruction would depend on arrival order); moving the wake label to the newest (hides work still running under the first label, LI8).
+- D29: changed by REDESIGN (A.11), L3: the gate stores its step; its labels are a view computed when it issues. Reason: the old rule froze labels at gate time, so a confirm after a replacement sent `end_session` to a retired runner (D36's own rejected failure). One confirm for a multi-label step, and `project_active` acting on every member label, stand (8.3, 8.4).
+- D30: derived from L4: a deferred command is an unissued send; session end covers it (8.5).
 - D31: a probe only reads, so it never counts as a send that may still act; LI8 exempts unfinished probes (8.3). Rejected: counting probes (a read would hold worktree cleanup and archive).
-- D32: the `kill_and_respawn` escalating an unconfirmed `end_session` acts on the runner that `end_session` was issued on; if that runner is already lost, nothing issues (8.4). Rejected: the current process (a later, unrelated runner would be killed while the end_session's own runner keeps acting).
-- D33: `close`, `kill_and_respawn` and `end_session` effects carry the execution label they act on (null only before any process was seen for it, binding per D23), and `PendingConfirm` carries the labels its step acts on (3.13, 8.4). Rejected: the feeder inferring the target from `runId` (a joined wake label on another runner has no single process per Run).
-- D34: a permanent `effect_outcome` on a `send_native_command` makes the command `Failed` with the outcome's code and finishes its send (3.4, 3.11, 8.5). Rejected: leaving it `Sent` until its confirmation deadline (it shows a command the provider never received as in flight).
-- D35: the D32 escalation kill carries the latest label seen for the `end_session`'s runner, a reattach included (8.4). Rejected: the label the `end_session` went to (after a reattach the runner answers to its newer label, and lost work is recorded under the latest label).
-- D36: "against those labels" binds only a confirm; a gate cleared by evidence issues the step as decided at that moment, so a Run-less `end_session` acts on the current process (8.4). Rejected: the gated labels (they can name a replaced process, so the `end_session` is covered at issue and the session never ends).
-- D37: a send issued while a process is live carries that process's label, a Queued Run's `interrupt` and OpenCode `abort` and `cancel_request` included; D23's next-process binding applies only with no live process (3.3). Rejected: the Run's execution label (a Queued Run has none yet, and a later process never received the send). A Run's `close`, `kill_and_respawn` and `end_session` keep D33's execution label.
-- D38: a destruction issued with no live process records no lost work (8.4). Rejected: a session-level label (it is not a host label, and the last process's loss already recorded its tasks).
-- D39: a `process_started` refreshing an open pending confirm also moves each of its labels to that runner's latest label (8.4). Rejected: keeping the gate-time labels (a confirmed kill after a reattach would carry a label the runner no longer answers to while lost work is recorded under the newer one).
-- D40: an unconfirmed expiry of an `end_session` not yet bound to a process issues one `kill_and_respawn` that binds with it to the next `process_started` and covers it (8.4, 5.1). Rejected: a null kill that covers nothing until bound (it re-escalates on every alarm and holds anythingMayAct with nothing able to act).
-- D41: a label is older once a kill is issued on its runner after the label was seen, so its unsolicited events record no wake Run (8.3). Rejected: waking from a killed label (a Run is opened for a process conduit has already destroyed, outstanding until its loss arrives).
-- D42: a send for a Run that has an execution carries its execution label, even when a newer process is live; only other sends take the latest live process (3.3; refines D37). Rejected: always the latest live process (an interrupt would go to a process not running the Run's query).
+- D32: derived from L2: the escalation goes where its `end_session` went (case 1), or to pending when that went to pending (case 3) (3.3, 8.4). Rejected: the current process (a later, unrelated runner would be killed).
+- D33: changed by REDESIGN (A.11), L2 projection: process-wide sends carry the runner's latest label, not the execution label; `PendingConfirm` labels are a view (L3). Reason: the two differ only after a reattach, where lost work and identity are under the newer label (D35's reason) (3.3, 3.13).
+- D34: derived from L4: a permanent outcome makes the command `Failed` with its code (8.5).
+- D35: derived from L2: the wire label projection (3.3).
+- D36: derived from L3: a confirm and clearing evidence issue the same step, addressed when it issues (8.4). Rejected: the gate-time labels (they can name a replaced process, so the step is covered at issue and the session never ends).
+- D37: changed by REDESIGN (A.11), L2: an OpenCode steer goes to the current instance (case 3), not the execution's instance; runner-held Run sends use case 2 (D42). Reason: the old label put its coverage on the wrong process (opencode-82103301) (3.3).
+- D38: derived from L5 and L1: a pending destruction records nothing, and a retired runner takes no destruction (8.4).
+- D39: removed by REDESIGN (A.11): confirm labels are a view (L3), so nothing moves on refresh. D3's `snapshotEntry` refresh stays (8.4).
+- D40: derived from L2: a pending kill covers the pending `end_session` issued before it, so there is no second expiry (3.3, 8.4).
+- D41: derived from L1: a kill retires its runner, and a retired runner's labels are older (3.4). Rejected: waking from a killed label (a Run opens for a process conduit already destroyed).
+- D42: derived from L2 case 2 (3.3). Rejected: the current process for every send (an interrupt would reach a process not running the Run's query).
+
+### A.11 REDESIGN-1 Process and address (2026-10-28): C + M1
+
+Decided autonomously under the Review Rounds rule after the harness rounds that added D15 to D42.
+Root cause: the host allows one serving runner (6.9, 6.5), but the ledger let several runners be
+live and a killed runner stay live, so one label did four jobs (target, coverage unit, lost-work
+key, freshness) and each guess became a decision. Chosen: one live process, addressed at issue
+(H1 to H3 in 4.4, 6.6, 6.9; L1 to L5 in 3.3, 3.4, 8.4, 8.5), built as one deep process module
+(`address`, `retire`, `older`). Source: `02-options-and-pick.md`.
+
+| Option | Verdict |
+|---|---|
+| C: one live process, addressed at issue | chosen (basis) |
+| M1: one deep process module | chosen (its shape) |
+| A: address once, with live, doomed and gone | rejected: models two live runners and a revivable doomed state the host forbids; one `next` slot misbinds across two spawns |
+| B: a process table with numbered slots | rejected: slot numbers and the doomed or lost split are redundant under one process. Its per-runner tasks and gate by target are kept |
+| D: the host names the process per send | rejected: a new port on four adapters and a fence and liveness split, to learn what H1 and H2 already make exact |
+| E: a Dying state plus `kill_failed` | rejected: the feeder deadlocks on a Dying runner. Its two good halves are in the pick |
+| F: the ledger names only run or session; resolve at transmit | rejected: coverage and lost work become host-only facts, so `anythingMayAct` is not pure |
+| G: the ledger mints a generation | rejected: `runnerId` already is a per-spawn id; a ledger copy is a sixth owner |
+| H: keep patching | rejected: six rounds, still four or more decisions per round |
+| M2: targeting in the interpreter | rejected: four adapters would implement the same guess |
+| M3: a native-command state machine | rejected: as a projection of its send it holds no state |
+| M4: a Run ledger and a Process ledger | rejected: coverage of Run sends would have two owners |
+
+<!-- src: REDESIGN 2026-10-28 (02-options-and-pick.md) -->
 
 ## Appendix B. Old-id mapping
 
