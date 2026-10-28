@@ -74,7 +74,6 @@ export function createTurnPanel(
 ): TurnPanelState<"log">;
 export function createTurnPanel(input: PanelInput): TurnPanelState;
 export function createTurnPanel(input: PanelInput): TurnPanelState {
-	let plainOpen = $state(false);
 	const key = $derived(JSON.stringify([input.sessionId ?? "", input.turn.id]));
 	const phase = $derived(
 		turnPhase(input.turn, input.processing, input.latestTurn),
@@ -90,15 +89,14 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 			),
 	);
 	const collapsed = $derived(
-		input.jev
-			? (turnMinimised(input.sessionId, input.turn.id) ??
-					(input.status.turnsOpen === "minimised" ||
-						(input.status.turnsOpen === "auto" &&
-							phase === "settled" &&
-							!input.newestSettledTurn &&
-							allRead &&
-							!openAsk(parts, input.categorySet, input.latestTurn))))
-			: !plainOpen,
+		turnMinimised(input.sessionId, input.turn.id) ??
+			(!input.jev ||
+				input.status.turnsOpen === "minimised" ||
+				(input.status.turnsOpen === "auto" &&
+					phase === "settled" &&
+					!input.newestSettledTurn &&
+					allRead &&
+					!openAsk(parts, input.categorySet, input.latestTurn))),
 	);
 	const choice = $derived.by(() => {
 		const stored = choices.get(key);
@@ -148,8 +146,7 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 	function open() {
 		// Working inside an already open Turn leaves Auto in charge.
 		if (!collapsed) return;
-		if (input.jev) setTurnMinimised(input.sessionId, input.turn.id, false);
-		else plainOpen = true;
+		setTurnMinimised(input.sessionId, input.turn.id, false);
 	}
 	$effect(() => {
 		const sessionId = input.sessionId;
@@ -173,8 +170,7 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 		},
 		open,
 		collapse() {
-			if (input.jev) setTurnMinimised(input.sessionId, input.turn.id, true);
-			else plainOpen = false;
+			setTurnMinimised(input.sessionId, input.turn.id, true);
 		},
 		show(stop) {
 			if (!input.jev && stop !== "log") return;

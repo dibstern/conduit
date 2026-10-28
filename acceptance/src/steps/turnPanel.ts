@@ -25,6 +25,23 @@ function publish(page: Page, messages: History[]) {
 
 export const turnPanelHandlers: StepHandler[] = [
 	{
+		name: "reload the panel choice session",
+		match: /^I reload the panel choice session$/,
+		run: async ({ world }) => {
+			await world.page.reload();
+			await expect(panel(world.page)).toBeVisible();
+		},
+	},
+	{
+		name: "collapse the Jev-off log",
+		match: /^I collapse the plain turn log$/,
+		run: async ({ world }) => {
+			const toggle = panel(world.page).locator(".turn-activity-toggle");
+			await expect(toggle).toHaveAttribute("aria-expanded", "true");
+			await toggle.click();
+		},
+	},
+	{
 		name: "seed panel choice lifecycle",
 		match: /^the panel choice session has a (live|settled) turn$/,
 		run: async ({ world, match }) => {

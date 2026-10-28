@@ -1,5 +1,25 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Jev-off turns remember open and collapsed choices across reloads
+  Given message surfacing is inactive at Balanced
+  And the conduit app is served with the connected mockup
+  And minimising uses the dark theme with Turns open <preference>
+  And the panel choice session has a settled turn
+  Then the panel shows the saved message stop
+  When I open the plain turn log
+  And I reload the panel choice session
+  Then the panel shows the full log
+  When I collapse the plain turn log
+  And I reload the panel choice session
+  Then the panel shows the saved message stop
+  And the messages region visually matches turn-panel-plain-persisted at 98 percent
+
+Examples:
+  | preference |
+  | Expanded   |
+  | Auto       |
+  | Minimised  |
+
 Scenario: Opening Summary with Jev off leaves the step log closed
   Given Jev is off with summaries on and a valid key in the dark theme
   And the conduit app is served with the connected mockup
