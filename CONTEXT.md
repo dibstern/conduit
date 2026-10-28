@@ -317,6 +317,48 @@ overlay change. Overlays are announced through the commit module's one overlay
 operation, which bumps the row's version and wakes subscribers. No other code
 stamps a version or moves `session_sidebar` markers for an overlay.
 
+## Turn log
+
+A **Turn** is one user message and everything that follows it until the next
+user message. It has one activity component across all its segments. This is
+the reader's transcript unit, distinct from the provider turn prepared by
+**Turn Launcher** and recorded by **Turn Settlement**.
+
+A **Run** is one execution of the agent. A **wake Run** resumes work without a
+new user message and stays inside the last Turn. A **Segment** is activity and
+its trailing reply, ending at a result or a **Hand-back**. A Hand-back is an
+AskUserQuestion or ExitPlanMode call that pauses for the reader.
+
+**Live**, **Waiting** and **Settled** are derived phases. Only the transcript's
+last Turn can be Live or Waiting. While the session is processing, an open
+last segment is Live and a last segment ended by a Hand-back is Waiting.
+Otherwise the Turn is Settled. Waiting uses the same pick rules as Live.
+
+The **Turn panel** owns whether the Turn is **Collapsed** or **Open**, and
+which view an Open Turn shows. A Collapsed panel has no active view. A
+**Show stop** is a message level or **Full log**, which includes every step
+and messages in place. A **Message level** is one of the persisted values
+`final`, `key`, `balanced` and `all`. The **Saved stop** is the session's
+message-level override, or the global `defaultLevel` when there is no override.
+With Jev off, the only Show stop is Full log.
+
+A **Pick** chooses a message level, Full log or the **Usage tab**, which shows
+the Turn's economics and notable events. A **live pick** applies only to the
+last segment while the Turn is Live or Waiting. It stops applying on settle;
+a later wake Run starts fresh. A **settled pick** survives collapse, is
+suspended during a wake Run and returns when the Turn settles. Picks stay in
+memory for the page's lifetime, keyed by session and Turn; only the panel's
+open state is persisted. With no applicable pick, the panel uses the saved
+stop. Code retains the name `defaultLevel` for the global saved stop.
+
+**Following** means the card tracks the newest message rather than a picked
+message. The **Ticker** is the compact live log of the latest three steps,
+with access to earlier steps. The **Show bar** is the Open panel's view
+control. The **Notes line** explains hidden or unjudged messages and offers
+read actions. **Opened directly** marks a message reached through a citation
+or reveal even when its level would hide it. A **Reveal target** identifies
+the message or step a reveal request should open.
+
 ## Daemon Settings
 
 **Daemon Settings** is the one module that owns `daemon.json` while the daemon
