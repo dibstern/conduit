@@ -12,6 +12,7 @@ import {
 	freezeAnimations,
 	screenshotLocator,
 	waitForFonts,
+	waitForFrame,
 	waitForIcons,
 } from "../../test/e2e/helpers/visual-helpers.js";
 import type { VisualMode } from "./visualMode.js";
@@ -142,10 +143,7 @@ export class PlaywrightDriver {
 		});
 		// The app's compact layout follows a matchMedia change event, which fires in the
 		// next rendering step; one frame lets it land before the next step acts on it.
-		await page.evaluate(
-			() =>
-				new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
-		);
+		await waitForFrame(page);
 		this.activeViewport = viewport;
 	}
 
@@ -194,10 +192,8 @@ export class PlaywrightDriver {
 					animation.finish();
 				}
 			}
-			return new Promise<void>((resolve) =>
-				requestAnimationFrame(() => resolve()),
-			);
 		});
+		await waitForFrame(page);
 
 		const locator = page.locator(selector);
 		await locator.waitFor({ state: "visible", timeout: 10_000 });
