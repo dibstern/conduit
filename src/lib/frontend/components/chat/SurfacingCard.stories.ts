@@ -7,6 +7,10 @@ import {
 	DEFAULT_CATEGORY_SET,
 } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
+import {
+	expectSelectedPin,
+	showTurnStop,
+} from "../../stories/turn-controls.js";
 import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { AssistantMessage } from "../../types.js";
 import type { SurfaceTurn } from "../../utils/surface-turn.js";
@@ -456,9 +460,9 @@ export const GroupCited: Story = {
 		const pin = lifted();
 		if (!pin) throw new Error("Missing cited pin");
 		await expect(pin).toHaveClass(/current/);
-		const inverse = new Option().style;
-		inverse.color = getComputedStyle(pin).getPropertyValue("--color-bg");
-		await expect(getComputedStyle(pin).color).toBe(inverse.color);
+		// The citation lifts the selected pin without repainting it (xdyjq.17).
+		await expect(getComputedStyle(pin).translate).toBe("0px -4px");
+		await expectSelectedPin(pin);
 		await userEvent.unhover(footnote);
 		await expect(lifted()).toBeNull();
 		footnote.focus();
@@ -615,11 +619,11 @@ export const OlderTurnLight: Story = {
 export const Override: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByRole("tab", { name: /^Key$/ }));
+		await showTurnStop(canvasElement, "key");
 		await expect(
 			canvas.getByTestId("surfacing-level-default-dot"),
 		).toBeVisible();
-		canvas.getByRole("tab", { name: /^Key$/ }).blur();
+		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
 	},
 };
 export const OverrideLight: Story = {

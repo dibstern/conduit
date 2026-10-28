@@ -6,6 +6,10 @@ import {
 } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import { feedbackLedger } from "../../stores/surfacing-feedback.svelte.js";
+import {
+	expectSelectedPin,
+	showTurnStop,
+} from "../../stories/turn-controls.js";
 import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
@@ -138,7 +142,9 @@ export const RaiseWhy: Story = {
 		expected.color = getComputedStyle(pin).getPropertyValue(
 			"--color-cat-finding",
 		);
-		await expect(getComputedStyle(pin).backgroundColor).toBe(expected.color);
+		// The selected pin carries Finding as a tint and ring, not a solid fill (xdyjq.17).
+		await expectSelectedPin(pin);
+		await expect(getComputedStyle(pin).boxShadow).toContain(expected.color);
 		await expect(getComputedStyle(label).color).toBe(expected.color);
 		await expect(getComputedStyle(glyph).color).toBe(expected.color);
 	},
@@ -242,7 +248,7 @@ export const RoutineInLog: Story = {
 		await expect(toggle).not.toBeNull();
 		if (toggle && toggle.getAttribute("aria-expanded") !== "true")
 			await userEvent.click(toggle);
-		await userEvent.click(canvas.getByRole("tab", { name: "Full log" }));
+		await showTurnStop(canvasElement, "log");
 		const message = canvasElement.querySelector<HTMLButtonElement>(
 			'.step-log [data-message-number="28"] button',
 		);
@@ -293,7 +299,7 @@ export const LoweredInLog: Story = {
 		await expect(toggle).not.toBeNull();
 		if (toggle && toggle.getAttribute("aria-expanded") !== "true")
 			await userEvent.click(toggle);
-		await userEvent.click(canvas.getByRole("tab", { name: "Full log" }));
+		await showTurnStop(canvasElement, "log");
 		const message = canvasElement.querySelector<HTMLButtonElement>(
 			'.step-log [data-message-number="26"] button',
 		);

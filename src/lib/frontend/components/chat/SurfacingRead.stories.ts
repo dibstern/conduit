@@ -139,8 +139,26 @@ export const MixedRead: Story = {
 		await expect(canvasElement.querySelector(".surface-axis")).toBeNull();
 		await expect(canvasElement.querySelector(".axis-notes")).toBeNull();
 		await expect(canvas.getByTestId("turn-show-bar")).toBeVisible();
+		// Read pins keep full ink; only the unread mark tells #5 apart from read #1 and #4.
+		const secondary = new Option().style;
+		for (const [number, unread] of [
+			["1", false],
+			["4", false],
+			["5", true],
+		] as const) {
+			const pin = canvasElement.querySelector(
+				`.pin-chip[data-number="${number}"]`,
+			);
+			if (!pin) throw new Error(`Missing pin #${number}`);
+			secondary.color = getComputedStyle(pin).getPropertyValue(
+				"--color-text-secondary",
+			);
+			await expect(getComputedStyle(pin).color).toBe(secondary.color);
+			await expect(
+				pin.closest("button")?.querySelector(".unread-dot") != null,
+			).toBe(unread);
+		}
 		for (const selector of [
-			".pin-chip.seen:not(.current)",
 			".turn-duration",
 			".turn-activity-toggle svg",
 			'[data-testid="surfacing-minimise-toggle"] svg',
@@ -186,7 +204,8 @@ export const MixedRead: Story = {
 			await expect(style.backgroundColor).toBe(ink.backgroundColor);
 			const toggle = verb.closest("button");
 			if (!toggle) throw new Error("Missing turn head toggle");
-			await expect(toggle.querySelector(".truncate")).not.toBeVisible();
+			// Phones keep only the skill count in the head (xdyjq.1); this turn ran none.
+			await expect(toggle.querySelector(".truncate")).toBeNull();
 			await expect(toggle.scrollWidth).toBeLessThanOrEqual(toggle.clientWidth);
 		} else {
 			await expect(style.fontSize).toBe("13px");
