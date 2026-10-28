@@ -33,7 +33,9 @@ describe("daemon Worktree setup runner", () => {
 			...process.env,
 			SHELL: "/bin/sh",
 		},
-		setupTimeoutMs = 2_000,
+		// Generous: under a loaded pre-commit run, spawning the shells alone can
+		// pass 2s, and the timeout kills the group before the script writes.
+		setupTimeoutMs = 30_000,
 		cwd = directory,
 	) =>
 		Effect.flatMap(WorktreeServiceTag, (service) =>
