@@ -1,5 +1,54 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: A message hover borrows the open or Usage slot without changing the selection
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I pick surfaced message #2
+  And the hover Turn is <mode>
+  And I hover turn step message 1
+  Then the hanging preview shows full message 1 without actions or navigation
+  And the messages region visually matches turn-hover-slot-<mode> at 98 percent
+  When I leave the strip hover
+  Then the <mode> slot returns without selecting the hovered message
+
+Examples:
+  | mode  |
+  | open  |
+  | usage |
+
+Scenario Outline: Step popovers explain failed and running work
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the hover session has a <state> tool
+  When I collapse the surfaced turn
+  And I hover turn step tool 1
+  Then the step popover describes the <state> work and its time
+  And the messages region visually matches turn-hover-step-<state> at 98 percent
+
+Examples:
+  | state   |
+  | failed  |
+  | running |
+
+Scenario Outline: Hover content flips above a strip near the transcript foot
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And minimising uses the dark theme with Turns open Minimised
+  And the minimising session has three turns
+  When I put the last strip near the transcript foot
+  And I hover turn step <kind> 1
+  Then the <kind> preview hangs above the strip within the transcript
+  And the messages region visually matches turn-hover-above-<kind> at 98 percent
+  When I press Escape over the hover
+  Then the strip hover is cleared
+
+Examples:
+  | kind    |
+  | tool    |
+  | message |
+
 Scenario Outline: Work hovers describe the step under the pointer and open its log row
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
@@ -19,7 +68,7 @@ Examples:
   | mode      |
   | collapsed |
   | open      |
-  | Usage     |
+  | usage     |
 
 Scenario: A collapsed message preview is a full read-only card in the hanging slot
   Given message surfacing is active at Most

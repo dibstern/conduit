@@ -1,6 +1,13 @@
 import { expect, type Page } from "@playwright/test";
+import { detailRowsOf } from "../../../test/helpers/detail-rows.js";
+import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRpcControl } from "./shared.js";
+import {
+	openSessionRoute,
+	requireRpcControl,
+	setSessionRowStatus,
+} from "./shared.js";
+import { surfacingHistory } from "./surfacingCard.js";
 
 const panel = (page: Page) => page.locator("#messages .turn-activity").last();
 const preview = (page: Page) =>
@@ -13,14 +20,170 @@ const previewBoxes = new WeakMap<
 
 export const turnHoverHandlers: StepHandler[] = [
 	{
+		name: "leave hover without choosing a message",
+		match: /^I leave the strip hover$/,
+		run: async ({ world }) => {
+			await world.page.mouse.move(0, 0);
+		},
+	},
+	{
+		name: "restore the selected card or Usage after hovering",
+		match:
+			/^the (open|usage) slot returns without selecting the hovered message$/,
+		run: async ({ world, match }) => {
+			await expect(preview(world.page)).toHaveCount(0);
+			if (match[1] === "usage") {
+				await expect(
+					panel(world.page).getByRole("region", { name: "Turn usage" }),
+				).toBeVisible();
+				await expect(
+					panel(world.page).getByTestId("surfacing-msg-card"),
+				).toHaveCount(0);
+			} else {
+				await expect(
+					panel(world.page).getByTestId("surfacing-msg-card"),
+				).toHaveAttribute("data-ordinal", "2");
+				await panel(world.page).getByTestId("surfacing-pin-2").hover();
+				await expect(preview(world.page)).toHaveCount(0);
+				await expect(
+					panel(world.page).getByTestId("surfacing-msg-card"),
+				).toBeVisible();
+			}
+		},
+	},
+	{
+		name: "seed a failed or running work step",
+		match: /^the hover session has a (failed|running) tool$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			await page.clock.install({ time: PINNED_CLOCK_MS });
+			await page.clock.pauseAt(PINNED_CLOCK_MS + 1_000);
+			const running = match[1] === "running";
+			const messages = surfacingHistory(running ? "live" : "settled").map(
+				(message) => ({
+					...message,
+					parts: message.parts
+						?.filter(
+							(part) =>
+								!running ||
+								!part.id.startsWith("surfacing-") ||
+								["surfacing-part-1", "surfacing-tool-1"].includes(part.id),
+						)
+						.map((part) =>
+							part.id !== "surfacing-tool-1"
+								? part
+								: {
+										...part,
+										time: {
+											start: PINNED_CLOCK_MS - 2_000,
+											...(running ? {} : { end: PINNED_CLOCK_MS + 1_000 }),
+										},
+										state: {
+											status: running ? "running" : "error",
+											input: {
+												_tag: "whole" as const,
+												value: { filePath: "src/route-surfacing-tool-1.ts" },
+											},
+											...(running ? {} : { error: "Read failed" }),
+										},
+									},
+						),
+				}),
+			);
+			requireRpcControl(page).setDetailRows(
+				"sess-surfacing",
+				messages.flatMap(detailRowsOf),
+			);
+			setSessionRowStatus(page, "sess-surfacing", running ? "busy" : "idle", {
+				title: "Hover work state",
+				accountId: "claude",
+				updatedAt: PINNED_CLOCK_MS,
+			});
+			await openSessionRoute(page, "sess-surfacing");
+			await expect(panel(page)).toBeVisible();
+		},
+	},
+	{
+		name: "assert failure and running popover semantics",
+		match:
+			/^the step popover describes the (failed|running) work and its time$/,
+		run: async ({ world, match }) => {
+			const popover = panel(world.page).getByTestId("turn-step-popover");
+			await expect(popover).toContainText(
+				match[1] === "running" ? "Running" : "failed",
+			);
+			await expect(popover).toContainText(
+				match[1] === "running" ? /\d+s so far/ : "3s",
+			);
+			await expect(popover).toContainText(
+				match[1] === "running" ? "Step 2 · click" : "Step 2 of 16 · click",
+			);
+			const colour = await popover
+				.locator("svg")
+				.evaluate((element, running) => {
+					const probe = document.createElement("span");
+					probe.style.color = running
+						? "var(--color-accent)"
+						: "var(--color-seg-fail)";
+					element.after(probe);
+					const colours = [
+						getComputedStyle(element).color,
+						getComputedStyle(probe).color,
+					];
+					probe.remove();
+					return colours;
+				}, match[1] === "running");
+			expect(colour[0]).toBe(colour[1]);
+		},
+	},
+	{
+		name: "scroll the last collapsed Turn near the transcript foot",
+		match: /^I put the last strip near the transcript foot$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await page.setViewportSize({ width: 1440, height: 650 });
+			await panel(page).scrollIntoViewIfNeeded();
+			const strip = await panel(page).locator(".surface-strip").boundingBox();
+			const messages = await page.locator("#messages").boundingBox();
+			if (!strip || !messages) throw new Error("Missing transcript geometry");
+			await page.locator("#messages").evaluate(
+				(element, delta) => {
+					element.scrollTop -= delta;
+				},
+				messages.y + messages.height - 25 - strip.y - strip.height,
+			);
+		},
+	},
+	{
+		name: "assert the overlay flips above without clipping",
+		match:
+			/^the (tool|message) preview hangs above the strip within the transcript$/,
+		run: async ({ world, match }) => {
+			const overlay = panel(world.page).getByTestId(
+				match[1] === "tool" ? "turn-step-popover" : "surfacing-hover-preview",
+			);
+			await expect(overlay).toBeVisible();
+			const box = await overlay.boundingBox();
+			const strip = await panel(world.page)
+				.locator(".surface-strip")
+				.boundingBox();
+			const messages = await world.page.locator("#messages").boundingBox();
+			if (!box || !strip || !messages)
+				throw new Error("Missing overlay geometry");
+			expect(box.y + box.height).toBeLessThan(strip.y);
+			expect(box.y).toBeGreaterThanOrEqual(messages.y);
+			await expect(overlay.locator("..")).toHaveAttribute("data-side", "top");
+		},
+	},
+	{
 		name: "choose the panel mode for a hover",
-		match: /^the hover Turn is (collapsed|open|Usage)$/,
+		match: /^the hover Turn is (collapsed|open|usage)$/,
 		run: async ({ world, match }) => {
 			if (match[1] === "collapsed")
 				await panel(world.page)
 					.getByRole("button", { name: "Collapse turn", exact: true })
 					.click();
-			if (match[1] === "Usage")
+			if (match[1] === "usage")
 				await panel(world.page)
 					.getByRole("tab", { name: "Usage", exact: true })
 					.click();
@@ -43,7 +206,7 @@ export const turnHoverHandlers: StepHandler[] = [
 			await expect(popover.locator("svg")).toHaveCount(1);
 			await expect(popover.locator("code")).toHaveCSS(
 				"font-family",
-				/JetBrains/,
+				/monospace/,
 			);
 			await expect(
 				panel(world.page).getByTestId("strip-hover-marker"),
@@ -141,7 +304,7 @@ export const turnHoverHandlers: StepHandler[] = [
 				document.activeElement?.setAttribute("data-hover-focus-owner", "true"),
 			);
 			const step = scope.locator(
-				`[data-step-id="surfacing-agent/surfacing-${match[1] === "message" ? "part" : "tool"}-${match[2]}"]`,
+				`[data-step-id*="/surfacing-${match[1] === "message" ? "part" : "tool"}-${match[2]}"]`,
 			);
 			const target = await step.boundingBox();
 			if (!target) throw new Error("Missing hovered step");
