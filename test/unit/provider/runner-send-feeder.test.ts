@@ -8,7 +8,10 @@ import {
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { RunRelease } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { makeRunnerSendFeeder } from "../../../src/lib/provider/runner/runner-send-feeder.js";
-import { StoreUnavailable } from "../../../src/lib/provider/runner/send-settlement.js";
+import {
+	StoreRejected,
+	StoreUnavailable,
+} from "../../../src/lib/provider/runner/send-settlement.js";
 
 type FeederOptions = Parameters<typeof makeRunnerSendFeeder>[0];
 const makeFeeder = (
@@ -815,3 +818,110 @@ for (const evidence of [
 			expect(holds).toBe(2);
 		}).pipe(Effect.scoped),
 	);
+
+it.effect(
+	"a faulted coverage read neither releases nor interrupts the write",
+	() =>
+		Effect.gen(function* () {
+			const entered = yield* Deferred.make<void>();
+			const unblock = yield* Deferred.make<void>();
+			const releases: RunRelease[] = [];
+			let writes = 0;
+			const result = {
+				status: "completed" as const,
+				cost: 0,
+				tokens: { input: 0, output: 0 },
+				durationMs: 0,
+				providerStateUpdates: [],
+			};
+			const feeder = yield* makeFeeder({
+				hold: () =>
+					Effect.succeed({
+						_tag: "Held" as const,
+						runner: "runner",
+						transmission: 1,
+					}),
+				start: () => Effect.void,
+				release: (proof) =>
+					Effect.sync(() => {
+						releases.push(proof);
+					}),
+				failed: () => Effect.void,
+				awaitRun: (_input, includeCoverage) =>
+					includeCoverage
+						? Deferred.await(entered).pipe(
+								Effect.andThen(
+									Effect.fail(new StoreRejected({ cause: "SQLITE_CORRUPT" })),
+								),
+							)
+						: Effect.never,
+			});
+			const sending = yield* feeder
+				.send(
+					{ sessionId: "s", runId: "r", commandId: "c" },
+					(_held, permission) =>
+						Effect.gen(function* () {
+							yield* Deferred.succeed(entered, undefined);
+							yield* Deferred.await(unblock);
+							if (permission.consume()) writes++;
+							return result;
+						}),
+				)
+				.pipe(Effect.forkChild);
+			yield* Deferred.await(entered);
+			yield* TestClock.adjust(0);
+			yield* Deferred.succeed(unblock, undefined);
+			yield* TestClock.adjust(0);
+			expect(writes).toBe(1);
+			expect(releases).toEqual([]);
+			expect(sending.pollUnsafe()).toMatchObject({
+				_tag: "Success",
+				value: result,
+			});
+		}).pipe(Effect.scoped),
+);
+
+it.effect("the coverage read stops once the write permission is taken", () =>
+	Effect.gen(function* () {
+		const written = yield* Deferred.make<void>();
+		let reading = false;
+		const feeder = yield* makeFeeder({
+			hold: () =>
+				Effect.succeed({
+					_tag: "Held" as const,
+					runner: "runner",
+					transmission: 1,
+				}),
+			start: () => Effect.void,
+			release: () => Effect.void,
+			failed: () => Effect.void,
+			awaitRun: (_input, includeCoverage) =>
+				includeCoverage
+					? Effect.sync(() => {
+							reading = true;
+						}).pipe(
+							Effect.andThen(Effect.never),
+							Effect.onInterrupt(() =>
+								Effect.sync(() => {
+									reading = false;
+								}),
+							),
+						)
+					: Effect.never,
+		});
+		yield* feeder
+			.send(
+				{ sessionId: "s", runId: "r", commandId: "c" },
+				(_held, permission) =>
+					Effect.gen(function* () {
+						expect(permission.consume()).toBe(true);
+						yield* Deferred.succeed(written, undefined);
+						return yield* Effect.never;
+					}),
+			)
+			.pipe(Effect.forkChild);
+		yield* Deferred.await(written);
+		yield* TestClock.adjust(0);
+		expect(reading).toBe(false);
+	}).pipe(Effect.scoped),
+);

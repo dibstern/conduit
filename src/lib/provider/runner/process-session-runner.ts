@@ -4865,33 +4865,6 @@ export const makeProcessSessionRunner = (
 								command.input.inputId,
 							)
 						: undefined;
-				const awaitReady = (entry: RunnerChild) =>
-					held && command.type === "send-turn" && command.input.runId
-						? Effect.raceFirst(
-								Deferred.await(entry.ready),
-								awaitRun(
-									{
-										sessionId: command.input.sessionId,
-										runId: command.input.runId,
-									},
-									true,
-								).pipe(
-									Effect.mapError((cause) => ({
-										...runnerFailure("await runner readiness", cause),
-										cause,
-									})),
-									Effect.andThen(
-										Effect.fail({
-											...runnerFailure(
-												"send-turn",
-												"Run ended before runner readiness",
-											),
-											delivery: { _tag: "NotSent" as const },
-										}),
-									),
-								),
-							)
-						: Deferred.await(entry.ready);
 				const execute = Effect.gen(function* () {
 					const autoSettleAfterDays =
 						command.type === "send-turn"
@@ -5285,7 +5258,7 @@ export const makeProcessSessionRunner = (
 						}
 						if ("recoveryPending" in selection && entry) {
 							const waiting = entry;
-							yield* awaitReady(waiting).pipe(
+							yield* Deferred.await(waiting.ready).pipe(
 								Effect.catch((failure) =>
 									currentEntry(sessionId) !== waiting && waiting.lifecycle.stop
 										? Effect.void
@@ -5366,7 +5339,7 @@ export const makeProcessSessionRunner = (
 								!entry.connection.closed &&
 								Entry.canUseControlConnection(entry.lifecycle)))
 							? entry.connection
-							: yield* awaitReady(entry);
+							: yield* Deferred.await(entry.ready);
 					if (
 						command.control &&
 						(currentEntry(sessionId) !== entry ||
@@ -5552,7 +5525,8 @@ export const makeProcessSessionRunner = (
 								runnerFailure("send-turn", "Serving runner is not attached"),
 							);
 						entry = serving;
-						connection = entry.connection ?? (yield* awaitReady(entry));
+						connection =
+							entry.connection ?? (yield* Deferred.await(entry.ready));
 						child = entry;
 						if (pending) pending.dispatched = true;
 					}

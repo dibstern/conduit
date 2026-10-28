@@ -429,6 +429,14 @@ describe("send continuation through real daemon and runner processes", () => {
 							expect(
 								runEvents(state, command.run_id, "turn.interrupted"),
 							).toHaveLength(1);
+							// The Stop committed after the write permission was taken, so only
+							// the host's refusal (4.6) may release it, never a pre-write NotSent.
+							expect(
+								runEvents(state, command.run_id, "run.released").map(
+									(event) =>
+										(JSON.parse(event.data) as { reason: string }).reason,
+								),
+							).toEqual(["Refused"]);
 							expect(
 								runEvents(state, command.run_id, "turn.error"),
 							).toHaveLength(0);

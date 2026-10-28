@@ -213,26 +213,60 @@ export const makeRunnerSendFeeder = (options: {
 					}
 					case "Held": {
 						if (hold.transmission <= item.releasedTransmission) return;
-						let consumed = false;
+						const consumed = Deferred.makeUnsafe<void>();
 						const live = item.live;
 						const permission: SendWritePermission = {
 							nativeResumeFallback: live?.nativeResumeFallback,
 							current: () => hold.transmission > item.releasedTransmission,
-							consume: () => {
-								if (consumed || hold.transmission <= item.releasedTransmission)
-									return false;
-								consumed = true;
-								return true;
-							},
+							consume: () =>
+								hold.transmission > item.releasedTransmission &&
+								Deferred.doneUnsafe(consumed, Effect.void),
 						};
 						runFork(
 							Effect.gen(function* () {
 								const sent = yield* Effect.exit(
 									Effect.gen(function* () {
+										// A Stop accepted before the first byte takes the write permission,
+										// so the hold is released unwritten (4.5 NotSent) and steps to Covered.
+										// Once either side takes the permission the coverage read stops. A
+										// faulted read takes nothing: the transmission writes normally and a
+										// later Stop is answered at the host (4.6 refusal or turn interrupt).
 										const reply = yield* Effect.result(
-											live
-												? live.transmit(hold, permission)
-												: options.transmitAdopted(item.input, hold, permission),
+											Effect.raceFirst(
+												live
+													? live.transmit(hold, permission)
+													: options.transmitAdopted(
+															item.input,
+															hold,
+															permission,
+														),
+												Effect.exit(
+													Effect.raceFirst(
+														retrySettlementWrite(
+															options.awaitRun(item.input, true),
+														),
+														Deferred.await(consumed),
+													),
+												).pipe(
+													Effect.flatMap((covered) =>
+														Exit.isFailure(covered)
+															? Effect.logWarning(
+																	"Owner send coverage read failed",
+																	{ runId: item.input.runId },
+																	covered.cause,
+																).pipe(Effect.andThen(Effect.never))
+															: permission.consume()
+																? Effect.fail({
+																		...runnerFailure(
+																			"send-turn",
+																			"Run ended before write",
+																		),
+																		delivery: { _tag: "NotSent" as const },
+																	})
+																: Effect.never,
+													),
+												),
+											),
 										);
 										if (reply._tag === "Failure") {
 											const evidence = runnerDeliveryEvidence(reply.failure);
