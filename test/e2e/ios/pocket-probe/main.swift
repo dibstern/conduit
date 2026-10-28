@@ -80,6 +80,11 @@ final class ProbeViewController: UIViewController, WKNavigationDelegate {
 		let parts = steps[index].split(separator: "=", maxSplits: 1).map(String.init)
 		let label = parts[0], script = parts.count > 1 ? parts[1] : ""
 		DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+			// "unfold" widens the page past the phone breakpoint, as opening an iPhone Duo does.
+			if label == "unfold" {
+				self.webView.autoresizingMask = []
+				self.webView.frame.size.width = 951
+			}
 			// An async function body, so a step can await (e.g. poll until ready).
 			self.webView.callAsyncJavaScript(script, in: nil, in: .page) { result in
 				let js: String
