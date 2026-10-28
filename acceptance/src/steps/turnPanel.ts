@@ -10,6 +10,7 @@ import {
 	setSessionRowStatus,
 } from "./shared.js";
 import { surfacingHistory } from "./surfacingCard.js";
+import { expectShowStop } from "./turnActivityShow.js";
 
 type History = typeof HistoryMessageSchema.Type;
 const SESSION = "sess-surfacing";
@@ -25,6 +26,16 @@ function publish(page: Page, messages: History[]) {
 }
 
 export const turnPanelHandlers: StepHandler[] = [
+	{
+		name: "assert live default Full log and ticker",
+		match: /^the Turn defaults to Full log with a three-step ticker$/,
+		run: async ({ world }) => {
+			await expectShowStop(world.page, "Full log");
+			await expect(
+				panel(world.page).locator(".step-log [data-log-part]:visible"),
+			).toHaveCount(3);
+		},
+	},
 	{
 		name: "seed an anchor-only reveal link",
 		match:

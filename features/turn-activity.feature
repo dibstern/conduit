@@ -1,5 +1,33 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: A waiting Turn defaults to Full log with its ticker
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a waiting turn
+  Then the Turn defaults to Full log with a three-step ticker
+  And the messages region visually matches turn-waiting-ticker-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: A live Turn defaults to Full log and restores its saved stop on settle
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the panel choice session has a live turn
+  Then the Turn defaults to Full log with a three-step ticker
+  When the panel choice Run settles
+  Then the effective surfacing level is Most
+  And the messages region visually matches turn-live-default-settled-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario: A selected pin below the saved stop keeps its category tint
   Given a surfacing marks ledger is available in the dark theme
   And message surfacing is active at Most
@@ -489,11 +517,11 @@ Scenario: A settled log pick survives collapse and suspends during each wake Run
   And I collapse and reopen the panel choice turn
   Then the panel shows the full log
   When a wake Run starts in the panel choice turn
-  Then the panel shows the saved message stop
+  Then the Turn defaults to Full log with a three-step ticker
   When the panel choice Run settles
   Then the panel shows the full log
   When a wake Run starts in the panel choice turn
-  Then the panel shows the saved message stop
+  Then the Turn defaults to Full log with a three-step ticker
   And the messages region visually matches turn-panel-settled-pick-wake at 98 percent
 
 Scenario: A log picked while live returns to the saved stop on settle
