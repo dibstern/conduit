@@ -47,7 +47,7 @@ Scenario: Pinned explains why Snooze is unavailable without a hold menu
   Given the phone session sheet state is pinned
   When I open the overflow session sheet
   And I tap the unavailable Snooze tile
-  Then the session sheet stays open with the reason pill Unpin to snooze
+  Then the session sheet stays open under the reason toast Unpin to snooze
   And the Snooze tile has no hold menu or hint
 
 Scenario: Pick a date and time opens the existing picker with its field expanded

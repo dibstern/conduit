@@ -432,7 +432,7 @@ export const composerWordsHandlers: StepHandler[] = [
 			/^the checkout shows (Branch copied|Commit hash copied) and the clipboard contains (.+)$/,
 		run: async ({ world, match }) => {
 			const toast = world.page
-				.locator('[data-testid="toast"], [data-testid="session-sheet-toast"]')
+				.getByTestId("toast")
 				.filter({ hasText: match[1] ?? "" });
 			await expect(toast).toBeVisible();
 			await expect(toast).toHaveAttribute("data-variant", "success");

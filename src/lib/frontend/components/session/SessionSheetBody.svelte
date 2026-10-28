@@ -3,11 +3,9 @@
 	import type { SessionInfo } from "../../types.js";
 	import { isSessionSnoozed, sessionAttention } from "../../stores/session.svelte.js";
 	import { formatSnoozeTime, formatTimeAgo } from "../../utils/format.js";
-	import { dismissToast, uiState } from "../../stores/ui.svelte.js";
 	import SessionStatusGlyph from "../ui/SessionStatusGlyph.svelte";
 	import MenuCloseItem from "../ui/MenuCloseItem.svelte";
 	import ProjectMark from "../ui/ProjectMark.svelte";
-	import SheetNotice from "../ui/SheetNotice.svelte";
 	import SessionCommandItems from "./SessionCommandItems.svelte";
 	import type { SessionCommand, SessionCommandEntry } from "./session-commands.js";
 
@@ -23,7 +21,6 @@
 		views?: Snippet;
 		now?: number;
 	} = $props();
-	const toastHost = Symbol("session-sheet");
 	const attention = $derived(sessionAttention(header.session));
 	const blocking = $derived(attention === "needs-approval" || attention === "needs-reply" || attention === "error");
 	const settled = $derived(!blocking && header.session.pinnedAt == null && header.session.settledAt != null);
@@ -34,10 +31,6 @@
 		if (pinnedAt == null && isSessionSnoozed(header.session, now))
 			return snoozedUntil == null ? "snoozed" : `until ${formatSnoozeTime(snoozedUntil, now)}`;
 		return formatTimeAgo(updatedAt, new Date(now));
-	});
-	$effect(() => {
-		uiState.sheetToastHost = toastHost;
-		return () => { if (uiState.sheetToastHost === toastHost) uiState.sheetToastHost = null; };
 	});
 </script>
 
@@ -56,17 +49,4 @@
 	</div>
 	{#if views}<div data-hold-menu-dim class="mt-[18px]">{@render views()}</div>{/if}
 	<SessionCommandItems {commands} {onselect} session={header.session} {now} presentation="sheet" />
-	{#if uiState.sheetToastHost === toastHost && uiState.toasts.length > 0}
-		<div class="sticky bottom-0 z-[var(--z-raised)] bg-bg-surface pb-[4px]">
-			{#each [...uiState.toasts].reverse() as toast (toast.id)}
-				<SheetNotice
-					message={toast.title}
-					body={toast.body}
-					emphasis={toast.emphasis}
-					variant={toast.variant}
-					actions={toast.actions.map((action) => ({ label: action.label, run: () => { try { action.run?.(); } finally { dismissToast(toast.id); } } }))}
-				/>
-			{/each}
-		</div>
-	{/if}
 </div>

@@ -1180,25 +1180,6 @@
 		document.addEventListener("keydown", handleGlobalEsc);
 		return () => document.removeEventListener("keydown", handleGlobalEsc);
 	});
-
-	/** Publishes how far the composer's top edge sits above the viewport bottom
-	 *  as --composer-clearance, so the toast stack (Toast.svelte) never covers
-	 *  it. Measured from the viewport rather than the composer's height because a
-	 *  terminal panel below the chat lifts the composer. Watching the parent too
-	 *  catches that move, since the chat column shrinks when it happens. */
-	function publishComposerClearance(area: HTMLElement) {
-		const root = document.documentElement;
-		const observer = new ResizeObserver(() => {
-			const clearance = area.offsetHeight > 0 ? window.innerHeight - area.getBoundingClientRect().top : 0;
-			root.style.setProperty("--composer-clearance", `${Math.max(0, clearance)}px`);
-		});
-		observer.observe(area);
-		if (area.parentElement) observer.observe(area.parentElement);
-		return () => {
-			observer.disconnect();
-			root.style.removeProperty("--composer-clearance");
-		};
-	}
 </script>
 
 {#snippet settingsStatus()}
@@ -1264,7 +1245,6 @@
      inset at once lifts the button out from under the finger before the click. -->
 <div
 	id="input-area"
-	{@attach publishComposerClearance}
 	data-compact={sessionViewState.compact}
 	class="shrink-0 px-[32px] pt-[8px] transition-[padding-bottom] duration-0 delay-250 has-[textarea:focus]:delay-0 pb-[calc(env(safe-area-inset-bottom,0px)+22px)] has-[textarea:focus]:pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >

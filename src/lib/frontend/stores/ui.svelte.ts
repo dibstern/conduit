@@ -51,8 +51,6 @@ export const uiState = $state({
 
 	// Toasts
 	toasts: [] as Toast[],
-	/** A phone session sheet presents all live notifications inside its modal boundary. */
-	sheetToastHost: null as symbol | null,
 
 	// Confirm dialog
 	confirmDialog: null as {
