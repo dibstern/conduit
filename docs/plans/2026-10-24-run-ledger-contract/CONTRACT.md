@@ -284,10 +284,14 @@ Only evidence and conduit's decisions, each once:
   follows is a decimal `querySeq`; otherwise the whole label is the `runnerId` (an older host). A
   `runnerId` may itself contain `:` (OpenCode, 9). A runner retires at the first of: its
   `process_lost`; an issued kill addressed to it; another runner's `process_started` (only for
-  totality: the host reports the loss first, H1, 6.9; it counts as that runner's `process_lost`).
-  Retired is final: its labels are older (item 4), so its later `process_started` changes nothing,
-  and a host never reuses a `runnerId` (6.1, 9). The current process is the one live
-  runner, if any. Retiring, in the same decision:
+  totality: the host reports the loss first, H1, 6.9; it counts as the `process_lost` of every
+  other runner, started or not). Retired is final: its labels are older (item 4), so its later
+  `process_started` changes nothing, and a host never reuses a `runnerId` (6.1, 9). So a later
+  `process_started` of a live runner is the same process reattached: it raises the latest
+  `querySeq`, settles tasks as its `reattached` flag says (8.3) and retires nothing; one at or
+  below the latest `querySeq` is an older label and changes nothing. Evidence under the label of
+  a runner not started has no authority (3.4): it is recorded with a diagnostic and changes
+  nothing. The current process is the one live runner, if any. Retiring, in the same decision:
   1. covers every send addressed to it, the kill's own included;
   2. ends its executions: launched Runs end `process_lost` unless Ended; wake executions end;
   3. records lost work (L5, 8.4);
@@ -303,7 +307,7 @@ Only evidence and conduit's decisions, each once:
      to escalate. Every OpenCode send is case 3.
 
   A pending send resolves, once, at the first of: its own `run_dispatched` (a held send), to the
-  runner it names; or the next `process_started`, to that runner. A case 2 send follows its
+  runner it names, which covers it at once if that runner is retired; or the next `process_started`, to that runner. A case 2 send follows its
   execution's start: it is pending while the start is, and resolves with it, to the same runner.
   The label fixed with an address is the runner's latest label when the address is fixed; a
   `run_dispatched` naming a runner with no `process_started` yet fixes the label of that runner's
@@ -327,7 +331,7 @@ Only evidence and conduit's decisions, each once:
 - No in-session pruning. Run Input records, interaction records and send history are kept for the
   session's life and reclaimed when the session is archived.
 
-<!-- src: FB §2; RA §7; HLK step 4, step 5; BG Decision 1, Decision 3; AUDIT-2 T6; review 2026-10-28 (H2); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1, L2; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (label split); REDESIGN review r3-1 (runner not started, authority at record) -->
+<!-- src: FB §2; RA §7; HLK step 4, step 5; BG Decision 1, Decision 3; AUDIT-2 T6; review 2026-10-28 (H2); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1, L2; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (label split); REDESIGN review r3-1 (runner not started, authority at record); REDESIGN oracle r8 -->
 
 ### 3.4 Correlation and evidence
 
@@ -2049,7 +2053,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
 - The host's idle check uses the same reducer, and resets to `Unknown` when the query is replaced.
   Host idle is `Open{commands} | Draining{tokens} | Exiting`; sets keyed by command or token replace
   the turns counter, and the host's task and idle caches are invalidated on query replacement.
-- Snapshots replace the set. Per-task events only name lost work, show outcomes and identify the
+- Snapshots replace the set, and so does a `process_started` settlement; an effect's outcome (a
+  `close` or `end_session` success) never does. Per-task events only name lost work, show outcomes and identify the
   waking task. A task is gone only when a later snapshot omits it.
 - Older-label evidence follows L1.4 (3.4): recorded only where it changes a join, never authority,
   liveness or a wake Run.
@@ -2069,7 +2074,9 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   waits for it as it would behind a user Run's retained start (D18). A `turn_started` that joins a wake
   Run under another label adds a wake execution for that label: every execution label of a wake
   Run is outstanding work and a fence member by these rules, each cleared by its own Run-end
-  evidence or its runner's retirement (and, for membership only, session end). The deadline stop
+  evidence or its runner's retirement (and, for membership only, session end). Run-end evidence
+  for an older execution label clears only that execution; the Run ends by its latest execution
+  label's evidence (3.4). The deadline stop
   sequence acts on the wake Run's first execution label; once the Run has Ended, the Tombstone
   cleanup expiry runs the provider's fence-expiry column against every execution label still a
   member (D28). A wake Run's deadline expiry runs
@@ -2085,7 +2092,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   archive and delete `hasLiveWork`, the status poller's idle corrections, and the runner record
   deletion. The physical-process file guard stays.
 
-<!-- src: BG Decision 3; AUDIT A9; AUDIT-2 T6, T11, A20, Other changes (wake admission); OW Decision 3; model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1; REDESIGN review r2-1 -->
+<!-- src: BG Decision 3; AUDIT A9; AUDIT-2 T6, T11, A20, Other changes (wake admission); OW Decision 3; model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1; REDESIGN review r2-1; REDESIGN oracle r8 -->
 
 ### 8.4 Stop tasks, the confirm gate and lost work
 
@@ -2099,14 +2106,18 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   ignored interrupt while paused) with tasks live or unknown waits with a pending confirm. The
   interrupt deadline never destroys on its own. A confirm must match the latest snapshot; a stale
   confirm is rejected. With no snapshot the UI says "background state unknown" and always asks.
-  The gate stores its step, never its addresses. It reads the same tasks as above: by H1 a step's
+  The gate stores its step, never its addresses, tasks or `snapshotEntry`. It reads the same tasks as above: by H1 a step's
   address now is the current process, pending or a runner not started (no tasks), or retired. A
   confirm releases it, and so does any decision after which those tasks are neither live nor
   unknown: a snapshot, a `process_started`, or the current process retiring. The step is addressed by L2 when it issues,
-  so every release issues the same effects. A step whose every address is retired issues nothing:
+  so every release issues the same effects: released by the current process retiring, a Run-less
+  `end_session` goes to pending (L2 case 3, D32). Everything the step decides, such as ending its
+  Run Interrupted forced (5.1), happens when it issues, not when it is gated. A step that belongs
+  to a Run is dropped when that Run Ends by other evidence (D43); `end` then continues to its
+  `end_session` step. A step whose every address is retired issues nothing:
   its sends were covered at retirement. A step that destroys several member labels (Tombstone
-  cleanup expiry, `project_active` reconciliation) waits on one confirm. `PendingConfirm`'s labels
-  are a view.
+  cleanup expiry, `project_active` reconciliation) waits on one confirm. `PendingConfirm`'s labels,
+  tasks and `snapshotEntry` are views of now.
 - `snapshotEntry` is the 1-based count of task-set entries accepted by the session:
   `tasks_snapshot` evidence and `process_started` settlements, excluding older labels. A
   `process_started` that leaves a pending confirm open refreshes `snapshotEntry` only (D3), so a
@@ -2128,7 +2139,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
 - A process that dies before confirming a native command: the tracker reloads from the transcript and
   re-sends first on the next launch, only if the confirmed status does not already match.
 
-<!-- src: BG Decision 2, Decision 3, Decision 4; AUDIT Already covered (32.8 defers to 32.25); AUDIT A4 (recovery); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L2, L3, L5; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (L5 Known empty); REDESIGN review r3-1 (runner not started) -->
+<!-- src: BG Decision 2, Decision 3, Decision 4; AUDIT Already covered (32.8 defers to 32.25); AUDIT A4 (recovery); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L2, L3, L5; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (L5 Known empty); REDESIGN review r3-1 (runner not started); REDESIGN oracle r8 (D43) -->
 
 ### 8.5 Native command issue
 
@@ -2966,6 +2977,18 @@ port.
 - D40: derived from L2: a pending kill covers the pending `end_session` issued before it, so there is no second expiry (3.3, 8.4).
 - D41: derived from L1: a kill retires its runner, and a retired runner's labels are older (3.4). Rejected: waking from a killed label (a Run opens for a process conduit already destroyed).
 - D42: derived from L2 case 2 (3.3). Rejected: the current process for every send (an interrupt would reach a process not running the Run's query).
+
+**Decided (oracle round 8, 2026-10-29)**
+
+Eleven questions from the first oracle round against REDESIGN-1. Ten follow from L1 to L3 and are
+written into their clauses, not added as decisions: a `process_started` retires every other
+runner, started or not; a later `process_started` of a live runner is a reattach; evidence from a
+runner not started has no authority (3.3 L1); a `run_dispatched` naming a retired runner covers
+its send (3.3 L2); only snapshots and `process_started` replace tasks; older wake execution labels
+never end the Run (8.3); the gate's tasks and `snapshotEntry` are views, a gated step decides at
+issue, and a release by retirement issues as any release does (8.4).
+
+- D43: a confirm-gated step that belongs to a Run is dropped when that Run Ends by other evidence; the step existed to end it (5.1, 8.4). Rejected: issuing it against the Ended Run (a `close` would record lost work, L5, for a query that may already serve the next Run).
 
 ### A.11 REDESIGN-1 Process and address (2026-10-28): C + M1
 
