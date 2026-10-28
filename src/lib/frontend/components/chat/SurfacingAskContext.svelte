@@ -1,16 +1,19 @@
-<script lang="ts">
+<script lang="ts" module>
 	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
+
+	export type AskState = { kind: "loading" } | { kind: "ready"; explanation: AskExplanation } | { kind: "failed"; message: string };
+</script>
+
+<script lang="ts">
 	import { splitCitations } from "../../utils/citations.js";
 	import { surfaceTime, type SurfacePart, type SurfaceTurn } from "../../utils/surface-turn.js";
 	import Button from "../ui/Button.svelte";
 
-	let { setup, view, start, explanation, generating = false, error = "", enabled = true, onexplain, oncite, onReplyToAsk }: {
+	let { setup, view, start, ask, enabled = true, onexplain, oncite, onReplyToAsk }: {
 		setup: SurfacePart | null;
 		view: SurfaceTurn;
 		start: number;
-		explanation?: AskExplanation | undefined;
-		generating?: boolean;
-		error?: string;
+		ask?: AskState | undefined;
 		enabled?: boolean;
 		onexplain: () => void;
 		oncite: (part: SurfacePart) => void;
@@ -32,7 +35,7 @@
 	{/each}
 {/snippet}
 
-<div class="ask-context" data-testid="ask-context" aria-busy={generating}>
+<div class="ask-context" data-testid="ask-context" aria-busy={ask?.kind === "loading"}>
 	<div class="ask-setup" data-testid="ask-setup">
 		{#if setup}
 			<div class="setup-head"><span>The agent explained this first</span><Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="ask-cite" data-testid="ask-setup-jump" ariaLabel={`Go to the agent's setup${setup.surfacingOrdinal === undefined ? '' : ` #${setup.surfacingOrdinal}`}`} onclick={() => { if (setup) oncite(setup); }}>{setup.surfacingOrdinal === undefined ? "Earlier reply" : `#${setup.surfacingOrdinal}`} · {surfaceTime((setup.createdAt ?? start) - start)} ›</Button></div>
@@ -41,7 +44,8 @@
 			<p class="no-setup">No earlier explanation found.</p>
 		{/if}
 	</div>
-	{#if explanation}
+	{#if ask?.kind === "ready"}
+		{@const explanation = ask.explanation}
 		<section class="ask-explanation" data-testid="ask-explanation" aria-label="In plain words">
 			<div class="explanation-head"><b>✦ In plain words</b><span>{explanation.model === "opus" ? "Opus" : "Sonnet"}</span></div>
 			<h5>So far</h5><p>{@render prose(explanation.soFar)}</p>
@@ -54,11 +58,11 @@
 		</section>
 	{:else}
 		<div class="ask-actions">
-			<Button variant={!setup ? "accent-soft" : "ghost"} size="content" tone={!setup ? "accent" : "inherit"} touchTarget class="ask-action {!setup ? '' : 'bg-chip'}" data-testid="ask-explain" data-primary={!setup} disabled={!enabled || generating} onclick={onexplain}>{generating ? "✦ Explaining…" : error ? "✦ Try again" : "✦ Explain options"}</Button>
+			<Button variant={!setup ? "accent-soft" : "ghost"} size="content" tone={!setup ? "accent" : "inherit"} touchTarget class="ask-action {!setup ? '' : 'bg-chip'}" data-testid="ask-explain" data-primary={!setup} disabled={!enabled || ask?.kind === "loading"} onclick={onexplain}>{ask?.kind === "loading" ? "✦ Explaining…" : ask?.kind === "failed" ? "✦ Try again" : "✦ Explain options"}</Button>
 		</div>
 	{/if}
-	{#if !enabled && !explanation}<p class="explain-off">Explain uses the summary model. Enable it in Settings › Surfacing.</p>{/if}
-	{#if error}<p role="alert" class="explain-error">{error}</p>{/if}
+	{#if !enabled && ask?.kind !== "ready"}<p class="explain-off">Explain uses the summary model. Enable it in Settings › Surfacing.</p>{/if}
+	{#if ask?.kind === "failed"}<p role="alert" class="explain-error">{ask.message}</p>{/if}
 </div>
 
 <style>

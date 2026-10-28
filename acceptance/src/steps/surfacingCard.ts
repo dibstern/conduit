@@ -523,6 +523,29 @@ export const surfacingCardHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "collapse an in-progress scrub and reopen its card",
+		match: /^I collapse and reopen the turn while holding a scrub$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const scrub = page.getByTestId("surfacing-scrub");
+			const strip = await scrub.locator(".surface-strip").boundingBox();
+			expect(strip).not.toBeNull();
+			if (!strip) throw new Error("No surfacing strip");
+			await scrub.focus();
+			await page.mouse.move(
+				strip.x + strip.width / 2,
+				strip.y + strip.height / 2,
+			);
+			await page.mouse.down();
+			await page.keyboard.press("h");
+			await expect(scrub).toHaveCount(0);
+			await page.mouse.up();
+			await page.getByTestId("surfacing-minimise-toggle").click();
+			await expect(card(page)).toBeInViewport();
+			await page.clock.runFor(32);
+		},
+	},
+	{
 		name: "advance the continuous read clock",
 		match: /^the surfacing read clock advances (\d+) milliseconds$/,
 		run: async ({ world, match }) => {
@@ -698,6 +721,15 @@ export const surfacingCardHandlers: StepHandler[] = [
 		run: ({ world, match }) => {
 			if (match[1] === "fail") failingReadWrites.add(world.page);
 			else failingReadWrites.delete(world.page);
+		},
+	},
+	{
+		name: "assert bulk read failures remain visible without a card",
+		match: /^the turn reports a read save failure$/,
+		run: async ({ world }) => {
+			await expect(panel(world.page).getByRole("alert")).toContainText(
+				"Couldn't save read state",
+			);
 		},
 	},
 	{

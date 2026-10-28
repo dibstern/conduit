@@ -2,6 +2,11 @@
 	import type { Snippet } from "svelte";
 	import type { SurfacePin, SurfaceTurn } from "../../utils/surface-turn.js";
 
+	export type ReadState =
+		| { kind: "idle" }
+		| { kind: "saving"; uuid: string }
+		| { kind: "failed"; uuid: string; message: string };
+
 	/** Owned by the annotation, reply, recap and density tickets. */
 	export interface SurfacingRegions {
 		headChips?: Snippet<[SurfaceTurn]>;
@@ -16,7 +21,7 @@
 </script>
 
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { onDestroy } from "svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { surfacePinRows, SURFACE_LABELS, SURFACE_LEVELS, type SurfaceLevel, type SurfacePinGroup } from "../../utils/surface-turn.js";
 	import Button from "../ui/Button.svelte";
@@ -27,7 +32,7 @@
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 
-	let { view, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onjump, onhover, onread, onautoread, onmarkread, readSaving = false, readError = "", canAutoRead = true, markReadInAxis = false, onreply, replied = false }: {
+	let { view, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onjump, onhover, onread, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), scrubbing = $bindable(false), markReadInAxis = false, onreply, replied = false }: {
 		view: SurfaceTurn;
 		live: boolean;
 		level: SurfaceLevel;
@@ -46,11 +51,10 @@
 		onjump: (x: number) => void;
 		onhover: (x: number | null) => void;
 		onread?: (pin: SurfacePin, read: boolean) => void;
-		onautoread?: (pin: SurfacePin) => void;
 		onmarkread?: () => void;
-		readSaving?: boolean;
-		readError?: string;
-		canAutoRead?: boolean;
+		readState?: ReadState;
+		cardEl?: HTMLElement | undefined;
+		scrubbing?: boolean;
 		markReadInAxis?: boolean;
 		onreply?: (pin: SurfacePin, excerpt?: string) => void;
 		/** The draft already holds a whole-message reply to this card. */
@@ -62,14 +66,11 @@
 	const groups = $derived(surfacePinRows(view, laneWidth, sessionViewState.compact));
 	const currentGroup = $derived(groups.find((group) => group.members.some((pin) => pin.part.uuid === view.card?.part.uuid)));
 	let lastGroupTap: { source: string; picked: string } | null = null;
-	let cardEl = $state<HTMLElement>();
-	let onScreen = $state(false);
-	let visible = $state(false);
-	let scrubbing = $state(false);
 	let menuOpen = $state(false);
-	let saving = $state(false);
-	let error = $state("");
+	let defaultState = $state<{ kind: "idle" } | { kind: "saving" } | { kind: "failed"; message: string }>({ kind: "idle" });
 	let drag: { id: number; x: number; y: number; moved: boolean; pin?: SurfacePin } | null = null;
+	// A card collapsed mid-scrub never sees pointerup; release the owner's auto-read gate.
+	onDestroy(() => { scrubbing = false; });
 	let suppressClick = false;
 	let cardBodyEl: HTMLDivElement | undefined = $state();
 	const levelOptions = $derived(SURFACE_LEVELS.filter((value) => value === "final" || value === "all" || value === level || view.counts[value] > 0).map((value) => ({
@@ -80,34 +81,6 @@
 	})));
 	// With summaries off, the axis carries the turn's bulk read in place of the start time.
 	const markCount = $derived(markReadInAxis && onmarkread ? view.unreadPartIds.length : 0);
-	// Track scalar values: the live strip's clock must not restart the read timer.
-	const readTarget = $derived(view.card?.read === false ? view.card.part.uuid : null);
-	const readText = $derived(view.card?.part.rawText ?? "");
-	$effect(() => {
-		const changed = () => { visible = document.visibilityState === "visible"; };
-		changed();
-		document.addEventListener("visibilitychange", changed);
-		return () => document.removeEventListener("visibilitychange", changed);
-	});
-	$effect(() => {
-		if (!cardEl) { onScreen = false; return; }
-		const observer = new IntersectionObserver((entries) => {
-			const entry = entries.at(-1);
-			onScreen = !!entry?.isIntersecting && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
-		});
-		observer.observe(cardEl);
-		return () => observer.disconnect();
-	});
-	$effect(() => {
-		const target = readTarget;
-		void readText;
-		if (!target || !visible || !onScreen || scrubbing || readSaving || !canAutoRead || !onautoread) return;
-		const timer = setTimeout(() => {
-			const card = untrack(() => view.card);
-			if (card?.part.uuid === target && document.visibilityState === "visible" && onScreen && !scrubbing) onautoread?.(card);
-		}, 1000);
-		return () => clearTimeout(timer);
-	});
 
 	function xAt(clientX: number): number {
 		const box = scrubEl.getBoundingClientRect();
@@ -162,11 +135,9 @@
 		if (scrubEl.hasPointerCapture(event.pointerId)) scrubEl.releasePointerCapture(event.pointerId);
 	}
 	async function makeDefault() {
-		saving = true;
-		error = "";
-		try { await ondefault(); menuOpen = false; }
-		catch { error = "Couldn't save the default. Try again."; }
-		finally { saving = false; }
+		defaultState = { kind: "saving" };
+		try { await ondefault(); menuOpen = false; defaultState = { kind: "idle" }; }
+		catch { defaultState = { kind: "failed", message: "Couldn't save the default. Try again." }; }
 	}
 </script>
 
@@ -183,7 +154,7 @@
 			{#if view.openAsk?.uuid === card.part.uuid}<span class="needs-reply">Needs reply</span>{/if}
 			{@render regions.cardHead?.(card)}
 			<span class="card-at">{card.number === undefined ? "Waiting for Jev" : `#${card.number}`}<span class="desktop-time">{` · ${card.time}`}</span>{` · ${view.cardIndex + 1}/${view.pins.length}`}</span>
-			{#if card.read !== undefined && onread}<label class="read-toggle"><Checkbox data-testid="surfacing-read-toggle" bind:checked={() => card.read === true, (read) => onread?.(card, read)} onchange={(event) => { event.currentTarget.checked = card.read === true; }} disabled={readSaving} class="size-[15px] rounded-[4px]" />Read</label>{/if}
+			{#if card.read !== undefined && onread}<label class="read-toggle"><Checkbox data-testid="surfacing-read-toggle" bind:checked={() => card.read === true, (read) => onread?.(card, read)} onchange={(event) => { event.currentTarget.checked = card.read === true; }} disabled={readState.kind === "saving"} class="size-[15px] rounded-[4px]" />Read</label>{/if}
 		</div>
 		{#if view.cardNote}<div class="card-note">{view.cardNote}</div>{/if}
 		<div class="card-body md-content select-text" bind:this={cardBodyEl}>{@html card.part.html}</div>
@@ -227,19 +198,19 @@
 
 <div class="surface-axis">
 	{#if !markCount}<span class="axis-start">{startTime}</span>{/if}
-	<span class="axis-notes">{#if level === "final"}<span>Final only · {view.counts.all} hidden</span>{/if}{#if view.empty}<span>Nothing at {SURFACE_LABELS[level]} · <Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" onclick={() => onlevel("all")}>Show All</Button></span>{/if}{#if view.notJudgedCount}<span data-testid="surfacing-not-judged">⚠ {view.notJudgedCount} not judged</span>{/if}{#if markCount}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="h-[22px] shrink-0 rounded-full px-[8px] font-sans text-[11.5px] font-medium bg-accent/15 text-accent" disabled={readSaving} data-testid="surfacing-mark-read" onclick={() => onmarkread?.()}>✓ Mark {markCount} read</Button>{/if}</span>
+	<span class="axis-notes">{#if level === "final"}<span>Final only · {view.counts.all} hidden</span>{/if}{#if view.empty}<span>Nothing at {SURFACE_LABELS[level]} · <Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" onclick={() => onlevel("all")}>Show All</Button></span>{/if}{#if view.notJudgedCount}<span data-testid="surfacing-not-judged">⚠ {view.notJudgedCount} not judged</span>{/if}{#if markCount}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="h-[22px] shrink-0 rounded-full px-[8px] font-sans text-[11.5px] font-medium bg-accent/15 text-accent" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => onmarkread?.()}>✓ Mark {markCount} read</Button>{/if}</span>
 	<span class="grow"></span>
 	<div class="contents" data-testid="surfacing-level"><SegmentedControl variant="level" label="Surfacing level" options={levelOptions} bind:value={() => level, onlevel} /></div>
 	{#if overridden}<i class="override-dot" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}
 	<Menu bind:open={menuOpen} side="top" align="end" ariaLabel="Level options">
 		{#snippet trigger({ props })}<Button {...props} variant="ghost" size="content" tone="muted" iconOnly icon="ellipsis" iconSize={14} touchTarget class="size-[22px] rounded-full" ariaLabel="Level options" />{/snippet}
-		<MenuItem disabled={saving} closeOnSelect={false} onselect={makeDefault}>Make default</MenuItem>
-		<MenuItem disabled={!overridden || saving} onselect={onreset}>Back to default</MenuItem>
-		{#if error}<p role="alert" class="px-[8px] py-[6px] text-[12px] text-error">{error}</p>{/if}
+		<MenuItem disabled={defaultState.kind === "saving"} closeOnSelect={false} onselect={makeDefault}>Make default</MenuItem>
+		<MenuItem disabled={!overridden || defaultState.kind === "saving"} onselect={onreset}>Back to default</MenuItem>
+		{#if defaultState.kind === "failed"}<p role="alert" class="px-[8px] py-[6px] text-[12px] text-error">{defaultState.message}</p>{/if}
 	</Menu>
 	{#if live && !view.following}<Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" ariaLabel="Follow latest" onclick={onfollow}>now ⇥</Button>{:else}<span class:live-end={live}>{endTime}{live ? " now" : ""}</span>{/if}
 </div>
-{#if readError}<p role="alert" class="mt-[4px] text-[12px] text-error">{readError}</p>{/if}
+{#if readState.kind === "failed" && (!view.card || readState.uuid === view.card.part.uuid)}<p role="alert" class="mt-[4px] text-[12px] text-error">{readState.message}</p>{/if}
 <div data-surfacing-region="below-strip">{@render regions.belowStrip?.(view, (partId) => { citedPart = partId; })}</div>
 
 <style>

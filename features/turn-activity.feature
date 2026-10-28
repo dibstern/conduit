@@ -34,6 +34,86 @@ Examples:
   | 767   | phone   |
   | 768   | desktop |
 
+Scenario Outline: Collapsing during a scrub permits auto-read after reopening
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I start reading surfaced message #8
+  And I collapse and reopen the turn while holding a scrub
+  And the surfacing read clock advances 1500 milliseconds
+  Then the surfaced message Read checkbox is checked
+  And the surfacing read RPC count is 1
+  And surfacing read RPC 1 marks only messages 8 read
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: A folded card keeps bulk read failures visible and retryable
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  And surfacing read writes fail
+  When I close the surfaced message
+  And I mark 5 surfaced messages read
+  Then the turn reports a read save failure
+  And the surfacing head says 5 unread
+  When surfacing read writes recover
+  And I mark 5 surfaced messages read
+  Then the surfacing head says All read ✓
+  And surfacing read RPC 2 marks only messages 1,2,4,5,8 read
+  And the messages region visually matches turn-card-folded-read-retry-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Folding a live card stops following and now resumes it
+  Given message surfacing is active at Balanced
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a live turn
+  When I fold the surfaced message
+  Then the surfaced card offers Follow latest
+  When I follow the latest surfaced message
+  Then the surfaced card shows #8 and announces its category and position
+  And the messages region visually matches turn-card-live-fold-now-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Marking a message Unread survives picking another card and returning
+  Given message surfacing is active at Balanced
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I start reading surfaced message #8
+  And the surfacing read clock advances 1000 milliseconds
+  Then the surfaced message Read checkbox is checked
+  When I uncheck the surfaced message Read checkbox
+  And I pick surfaced message #2
+  And I pick surfaced message #8
+  And the surfacing read clock advances 1500 milliseconds
+  Then the surfaced message Read checkbox is unchecked
+  And the surfacing head says 5 unread
+  And the surfacing read RPC count is 2
+  And surfacing read RPC 2 marks only messages 8 unread
+  And the messages region visually matches turn-card-unread-sticks-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario: Opening Summary with Jev off leaves the step log closed
   Given Jev is off with summaries on and a valid key in the dark theme
   And the conduit app is served with the connected mockup

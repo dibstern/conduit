@@ -5,8 +5,8 @@
 	import { onDestroy, tick, untrack } from "svelte";
 	import type { Snippet } from "svelte";
 	import type { SessionResume } from "../../../contracts/limit-recovery.js";
-	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
-	import SurfacingAskContext from "./SurfacingAskContext.svelte";
+	import { assertNever } from "../../../utils.js";
+	import SurfacingAskContext, { type AskState } from "./SurfacingAskContext.svelte";
 	import type { CategorySet } from "../../../contracts/category-set.js";
 	import type { MessageSurfacingStatus, MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
 	import { numberTurnMessages } from "../../../turn-message-numbers.js";
@@ -17,8 +17,8 @@
 	import { findSession } from "../../stores/session.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
-	import { surfaceTurn, surfaceTime, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
-	import SurfacingCard, { type SurfacingRegions } from "./SurfacingCard.svelte";
+	import { surfaceTurn, surfaceTime, surfaceKey, type CardSelection, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
+	import SurfacingCard, { type ReadState, type SurfacingRegions } from "./SurfacingCard.svelte";
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
 	import SurfacingMarkActions from "./SurfacingMarkActions.svelte";
 	import SurfacingMarkWhy from "./SurfacingMarkWhy.svelte";
@@ -136,9 +136,7 @@
 	const surfacingActive = $derived(sessionJevEnabled(sessionId ? findSession(sessionId) : undefined, surfacingConfig.status));
 	const level = $derived(panel.saved);
 	const recap = new TurnRecapState();
-	let askExplanations = $state<Record<string, AskExplanation>>({});
-	let generatingAsk = $state<string | null>(null);
-	let askError = $state<{ uuid: string; message: string } | null>(null);
+	let asks = $state<Record<string, AskState>>({});
 	/** The Ask a citation left, offered back on the cited message's card. */
 	let askReturn = $state<{ ask: SurfacePin; cited: string } | null>(null);
 	const askIdentity = $derived(`${sessionId}/${turn.id}`);
@@ -148,17 +146,15 @@
 		return parts.slice(0, Math.max(0, index)).reverse().find((part): part is SurfacePart => part.type === "assistant" && !!part.rawText.trim()) ?? null;
 	}
 	async function explainAsk(pin: SurfacePin) {
-		if (!sessionId || !storeTurnId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
+		const uuid = pin.part.uuid;
+		if (!sessionId || !storeTurnId || !pin.part.partId || asks[uuid]?.kind === "ready" || Object.values(asks).some(({ kind }) => kind === "loading")) return;
 		const identity = askIdentity;
-		generatingAsk = pin.part.uuid;
-		askError = null;
+		asks[uuid] = { kind: "loading" };
 		try {
 			const explanation = await rpc("ExplainAsk", { sessionId, turnId: storeTurnId, partId: pin.part.partId });
-			if (identity === askIdentity) askExplanations = { ...askExplanations, [pin.part.uuid]: explanation };
+			if (identity === askIdentity) asks[uuid] = { kind: "ready", explanation };
 		} catch (error) {
-			if (identity === askIdentity) askError = { uuid: pin.part.uuid, message: error instanceof Error ? error.message : String(error) };
-		} finally {
-			if (identity === askIdentity) generatingAsk = null;
+			if (identity === askIdentity) asks[uuid] = { kind: "failed", message: error instanceof Error ? error.message : String(error) };
 		}
 	}
 	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
@@ -181,13 +177,15 @@
 		if (active && session && id) return untrack(() => recap.connect(session, id, watch));
 		return;
 	});
-	let picked = $state<string | null>(null);
-	let folded = $state<boolean | null>(null);
-	let readSaving = $state(false);
-	let readError = $state("");
-	let autoReadAttempt = $state<string | null>(null);
-	let readCard: string | null = null;
-	let digits = "";
+	let selection = $state<CardSelection>({ kind: "auto" });
+	let readState = $state<ReadState>({ kind: "idle" });
+	// A card is auto-read at most once per mount, so an explicit Unread sticks.
+	const autoReadAttempts = new Set<string>();
+	let readCardEl = $state<HTMLElement>();
+	let readCardOnScreen = $state(false);
+	let pageVisible = $state(false);
+	let scrubbing = $state(false);
+	let keyBuffer = $state("");
 	const feedback = new SurfacingFeedback(() => sessionId, () => surfacingConfig.categorySet, (place) => {
 		void tick().then(() => {
 			const target = place === "card" ? panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-msg-card"]') : panelEl?.querySelector<HTMLElement>(`[data-testid="${place}"] button`);
@@ -198,7 +196,7 @@
 	const surface = $derived(surfaceTurn({
 		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: numberedMessages.map((part) => feedback.annotate(part)),
 		positions: stripLayout(segment, turn, final, now), categorySet: surfacingConfig.categorySet,
-		level, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, picked, folded, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
+		level, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, selection, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	const minimised = $derived(surfacingActive && panel.view.kind === "collapsed");
@@ -220,37 +218,55 @@
 			panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-msg-card"]')?.focus({ preventScroll: true });
 		} else await jumpTo(pin.step);
 	}
-	const readTarget = $derived(surface.card?.part.uuid ?? null);
+	// Track scalars so the live strip's clock cannot restart the read dwell.
+	const readTarget = $derived(surface.card?.read === false ? surface.card.part.uuid : null);
+	const readText = $derived(surface.card?.part.rawText ?? "");
+	$effect(() => {
+		const changed = () => { pageVisible = document.visibilityState === "visible"; };
+		changed();
+		document.addEventListener("visibilitychange", changed);
+		return () => document.removeEventListener("visibilitychange", changed);
+	});
+	$effect(() => {
+		if (!readCardEl) { readCardOnScreen = false; return; }
+		const observer = new IntersectionObserver((entries) => {
+			const entry = entries.at(-1);
+			readCardOnScreen = !!entry?.isIntersecting && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
+		});
+		observer.observe(readCardEl);
+		return () => observer.disconnect();
+	});
+	// An unread card is read after 1s continuously visible, on screen and not scrubbed past.
 	$effect(() => {
 		const target = readTarget;
-		untrack(() => {
-			if (target === readCard) return;
-			readCard = target;
-			autoReadAttempt = null;
-			readError = "";
-		});
+		void readText;
+		if (!target || !pageVisible || !readCardOnScreen || scrubbing || readState.kind === "saving" || autoReadAttempts.has(target)) return;
+		const timer = setTimeout(() => {
+			const card = untrack(() => surface.card);
+			if (card?.part.uuid === target && document.visibilityState === "visible" && readCardOnScreen && !scrubbing) readMessage(card, true);
+		}, 1000);
+		return () => clearTimeout(timer);
 	});
-	async function writeRead(partIds: readonly string[], read: boolean) {
-		if (readSaving || !partIds.length || (!sessionId && !onMessagesRead)) return;
-		readSaving = true;
-		readError = "";
+	/** `uuid` names the card a failure belongs to; bulk saves default to the open card, or the turn when folded. */
+	async function writeRead(partIds: readonly string[], read: boolean, uuid = surface.card?.part.uuid ?? turn.id) {
+		if (readState.kind === "saving" || !partIds.length || (!sessionId && !onMessagesRead)) return;
+		readState = { kind: "saving", uuid };
 		try {
 			if (onMessagesRead) await onMessagesRead(partIds, read);
 			else if (sessionId) await rpc("SetMessagesRead", { sessionId, partIds: [...partIds], read });
+			readState = { kind: "idle" };
 		} catch {
-			readError = "Couldn't save read state. Try again.";
-		} finally { readSaving = false; }
+			readState = { kind: "failed", uuid, message: "Couldn't save read state. Try again." };
+		}
 	}
 	function readMessage(pin: SurfacePin, read: boolean) {
-		// An explicit Unread must survive while this card stays open.
-		autoReadAttempt = pin.part.uuid;
-		if (pin.part.partId) void writeRead([pin.part.partId], read);
+		autoReadAttempts.add(pin.part.uuid);
+		if (pin.part.partId) void writeRead([pin.part.partId], read, pin.part.uuid);
 	}
 
 	function pick(pin: SurfacePin) {
 		panel.open();
-		picked = pin.part.uuid;
-		folded = false;
+		selection = { kind: "picked", uuid: pin.part.uuid };
 	}
 	function toggleSummary() {
 		if (!storeTurnId) return;
@@ -301,10 +317,9 @@
 		const keepLog = fullLog;
 		panel.show(next);
 		if (keepLog) panel.show("log");
-		picked = null;
-		folded = false;
+		selection = { kind: "latest" };
 	}
-	function followLatest() { picked = null; folded = false; }
+	function followLatest() { selection = { kind: "latest" }; }
 	const replies = $derived(messageReplies(sessionId));
 	// Reply toggles: a message already replied to in the draft takes its reference back out.
 	function messageReference(pin: Pick<SurfacePin, "label" | "glyph" | "time" | "part" | "builtinCategory">, ordinal: number, excerpt?: string): ReplyReference {
@@ -317,7 +332,7 @@
 		else insertComposerReference(messageReference(pin, pin.number, excerpt), sessionId);
 	}
 	function foldMessage() {
-		folded = true;
+		selection = { kind: "folded" };
 		void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-scrub"]')?.focus({ preventScroll: true }));
 	}
 	function revealMessage(part: SurfacePart | null) {
@@ -327,40 +342,38 @@
 		const target = event.target;
 		if (!event.defaultPrevented && event.key === "Escape" && feedback.pending) { event.preventDefault(); feedback.cancel(); return; }
 		if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || (target instanceof HTMLInputElement && target.type !== "checkbox") || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return;
-		if (event.key === "Escape" && summaryVisible) {
-			digits = "";
+		const { buffer, command } = surfaceKey(keyBuffer, event.key);
+		if (surfacingActive) keyBuffer = buffer;
+		if (command?.kind === "fold" && summaryVisible) {
 			event.stopPropagation();
 			// Native dialog cancel owns the phone sheet's dismissal.
 			if (!phone) { event.preventDefault(); closeSummary(); }
 			return;
 		}
 		if (!surfacingActive) {
-			if (event.key === "s" && summaryEnabled) { event.preventDefault(); toggleSummary(); }
+			if (command?.kind === "summary" && summaryEnabled) { event.preventDefault(); toggleSummary(); }
 			return;
 		}
-		if (/^\d$/.test(event.key)) { event.preventDefault(); digits = (digits + event.key).slice(-8); return; }
-		const key = event.key;
-		if (key === "Enter" && !digits) return;
-		if (!["ArrowLeft", "ArrowRight", "Home", "End", "Enter", "Escape", "a", "u", "s", "r", "m", "h", "+", "-", "−"].includes(key)) { digits = ""; return; }
+		if (!buffer && !command && !["+", "-", "−"].includes(event.key)) return;
 		// Plain session shortcuts bubble to SessionBar; focused-turn keys own them first.
 		event.preventDefault();
-		if (onSurfacingShortcut?.(key)) return;
-		if (key === "h") { digits = ""; toggleMinimised(); return; }
-		if (feedback.command(key, surface.card)) return;
-		if (key === "s" && summaryEnabled) { toggleSummary(); return; }
-		if (key === "ArrowLeft" && surface.previous) pick(surface.previous);
-		else if (key === "ArrowRight" && surface.next) pick(surface.next);
-		else if (key === "Home" && surface.first) pick(surface.first);
-		else if (key === "End" && surface.last) pick(surface.last);
-		else if (key === "Enter" && digits) {
-			const target = surface.numbers.find(({ number }) => number === Number(digits));
-			if (target) { if (target.belowLevel) selectLevel("all"); revealMessage(target.part); }
-		} else if (key === "a") revealMessage(surface.openAsk);
-		else if (key === "u") revealMessage(surface.nextUnread?.part ?? null);
-		else if (key === "m" && surface.card?.read !== undefined) readMessage(surface.card, !surface.card.read);
-		else if (key === "r" && surface.card) replyTo(surface.card);
-		else if (key === "Escape") foldMessage();
-		digits = "";
+		if (buffer || onSurfacingShortcut?.(event.key) || feedback.command(event.key, surface.card) || !command) return;
+		switch (command.kind) {
+			case "step": { const pin = surface[command.to]; if (pin) pick(pin); return; }
+			case "number": {
+				const target = surface.numbers.find(({ number }) => number === command.n);
+				if (target) { if (target.belowLevel) selectLevel("all"); revealMessage(target.part); }
+				return;
+			}
+			case "ask": revealMessage(surface.openAsk); return;
+			case "unread": revealMessage(surface.nextUnread?.part ?? null); return;
+			case "summary": if (summaryEnabled) toggleSummary(); return;
+			case "toggleRead": if (surface.card?.read !== undefined) readMessage(surface.card, !surface.card.read); return;
+			case "reply": if (surface.card) replyTo(surface.card); return;
+			case "fold": foldMessage(); return;
+			case "collapse": toggleMinimised(); return;
+			default: assertNever(command);
+		}
 	}
 	function surfaceJump(x: number) {
 		const positions = stripLayout(segment, turn, final, now);
@@ -460,9 +473,7 @@
 {#snippet askContext(pin: SurfacePin)}
 	{@render surfacingRegions.cardContext?.(pin)}
 	{#if pin.category === "ask" && !pin.pending}
-		<SurfacingAskContext setup={setupFor(pin)} view={surface} start={turn.user?.createdAt ?? 0}
-			explanation={askExplanations[pin.part.uuid]} generating={generatingAsk === pin.part.uuid}
-			error={askError?.uuid === pin.part.uuid ? askError.message : ""}
+		<SurfacingAskContext setup={setupFor(pin)} view={surface} start={turn.user?.createdAt ?? 0} ask={asks[pin.part.uuid]}
 			enabled={!!sessionId && !!pin.part.partId && summariesOn}
 			onexplain={() => { void explainAsk(pin); }} oncite={(part) => { askReturn = { ask: pin, cited: part.uuid }; revealMessage(part); }}
 			onReplyToAsk={(text) => { if (pin.number !== undefined) onReplyToAsk?.(messageReference(pin, pin.number), text); }} />
@@ -500,7 +511,7 @@
 {/snippet}
 
 {#snippet summaryMarkRead(view: ReturnType<typeof surfaceTurn>)}
-	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readSaving} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
+	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
 {/snippet}
 
 <div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfacingActive || summaryEnabled ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
@@ -554,13 +565,13 @@
 				</MinimisedTurn>
 			{:else if surfacingActive}
 				<SurfacingCard view={surface} {live} {level} overridden={panel.overridden} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
-					{readSaving} {readError} canAutoRead={autoReadAttempt !== readTarget} onread={readMessage} onautoread={(pin) => readMessage(pin, true)}
+					{readState} bind:cardEl={readCardEl} bind:scrubbing onread={readMessage}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={surface.card?.number !== undefined && replies.has(surface.card.number)}
 					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}
 					endTime={surfaceTime(duration ?? 0)} onpick={pick} onlevel={selectLevel}
 					ondefault={() => panel.makeDefault()}
-					onreset={() => { panel.resetLevel(); picked = null; folded = false; }}
+					onreset={() => { panel.resetLevel(); selection = { kind: "latest" }; }}
 					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand} onjump={surfaceJump} onhover={surfaceHover}>
 					{#snippet strip()}
 						<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} interactive={false} />
