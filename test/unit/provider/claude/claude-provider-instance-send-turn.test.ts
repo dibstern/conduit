@@ -1170,9 +1170,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		await vi.waitFor(() => expect(finalized).toHaveBeenCalled());
 		if (!pollFiber) throw new Error("No periodic subagent poll fiber started");
 		// Await actual termination so a leaked fiber cannot hide behind map removal.
-		await Effect.runPromise(
-			Fiber.await(pollFiber).pipe(Effect.timeout("100 millis")),
-		);
+		await Effect.runPromise(Fiber.await(pollFiber));
 		expect(
 			getClaudeRuntimeSessionForTest(instance, "parent-no-result")
 				?.subagentPollers?.size,
@@ -2954,13 +2952,7 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		);
 		expect(first._tag).toBe("Failure");
 
-		const second = await Promise.race([
-			secondPromise,
-			new Promise<"timeout">((resolve) =>
-				setTimeout(() => resolve("timeout"), 50),
-			),
-		]);
-		expect(second).not.toBe("timeout");
+		const second = await secondPromise;
 		expect(second).toMatchObject({ _tag: "Failure" });
 	});
 

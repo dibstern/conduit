@@ -13,7 +13,15 @@ import {
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	onTestFinished,
+	vi,
+} from "vitest";
 
 const rpcSpy = vi.hoisted(() =>
 	vi.fn((tag: string, _input: unknown) => {
@@ -263,11 +271,12 @@ describe("AttentionBanner merge logic", () => {
 	// resends the whole family. Walking descendants by rescanning the family
 	// once per descendant is quadratic in tracked reads and froze the UI for
 	// seconds on each resend.
-	it("re-derives a family of thousands of subagents without stalling", async () => {
+	it("re-derives a family of thousands of subagents with bounded family reads", async () => {
 		permissionsState.pendingPermissions = [makePerm("perm-1", "ses_other1")];
 		await renderBanner();
 
-		const start = performance.now();
+		const familyReads = vi.spyOn(sessionState, "familySessions", "get");
+		onTestFinished(() => familyReads.mockRestore());
 		seedFamilySessions([
 			{ id: "ses_current", title: "Parent", status: "idle", createdAt: 0 },
 			...Array.from({ length: 3000 }, (_, i) => ({
@@ -280,7 +289,9 @@ describe("AttentionBanner merge logic", () => {
 		]);
 		flushSync();
 
-		expect(performance.now() - start).toBeLessThan(200);
+		// Allow both derivations to read the family, but never once per descendant.
+		expect(familyReads.mock.calls.length).toBeGreaterThan(0);
+		expect(familyReads.mock.calls.length).toBeLessThan(10);
 		expect(screen.getByRole("status").textContent).toContain("1 session");
 	});
 

@@ -19,7 +19,8 @@ import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/work
 import { inspectSessionWorktree } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { worktreeFixture } from "./worktree-service-fixture.js";
 
-describe("daemon Worktree service", () => {
+// Real git subprocesses: tests measured 3-9 s each under CPU contention.
+describe("daemon Worktree service", { timeout: 30_000 }, () => {
 	const context = worktreeFixture();
 	const {
 		actualGit,
