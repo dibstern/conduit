@@ -974,8 +974,8 @@ One write transaction, in this order:
   - `Held`: hand the transmission to its write fiber.
   - `Busy`: drop; the hold's owner ends or releases it.
   - `Cleaning`: request candidate retirement, await its commit, then re-enter the gate.
-  - `Unserved{Some({runner, until})}`: park until `awaitStop(runner, "Escalated")` returns or
-    `until` passes (6.4).
+  - `Unserved{Some({runner, until})}`: park until `until` passes, or earlier when that runner's
+    in-progress Stop ends it (6.4). Every park end re-enters the gate.
   - `Unserved{None}`: start a serving runner.
   - `Covered`, `Exhausted` and `Ended`: drop.
   - `StoreUnavailable`: one backoff (4.8).
@@ -1658,9 +1658,17 @@ decideRunnerStop(state, observation) -> { state, actions }
   needs the runs settled. Once the row is committed no waiter sees a failure. Two racing Stops
   share one commit.
 - `holdRun` names the stopping predecessor and its window end in `Unserved{predecessor}`; the
-  feeder parks until `awaitStop(predecessor, "Escalated")` returns or the window ends, then
-  starts a serving runner. The park also ends early, and the feeder steps, when the head's run
-  ends or a Stop commit covers it (4.4). No other code scans the stop states for a predecessor.
+  feeder parks until the window ends, then starts a serving runner. The park reads the
+  predecessor's Stop state once, when it starts. If that Stop is in progress (`Committing`,
+  `Requested` or `Escalating`), the park also ends when `awaitStop(predecessor, "Escalated")`
+  returns; since `Escalated` needs the full 4 s, only an early `Gone` can beat the window. A
+  rejected Stop commit ends only that wait, and the window still ends the park. Any other state
+  at park start (`Running`, not loaded; `Escalated`, a legacy row; `Gone` or `Settled`, the
+  durable row not yet caught up) is parked on by the window alone. "No poll" (F82) means the
+  feeder runs no retry loop and reads no store while parked; `awaitStop`'s re-reads of the
+  reconciler's in-memory state on `runnerRetrySchedule` are the reconciler's own wait, bounded
+  by the same window. The park also ends early, and the feeder steps, when the head's run ends or
+  a Stop commit covers it (4.4). No other code scans the stop states for a predecessor.
 - The release's stop step receives the serving row that `releaseRun` selected in its own
   transaction (`runner_id, session_id, driver_kind, pid, start_time, reaper_pid,
   reaper_start_time`) as a `StopTarget`. With no serving row there is no stop step. The
