@@ -274,12 +274,13 @@
 	.below { outline:1px dashed var(--color-text); outline-offset:-1px; }
 	.unread-dot { position:absolute; top:-2px; right:-2px; width:7px; height:7px; border-radius:50%; background:var(--color-accent); box-shadow:0 0 0 1.5px var(--color-turn-bg); }
 	.hanging-card { position:relative; margin-top:10px; --card-background:var(--color-bg); }
-	.hanging-card.ask { --card-background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); }
+	/* Design E tints an Ask card's outline, not its fill. */
+	.hanging-card.ask { --card-border:color-mix(in srgb,var(--color-status-ask) 65%,var(--color-bg)); }
 	.hover-card { position:absolute; margin-top:0; }
 	.hover-card::before { content:""; position:absolute; bottom:100%; left:0; right:0; height:10px; }
 	.hover-card[data-side="top"]::before { bottom:auto; top:100%; }
 	.hover-card[data-side="top"] .card-caret { top:auto; bottom:-6px; transform:translateX(-50%) rotate(225deg); }
-	.card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--card-background); border-top:1px solid var(--color-border); border-left:1px solid var(--color-border); transform:translateX(-50%) rotate(45deg); }
+	.card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--card-background); border-top:1px solid var(--card-border,var(--color-border)); border-left:1px solid var(--card-border,var(--color-border)); transform:translateX(-50%) rotate(45deg); }
 	.surface-thumb { position:absolute; top:50%; width:3px; height:14px; border-radius:2px; background:var(--color-text); transform:translate(-50%,-50%); pointer-events:none; }
 	.surface-strip :global(.live-segment) { animation:strip-breathe 1.2s ease-in-out infinite; }
 	@keyframes strip-breathe { 50% { opacity:.35; } }

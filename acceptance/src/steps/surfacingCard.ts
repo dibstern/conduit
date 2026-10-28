@@ -945,6 +945,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 		match: /^the hanging card and caret share the border outline and Ask tint$/,
 		run: async ({ world }) => {
 			const scope = panel(world.page);
+			// Design E tints an Ask card's outline, not its fill (_frame-e.html .jc.ask).
 			const outline = await scope.evaluate((element) => {
 				const card = element.querySelector(
 					'[data-testid="surfacing-msg-card"]',
@@ -954,33 +955,31 @@ export const surfacingCardHandlers: StepHandler[] = [
 				const a = getComputedStyle(card),
 					b = getComputedStyle(caret);
 				const probe = document.createElement("span");
-				probe.style.color = "var(--color-border)";
+				probe.style.color =
+					"color-mix(in srgb,var(--color-status-ask) 65%,var(--color-bg))";
+				probe.style.backgroundColor = "var(--color-bg)";
 				element.append(probe);
-				const border = getComputedStyle(probe).color;
+				const { color: askBorder, backgroundColor: plainBg } =
+					getComputedStyle(probe);
 				probe.remove();
 				return {
 					cardWidth: a.borderTopWidth,
 					caretWidth: b.borderTopWidth,
 					cardBorder: a.borderTopColor,
 					caretBorder: b.borderTopColor,
-					border,
+					askBorder,
 					cardBg: a.backgroundColor,
 					caretBg: b.backgroundColor,
-					plainBg: getComputedStyle(element)
-						.getPropertyValue("--color-bg")
-						.trim(),
+					plainBg,
 				};
 			});
 			expect(outline.cardWidth).toBe("1px");
 			expect(outline.caretWidth).toBe("1px");
-			expect(outline.cardBorder).toBe(outline.border);
-			expect(outline.caretBorder).toBe(outline.border);
-			expect(outline.cardBg).toBe(outline.caretBg);
+			expect(outline.cardBorder).toBe(outline.askBorder);
+			expect(outline.caretBorder).toBe(outline.askBorder);
+			expect(outline.cardBg).toBe(outline.plainBg);
+			expect(outline.caretBg).toBe(outline.plainBg);
 			await expect(card(world.page)).toHaveClass(/ask/);
-			await expect(card(world.page)).not.toHaveCSS(
-				"background-color",
-				outline.plainBg,
-			);
 		},
 	},
 	{

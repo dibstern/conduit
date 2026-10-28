@@ -30,12 +30,12 @@
 	<Button variant="ghost" size="content" tone="muted" touchTarget {disabled} class="size-[26px] max-md:size-[30px] rounded-full text-[14px]" ariaLabel={label} {onclick}>{glyph}</Button>
 {/snippet}
 {#if props.kind === "preview"}
-	<Surface variant="bare" radius="none" class="surfacing-msg-card border border-border rounded-[12px] {props.card.category === 'ask' && !props.card.pending ? 'ask' : ''}" style="background:var(--card-background,var(--color-bg));--surface-colour:{props.card.colour};--category-tint:{props.card.builtinCategory ? '14%' : '16%'}" data-testid="surfacing-hover-preview" data-part={props.card.part.uuid} data-ordinal={props.card.number} aria-label={props.card.name}>
+	<Surface variant="bare" radius="none" class="surfacing-msg-card border rounded-[12px] {props.card.category === 'ask' && !props.card.pending ? 'ask' : ''}" style="background:var(--card-background,var(--color-bg));border-color:var(--card-border,var(--color-border));--surface-colour:{props.card.colour};--category-tint:{props.card.builtinCategory ? '14%' : '16%'}" data-testid="surfacing-hover-preview" data-part={props.card.part.uuid} data-ordinal={props.card.number} aria-label={props.card.name}>
 		{@render body(props.card)}
 	</Surface>
 {:else if props.card}
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<section bind:this={cardEl} use:landTurnTarget={{ pending: props.pending ?? null, target: { kind: "message", uuid: props.card.part.uuid }, ack: props.onland ?? (() => {}), navigation: props.scrubbing ? "in-place" : "scroll" }} class="surfacing-msg-card border border-border rounded-[12px] outline-none" class:ask={props.card.category === "ask" && !props.card.pending} style:background="var(--card-background,var(--color-bg))" style:--surface-colour={props.card.colour} style:--category-tint={props.card.builtinCategory ? "14%" : undefined} data-testid="surfacing-msg-card" data-part={props.card.part.uuid} data-ordinal={props.card.number} aria-label={props.card.name} tabindex="-1" onkeydown={props.oncommand}>
+	<section bind:this={cardEl} use:landTurnTarget={{ pending: props.pending ?? null, target: { kind: "message", uuid: props.card.part.uuid }, ack: props.onland ?? (() => {}), navigation: props.scrubbing ? "in-place" : "scroll" }} class="surfacing-msg-card border rounded-[12px] outline-none" class:ask={props.card.category === "ask" && !props.card.pending} style:background="var(--card-background,var(--color-bg))" style:border-color="var(--card-border,var(--color-border))" style:--surface-colour={props.card.colour} style:--category-tint={props.card.builtinCategory ? "14%" : undefined} data-testid="surfacing-msg-card" data-part={props.card.part.uuid} data-ordinal={props.card.number} aria-label={props.card.name} tabindex="-1" onkeydown={props.oncommand}>
 		{@render body(props.card)}
 	</section>
 {/if}
