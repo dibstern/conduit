@@ -1,5 +1,26 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Work hovers describe the step under the pointer and open its log row
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When the hover Turn is <mode>
+  And I hover turn step tool 1
+  Then the step popover describes tool 1 as step 2 of 16
+  And hovering across that work step keeps its own popover and moving marker
+  And the messages region visually matches turn-hover-step-<mode> at 98 percent
+  When I press Escape over the hover
+  Then the strip hover is cleared
+  When I hover turn step tool 1
+  And I click turn step tool 1
+  Then Full log opens at highlighted tool 1
+
+Examples:
+  | mode      |
+  | collapsed |
+  | open      |
+  | Usage     |
+
 Scenario: A collapsed message preview is a full read-only card in the hanging slot
   Given message surfacing is active at Most
   And surfacing read tracking starts with none read and summaries off
