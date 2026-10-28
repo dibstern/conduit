@@ -249,6 +249,9 @@ export function createTraceCursorSdkPort(
 	};
 	const readAuthState = () => {
 		const state = readAuthStateFile();
+		// Recorded account credentials must not authenticate an unconfigured slot.
+		if (!state && playback.accountId === "__cursor_login__")
+			return { status: { status: "logged-out" }, credential: null };
 		if (!state || !object(state["accounts"])) return state;
 		const selected =
 			state["accounts"][playback.accountId ?? "__cursor_login__"];
