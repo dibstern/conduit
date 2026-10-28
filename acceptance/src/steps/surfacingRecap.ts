@@ -594,12 +594,12 @@ export const surfacingRecapHandlers: StepHandler[] = [
 	{
 		name: "assert citation is usable in its reader without scrolling the transcript",
 		match:
-			/^recap citation #(\d+) is readable below Balanced without moving the transcript$/,
+			/^recap citation #(\d+) is readable below Most without moving the transcript$/,
 		run: async ({ world, match }) => {
 			const card = world.page.getByTestId("surfacing-recap-reader");
 			await expect(card).toBeVisible();
 			await expect(card).toHaveAttribute("data-ordinal", match[1] ?? "");
-			await expect(card).toContainText("At All, below Balanced");
+			await expect(card).toContainText("At All messages, below Most");
 			await expect(card).toContainText("The file includes a second route.");
 			await expect(card).toBeInViewport();
 			if (isPhone(world.page))

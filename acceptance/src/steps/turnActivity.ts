@@ -87,6 +87,101 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "open Full log message row",
+		match: /^I open message #(\d+) from the Full log row$/,
+		run: async ({ world, match }) => {
+			await world.page.getByTestId(`surfacing-step-open-${match[1]}`).click();
+		},
+	},
+	{
+		name: "assert Full log pins",
+		match: /^the Full log pins are (\d+(?:,\d+)*)$/,
+		run: async ({ world, match }) => {
+			await expect
+				.poll(async () =>
+					world.page
+						.locator("[data-group-members]")
+						.evaluateAll((groups) =>
+							groups.flatMap((group) =>
+								(group.getAttribute("data-group-members") ?? "").split(","),
+							),
+						),
+				)
+				.toEqual((match[1] ?? "").split(","));
+		},
+	},
+	{
+		name: "assert Full log card level",
+		match: /^the card has no below-stop note$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("surfacing-msg-card").locator(".card-note"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert category preview stop name",
+		match: /^the category preview says Most shows$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("surfacing-category-preview"),
+			).toContainText("Most shows");
+		},
+	},
+	{
+		name: "assert message stop labels",
+		match:
+			/^the (message|default message) stops read Answer, Key, Most and All messages$/,
+		run: async ({ world, match }) => {
+			const control =
+				match[1] === "message"
+					? world.page.getByTestId("surfacing-level")
+					: world.page.getByRole("radiogroup", {
+							name: "Default level",
+							exact: true,
+						});
+			for (const label of ["Answer", "Key", "Most", "All messages"])
+				await expect(
+					control.getByRole("radio", { name: new RegExp(`^${label}\\b`) }),
+				).toBeVisible();
+		},
+	},
+	{
+		name: "assert mark prompt stop names",
+		match: /^the turn mark prompt contains (.+) and (.+)$/,
+		run: async ({ world, match }) => {
+			const prompt = world.page.getByTestId("surfacing-mark-prompt");
+			await expect(prompt).toContainText(match[1] ?? "");
+			await expect(prompt).toContainText(match[2] ?? "");
+		},
+	},
+	{
+		name: "assert card and summary stop notes",
+		match: /^the (turn card|summary) (?:stop )?note says (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId(
+					match[1] === "turn card"
+						? "surfacing-msg-card"
+						: "surfacing-recap-reader",
+				),
+			).toContainText(match[2] ?? "");
+		},
+	},
+	{
+		name: "assert feedback stop names",
+		match: /^the feedback ledger names Most and Full log$/,
+		run: async ({ world }) => {
+			const records = world.page.getByTestId("surfacing-ledger-record");
+			await expect(
+				records.filter({ hasText: "you: ▲ Most" }).first(),
+			).toBeVisible();
+			await expect(
+				records.filter({ hasText: "you: ▼ Full log" }).first(),
+			).toBeVisible();
+		},
+	},
+	{
 		name: "seed multi-segment turn log",
 		match:
 			/^the turn log session has a (two-segment AskUserQuestion|two-segment ExitPlanMode|wake|wake-reply|wake-empty|waiting|async) turn$/,

@@ -6,7 +6,8 @@
 	import { splitUrls } from "../../utils/links.js";
 	import type { MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
 	import type { TurnRecap } from "../../../contracts/turn-recap.js";
-	import { SURFACE_LABELS, surfaceTime, type SurfaceLevel, type SurfaceTurn } from "../../utils/surface-turn.js";
+	import { STOPS, stopForLevel } from "../../utils/turn-stops.js";
+	import { surfaceTime, type SurfaceLevel, type SurfaceTurn } from "../../utils/surface-turn.js";
 	import Button from "../ui/Button.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -110,7 +111,7 @@
 	{#if reading}
 		<section class="summary-reader" data-testid="surfacing-recap-reader" data-ordinal={reading.number} aria-label={`Cited message #${reading.number}`}>
 			<div class="reader-head"><span>#{reading.number} · {surfaceTime((reading.part.createdAt ?? start) - start)}</span><Button variant="ghost" size="content" tone="muted" touchTarget class="ml-auto size-[24px] rounded-full" ariaLabel="Close cited message" onclick={closeCitation}><Icon name="x" size={14} /></Button></div>
-			{#if reading.belowLevel}<p class="reader-note">At {SURFACE_LABELS[reading.level]}, below {SURFACE_LABELS[level]} · opened directly</p>{/if}
+			{#if reading.belowLevel}<p class="reader-note">At {STOPS[stopForLevel(reading.level)].short}, below {STOPS[level].short} · opened directly</p>{/if}
 			<div class="reader-body md-content select-text" bind:this={readerBodyEl}>{@html reading.part.html}</div>
 			{#if onreply}
 				{@const ordinal = reading.number}

@@ -238,7 +238,7 @@ export const askContextHandlers: StepHandler[] = [
 			await expect(
 				world.page
 					.getByTestId("surfacing-level")
-					.getByRole("radio", { name: /Balanced/ }),
+					.getByRole("radio", { name: /Most/ }),
 			).toBeChecked();
 		},
 	},

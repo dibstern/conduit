@@ -1,7 +1,7 @@
 Feature: Turn summaries keep cached versions and cite the original messages
 
 Scenario Outline: A settled turn opens its newest cached summary without generating
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -21,7 +21,7 @@ Examples:
   | phone    | surfacing-recap-cached-phone     | 98        |
 
 Scenario Outline: Automatic cached summaries arrive live and preserve an older selected version
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with automatic summaries
@@ -46,7 +46,7 @@ Examples:
   | phone    |
 
 Scenario Outline: Automatic generation and SDK failures arrive without a browser request
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with automatic summaries
@@ -67,7 +67,7 @@ Examples:
   | phone    |
 
 Scenario Outline: On request creates a summary only after Summarize
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a live turn with no summaries
@@ -86,7 +86,7 @@ Examples:
   | phone    |
 
 Scenario Outline: Summary settings patch only the selected model and timing
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -106,7 +106,7 @@ Examples:
   | phone    |
 
 Scenario Outline: Stale summaries append New versions and keep older versions
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with stale summaries
@@ -131,7 +131,7 @@ Examples:
   | phone    | surfacing-recap-stale-phone      | 98        |
 
 Scenario Outline: Whole turn again appends a fresh version without replacing earlier summaries
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with stale summaries
@@ -152,15 +152,15 @@ Examples:
   | phone    |
 
 Scenario Outline: A citation opens in the summary reader without moving the transcript
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
   When I open the turn summary
   And I follow recap citation #3
   Then the cited summary remains open
-  And recap citation #3 is readable below Balanced without moving the transcript
-  And the effective surfacing level is Balanced
+  And recap citation #3 is readable below Most without moving the transcript
+  And the effective surfacing level is Most
   And the screen region visually matches <baseline> at <threshold> percent
   When I close the cited message
   Then recap citation #3 is followed
@@ -172,7 +172,7 @@ Examples:
   | duo      | surfacing-recap-cited-duo        | 98        |
 
 Scenario Outline: A failed summary retains the SDK error and retries on request
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a live turn with failing summaries
@@ -189,7 +189,7 @@ Examples:
   | phone    | surfacing-recap-failed-phone     | 98        |
 
 Scenario Outline: Summary model Off hides summary controls and never generates
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with disabled summaries
@@ -202,7 +202,7 @@ Examples:
   | phone    |
 
 Scenario Outline: Shared recap preferences replace an earlier local setting
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -221,7 +221,7 @@ Examples:
   | phone    |
 
 Scenario Outline: The focused turn toggles its summary with the s shortcut
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -237,7 +237,7 @@ Examples:
   | phone    |
 
 Scenario: The phone summary is a bottom sheet with a dismissible scrim
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a phone
   And the recap session has a settled turn with current summaries
@@ -247,7 +247,7 @@ Scenario: The phone summary is a bottom sheet with a dismissible scrim
   Then the summary body is closed
 
 Scenario Outline: A pending automatic recap settles after the next turn starts
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with automatic summaries
@@ -269,7 +269,7 @@ Examples:
   | phone    |
 
 Scenario Outline: A recap pending on the server is observed when its turn becomes older
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with automatic summaries
@@ -289,7 +289,7 @@ Examples:
   | phone    |
 
 Scenario Outline: Escape closes the summary before changing the selected transcript card
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -304,7 +304,7 @@ Examples:
   | phone    |
 
 Scenario Outline: The summary foot marks the remaining surfaced messages read
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries and messages 1,4,8 read

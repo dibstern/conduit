@@ -15,9 +15,9 @@ const ledgers = new WeakMap<Page, SurfacingFeedbackEntry[]>();
 const themes = new WeakMap<Page, "dark" | "light">();
 const targets = new WeakMap<Page, Locator>();
 const levelNames = {
-	hidden: "the log",
-	all: "All",
-	balanced: "Balanced",
+	hidden: "Full log",
+	all: "All messages",
+	balanced: "Most",
 	key: "Key",
 } as const;
 

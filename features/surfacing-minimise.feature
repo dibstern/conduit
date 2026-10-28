@@ -1,7 +1,7 @@
 Feature: Turns minimise to a head and thin strip without losing messages
 
 Scenario Outline: Chevron and h remember a hand choice over the setting
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And minimising uses the <theme> theme with Turns open Auto
@@ -25,7 +25,7 @@ Examples:
   | phone    | light | 98        |
 
 Scenario Outline: Hovering a minimised strip peeks and a click opens the nearest message
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a desktop
   And minimising uses the <theme> theme with Turns open Minimised
@@ -42,7 +42,7 @@ Examples:
   | light | 98        |
 
 Scenario Outline: On a phone a tap on the minimised strip opens the nearest message
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a phone
   And minimising uses the <theme> theme with Turns open Minimised
@@ -56,7 +56,7 @@ Examples:
   | light |
 
 Scenario Outline: Auto folds only older fully read turns and expands explicit destinations
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And minimising uses the <theme> theme with Turns open Auto

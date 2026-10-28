@@ -33,10 +33,10 @@ const fixtures = new WeakMap<Page, History[]>();
 const readFixtures = new WeakMap<Page, ReadonlySet<number>>();
 const failingReadWrites = new WeakSet<Page>();
 const levels = {
-	Final: "final",
+	Answer: "final",
 	Key: "key",
-	Balanced: "balanced",
-	All: "all",
+	Most: "balanced",
+	"All messages": "all",
 } as const;
 const verdicts = [
 	{ finding: 1 },
@@ -267,7 +267,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "opt into surfacing before app startup",
 		match:
-			/^message surfacing is (active|inactive|missing-key|invalid-key) at (Final|Key|Balanced|All)$/,
+			/^message surfacing is (active|inactive|missing-key|invalid-key) at (Answer|Key|Most|All messages)$/,
 		run: ({ world, match }) => {
 			const level = levels[match[2] as keyof typeof levels];
 			mockMessageSurfacing.set(world.page, {
@@ -887,7 +887,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 	},
 	{
 		name: "change surfacing level",
-		match: /^I set the surfacing level to (Final|Key|Balanced|All)$/,
+		match: /^I set the surfacing level to (Answer|Key|Most|All messages)$/,
 		run: async ({ world, match }) => {
 			await panel(world.page)
 				.getByTestId("surfacing-level")
@@ -898,15 +898,15 @@ export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "assert level pin counts and stable ordinal gaps",
 		match:
-			/^the surfacing pins are (\d+(?:,\d+)*) and level counts are Key (\d+), Balanced (\d+), All (\d+)$/,
+			/^the surfacing pins are (\d+(?:,\d+)*) and level counts are Key (\d+), Most (\d+), All messages (\d+)$/,
 		run: async ({ world, match }) => {
 			await expect
 				.poll(() => pinNumbers(panel(world.page)))
 				.toEqual((match[1] ?? "").split(","));
 			for (const [label, count] of [
 				["Key", match[2]],
-				["Balanced", match[3]],
-				["All", match[4]],
+				["Most", match[3]],
+				["All messages", match[4]],
 			])
 				await expect(
 					panel(world.page)
@@ -918,7 +918,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "assert override marker and browser persistence",
 		match:
-			/^the session surfacing override is (Final|Key|Balanced|All|absent)$/,
+			/^the session surfacing override is (Answer|Key|Most|All messages|absent)$/,
 		run: async ({ world, match }) => {
 			const expected =
 				match[1] === "absent"
@@ -989,7 +989,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "assert surfacing default patch",
 		match:
-			/^the daemon default becomes (Final|Key|Balanced|All) without changing other settings$/,
+			/^the daemon default becomes (Answer|Key|Most|All messages) without changing other settings$/,
 		run: async ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
 			await expect
@@ -1008,7 +1008,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert effective surfacing level",
-		match: /^the effective surfacing level is (Final|Key|Balanced|All)$/,
+		match: /^the effective surfacing level is (Answer|Key|Most|All messages)$/,
 		run: async ({ world, match }) => {
 			await expect(
 				panel(world.page)
@@ -1186,17 +1186,17 @@ export const surfacingCardHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert Final keeps the strip",
-		match: /^Final shows (\d+) hidden messages and keeps the strip$/,
+		name: "assert Answer keeps the strip",
+		match: /^Answer shows (\d+) hidden messages and keeps the strip$/,
 		run: async ({ world, match }) => {
 			await expect(card(world.page)).toHaveCount(0);
 			await expect(
 				panel(world.page).locator("[data-group-members]"),
 			).toHaveCount(0);
 			await expect(panel(world.page)).toContainText(
-				`Final only · ${match[1]} hidden`,
+				`Answer only · ${match[1]} hidden`,
 			);
-			await expect(panel(world.page)).not.toContainText("Nothing at Final");
+			await expect(panel(world.page)).not.toContainText("Nothing at Answer");
 			await expect(
 				panel(world.page).locator("[data-step-id]").first(),
 			).toBeVisible();
@@ -1204,20 +1204,20 @@ export const surfacingCardHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert not judged note and empty level",
-		match: /^the turn shows (\d+) not judged and Nothing at (Key|Balanced)$/,
+		match: /^the turn shows (\d+) not judged and Nothing at (Key|Most)$/,
 		run: async ({ world, match }) => {
 			await expect(
 				panel(world.page).getByTestId("surfacing-not-judged"),
 			).toContainText(`${match[1]} not judged`);
 			await expect(panel(world.page)).toContainText(`Nothing at ${match[2]}`);
-			await expect(control(world.page, "Show All")).toBeVisible();
+			await expect(control(world.page, "Show All messages")).toBeVisible();
 		},
 	},
 	{
 		name: "show all from empty level",
 		match: /^I show all surfaced messages from the empty state$/,
 		run: async ({ world }) => {
-			await control(world.page, "Show All").click();
+			await control(world.page, "Show All messages").click();
 		},
 	},
 	{

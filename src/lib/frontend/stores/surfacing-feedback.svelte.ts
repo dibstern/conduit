@@ -6,7 +6,8 @@ import {
 } from "../../contracts/category-set.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 import type { AssistantMessage } from "../types.js";
-import { SURFACE_LABELS, type SurfacePin } from "../utils/surface-turn.js";
+import type { SurfacePin } from "../utils/surface-turn.js";
+import { STOPS, stopForLevel } from "../utils/turn-stops.js";
 
 type Direction = "raise" | "lower" | "retype";
 type LedgerEntry = { sessionId: string; partId: string; mark: SurfacingMark };
@@ -181,7 +182,7 @@ export class SurfacingFeedback {
 							? "Lowered"
 							: "Raised";
 				const text = mark
-					? `${MARK_GLYPHS[mark.direction ?? "raise"]} ${verb} #${pin.number ?? "?"} to ${SURFACE_LABELS[mark.level]}`
+					? `${MARK_GLYPHS[mark.direction ?? "raise"]} ${verb} #${pin.number ?? "?"} to ${STOPS[stopForLevel(mark.level)].short}`
 					: `Cleared mark #${pin.number ?? "?"}`;
 				this.toast = { text, pin, previous, place };
 				this.timer = setTimeout(() => {

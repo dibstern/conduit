@@ -8,7 +8,7 @@
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { changedAgreement, hunkDependencies, hunkDiff, movedMessages, withTuningHunks } from "../../utils/category-tuning.js";
-	import { SURFACE_LABELS } from "../../utils/surface-turn.js";
+	import { STOPS, stopForLevel } from "../../utils/turn-stops.js";
 	import Button from "../ui/Button.svelte";
 	import CategoryPill from "../ui/CategoryPill.svelte";
 	import Checkbox from "../ui/Checkbox.svelte";
@@ -16,7 +16,6 @@
 	import SettingsBanner from "../ui/SettingsBanner.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 
-	const LEVELS = { ...SURFACE_LABELS, hidden: "hidden" };
 	let { active, onApplied }: { active: boolean; onApplied: () => void } = $props();
 	let entries = $state<readonly SurfacingFeedbackEntry[]>([]);
 	let current = $state<CategorySet | null>(null);
@@ -289,12 +288,12 @@
 						{@const category = current.categories.find((item) => item.id === answer.category)}
 						{@const retype = entry.mark.category ? current.categories.find((item) => item.id === entry.mark.category) : undefined}
 						{@const agreement = score?.levels.find((item) => item.partId === entry.partId && item.sessionId === entry.sessionId)?.level}
-						{@const jev = entry.probabilities === null ? "Not judged" : `${category ? `${category.glyph} ${category.label} · p ${(entry.probabilities[category.id] ?? 0).toFixed(2).replace(/^0/, "")}` : "Routine"} · ${LEVELS[answer.level]}`}
-						{@const you = `${entry.mark.direction ? `${MARK_GLYPHS[entry.mark.direction]} ` : ""}${entry.mark.category ? `${retype ? `${retype.glyph} ${retype.label}` : entry.mark.category} at ` : ""}${LEVELS[entry.mark.level]}${entry.mark.reason ? ` · “${entry.mark.reason}”` : ""}`}
+						{@const jev = entry.probabilities === null ? "Not judged" : `${category ? `${category.glyph} ${category.label} · p ${(entry.probabilities[category.id] ?? 0).toFixed(2).replace(/^0/, "")}` : "Routine"} · ${STOPS[stopForLevel(answer.level)].short}`}
+						{@const you = `${entry.mark.direction ? `${MARK_GLYPHS[entry.mark.direction]} ` : ""}${entry.mark.category ? `${retype ? `${retype.glyph} ${retype.label}` : entry.mark.category} at ` : ""}${STOPS[stopForLevel(entry.mark.level)].short}${entry.mark.reason ? ` · “${entry.mark.reason}”` : ""}`}
 						<div class="rec" data-testid="surfacing-ledger-record">
 							<div title={entry.text}><b>#{entry.ordinal ?? "?"}</b> {entry.text || "Message unavailable"}</div>
 							<small>{entry.sessionTitle} · <time datetime={new Date(entry.createdAt).toISOString()}>{new Date(entry.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</time></small>
-							<small title={`Jev: ${jev} → you: ${you}`}>Jev: {#if entry.probabilities === null}Not judged{:else}{#if category}{#if category.origin === "builtin"}<CategoryPill {category} plain />{:else}{category.glyph} {category.label}{/if} · p {(entry.probabilities[category.id] ?? 0).toFixed(2).replace(/^0/, "")}{:else}Routine{/if} · {LEVELS[answer.level]}{/if} → you: {entry.mark.direction ? `${MARK_GLYPHS[entry.mark.direction]} ` : ""}{#if entry.mark.category}{#if retype}{#if retype.origin === "builtin"}<CategoryPill category={retype} plain />{:else}{retype.glyph} {retype.label}{/if}{:else}{entry.mark.category}{/if}{" at "}{/if}{LEVELS[entry.mark.level]}{entry.mark.reason ? ` · “${entry.mark.reason}”` : ""}{#if agreement != null}{" · "}<span class={agreement === entry.mark.level ? "text-success" : "text-error"}>current set {agreement === entry.mark.level ? "agrees" : "disagrees"}</span>{/if}</small>
+							<small title={`Jev: ${jev} → you: ${you}`}>Jev: {#if entry.probabilities === null}Not judged{:else}{#if category}{#if category.origin === "builtin"}<CategoryPill {category} plain />{:else}{category.glyph} {category.label}{/if} · p {(entry.probabilities[category.id] ?? 0).toFixed(2).replace(/^0/, "")}{:else}Routine{/if} · {STOPS[stopForLevel(answer.level)].short}{/if} → you: {entry.mark.direction ? `${MARK_GLYPHS[entry.mark.direction]} ` : ""}{#if entry.mark.category}{#if retype}{#if retype.origin === "builtin"}<CategoryPill category={retype} plain />{:else}{retype.glyph} {retype.label}{/if}{:else}{entry.mark.category}{/if}{" at "}{/if}{STOPS[stopForLevel(entry.mark.level)].short}{entry.mark.reason ? ` · “${entry.mark.reason}”` : ""}{#if agreement != null}{" · "}<span class={agreement === entry.mark.level ? "text-success" : "text-error"}>current set {agreement === entry.mark.level ? "agrees" : "disagrees"}</span>{/if}</small>
 							<Button variant="ghost" size="sm" class="col-start-2 row-span-3 row-start-1 self-center" disabled={clearing !== null || saving || proposing || testing !== null} onclick={() => { void clear(entry); }} ariaLabel={`Clear mark ${entry.ordinal ?? entry.partId}`}>Clear</Button>
 						</div>
 					{/each}
