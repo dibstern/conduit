@@ -270,6 +270,10 @@ Only evidence and conduit's decisions, each once:
   sends; it never ends `start` or `steer` work, which ends only by its provider's work-ended
   rule (section 9). OpenCode `abort` and `cancel_request` act on the native session, not the
   query, so a query ending never covers them.
+- **A send's label is the process it went to.** A send issued while a process is live carries
+  that process's label, an `interrupt` of a Queued Run and OpenCode `abort` and `cancel_request`
+  included; only that process's loss covers its transport. The next-process binding (D23)
+  applies only when no process is live (D37).
 - **`hasAuthority(execution)`:** the execution is its Run's current one, the Run is not Ended, its
   label is not covered, the project is active, and its native session has not ended. This is the
   single read of Ended.
@@ -2015,7 +2019,10 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   confirm names the destruction it gates, its step and every execution label it acts on;
   confirming issues exactly that step against those labels. One step that destroys several
   member labels (Tombstone cleanup expiry, `project_active` reconciliation) waits on one confirm
-  (D29).
+  (D29). "Against those labels" binds only a confirm: when evidence clears the gate instead (a
+  `process_started` or snapshot leaves no task live or unknown), the step issues as decided at
+  that moment, so a Run-less `end_session` acts on the current process and a multi-label step on
+  the labels still members (D36).
 - `snapshotEntry` is the 1-based count of task-set entries accepted by the session:
   `tasks_snapshot` evidence and `process_started` settlements, excluding older labels. A
   `process_started` that leaves a pending confirm open refreshes it with the new count, so a
@@ -2026,8 +2033,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   unknown. With no Run, `end` issues `end_session{runId: null}`; its deadline belongs to the
   send. When that deadline expires unconfirmed, the ledger issues `kill_and_respawn{runId:
   null}`, confirm-gated with tasks live or unknown, against the runner the `end_session` was
-  issued on: it records lost work for the latest label seen for that runner, and issuing it
-  covers that runner's labels (5.1). If that runner is already lost, the `end_session` is covered
+  issued on, carrying the latest label seen for that runner, a reattach included (D35): it
+  records lost work for that label, and issuing it covers that runner's labels (5.1). If that runner is already lost, the `end_session` is covered
   and no kill issues (D32).
 - Lost work is always recorded for every destruction, unplanned loss included, under the
   latest label seen for the runner the destruction acts on.
@@ -2853,6 +2860,9 @@ port.
 - D32: the `kill_and_respawn` escalating an unconfirmed `end_session` acts on the runner that `end_session` was issued on; if that runner is already lost, nothing issues (8.4). Rejected: the current process (a later, unrelated runner would be killed while the end_session's own runner keeps acting).
 - D33: `close`, `kill_and_respawn` and `end_session` effects carry the execution label they act on (null only before any process was seen for it, binding per D23), and `PendingConfirm` carries the labels its step acts on (3.13, 8.4). Rejected: the feeder inferring the target from `runId` (a joined wake label on another runner has no single process per Run).
 - D34: a permanent `effect_outcome` on a `send_native_command` makes the command `Failed` with the outcome's code and finishes its send (3.4, 3.11, 8.5). Rejected: leaving it `Sent` until its confirmation deadline (it shows a command the provider never received as in flight).
+- D35: the D32 escalation kill carries the latest label seen for the `end_session`'s runner, a reattach included (8.4). Rejected: the label the `end_session` went to (after a reattach the runner answers to its newer label, and lost work is recorded under the latest label).
+- D36: "against those labels" binds only a confirm; a gate cleared by evidence issues the step as decided at that moment, so a Run-less `end_session` acts on the current process (8.4). Rejected: the gated labels (they can name a replaced process, so the `end_session` is covered at issue and the session never ends).
+- D37: a send issued while a process is live carries that process's label, a Queued Run's `interrupt` and OpenCode `abort` and `cancel_request` included; D23's next-process binding applies only with no live process (3.3). Rejected: the Run's execution label (a Queued Run has none yet, and a later process never received the send).
 
 ## Appendix B. Old-id mapping
 
