@@ -899,8 +899,12 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 			writeFileSync(join(f.second, "dirty"), "changed");
 			yield* f.service.invalidate({ directory: f.second });
 			expect((yield* f.service.read("one"))?.folders?.[1]?.dirty).toBe(false);
-			yield* settle;
-			expect((yield* f.service.read("one"))?.folders?.[1]?.dirty).toBe(true);
+			yield* TestClock.adjust(100);
+			expect(
+				yield* waitForDirty(
+					Effect.map(f.service.read("one"), (git) => git?.folders?.[1]),
+				),
+			).toMatchObject({ dirty: true });
 			expect(yield* f.version).toBeGreaterThan(before);
 		}),
 	);
