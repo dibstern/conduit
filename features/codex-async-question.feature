@@ -16,9 +16,11 @@ Background:
 
 Scenario Outline: answer an async question after the agent finishes
   Given the harness logo is viewed in the <tier> tier
+  When I select the Turn Q&A tab
   Then the Codex async card says Answer anytime
   And the messages region visually matches codex-async-question-<tier>-<kind> at <threshold> percent
   When the Codex relay completes the turn with the async question pending
+  And I select the Turn Q&A tab
   Then the Codex async question leaves the composer idle
   And the Codex async card says Answer anytime
   When I answer the Codex async question with <kind> <answer> and context <context>
@@ -34,8 +36,10 @@ Examples:
 
 Scenario Outline: dismiss an async question without sending a message
   Given the harness logo is viewed in the <tier> tier
+  When I select the Turn Q&A tab
   Then the Codex async card says Answer anytime
   When the Codex relay completes the turn with the async question pending
+  And I select the Turn Q&A tab
   And I dismiss the Codex async question
   Then the Codex async question is dismissed without a message
   And the Codex async question has no answer controls

@@ -11,6 +11,7 @@ export type SurfaceLevel = MessageSurfacingPreferences["defaultLevel"];
 export type ShowStop = SurfaceLevel | "log";
 export type PanelView<Stop extends ShowStop = ShowStop> =
 	| { kind: "show"; stop: Stop }
+	| { kind: "qa" }
 	| { kind: "usage" };
 export type StopCounts = Record<Exclude<ShowStop, "final">, number>;
 export type Step = Exclude<ActivityPart, { type: "system" }>;
@@ -73,6 +74,7 @@ export function stopForLevel(level: SurfacingLevel): ShowStop {
 export function cardLevelFor(view: PanelView | null): SurfaceLevel | null {
 	if (view === null) return null;
 	switch (view.kind) {
+		case "qa":
 		case "usage":
 			return null;
 		case "show": {

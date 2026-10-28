@@ -7,6 +7,7 @@ import TurnShowBar from "./TurnShowBar.svelte";
 function panel(view: TurnPanelState["view"]): TurnPanelState {
 	return {
 		phase: "settled",
+		hasHandBacks: false,
 		stops: ["final", "key", "balanced", "all", "log"],
 		view,
 		saved: "balanced",
@@ -18,6 +19,7 @@ function panel(view: TurnPanelState["view"]): TurnPanelState {
 		collapse: fn(),
 		show: fn(),
 		usage: fn(),
+		qa: fn(),
 		makeDefault: fn(async () => {}),
 		resetLevel: fn(),
 	};
@@ -95,6 +97,36 @@ export const UsageSelected: Story = {
 		const menu = body.getByRole("menu", { name: "Show, least to most" });
 		for (const row of within(menu).getAllByRole("menuitemradio"))
 			await expect(row).toHaveAttribute("aria-checked", "false");
+	},
+};
+
+export const QaSelected: Story = {
+	args: {
+		panel: {
+			...panel({ kind: "open", view: { kind: "qa" } }),
+			hasHandBacks: true,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Show messages" }),
+		);
+		await expect(
+			body.getByRole("menuitemradio", { name: /^Q&A$/ }),
+		).toHaveAttribute("aria-checked", "true");
+	},
+};
+
+export const QaJevOff: Story = {
+	...QaSelected,
+	args: {
+		panel: {
+			...panel({ kind: "open", view: { kind: "qa" } }),
+			hasHandBacks: true,
+			stops: ["log"],
+		},
 	},
 };
 

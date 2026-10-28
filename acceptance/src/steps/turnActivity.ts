@@ -702,17 +702,19 @@ export const turnActivityHandlers: StepHandler[] = [
 	{
 		name: "seed multi-segment turn log",
 		match:
-			/^the turn log session has a (two-segment AskUserQuestion|two-segment ExitPlanMode|wake|counted-wake|wake-reply|wake-empty|waiting|async) turn$/,
+			/^the turn log session has a (two-segment AskUserQuestion|two-segment ExitPlanMode|qa-history|wake|counted-wake|wake-reply|wake-empty|waiting|waiting-plan|async) turn$/,
 		run: async ({ world, match }) => {
 			const kind = match[1] ?? "";
 			kinds.set(world.page, kind);
 			const wake = kind.startsWith("wake") || kind === "counted-wake";
 			const counted = kind === "counted-wake";
-			const waiting = kind === "waiting" || kind === "async";
+			const waiting =
+				kind === "waiting" || kind === "async" || kind === "waiting-plan";
 			const asyncQuestion = kind === "async";
-			const handBack = kind.endsWith("ExitPlanMode")
-				? "ExitPlanMode"
-				: "AskUserQuestion";
+			const handBack =
+				kind.endsWith("ExitPlanMode") || kind === "waiting-plan"
+					? "ExitPlanMode"
+					: "AskUserQuestion";
 			const before =
 				kind === "wake-empty"
 					? []
@@ -779,6 +781,9 @@ export const turnActivityHandlers: StepHandler[] = [
 						: [
 								...before,
 								tool("answered", handBack, 8000),
+								...(kind === "qa-history"
+									? [tool("approved", "ExitPlanMode", 20_000)]
+									: []),
 								...(asyncQuestion
 									? [
 											{
@@ -796,7 +801,7 @@ export const turnActivityHandlers: StepHandler[] = [
 									: []),
 								...after,
 								...(waiting && !asyncQuestion
-									? [tool("waiting", "AskUserQuestion", 40_000, true)]
+									? [tool("waiting", handBack, 40_000, true)]
 									: []),
 							],
 				},
@@ -815,24 +820,32 @@ export const turnActivityHandlers: StepHandler[] = [
 			];
 			const rpc = requireRpcControl(world.page);
 			rpc.setDetailRows(SESSION, messages.flatMap(detailRowsOf));
+			const answer = (): { ok: true } => {
+				rpc.sendChunk("SubscribeApprovals", [
+					{ _tag: "remove", id: "waiting-question", sequence: 2 },
+				]);
+				rpc.setDetailRows(
+					SESSION,
+					messages
+						.map((message) => ({
+							...message,
+							parts: message.parts?.map((part) =>
+								part.id === "waiting"
+									? tool("waiting", handBack, 40_000)
+									: part,
+							),
+						}))
+						.flatMap(detailRowsOf),
+				);
+				return { ok: true };
+			};
 			rpc.setStubs({
-				AnswerQuestion: () => {
+				AnswerQuestion: answer,
+				RespondPermission: answer,
+				RejectQuestion: () => {
 					rpc.sendChunk("SubscribeApprovals", [
 						{ _tag: "remove", id: "waiting-question", sequence: 2 },
 					]);
-					rpc.setDetailRows(
-						SESSION,
-						messages
-							.map((message) => ({
-								...message,
-								parts: message.parts?.map((part) =>
-									part.id === "waiting"
-										? tool("waiting", "AskUserQuestion", 40_000)
-										: part,
-								),
-							}))
-							.flatMap(detailRowsOf),
-					);
 					return { ok: true };
 				},
 			});
@@ -855,15 +868,25 @@ export const turnActivityHandlers: StepHandler[] = [
 					{
 						_tag: "upsert",
 						sequence: 1,
-						item: {
-							_tag: "question",
-							sessionId: SESSION,
-							toolId: "waiting-question",
-							toolUseId: "waiting",
-							providerId: "claude",
-							...(asyncQuestion ? { delivery: "async" } : {}),
-							questions,
-						},
+						item:
+							kind === "waiting-plan"
+								? {
+										_tag: "permission",
+										sessionId: SESSION,
+										requestId: "waiting-question",
+										toolUseId: "waiting",
+										toolName: "ExitPlanMode",
+										toolInput: { plan: "Deploy to staging." },
+									}
+								: {
+										_tag: "question",
+										sessionId: SESSION,
+										toolId: "waiting-question",
+										toolUseId: "waiting",
+										providerId: "claude",
+										...(asyncQuestion ? { delivery: "async" } : {}),
+										questions,
+									},
 					},
 				]);
 			await expect(world.page.locator("#messages")).toContainText(
@@ -945,8 +968,8 @@ export const turnActivityHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "expand answered hand-back",
-		match: /^I expand the answered hand-back row$/,
+		name: "open answered hand-back in Q&A",
+		match: /^I open the answered hand-back row in Q&A$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("turn-hand-back-row").click();
 		},
@@ -955,10 +978,12 @@ export const turnActivityHandlers: StepHandler[] = [
 		name: "assert original hand-back details",
 		match: /^the answered hand-back shows its original tool details$/,
 		run: async ({ world }) => {
-			await expect(
-				panel(world.page).locator('.step-log [data-tool-id="answered"]'),
-			).toBeVisible();
-			await expect(panel(world.page).locator(".step-log")).toContainText(
+			const qa = panel(world.page).getByRole("region", {
+				name: "Turn Q&A",
+				exact: true,
+			});
+			await expect(qa).toBeVisible();
+			await expect(qa).toContainText(
 				kinds.get(world.page)?.endsWith("ExitPlanMode")
 					? "Deploy to staging."
 					: "Use staging.",
@@ -994,18 +1019,20 @@ export const turnActivityHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert waiting question placement",
-		match: /^the open hand-back is below the reply$/,
+		match: /^the open hand-back is in Q&A instead of below the reply$/,
 		run: async ({ world }) => {
 			const form = world.page.locator(".question-card");
 			await expect(form).toBeVisible();
-			await expect(panel(world.page).locator(".question-card")).toHaveCount(0);
-			const reply = await world.page
-				.locator("#messages .msg-assistant")
-				.boundingBox();
-			const question = await form.boundingBox();
-			if (!reply || !question)
-				throw new Error("Reply or question has no bounds");
-			expect(question.y).toBeGreaterThanOrEqual(reply.y + reply.height);
+			await expect(
+				panel(world.page)
+					.getByRole("region", { name: "Turn Q&A", exact: true })
+					.locator(".question-card"),
+			).toBeVisible();
+			await expect(
+				world.page
+					.locator("#messages .tool-item")
+					.filter({ has: world.page.locator(".question-card") }),
+			).toHaveCount(1);
 		},
 	},
 	{

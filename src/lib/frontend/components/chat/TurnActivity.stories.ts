@@ -240,7 +240,7 @@ const handBackMessages = [
 const [handBack = EMPTY_TURN] = segmentTurns(handBackMessages, false);
 const handBackLog = turnLog(handBack);
 
-/** Both sides of a question share one head, strip and expandable log. */
+/** Both sides of a question share one head, strip and log. */
 export const HandBack: Story = {
 	args: {
 		turn: handBack,
@@ -258,8 +258,31 @@ export const HandBackExpanded: Story = {
 			canvas.getByRole("button", { name: "Expand turn", expanded: false }),
 		);
 		await userEvent.click(canvas.getByTestId("turn-hand-back-row"));
-		await expect(canvas.getByText("Use the staging project.")).toBeVisible();
+		await expect(
+			within(canvas.getByRole("region", { name: "Turn Q&A" })).getByText(
+				"Use the staging project.",
+			),
+		).toBeVisible();
 	},
+};
+
+export const HandBackQa: Story = {
+	...HandBack,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Expand turn", expanded: false }),
+		);
+		await userEvent.click(canvas.getByRole("tab", { name: /^Q&A$/ }));
+		await expect(
+			canvas.getByRole("region", { name: "Turn Q&A" }),
+		).toHaveTextContent("Answered");
+	},
+};
+
+export const HandBackQaLight: Story = {
+	...HandBackQa,
+	globals: { theme: "light" },
 };
 
 const truncatedMessages = [

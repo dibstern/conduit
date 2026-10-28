@@ -35,6 +35,136 @@ Examples:
   | phone    | Minimised  | live    | 3    |
   | desktop  | Minimised  | live    | 3    |
 
+Scenario Outline: Q&A is available only on Turns with hand-backs
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a <kind> turn
+  Then the Turn <availability> Q&A on <viewport>
+  And the messages region visually matches turn-qa-navigation-<jev>-<viewport>-<availability> at 98 percent
+
+Examples:
+  | jev      | viewport | kind                         | availability |
+  | active   | desktop  | two-segment AskUserQuestion   | offers       |
+  | active   | phone    | two-segment AskUserQuestion   | offers       |
+  | inactive | desktop  | two-segment ExitPlanMode      | offers       |
+  | inactive | phone    | two-segment ExitPlanMode      | offers       |
+  | active   | desktop  | wake                         | omits        |
+  | active   | phone    | wake                         | omits        |
+  | inactive | desktop  | wake                         | omits        |
+  | inactive | phone    | wake                         | omits        |
+
+Scenario Outline: Q&A keeps each question, plan and answer in turn order
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a qa-history turn
+  When I select the Turn Q&A tab
+  Then Q&A lists the question and plan with their answers in order
+  And the messages region visually matches turn-qa-history-<jev>-<viewport> at 98 percent
+
+Examples:
+  | jev      | viewport |
+  | active   | desktop  |
+  | active   | phone    |
+  | inactive | desktop  |
+  | inactive | phone    |
+
+Scenario Outline: An open plan is reviewed and approved in Q&A
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a waiting-plan turn
+  When I select the Turn Q&A tab
+  Then the plan approval is answerable only in Q&A
+  When I approve the Q&A plan
+  Then the Q&A plan approval reaches the relay
+  And the answered Turn returns to its live log default
+  And the messages region visually matches turn-qa-plan-approved-<jev>-<viewport> at 98 percent
+
+Examples:
+  | jev      | viewport |
+  | active   | desktop  |
+  | active   | phone    |
+  | inactive | desktop  |
+  | inactive | phone    |
+
+Scenario Outline: Each hand-back pin opens Q&A at its entry
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a qa-history turn
+  Then the strip has a question-mark pin for each hand-back
+  When I activate hand-back <entry> by <via>
+  Then Q&A focuses hand-back <entry>
+  When I activate hand-back <entry> by pin
+  Then Q&A focuses hand-back <entry>
+  And the messages region visually matches turn-qa-pin-<jev>-<viewport>-<entry> at 98 percent
+
+Examples:
+  | jev      | viewport | entry | via          |
+  | active   | desktop  | 1     | pin          |
+  | active   | phone    | 2     | pin          |
+  | inactive | desktop  | 2     | pin keyboard |
+  | inactive | phone    | 1     | pin          |
+  | active   | desktop  | 2     | collapsed pin |
+  | active   | phone    | 1     | collapsed pin |
+  | inactive | desktop  | 1     | collapsed pin |
+  | inactive | phone    | 2     | collapsed pin |
+
+Scenario Outline: Each hand-back log row opens Q&A at its entry
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a qa-history turn
+  When I activate hand-back <entry> by row
+  Then Q&A focuses hand-back <entry>
+
+Examples:
+  | jev      | viewport | entry |
+  | active   | desktop  | 2     |
+  | active   | phone    | 1     |
+  | inactive | desktop  | 1     |
+  | inactive | phone    | 2     |
+
+Scenario Outline: Q&A preserves an unfinished answer across view changes
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a waiting turn
+  When I draft an answer in Q&A
+  And I select the turn Usage tab
+  And I select the Turn Q&A tab
+  Then Q&A keeps the unfinished answer
+  When I choose the waiting Turn log
+  And I select the Turn Q&A tab
+  Then Q&A keeps the unfinished answer
+  When I select the Q&A staging option
+  And I select the turn Usage tab
+  And I select the Turn Q&A tab
+  Then Q&A keeps the selected staging option
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Dismissing an async question keeps it closed in Q&A
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a async turn
+  When I select the Turn Q&A tab
+  And I dismiss the Q&A async question
+  And I select the turn Usage tab
+  And I select the Turn Q&A tab
+  Then the Q&A async question stays dismissed
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario Outline: The phone Show menu explains each cumulative stop
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
@@ -113,18 +243,28 @@ Examples:
   | desktop  |
   | phone    |
 
-Scenario Outline: A waiting Turn defaults to Full log with its ticker
-  Given message surfacing is active at Most
+Scenario Outline: Waiting defaults to Q&A, respects picks and returns to the live log after answering
+  Given message surfacing is <jev> at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the turn log session has a waiting turn
-  Then the Turn defaults to Full log with a three-step ticker
-  And the messages region visually matches turn-waiting-ticker-<viewport> at 98 percent
+  Then the waiting Turn defaults to Q&A
+  And the messages region visually matches turn-waiting-qa-<jev>-<viewport> at 98 percent
+  When I choose the waiting Turn log
+  Then the waiting Turn respects the log pick with a three-step ticker
+  When I select the turn Usage tab
+  Then Usage replaces the card and log without selecting a Show stop
+  When I select the Turn Q&A tab
+  And I answer the waiting turn question
+  Then the waiting turn answer reaches the relay
+  And the answered Turn returns to its live log default
 
 Examples:
-  | viewport |
-  | desktop  |
-  | phone    |
+  | jev      | viewport |
+  | active   | desktop  |
+  | active   | phone    |
+  | inactive | desktop  |
+  | inactive | phone    |
 
 Scenario Outline: A live Turn defaults to Full log and restores its saved stop on settle
   Given message surfacing is active at Most
@@ -739,7 +879,7 @@ Scenario Outline: A hand-back stays in one turn log with its earlier message
   When I open the combined turn log
   Then the combined log orders the earlier message, hand-back and later work
   And the earlier hand-back message has its judged pin
-  When I expand the answered hand-back row
+  When I open the answered hand-back row in Q&A
   Then the answered hand-back shows its original tool details
   And the messages region visually matches <baseline> at 98 percent
 
@@ -770,14 +910,15 @@ Examples:
   | desktop  | wake-empty | turn-log-wake-empty-desktop  |
   | phone    | wake-empty | turn-log-wake-empty-phone    |
 
-Scenario Outline: A waiting Turn keeps its open question answerable below its reply
+Scenario Outline: Open questions remain answerable in Q&A
   Given message surfacing is active at All messages
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the turn log session has a <kind> turn
   Then the turn has one activity head, strip and log
   And only the final turn reply is outside the activity
-  And the open hand-back is below the reply
+  When I select the Turn Q&A tab
+  Then the open hand-back is in Q&A instead of below the reply
   When I answer the waiting turn question
   Then the waiting turn answer reaches the relay
   When I open the combined turn log

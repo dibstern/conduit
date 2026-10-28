@@ -25,9 +25,10 @@
 	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 	import Button from "./Button.svelte";
 
-	let { segments, seams = [], width = $bindable(0), active = null, markers = { kind: "dots", dots: [] }, cardSlot = { kind: "none" }, card, openAsk = null, belowLevel = false, cited = null, phone = false, preview, sliderText, oninteraction, onpick, onjump, oncommand }: {
+	let { segments, seams = [], handBacks = [], width = $bindable(0), active = null, markers = { kind: "dots", dots: [] }, cardSlot = { kind: "none" }, card, openAsk = null, belowLevel = false, cited = null, phone = false, preview, sliderText, oninteraction, onpick, onjump, oncommand }: {
 		segments: readonly { id: string; left: number; width: number; label: string; tone: keyof typeof TONES; running?: boolean }[];
 		seams?: readonly { id: string; left: number; width: number }[];
+		handBacks?: readonly { id: string; x: number; label: string }[];
 		width?: number;
 		active?: string | null;
 		markers?: Markers | undefined;
@@ -91,7 +92,7 @@
 	}
 	function pointerDown(event: PointerEvent) {
 		if (event.button !== 0 || !event.isPrimary || !trackEl) return;
-		const id = (event.target as Element).closest<HTMLElement>("[data-surface-part]")?.dataset["surfacePart"] ?? stepAt(xAt(event.clientX))?.id;
+		const id = (event.target as Element).closest<HTMLElement>("[data-hand-back]")?.dataset["handBack"] ?? (event.target as Element).closest<HTMLElement>("[data-surface-part]")?.dataset["surfacePart"] ?? stepAt(xAt(event.clientX))?.id;
 		if (!id) return;
 		gesture = { kind: "pressed", id, x: event.clientX, y: event.clientY };
 		// Synthetic events have no browser pointer to capture.
@@ -114,6 +115,7 @@
 		const previous = gesture;
 		clear();
 		if (trackEl?.hasPointerCapture(event.pointerId)) trackEl.releasePointerCapture(event.pointerId);
+		if (previous.kind === "pressed" && handBacks.some((pin) => pin.id === previous.id)) { onjump?.(previous.id); return; }
 		if (markers.kind === "pins") {
 			if (previous.kind === "dragging") { const pin = markers.pins.find((pin) => pin.part.uuid === previous.id); if (pin) onpick?.(pin); }
 			else { const group = groups.find((group) => group.leader.part.uuid === previous.id); if (group) pickGroup(group); else onjump?.(stepAt(xAt(event.clientX))?.id ?? previous.id); }
@@ -123,9 +125,9 @@
 		} else { cursor = stepAt(xAt(event.clientX))?.id ?? previous.id; onjump?.(cursor); }
 	}
 	function keyboard(event: KeyboardEvent) {
-		const button = (event.target as Element).closest<HTMLButtonElement>("button[data-surface-part], button[data-step-id]");
+		const button = (event.target as Element).closest<HTMLButtonElement>("button[data-surface-part], button[data-step-id], button[data-hand-back]");
 		if (button) {
-			const buttons = [...trackEl?.querySelectorAll<HTMLButtonElement>(button.hasAttribute("data-step-id") ? ".surface-strip button[data-step-id]" : ".pin-lane button[data-surface-part]") ?? []];
+			const buttons = [...trackEl?.querySelectorAll<HTMLButtonElement>(button.hasAttribute("data-hand-back") ? ".surface-strip button[data-hand-back]" : button.hasAttribute("data-step-id") ? ".surface-strip button[data-step-id]" : ".pin-lane button[data-surface-part]") ?? []];
 			const index = buttons.indexOf(button);
 			let next: number;
 			switch (event.key) {
@@ -133,7 +135,7 @@
 				case "ArrowRight": case "ArrowDown": next = Math.min(buttons.length - 1, index + 1); break;
 				case "Home": next = 0; break;
 				case "End": next = buttons.length - 1; break;
-				case "Enter": case " ": clear(); oncommand?.(event); event.stopPropagation(); return;
+				case "Enter": case " ": clear(); if (!button.hasAttribute("data-hand-back")) oncommand?.(event); event.stopPropagation(); return;
 				default: if (oncommand) { clear(); oncommand(event); } return;
 			}
 			event.preventDefault(); event.stopPropagation(); clear();
@@ -189,6 +191,9 @@
 			{/each}
 			{#each seams as seam (seam.id)}
 				<span data-step-id={seam.id} aria-hidden="true" class="absolute top-1/2 h-[10px] w-[2px] -translate-y-1/2 bg-text-secondary" style:left="{seam.left}%"></span>
+			{/each}
+			{#each handBacks as pin, index (pin.id)}
+				<Button variant="ghost" size="content" hoverFill="none" class="absolute top-1/2 z-[var(--z-raised)] flex size-[19px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-turn-bg font-mono text-[12px] text-status-ask ring-1 ring-status-ask pointer-events-auto" style="left:clamp(10px, {pin.x}%, calc(100% - 10px))" data-hand-back={pin.id} data-testid="turn-hand-back-pin" ariaLabel={`Q&A ${index + 1}: ${pin.label}`} onclick={(event) => { if (event.detail === 0) { clear(); onjump?.(pin.id); } }}>?</Button>
 			{/each}
 			{#if markers.kind === "pins" && anchor}<i class="surface-thumb" style:left={anchor}></i>{/if}
 		</div>
