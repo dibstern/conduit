@@ -958,6 +958,16 @@
 		photosPicker?.open();
 	}
 
+	/** A pasted image takes the Add Photos path. A clipboard carrying text (an
+	 *  Office copy also carries a rendered image) pastes as text, as before. */
+	function handlePaste(event: ClipboardEvent) {
+		if (!event.clipboardData || event.clipboardData.types.includes("text/plain")) return;
+		const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+		if (images.length === 0) return;
+		event.preventDefault();
+		void processSelectedFiles(images);
+	}
+
 	function handleAttachFiles() {
 		if (!getProviderDriver(composerDriver)?.supportsFileAttachments) {
 			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before attaching files.";
@@ -1395,6 +1405,7 @@
 								onblur={() => { composerFocused = false; }}
 								onkeydown={handleKeydown}
 								onkeyup={handleKeyup}
+								onpaste={handlePaste}
 								onclick={handleClick}
 								oncompositionstart={handleCompositionStart}
 								oncompositionend={handleCompositionEnd}
