@@ -36,8 +36,8 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 	{
 		name: "peek at the nearest message across one work step",
 		match:
-			/^the collapsed peek follows the nearest message across one work step$/,
-		run: async ({ world }) => {
+			/^the collapsed peek follows the nearest message across one work step( while dragging)?$/,
+		run: async ({ world, match }) => {
 			const page = world.page;
 			const scope = panel(page, "3");
 			await scope.scrollIntoViewIfNeeded();
@@ -56,6 +56,10 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 				(first.x + first.width / 2 + second.x + second.width / 2) / 2;
 			expect(midpoint - 2).toBeGreaterThan(work.x);
 			expect(midpoint + 2).toBeLessThan(work.x + work.width);
+			if (match[1]) {
+				await page.mouse.move(midpoint - 8, work.y + work.height / 2);
+				await page.mouse.down();
+			}
 			for (const [offset, ordinal] of [
 				[-2, "1"],
 				[2, "2"],
@@ -64,6 +68,14 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 				await expect(
 					scope.getByTestId("surfacing-minimised-peek"),
 				).toHaveAttribute("data-ordinal", ordinal);
+			}
+			if (match[1]) {
+				await scope
+					.getByTestId("surfacing-minimised-strip")
+					.dispatchEvent("pointercancel", { pointerId: 1 });
+				await page.mouse.up();
+				await page.mouse.move(0, 0);
+				await page.mouse.move(midpoint + 2, work.y + work.height / 2);
 			}
 			await expect(scope).toHaveAttribute("data-minimised", "true");
 			await expect(page.getByRole("tooltip")).toHaveCount(0);
