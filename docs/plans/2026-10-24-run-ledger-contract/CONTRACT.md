@@ -1978,10 +1978,17 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   `project_inactive` or `session_ended`). Run-end evidence clears this liveness even without
   authority; it changes Run state only with authority (3.4). An outstanding wake execution also holds
   the native-session fence (section 9) until session end, so admission after its Run has Ended
-  waits for it as it would behind a user Run's retained start (D18). A wake Run's deadline expiry runs
+  waits for it as it would behind a user Run's retained start (D18). A `turn_started` that joins a wake
+  Run under another label adds a wake execution for that label: every execution label of a wake
+  Run is outstanding work and a fence member by these rules, each cleared by its own Run-end
+  evidence or coverage of its label (and, for membership only, session end). The deadline stop
+  sequence acts on the wake Run's first execution label; once the Run has Ended, the Tombstone
+  cleanup expiry runs the provider's fence-expiry column against every execution label still a
+  member (D28). A wake Run's deadline expiry runs
   its provider's stop sequence against it (Claude and Codex `close`, Cursor `kill_and_respawn`,
   OpenCode `probe native_session`), confirm-gated as in 8.4. While the project is inactive it
-  issues nothing, and `project_active` reconciliation settles it. `turn_started` with no active
+  issues nothing, and `project_active` reconciliation settles it, acting on every execution label
+  still a member as the Tombstone cleanup expiry does (D29). `turn_started` with no active
   Run records a wake Run even while the project is inactive (LI9); having no authority, it
   issues no effect.
 - **`anythingMayAct`** is true for a non-ended Run, a send that may still act, or tasks live or
@@ -2000,7 +2007,9 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
 - **Confirm gate.** A destructive step (an ignored interrupt, restart, kill, end-session, an ignored
   interrupt while paused) with tasks live or unknown waits with a pending confirm. The interrupt
   deadline never destroys on its own. A confirm must match the latest snapshot; a stale confirm is
-  rejected. With no snapshot the UI says "background state unknown" and always asks.
+  rejected. With no snapshot the UI says "background state unknown" and always asks. A pending
+  confirm names the destruction it gates, its step and the execution label it acts on; confirming
+  issues exactly that step against that label (D29).
 - `snapshotEntry` is the 1-based count of task-set entries accepted by the session:
   `tasks_snapshot` evidence and `process_started` settlements, excluding older labels. A
   `process_started` that leaves a pending confirm open refreshes it with the new count, so a
@@ -2026,7 +2035,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   the project is inactive it is recorded and issued in the `project_active` decision, after that
   decision's reconciliation probes and ahead of any start or steer (D17). The ledger never waits
   for `process_started` to issue it: the feeder (4.4) takes it like any send, spawns a runner when
-  none is alive, and transmits in issue order, so it is the first send on that runner (D22).
+  none is alive, and transmits in issue order, so it is the first send on that runner (D22). A send issued with no process takes the label of
+  the session's next `process_started`, the runner the feeder spawned for it (D23).
 - Its confirmation never holds back a start: issue order alone places it ahead of queued inputs,
   and its confirmation deadline drives only its view (D19).
 - The provider may report it queued ("queued by Claude"). Its confirmation deadline is an ordinary
@@ -2034,6 +2044,12 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   shows `unconfirmed`; the tracker re-reads native state (Claude's transcript, Codex's
   `thread/goal/get`) and shows "Clear not confirmed" or "Pause not confirmed" with Retry. The tracker
   runs no timer.
+- The confirmation deadline starts at issue: a command recorded while the project is inactive has
+  none until the `project_active` decision issues it. A sent command's deadline keeps running while
+  the project is inactive; `Unconfirmed` is a view, and the tracker's re-read needs no authority
+  (D27).
+- A covered native command's view is `Failed` with the covering cause as its code: `process_lost`,
+  `kill_and_respawn` or `session_ended` (D24).
 
 <!-- src: BG Decision 3; AUDIT A4; AUDIT-2 T5 -->
 
@@ -2126,7 +2142,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   | Claude | start, steer | a result naming the send's input uuid; `command_lifecycle` cancelled before started (NotConsumed); journal `absent` with no acceptance | no | none | close, then `kill_and_respawn` |
   | Codex (32.2.13) | start, steer | the runner's result, held back across a goal chain until the goal ends or the successor deadline expires | yes | none; `thread/status` idle is not proof | stop sequence |
   | Cursor | start, steer | the native `wait()` result | yes | none | `kill_and_respawn` |
-  | OpenCode | start, steer, `cancel_request`, abort | `query_ended` plus a covering probe | no | `probe native_session` returning `native_idle`; omission from `session.statuses` counts only after `session.get` confirms the identity; `retry` is busy | probe |
+  | OpenCode | start, steer, `cancel_request`, abort | `query_ended`, then a covering probe (a trusted covering idle probe alone is work ended, 3.5; D26) | no | `probe native_session` returning `native_idle`; omission from `session.statuses` counts only after `session.get` confirms the identity; `retry` is busy | probe |
 
   - Claude's `command_lifecycle` for a held start or steer is an Answer naming that
     transmission's token. `cancelled` before any `started` is NotConsumed for that
@@ -2812,6 +2828,13 @@ port.
 - D20: a retry is anchored where its obligation opens: the outcome for a send, the issue for a probe; `retryAt` only raises it (3.7).
 - D21: a command receipt naming another commandId is Rejected, retired or not (3.4, 9).
 - D22: the ledger issues a native command without waiting for a process; the feeder spawns a runner and sends it first (8.5). Rejected: waiting for `process_started` (only the feeder spawns, so a lone command deadlocks every later start); letting the start spawn first (breaks command-before-inputs order); a ledger spawn effect (a second spawner).
+- D23: a send issued with no process takes the label of the session's next `process_started` (8.5). Rejected: the first answer's label, or none (loss before any answer would pin `anythingMayAct` until session end).
+- D24: a covered native command shows `Failed` with code `process_lost`, `kill_and_respawn` or `session_ended` (8.5).
+- D25: a Claude wake member leaves at its label's `query_ended` with or without a result, as section 9 already says for `resultReleasesFence` no (9).
+- D26: for OpenCode, a trusted covering idle probe alone is work ended, for start sends and wake executions alike; the table's sequence is the usual path, not a conjunction (3.5, 9).
+- D27: native-command confirmation starts at issue and keeps running while the project is inactive (8.5). Rejected: pausing it while inactive (a second clock rule for a view-only deadline).
+- D28: a turn joining a wake Run under another label is a wake execution of its own: live and a fence member until its own Run-end evidence or coverage; the Tombstone cleanup expiry run- D29: a pending confirm names the destruction it gates (step and target execution label), and confirming issues exactly that; `project_active` reconciliation of a wake Run acts on every execution label still a member (8.3, 8.4). Rejected: confirming against the Run's first label (a joined label's gated destruction would hit the wrong process).
+s fence expiry against every remaining member label (8.3). Rejected: killing the current process at the wake deadline (destruction would depend on arrival order); moving the wake label to the newest (hides work still running under the first label, LI8).
 
 ## Appendix B. Old-id mapping
 
