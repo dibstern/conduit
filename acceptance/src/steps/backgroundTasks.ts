@@ -148,6 +148,14 @@ export async function setLiveTasks(
 					: undefined,
 		},
 	]);
+	// Working attention moves the sidebar row from Idle to Running a beat after
+	// the rows land; wait so a screenshot cannot catch it still under Idle.
+	const sidebarShown = await page
+		.locator('[data-testid$="-shelf-toggle"]')
+		.first()
+		.isVisible();
+	if (tasks.length > 0 && sidebarShown)
+		await expect(page.getByTestId("running-shelf-toggle")).toBeVisible();
 }
 
 export const backgroundTasksHandlers: StepHandler[] = [
@@ -380,16 +388,6 @@ export const backgroundTasksHandlers: StepHandler[] = [
 			await expect(
 				world.page.getByTestId("background-tasks-row"),
 			).toBeVisible();
-			// Working attention moves the sidebar row from Idle to Running a beat
-			// after the task row appears; wait so a screenshot cannot catch Idle.
-			const sidebarShown = await world.page
-				.locator('[data-testid$="-shelf-toggle"]')
-				.first()
-				.isVisible();
-			if (sidebarShown)
-				await expect(
-					world.page.getByTestId("running-shelf-toggle"),
-				).toBeVisible();
 		},
 	},
 	{
