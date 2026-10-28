@@ -1,5 +1,40 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Jev-off turns keep a plain collapsed head and open Log and Usage
+  Given message surfacing is inactive at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And minimising uses the dark theme with Turns open <preference>
+  And the panel choice session has a <phase> turn
+  Then the Jev-off turn is collapsed with its head phrase and plain strip
+  And the messages region visually matches turn-jev-off-collapsed-<phase>-<viewport> at 98 percent
+  When I expand the surfaced turn
+  Then the Jev-off footer has Log 16 and Usage tabs with cost
+  And the Jev-off Log shows <rows> plain rows
+  And the messages region visually matches turn-jev-off-open-<phase>-<viewport> at 98 percent
+  When I select the turn Usage tab
+  Then Usage replaces the card and log without selecting a Show stop
+  And the Jev-off footer has Log 16 and Usage tabs with cost
+  When I select the turn Log tab
+  Then the Jev-off Log shows <rows> plain rows
+  When I collapse the plain turn log
+  Then the Jev-off turn is collapsed with its head phrase and plain strip
+
+Examples:
+  | viewport | preference | phase   | rows |
+  | phone    | Expanded   | settled | 16   |
+  | desktop  | Expanded   | settled | 16   |
+  | phone    | Auto       | settled | 16   |
+  | desktop  | Auto       | settled | 16   |
+  | phone    | Minimised  | settled | 16   |
+  | desktop  | Minimised  | settled | 16   |
+  | phone    | Expanded   | live    | 3    |
+  | desktop  | Expanded   | live    | 3    |
+  | phone    | Auto       | live    | 3    |
+  | desktop  | Auto       | live    | 3    |
+  | phone    | Minimised  | live    | 3    |
+  | desktop  | Minimised  | live    | 3    |
+
 Scenario Outline: The phone Show menu explains each cumulative stop
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup

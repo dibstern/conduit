@@ -93,6 +93,93 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "assert Jev-off collapsed head and strip",
+		match:
+			/^the Jev-off turn is collapsed with its head phrase and plain strip$/,
+		run: async ({ world }) => {
+			const turn = panel(world.page);
+			const head = turn.getByRole("button", {
+				name: "Expand turn",
+				exact: true,
+			});
+			await expect(head).toBeVisible();
+			await expect(head).toContainText("8 reads");
+			await expect(
+				turn.getByRole("slider", { name: /Activity timeline/ }),
+			).toBeVisible();
+			for (const selector of [
+				".step-log",
+				'[data-testid="turn-show-bar"]',
+				'[data-testid="surfacing-msg-card"]',
+				".surface-head-chips",
+				".pin-chip",
+				".unread-dot",
+				'[data-testid="surfacing-level"]',
+			])
+				await expect(turn.locator(selector)).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert Jev-off Log and Usage footer",
+		match: /^the Jev-off footer has Log 16 and Usage tabs with cost$/,
+		run: async ({ world }) => {
+			const turn = panel(world.page);
+			const bar = turn.getByTestId("turn-show-bar");
+			await expect(bar.getByRole("tab")).toHaveCount(2);
+			await expect(
+				bar.getByRole("tab", { name: "Log", exact: true }),
+			).toHaveText("Log16");
+			await expect(
+				bar.getByRole("tab", { name: "Usage", exact: true }),
+			).toBeVisible();
+			await expect(bar.locator(".turn-meta")).toHaveText("Cost unavailable");
+			for (const selector of [
+				'[data-testid="surfacing-level"]',
+				".pin-chip",
+				".unread-dot",
+				".surface-head-chips",
+				'[data-testid="surfacing-msg-card"]',
+			])
+				await expect(turn.locator(selector)).toHaveCount(0);
+			await expect(bar.getByText("Show", { exact: true })).toHaveCount(0);
+			await expect(
+				bar.getByRole("button", { name: "Make default", exact: true }),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert Jev-off plain log and live ticker",
+		match: /^the Jev-off Log shows (\d+) plain rows$/,
+		run: async ({ world, match }) => {
+			const turn = panel(world.page);
+			await expect(
+				turn.getByRole("tab", { name: "Log", exact: true }),
+			).toHaveAttribute("aria-selected", "true");
+			const log = turn.getByRole("region", {
+				name: "Turn log, 16 steps",
+				exact: true,
+			});
+			await expect(log.locator("[data-log-part]:visible")).toHaveCount(
+				Number(match[1]),
+			);
+			await expect(log.locator("[data-message-number]")).toHaveCount(0);
+			await expect(
+				log.getByText(
+					"Opening one subscription per session could exhaust the socket budget.",
+					{ exact: true },
+				),
+			).toBeVisible();
+			if (match[1] === "3") {
+				await expect(
+					log.getByRole("button", { name: "+ 13 earlier steps", exact: true }),
+				).toBeVisible();
+				await expect(
+					turn.getByTestId("surfacing-minimise-toggle"),
+				).toContainText("Working");
+			}
+		},
+	},
+	{
 		name: "assert selected below-stop pin paint",
 		match:
 			/^the selected pin keeps its category tint and secondary number below the saved stop$/,

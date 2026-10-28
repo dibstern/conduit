@@ -161,6 +161,7 @@ export function createTurnPanel(
 ): TurnPanelState<"log">;
 export function createTurnPanel(input: PanelInput): TurnPanelState;
 export function createTurnPanel(input: PanelInput): TurnPanelState {
+	const stops = $derived(input.jev ? messageStops : logStops);
 	const key = $derived(JSON.stringify([input.sessionId ?? "", input.turn.id]));
 	const reveal = $derived.by(() => {
 		const entry = input.sessionId ? pending.get(input.sessionId) : undefined;
@@ -225,9 +226,9 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 							: {
 									kind: "show",
 									stop:
-										!input.jev || (revealStop ?? choice) === "log"
+										(revealStop ?? choice) === "log"
 											? "log"
-											: saved,
+											: (stops.find((stop) => stop === saved) ?? stops[0]),
 								},
 				},
 	);
@@ -262,7 +263,7 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 			return phase;
 		},
 		get stops() {
-			return input.jev ? messageStops : logStops;
+			return stops;
 		},
 		get view() {
 			return view;
@@ -292,7 +293,7 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 			setTurnMinimised(input.sessionId, input.turn.id, true);
 		},
 		show(stop) {
-			if (!input.jev && stop !== "log") return;
+			if (!stops.some((available) => available === stop)) return;
 			switch (stop) {
 				case "log":
 					pick("log");

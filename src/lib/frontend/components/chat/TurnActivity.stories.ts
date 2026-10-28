@@ -607,3 +607,90 @@ export const UsageLive: Story = {
 	...Usage,
 	args: { ...Usage.args, turn: skilledLive, segment: skilledLiveSegment },
 };
+
+/** Jev-off keeps the plain head and strip at both viewport sizes. */
+export const JevOffCollapsed: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		sessionId: "turn-activity-jev-off-collapsed",
+		turn: settled,
+		segment: settledSegment,
+		final: true,
+		surfacing: {
+			...skillSurfacing,
+			status: {
+				...skillSurfacing.status,
+				enabled: false,
+				active: false,
+				summariesEnabled: false,
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("button", { name: "Expand turn" }),
+		).toHaveTextContent(/reads/);
+		await expect(
+			canvas.getByRole("slider", { name: /Activity timeline/ }),
+		).toBeVisible();
+		await expect(canvas.queryByTestId("turn-show-bar")).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByRole("region", { name: /^Turn log/ }),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const JevOffOpen: Story = {
+	...JevOffCollapsed,
+	args: { ...JevOffCollapsed.args, sessionId: "turn-activity-jev-off-open" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const head = canvas.getByRole("button", { name: "Expand turn" });
+		await userEvent.click(head);
+		head.blur();
+		await expect(
+			canvas.getByRole("tab", { name: "Log", selected: true }),
+		).toBeVisible();
+		await expect(canvas.getByRole("tab", { name: "Usage" })).toBeVisible();
+		await expect(
+			canvas.getByRole("region", { name: /^Turn log/ }),
+		).toBeVisible();
+		await expect(
+			canvas.queryByRole("button", { name: "Show messages" }),
+		).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByTestId("surfacing-msg-card"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const JevOffLive: Story = {
+	...JevOffOpen,
+	args: {
+		...JevOffCollapsed.args,
+		sessionId: "turn-activity-jev-off-live",
+		turn: live,
+		segment: liveSegment,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const head = canvas.getByRole("button", { name: "Expand turn" });
+		await userEvent.click(head);
+		head.blur();
+		await expect(head).toHaveTextContent("Working");
+		await expect(
+			canvas.getByRole("tab", { name: "Log", selected: true }),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: /^\+ \d+ earlier steps$/ }),
+		).toBeVisible();
+		await expect(
+			[
+				...canvasElement.querySelectorAll<HTMLElement>(
+					".step-log [data-log-part]",
+				),
+			].filter((node) => node.offsetHeight > 0),
+		).toHaveLength(3);
+	},
+};
