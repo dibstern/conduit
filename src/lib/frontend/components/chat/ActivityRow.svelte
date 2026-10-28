@@ -39,7 +39,6 @@
 		liveTasks,
 		taskListedAt,
 		duration,
-		highlight = false,
 		messageNumber,
 		messageCategory,
 		onmessage,
@@ -50,7 +49,6 @@
 		liveTasks: readonly BackgroundTask[];
 		taskListedAt: ReadonlyMap<string, number>;
 		duration?: number | undefined;
-		highlight?: boolean;
 		messageNumber?: number | undefined;
 		messageCategory?: { glyph: string; colour: string | undefined } | undefined;
 		onmessage?: (() => void) | undefined;
@@ -119,7 +117,7 @@
 		<div class="flex items-center gap-[6px]">
 			<Button
 				variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" disabledStyle="undimmed"
-				class="{launch ? '@container' : ''} {highlight ? 'bg-selection' : ''}"
+				class={launch ? "@container" : ""}
 				disabled={!!launch && !childSession}
 				aria-expanded={launch ? undefined : expanded}
 				ariaLabel={launch
@@ -233,7 +231,7 @@
 	<!-- A boundary, not a step: there is nothing to open, so it is a rule across
 	     the log rather than a row. The saving is the one number worth reading. -->
 	<div
-		class="compaction-rule flex items-center gap-[8px] py-[6px] text-[12px] text-text-dimmer {highlight ? 'bg-selection' : ''}"
+		class="compaction-rule flex items-center gap-[8px] py-[6px] text-[12px] text-text-dimmer"
 		data-part={part.uuid}
 	>
 		<span class="h-px flex-1 bg-border" aria-hidden="true"></span>
@@ -249,8 +247,8 @@
 		<span class="h-px flex-1 bg-border" aria-hidden="true"></span>
 	</div>
 {:else}
-	<div data-part={part.uuid} data-message-number={messageNumber} data-highlighted={highlight || undefined}>
-		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" class={highlight ? "bg-selection" : ""} aria-expanded={onmessage ? undefined : expanded} onclick={() => { if (onmessage) onmessage(); else expanded = !expanded; }}>
+	<div data-part={part.uuid} data-message-number={messageNumber}>
+		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={onmessage ? undefined : expanded} onclick={() => { if (onmessage) onmessage(); else expanded = !expanded; }}>
 			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs {style.text}" style:color={messageCategory?.colour}>{#if messageCategory}<span aria-hidden="true">{messageCategory.glyph}</span>{" "}{/if}#{messageNumber}</span>
 			{:else}<span class="shrink-0 {style.text}"><Icon name={style.icon} size={14} /></span>{/if}
 			<span class="flex-1 truncate italic text-text-secondary">{firstLine(part.rawText, 120)}</span>
