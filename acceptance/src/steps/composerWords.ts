@@ -446,14 +446,10 @@ export const composerWordsHandlers: StepHandler[] = [
 		name: "assert workspace warning is an icon and actions stay in the menu",
 		match:
 			/^the composer checkout has a workspace (hint|mismatch) icon without inline actions$/,
-		run: async ({ world, match }) => {
+		run: async ({ world }) => {
 			const warning = world.page
 				.getByTestId("composer-checkout")
-				.getByTestId(
-					match[1] === "hint"
-						? "workspace-hint"
-						: "workspace-mismatch-indicator",
-				);
+				.getByTestId("workspace-notice-indicator");
 			await expect(warning).toBeVisible();
 			await expect(warning).toHaveText("");
 			await expect(warning).toHaveAttribute("aria-label", /.+/);
@@ -464,6 +460,20 @@ export const composerWordsHandlers: StepHandler[] = [
 			await expect(
 				world.page.getByTestId("workspace-hint-dismiss"),
 			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert multiple workspace notices share one accessible warning mark",
+		match:
+			/^the composer checkout has exactly one warning mark naming (.+) and (.+)$/,
+		run: async ({ world, match }) => {
+			const checkout = world.page.getByTestId("composer-checkout");
+			const warning = checkout.getByTestId("workspace-notice-indicator");
+			await expect(warning).toHaveCount(1);
+			await expect(checkout.locator("svg.lucide-circle-alert")).toHaveCount(1);
+			const labels = `${match[1]}, ${match[2]}`;
+			await expect(warning).toHaveAccessibleName(labels);
+			await expect(warning).toHaveAttribute("title", labels);
 		},
 	},
 	{

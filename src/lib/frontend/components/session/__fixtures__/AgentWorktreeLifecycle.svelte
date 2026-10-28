@@ -1,24 +1,26 @@
 <script lang="ts">
-	import type { SessionGit } from "../../../../shared-types.js";
 	import Button from "../../ui/Button.svelte";
 	import GitIdentity from "../GitIdentity.svelte";
 
-	let { directory, git, presentation }: { directory: string; git: SessionGit | undefined; presentation: "word" | "control" | "row" } = $props();
+	// The story owns the session write: components may not speak the transport's vocabulary.
+	let { directory, presentation, setWorktree }: {
+		directory: string;
+		presentation: "word" | "control" | "row";
+		// Optional so the fixture stays assignable to the GitIdentity story type.
+		setWorktree?: (entered: boolean) => void;
+	} = $props();
 	let entered = $state(false);
-	const worktreeGit: SessionGit = {
-		branch: "worktree-header-agent",
-		worktree: "header-agent",
-		dirty: true,
-		ahead: 1,
-		behind: 0,
-	};
+	function setEntered(value: boolean) {
+		setWorktree?.(value);
+		entered = value;
+	}
 </script>
 
 <div class="flex max-w-[320px] flex-col items-start gap-3">
 	<p role="status" data-testid="agent-worktree-status" class="text-xs text-text-muted">Composer checkout · Running turn</p>
-	<GitIdentity {presentation} directory={entered ? `${directory}/.claude/worktrees/header-agent` : directory} git={entered ? worktreeGit : git} />
+	<GitIdentity {presentation} directory={entered ? `${directory}/.claude/worktrees/header-agent` : directory} />
 	<div class="flex gap-2">
-		<Button variant="ghost" disabled={entered} onclick={() => { entered = true; }}>EnterWorktree</Button>
-		<Button variant="ghost" disabled={!entered} onclick={() => { entered = false; }}>ExitWorktree</Button>
+		<Button variant="ghost" disabled={entered} onclick={() => setEntered(true)}>EnterWorktree</Button>
+		<Button variant="ghost" disabled={!entered} onclick={() => setEntered(false)}>ExitWorktree</Button>
 	</div>
 </div>

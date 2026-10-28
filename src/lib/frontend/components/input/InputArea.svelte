@@ -260,7 +260,6 @@
 	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug : getDraftProject() ?? "");
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
 	const composerDirectory = $derived(composerProject ? effectiveWorkingDirectory(composerProject.folders[0], currentSession?.workspace) : undefined);
-	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
 	const accountId = $derived(composerAccountId(currentSession));
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === accountId));
 	// Wait for accounts and session placement before showing settings. Catalog
@@ -1247,17 +1246,6 @@
 			<GitIdentity
 				presentation="row"
 				directory={composerDirectory}
-				git={composerGit}
-				workspaceCause={session.workspace?.cause}
-				workspaceMissing={session.workspaceMissing}
-				workspaceMismatch={session.workspaceMismatch}
-				workspaceHint={session.workspaceHint}
-				loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-				onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
-				onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
-				oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
-				ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
-				onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 			>
 				{#snippet children(attention, checkout, warning)}
 					{@render phoneMore(rows, trigger, checkout, warning, attention)}
@@ -1520,17 +1508,6 @@
 										presentation="control"
 										compact={sessionViewState.composerTier === "phone"}
 										directory={composerDirectory}
-										git={composerGit}
-										workspaceCause={session.workspace?.cause}
-										workspaceMissing={session.workspaceMissing}
-										workspaceMismatch={session.workspaceMismatch}
-										workspaceHint={session.workspaceHint}
-										loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-										onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
-										onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
-										oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
-										ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
-										onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 									/>
 								{/key}
 							{/if}
@@ -1650,17 +1627,6 @@
 								<GitIdentity
 									presentation="word"
 									directory={composerDirectory}
-									git={composerGit}
-									workspaceCause={session.workspace?.cause}
-									workspaceMissing={session.workspaceMissing}
-									workspaceMismatch={session.workspaceMismatch}
-									workspaceHint={session.workspaceHint}
-									loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-									onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
-									onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
-									oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
-									ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
-									onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 								/>
 							{/key}
 						{/if}
