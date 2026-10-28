@@ -25,6 +25,15 @@ function publish(page: Page, messages: History[]) {
 
 export const turnPanelHandlers: StepHandler[] = [
 	{
+		name: "open a message through the turn number shortcut",
+		match: /^I open turn message #(\d+) with digits and Enter$/,
+		run: async ({ world, match }) => {
+			await panel(world.page).getByTestId("surfacing-card").focus();
+			await world.page.keyboard.type(match[1] ?? "");
+			await world.page.keyboard.press("Enter");
+		},
+	},
+	{
 		name: "set a turn panel viewport width",
 		match: /^the viewport is (\d+) pixels wide$/,
 		run: async ({ world, match }) => {
