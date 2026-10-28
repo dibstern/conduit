@@ -117,6 +117,11 @@
 	   page's top-edge colour, so any shadow up there reads as a seam under it. */
 	--shadow-island: 0 24px 40px -16px rgba(0, 0, 0, 0.45);
 	--shadow-composer: 0 0 0 1px #2b2b31;
+	/* A hairline ring, a tight contact edge and a soft drop. The modal shadow
+	   smears a small floating card into the transcript behind it. */
+	--shadow-toast:
+		0 0 0 1px rgba(255, 255, 255, 0.09), 0 1px 2px rgba(0, 0, 0, 0.45),
+		0 12px 28px -10px rgba(0, 0, 0, 0.7);
 
 	--color-thinking: #a1a1aa;
 	--color-thinking-bg: rgba(161, 161, 170, 0.06);
@@ -360,6 +365,9 @@
 	--shadow-settings-segment:
 		0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
 	--shadow-composer: 0 0 0 1px rgba(0, 0, 0, 0.09);
+	--shadow-toast:
+		0 0 0 1px rgba(19, 26, 37, 0.09), 0 1px 2px rgba(19, 26, 37, 0.07),
+		0 12px 28px -10px rgba(19, 26, 37, 0.28);
 
 	--color-thinking: #5d5d66;
 	--color-thinking-bg: rgba(93, 93, 102, 0.06);

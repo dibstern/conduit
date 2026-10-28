@@ -518,15 +518,15 @@ export const sessionSheetsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert sheet reason toast stays inside",
-		match: /^the session sheet stays open with the reason pill (.+)$/,
+		name: "assert sheet reason toast floats above the open sheet",
+		match: /^the session sheet stays open under the reason toast (.+)$/,
 		run: async ({ world, match }) => {
 			const sheet = world.page.locator(sheetSelector);
 			await expect(sheet).toBeVisible();
 			const reason = match[1] ?? "";
-			await expect(
-				sheet.getByTestId("session-sheet-toast").filter({ hasText: reason }),
-			).toHaveText(reason);
+			const toast = world.page.getByTestId("toast").filter({ hasText: reason });
+			await expect(toast).toHaveText(reason);
+			expect(await sheet.getByTestId("toast").count()).toBe(0);
 			const calls = requireRpcControl(world.page).getRequests();
 			expect(
 				calls.filter((request) => request.tag === "SnoozeSession"),

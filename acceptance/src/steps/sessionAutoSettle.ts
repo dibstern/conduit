@@ -166,9 +166,7 @@ export const sessionAutoSettleHandlers: StepHandler[] = [
 		name: "assert no auto-settle error toast",
 		match: /^no auto-settle error toast is shown$/,
 		run: async ({ world }) => {
-			await expect(world.page.getByTestId("session-sheet-toast")).toHaveCount(
-				0,
-			);
+			await expect(world.page.getByTestId("toast")).toHaveCount(0);
 			await expect(
 				world.page.getByText("Couldn't change auto-settle", { exact: true }),
 			).toHaveCount(0);

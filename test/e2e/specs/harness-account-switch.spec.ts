@@ -928,7 +928,7 @@ for (const decision of [
 				if (decision === "limited") {
 					await tryAgain.click();
 					await expect(
-						page.locator('.toast-card[data-variant="error"]'),
+						page.locator('[data-testid="toast"][data-variant="error"]'),
 					).toContainText(
 						`Claude still shows the weekly limit until ${usageForecastTime(resetAt * 1000, Date.now())}.`,
 					);
@@ -1329,7 +1329,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 			if (preferred) {
 				// The toast lives seven seconds, so it is checked before anything slower.
 				const toast = page
-					.locator(".toast-card")
+					.getByTestId("toast")
 					.filter({ hasText: "Switched to Account 2" });
 				await expect(toast).toBeVisible();
 				await expect(toast).toContainText(

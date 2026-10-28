@@ -493,7 +493,7 @@ export const PhoneDisabledReason: Story = {
 		await userEvent.click(snooze);
 		await expect(menu).toBeVisible();
 		await expect(
-			within(menu).getByTestId("session-sheet-toast"),
+			await within(document.body).findByTestId("toast"),
 		).toHaveTextContent("Unpin to snooze");
 		await userEvent.keyboard("{ArrowDown}");
 		await expect(within(menu).getByTestId("session-ctx-unpin")).toHaveFocus();
@@ -518,9 +518,10 @@ export const PhoneNotifications: Story = {
 	},
 	play: async () => {
 		const menu = await phoneMenu();
-		await expect(
-			within(menu).getByRole("menuitem", { name: "Undo" }),
-		).toBeVisible();
+		const undo = within(document.body).getByRole("button", { name: "Undo" });
+		// Toasts fade in, and toBeVisible fails while opacity is still 0.
+		await waitFor(() => expect(undo).toBeVisible());
+		await expect(menu).not.toContainElement(undo);
 		showToast({
 			title: "Error",
 			body: "Beta failed because its account is unavailable.",
@@ -529,23 +530,23 @@ export const PhoneNotifications: Story = {
 			duration: 60_000,
 		});
 		await waitFor(() =>
-			expect(within(menu).getAllByTestId("session-sheet-toast")).toHaveLength(
-				2,
-			),
+			expect(within(document.body).getAllByTestId("toast")).toHaveLength(2),
 		);
-		const pill = menu.querySelector(
-			'[data-testid="session-sheet-toast"][data-variant="error"]',
+		const pill = document.querySelector(
+			'[data-testid="toast"][data-variant="error"]',
 		);
 		await expect(pill).toHaveTextContent(
 			"Beta failed because its account is unavailable.",
 		);
 		await expect(pill).toHaveAttribute("aria-live", "assertive");
-		await expect(
-			within(menu).getByText("Beta", { selector: '[data-variant="error"] b' }),
-		).toBeVisible();
-		await expect(
-			within(menu).getByRole("menuitem", { name: "Undo" }),
-		).toBeVisible();
+		await waitFor(() =>
+			expect(
+				within(document.body).getByText("Beta", {
+					selector: '[data-variant="error"] b',
+				}),
+			).toBeVisible(),
+		);
+		await expect(undo).toBeVisible();
 	},
 };
 export const PhoneNotificationsLight: Story = {

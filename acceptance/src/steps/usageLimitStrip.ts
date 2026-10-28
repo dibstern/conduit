@@ -971,7 +971,7 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			await expect(actions).toHaveText([match[1] ?? "", match[2] ?? ""]);
 			await expect(actions.first()).toHaveAttribute("data-kind", "primary");
 			const toast = await world.page
-				.locator(".toast-card")
+				.getByTestId("toast")
 				.filter({ has: actions.first() })
 				.boundingBox();
 			const right = await actions.last().boundingBox();

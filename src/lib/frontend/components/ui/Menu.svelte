@@ -255,6 +255,12 @@
 		preventScroll: false,
 		loop: true,
 		preventOverflowTextSelection: false,
+		// Toasts float above the sheet, often raised by it ("Unpin to snooze");
+		// dismissing one must not close the sheet underneath.
+		onInteractOutside: (event) => {
+			if (event.target instanceof Element && event.target.closest("[data-toast-layer]")) event.preventDefault();
+			else rest.onInteractOutside?.(event);
+		},
 		...(ariaLabel === undefined ? {} : { "aria-label": ariaLabel }),
 		class: `${sheetEdge === "top" ? "relative pointer-events-auto" : "fixed inset-x-0 bottom-0"} z-[var(--z-sheet)] w-full focus-visible:outline-hidden`,
 	});

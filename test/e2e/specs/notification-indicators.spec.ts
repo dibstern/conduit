@@ -6,8 +6,8 @@
 // notification events, local phase and read state, which could disagree with
 // the server.
 //
-// The AttentionBanner follows root-row counts across sessions and reconciles
-// when a new scoped list arrives.
+// The arrival toast fires once when another session's root-row counts start
+// asking for you, including when a reconciling list brings them in.
 //
 // Uses WS mock — no real OpenCode or relay needed.
 // Frontend served by Vite preview, WebSocket intercepted by page.routeWebSocket().
@@ -116,9 +116,9 @@ function statusWord(page: Page, sessionId: string) {
 	return sessionItem(page, sessionId).locator(".session-item-status");
 }
 
-/** The AttentionBanner component with role="status". */
-function attentionBanner(page: Page) {
-	return page.locator(".permission-notification-enter[role='status']");
+/** The toast announcing that another session started needing you. */
+function arrivalToast(page: Page) {
+	return page.locator('[data-testid="toast"][data-variant="attention"]');
 }
 
 async function mockRelayWithViewSessionRpc(
@@ -205,7 +205,12 @@ test.describe("server-derived notification indicators", () => {
 				},
 			],
 		});
-		await expect(attentionBanner(page)).toBeVisible({ timeout: 5_000 });
+		await expect(arrivalToast(page)).toHaveText(
+			/Session B — other has a question/,
+			{
+				timeout: 5_000,
+			},
+		);
 		await expect(statusWord(page, SESS_B)).toHaveText("Reply", {
 			timeout: 5_000,
 		});
@@ -228,7 +233,6 @@ test.describe("server-derived notification indicators", () => {
 				},
 			],
 		});
-		await expect(attentionBanner(page)).toHaveCount(0);
 		await expect(statusWord(page, SESS_B)).toHaveCount(0);
 	});
 	test("shows the status word the session list sends for a session", async ({
@@ -334,7 +338,7 @@ test.describe("server-derived notification indicators", () => {
 		await expect(statusWord(page, SESS_B)).toHaveCount(0);
 	});
 
-	test("clears the attention banner when you open that session", async ({
+	test("Open on the arrival toast goes to that session", async ({
 		page,
 		baseURL,
 	}) => {
@@ -342,55 +346,50 @@ test.describe("server-derived notification indicators", () => {
 
 		control.sendMessage(shellSnapshotWith({ [SESS_B]: { questions: 1 } }));
 
-		await expect(attentionBanner(page)).toBeVisible({ timeout: 5_000 });
-
-		// The title end: the row's hover actions cover its centre.
-		await sessionItem(page, SESS_B).click({
-			position: { x: 48, y: 12 },
-			timeout: 5_000,
-		});
+		await arrivalToast(page)
+			.getByTestId("toast-action")
+			.click({ timeout: 5_000 });
 		await page.waitForFunction(
 			(sessId) => window.location.pathname.includes(`/s/${sessId}`),
 			SESS_B,
 			{ timeout: 5_000 },
 		);
 
-		// The banner never points at the session you are already looking at.
-		await expect(attentionBanner(page)).toHaveCount(0);
+		await expect(arrivalToast(page)).toHaveCount(0);
 	});
 
-	test("AttentionBanner appears when another session's row has a question", async ({
+	test("an arrival toast names another session that has a question", async ({
 		page,
 		baseURL,
 	}) => {
 		const control = await openChat(page, baseURL);
 
-		await expect(attentionBanner(page)).toHaveCount(0);
+		await expect(arrivalToast(page)).toHaveCount(0);
 
 		control.sendMessage(shellSnapshotWith({ [SESS_B]: { questions: 1 } }));
 
-		await expect(attentionBanner(page)).toBeVisible({ timeout: 5_000 });
-		await expect(attentionBanner(page)).toContainText("Session B", {
-			timeout: 5_000,
-		});
-		await expect(attentionBanner(page)).toContainText("attention", {
-			timeout: 5_000,
-		});
+		await expect(arrivalToast(page)).toHaveText(
+			/Session B — other has a question/,
+			{
+				timeout: 5_000,
+			},
+		);
+		await expect(arrivalToast(page)).toHaveCount(1);
 	});
 
-	test("reconcile via shell snapshot corrects stale banner state", async ({
+	test("a reconciling shell snapshot announces the session it brings in", async ({
 		page,
 		baseURL,
 	}) => {
 		const control = await openChat(page, baseURL);
 
-		// No banner initially (initial shell snapshot has no pendingQuestionCount)
+		// No toast initially (initial shell snapshot has no pendingQuestionCount)
 		await expect(sessionItem(page, SESS_B)).toBeVisible({ timeout: 5_000 });
-		await expect(attentionBanner(page)).toHaveCount(0);
+		await expect(arrivalToast(page)).toHaveCount(0);
 
 		// Server sends a reconciliation shell snapshot with pendingQuestionCount on B.
 		// This simulates the shell snapshot that corrects stale state.
-		// The root snapshot replaces the row counts used by the banner.
+		// The root snapshot replaces the row counts the toast is derived from.
 		control.sendMessage({
 			type: "shell_snapshot",
 			roots: true,
@@ -414,10 +413,11 @@ test.describe("server-derived notification indicators", () => {
 			],
 		});
 
-		// The banner should now point at session B with two questions.
-		await expect(attentionBanner(page)).toBeVisible({ timeout: 5_000 });
-		await expect(attentionBanner(page)).toContainText("Session B", {
-			timeout: 5_000,
-		});
+		await expect(arrivalToast(page)).toHaveText(
+			/Session B — other has a question/,
+			{
+				timeout: 5_000,
+			},
+		);
 	});
 });
