@@ -20,6 +20,7 @@ function panel(view: TurnPanelState["view"]): TurnPanelState {
 		show: fn(),
 		usage: fn(),
 		qa: fn(),
+		hold: fn(),
 		makeDefault: fn(async () => {}),
 		resetLevel: fn(),
 	};
