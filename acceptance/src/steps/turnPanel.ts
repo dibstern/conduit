@@ -107,11 +107,11 @@ export const turnPanelHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const head = panel(world.page).getByTestId("surfacing-minimise-toggle");
 			await expect(head).toContainText("Working");
-			const icons = head.locator("svg");
-			await expect(icons.nth(0)).toHaveClass(/chevron-down/);
-			await expect(icons.nth(1)).toHaveClass(/loader-circle/);
-			const ordered = await head.evaluate((node) => {
-				const spinner = node.querySelector("svg:last-of-type");
+			const running = '[data-conduit-mark][data-variant="running"]';
+			await expect(head.locator("svg").first()).toHaveClass(/chevron-down/);
+			await expect(head.locator(running)).toBeVisible();
+			const ordered = await head.evaluate((node, selector) => {
+				const spinner = node.querySelector(selector);
 				const label = [...node.querySelectorAll("span")].find(
 					(span) => span.textContent === "Working",
 				);
@@ -123,7 +123,7 @@ export const turnPanelHandlers: StepHandler[] = [
 						Node.DOCUMENT_POSITION_FOLLOWING
 					)
 				);
-			});
+			}, running);
 			expect(ordered).toBe(true);
 		},
 	},
