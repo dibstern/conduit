@@ -57,6 +57,7 @@ const resolveAccountFolders = (state: AccountsState): AccountsState => ({
 export function makeAccountDirectory(
 	read: Effect.Effect<AccountsState>,
 	commit?: AccountDirectory["Service"]["apply"],
+	readOpenCodeStatuses?: Effect.Effect<ReadonlyMap<string, string>>,
 ): AccountDirectory["Service"] {
 	// Cursor's Keychain binding is read from the caller's context, so a reader
 	// running outside the daemon's request context must provide DaemonConfigRefTag
@@ -88,11 +89,21 @@ export function makeAccountDirectory(
 		snapshot: eligible,
 		list: Effect.map(eligible, list),
 		defaultFor: (driver) =>
-			Effect.map(eligible, (state) => defaultFor(state, driver)),
+			Effect.gen(function* () {
+				const state = yield* eligible;
+				const statuses = readOpenCodeStatuses
+					? yield* readOpenCodeStatuses
+					: undefined;
+				return defaultFor(state, driver, statuses);
+			}),
 		resolve: (ref) =>
-			Effect.flatMap(eligible, (state) =>
-				Effect.fromResult(resolve(state, ref)),
-			),
+			Effect.gen(function* () {
+				const state = yield* eligible;
+				const statuses = readOpenCodeStatuses
+					? yield* readOpenCodeStatuses
+					: undefined;
+				return yield* Effect.fromResult(resolve(state, ref, statuses));
+			}),
 		apply:
 			commit ??
 			((change) =>
@@ -105,7 +116,10 @@ export function makeAccountDirectory(
 	};
 }
 
-const makeWritableAccountDirectory = (initial: AccountsState) =>
+const makeWritableAccountDirectory = (
+	initial: AccountsState,
+	readOpenCodeStatuses?: Effect.Effect<ReadonlyMap<string, string>>,
+) =>
 	Effect.gen(function* () {
 		const state = yield* Ref.make(resolveAccountFolders(initial));
 		const changes = yield* Semaphore.make(1);
@@ -138,17 +152,25 @@ const makeWritableAccountDirectory = (initial: AccountsState) =>
 						return next;
 					}).pipe(Effect.uninterruptible),
 				),
+			readOpenCodeStatuses,
 		);
 	});
 
-/** Account metadata has its own atomic state, independent of process runtime. */
-export const AccountDirectoryStateLive = (initial: AccountsState) =>
-	Layer.effect(AccountDirectory, makeWritableAccountDirectory(initial));
+/** Account metadata stays independent; standalone readers without health use metadata-only defaults. */
+export const AccountDirectoryStateLive = (
+	initial: AccountsState,
+	readOpenCodeStatuses?: Effect.Effect<ReadonlyMap<string, string>>,
+) =>
+	Layer.effect(
+		AccountDirectory,
+		makeWritableAccountDirectory(initial, readOpenCodeStatuses),
+	);
 
 export const AccountDirectoryLive = (
 	launchLogin: ClaudeConfigDir,
 	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],
 	maxAccounts = 5,
+	readOpenCodeStatuses?: Effect.Effect<ReadonlyMap<string, string>>,
 ) =>
 	AccountDirectoryStateLive(
 		accountsStateFromInstances(
@@ -159,6 +181,7 @@ export const AccountDirectoryLive = (
 			launchLogin,
 			maxAccounts,
 		),
+		readOpenCodeStatuses,
 	);
 
 export const AccountDirectoryFromConfigLive = (

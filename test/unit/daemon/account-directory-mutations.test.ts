@@ -486,7 +486,7 @@ describe("account directory mutations", () => {
 						for (const deleted of state.deleted) {
 							const routed = resolve(state, { _tag: "Id", id: deleted.id });
 							const fallback = defaultFor(state, deleted.driver);
-							if (Option.isSome(fallback))
+							if (Option.isSome(fallback) && deleted.id !== "opencode")
 								expect(routed).toEqual(Either.succeed(fallback.value));
 							else expect(Either.isFailure(routed)).toBe(true);
 						}

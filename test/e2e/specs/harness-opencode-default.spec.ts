@@ -16,11 +16,67 @@
  *   DriverDefault, including its isolated server's synchronous title reply
  *   and boolean abort response during cleanup.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Effect } from "effect";
+import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import type { ProcessHarness } from "../../helpers/process-harness.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
+
+async function expectPromptOnServer(
+	harness: ProcessHarness,
+	sessionId: string | undefined,
+	accountId: string,
+	serverPid: number,
+	text: string,
+) {
+	if (!sessionId) throw new Error("Missing draft session id");
+	const db = new DatabaseSync(harness.daemonStorePath(), { readOnly: true });
+	let binding:
+		| { accountId: string; providerSessionId: string | null }
+		| undefined;
+	try {
+		binding = db
+			.prepare(
+				`SELECT provider AS accountId, provider_sid AS providerSessionId
+				 FROM session_providers WHERE session_id = ? AND status = 'active'`,
+			)
+			.get(sessionId) as typeof binding;
+	} finally {
+		db.close();
+	}
+	expect(binding?.accountId).toBe(accountId);
+	if (!binding?.providerSessionId)
+		throw new Error("Missing native OpenCode session id");
+	const path = `/session/${binding.providerSessionId}/prompt_async`;
+	const receivingRequest = () =>
+		harness
+			.opencodeRequestBodies()
+			.find(
+				(request) =>
+					request.method === "POST" &&
+					request.path === path &&
+					request.body.includes(text),
+			);
+	await expect.poll(receivingRequest).toMatchObject({ pid: serverPid, path });
+	return {
+		sessionId,
+		...binding,
+		expectedPid: serverPid,
+		receivingPid: receivingRequest()?.pid,
+		path,
+	};
+}
+
+function writeEvidence(project: string, evidence: Record<string, unknown>) {
+	const directory = resolve("test/e2e/opencode-default/artifacts");
+	mkdirSync(directory, { recursive: true });
+	const path = join(mkdtempSync(join(directory, `${project}-`)), "report.json");
+	writeFileSync(path, `${JSON.stringify(evidence, null, "\t")}\n`);
+	console.log(`OpenCode default evidence: ${path}`);
+}
 
 test.use({
 	harnessOptions: {
@@ -76,6 +132,13 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 	const selected = added.addedInstanceId;
 	if (!selected) throw new Error("Missing selected OpenCode id");
 	await browser.startInstance(selected);
+	const running = (await browser.instances()).instances;
+	const selectedPid = running.find((instance) => instance.id === selected)?.pid;
+	const managedPid = running.find(
+		(instance) => instance.id === "opencode",
+	)?.pid;
+	if (selectedPid === undefined || managedPid === undefined)
+		throw new Error("Missing selected or managed OpenCode pid");
 	const reply = await Effect.runPromise(
 		rpc.SetDefault({ instanceId: selected }),
 	);
@@ -110,20 +173,16 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 	};
 	try {
 		evidence["beforeOutage"] = await openDraft(selected);
-		// Prove the relay can actually create/send on its non-home server.
+		// Prove the relay creates and sends on the selected concrete server.
 		await new AppPage(page).sendMessage("selected server draft");
 		await expect(page).toHaveURL(/\/s\/[^/?]+/);
-		await expect
-			.poll(() =>
-				harness
-					.opencodeRequestBodies()
-					.some(
-						({ body, path }) =>
-							path.endsWith("/prompt_async") &&
-							body.includes("selected server draft"),
-					),
-			)
-			.toBe(true);
+		evidence["selectedDraftRequest"] = await expectPromptOnServer(
+			harness,
+			new URL(page.url()).pathname.split("/").at(-1),
+			selected,
+			selectedPid,
+			"selected server draft",
+		);
 		await page.goto("about:blank");
 		await browser.stopInstance(selected);
 		const storedAfterStop = saved().accountDefaults;
@@ -155,17 +214,13 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 				delivery: "queue",
 			}),
 		);
-		await expect
-			.poll(() =>
-				harness
-					.opencodeRequestBodies()
-					.some(
-						({ path, body }) =>
-							path.endsWith("/prompt_async") &&
-							body.includes("managed existing session"),
-					),
-			)
-			.toBe(true);
+		evidence["existingSessionRequest"] = await expectPromptOnServer(
+			harness,
+			existing,
+			"opencode",
+			managedPid,
+			"managed existing session",
+		);
 		const claude = await browser.createSession();
 		await browser.send(
 			claude,
@@ -237,11 +292,101 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 			.filter(
 				({ method, path }) => method === "POST" && path.endsWith("/message"),
 			);
-		const directory = resolve("artifacts/conduit-test-3fc0.7");
-		mkdirSync(directory, { recursive: true });
-		writeFileSync(
-			join(directory, `${testInfo.project.name}.json`),
-			`${JSON.stringify(evidence, null, "\t")}\n`,
-		);
+		writeEvidence(testInfo.project.name, evidence);
 	}
+});
+
+test.describe("named OpenCode selection", () => {
+	test.use({ startHarness: false });
+
+	test("an unavailable named selection sends its fallback draft to managed OpenCode", async ({
+		page,
+		harness,
+	}, testInfo) => {
+		const configPath = join(harness.configDir, "daemon.json");
+		const config = JSON.parse(readFileSync(configPath, "utf8")) as DaemonConfig;
+		const managed = config.instances?.[0];
+		if (!managed) throw new Error("Missing managed fixture config");
+		writeFileSync(
+			configPath,
+			JSON.stringify({
+				...config,
+				instances: [
+					managed,
+					{
+						...managed,
+						id: "remote",
+						name: "Named selection",
+						env: {
+							...managed.env,
+							CONDUIT_TEST_OPENCODE_STATE_PREFIX: "remote",
+						},
+					},
+				],
+				accountDefaults: { opencode: "remote" },
+			}),
+		);
+		await harness.restart();
+		const browser = await harness.connect();
+		await browser.startInstance("remote");
+		await browser.startInstance("opencode");
+		const running = (await browser.instances()).instances;
+		const selectedPid = running.find(
+			(instance) => instance.id === "remote",
+		)?.pid;
+		const managedPid = running.find(
+			(instance) => instance.id === "opencode",
+		)?.pid;
+		if (selectedPid === undefined || managedPid === undefined)
+			throw new Error("Missing selected or managed OpenCode pid");
+		const evidence: Record<string, unknown> = {
+			selected: "remote",
+			selectedPid,
+		};
+		try {
+			const picker = page.locator(
+				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
+			);
+			await new AppPage(page).goto(`${harness.baseUrl}/?p=process-test`);
+			await page.locator("#new-session-btn:visible").click();
+			await expect(picker).toHaveAttribute("data-instance-id", "remote");
+			await expect(picker).toHaveAttribute("data-shown-model", "fake-model");
+			await new AppPage(page).sendMessage("named selected draft");
+			await expect(page).toHaveURL(/\/s\/[^/?]+/);
+			evidence["selectedDraftRequest"] = await expectPromptOnServer(
+				harness,
+				new URL(page.url()).pathname.split("/").at(-1),
+				"remote",
+				selectedPid,
+				"named selected draft",
+			);
+			await page.goto("about:blank");
+			await browser.stopInstance("remote");
+			await new AppPage(page).goto(`${harness.baseUrl}/?p=process-test`);
+			await page.locator("#new-session-btn:visible").click();
+			await expect(picker).toHaveAttribute("data-instance-id", "opencode");
+			await expect(picker).toHaveAttribute("data-shown-model", "fake-model");
+			await new AppPage(page).sendMessage("named selection managed fallback");
+			await expect(page).toHaveURL(/\/s\/[^/?]+/);
+			evidence["fallbackDraftRequest"] = await expectPromptOnServer(
+				harness,
+				new URL(page.url()).pathname.split("/").at(-1),
+				"opencode",
+				managedPid,
+				"named selection managed fallback",
+			);
+			expect(
+				(await browser.instances()).instances.find(
+					(instance) => instance.id === "remote",
+				)?.status,
+			).toBe("stopped");
+			const saved = JSON.parse(readFileSync(configPath, "utf8")) as {
+				accountDefaults: Record<string, string>;
+			};
+			expect(saved.accountDefaults["opencode"]).toBe("remote");
+			evidence["duringOutageDefaults"] = saved.accountDefaults;
+		} finally {
+			writeEvidence(`${testInfo.project.name}-named-selection`, evidence);
+		}
+	});
 });

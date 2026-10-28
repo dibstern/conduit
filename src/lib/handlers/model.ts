@@ -8,7 +8,6 @@ import {
 	Ref,
 	Result,
 } from "effect";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../account-directory.js";
 import type { Account } from "../contracts/account.js";
 import type { AccountUnroutable } from "../contracts/limit-recovery.js";
 import {
@@ -355,19 +354,22 @@ export const getModelsResponse = (
 				yield* discover(fallback);
 		}
 
+		const defaultOpenCode = Option.getOrUndefined(
+			yield* directory.defaultFor("opencode"),
+		);
 		const inventoryInstanceId =
 			(getProviderDriver(activeDriver)?.catalogSource === "server"
 				? activeAccount?.id
-				: undefined) ?? instanceId;
+				: undefined) ??
+			instanceId ??
+			defaultOpenCode?.id;
 		const providers: ProviderInfo[] = [];
 		let nativeDefaultModel: string | undefined;
 		if (
 			getProviderDriver(instanceDriver)?.catalogSource === "server" ||
 			(instanceDriver === undefined &&
 				(getProviderDriver(activeDriver)?.catalogSource === "server" ||
-					((yield* directory.list).some(
-						(account) => account.id === MANAGED_OPENCODE_ACCOUNT_ID,
-					) &&
+					(defaultOpenCode !== undefined &&
 						(account === undefined || account.id === listedId))))
 		) {
 			const openCodeProviderResult = yield* Effect.result(
@@ -385,11 +387,7 @@ export const getModelsResponse = (
 					openCodeProviderResult.success.nativeDefaultModel,
 				);
 				const { globalSync } = yield* ProjectSettingsTag;
-				if (
-					inventoryInstanceId === undefined ||
-					inventoryInstanceId ===
-						(config.openCodeInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID)
-				)
+				if (inventoryInstanceId === defaultOpenCode?.id)
 					yield* globalSync.withPermits(1)(
 						Effect.gen(function* () {
 							const state = yield* Ref.get(yield* OverridesStateTag);
@@ -687,11 +685,7 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 		const account =
 			boundAccount?.driver === harness
 				? boundAccount
-				: yield* accounts.resolve(
-						harness === "opencode"
-							? { _tag: "Id", id: MANAGED_OPENCODE_ACCOUNT_ID }
-							: { _tag: "DriverDefault", driver: harness },
-					);
+				: yield* accounts.resolve({ _tag: "DriverDefault", driver: harness });
 		const catalog = yield* loadModelCatalog(harness, account.id);
 		const resolved = resolveTurnSettings(
 			{

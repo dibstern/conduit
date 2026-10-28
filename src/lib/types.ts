@@ -166,8 +166,6 @@ export interface ProjectRelayConfig {
 	>;
 	/** Shared daemon services; must include the daemon-owned ProviderAdapters. */
 	daemonConfigContext?: import("effect").Context.Context<never>;
-	/** Id of the OpenCode instance selected for this relay (default instance when omitted). */
-	openCodeInstanceId?: string;
 	/** Project working directory */
 	projectDir: string;
 	/** Additional Claude workspace folders, fixed for this relay's lifetime. */

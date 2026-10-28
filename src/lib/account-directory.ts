@@ -18,6 +18,10 @@ import {
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_DRIVERS,
 } from "./contracts/provider-instance.js";
+import {
+	openCodeInstanceFor,
+	openCodeStartSelection,
+} from "./contracts/start-selection.js";
 import type { DaemonConfig } from "./daemon/config-persistence.js";
 import { assertNever } from "./utils.js";
 
@@ -222,6 +226,9 @@ function materializeDefault(
 	accounts: ReadonlyArray<{
 		readonly id: string;
 		readonly driver: KnownProviderDriverKind;
+		readonly managed?: boolean | undefined;
+		readonly port?: number | undefined;
+		readonly url?: string | undefined;
 	}>,
 	driver: KnownProviderDriverKind,
 	storedId: string | undefined,
@@ -231,6 +238,11 @@ function materializeDefault(
 		(account) => account.id === storedId && account.driver === driver,
 	);
 	if (stored !== undefined) return Option.some(AccountIdSchema.make(stored.id));
+	if (driver === "opencode")
+		return Option.map(
+			Option.fromNullishOr(openCodeInstanceFor(accounts)),
+			(account) => AccountIdSchema.make(account.id),
+		);
 	for (const id of usageOrder) {
 		const account = accounts.find(
 			(account) => account.id === id && account.driver === driver,
@@ -550,14 +562,25 @@ export function accountsStateFromConfig(
 	);
 }
 
-/** Backend defaults keep OpenCode work independent of the draft's selected server. */
+/** Without a runtime snapshot, resolve metadata only (for standalone callers). */
 export function defaultFor(
 	state: AccountsState,
 	driver: KnownProviderDriverKind,
+	openCodeStatuses?: ReadonlyMap<string, string>,
 ): Option.Option<Account> {
 	const id =
 		driver === "opencode"
-			? Option.some(MANAGED_OPENCODE_ACCOUNT_ID)
+			? Option.some(
+					openCodeStartSelection(
+						list(state).map((account) => ({
+							...account,
+							status:
+								openCodeStatuses === undefined
+									? "healthy"
+									: openCodeStatuses.get(account.id),
+						})),
+					).account.id,
+				)
 			: state.defaults[driver];
 	return Option.flatMap(id, (accountId) =>
 		Option.fromNullishOr(
@@ -578,6 +601,7 @@ export function list(state: AccountsState): ReadonlyArray<AccountListItem> {
 export function resolve(
 	state: AccountsState,
 	ref: AccountRef,
+	openCodeStatuses?: ReadonlyMap<string, string>,
 ): Result.Result<Account, AccountUnroutable> {
 	if (ref._tag === "Id") {
 		const live = state.accounts.find((account) => account.id === ref.id);
@@ -585,13 +609,13 @@ export function resolve(
 		const driver =
 			state.deleted.find((account) => account.id === ref.id)?.driver ??
 			accountDriverAlias(ref.id);
-		if (driver !== undefined)
-			return Option.match(defaultFor(state, driver), {
+		if (driver !== undefined && ref.id !== MANAGED_OPENCODE_ACCOUNT_ID)
+			return Option.match(defaultFor(state, driver, openCodeStatuses), {
 				onNone: () => Result.fail(new AccountUnroutable({ ref })),
 				onSome: Result.succeed,
 			});
 	} else {
-		return Option.match(defaultFor(state, ref.driver), {
+		return Option.match(defaultFor(state, ref.driver, openCodeStatuses), {
 			onNone: () => Result.fail(new AccountUnroutable({ ref })),
 			onSome: Result.succeed,
 		});

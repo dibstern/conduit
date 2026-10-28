@@ -823,7 +823,7 @@ describe("model handlers with Effect-native model service", () => {
 			expect(instances.use).not.toHaveBeenCalled();
 			expect(api.provider.list).toHaveBeenCalledOnce();
 		}).pipe(Effect.provide(OpenCodeModelServiceLive.pipe(Layer.provide(Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag)(api),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 			Layer.succeed(OpenCodeInstancesTag)(instances),
 			Layer.succeed(ConfigTag)(makeMockConfig()),
 			Layer.succeed(LoggerTag)(makeMockLogger()),
@@ -935,7 +935,7 @@ describe("model handlers with Effect-native model service", () => {
 			const layer = OpenCodeModelServiceLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						Layer.succeed(OpenCodeAPITag)(api),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 						Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: api })),
 						Layer.succeed(ConfigTag)(makeMockConfig({ configDir, projectDir })),
 						Layer.succeed(LoggerTag)(logger),

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Option, PubSub, Ref } from "effect";
 import { afterAll, expect, vi } from "vitest";
+import { openCodeInstanceFor } from "../../../src/lib/contracts/start-selection.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
@@ -21,7 +22,6 @@ import {
 	makeProjectRegistryLive,
 	markError,
 	markReady,
-	openCodeInstanceFor,
 	readyEntries,
 	remove,
 	removeAll,

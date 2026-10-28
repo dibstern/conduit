@@ -1158,7 +1158,7 @@ export function makeTestHandlerLayer(
 		: OpenCodeModelServiceLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						openCodeApiLayer,
+						accountDirectoryLayer,
 						openCodeInstancesLayer,
 						configLayer,
 						loggerLayer,

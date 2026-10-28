@@ -744,14 +744,9 @@ const resolveOpenCodePromptTarget = (
 			call?.account.id ??
 			(yield* engine.value.getProviderForSessionEffect(sessionId));
 		const boundId = instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
-		const selectedId =
-			!call && boundId === MANAGED_OPENCODE_ACCOUNT_ID
-				? (Option.getOrUndefined(yield* Effect.serviceOption(ConfigTag))
-						?.openCodeInstanceId ?? boundId)
-				: boundId;
 		const running = providerProcessId
-			? yield* instances.value.ifRunning(selectedId, directory)
-			: Option.some(yield* instances.value.use(selectedId, directory));
+			? yield* instances.value.ifRunning(boundId, directory)
+			: Option.some(yield* instances.value.use(boundId, directory));
 		if (
 			Option.isNone(running) ||
 			(providerProcessId && running.value.promptProcessId !== providerProcessId)

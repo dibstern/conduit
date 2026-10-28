@@ -345,19 +345,36 @@ export function makeInstanceManagerStateLive(
 					),
 					accountsState.launchLogin,
 				).accounts;
-	return makeOpenCodeRuntimeStateLive(config, seeded, options).pipe(
-		Layer.merge(
-			accountsState === undefined
+	return Layer.unwrap(
+		Effect.gen(function* () {
+			const runtime = yield* InstanceManagerStateTag;
+			const readOpenCodeStatuses = Effect.map(
+				Ref.get(runtime),
+				(state) =>
+					new Map(
+						Array.from(
+							HashMap.values(state.instances),
+							(instance) => [instance.id, instance.status] as const,
+						),
+					),
+			);
+			return accountsState === undefined
 				? AccountDirectoryLive(
 						options?.launchLogin ?? captureClaudeLaunchLogin(process.env),
 						seeded,
 						config?.maxInstances ?? DEFAULT_CONFIG.maxInstances,
+						readOpenCodeStatuses,
 					)
-				: AccountDirectoryStateLive({
-						...accountsState,
-						accounts: [...runtimeAccounts, ...accountsState.accounts],
-					}),
-		),
+				: AccountDirectoryStateLive(
+						{
+							...accountsState,
+							accounts: [...runtimeAccounts, ...accountsState.accounts],
+						},
+						readOpenCodeStatuses,
+					);
+		}),
+	).pipe(
+		Layer.provideMerge(makeOpenCodeRuntimeStateLive(config, seeded, options)),
 	);
 }
 
@@ -629,63 +646,51 @@ export const getInstances = Effect.gen(function* () {
 		? (yield* Ref.get(config.value)).cursorUsageBinding
 		: undefined;
 	const state = yield* Ref.get(yield* InstanceManagerStateTag);
-	const runtimeOrder = new Map(
-		Array.from(
-			HashMap.keys(state.instances),
-			(id, index) => [id, index] as const,
-		),
-	);
-	return accounts
-		.map((account): OpenCodeInstance => {
-			const runtime = Option.getOrUndefined(
-				HashMap.get(state.instances, account.id),
-			);
-			return instanceInfo({
-				...(runtime ?? { status: "healthy", restartCount: 0, createdAt: 0 }),
-				id: account.id,
-				name: account.name,
-				...(account.colorSlot === undefined
-					? {}
-					: { colorSlot: account.colorSlot }),
-				driver: account.driver,
-				port:
-					account.driver === "opencode"
-						? (runtime?.port ?? account.port ?? 0)
-						: 0,
-				managed:
-					account.driver === "opencode" &&
-					(runtime?.managed ?? account.managed ?? false),
-				...(account.configuredFolder === undefined
-					? {}
-					: { configDir: account.configuredFolder }),
-				...(runtime?.url !== undefined
-					? { url: runtime.url }
-					: account.driver === "opencode" && account.url !== undefined
-						? { url: account.url }
-						: {}),
-				...(account.env === undefined
-					? {}
-					: {
-							env:
-								account.driver === "opencode" &&
-								(runtime?.managed ?? account.managed)
-									? publicManagedOpenCodeEnv(account.env)
-									: { ...account.env },
-						}),
-				isDefault: account.isDefault,
-				usageEligible:
-					PROVIDER_DRIVERS[account.driver].usageHarness !== undefined &&
-					account.usageEligible,
-				...(account.driver === "cursor"
-					? { cursorUsageSource: cursorUsageSource(account, binding) }
-					: {}),
-			});
-		})
-		.sort(
-			(left, right) =>
-				(runtimeOrder.get(left.id) ?? runtimeOrder.size) -
-				(runtimeOrder.get(right.id) ?? runtimeOrder.size),
+	return accounts.map((account): OpenCodeInstance => {
+		const runtime = Option.getOrUndefined(
+			HashMap.get(state.instances, account.id),
 		);
+		return instanceInfo({
+			...(runtime ?? { status: "healthy", restartCount: 0, createdAt: 0 }),
+			id: account.id,
+			name: account.name,
+			...(account.colorSlot === undefined
+				? {}
+				: { colorSlot: account.colorSlot }),
+			driver: account.driver,
+			port:
+				account.driver === "opencode"
+					? (runtime?.port ?? account.port ?? 0)
+					: 0,
+			managed:
+				account.driver === "opencode" &&
+				(runtime?.managed ?? account.managed ?? false),
+			...(account.configuredFolder === undefined
+				? {}
+				: { configDir: account.configuredFolder }),
+			...(runtime?.url !== undefined
+				? { url: runtime.url }
+				: account.driver === "opencode" && account.url !== undefined
+					? { url: account.url }
+					: {}),
+			...(account.env === undefined
+				? {}
+				: {
+						env:
+							account.driver === "opencode" &&
+							(runtime?.managed ?? account.managed)
+								? publicManagedOpenCodeEnv(account.env)
+								: { ...account.env },
+					}),
+			isDefault: account.isDefault,
+			usageEligible:
+				PROVIDER_DRIVERS[account.driver].usageHarness !== undefined &&
+				account.usageEligible,
+			...(account.driver === "cursor"
+				? { cursorUsageSource: cursorUsageSource(account, binding) }
+				: {}),
+		});
+	});
 }).pipe(Effect.withSpan("instance.getAll"));
 
 /** Mutation replies validate only the affected account, leaving other probes to inventory reads. */

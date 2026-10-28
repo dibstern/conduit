@@ -29,7 +29,31 @@ describe("OpenCode Instances use", () => {
 			foregroundCli: true,
 			autoStartOpenCode: true,
 			managedOpenCode: true,
+			managedOpenCodeId: "opencode",
 		});
+		const config = Either.getOrThrow(loadDaemonConfigResult(harness.configDir));
+		const managed = config?.instances?.find(({ id }) => id === "opencode");
+		if (!config || !managed)
+			throw new Error("Missing managed OpenCode fixture");
+		// Concrete servers need separate fake stores as well as separate processes.
+		writeFileSync(
+			join(harness.configDir, "daemon.json"),
+			JSON.stringify({
+				...config,
+				instances: [
+					...(config.instances ?? []),
+					{
+						...managed,
+						id: "managed-test",
+						name: "Named test",
+						env: {
+							...managed.env,
+							CONDUIT_TEST_OPENCODE_STATE_PREFIX: "named",
+						},
+					},
+				],
+			}),
+		);
 		await harness.restart();
 		return harness;
 	}
@@ -58,6 +82,11 @@ describe("OpenCode Instances use", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
+			evidence["providerRequests"] = fixture
+				.opencodeRequests()
+				.filter(
+					({ url }) => url.startsWith("/session") && !url.includes("/message"),
+				);
 			await fixture.terminate();
 			evidence["streamConnections"] = fixture.opencodeStreamConnections();
 			evidence["failures"] =
@@ -83,17 +112,18 @@ describe("OpenCode Instances use", () => {
 		const { instances } = await sendRpcRequest(socket, {
 			_tag: "GetInstances",
 		});
-		const instanceA = instances.find(({ id }) => id === "managed-test");
+		const instanceA = instances.find(({ id }) => id === "opencode");
 		const { addedInstanceId: instanceBId } = await sendRpcRequest(socket, {
 			_tag: "AddInstance",
 			name: "Other OpenCode",
 			driver: "opencode",
 			managed: true,
 			port: await findFreePort(0),
+			env: { CONDUIT_TEST_OPENCODE_STATE_PREFIX: "other" },
 		});
 		if (!instanceA || !instanceBId)
 			throw new Error("Expected two OpenCode instances");
-		// Concrete named accounts avoid the canonical id's default-instance alias.
+		// Exercise the concrete managed account alongside the named accounts.
 		const pidOf = (id: string) => {
 			const pid = Either.getOrThrowWith(
 				loadDaemonConfigResult(fixture.configDir),

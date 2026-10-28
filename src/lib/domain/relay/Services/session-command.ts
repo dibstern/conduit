@@ -16,7 +16,6 @@ import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
 import {
 	type KnownProviderDriverKind,
-	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
 import { sessionCreatedLineage } from "../../../contracts/session-ref.js";
@@ -432,7 +431,7 @@ export const applySessionCommand = (
 					command.type === "session.deleted")
 					? yield* (yield* AccountDirectory).resolve(
 							row === undefined
-								? { _tag: "Id", id: MANAGED_OPENCODE_ACCOUNT_ID }
+								? { _tag: "DriverDefault", driver: "opencode" }
 								: { _tag: "Id", id: row.provider },
 						)
 					: undefined;
@@ -794,7 +793,7 @@ const forkSessionInWorkspace = (
 		const accounts = yield* AccountDirectory;
 		const sourceAccount = yield* accounts.resolve(
 			parent === undefined
-				? { _tag: "Id", id: MANAGED_OPENCODE_ACCOUNT_ID }
+				? { _tag: "DriverDefault", driver: "opencode" }
 				: { _tag: "Id", id: parent.provider },
 		);
 		const account = options?.instanceId

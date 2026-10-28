@@ -36,7 +36,6 @@ import {
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
 	resolveWorktreeCleanup,
@@ -923,27 +922,6 @@ export const replaceRelay = (slug: string) =>
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.replaceRelay"),
 	);
-
-/** The first configured OpenCode endpoint drives the relay's default sessions. */
-export const openCodeInstanceFor = <
-	I extends {
-		id: string;
-		driver?: string;
-		managed?: boolean;
-		port?: number;
-		url?: string;
-	},
->(
-	instances: readonly I[],
-): I | undefined =>
-	instances.find((instance) => {
-		if (!getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer)
-			return false;
-		if (instance.managed === true || (instance.port ?? 0) > 0) return true;
-		if (instance.url !== undefined)
-			return URL.canParse(instance.url) && new URL(instance.url).port !== "0";
-		return instance.port === undefined;
-	});
 
 /**
  * Check if a project is currently in Registering state

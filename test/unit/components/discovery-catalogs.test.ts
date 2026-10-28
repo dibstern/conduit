@@ -745,9 +745,15 @@ describe("discovery catalogs over the RPC wire", () => {
 
 	it("a draft account pick hides the old lists while both account reads are in flight", async () => {
 		stop = discovery.watchCatalogs();
-		await vi.waitFor(() => expect(modelReads).toHaveLength(1));
+		await vi.waitFor(() => {
+			expect(modelReads).toHaveLength(1);
+			expect(agentReads).toHaveLength(1);
+		});
 		discovery.selectInstance("two");
-		await vi.waitFor(() => expect(modelReads).toHaveLength(2));
+		await vi.waitFor(() => {
+			expect(modelReads).toHaveLength(2);
+			expect(agentReads).toHaveLength(2);
+		});
 		modelReads[0]?.resolve(models("Old account model"));
 		agentReads[0]?.resolve(agents("Old account agent"));
 		await new Promise((resolve) => setTimeout(resolve, 0));

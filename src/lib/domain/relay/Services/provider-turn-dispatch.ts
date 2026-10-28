@@ -14,7 +14,6 @@ import { SqlClient } from "effect/sql";
 import { type Account, AccountSchema } from "../../../contracts/account.js";
 import { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import {
-	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_DRIVERS,
 	type ProviderDriverKind,
 	type ProviderDriverTraits,
@@ -1030,11 +1029,7 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 				? yield* Effect.result(
 						(yield* AccountDirectory).resolve({
 							_tag: "Id",
-							// The canonical binding names this relay's configured default.
-							id:
-								boundProviderId === MANAGED_OPENCODE_ACCOUNT_ID
-									? ((yield* ConfigTag).openCodeInstanceId ?? boundProviderId)
-									: boundProviderId,
+							id: boundProviderId,
 						}),
 					)
 				: Result.succeed(input.account);

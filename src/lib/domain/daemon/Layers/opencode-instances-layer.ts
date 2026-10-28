@@ -1240,11 +1240,7 @@ export const OpenCodeInstancesLive = makeOpenCodeInstancesLive(
 				({ driver }) =>
 					getProviderDriver(driver ?? "opencode")?.runsOpenCodeServer,
 			);
-			// The default id names the daemon's first OpenCode instance when no
-			// instance carries that id.
-			const instance =
-				instances.find(({ id }) => id === instanceId) ??
-				(instanceId === MANAGED_OPENCODE_ACCOUNT_ID ? instances[0] : undefined);
+			const instance = instances.find(({ id }) => id === instanceId);
 			const url = instance ? yield* getInstanceUrl(instance.id) : null;
 			if (!instance || !url) return undefined;
 			const auth = openCodeAuth(
