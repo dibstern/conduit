@@ -57,6 +57,8 @@
 	import UserMessage from "./UserMessage.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
 	import TurnActivity from "./TurnActivity.svelte";
+	import { createTurnPanel } from "../../stores/turn-panel.svelte.js";
+	import { messageSurfacing, sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
 	import { insertComposerReference } from "../input/composer-reference.svelte.js";
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
@@ -582,7 +584,17 @@
 		{/if}
 		{#if hasActivity}
 			{@const reply = segment.reply[0]}
-			<TurnActivity latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} final={true} entries={log.entries} renderResume={resumeDivider} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
+			{@const panel = createTurnPanel({
+				get sessionId() { return viewedSessionId ?? undefined; },
+				get turn() { return turn; },
+				get jev() { return sessionJevEnabled(findSession(viewedSessionId ?? ""), messageSurfacing.status); },
+				get processing() { return processing; },
+				get latestTurn() { return turn.id === latestTurnId; },
+				get newestSettledTurn() { return turn.id === newestEndedTurnId; },
+				get status() { return messageSurfacing.status; },
+				get categorySet() { return messageSurfacing.categorySet; },
+			})}
+			<TurnActivity {panel} latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} final={true} entries={log.entries} renderResume={resumeDivider} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
 				onjump={scrollCtrl.requestJump}
 				onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
 				forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}

@@ -50,7 +50,7 @@ export const turnPanelHandlers: StepHandler[] = [
 				...last,
 				time: {
 					created: last.time?.created ?? PINNED_CLOCK_MS,
-					completed: PINNED_CLOCK_MS + messages.length * 1000,
+					completed: Math.max(last.time?.created ?? 0, PINNED_CLOCK_MS) + 1000,
 				},
 			};
 			publish(world.page, messages);
@@ -72,7 +72,16 @@ export const turnPanelHandlers: StepHandler[] = [
 					id,
 					role: "assistant",
 					parentID: "surfacing-user",
-					time: { created: PINNED_CLOCK_MS + messages.length * 2000 },
+					time: {
+						created:
+							Math.max(
+								PINNED_CLOCK_MS,
+								...messages.map(
+									(message) =>
+										message.time?.completed ?? message.time?.created ?? 0,
+								),
+							) + 1000,
+					},
 					parts: [
 						{
 							id: `${id}-read`,

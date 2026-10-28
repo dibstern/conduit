@@ -25,6 +25,26 @@ export const SURFACE_LABELS = {
 };
 const rank = { hidden: 0, all: 1, balanced: 2, key: 3, final: 4 };
 
+/** The latest visible Ask belongs only to the transcript's last Turn. */
+export function openAsk(
+	turnParts: readonly ActivityPart[],
+	categorySet: CategorySet,
+	latestTurn: boolean,
+): SurfacePart | null {
+	if (!latestTurn) return null;
+	for (let i = turnParts.length - 1; i >= 0; i--) {
+		const part = turnParts[i];
+		if (part?.type !== "assistant") continue;
+		const result = surfacingLevel(
+			{ probabilities: part.surfacingProbabilities ?? null },
+			categorySet,
+			part.surfacingMark ?? undefined,
+		);
+		if (result.category === "ask" && result.level !== "hidden") return part;
+	}
+	return null;
+}
+
 export function surfaceTime(milliseconds: number): string {
 	const seconds = Math.max(0, Math.floor(milliseconds / 1000));
 	return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
@@ -149,12 +169,6 @@ export function surfaceTurn(input: {
 		target !== null &&
 		!target.pending &&
 		rank[target.level] < rank[input.level];
-	const ask = input.latestTurn
-		? [...turnMessages]
-				.reverse()
-				.find(({ category, level }) => category === "ask" && level !== "hidden")
-				?.part
-		: null;
 	const unread = visible.filter(({ read }) => read === false);
 	return {
 		nearestPin: (x: number) =>
@@ -184,7 +198,11 @@ export function surfaceTurn(input: {
 					? "Hidden at this level · in the step log"
 					: `At ${SURFACE_LABELS[target.level]}, below ${SURFACE_LABELS[input.level]} · opened directly`
 				: "",
-		openAsk: ask ?? null,
+		openAsk: openAsk(
+			input.turnParts ?? input.parts,
+			input.categorySet,
+			input.latestTurn,
+		),
 		unreadCount: unread.length,
 		// The recap and its bulk action cover the whole turn, including hand-backs.
 		unreadPartIds: turnMessages.flatMap(({ part, level }) =>

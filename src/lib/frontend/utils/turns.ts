@@ -69,6 +69,20 @@ export interface Turn {
 	live: boolean;
 }
 
+export type TurnPhase = "live" | "waiting" | "settled";
+
+/** Only the transcript's last Turn can still be running or waiting on a hand-back. */
+export function turnPhase(
+	turn: Turn,
+	processing: boolean,
+	latestTurn: boolean,
+): TurnPhase {
+	if (!processing || !latestTurn) return "settled";
+	const last = turn.segments.at(-1);
+	if (last?.end === undefined) return "live";
+	return last.handBack ? "waiting" : "settled";
+}
+
 /** Earlier replies become steps once more work follows; only the last reply
  * stays outside the panel. Segment boundaries still own phase and timing. */
 export function turnLog(
@@ -226,7 +240,7 @@ export function segmentTurns(
 	// segment can never receive more work — the types see to that. So a result
 	// mid-turn no longer strands the transcript: the next part opens a fresh
 	// segment and the turn reads as live again.
-	if (last) last.live = processing && last.segments.at(-1)?.end === undefined;
+	if (last) last.live = turnPhase(last, processing, true) === "live";
 	return turns;
 }
 
