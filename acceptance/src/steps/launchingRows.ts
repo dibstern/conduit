@@ -111,7 +111,12 @@ const breathing = (page: Page) =>
 	page
 		.locator("#messages .turn-activity")
 		.first()
-		.locator('[aria-label^="Activity timeline"] .animate-pulse');
+		.locator('[aria-label^="Activity timeline"] [data-step-id]')
+		.evaluateAll(
+			(steps) =>
+				steps.filter((step) => getComputedStyle(step).animationName !== "none")
+					.length,
+		);
 
 export const launchingRowsHandlers: StepHandler[] = [
 	{
@@ -204,9 +209,9 @@ export const launchingRowsHandlers: StepHandler[] = [
 		name: "assert breathing launching steps",
 		match: /^(no|[0-9]+) launching steps breathe on the activity strip$/,
 		run: async ({ world, match }) => {
-			await expect(breathing(world.page)).toHaveCount(
-				match[1] === "no" ? 0 : Number(match[1]),
-			);
+			await expect
+				.poll(() => breathing(world.page))
+				.toBe(match[1] === "no" ? 0 : Number(match[1]));
 		},
 	},
 	{
