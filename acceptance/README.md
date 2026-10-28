@@ -51,7 +51,7 @@ pnpm acceptance:visual:capture      # (re)capture baselines for the current plat
 pnpm acceptance:mutation:visual     # mutate example values to measure test strength
 ```
 
-Set `ACCEPTANCE_FEATURE=cursor-unavailable` to run or capture only that feature.
+Pass a feature name (`pnpm acceptance:visual cursor-unavailable`) or set `ACCEPTANCE_FEATURE=cursor-unavailable` to run or capture only that feature.
 `VISUAL_ACCEPTANCE_CAPTURE_BASELINES=cursor-unavailable-rail` further limits
 capture to the named baseline; other baselines remain assertions.
 

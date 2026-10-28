@@ -6,6 +6,11 @@ cd "$ROOT_DIR"
 
 . "$ROOT_DIR/scripts/acceptance-env.sh"
 
+# A feature name argument (`pnpm acceptance:visual <feature>`) does the same as
+# ACCEPTANCE_FEATURE, and keeps the command free of an env prefix so a sandboxed
+# Codex can match it against its allow rules.
+ACCEPTANCE_FEATURE="${1:-${ACCEPTANCE_FEATURE:-}}"
+
 pnpm build:frontend
 
 rm -rf \
