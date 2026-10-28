@@ -522,8 +522,9 @@ For a runner-held send these chains are never stored: they are a view over the h
 - Retirement removes authority, never liveness. A retired send that may still act keeps
   `anythingMayAct` true until reconciled.
 - Project inactive leaves a sent native command's view and liveness unchanged: its retired send
-  stays in `live` until `command_result`, NotConsumed or coverage of its label. A native
-  command's view becomes `Failed` only by coverage (process loss, a kill, session end) (D17).
+  stays in `live` until `command_result`, NotConsumed or coverage of its label. Inactive never
+  fails a native command: its view becomes `Failed` only by coverage (process loss, a kill,
+  session end) or a permanent `effect_outcome` (D17, D34).
 - A retired probe is finished: it leaves `live` and owns no deadline. `project_active`
   reconciliation issues fresh probes.
 - A removed project's pending effects are cancelled with a project-inactive reason; other projects
@@ -2056,7 +2057,9 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   the project is inactive; `Unconfirmed` is a view, and the tracker's re-read needs no authority
   (D27).
 - A covered native command's view is `Failed` with the covering cause as its code: `process_lost`,
-  `kill_and_respawn` or `session_ended` (D24).
+  `kill_and_respawn` or `session_ended` (D24). A permanent `effect_outcome` on its send means the
+  provider never received it: the view is `Failed` with the outcome's code and the send leaves
+  `live` (3.4, D34).
 - A command still deferred (requested while the project is inactive, not yet issued) when its
   native session ends is `Failed{session_ended}` and is never issued: its target is gone (D30).
 
@@ -2849,6 +2852,7 @@ port.
 - D31: a probe only reads, so it never counts as a send that may still act; LI8 exempts unfinished probes (8.3). Rejected: counting probes (a read would hold worktree cleanup and archive).
 - D32: the `kill_and_respawn` escalating an unconfirmed `end_session` acts on the runner that `end_session` was issued on; if that runner is already lost, nothing issues (8.4). Rejected: the current process (a later, unrelated runner would be killed while the end_session's own runner keeps acting).
 - D33: `close`, `kill_and_respawn` and `end_session` effects carry the execution label they act on (null only before any process was seen for it, binding per D23), and `PendingConfirm` carries the labels its step acts on (3.13, 8.4). Rejected: the feeder inferring the target from `runId` (a joined wake label on another runner has no single process per Run).
+- D34: a permanent `effect_outcome` on a `send_native_command` makes the command `Failed` with the outcome's code and finishes its send (3.4, 3.11, 8.5). Rejected: leaving it `Sent` until its confirmation deadline (it shows a command the provider never received as in flight).
 
 ## Appendix B. Old-id mapping
 
