@@ -1085,5 +1085,11 @@
 		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
 		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
 	},
-	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock."
+	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock.",
+	"src/lib/frontend/components/chat/TurnOpening.svelte :: bg-current,flex,items-center,motion-safe:animate-pulse,rounded-full,size-[6px],text-text-dimmer": {
+		"movedTo": "src/lib/frontend/components/chat/AssistantHeader.svelte",
+		"requires": "pending=",
+		"reason": "conduit-test-c4275.1 option 3: the pulse and its dim label now render inside AssistantHeader's name row via the `pending` prop."
+	},
+	"src/lib/frontend/components/chat/TurnOpening.svelte :: gap-[6px],h-[21px],md:ml-[42px],md:pb-[9px],min-[600px]:h-[24px],mx-[3.5px],pb-[2px],pt-[38px],px-[12px],summaryHead,text-[14px]": "conduit-test-c4275.1 option 3: these reserved the name row (pt-[38px]) and mimicked the Working card head so the swap would not jump. The opening is now AssistantHeader itself at TurnActivity's outer spacing, so the reservation and head mimicry are deliberately gone."
 }

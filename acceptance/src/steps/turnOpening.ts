@@ -165,8 +165,8 @@ export const turnOpeningHandlers: StepHandler[] = [
 			const prompt = await world.page
 				.locator("#messages .msg-user")
 				.boundingBox();
-			const head = await world.page
-				.getByTestId("turn-opening-row")
+			const head = await opening(world.page)
+				.locator(".assistant-header")
 				.boundingBox();
 			if (!prompt || !head) throw new Error("Opening geometry is unavailable");
 			positions.set(world.page, { prompt, head });
@@ -184,12 +184,15 @@ export const turnOpeningHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert opening row matches Working head geometry",
-		match: /^the Working head occupies the opening pulse row$/,
+		name: "assert the turn's name row takes the opening row's place",
+		match: /^the assistant name row occupies the opening row$/,
 		run: async ({ world }) => {
 			const before = positions.get(world.page);
 			if (!before) throw new Error("Opening geometry was not recorded");
-			const head = await world.page.getByTestId("turn-live-head").boundingBox();
+			const head = await world.page
+				.locator("#messages .turn-activity .assistant-header")
+				.last()
+				.boundingBox();
 			expect(head).not.toBeNull();
 			expect(head?.y).toBe(before.head.y);
 			expect(head?.height).toBe(before.head.height);

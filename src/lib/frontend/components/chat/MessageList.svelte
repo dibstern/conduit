@@ -577,7 +577,7 @@
 			{@render goalNotice()}
 		{/if}
 		{#if turn.opening}
-			<TurnOpening opening={turn.opening} {turn} sessionId={viewedSessionId ?? undefined} />
+			<TurnOpening opening={turn.opening} {providerId} />
 		{/if}
 		{#if hasActivity}
 			{@const reply = segment.reply[0]}
@@ -694,7 +694,7 @@
 		</div>
 	{/each}
 	{#if localSends.length > 0 || (processing && chat.loadLifecycle === "ready" && turns.length === 0)}
-		<TurnOpening opening="sending" />
+		<TurnOpening opening="sending" {providerId} />
 	{/if}
 
 	<!-- Cold open: turn-shaped placeholders fill the pane, bottom-anchored where

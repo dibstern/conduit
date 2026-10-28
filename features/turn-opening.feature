@@ -31,7 +31,7 @@ Scenario Outline: Replacing the pulse keeps the prompt and head in place
   And the first ordinary turn opening step arrives
   Then the turn opening is replaced by a Working card timed 5s
   And the turn opening prompt bounding box is unchanged
-  And the Working head occupies the opening pulse row
+  And the assistant name row occupies the opening row
 
 Examples:
   | viewport |
