@@ -124,7 +124,7 @@
 		</SettingsGroup>
 		{#if error}<p role="alert" class="mt-2 text-error">{error}</p>{/if}
 		<SettingsGroup id="surfacing-turns" title="Turns">
-			<SettingsRow label="Default level" description="Sessions can override it from the level control on the axis.">
+			<SettingsRow label="Default level" description="Each turn's Show bar can switch that turn to another level.">
 				{#snippet control()}
 					{#if sessionViewState.compact}
 						<SettingsPicker label="Default level" value={status.defaultLevel} options={levels} disabled={saving} onvaluechange={(value) => { if (levels.some((o) => o.value === value)) void update({ defaultLevel: value as MessageSurfacingStatus["defaultLevel"] }); }} />
