@@ -256,6 +256,10 @@
 	function pick(pin: SurfacePin) {
 		void reveal({ sessionId, uuid: pin.part.uuid });
 	}
+	// An open strip's pins are already on screen, so picking one keeps focus on the strip.
+	function selectPin(pin: SurfacePin) {
+		selection = { kind: "picked", uuid: pin.part.uuid };
+	}
 	function acknowledgeMessage(seq: number) {
 		if (panel.pending?.seq !== seq || panel.target?.kind !== "message") return;
 		selection = { kind: "picked", uuid: panel.target.uuid };
@@ -546,7 +550,7 @@
 					onpick={pick} onlevel={selectLevel}
 					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand}>
 					{#snippet strip(cited: string | null, card: Snippet)}
-						<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} markers={{ kind: "pins", pins: surface.pins, selected: cardSlot.kind === "selected" ? cardSlot.card.part.uuid : null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={pick} onjump={stripJump} oncommand={surfaceCommand} />
+						<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} markers={{ kind: "pins", pins: surface.pins, selected: cardSlot.kind === "selected" ? cardSlot.card.part.uuid : null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={selectPin} onjump={stripJump} oncommand={surfaceCommand} />
 					{/snippet}
 				</SurfacingCard>
 			{:else}
