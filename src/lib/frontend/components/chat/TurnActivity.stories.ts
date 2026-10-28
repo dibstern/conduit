@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
+import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
+import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import { Utf8Bytes } from "../../../contracts/tool-wire.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import type { ChatMessage, ToolMessage } from "../../types.js";
@@ -399,34 +401,62 @@ const skilledLive = withSkills(live, {
 const [skilledSegment = EMPTY_SEGMENT] = skilled.segments;
 const [skilledLiveSegment = EMPTY_SEGMENT] = skilledLive.segments;
 
-async function openSkills(canvasElement: HTMLElement) {
+async function showSkillEvents(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
 	const head = canvasElement.querySelector<HTMLButtonElement>(
 		".turn-activity-toggle",
 	);
 	if (head?.getAttribute("aria-expanded") === "false")
 		await userEvent.click(head);
-	const toggle = canvas.getByRole("button", { name: /skills?$/ });
-	await userEvent.click(toggle);
-	toggle.blur();
+	head?.blur();
+	const rows = canvas.getAllByRole("button", { name: /^Skill / });
+	await expect(rows).toHaveLength(2);
+	for (const row of rows) {
+		await expect(row).toBeVisible();
+		await expect(row.querySelector("time")).toHaveTextContent("40ms");
+	}
 	await expect(
-		canvas.getByRole("list", { name: "Skills in this turn" }),
-	).toBeVisible();
+		canvas.queryByRole("button", { name: /^\d+ skills?$/ }),
+	).not.toBeInTheDocument();
+	await expect(
+		canvas.queryByRole("list", { name: "Skills in this turn" }),
+	).not.toBeInTheDocument();
 }
 
-/** Skills keep their chapter picker in the step log. */
+/** The head counts skills without a separate picker. */
 export const Skills: Story = {
 	args: { turn: skilled, segment: skilledSegment, final: true },
 };
 
-/** Open, it lists each skill with when it started and how long it governed, and the strip picks them out. */
+/** Skills sit among the other steps, with their loading time in the time column. */
 export const SkillsOpen: Story = {
 	args: { turn: skilled, segment: skilledSegment, final: true },
-	play: ({ canvasElement }) => openSkills(canvasElement),
+	play: ({ canvasElement }) => showSkillEvents(canvasElement),
 };
 
-/** While live, the skill still in charge is running rather than given a guessed duration. */
+/** A live turn keeps both skill events in the full log. */
 export const SkillsLive: Story = {
 	args: { turn: skilledLive, segment: skilledLiveSegment, final: true },
-	play: ({ canvasElement }) => openSkills(canvasElement),
+	play: ({ canvasElement }) => showSkillEvents(canvasElement),
+};
+
+const skillSurfacing = {
+	status: {
+		...DEFAULT_MESSAGE_SURFACING_SETTINGS,
+		enabled: true,
+		active: true,
+		summariesEnabled: false,
+		key: { source: "stored" as const, rejected: false },
+	},
+	categorySet: DEFAULT_CATEGORY_SET,
+};
+
+export const SkillsJev: Story = {
+	...SkillsOpen,
+	args: { ...SkillsOpen.args, surfacing: skillSurfacing },
+};
+
+export const SkillsLiveJev: Story = {
+	...SkillsLive,
+	args: { ...SkillsLive.args, surfacing: skillSurfacing },
 };

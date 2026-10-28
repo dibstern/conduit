@@ -464,9 +464,7 @@ export function plural(n: number, one: string, many = `${one}s`): string {
 }
 
 /**
- * "3 reads · 2 searches · 3 edits · 2 commands · 1 subagent". Skills and
- * compactions are left out: each has its own control beside the sentence, so
- * the phrase is empty when they are all the turn did.
+ * Counts the turn's work, including skills. Compactions keep their own marker.
  */
 export function countsPhrase(s: TurnStats): string {
 	const parts = [
@@ -475,12 +473,13 @@ export function countsPhrase(s: TurnStats): string {
 		plural(s.edits, "edit"),
 		plural(s.commands, "command"),
 		plural(s.fetches, "fetch", "fetches"),
+		plural(s.skills, "skill"),
 		plural(s.subagents, "subagent"),
 		plural(s.others, "other"),
 	].filter(Boolean);
 	if (parts.length > 0) return parts.join(" · ");
 	if (s.thinking > 0) return plural(s.thinking, "thought");
-	return s.skills > 0 || s.compactions > 0 ? "" : "no tools";
+	return s.compactions > 0 ? "" : "no tools";
 }
 
 export function fmtClock(ms: number): string {
@@ -499,19 +498,6 @@ export function fmtDuration(ms: number): string {
 	const minutes = Math.floor(ms / 60_000);
 	const sec = Math.floor((ms % 60_000) / 1000);
 	return `${minutes}m ${sec}s`;
-}
-
-/** When the prompt was sent, or failing that, when the first stamped work began. */
-function turnStart(turn: Turn): number | undefined {
-	if (turn.user?.createdAt !== undefined) return turn.user.createdAt;
-	for (const segment of turn.segments) {
-		const start =
-			segment.activity[0]?.createdAt ??
-			segment.reply[0]?.createdAt ??
-			segment.handBack?.createdAt;
-		if (start !== undefined) return start;
-	}
-	return undefined;
 }
 
 /** A stamped result closes the segment even if background tasks finish later. */
@@ -719,63 +705,6 @@ export function stepCaption(
 	return duration === undefined
 		? partLabel(part)
 		: `${partLabel(part)} · ${fmtDuration(duration)}`;
-}
-
-/** One skill as a chapter of the turn. */
-export interface SkillChapter {
-	/** Position of the Skill call in `segment.activity`. */
-	index: number;
-	name: string;
-	/** Ms from the start of the turn to the Skill call. */
-	offset?: number;
-	/** Ms until the next skill took over or the work ended. */
-	duration?: number;
-	/** The last skill of a turn still working: its chapter has no end yet. */
-	running: boolean;
-}
-
-/**
- * The skills a segment loaded, in order. Loading one takes milliseconds, so a
- * skill's own span says nothing; what matters is the stretch of work it
- * governed, which runs until the next skill loads or the segment's work ends.
- * Any figure that would need a missing stamp is left out rather than guessed.
- */
-export function skillChapters(
-	segment: Segment,
-	turn: Turn,
-	final: boolean,
-	now: number,
-): SkillChapter[] {
-	const start = turnStart(turn);
-	const open =
-		final && turn.live && segment.reply.length === 0 && !segment.handBack;
-	const skills = segment.activity.flatMap((part, index) =>
-		part.type === "tool" &&
-		ensureCanonical(part.name, part.input).tool === "Skill"
-			? [{ part, index }]
-			: [],
-	);
-	return skills.map(({ part, index }, k) => {
-		const createdAt = part.createdAt;
-		const next = skills[k + 1];
-		const running = !next && open;
-		const end = next
-			? next.part.createdAt
-			: running
-				? undefined
-				: segmentEnd(segment, turn, final, now);
-		return {
-			index,
-			name: skillName(part),
-			running,
-			...(createdAt !== undefined && start !== undefined && createdAt >= start
-				? { offset: createdAt - start }
-				: {}),
-			...(createdAt !== undefined && end !== undefined && end >= createdAt
-				? { duration: end - createdAt }
-				: {}),
-		};
-	});
 }
 
 export interface TurnEconomics {

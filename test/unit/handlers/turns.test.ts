@@ -29,7 +29,6 @@ import {
 	liveLaunchedTasks,
 	partLabel,
 	segmentTurns,
-	skillChapters,
 	skillName,
 	stepDurations,
 	stepWeights,
@@ -553,7 +552,7 @@ describe("countsPhrase", () => {
 		expect(phrase).toBe("2 reads · 1 search · 1 edit · 1 command");
 	});
 
-	it("leaves skills to their own control", () => {
+	it("counts skills alongside the other steps", () => {
 		expect(
 			countsPhrase(
 				turnStats({
@@ -565,7 +564,7 @@ describe("countsPhrase", () => {
 					reply: [],
 				}),
 			),
-		).toBe("1 fetch · 1 subagent");
+		).toBe("1 fetch · 1 skill · 1 subagent");
 		expect(
 			countsPhrase(
 				turnStats({
@@ -573,7 +572,7 @@ describe("countsPhrase", () => {
 					reply: [],
 				}),
 			),
-		).toBe("");
+		).toBe("1 skill");
 	});
 
 	it("falls back to thoughts, then to 'no tools'", () => {
@@ -1681,101 +1680,5 @@ describe("compaction", () => {
 			"Compacted context · 180k → 42k, 138k saved",
 		);
 		expect(label({})).toBe("Compacted context");
-	});
-});
-
-describe("skillChapters", () => {
-	const skill = (name: string, createdAt?: number) =>
-		tool(
-			"Skill",
-			{ tool: "Skill", name },
-			createdAt !== undefined ? { createdAt } : {},
-		);
-	const chapters = (messages: ChatMessage[], live: boolean, now: number) => {
-		const [turn] = segmentTurns(messages, live);
-		assert.exists(turn, "expected turn");
-		const [segment] = turn.segments;
-		assert.exists(segment, "expected segment");
-		return skillChapters(segment, turn, true, now);
-	};
-
-	it("runs each skill until the next one loads, and the last until the reply", () => {
-		expect(
-			chapters(
-				[
-					user(undefined, 0),
-					skill("tdd", 2_000),
-					read("/a.ts", 3_000),
-					skill("debugging", 10_000),
-					read("/b.ts", 11_000),
-					say("done", 20_000),
-				],
-				false,
-				0,
-			),
-		).toEqual([
-			{ index: 0, name: "tdd", offset: 2_000, duration: 8_000, running: false },
-			{
-				index: 2,
-				name: "debugging",
-				offset: 10_000,
-				duration: 10_000,
-				running: false,
-			},
-		]);
-	});
-
-	it("leaves the last skill of a live turn open rather than guessing its end", () => {
-		expect(
-			chapters(
-				[
-					user(undefined, 0),
-					skill("tdd", 1_000),
-					read("/a.ts", 2_000),
-					skill("debugging", 5_000),
-				],
-				true,
-				9_000,
-			),
-		).toEqual([
-			{ index: 0, name: "tdd", offset: 1_000, duration: 4_000, running: false },
-			{ index: 2, name: "debugging", offset: 5_000, running: true },
-		]);
-	});
-
-	it("omits whatever a missing stamp would have measured", () => {
-		expect(
-			chapters(
-				[
-					user(undefined, 0),
-					skill("tdd"),
-					skill("debugging", 4_000),
-					say("done", 6_000),
-				],
-				false,
-				0,
-			),
-		).toEqual([
-			{ index: 0, name: "tdd", running: false },
-			{
-				index: 1,
-				name: "debugging",
-				offset: 4_000,
-				duration: 2_000,
-				running: false,
-			},
-		]);
-	});
-
-	it("is empty when no skill ran", () => {
-		expect(chapters([user(), read("/a.ts"), say()], false, 0)).toEqual([]);
-	});
-
-	it("recovers the name of a skill recorded before inputs were normalized", () => {
-		expect(
-			skillName(
-				tool("Skill", {}, { result: "Launching skill: brainstorming" }),
-			),
-		).toBe("brainstorming");
 	});
 });
