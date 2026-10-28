@@ -464,9 +464,7 @@ export function plural(n: number, one: string, many = `${one}s`): string {
 }
 
 /**
- * "3 reads · 2 searches · 3 edits · 2 commands · 1 subagent". Skills and
- * compactions are left out: each has its own control beside the sentence, so
- * the phrase is empty when they are all the turn did.
+ * Counts the turn's work, including skills. Compactions keep their own marker.
  */
 export function countsPhrase(s: TurnStats): string {
 	const parts = [
@@ -475,12 +473,13 @@ export function countsPhrase(s: TurnStats): string {
 		plural(s.edits, "edit"),
 		plural(s.commands, "command"),
 		plural(s.fetches, "fetch", "fetches"),
+		plural(s.skills, "skill"),
 		plural(s.subagents, "subagent"),
 		plural(s.others, "other"),
 	].filter(Boolean);
 	if (parts.length > 0) return parts.join(" · ");
 	if (s.thinking > 0) return plural(s.thinking, "thought");
-	return s.skills > 0 || s.compactions > 0 ? "" : "no tools";
+	return s.compactions > 0 ? "" : "no tools";
 }
 
 export function fmtClock(ms: number): string {

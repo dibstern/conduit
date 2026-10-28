@@ -14,6 +14,46 @@ const START = PINNED_CLOCK_MS - 20_000;
 
 export const turnActivitySkillsHandlers: StepHandler[] = [
 	{
+		name: "assert skills have no separate controls",
+		match: /^skill events have no separate picker or chapter list$/,
+		run: async ({ world }) => {
+			const turn = world.page.locator(".turn-activity");
+			await expect(
+				turn.getByRole("button", {
+					name: /^\d+ skills?$/,
+					includeHidden: true,
+				}),
+			).toHaveCount(0);
+			await expect(
+				turn.getByRole("list", {
+					name: "Skills in this turn",
+					includeHidden: true,
+				}),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert skills join the turn head counts",
+		match: /^the turn head counts (\d+) skills$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.locator(".turn-activity-toggle > span:visible")
+					.filter({ hasText: `· ${match[1]} skills` }),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert skill events do not dim other activity",
+		match: /^the activity strip keeps every step at full strength$/,
+		run: async ({ world }) => {
+			const steps = world.page.locator(".turn-activity [data-step-id]");
+			await expect(steps).toHaveCount(4);
+			for (const step of await steps.all())
+				await expect(step).toHaveCSS("opacity", "1");
+		},
+	},
+	{
 		name: "seed a turn with two skill events",
 		match: /^the turn log has two skills in a (settled|live) turn$/,
 		run: async ({ world, match }) => {

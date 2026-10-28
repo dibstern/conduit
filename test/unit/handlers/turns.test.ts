@@ -553,7 +553,7 @@ describe("countsPhrase", () => {
 		expect(phrase).toBe("2 reads · 1 search · 1 edit · 1 command");
 	});
 
-	it("leaves skills to their own control", () => {
+	it("counts skills alongside the other steps", () => {
 		expect(
 			countsPhrase(
 				turnStats({
@@ -565,7 +565,7 @@ describe("countsPhrase", () => {
 					reply: [],
 				}),
 			),
-		).toBe("1 fetch · 1 subagent");
+		).toBe("1 fetch · 1 skill · 1 subagent");
 		expect(
 			countsPhrase(
 				turnStats({
@@ -573,7 +573,7 @@ describe("countsPhrase", () => {
 					reply: [],
 				}),
 			),
-		).toBe("");
+		).toBe("1 skill");
 	});
 
 	it("falls back to thoughts, then to 'no tools'", () => {

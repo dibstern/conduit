@@ -35,9 +35,8 @@
 		fmtDuration,
 		latestStamp,
 		liveLaunchedTasks,
+		plural,
 		stepCaption,
-		type SkillChapter,
-		skillChapters,
 		stepDurations,
 		stripLayout,
 		type Segment,
@@ -49,7 +48,6 @@
 	import ActivityStrip from "./ActivityStrip.svelte";
 	import MinimisedTurn from "./MinimisedTurn.svelte";
 	import { setTurnMinimised, turnMinimised } from "../../stores/turn-minimisation.svelte.js";
-	import { partStyle } from "./activity-style.js";
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
@@ -83,7 +81,6 @@
 	// remounting hundreds of rows made showing a long turn's log slow, and
 	// reset each row's own open state.
 	let logMounted = $state(false);
-	let skillsOpen = $state(false);
 	let hovered = $state<number | null>(null);
 	let focusUuid = $state<string | null>(null);
 	let panelEl = $state<HTMLDivElement | undefined>();
@@ -102,8 +99,6 @@
 	const bill = $derived(economics(turn, now));
 	const running = $derived(liveLaunchedTasks(turn, liveTasks, liveTasks.length > 0 && turn.live ? clock.now : taskNow, taskListedAt));
 	const phrase = $derived(countsPhrase(stats));
-	const chapters = $derived(skillChapters(segment, turn, final, now));
-	const skillSteps = $derived(skillsOpen ? new Set(chapters.map((c) => c.index)) : null);
 	const TICKER_ROWS = 3;
 	const ticker = $derived(segment.activity.slice(-TICKER_ROWS));
 	const live = $derived(final && turn.live);
@@ -430,18 +425,6 @@
 		return () => clearTimeout(resting);
 	});
 
-	/** "1m 4s in · 12s". Offsets under a second read as the start of the turn. */
-	function chapterTiming(c: SkillChapter): string {
-		let at: string | undefined;
-		if (c.offset !== undefined) {
-			at = c.offset < 1000 ? "at start" : `${fmtDuration(c.offset)} in`;
-		}
-		let span: string | undefined;
-		if (c.running) span = "running";
-		else if (c.duration !== undefined) span = fmtDuration(c.duration);
-		return [at, span].filter(Boolean).join(" · ");
-	}
-
 	// While live, the newest steps already show, and opening the log inserts
 	// the earlier ones above them. The scroll controller can't see that growth,
 	// so hold the newest step where the reader saw it. Closing needs no help:
@@ -542,6 +525,7 @@
 			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
 				<Tooltip bind:open={detailsOpen}>
 					{#snippet trigger({ props })}
+						{@const headPhrase = phone.current && (surfacingActive || minimised) ? plural(stats.skills, "skill") : phrase}
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
 							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={expanded}
 							onclick={toggleLog}>
@@ -553,7 +537,7 @@
 							{:else if duration !== undefined}
 								<span class="turn-duration font-mono text-[12px] text-text-dimmer shrink-0" data-testid={live ? "turn-live-elapsed" : undefined}>{live && duration < 1000 ? "0s" : fmtDuration(duration)}</span>
 							{/if}
-							{#if phrase}<span class="truncate text-[12px] text-text-muted {surfacingActive || minimised ? 'max-[599px]:hidden' : ''}">· {phrase}</span>{/if}
+							{#if headPhrase}<span class="truncate text-[12px] text-text-muted">· {headPhrase}</span>{/if}
 						</Button>
 					{/snippet}
 					<div class="max-w-[340px] flex flex-col gap-[6px] text-[12px]">
@@ -592,14 +576,14 @@
 					onreset={() => { if (sessionId) setSessionSurfaceLevel(sessionId, null); picked = null; folded = false; }}
 					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand} onjump={surfaceJump} onhover={surfaceHover}>
 					{#snippet strip()}
-						<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} emphasis={skillSteps} interactive={false} />
+						<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} interactive={false} />
 					{/snippet}
 				</SurfacingCard>
 			{:else}
 			<!-- The phone strip is a 44px tap target with its 4px bar centred; a summary row
 			     under it overlaps that empty area so it sits midway between bar and card edge. -->
 			<div class="md:mt-[7px] {summaryEnabled ? 'max-[599px]:-mb-[18px]' : ''}">
-				<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} emphasis={skillSteps}
+				<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered}
 					onhover={(index) => { hovered = index; detailsOpen = index !== null; }} onjump={jumpTo} />
 			</div>
 			{#if summaryEnabled}{@render summaryPanel(surface, hoverCitation)}{/if}
@@ -639,29 +623,10 @@
 					</div>
 				{/each}
 				<div class="flex flex-wrap items-center gap-[10px] py-[8px] text-[12px] text-text-muted">
-					{#if stats.skills > 0}
-						<Button variant="ghost" size="content" tone="muted-soft" hoverFill="none" touchTarget
-							class="skills-toggle gap-[5px]" aria-expanded={skillsOpen} onclick={() => (skillsOpen = !skillsOpen)}>
-							<Icon name="sparkles" size={12} />{stats.skills} {stats.skills === 1 ? "skill" : "skills"}
-						</Button>
-					{/if}
 					{#if stats.compactions > 0}<span class="compaction-marker">compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
 					{#if stats.failed > 0}<span class="text-error">{stats.failed} failed</span>{/if}
 					{#if final}<RunningPill count={running.size} /><TurnEconomics economics={bill} />{/if}
 				</div>
-				{#if skillsOpen}
-					<ol class="skill-chapters pb-[8px]" aria-label="Skills in this turn">
-						{#each chapters as chapter (chapter.index)}
-							{@const part = segment.activity[chapter.index]}
-							<li><Button variant="ghost" size="content" align="start" tone="inherit" hoverFill="surface" touchTarget
-								class="gap-[8px] w-full py-[8px] text-[12px] text-left" onclick={() => jumpTo(chapter.index)}>
-								<span class={part ? partStyle(part).text : ""}><Icon name="sparkles" size={14} /></span>
-								<span class="flex-1 truncate font-mono text-text-secondary">{chapter.name || "Unnamed skill"}</span>
-								<span class="shrink-0 font-mono text-text-muted">{chapterTiming(chapter)}</span>
-							</Button></li>
-						{/each}
-					</ol>
-				{/if}
 			</div>
 		{/if}
 	</div>
