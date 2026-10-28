@@ -90,11 +90,18 @@ widens that Stop's cohort.
 - **Delivery is owned by the hold.** `holdRun` commits the hold before the first byte of the
   transmission is written to the runner's socket. An owner send whose transmissions are all released
   was never received. A held transmission may have been received, now or later; only C3's evidence
-  turns it back into "never". `delivery_indeterminate` keeps its meaning and is never re-sent; the
-  reconciler's Settle is its only writer.
-- **Outcome stays with the Run Ledger** (SEND-SCOPE-5). A socket failure, a write failure or a
-  missing reply is never reported to the reactor as a send's outcome; the reactor writes a send's
-  terminal outbox status only from its run's terminal settlement.
+  turns it back into "never". `delivery_indeterminate` keeps its meaning and is never re-sent. For a
+  runner-held transmission the reconciler's Settle is its only writer.
+- **Outcome stays with the Run Ledger** (SEND-SCOPE-5). For a runner send, a socket failure, a write
+  failure or a missing reply is never reported to the reactor as the send's outcome; the reactor
+  writes its terminal outbox status only from its run's terminal settlement.
+- **Direct providers are out of this amendment's scope.** A send to a provider with no runner
+  (OpenCode through its SDK/API client) never has a hold, so C2 and C3 never apply to it. It keeps
+  today's behaviour unchanged: the adapter's typed indeterminate result, and the reactor's existing
+  nonterminal `delivery_indeterminate` marker on its still-running outbox row, which preserves the
+  admission blocker and replay. The partition is by row: a row is runner-held or direct, never both,
+  so each `delivery_indeterminate` row still has one writer. Moving direct-provider uncertainty into
+  the ledger belongs to 32.2.6's `decide`.
 
 ## C2. `holdRun` is the one gate for a transmission
 
@@ -384,7 +391,9 @@ per-session feeder re-drives every release, whoever commits it (the live loop no
 continuation); sends wait on their run, never the socket; NotSent covers the pre-write idle check and
 adoption's `not_received`; older runners' idle reply counts as `Refused`; the host's record is keyed
 by run id; Stop acceptance absorbs all of `prepareStop`'s write with an intent-only fingerprint; the
-hold, `delivery_indeterminate` and the serving-row cache each got one named writer.
+hold, `delivery_indeterminate` and the serving-row cache each got one named writer. Implementation
+found the `delivery_indeterminate` writer rule too wide: direct providers (no runner, no hold) keep
+the reactor's existing marker, partitioned by row.
 
 | option | verdict |
 |---|---|
