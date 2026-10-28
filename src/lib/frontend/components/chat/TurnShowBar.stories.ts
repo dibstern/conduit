@@ -7,6 +7,7 @@ import TurnShowBar from "./TurnShowBar.svelte";
 function panel(view: TurnPanelState["view"]): TurnPanelState {
 	return {
 		phase: "settled",
+		hasHandBacks: false,
 		stops: ["final", "key", "balanced", "all", "log"],
 		view,
 		saved: "balanced",
@@ -18,6 +19,7 @@ function panel(view: TurnPanelState["view"]): TurnPanelState {
 		collapse: fn(),
 		show: fn(),
 		usage: fn(),
+		qa: fn(),
 		makeDefault: fn(async () => {}),
 		resetLevel: fn(),
 	};

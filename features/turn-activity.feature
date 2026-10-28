@@ -1,5 +1,24 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Q&A is available only on Turns with hand-backs
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a <kind> turn
+  Then the Turn <availability> Q&A on <viewport>
+  And the messages region visually matches turn-qa-navigation-<jev>-<viewport>-<availability> at 98 percent
+
+Examples:
+  | jev      | viewport | kind                         | availability |
+  | active   | desktop  | two-segment AskUserQuestion   | offers       |
+  | active   | phone    | two-segment AskUserQuestion   | offers       |
+  | inactive | desktop  | two-segment ExitPlanMode      | offers       |
+  | inactive | phone    | two-segment ExitPlanMode      | offers       |
+  | active   | desktop  | wake                         | omits        |
+  | active   | phone    | wake                         | omits        |
+  | inactive | desktop  | wake                         | omits        |
+  | inactive | phone    | wake                         | omits        |
+
 Scenario Outline: The phone Show menu explains each cumulative stop
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup

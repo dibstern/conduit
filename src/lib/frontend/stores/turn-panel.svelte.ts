@@ -27,7 +27,7 @@ import { setTurnMinimised, turnMinimised } from "./turn-minimisation.svelte.js";
 export type TurnPanel<Stop extends ShowStop = ShowStop> =
 	| { kind: "collapsed" }
 	| { kind: "open"; view: PanelView<Stop> };
-type TurnChoice = "level" | "log" | "usage";
+type TurnChoice = "level" | "log" | "qa" | "usage";
 
 export type TurnTarget =
 	| { kind: "message"; uuid: string }
@@ -139,6 +139,7 @@ interface PanelInput {
 
 export interface TurnPanelState<Stop extends ShowStop = ShowStop> {
 	readonly phase: TurnPhase;
+	readonly hasHandBacks: boolean;
 	readonly stops: [Stop] extends ["log"]
 		? typeof logStops
 		: typeof messageStops | typeof logStops;
@@ -152,6 +153,7 @@ export interface TurnPanelState<Stop extends ShowStop = ShowStop> {
 	collapse(): void;
 	show(stop: Stop): void;
 	usage(): void;
+	qa(): void;
 	makeDefault(): Promise<void>;
 	resetLevel(): void;
 }
@@ -184,6 +186,7 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 		sessionSurfaceLevel(input.sessionId) ?? input.status.defaultLevel,
 	);
 	const parts = $derived(turnLog(input.turn).segment.activity);
+	const hasHandBacks = $derived(input.turn.segments.some((segment) => segment.handBack !== undefined));
 	const allRead = $derived(
 		parts.some((part) => part.type === "assistant") &&
 			parts.every(
@@ -214,23 +217,23 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 				return assertNever(phase);
 		}
 	});
-	const view = $derived<TurnPanel>(
-		collapsed && !reveal
-			? { kind: "collapsed" }
-			: {
-					kind: "open",
-					view:
-						!revealStop && choice === "usage"
-							? { kind: "usage" }
-							: {
-									kind: "show",
-									stop:
-										!input.jev || (revealStop ?? choice) === "log"
-											? "log"
-											: saved,
-								},
-				},
-	);
+	const view = $derived.by((): TurnPanel => {
+		if (collapsed && !reveal) return { kind: "collapsed" };
+		const selected = revealStop ?? choice;
+		switch (selected) {
+			case "qa":
+				if (hasHandBacks) return { kind: "open", view: { kind: "qa" } };
+				return { kind: "open", view: { kind: "show", stop: input.jev ? saved : "log" } };
+			case "usage":
+				return { kind: "open", view: { kind: "usage" } };
+			case null:
+			case "level":
+			case "log":
+				return { kind: "open", view: { kind: "show", stop: !input.jev || selected === "log" ? "log" : saved } };
+			default:
+				return assertNever(selected);
+		}
+	});
 	function pick(choice: TurnChoice) {
 		const previous = choices.get(key) ?? { settled: null, live: null };
 		switch (phase) {
@@ -260,6 +263,9 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 	return {
 		get phase() {
 			return phase;
+		},
+		get hasHandBacks() {
+			return hasHandBacks;
 		},
 		get stops() {
 			return input.jev ? messageStops : logStops;
@@ -311,6 +317,11 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 		},
 		usage() {
 			pick("usage");
+			open();
+		},
+		qa() {
+			if (!hasHandBacks) return;
+			pick("qa");
 			open();
 		},
 		async makeDefault() {

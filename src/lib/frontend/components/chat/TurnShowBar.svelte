@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { TurnPanelState } from "../../stores/turn-panel.svelte.js";
+	import { assertNever } from "../../../utils.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { STOPS, type ShowStop, type StopCounts } from "../../utils/turn-stops.js";
 	import type { TurnEconomics } from "../../utils/turns.js";
@@ -15,14 +16,28 @@
 	import RunningPill from "./RunningPill.svelte";
 
 	let { panel, counts, bill, running, onlevelchange }: { panel: TurnPanelState; counts: StopCounts; bill: TurnEconomics; running: number; onlevelchange: () => void } = $props();
-	const layout = $derived<"tabs" | "menu">(sessionViewState.compact && panel.stops.length > 1 ? "menu" : "tabs");
-	const active = $derived(panel.view.kind === "open" && panel.view.view.kind === "show" ? panel.view.view.stop : "usage");
+	const layout = $derived<"tabs" | "menu">(sessionViewState.compact && (panel.stops.length > 1 || panel.hasHandBacks) ? "menu" : "tabs");
+	const active = $derived.by(() => {
+		const view = panel.view;
+		switch (view.kind) {
+			case "collapsed": return null;
+			case "open": {
+				const tab = view.view;
+				switch (tab.kind) {
+					case "show": return tab.stop;
+					case "qa": case "usage": return tab.kind;
+					default: return assertNever(tab);
+				}
+			}
+			default: return assertNever(view);
+		}
+	});
 	const billDetail = $derived<"cost" | "context">(!sessionViewState.compact && panel.phase === "settled" ? "context" : "cost");
 	const options = $derived([...(layout === "tabs" ? panel.stops : []).map((stop) => ({
 		value: stop,
 		label: panel.stops.length === 1 && stop === "log" ? STOPS.log.tab : STOPS[stop].short,
 		...(stop === "log" && panel.stops.length > 1 ? { groupLabel: "Every step" } : {}),
-	})), { value: "usage" as const, label: "Usage", groupLabel: "Usage" }]);
+	})), ...(layout === "tabs" && panel.hasHandBacks ? [{ value: "qa" as const, label: "Q&A", groupLabel: "Q&A" }] : []), { value: "usage" as const, label: "Usage", groupLabel: "Usage" }]);
 	let defaultState = $state<{ kind: "idle" } | { kind: "saving" } | { kind: "failed"; message: string }>({ kind: "idle" });
 	function show(stop: ShowStop) {
 		panel.show(stop);
@@ -55,7 +70,7 @@
 	{:else}
 		<Menu ariaLabel="Show, least to most" presentation="popover" side="bottom" align="start">
 			{#snippet trigger({ props })}
-				<Button {...props} variant="ghost" size="content" tone="secondary" touchTarget class="min-h-[36px] gap-[6px] text-[12px]" data-testid="surfacing-level" ariaLabel="Show messages">{active === "usage" ? "Show ⌄" : `Show · ${STOPS[active].menu} ⌄`}{#if panel.overridden && active !== "usage"}<i class="size-[6px] rounded-full bg-accent" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}</Button>
+				<Button {...props} variant="ghost" size="content" tone="secondary" touchTarget class="min-h-[36px] gap-[6px] text-[12px]" data-testid="surfacing-level" ariaLabel="Show messages">{active === "usage" || active === null ? "Show ⌄" : `Show · ${active === "qa" ? "Q&A" : STOPS[active].menu} ⌄`}{#if panel.overridden && active !== "usage" && active !== "qa"}<i class="size-[6px] rounded-full bg-accent" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}</Button>
 			{/snippet}
 			<MenuGroup label="Show, least to most">
 				<MenuRadioGroup value={active}>
@@ -69,15 +84,18 @@
 							<span class="block text-[10.5px] text-text-muted">{STOPS[stop].description}</span>
 						</MenuRadioItem>
 					{/each}
+					{#if panel.hasHandBacks}<MenuSeparator /><MenuRadioItem value="qa" aria-label="Q&A" textValue="Q&A" indicatorPosition="leading" onselect={() => panel.qa()}>Q&A</MenuRadioItem>{/if}
 				</MenuRadioGroup>
 			</MenuGroup>
-			<MenuSeparator />
-			<MenuItem disabled={defaultState.kind === "saving"} onselect={makeDefault}>Make default</MenuItem>
-			<MenuItem disabled={!panel.overridden || defaultState.kind === "saving"} onselect={resetLevel}>Back to default</MenuItem>
+			{#if panel.stops.length > 1}
+				<MenuSeparator />
+				<MenuItem disabled={defaultState.kind === "saving"} onselect={makeDefault}>Make default</MenuItem>
+				<MenuItem disabled={!panel.overridden || defaultState.kind === "saving"} onselect={resetLevel}>Back to default</MenuItem>
+			{/if}
 		</Menu>
 	{/if}
-	<Tabs variant="footer" value={active} {options} label="Show" data-testid={layout === "tabs" && panel.stops.length > 1 ? "surfacing-level" : undefined} onValueChange={(stop) => { if (stop === "usage") panel.usage(); else show(stop); }}>
-		{#snippet optionContent(option)}{#if option.value === "usage"}Usage{:else}{@render stopContent(option.value, option.label)}{/if}{/snippet}
+	<Tabs variant="footer" value={active ?? ""} {options} label="Show" data-testid={layout === "tabs" && panel.stops.length > 1 ? "surfacing-level" : undefined} onValueChange={(stop) => { if (stop === "usage") panel.usage(); else if (stop === "qa") panel.qa(); else show(stop); }}>
+		{#snippet optionContent(option)}{#if option.value === "usage"}Usage{:else if option.value === "qa"}Q&A{:else}{@render stopContent(option.value, option.label)}{/if}{/snippet}
 	</Tabs>
 	{#if layout === "tabs" && panel.stops.length > 1}{@render defaults()}{/if}
 	<RunningPill count={running} />
