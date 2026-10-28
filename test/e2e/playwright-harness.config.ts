@@ -47,6 +47,21 @@ export default defineConfig({
 		},
 		{
 			name: "mobile",
+			// These specs drive no viewport- or touch-dependent UI (RPC, store,
+			// migration and render-count checks), so a mobile run only repeats
+			// desktop. Ignoring them here also skips their harness fixtures.
+			testIgnore: [
+				"**/harness-create-latency.spec.ts",
+				"**/harness-daemon-services.spec.ts",
+				"**/harness-daemon-store-cutover.spec.ts",
+				"**/harness-daemon-store-import.spec.ts",
+				"**/harness-overflow-fanout-pin.spec.ts",
+				"**/harness-session-cache.spec.ts",
+				"**/harness-session-routing.spec.ts",
+				"**/harness-store-contention.spec.ts",
+				"**/harness-trace-artifact-pin.spec.ts",
+				"**/harness-transcript-performance.spec.ts",
+			],
 			use: {
 				viewport: { width: 393, height: 852 },
 				isMobile: true,
