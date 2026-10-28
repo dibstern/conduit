@@ -118,9 +118,12 @@ clean_stale() {
     # Strip the trailing -<project>-<platform> suffix to get the story ID
     local story_id
     story_id=$(echo "$basename" | sed -E 's/-(desktop|mobile)-(darwin|linux)$//')
-    # Light captures use the same Storybook ID as their dark counterparts.
-    story_id=${story_id%-light}
-    if ! echo "$valid_ids" | grep -qxF "$story_id"; then
+    # Light captures use the same Storybook ID as their dark counterparts, but a
+    # story can itself be named Light (`...--light`), so try the ID both ways.
+    # Here-strings, not `echo | grep -q`: grep -q exits on the first match, echo
+    # takes SIGPIPE, and under pipefail the `if !` deletes a live baseline.
+    if ! grep -qxF "$story_id" <<<"$valid_ids" &&
+      ! grep -qxF "${story_id%-light}" <<<"$valid_ids"; then
       rm "$snap"
       removed=$((removed + 1))
     fi
