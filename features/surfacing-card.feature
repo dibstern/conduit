@@ -4,7 +4,7 @@ Scenario: Keyboard picking clears a hovered work caption
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the surfacing session has a settled turn
-  Then keyboard picking a message clears the strip caption
+  Then keyboard picking a message clears the step popover
   And the messages region visually matches surfacing-keyboard-clears-hover at 98 percent
 
 Scenario Outline: Answer stays quiet on a live turn even while Jev is pending
@@ -100,7 +100,7 @@ Scenario Outline: A tap under four pixels and a drag on either lane keep the sel
   When I scrub the strip from message #5 to #1
   Then the surfaced card shows #1 and announces its category and position
   And the surfaced card offers Follow latest
-  And an ordinary strip segment still captions the head and opens its log row
+  And an ordinary strip segment shows its step popover and opens its log row
 
 Examples:
   | viewport |
@@ -286,6 +286,7 @@ Scenario Outline: Older turns start folded while keeping their pins available
   And the open Ask head chip is absent
   When I pick surfaced message #2
   Then the surfaced card shows #2 and announces its category and position
+  And the historical Ask card is not labelled Needs reply
 
 Examples:
   | viewport |

@@ -3,8 +3,8 @@
 	import type { SurfacePin, SurfaceTurn } from "../../utils/surface-turn.js";
 	import type { PendingReveal } from "../../stores/turn-panel.svelte.js";
 	import type { ReadState, SurfacingRegions } from "./SurfacingCard.svelte";
-	export type Props = { kind: "preview"; card: SurfacePin } | {
-		kind: "selected"; card: SurfacePin | null; view: SurfaceTurn; live: boolean;
+	export type Props = { kind: "preview"; card: SurfacePin; onreply?: never; onread?: never; onexplain?: never } | {
+		kind: "selected"; card: SurfacePin; view: SurfaceTurn; live: boolean;
 		onreply: (pin: SurfacePin, excerpt?: string) => void;
 		onread: (pin: SurfacePin, read: boolean) => void;
 		onexplain: (pin: SurfacePin) => void;
@@ -41,11 +41,11 @@
 {/if}
 
 {#snippet body(card: SurfacePin)}
-	<div class="message-content" class:ask={card.category === "ask" && !card.pending}>
+	<div class="message-content" class:ask={card.category === "ask" && !card.pending} inert={props.kind === "preview"}>
 		<div class="card-head" data-surfacing-region="card-head">
 			<span class="type-label"><span class="glyph">{card.glyph}</span> {card.label}</span>
 			{#if selected?.live && selected.view.following}<span class="following">Following latest</span>{/if}
-			{#if selected?.view.openAsk?.uuid === card.part.uuid || card.category === "ask" && !card.pending}<span class="needs-reply">Needs reply</span>{/if}
+			{#if selected?.view.openAsk?.uuid === card.part.uuid}<span class="needs-reply">Needs reply</span>{/if}
 			{@render selected?.regions?.cardHead?.(card)}
 			<span class="card-at">{card.number === undefined ? "Waiting for Jev" : `#${card.number}`}<span class="desktop-time">{` · ${card.time}`}</span>{selected ? ` · ${selected.view.cardIndex + 1}/${selected.view.pins.length}` : ""}</span>
 			{#if card.read !== undefined && selected}<label class="read-toggle"><Checkbox data-testid="surfacing-read-toggle" bind:checked={() => card.read === true, (read) => selected?.onread(card, read)} onchange={(event) => { event.currentTarget.checked = card.read === true; }} disabled={selected?.readState?.kind === "saving"} class="size-[15px] rounded-[4px]" />Read</label>{/if}

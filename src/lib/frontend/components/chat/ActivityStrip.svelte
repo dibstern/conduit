@@ -1,12 +1,6 @@
-<!-- One segment per step: colour is the kind of work, width is how long it took. -->
-<!-- Hovering describes the step in a hanging popover; clicking opens its log row. -->
-<!-- A compaction is a fixed-width seam rather than a weighted block: it marks    -->
-<!-- where the context was squeezed, and took no share of the work.                -->
-<!--                                                                              -->
-<!-- Touch only gets the tap: it opens the log at the step you hit, which is the   -->
-<!-- useful half of the interaction anyway. Captioning is deliberately gated to a  -->
-<!-- mouse — a tap fires `pointerenter` with no matching leave, so an ungated      -->
-<!-- caption would replace the summary sentence and stay there.                    -->
+<!-- Each segment is a step: colour names the work, width shows its duration.
+     Mouse hover describes that step; touch only opens its log row.
+     Compactions are fixed-width seams, with no share of the work. -->
 <script lang="ts">
 	import type { ComponentProps, Snippet } from "svelte";
 	import type { SurfacePin, SurfacePart } from "../../utils/surface-turn.js";
@@ -26,6 +20,7 @@
 	import { partStyle, segmentAppearance } from "./activity-style.js";
 	import ActivityTimeline from "../ui/ActivityTimeline.svelte";
 	import Icon from "../ui/Icon.svelte";
+	type TimelineProps = ComponentProps<typeof import("../ui/ActivityTimeline.svelte").default>;
 
 	let { turn, segment, final, now, running, width = $bindable(0), active = null, markers, cardSlot, card, openAsk, belowLevel, cited, preview, sliderText, oninteraction, onpick, onjump, oncommand, phone = false }: {
 		turn: Turn;
@@ -35,15 +30,15 @@
 		running: ReadonlySet<string>;
 		width?: number;
 		active?: string | null;
-		markers?: ComponentProps<typeof ActivityTimeline>["markers"];
-		cardSlot?: ComponentProps<typeof ActivityTimeline>["cardSlot"];
+		markers?: TimelineProps["markers"];
+		cardSlot?: TimelineProps["cardSlot"];
 		card?: Snippet;
 		openAsk?: SurfacePart | null;
 		belowLevel?: boolean;
 		cited?: string | null;
 		preview?: Snippet<[SurfacePin]>;
 		sliderText?: string;
-		oninteraction?: ComponentProps<typeof ActivityTimeline>["oninteraction"];
+		oninteraction?: TimelineProps["oninteraction"];
 		onpick?: (pin: SurfacePin) => void;
 		onjump?: (id: string) => void;
 		oncommand?: (event: KeyboardEvent) => void;
@@ -61,7 +56,7 @@
 			left: positions[index]?.left ?? 0,
 			width: positions[index]?.width ?? 0,
 			label: title(part, index),
-			...segmentAppearance(part, running),
+			...segmentAppearance(part, running, final && turn.live && index === segment.activity.length - 1),
 		};
 	}));
 
@@ -77,14 +72,16 @@
 {#snippet stepPreview(id: string)}
 	{@const index = steps.findIndex((part) => part.uuid === id)}
 	{@const part = steps[index]}
-	{#if part}
+	{@const appearance = segments[index]}
+	{#if part && appearance}
 		{@const style = partStyle(part)}
-		{@const duration = durations?.[segment.activity.findIndex((candidate) => candidate.uuid === id)]}
+		{@const duration = appearance.running && part.createdAt !== undefined ? Math.max(0, now - part.createdAt) : durations?.[segment.activity.findIndex((candidate) => candidate.uuid === id)]}
 		<div class="flex items-center gap-[7px] text-[12px]">
-			<Icon name={style.icon} size={14} class={style.text} />
-			<span class="shrink-0">{part.type === "tool" ? toolVerb(part) : partLabel(part)}</span>
+			<Icon name={style.icon} size={14} class={appearance.tone === "fail" ? "text-seg-fail" : appearance.running ? "text-accent" : style.text} />
+			<span class="shrink-0">{appearance.running ? "Running" : part.type === "tool" ? toolVerb(part) : part.type === "thinking" ? "Thought" : partLabel(part)}</span>
 			{#if part.type === "tool"}<code class="min-w-0 truncate font-mono text-text-secondary">{toolSubject(part)}</code>{/if}
-			{#if duration !== undefined}<span class="shrink-0 font-mono text-text-muted">{fmtDuration(duration)}</span>{/if}
+			{#if duration !== undefined}<span class="shrink-0 font-mono text-text-muted">{fmtDuration(duration)}{appearance.running ? " so far" : ""}</span>{/if}
+			{#if appearance.tone === "fail"}<span class="text-seg-fail">failed</span>{/if}
 			<span class="ml-auto shrink-0 font-mono text-text-muted">{surfaceTime((part.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}</span>
 		</div>
 		<div class="mt-[5px] text-[10.5px] text-text-dimmer">Step {index + 1}{turn.live ? "" : ` of ${steps.length}`} · click to open it in the log</div>

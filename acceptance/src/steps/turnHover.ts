@@ -15,10 +15,32 @@ const preview = (page: Page) =>
 const beforeHover = new WeakMap<Page, { height: number }>();
 const previewBoxes = new WeakMap<
 	Page,
-	{ x: number; y: number; width: number }
+	{ x: number; y: number; width: number; gap: number }
 >();
 
 export const turnHoverHandlers: StepHandler[] = [
+	{
+		name: "preserve the focused element while previewing an open card",
+		match: /^the hover keeps keyboard focus$/,
+		run: async ({ world }) => {
+			expect(
+				await world.page.evaluate(() =>
+					document.activeElement?.hasAttribute("data-hover-focus-owner"),
+				),
+			).toBe(true);
+		},
+	},
+	{
+		name: "keep answered historical asks distinct from an open Ask",
+		match: /^the historical Ask card is not labelled Needs reply$/,
+		run: async ({ world }) => {
+			await expect(
+				panel(world.page)
+					.getByTestId("surfacing-msg-card")
+					.getByText("Needs reply", { exact: true }),
+			).toHaveCount(0);
+		},
+	},
 	{
 		name: "leave hover without choosing a message",
 		match: /^I leave the strip hover$/,
@@ -48,6 +70,15 @@ export const turnHoverHandlers: StepHandler[] = [
 				await expect(
 					panel(world.page).getByTestId("surfacing-msg-card"),
 				).toBeVisible();
+				await panel(world.page).getByTestId("surfacing-pin-4").hover();
+				await expect(preview(world.page)).toHaveAttribute("data-ordinal", "4");
+				await expect(
+					panel(world.page).getByTestId("surfacing-pin-2"),
+				).toHaveAttribute("aria-pressed", "true");
+				await world.page.mouse.move(0, 0);
+				await expect(
+					panel(world.page).getByTestId("surfacing-msg-card"),
+				).toHaveAttribute("data-ordinal", "2");
 			}
 		},
 	},
@@ -179,6 +210,8 @@ export const turnHoverHandlers: StepHandler[] = [
 		name: "choose the panel mode for a hover",
 		match: /^the hover Turn is (collapsed|open|usage)$/,
 		run: async ({ world, match }) => {
+			if (match[1] === "open")
+				await panel(world.page).getByTestId("surfacing-msg-card").focus();
 			if (match[1] === "collapsed")
 				await panel(world.page)
 					.getByRole("button", { name: "Collapse turn", exact: true })
@@ -260,16 +293,29 @@ export const turnHoverHandlers: StepHandler[] = [
 	},
 	{
 		name: "activate a step from the strip",
-		match: /^I click turn step tool 1$/,
-		run: async ({ world }) => {
+		match: /^I (click|tap) turn step tool 1$/,
+		run: async ({ world, match }) => {
 			const box = await panel(world.page)
 				.locator('[data-step-id="surfacing-agent/surfacing-tool-1"]')
 				.boundingBox();
 			if (!box) throw new Error("Missing work segment");
-			await world.page.mouse.click(
-				box.x + box.width / 2,
-				box.y + box.height / 2,
-			);
+			const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+			if (match[1] === "click") await world.page.mouse.click(point.x, point.y);
+			else {
+				const cdp = await world.page.context().newCDPSession(world.page);
+				try {
+					await cdp.send("Input.dispatchTouchEvent", {
+						type: "touchStart",
+						touchPoints: [point],
+					});
+					await cdp.send("Input.dispatchTouchEvent", {
+						type: "touchEnd",
+						touchPoints: [],
+					});
+				} finally {
+					await cdp.detach();
+				}
+			}
 		},
 	},
 	{
@@ -281,7 +327,18 @@ export const turnHoverHandlers: StepHandler[] = [
 			);
 			await expect(row).toBeInViewport();
 			await expect(row).toBeFocused();
-			await expect(row).toHaveCSS("background-color", /.+/);
+			const paint = await row.evaluate((element) => {
+				const probe = document.createElement("span");
+				probe.style.backgroundColor = "var(--color-selection)";
+				element.append(probe);
+				const colours = [
+					getComputedStyle(element).backgroundColor,
+					getComputedStyle(probe).backgroundColor,
+				];
+				probe.remove();
+				return colours;
+			});
+			expect(paint[0]).toBe(paint[1]);
 			await expect(panel(world.page)).toHaveAttribute(
 				"data-minimised",
 				"false",
@@ -331,8 +388,14 @@ export const turnHoverHandlers: StepHandler[] = [
 			);
 			await expect(card.locator("button, input, [tabindex]")).toHaveCount(0);
 			const box = await card.boundingBox();
-			if (!box) throw new Error("Missing preview card");
-			previewBoxes.set(world.page, box);
+			const strip = await panel(world.page)
+				.locator(".surface-strip")
+				.boundingBox();
+			if (!box || !strip) throw new Error("Missing preview card or strip");
+			previewBoxes.set(world.page, {
+				...box,
+				gap: box.y - strip.y - strip.height,
+			});
 		},
 	},
 	{
@@ -388,7 +451,7 @@ export const turnHoverHandlers: StepHandler[] = [
 				.locator(".surface-strip")
 				.boundingBox();
 			if (!strip) throw new Error("Missing strip");
-			expect(after.y - (strip.y + strip.height)).toBeCloseTo(10, 0);
+			expect(after.y - (strip.y + strip.height)).toBeCloseTo(before.gap, 0);
 		},
 	},
 ];

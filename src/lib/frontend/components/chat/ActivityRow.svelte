@@ -60,7 +60,7 @@
 	let expanded = $state(false);
 
 	const style = $derived(partStyle(part));
-	const iconTone = $derived(segmentAppearance(part, runningTasks).tone);
+	const iconTone = $derived(segmentAppearance(part, runningTasks, live).tone);
 	const iconColor = $derived(iconTone === "fail" ? "text-seg-fail" : iconTone === "live" ? "text-accent" : style.text);
 	const meta = $derived(duration === undefined ? "" : fmtDuration(duration));
 	// A step that launched a background task tracks that task. Foreground tasks

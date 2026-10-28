@@ -203,12 +203,11 @@
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	const minimised = $derived(panel.view.kind === "collapsed");
 	const cardSlot = $derived.by((): CardSlot => {
-		if (!surfacingActive || usage) return { kind: "none" };
-		if (panel.view.kind === "collapsed") {
-			const card = surface.messages.find((pin) => pin.part.uuid === stripInteraction.hovered);
-			return card ? { kind: "preview", card } : { kind: "none" };
-		}
-		return surface.card ? { kind: "selected", card: surface.card } : { kind: "none" };
+		if (!surfacingActive) return { kind: "none" };
+		const selected = minimised || usage ? null : surface.card;
+		const hovered = surface.messages.find((pin) => pin.part.uuid === stripInteraction.hovered);
+		if (hovered && hovered.part.uuid !== selected?.part.uuid && (!stripInteraction.scrubbing || minimised)) return { kind: "preview", card: hovered };
+		return selected ? { kind: "selected", card: selected } : { kind: "none" };
 	});
 	const summaryVisible = $derived((!surfacingActive || !minimised) && summaryEnabled && (summaryOpen && summaryOpen.storeId === storeTurnId ? summaryOpen.open : (!phone && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
 	function toggleMinimised() {
@@ -382,6 +381,10 @@
 		else void jumpTo(index);
 	}
 	function stripChanged(interaction: StripInteraction) { stripInteraction = interaction; }
+	function pickFromStrip(pin: SurfacePin) {
+		if (minimised || usage) pick(pin);
+		else selectPin(pin);
+	}
 
 	const PREFETCH_REST_MS = 2_000;
 
@@ -533,18 +536,18 @@
 					{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summary</Button></span>{/if}
 			</div>
 			{#if usage && surfacingActive}
-				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", mode: "usage", dots: surface.messages }} openAsk={surface.openAsk} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
+				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} {preview} markers={{ kind: "dots", mode: "usage", dots: surface.messages }} openAsk={surface.openAsk} onpick={pickFromStrip} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if minimised && surfacingActive}
 				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", mode: "collapsed", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if surfacingActive}
-				<SurfacingCard view={surface} card={cardSlot.kind === "selected" ? cardSlot.card : null} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} context={askContext} onexplain={(pin) => { void explainAsk(pin); }} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
+				<SurfacingCard view={surface} card={surface.card} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} context={askContext} onexplain={(pin) => { void explainAsk(pin); }} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readState} bind:cardEl={readCardEl} onread={readMessage}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={cardSlot.kind === "selected" && cardSlot.card.number !== undefined && replies.has(cardSlot.card.number)}
 					onpick={pick} onlevel={selectLevel}
 					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand}>
 					{#snippet strip(cited: string | null, card: Snippet)}
-						<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} markers={{ kind: "pins", pins: surface.pins, selected: cardSlot.kind === "selected" ? cardSlot.card.part.uuid : null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={selectPin} onjump={stripJump} oncommand={surfaceCommand} />
+						<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} {preview} markers={{ kind: "pins", pins: surface.pins, selected: surface.card?.part.uuid ?? null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={pickFromStrip} onjump={stripJump} oncommand={surfaceCommand} />
 					{/snippet}
 				</SurfacingCard>
 			{:else}

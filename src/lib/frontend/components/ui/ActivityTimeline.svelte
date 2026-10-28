@@ -51,29 +51,41 @@
 	} = $props();
 	let gesture = $state<Gesture>({ kind: "idle", hovered: null });
 	let cursor = $state<string | null>(null);
+	let timelineEl: HTMLDivElement | undefined = $state();
 	let trackEl: HTMLDivElement | undefined = $state();
 	let stripEl: HTMLDivElement | undefined = $state();
 	let laneWidth = $state(0);
 	let hoverX = $state(0);
+	let hoverHeight = $state(0);
+	let layoutVersion = $state(0);
 	let lastGroupTap: { source: string; picked: string } | null = null;
 	const hovered = $derived(gesture.kind === "idle" ? gesture.hovered : gesture.kind === "dragging" ? gesture.id : null);
 	const scrubbing = $derived(gesture.kind !== "idle");
 	const pinMarkers = $derived(markers.kind === "pins" ? markers : null);
 	const collapsed = $derived(markers.kind === "dots" && markers.mode === "collapsed");
 	const groups = $derived(pinMarkers ? surfacePinRows({ pins: pinMarkers.pins, openAsk }, laneWidth, phone) : []);
-	const currentGroup = $derived(groups.find((group) => group.members.some((pin) => pin.part.uuid === pinMarkers?.selected)));
+	const currentGroup = $derived(groups.find((group) => group.members.some((pin) => cardSlot.kind !== "none" && pin.part.uuid === cardSlot.card.part.uuid)));
 	const selected = $derived(Math.max(0, segments.findIndex((segment) => segment.id === cursor)));
 	const highlighted = $derived(active ?? hovered);
 	const messagePreview = $derived(cardSlot.kind === "preview" ? cardSlot.card : null);
 	const hoveredStep = $derived(segments.find((step) => step.id === hovered && step.kind !== "message"));
 	const anchor = $derived(cardSlot.kind === "none" ? null : `clamp(14px, ${currentGroup?.x ?? cardSlot.card.x}%, calc(100% - 14px))`);
-	const previewPosition = $derived.by(() => {
-		if (!messagePreview || !trackEl) return { left: 0, caret: 0, above: false };
-		const box = trackEl.getBoundingClientRect();
-		const bottom = trackEl.closest("[data-session-id]")?.getBoundingClientRect().bottom ?? window.innerHeight;
-		const dot = messagePreview.x / 100 * box.width;
-		const left = Math.max(0, Math.min(box.width - Math.min(400, box.width), dot - Math.min(400, box.width) * 0.7));
-		return { left, caret: dot - left, above: bottom - box.bottom < 64 };
+	const hoverPosition = $derived.by(() => {
+		void layoutVersion;
+		void width;
+		if (!stripEl || (!messagePreview && !hoveredStep)) return { top: 0, left: 0, width: 0, caret: "14px", side: "bottom" };
+		const box = stripEl.getBoundingClientRect();
+		const bounds = stripEl.closest("#messages, [data-session-id]")?.getBoundingClientRect();
+		const below = Math.min(window.innerHeight, bounds?.bottom ?? window.innerHeight) - box.bottom;
+		const above = box.top - Math.max(0, bounds?.top ?? 0);
+		const flip = below < hoverHeight + 10 && above > below;
+		const cardWidth = messagePreview ? box.width : Math.min(560, box.width);
+		const x = ((messagePreview ? currentGroup?.x ?? messagePreview.x : hoverX) / 100) * box.width;
+		const left = messagePreview ? 0 : Math.max(0, Math.min(box.width - cardWidth, x - cardWidth / 2));
+		return {
+			top: box.top - (timelineEl?.getBoundingClientRect().top ?? box.top) + (flip ? -hoverHeight - 10 : stripEl.offsetHeight + 10),
+			left, width: cardWidth, caret: `clamp(14px, ${x - left}px, calc(100% - 14px))`, side: flip ? "top" : "bottom",
+		};
 	});
 	$effect(() => { oninteraction?.({ hovered, scrubbing }); });
 	onDestroy(() => oninteraction?.({ hovered: null, scrubbing: false }));
@@ -106,6 +118,9 @@
 		if (event.button !== 0 || !event.isPrimary || !trackEl) return;
 		const id = (event.target as Element).closest<HTMLElement>("[data-surface-part]")?.dataset["surfacePart"] ?? stepAt(xAt(event.clientX))?.id;
 		if (!id) return;
+		// Suppress touch's later mouse-focus default; the reveal owns focus.
+		// Vertical scrolling still belongs to touch-action: pan-y.
+		if (event.pointerType === "touch") event.preventDefault();
 		gesture = { kind: "pressed", id, x: event.clientX, y: event.clientY };
 		// Synthetic events have no browser pointer to capture.
 		if (event.isTrusted) trackEl.setPointerCapture(event.pointerId);
@@ -170,20 +185,20 @@
 	}
 </script>
 
-<svelte:window onkeydowncapture={(event) => { if (event.key === "Escape" && hovered) { clear(); event.preventDefault(); event.stopPropagation(); } }} />
+<svelte:window onresize={() => layoutVersion++} onscrollcapture={() => layoutVersion++} onkeydowncapture={(event) => { if (event.key === "Escape" && hovered) { clear(); event.preventDefault(); event.stopPropagation(); } }} />
 
-<div class="timeline" class:minimised-turn={collapsed} onpointerleave={() => { if (gesture.kind === "idle") clear(); }} role="group" aria-label={collapsed ? "Minimised turn messages" : "Turn strip"}>
-	<div bind:this={trackEl} bind:clientWidth={width} class:dots={markers.kind === "dots"} class={collapsed ? "minimised-scrub" : markers.kind === "pins" ? "surfacing-scrub select-none" : "relative h-[44px] md:h-[16px] min-w-[44px] cursor-pointer touch-pan-y select-none outline-none focus-visible:ring-1 focus-visible:ring-accent"}
-		data-testid={collapsed ? "surfacing-minimised-strip" : markers.kind === "pins" ? "surfacing-scrub" : undefined}
-		data-surfacing-region={markers.kind === "pins" ? "strip-overlay" : undefined}
-		role="slider" tabindex="0" aria-label={markers.kind === "pins" ? "Surfaced messages" : `Activity timeline — ${segments.length} steps`}
-		aria-valuemin={0} aria-valuemax={Math.max(0, markers.kind === "pins" ? markers.pins.length - 1 : segments.length - 1)}
-		aria-valuenow={markers.kind === "pins" ? Math.max(0, markers.pins.findIndex((pin) => pin.part.uuid === markers.selected)) : selected}
-		aria-valuetext={markers.kind === "pins" ? sliderText : segments[selected]?.label ?? "No activity"} aria-disabled={segments.length === 0}
+<div bind:this={timelineEl} class="timeline" class:minimised-turn={collapsed} onpointerleave={() => { if (gesture.kind === "idle") clear(); }} role="group" aria-label={collapsed ? "Minimised turn messages" : "Turn strip"}>
+	<div bind:this={trackEl} bind:clientWidth={width} class:dots={markers.kind === "dots"} class={collapsed ? "minimised-scrub" : pinMarkers ? "surfacing-scrub select-none" : "relative h-[44px] md:h-[16px] min-w-[44px] cursor-pointer touch-pan-y select-none outline-none focus-visible:ring-1 focus-visible:ring-accent"}
+		data-testid={collapsed ? "surfacing-minimised-strip" : pinMarkers ? "surfacing-scrub" : undefined}
+		data-surfacing-region={pinMarkers ? "strip-overlay" : undefined}
+		role="slider" tabindex="0" aria-label={pinMarkers ? "Surfaced messages" : `Activity timeline — ${segments.length} steps`}
+		aria-valuemin={0} aria-valuemax={Math.max(0, pinMarkers ? pinMarkers.pins.length - 1 : segments.length - 1)}
+		aria-valuenow={pinMarkers ? Math.max(0, pinMarkers.pins.findIndex((pin) => pin.part.uuid === pinMarkers.selected)) : selected}
+		aria-valuetext={pinMarkers ? sliderText : segments[selected]?.label ?? "No activity"} aria-disabled={segments.length === 0}
 		onkeydown={keyboard} onpointerdown={pointerDown} onpointermove={pointerMove} onpointerup={pointerUp} onpointercancel={clear} onlostpointercapture={clear}
 		onfocus={() => { if (markers.kind !== "pins" && gesture.kind === "idle") { const step = segments[selected]; hoverX = step ? step.left + step.width / 2 : 0; gesture = { kind: "idle", hovered: step?.id ?? null }; } }} onblur={() => { if (gesture.kind === "idle") clear(); }}>
-		{#if markers.kind === "pins"}
-		<div class="pin-lane" class:two-rows={groups.some((group) => group.row === 1)} class:empty={markers.pins.length === 0} data-testid="surfacing-pins" bind:clientWidth={laneWidth} data-layout-ready={laneWidth > 0} data-lane-width={laneWidth}>
+		{#if pinMarkers}
+		<div class="pin-lane" class:two-rows={groups.some((group) => group.row === 1)} class:empty={pinMarkers.pins.length === 0} data-testid="surfacing-pins" bind:clientWidth={laneWidth} data-layout-ready={laneWidth > 0} data-lane-width={laneWidth}>
 		{#each groups as group (group.leader.part.uuid)}
 			{@const pin = group.members.find((member) => member.part.uuid === pinMarkers?.selected) ?? group.leader}
 			{@const current = pinMarkers?.selected === pin.part.uuid}
@@ -195,14 +210,14 @@
 		{/each}
 		</div>
 		{/if}
-		<div class={collapsed ? "thin-track surface-strip" : markers.kind === "pins" ? "surface-strip relative h-[16px] min-w-[44px]" : "surface-strip absolute inset-0"} data-testid={collapsed ? "surfacing-thin-track" : undefined} role={markers.kind === "pins" ? "group" : undefined} aria-label={markers.kind === "pins" ? `Activity timeline — ${segments.length} steps` : undefined} bind:this={stripEl}>
+		<div class={collapsed ? "thin-track surface-strip" : pinMarkers ? "surface-strip relative h-[16px] min-w-[44px]" : "surface-strip absolute inset-0"} data-testid={collapsed ? "surfacing-thin-track" : undefined} role={pinMarkers ? "group" : undefined} aria-label={pinMarkers ? `Activity timeline — ${segments.length} steps` : undefined} bind:this={stripEl}>
 			{#each segments as segment (segment.id)}
 				<Button variant="ghost" size="content" hoverFill="none" ariaLabel={segment.label} data-step-id={segment.id} class="absolute top-1/2 h-[4px] -translate-y-1/2 rounded-[1px] transition-opacity {TONES[segment.tone]} {segment.running ? 'live-segment' : ''} opacity-100" data-active={highlighted === segment.id} style="left:{segment.left}%;width:{segment.width}%;" onclick={(event) => { if (event.detail === 0) { cursor = segment.id; clear(); activateStep(segment.id); } }}><span class="sr-only">{segment.label}</span></Button>
 			{/each}
 			{#each seams as seam (seam.id)}
 				<span data-step-id={seam.id} aria-hidden="true" class="absolute top-1/2 h-[10px] w-[2px] -translate-y-1/2 bg-text-secondary" style:left="{seam.left}%"></span>
 			{/each}
-			{#if markers.kind === "pins" && anchor}<i class="surface-thumb" style:left={anchor}></i>{/if}
+			{#if pinMarkers && anchor}<i class="surface-thumb" style:left={anchor}></i>{/if}
 		{#if hovered && (messagePreview || hoveredStep && stepPreview)}<i data-testid="strip-hover-marker" class="strip-hover-marker" style:left="{hoverX}%"><Icon name="chevron-down" size={10} class="absolute top-full left-1/2 -translate-x-1/2" /></i>{/if}
 		</div>
 		{#if markers.kind === "dots"}
@@ -212,22 +227,22 @@
 			
 		{/if}
 	</div>
-	{#if cardSlot.kind === "selected" && card}
-		<div class="hanging-card" class:ask={cardSlot.card.category === "ask" && !cardSlot.card.pending}>
-			<i class="card-caret" style:left={anchor}></i>
+	{#if pinMarkers?.selected && card && cardSlot.kind !== "none"}
+		<div class="hanging-card {cardSlot.kind === 'preview' ? 'opacity-0 pointer-events-none' : ''}" class:ask={cardSlot.card.category === "ask" && !cardSlot.card.pending}>
+			{#if cardSlot.kind === "selected"}<i class="card-caret" style:left={anchor}></i>{/if}
 			{@render card()}
 		</div>
 	{/if}
 	{#if hoveredStep && stepPreview}
-		<div role="group" aria-label="Step preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" data-side="bottom" onpointerup={() => { const id = hoveredStep.id; clear(); activateStep(id); }}>
-			<i class="card-caret" style="left:clamp(14px, {hoverX}%, calc(100% - 14px));--card-background:var(--color-bg-alt)"></i>
+		<div role="group" aria-label="Step preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" bind:clientHeight={hoverHeight} style="top:{hoverPosition.top}px;left:{hoverPosition.left}px;width:{hoverPosition.width}px" data-side={hoverPosition.side} onpointerup={() => { const id = hoveredStep.id; clear(); activateStep(id); }}>
+			<i class="card-caret" style="left:{hoverPosition.caret};--card-background:var(--color-bg-alt)"></i>
 			<Surface variant="raised" radius="lg" padding="md" data-testid="turn-step-popover">{@render stepPreview(hoveredStep.id)}</Surface>
 		</div>
 	{/if}
 	{#if messagePreview && preview}
-		<div role="group" aria-label="Hover preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" class:ask={messagePreview.category === "ask" && !messagePreview.pending} data-side={previewPosition.above ? "top" : "bottom"} data-testid="surfacing-minimised-peek" data-ordinal={messagePreview.number}
+		<div role="group" aria-label="Hover preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" bind:clientHeight={hoverHeight} style="top:{hoverPosition.top}px;left:{hoverPosition.left}px;width:{hoverPosition.width}px" class:ask={messagePreview.category === "ask" && !messagePreview.pending} data-side={hoverPosition.side} data-testid="surfacing-minimised-peek" data-ordinal={messagePreview.number}
 			onpointerup={() => { const pin = messagePreview; clear(); if (pin) onpick?.(pin); }}>
-			<i class="card-caret" style:left={anchor}></i>
+			<i class="card-caret" style:left={hoverPosition.caret}></i>
 			{@render preview(messagePreview)}
 		</div>
 	{/if}
@@ -255,9 +270,10 @@
 	.unread-dot { position:absolute; top:-2px; right:-2px; width:7px; height:7px; border-radius:50%; background:var(--color-accent); box-shadow:0 0 0 1.5px var(--color-turn-bg); }
 	.hanging-card { position:relative; margin-top:10px; --card-background:var(--color-bg); }
 	.hanging-card.ask { --card-background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); }
-	.hover-card { position:absolute; top:100%; left:0; right:0; }
+	.hover-card { position:absolute; margin-top:0; }
 	.hover-card::before { content:""; position:absolute; bottom:100%; left:0; right:0; height:10px; }
-	.hover-card[data-side="top"] { top:auto; bottom:calc(100% + 10px); }
+	.hover-card[data-side="top"]::before { bottom:auto; top:100%; }
+	.hover-card[data-side="top"] .card-caret { top:auto; bottom:-6px; transform:translateX(-50%) rotate(225deg); }
 	.card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--card-background); border-top:1px solid var(--color-border); border-left:1px solid var(--color-border); transform:translateX(-50%) rotate(45deg); }
 	.surface-thumb { position:absolute; top:50%; width:3px; height:14px; border-radius:2px; background:var(--color-text); transform:translate(-50%,-50%); pointer-events:none; }
 	.surface-strip :global(.live-segment) { animation:strip-breathe 1.2s ease-in-out infinite; }

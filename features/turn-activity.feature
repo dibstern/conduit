@@ -9,6 +9,7 @@ Scenario Outline: A message hover borrows the open or Usage slot without changin
   And the hover Turn is <mode>
   And I hover turn step message 1
   Then the hanging preview shows full message 1 without actions or navigation
+  And the hover keeps keyboard focus
   And the messages region visually matches turn-hover-slot-<mode> at 98 percent
   When I leave the strip hover
   Then the <mode> slot returns without selecting the hovered message
@@ -52,6 +53,7 @@ Examples:
 Scenario Outline: Work hovers describe the step under the pointer and open its log row
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
   And the surfacing session has a settled turn
   When the hover Turn is <mode>
   And I hover turn step tool 1
@@ -61,14 +63,15 @@ Scenario Outline: Work hovers describe the step under the pointer and open its l
   When I press Escape over the hover
   Then the strip hover is cleared
   When I hover turn step tool 1
-  And I click turn step tool 1
+  And I <gesture> turn step tool 1
   Then Full log opens at highlighted tool 1
 
 Examples:
-  | mode      |
-  | collapsed |
-  | open      |
-  | usage     |
+  | mode      | viewport | gesture |
+  | collapsed | desktop  | click   |
+  | open      | desktop  | click   |
+  | usage     | desktop  | click   |
+  | collapsed | phone    | tap     |
 
 Scenario: A collapsed message preview is a full read-only card in the hanging slot
   Given message surfacing is active at Most
@@ -844,7 +847,7 @@ Scenario Outline: Cancelling a scrub discards its preview without picking a mess
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
-  Then cancelling a strip scrub preserves the selected message and clears the caption
+  Then cancelling a strip scrub preserves the selected message and clears the step popover
   And the messages region visually matches turn-strip-cancel-<viewport> at 98 percent
 
 Examples:

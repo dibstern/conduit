@@ -58,7 +58,9 @@
 </script>
 
 {#snippet messageCard()}
+	{#if card}
 	<SurfacingMessageCard kind="selected" {card} {view} {live} {regions} {context} {pending} {onland} {scrubbing} {readState} bind:cardEl {onreply} {onread} {onexplain} {replied} {oncommand} {onpick} {onfold} {onfollow} />
+	{/if}
 {/snippet}
 
 {@render strip(citedPart, messageCard)}

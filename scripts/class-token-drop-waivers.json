@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/chat/MinimisedTurn.svelte :: peek-text": "conduit-test-xdyjq.4 replaces the truncated single-line peek with the full read-only message card. The peek-text truncation recipe and its unused component are intentionally removed.",
 	"src/lib/frontend/components/chat/TurnLog.svelte :: py-[8px]": {
 		"renamedTo": "py-[7px]",
 		"reason": "conduit-test-xdyjq.6 matches design E's earlier-steps control: 7px vertical padding and 6px horizontal padding, with 12px secondary text."

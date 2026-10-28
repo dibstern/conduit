@@ -89,6 +89,7 @@ export function partStyle(part: ActivityPart): PartStyle {
 export function segmentAppearance(
 	part: ActivityPart,
 	running: ReadonlySet<string>,
+	live = false,
 ): { tone: PartStyle["tone"]; running: boolean } {
 	if (part.type === "tool") {
 		if (part.status === "error" || part.isError)
@@ -97,7 +98,9 @@ export function segmentAppearance(
 		if (
 			typeof taskId === "string" && part.metadata?.["backgrounded"] === true
 				? running.has(taskId)
-				: part.status === "running" || part.status === "pending"
+				: part.status === "running" ||
+					part.status === "pending" ||
+					(live && part.result === undefined)
 		) {
 			return { tone: "live", running: true };
 		}
