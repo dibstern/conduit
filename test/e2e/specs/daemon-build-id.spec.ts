@@ -205,7 +205,14 @@ const test = base.extend<{
 		let child: ChildProcess | undefined;
 		let diagnostics = "";
 		const stop = async () => {
-			if (!child || child.exitCode !== null) return;
+			if (!child) return;
+			if (child.exitCode !== null || child.signalCode !== null) {
+				if (child.exitCode !== 0)
+					throw new Error(
+						`Test daemon exited ${child.exitCode ?? child.signalCode}: ${diagnostics}`,
+					);
+				return;
+			}
 			const exited = once(child, "close");
 			child.send("stop");
 			const [code, signal] = await exited;

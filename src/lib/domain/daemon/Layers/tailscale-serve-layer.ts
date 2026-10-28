@@ -1,11 +1,13 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { Context, Data, Effect, Layer, Ref, Result, Schema } from "effect";
 import { formatErrorDetail } from "../../../errors.js";
 import {
 	commitDaemonRuntimeConfig,
 	DaemonConfigRefTag,
 } from "../Services/daemon-config-ref.js";
+import {
+	makeSubprocessRunner,
+	SubprocessError,
+} from "../Services/subprocess.js";
 
 export class TailscaleServeError extends Data.TaggedError(
 	"TailscaleServeError",
@@ -22,7 +24,6 @@ export class TailscaleCliTag extends Context.Service<
 	}
 >()("TailscaleCli") {}
 
-const execFileAsync = promisify(execFile);
 const isMissingBinary = (cause: unknown) =>
 	cause instanceof Error && "code" in cause && cause.code === "ENOENT";
 
@@ -30,11 +31,27 @@ export const TailscaleCliLive = Layer.succeed(TailscaleCliTag, {
 	exec: (args) =>
 		Effect.tryPromise({
 			try: async (signal) => {
+				const run = makeSubprocessRunner();
 				const override = process.env["CONDUIT_TAILSCALE_BIN"];
-				const options = { encoding: "utf8" as const, timeout: 10_000, signal };
+				const exec = (command: string) =>
+					run(command, args, { timeoutMs: 10_000 }, signal).then(
+						({ stdout, stderr, exitCode }) => {
+							if (exitCode !== 0)
+								throw new TailscaleServeError({
+									message: `Command failed: ${command} ${args.join(" ")}\n${stderr}`,
+								});
+							return stdout;
+						},
+						// Surface the spawn error itself so a missing binary reads as ENOENT.
+						(cause: unknown) => {
+							throw cause instanceof SubprocessError &&
+								cause.cause instanceof Error
+								? cause.cause
+								: cause;
+						},
+					);
 				try {
-					return (await execFileAsync(override ?? "tailscale", args, options))
-						.stdout;
+					return await exec(override ?? "tailscale");
 				} catch (cause) {
 					if (
 						override !== undefined ||
@@ -43,13 +60,7 @@ export const TailscaleCliLive = Layer.succeed(TailscaleCliTag, {
 					) {
 						throw cause;
 					}
-					return (
-						await execFileAsync(
-							"/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-							args,
-							options,
-						)
-					).stdout;
+					return exec("/Applications/Tailscale.app/Contents/MacOS/Tailscale");
 				}
 			},
 			catch: (cause) =>

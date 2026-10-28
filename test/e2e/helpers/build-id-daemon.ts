@@ -1,11 +1,11 @@
 // Compiled by tsgo so the test exercises the stamped server, not source/dev.
-import { spawnSync } from "node:child_process";
 import { existsSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { BUILD_ID } from "../../../src/lib/build-id.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
+import { stopDaemonAndAssertNoSurvivors } from "./daemon-survivors.js";
 
 const [root, staticDir, opencodeUrl, port] = process.argv.slice(2);
 if (!root || !staticDir || !opencodeUrl) throw new Error("Missing test paths");
@@ -46,49 +46,20 @@ const daemon = await startForegroundDaemon({
 await daemon.addProject(join(root, "build-id-test"));
 await daemon.addProject(join(root, "build-id-other"));
 process.send?.({ port: daemon.port, buildId: BUILD_ID });
-const stop = async () => {
-	await daemon.stop();
-	const snapshot = spawnSync("ps", ["-A", "-o", "pid=,ppid=,stat=,command="], {
-		encoding: "utf8",
-		maxBuffer: 4 * 1024 * 1024,
-	});
-	if (snapshot.error) throw snapshot.error;
-	if (snapshot.status !== 0) throw new Error(`ps failed: ${snapshot.stderr}`);
-	const processes = snapshot.stdout.split("\n").flatMap((line) => {
-		const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/.exec(line);
-		return match
-			? [
-					{
-						pid: Number(match[1]),
-						ppid: Number(match[2]),
-						stat: match[3],
-						command: match[4],
-					},
-				]
-			: [];
-	});
-	const descendants = new Set([process.pid]);
-	for (const pid of descendants) {
-		for (const child of processes) {
-			if (child.ppid === pid && child.pid !== snapshot.pid)
-				descendants.add(child.pid);
+let stopping: Promise<void> | undefined;
+const stop = () =>
+	(stopping ??= (async () => {
+		try {
+			await stopDaemonAndAssertNoSurvivors(() => daemon.stop());
+			process.exit(0);
+		} catch (error) {
+			writeSync(
+				2,
+				`${error instanceof Error ? error.message : String(error)}\n`,
+			);
+			process.exit(1);
 		}
-	}
-	const survivors = processes.filter(
-		(child) =>
-			child.pid !== process.pid &&
-			descendants.has(child.pid) &&
-			!child.stat?.startsWith("Z"),
-	);
-	if (survivors.length > 0) {
-		writeSync(
-			2,
-			`Children survived daemon.stop():\n${survivors.map((child) => `${child.pid} ${child.command}`).join("\n")}\n`,
-		);
-		process.exit(1);
-	}
-	process.exit(0);
-};
+	})());
 process.on("message", (message) => {
 	if (message === "stop") void stop();
 });

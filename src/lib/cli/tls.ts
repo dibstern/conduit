@@ -1,15 +1,12 @@
 // Manages mkcert-based TLS certificates for HTTPS access over LAN/Tailscale.
 // All system calls (exec, fs, networkInterfaces) are injectable for testing.
 
-import { exec as cpExec } from "node:child_process";
 import * as defaultFs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { promisify } from "node:util";
-
+import { Data } from "effect";
+import { makeSubprocessRunner } from "../domain/daemon/Services/subprocess.js";
 import { DEFAULT_CONFIG_DIR } from "../env.js";
-
-const promisifiedExec = promisify(cpExec);
 
 export interface TlsCerts {
 	key: Buffer;
@@ -41,9 +38,21 @@ export interface TlsOptions {
 	fs?: TlsFs;
 }
 
-async function defaultExec(cmd: string): Promise<string> {
-	const { stdout } = await promisifiedExec(cmd, { encoding: "utf8" });
-	return stdout;
+class TlsCommandError extends Data.TaggedError("TlsCommandError")<{
+	readonly command: string;
+	readonly stderr: string;
+}> {}
+
+function defaultExec(): ExecFn {
+	const run = makeSubprocessRunner();
+	return async (cmd) => {
+		const { stdout, stderr, exitCode } = await run(cmd, [], {
+			shell: true,
+			timeoutMs: 0,
+		});
+		if (exitCode !== 0) throw new TlsCommandError({ command: cmd, stderr });
+		return stdout;
+	};
 }
 
 /**
@@ -164,7 +173,7 @@ export function hasTailscale(
 export async function hasMkcert(
 	opts?: Pick<TlsOptions, "exec">,
 ): Promise<boolean> {
-	const exec = opts?.exec ?? defaultExec;
+	const exec = opts?.exec ?? defaultExec();
 	try {
 		await exec("mkcert -CAROOT");
 		return true;
@@ -177,7 +186,7 @@ export async function hasMkcert(
 export async function getMkcertCaRoot(
 	opts?: Pick<TlsOptions, "exec">,
 ): Promise<string | null> {
-	const exec = opts?.exec ?? defaultExec;
+	const exec = opts?.exec ?? defaultExec();
 	try {
 		return (await exec("mkcert -CAROOT")).trim();
 	} catch {
@@ -198,7 +207,7 @@ export async function getMkcertCaRoot(
  * 7. CA root: prefers mkcert's CAROOT, falls back to certDir/rootCA.pem.
  */
 export async function ensureCerts(opts?: TlsOptions): Promise<TlsCerts | null> {
-	const exec = opts?.exec ?? defaultExec;
+	const exec = opts?.exec ?? defaultExec();
 	const fs = opts?.fs ?? defaultFs;
 	const configDir = opts?.configDir ?? DEFAULT_CONFIG_DIR;
 

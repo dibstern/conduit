@@ -22,7 +22,7 @@ export const test = base.extend<{
 	daemonProjectUrl: string;
 	daemonProjectPath: string;
 }>({
-	daemonHarness: async ({ browserName: _browserName }, use, testInfo) => {
+	daemonHarness: async ({ browser: _browser }, use, testInfo) => {
 		const available = await isOpenCodeReachable(OPENCODE_URL);
 		if (!available) {
 			testInfo.skip(true, `OpenCode is not running at ${OPENCODE_URL}`);

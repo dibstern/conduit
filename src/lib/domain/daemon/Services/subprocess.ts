@@ -6,10 +6,12 @@ import { ReadRequest } from "./read-request.js";
 
 export interface SubprocessOptions {
 	readonly cwd?: string;
+	/** Zero leaves the command without a deadline; shutdown still awaits its exit. */
 	readonly timeoutMs: number;
 	readonly key?: string;
 	readonly priority?: "interactive" | "background";
 	readonly env?: NodeJS.ProcessEnv;
+	readonly shell?: boolean;
 	readonly maxBuffer?: number;
 	readonly input?: string;
 	readonly onStdout?: (chunk: Buffer) => void;
@@ -299,6 +301,7 @@ export const makeSubprocess = (
 		let child: ChildProcess | undefined;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		let failure: SubprocessError["reason"] | undefined;
+		let outputError: RangeError | undefined;
 		let finished = false;
 		let groupStopped = false;
 		const stdout: Buffer[] = [];
@@ -369,7 +372,13 @@ export const makeSubprocess = (
 				stderrBytes += chunk.length;
 			}
 			if (size + chunk.length > limit) {
-				failure ??= "output-limit";
+				if (failure === undefined) {
+					failure = "output-limit";
+					outputError = Object.assign(
+						new RangeError(`${pipe} maxBuffer length exceeded`),
+						{ code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" },
+					);
+				}
 				killGroup();
 			}
 		};
@@ -379,6 +388,7 @@ export const makeSubprocess = (
 			child = spawn(job.command, job.args, {
 				...(job.options.cwd !== undefined && { cwd: job.options.cwd }),
 				...(job.options.env !== undefined && { env: job.options.env }),
+				...(job.options.shell !== undefined && { shell: job.options.shell }),
 				stdio: ["pipe", "pipe", "pipe"],
 				detached: ownsGroup,
 			});
@@ -407,19 +417,21 @@ export const makeSubprocess = (
 		// before waiting for close, which owns releasing the concurrency slot.
 		if (ownsGroup) child.once("exit", () => killGroup());
 		child.once("close", (code, signal) =>
-			finish(code, spawnFailure, signal ?? undefined),
+			finish(code, spawnFailure ?? outputError, signal ?? undefined),
 		);
 		child.stdin?.on("error", () => {
 			/* A command may exit without reading its input. */
 		});
 		if (!job.options.keepStdinOpen) child.stdin?.end(job.options.input);
-		timer = setTimeout(() => {
-			failure ??= "timeout";
-			killGroup(job.options.killSignal ?? "SIGTERM");
-			timer = setTimeout(() => killGroup(), 250);
+		if (job.options.timeoutMs > 0) {
+			timer = setTimeout(() => {
+				failure ??= "timeout";
+				killGroup(job.options.killSignal ?? "SIGTERM");
+				timer = setTimeout(() => killGroup(), 250);
+				timer.unref();
+			}, job.options.timeoutMs);
 			timer.unref();
-		}, job.options.timeoutMs);
-		timer.unref();
+		}
 	};
 	const pump = () => {
 		while (!closed && running.size < concurrency && queue.length > 0) {
