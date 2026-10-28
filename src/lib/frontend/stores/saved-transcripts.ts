@@ -9,8 +9,11 @@
 // - IndexedDB is missing, refuses to open (private browsing), or is blocked:
 //   every call resolves to "no record" and every write is dropped.
 // - IndexedDB never answers (a WebKit bug can leave an open or a transaction
-//   pending forever): a read gives up after READ_WAIT_MS as "no record", so
-//   it never holds up the first subscribe.
+//   pending forever): a read gives up after READ_WAIT_MS as "no record". The
+//   first subscribe never waits on the read.
+// - IndexedDB answers slowly (a loaded machine takes hundreds of ms to open
+//   it): the page still draws, until the server's first reply. A late read
+//   loses nothing, since both draws refuse a page once the server answered.
 // - A write exceeds the quota or the transaction aborts: the old record, if
 //   any, stays as it was; a transaction is all or nothing.
 // - A record from another protocol or schema version, or one that no longer
@@ -41,7 +44,9 @@ const STORE = "transcripts";
 // the page. The page row stays the only truth about what was saved.
 const META = "meta";
 const KEEP = 20;
-const READ_WAIT_MS = 150;
+// Bounds only a store that never answers; a short cap turned slow reads into
+// cold opens on loaded Linux CI runners (conduit-test-lnm8.22).
+const READ_WAIT_MS = 2_000;
 
 const SavedSnapshot = SessionDetailEnvelopeSchema.members[0];
 export type SavedSnapshot = typeof SavedSnapshot.Type;
