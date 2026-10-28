@@ -59,7 +59,8 @@ export async function stopDaemonAndAssertNoSurvivors(
 			child.pid !== process.pid &&
 			candidates.has(child.pid) &&
 			!ignored.has(child.pid) &&
-			!child.stat?.startsWith("Z"),
+			// Zombies (Z) and macOS processes already exiting (E) are dead, not leaks.
+			!/^Z|E/.test(child.stat ?? ""),
 	);
 	// An exiting process has lost its arguments, so name it as it was before stop.
 	const named = new Map(beforeStop.map((child) => [child.pid, child.command]));
