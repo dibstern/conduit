@@ -1,6 +1,6 @@
 // Failure modes: enabling Jev hides a keyless summary's citations, log rows
 // disagree with those citations, or fallback numbering replaces saved ordinals.
-// Both switches off must retain the base strip's durations, captions and jump.
+// Both switches off must retain the base strip's durations and jump.
 import {
 	cleanup,
 	fireEvent,
@@ -195,9 +195,7 @@ it("renders the base activity strip with both switches off and opens its unnumbe
 	base.unmount();
 	expect(timeline.getAttribute("aria-valuetext")).toContain("1s");
 	await fireEvent.focus(timeline);
-	await waitFor(() =>
-		expect(screen.getByRole("tooltip").textContent).toContain("1s"),
-	);
+	expect(screen.queryByRole("tooltip")).toBeNull();
 	await fireEvent.keyDown(timeline, { key: "Enter" });
 	// The mounted destination acknowledges the reveal and takes focus.
 	await waitFor(() =>

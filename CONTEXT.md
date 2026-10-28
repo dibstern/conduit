@@ -377,8 +377,10 @@ below its pin, with a thumb at the same clamped position on the Strip. Only a
 selected card can auto-read after the continuous-visible dwell.
 
 A **Hover preview** temporarily fills the Card slot without changing the
-selection or marking a message read. Until the full preview lands, a Collapsed
-strip peeks at the message nearest the pointer.
+selection, focus or read state. It shows a full read-only message card in
+Collapsed, Open and Usage, except when that message is already selected.
+Other hovered Steps get a Step popover at the pointer. Both overlays flip
+above the Strip when space below is short, and Escape dismisses them.
 
 ## Daemon Settings
 

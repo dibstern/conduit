@@ -63,6 +63,7 @@ import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { turnActivityHandlers } from "./steps/turnActivity.js";
 import { turnActivityShowHandlers } from "./steps/turnActivityShow.js";
 import { turnActivitySkillsHandlers } from "./steps/turnActivitySkills.js";
+import { turnHoverHandlers } from "./steps/turnHover.js";
 import { turnPanelHandlers } from "./steps/turnPanel.js";
 import { turnQaHandlers } from "./steps/turnQa.js";
 import { turnUsageHandlers } from "./steps/turnUsage.js";
@@ -99,6 +100,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...turnActivityShowHandlers,
 	...turnPanelHandlers,
 	...turnUsageHandlers,
+	...turnHoverHandlers,
 	...surfacingMarksHandlers,
 	...surfacingMinimiseHandlers,
 	...surfacingRecapHandlers,

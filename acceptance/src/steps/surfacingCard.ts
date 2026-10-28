@@ -271,7 +271,7 @@ function trackReads(page: Page): void {
 export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "keyboard picking clears the strip caption",
-		match: /^keyboard picking a message clears the strip caption$/,
+		match: /^keyboard picking a message clears the step popover$/,
 		run: async ({ world }) => {
 			const page = world.page;
 			await pick(page, "4");
@@ -281,7 +281,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 			if (!work) throw new Error("Missing work segment");
 			await panel(page).getByTestId("surfacing-scrub").focus();
 			await page.mouse.move(work.x + work.width / 2, work.y + work.height / 2);
-			await expect(page.getByRole("tooltip")).toContainText(
+			await expect(panel(page).getByTestId("turn-step-popover")).toContainText(
 				"route-surfacing-tool-4.ts",
 			);
 			await page.keyboard.press("Home");
@@ -307,7 +307,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "cancel a strip scrub without committing its preview",
 		match:
-			/^cancelling a strip scrub preserves the selected message and clears the caption$/,
+			/^cancelling a strip scrub preserves the selected message and clears the step popover$/,
 		run: async ({ world }) => {
 			const page = world.page;
 			await pick(page, "2");
@@ -1427,7 +1427,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "click and hover a work segment without changing the selected pin",
 		match:
-			/^an ordinary strip segment still captions the head and opens its log row$/,
+			/^an ordinary strip segment shows its step popover and opens its log row$/,
 		run: async ({ world }) => {
 			const page = world.page;
 			await pick(page, "2");
@@ -1437,7 +1437,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 			const box = await work.boundingBox();
 			if (!box) throw new Error("Missing ordinary work step");
 			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-			await expect(page.getByRole("tooltip")).toContainText(
+			await expect(panel(page).getByTestId("turn-step-popover")).toContainText(
 				"route-surfacing-tool-4.ts",
 			);
 			await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);

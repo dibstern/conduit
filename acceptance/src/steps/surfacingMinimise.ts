@@ -34,9 +34,9 @@ function publish(page: Page, messages: History[]) {
 
 export const surfacingMinimiseHandlers: StepHandler[] = [
 	{
-		name: "peek at the nearest message across one work step",
+		name: "preview the hovered step instead of a nearby message",
 		match:
-			/^the collapsed peek follows the nearest message across one work step( while dragging)?$/,
+			/^the collapsed step preview follows the pointer while (hovering|dragging)$/,
 		run: async ({ world, match }) => {
 			const page = world.page;
 			const scope = panel(page, "3");
@@ -56,20 +56,20 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 				(first.x + first.width / 2 + second.x + second.width / 2) / 2;
 			expect(midpoint - 2).toBeGreaterThan(work.x);
 			expect(midpoint + 2).toBeLessThan(work.x + work.width);
-			if (match[1]) {
+			if (match[1] === "dragging") {
 				await page.mouse.move(midpoint - 8, work.y + work.height / 2);
 				await page.mouse.down();
 			}
-			for (const [offset, ordinal] of [
-				[-2, "1"],
-				[2, "2"],
-			] as const) {
+			for (const offset of [-2, 2]) {
 				await page.mouse.move(midpoint + offset, work.y + work.height / 2);
-				await expect(
-					scope.getByTestId("surfacing-minimised-peek"),
-				).toHaveAttribute("data-ordinal", ordinal);
+				await expect(scope.getByTestId("turn-step-popover")).toContainText(
+					"route-surfacing-tool-1.ts",
+				);
+				await expect(scope.getByTestId("surfacing-hover-preview")).toHaveCount(
+					0,
+				);
 			}
-			if (match[1]) {
+			if (match[1] === "dragging") {
 				await scope
 					.getByTestId("surfacing-minimised-strip")
 					.dispatchEvent("pointercancel", { pointerId: 1 });
@@ -282,19 +282,21 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert one-line peek without opening the turn",
+		name: "assert full card preview without opening the turn",
 		match: /^turn (\d+) peeks at message 1 with Click to open$/,
 		run: async ({ world, match }) => {
 			const scope = panel(world.page, match[1] ?? "");
 			await expect(scope).toHaveAttribute("data-minimised", "true");
 			const peek = scope.getByTestId("surfacing-minimised-peek");
 			await expect(peek).toBeInViewport();
-			await expect(peek).toHaveCSS("white-space", "nowrap");
 			await expect(peek).toHaveAttribute("data-ordinal", "1");
+			await expect(peek.getByTestId("surfacing-hover-preview")).toBeVisible();
 			await expect(peek).toContainText(
 				"The routing table has three consumers.",
 			);
-			await expect(peek).toContainText("Click to open");
+			await expect(peek).toContainText(
+				"Hover preview · click to open the turn on this message",
+			);
 		},
 	},
 	{

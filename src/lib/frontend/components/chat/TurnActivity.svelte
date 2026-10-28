@@ -27,6 +27,7 @@
 	import { stopCounts } from "../../utils/turn-stops.js";
 	import { canOpenSurfaceMessage, surfaceTurn, surfaceKey, type CardSelection, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
 	import SurfacingCard, { type ReadState, type SurfacingRegions } from "./SurfacingCard.svelte";
+	import SurfacingMessageCard from "./SurfacingMessageCard.svelte";
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
 	import SurfacingMarkActions from "./SurfacingMarkActions.svelte";
 	import SurfacingMarkWhy from "./SurfacingMarkWhy.svelte";
@@ -48,7 +49,6 @@
 		isHandBack,
 		liveLaunchedTasks,
 		plural,
-		stepCaption,
 		stepDurations,
 		stripLayout,
 		type Segment,
@@ -59,7 +59,6 @@
 	} from "../../utils/turns.js";
 	import ActivityRow from "./ActivityRow.svelte";
 	import ActivityStrip from "./ActivityStrip.svelte";
-	import MinimisedTurn from "./MinimisedTurn.svelte";
 	import TurnLog from "./TurnLog.svelte";
 	import TurnShowBar from "./TurnShowBar.svelte";
 	import TurnUsage from "./TurnUsage.svelte";
@@ -211,15 +210,12 @@
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	const minimised = $derived(panel.view.kind === "collapsed");
 	const cardSlot = $derived.by((): CardSlot => {
-		if (!surfacingActive || usage || qa) return { kind: "none" };
-		if (panel.view.kind === "collapsed") {
-			const card = surface.messages.find((pin) => pin.part.uuid === stripInteraction.hovered);
-			return card ? { kind: "preview", card } : { kind: "none" };
-		}
-		return surface.card ? { kind: "selected", card: surface.card } : { kind: "none" };
+		if (!surfacingActive) return { kind: "none" };
+		const selected = minimised || usage || qa ? null : surface.card;
+		const hovered = surface.messages.find((pin) => pin.part.uuid === stripInteraction.hovered);
+		if (hovered && hovered.part.uuid !== selected?.part.uuid && (!stripInteraction.scrubbing || minimised)) return { kind: "preview", card: hovered };
+		return selected ? { kind: "selected", card: selected } : { kind: "none" };
 	});
-	// A collapsed Jev turn previews in its strip, so only open strips caption the head.
-	const hovered = $derived(minimised && surfacingActive ? -1 : segment.activity.findIndex((part) => part.uuid === stripInteraction.hovered));
 	const summaryVisible = $derived((!surfacingActive || !minimised) && summaryEnabled && (summaryOpen && summaryOpen.storeId === storeTurnId ? summaryOpen.open : (!phone && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
 	function toggleMinimised() {
 		if (panel.view.kind === "collapsed") panel.open();
@@ -403,6 +399,10 @@
 		});
 	}
 	function stripChanged(interaction: StripInteraction) { stripInteraction = interaction; }
+	function pickFromStrip(pin: SurfacePin) {
+		if (minimised || usage || qa) pick(pin);
+		else selectPin(pin);
+	}
 
 	const PREFETCH_REST_MS = 2_000;
 
@@ -462,12 +462,12 @@
 	{@render surfacingRegions.cardFoot?.(pin)}
 	<SurfacingMarkActions {pin} {feedback} canSave={!!sessionId} />
 {/snippet}
-{#snippet askContext(pin: SurfacePin)}
+{#snippet askContext(pin: SurfacePin, onexplain: () => void)}
 	{@render surfacingRegions.cardContext?.(pin)}
 	{#if pin.category === "ask" && !pin.pending}
 		<SurfacingAskContext setup={setupFor(pin)} view={surface} start={turn.user?.createdAt ?? 0} ask={asks[pin.part.uuid]}
 			enabled={!!sessionId && !!pin.part.partId && summariesOn}
-			onexplain={() => { void explainAsk(pin); }} oncite={(part) => { askReturn = { ask: pin, cited: part.uuid }; revealMessage(part); }}
+			{onexplain} oncite={(part) => { askReturn = { ask: pin, cited: part.uuid }; revealMessage(part); }}
 			onReplyToAsk={(text) => { if (pin.number !== undefined) onReplyToAsk?.(messageReference(pin, pin.number), text); }} />
 	{:else if askReturn?.cited === pin.part.uuid && surface.openAsk?.uuid === askReturn.ask.part.uuid}
 		{@const ask = askReturn.ask}
@@ -506,6 +506,10 @@
 	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
 {/snippet}
 
+{#snippet preview(pin: SurfacePin)}
+	<SurfacingMessageCard kind="preview" card={pin} />
+{/snippet}
+
 <div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfaceCommand} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
 	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {model} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
 	<div class="md:ml-[42px]">
@@ -514,7 +518,7 @@
 		<div role={surfacingActive ? "group" : undefined} tabindex={surfacingActive ? 0 : undefined} aria-label={surfacingActive ? "Turn messages" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} data-testid={surfacingActive ? "surfacing-card" : undefined} class="turn-head-card @container rounded-[14px] border border-border bg-turn-bg">
 			<div class="px-[12px] pt-[10px] pb-[2px] md:pb-[9px]">
 			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
-				<Tooltip interaction="passive" bind:open={() => hovered >= 0 || headTooltip, (open) => { headTooltip = open; }}>
+				<Tooltip interaction="passive" bind:open={headTooltip}>
 					{#snippet trigger({ props })}
 						{@const headPhrase = phone && surfacingActive ? plural(stats.skills, "skill") : phrase}
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
@@ -533,7 +537,7 @@
 						</Button>
 					{/snippet}
 					<div class="max-w-[340px] flex flex-col gap-[6px] text-[12px]">
-						{#if hovered >= 0}<span>{stepCaption(segment, turn, final, hovered, now)}</span>{:else if live}<span>{currentStepLabel(segment)}</span>{/if}
+						{#if live}<span>{currentStepLabel(segment)}</span>{/if}
 						{#if phrase}<span>{phrase}</span>{/if}
 						{#if stats.compactions > 0}<span>Context compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
 						{#if stats.failed > 0}<span>{stats.failed} failed</span>{/if}
@@ -550,20 +554,18 @@
 					{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summary</Button></span>{/if}
 			</div>
 			{#if (usage || qa) && surfacingActive}
-				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
+				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} {preview} markers={{ kind: "dots", mode: "tab", dots: surface.messages }} openAsk={surface.openAsk} onpick={pickFromStrip} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if minimised && surfacingActive}
-				<MinimisedTurn>
-					{#snippet strip(preview: Snippet<[SurfacePin]>)}<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />{/snippet}
-				</MinimisedTurn>
+				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", mode: "collapsed", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if surfacingActive}
-				<SurfacingCard view={surface} card={cardSlot.kind === "selected" ? cardSlot.card : null} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
+				<SurfacingCard view={surface} card={surface.card} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} context={askContext} onexplain={(pin) => { void explainAsk(pin); }} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readState} bind:cardEl={readCardEl} onread={readMessage}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={cardSlot.kind === "selected" && cardSlot.card.number !== undefined && replies.has(cardSlot.card.number)}
 					onpick={pick} onlevel={selectLevel}
 					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand}>
 					{#snippet strip(cited: string | null, card: Snippet)}
-						<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} markers={{ kind: "pins", pins: surface.pins, selected: cardSlot.kind === "selected" ? cardSlot.card.part.uuid : null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={selectPin} onjump={stripJump} oncommand={surfaceCommand} />
+						<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} {preview} markers={{ kind: "pins", pins: surface.pins, selected: surface.card?.part.uuid ?? null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={pickFromStrip} onjump={stripJump} oncommand={surfaceCommand} />
 					{/snippet}
 				</SurfacingCard>
 			{:else}

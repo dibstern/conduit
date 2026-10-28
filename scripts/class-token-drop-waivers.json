@@ -1,4 +1,11 @@
 {
+	"src/lib/frontend/components/chat/SurfacingCard.svelte :: card-at,card-body,card-foot,card-head,card-note,desktop-time,following,glyph,grow,h-[26px],max-md:h-[30px],max-md:size-[30px],md-content,needs-reply,px-[9px],read-toggle,rounded-[4px],select-text,size-[15px],size-[26px],surfacing-msg-card,text-[12.5px],text-[14px],type-label": {
+		"movedTo": "src/lib/frontend/components/chat/SurfacingMessageCard.svelte",
+		"requires": "<SurfacingMessageCard",
+		"reason": "conduit-test-xdyjq.4 shares the existing message renderer between selected and read-only preview cards. These appearance tokens move with its markup and styles; SurfacingCard retains the strip and notes."
+	},
+	"src/lib/frontend/components/ui/ActivityTimeline.svelte :: peek,peek-above,peek-dot,previewPosition.above": "conduit-test-xdyjq.4 removes the narrow one-line peek and its ringed dot. The full hanging preview and step popover share hover-card positioning through data-side, and the strip uses a 2px hover marker with a down caret. previewPosition.above was the old class conditional, not a CSS token.",
+	"src/lib/frontend/components/chat/MinimisedTurn.svelte :: peek-text": "conduit-test-xdyjq.4 replaces the truncated single-line peek with the full read-only message card. The peek-text truncation recipe and its unused component are intentionally removed.",
 	"src/lib/frontend/components/chat/TurnLog.svelte :: py-[8px]": {
 		"renamedTo": "py-[7px]",
 		"reason": "conduit-test-xdyjq.6 matches design E's earlier-steps control: 7px vertical padding and 6px horizontal padding, with 12px secondary text."

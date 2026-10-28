@@ -214,7 +214,7 @@ export const Collapsed: Story = {
 		cardSlot: messages.card
 			? { kind: "preview", card: messages.card }
 			: { kind: "none" },
-		markers: { kind: "dots", dots: messages.messages },
+		markers: { kind: "dots", mode: "collapsed", dots: messages.messages },
 		preview: createRawSnippet<[SurfacePin]>((pin) => ({
 			render: () =>
 				`<span>#${pin().number} · ${pin().part.rawText} · Click to open</span>`,

@@ -1,5 +1,92 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: A message hover borrows the open or Usage slot without changing the selection
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I pick surfaced message #2
+  And the hover Turn is <mode>
+  And I hover turn step message 1
+  Then the hanging preview shows full message 1 without actions or navigation
+  And the hover keeps keyboard focus
+  And the messages region visually matches turn-hover-slot-<mode> at 98 percent
+  When I leave the strip hover
+  Then the <mode> slot returns without selecting the hovered message
+
+Examples:
+  | mode  |
+  | open  |
+  | usage |
+
+Scenario Outline: Step popovers explain failed and running work
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the hover session has a <state> step
+  When I collapse the surfaced turn
+  And I hover turn step tool 1
+  Then the step popover describes the <state> work and its time
+  And the messages region visually matches turn-hover-step-<state> at 98 percent
+
+Examples:
+  | state    |
+  | failed   |
+  | running  |
+  | thinking |
+
+Scenario Outline: Hover content flips above a strip near the transcript foot
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And minimising uses the dark theme with Turns open Minimised
+  And the minimising session has three turns
+  When I put the last strip near the transcript foot
+  And I hover turn step <kind> 1
+  Then the <kind> preview hangs above the strip within the transcript
+  And the messages region visually matches turn-hover-above-<kind> at 98 percent
+  When I press Escape over the hover
+  Then the strip hover is cleared
+
+Examples:
+  | kind    |
+  | tool    |
+  | message |
+
+Scenario Outline: Work hovers describe the step under the pointer and open its log row
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When the hover Turn is <mode>
+  And I hover turn step tool 1
+  Then the step popover describes tool 1 as step 2 of 16
+  And hovering across that work step keeps its own popover and moving marker
+  And the messages region visually matches turn-hover-step-<mode> at 98 percent
+  When I press Escape over the hover
+  Then the strip hover is cleared
+  When I hover turn step tool 1
+  And I <gesture> turn step tool 1
+  Then Full log opens at highlighted tool 1
+
+Examples:
+  | mode      | viewport | gesture |
+  | collapsed | desktop  | click   |
+  | open      | desktop  | click   |
+  | usage     | desktop  | click   |
+  | collapsed | phone    | tap     |
+
+Scenario: A collapsed message preview is a full read-only card in the hanging slot
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I collapse the surfaced turn
+  And I hover turn step message 1
+  Then the hanging preview shows full message 1 without actions or navigation
+  And the preview leaves focus, read state and collapsed layout unchanged
+  And the messages region visually matches turn-hover-message at 98 percent
+  When I click the hanging preview
+  Then message 1 opens where its preview hung
+
 Scenario Outline: Jev-off turns keep a plain collapsed head and open Log and Usage
   Given message surfacing is inactive at Most
   And the conduit app is served with the connected mockup
@@ -937,7 +1024,7 @@ Scenario Outline: Cancelling a scrub discards its preview without picking a mess
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
-  Then cancelling a strip scrub preserves the selected message and clears the caption
+  Then cancelling a strip scrub preserves the selected message and clears the step popover
   And the messages region visually matches turn-strip-cancel-<viewport> at 98 percent
 
 Examples:

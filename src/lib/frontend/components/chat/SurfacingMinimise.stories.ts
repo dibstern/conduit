@@ -167,7 +167,17 @@ export const Peek: Story = {
 		).toHaveAttribute("data-ordinal", "2");
 		await expect(
 			canvas.getByTestId("surfacing-minimised-peek"),
-		).toHaveTextContent("Click to open");
+		).toHaveTextContent(
+			"Hover preview · click to open the turn on this message",
+		);
+		await expect(
+			canvas.getByTestId("surfacing-hover-preview"),
+		).toHaveTextContent(descriptions[1][2]);
+		await expect(
+			canvas
+				.getByTestId("surfacing-hover-preview")
+				.querySelectorAll("button, input, [tabindex]"),
+		).toHaveLength(0);
 		await expect(
 			canvas.getByRole("button", { name: "Expand turn" }),
 		).toHaveAttribute("aria-expanded", "false");
@@ -178,6 +188,59 @@ export const PeekLight: Story = {
 	...Peek,
 	tags: ["viewport-capture"],
 	globals: { theme: "light" },
+};
+
+export const OpenPreview: Story = {
+	tags: ["viewport-capture"],
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const strip = canvas.getByTestId("surfacing-scrub");
+		const step = canvasElement
+			.querySelector('[data-step-id="minimise-agent/part-1"]')
+			?.getBoundingClientRect();
+		if (!step) throw new Error("Missing message step");
+		await userEvent.pointer({
+			target: strip,
+			coords: {
+				clientX: step.x + step.width / 2,
+				clientY: step.y + step.height / 2,
+			},
+		});
+		await expect(canvas.getByTestId("surfacing-hover-preview")).toHaveAttribute(
+			"data-ordinal",
+			"1",
+		);
+		await expect(canvas.getByTestId("surfacing-msg-card")).not.toBeVisible();
+		await expect(canvas.getByTestId("surfacing-pin-5")).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
+	},
+};
+
+export const StepPopover: Story = {
+	tags: ["viewport-capture"],
+	args: { surfacing: minimisedConfig },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const strip = canvas.getByTestId("surfacing-minimised-strip");
+		const step = canvasElement
+			.querySelector('[data-step-id="minimise-thinking-1"]')
+			?.getBoundingClientRect();
+		if (!step) throw new Error("Missing thinking step");
+		await userEvent.pointer({
+			target: strip,
+			coords: {
+				clientX: step.x + step.width / 2,
+				clientY: step.y + step.height / 2,
+			},
+		});
+		await expect(canvas.getByTestId("turn-step-popover")).toHaveTextContent(
+			"Step 2 of 10 · click to open it in the log",
+		);
+		await expect(canvas.queryByTestId("surfacing-hover-preview")).toBeNull();
+		await expect(canvas.getByTestId("strip-hover-marker")).toBeVisible();
+	},
 };
 
 export const AutoOlder: Story = {
