@@ -92,6 +92,360 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "assert selected below-stop pin paint",
+		match:
+			/^the selected pin keeps its category tint and secondary number below the saved stop$/,
+		run: async ({ world }) => {
+			const chip = world.page.locator(
+				'[data-x][aria-pressed="true"] .pin-chip',
+			);
+			const paint = await chip.evaluate((element) => {
+				const probe = document.createElement("span");
+				probe.style.color = "var(--color-text-secondary)";
+				probe.style.backgroundColor = "var(--color-turn-bg)";
+				element.append(probe);
+				const result = {
+					number: getComputedStyle(element).color,
+					secondary: getComputedStyle(probe).color,
+					fill: getComputedStyle(element).backgroundColor,
+					turnBg: getComputedStyle(probe).backgroundColor,
+					ring: getComputedStyle(element).boxShadow,
+				};
+				probe.remove();
+				return result;
+			});
+			expect(paint.number).toBe(paint.secondary);
+			expect(paint.fill).not.toBe(paint.turnBg);
+			expect(paint.ring).toContain("1px");
+		},
+	},
+	{
+		name: "open a collapsed message step with the keyboard",
+		match: /^I activate the first collapsed message step with the keyboard$/,
+		run: async ({ world }) => {
+			const steps = panel(world.page).locator(
+				".surface-strip button[data-step-id]",
+			);
+			await steps.nth(0).focus();
+			await world.page.keyboard.press("ArrowRight");
+			await expect(steps.nth(1)).toBeFocused();
+			await world.page.keyboard.press("ArrowLeft");
+			await world.page.keyboard.press("Enter");
+		},
+	},
+	{
+		name: "assert the compaction seam appearance",
+		match:
+			/^the strip compaction is a 2px secondary-colour mark taller than its bar$/,
+		run: async ({ world }) => {
+			const seam = panel(world.page).locator(
+				'.surface-strip [data-step-id$="/compacted"]',
+			);
+			await expect(seam).toHaveCSS("width", "2px");
+			await expect(seam).toHaveCSS("height", "10px");
+			const paint = await seam.evaluate((element) => {
+				const probe = document.createElement("span");
+				probe.style.backgroundColor = "var(--color-text-secondary)";
+				element.append(probe);
+				const result = {
+					actual: getComputedStyle(element).backgroundColor,
+					expected: getComputedStyle(probe).backgroundColor,
+				};
+				probe.remove();
+				return result;
+			});
+			expect(paint.actual).toBe(paint.expected);
+		},
+	},
+	{
+		name: "assert clear pixel gaps in the activity bar",
+		match: /^the strip segments have 2px clear gaps$/,
+		run: async ({ world }) => {
+			const gaps = await panel(world.page)
+				.locator(".surface-strip")
+				.evaluate((element) => {
+					const boxes = [...element.querySelectorAll("[data-step-id]")]
+						.map((node) => node.getBoundingClientRect())
+						.sort((a, b) => a.left - b.left);
+					const probe = document.createElement("span");
+					probe.style.backgroundColor = "var(--color-chip)";
+					element.append(probe);
+					const chip = getComputedStyle(probe).backgroundColor;
+					probe.remove();
+					return boxes.slice(1).map((box, index) => {
+						const previous = boxes[index];
+						if (!previous) throw new Error("Missing preceding strip step");
+						const under = document.elementFromPoint(
+							(box.left + previous.right) / 2,
+							box.y + box.height / 2,
+						);
+						return {
+							width: box.left - previous.right,
+							background: under ? getComputedStyle(under).backgroundColor : "",
+							chip,
+						};
+					});
+				});
+			expect(gaps.length).toBeGreaterThan(0);
+			for (const gap of gaps) {
+				expect(Math.abs(gap.width - 2)).toBeLessThanOrEqual(0.1);
+				expect(gap.background).not.toBe(gap.chip);
+			}
+		},
+	},
+	{
+		name: "seed a running tool for the live strip",
+		match: /^the turn log has a running tool$/,
+		run: async ({ world }) => {
+			const messages: History[] = [
+				{
+					id: "strip-user",
+					role: "user",
+					time: { created: START },
+					parts: [
+						{ id: "prompt", type: "text", text: "Read the routing table." },
+					],
+				},
+				{
+					id: "strip-agent",
+					role: "assistant",
+					parentID: "strip-user",
+					time: { created: START + 1000 },
+					parts: [tool("running-task", "Task", 1000, true)],
+				},
+			];
+			requireRpcControl(world.page).setDetailRows(
+				SESSION,
+				messages.flatMap(detailRowsOf),
+			);
+			setSessionRowStatus(world.page, SESSION, "busy", {
+				title: "Running strip",
+				accountId: "claude",
+				updatedAt: PINNED_CLOCK_MS,
+			});
+			await openSessionRoute(world.page, SESSION);
+			await expect(
+				panel(world.page).locator('[data-step-id$="/running-task"]'),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert the live strip fade",
+		match: /^the live strip segment fades to 0.35 every 1.2 seconds$/,
+		run: async ({ world }) => {
+			const step = panel(world.page).locator('[data-step-id$="/running-task"]');
+			await expect(step).toHaveCSS("animation-duration", "1.2s");
+			await expect(step).toHaveCSS("animation-timing-function", "ease-in-out");
+			const frames = await step.evaluate((element) =>
+				element
+					.getAnimations()
+					.flatMap((animation) =>
+						animation.effect instanceof KeyframeEffect
+							? animation.effect.getKeyframes().map((frame) => frame["opacity"])
+							: [],
+					),
+			);
+			expect(frames).toContain("0.35");
+		},
+	},
+	{
+		name: "collapse the surfaced turn",
+		match: /^I collapse the surfaced turn$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("surfacing-minimise-toggle").click();
+			await world.page.mouse.move(0, 0);
+		},
+	},
+	{
+		name: "assert every collapsed message dot and read paint",
+		match:
+			/^the collapsed strip shows 8 category dots, with 1,4,8 hollow and the rest filled$/,
+		run: async ({ world }) => {
+			const dots = world.page.locator(".dots > .unread-dot:not(.peek-dot)");
+			await expect(dots).toHaveCount(8);
+			const colours = new Set<string>();
+			for (let number = 1; number <= 8; number++) {
+				const dot = dots.nth(number - 1);
+				await expect(dot).toHaveCSS("width", "7px");
+				await expect(dot).toHaveCSS("height", "7px");
+				const paint = await dot.evaluate((element) => {
+					const style = getComputedStyle(element);
+					const probe = document.createElement("span");
+					probe.style.color = "var(--surface-colour)";
+					probe.style.backgroundColor = "var(--color-turn-bg)";
+					element.append(probe);
+					const result = {
+						colour: getComputedStyle(probe).color,
+						turnBg: getComputedStyle(probe).backgroundColor,
+						fill: style.backgroundColor,
+						ring: style.borderColor,
+						width: style.borderWidth,
+					};
+					probe.remove();
+					return result;
+				});
+				colours.add(paint.colour);
+				if ([1, 4, 8].includes(number)) {
+					expect(paint.fill).toBe(paint.turnBg);
+					expect(paint.ring).toBe(paint.colour);
+					expect(paint.width).toBe("1px");
+				} else expect(paint.fill).toBe(paint.colour);
+			}
+			expect(colours.size).toBeGreaterThanOrEqual(5);
+		},
+	},
+	{
+		name: "assert collapsed Ask outer ring",
+		match: /^the collapsed Ask dot keeps its outer ring$/,
+		run: async ({ world }) => {
+			const ask = world.page.getByTestId("surfacing-minimised-ask");
+			const ring = await ask.evaluate((element) => ({
+				width: getComputedStyle(element, "::after").borderWidth,
+				style: getComputedStyle(element, "::after").borderStyle,
+			}));
+			expect(ring.width).toBe("1px");
+			expect(ring.style).toBe("solid");
+		},
+	},
+	{
+		name: "navigate and activate strip pins with the keyboard",
+		match:
+			/^arrows move focus between strip pins and Enter picks the focused pin$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const first = page.getByTestId("surfacing-pin-1");
+			const second = page.getByTestId("surfacing-pin-2");
+			await first.focus();
+			await page.keyboard.press("ArrowRight");
+			await expect(second).toBeFocused();
+			await expect(page.getByTestId("surfacing-msg-card")).toHaveAttribute(
+				"data-ordinal",
+				"8",
+			);
+			await page.keyboard.press("Enter");
+			await expect(page.getByTestId("surfacing-msg-card")).toHaveAttribute(
+				"data-ordinal",
+				"2",
+			);
+			await page.keyboard.press("End");
+			await expect(page.getByTestId("surfacing-pin-8")).toBeFocused();
+			await page.keyboard.press("Home");
+			await page.keyboard.press("Enter");
+			await expect(page.getByTestId("surfacing-msg-card")).toHaveAttribute(
+				"data-ordinal",
+				"1",
+			);
+		},
+	},
+	{
+		name: "navigate and activate strip steps with the keyboard",
+		match:
+			/^arrows move focus between strip steps and Enter opens the focused step$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const steps = panel(page).locator(".surface-strip [data-step-id]");
+			await steps.nth(0).focus();
+			await expect(steps.nth(0)).toBeFocused();
+			await expect(steps.nth(0)).toHaveRole("button");
+			await page.keyboard.press("ArrowRight");
+			await expect(steps.nth(1)).toBeFocused();
+			await page.keyboard.press("Enter");
+			await expect(panel(page).locator(".step-log")).toBeVisible();
+			await expect(
+				panel(page)
+					.locator('[data-log-part="surfacing-agent/surfacing-tool-1"] button')
+					.first(),
+			).toHaveClass(/bg-selection/);
+		},
+	},
+	{
+		name: "assert compact category pin chips",
+		match:
+			/^open pins use 19px category chips with 6px stems and (visible|hidden) numbers$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const chip = page.getByTestId("surfacing-pin-1").locator(".pin-chip");
+			await expect(chip).toHaveCSS("height", "19px");
+			const number = chip.locator(".pin-number");
+			if (match[1] === "visible") await expect(number).toBeVisible();
+			else await expect(number).toBeHidden();
+			const paint = await chip.evaluate((element) => {
+				const style = getComputedStyle(element);
+				const glyph = element.querySelector(".glyph");
+				const probe = document.createElement("span");
+				probe.style.color = "var(--color-text-secondary)";
+				probe.style.backgroundColor = "var(--color-chip)";
+				element.append(probe);
+				const result = {
+					colour: style.color,
+					secondary: getComputedStyle(probe).color,
+					background: style.backgroundColor,
+					chip: getComputedStyle(probe).backgroundColor,
+					glyph: glyph ? getComputedStyle(glyph).color : "",
+					stem: getComputedStyle(element, "::after").height,
+				};
+				probe.remove();
+				return result;
+			});
+			expect(paint.colour).toBe(paint.secondary);
+			expect(paint.background).toBe(paint.chip);
+			expect(paint.glyph).not.toBe(paint.colour);
+			expect(paint.stem).toBe("6px");
+			const selected = page.locator('[data-x][aria-pressed="true"] .pin-chip');
+			const tint = await selected.evaluate((element) => ({
+				background: getComputedStyle(element).backgroundColor,
+				glyph: getComputedStyle(element.querySelector(".glyph") ?? element)
+					.color,
+				ring: getComputedStyle(element).boxShadow,
+			}));
+			expect(tint.background).not.toBe(tint.glyph);
+			expect(tint.ring).toContain("1px");
+			await expect(selected).toHaveCSS("color", paint.secondary);
+		},
+	},
+	{
+		name: "assert read and unread open pin paint",
+		match:
+			/^read pins keep their full colour while unread pins keep a corner dot$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("surfacing-pin-1").locator(".glyph"),
+			).toHaveCSS("opacity", "1");
+			await expect(
+				world.page.getByTestId("surfacing-pin-4").locator(".unread-dot"),
+			).toBeVisible();
+			await expect(
+				world.page.getByTestId("surfacing-pin-1").locator(".unread-dot"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert open Ask does not pulse",
+		match: /^the open Ask pin is tinted without a pulse$/,
+		run: async ({ world }) => {
+			const ask = world.page
+				.getByTestId("surfacing-pin-2")
+				.locator(".pin-chip");
+			await expect(ask).toHaveClass(/open-ask/);
+			expect(
+				await ask.evaluate(
+					(element) => getComputedStyle(element, "::before").animationName,
+				),
+			).toBe("none");
+			await expect(ask).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+		},
+	},
+	{
+		name: "assert pin lane follows occupied rows",
+		match: /^the pin lane reserves only its occupied rows$/,
+		run: async ({ world }) => {
+			const lane = world.page.getByTestId("surfacing-pins");
+			await expect(lane).toHaveAttribute("data-layout-ready", "true");
+			const upper = await lane.locator('[data-row="1"]').count();
+			await expect(lane).toHaveCSS("height", upper ? "49px" : "25px");
+		},
+	},
+	{
 		name: "assert Full log notes use its active stop",
 		match: /^the Full log has no Answer-only note$/,
 		run: async ({ world }) => {

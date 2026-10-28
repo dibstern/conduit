@@ -24,14 +24,17 @@
 	import { segmentAppearance } from "./activity-style.js";
 	import ActivityTimeline from "../ui/ActivityTimeline.svelte";
 
-	let { turn, segment, final, now, running, active = null, markers, openAsk, belowLevel, cited, preview, sliderText, oninteraction, onpick, onjump, oncommand, phone = false }: {
+	let { turn, segment, final, now, running, width = $bindable(0), active = null, markers, cardSlot, card, openAsk, belowLevel, cited, preview, sliderText, oninteraction, onpick, onjump, oncommand, phone = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
 		now: number;
 		running: ReadonlySet<string>;
+		width?: number;
 		active?: string | null;
 		markers?: ComponentProps<typeof ActivityTimeline>["markers"];
+		cardSlot?: ComponentProps<typeof ActivityTimeline>["cardSlot"];
+		card?: Snippet;
 		openAsk?: SurfacePart | null;
 		belowLevel?: boolean;
 		cited?: string | null;
@@ -44,7 +47,7 @@
 		phone?: boolean;
 	} = $props();
 
-	const positions = $derived(stripLayout(segment, turn, final, now));
+	const positions = $derived(stripLayout(segment, turn, final, now, width));
 	const durations = $derived(stepDurations(segment, turn, final, now));
 	const steps = $derived(logSteps(turn));
 	const segments = $derived(steps.map((part) => {
@@ -67,4 +70,4 @@
 
 </script>
 
-<ActivityTimeline {segments} {seams} {active} {markers} {openAsk} {belowLevel} {cited} {preview} {sliderText} {oninteraction} {onpick} {onjump} {oncommand} {phone} />
+<ActivityTimeline {segments} {seams} bind:width {active} {markers} {cardSlot} {card} {openAsk} {belowLevel} {cited} {preview} {sliderText} {oninteraction} {onpick} {onjump} {oncommand} {phone} />

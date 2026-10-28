@@ -364,8 +364,15 @@ Collapsed dots and Open pins. A **Step** is one log row, identified by its
 part UUID; compaction rules mark boundaries rather than steps. A **Pin**
 identifies a message on the Open strip. Its Collapsed form is a **Dot**.
 A **Step popover** describes the hovered Step without opening the log.
-Until the full hover preview lands, a Collapsed strip peeks at the message
-nearest the pointer.
+
+The **Card slot** is empty, selected or preview. The Strip owns its hanging
+position and caret; the Turn panel chooses its card. A selected card hangs
+below its pin, with a thumb at the same clamped position on the Strip. Only a
+selected card can auto-read after the continuous-visible dwell.
+
+A **Hover preview** temporarily fills the Card slot without changing the
+selection or marking a message read. Until the full preview lands, a Collapsed
+strip peeks at the message nearest the pointer.
 
 ## Daemon Settings
 

@@ -133,6 +133,9 @@ export const Minimised: Story = {
 		).toHaveLength(4);
 		await expect(canvas.getByTestId("surfacing-minimised-ask")).toBeVisible();
 		await expect(
+			canvasElement.querySelectorAll(".dots > .unread-dot"),
+		).toHaveLength(5);
+		await expect(
 			canvas.getByTestId("surfacing-summary-generate"),
 		).toBeVisible();
 		canvas.getByTestId("surfacing-card").blur();

@@ -48,6 +48,22 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Default: Story = {};
 export const Light: Story = { globals: { theme: "light" } };
+export const Compaction: Story = {
+	args: { seams: [{ id: "compacted", left: 54.2, width: 0.2 }] },
+	play: async ({ canvasElement }) => {
+		const seam = canvasElement.querySelector('[data-step-id="compacted"]');
+		if (!seam) throw new Error("Missing compaction seam");
+		await expect(getComputedStyle(seam).width).toBe("2px");
+		await expect(getComputedStyle(seam).height).toBe("10px");
+	},
+};
+export const LiveFade: Story = {
+	play: async ({ canvasElement }) => {
+		const step = canvasElement.querySelector('[data-step-id="edit"]');
+		if (!step) throw new Error("Missing live step");
+		await expect(getComputedStyle(step).animationDuration).toBe("1.2s");
+	},
+};
 export const Keyboard: Story = {
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
@@ -121,11 +137,17 @@ const messages = surfaceTurn({
 
 export const Pins: Story = {
 	args: {
+		cardSlot: messages.card
+			? { kind: "selected", card: messages.card }
+			: { kind: "none" },
+		card: createRawSnippet(() => ({
+			render: () =>
+				'<div class="border border-border rounded-xl bg-bg p-3">Selected message</div>',
+		})),
 		markers: {
 			kind: "pins",
 			pins: messages.pins,
 			selected: "message-1",
-			thumbX: 17,
 		},
 		sliderText: messages.sliderText,
 		onpick: fn(),
@@ -140,19 +162,58 @@ export const Pins: Story = {
 			"true",
 		);
 		const pin = canvas.getByTestId("surfacing-pin-2");
+		await expect(
+			getComputedStyle(pin.querySelector(".pin-chip") ?? pin).height,
+		).toBe("19px");
+		await expect(
+			canvas.getByTestId("surfacing-pins").getBoundingClientRect().height,
+		).toBe(25);
 		const user = userEvent.setup();
 		await user.pointer({ keys: "[MouseLeft>]", target: pin });
 		await expect(args["onpick"]).not.toHaveBeenCalled();
 		await user.pointer({ keys: "[/MouseLeft]", target: pin });
 		await expect(args["onpick"]).toHaveBeenLastCalledWith(messages.pins[1]);
 		pin.focus();
+		await userEvent.keyboard("{ArrowLeft}");
+		await expect(canvas.getByTestId("surfacing-pin-1")).toHaveFocus();
+		await userEvent.keyboard("{ArrowRight}");
+		await expect(pin).toHaveFocus();
 		await userEvent.keyboard("{Enter}");
 		await expect(args["onpick"]).toHaveBeenCalledTimes(2);
 	},
 };
 
+export const PhonePins: Story = {
+	...Pins,
+	args: { ...Pins.args, phone: true },
+	play: async (context) => {
+		await Pins.play?.(context);
+		await expect(
+			within(context.canvasElement)
+				.getByTestId("surfacing-pin-1")
+				.querySelector(".pin-number"),
+		).not.toBeVisible();
+	},
+};
+export const SelectedBelowStop: Story = {
+	...Pins,
+	args: { ...Pins.args, belowLevel: true },
+	play: async (context) => {
+		await Pins.play?.(context);
+		const chip = within(context.canvasElement)
+			.getByTestId("surfacing-pin-1")
+			.querySelector(".pin-chip");
+		if (!chip) throw new Error("Missing selected chip");
+		await expect(chip).toHaveClass(/below/);
+		await expect(getComputedStyle(chip).boxShadow).toContain("1px");
+	},
+};
+
 export const Collapsed: Story = {
 	args: {
+		cardSlot: messages.card
+			? { kind: "preview", card: messages.card }
+			: { kind: "none" },
 		markers: { kind: "dots", dots: messages.messages },
 		preview: createRawSnippet<[SurfacePin]>((pin) => ({
 			render: () =>
@@ -171,8 +232,5 @@ export const Collapsed: Story = {
 		);
 		await userEvent.keyboard("{Enter}");
 		await expect(args["onpick"]).toHaveBeenLastCalledWith(messages.messages[0]);
-		await expect(
-			canvas.queryByTestId("surfacing-minimised-peek"),
-		).not.toBeInTheDocument();
 	},
 };

@@ -347,7 +347,7 @@ export function surfacePinRows(
 ): SurfacePinGroup[] {
 	const width = laneWidth > 0 ? laneWidth : 1000;
 	const gap = 10;
-	const digit = phone ? 7.2 : 6.6;
+	const digit = 6.6;
 	const fixed = (pin: SurfacePin) =>
 		pin.pending || pin.part.uuid === view.openAsk?.uuid;
 	// A Blocked always leads; otherwise the most urgent, then the latest.
@@ -359,12 +359,14 @@ export function surfacePinRows(
 			Math.max(
 				...members.map(
 					(pin) =>
-						(phone ? 26 : 22) +
-						String(pin.number ?? "").length * digit +
+						22 +
+						(phone ? 0 : String(pin.number ?? "").length * digit) +
 						(pin.part.surfacingMark ? 8 : 0),
 				),
 			) +
-			(members.length > 1 ? 6 + `+${members.length - 1}`.length * digit : 0);
+			(!phone && members.length > 1
+				? 6 + `+${members.length - 1}`.length * digit
+				: 0);
 		const leader = members.reduce((best, pin) =>
 			(rank(pin) - rank(best) || best.step - pin.step) < 0 ? pin : best,
 		);

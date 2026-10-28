@@ -27,15 +27,16 @@
 	import Checkbox from "../ui/Checkbox.svelte";
 	import { landTurnTarget, type PendingReveal } from "../../stores/turn-panel.svelte.js";
 
-	let { view, counts, live, regions = {}, strip, onpick, onlevel, onfold, onfollow, oncommand, onread, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), markReadInAxis = false, onreply, replied = false, pending = null, onland = () => {}, scrubbing = false }: {
+	let { view, card, counts, live, regions = {}, strip, onpick, onlevel, onfold, onfollow, oncommand, onread, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), markReadInAxis = false, onreply, replied = false, pending = null, onland = () => {}, scrubbing = false }: {
 		scrubbing?: boolean;
 		pending?: PendingReveal | null;
 		onland?: (seq: number) => void;
 		view: SurfaceTurn;
+		card: SurfacePin | null;
 		counts: StopCounts;
 		live: boolean;
 		regions?: SurfacingRegions;
-		strip: Snippet<[string | null]>;
+		strip: Snippet<[string | null, Snippet]>;
 		onpick: (pin: SurfacePin) => void;
 		onlevel: (level: SurfaceLevel) => void;
 		onfold: () => void;
@@ -60,8 +61,8 @@
 	<Button variant="ghost" size="content" tone="muted" touchTarget {disabled} class="size-[26px] max-md:size-[30px] rounded-full text-[14px]" ariaLabel={label} {onclick}>{glyph}</Button>
 {/snippet}
 
-{#if view.card}
-	{@const card = view.card}
+{#snippet messageCard()}
+{#if card}
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<section bind:this={cardEl} use:landTurnTarget={{ pending, target: { kind: "message", uuid: card.part.uuid }, ack: onland, navigation: scrubbing ? "in-place" : "scroll" }} class="surfacing-msg-card" class:ask={card.category === "ask" && !card.pending} style:--surface-colour={card.colour} style:--category-tint={card.builtinCategory ? "14%" : undefined} data-testid="surfacing-msg-card" data-part={card.part.uuid} data-ordinal={card.number} aria-label={card.name} tabindex="-1" onkeydown={oncommand}>
 		<div class="card-head" data-surfacing-region="card-head">
@@ -86,8 +87,9 @@
 		</div>
 	</section>
 {/if}
+{/snippet}
 
-{@render strip(citedPart)}
+{@render strip(citedPart, messageCard)}
 
 {#if view.level === "final" || view.empty || view.notJudgedCount || markCount || (live && !view.following)}
 <div class="axis-notes" data-testid="surfacing-notes">
@@ -98,12 +100,12 @@
 	{#if live && !view.following}<Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" ariaLabel="Follow latest" onclick={onfollow}>now ⇥</Button>{/if}
 </div>
 {/if}
-{#if readState.kind === "failed" && (!view.card || readState.uuid === view.card.part.uuid)}<p role="alert" class="mt-[4px] text-[12px] text-error">{readState.message}</p>{/if}
+{#if readState.kind === "failed" && (!card || readState.uuid === card.part.uuid)}<p role="alert" class="mt-[4px] text-[12px] text-error">{readState.message}</p>{/if}
 <div data-surfacing-region="below-strip">{@render regions.belowStrip?.(view, (partId) => { citedPart = partId; })}</div>
 
 <style>
-	.surfacing-msg-card { margin-top:9px; padding:10px 12px 8px; border-radius:12px; background:var(--color-bg); outline:none; }
-	.surfacing-msg-card.ask { margin-top:10px; padding:11px 13px 12px; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-status-ask) 40%,transparent); }
+	.surfacing-msg-card { padding:10px 12px 8px; border:1px solid var(--color-border); border-radius:12px; background:var(--card-background,var(--color-bg)); outline:none; }
+	.surfacing-msg-card.ask { padding:11px 13px 12px; }
 	.ask .card-body { margin-top:6px; font-size:14px; line-height:1.55; }
 	.card-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
 	.type-label,.needs-reply { padding:2px 7px; border-radius:999px; font-size:11px; font-weight:600; background:color-mix(in srgb,var(--surface-colour,var(--color-text-dimmer)) var(--category-tint,16%),transparent); color:var(--surface-colour,var(--color-text)); }

@@ -140,8 +140,16 @@ export const Balanced: Story = {
 		const card = canvas
 			.getByTestId("surfacing-msg-card")
 			.getBoundingClientRect();
-		const lane = canvas.getByTestId("surfacing-pins").getBoundingClientRect();
-		await expect(card.bottom).toBeLessThanOrEqual(lane.top);
+		const strip = canvasElement
+			.querySelector(".surface-strip")
+			?.getBoundingClientRect();
+		if (!strip) throw new Error("Missing strip");
+		await expect(card.top).toBeGreaterThan(strip.bottom);
+		await expect(canvasElement.querySelector(".card-caret")).toBeVisible();
+		const lane = canvas.getByTestId("surfacing-pins");
+		await expect(lane.getBoundingClientRect().height).toBe(
+			lane.querySelector('[data-row="1"]') ? 49 : 25,
+		);
 		await expect(
 			canvas.queryByTestId("surfacing-pin-3"),
 		).not.toBeInTheDocument();
@@ -161,6 +169,11 @@ export const Ask: Story = {
 			"2",
 		);
 		await expect(canvas.getByText("Needs reply")).toBeVisible();
+		const chip = canvas
+			.getByTestId("surfacing-pin-2")
+			.querySelector(".pin-chip");
+		if (!chip) throw new Error("Missing Ask chip");
+		await expect(getComputedStyle(chip, "::before").animationName).toBe("none");
 		canvas.getByTestId("surfacing-pin-2").blur();
 	},
 };

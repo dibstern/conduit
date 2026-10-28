@@ -1,5 +1,104 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario: A selected pin below the saved stop keeps its category tint
+  Given a surfacing marks ledger is available in the dark theme
+  And message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I Lower surfaced message #1 from the card
+  And I save the mark without a reason
+  Then the selected pin keeps its category tint and secondary number below the saved stop
+  And the messages region visually matches turn-pin-below-stop-tint at 98 percent
+
+Scenario Outline: A collapsed strip opens its focused message step with Enter
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I collapse the surfaced turn
+  And I activate the first collapsed message step with the keyboard
+  Then the surfaced card shows #1 and announces its category and position
+  And the messages region visually matches turn-collapsed-keyboard-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Strip gaps and compaction seams match the Turn log design
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a counted-wake turn
+  Then the strip compaction is a 2px secondary-colour mark taller than its bar
+  And the strip segments have 2px clear gaps
+  And the messages region visually matches turn-strip-seam-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: A live strip segment breathes rather than pulsing
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log has a running tool
+  Then the live strip segment fades to 0.35 every 1.2 seconds
+  And the messages region visually matches turn-strip-live-fade-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Collapsed dots retain every message and distinguish read from unread
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with 1,4,8 read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I collapse the surfaced turn
+  Then the collapsed strip shows 8 category dots, with 1,4,8 hollow and the rest filled
+  And the collapsed Ask dot keeps its outer ring
+  And the messages region visually matches turn-collapsed-category-dots-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Strip pins and steps have keyboard focus movement and activation
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  Then arrows move focus between strip pins and Enter picks the focused pin
+  And arrows move focus between strip steps and Enter opens the focused step
+  And the messages region visually matches turn-strip-keyboard-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Open pins use compact tinted chips and only reserve occupied rows
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with 1,8 read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  Then open pins use 19px category chips with 6px stems and <numbers> numbers
+  And read pins keep their full colour while unread pins keep a corner dot
+  And the open Ask pin is tinted without a pulse
+  And the pin lane reserves only its occupied rows
+  And the messages region visually matches turn-pin-chips-<viewport> at 98 percent
+
+Examples:
+  | viewport | numbers |
+  | desktop  | visible |
+  | phone    | hidden  |
+
 Scenario Outline: The plain activity bar stays centred in its desktop and phone hit target
   Given message surfacing is inactive at Most
   And the conduit app is served with the connected mockup

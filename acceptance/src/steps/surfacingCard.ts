@@ -437,9 +437,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 			}
 			const first = chips.find(({ row }) => row === "0"),
 				upper = chips.find(({ row }) => row === "1");
-			expect((first?.top ?? 0) - (upper?.top ?? 0)).toBe(
-				(world.page.viewportSize()?.width ?? 1024) < 768 ? 38 : 24,
-			);
+			expect((first?.top ?? 0) - (upper?.top ?? 0)).toBe(24);
 			const members = chips.flatMap(
 				({ members }) => members?.split(",").map(Number) ?? [],
 			);
@@ -844,7 +842,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "assert the Jev card and pin scale",
 		match:
-			/^the full-width message card sits above pins aligned with their own steps$/,
+			/^the full-width message card hangs below pins aligned with their own steps$/,
 		run: async ({ world }) => {
 			const page = world.page;
 			await expect(card(page)).toBeVisible();
@@ -853,9 +851,11 @@ export const surfacingCardHandlers: StepHandler[] = [
 			const laneBox = await lane.boundingBox();
 			if (!messageBox || !laneBox)
 				throw new Error("Missing card or pin lane bounds");
-			expect(messageBox.y + messageBox.height).toBeLessThanOrEqual(
-				laneBox.y + 1,
-			);
+			const stripBox = await panel(page)
+				.locator(".surface-strip")
+				.boundingBox();
+			if (!stripBox) throw new Error("Missing strip bounds");
+			expect(messageBox.y).toBeGreaterThan(stripBox.y + stripBox.height);
 			expect(Math.abs(messageBox.width - laneBox.width)).toBeLessThanOrEqual(2);
 			const scrub = panel(page).getByTestId("surfacing-scrub");
 			await expect(scrub).toHaveAttribute("role", "slider");
@@ -885,6 +885,102 @@ export const surfacingCardHandlers: StepHandler[] = [
 					`stem of #${ordinal}`,
 				).toBeLessThanOrEqual(1.5);
 			}
+		},
+	},
+	{
+		name: "assert hanging card anchor and clamp",
+		match:
+			/^the hanging caret and thumb align with the selected pin inside the panel$/,
+		run: async ({ world }) => {
+			const scope = panel(world.page);
+			const caret = scope.locator(".card-caret");
+			const thumb = scope.locator(".surface-thumb");
+			await expect(caret).toBeVisible();
+			await expect(thumb).toBeVisible();
+			const geometry = await scope.evaluate((element) => {
+				const card = element
+					.querySelector('[data-testid="surfacing-msg-card"]')
+					?.getBoundingClientRect();
+				const track = element
+					.querySelector(".surface-strip")
+					?.getBoundingClientRect();
+				const caret = element
+					.querySelector(".card-caret")
+					?.getBoundingClientRect();
+				const thumb = element
+					.querySelector(".surface-thumb")
+					?.getBoundingClientRect();
+				if (!card || !track || !caret || !thumb)
+					throw new Error("Missing hanging card geometry");
+				const pin = element.querySelector('[aria-pressed="true"][data-x]');
+				if (!pin) throw new Error("Missing selected pin");
+				return {
+					card: { left: card.left, right: card.right, top: card.top },
+					caretX: caret.x + caret.width / 2,
+					caretY: caret.y,
+					thumbX: thumb.x + thumb.width / 2,
+					expected: Math.max(
+						track.left + 14,
+						Math.min(
+							track.right - 14,
+							track.left +
+								(track.width * Number(pin.getAttribute("data-x"))) / 100,
+						),
+					),
+				};
+			});
+			expect(Math.abs(geometry.caretX - geometry.expected)).toBeLessThanOrEqual(
+				1,
+			);
+			expect(Math.abs(geometry.caretX - geometry.thumbX)).toBeLessThanOrEqual(
+				1,
+			);
+			expect(geometry.caretX).toBeGreaterThanOrEqual(geometry.card.left + 13);
+			expect(geometry.caretX).toBeLessThanOrEqual(geometry.card.right - 13);
+			expect(geometry.caretY).toBeLessThan(geometry.card.top);
+		},
+	},
+	{
+		name: "assert hanging card border and Ask tint",
+		match: /^the hanging card and caret share the border outline and Ask tint$/,
+		run: async ({ world }) => {
+			const scope = panel(world.page);
+			const outline = await scope.evaluate((element) => {
+				const card = element.querySelector(
+					'[data-testid="surfacing-msg-card"]',
+				);
+				const caret = element.querySelector(".card-caret");
+				if (!card || !caret) throw new Error("Missing card or caret");
+				const a = getComputedStyle(card),
+					b = getComputedStyle(caret);
+				const probe = document.createElement("span");
+				probe.style.color = "var(--color-border)";
+				element.append(probe);
+				const border = getComputedStyle(probe).color;
+				probe.remove();
+				return {
+					cardWidth: a.borderTopWidth,
+					caretWidth: b.borderTopWidth,
+					cardBorder: a.borderTopColor,
+					caretBorder: b.borderTopColor,
+					border,
+					cardBg: a.backgroundColor,
+					caretBg: b.backgroundColor,
+					plainBg: getComputedStyle(element)
+						.getPropertyValue("--color-bg")
+						.trim(),
+				};
+			});
+			expect(outline.cardWidth).toBe("1px");
+			expect(outline.caretWidth).toBe("1px");
+			expect(outline.cardBorder).toBe(outline.border);
+			expect(outline.caretBorder).toBe(outline.border);
+			expect(outline.cardBg).toBe(outline.caretBg);
+			await expect(card(world.page)).toHaveClass(/ask/);
+			await expect(card(world.page)).not.toHaveCSS(
+				"background-color",
+				outline.plainBg,
+			);
 		},
 	},
 	{
