@@ -1026,6 +1026,34 @@
 		return () => window.removeEventListener("composer:goal", handleGoalAction);
 	});
 
+	// Files dropped anywhere in the window join the draft. Without this the
+	// browser's default drop navigates away to the file itself.
+	$effect(() => {
+		const fileTransfer = (event: DragEvent) => event.defaultPrevented || !event.dataTransfer?.types.includes("Files") ? undefined : event.dataTransfer;
+		function handleDragOver(event: DragEvent) {
+			const transfer = fileTransfer(event);
+			if (!transfer) return;
+			event.preventDefault();
+			transfer.dropEffect = readOnlySubagent ? "none" : "copy";
+		}
+		function handleDrop(event: DragEvent) {
+			const transfer = fileTransfer(event);
+			if (!transfer) return;
+			event.preventDefault();
+			if (readOnlySubagent) return;
+			const files = [...transfer.files];
+			const accepted = getProviderDriver(composerDriver)?.supportsFileAttachments ? files : files.filter((file) => file.type.startsWith("image/"));
+			if (accepted.length > 0) void processSelectedFiles(accepted);
+			if (accepted.length < files.length) attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before attaching files.";
+		}
+		window.addEventListener("dragover", handleDragOver);
+		window.addEventListener("drop", handleDrop);
+		return () => {
+			window.removeEventListener("dragover", handleDragOver);
+			window.removeEventListener("drop", handleDrop);
+		};
+	});
+
 	/** All picker entries share one attachment row and one send path. */
 	async function processSelectedFiles(files: File[]) {
 		const key = composerDraft.key;

@@ -13,6 +13,7 @@
 	import { SvelteSet } from "svelte/reactivity";
 	import type { UserMessage } from "../../types.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { openLightbox } from "../../stores/ui.svelte.js";
 	import {
 		discoveryState,
 		getModelDisplayName,
@@ -88,7 +89,9 @@
 						{#if failedImages.has(url)}
 							<span role="img" aria-label={attachment.name} class="flex size-[96px] items-center justify-center rounded-[10px] bg-bg-raised p-2 text-center text-xs text-text-muted">image unavailable</span>
 						{:else}
-							<img src={url} alt={attachment.name} class="size-[96px] rounded-[10px] bg-bg-raised object-contain" onerror={() => failedImages.add(url)} />
+							<Button variant="ghost" hoverFill="none" size="content" ariaLabel={`View image ${attachment.name}`} class="rounded-[10px] cursor-zoom-in" onclick={() => openLightbox(url)}>
+								<img src={url} alt={attachment.name} class="size-[96px] rounded-[10px] bg-bg-raised object-contain" onerror={() => failedImages.add(url)} />
+							</Button>
 						{/if}
 					{:else}
 						<FileAttachmentChip testid="user-message-file" name={attachment.name} detail={attachment.size === undefined ? attachment.mime : `${attachment.mime} · ${formatFileSize(attachment.size)}`} />

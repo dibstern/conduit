@@ -12,6 +12,7 @@ import { composerEffortHandlers } from "./steps/composerEffort.js";
 import { composerFieldWidthHandlers } from "./steps/composerFieldWidth.js";
 import { composerFilesHandlers } from "./steps/composerFiles.js";
 import { composerFinalDesignHandlers } from "./steps/composerFinalDesign.js";
+import { composerImageDropAndViewHandlers } from "./steps/composerImageDropAndView.js";
 import { composerLiveStatusHandlers } from "./steps/composerLiveStatus.js";
 import { composerPickerHandlers } from "./steps/composerPicker.js";
 import { composerSendAtResetHandlers } from "./steps/composerSendAtReset.js";
@@ -130,6 +131,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...transcriptFeedHandlers,
 	...composerFieldWidthHandlers,
 	...composerFilesHandlers,
+	...composerImageDropAndViewHandlers,
 	...composerFinalDesignHandlers,
 	...composerLiveStatusHandlers,
 	...pendingInputTrayHandlers,
