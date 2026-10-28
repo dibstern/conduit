@@ -182,11 +182,11 @@ export const cursorModelParametersHandlers: StepHandler[] = [
 			await expect(chip).toHaveText(match[1] ?? "");
 			await expect(chip).toHaveAttribute(
 				"aria-label",
-				`Effort: ${match[1]}. Open effort options`,
+				`Effort: ${match[1]}. Click to raise; Option-click for options`,
 			);
 			await expect(chip).toHaveAttribute(
 				"title",
-				`Effort ${match[1]}. Ctrl+T to cycle`,
+				`Effort ${match[1]}. Click or Ctrl+T to raise; Option-click for options`,
 			);
 			await expect(chip).not.toContainText(match[2] ?? "");
 		},

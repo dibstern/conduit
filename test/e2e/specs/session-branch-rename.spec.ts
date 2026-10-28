@@ -218,6 +218,7 @@ for (const mode of [
 				name: "Rename branch",
 				exact: true,
 			});
+			await expect(dialog).toHaveCount(1);
 			await expect(dialog).toBeVisible();
 			await expect(
 				dialog.getByRole("textbox", { name: "Branch name" }),

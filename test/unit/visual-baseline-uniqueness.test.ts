@@ -80,8 +80,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	// source; the two stories genuinely produce the same frame.
 	"model-contextwindowselector--premium-default | model-contextwindowselector--selected-1-m":
 		"premium default and an explicit 1M override both resolve to the same closed '1M (beta)' badge; they differ only inside the open dropdown",
-	"overlays-attentionbanner--permissions-and-questions | overlays-notificationstack--attention-only":
-		"both stories render NotificationStack with the same permission and question fixtures and no toasts",
 
 	// Verified legitimate (conduit-test-de3.35.9.3). For these three the
 	// identical bytes are the assertion, not a hole in one.

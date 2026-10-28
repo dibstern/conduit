@@ -101,8 +101,8 @@ test.describe("Claude session effort and context window across a relay restart",
 		await app.sendMessage("One");
 		await chat.waitForStreamingComplete();
 
-		// The effort chip opens the picker root, where context sits beside effort.
-		await effort.click();
+		// Option-click opens the picker root, where context sits beside effort.
+		await effort.click({ modifiers: ["Alt"] });
 		await page.getByTestId("picker-effort-option-high").click();
 		await expect(effort).toContainText("High");
 		await page.getByTestId("picker-context-option-200k").click();

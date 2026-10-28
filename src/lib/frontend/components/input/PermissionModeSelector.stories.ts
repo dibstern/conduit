@@ -96,7 +96,7 @@ async function assertMode(
 	await expect(badge?.querySelector("svg")).toBeInTheDocument();
 	const label = ranked.find(([value]) => value === mode)?.[1];
 	await expect(badge).toHaveAccessibleName(
-		new RegExp(`Approvals:? ${label}\\. Open options`),
+		new RegExp(`Permissions:? ${label}\\. Open options`),
 	);
 }
 

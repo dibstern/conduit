@@ -44,6 +44,8 @@ export const claudeSdk: typeof fakeSdk = {
 	titleQuery: fakeSdk.titleQuery,
 	fork: fakeSdk.fork,
 	query(params) {
+		// Capability probes are not session launches; only launches are recorded.
+		if (params.options?.maxTurns === 0) return fakeSdk.query(params);
 		const file = process.env["CONDUIT_TEST_CLAUDE_OPTIONS_FILE"];
 		if (!file) throw new Error("Claude replay requires an options file");
 		const seen = new WeakSet<object>();
@@ -61,8 +63,7 @@ export const claudeSdk: typeof fakeSdk = {
 		appendFileSync(file, `${record}\n`);
 		const recordedOptions: { options: Record<string, unknown> } =
 			JSON.parse(record);
-		if (!isRunner || params.options?.maxTurns === 0)
-			return fakeSdk.query(params);
+		if (!isRunner) return fakeSdk.query(params);
 		const workspaceMoves =
 			process.env["CONDUIT_TEST_CLAUDE_REPLAY_WORKSPACE_MOVES"] === "1";
 		const checkpoint = `${file}.${process.argv[3]}.workspace-replay`;

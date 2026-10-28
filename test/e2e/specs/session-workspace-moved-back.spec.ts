@@ -78,7 +78,7 @@ for (const viewport of [
 			await openComposerSheet(page);
 		}
 		const identity = page.getByTestId("composer-checkout");
-		const notice = page.getByTestId("workspace-moved-back");
+		const notice = page.getByTestId("workspace-notice-indicator");
 		await expect(notice).toBeVisible();
 		await expect(notice).toHaveAttribute("role", "img");
 		await expect(notice).toHaveAttribute(

@@ -57,14 +57,9 @@ function sampledOverEdge(page: Page): Promise<string[]> {
 			)
 				layer = layer.parentElement;
 			if (!layer || layer === document.body) return [];
-			const pinned = [...layer.querySelectorAll("*")].find((descendant) => {
-				if (!isPinned(descendant)) return false;
-				// A zero-height sticky rail can paint its children; an empty sheet positioner cannot.
-				return [descendant, ...descendant.querySelectorAll("*")].some((box) => {
-					const rect = box.getBoundingClientRect();
-					return rect.width > 0 && rect.height > 0 && box.checkVisibility();
-				});
-			});
+			// Size does not matter: an empty, zero-height fixed box still counts
+			// (the closed top-sheet wrapper did, until it was display: none).
+			const pinned = [...layer.querySelectorAll("*")].find(isPinned);
 			return pinned ? [`${name(element)} (${name(pinned)})`] : [];
 		});
 	});

@@ -174,7 +174,11 @@
 		class: `${sheetEdge === "top" ? "relative pointer-events-auto" : "fixed inset-x-0 bottom-0"} z-[var(--z-sheet)] w-full outline-hidden`,
 		onOpenAutoFocus: (event) => {
 			rest.onOpenAutoFocus?.(event);
-			if (!event.defaultPrevented && initialFocus === "content") {
+			if (event.defaultPrevented) return;
+			// bits-ui remounts its focus scope once the bound ref lands, re-running
+			// open focus; it must not pull focus the user already moved into the sheet.
+			if (sheetEl?.contains(document.activeElement)) event.preventDefault();
+			else if (initialFocus === "content") {
 				event.preventDefault();
 				// Bits can run this twice per open; never pull focus back out of the sheet.
 				if (!sheetEl?.contains(document.activeElement))
@@ -229,7 +233,9 @@
 	{/if}<BitsPopover.Portal {...portalProps}>
 		{#if sheet}
 			{#if open && (!modal || sheetEl) && sheetScrim?.portalTo === undefined}{@render scrim()}{/if}
-			<div class={sheetEdge === "top" ? "pointer-events-none fixed inset-x-0 z-[var(--z-sheet)] overflow-hidden" : "contents"} style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} use:sheetPosition={sheetEdge}>
+			<!-- Hidden while empty: a closed, zero-height fixed box still makes iOS 26 sample
+			     #session-chrome over #compact-top-edge, and the status-bar blur returns. -->
+			<div class={sheetEdge === "top" ? "pointer-events-none fixed inset-x-0 z-[var(--z-sheet)] overflow-hidden [&:not(:has(*))]:hidden" : "contents"} style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} use:sheetPosition={sheetEdge}>
 			<BitsPopover.ContentStatic {...sheetContentProps} bind:ref={sheetEl}>
 				{#snippet child({ props })}
 					<div {...props} id={sheetContentProps.id} data-sheet-edge={sheetEdge} use:exemptFromBackgroundInert use:backgroundInert={modal && open} use:dragToDismiss={{ edge: sheetEdge, ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }} transition:sheetGlide|global={{ edge: sheetEdge, onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>

@@ -546,7 +546,7 @@
 						<Icon name="user" size={16} class="shrink-0 text-text-muted" />
 						<span class="flex-1">Agent</span>
 						<span class="min-w-0 truncate text-text-secondary">Plan</span>
-						<span class="shrink-0 text-[11px] text-text-dimmer">Set by approvals</span>
+						<span class="shrink-0 text-[11px] text-text-dimmer">Set by permissions</span>
 					</div>
 				{:else if visibleAgents.length > 1}
 					<Button

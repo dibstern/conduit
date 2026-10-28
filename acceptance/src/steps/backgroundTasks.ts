@@ -122,6 +122,8 @@ export async function setLiveTasks(
 			updatedAt: now,
 			// undefined drops out of the JSON snapshot, clearing earlier tasks.
 			backgroundWork: tasks.length > 0 ? "working" : undefined,
+			// The server rolls working background work into attention.
+			attention: tasks.length > 0 ? "working" : undefined,
 			backgroundTasks:
 				tasks.length > 0
 					? tasks.map(
@@ -146,6 +148,14 @@ export async function setLiveTasks(
 					: undefined,
 		},
 	]);
+	// Working attention moves the sidebar row from Idle to Running a beat after
+	// the rows land; wait so a screenshot cannot catch it still under Idle.
+	const sidebarShown = await page
+		.locator('[data-testid$="-shelf-toggle"]')
+		.first()
+		.isVisible();
+	if (tasks.length > 0 && sidebarShown)
+		await expect(page.getByTestId("running-shelf-toggle")).toBeVisible();
 }
 
 export const backgroundTasksHandlers: StepHandler[] = [

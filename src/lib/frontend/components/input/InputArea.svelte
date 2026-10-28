@@ -261,7 +261,6 @@
 	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug : getDraftProject() ?? "");
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
 	const composerDirectory = $derived(composerProject ? effectiveWorkingDirectory(composerProject.folders[0], currentSession?.workspace) : undefined);
-	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
 	const accountId = $derived(composerAccountId(currentSession));
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === accountId));
 	// Wait for accounts and session placement before showing settings. Catalog
@@ -1004,6 +1003,34 @@
 		return () => window.removeEventListener("composer:goal", handleGoalAction);
 	});
 
+	// Files dropped anywhere in the window join the draft. Without this the
+	// browser's default drop navigates away to the file itself.
+	$effect(() => {
+		const fileTransfer = (event: DragEvent) => event.defaultPrevented || !event.dataTransfer?.types.includes("Files") ? undefined : event.dataTransfer;
+		function handleDragOver(event: DragEvent) {
+			const transfer = fileTransfer(event);
+			if (!transfer) return;
+			event.preventDefault();
+			transfer.dropEffect = readOnlySubagent ? "none" : "copy";
+		}
+		function handleDrop(event: DragEvent) {
+			const transfer = fileTransfer(event);
+			if (!transfer) return;
+			event.preventDefault();
+			if (readOnlySubagent) return;
+			const files = [...transfer.files];
+			const accepted = getProviderDriver(composerDriver)?.supportsFileAttachments ? files : files.filter((file) => file.type.startsWith("image/"));
+			if (accepted.length > 0) void processSelectedFiles(accepted);
+			if (accepted.length < files.length) attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before attaching files.";
+		}
+		window.addEventListener("dragover", handleDragOver);
+		window.addEventListener("drop", handleDrop);
+		return () => {
+			window.removeEventListener("dragover", handleDragOver);
+			window.removeEventListener("drop", handleDrop);
+		};
+	});
+
 	/** All picker entries share one attachment row and one send path. */
 	async function processSelectedFiles(files: File[]) {
 		const key = composerDraft.key;
@@ -1131,25 +1158,6 @@
 		document.addEventListener("keydown", handleGlobalEsc);
 		return () => document.removeEventListener("keydown", handleGlobalEsc);
 	});
-
-	/** Publishes how far the composer's top edge sits above the viewport bottom
-	 *  as --composer-clearance, so the toast stack (Toast.svelte) never covers
-	 *  it. Measured from the viewport rather than the composer's height because a
-	 *  terminal panel below the chat lifts the composer. Watching the parent too
-	 *  catches that move, since the chat column shrinks when it happens. */
-	function publishComposerClearance(area: HTMLElement) {
-		const root = document.documentElement;
-		const observer = new ResizeObserver(() => {
-			const clearance = area.offsetHeight > 0 ? window.innerHeight - area.getBoundingClientRect().top : 0;
-			root.style.setProperty("--composer-clearance", `${Math.max(0, clearance)}px`);
-		});
-		observer.observe(area);
-		if (area.parentElement) observer.observe(area.parentElement);
-		return () => {
-			observer.disconnect();
-			root.style.removeProperty("--composer-clearance");
-		};
-	}
 </script>
 
 {#snippet settingsStatus()}
@@ -1197,17 +1205,6 @@
 			<GitIdentity
 				presentation="row"
 				directory={composerDirectory}
-				git={composerGit}
-				workspaceCause={session.workspace?.cause}
-				workspaceMissing={session.workspaceMissing}
-				workspaceMismatch={session.workspaceMismatch}
-				workspaceHint={session.workspaceHint}
-				loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-				onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
-				onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
-				oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
-				ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
-				onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 			>
 				{#snippet children(attention, checkout, warning)}
 					{@render phoneMore(rows, trigger, checkout, warning, attention)}
@@ -1226,7 +1223,6 @@
      inset at once lifts the button out from under the finger before the click. -->
 <div
 	id="input-area"
-	{@attach publishComposerClearance}
 	data-compact={sessionViewState.compact}
 	class="shrink-0 px-[32px] pt-[8px] transition-[padding-bottom] duration-0 delay-250 has-[textarea:focus]:delay-0 pb-[calc(env(safe-area-inset-bottom,0px)+22px)] has-[textarea:focus]:pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
@@ -1471,17 +1467,6 @@
 										presentation="control"
 										compact={sessionViewState.composerTier === "phone"}
 										directory={composerDirectory}
-										git={composerGit}
-										workspaceCause={session.workspace?.cause}
-										workspaceMissing={session.workspaceMissing}
-										workspaceMismatch={session.workspaceMismatch}
-										workspaceHint={session.workspaceHint}
-										loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-										onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
-										onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
-										oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
-										ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
-										onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 									/>
 								{/key}
 							{/if}
@@ -1601,17 +1586,6 @@
 								<GitIdentity
 									presentation="word"
 									directory={composerDirectory}
-									git={composerGit}
-									workspaceCause={session.workspace?.cause}
-									workspaceMissing={session.workspaceMissing}
-									workspaceMismatch={session.workspaceMismatch}
-									workspaceHint={session.workspaceHint}
-									loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-									onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
-									onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
-									oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
-									ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
-									onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 								/>
 							{/key}
 						{/if}

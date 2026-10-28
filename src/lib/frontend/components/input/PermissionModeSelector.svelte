@@ -67,7 +67,7 @@
 	bind:open
 	appearance="final"
 	presentation={sessionViewState.compact ? "sheet" : "popover"}
-	ariaLabel="Approvals"
+	ariaLabel="Permissions"
 	side="top"
 	align="end"
 	sideOffset={4}

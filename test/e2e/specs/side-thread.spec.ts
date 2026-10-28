@@ -438,7 +438,7 @@ test.describe("OpenCode Side Threads", () => {
 			await modelPicker.click();
 			await expect(page.getByTestId("model-picker")).toBeHidden();
 			await expect(approvalPill).toHaveAccessibleName(
-				"Approvals: Ask before edits. Open options",
+				"Permissions: Ask before edits. Open options",
 			);
 			await expect
 				.poll(() => parentSettings(relayUrl, sideId))
@@ -462,7 +462,7 @@ test.describe("OpenCode Side Threads", () => {
 			await expect(planOption).not.toContainText("Claude");
 			await planOption.click();
 			await expect(approvalPill).toHaveAccessibleName(
-				"Approvals: Plan. Open options",
+				"Permissions: Plan. Open options",
 			);
 			const sidePatches = () =>
 				mockServer.requestBodies
@@ -640,7 +640,7 @@ test.describe("Claude Side Threads", () => {
 				await expect(chat.subagentBackBar).toHaveCount(0);
 				await expect(
 					page.getByTestId("permission-mode-badge"),
-				).toHaveAccessibleName("Approvals: Ask before edits. Open options");
+				).toHaveAccessibleName("Permissions: Ask before edits. Open options");
 				await expect(
 					page.locator(`#session-list [data-session-id="${sideId}"]`),
 				).toHaveCount(0);
@@ -694,7 +694,7 @@ test.describe("Claude Side Threads", () => {
 				);
 				await expect(
 					page.getByTestId("permission-mode-badge"),
-				).toHaveAccessibleName("Approvals: Ask before edits. Open options");
+				).toHaveAccessibleName("Permissions: Ask before edits. Open options");
 				await expect(
 					page.locator(`#session-list [data-session-id="${sideId}"]`),
 				).toHaveCount(0);

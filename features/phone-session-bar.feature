@@ -364,7 +364,7 @@ Scenario Outline: Disabled session tiles explain why and keep the sheet open
   And the phone session sheet state is pinned
   When I open the overflow session sheet
   And I tap the unavailable Snooze tile
-  Then the session sheet stays open with the reason pill Unpin to snooze
+  Then the session sheet stays open under the reason toast Unpin to snooze
   And the auto-settle status line is On · paused while pinned
   And the session-sheet region visually matches <baseline> at <threshold> percent
 
@@ -407,4 +407,4 @@ Scenario: A failed Auto-settle change keeps the stored flag and shows a sheet pi
   When I open the overflow session sheet
   And I toggle Auto-settle in the session sheet
   Then the session sheet stays open with Auto-settle on
-  And the session sheet stays open with the reason pill Couldn't change auto-settle
+  And the session sheet stays open under the reason toast Couldn't change auto-settle

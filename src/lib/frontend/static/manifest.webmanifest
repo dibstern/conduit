@@ -1,7 +1,7 @@
 {
 	"name": "Conduit",
 	"short_name": "Conduit",
-	"description": "Access your OpenCode sessions from any device",
+	"description": "An agentic IDE for your AI coding sessions, on any device",
 	"start_url": "/",
 	"display": "standalone",
 	"orientation": "portrait",
@@ -9,22 +9,22 @@
 	"background_color": "#111113",
 	"icons": [
 		{
-			"src": "/static/apple-touch-icon.png",
-			"sizes": "180x180",
-			"type": "image/png",
-			"purpose": "any"
-		},
-		{
 			"src": "/static/web-app-manifest-192x192.png",
 			"sizes": "192x192",
 			"type": "image/png",
-			"purpose": "any maskable"
+			"purpose": "any"
 		},
 		{
 			"src": "/static/web-app-manifest-512x512.png",
 			"sizes": "512x512",
 			"type": "image/png",
-			"purpose": "any maskable"
+			"purpose": "any"
+		},
+		{
+			"src": "/static/web-app-manifest-maskable-512x512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "maskable"
 		}
 	]
 }

@@ -367,7 +367,7 @@ export const composerHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await expect(
 				world.page.getByTestId("permission-mode-badge"),
-			).toHaveAccessibleName(`Approvals: ${match[1]}. Open options`);
+			).toHaveAccessibleName(`Permissions: ${match[1]}. Open options`);
 		},
 	},
 	{

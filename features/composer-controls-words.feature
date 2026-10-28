@@ -44,7 +44,7 @@ Scenario Outline: phone Words opens every picker through one Composer sheet
   And the composer checkout is conduit / account-chip as worktree
   And the composer uses words controls
   When I open the phone composer sheet
-  Then the phone composer sheet has separate Harness, Account, Model, Effort, Mode and Checkout rows
+  Then the phone composer sheet has separate Harness, Account, Model, Effort, Permissions and Checkout rows
   When I tap the phone composer <row> row
   Then the phone composer sheet gives way to the picker
   And the icons control opens the picker at <section>
@@ -83,11 +83,11 @@ Scenario Outline: phone Words mode is changed through its sheet
   And the composer picker has the Claude catalog
   And approvals are plan
   And the composer uses words controls
-  When I tap the phone composer Mode row
+  When I tap the phone composer Permissions row
   Then the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
-  And the phone composer Mode row reads Plan
+  And the phone composer Permissions row reads Plan
   When I set approvals to acceptEdits
-  Then the phone composer Mode row reads Auto-accept edits
+  Then the phone composer Permissions row reads Auto-accept edits
   And the approvals menu is closed
   When I close the phone composer sheet
   Then the phone Words mode is edits with the edits tone
@@ -233,6 +233,20 @@ Examples:
   | tier   | counts  | baseline                    | threshold |
   | wide   | visible | composer-words-d3-git-wide   | 98        |
   | narrow | visible | composer-words-d3-git-narrow | 98        |
+
+Scenario: two workspace notices share one git chip warning mark
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the harness logo is viewed in the wide tier
+  And the composer checkout is conduit / account-chip as worktree
+  And the session has a workspace hint at /workspace/conduit-hint
+  And the session has a workspace mismatch at /workspace/conduit-actual
+  And the composer uses words controls
+  Then the composer checkout has exactly one warning mark naming Workspace mismatch: Claude is working in /workspace/conduit-actual and working in conduit-hint?
+  When I open the composer checkout menu
+  Then the composer checkout menu reports /workspace/conduit-actual and offers Retry move
+  And the composer checkout menu offers Move and Dismiss for /workspace/conduit-hint
 
 Scenario Outline: D3 workspace hints show an icon and put Move and Dismiss in the menu at every width
   Given the conduit app is served with the connected mockup

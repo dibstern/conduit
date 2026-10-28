@@ -282,7 +282,7 @@ test.describe("Permission mode with a bound session", () => {
 
 		reportMode(rpc, "plan", "claude");
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Plan. Open options",
+			"Permissions: Plan. Open options",
 		);
 
 		// Approving ExitPlanMode makes the SDK leave plan mode, which conduit
@@ -291,7 +291,7 @@ test.describe("Permission mode with a bound session", () => {
 		// only" on screen and a session that is now editing files.
 		reportMode(rpc, "ask", "claude");
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Ask before edits. Open options",
+			"Permissions: Ask before edits. Open options",
 		);
 	});
 
@@ -306,14 +306,14 @@ test.describe("Permission mode with a bound session", () => {
 		serverModes.set("sess-pm-001", "auto");
 		reportMode(rpc, "auto", "claude");
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Auto. Open options",
+			"Permissions: Auto. Open options",
 		);
 
 		// The session moves to an OpenCode account, which has no Auto mode.
 		reportMode(rpc, "auto", "opencode");
 
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Ask before edits. Open options",
+			"Permissions: Ask before edits. Open options",
 		);
 		await expect
 			.poll(() => switchCalls(rpc).at(-1)?.payload)
@@ -331,7 +331,7 @@ test.describe("Permission mode with a bound session", () => {
 
 		await selectFullAccess(page);
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Full access. Open options",
+			"Permissions: Full access. Open options",
 		);
 
 		await expect
@@ -360,7 +360,7 @@ test.describe("Permission mode with a bound session", () => {
 			.poll(() => switchCalls(rpc).at(-1)?.payload)
 			.toMatchObject({ sessionId: "sess-pm-001", mode: "full" });
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Full access. Open options",
+			"Permissions: Full access. Open options",
 		);
 	});
 
@@ -378,7 +378,7 @@ test.describe("Permission mode with a bound session", () => {
 		await page.goto("/s/sess-pm-001");
 		await page.locator("#input").waitFor({ state: "visible", timeout: 10_000 });
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Full access. Open options",
+			"Permissions: Full access. Open options",
 		);
 	});
 });
@@ -392,7 +392,7 @@ test.describe("Permission mode selected in a draft", () => {
 		// 2ba9fc5b removed the pending-mode flush. The draft owns this choice.
 		await selectFullAccess(page);
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Full access. Open options",
+			"Permissions: Full access. Open options",
 		);
 		expect(switchCalls(rpc)).toHaveLength(0);
 
@@ -403,7 +403,7 @@ test.describe("Permission mode selected in a draft", () => {
 
 		await expect(page).toHaveURL(/\/s\/sess-pm-001$/);
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Ask before edits. Open options",
+			"Permissions: Ask before edits. Open options",
 		);
 		expect(switchCalls(rpc)).toHaveLength(0);
 		expect(serverModes.has("sess-pm-001")).toBe(false);
@@ -411,7 +411,7 @@ test.describe("Permission mode selected in a draft", () => {
 		// Hydrating the existing session cannot inherit the draft's elevation.
 		reportMode(rpc, "ask");
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Ask before edits. Open options",
+			"Permissions: Ask before edits. Open options",
 		);
 		expect(switchCalls(rpc)).toHaveLength(0);
 
@@ -419,7 +419,7 @@ test.describe("Permission mode selected in a draft", () => {
 			.getByRole("button", { name: "New session", exact: true })
 			.click();
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Ask before edits. Open options",
+			"Permissions: Ask before edits. Open options",
 		);
 		await openPickerRoot(
 			page,
@@ -431,7 +431,7 @@ test.describe("Permission mode selected in a draft", () => {
 		await page.keyboard.press("Escape");
 		await selectFullAccess(page);
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Full access. Open options",
+			"Permissions: Full access. Open options",
 		);
 		rpc.setStubs({
 			CreateSession: () => ({
@@ -470,7 +470,7 @@ test.describe("Permission mode selected in a draft", () => {
 		await pill(page).click();
 		await page.locator("[data-testid='permission-mode-option-ask']").click();
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Ask before edits. Open options",
+			"Permissions: Ask before edits. Open options",
 		);
 
 		await page
@@ -492,7 +492,7 @@ test.describe("Permission mode selected in a draft", () => {
 		expect(flushed).not.toContain("full");
 		expect(switchCalls(rpc)).toHaveLength(0);
 		await expect(pill(page)).toHaveAccessibleName(
-			"Approvals: Ask before edits. Open options",
+			"Permissions: Ask before edits. Open options",
 		);
 	});
 });

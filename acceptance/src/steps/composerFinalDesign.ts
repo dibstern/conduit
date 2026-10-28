@@ -21,7 +21,7 @@ const phoneRows = {
 	Account: "composer-more-account",
 	Model: "composer-more-model",
 	Effort: "composer-more-effort",
-	Mode: "composer-more-mode",
+	Permissions: "composer-more-mode",
 	Checkout: "composer-checkout",
 } as const;
 
@@ -380,7 +380,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	{
 		name: "tap phone composer sheet row",
 		match:
-			/^I tap the phone composer (Harness|Account|Model|Effort|Mode|Checkout) row$/,
+			/^I tap the phone composer (Harness|Account|Model|Effort|Permissions|Checkout) row$/,
 		run: async ({ world, match }) => {
 			await openComposerMoreSheet(world.page);
 			await world.page
@@ -400,19 +400,19 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert phone composer row value",
-		match: /^the phone composer (Account|Effort|Mode) row reads (.+)$/,
+		match: /^the phone composer (Account|Effort|Permissions) row reads (.+)$/,
 		run: async ({ world, match }) => {
 			const row = world.page
 				.getByTestId("composer-more-sheet")
-				.getByTestId(phoneRows[match[1] as "Effort" | "Mode"]);
+				.getByTestId(phoneRows[match[1] as "Effort" | "Permissions"]);
 			await expect(row.locator('[data-part="value"]')).toHaveText(
 				match[2] ?? "",
 			);
 		},
 	},
 	{
-		name: "tap inline phone footer control",
-		match: /^I tap the phone footer (effort|checkout) control$/,
+		name: "activate inline phone footer control",
+		match: /^I (tap|hold) the phone footer (effort|checkout) control$/,
 		run: async ({ world, match }) => {
 			const page = world.page;
 			const cdp = await page.context().newCDPSession(page);
@@ -421,10 +421,11 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 				maxTouchPoints: 1,
 			});
 			const control = page.getByTestId(
-				match[1] === "effort" ? "variant-badge" : "composer-checkout",
+				match[2] === "effort" ? "variant-badge" : "composer-checkout",
 			);
 			await expect(control).toBeVisible();
 			await expect(control).toBeEnabled();
+			await expect(control).not.toHaveAttribute("aria-busy", "true");
 			const bounds = await box(control);
 			await cdp.send("Input.dispatchTouchEvent", {
 				type: "touchStart",
@@ -435,11 +436,17 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					},
 				],
 			});
-			await cdp.send("Input.dispatchTouchEvent", {
-				type: "touchEnd",
-				touchPoints: [],
-			});
-			await cdp.detach();
+			try {
+				if (match[1] === "hold") {
+					await expect(page.getByTestId("model-picker")).toBeVisible();
+				}
+			} finally {
+				await cdp.send("Input.dispatchTouchEvent", {
+					type: "touchEnd",
+					touchPoints: [],
+				});
+				await cdp.detach();
+			}
 		},
 	},
 	{
@@ -448,7 +455,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const effort = world.page.getByTestId("variant-badge");
 			await expect(effort).toHaveAccessibleName(
-				`Effort: ${match[1]}. Open effort options`,
+				`Effort: ${match[1]}. Tap to raise; hold for options`,
 			);
 			await expect(effort.locator(".effort-meter")).toBeVisible();
 			await expect(effort).toHaveText("");
@@ -509,7 +516,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	{
 		name: "assert phone composer sheet rows and geometry",
 		match:
-			/^the phone composer sheet has separate Harness, Account, Model, Effort, Mode and Checkout rows$/,
+			/^the phone composer sheet has separate Harness, Account, Model, Effort, Permissions and Checkout rows$/,
 		run: async ({ world }) => {
 			const sheet = world.page.getByTestId("composer-more-sheet");
 			await expect(
@@ -576,12 +583,13 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert phone sheet remains under its menu",
-		match: /^the phone composer sheet keeps the (Mode|Checkout) menu above it$/,
+		match:
+			/^the phone composer sheet keeps the (Permissions|Checkout) menu above it$/,
 		run: async ({ world, match }) => {
 			await expect(world.page.getByTestId("composer-more-sheet")).toBeVisible();
 			await expect(
 				world.page.getByTestId(
-					match[1] === "Mode"
+					match[1] === "Permissions"
 						? "permission-mode-dropdown"
 						: "composer-checkout-menu",
 				),
@@ -599,7 +607,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(shield).toBeVisible();
 			await expect(shield).toHaveAttribute(
 				"aria-label",
-				new RegExp(`Approvals.*${match[1]}`),
+				new RegExp(`Permissions.*${match[1]}`),
 			);
 			await expect(shield).toHaveText("");
 			await expect(shield.locator("svg")).toHaveCount(1);
@@ -730,12 +738,18 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "tap desktop icons control",
-		match: /^I tap the icons (harness|model|effort|mode) control$/,
+		name: "activate desktop icons control",
+		match:
+			/^I (tap|open options from) the icons (harness|model|effort|mode) control$/,
 		run: async ({ world, match }) => {
 			await world.page
-				.getByTestId(iconsControls[match[1] as keyof typeof iconsControls])
-				.click();
+				.getByTestId(iconsControls[match[2] as keyof typeof iconsControls])
+				.click({
+					modifiers:
+						match[1] === "open options from" && match[2] === "effort"
+							? ["Alt"]
+							: [],
+				});
 		},
 	},
 	{
@@ -914,7 +928,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(mode).toHaveText("");
 			await expect(mode).toHaveAttribute(
 				"aria-label",
-				new RegExp(`Approvals.*${match[1]}`),
+				new RegExp(`Permissions.*${match[1]}`),
 			);
 		},
 	},

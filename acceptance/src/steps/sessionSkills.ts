@@ -415,7 +415,7 @@ export const sessionSkillsHandlers: StepHandler[] = [
 			});
 			await expect(toast).toHaveText(match[1] ?? "");
 			await expect(toast).toHaveAttribute("aria-live", "polite");
-			await expect(toast).toHaveClass(/\bbg-bg-alt\b/);
+			await expect(toast).toHaveClass(/\bbg-popover-bg\b/);
 			await expect(toast).toBeVisible();
 		},
 	},

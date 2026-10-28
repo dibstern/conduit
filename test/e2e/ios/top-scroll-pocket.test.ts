@@ -61,6 +61,10 @@ const SCROLL_UP = `document.getElementById("messages").scrollTop = 1500; ${SETTL
 // Swaps the theme in place; theme-color follows --color-bg as initTheme() would set it.
 // Returns the new --color-bg, which the status bar must take on.
 const LIGHT = `document.documentElement.classList.replace("dark-theme", "light-theme"); const bg = getComputedStyle(document.documentElement).getPropertyValue("--color-bg").trim(); const hex = Object.assign(document.createElement("canvas").getContext("2d"), { fillStyle: bg }).fillStyle; ${q('meta[name="theme-color"]')}.content = bg; return hex;`;
+// Switching to another app and back: ARM listens for the return, the test
+// switches apps once ARM's line prints (switchApps), and AWAY resolves on return.
+const ARM = `window.__back = new Promise((resolve) => document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") resolve("back"); })); return "armed";`;
+const AWAY = `return await window.__back;`;
 const COLLAPSE = `document.getElementById("messages").dispatchEvent(new WheelEvent("wheel", { deltaY: 120 })); ${SETTLE} if (document.getElementById("session-bar").dataset.collapsed !== "true") throw new Error("island did not collapse"); return "collapsed";`;
 
 const CASES: Record<string, string[]> = {
@@ -95,6 +99,28 @@ const CASES: Record<string, string[]> = {
 		`settings-open=${settings(`${q("#list-bar-settings")}.click();`, true)}`,
 		`light=${LIGHT}`,
 	],
+	// Reported as "blurred after switching apps". Switching keeps whatever WebKit
+	// last sampled; the blur was there from the first frame, because the closed
+	// top-sheet wrapper in #session-chrome hid the strip (Menu.svelte).
+	"chat, after switching apps": [
+		`ready=${READY}`,
+		`arm=${ARM}`,
+		`app-switch=${AWAY}`,
+	],
+	"settings, after switching apps": [
+		`ready=${READY}`,
+		`back=${click("#session-bar-back")}`,
+		`settings-open=${settings(`${q("#list-bar-settings")}.click();`, true)}`,
+		`arm=${ARM}`,
+		`app-switch=${AWAY}`,
+	],
+	// The probe widens the page to the iPhone Duo's inner screen first.
+	unfolded: [
+		`ready=${READY}`,
+		`unfold=for (const deadline = Date.now() + 5000; document.getElementById("layout").classList.contains("layout-compact"); await new Promise((resolve) => setTimeout(resolve, 100))) if (Date.now() > deadline) throw new Error("still compact"); return document.documentElement.clientWidth + "px, sidebar " + document.getElementById("sidebar").getBoundingClientRect().width + "px";`,
+		`session-menu-open=${menu("#session-bar-more", true)}`,
+		`session-menu-close=${menu("#session-bar-more", false)}`,
+	],
 	// Proves the probe can see the blur: without the strip it must show.
 	control: [
 		`ready=${READY}`,
@@ -103,6 +129,13 @@ const CASES: Record<string, string[]> = {
 		`menu-close=${menu("#session-bar-more", false)}`,
 	],
 };
+
+/** Sends the probe to the background behind Settings, then brings it back. */
+async function switchApps() {
+	await run("xcrun", ["simctl", "launch", UDID, "com.apple.Preferences"]);
+	await new Promise((resolve) => setTimeout(resolve, 3000));
+	await run("xcrun", ["simctl", "launch", UDID, "dev.conduit.pocketprobe"]);
+}
 
 type Probe = { lines: string[]; timelines: Record<string, string> };
 
@@ -113,7 +146,7 @@ async function probe(
 	steps: string[],
 ): Promise<Probe> {
 	const artifact = `${ARTIFACTS}/${name.replaceAll(/\W+/g, "-")}.txt`;
-	const { stdout } = await run(
+	const launch = run(
 		"xcrun",
 		[
 			"simctl",
@@ -126,10 +159,16 @@ async function probe(
 			...steps,
 		],
 		{ encoding: "utf8", timeout: 120_000 },
-	).catch((error: Error & { stdout?: string }) => {
-		writeFileSync(artifact, `${error.stdout ?? ""}\n${error.message}`);
-		throw error;
+	);
+	launch.child.stdout?.on("data", (chunk: string) => {
+		if (chunk.includes("PROBE arm ")) void switchApps();
 	});
+	const { stdout } = await launch.catch(
+		(error: Error & { stdout?: string }) => {
+			writeFileSync(artifact, `${error.stdout ?? ""}\n${error.message}`);
+			throw error;
+		},
+	);
 	const lines = stdout
 		.split("\n")
 		.filter((line) => line.startsWith("PROBE "))
