@@ -1530,32 +1530,57 @@ revoke(r: Live, reason: Revocation): Exiting | Retired
 
 - **Every way a runner is stopped** (explicit Stop, end-session, project removal, supersede or retire,
   idle exit, a confirmed exit, a refusal with `exiting` or `retiring`, an abandoned candidate) makes
-  one call: `requestStop(runner, reason)`.
-- It commits one transaction: the retirement row with leader identity, reaper identity if any, the
-  group snapshot, `retired_at` and the stop reason. The row lists no runs (6.5). Retirement clears
-  `attachment_id` in the same statement. Attach requires `retired_at IS NULL`, so a reconnect never
-  revives a retired runner. A non-Superseded stop also retires the session's candidates in the same
-  commit (6.9).
+  one call: `requestStop(target, reason)` (6.10).
+- It commits one transaction, which reads everything it decides on: the target's row, its
+  session and role, for `Superseded` the successor and any run the runner still holds, and for any
+  other Stop of a serving row every unretired candidate of the session. It writes the retirement
+  row with leader identity, reaper identity if any, the group snapshot, `retired_at` and the stop
+  reason. The row lists no runs (6.5). Retirement clears `attachment_id` in the same statement.
+  Attach requires `retired_at IS NULL`, so a reconnect never revives a retired runner. A
+  non-Superseded Stop of a serving row also retires the candidates it read, in the same commit
+  (6.9). No caller passes a candidate snapshot.
+- `retired_at` is the clock of the attempt that committed, never of an earlier failed attempt.
 - The record is written before any signal to the runner, on every path (Stop, retirement, survivor
   retries, restart recovery). A crash after the commit leaves a record restart recovery finds.
 - **If the commit fails with a store fault, nothing durable changed:** no fence, no revoke, no
   signal, no shutdown command. The runner keeps running and serving.
-- For every reason except `Superseded`:
-  - the intent stays `Committing`, and the reconciler re-runs the commit step after one backoff
-    (4.8) until it lands, logging each failure;
+- For every reason except `Superseded`, on any store fault, transient or not:
+  - the intent stays `Committing`, and the reconciler re-runs the whole commit step after the
+    4.8 backoff (capped at 30 s) until it lands, logging each failure;
   - waiters wait, and a second Stop joins;
-  - `requestStop` does not fail on a store outage. It waits for commit/rejection; a promoted
-    candidate returns Ignored, which no caller follows with awaitStop.
-- `requestStop` awaits commit or rejection; the reconciler owns its worker independently of
-  the waiter. Restart re-derives from durable control/candidate/dead-process facts per S3's
-  table. A healthy reattachment cannot recover an uncommitted direct Stop, as on main (Q26).
-- `Superseded` (the swap) fails with the existing "stop runner" error, and the upgrade's backoff
-  retries it (6.9).
-- `CandidateAbandoned` reads the row's role in its commit; a row already `serving` is not
-  stopped.
-- **If the runner's existing row is rejected on decode**, `requestStop` fails the same way and logs
-  the rejection. It never signals and never sends shutdown. The state returns to `Running` and
-  the waiters fail.
+  - `requestStop` does not fail on a store fault.
+- `requestStop` registers the intent before it yields and returns `"Requested" | "Ignored"`. The
+  reconciler's scope owns the commit worker; interrupting a caller ends only its wait. A
+  `Superseded` caller's wait is uninterruptible, so the upgrade learns whether its promotion
+  committed. Restart re-derives the Stop from durable control, candidate and dead-process facts,
+  per S3's table. A healthy reattachment cannot recover an uncommitted direct Stop, as on main
+  (Q26).
+- Startup never waits on a Stop commit. `recover` registers the Stops it re-derives (abandoned
+  candidates, dead processes) and returns. Recovery attachment forks the Stops it raises: an
+  orphan, an incompatible hello, a disconnected runner (dead or surviving), or a failed
+  attachment. Each fork waits for its stop, then releases that runner's waiters. Reattachment of
+  live runners goes on while those commits retry.
+- A rejected startup Stop fails only that runner's waiters and is logged; startup does not fail
+  for it. A Stop still committing when shutdown interrupts it is not logged as failed.
+- A restart's orphan (session gone, or already served) commits `EndSession`, which is not
+  role-gated, so a serving orphan is stopped.
+- A full stop and project removal (`stopRegisteredRunners`) await each runner's Stop. During a
+  write outage they keep retrying with no deadline. Killing the daemon then leaves the runners
+  alive (Q28).
+- `Superseded` (the swap) fails with the existing "stop runner" error on any failure, a store
+  fault included. The reconciler does not retry it; the upgrade's backoff retries the swap (6.9).
+  A repeated swap passes only if the committed row carries the same `Superseded` reason and the
+  successor is the serving, unretired row.
+- `CandidateAbandoned` reads the row's role in its commit. If the row is already `serving`, the
+  commit writes nothing and returns `Ignored`. A caller that gets `Ignored` never calls
+  `awaitStop`.
+- **If the commit fails with a decode rejection, an identity rejection (the row's session does not
+  match the target), any failure of a `Superseded` Stop (a store fault included; the upgrade
+  retries the swap), or a defect**, `requestStop` fails with "stop runner" and logs it. It never
+  signals and never sends shutdown. The state returns to `Running` and the waiters fail. That is
+  the whole fail set: for a Stop other than `Superseded`, every other store fault, transient or
+  not (busy, locked, disk full, I/O, a constraint), stays `Committing`, and the reconciler
+  retries it.
 - `retired_at` is set-only and is the fence that outlives memory. A daemon starting up never
   re-adopts a retired runner as live; it hands the row to the reconciler.
 - The transaction-bound form of the stop mutation (4.5) lets a release and a stop commit together.
@@ -1568,37 +1593,50 @@ type Identity = { tag: "Verified"; pid: number; startTime: string }
               | { tag: "Unverifiable"; pid?: number };
 ```
 
-- The row is decoded with Schema at the store; a rejected row is rejected alone and logged.
+- The row is decoded with Schema at the store. A list read (`recover`, `owners`) rejects a bad
+  row alone; the rest of the read stands. A Stop commit decodes the runner's row and also:
+  - for a serving Stop other than `Superseded`, every unretired candidate row of the session,
+    which it stops with it;
+  - for `Superseded`, the successor's row.
+
+  A decode rejection of any of these rows fails that Stop (F13).
 - Membership and signals are separate facts on the row. The group snapshot answers "which processes
   are this runner's". The signal log answers "what was sent to whom, and was it delivered". A
   refused or failed signal adds to the log and never removes a member.
 
-<!-- src: STOP-INTENT S1, S5; REAPER R3; RA §4; AUDIT-2 T3, A13; SWAP S7, K; CONT C3 (Refused, one commit for release and stop); SETTLE S3 -->
+<!-- src: STOP-INTENT S1, S5; REAPER R3; RA §4; AUDIT-2 T3, A13; SWAP S7, K; CONT C3 (Refused, one commit for release and stop); SETTLE S3; 32.29.3 (c6d3a44f) -->
 
 ### 6.4 The stop state, the reconciler and waiters
 
 ```ts
 type RunnerStop =
   | { _tag: "Running" }
-  | { _tag: "Committing"; target: StopTarget; reason: StopReason; waiters: Deferred<"Requested" | "Ignored", StopFailed> } // identity only, no retirement/progress fields
+  | { _tag: "Committing"; waiters: Deferred<"Requested" | "Ignored", StopFailed> } // no record; the commit worker holds target and reason
   | { _tag: "Requested"; record: RunnerRetirement }             // row committed, nothing sent yet
   | { _tag: "Escalating"; record: RunnerRetirement }            // shutdown sent and/or signals in the log
   | { _tag: "Escalated"; record: RunnerRetirement }             // TERM, 3 s, KILL, 1 s window is over
   | { _tag: "Gone"; record: RunnerRetirement }                  // every snapshotted member gone
   | { _tag: "Settled"; record: RunnerRetirement };              // runs settled, evicted, pruned (6.8)
 decideRunnerStop(state, observation) -> { state, actions }
-// actions: Commit | SendShutdown | Signal | Settle | Evict | Prune | Notice
+// actions: SendShutdown | Signal | Settle | Evict | Prune | Notice
 ```
 
 - The reconciler module (`runner-retirement.ts`) owns this state. Callers read it; only the
   reconciler changes it. `entry.retirement` is a read of it.
 - `Committing` is the only state that is not durable. A second Stop joins it instead of committing
-  again. It does not guard dispatch; the database does (4.3). On a store fault it stays `Committing`
-  and the reconciler retries the commit (6.3). Only a decode rejection or a `Superseded` refusal
-  returns it to `Running` and fails its waiters.
-- The worker starts at intent registration; `Committing` can only commit or reject. Durable
-  stop actions require the successful commit's retirement row. The generic durable-row tick
-  never treats `Committing` as `Requested`. `Ignored` resolves to `Running` without a Stop wait.
+  again. It does not guard dispatch; the database does (4.3). For a Stop other than `Superseded`,
+  it stays `Committing` on any store fault and the reconciler retries the commit (6.3). A decode
+  rejection, an identity rejection (session mismatch), any failure of a `Superseded` Stop (a store
+  fault included), or a defect returns it to `Running` and fails its waiters.
+- The commit worker starts when the intent is registered and runs in the reconciler's scope. It
+  is not a `decideRunnerStop` action, and the durable-row tick never treats `Committing` as
+  `Requested`. Only the row the committing transaction returns moves the state on (to `Requested`
+  for a new commit), and that same transaction's session rows replace the session's routing
+  cache. `Ignored` resolves to `Running` with no Stop wait, and each joiner then rechecks its own
+  reason.
+- A release that refuses with `exiting` or `retiring` holds `Committing` for the release
+  transaction. If that transaction fails, the state is restored and its joiners are resolved
+  `Ignored`, so each commits its own Stop.
 - `Requested` to `Settled` map onto the row: its tag plus its signal log. Memory is a cache of the
   row and is rebuilt from it at startup.
 - `decideRunnerKill` is the signal part of `decideRunnerStop`.
@@ -1623,8 +1661,10 @@ decideRunnerStop(state, observation) -> { state, actions }
   feeder parks until `awaitStop(predecessor, "Escalated")` returns or the window ends, then
   starts a serving runner. The park also ends early, and the feeder steps, when the head's run
   ends or a Stop commit covers it (4.4). No other code scans the stop states for a predecessor.
-- The release's stop step receives the `ServingRow` that `release` read in its transaction;
-  the in-memory registry is not read for who serves.
+- The release's stop step receives the serving row that `releaseRun` selected in its own
+  transaction (`runner_id, session_id, driver_kind, pid, start_time, reaper_pid,
+  reaper_start_time`) as a `StopTarget`. With no serving row there is no stop step. The
+  in-memory registry is a routing cache and is never read for who serves.
 - **One process watcher.** `RunnerAuthority` owns the only process watcher, over Exiting and Retired
   records; it is the reconciler's cadence. When a process is confirmed gone (exited, pid reused,
   zombie) it emits `runnerGone(runnerId)` once. 32.4 keeps only failed liveness checks, which are
@@ -1634,7 +1674,7 @@ decideRunnerStop(state, observation) -> { state, actions }
   `settleExitedRuns` await on `entry.stopped`, `evict`'s own revoke cohort, and the authority's
   `ownedRunIds` as a source of what to settle.
 
-<!-- src: STOP-INTENT S2, S3, S4, What is deleted; AUDIT A3; CONT C2 (feeder keeps the ordering against a stopping predecessor), C3 (Settle reads the journal); review 2026-10-28 (H4, H11); SETTLE S1, S2, S3, S5 -->
+<!-- src: STOP-INTENT S2, S3, S4, What is deleted; AUDIT A3; CONT C2 (feeder keeps the ordering against a stopping predecessor), C3 (Settle reads the journal); review 2026-10-28 (H4, H11); SETTLE S1, S2, S3, S5; 32.29.3 (c6d3a44f) -->
 
 ### 6.5 Which runner holds a run
 
@@ -1831,7 +1871,7 @@ The module has eight calls:
 
 ```ts
 register(runner, session, role: "serving" | "candidate"): Effect<"Registered" | "Lost", StoreFault>
-requestStop(runner, reason: StopReason): Effect<"Requested" | "Ignored", StopFailed> // StopFailed only for Superseded or a decode rejection
+requestStop(target: StopTarget, reason: StopReason): Effect<"Requested" | "Ignored", StopFailed> // StopFailed only for a decode rejection, an identity rejection (session mismatch), any failure of a Superseded Stop, or a defect
 holdRun(session, run, commandId): Effect<Hold, StoreFault>
 release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
 serving(session): RunnerId | undefined // a cache for routing a live caller; no write decision reads it
@@ -1840,12 +1880,17 @@ awaitStop(runner, "Escalated" | "Settled"): Effect<void>
 recover(): Effect<Recovered>
 ```
 
-- `StopFailed` is `runnerFailure("stop runner")`. A lost registration race and every hold answer are values.
-  StoreFault distinguishes transient unavailability from the existing per-row rejection.
-  Only unavailability retries.
+- `StopFailed` is `runnerFailure("stop runner")`. A lost registration race and every hold answer
+  are values. A Stop other than `Superseded` never fails on a store fault; it retries until the
+  commit lands. A `Superseded` Stop fails on any fault, and the upgrade retries the swap. When
+  the runner's row exists, the record keeps the row's identity. The target adds the members it
+  observed and a reaper the row does not yet hold (the hello reports it after `register`).
+- `StopTarget` is the runner, session, driver kind, identity, reaper and members. It carries no
+  `retired_at`, stop progress or signal log, so an uncommitted intent does not type-check as a
+  retirement record.
 - "Ending a session" is a request stop. The word "release" here means only 4.5's event.
 
-<!-- src: SWAP K; CONT C2, C3, Deleted or changed (lifecycle module); SETTLE Data shape 1, S1, S3, S4, S5 -->
+<!-- src: SWAP K; CONT C2, C3, Deleted or changed (lifecycle module); SETTLE Data shape 1, S1, S3, S4, S5; 32.29.3 (c6d3a44f) -->
 
 ### 6.11 Teardown after revoke (decided OPEN-7, 2026-10-28)
 
@@ -2360,10 +2405,29 @@ the ledger chain.
 
 ### 10.2 Stop intent (F12 to F21)
 
-- F12. The Stop commit fails with a store fault: nothing durable changes, the runner keeps
-  serving, the reconciler retries the commit, and the waiters see the commit when it lands. For
-  `Superseded`, request stop fails with "stop runner" and the upgrade retries.
-- F13. This runner's row is rejected on decode: request stop fails, no shutdown, no signal, logged.
+- F12. The commit of a Stop other than `Superseded` fails with a store fault, transient or not.
+  - Nothing durable changes, the runner keeps serving, and the state stays `Committing`.
+  - The reconciler re-runs the whole commit after each backoff (capped at 30 s) and logs each
+    failure. Until the commit lands it sends no shutdown or signal, and settles and prunes nothing.
+  - Once the commit lands, the caller and every joiner see `Requested`, with `retired_at` set to
+    that commit's time. Interrupting a caller does not cancel the commit.
+  - A decode rejection, an identity rejection (session mismatch), any failure of a `Superseded`
+    Stop (a store fault included), or a defect fails request stop with "stop runner" (F13). The
+    upgrade retries a swap.
+  - A daemon that dies first re-derives the Stop at restart per S3's table, except for a healthy
+    runner's direct Stop with no durable control (Q26).
+- F13. The Stop commit fails and is not retried:
+  - Any row it decodes is rejected on decode: this runner's row, an unretired candidate of its
+    session (serving Stop), or its successor (`Superseded`).
+  - Or the row's session does not match the target (identity).
+  - Or the Stop is `Superseded` and its commit fails for any reason: the swap is refused, or a
+    store fault. The upgrade retries the swap.
+  - Or the commit dies with a defect.
+
+  Request stop fails with "stop runner". Nothing durable changes, with no shutdown and no signal,
+  and the failure is logged. The state returns to `Running` and its waiters fail. The reconciler
+  does not retry. A rejection would read the same row and fail the same way, and a `Superseded`
+  retry belongs to the upgrade.
 - F14. The daemon crashes after the commit and before shutdown: the next daemon does not adopt the
   runner as live; the reconciler continues from `Requested`.
 - F15. A write after the commit fails (signal log, Gone, settlement, prune): the row stays, the
@@ -2382,7 +2446,7 @@ the ledger chain.
   and the first runner's reconciler leaves it alone.
 - F21. An old row with `owned_run_ids` and a run with no holder: settled through the fallback.
 
-<!-- src: STOP-INTENT failure modes 1-10; review 2026-10-28 (H5); SETTLE S3 -->
+<!-- src: STOP-INTENT failure modes 1-10; review 2026-10-28 (H5); SETTLE S3; 32.29.3 (c6d3a44f) -->
 
 ### 10.3 Swap (F22 to F29)
 
@@ -3193,5 +3257,11 @@ Every old id maps here. Ids were reused across documents, so each is named with 
 - The crash window between revoke and the flush (RA risk 1) is closed: the retirement row commits
   before any signal (6.3, F14).
 - Known limits: F10 and F11.
+- **Startup can finish before its forked Stops commit** (6.3). Until such a Stop commits, the
+  runner's row is unretired, so `holdRun` may hand a recovered owner send to a runner whose Stop
+  is still `Committing`. On an older runner build, which does not journal a send before running
+  it, that send can settle `delivery_unknown` once the runner is gone (7.3). Accepted: holding sends
+  back in memory would break STOP-INTENT S1, since nothing is fenced in memory before the commit;
+  the database guards dispatch (4.3).
 
-<!-- src: RA §10 (risks 1-4); AUDIT Bottlenecks inherited; AUDIT-2 Bottlenecks; STOP-INTENT S1, failure mode 3; REAPER failure modes 10, 11 -->
+<!-- src: RA §10 (risks 1-4); AUDIT Bottlenecks inherited; AUDIT-2 Bottlenecks; STOP-INTENT S1, failure mode 3; REAPER failure modes 10, 11; 32.29.3 (c6d3a44f) -->
