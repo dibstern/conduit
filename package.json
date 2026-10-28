@@ -4,7 +4,7 @@
 	"type": "module",
 	"packageManager": "pnpm@11.17.0",
 	"license": "MIT",
-	"description": "Web UI relay for OpenCode. Access your OpenCode sessions from any device.",
+	"description": "An agentic IDE for your AI coding sessions, on any device.",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/dibstern/conduit"
