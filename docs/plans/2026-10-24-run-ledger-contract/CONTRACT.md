@@ -365,7 +365,8 @@ Only evidence and conduit's decisions, each once:
   probe findings) updates only the record `receiptAddress(token)` names, and never changes or
   revives Run lifecycle.
 - An unknown or never-issued token: Accepted, no events, a diagnostic. Evidence of a kind the send
-  or its provider cannot produce (task evidence from Cursor or OpenCode, 8.1), a contradicting native id, or a command receipt naming another commandId (D21):
+  or its provider cannot produce (task evidence from Cursor or OpenCode, 8.1; `command_lifecycle`
+  from any provider but Claude, 9, D46), a contradicting native id, or a command receipt naming another commandId (D21):
   Rejected, a diagnostic, no state change. No throws
   and no new error types.
 - Hold facts (`run_dispatched`, `run_released`, `delivery_indeterminate`, `runner_reply`,
@@ -2066,11 +2067,15 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   equals the observation's label; otherwise they are recorded with a diagnostic and no change.
   A matching wake Run completes by its provider's Run-end policy (3.6, 9), including Codex's result
   policy. No fictitious token is minted.
-- A wake Run has no send, so its execution is outstanding work in its own right. From
+- An unsolicited `turn_started` names no send, so the execution it starts is outstanding work in
+  its own right (D47), whether it records a wake Run or joins an active Run: no send's chains can
+  end it, so a joined Run's start being NotConsumed (declined or absent) ends the Run but not this
+  execution. From
   `turn_started` until its runner retires (L1) or its provider's Run-end evidence for that label
-  is recorded, `anythingMayAct` is true, whether or not the Run has Ended (by deadline,
+  is recorded, `anythingMayAct` is true, whether or not the Run has Ended (by its start NotConsumed, deadline,
   `project_inactive` or `session_ended`). Run-end evidence clears this liveness even without
-  authority; it changes Run state only with authority (3.4). An outstanding wake execution also holds
+  authority; it changes Run state only with authority (3.4). Below, "wake execution" means any
+  such unsolicited execution, joined or not. An outstanding wake execution also holds
   the native-session fence (section 9) until session end, so admission after its Run has Ended
   waits for it as it would behind a user Run's retained start (D18). A `turn_started` that joins a wake
   Run under another label adds a wake execution for that label: every execution label of a wake
@@ -2121,9 +2126,10 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   its sends were covered at retirement. A step that destroys several member labels (Tombstone
   cleanup expiry, `project_active` reconciliation) waits on one confirm. `PendingConfirm`'s labels,
   tasks and `snapshotEntry` are views of now.
-- `snapshotEntry` is the 1-based count of task-set entries accepted by the session:
-  `tasks_snapshot` evidence and `process_started` settlements, excluding older labels. A
-  `process_started` that leaves a pending confirm open refreshes `snapshotEntry` only (D3), so a
+- `snapshotEntry` is the 1-based count of changes to what the task view reads (D45): `tasks_snapshot`
+  evidence, `process_started` settlements, and the decision that raises the current process's
+  latest `querySeq` (a query replacement, after which tasks are unknown), excluding older labels.
+  Any of them that leaves a pending confirm open refreshes `snapshotEntry` only (D3), so a
   confirm copied before it is stale. Callers copy it from `pendingConfirm`, never compute it.
 - With an active Run, `end` runs the stop sequence, then issues `end_session` once the Run is
   Ended or its interrupt deadline expired. Both steps are confirm-gated with tasks live or
@@ -3013,6 +3019,30 @@ and L5: Rejected evidence never raises a label (L1); Cursor and OpenCode task ev
 so they mark no waking task; a wake joined under a newer label is confirm-gated until that label's
 first snapshot (8.4, D44); a newer label retiring before any snapshot records "may have been lost"
 (L5).
+
+**Decided (harness round 10, 2026-10-29)**
+
+The generator now produces every input kind the model can represent, including query replacement.
+Two of five findings were oracle bugs that need no contract change: a permanent `effect_outcome` on
+a native command after `project_inactive` fails it (3.11, D34), and an older wake label's
+`query_ended` keeps the Run queued behind the fence (8.3, D18).
+
+- D45: amends D3 and 8.4. `snapshotEntry` counts every change to what the task view reads,
+  including a query replacement, not just snapshots and `process_started`. Reason: after a
+  replacement the tasks are unknown (8.4), but a confirm copied from the replaced query's snapshot
+  still matched and opened the destruction gate (LI5). One principle replaces a list of two events.
+  Rejected: dropping the pending confirm at a replacement (the step is still wanted; only the
+  user's view is stale).
+- D46: `command_lifecycle` from any provider but Claude is evidence its provider cannot produce,
+  Rejected (3.4). Reason: section 9 defines it only for Claude, and only Claude source emits it; a
+  Codex or Cursor one read as NotConsumed ended a Run whose start the host still held (LI8).
+  Rejected: adding it to those providers' Work ended (invents a host behaviour).
+- D47: amends 8.3. Every unsolicited `turn_started` is outstanding work in its own right, whether
+  it records a wake Run or joins an active Run. Reason: an OpenCode turn joined to a Starting Run,
+  then the start declined: the Run Ends (its send was not consumed and returns to the inbox), but
+  the native turn still runs (LI8). Rejected: the joined turn marking the start Observed (loses
+  the declined message); not joining unsolicited turns (8.3's join exists because OpenCode cannot
+  name the start).
 
 ### A.11 REDESIGN-1 Process and address (2026-10-28): C + M1
 
