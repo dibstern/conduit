@@ -164,6 +164,14 @@ export function hold(
 		swallowClick = false;
 	}
 
+	// After a hold, also cancel the emulated mousedown: its default focus would
+	// pull focus back from whatever onHold opened. No click follows, so stop swallowing.
+	function touchend(event: TouchEvent) {
+		if (!swallowClick || !event.cancelable) return;
+		event.preventDefault();
+		swallowClick = false;
+	}
+
 	node.addEventListener("pointerdown", pointerdown);
 	document.addEventListener("pointerdown", resetClick, true);
 	document.addEventListener("keydown", resetClick, true);
@@ -184,6 +192,7 @@ export function hold(
 		node.addEventListener("touchmove", touchmove, { passive: false });
 	// Capture runs before Svelte's delegated click handlers.
 	document.addEventListener("click", click, true);
+	node.addEventListener("touchend", touchend, { passive: false });
 	node.addEventListener("contextmenu", contextmenu);
 	node.addEventListener("keydown", keydown);
 
@@ -209,6 +218,7 @@ export function hold(
 			document.removeEventListener("touchstart", touchstart, true);
 			node.removeEventListener("touchmove", touchmove);
 			document.removeEventListener("click", click, true);
+			node.removeEventListener("touchend", touchend);
 			node.removeEventListener("contextmenu", contextmenu);
 			node.removeEventListener("keydown", keydown);
 			for (const { property, value, priority } of styles) {

@@ -1,5 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, fn, spyOn, userEvent, waitFor, within } from "storybook/test";
+import {
+	expect,
+	fireEvent,
+	fn,
+	spyOn,
+	userEvent,
+	waitFor,
+	within,
+} from "storybook/test";
 import { composerPickerState } from "../../stores/composer-picker.svelte.js";
 import { effort } from "../../stores/composer-settings.svelte.js";
 import {
@@ -166,10 +174,15 @@ export const ComposerControl: Story = {
 	play: async ({ canvasElement }) => {
 		const button = within(canvasElement).getByTestId("variant-badge");
 		await expect(button).toHaveAccessibleName(
-			"Effort: High. Open effort options",
+			"Effort: High. Click to raise; Option-click for options",
 		);
 		await assertMeter(button, 5, 3);
 		await userEvent.click(button);
+		await expect(button).toHaveAccessibleName(
+			"Effort: Extra high. Click to raise; Option-click for options",
+		);
+		await expect(composerPickerState.request).toBeNull();
+		await fireEvent.click(button, { altKey: true });
 		await expect(composerPickerState.request?.section).toBe("effort");
 		await expect(composerPickerState.request?.opener).toBe(button);
 	},

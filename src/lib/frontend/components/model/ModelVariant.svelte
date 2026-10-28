@@ -8,6 +8,7 @@
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MicroLabelButton from "../ui/MicroLabelButton.svelte";
+	import { hold } from "../../actions/hold.js";
 	import { effort } from "../../stores/composer-settings.svelte.js";
 	import { composerPickerState, openPicker } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
@@ -24,6 +25,7 @@
 	} = $props();
 
 	let open = $state(false);
+	let effortButton = $state<HTMLButtonElement | HTMLAnchorElement>();
 	const phone = $derived(sessionViewState.composerTier === "phone");
 	const variants = $derived(effort.options);
 	const currentVariant = $derived(effort.current ?? "");
@@ -44,6 +46,17 @@
 	const microLabel = $derived(
 		currentLevel?.label ?? (currentEffort ? currentEffort.slice(0, 5).toUpperCase() : "DEF"),
 	);
+
+	function openEffortPicker() {
+		if (effort.pending || levels === 0) return;
+		openPicker("effort");
+		if (composerPickerState.request && effortButton) composerPickerState.request.opener = effortButton;
+	}
+
+	$effect(() => {
+		if (!phone || !effortButton || effort.pending || levels === 0) return;
+		return hold(effortButton, { onHold: openEffortPicker, keyboard: false }).destroy;
+	});
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key.toLowerCase() === "t" && e.ctrlKey && variants.length > 0) {
@@ -85,21 +98,26 @@
 {#snippet effortControl()}
 	{#if showEffort && (!phone || levels > 0)}
 	<Button
+		bind:element={effortButton}
 		variant="composer-model"
 		size="composer-chip"
 		touchTarget={phone}
 		class="shrink-0"
-		ariaLabel={`Effort: ${levelName}. Open effort options`}
+		ariaLabel={`Effort: ${levelName}. ${phone ? "Tap to raise; hold for options" : "Click to raise; Option-click for options"}`}
 		loading={effort.pending}
-		disabled={variants.length === 0}
-		aria-haspopup="dialog"
-		aria-expanded={composerPickerState.request !== null}
-		aria-controls={composerPickerState.request ? "model-picker" : undefined}
+		disabled={levels === 0}
 		data-testid="variant-badge"
-		title="Effort {levelName}. Ctrl+T to cycle"
+		title={`Effort ${levelName}. ${phone ? "Tap to raise; hold for options" : "Click or Ctrl+T to raise; Option-click for options"}`}
 		onclick={(event) => {
-			openPicker("effort");
-			if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
+			if (effort.pending || levels === 0) return;
+			if (!phone && event.altKey) openEffortPicker();
+			else effort.cycle();
+		}}
+		onkeydown={(event) => {
+			if (event.shiftKey && event.key === "F10") {
+				event.preventDefault();
+				if (!event.repeat) openEffortPicker();
+			}
 		}}
 	>
 		{#if !parameters || levels > 0}<EffortMeter {levels} {filled} />{/if}

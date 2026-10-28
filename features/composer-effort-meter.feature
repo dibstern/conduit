@@ -1,9 +1,70 @@
-Feature: Phone composer effort moves into the sheet and shared picker
+Feature: Composer effort cycles directly and keeps options in the shared picker
 
 Background:
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
+
+Scenario: desktop clicks raise effort and wrap without opening the picker
+  Given the harness logo is viewed in the wide tier
+  And the composer uses icons controls
+  And the model offers effort levels low, medium, high, xhigh, max
+  When I set effort to high
+  And I click the effort control
+  Then the effort control names Extra high
+  And the shared composer picker is closed
+  When I click the effort control
+  Then the effort control names Max
+  And the shared composer picker is closed
+  When I click the effort control
+  Then the effort control names Low
+  And the shared composer picker is closed
+
+Scenario Outline: desktop keyboard activation raises effort without opening the picker
+  Given the harness logo is viewed in the wide tier
+  And the composer uses icons controls
+  And the model offers effort levels low, medium, high, xhigh, max
+  When I set effort to high
+  And I press <key> on the effort control
+  Then the effort control names Extra high
+  And the shared composer picker is closed
+
+Examples:
+  | key   |
+  | Enter |
+  | Space |
+
+Scenario Outline: desktop effort options focus Effort and return focus to the control
+  Given the harness logo is viewed in the wide tier
+  And the composer uses icons controls
+  And the model offers effort levels low, medium, high, xhigh, max
+  When I set effort to high
+  And I <gesture> the effort control
+  Then the icons control opens the picker at Effort
+  And the effort control names High
+  When I close the model picker
+  Then the icons effort control is focused
+
+Examples:
+  | gesture            |
+  | Option-click       |
+  | press Shift+F10 on |
+
+Scenario: phone tap raises effort and hold opens options without raising again
+  Given the composer uses icons controls
+  And the model offers effort levels low, medium, high, xhigh, max
+  When I set effort to high
+  And I tap the phone footer effort control
+  Then the effort control names Extra high
+  And the shared composer picker is closed
+  When I hold the phone footer effort control
+  Then the icons control opens the picker at Effort
+  And the picker effort xhigh is selected while the root remains open
+  And the effort control names Extra high
+  When I close the model picker
+  And I tap the phone footer effort control
+  Then the effort control names Max
+  And the shared composer picker is closed
 
 Scenario Outline: the picker follows model options and Default leaves every level unselected
   Given the model offers effort levels <levels>
