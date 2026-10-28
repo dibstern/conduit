@@ -1477,7 +1477,15 @@ test.describe("session composer owns its stored pick", () => {
 		const { browser, slug, sessionId, picker, reported } =
 			await createGuardSession(page, harness, "claude", caseId);
 		rejectedSessionId = sessionId;
-		const rowRead = observed.hold("GetModels", sessionId, { once: true });
+		// A startup catalog read still in flight can also report the switch. Hold
+		// every reply that does, so the picker cannot show high before the click.
+		const rowRead = observed.hold("GetModels", sessionId, {
+			once: false,
+			match: (frame) =>
+				Schema.decodeUnknownOption(GetModelsResponseSchema)(
+					frame.exit?.value,
+				).pipe(Option.exists((reply) => reply.variant?.variant === "high")),
+		});
 		const rejection = observed.hold("SwitchVariant", sessionId, { once: true });
 		let stage = "stored-pick-changed";
 		let optimistic: Pick | undefined;
