@@ -1,5 +1,18 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario: A collapsed message preview is a full read-only card in the hanging slot
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  When I collapse the surfaced turn
+  And I hover turn step message 1
+  Then the hanging preview shows full message 1 without actions or navigation
+  And the preview leaves focus, read state and collapsed layout unchanged
+  And the messages region visually matches turn-hover-message at 98 percent
+  When I click the hanging preview
+  Then message 1 opens where its preview hung
+
 Scenario Outline: The phone Show menu explains each cumulative stop
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
