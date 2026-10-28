@@ -206,9 +206,11 @@ const test = base.extend<{
 		let diagnostics = "";
 		const stop = async () => {
 			if (!child || child.exitCode !== null) return;
-			const exited = once(child, "exit");
+			const exited = once(child, "close");
 			child.send("stop");
-			await exited;
+			const [code, signal] = await exited;
+			if (code !== 0)
+				throw new Error(`Test daemon exited ${code ?? signal}: ${diagnostics}`);
 		};
 		const start = async (port = 0, buildId?: string) => {
 			const env: NodeJS.ProcessEnv = {

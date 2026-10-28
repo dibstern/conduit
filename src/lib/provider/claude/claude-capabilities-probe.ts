@@ -5,12 +5,13 @@ import type {
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import { Result, Schema } from "effect";
+import { Effect, Result, Schema } from "effect";
 import {
 	ClaudeSDKInitializationResultSubsetSchema,
 	decodeClaudeSDKOptionsJsonShape,
 } from "../../contracts/providers/claude-agent-sdk.js";
 import { createLogger, type Logger } from "../../logger.js";
+import { ClaudeBoundaryError } from "../event-sink-errors.js";
 import type {
 	CommandInfo,
 	ContextWindowOption,
@@ -21,6 +22,7 @@ import {
 	contextWindowOptionsForModel,
 	hasContextWindowRow,
 } from "./claude-api-model-id.js";
+import { makeClaudeQueryProcesses } from "./claude-query-processes.js";
 import { type ClaudeConfigDir, makeClaudeSdkEnv } from "./claude-sdk-env.js";
 
 const defaultLog = createLogger("claude-capabilities-probe");
@@ -233,94 +235,119 @@ async function* singleMessage(): AsyncIterable<SDKUserMessage> {
 	};
 }
 
-export async function probeClaudeCapabilities(
+/** Interruption must await children even when the SDK's promise is abandoned. */
+export const probeClaudeCapabilitiesEffect = (
 	deps: ProbeDeps,
-): Promise<ProbeResult> {
-	if (probeOverride) return probeOverride(deps.workspaceRoot);
-
-	const queryFactory = deps.queryFactory ?? sdkQuery;
-	const abortController = new AbortController();
-	const abort = () => abortController.abort();
-	deps.signal?.addEventListener("abort", abort, { once: true });
-	if (deps.signal?.aborted) abort();
-
-	try {
-		const options = {
-			persistSession: false,
-			maxTurns: 0,
-			cwd: deps.workspaceRoot,
-			...(deps.extraFolders && deps.extraFolders.length > 0
-				? { additionalDirectories: [...deps.extraFolders] }
-				: {}),
-			env: makeClaudeSdkEnv(deps),
-			settingSources: ["user", "project", "local"],
-			abortController,
-			allowedTools: [],
-			stderr: () => {},
-		} satisfies SDKOptions;
-		const query = queryFactory({
-			configDir: deps.configDir,
-			prompt: singleMessage(),
-			options: decodeClaudeSDKOptionsJsonShape(options),
-		});
-		const init = await query.initializationResult();
-		// Not query.reloadSkills(): this zero-turn query closes before answering it.
-		let skillNames: ReadonlySet<string> = new Set();
-		try {
-			for await (const message of query) {
-				if (message.type === "system" && message.subtype === "init") {
-					skillNames = new Set(message.skills ?? []);
-					break;
-				}
-			}
-		} catch (error) {
-			(deps.logger ?? defaultLog).warn(
-				`Claude system init unreadable; keeping SDK command sources: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
-		const decoded = decodeInitializationResult(init);
-		if (Result.isFailure(decoded)) {
-			(deps.logger ?? defaultLog).warn(
-				`Claude initializationResult failed subset decode (using raw with fallbacks): ${decoded.failure.message.slice(
-					0,
-					400,
-				)}`,
-			);
-		}
-		const subscriptionType = init.account?.subscriptionType;
-		const commands: CommandInfo[] = (init.commands ?? []).map((command) => ({
-			name: command.name,
-			...(command.description ? { description: command.description } : {}),
-			...(command.argumentHint ? { args: command.argumentHint } : {}),
-			// The SDK flags Claude Code's own commands and bundled skills alike, but
-			// not Anthropic's first-party skills plugin, which ships as a plugin.
-			source:
-				command.builtin || command.name.startsWith("anthropic-skills:")
-					? "builtin"
-					: skillNames.has(command.name)
-						? "plugin-skill"
-						: "sdk",
-		}));
-		const agents: ProviderAgentInfo[] = (init.agents ?? []).map((agent) => ({
-			id: agent.name,
-			name: agent.name,
-			...(agent.description ? { description: agent.description } : {}),
-			...(agent.model ? { model: agent.model } : {}),
-		}));
-		return {
-			models: (init.models ?? []).map((model) =>
-				sdkModelToConduit(model, subscriptionType, deps.logger ?? defaultLog),
+): Effect.Effect<ProbeResult, ClaudeBoundaryError> =>
+	Effect.suspend(() => {
+		const abortController = new AbortController();
+		const processes = makeClaudeQueryProcesses({ killProcessGroup: true });
+		const abort = () => abortController.abort();
+		deps.signal?.addEventListener("abort", abort, { once: true });
+		if (deps.signal?.aborted) abort();
+		const failure = (cause: unknown) =>
+			new ClaudeBoundaryError({ operation: "probeCapabilities", cause });
+		return Effect.tryPromise({
+			try: () =>
+				probeOverride
+					? probeOverride(deps.workspaceRoot)
+					: collectClaudeCapabilities(
+							deps,
+							abortController,
+							processes.spawnClaudeCodeProcess,
+						),
+			catch: failure,
+		}).pipe(
+			Effect.ensuring(
+				Effect.gen(function* () {
+					deps.signal?.removeEventListener("abort", abort);
+					abort();
+					yield* Effect.tryPromise({
+						try: processes.stop,
+						catch: failure,
+					}).pipe(Effect.orDie);
+				}),
 			),
-			...(subscriptionType ? { subscriptionType } : {}),
-			commands,
-			agents,
-		};
-	} finally {
-		deps.signal?.removeEventListener("abort", abort);
-		if (!abortController.signal.aborted) {
-			abortController.abort();
+		);
+	});
+
+async function collectClaudeCapabilities(
+	deps: ProbeDeps,
+	abortController: AbortController,
+	spawnClaudeCodeProcess: NonNullable<SDKOptions["spawnClaudeCodeProcess"]>,
+): Promise<ProbeResult> {
+	const queryFactory = deps.queryFactory ?? sdkQuery;
+	const options = {
+		persistSession: false,
+		maxTurns: 0,
+		cwd: deps.workspaceRoot,
+		...(deps.extraFolders && deps.extraFolders.length > 0
+			? { additionalDirectories: [...deps.extraFolders] }
+			: {}),
+		env: makeClaudeSdkEnv(deps),
+		settingSources: ["user", "project", "local"],
+		abortController,
+		spawnClaudeCodeProcess,
+		allowedTools: [],
+		stderr: () => {},
+	} satisfies SDKOptions;
+	const query = queryFactory({
+		configDir: deps.configDir,
+		prompt: singleMessage(),
+		options: decodeClaudeSDKOptionsJsonShape(options),
+	});
+	const init = await query.initializationResult();
+	// Not query.reloadSkills(): this zero-turn query closes before answering it.
+	let skillNames: ReadonlySet<string> = new Set();
+	try {
+		for await (const message of query) {
+			if (message.type === "system" && message.subtype === "init") {
+				skillNames = new Set(message.skills ?? []);
+				break;
+			}
 		}
+	} catch (error) {
+		(deps.logger ?? defaultLog).warn(
+			`Claude system init unreadable; keeping SDK command sources: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
+	const decoded = decodeInitializationResult(init);
+	if (Result.isFailure(decoded)) {
+		(deps.logger ?? defaultLog).warn(
+			`Claude initializationResult failed subset decode (using raw with fallbacks): ${decoded.failure.message.slice(
+				0,
+				400,
+			)}`,
+		);
+	}
+	const subscriptionType = init.account?.subscriptionType;
+	const commands: CommandInfo[] = (init.commands ?? []).map((command) => ({
+		name: command.name,
+		...(command.description ? { description: command.description } : {}),
+		...(command.argumentHint ? { args: command.argumentHint } : {}),
+		// The SDK flags Claude Code's own commands and bundled skills alike, but
+		// not Anthropic's first-party skills plugin, which ships as a plugin.
+		source:
+			command.builtin || command.name.startsWith("anthropic-skills:")
+				? "builtin"
+				: skillNames.has(command.name)
+					? "plugin-skill"
+					: "sdk",
+	}));
+	const agents: ProviderAgentInfo[] = (init.agents ?? []).map((agent) => ({
+		id: agent.name,
+		name: agent.name,
+		...(agent.description ? { description: agent.description } : {}),
+		...(agent.model ? { model: agent.model } : {}),
+	}));
+	return {
+		models: (init.models ?? []).map((model) =>
+			sdkModelToConduit(model, subscriptionType, deps.logger ?? defaultLog),
+		),
+		...(subscriptionType ? { subscriptionType } : {}),
+		commands,
+		agents,
+	};
 }
 
 let probeOverride:

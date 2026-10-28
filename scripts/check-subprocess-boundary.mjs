@@ -34,7 +34,6 @@ const remainingOneShotCallers = new Set(
 		"src/lib/provider/codex/codex-text-generation.ts",
 		"src/lib/provider/cursor/cursor-keychain.ts",
 		"src/lib/provider/cursor/cursor-skill-discovery.ts",
-		"src/lib/provider/project-shell-env.ts",
 		"src/lib/provider/runner/runner-registry.ts",
 	].map((path) => resolve(path)),
 );

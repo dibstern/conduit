@@ -1,5 +1,6 @@
 // Compiled by tsgo so the test exercises the stamped server, not source/dev.
-import { existsSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { BUILD_ID } from "../../../src/lib/build-id.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
@@ -47,6 +48,45 @@ await daemon.addProject(join(root, "build-id-other"));
 process.send?.({ port: daemon.port, buildId: BUILD_ID });
 const stop = async () => {
 	await daemon.stop();
+	const snapshot = spawnSync("ps", ["-A", "-o", "pid=,ppid=,stat=,command="], {
+		encoding: "utf8",
+		maxBuffer: 4 * 1024 * 1024,
+	});
+	if (snapshot.error) throw snapshot.error;
+	if (snapshot.status !== 0) throw new Error(`ps failed: ${snapshot.stderr}`);
+	const processes = snapshot.stdout.split("\n").flatMap((line) => {
+		const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/.exec(line);
+		return match
+			? [
+					{
+						pid: Number(match[1]),
+						ppid: Number(match[2]),
+						stat: match[3],
+						command: match[4],
+					},
+				]
+			: [];
+	});
+	const descendants = new Set([process.pid]);
+	for (const pid of descendants) {
+		for (const child of processes) {
+			if (child.ppid === pid && child.pid !== snapshot.pid)
+				descendants.add(child.pid);
+		}
+	}
+	const survivors = processes.filter(
+		(child) =>
+			child.pid !== process.pid &&
+			descendants.has(child.pid) &&
+			!child.stat?.startsWith("Z"),
+	);
+	if (survivors.length > 0) {
+		writeSync(
+			2,
+			`Children survived daemon.stop():\n${survivors.map((child) => `${child.pid} ${child.command}`).join("\n")}\n`,
+		);
+		process.exit(1);
+	}
 	process.exit(0);
 };
 process.on("message", (message) => {
