@@ -6,23 +6,39 @@ import {
 } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { decodeClaudeSDKMessage } from "../../src/lib/contracts/providers/claude-agent-sdk.js";
+import type { ClaudeSubagentSdk } from "../../src/lib/provider/claude/claude-subagent-materializer.js";
 import {
 	type ClaudeTraceName,
 	type ClaudeTraceReplayer,
 	createClaudeTraceReplayer,
 } from "../e2e/helpers/claude-trace-replayer.js";
 import { provisionalLimitReply } from "../fixtures/claude-sdk-traces/provisional-usage-limit-turn.js";
-import { claudeSdk as fakeSdk } from "./fake-claude-process-sdk.js";
-
-export {
-	claudeSubagentSdk,
-	resolveSettings,
+import {
+	claudeSdk as fakeSdk,
+	claudeSubagentSdk as fakeSubagentSdk,
 } from "./fake-claude-process-sdk.js";
+
+export { resolveSettings } from "./fake-claude-process-sdk.js";
 
 // The server imports this module too. Only per-session runners play turns.
 const isRunner = /claude-session-runner\.(js|ts)$/.test(process.argv[1] ?? "");
 let replayer: ClaudeTraceReplayer | undefined;
 let activeWorkspace: string | undefined;
+
+export const claudeSubagentSdk: ClaudeSubagentSdk = {
+	listSubagents: (...args) =>
+		(process.env["CONDUIT_TEST_CLAUDE_REPLAY_SUBAGENT_READS"] === "1" &&
+		replayer
+			? replayer.sdk.subagentSdk
+			: fakeSubagentSdk
+		).listSubagents(...args),
+	getSubagentMessages: (...args) =>
+		(process.env["CONDUIT_TEST_CLAUDE_REPLAY_SUBAGENT_READS"] === "1" &&
+		replayer
+			? replayer.sdk.subagentSdk
+			: fakeSubagentSdk
+		).getSubagentMessages(...args),
+};
 
 export const claudeSdk: typeof fakeSdk = {
 	titleQuery: fakeSdk.titleQuery,
@@ -62,14 +78,53 @@ export const claudeSdk: typeof fakeSdk = {
 		if (!replayer) {
 			const turns = process.env["CONDUIT_TEST_CLAUDE_REPLAY_TURNS"];
 			if (!turns) throw new Error("Claude replay requires a turn plan");
-			replayer = createClaudeTraceReplayer({
+			// Every runner reads the same hold file, so a hold applies to each
+			// Claude session that reaches that trace line.
+			const holdFile = process.env["CONDUIT_TEST_CLAUDE_REPLAY_HOLD"];
+			const readHold = () => {
+				if (!holdFile) return undefined;
+				try {
+					return JSON.parse(readFileSync(holdFile, "utf8")) as {
+						turn: number;
+						message: number;
+						id: number;
+					};
+				} catch {
+					return undefined;
+				}
+			};
+			// The hold the replayer last matched against, so a replacement cannot strand it.
+			let lastHold: ReturnType<typeof readHold>;
+			const tracesDir = process.env["CONDUIT_TEST_CLAUDE_REPLAY_TRACES_DIR"];
+			const played = createClaudeTraceReplayer({
+				...(tracesDir ? { tracesDir } : {}),
 				turns: (JSON.parse(turns) as readonly ClaudeTraceName[]).slice(
 					nextTurn,
 				),
 				delayMs: Number(
 					process.env["CONDUIT_TEST_CLAUDE_REPLAY_DELAY_MS"] ?? 0,
 				),
+				get holdBefore() {
+					lastHold = readHold();
+					return lastHold ?? [];
+				},
 			});
+			replayer = played;
+			// Deleting or replacing the hold file releases whatever this runner holds.
+			if (holdFile)
+				void (async () => {
+					for (;;) {
+						await played.held();
+						const hold = lastHold;
+						appendFileSync(
+							`${holdFile}.reached`,
+							`${JSON.stringify({ pid: process.pid, hold, at: Date.now() })}\n`,
+						);
+						while (readHold()?.id === hold?.id && existsSync(holdFile))
+							await sleep(10);
+						played.release();
+					}
+				})();
 		}
 		// Reuse fake SDK initialization without giving it the runner's prompt queue.
 		// The replayer consumes a turn only when that queue receives a real prompt.
