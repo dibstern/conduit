@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
-	import { MediaQuery } from "svelte/reactivity";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { splitCitations } from "../../utils/citations.js";
 	import { splitUrls } from "../../utils/links.js";
@@ -15,13 +14,9 @@
 	import Menu from "../ui/Menu.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
-	import Popover from "../ui/Popover.svelte";
 	import SheetChrome from "../ui/SheetChrome.svelte";
 	import SurfacingReplyActions from "./SurfacingReplyActions.svelte";
 
-	// jsdom has no matchMedia; real browsers always do.
-	const media = typeof matchMedia === "function";
-	const desktop = media ? new MediaQuery("(min-width: 1024px)") : { current: true };
 	let { versions, selected, open, phone = sessionViewState.compact, live, view, start, settings, plainCitations = false, generating = false, error = "", settingsError = "", saving = false, onclose, onversion, ongenerate, onretry, onsettings, oncite, onhover, onreply, onquote, replies = new Map(), foot }: {
 		versions: readonly TurnRecap[];
 		selected: TurnRecap | undefined;
@@ -53,13 +48,10 @@
 	} = $props();
 	let followed = $state<number[]>([]);
 	let readingOrdinal = $state<number | null>(null);
-	let summaryEl: HTMLElement | undefined;
-	let readerHeight = $state<number | undefined>();
 	let citationTrigger: HTMLElement | null = null;
 	let readerBodyEl = $state<HTMLElement>();
 	let proseEl = $state<HTMLElement>();
 	const reading = $derived(view.numbers.find(({ number }) => number === readingOrdinal));
-	const citationPopover = $derived(!phone && desktop.current);
 	$effect(() => {
 		void selected?.version;
 		void open;
@@ -79,22 +71,16 @@
 			oncite(ordinal);
 			return;
 		}
-		readerHeight = summaryEl?.parentElement?.getBoundingClientRect().height;
-		readingOrdinal = ordinal;
+		// Beside the transcript the citation opens its turn card; only the phone sheet, which covers
+		// that card, reads the cited message itself.
+		if (phone) readingOrdinal = ordinal;
 		if (!followed.includes(ordinal)) followed = [...followed, ordinal];
 		onhover?.(null);
 		oncite(ordinal);
 	}
-	// A reference that lands in the draft hands focus to the composer: the phone sheet covers it, and the
-	// desktop popover would trap focus, so both close without returning focus to their trigger.
-	let handedOff = false;
+	// A reference that lands in the draft hands focus to the composer, which the phone sheet covers.
 	function afterReply(inserted: boolean) {
-		if (!inserted) return;
-		if (phone) onclose();
-		else if (citationPopover) {
-			handedOff = true;
-			readingOrdinal = null;
-		}
+		if (inserted && phone) onclose();
 	}
 	function closeCitation() {
 		readingOrdinal = null;
@@ -122,8 +108,8 @@
 {/snippet}
 
 {#snippet content()}
-	<div class="summary-reading" class:split={!phone && !citationPopover && !!reading} style:height={!phone && !citationPopover && reading && readerHeight !== undefined ? `${readerHeight}px` : undefined}>
-	<section bind:this={summaryEl} class="summary" data-testid="surfacing-summary" aria-label={live ? "Summary so far" : "Turn summary"} aria-busy={generating}>
+	<div class="summary-reading">
+	<section class="summary" data-testid="surfacing-summary" aria-label={live ? "Summary so far" : "Turn summary"} aria-busy={generating}>
 		<div class="summary-head">
 			<Button variant="ghost" size="content" tone="inherit" touchTarget class="min-h-[28px] font-semibold gap-[5px] text-[13.5px]" ariaLabel="Close summary" onclick={onclose}>{#if !phone}<Icon name="chevron-down" size={14} class="text-text-muted" />{/if}✦ {live ? "Summary so far" : "Turn summary"}</Button>
 			<Menu ariaLabel="Summary settings" side="bottom" align="start">
@@ -167,11 +153,7 @@
 			</div>
 		{/if}
 		{#if selected}
-			<p class="summary-prose select-text" class:regenerating={generating} bind:this={proseEl}>{#each chunks as chunk}{@const message = chunk.message}{#if message}{#if citationPopover && !plainCitations}<Popover
-				open={readingOrdinal === message.number} onopenchange={(nextOpen) => nextOpen ? cite(message.number) : closeCitation()}
-				ariaLabel={`Cited message #${message.number}`} side="top" class="max-w-[380px]"
-				onCloseAutoFocus={(event) => { if (handedOff) event.preventDefault(); handedOff = false; }}
-			>{#snippet trigger({ props })}{@render citationButton(message, props)}{/snippet}{@render citationReader()}</Popover>{:else}{@render citationButton(message, { onclick: (event: MouseEvent) => { citationTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null; cite(message.number); } })}{/if}{:else if chunk.code}<code>{chunk.text}</code>{:else}{#each splitUrls(chunk.text) as part, i}{#if i % 2}<a href={part} target="_blank" rel="noopener noreferrer">{part}</a>{:else}{part}{/if}{/each}{/if}{/each}</p>
+			<p class="summary-prose select-text" class:regenerating={generating} bind:this={proseEl}>{#each chunks as chunk}{@const message = chunk.message}{#if message}{@render citationButton(message, { onclick: (event: MouseEvent) => { citationTrigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null; cite(message.number); } })}{:else if chunk.code}<code>{chunk.text}</code>{:else}{#each splitUrls(chunk.text) as part, i}{#if i % 2}<a href={part} target="_blank" rel="noopener noreferrer">{part}</a>{:else}{part}{/if}{/each}{/if}{/each}</p>
 			<div class="summary-foot">
 				<span class="mr-auto"><span class="desk-only">{`${selected.model.charAt(0).toUpperCase()}${selected.model.slice(1)} · `}</span>{`${view.numbers.filter(({ number }) => number >= selected.firstOrdinal && number <= selected.lastOrdinal).length} updates`}<span class="desk-only">{` · ${(selected.durationMs / 1000).toFixed(1)}s`}</span>{" · "}<span class="desk-only">{"written at "}</span>{writtenAt(selected)}</span>
 				{#if onquote}<SurfacingReplyActions source="recap-{selected.version}" within={proseEl} onreply={(excerpt) => { if (excerpt) { onquote(excerpt); afterReply(true); } }} />{/if}
@@ -180,7 +162,6 @@
 			</div>
 		{/if}
 	</section>
-	{#if !phone && !citationPopover}{@render citationReader()}{/if}
 	</div>
 {/snippet}
 
@@ -198,8 +179,6 @@
 
 <style>
 	.summary-reading { display:flow-root; }
-	.summary-reading.split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; padding-top:10px; }
-	.split > .summary, .split > .summary-reader { min-height:0; overflow-y:auto; margin-top:0; }
 	.summary-reader { margin-top:10px; padding:10px 12px; border:1px solid var(--color-border-subtle); border-radius:12px; background:var(--color-bg); }
 	.reader-head { display:flex; align-items:center; gap:8px; color:var(--color-text-muted); font:12px var(--font-mono); }
 	.reader-note { margin:6px 0; color:var(--color-text-muted); font-size:12px; }

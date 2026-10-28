@@ -676,15 +676,6 @@ Scenario: A card opened below the saved stop names both stops
   Then the turn card note says At All messages, below Most · opened directly
   And the messages region visually matches turn-stop-card-note at 98 percent
 
-Scenario: Summary citation notes name both stops
-  Given message surfacing is active at Most
-  And the conduit app is served with the connected mockup
-  And the recap session has a settled turn with current summaries
-  When I open the turn summary
-  And I follow recap citation #3
-  Then the summary stop note says At All messages, below Most · opened directly
-  And the screen region visually matches turn-stop-summary-note at 98 percent
-
 Scenario: Feedback uses the same names for message and hidden levels
   Given the conduit app is served with the connected mockup
   And Surfacing tuning has 6 marks and a valid key in the dark theme

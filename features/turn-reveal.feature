@@ -49,6 +49,7 @@ Scenario: A citation opens its message without widening Answer
   And I follow recap citation #3
   Then the surfaced card shows #3 and announces its category and position
   And the turn card note says At All messages, below Answer · opened directly
+  And the summary shows no second copy of the cited message
   And the effective surfacing level is Answer
   And the messages region visually matches turn-reveal-citation at 98 percent
 

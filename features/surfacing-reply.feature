@@ -65,7 +65,7 @@ Examples:
   | desktop  | surfacing-reply-excerpt-desktop   | 98        |
   | phone    | surfacing-reply-excerpt-phone     | 98        |
 
-Scenario Outline: Reply on a recap citation inserts the cited message as a token
+Scenario Outline: Reply on a phone recap citation inserts the cited message as a token
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
@@ -85,10 +85,9 @@ Scenario Outline: Reply on a recap citation inserts the cited message as a token
 
 Examples:
   | viewport | baseline                           | threshold |
-  | desktop  | surfacing-reply-recap-cite-desktop | 98        |
   | phone    | surfacing-reply-recap-cite-phone   | 98        |
 
-Scenario Outline: The cited message's Reply stays pressed while the draft replies to it
+Scenario Outline: The phone cited message's Reply stays pressed while the draft replies to it
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
@@ -107,7 +106,6 @@ Scenario Outline: The cited message's Reply stays pressed while the draft replie
 
 Examples:
   | viewport |
-  | desktop  |
   | phone    |
 
 Scenario Outline: Words selected in the turn summary become a recap excerpt

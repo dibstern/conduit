@@ -683,16 +683,12 @@ export const turnActivityHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert card and summary stop notes",
-		match: /^the (turn card|summary) (?:stop )?note says (.+)$/,
+		name: "assert card stop notes",
+		match: /^the turn card note says (.+)$/,
 		run: async ({ world, match }) => {
-			await expect(
-				world.page.getByTestId(
-					match[1] === "turn card"
-						? "surfacing-msg-card"
-						: "surfacing-recap-reader",
-				),
-			).toContainText(match[2] ?? "");
+			await expect(world.page.getByTestId("surfacing-msg-card")).toContainText(
+				match[1] ?? "",
+			);
 		},
 	},
 	{

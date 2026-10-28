@@ -149,9 +149,11 @@ it("keeps a summary generated without Jev clickable and its log numbered after e
 		},
 	});
 	await fireEvent.click(screen.getByTestId("surfacing-recap-cite-1"));
-	expect(screen.getByTestId("surfacing-recap-reader").textContent).toContain(
-		"Unclassified update",
+	// With Jev on a citation is followed and opens its turn card (turn-reveal.feature), not a summary reader.
+	expect(screen.getByTestId("surfacing-recap-cite-1").dataset["followed"]).toBe(
+		"true",
 	);
+	expect(screen.queryByTestId("surfacing-recap-reader")).toBeNull();
 	expect(
 		container.querySelector(
 			'[data-log-part="first"] [data-message-number="1"]',

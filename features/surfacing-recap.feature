@@ -151,7 +151,7 @@ Examples:
   | desktop  |
   | phone    |
 
-Scenario Outline: A citation opens in the summary reader without moving the transcript
+Scenario Outline: On a phone a citation opens in the summary sheet without moving the transcript
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
@@ -167,9 +167,7 @@ Scenario Outline: A citation opens in the summary reader without moving the tran
 
 Examples:
   | viewport | baseline                         | threshold |
-  | desktop  | surfacing-recap-cited-desktop    | 98        |
   | phone    | surfacing-recap-cited-phone      | 98        |
-  | duo      | surfacing-recap-cited-duo        | 98        |
 
 Scenario Outline: A failed summary retains the SDK error and retries on request
   Given message surfacing is active at Most
