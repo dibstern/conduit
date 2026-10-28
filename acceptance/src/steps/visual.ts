@@ -1,3 +1,4 @@
+import { MAX_DIFF_PIXELS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { currentVisualMode } from "../visualMode.js";
 import { exampleValue } from "./shared.js";
@@ -50,7 +51,7 @@ export const visualHandlers: StepHandler[] = [
 			if (result.diffPath) world.artifacts.push(result.diffPath);
 			if (!result.matches) {
 				throw new Error(
-					`Visual match failed for ${baseline}: ${(result.diffRatio * 100).toFixed(2)}% of pixels differ. Artifacts: ${world.artifacts.join(", ")}`,
+					`Visual match failed for ${baseline}: ${result.diffCount} pixels (${(result.diffRatio * 100).toFixed(2)}%) differ; the limit is ${threshold}% similar and at most ${MAX_DIFF_PIXELS} pixels. Artifacts: ${world.artifacts.join(", ")}`,
 				);
 			}
 		},

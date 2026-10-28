@@ -30,6 +30,13 @@ export type VisualMatchResult = {
 	diffPath?: string;
 };
 
+/**
+ * A percentage threshold scales with the shot: 2% of a desktop screen is ~24k
+ * pixels, enough to hide a redesigned menu. Past this many differing pixels a
+ * render fails whatever its threshold.
+ */
+export const MAX_DIFF_PIXELS = 500;
+
 /** Browser and mock fixtures share a clock; timers and animation frames still run. */
 export const PINNED_CLOCK_MS = MOCK_NOW_MS;
 
@@ -236,7 +243,10 @@ export class PlaywrightDriver {
 
 		const comparison = compareImages(expected, actual);
 		const similarity = (1 - comparison.diffRatio) * 100;
-		const matches = !comparison.sizeMismatch && similarity >= threshold;
+		const matches =
+			!comparison.sizeMismatch &&
+			similarity >= threshold &&
+			comparison.diffCount <= MAX_DIFF_PIXELS;
 		if (matches) {
 			console.log(
 				`MATCH ${baseline}: ${similarity.toFixed(2)}% (${comparison.diffCount} pixels differ)`,

@@ -1,5 +1,7 @@
 # Compaction and skills in the turn activity ledger
 
+> **Amended 2026-10-26** by [Compaction before the reply](2026-10-26-compaction-before-the-reply.spec.md): a compaction that completes before the turn's first step is a transcript rule, not a ledger step (story 14 superseded, story 11 narrowed to mid-turn).
+
 ## Problem Statement
 
 Three problems, all in how a turn reports what happened during it.
@@ -42,10 +44,10 @@ The seam is deliberately not weighted by duration. Every other strip segment's w
 8. As a user debugging why the model re-read a file it had already read, I want to see the compaction seam above that row in the log, so that the cause is visible where the symptom is.
 9. As a user in a long turn that compacted more than once, I want each compaction to get its own seam and rule, so that the record stays accurate without a new concept.
 10. As a user in a turn with multiple compactions, I want the summary badge to collapse to a count rather than trying to show every token pair, so that the summary row stays scannable.
-11. As a user waiting on a compaction that is currently running, I want it to keep showing as a status message in the main thread, so that I can see the session is busy without opening a panel.
+11. As a user waiting on a compaction that is currently running, I want it to keep showing as a status message in the main thread, so that I can see the session is busy without opening a panel. *(Amended 2026-10-26: mid-turn only. Before the turn's first step, the live compaction rule replaces the status message.)*
 12. As a user whose compaction failed, I want the failure to stay a notice in the main thread, so that it is never hidden behind a collapsed panel.
 13. As a user, I want a compaction to appear at the correct position among the turn's other steps rather than being appended at the end, so that the ordering reflects what actually happened.
-14. As a user of a turn that compacted before any tool ran, I want the seam to appear at the start of the strip, so that "nothing happened before it" is visible.
+14. As a user of a turn that compacted before any tool ran, I want the seam to appear at the start of the strip, so that "nothing happened before it" is visible. *(Superseded 2026-10-26: a compaction before the turn's first step leaves the ledger and settles as a transcript rule.)*
 15. As a user, I want a compaction that arrives between two turns to remain a thread-level element rather than being forced into an adjacent turn's ledger, so that the record does not claim it happened during work it did not.
 16. As a user hovering the compaction segment in the strip, I want the hover caption to describe it the way it describes any other step, so that the strip behaves consistently.
 

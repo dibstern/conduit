@@ -1,7 +1,7 @@
 {
 	"name": "Conduit",
 	"short_name": "Conduit",
-	"description": "Access your OpenCode sessions from any device",
+	"description": "Your AI coding sessions, on any device",
 	"start_url": "/",
 	"display": "standalone",
 	"orientation": "portrait",

@@ -105,6 +105,57 @@ describe("Instance Store", () => {
 		expect(found.name).toBe("Beta");
 	});
 
+	it("retains account availability until a fresh check replaces it", () => {
+		const account = makeInstance({ id: "codex", driver: "codex" });
+		applyInstanceListResponse({
+			instances: [
+				{
+					...account,
+					available: false,
+					unavailableReason: "Login required",
+					unavailableCode: "auth_required",
+				},
+			],
+		});
+		applyInstanceListResponse({ instances: [{ ...account, name: "Renamed" }] });
+		expect(getInstanceById(account.id)).toMatchObject({
+			name: "Renamed",
+			available: false,
+			unavailableReason: "Login required",
+			unavailableCode: "auth_required",
+		});
+
+		applyInstanceListResponse({ instances: [{ ...account, available: true }] });
+		applyInstanceListResponse({ instances: [account] });
+		expect(getInstanceById(account.id)).toMatchObject({ available: true });
+		expect(getInstanceById(account.id)).not.toHaveProperty("unavailableReason");
+		expect(getInstanceById(account.id)).not.toHaveProperty("unavailableCode");
+		applyInstanceListResponse({
+			instances: [
+				{ ...account, available: false, unavailableReason: "Probe failed" },
+			],
+		});
+		expect(getInstanceById(account.id)).toMatchObject({
+			available: false,
+			unavailableReason: "Probe failed",
+		});
+	});
+
+	it("does not inherit availability across driver changes or removed accounts", () => {
+		const account = makeInstance({ id: "account", driver: "codex" });
+		applyInstanceListResponse({
+			instances: [{ ...account, available: false }],
+		});
+		applyInstanceListResponse({
+			instances: [{ ...account, driver: "opencode" }],
+		});
+		expect(getInstanceById(account.id)).not.toHaveProperty("available");
+		applyInstanceListResponse({ instances: [] });
+		expect(getInstanceById(account.id)).toBeUndefined();
+		applyInstanceListResponse({ instances: [account] });
+		expect(getInstanceById(account.id)).not.toHaveProperty("available");
+	});
+
 	it("getInstanceById returns undefined for nonexistent", () => {
 		applyInstanceListResponse({
 			instances: [makeInstance({ id: "a" })],

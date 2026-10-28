@@ -411,8 +411,8 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "tap inline phone footer control",
-		match: /^I tap the phone footer (effort|checkout) control$/,
+		name: "activate inline phone footer control",
+		match: /^I (tap|hold) the phone footer (effort|checkout) control$/,
 		run: async ({ world, match }) => {
 			const page = world.page;
 			const cdp = await page.context().newCDPSession(page);
@@ -421,10 +421,11 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 				maxTouchPoints: 1,
 			});
 			const control = page.getByTestId(
-				match[1] === "effort" ? "variant-badge" : "composer-checkout",
+				match[2] === "effort" ? "variant-badge" : "composer-checkout",
 			);
 			await expect(control).toBeVisible();
 			await expect(control).toBeEnabled();
+			await expect(control).not.toHaveAttribute("aria-busy", "true");
 			const bounds = await box(control);
 			await cdp.send("Input.dispatchTouchEvent", {
 				type: "touchStart",
@@ -435,11 +436,17 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					},
 				],
 			});
-			await cdp.send("Input.dispatchTouchEvent", {
-				type: "touchEnd",
-				touchPoints: [],
-			});
-			await cdp.detach();
+			try {
+				if (match[1] === "hold") {
+					await expect(page.getByTestId("model-picker")).toBeVisible();
+				}
+			} finally {
+				await cdp.send("Input.dispatchTouchEvent", {
+					type: "touchEnd",
+					touchPoints: [],
+				});
+				await cdp.detach();
+			}
 		},
 	},
 	{
@@ -448,7 +455,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const effort = world.page.getByTestId("variant-badge");
 			await expect(effort).toHaveAccessibleName(
-				`Effort: ${match[1]}. Open effort options`,
+				`Effort: ${match[1]}. Tap to raise; hold for options`,
 			);
 			await expect(effort.locator(".effort-meter")).toBeVisible();
 			await expect(effort).toHaveText("");
@@ -731,12 +738,18 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "tap desktop icons control",
-		match: /^I tap the icons (harness|model|effort|mode) control$/,
+		name: "activate desktop icons control",
+		match:
+			/^I (tap|open options from) the icons (harness|model|effort|mode) control$/,
 		run: async ({ world, match }) => {
 			await world.page
-				.getByTestId(iconsControls[match[1] as keyof typeof iconsControls])
-				.click();
+				.getByTestId(iconsControls[match[2] as keyof typeof iconsControls])
+				.click({
+					modifiers:
+						match[1] === "open options from" && match[2] === "effort"
+							? ["Alt"]
+							: [],
+				});
 		},
 	},
 	{

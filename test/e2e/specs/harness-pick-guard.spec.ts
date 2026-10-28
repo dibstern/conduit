@@ -71,9 +71,6 @@ const otherOpenCodeModel = {
 const pickerSelector =
 	'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible';
 
-// Each case starts a daemon and provider processes. Keep cases sequential
-// within a viewport, while desktop and mobile still run independently.
-test.describe.configure({ mode: "default" });
 test.setTimeout(120_000);
 test.use({
 	harnessOptions: {

@@ -7,7 +7,7 @@ Scenario Outline: E1 desktop icons open the picker at each control's section and
   And the composer uses icons controls
   And the Claude accounts are claude as personal, self as work
   And the composer picker has the Claude catalog
-  When I tap the icons <control> control
+  When I open options from the icons <control> control
   Then the icons control opens the picker at <section>
   And the picker is a desktop popover
   And the model-picker region visually matches <baseline> at <threshold> percent
