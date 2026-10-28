@@ -1,6 +1,5 @@
 <!-- One segment per step: colour is the kind of work, width is how long it took. -->
-<!-- Hovering reports the step up so the header can caption it; clicking jumps to  -->
-<!-- it in the expanded log. Supplementary — every segment is also a row below.    -->
+<!-- Hovering describes the step in a hanging popover; clicking opens its log row. -->
 <!-- A compaction is a fixed-width seam rather than a weighted block: it marks    -->
 <!-- where the context was squeezed, and took no share of the work.                -->
 <!--                                                                              -->
@@ -11,18 +10,22 @@
 <script lang="ts">
 	import type { ComponentProps, Snippet } from "svelte";
 	import type { SurfacePin, SurfacePart } from "../../utils/surface-turn.js";
+	import { surfaceTime } from "../../utils/surface-turn.js";
 	import { logSteps } from "../../utils/turn-stops.js";
 	import {
 		type ActivityPart,
 		fmtDuration,
 		partLabel,
+		toolVerb,
+		toolSubject,
 		stepDurations,
 		stripLayout,
 		type Segment,
 		type Turn,
 	} from "../../utils/turns.js";
-	import { segmentAppearance } from "./activity-style.js";
+	import { partStyle, segmentAppearance } from "./activity-style.js";
 	import ActivityTimeline from "../ui/ActivityTimeline.svelte";
+	import Icon from "../ui/Icon.svelte";
 
 	let { turn, segment, final, now, running, width = $bindable(0), active = null, markers, cardSlot, card, openAsk, belowLevel, cited, preview, sliderText, oninteraction, onpick, onjump, oncommand, phone = false }: {
 		turn: Turn;
@@ -54,6 +57,7 @@
 		const index = segment.activity.findIndex((candidate) => candidate.uuid === part.uuid);
 		return {
 			id: part.uuid,
+			kind: part.type === "assistant" ? "message" as const : "step" as const,
 			left: positions[index]?.left ?? 0,
 			width: positions[index]?.width ?? 0,
 			label: title(part, index),
@@ -70,4 +74,21 @@
 
 </script>
 
-<ActivityTimeline {segments} {seams} bind:width {active} {markers} {cardSlot} {card} {openAsk} {belowLevel} {cited} {preview} {sliderText} {oninteraction} {onpick} {onjump} {oncommand} {phone} />
+{#snippet stepPreview(id: string)}
+	{@const index = steps.findIndex((part) => part.uuid === id)}
+	{@const part = steps[index]}
+	{#if part}
+		{@const style = partStyle(part)}
+		{@const duration = durations?.[segment.activity.findIndex((candidate) => candidate.uuid === id)]}
+		<div class="flex items-center gap-[7px] text-[12px]">
+			<Icon name={style.icon} size={14} class={style.text} />
+			<span class="shrink-0">{part.type === "tool" ? toolVerb(part) : partLabel(part)}</span>
+			{#if part.type === "tool"}<code class="min-w-0 truncate font-mono text-text-secondary">{toolSubject(part)}</code>{/if}
+			{#if duration !== undefined}<span class="shrink-0 font-mono text-text-muted">{fmtDuration(duration)}</span>{/if}
+			<span class="ml-auto shrink-0 font-mono text-text-muted">{surfaceTime((part.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}</span>
+		</div>
+		<div class="mt-[5px] text-[10.5px] text-text-dimmer">Step {index + 1}{turn.live ? "" : ` of ${steps.length}`} · click to open it in the log</div>
+	{/if}
+{/snippet}
+
+<ActivityTimeline {segments} {seams} bind:width {active} {markers} {cardSlot} {card} {openAsk} {belowLevel} {cited} {preview} {stepPreview} {sliderText} {oninteraction} {onpick} {onjump} {oncommand} {phone} />
