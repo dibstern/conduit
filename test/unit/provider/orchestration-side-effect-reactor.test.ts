@@ -10,6 +10,11 @@ import {
 	Option,
 } from "effect";
 import { SqlClient } from "effect/sql";
+import {
+	ConnectionError,
+	ConstraintError,
+	SqlError,
+} from "effect/sql/SqlError";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
@@ -39,6 +44,13 @@ import {
 	type ProviderSideEffectReactorOptions,
 } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { makeRunnerProviderInstance } from "../../../src/lib/provider/runner/runner-provider-instance.js";
+import type { SendScope } from "../../../src/lib/provider/runner/send-scope.js";
+import type {
+	SessionCommand,
+	SessionFailure,
+	SessionRunner,
+} from "../../../src/lib/provider/runner/session-runner.js";
 import type {
 	EventSink,
 	PermissionResponse,
@@ -462,6 +474,101 @@ describe("ProviderSideEffectReactor", () => {
 				]);
 			}).pipe(Effect.provide(reactorTestLayer)),
 	);
+	for (const fault of ["StoreRejected", "StoreUnavailable"] as const)
+		it.effect(`recall aborts local intake before ${fault} settlement`, () =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const commit = yield* makeCommitAndSignal;
+					const ingestion = yield* ProviderRuntimeIngestionTag;
+					yield* seedSendTurnOutbox(sql);
+					const sent = yield* Deferred.make<void>();
+					const abortSend = vi.fn();
+					function execute(
+						command: Extract<SessionCommand, { type: "send-turn" }>,
+						send: SendScope,
+					): Effect.Effect<TurnResult, SessionFailure>;
+					function execute(
+						command: Exclude<SessionCommand, { type: "send-turn" }>,
+						send?: SendScope,
+					): Effect.Effect<void, SessionFailure>;
+					function execute(
+						command: SessionCommand,
+						send: SendScope,
+					): Effect.Effect<TurnResult | undefined, SessionFailure>;
+					function execute(
+						command: SessionCommand,
+						_send?: SendScope,
+					): Effect.Effect<TurnResult | undefined, SessionFailure> {
+						return command.type === "send-turn"
+							? Deferred.succeed(sent, undefined).pipe(
+									Effect.andThen(Effect.never),
+								)
+							: Effect.succeed(undefined);
+					}
+					const provider = yield* makeRunnerProviderInstance(
+						{
+							accounts: Effect.succeed(
+								accountsStateFromInstances(
+									[],
+									configuredClaudeConfigDir("/tmp/test-claude-recall"),
+								),
+							),
+						},
+						{
+							driverKind: "claude",
+							discoverEffect: () => Effect.succeed(emptyCapabilities),
+							generateTextEffect: () => Effect.die("unused generation"),
+							prepareTurnEffect: (input) => Effect.succeed({ input }),
+						},
+						() =>
+							Effect.succeed({
+								hasLiveProcessEffect: () => Effect.succeed(false),
+								abortSend,
+								executeEffect: execute,
+							} satisfies SessionRunner),
+					);
+					let rejectWrites = false;
+					let failedWrites = 0;
+					const reactor = new ProviderSideEffectReactor({
+						projectId: "test-project",
+						sql,
+						ingestion,
+						registry: new ProviderRegistry([provider]),
+						write: (body, options) =>
+							commit.write(
+								(project, stamp) =>
+									Effect.gen(function* () {
+										if (rejectWrites) {
+											failedWrites++;
+											return yield* new SqlError({
+												reason:
+													fault === "StoreUnavailable"
+														? new ConnectionError({ cause: "recall outage" })
+														: new ConstraintError({
+																cause: "recall rejection",
+															}),
+											});
+										}
+										return yield* body(project, stamp);
+									}),
+								options,
+							),
+					});
+					yield* Effect.forkChild(
+						reactor.runCommand("cmd-1").pipe(Effect.result),
+					);
+					yield* Deferred.await(sent);
+					rejectWrites = true;
+					yield* TestClock.adjust("122 seconds");
+					expect(failedWrites).toBeGreaterThan(0);
+					expect(abortSend).toHaveBeenCalledTimes(1);
+					expect(
+						yield* sql`SELECT status, held_transmission FROM provider_runs`,
+					).toEqual([{ status: "pending", held_transmission: null }]);
+				}),
+			).pipe(Effect.provide(reactorTestLayer)),
+		);
 	for (const recall of [
 		"cancelled",
 		"indeterminate",
@@ -1003,6 +1110,30 @@ describe("ProviderSideEffectReactor", () => {
 					attempt_count: 2,
 				});
 			}).pipe(Effect.provide(reactorTestLayer)),
+	);
+
+	it.effect("wakes a retry already due when its wake is armed", () =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql);
+				yield* sql`UPDATE provider_command_outbox SET status = 'retryable_failed',
+				attempt_count = 1, next_attempt_at = 1000`;
+				let reads = 0;
+				const sendTurn = vi.fn(() => Effect.succeed(completedTurn));
+				const reactor = yield* makeReactor({
+					nowMs: () => (++reads === 1 ? 999 : 1000),
+					registry: new ProviderRegistry([makeProvider(sendTurn)]),
+				});
+				yield* reactor.drain();
+				yield* TestClock.adjust("1 millis");
+				expect(sendTurn).toHaveBeenCalledTimes(1);
+				expect(yield* readOutboxRetryState(sql, 10)).toMatchObject({
+					status: "completed",
+					attempt_count: 2,
+				});
+			}),
+		).pipe(Effect.provide(reactorTestLayer)),
 	);
 
 	// S-a: a retry that falls due while another session holds the drain is woken

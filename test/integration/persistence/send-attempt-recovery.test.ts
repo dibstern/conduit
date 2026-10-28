@@ -448,12 +448,9 @@ it.each([
 						yield* Effect.gen(function* () {
 							while (!aborted.has(index - 1)) yield* Effect.sleep("1 millis");
 						}).pipe(Effect.timeout("3 seconds"));
-						if (attempts === 3) {
-							// Exercise a third overlapping delivery directly at the executor seam;
-							// the live engine waiter serializes additional foreground retries.
-							yield* sql`UPDATE provider_command_outbox SET status = 'pending', error_code = NULL WHERE command_id = 'command'`;
-							yield* sql`UPDATE command_receipts SET status = 'side_effect_requested', error_code = NULL WHERE command_id = 'command'`;
-						}
+						// The emitted retryAt is already due. Let the reactor claim that
+						// durable retry, including when its wake wins this dispatch race.
+
 						const delivery: Effect.Effect<void, unknown> =
 							attempts === 3
 								? reactor.runCommand("command").pipe(Effect.asVoid)

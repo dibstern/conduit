@@ -87,6 +87,7 @@ export interface InputDrafts {
 		inputId: string,
 		refs: readonly AttachmentRef[],
 		text?: string,
+		observedAt?: number,
 	) => DraftChange;
 	readonly claim: (
 		draftId: string,
@@ -216,6 +217,7 @@ export const makeInputDrafts: Effect.Effect<
 		key: InputDraftKey,
 		inputId: string,
 		refs: readonly AttachmentRef[],
+		observedAt = Date.now(),
 	) =>
 		Effect.forEach(
 			refs,
@@ -223,19 +225,23 @@ export const makeInputDrafts: Effect.Effect<
 				sql`INSERT OR IGNORE INTO draft_attachments
 				(id, draft_key, position, name, hash, state, created_at)
 				SELECT ${`${inputId}:${index}`}, ${keyOf(key)}, COALESCE(MAX(position), -1) + 1,
-				${ref.name ?? null}, ${ref.attachmentHash}, 'live', ${Date.now()}
+				${ref.name ?? null}, ${ref.attachmentHash}, 'live', ${observedAt}
 				FROM draft_attachments WHERE draft_key = ${keyOf(key)}`,
 			{ discard: true },
 		);
-	const ensureDraft = (key: InputDraftKey, projectId?: string) =>
+	const ensureDraft = (
+		key: InputDraftKey,
+		projectId?: string,
+		observedAt = Date.now(),
+	) =>
 		Effect.gen(function* () {
 			if ("session" in key) {
 				yield* sql`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at)
-					SELECT id, project_id, 'session', '', ${Date.now()} FROM sessions WHERE id = ${key.session}
+					SELECT id, project_id, 'session', '', ${observedAt} FROM sessions WHERE id = ${key.session}
 					ON CONFLICT (draft_key) DO NOTHING`;
 			} else if (projectId !== undefined) {
 				yield* sql`INSERT OR IGNORE INTO input_drafts (draft_key, project_id, kind, text, updated_at)
-					VALUES (${key.draft}, ${projectId}, 'draft', '', ${Date.now()})`;
+					VALUES (${key.draft}, ${projectId}, 'draft', '', ${observedAt})`;
 			}
 			return (yield* readRow(key)) !== undefined;
 		});
@@ -504,7 +510,7 @@ export const makeInputDrafts: Effect.Effect<
 				}),
 			),
 		}),
-		restoreChange: (key, inputId, refs, text) => {
+		restoreChange: (key, inputId, refs, text, observedAt = Date.now()) => {
 			let restored: string | undefined;
 			return {
 				write: Effect.gen(function* () {
@@ -512,7 +518,7 @@ export const makeInputDrafts: Effect.Effect<
 					if (text !== undefined && "session" in actualKey) {
 						const rows =
 							yield* sql`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at)
-							SELECT id, project_id, 'session', ${text}, ${Date.now()}
+							SELECT id, project_id, 'session', ${text}, ${observedAt}
 							FROM sessions WHERE id = ${actualKey.session}
 							ON CONFLICT (draft_key) DO UPDATE SET
 								text = excluded.text || CASE WHEN input_drafts.text != '' AND input_drafts.text != excluded.text
@@ -523,8 +529,8 @@ export const makeInputDrafts: Effect.Effect<
 						if (rows.length === 0) return;
 						restored = text;
 					}
-					if (!(yield* ensureDraft(actualKey))) return;
-					yield* restoreAttachments(actualKey, inputId, refs);
+					if (!(yield* ensureDraft(actualKey, undefined, observedAt))) return;
+					yield* restoreAttachments(actualKey, inputId, refs, observedAt);
 				}),
 				publish: snapshotGate.withPermits(1)(
 					Effect.gen(function* () {

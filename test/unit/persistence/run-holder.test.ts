@@ -1,12 +1,14 @@
 import { describe, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber } from "effect";
+import { Deferred, Effect, Fiber, Option, Result } from "effect";
 import { SqlClient, Statement } from "effect/sql";
 import { expect } from "vitest";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
+import { makeRunnerRunLifecycle } from "../../../src/lib/provider/runner/runner-retirement.js";
 
 const layer = makePersistenceEffectLayer(":memory:", "project");
 const requested = (runId: string) =>
@@ -36,7 +38,14 @@ const setup = Effect.gen(function* () {
 		{ sessionId: "session", pid: 100, startTime: "start" },
 		"serving",
 	);
-	return { sql, commit };
+	yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at)
+		VALUES (0, 'send', 'project', 'session', 'claude', 'send_turn', '{}', 'run', 'running', 0, 0)`;
+	const lifecycle = makeRunnerRunLifecycle({
+		sql,
+		commit,
+		eventStore: yield* EventStoreEffectTag,
+	});
+	return { sql, commit, lifecycle };
 });
 
 // Failure cases: Stop wins before dispatch, a failed append or projection leaves
@@ -48,8 +57,9 @@ describe("durable run holder", () => {
 				`rejects a mismatched command identity without mutation, run=${runId}, covered=${covered}`,
 				() =>
 					Effect.gen(function* () {
-						const { sql, commit } = yield* setup;
+						const { sql, commit, lifecycle } = yield* setup;
 						yield* commit([requested("joined")]);
+						yield* sql`DELETE FROM provider_command_outbox`;
 						yield* sql`UPDATE provider_runs SET joined_into = 'run', status = 'joined' WHERE id = 'joined'`;
 						yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at)
 							VALUES (1, 'owner-send', 'project', 'session', 'claude', 'send_turn', '{}', 'run', 'running', 1, 1)`;
@@ -58,23 +68,13 @@ describe("durable run holder", () => {
 								VALUES (2, 'stop', 'project', 'session', 'claude', 'end_session', '{"stop":{"owners":[{"runId":"run"}]}}', 'completed', 2, 2)`;
 						expect(
 							yield* Effect.result(
-								commit.holdRun({
+								lifecycle.holdRun({
 									sessionId: "session",
 									runId,
 									commandId: "wrong-send",
 								}),
 							),
-						).toMatchObject({
-							_tag: "Failure",
-							failure: {
-								_tag: "HoldCommandIdMismatch",
-								sessionId: "session",
-								runId,
-								ownerRunId: "run",
-								commandId: "wrong-send",
-								expectedCommandId: "owner-send",
-							},
-						});
+						).toEqual(Result.succeed({ _tag: "Ended" }));
 						expect(
 							yield* sql`SELECT status, runner_id, held_transmission FROM provider_runs WHERE id = 'run'`,
 						).toEqual([
@@ -89,13 +89,14 @@ describe("durable run holder", () => {
 		"uses the live running command identity despite a newer historical or pending row",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
+				const { sql, lifecycle } = yield* setup;
+				yield* sql`DELETE FROM provider_command_outbox`;
 				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at)
 					VALUES (1, 'active-send', 'project', 'session', 'claude', 'send_turn', '{}', 'run', 'running', 1, 1),
 						(2, 'historical-send', 'project', 'session', 'claude', 'send_turn', '{}', 'run', 'completed', 2, 2),
 						(3, 'pending-send', 'project', 'session', 'claude', 'send_turn', '{}', 'run', 'pending', 3, 3)`;
 				expect(
-					yield* commit.holdRun({
+					yield* lifecycle.holdRun({
 						sessionId: "session",
 						runId: "run",
 						commandId: "active-send",
@@ -110,8 +111,8 @@ describe("durable run holder", () => {
 		"releaseRun appends stale evidence without Stop side effects and rolls matching release back with its Stop",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
-				yield* commit.holdRun({
+				const { sql, lifecycle } = yield* setup;
+				yield* lifecycle.holdRun({
 					sessionId: "session",
 					runId: "run",
 					commandId: "send",
@@ -127,7 +128,7 @@ describe("durable run holder", () => {
 						Effect.as("stopped"),
 					);
 				const release = (transmission: number) =>
-					commit.releaseRun(
+					lifecycle.releaseRun(
 						{
 							sessionId: "session",
 							runId: "run",
@@ -168,8 +169,8 @@ describe("durable run holder", () => {
 		"releaseRun clears a matching retired hold without running another Stop mutation",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
-				yield* commit.holdRun({
+				const { sql, lifecycle } = yield* setup;
+				yield* lifecycle.holdRun({
 					sessionId: "session",
 					runId: "run",
 					commandId: "send",
@@ -177,7 +178,7 @@ describe("durable run holder", () => {
 				yield* sql`UPDATE claude_runner_cursors SET retired_at = 1 WHERE runner_id = 'runner'`;
 				let stopped = false;
 				expect(
-					yield* commit.releaseRun(
+					yield* lifecycle.releaseRun(
 						{
 							sessionId: "session",
 							runId: "run",
@@ -201,15 +202,18 @@ describe("durable run holder", () => {
 		"returns Unserved without appending when no serving runner exists",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
+				const { sql, lifecycle } = yield* setup;
 				yield* sql`UPDATE claude_runner_cursors SET retired_at = 1`;
 				expect(
-					yield* commit.holdRun({
+					yield* lifecycle.holdRun({
 						sessionId: "session",
 						runId: "run",
 						commandId: "send",
 					}),
-				).toEqual({ _tag: "Unserved" });
+				).toEqual({
+					_tag: "Unserved",
+					predecessor: Option.some({ runner: "runner", until: 4001 }),
+				});
 				expect(
 					yield* sql`SELECT COUNT(*) AS n FROM events WHERE type = 'run.dispatched'`,
 				).toEqual([{ n: 0 }]);
@@ -220,7 +224,7 @@ describe("durable run holder", () => {
 		"settles an unheld covered run once before looking for a serving runner",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
+				const { sql, lifecycle } = yield* setup;
 				yield* sql`UPDATE claude_runner_cursors SET retired_at = 1`;
 				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, requested_at, updated_at)
 				VALUES (1, 'stop', 'project', 'session', 'claude', 'end_session', '{"stop":{"owners":[{"runId":"run"}]} }', 'completed', 1, 1)`;
@@ -228,12 +232,12 @@ describe("durable run holder", () => {
 					VALUES (2, 'send', 'project', 'session', 'claude', 'send_turn', '{"prompt":"hello"}', 'run', 'running', 1, 1)`;
 				for (let n = 0; n < 2; n++)
 					expect(
-						yield* commit.holdRun({
+						yield* lifecycle.holdRun({
 							sessionId: "session",
 							runId: "run",
 							commandId: "send",
 						}),
-					).toEqual({ _tag: "Covered" });
+					).toEqual({ _tag: n === 0 ? "Covered" : "Ended" });
 				expect(
 					yield* sql`SELECT status, runner_id, held_transmission FROM provider_runs WHERE id = 'run'`,
 				).toEqual([
@@ -255,8 +259,8 @@ describe("durable run holder", () => {
 
 	it.effect("leaves a covered held run for its holder to settle", () =>
 		Effect.gen(function* () {
-			const { sql, commit } = yield* setup;
-			yield* commit.holdRun({
+			const { sql, lifecycle } = yield* setup;
+			yield* lifecycle.holdRun({
 				sessionId: "session",
 				runId: "run",
 				commandId: "send",
@@ -264,7 +268,7 @@ describe("durable run holder", () => {
 			yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, requested_at, updated_at)
 				VALUES (1, 'stop', 'project', 'session', 'claude', 'end_session', '{"stop":{"owners":[{"runId":"run"}]} }', 'completed', 1, 1)`;
 			expect(
-				yield* commit.holdRun({
+				yield* lifecycle.holdRun({
 					sessionId: "session",
 					runId: "run",
 					commandId: "send",
@@ -285,7 +289,7 @@ describe("durable run holder", () => {
 		"guards releases by runner and transmission and rebuilds the released hold in event order",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
+				const { sql, commit, lifecycle } = yield* setup;
 				const release = (runnerId: string, transmission: number) =>
 					commit([
 						canonicalEvent(
@@ -301,7 +305,7 @@ describe("durable run holder", () => {
 							{ provider: "claude", metadata: { runId: "run" } },
 						),
 					]);
-				yield* commit.holdRun({
+				yield* lifecycle.holdRun({
 					sessionId: "session",
 					runId: "run",
 					commandId: "send",
@@ -313,7 +317,7 @@ describe("durable run holder", () => {
 				).toEqual([{ runner_id: "runner", held_transmission: 1 }]);
 				yield* release("runner", 1);
 				expect(
-					yield* commit.holdRun({
+					yield* lifecycle.holdRun({
 						sessionId: "session",
 						runId: "run",
 						commandId: "send",
@@ -339,12 +343,15 @@ describe("durable run holder", () => {
 		"caps transmissions durably by command across runs and settles exhaustion once",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
+				const { sql, commit, lifecycle } = yield* setup;
 				for (let n = 1; n <= 5; n++) {
 					const runId = n === 1 ? "run" : `run-${n}`;
-					if (n > 1) yield* commit([requested(runId)]);
+					if (n > 1) {
+						yield* commit([requested(runId)]);
+						yield* sql`UPDATE provider_command_outbox SET run_id = ${runId} WHERE command_id = 'send'`;
+					}
 					expect(
-						yield* commit.holdRun({
+						yield* lifecycle.holdRun({
 							sessionId: "session",
 							runId,
 							commandId: "send",
@@ -369,21 +376,21 @@ describe("durable run holder", () => {
 					VALUES (1, 'send', 'project', 'session', 'claude', 'send_turn', '{"prompt":"hello"}', 'run-5', 'running', 1, 1)`;
 				yield* sql`UPDATE claude_runner_cursors SET retired_at = 1`;
 				expect(
-					yield* commit.holdRun({
+					yield* lifecycle.holdRun({
 						sessionId: "session",
 						runId: "run-5",
 						commandId: "send",
 					}),
 				).toEqual({ _tag: "Exhausted" });
 				expect(
-					(yield* Effect.result(
-						commit.holdRun({
+					yield* Effect.result(
+						lifecycle.holdRun({
 							sessionId: "session",
 							runId: "run-5",
 							commandId: "send",
 						}),
-					))._tag,
-				).toBe("Failure");
+					),
+				).toEqual(Result.succeed({ _tag: "Ended" }));
 				expect(
 					yield* sql`SELECT status FROM provider_runs WHERE id = 'run-5'`,
 				).toEqual([{ status: "error" }]);
@@ -399,12 +406,12 @@ describe("durable run holder", () => {
 		"serializes the retirement write with the holder check and dispatch append",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
+				const { sql, lifecycle } = yield* setup;
 				const checked = yield* Deferred.make<void>();
 				const release = yield* Deferred.make<void>();
 				let gated = false;
 				let retired = false;
-				const dispatch = yield* commit
+				const dispatch = yield* lifecycle
 					.holdRun({ sessionId: "session", runId: "run", commandId: "send" })
 					.pipe(
 						Effect.provideService(Statement.CurrentTransformer, (statement) => {
@@ -444,14 +451,14 @@ describe("durable run holder", () => {
 					yield* sql`SELECT runner_id FROM provider_runs WHERE id = 'run'`,
 				).toEqual([{ runner_id: "runner" }]);
 				expect(
-					(yield* Effect.result(
-						commit.holdRun({
+					yield* Effect.result(
+						lifecycle.holdRun({
 							sessionId: "session",
 							runId: "run",
 							commandId: "send",
 						}),
-					))._tag,
-				).toBe("Failure");
+					),
+				).toEqual(Result.succeed({ _tag: "Busy" }));
 			}).pipe(Effect.provide(layer)),
 	);
 
@@ -459,10 +466,10 @@ describe("durable run holder", () => {
 		"commits the holder before dispatch and refuses an already retired runner before append",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
+				const { sql, lifecycle } = yield* setup;
 				yield* sql`UPDATE claude_runner_cursors SET runner_id = 'first'`;
 				expect(
-					yield* commit.holdRun({
+					yield* lifecycle.holdRun({
 						sessionId: "session",
 						runId: "run",
 						commandId: "send",
@@ -488,16 +495,13 @@ describe("durable run holder", () => {
 					sql`UPDATE claude_runner_cursors SET retired_at = 1 WHERE runner_id = 'first'`,
 				);
 				const refused = yield* Effect.result(
-					commit.holdRun({
+					lifecycle.holdRun({
 						sessionId: "session",
 						runId: "run",
 						commandId: "send",
 					}),
 				);
-				expect(refused).toMatchObject({
-					_tag: "Failure",
-					failure: { _tag: "EventStoreError", operation: "holdRun" },
-				});
+				expect(refused).toEqual(Result.succeed({ _tag: "Busy" }));
 				expect(
 					yield* sql`SELECT runner_id FROM provider_runs WHERE id = 'run'`,
 				).toEqual([{ runner_id: "first" }]);
@@ -511,7 +515,7 @@ describe("durable run holder", () => {
 		"rolls back both event and holder when append or projection fails",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
+				const { sql, lifecycle } = yield* setup;
 				for (const failAt of ["append", "projection"] as const) {
 					yield* sql.unsafe(
 						failAt === "append"
@@ -519,7 +523,7 @@ describe("durable run holder", () => {
 							: `CREATE TRIGGER reject_holder BEFORE UPDATE OF runner_id ON provider_runs BEGIN SELECT RAISE(ABORT, 'projection failed'); END`,
 					);
 					const failed = yield* Effect.exit(
-						commit.holdRun({
+						lifecycle.holdRun({
 							sessionId: "session",
 							runId: "run",
 							commandId: "send",
@@ -534,7 +538,7 @@ describe("durable run holder", () => {
 					).toEqual([{ n: 0 }]);
 					yield* sql`DROP TRIGGER reject_holder`;
 				}
-				yield* commit.holdRun({
+				yield* lifecycle.holdRun({
 					sessionId: "session",
 					runId: "run",
 					commandId: "send",
@@ -549,18 +553,20 @@ describe("durable run holder", () => {
 		"keeps the owner's hold on join and resolves the joined run through the owner for its next transmission",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
+				const { sql, commit, lifecycle } = yield* setup;
 				yield* sql`UPDATE claude_runner_cursors SET runner_id = 'old'`;
+				yield* sql`DELETE FROM provider_command_outbox`;
 				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, requested_at, updated_at, run_id)
 					VALUES (1, 'owner-send', 'project', 'session', 'claude', 'send_turn', '{}', 'running', 1, 1, 'run')`;
-				yield* commit.holdRun({
+				yield* lifecycle.holdRun({
 					sessionId: "session",
 					runId: "run",
 					commandId: "owner-send",
 				});
 				yield* commit([requested("joined")]);
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at) VALUES (2, 'steer', 'project', 'session', 'claude', 'send_turn', '{}', 'joined', 'running', 2, 2)`;
 				yield* sql`UPDATE claude_runner_cursors SET runner_id = 'new'`;
-				yield* commit.holdRun({
+				yield* lifecycle.holdRun({
 					sessionId: "session",
 					runId: "joined",
 					commandId: "steer",
@@ -603,7 +609,7 @@ describe("durable run holder", () => {
 					),
 				]);
 				expect(
-					yield* commit.holdRun({
+					yield* lifecycle.holdRun({
 						sessionId: "session",
 						runId: "joined",
 						commandId: "owner-send",
@@ -622,13 +628,13 @@ describe("durable run holder", () => {
 		"refuses missing, foreign, or terminal runs without appending a dispatch",
 		() =>
 			Effect.gen(function* () {
-				const { sql, commit } = yield* setup;
+				const { sql, commit, lifecycle } = yield* setup;
 				for (const input of [
 					{ sessionId: "session", runId: "absent", commandId: "send" },
 					{ sessionId: "foreign", runId: "run", commandId: "send" },
 				])
-					expect((yield* Effect.result(commit.holdRun(input)))._tag).toBe(
-						"Failure",
+					expect(yield* Effect.result(lifecycle.holdRun(input))).toEqual(
+						Result.succeed({ _tag: "Ended" }),
 					);
 				yield* commit([
 					canonicalEvent(
@@ -642,14 +648,14 @@ describe("durable run holder", () => {
 					),
 				]);
 				expect(
-					(yield* Effect.result(
-						commit.holdRun({
+					yield* Effect.result(
+						lifecycle.holdRun({
 							sessionId: "session",
 							runId: "run",
 							commandId: "send",
 						}),
-					))._tag,
-				).toBe("Failure");
+					),
+				).toEqual(Result.succeed({ _tag: "Ended" }));
 				expect(
 					yield* sql`SELECT runner_id, status FROM provider_runs WHERE id = 'run'`,
 				).toEqual([{ runner_id: null, status: "interrupted" }]);

@@ -65,6 +65,8 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"src/lib/provider/orchestration-side-effect-reactor.ts",
 			// SEND-CONTINUATION C1 moves prepareStop's complete write into engine acceptance.
 			"src/lib/provider/orchestration-engine.ts",
+			// The lifecycle gate owns durable dispatch/release events, checked by its ownership guard.
+			"src/lib/provider/runner/runner-retirement.ts",
 		]);
 		const unexpected = files.flatMap((file) => {
 			if (allowed.has(file)) return [];

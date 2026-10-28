@@ -3,6 +3,7 @@ import { Deferred, Effect, Fiber } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
@@ -10,6 +11,7 @@ import {
 	type RunnerRetirement,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
 import {
+	makeRunnerRunLifecycle,
 	makeRunnerStopReconciler,
 	type RunRelease,
 } from "../../../src/lib/provider/runner/runner-retirement.js";
@@ -240,6 +242,11 @@ for (const cached of ["missing", "candidate"])
 							{ provider: "claude", metadata: { runId: "run" } },
 						),
 					]);
+					const lifecycle = makeRunnerRunLifecycle({
+						sql,
+						commit,
+						eventStore: yield* EventStoreEffectTag,
+					});
 					const reconciler = yield* makeRunnerStopReconciler({
 						receipts,
 						processTable: {
@@ -251,7 +258,7 @@ for (const cached of ["missing", "candidate"])
 							signal: () => undefined,
 						},
 						release: (input, stop) =>
-							commit
+							lifecycle
 								.releaseRun(input, stop ?? Effect.succeed(undefined))
 								.pipe(Effect.orDie),
 						released: () => Effect.void,
@@ -282,7 +289,8 @@ for (const cached of ["missing", "candidate"])
 							"serving",
 						);
 					}
-					yield* commit.holdRun({
+					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at) VALUES (1, 'send', 'project', 'session', 'claude', 'send_turn', '{}', 'run', 'running', 1, 1)`;
+					yield* lifecycle.holdRun({
 						sessionId: "session",
 						runId: "run",
 						commandId: "send",

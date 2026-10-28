@@ -19,6 +19,7 @@ import {
 	RunnerRetirementDecodeError,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
 import { makeRunnerStopReconciler } from "../../../src/lib/provider/runner/runner-retirement.js";
+import { toStoreFault } from "../../../src/lib/provider/runner/send-settlement.js";
 
 const testLayer = Layer.merge(
 	makePersistenceEffectLayer(
@@ -67,19 +68,17 @@ it.effect(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const receipts = yield* makeRunnerReceiptStore(sql);
-			for (const [failure, retryable, code] of [
+			for (const [failure, code] of [
 				[
 					new SqlError({
 						reason: new ConnectionError({ cause: "temporary outage" }),
 					}),
-					true,
 					"StoreUnavailable",
 				],
 				[
 					new SqlError({
 						reason: new ConstraintError({ cause: "invalid registration" }),
 					}),
-					false,
 					"StoreRejected",
 				],
 				[
@@ -87,12 +86,14 @@ it.effect(
 						runnerId: "runner",
 						cause: "corrupt row",
 					}),
-					false,
 					"StoreRejected",
 				],
 			] as const) {
 				const stops = yield* makeRunnerStopReconciler({
-					receipts: { ...receipts, register: () => Effect.fail(failure) },
+					receipts: {
+						...receipts,
+						register: () => Effect.fail(toStoreFault(failure)),
+					},
 					processTable: {
 						inspect: () => ({ state: "gone" }),
 						signal: () => undefined,
@@ -109,7 +110,7 @@ it.effect(
 				);
 				expect(result._tag).toBe("Failure");
 				if (result._tag === "Failure")
-					expect(result.failure).toMatchObject({ retryable, code });
+					expect(result.failure).toMatchObject({ _tag: code });
 				expect(stops.serving("session")).toBeUndefined();
 			}
 		}).pipe(Effect.scoped, Effect.provide(testLayer)),
@@ -212,11 +213,9 @@ it.effect(
 				{ runnerId: "runner", retiredAt: 100 },
 				{ runnerId: "candidate", role: "serving", retiredAt: null },
 			]);
-			expect(
-				(yield* Effect.result(
-					receipts.register("third", retirement, "serving"),
-				))._tag,
-			).toBe("Failure");
+			expect(yield* receipts.register("third", retirement, "serving")).toBe(
+				"Lost",
+			);
 		}).pipe(Effect.provide(testLayer)),
 );
 
@@ -254,10 +253,8 @@ it.effect(
 				},
 			]);
 			expect(
-				(yield* Effect.result(
-					receipts.register("late-candidate", retirement, "candidate"),
-				))._tag,
-			).toBe("Failure");
+				yield* receipts.register("late-candidate", retirement, "candidate"),
+			).toBe("Lost");
 			expect((yield* receipts.runners()).rows).toHaveLength(2);
 		}).pipe(Effect.provide(testLayer)),
 );

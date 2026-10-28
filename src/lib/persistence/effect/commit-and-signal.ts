@@ -1,7 +1,7 @@
 import {
-	Clock,
 	Context,
 	Data,
+	Deferred,
 	Effect,
 	Option,
 	Ref,
@@ -15,19 +15,10 @@ import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
 import { observeTurnTimelineCommit } from "../../domain/daemon/Services/turn-timeline.js";
 import { EventRetentionSchedulerTag } from "../../domain/persistence/Services/event-retention-scheduler.js";
 import { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
-import {
-	type StoreFault,
-	settleSend,
-} from "../../provider/runner/send-settlement.js";
-import {
-	runSendCommandIdQuery,
-	stopCovers,
-} from "../../provider/session-run-settlement.js";
 import { contentionMetrics } from "../contention-metrics.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
-	type EventPayloadMap,
 	type StoredEvent,
 } from "../events.js";
 import { SESSION_SUBTREE_SQL } from "../projectors/session-handlers.js";
@@ -51,38 +42,6 @@ export type CommitAndSignalFailure =
 	| EventStoreError
 	| ProjectionRunnerError
 	| SqlError;
-
-export type Hold =
-	| {
-			readonly _tag: "Held";
-			readonly runner: string;
-			readonly transmission: number;
-	  }
-	| { readonly _tag: "Unserved" }
-	| { readonly _tag: "Covered" }
-	| { readonly _tag: "Exhausted" };
-
-export class HoldCommandIdMismatch extends Data.TaggedError(
-	"HoldCommandIdMismatch",
-)<{
-	readonly sessionId: string;
-	readonly runId: string;
-	readonly ownerRunId: string;
-	readonly commandId: string;
-	readonly expectedCommandId: string;
-}> {
-	readonly operation = "holdRun";
-	readonly code = "hold_command_id_mismatch";
-	readonly retryable = false;
-	get message(): string {
-		return `Command ${this.commandId} does not match owner send ${this.expectedCommandId}`;
-	}
-}
-
-export type HoldFailed =
-	| CommitAndSignalFailure
-	| HoldCommandIdMismatch
-	| StoreFault;
 
 /** Generic final authorization supplied by the owner of a bounded write. */
 export const currentWriteAuthorization = Context.Reference<
@@ -208,23 +167,8 @@ export interface CommitAndSignal {
 		options?: CommitAndSignalOptions,
 	): Effect.Effect<void, CommitAndSignalFailure>;
 
-	/** Assign the runner before dispatch, atomically excluding a committed Stop. */
-	readonly holdRun: (input: {
-		readonly sessionId: string;
-		readonly runId: string;
-		readonly commandId: string;
-		readonly observedAt?: number;
-	}) => Effect.Effect<Hold, HoldFailed>;
-
-	/** Release evidence and any resulting serving-runner Stop share this write. */
-	readonly releaseRun: <A, E, R>(
-		input: EventPayloadMap["run.released"] & { readonly sessionId: string },
-		stop: Effect.Effect<A, E, R>,
-	) => Effect.Effect<
-		{ readonly released: boolean; readonly stop: A | undefined },
-		CommitAndSignalFailure | E,
-		R
-	>;
+	/** Capture the next successful store commit before reading its durable rows. */
+	readonly committed: () => Effect.Effect<void>;
 
 	/**
 	 * For the append sites a plain `appendBatch` does not describe: an idempotent
@@ -249,6 +193,26 @@ export interface CommitAndSignal {
 // Factories are also created per command, so the permit belongs to the SQL
 // client, not an individual writer. Weak keys retain no closed persistence stack.
 const commitPermits = new WeakMap<SqlClient.SqlClient, Semaphore.Semaphore>();
+const commitSignals = new WeakMap<
+	SqlClient.SqlClient,
+	Deferred.Deferred<void>
+>();
+
+const nextCommit = (sql: SqlClient.SqlClient) => {
+	let signal = commitSignals.get(sql);
+	if (signal === undefined) {
+		signal = Deferred.makeUnsafe<void>();
+		commitSignals.set(sql, signal);
+	}
+	return signal;
+};
+
+const signalCommitted = (sql: SqlClient.SqlClient) =>
+	Effect.suspend(() => {
+		const signal = nextCommit(sql);
+		commitSignals.set(sql, Deferred.makeUnsafe<void>());
+		return Deferred.succeed(signal, undefined).pipe(Effect.asVoid);
+	});
 
 export interface PendingWrite {
 	readonly apply: Effect.Effect<void, SqlError>;
@@ -339,7 +303,11 @@ export const flushPendingWrites = <E = never, R = never>(
 				.pipe(
 					Effect.provideService(Scheduler.PreventSchedulerYield, true),
 					Effect.tap((applied) =>
-						Effect.sync(() => clearCommittedWrites(sql, applied)),
+						signalCommitted(sql).pipe(
+							Effect.andThen(
+								Effect.sync(() => clearCommittedWrites(sql, applied)),
+							),
+						),
 					),
 					Effect.asVoid,
 				),
@@ -614,6 +582,7 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 							// Explicit async body waits still suspend normally.
 							Effect.provideService(Scheduler.PreventSchedulerYield, true),
 						);
+						yield* signalCommitted(sql);
 						clearCommittedWrites(sql, flushedWrites);
 						observeTurnTimelineCommit(stored);
 						const { stamped, removed, collections } = mergeTouches(
@@ -702,169 +671,7 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 			),
 		{
 			write,
-			releaseRun: <A, E, R>(
-				input: Parameters<CommitAndSignal["releaseRun"]>[0],
-				stop: Effect.Effect<A, E, R>,
-			) =>
-				write((project) =>
-					Effect.gen(function* () {
-						const [held] = yield* sql<{
-							runner_id: string | null;
-							held_transmission: number | null;
-						}>`SELECT runner_id, held_transmission FROM provider_runs
-					WHERE id = ${input.runId} AND session_id = ${input.sessionId}`;
-						const released =
-							held?.runner_id === input.runnerId &&
-							held.held_transmission === input.transmission;
-						const [session] = yield* sql<{
-							provider: string;
-						}>`SELECT provider FROM sessions WHERE id = ${input.sessionId}`;
-						yield* project(
-							yield* eventStore.appendBatch([
-								canonicalEvent(
-									"run.released",
-									input.sessionId,
-									{
-										runId: input.runId,
-										runnerId: input.runnerId,
-										commandId: input.commandId,
-										transmission: input.transmission,
-										reason: input.reason,
-									},
-									{
-										provider: session?.provider ?? "conduit",
-										metadata: { runId: input.runId },
-									},
-								),
-							]),
-						);
-						if (!released) return { released, stop: undefined };
-						const [serving] = yield* sql`SELECT 1 FROM claude_runner_cursors
-					WHERE runner_id = ${input.runnerId} AND session_id = ${input.sessionId} AND role = 'serving' AND retired_at IS NULL`;
-						return { released, stop: serving ? yield* stop : undefined };
-					}),
-				),
-			holdRun: (input: Parameters<CommitAndSignal["holdRun"]>[0]) => {
-				return write<Hold, HoldFailed, never>((project, stamp) =>
-					Effect.gen(function* () {
-						const observedAt =
-							input.observedAt ?? (yield* Clock.currentTimeMillis);
-						const [owner] = yield* sql<{
-							id: string;
-							provider: string;
-							status: string;
-							runner_id: string | null;
-						}>`SELECT owner.id, session.provider, owner.status, owner.runner_id
-							FROM provider_runs requested JOIN provider_runs owner
-								ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
-							JOIN sessions session ON session.id = requested.session_id
-							WHERE requested.id = ${input.runId} AND requested.session_id = ${input.sessionId}`;
-						if (!owner)
-							return yield* new EventStoreError({
-								operation: "holdRun",
-								sessionId: input.sessionId,
-								cause: "Run is not dispatchable",
-							});
-						const expectedCommandId = yield* runSendCommandIdQuery(
-							sql,
-							input.sessionId,
-							owner.id,
-						);
-						if (
-							expectedCommandId !== undefined &&
-							expectedCommandId !== input.commandId
-						)
-							return yield* new HoldCommandIdMismatch({
-								sessionId: input.sessionId,
-								runId: input.runId,
-								ownerRunId: owner.id,
-								commandId: input.commandId,
-								expectedCommandId,
-							});
-						const commandId = input.commandId;
-						const dispatchable =
-							owner.status === "pending" || owner.status === "running";
-						const [command] = yield* sql<{
-							request_sequence: number;
-							attempt_count: number;
-						}>`SELECT request_sequence, attempt_count FROM provider_command_outbox
-							WHERE session_id = ${input.sessionId} AND command_id = ${commandId}
-								AND run_id = ${owner.id} AND effect_type = 'send_turn'
-							ORDER BY request_sequence DESC LIMIT 1`;
-						const send = command
-							? {
-									sessionId: input.sessionId,
-									runId: owner.id,
-									commandId,
-									requestSequence: command.request_sequence,
-									attempt: command.attempt_count,
-								}
-							: undefined;
-						if (yield* stopCovers(sql, input.sessionId, owner.id)) {
-							if (send && owner.runner_id === null && dispatchable)
-								yield* settleSend(
-									{ sql, project, stamp },
-									{
-										_tag: "covered",
-										send,
-										observedAt,
-									},
-								);
-							return { _tag: "Covered" };
-						}
-						if (!dispatchable || owner.runner_id !== null)
-							return yield* new EventStoreError({
-								operation: "holdRun",
-								sessionId: input.sessionId,
-								cause: "Run is not dispatchable",
-							});
-						const [count] = yield* sql<{
-							n: number;
-						}>`SELECT COUNT(*) AS n FROM events
-							WHERE session_id = ${input.sessionId} AND type = 'run.dispatched'
-								AND json_valid(data) AND json_extract(data, '$.commandId') = ${commandId}`;
-						const transmission = (count?.n ?? 0) + 1;
-						if (transmission > 5) {
-							if (send)
-								yield* settleSend(
-									{ sql, project, stamp },
-									{
-										_tag: "failed",
-										send,
-										observedAt,
-										failure: {
-											operation: "holdRun",
-											message: "Provider send attempts exhausted",
-											code: "provider_send_attempts_exhausted",
-										},
-									},
-								);
-							return { _tag: "Exhausted" };
-						}
-						const [serving] = yield* sql<{
-							runner_id: string;
-						}>`SELECT runner_id FROM claude_runner_cursors
-							WHERE session_id = ${input.sessionId} AND retired_at IS NULL AND role = 'serving'`;
-						if (!serving) return { _tag: "Unserved" };
-						yield* project(
-							yield* eventStore.appendBatch([
-								canonicalEvent(
-									"run.dispatched",
-									input.sessionId,
-									{
-										runId: owner.id,
-										runnerId: serving.runner_id,
-										commandId,
-										transmission,
-									},
-									{ provider: owner.provider, metadata: { runId: owner.id } },
-								),
-							]),
-						);
-						return { _tag: "Held", runner: serving.runner_id, transmission };
-					}),
-				);
-			},
+			committed: () => Deferred.await(nextCommit(sql)),
 		},
 	);
 

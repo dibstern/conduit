@@ -19,6 +19,95 @@ function sources(directory: string): string[] {
 }
 
 describe("send settlement ownership", () => {
+	it("keeps generic retry policy and retired send lifetime maps off the send path", () => {
+		for (const name of [
+			"runner-send-feeder.ts",
+			"send-settlement.ts",
+			"send-settlement-outbox.ts",
+			"runner-legacy-recovery.ts",
+		]) {
+			const source = readFileSync(
+				join(root, "src/lib/provider/runner", name),
+				"utf8",
+			);
+			expect(source, name).not.toMatch(
+				/\b(?:runnerRetrySchedule|retryRunnerPersistence)\b|Effect\.(?:retry|repeat)\s*\(/,
+			);
+		}
+		const feeder = readFileSync(
+			join(root, "src/lib/provider/runner/runner-send-feeder.ts"),
+			"utf8",
+		);
+		expect(feeder).not.toMatch(
+			/Effect\.catchCause\s*\(|\b(?:waiting|abandoned|restoring|cancelledBeforeWrite)\b/,
+		);
+		const manager = readFileSync(
+			join(root, "src/lib/provider/runner/process-session-runner.ts"),
+			"utf8",
+		);
+		expect(manager).not.toMatch(
+			/\b(?:ownerSends|restoringOwners|settleOwnerSendFailure)\b/,
+		);
+		expect(manager).not.toMatch(/while\s*\(draining\)/);
+		// Until the module split, the manager also composes upgrade and reconciler cadence.
+		const parsed = ts.createSourceFile(
+			"manager.ts",
+			manager,
+			ts.ScriptTarget.Latest,
+			true,
+		);
+		const owners = new Set([
+			"start",
+			"transmitStoredOwner",
+			"feeder",
+			"recoverOwnerSends",
+		]);
+		const visit = (node: ts.Node): void => {
+			if (
+				ts.isVariableDeclaration(node) &&
+				owners.has(node.name.getText(parsed))
+			)
+				expect(node.getText(parsed), node.name.getText(parsed)).not.toMatch(
+					/\b(?:runnerRetrySchedule|retryRunnerPersistence)\b|Effect\.(?:retry|repeat)\s*\(/,
+				);
+			ts.forEachChild(node, visit);
+		};
+		visit(parsed);
+	});
+
+	it("leaves runner SQL and the run gate entirely with the lifecycle owner", () => {
+		const source = readFileSync(
+			join(root, "src/lib/persistence/effect/commit-and-signal.ts"),
+			"utf8",
+		);
+		expect(source).not.toMatch(
+			/\b(?:claude_runner_cursors|holdRun|releaseRun|HoldCommandIdMismatch)\b/,
+		);
+	});
+
+	it("constructs only dispatch and release domain events in the lifecycle gate", () => {
+		const file = join(root, "src/lib/provider/runner/runner-retirement.ts");
+		const source = ts.createSourceFile(
+			file,
+			readFileSync(file, "utf8"),
+			ts.ScriptTarget.Latest,
+			true,
+		);
+		const kinds: string[] = [];
+		const visit = (node: ts.Node): void => {
+			if (
+				ts.isCallExpression(node) &&
+				node.expression.getText(source) === "canonicalEvent"
+			) {
+				const kind = node.arguments[0];
+				kinds.push(kind && ts.isStringLiteral(kind) ? kind.text : "dynamic");
+			}
+			ts.forEachChild(node, visit);
+		};
+		visit(source);
+		expect(kinds.sort()).toEqual(["run.dispatched", "run.released"]);
+	});
+
 	it("allows only the outbox adapter to import the run-terminal writer", () => {
 		const imports = sources(join(root, "src/lib")).flatMap((file) => {
 			const parsed = ts.createSourceFile(

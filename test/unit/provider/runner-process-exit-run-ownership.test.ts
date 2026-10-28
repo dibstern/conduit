@@ -10,6 +10,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
 	admitRunnerCommand,
 	makeRunnerAdmission,
+	reserveTestRun,
 } from "../../helpers/runner-provider-admission.js";
 
 const transport = vi.hoisted(() => ({ spawn: vi.fn(), alive: vi.fn() }));
@@ -422,6 +423,16 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 				providerState: {},
 				configDir: configuredClaudeConfigDir(root),
 			};
+			yield* sql`UPDATE provider_command_outbox SET payload_json = ${JSON.stringify(
+				{
+					...input,
+					inputId: "retry-input",
+					runId: "retry-run",
+					commandAttempt: 1,
+					prompt: "retry",
+					history: [],
+				},
+			)} WHERE command_id = 'retry-input'`;
 			yield* runner.executeEffect({ type: "pre-warm", sessionId: "s", input });
 			const execution = yield* Effect.forkChild(
 				admitRunnerCommand(admission, runner, {
@@ -1089,21 +1100,25 @@ effectIt.effect(
 					expect.any(String),
 					expect.objectContaining({ type: "pre-warm", input }),
 					undefined,
+					undefined,
 				);
 				const target = yield* Effect.forkChild(
 					admitRunnerCommand(admission, runner, {
 						type: "send-turn",
 						sinkId: "target-sink",
 						aborted: false,
-						input: {
-							...input,
-							account: accountB,
-							configDir: accountB.folder,
-							inputId: "target-input",
-							runId: "target-run",
-							prompt: "target",
-							history: [],
-						},
+						input: yield* reserveTestRun(
+							{
+								...input,
+								account: accountB,
+								configDir: accountB.folder,
+								inputId: "target-input",
+								runId: "target-run",
+								prompt: "target",
+								history: [],
+							},
+							{ ownerForExistingRun: true },
+						),
 					}),
 				);
 				yield* Effect.addFinalizer(() => Fiber.interrupt(target));
@@ -1144,7 +1159,8 @@ effectIt.effect(
 							configDir: accountB.folder,
 						}),
 					}),
-					undefined,
+					1,
+					expect.any(Function),
 				);
 				expect(target.pollUnsafe()).toEqual(
 					Exit.succeed({

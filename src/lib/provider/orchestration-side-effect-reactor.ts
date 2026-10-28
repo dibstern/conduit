@@ -515,10 +515,23 @@ export class ProviderSideEffectReactor {
 				const [next] = yield* this.options.sql<{
 					due: number | null;
 				}>`SELECT MIN(next_attempt_at) AS due
-				FROM provider_command_outbox WHERE status = 'retryable_failed' AND next_attempt_at > ${now}
-					AND (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})`.pipe(
-					Effect.mapError(storeFailure("scheduleRetry")),
-				);
+				FROM provider_command_outbox candidate
+				WHERE status = 'retryable_failed' AND next_attempt_at IS NOT NULL
+					AND (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
+					AND (next_attempt_at > ${now}
+						OR command_id NOT IN ${this.options.sql.in([...this.liveCommands])})
+					AND ((effect_type <> 'send_turn' AND provider_process_id IS NOT NULL)
+						OR session_id NOT IN ${this.options.sql.in([...this.drainingSessions])})
+					AND NOT EXISTS (
+						SELECT 1 FROM provider_command_outbox earlier
+						WHERE earlier.status IN ('pending', 'running', 'retryable_failed') AND (
+							(candidate.effect_type <> 'send_turn' AND candidate.provider_process_id IS NOT NULL
+								AND earlier.effect_type <> 'send_turn' AND earlier.provider_process_id = candidate.provider_process_id
+								AND earlier.request_sequence < candidate.request_sequence)
+							OR ((candidate.effect_type = 'send_turn' OR candidate.provider_process_id IS NULL)
+								AND earlier.project_key = candidate.project_key AND earlier.session_id = candidate.session_id
+								AND (earlier.request_sequence < candidate.request_sequence OR earlier.status = 'running')))
+					)`.pipe(Effect.mapError(storeFailure("scheduleRetry")));
 				const due = next?.due ?? undefined;
 				if (due === this.retryWake?.due) return;
 				if (this.retryWake?.fiber) yield* Fiber.interrupt(this.retryWake.fiber);
@@ -528,7 +541,7 @@ export class ProviderSideEffectReactor {
 					{ due };
 				this.retryWake = wake;
 				wake.fiber = yield* Effect.forkIn(
-					Effect.sleep(due - now).pipe(
+					Effect.sleep(Math.max(0, due - now)).pipe(
 						Effect.andThen(
 							Effect.sync(() => {
 								if (this.retryWake === wake) this.retryWake = undefined;
@@ -834,6 +847,8 @@ export class ProviderSideEffectReactor {
 							// Recall only Conduit's queue. Missing acknowledgement is uncertainty,
 							// never permission to cancel native work or retry the command.
 							const recall = Effect.gen({ self: this }, function* () {
+								cancellation.abort();
+								const observedAt = yield* this.currentTimeMillis();
 								yield* this.recordSendReply(
 									row,
 									undefined,
@@ -842,21 +857,20 @@ export class ProviderSideEffectReactor {
 										code: "processing_timeout",
 										message: "Input recalled before intake",
 									},
-									yield* this.currentTimeMillis(),
+									observedAt,
 									"unheld_runner",
 								);
-								cancellation.abort();
-							}).pipe(
-								Effect.andThen(wait),
-								Effect.timeoutOrElse({
-									duration: "1 second",
-									orElse: () =>
-										Effect.succeed({
-											...REACTOR_COMPLETED_RESULT,
-											status: "indeterminate" as const,
-										}),
-								}),
-							);
+								return yield* wait.pipe(
+									Effect.timeoutOrElse({
+										duration: "1 second",
+										orElse: () =>
+											Effect.succeed({
+												...REACTOR_COMPLETED_RESULT,
+												status: "indeterminate" as const,
+											}),
+									}),
+								);
+							});
 							return yield* Effect.raceFirst(
 								wait,
 								this.durableOutcome(row.command_id).pipe(
@@ -1335,7 +1349,7 @@ export class ProviderSideEffectReactor {
 				Effect.gen({ self: this }, function* () {
 					const [claimed] = yield* this.options.sql<ProviderCommandOutboxRow>`
 				UPDATE provider_command_outbox SET status = 'running',
-					attempt_count = attempt_count + 1, next_attempt_at = NULL, updated_at = ${updatedAt},
+					attempt_count = attempt_count + 1, error_code = NULL, next_attempt_at = NULL, updated_at = ${updatedAt},
 					run_id = CASE WHEN effect_type = 'send_turn' AND NOT EXISTS (
 						SELECT 1 FROM provider_runs WHERE id = provider_command_outbox.run_id
 							AND session_id = provider_command_outbox.session_id AND status IN ('pending', 'running')

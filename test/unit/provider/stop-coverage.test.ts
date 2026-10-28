@@ -3,10 +3,12 @@ import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { DurableCommandCommitRepository } from "../../../src/lib/provider/orchestration-command-commit.js";
 import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
+import { makeRunnerRunLifecycle } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { stopCovers } from "../../../src/lib/provider/session-run-settlement.js";
 
 const layer = makePersistenceEffectLayer(":memory:", "project");
@@ -95,7 +97,11 @@ describe("Stop coverage", () => {
 						"serving",
 					);
 					expect(
-						yield* commit.holdRun({
+						yield* makeRunnerRunLifecycle({
+							sql,
+							commit,
+							eventStore: yield* EventStoreEffectTag,
+						}).holdRun({
 							sessionId: "session",
 							runId: "R2",
 							commandId: "M2",

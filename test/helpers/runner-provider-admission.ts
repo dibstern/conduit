@@ -18,33 +18,65 @@ import type {
 	SessionTurn,
 } from "../../src/lib/provider/runner/session-runner.js";
 
-// Direct manager fixtures bypass the outbox's run.requested transaction.
-// Explicit owners stay untouched so invalid/missing ownership tests still fail.
-const reserveTestRun = <
-	T extends Pick<SessionTurn, "sessionId" | "runId" | "inputId">,
+// Direct manager fixtures need the same atomic run and owner claim as dispatch.
+// Existing run ids stay untouched unless the fixture explicitly requests an owner.
+export const reserveTestRun = <
+	T extends Pick<SessionTurn, "sessionId" | "runId" | "inputId"> &
+		Partial<Pick<SessionTurn, "commandAttempt" | "account" | "instanceId">>,
 >(
 	input: T,
+	options?: { readonly ownerForExistingRun: true },
 ): Effect.Effect<T> =>
 	Effect.gen(function* () {
-		if (input.runId) return input;
+		if (input.runId && !options?.ownerForExistingRun) return input;
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const store = yield* Effect.serviceOption(EventStoreEffectTag);
 		const projection = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
 		if (Option.isNone(sql) || Option.isNone(store) || Option.isNone(projection))
 			return input;
-		const runId = `fixture-${randomUUID()}`;
+		const runId = input.runId ?? `fixture-${randomUUID()}`;
+		const commandAttempt = input.commandAttempt ?? 1;
+		const reserved = { ...input, runId, commandAttempt };
 		const commit = yield* makeCommitAndSignal.pipe(
 			Effect.provideService(SqlClient.SqlClient, sql.value),
 			Effect.provideService(EventStoreEffectTag, store.value),
 			Effect.provideService(ProjectionRunnerEffectTag, projection.value),
 		);
-		yield* commit([
-			canonicalEvent("run.requested", input.sessionId, {
-				runId,
-				inputId: input.inputId ?? runId,
-			}),
-		]).pipe(Effect.orDie);
-		return { ...input, runId };
+		yield* commit
+			.write((project) =>
+				Effect.gen(function* () {
+					if (!input.runId)
+						yield* project(
+							yield* store.value.appendBatch([
+								canonicalEvent("run.requested", input.sessionId, {
+									runId,
+									inputId: input.inputId,
+								}),
+							]),
+						);
+					const [next] = yield* sql.value<{
+						sequence: number;
+					}>`SELECT COALESCE(MAX(request_sequence), 0) + 1 AS sequence FROM provider_command_outbox`;
+					const sequence = next?.sequence ?? 1;
+					const [session] = yield* sql.value<{
+						project_id: string;
+						provider: string;
+					}>`SELECT project_id, provider FROM sessions WHERE id = ${input.sessionId}`;
+					const projectId = session?.project_id ?? "test-project";
+					const providerId =
+						input.account?.id ??
+						input.instanceId ??
+						session?.provider ??
+						"claude";
+					yield* sql.value`INSERT INTO command_receipts (command_id, session_id, status, created_at, command_type, project_key, fingerprint_hash, fingerprint_version, side_effect_sequence, updated_at)
+			VALUES (${input.inputId}, ${input.sessionId}, 'side_effect_requested', 1, 'send_turn', ${projectId}, 'sha256:runner-admission-fixture', 1, ${sequence}, 1)
+			ON CONFLICT (command_id) DO UPDATE SET status = 'side_effect_requested', side_effect_sequence = excluded.side_effect_sequence`;
+					yield* sql.value`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at)
+				VALUES (${sequence}, ${input.inputId}, ${projectId}, ${input.sessionId}, ${providerId}, 'send_turn', ${JSON.stringify(reserved)}, ${runId}, 'running', ${commandAttempt}, 1, 1)`;
+				}),
+			)
+			.pipe(Effect.orDie);
+		return reserved;
 	});
 
 function idleExecute(

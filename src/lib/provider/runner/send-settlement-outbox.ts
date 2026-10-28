@@ -78,6 +78,7 @@ export const appendSendSettlement = (
 		outcome,
 		{
 			...tx,
+			...(evidence._tag === "covered" ? { covered: true } : {}),
 			...(evidence._tag === "process_lost" ? { processLost: true } : {}),
 			...(outcome === "retryable"
 				? {

@@ -3,6 +3,7 @@ import type { SqlClient } from "effect/sql";
 import { flushPendingWrites } from "../../persistence/effect/commit-and-signal.js";
 import type { PermissionResponse } from "../types.js";
 import { legacyRunnerRanking } from "./runner-registry.js";
+import { type StoreFault, toStoreFault } from "./send-settlement.js";
 import type { SessionOutputReply } from "./session-runner.js";
 
 export type RunnerRole = "serving" | "candidate";
@@ -517,33 +518,45 @@ export const makeRunnerReceiptStore = (
 				runnerId: string,
 				identity: RunnerCursorIdentity,
 				role: RunnerRole,
-			) =>
-				flushPendingWrites(
-					sql,
-					Effect.gen(function* () {
-						const existing = yield* rawRunner(runnerId);
-						if (existing[0]) {
-							yield* decodeRetirement(existing[0]);
-							return yield* new RunnerSlotError({
-								runnerId,
-								cause: "Runner is already registered",
-							});
-						}
-						if (role === "candidate") {
-							const serving =
-								yield* sql`SELECT 1 FROM claude_runner_cursors WHERE session_id = ${identity.sessionId} AND role = 'serving' AND retired_at IS NULL`;
-							if (serving.length === 0)
+			): Effect.Effect<"Registered" | "Lost", StoreFault> =>
+				Effect.gen(function* () {
+					let result: "Registered" | "Lost" = "Lost";
+					yield* flushPendingWrites(
+						sql,
+						Effect.gen(function* () {
+							const existing = yield* rawRunner(runnerId);
+							if (existing[0]) {
+								yield* decodeRetirement(existing[0]);
 								return yield* new RunnerSlotError({
 									runnerId,
-									cause: "Session has no serving runner for its candidate",
+									cause: "Runner is already registered",
 								});
-						}
-						yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, driver_kind, pid, start_time, reaper_pid, reaper_start_time, role)
+							}
+							if (role === "candidate") {
+								const serving =
+									yield* sql`SELECT 1 FROM claude_runner_cursors WHERE session_id = ${identity.sessionId} AND role = 'serving' AND retired_at IS NULL`;
+								if (serving.length === 0) return "Lost" as const;
+							} else {
+								const occupied = yield* sql`SELECT 1 FROM claude_runner_cursors
+								WHERE session_id = ${identity.sessionId} AND retired_at IS NULL LIMIT 1`;
+								if (occupied.length > 0) return "Lost" as const;
+							}
+							yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, driver_kind, pid, start_time, reaper_pid, reaper_start_time, role)
 					VALUES (${runnerId}, 0, ${identity.sessionId}, ${identity.driverKind ?? "claude"}, ${identity.pid ?? null}, ${identity.startTime ?? null}, ${identity.reaper?.pid ?? null}, ${identity.reaper?.startTime ?? null}, ${role})`;
-						const [saved] = yield* rawRunner(runnerId);
-						if (saved) yield* decodeRetirement(saved);
-					}),
-				),
+							const [saved] = yield* rawRunner(runnerId);
+							if (saved) yield* decodeRetirement(saved);
+							return "Registered" as const;
+						}).pipe(
+							Effect.tap((registered) =>
+								Effect.sync(() => {
+									result = registered;
+								}),
+							),
+							Effect.asVoid,
+						),
+					);
+					return result;
+				}).pipe(Effect.mapError(toStoreFault)),
 			runners: () =>
 				sql<{
 					runner_id: string;

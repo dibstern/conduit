@@ -84,6 +84,7 @@ import {
 import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-recovery.js";
 import * as runnerRegistry from "../../../src/lib/provider/runner/runner-registry.js";
 import { prepareRunnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
+import { makeRunnerRunLifecycle } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { RunnerSendJournal } from "../../../src/lib/provider/runner/runner-send-journal.js";
 import type { RunnerSinkBindings } from "../../../src/lib/provider/runner/runner-sink-bindings.js";
 import { SendAdmissionTimeout } from "../../../src/lib/provider/runner/send-admission.js";
@@ -105,6 +106,7 @@ import {
 import {
 	admitRunnerCommand,
 	makeRunnerAdmission,
+	reserveTestRun,
 } from "../../helpers/runner-provider-admission.js";
 
 const spawned = vi.hoisted(() => ({ spawn: vi.fn() }));
@@ -128,6 +130,8 @@ const retirementFixture = (
 		);
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('s', 'test-project', 'claude', 1, 1)`;
+		// Owner sends settle through persistence, which requires a live session.
+		yield* sql`INSERT INTO session_providers (id, session_id, provider, status, activated_at) VALUES ('s:initial', 's', 'claude', 'active', 1)`;
 		const runnerId = "131313131313";
 		const pid = 100_088;
 		const receipts = yield* makeRunnerReceiptStore(sql);
@@ -677,6 +681,18 @@ const sendScopeFixture = (
 		return {
 			...f,
 			instance,
+			acceptStop: commit.write(() =>
+				Effect.gen(function* () {
+					const owners = yield* f.sql<{
+						runId: string;
+					}>`SELECT id AS runId FROM provider_runs WHERE session_id = 's' AND status IN ('pending', 'running')`;
+					const [next] = yield* f.sql<{
+						sequence: number;
+					}>`SELECT COALESCE(MAX(request_sequence), 0) + 1 AS sequence FROM provider_command_outbox`;
+					yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, requested_at, updated_at)
+				VALUES (${next?.sequence ?? 1}, ${`stop:${owners.map(({ runId }) => runId).join(":")}`}, 'test-project', 's', 'account', 'interrupt_turn', ${JSON.stringify({ type: "interrupt_turn", sessionId: "s", stop: { owners, turnIds: owners.map(({ runId }) => runId), deadlineAt: 3000, runnerBacked: true, retainedSteers: false } })}, 'completed', 1, 1)`;
+				}),
+			),
 			account,
 			input,
 			sinkId,
@@ -705,6 +721,12 @@ it.effect(
 					.sendTurnEffect(f.input)
 					.pipe(Effect.forkChild);
 				yield* TestClock.adjust(0);
+				expect(f.attachments).toHaveLength(1);
+				expect(
+					f.commands.filter((command) => command.type === "send-turn"),
+				).toEqual([]);
+				expect(f.terminalCount()).toBe(0);
+				yield* TestClock.adjust("4001 millis");
 				expect(f.attachments).toHaveLength(2);
 				const replacement = f.attachments[1];
 				if (!replacement)
@@ -833,11 +855,7 @@ it.effect(
 					yield* TestClock.adjust(0);
 					expect(
 						yield* f.sql`SELECT type, json_extract(data, '$.transmission') AS transmission FROM events WHERE type IN ('run.dispatched', 'run.released') ORDER BY rowid`,
-					).toEqual([
-						{ type: "run.dispatched", transmission: 1 },
-						{ type: "run.released", transmission: 1 },
-						{ type: "run.dispatched", transmission: 2 },
-					]);
+					).toEqual([{ type: "run.dispatched", transmission: 1 }]);
 					expect(
 						f.commands.filter((command) => command.type === "send-turn"),
 					).toHaveLength(1);
@@ -870,6 +888,7 @@ const s7Fixture = (
 		const persist = yield* ClaudeEventPersistEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
 		const commit = yield* makeCommitAndSignal;
+		const eventStore = yield* EventStoreEffectTag;
 		const discover = runnerRegistry.discoverAllRunners;
 		const discovery = vi
 			.spyOn(runnerRegistry, "discoverAllRunners")
@@ -979,7 +998,11 @@ const s7Fixture = (
 					WHERE session_id = ${input.sessionId} AND run_id = ${input.runId}
 					ORDER BY request_sequence DESC LIMIT 1`;
 				if (!command) return yield* Effect.die("Missing send command");
-				const hold = yield* commit.holdRun({
+				const hold = yield* makeRunnerRunLifecycle({
+					sql: f.sql,
+					commit,
+					eventStore,
+				}).holdRun({
 					sessionId: input.sessionId,
 					runId: input.runId,
 					commandId: command.command_id,
@@ -2569,6 +2592,7 @@ it.effect(
 					"refused",
 					[],
 					"text refused",
+					yield* Clock.currentTimeMillis,
 				);
 				expect(yield* drafts.read({ session: "s" })).toBe("text refused");
 				expect(
@@ -3334,7 +3358,10 @@ it.effect(
 					);
 					yield* TestClock.adjust(0);
 					expect(f.account.acquired).toBe(1);
+					yield* f.acceptStop;
 					f.abort.abort();
+					yield* TestClock.adjust(0);
+					expect(sending.pollUnsafe()).toBeDefined();
 					expect(yield* Fiber.join(sending)).toMatchObject({
 						status: "cancelled",
 					});
@@ -3522,7 +3549,10 @@ it.effect(
 					f.instance.sendTurnEffect(f.input),
 				);
 				yield* Deferred.await(f.replacementConnecting);
+				yield* f.acceptStop;
 				f.abort.abort();
+				yield* TestClock.adjust(0);
+				expect(sending.pollUnsafe()).toBeDefined();
 				expect(yield* Fiber.join(sending)).toMatchObject({
 					status: "cancelled",
 				});
@@ -3532,6 +3562,72 @@ it.effect(
 					f.commands.filter((command) => command.type === "send-turn"),
 				).toEqual([]);
 				yield* Deferred.succeed(f.replacementReady, undefined);
+			}),
+		),
+);
+
+// The reactor's recall aborts a queued send and fails it as processing_timeout
+// only once the runner reports it cancelled. A steer is not an owner send, so
+// settleSend never writes for it and abort must keep its in-memory cancel.
+it.effect(
+	"abort cancels a queued steer into a joined run before its runner is ready",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture(false);
+				yield* (yield* makeCommitAndSignal)([
+					canonicalEvent(
+						"session.created",
+						"s",
+						{ sessionId: "s", title: "Steer", provider: "claude" },
+						{ provider: "claude" },
+					),
+					canonicalEvent("run.requested", "s", {
+						runId: "run:owner",
+						inputId: "owner",
+					}),
+					canonicalEvent("run.requested", "s", {
+						runId: "run:steer",
+						inputId: "steer",
+					}),
+				]);
+				yield* f.sql`UPDATE provider_runs SET status = 'joined', joined_into = 'run:owner' WHERE id = 'run:steer'`;
+				f.replacementGate.hold = true;
+				const steering = yield* Effect.forkChild(
+					f
+						.admitCommand({
+							type: "send-turn",
+							sinkId: "steer-sink",
+							aborted: false,
+							input: {
+								...f.input,
+								inputId: "steer",
+								runId: "run:steer",
+								prompt: "steer",
+								history: [],
+							},
+						})
+						.pipe(Effect.result),
+				);
+				yield* Deferred.await(f.replacementConnecting);
+				const aborting = yield* Effect.forkChild(
+					f.manager.executeEffect(
+						{ type: "abort", sinkId: "steer-sink" },
+						f.sendHandles.at(-1),
+					),
+				);
+				yield* TestClock.adjust(0);
+				const cancelledBeforeReady = steering.pollUnsafe() !== undefined;
+				yield* Deferred.succeed(f.replacementReady, undefined);
+				yield* Fiber.join(aborting);
+				expect(cancelledBeforeReady).toBe(true);
+				expect(yield* Fiber.join(steering)).toMatchObject({
+					_tag: "Success",
+					success: { status: "cancelled" },
+				});
+				expect(
+					f.commands.filter((command) => command.type === "send-turn"),
+				).toEqual([]);
 			}),
 		),
 );
@@ -3554,7 +3650,7 @@ it.effect(
 				});
 				expect(yield* Fiber.join(sending)).toMatchObject({
 					_tag: "Success",
-					success: { status: "cancelled" },
+					success: { status: "error" },
 				});
 				expect(
 					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'fixture-send-scope:1'`,
@@ -4168,6 +4264,7 @@ it.effect(
 						const input = {
 							...f.input,
 							runId: `fresh-run:${++admittedRuns}`,
+							commandAttempt: 0,
 							prompt: "same input",
 							history: [],
 						};
@@ -4177,14 +4274,17 @@ it.effect(
 								inputId: input.inputId,
 							}),
 						]);
+						const reserved = yield* reserveTestRun(input, {
+							ownerForExistingRun: true,
+						});
 						return yield* f.instance.admitSendEffect(
-							{ origin: { _tag: "Fresh" }, sinkId: f.sinkId, input },
+							{ origin: { _tag: "Fresh" }, sinkId: f.sinkId, input: reserved },
 							(send) =>
 								f.manager.executeEffect(
 									{
 										type: "send-turn",
 										sinkId: f.sinkId,
-										input,
+										input: reserved,
 										aborted: false,
 									},
 									send,
@@ -5128,10 +5228,12 @@ it.effect(
 					}),
 				]);
 				yield* f.manager.recoverEffect;
+				const reserved = yield* reserveTestRun(
+					{ ...f.input, runId: "current-run", commandAttempt: 0 },
+					{ ownerForExistingRun: true },
+				);
 				const sending = yield* Effect.forkChild(
-					f.instance
-						.sendTurnEffect({ ...f.input, runId: "current-run" })
-						.pipe(Effect.result),
+					f.instance.sendTurnEffect(reserved).pipe(Effect.result),
 				);
 				yield* Deferred.await(f.sending);
 				const old = f.attachments[0];
@@ -5731,7 +5833,12 @@ for (const cleanupFailure of ["deadline", "unavailable services"] as const)
 							{ metadata: { runId: "old-run" } },
 						),
 					]);
-					yield* commit.holdRun({
+					yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at) VALUES (1, 'old-command', 'test-project', 's', 'test-claude', 'send_turn', '{"inputId":"old-input"}', 'old-run', 'running', 1, 1, 1)`;
+					yield* makeRunnerRunLifecycle({
+						sql: f.sql,
+						commit,
+						eventStore: yield* EventStoreEffectTag,
+					}).holdRun({
 						sessionId: "s",
 						runId: "old-run",
 						commandId: "old-command",
@@ -5753,8 +5860,6 @@ for (const cleanupFailure of ["deadline", "unavailable services"] as const)
 						)
 						.pipe(Effect.forkChild);
 					yield* Deferred.await(received);
-					yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at)
-			VALUES (1, 'old-command', 'test-project', 's', 'test-claude', 'send_turn', '{"inputId":"old-input"}', 'old-run', 'running', 1, 1, 1)`;
 					old.onOutputCommitted?.({
 						type: "event",
 						sinkId: "retained",
@@ -6958,6 +7063,17 @@ for (const interleaving of ["replacement", "retirement", "pending"] as const) {
 					yield* Fiber.join(sending);
 					yield* TestClock.adjust(0);
 					if (pending) {
+						// Abort is not an in-memory cancel of an undispatched owner send;
+						// the committed Stop ends the readiness wait.
+						yield* (yield* makeCommitAndSignal).write(() =>
+							Effect.gen(function* () {
+								const owners = yield* f.sql<{
+									runId: string;
+								}>`SELECT id AS runId FROM provider_runs WHERE session_id = 's' AND status IN ('pending', 'running')`;
+								yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, requested_at, updated_at)
+									VALUES ((SELECT COALESCE(MAX(request_sequence), 0) + 1 FROM provider_command_outbox), 'stop:pending', 'test-project', 's', 'account', 'interrupt_turn', ${JSON.stringify({ type: "interrupt_turn", sessionId: "s", stop: { owners, turnIds: owners.map(({ runId }) => runId), deadlineAt: 3000, runnerBacked: true, retainedSteers: false } })}, 'completed', 1, 1)`;
+							}),
+						);
 						const aborting = yield* Effect.forkChild(
 							f.manager.executeEffect(
 								{ type: "abort", sinkId: "old-sink" },
@@ -7738,6 +7854,7 @@ it.effect(
 					"cached-timeout",
 					[image],
 					"original text",
+					yield* Clock.currentTimeMillis,
 				);
 				expect(yield* drafts.read({ session: "s" })).toBe("original text");
 				expect(
@@ -7996,6 +8113,7 @@ for (const admissionTimeout of [false, true])
 							"socket-held",
 							[image],
 							"original socket text",
+							yield* Clock.currentTimeMillis,
 						);
 						expect(yield* drafts.read({ session: "s" })).toBe(
 							"original socket text",
@@ -8883,7 +9001,7 @@ it.effect(
 );
 
 it.effect(
-	"R2 a command cancelled after its hold releases NotSent before returning",
+	"R2 a committed Stop after hold releases the host refusal before returning",
 	() =>
 		runRetirement(
 			Effect.gen(function* () {
@@ -8893,7 +9011,6 @@ it.effect(
 				const resume = yield* Deferred.make<void>();
 				const bus = yield* SessionEventBusTag;
 				const publish = bus.publish;
-				let cancelled = false;
 				let paused = false;
 				const publication = vi
 					.spyOn(bus, "publish")
@@ -8914,39 +9031,39 @@ it.effect(
 							),
 						),
 					);
-				const execute = f.manager.executeEffect.bind(f.manager);
-				const execution = vi
-					.spyOn(f.manager, "executeEffect")
-					.mockImplementation((command, ...rest) => {
-						// A public command's abort state changes after hold acceptance, while
-						// no transmission or native cancel event has yet occurred.
-						if (command.type === "send-turn")
-							Object.defineProperty(command, "aborted", {
-								get: () => cancelled,
-							});
-						return execute(command, ...rest);
+				f.replaySend.execute = () =>
+					Effect.fail({
+						operation: "send-turn",
+						code: "runner_stopping",
+						message: "Accepted Stop covers this transmission",
+						delivery: { _tag: "Refused", reason: "interrupted" },
 					});
 				yield* Effect.gen(function* () {
 					const sending = yield* f.instance
 						.sendTurnEffect(f.input)
 						.pipe(Effect.forkChild);
 					yield* Deferred.await(committed);
-					cancelled = true;
+					yield* f.acceptStop;
 					yield* Deferred.succeed(resume, undefined);
 					yield* TestClock.adjust(0);
 					expect(
 						yield* f.sql`SELECT json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
-					).toEqual([{ reason: "NotSent" }]);
+					).toEqual([{ reason: "Refused" }]);
 					expect(
 						f.commands.filter((command) => command.type === "send-turn"),
-					).toEqual([]);
+					).toHaveLength(1);
 					expect((yield* Fiber.join(sending)).status).toBe("cancelled");
+					expect(yield* f.sql`SELECT status FROM provider_runs`).toEqual([
+						{ status: "interrupted" },
+					]);
+					expect(
+						yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
+					).toEqual([{ type: "turn.interrupted" }]);
 				}).pipe(
 					Effect.ensuring(Deferred.succeed(resume, undefined)),
 					Effect.ensuring(
 						Effect.sync(() => {
 							publication.mockRestore();
-							execution.mockRestore();
 						}),
 					),
 				);

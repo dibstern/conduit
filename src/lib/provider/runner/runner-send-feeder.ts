@@ -1,17 +1,21 @@
-import { Deferred, Effect, Exit, FiberSet } from "effect";
+import { Deferred, Effect, Exit, FiberSet, Option } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
-import type { Hold } from "../../persistence/effect/commit-and-signal.js";
 import { isClaudeResumeRefused } from "../event-sink-errors.js";
 import type { TurnResult } from "../types.js";
 import {
 	runnerCommandReplied,
 	runnerDeliveryEvidence,
+	runnerFailure,
 } from "./runner-protocol.js";
-import type { RunRelease } from "./runner-retirement.js";
-import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
+import type { Hold, RunRelease } from "./runner-retirement.js";
+import {
+	retrySettlementWrite,
+	type StoreFault,
+	sendRetryBackoff,
+} from "./send-settlement.js";
 import type { SessionFailure } from "./session-runner.js";
 
-interface OwnerSend {
+export interface OwnerSend {
 	readonly sessionId: string;
 	readonly runId: string;
 	readonly commandId: string;
@@ -19,356 +23,381 @@ interface OwnerSend {
 	readonly requestSequence?: number;
 	readonly attempt?: number;
 }
-
+export interface SendWritePermission {
+	readonly nativeResumeFallback: boolean | undefined;
+	readonly current: () => boolean;
+	/** Consume immediately before the first byte, without yielding before write. */
+	readonly consume: () => boolean;
+}
 type Held = Extract<Hold, { _tag: "Held" }>;
-interface WaitingSend {
+type Transmit = (
+	held: Held,
+	permission: SendWritePermission,
+) => Effect.Effect<TurnResult | undefined, SessionFailure>;
+interface Capability {
 	readonly input: OwnerSend;
-	readonly transmit: (
-		hold: Held,
-	) => Effect.Effect<TurnResult | undefined, SessionFailure>;
-	readonly done: Deferred.Deferred<TurnResult | undefined, SessionFailure>;
-	held?: Held | undefined;
-	releasedTransmission?: number;
-	cancelledBeforeWrite?: boolean;
+	readonly ended: Deferred.Deferred<void, SessionFailure>;
+	releasedTransmission: number;
+	live?:
+		| {
+				readonly transmit: Transmit;
+				readonly nativeResumeFallback: boolean;
+				readonly close: Effect.Effect<void>;
+				readonly reply: Deferred.Deferred<
+					TurnResult | undefined,
+					SessionFailure
+				>;
+		  }
+		| undefined;
 }
 
-/** One session queue is the only place an owner send acquires a transmission. */
+/** The queue owns wakes; the ledger owns whether any wake may transmit. */
 export const makeRunnerSendFeeder = (options: {
-	readonly hold: (input: OwnerSend) => Effect.Effect<Hold, SessionFailure>;
-	readonly start: (input: OwnerSend) => Effect.Effect<void, SessionFailure>;
+	readonly hold: (input: OwnerSend) => Effect.Effect<Hold, StoreFault>;
+	readonly start: (
+		input: OwnerSend,
+	) => Effect.Effect<"Started", SessionFailure>;
 	readonly release: (input: RunRelease) => Effect.Effect<void, SessionFailure>;
-	readonly settled: (input: OwnerSend) => Effect.Effect<void, SessionFailure>;
 	readonly failed: (
 		input: OwnerSend,
 		failure: SessionFailure,
 	) => Effect.Effect<void, SessionFailure>;
-	/** Reconstruct a missing waiter; registration returns to this feeder. */
-	readonly restore?: (input: OwnerSend) => Effect.Effect<void, SessionFailure>;
+	readonly awaitRun: (
+		input: OwnerSend,
+		includeCoverage?: boolean,
+	) => Effect.Effect<void, StoreFault>;
+	readonly clean: (runner: string) => Effect.Effect<void, StoreFault>;
+	readonly park: (predecessor: {
+		readonly runner: string;
+		readonly until: number;
+	}) => Effect.Effect<void, SessionFailure>;
+	readonly transmitAdopted: (
+		input: OwnerSend,
+		held: Held,
+		permission: SendWritePermission,
+	) => Effect.Effect<TurnResult | undefined, SessionFailure>;
 }) =>
 	Effect.gen(function* () {
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
-		const waiting = new Map<string, WaitingSend>();
-		const abandoned = new Map<string, OwnerSend>();
-		const restoring = new Set<string>();
-		const queues = new Map<
-			string,
-			{ readonly pending: Set<WaitingSend>; changed: Deferred.Deferred<void> }
-		>();
+		// Entries retain only caller/I/O capabilities, never dispatch or run status.
+		const capabilities = new Map<string, Capability>();
+		const queues = new Map<string, Set<Capability>>();
 		const key = (input: OwnerSend) =>
-			JSON.stringify([
-				input.sessionId,
-				input.runId,
-				input.commandId,
-				input.nativeResumeFallback === true,
-			]);
-		const ownerKey = (input: OwnerSend) =>
 			JSON.stringify([input.sessionId, input.runId, input.commandId]);
-		const finish = (item: WaitingSend) => {
-			if (waiting.get(key(item.input)) === item)
-				waiting.delete(key(item.input));
-		};
 		const release = (input: RunRelease) =>
-			retryRunnerPersistence(Effect.suspend(() => options.release(input)));
-		const failed = (input: OwnerSend, failure: SessionFailure) =>
-			options.failed(input, failure);
-		const schedule = (item: WaitingSend): void => {
-			let queue = queues.get(item.input.sessionId);
-			if (!queue) {
-				queue = { pending: new Set(), changed: Deferred.makeUnsafe<void>() };
-				queues.set(item.input.sessionId, queue);
-			} else {
-				queue.pending.add(item);
-				Deferred.doneUnsafe(queue.changed, Effect.void);
-				return;
-			}
-			queue.pending.add(item);
-			const session = queue;
+			retrySettlementWrite(Effect.suspend(() => options.release(input)));
+		const capability = (input: OwnerSend) => {
+			const id = key(input);
+			const current = capabilities.get(id);
+			if (current) return current;
+			const item: Capability = {
+				input,
+				ended: Deferred.makeUnsafe<void, SessionFailure>(),
+				releasedTransmission: 0,
+			};
+			capabilities.set(id, item);
 			runFork(
 				Effect.gen(function* () {
-					while (true) {
-						const next = session.pending.values().next().value;
-						if (!next) {
-							const changed = session.changed;
-							yield* Deferred.await(changed);
-							if (session.changed === changed)
-								session.changed = Deferred.makeUnsafe<void>();
-							continue;
+					const ended = yield* Effect.exit(
+						retrySettlementWrite(options.awaitRun(input)),
+					);
+					if (Exit.isSuccess(ended)) {
+						if (capabilities.get(id) === item) capabilities.delete(id);
+						if (item.live) {
+							const reply = yield* Deferred.poll(item.live.reply);
+							const result = Option.isSome(reply)
+								? yield* Effect.exit(reply.value)
+								: undefined;
+							if (
+								!result ||
+								Exit.isFailure(result) ||
+								result.value?.status !== "completed"
+							)
+								yield* item.live.close;
 						}
-						session.pending.delete(next);
-						if (
-							waiting.get(key(next.input)) !== next ||
-							next.held ||
-							next.cancelledBeforeWrite
-						)
-							continue;
-						const result = yield* Effect.exit(
-							Effect.gen(function* () {
-								const holdOnce = () =>
-									options.hold(next.input).pipe(
-										Effect.retry({
-											while: (failure) => failure.code === "StoreUnavailable",
-											schedule: runnerRetrySchedule,
-										}),
-									);
-								const hold = yield* holdOnce();
-								if (hold._tag !== "Unserved") return hold;
-								const started = yield* Effect.result(options.start(next.input));
-								if (started._tag === "Failure") {
-									yield* failed(next.input, started.failure);
-									return { _tag: "Covered" as const };
-								}
-								const afterStart = yield* holdOnce();
-								if (afterStart._tag !== "Unserved") return afterStart;
-								yield* failed(next.input, {
-									operation: "start runner",
-									code: "runner_start_lost",
-									message: "Runner exited before accepting the send",
-								});
-								return { _tag: "Covered" as const };
-							}),
+						yield* Deferred.succeed(item.ended, undefined);
+					} else if (!Failure.isInterruptedOnly(ended.cause)) {
+						yield* Deferred.fail(
+							item.ended,
+							runnerFailure("await owner run", ended.cause),
 						);
-						if (waiting.get(key(next.input)) !== next) {
-							if (result._tag === "Success" && result.value._tag === "Held")
-								yield* release({
-									...next.input,
-									runnerId: result.value.runner,
-									transmission: result.value.transmission,
-									reason: "NotSent",
-								});
-							continue;
-						}
-						if (result._tag === "Failure") {
-							if (Failure.isInterruptedOnly(result.cause))
-								return yield* Effect.interrupt;
-							finish(next);
-							yield* Deferred.done(next.done, Exit.failCause(result.cause));
-							continue;
-						}
-						const hold = result.value;
-						if (hold._tag !== "Held") {
-							// The ledger observer completes the caller after its handle
-							// closes. Covered may still belong to a stopping holder.
-							continue;
-						}
-						if (next.cancelledBeforeWrite) {
-							yield* release({
-								...next.input,
-								runnerId: hold.runner,
-								transmission: hold.transmission,
-								reason: "NotSent",
-							});
-							continue;
-						}
-						if (hold.transmission <= (next.releasedTransmission ?? 0)) {
-							// Release can commit before the gate's reply reaches this fiber.
-							session.pending.add(next);
-							continue;
-						}
-						next.held = hold;
-						runFork(
-							Effect.gen(function* () {
-								if (waiting.get(key(next.input)) !== next) {
-									yield* release({
-										...next.input,
-										runnerId: hold.runner,
-										transmission: hold.transmission,
-										reason: "NotSent",
-									});
-									return;
-								}
-								const sent = yield* Effect.result(next.transmit(hold));
-								if (next.held !== hold) return;
-								if (sent._tag === "Failure") {
-									const evidence = runnerDeliveryEvidence(sent.failure);
-									if (isClaudeResumeRefused(sent.failure)) {
-										finish(next);
-										yield* release({
-											...next.input,
-											runnerId: hold.runner,
-											transmission: hold.transmission,
-											reason: "ResumeRejected",
-										});
-										yield* Deferred.fail(next.done, sent.failure);
-									} else if (evidence) {
-										yield* release({
-											...next.input,
-											runnerId: hold.runner,
-											transmission: hold.transmission,
-											reason: evidence._tag,
-											...(evidence._tag === "Refused"
-												? { refusalReason: evidence.reason }
-												: {}),
-										});
-									} else if (runnerCommandReplied(sent.failure)) {
-										yield* Deferred.fail(next.done, sent.failure);
-									}
-									// A failed write or a lost reply stays held until ledger settlement.
-									return;
-								}
-								if (
-									sent.success?.nativeResumeRejected ||
-									isClaudeResumeRefused(sent.success?.error)
-								) {
-									finish(next);
-									yield* release({
-										...next.input,
-										runnerId: hold.runner,
-										transmission: hold.transmission,
-										reason: "ResumeRejected",
-									});
-								}
-								yield* Deferred.succeed(next.done, sent.success);
-							}).pipe(
-								Effect.catchCause((cause) =>
-									Failure.isInterruptedOnly(cause)
-										? Effect.interrupt
-										: Effect.logWarning(
-												"Owner send transmission failed",
-												cause,
-											),
-								),
-							),
+						yield* Effect.logWarning(
+							"Owner run observation failed",
+							ended.cause,
 						);
 					}
-				}).pipe(
-					Effect.ensuring(
-						Effect.sync(() => {
-							if (queues.get(item.input.sessionId) === session)
-								queues.delete(item.input.sessionId);
-						}),
-					),
-					Effect.catchCause((cause) =>
-						Effect.logWarning("Owner send feeder failed", cause),
-					),
-				),
+				}),
 			);
+			return item;
 		};
-		return {
-			has: (input: OwnerSend) => waiting.has(key(input)),
-			cancel: (input: OwnerSend) =>
-				Effect.sync(() => {
-					const item = waiting.get(key(input));
-					if (item) item.cancelledBeforeWrite = true;
-				}),
-			cancelledBeforeWrite: (
-				input: OwnerSend,
-				hold: Held,
-				result: TurnResult,
-			) =>
-				Effect.gen(function* () {
-					const item = waiting.get(key(input));
-					// Retain the aborted waiter until its ledger outcome arrives, so a
-					// release cannot reconstruct a second caller during cancellation.
-					if (item) item.cancelledBeforeWrite = true;
-					yield* release({
-						...input,
-						runnerId: hold.runner,
-						transmission: hold.transmission,
-						reason: "NotSent",
-					});
-					if (item) yield* Deferred.succeed(item.done, result);
-				}),
-			send: (
-				input: OwnerSend,
-				transmit: WaitingSend["transmit"],
-				held?: Held,
-			) =>
-				Effect.suspend(() => {
-					let current: WaitingSend | undefined;
-					return Effect.gen(function* () {
-						let item = waiting.get(key(input));
-						if (!item) {
-							item = {
-								input,
-								transmit,
-								held,
-								done: yield* Deferred.make<
-									TurnResult | undefined,
-									SessionFailure
-								>(),
-							};
-							current = item;
-							waiting.set(key(input), item);
-							const registered = item;
-							runFork(
-								options.settled(input).pipe(
-									retryRunnerPersistence,
-									Effect.tap(() =>
-										Effect.gen(function* () {
-											finish(registered);
-											abandoned.delete(ownerKey(registered.input));
-											yield* Deferred.succeed(registered.done, undefined);
-										}),
-									),
-									Effect.catchCause((cause) =>
-										Effect.logWarning(
-											"Owner send settlement observation failed",
-											cause,
+
+		type Wake = {
+			readonly ready: Effect.Effect<
+				{ readonly started: boolean; readonly ordinal: number } | undefined,
+				SessionFailure | StoreFault
+			>;
+		};
+		const step = (
+			item: Capability,
+			started: boolean,
+			ordinal: number,
+		): Effect.Effect<Wake | undefined, SessionFailure | StoreFault> =>
+			Effect.gen(function* () {
+				const result = yield* Effect.result(options.hold(item.input));
+				if (result._tag === "Failure") {
+					if (result.failure._tag === "StoreRejected")
+						return yield* result.failure;
+					return {
+						ready: Effect.sleep(sendRetryBackoff(ordinal + 1)).pipe(
+							Effect.as({ started, ordinal: ordinal + 1 }),
+						),
+					};
+				}
+				const hold = result.success;
+				switch (hold._tag) {
+					case "Busy":
+					case "Covered":
+					case "Exhausted":
+					case "Ended":
+						return;
+					case "Cleaning":
+						// An unavailable cleanup waits one backoff, then steps the gate again.
+						// Cleaning is never StartLost, so a later Unserved read starts afresh.
+						return {
+							ready: Effect.raceFirst(
+								options.clean(hold.runner).pipe(
+									Effect.as({ started: false, ordinal: 0 }),
+									Effect.catchTag("StoreUnavailable", () =>
+										Effect.sleep(sendRetryBackoff(ordinal + 1)).pipe(
+											Effect.as({ started: false, ordinal: ordinal + 1 }),
 										),
 									),
 								),
-							);
-							if (!held) schedule(item);
+								retrySettlementWrite(options.awaitRun(item.input, true)).pipe(
+									Effect.as({ started: false, ordinal: 0 }),
+								),
+							),
+						};
+					case "Unserved": {
+						if (Option.isSome(hold.predecessor))
+							return {
+								ready: Effect.raceFirst(
+									options.park(hold.predecessor.value),
+									retrySettlementWrite(options.awaitRun(item.input, true)),
+								).pipe(Effect.as({ started: false, ordinal: 0 })),
+							};
+						if (started) {
+							yield* options.failed(item.input, {
+								operation: "start runner",
+								code: "runner_start_lost",
+								message: "Runner exited before accepting the send",
+							});
+							return;
 						}
-						current = item;
-						return yield* Deferred.await(item.done);
-					}).pipe(
-						Effect.onInterrupt(() =>
-							Effect.sync(() => {
+						return {
+							ready: Effect.gen(function* () {
+								const start = yield* Effect.raceFirst(
+									Effect.result(options.start(item.input)),
+									retrySettlementWrite(options.awaitRun(item.input, true)).pipe(
+										Effect.as(undefined),
+									),
+								);
+								if (!start) return { started: false, ordinal: 0 };
+								if (start._tag === "Failure") {
+									yield* options.failed(item.input, start.failure);
+									return;
+								}
+								return { started: true, ordinal: 0 };
+							}),
+						};
+					}
+					case "Held": {
+						if (hold.transmission <= item.releasedTransmission) return;
+						let consumed = false;
+						const live = item.live;
+						const permission: SendWritePermission = {
+							nativeResumeFallback: live?.nativeResumeFallback,
+							current: () => hold.transmission > item.releasedTransmission,
+							consume: () => {
+								if (consumed || hold.transmission <= item.releasedTransmission)
+									return false;
+								consumed = true;
+								return true;
+							},
+						};
+						runFork(
+							Effect.gen(function* () {
+								const sent = yield* Effect.exit(
+									Effect.gen(function* () {
+										const reply = yield* Effect.result(
+											live
+												? live.transmit(hold, permission)
+												: options.transmitAdopted(item.input, hold, permission),
+										);
+										if (reply._tag === "Failure") {
+											const evidence = runnerDeliveryEvidence(reply.failure);
+											if (isClaudeResumeRefused(reply.failure)) {
+												yield* release({
+													...item.input,
+													runnerId: hold.runner,
+													transmission: hold.transmission,
+													reason: "ResumeRejected",
+												});
+												if (live)
+													yield* Deferred.fail(live.reply, reply.failure);
+											} else if (evidence) {
+												yield* release({
+													...item.input,
+													runnerId: hold.runner,
+													transmission: hold.transmission,
+													reason: evidence._tag,
+													...(evidence._tag === "Refused"
+														? { refusalReason: evidence.reason }
+														: {}),
+												});
+											} else if (runnerCommandReplied(reply.failure) && live)
+												yield* Deferred.fail(live.reply, reply.failure);
+											return;
+										}
+										if (
+											reply.success?.nativeResumeRejected ||
+											isClaudeResumeRefused(reply.success?.error)
+										)
+											yield* release({
+												...item.input,
+												runnerId: hold.runner,
+												transmission: hold.transmission,
+												reason: "ResumeRejected",
+											});
+										if (live)
+											yield* Deferred.succeed(live.reply, reply.success);
+									}),
+								);
 								if (
-									current &&
-									!current.cancelledBeforeWrite &&
-									waiting.get(key(current.input)) === current
+									Exit.isFailure(sent) &&
+									!Failure.isInterruptedOnly(sent.cause)
 								) {
-									abandoned.set(ownerKey(current.input), current.input);
-									finish(current);
+									if (live)
+										yield* Deferred.done(
+											live.reply,
+											Exit.failCause(
+												Failure.mapFailures(sent.cause, (cause) =>
+													runnerFailure("owner send write", cause),
+												),
+											),
+										);
+									yield* Effect.logWarning(
+										"Owner send write failed",
+										sent.cause,
+									);
 								}
 							}),
-						),
-					);
-				}),
-			released: (input: RunRelease) =>
-				Effect.sync(() => {
-					let matched = false;
-					for (const item of waiting.values())
-						if (
-							item.input.sessionId === input.sessionId &&
-							item.input.runId === input.runId &&
-							item.input.commandId === input.commandId
-						) {
-							matched = true;
-							item.releasedTransmission = Math.max(
-								item.releasedTransmission ?? 0,
-								input.transmission,
-							);
-							if (
-								!item.held ||
-								(item.held.runner === input.runnerId &&
-									item.held.transmission === input.transmission)
-							) {
-								item.held = undefined;
-								if (!item.cancelledBeforeWrite) schedule(item);
-							}
+						);
+						return;
+					}
+				}
+			});
+		const enqueueCapability = (item: Capability): void => {
+			const existing = queues.get(item.input.sessionId);
+			if (existing) {
+				existing.add(item);
+				return;
+			}
+			const pending = new Set([item]);
+			queues.set(item.input.sessionId, pending);
+			runFork(
+				Effect.gen(function* () {
+					let head:
+						| {
+								readonly item: Capability;
+								readonly started: boolean;
+								readonly ordinal: number;
+						  }
+						| undefined;
+					while (true) {
+						const next = head?.item ?? pending.values().next().value;
+						if (!next) {
+							if (queues.get(item.input.sessionId) === pending)
+								queues.delete(item.input.sessionId);
+							return;
 						}
-					const restoreKey = ownerKey(input);
-					const missing = abandoned.get(restoreKey) ?? input;
-					if (matched) abandoned.delete(restoreKey);
-					if (!matched && options.restore) {
-						if (restoring.has(restoreKey)) return;
-						restoring.add(restoreKey);
-						abandoned.delete(restoreKey);
-						runFork(
-							options.restore(missing).pipe(
-								retryRunnerPersistence,
-								Effect.ensuring(
-									Effect.sync(() => restoring.delete(restoreKey)),
-								),
-								Effect.catchCause((cause) =>
-									Effect.logWarning("Owner send registration failed", cause),
+						pending.delete(next);
+						const result = yield* Effect.exit(
+							Effect.gen(function* () {
+								const wake = yield* step(
+									next,
+									head?.started ?? false,
+									head?.ordinal ?? 0,
+								);
+								return wake ? yield* wake.ready : undefined;
+							}).pipe(
+								Effect.mapError((cause) =>
+									runnerFailure("owner send step", cause),
 								),
 							),
 						);
+						head = undefined;
+						if (Exit.isFailure(result)) {
+							if (Failure.isInterruptedOnly(result.cause)) {
+								// No loop drains this queue once interrupted (closing only).
+								if (queues.get(item.input.sessionId) === pending)
+									queues.delete(item.input.sessionId);
+								return yield* Effect.interrupt;
+							}
+							if (next.live)
+								yield* Deferred.failCause(next.live.reply, result.cause);
+							yield* Effect.logWarning("Owner send step failed", result.cause);
+						} else if (result.value) head = { item: next, ...result.value };
 					}
+				}),
+			);
+		};
+		return {
+			enqueue: (input: OwnerSend) =>
+				Effect.sync(() => enqueueCapability(capability(input))),
+			released: (input: RunRelease) =>
+				Effect.sync(() => {
+					const item = capability(input);
+					item.releasedTransmission = Math.max(
+						item.releasedTransmission,
+						input.transmission,
+					);
+					if (input.reason !== "ResumeRejected") enqueueCapability(item);
+				}),
+			send: (
+				input: OwnerSend,
+				transmit: Transmit,
+				nativeResumeFallback = input.nativeResumeFallback === true,
+				close: Effect.Effect<void> = Effect.void,
+			) =>
+				Effect.suspend(() => {
+					const item = capability(input);
+					if (
+						!item.live ||
+						item.live.nativeResumeFallback !== nativeResumeFallback
+					) {
+						item.live = {
+							transmit,
+							nativeResumeFallback,
+							close,
+							reply: Deferred.makeUnsafe<
+								TurnResult | undefined,
+								SessionFailure
+							>(),
+						};
+					}
+					enqueueCapability(item);
+					const live = item.live;
+					return Effect.raceFirst(
+						Deferred.await(live.reply),
+						Deferred.await(item.ended).pipe(Effect.as(undefined)),
+					).pipe(
+						Effect.onInterrupt(() =>
+							Effect.sync(() => {
+								if (item.live === live) item.live = undefined;
+							}),
+						),
+					);
 				}),
 		};
 	});

@@ -696,6 +696,7 @@ export class RunnerSocket {
 		commandId: string,
 		command: SessionCommand,
 		attempt?: number,
+		canWrite?: () => boolean,
 	): Effect.Effect<TurnResult | undefined, RunnerCommandFailure> {
 		if (command.type === "send-turn" && command.input.runId)
 			command = { ...command, runId: command.input.runId };
@@ -739,12 +740,16 @@ export class RunnerSocket {
 							input: { ...command.input, ...inputEnvironment },
 						};
 		}
-		return this.requestEffect(`command:${commandId}`, {
-			type: "command",
-			commandId,
-			command,
-			...(attempt !== undefined ? { attempt } : {}),
-		});
+		return this.requestEffect(
+			`command:${commandId}`,
+			{
+				type: "command",
+				commandId,
+				command,
+				...(attempt !== undefined ? { attempt } : {}),
+			},
+			canWrite,
+		);
 	}
 
 	/** Legacy answer settlement is synchronous and safe to retry if not retained. */
@@ -815,12 +820,23 @@ export class RunnerSocket {
 	private requestEffect<A>(
 		key: string,
 		message: RunnerMessage,
+		canWrite?: () => boolean,
 	): Effect.Effect<A, RunnerCommandFailure> {
 		const connection = this;
 		return Effect.gen(function* () {
 			const result = yield* Deferred.make<A, RunnerCommandFailure>();
 			const dispatch = Effect.try({
 				try: () => {
+					if (canWrite && !canWrite()) {
+						const failure: RunnerCommandFailure = {
+							...runnerFailure(
+								"write runner frame",
+								"Transmission was released before write",
+							),
+							delivery: { _tag: "NotSent" },
+						};
+						throw failure;
+					}
 					const retryOnIdle =
 						message.type === "command" && message.command.type === "send-turn";
 					if (connection.idleExiting && retryOnIdle) {

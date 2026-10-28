@@ -1,6 +1,27 @@
-import { Clock, Deferred, Effect, Exit, FiberSet, Scheduler } from "effect";
-import type { Hold } from "../../persistence/effect/commit-and-signal.js";
+import {
+	Clock,
+	Deferred,
+	Effect,
+	Exit,
+	FiberSet,
+	Option,
+	Scheduler,
+} from "effect";
+import * as Failure from "../../effect/failure-classification.js";
+import type {
+	CommitAndSignal,
+	CommitAndSignalFailure,
+} from "../../persistence/effect/commit-and-signal.js";
+import type { UnboundEventStoreEffect } from "../../persistence/effect/event-store-effect.js";
+import {
+	canonicalEvent,
+	type EventPayloadMap,
+} from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
+import {
+	runSendCommandIdQuery,
+	stopCovers,
+} from "../session-run-settlement.js";
 import { runnerFailure } from "./runner-protocol.js";
 import {
 	type makeRunnerReceiptStore,
@@ -15,8 +36,287 @@ import {
 } from "./runner-receipts.js";
 import type { RunnerProcessTable } from "./runner-registry.js";
 import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
-import { toStoreFault } from "./send-settlement.js";
+import {
+	type SendEvidence,
+	type SettlementTx,
+	type StoreFault,
+	settleSend,
+	toStoreFault,
+} from "./send-settlement.js";
 import type { SessionFailure } from "./session-runner.js";
+
+export type Hold =
+	| {
+			readonly _tag: "Held";
+			readonly runner: string;
+			readonly transmission: number;
+	  }
+	| { readonly _tag: "Cleaning"; readonly runner: string }
+	| {
+			readonly _tag: "Unserved";
+			readonly predecessor: Option.Option<{
+				readonly runner: string;
+				readonly until: number;
+			}>;
+	  }
+	| { readonly _tag: "Busy" }
+	| { readonly _tag: "Covered" }
+	| { readonly _tag: "Exhausted" }
+	| { readonly _tag: "Ended" };
+
+const stopWindowEnd = (record: {
+	readonly retiredAt: number;
+	readonly stopStartedAt?: number | null;
+}) => (record.stopStartedAt ?? record.retiredAt) + 4_000;
+
+/** Owns the hold and release writes; the generic commit seam knows no runner state. */
+export const makeRunnerRunLifecycle = (
+	options: Omit<SettlementTx, "project" | "stamp" | "afterCommit"> & {
+		readonly commit: CommitAndSignal;
+		readonly eventStore: Pick<UnboundEventStoreEffect, "appendBatch">;
+		readonly wakeReactor?: Effect.Effect<void>;
+		readonly released?: (input: RunRelease) => Effect.Effect<void>;
+	},
+) => {
+	const { sql, commit, eventStore } = options;
+	return {
+		holdRun: (input: {
+			readonly sessionId: string;
+			readonly runId: string;
+			readonly commandId: string;
+			readonly observedAt?: number;
+		}): Effect.Effect<Hold, StoreFault> => {
+			const followUps: Effect.Effect<void>[] = [];
+			return commit
+				.write<Hold, CommitAndSignalFailure | StoreFault, never>(
+					(project, stamp) =>
+						Effect.gen(function* () {
+							followUps.length = 0;
+							const observedAt =
+								input.observedAt ?? (yield* Clock.currentTimeMillis);
+							const [owner] = yield* sql<{
+								id: string;
+								provider: string;
+								status: string;
+								runner_id: string | null;
+							}>`SELECT owner.id, session.provider, owner.status, owner.runner_id
+						FROM provider_runs requested JOIN provider_runs owner
+							ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
+						JOIN sessions session ON session.id = requested.session_id
+						WHERE requested.id = ${input.runId} AND requested.session_id = ${input.sessionId}`;
+							if (
+								!owner ||
+								(owner.status !== "pending" && owner.status !== "running")
+							)
+								return { _tag: "Ended" };
+							const commandId = yield* runSendCommandIdQuery(
+								sql,
+								input.sessionId,
+								owner.id,
+							);
+							if (commandId === undefined || commandId !== input.commandId)
+								return { _tag: "Ended" };
+							const [command] = yield* sql<{
+								request_sequence: number;
+								attempt_count: number;
+							}>`SELECT request_sequence, attempt_count FROM provider_command_outbox
+						WHERE session_id = ${input.sessionId} AND command_id = ${commandId}
+							AND run_id = ${owner.id} AND effect_type = 'send_turn' AND status = 'running'
+						ORDER BY request_sequence DESC LIMIT 1`;
+							if (!command) return { _tag: "Ended" };
+							const send = {
+								sessionId: input.sessionId,
+								runId: owner.id,
+								commandId,
+								requestSequence: command.request_sequence,
+								attempt: command.attempt_count,
+							};
+							const tx: SettlementTx = {
+								...options,
+								project,
+								stamp,
+								afterCommit: (effect) => followUps.push(effect),
+							};
+							if (yield* stopCovers(sql, input.sessionId, owner.id)) {
+								if (owner.runner_id === null)
+									yield* settleSend(tx, { _tag: "covered", send, observedAt });
+								return { _tag: "Covered" };
+							}
+							if (owner.runner_id !== null) return { _tag: "Busy" };
+							const [count] = yield* sql<{
+								n: number;
+							}>`SELECT COUNT(*) AS n FROM events
+						WHERE session_id = ${input.sessionId} AND type = 'run.dispatched'
+							AND json_valid(data) AND json_extract(data, '$.commandId') = ${commandId}`;
+							const transmission = (count?.n ?? 0) + 1;
+							if (transmission > 5) {
+								yield* settleSend(tx, {
+									_tag: "failed",
+									send,
+									observedAt,
+									failure: {
+										operation: "holdRun",
+										message: "Provider send attempts exhausted",
+										code: "provider_send_attempts_exhausted",
+									},
+								});
+								return { _tag: "Exhausted" };
+							}
+							const [serving] = yield* sql<{
+								runner_id: string;
+							}>`SELECT runner_id FROM claude_runner_cursors
+						WHERE session_id = ${input.sessionId} AND retired_at IS NULL AND role = 'serving'`;
+							if (!serving) {
+								const [candidate] = yield* sql<{
+									runner_id: string;
+								}>`SELECT runner_id FROM claude_runner_cursors
+							WHERE session_id = ${input.sessionId} AND retired_at IS NULL AND role = 'candidate' ORDER BY rowid LIMIT 1`;
+								if (candidate)
+									return { _tag: "Cleaning", runner: candidate.runner_id };
+								const predecessors = yield* sql<{
+									runner: string;
+									retiredAt: number;
+									stopStartedAt: number | null;
+								}>`SELECT runner_id AS runner, retired_at AS retiredAt, stop_started_at AS stopStartedAt FROM claude_runner_cursors
+							WHERE session_id = ${input.sessionId} AND retired_at IS NOT NULL
+								AND stop_state NOT IN ('Gone', 'Settled') AND retirement_state = 'Watching'
+							ORDER BY COALESCE(stop_started_at, retired_at) DESC, rowid`;
+								const predecessor = predecessors
+									.map((row) => ({
+										runner: row.runner,
+										until: stopWindowEnd(row),
+									}))
+									.find((row) => row.until > observedAt);
+								return {
+									_tag: "Unserved",
+									predecessor: Option.fromUndefinedOr(predecessor),
+								};
+							}
+							yield* project(
+								yield* eventStore.appendBatch([
+									canonicalEvent(
+										"run.dispatched",
+										input.sessionId,
+										{
+											runId: owner.id,
+											runnerId: serving.runner_id,
+											commandId,
+											transmission,
+										},
+										{ provider: owner.provider, metadata: { runId: owner.id } },
+									),
+								]),
+							);
+							return { _tag: "Held", runner: serving.runner_id, transmission };
+						}),
+					{
+						afterCommit: Effect.suspend(() =>
+							Effect.forEach(followUps, (effect) => effect, { discard: true }),
+						),
+					},
+				)
+				.pipe(
+					Effect.tap(() => options.wakeReactor ?? Effect.void),
+					Effect.mapError(toStoreFault),
+				);
+		},
+		releaseRun: <A, E, R>(
+			input: EventPayloadMap["run.released"] & { readonly sessionId: string },
+			stop: Effect.Effect<A, E, R>,
+			failed?: Extract<SendEvidence, { readonly _tag: "failed" }>,
+		) => {
+			let released = false;
+			const followUps: Effect.Effect<void>[] = [];
+			return commit
+				.write(
+					(project, stamp) =>
+						Effect.gen(function* () {
+							released = false;
+							followUps.length = 0;
+							if (failed) {
+								const { send } = failed;
+								if (
+									input.reason !== "NotSent" ||
+									send.sessionId !== input.sessionId ||
+									send.runId !== input.runId ||
+									send.commandId !== input.commandId
+								)
+									return { released: false, stop: undefined };
+								const [current] =
+									yield* sql`SELECT 1 FROM provider_command_outbox command
+									JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
+									JOIN sessions session ON session.id = command.session_id AND session.project_id = command.project_key
+									WHERE command.request_sequence = ${send.requestSequence} AND command.attempt_count = ${send.attempt}
+									AND command.session_id = ${send.sessionId} AND command.command_id = ${send.commandId}
+									AND command.run_id = ${send.runId} AND command.effect_type = 'send_turn' AND command.status = 'running'
+									AND command.request_sequence = (SELECT MAX(latest.request_sequence) FROM provider_command_outbox latest WHERE latest.project_key = command.project_key AND latest.command_id = command.command_id)
+									AND run.status IN ('pending', 'running') AND run.joined_into IS NULL
+									AND run.runner_id = ${input.runnerId} AND run.held_transmission = ${input.transmission}`;
+								if (!current) return { released: false, stop: undefined };
+							}
+							const [held] = yield* sql<{
+								runner_id: string | null;
+								held_transmission: number | null;
+							}>`SELECT runner_id, held_transmission FROM provider_runs
+					WHERE id = ${input.runId} AND session_id = ${input.sessionId}`;
+							released =
+								held?.runner_id === input.runnerId &&
+								held.held_transmission === input.transmission;
+							const [session] = yield* sql<{
+								provider: string;
+							}>`SELECT provider FROM sessions WHERE id = ${input.sessionId}`;
+							yield* project(
+								yield* eventStore.appendBatch([
+									canonicalEvent(
+										"run.released",
+										input.sessionId,
+										{
+											runId: input.runId,
+											runnerId: input.runnerId,
+											commandId: input.commandId,
+											transmission: input.transmission,
+											reason: input.reason,
+										},
+										{
+											provider: session?.provider ?? "conduit",
+											metadata: { runId: input.runId },
+										},
+									),
+								]),
+							);
+							if (!released) return { released, stop: undefined };
+							if (failed)
+								yield* settleSend(
+									{
+										...options,
+										project,
+										stamp,
+										afterCommit: (effect) => followUps.push(effect),
+									},
+									failed,
+								);
+							const [serving] = yield* sql`SELECT 1 FROM claude_runner_cursors
+					WHERE runner_id = ${input.runnerId} AND session_id = ${input.sessionId} AND role = 'serving' AND retired_at IS NULL`;
+							return { released, stop: serving ? yield* stop : undefined };
+						}),
+					{
+						afterCommit: Effect.gen(function* () {
+							if (released) yield* options.released?.(input) ?? Effect.void;
+							yield* Effect.forEach(followUps, (effect) => effect, {
+								discard: true,
+							});
+						}),
+					},
+				)
+				.pipe(
+					Effect.tap(() =>
+						failed ? (options.wakeReactor ?? Effect.void) : Effect.void,
+					),
+					Effect.mapError(toStoreFault),
+				);
+		},
+	};
+};
 
 export type RunnerStop =
 	| { readonly _tag: "Running" }
@@ -170,7 +470,7 @@ export const makeRunnerStopReconciler = (options: {
 		sessionId: string,
 		runId: string,
 		commandId: string,
-	) => Effect.Effect<Hold, SessionFailure>;
+	) => Effect.Effect<Hold, StoreFault>;
 	readonly release?: <A>(
 		input: RunRelease,
 		stop?: Effect.Effect<A, unknown>,
@@ -568,7 +868,11 @@ export const makeRunnerStopReconciler = (options: {
 							record.runnerId,
 							decideRunnerStop(decision.state, { _tag: "CommitFailed" }).state,
 						);
-						const failure = runnerFailure("stop runner", result.cause);
+						// The store fault stays classifiable by toStoreFault for its callers.
+						const failure = {
+							...runnerFailure("stop runner", result.cause),
+							cause: Option.getOrUndefined(Failure.firstFailure(result.cause)),
+						};
 						yield* Deferred.fail(waiters, failure);
 						return yield* Effect.fail(failure);
 					}
@@ -654,7 +958,12 @@ export const makeRunnerStopReconciler = (options: {
 					);
 					if (Exit.isFailure(result)) {
 						states.set(input.runnerId, current);
-						const failure = runnerFailure("release run", result.cause);
+						const failure = {
+							...runnerFailure("release run", result.cause),
+							cause:
+								Option.getOrUndefined(Failure.firstFailure(result.cause)) ??
+								result.cause,
+						};
 						yield* Deferred.fail(waiters, failure);
 						return yield* Effect.fail(failure);
 					}
@@ -684,21 +993,18 @@ export const makeRunnerStopReconciler = (options: {
 				runnerId: string,
 				identity: RunnerCursorIdentity,
 				role: RunnerRow["role"],
-			): Effect.Effect<void, SessionFailure> =>
+			): Effect.Effect<"Registered" | "Lost", StoreFault> =>
 				Effect.gen(function* () {
-					if (options.receipts)
-						yield* options.receipts.register(runnerId, identity, role).pipe(
-							Effect.mapError((cause) => {
-								const fault = toStoreFault(cause);
-								return {
-									...runnerFailure("register runner", cause),
-									code: fault._tag,
-									retryable: fault._tag === "StoreUnavailable",
-									cause: fault,
-								};
-							}),
+					if (options.receipts) {
+						const registered = yield* options.receipts.register(
+							runnerId,
+							identity,
+							role,
 						);
-					else {
+						if (registered === "Lost") return "Lost";
+						yield* refreshRows();
+						return "Registered";
+					} else {
 						const current = serving(identity.sessionId);
 						if (
 							(role === "serving" &&
@@ -706,12 +1012,7 @@ export const makeRunnerStopReconciler = (options: {
 								current !== runnerId) ||
 							(role === "candidate" && current === undefined)
 						)
-							return yield* Effect.fail(
-								runnerFailure(
-									"register runner",
-									"Session serving runner changed",
-								),
-							);
+							return "Lost";
 					}
 					rows.set(runnerId, {
 						runnerId,
@@ -735,19 +1036,20 @@ export const makeRunnerStopReconciler = (options: {
 						retiredAt: null,
 						sequence: 0,
 					});
-				}),
+					return "Registered";
+				}).pipe(Effect.mapError(toStoreFault)),
 			holdRun: (
 				sessionId: string,
 				runId: string,
 				commandId: string,
-			): Effect.Effect<Hold, SessionFailure> =>
+			): Effect.Effect<Hold, StoreFault> =>
 				options.holdRun
 					? options.holdRun(sessionId, runId, commandId)
 					: Effect.suspend(() => {
 							const holder = serving(sessionId);
 							return Effect.succeed<Hold>(
 								holder === undefined
-									? { _tag: "Unserved" }
+									? { _tag: "Unserved", predecessor: Option.none() }
 									: { _tag: "Held", runner: holder, transmission: 1 },
 							);
 						}),
@@ -820,8 +1122,7 @@ export const makeRunnerStopReconciler = (options: {
 						}),
 					);
 					if ("record" in state) {
-						const deadline =
-							(state.record.stopStartedAt ?? state.record.retiredAt) + 4_000;
+						const deadline = stopWindowEnd(state.record);
 						// Backoff may pass the deadline; the caller's bound must not.
 						return yield* wait.pipe(
 							Effect.timeoutOption(

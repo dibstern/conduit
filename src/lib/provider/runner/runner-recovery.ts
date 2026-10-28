@@ -247,6 +247,7 @@ export const settleRunnerCommandReply = (
 		readonly afterCommit?: (effect: Effect.Effect<void>) => void;
 		readonly driverKind?: string;
 		readonly processLost?: boolean;
+		readonly covered?: boolean;
 	},
 ) =>
 	Effect.gen(function* () {
@@ -333,7 +334,7 @@ export const settleRunnerCommandReply = (
 			options.persistUserMessage &&
 			!placement?.placed &&
 			(!placement?.steering || code === "send_admission_timeout") &&
-			!interrupted
+			(!interrupted || options.covered)
 		) {
 			const continuation = payload.continuation;
 			const cutOffMessageId =
@@ -357,13 +358,13 @@ export const settleRunnerCommandReply = (
 				...(payload.images ? { images: payload.images } : {}),
 			});
 		}
-		// A draft returns only for a message never shown before this settlement (4.8).
+		// Exhaustion returns the text even when an earlier transmission placed it.
 		if (
 			outcome === "permanent" &&
 			payload &&
 			options.inputDrafts &&
-			!placement?.placed &&
-			!placement?.shown &&
+			(code === "provider_send_attempts_exhausted" ||
+				(!placement?.placed && !placement?.shown)) &&
 			!placement?.steering
 		) {
 			const change = options.inputDrafts.restoreChange(
@@ -371,6 +372,7 @@ export const settleRunnerCommandReply = (
 				inputId,
 				payload.images ?? [],
 				payload.text ?? payload.prompt,
+				now,
 			);
 			yield* change.write.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 			options.afterCommit?.(change.publish);

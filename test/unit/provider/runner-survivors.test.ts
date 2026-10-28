@@ -278,6 +278,33 @@ const setup = Effect.gen(function* () {
 	};
 });
 
+const reserveOwnerSend = (
+	input: Extract<SessionCommand, { type: "send-turn" }>["input"],
+) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const commit = yield* makeCommitAndSignal;
+		const reserved = { ...input, commandAttempt: input.commandAttempt ?? 1 };
+		if (!input.runId) return reserved;
+		yield* commit.write(() =>
+			Effect.gen(function* () {
+				const [existing] = yield* sql`SELECT 1 FROM provider_command_outbox
+					WHERE run_id = ${input.runId} AND session_id = ${input.sessionId} AND effect_type = 'send_turn'`;
+				if (existing) return;
+				const [next] = yield* sql<{
+					sequence: number;
+				}>`SELECT COALESCE(MAX(request_sequence), 0) + 1 AS sequence FROM provider_command_outbox`;
+				const sequence = next?.sequence ?? 1;
+				yield* sql`INSERT INTO command_receipts (command_id, project_key, session_id, status, command_type, side_effect_sequence, created_at, updated_at)
+					VALUES (${input.inputId}, 'test-project', ${input.sessionId}, 'side_effect_requested', 'send_turn', ${sequence}, 1, 1)
+					ON CONFLICT (command_id) DO UPDATE SET status = 'side_effect_requested', side_effect_sequence = excluded.side_effect_sequence`;
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id)
+					VALUES (${sequence}, ${input.inputId}, 'test-project', ${input.sessionId}, 'claude', 'send_turn', ${JSON.stringify({ ...reserved, folderSource: input.folderSource ?? "account" })}, 'running', ${reserved.commandAttempt}, 1, 1, ${input.runId})`;
+			}),
+		);
+		return reserved;
+	});
+
 const stopIntentFixture = Effect.gen(function* () {
 	const f = yield* setup;
 	const ingestion = yield* ProviderRuntimeIngestionTag;
@@ -372,14 +399,14 @@ const stopIntentFixture = Effect.gen(function* () {
 				type: "send-turn",
 				sinkId: `sink-${runId}`,
 				aborted: false,
-				input: {
+				input: yield* reserveOwnerSend({
 					...input,
 					inputId: `input-${runId}`,
 					runId,
-					commandAttempt: command?.attempt_count ?? 0,
+					commandAttempt: command?.attempt_count ?? 1,
 					prompt: runId,
 					history: [],
-				},
+				}),
 			});
 		});
 	const accept = (runId: string) =>
@@ -539,51 +566,66 @@ const swapFixture = Effect.gen(function* () {
 					Effect.as(true),
 				),
 			);
-			vi.spyOn(socket, "commandEffect").mockImplementation((_id, command) =>
-				Effect.gen(function* () {
-					commands.push({
-						runnerId: options.runnerId,
-						type: command.type,
-						...(command.type === "send-turn"
-							? { runId: command.input.runId }
-							: {}),
-					});
-					if (candidate && command.type === "pre-warm") {
-						yield* Deferred.succeed(warming, undefined);
-						yield* Deferred.await(firstCandidate ? warmed : retryWarmed);
-					}
-					if (command.type === "send-turn")
-						yield* options.emit(
-							{
-								type: "event",
-								sinkId: command.sinkId,
-								event: {
-									eventId: `started-${command.input.runId}`,
-									type: "run.started",
-									providerId: "claude",
-									sessionId: "s",
-									runId: command.input.runId,
-									providerRefs: {},
-									rawSource: { kind: "test" },
-									createdAt: 1,
-									data: {
-										inputId: command.input.inputId,
-										requestedRunId: command.input.runId,
+			const journal = new RunnerSendJournal(
+				dirname(options.socketPath),
+				"s",
+				"claude",
+			);
+			vi.spyOn(socket, "commandEffect").mockImplementation(
+				(_id, command, attempt) => {
+					const execute = Effect.gen(function* () {
+						commands.push({
+							runnerId: options.runnerId,
+							type: command.type,
+							...(command.type === "send-turn"
+								? { runId: command.input.runId }
+								: {}),
+						});
+						if (candidate && command.type === "pre-warm") {
+							yield* Deferred.succeed(warming, undefined);
+							yield* Deferred.await(firstCandidate ? warmed : retryWarmed);
+						}
+						if (command.type === "send-turn")
+							yield* options.emit(
+								{
+									type: "event",
+									sinkId: command.sinkId,
+									event: {
+										eventId: `started-${command.input.runId}`,
+										type: "run.started",
+										providerId: "claude",
+										sessionId: "s",
+										runId: command.input.runId,
+										providerRefs: {},
+										rawSource: { kind: "test" },
+										createdAt: 1,
+										data: {
+											inputId: command.input.inputId,
+											requestedRunId: command.input.runId,
+										},
 									},
 								},
-							},
-							"s",
-						);
+								"s",
+							);
+						return command.type === "send-turn"
+							? {
+									status: "accepted" as const,
+									cost: 0,
+									tokens: { input: 0, output: 0 },
+									durationMs: 0,
+									providerStateUpdates: [],
+								}
+							: undefined;
+					});
 					return command.type === "send-turn"
-						? {
-								status: "accepted" as const,
-								cost: 0,
-								tokens: { input: 0, output: 0 },
-								durationMs: 0,
-								providerStateUpdates: [],
-							}
-						: undefined;
-				}),
+						? journal.execute(
+								_id,
+								attempt ?? command.input.commandAttempt ?? 0,
+								command.input.nativeResumeFallback === true,
+								execute,
+							)
+						: execute;
+				},
 			);
 			yield* options.onHello(
 				{
@@ -618,17 +660,19 @@ const swapFixture = Effect.gen(function* () {
 		}),
 	);
 	const dispatch = (runId: string) =>
-		admitRunnerCommand(f.admission, f.manager, {
-			type: "send-turn",
-			sinkId: `sink-${runId}`,
-			aborted: false,
-			input: {
-				...input,
-				inputId: `input-${runId}`,
-				runId,
-				prompt: runId,
-				history: [],
-			},
+		Effect.gen(function* () {
+			return yield* admitRunnerCommand(f.admission, f.manager, {
+				type: "send-turn",
+				sinkId: `sink-${runId}`,
+				aborted: false,
+				input: yield* reserveOwnerSend({
+					...input,
+					inputId: `input-${runId}`,
+					runId,
+					prompt: runId,
+					history: [],
+				}),
+			});
 		});
 	return {
 		...f,
@@ -808,13 +852,13 @@ for (const race of [
 									type: "send-turn",
 									sinkId: "sink-after-recovery",
 									aborted: false,
-									input: {
+									input: yield* reserveOwnerSend({
 										...f.input,
 										inputId: "input-after-recovery",
 										runId: "swap-run",
 										prompt: "after recovery",
 										history: [],
-									},
+									}),
 								},
 							);
 							const delivered = f.commands.filter(
@@ -3280,14 +3324,14 @@ for (const deniedTerm of [false, true])
 						type: "send-turn",
 						sinkId: "new-sink",
 						aborted: false,
-						input: {
+						input: yield* reserveOwnerSend({
 							...input,
 							inputId: "new-input",
 							runId: "new-run",
 							prompt: "follow up",
 							history: [],
 							resumeSessionId: "native-conversation",
-						},
+						}),
 					});
 					expect(connections).toHaveLength(2);
 					expect(connections[1]?.runnerId).not.toBe(old?.runnerId);
@@ -3623,7 +3667,7 @@ const continuationFixture = (
 			Effect.gen(function* () {
 				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES (${runId}, 's', 'pending', 1)`;
 				yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id)
-			VALUES (${++sequence}, ${commandId}, 'test-project', 's', 'claude', 'send_turn', ${JSON.stringify({ inputId: commandId, prompt: commandId, history: [] })}, 'running', 1, 1, 1, ${runId})`;
+			VALUES (${++sequence}, ${commandId}, 'test-project', 's', 'claude', 'send_turn', ${JSON.stringify({ ...input, inputId: commandId, prompt: commandId, history: [], folderSource: "account", commandAttempt: 1 })}, 'running', 1, 1, 1, ${runId})`;
 			});
 		const dispatch = (
 			runId: string,

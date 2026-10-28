@@ -36,6 +36,7 @@ import {
 	type StoredEvent,
 } from "../../../src/lib/persistence/events.js";
 import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
+import { makeRunnerRunLifecycle } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { makeEffectProjectionHarness } from "../../helpers/effect-projection-harness.js";
 
 const BASE_EVENT = {
@@ -91,7 +92,12 @@ const setupRunSettlement = Effect.gen(function* () {
 		{ sessionId: "settlement-session" },
 		"serving",
 	);
-	yield* commit.holdRun({
+	yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at) SELECT 1, 'input', project_id, 'settlement-session', 'claude', 'send_turn', '{}', 'held-run', 'running', 1, 1 FROM sessions WHERE id = 'settlement-session'`;
+	yield* makeRunnerRunLifecycle({
+		sql,
+		commit,
+		eventStore: yield* EventStoreEffectTag,
+	}).holdRun({
 		sessionId: "settlement-session",
 		runId: "held-run",
 		commandId: "input",
@@ -136,7 +142,11 @@ describe("transactional runner settlement ingestion", () => {
 						{ provider: "claude", metadata: { runId: "held-run" } },
 					),
 				]);
-				yield* commit.holdRun({
+				yield* makeRunnerRunLifecycle({
+					sql,
+					commit,
+					eventStore: yield* EventStoreEffectTag,
+				}).holdRun({
 					sessionId: "settlement-session",
 					runId: "held-run",
 					commandId: "input",
