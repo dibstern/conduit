@@ -299,7 +299,8 @@ Only evidence and conduit's decisions, each once:
 - **L2. Address at issue.** Every send is addressed once, when it issues, and never re-addressed:
   1. an escalation (`close` to kill, `end_session` to kill) whose parent has a runner address goes
      to that runner;
-  2. a runner-held send for a Run or wake Run with an execution goes to that execution's runner
+  2. a send for a Run or wake Run with an execution, on a runner-host provider (Claude, Codex,
+     Cursor, 4.10), goes to that execution's runner
      (3.3 Execution; pending while a start is, below);
   3. every other send goes to the current process, or to **pending** when there is none. An
      escalation of a parent still pending is this case, and is pending too: an uncovered pending
@@ -331,7 +332,7 @@ Only evidence and conduit's decisions, each once:
 - No in-session pruning. Run Input records, interaction records and send history are kept for the
   session's life and reclaimed when the session is archived.
 
-<!-- src: FB §2; RA §7; HLK step 4, step 5; BG Decision 1, Decision 3; AUDIT-2 T6; review 2026-10-28 (H2); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1, L2; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (label split); REDESIGN review r3-1 (runner not started, authority at record); REDESIGN oracle r8 -->
+<!-- src: FB §2; RA §7; HLK step 4, step 5; BG Decision 1, Decision 3; AUDIT-2 T6; review 2026-10-28 (H2); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1, L2; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (label split); REDESIGN review r3-1 (runner not started, authority at record); REDESIGN oracle r8; REDESIGN harness r9 (L2 case 2) -->
 
 ### 3.4 Correlation and evidence
 
@@ -364,7 +365,7 @@ Only evidence and conduit's decisions, each once:
   probe findings) updates only the record `receiptAddress(token)` names, and never changes or
   revives Run lifecycle.
 - An unknown or never-issued token: Accepted, no events, a diagnostic. Evidence of a kind the send
-  cannot produce, a contradicting native id, or a command receipt naming another commandId (D21):
+  or its provider cannot produce (task evidence from Cursor or OpenCode, 8.1), a contradicting native id, or a command receipt naming another commandId (D21):
   Rejected, a diagnostic, no state change. No throws
   and no new error types.
 - Hold facts (`run_dispatched`, `run_released`, `delivery_indeterminate`, `runner_reply`,
@@ -2097,8 +2098,10 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
 ### 8.4 Stop tasks, the confirm gate and lost work
 
 - **Tasks are read per runner.** `LedgerView.tasks`, `anythingMayAct`'s task term and
-  `stop_tasks` `"all"` read the current process's latest snapshot; with no current process there
-  are none. `"all"` means its live tasks. It is rejected, issuing nothing, when tasks are unknown or
+  `stop_tasks` `"all"` read the snapshot under the current process's latest label; with no current
+  process there are none. A newer `querySeq` has no snapshot until its first one, so its tasks are
+  unknown for a provider that reports tasks: the host drops its task cache on query replacement
+  (8.3). `"all"` means its live tasks. It is rejected, issuing nothing, when tasks are unknown or
   none, or when the provider has none. `stop_task` runs through the SDK's
   `stopTask(taskId)` or Codex `thread/backgroundTerminals/terminate(processId)`. A failed stop is a
   diagnostic, with no retries.
@@ -2130,8 +2133,9 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   or pending when it went to pending. Only runner-held providers escalate; OpenCode has no runner
   to kill (5.1).
 - **Lost work (L5).** Each label is decided once, in the decision that first ends its scope: a
-  `close` issued for its query (at issue, for its execution label), its runner's retirement (for
-  that runner's latest label), or `session_ended` (for the current process's latest label). That
+  `close` issued for its query (at issue, for its execution label), the label becoming older (a
+  newer `querySeq` of its runner, or its runner's retirement, L1 item 4; D44), or `session_ended`
+  (for the current process's latest label). That
   decision records the live tasks of the label's latest snapshot; "may have been lost" when the
   label has no snapshot or its tasks are unknown; and nothing when they are `Known` with none live
   (a fresh launch, and every Cursor and OpenCode label, 8.3). A destruction addressed to pending
@@ -2139,7 +2143,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
 - A process that dies before confirming a native command: the tracker reloads from the transcript and
   re-sends first on the next launch, only if the confirmed status does not already match.
 
-<!-- src: BG Decision 2, Decision 3, Decision 4; AUDIT Already covered (32.8 defers to 32.25); AUDIT A4 (recovery); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L2, L3, L5; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (L5 Known empty); REDESIGN review r3-1 (runner not started); REDESIGN oracle r8 (D43) -->
+<!-- src: BG Decision 2, Decision 3, Decision 4; AUDIT Already covered (32.8 defers to 32.25); AUDIT A4 (recovery); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L2, L3, L5; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (L5 Known empty); REDESIGN review r3-1 (runner not started); REDESIGN oracle r8 (D43); REDESIGN harness r9 (D44) -->
 
 ### 8.5 Native command issue
 
@@ -2989,6 +2993,20 @@ never end the Run (8.3); the gate's tasks and `snapshotEntry` are views, a gated
 issue, and a release by retirement issues as any release does (8.4).
 
 - D43: a confirm-gated step that belongs to a Run is dropped when that Run Ends by other evidence; the step existed to end it (5.1, 8.4). Rejected: issuing it against the Ended Run (a `close` would record lost work, L5, for a query that may already serve the next Run).
+
+**Decided (harness round 9, 2026-10-29)**
+
+Ten questions from the first harness round against REDESIGN-1. Nine follow from existing clauses:
+case 2 of L2 is every Run send on a runner-host provider (4.10), so OpenCode Held inputs stay as
+Rejected-path robustness inputs (3.4); task evidence from Cursor or OpenCode is evidence its
+provider cannot produce, Rejected (3.4); a late receipt for a covered send is recorded with no
+state change (3.4); a kill to pending never resolves (L2); its wire label is null (3.3); a
+multi-label destruction issues one effect per address, so one kill per runner under H1 (L2, D28);
+a gate released by `process_lost` issues at the loss (8.4); a same-runner `process_started` is a
+reattach (L1). A replaced query's sends are covered by its own `query_ended` (3.3), which passes
+the host fence (6.1).
+
+- D44: amends L5. A label's lost-work scope also ends when it becomes older by a newer `querySeq` of its runner (a query replacement, 6.1), so retirement is one case of "becoming older" rather than its own trigger; the newer label's tasks are unknown until its first snapshot (8.4). Reason: the host drops its task cache on replacement (8.3), so the old query's tasks would otherwise vanish with no record. Rejected: carrying the old label's tasks to the newer one (contradicts the host's cache reset); recording nothing at replacement (LI8 work vanishes silently). Risk: a provider that keeps tasks across a replacement would show a spurious notice; 32.25 checks this per provider.
 
 ### A.11 REDESIGN-1 Process and address (2026-10-28): C + M1
 
