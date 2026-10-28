@@ -1361,7 +1361,16 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 							elapsedMs: Math.round(performance.now() - startupAt),
 						});
 					finished = true;
-					fail(new Error(`Server startup timeout\n${this.logs}`));
+					// The phases reached place a stall that happens after the daemon's
+					// last log line, which the log alone cannot.
+					const phases = this.marks.filter(
+						(mark) => mark.kind === "startup-phase" && mark.pid === child.pid,
+					);
+					fail(
+						new Error(
+							`Server startup timeout\nphases: ${JSON.stringify(phases)}\n${this.logs}`,
+						),
+					);
 				},
 				remainingTimeout(
 					this.deadline,

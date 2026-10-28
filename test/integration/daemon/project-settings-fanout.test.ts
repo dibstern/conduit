@@ -26,7 +26,6 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 
 it("fans global settings out to another live project's subscribers and defaults", async () => {
 	const harness = ProcessHarness.create({
-		dist: "dist",
 		foregroundCli: true,
 		capabilityModels: [
 			{
@@ -169,6 +168,22 @@ it("fans global settings out to another live project's subscribers and defaults"
 			.toMatchObject([
 				{ item: { claude: { status: "ok", pick: expectedPick } } },
 				{ item: { claude: { status: "unverified", pick: expectedPick } } },
+			]);
+		await expect
+			.poll(() =>
+				[receivedA, receivedB].map((received) =>
+					received
+						.filter(
+							(envelope) =>
+								envelope._tag === "upsert" &&
+								envelope.item._tag === "titleGeneration",
+						)
+						.at(-1),
+				),
+			)
+			.toMatchObject([
+				{ item: { selection: null, status: "ok" } },
+				{ item: { selection: null, status: "unverified" } },
 			]);
 
 		// Re-read from B's already-running relay, after observing the live changes.

@@ -1914,17 +1914,18 @@ describe("Codex interactions through the real daemon and detached runner", () =>
 				browser.rpc.CancelSession({ sessionId: id, commandId: randomUUID() }),
 			);
 			await vi.waitFor(
-				() =>
+				() => {
 					expect(snapshot(fixture, id).turns).toEqual([
 						{ state: "interrupted" },
-					]),
+					]);
+					assertReply(
+						serverRequest(trace, method).id,
+						kind === "permissions"
+							? { permissions: {}, scope: "turn" }
+							: { decision: "cancel" },
+					);
+				},
 				{ timeout: TIMEOUT, interval: 100 },
-			);
-			assertReply(
-				serverRequest(trace, method).id,
-				kind === "permissions"
-					? { permissions: {}, scope: "turn" }
-					: { decision: "cancel" },
 			);
 			await browser.waitFor(
 				(message) =>
