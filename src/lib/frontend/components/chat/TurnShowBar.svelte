@@ -4,7 +4,11 @@
 	import { STOPS, type ShowStop, type StopCounts } from "../../utils/turn-stops.js";
 	import Button from "../ui/Button.svelte";
 	import Menu from "../ui/Menu.svelte";
+	import MenuGroup from "../ui/MenuGroup.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
+	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
+	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
+	import MenuSeparator from "../ui/MenuSeparator.svelte";
 	import Tabs from "../ui/Tabs.svelte";
 
 	let { panel, counts, onlevelchange }: { panel: TurnPanelState; counts: StopCounts; onlevelchange: () => void } = $props();
@@ -49,13 +53,25 @@
 		</Tabs>
 		{#if panel.stops.length > 1}{@render defaults()}{/if}
 	{:else}
-		<Menu ariaLabel="Show, least to most" side="top" align="start">
+		<Menu ariaLabel="Show, least to most" presentation="popover" side="bottom" align="start">
 			{#snippet trigger({ props })}
-				<Button {...props} variant="ghost" size="content" tone="secondary" touchTarget class="min-h-[36px] gap-[6px] text-[12px]" data-testid="surfacing-level" ariaLabel="Show messages">Show · {active === "usage" ? "" : STOPS[active].menu} ⌄{#if panel.overridden}<i class="size-[6px] rounded-full bg-accent" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}</Button>
+				<Button {...props} variant="ghost" size="content" tone="secondary" touchTarget class="min-h-[36px] gap-[6px] text-[12px]" data-testid="surfacing-level" ariaLabel="Show messages">{active === "usage" ? "Show ⌄" : `Show · ${STOPS[active].menu} ⌄`}{#if panel.overridden && active !== "usage"}<i class="size-[6px] rounded-full bg-accent" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}</Button>
 			{/snippet}
-			{#each panel.stops as stop (stop)}
-				<MenuItem aria-label={STOPS[stop].short} aria-current={active === stop ? "true" : undefined} variant={active === stop ? "selected" : "default"} onselect={() => show(stop)}>{@render stopContent(stop, STOPS[stop].menu)}</MenuItem>
-			{/each}
+			<MenuGroup label="Show, least to most">
+				<MenuRadioGroup value={active}>
+					{#each panel.stops as stop (stop)}
+						{#if stop === "log"}<MenuSeparator />{/if}
+						<MenuRadioItem value={stop} aria-label={STOPS[stop].menu} textValue={STOPS[stop].menu} indicatorPosition="leading" onselect={() => show(stop)}>
+							<span class="flex items-center justify-between gap-[16px] font-medium">
+								<span class="inline-flex items-center gap-[6px]">{STOPS[stop].menu}{#if panel.overridden && active === stop}<i class="size-[6px] rounded-full bg-accent" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}</span>
+								{#if stop !== "final"}<small class="font-mono text-[10.5px] text-text-muted">{counts[stop]}</small>{/if}
+							</span>
+							<span class="block text-[10.5px] text-text-muted">{STOPS[stop].description}</span>
+						</MenuRadioItem>
+					{/each}
+				</MenuRadioGroup>
+			</MenuGroup>
+			<MenuSeparator />
 			<MenuItem disabled={defaultState.kind === "saving"} onselect={makeDefault}>Make default</MenuItem>
 			<MenuItem disabled={!panel.overridden || defaultState.kind === "saving"} onselect={resetLevel}>Back to default</MenuItem>
 		</Menu>
