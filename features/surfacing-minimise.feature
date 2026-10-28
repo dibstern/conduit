@@ -1,5 +1,13 @@
 Feature: Turns minimise to a head and thin strip without losing messages
 
+Scenario: A collapsed peek follows the pointer within a long work step
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And minimising uses the dark theme with Turns open Minimised
+  And the minimising session has three turns
+  Then the collapsed peek follows the nearest message across one work step
+  And the messages region visually matches surfacing-peek-nearest-within-step at 98 percent
+
 Scenario Outline: Chevron and h remember a hand choice over the setting
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup

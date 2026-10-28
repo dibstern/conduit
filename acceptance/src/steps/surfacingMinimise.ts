@@ -34,6 +34,42 @@ function publish(page: Page, messages: History[]) {
 
 export const surfacingMinimiseHandlers: StepHandler[] = [
 	{
+		name: "peek at the nearest message across one work step",
+		match:
+			/^the collapsed peek follows the nearest message across one work step$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const scope = panel(page, "3");
+			await scope.scrollIntoViewIfNeeded();
+			await page.clock.resume();
+			const bounds = async (id: string) => {
+				const box = await scope
+					.locator(`[data-step-id="surfacing-agent-3/${id}-3"]`)
+					.boundingBox();
+				if (!box) throw new Error(`Missing ${id}`);
+				return box;
+			};
+			const first = await bounds("surfacing-part-1");
+			const second = await bounds("surfacing-part-2");
+			const work = await bounds("surfacing-tool-1");
+			const midpoint =
+				(first.x + first.width / 2 + second.x + second.width / 2) / 2;
+			expect(midpoint - 2).toBeGreaterThan(work.x);
+			expect(midpoint + 2).toBeLessThan(work.x + work.width);
+			for (const [offset, ordinal] of [
+				[-2, "1"],
+				[2, "2"],
+			] as const) {
+				await page.mouse.move(midpoint + offset, work.y + work.height / 2);
+				await expect(
+					scope.getByTestId("surfacing-minimised-peek"),
+				).toHaveAttribute("data-ordinal", ordinal);
+			}
+			await expect(scope).toHaveAttribute("data-minimised", "true");
+			await expect(page.getByRole("tooltip")).toHaveCount(0);
+		},
+	},
+	{
 		name: "seed Turns open and theme",
 		match:
 			/^minimising uses the (dark|light) theme with Turns open (Expanded|Auto|Minimised)$/,

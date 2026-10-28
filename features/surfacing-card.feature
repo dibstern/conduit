@@ -1,5 +1,12 @@
 Feature: Surfaced messages share the activity strip's scale and preserve a reader's pick
 
+Scenario: Keyboard picking clears a hovered work caption
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the surfacing session has a settled turn
+  Then keyboard picking a message clears the strip caption
+  And the messages region visually matches surfacing-keyboard-clears-hover at 98 percent
+
 Scenario Outline: Answer stays quiet on a live turn even while Jev is pending
   Given message surfacing is active at Answer
   And the conduit app is served with the connected mockup
