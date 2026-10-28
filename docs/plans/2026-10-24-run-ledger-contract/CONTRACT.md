@@ -332,7 +332,8 @@ idle probe the policy trusts, or coverage of its label.
 | NotConsumed | no | no |
 | None | yes | no |
 
-- `fenceHolds(nativeSession)`: some work the native policy says fences may still act.
+- `fenceHolds(nativeSession)`: some send the native policy counts as a fence member may still act
+  (section 9, native-session fence). Membership is per send; an admission's outcome never releases it.
 - `inputOutcome(admission)`: a fold over that admission's sends. Accepted if any send was accepted;
   refused only when every send ended with no acceptance.
 - `receiptAddress(token)`: the record a receipt may update.
@@ -416,7 +417,7 @@ For a runner-held send these chains are never stored: they are a view over the h
   A frozen execution's fold does not change.
 - Late evidence for an Ended Run never changes its Tombstone. A late acceptance still restores
   outstanding work, so the native-session fence stays until that work is settled. Its cleanup
-  deadline is the Tombstone time plus the settle budget; expiry closes (Claude) or probes (OpenCode).
+  deadline is the Tombstone time plus the settle budget; expiry runs the stop sequence for runner-held policies or probes (OpenCode).
 - Late accounting (usage, cost, tokens) is recorded against the ended Run's inputs.
 - A result after process loss changes nothing; its accounting is recorded.
 - **Activity throttling.** `activity` changes a join when it is the execution's first activity,
@@ -1826,6 +1827,43 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
     highest-attempt acks (two counts of one transmission, OPEN-2); input-id targeting (reusable ids);
     one ordered socket writer instead of a host record (a timing guarantee spread across daemon
     fibers); a Stop epoch (A.8 D).
+- **Decided (82tn.32.2.14, 2026-10-28): native-session fence membership and idle proof.** Members
+  are sends, never admissions. A member leaves the fence only by its own work ended (3.5),
+  NotConsumed, or coverage of its label (5.1, 6.1). Interactions, answers and background tasks are
+  never members (8.3).
+
+  | Provider | Members | Work ended | `resultReleasesFence` | Idle proof | Fence expiry |
+  |---|---|---|---|---|---|
+  | Claude | start, steer | a result naming the send's input uuid; `command_lifecycle` cancelled before started (NotConsumed); journal `finished`, or `absent` with no acceptance | no | none | close, then `kill_and_respawn` |
+  | Codex (32.2.13) | start, steer | the runner's result, held back across a goal chain until the goal ends or the successor deadline expires | yes | none; `thread/status` idle is not proof | stop sequence |
+  | Cursor | start, steer | the native `wait()` result | yes | none | `kill_and_respawn` |
+  | OpenCode | start, steer, `cancel_request`, abort | `query_ended` plus a covering probe | no | `probe native_session` returning `native_idle`; omission from `session.statuses` counts only after `session.get` confirms the identity; `retry` is busy | probe |
+
+  - An OpenCode idle probe covers only sends issued before it whose delivery the native
+    user-message echo confirmed. Abort is session-wide, so an abort whose delivery is unknown stays
+    a member until a probe issued after its cleanup deadline returns `native_idle`.
+  - A Claude result ends only the inputs it names. An input still queued after it, or listed in an
+    interrupt's `still_queued`, stays a member.
+  - A Cursor result releases the fence because `wait()` is the only native terminal and settles
+    every pending steer. The runner's interrupt-timeout abandonment is not a result: intake records
+    it as the Run's outcome (interrupted, forced), and the fence waits for runner retirement to
+    cover the label. The runner marks that terminal as abandoned on the wire.
+  - Codex's runner withholds its result while a goal successor may start, so a native idle between
+    goal turns never reaches the ledger. A successor that starts after the deadline is a wake Run
+    (8.3).
+  - Open, needs a live check before the owning switch ticket lands: Claude `session_state_changed`
+    emission and `still_queued` follow-up; a Cursor steer delivered after `wait()` settles; whether
+    killing the Cursor runner stops an abandoned local run; Codex `turn/start` while a goal
+    successor is pending; OpenCode `prompt_async`/abort executing after the client request ended,
+    and whether `input_absent` after `delivery_unknown` is final.
+  - Rejected: membership per admission (R5: a refusal releases while a sibling acts); Claude
+    releasing on a result (queued inputs run after a result that does not name them); Claude
+    releasing on `session_state_changed` (not consumed or recorded; it can be adopted later); a
+    Cursor idle probe (none exists, and `wait()` already settles); Codex `thread/status` idle (a goal
+    successor self-starts after it); OpenCode idle covering unconfirmed sends (a request in flight
+    joins the loop after the sample); counting the abandoned Cursor terminal as a result (the native
+    run may still act).
+<!-- src: 82tn.32.2.14; OW Decision 2; FB §4 (idle covers confirmed delivery); claude-sdk-traces steer-misses-boundary, queued-input-promoted-to-steer; cursor-sdk-traces steer, steer-shell, cancel; codex-app-server-traces goal-chain, steer-race; opencode-wire-traces classic-prompt-during-tool -->
 - **Decided (OPEN-6, 2026-10-28): Codex is a ledger provider, runner-held.** Codex runs in the
   runner host like Claude and Cursor (`makeRunnerProviderInstance` with the Codex runner driver), so
   its sends take the hold, the feeder, the journal, the reaper and the swap (4, 6, 7) unchanged, and
