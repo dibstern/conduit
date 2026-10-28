@@ -146,8 +146,9 @@
 				</span>
 				{#if tag}
 					<!-- Which kind of subagent ran. Worth its own slot: two Task rows
-					     differ by this far more than by their descriptions. -->
-					<Badge variant="tag" size="sm" class="shrink-0 font-mono">{tag}</Badge>
+					     differ by this far more than by their descriptions. It truncates
+					     so a narrow row's status never spills over the open-task link. -->
+					<Badge variant="tag" size="sm" wrap class="min-w-0 font-mono"><span class="truncate">{tag}</span></Badge>
 				{/if}
 				<span class="tool-desc {launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1 min-w-0'} truncate font-mono text-mono-code {isSkill ? style.text : 'text-text-dimmer'}">
 					{subject}
