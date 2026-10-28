@@ -3,6 +3,8 @@
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
+	import type { Snippet } from "svelte";
+	import type { SessionResume } from "../../../contracts/limit-recovery.js";
 	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
 	import SurfacingAskContext from "./SurfacingAskContext.svelte";
 	import { MediaQuery } from "svelte/reactivity";
@@ -33,7 +35,6 @@
 		currentStepLabel,
 		economics,
 		fmtDuration,
-		latestStamp,
 		liveLaunchedTasks,
 		stepCaption,
 		type SkillChapter,
@@ -42,6 +43,7 @@
 		stripLayout,
 		type Segment,
 		type Turn,
+		type TurnLogEntry,
 		turnStats,
 		workingTime,
 	} from "../../utils/turns.js";
@@ -54,10 +56,12 @@
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false }: {
+	let { turn, segment, final, entries, renderResume, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
+		entries?: readonly TurnLogEntry[];
+		renderResume?: Snippet<[SessionResume]>;
 		liveTasks?: readonly BackgroundTask[];
 		taskListedAt?: ReadonlyMap<string, number>;
 		taskNow?: number;
@@ -94,22 +98,19 @@
 
 	const stats = $derived(turnStats(segment));
 	const durations = $derived(stepDurations(segment, turn, final, now));
-	const duration = $derived.by(() => {
-		const index = turn.segments.indexOf(segment);
-		const until = index === -1 || index === turn.segments.length - 1 ? undefined : latestStamp(segment);
-		return workingTime(turn, now, until);
-	});
+	const duration = $derived(workingTime(turn, now));
 	const bill = $derived(economics(turn, now));
 	const running = $derived(liveLaunchedTasks(turn, liveTasks, liveTasks.length > 0 && turn.live ? clock.now : taskNow, taskListedAt));
 	const phrase = $derived(countsPhrase(stats));
 	const chapters = $derived(skillChapters(segment, turn, final, now));
 	const skillSteps = $derived(skillsOpen ? new Set(chapters.map((c) => c.index)) : null);
 	const TICKER_ROWS = 3;
-	const ticker = $derived(segment.activity.slice(-TICKER_ROWS));
+	const logEntries = $derived(entries ?? segment.activity.map((part, index): TurnLogEntry => ({ kind: "step", uuid: part.uuid, index, part })));
 	const live = $derived(final && turn.live);
 	const showTicker = $derived(live && segment.reply.length === 0 && !segment.handBack);
-	const earlierCount = $derived(Math.max(0, segment.activity.length - ticker.length));
-	const numberedMessages = $derived(numberTurnMessages(turn.segments.flatMap((block) => block.activity.flatMap((part) => part.type === "assistant" ? [part] : []))));
+	const earlierCount = $derived(Math.max(0, segment.activity.length - TICKER_ROWS));
+	const visibleEntries = $derived(logMounted ? logEntries : logEntries.filter((entry) => entry.index >= earlierCount));
+	const numberedMessages = $derived(numberTurnMessages(segment.activity.flatMap((part) => part.type === "assistant" ? [part] : [])));
 	function messageNumber(index: number): number | undefined {
 		const part = segment.activity[index];
 		// A live message Jev has yet to number keeps its icon: a predicted number
@@ -153,7 +154,7 @@
 		askReturn = null;
 	});
 	function setupFor(pin: SurfacePin): SurfacePart | null {
-		const parts = turn.segments.flatMap((block) => [...block.activity, ...block.reply]);
+		const parts = [...segment.activity, ...segment.reply];
 		const index = parts.findIndex((part) => part.uuid === pin.part.uuid);
 		return parts.slice(0, Math.max(0, index)).reverse().find((part): part is SurfacePart => part.type === "assistant" && !!part.rawText.trim()) ?? null;
 	}
@@ -218,7 +219,7 @@
 	}));
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	// Unknown read state and hidden unread messages must not make Auto fold a turn.
-	const turnParts = $derived(turn.segments.flatMap((block) => block.activity));
+	const turnParts = $derived(segment.activity);
 	const allRead = $derived(turnParts.some((part) => part.type === "assistant") && turnParts.every((part) => part.type !== "assistant" || part.surfacingRead === true));
 	const minimised = $derived(surfacingActive && (turnMinimised(sessionId, turn.id) ?? (surfacingConfig.status.turnsOpen === "minimised" || (surfacingConfig.status.turnsOpen === "auto" && !turn.live && !newestSettledTurn && allRead && !surface.openAsk))));
 	const summaryVisible = $derived(!minimised && summaryEnabled && (summaryOpen ?? (!phone.current && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
@@ -616,8 +617,12 @@
 					<Button variant="ghost" size="content" tone="muted" hoverFill="none" align="start" touchTarget
 						class="py-[8px] text-[12px]" onclick={() => (expanded = logMounted = true)}>+ {earlierCount} earlier messages</Button>
 				{/if}
-				{#each logMounted ? segment.activity : ticker as part, index (part.uuid)}
-					{@const i = logMounted ? index : earlierCount + index}
+				{#each visibleEntries as entry (entry.uuid)}
+					{@const i = entry.index}
+					{#if entry.kind === "resumed"}
+						<div hidden={!expanded && i < earlierCount}>{@render renderResume?.(entry.resume)}</div>
+					{:else}
+					{@const part = entry.part}
 					{@const latestLiveStep = live && i === segment.activity.length - 1}
 					{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
 					<div data-log-part={part.uuid} hidden={!expanded && i < earlierCount} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
@@ -637,6 +642,7 @@
 							{/if}
 						{/if}
 					</div>
+					{/if}
 				{/each}
 				<div class="flex flex-wrap items-center gap-[10px] py-[8px] text-[12px] text-text-muted">
 					{#if stats.skills > 0}

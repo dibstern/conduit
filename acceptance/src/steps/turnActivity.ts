@@ -89,21 +89,27 @@ export const turnActivityHandlers: StepHandler[] = [
 	{
 		name: "seed multi-segment turn log",
 		match:
-			/^the turn log session has a (two-segment AskUserQuestion|two-segment ExitPlanMode|wake|waiting) turn$/,
+			/^the turn log session has a (two-segment AskUserQuestion|two-segment ExitPlanMode|wake|wake-reply|wake-empty|waiting|async) turn$/,
 		run: async ({ world, match }) => {
 			const kind = match[1] ?? "";
 			kinds.set(world.page, kind);
-			const wake = kind === "wake";
-			const waiting = kind === "waiting";
+			const wake = kind.startsWith("wake");
+			const waiting = kind === "waiting" || kind === "async";
+			const asyncQuestion = kind === "async";
 			const handBack = kind.endsWith("ExitPlanMode")
 				? "ExitPlanMode"
 				: "AskUserQuestion";
-			const before = [
-				tool("first-read", "Read", 1000),
-				text("earlier", EARLIER, 4000, true),
-			];
+			const before =
+				kind === "wake-empty"
+					? []
+					: [
+							tool("first-read", "Read", 1000),
+							text("earlier", EARLIER, 4000, true),
+						];
 			const after = [
-				tool("later-read", "Read", 30_000),
+				...(kind === "wake-reply" || kind === "wake-empty"
+					? []
+					: [tool("later-read", "Read", 30_000)]),
 				text("reply", REPLY, 35_000),
 			];
 			const messages: History[] = [
@@ -133,8 +139,23 @@ export const turnActivityHandlers: StepHandler[] = [
 						: [
 								...before,
 								tool("answered", handBack, 8000),
+								...(asyncQuestion
+									? [
+											{
+												...tool("waiting", "AskUserQuestion", 25_000),
+												state: {
+													status: "completed",
+													input: {
+														_tag: "whole" as const,
+														value: { questions, delivery: "async" },
+													},
+													output: { _tag: "whole" as const, text: "null" },
+												},
+											},
+										]
+									: []),
 								...after,
-								...(waiting
+								...(waiting && !asyncQuestion
 									? [tool("waiting", "AskUserQuestion", 40_000, true)]
 									: []),
 							],
@@ -154,7 +175,27 @@ export const turnActivityHandlers: StepHandler[] = [
 			];
 			const rpc = requireRpcControl(world.page);
 			rpc.setDetailRows(SESSION, messages.flatMap(detailRowsOf));
-			rpc.setStubs({ AnswerQuestion: () => ({ ok: true }) });
+			rpc.setStubs({
+				AnswerQuestion: () => {
+					rpc.sendChunk("SubscribeApprovals", [
+						{ _tag: "remove", id: "waiting-question", sequence: 2 },
+					]);
+					rpc.setDetailRows(
+						SESSION,
+						messages
+							.map((message) => ({
+								...message,
+								parts: message.parts?.map((part) =>
+									part.id === "waiting"
+										? tool("waiting", "AskUserQuestion", 40_000)
+										: part,
+								),
+							}))
+							.flatMap(detailRowsOf),
+					);
+					return { ok: true };
+				},
+			});
 			setSessionRowStatus(world.page, SESSION, waiting ? "busy" : "idle", {
 				title: "Turn log acceptance",
 				accountId: "claude",
@@ -168,6 +209,7 @@ export const turnActivityHandlers: StepHandler[] = [
 					: {}),
 			});
 			await openSessionRoute(world.page, SESSION);
+			await expect.poll(() => rpc.hasStream("SubscribeApprovals")).toBe(true);
 			if (waiting)
 				rpc.sendChunk("SubscribeApprovals", [
 					{
@@ -179,6 +221,7 @@ export const turnActivityHandlers: StepHandler[] = [
 							toolId: "waiting-question",
 							toolUseId: "waiting",
 							providerId: "claude",
+							...(asyncQuestion ? { delivery: "async" } : {}),
 							questions,
 						},
 					},
@@ -300,7 +343,13 @@ export const turnActivityHandlers: StepHandler[] = [
 								"resumed",
 						),
 					),
-			).toEqual(["first-read", "earlier", "resumed", "later-read"]);
+			).toEqual(
+				kinds.get(world.page) === "wake-empty"
+					? ["resumed"]
+					: kinds.get(world.page) === "wake-reply"
+						? ["first-read", "earlier", "resumed"]
+						: ["first-read", "earlier", "resumed", "later-read"],
+			);
 		},
 	},
 	{
@@ -328,6 +377,19 @@ export const turnActivityHandlers: StepHandler[] = [
 				.getByText("Staging", { exact: true })
 				.click();
 			await world.page.locator(".question-submit-btn").click();
+		},
+	},
+	{
+		name: "assert answered waiting question joins the log",
+		match: /^the waiting hand-back becomes a compact log row$/,
+		run: async ({ world }) => {
+			await expect(
+				panel(world.page).getByTestId("turn-hand-back-row"),
+			).toHaveCount(2);
+			await expect(
+				panel(world.page).getByTestId("turn-hand-back-row").last(),
+			).toContainText("Which target? → Staging");
+			await expect(world.page.locator(".question-card")).toHaveCount(0);
 		},
 	},
 	{

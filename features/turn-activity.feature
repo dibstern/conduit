@@ -25,7 +25,7 @@ Scenario Outline: Wake Runs continue inside the same turn log
   Given message surfacing is active at All
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
-  And the turn log session has a wake turn
+  And the turn log session has a <run> turn
   Then the turn has one activity head, strip and log
   And only the final turn reply is outside the activity
   When I open the combined turn log
@@ -33,23 +33,31 @@ Scenario Outline: Wake Runs continue inside the same turn log
   And the messages region visually matches <baseline> at 98 percent
 
 Examples:
-  | viewport | baseline              |
-  | desktop  | turn-log-wake-desktop |
-  | phone    | turn-log-wake-phone   |
+  | viewport | run        | baseline                    |
+  | desktop  | wake       | turn-log-wake-desktop        |
+  | phone    | wake       | turn-log-wake-phone          |
+  | desktop  | wake-reply | turn-log-wake-reply-desktop  |
+  | phone    | wake-reply | turn-log-wake-reply-phone    |
+  | desktop  | wake-empty | turn-log-wake-empty-desktop  |
+  | phone    | wake-empty | turn-log-wake-empty-phone    |
 
 Scenario Outline: A waiting Turn keeps its open question answerable below its reply
   Given message surfacing is active at All
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
-  And the turn log session has a waiting turn
+  And the turn log session has a <kind> turn
   Then the turn has one activity head, strip and log
   And only the final turn reply is outside the activity
   And the open hand-back is below the reply
   When I answer the waiting turn question
   Then the waiting turn answer reaches the relay
+  When I open the combined turn log
+  Then the waiting hand-back becomes a compact log row
   And the messages region visually matches <baseline> at 98 percent
 
 Examples:
-  | viewport | baseline                 |
-  | desktop  | turn-log-waiting-desktop  |
-  | phone    | turn-log-waiting-phone    |
+  | viewport | kind    | baseline                 |
+  | desktop  | waiting | turn-log-waiting-desktop  |
+  | phone    | waiting | turn-log-waiting-phone    |
+  | desktop  | async   | turn-log-async-desktop    |
+  | phone    | async   | turn-log-async-phone      |
