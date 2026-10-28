@@ -94,8 +94,8 @@ Source names used in the comments:
   (until 32.13; then the ledger's run state, 5.4). Distinct from a send's coverage in the ledger
   (L1, L2, 3.3): its address retired, a pending kill or session end.
 - **Address.** The runner a ledger send is fixed to at issue, or **pending** until the next process
-  (L2, 3.3). **Current process:** the session's one live runner (L1). A **retired** runner (L1) is
-  distinct from a send retired by project inactive (3.11), which loses authority only.
+  (L2, 3.3). **Current process:** the session's one live runner (L1). Only runners
+  retire (L1).
 - **Feeder.** The one per-session caller of `holdRun` for owner sends.
 - **Settle (reconciler).** The reconciler's step that resolves the runs a stopped runner held.
   Distinct from the ledger verb **settle**.
@@ -195,8 +195,7 @@ send module owns the assignment, the database owns the serving runner.
   `SessionLedgerState` and `LedgerEvent` are opaque to callers and tests.
   `state' = decision.events.reduce(evolve, state)`. This is the only seam callers and tests cross.
 - Four verbs: **admit** (a new user input), **observe** (provider evidence and effect outcomes),
-  **control** (user actions and answers), **settle** (alarms, process loss, session end, project
-  gate).
+  **control** (user actions and answers), **settle** (alarms, process loss, session end).
 - `decide` is pure, never throws and never mutates. A rejection leaves state unchanged and carries
   a diagnostic. Stale evidence is Accepted with no events, no effects and no terminals. An Accepted
   decision may carry a diagnostic.
@@ -249,8 +248,8 @@ send module owns the assignment, the database owns the serving runner.
 
 Only evidence and conduit's decisions, each once:
 
-- **Session:** id, provider, an entry counter, stop/end/resume decisions, project inactive/active
-  and session-ended evidence. Paused and the project gate are derived.
+- **Session:** id, provider, an entry counter, stop/end/resume decisions and session-ended
+  evidence. Paused is derived. The ledger holds no project state (3.11).
 - **Send (issue decision):** effect, entry number, time, the Run, admission or interaction it serves,
   its execution, its address (L2: a runner, or pending until it resolves once) and the label fixed
   with that address, an optional deadline. Probes also store the sends they cover,
@@ -307,9 +306,12 @@ Only evidence and conduit's decisions, each once:
      parent means no `process_started` since it issued, and a covered one has no deadline left
      to escalate. Every OpenCode send is case 3.
 
-  A pending send resolves, once, at the first of: its own `run_dispatched` (a held send), to the
-  runner it names, which covers it at once if that runner is retired; or the next `process_started`, to that runner. A case 2 send follows its
-  execution's start: it is pending while the start is, and resolves with it, to the same runner.
+  A pending send resolves, once, at the first of: its own `run_dispatched` (a held send, the one
+  3.4 binds to it), to the runner it names, which covers it at once if that runner is retired; or
+  the next `process_started`, to that runner. A case 2 send follows its execution's start: it is
+  pending while the start is, and resolves with it, to the same runner. The start of an
+  execution dropped by an unlaunch (3.6) never resolves and is never covered: no later
+  `run_dispatched`, `process_started` or kill addresses it.
   The label fixed with an address is the runner's latest label when the address is fixed; a
   `run_dispatched` naming a runner with no `process_started` yet fixes the label of that runner's
   `process_started`. A kill addressed to pending covers every pending send issued up to it,
@@ -324,7 +326,7 @@ Only evidence and conduit's decisions, each once:
   lives only on the Send. A Queued Run's `interrupt` is addressed (to the
   current process or pending) and carries no label.
 - **`hasAuthority(execution)`:** the execution is its Run's current one, the Run is not Ended, its
-  runner is live (L1), the project is active, and its native session has not ended. This is the
+  runner is live (L1), and its native session has not ended. This is the
   single read of Ended.
 - Native message id (6C): immutable once known. Evidence that contradicts it is rejected with a
   diagnostic and no state change. A missing id is filled from evidence. Where a provider accepts a
@@ -343,9 +345,10 @@ Only evidence and conduit's decisions, each once:
   transmission, including redispatch of an already-bound issue. A `commandId` reissued onto a
   fresh Run keeps its count (4.8), so a transmission belongs to the latest issue of its
   `commandId` before it was held; one naming a retired runner belongs to the latest issue before
-  that runner retired, since no hold is written on a retired runner (4.3). Each transmission has
-  its own token and chains; the issue folds over its transmissions. `holdRun` alone applies the cap
-  (4.3, 4.11). Every effect with no hold gets its token from `ctx.newId()`, and `decide` applies its cap.
+  that runner retired, or to none (an unknown token, below), since no hold is written on a
+  retired runner (4.3). Each transmission has its own token and chains; the issue folds over its
+  transmissions. `holdRun` alone applies the cap (4.3, 4.11). Every effect with no hold gets its
+  token from `ctx.newId()`, and `decide` applies its cap.
 - An observation either **answers** a send (it names that send's token) or is **unsolicited**
   (it names only the host label and an event id). Unsolicited observations are background
   snapshots and task events, a turn start with no active Run (a wake Run), process events, and
@@ -360,8 +363,9 @@ Only evidence and conduit's decisions, each once:
   name the start or steer that carried that input; `effect_outcome` names the effect's own token;
   `probe_result` names the probe's token; its target is read from the issued probe record named by
   that token. The execution is found through the send.
-- Lifecycle evidence is always recorded as a fact. It changes Run state only when, in the decision
-  that records it, the send it answers (if any) is neither retired nor covered (3.11) and
+- Lifecycle evidence is always recorded as a fact on the chains of the send it answers, with or
+  without authority: `started` and `activity` are Observed. It changes Run state only when,
+  in the decision that records it, the send it answers (if any) is not covered (L2) and
   `hasAuthority` holds for its execution; a fact recorded without authority never changes Run state
   later.
 - Receipt evidence (input acceptance and decline, accounting, answer confirmation, input and answer
@@ -381,15 +385,12 @@ Only evidence and conduit's decisions, each once:
 - Freshness compares issue order of sends. There are no version counters. A native-session idle
   probe covers only sends issued before it, and only where the native policy can prove the covered
   work can no longer execute. Idle never leaves a cleanup deadline behind.
-- Project inactive retires every send of the session, probes included. Session end covers
-  every send of the ended native session, probes included. A retired token never regains
-  authority, but evidence on it still updates its chains (3.11): a later `started` or acceptance
-  makes it a send that may still act again (3.5, 3.8 12A). A covered send's work has ended (3.5)
-  and no evidence revives it.
+- Session end covers every send of the ended native session, probes included. A covered send's work has ended (3.5) and no evidence
+  revives it.
 - Native `run_id` order is unproven. Code must not assume it sorts by time; use arrival order, or
   cite evidence that it sorts.
 
-<!-- src: C0 §1; MODEL Observation doc comment; AUDIT-2 T7, Other changes (run_id); AUDIT A11; OW Decision 3; FB §4; HLK step 1, Rules not tied to one step (9B); review 2026-10-28 (H1); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1.4; REDESIGN review r3-2 (retired send in the authority test); REDESIGN harness r12 -->
+<!-- src: C0 §1; MODEL Observation doc comment; AUDIT-2 T7, Other changes (run_id); AUDIT A11; OW Decision 3; FB §4; HLK step 1, Rules not tied to one step (9B); review 2026-10-28 (H1); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1.4; REDESIGN review r3-2 (retired send in the authority test); REDESIGN harness r12; REDESIGN-2 (D48) -->
 
 ### 3.5 Send chains and the views over them
 
@@ -403,7 +404,8 @@ Each transmission has two chains; each merges by join (maximum):
 Transport and consumption stay separate unions; they are never merged into one machine.
 
 `effect_outcome` maps onto transport: succeeded to Sent, `delivery_unknown` to Unknown, retryable
-to Retrying{at}, permanent to Failed{code}.
+and `not_sent` to Retrying{at}, permanent to Failed{code}. A `not_sent` transmission never left
+conduit (H4): its consumption stays None and it counts toward no cap (4.8).
 
 **Work ended** is derived: the execution's evidence under the policy's work-ended rule, a covering
 idle probe the policy trusts, or its send's coverage (L1, L2, 3.3). A `stop_task`'s work is its
@@ -430,7 +432,7 @@ task (8.4): it ends when the task view holds that task neither live nor unknown 
 - A retryable outcome with consumption None ends that send's work; Observed or Accepted keeps it
   (the table above). A sibling's unsettled
   `delivery_unknown` blocks automatic resend until a probe settles it.
-- A refused sibling never releases the fence or retires an interrupt while other work of the same
+- A refused sibling never releases the fence or ends an interrupt while other work of the same
   admission may still act.
 
 For a runner-held send these chains are never stored: they are a view over the hold events
@@ -441,8 +443,14 @@ For a runner-held send these chains are never stored: they are a view over the h
 ### 3.6 Run machine
 
 - Moved only by `reconcile`: reserve to Queued (only with no active Run); launch to Launched (a new
-  execution; the only fold reset); interrupt to Interrupting (the policy's stop sequence); tombstone
-  to Ended (absorbing; outcome from the fold at that moment).
+  execution; the only fold reset); unlaunch back to Queued when the Run is Launched, its start's
+  latest try got `not_sent` (H4), and its execution has no evidence and no send but that start:
+  the execution is dropped and its start never resolves (L2), so the Run is as it was before it
+  launched, and it launches again through admission at its start's retry (3.7); interrupt to
+  Interrupting (the policy's stop sequence); tombstone to Ended (absorbing; outcome from the fold
+  at that moment). Otherwise (a joined turn, 8.3, or a steer already issued) a `not_sent` start
+  ends its Run as a joined Run's unconsumed start does (8.3), and its inputs return to the inbox
+  with no error shown (3.9, 4.8).
 - Derived labels: Launched with no evidence shows as Starting; with activity, Running. Settling means
   an OpenCode-style policy has a result with no later activity.
 - `reconcile` rule order: expired deadlines; end conditions (with authority); interrupts; answers,
@@ -457,7 +465,7 @@ For a runner-held send these chains are never stored: they are a view over the h
 - The view's `active` is a union by Run tag, so `by` exists only on Interrupting and the deadline
   kind is tied to the tag.
 
-<!-- src: FB §3; HLK step 2; SPEC Implementation Decisions (Native-session fence); AUDIT-2 T10; model-gaps 2026-10-28 -->
+<!-- src: FB §3; HLK step 2; SPEC Implementation Decisions (Native-session fence); AUDIT-2 T10; model-gaps 2026-10-28; REDESIGN-2 review r3-2 (unlaunch) -->
 
 ### 3.7 Deadlines and the alarm
 
@@ -466,9 +474,10 @@ For a runner-held send these chains are never stored: they are a view over the h
   required target.
 - Derived deadlines: each Run phase (Starting, Running, Interrupting, Settling) from its
   stored time and budget, with Settling fixed at the result; a Queued Run shows the deadline of
-  the obligation that blocks it (the earliest outstanding send cleanup or Tombstone cleanup) and has no clock of its own; each send's cleanup or retry while it
+  the obligation that blocks it (the earliest outstanding send cleanup or Tombstone cleanup, or
+  after an unlaunch its start's retry, 3.6) and has no clock of its own; each send's cleanup or retry while it
   may still act; permission timeouts; native command confirmation (which does not run while the
-  provider reports the command queued).
+  provider reports the command queued, or while its latest try got `not_sent`, H4).
 - Every non-Ended Run is bounded by a deadline, including its answer obligation's deadline while
   delivery is pending after settle expiry (3.10), so "stuck busy" cannot be represented.
 - Every probe is an obligation and owns a retry deadline from the moment it is issued. Probe
@@ -481,8 +490,9 @@ For a runner-held send these chains are never stored: they are a view over the h
   whose retryable outcome opens it, the next transmission is at
   `max(retryAt, outcomeTime + backoff(n))`. A probe's obligation opens at its issue (above): its
   deadline stays at issue plus `max(probeMs, backoff(n))`, raised to `retryAt` when a retryable
-  outcome names a later one (D20). `n` is the transmissions so far; backoff is 1 s, 2 s, 4 s, 8 s,
-  capped at 30 s.
+  outcome names a later one (D20). `n` is the send's attempts so far, by `commandId` across runs:
+  its transmissions, and its tries that ended before transmitting (a start failure, `not_sent`,
+  4.8); backoff is 1 s, 2 s, 4 s, 8 s, capped at 30 s.
 - Delivery recovery probes the input or interaction. Idle proof after interrupt, fence or settle
   expiry probes `native_session`.
 - An Accepted decision carries `alarmAt`: the earliest open deadline after its events, or absent
@@ -537,14 +547,15 @@ For a runner-held send these chains are never stored: they are a view over the h
   throttled.
 - End reasons: completed; provider error (code, retryable); interrupted (by stop, run now or end;
   forced when it ended on the deadline rather than native truth); process lost; deadline expired;
-  session ended (usage-limit failover or native session vanished); refused (code); project
-  inactive; fence unconfirmed. Every failed Run shows a specific reason.
+  session ended (usage-limit failover or native session vanished); refused (code, including
+  `project_inactive`, 3.11); fence unconfirmed. Every failed Run shows a specific reason.
 
 <!-- src: HLK step 4; FB §3 (10A, 11A, 12A), §4; AUDIT A6, A10; AUDIT-2 A16; SPEC Implementation Decisions (Tombstones), user story 19; MODEL EndReason; model-gaps 2026-10-28; REDESIGN harness r12 -->
 
 ### 3.9 Inputs, steers and the inbox
 
-- Input delivery: Queued, then Dispatching (a start or steer issued with no transport evidence yet),
+- Input delivery: Queued, then Dispatching (a start or steer issued with no transport evidence yet;
+  a `not_sent` try returns it to Queued, H4),
   then Delivered/sent, or Delivered/unknown when the transmission's outcome is unknown.
   Delivered/unknown blocks automatic resend until a probe settles it. Neither implies Accepted.
 - A message sent during an active Run becomes a Run Input on that Run with a steer effect. The
@@ -552,11 +563,12 @@ For a runner-held send these chains are never stored: they are a view over the h
   Run and queues behind a wake Run.
 - A steer the provider declines returns to the inbox.
 - When Stop, Run now or a forced close ends a Run: a steer the provider Accepted stays with the
-  ended Run. A steer that provably never reached the agent returns to the inbox as the next
-  message, with no error shown. A steer that was Delivered but not Accepted returns to the front of
-  the inbox marked possibly seen, is never re-sent automatically, and with ordinary Stop waits
-  behind the pause. A steer whose Run is still active, and whose transmission provably never
-  reached the agent, is re-sent as a steer.
+  ended Run. A steer that provably never reached the agent and whose outcome was not permanent
+  returns to the inbox as the next message, with no error shown; a steer with a permanent outcome,
+  a refusal included, stays refused (3.11, 4.8). A steer that was Delivered but not Accepted
+  returns to the front of the inbox marked possibly seen, is never re-sent automatically, and with
+  ordinary Stop waits behind the pause. A steer whose Run is still active, whose transmission
+  provably never reached the agent and whose outcome was not permanent, is re-sent as a steer.
 - Ordinary Stop pauses the inbox. Resume clears only an ordinary pause. Run now stops the current
   Run and starts its input at once, bypassing the pause.
 - The session inbox is a read view of the ledger: the ledger owns inbox order and pause. The inbox
@@ -582,31 +594,64 @@ For a runner-held send these chains are never stored: they are a view over the h
 
 <!-- src: FB §2, §4; RULINGS R2; HLK Rules not tied to one step (10B); SPEC user stories 8 to 12; MODEL InteractionView; model-gaps 2026-10-28 -->
 
-### 3.11 Session and project gates
+### 3.11 Session gates and project removal
 
-- **Project inactive** retires every send of the session. **`project_active`** clears the gate;
-  reconciliation probes run before any dispatch. Resume never clears this gate. Retired tokens
-  never regain authority.
-- Retirement removes authority, never liveness. A retired send that may still act keeps
-  `anythingMayAct` true until reconciled, and evidence on a retired send still updates its chains
-  and so its liveness (3.4).
-- Project inactive leaves a sent native command's view, liveness and deadline unchanged: its
-  retired send stays in `live`, and its deadline keeps running, until `command_result`,
-  NotConsumed or its coverage (L1, L2, 3.3). Inactive never
-  fails a native command: its view becomes `Failed` only by coverage (process loss, a kill,
-  session end) or a permanent `effect_outcome` (D17, D34).
-- A retired probe is finished: it leaves `live` and owns no deadline. `project_active`
-  reconciliation issues fresh probes.
-- A removed project's pending effects are cancelled with a project-inactive reason; other projects
-  keep their ordering. A project that returns reconciles its OpenCode work from what OpenCode
-  reports.
+- **H4. The daemon refuses the sends of a removed project and defers those of a project it does
+  not serve.** The registry's project gate has three answers. Where a send would transmit, the
+  feeder spawns nothing and the effect interpreter calls no adapter unless the project is served:
+  - **Removed** (not registered, and no removal or registration of it in progress): the send
+    gets its permanent outcome, code `project_inactive` (4.7).
+  - **Not served** (registered but not ready to serve: registering, its relay being built or
+    replaced, a relay load error or its store unavailable; or a removal or registration of it in
+    progress, as when a re-add imports its store before it registers): the send gets
+    `effect_outcome` `not_sent` before any hold, spawn or adapter call, runner-held or not (3.4,
+    4.4). A `not_sent` try counts no transmission and ends nothing: a start's Run goes back to
+    Queued (3.6), an input or native command shows as queued (3.9, 8.5), and the same effect
+    re-issues at the backoff, at most 30 s apart, for as long as the project is not served, while
+    the session's later input waits behind it (4.7), as main's inbox waits for the relay. Only the
+    clocks a send's own issue starts stop for a `not_sent` try (a Run's Starting, gone with the
+    unlaunch, and a native command's confirmation, 8.5); Interrupting, fence and probe deadlines
+    run, so Stop still ends a Run during an outage. No Run ends per try, so a try shows nothing.
+  - **Served**: the send proceeds.
+
+  A transmitted send is never refused; it ends by its runner's retirement or its provider's
+  evidence. The gate never applies to `kill_and_respawn`: it acts on a conduit process through
+  `requestStop` (H2, 6.6), not on the provider, so Stop escalation and restart recovery kill
+  whatever the gate answers. The registry answers removed only once the removal has finished,
+  which includes the committed Stop of every runner of the project (6.3). A daemon killed
+  mid-removal restarts with the project registered (Not served, then Served) if no config save
+  has run since the removal began, or else removed, with any runner whose Stop never committed
+  left alive as Q28 leaves it; either way every refusal precedes any transmission.
+  Removal and spawn are serialized per project: a spawn either finishes before removal looks for
+  runners or is refused, and a refused spawn is `not_sent` as above, so its re-issue meets the
+  gate again. So no refused send is addressed to a live conduit runner. The gate is read when a
+  send is stepped: a waiting send whose project is removed and re-added between two of its
+  tries is delivered to the re-added project, as main's inbox drains on re-add. The gate's
+  readers (the feeder and the effect interpreter) and the scheduler that fires their re-issues
+  are the daemon's, as the provider adapters are, not a relay's: a project with no relay,
+  removed or not served, still has every send stepped and answered. The daemon's project
+  registry owns this fact; the ledger holds no project state and has no project input (D48).
+- Removal reaches the ledger only through existing inputs. It stops the project's runners (6.3),
+  and each retirement commit records `process_lost` (L1, 6.5): it covers the sends addressed to
+  that runner and ends launched Runs `process_lost`. A refused send ends (3.5). A refused start
+  ends its Run `refused (project_inactive)`, and `reconcile` starts the next Queued input, which
+  meets the same refusal. A refused steer is never re-sent, since no permanent outcome is (4.8):
+  its input is refused (3.5), as a refused start's is. A refused native command is
+  `Failed` (D34); a refused probe has no answer and is re-probed under its cap (3.7). Deadlines,
+  gates and stop sequences run as they do elsewhere. Other projects keep their ordering.
+- Removal does not stop managed OpenCode, which only a full stop ends (then `process_lost`, 9),
+  and it disposes the project's relay, so no OpenCode evidence reaches the ledger while the
+  project is removed. A transmitted OpenCode send may still act (3.5) until the project returns:
+  its Run ends by its deadlines as elsewhere (3.7), and the interrupt and probe sends they issue
+  are refused. A project that returns needs no input: its OpenCode work reconciles from what
+  OpenCode reports (9).
 - **Session ended** removes authority over that native session's work. It does not block fresh
   authorized admission, which opens a new native session with start mode `fresh` (4.8).
 - `session_ended` records lost work by L5 (8.4).
 - Session-scoped provider failures (usage-limit failover, vanished native session) settle every open
   Run on the session with its reason.
 
-<!-- src: HLK Rules not tied to one step (9B), step 3; FB §4; SPEC Implementation Decisions (Session-scoped provider failures, Removed project, OpenCode adapter), user stories 22 to 24; model-gaps 2026-10-28; REDESIGN review r1-2; REDESIGN harness r12 -->
+<!-- src: HLK Rules not tied to one step (9B), step 3; FB §4; SPEC Implementation Decisions (Session-scoped provider failures, Removed project, OpenCode adapter), user stories 22 to 24; model-gaps 2026-10-28; REDESIGN review r1-2; REDESIGN harness r12; REDESIGN-2 (D48); REDESIGN-2 review r3-2 -->
 
 ### 3.12 Persistence
 
@@ -690,6 +735,7 @@ export type Evidence =
       | { readonly tag: "succeeded" }
       | { readonly tag: "retryable"; readonly retryAt: number }
       | { readonly tag: "permanent"; readonly code: string } // includes "native_resume_rejected"
+      | { readonly tag: "not_sent"; readonly retryAt: number } // host never called the provider (H4); retryAt is the outcome time, 3.7 spaces the re-send
       | { readonly tag: "delivery_unknown" } }
   | { readonly kind: "probe_result"; readonly finding:
       | { readonly tag: "input_present"; readonly nativeMessageId?: string }
@@ -731,9 +777,7 @@ export type Settlement =
   | { readonly kind: "hold_exhausted"; readonly commandId: string }
   | { readonly kind: "process_started"; readonly label: Label; readonly reattached: boolean }
   | { readonly kind: "process_lost"; readonly runnerId: string } // retires runnerId (L1, 3.3)
-  | { readonly kind: "session_ended"; readonly cause: "usage_limit_failover" | "native_session_vanished" }
-  | { readonly kind: "project_inactive" }
-  | { readonly kind: "project_active" };
+  | { readonly kind: "session_ended"; readonly cause: "usage_limit_failover" | "native_session_vanished" };
 
 export type RunEffect =
   | { readonly kind: "start"; readonly runId: string; readonly inputId: string;
@@ -971,17 +1015,25 @@ One write transaction, in this order:
 - Each session's runner manager has one feeder. It is the only caller of `holdRun` for an owner
   send. Nothing else appends `run.dispatched` and nothing else spawns a runner for a send. From
   32.5 it is also the caller for a joined steer's own transmission (4.11).
-- It takes a send when the send is claimed, when a release commits, and at restart.
+- It takes a send when the send is claimed, when a release commits and at restart.
 - From the ledger switch (32.6) it also takes `send_native_command` effects, which have no Run:
   with no runner alive it spawns one (8.5).
 - **H3. Order.** The feeder transmits in issue order, is the only spawner, and drops a send the
   ledger no longer wants: an owner send when `holdRun` returns `Covered` or `Ended` (a Run ends when
-  its runner retires, L1), a `send_native_command` once its send has left `live` (3.11). A send
+  its runner retires, L1), a `send_native_command` once its send has left `live` (3.5, 8.5). A send
   covered by a pending kill may still be transmitted before that kill executes; the kill, issued
   after it, then acts on the process it reached. The ledger relies on this for pending sends (L2,
   3.3).
 - The feeder's memory is its queue, keyed by `(session, run, commandId)`, and each send's
-  capability (a live handle, or `Adopted`). Every step calls `holdRun`:
+  capability (a live handle, or `Adopted`). Every step first reads the registry's project gate
+  (H4, 3.11), then calls `holdRun`. A gate settlement applies only to a run `holdRun` steps 1 and
+  2 would pass (not covered, unheld, not terminal), checked in its own transaction; any other run
+  goes on to `holdRun`. A `send_native_command`, which has no Run and no hold, is answered while
+  its send is `live` (8.5), as an `effect_outcome`: permanent `project_inactive`, or `not_sent`.
+  - removed: settle the send through Send Settlement as a start failure (below), permanent,
+    code `project_inactive`, with no hold and no spawn.
+  - not served: observe `effect_outcome` `not_sent` for it, with no hold and no spawn. It ends
+    no run; its Run goes back to Queued (3.6), and the ledger re-issues it (3.7).
   - `Held`: hand the transmission to its write fiber.
   - `Busy`: drop; the hold's owner ends or releases it.
   - `Cleaning`: request candidate retirement, await its commit, then re-enter the gate.
@@ -991,12 +1043,13 @@ One write transaction, in this order:
   - `Covered`, `Exhausted` and `Ended`: drop.
   - `StoreUnavailable`: one backoff (4.8).
 
-  Every re-entry is a `holdRun` call. The feeder has no retry loop, no poll and no failure
+  Every re-entry is a new step. The feeder has no retry loop, no poll and no failure
   handler of its own. A key being stepped is queued again when a release commits, so no
   release is lost.
 - A start failure, or `Unserved` on the step right after a start (`StartLost`), settles the
-  send through Send Settlement (4.7): permanent unless the failure sets `retryable: true`. It
-  is never retried in the feeder (main parity).
+  send through Send Settlement (4.7): permanent unless the failure sets `retryable: true`. A
+  spawn the registry refuses because a removal is in progress is `not_sent` (H4). It is never
+  retried in the feeder (main parity).
 - The write fiber runs a release that fails on the store again after one backoff, until it
   commits (4.5's no-op rule makes the repeat safe).
 - Interruption is not an outcome: an interrupted feeder writes nothing; the restart scan owns
@@ -1174,7 +1227,8 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
   | hello: runner never got it (`not_received`) | `run.released` `NotSent`, read as Consumption NotConsumed{absent} (4.11) |
   | delivery unknown | `observe` `effect_outcome` `delivery_unknown`; runner-held: Settle's `delivery_indeterminate` (4.11) |
   | native resume rejected | `effect_outcome` `permanent`, code `native_resume_rejected`; runner-held: `run.released` `ResumeRejected` (4.11) |
-  | daemon refusal (project inactive, admission timeout) | `settle` `project_inactive`, or `effect_outcome` `permanent` |
+  | daemon refusal (project removed, H4; admission timeout) | the refused send's `effect_outcome` `permanent`; runner-held: Send Settlement's permanent outcome before any hold (4.4, 4.11) |
+  | project not served (H4) | `effect_outcome` `not_sent`, runner-held included (4.4); it ends no run (3.6) |
   | Stop | `control` `stop` / `cancel_input` |
   | runner lost | `settle` `process_lost` |
 
@@ -1195,12 +1249,14 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
 ### 4.8 Retries, the cap, the resume fallback and steers
 
 - **A message that never reached the agent.** When a Run ends, or a runner reconnects, and an
-  input's send provably never reached the agent and the user did not press Stop, the send is
-  re-sent automatically, up to the cap. Otherwise it ends `failed` or `cancelled`: the failed
-  message is shown once and its text returns to the composer. `delivery_unknown` is never re-sent.
+  input's send provably never reached the agent, its outcome was not permanent and the user did
+  not press Stop, the send is re-sent automatically, up to the cap. Otherwise it ends `failed` or
+  `cancelled`: the failed message is shown once and its text returns to the composer.
+  `delivery_unknown` and a permanent outcome (F65, F67, a refusal included) are never re-sent.
   This replaces the native projection settling undelivered sends with the Run's outcome.
-- **Steers.** A steer whose Run is still active is re-sent as a steer. A steer whose Run has ended
-  returns to the inbox as the next message, with no error shown. Until 32.5, a joined steer is
+- **Steers.** Of those re-sends, a steer whose Run is still active is re-sent as a steer; one
+  whose Run has ended returns to the inbox as the next message, with no error shown. Until 32.5,
+  a joined steer is
   carried by its owner's holder: if its runner never received it, it is moved to `retryable_failed`
   with `next_attempt_at = now`, keeping its run and `request_sequence`, writing no event, and the
   reactor re-sends it as a `Fresh` send with an incremented attempt and a new `sinkId`. This is the
@@ -1210,16 +1266,17 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
   re-sends after a retryable provider failure, anchored at its outcome; `retryAt` is a lower bound
   (3.7). The cap is 5 transmissions per send or control effect. For a runner-held start or steer,
   `holdRun` is the only cap, durable and counted from
-  `run.dispatched` (4.3 step 3); for an effect with no hold, the ledger's `decide` applies it. A
-  re-send after `input_absent` or a
+  `run.dispatched` (4.3 step 3); for an effect with no hold, the ledger's `decide` applies it,
+  counting every issued token but a `not_sent` one (3.5). A re-send after `input_absent` or a
   release goes at once but counts. Past the cap, an input send fails, its message is shown once
   and its text returns to the composer; probes follow 3.7. A send retried onto a fresh run keeps
   its transmission count. The same backoff spaces the feeder's re-entries after
   `StoreUnavailable`, the write fiber's repeated release, and the reconciler's retry of a failed
   Stop commit. A runner-held send's retryable outcome ends its run and re-sends on a fresh run; the
-  cap counts by `commandId` across runs. A start failure precedes any hold and counts no
-  transmission, so a start failure that keeps setting `retryable: true` re-sends without a bound at
-  the 30 s cap, as on main.
+  cap counts by `commandId` across runs. A start failure precedes any hold and a `not_sent`
+  outcome precedes any hold or adapter call; neither counts a transmission, so one that keeps
+  recurring re-sends without a bound at the 30 s cap, as on main. A `not_sent` outcome (a project
+  not served, H4) ends no run: a start's Run goes back to Queued (3.6).
 - **The resume fallback is a new transmission.** A rejected native resume ends that transmission
   (released `ResumeRejected` for a runner send). The ledger issues a new start decision under the
   same `commandId`; `holdRun` binds it as `n + 1`. The feeder does not re-hold the release itself.
@@ -1317,6 +1374,8 @@ treat the hold as a cache of a ledger chain.
   | Hold fact | Source | Ledger chain value |
   |---|---|---|
   | `run.dispatched{commandId, transmission: n}` | the `run.dispatched` event | the send's issue decision; `(commandId, n)` is the transmission |
+  | settled before any hold (a start failure, `StartLost` or a removed gate answer, 4.4) | the run terminal event Send Settlement appends (4.7) | Transport Failed{code}, or Retrying when `retryable`; Consumption None |
+  | not served before any hold (H4, 4.4) | the `effect_outcome` `not_sent` the feeder observes | Transport Retrying; Consumption None; no run terminal (3.6) |
   | held, no other evidence | `run.dispatched` with no later `run.released` for that transmission | Transport Issued; Consumption None |
   | released `NotSent` or `JournalAbsent` | the `run.released` event | Consumption NotConsumed{absent} |
   | released `Refused` (`exiting`, `retiring`, `interrupted`) | the `run.released` event | Consumption NotConsumed{declined} |
@@ -2151,7 +2210,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   execution. From
   `turn_started` until its runner retires (L1) or its provider's Run-end evidence for that label
   is recorded, `anythingMayAct` is true, whether or not the Run has Ended (by its start NotConsumed, deadline,
-  `project_inactive` or `session_ended`). Run-end evidence clears this liveness even without
+  a refusal or `session_ended`). Run-end evidence clears this liveness even without
   authority; it changes Run state only with authority (3.4). Below, "wake execution" means any
   such unsolicited execution, joined or not. An outstanding wake execution also holds
   the native-session fence (section 9) until session end, so admission after its Run has Ended
@@ -2165,11 +2224,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   cleanup expiry runs the provider's fence-expiry column against every execution label still a
   member (D28). A wake Run's deadline expiry runs
   its provider's stop sequence against it (Claude and Codex `close`, Cursor `kill_and_respawn`,
-  OpenCode `probe native_session`), confirm-gated as in 8.4. While the project is inactive it
-  issues nothing, and `project_active` reconciliation settles it, acting on every execution label
-  still a member as the Tombstone cleanup expiry does (D29). `turn_started` with no active
-  Run records a wake Run even while the project is inactive (LI9); having no authority, it
-  issues no effect.
+  OpenCode `probe native_session`), confirm-gated as in 8.4.
 - **`anythingMayAct`** is true for a non-ended Run, a send that may still act (a probe only reads,
   so it never may act, D31), or tasks live or
   unknown. Tasks never block a new Run. Every liveness reader asks it: the worktree cleanup sweep,
@@ -2188,7 +2243,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   none, or when the provider has none. `stop_task` runs through the SDK's
   `stopTask(taskId)` or Codex `thread/backgroundTerminals/terminate(processId)`. A failed stop is a
   diagnostic, with no retries. A `stop_task` is never probed: its work is its task (3.5), so it
-  may still act only while that task is live or unknown, which the task term already counts.
+  may still act only while that task is live or unknown, which the task term already counts. With
+  transport Issued, Unknown or Sent it stays live that long (the 3.5 table).
 - **Confirm gate (L3).** A destructive step (an ignored interrupt, restart, kill, end-session, an
   ignored interrupt while paused) with tasks live or unknown waits with a pending confirm. The
   interrupt deadline never destroys on its own. A confirm must match the latest snapshot; a stale
@@ -2203,7 +2259,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   to a Run is dropped when that Run Ends by other evidence (D43); `end` then continues to its
   `end_session` step. A step whose every address is retired issues nothing:
   its sends were covered at retirement. A step that destroys several member labels (Tombstone
-  cleanup expiry, `project_active` reconciliation) waits on one confirm. `PendingConfirm`'s labels,
+  cleanup expiry) waits on one confirm. `PendingConfirm`'s labels,
   tasks and `snapshotEntry` are views of now.
 - `snapshotEntry` is the 1-based count of changes to what the task view reads (D45): `tasks_snapshot`
   evidence, `process_started` settlements, and the decision that raises the current process's
@@ -2237,17 +2293,14 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   for it (H3, 4.4). It issues in the decision that admits it, after already-issued sends and ahead
   of queued inputs, so issue order alone puts it first and its confirmation never holds back a
   start.
-- **D17.** A sent command under project inactive follows 3.11. One admitted while the project is
-  inactive is recorded and issued in the `project_active` decision, after that decision's
-  reconciliation probes and ahead of any start or steer.
 - **Its view is a projection of its send:** `Sent` while unfinished; `Queued`, `Started`,
   `Completed` or `Cancelled` from receipts; `Unconfirmed` when its deadline fires; `Failed` with
   the covering cause (`process_lost`, `kill_and_respawn` or `session_ended`) when covered; `Failed`
-  with the outcome's code on a permanent `effect_outcome`, which also finishes the send (3.4). The
-  deadline starts at issue and drives only the view. A deferred command is an unissued send:
-  session end covers it, so it is `Failed{session_ended}` and never issued.
+  with the outcome's code on a permanent `effect_outcome`, a refusal included (H4), which also
+  finishes the send (3.4). The deadline starts at issue and drives only the view.
 - The provider may report it queued ("queued by Claude"). The deadline does not run while the
-  provider reports it queued. When it fires, the tracker re-reads native state (Claude's
+  provider reports it queued, or while its latest try got `not_sent` (H4), which shows as
+  `Queued`. When it fires, the tracker re-reads native state (Claude's
   transcript, Codex's `thread/goal/get`), with no authority needed, and shows "Clear not confirmed"
   or "Pause not confirmed" with Retry. The tracker runs no timer.
 
@@ -2363,7 +2416,7 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
     transmission; after `started` it is Observed and ends nothing. Its `commandId` must equal
     the hold's. A `command_lifecycle` or `command_result` answer whose `commandId` differs from
     its send's (the hold's for a held start or steer, the effect's for `send_native_command`) is
-    Rejected, a diagnostic, no state change (3.4), whether or not the send is retired (D21).
+    Rejected, a diagnostic, no state change (3.4), whether or not the send is covered (D21).
 
   - An OpenCode idle probe covers only sends issued before it whose delivery the native
     user-message echo or a native result naming the send confirmed. Abort is session-wide, so
@@ -2567,13 +2620,19 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 - F57. A Run on attempt 2 expires; successor B queues behind the new close. A retained close
   acknowledgement from attempt 1 arrives. B must not start until attempt 2's close is confirmed or its
   deadline settles.
-- F58. Running A, `run_now(B)` queued, then `project_inactive`. A later receipt for A's input must not
-  start B; nothing starts until the project returns.
+- F58. Running A, `run_now(B)` queued, then the project is removed: A's runner retires (L1) and
+  the daemon refuses the session's sends (H4). A later receipt for A's input changes nothing; B's
+  start is refused and B ends `refused (project_inactive)`. Nothing reaches the agent. A start of
+  B stepped while the removal is still in progress gets `not_sent` and B goes back to Queued;
+  its re-issue is refused once the removal has finished. If instead the project is only not
+  served (a relay load error), B's start gets `not_sent` before any hold, B goes back to Queued,
+  counts no transmission, re-issues at the backoff for as long as the error lasts, and is
+  delivered once after the project is served again.
 - F59. Question q answered with E; E gets a retryable outcome; result (error ActualFailure); E
   retried; then q's delayed confirmation of the first transmission arrives, then `query_ended`. The
   Run ends as error with ActualFailure, not completed.
-- F60. An uncertain answer's interaction probe is scheduled for retry, then `project_inactive`.
-  Firing the old retry timer must not transmit anything.
+- F60. An uncertain answer's interaction probe is scheduled for retry, then the project is
+  removed. The retry fires and its probe is refused (H4); nothing is transmitted.
 - F61. The settlement deadline after a result is the one armed at the result. No later evidence
   extends it except evidence this contract says extends it.
 
@@ -2669,10 +2728,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
   - LI5: live or unknown tasks are never destroyed without a confirm that matches the latest
     snapshot, except unplanned loss; lost work is recorded at most once per label, in the decision
     that ends its scope, and never for a label `Known` to have no live task (L5, 8.4).
-  - LI6: a native command is issued in the requesting decision when the project is active, alive
-    process or not; requested while the project is inactive, it is issued in the `project_active`
-    decision, ahead of any start or steer, unless its native session ends first (then it is
-    `Failed{session_ended}` and never issued, D30).
+  - LI6: a native command is issued in the requesting decision, alive process or not.
   - LI7: older-label evidence never changes authority or liveness; a send's own label is never older
     for that send (3.4).
   - LI8: `anythingMayAct` is false only when the fake has no running turn, no unfinished send other
@@ -2682,10 +2738,9 @@ Behavioural statements the rebuilt decider must make impossible to violate:
     exactly one wake Run.
   - LI10: a zero-turn result never ends or starts a Run.
 - **Spec properties**, checked against both the pure decider and the real ledger on SQLite: every Run
-  ends exactly once; every unfinished Run has a deadline; at most one active Run per session; no
-  `delivery_unknown` input is delivered twice; no answer is lost; the inbox drains; Tombstoned Runs
-  accept no lifecycle events; no illegal transition on valid input; tables and views agree after a
-  rollback.
+  ends exactly once; every unfinished Run has a deadline (3.7); at most one active Run per
+  session; no `delivery_unknown` input is delivered twice; no answer is lost; the inbox drains;
+  Tombstoned Runs accept no lifecycle events; no illegal transition on valid input; tables and views agree after a rollback.
 - **Oracle.** A deliberately naive reference consumes only the public command stream and the
   decider's public outputs (issued effects with tokens, `ended`, `viewLedger`), keeps its own history
   and recomputes expected facts. It never reads `SessionLedgerState`, `LedgerEvent` or any internal
@@ -2709,7 +2764,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
   - R1: quarantine kept when a completed query's fence is released; retained transport failures kept
     apart from successor admissions; late native results reconciled for retained OpenCode sends;
     a fence-release path for retained retryable sends.
-  - R2: native acceptance kept when retryable sends are retired; process loss reconciled before an
+  - R2: native acceptance kept when retryable sends end; process loss reconciled before an
     ended owner is ignored.
   - R3: acceptance-based retention scoped to the accepted transmission.
   - R4: acceptance set by an input probe kept; observed proof kept without upgrading failed delivery.
@@ -2819,7 +2874,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 | 32.2.4 | public-interface trace harness, fake provider ground truth, oracle differential, coverage and fixed traces | 11.2 |
 | 32.2.5 | A6, A16 | 3.8 |
 | 32.2.6 | direct-provider uncertainty, outbox re-sends, one Stop rule for inbox and claimed rows, reading `stopCovers` (5.4); Q26: close native terminal projection's missing attempt fence with 32.6 | 4.7, 4.8, 4.10, 5.4 |
-| 32.2.7 | core authority, stopping, process labels, session and project gates | 3.3, 3.6, 3.11, 5.1, 6.1 |
+| 32.2.7 | core authority, stopping, process labels, session gates and project removal | 3.3, 3.6, 3.11, 5.1, 6.1 |
 | 32.2.8 | core answers, steers, OpenCode and Cursor policies | 3.6, 3.9, 3.10, 9 |
 | 32.2.9 | integrate, verify and land the redesigned ledger | 11.2 |
 | 32.2.10 | key Claude background tasks by native `task_id` and `run_id`, without a second counter | 8.2, 8.3 |
@@ -2838,7 +2893,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 | 32.2.13 | Codex policy in the decider | 3, 8, 9 |
 | 32.21 | Codex on the ledger, runner-held; reuses 32.6's runner path. Switch for Codex, as 32.6 does for Claude; migrate Send Settlement's Codex callers to the ledger's source-specific inputs (4.7, 4.11) and delete their outbox path; `processLost` is a no-op for Codex | 3.12, 4, 6.5, 9 |
 | 32.11 | OpenCode on the ledger. Switch for OpenCode: Run Effects, run state and the direct-provider `delivery_indeterminate` marker (written by the interpreter) become the ledger's; the OpenCode process reporter, labelled with the instance's `promptProcessId` (9) | 3.12, 4.10, 9 |
-| 32.12 | session-wide failures and removed projects | 3.11 |
+| 32.12 | session-wide failures and removed projects: one project gate for H4 (removed, not served, served: `not_sent` before any transmission, its Run back to Queued, while registered and not served or while a removal or registration runs, a permanent `project_inactive` once removed), removal serialized with spawn per project, `project_inactive` a final refusal | 3.11, 4.4, 4.7, 4.8 |
 | 32.13 | deletes the old run-state copies: `owned_run_ids` and the fallback, main-built paths, `newestRunnerFirst`, run joining, `payload.stop.owners`, `stopCovers`, `joined_into` and the outbox; the ledger's `control` `stop` takes over coverage (5.4); Send Settlement's outbox adapter and its `settleRunnerCommandReply` call path | 3.12, 5.4, 6.5, 6.9, 7.4 |
 | 32.14 | full crash matrix and two-build upgrade, run once each for Claude, Codex and Cursor; reuses the journal answers | 4.9, 11.3 |
 | 32.22 | A9, A20, T6, T11 | 8.3 |
@@ -2896,7 +2951,7 @@ and Q10 were real rules.
 | Q6 | 6C | native id immutable once known; one execution per start attempt (3.4) | not recorded |
 | Q7 | 7B | one module for correlation and transmissions; refined by OW Q7 | not recorded |
 | Q8 | 8C | no in-session pruning (3.12) | not recorded |
-| Q9 | 9B | resume clears only an ordinary pause; the project returns through reconciliation probes (3.11) | not recorded |
+| Q9 | 9B | resume clears only an ordinary pause; the ledger has no project gate, and a removed project's sends are refused by the daemon (3.11, H4, D48) | not recorded |
 | Q10 | 10B | a refused answer stays Pending with `lastRefusal` (3.10) | not recorded |
 
 <!-- src: HLK header, Why, steps 1-5, Rules not tied to one step -->
@@ -3047,11 +3102,11 @@ port.
 - D4: idle end-session expiry escalates to confirm-gated Run-less kill and respawn (8.4).
 - D5: tokened command lifecycle addresses a held query transmission and matches its command id (9).
 - D6: a named native result confirms delivery for OpenCode idle coverage (9).
-- D7: wake execution stays live after Run end and is recorded while the project is inactive (8.3).
+- D7: changed by D48: wake execution stays live after Run end (8.3).
 - D8: unsolicited identity is the label and event id pair (3.4).
 - D9: Queued borrows its blocking obligation's deadline; no fence clock or fenceMs (3.7, 3.13).
-- D10: session end covers sends; project inactive retires them (3.4).
-- D11: retired probes finish and lose their deadlines (3.11).
+- D10: changed by D48: session end covers sends (3.4).
+- D11: removed by D48: no probe has a project case; a refused probe is re-probed under its cap (3.7, 3.11).
 - D12: interaction resolution ends every answer transmission for it (3.10).
 - D13: probe retry fires at issue plus max(probeMs, backoff(n)) in one decision (3.7).
 - D14: LI2 permits the Tombstoned Run's absence from active and a different outcome (11.2).
@@ -3060,20 +3115,20 @@ port.
 **Decided (integration round 3, attrib-r3)**
 
 - D16: derived from L1: a kill retires its runner at issue, covering its sends, its own included (3.3, 5.1).
-- D17: a native command admitted while the project is inactive issues in the `project_active` decision; inactive leaves a sent command's view, liveness and deadline unchanged (3.11, 8.5).
+- D17: removed by D48: a native command has no project case; it issues in the requesting decision (LI6), and a refusal makes it `Failed` (D34, 3.11).
 - D18: an outstanding wake execution is a native-session fence member until its work ends, its runner retires or the session ends (8.3, 9).
 - D19: derived from L4: a native command is a session send with no Run, so never a Run's barrier; its deadline drives only its view (8.5).
 - D20: a retry is anchored where its obligation opens: the outcome for a send, the issue for a probe; `retryAt` only raises it (3.7).
-- D21: a command receipt naming another commandId is Rejected, retired or not (3.4, 9).
+- D21: a command receipt naming another commandId is Rejected, covered or not (3.4, 9).
 - D22: derived from L2 case 3 and H3: with no process the command goes to pending, and the feeder spawns (8.5, 4.4). Rejected: waiting for `process_started` (only the feeder spawns, so a lone command deadlocks); a ledger spawn effect (a second spawner).
 - D23: derived from L2: pending resolution, which also fixes the send's label (3.3).
 - D24: derived from L4: a covered command is `Failed` with its cause, from L1 and 3.4 (8.5).
 - D25: a Claude wake member leaves at its label's `query_ended` with or without a result, as section 9 already says for `resultReleasesFence` no (9).
 - D26: for OpenCode, a trusted covering idle probe alone is work ended, for start sends and wake executions alike; the table's sequence is the usual path, not a conjunction (3.5, 9).
-- D27: derived from L4: the deadline starts at issue and runs while inactive, because D17 leaves a sent command's deadline unchanged (8.5).
+- D27: changed by D48: derived from L4: the deadline starts at issue (8.5).
 - D28: derived from L1.2: under H1 a joining label is a newer `querySeq` of the same runner, and each execution ends at its own Run-end evidence or its runner's retirement. A turn joining a wake Run under another label is a wake execution of its own: live and a fence member until then; the Tombstone cleanup expiry runs fence expiry against every remaining member label (8.3). Rejected: killing the current process at the wake deadline (destruction would depend on arrival order); moving the wake label to the newest (hides work still running under the first label, LI8).
-- D29: changed by REDESIGN (A.11), L3: the gate stores its step; its labels are a view computed when it issues. Reason: the old rule froze labels at gate time, so a confirm after a replacement sent `end_session` to a retired runner (D36's own rejected failure). One confirm for a multi-label step, and `project_active` acting on every member label, stand (8.3, 8.4).
-- D30: derived from L4: a deferred command is an unissued send; session end covers it (8.5).
+- D29: changed by REDESIGN (A.11), L3: the gate stores its step; its labels are a view computed when it issues. Reason: the old rule froze labels at gate time, so a confirm after a replacement sent `end_session` to a retired runner (D36's own rejected failure). One confirm for a multi-label step stands (8.4); D48 removed its `project_active` case.
+- D30: removed by D48: no command is deferred (8.5).
 - D31: a probe only reads, so it never counts as a send that may still act; LI8 exempts unfinished probes (8.3). Rejected: counting probes (a read would hold worktree cleanup and archive).
 - D32: derived from L2: the escalation goes where its `end_session` went (case 1), or to pending when that went to pending (case 3) (3.3, 8.4). Rejected: the current process (a later, unrelated runner would be killed).
 - D33: changed by REDESIGN (A.11), L2 projection: process-wide sends carry the runner's latest label, not the execution label; `PendingConfirm` labels are a view (L3). Reason: the two differ only after a reattach, where lost work and identity are under the newer label (D35's reason) (3.3, 3.13).
@@ -3093,9 +3148,10 @@ Eleven questions from the first oracle round against REDESIGN-1. Ten follow from
 written into their clauses, not added as decisions: a `process_started` retires every other
 runner, started or not; a later `process_started` of a live runner is a reattach; evidence from a
 runner not started has no authority (3.3 L1); a `run_dispatched` naming a retired runner covers
-its send (3.3 L2); only snapshots and `process_started` replace tasks; older wake execution labels
-never end the Run (8.3); the gate's tasks and `snapshotEntry` are views, a gated step decides at
-issue, and a release by retirement issues as any release does (8.4).
+the send 3.4 binds it to, and is an unknown token when no issue of its `commandId` precedes that
+retirement (3.3 L2, 3.4); only snapshots and `process_started` replace tasks; older wake
+execution labels never end the Run (8.3); the gate's tasks and `snapshotEntry` are views, a gated
+step decides at issue, and a release by retirement issues as any release does (8.4).
 
 - D43: a confirm-gated step that belongs to a Run is dropped when that Run Ends by other evidence; the step existed to end it (5.1, 8.4). Rejected: issuing it against the Ended Run (a `close` would record lost work, L5, for a query that may already serve the next Run).
 
@@ -3123,7 +3179,7 @@ first snapshot (8.4, D44); a newer label retiring before any snapshot records "m
 
 The generator now produces every input kind the model can represent, including query replacement.
 Two of five findings were oracle bugs that need no contract change: a permanent `effect_outcome` on
-a native command after `project_inactive` fails it (3.11, D34), and an older wake label's
+a native command fails it (D34), and an older wake label's
 `query_ended` keeps the Run queued behind the fence (8.3, D18).
 
 - D45: amends D3 and 8.4. `snapshotEntry` counts every change to what the task view reads,
@@ -3156,7 +3212,6 @@ D28 and D47:
 - A repeated `turn_started` re-arms its execution: there is one per (Run, label) (D28).
 - Run-end evidence for a label clears every outstanding execution with that label. 8.3 names the
   label, not one execution.
-- `project_active` settles a joined execution as it does a wake one (D29, D47).
 
 **Harness round 12 (2026-10-29): no new decisions.** Its four contract questions follow from 3.2,
 3.4, 3.5, 3.11, 4.3, 4.8 and 8.3, and are written into those clauses:
@@ -3164,9 +3219,20 @@ D28 and D47:
   the task is live or unknown (3.5, 8.4, LI8).
 - Late evidence that releases the fence starts the next Run in its own decision: 12A forbids
   effects for the Ended Run only, and `reconcile` reads views, never the command (3.2, 3.8).
-- A send retired by project inactive loses authority only; evidence on it still updates its
-  chains, and a retryable outcome after `started` keeps work (3.4, 3.5, 3.11).
+- Evidence on a send without authority still updates its chains, and a retryable outcome after
+  `started` keeps work (3.4, 3.5).
 - A transmission binds to the latest issue of its `commandId` before it was held (3.4, 4.3, 4.8).
+
+**Decided (oracle round 11, 2026-10-29)**
+
+Six questions from the oracle round against round 13. Two follow from existing clauses: a
+`run_dispatched` naming a runner retired before any issue of its `commandId` binds none, an
+unknown token (3.3 L2, 3.4, 4.3); a Sent `stop_task` may still act while its task is live or
+unknown (3.5, 8.4). The other four (binding of an issue retired by project inactive, evidence on
+a retired probe, the deadline of a revived retired send, `activity` without authority) came from
+the project seam. D48 (A.12) removes the state they asked about: no send is retired by a project,
+so binding is 3.4 alone, a probe's findings apply as for any probe, nothing revives, and
+`activity` is ordinary evidence.
 
 ### A.11 REDESIGN-1 Process and address (2026-10-28): C + M1
 
@@ -3193,6 +3259,54 @@ key, freshness) and each guess became a decision. Chosen: one live process, addr
 | M4: a Run ledger and a Process ledger | rejected: coverage of Run sends would have two owners |
 
 <!-- src: REDESIGN 2026-10-28 (02-options-and-pick.md) -->
+
+### A.12 REDESIGN-2 Project removal (2026-10-29): C + M1 + M3 + M4
+
+Decided autonomously under the Review Rounds rule after round 14's three review rounds with
+material findings (r1 5, r2 3, r3 1). Root cause: the daemon's project registry owns whether a
+project is served (`isProjectReady`), and the ledger held a second copy as a mode, so every ledger
+concept needed a disposition for it and its writer raced the host's refusals. Source:
+`02-options-and-pick.md` (REDESIGN-2).
+
+- D48: the ledger has no project state. `project_inactive` and `project_active` leave Settlement,
+  Session state has no project field, and `hasAuthority` has no project term. One host fact, H4
+  (3.11): the daemon refuses the untransmitted sends of a removed project, each with its permanent
+  `effect_outcome` code `project_inactive` (4.7), only after removal has finished and its runners'
+  Stops have committed. A registered project that is not served, or whose removal is in
+  progress, is never refused: each send gets `not_sent` before any transmission, which counts
+  none and ends nothing (a start's Run goes back to Queued, 3.6), so its input re-issues at the
+  backoff until the project is served (4.8), and no try is shown because none ends a Run. The
+  gate never applies to `kill_and_respawn` (H2).
+  Removal reaches the ledger only as `process_lost` and refusals: launched runner-held Runs end
+  `process_lost`, queued input ends refused, a refused steer is never re-sent (4.8), native commands
+  `Failed` (D34), probes re-probe under their cap, and deadlines and gates are unchanged.
+  Replaces round 14's draft (defer at inactive, re-decide at `project_active`) and HEAD's
+  retirement. Amends D7, D10, D27, D29 and A.1 Q9; removes D11, D17 and D30; amends the glossary,
+  3.1, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.11, 3.13, 4.4, 4.7, 4.8, 4.11, 8.3, 8.4, 8.5, 9, LI6, the
+  spec properties, F58, F60, 12.2 and Appendix C. Reason: one owner
+  for the fact; the ledger already has an input for each consequence of removal. Risk: removal
+  leaves managed OpenCode running with no relay, so a transmitted OpenCode send of a removed
+  project stays may-still-act until the project returns (Appendix C).
+
+| Option | Verdict |
+|---|---|
+| C: project served is a host fact (H4); removal reaches the ledger as `process_lost` and refusals | chosen (basis) |
+| M1: one registry-owned project gate read by the feeder, interpreter, admission and sweep | chosen (code shape, 32.12) |
+| M3: the ledger's input set has no host modes | chosen (with C) |
+| M4: liveness is the ledger's view, never the outbox code `project_inactive` | chosen (code, 32.12 and 32.13) |
+| A: defer at inactive, re-decide at `project_active`, refusal settles inactive first | rejected: two writers of one fact, 14 rules, a removed project never bounded |
+| B: removal settles every session inactive before unregistering | rejected: rollback, crash, restart and concurrent create each need a host rule; still a mode |
+| D': suspend the project's sessions until it returns | rejected: deadlines get a second owner; overdue deadlines fire against untransmitted sends |
+| P: park a not-served project's sends in the feeder until the registry marks it ready | rejected (review r2): the Run's deadlines run while parked, so an outage longer than them ends queued input, and the park needs a wake for every gate change (a removal ends with no ready mark) |
+| N: a not-served send is `not_sent`, which ends nothing; a start's Run unlaunches to Queued and borrows its start's retry deadline | chosen (review r3) |
+| R: a not-served try is a retryable start failure that ends its Run, hidden from view | rejected (review r3): every try ends a Run that each user-facing consumer must hide, a waiting input shows Starting or Dispatching, and a Run held Launched through an outage would absorb a self-started turn (8.3) |
+| E: removal is `session_ended` | rejected: lies about the native session; hides live OpenCode work from cleanup |
+| F: removal is a host Stop per session | rejected: a second writer of stop intent; the same order race; paused input waits forever |
+| G: inactive retires every send (HEAD) | rejected: the retired-send state behind harness r12 gap i and oracle r11 |
+| M2: removal as one planner module | rejected: orders nothing C needs ordered |
+| M5: removal on each session's drain lane | rejected: C is order-free; a lane only adds waiting |
+
+<!-- src: REDESIGN-2 2026-10-29 (/private/tmp/r32-inactive-redesign/02-options-and-pick.md) -->
 
 ## Appendix B. Old-id mapping
 
@@ -3302,6 +3416,19 @@ Every old id maps here. Ids were reused across documents, so each is named with 
 - The crash window between revoke and the flush (RA risk 1) is closed: the retirement row commits
   before any signal (6.3, F14).
 - Known limits: F10 and F11.
+- **A removed project's transmitted OpenCode work is unbounded until the project returns** (3.11,
+  D48). Removal leaves managed OpenCode running and disposes the relay, so no OpenCode evidence
+  reaches the ledger: the Run ends by its deadlines, but its send may still act. Accepted:
+  OpenCode really may still act, and a removed project's worktree is not cleaned up, so nothing
+  reads that liveness until a re-add reconciles it (9).
+- **A not-served project's input polls at the backoff** (3.11, D48). While a registered project's
+  relay stays down (a load error until the next successful load, a folder missing until it
+  returns), its session's head input stays Queued and re-issues every 30 s at most (3.6, H4),
+  and once the project is served it goes at
+  its next backoff, up to 30 s later. Main's inbox waited with no Run and drained when the relay
+  started, and main failed a claimed, unstarted send on a relay load error
+  (`refuseProjectCommand`), which this contract re-sends instead. Accepted:
+  waking it at once needs a project input in the ledger, which D48 removes; no input is lost.
 - **Startup can finish before its forked Stops commit** (6.3). Until such a Stop commits, the
   runner's row is unretired, so `holdRun` may hand a recovered owner send to a runner whose Stop
   is still `Committing`. On an older runner build, which does not journal a send before running
