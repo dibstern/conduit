@@ -156,7 +156,7 @@ describe("MessageList session-view publication", () => {
 					},
 		];
 		flushSync();
-		expect(container.querySelectorAll(".turn-activity")).toHaveLength(2);
+		expect(container.querySelectorAll(".turn-activity")).toHaveLength(1);
 		expect(
 			container.querySelectorAll(
 				'.turn-activity [data-testid="turn-live-head"]',
@@ -177,7 +177,7 @@ describe("MessageList session-view publication", () => {
 		).toBeNull();
 		expect(container.textContent).not.toContain("Working");
 		if (kind === "assistant")
-			expect(container.querySelector(".result-bar")).not.toBeNull();
+			expect(container.querySelector(".result-bar")).toBeNull();
 		slot.messages.messages = [];
 		slot.activity.phase = "idle";
 	});

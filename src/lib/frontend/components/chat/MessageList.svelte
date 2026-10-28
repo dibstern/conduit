@@ -51,6 +51,7 @@
 		lastResult,
 		liveLaunchedTasks,
 		segmentTurns,
+		turnLog,
 		type Turn,
 	} from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
@@ -452,22 +453,18 @@
 	const currentTurns = $derived(
 		projectCurrentTurns(forkSplit?.current ?? [], processing),
 	);
-	// Each continuation leaves a divider before the first reply-side message
-	// created at or after it, or after the last message until one arrives. An
-	// activity panel renders as one collapsed row, so a divider that falls inside
-	// one goes before the whole panel. Keyed by the uuid it renders before.
+	// A continuation belongs before the next reply-side part, inside the log
+	// when that part is activity, or at the transcript end until work arrives.
 	const resumeDividers = $derived.by(() => {
 		const dividers = new Map<string, SessionResume[]>();
 		const resumes = activeSession?.resumes ?? [];
 		if (resumes.length === 0) return dividers;
-		const slots = (forkSplit ? [...inheritedTurns, ...currentTurns] : turns).flatMap((turn) =>
-			turn.segments.flatMap((segment) => [
-				...(segment.activity[0] ? [{ key: segment.activity[0].uuid, parts: segment.activity }] : []),
-				...segment.reply.map((reply) => ({ key: reply.uuid, parts: [reply] })),
-			]),
-		);
+		const slots = (forkSplit ? [...inheritedTurns, ...currentTurns] : turns).flatMap((turn) => {
+			const { segment, handBacks } = turnLog(turn);
+			return [...segment.activity, ...segment.reply, ...handBacks];
+		});
 		for (const resume of resumes) {
-			const key = slots.find((slot) => slot.parts.some((part) => (part.createdAt ?? -Infinity) >= resume.at))?.key ?? END_OF_TRANSCRIPT;
+			const key = slots.find((part) => (part.createdAt ?? -Infinity) >= resume.at)?.uuid ?? END_OF_TRANSCRIPT;
 			dividers.set(key, [...(dividers.get(key) ?? []), resume]);
 		}
 		return dividers;
@@ -571,6 +568,9 @@
 
 	<!-- Turn rendering snippet (shared between fork and normal paths) -->
 	{#snippet turnItem(turn: Turn)}
+		{@const log = turnLog(turn, resumeDividers)}
+		{@const segment = log.segment}
+		{@const hasActivity = log.entries.length > 0 || turn.live}
 		<div data-live-turn={turn.live ? "" : undefined}>
 		{#if turn.user}
 			<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
@@ -580,47 +580,40 @@
 		{#if goal && turn.id === goalNoticeTurnId}
 			{@render goalNotice()}
 		{/if}
-		{#each turn.segments as segment, i}
-			{@const final = i === turn.segments.length - 1}
-			{#if segment.activity[0]}
-				{@render resumed(segment.activity[0].uuid)}
-			{/if}
-			{#if segment.activity.length > 0 || (final && turn.live)}
-				{@const reply = segment.reply[0]}
-				<TurnActivity latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
-					onjump={scrollCtrl.requestJump}
-					onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
-					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
-					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
-			{/if}
-			<!-- Notices sit between the final work and reply: they are lifted out of
-			     the activity log so a failure is never hidden behind a collapsed panel. -->
-			{#if final}
-				{#each turn.notices as notice (notice.uuid)}
-					<div class="msg-container">
-						<SystemMessage message={notice} driver={viewedSessionId ? getSessionDriver(viewedSessionId) : undefined} accountId={activeSession?.accountId ?? undefined} />
-					</div>
-				{/each}
-			{/if}
-			{#each segment.reply as reply (reply.uuid)}
-				{@render resumed(reply.uuid)}
-				<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
-					<AssistantMessage {sessionId} {providerId} message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)}
-						hideHeader={reply === segment.reply[0] && (segment.activity.length > 0 || (final && turn.live))}
-						model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
-				</div>
-			{/each}
-			{#if segment.handBack}
-				<div class="max-w-[820px] mx-auto px-[14px] md:px-[32px]">
-					<div class="md:ml-[42px]"><ToolItem message={segment.handBack} /></div>
-				</div>
-			{/if}
+		{#if hasActivity}
+			{@const reply = segment.reply[0]}
+			<TurnActivity latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} final={true} entries={log.entries} renderResume={resumeDivider} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
+				onjump={scrollCtrl.requestJump}
+				onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
+				forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
+				model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
+		{/if}
+		<!-- Notices sit between the final work and reply: they are lifted out of
+		     the activity log so a failure is never hidden behind a collapsed panel. -->
+		{#each turn.notices as notice (notice.uuid)}
+			<div class="msg-container">
+				<SystemMessage message={notice} driver={viewedSessionId ? getSessionDriver(viewedSessionId) : undefined} accountId={activeSession?.accountId ?? undefined} />
+			</div>
 		{/each}
-		<!-- A final segment that did work carries its bill on the strip. A text-only
-		     final segment has no ledger, so it renders the same bill on its own line —
+		{#each segment.reply as reply (reply.uuid)}
+			{#if !log.resumedParts.has(reply.uuid)}{@render resumed(reply.uuid)}{/if}
+			<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
+				<AssistantMessage {sessionId} {providerId} message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)}
+					hideHeader={reply === segment.reply[0] && hasActivity}
+					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
+			</div>
+		{/each}
+		{#each log.handBacks as handBack (handBack.uuid)}
+			{#if !log.resumedParts.has(handBack.uuid)}{@render resumed(handBack.uuid)}{/if}
+			<div class="max-w-[820px] mx-auto px-[14px] md:px-[32px]">
+				<div class="md:ml-[42px]"><ToolItem message={handBack} /></div>
+			</div>
+		{/each}
+		<!-- A turn that did work carries its bill on the strip. A text-only
+		     turn has no ledger, so it renders the same bill on its own line —
 		     one formatter for both, rather than a second dialect of the same facts.
 		     .result-bar is an E2E selector; .turn-meta rides on TurnEconomics. -->
-		{#if lastResult(turn) && turn.segments.at(-1)?.activity.length === 0 && (turn.segments.length === 1 || !turn.live)}
+		{#if lastResult(turn) && !hasActivity}
 			<!-- `now` only matters for a live turn, and this branch needs a result. -->
 			{@const bill = economics(turn, Date.now())}
 			<div class="msg-container">
@@ -642,14 +635,18 @@
 
 	{#snippet resumed(key: string)}
 		{#each resumeDividers.get(key) ?? [] as resume, i (i)}
-			{#if resume.from !== undefined && resume.from !== resume.instanceId && activeSession}
-				<ContinuationDivider {resume} sessionId={activeSession.id} />
-			{:else}
-				<TranscriptDivider data-testid="transcript-divider" class="max-w-[760px] mx-auto px-5">
-					↻ Resumed on <b>{getInstanceById(resume.instanceId)?.name ?? resume.instanceId}</b>{resume.reason === "user" ? " · retried by you" : resume.reason === "reset" ? ` after reset · ${formatSnoozeTime(resume.at)}` : ""}
-				</TranscriptDivider>
-			{/if}
+			{@render resumeDivider(resume)}
 		{/each}
+	{/snippet}
+
+	{#snippet resumeDivider(resume: SessionResume)}
+		{#if resume.from !== undefined && resume.from !== resume.instanceId && activeSession}
+			<ContinuationDivider {resume} sessionId={activeSession.id} />
+		{:else}
+			<TranscriptDivider data-testid="transcript-divider" class="max-w-[760px] mx-auto px-5">
+				↻ Resumed on <b>{getInstanceById(resume.instanceId)?.name ?? resume.instanceId}</b>{resume.reason === "user" ? " · retried by you" : resume.reason === "reset" ? ` after reset · ${formatSnoozeTime(resume.at)}` : ""}
+			</TranscriptDivider>
+		{/if}
 	{/snippet}
 
 	{#snippet goalNotice()}

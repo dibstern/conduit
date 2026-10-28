@@ -232,12 +232,12 @@ Examples:
   | desktop  |
   | phone    |
 
-Scenario Outline: A hand-back divides the lane while keeping turn-wide numbers
+Scenario Outline: A hand-back shares one lane with turn-wide numbers
   Given message surfacing is active at Balanced
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a hand-back turn
-  Then the two hand-back blocks keep turn-wide numbers on their own strips
+  Then the hand-back turn keeps turn-wide numbers on one strip
   And the messages region visually matches <baseline> at <threshold> percent
 
 Examples:

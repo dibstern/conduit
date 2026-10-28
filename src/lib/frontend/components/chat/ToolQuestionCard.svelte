@@ -12,10 +12,13 @@
 	import BlockGrid from '../ui/BlockGrid.svelte';
 	import QuestionCard from "./QuestionCard.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import Button from "../ui/Button.svelte";
 
-	let { message }: {
+	let { message, presentation = "card" }: {
 		message: ToolMessage;
+		presentation?: "card" | "log";
 	} = $props();
+	let expanded = $state(false);
 
 	// The question tool name is "AskUserQuestion" (mapped from "question").
 	// When the question is active, render the interactive QuestionCard inline.
@@ -210,6 +213,13 @@
 	const duration = $derived(message.createdAt === undefined || (!running && message.endedAt === undefined) ? undefined : Math.max(0, (message.endedAt ?? clock.now) - message.createdAt));
 </script>
 
+{#if presentation === "log"}
+	<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={expanded} data-testid="turn-hand-back-row" onclick={() => expanded = !expanded}>
+		<span class="shrink-0 text-text-muted">?</span>
+		<span class="truncate text-text-secondary">{questionData?.map((question, index) => `${question.question} → ${question.isSecret ? "Secret answer hidden" : parsedAnswers?.[index]?.join(", ") || answerDisplay || "No answer"}`).join("; ") ?? answerDisplay ?? "No answer"}</span>
+	</Button>
+{/if}
+{#if presentation === "card" || expanded}
 <div class="min-w-0">
 	<div class="question-tool-header flex items-center gap-[8px] h-[26px] text-[12.5px] text-text-muted">
 		<span class="tool-status-icon shrink-0 text-text-dimmer"><Icon name="message-square" size={14} /></span>
@@ -295,6 +305,8 @@
 	</div>
 {/if}
 </div>
+
+{/if}
 
 <style>
 	.question-tool-option-control {

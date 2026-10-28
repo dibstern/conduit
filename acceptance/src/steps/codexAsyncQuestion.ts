@@ -287,6 +287,12 @@ export const codexAsyncQuestionHandlers: StepHandler[] = [
 			await expect(
 				world.page.locator("#messages .msg-user").last(),
 			).toContainText(`${titles[0]}\n${match[1]}\n\n${titles[1]}\n${match[2]}`);
+			const toggle = world.page.locator(".turn-activity-toggle").last();
+			if ((await toggle.getAttribute("aria-expanded")) === "false")
+				await toggle.click();
+			const row = world.page.getByTestId("turn-hand-back-row");
+			await expect(row).toContainText(match[1] ?? "");
+			await row.click();
 			await expect(world.page.locator(".tool-subtitle-text")).toContainText(
 				"Answered",
 			);

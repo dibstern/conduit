@@ -1188,28 +1188,20 @@ export const surfacingCardHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert hand-back uses local parts and turn ordinals",
-		match:
-			/^the two hand-back blocks keep turn-wide numbers on their own strips$/,
+		name: "assert hand-back uses one strip and turn ordinals",
+		match: /^the hand-back turn keeps turn-wide numbers on one strip$/,
 		run: async ({ world }) => {
 			const panels = world.page.getByTestId("surfacing-card");
-			await expect(panels).toHaveCount(2);
-			for (const [index, expected] of [
-				[0, ["1", "2", "4"]],
-				[1, ["5", "8"]],
-			] as const) {
-				const block = panels.nth(index);
-				await expect.poll(() => pinNumbers(block)).toEqual(expected);
-				for (const ordinal of expected)
-					await expect(
-						block.locator(
-							`[data-step-id="surfacing-agent/surfacing-part-${ordinal}"]`,
-						),
-					).toBeVisible();
-			}
-			await expect(
-				panels.first().getByTestId("surfacing-msg-card"),
-			).toHaveCount(0);
+			await expect(panels).toHaveCount(1);
+			await expect
+				.poll(() => pinNumbers(panels))
+				.toEqual(["1", "2", "4", "5", "8"]);
+			for (const ordinal of [1, 2, 4, 5, 8])
+				await expect(
+					panels.locator(
+						`[data-step-id="surfacing-agent/surfacing-part-${ordinal}"]`,
+					),
+				).toBeVisible();
 		},
 	},
 	{

@@ -10,6 +10,7 @@ import {
 	type CompactionPart,
 	segmentTurns,
 	type Turn,
+	turnLog,
 } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -230,11 +231,28 @@ const handBackMessages = [
 	},
 ] satisfies ChatMessage[];
 const [handBack = EMPTY_TURN] = segmentTurns(handBackMessages, false);
-const [handBackSegment = EMPTY_SEGMENT] = handBack.segments;
+const handBackLog = turnLog(handBack);
 
-/** The pre-question ledger is settled and carries no turn-level bill. */
+/** Both sides of a question share one head, strip and expandable log. */
 export const HandBack: Story = {
-	args: { turn: handBack, segment: handBackSegment, final: false },
+	args: {
+		turn: handBack,
+		segment: handBackLog.segment,
+		entries: handBackLog.entries,
+		final: true,
+	},
+};
+
+export const HandBackExpanded: Story = {
+	...HandBack,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: /^Worked\b/, expanded: false }),
+		);
+		await userEvent.click(canvas.getByTestId("turn-hand-back-row"));
+		await expect(canvas.getByText("Use the staging project.")).toBeVisible();
+	},
 };
 
 const truncatedMessages = [

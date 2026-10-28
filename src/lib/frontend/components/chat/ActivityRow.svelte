@@ -8,6 +8,7 @@
 	import {
 		type ActivityPart,
 		firstLine,
+		isHandBack,
 		fmtDuration,
 		fmtTokens,
 		launchMeta,
@@ -31,6 +32,7 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import SkillDoc from "./SkillDoc.svelte";
 	import ToolFullDetail from "./ToolFullDetail.svelte";
+	import ToolItem from "./ToolItem.svelte";
 
 	let {
 		part,
@@ -90,7 +92,9 @@
 
 </script>
 
-{#if part.type === "tool"}
+{#if part.type === "tool" && isHandBack(part)}
+	<div data-part={part.uuid}><ToolItem message={part} presentation="log" /></div>
+{:else if part.type === "tool"}
 	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.status !== "error" && !part.isError)}
 	{@const failed = part.status === "error" || part.isError}
 	{@const movedToBackground = part.metadata?.['movedToBackground'] === true}

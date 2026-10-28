@@ -1,7 +1,7 @@
 // A turn is one user prompt, everything the model did in response, and its
-// reply segments. The transcript renders one collapsed activity line per segment
-// (summary sentence + duration strip), expandable to the log.
+// reply segments. The transcript renders one activity panel for the whole turn.
 
+import type { SessionResume } from "../../contracts/limit-recovery.js";
 import { skillNameFromTool } from "../../skill-recognition.js";
 import type {
 	AssistantMessage,
@@ -50,6 +50,10 @@ export interface ClosedSegment {
 
 export type Segment = OpenSegment | ClosedSegment;
 
+export type TurnLogEntry =
+	| { kind: "step"; uuid: string; index: number; part: ActivityPart }
+	| { kind: "resumed"; uuid: string; index: number; resume: SessionResume };
+
 export interface Turn {
 	id: string;
 	/** Durable turns.id; absent for display-only placeholders. */
@@ -63,6 +67,81 @@ export interface Turn {
 	 */
 	notices: SystemMessage[];
 	live: boolean;
+}
+
+/** Earlier replies become steps once more work follows; only the last reply
+ * stays outside the panel. Segment boundaries still own phase and timing. */
+export function turnLog(
+	turn: Turn,
+	resumes: ReadonlyMap<string, readonly SessionResume[]> = new Map(),
+): {
+	segment: Segment;
+	entries: TurnLogEntry[];
+	handBacks: ToolMessage[];
+	resumedParts: ReadonlySet<string>;
+} {
+	const activity: ActivityPart[] = [];
+	const handBacks: ToolMessage[] = [];
+	const last = turn.segments.at(-1);
+	for (const segment of turn.segments) {
+		activity.push(...segment.activity);
+		if (segment !== last) activity.push(...segment.reply);
+		const handBack = segment.handBack;
+		if (!handBack) continue;
+		// Async questions can outlive their runner's completion and more work.
+		const asyncQuestion =
+			handBack.name === "AskUserQuestion" &&
+			typeof handBack.input === "object" &&
+			handBack.input !== null &&
+			"delivery" in handBack.input &&
+			handBack.input.delivery === "async";
+		if (
+			handBack.status === "running" ||
+			handBack.status === "pending" ||
+			(asyncQuestion &&
+				handBack.status === "completed" &&
+				(!handBack.result ||
+					handBack.result === "null" ||
+					handBack.result === '""'))
+		)
+			handBacks.push(handBack);
+		else activity.push(handBack);
+	}
+	const segment: Segment =
+		last?.end === undefined
+			? { activity, reply: [...(last?.reply ?? [])] }
+			: {
+					activity,
+					reply: last.reply,
+					end: last.end,
+					...(last.handBack && handBacks.includes(last.handBack)
+						? { handBack: last.handBack }
+						: {}),
+				};
+	const entries: TurnLogEntry[] = [];
+	const resumedParts = new Set<string>();
+	const addResumes = (uuid: string, index: number) => {
+		for (const [i, resume] of (resumes.get(uuid) ?? []).entries()) {
+			entries.push({
+				kind: "resumed",
+				uuid: `resume-${uuid}-${i}`,
+				index,
+				resume,
+			});
+			resumedParts.add(uuid);
+		}
+	};
+	for (const [index, part] of activity.entries()) {
+		addResumes(part.uuid, index);
+		entries.push({ kind: "step", uuid: part.uuid, index, part });
+	}
+	// A wake may produce only a reply, with no new activity step to carry its
+	// divider. It still belongs to this turn's log, before that trailing reply.
+	if (turn.segments.length > 1) {
+		for (const part of [...segment.reply, ...handBacks])
+			addResumes(part.uuid, activity.length);
+	}
+	return { segment, entries, handBacks, resumedParts };
 }
 
 /** AskUserQuestion or ExitPlanMode: the model stops and waits for the user. */
