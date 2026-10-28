@@ -670,6 +670,7 @@
 		{/if}
 	{/snippet}
 
+	{#key viewedSessionId}
 	<!-- Single render loop for ALL messages (click delegation for rewind mode) -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -709,6 +710,7 @@
 	{#if emptyLiveTurn}
 		{@render turnItem(emptyLiveTurn)}
 	{/if}
+	{/key}
 
 	<!-- Cold open: turn-shaped placeholders fill the pane, bottom-anchored where
 	     the newest messages land; extra turns clip off the top. -->

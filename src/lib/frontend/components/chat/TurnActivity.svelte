@@ -142,13 +142,6 @@
 	/** The Ask a citation left, offered back on the cited message's card. */
 	let askReturn = $state<{ ask: SurfacePin; cited: string } | null>(null);
 	const askIdentity = $derived(`${sessionId}/${turn.id}`);
-	$effect(() => {
-		void askIdentity;
-		askExplanations = {};
-		generatingAsk = null;
-		askError = null;
-		askReturn = null;
-	});
 	function setupFor(pin: SurfacePin): SurfacePart | null {
 		const parts = [...segment.activity, ...segment.reply];
 		const index = parts.findIndex((part) => part.uuid === pin.part.uuid);
@@ -172,7 +165,7 @@
 	const storeTurnId = $derived(turn.storeId ?? turn.user?.messageId);
 	// jsdom has no matchMedia; real browsers always do.
 	const phone = typeof matchMedia === "function" ? new MediaQuery("(max-width: 599px)") : { current: false };
-	let summaryOpen = $state<boolean | null>(null);
+	let summaryOpen = $state<{ storeId: string; open: boolean } | null>(null);
 	let summarySettingsError = $state("");
 	let summarySaving = $state(false);
 	let citedOrdinal = $state<number | null>(null);
@@ -188,11 +181,6 @@
 		// A turn can settle while its asynchronous automatic recap is still running.
 		if (active && session && id) return untrack(() => recap.connect(session, id, watch));
 		return;
-	});
-	$effect(() => {
-		void storeTurnId;
-		void sessionId;
-		summaryOpen = null;
 	});
 	let picked = $state<string | null>(null);
 	let folded = $state<boolean | null>(null);
@@ -215,7 +203,7 @@
 	}));
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	const minimised = $derived(surfacingActive && panel.view.kind === "collapsed");
-	const summaryVisible = $derived(!minimised && summaryEnabled && (summaryOpen ?? (!phone.current && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
+	const summaryVisible = $derived(!minimised && summaryEnabled && (summaryOpen && summaryOpen.storeId === storeTurnId ? summaryOpen.open : (!phone.current && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
 	$effect(() => {
 		if (minimised) { hovered = null; detailsOpen = false; }
 	});
@@ -266,16 +254,20 @@
 		folded = false;
 	}
 	function toggleSummary() {
+		if (!storeTurnId) return;
 		const visible = summaryVisible;
 		if (minimised) panel.open();
-		summaryOpen = !visible;
+		summaryOpen = { storeId: storeTurnId, open: !visible };
+	}
+	function closeSummary() {
+		if (storeTurnId) summaryOpen = { storeId: storeTurnId, open: false };
 	}
 	function retrySummary() {
 		generateSummary(recap.retry?.scope ?? (recap.versions.length && summaryNew > 0 ? "new" : "whole"), recap.retry?.sourceVersion);
 	}
 	function generateSummary(scope: "whole" | "new", sourceVersion?: number) {
 		if (!sessionId || !storeTurnId || !summaryEnabled) return;
-		summaryOpen = true;
+		summaryOpen = { storeId: storeTurnId, open: true };
 		void recap.generate(sessionId, storeTurnId, scope, sourceVersion);
 	}
 	async function updateSummarySettings(patch: Partial<MessageSurfacingPreferences["recap"]>) {
@@ -340,7 +332,7 @@
 			digits = "";
 			event.stopPropagation();
 			// Native dialog cancel owns the phone sheet's dismissal.
-			if (!phone.current) { event.preventDefault(); summaryOpen = false; }
+			if (!phone.current) { event.preventDefault(); closeSummary(); }
 			return;
 		}
 		if (!surfacingActive) {
@@ -502,7 +494,7 @@
 		plainCitations={!surfacingActive}
 		start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings} {level}
 		generating={recap.generating} error={recap.error} settingsError={summarySettingsError} saving={summarySaving}
-		onclose={() => summaryOpen = false} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
+		onclose={closeSummary} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
 		onsettings={updateSummarySettings} oncite={citeSummary} {replies}
 		onreply={(ordinal, excerpt) => { const cited = view.numbers.find(({ number }) => number === ordinal); if (cited) replyTo(cited, excerpt); }}
 		onquote={(excerpt) => { if (sessionId) insertComposerReference({ kind: "recap-excerpt", text: excerpt }, sessionId); }} {onhover} foot={surfacingActive ? summaryMarkRead : undefined} />
