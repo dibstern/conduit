@@ -1,7 +1,8 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import type { ProviderInfo } from "../../../src/lib/frontend/types.js";
+import { defaultInstances } from "../fixtures/mockup-state.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -96,6 +97,7 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 				sessions: [
 					{
 						id: "settings-models",
+						accountId: "opencode",
 						title: "Model visibility",
 						status: "idle",
 						projectSlug: "e2e-replay",
@@ -109,7 +111,22 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 		page,
 		new URL("/s/settings-models?p=e2e-replay", relayUrl).toString(),
 	);
+	const requestsBeforeOpen = rpc.getRequests().length;
 	await openModels(page);
+	await expect
+		.poll(() => rpc.getRequests().slice(requestsBeforeOpen))
+		.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					tag: "GetModels",
+					payload: { projectSlug: "e2e-replay", instanceId: "opencode" },
+				}),
+				expect.objectContaining({
+					tag: "GetAgents",
+					payload: { sessionId: "settings-models" },
+				}),
+			]),
+		);
 
 	const panel = page.locator("#settings-panel");
 	const filter = panel.getByTestId("settings-models-filter");
@@ -150,7 +167,9 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 	await expect(panel.getByTestId("settings-models-summary")).toHaveText(
 		"3 of 4 shown",
 	);
-	const artifactDir = resolve("test-results/settings-models-filter");
+	const artifactDir = resolve(
+		"/tmp/conduit-test-3fc0.2/settings-models-filter",
+	);
 	await mkdir(artifactDir, { recursive: true });
 	await page.evaluate(() => document.fonts.ready);
 	const filteredPath = resolve(artifactDir, "filtered-desktop.png");
@@ -259,3 +278,166 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 		"1 of 4 shown",
 	);
 });
+
+for (const driver of ["opencode", "claude"] as const) {
+	test(`loads visibility models for the current non-default ${driver} account`, async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		const accountId = `${driver}-secondary`;
+		const providerId = driver === "opencode" ? "anthropic" : "claude";
+		let hiddenModels = ["elsewhere/keep-hidden"];
+		const rpc = await mockWsRpc(page, {
+			stubs: {
+				GetModels: ({ instanceId }) => ({
+					projectSlug: "e2e-replay",
+					instanceId: accountId,
+					defaultOpenCodeInstanceId: "opencode",
+					providers:
+						instanceId === accountId
+							? [
+									{
+										id: providerId,
+										name: "Account catalog",
+										configured: true,
+										models: [
+											{
+												id: "account-only",
+												name: "Account only",
+												provider: providerId,
+											},
+										],
+									},
+								]
+							: providers,
+					hiddenModels,
+				}),
+				GetAgents: () => ({
+					projectSlug: "e2e-replay",
+					providerScope: { id: "opencode", name: "OpenCode" },
+					agents: [{ id: "review", name: "Review" }],
+					hiddenAgents: [],
+				}),
+				SetHiddenEntries: (params) => {
+					if (params.hiddenModels) hiddenModels = [...params.hiddenModels];
+					return { projectSlug: "e2e-replay", hiddenModels, hiddenAgents: [] };
+				},
+			},
+		});
+		rpc.setDaemonList("SubscribeInstances", {
+			instances: [
+				...defaultInstances,
+				{
+					id: accountId,
+					name: "Secondary account",
+					driver,
+					isDefault: false,
+					port: driver === "opencode" ? 4097 : 0,
+					managed: false,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 1,
+				},
+			],
+		});
+		await mockRelayWebSocket(page, {
+			initMessages: [
+				{
+					type: "project_list",
+					projects: [
+						{
+							slug: "e2e-replay",
+							title: "Account catalog",
+							folders: ["/workspace/settings"],
+						},
+					],
+					current: "e2e-replay",
+				},
+				{
+					type: "shell_snapshot",
+					roots: true,
+					sessions: [
+						{
+							id: "account-models",
+							accountId,
+							title: "Account catalog",
+							status: "idle",
+							projectSlug: "e2e-replay",
+						},
+					],
+				},
+			],
+			responses: new Map(),
+		});
+		await gotoRelay(
+			page,
+			new URL("/s/account-models?p=e2e-replay", relayUrl).toString(),
+		);
+		await openModels(page);
+
+		const panel = page.locator("#settings-panel");
+		await expect(panel.getByTestId("settings-models-filter")).toHaveAttribute(
+			"placeholder",
+			"Filter 1 models",
+		);
+		await expect(panel.getByTestId("settings-models-summary")).toHaveText(
+			"1 of 1 shown",
+		);
+		const group = panel.getByTestId(`settings-models-group-${providerId}`);
+		await group.locator("[aria-expanded]").click();
+		await expect(group.getByRole("switch")).toHaveAccessibleName(
+			"Toggle account only",
+		);
+		await group.getByRole("switch").click();
+		await expect(group).toContainText("0 of 1 shown");
+		await expect
+			.poll(
+				() =>
+					rpc
+						.getRequests()
+						.filter(({ tag }) => tag === "SetHiddenEntries")
+						.at(-1)?.payload,
+			)
+			.toEqual({
+				projectSlug: "e2e-replay",
+				hiddenModels: ["elsewhere/keep-hidden", `${providerId}/account-only`],
+			});
+		await expect(panel.getByTestId("settings-agents-group")).toContainText(
+			"OpenCode agents",
+		);
+		await expect
+			.poll(
+				() =>
+					rpc
+						.getRequests()
+						.filter(({ tag }) => tag === "GetAgents")
+						.at(-1)?.payload,
+			)
+			.toEqual({ sessionId: "account-models" });
+		const artifactDir = resolve(
+			"/tmp/conduit-test-3fc0.2/settings-models-filter",
+		);
+		await mkdir(artifactDir, { recursive: true });
+		const artifact = resolve(artifactDir, `${driver}-catalog.json`);
+		await writeFile(
+			artifact,
+			JSON.stringify(
+				{
+					accountId,
+					hiddenModels,
+					requests: rpc
+						.getRequests()
+						.filter(({ tag }) =>
+							["GetModels", "GetAgents", "SetHiddenEntries"].includes(tag),
+						),
+				},
+				null,
+				2,
+			),
+		);
+		await testInfo.attach("account catalog visibility", {
+			path: artifact,
+			contentType: "application/json",
+		});
+	});
+}

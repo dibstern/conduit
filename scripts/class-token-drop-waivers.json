@@ -5,6 +5,11 @@
 		"requires": "<AccountForm {form} />",
 		"reason": "conduit-test-3fc0.1 extracts the unchanged account form markup; Instances still renders that form."
 	},
+	"src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte :: flex-col,font-medium,gap-2,gap-[8px],gap-x-[12px],gap-y-[4px],max-md:min-h-[44px],max-md:min-w-[44px],max-md:text-[13px],mt-[16px],mx-[4px]": {
+		"movedTo": "src/lib/frontend/components/overlays/ModelVisibilityList.svelte",
+		"requires": "<ModelVisibilityList accountId={discoveryState.catalogAccountId} />",
+		"reason": "conduit-test-3fc0.2 extracts the unchanged visibility markup into the account-driven model list."
+	},
 	"src/lib/frontend/components/input/AttachMenu.svelte :: font-sans": {
 		"movedTo": "src/lib/frontend/components/ui/floating-styles.ts",
 		"requires": "appearance=\"final\"",

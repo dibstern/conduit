@@ -304,6 +304,24 @@ function providersFor(scope = catalogScope()): ProviderInfo[] {
 function agentsFor(scope = catalogScope()) {
 	return agentCatalogs[scope.key] ?? noAgents;
 }
+
+/** Full account catalog, retaining the current view until its account read settles. */
+export function getModelProvidersForInstance(
+	instanceId: string | undefined,
+	project = getCurrentSlug() ?? "",
+): readonly Immutable<ProviderInfo>[] {
+	if (!instanceId) return providersFor();
+	const scope = catalogScope(null, instanceId, project);
+	const current = catalogScope();
+	return providersFor(
+		!modelsFor(scope).loaded &&
+			current.project === project &&
+			discoveryState.catalogAccountId === instanceId
+			? current
+			: scope,
+	);
+}
+
 export function getModelCatalogForInstance(
 	instanceId: string,
 	project = getCurrentSlug() ?? "",
@@ -815,6 +833,12 @@ export const discoveryState = {
 	},
 	get providers(): readonly Immutable<ProviderInfo>[] {
 		return providersFor();
+	},
+	get catalogAccountId(): string | undefined {
+		const scope = catalogScope();
+		return scope.sessionId
+			? getSessionInstanceId(scope.sessionId) || undefined
+			: scope.instanceId;
 	},
 	get sessionProviderIds(): Readonly<Record<string, string>> {
 		return serverDiscovery.sessionProviderIds;
