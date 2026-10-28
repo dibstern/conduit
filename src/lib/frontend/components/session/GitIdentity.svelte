@@ -13,13 +13,13 @@
 	import Modal from "../ui/Modal.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
-	let { directory, presentation, compact = false, children }: {
-		directory: string;
+	let { presentation, compact = false, children }: {
 		presentation: "word" | "control" | "row";
 		compact?: boolean | undefined;
 		children?: Snippet<[attention: boolean, checkout: Snippet, warning: Snippet]> | undefined;
 	} = $props();
 	const checkoutState = $derived(getWorkspaceCheckout());
+	const directory = $derived(checkoutState.directory ?? "");
 	const folders = $derived(checkoutState.folders);
 	const git = $derived(checkoutState.git);
 	const multiFolder = $derived(folders.length > 1 || folders.some((folder) => folder.shared) || (!git && folders.length > 0));
@@ -30,9 +30,9 @@
 	const componentId = $props.id();
 	const branchRenameFormId = `${componentId}-branch-rename`;
 	const showBranchRename = $derived(checkoutState.showBranchRename && checkoutState.branchRenameOpener === identityElement);
-	const project = $derived(directory.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || directory);
-	const checkout = $derived(git?.branch || git?.head);
-	const label = $derived(checkout ? `${project} / ${checkout}` : project);
+	const project = $derived(checkoutState.projectName);
+	const checkout = $derived(checkoutState.checkoutName);
+	const label = $derived(checkoutState.label);
 	const operation = $derived(git?.operation ? {
 		rebase: "rebasing", merge: "merging", "cherry-pick": "cherry-picking",
 		revert: "reverting", bisect: "bisecting",

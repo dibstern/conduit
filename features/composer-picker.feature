@@ -76,7 +76,7 @@ Scenario Outline: C1 draft Claude accounts form a grid and bind the project on t
   When I view Account choices in the picker
   Then the Account section has 2 equal-width cards and the caption 5-hour use
   And the picker has no account handoff note
-  And the picker root sections and rows are harness, account, model, context, effort, agent
+  And the picker root sections and rows are harness, account, model, context, effort, agent, permissions
   And the picker card claude is named personal and shows its account logo
   And the claude Account card shows 62% usage
   And the self Account card shows 90% usage
@@ -345,10 +345,10 @@ Scenario Outline: C6 a single account or instance hides its section beneath two 
 
 Examples:
   | tier  | harness  | rows                                   | baseline                            | threshold |
-  | wide  | Claude   | harness, model, context, effort, agent | composer-picker-account-c6-claude   | 98        |
-  | phone | Claude   | harness, model, context, effort, agent | composer-picker-account-c6-claude   | 98        |
-  | wide  | OpenCode | harness, model, context, agent         | composer-picker-account-c6-opencode | 98        |
-  | phone | OpenCode | harness, model, context, agent         | composer-picker-account-c6-opencode | 98        |
+  | wide  | Claude   | harness, model, context, effort, agent, permissions | composer-picker-account-c6-claude   | 98        |
+  | phone | Claude   | harness, model, context, effort, agent, permissions | composer-picker-account-c6-claude   | 98        |
+  | wide  | OpenCode | harness, model, context, agent                      | composer-picker-account-c6-opencode | 98        |
+  | phone | OpenCode | harness, model, context, agent                      | composer-picker-account-c6-opencode | 98        |
 
 Scenario Outline: C1 two harnesses are equal-width tabs in the picker root
   Given the conduit app is served with the connected mockup
@@ -534,3 +534,68 @@ Scenario Outline: desktop opens the same root rows in a popover
 Examples:
   | baseline                     | threshold |
   | composer-picker-root-desktop | 98        |
+
+Scenario Outline: Session Permissions choices update both the panel and composer control
+  Given the conduit app is served with the connected mockup
+  And the harness logo is viewed in the <tier> tier
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And approvals are ask
+  When I open the model picker
+  Then the picker Permissions row reads Ask before edits
+  When I view Permissions choices in the picker
+  Then the picker lists permission modes dontAsk, plan, ask, acceptEdits, auto, full with ask selected
+  When I choose permission acceptEdits in the picker
+  Then the picker Permissions row reads Auto-accept edits
+  And the approvals chip shows Auto-accept edits
+  When I view Permissions choices in the picker
+  Then the picker lists permission modes dontAsk, plan, ask, acceptEdits, auto, full with acceptEdits selected
+  And the model-picker region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier  | baseline                          | threshold |
+  | wide  | composer-picker-permissions       | 98        |
+  | phone | composer-picker-permissions-phone | 98        |
+
+Scenario Outline: Session Checkout lists worktrees and moves the current session
+  Given the conduit app is served with the connected mockup
+  And the harness logo is viewed in the <tier> tier
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the checkout worktrees are account-chip at /workspace/conduit and main at /workspace/conduit-main
+  When I open the model picker
+  Then the picker Checkout row reads conduit / account-chip
+  When I view Checkout choices in the picker
+  Then the picker lists both checkout worktrees with /workspace/conduit checked
+  When I choose the picker worktree at /workspace/conduit-main
+  Then the shared composer picker is closed
+  And the checkout Move RPC targets /workspace/conduit-main
+  When I view Checkout choices in the picker
+  Then the picker lists both checkout worktrees with /workspace/conduit-main checked
+  And the model-picker region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier  | baseline                       | threshold |
+  | wide  | composer-picker-checkout       | 98        |
+  | phone | composer-picker-checkout-phone | 98        |
+
+Scenario Outline: Session Checkout mismatch shows one warning and an inline Dismiss action
+  Given the conduit app is served with the connected mockup
+  And the harness logo is viewed in the <tier> tier
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the session has a workspace mismatch at /workspace/conduit-actual
+  When I open the model picker
+  Then the picker Checkout row reads conduit / account-chip
+  And the picker Checkout row has one warning and an inline mismatch notice for /workspace/conduit-actual
+  And the model-picker region visually matches <baseline> at <threshold> percent
+  When I dismiss the picker checkout notice
+  Then the picker checkout warning and inline notice are cleared
+
+Examples:
+  | tier  | baseline                                 | threshold |
+  | wide  | composer-picker-checkout-mismatch         | 98        |
+  | phone | composer-picker-checkout-mismatch-phone   | 98        |

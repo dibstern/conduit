@@ -138,7 +138,7 @@ async function openPicker(canvasElement: HTMLElement) {
 	await userEvent.click(trigger);
 	const picker = await canvas.findByTestId("model-picker");
 	await expect(
-		within(picker).getByRole("heading", { name: "Harness & model" }),
+		within(picker).getByRole("heading", { name: "Session" }),
 	).toBeVisible();
 	await expect(within(picker).getByTestId("picker-row-model")).toBeVisible();
 	// userEvent.click leaves the pointer on the trigger. Its background has a
@@ -627,7 +627,7 @@ export const Locked: Story = {
 		);
 		await userEvent.click(other);
 		await expect(
-			within(picker).getByRole("heading", { name: "Harness & model" }),
+			within(picker).getByRole("heading", { name: "Session" }),
 		).toBeVisible();
 	},
 };

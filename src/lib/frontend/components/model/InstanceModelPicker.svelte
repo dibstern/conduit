@@ -1,4 +1,4 @@
-<!-- Harness tabs and model options: a phone sheet or a desktop drop-up. -->
+<!-- Session choices: a phone sheet or a desktop drop-up. -->
 
 <script lang="ts">
 	import SheetChrome from "../ui/SheetChrome.svelte";
@@ -8,6 +8,9 @@
 	import HarnessLogo from "./HarnessLogo.svelte";
 	import HandoffDialog from "../overlays/HandoffDialog.svelte";
 	import Button from "../ui/Button.svelte";
+	import Badge from "../ui/Badge.svelte";
+	import PermissionShield from "../ui/PermissionShield.svelte";
+	import TextButton from "../ui/TextButton.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import ModelSelectionPanel from "./ModelSelectionPanel.svelte";
 	import { composerModelSelectionTarget as target } from "./composer-model-selection-target.svelte.js";
@@ -17,7 +20,9 @@
 	// biome-ignore lint/style/useImportType: ModelVariant is used as a value for bind:this
 	import ModelVariant from "./ModelVariant.svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
-	import { effort } from "../../stores/composer-settings.svelte.js";
+	import { approvals, effort, getRankedApprovalOptions } from "../../stores/composer-settings.svelte.js";
+	import { PERMISSION_MODE_COLOURS, PERMISSION_MODE_DESCRIPTIONS, PERMISSION_MODE_LABELS } from "../../permission-modes.js";
+	import { getWorkspaceCheckout } from "../../stores/workspace-checkout.svelte.js";
 	import {
 		applyDefaultModelSet,
 		refreshCatalogs,
@@ -57,7 +62,7 @@
 	} = $props();
 
 	const pickerOpen = $derived(composerPickerState.request !== null);
-	let view = $state<"root" | "model" | "agent">("root");
+	let view = $state<"root" | "model" | "agent" | "permissions" | "checkout">("root");
 	const phone = $derived(sessionViewState.composerTier === "phone");
 	let searchQuery = $state("");
 	let favoritesOnly = $state(false);
@@ -73,8 +78,14 @@
 	const groupHeadingId = $props.id();
 	const titleId = `${groupHeadingId}-title`;
 	const title = $derived(
-		view === "root" ? "Harness & model" : view === "agent" ? "Agent" : "Model",
+		view === "root" ? "Session" : view === "agent" ? "Agent" : view === "permissions" ? "Permissions" : view === "checkout" ? "Checkout" : "Model",
 	);
+	const permissionMode = $derived(approvals.current?.mode ?? "ask");
+	const permissionOptions = $derived(getRankedApprovalOptions());
+	const checkoutState = $derived(getWorkspaceCheckout());
+	const showCheckout = $derived(!!sessionState.currentId && !!checkoutState.directory);
+	const checkoutNotices = $derived(checkoutState.rowNotices);
+	const checkoutNoticeLabel = $derived(checkoutNotices.map((notice) => notice.label).join(", "));
 
 	const instances = $derived(target.accounts);
 
@@ -90,6 +101,8 @@
 	);
 	const selectedDriver = $derived(target.pick.driver);
 	const selectedTraits = $derived(getDriverTraits(selectedDriver));
+	// Matches the composer: harnesses whose mode control is the agent (OpenCode) show no permissions control.
+	const showPermissions = $derived((selectedTraits?.composerModeControl ?? "permission-mode") === "permission-mode");
 	const canSwitchAccounts = $derived(selectedTraits?.usageHarness === "claude" || selectedTraits?.usageHarness === "codex");
 	const accountLabel = $derived(selectedTraits?.accountKind === "config-directory" ? "Account" : "Instance");
 	const selectedLabel = $derived(
@@ -327,7 +340,7 @@
 	// The root focuses the row of the subview just left, so Back returns where it came from.
 	// Plain variables: the focus effect also reruns when bound elements change, without a view change.
 	let shownView: typeof view = "root";
-	let leftView: "model" | "agent" | undefined;
+	let leftView: Exclude<typeof view, "root"> | undefined;
 	$effect(() => {
 		const request = composerPickerState.request;
 		if (!request) return;
@@ -541,6 +554,9 @@
 						{/if}
 			{/snippet}
 			{#snippet rootExtras()}
+				{#if planLocked || visibleAgents.length > 1 || activeAgent || showPermissions}
+					<div aria-hidden="true" class="mx-[8px] my-[4px] h-px bg-border-chip opacity-70"></div>
+				{/if}
 				{#if planLocked}
 					<div data-testid="picker-row-agent" data-locked="plan" class="flex min-h-[36px] items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
 						<Icon name="user" size={16} class="shrink-0 text-text-muted" />
@@ -568,27 +584,108 @@
 						<span class="min-w-0 truncate text-text-secondary">{agentLabel(activeAgent)}</span>
 					</div>
 				{/if}
+				{#if showPermissions}
+					<Button variant="picker-row" size="content" layout="flow" data-testid="picker-row-permissions" onclick={() => { view = "permissions"; }}>
+						<PermissionShield mode={permissionMode} size={16} />
+						<span class="flex-1">Permissions</span>
+						<span class="min-w-0 truncate" style:color={PERMISSION_MODE_COLOURS[permissionMode]}>{PERMISSION_MODE_LABELS[permissionMode]}</span>
+						<Icon name="chevron-right" size={13} class="shrink-0 text-text-muted" />
+					</Button>
+				{/if}
+				{#if showCheckout}
+					<div aria-hidden="true" class="mx-[8px] my-[4px] h-px bg-border-chip opacity-70"></div>
+					{#snippet checkoutRow()}
+						<Icon name="git-branch" size={16} class="shrink-0 text-text-muted" />
+						<span class="flex-1">Checkout</span>
+						<span class="flex min-w-0 items-center gap-[6px] text-text-secondary">
+							{#if checkoutNotices.length > 0}
+								<span data-testid="picker-checkout-warning" role="img" aria-label={checkoutNoticeLabel} title={checkoutNoticeLabel} class="inline-flex shrink-0 text-warning"><Icon name="circle-alert" size={12} /></span>
+							{/if}
+							<span class="truncate">{checkoutState.label}</span>
+						</span>
+					{/snippet}
+					{#if checkoutState.canListWorktrees}
+						<Button variant="picker-row" size="content" layout="flow" data-testid="picker-row-checkout" onclick={() => { view = "checkout"; void checkoutState.openWorktrees(); }}>
+							{@render checkoutRow()}
+							<Icon name="chevron-right" size={13} class="shrink-0 text-text-muted" />
+						</Button>
+					{:else}
+						<div data-testid="picker-row-checkout" class="flex min-h-[36px] items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
+							{@render checkoutRow()}
+						</div>
+					{/if}
+					{#each checkoutNotices as notice (notice.kind)}
+						<div data-testid="picker-checkout-notice" data-kind={notice.kind} class="mt-[2px] mr-[10px] mb-[6px] ml-[36px] rounded-[8px] bg-warning/10 px-[10px] py-[8px] text-[12px] leading-[1.4] text-warning">
+							<p class="break-words">{notice.label}</p>
+							{#if notice.actions.length > 0}
+								<div class="mt-[6px] flex flex-wrap gap-[12px] font-medium">
+									{#each notice.actions as action (action.kind)}
+										<TextButton tone="inherit" underline="always" class="underline-offset-2" data-testid="picker-checkout-notice-{action.kind}" disabled={checkoutState.moving || checkoutState.dismissing} onclick={() => void action.run()}>{action.label}</TextButton>
+									{/each}
+									</div>
+							{/if}
+						</div>
+					{/each}
+				{/if}
 
 			{/snippet}
 			{#snippet extraView()}
-				{#each visibleAgents as agent (agent.id)}
-					{@const selected = agent.id === activeAgent?.id}
-					<Button
-						variant="picker-row"
-						size="content"
-						layout="flow"
-						aria-pressed={selected}
-						data-testid="picker-agent-{agent.id}"
-						onclick={() => handleAgentSelect(agent)}
-					>
-						<Icon name="user" size={16} class="shrink-0 text-text-muted" />
-						<span class="min-w-0 flex-1">
-							<span class="block">{agentLabel(agent)}</span>
-							{#if agent.description}<span class="block text-[12px] text-text-muted">{agent.description}</span>{/if}
-						</span>
-						{#if selected}<Icon name="check" size={16} class="text-accent" />{/if}
-					</Button>
-				{/each}
+				{#if view === "agent"}
+					{#each visibleAgents as agent (agent.id)}
+						{@const selected = agent.id === activeAgent?.id}
+						<Button
+							variant="picker-row"
+							size="content"
+							layout="flow"
+							aria-pressed={selected}
+							data-testid="picker-agent-{agent.id}"
+							onclick={() => handleAgentSelect(agent)}
+						>
+							<Icon name="user" size={16} class="shrink-0 text-text-muted" />
+							<span class="min-w-0 flex-1">
+								<span class="block">{agentLabel(agent)}</span>
+								{#if agent.description}<span class="block text-[12px] text-text-muted">{agent.description}</span>{/if}
+							</span>
+							{#if selected}<Icon name="check" size={16} class="text-accent" />{/if}
+						</Button>
+					{/each}
+				{:else if view === "permissions"}
+					{#each permissionOptions as option (option.mode)}
+						{@const selected = option.mode === permissionMode}
+						{#if option.mode === "full"}<div aria-hidden="true" class="mx-[8px] my-[4px] h-px bg-border-chip opacity-70"></div>{/if}
+						<Button variant="picker-row" size="content" layout="flow" data-testid="picker-permission-{option.mode}" aria-pressed={selected} disabled={approvals.pending} onclick={() => { approvals.select(option); view = "root"; }}>
+							<PermissionShield mode={option.mode} size={19} />
+							<span class="min-w-0 flex-1">
+								<span class="flex items-center gap-1.5">
+									{PERMISSION_MODE_LABELS[option.mode]}
+									{#if option.claudeOnly && discoveryState.currentTraits?.permissionModes.includes(option.mode)}
+										<Badge variant="neutral" size="xs">{getProviderPresentation(discoveryState.currentDriver)?.label}</Badge>
+									{/if}
+								</span>
+								<span class="block text-[12px] text-text-muted">{PERMISSION_MODE_DESCRIPTIONS[option.mode]}</span>
+							</span>
+							{#if selected}<Icon name="check" size={16} class="text-accent" />{/if}
+						</Button>
+					{/each}
+				{:else if view === "checkout"}
+					{#if checkoutState.worktrees === undefined}
+						<Button variant="picker-row" size="content" layout="flow" disabled>Loading worktrees…</Button>
+					{:else if checkoutState.worktrees.length === 0}
+						<Button variant="picker-row" size="content" layout="flow" disabled>No worktrees available</Button>
+					{:else}
+						{#each checkoutState.worktrees as worktree (worktree.path)}
+							{@const current = worktree.path === (checkoutState.currentDirectory ?? checkoutState.directory)}
+							<Button variant="picker-row" size="content" layout="flow" data-testid="picker-worktree" data-path={worktree.path} disabled={checkoutState.moving} onclick={() => { if (!current) { void checkoutState.move(worktree.path); closePicker(); } }}>
+								<Icon name="git-branch" size={16} class="shrink-0 text-text-muted" />
+								<span class="min-w-0 flex-1">
+									<span class="block">{worktree.branch ?? (worktree.main ? "Main folder" : "Detached HEAD")}{worktree.main ? " · main worktree" : ""}</span>
+									<span class="block break-all text-[12px] text-text-muted">{worktree.path}</span>
+								</span>
+								{#if current}<span data-testid="current-worktree" class="text-accent"><Icon name="check" size={16} /><span class="sr-only">Current worktree</span></span>{/if}
+							</Button>
+						{/each}
+					{/if}
+				{/if}
 
 			{/snippet}
 			{#snippet modelToolbar()}

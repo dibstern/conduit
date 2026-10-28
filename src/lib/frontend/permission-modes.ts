@@ -1,5 +1,26 @@
 import type { SessionPermissionMode } from "./types.js";
 
+export const PERMISSION_MODE_LABELS: Record<SessionPermissionMode, string> = {
+	dontAsk: "Never ask",
+	plan: "Plan",
+	ask: "Ask before edits",
+	acceptEdits: "Auto-accept edits",
+	auto: "Auto",
+	full: "Full access",
+};
+
+export const PERMISSION_MODE_DESCRIPTIONS: Record<
+	SessionPermissionMode,
+	string
+> = {
+	dontAsk: "Denies anything not pre-approved",
+	plan: "Reads and plans, changes nothing",
+	ask: "The default",
+	acceptEdits: "Still asks before commands",
+	auto: "A model approves or denies each action",
+	full: "Never asks. Use in a sandbox",
+};
+
 export const PERMISSION_MODE_COLOURS: Record<SessionPermissionMode, string> = {
 	dontAsk: "var(--color-p-never)",
 	plan: "var(--color-p-plan)",

@@ -25,6 +25,7 @@ type CheckoutSeed = Pick<
 	| "workspaceHint"
 	| "canRenameBranch"
 > & {
+	directory?: string;
 	worktrees?: Awaited<ReturnType<typeof rpc<"ListWorktrees">>>;
 	renameError?: WorktreeBranchRenameError;
 };
@@ -51,8 +52,8 @@ const meta = {
 	title: "Session/GitIdentity",
 	component: GitIdentity,
 	tags: ["autodocs"],
-	args: { directory: "/src/conduit", presentation: "control" },
-	beforeEach: ({ canvasElement, args, parameters, id }) => {
+	args: { presentation: "control" },
+	beforeEach: ({ canvasElement, parameters, id }) => {
 		const previous = {
 			sessions: [...sessionState.liveSessions.values()],
 			projects: projectState.projects,
@@ -63,7 +64,7 @@ const meta = {
 			composerWidth: sessionViewState.composerWidth,
 		};
 		const checkout = parameters["checkout"] as CheckoutSeed | undefined;
-		const directory = args["directory"] ?? "/src/conduit";
+		const directory = checkout?.directory ?? "/src/conduit";
 		const restoreSocket = connectedSocket();
 		moveWorkspace.mockClear();
 		dismissWorkspaceHint.mockClear();
@@ -208,11 +209,9 @@ export const Dirty: Story = {
 };
 
 export const Narrow: Story = {
-	args: {
-		directory: "/src/conduit-project-with-a-very-long-name",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-project-with-a-very-long-name",
 			git: {
 				branch: "feature/git-ui",
 				worktree: "linked-worktree-with-a-long-name",
@@ -404,11 +403,9 @@ export const FolderDetailsOpen: Story = {
 
 export const NonGitPrimary: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/notes",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/notes",
 			git: {
 				folders: [
 					{
@@ -443,11 +440,9 @@ export const NonGitPrimary: Story = {
 
 export const SharedFolderDetailsOpen: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/conduit/worktrees/workspace/session/app",
-	},
 	parameters: {
 		checkout: {
+			directory: "/conduit/worktrees/workspace/session/app",
 			git: {
 				branch: "conduit/session-cross-repo",
 				worktree: "app",
@@ -509,11 +504,9 @@ export const SharedFolderDetailsOpen: Story = {
 
 export const WorktreeMenu: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/conduit-one",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-one",
 			git: { branch: "feature/one", worktree: "conduit-one", dirty: true },
 			worktrees: {
 				directory: "/src/conduit-one",
@@ -547,11 +540,9 @@ export const WorktreeMenu: Story = {
 
 export const RenameBranch: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/conduit/worktrees/workspace/rename-session/app",
-	},
 	parameters: {
 		checkout: {
+			directory: "/conduit/worktrees/workspace/rename-session/app",
 			git: { branch: "conduit/session-rename", worktree: "app", dirty: false },
 			canRenameBranch: true,
 		},
@@ -623,11 +614,9 @@ export const RenameBranchErrorPhone: Story = {
 
 export const WorkspaceMismatch: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/conduit-two",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-two",
 			git: { branch: "feature/two", worktree: "conduit-two" },
 			workspaceMismatch: {
 				actualPath: "/src/conduit/.claude/worktrees/contract",
@@ -700,11 +689,9 @@ export const MovedBackPhone: Story = {
 
 export const WorktreeMissing: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/conduit-worktree",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-worktree",
 			workspace: { cause: "launch", origin: "existing", worktrees: {} },
 			workspaceMissing: {
 				path: "/src/conduit-worktree",
@@ -765,11 +752,9 @@ export const WorktreeMissingPhone: Story = {
 
 export const WorktreeMissingExtraFolder: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/conduit-worktree",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-worktree",
 			workspace: { cause: "launch", origin: "existing", worktrees: {} },
 			git: {
 				branch: "conduit/multi-folder-session",
@@ -831,11 +816,9 @@ export const WorktreeMissingExtraFolder: Story = {
 
 export const WorkspaceHint: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/conduit",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit",
 			git: { branch: "main" },
 			workspaceHint: "/src/conduit-hint",
 		},
@@ -898,16 +881,18 @@ export const Word: Story = {
 			git: { branch: "account-chip", worktree: "account-chip" },
 		},
 	},
-	play: async ({ canvasElement, args }) => {
+	play: async ({ canvasElement, parameters }) => {
+		const seed = parameters["checkout"] as CheckoutSeed | undefined;
+		const directory = seed?.directory ?? "/src/conduit";
 		const checkout = within(canvasElement).getByTestId("composer-checkout");
 		await expect(checkout).toHaveAttribute(
 			"title",
-			`${args["directory"]?.split("/").pop()} / account-chip`,
+			`${directory.split("/").pop()} / account-chip`,
 		);
 		await userEvent.click(checkout);
 		await expect(
 			within(document.body).getByTestId("composer-checkout-menu"),
-		).toHaveTextContent(args["directory"] ?? "");
+		).toHaveTextContent(directory);
 	},
 };
 
@@ -916,10 +901,10 @@ export const WordNarrow: Story = {
 	tags: ["viewport-capture"],
 	args: {
 		presentation: "word",
-		directory: "/src/conduit-worktrees",
 	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-worktrees",
 			git: {
 				branch: "feature/session-account-chip-redesign",
 				worktree: "account-chip",
@@ -1058,8 +1043,9 @@ export const AgentEntersWorktree: Story = {
 			git: { branch: "main", dirty: false, ahead: 0, behind: 0 },
 		},
 	},
-	render: (args) => {
-		const directory = args["directory"];
+	render: (args, { parameters }) => {
+		const checkout = parameters["checkout"] as CheckoutSeed | undefined;
+		const directory = checkout?.directory ?? "/src/conduit";
 		let originalGit: SessionGit | undefined;
 		const setWorktree = (entered: boolean) => {
 			const session = sessionState.sessions.get(sessionState.currentId ?? "");
@@ -1128,11 +1114,9 @@ export const Phone: Story = {
 };
 
 export const LongNames: Story = {
-	args: {
-		directory: "/src/spm-architecture-deepening",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/spm-architecture-deepening",
 			git: { branch: "docs/architecture-deepening-design", dirty: true },
 		},
 	},

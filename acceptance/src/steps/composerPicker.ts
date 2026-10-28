@@ -259,7 +259,7 @@ export const composerPickerHandlers: StepHandler[] = [
 	{
 		name: "view picker choices",
 		match:
-			/^I view (Harness|Model|Agent|Account|Instance) choices in the picker$/,
+			/^I view (Harness|Model|Agent|Account|Instance|Permissions|Checkout) choices in the picker$/,
 		run: async ({ world, match }) => {
 			await openModelPicker(world.page);
 			if (match[1] === "Harness") {
@@ -307,7 +307,7 @@ export const composerPickerHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const picker = world.page.locator("#model-picker");
 			await expect(picker).toBeVisible();
-			await expect(picker).toContainText("Harness & model");
+			await expect(picker).toContainText("Session");
 			await expect(
 				world.page.getByTestId(
 					`picker-harness-${(match[1] ?? "").toLowerCase()}`,
@@ -501,9 +501,10 @@ export const composerPickerHandlers: StepHandler[] = [
 				"font-size",
 				"12px",
 			);
-			await expect(
-				picker.getByRole("heading", { name: /^Harness & model/ }),
-			).toHaveCSS("font-size", "12px");
+			await expect(picker.getByRole("heading", { name: /^Session/ })).toHaveCSS(
+				"font-size",
+				"12px",
+			);
 		},
 	},
 	{
@@ -524,7 +525,13 @@ export const composerPickerHandlers: StepHandler[] = [
 					);
 				})
 				.toBe(true);
-			for (const row of ["model", "context", "effort", "agent"]) {
+			for (const row of [
+				"model",
+				"context",
+				"effort",
+				"agent",
+				"permissions",
+			]) {
 				const box = await world.page
 					.getByTestId(`picker-row-${row}`)
 					.boundingBox();
@@ -664,6 +671,168 @@ export const composerPickerHandlers: StepHandler[] = [
 				.filter({ hasText: match[1] ?? "" })
 				.click();
 			await expect(world.page.getByTestId("picker-row-model")).toBeEnabled();
+		},
+	},
+	{
+		name: "assert picker permission mode label",
+		match: /^the picker Permissions row reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId("picker-row-permissions"),
+			).toContainText(match[1] ?? "");
+		},
+	},
+	{
+		name: "assert ranked picker permission modes and selection",
+		match:
+			/^the picker lists permission modes (.+) with (dontAsk|plan|ask|acceptEdits|auto|full) selected$/,
+		run: async ({ world, match }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(
+				picker.getByRole("heading", { name: "Permissions", exact: true }),
+			).toBeVisible();
+			const modes = (match[1] ?? "").split(", ");
+			const rows = picker.locator('[data-testid^="picker-permission-"]');
+			await expect(rows).toHaveCount(modes.length);
+			expect(
+				await rows.evaluateAll((items) =>
+					items.map((item) =>
+						item.getAttribute("data-testid")?.replace("picker-permission-", ""),
+					),
+				),
+			).toEqual(modes);
+			for (const mode of modes) {
+				await expect(
+					picker.getByTestId(`picker-permission-${mode}`),
+				).toHaveAttribute("aria-pressed", String(mode === match[2]));
+			}
+			await expect(picker.getByTestId("picker-permission-ask")).toContainText(
+				"Ask before edits",
+			);
+			await expect(
+				picker.getByTestId("picker-permission-acceptEdits"),
+			).toContainText("Still asks before commands");
+		},
+	},
+	{
+		name: "choose picker permission mode",
+		match:
+			/^I choose permission (dontAsk|plan|ask|acceptEdits|auto|full) in the picker$/,
+		run: async ({ world, match }) => {
+			await world.page.getByTestId(`picker-permission-${match[1]}`).click();
+			await expect(world.page.getByTestId("picker-back")).toHaveCount(0);
+			await expect(
+				world.page.getByTestId("picker-row-permissions"),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert picker checkout identity",
+		match: /^the picker Checkout row reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("picker-row-checkout")).toContainText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "seed checkout worktree choices",
+		match:
+			/^the checkout worktrees are account-chip at \/workspace\/conduit and main at \/workspace\/conduit-main$/,
+		run: ({ world }) => {
+			let directory = "/workspace/conduit";
+			requireRpcControl(world.page).setStubs({
+				ListWorktrees: () => ({
+					worktrees: [
+						{ path: "/workspace/conduit", branch: "account-chip", main: false },
+						{ path: "/workspace/conduit-main", branch: "main", main: true },
+					],
+					directory,
+				}),
+				MoveSessionWorkspace: ({ path }) => {
+					directory = path;
+					return { projectSlug: "myapp", directory };
+				},
+			});
+		},
+	},
+	{
+		name: "assert checkout worktree choices and current worktree",
+		match: /^the picker lists both checkout worktrees with (.+) checked$/,
+		run: async ({ world, match }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(
+				picker.getByRole("heading", { name: "Checkout", exact: true }),
+			).toBeVisible();
+			const rows = picker.getByTestId("picker-worktree");
+			await expect(rows).toHaveCount(2);
+			await expect(rows.nth(0)).toHaveAttribute(
+				"data-path",
+				"/workspace/conduit",
+			);
+			await expect(rows.nth(0)).toContainText("account-chip");
+			await expect(rows.nth(1)).toHaveAttribute(
+				"data-path",
+				"/workspace/conduit-main",
+			);
+			await expect(rows.nth(1)).toContainText("main · main worktree");
+			await expect(rows.nth(1)).toContainText("/workspace/conduit-main");
+			await expect(picker.getByTestId("current-worktree")).toHaveCount(1);
+			await expect(
+				rows.filter({ has: world.page.getByTestId("current-worktree") }),
+			).toHaveAttribute("data-path", match[1] ?? "");
+		},
+	},
+	{
+		name: "choose another checkout worktree",
+		match: /^I choose the picker worktree at (.+)$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId("picker-worktree")
+				.filter({ hasText: match[1] ?? "" })
+				.click();
+			await expect(world.page.getByTestId("model-picker")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert picker workspace mismatch warning and inline dismissal",
+		match:
+			/^the picker Checkout row has one warning and an inline mismatch notice for (.+)$/,
+		run: async ({ world, match }) => {
+			const row = world.page.getByTestId("picker-row-checkout");
+			const warning = row.getByTestId("picker-checkout-warning");
+			const label = `Workspace mismatch: Claude is working in ${match[1]}`;
+			await expect(warning).toHaveCount(1);
+			await expect(warning).toHaveAccessibleName(label);
+			await expect(warning).toHaveAttribute("title", label);
+			await expect(row.locator("svg.lucide-circle-alert")).toHaveCount(1);
+			const notice = world.page.getByTestId("picker-checkout-notice");
+			await expect(notice).toHaveCount(1);
+			await expect(notice).toHaveAttribute("data-kind", "mismatch");
+			await expect(notice).toContainText(label);
+			await expect(
+				notice.getByTestId("picker-checkout-notice-dismiss"),
+			).toHaveText("Dismiss");
+		},
+	},
+	{
+		name: "dismiss picker checkout notice",
+		match: /^I dismiss the picker checkout notice$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("picker-checkout-notice-dismiss").click();
+		},
+	},
+	{
+		name: "assert picker checkout notice and warning cleared",
+		match: /^the picker checkout warning and inline notice are cleared$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("picker-checkout-warning"),
+			).toHaveCount(0);
+			await expect(
+				world.page.getByTestId("picker-checkout-notice"),
+			).toHaveCount(0);
+			await expect(world.page.getByTestId("picker-row-checkout")).toBeVisible();
 		},
 	},
 ];

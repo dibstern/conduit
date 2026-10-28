@@ -15,31 +15,15 @@
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
-	import type { SessionPermissionMode } from "../../types.js";
+	import { PERMISSION_MODE_LABELS, PERMISSION_MODE_DESCRIPTIONS } from "../../permission-modes.js";
 
 	let { variant = "icons" }: { variant?: "icons" | "words" | "row" | "summary" | undefined } = $props();
 
-	const labels: Record<SessionPermissionMode, string> = {
-		dontAsk: "Never ask",
-		plan: "Plan",
-		ask: "Ask before edits",
-		acceptEdits: "Auto-accept edits",
-		auto: "Auto",
-		full: "Full access",
-	};
-	const descriptions: Record<SessionPermissionMode, string> = {
-		dontAsk: "Denies anything not pre-approved",
-		plan: "Reads and plans, changes nothing",
-		ask: "The default",
-		acceptEdits: "Still asks before commands",
-		auto: "A model approves or denies each action",
-		full: "Never asks. Use in a sandbox",
-	};
 	let open = $state(false);
 	let autoNormalizationProvider: string | null = null;
 
 	const currentMode = $derived(approvals.current?.mode ?? "ask");
-	const currentLabel = $derived(labels[currentMode]);
+	const currentLabel = $derived(PERMISSION_MODE_LABELS[currentMode]);
 	const availableModes = $derived(getRankedApprovalOptions());
 
 	$effect(() => {
@@ -101,12 +85,12 @@
 						<PermissionShield mode={option.mode} size={19} />
 					</span>
 					<span class="flex items-center gap-1.5 text-[12.5px] font-semibold">
-						{labels[option.mode]}
+						{PERMISSION_MODE_LABELS[option.mode]}
 						{#if option.claudeOnly && discoveryState.currentTraits?.permissionModes.includes(option.mode)}
 							<Badge variant="neutral" size="xs">{getProviderPresentation(discoveryState.currentDriver)?.label}</Badge>
 						{/if}
 					</span>
-					<span class="truncate text-[10.5px] leading-[1.3] text-text-muted">{descriptions[option.mode]}</span>
+					<span class="truncate text-[10.5px] leading-[1.3] text-text-muted">{PERMISSION_MODE_DESCRIPTIONS[option.mode]}</span>
 				</span>
 			</MenuRadioItem>
 		{/each}

@@ -50,6 +50,20 @@ class WorkspaceCheckout {
 			? undefined
 			: this.folderGit,
 	);
+	projectName = $derived(
+		this.directory
+			?.replace(/[\\/]+$/, "")
+			.split(/[\\/]/)
+			.pop() ||
+			this.directory ||
+			"",
+	);
+	checkoutName = $derived(this.git?.branch || this.git?.head);
+	label = $derived(
+		this.checkoutName
+			? `${this.projectName} / ${this.checkoutName}`
+			: this.projectName,
+	);
 	workspaceMissing = $derived(this.session?.workspaceMissing);
 	workspaceMismatch = $derived(this.session?.workspaceMismatch);
 	workspaceHint = $derived(this.session?.workspaceHint);

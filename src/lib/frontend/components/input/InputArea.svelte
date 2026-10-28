@@ -1226,7 +1226,6 @@
 		{#key session.id}
 			<GitIdentity
 				presentation="row"
-				directory={composerDirectory}
 			>
 				{#snippet children(attention, checkout, warning)}
 					{@render phoneMore(rows, trigger, checkout, warning, attention)}
@@ -1487,7 +1486,6 @@
 									<GitIdentity
 										presentation="control"
 										compact={sessionViewState.composerTier === "phone"}
-										directory={composerDirectory}
 									/>
 								{/key}
 							{/if}
@@ -1606,7 +1604,6 @@
 							{#key session.id}
 								<GitIdentity
 									presentation="word"
-									directory={composerDirectory}
 								/>
 							{/key}
 						{/if}
