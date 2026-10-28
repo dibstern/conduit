@@ -1,11 +1,21 @@
 # Run Ledger contract (conduit-test-82tn.32)
 
-The design contract for the Run Ledger and its amendments, moved here from a scratch
-directory so tickets can cite a durable path. The documents are copied unchanged.
+`CONTRACT.md` is the single authority for the Run Ledger and the runner work around it. It
+states the contract as it stands today, consolidated on 2026-10-28 from every document below.
+Tickets cite `CONTRACT.md`.
 
-## Precedence
+The amendments, rulings and the spec stay in this folder unchanged, as history. Where any of
+them differs from `CONTRACT.md`, `CONTRACT.md` wins. Each section of `CONTRACT.md` names the
+source documents and sections it came from in a hidden comment, and its Appendix B maps old ids
+(failure modes, invariants, S-, A-, T-, R- and C-numbers) to their new places.
 
-Later documents win over earlier ones:
+The seven questions the sources did not settle (OPEN-1 to OPEN-7) were decided on 2026-10-28.
+Section 13 lists them; the decisions live in the cited sections, with the reasons in Appendix A.9.
+
+## History
+
+The documents were moved here from a scratch directory so tickets could cite a durable path.
+Before consolidation, later documents won over earlier ones in this order:
 
 1. `AMENDMENT-2026-10-28-SEND-CONTINUATION.md` (a waiting send continues only through `holdRun`: the Run Ledger answers Stop coverage, the hold, committed before transmission and cleared only by evidence, answers delivery; decided autonomously after three review rounds, C + J + K)
 2. `AMENDMENT-2026-10-28-RUNNER-SWAP.md` (a runner swap is prepare, one commit, promote; the database names each session's serving runner; the runner's role is one typed state; Q33 = A + E + M)
@@ -24,7 +34,7 @@ Later documents win over earlier ones:
 15. `AMENDMENT-2026-10-24-FACT-BOOK.md`
 16. `AMENDMENT-2026-10-23-OUTSTANDING-WORK.md`, `RULINGS-2026-10-23-D1.md`, `RULINGS-2026-10-23.md`
 17. `AMENDMENT-2026-10-23.md`
-18. `CONTRACT.md`, `spec-82tn32.md`
+18. The 2026-10-23 `CONTRACT.md` (now replaced; see git history before this consolidation), `spec-82tn32.md`
 
 ## Renamed files
 
