@@ -1,4 +1,8 @@
 {
+	"src/lib/frontend/components/chat/TurnLog.svelte :: py-[8px]": {
+		"renamedTo": "py-[7px]",
+		"reason": "conduit-test-xdyjq.6 matches design E's earlier-steps control: 7px vertical padding and 6px horizontal padding, with 12px secondary text."
+	},
 	"src/lib/frontend/components/ui/ActivityTimeline.svelte :: animate-pulse": {
 		"renamedTo": "live-segment",
 		"reason": "conduit-test-xdyjq.17 replaces the generic 2s pulse with design E's 1.2s fade to 0.35 opacity. The strip owns the live-segment animation and its reduced-motion rule."

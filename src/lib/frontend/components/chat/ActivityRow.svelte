@@ -99,7 +99,7 @@
 	{@const failed = part.status === "error" || part.isError}
 	{@const movedToBackground = part.metadata?.['movedToBackground'] === true}
 	{@const isSkill = part.name === "Skill"}
-	{@const verb = isSkill ? "Skill" : movedToBackground ? "Moved to background" : toolVerb(part, running ? "present" : "past")}
+	{@const verb = isSkill ? "Skill" : movedToBackground ? "Moved to background" : running && !launch ? "Running" : toolVerb(part, running ? "present" : "past")}
 	{@const command = toolCommand(part)}
 	{@const subject = part.name === "Skill" ? skillName(part) : toolSubject(part)}
 	{@const tag = toolTags(part)[0]}
@@ -164,13 +164,13 @@
 					{@const usage = launchUsage(launch)}
 					<!-- Status and time stay whole; a narrow row drops the usage. -->
 					<span class="launch-meta ml-auto shrink-0 whitespace-nowrap font-mono text-mono-time"><span class={launchTone}>{lead}</span>{#if usage}<span class="text-text-dimmer @max-[480px]:hidden">{lead ? " · " : ""}{usage}</span>{/if}</span>
-				{:else if meta}<time class="ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</time>{/if}
+				{:else if !running && meta}<time class="ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</time>{/if}
 				{#if launch?.state.kind === "finished"}
 					<span class="shrink-0 {launchTone} [&_.lucide]:w-3 [&_.lucide]:h-3" aria-hidden="true">
 						<Icon name={{ completed: "circle-check", failed: "circle-x", stopped: "circle-stop" }[launch.state.outcome]} size={12} />
 					</span>
 				{:else if running}
-					<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+					<span class="running-block shrink-0" role="img" aria-label="Running"></span>
 				{:else if failed}
 					<span class="shrink-0 text-error [&_.lucide]:w-3 [&_.lucide]:h-3">
 						<Icon name="circle-alert" size={12} />
@@ -259,3 +259,8 @@
 		{/if}
 	</div>
 {/if}
+
+<style>
+	.running-block { width:9px; height:9px; background:repeating-linear-gradient(90deg,var(--color-accent) 0 1.5px,transparent 1.5px 2.5px); animation:running-pulse .6s steps(2) infinite; }
+	@keyframes running-pulse { 50% { opacity:.35; } }
+</style>
