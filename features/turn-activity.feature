@@ -1,5 +1,20 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: A collapsed strip opens its focused message step with Enter
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I collapse the surfaced turn
+  And I activate the first collapsed message step with the keyboard
+  Then the surfaced card shows #1 and announces its category and position
+  And the messages region visually matches turn-collapsed-keyboard-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario Outline: Strip gaps and compaction seams match the Turn log design
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup

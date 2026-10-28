@@ -87,6 +87,20 @@ function tool(id: string, name: string, offset: number, waiting = false): Part {
 
 export const turnActivityHandlers: StepHandler[] = [
 	{
+		name: "open a collapsed message step with the keyboard",
+		match: /^I activate the first collapsed message step with the keyboard$/,
+		run: async ({ world }) => {
+			const steps = panel(world.page).locator(
+				".surface-strip button[data-step-id]",
+			);
+			await steps.nth(0).focus();
+			await world.page.keyboard.press("ArrowRight");
+			await expect(steps.nth(1)).toBeFocused();
+			await world.page.keyboard.press("ArrowLeft");
+			await world.page.keyboard.press("Enter");
+		},
+	},
+	{
 		name: "assert the compaction seam appearance",
 		match:
 			/^the strip compaction is a 2px secondary-colour mark taller than its bar$/,
