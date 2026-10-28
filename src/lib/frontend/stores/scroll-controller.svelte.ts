@@ -79,10 +79,14 @@ export function createScrollController(
 			return;
 		}
 
-		// Skip detach/re-follow logic if content doesn't overflow the
-		// container. Without this guard, edge cases (e.g. browser firing a
-		// scroll event on a non-overflowing container) could falsely detach.
-		if (container.scrollHeight <= container.clientHeight) return;
+		// Content that fits leaves nothing to scroll away from, so follow. This
+		// covers a stray scroll on a short transcript and the clamp scroll after
+		// content shrinks to fit (a collapsed Turn), which must clear a detach.
+		if (container.scrollHeight <= container.clientHeight) {
+			pinned = true;
+			userDetached = false;
+			return;
+		}
 
 		const distFromBottom =
 			container.scrollHeight - container.scrollTop - container.clientHeight;
