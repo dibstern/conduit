@@ -5,7 +5,7 @@
 
 	let { part, highlight = false }: {
 		/** Absent while the compaction is still running. */
-		part?: CompactionPart;
+		part?: CompactionPart | undefined;
 		highlight?: boolean;
 	} = $props();
 	const live = $derived(part === undefined);

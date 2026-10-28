@@ -66,6 +66,7 @@ const turn: Turn = {
 		createdAt: start,
 	},
 	segments: [segment],
+	preface: [],
 	notices: [],
 	live: false,
 };

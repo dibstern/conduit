@@ -349,6 +349,7 @@
 			const next = segmentTurns(messages, processing).map((turn) => {
 				const held = previous.get(turn.id);
 				return held && held.user === turn.user && held.live === turn.live && held.opening === turn.opening &&
+					same(held.preface, turn.preface) &&
 					same(held.notices, turn.notices) &&
 					held.segments.length === turn.segments.length &&
 					turn.segments.every((segment, i) => {
@@ -576,6 +577,9 @@
 		{#if goal && turn.id === goalNoticeTurnId}
 			{@render goalNotice()}
 		{/if}
+		{#each turn.preface as part (part.uuid)}
+			<TurnOpening {part} />
+		{/each}
 		{#if turn.opening}
 			<TurnOpening opening={turn.opening} {providerId} />
 		{/if}

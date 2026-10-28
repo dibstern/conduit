@@ -80,6 +80,7 @@ const turn: Turn = {
 		createdAt: START,
 	},
 	segments: [mixed],
+	preface: [],
 	notices: [],
 	live: false,
 };

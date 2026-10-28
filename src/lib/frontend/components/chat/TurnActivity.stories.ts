@@ -18,6 +18,7 @@ const EMPTY_SEGMENT: Turn["segments"][number] = { activity: [], reply: [] };
 const EMPTY_TURN: Turn = {
 	id: "empty",
 	segments: [EMPTY_SEGMENT],
+	preface: [],
 	notices: [],
 	live: false,
 };

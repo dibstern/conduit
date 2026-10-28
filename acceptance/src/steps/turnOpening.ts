@@ -11,15 +11,17 @@ import {
 
 const SESSION = "sess-turn-opening";
 const PROMPT = "Review the change.";
-const prompts = new WeakMap<Page, typeof HistoryMessageSchema.Type>();
+const histories = new WeakMap<Page, (typeof HistoryMessageSchema.Type)[]>();
 const positions = new WeakMap<
 	Page,
 	{
 		prompt: { x: number; y: number; width: number; height: number };
-		head: { y: number; height: number };
+		head: { x: number; y: number; width: number; height: number };
 	}
 >();
 const opening = (page: Page) => page.getByTestId("turn-opening");
+const prefaceRules = (page: Page) =>
+	page.getByTestId("turn-preface").locator(".compaction-rule");
 
 export const turnOpeningHandlers: StepHandler[] = [
 	{
@@ -33,7 +35,7 @@ export const turnOpeningHandlers: StepHandler[] = [
 				time: { created: PINNED_CLOCK_MS - Number(match[1]) * 1000 },
 				parts: [{ id: "turn-opening-prompt", type: "text", text: PROMPT }],
 			};
-			prompts.set(world.page, prompt);
+			histories.set(world.page, [prompt]);
 			requireRpcControl(world.page).setDetailRows(
 				SESSION,
 				detailRowsOf(prompt),
@@ -93,10 +95,251 @@ export const turnOpeningHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "complete a compaction in the turn history",
+		match:
+			/^the turn opening compaction completes (\d+) seconds after send with (\d+) tokens before and (\d+) tokens after$/,
+		run: ({ world, match }) => {
+			const history = histories.get(world.page);
+			const prompt = history?.[0];
+			if (!history || prompt?.time?.created === undefined)
+				throw new Error("Turn opening prompt was not seeded");
+			const stamp = prompt.time.created + Number(match[1]) * 1000;
+			const id = `turn-opening-compaction-${history.length}`;
+			history.push({
+				id,
+				role: "assistant",
+				parentID: prompt.id,
+				time: { created: stamp },
+				parts: [
+					{
+						id: `${id}-part`,
+						type: "compaction",
+						text: "Context compacted.",
+						preTokens: Number(match[2]),
+						postTokens: Number(match[3]),
+					},
+				],
+			});
+			requireRpcControl(world.page).setDetailRows(
+				SESSION,
+				history.flatMap(detailRowsOf),
+			);
+			setSessionRowStatus(world.page, SESSION, "busy", {
+				compacting: undefined,
+			});
+		},
+	},
+	{
+		name: "assert settled compaction figures at transcript level",
+		match: /^the settled turn opening rule shows (.+) → (.+) and (.+) saved$/,
+		run: async ({ world, match }) => {
+			const rule = prefaceRules(world.page).last();
+			await expect(rule).toBeVisible();
+			await expect(
+				rule.getByText("Compacted context", { exact: true }),
+			).toBeVisible();
+			await expect(
+				rule.getByText(`${match[1]} → ${match[2]}`, { exact: true }),
+			).toBeVisible();
+			await expect(
+				rule.getByText(`${match[3]} saved`, { exact: true }),
+			).toBeVisible();
+			await expect(world.page.locator("#messages .system-notice")).toHaveCount(
+				0,
+			);
+		},
+	},
+	{
+		name: "record live compaction geometry",
+		match:
+			/^I record the turn opening prompt and live compaction rule positions$/,
+		run: async ({ world }) => {
+			const prompt = await world.page
+				.locator("#messages .msg-user")
+				.boundingBox();
+			const head = await world.page
+				.getByTestId("turn-opening-compacting")
+				.boundingBox();
+			if (!prompt || !head)
+				throw new Error("Compaction geometry is unavailable");
+			positions.set(world.page, { prompt, head });
+		},
+	},
+	{
+		name: "assert compaction settles in the same box",
+		match: /^the settled turn opening rule occupies the live rule's box$/,
+		run: async ({ world }) => {
+			const before = positions.get(world.page);
+			if (!before) throw new Error("Compaction geometry was not recorded");
+			await expect
+				.poll(() => prefaceRules(world.page).boundingBox())
+				.toEqual(before.head);
+		},
+	},
+	{
+		name: "assert preface precedes the opening or work card",
+		match:
+			/^the settled turn opening rules precede the (Working opening|Working card|Worked card)$/,
+		run: async ({ world, match }) => {
+			const next =
+				match[1] === "Working opening"
+					? opening(world.page)
+					: world.page.locator("#messages .turn-activity");
+			await expect(next).toBeVisible();
+			const rule = await prefaceRules(world.page).last().boundingBox();
+			const box = await next.boundingBox();
+			if (!rule || !box)
+				throw new Error("Compaction or work geometry is unavailable");
+			expect(box.y).toBeGreaterThanOrEqual(rule.y + rule.height);
+		},
+	},
+	{
+		name: "assert opening compactions are absent from the ledger",
+		match: /^the turn opening ledger has no compaction badge, seam or rule$/,
+		run: async ({ world }) => {
+			const ledger = world.page.locator("#messages .turn-activity");
+			await ledger.locator(".turn-activity-toggle").click();
+			await expect(ledger.locator(".turn-activity-toggle")).toHaveAttribute(
+				"aria-expanded",
+				"true",
+			);
+			await expect(ledger.locator(".compaction-marker")).toHaveCount(0);
+			await expect(ledger.locator(".compaction-rule")).toHaveCount(0);
+			await expect(ledger.locator("[data-step-id].bg-text")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert multiple opening rules retain completion order",
+		match: /^the turn preface lists (\d+) rules saving (.+) then (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(prefaceRules(world.page)).toHaveCount(Number(match[1]));
+			await expect(prefaceRules(world.page)).toContainText([
+				`${match[2]} saved`,
+				`${match[3]} saved`,
+			]);
+		},
+	},
+	{
+		name: "supply server turn timing",
+		match: /^the turn opening server timing starts (\d+) seconds after send$/,
+		run: ({ world, match }) => {
+			const history = histories.get(world.page);
+			const prompt = history?.[0];
+			if (!history || prompt?.time?.created === undefined)
+				throw new Error("Turn opening prompt was not seeded");
+			history[0] = {
+				...prompt,
+				turnTiming: {
+					startedAt: prompt.time.created + Number(match[1]) * 1000,
+					waits: [],
+				},
+			};
+			requireRpcControl(world.page).setDetailRows(
+				SESSION,
+				history.flatMap(detailRowsOf),
+			);
+		},
+	},
+	{
+		name: "finish and reload a turn with opening compaction",
+		match:
+			/^the turn opening finishes (\d+) seconds after send and I reload it$/,
+		run: async ({ world, match }) => {
+			const history = histories.get(world.page);
+			const prompt = history?.[0];
+			if (!history || prompt?.time?.created === undefined)
+				throw new Error("Turn opening prompt was not seeded");
+			const end = prompt.time.created + Number(match[1]) * 1000;
+			const finished: (typeof HistoryMessageSchema.Type)[] = history.map(
+				(message) => ({
+					...message,
+					...(message.turnTiming
+						? { turnTiming: { ...message.turnTiming, endedAt: end } }
+						: {}),
+					parts: message.parts?.map((part) =>
+						part.type === "tool"
+							? {
+									...part,
+									time: { start: message.time?.created, end: end - 1000 },
+									state: {
+										...part.state,
+										status: "completed",
+										output: { _tag: "whole" as const, text: "Read the file." },
+									},
+								}
+							: part,
+					),
+				}),
+			);
+			finished.push({
+				id: "turn-opening-reply",
+				role: "assistant",
+				parentID: prompt.id,
+				cost: 0.01,
+				time: { created: end - 1000, completed: end },
+				parts: [
+					{
+						id: "turn-opening-reply-text",
+						type: "text",
+						text: "The change looks good.",
+						time: { start: end - 1000, end },
+					},
+				],
+			});
+			histories.set(world.page, finished);
+			const rpc = requireRpcControl(world.page);
+			rpc.setDetailRows(SESSION, finished.flatMap(detailRowsOf));
+			setSessionRowStatus(world.page, SESSION, "idle");
+			const before = rpc.getRequests().length;
+			await world.page.reload();
+			await rpc.waitForRequest(
+				(request) =>
+					request.tag === "ViewSession" &&
+					request.payload["sessionId"] === SESSION &&
+					rpc.getRequests().indexOf(request) >= before,
+			);
+			await expect(world.page.locator("#messages")).toContainText(
+				"The change looks good.",
+			);
+		},
+	},
+	{
+		name: "assert settled work duration after reload",
+		match: /^the reloaded turn opening has a Worked card timed (.+)$/,
+		run: async ({ world, match }) => {
+			const ledger = world.page.locator("#messages .turn-activity");
+			await expect(ledger.locator(".turn-activity-toggle")).toContainText(
+				"Worked",
+			);
+			await expect(ledger.locator(".turn-duration")).toHaveText(match[1] ?? "");
+			await expect(opening(world.page)).toHaveCount(0);
+			await expect(world.page.getByTestId("turn-live-elapsed")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert completed mid-turn compaction remains in the ledger",
+		match:
+			/^the turn opening ledger contains (\d+) compaction with badge (.+)$/,
+		run: async ({ world, match }) => {
+			const ledger = world.page.locator("#messages .turn-activity");
+			await ledger.locator(".turn-activity-toggle").click();
+			await expect(ledger.locator(".compaction-marker")).toHaveText(
+				match[2] ?? "",
+			);
+			await expect(ledger.locator(".compaction-rule")).toHaveCount(
+				Number(match[1]),
+			);
+			await expect(ledger.locator("[data-step-id].bg-text")).toHaveCount(
+				Number(match[1]),
+			);
+			await expect(prefaceRules(world.page)).toHaveCount(0);
+		},
+	},
+	{
 		name: "project opening compaction failure and clear its session status",
 		match: /^the turn opening compaction fails$/,
 		run: ({ world }) => {
-			const prompt = prompts.get(world.page);
+			const prompt = histories.get(world.page)?.[0];
 			if (!prompt) throw new Error("Turn opening prompt was not seeded");
 			const failure: typeof HistoryMessageSchema.Type = {
 				id: "turn-opening-compaction-failed",
@@ -298,22 +541,29 @@ export const turnOpeningHandlers: StepHandler[] = [
 	},
 	{
 		name: "deliver the first ordinary step",
-		match: /^the first ordinary turn opening step arrives$/,
-		run: async ({ world }) => {
-			const prompt = prompts.get(world.page);
-			if (!prompt) throw new Error("Turn opening prompt was not seeded");
+		match:
+			/^the first ordinary turn opening step arrives(?: (\d+) seconds after send)?$/,
+		run: async ({ world, match }) => {
+			const history = histories.get(world.page);
+			const prompt = history?.[0];
+			if (!history || prompt?.time?.created === undefined)
+				throw new Error("Turn opening prompt was not seeded");
+			const stamp =
+				match[1] === undefined
+					? PINNED_CLOCK_MS - 1000
+					: prompt.time.created + Number(match[1]) * 1000;
 			const step: typeof HistoryMessageSchema.Type = {
 				id: "turn-opening-assistant",
 				role: "assistant",
 				parentID: prompt.id,
-				time: { created: PINNED_CLOCK_MS - 1000 },
+				time: { created: stamp },
 				parts: [
 					{
 						id: "turn-opening-read",
 						type: "tool",
 						tool: "Read",
 						callID: "turn-opening-read",
-						time: { start: PINNED_CLOCK_MS - 1000 },
+						time: { start: stamp },
 						state: {
 							status: "running",
 							input: { _tag: "whole", value: { filePath: "src/index.ts" } },
@@ -321,10 +571,11 @@ export const turnOpeningHandlers: StepHandler[] = [
 					},
 				],
 			};
-			requireRpcControl(world.page).setDetailRows(SESSION, [
-				...detailRowsOf(prompt),
-				...detailRowsOf(step),
-			]);
+			history.push(step);
+			requireRpcControl(world.page).setDetailRows(
+				SESSION,
+				history.flatMap(detailRowsOf),
+			);
 		},
 	},
 	{
