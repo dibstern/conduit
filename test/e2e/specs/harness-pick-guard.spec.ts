@@ -1297,7 +1297,7 @@ test.describe("session composer owns its stored pick", () => {
 				openedComposer = true;
 			}
 			await expect(mode).toHaveAccessibleName(
-				"Approvals: Full access. Open options",
+				"Permissions: Full access. Open options",
 			);
 			stage = "A-stale-delivered";
 			older.release();
@@ -1310,7 +1310,7 @@ test.describe("session composer owns its stored pick", () => {
 			);
 			after = await picker.getAttribute("data-shown-permission-mode");
 			await expect(mode).toHaveAccessibleName(
-				"Approvals: Full access. Open options",
+				"Permissions: Full access. Open options",
 			);
 			if (openedComposer) await page.keyboard.press("Escape");
 			if (await phoneWords.isVisible())
@@ -1968,7 +1968,7 @@ async function selectFullPermission(page: Page): Promise<void> {
 	await page.getByTestId("permission-mode-option-full").click();
 	await expect(
 		page.getByRole("button", {
-			name: "Approvals: Full access. Open options",
+			name: "Permissions: Full access. Open options",
 			exact: true,
 		}),
 	).toBeVisible();

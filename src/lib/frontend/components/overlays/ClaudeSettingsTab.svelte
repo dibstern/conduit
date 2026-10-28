@@ -318,7 +318,7 @@
 
 {#snippet defaultPermissionModeNotes()}
 	<p class="text-text-dimmer">
-		New sessions start in this mode; the approvals pill still overrides it for the session you're in. Claude Code ignores a default mode set in a project's settings files, so Conduit applies this one itself.
+		New sessions start in this mode; the permissions pill still overrides it for the session you're in. Claude Code ignores a default mode set in a project's settings files, so Conduit applies this one itself.
 	</p>
 	{#if DEFAULT_MODE_OPTIONS.find((m) => m.mode === discoveryState.defaultPermissionMode)?.elevated}
 		<p class="text-warning">

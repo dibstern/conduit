@@ -21,7 +21,7 @@ const phoneRows = {
 	Account: "composer-more-account",
 	Model: "composer-more-model",
 	Effort: "composer-more-effort",
-	Mode: "composer-more-mode",
+	Permissions: "composer-more-mode",
 	Checkout: "composer-checkout",
 } as const;
 
@@ -380,7 +380,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	{
 		name: "tap phone composer sheet row",
 		match:
-			/^I tap the phone composer (Harness|Account|Model|Effort|Mode|Checkout) row$/,
+			/^I tap the phone composer (Harness|Account|Model|Effort|Permissions|Checkout) row$/,
 		run: async ({ world, match }) => {
 			await openComposerMoreSheet(world.page);
 			await world.page
@@ -400,11 +400,11 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert phone composer row value",
-		match: /^the phone composer (Account|Effort|Mode) row reads (.+)$/,
+		match: /^the phone composer (Account|Effort|Permissions) row reads (.+)$/,
 		run: async ({ world, match }) => {
 			const row = world.page
 				.getByTestId("composer-more-sheet")
-				.getByTestId(phoneRows[match[1] as "Effort" | "Mode"]);
+				.getByTestId(phoneRows[match[1] as "Effort" | "Permissions"]);
 			await expect(row.locator('[data-part="value"]')).toHaveText(
 				match[2] ?? "",
 			);
@@ -509,7 +509,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	{
 		name: "assert phone composer sheet rows and geometry",
 		match:
-			/^the phone composer sheet has separate Harness, Account, Model, Effort, Mode and Checkout rows$/,
+			/^the phone composer sheet has separate Harness, Account, Model, Effort, Permissions and Checkout rows$/,
 		run: async ({ world }) => {
 			const sheet = world.page.getByTestId("composer-more-sheet");
 			await expect(
@@ -576,12 +576,13 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert phone sheet remains under its menu",
-		match: /^the phone composer sheet keeps the (Mode|Checkout) menu above it$/,
+		match:
+			/^the phone composer sheet keeps the (Permissions|Checkout) menu above it$/,
 		run: async ({ world, match }) => {
 			await expect(world.page.getByTestId("composer-more-sheet")).toBeVisible();
 			await expect(
 				world.page.getByTestId(
-					match[1] === "Mode"
+					match[1] === "Permissions"
 						? "permission-mode-dropdown"
 						: "composer-checkout-menu",
 				),
@@ -599,7 +600,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(shield).toBeVisible();
 			await expect(shield).toHaveAttribute(
 				"aria-label",
-				new RegExp(`Approvals.*${match[1]}`),
+				new RegExp(`Permissions.*${match[1]}`),
 			);
 			await expect(shield).toHaveText("");
 			await expect(shield.locator("svg")).toHaveCount(1);
@@ -914,7 +915,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(mode).toHaveText("");
 			await expect(mode).toHaveAttribute(
 				"aria-label",
-				new RegExp(`Approvals.*${match[1]}`),
+				new RegExp(`Permissions.*${match[1]}`),
 			);
 		},
 	},

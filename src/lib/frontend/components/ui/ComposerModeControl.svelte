@@ -19,16 +19,16 @@
 {#if variant === "summary"}
 	<span style:color={tone}>{word}</span>
 {:else if variant === "row"}
-	<Button {...rest} variant="composer-row" size="content" {loading} ariaLabel={`Approvals: ${label}. Open options`}>
+	<Button {...rest} variant="composer-row" size="content" {loading} ariaLabel={`Permissions: ${label}. Open options`}>
 		<PermissionShield {mode} size={16} />
-		<span data-part="label" class="flex-1">Mode</span>
+		<span data-part="label" class="flex-1">Permissions</span>
 		<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{label}</span>
 		<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 	</Button>
 {:else if variant === "words"}
-	<Button {...rest} variant="composer-word" size="content" tone="inherit" {loading} ariaLabel={`Approvals: ${label}. Open options`} style={`color: ${tone}`} touchTarget>{word}</Button>
+	<Button {...rest} variant="composer-word" size="content" tone="inherit" {loading} ariaLabel={`Permissions: ${label}. Open options`} style={`color: ${tone}`} touchTarget>{word}</Button>
 {:else}
-	<Button {...rest} variant="ghost" size="composer-icon" tone="inherit" {loading} ariaLabel={`Approvals: ${label}. Open options`} title={`Approvals (${label})`} touchTarget>
+	<Button {...rest} variant="ghost" size="composer-icon" tone="inherit" {loading} ariaLabel={`Permissions: ${label}. Open options`} title={`Permissions (${label})`} touchTarget>
 		<PermissionShield {mode} size={17} />
 	</Button>
 {/if}

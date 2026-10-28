@@ -44,7 +44,7 @@ Scenario Outline: phone Words opens every picker through one Composer sheet
   And the composer checkout is conduit / account-chip as worktree
   And the composer uses words controls
   When I open the phone composer sheet
-  Then the phone composer sheet has separate Harness, Account, Model, Effort, Mode and Checkout rows
+  Then the phone composer sheet has separate Harness, Account, Model, Effort, Permissions and Checkout rows
   When I tap the phone composer <row> row
   Then the phone composer sheet gives way to the picker
   And the icons control opens the picker at <section>
@@ -83,11 +83,11 @@ Scenario Outline: phone Words mode is changed through its sheet
   And the composer picker has the Claude catalog
   And approvals are plan
   And the composer uses words controls
-  When I tap the phone composer Mode row
+  When I tap the phone composer Permissions row
   Then the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
-  And the phone composer Mode row reads Plan
+  And the phone composer Permissions row reads Plan
   When I set approvals to acceptEdits
-  Then the phone composer Mode row reads Auto-accept edits
+  Then the phone composer Permissions row reads Auto-accept edits
   And the approvals menu is closed
   When I close the phone composer sheet
   Then the phone Words mode is edits with the edits tone

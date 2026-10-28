@@ -29,7 +29,8 @@ const meta = {
 	},
 	args: {
 		label: "ASK",
-		accessibleName: "Approvals Ask. Activate to cycle; Shift+F10 opens options",
+		accessibleName:
+			"Permissions Ask. Activate to cycle; Shift+F10 opens options",
 		onTap,
 		onHold,
 		"data-testid": "micro-label-button",
@@ -134,7 +135,7 @@ export const Chip: Story = {
 		variant: "chip",
 		label: "Full access",
 		accessibleName:
-			"Approvals Full access. Activate to cycle; Shift+F10 opens options",
+			"Permissions Full access. Activate to cycle; Shift+F10 opens options",
 		tone: "var(--color-warning)",
 		tinted: true,
 	},
@@ -177,7 +178,7 @@ export const Tinted: Story = {
 	args: {
 		label: "FULL",
 		accessibleName:
-			"Approvals Full access. Activate to cycle; Shift+F10 opens options",
+			"Permissions Full access. Activate to cycle; Shift+F10 opens options",
 		tone: "var(--color-warning)",
 		tinted: true,
 	},

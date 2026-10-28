@@ -155,7 +155,7 @@ Scenario Outline: the phone model pill opens the Composer sheet
   And the mock relay reports context 42 percent
   When I set effort to high
   And I open the phone composer sheet
-  Then the phone composer sheet has separate Harness, Account, Model, Effort, Mode and Checkout rows
+  Then the phone composer sheet has separate Harness, Account, Model, Effort, Permissions and Checkout rows
   And the phone composer Account row reads personal
   And the phone composer Effort row reads high
   And the screen region visually matches <baseline> at <threshold> percent
@@ -194,20 +194,20 @@ Scenario: the phone model control opens Composer options
   And the composer picker has the Claude catalog
   And the composer checkout is conduit / account-chip as worktree
   When I tap the icons model control
-  Then the phone composer sheet has separate Harness, Account, Model, Effort, Mode and Checkout rows
+  Then the phone composer sheet has separate Harness, Account, Model, Effort, Permissions and Checkout rows
 
-Scenario: the phone sheet Mode row opens the existing ranked mode menu
+Scenario: the phone sheet Permissions row opens the existing ranked mode menu
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And approvals are ask
-  When I tap the phone composer Mode row
-  Then the phone composer sheet keeps the Mode menu above it
+  When I tap the phone composer Permissions row
+  Then the phone composer sheet keeps the Permissions menu above it
   And the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
   When I set approvals to auto
   Then the approvals menu is closed
-  And the phone composer Mode row reads Auto
+  And the phone composer Permissions row reads Auto
   When I close the phone composer sheet
   Then the phone shield is visible for Auto
 
@@ -335,8 +335,8 @@ Scenario Outline: every phone permission mode keeps its shield visible
   And the composer picker has the Claude catalog
   And approvals are <mode>
   Then the phone shield is visible for <label>
-  When I tap the phone composer Mode row
-  Then the phone composer sheet keeps the Mode menu above it
+  When I tap the phone composer Permissions row
+  Then the phone composer sheet keeps the Permissions menu above it
   And the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
 
 Examples:
