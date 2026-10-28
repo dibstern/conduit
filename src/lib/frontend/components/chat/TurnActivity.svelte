@@ -18,7 +18,7 @@
 	import { findSession } from "../../stores/session.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { surfaceTurn, surfaceTime, surfaceKey, type CardSelection, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
-	import SurfacingCard, { type SurfacingRegions } from "./SurfacingCard.svelte";
+	import SurfacingCard, { type ReadState, type SurfacingRegions } from "./SurfacingCard.svelte";
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
 	import SurfacingMarkActions from "./SurfacingMarkActions.svelte";
 	import SurfacingMarkWhy from "./SurfacingMarkWhy.svelte";
@@ -189,10 +189,13 @@
 		summaryOpen = null;
 	});
 	let selection = $state<CardSelection>({ kind: "auto" });
-	let readSaving = $state(false);
-	let readError = $state("");
-	let autoReadAttempt = $state<string | null>(null);
-	let readCard: string | null = null;
+	let readState = $state<ReadState>({ kind: "idle" });
+	// A card is auto-read at most once per mount, so an explicit Unread sticks.
+	const autoReadAttempts = new Set<string>();
+	let readCardEl = $state<HTMLElement>();
+	let readCardOnScreen = $state(false);
+	let pageVisible = $state(false);
+	let scrubbing = $state(false);
 	let keyBuffer = $state("");
 	const feedback = new SurfacingFeedback(() => sessionId, () => surfacingConfig.categorySet, (place) => {
 		void tick().then(() => {
@@ -226,31 +229,50 @@
 			panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-msg-card"]')?.focus({ preventScroll: true });
 		} else await jumpTo(pin.step);
 	}
-	const readTarget = $derived(surface.card?.part.uuid ?? null);
+	// Track scalars so the live strip's clock cannot restart the read dwell.
+	const readTarget = $derived(surface.card?.read === false ? surface.card.part.uuid : null);
+	const readText = $derived(surface.card?.part.rawText ?? "");
+	$effect(() => {
+		const changed = () => { pageVisible = document.visibilityState === "visible"; };
+		changed();
+		document.addEventListener("visibilitychange", changed);
+		return () => document.removeEventListener("visibilitychange", changed);
+	});
+	$effect(() => {
+		if (!readCardEl) { readCardOnScreen = false; return; }
+		const observer = new IntersectionObserver((entries) => {
+			const entry = entries.at(-1);
+			readCardOnScreen = !!entry?.isIntersecting && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
+		});
+		observer.observe(readCardEl);
+		return () => observer.disconnect();
+	});
+	// An unread card is read after 1s continuously visible, on screen and not scrubbed past.
 	$effect(() => {
 		const target = readTarget;
-		untrack(() => {
-			if (target === readCard) return;
-			readCard = target;
-			autoReadAttempt = null;
-			readError = "";
-		});
+		void readText;
+		if (!target || !pageVisible || !readCardOnScreen || scrubbing || readState.kind === "saving" || autoReadAttempts.has(target)) return;
+		const timer = setTimeout(() => {
+			const card = untrack(() => surface.card);
+			if (card?.part.uuid === target && document.visibilityState === "visible" && readCardOnScreen && !scrubbing) readMessage(card, true);
+		}, 1000);
+		return () => clearTimeout(timer);
 	});
-	async function writeRead(partIds: readonly string[], read: boolean) {
-		if (readSaving || !partIds.length || (!sessionId && !onMessagesRead)) return;
-		readSaving = true;
-		readError = "";
+	/** `uuid` names the card a failure belongs to; bulk saves default to the open card, or the turn when folded. */
+	async function writeRead(partIds: readonly string[], read: boolean, uuid = surface.card?.part.uuid ?? turn.id) {
+		if (readState.kind === "saving" || !partIds.length || (!sessionId && !onMessagesRead)) return;
+		readState = { kind: "saving", uuid };
 		try {
 			if (onMessagesRead) await onMessagesRead(partIds, read);
 			else if (sessionId) await rpc("SetMessagesRead", { sessionId, partIds: [...partIds], read });
+			readState = { kind: "idle" };
 		} catch {
-			readError = "Couldn't save read state. Try again.";
-		} finally { readSaving = false; }
+			readState = { kind: "failed", uuid, message: "Couldn't save read state. Try again." };
+		}
 	}
 	function readMessage(pin: SurfacePin, read: boolean) {
-		// An explicit Unread must survive while this card stays open.
-		autoReadAttempt = pin.part.uuid;
-		if (pin.part.partId) void writeRead([pin.part.partId], read);
+		autoReadAttempts.add(pin.part.uuid);
+		if (pin.part.partId) void writeRead([pin.part.partId], read, pin.part.uuid);
 	}
 
 	function pick(pin: SurfacePin) {
@@ -496,7 +518,7 @@
 {/snippet}
 
 {#snippet summaryMarkRead(view: ReturnType<typeof surfaceTurn>)}
-	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readSaving} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
+	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
 {/snippet}
 
 <div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfacingActive || summaryEnabled ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
@@ -550,7 +572,7 @@
 				</MinimisedTurn>
 			{:else if surfacingActive}
 				<SurfacingCard view={surface} {live} {level} overridden={panel.overridden} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
-					{readSaving} {readError} canAutoRead={autoReadAttempt !== readTarget} onread={readMessage} onautoread={(pin) => readMessage(pin, true)}
+					{readState} bind:cardEl={readCardEl} bind:scrubbing onread={readMessage}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={surface.card?.number !== undefined && replies.has(surface.card.number)}
 					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}
