@@ -1,0 +1,1594 @@
+{
+	"acceptance/bin/acceptance-runner-worker.ts": {
+		"real-wait": 3
+	},
+	"acceptance/src/steps/backgroundTasks.ts": {
+		"real-wait": 1
+	},
+	"acceptance/src/steps/composer.ts": {
+		"real-wait": 4
+	},
+	"acceptance/src/steps/cursorTurn.ts": {
+		"real-wait": 1
+	},
+	"acceptance/src/steps/mockApp.ts": {
+		"real-wait": 1
+	},
+	"acceptance/src/steps/sessionPresentation.ts": {
+		"real-wait": 2
+	},
+	"acceptance/src/steps/sessionSheetSnooze.ts": {
+		"real-wait": 2
+	},
+	"acceptance/src/steps/surfacingRecap.ts": {
+		"real-wait": 1
+	},
+	"acceptance/src/steps/transcriptFeed.ts": {
+		"real-wait": 2
+	},
+	"test/bench/claude-prewarm.ts": {
+		"real-wait": 1
+	},
+	"test/budget/daemon-idle.test.ts": {
+		"real-wait": 3
+	},
+	"test/contract/helpers/session-helpers.ts": {
+		"polling": 1
+	},
+	"test/contract/opencode-global-stream.contract.ts": {
+		"polling": 3,
+		"timeout-override": 1
+	},
+	"test/contract/permission-flow.contract.ts": {
+		"real-wait": 1
+	},
+	"test/contract/sse-events.contract.ts": {
+		"polling": 5
+	},
+	"test/contract/tool-sse-transitions.contract.ts": {
+		"polling": 2,
+		"timeout-override": 3
+	},
+	"test/e2e/helpers/claude-trace-replayer.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/helpers/daemon-harness.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/helpers/e2e-harness.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/helpers/opencode-spawner.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/helpers/rpc-mock.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/helpers/ws-mock.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/ios/session-long-press.test.ts": {
+		"real-wait": 1,
+		"timeout-override": 3
+	},
+	"test/e2e/ios/top-scroll-pocket.test.ts": {
+		"timeout-override": 2
+	},
+	"test/e2e/linux-service/driver.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/macos-service/driver.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/provider/claude-background-work-trace-capture.test.ts": {
+		"real-wait": 3,
+		"timeout-override": 2
+	},
+	"test/e2e/provider/claude-extra-folder-trace-capture.test.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/provider/claude-fork-trace-capture.test.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/provider/claude-provider-instance-real-sdk.test.ts": {
+		"timeout-override": 2
+	},
+	"test/e2e/provider/claude-replay-trace-capture.test.ts": {
+		"polling": 1,
+		"real-wait": 1,
+		"timeout-override": 8
+	},
+	"test/e2e/provider/claude-runner-real-sdk.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/provider/claude-side-thread-trace-capture.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/provider/claude-usage-trace-capture.test.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/provider/claude-worktree-trace-capture.test.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/provider/codex-live.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/provider/cursor-fork-live-sdk.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/provider/cursor-runner-live-sdk.test.ts": {
+		"timeout-override": 3
+	},
+	"test/e2e/provider/cursor-sdk-live.test.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/provider/cursor-skills-real-sdk.test.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/provider/opencode-directory-spike-capture.test.ts": {
+		"real-wait": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/provider/opencode-steer-wire-capture.test.ts": {
+		"real-wait": 1,
+		"timeout-override": 2
+	},
+	"test/e2e/provider/opencode-title-generation-capture.test.ts": {
+		"real-wait": 1,
+		"timeout-override": 2
+	},
+	"test/e2e/provider/opencode-title-isolation.test.ts": {
+		"polling": 5,
+		"timeout-override": 1
+	},
+	"test/e2e/service-runtime/driver.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/specs/chat-lifecycle.spec.ts": {
+		"timeout-override": 4
+	},
+	"test/e2e/specs/chat.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/claude-background-agents.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/claude-background-task-details.spec.ts": {
+		"timeout-override": 3
+	},
+	"test/e2e/specs/claude-launching-rows.spec.ts": {
+		"timeout-override": 3
+	},
+	"test/e2e/specs/claude-replay.spec.ts": {
+		"timeout-override": 19
+	},
+	"test/e2e/specs/claude-running-tasks.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/claude-subagent-status.spec.ts": {
+		"real-wait": 1,
+		"timeout-override": 3
+	},
+	"test/e2e/specs/claude-task-drill-in.spec.ts": {
+		"timeout-override": 2
+	},
+	"test/e2e/specs/claude-turn-cost.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/claude-turn-working-time.spec.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/specs/daemon-build-id.spec.ts": {
+		"real-wait": 7,
+		"timeout-override": 5
+	},
+	"test/e2e/specs/daemon-side-thread-restart.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/daemon-wide-settings.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/files-pane.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/fork-reply.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/fork-session.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-account-switch.spec.ts": {
+		"timeout-override": 10
+	},
+	"test/e2e/specs/harness-build-mismatch-pin.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-create-latency.spec.ts": {
+		"real-wait": 1,
+		"retry-override": 1,
+		"timeout-override": 2
+	},
+	"test/e2e/specs/harness-daemon-services.spec.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/specs/harness-daemon-store-cutover.spec.ts": {
+		"timeout-override": 2
+	},
+	"test/e2e/specs/harness-deep-rewind.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-default-settings.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-draft-attachment-failures.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-draft-attachments.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 10
+	},
+	"test/e2e/specs/harness-draft-promotion.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-draft-session-attachments.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-event-store-compat-pin.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-first-run-projects.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-overflow-fanout-pin.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-page-budget.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-pending-input-resume.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-pick-guard.spec.ts": {
+		"timeout-override": 8
+	},
+	"test/e2e/specs/harness-project-edit.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-recreated-message-resume.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 2
+	},
+	"test/e2e/specs/harness-restart-load.spec.ts": {
+		"real-wait": 2,
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-resume-checksum.spec.ts": {
+		"real-wait": 1,
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-rewind-resume.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-rpc-roundtrip-pin.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-send-shows-message.spec.ts": {
+		"retry-override": 1
+	},
+	"test/e2e/specs/harness-session-cache.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-session-routing.spec.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/specs/harness-settled-count.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-store-contention.spec.ts": {
+		"timeout-override": 2
+	},
+	"test/e2e/specs/harness-tool-previews.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 2
+	},
+	"test/e2e/specs/harness-trace-artifact-pin.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/harness-transcript-performance.spec.ts": {
+		"retry-override": 1,
+		"timeout-override": 2
+	},
+	"test/e2e/specs/input-rpc-errors.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/late-turn-end.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/live-surfacing.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/notification-session-nav-replay.spec.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/specs/opencode-steer.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/permissions.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/project-scope.spec.ts": {
+		"real-wait": 2
+	},
+	"test/e2e/specs/pwa-background-resume.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/scroll-stability.spec.ts": {
+		"timeout-override": 5
+	},
+	"test/e2e/specs/session-island.spec.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/specs/session-skills.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/session-woken.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/settings-access.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/settings-default-claude-account.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/settings-opencode-instances.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/settings-pin.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/settings-power.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/settings-server-logs.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/settings-server-status.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/side-thread-list.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/e2e/specs/side-thread-mid-turn.spec.ts": {
+		"timeout-override": 2
+	},
+	"test/e2e/specs/side-thread-status.spec.ts": {
+		"timeout-override": 3
+	},
+	"test/e2e/specs/side-thread.spec.ts": {
+		"timeout-override": 2
+	},
+	"test/e2e/specs/step-log-toggle-perf.spec.ts": {
+		"real-wait": 1,
+		"retry-override": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/terminal-keys.spec.ts": {
+		"real-wait": 7
+	},
+	"test/e2e/specs/terminal-settings.spec.ts": {
+		"real-wait": 1,
+		"timeout-override": 1
+	},
+	"test/e2e/specs/turn-recap.spec.ts": {
+		"real-wait": 1
+	},
+	"test/e2e/specs/turn-working-clock.spec.ts": {
+		"real-wait": 2,
+		"timeout-override": 3
+	},
+	"test/e2e/specs/unified-rendering.spec.ts": {
+		"timeout-override": 5
+	},
+	"test/e2e/specs/usage-footer-meter.spec.ts": {
+		"timeout-override": 1
+	},
+	"test/helpers/claude-process-marks.ts": {
+		"polling": 1
+	},
+	"test/helpers/claude-runner-cleanup.ts": {
+		"real-wait": 3
+	},
+	"test/helpers/fake-claude-process-sdk.ts": {
+		"real-wait": 31
+	},
+	"test/helpers/fake-opencode-process.mjs": {
+		"real-wait": 1
+	},
+	"test/helpers/historical-runner-bundle.ts": {
+		"real-wait": 1
+	},
+	"test/helpers/mock-opencode-server.ts": {
+		"real-wait": 3
+	},
+	"test/helpers/process-harness-server.ts": {
+		"real-wait": 1
+	},
+	"test/helpers/process-harness.ts": {
+		"real-wait": 8
+	},
+	"test/helpers/pty-host-fixture.ts": {
+		"real-wait": 1
+	},
+	"test/helpers/replay-claude-process-sdk.ts": {
+		"real-wait": 1
+	},
+	"test/integration/daemon/82tn-9-call-context.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/82tn-9-driver-accounts.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/82tn-9-runner-provenance.test.ts": {
+		"polling": 3,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/account-folder-changes.integration.ts": {
+		"polling": 4
+	},
+	"test/integration/daemon/archived-retention.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/category-set-process.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/category-tuning-process.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/claude-account-folders.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/claude-account-rebind.test.ts": {
+		"polling": 18,
+		"timeout-override": 9
+	},
+	"test/integration/daemon/claude-account-scopes.test.ts": {
+		"polling": 9,
+		"real-wait": 4,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/claude-background-run-ownership.test.ts": {
+		"polling": 3,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/claude-blocked-stop.test.ts": {
+		"polling": 7,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/claude-continuation-restart.test.ts": {
+		"polling": 3,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/claude-launch-folder.test.ts": {
+		"polling": 5,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/claude-one-shot.test.ts": {
+		"polling": 1
+	},
+	"test/integration/daemon/claude-prewarm.test.ts": {
+		"polling": 37,
+		"real-wait": 3,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/claude-process-runner-lifecycle.test.ts": {
+		"polling": 1,
+		"real-wait": 5,
+		"timeout-override": 9
+	},
+	"test/integration/daemon/claude-process-runner.test.ts": {
+		"polling": 16,
+		"timeout-override": 8
+	},
+	"test/integration/daemon/claude-queue-restart.test.ts": {
+		"polling": 2,
+		"real-wait": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/claude-run-ownership-browser-regressions.test.ts": {
+		"polling": 10,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/claude-runner-at-most-once.test.ts": {
+		"polling": 6,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/claude-runner-historical.test.ts": {
+		"polling": 5,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/claude-runner-login.test.ts": {
+		"polling": 3,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/claude-runner-long-socket-path.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/claude-runner-quarantine.test.ts": {
+		"polling": 3,
+		"real-wait": 1,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/claude-runner-restart.test.ts": {
+		"polling": 25,
+		"real-wait": 1,
+		"timeout-override": 11
+	},
+	"test/integration/daemon/claude-runner-startup.test.ts": {
+		"polling": 4,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/claude-runner-upgrade.test.ts": {
+		"polling": 43,
+		"real-wait": 6,
+		"timeout-override": 22
+	},
+	"test/integration/daemon/claude-session-rewind.test.ts": {
+		"polling": 12,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/claude-session-workspace-hint.test.ts": {
+		"polling": 17,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/claude-session-workspace.test.ts": {
+		"polling": 14,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/claude-steer-recovery.test.ts": {
+		"polling": 6,
+		"timeout-override": 3
+	},
+	"test/integration/daemon/claude-turn-retry.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/claude-turn-status-restart.test.ts": {
+		"polling": 8,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/codex-account-resources.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/codex-accounts.test.ts": {
+		"polling": 14,
+		"timeout-override": 11
+	},
+	"test/integration/daemon/codex-command-recovery.test.ts": {
+		"polling": 8,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/codex-control.test.ts": {
+		"polling": 11,
+		"timeout-override": 12
+	},
+	"test/integration/daemon/codex-fork.test.ts": {
+		"polling": 8,
+		"timeout-override": 7
+	},
+	"test/integration/daemon/codex-goals.test.ts": {
+		"polling": 14,
+		"timeout-override": 9
+	},
+	"test/integration/daemon/codex-interactions.test.ts": {
+		"polling": 12,
+		"timeout-override": 23
+	},
+	"test/integration/daemon/codex-skills-fork.test.ts": {
+		"polling": 4,
+		"timeout-override": 3
+	},
+	"test/integration/daemon/codex-subagents.test.ts": {
+		"polling": 18,
+		"timeout-override": 9
+	},
+	"test/integration/daemon/codex-title.test.ts": {
+		"polling": 2,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/codex-turn.test.ts": {
+		"polling": 13,
+		"real-wait": 1,
+		"timeout-override": 27
+	},
+	"test/integration/daemon/codex-usage.test.ts": {
+		"polling": 13,
+		"timeout-override": 8
+	},
+	"test/integration/daemon/config-load-safety.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/cursor-account-lifetime.test.ts": {
+		"polling": 25,
+		"real-wait": 5,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/cursor-account-scopes.test.ts": {
+		"polling": 5,
+		"real-wait": 3,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/cursor-auth-frontend.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/cursor-auth-upgrade.test.ts": {
+		"timeout-override": 3
+	},
+	"test/integration/daemon/cursor-auth.test.ts": {
+		"polling": 10,
+		"timeout-override": 13
+	},
+	"test/integration/daemon/cursor-discovery.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/cursor-driver-unavailable.test.ts": {
+		"polling": 2,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/cursor-fork-flow.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/cursor-fork.test.ts": {
+		"polling": 10,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/cursor-model-parameters.test.ts": {
+		"real-wait": 1,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/cursor-question.test.ts": {
+		"polling": 2,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/cursor-recovery.test.ts": {
+		"polling": 22,
+		"timeout-override": 9
+	},
+	"test/integration/daemon/cursor-runner-replay.test.ts": {
+		"polling": 9,
+		"real-wait": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/cursor-runner-upgrade.test.ts": {
+		"polling": 4,
+		"real-wait": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/cursor-skills.test.ts": {
+		"timeout-override": 2
+	},
+	"test/integration/daemon/cursor-steer.test.ts": {
+		"polling": 8,
+		"timeout-override": 7
+	},
+	"test/integration/daemon/cursor-subagents.test.ts": {
+		"polling": 6,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/cursor-tools.test.ts": {
+		"timeout-override": 2
+	},
+	"test/integration/daemon/cursor-turn.test.ts": {
+		"polling": 9,
+		"timeout-override": 11
+	},
+	"test/integration/daemon/cursor-usage-errors.test.ts": {
+		"polling": 7,
+		"timeout-override": 7
+	},
+	"test/integration/daemon/cursor-usage.test.ts": {
+		"polling": 4,
+		"timeout-override": 13
+	},
+	"test/integration/daemon/daemon-cli-rpc.test.ts": {
+		"timeout-override": 4
+	},
+	"test/integration/daemon/daemon-config-memory.test.ts": {
+		"polling": 1,
+		"real-wait": 2,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/daemon-config-replay.test.ts": {
+		"polling": 12,
+		"real-wait": 4,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/daemon-list-fanout.test.ts": {
+		"polling": 11,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/daemon-orchestration-engine.test.ts": {
+		"polling": 75,
+		"timeout-override": 18
+	},
+	"test/integration/daemon/daemon-overrides.test.ts": {
+		"polling": 2,
+		"real-wait": 3,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/daemon-provider-adapters.test.ts": {
+		"polling": 11,
+		"real-wait": 1,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/daemon-provider-prompt-retirement.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/daemon-provider-thread-read.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/daemon-server.test.ts": {
+		"polling": 3,
+		"real-wait": 4,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/daemon-session-workspace.test.ts": {
+		"polling": 8,
+		"real-wait": 1,
+		"timeout-override": 3
+	},
+	"test/integration/daemon/daemon-warm-runners.test.ts": {
+		"polling": 18
+	},
+	"test/integration/daemon/default-data-dir.test.ts": {
+		"polling": 2,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/dev-startup.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/draft-session-worktree.test.ts": {
+		"polling": 5,
+		"real-wait": 1,
+		"timeout-override": 7
+	},
+	"test/integration/daemon/e2e-harness-pty-cleanup.test.ts": {
+		"polling": 7,
+		"real-wait": 1,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/goal-stuck-stop.test.ts": {
+		"polling": 7,
+		"real-wait": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/keep-awake.test.ts": {
+		"polling": 5,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/legacy-history-runtime-import.test.ts": {
+		"polling": 6,
+		"real-wait": 1,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/managed-opencode-cli-restart.test.ts": {
+		"polling": 2,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/managed-opencode-restart.test.ts": {
+		"polling": 23,
+		"real-wait": 1
+	},
+	"test/integration/daemon/message-read-state-process.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/message-surfacing-process.test.ts": {
+		"real-wait": 3,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/multi-folder-git.test.ts": {
+		"polling": 11,
+		"timeout-override": 3
+	},
+	"test/integration/daemon/multi-folder-worktree-missing.test.ts": {
+		"polling": 4,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/multi-folder-worktree.test.ts": {
+		"polling": 4,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/new-session-worktree.test.ts": {
+		"polling": 4,
+		"timeout-override": 8
+	},
+	"test/integration/daemon/opencode-connection-health.test.ts": {
+		"polling": 9,
+		"real-wait": 2,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/opencode-crash.test.ts": {
+		"polling": 4,
+		"real-wait": 1,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/opencode-idle-stop.test.ts": {
+		"polling": 9,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/opencode-instances-stop-race.test.ts": {
+		"real-wait": 1
+	},
+	"test/integration/daemon/opencode-instances-use.test.ts": {
+		"polling": 4,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/opencode-launch-worktree.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/opencode-model-catalog.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/opencode-real-lifecycle.test.ts": {
+		"polling": 3,
+		"real-wait": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/opencode-reconcile.test.ts": {
+		"polling": 6,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/opencode-session-deletion.test.ts": {
+		"polling": 1
+	},
+	"test/integration/daemon/opencode-session-directories.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/opencode-shared-stream.test.ts": {
+		"polling": 9,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/opencode-stale-status-read.test.ts": {
+		"polling": 5,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/opencode-startup-quiet.test.ts": {
+		"polling": 7,
+		"real-wait": 2,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/opencode-unanswered-turn.test.ts": {
+		"polling": 3,
+		"real-wait": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/opencode-worktree.test.ts": {
+		"polling": 1,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/pin-guard.test.ts": {
+		"timeout-override": 2
+	},
+	"test/integration/daemon/process-harness.test.ts": {
+		"polling": 12,
+		"timeout-override": 3
+	},
+	"test/integration/daemon/project-context-cleanup.test.ts": {
+		"polling": 3,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/project-context.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/project-duplicates.test.ts": {
+		"polling": 1,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/project-extra-folders-opencode.test.ts": {
+		"polling": 1,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/project-extra-folders.test.ts": {
+		"polling": 3,
+		"timeout-override": 4
+	},
+	"test/integration/daemon/project-provenance.test.ts": {
+		"polling": 5,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/project-save.test.ts": {
+		"polling": 8,
+		"timeout-override": 8
+	},
+	"test/integration/daemon/project-settings-fanout.test.ts": {
+		"polling": 9,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/project-setup-script.test.ts": {
+		"polling": 13,
+		"real-wait": 1,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/project-storage-migration.test.ts": {
+		"polling": 3,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/project-tree-data.test.ts": {
+		"polling": 13,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/prompt-identity.test.ts": {
+		"polling": 22,
+		"timeout-override": 8
+	},
+	"test/integration/daemon/provider-answer-reconciliation.test.ts": {
+		"polling": 7,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/provider-command-outbox-drain.test.ts": {
+		"polling": 11,
+		"real-wait": 5,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/provider-command-outbox-proof.test.ts": {
+		"polling": 4,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/provider-control-restart.test.ts": {
+		"polling": 12,
+		"timeout-override": 3
+	},
+	"test/integration/daemon/provider-runner-quarantine.test.ts": {
+		"polling": 2,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/provider-stop-confirmation.test.ts": {
+		"polling": 25,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/provider-stop-delivery.test.ts": {
+		"polling": 24,
+		"timeout-override": 7
+	},
+	"test/integration/daemon/pty-host-store.test.ts": {
+		"polling": 14,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/pty-host.test.ts": {
+		"polling": 28,
+		"real-wait": 6,
+		"timeout-override": 10
+	},
+	"test/integration/daemon/repository-grouping.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/repository-identity.test.ts": {
+		"polling": 2,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/repository-scope.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/run-ownership-review.test.ts": {
+		"polling": 9,
+		"timeout-override": 3
+	},
+	"test/integration/daemon/run-ownership.test.ts": {
+		"polling": 9,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/runner-awaiting-project.test.ts": {
+		"polling": 6,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/runner-observation-retirement.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/runner-quarantine-account-holds.test.ts": {
+		"polling": 9,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/send-admission-recovery.test.ts": {
+		"polling": 1,
+		"real-wait": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/send-admission.test.ts": {
+		"polling": 5,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/send-turn-daemon-kill.test.ts": {
+		"polling": 35,
+		"timeout-override": 12
+	},
+	"test/integration/daemon/serve-foreground.test.ts": {
+		"polling": 33,
+		"real-wait": 1,
+		"timeout-override": 16
+	},
+	"test/integration/daemon/server-update.test.ts": {
+		"polling": 4,
+		"timeout-override": 5
+	},
+	"test/integration/daemon/service-stored-config.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/session-directory-discovery.test.ts": {
+		"polling": 1,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/session-fork-surfacing.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/session-mode-defaults.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/session-workspace-fork.test.ts": {
+		"polling": 6,
+		"timeout-override": 3
+	},
+	"test/integration/daemon/session-workspace-isolated-missing.test.ts": {
+		"polling": 4,
+		"timeout-override": 8
+	},
+	"test/integration/daemon/session-workspace-missing.test.ts": {
+		"polling": 4,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/session-workspace.test.ts": {
+		"polling": 2,
+		"timeout-override": 6
+	},
+	"test/integration/daemon/session-worktree-settlement.test.ts": {
+		"polling": 4,
+		"real-wait": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/shared-session-event-bus.test.ts": {
+		"polling": 1
+	},
+	"test/integration/daemon/shell-feed.test.ts": {
+		"polling": 7
+	},
+	"test/integration/daemon/skill-location.test.ts": {
+		"timeout-override": 3
+	},
+	"test/integration/daemon/streaming-cost.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/daemon/surfacing-feedback-process.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/daemon/surfacing-reply.test.ts": {
+		"polling": 1
+	},
+	"test/integration/daemon/terminal-account.test.ts": {
+		"timeout-override": 3
+	},
+	"test/integration/daemon/turn-timeline.test.ts": {
+		"polling": 3
+	},
+	"test/integration/daemon/worktree-branch-rename.test.ts": {
+		"polling": 3,
+		"timeout-override": 18
+	},
+	"test/integration/daemon/worktree-cleanup-agent.test.ts": {
+		"polling": 14,
+		"timeout-override": 11
+	},
+	"test/integration/daemon/worktree-cleanup.test.ts": {
+		"polling": 12,
+		"timeout-override": 40
+	},
+	"test/integration/flows/archived-event-retention.integration.ts": {
+		"polling": 1
+	},
+	"test/integration/flows/attachment-delivery.integration.ts": {
+		"polling": 1,
+		"timeout-override": 2
+	},
+	"test/integration/flows/born-dead-sessions.integration.ts": {
+		"polling": 3
+	},
+	"test/integration/flows/cancel-lifecycle.integration.ts": {
+		"polling": 1,
+		"timeout-override": 4
+	},
+	"test/integration/flows/claude-account-scopes.integration.ts": {
+		"polling": 1,
+		"real-wait": 1,
+		"timeout-override": 1
+	},
+	"test/integration/flows/claude-recovered-question.integration.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/flows/claude-run-ownership-replay.test.ts": {
+		"polling": 7,
+		"timeout-override": 3
+	},
+	"test/integration/flows/claude-session-title.integration.ts": {
+		"real-wait": 2
+	},
+	"test/integration/flows/daemon-lifecycle.integration.ts": {
+		"polling": 4,
+		"timeout-override": 4
+	},
+	"test/integration/flows/discovery-endpoints.integration.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/flows/error-handling.integration.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/flows/event-retention-scheduling.integration.ts": {
+		"polling": 6
+	},
+	"test/integration/flows/event-retention.integration.ts": {
+		"polling": 1,
+		"timeout-override": 3
+	},
+	"test/integration/flows/fork-read-model.integration.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/flows/fork-storage-benchmark.integration.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/flows/message-lifecycle.integration.ts": {
+		"timeout-override": 4
+	},
+	"test/integration/flows/model-selection.integration.ts": {
+		"timeout-override": 6
+	},
+	"test/integration/flows/multi-client.integration.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/flows/opencode-compaction.integration.ts": {
+		"polling": 9,
+		"timeout-override": 1
+	},
+	"test/integration/flows/opencode-file-attachment.integration.ts": {
+		"timeout-override": 2
+	},
+	"test/integration/flows/opencode-fork-run-ownership.integration.ts": {
+		"polling": 5,
+		"timeout-override": 2
+	},
+	"test/integration/flows/opencode-history-backfill.integration.ts": {
+		"real-wait": 8,
+		"timeout-override": 23
+	},
+	"test/integration/flows/opencode-named-instance-routing.integration.ts": {
+		"timeout-override": 2
+	},
+	"test/integration/flows/opencode-session-title.integration.ts": {
+		"polling": 4,
+		"real-wait": 1,
+		"timeout-override": 4
+	},
+	"test/integration/flows/per-tab-sessions.integration.ts": {
+		"real-wait": 2,
+		"timeout-override": 1
+	},
+	"test/integration/flows/replay-parity.integration.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/integration/flows/send-message.integration.ts": {
+		"timeout-override": 6
+	},
+	"test/integration/flows/session-delete-markers.integration.ts": {
+		"polling": 1
+	},
+	"test/integration/flows/session-detail-removal.integration.ts": {
+		"timeout-override": 2
+	},
+	"test/integration/flows/session-lifecycle.integration.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/flows/session-rewind.integration.ts": {
+		"polling": 10,
+		"timeout-override": 4
+	},
+	"test/integration/flows/session-visibility-repro.integration.ts": {
+		"polling": 10,
+		"timeout-override": 11
+	},
+	"test/integration/flows/sqlite-transcript-paging.integration.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/flows/sse-to-ws-pipeline.integration.ts": {
+		"polling": 1,
+		"timeout-override": 6
+	},
+	"test/integration/flows/standalone-added-project-routing.integration.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/flows/stop-resume-cohort.integration.ts": {
+		"polling": 9,
+		"timeout-override": 2
+	},
+	"test/integration/flows/streaming-cost.integration.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/flows/switch-to-streaming-session.integration.ts": {
+		"timeout-override": 2
+	},
+	"test/integration/flows/terminal.integration.ts": {
+		"polling": 10,
+		"real-wait": 1,
+		"timeout-override": 17
+	},
+	"test/integration/flows/tool-lifecycle-pipeline.integration.ts": {
+		"polling": 1,
+		"timeout-override": 3
+	},
+	"test/integration/flows/tool-presentation-compatibility.integration.ts": {
+		"timeout-override": 2
+	},
+	"test/integration/flows/turn-recap.integration.ts": {
+		"polling": 1,
+		"real-wait": 1
+	},
+	"test/integration/flows/ws-handler-coverage.integration.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/helpers/test-ws-client.ts": {
+		"real-wait": 2
+	},
+	"test/integration/persistence/daemon-store-import.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/persistence/legacy-run-ownership-upgrade.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/persistence/shared-store-scope.test.ts": {
+		"polling": 1
+	},
+	"test/integration/relay/pending-input-run-now.test.ts": {
+		"timeout-override": 1
+	},
+	"test/integration/relay/sse-aware-poller-gating.test.ts": {
+		"polling": 12,
+		"timeout-override": 28
+	},
+	"test/media/media-generation.test.ts": {
+		"timeout-override": 1
+	},
+	"test/unit/cli/cli-foreground.test.ts": {
+		"polling": 1
+	},
+	"test/unit/cli/cli-menu.test.ts": {
+		"polling": 6,
+		"real-wait": 1
+	},
+	"test/unit/cli/cli-service.test.ts": {
+		"polling": 1,
+		"real-wait": 1
+	},
+	"test/unit/cli/cli.test.ts": {
+		"polling": 1
+	},
+	"test/unit/components/activity-row-skill.test.ts": {
+		"polling": 1
+	},
+	"test/unit/components/discovery-catalogs.test.ts": {
+		"polling": 24,
+		"real-wait": 1
+	},
+	"test/unit/components/input-area-build-reload.test.ts": {
+		"polling": 1
+	},
+	"test/unit/components/session-context-menu.test.ts": {
+		"polling": 1
+	},
+	"test/unit/components/session-list-fork.test.ts": {
+		"polling": 1
+	},
+	"test/unit/components/session-selection.test.ts": {
+		"polling": 31
+	},
+	"test/unit/contracts/stub-ws-rpc.test.ts": {
+		"polling": 1
+	},
+	"test/unit/daemon/daemon-foreground.test.ts": {
+		"polling": 2
+	},
+	"test/unit/daemon/local-trace-artifact.test.ts": {
+		"polling": 1
+	},
+	"test/unit/daemon/project-registry.test.ts": {
+		"polling": 24
+	},
+	"test/unit/daemon/project-shell-env-lifecycle.test.ts": {
+		"polling": 2
+	},
+	"test/unit/daemon/session-git.test.ts": {
+		"polling": 12,
+		"real-wait": 2
+	},
+	"test/unit/daemon/storage-monitor.test.ts": {
+		"polling": 28,
+		"real-wait": 1
+	},
+	"test/unit/daemon/subprocess-budget.test.ts": {
+		"real-wait": 1
+	},
+	"test/unit/daemon/subprocess.test.ts": {
+		"real-wait": 1
+	},
+	"test/unit/daemon/tracing.test.ts": {
+		"polling": 1
+	},
+	"test/unit/daemon/version-check.test.ts": {
+		"real-wait": 1
+	},
+	"test/unit/daemon/worktree-service.creation.test.ts": {
+		"timeout-override": 1
+	},
+	"test/unit/daemon/worktree-service.lifecycle.test.ts": {
+		"timeout-override": 1
+	},
+	"test/unit/daemon/worktree-service.rollback.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/unit/daemon/worktree-service.setup.test.ts": {
+		"polling": 3,
+		"timeout-override": 1
+	},
+	"test/unit/domain/relay/opencode-command-completion-ownership.test.ts": {
+		"polling": 3
+	},
+	"test/unit/domain/relay/opencode-run-recovery.test.ts": {
+		"polling": 1
+	},
+	"test/unit/domain/relay/opencode-runtime-ingress-effect.test.ts": {
+		"polling": 2
+	},
+	"test/unit/domain/relay/opencode-runtime-ingress-projection.test.ts": {
+		"polling": 2,
+		"real-wait": 19
+	},
+	"test/unit/domain/relay/scoped-runtime-reads.test.ts": {
+		"polling": 2
+	},
+	"test/unit/e2e/claude-trace-replayer.test.ts": {
+		"timeout-override": 1
+	},
+	"test/unit/effect/daemon-main-getstatus.test.ts": {
+		"polling": 1
+	},
+	"test/unit/effect/layer-wiring.test.ts": {
+		"polling": 1
+	},
+	"test/unit/effect/message-poller-manager-layer.test.ts": {
+		"timeout-override": 1
+	},
+	"test/unit/effect/session-lifecycle-wiring.test.ts": {
+		"polling": 1,
+		"real-wait": 1
+	},
+	"test/unit/effect/ws-routing-layer.test.ts": {
+		"polling": 1
+	},
+	"test/unit/frontend/alert-audio.test.ts": {
+		"polling": 4,
+		"real-wait": 3
+	},
+	"test/unit/frontend/notifications.test.ts": {
+		"polling": 2
+	},
+	"test/unit/frontend/push-in-app-ding.test.ts": {
+		"polling": 1,
+		"real-wait": 2
+	},
+	"test/unit/frontend/sw-push.test.ts": {
+		"polling": 1
+	},
+	"test/unit/frontend/transport/rpc.test.ts": {
+		"polling": 1,
+		"timeout-override": 1
+	},
+	"test/unit/frontend/transport/shared-client-resume.test.ts": {
+		"polling": 4,
+		"timeout-override": 2
+	},
+	"test/unit/frontend/trigger-notifications.test.ts": {
+		"polling": 1
+	},
+	"test/unit/frontend/ws-reconnect-stream.test.ts": {
+		"polling": 10
+	},
+	"test/unit/git/repository-identity.test.ts": {
+		"timeout-override": 1
+	},
+	"test/unit/handlers/prompt-processing-timeout-effect.test.ts": {
+		"polling": 1
+	},
+	"test/unit/handlers/prompt-provider-state-effect.test.ts": {
+		"polling": 2
+	},
+	"test/unit/helpers/mock-opencode-server.test.ts": {
+		"polling": 9
+	},
+	"test/unit/helpers/recording-proxy.test.ts": {
+		"polling": 1
+	},
+	"test/unit/persistence/recap-service.test.ts": {
+		"polling": 3
+	},
+	"test/unit/persistence/session-sidebar.test.ts": {
+		"timeout-override": 4
+	},
+	"test/unit/pipeline/claude-subagent-materialization.test.ts": {
+		"polling": 1
+	},
+	"test/unit/pipeline/pipeline-properties.test.ts": {
+		"timeout-override": 1
+	},
+	"test/unit/provider/claude/claude-permission-bridge.test.ts": {
+		"polling": 5,
+		"real-wait": 1
+	},
+	"test/unit/provider/claude/claude-provider-instance-lifecycle.test.ts": {
+		"polling": 2,
+		"real-wait": 2
+	},
+	"test/unit/provider/claude/claude-provider-instance-live-settings.test.ts": {
+		"polling": 1
+	},
+	"test/unit/provider/claude/claude-provider-instance-send-turn.test.ts": {
+		"polling": 13,
+		"real-wait": 3,
+		"timeout-override": 1
+	},
+	"test/unit/provider/claude/claude-provider-runtime-interactions.test.ts": {
+		"polling": 1
+	},
+	"test/unit/provider/claude/claude-run-ownership.test.ts": {
+		"polling": 19,
+		"timeout-override": 1
+	},
+	"test/unit/provider/claude/claude-runner-connection.test.ts": {
+		"polling": 8
+	},
+	"test/unit/provider/claude/claude-runtime-settle-by-id.test.ts": {
+		"polling": 9
+	},
+	"test/unit/provider/claude/claude-session-runner.test.ts": {
+		"polling": 1
+	},
+	"test/unit/provider/claude/claude-stop-turn.test.ts": {
+		"polling": 1,
+		"real-wait": 1
+	},
+	"test/unit/provider/claude/prepare-turn.property.test.ts": {
+		"timeout-override": 3
+	},
+	"test/unit/provider/claude/project-shell-env.test.ts": {
+		"polling": 1
+	},
+	"test/unit/provider/cursor/cursor-run-ownership.test.ts": {
+		"polling": 11
+	},
+	"test/unit/provider/opencode-provider-instance-send-turn.test.ts": {
+		"polling": 8,
+		"real-wait": 1
+	},
+	"test/unit/provider/orchestration-side-effect-reactor.test.ts": {
+		"polling": 2
+	},
+	"test/unit/provider/relay-event-sink.test.ts": {
+		"polling": 2
+	},
+	"test/unit/provider/runner-process-exit-run-ownership.test.ts": {
+		"polling": 1
+	},
+	"test/unit/relay/interim-badge-broadcast.test.ts": {
+		"polling": 8
+	},
+	"test/unit/relay/monitoring-wiring.test.ts": {
+		"polling": 1
+	},
+	"test/unit/relay/opencode-health-removal.test.ts": {
+		"polling": 1
+	},
+	"test/unit/relay/per-tab-routing-e2e.test.ts": {
+		"polling": 2,
+		"timeout-override": 2
+	},
+	"test/unit/relay/permission-rehydration-wiring.test.ts": {
+		"polling": 1,
+		"timeout-override": 2
+	},
+	"test/unit/relay/push-notification-done.test.ts": {
+		"polling": 1
+	},
+	"test/unit/relay/relay-stack-opencode-runtime-ingress-wiring.test.ts": {
+		"polling": 1,
+		"real-wait": 1
+	},
+	"test/unit/relay/relay-startup-recovery.test.ts": {
+		"polling": 2
+	},
+	"test/unit/relay/relay-tracing-propagation.test.ts": {
+		"polling": 1
+	},
+	"test/unit/relay/shared-opencode-reconnect.test.ts": {
+		"polling": 20
+	},
+	"test/unit/relay/sse-stream.test.ts": {
+		"polling": 6,
+		"real-wait": 3
+	},
+	"test/unit/relay/status-poller-broadcast.test.ts": {
+		"polling": 4,
+		"timeout-override": 2
+	},
+	"test/unit/server/pty-storm.test.ts": {
+		"timeout-override": 1
+	},
+	"test/unit/server/ws-rpc-daemon.test.ts": {
+		"polling": 1
+	},
+	"test/unit/server/ws-rpc-handler.test.ts": {
+		"polling": 1
+	},
+	"test/unit/session/session-title-service.test.ts": {
+		"polling": 1
+	},
+	"test/unit/session/status-poller-rows.test.ts": {
+		"polling": 1
+	},
+	"test/unit/stores/project-store-routes.test.ts": {
+		"polling": 1
+	},
+	"test/unit/stores/shell-row-phase.test.ts": {
+		"polling": 4
+	},
+	"test/unit/stores/todo-feed.test.ts": {
+		"polling": 2,
+		"real-wait": 1
+	},
+	"test/unit/stores/transcript-exactly-once.test.ts": {
+		"polling": 9,
+		"real-wait": 1
+	},
+	"test/unit/stores/transcript-interface.test.ts": {
+		"polling": 2,
+		"real-wait": 2
+	},
+	"test/visual/components.spec.ts": {
+		"real-wait": 4
+	},
+	"test/visual/hold-menu.spec.ts": {
+		"real-wait": 2,
+		"timeout-override": 2
+	}
+}
