@@ -81,7 +81,11 @@ export function turnPhase(
 	if (!processing || !latestTurn) return "settled";
 	const last = turn.segments.at(-1);
 	if (last?.end === undefined) return "live";
-	return last.handBack ? "waiting" : "settled";
+	return last.handBack
+		? isOpenHandBack(last.handBack)
+			? "waiting"
+			: "live"
+		: "settled";
 }
 
 /** Earlier replies become steps once more work follows; only the last reply
@@ -137,8 +141,7 @@ export function turnLog(
 	// A wake may produce only a reply, with no new activity step to carry its
 	// divider. It still belongs to this turn's log, before that trailing reply.
 	if (turn.segments.length > 1) {
-		for (const part of segment.reply)
-			addResumes(part.uuid, activity.length);
+		for (const part of segment.reply) addResumes(part.uuid, activity.length);
 	}
 	return { segment, entries, handBacks, resumedParts };
 }
@@ -155,12 +158,9 @@ export function isOpenHandBack(
 ): boolean {
 	if (!isHandBack(tool)) return false;
 	if (tool.status === "pending" || tool.status === "running") return true;
-	const asyncQuestion = question?.delivery === "async" ||
-		(typeof tool.input === "object" && tool.input !== null &&
-			"delivery" in tool.input && tool.input.delivery === "async");
-	return tool.name === "AskUserQuestion" && asyncQuestion &&
-		tool.status === "completed" &&
-		(!tool.result || tool.result === "null" || tool.result === '""');
+	// A null async result also represents dismissal. Only a pending approval
+	// proves that a completed question is still answerable.
+	return tool.name === "AskUserQuestion" && question?.delivery === "async";
 }
 
 /** Only an open segment can receive new work. */

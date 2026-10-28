@@ -132,6 +132,7 @@ export function getAssistantText(msg: HistoryMessage | undefined): string {
 const LIVE_STATUS_TOOLS = new Set([
 	"question",
 	"AskUserQuestion",
+	"ExitPlanMode",
 	...SUBAGENT_TOOL_NAMES,
 ]);
 

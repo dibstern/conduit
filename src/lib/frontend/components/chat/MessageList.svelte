@@ -461,8 +461,8 @@
 		const resumes = activeSession?.resumes ?? [];
 		if (resumes.length === 0) return dividers;
 		const slots = (forkSplit ? [...inheritedTurns, ...currentTurns] : turns).flatMap((turn) => {
-			const { segment, handBacks } = turnLog(turn);
-			return [...segment.activity, ...segment.reply, ...handBacks];
+			const { segment } = turnLog(turn);
+			return [...segment.activity, ...segment.reply];
 		});
 		for (const resume of resumes) {
 			const key = slots.find((part) => (part.createdAt ?? -Infinity) >= resume.at)?.uuid ?? END_OF_TRANSCRIPT;
@@ -727,9 +727,11 @@
 
 	<!-- Pending permission requests for the viewed session. -->
 	{#each localPermissions as perm (perm.id)}
+		{#if perm.toolName !== "ExitPlanMode" || !perm.toolUseId || !transcriptToolIds.has(perm.toolUseId)}
 		<div class="max-w-[760px] mx-auto mb-3 px-5">
 			<PermissionCard request={perm} />
 		</div>
+		{/if}
 	{/each}
 
 	<!-- Keep questions answerable when their tool message has not reached the transcript. -->

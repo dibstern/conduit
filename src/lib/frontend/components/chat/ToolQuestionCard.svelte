@@ -14,9 +14,10 @@
 	import Surface from "../ui/Surface.svelte";
 	import Button from "../ui/Button.svelte";
 
-	let { message, presentation = "card" }: {
+	let { message, presentation = "card", onopen }: {
 		message: ToolMessage;
 		presentation?: "card" | "log";
+		onopen?: (() => void) | undefined;
 	} = $props();
 	let expanded = $state(false);
 
@@ -81,7 +82,9 @@
 		// Scoped to the viewed session: pending questions outlive switches, and
 		// another session's identical text must not bind (answers go by toolId).
 		const fallbackQuestions = questionDataFromInput;
-		if (fallbackQuestions) {
+		// Completed questions need an exact request match: identical historical
+		// wording cannot prove which async question is still pending.
+		if (fallbackQuestions && isOpenHandBack(message)) {
 			const contentMatch = permissionsState.pendingQuestions.find((pendingQuestion) => {
 				if (pendingQuestion.sessionId !== sessionState.currentId) return false;
 				if (pendingQuestion.questions.length !== fallbackQuestions.length) return false;
@@ -208,7 +211,7 @@
 </script>
 
 {#if presentation === "log"}
-	<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={expanded} data-testid="turn-hand-back-row" onclick={() => expanded = !expanded}>
+	<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={onopen ? undefined : expanded} data-testid="turn-hand-back-row" onclick={() => { if (onopen) onopen(); else expanded = !expanded; }}>
 		<span class="shrink-0 text-text-muted">?</span>
 		<span class="truncate text-text-secondary">{questionData?.map((question, index) => `${question.question} → ${question.isSecret ? "Secret answer hidden" : parsedAnswers?.[index]?.join(", ") || answerDisplay || "No answer"}`).join("; ") ?? answerDisplay ?? "No answer"}</span>
 	</Button>

@@ -120,7 +120,11 @@ const choices = new SvelteMap<
 	string,
 	{
 		settled: TurnChoice | null;
-		live: { choice: TurnChoice; segment: number } | null;
+		live: {
+			choice: TurnChoice;
+			segment: number;
+			phase: "live" | "waiting";
+		} | null;
 	}
 >();
 const messageStops = [...SURFACE_LEVELS, "log"] as const;
@@ -185,8 +189,9 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 	const saved = $derived(
 		sessionSurfaceLevel(input.sessionId) ?? input.status.defaultLevel,
 	);
-	const parts = $derived(turnLog(input.turn).segment.activity);
-	const hasHandBacks = $derived(input.turn.segments.some((segment) => segment.handBack !== undefined));
+	const log = $derived(turnLog(input.turn));
+	const parts = $derived(log.segment.activity);
+	const hasHandBacks = $derived(log.handBacks.length > 0);
 	const allRead = $derived(
 		parts.some((part) => part.type === "assistant") &&
 			parts.every(
@@ -195,22 +200,26 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 	);
 	const collapsed = $derived(
 		turnMinimised(input.sessionId, input.turn.id) ??
-			(!input.jev ||
-				input.status.turnsOpen === "minimised" ||
-				(input.status.turnsOpen === "auto" &&
-					phase === "settled" &&
-					!input.newestSettledTurn &&
-					allRead &&
-					!openAsk(parts, input.categorySet, input.latestTurn))),
+			(!(phase !== "settled" && hasHandBacks) &&
+				(!input.jev ||
+					input.status.turnsOpen === "minimised" ||
+					(input.status.turnsOpen === "auto" &&
+						phase === "settled" &&
+						!input.newestSettledTurn &&
+						allRead &&
+						!openAsk(parts, input.categorySet, input.latestTurn)))),
 	);
 	const choice = $derived.by(() => {
 		const stored = choices.get(key);
 		switch (phase) {
 			case "live":
 			case "waiting":
-				return stored?.live?.segment === input.turn.segments.length - 1
+				return stored?.live?.segment === input.turn.segments.length - 1 &&
+					(phase === "waiting" || stored.live.phase === "live")
 					? stored.live.choice
-					: "log";
+					: phase === "waiting"
+						? "qa"
+						: "log";
 			case "settled":
 				return stored?.settled ?? null;
 			default:
@@ -223,13 +232,22 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 		switch (selected) {
 			case "qa":
 				if (hasHandBacks) return { kind: "open", view: { kind: "qa" } };
-				return { kind: "open", view: { kind: "show", stop: input.jev ? saved : "log" } };
+				return {
+					kind: "open",
+					view: { kind: "show", stop: input.jev ? saved : "log" },
+				};
 			case "usage":
 				return { kind: "open", view: { kind: "usage" } };
 			case null:
 			case "level":
 			case "log":
-				return { kind: "open", view: { kind: "show", stop: !input.jev || selected === "log" ? "log" : saved } };
+				return {
+					kind: "open",
+					view: {
+						kind: "show",
+						stop: !input.jev || selected === "log" ? "log" : saved,
+					},
+				};
 			default:
 				return assertNever(selected);
 		}
@@ -241,7 +259,7 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 			case "waiting":
 				choices.set(key, {
 					...previous,
-					live: { choice, segment: input.turn.segments.length - 1 },
+					live: { choice, segment: input.turn.segments.length - 1, phase },
 				});
 				return;
 			case "settled":
