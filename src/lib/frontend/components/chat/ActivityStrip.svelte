@@ -9,6 +9,8 @@
 <!-- mouse — a tap fires `pointerenter` with no matching leave, so an ungated      -->
 <!-- caption would replace the summary sentence and stay there.                    -->
 <script lang="ts">
+	import type { ComponentProps, Snippet } from "svelte";
+	import type { SurfacePin, SurfacePart } from "../../utils/surface-turn.js";
 	import { logSteps } from "../../utils/turn-stops.js";
 	import {
 		type ActivityPart,
@@ -22,33 +24,31 @@
 	import { segmentAppearance } from "./activity-style.js";
 	import ActivityTimeline from "../ui/ActivityTimeline.svelte";
 
-	let {
-		turn,
-		segment,
-		final,
-		now,
-		running,
-		active = null,
-		onhover,
-		onjump,
-		interactive = true,
-	}: {
+	let { turn, segment, final, now, running, active = null, markers, openAsk, belowLevel, cited, preview, sliderText, oninteraction, onpick, onjump, oncommand, phone = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
 		now: number;
-		/** Live tasks the turn launched: their launching steps keep breathing. */
 		running: ReadonlySet<string>;
-		/** Segment to highlight — owned by the parent so the caption can't drift. */
-		active?: number | null;
-		onhover?: (i: number | null) => void;
-		onjump?: (i: number) => void;
-		interactive?: boolean;
+		active?: string | null;
+		markers?: ComponentProps<typeof ActivityTimeline>["markers"];
+		openAsk?: SurfacePart | null;
+		belowLevel?: boolean;
+		cited?: string | null;
+		preview?: Snippet<[SurfacePin]>;
+		sliderText?: string;
+		oninteraction?: ComponentProps<typeof ActivityTimeline>["oninteraction"];
+		onpick?: (pin: SurfacePin) => void;
+		onjump?: (id: string) => void;
+		oncommand?: (event: KeyboardEvent) => void;
+		phone?: boolean;
 	} = $props();
 
 	const positions = $derived(stripLayout(segment, turn, final, now));
 	const durations = $derived(stepDurations(segment, turn, final, now));
-	const segments = $derived(segment.activity.map((part, index) => {
+	const steps = $derived(logSteps(turn));
+	const segments = $derived(steps.map((part) => {
+		const index = segment.activity.findIndex((candidate) => candidate.uuid === part.uuid);
 		return {
 			id: part.uuid,
 			left: positions[index]?.left ?? 0,
@@ -58,6 +58,8 @@
 		};
 	}));
 
+	const seams = $derived(segment.activity.flatMap((part, index) => part.type === "system" ? [{ id: part.uuid, left: positions[index]?.left ?? 0, width: positions[index]?.width ?? 0 }] : []));
+
 	function title(part: ActivityPart, i: number): string {
 		const duration = part.type === "system" ? undefined : durations?.[i];
 		return duration === undefined ? partLabel(part) : `${partLabel(part)} · ${fmtDuration(duration)}`;
@@ -65,4 +67,4 @@
 
 </script>
 
-<ActivityTimeline stepCount={logSteps(turn).length} {segments} {active} {onhover} {onjump} {interactive} />
+<ActivityTimeline {segments} {seams} {active} {markers} {openAsk} {belowLevel} {cited} {preview} {sliderText} {oninteraction} {onpick} {onjump} {oncommand} {phone} />

@@ -3,7 +3,7 @@
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
-	import type { Snippet } from "svelte";
+	import type { ComponentProps, Snippet } from "svelte";
 	import type { SessionResume } from "../../../contracts/limit-recovery.js";
 	import { assertNever } from "../../../utils.js";
 	import SurfacingAskContext, { type AskState } from "./SurfacingAskContext.svelte";
@@ -89,10 +89,12 @@
 	} = $props();
 
 	const fullLog = $derived(panel.view.kind === "open" && panel.view.view.kind === "show" && panel.view.view.stop === "log");
-	let hovered = $state<number | null>(null);
+	type StripInteraction = Parameters<NonNullable<ComponentProps<typeof ActivityStrip>["oninteraction"]>>[0];
+	let stripInteraction = $state<StripInteraction>({ hovered: null, scrubbing: false });
+	let citedStep = $state<string | null>(null);
 	let focusUuid = $state<string | null>(null);
 	let panelEl = $state<HTMLDivElement | undefined>();
-	let detailsOpen = $state(false);
+	let headTooltip = $state(false);
 
 	const settledNow = Date.now();
 	const now = $derived(final && turn.live ? clock.now : settledNow);
@@ -185,7 +187,6 @@
 	let readCardEl = $state<HTMLElement>();
 	let readCardOnScreen = $state(false);
 	let pageVisible = $state(false);
-	let scrubbing = $state(false);
 	let keyBuffer = $state("");
 	const feedback = new SurfacingFeedback(() => sessionId, () => surfacingConfig.categorySet, (place) => {
 		void tick().then(() => {
@@ -200,14 +201,12 @@
 	const surface = $derived(surfaceTurn({
 		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: numberedMessages.map((part) => feedback.annotate(part)),
 		positions: stripLayout(segment, turn, final, now), categorySet: surfacingConfig.categorySet,
-		level, view: panel.view.kind === "open" ? panel.view.view : null, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, selection, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
+		level, view: panel.view.kind === "open" ? panel.view.view : null, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, selection: stripInteraction.scrubbing && stripInteraction.hovered ? { kind: "picked", uuid: stripInteraction.hovered } : selection, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	const minimised = $derived(surfacingActive && panel.view.kind === "collapsed");
+	const hovered = $derived(minimised ? -1 : segment.activity.findIndex((part) => part.uuid === stripInteraction.hovered));
 	const summaryVisible = $derived(!minimised && summaryEnabled && (summaryOpen && summaryOpen.storeId === storeTurnId ? summaryOpen.open : (!phone && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
-	$effect(() => {
-		if (minimised) { hovered = null; detailsOpen = false; }
-	});
 	function toggleMinimised() {
 		if (panel.view.kind === "collapsed") panel.open();
 		else panel.collapse();
@@ -244,10 +243,10 @@
 	$effect(() => {
 		const target = readTarget;
 		void readText;
-		if (!target || !pageVisible || !readCardOnScreen || scrubbing || readState.kind === "saving" || autoReadAttempts.has(target)) return;
+		if (!target || !pageVisible || !readCardOnScreen || stripInteraction.scrubbing || readState.kind === "saving" || autoReadAttempts.has(target)) return;
 		const timer = setTimeout(() => {
 			const card = untrack(() => surface.card);
-			if (card?.part.uuid === target && document.visibilityState === "visible" && readCardOnScreen && !scrubbing) readMessage(card, true);
+			if (card?.part.uuid === target && document.visibilityState === "visible" && readCardOnScreen && !stripInteraction.scrubbing) readMessage(card, true);
 		}, 1000);
 		return () => clearTimeout(timer);
 	});
@@ -313,8 +312,7 @@
 	/** Without Jev, hovering a citation marks its step on the activity strip. */
 	function hoverCitation(ordinal: number | null) {
 		const uuid = numberedMessages.find((part) => part.surfacingOrdinal === ordinal)?.uuid;
-		const index = segment.activity.findIndex((part) => part.uuid === uuid);
-		hovered = index >= 0 ? index : null;
+		citedStep = uuid ?? null;
 	}
 	function selectLevel(next: SurfaceLevel) {
 		// The existing card's level control changes its pins without closing the log.
@@ -379,19 +377,14 @@
 			default: assertNever(command);
 		}
 	}
-	function surfaceJump(x: number) {
-		const positions = stripLayout(segment, turn, final, now);
-		const i = positions.findIndex((position) => x <= position.left + position.width);
-		const index = i < 0 ? segment.activity.length - 1 : i;
-		const pin = surface.pins.find((pin) => pin.step === index);
+	function stripJump(id: string) {
+		const index = segment.activity.findIndex((part) => part.uuid === id);
+		if (index < 0) return;
+		const pin = surfacingActive ? surface.pins.find((pin) => pin.part.uuid === id) : undefined;
 		if (pin) pick(pin);
 		else void jumpTo(index);
 	}
-	function surfaceHover(x: number | null) {
-		const positions = stripLayout(segment, turn, final, now);
-		hovered = x === null ? null : positions.findIndex((position) => x <= position.left + position.width);
-		detailsOpen = hovered !== null && hovered >= 0;
-	}
+	function stripChanged(interaction: StripInteraction) { stripInteraction = interaction; }
 
 	const PREFETCH_REST_MS = 2_000;
 
@@ -525,7 +518,7 @@
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div role={surfacingActive ? "group" : undefined} tabindex={surfacingActive ? 0 : undefined} aria-label={surfacingActive ? "Turn messages" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} data-testid={surfacingActive ? "surfacing-card" : undefined} class="turn-head-card @container rounded-[14px] bg-turn-bg px-[12px] pt-[10px] pb-[2px] md:pb-[9px]">
 			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
-				<Tooltip bind:open={detailsOpen}>
+				<Tooltip bind:open={() => hovered >= 0 || headTooltip, (open) => { headTooltip = open; }}>
 					{#snippet trigger({ props })}
 						{@const headPhrase = phone && (surfacingActive || minimised) ? plural(stats.skills, "skill") : phrase}
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
@@ -543,7 +536,7 @@
 						</Button>
 					{/snippet}
 					<div class="max-w-[340px] flex flex-col gap-[6px] text-[12px]">
-						{#if hovered !== null}<span>{stepCaption(segment, turn, final, hovered, now)}</span>{:else if live}<span>{currentStepLabel(segment)}</span>{/if}
+						{#if hovered >= 0}<span>{stepCaption(segment, turn, final, hovered, now)}</span>{:else if live}<span>{currentStepLabel(segment)}</span>{/if}
 						{#if phrase}<span>{phrase}</span>{/if}
 						{#if stats.compactions > 0}<span>Context compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
 						{#if stats.failed > 0}<span>{stats.failed} failed</span>{/if}
@@ -564,29 +557,28 @@
 				{#if surfacingActive}<Button variant="ghost" size="content" tone="inherit" touchTarget class="ml-auto shrink-0 -my-[2px] h-[24px] w-[24px] text-text-dimmer" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Minimise turn"} aria-expanded={!minimised} onclick={toggleMinimised}><Icon name={minimised ? "chevron-down" : "chevron-up"} size={14} /></Button>{/if}
 			</div>
 			{#if minimised}
-				<MinimisedTurn view={surface} onopen={openMinimisedMessage}>
-					{#snippet strip()}<ActivityStrip {turn} {segment} {final} {now} {running} interactive={false} />{/snippet}
+				<MinimisedTurn>
+					{#snippet strip(preview: Snippet<[SurfacePin]>)}<ActivityStrip {turn} {segment} {final} {now} {running} {phone} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={openMinimisedMessage} oninteraction={stripChanged} />{/snippet}
 				</MinimisedTurn>
 			{:else if surfacingActive}
 				<SurfacingCard view={surface} {counts} {live} {level} overridden={panel.overridden} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
-					{readState} bind:cardEl={readCardEl} bind:scrubbing onread={readMessage}
+					{readState} bind:cardEl={readCardEl} onread={readMessage}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={surface.card?.number !== undefined && replies.has(surface.card.number)}
 					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}
 					endTime={surfaceTime(duration ?? 0)} onpick={pick} onlevel={selectLevel}
 					ondefault={() => panel.makeDefault()}
 					onreset={() => { panel.resetLevel(); selection = { kind: "latest" }; }}
-					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand} onjump={surfaceJump} onhover={surfaceHover}>
-					{#snippet strip()}
-						<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} interactive={false} />
+					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand}>
+					{#snippet strip(cited: string | null)}
+						<ActivityStrip {turn} {segment} {final} {now} {running} {phone} {cited} markers={{ kind: "pins", pins: surface.pins, selected: surface.card?.part.uuid ?? null, thumbX: surface.card?.x ?? (live ? 100 : null) }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={pick} onjump={stripJump} oncommand={surfaceCommand} />
 					{/snippet}
 				</SurfacingCard>
 			{:else}
 			<!-- The phone strip is a 44px tap target with its 4px bar centred; a summary row
 			     under it overlaps that empty area so it sits midway between bar and card edge. -->
 			<div class="md:mt-[7px] {summaryEnabled ? 'max-md:-mb-[18px]' : ''}">
-				<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered}
-					onhover={(index) => { hovered = index; detailsOpen = index !== null; }} onjump={jumpTo} />
+				<ActivityStrip {turn} {segment} {final} {now} {running} active={citedStep} oninteraction={stripChanged} onjump={stripJump} />
 			</div>
 			{#if summaryEnabled}{@render summaryPanel(surface, hoverCitation)}{/if}
 			{/if}

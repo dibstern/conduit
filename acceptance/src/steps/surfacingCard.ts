@@ -265,6 +265,67 @@ function trackReads(page: Page): void {
 
 export const surfacingCardHandlers: StepHandler[] = [
 	{
+		name: "keyboard picking clears the strip caption",
+		match: /^keyboard picking a message clears the strip caption$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await pick(page, "4");
+			const work = await panel(page)
+				.locator('[data-step-id="surfacing-agent/surfacing-tool-4"]')
+				.boundingBox();
+			if (!work) throw new Error("Missing work segment");
+			await panel(page).getByTestId("surfacing-scrub").focus();
+			await page.mouse.move(work.x + work.width / 2, work.y + work.height / 2);
+			await expect(page.getByRole("tooltip")).toContainText(
+				"route-surfacing-tool-4.ts",
+			);
+			await page.keyboard.press("Home");
+			await expect(card(page)).toHaveAttribute("data-ordinal", "1");
+			await expect(page.getByRole("tooltip")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert plain strip is centred in its tap target",
+		match: /^the plain activity strip stays centred in its tap target$/,
+		run: async ({ world }) => {
+			const slider = world.page.getByRole("slider", {
+				name: /Activity timeline/,
+			});
+			const target = await slider.boundingBox();
+			const bar = await slider.locator("[data-step-id]").first().boundingBox();
+			if (!target || !bar) throw new Error("Missing plain strip geometry");
+			expect(
+				Math.abs(bar.y + bar.height / 2 - target.y - target.height / 2),
+			).toBeLessThan(0.5);
+		},
+	},
+	{
+		name: "cancel a strip scrub without committing its preview",
+		match:
+			/^cancelling a strip scrub preserves the selected message and clears the caption$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await pick(page, "2");
+			const strip = panel(page).locator(".surface-strip");
+			const box = await strip.boundingBox();
+			if (!box) throw new Error("Missing activity strip");
+			const x = async (ordinal: string) =>
+				box.x +
+				(box.width * Number(await pin(page, ordinal).getAttribute("data-x"))) /
+					100;
+			await page.mouse.move(await x("2"), box.y + box.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(await x("8"), box.y + box.height / 2, { steps: 8 });
+			await expect(card(page)).toHaveAttribute("data-ordinal", "8");
+			await panel(page)
+				.getByTestId("surfacing-scrub")
+				.dispatchEvent("pointercancel", { pointerId: 1 });
+			await page.mouse.up();
+			await expect(card(page)).toHaveAttribute("data-ordinal", "2");
+			await expect(page.getByRole("tooltip")).toHaveCount(0);
+		},
+	},
+	{
 		name: "opt into surfacing before app startup",
 		match:
 			/^message surfacing is (active|inactive|missing-key|invalid-key) at (Answer|Key|Most|All messages)$/,

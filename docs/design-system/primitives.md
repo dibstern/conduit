@@ -10,6 +10,33 @@ The entries enumerate locally declared closed unions, booleans and required-prop
 
 ## Controls
 
+### ActivityTimeline
+
+[ActivityTimeline.svelte](../../src/lib/frontend/components/ui/ActivityTimeline.svelte)
+owns the Turn strip, pin chips, collapsed dots, thumb and caret positioning.
+`ActivityStrip` supplies labelled segments from `logSteps(turn)` and separate
+compaction seams. Chat code chooses messages and handles picks.
+
+`markers` is `{ kind: "dots"; dots }` or
+`{ kind: "pins"; pins; selected; thumbX }`. Only pins can render the thumb.
+The existing `surfacePinRows` helper lays out the pin groups inside the primitive.
+An optional `preview` snippet fills the collapsed peek; the primitive owns its
+clamp, caret and above/below placement. `openAsk`, `belowLevel` and `cited` supply
+message presentation state without another pointer owner.
+
+One `Gesture` union owns idle hover, a press and a drag, using part UUIDs.
+`oninteraction` exports derived `hovered` and `scrubbing` values so the owner
+can caption the Step, preview a scrubbed message and pause auto-read. Cancellation
+or unmount clears those values. Picks occur on pointerup; pin clicks with
+`detail === 0` provide keyboard activation. Activation clears hover.
+The primitive owns the slider ARIA and pin `aria-pressed` state. `oncommand`
+retains the existing Turn message shortcuts; the plain slider handles arrows,
+Home, End and Enter itself.
+
+The `Keyboard`, `TouchScrub`, `Pins` and `Collapsed` stories assert focus,
+slider values, release-only picking, keyboard picking and the collapsed peek.
+Visual baselines for this prefactor are deferred to conduit-test-xdyjq.9.
+
 ### Button
 
 [Button.svelte](../../src/lib/frontend/components/ui/Button.svelte) is the primitive action control; it renders a button or an anchor when `href` is set.

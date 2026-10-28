@@ -1086,5 +1086,17 @@
 		"movedTo": "src/lib/frontend/components/overlays/DebugSettingsTab.svelte",
 		"reason": "These class tokens moved intact to DebugSettingsTab.svelte; SettingsPanel renders that tab component without an extra element."
 	},
-	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock."
+	"src/lib/frontend/components/session/SessionListBulkBar.svelte :: pb-[calc(10px+env(safe-area-inset-bottom))]": "The select bar sits above the usage dock, which already clears the home indicator, so the inset here doubled the gap under the actions. The bar keeps a plain pb-2.5; Sidebar.svelte adds the inset back (.clears-home-indicator) when there is no dock.",
+	"src/lib/frontend/components/chat/MinimisedTurn.svelte :: minimised-scrub,minimised-turn,peek,peek-above,peek-dot,thin-track,unread-dot": {
+		"movedTo": "src/lib/frontend/components/ui/ActivityTimeline.svelte",
+		"requires": "{@render strip(preview)}",
+		"reason": "conduit-test-xdyjq.3 moves the unchanged collapsed strip, dots and peek positioning into ActivityTimeline; MinimisedTurn supplies only peek content."
+	},
+	"src/lib/frontend/components/chat/MinimisedTurn.svelte :: peekAbove": "conduit-test-xdyjq.3 removes this expression fragment with the local peek state; ActivityTimeline derives above/below placement from its hovered message.",
+	"src/lib/frontend/components/chat/SurfacingCard.svelte :: bottom-[27px],bottom-[3px],card-caret,group.row,h-[32px],mark-glyph,max-md:bottom-[43px],max-md:bottom-[5px],pin-chip,pin-lane,pin.part.surfacingMark.direction,raise,select-none,surface-strip,surface-thumb,surfacing-scrub,unread-dot": {
+		"movedTo": "src/lib/frontend/components/ui/ActivityTimeline.svelte",
+		"requires": "{@render strip(citedPart)}",
+		"reason": "conduit-test-xdyjq.3 moves the unchanged pin lane, chips, stems, caret, thumb and pointer handling into ActivityTimeline through the owner-supplied strip snippet."
+	},
+	"src/lib/frontend/components/ui/ActivityTimeline.svelte :: emphasis,has(index),highlighted,index,opacity-20": "conduit-test-xdyjq.3 uses stable step UUIDs for highlight identity. The unused emphasis dimming branch had no caller after conduit-test-xdyjq.1 removed skill emphasis; all segments retain their prior full opacity."
 }
