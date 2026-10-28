@@ -24,7 +24,7 @@
 	import { segmentAppearance } from "./activity-style.js";
 	import ActivityTimeline from "../ui/ActivityTimeline.svelte";
 
-	let { turn, segment, final, now, running, active = null, markers, openAsk, belowLevel, cited, preview, sliderText, oninteraction, onpick, onjump, oncommand, phone = false }: {
+	let { turn, segment, final, now, running, active = null, markers, cardSlot, card, openAsk, belowLevel, cited, preview, sliderText, oninteraction, onpick, onjump, oncommand, phone = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
@@ -32,6 +32,8 @@
 		running: ReadonlySet<string>;
 		active?: string | null;
 		markers?: ComponentProps<typeof ActivityTimeline>["markers"];
+		cardSlot?: ComponentProps<typeof ActivityTimeline>["cardSlot"];
+		card?: Snippet;
 		openAsk?: SurfacePart | null;
 		belowLevel?: boolean;
 		cited?: string | null;
@@ -67,4 +69,4 @@
 
 </script>
 
-<ActivityTimeline {segments} {seams} {active} {markers} {openAsk} {belowLevel} {cited} {preview} {sliderText} {oninteraction} {onpick} {onjump} {oncommand} {phone} />
+<ActivityTimeline {segments} {seams} {active} {markers} {cardSlot} {card} {openAsk} {belowLevel} {cited} {preview} {sliderText} {oninteraction} {onpick} {onjump} {oncommand} {phone} />

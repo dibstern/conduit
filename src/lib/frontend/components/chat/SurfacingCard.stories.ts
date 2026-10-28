@@ -137,8 +137,12 @@ export const Balanced: Story = {
 		const card = canvas
 			.getByTestId("surfacing-msg-card")
 			.getBoundingClientRect();
-		const lane = canvas.getByTestId("surfacing-pins").getBoundingClientRect();
-		await expect(card.bottom).toBeLessThanOrEqual(lane.top);
+		const strip = canvasElement
+			.querySelector(".surface-strip")
+			?.getBoundingClientRect();
+		if (!strip) throw new Error("Missing strip");
+		await expect(card.top).toBeGreaterThan(strip.bottom);
+		await expect(canvasElement.querySelector(".card-caret")).toBeVisible();
 		await expect(
 			canvas.queryByTestId("surfacing-pin-3"),
 		).not.toBeInTheDocument();

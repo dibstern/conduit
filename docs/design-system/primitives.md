@@ -20,8 +20,11 @@ compaction seams. Chat code chooses messages and handles picks.
 `markers` is `{ kind: "dots"; dots }` or
 `{ kind: "pins"; pins; selected; thumbX }`. Only pins can render the thumb.
 The existing `surfacePinRows` helper lays out the pin groups inside the primitive.
-An optional `preview` snippet fills the collapsed peek; the primitive owns its
-clamp, caret and above/below placement. `openAsk`, `belowLevel` and `cited` supply
+`cardSlot` is `none | selected { card } | preview { card }`, chosen by the
+Turn owner. The `card` snippet fills the selected hanging slot under the strip;
+the primitive aligns its caret and thumb at one clamped pin position. The
+`preview` snippet fills the collapsed peek, with its clamp, caret and above/below
+placement also owned here. `openAsk`, `belowLevel` and `cited` supply
 message presentation state without another pointer owner.
 
 One `Gesture` union owns idle hover, a press and a drag, using part UUIDs.

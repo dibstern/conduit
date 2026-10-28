@@ -10,6 +10,7 @@
 		| { kind: "dots"; dots: readonly SurfacePin[] }
 		| { kind: "pins"; pins: SurfacePin[]; selected: string | null; thumbX: number | null };
 	export type StripInteraction = { hovered: string | null; scrubbing: boolean };
+	export type CardSlot = { kind: "none" } | { kind: "selected"; card: SurfacePin } | { kind: "preview"; card: SurfacePin };
 	const TONES = {
 		explore: "bg-act-explore", edit: "bg-seg-edit", shell: "bg-act-shell",
 		fetch: "bg-act-fetch", task: "bg-act-task", other: "bg-act-other",
@@ -24,11 +25,13 @@
 	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 	import Button from "./Button.svelte";
 
-	let { segments, seams = [], active = null, markers = { kind: "dots", dots: [] }, openAsk = null, belowLevel = false, cited = null, phone = false, preview, sliderText, oninteraction, onpick, onjump, oncommand }: {
+	let { segments, seams = [], active = null, markers = { kind: "dots", dots: [] }, cardSlot = { kind: "none" }, card, openAsk = null, belowLevel = false, cited = null, phone = false, preview, sliderText, oninteraction, onpick, onjump, oncommand }: {
 		segments: readonly { id: string; left: number; width: number; label: string; tone: keyof typeof TONES; running?: boolean }[];
 		seams?: readonly { id: string; left: number; width: number }[];
 		active?: string | null;
 		markers?: Markers | undefined;
+		cardSlot?: CardSlot | undefined;
+		card?: Snippet | undefined;
 		openAsk?: SurfacePart | null | undefined;
 		belowLevel?: boolean | undefined;
 		cited?: string | null | undefined;
@@ -53,7 +56,8 @@
 	const currentGroup = $derived(groups.find((group) => group.members.some((pin) => markers.kind === "pins" && pin.part.uuid === markers.selected)));
 	const selected = $derived(Math.max(0, segments.findIndex((segment) => segment.id === cursor)));
 	const highlighted = $derived(active ?? hovered);
-	const messagePreview = $derived(markers.kind === "dots" ? markers.dots.find((pin) => pin.part.uuid === hovered) ?? null : null);
+	const messagePreview = $derived(cardSlot.kind === "preview" ? cardSlot.card : null);
+	const anchor = $derived(cardSlot.kind === "none" ? null : `clamp(14px, ${currentGroup?.x ?? cardSlot.card.x}%, calc(100% - 14px))`);
 	const previewPosition = $derived.by(() => {
 		if (!messagePreview || !trackEl) return { left: 0, caret: 0, above: false };
 		const box = trackEl.getBoundingClientRect();
@@ -161,7 +165,6 @@
 				<span class="pin-chip" class:builtin={!!pin.builtinCategory} class:upper={group.row === 1} class:current class:cited={isCited} class:open-ask={openAsk?.uuid === pin.part.uuid} class:pending={pin.pending} class:below={belowLevel && markers.kind === "pins" && markers.selected === pin.part.uuid} class:seen={seen} style:--surface-colour={pin.colour} data-number={pin.number} data-category={pin.category}><span class="glyph">{pin.glyph}</span>{pin.number ?? ""}{#if pin.part.surfacingMark}<sup class="mark-glyph {pin.part.surfacingMark.direction ?? 'raise'}">{MARK_GLYPHS[pin.part.surfacingMark.direction ?? "raise"]}</sup>{/if}{#if group.members.length > 1}<small>+{group.members.length - 1}</small>{/if}{#if unread}<i class="unread-dot"></i>{/if}</span>
 			</Button>
 		{/each}
-			{#if markers.selected}<i class="card-caret" style:left="clamp(14px, {currentGroup?.x ?? markers.thumbX ?? 0}%, calc(100% - 14px))"></i>{/if}
 		</div>
 		{/if}
 		<div class={collapsed ? "thin-track surface-strip" : markers.kind === "pins" ? "surface-strip relative h-[16px] min-w-[44px]" : "surface-strip absolute inset-0"} data-testid={collapsed ? "surfacing-thin-track" : undefined} role={markers.kind === "pins" ? "img" : undefined} aria-label={markers.kind === "pins" ? `Activity timeline — ${segments.length} steps` : undefined} bind:this={stripEl}>
@@ -169,7 +172,7 @@
 			{#each [...segments, ...seams.map((seam) => ({ ...seam, label: "Compaction", tone: "compaction" as const, running: false }))] as segment (segment.id)}
 				<span data-step-id={segment.id} aria-hidden="true" class="absolute top-1/2 h-[4px] -translate-y-1/2 rounded-[1px] transition-opacity {TONES[segment.tone]} {segment.running ? 'animate-pulse' : ''} opacity-100" data-active={highlighted === segment.id} style="left:{segment.left}%;width:{segment.width}%;"></span>
 			{/each}
-			{#if markers.kind === "pins" && markers.thumbX !== null}<i class="surface-thumb" style:left="{currentGroup?.x ?? markers.thumbX}%"></i>{/if}
+			{#if markers.kind === "pins" && anchor}<i class="surface-thumb" style:left={anchor}></i>{/if}
 		</div>
 		{#if markers.kind === "dots"}
 			{#each markers.dots.filter((pin) => pin.read === false || pin.part.uuid === openAsk?.uuid) as pin (pin.part.uuid)}
@@ -178,6 +181,12 @@
 			{#if messagePreview}<span class="unread-dot peek-dot" class:ask={messagePreview.part.uuid === openAsk?.uuid} style:left="{messagePreview.x}%" aria-hidden="true"></span>{/if}
 		{/if}
 	</div>
+	{#if cardSlot.kind === "selected" && card}
+		<div class="hanging-card" class:ask={cardSlot.card.category === "ask" && !cardSlot.card.pending}>
+			<i class="card-caret" style:left={anchor}></i>
+			{@render card()}
+		</div>
+	{/if}
 	{#if messagePreview && preview}
 		<Button variant="ghost" size="content" tone="inherit" hoverFill="none" class="peek {previewPosition.above ? 'peek-above' : ''}" style="left:{previewPosition.left}px;--caret:{previewPosition.caret}px" data-testid="surfacing-minimised-peek" data-ordinal={messagePreview.number}
 			onpointerup={() => { const pin = messagePreview; clear(); if (pin) onpick?.(pin); }} onclick={(event) => { if (event.detail === 0) { const pin = messagePreview; clear(); if (pin) onpick?.(pin); } }}>
@@ -214,7 +223,9 @@
 	.below .glyph { color:var(--color-text-dimmer); }
 	.below.builtin .glyph { color:var(--surface-colour); }
 	.unread-dot { position:absolute; top:-2px; right:-2px; width:7px; height:7px; border-radius:50%; background:var(--color-accent); box-shadow:0 0 0 1.5px var(--color-turn-bg); }
-	.card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--color-bg); transform:translateX(-50%) rotate(45deg); }
+	.hanging-card { position:relative; margin-top:10px; --card-background:var(--color-bg); }
+	.hanging-card.ask { --card-background:color-mix(in srgb,var(--color-status-ask) 14%,var(--color-turn-bg)); }
+	.card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--card-background); border-top:1px solid var(--color-border); border-left:1px solid var(--color-border); transform:translateX(-50%) rotate(45deg); }
 	.surface-thumb { position:absolute; top:50%; width:3px; height:14px; border-radius:2px; background:var(--color-text); transform:translate(-50%,-50%); pointer-events:none; }
 	@keyframes ask-pulse { 50% { opacity:.45; } }
 	@media(prefers-reduced-motion:reduce) { .open-ask::before { animation:none; } }

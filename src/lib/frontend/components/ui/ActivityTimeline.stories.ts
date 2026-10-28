@@ -121,6 +121,13 @@ const messages = surfaceTurn({
 
 export const Pins: Story = {
 	args: {
+		cardSlot: messages.card
+			? { kind: "selected", card: messages.card }
+			: { kind: "none" },
+		card: createRawSnippet(() => ({
+			render: () =>
+				'<div class="border border-border rounded-xl bg-bg p-3">Selected message</div>',
+		})),
 		markers: {
 			kind: "pins",
 			pins: messages.pins,
@@ -153,6 +160,9 @@ export const Pins: Story = {
 
 export const Collapsed: Story = {
 	args: {
+		cardSlot: messages.card
+			? { kind: "preview", card: messages.card }
+			: { kind: "none" },
 		markers: { kind: "dots", dots: messages.messages },
 		preview: createRawSnippet<[SurfacePin]>((pin) => ({
 			render: () =>
@@ -171,8 +181,5 @@ export const Collapsed: Story = {
 		);
 		await userEvent.keyboard("{Enter}");
 		await expect(args["onpick"]).toHaveBeenLastCalledWith(messages.messages[0]);
-		await expect(
-			canvas.queryByTestId("surfacing-minimised-peek"),
-		).not.toBeInTheDocument();
 	},
 };

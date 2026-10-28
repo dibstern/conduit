@@ -50,12 +50,12 @@ Examples:
   | desktop  | invalid-key |
   | phone    | invalid-key |
 
-Scenario Outline: The Jev card sits above numbered pins on the strip's own scale
+Scenario Outline: The Jev card hangs below pins on the strip's own scale
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a live turn
-  Then the full-width message card sits above pins aligned with their own steps
+  Then the full-width message card hangs below pins aligned with their own steps
   And the surfaced card shows #8 and announces its category and position
   And the open Ask head chip shows #2
   And the surfacing pins are 1,2,4,5,8 and level counts are Key 3, Most 5, All messages 6
@@ -65,6 +65,25 @@ Examples:
   | viewport | baseline                | threshold |
   | desktop  | surfacing-live-desktop  | 98        |
   | phone    | surfacing-live-phone    | 98        |
+
+Scenario Outline: The hanging card and thumb point to the selected pin inside the panel
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I pick surfaced message #1
+  Then the hanging caret and thumb align with the selected pin inside the panel
+  When I pick surfaced message #8
+  Then the hanging caret and thumb align with the selected pin inside the panel
+  When I pick surfaced message #2
+  Then the hanging caret and thumb align with the selected pin inside the panel
+  And the hanging card and caret share the border outline and Ask tint
+  And the messages region visually matches turn-hanging-card-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
 
 Scenario Outline: A tap under four pixels and a drag on either lane keep the selected message
   Given message surfacing is active at Most
