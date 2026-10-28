@@ -3,6 +3,7 @@ import { expect, userEvent, waitFor, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import type { TurnRecap } from "../../../contracts/turn-recap.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import type { Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
@@ -106,8 +107,7 @@ const summaryLog: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 	await expect(
 		canvas.getByRole("slider", { name: /Activity timeline/ }),
 	).toBeVisible();
-	if (window.matchMedia("(max-width: 599px)").matches)
-		await userEvent.click(trigger);
+	if (sessionViewState.compact) await userEvent.click(trigger);
 	else
 		await waitFor(() =>
 			expect(trigger).toHaveAttribute("aria-expanded", "true"),

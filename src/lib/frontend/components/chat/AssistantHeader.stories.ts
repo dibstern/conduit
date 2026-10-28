@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { mockAssistantSimple } from "../../stories/mocks.js";
 import AssistantHeader from "./AssistantHeader.svelte";
 
@@ -50,7 +51,7 @@ export const Default: Story = {
 			Math.abs(mark.top + mark.height / 2 - text.top - text.height / 2),
 		).toBeLessThan(0.5);
 		await expect(tile.querySelector("svg")?.getBoundingClientRect().width).toBe(
-			window.innerWidth < 768 ? 12 : 14,
+			sessionViewState.compact ? 12 : 14,
 		);
 		for (const mono of canvasElement.querySelectorAll(".font-mono")) {
 			await expect(

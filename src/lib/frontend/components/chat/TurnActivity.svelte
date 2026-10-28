@@ -7,7 +7,6 @@
 	import type { SessionResume } from "../../../contracts/limit-recovery.js";
 	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
 	import SurfacingAskContext from "./SurfacingAskContext.svelte";
-	import { MediaQuery } from "svelte/reactivity";
 	import type { CategorySet } from "../../../contracts/category-set.js";
 	import type { MessageSurfacingStatus, MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
 	import { numberTurnMessages } from "../../../turn-message-numbers.js";
@@ -16,6 +15,7 @@
 	import { messageSurfacing, sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
 	import { createTurnPanel, type TurnPanelState } from "../../stores/turn-panel.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { surfaceTurn, surfaceTime, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
 	import SurfacingCard, { type SurfacingRegions } from "./SurfacingCard.svelte";
@@ -142,13 +142,6 @@
 	/** The Ask a citation left, offered back on the cited message's card. */
 	let askReturn = $state<{ ask: SurfacePin; cited: string } | null>(null);
 	const askIdentity = $derived(`${sessionId}/${turn.id}`);
-	$effect(() => {
-		void askIdentity;
-		askExplanations = {};
-		generatingAsk = null;
-		askError = null;
-		askReturn = null;
-	});
 	function setupFor(pin: SurfacePin): SurfacePart | null {
 		const parts = [...segment.activity, ...segment.reply];
 		const index = parts.findIndex((part) => part.uuid === pin.part.uuid);
@@ -170,9 +163,8 @@
 	}
 	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
 	const storeTurnId = $derived(turn.storeId ?? turn.user?.messageId);
-	// jsdom has no matchMedia; real browsers always do.
-	const phone = typeof matchMedia === "function" ? new MediaQuery("(max-width: 599px)") : { current: false };
-	let summaryOpen = $state<boolean | null>(null);
+	const phone = $derived(sessionViewState.compact);
+	let summaryOpen = $state<{ storeId: string; open: boolean } | null>(null);
 	let summarySettingsError = $state("");
 	let summarySaving = $state(false);
 	let citedOrdinal = $state<number | null>(null);
@@ -188,11 +180,6 @@
 		// A turn can settle while its asynchronous automatic recap is still running.
 		if (active && session && id) return untrack(() => recap.connect(session, id, watch));
 		return;
-	});
-	$effect(() => {
-		void storeTurnId;
-		void sessionId;
-		summaryOpen = null;
 	});
 	let picked = $state<string | null>(null);
 	let folded = $state<boolean | null>(null);
@@ -215,7 +202,7 @@
 	}));
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	const minimised = $derived(surfacingActive && panel.view.kind === "collapsed");
-	const summaryVisible = $derived(!minimised && summaryEnabled && (summaryOpen ?? (!phone.current && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
+	const summaryVisible = $derived(!minimised && summaryEnabled && (summaryOpen && summaryOpen.storeId === storeTurnId ? summaryOpen.open : (!phone && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
 	$effect(() => {
 		if (minimised) { hovered = null; detailsOpen = false; }
 	});
@@ -266,16 +253,20 @@
 		folded = false;
 	}
 	function toggleSummary() {
+		if (!storeTurnId) return;
 		const visible = summaryVisible;
 		if (minimised) panel.open();
-		summaryOpen = !visible;
+		summaryOpen = { storeId: storeTurnId, open: !visible };
+	}
+	function closeSummary() {
+		if (storeTurnId) summaryOpen = { storeId: storeTurnId, open: false };
 	}
 	function retrySummary() {
 		generateSummary(recap.retry?.scope ?? (recap.versions.length && summaryNew > 0 ? "new" : "whole"), recap.retry?.sourceVersion);
 	}
 	function generateSummary(scope: "whole" | "new", sourceVersion?: number) {
 		if (!sessionId || !storeTurnId || !summaryEnabled) return;
-		summaryOpen = true;
+		summaryOpen = { storeId: storeTurnId, open: true };
 		void recap.generate(sessionId, storeTurnId, scope, sourceVersion);
 	}
 	async function updateSummarySettings(patch: Partial<MessageSurfacingPreferences["recap"]>) {
@@ -340,7 +331,7 @@
 			digits = "";
 			event.stopPropagation();
 			// Native dialog cancel owns the phone sheet's dismissal.
-			if (!phone.current) { event.preventDefault(); summaryOpen = false; }
+			if (!phone) { event.preventDefault(); closeSummary(); }
 			return;
 		}
 		if (!surfacingActive) {
@@ -495,14 +486,14 @@
 
 <!-- Phones open the summary from its own row under the strip; wider screens use the head chip. -->
 {#snippet summaryPanel(view: ReturnType<typeof surfaceTurn>, onhover: (ordinal: number | null) => void)}
-	<Button variant="ghost" size="content" align="start" tone="default" touchTarget class="min-[600px]:hidden w-full mt-[10px] mb-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
+	<Button variant="ghost" size="content" align="start" tone="default" touchTarget class="md:hidden w-full mt-[10px] mb-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
 		<span class="mr-auto">{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="text-text-dimmer" />
 	</Button>
-	<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} phone={phone.current} {live} {view}
+	<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} {phone} {live} {view}
 		plainCitations={!surfacingActive}
 		start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings} {level}
 		generating={recap.generating} error={recap.error} settingsError={summarySettingsError} saving={summarySaving}
-		onclose={() => summaryOpen = false} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
+		onclose={closeSummary} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
 		onsettings={updateSummarySettings} oncite={citeSummary} {replies}
 		onreply={(ordinal, excerpt) => { const cited = view.numbers.find(({ number }) => number === ordinal); if (cited) replyTo(cited, excerpt); }}
 		onquote={(excerpt) => { if (sessionId) insertComposerReference({ kind: "recap-excerpt", text: excerpt }, sessionId); }} {onhover} foot={surfacingActive ? summaryMarkRead : undefined} />
@@ -521,7 +512,7 @@
 			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
 				<Tooltip bind:open={detailsOpen}>
 					{#snippet trigger({ props })}
-						{@const headPhrase = phone.current && (surfacingActive || minimised) ? plural(stats.skills, "skill") : phrase}
+						{@const headPhrase = phone && (surfacingActive || minimised) ? plural(stats.skills, "skill") : phrase}
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
 							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={fullLog}
 							onclick={toggleLog}>
@@ -551,7 +542,7 @@
 						{#if surfacingActive && surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
 						{#if surfacingActive && surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
 						{#if surfacingActive}{@render surfacingRegions.headChips?.(surface)}{/if}
-						{#if summaryEnabled}<Button variant="ghost" size="content" tone="default" hoverFill="none" touchTarget class="{minimised ? '' : 'max-[599px]:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[13px] leading-[normal] font-medium bg-chip" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised}<span class="max-[599px]:sr-only">{summaryLabel}</span><span class="min-[600px]:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised ? 'max-[599px]:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
+						{#if summaryEnabled}<Button variant="ghost" size="content" tone="default" hoverFill="none" touchTarget class="{minimised ? '' : 'max-md:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[13px] leading-[normal] font-medium bg-chip" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised}<span class="max-md:sr-only">{summaryLabel}</span><span class="md:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised ? 'max-md:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
 					</div>
 				{/if}
 					{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summary</Button></span>{/if}
@@ -578,7 +569,7 @@
 			{:else}
 			<!-- The phone strip is a 44px tap target with its 4px bar centred; a summary row
 			     under it overlaps that empty area so it sits midway between bar and card edge. -->
-			<div class="md:mt-[7px] {summaryEnabled ? 'max-[599px]:-mb-[18px]' : ''}">
+			<div class="md:mt-[7px] {summaryEnabled ? 'max-md:-mb-[18px]' : ''}">
 				<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered}
 					onhover={(index) => { hovered = index; detailsOpen = index !== null; }} onjump={jumpTo} />
 			</div>

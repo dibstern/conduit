@@ -43,7 +43,7 @@ function summaryTrigger(page: Page): Locator {
 }
 
 function isPhone(page: Page): boolean {
-	return (page.viewportSize()?.width ?? 1440) < 600;
+	return (page.viewportSize()?.width ?? 1440) < 768;
 }
 
 async function openSummary(page: Page): Promise<void> {
