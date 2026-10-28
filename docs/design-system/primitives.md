@@ -213,12 +213,12 @@ Shared `variant` recipes for SegmentedControl and Tabs, from [segmented-styles.t
 | | item | `flex-1 px-3 py-1.5 text-xs rounded border transition-colors cursor-pointer` |
 | | selected | `border-brand-a text-text bg-brand-a/10` |
 | | unselected | `border-border text-text-muted hover:text-text` |
-| `footer` | list | `flex items-stretch bg-turn-bg` |
-| | item | `relative inline-flex min-h-[36px] items-center gap-[4px] border-t-2 px-[9px] font-sans text-[12px] font-medium cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50` |
+| `footer` | list | `flex items-stretch overflow-x-auto bg-turn-bg` |
+| | item | `relative inline-flex min-h-[36px] shrink-0 whitespace-nowrap items-center gap-[4px] border-t-2 px-[9px] font-sans text-[12px] font-medium cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50` |
 | | selected | `border-accent text-text` |
 | | unselected | `border-transparent text-text-secondary hover:text-text` |
 
-The `footer` recipe is the Turn panel's Show bar tabs. It replaces the former `level` variant, the SurfacingCard level control on the strip axis, which the Show bar removed.
+The `footer` recipe is the Turn panel's Show bar tabs. It replaces the former `level` variant, the SurfacingCard level control on the strip axis, which the Show bar removed. Footer tabs never wrap their labels; in a card too narrow for the row, the list scrolls sideways. bits' `Tabs.Root` takes no class, so the caller wraps it in a `min-w-0` box for the list to shrink.
 
 ## Fields
 

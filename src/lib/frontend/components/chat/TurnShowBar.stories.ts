@@ -192,3 +192,23 @@ export const KeyboardSelection: Story = {
 		await expect(trigger).toHaveFocus();
 	},
 };
+
+/** A narrow card on a wide screen (768px with the sidebar open) keeps tabs, so they scroll. */
+export const NarrowCardTabs: Story = {
+	beforeEach: () => {
+		sessionViewState.compact = false;
+	},
+	play: async ({ canvasElement }) => {
+		canvasElement.style.width = "315px";
+		const canvas = within(canvasElement);
+		const bar = canvas.getByTestId("turn-show-bar");
+		const tabs = canvas.getAllByRole("tab");
+		const usage = canvas.getByRole("tab", { name: "Usage" });
+		await waitFor(() => {
+			for (const tab of tabs) {
+				expect(tab.offsetHeight).toBe(usage.offsetHeight);
+			}
+		});
+		await expect(bar.scrollWidth).toBeLessThanOrEqual(bar.clientWidth);
+	},
+};

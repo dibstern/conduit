@@ -94,9 +94,12 @@
 			{/if}
 		</Menu>
 	{/if}
-	<Tabs variant="footer" value={active} {options} label="Show" data-testid={layout === "tabs" && panel.stops.length > 1 ? "surfacing-level" : undefined} onValueChange={(stop) => { if (stop === "usage") panel.usage(); else if (stop === "qa") panel.qa(); else show(stop); }}>
-		{#snippet optionContent(option)}{#if option.value === "usage"}Usage{:else if option.value === "qa"}Q&A{:else}{@render stopContent(option.value, option.label)}{/if}{/snippet}
-	</Tabs>
+	<!-- bits' Tabs.Root takes no class; this lets the tab row shrink and scroll in a narrow card. -->
+	<div class="min-w-0 max-w-full">
+		<Tabs variant="footer" value={active} {options} label="Show" data-testid={layout === "tabs" && panel.stops.length > 1 ? "surfacing-level" : undefined} onValueChange={(stop) => { if (stop === "usage") panel.usage(); else if (stop === "qa") panel.qa(); else show(stop); }}>
+			{#snippet optionContent(option)}{#if option.value === "usage"}Usage{:else if option.value === "qa"}Q&A{:else}{@render stopContent(option.value, option.label)}{/if}{/snippet}
+		</Tabs>
+	</div>
 	{#if layout === "tabs" && panel.stops.length > 1}{@render defaults()}{/if}
 	<RunningPill count={running} />
 	<span class="turn-meta ml-auto inline-flex items-center gap-[10px] whitespace-nowrap py-[6px] font-mono text-[11.5px] text-text-secondary">
