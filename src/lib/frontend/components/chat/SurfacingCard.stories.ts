@@ -7,7 +7,7 @@ import {
 	DEFAULT_CATEGORY_SET,
 } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
-import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { AssistantMessage } from "../../types.js";
 import type { SurfaceTurn } from "../../utils/surface-turn.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
@@ -119,9 +119,12 @@ const meta = {
 		sessionId: "jev-story-session",
 		surfacing: config,
 	},
-	beforeEach: () => {
-		setSessionSurfaceLevel("jev-story-session", null);
-	},
+	beforeEach: ({ args }) =>
+		setupTurnStory({
+			turn: args["turn"],
+			sessionId: args["sessionId"],
+			surfacing: args["surfacing"],
+		}),
 } satisfies Meta<typeof TurnActivity>;
 export default meta;
 type Story = StoryObj<typeof meta>;

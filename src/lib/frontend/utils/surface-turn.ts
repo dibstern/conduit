@@ -235,9 +235,7 @@ export function surfaceTurn(input: {
 			: "No message selected",
 		cardNote:
 			belowLevel && target
-				? target.level === "hidden"
-					? "Hidden at this level · in the step log"
-					: `At ${STOPS[stopForLevel(target.level)].short}, below ${STOPS[level].short} · opened directly`
+				? `At ${STOPS[stopForLevel(target.level)].short}, below ${STOPS[level].short} · opened directly`
 				: "",
 		openAsk: openAsk(
 			input.turnParts ?? input.parts,

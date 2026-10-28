@@ -4,6 +4,7 @@ import { detailRowsOf } from "../../../test/helpers/detail-rows.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
+	mockSessionSkills,
 	openSessionRoute,
 	requireRpcControl,
 	setSessionRowStatus,
@@ -24,6 +25,108 @@ function publish(page: Page, messages: History[]) {
 }
 
 export const turnPanelHandlers: StepHandler[] = [
+	{
+		name: "seed an anchor-only reveal link",
+		match:
+			/^the skills chip links to the (user message|reply|earlier hand-back message)$/,
+		run: ({ world, match }) => {
+			const anchor =
+				match[1] === "user message"
+					? { messageId: "surfacing-user" }
+					: match[1] === "reply"
+						? { messageId: "surfacing-agent", partId: "surfacing-final" }
+						: { messageId: "turn-log-agent", partId: "earlier" };
+			mockSessionSkills.set(world.page, [
+				{
+					name: "reveal-link",
+					invokedBy: "agent",
+					turnOrdinal: 1,
+					at: PINNED_CLOCK_MS,
+					anchor,
+					running: false,
+				},
+			]);
+		},
+	},
+	{
+		name: "seed a Turn with a reply and no activity",
+		match: /^the reveal session has a reply-only turn$/,
+		run: async ({ world }) => {
+			publish(
+				world.page,
+				surfacingHistory("settled").map((message) =>
+					message.role === "assistant"
+						? {
+								...message,
+								parts: message.parts?.filter(
+									(part) => part.id === "surfacing-final",
+								),
+							}
+						: message,
+				),
+			);
+			setSessionRowStatus(world.page, SESSION, "idle", {
+				title: "Reply-only reveal",
+				accountId: "claude",
+			});
+			await openSessionRoute(world.page, SESSION);
+		},
+	},
+	{
+		name: "assert a reveal outside the Turn panel",
+		match:
+			/^the revealed (user message|reply) is in view without opening a turn log$/,
+		run: async ({ world, match }) => {
+			const uuid =
+				match[1] === "reply"
+					? "surfacing-agent/surfacing-final"
+					: "surfacing-user/user";
+			await expect(
+				world.page.locator(`#messages [data-uuid="${uuid}"]`),
+			).toBeInViewport();
+			await expect(
+				world.page.locator("#messages .step-log:visible"),
+			).toHaveCount(0);
+			await world.page.evaluate(
+				() =>
+					new Promise<void>((resolve) => {
+						requestAnimationFrame(() =>
+							requestAnimationFrame(() =>
+								requestAnimationFrame(() =>
+									requestAnimationFrame(() => resolve()),
+								),
+							),
+						);
+					}),
+			);
+			await expect(
+				world.page.getByText("That skill run is no longer in this session", {
+					exact: true,
+				}),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert never-judged message landing",
+		match: /^turn message #(\d+) is focused in the Full log$/,
+		run: async ({ world, match }) => {
+			const row = panel(world.page).locator(
+				`[data-log-part="surfacing-agent/surfacing-part-${match[1]}"]`,
+			);
+			await expect(row).toBeVisible();
+			await expect(row).toBeFocused();
+			await expect(row).toBeInViewport();
+		},
+	},
+	{
+		name: "open a message through the turn number shortcut",
+		match: /^I open turn message #(\d+) with digits and Enter$/,
+		run: async ({ world, match }) => {
+			await panel(world.page).getByTestId("surfacing-card").focus();
+			await world.page.keyboard.type(match[1] ?? "");
+			await world.page.keyboard.press("Enter");
+		},
+	},
 	{
 		name: "set a turn panel viewport width",
 		match: /^the viewport is (\d+) pixels wide$/,

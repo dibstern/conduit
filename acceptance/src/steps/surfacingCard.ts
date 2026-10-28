@@ -1355,7 +1355,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 			await expect(
 				panel(page)
 					.getByTestId("surfacing-level")
-					.getByRole("radio", { name: /^All\b/ }),
+					.getByRole("radio", { name: /^Most\b/ }),
 			).toHaveAttribute("aria-checked", "true");
 			// `s` toggles the turn summary (a modal sheet on phone), so it closes again before the card keys.
 			// `h` unmounts the card; surfacing-minimise covers its focus and toggle behavior.

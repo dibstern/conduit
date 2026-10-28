@@ -28,8 +28,12 @@
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
+	import { landTurnTarget, type PendingReveal } from "../../stores/turn-panel.svelte.js";
 
-	let { view, counts, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onread, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), markReadInAxis = false, onreply, replied = false }: {
+	let { view, counts, live, level, overridden, endTime, startTime, regions = {}, strip, onpick, onlevel, ondefault, onreset, onfold, onfollow, oncommand, onread, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), markReadInAxis = false, onreply, replied = false, pending = null, onland = () => {}, scrubbing = false }: {
+		scrubbing?: boolean;
+		pending?: PendingReveal | null;
+		onland?: (seq: number) => void;
 		view: SurfaceTurn;
 		counts: StopCounts;
 		live: boolean;
@@ -81,7 +85,7 @@
 {#if view.card}
 	{@const card = view.card}
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<section bind:this={cardEl} class="surfacing-msg-card" class:ask={card.category === "ask" && !card.pending} style:--surface-colour={card.colour} style:--category-tint={card.builtinCategory ? "14%" : undefined} data-testid="surfacing-msg-card" data-part={card.part.uuid} data-ordinal={card.number} aria-label={card.name} tabindex="-1" onkeydown={oncommand}>
+	<section bind:this={cardEl} use:landTurnTarget={{ pending, target: { kind: "message", uuid: card.part.uuid }, ack: onland, navigation: scrubbing ? "in-place" : "scroll" }} class="surfacing-msg-card" class:ask={card.category === "ask" && !card.pending} style:--surface-colour={card.colour} style:--category-tint={card.builtinCategory ? "14%" : undefined} data-testid="surfacing-msg-card" data-part={card.part.uuid} data-ordinal={card.number} aria-label={card.name} tabindex="-1" onkeydown={oncommand}>
 		<div class="card-head" data-surfacing-region="card-head">
 			<span class="type-label"><span class="glyph">{card.glyph}</span> {card.label}</span>
 			{#if view.openAsk?.uuid === card.part.uuid}<span class="needs-reply">Needs reply</span>{/if}

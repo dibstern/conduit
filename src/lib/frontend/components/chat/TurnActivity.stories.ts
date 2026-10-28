@@ -4,6 +4,7 @@ import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import { Utf8Bytes } from "../../../contracts/tool-wire.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { ChatMessage, ToolMessage } from "../../types.js";
 import {
 	type ActivityPart,
@@ -37,7 +38,13 @@ const meta = {
 	title: "Chat/Turn Activity",
 	component: TurnActivity,
 	parameters: { layout: "padded" },
-	args: { providerId: "claude" },
+	args: { providerId: "claude", sessionId: "turn-activity-story" },
+	beforeEach: ({ args }) =>
+		setupTurnStory({
+			turn: args["turn"],
+			sessionId: args["sessionId"],
+			surfacing: args["surfacing"],
+		}),
 } satisfies Meta<typeof TurnActivity>;
 
 export default meta;
