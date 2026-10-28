@@ -327,6 +327,10 @@ export const turnActivityHandlers: StepHandler[] = [
 				"data-ordinal",
 				"2",
 			);
+			// Activating a pin reveals and focuses its card. Return to the strip
+			// before exercising navigation among the remaining pins.
+			await expect(page.getByTestId("surfacing-msg-card")).toBeFocused();
+			await second.focus();
 			await page.keyboard.press("End");
 			await expect(page.getByTestId("surfacing-pin-8")).toBeFocused();
 			await page.keyboard.press("Home");
@@ -351,11 +355,11 @@ export const turnActivityHandlers: StepHandler[] = [
 			await expect(steps.nth(1)).toBeFocused();
 			await page.keyboard.press("Enter");
 			await expect(panel(page).locator(".step-log")).toBeVisible();
-			await expect(
-				panel(page)
-					.locator('[data-log-part="surfacing-agent/surfacing-tool-1"] button')
-					.first(),
-			).toHaveClass(/bg-selection/);
+			const row = panel(page).locator(
+				'[data-log-part="surfacing-agent/surfacing-tool-1"]',
+			);
+			await expect(row).toBeFocused();
+			await expect(row).toBeInViewport();
 		},
 	},
 	{

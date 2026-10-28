@@ -1,5 +1,46 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Usage collects the turn's bill and notable events
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the Usage turn is <phase> with reported economics and notable events
+  When I select the turn Usage tab
+  Then Usage replaces the card and log without selecting a Show stop
+  And Usage lists the reported cost, tokens, context, skills and notable events
+  And the Usage footer has a divider and <cost> with <gauge> context gauge
+  And the messages region visually matches turn-usage-<phase>-<jev>-<viewport> at 98 percent
+
+Examples:
+  | jev      | viewport | phase   | cost    | gauge |
+  | active   | desktop  | settled | $0.4123 | a     |
+  | active   | phone    | settled | $0.41   | no    |
+  | inactive | desktop  | settled | $0.4123 | a     |
+  | inactive | phone    | settled | $0.41   | no    |
+  | active   | desktop  | live    | $0.41   | no    |
+  | active   | phone    | live    | $0.41   | no    |
+  | inactive | desktop  | live    | $0.41   | no    |
+  | inactive | phone    | live    | $0.41   | no    |
+
+Scenario Outline: Usage keeps the strip's collapsed markers and the footer's shared controls
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the Usage turn is settled with reported economics and notable events
+  When I select the turn Usage tab
+  Then Usage shows centred category dots instead of pins
+  And the Usage footer has a divider and <cost> with <gauge> context gauge
+  And the Usage panel uses a 6px gauge and a coloured sparkles skill pill
+  And Usage and the Show stops share keyboard navigation
+  And selecting a Usage strip step opens its Full log row
+  And the head tooltip and Full log leave the bill in the footer
+  And the messages region visually matches turn-usage-controls-<viewport> at 98 percent
+
+Examples:
+  | viewport | cost    | gauge |
+  | desktop  | $0.4123 | a     |
+  | phone    | $0.41   | no    |
+
 Scenario: A selected pin below the saved stop keeps its category tint
   Given a surfacing marks ledger is available in the dark theme
   And message surfacing is active at Most
@@ -183,7 +224,7 @@ Scenario: The desktop Show bar controls message stops and Full log
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the surfacing session has a settled turn
-  Then the Show bar has flat accessible tabs with Answer, Key 3, Most 5, All messages 6 and Full log 16
+  Then the Show bar has flat accessible tabs with Answer, Key 3, Most 5, All messages 6, Full log 16 and Usage
   When I navigate the Show tabs with arrow keys
   Then the Show bar selects Full log without changing the saved Most stop
   And the Full log pins are 1,2,3,4,5,8

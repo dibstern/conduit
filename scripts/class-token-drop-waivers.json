@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/components/chat/TurnActivity.svelte :: compaction-marker,flex-wrap,gap-[10px],py-[8px]": "conduit-test-xdyjq.5 removes the old log footer. Its compaction marker and row spacing disappear with it; the bill and running tasks move to TurnShowBar, and notable events have their own timed rows in TurnUsage.",
 	"src/lib/frontend/components/chat/TurnEconomics.svelte :: bg-chip,gaugeClass": "conduit-test-xdyjq.5 replaces the hand-rolled context gauge with QuotaMeter. Its track background and colour thresholds now use the app-wide QuotaMeter recipe; gaugeClass was the removed computed-class expression.",
 	"src/lib/frontend/components/chat/TurnEconomics.svelte :: h-[4px],h-full,rounded-full,w-[40px]": {
 		"movedTo": "src/lib/frontend/components/ui/QuotaMeter.svelte",

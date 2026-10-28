@@ -161,7 +161,7 @@
 </script>
 
 <div class={collapsed ? "minimised-turn" : ""} onpointerleave={() => { if (gesture.kind === "idle") clear(); }} role="group" aria-label={collapsed ? "Minimised turn messages" : "Turn strip"}>
-	<div bind:this={trackEl} bind:clientWidth={width} class={collapsed ? "minimised-scrub dots" : markers.kind === "pins" ? "surfacing-scrub select-none" : "relative h-[44px] md:h-[16px] min-w-[44px] cursor-pointer touch-pan-y select-none outline-none focus-visible:ring-1 focus-visible:ring-accent"}
+	<div bind:this={trackEl} bind:clientWidth={width} class:dots={markers.kind === "dots"} class={collapsed ? "minimised-scrub" : markers.kind === "pins" ? "surfacing-scrub select-none" : "relative h-[44px] md:h-[16px] min-w-[44px] cursor-pointer touch-pan-y select-none outline-none focus-visible:ring-1 focus-visible:ring-accent"}
 		data-testid={collapsed ? "surfacing-minimised-strip" : markers.kind === "pins" ? "surfacing-scrub" : undefined}
 		data-surfacing-region={markers.kind === "pins" ? "strip-overlay" : undefined}
 		role="slider" tabindex="0" aria-label={markers.kind === "pins" ? "Surfaced messages" : `Activity timeline — ${segments.length} steps`}

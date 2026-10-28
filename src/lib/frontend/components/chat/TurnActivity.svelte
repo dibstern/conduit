@@ -1,5 +1,5 @@
 <!-- The turn head keeps counts and duration above a shared activity strip.
-     Skills, task status and the bill stay in the step log or duration hover.
+     Usage holds the bill and notable events; running tasks stay in the footer.
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
@@ -30,6 +30,7 @@
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
 	import Button from "../ui/Button.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
 	import {
@@ -53,8 +54,7 @@
 	import MinimisedTurn from "./MinimisedTurn.svelte";
 	import TurnLog from "./TurnLog.svelte";
 	import TurnShowBar from "./TurnShowBar.svelte";
-	import RunningPill from "./RunningPill.svelte";
-	import TurnEconomics from "./TurnEconomics.svelte";
+	import TurnUsage from "./TurnUsage.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
 	let { turn, segment, final, entries, renderResume, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
@@ -90,6 +90,7 @@
 	} = $props();
 
 	const fullLog = $derived(panel.view.kind === "open" && panel.view.view.kind === "show" && panel.view.view.stop === "log");
+	const usage = $derived(panel.view.kind === "open" && panel.view.view.kind === "usage");
 	type StripInteraction = Parameters<NonNullable<ComponentProps<typeof ActivityStrip>["oninteraction"]>>[0];
 	type CardSlot = NonNullable<ComponentProps<typeof ActivityStrip>["cardSlot"]>;
 	let stripInteraction = $state<StripInteraction>({ hovered: null, scrubbing: false });
@@ -192,7 +193,7 @@
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
 	const minimised = $derived(panel.view.kind === "collapsed");
 	const cardSlot = $derived.by((): CardSlot => {
-		if (!surfacingActive) return { kind: "none" };
+		if (!surfacingActive || usage) return { kind: "none" };
 		if (panel.view.kind === "collapsed") {
 			const card = surface.messages.find((pin) => pin.part.uuid === stripInteraction.hovered);
 			return card ? { kind: "preview", card } : { kind: "none" };
@@ -498,7 +499,7 @@
 		<div role={surfacingActive ? "group" : undefined} tabindex={surfacingActive ? 0 : undefined} aria-label={surfacingActive ? "Turn messages" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} data-testid={surfacingActive ? "surfacing-card" : undefined} class="turn-head-card @container rounded-[14px] border border-border bg-turn-bg">
 			<div class="px-[12px] pt-[10px] pb-[2px] md:pb-[9px]">
 			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
-				<Tooltip bind:open={() => hovered >= 0 || headTooltip, (open) => { headTooltip = open; }}>
+				<Tooltip interaction="passive" bind:open={() => hovered >= 0 || headTooltip, (open) => { headTooltip = open; }}>
 					{#snippet trigger({ props })}
 						{@const headPhrase = phone && (surfacingActive || minimised) ? plural(stats.skills, "skill") : phrase}
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
@@ -521,12 +522,11 @@
 						{#if phrase}<span>{phrase}</span>{/if}
 						{#if stats.compactions > 0}<span>Context compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
 						{#if stats.failed > 0}<span>{stats.failed} failed</span>{/if}
-						{#if final}<RunningPill count={running.size} />{/if}
 					</div>
 				</Tooltip>
 				{#if surfacingActive || summaryEnabled}
 					<div class="surface-head-chips" data-surfacing-region="head-chips">
-						{#if surfacingActive && surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
+						{#if surfacingActive && surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}><Badge variant="ask" size="session" shape="pill">? #{surface.openAsk.surfacingOrdinal}</Badge></Button>{/if}
 						{#if surfacingActive && surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
 						{#if surfacingActive}{@render surfacingRegions.headChips?.(surface)}{/if}
 						{#if summaryEnabled}<Button variant="ghost" size="content" tone="default" hoverFill="none" touchTarget class="{minimised && surfacingActive ? '' : 'max-md:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[13px] leading-[normal] font-medium bg-chip" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised && surfacingActive}<span class="max-md:sr-only">{summaryLabel}</span><span class="md:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised && surfacingActive ? 'max-md:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
@@ -534,7 +534,9 @@
 				{/if}
 					{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summary</Button></span>{/if}
 			</div>
-			{#if minimised && surfacingActive}
+			{#if usage && surfacingActive}
+				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
+			{:else if minimised && surfacingActive}
 				<MinimisedTurn>
 					{#snippet strip(preview: Snippet<[SurfacePin]>)}<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} oninteraction={stripChanged} />{/snippet}
 				</MinimisedTurn>
@@ -563,7 +565,8 @@
 				</Button>
 			{/if}
 		</div>
-		<TurnLog class="step-log border-t border-border bg-bg px-[12px] py-[6px]" mode={minimised ? "collapsed" : fullLog ? "full" : showTicker ? "ticker" : "hidden"} {live} {earlierCount} {earlierIndex} stepCount={counts.log} entries={logEntries} onopen={() => panel.show("log")}>
+		{#if usage}<TurnUsage {turn} {bill} />{/if}
+		<TurnLog class="step-log border-t border-border bg-bg px-[12px] py-[6px]" mode={minimised ? "collapsed" : usage ? "hidden" : fullLog ? "full" : showTicker ? "ticker" : "hidden"} {live} {earlierCount} {earlierIndex} stepCount={counts.log} entries={logEntries} onopen={() => panel.show("log")}>
 			{#snippet row(entry: TurnLogEntry)}
 				{@const i = entry.index}
 				{#if entry.kind === "resumed"}
@@ -577,15 +580,8 @@
 				</div>
 				{/if}
 			{/snippet}
-			{#snippet footer()}
-				<div class="flex flex-wrap items-center gap-[10px] py-[8px] text-[12px] text-text-muted">
-					{#if stats.compactions > 0}<span class="compaction-marker">compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
-					{#if stats.failed > 0}<span class="text-error">{stats.failed} failed</span>{/if}
-					{#if final}<RunningPill count={running.size} /><TurnEconomics economics={bill} />{/if}
-				</div>
-			{/snippet}
 		</TurnLog>
-		{#if !minimised}<TurnShowBar {panel} {counts} onlevelchange={followLatest} />{/if}
+		{#if !minimised}<TurnShowBar {panel} {counts} {bill} running={final ? running.size : 0} onlevelchange={followLatest} />{/if}
 		</div>
 	</div>
 </div>

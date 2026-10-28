@@ -3,7 +3,7 @@
 	import type { TurnLogEntry } from "../../utils/turns.js";
 	import Button from "../ui/Button.svelte";
 
-	let { class: className, mode, live, earlierCount, earlierIndex, stepCount, entries, row, footer, onopen }: {
+	let { class: className, mode, live, earlierCount, earlierIndex, stepCount, entries, row, onopen }: {
 		class: string;
 		mode: "collapsed" | "hidden" | "ticker" | "full";
 		live: boolean;
@@ -12,7 +12,6 @@
 		stepCount: number;
 		entries: readonly TurnLogEntry[];
 		row: Snippet<[TurnLogEntry]>;
-		footer: Snippet;
 		onopen: () => void;
 	} = $props();
 	// Keep shown rows mounted when leaving Full log so row details survive.
@@ -28,6 +27,5 @@
 				class="py-[8px] text-[12px]" onclick={onopen}>+ {earlierCount} earlier messages</Button>
 		{/if}
 		{#each visibleEntries as entry (entry.uuid)}{@render row(entry)}{/each}
-		{@render footer()}
 	</div>
 {/if}

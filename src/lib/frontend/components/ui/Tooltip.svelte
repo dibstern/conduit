@@ -26,6 +26,8 @@
 		open?: boolean | undefined;
 		onopenchange?: ((open: boolean) => void) | undefined;
 		delayDuration?: number | undefined;
+		/** Passive captions cannot intercept controls underneath them. */
+		interaction?: "hoverable" | "passive";
 		side?: TooltipSide | undefined;
 		align?: TooltipAlign | undefined;
 		sideOffset?: number | undefined;
@@ -54,6 +56,7 @@
 		open = $bindable(false),
 		onopenchange,
 		delayDuration = DEFAULT_DELAY_MS,
+		interaction = "hoverable",
 		side,
 		align = "center",
 		sideOffset = FLOATING_POSITIONING_DEFAULTS.sideOffset,
@@ -125,6 +128,7 @@
 		bind:open
 		{triggerId}
 		{delayDuration}
+		disableHoverableContent={interaction === "passive"}
 		onOpenChange={handleOpenChange}
 	>
 		<BitsTooltip.Trigger id={triggerId}>
