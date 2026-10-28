@@ -14,6 +14,7 @@ import {
 import {
 	chooseShowStop,
 	expectShowCounts,
+	showOptionName,
 	showOptions,
 } from "./turnActivityShow.js";
 
@@ -327,6 +328,8 @@ export const turnActivityHandlers: StepHandler[] = [
 				"data-ordinal",
 				"2",
 			);
+			await expect(page.getByTestId("surfacing-msg-card")).toBeFocused();
+			await second.focus();
 			await page.keyboard.press("End");
 			await expect(page.getByTestId("surfacing-pin-8")).toBeFocused();
 			await page.keyboard.press("Home");
@@ -566,9 +569,12 @@ export const turnActivityHandlers: StepHandler[] = [
 						};
 			for (const name of ["Answer", "Key", "Most", "All messages"])
 				await expect(
-					options.locator.getByRole(options.role, { name, exact: true }),
+					options.locator.getByRole(options.role, {
+						name: showOptionName(name, options.role),
+						exact: true,
+					}),
 				).toBeVisible();
-			if (options.role === "menuitem")
+			if (options.role === "menuitemradio")
 				await world.page.keyboard.press("Escape");
 		},
 	},

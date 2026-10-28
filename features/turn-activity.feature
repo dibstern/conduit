@@ -1,5 +1,36 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: The phone Show menu explains each cumulative stop
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is <width> pixels wide
+  And the surfacing session has a settled turn
+  Then the phone Show button reads Show · Most messages ⌄
+  When I open the phone Show menu
+  Then the phone Show menu lists the stops with counts and descriptions
+  And the Show menu stays anchored to its button with a leading selected check
+  And the screen region visually matches turn-show-menu-<width> at 98 percent
+  When I dismiss the phone Show menu with Escape
+  And I set the surfacing level to Key
+  Then the phone Show button reads Show · Key messages ⌄
+  And the effective surfacing level is Key
+  When I choose surfacing Make default
+  Then the daemon default becomes Key without changing other settings
+  And the session surfacing override is absent
+  When I set the surfacing level to All messages
+  And I choose surfacing Back to default
+  Then the phone Show button reads Show · Key messages ⌄
+  When I open the plain turn log
+  Then the phone Show button reads Show · Full log ⌄
+  And the Full log pins are 1,2,3,4,5,8
+  When I reload the surfacing session
+  Then the effective surfacing level is Key
+
+Examples:
+  | width |
+  | 393   |
+  | 700   |
+
 Scenario: A selected pin below the saved stop keeps its category tint
   Given a surfacing marks ledger is available in the dark theme
   And message surfacing is active at Most

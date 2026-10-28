@@ -13,6 +13,7 @@
 	type MenuRadioItemProps = {
 		value: string;
 		icon?: string | undefined;
+		indicatorPosition?: "leading" | "trailing";
 		disabled?: boolean | undefined;
 		closeOnSelect?: boolean | undefined;
 		onselect?: ((event: Event) => void) | undefined;
@@ -32,6 +33,7 @@
 	let {
 		value,
 		icon,
+		indicatorPosition = "trailing",
 		disabled = false,
 		closeOnSelect = true,
 		onselect,
@@ -46,7 +48,9 @@
 		[
 			FLOATING_ITEM_BASE_CLASSES,
 			MENU_ITEM_DENSITY_CLASSES[density],
-			`justify-between ${MENU_RADIO_ITEM_COLOR_CLASSES}`,
+			indicatorPosition === "leading"
+				? "data-[state=unchecked]:text-text data-[state=checked]:text-text data-[state=checked]:bg-selection data-[state=unchecked]:hover:bg-bg data-[state=unchecked]:focus:bg-bg"
+				: `justify-between ${MENU_RADIO_ITEM_COLOR_CLASSES}`,
 			className,
 		]
 			.filter(Boolean)
@@ -73,7 +77,11 @@
 <DropdownMenu.RadioItem {...radioItemProps}>
 	{#snippet child({ props, checked })}
 		<div {...props}>
-			{#if density === "sheet"}
+			{#if indicatorPosition === "leading"}
+				<span aria-hidden="true" class="grid w-[14px] shrink-0 place-items-center text-accent">
+					{#if checked}<Icon name="check" size={14} />{/if}
+				</span>
+			{:else if density === "sheet"}
 				<span aria-hidden="true" class={`${MENU_SHEET_LEADING_ICON_CLASSES} ${checked ? "text-accent" : "text-text-secondary"}`}>
 					{#if icon}<Icon name={icon} size={15} />{/if}
 				</span>
@@ -81,7 +89,7 @@
 			<span class="min-w-0 flex-1">
 				{@render children()}
 			</span>
-			{#if checked}
+			{#if checked && indicatorPosition === "trailing"}
 				<span
 					aria-hidden="true"
 					data-menu-radio-check

@@ -1052,6 +1052,21 @@ export const surfacingCardHandlers: StepHandler[] = [
 		match: /^I set the surfacing level to (Answer|Key|Most|All messages)$/,
 		run: async ({ world, match }) => {
 			await chooseShowStop(world.page, match[1] ?? "");
+			if (
+				readFixtures.has(world.page) &&
+				(await panel(world.page)
+					.getByTestId("surfacing-level")
+					.getAttribute("aria-haspopup")) === "menu"
+			) {
+				// Read fixtures pause rAF too; let the menu finish its closing frame.
+				await world.page.clock.runFor(32);
+				await expect(
+					world.page.getByRole("menu", {
+						name: "Show, least to most",
+						exact: true,
+					}),
+				).toHaveCount(0);
+			}
 		},
 	},
 	{

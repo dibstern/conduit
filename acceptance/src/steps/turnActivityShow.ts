@@ -4,6 +4,23 @@ import type { StepHandler } from "../runtime.js";
 const panel = (page: Page) => page.locator("#messages .turn-activity");
 const newestTop = new WeakMap<Page, number>();
 
+export function showOptionName(
+	name: string,
+	role: "tab" | "menuitemradio" | "radio",
+) {
+	if (role !== "menuitemradio") return name;
+	switch (name) {
+		case "Answer":
+			return "Answer only";
+		case "Key":
+			return "Key messages";
+		case "Most":
+			return "Most messages";
+		default:
+			return name;
+	}
+}
+
 export async function showOptions(page: Page) {
 	const control = panel(page).getByTestId("surfacing-level");
 	if ((await control.getAttribute("role")) === "tablist")
@@ -16,16 +33,19 @@ export async function showOptions(page: Page) {
 	await expect(menu).toBeVisible();
 	return {
 		locator: menu,
-		role: "menuitem" as const,
+		role: "menuitemradio" as const,
 	};
 }
 
 export async function chooseShowStop(page: Page, label: string) {
 	const options = await showOptions(page);
 	await options.locator
-		.getByRole(options.role, { name: label, exact: true })
+		.getByRole(options.role, {
+			name: showOptionName(label, options.role),
+			exact: true,
+		})
 		.click();
-	if (options.role === "menuitem") {
+	if (options.role === "menuitemradio") {
 		await expect(panel(page).getByTestId("surfacing-level")).toHaveAttribute(
 			"aria-expanded",
 			"false",
@@ -40,9 +60,12 @@ export async function expectShowCounts(
 	const options = await showOptions(page);
 	for (const [name, count] of counts)
 		await expect(
-			options.locator.getByRole(options.role, { name, exact: true }),
+			options.locator.getByRole(options.role, {
+				name: showOptionName(name, options.role),
+				exact: true,
+			}),
 		).toContainText(count);
-	if (options.role === "menuitem") {
+	if (options.role === "menuitemradio") {
 		await panel(page).getByTestId("surfacing-level").click();
 		await expect(panel(page).getByTestId("surfacing-level")).toHaveAttribute(
 			"aria-expanded",
@@ -54,7 +77,9 @@ export async function expectShowCounts(
 export async function expectShowStop(page: Page, label: string) {
 	const control = panel(page).getByTestId("surfacing-level");
 	if ((await control.getAttribute("role")) !== "tablist") {
-		await expect(control).toContainText(`Show · ${label}`);
+		await expect(control).toContainText(
+			`Show · ${showOptionName(label, "menuitemradio")}`,
+		);
 		return;
 	}
 	await expect(
@@ -63,6 +88,131 @@ export async function expectShowStop(page: Page, label: string) {
 }
 
 export const turnActivityShowHandlers: StepHandler[] = [
+	{
+		name: "dismiss phone Show menu with Escape",
+		match: /^I dismiss the phone Show menu with Escape$/,
+		run: async ({ world }) => {
+			await world.page.keyboard.press("Escape");
+			await expect(
+				world.page.getByRole("menu", {
+					name: "Show, least to most",
+					exact: true,
+				}),
+			).toHaveCount(0);
+			await expect(
+				panel(world.page).getByTestId("surfacing-level"),
+			).toBeFocused();
+		},
+	},
+	{
+		name: "assert phone Show button label",
+		match: /^the phone Show button reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(panel(world.page).getByTestId("surfacing-level")).toHaveText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "open phone Show menu",
+		match: /^I open the phone Show menu$/,
+		run: async ({ world }) => {
+			await panel(world.page).getByTestId("surfacing-level").click();
+			await expect(
+				world.page.getByRole("menu", {
+					name: "Show, least to most",
+					exact: true,
+				}),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert phone Show menu content",
+		match: /^the phone Show menu lists the stops with counts and descriptions$/,
+		run: async ({ world }) => {
+			const menu = world.page.getByRole("menu", {
+				name: "Show, least to most",
+				exact: true,
+			});
+			await expect(
+				menu.getByText("Show, least to most", { exact: true }),
+			).toBeVisible();
+			const rows = menu.getByRole("menuitemradio");
+			await expect(rows).toHaveCount(5);
+			for (const [index, [name, count, description]] of [
+				["Answer only", "", "Just the final message"],
+				["Key messages", "3", "Adds asks and risks"],
+				["Most messages", "5", "Adds decisions"],
+				["All messages", "6", "Adds findings"],
+				["Full log", "16", "Adds every step, messages in place"],
+			].entries()) {
+				const row = rows.nth(index);
+				await expect(row.getByText(name ?? "", { exact: true })).toHaveCSS(
+					"font-weight",
+					"500",
+				);
+				await expect(
+					row.getByText(description ?? "", { exact: true }),
+				).toBeVisible();
+				if (count) await expect(row.locator("small")).toHaveText(count);
+				else await expect(row.locator("small")).toHaveCount(0);
+			}
+			const fullLog = rows.last();
+			await expect(
+				fullLog.locator("xpath=preceding-sibling::*[1]"),
+			).toHaveAttribute("role", "separator");
+			for (const name of ["Make default", "Back to default"])
+				await expect(
+					menu.getByRole("menuitem", { name, exact: true }),
+				).toBeVisible();
+		},
+	},
+	{
+		name: "assert anchored Show menu and leading selection",
+		match:
+			/^the Show menu stays anchored to its button with a leading selected check$/,
+		run: async ({ world }) => {
+			const menu = world.page.getByRole("menu", {
+				name: "Show, least to most",
+				exact: true,
+			});
+			await expect(menu).toHaveAttribute("data-side", /^(top|bottom)$/);
+			const menuBox = await menu.boundingBox();
+			const buttonBox = await panel(world.page)
+				.getByTestId("surfacing-level")
+				.boundingBox();
+			if (!menuBox || !buttonBox) throw new Error("Missing Show menu anchor");
+			expect(Math.abs(menuBox.x - buttonBox.x)).toBeLessThanOrEqual(8);
+			const gap =
+				(await menu.getAttribute("data-side")) === "bottom"
+					? menuBox.y - buttonBox.y - buttonBox.height
+					: buttonBox.y - menuBox.y - menuBox.height;
+			expect(gap).toBeGreaterThanOrEqual(0);
+			expect(gap).toBeLessThanOrEqual(8);
+			await expect(world.page.getByTestId("menu-sheet-scrim")).toHaveCount(0);
+			const selected = menu.getByRole("menuitemradio", { checked: true });
+			await expect(selected).toHaveCount(1);
+			const label = selected.getByText("Most messages", { exact: true });
+			const check = selected.locator("svg");
+			await expect(check).toBeVisible();
+			const checkBox = await check.boundingBox();
+			const labelBox = await label.boundingBox();
+			if (!checkBox || !labelBox)
+				throw new Error("Missing selected stop geometry");
+			expect(checkBox.x + checkBox.width).toBeLessThan(labelBox.x);
+			await expect(selected).toHaveCSS(
+				"background-color",
+				await selected.evaluate((row) => {
+					const probe = document.createElement("span");
+					probe.style.backgroundColor = "var(--color-selection)";
+					row.append(probe);
+					const colour = getComputedStyle(probe).backgroundColor;
+					probe.remove();
+					return colour;
+				}),
+			);
+		},
+	},
 	{
 		name: "open an earlier live strip tool",
 		match: /^I open the first tool step from the live strip$/,
