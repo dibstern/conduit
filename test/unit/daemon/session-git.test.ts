@@ -896,10 +896,18 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 			const f = yield* fixture(true);
 			yield* f.service.read("one");
 			const before = yield* f.version;
+			// Wait for the published change: the real git refresh can outlast settle under load.
+			const changed = yield* f.service.changes.pipe(
+				Stream.take(1),
+				Stream.runCollect,
+				Effect.forkChild,
+			);
+			yield* Effect.yieldNow;
 			writeFileSync(join(f.second, "dirty"), "changed");
 			yield* f.service.invalidate({ directory: f.second });
 			expect((yield* f.service.read("one"))?.folders?.[1]?.dirty).toBe(false);
 			yield* settle;
+			yield* Fiber.join(changed);
 			expect((yield* f.service.read("one"))?.folders?.[1]?.dirty).toBe(true);
 			expect(yield* f.version).toBeGreaterThan(before);
 		}),
