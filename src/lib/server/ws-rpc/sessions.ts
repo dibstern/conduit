@@ -60,6 +60,7 @@ import { dismissWorkspaceHint } from "../../domain/relay/Services/session-worksp
 import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
 import { makeSurfacingFeedback } from "../../domain/relay/Services/surfacing-feedback.js";
 import * as Failure from "../../effect/failure-classification.js";
+import { ENV } from "../../env.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
 	listLocalBranches,
@@ -517,7 +518,7 @@ export const sessionsHandlers = {
 		),
 	QuotaForAccounts: (_request) =>
 		Effect.flatMap(Usage, (usage) =>
-			usage.refresh({ maxAge: "30 seconds" }),
+			usage.refresh({ maxAge: ENV.quotaReadMaxAgeMs }),
 		).pipe(Effect.catch(mapRpcFailure("QuotaForAccounts"))),
 	GetContinuationHandoff: (request) =>
 		Effect.gen(function* () {

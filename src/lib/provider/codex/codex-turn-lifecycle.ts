@@ -29,7 +29,13 @@ export interface CodexTurnState {
 	}[];
 }
 
-export const CODEX_GOAL_SUCCESSOR_TIMEOUT_MS = 30_000;
+// Tests shorten the successor deadline in the detached runner process.
+export const CODEX_GOAL_SUCCESSOR_TIMEOUT_MS =
+	process.env["NODE_ENV"] === "test"
+		? Number(
+				process.env["CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS"] ?? 30_000,
+			)
+		: 30_000;
 
 export function parseCodexGoalCommand(text: string) {
 	const match = /^[/$]goal(?:\s+([\s\S]*))?$/.exec(text.trim());

@@ -884,11 +884,16 @@ export const wireSSEConsumerEffect = (
 									yield* models.value.listProviders().pipe(Effect.ignore);
 							}
 							yield* refreshModelSettings;
-							if (managedStopped)
+							if (managedStopped) {
 								yield* deps.opencodeRuntimeIngress?.onInstanceStopped?.(
 									deps.providerInstanceId,
 									() => revision === connectionRevision,
 								) ?? Effect.void;
+								// Marks the end of stop work, which can outlive an immediate restart.
+								yield* Effect.logInfo("Managed stop settlement finished", {
+									instanceId: deps.providerInstanceId,
+								});
+							}
 						}),
 					);
 				},
