@@ -282,6 +282,119 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 	);
 });
 
+test("keeps OpenCode visibility groups after the current Claude account catalog loads", async ({
+	page,
+	relayUrl,
+}, testInfo) => {
+	const claudeProvider: ProviderInfo = {
+		id: "claude",
+		name: "Claude",
+		configured: true,
+		models: [
+			{
+				id: "account-model",
+				name: "Discovered account model",
+				provider: "claude",
+			},
+		],
+	};
+	const rpc = await mockWsRpc(page, {
+		stubs: {
+			GetModels: ({ instanceId }) => ({
+				projectSlug: "e2e-replay",
+				instanceId: "claude",
+				defaultOpenCodeInstanceId: "opencode",
+				providers: instanceId === "claude" ? [claudeProvider] : providers,
+				hiddenModels: ["anthropic/claude-haiku-3-5"],
+			}),
+			GetAgents: () => ({
+				projectSlug: "e2e-replay",
+				providerScope: { id: "claude", name: "Claude" },
+				agents: [],
+				hiddenAgents: [],
+			}),
+		},
+	});
+	await mockRelayWebSocket(page, {
+		initMessages: [
+			{
+				type: "project_list",
+				projects: [
+					{
+						slug: "e2e-replay",
+						title: "Merged catalog",
+						folders: ["/workspace/settings"],
+					},
+				],
+				current: "e2e-replay",
+			},
+			{
+				type: "shell_snapshot",
+				roots: true,
+				sessions: [
+					{
+						id: "claude-models",
+						accountId: "claude",
+						title: "Merged catalog",
+						status: "idle",
+						projectSlug: "e2e-replay",
+					},
+				],
+			},
+		],
+		responses: new Map(),
+	});
+	await gotoRelay(
+		page,
+		new URL("/s/claude-models?p=e2e-replay", relayUrl).toString(),
+	);
+	await openModels(page);
+	await rpc.waitForRequest(
+		({ tag, payload }) =>
+			tag === "GetModels" &&
+			payload?.["projectSlug"] === "e2e-replay" &&
+			payload?.["instanceId"] === "claude",
+	);
+
+	const panel = page.locator("#settings-panel");
+	const claude = panel.getByTestId("settings-models-group-claude");
+	await claude.locator("[aria-expanded]").click();
+	// This model only arrives in the account reply, so its switch proves the read settled.
+	await expect(
+		claude.getByRole("switch", { name: "Toggle discovered account model" }),
+	).toBeVisible();
+	for (const provider of providers) {
+		const group = panel.getByTestId(`settings-models-group-${provider.id}`);
+		await expect(group).toBeVisible();
+		await group.locator("[aria-expanded]").click();
+		await expect(group.getByRole("switch")).toHaveCount(provider.models.length);
+		for (const model of provider.models) {
+			const toggle = group.getByRole("switch", {
+				name: `Toggle ${model.name.toLowerCase()}`,
+				exact: true,
+			});
+			await expect(toggle).toBeVisible();
+			await expect(toggle).toHaveAttribute(
+				"aria-checked",
+				model.id === "claude-haiku-3-5" ? "false" : "true",
+			);
+		}
+	}
+	await expect(panel.getByTestId("settings-models-summary")).toHaveText(
+		"4 of 5 shown",
+	);
+	const artifactDir = resolve(
+		"/tmp/conduit-test-3fc0.2/settings-models-filter",
+	);
+	await mkdir(artifactDir, { recursive: true });
+	const artifact = resolve(artifactDir, "claude-merged-catalog.png");
+	await page.screenshot({ path: artifact, animations: "disabled" });
+	await testInfo.attach("merged Claude catalog visibility", {
+		path: artifact,
+		contentType: "image/png",
+	});
+});
+
 for (const driver of ["opencode", "claude"] as const) {
 	test(`loads visibility models for the current non-default ${driver} account`, async ({
 		page,
@@ -292,12 +405,13 @@ for (const driver of ["opencode", "claude"] as const) {
 		let hiddenModels = ["elsewhere/keep-hidden"];
 		const rpc = await mockWsRpc(page, {
 			stubs: {
-				GetModels: ({ instanceId }) => ({
+				GetModels: (payload) => ({
 					projectSlug: "e2e-replay",
 					instanceId: accountId,
 					defaultOpenCodeInstanceId: "opencode",
 					providers:
-						instanceId === accountId
+						payload.instanceId === accountId ||
+						("sessionId" in payload && payload.sessionId === "account-models")
 							? [
 									{
 										id: providerId,

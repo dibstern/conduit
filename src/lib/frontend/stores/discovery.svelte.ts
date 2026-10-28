@@ -305,7 +305,7 @@ function agentsFor(scope = catalogScope()) {
 	return agentCatalogs[scope.key] ?? noAgents;
 }
 
-/** Full account catalog, retaining the current view until its account read settles. */
+/** Keep the current account's merged catalog; use an account-scoped catalog for others. */
 export function getModelProvidersForInstance(
 	instanceId: string | undefined,
 	project = getCurrentSlug() ?? "",
@@ -314,8 +314,7 @@ export function getModelProvidersForInstance(
 	const scope = catalogScope(null, instanceId, project);
 	const current = catalogScope();
 	return providersFor(
-		!modelsFor(scope).loaded &&
-			current.project === project &&
+		current.project === project &&
 			discoveryState.catalogAccountId === instanceId
 			? current
 			: scope,
