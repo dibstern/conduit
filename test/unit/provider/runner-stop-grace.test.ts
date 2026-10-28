@@ -113,19 +113,18 @@ for (const previousUntimedTerm of [false, true])
 					const receipts = yield* makeRunnerReceiptStore(sql);
 					const clock = yield* Clock.Clock;
 					const signals: Array<{ signal: string; at: number }> = [];
-					const record = yield* receipts.requestStop({
+					const commit = yield* receipts.requestStop({
 						runnerId: "runner",
 						sessionId: "session",
 						driverKind: "claude",
 						identity: { tag: "Verified", pid: 123, startTime: "started" },
 						reaper: undefined,
 						members: [],
-						signalLog: [],
-						signal: { tag: "None" },
-						retirement: { tag: "Watching" },
-						ownedRunIds: [],
-						retiredAt: 0,
 					});
+					const record =
+						commit._tag === "Requested"
+							? commit.record
+							: expect.unreachable("Ignored");
 					yield* receipts.stopProgress({
 						...record,
 						stopState: "Escalating",
@@ -228,11 +227,6 @@ it.effect(
 					identity: { tag: "Verified", pid: 123, startTime: "started" },
 					reaper: undefined,
 					members: [],
-					signalLog: [],
-					signal: { tag: "None" },
-					retirement: { tag: "Watching" },
-					ownedRunIds: [],
-					retiredAt: 0,
 				});
 				yield* TestClock.adjust("0 millis");
 				expect(signals).toEqual([{ signal: "SIGTERM", at: 0 }]);
@@ -284,11 +278,6 @@ it.effect(
 					identity: { tag: "Verified", pid: 123, startTime: "started" },
 					reaper: undefined,
 					members: [],
-					signalLog: [],
-					signal: { tag: "None" },
-					retirement: { tag: "Watching" },
-					ownedRunIds: [],
-					retiredAt: 0,
 				});
 				const escalated = yield* reconciler
 					.awaitStop("runner", "Escalated")

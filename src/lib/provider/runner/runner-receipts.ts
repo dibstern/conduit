@@ -1,4 +1,4 @@
-import { Context, Data, type Deferred, Effect, Schema } from "effect";
+import { Clock, Context, Data, type Deferred, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/sql";
 import { flushPendingWrites } from "../../persistence/effect/commit-and-signal.js";
 import type { PermissionResponse } from "../types.js";
@@ -161,6 +161,39 @@ export interface RunnerRetirement {
 	readonly stopReason?: string;
 	readonly stopStartedAt?: number;
 }
+
+/** What a Stop names; its committing transaction supplies everything else. */
+export type StopTarget = Pick<
+	RunnerRetirement,
+	"runnerId" | "sessionId" | "driverKind" | "identity" | "reaper" | "members"
+>;
+
+export type StopCommit =
+	| {
+			readonly _tag: "Requested";
+			readonly record: RunnerRetirement;
+			readonly candidates: readonly RunnerRetirement[];
+			/** The session's rows as the committing transaction left them. */
+			readonly session: readonly RunnerRow[];
+	  }
+	| { readonly _tag: "Ignored" };
+
+export const stopRecord = (
+	target: StopTarget,
+	retiredAt: number,
+): RunnerRetirement => ({
+	runnerId: target.runnerId,
+	sessionId: target.sessionId,
+	driverKind: target.driverKind,
+	identity: target.identity,
+	reaper: target.reaper,
+	members: target.members,
+	signalLog: [],
+	signal: { tag: "None" },
+	retirement: { tag: "Watching" },
+	ownedRunIds: [],
+	retiredAt,
+});
 
 const decodeRetirement = (raw: { readonly runner_id: string }) =>
 	Effect.gen(function* () {
@@ -431,45 +464,106 @@ export const makeRunnerReceiptStore = (
 				ON CONFLICT(runner_id) DO UPDATE SET retired_at = excluded.retired_at, attachment_id = '', session_id = excluded.session_id, driver_kind = excluded.driver_kind, pid = excluded.pid, start_time = excluded.start_time, reaper_pid = excluded.reaper_pid, reaper_start_time = excluded.reaper_start_time, member_snapshot = excluded.member_snapshot, stop_state = 'Requested', stop_reason = excluded.stop_reason`.pipe(
 				Effect.asVoid,
 			);
-		/** Runs inside the caller's write; it never acquires a second writer. */
+		const runners = (sessionId?: string) =>
+			sql<{
+				runner_id: string;
+				role: string;
+				retired_at: number | null;
+				sequence: number;
+			}>`SELECT * FROM claude_runner_cursors WHERE ${sessionId === undefined ? sql`1 = 1` : sql`session_id = ${sessionId}`} ORDER BY rowid`.pipe(
+				Effect.flatMap((rows) =>
+					Effect.partition(rows, (row) =>
+						Effect.gen(function* () {
+							const normalized = {
+								...row,
+								retired_at: row.retired_at ?? 0,
+							};
+							const record = yield* decodeRetirement(normalized);
+							const role = yield* Schema.decodeUnknownEffect(
+								Schema.Literals(["serving", "candidate"]),
+							)(row.role).pipe(
+								Effect.mapError(
+									(cause) =>
+										new RunnerRetirementDecodeError({
+											runnerId: row.runner_id,
+											cause,
+										}),
+								),
+							);
+							return {
+								runnerId: record.runnerId,
+								sessionId: record.sessionId,
+								driverKind: record.driverKind,
+								identity: record.identity,
+								reaper: record.reaper,
+								role,
+								retiredAt: row.retired_at,
+								sequence: row.sequence,
+							} satisfies RunnerRow;
+						}),
+					),
+				),
+				Effect.map(([rows, rejected]) => ({ rows, rejected })),
+			);
+		/**
+		 * Runs inside the caller's write; it never acquires a second writer.
+		 * Role, successor and candidates are read here, so the in-memory
+		 * registry never decides who serves.
+		 */
 		const requestStopMutation = (
-			record: RunnerRetirement,
+			target: StopTarget,
 			reason: StopReason = { _tag: "Explicit" },
-			candidates: readonly RunnerRetirement[] = [],
+			observe: (record: RunnerRetirement) => RunnerRetirement = (record) =>
+				record,
 		) =>
 			Effect.gen(function* () {
-				let committed = record;
-				const [existingRaw] = yield* rawRunner(record.runnerId);
+				const retiredAt = yield* Clock.currentTimeMillis;
+				const [existingRaw] = yield* rawRunner(target.runnerId);
 				const [fence] = yield* sql<{
 					retired_at: number | null;
 					role: RunnerRole;
 					session_id: string;
-				}>`SELECT retired_at, role, session_id FROM claude_runner_cursors WHERE runner_id = ${record.runnerId}`;
-				if (existingRaw) {
-					const existing = yield* decodeRetirement(existingRaw);
-					if (fence?.session_id !== record.sessionId)
+				}>`SELECT retired_at, role, session_id FROM claude_runner_cursors WHERE runner_id = ${target.runnerId}`;
+				const existing = existingRaw
+					? yield* decodeRetirement(existingRaw)
+					: undefined;
+				if (existing) {
+					if (fence?.session_id !== target.sessionId)
 						return yield* new RunnerSlotError({
-							runnerId: record.runnerId,
+							runnerId: target.runnerId,
 							cause: "Runner session changed",
 						});
-					if (fence?.retired_at !== null) {
-						if (
-							reason._tag === "Superseded" &&
-							existing.stopReason !== JSON.stringify(reason)
-						)
-							return yield* new RunnerSlotError({
-								runnerId: record.runnerId,
-								cause: "Another Stop already committed",
-							});
-						return existing;
+					if (fence.retired_at !== null) {
+						if (reason._tag === "Superseded") {
+							const successor =
+								yield* sql`SELECT 1 FROM claude_runner_cursors WHERE runner_id = ${reason.successor} AND session_id = ${target.sessionId} AND retired_at IS NULL AND role = 'serving'`;
+							if (
+								existing.stopReason !== JSON.stringify(reason) ||
+								successor.length === 0
+							)
+								return yield* new RunnerSlotError({
+									runnerId: target.runnerId,
+									cause: "A different Stop won the swap",
+								});
+						}
+						return {
+							_tag: "Requested",
+							record: existing,
+							candidates: [],
+							session: (yield* runners(target.sessionId)).rows,
+						} satisfies StopCommit;
 					}
+					// An abandoned candidate that was promoted keeps serving.
+					if (reason._tag === "CandidateAbandoned" && fence.role === "serving")
+						return { _tag: "Ignored" } satisfies StopCommit;
 				}
+				const candidates: RunnerRetirement[] = [];
 				if (reason._tag === "Superseded") {
 					const [successor] = yield* sql<{
 						runner_id: string;
-					}>`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${reason.successor} AND session_id = ${record.sessionId} AND retired_at IS NULL AND role = 'candidate'`;
+					}>`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${reason.successor} AND session_id = ${target.sessionId} AND retired_at IS NULL AND role = 'candidate'`;
 					const held =
-						yield* sql`SELECT 1 FROM provider_runs WHERE runner_id = ${record.runnerId} AND status IN ('pending', 'running') LIMIT 1`;
+						yield* sql`SELECT 1 FROM provider_runs WHERE runner_id = ${target.runnerId} AND status IN ('pending', 'running') LIMIT 1`;
 					if (
 						!fence ||
 						fence.role !== "serving" ||
@@ -477,40 +571,49 @@ export const makeRunnerReceiptStore = (
 						held.length > 0
 					)
 						return yield* new RunnerSlotError({
-							runnerId: record.runnerId,
+							runnerId: target.runnerId,
 							cause: "Runner swap refused",
 						});
 					const [rawSuccessor] = yield* rawRunner(reason.successor);
 					if (rawSuccessor) yield* decodeRetirement(rawSuccessor);
 				} else if (fence?.role === "serving") {
-					const liveCandidates = yield* sql<{
+					const live = yield* sql<{
 						runner_id: string;
-					}>`SELECT runner_id FROM claude_runner_cursors WHERE session_id = ${record.sessionId} AND role = 'candidate' AND retired_at IS NULL`;
-					for (const candidate of liveCandidates) {
-						const snapshot = candidates.find(
-							(row) =>
-								row.runnerId === candidate.runner_id &&
-								row.sessionId === record.sessionId,
+					}>`SELECT *, COALESCE(retired_at, 0) AS retired_at FROM claude_runner_cursors WHERE session_id = ${target.sessionId} AND role = 'candidate' AND retired_at IS NULL ORDER BY rowid`;
+					for (const raw of live) {
+						yield* saveStop(
+							observe(stopRecord(yield* decodeRetirement(raw), retiredAt)),
+							{ _tag: "CandidateAbandoned" },
 						);
-						if (!snapshot)
-							return yield* new RunnerSlotError({
-								runnerId: candidate.runner_id,
-								cause: "Candidate snapshot missing",
-							});
-						const [raw] = yield* rawRunner(candidate.runner_id);
-						if (raw) yield* decodeRetirement(raw);
-						yield* saveStop(snapshot, { _tag: "CandidateAbandoned" });
-						const [savedCandidate] = yield* rawRunner(candidate.runner_id);
-						if (savedCandidate) yield* decodeRetirement(savedCandidate);
+						const [saved] = yield* rawRunner(raw.runner_id);
+						if (saved) candidates.push(yield* decodeRetirement(saved));
 					}
 				}
-				// New intents never write owned_run_ids; legacy lists survive.
+				// The row is the identity source. The caller adds the members it
+				// observed and a reaper the row lacks (the hello reports it after
+				// register). New intents never write owned_run_ids.
+				const record = observe(
+					stopRecord(
+						existing
+							? {
+									...existing,
+									reaper: existing.reaper ?? target.reaper,
+									members: mergeRunnerMembers(existing.members, target.members),
+								}
+							: target,
+						retiredAt,
+					),
+				);
 				yield* saveStop(record, reason);
 				if (reason._tag === "Superseded")
 					yield* sql`UPDATE claude_runner_cursors SET role = 'serving' WHERE runner_id = ${reason.successor}`;
-				const [saved] = yield* rawRunner(record.runnerId);
-				if (saved) committed = yield* decodeRetirement(saved);
-				return committed;
+				const [saved] = yield* rawRunner(target.runnerId);
+				return {
+					_tag: "Requested",
+					record: saved ? yield* decodeRetirement(saved) : record,
+					candidates,
+					session: (yield* runners(target.sessionId)).rows,
+				} satisfies StopCommit;
 			});
 		return {
 			read,
@@ -557,59 +660,19 @@ export const makeRunnerReceiptStore = (
 					);
 					return result;
 				}).pipe(Effect.mapError(toStoreFault)),
-			runners: () =>
-				sql<{
-					runner_id: string;
-					role: string;
-					retired_at: number | null;
-					sequence: number;
-				}>`SELECT * FROM claude_runner_cursors ORDER BY rowid`.pipe(
-					Effect.flatMap((rows) =>
-						Effect.partition(rows, (row) =>
-							Effect.gen(function* () {
-								const normalized = {
-									...row,
-									retired_at: row.retired_at ?? 0,
-								};
-								const record = yield* decodeRetirement(normalized);
-								const role = yield* Schema.decodeUnknownEffect(
-									Schema.Literals(["serving", "candidate"]),
-								)(row.role).pipe(
-									Effect.mapError(
-										(cause) =>
-											new RunnerRetirementDecodeError({
-												runnerId: row.runner_id,
-												cause,
-											}),
-									),
-								);
-								return {
-									runnerId: record.runnerId,
-									sessionId: record.sessionId,
-									driverKind: record.driverKind,
-									identity: record.identity,
-									reaper: record.reaper,
-									role,
-									retiredAt: row.retired_at,
-									sequence: row.sequence,
-								} satisfies RunnerRow;
-							}),
-						),
-					),
-					Effect.map(([rows, rejected]) => ({ rows, rejected })),
-				),
+			runners,
 			/** Retirement and slot promotion share dispatch's writer lock. */
 			requestStopMutation,
 			requestStop: (
-				record: RunnerRetirement,
+				target: StopTarget,
 				reason: StopReason = { _tag: "Explicit" },
-				candidates: readonly RunnerRetirement[] = [],
+				observe?: (record: RunnerRetirement) => RunnerRetirement,
 			) =>
 				Effect.gen(function* () {
-					let committed = record;
+					let committed = { _tag: "Ignored" } as StopCommit;
 					yield* flushPendingWrites(
 						sql,
-						requestStopMutation(record, reason, candidates).pipe(
+						requestStopMutation(target, reason, observe).pipe(
 							Effect.tap((saved) =>
 								Effect.sync(() => {
 									committed = saved;

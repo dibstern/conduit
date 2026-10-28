@@ -68,8 +68,9 @@ it.effect(
 							commits++;
 							yield* Deferred.succeed(entered, undefined);
 							yield* Deferred.await(proceed);
+							// The serving row this transaction read is the stopped runner.
 							const result = yield* sql.withTransaction(
-								stop ?? Effect.succeed(undefined),
+								stop ? stop(record) : Effect.succeed(undefined),
 							);
 							actions.push("commit");
 							return { released: true, stop: result };
@@ -259,7 +260,7 @@ for (const cached of ["missing", "candidate"])
 						},
 						release: (input, stop) =>
 							lifecycle
-								.releaseRun(input, stop ?? Effect.succeed(undefined))
+								.releaseRun(input, stop ?? (() => Effect.succeed(undefined)))
 								.pipe(Effect.orDie),
 						released: () => Effect.void,
 						committed: () => Effect.void,

@@ -1686,9 +1686,10 @@ it.effect("recovers a phase-2 Stop snapshot whose retired_at was NULL", () =>
 	),
 );
 
-// A failed request has no durable intent. Only another explicit Stop may retry it.
+// A non-retryable store fault is not a rejection: the intent stays Committing, the runner keeps
+// serving, and the reconciler retries until the commit lands (CONTRACT 6.3, F12).
 it.effect(
-	"STOP-INTENT failed commit leaves accepted runs serving until an explicit retry",
+	"STOP-INTENT failed commit keeps accepted runs serving until the reconciler's retry lands",
 	() =>
 		run(
 			Effect.gen(function* () {
@@ -1703,15 +1704,8 @@ it.effect(
 				const first = yield* f.stop.pipe(Effect.result, Effect.forkChild);
 				const concurrent = yield* f.stop.pipe(Effect.result, Effect.forkChild);
 				yield* TestClock.adjust("2 seconds");
-				for (const waiter of [first, concurrent]) {
-					expect(waiter.pollUnsafe()).toBeDefined();
-					const result = yield* Fiber.join(waiter);
-					expect(result._tag).toBe("Failure");
-					if (result._tag === "Failure")
-						expect(result.failure).toMatchObject({
-							operation: "stop runner",
-						});
-				}
+				expect(first.pollUnsafe()).toBeUndefined();
+				expect(concurrent.pollUnsafe()).toBeUndefined();
 				expect(f.signals).toEqual([]);
 				expect(f.commands.some((command) => command.type === "shutdown")).toBe(
 					false,
@@ -1720,14 +1714,14 @@ it.effect(
 					yield* f.manager.hasLiveProcessEffect("s", f.runner.runnerId),
 				).toBe(true);
 				expect(
-					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'first-run'`,
-				).toEqual([{ status: "running" }]);
-				yield* f.sql`DROP TRIGGER fail_stop_commit`;
-				yield* TestClock.adjust("60 seconds");
-				expect(f.signals).toEqual([]);
-				expect(f.commands.some((command) => command.type === "shutdown")).toBe(
-					false,
-				);
+					yield* f.sql`SELECT id, status FROM provider_runs ORDER BY id`,
+				).toEqual([
+					{ id: "first-run", status: "running" },
+					{ id: "second-run", status: "running" },
+				]);
+				expect(
+					yield* f.sql`SELECT retired_at FROM claude_runner_cursors WHERE runner_id = ${f.runner.runnerId}`,
+				).toEqual([{ retired_at: null }]);
 				yield* f.dispatch("second-run");
 				f.accept("second-run");
 				expect(f.connections).toHaveLength(1);
@@ -1736,10 +1730,14 @@ it.effect(
 						.filter((command) => command.type === "send-turn")
 						.map((command) => command.runId),
 				).toEqual(["first-run", "second-run"]);
+				yield* f.sql`DROP TRIGGER fail_stop_commit`;
 				f.exitOnSignal();
-				const retry = yield* f.stop.pipe(Effect.result, Effect.forkChild);
 				yield* TestClock.adjust("12 seconds");
-				expect((yield* Fiber.join(retry))._tag).toBe("Success");
+				for (const waiter of [first, concurrent])
+					expect((yield* Fiber.join(waiter))._tag).toBe("Success");
+				expect(
+					f.commands.filter((command) => command.type === "shutdown"),
+				).toHaveLength(1);
 				expect(
 					yield* f.sql`SELECT id, status FROM provider_runs ORDER BY id`,
 				).toEqual([

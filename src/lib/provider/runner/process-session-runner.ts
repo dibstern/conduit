@@ -406,12 +406,6 @@ export const stopRegisteredRunners = (
 									: { tag: "Verified", pid: registration.pid, startTime },
 							reaper,
 							members: [],
-							signalLog: [],
-							signal: { tag: "None" },
-							retirement: { tag: "Watching" },
-							ownedRunIds: [],
-							retiredAt: yield* Clock.currentTimeMillis,
-							stopReason: "registered runner stop",
 						});
 						yield* stops.awaitStop(registration.runnerId, "Escalated");
 						// Project ingestion has drained, so Settle belongs to startup.
@@ -493,17 +487,8 @@ export const makeProcessSessionRunner = (
 				if (intent === "failure")
 					yield* entry.outputs.withPermits(1)(Effect.void);
 				if (exceptCommandId) endCommands.set(entry.runnerId, exceptCommandId);
-				yield* stops
-					.requestStop(
-						{
-							...retirementFor(entry),
-							stopReason:
-								intent === "failure"
-									? (entry.lifecycle.failure?.message ?? "Runner exited")
-									: "stop",
-						},
-						reason,
-					)
+				const stop = yield* stops
+					.requestStop(retirementFor(entry), reason)
 					.pipe(
 						Effect.tapError(() =>
 							Effect.sync(() => {
@@ -511,7 +496,8 @@ export const makeProcessSessionRunner = (
 							}),
 						),
 					);
-				yield* stops.awaitStop(entry.runnerId, "Escalated");
+				if (stop === "Requested")
+					yield* stops.awaitStop(entry.runnerId, "Escalated");
 			});
 		const turnEnds = yield* PubSub.unbounded<string>();
 		const runnerLabel = `${driver.driverKind.charAt(0).toUpperCase()}${driver.driverKind.slice(1)} runner`;
@@ -1304,7 +1290,7 @@ export const makeProcessSessionRunner = (
 						if (!sql) return { released: true };
 						const { lifecycle } = yield* sessionCommit(input.sessionId);
 						return yield* lifecycle
-							.releaseRun(input, stop ?? Effect.succeed(undefined))
+							.releaseRun(input, stop ?? (() => Effect.succeed(undefined)))
 							.pipe(
 								Effect.mapError((cause) => ({
 									...runnerFailure("release runner hold", cause),
@@ -1726,8 +1712,10 @@ export const makeProcessSessionRunner = (
 					? tracked(entry)
 					: currentEntry(entry.sessionId) === entry;
 				if (closing || !ownsEntry) return;
+				// An orphan's session is gone or already served. EndSession is not
+				// role-gated, so the commit stops whatever row it reads.
 				yield* stopRunner(entry, undefined, "stop", {
-					_tag: "CandidateAbandoned",
+					_tag: "EndSession",
 				}).pipe(Effect.ensuring(Deferred.succeed(entry.drained, undefined)));
 			});
 		const detach = (entry: RunnerChild, failure?: SessionFailure) => {
@@ -1800,14 +1788,8 @@ export const makeProcessSessionRunner = (
 				log.error(
 					`${runnerLabel} failed for session ${sessionId}: ${failure.message}`,
 				);
-			runFork(
-				stopRunner(entry, undefined, "failure").pipe(
-					retryRunnerPersistence,
-					Effect.catchCause((cause) =>
-						Effect.logError("Runner cleanup failed", cause),
-					),
-				),
-			);
+			// The reconciler retries and logs the Stop commit.
+			runFork(stopRunner(entry, undefined, "failure").pipe(Effect.ignore));
 		};
 
 		const attach = (
@@ -3325,10 +3307,18 @@ export const makeProcessSessionRunner = (
 							cause,
 							...(cause._tag === "StoreUnavailable" ? { retryable: true } : {}),
 						})),
+						// The reconciler owns the cleanup Stop; the start fails with
+						// the register fault at once.
 						Effect.tapError(() =>
-							stops.requestStop(retirementFor(entry), {
-								_tag: "CandidateAbandoned",
-							}),
+							Effect.sync(() =>
+								runFork(
+									stops
+										.requestStop(retirementFor(entry), {
+											_tag: "CandidateAbandoned",
+										})
+										.pipe(Effect.ignore),
+								),
+							),
 						),
 					);
 				if (registered === "Lost") {
@@ -3696,17 +3686,14 @@ export const makeProcessSessionRunner = (
 					);
 				}),
 			stop: (entry) =>
+				// The commit reads the role: a promoted candidate is Ignored.
 				Effect.suspend(() =>
-					closing || stops.serving(entry.sessionId) === entry.runnerId
+					closing
 						? Effect.void
 						: stopRunner(entry, undefined, "stop", {
 								_tag: "CandidateAbandoned",
 							}),
-				).pipe(
-					Effect.catchCause((cause) =>
-						Effect.logError("Stopping upgrade candidate failed", cause),
-					),
-				),
+				).pipe(Effect.ignore),
 			failed: (sessionId, old, cause) => {
 				const failure = runnerFailure("upgrade runner", cause);
 				if (failure.code === driver.settingsDeferredCode)
@@ -3946,7 +3933,9 @@ export const makeProcessSessionRunner = (
 									(row) =>
 										row.runnerId === registration.runnerId &&
 										row.role === "serving" &&
-										row.retiredAt === null,
+										row.retiredAt === null &&
+										// recover registered a Stop for it without waiting.
+										stops.state(row.runnerId)._tag === "Running",
 								)) &&
 							!recovered.rejected.some(
 								(error) => error.runnerId === registration.runnerId,
@@ -4197,6 +4186,26 @@ export const makeProcessSessionRunner = (
 										),
 									),
 						);
+						// Startup never waits on a Stop commit. The reconciler retries it,
+						// and the entry's waiters settle once the stop finishes or fails.
+						const stopUnawaited = (stop: Effect.Effect<void, SessionFailure>) =>
+							runFork(
+								stop.pipe(
+									Effect.catchCause((cause) =>
+										releaseEntryWaiters(entry, cause).pipe(
+											// Shutdown interrupts a Stop still committing; that is not an error.
+											Effect.andThen(
+												Failure.isInterruptedOnly(cause)
+													? Effect.void
+													: Effect.logError(
+															"Runner recovery stop failed",
+															cause,
+														),
+											),
+										),
+									),
+								),
+							);
 						const attachAndRecover = Effect.gen(function* () {
 							yield* ensureRecovering;
 							const reconnectDelay =
@@ -4233,13 +4242,17 @@ export const makeProcessSessionRunner = (
 								// A failed hello needs independent process identity before signalling.
 								transition(entry, { _tag: "Verify" });
 								yield* Deferred.fail(entry.ready, failure);
-								yield* stopRunner(entry);
-								if (pidAlive(registration.pid, registration.startTime))
-									return yield* retireSurvivor(entry, failure);
-								transition(entry, { _tag: "Recovered" });
-								transition(entry, { _tag: "Fail", failure });
-								yield* stopRunner(entry);
-								yield* releaseEntryWaiters(entry, Cause.fail(failure));
+								stopUnawaited(
+									Effect.gen(function* () {
+										yield* stopRunner(entry);
+										if (pidAlive(registration.pid, registration.startTime))
+											return yield* retireSurvivor(entry, failure);
+										transition(entry, { _tag: "Recovered" });
+										transition(entry, { _tag: "Fail", failure });
+										yield* stopRunner(entry);
+										yield* releaseEntryWaiters(entry, Cause.fail(failure));
+									}),
+								);
 								return;
 							}
 							if (connected._tag === "Failure" || connected.success.closed) {
@@ -4261,23 +4274,30 @@ export const makeProcessSessionRunner = (
 										_tag: "Fail",
 										failure: abandonedFailure,
 									});
-
-									yield* stopRunner(entry, undefined, "failure");
-									yield* releaseEntryWaiters(
-										entry,
-										Cause.fail(abandonedFailure),
+									stopUnawaited(
+										stopRunner(entry, undefined, "failure").pipe(
+											Effect.andThen(
+												releaseEntryWaiters(
+													entry,
+													Cause.fail(abandonedFailure),
+												),
+											),
+										),
 									);
 									return;
 								}
 								// Detach this registration so admission can create its replacement.
-								return yield* retireSurvivor(entry, failure);
+								stopUnawaited(retireSurvivor(entry, failure));
+								return;
 							}
 							if (abandoned) {
 								transition(entry, { _tag: "Recovered" });
 								yield* Deferred.succeed(entry.ready, connected.success);
 								// Shutdown skips retirement; waiters must still be released.
-								yield* retireOrphan(entry).pipe(
-									Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
+								stopUnawaited(
+									retireOrphan(entry).pipe(
+										Effect.ensuring(Deferred.succeed(entry.drained, undefined)),
+									),
 								);
 								return;
 							}
@@ -4306,7 +4326,7 @@ export const makeProcessSessionRunner = (
 									Failure.isInterruptedOnly(exit.cause)
 								)
 									return Effect.void;
-								return Effect.gen(function* () {
+								return Effect.sync(() => {
 									transition(entry, { _tag: "Recovered" });
 									transition(entry, {
 										_tag: "Fail",
@@ -4316,8 +4336,11 @@ export const makeProcessSessionRunner = (
 										),
 									});
 									entry.connection?.destroy();
-									yield* stopRunner(entry);
-									yield* releaseEntryWaiters(entry, exit.cause);
+									stopUnawaited(
+										stopRunner(entry).pipe(
+											Effect.andThen(releaseEntryWaiters(entry, exit.cause)),
+										),
+									);
 								});
 							}),
 						);
@@ -5927,7 +5950,7 @@ export const makeProcessSessionRunner = (
 											transmission: held.transmission,
 											reason: "NotSent",
 										},
-										Effect.void,
+										() => Effect.void,
 										evidence,
 									);
 								}),
@@ -6115,17 +6138,9 @@ export const makeProcessSessionRunner = (
 					const { rows } = yield* receipts.runners();
 					const row = rows.find((candidate) => candidate.runnerId === runnerId);
 					if (!row) return;
+					// The reconciler owns an unavailable commit; this waits for it.
 					yield* stops.requestStop(
-						{
-							...row,
-							retiredAt: clock.currentTimeMillisUnsafe(),
-							members: [],
-							signalLog: [],
-							signal: { tag: "None" },
-							retirement: { tag: "Watching" },
-							ownedRunIds: [],
-							stopReason: "CandidateAbandoned",
-						},
+						{ ...row, members: [] },
 						{ _tag: "CandidateAbandoned" },
 					);
 				}).pipe(Effect.mapError(toStoreFault)),

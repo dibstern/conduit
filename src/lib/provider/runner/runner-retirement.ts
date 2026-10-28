@@ -29,10 +29,15 @@ import {
 	type RunnerCursorIdentity,
 	type RunnerMember,
 	type RunnerRetirement,
+	RunnerRetirementDecodeError,
 	type RunnerRow,
 	type RunnerSignal,
 	type RunnerSignalAttempt,
+	RunnerSlotError,
+	type StopCommit,
 	type StopReason,
+	type StopTarget,
+	stopRecord,
 } from "./runner-receipts.js";
 import type { RunnerProcessTable } from "./runner-registry.js";
 import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
@@ -40,6 +45,7 @@ import {
 	type SendEvidence,
 	type SettlementTx,
 	type StoreFault,
+	sendRetryBackoff,
 	settleSend,
 	toStoreFault,
 } from "./send-settlement.js";
@@ -222,7 +228,8 @@ export const makeRunnerRunLifecycle = (
 		},
 		releaseRun: <A, E, R>(
 			input: EventPayloadMap["run.released"] & { readonly sessionId: string },
-			stop: Effect.Effect<A, E, R>,
+			/** Receives the serving row this transaction read, never a cached one. */
+			stop: (serving: StopTarget) => Effect.Effect<A, E, R>,
 			failed?: Extract<SendEvidence, { readonly _tag: "failed" }>,
 		) => {
 			let released = false;
@@ -295,9 +302,45 @@ export const makeRunnerRunLifecycle = (
 									},
 									failed,
 								);
-							const [serving] = yield* sql`SELECT 1 FROM claude_runner_cursors
+							const [serving] = yield* sql<{
+								runner_id: string;
+								session_id: string;
+								driver_kind: string;
+								pid: number | null;
+								start_time: string | null;
+								reaper_pid: number | null;
+								reaper_start_time: string | null;
+							}>`SELECT runner_id, session_id, driver_kind, pid, start_time, reaper_pid, reaper_start_time FROM claude_runner_cursors
 					WHERE runner_id = ${input.runnerId} AND session_id = ${input.sessionId} AND role = 'serving' AND retired_at IS NULL`;
-							return { released, stop: serving ? yield* stop : undefined };
+							if (!serving) return { released, stop: undefined };
+							return {
+								released,
+								stop: yield* stop({
+									runnerId: serving.runner_id,
+									sessionId: serving.session_id,
+									driverKind: serving.driver_kind,
+									identity:
+										serving.pid !== null && serving.start_time !== null
+											? {
+													tag: "Verified",
+													pid: serving.pid,
+													startTime: serving.start_time,
+												}
+											: {
+													tag: "Unverifiable",
+													...(serving.pid === null ? {} : { pid: serving.pid }),
+												},
+									reaper:
+										serving.reaper_pid !== null &&
+										serving.reaper_start_time !== null
+											? {
+													pid: serving.reaper_pid,
+													startTime: serving.reaper_start_time,
+												}
+											: undefined,
+									members: [],
+								}),
+							};
 						}),
 					{
 						afterCommit: Effect.gen(function* () {
@@ -322,7 +365,10 @@ export type RunnerStop =
 	| { readonly _tag: "Running" }
 	| {
 			readonly _tag: "Committing";
-			readonly waiters: Deferred.Deferred<void, SessionFailure>;
+			readonly waiters: Deferred.Deferred<
+				"Requested" | "Ignored",
+				SessionFailure
+			>;
 	  }
 	| { readonly _tag: "Requested"; readonly record: RunnerRetirement }
 	| { readonly _tag: "Escalating"; readonly record: RunnerRetirement }
@@ -341,25 +387,16 @@ export interface RunRelease {
 }
 
 type StopAction =
-	| { readonly _tag: "Commit"; readonly record: RunnerRetirement }
 	| { readonly _tag: "SendShutdown" }
 	| { readonly _tag: "Signal"; readonly signal: "SIGTERM" | "SIGKILL" }
 	| { readonly _tag: "Settle" | "Evict" | "Prune" | "Notice" };
-type StopObservation =
-	| {
-			readonly _tag: "Request";
-			readonly record: RunnerRetirement;
-			readonly waiters: Deferred.Deferred<void, SessionFailure>;
-	  }
-	| { readonly _tag: "Committed"; readonly record: RunnerRetirement }
-	| { readonly _tag: "CommitFailed" }
-	| {
-			readonly _tag: "Observe";
-			readonly now: number;
-			readonly processes: RunnerRetirementObservation;
-			readonly retry: boolean;
-			readonly notice: boolean;
-	  };
+type StopObservation = {
+	readonly _tag: "Observe";
+	readonly now: number;
+	readonly processes: RunnerRetirementObservation;
+	readonly retry: boolean;
+	readonly notice: boolean;
+};
 
 const stoppedState = (record: RunnerRetirement): RunnerStop => ({
 	_tag:
@@ -379,17 +416,8 @@ export const decideRunnerStop = (
 	state: RunnerStop,
 	observation: StopObservation,
 ): { readonly state: RunnerStop; readonly actions: readonly StopAction[] } => {
-	if (observation._tag === "Request")
-		return state._tag === "Running"
-			? {
-					state: { _tag: "Committing", waiters: observation.waiters },
-					actions: [{ _tag: "Commit", record: observation.record }],
-				}
-			: { state, actions: [] };
-	if (observation._tag === "Committed")
-		return { state: stoppedState(observation.record), actions: [] };
-	if (observation._tag === "CommitFailed")
-		return { state: { _tag: "Running" }, actions: [] };
+	// Committing belongs to the reconciler's commit worker: it never sends
+	// shutdown, signals, settles or prunes.
 	if (
 		state._tag === "Running" ||
 		state._tag === "Committing" ||
@@ -473,7 +501,7 @@ export const makeRunnerStopReconciler = (options: {
 	) => Effect.Effect<Hold, StoreFault>;
 	readonly release?: <A>(
 		input: RunRelease,
-		stop?: Effect.Effect<A, unknown>,
+		stop?: (serving: StopTarget) => Effect.Effect<A, unknown>,
 	) => Effect.Effect<
 		{
 			readonly released: boolean;
@@ -517,6 +545,7 @@ export const makeRunnerStopReconciler = (options: {
 					row.role === "serving" &&
 					row.retiredAt === null,
 			)?.runnerId;
+		/** Fills the routing cache; no Stop decision reads it. */
 		const refreshRows = () =>
 			Effect.gen(function* () {
 				if (!options.receipts)
@@ -526,19 +555,80 @@ export const makeRunnerStopReconciler = (options: {
 				for (const row of recovered.rows) rows.set(row.runnerId, row);
 				return recovered;
 			});
-		const retirementForRow = (row: RunnerRow): RunnerRetirement => ({
-			runnerId: row.runnerId,
-			sessionId: row.sessionId,
-			driverKind: row.driverKind,
-			identity: row.identity,
-			reaper: row.reaper,
-			members: [],
-			signalLog: [],
-			signal: { tag: "None" },
-			retirement: { tag: "Watching" },
-			ownedRunIds: [],
-			retiredAt: clock.currentTimeMillisUnsafe(),
-		});
+		const observe = (record: RunnerRetirement) =>
+			decideRunnerKill(
+				record,
+				observeRunnerRetirement(record, options.processTable),
+			).record;
+		/** The durable commit; without a store the routing rows are the store. */
+		const commitStop = (
+			target: StopTarget,
+			reason: StopReason,
+			inWrite: boolean,
+		): Effect.Effect<StopCommit, unknown> => {
+			if (options.receipts)
+				return (
+					inWrite
+						? options.receipts.requestStopMutation
+						: options.receipts.requestStop
+				)(target, reason, observe);
+			return Effect.suspend(() => {
+				const row = rows.get(target.runnerId);
+				if (row && row.retiredAt !== null)
+					return reason._tag === "Superseded" &&
+						serving(target.sessionId) !== reason.successor
+						? Effect.fail("A different Stop won the swap")
+						: Effect.succeed<StopCommit>({
+								_tag: "Requested",
+								record: {
+									...stopRecord(target, row.retiredAt),
+									stopReason: JSON.stringify(reason),
+								},
+								candidates: [],
+								session: [...rows.values()].filter(
+									(cached) => cached.sessionId === target.sessionId,
+								),
+							});
+				if (row?.role === "serving" && reason._tag === "CandidateAbandoned")
+					return Effect.succeed<StopCommit>({ _tag: "Ignored" });
+				const retiredAt = clock.currentTimeMillisUnsafe();
+				const candidates =
+					row?.role === "serving" && reason._tag !== "Superseded"
+						? [...rows.values()]
+								.filter(
+									(candidate) =>
+										candidate.sessionId === target.sessionId &&
+										candidate.role === "candidate" &&
+										candidate.retiredAt === null,
+								)
+								.map((candidate) =>
+									observe(stopRecord({ ...candidate, members: [] }, retiredAt)),
+								)
+						: [];
+				const retired = new Set([
+					target.runnerId,
+					...candidates.map((candidate) => candidate.runnerId),
+				]);
+				return Effect.succeed<StopCommit>({
+					_tag: "Requested",
+					record: {
+						...observe(stopRecord(target, retiredAt)),
+						stopReason: JSON.stringify(reason),
+					},
+					candidates,
+					session: [...rows.values()]
+						.filter((cached) => cached.sessionId === target.sessionId)
+						.map((cached) =>
+							retired.has(cached.runnerId)
+								? { ...cached, retiredAt }
+								: reason._tag === "Superseded" &&
+										cached.runnerId === reason.successor
+									? { ...cached, role: "serving" as const }
+									: cached,
+						),
+				});
+			});
+		};
 		const tick = (runnerId: string, retry = false, notice = false) =>
 			Effect.gen(function* () {
 				let retryPending = retry;
@@ -578,8 +668,6 @@ export const makeRunnerStopReconciler = (options: {
 					let record: RunnerRetirement = state.record;
 					for (const action of decision.actions) {
 						switch (action._tag) {
-							case "Commit":
-								break;
 							case "SendShutdown":
 								yield* options
 									.shutdown(record)
@@ -714,83 +802,20 @@ export const makeRunnerStopReconciler = (options: {
 				}).pipe(Effect.ensuring(Effect.sync(() => watching.delete(runnerId)))),
 			);
 		};
-		const prepareStop = (record: RunnerRetirement, reason: StopReason) =>
-			Effect.gen(function* () {
-				const registered = options.receipts
-					? yield* options.receipts.runners()
-					: { rows: [...rows.values()], rejected: [] };
-				const rejected = registered.rejected.find(
-					(error) => error.runnerId === record.runnerId,
-				);
-				if (rejected) return yield* Effect.fail(rejected);
-				const candidates =
-					reason._tag !== "Superseded" &&
-					registered.rows.some(
-						(row) =>
-							row.runnerId === record.runnerId &&
-							row.role === "serving" &&
-							row.retiredAt === null,
-					)
-						? registered.rows
-								.filter(
-									(row) =>
-										row.sessionId === record.sessionId &&
-										row.role === "candidate" &&
-										row.retiredAt === null,
-								)
-								.map((row) => {
-									const candidate = retirementForRow(row);
-									return decideRunnerKill(
-										candidate,
-										observeRunnerRetirement(candidate, options.processTable),
-									).record;
-								})
-						: [];
-				return { candidates, registered: registered.rows };
-			});
 		const afterStop = (
-			record: RunnerRetirement,
-			reason: StopReason,
-			snapshot: {
-				readonly candidates: readonly RunnerRetirement[];
-				readonly registered: readonly RunnerRow[];
-			},
-			waiters: Deferred.Deferred<void, SessionFailure>,
+			commit: Extract<StopCommit, { readonly _tag: "Requested" }>,
+			waiters: Deferred.Deferred<"Requested" | "Ignored", SessionFailure>,
 		) =>
 			Effect.gen(function* () {
-				const committed = record;
-				// Update the route cache before cleanup can release admission waiters.
-				// A failed refresh cannot undo the already committed transaction.
-				for (const retired of [committed, ...snapshot.candidates]) {
-					const row =
-						rows.get(retired.runnerId) ??
-						snapshot.registered.find(
-							(row) => row.runnerId === retired.runnerId,
-						);
-					if (row)
-						rows.set(retired.runnerId, {
-							...row,
-							retiredAt: retired.retiredAt,
-						});
-				}
-				if (reason._tag === "Superseded") {
-					const successor =
-						rows.get(reason.successor) ??
-						snapshot.registered.find(
-							(row) => row.runnerId === reason.successor,
-						);
-					if (successor)
-						rows.set(successor.runnerId, { ...successor, role: "serving" });
-				}
-				states.set(
-					record.runnerId,
-					decideRunnerStop(get(record.runnerId), {
-						_tag: "Committed",
-						record: committed,
-					}).state,
-				);
+				const { record } = commit;
+				// The committing transaction's rows replace the session's routing
+				// cache before cleanup can release admission waiters.
+				for (const row of rows.values())
+					if (row.sessionId === record.sessionId) rows.delete(row.runnerId);
+				for (const row of commit.session) rows.set(row.runnerId, row);
+				states.set(record.runnerId, stoppedState(record));
 				yield* options
-					.committed(committed)
+					.committed(record)
 					.pipe(
 						Effect.catchCause((cause) =>
 							Effect.logWarning(
@@ -799,91 +824,105 @@ export const makeRunnerStopReconciler = (options: {
 							),
 						),
 					);
-				yield* Deferred.succeed(waiters, undefined);
+				yield* Deferred.succeed(waiters, "Requested");
 				watch(record.runnerId);
-				for (const candidate of snapshot.candidates) {
+				for (const candidate of commit.candidates) {
 					states.set(candidate.runnerId, stoppedState(candidate));
 					watch(candidate.runnerId);
 				}
 			});
+		/**
+		 * The one owner of a Stop commit. A store fault leaves the runner
+		 * Committing and re-runs the whole commit after the 4.8 backoff. Only a
+		 * per-row decode or identity rejection, a refused swap or a defect fails
+		 * the waiters.
+		 */
+		const commitWorker = (
+			target: StopTarget,
+			reason: StopReason,
+			waiters: Deferred.Deferred<"Requested" | "Ignored", SessionFailure>,
+		) =>
+			Effect.gen(function* () {
+				for (let attempt = 1; ; attempt++) {
+					const result = yield* Effect.exit(
+						commitStop(target, reason, false).pipe(
+							Effect.uninterruptible,
+							Effect.provideService(Scheduler.PreventSchedulerYield, true),
+						),
+					);
+					if (Exit.isSuccess(result)) {
+						if (result.value._tag === "Requested")
+							return yield* afterStop(result.value, waiters);
+						states.set(target.runnerId, { _tag: "Running" });
+						return yield* Deferred.succeed(waiters, "Ignored");
+					}
+					const cause = Option.getOrUndefined(
+						Failure.firstFailure(result.cause),
+					);
+					if (
+						reason._tag === "Superseded" ||
+						cause === undefined ||
+						cause instanceof RunnerRetirementDecodeError ||
+						cause instanceof RunnerSlotError
+					) {
+						states.set(target.runnerId, { _tag: "Running" });
+						yield* Effect.logError(
+							`Runner stop commit rejected: runnerId=${target.runnerId}`,
+							result.cause,
+						);
+						return yield* Deferred.fail(
+							waiters,
+							runnerFailure("stop runner", result.cause),
+						);
+					}
+					yield* Effect.logWarning(
+						`Runner stop commit failed; retrying: runnerId=${target.runnerId} attempt=${attempt}`,
+						result.cause,
+					);
+					yield* Effect.sleep(sendRetryBackoff(attempt));
+				}
+			}).pipe(Effect.onInterrupt(() => Deferred.interrupt(waiters)));
+		/** Registers a Stop intent; the reconciler scope owns its commit. */
+		const registerStop = (target: StopTarget, reason: StopReason) => {
+			const waiters = Deferred.makeUnsafe<
+				"Requested" | "Ignored",
+				SessionFailure
+			>();
+			states.set(target.runnerId, { _tag: "Committing", waiters });
+			runFork(commitWorker(target, reason, waiters));
+			return waiters;
+		};
+		/**
+		 * Registers the intent before yielding. Cancelling a caller cancels only
+		 * its wait; the reconciler scope owns the commit.
+		 */
 		const requestStop = (
-			record: RunnerRetirement,
+			target: StopTarget,
 			reason: StopReason = { _tag: "Explicit" },
-		): Effect.Effect<void, SessionFailure> =>
-			Effect.uninterruptible(
-				Effect.gen(function* () {
-					let current = get(record.runnerId);
+		): Effect.Effect<"Requested" | "Ignored", SessionFailure> =>
+			Effect.gen(function* () {
+				while (true) {
+					const current = get(target.runnerId);
 					if (current._tag === "Committing") {
+						// After Ignored a joiner commits its own reason.
 						yield* Deferred.await(current.waiters);
-						current = get(record.runnerId);
+						continue;
 					}
 					if (current._tag !== "Running") {
-						if (
-							reason._tag === "Superseded" &&
-							(yield* refreshRows().pipe(
-								Effect.mapError((cause) =>
-									runnerFailure("read serving runner", cause),
-								),
-							)).rows.find(
-								(row) =>
-									row.sessionId === record.sessionId &&
-									row.role === "serving" &&
-									row.retiredAt === null,
-							)?.runnerId !== reason.successor
-						)
-							return yield* Effect.fail(
-								runnerFailure("stop runner", "A different Stop won the swap"),
+						// A repeated swap is checked against the committed row.
+						if (reason._tag === "Superseded")
+							yield* commitStop(target, reason, false).pipe(
+								Effect.mapError((cause) => runnerFailure("stop runner", cause)),
 							);
-						return;
+						return "Requested";
 					}
-					const waiters = yield* Deferred.make<void, SessionFailure>();
-					const decision = decideRunnerStop(current, {
-						_tag: "Request",
-						record,
-						waiters,
-					});
-					states.set(record.runnerId, decision.state);
-					const observed = decideRunnerKill(
-						record,
-						observeRunnerRetirement(record, options.processTable),
-					).record;
-					const result = yield* Effect.exit(
-						Effect.gen(function* () {
-							const { candidates, registered } = yield* prepareStop(
-								record,
-								reason,
-							);
-							const committed = options.receipts
-								? yield* options.receipts.requestStop(
-										observed,
-										reason,
-										candidates,
-									)
-								: { ...observed, stopReason: JSON.stringify(reason) };
-							return { committed, candidates, registered };
-						}),
-					);
-					if (Exit.isFailure(result)) {
-						states.set(
-							record.runnerId,
-							decideRunnerStop(decision.state, { _tag: "CommitFailed" }).state,
-						);
-						// The store fault stays classifiable by toStoreFault for its callers.
-						const failure = {
-							...runnerFailure("stop runner", result.cause),
-							cause: Option.getOrUndefined(Failure.firstFailure(result.cause)),
-						};
-						yield* Deferred.fail(waiters, failure);
-						return yield* Effect.fail(failure);
-					}
-					yield* afterStop(
-						result.value.committed,
-						reason,
-						result.value,
-						waiters,
-					);
-				}).pipe(Effect.provideService(Scheduler.PreventSchedulerYield, true)),
-			);
+					const waiters = registerStop(target, reason);
+					// The swap's caller must learn whether its promotion committed.
+					return yield* reason._tag === "Superseded"
+						? Effect.uninterruptible(Deferred.await(waiters))
+						: Deferred.await(waiters);
+				}
+			});
 		const release = (input: RunRelease): Effect.Effect<void, SessionFailure> =>
 			Effect.uninterruptible(
 				Effect.gen(function* () {
@@ -914,81 +953,44 @@ export const makeRunnerStopReconciler = (options: {
 							yield* options.released?.(input) ?? Effect.void;
 						return;
 					}
-					const waiters = yield* Deferred.make<void, SessionFailure>();
+					const waiters = yield* Deferred.make<
+						"Requested" | "Ignored",
+						SessionFailure
+					>();
 					states.set(input.runnerId, { _tag: "Committing", waiters });
 					const result = yield* Effect.exit(
-						persistRelease(
-							input,
-							Effect.gen(function* () {
-								// releaseRun invokes this only for its SQL serving row, in
-								// the same transaction as the matching release evidence.
-								const registered = yield* refreshRows();
-								const rejected = registered.rejected.find(
-									(error) => error.runnerId === input.runnerId,
-								);
-								if (rejected) return yield* Effect.fail(rejected);
-								const row = registered.rows.find(
-									(row) =>
-										row.runnerId === input.runnerId &&
-										row.sessionId === input.sessionId,
-								);
-								if (!row)
-									return yield* Effect.fail(
-										runnerFailure(
-											"release run",
-											"Serving runner row is missing",
-										),
-									);
-								const record = retirementForRow(row);
-								const snapshot = yield* prepareStop(record, reason);
-								const observed = decideRunnerKill(
-									record,
-									observeRunnerRetirement(record, options.processTable),
-								).record;
-								const committed = options.receipts
-									? yield* options.receipts.requestStopMutation(
-											observed,
-											reason,
-											snapshot.candidates,
-										)
-									: { ...observed, stopReason: JSON.stringify(reason) };
-								return { record: committed, snapshot };
-							}),
+						// releaseRun invokes this only for the serving row its own
+						// transaction read, beside the matching release evidence.
+						persistRelease(input, (serving) =>
+							commitStop(serving, reason, true),
 						),
 					);
 					if (Exit.isFailure(result)) {
 						states.set(input.runnerId, current);
-						const failure = {
+						// Joiners recheck and commit their own Stop.
+						yield* Deferred.succeed(waiters, "Ignored");
+						return yield* Effect.fail({
 							...runnerFailure("release run", result.cause),
 							cause:
 								Option.getOrUndefined(Failure.firstFailure(result.cause)) ??
 								result.cause,
-						};
-						yield* Deferred.fail(waiters, failure);
-						return yield* Effect.fail(failure);
+						});
 					}
 					// The handle must leave the releasing runner before revocation or
 					// admission waiters can trigger any retirement cleanup.
 					if (result.value.released)
 						yield* options.released?.(input) ?? Effect.void;
-					if (result.value.released && result.value.stop)
-						yield* afterStop(
-							result.value.stop.record,
-							reason,
-							result.value.stop.snapshot,
-							waiters,
-						);
+					if (result.value.released && result.value.stop?._tag === "Requested")
+						yield* afterStop(result.value.stop, waiters);
 					else {
 						states.set(input.runnerId, current);
-						yield* Deferred.succeed(waiters, undefined);
+						yield* Deferred.succeed(waiters, "Ignored");
 					}
 				}).pipe(Effect.provideService(Scheduler.PreventSchedulerYield, true)),
 			);
 		return {
 			state: get,
 			serving,
-			servingEffect: (sessionId: string) =>
-				refreshRows().pipe(Effect.map(() => serving(sessionId))),
 			register: (
 				runnerId: string,
 				identity: RunnerCursorIdentity,
@@ -1068,14 +1070,18 @@ export const makeRunnerStopReconciler = (options: {
 						states.set(record.runnerId, stoppedState(record));
 						watch(record.runnerId);
 					}
+					// Startup registers these intents and does not wait on their
+					// commits; a busy store must not hold up reattachment.
 					for (const row of recovered.rows) {
 						if (options.recoverable && !(yield* options.recoverable(row)))
 							continue;
-						if (row.retiredAt !== null) continue;
+						if (row.retiredAt !== null || get(row.runnerId)._tag !== "Running")
+							continue;
 						if (row.role === "candidate")
-							yield* requestStop(retirementForRow(row), {
-								_tag: "CandidateAbandoned",
-							});
+							registerStop(
+								{ ...row, members: [] },
+								{ _tag: "CandidateAbandoned" },
+							);
 						else if (row.identity.pid !== undefined) {
 							const observed = options.processTable.inspect(row.identity.pid);
 							if (
@@ -1085,7 +1091,7 @@ export const makeRunnerStopReconciler = (options: {
 									observed.startTime !== undefined &&
 									observed.startTime !== row.identity.startTime)
 							)
-								yield* requestStop(retirementForRow(row), { _tag: "Exited" });
+								registerStop({ ...row, members: [] }, { _tag: "Exited" });
 						}
 					}
 					return {

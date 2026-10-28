@@ -137,7 +137,7 @@ describe("durable run holder", () => {
 							transmission,
 							reason: "Refused",
 						},
-						stop,
+						() => stop,
 					);
 				expect(yield* release(0)).toEqual({ released: false, stop: undefined });
 				expect(stops).toBe(0);
@@ -187,9 +187,10 @@ describe("durable run holder", () => {
 							transmission: 1,
 							reason: "JournalAbsent",
 						},
-						Effect.sync(() => {
-							stopped = true;
-						}),
+						() =>
+							Effect.sync(() => {
+								stopped = true;
+							}),
 					),
 				).toEqual({ released: true, stop: undefined });
 				expect(stopped).toBe(false);

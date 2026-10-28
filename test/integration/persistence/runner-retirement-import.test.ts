@@ -30,16 +30,25 @@ it.live(
 			expect(
 				yield* sql`SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_runner_serving_session'`,
 			).toHaveLength(1);
+			// A lost registration race is a value (CONTRACT 6.10); SQLite itself
+			// refuses a second serving row.
 			expect(
-				(yield* Effect.result(
-					receipts.register("third", { sessionId: "session" }, "serving"),
-				))._tag,
-			).toBe("Failure");
+				yield* receipts.register("third", { sessionId: "session" }, "serving"),
+			).toBe("Lost");
 			expect(
-				(yield* Effect.result(
-					receipts.register("candidate", { sessionId: "session" }, "candidate"),
-				))._tag,
-			).toBe("Success");
+				yield* Effect.flip(
+					sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, role) VALUES ('fourth', 0, 'session', 'serving')`,
+				),
+			).toMatchObject({
+				reason: { constraint: "claude_runner_cursors.session_id" },
+			});
+			expect(
+				yield* receipts.register(
+					"candidate",
+					{ sessionId: "session" },
+					"candidate",
+				),
+			).toBe("Registered");
 		}).pipe(
 			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 		),

@@ -2,9 +2,10 @@ import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { it } from "@effect/vitest";
 import {
+	Cause,
 	Clock,
 	Deferred,
 	Effect,
@@ -18,7 +19,12 @@ import {
 	Stream,
 } from "effect";
 import { SqlClient, Statement } from "effect/sql";
-import { ConnectionError, SqlError, UnknownError } from "effect/sql/SqlError";
+import {
+	ConnectionError,
+	LockTimeoutError,
+	SqlError,
+	UnknownError,
+} from "effect/sql/SqlError";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
@@ -109,11 +115,21 @@ import {
 	reserveTestRun,
 } from "../../helpers/runner-provider-admission.js";
 
-const spawned = vi.hoisted(() => ({ spawn: vi.fn() }));
-vi.mock("node:child_process", async (original) => ({
-	...(await original<typeof import("node:child_process")>()),
-	spawn: spawned.spawn,
+const spawned = vi.hoisted(() => ({
+	spawn: vi.fn(),
+	// `ps` command lines by pid, for fake runners that must pass the pid match.
+	commands: new Map<string, string>(),
 }));
+vi.mock("node:child_process", async (original) => {
+	const actual = await original<typeof import("node:child_process")>();
+	return {
+		...actual,
+		spawn: spawned.spawn,
+		execFileSync: (...args: Parameters<typeof actual.execFileSync>) =>
+			(args[0] === "ps" && spawned.commands.get(args[1]?.at(-1) ?? "")) ||
+			actual.execFileSync(...args),
+	};
+});
 
 const retirementFixture = (
 	recover = true,
@@ -9067,6 +9083,498 @@ it.effect(
 						}),
 					),
 				);
+			}),
+		),
+);
+
+// F55 and F57: a Stop commit that meets a store fault belongs to the
+// reconciler. The caller neither retries it nor swallows it.
+const failStopFences = (
+	sql: SqlClient.SqlClient,
+	fails: (runnerId: unknown) => boolean,
+	error = new SqlError({
+		reason: new ConnectionError({ cause: "Stop commit unavailable" }),
+	}),
+) =>
+	Effect.gen(function* () {
+		const fences: unknown[] = [];
+		const connection = yield* Effect.scoped(sql.reserve);
+		const execute = connection.execute;
+		const injected = vi
+			.spyOn(connection, "execute")
+			.mockImplementation((query, params, transform) => {
+				if (
+					query.includes(
+						"SELECT retired_at, role, session_id FROM claude_runner_cursors",
+					)
+				) {
+					fences.push(params[0]);
+					if (fails(params[0])) return Effect.fail(error);
+				}
+				return execute(query, params, transform);
+			});
+		yield* Effect.addFinalizer(() => Effect.sync(() => injected.mockRestore()));
+		return fences;
+	});
+
+it.effect(
+	"F55 an upgrade candidate's unavailable Stop commit lands through the reconciler with one shutdown",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture(false);
+				const connect = vi.mocked(f.driver.connect).getMockImplementation();
+				if (!connect) return yield* Effect.die("missing connect");
+				vi.mocked(f.driver.connect).mockImplementation((options) =>
+					connect({
+						...options,
+						onHello: (hello, connection, replay) => {
+							const original = options.runnerId === "131313131313";
+							if (!original) {
+								const command = connection.commandEffect.bind(connection);
+								vi.spyOn(connection, "commandEffect").mockImplementation(
+									(id, payload, attempt) =>
+										payload.type === "pre-warm"
+											? Effect.fail(runnerFailure("pre-warm", "warm failed"))
+											: command(id, payload, attempt),
+								);
+							}
+							return options.onHello(
+								{
+									...hello,
+									buildId: original ? "previous-build" : hello.buildId,
+								},
+								connection,
+								replay,
+							);
+						},
+					}),
+				);
+				yield* f.manager.recoverEffect;
+				let down = true;
+				const fences = yield* failStopFences(
+					f.sql,
+					(runnerId) => down && runnerId !== "131313131313",
+				);
+				const old = f.attachments[0];
+				if (!old?.onUpgradeState) return yield* Effect.die("missing old");
+				old.onUpgradeState({
+					quiescent: true,
+					revision: 1,
+					snapshot: {
+						input: { ...f.input, folderSource: "implicitDefault" },
+						options: {},
+					},
+				});
+				yield* TestClock.adjust(0);
+				const candidate = f.attachments[1];
+				if (!candidate) return yield* Effect.die("missing candidate");
+				const shutdowns = () =>
+					f.commands.filter(
+						(command) =>
+							command.runnerId === candidate.runnerId &&
+							command.type === "shutdown",
+					);
+				expect(fences).toEqual([candidate.runnerId]);
+				expect(
+					yield* f.sql`SELECT retired_at, role FROM claude_runner_cursors WHERE runner_id = ${candidate.runnerId}`,
+				).toEqual([{ retired_at: null, role: "candidate" }]);
+				expect(shutdowns()).toEqual([]);
+				down = false;
+				yield* TestClock.adjust("1 second");
+				expect(fences).toEqual([candidate.runnerId, candidate.runnerId]);
+				expect(
+					yield* f.sql`SELECT retired_at, stop_reason FROM claude_runner_cursors WHERE runner_id = ${candidate.runnerId}`,
+				).toEqual([
+					{ retired_at: 1000, stop_reason: '{"_tag":"CandidateAbandoned"}' },
+				]);
+				expect(shutdowns()).toHaveLength(1);
+				expect(
+					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE role = 'serving' AND retired_at IS NULL`,
+				).toEqual([{ runner_id: "131313131313" }]);
+				// The upgrade's ensuring waits out the candidate's bounded Stop window.
+				yield* TestClock.adjust("4 seconds");
+			}),
+		),
+);
+
+it.effect(
+	"F57 failure cleanup's unavailable Stop commit waits for the reconciler, with no caller retry",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture();
+				let down = true;
+				const fences = yield* failStopFences(f.sql, () => down);
+				const old = f.attachments[0];
+				if (!old) return yield* Effect.die("missing runner");
+				old.onClose(runnerFailure("socket", "runner exited"));
+				yield* TestClock.adjust("500 millis");
+				expect(fences).toEqual(["131313131313"]);
+				expect(
+					yield* f.sql`SELECT retired_at FROM claude_runner_cursors WHERE runner_id = '131313131313'`,
+				).toEqual([{ retired_at: null }]);
+				down = false;
+				yield* TestClock.adjust("500 millis");
+				expect(fences).toEqual(["131313131313", "131313131313"]);
+				expect(
+					yield* f.sql`SELECT retired_at, stop_reason FROM claude_runner_cursors WHERE runner_id = '131313131313'`,
+				).toEqual([{ retired_at: 1000, stop_reason: '{"_tag":"Exited"}' }]);
+			}),
+		),
+);
+
+it.effect(
+	"32.29.3 R1 restart stops a deleted session's serving runner after its identity hello",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture(false);
+				yield* f.sql`DELETE FROM session_providers WHERE session_id = 's'`;
+				yield* f.sql`DELETE FROM sessions WHERE id = 's'`;
+				const recovering = yield* f.manager.recoverEffect.pipe(
+					Effect.forkChild,
+				);
+				yield* TestClock.adjust(0);
+				expect(
+					yield* f.sql`SELECT retired_at, stop_reason, role FROM claude_runner_cursors WHERE runner_id = '131313131313'`,
+				).toEqual([
+					{
+						retired_at: 0,
+						stop_reason: '{"_tag":"EndSession"}',
+						role: "serving",
+					},
+				]);
+				expect(
+					f.commands.filter((command) => command.type === "shutdown"),
+				).toEqual([{ runnerId: "131313131313", type: "shutdown" }]);
+				// Recovery waits for the stopped runner to exit.
+				f.processes.delete(100_088);
+				yield* TestClock.adjust("1 second");
+				yield* Fiber.join(recovering);
+			}),
+		),
+);
+
+it.effect(
+	"32.29.3 R2 startup never waits on a Stop commit on any recovery path while writes stay busy",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture(false);
+				const runners = {
+					orphan: { runnerId: "515151515151", sessionId: "gone", pid: 100_051 },
+					incompatible: {
+						runnerId: "525252525252",
+						sessionId: "b",
+						pid: 100_052,
+					},
+					dead: { runnerId: "535353535353", sessionId: "c", pid: 100_053 },
+					survivor: { runnerId: "555555555555", sessionId: "e", pid: 100_055 },
+					defect: { runnerId: "545454545454", sessionId: "d", pid: 100_054 },
+				};
+				// Every path but the defect runs before the live runner: newest first.
+				for (const [index, runner] of Object.values(runners).entries()) {
+					if (runner.sessionId !== "gone")
+						yield* f.sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES (${runner.sessionId}, 'test-project', 'claude', 1, 1)`;
+					yield* f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, driver_kind, pid, start_time, role) VALUES (${runner.runnerId}, 0, ${runner.sessionId}, 'claude', ${runner.pid}, 'original', 'serving')`;
+					const socketPath = join(dirname(f.socketPath), runner.runnerId);
+					writeFileSync(
+						`${socketPath}.json`,
+						JSON.stringify({
+							driverKind: "claude",
+							runnerId: runner.runnerId,
+							sessionId: runner.sessionId,
+							socketPath,
+							buildId: runnerBuildId(),
+							pid: runner.pid,
+							startTime: "original",
+							registeredAt: runner === runners.defect ? 0 : 10 - index,
+						}),
+					);
+					f.processes.set(runner.pid, {
+						state: "running",
+						startTime: "original",
+					});
+					spawned.commands.set(
+						String(runner.pid),
+						`node runner ${socketPath} ${runner.runnerId}`,
+					);
+				}
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => spawned.commands.clear()),
+				);
+				const connect = vi.mocked(f.driver.connect).getMockImplementation();
+				if (!connect) return yield* Effect.die("missing connect");
+				vi.mocked(f.driver.connect).mockImplementation((options) => {
+					switch (options.runnerId) {
+						case runners.incompatible.runnerId:
+							return Effect.fail({
+								...runnerFailure(
+									"runner hello",
+									"Runner predates run ownership",
+								),
+								code: "runner_incompatible",
+							});
+						case runners.dead.runnerId:
+							f.processes.delete(runners.dead.pid);
+							return Effect.fail(
+								runnerFailure("connect", "runner socket gone"),
+							);
+						case runners.survivor.runnerId:
+							return Effect.fail(
+								runnerFailure("connect", "runner socket busy"),
+							);
+						case runners.defect.runnerId:
+							return Effect.die("runner socket defect");
+						default:
+							return connect({
+								...options,
+								onHello: (hello, connection, replay) =>
+									options.onHello(
+										{
+											...hello,
+											...(options.runnerId === runners.orphan.runnerId
+												? { sessionId: runners.orphan.sessionId }
+												: {}),
+										},
+										connection,
+										replay,
+									),
+							});
+					}
+				});
+				const stopped = Object.values(runners).map((runner) => runner.runnerId);
+				let busy = true;
+				const fences = yield* failStopFences(
+					f.sql,
+					(runnerId) => busy && stopped.includes(String(runnerId)),
+					new SqlError({
+						reason: new LockTimeoutError({ cause: "database is locked" }),
+					}),
+				);
+				const recovering = yield* f.manager.recoverEffect.pipe(
+					Effect.forkChild,
+				);
+				yield* TestClock.adjust("10 seconds");
+				// The defect still fails startup, as it did before; nothing waits on a Stop.
+				expect(recovering.pollUnsafe()?._tag).toBe("Failure");
+				expect(f.attachments.map((options) => options.runnerId)).toContain(
+					"131313131313",
+				);
+				expect(new Set(fences)).toEqual(new Set(stopped));
+				expect(
+					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE retired_at IS NULL ORDER BY runner_id`,
+				).toEqual(
+					["131313131313", ...stopped]
+						.sort()
+						.map((runnerId) => ({ runner_id: runnerId })),
+				);
+				busy = false;
+				yield* TestClock.adjust("1 minute");
+				expect(
+					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE retired_at IS NULL`,
+				).toEqual([{ runner_id: "131313131313" }]);
+			}),
+		),
+);
+
+it.effect(
+	"32.29.3 R3 a rejected startup Stop fails only its runner while recovery reattaches the rest",
+	() => {
+		const errors: string[] = [];
+		return runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture(false);
+				const orphan = "515151515151";
+				const rejected = "535353535353";
+				yield* f.sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('c', 'test-project', 'claude', 1, 1)`;
+				for (const [runnerId, sessionId, pid, registeredAt] of [
+					[orphan, "gone", 100_051, 10],
+					[rejected, "c", 100_053, 9],
+				] as const) {
+					yield* f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, driver_kind, pid, start_time, role) VALUES (${runnerId}, 0, ${sessionId}, 'claude', ${pid}, 'original', 'serving')`;
+					const socketPath = join(dirname(f.socketPath), runnerId);
+					writeFileSync(
+						`${socketPath}.json`,
+						JSON.stringify({
+							driverKind: "claude",
+							runnerId,
+							sessionId,
+							socketPath,
+							buildId: runnerBuildId(),
+							pid,
+							startTime: "original",
+							registeredAt,
+						}),
+					);
+					f.processes.set(pid, { state: "running", startTime: "original" });
+					spawned.commands.set(
+						String(pid),
+						`node runner ${socketPath} ${runnerId}`,
+					);
+				}
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => spawned.commands.clear()),
+				);
+				const connect = vi.mocked(f.driver.connect).getMockImplementation();
+				if (!connect) return yield* Effect.die("missing connect");
+				vi.mocked(f.driver.connect).mockImplementation((options) =>
+					options.runnerId === rejected
+						? // The row moves to another session after recover read it, so
+							// the dead runner's Stop meets the identity rejection.
+							f.sql`UPDATE claude_runner_cursors SET session_id = 'moved' WHERE runner_id = ${rejected}`.pipe(
+								Effect.orDie,
+								Effect.andThen(Effect.sync(() => f.processes.delete(100_053))),
+								Effect.andThen(
+									Effect.fail(runnerFailure("connect", "runner socket gone")),
+								),
+							)
+						: connect({
+								...options,
+								onHello: (hello, connection, replay) =>
+									options.onHello(
+										{
+											...hello,
+											...(options.runnerId === orphan
+												? { sessionId: "gone" }
+												: {}),
+										},
+										connection,
+										replay,
+									),
+							}),
+				);
+				const recovering = yield* f.manager.recoverEffect.pipe(
+					Effect.forkChild,
+				);
+				yield* TestClock.adjust("10 seconds");
+				expect(recovering.pollUnsafe()?._tag).toBe("Success");
+				expect(
+					vi
+						.mocked(f.driver.connect)
+						.mock.calls.map(([options]) => options.runnerId),
+				).toEqual([orphan, rejected, "131313131313"]);
+				expect(f.attachments.map((options) => options.runnerId)).toEqual([
+					orphan,
+					"131313131313",
+				]);
+				expect(
+					yield* f.sql`SELECT runner_id, session_id, retired_at IS NOT NULL AS retired FROM claude_runner_cursors ORDER BY runner_id`,
+				).toEqual([
+					{ runner_id: "131313131313", session_id: "s", retired: 0 },
+					{ runner_id: orphan, session_id: "gone", retired: 1 },
+					{ runner_id: rejected, session_id: "moved", retired: 0 },
+				]);
+				expect(
+					f.commands.filter((command) => command.type === "shutdown"),
+				).toEqual([{ runnerId: orphan, type: "shutdown" }]);
+				expect(
+					errors.filter((line) =>
+						line.startsWith("Runner recovery stop failed"),
+					),
+				).toEqual([expect.stringContaining("Runner session changed")]);
+			}),
+		).pipe(
+			Effect.provide(
+				Logger.layer([
+					Logger.make((options) => {
+						if (options.logLevel === "Error")
+							errors.push(
+								`${[options.message].flat().join(" ")} ${Cause.pretty(options.cause)}`,
+							);
+					}),
+				]),
+			),
+		);
+	},
+);
+
+it.effect(
+	"32.29.3 R3 shutdown does not log a startup Stop still committing as failed",
+	() => {
+		const errors: string[] = [];
+		return runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture(false);
+				yield* f.sql`DELETE FROM session_providers WHERE session_id = 's'`;
+				yield* f.sql`DELETE FROM sessions WHERE id = 's'`;
+				yield* failStopFences(
+					f.sql,
+					() => true,
+					new SqlError({
+						reason: new LockTimeoutError({ cause: "database is locked" }),
+					}),
+				);
+				const recovering = yield* f.manager.recoverEffect.pipe(
+					Effect.forkChild,
+				);
+				yield* TestClock.adjust("5 seconds");
+				expect(recovering.pollUnsafe()?._tag).toBe("Success");
+				expect(
+					yield* f.sql`SELECT retired_at FROM claude_runner_cursors WHERE runner_id = '131313131313'`,
+				).toEqual([{ retired_at: null }]);
+			}),
+		).pipe(
+			Effect.provide(
+				Logger.layer([
+					Logger.make((options) => {
+						if (options.logLevel === "Error")
+							errors.push([options.message].flat().map(String).join(" "));
+					}),
+				]),
+			),
+			// The scope closed above, with the orphan's EndSession still committing.
+			Effect.andThen(
+				Effect.sync(() =>
+					expect(
+						errors.filter((line) =>
+							line.startsWith("Runner recovery stop failed"),
+						),
+					).toEqual([]),
+				),
+			),
+		);
+	},
+);
+
+it.effect(
+	"32.29.3 R1 restart reattaches the serving runner while a dead runner's Stop writes stay busy",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture(false);
+				// Another session's serving row whose process is gone.
+				yield* f.sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('other', 'test-project', 'claude', 1, 1)`;
+				yield* f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, driver_kind, pid, start_time, role) VALUES ('242424242424', 0, 'other', 'claude', 100099, 'gone', 'serving')`;
+				let busy = true;
+				const fences = yield* failStopFences(
+					f.sql,
+					(runnerId) => busy && runnerId === "242424242424",
+					new SqlError({
+						reason: new LockTimeoutError({ cause: "database is locked" }),
+					}),
+				);
+				const recovering = yield* f.manager.recoverEffect.pipe(
+					Effect.forkChild,
+				);
+				yield* TestClock.adjust("5 seconds");
+				expect(recovering.pollUnsafe()?._tag).toBe("Success");
+				expect(f.attachments.map((options) => options.runnerId)).toEqual([
+					"131313131313",
+				]);
+				// Attempts at 0 s, 1 s and 3 s; the next backoff ends at 7 s.
+				expect(fences).toEqual(Array(3).fill("242424242424"));
+				expect(
+					yield* f.sql`SELECT retired_at FROM claude_runner_cursors WHERE runner_id = '242424242424'`,
+				).toEqual([{ retired_at: null }]);
+				busy = false;
+				yield* TestClock.adjust("2 seconds");
+				expect(fences).toHaveLength(4);
+				// The landed Stop finds the process gone, settles it and prunes the row.
+				expect(
+					yield* f.sql`SELECT runner_id FROM claude_runner_cursors ORDER BY runner_id`,
+				).toEqual([{ runner_id: "131313131313" }]);
 			}),
 		),
 );

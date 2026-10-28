@@ -17,6 +17,7 @@ import {
 	makeRunnerReceiptStore,
 	type RunnerRetirement,
 	RunnerRetirementDecodeError,
+	type StopCommit,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
 import { makeRunnerStopReconciler } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { toStoreFault } from "../../../src/lib/provider/runner/send-settlement.js";
@@ -57,6 +58,9 @@ const decodedRetirement = {
 	stopState: "Requested",
 	stopReason: "Provider process stopped",
 } satisfies RunnerRetirement;
+// A Stop's record, as its committing transaction saved it.
+const stopped = (commit: StopCommit): RunnerRetirement =>
+	commit._tag === "Requested" ? commit.record : expect.unreachable("Ignored");
 
 const seedLegacy = (sql: SqlClient.SqlClient, signalled = true) =>
 	sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, retired_at, session_id, pid, start_time, owned_run_ids, signalled, driver_kind)
@@ -163,8 +167,8 @@ it.effect("composes release and Stop mutation in the caller's one commit", () =>
 		).toEqual([{ n: 0 }]);
 		yield* sql`DROP TRIGGER reject_stop`;
 		expect(yield* write).toMatchObject({
-			runnerId: "runner",
-			stopReason: '{"_tag":"Idle"}',
+			_tag: "Requested",
+			record: { runnerId: "runner", stopReason: '{"_tag":"Idle"}' },
 		});
 		expect(
 			yield* sql`SELECT runner_id, held_transmission FROM provider_runs WHERE id = 'held'`,
@@ -184,6 +188,7 @@ it.effect(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const receipts = yield* makeRunnerReceiptStore(sql);
+			yield* TestClock.setTime(100);
 			yield* receipts.register("runner", retirement, "serving");
 			yield* receipts.register("candidate", retirement, "candidate");
 			yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('session', 'test-project', 'cursor', 1, 1)`;
@@ -219,26 +224,33 @@ it.effect(
 		}).pipe(Effect.provide(testLayer)),
 );
 
+// The candidates come from the committing transaction, never a caller's
+// snapshot; `observe` records each one's process group there.
 it.effect(
-	"a serving Stop retires all candidates atomically and refuses missing snapshots",
+	"a serving Stop retires every candidate its own transaction reads",
 	() =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const receipts = yield* makeRunnerReceiptStore(sql);
+			yield* TestClock.setTime(100);
 			yield* receipts.register("runner", retirement, "serving");
 			yield* receipts.register("candidate", retirement, "candidate");
-			expect(
-				(yield* Effect.result(receipts.requestStop(decodedRetirement)))._tag,
-			).toBe("Failure");
-			expect((yield* receipts.retirements()).rows).toEqual([]);
-			const candidate = {
-				...decodedRetirement,
-				runnerId: "candidate",
-				members: [{ pid: 124, startTime: "candidate-start" }],
-			};
-			yield* receipts.requestStop(decodedRetirement, { _tag: "Explicit" }, [
-				candidate,
-			]);
+			const commit = yield* receipts.requestStop(
+				decodedRetirement,
+				{ _tag: "Explicit" },
+				(record) =>
+					record.runnerId === "candidate"
+						? {
+								...record,
+								members: [{ pid: 124, startTime: "candidate-start" }],
+							}
+						: record,
+			);
+			expect(commit).toMatchObject({
+				_tag: "Requested",
+				record: { runnerId: "runner" },
+				candidates: [{ runnerId: "candidate", retiredAt: 100 }],
+			});
 			expect(
 				(yield* receipts.runners()).rows.every((row) => row.retiredAt === 100),
 			).toBe(true);
@@ -314,10 +326,7 @@ for (const status of ["pending", "running"] as const)
 				const receipts = yield* makeRunnerReceiptStore(sql);
 				yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('session', 'test-project', 'cursor', 1, 1)`;
 				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at, runner_id) VALUES ('held-run', 'session', ${status}, 1, 'runner')`;
-				const record = yield* receipts.requestStop({
-					...decodedRetirement,
-					ownedRunIds: [],
-				});
+				const record = stopped(yield* receipts.requestStop(decodedRetirement));
 				yield* receipts.stopProgress({ ...record, stopState: "Gone" });
 				yield* receipts.markGone("runner");
 				yield* receipts.settled("runner");
@@ -382,8 +391,9 @@ it.effect(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const receipts = yield* makeRunnerReceiptStore(sql);
+			yield* TestClock.setTime(100);
 			yield* receipts.attach("runner", "old", retirement);
-			const first = yield* receipts.requestStop(decodedRetirement);
+			const first = stopped(yield* receipts.requestStop(decodedRetirement));
 			expect(first).toMatchObject({
 				runnerId: "runner",
 				retiredAt: 100,
@@ -394,17 +404,17 @@ it.effect(
 				...retirement,
 				ownedRunIds: ["new-run"],
 			});
-			expect(
-				yield* receipts.requestStop({ ...decodedRetirement, retiredAt: 200 }),
-			).toEqual(first);
+			yield* TestClock.setTime(200);
+			expect(stopped(yield* receipts.requestStop(decodedRetirement))).toEqual(
+				first,
+			);
 			expect((yield* receipts.retirements()).rows).toEqual([first]);
 			expect(
 				yield* sql`SELECT attachment_id, owned_run_ids FROM claude_runner_cursors`,
 			).toEqual([{ attachment_id: "", owned_run_ids: "[]" }]);
-			const gone = yield* receipts.requestStop({
-				...decodedRetirement,
-				runnerId: "gone",
-			});
+			const gone = stopped(
+				yield* receipts.requestStop({ ...decodedRetirement, runnerId: "gone" }),
+			);
 			yield* receipts.stopProgress({ ...gone, stopState: "Gone" });
 			yield* receipts.markGone("gone");
 			yield* receipts.settled("gone");
@@ -420,6 +430,7 @@ it.effect(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const receipts = yield* makeRunnerReceiptStore(sql);
+			yield* TestClock.setTime(100);
 			yield* receipts.attach("runner", "old", retirement);
 			const writer = yield* makeCommitAndSignal;
 			const entered = yield* Deferred.make<void>();
@@ -440,10 +451,11 @@ it.effect(
 				expect(stop.pollUnsafe()).toBeUndefined();
 				yield* Deferred.succeed(release, undefined);
 				yield* Fiber.join(held);
-				const record = yield* Fiber.join(stop);
+				const record = stopped(yield* Fiber.join(stop));
+				// retired_at is the time of the transaction that committed.
 				expect(record).toMatchObject({
 					runnerId: "runner",
-					retiredAt: 100,
+					retiredAt: 5100,
 					ownedRunIds: [],
 				});
 				expect((yield* receipts.retirements()).rows).toEqual([record]);
@@ -476,7 +488,7 @@ it.effect(
 			const writer = yield* makeCommitAndSignal;
 			yield* writer.write(() => Effect.void);
 			expect((yield* receipts.retirements()).rows).toEqual([]);
-			const record = yield* receipts.requestStop(decodedRetirement);
+			const record = stopped(yield* receipts.requestStop(decodedRetirement));
 			expect((yield* receipts.retirements()).rows).toEqual([record]);
 		}).pipe(Effect.provide(testLayer)),
 );

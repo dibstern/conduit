@@ -1305,7 +1305,7 @@ for (const outcome of ["terminal", "covered"] as const)
 
 for (const pickup of ["live caller", "restart scan"] as const)
 	it.effect(
-		`F75 an unavailable Cleaning cleanup steps the gate again after one backoff (${pickup})`,
+		`F75 an unavailable Cleaning cleanup waits on the reconciler's commit and leaves when the send ends (${pickup})`,
 		() =>
 			runRetirement(
 				Effect.gen(function* () {
@@ -1372,10 +1372,13 @@ for (const pickup of ["live caller", "restart scan"] as const)
 					expect(
 						yield* f.sql`SELECT status, error_code FROM provider_command_outbox`,
 					).toEqual([{ status: "running", error_code: null }]);
+					// The reconciler re-runs the commit; the send does not re-gate, and
+					// no runner serves the session until the cleanup commits.
 					yield* TestClock.adjust("1 second");
-					expect(gates).toBe(gateCount + 1);
+					expect(gates).toBe(gateCount);
 					expect(stops).toBe(2);
 					expect(sending?.pollUnsafe()).toBeUndefined();
+					expect(spawned.spawn).not.toHaveBeenCalled();
 					yield* f.commit([
 						canonicalEvent(
 							"turn.interrupted",
@@ -1425,11 +1428,14 @@ it.effect(
 								[],
 								undefined,
 							).pipe(Effect.andThen(execute(query, params, transform)));
+						// The store is unavailable for the first Cleaning commit only; the
+						// reconciler's retry after one backoff reads the fence again.
 						if (
 							query.includes(
 								"SELECT retired_at, role, session_id FROM claude_runner_cursors",
 							) &&
-							params.includes("f0f0f0f0f0f0")
+							params.includes("f0f0f0f0f0f0") &&
+							foreignStops === 0
 						) {
 							foreignStops++;
 							return Effect.fail(

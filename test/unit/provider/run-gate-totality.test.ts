@@ -74,7 +74,7 @@ describe("total run gate", () => {
 				yield* sql`CREATE TRIGGER reject_preparation_terminal BEFORE INSERT ON events WHEN NEW.type = 'turn.error' BEGIN SELECT RAISE(ABORT, 'terminal write rejected'); END`;
 				expect(
 					(yield* Effect.result(
-						lifecycle.releaseRun(release, Effect.void, evidence),
+						lifecycle.releaseRun(release, () => Effect.void, evidence),
 					))._tag,
 				).toBe("Failure");
 				expect(
@@ -87,7 +87,7 @@ describe("total run gate", () => {
 				).toEqual([]);
 				yield* sql`DROP TRIGGER reject_preparation_terminal`;
 				expect(
-					yield* lifecycle.releaseRun(release, Effect.void, evidence),
+					yield* lifecycle.releaseRun(release, () => Effect.void, evidence),
 				).toEqual({ released: true, stop: undefined });
 				expect(
 					yield* sql`SELECT runner_id, held_transmission, status FROM provider_runs WHERE id = 'run'`,
@@ -117,7 +117,7 @@ describe("total run gate", () => {
 							transmission: 1,
 							reason: "NotSent",
 						},
-						Effect.void,
+						() => Effect.void,
 						{
 							_tag: "failed",
 							send: { ...input, requestSequence: 0, attempt: 0 },
@@ -188,7 +188,7 @@ describe("total run gate", () => {
 								transmission,
 								reason: "NotSent",
 							},
-							Effect.void,
+							() => Effect.void,
 						);
 					}
 					if (shown)
