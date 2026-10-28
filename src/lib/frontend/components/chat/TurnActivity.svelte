@@ -139,7 +139,6 @@
 	let asks = $state<Record<string, AskState>>({});
 	/** The Ask a citation left, offered back on the cited message's card. */
 	let askReturn = $state<{ ask: SurfacePin; cited: string } | null>(null);
-	const askIdentity = $derived(`${sessionId}/${turn.id}`);
 	function setupFor(pin: SurfacePin): SurfacePart | null {
 		const parts = [...segment.activity, ...segment.reply];
 		const index = parts.findIndex((part) => part.uuid === pin.part.uuid);
@@ -148,13 +147,12 @@
 	async function explainAsk(pin: SurfacePin) {
 		const uuid = pin.part.uuid;
 		if (!sessionId || !storeTurnId || !pin.part.partId || asks[uuid]?.kind === "ready" || Object.values(asks).some(({ kind }) => kind === "loading")) return;
-		const identity = askIdentity;
 		asks[uuid] = { kind: "loading" };
 		try {
 			const explanation = await rpc("ExplainAsk", { sessionId, turnId: storeTurnId, partId: pin.part.partId });
-			if (identity === askIdentity) asks[uuid] = { kind: "ready", explanation };
+			asks[uuid] = { kind: "ready", explanation };
 		} catch (error) {
-			if (identity === askIdentity) asks[uuid] = { kind: "failed", message: error instanceof Error ? error.message : String(error) };
+			asks[uuid] = { kind: "failed", message: error instanceof Error ? error.message : String(error) };
 		}
 	}
 	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
