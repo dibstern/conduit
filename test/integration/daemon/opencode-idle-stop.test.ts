@@ -233,6 +233,7 @@ describe("Managed OpenCode stops when idle", () => {
 	}
 
 	afterEach(async ({ task }) => {
+		vi.unstubAllEnvs();
 		if (!harness) return;
 		const fixture = harness;
 		try {
@@ -328,6 +329,7 @@ describe("Managed OpenCode stops when idle", () => {
 		scenario = "82tn7-idle-message-polling";
 		probeId = "";
 		evidence = { ticket: "conduit-test-82tn.7" };
+		vi.stubEnv("CONDUIT_TEST_DIST", undefined);
 		harness = ProcessHarness.create({
 			managedOpenCode: true,
 			managedOpenCodeId: instanceId,

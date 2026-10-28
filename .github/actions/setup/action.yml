@@ -1,0 +1,41 @@
+name: Setup
+description: Install the mise toolchain and pnpm dependencies, optionally starting OpenCode.
+inputs:
+  opencode:
+    description: Start an OpenCode server on port 4096 (needs OPENCODE_SERVER_PASSWORD in the job env).
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@v4
+      with:
+        install: true
+        cache: true
+    - name: Cache pnpm store
+      uses: actions/cache@v5
+      with:
+        path: ~/.local/share/pnpm/store
+        key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+        restore-keys: ${{ runner.os }}-pnpm-
+    - run: pnpm install --frozen-lockfile
+      shell: bash
+    - name: Install and start OpenCode server
+      if: inputs.opencode == 'true'
+      shell: bash
+      env:
+        XDG_DATA_HOME: /tmp/opencode-ci-data
+        XDG_CONFIG_HOME: /tmp/opencode-ci-config
+      run: |
+        npm install -g "opencode-ai@$(cat .opencode-version)"
+        OPENCODE_DATA_DIR=$(mktemp -d) opencode serve --port 4096 &
+        # A health request sent while OpenCode starts can hang forever, so
+        # each try gets its own deadline.
+        for _ in $(seq 30); do
+          if curl -sf --max-time 2 -u "opencode:${OPENCODE_SERVER_PASSWORD}" http://localhost:4096/global/health > /dev/null; then
+            echo "OpenCode server healthy on port 4096"
+            exit 0
+          fi
+          sleep 1
+        done
+        echo "OpenCode server was not healthy after 30 tries"
+        exit 1

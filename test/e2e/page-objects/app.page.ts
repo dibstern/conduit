@@ -115,8 +115,9 @@ export class AppPage {
 
 	async sendMessage(text: string): Promise<void> {
 		await this.input.fill(text);
-		// Fill enables the send button
-		await expect(this.sendBtn).toBeEnabled({ timeout: 2_000 });
+		// Send also waits for the session to be placed, which can lag goto()
+		// under load, so this takes the default expect timeout.
+		await expect(this.sendBtn).toBeEnabled();
 		await this.sendBtn.click();
 	}
 

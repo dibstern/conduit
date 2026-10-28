@@ -882,10 +882,13 @@ it.each([
 			await fixture.restart();
 			browser = await fixture.connect(sessionId);
 		}
-		await vi.waitFor(() =>
-			expect(existsSync(join(fixture.root, "home/send-env-started"))).toBe(
-				true,
-			),
+		// Profile changes are polled every second before the login shell starts.
+		await vi.waitFor(
+			() =>
+				expect(existsSync(join(fixture.root, "home/send-env-started"))).toBe(
+					true,
+				),
+			{ timeout: 15_000 },
 		);
 		const deliveredBeforeStop = fixture
 			.proof()

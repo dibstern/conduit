@@ -80,12 +80,20 @@ tests alone).
 Run this when changing daemon, relay, server, session, or instance behavior that depends on a real relay stack or OpenCode interaction.
 
 ```bash
+pnpm build
 pnpm test:integration
 pnpm test:contract
 ```
 
-Integration files run in parallel in up to 4 fork workers. Set
+Integration files run in parallel in fork workers, half the CPU cores and at
+least 4. Set
 `CONDUIT_INTEGRATION_WORKERS=<positive integer>` to override the worker cap.
+
+Process harnesses use `dist/` by default in this suite. Rebuild after changing
+`src/`. Set `CONDUIT_TEST_DIST` to another build directory, or to an empty string
+to use source for fixtures without an explicit build. Tests that verify source
+behavior opt out explicitly.
+Stale or missing dist fails fast in integration and E2E groups; bypass with `CONDUIT_SKIP_DIST_CHECK=1`.
 
 ### Claude process runners
 

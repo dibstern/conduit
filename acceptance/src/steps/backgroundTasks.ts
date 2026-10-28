@@ -122,6 +122,8 @@ export async function setLiveTasks(
 			updatedAt: now,
 			// undefined drops out of the JSON snapshot, clearing earlier tasks.
 			backgroundWork: tasks.length > 0 ? "working" : undefined,
+			// The server rolls working background work into attention.
+			attention: tasks.length > 0 ? "working" : undefined,
 			backgroundTasks:
 				tasks.length > 0
 					? tasks.map(

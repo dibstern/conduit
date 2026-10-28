@@ -564,6 +564,14 @@ describe("Draft worktree launches through the built daemon", () => {
 			_tag: "WorkspaceMoveError",
 			reason: "unsupported-provider",
 		});
+		expect(
+			fixture
+				.opencodeRequestBodies()
+				.filter(
+					({ method, path }) =>
+						method === "POST" && /^\/(?:api\/)?session$/.test(path),
+				),
+		).toEqual([]);
 		const { sessions } = await sendRpcRequest(socket, {
 			_tag: "ListDaemonSessions",
 			projectSlug: "process-test",

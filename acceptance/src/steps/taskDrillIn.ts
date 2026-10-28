@@ -167,6 +167,7 @@ export const taskDrillInHandlers: StepHandler[] = [
 				id: parentOf(world.page),
 				// undefined drops out of the JSON snapshot, clearing the tasks.
 				backgroundWork: undefined,
+				attention: undefined,
 				backgroundTasks: undefined,
 			});
 			upsertRow(world.page, { id: FLAKY_TEST_SESSION, status: "idle" });

@@ -759,6 +759,16 @@ export const sessionsHandlers = {
 					);
 					return { projectSlug: request.projectSlug, sessionId: session.id };
 				}
+				if (
+					path !== undefined &&
+					!PROVIDER_SESSION_CAPABILITIES[account.driver].supportsWorktree
+				) {
+					yield* takeReservation;
+					return yield* new WorkspaceMoveError({
+						path,
+						reason: "unsupported-provider",
+					});
+				}
 				// Taking a reservation and arming its rollback must not be split by interruption.
 				const session = yield* Effect.uninterruptibleMask((restore) =>
 					Effect.gen(function* () {

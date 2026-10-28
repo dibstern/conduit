@@ -9,6 +9,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { setTimeout } from "node:timers/promises";
+import { sourceHash } from "./source-hash.mjs";
 
 // Concurrent builds (pre-commit, dev:all, agents) would interleave dist/ and
 // stamp the server and frontend with different build IDs, so take turns.
@@ -63,6 +64,7 @@ process.on("exit", () => {
 
 // One identity for both outputs, without modifying the source dev sentinel.
 const buildId = randomUUID();
+const hash = sourceHash();
 const env = { ...process.env, CONDUIT_BUILD_ID: buildId };
 
 // The previous marker cannot describe outputs being replaced by this build.
@@ -96,6 +98,6 @@ writeFileSync(
 );
 if (!serverOnly) {
 	const marker = `dist/build-ready.${process.pid}.tmp`;
-	writeFileSync(marker, JSON.stringify({ buildId }));
+	writeFileSync(marker, JSON.stringify({ buildId, sourceHash: hash }));
 	renameSync(marker, "dist/build-ready.json");
 }
