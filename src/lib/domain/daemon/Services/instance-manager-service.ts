@@ -715,7 +715,7 @@ export const discoverInstancesFor = (instanceId?: string) =>
 						account.driver === "codex"
 							? discoverCodexEffect(account, undefined, configDir)
 							: account.driver === "cursor"
-								? discoverCursorEffect(undefined, account)
+								? discoverCursorEffect(account)
 								: undefined;
 					if (!discover) return;
 					const result = yield* Effect.result(discover);

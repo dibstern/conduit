@@ -4,6 +4,7 @@
 	import Button from "../ui/Button.svelte";
 	import type { SystemMessage } from "../../types.js";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Surface from "../ui/Surface.svelte";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import { cursorAuthFor, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
@@ -27,7 +28,7 @@
 		}
 	});
 	const setupIcon = $derived(message.setup ? {
-		running: "loader-circle",
+		running: "info",
 		succeeded: "circle-check",
 		failed: "circle-alert",
 		timed_out: "timer",
@@ -62,7 +63,7 @@
 	>
 		{#if message.setup}
 			<div class="flex items-center gap-2 text-sm {setupTone}">
-				<span aria-hidden="true"><Icon name={setupIcon} size={14} class={message.setup.status === "running" ? "animate-spin motion-reduce:animate-none" : ""} /></span>
+				<span aria-hidden="true">{#if message.setup.status === "running"}<ConduitMark size={14} variant="running" />{:else}<Icon name={setupIcon} size={14} />{/if}</span>
 				<strong class="font-medium">{setupTitle}</strong>
 			</div>
 			{#if message.setup.message}

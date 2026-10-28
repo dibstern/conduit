@@ -107,10 +107,10 @@ export const pendingInputTrayHandlers: StepHandler[] = [
 				inputId,
 				text,
 				...(match[1] === "steers" ? { state: "steering" } : {}),
-				images: Array.from(
-					{ length: Number(match[3] ?? 0) },
-					(_, index) => `data:image/png;base64,${index}`,
-				),
+				images: Array.from({ length: Number(match[3] ?? 0) }, (_, index) => ({
+					attachmentHash: String(index).padStart(64, "0"),
+					mime: "image/png",
+				})),
 			});
 			await world.page
 				.locator(

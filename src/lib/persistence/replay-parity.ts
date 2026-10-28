@@ -9,6 +9,7 @@ import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { makeRunnerReceiptStore } from "../provider/runner/runner-receipts.js";
+import { readAttachmentUses } from "./attachment-store.js";
 import { makeEventStoreEffect } from "./effect/event-store-effect.js";
 import { makeEffectSqlMigrator } from "./effect/migrations.js";
 import { makeProjectionRunnerEffect } from "./effect/projection-runner-effect.js";
@@ -307,6 +308,109 @@ export function compareProjectionStores(
 				actual: row,
 			});
 	}
+	const attachmentKey = (row: {
+		hash: string;
+		sourceTable?: string;
+		sourceColumn?: string;
+		sourceRowKey?: string;
+	}) =>
+		JSON.stringify([
+			row.sourceTable,
+			row.sourceColumn,
+			row.sourceRowKey,
+			row.hash,
+		]);
+	const attachmentState = (db: DatabaseSync) => {
+		const blobs = db
+			.prepare("SELECT hash FROM attachment_blobs ORDER BY hash")
+			.all() as {
+			hash: string;
+		}[];
+		const uses = readAttachmentUses(db).filter(({ sourceTable }) =>
+			["events", "messages", "message_parts"].includes(sourceTable),
+		);
+		const references = [
+			["events", "data", "event_id"],
+			["messages", "rest_payload", "id"],
+			["message_parts", "metadata", "id"],
+			["message_parts", "rest_payload", "id"],
+			["pending_inputs", "request", "input_id"],
+			["pending_inputs", "images", "input_id"],
+			["provider_command_outbox", "payload_json", "request_sequence"],
+		].flatMap(
+			([table, column, key]) =>
+				db
+					.prepare(`
+				SELECT DISTINCT '${table}' AS sourceTable, '${column}' AS sourceColumn,
+				CAST(source.${key} AS TEXT) AS sourceRowKey, ref.value AS hash
+				FROM ${table} source, json_tree(CASE
+					WHEN instr(source.${column}, '"attachmentHash"') > 0 THEN source.${column}
+					ELSE NULL END) ref
+				WHERE ref.key = 'attachmentHash' AND ref.type = 'text'`)
+					.all() as {
+					sourceTable: string;
+					sourceColumn: string;
+					sourceRowKey: string;
+					hash: string;
+				}[],
+		);
+		references.push(
+			...(db
+				.prepare(`SELECT 'draft_attachments' AS sourceTable, 'hash' AS sourceColumn,
+				id AS sourceRowKey, hash FROM draft_attachments WHERE state = 'live' AND hash IS NOT NULL`)
+				.all() as typeof references),
+		);
+		return { blobs, uses, references };
+	};
+	const beforeAttachments = attachmentState(expected);
+	const afterAttachments = attachmentState(actual);
+	for (const [table, before, after] of [
+		["attachment_blobs", beforeAttachments.blobs, afterAttachments.blobs],
+		["attachment references", beforeAttachments.uses, afterAttachments.uses],
+	] as const) {
+		tables[table] = { expected: before.length, actual: after.length };
+		const remaining = new Map(after.map((row) => [attachmentKey(row), row]));
+		for (const row of before) {
+			const key = attachmentKey(row);
+			if (!remaining.delete(key))
+				diffs.push({
+					table,
+					key,
+					fields: ["row_removed"],
+					expected: row,
+					actual: null,
+				});
+		}
+		for (const [key, row] of remaining)
+			diffs.push({
+				table,
+				key,
+				fields: ["row_added"],
+				expected: null,
+				actual: row,
+			});
+	}
+	for (const [side, state] of [
+		["expected", beforeAttachments],
+		["actual", afterAttachments],
+	] as const) {
+		const hashes = new Set(state.blobs.map(({ hash }) => hash));
+		const uses = new Set(state.uses.map(attachmentKey));
+		for (const reference of state.references) {
+			const missingBlob = !hashes.has(reference.hash);
+			const replayable = ["events", "messages", "message_parts"].includes(
+				reference.sourceTable,
+			);
+			if (missingBlob || (replayable && !uses.has(attachmentKey(reference))))
+				diffs.push({
+					table: "attachment integrity",
+					key: JSON.stringify([side, reference]),
+					fields: [missingBlob ? "missing_blob" : "missing_use"],
+					expected: { ...reference, side },
+					actual: null,
+				});
+		}
+	}
 	const dangling = (db: DatabaseSync) =>
 		db
 			.prepare(`
@@ -381,6 +485,14 @@ export const verifyReplayParity = (
 			const destination = new DatabaseSync(filename);
 			try {
 				destination.exec("PRAGMA foreign_keys = OFF; BEGIN");
+				// Preserve unswept blobs too. Replay is a comparison, never a sweep.
+				const insertBlob = destination.prepare(
+					"INSERT INTO attachment_blobs (hash, mime, size, bytes, created_at) VALUES (@hash, @mime, @size, @bytes, @created_at)",
+				);
+				for (const row of snapshot
+					.prepare("SELECT * FROM attachment_blobs")
+					.iterate())
+					insertBlob.run(row);
 				const columns = (
 					snapshot.prepare("PRAGMA table_info(events)").all() as {
 						name: string;

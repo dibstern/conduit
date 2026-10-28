@@ -11,7 +11,7 @@
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
-	import BlockGrid from "../ui/BlockGrid.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import Button from "../ui/Button.svelte";
 	import { fileBrowserKey, fileTreeState } from "../../stores/file-tree.svelte.js";
@@ -234,7 +234,7 @@
 			{/each}
 		{:else if loading}
 			<div class="flex items-center justify-center py-8 text-text-dimmer text-sm">
-				<BlockGrid cols={5} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />
+				<ConduitMark size={16} variant="running" />
 				<span class="ml-2">Loading...</span>
 			</div>
 		{:else if fileTreeState.browserEntries.length === 0}

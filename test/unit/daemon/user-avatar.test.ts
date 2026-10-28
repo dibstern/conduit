@@ -4,6 +4,8 @@
 // are acknowledged; a failed photo read is reported as "no picture" and erases
 // the browser's copy. The adapter must return only a bounded JPEG or none, and
 // repeat reads must not rerun the slow lookup.
+// Concurrent identity reads share one lookup; settings and avatar saves, and
+// TTL expiry, must refresh it, including a cached account-name fallback.
 
 import { execFileSync } from "node:child_process";
 import {
@@ -24,6 +26,7 @@ import {
 	Option,
 	Schema,
 } from "effect";
+import { TestClock } from "effect/testing";
 import {
 	type Avatar,
 	AvatarChoiceSchema,
@@ -43,6 +46,7 @@ import {
 	ConfigSnapshotFromEffectStateLive,
 	makeConfigWriterLive,
 } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
+import { makeSubprocessLive } from "../../../src/lib/domain/daemon/Layers/subprocess-layer.js";
 import { UserAvatarLive } from "../../../src/lib/domain/daemon/Layers/user-avatar-layer.js";
 import { AccountPicture } from "../../../src/lib/domain/daemon/Services/account-picture.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
@@ -53,6 +57,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { makeInstanceManagerStateLive } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { Subprocess } from "../../../src/lib/domain/daemon/Services/subprocess.js";
 import { UserAvatar } from "../../../src/lib/domain/daemon/Services/user-avatar.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { settingsHandlers } from "../../../src/lib/server/ws-rpc/settings.js";
@@ -104,6 +109,7 @@ describe("user avatar", () => {
 					}),
 					makeConfigWriterLive(directory),
 					AccountPictureNone,
+					makeSubprocessLive(),
 				);
 				const dependencies = ConfigPersistenceLive.pipe(
 					Layer.provideMerge(
@@ -114,15 +120,24 @@ describe("user avatar", () => {
 					UserAvatarLive.pipe(Layer.provideMerge(dependencies)),
 				);
 				const responses: Avatar[] = [];
-				const first = yield* settingsHandlers
-					.GetAvatar(GetAvatar.payloadSchema.make({}))
-					.pipe(Effect.provide(context));
+				const avatar = Context.get(context, UserAvatar);
+				const subprocess = Context.get(context, Subprocess);
+				const concurrent = yield* Effect.all(
+					Array.from({ length: 8 }, () =>
+						settingsHandlers.GetAvatar(GetAvatar.payloadSchema.make({})),
+					),
+					{ concurrency: 8 },
+				).pipe(Effect.provide(context));
+				const first = yield* avatar.get;
 				responses.push(first);
 				expect(first).toEqual({
 					name: "Élodie Example",
 					choice: null,
 					macPicture: null,
 				});
+				for (const result of concurrent) expect(result).toEqual(first);
+				for (let i = 0; i < 3; i++) expect(yield* avatar.get).toEqual(first);
+				expect((yield* subprocess.metrics).spawnCount).toBe(1);
 				responses.push(
 					yield* settingsHandlers
 						.SetAvatar(
@@ -132,14 +147,34 @@ describe("user avatar", () => {
 						)
 						.pipe(Effect.provide(context)),
 				);
+				expect((yield* subprocess.metrics).spawnCount).toBe(2);
 				writeFileSync(gitConfig, "");
-				const fallback = yield* Context.get(context, UserAvatar).get;
-				responses.push(fallback);
-				expect(fallback.name).toBe(userInfo().username);
+				expect((yield* avatar.get).name).toBe("Élodie Example");
+				expect((yield* subprocess.metrics).spawnCount).toBe(2);
 				yield* commitDaemonRuntimeConfig((config) => ({
 					...config,
 					keepAwake: true,
 				})).pipe(Effect.provide(context));
+				const refreshed = yield* Effect.all(
+					Array.from({ length: 8 }, () => avatar.get),
+					{ concurrency: 8 },
+				);
+				for (const fallback of refreshed) {
+					responses.push(fallback);
+					expect(fallback.name).toBe(userInfo().username);
+				}
+				expect((yield* subprocess.metrics).spawnCount).toBe(3);
+				writeFileSync(gitConfig, "[user]\nname = Updated Example\n");
+				expect((yield* avatar.get).name).toBe(userInfo().username);
+				expect((yield* subprocess.metrics).spawnCount).toBe(3);
+				expect(
+					(yield* avatar.set({ kind: "shape", seed: -2147483648 })).name,
+				).toBe("Updated Example");
+				expect((yield* subprocess.metrics).spawnCount).toBe(4);
+				writeFileSync(gitConfig, "[user]\nname = TTL Example\n");
+				yield* TestClock.adjust("10 minutes");
+				expect((yield* avatar.get).name).toBe("TTL Example");
+				expect((yield* subprocess.metrics).spawnCount).toBe(5);
 				const persistence = Context.get(context, ConfigPersistenceTag);
 				yield* persistence.requestSave;
 				yield* persistence.flush;

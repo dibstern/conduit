@@ -16,6 +16,7 @@ import type { TitleGenerationState } from "../../contracts/title-generation.js";
 import {
 	catalogFromProviderList,
 	findCatalogModel,
+	modelParameterChoices,
 	offeredOptions,
 	resolveTurnSettings,
 } from "../../provider/turn-settings.js";
@@ -1317,7 +1318,15 @@ export function getModelDisplayName(modelId: string): string {
 	const model = getAllModels().find((candidate) =>
 		modelMatchesId(candidate, modelId),
 	);
-	return model ? formatModelName(model) : modelId;
+	if (model) return formatModelName(model);
+	const id = modelId
+		.replace(/\[1m\]$/i, "")
+		.replace(/-\d{8}$/, "")
+		.replace(/^[^/]+\//, "");
+	const claude = /^claude-([a-z]+)-(\d+)(?:-(\d+))?$/.exec(id);
+	if (!claude) return id;
+	const [, family = "", major, minor] = claude;
+	return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${major}${minor ? `.${minor}` : ""}`;
 }
 
 /** Check if a provider is configured. */
@@ -1595,6 +1604,7 @@ export function applyGetCommandsResponse(
 					? { description: command.description }
 					: {}),
 				...(command.args != null ? { args: command.args } : {}),
+				...(command.skillRef != null ? { skillRef: command.skillRef } : {}),
 				...(command.builtin ? { builtin: true } : {}),
 			})),
 		},
@@ -1794,15 +1804,17 @@ export function chooseModel(model: {
 	if (sessionState.currentId) {
 		const current = getSessionPick(sessionState.currentId);
 		const catalog = getActiveModel(model.modelId, model.providerId);
-		const variants = catalog?.variants ?? [];
+		const choices = catalog ? modelParameterChoices(catalog) : undefined;
+		const variants = choices?.offered() ?? [];
 		const options = catalog?.contextWindowOptions ?? [];
 		return chooseSessionPick(sessionState.currentId, {
 			...model,
 			variants,
 			contextWindowOptions: options,
-			variant: variants.includes(current?.variant ?? "")
-				? (current?.variant ?? "")
-				: "",
+			variant:
+				choices && Result.isSuccess(choices.resolve(current?.variant ?? ""))
+					? (current?.variant ?? "")
+					: "",
 			contextWindow: options.some(
 				(option) => option.value === current?.contextWindow,
 			)

@@ -94,8 +94,7 @@ export function segmentAppearance(
 	if (part.type === "thinking" && live && !part.done)
 		return { tone: "live", running: true };
 	if (part.type === "tool") {
-		if (part.status === "error" || part.isError)
-			return { tone: "fail", running: false };
+		if (part.outcome === "failed") return { tone: "fail", running: false };
 		const taskId = part.metadata?.["providerTaskId"];
 		if (
 			typeof taskId === "string" && part.metadata?.["backgrounded"] === true

@@ -754,7 +754,7 @@ describe("Stop delivery preserves its captured cohort", () => {
 		}
 	}, 110_000);
 
-	it("bounds replacement of a live question when interrupt never acknowledges", async () => {
+	it("replaces a completed question turn while its interrupt never acknowledges", async () => {
 		writeProviderCommandOutboxProof(import.meta.url, [
 			{ scenario: "question-replacement-unacknowledged-stop", passed: false },
 		]);
@@ -825,10 +825,17 @@ describe("Stop delivery preserves its captured cohort", () => {
 						"SELECT command_id, status FROM provider_command_outbox WHERE command_id = ?",
 					)
 					.get(`${inputId}:interrupt-for-question:retire`),
-			).toEqual({
-				command_id: `${inputId}:interrupt-for-question:retire`,
-				status: "completed",
-			});
+			).toBeUndefined();
+			expect(
+				db
+					.prepare(
+						"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+					)
+					.get(`${inputId}:interrupt-for-question`),
+			).toEqual({ status: "completed" });
+			expect(
+				sdkProof(harness).filter((mark) => mark["kind"] === "query-closed"),
+			).toEqual([]);
 			await send;
 			passed = true;
 		} finally {

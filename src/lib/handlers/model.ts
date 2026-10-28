@@ -66,6 +66,7 @@ import {
 	type Harness,
 	harnessDefaultPick,
 	harnessForModelProvider,
+	modelParameterChoices,
 	offeredOptions,
 	resolveTurnSettings,
 } from "../provider/turn-settings.js";
@@ -115,22 +116,38 @@ const loadVariantsForModel = (
 			{ providerId: activeModel.providerID, modelId: activeModel.modelID },
 			catalog ?? (yield* loadModelCatalog(harness)),
 		);
-		return model ? [...offeredOptions(model).efforts] : [];
+		return model ? [...modelParameterChoices(model).offered()] : [];
 	});
 
-/** The efforts `model` offers, and the one last saved for it if still offered. */
+/** Restore an offered saved choice; retired choices carry over as Default. */
 export const savedVariantFor = (
 	model: ModelOverride,
 	catalog?: readonly ModelInfo[],
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		const variants = yield* loadVariantsForModel(model, catalog);
+		const harness = harnessForModelProvider(model.providerID);
+		const catalogModel = findCatalogModel(
+			harness,
+			{ providerId: model.providerID, modelId: model.modelID },
+			catalog ?? (yield* loadModelCatalog(harness)),
+		);
+		const choices = modelParameterChoices(
+			catalogModel ?? { id: model.modelID },
+		);
 		const saved =
 			loadRelaySettings(config.configDir).defaultVariants?.[
 				`${model.providerID}/${model.modelID}`
 			] ?? "";
-		return { variant: variants.includes(saved) ? saved : "", variants };
+		const resolved = choices.resolve(saved);
+		if (Result.isFailure(resolved))
+			(yield* LoggerTag).warn(
+				`Model ${model.providerID}/${model.modelID} no longer offers saved parameter choice ${JSON.stringify(saved)}; using Default`,
+			);
+		return {
+			variant: Result.isSuccess(resolved) ? saved : "",
+			variants: [...choices.offered()],
+		};
 	});
 
 const shouldBindOpenCodeSessionOnModelSwitch = (sessionId: string) =>
@@ -412,8 +429,8 @@ export const getModelsResponse = (
 								name: m.name || m.id,
 								provider: providerId,
 								...(m.limit && { limit: { ...m.limit } }),
-								...(offeredOptions({ ...m, providerId }).efforts.length > 0 && {
-									variants: [...offeredOptions({ ...m, providerId }).efforts],
+								...(modelParameterChoices(m).offered().length > 0 && {
+									variants: [...modelParameterChoices(m).offered()],
 								}),
 							}));
 							return {
@@ -503,9 +520,23 @@ export const getModelsResponse = (
 						"Some"))
 				? catalog
 				: undefined;
-		const normalized = pick
+		let normalized = pick
 			? resolveTurnSettings(pick, activeId ? sessionCatalog : catalog)
 			: undefined;
+		if (
+			pick &&
+			normalized &&
+			Result.isFailure(normalized) &&
+			normalized.failure._tag === "ModelParametersUnavailable"
+		) {
+			log.warn(
+				`Model ${pick.model.providerId}/${pick.model.modelId} no longer offers saved parameter choice ${JSON.stringify(pick.effort)}; ${activeId ? "keeping unavailable session choice" : "using Default"}`,
+			);
+			normalized = resolveTurnSettings(
+				{ ...pick, effort: "" },
+				activeId ? sessionCatalog : catalog,
+			);
+		}
 		const activeModel =
 			normalized && Result.isSuccess(normalized)
 				? {
@@ -514,11 +545,13 @@ export const getModelsResponse = (
 					}
 				: undefined;
 
-		// Send variant_info for the current model so clients get refreshed state
+		// Keep a session's stored choice visible even when the catalog retired it.
 		const currentVariant =
-			normalized && Result.isSuccess(normalized)
-				? normalized.success.effort
-				: "";
+			activeId && pick
+				? pick.effort
+				: normalized && Result.isSuccess(normalized)
+					? normalized.success.effort
+					: "";
 		const variantList = [...options.efforts];
 		let modelExecution: GetModelsResponse["modelExecution"];
 		if (activeId) {
@@ -751,6 +784,8 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 
 		const modelSpec = `${provider}/${model}`;
 		const override = { providerID: provider, modelID: model };
+		const { variant: validVariant, variants: availableVariants } =
+			yield* savedVariantFor(override, catalog);
 		yield* saveRelaySettingsEffect(
 			{
 				defaultModel: modelSpec,
@@ -776,8 +811,6 @@ export const setDefaultModelForRelay = (input: SetDefaultModelInput) =>
 			}
 		}
 
-		const { variant: validVariant, variants: availableVariants } =
-			yield* savedVariantFor(override, catalog);
 		log.info(`client=${input.clientId} Set default: ${model} (${provider})`);
 
 		return {
@@ -852,6 +885,11 @@ export const setTitleGenerationForRelay = (
 			const catalog = yield* loadModelCatalog(account.driver, account.id, {
 				startIfStopped: true,
 			});
+			const model = findCatalogModel(account.driver, selection, catalog);
+			if (model) {
+				const choice = modelParameterChoices(model).resolve(selection.effort);
+				if (Result.isFailure(choice)) return yield* choice.failure;
+			}
 			const resolved = resolveTitleGeneration(
 				selection,
 				accounts,

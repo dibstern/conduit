@@ -17,6 +17,7 @@ import {
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import * as Failure from "../effect/failure-classification.js";
 import { createLogger } from "../logger.js";
+import { AttachmentMissing } from "../persistence/attachment-store.js";
 import { ClaudeEventPersistEffectError } from "../persistence/effect/claude-event-persist-effect.js";
 import { EventStoreError } from "../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerError } from "../persistence/effect/projection-runner-effect.js";
@@ -37,6 +38,7 @@ import { providerRefsFromRuntimeData } from "./provider-runtime-refs.js";
 import {
 	currentRunnerOutput,
 	currentRunnerPermissionReply,
+	currentRunnerProcessId,
 } from "./runner/runner-receipts.js";
 import type {
 	EventSink,
@@ -232,6 +234,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 	): Effect.Effect<void> =>
 		Effect.gen(function* () {
 			const receipt = yield* currentRunnerOutput;
+			const processId = yield* currentRunnerProcessId;
 			yield* deliver(
 				{
 					eventId: createEventId(),
@@ -240,7 +243,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 					sessionId,
 					providerRefs: {
 						...providerRefsFromRuntimeData(type, data),
-						providerProcessId: receipt?.runnerId ?? localProcessId,
+						providerProcessId: receipt?.runnerId ?? processId ?? localProcessId,
 					},
 					rawSource: { kind: "relay.event-sink" },
 					createdAt: Date.now(),
@@ -665,6 +668,7 @@ export function createRelayEventSink(deps: RelayEventSinkDeps): RelayEventSink {
 
 export function toEventSinkError(cause: unknown): EventSinkError {
 	if (
+		cause instanceof AttachmentMissing ||
 		cause instanceof PersistenceError ||
 		cause instanceof EventStoreError ||
 		cause instanceof ClaudeEventPersistEffectError ||

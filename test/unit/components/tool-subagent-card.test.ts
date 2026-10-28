@@ -15,6 +15,28 @@ describe("ToolSubagentCard", () => {
 		vi.clearAllMocks();
 	});
 
+	it.each([
+		{ outcome: "failed", status: "completed", isError: false, failed: true },
+		{ outcome: "succeeded", status: "error", isError: true, failed: false },
+	] as const)("uses $outcome for its failure icon", ({
+		outcome,
+		status,
+		isError,
+		failed,
+	}) => {
+		const message: ToolMessage = {
+			type: "tool",
+			uuid: "message/tool",
+			id: "tool",
+			name: "Task",
+			outcome,
+			status,
+			isError,
+		};
+		const { container } = render(ToolSubagentCard, { props: { message } });
+		expect(container.querySelector(".text-error") !== null).toBe(failed);
+	});
+
 	it("uses canonical Task subagentType for the agent title", () => {
 		const message: ToolMessage = {
 			type: "tool",

@@ -276,7 +276,8 @@ test("a recreated message resumes without its old parts or a checksum repair", a
 		(e) => e._tag === "remove" && e.id === MESSAGE,
 	);
 	const upsertedAt = delivered.findIndex(
-		(e) =>
+		(e, index) =>
+			index > removedAt &&
 			e._tag === "upsert" &&
 			e.item._tag === "message" &&
 			e.item.message.id === MESSAGE,
@@ -314,8 +315,9 @@ test("an open recreated message catches up through overflow without replacing it
 	const initial = event(SESSION);
 	const advanceBusCapacity = 1;
 	const unrelatedAdvances = 64;
-	const heldMs = 8000;
-	const heldDeliveries = 4;
+	// One RPC delivery, the audience watcher pull, two queued batches and the
+	// producer's pending offer exhaust the path before the advance subscriber.
+	const heldDeliveries = 5;
 	await harness.terminate();
 	await seed(store, [
 		...[SESSION, OTHER].map((sessionId) =>
@@ -354,6 +356,49 @@ test("an open recreated message catches up through overflow without replacing it
 		},
 	});
 	const driver = await harness.connect(undefined, undefined, undefined, false);
+	let holdingAcknowledgements = false;
+	let heldAcknowledgements = 0;
+	const releaseAcknowledgements: (() => void)[] = [];
+	await page.routeWebSocket(
+		(url) => url.pathname === "/rpc",
+		(socket) => {
+			const server = socket.connectToServer();
+			const detailRequests = new Set<string>();
+			socket.onMessage((message) => {
+				const frame: unknown = JSON.parse(String(message));
+				for (const request of find(
+					frame,
+					(value) =>
+						"_tag" in value &&
+						value._tag === "Request" &&
+						"tag" in value &&
+						value.tag === "SubscribeSessionDetail" &&
+						"payload" in value &&
+						typeof value.payload === "object" &&
+						value.payload !== null &&
+						"sessionId" in value.payload &&
+						value.payload.sessionId === SESSION,
+				)) {
+					if ("id" in request) detailRequests.add(String(request.id));
+				}
+				if (
+					holdingAcknowledgements &&
+					find(
+						frame,
+						(value) =>
+							"_tag" in value &&
+							value._tag === "Ack" &&
+							"requestId" in value &&
+							detailRequests.has(String(value.requestId)),
+					).length > 0
+				) {
+					heldAcknowledgements++;
+					releaseAcknowledgements.push(() => server.send(message));
+				} else server.send(message);
+			});
+			server.onMessage((message) => socket.send(message));
+		},
+	);
 	const {
 		sent,
 		received,
@@ -410,54 +455,58 @@ test("an open recreated message catches up through overflow without replacing it
 		},
 		{ textA: TEXT_A, textB: TEXT_B },
 	);
+	const [detailRequest] = requests(SESSION);
+	if (!detailRequest || !("id" in detailRequest))
+		throw new Error("Missing detail subscription request");
 
-	// The server sends a delivery only after the page acknowledged the last,
-	// queueing at most two more, while unrelated advances deliver nothing and so
-	// never back up. Hold the page's main thread and rename this session until a
-	// delivery blocks the open view's stream: the burst then overflows its bus.
-	// A task queued now runs before any delivery the renames below send.
-	// Fault injection: blocking the browser thread is required to withhold RPC acknowledgements during the burst.
-	const heldUntil = await page.evaluate((ms) => {
-		const until = Date.now() + ms;
-		setTimeout(() => {
-			while (Date.now() < until) {}
-		}, 0);
-		return until;
-	}, heldMs);
-	for (let index = 0; index < heldDeliveries; index++)
-		await rename(SESSION, `Held delivery ${index}`);
-	// Hide the removal signals, as a dropped bus publication would. Only an
-	// overflow can route the unrelated advances below to this open detail view.
-	await seed(store, [
-		event(SESSION, START + 1000)("message.removed", { messageId: MESSAGE }),
-	]);
-	const recreated = event(SESSION, START + 2000);
-	await seed(store, [
-		recreated("message.created", {
-			sessionId: SESSION,
-			messageId: MESSAGE,
-			role: "assistant",
-			parentID: `${SESSION}-input`,
-		}),
-		recreated("text.delta", {
-			messageId: MESSAGE,
-			partId: PART_A,
-			text: `${TEXT_A}\n\n`,
-		}),
-		recreated("turn.completed", { messageId: MESSAGE }),
-	]);
-	await Promise.all(
-		Array.from({ length: unrelatedAdvances }, (_, index) =>
-			rename(OTHER, `Overflow advance ${index}`),
-		),
-	);
-	expect(
-		Date.now(),
-		"The burst must land while the page still holds its acknowledgement",
-	).toBeLessThan(heldUntil);
+	// Hold the exact detail acknowledgement until every publication has landed;
+	// elapsed browser work cannot release the producer halfway through the burst.
+	holdingAcknowledgements = true;
+	try {
+		for (let index = 0; index < heldDeliveries; index++) {
+			// A rename wakes the view but carries no detail delta; move a text row to require delivery.
+			await seed(store, [
+				initial("text.delta", {
+					messageId: MESSAGE,
+					partId: PART_A,
+					text: " ",
+				}),
+			]);
+			await rename(SESSION, `Held delivery ${index}`);
+			if (index === 0)
+				await expect.poll(() => heldAcknowledgements).toBeGreaterThan(0);
+		}
+		// Hide the removal signals, as a dropped bus publication would. Only an
+		// overflow can route the unrelated advances below to this open detail view.
+		await seed(store, [
+			event(SESSION, START + 1000)("message.removed", { messageId: MESSAGE }),
+		]);
+		const recreated = event(SESSION, START + 2000);
+		await seed(store, [
+			recreated("message.created", {
+				sessionId: SESSION,
+				messageId: MESSAGE,
+				role: "assistant",
+				parentID: `${SESSION}-input`,
+			}),
+			recreated("text.delta", {
+				messageId: MESSAGE,
+				partId: PART_A,
+				text: `${TEXT_A}\n\n`,
+			}),
+			recreated("turn.completed", { messageId: MESSAGE }),
+		]);
+		await Promise.all(
+			Array.from({ length: unrelatedAdvances }, (_, index) =>
+				rename(OTHER, `Overflow advance ${index}`),
+			),
+		);
+	} finally {
+		holdingAcknowledgements = false;
+		for (const release of releaseAcknowledgements.splice(0)) release();
+	}
 	// The burst left its newest advances, the gap among them, on the bus. The
 	// freed view must catch up from them with no later publication.
-	await page.evaluate(() => undefined);
 	await expect
 		.soft(messages.locator(".md-content p:visible"))
 		.toHaveText([TEXT_A]);
@@ -492,8 +541,8 @@ test("an open recreated message catches up through overflow without replacing it
 				parameters: {
 					advanceBusCapacity,
 					unrelatedAdvances,
-					heldMs,
 					heldDeliveries,
+					heldAcknowledgements,
 				},
 				detailReadCounts,
 				envelopes: delivered.map(envelopeIds),
@@ -524,7 +573,8 @@ test("an open recreated message catches up through overflow without replacing it
 		(e) => e._tag === "remove" && e.id === MESSAGE,
 	);
 	const upsertedAt = delivered.findIndex(
-		(e) =>
+		(e, index) =>
+			index > removedAt &&
 			e._tag === "upsert" &&
 			e.item._tag === "message" &&
 			e.item.message.id === MESSAGE,

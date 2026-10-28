@@ -102,16 +102,18 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 	let scenario = "";
 	const evidence: Record<string, unknown>[] = [];
 
-	async function start(name: string, fixture = CAPTURE, waitDelayMs = 0) {
+	async function start(
+		name: string,
+		fixture = CAPTURE,
+		waitDelayMs = 0,
+		trace = rows(resolve(`test/fixtures/cursor-sdk-traces/${fixture}.jsonl`)),
+	) {
 		scenario = name;
 		harness = ProcessHarness.create({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 		});
 		const tracePath = join(harness.root, "cursor-subagent.jsonl");
 		capturePath = join(harness.root, "cursor-capture.jsonl");
-		const trace = rows(
-			resolve(`test/fixtures/cursor-sdk-traces/${fixture}.jsonl`),
-		);
 		const catalog = rows(
 			resolve("test/fixtures/cursor-sdk-traces/basic.jsonl"),
 		).find(({ kind }) => kind === "models.list");
@@ -264,10 +266,10 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 			capturedChildContent("thinking-delta"),
 		);
 		const starts = events.filter(({ type }) => type === "tool.started");
-		expect(starts).toHaveLength(10);
-		expect(new Set(starts.map(({ data }) => data["callId"])).size).toBe(10);
+		expect(starts).toHaveLength(7);
+		expect(new Set(starts.map(({ data }) => data["callId"])).size).toBe(7);
 		expect(events.filter(({ type }) => type === "tool.completed")).toHaveLength(
-			10,
+			7,
 		);
 		expect(
 			events.filter(({ type }) => type === "message.snapshot"),
@@ -288,13 +290,10 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 		}
 		expect(
 			parts.filter(({ tool }) => tool === "getMcpToolsToolCall"),
-		).toHaveLength(3);
-		expect(parts.slice(0, 7).map(({ type, tool }) => tool ?? type)).toEqual([
+		).toHaveLength(0);
+		expect(parts.slice(0, 4).map(({ type, tool }) => tool ?? type)).toEqual([
 			"thinking",
 			"text",
-			"getMcpToolsToolCall",
-			"getMcpToolsToolCall",
-			"getMcpToolsToolCall",
 			"Read",
 			"Bash",
 		]);
@@ -406,11 +405,47 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 			capturedChildContent("thinking-delta"),
 		);
 		expect(events.filter(({ type }) => type === "tool.started")).toHaveLength(
-			10,
+			7,
 		);
 		expect(events.filter(({ type }) => type === "tool.completed")).toHaveLength(
-			10,
+			7,
 		);
+	}, 300_000);
+
+	it("projects snapshot-only shell and MCP failures without ending the turn on an unknown kind", async () => {
+		const { fixture, browser, id } = await start(
+			"reconcile-failures",
+			"subagent-reconcile-failures",
+		);
+		const child = await waitChild(fixture, id);
+		await waitTurn(fixture, id, "completed");
+		const parts = (await browser.history(child.id)).flatMap(
+			({ parts }) => parts ?? [],
+		);
+		for (const callId of [
+			"c4-shell-exit",
+			"c4-shell-timeout",
+			"c4-shell-rejected",
+			"c4-shell-spawn",
+			"c4-mcp-error",
+		]) {
+			const part = parts.find(({ callID }) => callID === callId);
+			expect.soft(part?.state?.["status"], callId).toBe("error");
+			expect
+				.soft(part?.tool, callId)
+				.toBe(callId === "c4-mcp-error" ? "mcp__spike__echo_hi" : "Bash");
+		}
+		expect
+			.soft(parts.some(({ callID }) => callID === "c4-unknown"))
+			.toBe(false);
+		expect
+			.soft(parts.some(({ tool }) => tool === "getMcpToolsToolCall"))
+			.toBe(false);
+		expect(
+			snapshot(fixture).events.filter(
+				({ sessionId: owner, type }) => owner === id && type === "turn.error",
+			),
+		).toEqual([]);
 	}, 300_000);
 
 	it("keeps a background run open through its same-run follow-up until wait resolves", async () => {
@@ -475,6 +510,77 @@ describe("Cursor live child sessions through daemon and detached runner", () => 
 		expect(
 			rows(capturePath).filter(({ kind }) => kind === "send.options"),
 		).toHaveLength(1);
+	}, 300_000);
+
+	it("persists the latest partial Task prompt when its parent errors before completion", async () => {
+		// Temporary derivative of the interrupt capture: shorten the first Task
+		// args, replay its captured full prompt as a later partial, and fail wait.
+		const trace = rows(
+			resolve("test/fixtures/cursor-sdk-traces/subagent-interrupt.jsonl"),
+		);
+		const partial = trace.find(
+			({ kind, data }) =>
+				kind === "delta" && data?.["type"] === "partial-tool-call",
+		);
+		const call = partial?.data?.["toolCall"] as
+			| { type: string; args: Record<string, unknown> }
+			| undefined;
+		if (!partial || !call) throw new Error("Missing captured partial Task");
+		const latestPrompt = String(call.args["prompt"]);
+		for (const row of trace) {
+			if (
+				row.kind === "delta" &&
+				row.data?.["callId"] === TASK_CALL &&
+				row.data["toolCall"]
+			) {
+				const tool = row.data["toolCall"] as { args: Record<string, unknown> };
+				tool.args["prompt"] = "Inspect";
+			}
+			if (row.kind === "wait.result" && row.data) {
+				row.data["status"] = "error";
+				row.data["error"] = { message: "Parent failed before Task completion" };
+			}
+		}
+		const started = trace.findIndex(
+			({ kind, data }) =>
+				kind === "delta" && data?.["type"] === "tool-call-started",
+		);
+		if (started < 0) throw new Error("Missing captured started Task");
+		trace.splice(started + 1, 0, {
+			...partial,
+			data: {
+				...partial.data,
+				toolCall: { ...call, args: { ...call.args, prompt: latestPrompt } },
+			},
+		});
+		const { fixture, browser, id } = await start(
+			"parent-error-input",
+			"subagent-interrupt",
+			0,
+			trace,
+		);
+		await waitTurn(fixture, id, "error");
+		const task = (await browser.history(id))
+			.flatMap(({ parts }) => parts ?? [])
+			.find(({ callID }) => callID === TASK_CALL);
+		expect.soft(task?.state).toMatchObject({
+			status: "error",
+			input: { _tag: "whole", value: { tool: "Task", prompt: latestPrompt } },
+		});
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			const stored = db
+				.prepare<[string], { input: string }>(
+					"SELECT input FROM message_parts WHERE id = ?",
+				)
+				.get(task?.id ?? "");
+			expect(JSON.parse(stored?.input ?? "null")).toMatchObject({
+				tool: "Task",
+				prompt: latestPrompt,
+			});
+		} finally {
+			db.close();
+		}
 	}, 300_000);
 
 	it("cancels the whole run and settles its active child on interrupt", async () => {

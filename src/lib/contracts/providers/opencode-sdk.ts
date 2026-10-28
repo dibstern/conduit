@@ -1881,6 +1881,7 @@ export const OpenCodePtyListResponseSchema = Schema.Array(OpenCodePtySchema);
 const OpenCodeSkillSchema = Schema.Struct({
 	name: Schema.String,
 	description: Schema.optional(Schema.String),
+	location: Schema.optional(Schema.String),
 });
 export const OpenCodeSkillListResponseSchema =
 	Schema.Array(OpenCodeSkillSchema);

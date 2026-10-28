@@ -403,8 +403,9 @@
 {/if}
 
 <style>
-	/* Keep the panel below the open menu that contains its visibility switch. */
-	:global(body:has([role="menu"][data-state="open"])) .debug-panel {
-		z-index: var(--z-dropdown);
+	/* Keep the panel below the open menu that contains its visibility switch,
+	   including the phone sheet inside #session-chrome's z-dropdown layer. */
+	:global(body:has([data-dropdown-menu-content][data-state="open"])) .debug-panel {
+		z-index: calc(var(--z-dropdown) - 1);
 	}
 </style>

@@ -4,7 +4,7 @@ import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import {
 	type Harness,
-	offeredOptions,
+	modelParameterChoices,
 } from "../../../provider/turn-settings.js";
 import type {
 	ContextWindowOption,
@@ -56,7 +56,7 @@ const providerFromCatalog = (
 	configured: true,
 	models: models
 		.map((model) => {
-			const { efforts } = offeredOptions(model);
+			const efforts = modelParameterChoices(model).offered();
 			return {
 				id: model.id,
 				name: model.name,

@@ -1,10 +1,16 @@
 import { statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Effect, Result, Schema, Semaphore } from "effect";
 import type { Account } from "../../contracts/account.js";
 import { createLogger } from "../../logger.js";
 import { ProviderInstanceFailure } from "../errors.js";
-import type { CommandInfo, ModelInfo, ProviderCapabilities } from "../types.js";
+import { skillCommand } from "../skill-discovery.js";
+import type {
+	CommandInfo,
+	DiscoveredSkill,
+	ModelInfo,
+	ProviderCapabilities,
+} from "../types.js";
 import { openAppServerTransport } from "./app-server/app-server.js";
 import {
 	CodexVersionUnsupported,
@@ -293,8 +299,22 @@ export const discoverCodexEffect = (
 		Effect.flatMap(({ home, env }) =>
 			discoverCodex(home, env, workspaceRoot, true, options),
 		),
-		Effect.flatMap((discovered) =>
-			discovered.signedIn
+		Effect.flatMap((discovered) => {
+			const skills = discovered.skills.map((skill): DiscoveredSkill => {
+				const path = skill.path
+					? resolve(workspaceRoot ?? process.cwd(), skill.path)
+					: undefined;
+				return {
+					name: skill.name,
+					description: skill.description,
+					// System and admin skills are installed for the user, like user skills.
+					source: skill.scope === "repo" ? "project-skill" : "user-skill",
+					location: path
+						? { _tag: "File", path, root: dirname(path) }
+						: { _tag: "Provider" },
+				};
+			});
+			return discovered.signedIn
 				? Effect.succeed({
 						models: discovered.models,
 						supportsTools: true,
@@ -310,16 +330,9 @@ export const discoverCodexEffect = (
 								description: "Compact conversation context",
 								source: "builtin",
 							},
-							...discovered.skills.map(
-								(skill): CommandInfo => ({
-									name: skill.name,
-									description: skill.description,
-									// System and admin skills are installed for the user, like user skills.
-									source:
-										skill.scope === "repo" ? "project-skill" : "user-skill",
-								}),
-							),
+							...skills.map(skillCommand),
 						] satisfies CommandInfo[],
+						skills,
 					})
 				: Effect.fail(
 						new ProviderInstanceFailure({
@@ -330,6 +343,6 @@ export const discoverCodexEffect = (
 							),
 							code: "auth_required",
 						}),
-					),
-		),
+					);
+		}),
 	);

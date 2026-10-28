@@ -44,6 +44,31 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
 describe("ActivityRow task actions", () => {
+	it.each([
+		{ outcome: "failed", status: "completed", isError: false, failed: true },
+		{ outcome: "succeeded", status: "error", isError: true, failed: false },
+	] as const)("uses $outcome for its failure presentation", ({
+		outcome,
+		status,
+		isError,
+		failed,
+	}) => {
+		const { container } = render(ActivityRow, {
+			props: {
+				...props,
+				part: {
+					...agent,
+					name: "Bash",
+					outcome,
+					status,
+					isError,
+					metadata: {},
+				},
+			},
+		});
+		expect(container.querySelector(".text-error") !== null).toBe(failed);
+	});
+
 	it("opens a background agent from the primary row instead of expanding its launch result", async () => {
 		const { container } = render(ActivityRow, { props });
 		await fireEvent.click(
@@ -76,7 +101,7 @@ describe("ActivityRow task actions", () => {
 		);
 		expect(openTask).not.toHaveBeenCalled();
 		expect(openSession).not.toHaveBeenCalled();
-		expect(container.querySelector(".tool-result")).toBeNull();
+		expect(container.querySelector(".shell-detail")).toBeNull();
 		expect(container.querySelector(".subagent-link")).toBeNull();
 	});
 

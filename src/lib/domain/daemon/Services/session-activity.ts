@@ -19,6 +19,7 @@ export interface SessionActivity {
 	readonly compactions: ReturnType<typeof makeSessionCompactions>;
 	readonly retries: ReturnType<typeof makeSessionRetries>;
 	readonly hintDismissals: Map<string, number>;
+	readonly viewers: Map<string, number>;
 	readonly changed: (sessionId: string) => void;
 	readonly subscribe: Effect.Effect<Stream.Stream<string>, never, Scope.Scope>;
 }
@@ -78,6 +79,7 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 				},
 			},
 			hintDismissals,
+			viewers: new Map(),
 			changed,
 			subscribe: Effect.map(PubSub.subscribe(changes), Stream.fromSubscription),
 		} satisfies SessionActivity;

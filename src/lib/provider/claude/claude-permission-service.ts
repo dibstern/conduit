@@ -1,4 +1,4 @@
-import { Effect, Fiber } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import { isRecord } from "../../utils.js";
 import {
 	type ClaudeAdapterError,
@@ -215,19 +215,38 @@ export class ClaudePermissionService {
 			: (ctx.toolRunIds?.get(options.toolUseID) ?? ctx.currentRunId);
 		return Effect.uninterruptibleMask((restore) =>
 			Effect.gen(function* () {
+				const requestId = options.requestId ?? options.toolUseID;
+				const answer = yield* Deferred.make<
+					Record<string, unknown>,
+					ClaudeAdapterError
+				>();
+				ctx.pendingQuestions.set(requestId, {
+					requestId,
+					createdAt: new Date().toISOString(),
+					resolve: (answers) =>
+						Deferred.succeed(answer, answers).pipe(Effect.asVoid),
+					reject: (error) =>
+						Deferred.fail(
+							answer,
+							new ClaudeRuntimeError({ message: error.message }),
+						).pipe(Effect.asVoid),
+				});
 				const request = yield* Effect.forkDetach(
 					restore(
-						sink.requestQuestion({
-							requestId: options.requestId ?? options.toolUseID,
-							...(runId ? { runId } : {}),
-							toolUseId: options.toolUseID,
-							questions,
-						}),
+						Deferred.complete(
+							answer,
+							sink.requestQuestion({
+								requestId,
+								...(runId ? { runId } : {}),
+								toolUseId: options.toolUseID,
+								questions,
+							}),
+						),
 					),
 					{ startImmediately: true },
 				);
 				return yield* restore(
-					Fiber.join(request).pipe(
+					Deferred.await(answer).pipe(
 						Effect.map((answers) => ({
 							behavior: "allow" as const,
 							updatedInput: {
@@ -246,7 +265,12 @@ export class ClaudePermissionService {
 						),
 					),
 				).pipe(
-					Effect.ensuring(Effect.sync(() => request.interruptUnsafe())),
+					Effect.ensuring(
+						Effect.sync(() => {
+							ctx.pendingQuestions.delete(requestId);
+							request.interruptUnsafe();
+						}),
+					),
 					Effect.catch(() =>
 						Effect.succeed({
 							behavior: "deny" as const,

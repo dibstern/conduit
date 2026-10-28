@@ -42,9 +42,14 @@ export const decodeStoredEventRow = <E>(
 			createdAt: row.created_at,
 		};
 
-		yield* Schema.decodeUnknownEffect(StoredEventSchema)(event).pipe(
-			Effect.mapError(mapCause),
-		);
+		const decoded = yield* Schema.decodeUnknownEffect(StoredEventSchema)(
+			event,
+		).pipe(Effect.mapError(mapCause));
 
-		return event as StoredEvent;
+		return {
+			...event,
+			...(decoded.type === "tool.completed"
+				? { data: { ...data, outcome: decoded.data.outcome } }
+				: {}),
+		} as StoredEvent;
 	});

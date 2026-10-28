@@ -39,14 +39,15 @@ export interface CursorStoredCredential {
 	readonly backendUrl: string;
 	readonly createdAtMs: number;
 	readonly apiKeyExpiresAtMs?: number;
+	readonly email?: string;
 }
 
-export interface CursorCredential {
-	readonly source: "environment" | "sdk-login";
-	readonly fingerprint: string;
-	readonly apiKey: string;
-	readonly backendUrl?: string;
-}
+export type { CursorCredential } from "./cursor-credential.js";
+
+import type {
+	CursorCredential,
+	CursorCredentialEnvelope,
+} from "./cursor-credential.js";
 
 export interface CursorRuntimeProbe {
 	readonly available: boolean;
@@ -160,19 +161,19 @@ export interface CursorSdkPort {
 	deleteAgent(agentId: string, cwd: string, store: CursorStore): Promise<void>;
 	primeSandbox(
 		options: CursorAgentOptions,
-		credential: CursorCredential,
+		credential: CursorCredentialEnvelope,
 		store: CursorStore,
 	): Promise<void>;
 	createAgent(
 		options: CursorAgentOptions,
-		credential: CursorCredential,
+		credential: CursorCredentialEnvelope,
 		store: CursorStore,
 		customTools?: Readonly<Record<string, CursorCustomTool>>,
 	): Promise<CursorAgent>;
 	resumeAgent(
 		id: string,
 		options: CursorAgentOptions,
-		credential: CursorCredential,
+		credential: CursorCredentialEnvelope,
 		store: CursorStore,
 		customTools?: Readonly<Record<string, CursorCustomTool>>,
 	): Promise<CursorAgent>;

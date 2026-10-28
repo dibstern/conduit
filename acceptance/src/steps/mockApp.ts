@@ -124,7 +124,18 @@ const skillNavigationMockup = {
 						...message,
 						history: { messages: skillNavigationMessages, hasMore: true },
 					}
-				: message,
+				: message.type === "mock_command_catalog"
+					? {
+							...message,
+							commands: [
+								...(Array.isArray(message["commands"])
+									? message["commands"]
+									: []),
+								{ name: "paged-skill", skillRef: "skill-navigation-paged" },
+								{ name: "user-skill", skillRef: "skill-navigation-user" },
+							],
+						}
+					: message,
 	),
 };
 
@@ -168,6 +179,8 @@ export const mockAppHandlers: StepHandler[] = [
 						? { head: branch }
 						: {
 								branch,
+								head: "6b11104",
+								oid: "6b11104a9c2e88d27395d13c706d876fbab99aa1",
 								...(kind === "worktree" ? { worktree: project } : {}),
 							};
 			const projects = [
@@ -204,6 +217,8 @@ export const mockAppHandlers: StepHandler[] = [
 				git: {
 					...row?.git,
 					dirty: true,
+					upstream: `origin/${row?.git?.branch ?? "main"}`,
+					changes: { files: 3, insertions: 12, deletions: 4 },
 					ahead: Number(match[1]),
 					behind: Number(match[2]),
 					...(match[3] ? { operation: "rebase" as const } : {}),
@@ -724,7 +739,7 @@ export const mockAppHandlers: StepHandler[] = [
 					GetSkillContent: async (payload) => ({
 						projectSlug:
 							"projectSlug" in payload ? payload.projectSlug : "myapp",
-						name: String(payload["name"] ?? ""),
+						name: "paged-skill",
 						path: ".agents/skills/paged-skill/SKILL.md",
 						content:
 							"---\nname: paged-skill\ndescription: A navigation fixture\n---\n# Skill instructions\n\nReview the earlier runs before continuing.\n",

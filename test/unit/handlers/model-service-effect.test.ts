@@ -51,7 +51,10 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
 	getModelsResponse,
+	savedVariantFor,
 	setDefaultModelForRelay,
+	setHarnessDefaultForRelay,
+	setTitleGenerationForRelay,
 	switchModelForSession,
 	switchVariantForSession,
 } from "../../../src/lib/handlers/model.js";
@@ -63,6 +66,10 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import type { ProviderCapabilities } from "../../../src/lib/provider/types.js";
+import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../../../src/lib/relay/relay-settings.js";
 import { RpcSubscriptionScopeLive } from "../../../src/lib/server/ws-rpc.js";
 import { makeHandlerOpenCodeAPI } from "../../helpers/handler-fakes.js";
 import {
@@ -78,6 +85,25 @@ import { withDispatchEffect } from "../../helpers/orchestration-engine-test-doub
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
 layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(makeMockConfig()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
 describe("model handlers with Effect-native model service", () => {
+	it.effect("uses Default and warns once when a saved parameter choice is no longer offered", () => {
+		const configDir = mkdtempSync(join(tmpdir(), "conduit-stale-choice-"));
+		saveRelaySettings({ defaultVariants: { "claude/sonnet": "removed" } }, configDir);
+		const logger = makeMockLogger();
+		return Effect.gen(function* () {
+			const result = yield* savedVariantFor(
+				{ providerID: "claude", modelID: "sonnet" },
+				[{ id: "sonnet", name: "Sonnet", providerId: "claude", variants: { high: {} } }],
+			);
+			expect(result).toEqual({ variant: "", variants: ["high"] });
+			expect(logger.warn).toHaveBeenCalledOnce();
+			expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("claude/sonnet"));
+			expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('"removed"'));
+		}).pipe(
+			Effect.provideService(ConfigTag, makeMockConfig({ configDir })),
+			Effect.provideService(LoggerTag, logger),
+		);
+	});
+
 	it.effect("preserves OpenCode discovery failures instead of returning an empty catalog", () => {
 		const failure = new Cause.UnknownError(
 			new Error("OpenCode request timed out"),
@@ -96,6 +122,54 @@ describe("model handlers with Effect-native model service", () => {
 			}),
 		);
 	});
+	for (const session of [false, true]) {
+		it.effect(`lists the active model and ${session ? "preserves a stale session choice" : "uses Default for a stale saved preference"} with one warning`, () => {
+			const configDir = mkdtempSync(join(tmpdir(), "conduit-stale-models-"));
+			saveRelaySettings({ defaultModel: "openai/gpt-4", defaultVariants: { "openai/gpt-4": "removed" } }, configDir);
+			const logger = makeMockLogger();
+			const deps = Layer.mergeAll(
+				Layer.succeed(OpenCodeModelServiceTag)({
+					listProviders: () => Effect.succeed({ connected: ["openai"], defaults: {}, providers: [
+						{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4", variants: { high: {} } }] },
+					] }),
+					cachedProviders: () => Effect.succeedNone,
+					persistDefaultModel: () => Effect.void,
+				}),
+				Layer.succeed(ConfigTag)(makeMockConfig({ configDir })),
+				Layer.succeed(LoggerTag)(logger),
+				Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+				makeOverridesStateLive(), ProjectSettingsLive,
+			);
+			return Effect.gen(function* () {
+				if (session) {
+					yield* (yield* ProjectionRunnerEffectTag).recover();
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`INSERT INTO sessions
+						(id, provider, title, model_provider, model_id, variant, context_window, created_at, updated_at)
+						VALUES ('stale-parameter-session', 'opencode', 'Stale parameters', 'openai', 'gpt-4', 'removed', '', 1, 1)`;
+				}
+				const result = yield* getModelsResponse({ instanceId: "opencode", ...(session ? { sessionId: "stale-parameter-session" } : {}) });
+				expect(result).toMatchObject({
+					providers: [{ id: "openai", models: [{ id: "gpt-4", variants: ["high"] }] }],
+					active: { provider: "openai", model: "gpt-4" },
+					variant: { variant: session ? "removed" : "", variants: ["high"] },
+				});
+				expect(logger.warn).toHaveBeenCalledOnce();
+				expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("openai/gpt-4"));
+				expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('"removed"'));
+				expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(session ? "keeping unavailable session choice" : "using Default"));
+				if (session) {
+					const explicit = yield* Effect.result(switchVariantForSession({
+						clientId: "client-1", sessionId: "stale-parameter-session", variant: "never-offered",
+					}));
+					expect(explicit).toMatchObject({ _tag: "Failure", failure: {
+						_tag: "ModelParametersUnavailable", choice: "never-offered", reason: "not-offered", offered: ["high"],
+					} });
+					expect(logger.warn).toHaveBeenCalledOnce();
+				}
+			}).pipe(Effect.provide(deps, { local: true }));
+		});
+	}
 	it.effect(
 		"loads providers and relay-owned active-session model info without requiring the Promise OpenCode API tag",
 		() => {
@@ -518,12 +592,14 @@ describe("model handlers with Effect-native model service", () => {
 	);
 
 	it.effect(
-		"switches a stored OpenCode session model using the model service without requiring the Promise OpenCode API tag",
+		"switches a stored OpenCode session model with Default when its saved choice is stale",
 		() => {
 			const wsHandler = makeMockWebSocketHandler({
 				getClientSession: vi.fn(() => "session-model-switch"),
 			});
 			const logger = makeMockLogger();
+			const configDir = mkdtempSync(join(tmpdir(), "conduit-switch-model-"));
+			saveRelaySettings({ defaultVariants: { "openai/gpt-4": "removed" } }, configDir);
 			const modelService = {
 				listProviders: vi.fn(() =>
 					Effect.succeed({
@@ -552,9 +628,7 @@ describe("model handlers with Effect-native model service", () => {
 				Layer.succeed(OpenCodeModelServiceTag)(modelService),
 				Layer.succeed(WebSocketHandlerTag)(wsHandler),
 				Layer.succeed(LoggerTag)(logger),
-				Layer.succeed(ConfigTag)(makeMockConfig({
-						configDir: mkdtempSync(join(tmpdir(), "conduit-switch-model-")),
-					})),
+				Layer.succeed(ConfigTag)(makeMockConfig({ configDir })),
 				makeOverridesStateLive(),
 			);
 
@@ -574,6 +648,9 @@ describe("model handlers with Effect-native model service", () => {
 				Effect.provide(layer, { local: true }),
 				Effect.tap((result) => Effect.sync(() => {
 					expect(modelService.listProviders).toHaveBeenCalledOnce();
+					expect(logger.warn).toHaveBeenCalledOnce();
+					expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("openai/gpt-4"));
+					expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('"removed"'));
 					expect(result).toEqual({
 						model: "gpt-4",
 						provider: "openai",
@@ -650,6 +727,79 @@ describe("model handlers with Effect-native model service", () => {
 			}).pipe(Effect.provide(layer, { local: true }));
 		},
 	);
+
+	for (const harnessDefault of [false, true]) {
+	it.effect(`sets the ${harnessDefault ? "harness" : "model"} default with Default when the saved choice is stale`, () => {
+		const configDir = mkdtempSync(join(tmpdir(), "conduit-stale-default-"));
+		saveRelaySettings({
+			defaultModel: "openai/previous",
+			harnessDefaults: { opencode: { providerId: "openai", modelId: "previous", contextWindow: "" } },
+			defaultVariants: { "openai/gpt-4": "removed" },
+		}, configDir);
+		const publishGlobalSetting = vi.fn(() => Effect.void);
+		const persistDefaultModel = vi.fn(() => Effect.void);
+		const logger = makeMockLogger();
+		const deps = Layer.mergeAll(
+			Layer.succeed(OpenCodeModelServiceTag)({
+				listProviders: () => Effect.succeed({ connected: ["openai"], defaults: {}, providers: [
+					{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4", variants: { high: {} } }] },
+				] }),
+				cachedProviders: () => Effect.succeedNone,
+				persistDefaultModel,
+			}),
+			Layer.succeed(ConfigTag)(makeMockConfig({ configDir, publishGlobalSetting })),
+			Layer.succeed(LoggerTag)(logger),
+			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
+			makeOverridesStateLive(), ProjectSettingsLive,
+		);
+		return Effect.gen(function* () {
+			if (harnessDefault) {
+				const result = yield* setHarnessDefaultForRelay({
+					harness: "opencode", providerId: "openai", modelId: "gpt-4", contextWindow: "",
+				});
+				expect(result).toMatchObject({ status: "ok", pick: { modelId: "gpt-4", effort: "" } });
+			} else {
+				const result = yield* setDefaultModelForRelay({
+					clientId: "client-1", provider: "openai", model: "gpt-4",
+				});
+				expect(result).toMatchObject({ model: "gpt-4", variant: "", variants: ["high"] });
+				expect(persistDefaultModel).toHaveBeenCalledExactlyOnceWith("openai", "gpt-4");
+			}
+			expect(loadRelaySettings(configDir).harnessDefaults?.opencode).toMatchObject({ providerId: "openai", modelId: "gpt-4" });
+			expect(publishGlobalSetting).toHaveBeenCalled();
+			expect(logger.warn).toHaveBeenCalledOnce();
+			expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("openai/gpt-4"));
+			expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('"removed"'));
+		}).pipe(Effect.provide(deps, { local: true }));
+	});
+	}
+
+	it.effect("rejects an explicitly submitted title parameter key that is not offered", () => {
+		const configDir = mkdtempSync(join(tmpdir(), "conduit-invalid-title-choice-"));
+		const logger = makeMockLogger();
+		const deps = Layer.mergeAll(
+			Layer.succeed(OpenCodeModelServiceTag)({
+				listProviders: () => Effect.succeed({ connected: ["openai"], defaults: {}, providers: [
+					{ id: "openai", name: "OpenAI", models: [{ id: "gpt-4", name: "GPT-4", variants: { high: {} } }] },
+				] }),
+				cachedProviders: () => Effect.succeedNone,
+				persistDefaultModel: () => Effect.void,
+			}),
+			Layer.succeed(ConfigTag)(makeMockConfig({ configDir })),
+			Layer.succeed(LoggerTag)(logger),
+			makeOverridesStateLive(), ProjectSettingsLive,
+		);
+		return Effect.gen(function* () {
+			const result = yield* Effect.result(setTitleGenerationForRelay({
+				account: { _tag: "Id", id: "opencode" }, providerId: "openai", modelId: "gpt-4", effort: "never-offered",
+			}));
+			expect(result).toMatchObject({ _tag: "Failure", failure: {
+				_tag: "ModelParametersUnavailable", choice: "never-offered", reason: "not-offered", offered: ["high"],
+			} });
+			expect(loadRelaySettings(configDir).titleGeneration).toBeUndefined();
+			expect(logger.warn).not.toHaveBeenCalled();
+		}).pipe(Effect.provide(deps, { local: true }));
+	});
 
 	it.effect("keeps cold model discovery non-starting, refreshes live data and retains it after stop", () => {
 		const catalog = { providers: [], defaults: { fake: "fake-model" }, connected: ["fake"] };

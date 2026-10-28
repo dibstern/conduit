@@ -78,14 +78,21 @@ export const Url: Story = {
 	},
 };
 
-export const UnknownSkill: Story = {
+export const UnknownSkill = {
 	args: {
-		text: "Run /deploy-production after the checks pass.",
+		// 352e7835 leaves unrelated slash tokens plain; exercise a real typo.
+		text: "Run /reviev after the checks pass.",
 	},
-};
+	play: async ({ canvasElement }) => {
+		await expect(
+			canvasElement.querySelector(".skill-unknown")?.textContent,
+		).toBe("/reviev");
+	},
+} satisfies Story;
 
 export const MixedSkills: Story = {
 	args: {
-		text: "Use /review, then run /missing-skill before /test.",
+		text: "Use /review, then run /reviev before /test.",
 	},
+	play: UnknownSkill.play,
 };

@@ -11,6 +11,7 @@ import { clearSessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { applyUsageReadings } from "../../stores/usage.svelte.js";
+import { expectSessionGlyphAlignment } from "../../stories/glyph-alignment.js";
 import { mockClaudeAccount } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
@@ -80,17 +81,21 @@ async function expectSessionTitle(canvasElement: HTMLElement) {
 	await expect(mark).toHaveStyle({
 		width: compact ? "26px" : "20px",
 		height: compact ? "26px" : "20px",
-		borderRadius: compact ? "7px" : "5px",
+		borderRadius: compact ? "7.02px" : "5.4px",
 		color: "rgb(255, 255, 255)",
 	});
 	const glyph = mark.querySelector("svg");
-	await expect(glyph).toHaveStyle({
-		width: compact ? "15px" : "12px",
-		height: compact ? "15px" : "12px",
-	});
-	const accent = new Option().style;
-	accent.color = getComputedStyle(mark).getPropertyValue("--color-accent");
-	await expect(getComputedStyle(mark).backgroundColor).toBe(accent.color);
+	await expect(glyph?.getBoundingClientRect().width).toBeCloseTo(
+		compact ? 15.6 : 12,
+		1,
+	);
+	await expect(glyph?.getBoundingClientRect().height).toBeCloseTo(
+		compact ? 15.6 : 12,
+		1,
+	);
+	const brand = new Option().style;
+	brand.color = getComputedStyle(mark).getPropertyValue("--color-brand");
+	await expect(getComputedStyle(mark).backgroundColor).toBe(brand.color);
 	const markBox = mark.getBoundingClientRect();
 	const textRange = document.createRange();
 	textRange.selectNodeContents(label);
@@ -215,7 +220,9 @@ export const Final: Story = {
 		return fitSidebarToViewport();
 	},
 	play: async ({ canvasElement }) => {
+		await document.fonts.ready;
 		await expectSessionTitle(canvasElement);
+		await expectSessionGlyphAlignment(canvasElement);
 		const canvas = within(canvasElement);
 		await expect(canvas.getByText("Fix token refresh race")).toBeVisible();
 		await expect(canvas.getByTestId("usage-footer-row-work")).toBeVisible();
@@ -239,9 +246,20 @@ export const Final: Story = {
 			.closest<HTMLElement>(".session-title-inner");
 		if (!title) throw new TypeError("Pinned title is missing");
 		const phone = matchMedia("(max-width: 767px)").matches;
-		if (phone && !sessionViewState.compact) {
-			// The 260px sidebar truncates this title at the phone's larger type size.
-			await expect(title.scrollWidth).toBeGreaterThan(title.clientWidth);
+		if (!sessionViewState.compact) {
+			// The loaded font fits at 260px; exercise ellipsis at a narrower width.
+			const width = uiState.sidebarWidth;
+			uiState.sidebarWidth = 240;
+			await waitFor(() =>
+				expect(title.scrollWidth).toBeGreaterThan(title.clientWidth),
+			);
+			uiState.sidebarWidth = width;
+			await waitFor(() =>
+				expect(
+					canvasElement.querySelector("#sidebar")?.getBoundingClientRect()
+						.width,
+				).toBe(width),
+			);
 			await expect(getComputedStyle(title).overflowX).toBe("hidden");
 			await expect(getComputedStyle(title).textOverflow).toBe("ellipsis");
 		} else {

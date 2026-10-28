@@ -11,13 +11,18 @@ export function makeRunnerIdleExit(
 	testIdleWindowMs?: number | null,
 	dayMs = 86_400_000,
 	autoSettleAfterDays?: number | null,
-	hasHeldWork?: () => boolean,
+	hasHeldWork?: (ignoredTurns?: number) => boolean,
 	configDir = DEFAULT_CONFIG_DIR,
 ) {
 	let lastActivityAt = Date.now();
 	let turns = 0;
 	let sdkTurnInFlight = false;
 	let backgroundWork = false;
+	const isQuiescent = (ignoredTurns = 0) =>
+		turns <= ignoredTurns &&
+		!sdkTurnInFlight &&
+		!backgroundWork &&
+		!hasHeldWork?.(ignoredTurns);
 	const timer = setInterval(
 		() => {
 			if (turns > 0 || sdkTurnInFlight || backgroundWork || hasHeldWork?.())
@@ -54,10 +59,9 @@ export function makeRunnerIdleExit(
 	);
 	return {
 		get quiescent() {
-			return (
-				turns === 0 && !sdkTurnInFlight && !backgroundWork && !hasHeldWork?.()
-			);
+			return isQuiescent();
 		},
+		isQuiescent,
 		setTurnInFlight(inFlight: boolean) {
 			sdkTurnInFlight = inFlight;
 			lastActivityAt = Date.now();

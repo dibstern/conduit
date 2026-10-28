@@ -37,7 +37,7 @@ describe("WsRpcServerLayer Claude settings", () => {
 			const client = yield* RpcTest.makeClient(WsRpcGroup);
 			const settings = yield* Queue.unbounded<ProjectSettingsEnvelope>();
 			yield* Stream.runForEach(
-				client.SubscribeProjectSettings({ projectSlug: "project-a" }),
+				client.SubscribeProjectSettings({ projectSlug: "test-project" }),
 				(envelope) => Queue.offer(settings, envelope),
 			).pipe(Effect.forkScoped);
 			yield* Queue.take(settings); // snapshot

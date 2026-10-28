@@ -32,7 +32,8 @@ Scenario Outline: inspect Cursor tool activity while output streams and after co
   Then the Cursor edit row shows old value replaced by new value with 1 added and 1 removed
   And the Cursor write row shows its content and 2 added lines without a removed count
   And the Cursor delete row shows its path and 23 bytes without invented lines
-  When I scroll the transcript back to the bottom
+  When I scroll the transcript down by 200 pixels
+  And I scroll the transcript back to the bottom
   Then the transcript is pinned to the bottom
   And the jump-to-latest control is not visible
   And the messages region visually matches cursor-tools-file-changes at <threshold> percent

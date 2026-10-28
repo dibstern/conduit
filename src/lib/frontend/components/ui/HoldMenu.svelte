@@ -2,7 +2,7 @@
 	import { DropdownMenu } from "bits-ui";
 	import type { Snippet } from "svelte";
 	import { createAttachmentKey } from "svelte/attachments";
-	import { hold } from "./actions/hold.js";
+	import { hold } from "../../actions/hold.js";
 	import Icon from "./Icon.svelte";
 
 	type HoldMenuState =

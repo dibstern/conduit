@@ -182,6 +182,15 @@ describe("Codex native forks and conversation rewind through the daemon", () => 
 			},
 			{ timeout: TIMEOUT },
 		);
+		// Turn launches use the account's resolved environment, not the service env.
+		await fixture.requestRpc({
+			_tag: "UpdateInstance",
+			instanceId: account.id,
+			env: {
+				NODE_ENV: "test",
+				CONDUIT_TEST_CODEX_TRACE_MAP: mapPath,
+			},
+		});
 		expect(await codexModels(browser, account.id)).toContainEqual(
 			expect.objectContaining({ id: MODEL }),
 		);

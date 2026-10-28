@@ -295,6 +295,7 @@ export const DraftPreWarmLive = Layer.effect(
 															workspaceRoot: input.workspaceRoot,
 															extraFolders: input.extraFolders,
 															shellEnv: input.shellEnv,
+															shellConfig: input.shellConfig,
 														}
 													: undefined;
 											const warm = yield* Effect.forkIn(

@@ -186,6 +186,11 @@ describe("findCatalogModel", () => {
 });
 
 describe("resolveTurnSettings", () => {
+	it("preserves a Claude legacy variant effort without parameters", () => {
+		expect(resolveTurnSettings(pick({ effort: "high" }), [claude])).toEqual(
+			Either.succeed(pick({ effort: "high" })),
+		);
+	});
 	it.each([
 		{ name: "Claude defaults", input: pick(), expected: pick() },
 		{
@@ -294,14 +299,14 @@ describe("resolveTurnSettings", () => {
 			}),
 			tag: "ModelNotInCatalog",
 		},
-		{ input: pick({ effort: "medium" }), tag: "EffortNotOffered" },
+		{ input: pick({ effort: "medium" }), tag: "ModelParametersUnavailable" },
 		{
 			input: pick({
 				harness: "opencode",
 				model: { providerId: "anthropic", modelId: "sonnet" },
 				effort: "low",
 			}),
-			tag: "EffortNotOffered",
+			tag: "ModelParametersUnavailable",
 		},
 		{ input: pick({ contextWindow: "2m" }), tag: "ContextWindowNotOffered" },
 		{
@@ -325,7 +330,7 @@ describe("resolveTurnSettings", () => {
 				return [
 					{
 						input: pick({ harness, model, effort: "high" }),
-						tag: "EffortNotOffered",
+						tag: "ModelParametersUnavailable",
 					},
 					{
 						input: pick({ harness, model, contextWindow: "1m" }),
@@ -358,9 +363,10 @@ describe("resolveTurnSettings", () => {
 		expect(resolveTurnSettings(pick({ effort: "max" }), catalog)).toMatchObject(
 			{
 				failure: {
-					_tag: "EffortNotOffered",
+					_tag: "ModelParametersUnavailable",
 					modelId: "sonnet",
-					effort: "max",
+					choice: "max",
+					reason: "not-offered",
 					offered: ["low", "high"],
 				},
 			},

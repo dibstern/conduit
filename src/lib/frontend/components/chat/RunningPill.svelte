@@ -2,7 +2,7 @@
 <!-- nested tasks included (liveLaunchedTasks). Absent once they all finish.      -->
 <!-- .turn-running is an E2E hook; it stays outside .turn-meta, which is the bill. -->
 <script lang="ts">
-	import TaskGlyph from "../session/TaskGlyph.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 
 	let { count }: { count: number } = $props();
 </script>
@@ -12,7 +12,7 @@
 		class="turn-running inline-flex shrink-0 items-center gap-1.5 rounded-full border border-tool/35 bg-tool/7 px-2 py-px font-mono text-[11px] text-tool whitespace-nowrap"
 		title="{count} background {count === 1 ? 'task' : 'tasks'} still running"
 	>
-		<TaskGlyph />
+		<ConduitMark size={12} variant="running" tone="inherit" />
 		<span>{count}</span>
 		<span class="@max-[336px]:hidden">running</span>
 	</span>

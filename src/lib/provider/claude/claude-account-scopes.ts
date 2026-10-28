@@ -10,9 +10,9 @@ import {
 import { ClaudeBoundaryError } from "../event-sink-errors.js";
 import {
 	type ClaudeCapabilitiesService,
+	type ClaudeCapabilitiesServiceDeps,
 	makeClaudeCapabilitiesService,
 } from "./claude-capabilities-service.js";
-import { loadClaudeSdkTestModule } from "./claude-sdk-module.js";
 
 type ClaudeAccount = Extract<Account, { driver: "claude" }>;
 
@@ -37,6 +37,7 @@ export const makeClaudeAccountScopes = (deps: {
 	readonly trustAdmission?: true;
 	readonly cacheDir?: string;
 	readonly capabilitiesService?: ClaudeCapabilitiesService;
+	readonly queryFactory?: ClaudeCapabilitiesServiceDeps["queryFactory"];
 	readonly openCapabilities?: (
 		accountId: string,
 	) => Effect.Effect<
@@ -55,10 +56,8 @@ export const makeClaudeAccountScopes = (deps: {
 				deps.openCapabilities?.(id) ??
 				Effect.gen(function* () {
 					const scope = yield* Effect.scope;
-					// Process tests swap the SDK module; probes must not reach the real SDK.
-					const testSdk = yield* loadClaudeSdkTestModule.pipe(Effect.orDie);
 					return yield* makeClaudeCapabilitiesService({
-						...(testSdk ? { queryFactory: testSdk.claudeSdk.query } : {}),
+						...(deps.queryFactory ? { queryFactory: deps.queryFactory } : {}),
 						...(deps.cacheDir !== undefined ? { cacheDir: deps.cacheDir } : {}),
 						launchConfig: () => {
 							throw new ClaudeBoundaryError({

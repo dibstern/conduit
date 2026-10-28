@@ -1541,7 +1541,7 @@ test("a new-session draft survives a daemon restart for a device opening its URL
 	}
 });
 
-test("New session twice on an empty draft keeps the draft URL", async ({
+test("New session twice opens independent empty draft URLs", async ({
 	page,
 	buildDaemon,
 }, testInfo) => {
@@ -1559,8 +1559,9 @@ test("New session twice on an empty draft keeps the draft URL", async ({
 		for (const index of [1, 2]) {
 			await startNewSession(page);
 			urls.push(page.url());
-			// The phone list is "/", so its project falls back to the default; the id is what must hold.
-			expect(new URL(page.url()).pathname).toBe(new URL(entry).pathname);
+			expect(new Set(urls.map((url) => new URL(url).pathname)).size).toBe(
+				urls.length,
+			);
 			await expect(page.locator("#input")).toHaveValue("");
 			await page.screenshot({
 				path: testInfo.outputPath(`empty-draft-new-${index}.png`),

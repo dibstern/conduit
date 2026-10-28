@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect } from "@playwright/test";
+import type { ProcessHarness } from "../../helpers/process-harness.js";
 
 export class AppPage {
 	readonly page: Page;
@@ -77,6 +78,35 @@ export class AppPage {
 		await this.connectOverlay.waitFor({ state: "detached", timeout: 30_000 });
 	}
 
+	/** A cold empty load opens setup; removing the last project keeps settings available. */
+	async mountWithoutProjects(
+		harness: ProcessHarness,
+		mount: () => Promise<void> = () => this.goto(harness.baseUrl),
+	): Promise<void> {
+		const project = await harness.requestRpc({
+			_tag: "SaveProject",
+			title: "Settings fixture",
+			folders: [harness.projectDir],
+		});
+		try {
+			await mount();
+			await expect(
+				this.page
+					.locator('.session-empty, [data-testid="project-tree-empty"]')
+					.first(),
+			).toBeVisible();
+		} finally {
+			await harness.requestRpc({
+				_tag: "RemoveProject",
+				slug: project.savedSlug,
+			});
+		}
+		expect(
+			(await harness.requestRpc({ _tag: "GetProjects" })).projects,
+		).toEqual([]);
+		await expect(this.page.getByTestId("project-tree-header")).toHaveCount(0);
+	}
+
 	async waitForConnected(): Promise<void> {
 		await expect(this.statusDot).toHaveClass(/bg-success/, {
 			timeout: 10_000,
@@ -85,8 +115,9 @@ export class AppPage {
 
 	async sendMessage(text: string): Promise<void> {
 		await this.input.fill(text);
-		// Fill enables the send button
-		await expect(this.sendBtn).toBeEnabled({ timeout: 2_000 });
+		// Send also waits for the session to be placed, which can lag goto()
+		// under load, so this takes the default expect timeout.
+		await expect(this.sendBtn).toBeEnabled();
 		await this.sendBtn.click();
 	}
 

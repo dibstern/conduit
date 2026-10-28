@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import { isSealedSecretAnswer } from "../domain/daemon/Services/secret-answers.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import {
 	type EventStoreError,
@@ -105,7 +106,12 @@ export class DurableCommandCommitRepository {
 						...(payload.nativeRequestId
 							? { providerRequestId: payload.nativeRequestId }
 							: {}),
-						answers: payload.answers,
+						answers: Object.fromEntries(
+							Object.entries(payload.answers).map(([index, answer]) => [
+								index,
+								isSealedSecretAnswer(answer) ? "[redacted]" : answer,
+							]),
+						),
 					},
 					opts,
 				);

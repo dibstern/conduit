@@ -20,11 +20,12 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import type { HTMLAttributes } from "svelte/elements";
-	import { DETACHED_LISTBOX_SURFACE_CLASSES } from "./floating-styles.js";
+	import { DETACHED_LISTBOX_SURFACE_CLASSES, FINAL_FLOATING_SURFACE_CLASSES } from "./floating-styles.js";
 
 	type DetachedListboxProps = {
 		id: string;
 		ariaLabel: string;
+		appearance?: "default" | "final";
 		class?: string | undefined;
 		children: Snippet;
 	} & Omit<
@@ -46,20 +47,14 @@
 	let {
 		id,
 		ariaLabel,
+		appearance = "default",
 		class: className,
 		children,
 		...rest
 	}: DetachedListboxProps = $props();
 
-	// `class` is additive, never an override: a consumer utility that conflicts
-	// with a canonical one is resolved by stylesheet order, not by this order.
-	// See component-conventions.mdx. The fix for a conflict is a prop that
-	// REPLACES the canonical utility (as MenuItem's `density` does) rather than
-	// an authoritative (`!`) one that beats it. This surface emits exactly one
-	// `rounded-*` and one `z-*`, so neither group is ever contested, and it has
-	// no radius prop because there is now only one floating radius in the app.
 	const surfaceClass = $derived(
-		[DETACHED_LISTBOX_SURFACE_CLASSES, className]
+		[appearance === "final" ? `${FINAL_FLOATING_SURFACE_CLASSES} z-[var(--z-dropdown)]` : DETACHED_LISTBOX_SURFACE_CLASSES, className]
 			.filter(Boolean)
 			.join(" "),
 	);

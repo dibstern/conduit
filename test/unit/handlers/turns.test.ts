@@ -76,7 +76,7 @@ function tool(
 	opts: {
 		createdAt?: number;
 		status?: ToolMessage["status"];
-		isError?: boolean;
+		outcome?: ToolMessage["outcome"];
 		result?: string;
 	} = {},
 ): ToolMessage {
@@ -89,7 +89,7 @@ function tool(
 		input,
 		status: opts.status ?? "completed",
 		...(opts.createdAt !== undefined ? { createdAt: opts.createdAt } : {}),
-		...(opts.isError !== undefined ? { isError: opts.isError } : {}),
+		...(opts.outcome !== undefined ? { outcome: opts.outcome } : {}),
 		...(opts.result !== undefined ? { result: opts.result } : {}),
 	};
 }
@@ -517,11 +517,15 @@ describe("turnStats", () => {
 		expect(s.others).toBe(0);
 	});
 
-	it("counts failures from either the status or the error flag", () => {
+	it("counts failures from the typed outcome regardless of status", () => {
 		const s = turnStats({
 			activity: [
-				tool("Bash", { tool: "Bash", command: "false" }, { status: "error" }),
-				tool("Bash", { tool: "Bash", command: "nope" }, { isError: true }),
+				tool(
+					"Bash",
+					{ tool: "Bash", command: "false" },
+					{ status: "error", outcome: "failed" },
+				),
+				tool("Bash", { tool: "Bash", command: "nope" }, { outcome: "failed" }),
 				tool("Bash", { tool: "Bash", command: "ls" }),
 			],
 			reply: [],

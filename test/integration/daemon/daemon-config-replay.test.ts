@@ -67,7 +67,7 @@ for (const [owner, key] of [[fs, "readFileSync"], [fs, "readFile"], [promises, "
       const boundary = stack.includes("config-persistence-layer") ? "writer"
         : stack.includes("daemon-foreground") || stack.includes("process-harness-server") ? "startup" : "runtime";
       appendFileSync(root + "/config-reads.ndjson", JSON.stringify({ pid: process.pid, api: key, boundary, stack }) + "\\n");
-      const legacyDaemon = existsSync(root + "/rollback-daemon") && !/claude-session-runner\.(js|ts)$/.test(process.argv[1] ?? "");
+      const legacyDaemon = existsSync(root + "/rollback-daemon") && !/claude-session-runner.(js|ts)$/.test(process.argv[1] ?? "");
       if (boundary === "runtime" && !legacyDaemon && !existsSync(root + "/legacy-launch")) throw new Error("Runtime daemon config read forbidden");
     }
     return original.apply(this, args);
@@ -546,7 +546,13 @@ it("retains Cursor's admitted command snapshot through restart without runtime c
 	await vi.waitFor(() => expect(sends(fixture)).toHaveLength(2), {
 		timeout: 15_000,
 	});
-	expect(sends(fixture).map(({ days }) => days)).toEqual([null, null]);
+	// b5b4079c reattaches journaled sends without re-preparing their metadata.
+	expect(
+		sends(fixture).map(({ hasPolicy, days }) => ({ hasPolicy, days })),
+	).toEqual([
+		{ hasPolicy: true, days: null },
+		{ hasPolicy: false, days: undefined },
+	]);
 	expect(sends(fixture)[1]?.commandId).toBe(sends(fixture)[0]?.commandId);
 	rmSync(gate);
 	const db = new Database(fixture.daemonStorePath(), { readonly: true });

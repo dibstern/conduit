@@ -608,6 +608,7 @@ describe("daemon-wide shell feed", () => {
 		expect(resumed.frames).toContainEqual({
 			_tag: "remove",
 			id: "a",
+			projectSlug: "alpha",
 			sequence: await f.version("a"),
 			deleted: true,
 		});

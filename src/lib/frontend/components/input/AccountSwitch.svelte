@@ -20,7 +20,7 @@
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { quotaReading } from "../../utils/continuation.js";
 	import HandoffDialog from "../overlays/HandoffDialog.svelte";
-	import AccountDot from "../ui/AccountDot.svelte";
+	import HarnessLogo from "../model/HarnessLogo.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuItem from "../ui/MenuItem.svelte";
 	import QuotaMeter from "../ui/QuotaMeter.svelte";
@@ -90,7 +90,7 @@
 				presentedRequest = claudeAccounts.handoff.kind === "previewing" ? claudeAccounts.handoff.requestId : undefined;
 			}}
 		>
-			<AccountDot instanceId={option.id} />
+			<HarnessLogo driver={getInstanceById(option.id)?.driver ?? claudeAccounts.harness} instanceId={option.id} size={15} aligned spinning={option.id === claudeAccounts.switchingTo && claudeAccounts.shouldAccountSpin(sessionId, option.id)} data-testid="account-logo" />
 			<span class="min-w-0 truncate {selected ? 'text-text' : 'text-text-secondary'}">{option.name}</span>
 			{#if option.id === account}<span class="text-[11px] text-text-dimmer">current</span>{/if}
 			<span class="flex-1"></span>

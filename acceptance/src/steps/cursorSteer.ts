@@ -1,5 +1,6 @@
 import { expect } from "@playwright/test";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
+import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	requireRelayControl,
@@ -91,11 +92,21 @@ export const cursorSteerHandlers: StepHandler[] = [
 	{
 		name: "publish a backgrounded Cursor shell",
 		match: /^the Cursor relay reports a shell moved to the background$/,
-		run: ({ world }) => {
+		run: async ({ world }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) =>
+					candidate.tag === "input.submit" &&
+					candidate.payload["sessionId"] === sessionId,
+			);
+			const inputId = request.payload["inputId"];
+			if (typeof inputId !== "string")
+				throw new Error("The Cursor turn has no submitted input id");
 			const messages: HistoryMessage[] = [
 				{
-					id: "cursor-shell-user",
+					id: "cursor-turn-user",
 					role: "user",
+					inputId,
+					time: { created: PINNED_CLOCK_MS },
 					parts: [
 						{ id: "cursor-shell-prompt", type: "text", text: "Keep working" },
 					],
@@ -103,6 +114,7 @@ export const cursorSteerHandlers: StepHandler[] = [
 				{
 					id: "cursor-turn-assistant",
 					role: "assistant",
+					time: { created: PINNED_CLOCK_MS + 1 },
 					parts: [
 						{
 							id: shellId,
@@ -141,7 +153,7 @@ export const cursorSteerHandlers: StepHandler[] = [
 			await expect(row.locator("button").first()).toContainText(
 				"Moved to background",
 			);
-			await expect(row.locator(".tool-result")).toHaveCount(0);
+			await expect(row.locator(".shell-detail")).toHaveCount(0);
 		},
 	},
 	{
@@ -163,7 +175,7 @@ export const cursorSteerHandlers: StepHandler[] = [
 			).toHaveText("Moved to background. The command may still be running.");
 			await expect(
 				world.page.locator(
-					`.tool-item[data-tool-id="${shellId}"] .tool-result`,
+					`.tool-item[data-tool-id="${shellId}"] .shell-detail`,
 				),
 			).toContainText("sleep 10");
 		},

@@ -1715,6 +1715,52 @@ describe("MessageProjector", () => {
 	});
 
 	describe("tool.completed", () => {
+		it.each([
+			{ outcome: "failed", metadata: {}, expected: "error" },
+			{
+				outcome: "succeeded",
+				metadata: { cursorToolType: "shellToolCall", isError: true },
+				expected: "completed",
+			},
+		] as const)("projects the typed $outcome outcome as $expected", async ({
+			outcome,
+			metadata,
+			expected,
+		}) => {
+			await project(
+				makeStored("tool.started", "s1", {
+					messageId: "m1",
+					partId: "tool1",
+					toolName: "Bash",
+					callId: "call1",
+					input: { tool: "Bash", command: "false" },
+				}),
+			);
+			await project(
+				makeStored(
+					"tool.completed",
+					"s1",
+					{
+						messageId: "m1",
+						partId: "tool1",
+						result: "tool output",
+						duration: 1,
+						outcome,
+						metadata,
+					},
+					2,
+				),
+			);
+			expect(
+				(
+					await queryOne<MessagePartRow>(
+						"SELECT * FROM message_parts WHERE id = ?",
+						["tool1"],
+					)
+				)?.status,
+			).toBe(expected);
+		});
+
 		it("updates matching tool part with result, duration, and completed status", async () => {
 			const created = makeStored(
 				"message.created",
@@ -1943,7 +1989,7 @@ describe("MessageProjector", () => {
 					partId: "file1",
 					mime: "image/png",
 					filename: "screenshot.png",
-					url: "data:image/png;base64,AAAA",
+					source: { url: "https://example.com/screenshot.png" },
 				} satisfies FileAttachedPayload,
 				1,
 			);
@@ -1969,7 +2015,7 @@ describe("MessageProjector", () => {
 			expect(JSON.parse(parts[0]?.metadata ?? "{}")).toEqual({
 				mime: "image/png",
 				filename: "screenshot.png",
-				url: "data:image/png;base64,AAAA",
+				source: { url: "https://example.com/screenshot.png" },
 			});
 		});
 	});

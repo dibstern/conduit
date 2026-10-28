@@ -53,6 +53,7 @@ test("imports both legacy project histories before the first daemon start", asyn
 			before: { rows: ProjectManifest["rowCounts"]; hash: string };
 			after: { rows: ProjectManifest["rowCounts"]; hash: string };
 			equal: boolean;
+			versionRestamped: boolean;
 		}[];
 		sourceChecksums: boolean;
 		idempotency: boolean;
@@ -87,9 +88,14 @@ test("imports both legacy project histories before the first daemon start", asyn
 			},
 		]);
 
-		const projects = ["process-test", savedSlug].map((projectId) => ({
-			projectId,
-			sourcePath: realpathSync(harness.legacyProjectStorePath(projectId)),
+		const projects = [
+			{ projectId: "process-test", folder: harness.projectDir },
+			{ projectId: savedSlug, folder: join(harness.root, "project-b") },
+		].map((project) => ({
+			...project,
+			sourcePath: realpathSync(
+				harness.legacyProjectStorePath(project.projectId),
+			),
 		}));
 		const before = projects.map((project) =>
 			projectManifest(project.sourcePath, project.projectId),
@@ -112,13 +118,14 @@ test("imports both legacy project histories before the first daemon start", asyn
 				return projects.map(({ projectId, sourcePath }) => {
 					const marker = markerDb
 						.prepare(
-							"SELECT method, completed_at FROM daemon_store_imports WHERE project_id = ?",
+							"SELECT method, completed_at, version_offset FROM daemon_store_imports WHERE project_id = ?",
 						)
 						.get(projectId);
 					expect(marker?.["method"]).toMatch(/^(seeded|imported)$/);
 					return {
 						projectId,
 						outcome: String(marker?.["method"]),
+						versionOffset: Number(marker?.["version_offset"]),
 						backup: `${sourcePath}.imported-${marker?.["completed_at"]}`,
 					};
 				});
@@ -138,28 +145,110 @@ test("imports both legacy project histories before the first daemon start", asyn
 		);
 		const position = positions[seedIndex];
 		if (!position) throw new Error("Missing pre-import seed position");
-		for (const result of results.filter(
-			(result) => result.outcome === "imported",
-		)) {
-			const assertions = daemonStoreAssertions(destination, {
-				projectId: result.projectId,
-				before: position,
-			});
-			evidence.invariants.push(assertions);
-			for (const [name, passed] of Object.entries(assertions))
-				expect(passed, name).toBe(true);
-		}
-		for (const [index, project] of projects.entries()) {
-			const prior = before[index];
-			if (!prior) throw new Error("Missing source manifest");
-			const after = projectManifest(destination, project.projectId, prior);
-			evidence.projects.push({
-				before: { rows: prior.rowCounts, hash: prior.hash },
-				after: { rows: after.rowCounts, hash: after.hash },
-				equal: after.hash === prior.hash,
-			});
-			expect(after.tables).toEqual(prior.tables);
-		}
+		const assertLiveHistories = () => {
+			const live = new DatabaseSync(destination, { readOnly: true });
+			try {
+				const publications = live
+					.prepare(
+						"SELECT directory, git, workspace_missing FROM session_git_published",
+					)
+					.all();
+				for (const publication of publications) {
+					expect(
+						projects.map((project) => realpathSync(project.folder)),
+					).toContain(publication["directory"]);
+					expect(publication).toMatchObject({
+						git: null,
+						workspace_missing: null,
+					});
+				}
+				evidence.invariants = [];
+				return projects.map((project, index) => {
+					const prior = before[index];
+					const sourcePosition = positions[index];
+					const result = results.find(
+						({ projectId }) => projectId === project.projectId,
+					);
+					if (!prior || !sourcePosition || !result)
+						throw new Error("Missing source import evidence");
+					if (result.outcome === "imported") {
+						const assertions = daemonStoreAssertions(destination, {
+							projectId: result.projectId,
+							before: position,
+							minimumHorizon:
+								result.versionOffset + sourcePosition.readModelVersion,
+						});
+						evidence.invariants.push(assertions);
+						for (const [name, passed] of Object.entries(assertions))
+							expect(passed, name).toBe(true);
+					}
+					const publication = live
+						.prepare(
+							"SELECT version FROM session_git_published WHERE directory = ?",
+						)
+						.get(realpathSync(project.folder));
+					const publicationVersion = publication
+						? Number(publication["version"])
+						: undefined;
+					const restampedVersion =
+						publicationVersion !== undefined &&
+						publicationVersion >
+							result.versionOffset + sourcePosition.readModelVersion
+							? publicationVersion
+							: undefined;
+					const source = new DatabaseSync(result.backup, { readOnly: true });
+					try {
+						const familyVersions = `SELECT session.id, session.version,
+							sidebar.version AS sidebar_version, json_extract(sidebar.row, '$.version') AS row_version
+							FROM sessions session JOIN session_sidebar sidebar ON sidebar.session_id = session.root_id`;
+						const families = source.prepare(familyVersions).all();
+						expect(families).toHaveLength(
+							prior.tables["sessions"]?.length ?? 0,
+						);
+						expect(families.length).toBeGreaterThan(0);
+						for (const family of families) {
+							const expected = { ...family };
+							for (const field of ["version", "sidebar_version", "row_version"])
+								expected[field] =
+									restampedVersion ??
+									Number(family[field]) + result.versionOffset;
+							expect(
+								live
+									.prepare(`${familyVersions} WHERE session.id = ?`)
+									.get(String(family["id"])),
+							).toEqual(expected);
+						}
+					} finally {
+						source.close();
+					}
+					const after = projectManifest(destination, project.projectId, prior);
+					// Live Git publication restamps the family without changing its history.
+					// The raw check above proves those exact stamps before comparing every other cell.
+					const [priorHistory, afterHistory] = [prior, after].map(
+						({ tables }) => {
+							const content = structuredClone(tables);
+							for (const row of content["sessions"] ?? [])
+								delete row["version"];
+							for (const row of content["session_sidebar"] ?? []) {
+								delete row["version"];
+								delete (row["row"] as Record<string, unknown>)["version"];
+							}
+							return content;
+						},
+					);
+					expect(afterHistory).toEqual(priorHistory);
+					return {
+						before: { rows: prior.rowCounts, hash: prior.hash },
+						after: { rows: after.rowCounts, hash: after.hash },
+						equal: true,
+						versionRestamped: restampedVersion !== undefined,
+					};
+				});
+			} finally {
+				live.close();
+			}
+		};
+		evidence.projects = assertLiveHistories();
 		evidence.sourceChecksums = projects.every((project, index) => {
 			const backup = results.find(
 				(result) => result.projectId === project.projectId,
@@ -174,6 +263,7 @@ test("imports both legacy project histories before the first daemon start", asyn
 		});
 		expect(evidence.sourceChecksums).toBe(true);
 		const counts = storeTableCounts(destination);
+		const beforeSkippedImport = daemonStoreManifest(destination);
 		const again = await Effect.runPromise(
 			importRegisteredProjectStores(harness.configDir, projects, {
 				now: () => completedAt,
@@ -181,15 +271,40 @@ test("imports both legacy project histories before the first daemon start", asyn
 		);
 		expect(again.every((result) => result.outcome === "skipped")).toBe(true);
 		expect(storeTableCounts(destination)).toEqual(counts);
-		for (const [index, project] of projects.entries())
-			expect(
-				projectManifest(destination, project.projectId, before[index]).tables,
-			).toEqual(before[index]?.tables);
+		expect(daemonStoreManifest(destination)).toEqual(beforeSkippedImport);
 		evidence.idempotency = true;
 		const beforeRestart = daemonStoreManifest(destination);
 		await harness.restart({ skipBrowserProbe: true });
 		await harness.terminate();
-		expect(daemonStoreManifest(destination)).toEqual(beforeRestart);
+		const afterRestart = daemonStoreManifest(destination);
+		const newPublications =
+			(afterRestart.tables["session_git_published"]?.length ?? 0) -
+			(beforeRestart.tables["session_git_published"]?.length ?? 0);
+		expect(newPublications).toBeGreaterThanOrEqual(0);
+		expect(
+			Number(afterRestart.tables["read_model_counter"]?.[0]?.["value"]),
+		).toBe(
+			Number(beforeRestart.tables["read_model_counter"]?.[0]?.["value"]) +
+				newPublications,
+		);
+		const [beforeStableTables, afterStableTables] = [
+			beforeRestart,
+			afterRestart,
+		].map(({ tables }) =>
+			Object.fromEntries(
+				Object.entries(tables).filter(
+					([table]) =>
+						![
+							"sessions",
+							"session_sidebar",
+							"session_git_published",
+							"read_model_counter",
+						].includes(table),
+				),
+			),
+		);
+		expect(afterStableTables).toEqual(beforeStableTables);
+		evidence.projects = assertLiveHistories();
 		for (const { sourcePath } of projects)
 			for (const suffix of ["", "-wal", "-shm"])
 				expect(existsSync(`${sourcePath}${suffix}`)).toBe(false);

@@ -14,6 +14,7 @@ import { SqlClient } from "effect/sql";
 import { type Account, AccountSchema } from "../../../contracts/account.js";
 import { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import {
+	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_DRIVERS,
 	type ProviderDriverKind,
 	type ProviderDriverTraits,
@@ -27,6 +28,7 @@ import {
 	MissingWorktreeError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
+import { DraftAttachmentMissing } from "../../../contracts/ws-rpc.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail, RelayError } from "../../../errors.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
@@ -355,6 +357,14 @@ const restoreFailedPlacement = (
 	failure?: { readonly message: string; readonly code: string },
 ) =>
 	Effect.gen(function* () {
+		// A Draft change belongs to its admission commit. Do not place an
+		// unreserved fallback message with its refs outside that commit.
+		if (input.draftChange && runId === undefined)
+			return yield* new ProviderInstanceFailure({
+				providerId: driver ?? "conduit",
+				operation: "send_turn",
+				cause: new Error(failure?.message ?? "Message could not be sent."),
+			});
 		const log = yield* LoggerTag;
 		const sql = yield* SqlClient.SqlClient;
 		const handoff = input.events?.find((event) => event.type === "input.sent");
@@ -809,7 +819,10 @@ const dispatchEngineTurn = (
 		// Resolved once the engine commits the handoff, or once the dispatch ends
 		// without committing it. The caller waits on it so a submit behind this
 		// one reads the committed handoff, not the moment before it.
-		const accepted = yield* Deferred.make<void>();
+		const accepted = yield* Deferred.make<
+			void,
+			DraftAttachmentMissing | ProviderInstanceFailure
+		>();
 
 		const events = (resolvedInput.events ?? []).map((event) =>
 			event.type === "input.sent" && workspaceMoveSequence !== undefined
@@ -851,6 +864,9 @@ const dispatchEngineTurn = (
 					commandId: resolvedInput.commandId,
 					providerId,
 					input: sendTurnInput,
+					...(resolvedInput.draftChange
+						? { draftChange: resolvedInput.draftChange }
+						: {}),
 					...(events.length > 0 ? { events } : {}),
 					onAccepted: Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
@@ -889,18 +905,26 @@ const dispatchEngineTurn = (
 						: Effect.void,
 			),
 			Effect.catch((error) =>
-				restorePreviousBinding.pipe(
-					Effect.andThen(
-						handleDispatchFailure(
-							dispatchedInput,
-							error,
-							driver,
-							reservedRunId,
+				error instanceof DraftAttachmentMissing
+					? restorePreviousBinding.pipe(
+							Effect.andThen(Deferred.fail(accepted, error)),
+							Effect.asVoid,
+						)
+					: restorePreviousBinding.pipe(
+							Effect.andThen(
+								handleDispatchFailure(
+									dispatchedInput,
+									error,
+									driver,
+									reservedRunId,
+								),
+							),
 						),
-					),
-				),
 			),
 			Effect.onInterrupt(() => restorePreviousBinding),
+			Effect.catchTag("ProviderInstanceFailure", (error) =>
+				Deferred.fail(accepted, error).pipe(Effect.asVoid),
+			),
 			Effect.ensuring(Deferred.succeed(accepted, undefined)),
 			// The turn's outbox row is terminal here, so cleanup can now stop a
 			// settled session's agent. Adopted runners wait for the hourly run.
@@ -942,6 +966,9 @@ const dispatchEngineTurn = (
 				Fiber.await(fiber).pipe(Effect.asVoid),
 			),
 		);
+		// A failed admission must reach the caller even if the dispatch fiber
+		// finished before the failed deferred won the race above.
+		yield* Deferred.await(accepted);
 	});
 
 const sendViaEngine = (
@@ -1003,7 +1030,11 @@ export const sendTurn = (input: ProviderTurnServiceSendInput) =>
 				? yield* Effect.result(
 						(yield* AccountDirectory).resolve({
 							_tag: "Id",
-							id: boundProviderId,
+							// The canonical binding names this relay's configured default.
+							id:
+								boundProviderId === MANAGED_OPENCODE_ACCOUNT_ID
+									? ((yield* ConfigTag).openCodeInstanceId ?? boundProviderId)
+									: boundProviderId,
 						}),
 					)
 				: Result.succeed(input.account);

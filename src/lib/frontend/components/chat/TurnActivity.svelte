@@ -37,9 +37,11 @@
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
+	import type { ModelExecution } from "../../types.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
 	import {
 		countsPhrase,
@@ -66,7 +68,7 @@
 	import { turnLog } from "../../utils/turns.js";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, model, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
+	let { turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
 		get sessionId() { return sessionId; }, get turn() { return turn; },
 		get jev() { return surfacingActive; }, get processing() { return turn.live; },
 		get latestTurn() { return latestTurn; }, get newestSettledTurn() { return newestSettledTurn; },
@@ -84,7 +86,7 @@
 		taskNow?: number;
 		sessionId?: string | undefined;
 		forkMessageId?: string | undefined;
-		model?: string | undefined;
+		modelExecution?: ModelExecution | undefined;
 		providerId?: string | undefined;
 		onsummarize?: (() => void) | undefined;
 		onjump?: (() => void) | undefined;
@@ -445,6 +447,7 @@
 		if (!part) return;
 		await reveal({ sessionId, uuid: part.uuid });
 	}
+
 </script>
 
 {#snippet markLabel(pin: SurfacePin)}
@@ -511,7 +514,7 @@
 {/snippet}
 
 <div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfaceCommand} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
-	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {model} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
+	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {modelExecution} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
 	<div class="md:ml-[42px]">
 		<!-- The active turn is a keyboard navigation group; inactive turns add no tab stop. -->
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -525,7 +528,7 @@
 							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Collapse turn"} aria-expanded={!minimised}
 							onclick={toggleMinimised}>
 							<Icon name={minimised ? "chevron-right" : "chevron-down"} size={14} class="shrink-0 text-text-dimmer" />
-							{#if live}<Icon name="loader-circle" size={13} class="animate-spin shrink-0 text-accent" />
+							{#if live}<ConduitMark size={16} variant="running" />
 							{/if}
 							<span class="text-[14px] font-semibold text-text">{live ? runText(runLabel) : "Worked"}</span>
 							{#if live && !turn.user}

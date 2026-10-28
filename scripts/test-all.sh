@@ -88,6 +88,11 @@ run_group() {
       ;;
     e2e)
       # Requires dist/ from the build group or CI's downloaded build artifact.
+      if [[ "${CONDUIT_SKIP_DIST_CHECK:-}" != "1" ]]; then
+        local failed_before=${#failed[@]}
+        run "E2E dist freshness" node scripts/source-hash.mjs check
+        [[ ${#failed[@]} -eq "$failed_before" ]] || return 0
+      fi
       run_playwright "E2E replay tests" replay test/e2e/playwright-replay.config.ts
       run_playwright "E2E harness tests" harness test/e2e/playwright-harness.config.ts
       run_playwright "E2E daemon tests" daemon test/e2e/playwright-daemon.config.ts
@@ -218,7 +223,7 @@ else
   wait_for_lanes
 
   # Unit and interaction tests can use many cores. Finish them before pairing
-  # four integration forks with the eight browser-only visual workers.
+  # integration forks with the eight browser-only visual workers.
   if [[ "$selected" == *" vitest "* ]]; then
     start_lane unit unit
     wait_for_lanes
@@ -246,7 +251,17 @@ else
       static) labels=("Type check" "Lint") ;;
       vitest) labels=("Unit tests" "Integration tests" "Contract tests") ;;
       build) labels=("Build") ;;
-      e2e) labels=("E2E replay tests" "E2E harness tests" "E2E daemon tests" "E2E preview tests") ;;
+      e2e)
+        labels=("E2E replay tests" "E2E harness tests" "E2E daemon tests" "E2E preview tests")
+        if [[ "${CONDUIT_SKIP_DIST_CHECK:-}" != "1" ]]; then
+          if [[ -f "$log_dir/E2E dist freshness.result" ]] &&
+            [[ "$(<"$log_dir/E2E dist freshness.result")" == "✗"* ]]; then
+            labels=("E2E dist freshness")
+          else
+            labels=("E2E dist freshness" "${labels[@]}")
+          fi
+        fi
+        ;;
       storybook) labels=("Storybook build" "Storybook interaction and a11y tests") ;;
       visual) labels=("Strict Darwin Storybook visual tests") ;;
     esac

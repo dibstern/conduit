@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	type Check,
+	createGoalStuckTracker,
 	detectGoalStuck,
 	detectStuck,
 } from "../../../src/lib/persistence/goal-stuck-detector.js";
@@ -56,6 +57,127 @@ describe("goal stuck detector", () => {
 			"1@100",
 		);
 		expect(detectStuck(checks(reasons), product).runs[0]?.id).toBe("1@100");
+	});
+	it("reuses the previous blocker identity after incidental detail splits its wording", () => {
+		const reason = reasons[0] ?? "";
+		const history = checks([
+			reason,
+			reason,
+			reason,
+			`${reason} Reference samples/notes.csv.`,
+			reason,
+			reason,
+			reason,
+		]);
+		const result = detectGoalStuck(history);
+		expect(result.runs).toHaveLength(1);
+		expect(result.runs[0]).toMatchObject({
+			id: "1@100",
+			since: 100,
+			sinceIteration: 1,
+			detectedIteration: 3,
+			untilIteration: 7,
+			count: 7,
+		});
+		expect(result.verdicts.map((verdict) => verdict.stuck)).toEqual([
+			false,
+			false,
+			true,
+			false,
+			false,
+			true,
+			true,
+		]);
+		const tracker = createGoalStuckTracker();
+		for (let length = 1; length <= history.length; length++) {
+			const prefix = detectGoalStuck(history.slice(0, length));
+			expect(prefix.verdicts).toEqual(result.verdicts.slice(0, length));
+			const check = history[length - 1];
+			if (!check) throw new Error("Missing synthetic check");
+			expect(tracker.add(check)).toEqual(
+				prefix.stuck
+					? { since: 100, lastAt: check.at, count: prefix.stuck.count }
+					: null,
+			);
+		}
+	});
+	it.each([
+		["path", "samples/alpha.csv", "samples/beta.csv"],
+		["hash", "abc1234", "def5678"],
+		["version", "v1.2.3", "v2.3.4"],
+		["mixed id", "Batch7", "Batch8"],
+		["family addition", "B1-B2", "B1-B3"],
+		["polarity", "Calibration is ready.", "Calibration is not ready."],
+	])("does not merge a genuinely changed %s after reconfirmation", (_kind, first, next) => {
+		const reason = `${reasons[0]} ${first}`;
+		const changed = reason.replace(first, next);
+		const result = detectGoalStuck(
+			checks([reason, reason, reason, changed, changed, changed]),
+		);
+		expect(result.runs.map((run) => run.id)).toEqual(["1@100", "4@400"]);
+		expect(result.stuck).toMatchObject({ since: 400, count: 3 });
+	});
+	it("keeps the original raw since time when a merge follows clock rollback", () => {
+		const reason = reasons[0] ?? "";
+		const history = checks([
+			reason,
+			reason,
+			reason,
+			`${reason} Reference samples/notes.csv.`,
+			reason,
+			reason,
+		]).map((check, index) => ({ ...check, at: 600 - index * 100 }));
+		const tracker = createGoalStuckTracker();
+		const headers = history.map((check) => tracker.add(check));
+		expect(headers.at(-1)).toEqual({ since: 600, lastAt: 100, count: 6 });
+		expect(detectGoalStuck(history).runs[0]?.id).toBe("1@600");
+	});
+	it("does not resurrect a blocker across an intervening progress segment", () => {
+		const reason = reasons[0] ?? "";
+		const result = detectGoalStuck(
+			checks([
+				reason,
+				reason,
+				reason,
+				"Database migration completed successfully; preparing documentation.",
+				reason,
+				reason,
+				reason,
+			]),
+		);
+		expect(result.runs.map((run) => run.id)).toEqual(["1@100", "5@500"]);
+	});
+	it.each([
+		null,
+		"",
+		"the and",
+	])("missing evidence %j prevents identity reuse", (missing) => {
+		const reason = reasons[0] ?? "";
+		const result = detectGoalStuck(
+			checks([reason, reason, reason, missing, reason, reason, reason]),
+		);
+		expect(result.runs.map((run) => run.id)).toEqual(["1@100", "5@500"]);
+	});
+	it("iteration and time gaps prevent identity reuse", () => {
+		const history = checks(Array<string>(6).fill(reasons[0] ?? ""));
+		expect(
+			detectStuck(
+				history.map((check, index) => ({
+					...check,
+					iteration: check.iteration + (index >= 3 ? 1 : 0),
+				})),
+				product,
+			).runs,
+		).toHaveLength(2);
+		expect(
+			detectStuck(
+				history.map((check, index) => ({
+					...check,
+					at: check.at + (index >= 3 ? 1_000 : 0),
+				})),
+				{ ...product, maxGapMs: 500 },
+			).runs,
+		).toHaveLength(2);
 	});
 	it("does not change earlier verdicts when later checks arrive", () => {
 		const history = checks([

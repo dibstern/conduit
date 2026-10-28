@@ -1,7 +1,7 @@
 <!--
-  A reply reference painted in the composer backdrop. `label` is exactly the
-  text the transparent textarea holds for the token, so every glyph, the ×
-  included, sits under its caret position. The × is the only live part of the
+  A reply reference chip in the composer backdrop. `label` is exactly the text
+  the textarea paints for the token, so the chip, the × included, lines up with
+  the glyphs the textarea draws over it. The × is the only live part of the
   backdrop: positioned above the textarea to take the click, while the keyboard
   removes the token with Backspace or Delete in the textarea itself.
 -->
@@ -25,7 +25,6 @@
 		box-decoration-break: clone;
 	}
 	.category {
-		color: var(--category-colour);
 		background: color-mix(in srgb, var(--category-colour) 14%, transparent);
 	}
 	.ask {
@@ -36,10 +35,6 @@
 		z-index: 20;
 		pointer-events: auto;
 		cursor: pointer;
-		color: var(--color-text-muted);
-	}
-	.remove:hover {
-		color: var(--color-text);
 	}
 	/* A wider hit area that leaves the text metrics alone. */
 	.remove::before {

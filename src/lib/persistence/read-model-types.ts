@@ -155,12 +155,16 @@ export interface MessagePartRow {
 
 export interface MessageWithParts extends MessageRow {
 	parts: MessagePartRow[];
+	/** Codex presentation provenance from an admitted run or the original event channel. */
+	providerDriver?: "codex";
 	turnCost?: number;
 	turnTiming?: HistoryMessage["turnTiming"];
 	modelExecution?: {
 		requestedModel?: string;
 		expectedModel?: string;
 		actualModel: string;
+		effort?: string;
+		contextWindow?: string;
 	};
 }
 
@@ -168,4 +172,6 @@ export interface TurnModelExecutionRow {
 	requested_model: string | null;
 	expected_model: string | null;
 	actual_model: string;
+	effort: string | null;
+	context_window: string | null;
 }

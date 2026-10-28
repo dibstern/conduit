@@ -75,13 +75,13 @@
 		const providers = getHarnessDefaultProviders(row.harness);
 		const catalog = catalogFromProviderList(providers);
 		const model = state.pick ? findCatalogModel(row.harness, state.pick, catalog) : undefined;
-		return { ...row, state, providers, model, parameters: resolveModelParameters(model?.parameters, state.pick?.effort), options: model ? offeredOptions(model) : { efforts: [], contextWindows: [] } };
+		return { ...row, state, providers, model, parameters: resolveModelParameters(model, state.pick?.effort), options: model ? offeredOptions(model) : { efforts: [], contextWindows: [] } };
 	}));
 
 	function defaultProblem(state: HarnessDefaultState, harness: Harness, label: string): string {
 		if (state.status === "missing") return `No default. New chats on ${label} start with no model.`;
 		if (state.status === "unverified") return getDriverTraits(harness)?.runsOpenCodeServer ? `Start ${label} to check this default.` : `Connect ${label} to check this default.`;
-		if (state.problem?.startsWith("EffortNotOffered")) return `Effort "${state.pick?.effort}" is no longer available for ${state.pick?.modelId}.`;
+		if (state.problem?.startsWith("ModelParametersUnavailable")) return `Effort "${state.pick?.effort}" is no longer available for ${state.pick?.modelId}.`;
 		if (state.problem?.startsWith("ContextWindowNotOffered")) return `Context window "${state.pick?.contextWindow}" is no longer available for ${state.pick?.modelId}.`;
 		return `${state.pick?.modelId ?? "This model"} is no longer available.`;
 	}
@@ -216,8 +216,8 @@
 							<SettingsPicker value={parameter.value} disabled={saving[row.harness]} label="{row.label} {parameter.title}"
 								data-testid="settings-harness-default-{row.harness}-{parameter.kind}" options={parameter.options}
 								onvaluechange={(value) => {
-									const combination = row.parameters.parameterCombination(parameter.id, value);
-									if (combination) void updateDefault(row.harness, "effort", combination.variant);
+									const choice = row.parameters.withValue(parameter.id, value);
+									if (choice !== undefined) void updateDefault(row.harness, "effort", choice);
 								}} />
 						{/each}
 					{:else if pick && row.options.efforts.length > 0}

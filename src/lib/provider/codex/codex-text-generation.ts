@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { Effect, Schema } from "effect";
+import { Effect, Result, Schema } from "effect";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { ProviderInstanceFailure } from "../errors.js";
+import { modelParameterChoices } from "../turn-settings.js";
 import type { ProviderInstance } from "../types.js";
+import { discoverCodex } from "./codex-discovery.js";
 import { prepareCodexAccount } from "./codex-home.js";
 
 const McpServers = Schema.fromJsonString(
@@ -25,12 +27,24 @@ export const generateCodexText = (
 							"Codex text generation requires a Codex account and model",
 						),
 					);
-		// Values reach a TOML override, so only bare effort names are accepted.
-		if (input.effort && !/^[a-z]+$/.test(input.effort))
+		const { home, env } = yield* prepareCodexAccount(account, configDir);
+		const catalog = yield* discoverCodex(home, env, undefined, true);
+		const model = catalog.models.find(({ id }) => id === input.model.modelId);
+		if (!model)
+			return yield* Effect.fail(new Error("Codex title model is not offered"));
+		const choices = modelParameterChoices(model);
+		const choice = input.effort
+			? choices.resolve(input.effort)
+			: Result.succeed(choices.cheapest());
+		if (Result.isFailure(choice)) return yield* choice.failure;
+		const effort = choice.success.values.find(
+			({ id }) => id === "effort",
+		)?.value;
+		// Native values reach a TOML override, so only bare effort names are accepted.
+		if (effort && !/^[a-z]+$/.test(effort))
 			return yield* Effect.fail(
-				new Error(`Unsupported Codex effort ${input.effort}`),
+				new Error(`Unsupported Codex effort ${effort}`),
 			);
-		const { env } = yield* prepareCodexAccount(account, configDir);
 		const binary = env["CONDUIT_CODEX_BINARY"] ?? "codex";
 		const run = (argv: string[], cwd: string, stdin = "") =>
 			Effect.tryPromise({
@@ -84,9 +98,7 @@ export const generateCodexText = (
 							lastMessage,
 							"--model",
 							input.model.modelId,
-							...(input.effort
-								? ["-c", `model_reasoning_effort="${input.effort}"`]
-								: []),
+							...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []),
 							...overrides,
 							// The prompt carries user text: stdin keeps it out of argv parsing and ps.
 							"-",

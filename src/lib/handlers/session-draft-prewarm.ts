@@ -48,7 +48,13 @@ export const resolveDraftLaunchInput = (
 				folders,
 				yield* getDefaultAgent(),
 			),
-			...(call ? { projectId: call.projectId, shellEnv: call.shellEnv } : {}),
+			...(call
+				? {
+						projectId: call.projectId,
+						shellEnv: call.shellEnv,
+						shellConfig: call.shellConfig,
+					}
+				: {}),
 		};
 	});
 

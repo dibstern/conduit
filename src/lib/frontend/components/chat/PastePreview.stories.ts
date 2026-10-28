@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, within } from "storybook/test";
-import type { PendingAttachment } from "../../types.js";
+import type { DraftAttachmentItem } from "../../stores/composer-draft/state.js";
 import PastePreview from "./PastePreview.svelte";
 
 const meta = {
@@ -22,24 +22,30 @@ const BLUE_PIXEL =
 const GREEN_PIXEL =
 	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
-const firstMockImage: PendingAttachment = {
+const firstMockImage: DraftAttachmentItem = {
 	id: "img-1",
 	dataUrl: RED_PIXEL,
+	mime: "image/png",
+	status: "saving",
 	name: "screenshot.png",
 	size: 24576,
 };
 
-const mockImages: PendingAttachment[] = [
+const mockImages: DraftAttachmentItem[] = [
 	firstMockImage,
 	{
 		id: "img-2",
 		dataUrl: BLUE_PIXEL,
+		mime: "image/png",
+		status: "saving",
 		name: "diagram-architecture-overview.png",
 		size: 102400,
 	},
 	{
 		id: "img-3",
 		dataUrl: GREEN_PIXEL,
+		mime: "image/png",
+		status: "saving",
 		name: "photo.jpg",
 		size: 512000,
 	},
@@ -71,12 +77,16 @@ export const WithFiles: Story = {
 		images: [
 			{
 				id: "text-file",
+				mime: "text/plain",
+				status: "saving",
 				name: "notes.txt",
 				size: 34,
 				dataUrl: "data:text/plain;name=notes.txt;base64,bm90ZXM=",
 			},
 			{
 				id: "pdf-file",
+				mime: "application/pdf",
+				status: "saving",
 				name: "guide.pdf",
 				size: 601,
 				dataUrl: "data:application/pdf;name=guide.pdf;base64,JVBERi0xLjQ=",
@@ -103,6 +113,8 @@ export const MixedAttachments: Story = {
 			...(WithFiles.args?.["images"] ?? []),
 			{
 				id: "long-name",
+				mime: "text/plain",
+				status: "saving",
 				name: "2026-10-quarterly-infrastructure-review-notes.md",
 				size: 18_432,
 				dataUrl:

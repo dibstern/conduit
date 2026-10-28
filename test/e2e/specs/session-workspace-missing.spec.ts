@@ -157,7 +157,7 @@ for (const viewport of [
 				await openComposerSheet(page);
 			}
 			const identity = page.getByTestId("composer-checkout");
-			const notice = page.getByTestId("workspace-missing");
+			const notice = page.getByTestId("workspace-notice-indicator");
 			await expect(notice).toBeVisible();
 			await expect(notice).toHaveAttribute("aria-label", label);
 			await expect(identity).toHaveAccessibleName(new RegExp(label));
@@ -242,9 +242,11 @@ for (const viewport of [
 				await openComposerSheet(page);
 			}
 			const identity = page.getByTestId("composer-checkout");
-			const notice = page.getByTestId("workspace-missing");
+			const notice = page.getByTestId("workspace-notice-indicator");
 			await expect(notice).toBeVisible();
-			await expect(page.getByTestId("workspace-moved-back")).toHaveCount(0);
+			await expect(identity).not.toHaveAccessibleName(
+				/moved back: worktree removed/,
+			);
 			await expect(notice).toHaveAttribute("role", "img");
 			await expect(notice).toHaveAttribute("aria-label", "worktree missing");
 			await expect(notice).toHaveText("");
@@ -288,7 +290,9 @@ for (const viewport of [
 				"title",
 				recreated ? `0 / ${branch}` : "main / main",
 			);
-			await expect(page.getByTestId("workspace-moved-back")).toHaveCount(0);
+			await expect(identity).not.toHaveAccessibleName(
+				/moved back: worktree removed/,
+			);
 			await identity.click();
 			await expect(
 				menu.getByRole("menuitem", { name: "Recreate worktree" }),
@@ -367,7 +371,7 @@ for (const failure of [
 			page.getByRole("alert").getByText(failure.title, { exact: true }),
 		).toBeVisible();
 		await expect(page.getByRole("alert")).toContainText(failure.toast);
-		await expect(page.getByTestId("workspace-missing")).toBeVisible();
+		await expect(page.getByTestId("workspace-notice-indicator")).toBeVisible();
 		await capture(page, testInfo, "workspace-recovery-error");
 	});
 }

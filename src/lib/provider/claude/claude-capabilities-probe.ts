@@ -77,7 +77,7 @@ interface SDKMessageSubset {
 
 // Iterated only until the system init message, whose skills list is the one
 // place the SDK says which commands are skills.
-interface CapabilityQuery extends AsyncIterable<SDKMessageSubset> {
+export interface CapabilityQuery extends AsyncIterable<SDKMessageSubset> {
 	initializationResult(): Promise<InitializationResultSubset>;
 }
 
@@ -238,6 +238,7 @@ export async function probeClaudeCapabilities(
 ): Promise<ProbeResult> {
 	if (probeOverride) return probeOverride(deps.workspaceRoot);
 
+	const queryFactory = deps.queryFactory ?? sdkQuery;
 	const abortController = new AbortController();
 	const abort = () => abortController.abort();
 	deps.signal?.addEventListener("abort", abort, { once: true });
@@ -257,13 +258,11 @@ export async function probeClaudeCapabilities(
 			allowedTools: [],
 			stderr: () => {},
 		} satisfies SDKOptions;
-		const params = {
+		const query = queryFactory({
+			configDir: deps.configDir,
 			prompt: singleMessage(),
 			options: decodeClaudeSDKOptionsJsonShape(options),
-		};
-		const query = deps.queryFactory
-			? deps.queryFactory({ configDir: deps.configDir, ...params })
-			: sdkQuery(params);
+		});
 		const init = await query.initializationResult();
 		// Not query.reloadSkills(): this zero-turn query closes before answering it.
 		let skillNames: ReadonlySet<string> = new Set();

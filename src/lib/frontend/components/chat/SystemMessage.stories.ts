@@ -75,6 +75,11 @@ export const SetupRunning: Story = {
 			setupOutput: "Installing dependencies…\nResolved 128 packages\n",
 		},
 	},
+	play: async ({ canvasElement }) => {
+		const glyph = canvasElement.querySelector('[data-flow-glyph="running"]');
+		await expect(glyph).toBeVisible();
+		await expect(glyph?.getBoundingClientRect().width).toBe(14);
+	},
 };
 
 export const SetupSucceeded: Story = {

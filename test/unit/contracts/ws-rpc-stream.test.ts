@@ -5,6 +5,7 @@ import {
 	Exit,
 	Fiber,
 	Layer,
+	Option,
 	Queue,
 	Scope,
 	Stream,
@@ -21,6 +22,7 @@ import { expect } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
 import { MessageVersion } from "../../../src/lib/contracts/tool-wire.js";
 import { WsRpcError, WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
@@ -117,6 +119,10 @@ const makeLayer = (options: {
 		Layer.provide(
 			Layer.mergeAll(
 				makeSessionManagerStateLive(),
+				// Session subscriptions resolve their owner before opening.
+				Layer.succeed(SessionDirectory)({
+					projectOf: () => Effect.succeed(Option.some("test-project")),
+				}),
 				Layer.succeed(ReadQueryEffectTag)({
 					readToolDetails: () => Effect.succeed([]),
 					getSessionStatus: () => Effect.succeed(undefined),

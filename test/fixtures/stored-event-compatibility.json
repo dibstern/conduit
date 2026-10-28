@@ -873,7 +873,7 @@
 			"session_id": "fixture-session",
 			"stream_version": 46,
 			"type": "file.attached",
-			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"mime\":\"fixture\",\"url\":\"fixture\"}",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"mime\":\"fixture\",\"source\":{\"url\":\"fixture\"}}",
 			"metadata": "{}",
 			"provider": "claude",
 			"created_at": 1789508753985
@@ -889,7 +889,7 @@
 			"session_id": "fixture-session",
 			"stream_version": 47,
 			"type": "file.attached",
-			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"mime\":\"fixture\",\"filename\":\"fixture\",\"url\":\"fixture\",\"futureField\":{\"retained\":true}}",
+			"data": "{\"messageId\":\"fixture\",\"partId\":\"fixture\",\"mime\":\"fixture\",\"filename\":\"fixture\",\"source\":{\"url\":\"fixture\"},\"futureField\":{\"retained\":true}}",
 			"metadata": "{}",
 			"provider": "claude",
 			"created_at": 1789508753985

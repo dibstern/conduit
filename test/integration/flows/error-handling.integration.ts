@@ -146,7 +146,7 @@ describe("Integration: Error Handling", () => {
 				client.rpcCall((rpc) =>
 					rpc.GetSkillContent({
 						projectSlug: "integration-test",
-						name: toolId,
+						skillRef: toolId,
 					}),
 				),
 			).rejects.toThrow("Skill content not available");

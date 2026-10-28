@@ -127,6 +127,16 @@ const streamLog = (action, stream) =>
 		`${JSON.stringify({ pid: process.pid, at: Date.now(), action, ...stream })}\n`,
 	);
 const server = createServer(async (request, response) => {
+	// Log the request only once its body is in, so a request a test sees in
+	// fake-opencode-requests.jsonl always has its body recorded (lnm8.26).
+	let body = "";
+	for await (const chunk of request) body += chunk;
+	const path = new URL(request.url, "http://127.0.0.1").pathname;
+	if (body)
+		appendFileSync(
+			join(configDir, "fake-opencode-request-bodies.jsonl"),
+			`${JSON.stringify({ pid: process.pid, method: request.method, path, body })}\n`,
+		);
 	appendFileSync(
 		join(configDir, "fake-opencode-requests.jsonl"),
 		`${JSON.stringify({ pid: process.pid, at: Date.now(), method: request.method, url: request.url, directory: request.headers["x-opencode-directory"] })}\n`,
@@ -143,7 +153,6 @@ const server = createServer(async (request, response) => {
 	}
 	response.setHeader("Content-Type", "application/json");
 	const url = new URL(request.url, "http://127.0.0.1");
-	const path = url.pathname;
 	let directory =
 		url.searchParams.get("directory") ??
 		request.headers["x-opencode-directory"];
@@ -158,13 +167,6 @@ const server = createServer(async (request, response) => {
 	const sessionID = /^\/session\/([^/]+)/.exec(path)?.[1];
 	const stored = sessionID && sessions().find(({ id }) => id === sessionID);
 	if (stored?.directory) directory = stored.directory;
-	let body = "";
-	for await (const chunk of request) body += chunk;
-	if (body)
-		appendFileSync(
-			join(configDir, "fake-opencode-request-bodies.jsonl"),
-			`${JSON.stringify({ pid: process.pid, method: request.method, path, body })}\n`,
-		);
 	if (path === "/test/emit-event" && request.method === "POST") {
 		emit(JSON.parse(body));
 		response.end("{}");

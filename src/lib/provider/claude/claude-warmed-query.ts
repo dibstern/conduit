@@ -18,6 +18,7 @@ import { buildClaudeQueryOptions } from "./claude-query-options.js";
 import {
 	type ClaudeConfigDir,
 	type ClaudeLaunchConfig,
+	type ClaudeLogin,
 	makeClaudeSdkEnv,
 	sameClaudeLogin,
 } from "./claude-sdk-env.js";
@@ -116,6 +117,7 @@ export const closeClaudeEmptyQuery = <Q extends { close(): void }>(
 interface PendingWarmedQuery {
 	readonly initializingKey: symbol;
 	readonly resource: WarmedClaudeQuery;
+	readonly login: ClaudeLogin;
 	readonly ready: Deferred.Deferred<WarmedClaudeQuery, ClaudeAdapterError>;
 	readonly inheritedSettings: string | undefined;
 	readonly inheritedSettingsFrozen: boolean;
@@ -132,7 +134,7 @@ export interface ClaudeWarmedQueryOwner {
 	takeEffect(
 		sessionId: string,
 		options: SDKOptions,
-		configDir: ClaudeConfigDir,
+		login: ClaudeLogin,
 	): Effect.Effect<WarmedClaudeQuery | undefined, ClaudeAdapterError>;
 	discardEffect(sessionId: string): Effect.Effect<void>;
 	clearEffect(): Effect.Effect<void>;
@@ -142,6 +144,7 @@ function immutableOptions(options: SDKOptions) {
 	const {
 		abortController: _abort,
 		canUseTool: _permission,
+		env: _env,
 		...launch
 	} = options;
 	if (launch.forkSession) {
@@ -208,7 +211,7 @@ export function inheritedSettingsFingerprint(
 /** Owns empty queries until initialization succeeds and a real turn adopts them. */
 export const makeClaudeWarmedQueryOwner = (
 	queryFactory: NonNullable<ClaudeProviderInstanceDeps["queryFactory"]>,
-	prepareQuery?: () => Promise<void>,
+	prepareQuery?: (input: ClaudePreWarmSessionInput) => Promise<void>,
 	readGoalStatus?: ReadClaudeGoalStatus,
 	onNativeSessionId?: (sessionId: string, nativeSessionId: string) => void,
 ) =>
@@ -253,13 +256,10 @@ export const makeClaudeWarmedQueryOwner = (
 							const existing = pending.get(input.sessionId);
 							if (existing) {
 								if (
-									sameClaudeLogin(
-										{
-											configDir: existing.resource.configDir,
-											root: existing.resource.options.cwd ?? process.cwd(),
-										},
-										{ configDir: input.configDir, root: input.workspaceRoot },
-									)
+									sameClaudeLogin(existing.login, {
+										...input,
+										root: input.workspaceRoot,
+									})
 								)
 									return existing;
 								yield* discardEntry(input.sessionId, existing);
@@ -300,7 +300,7 @@ export const makeClaudeWarmedQueryOwner = (
 									return options;
 								},
 								input,
-								prepareQuery,
+								prepareQuery ? () => prepareQuery(input) : undefined,
 							);
 							const resource: WarmedClaudeQuery = {
 								...empty,
@@ -311,6 +311,7 @@ export const makeClaudeWarmedQueryOwner = (
 							const created: PendingWarmedQuery = {
 								initializingKey: Symbol(),
 								resource,
+								login: { ...input, root: input.workspaceRoot },
 								inheritedSettings,
 								inheritedSettingsFrozen,
 								ready: yield* Deferred.make<
@@ -362,20 +363,14 @@ export const makeClaudeWarmedQueryOwner = (
 					);
 					yield* Deferred.await(entry.ready);
 				}),
-			takeEffect: (sessionId, options, configDir) =>
+			takeEffect: (sessionId, options, login) =>
 				Effect.gen(function* () {
 					const entry = yield* lock.withPermits(1)(
 						Effect.sync(() => pending.get(sessionId)),
 					);
 					if (!entry) return;
 					if (
-						!sameClaudeLogin(
-							{
-								configDir: entry.resource.configDir,
-								root: entry.resource.options.cwd ?? process.cwd(),
-							},
-							{ configDir, root: options.cwd ?? process.cwd() },
-						) ||
+						!sameClaudeLogin(entry.login, login) ||
 						!isDeepStrictEqual(
 							immutableOptions(entry.resource.options),
 							immutableOptions(options),
@@ -397,7 +392,7 @@ export const makeClaudeWarmedQueryOwner = (
 						!entry.inheritedSettingsFrozen &&
 						(entry.inheritedSettings === undefined ||
 							entry.inheritedSettings !==
-								inheritedSettingsFingerprint(options, configDir))
+								inheritedSettingsFingerprint(options, login.configDir))
 					) {
 						yield* discardEntry(sessionId, entry);
 						return;

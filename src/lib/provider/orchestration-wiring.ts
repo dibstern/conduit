@@ -22,6 +22,7 @@ import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.
 import { DaemonOrchestration } from "../domain/daemon/Services/daemon-orchestration.js";
 import { ProjectContext } from "../domain/daemon/Services/project-context.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
+import { AttachmentStoreTag } from "../domain/persistence/Services/attachment-store.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { ProviderRuntimeIngestionTag } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { OrchestrationEngineTag } from "../domain/relay/Services/services.js";
@@ -59,7 +60,7 @@ import type { ProviderCall } from "./types.js";
 export interface OrchestrationRuntimeLayerOptions {
 	readonly shellEnv?: (
 		directory: string,
-	) => Readonly<Record<string, string | undefined>>;
+	) => import("../contracts/project-shell-env.js").ProjectShellEnvSnapshot;
 	readonly prepareShellEnv?: (directory: string) => Promise<boolean>;
 	readonly workspaceRoot?: string;
 	readonly extraFolders?: readonly string[];
@@ -145,6 +146,7 @@ export const makeProviderCallContextResolver = (options: {
 											mainFolder: request.workspaceRoot,
 											extraFolders: request.extraFolders,
 											shellEnv: Object.freeze({}),
+											shellConfig: undefined,
 										})
 									: Effect.fail(cause),
 							),
@@ -221,16 +223,21 @@ export const makeProviderCallContextResolver = (options: {
 						Effect.catch(() => Effect.void),
 					);
 				}
-				const environment =
+				const environmentProject =
 					project && Option.isSome(projectContexts)
-						? (workspaceRoot !== project.mainFolder || request.prepareShellEnv
-								? yield* projectContexts.value.forProject(project.projectId, {
-										directory: workspaceRoot,
-										prepareShellEnv: request.prepareShellEnv === true,
-									})
-								: project
-							).shellEnv
-						: getShellEnv(workspaceRoot);
+						? workspaceRoot !== project.mainFolder || request.prepareShellEnv
+							? yield* projectContexts.value.forProject(project.projectId, {
+									directory: workspaceRoot,
+									prepareShellEnv: request.prepareShellEnv === true,
+								})
+							: project
+						: undefined;
+				const environment = environmentProject
+					? {
+							env: environmentProject.shellEnv,
+							declared: environmentProject.shellConfig,
+						}
+					: getShellEnv(workspaceRoot);
 				const owner = project?.projectId ?? projectId;
 				if (!owner)
 					return yield* Effect.fail(
@@ -246,7 +253,8 @@ export const makeProviderCallContextResolver = (options: {
 					account,
 					workspaceRoot,
 					extraFolders: Object.freeze([...extraFolders]),
-					shellEnv: Object.freeze({ ...environment }),
+					shellEnv: Object.freeze({ ...environment.env }),
+					shellConfig: environment.declared,
 				});
 			}).pipe(
 				Effect.mapError((cause) =>
@@ -269,6 +277,7 @@ const createOrchestrationComponentsEffect = (
 	Error,
 	| Scope.Scope
 	| SqlClient.SqlClient
+	| AttachmentStoreTag
 	| PersistenceProjectTag
 	| AccountDirectory
 	| ProviderAdapters
@@ -332,7 +341,7 @@ const createOrchestrationComponentsEffect = (
 					(project) => resolve(project.path) === resolve(directory),
 				);
 			resolver.register(directory, config?.shellEnv, projectId);
-			shellEnv = (projectDir) => resolver.get(projectDir, projectId);
+			shellEnv = (projectDir) => resolver.getSnapshot(projectDir, projectId);
 			prepareShellEnv = (projectDir) =>
 				resolver.waitUntilReady(projectDir, projectId);
 		}
@@ -375,6 +384,7 @@ const createOrchestrationComponentsEffect = (
 		};
 		const engine = new OrchestrationEngine({
 			registry,
+			attachmentStore: yield* AttachmentStoreTag,
 			...(Option.isSome(configRef) && {
 				autoSettleAfterDays: Ref.get(configRef.value).pipe(
 					Effect.map((config) => config.autoSettleAfterDays),
@@ -416,6 +426,7 @@ export const makeOrchestrationRuntimeLayer = (
 	Error,
 	| ProviderAdapters
 	| SqlClient.SqlClient
+	| AttachmentStoreTag
 	| PersistenceProjectTag
 	| AccountDirectory
 	| SessionWorkspaceTag

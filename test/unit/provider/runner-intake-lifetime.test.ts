@@ -12,7 +12,10 @@ import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/clau
 import { makeInProcessSessionRunner } from "../../../src/lib/provider/runner/in-process-session-runner.js";
 import { runnerSinkId } from "../../../src/lib/provider/runner/runner-protocol.js";
 import { recoverRunnerCommands } from "../../../src/lib/provider/runner/runner-recovery.js";
-import type { SessionTurn } from "../../../src/lib/provider/runner/session-runner.js";
+import type {
+	DurableSessionTurn,
+	SessionTurn,
+} from "../../../src/lib/provider/runner/session-runner.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 it("keeps native activity after intake acknowledgement and waits for it before shutdown", async () => {
@@ -147,7 +150,8 @@ it.each([
 					provider,
 					{
 						driverForAccount: () => provider,
-						decodeInput: (row) => JSON.parse(row.payload_json) as SessionTurn,
+						decodeInput: (row) =>
+							JSON.parse(row.payload_json) as DurableSessionTurn,
 						resolveSinkId: (commandId, _inputId, attempt) =>
 							runnerSinkId(commandId, attempt),
 						closing: () => false,

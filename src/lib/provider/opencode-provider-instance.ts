@@ -27,7 +27,9 @@ import {
 	inputIdFromOpenCodeMessageId,
 	openCodeInputMessageId,
 } from "./opencode/opencode-input-message-id.js";
+import { discoverOpenCodeCatalog } from "./opencode-discovery.js";
 import { openCodeTextServerEffect } from "./opencode-text-server.js";
+import { skillCommand } from "./skill-discovery.js";
 import type {
 	CommandInfo,
 	ModelInfo,
@@ -37,7 +39,7 @@ import type {
 	ProviderControlContext,
 	ProviderDriver,
 	ProviderInstance,
-	SendTurnInput,
+	ResolvedSendTurnInput,
 	TurnResult,
 } from "./types.js";
 
@@ -372,10 +374,9 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		client: OpenCodeAPI,
 		directory?: string,
 	): Promise<ProviderCapabilities> {
-		const [providerResult, commandsRaw, skillsRaw] = await Promise.all([
+		const [providerResult, catalog] = await Promise.all([
 			client.provider.list(),
-			client.app.commands(),
-			client.app.skills(directory),
+			discoverOpenCodeCatalog(client, directory),
 		]);
 
 		const models: ModelInfo[] = providerResult.providers.flatMap((provider) =>
@@ -388,17 +389,13 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			})),
 		);
 
-		const commands: CommandInfo[] = commandsRaw.map((cmd) => ({
-			name: cmd.name,
-			...(cmd.description != null ? { description: cmd.description } : {}),
-			source: "builtin" as const,
-		}));
-
-		const skills: CommandInfo[] = skillsRaw.map((skill) => ({
-			name: skill.name,
-			...(skill.description != null ? { description: skill.description } : {}),
-			source: "project-skill" as const,
-		}));
+		const commands: CommandInfo[] = catalog.commands
+			.filter((command) => command.source !== "skill")
+			.map((cmd) => ({
+				name: cmd.name,
+				...(cmd.description != null ? { description: cmd.description } : {}),
+				source: "builtin" as const,
+			}));
 
 		return {
 			models,
@@ -409,12 +406,13 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			supportsAttachments: true,
 			supportsFork: true,
 			supportsRevert: true,
-			commands: [...commands, ...skills],
+			commands: [...commands, ...catalog.skills.map(skillCommand)],
+			skills: catalog.skills,
 		};
 	}
 
 	sendTurnEffect(
-		input: SendTurnInput,
+		input: ResolvedSendTurnInput,
 	): Effect.Effect<TurnResult, ProviderInstanceFailure> {
 		const {
 			sessionId,
@@ -449,7 +447,9 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 			...(model?.providerId && model?.modelId
 				? { model: { providerID: model.providerId, modelID: model.modelId } }
 				: {}),
-			...(images && images.length > 0 ? { images: [...images] } : {}),
+			...(images && images.length > 0
+				? { images: images.map(({ dataUrl }) => dataUrl) }
+				: {}),
 			...(input.permissionMode === "plan" && !input.sideThread
 				? { agent: "plan" }
 				: agent
@@ -617,10 +617,32 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 							if (permission.length > 0) {
 								await client.session.update(sessionId, { permission });
 							}
-							if (!abortSignal.aborted) {
-								submitted = true;
+							// `$init` arrives as `/init`; OpenCode's prompt endpoint would
+							// send it to the model as plain text, so route known commands.
+							const slash = prompt.trim().match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
+							const command =
+								slash?.[1] &&
+								(await client.app.commands()).some(
+									({ name, source }) => name === slash[1] && source !== "skill",
+								)
+									? { name: slash[1], arguments: slash[2] ?? "" }
+									: undefined;
+							if (abortSignal.aborted) return;
+							submitted = true;
+							if (!command) {
 								await client.session.prompt(sessionId, promptOptions);
+								return;
 							}
+							// The command endpoint replies only when the turn ends, well past
+							// the client's request timeout. Submit it like promptAsync: the
+							// echo establishes intake and the event stream carries the turn.
+							client.session
+								.command(sessionId, command, promptOptions)
+								.catch((cause: unknown) =>
+									log.warn(
+										`OpenCode command /${command.name} for session ${sessionId} ended with: ${cause instanceof Error ? cause.message : String(cause)}`,
+									),
+								);
 						},
 						catch: (cause) => cause,
 					}),

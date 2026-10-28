@@ -2,11 +2,10 @@ import { Effect, Fiber, Option, Result, Semaphore } from "effect";
 import type { CursorAuthState } from "../../contracts/ws-rpc.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
-	cursorEnvironmentKey,
-	resolveCursorCredential,
+	type CursorCredentialLookup,
+	cursorCredentialMessage,
 } from "./cursor-credential.js";
-import { createCursorSdkPort } from "./cursor-sdk.js";
-import type { CursorCredential, CursorSdkPort } from "./sdk-port.js";
+import type { CursorSdkPort } from "./sdk-port.js";
 
 const EXPIRY_WARNING_MS = 7 * 24 * 60 * 60 * 1_000;
 
@@ -14,20 +13,14 @@ const EXPIRY_WARNING_MS = 7 * 24 * 60 * 60 * 1_000;
 export const makeCursorAuth = (
 	onChanged: (authenticated: boolean) => Effect.Effect<void, WsRpcError>,
 	options: {
-		readonly port?: CursorSdkPort;
-		readonly env?: Readonly<Record<string, string | undefined>>;
-		readonly credential?: Effect.Effect<
-			CursorCredential | undefined,
-			WsRpcError
-		>;
-	} = {},
+		readonly port: CursorSdkPort;
+		readonly credential: Effect.Effect<CursorCredentialLookup, WsRpcError>;
+	},
 ) =>
 	Effect.gen(function* () {
 		const scope = yield* Effect.scope;
 		const changes = yield* Semaphore.make(1);
-		let sdk: ReturnType<typeof createCursorSdkPort> | undefined;
-		const port = () => (sdk ??= options.port ?? createCursorSdkPort());
-		const env = options.env ?? process.env;
+		const port = () => options.port;
 		let login: CursorAuthState["login"] = { state: "idle" };
 		let controller: AbortController | undefined;
 		let loginFiber: Fiber.Fiber<void> | undefined;
@@ -42,19 +35,27 @@ export const makeCursorAuth = (
 			let environmentCredential = false;
 			const result = yield* Effect.result(
 				Effect.gen(function* () {
-					const credential = yield* options.credential ??
-						Effect.tryPromise(() =>
-							cursorEnvironmentKey(port(), env)
-								? resolveCursorCredential(port(), env)
-								: Promise.resolve(undefined),
-						);
-					environmentCredential = credential?.source === "environment";
+					const lookup = yield* options.credential;
+					if (lookup._tag !== "Ready") {
+						return lookup._tag === "LoggedOut"
+							? ({
+									source: "none",
+									status: "logged-out",
+									expiresSoon: false,
+								} as const)
+							: ({
+									source: "sdk-login",
+									status: "error",
+									expiresSoon: false,
+									error: cursorCredentialMessage(lookup),
+								} as const);
+					}
+					const credential = lookup.credential;
+					environmentCredential = credential.source === "environment";
 					return yield* Effect.tryPromise(async () => {
-						const sdk = port();
-						if (credential?.source === "environment") {
-							// SDK status describes only stored login, never an environment key.
+						if (credential.source === "environment") {
 							try {
-								await sdk.modelsList(credential);
+								await port().modelsList(credential);
 								return {
 									source: "environment",
 									status: "logged-in",
@@ -70,13 +71,7 @@ export const makeCursorAuth = (
 								} as const;
 							}
 						}
-						const status = await sdk.authStatus();
-						if (status.status === "logged-out")
-							return {
-								source: "none",
-								status: "logged-out",
-								expiresSoon: false,
-							} as const;
+						const status = credential;
 						return {
 							source: "sdk-login",
 							status: "logged-in",

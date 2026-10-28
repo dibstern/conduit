@@ -82,8 +82,7 @@ import {
 	ProjectRelayLoggerLive,
 } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeRelayStateLive } from "../domain/relay/Layers/relay-layer.js";
-import { SessionGitLive } from "../domain/relay/Layers/session-git-layer.js";
-import { makeSessionStateProjectionNotifierLive } from "../domain/relay/Layers/session-state-projection-notifier-layer.js";
+import { SessionStateProjectionNotifierLive } from "../domain/relay/Layers/session-state-projection-notifier-layer.js";
 import { SessionWorkspaceLive } from "../domain/relay/Layers/session-workspace-layer.js";
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
@@ -103,6 +102,7 @@ import {
 	DraftPreWarmLive,
 	DraftPreWarmTag,
 } from "../domain/relay/Services/draft-prewarm.js";
+import { GoalStuckStopReactorLive } from "../domain/relay/Services/goal-stuck-stop.js";
 import { makeGoalSummaryServiceLive } from "../domain/relay/Services/goal-summary-service.js";
 import { HandoffReceiptsLive } from "../domain/relay/Services/handoff-receipts.js";
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
@@ -519,7 +519,7 @@ export function createProjectRelayLayers({
 								queryFactory: claudeSdk.query,
 								cwd: config.projectDir,
 								...(config.shellEnv
-									? { shellEnv: config.shellEnv(config.projectDir) }
+									? { shellEnv: config.shellEnv(config.projectDir).env }
 									: {}),
 							}),
 						},
@@ -1042,7 +1042,7 @@ export function createProjectRelayLayers({
 	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(
 		StatusPollerLive,
-		Layer.provideMerge(SessionGitLive, relayStateAndBridges),
+		relayStateAndBridges,
 	);
 	const relayStateWithRecaps = Layer.merge(
 		makeRecapServiceLive({
@@ -1072,7 +1072,7 @@ export function createProjectRelayLayers({
 		relayStateServicesAndBridges,
 	);
 	const baseLayersWithProjectionNotifier = Layer.provideMerge(
-		makeSessionStateProjectionNotifierLive(),
+		SessionStateProjectionNotifierLive,
 		baseLayers,
 	);
 	const fullBaseLayers = Layer.provideMerge(
@@ -1116,6 +1116,9 @@ export function createProjectRelayLayers({
 					wiringLayers,
 					inboxLayer,
 					SessionWorkspaceHintReactorLive,
+					GoalStuckStopReactorLive.pipe(
+						Layer.provide(Layer.merge(inboxLayer, alertLedgerLayer)),
+					),
 				),
 				fullBaseLayers,
 			),

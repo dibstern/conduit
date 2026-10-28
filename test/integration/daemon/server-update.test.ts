@@ -566,7 +566,11 @@ describe("supervised server build updates", () => {
 		).toEqual([]);
 
 		writeFileSync(markerPath, JSON.stringify({ buildId: BUILD_ID }));
-		await owned.restart({ serviceEnvironment, skipBrowserProbe: true });
+		await owned.restart({
+			serviceEnvironment,
+			opencodeUrl: probeUrl,
+			skipBrowserProbe: true,
+		});
 		const replacement = owned.generations[1];
 		if (!replacement)
 			throw new Error("Replacement server generation is missing");

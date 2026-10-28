@@ -136,6 +136,8 @@ export const launchingRowsHandlers: StepHandler[] = [
 					status: "idle",
 					updatedAt: PINNED_CLOCK_MS,
 					backgroundWork: "working",
+					// The server rolls working background work into attention.
+					attention: "working",
 					backgroundTasks: [
 						{
 							id: "task-shell",
@@ -178,6 +180,7 @@ export const launchingRowsHandlers: StepHandler[] = [
 					...(row as object | undefined),
 					id,
 					backgroundWork: undefined,
+					attention: undefined,
 					backgroundTasks: undefined,
 				},
 			]);

@@ -1,9 +1,10 @@
-import { Data, Result } from "effect";
+import { Brand, Data, Result } from "effect";
 import {
 	isKnownDriverKind,
 	type KnownProviderDriverKind,
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
+import type { ModelInfo as WireModelInfo } from "../contracts/ws-rpc.js";
 import type { RelaySettings } from "../relay/relay-settings.js";
 import {
 	claudeApiModelId,
@@ -16,6 +17,129 @@ import type {
 } from "./types.js";
 
 export type Harness = KnownProviderDriverKind;
+
+export type ModelParameters = NonNullable<WireModelInfo["parameters"]>;
+export type ParameterChoiceKey = string & Brand.Brand<"ParameterChoiceKey">;
+export type ParamValue = { readonly id: string; readonly value: string };
+export type ResolvedChoice =
+	| { readonly _tag: "Default"; readonly values: readonly ParamValue[] }
+	| {
+			readonly _tag: "Chosen";
+			readonly key: ParameterChoiceKey;
+			readonly values: readonly ParamValue[];
+	  };
+
+const parameterChoiceKey = Brand.nominal<ParameterChoiceKey>();
+
+export class ModelParametersUnavailable extends Data.TaggedError(
+	"ModelParametersUnavailable",
+)<{
+	readonly modelId: string;
+	readonly choice: string;
+	readonly reason: "not-offered";
+	readonly offered: readonly string[];
+}> {
+	override get message(): string {
+		return `${this._tag}: parameter choice ${JSON.stringify(this.choice)} is not offered by model ${this.modelId}`;
+	}
+}
+
+/** One interpretation of stored choices for both wire and provider catalogs. */
+export function modelParameterChoices(model: {
+	readonly id: string;
+	readonly parameters?: WireModelInfo["parameters"];
+	readonly variants?: WireModelInfo["variants"] | ModelInfo["variants"];
+}): {
+	offered(): readonly ParameterChoiceKey[];
+	resolve(
+		choice: string,
+	): Result.Result<ResolvedChoice, ModelParametersUnavailable>;
+	cheapest(): ResolvedChoice;
+	withValue(
+		choice: string,
+		rowId: string,
+		value: string,
+	): ParameterChoiceKey | undefined;
+} {
+	const parameters = model.parameters;
+	const offered = (
+		parameters
+			? parameters.combinations.map(({ variant }) => variant)
+			: Array.isArray(model.variants)
+				? model.variants
+				: Object.keys(model.variants ?? {})
+	).map(parameterChoiceKey);
+	const valuesFor = (
+		values: Readonly<Record<string, string>> | undefined,
+	): readonly ParamValue[] =>
+		Object.entries(values ?? {}).map(([id, value]) => ({ id, value }));
+	const defaultChoice: ResolvedChoice = {
+		_tag: "Default",
+		values: valuesFor(
+			parameters?.combinations.find((entry) => entry.isDefault)?.values,
+		),
+	};
+	const resolve = (
+		choice: string,
+	): Result.Result<ResolvedChoice, ModelParametersUnavailable> => {
+		if (choice === "") return Result.succeed(defaultChoice);
+		const key = offered.find((key) => key === choice);
+		if (key === undefined)
+			return Result.fail(
+				new ModelParametersUnavailable({
+					modelId: model.id,
+					choice,
+					reason: "not-offered",
+					offered,
+				}),
+			);
+		return Result.succeed({
+			_tag: "Chosen",
+			key,
+			values: valuesFor(
+				parameters?.combinations.find((entry) => entry.variant === key)?.values,
+			),
+		});
+	};
+	return {
+		offered: () => offered,
+		resolve,
+		cheapest() {
+			// Cursor and Codex captures pin each row's values as cheapest-first.
+			const cheapest = parameters?.combinations.find(({ values }) =>
+				parameters.rows.every((row) => values[row.id] === row.values[0]?.value),
+			);
+			return cheapest
+				? {
+						_tag: "Chosen",
+						key: parameterChoiceKey(cheapest.variant),
+						values: valuesFor(cheapest.values),
+					}
+				: defaultChoice;
+		},
+		withValue(choice, rowId, value) {
+			const resolved = resolve(choice);
+			if (Result.isFailure(resolved)) return undefined;
+			const values = {
+				...Object.fromEntries(
+					resolved.success.values.map(({ id, value }) => [id, value]),
+				),
+				[rowId]: value,
+			};
+			const matches = parameters?.combinations.filter((entry) =>
+				Object.entries(values).every(
+					([id, value]) => entry.values[id] === value,
+				),
+			);
+			const combination =
+				matches?.find(
+					(entry) =>
+						Object.keys(entry.values).length === Object.keys(values).length,
+				) ?? matches?.[0];
+			return combination ? parameterChoiceKey(combination.variant) : undefined;
+		},
+	};
+}
 
 /** Model namespaces identify a harness, independently of account bindings. */
 export function harnessForModelProvider(providerId: string): Harness {
@@ -88,16 +212,6 @@ export class ModelNotInCatalog extends Data.TaggedError("ModelNotInCatalog")<{
 	}
 }
 
-export class EffortNotOffered extends Data.TaggedError("EffortNotOffered")<{
-	readonly modelId: string;
-	readonly effort: string;
-	readonly offered: readonly string[];
-}> {
-	override get message(): string {
-		return `${this._tag}: effort ${JSON.stringify(this.effort)} is not offered by model ${this.modelId}`;
-	}
-}
-
 export class ContextWindowNotOffered extends Data.TaggedError(
 	"ContextWindowNotOffered",
 )<{
@@ -113,14 +227,14 @@ export class ContextWindowNotOffered extends Data.TaggedError(
 export type PickRejection =
 	| PickRequired
 	| ModelNotInCatalog
-	| EffortNotOffered
+	| ModelParametersUnavailable
 	| ContextWindowNotOffered;
 
 export function isPickRejection(error: unknown): error is PickRejection {
 	return (
 		error instanceof PickRequired ||
 		error instanceof ModelNotInCatalog ||
-		error instanceof EffortNotOffered ||
+		error instanceof ModelParametersUnavailable ||
 		error instanceof ContextWindowNotOffered
 	);
 }
@@ -130,7 +244,7 @@ export function offeredOptions(model: ModelInfo): {
 	contextWindows: readonly ContextWindowOption[];
 } {
 	return {
-		efforts: Object.keys(model.variants ?? {}),
+		efforts: modelParameterChoices(model).offered(),
 		contextWindows: model.contextWindowOptions ?? [],
 	};
 }
@@ -187,12 +301,9 @@ export function resolveTurnSettings(
 		model.id === claudeApiModelId(pick.model.modelId, "200k");
 	const contextWindow = pick.contextWindow || (askedFor1m ? "1m" : "");
 	const modelId = isRoutingOption ? pick.model.modelId : model.id;
-	const { efforts, contextWindows } = offeredOptions(model);
-	if (pick.effort !== "" && !efforts.includes(pick.effort)) {
-		return Result.fail(
-			new EffortNotOffered({ modelId, effort: pick.effort, offered: efforts }),
-		);
-	}
+	const { contextWindows } = offeredOptions(model);
+	const choice = modelParameterChoices(model).resolve(pick.effort);
+	if (Result.isFailure(choice)) return Result.fail(choice.failure);
 	const offeredWindows = contextWindows.map((option) => option.value);
 	if (contextWindow !== "" && !offeredWindows.includes(contextWindow)) {
 		return Result.fail(
@@ -242,7 +353,9 @@ export const catalogFromProviderList = (
 			name: model.name,
 			providerId: provider.id,
 			variants: Object.fromEntries(
-				(model.variants ?? []).map((effort) => [effort, {}]),
+				modelParameterChoices(model)
+					.offered()
+					.map((effort) => [effort, {}]),
 			),
 			...(model.parameters ? { parameters: model.parameters } : {}),
 			...(model.contextWindowOptions

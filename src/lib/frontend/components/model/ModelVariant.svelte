@@ -8,26 +8,30 @@
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
 	import MenuRadioItem from "../ui/MenuRadioItem.svelte";
 	import MicroLabelButton from "../ui/MicroLabelButton.svelte";
+	import { hold } from "../../actions/hold.js";
 	import { effort } from "../../stores/composer-settings.svelte.js";
 	import { composerPickerState, openPicker } from "../../stores/composer-picker.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getActiveModel } from "../../stores/discovery.svelte.js";
 	import { resolveModelParameters } from "./model-parameters.js";
+	import { effortLevels as knownLevels } from "./effort-levels.js";
 
 	let { onOpen, variant = "icons", children, wordLabel }: {
 		onOpen?: (() => void) | undefined;
 		variant?: "icons" | "words" | "control" | "row" | undefined;
-		children?: Snippet<[row: Snippet]> | undefined;
+		children?: Snippet<[row: Snippet, control: Snippet]> | undefined;
 		wordLabel?: string | undefined;
 	} = $props();
 
 	let open = $state(false);
+	let effortButton = $state<HTMLButtonElement | HTMLAnchorElement>();
 	const phone = $derived(sessionViewState.composerTier === "phone");
 	const variants = $derived(effort.options);
 	const currentVariant = $derived(effort.current ?? "");
-	const parameters = $derived(getActiveModel()?.parameters);
-	const parameterState = $derived(resolveModelParameters(parameters, effort.current));
+	const activeModel = $derived(getActiveModel());
+	const parameters = $derived(activeModel?.parameters);
+	const parameterState = $derived(resolveModelParameters(activeModel, effort.current));
 	const parameterEffort = $derived(parameterState.rows.find((row) => row.kind === "effort"));
 	const levels = $derived(parameters ? parameterEffort?.options.length ?? 0 : variants.length);
 	const currentEffort = $derived(parameters && !parameterState.variantUnavailable ? parameterEffort?.value ?? "" : currentVariant);
@@ -37,18 +41,22 @@
 		? parameterState.variantUnavailable ? 0 : (parameterEffort?.options.findIndex((option) => option.value === currentEffort) ?? -1) + 1
 		: currentVariant ? variants.indexOf(currentVariant) + 1 : 0);
 
-	const knownLevels = [
-		{ value: "low", name: "Low", label: "LOW", description: "Quick, light reasoning" },
-		{ value: "medium", name: "Medium", label: "MEDIUM", description: "Balanced" },
-		{ value: "high", name: "High", label: "HIGH", description: "Thinks harder, slower" },
-		{ value: "xhigh", name: "Extra high", label: "XHIGH", description: "Deeper still, for hard problems" },
-		{ value: "max", name: "Max", label: "MAX", description: "Most thorough, slowest" },
-	];
 	const currentLevel = $derived(knownLevels.find((level) => level.value === currentEffort));
 	const levelName = $derived(currentLevel?.name ?? (currentEffort || (parameters ? displayedWord : undefined) || "Default"));
 	const microLabel = $derived(
 		currentLevel?.label ?? (currentEffort ? currentEffort.slice(0, 5).toUpperCase() : "DEF"),
 	);
+
+	function openEffortPicker() {
+		if (effort.pending || levels === 0) return;
+		openPicker("effort");
+		if (composerPickerState.request && effortButton) composerPickerState.request.opener = effortButton;
+	}
+
+	$effect(() => {
+		if (!phone || !effortButton || effort.pending || levels === 0) return;
+		return hold(effortButton, { onHold: openEffortPicker, keyboard: false }).destroy;
+	});
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key.toLowerCase() === "t" && e.ctrlKey && variants.length > 0) {
@@ -80,14 +88,46 @@
 			data-testid="composer-more-effort"
 			onclick={() => openPicker("effort")}
 		>
-			<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Effort</span>
-			<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{#if !parameters || levels > 0}<EffortMeter {levels} {filled} />{/if}{displayedWord ?? (variants.length === 0 && !currentVariant ? "Unavailable" : parameters ? levelName : currentVariant || "Default")}</span>
+			<Icon name="sliders-horizontal" size={16} class="shrink-0 text-text-dimmer" />
+			<span data-part="label" class="flex-1">Effort</span>
+			<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{displayedWord ?? (variants.length === 0 && !currentVariant ? "Unavailable" : parameters ? levelName : currentVariant || "Default")}</span>
 			<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 		</Button>
 {/snippet}
 
+{#snippet effortControl()}
+	{#if showEffort && (!phone || levels > 0)}
+	<Button
+		bind:element={effortButton}
+		variant="composer-model"
+		size="composer-chip"
+		touchTarget={phone}
+		class="shrink-0"
+		ariaLabel={`Effort: ${levelName}. ${phone ? "Tap to raise; hold for options" : "Click to raise; Option-click for options"}`}
+		loading={effort.pending}
+		disabled={levels === 0}
+		data-testid="variant-badge"
+		title={`Effort ${levelName}. ${phone ? "Tap to raise; hold for options" : "Click or Ctrl+T to raise; Option-click for options"}`}
+		onclick={(event) => {
+			if (effort.pending || levels === 0) return;
+			if (!phone && event.altKey) openEffortPicker();
+			else effort.cycle();
+		}}
+		onkeydown={(event) => {
+			if (event.shiftKey && event.key === "F10") {
+				event.preventDefault();
+				if (!event.repeat) openEffortPicker();
+			}
+		}}
+	>
+		{#if !parameters || levels > 0}<EffortMeter {levels} {filled} />{/if}
+		{#if !phone && (sessionViewState.composerTier === "wide" || levels === 0)}<span data-testid="composer-effort-label">{levelName}</span>{/if}
+	</Button>
+	{/if}
+{/snippet}
+
 {#if variant === "row"}
-	{#if children}{@render children(effortRow)}{:else}{@render effortRow()}{/if}
+	{#if children}{@render children(effortRow, effortControl)}{:else}{@render effortRow()}{/if}
 {:else if showEffort && variant === "words"}
 		<Button
 			variant="composer-word"
@@ -105,28 +145,9 @@
 				if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
 			}}
 		><span>{displayedWord ?? (parameters ? currentEffort || levelName : currentVariant || "default")}</span></Button>
-{:else if showEffort && variant === "control" && sessionViewState.composerWidth >= 480}
-	<Button
-		variant="composer-model"
-		size="composer-chip"
-		class="shrink-0"
-		ariaLabel={`Effort: ${levelName}. Open effort options`}
-		loading={effort.pending}
-		disabled={variants.length === 0}
-		aria-haspopup="dialog"
-		aria-expanded={composerPickerState.request !== null}
-		aria-controls={composerPickerState.request ? "model-picker" : undefined}
-		data-testid="variant-badge"
-		title="Effort {levelName}. Ctrl+T to cycle"
-		onclick={(event) => {
-			openPicker("effort");
-			if (composerPickerState.request && event.currentTarget instanceof HTMLElement) composerPickerState.request.opener = event.currentTarget;
-		}}
-	>
-		{#if !parameters || levels > 0}<EffortMeter {levels} {filled} />{/if}
-		{#if sessionViewState.composerTier === "wide" || levels === 0}<span data-testid="composer-effort-label">{levelName}</span>{/if}
-	</Button>
-{:else if showEffort && variant !== "control"}
+{:else if variant === "control"}
+	{#if sessionViewState.composerWidth >= 480}{@render effortControl()}{/if}
+{:else if showEffort}
 	<Menu
 		bind:open
 		onopenchange={(nextOpen) => { if (nextOpen) onOpen?.(); }}
@@ -219,8 +240,8 @@
 								disabled={effort.pending || option.disabled}
 								data-testid="variant-{row.kind}-option-{option.value}"
 								onselect={() => {
-									const combination = parameterState.parameterCombination(row.id, option.value);
-									if (combination && !effort.pending) effort.select(combination.variant);
+									const choice = parameterState.withValue(row.id, option.value);
+									if (choice !== undefined && !effort.pending) effort.select(choice);
 									open = false;
 								}}
 							>{option.label}</MenuRadioItem>

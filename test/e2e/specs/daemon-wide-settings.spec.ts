@@ -102,15 +102,26 @@ test("no project open: instance mutations, scan and log level use daemon RPC", a
 	page,
 	harness,
 }, testInfo) => {
-	// The startup probe registers a fixture project. Remove it so a cold browser
-	// cannot auto-attach a default project.
+	const observed = observeRpc(page);
+	await new AppPage(page).goto(harness.baseUrl);
+	await expect
+		.poll(
+			() =>
+				observed.calls.find((call) => call.tag === "AttachProject")?.exit?._tag,
+		)
+		.toBe("Success");
+	await expect(
+		page.locator('.session-empty, [data-testid="project-tree-empty"]').first(),
+	).toBeVisible();
+	observed.calls.length = 0;
+	// Removing the last project from a settled app keeps daemon settings available.
+	// A cold load with no projects now opens the project setup screen.
 	const projects = await harness.requestRpc({
 		_tag: "RemoveProject",
 		slug: "process-test",
 	});
 	expect(projects.projects).toEqual([]);
-	const observed = observeRpc(page);
-	await new AppPage(page).goto(harness.baseUrl);
+	await expect(page.getByTestId("project-tree-header")).toHaveCount(0);
 	await expect
 		.poll(
 			() => observed.calls.find((call) => call.tag === "AttachProject")?.exit,

@@ -307,18 +307,30 @@ export class CodexInteractions {
 					parsed.push({ name, field: value, options });
 				}
 				const runId = this.state().runId;
-				const answers = yield* this.sink.requestQuestion({
-					requestId,
-					...(runId ? { runId } : {}),
-					toolUseId: requestId,
-					questions: parsed.map(({ name, field, options }) => ({
-						header: field.title ?? name,
-						question: `${request.serverName}: ${request.message}\n${field.description ?? field.title ?? name}`,
-						options: options.map(({ label }) => ({ label, description: "" })),
-						multiSelect: field.type === "array",
-						custom: options.length === 0,
-					})),
-				});
+				const answers = yield* this.sink
+					.requestQuestion({
+						requestId,
+						...(runId ? { runId } : {}),
+						toolUseId: requestId,
+						questions: parsed.map(({ name, field, options }) => ({
+							header: field.title ?? name,
+							question: `${request.serverName}: ${request.message}\n${field.description ?? field.title ?? name}`,
+							options: options.map(({ label }) => ({ label, description: "" })),
+							multiSelect: field.type === "array",
+							custom: options.length === 0,
+						})),
+					})
+					.pipe(
+						Effect.catchIf(
+							(failure) =>
+								failure._tag === "EventSinkIngestionError" &&
+								typeof failure.cause === "object" &&
+								failure.cause !== null &&
+								"code" in failure.cause &&
+								failure.cause.code === "question_rejected",
+							() => Effect.succeed<Record<string, unknown>>({}),
+						),
+					);
 				if (!Object.keys(answers).length) return { action: "decline" };
 				const content: Record<string, string | number | boolean | string[]> =
 					Object.create(null);

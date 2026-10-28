@@ -78,10 +78,14 @@ test("account colours agree across browsers and controls after removal and resta
 			);
 			await openPickerRoot(client, trigger);
 			await client.getByTestId("picker-harness-claude").click();
-			const dot = client
+			const accountBadge = client
 				.getByTestId("picker-account-work")
-				.getByTestId("account-dot");
-			await expect(dot).toHaveCSS("background-color", "rgb(62, 207, 142)");
+				.getByTestId("account-logo")
+				.getByTestId("harness-logo-badge");
+			await expect(accountBadge).toHaveCSS(
+				"background-color",
+				"rgb(62, 207, 142)",
+			);
 			await client.getByTestId("picker-account-work").click();
 			await client.keyboard.press("Escape");
 			const badge = client.locator(
@@ -89,7 +93,9 @@ test("account colours agree across browsers and controls after removal and resta
 			);
 			await expect(badge).toHaveCSS("background-color", "rgb(62, 207, 142)");
 		}
-		const footer = other.getByTestId("usage-footer-dot-work");
+		const footer = other
+			.getByTestId("usage-footer-logo-work")
+			.getByTestId("harness-logo-badge");
 		await expect(footer).toHaveCSS("background-color", "rgb(62, 207, 142)");
 		const before = await footer.evaluate(
 			(dot) => getComputedStyle(dot).backgroundColor,
@@ -108,7 +114,10 @@ test("account colours agree across browsers and controls after removal and resta
 				0,
 			);
 			await expect(
-				client.getByTestId("picker-account-work").getByTestId("account-dot"),
+				client
+					.getByTestId("picker-account-work")
+					.getByTestId("account-logo")
+					.getByTestId("harness-logo-badge"),
 			).toHaveCSS("background-color", before);
 			await client.keyboard.press("Escape");
 			await expect(
@@ -157,12 +166,14 @@ test("account colours agree across browsers and controls after removal and resta
 				?.colorSlot,
 		).toBe(0);
 		await new AppPage(other).goto(url);
-		await expect(other.getByTestId("usage-footer-dot-work")).toHaveCSS(
-			"background-color",
-			before,
-		);
+		await expect(
+			other
+				.getByTestId("usage-footer-logo-work")
+				.getByTestId("harness-logo-badge"),
+		).toHaveCSS("background-color", before);
 		observed["afterRestart"] = await other
-			.getByTestId("usage-footer-dot-work")
+			.getByTestId("usage-footer-logo-work")
+			.getByTestId("harness-logo-badge")
 			.evaluate((dot) => getComputedStyle(dot).backgroundColor);
 		await other
 			.getByTestId("usage-footer-meter")

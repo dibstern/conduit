@@ -86,8 +86,10 @@ test.describe("ToolGenericCard", () => {
 		await expect(subtitle).toBeVisible();
 		await expect(subtitle).toHaveText("Running…");
 
-		const activityIndicator = page.locator(".tool-header [style*='grid']");
-		await expect(activityIndicator).toBeAttached();
+		const activityIndicator = page.locator(
+			'.tool-header [data-flow-glyph="running"]',
+		);
+		await expect(activityIndicator).toBeVisible();
 	});
 
 	test("shows error styling for error state", async ({ page }) => {
@@ -217,7 +219,7 @@ test.describe("ToolSubagentCard", () => {
 		await expect(header).not.toBeDisabled();
 	});
 
-	test("shows running state with block grid", async ({ page }) => {
+	test("shows running state with Flow glyph", async ({ page }) => {
 		await page.goto(storyUrl("chat-toolitem--subagent-running"), {
 			waitUntil: "domcontentloaded",
 		});
@@ -228,9 +230,7 @@ test.describe("ToolSubagentCard", () => {
 		await expect(subtitle).toBeVisible();
 		await expect(subtitle).toHaveText("Running…");
 
-		// Should show the block grid animation instead of a static icon
-		// BlockGrid renders as a div with inline grid styles
-		const blockGrid = page.locator(".subagent-header [style*='grid']");
-		await expect(blockGrid).toBeAttached();
+		const glyph = page.locator('.subagent-header [data-flow-glyph="running"]');
+		await expect(glyph).toBeVisible();
 	});
 });

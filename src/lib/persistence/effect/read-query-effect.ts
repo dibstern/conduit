@@ -694,6 +694,7 @@ export interface ReadQueryEffect {
 				readonly id: string;
 				readonly version: number;
 				readonly deleted: boolean;
+				readonly projectSlug?: string;
 			}[];
 			/**
 			 * With `removed`: the version tombstones were first kept at. A range
@@ -833,10 +834,13 @@ export class ReadQueryEffectTag extends Context.Service<
 >()("ReadQueryEffect") {}
 
 type MessageWithTurnModelRow = MessageRow & {
+	turn_provider_driver: "codex" | null;
 	turn_cost: number | null;
 	turn_requested_model: string | null;
 	turn_expected_model: string | null;
 	turn_actual_model: string | null;
+	turn_effort: string | null;
+	turn_context_window: string | null;
 	turn_started_at: number | null;
 	turn_completed_at: number | null;
 	turn_waits: string;
@@ -913,10 +917,13 @@ function groupMessagesWithPartsAndTurnModels(
 	}
 	return messages.map((message) => {
 		const {
+			turn_provider_driver,
 			turn_cost,
 			turn_requested_model,
 			turn_expected_model,
 			turn_actual_model,
+			turn_effort,
+			turn_context_window,
 			turn_started_at,
 			turn_completed_at,
 			turn_waits,
@@ -925,6 +932,9 @@ function groupMessagesWithPartsAndTurnModels(
 		return {
 			...messageRow,
 			parts: partsByMessage.get(message.id) ?? [],
+			...(turn_provider_driver == null
+				? {}
+				: { providerDriver: turn_provider_driver }),
 			...(turn_cost === null ? {} : { turnCost: turn_cost }),
 			...(message.role === "user" && turn_started_at !== null
 				? {
@@ -952,6 +962,10 @@ function groupMessagesWithPartsAndTurnModels(
 								? {}
 								: { expectedModel: turn_expected_model }),
 							actualModel: turn_actual_model,
+							...(turn_effort === null ? {} : { effort: turn_effort }),
+							...(turn_context_window === null
+								? {}
+								: { contextWindow: turn_context_window }),
 						},
 					}),
 		};
@@ -999,6 +1013,49 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	// ends, not when it was sent: waiting in the queue is not work. A steer
 	// joins the running turn and settles with it, so it starts when sent.
 	const turnMetadataColumns = sql`
+		CASE WHEN EXISTS (SELECT 1 FROM message_parts part
+			WHERE part.message_id = messages.id AND part.type = 'tool' AND part.result IS NULL
+				AND part.status IS NOT 'completed' AND part.status IS NOT 'error'
+				AND json_type(CASE WHEN json_valid(part.metadata) THEN part.metadata END, '$.output') = 'text')
+		THEN CASE COALESCE(CASE WHEN COALESCE(turns.run_id, t.run_id) IS NOT NULL THEN COALESCE((SELECT json_extract(command.payload_json, '$.account.driver')
+			FROM provider_command_outbox command
+			WHERE command.session_id = messages.session_id AND command.effect_type = 'send_turn'
+				AND json_valid(command.payload_json)
+				AND command.run_id = COALESCE(turns.run_id, t.run_id)
+			ORDER BY command.request_sequence LIMIT 1),
+			(SELECT event.provider FROM events event INDEXED BY idx_events_run_started_identity
+				WHERE event.session_id = messages.session_id AND event.type = 'run.started' AND json_valid(event.metadata)
+					AND json_extract(event.metadata, '$.runId') = COALESCE(turns.run_id, t.run_id)
+				ORDER BY event.sequence LIMIT 1)) END,
+			(
+				-- Retained creation events identify legacy output even when migration supplied a run ID.
+				-- Unary + removes column affinity so string message IDs use the JSON expression index.
+				WITH RECURSIVE ancestors(session_id, message_id, provider, through_sequence) AS (
+					SELECT messages.session_id, messages.id,
+						(SELECT owner.provider FROM events owner INDEXED BY idx_events_message_created_identity
+							WHERE owner.session_id = messages.session_id AND owner.type = 'message.created' AND json_valid(owner.data)
+								AND json_extract(owner.data, '$.messageId') = +messages.id AND owner.provider IS NOT NULL
+							ORDER BY owner.sequence LIMIT 1), NULL
+					UNION ALL
+					SELECT COALESCE(json_extract(created.data, '$.forkedFrom'), json_extract(created.data, '$.parentId')),
+						substr(ancestor.message_id, 1, length(ancestor.message_id) - length(ancestor.session_id) - 1),
+						(SELECT owner.provider FROM events owner INDEXED BY idx_events_message_created_identity
+							WHERE owner.session_id = COALESCE(json_extract(created.data, '$.forkedFrom'), json_extract(created.data, '$.parentId'))
+								AND owner.type = 'message.created' AND json_valid(owner.data)
+								AND json_extract(owner.data, '$.messageId') = substr(ancestor.message_id, 1, length(ancestor.message_id) - length(ancestor.session_id) - 1)
+								AND owner.provider IS NOT NULL AND owner.sequence < created.sequence
+							ORDER BY owner.sequence LIMIT 1),
+						created.sequence
+					FROM ancestors ancestor JOIN events created INDEXED BY idx_events_session_type
+						ON created.session_id = ancestor.session_id AND created.type = 'session.created'
+							AND CASE WHEN json_valid(created.data) THEN json_extract(created.data, '$.inheritsHistory') END = 1
+					WHERE ancestor.provider IS NULL
+						AND (ancestor.through_sequence IS NOT NULL OR messages.is_inherited = 1)
+						AND (ancestor.through_sequence IS NULL OR created.sequence < ancestor.through_sequence)
+						AND substr(ancestor.message_id, -length(ancestor.session_id) - 1) = '_' || ancestor.session_id
+				)
+				SELECT provider FROM ancestors WHERE provider IS NOT NULL LIMIT 1
+			)) WHEN 'codex' THEN 'codex' END END AS turn_provider_driver,
 		CASE WHEN (SELECT provider FROM sessions WHERE id = messages.session_id) = 'claude'
 			THEN turns.cost ELSE NULL END AS turn_cost,
 		CASE WHEN messages.steered = 1 THEN t.requested_at
@@ -1531,8 +1588,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			SELECT mp.id, mp.call_id, mp.message_id, mp.input, mp.created_at, m.session_id
 			FROM message_parts mp
 			JOIN messages m ON m.id = mp.message_id
-			JOIN sessions s ON s.id = m.session_id
-			WHERE s.provider = 'claude' AND m.session_id = ${sessionId}
+			WHERE m.session_id = ${sessionId}
 				AND mp.call_id = ${callId} AND mp.tool_name = 'AskUserQuestion'
 				AND mp.status IN ('started', 'running', 'pending')
 			LIMIT 1`.pipe(
@@ -1555,6 +1611,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					turns.requested_model AS turn_requested_model,
 					turns.expected_model AS turn_expected_model,
 					turns.actual_model AS turn_actual_model,
+					turns.effort AS turn_effort,
+					turns.context_window AS turn_context_window,
 					${turnMetadataColumns}
 				FROM messages
 				LEFT JOIN turns ON turns.id = messages.turn_id
@@ -1851,6 +1909,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 									turns.requested_model AS turn_requested_model,
 										turns.expected_model AS turn_expected_model,
 										turns.actual_model AS turn_actual_model,
+										turns.effort AS turn_effort,
+										turns.context_window AS turn_context_window,
 										${turnMetadataColumns}
 									FROM messages
 									LEFT JOIN turns ON turns.id = messages.turn_id
@@ -1894,6 +1954,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								turns.requested_model AS turn_requested_model,
 								turns.expected_model AS turn_expected_model,
 								turns.actual_model AS turn_actual_model,
+								turns.effort AS turn_effort,
+								turns.context_window AS turn_context_window,
 								${turnMetadataColumns}
 							FROM messages
 							LEFT JOIN turns ON turns.id = messages.turn_id
@@ -1960,6 +2022,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				readonly id: string;
 				readonly version: number;
 				readonly deleted: boolean;
+				readonly projectSlug?: string;
 			}[];
 			readonly removedSince?: number;
 			readonly listing?: readonly (readonly [id: string, version: number])[];
@@ -1980,12 +2043,13 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						const ranged = range?.after !== undefined;
 						const stored = yield* sql<{
 							session_id: string;
+							project_id: string;
 							version: number;
 							row: string | null;
 							workspace_hint_sequence: number | null;
 							deleted: number;
 						}>`
-							SELECT session_sidebar.session_id, session_sidebar.version, row,
+							SELECT session_sidebar.session_id, session_sidebar.project_id, session_sidebar.version, row,
 								workspace_hint_sequence, sessions.id IS NULL AS deleted
 							FROM session_sidebar LEFT JOIN sessions
 								ON sessions.id = session_sidebar.session_id
@@ -2059,6 +2123,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 													id: stamp.session_id,
 													version: stamp.version,
 													deleted: stamp.deleted === 1,
+													projectSlug: stamp.project_id,
 												},
 											]
 										: [],
@@ -2325,6 +2390,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							turns.requested_model AS turn_requested_model,
 							turns.expected_model AS turn_expected_model,
 							turns.actual_model AS turn_actual_model,
+							turns.effort AS turn_effort,
+							turns.context_window AS turn_context_window,
 							${turnMetadataColumns}
 						FROM messages
 						LEFT JOIN turns ON turns.id = messages.turn_id
@@ -2618,7 +2685,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 	> =>
 		Effect.gen(function* () {
 			const rows = yield* sql<TurnModelExecutionRow>`
-				SELECT requested_model, expected_model, actual_model
+				SELECT requested_model, expected_model, actual_model, effort, context_window
 				FROM turns
 				WHERE session_id = ${sessionId}
 					AND actual_model IS NOT NULL

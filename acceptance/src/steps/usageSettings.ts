@@ -221,21 +221,21 @@ export const usageSettingsHandlers: StepHandler[] = [
 			const several = match[1] === "several";
 			const now = clockTimes.get(world.page) ?? Date.now();
 			const ids = several ? ["spare", "work", "claude"] : ["claude"];
-			rpc.setDaemonList("SubscribeInstances", {
-				instances: ids.map((id) => ({
-					id,
-					colorSlot: id === "claude" ? 0 : id === "work" ? 1 : 2,
-					name: id === "claude" ? "Personal" : id === "work" ? "Work" : "Spare",
-					driver: "claude",
-					isDefault: id === "claude",
-					usageEligible: true,
-					port: 0,
-					managed: false,
-					status: "healthy",
-					restartCount: 0,
-					createdAt: 1,
-				})),
-			});
+			const instances = ids.map((id) => ({
+				id,
+				colorSlot: id === "claude" ? 0 : id === "work" ? 1 : 2,
+				name: id === "claude" ? "Personal" : id === "work" ? "Work" : "Spare",
+				driver: "claude",
+				isDefault: id === "claude",
+				usageEligible: true,
+				port: 0,
+				managed: false,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 1,
+			}));
+			mockInstances.set(world.page, instances);
+			rpc.setDaemonList("SubscribeInstances", { instances });
 			// A Claude default model makes the claude account the draft's account.
 			rpc.setProjectSetting({
 				_tag: "defaultModel",
@@ -959,9 +959,9 @@ export const usageSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert account positions, identity dots, plan badges and handles",
+		name: "assert account positions, identity logos, plan badges and handles",
 		match:
-			/^the Usage cards show their positions, account dots, plan badges and drag handles$|^the phone Usage cards show account dots and plan badges, and drag handles only after Edit order$/,
+			/^the Usage cards show their positions, account logos, plan badges and drag handles$|^the phone Usage cards show account logos and plan badges, and drag handles only after Edit order$/,
 		run: async ({ world, match }) => {
 			const phone = match[0].startsWith("the phone");
 			const list = world.page.getByRole("list", {
@@ -992,7 +992,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 				if (phone) await expect(position).toHaveCount(0);
 				else await expect(position).toHaveText(String(index + 1));
 				await expect(
-					world.page.getByTestId(`usage-settings-dot-${id}`),
+					world.page.getByTestId(`usage-settings-logo-${id}`),
 				).toHaveAttribute("data-account", id ?? "");
 				await expect(
 					list.getByRole("button", { name: `Reorder ${name}` }),
@@ -1012,6 +1012,49 @@ export const usageSettingsHandlers: StepHandler[] = [
 				0,
 			);
 			await expect(hint).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert Usage account glyph and configured-driver badge count",
+		match:
+			/^the Usage account (\S+) shows a (claude|codex|cursor|opencode) logo (with|without) a letter badge$/,
+		run: async ({ world, match }) => {
+			const id = match[1] ?? "";
+			const driver = match[2] ?? "";
+			const instances = mockInstances.get(world.page) ?? [];
+			const account = instances.find((instance) => instance["id"] === id);
+			const badged = match[3] === "with";
+			expect(
+				instances.filter((instance) => instance["driver"] === driver).length >=
+					2,
+			).toBe(badged);
+			const logo = world.page.getByTestId(`usage-settings-logo-${id}`);
+			await expect(logo).toBeVisible();
+			await expect(logo).toHaveAttribute("data-driver", driver);
+			await expect(logo).toHaveAttribute("data-account", id);
+			await expect(logo).toHaveCSS("width", "18px");
+			const badge = logo.getByTestId("harness-logo-badge");
+			await expect(badge).toHaveCount(badged ? 1 : 0);
+			if (badged) {
+				await expect(badge).toHaveText(
+					String(account?.["name"] ?? driver)
+						.charAt(0)
+						.toUpperCase(),
+				);
+				await expect(badge).toHaveAttribute("data-state", "idle");
+			}
+		},
+	},
+	{
+		name: "assert Usage account names share a left edge",
+		match: /^the Usage account names are left aligned$/,
+		run: async ({ world }) => {
+			const names = world.page.getByTestId("usage-limit-account-name");
+			const positions = await names.evaluateAll((elements) =>
+				elements.map((element) => element.getBoundingClientRect().x),
+			);
+			expect(positions.length).toBeGreaterThan(1);
+			for (const x of positions) expect(x).toBeCloseTo(positions[0] ?? 0, 0);
 		},
 	},
 	{

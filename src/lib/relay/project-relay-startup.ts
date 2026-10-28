@@ -9,6 +9,7 @@ import {
 	ProviderAdapters,
 } from "../domain/daemon/Services/provider-adapters.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
+import { AttachmentStoreTag } from "../domain/persistence/Services/attachment-store.js";
 import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
@@ -116,6 +117,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 	const { relayManagedRuntime } = layers;
 	return Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
+		const attachments = yield* AttachmentStoreTag;
 		const persistenceProject = yield* PersistenceProjectTag;
 		const activity = yield* SessionActivityTag;
 		const projectSettingsContext = yield* Effect.context<
@@ -405,6 +407,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		}
 		return {
 			sql,
+			attachments,
 			persistenceProject,
 			activity,
 			projectSettingsContext,
@@ -623,6 +626,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				} = services;
 				return {
 					sql,
+					attachments: services.attachments,
 					persistenceProject: services.persistenceProject,
 					activity: services.activity,
 					projectSettingsContext: services.projectSettingsContext,

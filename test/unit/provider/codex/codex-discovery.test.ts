@@ -7,7 +7,10 @@ import { afterEach, expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
 import { connectAppServer } from "../../../../src/lib/provider/codex/app-server/client.js";
 import { AppServerIoError } from "../../../../src/lib/provider/codex/app-server/transport.js";
-import { discoverCodex } from "../../../../src/lib/provider/codex/codex-discovery.js";
+import {
+	discoverCodex,
+	discoverCodexEffect,
+} from "../../../../src/lib/provider/codex/codex-discovery.js";
 import { makeCodexRunnerDriver } from "../../../../src/lib/provider/codex/codex-runner-driver.js";
 
 vi.mock("../../../../src/lib/provider/codex/app-server/app-server.js", () => ({
@@ -26,6 +29,93 @@ vi.mock(
 afterEach(() => {
 	vi.restoreAllMocks();
 	vi.clearAllMocks();
+});
+
+describe("Codex skill locations", () => {
+	it.effect(
+		"preserves file locations and provider-only skills from skills/list",
+		() =>
+			Effect.gen(function* () {
+				vi.mocked(connectAppServer).mockReturnValue(
+					Effect.succeed({
+						serverVersion: "999.0.0",
+						notifications: Stream.empty,
+						request: (method, _params, schema) =>
+							Schema.decodeUnknownEffect(schema)(
+								method === "account/read"
+									? {
+											account: { type: "apiKey" },
+											requiresOpenaiAuth: false,
+										}
+									: method === "model/list"
+										? { data: [], nextCursor: null }
+										: {
+												data: [
+													{
+														cwd: "/tmp/codex-location-work",
+														errors: [],
+														skills: [
+															{
+																name: "local-review",
+																description: "Review local code",
+																enabled: true,
+																path: "/tmp/codex-location-work/skills/local-review/SKILL.md",
+																scope: "repo",
+															},
+															{
+																name: "provider-review",
+																description: "Provided by Codex",
+																enabled: true,
+																scope: "user",
+															},
+														],
+													},
+												],
+											},
+							),
+					}),
+				);
+				const discovered = yield* discoverCodexEffect(
+					{
+						id: AccountIdSchema.make("codex"),
+						driver: "codex",
+						configuredFolder: "/tmp/codex-location-home",
+						name: "Codex",
+						usageEligible: false,
+					},
+					"/tmp/codex-location-work",
+				);
+				expect(discovered.skills).toEqual([
+					{
+						name: "local-review",
+						description: "Review local code",
+						source: "project-skill",
+						location: {
+							_tag: "File",
+							path: "/tmp/codex-location-work/skills/local-review/SKILL.md",
+							root: "/tmp/codex-location-work/skills/local-review",
+						},
+					},
+					{
+						name: "provider-review",
+						description: "Provided by Codex",
+						source: "user-skill",
+						location: { _tag: "Provider" },
+					},
+				]);
+				expect(discovered.commands).toEqual([
+					expect.objectContaining({ name: "compact", source: "builtin" }),
+					expect.objectContaining({
+						name: "local-review",
+						skillRef: expect.any(String),
+					}),
+					expect.objectContaining({
+						name: "provider-review",
+						skillRef: expect.any(String),
+					}),
+				]);
+			}),
+	);
 });
 
 describe("Codex discovery failure memory", () => {

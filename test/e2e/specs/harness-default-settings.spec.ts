@@ -268,7 +268,7 @@ test("RPC rejects the other harness and unoffered choices without writing", asyn
 		},
 		{
 			name: "3-effort",
-			tag: "EffortNotOffered",
+			tag: "ModelParametersUnavailable",
 			pick: {
 				providerId: "claude",
 				modelId: "sonnet",

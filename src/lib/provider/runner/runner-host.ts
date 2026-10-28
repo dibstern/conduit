@@ -19,7 +19,10 @@ import {
 import { registerRunner, removeRunner } from "./runner-registry.js";
 import { RunnerSendJournal } from "./runner-send-journal.js";
 import { RunnerSpool } from "./runner-spool.js";
-import type { RunnerUpgradeState } from "./runner-upgrade.js";
+import type {
+	RunnerSourceDelivery,
+	RunnerUpgradeState,
+} from "./runner-upgrade.js";
 import type {
 	SessionCommand,
 	SessionFailure,
@@ -35,7 +38,13 @@ export interface RunnerLaunchCallbacks {
 	/** Fence admission before a payload publishes its final turn outcome. */
 	readonly retireAfterCommand?: (inputId: string) => void;
 	readonly isCandidate: () => boolean;
+	/** A rebind excludes the executing send's own command and admitted turn. */
+	readonly isBackgroundBusy: (ignoredCommands?: number) => boolean;
 	readonly turnStateChanged: (inFlight: boolean) => void;
+	/** Only the producer can finish this exact terminal delivery. */
+	readonly sourceDelivery?: (
+		source: Pick<RunnerSourceDelivery, "sessionId" | "inputId" | "runId">,
+	) => (() => void) | undefined;
 	readonly readThread: RunnerSocket["threadReadEffect"];
 }
 
@@ -48,7 +57,11 @@ export interface RunnerLaunch {
 	readonly wire?: RunnerWireCodec;
 	readonly capabilities?: Pick<
 		RunnerHello,
-		"stopsTasks" | "taggedConfigDir" | "rebindsAccount"
+		| "stopsTasks"
+		| "taggedConfigDir"
+		| "rebindsAccount"
+		| "declaresLogin"
+		| "cursorBackendUrl"
 	>;
 	readonly makeRunner: (
 		config: NonNullable<RunnerHello["config"]>,
@@ -58,9 +71,12 @@ export interface RunnerLaunch {
 	) => Effect.Effect<SessionRunner, never, Scope.Scope>;
 	readonly upgradeState: () => Omit<
 		RunnerUpgradeState,
-		"quiescent" | "revision"
+		"quiescent" | "turnInFlight" | "revision"
 	>;
 	readonly acceptCommand: (command: SessionCommand) => void;
+	readonly changesAccount?: (
+		command: Extract<SessionCommand, { type: "send-turn" }>,
+	) => boolean;
 	readonly executeEffect: (
 		runner: SessionRunner,
 		command: SessionCommand,
@@ -106,6 +122,7 @@ export const runSessionRunner = (
 		const beginExit = () => {
 			if (exiting) return;
 			exiting = true;
+			invalidateSourceDelivery();
 			idle?.close();
 			// Neither an absent server acknowledgement nor SDK disposal can hold exit.
 			exitDeadline = setTimeout(() => {
@@ -139,22 +156,35 @@ export const runSessionRunner = (
 		let activeCommands = 0;
 		let activeOutputs = 0;
 		let revision = 0;
+		let turnInFlight = false;
+		let reportedTurnInFlight: boolean | undefined;
 		let reportedQuiescent: boolean | undefined;
+		let sourceDelivery: RunnerSourceDelivery | undefined;
+		let sourceDeliveryInvalidated: Deferred.Deferred<void> | undefined;
+		let reportedDelivery: RunnerSourceDelivery | undefined;
+		let deliveryGeneration = 0;
+		let sourceSinkId: string | undefined;
 		let reportedSnapshot: RunnerUpgradeState["snapshot"];
 		let reportedResume: string | undefined;
 		let reportedConfiguration: RunnerUpgradeState["liveConfiguration"];
+		// A rebind check ignores the executing send's own command and turn.
+		const hostBusy = (ignoredCommands = 0) =>
+			activeCommands > ignoredCommands ||
+			activeOutputs > 0 ||
+			runner?.hasPendingSubagentFinalizers?.(sessionId) === true;
+		const isBackgroundBusy = (ignoredCommands = 0) =>
+			hostBusy(ignoredCommands) || idle?.isQuiescent(ignoredCommands) !== true;
 		const quiescent = () =>
 			!exiting &&
 			retirementInputId === undefined &&
 			!retiring &&
-			activeCommands === 0 &&
-			activeOutputs === 0 &&
-			!runner?.hasPendingSubagentFinalizers?.(sessionId) &&
-			idle?.quiescent === true;
+			!isBackgroundBusy();
 		const upgradeState = (): RunnerUpgradeState => ({
 			quiescent: quiescent(),
+			turnInFlight,
 			revision,
 			...launch.upgradeState(),
+			...(sourceDelivery ? { sourceDelivery } : {}),
 		});
 		const reportUpgradeState = () => {
 			const { snapshot, resumeSessionId, liveConfiguration, frozen } =
@@ -162,12 +192,16 @@ export const runSessionRunner = (
 			const quiet = quiescent();
 			if (
 				quiet === reportedQuiescent &&
+				sourceDelivery === reportedDelivery &&
+				turnInFlight === reportedTurnInFlight &&
 				snapshot === reportedSnapshot &&
 				resumeSessionId === reportedResume &&
 				liveConfiguration === reportedConfiguration
 			)
 				return;
 			reportedQuiescent = quiet;
+			reportedDelivery = sourceDelivery;
+			reportedTurnInFlight = turnInFlight;
 			const changedSnapshot = snapshot !== reportedSnapshot;
 			reportedSnapshot = snapshot;
 			reportedResume = resumeSessionId;
@@ -178,7 +212,9 @@ export const runSessionRunner = (
 					type: "upgrade-state",
 					state: {
 						quiescent: quiet,
+						turnInFlight,
 						revision,
+						...(sourceDelivery ? { sourceDelivery } : {}),
 						...(changedSnapshot && snapshot ? { snapshot } : {}),
 						...(resumeSessionId ? { resumeSessionId } : {}),
 						...(liveConfiguration ? { liveConfiguration } : {}),
@@ -186,15 +222,16 @@ export const runSessionRunner = (
 					},
 				});
 		};
+		const invalidateSourceDelivery = () => {
+			if (!sourceDelivery) return;
+			sourceDelivery = undefined;
+			const invalidated = sourceDeliveryInvalidated;
+			sourceDeliveryInvalidated = undefined;
+			if (invalidated) Deferred.doneUnsafe(invalidated, Effect.void);
+			reportUpgradeState();
+		};
 		const retireWhenQuiescent = () => {
-			if (
-				retirementInputId !== undefined &&
-				activeCommands === 0 &&
-				activeOutputs === 0 &&
-				!runner?.hasPendingSubagentFinalizers?.(sessionId) &&
-				idle?.quiescent === true
-			)
-				beginExit();
+			if (retirementInputId !== undefined && !isBackgroundBusy()) beginExit();
 		};
 		const launch = yield* makeLaunch({
 			sessionId,
@@ -207,10 +244,55 @@ export const runSessionRunner = (
 				retirementInputId = inputId;
 			},
 			isCandidate: () => role === "candidate",
+			isBackgroundBusy,
 			turnStateChanged: (inFlight) => {
+				turnInFlight = inFlight;
 				idle?.setTurnInFlight(inFlight);
 				reportUpgradeState();
 				if (!inFlight) retireWhenQuiescent();
+			},
+			sourceDelivery: (source) => {
+				const owner = sourceSinkId ? bindings.get(sourceSinkId) : undefined;
+				if (
+					source.sessionId !== sessionId ||
+					!sourceSinkId ||
+					!owner?.commandId ||
+					owner.sessionId !== source.sessionId ||
+					owner.inputId !== source.inputId ||
+					owner.runId !== source.runId
+				)
+					return;
+				const delivery: RunnerSourceDelivery = {
+					...source,
+					runnerId,
+					commandId: owner.commandId,
+					sinkId: sourceSinkId,
+					generation: ++deliveryGeneration,
+				};
+				const invalidated = Deferred.makeUnsafe<void>();
+				const previousInvalidated = sourceDeliveryInvalidated;
+				sourceDeliveryInvalidated = invalidated;
+				sourceDelivery = delivery;
+				if (previousInvalidated)
+					Deferred.doneUnsafe(previousInvalidated, Effect.void);
+				reportUpgradeState();
+				let finishing = false;
+				return () => {
+					if (sourceDelivery !== delivery || finishing) return;
+					finishing = true;
+					// Idle/release notices return before ACK, but their sequence is already allocated.
+					const acknowledged = spool.drainThroughEffect();
+					runFork(
+						Effect.raceFirst(acknowledged, Deferred.await(invalidated)).pipe(
+							Effect.tap(() =>
+								Effect.sync(() => {
+									// A late fence belongs to its old producer, never its successor.
+									if (sourceDelivery === delivery) invalidateSourceDelivery();
+								}),
+							),
+						),
+					);
+				};
 			},
 			readThread: (input) =>
 				connection && attached && !connection.closed
@@ -221,6 +303,8 @@ export const runSessionRunner = (
 			string,
 			{
 				sessionId: string;
+				inputId?: string;
+				runId?: string;
 				commandId?: string;
 				attempt?: number;
 				fallback?: boolean;
@@ -295,6 +379,21 @@ export const runSessionRunner = (
 												"sinkId" in output
 													? bindings.get(output.sinkId)
 													: undefined;
+											if (
+												binding &&
+												binding.sessionId === sessionId &&
+												output.type === "event" &&
+												output.event.sessionId === sessionId &&
+												output.event.type === "run.started" &&
+												typeof output.event.data === "object" &&
+												output.event.data !== null &&
+												"inputId" in output.event.data &&
+												output.event.data.inputId === binding.inputId &&
+												output.event.runId
+											) {
+												binding.runId = output.event.runId;
+												sourceSinkId = output.sinkId;
+											}
 											const runId =
 												output.type === "event"
 													? output.event.providerRefs.providerTurnId
@@ -348,13 +447,8 @@ export const runSessionRunner = (
 											? Number(process.env["CONDUIT_TEST_RUNNER_IDLE_DAY_MS"])
 											: undefined,
 										config.autoSettleAfterDays,
-										() =>
-											retiring ||
-											activeCommands > 0 ||
-											activeOutputs > 0 ||
-											runner?.hasPendingSubagentFinalizers?.(sessionId) ===
-												true ||
-											spool.hasHeldWork,
+										(ignoredTurns) =>
+											retiring || hostBusy(ignoredTurns) || spool.hasHeldWork,
 										config.daemonConfigDir,
 									);
 								}
@@ -390,6 +484,8 @@ export const runSessionRunner = (
 									process.env["CONDUIT_TEST_RUNNER_HELLO_WITHOUT_RUN_IDS"]
 										? {}
 										: { stampsRunIds: true as const }),
+									settlesAnswers: true,
+									attachmentRefs: true,
 									...(driverKind === "cursor" &&
 									!(
 										overrideHello &&
@@ -577,7 +673,6 @@ export const runSessionRunner = (
 						idle?.activity();
 						activeCommands++;
 						const deduplicationKey = `${message.commandId}:${message.attempt ?? 0}${command.type === "send-turn" && command.input.nativeResumeFallback ? ":native-resume-fallback" : ""}`;
-						launch.acceptCommand(command);
 						if (command.type === "send-turn") {
 							const binding = bindings.get(command.sinkId);
 							if (
@@ -588,6 +683,10 @@ export const runSessionRunner = (
 							)
 								bindings.set(command.sinkId, {
 									sessionId: command.input.sessionId,
+									inputId: command.input.inputId,
+									...(command.input.runId
+										? { runId: command.input.runId }
+										: {}),
 									commandId: message.commandId,
 									attempt: message.attempt ?? 0,
 									fallback: command.input.nativeResumeFallback === true,
@@ -621,7 +720,24 @@ export const runSessionRunner = (
 									);
 								if (!runner)
 									return yield* Effect.die("Runner is not initialized");
-								const execution = launch.executeEffect(runner, command);
+								const payloadRunner = runner;
+								const execution = Effect.gen(function* () {
+									// A waiting replacement could outlive a later abort.
+									if (
+										command.type === "send-turn" &&
+										sourceDeliveryInvalidated &&
+										launch.changesAccount?.(command)
+									)
+										return yield* Effect.fail({
+											operation: "send-turn",
+											code: "account_switch_busy",
+											retryable: true,
+											message:
+												"Source delivery did not finish before send admission. Resend the turn.",
+										});
+									launch.acceptCommand(command);
+									return yield* launch.executeEffect(payloadRunner, command);
+								});
 								const exit = yield* Effect.exit(
 									command.type === "send-turn" && sendJournal
 										? sendJournal.execute(

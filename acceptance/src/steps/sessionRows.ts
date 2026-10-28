@@ -18,6 +18,129 @@ const OPENCODE_ROW_ID = "row-opencode";
 
 export const sessionRowsHandlers: StepHandler[] = [
 	{
+		name: "seed textless Draft sidebar counts",
+		match:
+			/^the sidebar has a textless Draft with (\d+) images and (\d+) files$/,
+		run: async ({ world, match }) => {
+			const rows = [
+				{
+					draftId: "draft-label",
+					projectSlug: "myapp",
+					firstLine: "",
+					updatedAt: PINNED_CLOCK_MS,
+					imageCount: Number(match[1]),
+					fileCount: Number(match[2]),
+				},
+			];
+			const rpc = requireRpcControl(world.page);
+			await expect.poll(() => rpc.hasStream("SubscribeDrafts")).toBe(true);
+			rpc.sendChunk("SubscribeDrafts", [rows]);
+			if (!(await world.page.locator("#session-list").isVisible()))
+				await world.page.getByTestId("session-bar-back").click();
+		},
+	},
+	{
+		name: "textless Draft sidebar label",
+		match: /^the Draft sidebar label is (.+) with a paperclip$/,
+		run: async ({ world, match }) => {
+			const row = world.page.locator('[data-draft-id="draft-label"]');
+			await expect(row.locator("[title]")).toHaveAttribute(
+				"title",
+				match[1] ?? "",
+			);
+			await expect(row.getByTestId("draft-attachment-icon")).toBeVisible();
+		},
+	},
+	{
+		name: "seed Flow session states",
+		match: /^the sidebar has the Flow status fixture$/,
+		run: async ({ world }) => {
+			const rows: SessionInfo[] = (
+				["working", "done-unread", "idle"] as const
+			).map((attention) => ({
+				id: `flow-${attention}`,
+				title: `Flow ${attention}`,
+				accountId: null,
+				projectSlug: "myapp",
+				status: attention === "working" ? "busy" : "idle",
+				attention,
+				updatedAt: PINNED_CLOCK_MS,
+			}));
+			const rpc = requireRpcControl(world.page);
+			rpc.setShellRows(rows);
+			rpc.setStubs({
+				ListDaemonSessions: () => ({
+					sessions: rows,
+					availability: [],
+					hasMore: false,
+					nextCursor: null,
+				}),
+			});
+			if (!(await world.page.locator("#session-list").isVisible()))
+				await world.page.getByTestId("session-bar-back").click();
+		},
+	},
+	{
+		name: "assert Flow session states",
+		match: /^the Flow session glyphs distinguish running, unread and idle$/,
+		run: async ({ world }) => {
+			for (const [attention, variant] of [
+				["working", "running"],
+				["done-unread", "unread"],
+				["idle", "idle"],
+			] as const) {
+				const row = world.page.locator(
+					`.session-item[data-session-id="flow-${attention}"]`,
+				);
+				const glyph = row.locator(`[data-flow-glyph="${variant}"]`);
+				await expect(glyph).toBeVisible();
+				await expect(glyph).toHaveCSS("width", "16px");
+				await expect(glyph).toHaveCSS("height", "16px");
+				await expect(glyph.locator("[data-flow-packet]")).toHaveCount(
+					variant === "running" ? 1 : 0,
+				);
+			}
+			await expect(
+				world.page
+					.locator('[data-session-id="flow-done-unread"]')
+					.getByTestId("session-unread-dot"),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert static Running header",
+		match: /^the Running group Flow glyph stays still$/,
+		run: async ({ world }) => {
+			const glyph = world.page
+				.getByTestId("running-shelf-toggle")
+				.locator('[data-flow-glyph="running"]');
+			await expect(glyph).toBeVisible();
+			await expect(glyph.locator("[data-flow-packet]")).toHaveCSS(
+				"animation-name",
+				"none",
+			);
+		},
+	},
+	{
+		name: "reduce Flow motion",
+		match: /^the Flow motion preference is reduced$/,
+		run: async ({ world }) => {
+			await world.page.emulateMedia({ reducedMotion: "reduce" });
+		},
+	},
+	{
+		name: "assert static Flow packet",
+		match: /^the Flow session packet is a static highlight$/,
+		run: async ({ world }) => {
+			const packet = world.page.locator(
+				'[data-session-id="flow-working"] [data-flow-packet]',
+			);
+			await expect(packet).toHaveCSS("animation-name", "none");
+			await expect(packet).toHaveAttribute("stroke-dasharray", "30 100");
+			await expect(packet).toHaveCSS("stroke-dashoffset", "-30px");
+		},
+	},
+	{
 		name: "seed session groups",
 		match: /^the sidebar has the session group fixture$/,
 		run: async ({ world }) => {

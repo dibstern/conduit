@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
-import { DESKTOP_VIEWPORT } from "../playwrightDriver.js";
+import { DESKTOP_VIEWPORT, PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	openComposerMoreSheet,
@@ -21,7 +21,7 @@ const phoneRows = {
 	Account: "composer-more-account",
 	Model: "composer-more-model",
 	Effort: "composer-more-effort",
-	Mode: "composer-more-mode",
+	Permissions: "composer-more-mode",
 	Checkout: "composer-checkout",
 } as const;
 
@@ -57,8 +57,232 @@ const sessionIdOf = (page: Page): string => {
 
 export const composerFinalDesignHandlers: StepHandler[] = [
 	{
-		name: "assert pinned teal goal command",
-		match: /^the built-in menu pins \$goal first in teal$/,
+		name: "assert phone footer priority collapse across widths",
+		match:
+			/^the (idle|busy|auto-switch|goal|at-reset) phone footer fits at 320, 393 and 320 pixels$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const state = match[1] ?? "";
+			const hasOptions = state === "auto-switch" || state === "at-reset";
+			const expectedActions = hasOptions
+				? ["send", "composer-send-menu-trigger", "stop"]
+				: state === "idle"
+					? ["send"]
+					: ["send", "stop"];
+			const touch = await page.context().newCDPSession(page);
+			await touch.send("Emulation.setTouchEmulationEnabled", {
+				enabled: true,
+				maxTouchPoints: 1,
+			});
+			await touch.detach();
+			await page.evaluate(() => document.fonts.ready);
+			let initialFit: string | undefined;
+			for (const width of [320, 393, 320]) {
+				await world.driver.setViewport(page, { ...PHONE_VIEWPORT, width });
+				expect(page.viewportSize()).toEqual({
+					width,
+					height: PHONE_VIEWPORT.height,
+				});
+				expect(await page.evaluate(() => window.innerWidth)).toBe(width);
+				const layout = page.getByTestId("composer-layout");
+				await expect(layout).toHaveAttribute("data-footer-fit", /\S+/);
+				for (const control of [
+					page.locator("#attach-btn"),
+					layout.getByTestId("model-picker-trigger"),
+					layout.getByTestId("permission-mode-badge"),
+				])
+					await expect(control).toBeVisible();
+				await expect
+					.poll(() =>
+						layout.evaluate((element, expectedActions) => {
+							const frame = document.querySelector("#input-row");
+							const actions = Array.from(
+								element.querySelectorAll<HTMLElement>(
+									'#send, #stop, [data-testid="composer-send-menu-trigger"]',
+								),
+							);
+							if (!frame || !actions.length) return ["Missing footer actions"];
+							if (
+								actions
+									.map((action) => action.dataset["testid"] || action.id)
+									.join() !== expectedActions.join()
+							)
+								return ["Missing expected footer actions"];
+							const actionBoxes = actions.map((action) =>
+								action.getBoundingClientRect(),
+							);
+							const firstAction = actionBoxes[0];
+							if (!firstAction) return ["Missing Send action"];
+							const controls = Array.from(
+								element.querySelectorAll<HTMLElement>(
+									'#attach-btn, [data-testid="model-picker-trigger"], [data-testid="variant-badge"], [data-testid="permission-mode-badge"]',
+								),
+							);
+							const problems: string[] = [];
+							// Separate protocol reads can straddle a footer resize.
+							for (const [index, current] of actionBoxes.entries()) {
+								const previous = actionBoxes[index - 1];
+								if (!previous) continue;
+								const gap = actions[index]?.id === "stop" ? 5 : 0;
+								if (current.x - previous.right !== gap)
+									problems.push(
+										`Footer actions have a ${current.x - previous.right}px gap instead of ${gap}px`,
+									);
+							}
+							const targets = controls.flatMap((control) => {
+								if (!control.getClientRects().length) return [];
+								const body = control.getBoundingClientRect();
+								const before = getComputedStyle(control, "::before");
+								const targetWidth = Math.max(
+									body.width,
+									Number.parseFloat(before.minWidth) || 0,
+								);
+								const targetHeight = Math.max(
+									body.height,
+									Number.parseFloat(before.minHeight) || 0,
+								);
+								const clip =
+									Number.parseFloat(
+										control.style.getPropertyValue("--composer-target-clip"),
+									) || 0;
+								const targetLeft = body.x + (body.width - targetWidth) / 2;
+								const target = new DOMRect(
+									targetLeft,
+									body.y + (body.height - targetHeight) / 2,
+									Math.max(body.right, targetLeft + targetWidth - clip) -
+										targetLeft,
+									targetHeight,
+								);
+								const id = control.id || control.dataset["testid"] || "control";
+								if (target.height < 44 || (target.width < 44 && !clip))
+									problems.push(`${id} lost its touch target`);
+								if (
+									Math.abs(
+										body.y +
+											body.height / 2 -
+											firstAction.y -
+											firstAction.height / 2,
+									) > 0.5
+								)
+									problems.push(`${id} wrapped or lost row alignment`);
+								for (const action of actionBoxes) {
+									if (
+										target.left < action.right &&
+										target.right > action.left &&
+										target.top < action.bottom &&
+										target.bottom > action.top
+									)
+										problems.push(`${id} covers an action`);
+								}
+								return [{ id, target }];
+							});
+							for (const [index, current] of targets.entries()) {
+								const previous = targets[index - 1];
+								if (previous && previous.target.right > current.target.left)
+									problems.push(`${current.id} covers another footer target`);
+							}
+							const effort = element.querySelector<HTMLElement>(
+								'[data-testid="variant-badge"]',
+							);
+							const checkout = element.querySelector<HTMLElement>(
+								'[data-testid="composer-checkout"]',
+							);
+							if (targets.length < 3)
+								problems.push("A persistent footer control disappeared");
+							if (element.getAttribute("data-footer-fit") === "effort-hidden") {
+								if (
+									effort?.getClientRects().length ||
+									checkout?.getClientRects().length
+								)
+									problems.push("Effort collapsed before checkout");
+								// Reveal only for this synchronous measurement; the observer sees the restored state.
+								const modelMinimum = element.style.getPropertyValue(
+									"--composer-model-minimum",
+								);
+								const fit = element.getAttribute("data-footer-fit");
+								try {
+									element.style.setProperty("--composer-model-minimum", "88px");
+									element.setAttribute("data-footer-fit", "checkout-hidden");
+									const firstAction = Math.min(
+										...actions.map(
+											(action) => action.getBoundingClientRect().left,
+										),
+									);
+									const wouldOverlap = controls.some((control) => {
+										const body = control.getBoundingClientRect();
+										const targetWidth = Math.max(
+											body.width,
+											Number.parseFloat(
+												getComputedStyle(control, "::before").minWidth,
+											) || 0,
+										);
+										return (
+											body.x + (body.width + targetWidth) / 2 > firstAction
+										);
+									});
+									const wouldOverflow = actions.some(
+										(action) =>
+											action.getBoundingClientRect().right >
+											frame.getBoundingClientRect().right - 4,
+									);
+									if (!wouldOverlap && !wouldOverflow)
+										problems.push("Effort was hidden while it fit");
+								} finally {
+									if (fit === null) element.removeAttribute("data-footer-fit");
+									else element.setAttribute("data-footer-fit", fit);
+									if (modelMinimum)
+										element.style.setProperty(
+											"--composer-model-minimum",
+											modelMinimum,
+										);
+									else element.style.removeProperty("--composer-model-minimum");
+								}
+							} else if (!effort?.getClientRects().length)
+								problems.push("Effort is absent without a fit constraint");
+							if (
+								actionBoxes.some(
+									(action) =>
+										action.right > frame.getBoundingClientRect().right - 4,
+								)
+							)
+								problems.push("Actions overflow the footer gutter");
+							if (document.documentElement.scrollWidth > window.innerWidth)
+								problems.push("Footer causes horizontal scrolling");
+							return problems;
+						}, expectedActions),
+					)
+					.toEqual([]);
+				const fit = await layout.getAttribute("data-footer-fit");
+				if (initialFit === undefined) initialFit = fit ?? "";
+				else if (width === 320) expect(fit).toBe(initialFit);
+				if (width === 393 && state === "idle") {
+					await expect(layout.getByTestId("variant-badge")).toBeVisible();
+					await expect(layout).not.toHaveAttribute(
+						"data-footer-fit",
+						"effort-hidden",
+					);
+				}
+				const send = page.locator("#send");
+				const sendBox = await box(send);
+				expect(sendBox.height).toBe(34);
+				if (state === "goal") await expect(send).toHaveText("Set goal");
+				const options = layout.getByTestId("composer-send-menu-trigger");
+				if (hasOptions) {
+					const optionsBox = await box(options);
+					expect(optionsBox.width).toBe(28);
+					expect(optionsBox.height).toBe(34);
+					await expect(send).toHaveCSS("border-top-right-radius", "0px");
+					await expect(options).toHaveCSS("border-top-left-radius", "0px");
+				} else await expect(options).toHaveCount(0);
+				const stop = page.locator("#stop");
+				if (state === "idle") await expect(stop).toHaveCount(0);
+				else await expectSquare(stop, 34);
+			}
+		},
+	},
+	{
+		name: "assert pinned goal command with teal icon",
+		match: /^the built-in menu pins \$goal first with a teal icon$/,
 		run: async ({ world }) => {
 			const menu = world.page.getByRole("listbox", {
 				name: "Built-in commands",
@@ -71,21 +295,29 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			);
 			await expect
 				.poll(() =>
-					first.locator(".cmd-name").evaluate((element) => {
+					first.evaluate((element) => {
+						const icon = element.querySelector("svg");
+						const name = element.querySelector(".cmd-name");
+						if (!icon || !name) return false;
 						const probe = document.createElement("span");
 						probe.style.color = "var(--color-status-goal)";
 						element.append(probe);
-						const expected = getComputedStyle(probe).color;
+						const expectedIcon = getComputedStyle(probe).color;
+						probe.style.color = "var(--color-text)";
+						const expectedName = getComputedStyle(probe).color;
 						probe.remove();
-						return getComputedStyle(element).color === expected;
+						return (
+							getComputedStyle(icon).color === expectedIcon &&
+							getComputedStyle(name).color === expectedName
+						);
 					}),
 				)
 				.toBe(true);
 		},
 	},
 	{
-		name: "assert command menu spans composer",
-		match: /^the command menu spans the composer width$/,
+		name: "assert compact command menu fits composer",
+		match: /^the compact command menu fits the composer width$/,
 		run: async ({ world }) => {
 			await expect
 				.poll(async () => {
@@ -95,7 +327,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					const composer = await box(world.page.locator("#input-row"));
 					return (
 						Math.abs(menu.x - composer.x) <= 1 &&
-						Math.abs(menu.width - composer.width) <= 1
+						Math.abs(menu.width - Math.min(340, composer.width)) <= 1
 					);
 				})
 				.toBe(true);
@@ -148,7 +380,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	{
 		name: "tap phone composer sheet row",
 		match:
-			/^I tap the phone composer (Harness|Account|Model|Effort|Mode|Checkout) row$/,
+			/^I tap the phone composer (Harness|Account|Model|Effort|Permissions|Checkout) row$/,
 		run: async ({ world, match }) => {
 			await openComposerMoreSheet(world.page);
 			await world.page
@@ -168,14 +400,91 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert phone composer row value",
-		match: /^the phone composer (Account|Effort|Mode) row reads (.+)$/,
+		match: /^the phone composer (Account|Effort|Permissions) row reads (.+)$/,
 		run: async ({ world, match }) => {
 			const row = world.page
 				.getByTestId("composer-more-sheet")
-				.getByTestId(phoneRows[match[1] as "Effort" | "Mode"]);
+				.getByTestId(phoneRows[match[1] as "Effort" | "Permissions"]);
 			await expect(row.locator('[data-part="value"]')).toHaveText(
 				match[2] ?? "",
 			);
+		},
+	},
+	{
+		name: "activate inline phone footer control",
+		match: /^I (tap|hold) the phone footer (effort|checkout) control$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const cdp = await page.context().newCDPSession(page);
+			await cdp.send("Emulation.setTouchEmulationEnabled", {
+				enabled: true,
+				maxTouchPoints: 1,
+			});
+			const control = page.getByTestId(
+				match[2] === "effort" ? "variant-badge" : "composer-checkout",
+			);
+			await expect(control).toBeVisible();
+			await expect(control).toBeEnabled();
+			await expect(control).not.toHaveAttribute("aria-busy", "true");
+			const bounds = await box(control);
+			await cdp.send("Input.dispatchTouchEvent", {
+				type: "touchStart",
+				touchPoints: [
+					{
+						x: bounds.x + bounds.width / 2,
+						y: bounds.y + bounds.height / 2,
+					},
+				],
+			});
+			try {
+				if (match[1] === "hold") {
+					await expect(page.getByTestId("model-picker")).toBeVisible();
+				}
+			} finally {
+				await cdp.send("Input.dispatchTouchEvent", {
+					type: "touchEnd",
+					touchPoints: [],
+				});
+				await cdp.detach();
+			}
+		},
+	},
+	{
+		name: "assert inline phone effort meter label",
+		match: /^the phone footer effort meter names (.+)$/,
+		run: async ({ world, match }) => {
+			const effort = world.page.getByTestId("variant-badge");
+			await expect(effort).toHaveAccessibleName(
+				`Effort: ${match[1]}. Tap to raise; hold for options`,
+			);
+			await expect(effort.locator(".effort-meter")).toBeVisible();
+			await expect(effort).toHaveText("");
+		},
+	},
+	{
+		name: "assert inline phone checkout opens a bottom sheet",
+		match: /^the checkout menu is a phone bottom sheet$/,
+		run: async ({ world }) => {
+			const viewport = world.page.viewportSize();
+			if (!viewport || viewport.width >= 768)
+				throw new Error("Phone viewport is required");
+			const menu = world.page.getByTestId("composer-checkout-menu");
+			await expect(menu).toBeVisible();
+			await expect(
+				menu.getByRole("menuitem", { name: "Copy worktree path" }),
+			).toContainText("Worktree");
+			await expect(menu).toContainText("Tap a row to copy it.");
+			await expect(world.page.getByTestId("menu-sheet-scrim")).toBeVisible();
+			await expect
+				.poll(async () => {
+					const bounds = await box(menu);
+					return (
+						Math.abs(bounds.x) <= 1 &&
+						Math.abs(bounds.width - viewport.width) <= 2 &&
+						Math.abs(bounds.y + bounds.height - viewport.height) <= 2
+					);
+				})
+				.toBe(true);
 		},
 	},
 	{
@@ -190,12 +499,9 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			);
 			await expect(layout.getByTestId("permission-mode-badge")).toBeVisible();
 			await expect(layout.getByTestId("permission-mode-badge")).toHaveText("");
-			for (const id of [
-				"composer-more",
-				"variant-badge",
-				"composer-harness-trigger",
-				"composer-checkout",
-			])
+			await expect(layout.getByTestId("variant-badge")).toBeVisible();
+			await expect(layout.getByTestId("variant-badge")).toHaveText("");
+			for (const id of ["composer-more", "composer-harness-trigger"])
 				await expect(layout.getByTestId(id)).toHaveCount(0);
 			const input = await box(world.page.locator("#input"));
 			const model = await box(layout.getByTestId("model-picker-trigger"));
@@ -210,7 +516,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	{
 		name: "assert phone composer sheet rows and geometry",
 		match:
-			/^the phone composer sheet has separate Harness, Account, Model, Effort, Mode and Checkout rows$/,
+			/^the phone composer sheet has separate Harness, Account, Model, Effort, Permissions and Checkout rows$/,
 		run: async ({ world }) => {
 			const sheet = world.page.getByTestId("composer-more-sheet");
 			await expect(
@@ -277,12 +583,13 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert phone sheet remains under its menu",
-		match: /^the phone composer sheet keeps the (Mode|Checkout) menu above it$/,
+		match:
+			/^the phone composer sheet keeps the (Permissions|Checkout) menu above it$/,
 		run: async ({ world, match }) => {
 			await expect(world.page.getByTestId("composer-more-sheet")).toBeVisible();
 			await expect(
 				world.page.getByTestId(
-					match[1] === "Mode"
+					match[1] === "Permissions"
 						? "permission-mode-dropdown"
 						: "composer-checkout-menu",
 				),
@@ -300,7 +607,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(shield).toBeVisible();
 			await expect(shield).toHaveAttribute(
 				"aria-label",
-				new RegExp(`Approvals.*${match[1]}`),
+				new RegExp(`Permissions.*${match[1]}`),
 			);
 			await expect(shield).toHaveText("");
 			await expect(shield.locator("svg")).toHaveCount(1);
@@ -431,12 +738,18 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "tap desktop icons control",
-		match: /^I tap the icons (harness|model|effort|mode) control$/,
+		name: "activate desktop icons control",
+		match:
+			/^I (tap|open options from) the icons (harness|model|effort|mode) control$/,
 		run: async ({ world, match }) => {
 			await world.page
-				.getByTestId(iconsControls[match[1] as keyof typeof iconsControls])
-				.click();
+				.getByTestId(iconsControls[match[2] as keyof typeof iconsControls])
+				.click({
+					modifiers:
+						match[1] === "open options from" && match[2] === "effort"
+							? ["Alt"]
+							: [],
+				});
 		},
 	},
 	{
@@ -615,7 +928,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(mode).toHaveText("");
 			await expect(mode).toHaveAttribute(
 				"aria-label",
-				new RegExp(`Approvals.*${match[1]}`),
+				new RegExp(`Permissions.*${match[1]}`),
 			);
 		},
 	},

@@ -68,6 +68,11 @@ function tool(
 		name,
 		input,
 		status,
+		...(status === "error"
+			? { outcome: "failed" as const }
+			: status === "completed"
+				? { outcome: "succeeded" as const }
+				: {}),
 		...(result !== undefined ? { result } : {}),
 		isError: opts.error ?? false,
 		createdAt: stamp(opts.ms ?? 900),

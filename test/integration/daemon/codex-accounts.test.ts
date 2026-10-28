@@ -137,6 +137,11 @@ describe("Codex accounts through the built daemon and detached runners", () => {
 			_tag: "AddInstance",
 			name,
 			driver: "codex",
+			env: {
+				NODE_ENV: "test",
+				CONDUIT_TEST_CODEX_TRACE_MAP: mapPath,
+				CONDUIT_TEST_CODEX_TRANSPORTS: transportPath,
+			},
 			...(folder ? { configDir: folder } : {}),
 		});
 		if (!added.addedInstanceId) throw new Error("Missing named Codex account");

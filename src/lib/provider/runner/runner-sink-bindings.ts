@@ -9,6 +9,7 @@ import type {
 	EventSink,
 	PermissionDecision,
 	PermissionResponse,
+	QuestionRequest,
 } from "../types.js";
 import type {
 	SessionCommand,
@@ -50,7 +51,13 @@ export class RunnerSinkBindings {
 			>;
 			readonly questions: Map<
 				string,
-				Deferred.Deferred<Record<string, unknown>, SessionFailure>
+				{
+					readonly deferred: Deferred.Deferred<
+						Record<string, unknown>,
+						SessionFailure
+					>;
+					readonly questions: QuestionRequest["questions"];
+				}
 			>;
 			references: number;
 		}
@@ -175,7 +182,13 @@ export class RunnerSinkBindings {
 		>();
 		const questions = new Map<
 			string,
-			Deferred.Deferred<Record<string, unknown>, SessionFailure>
+			{
+				readonly deferred: Deferred.Deferred<
+					Record<string, unknown>,
+					SessionFailure
+				>;
+				readonly questions: QuestionRequest["questions"];
+			}
 		>();
 		const sinkFailure = (cause: SessionFailure) =>
 			new EventSinkIngestionError({
@@ -224,7 +237,10 @@ export class RunnerSinkBindings {
 						Record<string, unknown>,
 						SessionFailure
 					>();
-					questions.set(request.requestId, deferred);
+					questions.set(request.requestId, {
+						deferred,
+						questions: request.questions,
+					});
 					return yield* emit({
 						type: "question-request",
 						sinkId,
@@ -250,7 +266,19 @@ export class RunnerSinkBindings {
 			resolvePermission: (requestId, response) =>
 				emit({ type: "resolve-permission", sinkId, requestId, response }),
 			resolveQuestion: (requestId, answers) =>
-				emit({ type: "resolve-question", sinkId, requestId, answers }),
+				emit({
+					type: "resolve-question",
+					sinkId,
+					requestId,
+					answers: Object.fromEntries(
+						Object.entries(answers).map(([index, answer]) => [
+							index,
+							questions.get(requestId)?.questions[Number(index)]?.isSecret
+								? "[redacted]"
+								: answer,
+						]),
+					),
+				}),
 			cancelSessionInteractions: (reason, options) =>
 				emit({
 					type: "cancel-interactions",
@@ -270,7 +298,7 @@ export class RunnerSinkBindings {
 						Effect.forEach(
 							questions.values(),
 							(pending) =>
-								Deferred.fail(pending, {
+								Deferred.fail(pending.deferred, {
 									operation: "requestQuestion",
 									message: reason,
 								}),
@@ -338,7 +366,7 @@ export class RunnerSinkBindings {
 				yield* Deferred.succeed(pending, { decision: "reject" });
 			}
 			for (const pending of binding.questions.values()) {
-				yield* Deferred.fail(pending, {
+				yield* Deferred.fail(pending.deferred, {
 					operation: "requestQuestion",
 					message: binding.abortController.signal.aborted
 						? "Turn interrupted"
@@ -386,7 +414,8 @@ export class RunnerSinkBindings {
 					const pending = this.sinkBindings
 						.get(command.sinkId)
 						?.questions.get(command.requestId);
-					if (pending) yield* Deferred.succeed(pending, command.answers);
+					if (pending)
+						yield* Deferred.succeed(pending.deferred, command.answers);
 					return;
 				}
 				case "interaction-failed": {
@@ -396,7 +425,8 @@ export class RunnerSinkBindings {
 						if (pending) yield* Deferred.fail(pending, command.failure);
 					} else {
 						const pending = binding?.questions.get(command.requestId);
-						if (pending) yield* Deferred.fail(pending, command.failure);
+						if (pending)
+							yield* Deferred.fail(pending.deferred, command.failure);
 					}
 					return;
 				}
@@ -453,11 +483,12 @@ export class RunnerSinkBindings {
 			const waiter = binding.questions.get(requestId);
 			if (waiter) {
 				if (operation === "reject")
-					yield* Deferred.fail(waiter, {
+					yield* Deferred.fail(waiter.deferred, {
 						operation: "requestQuestion",
+						code: "question_rejected",
 						message: "Question rejected",
 					});
-				else yield* Deferred.succeed(waiter, answers);
+				else yield* Deferred.succeed(waiter.deferred, answers);
 			}
 			return true;
 		});

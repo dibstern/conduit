@@ -98,6 +98,40 @@ const models = [
 			combinations: gptCombinations,
 		},
 	},
+	{
+		id: "title-order-probe",
+		name: "Title order probe",
+		provider: "cursor",
+		parameters: {
+			rows: [
+				{
+					id: "reasoning_effort",
+					label: "Reasoning effort",
+					values: ["low", "medium", "high"].map((value) => ({
+						value,
+						label: value,
+					})),
+				},
+			],
+			combinations: [
+				{
+					variant: "medium",
+					values: { reasoning_effort: "medium" },
+					isDefault: false,
+				},
+				{
+					variant: "high",
+					values: { reasoning_effort: "high" },
+					isDefault: true,
+				},
+				{
+					variant: "low",
+					values: { reasoning_effort: "low" },
+					isDefault: false,
+				},
+			],
+		},
+	},
 ].map((model) => ({
 	...model,
 	variants: model.parameters.combinations.map(({ variant }) => variant),
@@ -113,6 +147,33 @@ const rowValues = (text: string, separator: string) =>
 
 export const cursorModelParametersHandlers: StepHandler[] = [
 	{
+		name: "prepare empty Cursor title choice",
+		match: /^Cursor titles use the default choice for (\S+)$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setProjectSetting({
+				_tag: "titleGeneration",
+				selection: {
+					account: { _tag: "Id", id: "cursor-work" },
+					providerId: "cursor",
+					modelId: match[1] ?? "",
+					effort: "",
+				},
+				status: "unverified",
+			});
+		},
+	},
+	{
+		name: "assert empty Cursor title choice uses cheapest",
+		match: /^the empty Cursor title choice shows effort=(\S+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.getByTestId("title-generation-picker")
+					.getByTestId(`picker-effort-option-${match[1]}`),
+			).toHaveAttribute("aria-checked", "true");
+		},
+	},
+	{
 		name: "assert Cursor effort chip labels",
 		match:
 			/^the Cursor effort chip describes (.+) instead of combination (.+)$/,
@@ -121,11 +182,11 @@ export const cursorModelParametersHandlers: StepHandler[] = [
 			await expect(chip).toHaveText(match[1] ?? "");
 			await expect(chip).toHaveAttribute(
 				"aria-label",
-				`Effort: ${match[1]}. Open effort options`,
+				`Effort: ${match[1]}. Click to raise; Option-click for options`,
 			);
 			await expect(chip).toHaveAttribute(
 				"title",
-				`Effort ${match[1]}. Ctrl+T to cycle`,
+				`Effort ${match[1]}. Click or Ctrl+T to raise; Option-click for options`,
 			);
 			await expect(chip).not.toContainText(match[2] ?? "");
 		},
@@ -228,7 +289,7 @@ export const cursorModelParametersHandlers: StepHandler[] = [
 				opencode: { status: "missing" },
 				cursor: {
 					status: "invalid",
-					problem: "EffortNotOffered",
+					problem: "ModelParametersUnavailable",
 					pick: {
 						providerId: "cursor",
 						modelId: "grok-4.7",

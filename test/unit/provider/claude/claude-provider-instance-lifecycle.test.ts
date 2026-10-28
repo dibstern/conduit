@@ -179,7 +179,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(resolvedWith).toContain("reject");
 		});
 
-		it("rejects pending questions on shutdown", async () => {
+		it("leaves pending questions recoverable on shutdown", async () => {
 			const instance = makeTestClaudeProviderInstance({});
 			const rejected: Error[] = [];
 			const pending: PendingQuestion = {
@@ -197,8 +197,9 @@ describe("ClaudeProviderInstance lifecycle", () => {
 
 			await Effect.runPromise(instance.shutdownEffect());
 
-			expect(rejected).toHaveLength(1);
-			expect(rejected[0]?.message).toContain("shutting down");
+			// A rejection would record a denial; the next runner answers instead.
+			expect(rejected).toHaveLength(0);
+			expect(ctx.pendingQuestions.size).toBe(0);
 		});
 
 		it("is idempotent for already-stopped sessions", async () => {

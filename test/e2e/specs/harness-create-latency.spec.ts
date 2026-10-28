@@ -8,6 +8,7 @@ import {
 	HEAVY_SESSION_ID,
 	seedSessionLoadFixture,
 } from "../../fixtures/session-load.js";
+import { find } from "../helpers/detail-wire.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -695,6 +696,9 @@ test("overflow catches up every sidebar through create and delete bursts", async
 	let phaseEnd: number | null = null;
 	let metricsFlushedAt: number | null = null;
 	let backgroundTicks = 0;
+	let holdingAcknowledgements = false;
+	let heldAcknowledgements = 0;
+	const releaseAcknowledgements: (() => void)[] = [];
 	try {
 		await harness.terminate();
 		await seedSessionLoadFixture(harness.daemonStorePath(), {
@@ -738,6 +742,41 @@ test("overflow catches up every sidebar through create and delete bursts", async
 				isMobile: false,
 			});
 			contexts.push(context);
+			await context.routeWebSocket(
+				(url) => url.pathname === "/rpc",
+				(socket) => {
+					const server = socket.connectToServer();
+					const shellRequests = new Set<string>();
+					socket.onMessage((message) => {
+						const frame: unknown = JSON.parse(String(message));
+						for (const request of find(
+							frame,
+							(value) =>
+								"_tag" in value &&
+								value._tag === "Request" &&
+								"tag" in value &&
+								value.tag === "SubscribeShell",
+						)) {
+							if ("id" in request) shellRequests.add(String(request.id));
+						}
+						if (
+							holdingAcknowledgements &&
+							find(
+								frame,
+								(value) =>
+									"_tag" in value &&
+									value._tag === "Ack" &&
+									"requestId" in value &&
+									shellRequests.has(String(value.requestId)),
+							).length > 0
+						) {
+							heldAcknowledgements++;
+							releaseAcknowledgements.push(() => server.send(message));
+						} else server.send(message);
+					});
+					server.onMessage((message) => socket.send(message));
+				},
+			);
 			const page = await context.newPage();
 			pages[device] = page;
 			await new AppPage(page).goto(
@@ -770,6 +809,9 @@ test("overflow catches up every sidebar through create and delete bursts", async
 				.toBeGreaterThan(setupRenderedAt);
 			const beforeTicks = ticks();
 			phaseStart = now();
+			// Withhold shell delivery acknowledgements throughout the burst, so a
+			// fast client cannot drain the capacity-one advance bus between commits.
+			holdingAcknowledgements = true;
 			await Promise.all(
 				Array.from({ length: 20 }, async (_, index) => {
 					const title = `Overflow ${index}: ${randomUUID()}`;
@@ -793,6 +835,9 @@ test("overflow catches up every sidebar through create and delete bursts", async
 					created.push({ id: reply.sessionId, title });
 				}),
 			);
+			await expect
+				.poll(() => heldAcknowledgements)
+				.toBeGreaterThanOrEqual(devices.length);
 			deleted = created.slice(0, 5);
 			surviving = created.slice(5);
 			await Promise.all(
@@ -807,6 +852,8 @@ test("overflow catches up every sidebar through create and delete bursts", async
 					),
 				),
 			);
+			holdingAcknowledgements = false;
+			for (const release of releaseAcknowledgements.splice(0)) release();
 			await Promise.all(
 				devices.map(async (device) => {
 					const page = pages[device.device];
@@ -857,6 +904,8 @@ test("overflow catches up every sidebar through create and delete bursts", async
 			database.close();
 		}
 	} finally {
+		holdingAcknowledgements = false;
+		for (const release of releaseAcknowledgements.splice(0)) release();
 		phaseEnd = now();
 		if (phaseStart !== null) {
 			try {
@@ -910,6 +959,7 @@ test("overflow catches up every sidebar through create and delete bursts", async
 						creates: 20,
 						deletes: 5,
 						advanceBusCapacity: 1,
+						heldAcknowledgements,
 					},
 					phaseStart,
 					phaseEnd,

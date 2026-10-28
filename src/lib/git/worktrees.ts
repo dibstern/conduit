@@ -1,15 +1,12 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
-import { promisify } from "node:util";
 import { Effect } from "effect";
 import {
 	WorkspaceMoveError,
 	type WorktreeInfo,
 } from "../contracts/session-workspace.js";
-
-const execFileAsync = promisify(execFile);
+import { Subprocess } from "../domain/daemon/Services/subprocess.js";
 
 export const realWorkspacePath = (path: string) =>
 	Effect.tryPromise({
@@ -18,27 +15,68 @@ export const realWorkspacePath = (path: string) =>
 	});
 
 const git = (directory: string, ...args: string[]) =>
-	Effect.tryPromise({
-		try: () => {
-			const env: NodeJS.ProcessEnv = {
-				...process.env,
-				GIT_OPTIONAL_LOCKS: "0",
-			};
-			for (const key of [
-				"GIT_DIR",
-				"GIT_INDEX_FILE",
-				"GIT_WORK_TREE",
-				"GIT_COMMON_DIR",
-			])
-				delete env[key];
-			return execFileAsync("git", args, {
-				cwd: directory,
-				env,
-				timeout: 2_000,
+	Effect.gen(function* () {
+		const owner = yield* Subprocess;
+		const env: NodeJS.ProcessEnv = {
+			...process.env,
+			GIT_OPTIONAL_LOCKS: "0",
+		};
+		for (const key of [
+			"GIT_DIR",
+			"GIT_INDEX_FILE",
+			"GIT_WORK_TREE",
+			"GIT_COMMON_DIR",
+		])
+			delete env[key];
+		const result = yield* owner.run("git", args, {
+			cwd: directory,
+			env,
+			timeoutMs: 2_000,
+		});
+		if (result.exitCode !== 0)
+			return yield* new WorkspaceMoveError({
+				path: directory,
+				reason: "not-a-worktree",
 			});
-		},
-		catch: () =>
-			new WorkspaceMoveError({ path: directory, reason: "not-a-worktree" }),
+		return result;
+	}).pipe(
+		Effect.mapError(
+			() =>
+				new WorkspaceMoveError({ path: directory, reason: "not-a-worktree" }),
+		),
+	);
+
+/** Fresh local refs and ancestry for a destructive cleanup recheck. Never fetch. */
+export const hasNoCommitsBeyondDefault = (directory: string, head: string) =>
+	Effect.gen(function* () {
+		const refs = yield* git(
+			directory,
+			"for-each-ref",
+			"--format=%(refname) %(symref) %(objecttype)",
+			"refs/remotes/origin/HEAD",
+			"refs/heads/main",
+			"refs/heads/master",
+		).pipe(Effect.option);
+		if (refs._tag === "None") return false;
+		const candidates = refs.value.stdout.split("\n").flatMap((line) => {
+			const [ref, symref, type] = line.split(" ");
+			if (type !== "commit") return [];
+			if (ref === "refs/remotes/origin/HEAD") return symref ? [symref] : [];
+			return ref === "refs/heads/main" || ref === "refs/heads/master"
+				? [ref]
+				: [];
+		});
+		for (const ref of candidates) {
+			const ancestor = yield* git(
+				directory,
+				"merge-base",
+				"--is-ancestor",
+				head,
+				ref,
+			).pipe(Effect.option);
+			if (ancestor._tag === "Some") return true;
+		}
+		return false;
 	});
 
 /** The primary folder's local branch names, without tags or remote refs. */

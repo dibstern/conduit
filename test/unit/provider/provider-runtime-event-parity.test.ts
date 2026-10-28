@@ -63,6 +63,28 @@ function stateEntries(state: ProviderRuntimeDomainMapperState) {
 }
 
 describe("translateProviderRuntimeEventToDomain", () => {
+	it.each([
+		"succeeded",
+		"failed",
+	] as const)("preserves the typed %s tool outcome", (outcome) => {
+		const { events } = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "tool-outcome",
+				type: "tool.completed",
+				data: {
+					messageId: "message",
+					partId: "tool",
+					result: "result",
+					duration: 1,
+					outcome,
+				},
+			}),
+		);
+		expect(
+			events.find(({ type }) => type === "tool.completed")?.data,
+		).toMatchObject({ outcome });
+	});
+
 	it("retains accepted run ownership and input identity without inferring an owner", () => {
 		const accepted = translateProviderRuntimeEventToDomain(
 			runtimeEvent({
@@ -567,6 +589,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 	});
 
 	it("maps runtime file.attached to durable file.attached", () => {
+		const source = { attachmentHash: "a".repeat(64), mime: "image/png" };
 		const { events } = translateProviderRuntimeEventToDomain(
 			runtimeEvent({
 				eventId: "file-attached",
@@ -576,7 +599,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 					partId: "file-1",
 					mime: "image/png",
 					filename: "screenshot.png",
-					url: "data:image/png;base64,AAAA",
+					source,
 				},
 			}),
 		);
@@ -590,7 +613,7 @@ describe("translateProviderRuntimeEventToDomain", () => {
 					partId: "file-1",
 					mime: "image/png",
 					filename: "screenshot.png",
-					url: "data:image/png;base64,AAAA",
+					source,
 				},
 			}),
 		]);

@@ -70,6 +70,15 @@ For Cursor, `pin` moves the SDK and its five helpers (`optionalDependencies`) to
 
 `node $U gates` runs check, lint, unit and contract; `--live` adds build and the real-SDK E2E tests, which spend real tokens with your login. `--dry-run` prints the commands. Every gate runs even after one fails; failing logs' tails are printed.
 
+Cursor's `cursor-sdk-contract` gate always runs the offline real-SDK skill differential,
+stored-login credential rows and error-class/code table in `test/e2e/provider/cursor-{skills,credentials,errors}-real-sdk.test.ts`.
+Credential rows compare only backend match and expiry, observing Authorization at a loopback
+`CURSOR_BACKEND_URL` in child processes with a temporary HOME. Conduit passes its resolved key
+explicitly; SDK key precedence is outside this contract. The empty-key row pins Conduit's
+deliberate fall-through where the SDK throws. The paid skill-activation smoke stays opt-in.
+The gates require the installed `@cursor/sdk` optional dependency even with `--dry-run`;
+a missing SDK is a failure. Run these rows on every Cursor upgrade, without `--live`.
+
 - The contract suite needs the exact npm `opencode` build matching `.opencode-version` first on PATH, not the brew one; the script installs and checks it.
 - An auth failure ("OAuth session expired") is the login, not the bump. Confirm by running one turn directly against the new SDK outside the harness, then ask the user to log in. Leave credentials and keychains alone.
 - For any other failure, run the same gate on an untouched worktree at the base commit (`node $U gates --root <that worktree>`). Fixing what fails there too is a separate bead.

@@ -7,6 +7,9 @@ export interface ResolvedProjectContext {
 	readonly mainFolder: string;
 	readonly extraFolders: readonly string[];
 	readonly shellEnv: Readonly<Record<string, string | undefined>>;
+	readonly shellConfig?:
+		| import("../../../contracts/project-shell-env.js").ProjectShellEnvConfig
+		| undefined;
 }
 
 export interface ProjectContextOptions {

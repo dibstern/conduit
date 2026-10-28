@@ -19,11 +19,14 @@ import {
 	type PersistenceStoreContext,
 } from "../../src/lib/persistence/effect/live.js";
 import type { ClaudeProviderInstanceDeps } from "../../src/lib/provider/claude/claude-provider-runtime.js";
+import { CursorAccountResources } from "../../src/lib/provider/cursor/cursor-account-resources.js";
+import { createCursorSdkPort } from "../../src/lib/provider/cursor/cursor-sdk.js";
 import {
 	makeOrchestrationRuntimeLayer,
 	type OrchestrationRuntimeLayerOptions,
 } from "../../src/lib/provider/orchestration-wiring.js";
 import type { ProjectRelayConfig } from "../../src/lib/types.js";
+import { cursorAccountResourcesFixture } from "./cursor-account-resources-fixture.js";
 
 export interface TestAdapterOptions {
 	readonly configDir?: string;
@@ -53,6 +56,15 @@ export function makeTestProviderAdaptersLayer(
 	}).pipe(
 		Layer.provideMerge(
 			Layer.mergeAll(
+				Layer.effect(
+					CursorAccountResources,
+					Effect.gen(function* () {
+						const shared = yield* Effect.serviceOption(CursorAccountResources);
+						return Option.isSome(shared)
+							? shared.value
+							: cursorAccountResourcesFixture(createCursorSdkPort());
+					}),
+				),
 				Layer.effect(
 					DaemonConfigRefTag,
 					Effect.gen(function* () {

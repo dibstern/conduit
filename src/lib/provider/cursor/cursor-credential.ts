@@ -1,51 +1,108 @@
 import { createHash } from "node:crypto";
-import type { CursorCredential, CursorSdkPort } from "./sdk-port.js";
+import { Redacted, Schema } from "effect";
+import type { CursorAccount } from "../../contracts/account.js";
+import type { CursorStoredCredential } from "./sdk-port.js";
 
-export function cursorEnvironmentKey(
-	port: CursorSdkPort,
-	env: Readonly<Record<string, string | undefined>> = process.env,
-): string | undefined {
-	// Replay never consumes a developer's real credential.
-	return !port.replay ||
-		(env["NODE_ENV"] === "test" &&
-			env["CURSOR_API_KEY"] === "[REDACTED:environment]")
-		? env["CURSOR_API_KEY"]?.trim()
-		: undefined;
-}
+export const CursorBackendUrl = Schema.String.pipe(
+	Schema.brand("CursorBackendUrl"),
+);
+export type CursorBackendUrl = typeof CursorBackendUrl.Type;
+export const cursorBackendUrl = (url: string): CursorBackendUrl =>
+	CursorBackendUrl.make(url.replace(/\/+$/, ""));
 
-export async function resolveCursorCredential(
-	port: CursorSdkPort,
-	env: Readonly<Record<string, string | undefined>> = process.env,
-): Promise<CursorCredential | undefined> {
-	const environmentKey = cursorEnvironmentKey(port, env);
-	const stored = environmentKey ? undefined : await port.storedCredential();
-	if (
-		!environmentKey &&
-		(!stored ||
-			(stored.apiKeyExpiresAtMs !== undefined &&
-				stored.apiKeyExpiresAtMs <= Date.now()))
-	) {
-		return undefined;
+export const CursorCredentialFingerprint = Schema.String.pipe(
+	Schema.brand("CursorCredentialFingerprint"),
+);
+export type CursorCredentialFingerprint =
+	typeof CursorCredentialFingerprint.Type;
+
+export type CursorCredentialOwner =
+	| {
+			readonly _tag: "Account";
+			readonly account: CursorAccount;
+			readonly launchEnv: boolean;
+	  }
+	| { readonly _tag: "LoginSlot" };
+
+export const CursorCredentialEnvelope = Schema.Struct({
+	fingerprint: CursorCredentialFingerprint,
+	backendUrl: CursorBackendUrl,
+	apiKey: Schema.Redacted(Schema.String),
+});
+export type CursorCredentialEnvelope = typeof CursorCredentialEnvelope.Type;
+export type CursorCredential = CursorCredentialEnvelope & {
+	readonly source: "environment" | "sdk-login";
+	readonly email?: string;
+	readonly apiKeyExpiresAtMs?: number;
+};
+
+export type CursorCredentialLookup =
+	| { readonly _tag: "Ready"; readonly credential: CursorCredential }
+	| { readonly _tag: "LoggedOut" }
+	| { readonly _tag: "Expired" }
+	| {
+			readonly _tag: "OtherBackend";
+			readonly loginBackendUrl: CursorBackendUrl;
+			readonly activeBackendUrl: CursorBackendUrl;
+	  };
+
+export function resolveCursorCredential(
+	envKey: string | undefined,
+	stored: CursorStoredCredential | undefined,
+	activeBackend: CursorBackendUrl,
+	now: number,
+): CursorCredentialLookup {
+	const environmentKey = envKey?.trim();
+	if (!environmentKey) {
+		if (!stored?.apiKey) return { _tag: "LoggedOut" };
+		if (
+			stored.apiKeyExpiresAtMs !== undefined &&
+			stored.apiKeyExpiresAtMs <= now
+		)
+			return { _tag: "Expired" };
+		const loginBackendUrl = cursorBackendUrl(stored.backendUrl);
+		if (loginBackendUrl !== activeBackend)
+			return {
+				_tag: "OtherBackend",
+				loginBackendUrl,
+				activeBackendUrl: activeBackend,
+			};
 	}
 	const apiKey = environmentKey || stored?.apiKey;
-	if (!apiKey) return undefined;
-	const credential = {
-		source: environmentKey ? "environment" : "sdk-login",
-		fingerprint: createHash("sha256")
-			.update(
-				JSON.stringify([
-					environmentKey ? "environment" : "sdk-login",
-					stored?.backendUrl ?? "",
-					apiKey,
-				]),
-			)
-			.digest("hex"),
-		...(!environmentKey && stored ? { backendUrl: stored.backendUrl } : {}),
-	} as CursorCredential;
-	// Accidental JSON/log serialization must not expose the credential.
-	Object.defineProperty(credential, "apiKey", {
-		value: apiKey,
-		enumerable: false,
-	});
-	return Object.freeze(credential);
+	if (!apiKey) return { _tag: "LoggedOut" };
+	const source = environmentKey ? "environment" : "sdk-login";
+	return {
+		_tag: "Ready",
+		credential: Object.freeze({
+			source,
+			fingerprint: CursorCredentialFingerprint.make(
+				createHash("sha256")
+					.update(JSON.stringify([source, activeBackend, apiKey]))
+					.digest("hex"),
+			),
+			backendUrl: activeBackend,
+			apiKey: Redacted.make(apiKey),
+			...(!environmentKey && stored
+				? {
+						...(stored.email === undefined ? {} : { email: stored.email }),
+						...(stored.apiKeyExpiresAtMs === undefined
+							? {}
+							: { apiKeyExpiresAtMs: stored.apiKeyExpiresAtMs }),
+					}
+				: {}),
+		}),
+	};
+}
+
+export function cursorCredentialMessage(
+	lookup: Exclude<CursorCredentialLookup, { _tag: "Ready" }>,
+): string {
+	switch (lookup._tag) {
+		case "LoggedOut":
+			return "Cursor authentication required. Log in to Cursor in Settings.";
+		case "Expired":
+			return "Cursor login has expired. Log in to Cursor in Settings.";
+		case "OtherBackend":
+			return `Cursor login is for ${lookup.loginBackendUrl}, but the active backend is ${lookup.activeBackendUrl}. Log in to Cursor in Settings. Logging in replaces the stored login for ${lookup.loginBackendUrl}.`;
+	}
 }

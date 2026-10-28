@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick, type Snippet } from "svelte";
+	import { on } from "svelte/events";
 	import type { PendingReveal } from "../../stores/turn-panel.svelte.js";
 	import type { TurnLogEntry, TurnPhase } from "../../utils/turns.js";
 	import Button from "../ui/Button.svelte";
@@ -35,10 +36,15 @@
 		if (before === undefined || mode !== "shown" || pending || !row?.isConnected || !scroller?.isConnected) return;
 		scroller.scrollTop += row.getBoundingClientRect().top - before;
 	}
+
+	// Safari only paints :active when a touch listener covers the target.
+	function enableTouchActive(node: HTMLDivElement) {
+		return { destroy: on(node, "touchstart", () => {}, { passive: true }) };
+	}
 </script>
 
 {#if mode !== "collapsed" && (logMounted || mode === "shown")}
-	<div bind:this={logEl} class={className} role="region" aria-label={`Turn log, ${stepCount} steps`} hidden={mode === "hidden"} data-testid={phase !== "settled" ? "turn-live-activity" : undefined}>
+	<div bind:this={logEl} class={className} use:enableTouchActive role="region" aria-label={`Turn log, ${stepCount} steps`} hidden={mode === "hidden"} data-testid={phase !== "settled" ? "turn-live-activity" : undefined}>
 		{#if phase !== "settled" && earlierCount > 0}
 			<Button variant="ghost" size="content" tone="secondary" hoverFill="none" align="start" touchTarget
 				class="px-[6px] py-[7px] text-[12px]" aria-expanded={rowMode === "all"} onclick={toggleEarlier}>{rowMode === "ticker" ? `+ ${earlierCount} earlier steps` : "Hide earlier steps"}</Button>
@@ -48,3 +54,7 @@
 		{/each}
 	</div>
 {/if}
+
+<style>
+	[role="region"] :global(::selection) { background:var(--color-accent-bg); color:inherit; }
+</style>

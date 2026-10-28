@@ -52,12 +52,12 @@ pnpm acceptance:visual:capture      # (re)capture baselines for the current plat
 pnpm acceptance:mutation:visual     # mutate example values to measure test strength
 ```
 
+Pass a feature name (`pnpm acceptance:visual cursor-unavailable`) or set `ACCEPTANCE_FEATURE=cursor-unavailable` to run or capture only that feature.
+
 Use `pnpm acceptance:functional` for per-ticket behaviour checks. It skips visual
 steps without reading or writing baseline or artifact PNGs. It is not the visual
 gate; run `pnpm acceptance:visual` for that.
-
-Set `ACCEPTANCE_FEATURE=cursor-unavailable` to run or capture only that feature,
-including with `pnpm acceptance:functional`.
+The feature name works the same with `pnpm acceptance:functional`.
 `VISUAL_ACCEPTANCE_CAPTURE_BASELINES=cursor-unavailable-rail` further limits
 capture to the named baseline; other baselines remain assertions.
 

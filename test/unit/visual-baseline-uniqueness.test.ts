@@ -21,6 +21,14 @@ import { beforeAll, describe, expect, it } from "vitest";
  * story name claims), recapture, and delete the line.
  */
 const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
+	"chat-subagentbackbar--side-thread | chat-subagentbackbar--side-thread-parent-working":
+		"ba794f06 / conduit-test-kvcx3 moves Side Thread navigation to the SessionBar breadcrumb; both stories assert in play that the back bar is absent for idle and working parents",
+	"overlays-surfacingcategories--counts-unavailable | overlays-surfacingcategories--live-refresh | overlays-surfacingcategories--retire-restore | overlays-surfacingcategories--session-counts":
+		"876c6e84: Retry counts recovers, LiveRefresh finishes its refresh, and RetireRestore restores Ask; all finish by asserting SessionCounts, so their desktop terminal frame is identical",
+	"overlays-surfacingcategories--counts-unavailable | overlays-surfacingcategories--live-refresh | overlays-surfacingcategories--session-counts":
+		"876c6e84: successful retry and completed refresh finish at SessionCounts; RetireRestore differs on phone because its interaction scrolls to the restored category",
+	"ui-sessionstatusglyph--running | ui-sessionstatusglyph--running-header":
+		"capture freezes the running packet to the same frame as the static header, while play() and flow.spec.ts assert their animation states",
 	// Verified legitimate: these interaction stories deliberately re-open the
 	// surface as their final step, so an open menu IS the terminal state. Their
 	// real assertions live in play(), not in the pixels.
@@ -28,10 +36,16 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"both interaction stories re-open the menu as their last step",
 	"ui-menu--arrow-key-navigation | ui-menu--typeahead":
 		"both end with focus on the same item",
+	"ui-menu--radio-leading-icon | ui-menu--radio-selection":
+		"both pick Private and re-open the menu; RadioLeadingIcon asserts the icon colours in play()",
 	"ui-popover--default | ui-popover--escape-restores-focus":
 		"escape story re-opens the popover as its last step",
 	"layout-sessionbar--banners-row-expands | layout-sessionbar--island-with-banners":
 		"tapping the collapsed banners row opens the full header with its banners",
+	"layout-sessionbar--overflow-menu-open | layout-sessionbar--views-sheet-open":
+		"opening the phone drop-down forces the island bar open, so both end on the same sheet; each asserts different rows in play()",
+	"layout-sessionbar--overflow-menu-open-light | layout-sessionbar--views-sheet-open-light":
+		"opening the phone drop-down forces the island bar open, so both end on the same sheet; each asserts different rows in play()",
 	"project-projectdialog--multi-folder-supported | project-projectdialog--multi-folder-unknown":
 		"an unknown multi-folder capability warns like a supported one, i.e. not at all; both assert the missing warning in play()",
 	"ui-useravatar--initial | ui-useravatar--missing-mac-picture":
@@ -66,8 +80,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	// source; the two stories genuinely produce the same frame.
 	"model-contextwindowselector--premium-default | model-contextwindowselector--selected-1-m":
 		"premium default and an explicit 1M override both resolve to the same closed '1M (beta)' badge; they differ only inside the open dropdown",
-	"overlays-attentionbanner--permissions-and-questions | overlays-notificationstack--attention-only":
-		"both stories render NotificationStack with the same permission and question fixtures and no toasts",
 
 	// Verified legitimate (conduit-test-de3.35.9.3). For these three the
 	// identical bytes are the assertion, not a hole in one.

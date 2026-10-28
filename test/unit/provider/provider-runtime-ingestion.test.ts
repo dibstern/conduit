@@ -1,6 +1,7 @@
 import { Deferred, Effect, Fiber, Layer, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import { literal } from "effect/sql/Statement";
 import { describe, expect, it, vi } from "vitest";
 import {
 	decodeProviderRuntimeEvent,
@@ -219,6 +220,7 @@ function makeHarness(options?: {
 		),
 	);
 	const sql = Object.assign(executeSql, {
+		literal,
 		transactionService: SqlClient.TransactionConnection(0),
 	}) as unknown as SqlClient.SqlClient & {
 		withTransaction: <A, E, R>(

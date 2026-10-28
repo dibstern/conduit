@@ -31,15 +31,20 @@
 //   CONDUIT_TEST_DIST=dist pnpm exec playwright test \
 //     --config test/e2e/playwright-harness.config.ts --workers=1 harness-session-cache
 
+import { type ChildProcess, execFile } from "node:child_process";
 import {
 	copyFileSync,
+	cpSync,
 	existsSync,
 	mkdirSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import type { BrowserContext, Page } from "@playwright/test";
 import { Effect } from "effect";
 import type {
@@ -206,6 +211,63 @@ const detailEnvelopes = (tab: Tab, sentFrom: number, from: number) => {
 
 test.describe.configure({ retries: 0 });
 
+let compilerBuild:
+	| {
+			child: ChildProcess;
+			completion: Promise<{ stdout: string; stderr: string }>;
+			metadata: {
+				originalDist: string;
+				originalBuildId: string;
+				deployedDist: string;
+				deployedBuildId: string;
+				compilerArgs: string[];
+			};
+	  }
+	| undefined;
+
+test.afterEach(async ({ harness }, testInfo) => {
+	const build = compilerBuild;
+	compilerBuild = undefined;
+	if (!build) return;
+	// afterEach runs before the harness removes the compiler's output directory.
+	if (
+		build.child.pid !== undefined &&
+		build.child.exitCode === null &&
+		build.child.signalCode === null
+	)
+		build.child.kill("SIGKILL");
+	const outcome = await build.completion.then(
+		(output) => ({ status: "completed", ...output }),
+		(error: unknown) => ({
+			status: "failed",
+			error:
+				error instanceof Error
+					? { ...error, message: error.message }
+					: String(error),
+		}),
+	);
+	const proofPath = testInfo.outputPath("cache-build-deploy.json");
+	writeFileSync(
+		proofPath,
+		`${JSON.stringify(
+			{
+				...build.metadata,
+				harnessRoot: harness.root,
+				compilerPid: build.child.pid,
+				compilerExit: build.child.exitCode,
+				compilerSignal: build.child.signalCode,
+				...outcome,
+			},
+			null,
+			2,
+		)}\n`,
+	);
+	await testInfo.attach("cache-build-deploy", {
+		path: proofPath,
+		contentType: "application/json",
+	});
+});
+
 test("a session opened from its saved page ends where a cold open does", async ({
 	browser,
 	harness,
@@ -215,12 +277,17 @@ test("a session opened from its saved page ends where a cold open does", async (
 		"The cache and the wire are the same on every device.",
 	);
 	test.setTimeout(600_000);
+	const originalDist = resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist");
 	const store = harness.daemonStorePath();
 	const viewport = testInfo.project.use.viewport ?? null;
 	const url = (sessionId: string) =>
 		`${harness.baseUrl}/s/${sessionId}?p=process-test`;
 	const restart = () =>
-		harness.restart({ keepPort: true, skipBrowserProbe: true });
+		harness.restart({
+			dist: originalDist,
+			keepPort: true,
+			skipBrowserProbe: true,
+		});
 
 	await harness.terminate();
 	await seed(store, [
@@ -734,10 +801,58 @@ test("a session opened from its saved page ends where a cold open does", async (
 	const beforeDeploy = (await atOrigin(tab, (page) => records(page)))[SESSION]
 		?.resumePoint;
 	await harness.terminate();
+	const { BUILD_ID: originalBuildId } = (await import(
+		pathToFileURL(join(originalDist, "src/lib/build-id.js")).href
+	)) as { BUILD_ID: string };
+	if (testInfo.status !== "passed") return;
+	const deployedBuildId = "next-build";
+	const buildRoot = join(harness.root, "cache-build-b");
+	const deployedDist = join(buildRoot, "dist");
+	mkdirSync(deployedDist, { recursive: true });
+	cpSync(join(originalDist, "src"), join(deployedDist, "src"), {
+		recursive: true,
+	});
+	writeFileSync(join(buildRoot, "package.json"), '{"type":"module"}');
+	symlinkSync(resolve("node_modules"), join(buildRoot, "node_modules"));
+	const compilerArgs = [
+		resolve("node_modules/vite/bin/vite.js"),
+		"build",
+		"--outDir",
+		join(deployedDist, "frontend"),
+	];
+	const compilation = promisify(execFile)(process.execPath, compilerArgs, {
+		cwd: resolve("."),
+		env: { ...process.env, CONDUIT_BUILD_ID: deployedBuildId },
+		encoding: "utf8",
+		maxBuffer: 1024 * 1024,
+	});
+	compilerBuild = {
+		child: compilation.child,
+		completion: compilation,
+		metadata: {
+			originalDist,
+			originalBuildId,
+			deployedDist,
+			deployedBuildId,
+			compilerArgs,
+		},
+	};
+	compilation.child.stdin?.end();
+	await compilation;
+	if (testInfo.status !== "passed") return;
+	// Use the same generated-module stamp and completed-build marker as build.mjs.
+	writeFileSync(
+		join(deployedDist, "src/lib/build-id.js"),
+		`export const BUILD_ID = ${JSON.stringify(deployedBuildId)};\n`,
+	);
+	writeFileSync(
+		join(deployedDist, "build-ready.json"),
+		JSON.stringify({ buildId: deployedBuildId }),
+	);
 	await harness.restart({
+		dist: deployedDist,
 		keepPort: true,
 		skipBrowserProbe: true,
-		serviceEnvironment: { CONDUIT_SERVER_BUILD_ID: "next-build" },
 	});
 	await run(
 		"build-changed",

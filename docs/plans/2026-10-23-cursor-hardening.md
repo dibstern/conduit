@@ -381,6 +381,39 @@ toplevel, so the SDK **would** load it. Removing `linked` would encode a new bug
   test row or be deleted. Leave `sdk-trace*` to C4.
 - Extend the existing `test/e2e/provider/cursor-skills-real-sdk.test.ts` rather than adding live rows elsewhere.
 
+#### C5-A spike result
+
+Tested installed SDK **1.0.40** offline on 2026-10-23. Choose **option 2**.
+`Agent.create(...).getExecutor()` reaches the SDK's keyed executor cache, also used by its
+`CursorAgentPlatform.prewarmLocalWorkspace`, but returns only `run`, `reload`, and `dispose`.
+`getAgentSkills` is closed over in the workspace services, not reachable on that handle.
+With an explicit dummy key, construction attempted nine fetches to
+`https://api2.cursor.sh/auth/exchange_user_api_key`; the probe blocked every request.
+Thus it neither exposes listing nor meets the no-network-construction condition.
+
+The offline differential rows in `cursor-skills-real-sdk.test.ts` expose the installed SDK's
+workspace getter with an in-memory module-load hook, keeping its walker/parser/filter intact.
+They acquire the same SDK cache without a key, make zero network attempts, and load `linked`
+and its `must-not-walk` descendant. The SDK omits a target outside git and HOME and the unsynced
+managed cache. Single-root discovery uses the git parent; multi-root uses cwd plus dirs.
+The fixture uses a symlinked HOME to pin realpath handling, including macOS aliases.
+No SDK files are modified and SDK imports remain confined to `sdk-real.ts`.
+
+Before the fix, all three differential rows failed: `single-root` omitted `toplevel` and
+`must-not-walk` and included `outside`/`managed`; `multi-root` omitted `extra` and included
+`linked`/`outside`/`managed`; `project-only` also incorrectly included user and plugin skills.
+The three unit rows failed for the same root/source/traversal differences. Reproducible evidence
+is written to `test-results/c5-a-{single-root,multi-root,project-only}.json`; red logs are
+`test-results/c5-a-{e2e,unit}-red.log`. The paid live-turn row remains opt-in.
+The subsequent provider-discovery row also failed before forwarding `extraFolders`: it listed
+the git parent's skills instead of `extra`. Its red log is `test-results/c5-a-forwarding-red.log`.
+Review added two mixed Git/non-Git differential rows, red before checking Git per nested root
+(`c5-a-mixed-red.log`), and a moved-session row, red before retaining the runner's original cwd
+(`c5-a-moved-red.log`). A bounded recheck confirmed that the checked executor route exposes
+neither managed-sync status nor the managed list. Production discovery therefore treats the
+on-disk managed cache as synced, with no manifest heuristic; the `managed-cache` row pins the
+known divergence that the SDK excludes this cache offline.
+
 ### C5-B (S): credential rows, errors, upgrade wiring
 
 - Credential rows pin only stored-login usability (backend match, expiry). Conduit always passes an explicit

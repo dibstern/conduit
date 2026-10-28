@@ -131,6 +131,13 @@ export const ExpandedLight: Story = {
 /** Elapsed time counts up, the strip grows, and the last three steps show as a fading ticker. */
 export const Live: Story = {
 	args: { turn: live, segment: liveSegment, final: true },
+	play: async ({ canvasElement }) => {
+		await expect(
+			within(canvasElement)
+				.getByTestId("turn-live-head")
+				.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
+	},
 };
 
 export const LiveLight: Story = { ...Live, globals: { theme: "light" } };
@@ -716,4 +723,77 @@ export const JevOffLive: Story = {
 			].filter((node) => node.offsetHeight > 0),
 		).toHaveLength(3);
 	},
+};
+
+const runningTasks: Turn = {
+	...skilled,
+	segments: skilled.segments.map((segment) => ({
+		...segment,
+		activity: segment.activity.map((part) =>
+			part.type === "tool" && part.name === "Task"
+				? {
+						...part,
+						metadata: { providerTaskId: "story-agent", backgrounded: true },
+					}
+				: part,
+		),
+	})),
+};
+
+/** The launched agent and its nested shell keep running after their turn ends. */
+export const RunningTasks: Story = {
+	args: {
+		turn: runningTasks,
+		segment: runningTasks.segments[0] ?? EMPTY_SEGMENT,
+		final: true,
+		taskNow: 15_000,
+		taskListedAt: new Map([
+			["story-agent", 10_000],
+			["story-shell", 10_000],
+		]),
+		liveTasks: [
+			{
+				id: "story-agent",
+				type: "local_agent",
+				description: "Review the changes",
+				firstSeenAt: 10_000,
+			},
+			{
+				id: "story-shell",
+				type: "local_bash",
+				description: "Run the checks",
+				parentTaskId: "story-agent",
+				firstSeenAt: 10_000,
+			},
+		],
+	},
+	play: async ({ canvasElement }) => {
+		const toggle = within(canvasElement).getByRole("button", {
+			name: /^Worked\b/,
+			expanded: false,
+		});
+		await userEvent.click(toggle);
+		toggle.blur();
+		const pill = canvasElement.querySelector(".step-log .turn-running");
+		await expect(pill).toBeVisible();
+		await expect(pill).toHaveTextContent("2 running");
+		const glyph = pill?.querySelector('[data-flow-glyph="running"]');
+		await expect(glyph).toBeVisible();
+		if (!pill || !glyph) throw new Error("Running task pill glyph is missing");
+		await expect(glyph.getBoundingClientRect().width).toBe(12);
+		await expect(glyph.getBoundingClientRect().height).toBe(12);
+		const expectedTool = new Option().style;
+		expectedTool.color =
+			getComputedStyle(pill).getPropertyValue("--color-tool");
+		await expect(getComputedStyle(pill).color).toBe(expectedTool.color);
+		await expect(getComputedStyle(glyph).color).toBe(expectedTool.color);
+		await expect(
+			canvasElement.querySelector(".skills-toggle .lucide-sparkles"),
+		).toBeVisible();
+	},
+};
+
+export const RunningTasksLight: Story = {
+	...RunningTasks,
+	globals: { theme: "light" },
 };

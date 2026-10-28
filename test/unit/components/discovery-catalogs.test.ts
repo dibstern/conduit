@@ -181,6 +181,79 @@ afterEach(async () => {
 });
 
 describe("discovery catalogs over the RPC wire", () => {
+	it("shows the cheapest title parameters for an empty choice rather than the default or first combination", async () => {
+		applyInstanceListResponse({
+			instances: [
+				{
+					id: "cursor-work",
+					name: "Cursor",
+					driver: "cursor",
+					isDefault: true,
+					port: 0,
+					managed: false,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 0,
+				},
+			],
+		});
+		applyProjectSetting({
+			_tag: "providerModels",
+			accountId: "cursor-work",
+			providers: [
+				{
+					id: "cursor",
+					name: "Cursor",
+					configured: true,
+					models: [
+						{
+							id: "probe",
+							name: "Probe",
+							provider: "cursor",
+							variants: ["medium", "high", "low"],
+							parameters: {
+								rows: [
+									{
+										id: "effort",
+										label: "Effort",
+										values: ["low", "medium", "high"].map((value) => ({
+											value,
+											label: value,
+										})),
+									},
+								],
+								combinations: [
+									{ variant: "medium", values: { effort: "medium" } },
+									{
+										variant: "high",
+										values: { effort: "high" },
+										isDefault: true,
+									},
+									{ variant: "low", values: { effort: "low" } },
+								],
+							},
+						},
+					],
+				},
+			],
+		});
+		applyProjectSetting({
+			_tag: "titleGeneration",
+			status: "ok",
+			selection: {
+				account: { _tag: "Id", id: "cursor-work" },
+				providerId: "cursor",
+				modelId: "probe",
+				effort: "",
+			},
+		});
+		const view = render(VisibilitySettingsTab);
+		await fireEvent.click(view.getByTestId("settings-title-generation-picker"));
+		expect(
+			view.getByTestId("picker-effort-option-low").getAttribute("aria-checked"),
+		).toBe("true");
+		expect(discovery.discoveryState.titleGeneration.selection?.effort).toBe("");
+	});
 	it.each([
 		"one",
 		"claude-work",

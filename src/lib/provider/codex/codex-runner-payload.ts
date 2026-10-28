@@ -233,20 +233,25 @@ export class CodexRunnerPayload implements RunnerPayload {
 		intake: Deferred.Deferred<TurnResult, SessionFailure>,
 	): Effect.Effect<TurnResult, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
+			const prepared = yield* prepareCodexAccount(
+				input.account,
+				this.deps.daemonConfigDir,
+				this.deps.environment?.() ?? process.env,
+			).pipe(
+				Effect.mapError(
+					(cause): SessionFailure => ({
+						operation: "prepare home",
+						message: cause.message,
+					}),
+				),
+			);
 			let session = this.sessions.get(input.sessionId);
+			if (session && !session.busy && session.codexHome !== prepared.home) {
+				if (session.child) yield* Scope.close(session.child.scope, Exit.void);
+				this.sessions.delete(input.sessionId);
+				session = undefined;
+			}
 			if (!session) {
-				const prepared = yield* prepareCodexAccount(
-					input.account,
-					this.deps.daemonConfigDir,
-					this.deps.environment?.() ?? process.env,
-				).pipe(
-					Effect.mapError(
-						(cause): SessionFailure => ({
-							operation: "prepare home",
-							message: cause.message,
-						}),
-					),
-				);
 				const identity = yield* Effect.try({
 					try: () =>
 						readCodexSessionIdentity(
@@ -549,7 +554,9 @@ export class CodexRunnerPayload implements RunnerPayload {
 											inputId: input.inputId,
 											...(input.runId ? { runId: input.runId } : {}),
 											text: input.text ?? input.prompt,
-											...(input.images?.length ? { images: input.images } : {}),
+											...(input.images?.length
+												? { images: input.images.map(({ ref }) => ref) }
+												: {}),
 										},
 									});
 							});
@@ -722,9 +729,9 @@ export class CodexRunnerPayload implements RunnerPayload {
 											text_elements: [],
 										},
 										...(skill._tag === "Some" ? [skill.value] : []),
-										...(input.images ?? []).map((url) => ({
+										...(input.images ?? []).map(({ dataUrl }) => ({
 											type: "image",
-											url,
+											url: dataUrl,
 										})),
 									],
 									cwd: current.cwd,
@@ -1048,7 +1055,9 @@ export class CodexRunnerPayload implements RunnerPayload {
 									inputId: input.inputId,
 									...(input.runId ? { runId: input.runId } : {}),
 									text: input.text ?? input.prompt,
-									...(input.images?.length ? { images: input.images } : {}),
+									...(input.images?.length
+										? { images: input.images.map(({ ref }) => ref) }
+										: {}),
 								},
 							});
 						if (input.runId && active.state.items.runId) {
@@ -1142,7 +1151,10 @@ export class CodexRunnerPayload implements RunnerPayload {
 							clientUserMessageId: input.inputId,
 							input: [
 								{ type: "text", text: input.prompt, text_elements: [] },
-								...(input.images ?? []).map((url) => ({ type: "image", url })),
+								...(input.images ?? []).map(({ dataUrl }) => ({
+									type: "image",
+									url: dataUrl,
+								})),
 							],
 						},
 						TurnSteerResponseSchema,

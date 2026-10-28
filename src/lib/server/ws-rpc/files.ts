@@ -5,7 +5,6 @@ import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import { DirectoryListingServiceTag } from "../../domain/relay/Services/directory-listing-service.js";
 import { resolveSessionRequestFolders } from "../../domain/relay/Services/provider-turn-dispatch.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
-import { SessionWorkspaceTag } from "../../domain/relay/Services/session-workspace.js";
 import { ToolContentServiceTag } from "../../domain/relay/Services/tool-content-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors.js";
@@ -15,6 +14,7 @@ import {
 	getFileListResponse,
 	getFileTreeEntries,
 } from "../../handlers/files.js";
+import { getDiscoveredSkillForSession } from "../../handlers/settings.js";
 import { getSkillContentValue } from "../../handlers/skill-content.js";
 import { labelProjectFolders } from "../../project-folders.js";
 import {
@@ -165,20 +165,28 @@ export const filesHandlers = {
 	GetSkillContent: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
-			const primaryFolder = config.projectDir;
-			const directory =
-				"sessionId" in request
-					? yield* (yield* SessionWorkspaceTag).get(request.sessionId)
-					: primaryFolder;
-			const result = yield* getSkillContentValue(request.name, directory);
-			if (result === undefined) {
+			const skill = yield* getDiscoveredSkillForSession(
+				request.skillRef,
+				"sessionId" in request ? request.sessionId : undefined,
+			);
+			if (skill?.location._tag === "Provider") {
+				return yield* Effect.fail(
+					new WsRpcError({
+						message: "Skill content not available: managed by the provider",
+					}),
+				);
+			}
+			const result = skill
+				? yield* getSkillContentValue(skill.location)
+				: undefined;
+			if (skill === undefined || result === undefined) {
 				return yield* Effect.fail(
 					new WsRpcError({ message: "Skill content not available" }),
 				);
 			}
 			return {
 				projectSlug: config.slug,
-				name: request.name,
+				name: skill.name,
 				...result,
 			};
 		}).pipe(Effect.catch(mapRpcFailure("GetSkillContent"))),

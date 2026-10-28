@@ -13,12 +13,12 @@ export function createModelSelectionState(
 	const activeModel = $derived(target.activeModel);
 	const parameters = $derived(activeModel?.parameters);
 	const parameterState = $derived(
-		resolveModelParameters(parameters, target.pick.effort),
+		resolveModelParameters(activeModel, target.pick.effort),
 	);
-	const defaultCombination = $derived(parameterState.defaultCombination);
+	const defaultValues = $derived(parameterState.defaultValues);
 	function selectParameter(id: string, value: string) {
-		const next = parameterState.parameterCombination(id, value);
-		if (next && !target.pending.effort) target.selectEffort(next.variant);
+		const next = parameterState.withValue(id, value);
+		if (next !== undefined && !target.pending.effort) target.selectEffort(next);
 	}
 	const parameterRows = $derived(
 		parameterState.rows.map((row) => ({
@@ -112,8 +112,8 @@ export function createModelSelectionState(
 		get parameters() {
 			return parameters;
 		},
-		get defaultCombination() {
-			return defaultCombination;
+		get defaultValues() {
+			return defaultValues;
 		},
 		get parameterContext() {
 			return parameterContext;

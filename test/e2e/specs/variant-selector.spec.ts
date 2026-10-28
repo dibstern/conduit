@@ -1,5 +1,5 @@
-// Tests the effort (thinking-level variant) control: the composer badge opens
-// the model picker, whose Effort row lists the model's levels.
+// Option-clicking the effort badge opens the model picker, whose Effort row
+// lists the model's levels.
 //
 // Uses WS mock — no real OpenCode or relay needed.
 // Frontend served by Vite preview, WebSocket intercepted by page.routeWebSocket().
@@ -121,14 +121,14 @@ test.describe("Variant badge visibility", () => {
 	});
 });
 
-/** The badge opens the model picker at its Effort row. */
+/** Option-click opens the model picker at its Effort row. */
 async function openEffort(page: Page): Promise<void> {
-	await badge(page).click();
+	await badge(page).click({ modifiers: ["Alt"] });
 	await expect(page.locator("[data-testid='picker-row-effort']")).toBeVisible();
 }
 
 test.describe("Effort row", () => {
-	test("opens on badge click", async ({ page, baseURL }) => {
+	test("opens on badge Option-click", async ({ page, baseURL }) => {
 		await setupWithVariants(page, baseURL);
 		await openEffort(page);
 	});

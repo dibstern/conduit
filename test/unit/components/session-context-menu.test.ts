@@ -77,59 +77,28 @@ function openMenu(
 }
 
 describe("session triage menu", () => {
-	// A sheet must retain live notifications, their details/severity and every
-	// action, including Undo. Closing it must restore any unexpired notices.
-	it("moves an existing Undo toast into the sheet and restores it on close", async () => {
-		const undo = vi.fn();
-		showToast("Moved Alpha to Settled", {
-			action: { label: "Undo", run: undo },
-		});
+	// Notifications are one global layer above the sheet, never moved into it.
+	it("keeps a toast raised over an open sheet global and actionable", async () => {
 		render(Toast);
-		expect(screen.getByTestId("toast-action").textContent?.trim()).toBe("Undo");
-		const menu = openMenu(
-			{ id: "a", title: "Alpha" },
-			{ presentation: "sheet" },
-		);
-		const notice = await screen.findByTestId("session-sheet-toast");
-		expect(notice.textContent).toContain("Moved Alpha to Settled");
-		expect(within(notice).getByRole("menuitem", { name: "Undo" })).toBeTruthy();
-		expect(screen.queryByTestId("toast")).toBeNull();
-		await menu.unmount();
-		await fireEvent.click(await screen.findByTestId("toast-action"));
-		expect(undo).toHaveBeenCalledOnce();
-		expect(uiState.toasts).toEqual([]);
-	});
-
-	it("keeps incoming error details, emphasis and actions in the open sheet", async () => {
 		openMenu({ id: "a", title: "Alpha" }, { presentation: "sheet" });
-		await screen.findByRole("menu");
+		const sheet = await screen.findByRole("menu");
 		const undo = vi.fn();
 		showToast({
 			title: "Error",
 			body: "Beta failed because its account is unavailable.",
 			emphasis: "Beta",
 			variant: "error",
-			actions: [
-				{ kind: "primary", label: "Undo", run: undo },
-				{ kind: "dismiss", label: "Later" },
-			],
+			actions: [{ kind: "primary", label: "Undo", run: undo }],
 		});
-		const notice = await screen.findByTestId("session-sheet-toast");
-		expect(notice.getAttribute("aria-live")).toBe("assertive");
-		expect(notice.textContent).toContain(
-			"Beta failed because its account is unavailable.",
-		);
-		expect(within(notice).getByText("Beta", { selector: "b" })).toBeTruthy();
-		expect(notice.querySelector(".lucide-circle-x")).toBeTruthy();
-		expect(
-			within(notice).getByRole("menuitem", { name: "Later" }),
-		).toBeTruthy();
-		await fireEvent.click(
-			within(notice).getByRole("menuitem", { name: "Undo" }),
-		);
+		const toast = await screen.findByTestId("toast");
+		expect(sheet.contains(toast)).toBe(false);
+		expect(toast.getAttribute("aria-live")).toBe("assertive");
+		expect(within(toast).getByText("Beta", { selector: "b" })).toBeTruthy();
+		const action = within(toast).getByTestId("toast-action");
+		await fireEvent.pointerDown(action);
+		await fireEvent.click(action);
 		expect(undo).toHaveBeenCalledOnce();
 		expect(uiState.toasts).toEqual([]);
-		expect(screen.getByRole("menu")).toBeTruthy();
 	});
 
 	it.each([

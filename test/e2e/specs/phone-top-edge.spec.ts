@@ -57,6 +57,8 @@ function sampledOverEdge(page: Page): Promise<string[]> {
 			)
 				layer = layer.parentElement;
 			if (!layer || layer === document.body) return [];
+			// Size does not matter: an empty, zero-height fixed box still counts
+			// (the closed top-sheet wrapper did, until it was display: none).
 			const pinned = [...layer.querySelectorAll("*")].find(isPinned);
 			return pinned ? [`${name(element)} (${name(pinned)})`] : [];
 		});

@@ -19,21 +19,32 @@ test.use({ harnessOptions: { opencodeRecording: "chat-simple" } });
 // Only OpenCode is recorded here, and a draft may default to another harness
 // with no model, which leaves Send disabled.
 async function createSession(page: Page, app: AppPage): Promise<void> {
+	const projectSlug = new URL(page.url()).searchParams.get("project");
+	expect(projectSlug).toBeTruthy();
+	// ChatLayout records the project after attachment is acknowledged.
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				localStorage.getItem("conduit:last-attached-project"),
+			),
+		)
+		.toBe(projectSlug);
 	const picker = page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 	);
 	await openPickerRoot(page, picker);
-	if ((await picker.getAttribute("data-instance-id")) !== "opencode")
-		await page.getByTestId("picker-harness-opencode").click();
+	await page.getByTestId("picker-harness-opencode").click();
+	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
 	await page.getByTestId("picker-row-model").click();
 	await page
 		.getByTestId("model-picker-list")
-		.locator("[data-model-id]")
-		.first()
+		.locator('[data-model-id="claude-opus-4-6"][data-provider-id="anthropic"]')
 		.click();
 	await page.keyboard.press("Escape");
 	await expect(page.getByTestId("model-picker")).toBeHidden();
 	await expect(picker).toHaveAttribute("data-instance-id", "opencode");
+	await expect(picker).toHaveAttribute("data-shown-provider", "anthropic");
+	await expect(picker).toHaveAttribute("data-shown-model", "claude-opus-4-6");
 	await app.sendMessage("Hello, reply with just the word pong");
 	await expect(page).toHaveURL(/\/s\/[^/?]+/);
 	await expect(page.locator(".md-content").last()).toContainText(/pong|done\(/);
@@ -104,7 +115,10 @@ test("a draft prefills the project last added or given a session, on every clien
 	await toList(page);
 	await page.getByTestId("session-scope-chip").click();
 	await page.getByRole("menuitem", { name: "Add a project…" }).click();
-	const dialog = page.getByRole("dialog", { name: "Add project", exact: true });
+	const dialog = page.getByRole("dialog", {
+		name: "Add a project",
+		exact: true,
+	});
 	await dialog.getByRole("combobox", { name: "Add folder" }).fill(folder);
 	await dialog.getByRole("option", { name: folder, exact: true }).click();
 	await dialog.getByRole("button", { name: /^Add project/ }).click();
@@ -179,7 +193,7 @@ test("a draft starts in the open session's project, keeps its pick, and lands in
 		page.screenshot({ path: testInfo.outputPath(`${name}.png`) });
 	const addFolder = async (target: Page, folder: string) => {
 		const dialog = target.getByRole("dialog", {
-			name: "Add project",
+			name: "Add a project",
 			exact: true,
 		});
 		await dialog.getByRole("combobox", { name: "Add folder" }).fill(folder);

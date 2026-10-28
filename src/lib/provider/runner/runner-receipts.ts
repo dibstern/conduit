@@ -18,6 +18,11 @@ export const currentRunnerOutput = Context.Reference<
 	RunnerOutputReceipt | undefined
 >("conduit/currentRunnerOutput", { defaultValue: () => undefined });
 
+export const currentRunnerProcessId = Context.Reference<string | undefined>(
+	"conduit/currentRunnerProcessId",
+	{ defaultValue: () => undefined },
+);
+
 export const currentRunnerPermissionReply = Context.Reference<
 	| {
 			readonly sessionId: string;

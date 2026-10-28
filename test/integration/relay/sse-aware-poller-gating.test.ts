@@ -308,14 +308,15 @@ async function createTestHarness(
 	const db = new Database(dbPath);
 	// parent_id matters: notification routing treats a session without one as top-level.
 	const upsertRow = db.prepare(`
-		INSERT INTO sessions (id, provider, title, parent_id, status, created_at, updated_at)
-		VALUES (?, 'opencode', 'Untitled', ?, ?, ?, ?)
+		INSERT INTO sessions (id, project_id, provider, title, parent_id, status, created_at, updated_at)
+		VALUES (?, ?, 'opencode', 'Untitled', ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET status = excluded.status,
 			updated_at = excluded.updated_at
 	`);
 	const upsertStatus = (sessionId: string, status: string, now: number) =>
 		upsertRow.run(
 			sessionId,
+			slug,
 			mock.sessionList.find((s) => s.id === sessionId)?.parentID ?? null,
 			status,
 			now,
@@ -340,6 +341,9 @@ async function createTestHarness(
 		deleteProperty(target, sessionId) {
 			if (typeof sessionId === "string") {
 				db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+				db.prepare("DELETE FROM session_sidebar WHERE session_id = ?").run(
+					sessionId,
+				);
 			}
 			return Reflect.deleteProperty(target, sessionId);
 		},

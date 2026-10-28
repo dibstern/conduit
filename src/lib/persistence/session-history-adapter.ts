@@ -3,6 +3,7 @@
 // Pure conversion with no I/O.
 
 import { Option, Schema } from "effect";
+import { AttachmentSourceSchema } from "../contracts/attachment-ref.js";
 import { SurfacingMarkSchema } from "../contracts/category-set.js";
 import { ProjectSetupStateSchema } from "../contracts/project-setup.js";
 import { TextSurfacedPayloadSchema } from "../contracts/stored-event.js";
@@ -62,6 +63,7 @@ function snapshotRowToHistory(
 								"status" in state &&
 								(state.status === "completed" || state.status === "error")
 							),
+						row.providerDriver,
 					)
 				: undefined;
 		const projected = projectedParts.get(part.id);
@@ -81,6 +83,11 @@ function snapshotRowToHistory(
 				: {
 						state: {
 							...providerState,
+							...("status" in state && state.status === "error"
+								? { outcome: "failed" as const }
+								: "status" in state && state.status === "completed"
+									? { outcome: "succeeded" as const }
+									: {}),
 							...(metadata === undefined ? {} : { metadata }),
 							...projectTool({
 								name:
@@ -104,7 +111,7 @@ function snapshotRowToHistory(
 	parts.push(
 		...row.parts
 			.filter((part) => part.type === "compaction" && part.rest_payload == null)
-			.map(partRowToHistoryPart),
+			.map((part) => partRowToHistoryPart(part, row.providerDriver)),
 	);
 	return {
 		...parsed,
@@ -173,7 +180,6 @@ const CURSOR_PRESENTATION_KEYS = new Set([
 	"truncated",
 	"movedToBackground",
 	"exitCode",
-	"isError",
 	"fileChange",
 	"plan",
 	"computerUse",
@@ -183,6 +189,7 @@ const CURSOR_PRESENTATION_KEYS = new Set([
 function browserMetadata(
 	metadata: object | undefined,
 	inFlight: boolean,
+	providerDriver?: "codex",
 ): Record<string, unknown> | undefined {
 	if (metadata === undefined) return undefined;
 	const cursor =
@@ -192,7 +199,13 @@ function browserMetadata(
 			([key, value]) =>
 				(BROWSER_METADATA_KEYS.has(key) ||
 					(cursor && CURSOR_PRESENTATION_KEYS.has(key)) ||
-					(inFlight && key === "output" && typeof value === "string")) &&
+					(inFlight &&
+						(cursor ||
+							providerDriver === "codex" ||
+							("codexItemType" in metadata &&
+								typeof metadata.codexItemType === "string")) &&
+						key === "output" &&
+						typeof value === "string")) &&
 				(typeof value === "string" ||
 					typeof value === "number" ||
 					typeof value === "boolean" ||
@@ -261,7 +274,10 @@ function partSurfacing(
 	};
 }
 
-function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
+function partRowToHistoryPart(
+	row: MessagePartRow,
+	providerDriver?: "codex",
+): HistoryMessagePart {
 	if (row.type === "text" && row.metadata != null) {
 		const metadata = parseObjectJson(row.metadata);
 		if (metadata?.["notice"] === true)
@@ -331,8 +347,8 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 			...(typeof metadata?.["filename"] === "string"
 				? { filename: metadata["filename"] }
 				: {}),
-			...(typeof metadata?.["url"] === "string"
-				? { url: metadata["url"] }
+			...(Schema.is(AttachmentSourceSchema)(metadata?.["source"])
+				? { source: metadata["source"] }
 				: {}),
 		};
 	}
@@ -355,15 +371,17 @@ function partRowToHistoryPart(row: MessagePartRow): HistoryMessagePart {
 		const status =
 			row.status == null ? undefined : TOOL_STATUSES.get(row.status);
 		if (status) stateObj["status"] = status;
+		if (status === "error") stateObj.outcome = "failed";
+		else if (status === "completed") stateObj.outcome = "succeeded";
 		const metadata = browserMetadata(
 			row.metadata == null ? undefined : parseObjectJson(row.metadata),
 			row.result == null &&
 				row.status !== "completed" &&
 				row.status !== "error",
+			providerDriver,
 		);
 		if (metadata) stateObj["metadata"] = metadata;
-		if (metadata?.["isError"] === true) {
-			stateObj["status"] = "error";
+		if (stateObj.outcome === "failed") {
 			stateObj["error"] = stateObj.output?.text ?? "Tool failed";
 		}
 		if (Object.keys(stateObj).length > 0) {
@@ -416,7 +434,9 @@ export function messageRowsToHistory(
 							completed: row.completed_at,
 						},
 					};
-		const parts = row.parts.map(partRowToHistoryPart);
+		const parts = row.parts.map((part) =>
+			partRowToHistoryPart(part, row.providerDriver),
+		);
 
 		return {
 			id: row.id,

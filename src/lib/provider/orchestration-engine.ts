@@ -17,17 +17,24 @@ import {
 	Schema,
 	Scope,
 } from "effect";
-import type { SqlClient } from "effect/sql";
+import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 
 import { type Account, AccountSchema } from "../contracts/account.js";
 import type { SessionScope } from "../contracts/session-scope.js";
 import type { ProviderStopSnapshot } from "../contracts/stored-event.js";
+import { DraftAttachmentMissing } from "../contracts/ws-rpc.js";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../daemon/config-persistence.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import {
+	SecretAnswerFailure,
+	type SecretAnswers,
+} from "../domain/daemon/Services/secret-answers.js";
+import type { DraftChange } from "../domain/relay/Services/input-drafts.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { createLogger } from "../logger.js";
+import type { AttachmentStore } from "../persistence/attachment-store.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
 import type {
 	CommitAndSignal,
@@ -73,6 +80,7 @@ import {
 	InMemoryProviderSessionBindingReadModel,
 	type ProviderSessionBindingReadModel,
 } from "./provider-session-binding-read-model.js";
+import { resolveTurnImages } from "./resolve-turn-images.js";
 import type {
 	EventSink,
 	PermissionDecision,
@@ -97,6 +105,7 @@ class CommandPayloadSerializationFailed extends Data.TaggedError(
 }
 
 export interface SendTurnCommand {
+	readonly draftChange?: DraftChange;
 	readonly type: "send_turn";
 	readonly commandId: string;
 	readonly providerId: string;
@@ -134,6 +143,8 @@ export interface ResolveQuestionCommand {
 	readonly sessionId: string;
 	readonly requestId: string;
 	readonly answers: Record<string, unknown>;
+	/** Live prompt fallback; never persisted in the command payload. */
+	readonly secretAnswerIndices?: readonly string[];
 	readonly providerProcessId?: string;
 	readonly nativeRequestId?: string;
 	readonly operation?: "reply" | "reject";
@@ -240,6 +251,8 @@ export interface ProviderCallRequest {
 
 export interface OrchestrationEngineOptions {
 	readonly registry: ProviderRegistry;
+	readonly attachmentStore?: Pick<AttachmentStore, "get">;
+	readonly secretAnswers?: SecretAnswers["Service"];
 	readonly defaultClaudeLaunchConfig?: () => ClaudeLaunchConfig;
 	readonly sessionBindingReadModel?: ProviderSessionBindingReadModel;
 	readonly durableCommands?: DurableCommandStoreOptions;
@@ -310,6 +323,8 @@ const admittedCallSchema = Schema.Struct({
 
 export class OrchestrationEngine {
 	private readonly registry: ProviderRegistry;
+	private readonly attachmentStore: OrchestrationEngineOptions["attachmentStore"];
+	private readonly secretAnswers: OrchestrationEngineOptions["secretAnswers"];
 	private readonly sessionBindingReadModel: ProviderSessionBindingReadModel;
 	private readonly accountDirectory: OrchestrationEngineOptions["accountDirectory"];
 	private readonly resolveCallContext: OrchestrationEngineOptions["resolveCallContext"];
@@ -338,6 +353,8 @@ export class OrchestrationEngine {
 
 	constructor(options: OrchestrationEngineOptions) {
 		this.registry = options.registry;
+		this.attachmentStore = options.attachmentStore;
+		this.secretAnswers = options.secretAnswers;
 		this.sessionBindingReadModel =
 			options.sessionBindingReadModel ??
 			new InMemoryProviderSessionBindingReadModel();
@@ -359,6 +376,10 @@ export class OrchestrationEngine {
 				),
 				reactor: new ProviderSideEffectReactor({
 					sql: durable.sql,
+					...(options.attachmentStore
+						? { attachmentStore: options.attachmentStore }
+						: {}),
+					...(this.secretAnswers ? { secretAnswers: this.secretAnswers } : {}),
 					...(durable.projectKey === undefined
 						? {}
 						: { projectId: durable.projectKey }),
@@ -645,6 +666,17 @@ export class OrchestrationEngine {
 	): Effect.Effect<OrchestrationResult, OrchestrationError> {
 		return Effect.gen({ self: this }, function* () {
 			yield* this.ensureMutatingCommandHasId(command);
+			if (
+				command.type === "resolve_question" &&
+				command.secretAnswerIndices !== undefined &&
+				(!this.durable || !this.secretAnswers)
+			)
+				return yield* new ProviderInstanceFailure({
+					providerId: "conduit",
+					operation: command.type,
+					code: "secret_answer_unavailable",
+					cause: new SecretAnswerFailure({ code: "secret_answer_unavailable" }),
+				});
 			if (
 				this.durable &&
 				command.type !== "send_turn" &&
@@ -989,6 +1021,49 @@ export class OrchestrationEngine {
 									nativeRequestId =
 										prompt.provider_request_id ?? payload.requestId;
 								}
+								let committedPayload = payload;
+								if (payload.type === "resolve_question") {
+									const storedSecrets = yield* durable.sql<{
+										answer_index: string;
+									}>`SELECT CAST(question.key AS TEXT) AS answer_index
+						FROM pending_approvals, json_each(pending_approvals.input) AS question
+						WHERE pending_approvals.id = ${payload.requestId} AND session_id = ${payload.sessionId}
+							AND CASE WHEN question.type = 'object'
+								THEN json_extract(question.value, '$.isSecret') ELSE 0 END = 1`;
+									const secretIndices = [
+										...new Set([
+											...storedSecrets.map(({ answer_index }) => answer_index),
+											...(command.type === "resolve_question"
+												? (command.secretAnswerIndices ?? [])
+												: []),
+										]),
+									];
+									if (secretIndices.length) {
+										if (!this.secretAnswers)
+											return yield* new ProviderInstanceFailure({
+												providerId,
+												operation: payload.type,
+												code: "secret_answer_unavailable",
+												cause: new SecretAnswerFailure({
+													code: "secret_answer_unavailable",
+												}),
+											});
+										const answers = yield* this.secretAnswers
+											.seal(payload.answers, secretIndices)
+											.pipe(
+												Effect.mapError(
+													(cause) =>
+														new ProviderInstanceFailure({
+															providerId,
+															operation: payload.type,
+															code: cause.code,
+															cause,
+														}),
+												),
+											);
+										committedPayload = { ...payload, answers };
+									}
+								}
 								const [maxRow] = yield* durable.sql<{
 									m: number;
 								}>`SELECT COALESCE(MAX(request_sequence), 0) AS m FROM provider_command_outbox`;
@@ -999,7 +1074,7 @@ export class OrchestrationEngine {
 										commandId: command.commandId,
 										providerId,
 										payload: {
-											...payload,
+											...committedPayload,
 											...(nativeRequestId ? { nativeRequestId } : {}),
 										},
 										fingerprintHash: hash,
@@ -1029,6 +1104,7 @@ export class OrchestrationEngine {
 						),
 						Effect.mapError((cause) =>
 							cause instanceof CommandFingerprintMismatch ||
+							cause instanceof ProviderInstanceFailure ||
 							cause instanceof StaleCommandRejected ||
 							cause instanceof SessionProviderNotBound
 								? cause
@@ -1219,13 +1295,14 @@ export class OrchestrationEngine {
 				dispatchId,
 				nowMs,
 			).pipe(
-				Effect.mapError(
-					(cause) =>
-						new ProviderInstanceFailure({
-							providerId: command.providerId,
-							operation: "commitSendTurn",
-							cause,
-						}),
+				Effect.mapError((cause) =>
+					cause instanceof DraftAttachmentMissing
+						? cause
+						: new ProviderInstanceFailure({
+								providerId: command.providerId,
+								operation: "commitSendTurn",
+								cause,
+							}),
 				),
 			);
 
@@ -1278,12 +1355,16 @@ export class OrchestrationEngine {
 		| CommitAndSignalFailure
 		| Error
 		| CommandPayloadSerializationFailed
+		| DraftAttachmentMissing
 	> {
 		const driver = command.input.account?.driver ?? command.providerId;
 		const traits = getProviderDriver(driver);
 		// The rewind range and request sequence share ingestion's write boundary:
 		// a backfill accepted before this write must be removed by this commit.
 		const commit = Effect.gen(function* () {
+			yield* (command.draftChange?.write ?? Effect.void).pipe(
+				Effect.provideService(SqlClient.SqlClient, durable.sql),
+			);
 			const pendingRewind = command.input.continuation
 				? undefined
 				: yield* readPendingRewindCommit(durable.sql, command.input.sessionId);
@@ -1295,6 +1376,7 @@ export class OrchestrationEngine {
 				abortSignal: _abortSignal,
 				history: _history,
 				shellEnv: _shellEnv,
+				shellConfig: _shellConfig,
 				account,
 				...payload
 			} = command.input;
@@ -1339,9 +1421,14 @@ export class OrchestrationEngine {
 		});
 		// Through the seam the events are projected in the same transaction and
 		// announced once it commits.
-		return durable.write((project) => Effect.flatMap(commit, project), {
-			projectId: durable.projectId,
-		});
+		return durable
+			.write((project) => Effect.flatMap(commit, project), {
+				projectId: durable.projectId,
+			})
+			.pipe(
+				Effect.tap(() => command.draftChange?.publish ?? Effect.void),
+				Effect.uninterruptible,
+			);
 	}
 
 	private handleInlineSendTurnEffect(
@@ -1389,8 +1476,25 @@ export class OrchestrationEngine {
 					command.providerId,
 				),
 			);
+			const input = yield* resolveTurnImages(
+				command.input,
+				this.attachmentStore,
+			).pipe(
+				Effect.mapError(
+					(cause) =>
+						new ProviderInstanceFailure({
+							providerId: command.providerId,
+							operation: "resolveTurnImages",
+							...(cause._tag === "AttachmentMissing"
+								? { code: "attachment_missing" as const }
+								: {}),
+							cause,
+						}),
+				),
+				Effect.tapError(() => restorePreviousBinding),
+			);
 			const sendEffect = yield* Effect.try({
-				try: () => instance.sendTurnEffect(command.input),
+				try: () => instance.sendTurnEffect(input),
 				catch: (cause) =>
 					new ProviderInstanceFailure({
 						providerId: command.providerId,

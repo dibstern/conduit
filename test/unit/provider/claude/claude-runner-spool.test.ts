@@ -9,10 +9,12 @@ import {
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Fiber, Option } from "effect";
+import { it as effectIt } from "@effect/vitest";
+import { Deferred, Effect, Fiber, Option } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeRunnerSocket } from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
 import type { RunnerMessage } from "../../../../src/lib/provider/runner/runner-protocol.js";
+import { RunnerSinkBindings } from "../../../../src/lib/provider/runner/runner-sink-bindings.js";
 import { RunnerSpool } from "../../../../src/lib/provider/runner/runner-spool.js";
 import type { SessionOutput } from "../../../../src/lib/provider/runner/session-runner.js";
 
@@ -90,6 +92,68 @@ afterEach(() => {
 });
 
 describe("Claude runner output spool", () => {
+	effectIt.effect(
+		"keeps secret question answers out of the disconnected spool while replying with originals",
+		() =>
+			Effect.gen(function* () {
+				const { spool, filename } = fixture();
+				const requested = yield* Deferred.make<void>();
+				const outputs: SessionOutput[] = [];
+				const bindings = new RunnerSinkBindings((output) =>
+					Effect.gen(function* () {
+						outputs.push(output);
+						const result = yield* spool.emit(output);
+						if (output.type === "question-request")
+							yield* Deferred.succeed(requested, undefined);
+						return result;
+					}),
+				);
+				const sink = bindings.makeSessionSink("turn-1", "session-1");
+				const original = Object.freeze({
+					"0": "Safe",
+					"1": "fixture-spool-secret",
+					"2": ["fixture-spool-code"],
+				});
+				const reply = yield* Effect.forkScoped(
+					sink.requestQuestion({
+						requestId: "native-question",
+						questions: [
+							{ header: "Route", question: "Route?", options: [] },
+							{
+								header: "Token",
+								question: "Token?",
+								options: [],
+								isSecret: true,
+							},
+							{
+								header: "Code",
+								question: "Code?",
+								options: [],
+								isSecret: true,
+							},
+						],
+					}),
+				);
+				yield* Deferred.await(requested);
+				expect(
+					yield* bindings.resolveQuestion(
+						"session-1",
+						"native-question",
+						original,
+					),
+				).toBe(true);
+				expect(yield* Fiber.join(reply)).toBe(original);
+				const persisted = readFileSync(filename, "utf8");
+				expect(persisted).not.toContain("fixture-spool-secret");
+				expect(persisted).not.toContain("fixture-spool-code");
+				expect(
+					outputs.find((output) => output.type === "resolve-question"),
+				).toMatchObject({
+					answers: { "0": "Safe", "1": "[redacted]", "2": "[redacted]" },
+				});
+			}),
+	);
+
 	it.each([
 		true,
 		false,

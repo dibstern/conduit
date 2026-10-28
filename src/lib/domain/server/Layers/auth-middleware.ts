@@ -126,7 +126,11 @@ export const withAuthGate = <E, R>(
 			}
 		}
 
-		if (req.url.startsWith("/api/") || req.url.includes("/api/")) {
+		if (
+			req.url.startsWith("/api/") ||
+			req.url.includes("/api/") ||
+			/^\/p\/[^/]+\/attachments(?:\/|\?|$)/.test(req.url)
+		) {
 			return HttpServerResponse.jsonUnsafe(
 				{ error: { code: "AUTH_REQUIRED", message: "PIN required" } },
 				{ status: 401 },

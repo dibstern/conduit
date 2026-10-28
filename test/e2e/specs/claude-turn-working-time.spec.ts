@@ -101,7 +101,7 @@ test.describe("Claude turn working time", () => {
 				// updates to an earlier message must not start the next segment.
 				const events = db
 					.prepare(
-						"SELECT type, data, created_at FROM events WHERE session_id = ? AND type IN ('tool.started', 'thinking.start', 'thinking.delta', 'text.delta', 'turn.completed') ORDER BY sequence",
+						"SELECT type, data, created_at FROM events WHERE session_id = ? AND type IN ('tool.started', 'thinking.start', 'thinking.delta', 'text.delta', 'turn.completed', 'message.completed') ORDER BY sequence",
 					)
 					.all(parentId);
 				const firstContentPart = db.prepare(
@@ -110,6 +110,7 @@ test.describe("Claude turn working time", () => {
 					 ORDER BY sort_order LIMIT 1`,
 				);
 				const segments: {
+					eventType: string;
 					messageId: string;
 					firstPartAt: number;
 					endAt: number;
@@ -123,13 +124,18 @@ test.describe("Claude turn working time", () => {
 					};
 				}[] = [];
 				for (const event of events) {
-					if (event["type"] !== "turn.completed") continue;
+					if (
+						event["type"] !== "turn.completed" &&
+						event["type"] !== "message.completed"
+					)
+						continue;
 					const data = JSON.parse(String(event["data"])) as {
 						messageId: string;
 						tokens: (typeof segments)[number]["tokens"];
 						contextTokens?: number;
 					};
 					segments.push({
+						eventType: String(event["type"]),
 						messageId: data.messageId,
 						firstPartAt: Number(
 							firstContentPart.get(data.messageId)?.["created_at"] ??
@@ -189,6 +195,11 @@ test.describe("Claude turn working time", () => {
 							`SELECT id, user_message_id, assistant_message_id, state,
 							        requested_at, started_at, completed_at
 							 FROM turns WHERE session_id = ? ORDER BY requested_at`,
+						)
+						.all(parentId),
+					runStamps: db
+						.prepare(
+							"SELECT id, status, completed_at FROM provider_runs WHERE session_id = ? ORDER BY requested_at, rowid",
 						)
 						.all(parentId),
 				};
@@ -276,6 +287,17 @@ test.describe("Claude turn working time", () => {
 				contextTitle: await context.getAttribute("title"),
 			};
 			expect(final.segments).toHaveLength(results.length);
+			expect(final.segments.map((segment) => segment.eventType)).toEqual([
+				"turn.completed",
+				"message.completed",
+				"message.completed",
+				"message.completed",
+			]);
+			expect(final.runStamps).toHaveLength(1);
+			expect(final.runStamps[0]).toMatchObject({
+				status: "completed",
+				completed_at: final.segments[0]?.endAt,
+			});
 			expect(final.gaps).toHaveLength(results.length - 1);
 			const firstGap = final.gaps[0];
 			if (!firstGap) throw new Error("no wake-up gap was stored");

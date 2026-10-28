@@ -5,25 +5,106 @@ on:
   pull_request:
     branches: [main]
 
+# Static checks, build and unit tests run in parallel. Integration, contract
+# and E2E smokes reuse the build's dist/, as in release CI. A hung step fails
+# its job after 20 minutes.
 jobs:
-  ci:
+  static:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+      - run: pnpm check
+      - run: pnpm lint
+        if: ${{ !cancelled() }}
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+      - run: pnpm build
+      - name: Build-output tests
+        run: pnpm exec vitest run --config vitest.build.config.ts
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          retention-days: 1
+
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       # Project shell env tests capture a real zsh login shell; the runner image has none.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
-      - uses: jdx/mise-action@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm test:unit
+
+  integration:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPENCODE_SERVER_PASSWORD: ci-test-password
+    steps:
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
+      - uses: ./.github/actions/setup
         with:
-          install: true
-          cache: true
-      - name: Cache pnpm store
-        uses: actions/cache@v5
+          opencode: "true"
+      - uses: actions/download-artifact@v8
         with:
-          path: ~/.local/share/pnpm/store
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: ${{ runner.os }}-pnpm-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check        # TypeScript
-      - run: pnpm lint          # Biome
-      - run: pnpm build         # tsgo + vite (needed by test/build/)
-      - run: pnpm test          # Vitest
+          name: dist
+          path: dist/
+      # A smoke of the critical paths: daemon boot, session and message
+      # lifecycle, send, streaming, cancel, multi-client and send recovery.
+      # The full suite takes 45 minutes on a hosted runner and is not yet
+      # green on Linux (conduit-test-lnm8.22).
+      - name: Integration smoke
+        run: >-
+          pnpm test:integration
+          test/integration/flows/daemon-lifecycle.integration.ts
+          test/integration/flows/session-lifecycle.integration.ts
+          test/integration/flows/message-lifecycle.integration.ts
+          test/integration/flows/send-message.integration.ts
+          test/integration/flows/sse-to-ws-pipeline.integration.ts
+          test/integration/flows/cancel-lifecycle.integration.ts
+          test/integration/flows/multi-client.integration.ts
+          test/integration/flows/claude-provider-instance.integration.ts
+          test/integration/persistence/send-attempt-recovery.test.ts
+      - run: pnpm test:contract
+        if: ${{ !cancelled() }}
+
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPENCODE_SERVER_PASSWORD: ci-test-password
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup
+        with:
+          opencode: "true"
+      - run: pnpm exec playwright install --with-deps chromium
+        timeout-minutes: 5
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      # A smoke of each E2E harness: replayed chat and first load, a send
+      # through the built daemon, and the daemon's own smoke (conduit-test-lnm8.22).
+      - name: E2E replay smoke
+        run: pnpm exec playwright test --config test/e2e/playwright-replay.config.ts chat.spec.ts frontend-first-load.spec.ts
+      - name: E2E harness smoke
+        if: ${{ !cancelled() }}
+        run: pnpm exec playwright test --config test/e2e/playwright-harness.config.ts harness-send-shows-message.spec.ts
+        env:
+          CONDUIT_TEST_DIST: dist
+      - name: E2E daemon smoke
+        if: ${{ !cancelled() }}
+        run: pnpm exec playwright test --config test/e2e/playwright-daemon.config.ts daemon-smoke.spec.ts

@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import { changeCursorAuth, cursorAuthFor, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
+	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { PROVIDER_PRESENTATION } from "../../utils/provider-presentation.js";
-	import AccountDot from "../ui/AccountDot.svelte";
+	import HarnessLogo from "../model/HarnessLogo.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
@@ -37,8 +38,8 @@
 <SettingsGroup title={copy.title} testId="cursor-accounts-list">
 	<div class="flex flex-col gap-2 px-[14px] py-[10px] text-[12px] leading-[1.4]" data-testid={account ? `instance-row-${account.id}` : "cursor-auth-account"} data-driver="cursor">
 		{#if account}
-			<div class="flex min-w-0 items-center gap-2 text-[13.5px] text-text max-md:text-[15px]">
-				<AccountDot instanceId={account.id} size={9} />
+			<div class="flex min-w-0 items-center gap-[7px] text-[13.5px] text-text max-md:text-[15px]">
+				<HarnessLogo driver={getInstanceById(account.id)?.driver ?? "cursor"} instanceId={account.id} size={18} aligned data-testid="account-logo" />
 				<span class="truncate">{account.name}</span>
 				{#if account.isDefault}<Badge variant="quiet" size="xs" shape="pill" data-testid="default-account-marker">default</Badge>{/if}
 			</div>

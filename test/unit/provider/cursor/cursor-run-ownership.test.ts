@@ -8,6 +8,7 @@ import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/c
 import { makeCursorSessionRunner } from "../../../../src/lib/provider/cursor/cursor-runner-payload.js";
 import type { CursorSdkPort } from "../../../../src/lib/provider/cursor/sdk-port.js";
 import type { SessionTurn } from "../../../../src/lib/provider/runner/session-runner.js";
+import { cursorCredentialFixture } from "../../../helpers/cursor-account-resources-fixture.js";
 
 const rows = readFileSync(
 	join(import.meta.dirname, "../../../fixtures/cursor-sdk-traces/basic.jsonl"),
@@ -33,6 +34,7 @@ describe("Cursor accepted run ownership", () => {
 		"terminal-error",
 		"recall-before-send",
 		"recall-after-send",
+		"unprepared",
 	] as const)("keeps intake and terminal ownership with %s evidence", async (evidence) => {
 		const root = mkdtempSync(join(tmpdir(), "cursor-run-ownership-"));
 		const events: ProviderRuntimeEvent[] = [];
@@ -110,6 +112,10 @@ describe("Cursor accepted run ownership", () => {
 								workspaceRoot: root,
 								daemonConfigDir: root,
 								port,
+								credential: () =>
+									evidence === "unprepared"
+										? undefined
+										: cursorCredentialFixture("inert-test-key", "environment"),
 								environment: () => ({ CURSOR_API_KEY: "inert-test-key" }),
 								onAbandonedRun: (inputId) => {
 									lifecycle.push(`retire:${inputId}`);
@@ -157,6 +163,15 @@ describe("Cursor accepted run ownership", () => {
 						};
 						const accepted = () =>
 							events.filter((event) => event.type === "run.started");
+						if (evidence === "unprepared") {
+							const result = yield* send("unprepared", "run-unprepared");
+							expect(result).toMatchObject({
+								status: "error",
+								error: { code: "turn_unprepared" },
+							});
+							expect(sends).toBe(0);
+							return;
+						}
 						const first = yield* Effect.forkChild(send("input-a", "run-a"));
 						if (
 							evidence === "recall-before-send" ||

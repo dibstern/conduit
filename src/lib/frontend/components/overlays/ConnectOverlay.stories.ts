@@ -32,10 +32,23 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 /**
- * Overlay visible — shows animated logo and "Connecting to Conduit server..."
- * status text. Simulates the disconnected/connecting state.
+ * Overlay visible: rain on the dot grid, the still logo tile whose hook fires
+ * when a drop lands on it, and the cycling "Connecting…" verb.
  */
-export const Connecting: Story = {};
+export const Connecting: Story = {
+	play: async ({ canvasElement }) => {
+		const hero = canvasElement.querySelector("[data-flow-hero]");
+		await expect(hero).toBeInTheDocument();
+		if (!hero) return;
+		const mark = hero.querySelector("[data-conduit-mark]");
+		await expect(mark?.getBoundingClientRect().width).toBe(96);
+		await expect(hero.querySelectorAll("[data-flow-ripple]")).toHaveLength(0);
+		await expect(hero.querySelector("[data-flow-packet]")).toBeInTheDocument();
+		await expect(canvasElement.querySelector("canvas")).toBeInTheDocument();
+		await expect(canvasElement.textContent).toContain("conduit");
+		await expect(canvasElement.textContent).toContain("Connecting…");
+	},
+};
 
 /**
  * Relay failed to start — overlay shows the error text.

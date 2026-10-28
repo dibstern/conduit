@@ -109,9 +109,10 @@
 <div id="command-menu" class:hidden={!isVisible}>
 	{#if isVisible}
 		<DetachedListbox
+			appearance="final"
 			id={listboxId}
 			ariaLabel={trigger === "$" ? "Built-in commands" : "Slash commands"}
-			class="cmd-menu absolute bottom-full left-0 right-0 mb-1 max-h-[360px] overflow-y-auto p-[6px]"
+			class="cmd-menu absolute bottom-full left-0 mb-1 w-[340px] max-w-full max-h-[360px] overflow-y-auto"
 		>
 			{#each filtered as cmd, i}
 				<CommandOption
@@ -129,10 +130,10 @@
 					}}
 				>
 					<div class="min-w-0 flex-1">
-						<span class="cmd-name block truncate font-mono text-[13.5px] {trigger === '$' && cmd.name === 'goal' ? 'text-status-goal' : 'text-text'}">{trigger}{cmd.name}{#if cmd.args}<span class="cmd-args font-normal text-text-muted"> {cmd.args}</span>{/if}</span>
-						{#if cmd.description}<span class="cmd-desc block truncate text-[12px] text-text-muted">{cmd.description}</span>{/if}
+						<span class="cmd-name block truncate text-[13.5px] text-text">{trigger}{cmd.name}{#if cmd.args}<span class="cmd-args ml-[6px] font-normal text-text-muted"> {cmd.args}</span>{/if}</span>
+						{#if cmd.description}<span class="cmd-desc block truncate text-[12px] text-text-dimmer">{cmd.description}</span>{/if}
 					</div>
-					{#if trigger === "$" && cmd.name === "compact"}<span data-testid="command-context-percent" class="shrink-0 font-mono text-[11.5px] text-text-muted">{Math.round(contextPercent)}%</span>{/if}
+					{#if trigger === "$" && cmd.name === "compact"}<span data-testid="command-context-percent" class="shrink-0 font-mono text-[11.5px] text-text-dimmer">{Math.round(contextPercent)}%</span>{/if}
 				</CommandOption>
 			{/each}
 		</DetachedListbox>

@@ -1,7 +1,9 @@
+import { Result } from "effect";
 import {
 	BUILTIN_TITLE_GENERATION,
 	type TitleGenerationSelection,
 } from "../../../contracts/title-generation.js";
+import { modelParameterChoices } from "../../../provider/turn-settings.js";
 import {
 	applyTitleGeneration,
 	discoveryState,
@@ -113,7 +115,11 @@ export function createTitleModelSelectionTarget() {
 						...next,
 						providerId: model.provider,
 						modelId: previous ? next.modelId : model.id,
-						effort: model.variants?.includes(next.effort) ? next.effort : "",
+						effort: Result.isSuccess(
+							modelParameterChoices(model).resolve(next.effort),
+						)
+							? next.effort
+							: "",
 					};
 					localSelection = next;
 				}
@@ -132,12 +138,16 @@ export function createTitleModelSelectionTarget() {
 
 	const target: ModelSelectionTarget = {
 		get pick() {
+			const cheapest =
+				selection.effort === "" && this.activeModel
+					? modelParameterChoices(this.activeModel).cheapest()
+					: undefined;
 			return {
 				account: accountId,
 				driver: accounts.find((account) => account.id === accountId)?.driver,
 				providerId: selection.providerId,
 				modelId: selection.modelId,
-				effort: selection.effort,
+				effort: cheapest?._tag === "Chosen" ? cheapest.key : selection.effort,
 				contextWindow: null,
 			};
 		},
@@ -161,9 +171,10 @@ export function createTitleModelSelectionTarget() {
 			return false;
 		},
 		get effortOptions() {
-			return this.activeModel?.variants?.length
-				? ["", ...this.activeModel.variants]
+			const choices = this.activeModel
+				? modelParameterChoices(this.activeModel).offered()
 				: [];
+			return choices.length ? ["", ...choices] : [];
 		},
 		get contextWindowOptions() {
 			return [];
@@ -189,7 +200,9 @@ export function createTitleModelSelectionTarget() {
 			void save({
 				account: { _tag: "Id", id: accountId },
 				...pick,
-				effort: model.variants?.includes(selection.effort)
+				effort: Result.isSuccess(
+					modelParameterChoices(model).resolve(selection.effort),
+				)
 					? selection.effort
 					: "",
 			});

@@ -119,7 +119,9 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 					touchPoints: [
 						{
 							x: scrim ? box.x + 10 : box.x + box.width / 2,
-							y: sheet ? (box.y + sheet.y) / 2 : box.y + box.height / 2,
+							y: sheet
+								? (sheet.y + sheet.height + box.y + box.height) / 2
+								: box.y + box.height / 2,
 						},
 					],
 				});
@@ -316,11 +318,9 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 								panel.y >= header.y + header.height
 							: Math.abs(panel.x - header.x) < 2 &&
 								Math.abs(panel.width - header.width) < 2 &&
-								Math.abs(
-									panel.y +
-										panel.height -
-										(world.page.viewportSize()?.height ?? 0),
-								) < 2)
+								Math.abs(panel.y - header.y - header.height) < 2 &&
+								panel.y + panel.height <=
+									(world.page.viewportSize()?.height ?? 0) - 64)
 					);
 				})
 				.toBe(true);
@@ -485,14 +485,17 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 				/Checking.*now/,
 				...checkText(world.page),
 			]);
-			await expect
-				.poll(() =>
-					checks
-						.first()
-						.locator("svg")
-						.evaluate((el) => getComputedStyle(el).animationName),
-				)
-				.toBe("spin");
+			const glyph = checks.first().locator('[data-flow-glyph="running"]');
+			await expect(glyph).toBeVisible();
+			const packet = glyph.locator("[data-flow-packet]");
+			await expect(packet).toBeVisible();
+			const reducedMotion = await world.page.evaluate(
+				() => matchMedia("(prefers-reduced-motion: reduce)").matches,
+			);
+			await expect(packet).toHaveCSS(
+				"animation-name",
+				reducedMotion ? "none" : /flow/,
+			);
 		},
 	},
 	{
@@ -549,7 +552,12 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 				? await phoneSheet.boundingBox()
 				: null;
 			await scrim.click({
-				position: { x: 10, y: sheet ? (sheet.y - box.y) / 2 : box.height - 10 },
+				position: {
+					x: 10,
+					y: sheet
+						? (sheet.y + sheet.height - box.y + box.height) / 2
+						: box.height - 10,
+				},
 			});
 		},
 	},

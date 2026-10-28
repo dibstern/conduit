@@ -3,7 +3,7 @@
  * - Two worktrees inherit the project's branch/merge result, or Local gets a badge.
  * - A merge into local main counts before the remote default branch is fetched.
  * - The merge never reaches the existing settlement sweep with the app closed.
- * - Settlement ends/archives a session or removes its workspace or checkout.
+ * - With cleanup set to Keep, settlement ends/archives a session or removes its workspace or checkout.
  * - A follow-up restarts Claude in the project folder instead of the worktree.
  * - A later default-branch advance, cache refresh or restart re-settles resumed work.
  * - Manual settlement fails to consume a merge, then hides a follow-up again.
@@ -14,6 +14,7 @@ import { basename, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { effectiveWorkingDirectory } from "../../../src/lib/session/session-workspace.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
@@ -193,6 +194,13 @@ describe("Worktree branch settlement through the built daemon", () => {
 			runnerStartupTimeoutMs: 90_000,
 		});
 		const socket = join(fixture.configDir, "relay.sock");
+		// Default cleanup removes merged settled checkouts; this scenario exercises retained workspaces.
+		evidence["worktreeCleanupSetting"] = await sendRpcRequest(socket, {
+			_tag: "SetWorktreeCleanupSetting",
+			scope: "project",
+			projectSlug: "process-test",
+			override: { ...DEFAULT_WORKTREE_CLEANUP, onSettle: "keep" },
+		});
 		const sessions = async () =>
 			(
 				await sendRpcRequest(socket, {
@@ -280,6 +288,19 @@ describe("Worktree branch settlement through the built daemon", () => {
 			});
 			return rows;
 		};
+		const browser = await fixture.connect();
+		await browser.waitFor(
+			(frame) =>
+				frame["type"] === "session_row" &&
+				frame["id"] === ownedId &&
+				(frame["git"] as SessionInfo["git"])?.branch !== undefined,
+		);
+		await browser.waitFor(
+			(frame) =>
+				frame["type"] === "session_row" &&
+				frame["id"] === otherId &&
+				(frame["git"] as SessionInfo["git"])?.branch === "feature/existing",
+		);
 		const initial = await snapshot("initial");
 		const owned = row(initial, ownedId);
 		const ownedPath = owned.workspace?.worktrees[fixture.projectDir];
@@ -291,7 +312,6 @@ describe("Worktree branch settlement through the built daemon", () => {
 		expect(row(initial, otherId).git?.branch).toBe("feature/existing");
 		expect(ownedBranch).not.toBe("feature/existing");
 		expect(row(initial, localId).workspace ?? null).toBeNull();
-		const browser = await fixture.connect();
 		await browser.view(ownedId);
 		await browser.send(
 			ownedId,
@@ -344,7 +364,16 @@ describe("Worktree branch settlement through the built daemon", () => {
 		);
 		git(seed, "push", remote, "trunk");
 		git(fixture.projectDir, "fetch", "origin");
-		// Startup runs the same background sweep and exercises the cold-project reader.
+		// The startup sweep reads published facts; Git refreshes publish asynchronously.
+		await vi.waitFor(
+			async () =>
+				expect(row(await sessions(), ownedId).git).toMatchObject({
+					branch: ownedBranch,
+					merged: true,
+				}),
+			{ timeout: 30_000 },
+		);
+		// Startup runs the periodic sweep and exercises the cold-project reader.
 		await fixture.shutdown();
 		await fixture.restart({
 			startupTimeoutMs: 120_000,
@@ -456,6 +485,14 @@ describe("Worktree branch settlement through the built daemon", () => {
 			startupTimeoutMs: 120_000,
 			runnerStartupTimeoutMs: 90_000,
 		});
+		await vi.waitFor(
+			async () =>
+				expect(row(await sessions(), otherId).git).toMatchObject({
+					branch: "feature/existing",
+					merged: true,
+				}),
+			{ timeout: 30_000 },
+		);
 		const manualResumed = await snapshot("afterManualSettlementAndResume");
 		expect(row(manualResumed, otherId)).toMatchObject({
 			git: { merged: true },

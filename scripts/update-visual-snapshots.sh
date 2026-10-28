@@ -78,11 +78,16 @@ update_linux() {
   # so every pre-existing linux baseline is stale by an amount smaller than the
   # tolerance that would decide whether to rewrite it. Strict sets threshold 0, so
   # "changed" means "differs at all" and the whole set is genuinely regenerated.
+  # 4, not the config default of 8: this leg runs Chromium under amd64 emulation,
+  # ~8x slower than native, so 8 workers on a busy host pushed play-function
+  # stories past the 10s test budget (conduit-test-r5yy7: 13-54 timeouts per run,
+  # zero pixel diffs). Measured 2026-10-28, same 62 stories: 8 workers p90 10.9s,
+  # 4 workers p90 8.1s and all green under load ~55.
   docker run --rm \
     -v "$ROOT_DIR":/work \
     -w /work \
     -e VISUAL_STRICT=1 \
-    -e VISUAL_WORKERS="${VISUAL_WORKERS:-8}" \
+    -e VISUAL_WORKERS="${VISUAL_WORKERS:-4}" \
     --platform linux/amd64 \
     -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     "$DOCKER_IMAGE" \

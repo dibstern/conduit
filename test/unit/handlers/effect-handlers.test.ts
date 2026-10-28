@@ -2195,7 +2195,7 @@ describe("handleAskUserResponse", () => {
 				getClientsForSession: vi.fn(() => ["client-1"]),
 			});
 			const engine = withDispatchEffect({ dispatchEffect: vi.fn(() => Effect.void) });
-			const completeRecoveredQuestion = vi.fn(() => Effect.void);
+			const completeRecoveredQuestion = vi.fn(() => Effect.succeed(true));
 			const sendTurn = vi.fn(() => Effect.void);
 			const turns: ProviderTurnService = {
 				holdUserTurnsForAccountSwitch: () => Effect.void,
@@ -2229,10 +2229,21 @@ describe("handleAskUserResponse", () => {
 						questions: [{ question: "Which colour?" }],
 					},
 				]);
+				const read = yield* ReadQueryEffectTag;
 				yield* handleAskUserResponse("client-1", {
 					toolId: "toolu-1",
 					answers: { "0": "red" },
-				});
+				}).pipe(Effect.provideService(ReadQueryEffectTag, {
+					...read,
+					getPendingClaudeQuestionTool: () => Effect.succeed({
+						id: "toolu-1",
+						call_id: "toolu-1",
+						message_id: "message-1",
+						input: null,
+						created_at: 1,
+						session_id: "question-session",
+					}),
+				}));
 				expect(engine.dispatchEffect).toHaveBeenCalledExactlyOnceWith({
 					type: "resolve_question",
 					commandId: expect.any(String),
@@ -2409,6 +2420,8 @@ describe("handleNewSession", () => {
 					expect(ws.setClientSession).toHaveBeenCalledWith(
 						"client-1",
 						"new-session-1",
+						"test-project",
+						undefined,
 					);
 					expect(log.info).toHaveBeenCalledWith(
 						"client=client-1 Created: new-session-1",
@@ -2456,6 +2469,8 @@ describe("handleNewSession", () => {
 				expect(ws.setClientSession).toHaveBeenCalledWith(
 					"client-1",
 					"opencode-session",
+					"test-project",
+					undefined,
 				);
 			})),
 		);

@@ -887,22 +887,38 @@ export class MockOpenCodeServer {
 		// POST /session: use queue if available, otherwise generate dynamic session.
 		// Dynamic sessions are injected into the GET /session queue fallback so
 		// subsequent list requests include them without a separate intercept.
-		if (method === "POST" && basePath === "/session") {
+		if (
+			method === "POST" &&
+			(basePath === "/session" || basePath === "/api/session")
+		) {
 			let title = "Untitled";
+			let requestedId: string | undefined;
+			let directory = this.defaultDirectory;
 			if (rawBody) {
 				try {
 					const parsed = JSON.parse(rawBody) as Record<string, unknown>;
 					if (typeof parsed["title"] === "string") title = parsed["title"];
+					if (basePath === "/api/session") {
+						if (typeof parsed["id"] === "string") requestedId = parsed["id"];
+						const location = parsed["location"];
+						if (
+							location !== null &&
+							typeof location === "object" &&
+							"directory" in location &&
+							typeof location.directory === "string"
+						)
+							directory = location.directory;
+					}
 				} catch {
 					/* ignore */
 				}
 			}
 
 			// Each recorded creation owns one ID; generate fresh IDs once exhausted.
-			const sessionQueue = this.getActiveQueue(
-				this.exactQueues,
-				"POST /session",
-			);
+			const sessionQueue =
+				basePath === "/session"
+					? this.getActiveQueue(this.exactQueues, "POST /session")
+					: undefined;
 			if (sessionQueue && sessionQueue.length >= 1) {
 				const entry = sessionQueue[0] as QueuedRestResponse;
 				if (!entry.sticky) sessionQueue.shift();
@@ -937,18 +953,20 @@ export class MockOpenCodeServer {
 			}
 
 			// Generate dynamic session and inject into GET /session fallback
-			const id = `ses_mock${String(++this.sessionCounter).padStart(3, "0")}`;
+			const id =
+				requestedId ??
+				`ses_mock${String(++this.sessionCounter).padStart(3, "0")}`;
 			const now = Date.now();
 			const session: Session = {
 				id,
 				slug: id,
 				projectID: "mock-project",
-				directory: this.defaultDirectory,
+				directory,
 				title,
 				version: "1.19.1",
 				time: { created: now, updated: now },
 			};
-			this.sessionDirectories.set(id, this.defaultDirectory);
+			this.sessionDirectories.set(id, directory);
 			this.injectedSessions.set(id, { ...session });
 			this.injectIntoSessionListFallback(session);
 			res.writeHead(200, { "Content-Type": "application/json" });

@@ -16,12 +16,14 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import type {
 	MessagePartRow,
 	MessageWithParts,
 } from "../../../src/lib/persistence/read-model-types.js";
+import { CursorAccountResources } from "../../../src/lib/provider/cursor/cursor-account-resources.js";
 import { discoverCursorEffect } from "../../../src/lib/provider/cursor/cursor-runner-driver.js";
 import {
 	cursorSessionStorePath,
@@ -30,6 +32,7 @@ import {
 import { createTraceCursorSdkPort } from "../../../src/lib/provider/cursor/sdk-trace-player.js";
 import { renderForkDigest } from "../../../src/lib/provider/fork-digest.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
+import { cursorAccountResourcesFixture } from "../../helpers/cursor-account-resources-fixture.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 interface TraceRow {
@@ -191,7 +194,17 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 		);
 		expect(
 			await Effect.runPromise(
-				discoverCursorEffect(createTraceCursorSdkPort(trace)),
+				discoverCursorEffect({
+					driver: "cursor",
+					id: AccountIdSchema.make("cursor-fork-replay"),
+					name: "Cursor fork replay",
+					usageEligible: false,
+				}).pipe(
+					Effect.provideService(
+						CursorAccountResources,
+						cursorAccountResourcesFixture(createTraceCursorSdkPort(trace)),
+					),
+				),
 			),
 		).toMatchObject({ supportsFork: true, supportsRevert: false });
 		const restart = (holdBeforeSend = false) =>

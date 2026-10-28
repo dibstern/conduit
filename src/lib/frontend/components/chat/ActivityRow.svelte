@@ -1,7 +1,7 @@
 <!-- One step in the expanded log: icon · verb · subject · how long it took.      -->
 <!-- Click to see foreground output or open a background agent's task.            -->
 <script lang="ts">
-	import BlockGrid from "../ui/BlockGrid.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -33,6 +33,7 @@
 	import SkillDoc from "./SkillDoc.svelte";
 	import ToolFullDetail from "./ToolFullDetail.svelte";
 	import ToolItem from "./ToolItem.svelte";
+	import ShellToolDetail from "./ShellToolDetail.svelte";
 
 	let {
 		part,
@@ -92,13 +93,23 @@
 		openTask({ id: taskId, sessionId: childSession, description }, { messageId, partId });
 	}
 
+	function hasRowSelection(event: MouseEvent) {
+		const selection = window.getSelection();
+		const row = event.currentTarget;
+		if (!selection || selection.isCollapsed || !(row instanceof Node)) return false;
+		for (let index = 0; index < selection.rangeCount; index++) {
+			if (selection.getRangeAt(index).intersectsNode(row)) return true;
+		}
+		return false;
+	}
+
 </script>
 
 {#if part.type === "tool" && isHandBack(part)}
 	<div data-part={part.uuid}><ToolItem message={part} presentation="log" onopen={onhandback} /></div>
 {:else if part.type === "tool"}
-	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.status !== "error" && !part.isError)}
-	{@const failed = part.status === "error" || part.isError}
+	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.outcome !== "failed")}
+	{@const failed = part.outcome === "failed"}
 	{@const movedToBackground = part.metadata?.['movedToBackground'] === true}
 	{@const isSkill = part.name === "Skill"}
 	{@const verb = isSkill ? "Skill" : movedToBackground ? "Moved to background" : running && !launch ? "Running" : toolVerb(part, running ? "present" : "past")}
@@ -118,7 +129,7 @@
 	>
 		<div class="flex items-center gap-[6px]">
 			<Button
-				variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" disabledStyle="undimmed"
+				variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="activity" disabledStyle="undimmed"
 				class={launch ? "@container" : ""}
 				disabled={!!launch && !childSession}
 				aria-expanded={launch ? undefined : expanded}
@@ -133,7 +144,8 @@
 							.filter(Boolean)
 							.join(", ")
 					: `${verb} ${subject}`}
-				onclick={() => {
+				onclick={(event) => {
+					if (hasRowSelection(event)) return;
 					if (launch) return openChildSession(subject);
 					expanded = !expanded;
 				}}
@@ -166,8 +178,8 @@
 					{@const lead = launchMeta(launch)}
 					{@const usage = launchUsage(launch)}
 					<!-- Status and time stay whole; a narrow row drops the usage. -->
-					<span class="launch-meta ml-auto shrink-0 whitespace-nowrap font-mono text-mono-time"><span class={launchTone}>{lead}</span>{#if usage}<span class="text-text-dimmer @max-[480px]:hidden">{lead ? " · " : ""}{usage}</span>{/if}</span>
-				{:else if !running && meta}<time class="ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</time>{/if}
+					<span class="launch-meta ml-auto shrink-0 whitespace-nowrap font-mono text-mono-time"><span class="{launchTone} {launchTone === 'text-text-dimmer' ? 'activity-time' : ''}">{lead}</span>{#if usage}<span class="text-text-dimmer @max-[480px]:hidden">{lead ? " · " : ""}{usage}</span>{/if}</span>
+				{:else if !running && meta}<time class="activity-time ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</time>{/if}
 				{#if launch?.state.kind === "finished"}
 					<span class="shrink-0 {launchTone} [&_.lucide]:w-3 [&_.lucide]:h-3" aria-hidden="true">
 						<Icon name={{ completed: "circle-check", failed: "circle-x", stopped: "circle-stop" }[launch.state.outcome]} size={12} />
@@ -202,26 +214,30 @@
 		{#if !launch && expanded && isSkill}
 			<div class="ml-[22px] mr-[4px] my-[4px]"><SkillDoc name={subject} /></div>
 		{:else if !launch && expanded && (part.result || command || hasLiveOutput || cursorDetail)}
-			<ToolFullDetail message={part} class="ml-[22px] mr-[4px] mb-[4px]">
+			<ToolFullDetail message={part} showExitCode={ensureCanonical(part.name, part.input).tool !== "Bash"} class="ml-[22px] mr-[4px] mb-[4px]">
 				{#snippet children(tool)}
 					{@const fullCommand = toolCommand(tool)}
+					{#if ensureCanonical(tool.name, tool.input).tool === "Bash"}
+						<ShellToolDetail {tool} command={fullCommand ?? ""} />
+					{:else}
 					<div
-						class="tool-result my-[4px] py-[8px] px-[10px] font-mono text-mono-xs leading-[1.6] whitespace-pre-wrap break-all bg-code-bg rounded-[6px] max-h-[300px] overflow-y-auto {tool.isError ? 'text-error' : 'text-text-secondary'}"
+						class="tool-result my-[4px] py-[8px] px-[10px] font-mono text-mono-xs leading-[1.6] whitespace-pre-wrap break-all bg-code-bg rounded-[6px] max-h-[300px] overflow-y-auto {tool.outcome === 'failed' ? 'text-error' : 'text-text-secondary'}"
 					>{#if fullCommand}<span class="text-text-muted">$ {fullCommand}</span>{#if tool.result}{"\n\n"}{/if}{/if}{tool.result ?? ""}</div>
+					{/if}
 				{/snippet}
 			</ToolFullDetail>
 		{/if}
 	</div>
 {:else if part.type === "thinking"}
 	<div class="thinking-block thinking-item" class:done={part.done} data-part={part.uuid}>
-		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
+		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="activity" aria-expanded={expanded} onclick={(event) => { if (!hasRowSelection(event)) expanded = !expanded; }}>
 			<span class="shrink-0 {style.text}">
 				<Icon name={style.icon} size={14} />
 			</span>
 			<span class="thinking-label shrink-0 font-medium text-text-secondary">{part.done ? "Thought" : thinkingVerb(part)}</span>
 			<span class="flex-1 truncate text-text-dimmer italic">{firstLine(part.text, 80)}</span>
-			{#if meta}<span class="thinking-duration shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}
-			{#if !part.done}<BlockGrid cols={4} mode="fast" blockSize={1.5} gap={0.5} class="shrink-0" />{/if}
+			{#if meta}<span class="activity-time thinking-duration shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}
+			{#if !part.done}<ConduitMark size={16} variant="running" />{/if}
 		</Button>
 		{#if expanded && part.text}
 			<div
@@ -251,11 +267,11 @@
 	</div>
 {:else}
 	<div data-part={part.uuid} data-message-number={messageNumber}>
-		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={onmessage ? undefined : expanded} onclick={() => { if (onmessage) onmessage(); else expanded = !expanded; }}>
+		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="activity" aria-expanded={onmessage ? undefined : expanded} onclick={(event) => { if (hasRowSelection(event)) return; if (onmessage) onmessage(); else expanded = !expanded; }}>
 			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs {style.text}" style:color={messageCategory?.colour}>{#if messageCategory}<span aria-hidden="true">{messageCategory.glyph}</span>{" "}{/if}#{messageNumber}</span>
 			{:else}<span class="shrink-0 {style.text}"><Icon name={style.icon} size={14} /></span>{/if}
 			<span class="flex-1 truncate italic text-text-secondary">{firstLine(part.rawText, 120)}</span>
-			{#if meta}<span class="shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}
+			{#if meta}<span class="activity-time shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</span>{/if}
 		</Button>
 		{#if expanded}
 			<div class="ml-[22px] mr-[4px] my-[4px] md-content text-[13px] leading-[1.6] italic text-text-secondary">{@html part.html}</div>

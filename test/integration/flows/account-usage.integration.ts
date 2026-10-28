@@ -28,6 +28,7 @@ import {
 	orderedUsageAccounts,
 } from "../../../src/lib/frontend/stores/usage.svelte.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { CodexAccountResources } from "../../../src/lib/provider/codex/codex-account-resources.js";
 
 it("filters usage by directory eligibility on the server and in both browser lists", async () => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-account-usage-"));
@@ -75,6 +76,9 @@ it("filters usage by directory eligibility on the server and in both browser lis
 	);
 	const dependencies = Layer.mergeAll(
 		registry,
+		Layer.succeed(CodexAccountResources)({
+			use: () => Effect.die("Unexpected Codex account use"),
+		}),
 		makeDaemonStateLive({ configDir: root }),
 		DaemonEventBusLive,
 		ConfigPersistenceNoopLive,

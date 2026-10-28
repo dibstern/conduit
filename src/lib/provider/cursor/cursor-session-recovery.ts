@@ -53,6 +53,17 @@ export function readCursorSessionIdentity(
 	};
 }
 
+export function resolveCursorSessionCwd<Root extends string | undefined>(
+	identity: CursorSessionIdentity | undefined,
+	providerState: Readonly<Record<string, unknown>>,
+	workspaceRoot: Root,
+): string | Root {
+	const storedCwd = providerState["cursor.cwd"];
+	return (
+		identity?.cwd ?? (typeof storedCwd === "string" ? storedCwd : workspaceRoot)
+	);
+}
+
 export function writeCursorSessionIdentity(
 	configDir: string,
 	sessionId: string,

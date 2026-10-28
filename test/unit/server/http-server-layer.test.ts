@@ -1,6 +1,6 @@
 // Tests for the Effect-based HTTP server layer (http-server-layer.ts).
 //
-// Uses NodeHttpServer.layerTest to spin up a real HTTP server on a random port
+// Uses NodeHttpServer to spin up a real HTTP server on a random loopback port
 // with an HttpClient that knows the server's address. This validates that
 // the router is correctly wired through the server layer.
 //
@@ -9,6 +9,7 @@
 //   GET  /api/setup-info
 
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -18,7 +19,13 @@ import {
 } from "@effect/platform-node";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import { HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
+import {
+	FetchHttpClient,
+	HttpClient,
+	HttpClientRequest,
+	HttpRouter,
+	HttpServer,
+} from "effect/http";
 import { afterAll, beforeAll, expect } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
@@ -243,7 +250,7 @@ describe("Effect HTTP Router - Extended Routes", () => {
 });
 
 describe("HTTP Server Layer", () => {
-	// The NodeHttpServer.layerTest provides:
+	// The test server provides:
 	// 1. An HTTP server on port 0 (random)
 	// 2. An HttpClient with the server URL prepended
 	// 3. Platform context (FileSystem, Etag, Path)
@@ -257,10 +264,23 @@ describe("HTTP Server Layer", () => {
 		baseRouterLayer(),
 	);
 
-	// Build a test layer: layerTest provides HttpServer + HttpClient,
-	// HttpRouter.serve wires the router into the server.
+	// layerTest binds IPv6 :: but its client dials IPv4 loopback. On macOS,
+	// another IPv4 listener can own that same port, so bind both ends to IPv4.
 	const TestServerLayer = HttpRouter.serve(effectRouterWithCors).pipe(
-		Layer.provideMerge(NodeHttpServer.layerTest),
+		Layer.provideMerge(
+			HttpServer.layerTestClient.pipe(
+				Layer.provide(
+					Layer.fresh(FetchHttpClient.layer).pipe(
+						Layer.provide(
+							Layer.succeed(FetchHttpClient.RequestInit)({ keepalive: false }),
+						),
+					),
+				),
+				Layer.provideMerge(
+					NodeHttpServer.layer(createServer, { port: 0, host: "127.0.0.1" }),
+				),
+			),
+		),
 		Layer.provideMerge(AllTestLayers),
 	);
 

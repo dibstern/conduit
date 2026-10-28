@@ -147,3 +147,12 @@ export const MultipleToasts: Story = {
 		{ title: "Connection lost", variant: "warn", actions: [] },
 	),
 };
+
+export const AttentionToast: Story = {
+	name: "Attention (another session needs you)",
+	beforeEach: show({
+		title: "Fix authentication bug needs approval",
+		variant: "attention",
+		actions: [{ label: "Open", run: fn(), kind: "primary" }],
+	}),
+};

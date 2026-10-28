@@ -1,5 +1,22 @@
 Feature: Cursor monthly usage uses an explicitly enabled credential
 
+Scenario Outline: Cursor account tiles count configured accounts even when one is unavailable
+  Given the conduit app is served with the connected mockup
+  And a Cursor account is available with its live models
+  And the harness logo is viewed in the <tier> tier
+  And Cursor plan usage is can_enable
+  When I open settings to the Usage section
+  Then the Cursor Usage account cursor-work shows its logo without a letter badge
+  Given a second Cursor usage account is configured but unavailable
+  Then the Cursor Usage account cursor-work shows its logo with a letter badge
+  And the Cursor Usage account cursor-personal shows its logo with a letter badge
+  And the Cursor Usage account names are left aligned
+
+Examples:
+  | tier  |
+  | wide  |
+  | phone |
+
 Scenario Outline: a Cursor reading appears in the existing Month footer
   Given the conduit app is served with the connected mockup
   And a Cursor account is available with its live models

@@ -29,6 +29,14 @@ const PHONE_VIEWPORT_TAG = "visual-phone-viewport";
 const POINTER_HOVER_TAG = "visual-pointer-hover";
 
 const LIGHT_STORY_IDS = new Set([
+	"overlays-connectoverlay--connecting",
+	"ui-conduitlogo--loading",
+	"ui-sessionstatusglyph--running",
+	"ui-sessionstatusglyph--monitoring",
+	"ui-sessionstatusglyph--unread",
+	"ui-sessionstatusglyph--idle",
+	"input-filemenu--loading",
+	"file-fileviewer--loading",
 	// The OpenCode mark is drawn from the text colour and must stay legible.
 	"ui-icon--open-code-mark",
 	// The sidebar and the file browser expose the main navigation palette.
@@ -461,6 +469,9 @@ if (stories.length > 0) {
 		["ui-menu-in-modal--keyboard-and-pointer-selection", "all"],
 		["fixtures-modalfocus--default", "all"],
 		["ui-modal--escape-restores-focus", "all"],
+		// Behaviour-only: desktop keyboard browsing, asserted by play(). It ends on
+		// the same frame as ghost-completion-and-crumb-navigation.
+		["project-projectdialog--browse-keyboard-navigation", "all"],
 		["model-agentselector--single-agent", "all"],
 		["model-agentselector--no-agents", "all"],
 		["chat-pastepreview--empty", "all"],
@@ -629,8 +640,12 @@ if (stories.length > 0) {
 					}
 					await pinRandomness(page);
 					await pinClock(page);
+					// a11y.manual skips the addon's axe pass. Pixels never depend on it,
+					// and under the emulated Docker leg it costs ~1s of each story's 10s
+					// budget even with no contention (conduit-test-r5yy7).
+					// Accessibility stays covered by the Storybook Vitest project.
 					await page.goto(
-						`/iframe.html?id=${story.id}&viewMode=story${theme === "light" ? "&globals=theme:light" : ""}`,
+						`/iframe.html?id=${story.id}&viewMode=story&globals=a11y.manual:!true${theme === "light" ? ";theme:light" : ""}`,
 						{
 							waitUntil: "domcontentloaded",
 						},

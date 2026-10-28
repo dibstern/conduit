@@ -44,6 +44,7 @@ import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
+import { CodexAccountResourcesLive } from "../../../provider/codex/codex-account-resources.js";
 import { CursorAccountResourcesLive } from "../../../provider/cursor/cursor-account-resources.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import {
@@ -87,6 +88,7 @@ import {
 	DaemonLifecycleContextTag,
 } from "../Services/daemon-lifecycle-context.js";
 import {
+	DaemonEvent,
 	DaemonEventBusLive,
 	DaemonEventBusTag,
 } from "../Services/daemon-pubsub.js";
@@ -94,6 +96,7 @@ import {
 	DaemonStateTag,
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
+import { EventLoopBlockMonitorLive } from "../Services/event-loop-delay.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
 	ManagedOpenCodeLifecycleLive,
@@ -122,6 +125,7 @@ import {
 	makeSharedSessionDirectoryLive,
 	SessionDirectory,
 } from "../Services/session-directory.js";
+import { SessionGit, SessionGitLive } from "../Services/session-git.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AccountPictureLive } from "./account-picture-layer.js";
 import { makeAccountResourceScopesLive } from "./account-resource-scopes-layer.js";
@@ -142,6 +146,7 @@ import {
 import { KeepAwakeLive } from "./keep-awake-layer.js";
 import { MessageSurfacingSettingsLive } from "./message-surfacing-settings-layer.js";
 import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
+import { OwnerScopesLive } from "./owner-scopes-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
 import { ProjectContextLive } from "./project-context-layer.js";
@@ -160,6 +165,7 @@ import {
 	StorageMonitorLive,
 	StorageMonitorTag,
 } from "./storage-monitor-layer.js";
+import { SubprocessLive } from "./subprocess-layer.js";
 import {
 	TailscaleCliLive,
 	TailscaleServeLive,
@@ -693,6 +699,8 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// These Layers have zero dependencies on other Tags. They form the base
 	// of the Layer stack that all subsequent tiers build on.
 	const foundation = Layer.mergeAll(
+		EventLoopBlockMonitorLive.pipe(Layer.provide(PinoLoggerLive)),
+		SubprocessLive,
 		Layer.effectDiscard(
 			Effect.acquireRelease(Effect.sync(startContentionMetrics), (metrics) =>
 				Effect.tryPromise(async () => {
@@ -829,9 +837,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	)
 		.pipe(Layer.provideMerge(stateLayer))
 		.pipe(Layer.provideMerge(auxiliaryServices));
-	const registryState = CursorAccountResourcesLive(configDir).pipe(
-		Layer.provideMerge(registryBase),
-	);
+	const registryState = Layer.merge(
+		CursorAccountResourcesLive(configDir),
+		CodexAccountResourcesLive(configDir),
+	).pipe(Layer.provideMerge(registryBase));
 
 	const effectSnapshotLayer = ConfigSnapshotFromEffectStateLive.pipe(
 		Layer.provideMerge(
@@ -863,8 +872,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withOpenCodeInstances));
-	const withProjectContext = ProjectContextLive.pipe(
+	const withOwnerScopes = OwnerScopesLive.pipe(
 		Layer.provideMerge(withSessionDirectory),
+	);
+	const withProjectContext = ProjectContextLive.pipe(
+		Layer.provideMerge(withOwnerScopes),
 	);
 	const withInputDrafts = Layer.unwrap(
 		Effect.gen(function* () {
@@ -883,6 +895,30 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		}),
 		MessageSurfacingSettingsLive,
 	).pipe(Layer.provideMerge(withProviderAdapters));
+	const withSessionGit = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			return SessionGitLive.pipe(
+				Layer.provide(
+					makePersistenceDaemonLayer().pipe(
+						Layer.provideMerge(Layer.succeedContext(store)),
+					),
+				),
+			);
+		}),
+	).pipe(Layer.provideMerge(withWorktrees));
+	const withGitChanges = Layer.effectDiscard(
+		Effect.gen(function* () {
+			const git = yield* SessionGit;
+			const bus = yield* DaemonEventBusTag;
+			yield* git.changes.pipe(
+				Stream.runForEach(() =>
+					PubSub.publish(bus, DaemonEvent.ProjectsChanged()),
+				),
+				Effect.forkScoped,
+			);
+		}),
+	).pipe(Layer.provideMerge(withSessionGit));
 	const withSessionWorkspace = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;
@@ -894,7 +930,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				),
 			);
 		}),
-	).pipe(Layer.provideMerge(withWorktrees));
+	).pipe(Layer.provideMerge(withGitChanges));
 	const withOrchestration = DaemonOrchestrationLive.pipe(
 		Layer.provideMerge(withSessionWorkspace),
 	);

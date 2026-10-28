@@ -135,6 +135,7 @@ export interface SubscriptionSource<T, E = never> {
 					readonly id: string;
 					readonly version: number;
 					readonly deleted?: boolean;
+					readonly projectSlug?: string;
 				}[];
 				/**
 				 * The oldest cursor the tombstones cover. A resume from below it, or
@@ -209,14 +210,16 @@ const deltaEnvelopes = <T>(
 		readonly id: string;
 		readonly version: number;
 		readonly deleted?: boolean;
+		readonly projectSlug?: string;
 	}[],
 ): Envelope<T>[] =>
 	[
-		...removed.map(({ id, version, deleted }) => ({
+		...removed.map(({ id, version, deleted, projectSlug }) => ({
 			_tag: "remove" as const,
 			id,
 			sequence: version,
 			...(deleted === true ? { deleted } : {}),
+			...(projectSlug === undefined ? {} : { projectSlug }),
 		})),
 		...rows.map(({ item, version }) => ({
 			_tag: "upsert" as const,

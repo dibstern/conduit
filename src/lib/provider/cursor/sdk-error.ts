@@ -100,7 +100,7 @@ export function cursorTurnError(cause: unknown): TurnError {
 	} else if (
 		code === "BAD_MODEL_NAME" ||
 		code === "MODEL_BLOCKED" ||
-		// 1.0.37's local catalogue rejection has no code (resolveLocalModelSelection).
+		// The local model-catalogue rejection carries no code.
 		(name === "ConfigurationError" &&
 			code === undefined &&
 			message.startsWith("Cannot use this model:"))

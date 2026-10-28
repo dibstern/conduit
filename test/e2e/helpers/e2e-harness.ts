@@ -300,22 +300,24 @@ export async function createReplayHarness(
 		},
 		configDir,
 	);
-	if (claudeReplayer) {
-		// Capability discovery would otherwise spawn the real Claude CLI.
-		__setProbeOverrideForTesting(async () => ({
-			models: options.claudeReplay?.models ?? [
-				{
-					id: CLAUDE_TRACE_MODEL,
-					name: "Claude Fable 5",
-					providerId: "claude",
-					// The real catalog advertises effort levels for Fable.
-					variants: { low: {}, medium: {}, high: {} },
-				},
-			],
-			commands: [],
-			agents: [],
-		}));
-	}
+	// Capability discovery would otherwise spawn the real Claude CLI, even for
+	// OpenCode-only replays (GetModels also discovers the default Claude), and
+	// that process outlives stop() and writes into configDir.
+	__setProbeOverrideForTesting(async () => ({
+		models: claudeReplayer
+			? (options.claudeReplay?.models ?? [
+					{
+						id: CLAUDE_TRACE_MODEL,
+						name: "Claude Fable 5",
+						providerId: "claude",
+						// The real catalog advertises effort levels for Fable.
+						variants: { low: {}, medium: {}, high: {} },
+					},
+				])
+			: [],
+		commands: [],
+		agents: [],
+	}));
 
 	const daemonReads = options.daemonSessionQueries
 		? ManagedRuntime.make(
@@ -386,6 +388,8 @@ export async function createReplayHarness(
 			log: createSilentLogger(),
 		});
 	let stack: RelayStack = await startStack(0);
+	let stoppedStack: RelayStack | undefined;
+	let mockStopped = false;
 
 	const relayPort = stack.getPort();
 	const relayBaseUrl = `http://127.0.0.1:${relayPort}`;
@@ -422,11 +426,18 @@ export async function createReplayHarness(
 		},
 		async stop(): Promise<void> {
 			try {
-				await stack.stop();
-				await mock.stop();
+				// A later cleanup failure must not dispose the same runtime twice.
+				if (stoppedStack !== stack) {
+					await stack.stop();
+					stoppedStack = stack;
+				}
+				if (!mockStopped) {
+					await mock.stop();
+					mockStopped = true;
+				}
 			} finally {
 				await daemonReads?.dispose();
-				if (claudeReplayer) __setProbeOverrideForTesting(undefined);
+				__setProbeOverrideForTesting(undefined);
 				await stopPtyHost({ configDir, force: true });
 			}
 			rmSync(configDir, { recursive: true, force: true });

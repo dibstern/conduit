@@ -10,6 +10,7 @@ export interface ToolMessageInit {
 	id: string;
 	name: string;
 	status: ToolStatus;
+	outcome?: "succeeded" | "failed";
 	result?: string;
 	isError?: boolean;
 	input?: unknown;
@@ -33,6 +34,7 @@ export function createToolMessage(init: ToolMessageInit): ToolMessage {
 		id: init.id,
 		name: init.name,
 		status: init.status,
+		...(init.outcome !== undefined && { outcome: init.outcome }),
 		...(init.result !== undefined && { result: init.result }),
 		...(init.isError !== undefined && { isError: init.isError }),
 		...(init.input !== undefined && { input: init.input }),

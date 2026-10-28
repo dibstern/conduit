@@ -110,7 +110,7 @@ export const SessionSetupLive = Layer.effect(
 								prepareShellEnv(config.projectDir),
 							);
 						}
-						const env = config.shellEnv?.(config.projectDir) ?? process.env;
+						const env = config.shellEnv?.(config.projectDir).env ?? process.env;
 						yield* worktrees.value.runSetup(directory, script, env).pipe(
 							Stream.runForEach((update) =>
 								update._tag === "output"

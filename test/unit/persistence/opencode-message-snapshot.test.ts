@@ -38,6 +38,8 @@ const wirePart = <
 		...part,
 		state: {
 			...rest,
+			...(rest["status"] === "completed" && { outcome: "succeeded" as const }),
+			...(rest["status"] === "error" && { outcome: "failed" as const }),
 			...(input !== undefined && { input: { _tag: "whole", value: input } }),
 			...(typeof output === "string" && {
 				output: { _tag: "whole", text: output },
@@ -88,7 +90,7 @@ const assistant: Message = {
 			type: "file",
 			mime: "text/plain",
 			filename: "a.txt",
-			url: "file://a",
+			source: { url: "file://a" },
 		},
 		{ id: "answer", type: "text", text: "done" },
 		{ id: "step-finish", type: "step-finish", cost: 0.5 },

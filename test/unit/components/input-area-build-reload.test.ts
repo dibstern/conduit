@@ -84,7 +84,15 @@ describe("InputArea build reload recovery", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-10-02T00:00:00Z"));
-		vi.mocked(rpc).mockReset().mockResolvedValue({ ok: true });
+		vi.mocked(rpc)
+			.mockReset()
+			.mockImplementation((tag) =>
+				// These cases hold the upload open, rather than returning a text-sync reply
+				// for an AddDraftAttachment request.
+				tag === "AddDraftAttachment"
+					? new Promise<never>(() => {})
+					: Promise.resolve({ ok: true }),
+			);
 		sessionStorage.clear();
 		openSessionForSetup(sessionId, "test");
 		attachedProjectState.slug = "test";

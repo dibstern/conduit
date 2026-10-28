@@ -7,8 +7,9 @@
 	import { refreshServerStatus } from "../../stores/server-status.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
-	import AccountDot from "../ui/AccountDot.svelte";
+	import HarnessLogo from "../model/HarnessLogo.svelte";
 	import Icon from "../ui/Icon.svelte";
+	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import SegmentedControl from "../ui/SegmentedControl.svelte";
@@ -281,7 +282,7 @@
 		disabled={scanInFlight}
 		onclick={handleScanNow}
 	>
-		<Icon name="refresh-cw" size={12} class={scanInFlight ? "animate-spin" : ""} />
+		{#if scanInFlight}<ConduitMark size={12} variant="running" tone="inherit" />{:else}<Icon name="refresh-cw" size={12} />{/if}
 		{scanInFlight ? "Scanning..." : "Scan"}
 	</Button>
 	<Button touchTarget
@@ -376,7 +377,7 @@
 				{#each accounts as inst (inst.id)}
 					<div data-testid="instance-row-{inst.id}" data-driver={driver}>
 						<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
-							<AccountDot instanceId={inst.id} size={9} />
+							<HarnessLogo {driver} instanceId={inst.id} size={18} aligned data-testid="account-logo" />
 							<div class="flex-1 min-w-0">
 								<div class="flex items-center gap-[6px] text-[13.5px] max-md:text-[15px] text-text">
 									<span class="truncate">{inst.name}</span>
@@ -423,11 +424,12 @@
 		{#each serverInstances as inst (inst.id)}
 			<div data-testid="instance-row-{inst.id}" data-driver={inst.driver ?? "opencode"}>
 				<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
-					<span data-testid="instance-status-dot" class={"size-[7px] rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
+					<HarnessLogo driver={inst.driver ?? "opencode"} instanceId={inst.id} size={18} aligned data-testid="account-logo" />
 					<div class="flex-1 min-w-0 flex items-center gap-[6px] text-[13.5px] max-md:text-[15px] text-text">
 						<span class="truncate">{inst.name}</span>
 						{#if !inst.managed}<Badge variant="quiet" size="xs" shape="pill">discovered</Badge>{/if}
 					</div>
+					<span data-testid="instance-status-dot" class={"size-[7px] rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
 					<span class="font-mono text-[12px] text-text-muted shrink-0">:{inst.port}</span>
 					<span aria-hidden="true" class="w-[10px] shrink-0 text-center not-italic text-text-muted transition-transform duration-150" class:rotate-90={state.expandedInstanceId === inst.id}>›</span>
 				</Disclosure>
@@ -479,7 +481,7 @@
 						<Disclosure expanded={state.expandedScenario === "ccs"} onToggle={() => toggleScenario("ccs")} chevron={false} look="section" density="list">
 							<Icon name={state.expandedScenario === "ccs" ? "chevron-down" : "chevron-right"} size={14} class="text-text-muted shrink-0" />
 							<span>CCS</span>
-							{#if ccsDetected}<Icon name="circle-check" size={14} class="text-success ml-auto shrink-0" />{:else if proxyResult === null}<span class="text-xs text-text-muted animate-pulse ml-auto">detecting...</span>{/if}
+							{#if ccsDetected}<Icon name="circle-check" size={14} class="text-success ml-auto shrink-0" />{:else if proxyResult === null}<span class="ml-auto flex items-center gap-1.5 text-xs text-text-muted"><ConduitMark size={12} variant="running" />detecting...</span>{/if}
 						</Disclosure>
 						{#if state.expandedScenario === "ccs"}
 							<div class="p-[8px] flex flex-col gap-[6px] border-t border-settings-separator">
@@ -519,7 +521,7 @@
 			{#each unknownInstances as inst (inst.id)}
 				<div data-testid="instance-row-{inst.id}" data-driver={inst.driver}>
 					<Disclosure expanded={state.expandedInstanceId === inst.id} onToggle={() => handleToggleInstance(inst.id)} look="row" density="row" chevron={false} class="focus-visible:-outline-offset-2">
-						<Icon name="bot" size={14} class="text-text-muted shrink-0" />
+						<HarnessLogo driver={inst.driver ?? "opencode"} instanceId={inst.id} size={18} aligned data-testid="account-logo" />
 						<div class="flex-1 min-w-0">
 							<div class="truncate text-[13.5px] max-md:text-[15px] text-text">{inst.name}</div>
 							<div class="text-[12px] text-text-muted">Unknown provider</div>

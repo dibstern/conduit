@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	Cause,
+	Clock,
 	Data,
 	Deferred,
 	Effect,
@@ -12,11 +13,20 @@ import {
 	Fiber,
 	FiberSet,
 	Option,
+	PubSub,
 	Schedule,
 	Semaphore,
+	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
+import type { Account } from "../../contracts/account.js";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
+import {
+	AccountSwitchBusy,
+	accountSwitchBusyMessage,
+} from "../../contracts/limit-recovery.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
+import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import {
 	type PendingInteractionService,
 	PendingInteractionServiceTag,
@@ -67,8 +77,15 @@ import {
 	runnerPidMatchesRegistration,
 } from "./runner-registry.js";
 import { failRunnerTurn, observeRunnerTurn } from "./runner-turn-failure.js";
-import { makeRunnerUpgrade, type RunnerUpgrade } from "./runner-upgrade.js";
+import {
+	makeRunnerUpgrade,
+	type RunnerSourceDelivery,
+	type RunnerUpgrade,
+	type RunnerUpgradeState,
+} from "./runner-upgrade.js";
+import { makeSendAdmissionWait } from "./send-admission.js";
 import type {
+	DurableSessionTurn,
 	SessionCommand,
 	SessionFailure,
 	SessionOutput,
@@ -81,6 +98,7 @@ interface RunnerChild {
 	readonly sessionId: string;
 	readonly registrationRoot?: string;
 	launch?: Pick<SessionTurn, "workspaceRoot" | "extraFolders"> | undefined;
+	launchSnapshot?: RunnerUpgradeState["snapshot"];
 	readonly ready: Deferred.Deferred<RunnerSocket, SessionFailure>;
 	readonly stopped: Deferred.Deferred<void>;
 	readonly drained: Deferred.Deferred<void>;
@@ -98,9 +116,15 @@ interface RunnerChild {
 	capabilities?: {
 		readonly stopsTasks: boolean;
 		readonly rebindsAccount: boolean;
+		readonly settlesAnswers: boolean;
+		readonly declaresLogin: boolean;
 	};
+	interactionSinks?: Map<string, string>;
 	pendingSendCommands?: Map<string, number> | undefined;
 	ownedRunIds?: Set<string>;
+	/** One verified terminal delivery, including its release-sink unwind. */
+	sourceDelivery?: RunnerSourceDelivery | undefined;
+	deliveryWaiters?: Set<Deferred.Deferred<void>>;
 	readonly upgrade: RunnerUpgrade;
 }
 
@@ -123,6 +147,7 @@ interface ProcessRunnerDeps {
 }
 
 export interface ProcessRunnerDriver {
+	readonly spawnEnvironment?: Readonly<Record<string, string>>;
 	/** Undelivered replays use the sendTurn callback's ordinary admission. */
 	readonly admitsRecoveredSends?: boolean;
 	readonly driverKind: string;
@@ -146,22 +171,22 @@ export interface ProcessRunnerDriver {
 		Extract<SessionCommand, { type: "send-turn" }>,
 		"type" | "sinkId" | "aborted" | "input"
 	>;
-	readonly sameAccountLogin: (
+	readonly loginChange: (
 		a: {
 			readonly configDir: import("./session-runner.js").SessionTurn["configDir"];
 			readonly root: string;
 			readonly account?: SessionTurn["account"];
 			readonly instanceId?: string;
-			readonly shellEnv?: SessionTurn["shellEnv"];
+			readonly shellConfig?: SessionTurn["shellConfig"];
 		},
 		b: {
 			readonly configDir: import("./session-runner.js").SessionTurn["configDir"];
 			readonly root: string;
 			readonly account?: SessionTurn["account"];
 			readonly instanceId?: string;
-			readonly shellEnv?: SessionTurn["shellEnv"];
+			readonly shellConfig?: SessionTurn["shellConfig"];
 		},
-	) => boolean;
+	) => "None" | "Settings" | "Account";
 	readonly recoverCommands: (
 		sql: SqlClient.SqlClient,
 		sessionId: string,
@@ -177,7 +202,7 @@ export interface ProcessRunnerDriver {
 		) => string,
 		replayTurn: (
 			accountId: string,
-			input: SessionTurn,
+			input: Pick<SessionTurn, "sessionId" | "inputId" | "account">,
 			sinkId: string,
 			work: (
 				dispatch: (
@@ -196,9 +221,7 @@ export interface ProcessRunnerDriver {
 		) => Effect.Effect<TurnResult | undefined, SessionFailure>,
 	) => Effect.Effect<
 		Effect.Success<
-			ReturnType<
-				typeof recoverRunnerCommands<import("./session-runner.js").SessionTurn>
-			>
+			ReturnType<typeof recoverRunnerCommands<DurableSessionTurn>>
 		>,
 		unknown,
 		PersistenceProjectTag
@@ -214,13 +237,28 @@ const CANCELLED_TURN: TurnResult = {
 	providerStateUpdates: [],
 };
 
+// Notification is private to admission; it never changes account eligibility.
+const notifyEntry = (entry: Pick<RunnerChild, "deliveryWaiters">): void => {
+	const waiters = [...(entry.deliveryWaiters ?? [])];
+	// Completing a Deferred can synchronously register its next observation.
+	entry.deliveryWaiters?.clear();
+	for (const waiter of waiters) Deferred.doneUnsafe(waiter, Effect.void);
+};
+
+const legacyAnswerCommandId = (entry: RunnerChild, commandId: string) =>
+	entry.capabilities?.settlesAnswers === true
+		? undefined
+		: `${commandId}:answer`;
+
 // Every lifecycle write goes through this boundary; reduction itself is pure.
 const transition = (
-	entry: Pick<RunnerChild, "lifecycle">,
+	entry: Pick<RunnerChild, "lifecycle" | "deliveryWaiters" | "sourceDelivery">,
 	event: Entry.RunnerEntryTransition,
 ) => {
 	const ending = entry.lifecycle.end;
 	entry.lifecycle = Entry.nextRunnerLifecycle(entry.lifecycle, event);
+	if (!Entry.canReconfigure(entry.lifecycle)) entry.sourceDelivery = undefined;
+	notifyEntry(entry);
 	return event._tag === "FinishEnd" && ending?.pending === 1
 		? ending.released
 		: undefined;
@@ -233,6 +271,7 @@ const stop = (
 		| "stopped"
 		| "socketPath"
 		| "lifecycle"
+		| "deliveryWaiters"
 		| "pid"
 		| "child"
 		| "connection"
@@ -423,7 +462,15 @@ export const makeProcessSessionRunner = (
 ) =>
 	Effect.gen(function* () {
 		const runFork = yield* FiberSet.makeRuntime<never, void, never>();
+		const turnEnds = yield* PubSub.unbounded<string>();
 		const runnerLabel = `${driver.driverKind.charAt(0).toUpperCase()}${driver.driverKind.slice(1)} runner`;
+		const accountDisplayName = (
+			input: Pick<SessionTurn, "account" | "instanceId"> | undefined,
+		) =>
+			input?.account?.name ||
+			input?.account?.id ||
+			input?.instanceId ||
+			driver.driverKind;
 		const lock = yield* Semaphore.make(1);
 		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
 		const startupTimeoutMs =
@@ -510,11 +557,13 @@ export const makeProcessSessionRunner = (
 				sessionId: string;
 				inputId?: string;
 				runId?: string | undefined;
+				commandId?: string;
+				runnerId?: string;
 				/** What a failed send places when the SDK never started it. */
 				placement?: {
 					inputId: string;
 					text: string;
-					images?: readonly string[];
+					images?: readonly AttachmentRef[];
 				};
 				messageId: string;
 				pending: boolean;
@@ -523,6 +572,37 @@ export const makeProcessSessionRunner = (
 				releaseRequested: boolean;
 			}
 		>();
+		const observeSourceDelivery = (
+			entry: RunnerChild,
+			state: RunnerUpgradeState | undefined,
+		) => {
+			const delivery = state?.sourceDelivery;
+			const previous = entry.sourceDelivery;
+			const binding = delivery ? sinks.get(delivery.sinkId) : undefined;
+			// A released sink may disappear while its already-verified delivery unwinds.
+			const retained =
+				delivery &&
+				previous &&
+				previous.generation === delivery.generation &&
+				previous.sinkId === delivery.sinkId &&
+				previous.commandId === delivery.commandId &&
+				previous.inputId === delivery.inputId &&
+				previous.runId === delivery.runId;
+			const owned =
+				delivery &&
+				binding?.sessionId === entry.sessionId &&
+				binding.runnerId === entry.runnerId &&
+				binding.commandId === delivery.commandId &&
+				binding.inputId === delivery.inputId &&
+				binding.runId === delivery.runId;
+			entry.sourceDelivery =
+				delivery?.sessionId === entry.sessionId &&
+				delivery.runnerId === entry.runnerId &&
+				Entry.canReconfigure(entry.lifecycle) &&
+				(owned || retained)
+					? delivery
+					: undefined;
+		};
 		// These sends have no runner ownership yet, including while rebinding.
 		const pendingSends = new Map<
 			string,
@@ -698,6 +778,8 @@ export const makeProcessSessionRunner = (
 		};
 
 		const evict = (sessionId: string, entry: RunnerChild) => {
+			entry.sourceDelivery = undefined;
+			notifyEntry(entry);
 			// A late close from an old child must not remove its replacement.
 			if (children.get(sessionId) !== entry) return;
 			children.delete(sessionId);
@@ -716,6 +798,7 @@ export const makeProcessSessionRunner = (
 			cause: Cause.Cause<SessionFailure>,
 		) =>
 			Effect.gen(function* () {
+				notifyEntry(entry);
 				yield* Deferred.failCause(entry.ready, cause);
 				yield* Deferred.succeed(entry.drained, undefined);
 				const ending = entry.lifecycle.end;
@@ -763,6 +846,8 @@ export const makeProcessSessionRunner = (
 				candidates.delete(entry);
 			});
 		const detach = (entry: RunnerChild, failure?: SessionFailure) => {
+			entry.sourceDelivery = undefined;
+			notifyEntry(entry);
 			entry.connection?.destroy(failure);
 			entry.child?.unref();
 			if (entry.child?.connected) entry.child.disconnect();
@@ -771,6 +856,8 @@ export const makeProcessSessionRunner = (
 			.withPermits(1)(
 				Effect.gen(function* () {
 					closing = true;
+					for (const entry of [...children.values(), ...candidates])
+						notifyEntry(entry);
 					for (const { finished } of accountDemands.values())
 						Deferred.doneUnsafe(finished, Effect.void);
 					const entries = [...children.values(), ...candidates];
@@ -957,8 +1044,32 @@ export const makeProcessSessionRunner = (
 			runFork(stop(entry));
 		};
 
-		const attach = (sessionId: string, entry: RunnerChild) =>
+		const attach = (
+			sessionId: string,
+			entry: RunnerChild,
+			identityOnly = false,
+		) =>
 			Effect.gen(function* () {
+				const trackInteraction = (output: SessionOutput) => {
+					if (
+						output.type === "question-request" ||
+						output.type === "permission-request"
+					)
+						(entry.interactionSinks ??= new Map()).set(
+							`${output.type}:${output.request.requestId}`,
+							output.sinkId,
+						);
+					else if (output.type === "cancel-interaction") {
+						for (const kind of ["question-request", "permission-request"]) {
+							const key = `${kind}:${output.requestId}`;
+							if (entry.interactionSinks?.get(key) === output.sinkId)
+								entry.interactionSinks.delete(key);
+						}
+					} else if (output.type === "release-sink") {
+						for (const [key, sinkId] of entry.interactionSinks ?? [])
+							if (sinkId === output.sinkId) entry.interactionSinks?.delete(key);
+					}
+				};
 				const workspaceRoot =
 					entry.launch?.workspaceRoot ??
 					(yield* deps.projectRootForSession(sessionId)) ??
@@ -982,6 +1093,7 @@ export const makeProcessSessionRunner = (
 					...(entry.pid !== undefined ? { pid: entry.pid } : {}),
 					helloTimeoutMs: entry.child ? startupTimeoutMs : 2000,
 					...(entry.lifecycle.candidate ? { preserveRole: true } : {}),
+					...(identityOnly ? { identityOnly: true as const } : {}),
 					deps: {
 						workspaceRoot,
 						...entry.launch,
@@ -993,7 +1105,8 @@ export const makeProcessSessionRunner = (
 							? { subagentPollTimeoutMs: deps.subagentPollTimeoutMs }
 							: {}),
 					},
-					...(receipts ? { receipts } : {}),
+					// A verified orphan can be stopped without claiming history's cursor.
+					...(receipts && !identityOnly ? { receipts } : {}),
 					runFork,
 					onOutputCommitted: (output) => {
 						if (
@@ -1010,9 +1123,10 @@ export const makeProcessSessionRunner = (
 					emit: (received) => {
 						// Keep output in the runner's spool until its project can ingest it.
 						// The verified connection still permits native retirement meanwhile.
-						if (Entry.isAwaitingProject(entry.lifecycle))
+						if (identityOnly || Entry.isAwaitingProject(entry.lifecycle))
 							return Effect.interrupt;
 						const operation = Effect.suspend(() => {
+							trackInteraction(received);
 							// A retired query's shutdown notices must not clear its replacement.
 							if (
 								entry.lifecycle.stop &&
@@ -1076,10 +1190,31 @@ export const makeProcessSessionRunner = (
 							entry.capabilities = {
 								stopsTasks: hello.stopsTasks === true,
 								rebindsAccount: hello.rebindsAccount === true,
+								settlesAnswers: hello.settlesAnswers === true,
+								declaresLogin: hello.declaresLogin === true,
 							};
-							entry.upgrade.state = hello.upgradeState;
+							log.info(
+								`${runnerLabel} attached for session ${sessionId}: build ${hello.buildId}, answers ${entry.capabilities.settlesAnswers ? "runner-settled" : "legacy answer-question/answer-permission"}`,
+							);
+							const observed = entry.upgrade.state;
+							const helloState = hello.upgradeState;
+							const latest =
+								observed &&
+								(!helloState || observed.revision >= helloState.revision)
+									? observed
+									: helloState;
+							const snapshot =
+								latest?.snapshot ??
+								observed?.snapshot ??
+								helloState?.snapshot ??
+								entry.launchSnapshot;
+							entry.upgrade.state = latest
+								? { ...latest, ...(snapshot ? { snapshot } : {}) }
+								: undefined;
+							notifyEntry(entry);
 							// Identity and native controls suffice until the project can reattach.
-							if (Entry.isAwaitingProject(entry.lifecycle)) return;
+							if (identityOnly || Entry.isAwaitingProject(entry.lifecycle))
+								return;
 							// Warming candidates have not replaced the active process yet.
 							if (!entry.lifecycle.candidate)
 								yield* lock.withPermits(1)(
@@ -1160,6 +1295,10 @@ export const makeProcessSessionRunner = (
 								yield* ensureAttached();
 								sinks.set(binding.sinkId, {
 									sessionId,
+									runnerId: entry.runnerId,
+									...(binding.commandId
+										? { commandId: binding.commandId }
+										: {}),
 									...(inputId ? { inputId } : {}),
 									runId,
 									messageId,
@@ -1232,6 +1371,7 @@ export const makeProcessSessionRunner = (
 								? []
 								: (hello.pendingOutputs ?? [])) {
 								yield* ensureAttached();
+								trackInteraction(pending.output);
 								if (pending.sequence <= (hello.acknowledgedSequence ?? 0))
 									yield* emit(pending.output, sessionId);
 							}
@@ -1274,6 +1414,8 @@ export const makeProcessSessionRunner = (
 							}
 							yield* Effect.all(restoreAccounts, { discard: true });
 							yield* ensureAttached();
+							// Recovery can await output ACKs that publish a newer revision.
+							observeSourceDelivery(entry, entry.upgrade.state);
 							if (process.env["NODE_ENV"] === "test" && process.connected)
 								process.send?.({
 									channel: "conduit-process-test",
@@ -1283,6 +1425,11 @@ export const makeProcessSessionRunner = (
 									socketPath: entry.socketPath,
 									buildId: hello.buildId,
 									protocolVersion: hello.protocolVersion,
+									settlesAnswers: entry.capabilities.settlesAnswers,
+									declaresLogin: entry.capabilities.declaresLogin,
+									answerDialect: entry.capabilities.settlesAnswers
+										? "runner"
+										: "legacy",
 								});
 						}),
 					onCommandAccepted: (sinkId) => {
@@ -1328,12 +1475,40 @@ export const makeProcessSessionRunner = (
 						);
 					},
 					onUpgradeState: (state) => {
-						const snapshot = state.snapshot ?? entry.upgrade.state?.snapshot;
+						if (
+							entry.upgrade.state &&
+							state.revision < entry.upgrade.state.revision
+						)
+							return;
+						const wasInFlight = entry.upgrade.state?.turnInFlight === true;
+						observeSourceDelivery(entry, state);
+						const snapshot =
+							state.snapshot ??
+							entry.upgrade.state?.snapshot ??
+							entry.launchSnapshot;
 						// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
 						entry.upgrade.state = {
 							...state,
 							...(snapshot ? { snapshot } : {}),
 						};
+						notifyEntry(entry);
+						if (
+							state.snapshot &&
+							process.env["NODE_ENV"] === "test" &&
+							process.env["CONDUIT_TEST_UPGRADE_SINK_PROOF"] === "1" &&
+							process.connected
+						)
+							process.send?.({
+								channel: "conduit-process-test",
+								kind: "runner-snapshot-observed",
+								sessionId,
+							});
+						if (
+							children.get(sessionId) === entry &&
+							wasInFlight &&
+							state.turnInFlight === false
+						)
+							PubSub.publishUnsafe(turnEnds, sessionId);
 						upgrade(sessionId, entry);
 					},
 					onIdleExit: () => {
@@ -1399,7 +1574,11 @@ export const makeProcessSessionRunner = (
 								],
 								{
 									cwd: entry.launch?.workspaceRoot ?? registrationRoot,
-									env: { ...process.env, CONDUIT_CONFIG_DIR: configDir },
+									env: {
+										...process.env,
+										...driver.spawnEnvironment,
+										CONDUIT_CONFIG_DIR: configDir,
+									},
 									detached: true,
 									stdio: ["ignore", log, log, "ipc"],
 								},
@@ -1586,7 +1765,8 @@ export const makeProcessSessionRunner = (
 						Effect.sync(() => {
 							transition(entry, { _tag: "MakeCandidate" });
 							entry.launch = old.launch ?? old.upgrade.state?.snapshot?.input;
-							entry.upgrade.state = old.upgrade.state;
+							// Host revisions are local to a child; only launch data crosses upgrades.
+							entry.launchSnapshot = old.upgrade.state?.snapshot;
 							candidates.add(entry);
 						}),
 					),
@@ -1690,6 +1870,8 @@ export const makeProcessSessionRunner = (
 							transition(replacement, { _tag: "Promote" });
 							replacement.connection?.write({ type: "upgrade-activate" });
 							children.set(sessionId, replacement);
+							old.sourceDelivery = undefined;
+							notifyEntry(old);
 							candidates.delete(replacement);
 							candidates.add(old);
 							upgradeMark(sessionId, old, "switched", replacement);
@@ -1720,6 +1902,21 @@ export const makeProcessSessionRunner = (
 		});
 
 		class ProcessSessionRunner implements SessionRunner {
+			readonly turnEnds = Effect.map(
+				PubSub.subscribe(turnEnds),
+				Stream.fromSubscription,
+			);
+
+			hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
+				return Effect.sync(() => {
+					const entry = children.get(sessionId);
+					return (
+						entry !== undefined &&
+						Entry.countsTowardDemand(entry.lifecycle) &&
+						entry.upgrade.state?.turnInFlight === true
+					);
+				});
+			}
 			getControlCommandStatusEffect(
 				sessionId: string,
 				control: ProviderControlContext,
@@ -1743,8 +1940,31 @@ export const makeProcessSessionRunner = (
 						!Entry.canControl(entry.lifecycle)
 					)
 						return yield* Effect.fail(unavailable());
+					const legacyAnswerId = legacyAnswerCommandId(
+						entry,
+						control.commandId,
+					);
+					const [command] =
+						legacyAnswerId && sql
+							? yield* sql<{
+									effect_type: string;
+								}>`SELECT effect_type FROM provider_command_outbox
+							WHERE session_id = ${sessionId} AND command_id = ${control.commandId} LIMIT 1`.pipe(
+									Effect.mapError((cause) =>
+										runnerFailure("get control command status", cause),
+									),
+								)
+							: [];
+					// Pre-outbox runners cannot answer command-status. Their final answer
+					// receipt, not the resolve receipt, proves the whole handoff completed.
 					const status = yield* Effect.result(
-						connection.commandStatusEffect(control.commandId),
+						legacyAnswerId &&
+							(command?.effect_type === "resolve_question" ||
+								command?.effect_type === "resolve_permission")
+							? Effect.sync(() =>
+									connection.observedCommandStatus(legacyAnswerId),
+								)
+							: connection.commandStatusEffect(control.commandId),
 					);
 					const current = children.get(sessionId);
 					if (current && current.runnerId !== control.providerProcessId)
@@ -1982,7 +2202,7 @@ export const makeProcessSessionRunner = (
 						yield* Effect.gen(function* () {
 							yield* ensureRecovering;
 							let connected = yield* Effect.result(
-								attach(registration.sessionId, entry),
+								attach(registration.sessionId, entry, abandoned),
 							);
 							yield* ensureRecovering;
 							// A previous server may still own the socket while its shutdown
@@ -1999,7 +2219,7 @@ export const makeProcessSessionRunner = (
 								yield* Effect.sleep(100 * 2 ** retry);
 								yield* ensureRecovering;
 								connected = yield* Effect.result(
-									attach(registration.sessionId, entry),
+									attach(registration.sessionId, entry, abandoned),
 								);
 								yield* ensureRecovering;
 							}
@@ -2268,23 +2488,27 @@ export const makeProcessSessionRunner = (
 												}),
 												Effect.map((commands) =>
 													commands.map((command) => {
-														const wait = command.wait.pipe(
+														let wait = command.wait.pipe(
 															Effect.provideService(PersistenceProjectTag, {
 																projectId: persisted.project_id,
 															}),
 															Effect.provideService(SqlClient.SqlClient, sql),
 														);
-														return {
-															...command,
-															wait: recovery
-																? wait.pipe(
-																		Effect.provideService(
-																			ClaudeEventPersistEffectTag,
-																			recovery.persist,
-																		),
-																	)
-																: wait,
-														};
+														if (recovery)
+															wait = wait.pipe(
+																Effect.provideService(
+																	ClaudeEventPersistEffectTag,
+																	recovery.persist,
+																),
+															);
+														if (recovery?.inputDrafts)
+															wait = wait.pipe(
+																Effect.provideService(
+																	InputDraftsTag,
+																	recovery.inputDrafts,
+																),
+															);
+														return { ...command, wait };
 													}),
 												),
 												Effect.mapError((cause) =>
@@ -2500,6 +2724,48 @@ export const makeProcessSessionRunner = (
 				return Effect.sync(() => quarantined.get(sessionId));
 			}
 
+			getAccountSwitchBlockEffect(sessionId: string, account: Account) {
+				return Effect.sync(() => {
+					const entry = children.get(sessionId);
+					const snapshot = entry?.upgrade.state?.snapshot;
+					if (
+						!entry ||
+						!Entry.canReconfigure(entry.lifecycle) ||
+						!snapshot ||
+						Entry.isQuiet(
+							entry.lifecycle,
+							entry.upgrade.state?.quiescent === true,
+						)
+					)
+						return undefined;
+					const live = snapshot.input;
+					const target = {
+						account,
+						instanceId: account.id,
+						configDir: "folder" in account ? account.folder : live.configDir,
+						root: live.workspaceRoot,
+						shellConfig: live.shellConfig,
+					};
+					if (
+						driver.loginChange(
+							{ ...live, root: live.workspaceRoot },
+							target,
+						) !== "Account"
+					)
+						return undefined;
+					return new AccountSwitchBusy({
+						sessionId,
+						fromAccountId:
+							live.account?.id ?? live.instanceId ?? driver.driverKind,
+						toAccountId: account.id,
+						message: accountSwitchBusyMessage(
+							accountDisplayName(live),
+							accountDisplayName(target),
+						),
+					});
+				});
+			}
+
 			getNativeSessionEffect(
 				sessionId: string,
 			): Effect.Effect<ProviderNativeSession | undefined> {
@@ -2518,8 +2784,13 @@ export const makeProcessSessionRunner = (
 				});
 			}
 
-			withTurnEffect<A, E, R>(
-				input: SessionTurn,
+			withTurnEffect<
+				A,
+				E,
+				R,
+				T extends Pick<SessionTurn, "sessionId" | "inputId" | "account">,
+			>(
+				input: T,
 				sinkId: string,
 				work: Effect.Effect<A, E, R>,
 				accountId: string | undefined = input.account?.id,
@@ -2609,7 +2880,11 @@ export const makeProcessSessionRunner = (
 												inputId: command.input.inputId,
 												text: command.input.text ?? command.input.prompt,
 												...(command.input.images
-													? { images: command.input.images }
+													? {
+															images: command.input.images.map(
+																({ ref }) => ref,
+															),
+														}
 													: {}),
 											},
 										}),
@@ -2625,6 +2900,17 @@ export const makeProcessSessionRunner = (
 				let admittedSessionId = "";
 				let ending: RunnerChild | undefined;
 				let cancelled: Deferred.Deferred<void> | undefined;
+				let deliveryRegistration:
+					| { entry: RunnerChild; changed: Deferred.Deferred<void> }
+					| undefined;
+				let deliveryDeadline: number | undefined;
+				const waitForAdmission =
+					command.type === "send-turn"
+						? makeSendAdmissionWait(
+								command.input.sessionId,
+								command.input.inputId,
+							)
+						: undefined;
 				const execute = Effect.gen(function* () {
 					const autoSettleAfterDays =
 						command.type === "send-turn"
@@ -2763,63 +3049,106 @@ export const makeProcessSessionRunner = (
 										launch !== undefined &&
 										(launch.workspaceRoot !== command.input.workspaceRoot ||
 											(extraFoldersChanged && !canReconcileExtraFolders));
-									const accountFolderChanged =
-										launch !== undefined &&
-										!driver.sameAccountLogin(
-											{
-												...launch,
-												configDir: launch.configDir,
-												root: launch.workspaceRoot,
-											},
-											{
-												...command.input,
-												configDir: command.input.configDir,
-												root: command.input.workspaceRoot,
-											},
-										);
+									const loginChange =
+										launch === undefined
+											? "None"
+											: driver.loginChange(
+													{
+														...launch,
+														configDir: launch.configDir,
+														root: launch.workspaceRoot,
+													},
+													{
+														...command.input,
+														configDir: command.input.configDir,
+														root: command.input.workspaceRoot,
+														shellConfig:
+															command.input.shellConfig ?? command.shellConfig,
+													},
+												);
 									const legacyCursor =
 										driver.driverKind === "cursor" &&
 										existing.connection?.scopedCursorCredentials === false;
-									if (legacyCursor && command.type === "pre-warm")
-										return { entry: undefined, draining: false };
-									if (foldersChanged && command.type === "pre-warm")
-										return { entry: undefined, draining: false };
-									// Only an idle runner restarts. Background tasks can keep one
-									// busy for hours, and it can still serve the send meanwhile.
-									const upgradeByRestart =
-										command.type === "send-turn" &&
-										existing.upgrade.settingsDeferred === true &&
-										Entry.isCommandIdle(existing.lifecycle) &&
-										existing.upgrade.state?.quiescent === true;
+									// Observe before checking, under selection. Await only after releasing it.
+									const changed = Deferred.makeUnsafe<void>();
+									(existing.deliveryWaiters ??= new Set()).add(changed);
+									deliveryRegistration = { entry: existing, changed };
+									const delivery = existing.sourceDelivery;
 									if (
-										(foldersChanged ||
-											accountFolderChanged ||
-											legacyCursor ||
-											upgradeByRestart) &&
-										Entry.canReconfigure(existing.lifecycle)
+										command.type === "send-turn" &&
+										loginChange === "Account" &&
+										!foldersChanged &&
+										!legacyCursor &&
+										Entry.canReconfigure(existing.lifecycle) &&
+										delivery?.sessionId === sessionId &&
+										delivery.runnerId === existing.runnerId &&
+										delivery.generation > 0
 									) {
-										// A turn's completion can reach the browser before the
-										// runner reports quiescence. Do not admit the next turn
-										// on its old folders while that final output drains.
-										if (
-											!Entry.isCommandIdle(existing.lifecycle) ||
-											existing.upgrade.state?.quiescent !== true
-										) {
-											if (command.type === "pre-warm")
-												return { entry: undefined, draining: false };
+										return {
+											entry: existing,
+											draining: true,
+											sourceDeliveryPending: changed,
+										};
+									}
+									existing.deliveryWaiters.delete(changed);
+									deliveryRegistration = undefined;
+									const decision = Entry.decideSend({
+										command: command.type,
+										lifecycle: existing.lifecycle,
+										quiescent: existing.upgrade.state?.quiescent === true,
+										rebindsAccount:
+											existing.capabilities?.rebindsAccount === true &&
+											// The capability predates guarded account admission. The
+											// shared dev sentinel cannot establish the child's build.
+											(loginChange !== "Account" ||
+												(existing.buildId !== "dev" &&
+													existing.buildId === runnerBuildId())),
+										changes: {
+											folders: foldersChanged,
+											login: loginChange,
+											legacyCursor,
+											settingsDeferred:
+												existing.upgrade.settingsDeferred === true,
+										},
+									});
+									if (process.env["NODE_ENV"] === "test" && process.connected)
+										process.send?.({
+											channel: "conduit-process-test",
+											kind: "runner-admission",
+											sessionId,
+											command: command.type,
+											decision,
+										});
+									switch (decision) {
+										case "Refuse":
+											log.info(
+												`Account switch refused for session ${sessionId}: runner is busy`,
+											);
+											return yield* Effect.fail({
+												...runnerFailure(
+													command.type,
+													accountSwitchBusyMessage(
+														accountDisplayName(launch),
+														accountDisplayName(command.input),
+													),
+												),
+												code: "account_switch_busy",
+												retryable: true,
+											});
+										case "Skip":
+											return { entry: undefined, draining: false };
+										case "Wait":
 											return {
 												entry: existing,
 												draining: true,
 												foldersPending: true,
+												waitReason: foldersChanged
+													? ("foldersPending" as const)
+													: legacyCursor
+														? ("legacyCursor" as const)
+														: ("loginPending" as const),
 											};
-										}
-										// New Claude payloads replace only the SDK query. Keep the
-										// quiescence wait above, and the old restart for older peers.
-										if (
-											foldersChanged ||
-											upgradeByRestart ||
-											!existing.capabilities?.rebindsAccount
-										) {
+										case "Retire":
 											transition(existing, {
 												_tag: "BeginEnd",
 												released: yield* Deferred.make<void>(),
@@ -2829,6 +3158,16 @@ export const makeProcessSessionRunner = (
 												draining: true,
 												retire: existing,
 											};
+										case "DeferRebind":
+											log.info(
+												`Account rebind deferred for session ${sessionId}: runner is busy`,
+											);
+											break;
+										case "Use":
+											break;
+										default: {
+											const _exhaustive: never = decision;
+											return _exhaustive;
 										}
 									}
 								}
@@ -2909,6 +3248,38 @@ export const makeProcessSessionRunner = (
 						);
 						entry = selection.entry;
 						draining = selection.draining;
+						if (
+							"sourceDeliveryPending" in selection &&
+							selection.sourceDeliveryPending
+						) {
+							const changed = selection.sourceDeliveryPending;
+							const now = yield* Clock.currentTimeMillis;
+							// Notifications and successor producers share this send's budget.
+							deliveryDeadline ??= now + STOP_ABORT_WAIT_MS;
+							const failure: SessionFailure = {
+								operation: command.type,
+								code: "account_switch_busy",
+								retryable: true,
+								message:
+									"Source delivery did not finish before account-switch admission. Resend the turn.",
+							};
+							if (now >= deliveryDeadline) return yield* Effect.fail(failure);
+							yield* Deferred.await(changed).pipe(
+								Effect.timeoutOrElse({
+									duration: deliveryDeadline - now,
+									orElse: () => Effect.fail(failure),
+								}),
+								Effect.ensuring(
+									Effect.sync(() => {
+										deliveryRegistration?.entry.deliveryWaiters?.delete(
+											changed,
+										);
+										deliveryRegistration = undefined;
+									}),
+								),
+							);
+							continue;
+						}
 						if ("recoveryPending" in selection && entry) {
 							const waiting = entry;
 							yield* Deferred.await(waiting.ready).pipe(
@@ -2920,8 +3291,13 @@ export const makeProcessSessionRunner = (
 							);
 							continue;
 						}
-						if ("foldersPending" in selection) {
-							yield* Effect.sleep("10 millis");
+						if ("foldersPending" in selection && selection.waitReason) {
+							yield* waitForAdmission
+								? waitForAdmission(
+										selection.waitReason,
+										Effect.sleep("10 millis"),
+									)
+								: Effect.sleep("10 millis");
 							continue;
 						}
 						if (selection.retire) {
@@ -2993,11 +3369,56 @@ export const makeProcessSessionRunner = (
 								`Runner build ${entry.buildId ?? "unknown"} cannot stop background tasks`,
 							),
 						);
+					const preserveReportedLogin = <
+						Command extends Extract<
+							SessionCommand,
+							{ type: "send-turn" | "pre-warm" }
+						>,
+					>(
+						payload: Command,
+					): Command => {
+						const snapshot = entry.upgrade.state?.snapshot;
+						const launch = snapshot?.input;
+						if (
+							driver.driverKind === "claude" &&
+							!entry.capabilities?.declaresLogin &&
+							launch &&
+							driver.loginChange(
+								{ ...launch, root: launch.workspaceRoot },
+								{
+									...payload.input,
+									configDir: payload.input.configDir,
+									root: payload.input.workspaceRoot,
+									shellConfig: payload.input.shellConfig ?? payload.shellConfig,
+								},
+							) === "None"
+						) {
+							// Old peers compare captures and absent account fields as values.
+							// Keep their reported login until a declared setting really changes.
+							const captured = {
+								...payload,
+								input: { ...payload.input },
+								shellEnv: launch.shellEnv ?? snapshot?.options.env ?? {},
+							};
+							delete captured.input.account;
+							delete captured.input.instanceId;
+							delete captured.input.shellEnv;
+							if (launch.account !== undefined)
+								captured.input.account = launch.account;
+							if (launch.instanceId !== undefined)
+								captured.input.instanceId = launch.instanceId;
+							if (launch.shellEnv !== undefined)
+								captured.input.shellEnv = launch.shellEnv;
+							return captured;
+						}
+						return payload;
+					};
 					const payload =
 						command.type === "send-turn"
-							? {
+							? preserveReportedLogin({
 									...command,
 									autoSettleAfterDays,
+									shellConfig: command.input.shellConfig ?? command.shellConfig,
 									...(entry.upgrade.state?.frozen
 										? driver.snapshotCommandSettings(
 												entry.upgrade.state.snapshot,
@@ -3007,15 +3428,17 @@ export const makeProcessSessionRunner = (
 										command.shellEnv ?? {
 											...process.env,
 										},
-								}
+								})
 							: command.type === "pre-warm"
-								? {
+								? preserveReportedLogin({
 										...command,
+										shellConfig:
+											command.input.shellConfig ?? command.shellConfig,
 										shellEnv: command.input.shellEnv ??
 											command.shellEnv ?? {
 												...process.env,
 											},
-									}
+									})
 								: command;
 					let commandId =
 						command.control?.commandId ??
@@ -3174,16 +3597,61 @@ export const makeProcessSessionRunner = (
 							commandId,
 							command.input.commandAttempt ?? 0,
 						);
-					return yield* connection.commandEffect(
+					if (command.type === "send-turn") {
+						const binding = sinks.get(command.sinkId);
+						if (binding) {
+							binding.commandId = commandId;
+							binding.runnerId = entry.runnerId;
+						}
+					}
+					const legacyAnswerId = legacyAnswerCommandId(entry, commandId);
+					// Some unflagged builds already settle and cancel during resolve.
+					// Retain their sink so the final handshake receipt is still recorded.
+					const legacySinkId =
+						legacyAnswerId &&
+						(command.type === "resolve-question" ||
+							command.type === "resolve-permission")
+							? entry.interactionSinks?.get(
+									`${command.type === "resolve-question" ? "question" : "permission"}-request:${command.requestId}`,
+								)
+							: undefined;
+					const result = yield* connection.commandEffect(
 						commandId,
 						payload,
 						command.type === "send-turn"
 							? command.input.commandAttempt
 							: undefined,
 					);
+					// Legacy resolve commands acknowledge the answer without releasing
+					// canUseTool. Complete that handshake inside the outbox attempt, using
+					// its original reply rather than the runner's redacted notification.
+					if (legacyAnswerId && legacySinkId) {
+						if (command.type === "resolve-question") {
+							yield* connection.commandEffect(legacyAnswerId, {
+								type: "answer-question",
+								sinkId: legacySinkId,
+								requestId: command.requestId,
+								answers: command.answers,
+							});
+						} else if (command.type === "resolve-permission") {
+							yield* connection.commandEffect(legacyAnswerId, {
+								type: "answer-permission",
+								sinkId: legacySinkId,
+								requestId: command.requestId,
+								response: command.control?.response ?? {
+									decision: command.decision,
+								},
+							});
+						}
+					}
+					return result;
 				}).pipe(
 					Effect.ensuring(
 						Effect.sync(() => {
+							deliveryRegistration?.entry.deliveryWaiters?.delete(
+								deliveryRegistration.changed,
+							);
+							deliveryRegistration = undefined;
 							if (!admitted) return;
 							transition(admitted, { _tag: "FinishCommand" });
 							upgrade(admittedSessionId, admitted);
@@ -3212,6 +3680,11 @@ export const makeProcessSessionRunner = (
 							: Effect.fail(failure),
 					),
 					Effect.onError((cause) => {
+						if (
+							runnerFailure(command.type, Failure.squashCause(cause)).code ===
+							"send_admission_timeout"
+						)
+							return Effect.void;
 						if (
 							command.type !== "send-turn" ||
 							recovered ||

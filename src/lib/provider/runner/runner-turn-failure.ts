@@ -1,5 +1,6 @@
 import { Effect, Option } from "effect";
 import { SqlClient } from "effect/sql";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import { createEventId } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
@@ -51,7 +52,7 @@ export function failRunnerTurn(
 		placement?: {
 			inputId: string;
 			text: string;
-			images?: readonly string[];
+			images?: readonly AttachmentRef[];
 		};
 		messageId: string;
 	},

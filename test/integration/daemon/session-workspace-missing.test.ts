@@ -426,7 +426,9 @@ describe("Missing session worktrees through the built daemon", () => {
 				({ type }) => type === "session.workspace_changed",
 			);
 			rmSync(main, { recursive: true, force: true });
-			await browser.send(sessionId, "Cannot launch.");
+			await expect(browser.send(sessionId, "Cannot launch.")).rejects.toThrow(
+				`Main project folder does not exist: ${main}`,
+			);
 			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
 				const turn = db
@@ -436,23 +438,13 @@ describe("Missing session worktrees through the built daemon", () => {
 					FROM turns JOIN provider_runs ON provider_runs.id = turns.run_id
 					WHERE turns.session_id = ?`)
 					.get(sessionId);
-				expect(turn).toEqual({
-					state: "error",
-					started_at: null,
-					run_id: expect.any(String),
-					status: "error",
-					run_started_at: null,
-				});
+				expect(turn).toBeUndefined();
 			} finally {
 				db.close();
 			}
 			expect(
-				events(fixture, sessionId)
-					.filter(({ type }) => type === "turn.error")
-					.at(-1)?.data["error"],
-			).toBe(
-				`Failed to send message: Main project folder does not exist: ${main}`,
-			);
+				events(fixture, sessionId).filter(({ type }) => type === "turn.error"),
+			).toEqual([]);
 			expect(
 				events(fixture, sessionId).filter(
 					({ type }) => type === "session.workspace_changed",
@@ -603,15 +595,14 @@ describe("Missing session worktrees through the built daemon", () => {
 			db.close();
 		}
 		git(main, "worktree", "remove", "--force", worktree);
-		await browser.send(sessionId, "Cannot silently fall back.");
+		await expect(
+			browser.send(sessionId, "Cannot silently fall back."),
+		).rejects.toThrow(
+			`Worktree missing: ${worktree}. Recreate worktree or Continue in main folder before sending another message.`,
+		);
 		expect(
-			events(fixture, sessionId)
-				.filter(({ type }) => type === "turn.error")
-				.at(-1)?.data,
-		).toMatchObject({
-			code: "WORKTREE_MISSING",
-			error: `Worktree missing: ${worktree}. Recreate worktree or Continue in main folder before sending another message.`,
-		});
+			events(fixture, sessionId).filter(({ type }) => type === "turn.error"),
+		).toEqual([]);
 		expect(
 			events(fixture, sessionId).filter(
 				({ data }) => data["cause"] === "missing",

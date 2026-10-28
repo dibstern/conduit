@@ -682,21 +682,63 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert account dots match the composer account badge colour",
-		match: /^the usage footer (\S+) dot matches the composer account badge$/,
+		name: "assert account badges match the composer account badge colour",
+		match: /^the usage footer (\S+) badge matches the composer account badge$/,
 		run: async ({ world, match }) => {
-			const footerDot = world.page.getByTestId(`usage-footer-dot-${match[1]}`);
+			const footerLogo = world.page.getByTestId(
+				`usage-footer-logo-${match[1]}`,
+			);
 			const badge = world.page
 				.locator(
 					`#input-area [data-testid="harness-logo"][data-account="${match[1]}"]`,
 				)
 				.getByTestId("harness-logo-badge");
-			await expect(footerDot).toHaveAttribute("data-account", match[1] ?? "");
+			await expect(footerLogo).toHaveAttribute("data-account", match[1] ?? "");
 			await expect(badge).toBeVisible();
-			await expect(footerDot).toHaveCSS(
+			await expect(footerLogo.getByTestId("harness-logo-badge")).toHaveCSS(
 				"background-color",
 				await badge.evaluate((dot) => getComputedStyle(dot).backgroundColor),
 			);
+		},
+	},
+	{
+		name: "assert a footer or sheet account logo",
+		match:
+			/^the (usage footer|usage sheet) account (\S+) shows an? (\S+) logo (without a badge|with badge (\S))$/,
+		run: async ({ world, match }) => {
+			const prefix =
+				match[1] === "usage sheet" ? "usage-sheet" : "usage-footer";
+			const logo = world.page.getByTestId(`${prefix}-logo-${match[2]}`);
+			await expect(logo).toBeVisible();
+			await expect(logo).toHaveAttribute("data-driver", match[3] ?? "");
+			await expect(logo).toHaveAttribute("data-account", match[2] ?? "");
+			await expect(logo).toHaveAttribute("aria-hidden", "true");
+			const badge = logo.getByTestId("harness-logo-badge");
+			if (match[5]) {
+				await expect(badge).toBeVisible();
+				await expect(badge).toHaveText(match[5]);
+				await expect(badge).toHaveAttribute("data-state", "idle");
+			} else await expect(badge).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert account names align across usage groups",
+		match: /^the (usage footer|usage sheet) names for (.+) are left-aligned$/,
+		run: async ({ world, match }) => {
+			const prefix =
+				match[1] === "usage sheet" ? "usage-sheet" : "usage-footer";
+			const positions = await Promise.all(
+				(match[2] ?? "").split(", ").map(async (id) => {
+					const name = world.page.getByTestId(`${prefix}-name-${id}`);
+					await expect(name).toBeVisible();
+					const box = await name.boundingBox();
+					if (!box) throw new Error(`Missing name for ${id}`);
+					return box.x;
+				}),
+			);
+			expect(
+				Math.max(...positions) - Math.min(...positions),
+			).toBeLessThanOrEqual(0.5);
 		},
 	},
 	{
@@ -777,6 +819,75 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 			await world.page.mouse.move(x - sidebar.width + 160, y, { steps: 8 });
 			await world.page.mouse.up();
 			await expect(world.page.locator("#sidebar")).toHaveCSS("width", "180px");
+		},
+	},
+	{
+		name: "drag the desktop usage footer handle with a mouse",
+		match: /^I drag the usage footer handle (up|down) by (\d+) pixels$/,
+		run: async ({ world, match }) => {
+			const box = await world.page
+				.getByTestId("usage-footer-handle")
+				.boundingBox();
+			if (!box) throw new Error("Missing usage footer handle");
+			const x = box.x + box.width / 2;
+			const y = box.y + box.height / 2;
+			const dy = (match[1] === "up" ? -1 : 1) * Number(match[2]);
+			await world.page.mouse.move(x, y);
+			await world.page.mouse.down();
+			await world.page.mouse.move(x, y + dy, { steps: 12 });
+			await world.page.mouse.up();
+		},
+	},
+	{
+		name: "click a desktop usage footer fold control",
+		match: /^I click the usage footer (handle|more summary)$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId(
+					match[1] === "handle" ? "usage-footer-handle" : "usage-footer-more",
+				)
+				.click();
+		},
+	},
+	{
+		name: "assert the desktop usage footer is folded or open",
+		match:
+			/^the usage footer (is folded to the claude row with \+5 more|shows every account)$/,
+		run: async ({ world, match }) => {
+			const folded = match[1] !== "shows every account";
+			const footer = world.page.getByTestId("usage-footer-meter");
+			await expect(footer).toHaveAttribute("data-collapsed", String(folded));
+			// A folded row is clipped by its wrapper, so the wrapper's height is what the eye sees.
+			const shownHeight = (accountId: string) =>
+				world.page
+					.getByTestId(`usage-footer-row-${accountId}`)
+					.evaluate(
+						(row) => row.parentElement?.getBoundingClientRect().height ?? 0,
+					);
+			await expect.poll(() => shownHeight("claude")).toBe(24);
+			for (const accountId of [
+				"work",
+				"spare",
+				"unreadable",
+				"chatgpt",
+				"cursor",
+			])
+				await expect.poll(() => shownHeight(accountId)).toBe(folded ? 0 : 24);
+			await expect(
+				world.page.getByTestId("usage-footer-more-count"),
+			).toHaveText("+5 more");
+			await expect
+				.poll(() =>
+					world.page
+						.getByTestId("usage-footer-more")
+						.evaluate((more) =>
+							Number(getComputedStyle(more.parentElement ?? more).opacity),
+						),
+				)
+				.toBe(folded ? 1 : 0);
+			await expect(
+				world.page.getByTestId("usage-footer-handle"),
+			).toHaveAttribute("aria-expanded", String(!folded));
 		},
 	},
 	{

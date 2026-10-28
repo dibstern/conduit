@@ -95,7 +95,9 @@ export function effectiveDispatchFingerprint(
 		interactionMode: null,
 		workspaceRoot: input.workspaceRoot,
 		promptText: input.prompt,
-		imageDigests: (input.images ?? []).map(sha256Hex),
+		imageDigests: (input.images ?? []).map((image) =>
+			sha256Hex(canonicalJson(image)),
+		),
 		effectiveModel: effectiveModel(command, options),
 		providerOptions,
 		materialDefaults: input.account

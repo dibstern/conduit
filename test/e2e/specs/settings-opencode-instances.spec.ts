@@ -54,7 +54,7 @@ test("OpenCode instances can be added, edited and removed with no project open",
 				instanceId: instance.id,
 			});
 	const proxy = await harness.requestRpc({ _tag: "DetectProxy" });
-	await new AppPage(page).goto(harness.baseUrl);
+	await new AppPage(page).mountWithoutProjects(harness);
 	const listSettings = page.getByTestId("list-bar-settings");
 	const sessionOverflow = page
 		.getByTestId("session-bar-overflow")

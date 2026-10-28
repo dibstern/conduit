@@ -135,6 +135,9 @@ export const composerLiveStatusHandlers: StepHandler[] = [
 				.locator(".thinking-item:not(.done)");
 			await expect(reasoning).toBeVisible();
 			await expect(reasoning).toContainText(match[1] ?? "");
+			await expect(
+				reasoning.locator('[data-flow-glyph="running"]'),
+			).toBeVisible();
 		},
 	},
 	{

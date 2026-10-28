@@ -222,11 +222,7 @@ export const ConfigPersistenceLive = Layer.effect(
 				yield* Effect.gen(function* () {
 					const config = yield* snapshot.build;
 					yield* writer.write(config);
-				}).pipe(
-					Effect.catch((error) =>
-						Ref.set(dirty, true).pipe(Effect.andThen(Effect.fail(error))),
-					),
-				);
+				}).pipe(Effect.onError(() => Ref.set(dirty, true)));
 			}).pipe(
 				// Disk writes cannot be cancelled. Retain the permit until the
 				// write completes, even when the requesting RPC disconnects.

@@ -3,6 +3,7 @@ import { SqlClient } from "effect/sql";
 import * as Migrator from "effect/sql/Migrator";
 import type { SqlError } from "effect/sql/SqlError";
 import {
+	ATTACHMENT_STORE_MIGRATION,
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	COMPACT_REDUNDANT_EVENTS_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
@@ -12,6 +13,7 @@ import {
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
 	EVENTS_FORKED_FROM_INDEX_MIGRATION,
 	EVENTS_PARENT_ID_INDEX_MIGRATION,
+	EVENTS_PROVIDER_IDENTITY_INDEXES_MIGRATION,
 	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
 	EVENTS_UNSTAMPED_INDEX_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
@@ -46,6 +48,8 @@ import {
 	SENT_ALERTS_MIGRATION,
 	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
+	SESSION_DRAFT_DELETE_MIGRATION,
+	SESSION_GIT_PUBLICATION_MIGRATION,
 	SESSION_GIT_PUBLISHED_MIGRATION,
 	SESSION_GOALS_MIGRATION,
 	SESSION_PICK_BACKFILL_MIGRATION,
@@ -82,6 +86,7 @@ import {
 	TOOL_RESULT_EVENT_REFS_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 	TURN_RECAPS_MIGRATION,
+	TURN_REQUEST_SETTINGS_MIGRATION,
 } from "../schema.js";
 import {
 	NEVER_CUT_TOOL_NAMES,
@@ -386,6 +391,8 @@ const expectedTableColumns = {
 		"requested_model",
 		"expected_model",
 		"actual_model",
+		"effort",
+		"context_window",
 	],
 } as const;
 
@@ -670,13 +677,9 @@ const verifyExistingBaselineSchema: Effect.Effect<
 			(tableName === "turns" &&
 				sameStrings(
 					actualColumns,
-					expectedColumns.filter(
-						(column) =>
-							column !== "requested_model" &&
-							column !== "expected_model" &&
-							column !== "actual_model",
-					),
-				));
+					expectedColumns.slice(0, actualColumns.length),
+				) &&
+				expectedColumns.length - actualColumns.length <= 5);
 		if (!matchesKnownSchema) {
 			return yield* failSchemaMismatch(
 				`Existing event-store columns differ for ${tableName}. Expected ${expectedColumns.join(", ")}, got ${actualColumns.join(", ")}`,
@@ -1535,6 +1538,37 @@ export const effectMigrationEntries = {
 				.join(";"),
 		);
 	}),
+	"0082_session_git_publication": Effect.gen(function* () {
+		for (const [index, column] of ["workspace_missing", "version"].entries()) {
+			const statement = splitSqlStatements(
+				readMigrationSql(SESSION_GIT_PUBLICATION_MIGRATION),
+			)[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing(
+					"session_git_published",
+					column,
+					statement,
+				);
+		}
+	}),
+	"0083_attachment_store": executeSqlStatements(
+		readMigrationSql(ATTACHMENT_STORE_MIGRATION),
+	),
+	"0084_session_draft_delete": executeSqlStatements(
+		readMigrationSql(SESSION_DRAFT_DELETE_MIGRATION),
+	),
+	"0085_turn_request_settings": Effect.gen(function* () {
+		for (const [index, column] of ["effort", "context_window"].entries()) {
+			const statement = splitSqlStatements(
+				readMigrationSql(TURN_REQUEST_SETTINGS_MIGRATION),
+			)[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing("turns", column, statement);
+		}
+	}),
+	"0086_events_provider_identity_indexes": executeSqlStatements(
+		readMigrationSql(EVENTS_PROVIDER_IDENTITY_INDEXES_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getSkillContentRpc = vi.hoisted(() =>
-	vi.fn(async (_input: { projectSlug: string; name: string }) => ({
+	vi.fn(async (_input: { projectSlug: string; skillRef: string }) => ({
 		name: "brainstorm",
 		path: "/skills/brainstorm/SKILL.md",
 		content: "# Brainstorm skill body",
@@ -15,12 +15,17 @@ const getSkillContentRpc = vi.hoisted(() =>
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	rpc: (
 		_tag: "GetSkillContent",
-		input: { projectSlug: string; name: string },
+		input: { projectSlug: string; skillRef: string },
 	) => getSkillContentRpc(input),
 }));
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
 	getCurrentSlug: () => "conduit",
 	getCurrentSessionId: () => null,
+}));
+vi.mock("../../../src/lib/frontend/stores/discovery.svelte.js", () => ({
+	discoveryState: {
+		commands: [{ name: "brainstorm", skillRef: "skill-brainstorm" }],
+	},
 }));
 
 import ActivityRow from "../../../src/lib/frontend/components/chat/ActivityRow.svelte";
@@ -51,7 +56,7 @@ describe("ActivityRow skill content", () => {
 		expect(await screen.findByText("Brainstorm skill body")).toBeTruthy();
 		expect(getSkillContentRpc).toHaveBeenCalledWith({
 			projectSlug: "conduit",
-			name: "brainstorm",
+			skillRef: "skill-brainstorm",
 		});
 	});
 

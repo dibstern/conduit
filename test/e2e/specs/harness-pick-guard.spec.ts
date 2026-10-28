@@ -71,9 +71,6 @@ const otherOpenCodeModel = {
 const pickerSelector =
 	'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible';
 
-// Each case starts a daemon and provider processes. Keep cases sequential
-// within a viewport, while desktop and mobile still run independently.
-test.describe.configure({ mode: "default" });
 test.setTimeout(120_000);
 test.use({
 	harnessOptions: {
@@ -1297,7 +1294,7 @@ test.describe("session composer owns its stored pick", () => {
 				openedComposer = true;
 			}
 			await expect(mode).toHaveAccessibleName(
-				"Approvals: Full access. Open options",
+				"Permissions: Full access. Open options",
 			);
 			stage = "A-stale-delivered";
 			older.release();
@@ -1310,7 +1307,7 @@ test.describe("session composer owns its stored pick", () => {
 			);
 			after = await picker.getAttribute("data-shown-permission-mode");
 			await expect(mode).toHaveAccessibleName(
-				"Approvals: Full access. Open options",
+				"Permissions: Full access. Open options",
 			);
 			if (openedComposer) await page.keyboard.press("Escape");
 			if (await phoneWords.isVisible())
@@ -1968,7 +1965,7 @@ async function selectFullPermission(page: Page): Promise<void> {
 	await page.getByTestId("permission-mode-option-full").click();
 	await expect(
 		page.getByRole("button", {
-			name: "Approvals: Full access. Open options",
+			name: "Permissions: Full access. Open options",
 			exact: true,
 		}),
 	).toBeVisible();
@@ -3799,9 +3796,14 @@ test("legacy-executed-unrecoverable-pick: a turn without a recoverable model nev
 	});
 	const restarted = readStoredState(harness, slug, sessionId);
 	const restoredBrowser = await harness.connect(sessionId, caseId, slug);
-	let after = restarted;
-	try {
-		await Effect.runPromise(
+	await Effect.runPromise(
+		restoredBrowser.rpc.SyncInputDraft({
+			key: { session: sessionId },
+			text: `${caseId}-rejected`,
+		}),
+	);
+	const submit = await Effect.runPromise(
+		Effect.result(
 			restoredBrowser.rpc["input.submit"]({
 				sessionId,
 				inputId: `${caseId}-rejected`,
@@ -3809,13 +3811,31 @@ test("legacy-executed-unrecoverable-pick: a turn without a recoverable model nev
 				delivery: "queue",
 				text: `${caseId}-rejected`,
 			}),
+		),
+	);
+	const draft = await Effect.runPromise(
+		Stream.runHead(
+			restoredBrowser.rpc.SubscribeInputDraft({ key: { session: sessionId } }),
+		),
+	);
+	let after = restarted;
+	try {
+		expect(submit).toMatchObject({
+			_tag: "Failure",
+			failure: {
+				_tag: "WsRpcError",
+				message: expect.stringContaining("A session model pick is required"),
+			},
+		});
+		after = readStoredState(harness, slug, sessionId);
+		expect(after).toEqual(restarted);
+		expect(draft).toEqual(
+			Option.some({
+				_tag: "synchronized",
+				text: `${caseId}-rejected`,
+				attachments: [],
+			}),
 		);
-		await expect
-			.poll(() => {
-				after = readStoredState(harness, slug, sessionId);
-				return after.turnErrors.length;
-			})
-			.toBe(before.turnErrors.length + 1);
 	} finally {
 		await writeGuardArtifact(testInfo, {
 			case: caseId,
@@ -3825,7 +3845,8 @@ test("legacy-executed-unrecoverable-pick: a turn without a recoverable model nev
 			legacy,
 			restarted,
 			after,
-			expectedCode: "PICK_REQUIRED",
+			submit,
+			draft,
 			receiptsBefore,
 			receiptsAfter: enqueues(harness, true).length,
 		});
@@ -3839,9 +3860,7 @@ test("legacy-executed-unrecoverable-pick: a turn without a recoverable model nev
 	expect(restarted.pick).toEqual(legacy.pick);
 	expect(restarted.pick?.model_id).toBeNull();
 	expect(after.pickEvents).toEqual(before.pickEvents);
-	expect(JSON.parse(after.turnErrors.at(-1)?.data ?? "{}")).toMatchObject({
-		code: "PICK_REQUIRED",
-	});
+	expect(after.turnErrors).toEqual(restarted.turnErrors);
 	expect(enqueues(harness, true).length).toBe(receiptsBefore);
 });
 
@@ -4499,26 +4518,51 @@ test.describe("OpenCode draft inventory borrows", () => {
 						browser = await harness.connect(sessionId, undefined, setup.slug);
 					}
 					const beforePrompts = openCodePrompts(harness).length;
-					await Effect.runPromise(
-						browser.rpc["input.submit"]({
-							sessionId,
-							originId: caseId,
-							inputId: `${caseId}-rejected`,
-							delivery: "queue",
-							text: `${caseId}-rejected`,
-						}),
-					);
-					await expect
-						.poll(() =>
-							readStoredState(harness, setup.slug, sessionId).turnErrors.some(
-								(event) => JSON.parse(event.data).code === "PICK_REJECTED",
-							),
-						)
-						.toBe(true);
-					evidence["rejected"] = readStoredState(
+					const beforeRejected = readStoredState(
 						harness,
 						setup.slug,
 						sessionId,
+					);
+					await Effect.runPromise(
+						browser.rpc.SyncInputDraft({
+							key: { session: sessionId },
+							text: `${caseId}-rejected`,
+						}),
+					);
+					const submit = await Effect.runPromise(
+						Effect.result(
+							browser.rpc["input.submit"]({
+								sessionId,
+								originId: caseId,
+								inputId: `${caseId}-rejected`,
+								delivery: "queue",
+								text: `${caseId}-rejected`,
+							}),
+						),
+					);
+					evidence["submit"] = submit;
+					expect(submit).toMatchObject({
+						_tag: "Failure",
+						failure: {
+							_tag: "WsRpcError",
+							message: expect.stringContaining("ModelNotInCatalog:"),
+						},
+					});
+					const rejected = readStoredState(harness, setup.slug, sessionId);
+					evidence["rejected"] = rejected;
+					expect(rejected).toEqual(beforeRejected);
+					const draft = await Effect.runPromise(
+						Stream.runHead(
+							browser.rpc.SubscribeInputDraft({ key: { session: sessionId } }),
+						),
+					);
+					evidence["rejectedDraft"] = draft;
+					expect(draft).toEqual(
+						Option.some({
+							_tag: "synchronized",
+							text: `${caseId}-rejected`,
+							attachments: [],
+						}),
 					);
 					expect(openCodePrompts(harness)).toHaveLength(beforePrompts);
 					rmSync(rejectedModels, { force: true });
@@ -5597,43 +5641,51 @@ for (const rejection of [
 		} finally {
 			db.close();
 		}
-		const submit = await Effect.runPromise(
-			browser.rpc["input.submit"]({
-				sessionId,
-				inputId: caseId,
-				originId: "pick-guard",
-				delivery: "queue",
+		const beforeRejected = readStoredState(harness, slug, sessionId);
+		await Effect.runPromise(
+			browser.rpc.SyncInputDraft({
+				key: { session: sessionId },
 				text: caseId,
 			}),
 		);
-		let after = readStoredState(harness, slug, sessionId);
+		const submit = await Effect.runPromise(
+			Effect.result(
+				browser.rpc["input.submit"]({
+					sessionId,
+					inputId: caseId,
+					originId: "pick-guard",
+					delivery: "queue",
+					text: caseId,
+				}),
+			),
+		);
+		expect(submit).toMatchObject({
+			_tag: "Failure",
+			failure: {
+				_tag: "WsRpcError",
+				message: expect.stringContaining(
+					rejection === "uncatalogued"
+						? "ModelNotInCatalog:"
+						: "A session model pick is required",
+				),
+			},
+		});
+		const after = readStoredState(harness, slug, sessionId);
+		const draft = await Effect.runPromise(
+			Stream.runHead(
+				browser.rpc.SubscribeInputDraft({ key: { session: sessionId } }),
+			),
+		);
 		let receiptsAfter: number | undefined;
 		let repaired: ReturnType<typeof readStoredState> | undefined;
 		let selectedVariant: string | undefined;
 		try {
-			await expect
-				.poll(
-					() => {
-						after = readStoredState(harness, slug, sessionId);
-						return after.turnErrors.length;
-					},
-					{ timeout: 15_000 },
-				)
-				.toBe(before.turnErrors.length + 1);
-			receiptsAfter = enqueues(harness, true).length;
-			const error = JSON.parse(after.turnErrors.at(-1)?.data ?? "{}") as {
-				code?: string;
-				error?: string;
-			};
-			expect(error.code).toBe(
-				rejection === "uncatalogued" ? "PICK_REJECTED" : "PICK_REQUIRED",
+			// Failed admission leaves both the durable pick and draft untouched.
+			expect(after).toEqual(beforeRejected);
+			expect(draft).toEqual(
+				Option.some({ _tag: "synchronized", text: caseId, attachments: [] }),
 			);
-			if (rejection === "uncatalogued")
-				expect(error.error).toMatch(/^ModelNotInCatalog:/);
-			else {
-				expect(error.error).toMatch(/pick/i);
-				expect(error.error).not.toMatch(/^PickRequired:/);
-			}
+			receiptsAfter = enqueues(harness, true).length;
 			expect(after.pickEvents).toEqual(before.pickEvents);
 			expect(receiptsAfter).toBe(receiptsBefore);
 			if (
@@ -5662,8 +5714,7 @@ for (const rejection of [
 			await writeGuardArtifact(testInfo, {
 				case: caseId,
 				bead: "conduit-test-fmg0.4",
-				expectedCode:
-					rejection === "uncatalogued" ? "PICK_REJECTED" : "PICK_REQUIRED",
+				draft,
 				submit,
 				before,
 				after,
@@ -5821,7 +5872,7 @@ test("server-side-thread-pick: a server-created session inherits its source pick
 async function assertPickRejected(
 	guard: GuardCase,
 	result: Either.Result<unknown, unknown>,
-	tag: "EffortNotOffered" | "ContextWindowNotOffered",
+	tag: "ModelParametersUnavailable" | "ContextWindowNotOffered",
 	testInfo: TestInfo,
 	evidence: {
 		shown: Pick;
@@ -6005,7 +6056,7 @@ test.describe("server pick rejections", () => {
 					result,
 					rejection === "context"
 						? "ContextWindowNotOffered"
-						: "EffortNotOffered",
+						: "ModelParametersUnavailable",
 					testInfo,
 					{
 						shown,

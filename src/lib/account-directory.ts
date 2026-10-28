@@ -261,6 +261,13 @@ export function apply(
 			return reject(
 				`Unknown account driver "${change.driver}"; expected ${Object.keys(PROVIDER_DRIVERS).join(" or ")}`,
 			);
+		if (
+			change.driver === "cursor" &&
+			change.env?.["CURSOR_BACKEND_URL"] !== undefined
+		)
+			return reject(
+				"CURSOR_BACKEND_URL is daemon-wide and cannot be set on an account",
+			);
 		const decoded = Schema.decodeUnknownResult(AccountAddInputSchema)({
 			...change,
 			name,
@@ -399,6 +406,10 @@ export function apply(
 						CURSOR_AUTH_TOKEN: current.env["CURSOR_AUTH_TOKEN"],
 					}
 				: updates.env;
+	if (driver === "cursor" && env?.["CURSOR_BACKEND_URL"] !== undefined)
+		return reject(
+			"CURSOR_BACKEND_URL is daemon-wide and cannot be set on an account",
+		);
 	const updated = accountsStateFromInstances(
 		[
 			{

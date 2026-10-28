@@ -170,7 +170,7 @@ test.describe("Claude Side Thread started mid-turn", () => {
 				};
 			})
 			.toEqual({ status: "idle", turns: 2, toolCompleted: true });
-		await chat.subagentBackBtn.click();
+		await chat.sideThreadParentCrumb.click();
 		await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
 		await expect(chat.assistantMessages.last()).toContainText(
 			"CONDUIT-EXTRA-FOLDER-MARKER-7f3a",
@@ -280,7 +280,7 @@ test.describe("OpenCode Side Thread started mid-turn", () => {
 				};
 			})
 			.toEqual({ status: "idle", toolCompleted: true });
-		await chat.subagentBackBtn.click();
+		await chat.sideThreadParentCrumb.click();
 		await expect(page).toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
 		await expect(chat.assistantMessages.last()).toContainText(
 			"mid-turn-marker",

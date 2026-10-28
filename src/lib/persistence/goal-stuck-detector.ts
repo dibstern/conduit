@@ -239,8 +239,28 @@ function vector(reason: string): Vector {
 	};
 }
 
+function medoid(checks: readonly Check[]): Vector | undefined {
+	const values = checks.map((check) => extract(check.reason ?? ""));
+	const sum = new Map<string, number>();
+	for (const value of values)
+		for (const key of value.keys)
+			sum.set(key, (sum.get(key) ?? 0) + value.inverseNorm);
+	let best = -Infinity;
+	let central: Vector | undefined;
+	for (const value of values) {
+		const score =
+			value.keys.reduce((total, key) => total + (sum.get(key) ?? 0), 0) *
+			value.inverseNorm;
+		if (score > best + 1e-12) {
+			best = score;
+			central = value;
+		}
+	}
+	return central;
+}
+
 /** Pure online segmentation. Centroid = sum of unit vectors of the observed segment.
- * A central observed reason minimises summed cosine distance to all reasons in its run.
+ * A central observed reason minimises summed cosine distance within the latest segment.
  * This computes the exact cosine medoid in O(total tokens), without a pairwise matrix.
  */
 function createStuckDetector(options: Options = {}, retainHistory = true) {
@@ -271,7 +291,47 @@ function createStuckDetector(options: Options = {}, retainHistory = true) {
 	let groups = new Map<string, Set<string>>(),
 		polarities = new Map<string, boolean>();
 	let confirmed: Run | null = null;
+	let prior: {
+		run: Run;
+		medoid: Vector;
+		identifiers: ReadonlySet<string>;
+	} | null = null;
+	let recent: Check[] = [];
 	let previous: Check | undefined;
+	const continuesRun = (value: Vector) => {
+		const earlier = prior;
+		if (!earlier) return false;
+		const keys = new Set(earlier.medoid.keys);
+		const similarity =
+			value.keys.filter((key) => keys.has(key)).length *
+			value.inverseNorm *
+			earlier.medoid.inverseNorm;
+		if (similarity < continuationThreshold) return false;
+		if (!contextGuards) return true;
+		// Added detail may describe the same blocker. Replacing an identifier with
+		// a never-observed one supplies evidence of different work.
+		if (
+			[...value.identifiers].some((id) => !earlier.identifiers.has(id)) &&
+			[...earlier.medoid.identifiers].some((id) => !value.identifiers.has(id))
+		)
+			return false;
+		for (const [family, current] of value.groups) {
+			const previous = earlier.medoid.groups.get(family);
+			if (
+				previous &&
+				(previous.size !== current.size ||
+					[...previous].some((id) => !current.has(id)))
+			)
+				return false;
+		}
+		for (const [predicate, positive] of value.polarities)
+			if (
+				earlier.medoid.polarities.has(predicate) &&
+				earlier.medoid.polarities.get(predicate) !== positive
+			)
+				return false;
+		return true;
+	};
 	const finish = (preserveIdentifiers = false) => {
 		if (confirmed) {
 			// Denominator common to all candidates is omitted; earliest wins ties.
@@ -287,7 +347,15 @@ function createStuckDetector(options: Options = {}, retainHistory = true) {
 				}
 			}
 		}
+		const central = medoid(recent);
+		// Short segments may bridge wording changes only while they independently
+		// describe the previous blocker; unrelated progress must break the link.
+		if (preserveIdentifiers && confirmed && central)
+			prior = { run: confirmed, medoid: central, identifiers: new Set(known) };
+		else if (!preserveIdentifiers || !central || !continuesRun(central))
+			prior = null;
 		members = [];
+		recent = [];
 		count = 0;
 		first = undefined;
 		vocabulary.clear();
@@ -403,6 +471,8 @@ function createStuckDetector(options: Options = {}, retainHistory = true) {
 		}
 		if (!count) first = check;
 		count++;
+		recent.push(check);
+		if (recent.length > minChecks) recent.shift();
 		if (retainHistory)
 			members.push({ check, keys, inverseNorm: value.inverseNorm });
 		for (const id of value.identifiers) known.add(id);
@@ -412,20 +482,25 @@ function createStuckDetector(options: Options = {}, retainHistory = true) {
 		if (count >= minChecks) {
 			if (!confirmed) {
 				if (!first) return;
-				confirmed = {
-					id: `${first.iteration}@${first.at}`,
-					since: first.at,
-					sinceIteration: first.iteration,
-					count,
-					blocker: first.reason ?? "",
-					until: check.at,
-					untilIteration: check.iteration,
-					detectedAt: check.at,
-					detectedIteration: check.iteration,
-				};
-				if (retainHistory) runs.push(confirmed);
+				const central = medoid(recent);
+				if (central && continuesRun(central) && prior) {
+					confirmed = prior.run;
+				} else {
+					confirmed = {
+						id: `${first.iteration}@${first.at}`,
+						since: first.at,
+						sinceIteration: first.iteration,
+						count,
+						blocker: first.reason ?? "",
+						until: check.at,
+						untilIteration: check.iteration,
+						detectedAt: check.at,
+						detectedIteration: check.iteration,
+					};
+					if (retainHistory) runs.push(confirmed);
+				}
 			}
-			confirmed.count = count;
+			confirmed.count = check.iteration - confirmed.sinceIteration + 1;
 			confirmed.until = check.at;
 			confirmed.untilIteration = check.iteration;
 		}
@@ -476,14 +551,16 @@ export default detectStuck;
 const goalOptions = { minChecks: 3, threshold: 0.55 };
 const goalReasonLimit = 4_096;
 
-/** Projection needs the run bounds/count, not the medoid or historical verdicts.
+/** Projection needs the run bounds/count, not historical verdicts or full medoids.
  * The centroid and identifier context have no finite lookback, so retain those
- * statistics across checks without retaining the run's reasons or row history.
+ * statistics and a minChecks-sized medoid window without retaining row history.
  */
 export function createGoalStuckTracker() {
 	const detector = createStuckDetector(goalOptions, false);
 	let at = -Infinity;
 	let since = 0;
+	let segmentSince = 0;
+	let sinceIteration: number | undefined;
 	let invalid = false;
 	return {
 		add(check: Check): { since: number; lastAt: number; count: number } | null {
@@ -495,7 +572,15 @@ export function createGoalStuckTracker() {
 					at,
 					reason: check.reason?.slice(0, goalReasonLimit) ?? null,
 				});
-				if (detector.first?.iteration === check.iteration) since = check.at;
+				if (detector.first?.iteration === check.iteration)
+					segmentSince = check.at;
+				if (
+					detector.current &&
+					detector.current.sinceIteration !== sinceIteration
+				) {
+					sinceIteration = detector.current.sinceIteration;
+					since = segmentSince;
+				}
 				return detector.current
 					? { since, lastAt: check.at, count: detector.current.count }
 					: null;

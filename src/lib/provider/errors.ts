@@ -46,11 +46,14 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 	readonly cause: unknown;
 	/** A concrete remedy the account picker can present, or a process fence. */
 	readonly code?:
+		| "attachment_missing"
 		| "auth_required"
 		| "codex_version_unsupported"
 		| "provider_process_gone"
 		| "provider_process_unavailable"
 		| "provider_control_timeout"
+		| "secret_answer_expired"
+		| "secret_answer_unavailable"
 		| "runner_detached"
 		| "project_inactive"
 		| "project_unavailable";
@@ -176,6 +179,7 @@ export class MissingPendingInteractions extends Data.TaggedError(
 }
 
 export type OrchestrationError =
+	| import("../contracts/ws-rpc.js").DraftAttachmentMissing
 	| ProviderNotRegistered
 	| SessionProviderNotBound
 	| DuplicateCommand

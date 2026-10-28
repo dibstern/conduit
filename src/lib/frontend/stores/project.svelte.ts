@@ -40,6 +40,7 @@ export function applyShellProjects(
 ): void {
 	const projects = toProjectInfoList(frame.projects);
 	projectState.projects = projects;
+	projectState.projectsLoaded = true;
 	projectState.newSessionProject = frame.newSessionProject ?? null;
 	projectState.projectOrder = frame.projectOrder ?? [];
 
