@@ -612,6 +612,7 @@ export const UsageLive: Story = {
 export const JevOffCollapsed: Story = {
 	tags: ["viewport-capture"],
 	args: {
+		sessionId: "turn-activity-jev-off-collapsed",
 		turn: settled,
 		segment: settledSegment,
 		final: true,
@@ -642,6 +643,7 @@ export const JevOffCollapsed: Story = {
 
 export const JevOffOpen: Story = {
 	...JevOffCollapsed,
+	args: { ...JevOffCollapsed.args, sessionId: "turn-activity-jev-off-open" },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const head = canvas.getByRole("button", { name: "Expand turn" });
@@ -665,7 +667,12 @@ export const JevOffOpen: Story = {
 
 export const JevOffLive: Story = {
 	...JevOffOpen,
-	args: { ...JevOffCollapsed.args, turn: live, segment: liveSegment },
+	args: {
+		...JevOffCollapsed.args,
+		sessionId: "turn-activity-jev-off-live",
+		turn: live,
+		segment: liveSegment,
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const head = canvas.getByRole("button", { name: "Expand turn" });
