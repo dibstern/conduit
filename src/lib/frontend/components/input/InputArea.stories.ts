@@ -1694,7 +1694,7 @@ export const FinalIconsDesktop: Story = {
 		if (phone || sessionViewState.composerWidth >= 480) {
 			await expect(effort).toBeVisible();
 			await expect(effort).toHaveAccessibleName(
-				"Effort: High. Open effort options",
+				`Effort: High. ${phone ? "Tap to raise; hold for options" : "Click to raise; Option-click for options"}`,
 			);
 		} else {
 			await expect(effort).toBeNull();
@@ -3365,7 +3365,7 @@ export const PhoneProviderEffortClaude: Story = {
 			if (!meter) throw new Error("Phone effort control is missing");
 			await expect(meter).toBeVisible();
 			await expect(meter).toHaveAccessibleName(
-				`Effort: ${label}. Open effort options`,
+				`Effort: ${label}. Tap to raise; hold for options`,
 			);
 			await expect(meter).toHaveTextContent(/^$/);
 			const bars = canvas.getByTestId("effort-meter").children;
@@ -3375,8 +3375,10 @@ export const PhoneProviderEffortClaude: Story = {
 				await expect(getComputedStyle(bar).backgroundColor === color).toBe(
 					index < filled,
 				);
-			await userEvent.click(meter);
+			// A phone tap raises effort; a long-press opens the options.
+			await userEvent.pointer({ keys: "[TouchA>]", target: meter });
 			const picker = await body.findByTestId("model-picker");
+			await userEvent.pointer({ keys: "[/TouchA]", target: meter });
 			await expect(
 				within(picker).getByTestId("picker-effort-option-high"),
 			).toBeVisible();
