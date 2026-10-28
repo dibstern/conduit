@@ -19,9 +19,9 @@ compaction seams. Chat code chooses messages and handles picks.
 The primitive measures the track's `width`; the adapter and Turn share it with
 `stripLayout` so its 2px gaps and seams stay on the same scale as the pins.
 
-`markers` is `{ kind: "dots"; dots }` or
-`{ kind: "pins"; pins; selected }`. Only pins can render the thumb, derived from
-the card slot.
+`markers` is `{ kind: "plain" }` (segments only), `{ kind: "dots"; mode; dots }`
+with `mode: "collapsed" | "tab"`, or `{ kind: "pins"; pins; selected }`. Only
+pins can render the thumb, derived from the card slot.
 The existing `surfacePinRows` helper lays out the pin groups inside the primitive.
 `cardSlot` is `none | selected { card } | preview { card }`, chosen by the
 Turn owner. The `card` snippet fills the selected hanging slot under the strip;
@@ -191,7 +191,7 @@ No axis for padding, gap, type scale, radius or border independently of `variant
 
 [Tabs.svelte](../../src/lib/frontend/components/ui/Tabs.svelte) is a strip of options where picking one swaps the panel below it.
 
-`variant` is `underline | pill | field`, default `underline`. Exact recipes are in the shared table below. `value: T` and `options: readonly SegmentedOption<T>[]` are required, with caller-defined `T extends string`, not a closed primitive union. There are no top-level boolean props. Each option has `disabled?: boolean`, omitted by default and forwarded to bits. `label` is required. No discriminated prop union.
+`variant` is `underline | pill | field | footer`, default `underline`. `footer` is Tabs-only (`TabVariant`); SegmentedControl's `SegmentedVariant` excludes it. Exact recipes are in the shared table below. `value: T` and `options: readonly SegmentedOption<T>[]` are required, with caller-defined `T extends string`, not a closed primitive union. There are no top-level boolean props. Each option has `disabled?: boolean`, omitted by default and forwarded to bits. `label` is required. No discriminated prop union.
 
 Bits-ui: `Tabs.Root`, `Tabs.List` and `Tabs.Trigger`. The component's doc comment assigns roving focus, arrow/Home/End handling and ARIA role wiring to bits. This wrapper renders no `Tabs.Content`; the doc comment explicitly says `aria-controls` is absent.
 
@@ -213,6 +213,12 @@ Shared `variant` recipes for SegmentedControl and Tabs, from [segmented-styles.t
 | | item | `flex-1 px-3 py-1.5 text-xs rounded border transition-colors cursor-pointer` |
 | | selected | `border-brand-a text-text bg-brand-a/10` |
 | | unselected | `border-border text-text-muted hover:text-text` |
+| `footer` | list | `flex items-stretch bg-turn-bg` |
+| | item | `relative inline-flex min-h-[36px] items-center gap-[4px] border-t-2 px-[9px] font-sans text-[12px] font-medium cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50` |
+| | selected | `border-accent text-text` |
+| | unselected | `border-transparent text-text-secondary hover:text-text` |
+
+The `footer` recipe is the Turn panel's Show bar tabs. It replaces the former `level` variant, the SurfacingCard level control on the strip axis, which the Show bar removed.
 
 ## Fields
 

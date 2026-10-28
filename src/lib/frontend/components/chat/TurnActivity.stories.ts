@@ -666,6 +666,7 @@ export const JevOffCollapsed: Story = {
 
 export const JevOffOpen: Story = {
 	...JevOffCollapsed,
+	tags: ["viewport-capture"],
 	args: { ...JevOffCollapsed.args, sessionId: "turn-activity-jev-off-open" },
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -690,6 +691,7 @@ export const JevOffOpen: Story = {
 
 export const JevOffLive: Story = {
 	...JevOffOpen,
+	tags: ["viewport-capture"],
 	args: {
 		...JevOffCollapsed.args,
 		sessionId: "turn-activity-jev-off-live",

@@ -794,25 +794,6 @@ export function stripLayout(
 	});
 }
 
-/** "Edited src/auth.ts · 1s" for the i-th step, for the hover caption. */
-export function stepCaption(
-	segment: Segment,
-	turn: Turn,
-	final: boolean,
-	i: number,
-	now: number,
-): string {
-	const part = segment.activity[i];
-	if (!part) return "";
-	const duration =
-		part.type === "system"
-			? undefined
-			: stepDurations(segment, turn, final, now)?.[i];
-	return duration === undefined
-		? partLabel(part)
-		: `${partLabel(part)} · ${fmtDuration(duration)}`;
-}
-
 export interface TurnEconomics {
 	duration?: number;
 	cost?: number;

@@ -105,9 +105,6 @@ export const SEGMENTED_VARIANTS = {
 export type TabVariant = keyof typeof SEGMENTED_VARIANTS;
 export type SegmentedVariant = Exclude<TabVariant, "footer">;
 
-export const SEGMENTED_VARIANT_NAMES = Object.keys(SEGMENTED_VARIANTS).filter(
-	(variant): variant is SegmentedVariant => variant !== "footer",
-);
 export const TAB_VARIANT_NAMES = Object.keys(
 	SEGMENTED_VARIANTS,
 ) as TabVariant[];
