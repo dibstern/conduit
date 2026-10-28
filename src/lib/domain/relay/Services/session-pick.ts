@@ -1,7 +1,10 @@
 import { Effect, Result } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
-import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
+import {
+	MANAGED_OPENCODE_ACCOUNT_ID,
+	PROVIDER_DRIVERS,
+} from "../../../contracts/provider-instance.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -91,7 +94,9 @@ export const loadServerSessionPick = (
 		if (source && !sourcePick) return yield* new PickRequired();
 		const account = yield* (yield* AccountDirectory).resolve(
 			instanceId === undefined
-				? { _tag: "DriverDefault", driver: harness }
+				? harness === "opencode"
+					? { _tag: "Id", id: MANAGED_OPENCODE_ACCOUNT_ID }
+					: { _tag: "DriverDefault", driver: harness }
 				: { _tag: "Id", id: instanceId },
 		);
 		const config = yield* ConfigTag;

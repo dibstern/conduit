@@ -153,7 +153,7 @@ export const PROVIDER_DRIVERS = {
 		forkStrategy: "native",
 		needsPriorHistoryMetadata: false,
 		accountKind: "server",
-		defaultAccountSource: "managed",
+		defaultAccountSource: "selection",
 		catalogSource: "server",
 		modelIdFormat: "provider-qualified",
 		streamsSessionLifecycle: false,

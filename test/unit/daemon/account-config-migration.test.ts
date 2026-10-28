@@ -161,7 +161,10 @@ describe("account config migration", () => {
 				},
 			],
 		});
-		expect(config.accountDefaults).toEqual({ claude: "claude" });
+		expect(config.accountDefaults).toEqual({
+			claude: "claude",
+			opencode: "opencode",
+		});
 	});
 
 	it("saves a migrated snapshot once and decodes the saved config identically", async () => {
@@ -235,7 +238,7 @@ describe("account config migration", () => {
 			claudeConfigDir: "/retired-login",
 			accountDefaults,
 		});
-		expect(config.accountDefaults).toEqual({});
+		expect(config.accountDefaults).toEqual({ opencode: "opencode" });
 		await saveDaemonConfig(config, dir);
 		const restarted = Either.getOrThrow(loadAccountsState(dir, launch));
 		expect(

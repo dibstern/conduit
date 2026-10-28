@@ -1,6 +1,9 @@
 import { Effect } from "effect";
 import type { Account } from "../../../contracts/account.js";
-import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
+import {
+	MANAGED_OPENCODE_ACCOUNT_ID,
+	PROVIDER_DRIVERS,
+} from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
 import {
 	type Harness,
@@ -109,7 +112,9 @@ export const loadModelCatalog = (
 		const log = yield* LoggerTag;
 		const account = yield* (yield* AccountDirectory).resolve(
 			instanceId === undefined
-				? { _tag: "DriverDefault", driver: harness }
+				? harness === "opencode"
+					? { _tag: "Id", id: MANAGED_OPENCODE_ACCOUNT_ID }
+					: { _tag: "DriverDefault", driver: harness }
 				: { _tag: "Id", id: instanceId },
 		);
 		if (account.driver !== harness) return [] as ModelInfo[];

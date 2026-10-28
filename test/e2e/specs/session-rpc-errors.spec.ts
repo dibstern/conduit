@@ -320,7 +320,6 @@ for (const failure of ["AccountUnroutable", "DraftAlreadySent"] as const)
 		const models = {
 			projectSlug,
 			instanceId: "opencode",
-			defaultOpenCodeInstanceId: "opencode",
 			providers: [
 				{
 					id: "anthropic",

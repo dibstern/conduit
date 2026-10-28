@@ -119,7 +119,6 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			}
 			rpc.setStubs({
 				GetModels: () => ({
-					defaultOpenCodeInstanceId: "opencode",
 					projectSlug: "myapp",
 					instanceId: match[3] ?? (claude ? "claude" : "opencode"),
 					providers: dualDriverProviders.filter(

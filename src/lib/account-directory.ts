@@ -13,7 +13,6 @@ import { AccountUnroutable } from "./contracts/limit-recovery.js";
 import {
 	type AccountId,
 	AccountIdSchema,
-	getProviderDriver,
 	isKnownDriverKind,
 	type KnownProviderDriverKind,
 	MANAGED_OPENCODE_ACCOUNT_ID,
@@ -551,14 +550,15 @@ export function accountsStateFromConfig(
 	);
 }
 
+/** Backend defaults keep OpenCode work independent of the draft's selected server. */
 export function defaultFor(
 	state: AccountsState,
 	driver: KnownProviderDriverKind,
 ): Option.Option<Account> {
 	const id =
-		getProviderDriver(driver)?.defaultAccountSource === "selection"
-			? state.defaults[driver]
-			: Option.some(MANAGED_OPENCODE_ACCOUNT_ID);
+		driver === "opencode"
+			? Option.some(MANAGED_OPENCODE_ACCOUNT_ID)
+			: state.defaults[driver];
 	return Option.flatMap(id, (accountId) =>
 		Option.fromNullishOr(
 			state.accounts.find(
@@ -571,10 +571,7 @@ export function defaultFor(
 export function list(state: AccountsState): ReadonlyArray<AccountListItem> {
 	return state.accounts.map((account) => ({
 		...account,
-		isDefault: Option.exists(
-			defaultFor(state, account.driver),
-			(selected) => selected.id === account.id,
-		),
+		isDefault: Option.contains(state.defaults[account.driver], account.id),
 	}));
 }
 

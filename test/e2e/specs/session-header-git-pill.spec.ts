@@ -112,7 +112,6 @@ async function openCheckout(
 				nextCursor: null,
 			}),
 			GetModels: () => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "e2e-replay",
 				providers: [],
 			}),

@@ -14,6 +14,7 @@ const builders: Readonly<Record<string, string>> = {
 // not parameter combinations. Counts fail in both directions so the allowance
 // cannot silently grow or survive the removal of an unrelated read.
 const unrelatedDefaultReads = {
+	"src/lib/contracts/start-selection.ts": 1,
 	"src/lib/domain/daemon/Services/instance-manager-service.ts": 1,
 	"src/lib/domain/relay/Services/model-catalog.ts": 2,
 	"src/lib/frontend/components/layout/UsageFooterMeter.svelte": 2,
@@ -22,7 +23,7 @@ const unrelatedDefaultReads = {
 	"src/lib/frontend/components/model/title-model-selection-target.svelte.ts": 1,
 	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte": 1,
 	"src/lib/frontend/components/overlays/CursorAuthSettings.svelte": 1,
-	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte": 3,
+	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte": 5,
 	"src/lib/frontend/components/overlays/ProvidersSettingsTab.svelte": 3,
 	"src/lib/frontend/stores/discovery.svelte.ts": 11,
 	"src/lib/frontend/stores/instance.svelte.ts": 3,

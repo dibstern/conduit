@@ -329,7 +329,7 @@ describe("account directory mutations", () => {
 		).toBe(true);
 	});
 
-	it("rejects unavailable and OpenCode defaults without changing state", () => {
+	it("accepts OpenCode defaults and rejects unavailable accounts", () => {
 		const state = accountsStateFromInstances(
 			[
 				{ id: "opencode", name: "OpenCode", driver: "opencode" },
@@ -337,7 +337,12 @@ describe("account directory mutations", () => {
 			],
 			launchLogin,
 		);
-		for (const id of ["missing", "opencode"])
+		expect(
+			Either.isSuccess(
+				apply(state, { _tag: "SetDefault", id: "opencode" }, []),
+			),
+		).toBe(true);
+		for (const id of ["missing"])
 			expect(
 				Either.isFailure(apply(state, { _tag: "SetDefault", id }, [])),
 			).toBe(true);
@@ -475,7 +480,9 @@ describe("account directory mutations", () => {
 							).toBe(true);
 						}
 						if (change._tag === "SetDefault")
-							expect(Option.getOrThrow(selected).id).toBe(id);
+							expect(
+								current.find((account) => account.id === id)?.isDefault,
+							).toBe(true);
 						for (const deleted of state.deleted) {
 							const routed = resolve(state, { _tag: "Id", id: deleted.id });
 							const fallback = defaultFor(state, deleted.driver);

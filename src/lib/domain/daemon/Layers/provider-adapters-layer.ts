@@ -365,7 +365,7 @@ export const makeProviderAdaptersLive = (
 								yield* bindings.getProviderForSession(sessionId);
 							const account = yield* accounts.resolve(
 								instanceId === undefined
-									? { _tag: "DriverDefault", driver: "opencode" }
+									? { _tag: "Id", id: MANAGED_OPENCODE_ACCOUNT_ID }
 									: { _tag: "Id", id: instanceId },
 							);
 							if (!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer)

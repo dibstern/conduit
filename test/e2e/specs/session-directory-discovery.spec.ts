@@ -71,7 +71,6 @@ test("settings, commands and skill documents follow a workspace change and sessi
 				nextCursor: null,
 			}),
 			GetModels: () => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "e2e-replay",
 				providers: [],
 			}),

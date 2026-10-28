@@ -99,7 +99,6 @@ async function openSession(
 				nextCursor: null,
 			}),
 			GetModels: () => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "e2e-replay",
 				providers: [],
 			}),

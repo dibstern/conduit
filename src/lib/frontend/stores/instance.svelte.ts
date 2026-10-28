@@ -174,7 +174,12 @@ export function applyInstanceListResponse(
 	});
 	// Only these fields change which account a session or draft resolves to.
 	const routingKey = (list: readonly OpenCodeInstance[]) =>
-		list.map((i) => `${i.id}:${i.driver}:${i.isDefault}`).join("|");
+		list
+			.map(
+				(i) =>
+					`${i.id}:${i.driver}:${i.isDefault}:${i.driver === "opencode" ? i.status : ""}`,
+			)
+			.join("|");
 	const accountsChanged = routingKey(instances) !== routingKey(cachedInstances);
 	const firstList = !instancesListed;
 	instancesListed = true;

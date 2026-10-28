@@ -208,6 +208,7 @@
 					<HarnessLogo driver={inst.driver ?? "opencode"} instanceId={inst.id} size={18} aligned data-testid="account-logo" />
 					<div class="flex-1 min-w-0 flex items-center gap-[6px] text-[13.5px] max-md:text-[15px] text-text">
 						<span class="truncate">{inst.name}</span>
+						{#if inst.isDefault}<Badge variant="quiet" size="xs" shape="pill" data-testid="default-account-marker">default</Badge>{/if}
 						{#if !inst.managed}<Badge variant="quiet" size="xs" shape="pill">discovered</Badge>{/if}
 					</div>
 					<span data-testid="instance-status-dot" class={"size-[7px] rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
@@ -225,6 +226,9 @@
 							<dd class="text-text">{inst.managed ? "Conduit" : "You (found by scan)"}</dd>
 						</dl>
 						<div class="flex flex-wrap items-center gap-2">
+							{#if !inst.isDefault}
+								<Button touchTarget variant="secondary" size="sm" data-testid="make-default-btn" disabled={form.state.formSaving || accountActions.defaultSaving} onclick={() => accountActions.makeDefault(inst.id)}>Make default</Button>
+							{/if}
 							{#if inst.managed}
 								{#if inst.status === "healthy" || inst.status === "starting"}
 									<Button touchTarget variant="secondary" size="sm" onclick={() => accountActions.stop(inst.id)}>Stop</Button>

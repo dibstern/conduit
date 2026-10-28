@@ -397,7 +397,6 @@ test("deleting Claude defaults follows usage order and adding an account restore
 							)?.id;
 				if (!id)
 					return {
-						defaultOpenCodeInstanceId: "opencode",
 						projectSlug: "myapp",
 						providers: [],
 					};
@@ -405,7 +404,6 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				if (!catalogue) throw new Error(`Missing fixture catalogue for ${id}`);
 				publishCatalogue(id);
 				return {
-					defaultOpenCodeInstanceId: "opencode",
 					projectSlug: "myapp",
 					instanceId: id,
 					providers: providersForAccount(id),

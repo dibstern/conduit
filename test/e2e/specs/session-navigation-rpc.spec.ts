@@ -55,7 +55,6 @@ async function setup(
 			GetModels: () => ({
 				projectSlug,
 				instanceId: "opencode",
-				defaultOpenCodeInstanceId: "opencode",
 				providers: [
 					{
 						id: "anthropic",
@@ -743,7 +742,6 @@ test("a first send from home places the session in the chosen draft project", as
 			projectSlug:
 				"projectSlug" in payload ? payload.projectSlug : otherProject,
 			instanceId: "opencode",
-			defaultOpenCodeInstanceId: "opencode",
 			providers: [
 				{
 					id: "anthropic",

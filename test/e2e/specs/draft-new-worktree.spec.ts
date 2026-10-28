@@ -220,7 +220,6 @@ async function openDraft(
 			PreWarmSession: () => undefined,
 			PreWarmDraft: () => undefined,
 			GetModels: (input) => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "projectSlug" in input ? input.projectSlug : "e2e-replay",
 				providers: modelProviders.filter(
 					({ id }) =>

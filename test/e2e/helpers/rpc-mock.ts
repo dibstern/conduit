@@ -93,7 +93,6 @@ export interface RpcMockOptions {
 /** Mock-only catalog served by GetModels/GetAgents/GetCommands by default. */
 export interface MockCatalog {
 	instanceId?: string;
-	defaultOpenCodeInstanceId?: string;
 	providers?: readonly unknown[];
 	agents?: ReadonlyArray<{
 		providerScope: { id: string; name: string };
@@ -198,7 +197,6 @@ export class RpcMockControl {
 				return checkedReply("GetModels", () =>
 					Schema.decodeUnknownSync(GetModelsResponseSchema)({
 						projectSlug: this.projectSlug,
-						defaultOpenCodeInstanceId: "opencode",
 						providers: providers ?? [],
 						...modelState,
 						...("sessionId" in payload &&
@@ -1055,7 +1053,6 @@ function socketTable(
 										new Error("Mock GetModels must return an object"),
 									);
 								yield* queue.emit({
-									defaultOpenCodeInstanceId: "opencode",
 									...response,
 									instanceId: payload["instanceId"],
 								});

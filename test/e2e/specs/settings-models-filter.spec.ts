@@ -56,7 +56,6 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			GetModels: () => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "e2e-replay",
 				providers,
 				hiddenModels,

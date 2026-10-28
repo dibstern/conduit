@@ -358,7 +358,6 @@ describe("discovery catalogs over the RPC wire", () => {
 		});
 		discovery.applyGetModelsResponse({
 			...models("A"),
-			defaultOpenCodeInstanceId: "one",
 		});
 		const oldRead = discovery.refreshCatalogs();
 		await vi.waitFor(() => {
@@ -489,7 +488,6 @@ describe("discovery catalogs over the RPC wire", () => {
 		discovery.applyGetModelsResponse({
 			projectSlug: "project-a",
 			instanceId: "one",
-			defaultOpenCodeInstanceId: "one",
 			providers,
 			active: { model: "A", provider: "opencode" },
 		});
@@ -516,7 +514,6 @@ describe("discovery catalogs over the RPC wire", () => {
 		discovery.applyGetModelsResponse({
 			projectSlug: "project-a",
 			instanceId: "one",
-			defaultOpenCodeInstanceId: "one",
 			providers,
 			active: { model: "B", provider: "opencode" },
 		});

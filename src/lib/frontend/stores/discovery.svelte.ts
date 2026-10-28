@@ -12,6 +12,7 @@ import {
 	type ProviderDriverKind,
 	type ProviderSessionCapabilities,
 } from "../../contracts/provider-instance.js";
+import { openCodeStartSelection } from "../../contracts/start-selection.js";
 import type { TitleGenerationState } from "../../contracts/title-generation.js";
 import {
 	catalogFromProviderList,
@@ -252,7 +253,6 @@ const commandCatalogs = $state<
 >({});
 // Pruning entries must never reuse an issue number held by an in-flight read.
 let catalogReadIssue = 0;
-const projectCatalogDefaults = $state<Record<string, string>>({});
 const noModels = emptyModels();
 const noAgents = emptyAgents();
 
@@ -1116,17 +1116,10 @@ export function getEffectiveInstanceId(): string | undefined {
 		return available.find((account) => account.id === draft.instanceId)?.id;
 	const provider = discoveryState.defaultProviderId;
 	const driver = draft.driver ?? driverForProvider(provider);
-	const defaultOpenCodeInstanceId =
-		projectCatalogDefaults[getCurrentSlug() ?? ""];
-	if (
-		getDriverTraits(driver)?.runsOpenCodeServer &&
-		defaultOpenCodeInstanceId &&
-		available.some(
-			(account) =>
-				account.id === defaultOpenCodeInstanceId && account.driver === driver,
-		)
-	)
-		return defaultOpenCodeInstanceId;
+	if (driver === "opencode") {
+		const { account } = openCodeStartSelection(instanceState.instances);
+		return available.find((instance) => instance.id === account.id)?.id;
+	}
 	return available.find(
 		(account) =>
 			account.isDefault && (driver === undefined || account.driver === driver),
@@ -1157,12 +1150,6 @@ function fillDraftDefault(): void {
 	const instanceId = getEffectiveInstanceId();
 	if (!instanceId) return;
 	const defaults = serverDiscovery.harnessDefaults[draftDriver(instanceId)];
-	if (
-		draft.instanceId === null &&
-		getInstanceTraits(instanceId)?.runsOpenCodeServer &&
-		projectCatalogDefaults[getCurrentSlug() ?? ""] === undefined
-	)
-		return;
 	if (defaults.status !== "ok" || !defaults.pick) return;
 	const catalog = catalogFromProviderList(
 		getModelCatalogForInstance(instanceId),
@@ -1527,8 +1514,6 @@ export function applyGetModelsResponse(
 			}
 		}
 	}
-	if (response.defaultOpenCodeInstanceId !== undefined)
-		projectCatalogDefaults[scope.project] = response.defaultOpenCodeInstanceId;
 	const previous = modelsFor(scope);
 	modelCatalogs[scope.key] = {
 		...previous,
@@ -1963,8 +1948,6 @@ export function clearDiscoveryState(): void {
 		delete accountModelCatalogs[project];
 	for (const key of Object.keys(agentCatalogs)) delete agentCatalogs[key];
 	for (const key of Object.keys(commandCatalogs)) delete commandCatalogs[key];
-	for (const key of Object.keys(projectCatalogDefaults))
-		delete projectCatalogDefaults[key];
 	serverDiscovery.currentModelId = "";
 	serverDiscovery.currentProviderId = "";
 	serverDiscovery.sessionProviderIds = {};

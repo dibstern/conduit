@@ -365,7 +365,9 @@ export const getModelsResponse = (
 			getProviderDriver(instanceDriver)?.catalogSource === "server" ||
 			(instanceDriver === undefined &&
 				(getProviderDriver(activeDriver)?.catalogSource === "server" ||
-					((yield* directory.defaultFor("opencode"))._tag === "Some" &&
+					((yield* directory.list).some(
+						(account) => account.id === MANAGED_OPENCODE_ACCOUNT_ID,
+					) &&
 						(account === undefined || account.id === listedId))))
 		) {
 			const openCodeProviderResult = yield* Effect.result(
@@ -585,8 +587,6 @@ export const getModelsResponse = (
 
 		return {
 			projectSlug: input.projectSlug ?? "",
-			defaultOpenCodeInstanceId:
-				config.openCodeInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID,
 			...((activeAccount?.id ?? instanceId) === undefined
 				? {}
 				: { instanceId: activeAccount?.id ?? instanceId }),
@@ -687,7 +687,11 @@ export const switchModelForSession = (input: SwitchModelInput) =>
 		const account =
 			boundAccount?.driver === harness
 				? boundAccount
-				: yield* accounts.resolve({ _tag: "DriverDefault", driver: harness });
+				: yield* accounts.resolve(
+						harness === "opencode"
+							? { _tag: "Id", id: MANAGED_OPENCODE_ACCOUNT_ID }
+							: { _tag: "DriverDefault", driver: harness },
+					);
 		const catalog = yield* loadModelCatalog(harness, account.id);
 		const resolved = resolveTurnSettings(
 			{

@@ -6,7 +6,7 @@
  * - A live former default must stay on itself after moving the pointer.
  * - Zero Claude accounts must keep history visible with no invented account.
  * - Adding an account must refresh previously unroutable session lists.
- * - Unknown and OpenCode accounts must fail with a typed rejection.
+ * - Unknown accounts must fail; OpenCode defaults must persist like other drivers.
  * All config, account folders and environment variables are fixture-owned.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -367,11 +367,16 @@ describe("default Claude account through daemon RPC", () => {
 	);
 
 	it.effect(
-		"rejects unknown and OpenCode defaults without moving the pointer",
+		"accepts OpenCode defaults and rejects unknown accounts without moving other defaults",
 		() =>
 			Effect.gen(function* () {
 				const client = yield* makeClient;
-				for (const instanceId of ["missing", "opencode"]) {
+				yield* client.SetDefault({ instanceId: "opencode" });
+				expect(
+					Either.getOrThrowWith(loadDaemonConfigResult(root), (error) => error)
+						?.accountDefaults?.opencode,
+				).toBe("opencode");
+				for (const instanceId of ["missing"]) {
 					const result = yield* Effect.result(
 						client.SetDefault({ instanceId }),
 					);
