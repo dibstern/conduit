@@ -188,7 +188,10 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 	await expect(usageLink).toHaveText("Usage ›");
 	await usageLink.scrollIntoViewIfNeeded();
 	await page.evaluate(() => document.fonts.ready);
-	const artifactDir = resolve("test-results/settings-claude-accounts");
+	const artifactDir = resolve(
+		process.env["CONDUIT_E2E_ARTIFACTS"] ?? "test-results",
+		"settings-claude-accounts",
+	);
 	await mkdir(artifactDir, { recursive: true });
 	const accountsPath = resolve(
 		artifactDir,
@@ -497,7 +500,10 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		await page.getByTestId("confirm-modal-action").click();
 		await expect(row).toHaveCount(0);
 	};
-	const artifactDir = resolve("test-results/settings-claude-accounts");
+	const artifactDir = resolve(
+		process.env["CONDUIT_E2E_ARTIFACTS"] ?? "test-results",
+		"settings-claude-accounts",
+	);
 	await mkdir(artifactDir, { recursive: true });
 	const capture = async (name: string) => {
 		const path = resolve(artifactDir, `${testInfo.project.name}-${name}.png`);
