@@ -223,6 +223,14 @@ non-terminal and unheld. Held transmissions of exited runners go to the reconcil
 `settleUnclaimedRunnerCommands` no longer settles held transmissions itself: it hands those of exited
 runners to the reconciler's Settle.
 
+**Discovery is not evidence.** A runner's socket and registration file only find a live runner.
+Once full daemon shutdown confirms every owned runner Gone, it removes that runner's socket and
+registration and nothing else. The retirement row, the send journal and any unacknowledged spool stay
+until startup Settle consumes them. Every fact Settle needs (runner id, session, build identity, the
+journal and the spool) lives with that durable evidence, written before the runner can exit, so
+removing the discovery files never changes a Settle outcome. A runner not confirmed Gone keeps its
+discovery files.
+
 S9.5's backoff still applies to re-sends after a retryable provider failure; a re-hold after a
 release goes immediately and counts toward the cap.
 
@@ -393,7 +401,9 @@ adoption's `not_received`; older runners' idle reply counts as `Refused`; the ho
 by run id; Stop acceptance absorbs all of `prepareStop`'s write with an intent-only fingerprint; the
 hold, `delivery_indeterminate` and the serving-row cache each got one named writer. Implementation
 found the `delivery_indeterminate` writer rule too wide: direct providers (no runner, no hold) keep
-the reactor's existing marker, partitioned by row.
+the reactor's existing marker, partitioned by row. It also found the amendment silent on a dead runner's
+discovery files at full shutdown: they are removed once the runner is confirmed Gone, and Settle reads
+only the retained durable evidence (C3, Restart), rather than keeping the files until startup.
 
 | option | verdict |
 |---|---|
