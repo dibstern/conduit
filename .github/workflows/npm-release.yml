@@ -73,6 +73,8 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
+      # Project shell env tests capture a real zsh login shell; the runner image has none.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
       - name: Download build artifacts
         uses: actions/download-artifact@v8
         with:
@@ -122,6 +124,7 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
       - run: pnpm install --frozen-lockfile
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
       - run: pnpm exec playwright install --with-deps chromium
         timeout-minutes: 5
       - name: Download build artifacts
