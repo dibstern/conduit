@@ -1,4 +1,10 @@
 {
+	"src/lib/frontend/components/chat/TurnEconomics.svelte :: bg-chip,gaugeClass": "conduit-test-xdyjq.5 replaces the hand-rolled context gauge with QuotaMeter. Its track background and colour thresholds now use the app-wide QuotaMeter recipe; gaugeClass was the removed computed-class expression.",
+	"src/lib/frontend/components/chat/TurnEconomics.svelte :: h-[4px],h-full,rounded-full,w-[40px]": {
+		"movedTo": "src/lib/frontend/components/ui/QuotaMeter.svelte",
+		"requires": "<QuotaMeter",
+		"reason": "conduit-test-xdyjq.5 delegates the context track's geometry and fill to QuotaMeter at size sm."
+	},
 	"src/lib/frontend/components/ui/ActivityTimeline.svelte :: animate-pulse": {
 		"renamedTo": "live-segment",
 		"reason": "conduit-test-xdyjq.17 replaces the generic 2s pulse with design E's 1.2s fade to 0.35 opacity. The strip owns the live-segment animation and its reduced-motion rule."
