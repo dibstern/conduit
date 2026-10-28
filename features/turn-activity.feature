@@ -22,16 +22,17 @@ Examples:
 Scenario Outline: Step popovers explain failed and running work
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
-  And the hover session has a <state> tool
+  And the hover session has a <state> step
   When I collapse the surfaced turn
   And I hover turn step tool 1
   Then the step popover describes the <state> work and its time
   And the messages region visually matches turn-hover-step-<state> at 98 percent
 
 Examples:
-  | state   |
-  | failed  |
-  | running |
+  | state    |
+  | failed   |
+  | running  |
+  | thinking |
 
 Scenario Outline: Hover content flips above a strip near the transcript foot
   Given message surfacing is active at Most

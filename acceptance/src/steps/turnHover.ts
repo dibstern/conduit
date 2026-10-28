@@ -84,12 +84,12 @@ export const turnHoverHandlers: StepHandler[] = [
 	},
 	{
 		name: "seed a failed or running work step",
-		match: /^the hover session has a (failed|running) tool$/,
+		match: /^the hover session has a (failed|running|thinking) step$/,
 		run: async ({ world, match }) => {
 			const page = world.page;
 			await page.clock.install({ time: PINNED_CLOCK_MS });
 			await page.clock.pauseAt(PINNED_CLOCK_MS + 1_000);
-			const running = match[1] === "running";
+			const running = match[1] !== "failed";
 			const messages = surfacingHistory(running ? "live" : "settled").map(
 				(message) => ({
 					...message,
@@ -105,6 +105,12 @@ export const turnHoverHandlers: StepHandler[] = [
 								? part
 								: {
 										...part,
+										...(match[1] === "thinking"
+											? {
+													type: "reasoning" as const,
+													text: "Checking the routing table.",
+												}
+											: {}),
 										time: {
 											start: PINNED_CLOCK_MS - 2_000,
 											...(running ? {} : { end: PINNED_CLOCK_MS + 1_000 }),
@@ -137,17 +143,17 @@ export const turnHoverHandlers: StepHandler[] = [
 	{
 		name: "assert failure and running popover semantics",
 		match:
-			/^the step popover describes the (failed|running) work and its time$/,
+			/^the step popover describes the (failed|running|thinking) work and its time$/,
 		run: async ({ world, match }) => {
 			const popover = panel(world.page).getByTestId("turn-step-popover");
 			await expect(popover).toContainText(
-				match[1] === "running" ? "Running" : "failed",
+				match[1] !== "failed" ? "Running" : "failed",
 			);
 			await expect(popover).toContainText(
-				match[1] === "running" ? /\d+s so far/ : "3s",
+				match[1] !== "failed" ? /\d+s so far/ : "3s",
 			);
 			await expect(popover).toContainText(
-				match[1] === "running" ? "Step 2 · click" : "Step 2 of 16 · click",
+				match[1] !== "failed" ? "Step 2 · click" : "Step 2 of 16 · click",
 			);
 			const colour = await popover
 				.locator("svg")
@@ -163,7 +169,7 @@ export const turnHoverHandlers: StepHandler[] = [
 					];
 					probe.remove();
 					return colours;
-				}, match[1] === "running");
+				}, match[1] !== "failed");
 			expect(colour[0]).toBe(colour[1]);
 		},
 	},
