@@ -37,6 +37,7 @@ export type ButtonVariant =
 	| "composer-word"
 	| "composer-row"
 	| "picker-row"
+	| "provider-row"
 	| "composer-summary"
 	| "ask"
 	| "goal"
@@ -211,6 +212,12 @@ type VariantRecipe = {
 };
 
 export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
+	"provider-row": {
+		chrome:
+			"w-full min-w-0 min-h-[42px] max-md:min-h-[50px] gap-[9px] rounded-[8px] px-[8px] py-[5px] text-left font-sans text-[13px] max-md:text-[15px] font-normal focus-visible:ring-inset aria-pressed:bg-selection aria-pressed:shadow-[inset_0_0_0_1px_var(--color-border)]",
+		tone: TONE_CLASSES.default,
+		hoverFill: HOVER_FILL_CLASSES.text,
+	},
 	settings: {
 		chrome: "rounded-full px-[12px] font-medium",
 		tone: TONE_CLASSES.default,

@@ -19,6 +19,7 @@
 	import SessionsSettingsTab from "./SessionsSettingsTab.svelte";
 	import TerminalSettingsTab from "./TerminalSettingsTab.svelte";
 	import VisibilitySettingsTab from "./VisibilitySettingsTab.svelte";
+	import ProvidersSettingsTab from "./ProvidersSettingsTab.svelte";
 	import ServerSettingsTab from "./ServerSettingsTab.svelte";
 	import DebugSettingsTab from "./DebugSettingsTab.svelte";
 	import SurfacingSettingsTab from "./SurfacingSettingsTab.svelte";
@@ -31,6 +32,7 @@
 	const SETTINGS_TABS = [
 		{ value: "general", label: "General", testId: "settings-tab-general", icon: "settings", iconTone: "neutral" },
 		{ value: "terminal", label: "Terminal", testId: "settings-tab-terminal", icon: "terminal", iconTone: "neutral" },
+		{ value: "providers", label: "Providers", testId: "settings-tab-providers", icon: "plug", iconTone: "neutral" },
 		{ value: "models", label: "Models & agents", testId: "settings-tab-models", icon: "sliders-horizontal", iconTone: "purple" },
 		{ value: "claude", label: "Claude", testId: "settings-tab-claude", icon: "claude", iconTone: "clay" },
 		{ value: "surfacing", label: "Jev", testId: "settings-tab-surfacing", icon: "sparkle", iconTone: "purple" },
@@ -43,6 +45,8 @@
 	let backEl = $state<HTMLButtonElement | HTMLAnchorElement>();
 	let contentEl = $state<HTMLDivElement>();
 	let surfacingPage = $state<{ title: string; back: () => void } | null>(null);
+	let providerPage = $state<{ title: string; back: () => void } | null>(null);
+	let contentHeight = $state(548);
 	const shown = $derived(section ?? "general");
 	const listHidden = $derived(sessionViewState.compact && section !== null);
 	const sectionLabel = $derived(SETTINGS_TABS.find((tab) => tab.value === shown)?.label ?? "Settings");
@@ -52,6 +56,7 @@
 	$effect(() => {
 		if (!visible) return;
 		section = initialTab ?? (untrack(() => sessionViewState.compact) ? null : "general");
+		providerPage = null;
 		void scrollContent(initialAnchor);
 	});
 
@@ -69,6 +74,7 @@
 	async function openSection(next: SettingsSection | ""): Promise<void> {
 		if (!next) return;
 		surfacingPage = null;
+		providerPage = null;
 		section = next;
 		await scrollContent();
 		if (!sessionViewState.compact) return;
@@ -100,16 +106,16 @@
 					size="content"
 					icon="chevron-left"
 					iconSize={16}
-					ariaLabel={surfacingPage ? "Back to Jev" : "Back to settings sections"}
+					ariaLabel={providerPage ? "Back to Providers" : surfacingPage ? "Back to Jev" : "Back to settings sections"}
 					data-testid="settings-back-btn"
 					class="min-h-[44px] justify-self-start text-[15px]"
-					onclick={() => { if (surfacingPage) surfacingPage.back(); else void showSectionList(); }}
-					>{surfacingPage ? "Jev" : "Settings"}</Button>
+					onclick={() => { if (providerPage) providerPage.back(); else if (surfacingPage) surfacingPage.back(); else void showSectionList(); }}
+					>{providerPage ? "Providers" : surfacingPage ? "Jev" : "Settings"}</Button>
 			{:else if sessionViewState.compact}
 				<span></span>
 			{/if}
 			<h2 id="settings-panel-title" class="min-w-0 truncate font-semibold text-text {sessionViewState.compact ? 'text-center text-[16px]' : 'flex-1 text-[15px]'}">
-				{listHidden ? surfacingPage?.title ?? sectionLabel : "Settings"}
+				{listHidden ? providerPage?.title ?? surfacingPage?.title ?? sectionLabel : "Settings"}
 			</h2>
 			{#if sessionViewState.compact && !listHidden}
 				<Button variant="ghost" tone="accent" hoverFill="none" size="content" class="min-h-[44px] min-w-[44px] justify-self-end text-[15px] font-semibold" data-testid="settings-close-btn" ariaLabel="Close settings" onclick={() => onClose?.()}>Done</Button>
@@ -153,8 +159,8 @@
 			{/if}
 
 			{#if !sessionViewState.compact || section !== null}
-				<div class="settings-main relative flex flex-1 min-w-0 min-h-0">
-				<div bind:this={contentEl} class="settings-content flex-1 min-w-0 overflow-y-auto text-[12px] text-text-secondary">
+				<div class="settings-main relative flex flex-1 min-w-0 min-h-0" class:providers={shown === 'providers'}>
+				<div bind:this={contentEl} bind:clientHeight={contentHeight} style:--providers-split-height={`${contentHeight - 80}px`} class="settings-content flex-1 min-w-0 overflow-y-auto text-[12px] text-text-secondary">
 					{#if !sessionViewState.compact}
 						<div class="mb-[16px] flex flex-wrap items-baseline gap-x-[10px]">
 							<h2 class="text-[17px] font-semibold tracking-[-0.01em] text-text">{sectionLabel}</h2>
@@ -174,6 +180,8 @@
 						<TerminalSettingsTab />
 					{:else if shown === "models"}
 						<VisibilitySettingsTab />
+					{:else if shown === "providers"}
+						<ProvidersSettingsTab onPageChange={(page) => { providerPage = page; void scrollContent(); }} />
 					{:else if shown === "claude"}
 						<ClaudeSettingsTab />
 					{:else if shown === "surfacing"}
@@ -196,7 +204,7 @@
 <style>
 	.settings-panel {
 		--settings-section-gap: 16px;
-		width: min(720px, calc(100vw - 32px));
+		width: min(1020px, calc(100vw - 32px));
 		height: min(600px, round(down, 80dvh, 1px));
 	}
 	.settings-content {
@@ -210,6 +218,8 @@
 		background: linear-gradient(transparent, var(--color-settings-bg));
 		pointer-events: none;
 	}
+	.settings-main.providers::after { display: none; }
+	.providers .settings-content { padding-bottom: 18px; }
 	.phone {
 		width: 100%;
 		height: 100dvh;

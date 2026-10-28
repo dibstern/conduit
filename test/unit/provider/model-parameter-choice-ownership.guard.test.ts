@@ -23,6 +23,7 @@ const unrelatedDefaultReads = {
 	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte": 1,
 	"src/lib/frontend/components/overlays/CursorAuthSettings.svelte": 1,
 	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte": 3,
+	"src/lib/frontend/components/overlays/ProvidersSettingsTab.svelte": 3,
 	"src/lib/frontend/stores/discovery.svelte.ts": 11,
 	"src/lib/frontend/stores/instance.svelte.ts": 3,
 };
