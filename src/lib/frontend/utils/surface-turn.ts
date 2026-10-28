@@ -364,9 +364,7 @@ export function surfacePinRows(
 						(pin.part.surfacingMark ? 8 : 0),
 				),
 			) +
-			(!phone && members.length > 1
-				? 6 + `+${members.length - 1}`.length * digit
-				: 0);
+			(members.length > 1 ? 6 + `+${members.length - 1}`.length * digit : 0);
 		const leader = members.reduce((best, pin) =>
 			(rank(pin) - rank(best) || best.step - pin.step) < 0 ? pin : best,
 		);

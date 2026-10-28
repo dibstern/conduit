@@ -414,6 +414,12 @@ export const surfacingCardHandlers: StepHandler[] = [
 						top: box.top,
 						name: button.getAttribute("aria-label"),
 						members: button.getAttribute("data-group-members"),
+						count: (() => {
+							const small = chip.querySelector("small");
+							return small && small.getBoundingClientRect().width > 0
+								? small.textContent
+								: null;
+						})(),
 					};
 				}),
 			);
@@ -431,8 +437,12 @@ export const surfacingCardHandlers: StepHandler[] = [
 						expect(
 							chip.left - (ordered[index - 1]?.right ?? 0),
 						).toBeGreaterThanOrEqual(9);
-					if ((chip.members?.split(",").length ?? 0) > 1)
+					const size = chip.members?.split(",").length ?? 0;
+					if (size > 1) {
 						expect(chip.name).toMatch(/^Group of \d+, led by #\d+ \w+/);
+						// A phone pin drops its number, never its group count.
+						expect(chip.count).toBe(`+${size - 1}`);
+					}
 				}
 			}
 			const first = chips.find(({ row }) => row === "0"),
