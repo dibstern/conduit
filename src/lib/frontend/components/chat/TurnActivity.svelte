@@ -5,9 +5,8 @@
 	import { onDestroy, tick, untrack } from "svelte";
 	import type { Snippet } from "svelte";
 	import type { SessionResume } from "../../../contracts/limit-recovery.js";
-	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
 	import { assertNever } from "../../../utils.js";
-	import SurfacingAskContext from "./SurfacingAskContext.svelte";
+	import SurfacingAskContext, { type AskState } from "./SurfacingAskContext.svelte";
 	import { MediaQuery } from "svelte/reactivity";
 	import type { CategorySet } from "../../../contracts/category-set.js";
 	import type { MessageSurfacingStatus, MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
@@ -137,17 +136,13 @@
 	const surfacingActive = $derived(sessionJevEnabled(sessionId ? findSession(sessionId) : undefined, surfacingConfig.status));
 	const level = $derived(panel.saved);
 	const recap = new TurnRecapState();
-	let askExplanations = $state<Record<string, AskExplanation>>({});
-	let generatingAsk = $state<string | null>(null);
-	let askError = $state<{ uuid: string; message: string } | null>(null);
+	let asks = $state<Record<string, AskState>>({});
 	/** The Ask a citation left, offered back on the cited message's card. */
 	let askReturn = $state<{ ask: SurfacePin; cited: string } | null>(null);
 	const askIdentity = $derived(`${sessionId}/${turn.id}`);
 	$effect(() => {
 		void askIdentity;
-		askExplanations = {};
-		generatingAsk = null;
-		askError = null;
+		asks = {};
 		askReturn = null;
 	});
 	function setupFor(pin: SurfacePin): SurfacePart | null {
@@ -156,17 +151,15 @@
 		return parts.slice(0, Math.max(0, index)).reverse().find((part): part is SurfacePart => part.type === "assistant" && !!part.rawText.trim()) ?? null;
 	}
 	async function explainAsk(pin: SurfacePin) {
-		if (!sessionId || !storeTurnId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
+		const uuid = pin.part.uuid;
+		if (!sessionId || !storeTurnId || !pin.part.partId || asks[uuid]?.kind === "ready" || Object.values(asks).some(({ kind }) => kind === "loading")) return;
 		const identity = askIdentity;
-		generatingAsk = pin.part.uuid;
-		askError = null;
+		asks[uuid] = { kind: "loading" };
 		try {
 			const explanation = await rpc("ExplainAsk", { sessionId, turnId: storeTurnId, partId: pin.part.partId });
-			if (identity === askIdentity) askExplanations = { ...askExplanations, [pin.part.uuid]: explanation };
+			if (identity === askIdentity) asks[uuid] = { kind: "ready", explanation };
 		} catch (error) {
-			if (identity === askIdentity) askError = { uuid: pin.part.uuid, message: error instanceof Error ? error.message : String(error) };
-		} finally {
-			if (identity === askIdentity) generatingAsk = null;
+			if (identity === askIdentity) asks[uuid] = { kind: "failed", message: error instanceof Error ? error.message : String(error) };
 		}
 	}
 	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
@@ -465,9 +458,7 @@
 {#snippet askContext(pin: SurfacePin)}
 	{@render surfacingRegions.cardContext?.(pin)}
 	{#if pin.category === "ask" && !pin.pending}
-		<SurfacingAskContext setup={setupFor(pin)} view={surface} start={turn.user?.createdAt ?? 0}
-			explanation={askExplanations[pin.part.uuid]} generating={generatingAsk === pin.part.uuid}
-			error={askError?.uuid === pin.part.uuid ? askError.message : ""}
+		<SurfacingAskContext setup={setupFor(pin)} view={surface} start={turn.user?.createdAt ?? 0} ask={asks[pin.part.uuid]}
 			enabled={!!sessionId && !!pin.part.partId && summariesOn}
 			onexplain={() => { void explainAsk(pin); }} oncite={(part) => { askReturn = { ask: pin, cited: part.uuid }; revealMessage(part); }}
 			onReplyToAsk={(text) => { if (pin.number !== undefined) onReplyToAsk?.(messageReference(pin, pin.number), text); }} />
