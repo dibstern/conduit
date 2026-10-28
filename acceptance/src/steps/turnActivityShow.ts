@@ -108,7 +108,7 @@ export const turnActivityShowHandlers: StepHandler[] = [
 			const trigger =
 				match[1] === "the Show bar"
 					? scope.getByRole("tab", { name: "Full log", exact: true })
-					: scope.getByRole("button", { name: /^\+ \d+ earlier messages$/ });
+					: scope.getByRole("button", { name: /^\+ \d+ earlier steps$/ });
 			await trigger.scrollIntoViewIfNeeded();
 			await trigger.focus();
 			const row = scope.locator(".step-log [data-log-part]").last();

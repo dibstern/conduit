@@ -327,6 +327,8 @@ export const turnActivityHandlers: StepHandler[] = [
 				"data-ordinal",
 				"2",
 			);
+			// A committed reveal focuses its card; refocus the pin to test the strip's keys.
+			await second.focus();
 			await page.keyboard.press("End");
 			await expect(page.getByTestId("surfacing-pin-8")).toBeFocused();
 			await page.keyboard.press("Home");
@@ -352,10 +354,10 @@ export const turnActivityHandlers: StepHandler[] = [
 			await page.keyboard.press("Enter");
 			await expect(panel(page).locator(".step-log")).toBeVisible();
 			await expect(
-				panel(page)
-					.locator('[data-log-part="surfacing-agent/surfacing-tool-1"] button')
-					.first(),
-			).toHaveClass(/bg-selection/);
+				panel(page).locator(
+					'[data-log-part="surfacing-agent/surfacing-tool-1"]',
+				),
+			).toBeFocused();
 		},
 	},
 	{

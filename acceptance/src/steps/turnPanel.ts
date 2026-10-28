@@ -27,6 +27,190 @@ function publish(page: Page, messages: History[]) {
 
 export const turnPanelHandlers: StepHandler[] = [
 	{
+		name: "show every step in the open turn log",
+		match: /^I show every step in the open turn log$/,
+		run: async ({ world }) => {
+			const earlier = panel(world.page).getByRole("button", {
+				name: /^\+ \d+ earlier steps$/,
+			});
+			if (await earlier.count()) await earlier.click();
+		},
+	},
+	{
+		name: "assert running row design",
+		match:
+			/^the running log row says Running with an accent striped block and no time$/,
+		run: async ({ world }) => {
+			const row = panel(world.page).getByTestId("turn-running");
+			await expect(row.locator(".tool-name")).toHaveText("Running");
+			await expect(row.locator("time")).toHaveCount(0);
+			const block = row.getByRole("img", { name: "Running", exact: true });
+			await expect(block).toHaveCSS("width", "9px");
+			await expect(block).toHaveCSS("height", "9px");
+			const paint = await block.evaluate((node) => {
+				const probe = document.createElement("span");
+				probe.style.color = "var(--color-accent)";
+				node.append(probe);
+				const result = {
+					stripes: getComputedStyle(node).backgroundImage,
+					accent: getComputedStyle(probe).color,
+				};
+				probe.remove();
+				return result;
+			});
+			expect(paint.stripes).toContain("repeating-linear-gradient");
+			expect(paint.stripes).toContain(paint.accent);
+		},
+	},
+	{
+		name: "expand the surfaced Turn",
+		match: /^I expand the surfaced turn$/,
+		run: async ({ world }) => {
+			await panel(world.page)
+				.getByRole("button", { name: "Expand turn", exact: true })
+				.click();
+		},
+	},
+	{
+		name: "stream interim text after the latest tool",
+		match: /^interim text is streaming in the live Turn$/,
+		run: async ({ world }) => {
+			publish(
+				world.page,
+				(fixtures.get(world.page) ?? []).map((message) =>
+					message.role === "assistant"
+						? {
+								...message,
+								parts: [
+									...(message.parts ?? []),
+									{
+										id: "live-interim",
+										type: "text",
+										text: "I am still checking the routing table.",
+										time: { start: PINNED_CLOCK_MS - 1000 },
+									},
+								],
+							}
+						: message,
+				),
+			);
+			await expect(
+				world.page.locator(
+					'#messages [data-uuid="surfacing-agent/live-interim"]',
+				),
+			).toContainText("I am still checking the routing table.");
+		},
+	},
+	{
+		name: "assert live head order",
+		match: /^the live head orders its chevron, spinner and Working label$/,
+		run: async ({ world }) => {
+			const head = panel(world.page).getByTestId("surfacing-minimise-toggle");
+			await expect(head).toContainText("Working");
+			const icons = head.locator("svg");
+			await expect(icons.nth(0)).toHaveClass(/chevron-down/);
+			await expect(icons.nth(1)).toHaveClass(/loader-circle/);
+			const ordered = await head.evaluate((node) => {
+				const spinner = node.querySelector("svg:last-of-type");
+				const label = [...node.querySelectorAll("span")].find(
+					(span) => span.textContent === "Working",
+				);
+				return (
+					!!spinner &&
+					!!label &&
+					!!(
+						spinner.compareDocumentPosition(label) &
+						Node.DOCUMENT_POSITION_FOLLOWING
+					)
+				);
+			});
+			expect(ordered).toBe(true);
+		},
+	},
+	{
+		name: "assert live card following tag",
+		match: /^the live card is (not )?tagged Following latest$/,
+		run: async ({ world, match }) => {
+			const tag = panel(world.page)
+				.getByTestId("surfacing-msg-card")
+				.getByText("Following latest", { exact: true });
+			if (match[1]) await expect(tag).toHaveCount(0);
+			else {
+				await expect(tag).toBeVisible();
+				await expect(
+					panel(world.page).getByRole("button", {
+						name: "Follow latest",
+						exact: true,
+					}),
+				).toHaveCount(0);
+			}
+		},
+	},
+	{
+		name: "assert earlier steps design",
+		match: /^the earlier steps control uses the Turn log design$/,
+		run: async ({ world }) => {
+			const button = panel(world.page).getByRole("button", {
+				name: "+ 13 earlier steps",
+				exact: true,
+			});
+			await expect(button).toHaveCSS("font-size", "12px");
+			await expect(button).toHaveCSS("padding", "7px 6px");
+			const colour = await button.evaluate((node) => {
+				const probe = document.createElement("span");
+				probe.style.color = "var(--color-text-secondary)";
+				node.append(probe);
+				const result = {
+					actual: getComputedStyle(node).color,
+					expected: getComputedStyle(probe).color,
+				};
+				probe.remove();
+				return result;
+			});
+			expect(colour.actual).toBe(colour.expected);
+		},
+	},
+	{
+		name: "assert all live steps",
+		match: /^the live log shows all (\d+) steps$/,
+		run: async ({ world, match }) => {
+			await expect(
+				panel(world.page).locator(".step-log [data-log-part]:visible"),
+			).toHaveCount(Number(match[1]));
+		},
+	},
+	{
+		name: "hide earlier live steps",
+		match: /^I hide the earlier live steps$/,
+		run: async ({ world }) => {
+			await panel(world.page)
+				.getByRole("button", { name: "Hide earlier steps", exact: true })
+				.click();
+		},
+	},
+	{
+		name: "assert collapsed live Turn contents",
+		match: /^the collapsed live Turn keeps its Working head and strip only$/,
+		run: async ({ world }) => {
+			const scope = panel(world.page);
+			await expect(
+				scope.getByTestId("surfacing-minimise-toggle"),
+			).toHaveAccessibleName("Expand turn");
+			await expect(scope.getByTestId("turn-live-head")).toContainText(
+				"Working",
+			);
+			await expect(
+				scope.locator('[aria-label^="Activity timeline"]'),
+			).toBeVisible();
+			for (const selector of [
+				".step-log",
+				'[data-testid="turn-show-bar"]',
+				'[data-testid="surfacing-msg-card"]',
+			])
+				await expect(scope.locator(selector)).toHaveCount(0);
+		},
+	},
+	{
 		name: "assert live default Full log and ticker",
 		match: /^the Turn defaults to Full log with a three-step ticker$/,
 		run: async ({ world }) => {

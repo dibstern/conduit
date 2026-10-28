@@ -434,6 +434,10 @@ async function showSkillEvents(canvasElement: HTMLElement) {
 	if (head?.getAttribute("aria-expanded") === "false")
 		await userEvent.click(head);
 	await userEvent.click(canvas.getByRole("tab", { name: /^(Full log|Log)$/ }));
+	const earlier = canvas.queryByRole("button", {
+		name: /^\+ \d+ earlier steps$/,
+	});
+	if (earlier) await userEvent.click(earlier);
 	head?.blur();
 	const rows = canvas.getAllByRole("button", { name: /^Skill / });
 	await expect(rows).toHaveLength(2);
@@ -485,4 +489,63 @@ export const SkillsJev: Story = {
 export const SkillsLiveJev: Story = {
 	...SkillsLive,
 	args: { ...SkillsLive.args, surfacing: skillSurfacing },
+};
+
+/** Live stays on Full log even when text is streaming after its latest step. */
+const interimSegment = {
+	...liveSegment,
+	reply: [
+		{
+			type: "assistant" as const,
+			uuid: "live-interim",
+			rawText: "I am checking the final dependency.",
+			html: "<p>I am checking the final dependency.</p>",
+			finalized: false,
+		},
+	],
+};
+const interimTurn: Turn = { ...live, segments: [interimSegment] };
+
+export const LiveInterim: Story = {
+	args: {
+		turn: interimTurn,
+		segment: interimSegment,
+		final: true,
+		surfacing: skillSurfacing,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const stop = canvas.queryByRole("tab", { name: /^Full log$/ });
+		if (stop) await expect(stop).toHaveAttribute("aria-selected", "true");
+		else
+			await expect(
+				canvas.getByRole("button", { name: /^Show messages$/ }),
+			).toHaveTextContent("Full log");
+		await expect(
+			canvas.getByText("Following latest", { exact: true }),
+		).toBeVisible();
+		await expect(
+			[
+				...canvasElement.querySelectorAll<HTMLElement>(
+					".step-log [data-log-part]",
+				),
+			].filter((node) => node.offsetHeight > 0),
+		).toHaveLength(3);
+	},
+};
+
+export const LiveCollapsed: Story = {
+	args: { ...LiveInterim.args },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const head = canvas.getByRole("button", { name: /^Collapse turn$/ });
+		await userEvent.click(head);
+		head.blur();
+		await expect(head).toHaveAccessibleName("Expand turn");
+		await expect(head).toHaveTextContent("Working");
+		await expect(canvas.queryByTestId("turn-show-bar")).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByTestId("surfacing-msg-card"),
+		).not.toBeInTheDocument();
+	},
 };

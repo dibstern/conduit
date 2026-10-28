@@ -12,7 +12,8 @@ Scenario Outline: Answer stays quiet on a live turn even while Jev is pending
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a live turn
-  When a new folded surfacing message awaits its verdict
+  When I set the surfacing level to Answer
+  And a new folded surfacing message awaits its verdict
   Then Answer shows 7 hidden messages and keeps the strip
   And the messages region visually matches turn-answer-live-<viewport> at 98 percent
 
@@ -55,6 +56,7 @@ Scenario Outline: The Jev card hangs below pins on the strip's own scale
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a live turn
+  When I set the surfacing level to Most
   Then the full-width message card hangs below pins aligned with their own steps
   And the surfaced card shows #8 and announces its category and position
   And the open Ask head chip shows #2
@@ -90,7 +92,8 @@ Scenario Outline: A tap under four pixels and a drag on either lane keep the sel
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a live turn
-  When I tap surfaced message #2 moving 3 pixels
+  When I set the surfacing level to Most
+  And I tap surfaced message #2 moving 3 pixels
   Then the surfaced card shows #2 and announces its category and position
   When I scrub the pins from message #2 to #5
   Then the surfaced card shows #5 and announces its category and position
@@ -183,7 +186,8 @@ Scenario Outline: Live follow holds a pending folded message then falls back aft
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a live turn
-  When a new folded surfacing message awaits its verdict
+  When I set the surfacing level to Most
+  And a new folded surfacing message awaits its verdict
   Then the card follows the pending message without inventing a number
   When the pending surfacing verdict is routine
   Then the surfaced card shows #8 and announces its category and position
@@ -198,7 +202,8 @@ Scenario Outline: A reader's pick survives new pending parts until Follow latest
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a live turn
-  When I pick surfaced message #2
+  When I set the surfacing level to Most
+  And I pick surfaced message #2
   And a new folded surfacing message awaits its verdict
   Then the surfaced card shows #2 and announces its category and position
   And the surfaced card offers Follow latest
@@ -217,7 +222,8 @@ Scenario Outline: A settled unjudged part remains only in the log
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a live turn
-  When a new folded surfacing message awaits its verdict
+  When I set the surfacing level to Most
+  And a new folded surfacing message awaits its verdict
   Then the card follows the pending message without inventing a number
   When the surfacing turn settles without the pending verdict
   Then the surfaced card shows #8 and announces its category and position
@@ -246,7 +252,8 @@ Scenario Outline: Folding hides only the card and a pin reopens it
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a live turn
-  When I fold the surfaced message
+  When I set the surfacing level to Most
+  And I fold the surfaced message
   Then the surfaced card is hidden but pins and the strip remain
   When I pick surfaced message #2
   Then the surfaced card shows #2 and announces its category and position
@@ -317,6 +324,7 @@ Scenario Outline: Focused card keyboard commands navigate without triggering ses
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a live turn
+  When I set the surfacing level to Most
   Then surfacing keyboard navigation selects messages and consumes focused-turn shortcuts
 
 Examples:

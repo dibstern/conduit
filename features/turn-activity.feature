@@ -1,5 +1,52 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: A running step uses the live row treatment
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log has a running tool
+  Then the running log row says Running with an accent striped block and no time
+  And the messages region visually matches turn-live-running-row-<viewport> at 98 percent
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: Interim streaming text keeps the live ticker and following card through collapse
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the panel choice session has a live turn
+  When interim text is streaming in the live Turn
+  Then the Turn defaults to Full log with a three-step ticker
+  And the live head orders its chevron, spinner and Working label
+  And the live card is tagged Following latest
+  And the earlier steps control uses the Turn log design
+  And the messages region visually matches turn-live-streaming-<viewport> at 98 percent
+  When I pick surfaced message #1
+  Then the surfaced card offers Follow latest
+  And the live card is not tagged Following latest
+  When I follow the latest surfaced message
+  Then the live card is tagged Following latest
+  And the surfaced card shows #8 and announces its category and position
+  When I open the live Full log from earlier steps
+  Then the live log shows all 16 steps
+  When I collapse and reopen the panel choice turn
+  Then the live log shows all 16 steps
+  When I hide the earlier live steps
+  Then the Turn defaults to Full log with a three-step ticker
+  When I collapse the surfaced turn
+  Then the collapsed live Turn keeps its Working head and strip only
+  And the messages region visually matches turn-live-collapsed-<viewport> at 98 percent
+  When I expand the surfaced turn
+  Then the Turn defaults to Full log with a three-step ticker
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
 Scenario Outline: A waiting Turn defaults to Full log with its ticker
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
@@ -557,6 +604,7 @@ Scenario Outline: Skills need no picker in a live or settled turn
   And the turn log has two skills in a <phase> turn
   Then skill events have no separate picker or chapter list
   When I open the plain turn log
+  And I show every step in the open turn log
   Then skill events have no separate picker or chapter list
   And the turn head counts 2 skills
   And the activity strip keeps every step at full strength
