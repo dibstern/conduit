@@ -1,6 +1,7 @@
 // Failure modes: duplicate stream content, terminal hints overriding wait,
 // lost resume identity, stale agent options, dropped cancellation, auth hangs,
-// unknown tools breaking replay, and malformed updates aborting a valid turn.
+// unknown tools breaking replay, malformed updates aborting a valid turn,
+// and image bytes or stored file parts disappearing at the runner boundary.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -8,6 +9,7 @@ import Database from "better-sqlite3";
 import { Effect, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionDetailItemSchema } from "../../../src/lib/contracts/ws-rpc.js";
+import { attachmentFromDataUrl } from "../../../src/lib/persistence/attachment-store.js";
 
 import {
 	type ProcessBrowser,
@@ -365,6 +367,54 @@ describe("Cursor text turns through the built daemon and detached runner", () =>
 			sessionId = undefined;
 		}
 	});
+
+	it("sends image bytes to Cursor and preserves their stored file parts", async () => {
+		const { fixture, browser, id } = await start("image-attachments");
+		const image =
+			"data:image/png;name=pixel.png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jfZkAAAAASUVORK5CYII=";
+		const inputId = randomUUID();
+		expect(
+			await Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId: id,
+					originId: browser.originId,
+					inputId,
+					delivery: "queue",
+					text: "Say hello",
+					images: [image],
+				}),
+			),
+		).toMatchObject({ ok: true });
+		await expectTurns(fixture, id, ["completed"]);
+		expect(
+			traceRows(capturePath).filter(({ kind }) => kind === "send.options"),
+		).toEqual([
+			expect.objectContaining({
+				data: expect.objectContaining({
+					prompt: {
+						text: "Say hello",
+						images: [{ data: image.split(",")[1], mimeType: "image/png" }],
+					},
+				}),
+			}),
+		]);
+		const userMessage = (await browser.history(id)).find(
+			(message) => message.id === inputId && message.role === "user",
+		);
+		expect(userMessage?.parts).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ type: "text", text: "Say hello" }),
+				expect.objectContaining({
+					type: "file",
+					source: attachmentFromDataUrl(image).ref,
+				}),
+			]),
+		);
+		record("image-attachments", {
+			imageBytesSent: true,
+			storedFilePartPreserved: true,
+		});
+	}, 180_000);
 
 	it("streams and resumes while reopening for folders, credentials and Ask → Full → Ask", async () => {
 		const { fixture, browser, id } = await start("agent-lifecycle");
