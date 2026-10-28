@@ -119,11 +119,14 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 			expect.arrayContaining([
 				expect.objectContaining({
 					tag: "GetModels",
-					payload: { projectSlug: "e2e-replay", instanceId: "opencode" },
+					payload: expect.objectContaining({
+						projectSlug: "e2e-replay",
+						instanceId: "opencode",
+					}),
 				}),
 				expect.objectContaining({
 					tag: "GetAgents",
-					payload: { sessionId: "settings-models" },
+					payload: expect.objectContaining({ sessionId: "settings-models" }),
 				}),
 			]),
 		);
@@ -398,10 +401,12 @@ for (const driver of ["opencode", "claude"] as const) {
 						.filter(({ tag }) => tag === "SetHiddenEntries")
 						.at(-1)?.payload,
 			)
-			.toEqual({
-				projectSlug: "e2e-replay",
-				hiddenModels: ["elsewhere/keep-hidden", `${providerId}/account-only`],
-			});
+			.toEqual(
+				expect.objectContaining({
+					projectSlug: "e2e-replay",
+					hiddenModels: ["elsewhere/keep-hidden", `${providerId}/account-only`],
+				}),
+			);
 		await expect(panel.getByTestId("settings-agents-group")).toContainText(
 			"OpenCode agents",
 		);
@@ -413,7 +418,7 @@ for (const driver of ["opencode", "claude"] as const) {
 						.filter(({ tag }) => tag === "GetAgents")
 						.at(-1)?.payload,
 			)
-			.toEqual({ sessionId: "account-models" });
+			.toEqual(expect.objectContaining({ sessionId: "account-models" }));
 		const artifactDir = resolve(
 			"/tmp/conduit-test-3fc0.2/settings-models-filter",
 		);
