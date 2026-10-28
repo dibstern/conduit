@@ -15,6 +15,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
 	accountsStateFromConfig,
 	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
 } from "../../../../src/lib/account-directory.js";
 import type { Account } from "../../../../src/lib/contracts/account.js";
 import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
@@ -381,7 +382,10 @@ for (const scenario of [
 				Effect.provideService(ProviderRegistryTag, registry),
 				Effect.provideService(
 					AccountDirectory,
-					makeAccountDirectory(Effect.sync(() => accountState)),
+					makeAccountDirectory(
+						Effect.sync(() => accountState),
+						Effect.succeed(NO_OPENCODE_HEALTH),
+					),
 				),
 				Effect.provideService(AgentServiceTag, {
 					getActiveAgent: () => Effect.succeed(undefined),
@@ -450,6 +454,7 @@ for (const boundId of ["claude-sdk", "unknown-account", "opencode"] as const) {
 					configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
 				),
 			),
+			Effect.succeed(NO_OPENCODE_HEALTH),
 		);
 		const warmed: PreWarmSessionInput[] = [];
 		const registry = new ProviderRegistry([

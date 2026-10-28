@@ -1,17 +1,30 @@
-import { Result } from "effect";
-import { type AccountsState, resolve } from "../account-directory.js";
+import { Effect, Result } from "effect";
 import type { Account } from "../contracts/account.js";
 import {
 	BUILTIN_TITLE_GENERATION,
 	type TitleGenerationSelection,
 } from "../contracts/title-generation.js";
+import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { resolveTurnSettings } from "./turn-settings.js";
 import type { ModelInfo } from "./types.js";
+
+/** Deleted title accounts stay missing; only driver defaults may fall back. */
+export function resolveTitleGenerationAccount(
+	stored: TitleGenerationSelection | null | undefined,
+	directory: AccountDirectory["Service"],
+): Effect.Effect<Account | undefined> {
+	const reference = (stored ?? BUILTIN_TITLE_GENERATION).account;
+	return reference._tag === "Id"
+		? Effect.map(directory.snapshot, (state) =>
+				state.accounts.find((account) => account.id === reference.id),
+			)
+		: directory.resolve(reference).pipe(Effect.orElseSucceed(() => undefined));
+}
 
 /** Resolve a title selection without account I/O or catalog discovery. */
 export function resolveTitleGeneration(
 	stored: TitleGenerationSelection | null | undefined,
-	accounts: AccountsState,
+	account: Account | undefined,
 	catalogFor: (account: Account) => readonly ModelInfo[] | undefined,
 ): {
 	readonly pick: TitleGenerationSelection;
@@ -19,23 +32,13 @@ export function resolveTitleGeneration(
 	readonly problem?: string;
 } {
 	const selection = stored ?? BUILTIN_TITLE_GENERATION;
-	// Session routing can redirect deleted ids; a saved title choice must report
-	// the missing account so its caller can apply the built-in title default.
-	const reference = selection.account;
-	const account =
-		reference._tag === "Id"
-			? accounts.accounts.find((candidate) => candidate.id === reference.id)
-			: Result.getOrUndefined(resolve(accounts, reference));
 	if (!account)
 		return {
 			pick: selection,
 			status: "missing",
 			problem: "Title generation account does not exist",
 		};
-	const pick: TitleGenerationSelection = {
-		...selection,
-		account: { _tag: "Id", id: account.id },
-	};
+	const pick = selection;
 	const catalog = catalogFor(account);
 	const resolved = resolveTurnSettings(
 		{

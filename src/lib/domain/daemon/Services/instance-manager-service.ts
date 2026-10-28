@@ -28,6 +28,7 @@ import {
 	type AccountsState,
 	accountsStateFromInstances,
 	assignAccountColorSlots,
+	materializeDefault,
 } from "../../../account-directory.js";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
 import {
@@ -361,14 +362,23 @@ export function makeInstanceManagerStateLive(
 			return accountsState === undefined
 				? AccountDirectoryLive(
 						options?.launchLogin ?? captureClaudeLaunchLogin(process.env),
+						readOpenCodeStatuses,
 						seeded,
 						config?.maxInstances ?? DEFAULT_CONFIG.maxInstances,
-						readOpenCodeStatuses,
 					)
 				: AccountDirectoryStateLive(
 						{
 							...accountsState,
 							accounts: [...runtimeAccounts, ...accountsState.accounts],
+							defaults: {
+								...accountsState.defaults,
+								opencode: materializeDefault(
+									[...runtimeAccounts, ...accountsState.accounts],
+									"opencode",
+									Option.getOrUndefined(accountsState.defaults.opencode),
+									[],
+								),
+							},
 						},
 						readOpenCodeStatuses,
 					);
@@ -651,7 +661,11 @@ export const getInstances = Effect.gen(function* () {
 			HashMap.get(state.instances, account.id),
 		);
 		return instanceInfo({
-			...(runtime ?? { status: "healthy", restartCount: 0, createdAt: 0 }),
+			...(runtime ?? {
+				status: account.driver === "opencode" ? "stopped" : "healthy",
+				restartCount: 0,
+				createdAt: 0,
+			}),
 			id: account.id,
 			name: account.name,
 			...(account.colorSlot === undefined

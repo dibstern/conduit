@@ -13,19 +13,20 @@ import { AccountUnroutable } from "./contracts/limit-recovery.js";
 import {
 	type AccountId,
 	AccountIdSchema,
+	getProviderDriver,
 	isKnownDriverKind,
 	type KnownProviderDriverKind,
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_DRIVERS,
 } from "./contracts/provider-instance.js";
-import {
-	openCodeInstanceFor,
-	openCodeStartSelection,
-} from "./contracts/start-selection.js";
+import { openCodeStartSelection } from "./contracts/start-selection.js";
 import type { DaemonConfig } from "./daemon/config-persistence.js";
+import type { InstanceStatus } from "./shared-types.js";
 import { assertNever } from "./utils.js";
 
 export { MANAGED_OPENCODE_ACCOUNT_ID };
+export const NO_OPENCODE_HEALTH: ReadonlyMap<string, InstanceStatus> =
+	new Map();
 export type { AccountChange } from "./contracts/account.js";
 
 const LEGACY_ACCOUNT_DRIVERS: Readonly<
@@ -222,7 +223,25 @@ export function accountsStateFromInstances(
 	};
 }
 
-function materializeDefault(
+/** The first configured OpenCode endpoint, excluding no-server placeholders. */
+const openCodeInstanceFor = (
+	instances: ReadonlyArray<{
+		readonly id: string;
+		readonly driver: KnownProviderDriverKind;
+		readonly managed?: boolean | undefined;
+		readonly port?: number | undefined;
+		readonly url?: string | undefined;
+	}>,
+) =>
+	instances.find((instance) => {
+		if (!getProviderDriver(instance.driver)?.runsOpenCodeServer) return false;
+		if (instance.managed === true || (instance.port ?? 0) > 0) return true;
+		if (instance.url !== undefined)
+			return URL.canParse(instance.url) && new URL(instance.url).port !== "0";
+		return instance.port === undefined;
+	});
+
+export function materializeDefault(
 	accounts: ReadonlyArray<{
 		readonly id: string;
 		readonly driver: KnownProviderDriverKind;
@@ -562,24 +581,15 @@ export function accountsStateFromConfig(
 	);
 }
 
-/** Without a runtime snapshot, resolve metadata only (for standalone callers). */
 export function defaultFor(
 	state: AccountsState,
 	driver: KnownProviderDriverKind,
-	openCodeStatuses?: ReadonlyMap<string, string>,
+	openCodeStatuses: ReadonlyMap<string, InstanceStatus>,
 ): Option.Option<Account> {
 	const id =
 		driver === "opencode"
 			? Option.some(
-					openCodeStartSelection(
-						list(state).map((account) => ({
-							...account,
-							status:
-								openCodeStatuses === undefined
-									? "healthy"
-									: openCodeStatuses.get(account.id),
-						})),
-					).account.id,
+					openCodeStartSelection(list(state), openCodeStatuses).account.id,
 				)
 			: state.defaults[driver];
 	return Option.flatMap(id, (accountId) =>
@@ -601,7 +611,7 @@ export function list(state: AccountsState): ReadonlyArray<AccountListItem> {
 export function resolve(
 	state: AccountsState,
 	ref: AccountRef,
-	openCodeStatuses?: ReadonlyMap<string, string>,
+	openCodeStatuses: ReadonlyMap<string, InstanceStatus>,
 ): Result.Result<Account, AccountUnroutable> {
 	if (ref._tag === "Id") {
 		const live = state.accounts.find((account) => account.id === ref.id);

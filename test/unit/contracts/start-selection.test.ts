@@ -2,6 +2,7 @@
 // recovery sticks to managed, or an unavailable managed server picks a third server.
 import { describe, expect, it } from "vitest";
 import { openCodeStartSelection } from "../../../src/lib/contracts/start-selection.js";
+import type { InstanceStatus } from "../../../src/lib/shared-types.js";
 
 describe("OpenCode draft start", () => {
 	it.each([
@@ -9,28 +10,32 @@ describe("OpenCode draft start", () => {
 		"starting",
 		"unhealthy",
 		"stopped",
+		undefined,
 	] as const)("resolves a %s selection without writing it", (status) => {
 		const accounts = Object.freeze([
 			Object.freeze({
 				id: "opencode",
 				driver: "opencode",
 				isDefault: false,
-				status: "stopped",
 			}),
 			Object.freeze({
 				id: "chosen",
 				driver: "opencode",
 				isDefault: true,
-				status,
+				managed: true,
 			}),
 			Object.freeze({
 				id: "other",
 				driver: "opencode",
 				isDefault: false,
-				status: "healthy",
 			}),
 		]);
-		expect(openCodeStartSelection(accounts)).toEqual(
+		const statuses = new Map<string, InstanceStatus>([
+			["opencode", "stopped"],
+			["other", "healthy"],
+			...(status === undefined ? [] : [["chosen", status] as const]),
+		]);
+		expect(openCodeStartSelection(accounts, statuses)).toEqual(
 			status === "healthy"
 				? { account: { _tag: "Id", id: "chosen" } }
 				: { account: { _tag: "Id", id: "opencode" }, fallback: "unreachable" },
@@ -38,20 +43,23 @@ describe("OpenCode draft start", () => {
 		expect(accounts[1]?.isDefault).toBe(true);
 		expect(
 			openCodeStartSelection(
-				accounts.map((account) => ({ ...account, status: "healthy" })),
+				accounts,
+				new Map(accounts.map(({ id }) => [id, "healthy"])),
 			),
 		).toEqual({ account: { _tag: "Id", id: "chosen" } });
 	});
 	it("keeps the lazy managed default even while stopped", () => {
 		expect(
-			openCodeStartSelection([
-				{
-					id: "opencode",
-					driver: "opencode",
-					isDefault: true,
-					status: "stopped",
-				},
-			]),
+			openCodeStartSelection(
+				[
+					{
+						id: "opencode",
+						driver: "opencode",
+						isDefault: true,
+					},
+				],
+				new Map([["opencode", "stopped"]]),
+			),
 		).toEqual({ account: { _tag: "Id", id: "opencode" } });
 	});
 });

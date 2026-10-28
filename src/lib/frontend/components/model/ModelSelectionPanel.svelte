@@ -62,9 +62,7 @@
 	})));
 	const accountOptions = $derived(target.accounts.filter((account) => account.driver === target.pick.driver).map((account) => ({ value: account.id, label: account.label, locked: target.pending.model || account.available === false })));
 	function selectHarness(driver: ProviderDriverKind) {
-		const available = target.accounts.filter((account) => account.driver === driver && account.available !== false);
-		const account = available.find((account) => account.isDefault) ?? available[0];
-		if (account) target.selectAccount(account.id);
+		target.selectAccount({ driver });
 	}
 	const selectParameter = selection.selectParameter;
 	const scopedGroups = $derived(target.catalog);

@@ -11,7 +11,10 @@ import { EventStoreEffectTag } from "../../../persistence/effect/event-store-eff
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
-import { resolveTitleGeneration } from "../../../provider/title-generation.js";
+import {
+	resolveTitleGeneration,
+	resolveTitleGenerationAccount,
+} from "../../../provider/title-generation.js";
 import { catalogFromProviderList } from "../../../provider/turn-settings.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
@@ -198,7 +201,11 @@ export const makeSessionTitleServiceLive = (
 				readonly message: string;
 			}) =>
 				Effect.gen(function* () {
-					const state = yield* accounts.snapshot;
+					const selection = loadRelaySettings(config.configDir).titleGeneration;
+					let account = yield* resolveTitleGenerationAccount(
+						selection,
+						accounts,
+					);
 					const facts =
 						projectSettings._tag === "Some"
 							? yield* Ref.get(projectSettings.value.live)
@@ -210,31 +217,28 @@ export const makeSessionTitleServiceLive = (
 							: undefined;
 					};
 					const resolved = resolveTitleGeneration(
-						loadRelaySettings(config.configDir).titleGeneration,
-						state,
+						selection,
+						account,
 						catalogFor,
 					);
+					let pick = resolved.pick;
 					if (resolved.status === "missing" || resolved.status === "invalid") {
 						const ref = resolved.pick.account;
 						const accountId = ref._tag === "Id" ? ref.id : ref.driver;
-						const harness =
-							state.accounts.find((account) => account.id === accountId)
-								?.driver ?? resolved.pick.providerId;
+						const harness = account?.driver ?? resolved.pick.providerId;
 						log.warn(
 							`SESSION_TITLE_GENERATION_FALLBACK sessionId=${input.sessionId} harness=${harness} account=${accountId} model=${resolved.pick.providerId}/${resolved.pick.modelId} reason=${resolved.problem}`,
 						);
+						account = yield* resolveTitleGenerationAccount(undefined, accounts);
+						pick = resolveTitleGeneration(undefined, account, catalogFor).pick;
 					}
-					const pick =
-						resolved.status === "ok" || resolved.status === "unverified"
-							? resolved.pick
-							: resolveTitleGeneration(undefined, state, catalogFor).pick;
-					const account = yield* Effect.result(accounts.resolve(pick.account));
-					const titleResult =
-						account._tag === "Failure"
-							? account
-							: yield* Effect.result(
-									generateTitle(account.success, pick, input.message),
-								);
+					const titleResult = yield* Effect.result(
+						account
+							? generateTitle(account, pick, input.message)
+							: Effect.fail(
+									new Error("Title generation account does not exist"),
+								),
+					);
 					if (titleResult._tag === "Success") {
 						yield* applyTitleIfStillDefault(
 							input.sessionId,
@@ -253,7 +257,7 @@ export const makeSessionTitleServiceLive = (
 					// user-visible outcome, so the failure itself is log only.
 					if (applied) {
 						log.warn(
-							`SESSION_TITLE_GENERATION_FAILED sessionId=${input.sessionId} harness=${account._tag === "Success" ? account.success.driver : "claude"} account=${account._tag === "Success" ? account.success.id : "default"} model=${pick.providerId}/${pick.modelId} reason=${reason}`,
+							`SESSION_TITLE_GENERATION_FAILED sessionId=${input.sessionId} harness=${account?.driver ?? "claude"} account=${account?.id ?? "default"} model=${pick.providerId}/${pick.modelId} reason=${reason}`,
 						);
 					}
 				});

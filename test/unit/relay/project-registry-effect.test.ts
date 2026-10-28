@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Option, PubSub, Ref } from "effect";
 import { afterAll, expect, vi } from "vitest";
-import { openCodeInstanceFor } from "../../../src/lib/contracts/start-selection.js";
+import {
+	accountsStateFromConfig,
+	materializeDefault,
+} from "../../../src/lib/account-directory.js";
+import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
@@ -35,6 +39,7 @@ import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 
 const configDir = mkdtempSync("/tmp/project-registry-");
@@ -376,19 +381,39 @@ describe("ProjectRegistry Effect - updateProject", () => {
 	);
 });
 
-describe("openCodeInstanceFor", () => {
+describe("materializeDefault for OpenCode", () => {
 	it("returns the first OpenCode instance after skipping Claude accounts", () => {
 		const instances = [
 			{ id: "claude", driver: "claude" },
 			{ id: "first", driver: "opencode" },
 			{ id: "second", driver: "opencode" },
-		];
-		expect(openCodeInstanceFor(instances)).toBe(instances[1]);
-		expect(openCodeInstanceFor([{ id: "legacy" }])).toEqual({ id: "legacy" });
+		] as const;
+		expect(materializeDefault(instances, "opencode", undefined, [])).toEqual(
+			Option.some("first"),
+		);
+		const legacy = accountsStateFromConfig(
+			{
+				...defaultDaemonConfig(),
+				instances: [
+					{ id: "legacy", name: "Legacy", port: 1234, managed: false },
+				],
+			},
+			sdkDefaultClaudeConfigDir("/isolated-home/.claude"),
+		);
 		expect(
-			openCodeInstanceFor([{ id: "claude", driver: "claude" }]),
-		).toBeUndefined();
-		expect(openCodeInstanceFor([])).toBeUndefined();
+			materializeDefault(legacy.accounts, "opencode", undefined, []),
+		).toEqual(Option.some("legacy"));
+		expect(
+			materializeDefault(
+				[{ id: "claude", driver: "claude" }],
+				"opencode",
+				undefined,
+				[],
+			),
+		).toEqual(Option.none());
+		expect(materializeDefault([], "opencode", undefined, [])).toEqual(
+			Option.none(),
+		);
 	});
 });
 

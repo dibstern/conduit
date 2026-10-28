@@ -1,6 +1,9 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import {
 	AccountDirectory,
 	makeAccountDirectory,
@@ -65,6 +68,7 @@ describe("orchestration scoped layer", () => {
 										configuredClaudeConfigDir("/tmp/g4zp-test-claude"),
 									),
 								),
+								Effect.succeed(NO_OPENCODE_HEALTH),
 							),
 						),
 						Layer.succeed(OpenCodeAPITag)(openCodeApi),

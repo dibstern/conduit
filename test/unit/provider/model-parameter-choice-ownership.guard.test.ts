@@ -19,13 +19,12 @@ const unrelatedDefaultReads = {
 	"src/lib/domain/relay/Services/model-catalog.ts": 2,
 	"src/lib/frontend/components/layout/UsageFooterMeter.svelte": 2,
 	"src/lib/frontend/components/model/InstanceModelPicker.svelte": 4,
-	"src/lib/frontend/components/model/ModelSelectionPanel.svelte": 3,
-	"src/lib/frontend/components/model/title-model-selection-target.svelte.ts": 1,
+	"src/lib/frontend/components/model/ModelSelectionPanel.svelte": 2,
 	"src/lib/frontend/components/overlays/ClaudeSettingsTab.svelte": 1,
 	"src/lib/frontend/components/overlays/CursorAuthSettings.svelte": 1,
 	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte": 5,
 	"src/lib/frontend/components/overlays/ProvidersSettingsTab.svelte": 3,
-	"src/lib/frontend/stores/discovery.svelte.ts": 11,
+	"src/lib/frontend/stores/discovery.svelte.ts": 10,
 	"src/lib/frontend/stores/instance.svelte.ts": 3,
 };
 

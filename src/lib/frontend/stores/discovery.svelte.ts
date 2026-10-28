@@ -143,9 +143,13 @@ const providersFromGetModelsResponse = (
 		})),
 	}));
 
-// The composer's harness picker selects a provider *instance*. Default
-// instances come from the daemon's isDefault flags. Catalogue groups remain
-// keyed by driver; an explicit provider.instanceId keeps its own account.
+// Catalogue groups remain keyed by driver; an explicit provider.instanceId
+// keeps its own account.
+
+/** An exact account id, or a driver's default account. */
+export type InstanceSelection =
+	| string
+	| { readonly driver: ProviderDriverKind };
 
 export interface InstanceOption {
 	readonly id: string;
@@ -1132,21 +1136,32 @@ export function getProviderGroupsForInstance(
 	);
 }
 
-/** Hold a live draft account; removed accounts fall back to their driver's default. */
-export function getEffectiveInstanceId(): string | undefined {
+/** Resolve the saved default against the currently published account health. */
+export function defaultInstanceFor(
+	driver: ProviderDriverKind | undefined,
+): InstanceOption | undefined {
 	const available = getAvailableInstances();
-	if (draft.instanceId !== null)
-		return available.find((account) => account.id === draft.instanceId)?.id;
-	const provider = discoveryState.defaultProviderId;
-	const driver = draft.driver ?? driverForProvider(provider);
 	if (driver === "opencode") {
-		const { account } = openCodeStartSelection(instanceState.instances);
-		return available.find((instance) => instance.id === account.id)?.id;
+		const { account } = openCodeStartSelection(
+			instanceState.instances,
+			new Map(instanceState.instances.map(({ id, status }) => [id, status])),
+		);
+		return available.find((instance) => instance.id === account.id);
 	}
 	return available.find(
 		(account) =>
 			account.isDefault && (driver === undefined || account.driver === driver),
-	)?.id;
+	);
+}
+
+/** Hold a live draft account; removed accounts fall back to their driver's default. */
+export function getEffectiveInstanceId(): string | undefined {
+	if (draft.instanceId !== null)
+		return getAvailableInstances().find(
+			(account) => account.id === draft.instanceId,
+		)?.id;
+	const provider = discoveryState.defaultProviderId;
+	return defaultInstanceFor(draft.driver ?? driverForProvider(provider))?.id;
 }
 
 /** The server's session snapshot publishes the directory's effective account. */
@@ -1193,6 +1208,7 @@ function fillDraftDefault(): void {
 		defaults.pick,
 		defaults.pick.effort,
 		defaults.pick.contextWindow,
+		catalogScope(null, instanceId),
 	);
 }
 
@@ -1266,33 +1282,43 @@ function setDraftModel(
 		rememberDraftModel(target);
 }
 
-/** A different instance starts with its own default, never a neighboring model. */
-export function selectInstance(instanceId: string): void {
-	draftPickChosen = true;
-	draftAccountChosen = true;
-	const available = getAvailableInstances();
-	const ref = accountRefFromSelection({ providerId: instanceId });
-	const selected =
-		available.find((account) => account.id === instanceId) ??
-		(ref._tag === "DriverDefault"
-			? available.find(
-					(account) => account.driver === ref.driver && account.isDefault,
-				)
-			: undefined);
-	if (!selected) {
-		draft.instanceId = ref._tag === "Id" ? instanceId : null;
-		draft.driver = ref._tag === "DriverDefault" ? ref.driver : null;
-		draftModels[catalogScope().key] = null;
-		return;
+/** Exact accounts stay pinned; driver defaults follow current health. */
+export function selectInstance(selection: InstanceSelection): void {
+	// A driver whose default can't be used starts on its first usable account.
+	if (
+		typeof selection !== "string" &&
+		defaultInstanceFor(selection.driver)?.available === false
+	) {
+		const usable = getAvailableInstances().find(
+			(account) =>
+				account.driver === selection.driver && account.available !== false,
+		);
+		if (usable) {
+			selectInstance(usable.id);
+			return;
+		}
 	}
-	if (draft.instanceId === selected.id) return;
-	draft.instanceId = selected.id;
-	draft.driver = selected.driver;
+	draftPickChosen = true;
+	const available = getAvailableInstances();
+	const selected =
+		typeof selection === "string"
+			? available.find((account) => account.id === selection)
+			: undefined;
+	const ref =
+		typeof selection === "string"
+			? accountRefFromSelection({ providerId: selection })
+			: ({ _tag: "DriverDefault", driver: selection.driver } as const);
+	const instanceId = selected?.id ?? (ref._tag === "Id" ? ref.id : null);
+	const driver =
+		selected?.driver ?? (ref._tag === "DriverDefault" ? ref.driver : null);
+	draftAccountChosen = instanceId !== null;
+	if (draft.instanceId === instanceId && draft.driver === driver) return;
+	draft.instanceId = instanceId;
+	draft.driver = driver;
 	draftModels[catalogScope().key] = null;
 	if (
-		!getDriverTraits(selected.driver)?.permissionModes.includes(
-			draft.permissionMode,
-		)
+		driver !== null &&
+		!getDriverTraits(driver)?.permissionModes.includes(draft.permissionMode)
 	)
 		draft.permissionMode = "ask";
 	fillDraftDefault();

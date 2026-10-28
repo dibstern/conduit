@@ -32,7 +32,10 @@ import type {
 	ProjectSetting,
 	ProjectSettingsEnvelope,
 } from "../../../contracts/ws-rpc.js";
-import { resolveTitleGeneration } from "../../../provider/title-generation.js";
+import {
+	resolveTitleGeneration,
+	resolveTitleGenerationAccount,
+} from "../../../provider/title-generation.js";
 import {
 	catalogFromProviderList,
 	type Harness,
@@ -238,11 +241,14 @@ export const readTitleGenerationState = Effect.gen(function* () {
 	const directory = yield* Effect.serviceOption(AccountDirectory);
 	if (Option.isNone(directory))
 		return { selection, status: "unverified" } satisfies TitleGenerationState;
-	const accounts = yield* directory.value.snapshot;
+	const account = yield* resolveTitleGenerationAccount(
+		selection,
+		directory.value,
+	);
 	const facts = yield* Ref.get((yield* ProjectSettingsTag).live);
 	const { status, problem } = resolveTitleGeneration(
 		selection,
-		accounts,
+		account,
 		(account) => {
 			const catalog = facts[`providerModels:${account.id}`];
 			return catalog ? catalogFromProviderList(catalog.providers) : undefined;

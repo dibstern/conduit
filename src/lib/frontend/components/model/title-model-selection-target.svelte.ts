@@ -6,6 +6,7 @@ import {
 import { modelParameterChoices } from "../../../provider/turn-settings.js";
 import {
 	applyTitleGeneration,
+	defaultInstanceFor,
 	discoveryState,
 	getAvailableInstances,
 	getModelCatalogForInstance,
@@ -29,11 +30,7 @@ export function createTitleModelSelectionTarget() {
 	const accounts = $derived(getAvailableInstances());
 	const accountId = $derived.by(() => {
 		const ref = selection.account;
-		return ref._tag === "Id"
-			? ref.id
-			: accounts.find(
-					(account) => account.driver === ref.driver && account.isDefault,
-				)?.id;
+		return ref._tag === "Id" ? ref.id : defaultInstanceFor(ref.driver)?.id;
 	});
 	const inventory = $state({ loading: false, error: null as string | null });
 	let catalogRead:
@@ -182,13 +179,24 @@ export function createTitleModelSelectionTarget() {
 		get pending() {
 			return { model: saving, effort: saving, contextWindow: saving };
 		},
-		selectAccount(id) {
-			if (
-				!accounts.some(
-					(account) => account.id === id && account.available !== false,
-				)
-			)
-				return;
+		selectAccount(accountSelection) {
+			const driver =
+				typeof accountSelection === "string"
+					? undefined
+					: accountSelection.driver;
+			const available = accounts.filter(
+				(account) =>
+					account.available !== false &&
+					(driver === undefined || account.driver === driver),
+			);
+			const preferred =
+				typeof accountSelection === "string"
+					? accountSelection
+					: defaultInstanceFor(accountSelection.driver)?.id;
+			const id =
+				available.find((account) => account.id === preferred)?.id ??
+				(typeof accountSelection === "string" ? undefined : available[0]?.id);
+			if (!id) return;
 			void save({ ...selection, account: { _tag: "Id", id } }, true);
 		},
 		selectModel(pick) {

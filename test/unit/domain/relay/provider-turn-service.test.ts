@@ -6,7 +6,10 @@ import { Clock, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
 import { SqlClient, Statement } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { afterEach, expect, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../../src/lib/account-directory.js";
 import {
 	AccountIdSchema,
 	type ClaudeAccount,
@@ -408,6 +411,7 @@ const serviceLayer = (input: {
 				: AccountDirectoryFromConfigLive(
 						input.configDir,
 						configuredClaudeConfigDir("/isolated-provider-home/.claude"),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 		Layer.succeed(OpenCodeAPITag)(api),
 		Layer.succeed(OpenCodeInstancesTag)(
@@ -561,6 +565,7 @@ describe("ProviderTurnService", () => {
 									5,
 									{ defaultAccountIds: { claude: admitted.id } },
 								),
+								Effect.succeed(NO_OPENCODE_HEALTH),
 							),
 						),
 					);

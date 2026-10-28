@@ -7,6 +7,7 @@ import {
 	accountsStateFromInstances,
 	apply,
 	list,
+	NO_OPENCODE_HEALTH,
 	resolve as resolveAccount,
 } from "../../../src/lib/account-directory.js";
 import type {
@@ -375,7 +376,7 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				const id = payload["instanceId"];
 				if (typeof id !== "string") throw new Error("Missing account id");
 				const account = Either.getOrThrowWith(
-					resolveAccount(state, { _tag: "Id", id }),
+					resolveAccount(state, { _tag: "Id", id }, NO_OPENCODE_HEALTH),
 					(error) => error,
 				);
 				rpc.upsertShellRow({

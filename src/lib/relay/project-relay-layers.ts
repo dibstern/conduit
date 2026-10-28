@@ -12,7 +12,10 @@ import {
 	Tracer,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import { accountsStateFromConfig } from "../account-directory.js";
+import {
+	accountsStateFromConfig,
+	NO_OPENCODE_HEALTH,
+} from "../account-directory.js";
 import {
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_DRIVERS,
@@ -402,7 +405,12 @@ export function createProjectRelayLayers({
 			return ConfigPersistenceLive.pipe(
 				Layer.provideMerge(snapshot),
 				Layer.provide(makeConfigWriterLive(configDir)),
-				Layer.provideMerge(AccountDirectoryStateLive(accounts)),
+				Layer.provideMerge(
+					AccountDirectoryStateLive(
+						accounts,
+						Effect.succeed(NO_OPENCODE_HEALTH),
+					),
+				),
 			);
 		}),
 	).pipe(

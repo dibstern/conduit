@@ -19,8 +19,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Effect } from "effect";
-import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
+import { Effect, Result } from "effect";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import type { ProcessHarness } from "../../helpers/process-harness.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -34,22 +34,25 @@ async function expectPromptOnServer(
 ) {
 	if (!sessionId) throw new Error("Missing draft session id");
 	const db = new DatabaseSync(harness.daemonStorePath(), { readOnly: true });
-	let binding:
-		| { accountId: string; providerSessionId: string | null }
-		| undefined;
+	let binding: { accountId: string; providerSessionId: string } | undefined;
 	try {
 		binding = db
 			.prepare(
-				`SELECT provider AS accountId, provider_sid AS providerSessionId
-				 FROM session_providers WHERE session_id = ? AND status = 'active'`,
+				`SELECT binding.provider AS accountId,
+				 COALESCE(session.provider_sid, session.id) AS providerSessionId
+				 FROM session_providers AS binding
+				 JOIN sessions AS session ON session.id = binding.session_id
+				 WHERE binding.session_id = ? AND binding.status = 'active'`,
 			)
 			.get(sessionId) as typeof binding;
 	} finally {
 		db.close();
 	}
-	expect(binding?.accountId).toBe(accountId);
-	if (!binding?.providerSessionId)
-		throw new Error("Missing native OpenCode session id");
+	if (!binding) throw new Error("Missing active OpenCode binding");
+	expect(binding.accountId).toBe(accountId);
+	// OpenCode keeps its native id as the Conduit id; the binding's provider_sid
+	// is not populated by the session.created projector.
+	expect(binding.providerSessionId).toBe(sessionId);
 	const path = `/session/${binding.providerSessionId}/prompt_async`;
 	const receivingRequest = () =>
 		harness
@@ -183,6 +186,37 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 			selectedPid,
 			"selected server draft",
 		);
+		const claude = await browser.createSession();
+		await browser.send(
+			claude,
+			"Generate a built-in title before the OpenCode preference changes",
+		);
+		await expect
+			.poll(
+				async () =>
+					(
+						await Effect.runPromise(
+							rpc.ListDaemonSessions({ projectSlug: "process-test" }),
+						)
+					).sessions.find((s) => s.id === claude)?.title,
+			)
+			.toBe("Process harness session");
+		evidence["titleRequests"] = harness.claudeTitles();
+		writeFileSync(
+			join(harness.configDir, "fake-opencode-discovery.json"),
+			JSON.stringify({ agents: [{ name: "title", mode: "subagent" }] }),
+		);
+		await Effect.runPromise(
+			rpc.SetTitleGeneration({
+				projectSlug: "process-test",
+				selection: {
+					account: { _tag: "DriverDefault", driver: "opencode" },
+					providerId: "fake",
+					modelId: "fake-model",
+					effort: "",
+				},
+			}),
+		);
 		await page.goto("about:blank");
 		await browser.stopInstance(selected);
 		const storedAfterStop = saved().accountDefaults;
@@ -221,38 +255,7 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 			managedPid,
 			"managed existing session",
 		);
-		const claude = await browser.createSession();
-		await browser.send(
-			claude,
-			"Generate a title while the selected OpenCode is stopped",
-		);
-		await expect
-			.poll(
-				async () =>
-					(
-						await Effect.runPromise(
-							rpc.ListDaemonSessions({ projectSlug: "process-test" }),
-						)
-					).sessions.find((s) => s.id === claude)?.title,
-			)
-			.toBe("Process harness session");
 		evidence["duringOutageDefaults"] = saved().accountDefaults;
-		evidence["titleRequests"] = harness.claudeTitles();
-		writeFileSync(
-			join(harness.configDir, "fake-opencode-discovery.json"),
-			JSON.stringify({ agents: [{ name: "title", mode: "subagent" }] }),
-		);
-		await Effect.runPromise(
-			rpc.SetTitleGeneration({
-				projectSlug: "process-test",
-				selection: {
-					account: { _tag: "DriverDefault", driver: "opencode" },
-					providerId: "fake",
-					modelId: "fake-model",
-					effort: "",
-				},
-			}),
-		);
 		const openCodeTitleSession = await browser.createSession();
 		await browser.send(
 			openCodeTitleSession,
@@ -273,6 +276,10 @@ test("OpenCode selection survives an outage while drafts fall back and recover",
 			title: "Managed OpenCode title",
 		};
 		evidence["storedSettings"] = JSON.parse(settings());
+		expect(JSON.parse(settings()).titleGeneration.account).toEqual({
+			_tag: "DriverDefault",
+			driver: "opencode",
+		});
 		expect(
 			(await browser.instances()).instances.find((i) => i.id === selected)
 				?.status,
@@ -304,9 +311,11 @@ test.describe("named OpenCode selection", () => {
 		harness,
 	}, testInfo) => {
 		const configPath = join(harness.configDir, "daemon.json");
-		const config = JSON.parse(readFileSync(configPath, "utf8")) as DaemonConfig;
-		const managed = config.instances?.[0];
-		if (!managed) throw new Error("Missing managed fixture config");
+		// The unstarted harness seeds legacy config. Normalize it before adding
+		// modern account defaults, or legacy decoding replaces those defaults.
+		const config = Result.getOrThrow(loadDaemonConfigResult(harness.configDir));
+		const managed = config?.instances?.find(({ id }) => id === "opencode");
+		if (!config || !managed) throw new Error("Missing managed fixture config");
 		writeFileSync(
 			configPath,
 			JSON.stringify({
@@ -323,7 +332,7 @@ test.describe("named OpenCode selection", () => {
 						},
 					},
 				],
-				accountDefaults: { opencode: "remote" },
+				accountDefaults: { ...config.accountDefaults, opencode: "remote" },
 			}),
 		);
 		await harness.restart();
@@ -342,8 +351,16 @@ test.describe("named OpenCode selection", () => {
 		const evidence: Record<string, unknown> = {
 			selected: "remote",
 			selectedPid,
+			managedPid,
+			instances: running,
 		};
 		try {
+			expect(
+				running.filter(
+					(instance) => instance.driver === "opencode" && instance.isDefault,
+				),
+			).toMatchObject([{ id: "remote", status: "healthy" }]);
+			expect(selectedPid).not.toBe(managedPid);
 			const picker = page.locator(
 				'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 			);

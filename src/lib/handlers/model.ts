@@ -58,7 +58,10 @@ import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
-import { resolveTitleGeneration } from "../provider/title-generation.js";
+import {
+	resolveTitleGeneration,
+	resolveTitleGenerationAccount,
+} from "../provider/title-generation.js";
 import {
 	catalogFromProviderList,
 	findCatalogModel,
@@ -866,20 +869,21 @@ export const setTitleGenerationForRelay = (
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		let saved = selection;
 		if (selection !== null) {
 			const directory = yield* AccountDirectory;
-			const accounts = yield* directory.snapshot;
+			const account = yield* resolveTitleGenerationAccount(
+				selection,
+				directory,
+			);
 			const candidate = resolveTitleGeneration(
 				selection,
-				accounts,
+				account,
 				() => undefined,
 			);
-			if (candidate.status !== "unverified")
+			if (candidate.status !== "unverified" || !account)
 				return yield* Effect.fail(
 					new Error(candidate.problem ?? "Invalid title generation selection"),
 				);
-			const account = yield* directory.resolve(candidate.pick.account);
 			const catalog = yield* loadModelCatalog(account.driver, account.id, {
 				startIfStopped: true,
 			});
@@ -890,7 +894,7 @@ export const setTitleGenerationForRelay = (
 			}
 			const resolved = resolveTitleGeneration(
 				selection,
-				accounts,
+				account,
 				() => catalog,
 			);
 			if (resolved.status !== "ok")
@@ -899,10 +903,9 @@ export const setTitleGenerationForRelay = (
 						resolved.problem ?? "Title generation catalog is unavailable",
 					),
 				);
-			saved = resolved.pick;
 		}
 		yield* saveRelaySettingsEffect(
-			{ titleGeneration: saved },
+			{ titleGeneration: selection },
 			config.configDir,
 		);
 		yield* publishGlobalProjectSetting("titleGeneration");

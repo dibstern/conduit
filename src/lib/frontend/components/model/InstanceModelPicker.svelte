@@ -277,8 +277,9 @@
 
 	function handleHarnessSelect(driver: ProviderDriverKind) {
 		if (locked || harnesses.find((harness) => harness.value === driver)?.locked) return;
-		const instance = instanceForDriver(driver);
-		if (instance) handleInstanceSelect(instance);
+		view = "root";
+		target.selectAccount({ driver });
+		searchQuery = "";
 	}
 
 	function handleAccountSelect(id: string) {

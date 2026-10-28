@@ -1,10 +1,12 @@
 // Repeatable read-path measurement against a temporary store, never live data.
 // pnpm exec tsx test/bench/transcript-read-path.ts /tmp/read-path.db /tmp/read-path.json
+
 import { channel } from "node:diagnostics_channel";
 import { existsSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { SqlClient } from "effect/sql";
+import { NO_OPENCODE_HEALTH } from "../../src/lib/account-directory.js";
 import { defaultDaemonConfig } from "../../src/lib/daemon/config-persistence.js";
 import { AccountDirectoryLive } from "../../src/lib/domain/daemon/Services/account-directory.js";
 import { subscribeSessionDetail } from "../../src/lib/domain/relay/Services/session-detail-subscription.js";
@@ -215,6 +217,7 @@ const runtime = ManagedRuntime.make(
 		SessionEventBusLive,
 		AccountDirectoryLive(
 			configuredClaudeConfigDir("/isolated-read-path-login"),
+			Effect.succeed(NO_OPENCODE_HEALTH),
 			defaultDaemonConfig().instances,
 		),
 	),
