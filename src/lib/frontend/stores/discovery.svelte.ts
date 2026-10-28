@@ -1333,21 +1333,26 @@ function setDraftModel(
 /** Exact accounts stay pinned; driver defaults follow current health. */
 export function selectInstance(selection: InstanceSelection): void {
 	const ref = accountRefForSelection(selection);
-	if (!ref) return;
-	if (
-		ref._tag === "DriverDefault" &&
-		draft.instanceId === defaultInstanceFor(ref.driver)?.id
-	)
-		return;
 	const { instanceId, driver } =
-		ref._tag === "Id"
+		ref?._tag === "Id"
 			? {
 					instanceId: ref.id,
 					driver:
 						getAvailableInstances().find((account) => account.id === ref.id)
 							?.driver ?? null,
 				}
-			: { instanceId: null, driver: ref.driver };
+			: {
+					instanceId: null,
+					// An unknown harness has no DriverDefault ref; its draft follows the driver itself.
+					driver:
+						ref?.driver ??
+						(typeof selection === "string" ? null : selection.driver),
+				};
+	if (
+		instanceId === null &&
+		(driver === null || draft.instanceId === defaultInstanceFor(driver)?.id)
+	)
+		return;
 	draftPickChosen = true;
 	draftAccountChosen = instanceId !== null;
 	if (draft.instanceId === instanceId && draft.driver === driver) return;
