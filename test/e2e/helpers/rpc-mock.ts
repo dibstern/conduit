@@ -79,6 +79,7 @@ const isSessionStream = (tag: string): boolean =>
 	tag === "SubscribeSessionDetail" ||
 	tag === "SubscribeSessionPromptIndex" ||
 	tag === "SubscribeSessionTodos" ||
+	tag === "SubscribeSessionDiff" ||
 	tag === "SubscribeInputDraft";
 
 /** Live-only feeds open synchronized, with nothing to replay. */
