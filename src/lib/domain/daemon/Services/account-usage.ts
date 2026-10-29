@@ -18,7 +18,10 @@ export type AccountUsage = {
 				readonly overtaken: boolean;
 		  }
 		| undefined;
+	/** When the account is next read, if someone is viewing or a plan window is full then. */
 	readonly wakeAt?: number | undefined;
+	/** Failed reads in a row; they space out the next read. */
+	readonly failures?: number | undefined;
 	readonly five_hour?: ForecastSeries | undefined;
 	readonly seven_day?: ForecastSeries | undefined;
 };
@@ -82,8 +85,25 @@ const keptReading = (record: AccountUsage, reading: UsageReading) =>
 		? { ...record.reading, stale: true }
 		: reading;
 
+// The next read after one settles at readAt. Failed reads in a row wait 30s,
+// doubling to 2m, then 5m like any other read.
+const nextRead = (
+	{ failures: before = 0 }: AccountUsage,
+	reading: UsageReading,
+	readAt: number,
+) => {
+	const failures = reading.status === "unknown" ? before + 1 : 0;
+	return {
+		failures,
+		wakeAt:
+			readAt +
+			(failures > 0 && failures < 4 ? 15_000 * 2 ** failures : 300_000),
+	};
+};
+
 /**
- * Apply a finished read: the reading its callers get and the record it leaves.
+ * Apply a finished read: the reading its callers get and the record it leaves,
+ * with the account's next read scheduled from when this one settled.
  * A read whose account was retired or read again since it started leaves the
  * record as it is.
  */
@@ -109,6 +129,7 @@ export const settle = (
 			...series,
 			inFlight: undefined,
 			reading: keptReading(record, reading),
+			...nextRead(record, reading, readAt),
 		},
 	};
 };
@@ -197,26 +218,47 @@ export const live = (
 	};
 };
 
-/** When a finished turn's usage is read again. */
-export const afterTurn = (now: number) => now + 10_000;
+// A wake still to come, or Infinity. One already past was carried out or skipped.
+const comingWake = ({ wakeAt }: AccountUsage, now: number) =>
+	wakeAt !== undefined && wakeAt > now ? wakeAt : Infinity;
 
-/** A wake reads while someone is viewing or a plan window is full. */
-export const shouldWake = ({ reading }: AccountUsage, viewers: number) => {
-	if (viewers > 0) return true;
-	if (!reading) return false;
-	return reading.windows.some(
-		(window) =>
-			(window.kind === "five_hour" || window.kind === "seven_day") &&
-			window.utilization >= 100,
-	);
+/** A finished turn's usage is read again in ten seconds, unless a wake to come is sooner. */
+export const afterTurn = (record: AccountUsage, now: number): AccountUsage => ({
+	...record,
+	wakeAt: Math.min(now + 10_000, comingWake(record, now)),
+});
+
+/** An account whose wake has come, or was never set, is read while someone is viewing or a plan window is full. */
+export const shouldWake = (
+	record: AccountUsage,
+	now: number,
+	viewers: number,
+) => {
+	if (comingWake(record, now) < Infinity) return false;
+	const full =
+		record.reading?.windows.some(
+			(window) =>
+				(window.kind === "five_hour" || window.kind === "seven_day") &&
+				window.utilization >= 100,
+		) === true;
+	return full || viewers > 0;
 };
 
-/** The Usage Reading published for an account, marked checking while a read is in progress. */
+/**
+ * The Usage Reading published for an account: marked checking while a read is
+ * in progress, and with the next read's time after failed reads.
+ */
 export const publishedReading = ({
 	reading,
 	inFlight,
+	failures,
+	wakeAt,
 }: AccountUsage): UsageReading | undefined =>
-	reading && inFlight ? { ...reading, checking: true } : reading;
+	reading && {
+		...reading,
+		...(inFlight ? { checking: true } : {}),
+		...(failures && wakeAt !== undefined ? { retryAt: wakeAt } : {}),
+	};
 
 /** What a caller whose wait ran out gets: the published reading, or unknown before the first one. */
 export const waitedOut = (
@@ -242,6 +284,7 @@ export const retired = ({
 	lastAttemptAt,
 	inFlight,
 	wakeAt,
+	failures,
 	...kept
 }: AccountUsage): AccountUsage => kept;
 

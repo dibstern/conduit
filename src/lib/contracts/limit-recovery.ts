@@ -248,6 +248,8 @@ export const UsageReadingSchema = Schema.Struct({
 	stale: Schema.Boolean,
 	/** A read of this account is in progress. */
 	checking: Schema.optional(Schema.Boolean),
+	/** Epoch milliseconds of the next read after failed reads. */
+	retryAt: Schema.optional(Schema.Number),
 	reason: Schema.optional(Schema.String),
 });
 export type UsageReading = typeof UsageReadingSchema.Type;

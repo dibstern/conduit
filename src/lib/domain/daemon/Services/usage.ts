@@ -5,12 +5,10 @@ import {
 	Duration,
 	Effect,
 	Equal,
-	Fiber,
 	FiberMap,
-	Schedule,
+	Ref,
 	Schema,
 	type Scope,
-	Semaphore,
 	Stream,
 	SubscriptionRef,
 	SynchronizedRef,
@@ -51,13 +49,13 @@ export interface UsageService {
 		enabled: boolean,
 	) => Effect.Effect<{ enabled: boolean; reason?: string }>;
 	readonly readings: Stream.Stream<readonly UsageReading[]>;
-	/** Merge a provider's sparse live windows into the account sampler's stream. */
+	/** Merge a provider's sparse live windows into the account's published reading. */
 	readonly update?: (
 		accountId: string,
 		harness: UsageHarness,
 		reading: UsageRead,
 	) => Effect.Effect<void>;
-	/** The latest completed reading, without probing or starting the sampler. */
+	/** The latest completed reading, without reading the account. */
 	readonly latest: (
 		accountId: string,
 	) => Effect.Effect<UsageReading | undefined>;
@@ -158,6 +156,7 @@ const settleRead =
 	(
 		state: UsageStateRef,
 		saveHistory: Effect.Effect<void>,
+		schedule: (accountId: string) => Effect.Effect<void>,
 		account: UsageAccount,
 		{
 			result,
@@ -185,6 +184,7 @@ const settleRead =
 					];
 				},
 			);
+			yield* schedule(account.id);
 			for (const freed of freedBeforeReset(previous, reading))
 				yield* Effect.logInfo("Usage window free before reset", {
 					accountId: account.id,
@@ -208,6 +208,7 @@ const readAccount =
 		scope: Scope.Scope,
 		readers: UsageOptions["readers"],
 		saveHistory: Effect.Effect<void>,
+		schedule: (accountId: string) => Effect.Effect<void>,
 	) =>
 	(
 		accountId: string,
@@ -246,7 +247,7 @@ const readAccount =
 								restore(
 									readUsage(readers, account).pipe(
 										Effect.flatMap(
-											settleRead(state, saveHistory, account, {
+											settleRead(state, saveHistory, schedule, account, {
 												result: pending,
 												startedAt: now,
 											}),
@@ -358,105 +359,53 @@ const makeRefresh =
 
 const makeReadings = (
 	state: UsageStateRef,
-	scope: Scope.Scope,
-	refresh: UsageService["refresh"],
+	viewers: Ref.Ref<number>,
+	wakeAll: Effect.Effect<void>,
 ) =>
-	Effect.gen(function* () {
-		const subscriberLock = yield* Semaphore.make(1);
-		let subscribers = 0;
-		let sampler: Fiber.Fiber<void> | undefined;
-		const readings = Stream.unwrap(
-			Effect.gen(function* () {
-				const subscriptionScope = yield* Effect.scope;
-				yield* Effect.acquireRelease(
-					subscriberLock.withPermits(1)(
-						Effect.gen(function* () {
-							subscribers++;
-							if (subscribers === 1)
-								sampler = yield* Effect.forkIn(
-									refresh({ maxAge: "5 minutes", wait: 0 }).pipe(
-										Effect.schedule(Schedule.fixed("5 minutes")),
-										Effect.asVoid,
-										Effect.interruptible,
-									),
-									scope,
-								);
-						}),
+	Stream.unwrap(
+		Effect.gen(function* () {
+			const subscriptionScope = yield* Effect.scope;
+			yield* Effect.acquireRelease(
+				Ref.update(viewers, (count) => count + 1),
+				() => Ref.update(viewers, (count) => count - 1),
+			);
+			let initial = true;
+			return SubscriptionRef.changes(state).pipe(
+				Stream.map(({ accounts }) =>
+					[...accounts.values()].flatMap(
+						(record) => publishedReading(record) ?? [],
 					),
-					() =>
-						subscriberLock.withPermits(1)(
-							Effect.gen(function* () {
-								subscribers--;
-								if (subscribers === 0 && sampler) {
-									yield* Fiber.interrupt(sampler);
-									sampler = undefined;
-								}
-							}),
-						),
-				);
-				let initial = true;
-				return SubscriptionRef.changes(state).pipe(
-					Stream.map(({ accounts }) =>
-						[...accounts.values()].flatMap(
-							(record) => publishedReading(record) ?? [],
-						),
-					),
-					Stream.changes,
-					Stream.tap(() => {
-						if (!initial) return Effect.void;
-						initial = false;
-						// changes has captured the snapshot and joined the update stream
-						// before this read can publish, so the snapshot always comes first.
-						return Effect.forkIn(
-							refresh({ maxAge: "5 minutes", wait: 0 }),
-							subscriptionScope,
-						).pipe(Effect.asVoid);
-					}),
-				);
-			}),
-		);
-		return { readings, viewers: () => subscribers };
-	});
+				),
+				Stream.changes,
+				Stream.tap(() => {
+					if (!initial) return Effect.void;
+					initial = false;
+					// changes has captured the snapshot and joined the update stream
+					// before this read can publish, so the snapshot always comes first.
+					return Effect.forkIn(wakeAll, subscriptionScope).pipe(Effect.asVoid);
+				}),
+			);
+		}),
+	);
 
-const makeTurnEnded = (
-	state: UsageStateRef,
-	viewers: () => number,
-	refresh: UsageService["refresh"],
-) =>
-	Effect.gen(function* () {
-		const timers = yield* FiberMap.make<string, void>();
-		// The timer carries out the record's wakeAt; a later wakeAt replaces it.
-		const wake = (accountId: string, wakeAt: number) =>
-			Effect.gen(function* () {
-				yield* Effect.sleep(wakeAt - (yield* Clock.currentTimeMillis));
-				const due = yield* SubscriptionRef.modify(state, (current) => {
-					const record = current.accounts.get(accountId);
-					return record?.wakeAt === wakeAt
-						? [
-								shouldWake(record, viewers()),
-								withAccount(current, accountId, {
-									...record,
-									wakeAt: undefined,
-								}),
-							]
-						: [false, current];
-				});
-				if (due)
-					yield* refresh({ accountIds: [accountId], maxAge: 0, wait: 0 });
-			});
-		const turnEnded: UsageService["turnEnded"] = (accountId) =>
-			Effect.gen(function* () {
-				const wakeAt = afterTurn(yield* Clock.currentTimeMillis);
-				yield* SubscriptionRef.update(state, (current) =>
-					withAccount(current, accountId, {
-						...(current.accounts.get(accountId) ?? emptyAccountUsage),
-						wakeAt,
-					}),
-				);
-				yield* FiberMap.run(timers, accountId, wake(accountId, wakeAt));
-			});
-		return turnEnded;
-	});
+/** Read the accounts whose wake has come, while someone is viewing or a plan window is full. */
+const makeWake =
+	(
+		state: UsageStateRef,
+		viewers: Ref.Ref<number>,
+		refresh: UsageService["refresh"],
+	) =>
+	(accountIds: readonly string[]) =>
+		Effect.gen(function* () {
+			const now = yield* Clock.currentTimeMillis;
+			const watching = yield* Ref.get(viewers);
+			const { accounts } = yield* SubscriptionRef.get(state);
+			const due = accountIds.filter((accountId) =>
+				shouldWake(accounts.get(accountId) ?? emptyAccountUsage, now, watching),
+			);
+			if (due.length > 0)
+				yield* refresh({ accountIds: due, maxAge: 0, wait: 0 });
+		});
 
 const byOrder =
 	(order: readonly string[]) => (a: UsageAccount, b: UsageAccount) => {
@@ -570,15 +519,40 @@ export const makeUsage = (options: UsageOptions) =>
 		);
 		// A live reading's background save may not have run before shutdown.
 		yield* Effect.addFinalizer(() => saveHistory);
+		const viewers = yield* Ref.make(0);
+		const timers = yield* FiberMap.make<string, void>();
+		// Settled reads and turn ends restart their account's timer. It reads
+		// wakeAt as it starts, so after racing writes the last restart wins.
+		const schedule = (accountId: string) =>
+			FiberMap.run(
+				timers,
+				accountId,
+				Effect.gen(function* () {
+					const { accounts } = yield* SubscriptionRef.get(state);
+					const wakeAt = accounts.get(accountId)?.wakeAt;
+					if (wakeAt === undefined) return;
+					yield* Effect.sleep(wakeAt - (yield* Clock.currentTimeMillis));
+					// The wake's own read restarts this timer, so it runs outside it.
+					yield* Effect.forkIn(wake([accountId]), scope);
+				}),
+			).pipe(Effect.asVoid);
 		const refresh = makeRefresh(
 			state,
 			options.accounts,
-			readAccount(state, scope, options.readers, saveHistory),
+			readAccount(state, scope, options.readers, saveHistory, schedule),
 			saveHistory,
 		);
-		const { readings, viewers } = yield* makeReadings(state, scope, refresh);
+		const wake = makeWake(state, viewers, refresh);
 		return {
-			readings,
+			readings: makeReadings(
+				state,
+				viewers,
+				options.accounts.pipe(
+					Effect.flatMap((configured) =>
+						wake(configured.map((account) => account.id)),
+					),
+				),
+			),
 			update: makeUpdate(
 				state,
 				options.accounts,
@@ -590,7 +564,21 @@ export const makeUsage = (options: UsageOptions) =>
 					Effect.map(({ accounts }) => accounts.get(accountId)?.reading),
 				),
 			refresh,
-			turnEnded: yield* makeTurnEnded(state, viewers, refresh),
+			turnEnded: (accountId) =>
+				Effect.gen(function* () {
+					const now = yield* Clock.currentTimeMillis;
+					yield* SubscriptionRef.update(state, (current) =>
+						withAccount(
+							current,
+							accountId,
+							afterTurn(
+								current.accounts.get(accountId) ?? emptyAccountUsage,
+								now,
+							),
+						),
+					);
+					yield* schedule(accountId);
+				}),
 			pickFailover: makePickFailover(options, refresh),
 		} satisfies UsageService;
 	});
