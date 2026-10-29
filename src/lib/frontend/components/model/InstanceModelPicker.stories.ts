@@ -250,9 +250,8 @@ export const Closed: Story = {
 		await expect(trigger).toHaveAttribute("data-shown-context-window", "200k");
 		await expect(trigger).toHaveAttribute("data-shown-permission-mode", "ask");
 		await expect(trigger).toHaveTextContent(/Sonnet 4\.5/);
-		await expect(
-			within(canvasElement).queryByTestId("composer-harness-trigger"),
-		).not.toBeInTheDocument();
+		await expect(trigger).toHaveAccessibleName(/^Harness and model:/);
+		await expect(trigger).toHaveAttribute("aria-expanded", "false");
 	},
 };
 

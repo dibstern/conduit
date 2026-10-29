@@ -177,15 +177,11 @@ async function openCheckout(
 	});
 	rpc.setDaemonList("SubscribeInstances", instances);
 	await page.goto(`${relayBaseUrl}/s/header-session`);
-	// Phones keep the checkout in the Composer sheet.
-	if ((page.viewportSize()?.width ?? 0) < 768)
-		await page.getByTestId("composer-words-sheet-trigger").tap();
 	const trigger = page.getByTestId("composer-checkout");
 	await expect(trigger).toBeVisible();
 	if ((page.viewportSize()?.width ?? 1440) < 768) {
-		// 2e40cde7 gives the Final phone row a stable Checkout label and icon.
-		await expect(trigger.locator('[data-part="label"]')).toHaveText("Checkout");
-		await expect(trigger.locator("[data-icon]")).toHaveCount(0);
+		await expect(trigger.locator('[data-part="label"]')).toHaveCount(0);
+		await expect(trigger.locator('[data-icon="folder"]')).toBeVisible();
 	}
 	const bar = page.getByTestId("session-bar");
 	await expect(bar.getByRole("button", { name: /^Checkout:/ })).toHaveCount(0);
@@ -224,15 +220,18 @@ for (const mode of [
 				},
 			});
 			await expect(trigger).toHaveAttribute("title", "conduit / main");
-			// Desktop Words names the branch alone; the phone sheet row keeps the project.
+			// Desktop Words names the branch; the compact phone chip names the project.
 			if (mode.hasTouch) {
 				await expect(trigger.locator('[data-part="project"]')).toHaveText(
 					"conduit",
 				);
-				await expect(trigger).toContainText("/");
-			} else
+				await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
+			} else {
 				await expect(trigger.locator('[data-part="project"]')).toHaveCount(0);
-			await expect(trigger.locator('[data-part="branch"]')).toHaveText("main");
+				await expect(trigger.locator('[data-part="branch"]')).toHaveText(
+					"main",
+				);
+			}
 			await expect(trigger.locator('[data-part="dirty"]')).toBeVisible();
 			await expect(trigger.locator('[data-part="dirty"]')).toHaveText(
 				"Uncommitted changes",
@@ -395,9 +394,12 @@ for (const mode of [
 				await expect(trigger.locator('[data-part="project"]')).toHaveText(
 					mode.hasTouch ? (folder ?? "") : [],
 				);
-				await expect(trigger.locator('[data-part="branch"]')).toHaveText(
-					stage.git.branch ?? "",
-				);
+				if (mode.hasTouch)
+					await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
+				else
+					await expect(trigger.locator('[data-part="branch"]')).toHaveText(
+						stage.git.branch ?? "",
+					);
 				if (!mode.hasTouch)
 					await expect(trigger.locator("[data-icon]")).toHaveAttribute(
 						"data-icon",
@@ -461,12 +463,8 @@ for (const mode of [
 			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				directory: "/workspace/ai-notes",
 			});
-			// The phone sheet row leads with its "Checkout" label.
-			await expect(trigger).toHaveText(
-				mode.hasTouch ? /^\s*Checkout\s+ai-notes\s*$/ : "ai-notes",
-			);
-			if (!mode.hasTouch)
-				await expect(trigger.locator('[data-icon="folder"] svg')).toBeVisible();
+			await expect(trigger).toHaveText("ai-notes");
+			await expect(trigger.locator('[data-icon="folder"] svg')).toBeVisible();
 			await expect(trigger.locator('[data-part="branch"]')).toHaveCount(0);
 			await expect(
 				trigger.locator('[title="Uncommitted changes"]'),
@@ -626,8 +624,11 @@ for (const mode of [
 					expect((await project.boundingBox())?.width).toBeGreaterThan(10);
 				} else await expect(project).toHaveCount(0);
 				const branch = trigger.locator('[data-part="branch"]');
-				await expect(branch).toBeVisible();
-				expect((await branch.boundingBox())?.width).toBeGreaterThan(10);
+				if (mode.hasTouch) await expect(branch).toHaveCount(0);
+				else {
+					await expect(branch).toBeVisible();
+					expect((await branch.boundingBox())?.width).toBeGreaterThan(10);
+				}
 				const checkoutBox = await trigger.boundingBox();
 				const composerBox = await page.locator("#input-area").boundingBox();
 				expect(checkoutBox).not.toBeNull();
@@ -638,7 +639,7 @@ for (const mode of [
 				expect(checkoutBox.x + checkoutBox.width).toBeLessThanOrEqual(
 					composerBox.x + composerBox.width,
 				);
-				for (const part of mode.hasTouch ? ["project", "branch"] : ["branch"]) {
+				for (const part of mode.hasTouch ? ["project"] : ["branch"]) {
 					const height = await trigger
 						.locator(`[data-part="${part}"]`)
 						.evaluate((element) => ({
@@ -675,7 +676,7 @@ for (const mode of [
 			await capture(page, testInfo, `${mode.name}-detached-details`);
 		});
 
-		test("upstream counts stay desktop-only while the operation remains visible", async ({
+		test("upstream counts and operation labels stay desktop-only in the chip", async ({
 			page,
 			harness,
 		}, testInfo) => {
@@ -687,9 +688,14 @@ for (const mode of [
 					operation: "rebase",
 				},
 			});
-			await expect(
-				trigger.getByText("rebasing", { exact: true }),
-			).toBeVisible();
+			if (mode.hasTouch)
+				await expect(
+					trigger.getByText("rebasing", { exact: true }),
+				).toHaveCount(0);
+			else
+				await expect(
+					trigger.getByText("rebasing", { exact: true }),
+				).toBeVisible();
 			if (mode.hasTouch) await expect(trigger).not.toContainText("↑3");
 			else await expect(trigger).toContainText("↑3 ↓1");
 			await capture(page, testInfo, `${mode.name}-checkout-marks`);
@@ -706,7 +712,14 @@ for (const mode of [
 			const trigger = await openCheckout(page, harness.relayBaseUrl, {
 				git: { branch: "feat/x", merged: true },
 			});
-			await expect(trigger.getByText("merged", { exact: true })).toBeVisible();
+			if (mode.hasTouch)
+				await expect(trigger.getByText("merged", { exact: true })).toHaveCount(
+					0,
+				);
+			else
+				await expect(
+					trigger.getByText("merged", { exact: true }),
+				).toBeVisible();
 			await capture(page, testInfo, `${mode.name}-merged`);
 		});
 
@@ -725,22 +738,23 @@ for (const mode of [
 				},
 				skills: true,
 			});
-			await expect(trigger.locator('[data-part="operation"]')).toHaveText(
-				"cherry-picking",
-			);
-			// Phones show one status word, and the operation outranks merged.
-			if (mode.hasTouch)
+			if (mode.hasTouch) {
+				await expect(trigger.locator('[data-part="operation"]')).toHaveCount(0);
 				await expect(trigger.locator('[data-part="merged"]')).toHaveCount(0);
-			else
+			} else {
+				await expect(trigger.locator('[data-part="operation"]')).toHaveText(
+					"cherry-picking",
+				);
 				await expect(trigger.locator('[data-part="merged"]')).toHaveText(
 					"merged",
 				);
+			}
 			const layout = await trigger.evaluate((button) => {
 				const box = button.getBoundingClientRect();
 				return {
-					branchWidth:
+					labelWidth:
 						button
-							.querySelector('[data-part="branch"]')
+							.querySelector('[data-part="project"], [data-part="branch"]')
 							?.getBoundingClientRect().width ?? 0,
 					contained: Array.from(button.children).every((child) => {
 						const childBox = child.getBoundingClientRect();
@@ -748,11 +762,9 @@ for (const mode of [
 					}),
 				};
 			});
-			expect(layout.branchWidth).toBeGreaterThan(10);
+			expect(layout.labelWidth).toBeGreaterThan(10);
 			expect(layout.contained).toBe(true);
 			if (mode.hasTouch) {
-				await page.keyboard.press("Escape");
-				await expect(trigger).toBeHidden();
 				const back = page.getByTestId("session-bar-back");
 				await expect(back).toHaveAccessibleName("Sessions");
 				const backBox = await back.boundingBox();
@@ -778,7 +790,6 @@ for (const mode of [
 				expect(moreBox.x + moreBox.width).toBeLessThanOrEqual(
 					mode.viewport.width,
 				);
-				await page.getByTestId("composer-words-sheet-trigger").tap();
 			}
 			await capture(page, testInfo, `${mode.name}-long-operation`);
 		});
@@ -848,9 +859,7 @@ for (const mode of [
 					git: { branch: "main" },
 					viewActivity: true,
 				});
-				// Close the Composer sheet openCheckout raised; it holds the page.
-				await page.keyboard.press("Escape");
-				await expect(page.getByTestId("composer-checkout")).toHaveCount(0);
+				await expect(page.getByTestId("composer-checkout")).toBeVisible();
 				await expect(page.getByTestId("session-bar-views-button")).toHaveCount(
 					0,
 				);

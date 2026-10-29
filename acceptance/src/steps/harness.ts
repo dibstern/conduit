@@ -463,7 +463,7 @@ export const harnessHandlers: StepHandler[] = [
 			await world.page.waitForFunction(
 				(expected) => {
 					const trigger = document.querySelector(
-						'[data-testid="composer-harness-trigger"], [data-testid="model-picker-trigger"]',
+						'[data-testid="model-picker-trigger"]',
 					);
 					const icon = trigger?.querySelector("[data-driver]");
 					return (

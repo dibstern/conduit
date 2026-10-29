@@ -65,14 +65,16 @@ export const composerWordsHandlers: StepHandler[] = [
 			const row = world.page.getByTestId("composer-words-row");
 			const trigger = row.getByTestId("composer-words-sheet-trigger");
 			await expect(trigger).toBeVisible();
-			await expect(row.locator("button")).toHaveCount(1);
+			await expect(
+				row.getByTestId("composer-words-left").locator("button"),
+			).toHaveCount(1);
 			for (const label of match.slice(1))
 				await expect(trigger).toContainText(label);
 			await expect(trigger.locator("button, a, input")).toHaveCount(0);
 			await expect(trigger.getByTestId("harness-logo")).toBeVisible();
 			await expect
 				.poll(() =>
-					row.evaluate((element) => {
+					row.getByTestId("composer-words-left").evaluate((element) => {
 						const trigger = element.querySelector(
 							'[data-testid="composer-words-sheet-trigger"]',
 						);
@@ -90,7 +92,7 @@ export const composerWordsHandlers: StepHandler[] = [
 					}),
 				)
 				.toBe(true);
-			await expect(row.getByTestId("composer-checkout")).toHaveCount(0);
+			await expect(row.getByTestId("composer-word-effort")).toHaveCount(0);
 		},
 	},
 	{
@@ -137,14 +139,27 @@ export const composerWordsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert phone Words context usage",
-		match: /^the phone Words row omits checkout and shows (\d+)% context$/,
+		name: "assert phone Words checkout chip and summary context usage",
+		match:
+			/^the phone Words row shows checkout and keeps (\d+)% context in its summary$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId("composer-words-row");
-			await expect(row.getByTestId("composer-checkout")).toHaveCount(0);
-			await expect(row.getByTestId("composer-word-context-usage")).toHaveText(
-				`${match[1]}%`,
+			const right = row.getByTestId("composer-words-right");
+			const checkout = right.getByTestId("composer-checkout");
+			await expect(checkout).toBeVisible();
+			await expect(checkout.locator('[data-icon="folder"] svg')).toBeVisible();
+			await expect(checkout.locator('[data-part="project"]')).toContainText(
+				"conduit",
 			);
+			await expect(right.locator("button")).toHaveCount(1);
+			await expect(
+				right.getByTestId("composer-word-context-usage"),
+			).toHaveCount(0);
+			await expect(
+				row
+					.getByTestId("composer-words-sheet-trigger")
+					.getByTestId("composer-word-context-usage"),
+			).toHaveText(`${match[1]}%`);
 		},
 	},
 
@@ -623,7 +638,7 @@ export const composerWordsHandlers: StepHandler[] = [
 				world.page
 					.locator("#input-area")
 					.getByTestId(
-						/^(composer-harness-trigger|model-picker-trigger|variant-badge|permission-mode-badge)$/,
+						/^(model-picker-trigger|variant-badge|permission-mode-badge)$/,
 					),
 			).toHaveCount(0);
 		},

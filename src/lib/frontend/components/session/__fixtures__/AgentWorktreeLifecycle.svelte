@@ -4,7 +4,7 @@
 
 	// The story owns the session write: components may not speak the transport's vocabulary.
 	let { presentation, setWorktree }: {
-		presentation: "word" | "control" | "row";
+		presentation: "word" | "control";
 		// Optional so the fixture stays assignable to the GitIdentity story type.
 		setWorktree?: (entered: boolean) => void;
 	} = $props();

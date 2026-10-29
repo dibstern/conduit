@@ -2,7 +2,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { DESKTOP_VIEWPORT, PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
-	openComposerMoreSheet,
+	openModelPicker,
 	requireRpcControl,
 	setSessionRowStatus,
 } from "./shared.js";
@@ -11,18 +11,18 @@ import {
 const BUTTON = 34;
 const CONTROL = 30;
 const iconsControls = {
-	harness: "composer-harness-trigger",
+	harness: "model-picker-trigger",
 	model: "model-picker-trigger",
 	effort: "variant-badge",
 	mode: "permission-mode-badge",
 } as const;
 const phoneRows = {
-	Harness: "composer-harness-trigger",
-	Account: "composer-more-account",
-	Model: "composer-more-model",
-	Effort: "composer-more-effort",
-	Permissions: "composer-more-mode",
-	Checkout: "composer-checkout",
+	Harness: "picker-harness-section",
+	Account: "picker-account-section",
+	Model: "picker-row-model",
+	Effort: "picker-row-effort",
+	Permissions: "picker-row-permissions",
+	Checkout: "picker-row-checkout",
 } as const;
 
 async function box(locator: Locator) {
@@ -347,20 +347,18 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 	},
 
 	{
-		name: "open phone composer sheet",
-		match: /^I open the phone composer sheet$/,
+		name: "open phone Session panel",
+		match: /^I open the phone Session panel$/,
 		run: async ({ world }) => {
-			await openComposerMoreSheet(world.page);
+			await openModelPicker(world.page);
 		},
 	},
 	{
-		name: "close phone composer sheet",
-		match: /^I close the phone composer sheet$/,
+		name: "close phone Session panel",
+		match: /^I close the phone Session panel$/,
 		run: async ({ world }) => {
 			await world.page.keyboard.press("Escape");
-			await expect(world.page.getByTestId("composer-more-sheet")).toHaveCount(
-				0,
-			);
+			await expect(world.page.getByTestId("model-picker")).toHaveCount(0);
 			await expect(
 				world.page.getByTestId(
 					/^(model-picker-trigger|composer-words-sheet-trigger)$/,
@@ -369,24 +367,28 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert phone composer sheet is closed",
-		match: /^the phone composer sheet is closed$/,
+		name: "assert phone Session panel is closed",
+		match: /^the phone Session panel is closed$/,
 		run: async ({ world }) => {
-			await expect(world.page.getByTestId("composer-more-sheet")).toHaveCount(
-				0,
-			);
+			await expect(world.page.getByTestId("model-picker")).toHaveCount(0);
 		},
 	},
 	{
-		name: "tap phone composer sheet row",
+		name: "tap phone Session panel row",
 		match:
-			/^I tap the phone composer (Harness|Account|Model|Effort|Permissions|Checkout) row$/,
+			/^I tap the phone Session panel (Harness|Account|Model|Effort|Permissions|Checkout) row$/,
 		run: async ({ world, match }) => {
-			await openComposerMoreSheet(world.page);
-			await world.page
-				.getByTestId("composer-more-sheet")
-				.getByTestId(phoneRows[match[1] as keyof typeof phoneRows])
-				.click();
+			await openModelPicker(world.page);
+			const row = world.page
+				.getByTestId("model-picker")
+				.getByTestId(phoneRows[match[1] as keyof typeof phoneRows]);
+			if (match[1] === "Harness") {
+				await row.locator('[aria-checked="true"]').focus();
+			} else if (match[1] === "Account" || match[1] === "Effort") {
+				await row.focus();
+			} else {
+				await row.click();
+			}
 		},
 	},
 	{
@@ -399,15 +401,42 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert phone composer row value",
-		match: /^the phone composer (Account|Effort|Permissions) row reads (.+)$/,
+		name: "assert phone Session panel row value",
+		match:
+			/^the phone Session panel (Account|Effort|Permissions) row reads (.+)$/,
 		run: async ({ world, match }) => {
-			const row = world.page
-				.getByTestId("composer-more-sheet")
-				.getByTestId(phoneRows[match[1] as "Effort" | "Permissions"]);
-			await expect(row.locator('[data-part="value"]')).toHaveText(
-				match[2] ?? "",
+			const picker = world.page.getByTestId("model-picker");
+			const value = match[2] ?? "";
+			if (
+				match[1] === "Permissions" &&
+				!(await picker.getByTestId("picker-row-permissions").isVisible())
+			) {
+				await expect(
+					picker.locator(
+						'[data-testid^="picker-permission-"][aria-pressed="true"]',
+					),
+				).toContainText(value);
+				return;
+			}
+			const row = picker.getByTestId(
+				phoneRows[match[1] as "Account" | "Effort" | "Permissions"],
 			);
+			await expect(row).toBeVisible();
+			if (match[1] === "Effort") {
+				const options = row.getByRole("radio");
+				if ((await options.count()) === 0)
+					await expect(row).toContainText(value);
+				else if (value === "Default")
+					await expect(row.locator('[aria-checked="true"]')).toHaveCount(0);
+				else
+					await expect(
+						row.getByRole("radio", { name: value, exact: true }),
+					).toBeChecked();
+			} else if (match[1] === "Account") {
+				await expect(row.locator('[aria-checked="true"]')).toContainText(value);
+			} else {
+				await expect(row).toContainText(value);
+			}
 		},
 	},
 	{
@@ -501,8 +530,6 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(layout.getByTestId("permission-mode-badge")).toHaveText("");
 			await expect(layout.getByTestId("variant-badge")).toBeVisible();
 			await expect(layout.getByTestId("variant-badge")).toHaveText("");
-			for (const id of ["composer-more", "composer-harness-trigger"])
-				await expect(layout.getByTestId(id)).toHaveCount(0);
 			const input = await box(world.page.locator("#input"));
 			const model = await box(layout.getByTestId("model-picker-trigger"));
 			expect(input.y + input.height).toBeLessThanOrEqual(model.y + 1);
@@ -514,13 +541,13 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert phone composer sheet rows and geometry",
+		name: "assert phone Session panel sections, rows and geometry",
 		match:
-			/^the phone composer sheet has separate Harness, Account, Model, Effort, Permissions and Checkout rows$/,
+			/^the phone Session panel has Harness and Account sections and Model, Context, Effort, Agent, Permissions and Checkout rows$/,
 		run: async ({ world }) => {
-			const sheet = world.page.getByTestId("composer-more-sheet");
+			const sheet = world.page.getByTestId("model-picker");
 			await expect(
-				sheet.getByRole("heading", { name: "Composer", exact: true }),
+				sheet.getByRole("heading", { name: "Session", exact: true }),
 			).toBeVisible();
 			const viewport = world.page.viewportSize();
 			if (!viewport || viewport.width >= 768)
@@ -535,65 +562,60 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					);
 				})
 				.toBe(true);
-			expect(
-				await sheet.locator('[data-part="label"]').allTextContents(),
-			).toEqual(Object.keys(phoneRows));
 			for (const id of Object.values(phoneRows)) {
 				const row = sheet.getByTestId(id);
 				await expect(row).toBeVisible();
-				expect((await box(row)).height).toBeGreaterThanOrEqual(44);
-				await expect(row.locator("svg").last()).toBeVisible();
+				expect((await box(row)).height).toBeGreaterThanOrEqual(50);
 			}
-			await expect(sheet.getByTestId("composer-harness-trigger")).toContainText(
+			await expect(sheet.getByTestId("picker-harness-section")).toContainText(
 				"Claude",
 			);
 			await expect(
 				sheet
-					.getByTestId("composer-more-account")
-					.locator('[data-part="value"]'),
-			).toHaveText(/\S/);
-			await expect(sheet.getByTestId("composer-more-model")).toContainText(
+					.getByTestId("picker-account-section")
+					.locator('[aria-checked="true"]'),
+			).toContainText(/\S/);
+			await expect(sheet.getByTestId("picker-row-model")).toContainText(
 				"Sonnet 5",
 			);
-			await expect(sheet.getByTestId("composer-more-model")).toContainText(
+			await expect(sheet.getByTestId("picker-row-context")).toContainText(
 				"200K",
 			);
 			await expect(
-				sheet
-					.getByTestId("composer-more-effort")
-					.locator('[data-part="value"]'),
-			).toHaveText(/\S/);
-			await expect(
-				sheet.getByTestId("composer-more-mode").locator('[data-part="value"]'),
-			).toHaveText("Ask before edits");
-			await expect(sheet.getByTestId("composer-checkout")).toContainText(
+				sheet.getByTestId("picker-row-effort").getByRole("radiogroup"),
+			).toBeVisible();
+			await expect(sheet.getByTestId("picker-row-agent")).toBeVisible();
+			await expect(sheet.getByTestId("picker-row-permissions")).toContainText(
+				"Ask before edits",
+			);
+			await expect(sheet.getByTestId("picker-row-checkout")).toContainText(
 				"account-chip",
 			);
 		},
 	},
 	{
-		name: "assert composer picker replaces phone sheet",
-		match: /^the phone composer sheet gives way to the picker$/,
+		name: "assert phone Session panel remains open",
+		match: /^the phone Session panel remains open$/,
 		run: async ({ world }) => {
-			await expect(world.page.getByTestId("composer-more-sheet")).toHaveCount(
-				0,
-			);
 			await expect(world.page.getByTestId("model-picker")).toBeVisible();
 		},
 	},
 	{
-		name: "assert phone sheet remains under its menu",
-		match:
-			/^the phone composer sheet keeps the (Permissions|Checkout) menu above it$/,
+		name: "assert phone Session panel shows its choices",
+		match: /^the phone Session panel shows (Permissions|Checkout) choices$/,
 		run: async ({ world, match }) => {
-			await expect(world.page.getByTestId("composer-more-sheet")).toBeVisible();
+			const picker = world.page.getByTestId("model-picker");
+			await expect(picker).toBeVisible();
 			await expect(
-				world.page.getByTestId(
-					match[1] === "Permissions"
-						? "permission-mode-dropdown"
-						: "composer-checkout-menu",
-				),
+				picker.getByRole("heading", { name: match[1] ?? "", exact: true }),
 			).toBeVisible();
+			await expect(picker.getByTestId("picker-back")).toBeVisible();
+			if (match[1] === "Permissions")
+				await expect(picker.getByTestId("picker-permission-ask")).toBeVisible();
+			else
+				await expect(
+					picker.getByTestId("picker-worktree").first(),
+				).toBeVisible();
 		},
 	},
 	{
@@ -614,75 +636,80 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert phone composer warning dot",
-		match: /^the phone composer amber dot is (visible|hidden)$/,
+		name: "assert phone checkout warning mark",
+		match: /^the phone checkout warning mark is (visible|hidden)$/,
 		run: async ({ world, match }) => {
-			const dot = world.page.getByTestId("composer-more-attention");
+			const dot = world.page
+				.getByTestId("composer-checkout")
+				.getByTestId("workspace-notice-indicator");
 			if (match[1] === "hidden") {
 				await expect(dot).toHaveCount(0);
 				return;
 			}
 			await expect(dot).toBeVisible();
-			await expectSquare(dot, 6);
-			const warning = await dot.evaluate((element) => {
-				const probe = document.createElement("span");
-				probe.style.color = "var(--color-status-ask)";
-				element.append(probe);
-				const colour = getComputedStyle(probe).color;
-				probe.remove();
-				return colour;
-			});
-			await expect(dot).toHaveCSS("background-color", warning);
+			await expect(dot.locator("svg")).toBeVisible();
+			await expect(dot).toHaveAttribute("aria-label", /\S/);
 		},
 	},
 	{
-		name: "assert phone composer warning and actions",
+		name: "assert phone Session panel checkout notice and actions",
 		match:
-			/^the phone composer warning row reports (.+) and offers Move and Dismiss$/,
+			/^the phone Session panel checkout notice reports (.+) and offers (Move|Retry move) and Dismiss$/,
 		run: async ({ world, match }) => {
-			const warning = world.page
-				.getByTestId("composer-more-sheet")
-				.getByTestId("composer-checkout-warning");
+			const picker = world.page.getByTestId("model-picker");
+			await expect(picker.getByTestId("picker-checkout-warning")).toBeVisible();
+			const warning = picker
+				.getByTestId("picker-checkout-notice")
+				.filter({ hasText: match[1] ?? "" })
+				.first();
 			await expect(warning).toContainText(match[1] ?? "");
-			await expect(warning).toHaveCSS("flex-wrap", "wrap");
 			const colour = await warning.evaluate((element) => {
 				const probe = document.createElement("span");
-				probe.style.color = "var(--color-status-ask)";
+				probe.style.color = "var(--color-warning)";
 				element.append(probe);
 				const resolved = getComputedStyle(probe).color;
 				probe.remove();
 				return resolved;
 			});
 			await expect(warning).toHaveCSS("color", colour);
-			for (const id of ["workspace-hint-move", "workspace-hint-dismiss"]) {
+			for (const id of [
+				"picker-checkout-notice-move",
+				"picker-checkout-notice-dismiss",
+			]) {
 				const button = warning.getByTestId(id);
 				await expect(button).toBeVisible();
-				await expect(button).toHaveCSS("border-radius", "7px");
-				await expect(button).toHaveCSS("border-top-width", "1px");
+				await expect(button).toHaveText(
+					id.endsWith("dismiss") ? "Dismiss" : (match[2] ?? ""),
+				);
 			}
 		},
 	},
 	{
-		name: "choose phone composer warning action",
-		match: /^I choose (Move|Dismiss) in the phone composer warning row$/,
+		name: "choose phone Session panel checkout notice action",
+		match:
+			/^I choose (Move|Retry move|Dismiss) in the phone Session panel checkout notice$/,
 		run: async ({ world, match }) => {
 			await world.page
-				.getByTestId("composer-more-sheet")
-				.getByTestId("composer-checkout-warning")
+				.getByTestId("model-picker")
+				.getByTestId("picker-checkout-notice")
+				.first()
 				.getByTestId(
-					match[1] === "Move"
-						? "workspace-hint-move"
-						: "workspace-hint-dismiss",
+					match[1] === "Dismiss"
+						? "picker-checkout-notice-dismiss"
+						: "picker-checkout-notice-move",
 				)
 				.click();
 		},
 	},
 	{
-		name: "assert phone composer workspace warning is absent",
-		match: /^the phone composer warning row is absent$/,
+		name: "assert phone Session panel checkout notice is absent",
+		match: /^the phone Session panel checkout notice is absent$/,
 		run: async ({ world }) => {
 			await expect(
-				world.page.getByTestId("composer-checkout-warning"),
+				world.page.getByTestId("picker-checkout-notice"),
+			).toHaveCount(0);
+			await expect(
+				world.page.getByTestId("picker-checkout-warning"),
 			).toHaveCount(0);
 		},
 	},
@@ -726,14 +753,14 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 				box(area.locator("#input-row")),
 			]);
 			expect(contextBox.y + contextBox.height).toBeLessThanOrEqual(border.y);
-			await openComposerMoreSheet(world.page);
+			await openModelPicker(world.page);
 			await expect(
 				world.page
-					.getByTestId("composer-more-sheet")
-					.getByTestId("composer-checkout"),
+					.getByTestId("model-picker")
+					.getByTestId("picker-row-checkout"),
 			).toHaveCount(0);
 			await expect(
-				world.page.getByTestId("composer-checkout-warning"),
+				world.page.getByTestId("picker-checkout-notice"),
 			).toHaveCount(0);
 		},
 	},
@@ -769,9 +796,6 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const layout = world.page.getByTestId("composer-layout");
 			await expect(layout).toHaveAttribute("data-rows", "2");
-			await expect(layout.getByTestId("composer-harness-trigger")).toHaveCount(
-				0,
-			);
 			await expect(layout.getByTestId("model-picker-trigger")).toHaveCount(1);
 			await expect(
 				layout.getByTestId("model-picker-trigger").getByTestId("harness-logo"),
@@ -1035,11 +1059,6 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 				);
 			await expect(trigger.getByTestId("harness-logo")).toBeVisible();
 			await expect(trigger.getByTestId("model-chip-chevron")).toBeVisible();
-			await expect(
-				world.page
-					.getByTestId("composer-layout")
-					.getByTestId("composer-harness-trigger"),
-			).toHaveCount(0);
 		},
 	},
 	{

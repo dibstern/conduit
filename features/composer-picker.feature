@@ -484,7 +484,7 @@ Examples:
   | baseline                             | threshold |
   | composer-picker-context-static-phone | 98        |
 
-Scenario Outline: phone Default starts unselected and xhigh persists through the composer sheet
+Scenario Outline: phone Default starts unselected and xhigh persists through the Session panel
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -495,9 +495,9 @@ Scenario Outline: phone Default starts unselected and xhigh persists through the
   When I select effort xhigh in the picker
   Then the picker effort xhigh is selected while the root remains open
   When I close the model picker
-  And I open the phone composer sheet
-  Then the phone composer Effort row reads xhigh
-  When I tap the phone composer Effort row
+  And I open the phone Session panel
+  Then the phone Session panel Effort row reads xhigh
+  When I tap the phone Session panel Effort row
   Then the picker effort xhigh is selected while the root remains open
 
 Examples:

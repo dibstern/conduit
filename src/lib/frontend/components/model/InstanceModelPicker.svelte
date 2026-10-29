@@ -55,9 +55,8 @@
 	import type { AgentInfo, Immutable, InstanceStatus, ModelInfo } from "../../types.js";
 	import Surface from "../ui/Surface.svelte";
 
-	let { variant = "icons", phoneControls, phoneMode }: {
+	let { variant = "icons", phoneMode }: {
 		variant?: "icons" | "words" | undefined;
-		phoneControls?: Snippet<[rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>]> | undefined;
 		phoneMode?: Snippet | undefined;
 	} = $props();
 
@@ -755,11 +754,10 @@
 	</SheetChrome>
 {/snippet}
 
-{#snippet modelTrigger({ props, attention = false }: { props: Record<string, unknown>; attention?: boolean })}
+{#snippet modelTrigger()}
 	{#snippet summary()}
 		{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={variant === "words" ? 15 : 18} spinning={selectedLogoSpinning} />{/if}
 		<span class="model-label min-w-0 truncate">{displayName}</span>
-		{#if phone && attention}<span data-testid="composer-more-attention" class="size-[6px] shrink-0 rounded-full bg-status-ask" aria-hidden="true"></span>{/if}
 		{#if contextLabel}<span data-testid="picker-selected-context" class="shrink-0 {variant === 'words' ? '' : 'font-mono text-[11.5px] text-text-muted'}">{contextLabel}</span>{/if}
 		{#if variant === "words"}
 			{@const effortWord = parameters ? parameterEffortWord : effort.current}
@@ -769,7 +767,6 @@
 		<span data-testid="model-chip-chevron" class="inline-flex shrink-0 {variant === 'words' ? 'text-text-dimmer' : 'text-text-muted'}"><Icon name="chevron-down" size={12} /></span>
 	{/snippet}
 	<Button
-		{...props}
 		bind:element={triggerEl}
 		variant={variant === "words" ? "composer-summary" : "composer-model"}
 		size={variant === "words" ? "content" : "composer-chip"}
@@ -786,13 +783,10 @@
 		disabled={sessionLoading}
 		class="model-btn max-w-full {phone && variant === 'words' ? 'w-full' : ''}"
 		title="Switch model"
-		ariaLabel={`${phone ? "Composer options" : "Harness and model"}: ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}, ${wordAccountName}`}
+		ariaLabel={`Harness and model: ${displayName}${contextLabel ? `, context ${contextLabel}` : ""}, ${wordAccountName}`}
 		aria-haspopup="dialog"
-		aria-expanded={phone ? props["aria-expanded"] === "true" || props["aria-expanded"] === true : pickerOpen}
-		onclick={(event) => {
-			if (phone && phoneControls) { if (typeof props["onclick"] === "function") props["onclick"](event); }
-			else togglePicker(event);
-		}}
+		aria-expanded={pickerOpen}
+		onclick={(event) => togglePicker(event)}
 	>
 		{#if variant === "words"}
 			<span data-part="summary" class="inline-flex min-w-0 items-center gap-[5px] rounded-[6px] group-focus-visible/composer-summary:outline-2 group-focus-visible/composer-summary:outline-offset-[3px] group-focus-visible/composer-summary:outline-text">{@render summary()}</span>
@@ -881,55 +875,12 @@
 		{#if effort.options.length > 0 || (sessionState.currentId && effort.current)}
 			<span aria-hidden="true" class="text-text-dimmer">·</span>
 		{/if}
-	{:else if !phone || !phoneControls}
-		{@render modelTrigger({ props: {} })}
+	{:else}
+		{@render modelTrigger()}
 	{/if}
 
-	{#if phone && phoneControls}
-		<!-- Keep the effort owner mounted so Ctrl+T also works with the sheet closed. -->
-		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant="row" wordLabel={parameters ? parameterEffortWord : undefined}>
-			{#snippet children(effortRow, effortControl)}
-				{#snippet rows()}
-					<Button
-						variant="composer-row" size="content"
-						data-testid="composer-harness-trigger"
-						data-instance-id={selectedLogoInstanceId}
-						ariaLabel={`Harness: ${driverLabel(selectedDriver)}, account: ${wordAccountName}. Open harness options`}
-						aria-haspopup="dialog"
-						onclick={(event) => togglePicker(event, "harness")}
-					>
-						<Icon name="box" size={16} class="shrink-0 text-text-dimmer" />
-						<span data-part="label" class="flex-1">Harness</span>
-						<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{driverLabel(selectedDriver)}</span>
-						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
-					</Button>
-					<Button variant="composer-row" size="content" data-testid="composer-more-account" ariaLabel={`Account: ${wordAccountName}. Open account options`} onclick={(event) => togglePicker(event, "account")}>
-						<Icon name="user" size={16} class="shrink-0 text-text-dimmer" />
-						<span data-part="label" class="flex-1">Account</span>
-						<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{wordAccountName}</span>
-						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
-					</Button>
-					<Button
-						variant="composer-row" size="content"
-						data-testid="composer-more-model"
-						ariaLabel={`Model: ${displayName}. Open model options`}
-						aria-haspopup="dialog"
-						onclick={(event) => togglePicker(event, "model")}
-					>
-						{#if selectedDriver}<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={15} spinning={selectedLogoSpinning} />{:else}<Icon name="sparkles" size={16} class="shrink-0 text-text-dimmer" />{/if}
-						<span data-part="label" class="flex-1">Model</span>
-						<span data-part="value" class="flex min-w-0 flex-wrap items-center justify-end gap-x-[7px] text-right text-text-secondary"><span class="truncate">{displayName}</span>{#if contextLabel || contextPercent > 0}<small class="text-[10.5px] {contextWarning ? 'text-warning' : 'text-text-muted'}">{contextLabel}{contextLabel && contextPercent > 0 ? " · " : ""}{contextPercent > 0 ? `${Math.round(contextPercent)}% used` : ""}</small>{/if}</span>
-						<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
-					</Button>
-					{@render effortRow()}
-				{/snippet}
-				{@render phoneControls(rows, modelTrigger)}
-				{#if variant === "icons"}{@render effortControl()}{/if}
-			{/snippet}
-		</ModelVariant>
-	{:else}
-		<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" ? "control" : variant} wordLabel={parameters ? parameterEffortWord : undefined} />
-	{/if}
+	<!-- Phone words include effort in the summary; keep its shortcut owner mounted without another word. -->
+	<ModelVariant bind:this={variantRef} onOpen={closePicker} variant={variant === "icons" ? "control" : phone ? "hidden" : "words"} wordLabel={parameters ? parameterEffortWord : undefined} />
 	{#if variant === "words" && !phone && selectedTraits?.composerModeControl === "agent"}
 		<span aria-hidden="true" class="text-text-dimmer">·</span>
 		<Button

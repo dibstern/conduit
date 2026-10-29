@@ -50,7 +50,7 @@ Scenario Outline: auto-switch and Stop yield phone effort before covering Send
   Then the composer send mode is switch
   And the auto-switch phone footer fits at 320, 393 and 320 pixels
   And the composer region visually matches <baseline> at <threshold> percent
-  When I tap the phone composer Effort row
+  When I tap the phone Session panel Effort row
   Then the icons control opens the picker at Effort
   And the picker is a phone bottom sheet
 
@@ -71,7 +71,7 @@ Scenario Outline: Set goal and Stop yield phone effort before covering permissio
   Then the composer shows goal send controls
   And the goal phone footer fits at 320, 393 and 320 pixels
   And the composer region visually matches <baseline> at <threshold> percent
-  When I tap the phone composer Effort row
+  When I tap the phone Session panel Effort row
   Then the icons control opens the picker at Effort
   And the picker is a phone bottom sheet
 
@@ -115,7 +115,7 @@ Scenario Outline: phone icons composer keeps text above its controls
   And the composer has no standalone agent selector
   And the model chip reads Sonnet 5 with a chevron
   And the phone icons controls show one model chip and the shield
-  And the phone composer amber dot is hidden
+  And the phone checkout warning mark is hidden
   And send is a 34 pixel neutral circle
   And the attach button has no border
   And the composer region visually matches <baseline> at <threshold> percent
@@ -136,14 +136,14 @@ Scenario: holding phone footer effort and tapping checkout open their existing s
   When I hold the phone footer effort control
   Then the icons control opens the picker at Effort
   And the picker is a phone bottom sheet
-  And the phone composer sheet is closed
+  And the phone Session panel remains open
   When I close the model picker
   And I tap the phone footer checkout control
   Then the checkout menu is a phone bottom sheet
   And the composer checkout menu shows conduit and account-chip in full
-  And the phone composer sheet is closed
+  And the phone Session panel is closed
 
-Scenario Outline: the phone model pill opens the Composer sheet
+Scenario Outline: the phone model pill opens the Session panel
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -154,27 +154,27 @@ Scenario Outline: the phone model pill opens the Composer sheet
   And the composer checkout is conduit / account-chip as worktree
   And the mock relay reports context 42 percent
   When I set effort to high
-  And I open the phone composer sheet
-  Then the phone composer sheet has separate Harness, Account, Model, Effort, Permissions and Checkout rows
-  And the phone composer Account row reads personal
-  And the phone composer Effort row reads high
+  And I open the phone Session panel
+  Then the phone Session panel has Harness and Account sections and Model, Context, Effort, Agent, Permissions and Checkout rows
+  And the phone Session panel Account row reads personal
+  And the phone Session panel Effort row reads high
   And the screen region visually matches <baseline> at <threshold> percent
-  When I close the phone composer sheet
+  When I close the phone Session panel
   Then the phone icons controls show one model chip and the shield
 
 Examples:
   | baseline                    | threshold |
   | composer-icons-e1-sheet     | 98        |
 
-Scenario Outline: every phone sheet picker row opens its target
+Scenario Outline: every phone Session panel section or row opens its target
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer uses icons controls
   And the Claude accounts are claude as personal, self as work
   And the composer picker has the Claude catalog
-  When I tap the phone composer <row> row
-  Then the phone composer sheet gives way to the picker
+  When I tap the phone Session panel <row> row
+  Then the phone Session panel remains open
   And the icons control opens the picker at <section>
   When I close the model picker
   Then the shared composer picker is closed
@@ -187,41 +187,43 @@ Examples:
   | Model   | Model   |
   | Effort  | Effort  |
 
-Scenario: the phone model control opens Composer options
+Scenario: the phone model control opens the Session panel
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
+  And the Claude accounts are claude as personal, self as work
   And the composer picker has the Claude catalog
   And the composer checkout is conduit / account-chip as worktree
   When I tap the icons model control
-  Then the phone composer sheet has separate Harness, Account, Model, Effort, Permissions and Checkout rows
+  Then the phone Session panel has Harness and Account sections and Model, Context, Effort, Agent, Permissions and Checkout rows
 
-Scenario: the phone sheet Permissions row opens the existing ranked mode menu
+Scenario: the phone Session panel Permissions row opens the existing ranked mode menu
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And approvals are ask
-  When I tap the phone composer Permissions row
-  Then the phone composer sheet keeps the Permissions menu above it
+  When I tap the phone Session panel Permissions row
+  Then the phone Session panel shows Permissions choices
   And the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
   When I set approvals to auto
   Then the approvals menu is closed
-  And the phone composer Permissions row reads Auto
-  When I close the phone composer sheet
+  And the phone Session panel Permissions row reads Auto
+  When I close the phone Session panel
   Then the phone shield is visible for Auto
 
-Scenario: the phone sheet Checkout row opens checkout details
+Scenario: the phone Session panel Checkout row opens worktree choices
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And the composer checkout is conduit / account-chip as worktree
-  When I tap the phone composer Checkout row
-  Then the phone composer sheet keeps the Checkout menu above it
-  And the composer checkout menu shows conduit and account-chip in full
+  And the checkout worktrees are account-chip at /workspace/conduit and main at /workspace/conduit-main
+  When I tap the phone Session panel Checkout row
+  Then the phone Session panel shows Checkout choices
+  And the picker lists both checkout worktrees with /workspace/conduit checked
 
-Scenario Outline: phone workspace hints keep the shield and amber dot
+Scenario Outline: phone workspace hints keep the shield and checkout warning mark
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -234,38 +236,38 @@ Scenario Outline: phone workspace hints keep the shield and amber dot
   And the session has a workspace hint at /workspace/conduit-chip
   When I set effort to high
   Then the phone shield is visible for Auto
-  And the phone composer amber dot is visible
+  And the phone checkout warning mark is visible
   And the composer region visually matches <closed> at <threshold> percent
   When I tap the approvals shield
   Then the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
   When I set approvals to auto
-  And I open the phone composer sheet
-  Then the phone composer warning row reports Claude is working in ../conduit-chip and offers Move and Dismiss
+  And I open the phone Session panel
+  Then the phone Session panel checkout notice reports working in conduit-chip? and offers Move and Dismiss
   And the screen region visually matches <open> at <threshold> percent
-  When I choose <action> in the phone composer warning row
+  When I choose <action> in the phone Session panel checkout notice
   Then the checkout <action> RPC targets /workspace/conduit-chip
-  And the phone composer warning row is absent
-  And the phone composer amber dot is hidden
+  And the phone Session panel checkout notice is absent
+  And the phone checkout warning mark is hidden
 
 Examples:
   | action  | closed                  | open                       | threshold |
   | Move    | composer-icons-e2-phone | composer-icons-e2-sheet     | 98        |
   | Dismiss | composer-icons-e2-phone | composer-icons-e2-sheet     | 98        |
 
-Scenario: a phone workspace mismatch also keeps the amber dot and warning actions
+Scenario: a phone workspace mismatch also keeps the checkout warning mark and warning actions
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And the composer checkout is conduit / account-chip as worktree
   And the session has a workspace mismatch at /workspace/conduit-chip
-  Then the phone composer amber dot is visible
-  When I open the phone composer sheet
-  Then the phone composer warning row reports ../conduit-chip and offers Move and Dismiss
-  When I choose Move in the phone composer warning row
-  Then the checkout Move RPC targets /workspace/conduit
-  And the phone composer warning row is absent
-  And the phone composer amber dot is hidden
+  Then the phone checkout warning mark is visible
+  When I open the phone Session panel
+  Then the phone Session panel checkout notice reports Workspace mismatch: Claude is working in /workspace/conduit-chip and offers Retry move and Dismiss
+  When I choose Retry move in the phone Session panel checkout notice
+  Then the checkout Retry move RPC targets /workspace/conduit
+  And the phone Session panel checkout notice is absent
+  And the phone checkout warning mark is hidden
 
 Scenario: dismissing a phone workspace mismatch acknowledges its warning locally
   Given the conduit app is served with the connected mockup
@@ -274,15 +276,16 @@ Scenario: dismissing a phone workspace mismatch acknowledges its warning locally
   And the composer picker has the Claude catalog
   And the composer checkout is conduit / account-chip as worktree
   And the session has a workspace mismatch at /workspace/conduit-chip
-  When I open the phone composer sheet
-  And I choose Dismiss in the phone composer warning row
-  Then the phone composer warning row is absent
-  And the phone composer amber dot is hidden
+  When I open the phone Session panel
+  And I choose Dismiss in the phone Session panel checkout notice
+  Then the phone Session panel checkout notice is absent
+  And the phone checkout warning mark is hidden
   And the workspace mismatch stays recorded at /workspace/conduit-chip without a Dismiss RPC
-  When I close the phone composer sheet
-  And I open the phone composer sheet
-  Then the phone composer warning row is absent
-  When I tap the phone composer Checkout row
+  When I close the phone Session panel
+  And I open the phone Session panel
+  Then the phone Session panel checkout notice is absent
+  When I close the phone Session panel
+  And I open the composer checkout menu
   Then the composer checkout menu reports /workspace/conduit-chip and offers Retry move
 
 Scenario: a phone hint and mismatch at the same path have separate Dismiss actions
@@ -293,19 +296,19 @@ Scenario: a phone hint and mismatch at the same path have separate Dismiss actio
   And the composer checkout is conduit / account-chip as worktree
   And the session has a workspace hint at /workspace/conduit-chip
   And the session has a workspace mismatch at /workspace/conduit-chip
-  When I open the phone composer sheet
-  And I choose Dismiss in the phone composer warning row
-  Then the phone composer warning row reports ../conduit-chip and offers Move and Dismiss
-  And the phone composer amber dot is visible
+  When I open the phone Session panel
+  And I choose Dismiss in the phone Session panel checkout notice
+  Then the phone Session panel checkout notice reports working in conduit-chip? and offers Move and Dismiss
+  And the phone checkout warning mark is visible
   And the workspace mismatch stays recorded at /workspace/conduit-chip without a Dismiss RPC
-  When I choose Dismiss in the phone composer warning row
+  When I choose Dismiss in the phone Session panel checkout notice
   Then the checkout Dismiss RPC targets /workspace/conduit-chip
-  And the phone composer warning row is absent
-  And the phone composer amber dot is hidden
+  And the phone Session panel checkout notice is absent
+  And the phone checkout warning mark is hidden
   And the workspace mismatch stays recorded at /workspace/conduit-chip after 1 Dismiss RPC
   When the session has a workspace mismatch at /workspace/conduit-chip
-  Then the phone composer warning row is absent
-  And the phone composer amber dot is hidden
+  Then the phone Session panel checkout notice is absent
+  And the phone checkout warning mark is hidden
   And the workspace mismatch stays recorded at /workspace/conduit-chip after 1 Dismiss RPC
 
 Scenario: changed phone mismatch evidence restores a locally dismissed warning
@@ -315,17 +318,17 @@ Scenario: changed phone mismatch evidence restores a locally dismissed warning
   And the composer picker has the Claude catalog
   And the composer checkout is conduit / account-chip as worktree
   And the session has a workspace mismatch at /workspace/conduit-chip
-  When I open the phone composer sheet
-  And I choose Dismiss in the phone composer warning row
-  Then the phone composer warning row is absent
-  And the phone composer amber dot is hidden
+  When I open the phone Session panel
+  And I choose Dismiss in the phone Session panel checkout notice
+  Then the phone Session panel checkout notice is absent
+  And the phone checkout warning mark is hidden
   When the session has a workspace mismatch at /workspace/conduit-other
-  Then the phone composer warning row reports ../conduit-other and offers Move and Dismiss
-  And the phone composer amber dot is visible
+  Then the phone Session panel checkout notice reports Workspace mismatch: Claude is working in /workspace/conduit-other and offers Retry move and Dismiss
+  And the phone checkout warning mark is visible
   And the workspace mismatch stays recorded at /workspace/conduit-other without a Dismiss RPC
   When the session has a workspace mismatch at /workspace/conduit-chip
-  Then the phone composer warning row reports ../conduit-chip and offers Move and Dismiss
-  And the phone composer amber dot is visible
+  Then the phone Session panel checkout notice reports Workspace mismatch: Claude is working in /workspace/conduit-chip and offers Retry move and Dismiss
+  And the phone checkout warning mark is visible
   And the workspace mismatch stays recorded at /workspace/conduit-chip without a Dismiss RPC
 
 Scenario Outline: every phone permission mode keeps its shield visible
@@ -335,8 +338,8 @@ Scenario Outline: every phone permission mode keeps its shield visible
   And the composer picker has the Claude catalog
   And approvals are <mode>
   Then the phone shield is visible for <label>
-  When I tap the phone composer Permissions row
-  Then the phone composer sheet keeps the Permissions menu above it
+  When I tap the phone Session panel Permissions row
+  Then the phone Session panel shows Permissions choices
   And the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
 
 Examples:

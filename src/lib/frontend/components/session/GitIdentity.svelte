@@ -1,5 +1,4 @@
 <script lang="ts">
-	import type { Snippet } from "svelte";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { getWorkspaceCheckout } from "../../stores/workspace-checkout.svelte.js";
@@ -13,10 +12,9 @@
 	import Modal from "../ui/Modal.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 
-	let { presentation, compact = false, children }: {
-		presentation: "word" | "control" | "row";
+	let { presentation, compact = false }: {
+		presentation: "word" | "control";
 		compact?: boolean | undefined;
-		children?: Snippet<[attention: boolean, checkout: Snippet, warning: Snippet]> | undefined;
 	} = $props();
 	const checkoutState = $derived(getWorkspaceCheckout());
 	const directory = $derived(checkoutState.directory ?? "");
@@ -24,14 +22,13 @@
 	const git = $derived(checkoutState.git);
 	const multiFolder = $derived(folders.length > 1 || folders.some((folder) => folder.shared) || (!git && folders.length > 0));
 	const control = $derived(presentation === "control");
-	const row = $derived(presentation === "row");
 	const phone = $derived(sessionViewState.composerTier === "phone");
 	let identityElement = $state<HTMLButtonElement | HTMLAnchorElement>();
 	const componentId = $props.id();
 	const branchRenameFormId = `${componentId}-branch-rename`;
 	const showBranchRename = $derived(checkoutState.showBranchRename && checkoutState.branchRenameOpener === identityElement);
 	const project = $derived(checkoutState.projectName);
-	const checkout = $derived(checkoutState.checkoutName);
+	const checkout = $derived(phone && compact ? undefined : checkoutState.checkoutName);
 	const label = $derived(checkoutState.label);
 	const operation = $derived(git?.operation ? {
 		rebase: "rebasing", merge: "merging", "cherry-pick": "cherry-picking",
@@ -40,7 +37,7 @@
 	// Phones show one status word: an in-progress operation outranks merged.
 	const showMerged = $derived(git?.merged === true && !(phone && operation));
 	const upstreamMark = $derived([git?.ahead ? `↑${git.ahead}` : "", git?.behind ? `↓${git.behind}` : ""].filter(Boolean).join(" "));
-	const noticeLabels = $derived((row ? checkoutState.rowNotices : checkoutState.notices).map((notice) => notice.label));
+	const noticeLabels = $derived((phone ? checkoutState.rowNotices : checkoutState.notices).map((notice) => notice.label));
 	const noticeLabel = $derived(noticeLabels.join(", "));
 	const projectFloor = $derived(Math.min(project.length, 4.5));
 	const branchFloor = $derived(Math.min(checkout?.length ?? 0, 6.5));
@@ -53,7 +50,7 @@
 			operation ? operation.length : null,
 			showMerged ? 6 : null,
 		].filter((width) => width !== null);
-		const labels = fit === "icon" ? [] : !control && !row && checkout ? [branchFloor] : checkout ? [projectFloor, 1, branchFloor] : [projectFloor];
+		const labels = fit === "icon" ? [] : !control && checkout ? [branchFloor] : checkout ? [projectFloor, 1, branchFloor] : [projectFloor];
 		const widths = [...labels, ...marks];
 		return { ch: widths.reduce((sum, width) => sum + width, 0), px: 12 + 5 * widths.length + (control ? 12 : 0) + (fit === "icon" ? 0 : (noticeLabels.length ? 17 : 0) + (git?.dirty ? 11 : 0)) };
 	}
@@ -63,7 +60,7 @@
 	const fit = $derived.by((): Fit => {
 		const available = room;
 		if (compact) return available === undefined || available >= 66 ? "full" : "icon";
-		if (row || available === undefined || !hundredCh) return "full";
+		if (available === undefined || !hundredCh) return "full";
 		const fits = (candidate: Fit) => {
 			const { ch, px } = floor(candidate);
 			return (ch * hundredCh) / 100 + px <= available;
@@ -74,7 +71,7 @@
 		const { ch, px } = floor(candidate);
 		return `calc(${ch}ch + ${px}px)`;
 	};
-	const minimumWidth = $derived(compact ? "44px" : width(fit));
+	const minimumWidth = $derived(compact ? control ? "44px" : "66px" : width(fit));
 
 	async function copy(text: string, message: string) {
 		try {
@@ -91,19 +88,17 @@
 {/snippet}
 
 {#snippet identity()}
-			{#if !row}
-			<span class="relative flex size-[12px] shrink-0 items-center {presentation === 'word' ? 'text-text-dimmer' : 'text-text-muted'}" data-part={git?.worktree ? "worktree" : undefined} data-icon={!git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
-				{#if git && !git.branch}
+			<span class="relative flex size-[12px] shrink-0 items-center {presentation === 'word' ? 'text-text-dimmer' : 'text-text-muted'}" data-part={git?.worktree ? "worktree" : undefined} data-icon={(phone && compact) || !git ? "folder" : !git.branch ? "commit" : git.worktree ? "worktree" : "branch"}>
+				{#if git && !git.branch && !(phone && compact)}
 					<!-- Compose the commit glyph from the existing circle icon. -->
 					<span class="commit-icon"><Icon name="circle" size={4} /></span>
 				{:else}
-					<Icon name={!git ? "folder" : git.worktree ? "folder-tree" : "git-branch"} size={12} />
+					<Icon name={(phone && compact) || !git ? "folder" : git.worktree ? "folder-tree" : "git-branch"} size={12} />
 				{/if}
 				<!-- Without labels the dirty mark rides the icon; with them it follows the branch. -->
-				{#if git?.dirty && fit === "icon"}{@render dirtyMark("absolute -right-[2px] -bottom-[1px] ring-[1.5px] " + (row ? "ring-bg-surface" : "ring-input-bg"))}{/if}
+				{#if git?.dirty && fit === "icon"}{@render dirtyMark("absolute -right-[2px] -bottom-[1px] ring-[1.5px] ring-input-bg")}{/if}
 			</span>
-			{/if}
-			{#if fit === "full" && ((!compact && (control || row)) || !checkout)}
+			{#if fit === "full" && ((!compact && control) || !checkout)}
 				<span data-part="project" class="shrink-[100000000] truncate text-text-muted" style={`min-width: ${compact ? '0' : `calc(${projectFloor}ch + 1px)`}`} title={project}>{project}</span>
 				{#if checkout}<span class="shrink-0 text-text-dimmer" aria-hidden="true">{control ? "·" : "/"}</span>{/if}
 			{/if}
@@ -119,7 +114,7 @@
 				{#if !compact && showMerged}<span data-part="merged" class="shrink-0 text-success">merged</span>{/if}
 			{/if}
 			{#if noticeLabel}
-				<span data-part="warning" class="text-warning {fit === 'icon' && !row ? 'absolute right-[2px] top-[2px]' : 'inline-flex shrink-0'}" role="img" aria-label={noticeLabel} title={noticeLabel} data-testid="workspace-notice-indicator"><Icon name="circle-alert" size={12} /></span>
+				<span data-part="warning" class="text-warning {fit === 'icon' ? 'absolute right-[2px] top-[2px]' : 'inline-flex shrink-0'}" role="img" aria-label={noticeLabel} title={noticeLabel} data-testid="workspace-notice-indicator"><Icon name="circle-alert" size={12} /></span>
 			{/if}
 {/snippet}
 
@@ -157,23 +152,13 @@
 {#snippet checkoutMenu()}
 <Menu presentation={phone ? "sheet" : "popover"} side="top" align="end" ariaLabel="Checkout" class={phone ? undefined : "w-[320px]"} data-testid="composer-checkout-menu" onopenchange={(open) => { if (!open) checkoutState.showWorktrees = false; }} onCloseAutoFocus={(event) => { if (showBranchRename) event.preventDefault(); }}>
 	{#snippet trigger({ props })}
-		{#if row}
-			<Button {...props} bind:element={identityElement} variant="composer-row" size="content"
-				title={label} ariaLabel={`Checkout: ${[label, ...noticeLabels].join(", ")}`} data-testid="composer-checkout">
-				<Icon name="git-branch" size={16} class="shrink-0 text-text-dimmer" />
-				<span data-part="label" class="flex-1">Checkout</span>
-				<span data-part="value" class="flex min-w-0 items-center justify-end gap-[5px] text-right text-text-secondary">{@render identity()}</span>
-				<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
-			</Button>
-		{:else}
 			<!-- A grid track gives the pill an honest minimum: flex parents read a truncating label's minimum as its full text width, so the bar would overflow instead of shrinking the title. -->
 			<!-- The wrapper, ruler and button share a font so the ch floors agree. -->
-			<span class="git-pill {control ? 'git-control font-mono' : 'git-word font-sans'} text-[11.5px] inline-grid" class:compact style={`grid-template-columns: minmax(${minimumWidth}, max-content)`} style:width={!control && !row && fit === "icon" ? width("full") : undefined} bind:clientWidth={room}>{#if !row}<span class="ruler" aria-hidden="true" bind:clientWidth={hundredCh}></span>{/if}<Button {...props} bind:element={identityElement} variant={control ? "composer-checkout" : "composer-word"} size={control ? "composer-chip" : "content"} touchTarget align="start" class="max-w-full"
+			<span class="git-pill {control ? 'git-control font-mono' : 'git-word font-sans'} text-[11.5px] inline-grid" class:compact style={`grid-template-columns: minmax(${minimumWidth}, max-content)`} style:width={!control && fit === "icon" ? width("full") : undefined} bind:clientWidth={room}><span class="ruler" aria-hidden="true" bind:clientWidth={hundredCh}></span><Button {...props} bind:element={identityElement} variant={control ? "composer-checkout" : "composer-word"} size={control ? "composer-chip" : "content"} touchTarget align="start" class="max-w-full"
 				style={`min-width: ${minimumWidth}`}
 				title={label} ariaLabel={`Checkout: ${[label, ...noticeLabels].join(", ")}`} data-testid="composer-checkout">
 				{@render identity()}
 			</Button></span>
-		{/if}
 	{/snippet}
 	{#if multiFolder}
 		<MenuGroup label="Checkout">
@@ -274,19 +259,6 @@
 </Menu>
 {/snippet}
 
-{#snippet warningRow()}
-	{#if checkoutState.warningPath}
-		<div data-testid="composer-checkout-warning" class="flex min-h-[50px] flex-wrap items-center gap-x-[10px] gap-y-[6px] py-[8px] text-[11.5px] text-warning">
-			<span class="flex min-w-0 items-center gap-[5px]"><span class="inline-flex shrink-0"><Icon name="circle-alert" size={12} /></span><span class="min-w-0 break-all">Claude is working in {checkoutState.warningDisplayPath}</span></span>
-			<span class="ml-auto flex shrink-0 gap-[6px]">
-				{#each checkoutState.warningNotice?.actions ?? [] as action (action.kind)}
-					<Button variant="ghost" size="content" tone="inherit" hoverFill="none" class="rounded-[7px] border border-border px-[10px] py-[3px] text-[11.5px] font-normal text-text" disabled={checkoutState.moving || checkoutState.dismissing} data-testid={`workspace-hint-${action.kind}`} onclick={() => void action.run()}>{action.kind === "move" ? "Move" : action.label}</Button>
-				{/each}
-			</span>
-		</div>
-	{/if}
-{/snippet}
-
 <Modal open={showBranchRename} title="Rename branch" description="Rename the branch in every worktree created for this session." size="sm" placement={phone ? "sheet" : "center"} dismissible={!checkoutState.renamingBranch} showClose={!checkoutState.renamingBranch} onclose={() => { if (!checkoutState.renamingBranch) checkoutState.showBranchRename = false; }} returnFocus={() => identityElement ?? null}>
 	<form id={branchRenameFormId} onsubmit={(event) => { event.preventDefault(); void checkoutState.renameBranch(); }} aria-busy={checkoutState.renamingBranch}>
 		<Field label="Branch name" error={checkoutState.branchRenameError}>
@@ -299,18 +271,14 @@
 	{/snippet}
 </Modal>
 
-{#if children}
-	{@render children(noticeLabels.length > 0, checkoutMenu, warningRow)}
-{:else}
-	{@render checkoutMenu()}
-{/if}
+{@render checkoutMenu()}
 
 <style>
 	/* The cap sits on the grid wrapper, the flex item: on the button it left the wrapper sized to the full label, with dead space after the pill. */
 	.git-pill { max-width: 100%; flex-shrink: 1; }
 	/* A stable slot measures available room in block, grid and flex parents. Checkout still yields before the model. */
 	.git-pill.git-control { position: relative; width: 100%; flex: 0 1000000 220px; min-width: 30px; max-width: 220px; justify-content: end; }
-	/* Phone models yield their name first; checkout keeps a readable branch until then. */
+	/* Phone models yield their name first; checkout keeps a readable project until then. */
 	.git-pill.git-control.compact { flex: 0 0 var(--composer-checkout-width, 90px); max-width: 110px; }
 	/* Content-sized, so it sits beside the context %. As an icon it still asks for its full width, or it could never grow back. */
 	.git-pill.git-word { position: relative; flex: 0 1 auto; min-width: 12px; justify-content: end; }

@@ -1,4 +1,4 @@
-<!-- Session approvals: controls and sheet rows open the ranked mode menu. -->
+<!-- Session approvals: controls open the ranked mode menu. -->
 
 <script lang="ts">
 	import Badge from "../ui/Badge.svelte";
@@ -17,7 +17,7 @@
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import { PERMISSION_MODE_LABELS, PERMISSION_MODE_DESCRIPTIONS } from "../../permission-modes.js";
 
-	let { variant = "icons" }: { variant?: "icons" | "words" | "row" | "summary" | undefined } = $props();
+	let { variant = "icons" }: { variant?: "icons" | "words" | "summary" | undefined } = $props();
 
 	let open = $state(false);
 	let autoNormalizationProvider: string | null = null;
@@ -66,7 +66,7 @@
 			{variant}
 			loading={approvals.pending}
 			data-hot={currentMode === "acceptEdits" || currentMode === "auto" || currentMode === "full" ? "true" : undefined}
-			data-testid={variant === "words" ? "composer-word-approvals" : variant === "row" ? "composer-more-mode" : "permission-mode-badge"}
+			data-testid={variant === "words" ? "composer-word-approvals" : "permission-mode-badge"}
 		/>
 	{/snippet}
 

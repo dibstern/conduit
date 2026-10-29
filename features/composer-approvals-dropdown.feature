@@ -18,7 +18,7 @@ Examples:
 Scenario: Claude-only modes are absent from an OpenCode phone menu
   Given the viewport is a phone
   And a session already exists on the OpenCode harness
-  When I tap the phone composer Permissions row
+  When I open the approvals menu
   Then the approvals menu is ranked ask, acceptEdits, full
   And the approvals dropdown does not offer auto
   And the approvals dropdown does not offer plan
@@ -28,11 +28,11 @@ Scenario Outline: the Claude phone Permissions row changes the mode and keeps th
   Given the viewport is a phone
   And a session already exists on the Claude harness
   And approvals are ask
-  When I tap the phone composer Permissions row
+  When I tap the phone Session panel Permissions row
   And I set approvals to <mode>
-  Then the phone composer Permissions row reads <label>
+  Then the phone Session panel Permissions row reads <label>
   And the approvals menu is closed
-  When I close the phone composer sheet
+  When I close the phone Session panel
   Then the phone shield is visible for <label>
 
 Examples:
@@ -48,13 +48,11 @@ Scenario Outline: the OpenCode phone Permissions row selects Ask, Edits and Full
   Given the viewport is a phone
   And a session already exists on the OpenCode harness
   And approvals are ask
-  When I tap the phone composer Permissions row
+  When I open the approvals menu
   Then the approvals menu is ranked ask, acceptEdits, full
   When I set approvals to <mode>
-  Then the phone composer Permissions row reads <label>
-  And the approvals menu is closed
-  When I close the phone composer sheet
   Then the phone shield is visible for <label>
+  And the approvals menu is closed
 
 Examples:
   | mode        | label       | visible |
@@ -67,9 +65,9 @@ Scenario: the phone mode menu offers ranked descriptions without changing Ask on
   And a session already exists on the Claude harness
   And approvals are ask
   Then the phone shield is visible for Ask before edits
-  When I tap the phone composer Permissions row
+  When I tap the phone Session panel Permissions row
   Then the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
-  And the phone composer Permissions row reads Ask before edits
+  And the phone Session panel Permissions row reads Ask before edits
   And the approvals option dontAsk describes Denies anything not pre-approved
   And the approvals option plan describes Reads and plans, changes nothing
   And the approvals option ask describes The default
@@ -78,7 +76,7 @@ Scenario: the phone mode menu offers ranked descriptions without changing Ask on
   And the approvals option full describes Never asks. Use in a sandbox
   And only dontAsk, plan and auto carry Claude tags
   When I set approvals to full
-  Then the phone composer Permissions row reads Full access
+  Then the phone Session panel Permissions row reads Full access
   And the approvals menu is closed
 
 Scenario Outline: an auto-approving session is visibly flagged

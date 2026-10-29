@@ -1246,10 +1246,10 @@ test.describe("session composer owns its stored pick", () => {
 			browser.rpc.GetModels({ sessionId: sessionB }),
 		);
 		const mode = page.locator(
-			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible, [data-testid="composer-more-mode"]:visible',
+			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible, [data-testid="picker-row-permissions"]:visible',
 		);
 		const phoneWords = page.getByTestId("composer-words-sheet-trigger");
-		let openedComposer = false;
+		let openedPanel = false;
 		const older = observed.hold("GetModels", sessionA, { once: true });
 		let stage = "A-row-read";
 		let before: string | null | undefined;
@@ -1290,11 +1290,13 @@ test.describe("session composer owns its stored pick", () => {
 					phoneWords.getByText("full", { exact: true }),
 				).toBeVisible();
 			if (!(await mode.isVisible())) {
-				await picker.click();
-				openedComposer = true;
+				await openPickerRoot(page, picker);
+				openedPanel = true;
 			}
 			await expect(mode).toHaveAccessibleName(
-				"Permissions: Full access. Open options",
+				openedPanel
+					? /Permissions.*Full access/
+					: "Permissions: Full access. Open options",
 			);
 			stage = "A-stale-delivered";
 			older.release();
@@ -1307,9 +1309,11 @@ test.describe("session composer owns its stored pick", () => {
 			);
 			after = await picker.getAttribute("data-shown-permission-mode");
 			await expect(mode).toHaveAccessibleName(
-				"Permissions: Full access. Open options",
+				openedPanel
+					? /Permissions.*Full access/
+					: "Permissions: Full access. Open options",
 			);
-			if (openedComposer) await page.keyboard.press("Escape");
+			if (openedPanel) await page.keyboard.press("Escape");
 			if (await phoneWords.isVisible())
 				await expect(
 					phoneWords.getByText("full", { exact: true }),
@@ -1956,19 +1960,29 @@ async function selectFullPermission(page: Page): Promise<void> {
 	const trigger = page.locator(
 		'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible',
 	);
-	if (await trigger.count()) {
+	const panel = (await trigger.count()) === 0;
+	if (!panel) {
 		await trigger.click();
 	} else {
-		await page.locator(pickerSelector).click();
-		await page.getByTestId("composer-more-mode").click();
+		await openPickerRoot(page, page.locator(pickerSelector));
+		await page.getByTestId("picker-row-permissions").click();
 	}
-	await page.getByTestId("permission-mode-option-full").click();
-	await expect(
-		page.getByRole("button", {
-			name: "Permissions: Full access. Open options",
-			exact: true,
-		}),
-	).toBeVisible();
+	await page
+		.getByTestId(
+			panel ? "picker-permission-full" : "permission-mode-option-full",
+		)
+		.click();
+	if (panel)
+		await expect(page.getByTestId("picker-row-permissions")).toContainText(
+			"Full access",
+		);
+	else
+		await expect(
+			page.getByRole("button", {
+				name: "Permissions: Full access. Open options",
+				exact: true,
+			}),
+		).toBeVisible();
 	await page.keyboard.press("Escape");
 	await expect(page.locator(pickerSelector)).toHaveAttribute(
 		"data-shown-permission-mode",

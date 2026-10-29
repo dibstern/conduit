@@ -3534,12 +3534,12 @@ test("story 16: composer account cards switch the session, not the project", asy
 		await expect(bar.locator("[data-account]")).toHaveCount(0);
 		await page.screenshot({ path: join(artifacts, "01-composer.png") });
 
-		// Phones reach the account through the Composer sheet.
+		// Phones expose accounts directly in the Session panel.
 		const openAccounts = async () => {
 			if ((page.viewportSize()?.width ?? 0) < 768) {
 				await page.getByTestId("composer-words-sheet-trigger").click();
-				await page.getByTestId("composer-more-account").click();
 			} else await page.getByTestId("composer-word-harness").click();
+			await expect(page.getByTestId("picker-account-section")).toBeVisible();
 		};
 		await openAccounts();
 		const row = page.getByTestId(`picker-account-${target.id}`);
