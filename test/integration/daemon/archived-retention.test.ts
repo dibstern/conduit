@@ -162,7 +162,9 @@ it("reclaims a root-only archived tree with unarchived side threads and subagent
 				),
 			);
 			evidence["seedMs"] = performance.now() - fixtureStarted;
-			await harness.restart();
+			await harness.restart({
+				serviceEnvironment: { CONDUIT_AUTO_SETTLE_SWEEP_INTERVAL_MS: "1000" },
+			});
 			const browser = await harness.connect();
 			await Effect.runPromise(
 				browser.rpc.SetAutoSettleSetting({ autoSettleAfterDays: null }),
@@ -201,7 +203,7 @@ it("reclaims a root-only archived tree with unarchived side threads and subagent
 					expect(snapshot().sourceEvents).toBe(1);
 					expect(snapshot().fork?.forked_from).toBeNull();
 				},
-				{ timeout: 75_000, interval: 500 },
+				{ timeout: 10_000, interval: 100 },
 			);
 			evidence["elapsedMs"] = Date.now() - started;
 			evidence["after"] = snapshot();
@@ -226,7 +228,7 @@ it("reclaims a root-only archived tree with unarchived side threads and subagent
 			);
 		}
 	}
-}, 100_000);
+}, 30_000);
 
 it.each([
 	"new descendant",

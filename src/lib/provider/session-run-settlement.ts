@@ -8,6 +8,39 @@ export interface RunSettlementOwner {
 	readonly runId: string;
 }
 
+/** After confirmed runner loss, recover its children from durable tool links.
+ *  Fork-inherited links are skipped: they point at the source runner's children. */
+export function settleToolChildRuns<A, E, R>(
+	sql: SqlClient.SqlClient,
+	parentSessionId: string,
+	reason: string,
+	publish: (events: readonly ProviderRuntimeEvent[]) => Effect.Effect<A, E, R>,
+) {
+	return Effect.gen(function* () {
+		const runs = yield* sql<{ session_id: string; runId: string }>`
+			WITH RECURSIVE children(id) AS (
+				SELECT ${parentSessionId}
+				UNION
+				SELECT json_extract(part.metadata, '$.childSessionId')
+				FROM children CROSS JOIN messages message ON message.session_id = children.id
+				CROSS JOIN message_parts part ON part.message_id = message.id
+				WHERE message.is_inherited = 0 AND part.type = 'tool'
+					AND json_extract(part.metadata, '$.childSessionId') IS NOT NULL
+			)
+			SELECT run.session_id, run.id AS runId FROM provider_runs run
+			WHERE run.status IN ('pending', 'running') AND run.session_id != ${parentSessionId}
+				AND run.session_id IN (SELECT id FROM children)`;
+		const children = new Map<string, RunSettlementOwner[]>();
+		for (const run of runs) {
+			const owners = children.get(run.session_id) ?? [];
+			owners.push({ runId: run.runId });
+			children.set(run.session_id, owners);
+		}
+		for (const [sessionId, owners] of children)
+			yield* settleSessionRuns(sql, sessionId, reason, publish, { owners });
+	});
+}
+
 export const sessionRunOwnersQuery = (
 	sql: SqlClient.SqlClient,
 	sessionId: string,

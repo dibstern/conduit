@@ -47,7 +47,7 @@ function usageFailure(error: unknown, stderr: string): UsageRead {
 				windows: [],
 				reason: "Claude account authentication failed",
 			}
-		: { status: "unknown", windows: [] };
+		: { status: "unknown", windows: [], reason: "Usage read failed" };
 }
 
 export const makeClaudeUsageReader = (
@@ -68,6 +68,7 @@ export const makeClaudeUsageReader = (
 				);
 			const launch = {
 				configDir: folder,
+				killProcessGroup: true,
 			};
 			return Effect.acquireUseRelease(
 				makeClaudeEmptyQuery(
@@ -89,7 +90,7 @@ export const makeClaudeUsageReader = (
 					}),
 					launch,
 					options.prepareQuery,
-				).pipe(Effect.interruptible),
+				),
 				(resource) =>
 					Effect.gen(function* () {
 						yield* Effect.tryPromise({

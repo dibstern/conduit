@@ -379,7 +379,6 @@ export function isSoloTool(tool: ToolMessage): boolean {
 /** Counts behind the collapsed summary sentence. Files are counted uniquely. */
 export interface TurnStats {
 	tools: number;
-	failed: number;
 	thinking: number;
 	reads: number;
 	edits: number;
@@ -397,7 +396,6 @@ export function turnStats(segment: Segment): TurnStats {
 	const edited = new Set<string>();
 	const stats: TurnStats = {
 		tools: 0,
-		failed: 0,
 		thinking: 0,
 		reads: 0,
 		edits: 0,
@@ -420,7 +418,6 @@ export function turnStats(segment: Segment): TurnStats {
 		}
 		if (part.type !== "tool") continue;
 		stats.tools++;
-		if (part.outcome === "failed") stats.failed++;
 		const canonicalTool = ensureCanonical(part.name, part.input);
 		switch (canonicalTool.tool) {
 			case "Read":

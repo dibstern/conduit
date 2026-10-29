@@ -89,6 +89,8 @@ export { responseChunks };
 
 const TIMEOUT_MS = 15_000;
 // Loaded four-worker runs reached 22.9s. Leave 5s within the 30s hook deadline.
+// A browser's first subscriptions share it: without the startup browser probe
+// they absorb the project's cold start.
 const STARTUP_TIMEOUT_MS = 25_000;
 
 function remainingTimeout(deadline: number | undefined, timeoutMs?: number) {
@@ -246,6 +248,8 @@ export class ProcessHarness {
 		private readonly opencodeRecording?: string,
 		private readonly claudeReplay?: {
 			readonly turns: readonly ClaudeTraceName[];
+			/** Test-derived trace variants, isolated from committed recordings. */
+			readonly tracesDir?: string;
 			readonly delayMs?: number;
 			/** Relative paths resolve against the isolated project. */
 			readonly reportedCwd?: string;
@@ -273,6 +277,7 @@ export class ProcessHarness {
 		private readonly managedOpenCodeStopGraceMs?: number,
 		private readonly deadline?: number,
 		private readonly legacyStoreWitness = false,
+		private readonly serverLogFile?: string,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -743,6 +748,8 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			foregroundCli?: boolean;
 			/** Append native legacy-store acquisition and promotion evidence in the preload. */
 			legacyStoreWitness?: boolean;
+			/** Append every server generation's stdout/stderr, beyond the in-memory tail. */
+			serverLogFile?: string;
 			autoStartOpenCode?: boolean;
 			opencodeRecording?: string;
 			claudeReplay?: ProcessHarness["claudeReplay"];
@@ -791,6 +798,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			options.managedOpenCodeStopGraceMs,
 			options.deadline,
 			options.legacyStoreWitness,
+			options.serverLogFile,
 		);
 	}
 
@@ -831,6 +839,10 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "TYPESAFE_BASE_URL"
 					| "TYPESAFE_API_KEY"
 					| "CONDUIT_OUTBOX_DRAIN_INTERVAL_MS"
+					| "CONDUIT_AUTO_SETTLE_SWEEP_INTERVAL_MS"
+					| "CONDUIT_STATUS_RECONCILIATION_INTERVAL_MS"
+					| "CONDUIT_MESSAGE_POLLER_INTERVAL_MS"
+					| "CONDUIT_QUOTA_READ_MAX_AGE_MS"
 					| "CONDUIT_TAILSCALE_BIN"
 					| "CONDUIT_BUILD_READY_PATH"
 					| "NODE_OPTIONS"
@@ -851,6 +863,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_CURSOR_SDK_TRACE"
 					| "CONDUIT_CURSOR_SDK_CAPTURE"
 					| "CONDUIT_CODEX_APP_SERVER_TRACE"
+					| "CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS"
 					| "CONDUIT_TEST_CODEX_TRACE_MAP"
 					| "CONDUIT_TEST_CODEX_TRANSPORTS"
 					| "OPENAI_API_KEY"
@@ -1157,6 +1170,12 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 									this.claudeReplay.delayMs ?? 0,
 								),
 								CONDUIT_TEST_CLAUDE_REPLAY_PROJECT_DIR: this.projectDir,
+								CONDUIT_TEST_CLAUDE_REPLAY_TRACES_DIR:
+									this.claudeReplay.tracesDir,
+								CONDUIT_TEST_CLAUDE_REPLAY_HOLD: join(
+									this.root,
+									"claude-replay-hold",
+								),
 								...(this.claudeReplay.followWorkspaceDirectives
 									? { CONDUIT_TEST_CLAUDE_REPLAY_WORKSPACE_MOVES: "1" }
 									: {}),
@@ -1322,10 +1341,14 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 		child.stdout?.on("data", (data: Buffer) => {
 			this.logs = (this.logs + data.toString()).slice(-8000);
 			if (options.logFile) appendFileSync(options.logFile, data);
+			if (this.serverLogFile && this.serverLogFile !== options.logFile)
+				appendFileSync(this.serverLogFile, data);
 		});
 		child.stderr?.on("data", (data: Buffer) => {
 			this.logs = (this.logs + data.toString()).slice(-8000);
 			if (options.logFile) appendFileSync(options.logFile, data);
+			if (this.serverLogFile && this.serverLogFile !== options.logFile)
+				appendFileSync(this.serverLogFile, data);
 		});
 		let generation: Generation | undefined;
 		let fakeSdkActive = false;
@@ -2392,6 +2415,7 @@ export class ProcessBrowser {
 	readonly frames: BrowserFrame[] = [];
 	readonly originId: string;
 	private readonly waiters = new Set<() => void>();
+	private wakePending = false;
 	private readonly messageListeners = new Set<
 		(message: Record<string, unknown>) => void
 	>();
@@ -2491,7 +2515,15 @@ export class ProcessBrowser {
 	private record(message: Record<string, unknown>): void {
 		this.frames.push({ message, at: process.hrtime.bigint() });
 		for (const notify of this.messageListeners) notify(message);
-		for (const notify of this.waiters) notify();
+		// Waiters rescan from their cursor (a predicate may look at later frames),
+		// so wake them once per burst: a 5,001-row snapshot woke each one per row,
+		// quadratic work that starved the worker on slow CI runners.
+		if (this.wakePending) return;
+		this.wakePending = true;
+		queueMicrotask(() => {
+			this.wakePending = false;
+			for (const notify of this.waiters) notify();
+		});
 	}
 
 	/**
@@ -2509,6 +2541,7 @@ export class ProcessBrowser {
 			(message) =>
 				message["type"] === "pty" && message["_tag"] === "synchronized",
 			cursor,
+			STARTUP_TIMEOUT_MS,
 		);
 	}
 
@@ -2538,6 +2571,7 @@ export class ProcessBrowser {
 			(message) =>
 				message["type"] === "approvals" && message["_tag"] === "synchronized",
 			cursor,
+			STARTUP_TIMEOUT_MS,
 		);
 	}
 
@@ -2565,6 +2599,7 @@ export class ProcessBrowser {
 				message["type"] === "project_settings" &&
 				message["_tag"] === "synchronized",
 			cursor,
+			STARTUP_TIMEOUT_MS,
 		);
 	}
 
@@ -2604,6 +2639,7 @@ export class ProcessBrowser {
 				(message) =>
 					message["type"] === "shell" && message["_tag"] === "synchronized",
 				cursor,
+				STARTUP_TIMEOUT_MS,
 			);
 		})();
 		return this.sessionsReady;

@@ -16,10 +16,12 @@ import {
 } from "../../test/e2e/helpers/visual-helpers.js";
 import type { VisualMode } from "./visualMode.js";
 
-type Viewport = {
+export type Viewport = {
 	name: string;
 	width: number;
 	height: number;
+	/** Safe-area insets in CSS pixels, as env(safe-area-inset-*) reports them. */
+	insets?: { top: number; right: number; bottom: number; left: number };
 };
 
 export type VisualMatchResult = {
@@ -147,8 +149,18 @@ export class PlaywrightDriver {
 			width: viewport.width,
 			height: viewport.height,
 		});
-		// The app's compact layout follows a matchMedia change event, which fires in the
-		// next rendering step; one frame lets it land before the next step acts on it.
+		if (viewport.insets) {
+			// After the resize, so the insets belong to the new size. The override
+			// outlives this session, so it can detach at once.
+			const cdp = await page.context().newCDPSession(page);
+			const { top, right, bottom, left } = viewport.insets;
+			await cdp.send("Emulation.setSafeAreaInsetsOverride", {
+				insets: { top, right, bottom, left },
+			});
+			await cdp.detach();
+		}
+		// The app's pose follows resize events and its inset probe, which update in
+		// the next rendering step; one frame lets them land before the next step acts.
 		await page.evaluate(
 			() =>
 				new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),

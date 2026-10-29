@@ -42,6 +42,7 @@ import { ProviderInstanceFailure } from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
 import type { ProviderRegistry } from "../provider-registry.js";
 import type { RelayEventSinkDeps } from "../relay-event-sink.js";
+import { settleToolChildRuns } from "../session-run-settlement.js";
 import type {
 	EventSink,
 	PermissionDecision,
@@ -291,10 +292,43 @@ export class RunnerProviderInstance implements ProviderInstance {
 				);
 			}
 			const accounts = yield* this.deps.accounts;
+			// A nested subagent has no runner registration of its own. Protect
+			// its descendants while their root runner is alive, using tool ownership.
+			const protectedSessions = new Set(claimed);
+			if (this.providerId === "claude" && claimed.size) {
+				const live = yield* sql<{ id: string }>`
+					WITH RECURSIVE owned(id) AS (
+						SELECT id FROM sessions WHERE id IN ${sql.in([...claimed])}
+						UNION
+						SELECT json_extract(part.metadata, '$.childSessionId')
+						FROM owned CROSS JOIN messages message ON message.session_id = owned.id
+						CROSS JOIN message_parts part ON part.message_id = message.id
+						WHERE message.is_inherited = 0 AND part.type = 'tool'
+							AND json_extract(part.metadata, '$.childSessionId') IS NOT NULL
+					) SELECT id FROM owned`;
+				for (const session of live) protectedSessions.add(session.id);
+			}
+			// Startup visits every session; walk tool links only when some open
+			// run lies outside the live runners' trees.
+			const orphanable =
+				this.providerId === "claude" &&
+				(yield* sql<{ session_id: string }>`
+						SELECT DISTINCT session_id FROM provider_runs WHERE status IN ('pending', 'running')`).some(
+					({ session_id }) => !protectedSessions.has(session_id),
+				);
 			const sessions = yield* sql<{
 				id: string;
 				provider: string;
-			}>`SELECT id, provider FROM sessions`;
+			}>`SELECT s.id, s.provider FROM sessions s
+				JOIN (
+					SELECT session_id FROM pending_approvals
+					WHERE status = 'pending'
+						AND COALESCE(json_extract(details, '$.delivery'), '') <> 'async'
+					UNION
+					SELECT session_id FROM provider_command_outbox
+					WHERE effect_type <> 'send_turn'
+						AND status IN ('pending', 'running', 'retryable_failed')
+				) cleanup ON cleanup.session_id = s.id`;
 			for (const session of sessions) {
 				if (sessionIds && !sessionIds.has(session.id)) continue;
 				const driver =
@@ -307,7 +341,20 @@ export class RunnerProviderInstance implements ProviderInstance {
 					(driver ?? session.provider) === this.providerId
 				) {
 					const recovery = yield* recoveryForSession(session.id);
-					if (recovery) yield* recovery.retirePrompts(null);
+					if (recovery) {
+						yield* recovery.retirePrompts(null);
+						if (orphanable && !protectedSessions.has(session.id))
+							yield* settleToolChildRuns(
+								sql,
+								session.id,
+								"Claude runner stopped before completing the child turn",
+								(events) =>
+									recovery.ingestion.ingestBatch(events, {
+										publishToBus: false,
+										publishToRelay: false,
+									}),
+							);
+					}
 				}
 			}
 			for (const sessionId of claimed) {

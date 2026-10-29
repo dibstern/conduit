@@ -1,4 +1,8 @@
 {
+	"src/lib/frontend/actions/click-on-lift.ts :: click": "Drops the trusted compatibility click that follows a header control already activated on touch lift (iOS standalone loses clicks above y64), within 600ms and until the next pointerdown or keydown. Does not dismiss surfaces, move focus or handle Escape.",
+	"src/lib/frontend/actions/click-on-lift.ts :: keydown": "Ends the touch-lift click-drop window so a keyboard activation straight after a tap still lands. Does not intercept keys, implement Escape, move focus or dismiss a surface.",
+	"src/lib/frontend/actions/click-on-lift.ts :: mousedown": "Drops the trusted compatibility mousedown after a touch-lift activation so its default focus change cannot undo the focus a closing sheet restored to its trigger. Does not dismiss surfaces or move focus itself.",
+	"src/lib/frontend/actions/click-on-lift.ts :: pointerdown": "Ends the touch-lift click-drop window when a new press begins, so that press's own click lands. Observes only; does not dismiss surfaces, prevent defaults or move focus.",
 	"src/lib/frontend/actions/use-dismiss.svelte.ts :: click": "Sanctioned non-Bits dismissal implementation; see this file's header comment. Dismisses outside clicks while preserving interactions that began inside and respecting ignored nodes.",
 	"src/lib/frontend/actions/use-dismiss.svelte.ts :: keydown": "Sanctioned non-Bits dismissal implementation; see this file's header comment. Handles Escape for the topmost enabled dismisser, with opt-out and IME guards.",
 	"src/lib/frontend/actions/use-dismiss.svelte.ts :: pointerdown": "Sanctioned non-Bits dismissal implementation; see this file's header comment. Records where an interaction began so its subsequent click does not dismiss a surface it started inside.",

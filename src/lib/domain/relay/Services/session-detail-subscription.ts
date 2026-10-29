@@ -23,10 +23,12 @@ import {
 	ResumePoint,
 	type SessionDetailEnvelope,
 	type SessionDetailItemSchema,
+	type SessionDetailWindowRequest,
 } from "../../../contracts/ws-rpc.js";
 import {
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
+	type TranscriptBounds,
 	type TranscriptPageCursorNotFoundError,
 } from "../../../persistence/effect/read-query-effect.js";
 import {
@@ -99,6 +101,7 @@ export type SessionDetailSubscriptionError =
  */
 export const subscribeSessionDetail = (options: {
 	readonly sessionId: string;
+	readonly window?: SessionDetailWindowRequest;
 	readonly resumeFromSequence?: number;
 	readonly resumeBase?: ResumeBase;
 	/** Resume from a saved snapshot; one from another store starts cold. */
@@ -139,17 +142,20 @@ export const subscribeSessionDetail = (options: {
 				}
 			}
 			const store = yield* readQuery.readStoreIdentity();
-			const point = Option.getOrUndefined(
-				Option.filter(
-					Option.fromNullishOr(options.resumePoint).pipe(
-						Option.flatMap(Schema.decodeOption(ResumePointBody)),
-					),
-					(body) =>
-						body.store === store &&
-						body.session === options.sessionId &&
-						body.build === SERVER_BUILD_ID,
-				),
-			);
+			const point =
+				options.window === undefined
+					? Option.getOrUndefined(
+							Option.filter(
+								Option.fromNullishOr(options.resumePoint).pipe(
+									Option.flatMap(Schema.decodeOption(ResumePointBody)),
+								),
+								(body) =>
+									body.store === store &&
+									body.session === options.sessionId &&
+									body.build === SERVER_BUILD_ID,
+							),
+						)
+					: undefined;
 			// A saved snapshot resumes from the base its point names; a point
 			// this store and build did not send for this session gets a fresh
 			// snapshot. A client resuming from that very base holds the page as
@@ -157,25 +163,29 @@ export const subscribeSessionDetail = (options: {
 			const fromSavedPage =
 				point !== undefined && options.resumeFromSequence === point.sequence;
 			const resume =
-				options.resumePoint === undefined
-					? options
-					: point === undefined
-						? {}
-						: {
-								resumeFromSequence: options.resumeFromSequence,
-								resumeBase: {
-									sequence: point.sequence,
-									...(point.cursor === undefined
-										? {}
-										: { cursor: point.cursor }),
-								},
-							};
+				options.window !== undefined
+					? {}
+					: options.resumePoint === undefined
+						? options
+						: point === undefined
+							? {}
+							: {
+									resumeFromSequence: options.resumeFromSequence,
+									resumeBase: {
+										sequence: point.sequence,
+										...(point.cursor === undefined
+											? {}
+											: { cursor: point.cursor }),
+									},
+								};
+			let bounds: TranscriptBounds | undefined;
 			return stream<SessionDetailItem, SessionDetailSubscriptionError>({
 				bus,
 				source: {
 					name: `session-detail/${options.sessionId}`,
 					collections: ["messages", "sessions", "inputs"],
-					shareReads: true,
+					shareReads: options.window === undefined,
+					...(options.window ? { live: "snapshot" as const } : {}),
 					read: (range, base) =>
 						Effect.gen(function* () {
 							// Pending inputs, the inbox state and the rewind point ride the
@@ -277,15 +287,48 @@ export const subscribeSessionDetail = (options: {
 									};
 								});
 							if (range === undefined) {
+								const request = options.window;
 								const page = yield* readQuery.readSessionTranscriptPage(
 									options.sessionId,
-									{ limit: PAGE_MESSAGES, previewTools: true },
+									{
+										limit: PAGE_MESSAGES,
+										previewTools: true,
+										windowKind: request ? "historical" : "latest",
+										...(bounds
+											? { bounds, forward: {} }
+											: request
+												? request.direction === "before"
+													? { before: request.anchorMessageId }
+													: {
+															forward: {
+																from: request.anchorMessageId,
+																exclusive: request.direction === "after",
+															},
+														}
+												: {}),
+									},
 								);
+								const first = page.messages[0];
+								const last = page.messages.at(-1);
+								if (request && !bounds && first && last)
+									bounds = {
+										first: { id: first.id, createdAt: first.created_at },
+										last: { id: last.id, createdAt: last.created_at },
+									};
+								const window = page.window;
 								const heldRows = yield* held(page.version);
 								return {
 									rows: [
 										...messageRowGroups(page.messages, () => true).flat(),
 										...heldRows.rows,
+										...(window
+											? [
+													{
+														item: { _tag: "window" as const, window },
+														version: page.version,
+													},
+												]
+											: []),
 									],
 									version: page.version,
 									hasMore: page.hasMore,
@@ -375,7 +418,7 @@ export const subscribeSessionDetail = (options: {
 						moved: advance.sessionIds.includes(options.sessionId),
 						removed: [],
 					}),
-					resume: "catchUp",
+					resume: options.window ? "rebase" : "catchUp",
 				},
 				...(resume.resumeFromSequence === undefined
 					? {}
@@ -386,7 +429,9 @@ export const subscribeSessionDetail = (options: {
 			}).pipe(
 				Stream.map(
 					(envelope): SessionDetailEnvelope =>
-						envelope._tag === "snapshot" && store !== undefined
+						envelope._tag === "snapshot" &&
+						store !== undefined &&
+						options.window === undefined
 							? {
 									...envelope,
 									resumePoint: ResumePoint.make(

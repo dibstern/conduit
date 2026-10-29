@@ -86,7 +86,7 @@
 	</span>
 	<div class="flex min-h-[28px] min-w-0 flex-wrap items-center gap-x-[8px] gap-y-[4px] text-[13.5px] font-semibold">
 		<!-- Keep the title and time on the same baseline. -->
-		<span class="flex min-w-0 items-baseline gap-x-[8px]">
+		<span class="flex min-w-0 flex-wrap items-baseline gap-x-[8px] gap-y-[4px]">
 			{#if tooltip}
 				<Tooltip>
 					{#snippet trigger({ props })}

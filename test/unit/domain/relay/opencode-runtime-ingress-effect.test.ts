@@ -113,6 +113,9 @@ describe("concrete OpenCode stop through the relay graph", () => {
 		let relay: Awaited<ReturnType<typeof createProjectRelay>> | undefined;
 		try {
 			relay = await createProjectRelay({
+				// A fixed environment keeps the relay from spawning the developer's
+				// login shell and mise, which compete for CPU under machine load.
+				shellEnv: () => ({ env: {}, declared: {} }),
 				httpServer: server,
 				noServer: true,
 				projectDir: dir,

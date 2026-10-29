@@ -156,7 +156,8 @@ function predictsHandoff(sessionId: string): boolean {
 	);
 }
 
-function settle(inputId: string): void {
+/** An authoritative input end also settles a handoff reply still in flight. */
+export function settleTurnInput(inputId: string): void {
 	intents.delete(inputId);
 	if (pendingReplies.has(inputId)) settledInputs.add(inputId);
 }
@@ -170,7 +171,7 @@ export function applyTurnRow(row: SessionInfo): void {
 				(intent.sessionId === row.id ? intent.baseline : 0) &&
 			(row.lastTurnEndInputId ?? inputId) === inputId
 		)
-			settle(inputId);
+			settleTurnInput(inputId);
 	}
 }
 
@@ -178,7 +179,7 @@ export function applyTurnRow(row: SessionInfo): void {
 export function rebaseTurns(sessionIds: Iterable<string>): void {
 	const covered = new Set(sessionIds);
 	for (const [inputId, intent] of new Map([...intents, ...pendingReplies]))
-		if (covered.has(intent.sessionId)) settle(inputId);
+		if (covered.has(intent.sessionId)) settleTurnInput(inputId);
 }
 
 /** A feed removal alone is not a deletion. */

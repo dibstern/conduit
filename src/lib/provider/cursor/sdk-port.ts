@@ -135,7 +135,15 @@ export interface CursorRun {
 export interface CursorAgent {
 	readonly id: string;
 	send(
-		prompt: string,
+		prompt:
+			| string
+			| {
+					readonly text: string;
+					readonly images: {
+						readonly data: string;
+						readonly mimeType: string;
+					}[];
+			  },
 		options: CursorSendOptions,
 		onDelta: (update: unknown) => void,
 	): Promise<CursorRun>;

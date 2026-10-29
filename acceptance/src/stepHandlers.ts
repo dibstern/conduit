@@ -30,8 +30,10 @@ import { cursorTurnHandlers } from "./steps/cursorTurn.js";
 import { cursorUsageHandlers } from "./steps/cursorUsage.js";
 import { cursorUsageErrorsHandlers } from "./steps/cursorUsageErrors.js";
 import { draftAttachmentFailureHandlers } from "./steps/draftAttachmentFailures.js";
+import { duoPoseHandlers } from "./steps/duoPose.js";
 import { firstRunProjectsHandlers } from "./steps/firstRunProjects.js";
 import { harnessHandlers } from "./steps/harness.js";
+import { headerTapOnLiftHandlers } from "./steps/headerTapOnLift.js";
 import { launchingRowsHandlers } from "./steps/launchingRows.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
@@ -77,6 +79,7 @@ import { worktreeCleanupSettingsHandlers } from "./steps/worktreeCleanupSettings
 const driver = new PlaywrightDriver();
 
 export const conduitVisualHandlers: StepHandler[] = [
+	...headerTapOnLiftHandlers,
 	...addProjectDialogHandlers,
 	...firstRunProjectsHandlers,
 	...draftAttachmentFailureHandlers,
@@ -85,6 +88,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionSheetSnoozeHandlers,
 	...sessionAutoSettleHandlers,
 	...phoneToastsHandlers,
+	...duoPoseHandlers,
 	...sessionRowsHandlers,
 	...projectTreeHandlers,
 	...sessionModeDefaultHandlers,

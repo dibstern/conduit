@@ -28,7 +28,7 @@ import type { ProviderCall } from "../types.js";
 import type { ProbeResult } from "./claude-capabilities-probe.js";
 import {
 	type ProbeDeps,
-	probeClaudeCapabilities,
+	probeClaudeCapabilitiesEffect,
 } from "./claude-capabilities-probe.js";
 import {
 	ClaudeConfigDirSchema,
@@ -285,30 +285,17 @@ const makeClaudeCapabilitiesServiceWithCache = (
 
 					const { inFlight, staleValue } = lookup;
 					const probe = restore(
-						Effect.tryPromise({
-							try: (signal) =>
-								probeClaudeCapabilities({
-									signal,
-									workspaceRoot,
-									...launch,
-									...(call
-										? {
-												baseEnv: call.shellEnv,
-												extraFolders: call.extraFolders,
-											}
-										: {}),
-									...(call?.account.env
-										? { accountEnv: call.account.env }
-										: {}),
-									...(deps.queryFactory
-										? { queryFactory: deps.queryFactory }
-										: {}),
-								}),
-							catch: (cause) =>
-								new ClaudeBoundaryError({
-									operation: "probeCapabilities",
-									cause,
-								}),
+						probeClaudeCapabilitiesEffect({
+							workspaceRoot,
+							...launch,
+							...(call
+								? {
+										baseEnv: call.shellEnv,
+										extraFolders: call.extraFolders,
+									}
+								: {}),
+							...(call?.account.env ? { accountEnv: call.account.env } : {}),
+							...(deps.queryFactory ? { queryFactory: deps.queryFactory } : {}),
 						}),
 					).pipe(
 						Effect.tap((value) =>

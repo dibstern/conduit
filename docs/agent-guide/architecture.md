@@ -99,8 +99,11 @@ changes are its own branch and the default branches, not other worktrees'. One
 scoped daemon fiber probes directories sequentially using async stat calls, every
 500 ms viewed, 1 second running, 5 seconds listed and 10 seconds dormant. Targets
 are the checkout directory, HEAD, index, packed-refs in the git and common
-directories, and exact loose refs for the current branch, main and master.
-HEAD changes update the branch target, including nested branch names. Stat
+directories, the current branch's exact loose ref, and the reader's merge-ref
+dependencies: origin/HEAD and its symbolic target chain, main and master.
+Shared refs use the common directory for linked worktrees. Missing loose paths
+remain targets so ref creation and packed-to-loose moves are detected. HEAD and
+symbolic-ref changes update the targets, including nested branch names. Stat
 changes to HEAD and refs trigger async content comparisons before forcing a
 read; index and checkout-directory changes are hints. A hinted folder's presence
 is checked once per hint, before the scheduler reads the clock. Releasing an

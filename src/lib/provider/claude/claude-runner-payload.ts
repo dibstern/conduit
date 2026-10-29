@@ -1096,6 +1096,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			}
 			let promptQueue: PromptQueueController | undefined;
 			let activeQuery: Query | undefined;
+			let streamFiber: Fiber.Fiber<void, unknown> | undefined;
 			const setup = Effect.gen({ self: this }, function* () {
 				if (previous) {
 					let retirementCommitted = false;
@@ -1301,6 +1302,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					subagentPollers: new Map(),
 					subagentTranscripts: new Map(),
 					failedSubagentSessions: new Set(),
+					subagentRunIds: new Map(),
 				};
 				this.controllers.set(sessionId, controller);
 				const context = {
@@ -1429,7 +1431,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					onBackgroundTask: (transition) =>
 						this.recordBackgroundTaskEffect(transition),
 				});
-				yield* FiberMap.run(
+				streamFiber = yield* FiberMap.run(
 					this.streamFibers,
 					sessionId,
 					this.runStreamConsumerEffect(ctx, translator),
@@ -1457,12 +1459,35 @@ class ClaudeRunnerPayload implements RunnerPayload {
 									(yield* pendingIntakes(this.stateRef, sessionId)).get(
 										input.inputId,
 									)?.deferred === intake
-								)
-									yield* settlePendingIntakesEffect(
-										this.stateRef,
-										sessionId,
-										failure.message,
-									);
+								) {
+									if (
+										failure instanceof ClaudeBoundaryError &&
+										failure.operation === "awaitSetup" &&
+										failure.cause instanceof ClaudeRuntimeError &&
+										failure.cause.code === "interrupted"
+									) {
+										// The setup race has stopped launch work before persistence
+										// can wait for the daemon to acknowledge this terminal.
+										yield* input.eventSink.push(
+											claudeRuntimeEvent(
+												"turn.interrupted",
+												sessionId,
+												{ messageId: "" },
+												input.runId,
+											),
+										);
+										yield* cancelIntakeEffect(
+											this.stateRef,
+											sessionId,
+											input.inputId,
+										);
+									} else
+										yield* settlePendingIntakesEffect(
+											this.stateRef,
+											sessionId,
+											failure.message,
+										);
+								}
 								yield* Deferred.fail(setupLock, failure);
 								if (promptQueue) yield* Effect.exit(promptQueue.close());
 								if (activeQuery)
@@ -1481,9 +1506,24 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						yield* removeSetupLock(this.stateRef, sessionId);
 					}),
 				),
+				Effect.catch((error) =>
+					Effect.gen(function* () {
+						// Preserve cancellation after setup cleanup instead of reporting
+						// the error used to stop launch work.
+						if (yield* Deferred.isDone(intake)) {
+							const result = yield* Effect.result(Deferred.await(intake));
+							if (
+								result._tag === "Success" &&
+								result.success.status === "cancelled"
+							)
+								return;
+						}
+						return yield* Effect.fail(error);
+					}),
+				),
 			);
 
-			return yield* this.awaitIntakeEffect(input, intake);
+			return yield* this.awaitIntakeEffect(input, intake, streamFiber);
 		});
 	}
 
@@ -1644,6 +1684,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			}
 
 			const turnAdmissionSemaphore = ctx.turnAdmissionSemaphore;
+			const streamFiber = getOrUndefined(
+				FiberMap.getUnsafe(this.streamFibers, ctx.sessionId),
+			);
 			if (!turnAdmissionSemaphore) {
 				return yield* Effect.fail(
 					new ClaudeRuntimeError({
@@ -1852,13 +1895,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				() => turnAdmissionSemaphore.release(1),
 			);
 
-			return yield* this.awaitIntakeEffect(input, intake);
+			return yield* this.awaitIntakeEffect(input, intake, streamFiber);
 		});
 	}
 
 	private awaitIntakeEffect(
 		input: ClaudeSendTurnInput,
 		intake: Deferred.Deferred<TurnResult, Error>,
+		streamFiber: Fiber.Fiber<void, unknown> | undefined,
 	): Effect.Effect<TurnResult, ClaudeAdapterError> {
 		const aborted = Effect.callback<void>((resume) => {
 			const onAbort = () => resume(Effect.void);
@@ -1907,6 +1951,13 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				),
 			),
 		).pipe(
+			// Fallback must follow this query's session-ended acknowledgement.
+			// A hung finalizer fails the send rather than releasing fallback early.
+			Effect.tap((result) =>
+				result.nativeResumeRejected && streamFiber
+					? Fiber.await(streamFiber).pipe(Effect.timeout(STOP_ABORT_WAIT_MS))
+					: Effect.void,
+			),
 			Effect.mapError(
 				(cause) => new ClaudeBoundaryError({ operation: "awaitIntake", cause }),
 			),
@@ -2288,6 +2339,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							endsCurrentRun &&
 							isInterruptedResult(message, ctx.interruptRequested)
 						) {
+							// Retain the parent's interruption after its result clears the
+							// transient interrupt flag and child final reads run separately.
+							for (const [taskId, task] of ctx.subagentTasks ?? [])
+								if (!task.outcome)
+									ctx.subagentTasks?.set(taskId, {
+										...task,
+										outcome: "interrupted",
+									});
 							yield* this.completeTurnToolsEffect(ctx, false);
 							yield* this.cancelInteractionsEffect(
 								ctx,
@@ -2808,8 +2867,24 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					if (!turnIds.some((turnId) => waiters.has(turnId)))
 						return Effect.void;
 					const setupLock = yield* getSetupLock(this.stateRef, sessionId);
-					if (setupLock)
-						yield* Deferred.fail(setupLock, new Error("Turn interrupted"));
+					if (
+						!setupLock ||
+						!(yield* Deferred.fail(
+							setupLock,
+							new ClaudeRuntimeError({
+								code: "interrupted",
+								message: "Turn interrupted",
+							}),
+						))
+					) {
+						if (yield* getSession(this.stateRef, sessionId))
+							yield* this.interruptSessionEffect(
+								sessionId,
+								turnIds,
+								requestedAt,
+							);
+						return Effect.void;
+					}
 				} else if (
 					ctx &&
 					bound &&

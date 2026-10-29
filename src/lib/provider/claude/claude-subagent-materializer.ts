@@ -196,12 +196,21 @@ export function stageSessionMessagesToEvents(input: {
 			shouldCreateTranscriptMessage(role, content) &&
 			!cursor.messageRoles.has(messageId)
 		) {
+			// An answer belongs to the child's latest prompt, which owns its turn.
+			const parentID = [...cursor.messageRoles]
+				.filter(([, created]) => created === "user")
+				.at(-1)?.[0];
 			cursor.messageRoles.set(messageId, role);
 			events.push(
 				providerRuntimeEvent(
 					"message.created",
 					input.childSessionId,
-					{ messageId, role, sessionId: input.childSessionId },
+					{
+						messageId,
+						role,
+						sessionId: input.childSessionId,
+						...(role === "assistant" && parentID ? { parentID } : {}),
+					},
 					eventOptions(),
 				),
 			);
