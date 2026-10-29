@@ -251,6 +251,8 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const scope = panel(world.page, match[2] ?? "");
 			await scope.scrollIntoViewIfNeeded();
+			// The message rail appears on a frame and pads the transcript, so measure after it lands.
+			await world.page.clock.runFor(32);
 			const box = await scope
 				.locator('[data-step-id^="surfacing-agent-"]')
 				.first()
