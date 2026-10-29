@@ -565,7 +565,7 @@
 		"timeout-override": 4
 	},
 	"test/integration/daemon/claude-session-workspace-hint.test.ts": {
-		"polling": 17,
+		"polling": 16,
 		"timeout-override": 1
 	},
 	"test/integration/daemon/claude-session-workspace.test.ts": {
