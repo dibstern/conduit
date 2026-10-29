@@ -373,6 +373,17 @@ An absent field falls back to one pure derivation from canonical tool input for
 successful completed tools. An empty array explicitly records no file changes.
 Existing events need no migration.
 
+## Session Diff
+
+A **Session Diff** is a read-only view of a session's folders by scope; the
+`unstaged` scope compares each folder's index with its worktree, untracked
+files included. Listing snapshots each folder into the **Folder Timeline**, a
+private bare store per repository under `<configDir>/folder-timeline/` that
+borrows the repository's objects and never writes its index, objects or refs.
+A file's patch is served only for a path and blob pair the listing named;
+once the store collects that snapshot the request answers Gone and the client
+re-lists.
+
 ## Sidebar Overlay
 
 **Sidebar Overlay** is sidebar state that is deliberately not a canonical
