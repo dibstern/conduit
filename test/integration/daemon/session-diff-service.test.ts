@@ -107,17 +107,18 @@ it("lists every kind of change with exact blobs, counts, sizes and tiers, and se
 		"binary.bin": "\0\x01\x02",
 		"deleted.txt": lines(3),
 		"modified.txt": "a\nb\n",
+		"rewritten.txt": lines(251),
 		"z-moved.txt": `${lines(9)}last\n`,
 	});
 	writeFileSync(join(repo, "binary.bin"), "\0\x01\x02\x03");
 	rmSync(join(repo, "deleted.txt"));
+	writeFileSync(join(repo, "rewritten.txt"), "new\n".repeat(250));
 	writeFileSync(join(repo, "modified.txt"), "a\nc\nd\n");
 	renameSync(join(repo, "z-moved.txt"), join(repo, "a-renamed.txt"));
 	writeFileSync(join(repo, "a-renamed.txt"), `${lines(9)}edited\n`);
 	writeFileSync(join(repo, "added.txt"), "new\n");
 	writeFileSync(join(repo, "empty.txt"), "");
 	writeFileSync(join(repo, "lines-500.txt"), lines(500));
-	writeFileSync(join(repo, "lines-501.txt"), lines(501));
 	writeFileSync(join(repo, "size-limit.txt"), `${"x".repeat(tooLarge - 1)}\n`);
 	writeFileSync(join(repo, "size-over.txt"), `${"x".repeat(tooLarge)}\n`);
 
@@ -225,18 +226,18 @@ it("lists every kind of change with exact blobs, counts, sizes and tiers, and se
 			insertions: 500,
 			deletions: 0,
 		}),
-		counted("lines-501.txt", {
-			status: "added",
-			bytes: 2505,
-			insertions: 501,
-			deletions: 0,
-			tier: "onDemand",
-		}),
 		counted("modified.txt", {
 			status: "modified",
 			bytes: 6,
 			insertions: 2,
 			deletions: 1,
+		}),
+		counted("rewritten.txt", {
+			status: "modified",
+			bytes: 1255,
+			insertions: 250,
+			deletions: 251,
+			tier: "onDemand",
 		}),
 		counted("size-limit.txt", {
 			status: "added",
@@ -371,7 +372,8 @@ it("lists a subfolder relative to itself, keeps a rename's old path, and serves 
 });
 
 it("reports missing and non-git folders as unavailable beside a listed one", async () => {
-	const repo = repository({ "tracked.txt": "one\n" });
+	const repo = repository({ "empty.txt": "", "tracked.txt": "one\n" });
+	rmSync(join(repo, "empty.txt"));
 	writeFileSync(join(repo, "tracked.txt"), "two\n");
 	const fresh = join(root, "fresh");
 	mkdirSync(fresh);
@@ -401,12 +403,14 @@ it("reports missing and non-git folders as unavailable beside a listed one", asy
 	expect(
 		listing.folders.map((folder) =>
 			"files" in folder
-				? folder.files.map(({ path, status }) => `${status} ${path}`)
+				? folder.files.map(
+						({ path, status, bytes }) => `${status} ${path} ${bytes}`,
+					)
 				: [folder.folder, folder.error, folder.message],
 		),
 	).toEqual([
-		["modified tracked.txt"],
-		["added untracked.txt"],
+		["deleted empty.txt 0", "modified tracked.txt 4"],
+		["added untracked.txt 4"],
 		[plain, "unavailable", expect.stringContaining("not a git repository")],
 		[missing, "unavailable", `Folder is missing: ${missing}`],
 	]);
