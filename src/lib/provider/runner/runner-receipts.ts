@@ -332,12 +332,10 @@ export const createRunnerPermissionReplies = (sql: SqlClient.SqlClient) =>
 		PRIMARY KEY (session_id, request_id)
 	)`;
 
-export const makeRunnerReceiptStore = (
-	sql: SqlClient.SqlClient,
-	options: { readonly configDir?: string } = {},
-) =>
-	Effect.gen(function* () {
-		yield* sql`CREATE TABLE IF NOT EXISTS claude_runner_cursors (
+// Legacy provenance reads this table on stores that never built a receipt
+// store, so its readers create it too.
+export const createRunnerCursors = (sql: SqlClient.SqlClient) =>
+	sql`CREATE TABLE IF NOT EXISTS claude_runner_cursors (
 		runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, result_json TEXT NOT NULL DEFAULT '{}',
 		attachment_id TEXT NOT NULL DEFAULT '', retired_at INTEGER,
 		pid INTEGER, start_time TEXT, owned_run_ids TEXT NOT NULL DEFAULT '[]',
@@ -348,6 +346,13 @@ export const makeRunnerReceiptStore = (
 		stop_state TEXT NOT NULL DEFAULT 'Requested', stop_reason TEXT NOT NULL DEFAULT 'Provider process stopped', stop_started_at INTEGER,
 		role TEXT NOT NULL DEFAULT 'serving'
 	)`;
+
+export const makeRunnerReceiptStore = (
+	sql: SqlClient.SqlClient,
+	options: { readonly configDir?: string } = {},
+) =>
+	Effect.gen(function* () {
+		yield* createRunnerCursors(sql);
 		const columns = yield* sql<{
 			name: string;
 		}>`PRAGMA table_info(claude_runner_cursors)`;

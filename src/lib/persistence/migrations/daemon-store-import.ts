@@ -669,13 +669,15 @@ function sessionIds(db: DatabaseSync, schema: string): string {
 			columns(db, schema, table)
 				.filter(
 					({ name }) =>
-						name === "session_id" ||
+						// A runner cursor names its session but owns none; main's
+						// cursor table had no session_id column.
+						(name === "session_id" && table !== "claude_runner_cursors") ||
 						(table === "sessions" && name === "id") ||
 						(table === "input_drafts" && name === "draft_key"),
 				)
 				.map(
 					({ name }) =>
-						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}${table === "input_drafts" ? " WHERE kind = 'session'" : table === "claude_runner_cursors" ? " WHERE session_id <> ''" : ""}`,
+						`SELECT ${quote(name)} AS id FROM ${schema}.${quote(table)}${table === "input_drafts" ? " WHERE kind = 'session'" : ""}`,
 				),
 		)
 		.join(" UNION ");
@@ -695,6 +697,17 @@ function excludeSharedSessions(
 			db,
 			`SELECT s.id FROM (${sessionIds(db, "main")}) s JOIN (${sessionIds(db, "daemon")}) d ON s.id = d.id ORDER BY s.id`,
 		).map(({ id }) => id);
+		// A daemon that could not import this history may still have stopped its
+		// runner; that retirement supersedes the copy's earlier cursor row.
+		if (
+			tables(db, "main").includes("claude_runner_cursors") &&
+			columns(db, "daemon", "claude_runner_cursors").some(
+				({ name }) => name === "retired_at",
+			)
+		)
+			db.exec(
+				"DELETE FROM main.claude_runner_cursors WHERE runner_id IN (SELECT runner_id FROM daemon.claude_runner_cursors WHERE retired_at IS NOT NULL)",
+			);
 		if (shared.length === 0) return shared;
 		db.exec("CREATE TEMP TABLE shared_sessions (id TEXT PRIMARY KEY)");
 		const insert = db.prepare("INSERT INTO shared_sessions VALUES (?)");

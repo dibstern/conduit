@@ -40,6 +40,8 @@ let proof: Record<string, unknown> | undefined;
 const proofs: Record<string, unknown>[] = [];
 
 afterEach(async () => {
+	// Restore inspect first: cleanup refuses to signal an unverifiable runner.
+	vi.restoreAllMocks();
 	if (harness) {
 		await harness.dispose();
 		expect(harness.remainingRunnerPids()).toEqual([]);
@@ -54,7 +56,6 @@ afterEach(async () => {
 		harness = undefined;
 	}
 	vi.unstubAllEnvs();
-	vi.restoreAllMocks();
 });
 
 // Failures: the relay's project rejects A's retained runner, restored bindings
@@ -452,6 +453,16 @@ it.each([
 				? { state: "unknown" }
 				: { state: "running", startTime };
 		},
+	);
+	// Retirement observes through the batch form; it must see the same evidence.
+	vi.spyOn(runnerRegistry.runnerProcessTable, "inspectMany").mockImplementation(
+		(pids) =>
+			new Map(
+				pids.map((pid) => [
+					pid,
+					runnerRegistry.runnerProcessTable.inspect(pid),
+				]),
+			),
 	);
 	const signals = vi.spyOn(runnerRegistry.runnerProcessTable, "signal");
 	const store = makePersistenceStoreLayer(fixture.daemonStorePath());

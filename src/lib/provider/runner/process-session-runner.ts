@@ -823,7 +823,8 @@ export const makeProcessSessionRunner = (
 			});
 		let recovering = false;
 		let recoverySessionIds: ReadonlySet<string> | undefined;
-		const projectScope = yield* Effect.serviceOption(PersistenceProjectTag);
+		// Each recovery invocation rereads its caller's project scope.
+		let projectScope = yield* Effect.serviceOption(PersistenceProjectTag);
 		const refusedReleases = new Set<string>();
 		const sinks = new Map<
 			string,
@@ -2090,24 +2091,14 @@ export const makeProcessSessionRunner = (
 				const recoverLegacySends = (connection: RunnerSocket) =>
 					sql
 						? Effect.gen(function* () {
-								const modern = yield* sql<{
-									command_id: string;
-								}>`SELECT DISTINCT command.command_id
-								FROM provider_command_outbox command JOIN provider_runs run
-									ON run.id = command.run_id AND run.session_id = command.session_id
-								WHERE command.session_id = ${sessionId} AND command.effect_type = 'send_turn'
-									AND command.status = 'running' AND run.joined_into IS NULL
-									AND NOT ${legacyRunnerRunPredicate(sql, sessionId, sql`run.id`)}`;
-								const modernCommands = new Set(
-									modern.map((row) => row.command_id),
-								);
+								// C 7.4: a runner without journal answers replays every running
+								// send, selected by the capability check alone.
 								return yield* recoverLegacyRunnerCommands({
 									sql,
 									sessionId,
 									driverKind: driver.driverKind,
 									...(deps.accounts ? { accounts: deps.accounts } : {}),
 									ownsPendingSend: (row) =>
-										modernCommands.has(row.command_id) ||
 										entry.ownsPendingSend?.(
 											sessionId,
 											row.command_id,
@@ -2339,10 +2330,11 @@ export const makeProcessSessionRunner = (
 										);
 									},
 									settle: (answer, key) => {
-										legacySendKeys.set(
-											legacyKey(answer.commandId, answer.attempt),
-											key,
-										);
+										if (key)
+											legacySendKeys.set(
+												legacyKey(answer.commandId, answer.attempt),
+												key,
+											);
 										return settleRecoveredSends([answer], false);
 									},
 									release: (commandId) =>
@@ -2533,7 +2525,8 @@ export const makeProcessSessionRunner = (
 										);
 								}
 							}
-							if (sql && hello.sendJournalAnswers === true && !identityOnly) {
+							// A main-built runner's replay settles its held sends too (C 7.4).
+							if (sql && !identityOnly) {
 								const held = yield* sql<{
 									run_id: string;
 									command_id: string;
@@ -3865,6 +3858,7 @@ export const makeProcessSessionRunner = (
 							(!sessionIds || sessionIds.has(registration.sessionId)),
 					);
 					recoverySessionIds = sessionIds;
+					projectScope = yield* Effect.serviceOption(PersistenceProjectTag);
 					const recovered = yield* stops
 						.recover()
 						.pipe(

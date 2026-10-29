@@ -4250,7 +4250,9 @@ it.effect(
 );
 
 it.effect(
-	"SEND-CONTINUATION older-build unknown adoption never replays a modern held transmission through legacy recovery",
+	// C 7.4: a runner without the journal-answer capability gets main's own
+	// recovery, "replay the same key", "selected by the capability check alone".
+	"SEND-CONTINUATION older-build unknown adoption replays a modern held transmission by the same key",
 	() =>
 		run(
 			Effect.gen(function* () {
@@ -4271,7 +4273,11 @@ it.effect(
 				yield* TestClock.adjust("2 seconds");
 				yield* Fiber.join(recovering);
 				expect(f.delivered).toEqual([]);
-				expect(f.sends).toHaveLength(1);
+				expect(f.sends).toHaveLength(2);
+				expect(f.sends[1]?.runnerId).toBe(old.runnerId);
+				expect(f.sends[1]?.command.input.inputId).toBe(
+					f.sends[0]?.command.input.inputId,
+				);
 				expect(f.connections).toHaveLength(2);
 				expect(f.connections[1]?.runnerId).toBe(old.runnerId);
 				expect(f.processes.get(old.pid)?.state).toBe("running");

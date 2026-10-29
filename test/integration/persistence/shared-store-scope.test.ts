@@ -613,10 +613,13 @@ describe("shared-store relay project scope", () => {
 	it("unclaimed Claude runner settlement changes only A", async () => {
 		const before = daemonStoreManifest(store.filename);
 		const failures: string[] = [];
-		await store.runtime.runPromise(
+		// A modern run settles through Send Settlement (C 4.7), which ends A's
+		// command durably instead of calling the legacy failTurn sink.
+		const settled = await store.runtime.runPromise(
 			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
 				yield* settleUnclaimedRunnerCommands(
-					yield* SqlClient.SqlClient,
+					sql,
 					new Set(),
 					"claude",
 					() => "claude",
@@ -625,12 +628,19 @@ describe("shared-store relay project scope", () => {
 							failures.push(turn.sessionId);
 						}),
 				);
+				return yield* sql<{
+					command_id: string;
+					status: string;
+				}>`SELECT command_id, status FROM provider_command_outbox WHERE project_key = ${A} AND command_id = ${`${A}-runner-command`}`;
 			}),
 		);
+		expect(settled).toEqual([
+			{ command_id: `${A}-runner-command`, status: "failed" },
+		]);
 		record(
 			"settle-unclaimed-claude-commands",
 			before,
-			failures.filter((session) => session.startsWith(`${A}-`)).length,
+			settled.length,
 			failures.filter((session) => session.startsWith(`${B}-`)).length,
 		);
 	});

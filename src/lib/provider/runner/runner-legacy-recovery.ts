@@ -202,7 +202,7 @@ export const recoverLegacyRunnerCommands = (options: {
 	) => Effect.Effect<LegacyReplayOutcome, SessionFailure>;
 	readonly settle: (
 		answer: Extract<RunnerSendAnswer, { readonly status: "finished" }>,
-		key: LegacySendKey,
+		key: LegacySendKey | undefined,
 	) => Effect.Effect<void, SessionFailure>;
 	readonly release: (commandId: string) => Effect.Effect<void>;
 	readonly closing: () => boolean;
@@ -249,9 +249,11 @@ export const recoverLegacyRunnerCommands = (options: {
 										AND command.session_id = ${row.session_id} AND command.command_id = ${row.command_id}
 										AND command.attempt_count = ${row.attempt_count} AND command.status = 'running'
 										AND COALESCE(run.joined_into, run.id) = ${row.run_id}`;
-								return (
-									current && (yield* LegacySendKey.prove(options.sql, row))
-								);
+								// C 7.4: a modern run replays here too; it settles through
+								// Send Settlement, so only legacy provenance gets a key.
+								return current
+									? { key: yield* LegacySendKey.prove(options.sql, row) }
+									: undefined;
 							}),
 						);
 						if (!live || options.closing()) return;
@@ -261,7 +263,7 @@ export const recoverLegacyRunnerCommands = (options: {
 							classify({ _tag: "failed", failure: reply.failure }) !==
 								"retryable"
 						)
-							return { reply, key: live };
+							return { reply, key: live.key };
 						yield* Effect.sleep(sendRetryBackoff(++ordinal));
 					}
 					return undefined;

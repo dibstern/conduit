@@ -113,9 +113,14 @@ it.each([
 			payload["configDir"] = { path: expectedFolder };
 		if (scenario === "invalid-default-path")
 			payload["configDir"] = { _tag: "SdkDefault", path: defaultFolder };
+		// Main's NativeThread always carried every field beside the folder.
 		payload["nativeThread"] = {
+			projectId: payload["projectId"],
 			configDir:
 				scenario === "empty-native-path" ? "" : "/wrong/legacy/account",
+			resumeSessionId: "legacy-native-thread",
+			firstSequence: 0,
+			deliveredThrough: 0,
 		};
 		const updated = db
 			.prepare(`UPDATE provider_command_outbox
