@@ -260,8 +260,9 @@ describe("Turn diffs through the built daemon", () => {
 		);
 		expect(existsSync(store)).toBe(true);
 		await browser.deleteSession(editor);
-		// Run ends and deletions reach the timeline in commit order, so once a
-		// later turn's capture settles, the deleted session's store is gone.
+		// Forgetting runs beside the event stream. The editor's capture was
+		// recorded long ago, so nothing holds its store and the removal lands
+		// well within the watcher's next turn.
 		await browser.send(watcher, "Reply with pong again.");
 		const [, watcherNext = ""] = turnsOf(watcher);
 		const next = await list(watcher, watcherNext);

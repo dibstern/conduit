@@ -270,6 +270,10 @@ export const DaemonOrchestrationLive = Layer.effect(
 							[event.sessionId, ...(event.data.childSessionIds ?? [])],
 							folders.forget,
 							{ discard: true },
+						).pipe(
+							// Forgetting waits for the session's own capture, not other sessions' run ends.
+							Effect.forkIn(scope),
+							Effect.asVoid,
 						);
 					return Effect.void;
 				}),
