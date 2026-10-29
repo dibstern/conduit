@@ -347,3 +347,38 @@ Scenario Outline: Submodule, LFS, symlink, mode-only, renamed, CRLF and non-UTF-
 Examples:
   | submodule_path | submodule_label | submodule_body            | lfs_path       | lfs_label | lfs_body           | link_path    | link_label | script_path      | mode_before | mode_after | mode_label       | old_path   | moved_path    | unchanged_body      | crlf_path       | crlf_label | latin1_path      | latin1_label        | baseline                | threshold |
   | vendor/lib     | Submodule       | Commit 5555555 → 6666666  | assets/art.psd | Git LFS   | Stored in Git LFS. | current      | Symlink    | scripts/build.sh | 100644      | 100755     | 100644 → 100755  | old/doc.md | docs/guide.md | No content changes. | windows/run.bat | CRLF       | legacy/names.txt | Not UTF-8 (Latin-1) | session-diff-edge-cases | 98        |
+
+Scenario Outline: A settled turn's footer opens the files its run changed, labelled when another session shared the folder
+  Given message surfacing is inactive at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And the <turn_id> turn changed <first_path> and <second_path> in a <sharing> folder
+  And the panel choice session has a settled turn
+  When I expand the surfaced turn
+  Then the turn footer shows "<entry>"
+  When I open the turn's changed files
+  Then the turn diff lists <first_path> and <second_path>
+  And the <first_path> diff shows its patch
+  And the turn diff <label> labelled as shared with other sessions
+  And the messages region visually matches <baseline> at 98 percent
+
+Examples:
+  | turn_id        | first_path | second_path  | sharing | entry           | label  | baseline            |
+  | surfacing-user | src/app.ts | src/util.ts  | shared  | 2 files changed | is     | turn-diff-shared    |
+  | surfacing-user | src/app.ts | src/util.ts  | private | 2 files changed | is not | turn-diff-private   |
+
+Scenario Outline: A turn without a capture says Not captured and links to the Diff pane
+  Given message surfacing is inactive at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And the <turn_id> turn was not captured
+  And the panel choice session has a settled turn
+  When I expand the surfaced turn
+  Then the turn footer says Not captured
+  And the messages region visually matches <baseline> at 98 percent
+  When I open the branch diff from the turn footer
+  Then the Diff right pane is selected
+
+Examples:
+  | turn_id        | baseline               |
+  | surfacing-user | turn-diff-not-captured |

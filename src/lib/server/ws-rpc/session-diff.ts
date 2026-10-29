@@ -1,9 +1,12 @@
-import { Effect, Stream } from "effect";
+import { Effect, Option, Schema, Stream } from "effect";
+import { SqlClient } from "effect/sql";
 import {
 	SessionDiffError,
 	type SessionDiffScope,
 } from "../../contracts/session-diff.js";
+import { RunChangesCapturedSchema } from "../../contracts/stored-event.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
+import { FolderTimeline } from "../../domain/daemon/Services/folder-timeline.js";
 import { SessionDiff } from "../../domain/daemon/Services/session-diff.js";
 import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
 import { readSessionWorktreeOwnership } from "../../domain/relay/Services/session-worktree-deletion.js";
@@ -21,8 +24,30 @@ const sessionDiff = Effect.serviceOption(SessionDiff).pipe(
 	),
 );
 
+/** The turn's recorded run capture, once its run-end checkpoint has settled. */
+const turnCapture = (sessionId: string, turnId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const [turn] = yield* sql<{
+			run_id: string | null;
+		}>`SELECT run_id FROM turns
+			WHERE session_id = ${sessionId} AND (id = ${turnId} OR user_message_id = ${turnId})`;
+		const runId = turn?.run_id;
+		if (!runId) return undefined;
+		const timeline = yield* Effect.serviceOption(FolderTimeline);
+		if (Option.isSome(timeline)) yield* timeline.value.settled(runId);
+		const [row] = yield* sql<{ data: string }>`SELECT data FROM events
+			WHERE session_id = ${sessionId} AND type = 'run.changes_captured'
+			AND json_extract(data, '$.runId') = ${runId} LIMIT 1`;
+		return row
+			? yield* Schema.decodeUnknownEffect(
+					Schema.fromJsonString(RunChangesCapturedSchema),
+				)(row.data)
+			: undefined;
+	});
+
 /** The session's folders as this request may read them; an unguarded one reads as missing.
- *  A branch scope also carries each folder's launch base. */
+ *  A branch scope also carries each folder's launch base, and a turn scope its run's capture. */
 const sessionFolders = (sessionId: string, scope: SessionDiffScope) =>
 	Effect.gen(function* () {
 		const { effectiveFolders } = yield* resolveSessionRequestFolders(sessionId);
@@ -46,7 +71,11 @@ const sessionFolders = (sessionId: string, scope: SessionDiffScope) =>
 				Effect.orElseSucceed(() => ({ ...listed, present: false })),
 			);
 		});
-		return { id: sessionId, folders };
+		const capture =
+			scope.kind === "turn"
+				? yield* turnCapture(sessionId, scope.turnId)
+				: undefined;
+		return { id: sessionId, folders, ...(capture ? { capture } : {}) };
 	});
 
 export const subscribeSessionDiff = (request: {

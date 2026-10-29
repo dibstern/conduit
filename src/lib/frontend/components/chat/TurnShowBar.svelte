@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from "svelte";
 	import type { TurnPanelState } from "../../stores/turn-panel.svelte.js";
 	import { assertNever } from "../../../utils.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
@@ -15,7 +16,7 @@
 	import QuotaMeter from "../ui/QuotaMeter.svelte";
 	import RunningPill from "./RunningPill.svelte";
 
-	let { panel, counts, bill, running, onlevelchange }: { panel: TurnPanelState; counts: StopCounts; bill: TurnEconomics; running: number; onlevelchange: () => void } = $props();
+	let { panel, counts, bill, running, onlevelchange, changes }: { panel: TurnPanelState; counts: StopCounts; bill: TurnEconomics; running: number; onlevelchange: () => void; changes?: Snippet } = $props();
 	// The widest row (stops with counts, Q&A, override dot, ⋯, $0.1234, ctx 32%) first fits at
 	// 709px on macOS and 708px on Linux; NarrowCardMenu pins this. Real cards top out at 712px.
 	const TABS_MIN_WIDTH = 710;
@@ -111,6 +112,7 @@
 			{@render defaultItems()}
 		</Menu>
 	{/if}
+	{@render changes?.()}
 	<RunningPill count={running} />
 	<span class="turn-meta ml-auto inline-flex items-center gap-[10px] whitespace-nowrap py-[6px] font-mono text-[11.5px] text-text-secondary">
 		<span>{bill.cost === undefined ? "Cost unavailable" : `$${bill.cost.toFixed(billDetail === "context" ? 4 : 2)}`}</span>

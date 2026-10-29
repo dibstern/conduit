@@ -40,6 +40,8 @@ export type DiffFolder =
 			/** What a branch listing compared against, and any fallback it took. */
 			readonly base?: SessionDiffBase;
 			readonly rows: readonly DiffRow[];
+			/** Another session ran in this folder during the turn. */
+			readonly shared?: true;
 	  }
 	| {
 			readonly folder: string;
@@ -57,7 +59,12 @@ export class SessionDiffView {
 	state = $state<
 		| { readonly kind: "loading" }
 		| { readonly kind: "failed"; readonly message: string }
-		| { readonly kind: "listed"; readonly folders: readonly DiffFolder[] }
+		| {
+				readonly kind: "listed";
+				readonly folders: readonly DiffFolder[];
+				/** The turn's run was never captured, so there is nothing to list. */
+				readonly notCaptured?: true;
+		  }
 	>({ kind: "loading" });
 	// Reactive: a row's load() reads it, so a row refused while hidden asks again when shown.
 	#leases = $state(0);
@@ -154,6 +161,7 @@ export class SessionDiffView {
 				return {
 					folder,
 					...(base ? { base } : {}),
+					...(entry.shared && { shared: entry.shared }),
 					rows: entry.files.map((file) => {
 						const key = [
 							folder,
@@ -175,7 +183,11 @@ export class SessionDiffView {
 				};
 			});
 			this.#rows = rows;
-			this.state = { kind: "listed", folders };
+			this.state = {
+				kind: "listed",
+				folders,
+				...(listing.notCaptured && { notCaptured: listing.notCaptured }),
+			};
 			for (const row of rows.values())
 				if (row.patch.kind === "gone") row.load();
 		} catch (error) {

@@ -2590,6 +2590,8 @@ export const UNPROJECTED: UnprojectedReasons<Unhandled> = {
 		"Audit receipt for failed upstream cleanup; no materialized projection needed",
 	"session.handoff_delivered":
 		"Delivery receipt needs no materialized projection",
+	"run.changes_captured":
+		"Turn diffs read the event itself; the Folder Timeline ref is its projection",
 };
 
 /**

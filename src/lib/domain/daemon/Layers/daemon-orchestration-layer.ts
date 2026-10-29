@@ -1,6 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { channel } from "node:diagnostics_channel";
-import { Context, Effect, HashMap, Layer, Option, Ref, Schedule } from "effect";
+import {
+	Context,
+	Effect,
+	HashMap,
+	Layer,
+	Option,
+	Ref,
+	Schedule,
+	Schema,
+	Stream,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV } from "../../../env.js";
@@ -17,6 +27,7 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
+import { canonicalEvent, EventId } from "../../../persistence/events.js";
 import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import { CommandReadModelRepository } from "../../../provider/orchestration-read-model.js";
@@ -34,6 +45,7 @@ import {
 } from "../../relay/Services/provider-runtime-ingestion-service.js";
 import { makeEventSinkFactory } from "../../relay/Services/provider-turn-dispatch.js";
 import { LoggerTag } from "../../relay/Services/services.js";
+import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { AccountDirectory } from "../Services/account-directory.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
@@ -42,6 +54,7 @@ import {
 	DaemonStoreAvailability,
 	onProjectUnavailable,
 } from "../Services/daemon-store-availability.js";
+import { FolderTimeline } from "../Services/folder-timeline.js";
 import {
 	ProjectRegistryTag,
 	ProjectSaveLockTag,
@@ -216,6 +229,57 @@ export const DaemonOrchestrationLive = Layer.effect(
 			Effect.provide(store),
 		);
 		const read = yield* makeReadQueryEffect.pipe(Effect.provide(store));
+		const timeline = yield* Effect.serviceOption(FolderTimeline);
+		const events = yield* Effect.serviceOption(SessionEventBusTag);
+		if (Option.isSome(timeline) && Option.isSome(events)) {
+			const folders = timeline.value;
+			const scope = yield* Effect.scope;
+			// The run-end checkpoint, a joined run's release and a deleted session's captures.
+			yield* (yield* events.value.subscribe()).pipe(
+				Stream.runForEach((event) => {
+					const { runId } = event.metadata;
+					if (event.runEnded && runId)
+						return folders
+							.runEnded(runId, (sessionId, capture) =>
+								Effect.gen(function* () {
+									const projectId = yield* projectOfSession(sessionId);
+									yield* persist.persistEvent(
+										canonicalEvent("run.changes_captured", sessionId, capture, {
+											provider: event.provider,
+											eventId: Schema.decodeSync(EventId)(
+												`evt_conduit_run_changes_captured_${runId}`,
+											),
+										}),
+										{ projectId },
+									);
+								}),
+							)
+							.pipe(
+								// Captures run beside the bus, which drops events a stalled subscriber misses.
+								Effect.forkIn(scope),
+								Effect.asVoid,
+							);
+					if (
+						event.type === "run.started" &&
+						runId &&
+						event.data.requestedRunId !== runId
+					)
+						return folders.runJoined(event.data.requestedRunId);
+					if (event.type === "session.deleted")
+						return Effect.forEach(
+							[event.sessionId, ...(event.data.childSessionIds ?? [])],
+							folders.forget,
+							{ discard: true },
+						).pipe(
+							// Forgetting waits for the session's own capture, not other sessions' run ends.
+							Effect.forkIn(scope),
+							Effect.asVoid,
+						);
+					return Effect.void;
+				}),
+				Effect.forkScoped,
+			);
+		}
 		const bindings = new SqliteProviderSessionBindingReadModel(sql);
 		const resolveCallContext = yield* makeProviderCallContextResolver({
 			sessionBindingReadModel: bindings,
@@ -253,6 +317,9 @@ export const DaemonOrchestrationLive = Layer.effect(
 						Effect.map((make) => make(sessionId, driver)),
 					),
 				persistUserMessage: persist.persistUserMessage,
+				...(Option.isSome(timeline)
+					? { runStarted: timeline.value.runStarted }
+					: {}),
 			},
 		});
 		yield* Effect.addFinalizer(() => engine.shutdownEffect());

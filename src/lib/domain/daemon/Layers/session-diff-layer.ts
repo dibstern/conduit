@@ -11,6 +11,7 @@ import {
 	type SessionDiffListing,
 	type SessionDiffScope,
 } from "../../../contracts/session-diff.js";
+import type { RunChangesCaptured } from "../../../contracts/stored-event.js";
 import {
 	type FolderSnapshot,
 	FolderTimeline,
@@ -113,6 +114,7 @@ type Listed =
 			readonly from: string;
 			readonly base?: SessionDiffBase;
 			readonly files: readonly SessionDiffFile[];
+			readonly shared?: true;
 	  }
 	| Extract<SessionDiffFolder, { readonly error: unknown }>;
 
@@ -329,6 +331,50 @@ export const makeSessionDiff = Effect.gen(function* () {
 			);
 		});
 
+	const unavailable = (folder: string) => (error: FolderTimelineError) =>
+		Effect.succeed<Listed>({
+			folder,
+			error: error.reason === "timeout" ? "timeout" : "unavailable",
+			message: error.message,
+		});
+
+	/** A turn lists its run's capture: each changed path before and after, from the session's store. */
+	const listTurn = (session: SessionDiffSession, capture: RunChangesCaptured) =>
+		Effect.forEach(
+			capture.folders,
+			(captured) => {
+				const folder =
+					session.folders.find(
+						({ directory }) => directory === captured.directory,
+					)?.root ?? captured.directory;
+				if ("gap" in captured)
+					return Effect.succeed<Listed>({
+						folder,
+						error: captured.gap === "timeout" ? "timeout" : "unavailable",
+						message: captured.message,
+					});
+				const snapshot = {
+					store: timeline.sessionStore(session.id),
+					prefix: "",
+					index: captured.before,
+					worktree: captured.after,
+				};
+				return listFiles(snapshot, captured.before).pipe(
+					Effect.map(
+						(files): Listed => ({
+							folder,
+							snapshot,
+							from: captured.before,
+							files,
+							...(captured.shared ? { shared: true as const } : {}),
+						}),
+					),
+					Effect.catch(unavailable(folder)),
+				);
+			},
+			{ concurrency: "unbounded" },
+		);
+
 	const listFolder = (folder: SessionFolder, scope: SessionDiffScope) =>
 		Effect.gen(function* (): Effect.fn.Return<Listed, FolderTimelineError> {
 			if (!folder.present)
@@ -348,18 +394,7 @@ export const makeSessionDiff = Effect.gen(function* () {
 				...compared,
 				files: yield* listFiles(snapshot, compared.from),
 			};
-		}).pipe(
-			Effect.catch((error) =>
-				Effect.succeed<Listed>({
-					folder: folder.root,
-					error:
-						error.reason === "timeout"
-							? ("timeout" as const)
-							: ("unavailable" as const),
-					message: error.message,
-				}),
-			),
-		);
+		}).pipe(Effect.catch(unavailable(folder.root)));
 
 	/** The listing a revision names, if this (session, scope) made it. */
 	const recall = (sessionId: string, scopeKey: string, revision?: string) => {
@@ -374,11 +409,17 @@ export const makeSessionDiff = Effect.gen(function* () {
 			const scopeKey = JSON.stringify(scope);
 			const recalled = recall(session.id, scopeKey, revision);
 			if (recalled) return recalled;
-			const folders = yield* Effect.forEach(
-				session.folders,
-				(folder) => listFolder(folder, scope),
-				{ concurrency: "unbounded" },
-			);
+			const notCaptured = scope.kind === "turn" && !session.capture;
+			const folders =
+				scope.kind !== "turn"
+					? yield* Effect.forEach(
+							session.folders,
+							(folder) => listFolder(folder, scope),
+							{ concurrency: "unbounded" },
+						)
+					: session.capture
+						? yield* listTurn(session, session.capture)
+						: [];
 			const listed = createHash("sha256")
 				.update(
 					JSON.stringify([
@@ -402,9 +443,11 @@ export const makeSessionDiff = Effect.gen(function* () {
 									folder: folder.folder,
 									files: folder.files,
 									...(folder.base ? { base: folder.base } : {}),
+									...(folder.shared ? { shared: true as const } : {}),
 								}
 							: folder,
 				),
+				...(notCaptured ? { notCaptured: true as const } : {}),
 			} satisfies SessionDiffListing;
 			memo.delete(listed);
 			memo.set(listed, {

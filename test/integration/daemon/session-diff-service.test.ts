@@ -924,6 +924,12 @@ it("stops snapshotting when a subscriber is interrupted at any step of joining",
 							folderGit: () =>
 								Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
 							collect: () => Effect.void,
+							runStarted: () => Effect.void,
+							runJoined: () => Effect.void,
+							runEnded: () => Effect.void,
+							settled: () => Effect.void,
+							sessionStore: () => "store",
+							forget: () => Effect.void,
 						}),
 						Effect.provideService(SessionGit, {
 							read: () => Effect.succeed(undefined),

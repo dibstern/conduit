@@ -74,6 +74,7 @@ import {
 	type ProviderCommandInteractionSinkFactory,
 	type ProviderCommandStoreFailure,
 	ProviderSideEffectReactor,
+	type RunStarted,
 } from "./orchestration-side-effect-reactor.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import {
@@ -233,6 +234,7 @@ export interface DurableCommandStoreOptions {
 	readonly projectContext?: (
 		projectId: string,
 	) => Option.Option<import("effect").Context.Context<never>>;
+	readonly runStarted?: RunStarted;
 }
 
 export interface ProviderCallRequest {
@@ -398,6 +400,7 @@ export class OrchestrationEngine {
 					...(durable.projectContext
 						? { projectContext: durable.projectContext }
 						: {}),
+					...(durable.runStarted ? { runStarted: durable.runStarted } : {}),
 					...(durable.persistUserMessage
 						? { persistUserMessage: durable.persistUserMessage }
 						: {}),
