@@ -23,7 +23,7 @@
 	import ConnectOverlay from "../overlays/ConnectOverlay.svelte";
 	import Banners from "../overlays/Banners.svelte";
 	import NotificationStack from "../overlays/NotificationStack.svelte";
-	import ImageLightbox from "../overlays/ImageLightbox.svelte";
+	import MediaViewer from "../overlays/MediaViewer.svelte";
 	import type { SettingsOpenDetail, SettingsSection } from "./chrome-actions.js";
 	import RewindBanner from "../overlays/RewindBanner.svelte";
 	import Button from "../ui/Button.svelte";
@@ -790,7 +790,7 @@
 {/if}
 
 <!-- Global overlays + notification stack (outside layout for proper z-index stacking) -->
-<ImageLightbox />
+<MediaViewer />
 <NotificationStack />
 <svelte:window onkeydown={handleDeepSearchShortcut} />
 {#if deepSearchEverOpened}

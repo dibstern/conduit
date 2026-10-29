@@ -478,7 +478,7 @@ if (stories.length > 0) {
 		["input-filemenu--hides-when-no-matches", "all"],
 		["input-commandmenu--hides-when-no-matches", "all"],
 		["overlays-confirmmodal--hidden", "all"],
-		["overlays-imagelightbox--hidden", "all"],
+		["overlays-mediaviewer--hidden", "all"],
 		["overlays-qrmodal--hidden", "all"],
 		["overlays-rewindbanner--inactive", "all"],
 		["overlays-connectoverlay--connected", "all"],

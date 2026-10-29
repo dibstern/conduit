@@ -1,10 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { uiState } from "../../stores/ui.svelte.js";
-import ImageLightbox from "./ImageLightbox.svelte";
+import MediaViewer from "./MediaViewer.svelte";
 
 const meta = {
-	title: "Overlays/ImageLightbox",
-	component: ImageLightbox,
+	title: "Overlays/MediaViewer",
+	component: MediaViewer,
 	tags: ["autodocs"],
 	parameters: {
 		docs: { story: { inline: false, height: "400px" } },
@@ -12,7 +12,7 @@ const meta = {
 	beforeEach: () => {
 		uiState.lightboxSrc = null;
 	},
-} satisfies Meta<typeof ImageLightbox>;
+} satisfies Meta<typeof MediaViewer>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
