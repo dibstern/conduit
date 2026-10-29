@@ -76,7 +76,10 @@ import {
 	makeProcessSessionRunner,
 	type ProcessRunnerDriver,
 } from "../../../src/lib/provider/runner/process-session-runner.js";
-import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-legacy-classification.js";
+import {
+	isLegacyRunner,
+	legacyRunnerRunQuery,
+} from "../../../src/lib/provider/runner/runner-legacy-classification.js";
 import {
 	type RunnerCommandFailure,
 	type RunnerHello,
@@ -275,6 +278,10 @@ const retirementFixture = (
 						destroy: () => destroyed(options.runnerId),
 						write: () => {},
 					} as unknown as RunnerSocket;
+					// A real connection's hello claim records that this runner journals.
+					yield* sql`UPDATE claude_runner_cursors SET journals_before_execution = 1 WHERE runner_id = ${options.runnerId}`.pipe(
+						Effect.orDie,
+					);
 					yield* options.onHello(
 						{
 							type: "hello",
@@ -998,7 +1005,10 @@ const s7Fixture = (
 							configurable: true,
 							get: () => retained.sendCommands,
 						});
-						return options.onHello(retained, connection, replay);
+						return f.sql`UPDATE claude_runner_cursors SET journals_before_execution = ${Number(!isLegacyRunner(retained))} WHERE runner_id = ${options.runnerId}`.pipe(
+							Effect.orDie,
+							Effect.andThen(options.onHello(retained, connection, replay)),
+						);
 					},
 				}),
 			);

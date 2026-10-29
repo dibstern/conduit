@@ -2,8 +2,6 @@ import type { ChildProcess } from "node:child_process";
 import { Deferred, Effect, type Semaphore } from "effect";
 import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
 import type { ProviderRuntimeIngestion } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
-import type { Grant } from "./runner-authority.js";
-import { isLegacyRunner } from "./runner-legacy-classification.js";
 import type { RunnerHello, RunnerSocket } from "./runner-protocol.js";
 import type { RunnerMember } from "./runner-receipts.js";
 import type { currentPendingSendOwner } from "./runner-recovery.js";
@@ -18,13 +16,10 @@ import type {
 	SessionTurn,
 } from "./session-runner.js";
 
-/** Read-only outside this module, which is the only writer of every field but the grant. */
+/** Read-only outside this module, which is the only writer of every field. */
 export interface RunnerChild {
 	readonly recoveringCommands?: boolean;
-	readonly journalsBeforeExecution?: boolean;
 	readonly ownsPendingSend?: Effect.Success<typeof currentPendingSendOwner>;
-	grant?: Grant | undefined;
-	outputAuthority?: { grant: Grant | undefined } | undefined;
 	readonly attachmentId?: string | undefined;
 	readonly registeredAt?: number;
 	readonly sessionId: string;
@@ -371,7 +366,6 @@ export const connect = (
 ) => {
 	const { hello, connection } = attachment;
 	const writable: Writable<RunnerChild> = entry;
-	writable.journalsBeforeExecution = !isLegacyRunner(hello);
 	bindProcess(entry, { pid: hello.pid, startTime: attachment.startTime });
 	writable.reaper = hello.reaper;
 	if (attachment.owns() && !connection.closed) {

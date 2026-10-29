@@ -108,6 +108,33 @@ describe("send settlement ownership", () => {
 		expect(kinds.sort()).toEqual(["run.dispatched", "run.released"]);
 	});
 
+	it("constructs delivery_unknown evidence only in Settle", () => {
+		const constructors = sources(join(root, "src/lib")).flatMap((file) => {
+			const parsed = ts.createSourceFile(
+				file,
+				readFileSync(file, "utf8"),
+				ts.ScriptTarget.Latest,
+				true,
+			);
+			const found: string[] = [];
+			const visit = (node: ts.Node): void => {
+				if (
+					ts.isPropertyAssignment(node) &&
+					node.name.getText(parsed) === "_tag" &&
+					ts.isStringLiteral(node.initializer) &&
+					node.initializer.text === "delivery_unknown"
+				)
+					found.push(relative(root, file));
+				ts.forEachChild(node, visit);
+			};
+			visit(parsed);
+			return found;
+		});
+		expect(constructors).toEqual([
+			"src/lib/provider/runner/runner-retirement.ts",
+		]);
+	});
+
 	it("keeps the run-terminal writer private to the outbox adapter", () => {
 		const imports = sources(join(root, "src/lib")).flatMap((file) => {
 			const parsed = ts.createSourceFile(

@@ -290,6 +290,8 @@ export interface RunnerCursorIdentity {
 	readonly startTime?: string | undefined;
 	readonly ownedRunIds?: readonly string[] | undefined;
 	readonly reaper?: RunnerMember | undefined;
+	/** Recorded at hello; see journalsBeforeExecution. */
+	readonly journalsBeforeExecution?: boolean | undefined;
 }
 
 /** Only the server consumes this context and writes the durable checkpoint. */
@@ -755,12 +757,13 @@ export const makeRunnerReceiptStore = (
 				sql<{
 					sequence: number;
 					result_json: string;
-				}>`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, pid, start_time, driver_kind, reaper_pid, reaper_start_time)
-					VALUES (${runnerId}, 0, ${attachmentId}, ${identity?.sessionId ?? ""}, ${identity?.pid ?? null}, ${identity?.startTime ?? null}, ${identity?.driverKind ?? "claude"}, ${identity?.reaper?.pid ?? null}, ${identity?.reaper?.startTime ?? null})
+				}>`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, pid, start_time, driver_kind, reaper_pid, reaper_start_time, journals_before_execution)
+					VALUES (${runnerId}, 0, ${attachmentId}, ${identity?.sessionId ?? ""}, ${identity?.pid ?? null}, ${identity?.startTime ?? null}, ${identity?.driverKind ?? "claude"}, ${identity?.reaper?.pid ?? null}, ${identity?.reaper?.startTime ?? null}, ${identity?.journalsBeforeExecution === undefined ? null : Number(identity.journalsBeforeExecution)})
 					ON CONFLICT(runner_id) DO UPDATE SET attachment_id = excluded.attachment_id,
 					session_id = COALESCE(NULLIF(excluded.session_id, ''), claude_runner_cursors.session_id),
 					pid = COALESCE(excluded.pid, claude_runner_cursors.pid), start_time = COALESCE(excluded.start_time, claude_runner_cursors.start_time),
 					reaper_pid = COALESCE(excluded.reaper_pid, claude_runner_cursors.reaper_pid), reaper_start_time = COALESCE(excluded.reaper_start_time, claude_runner_cursors.reaper_start_time),
+					journals_before_execution = COALESCE(excluded.journals_before_execution, claude_runner_cursors.journals_before_execution),
 					driver_kind = CASE WHEN ${identity?.driverKind !== undefined} THEN excluded.driver_kind ELSE claude_runner_cursors.driver_kind END
 					WHERE claude_runner_cursors.retired_at IS NULL
 				RETURNING sequence, result_json`.pipe(

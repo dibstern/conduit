@@ -5,6 +5,7 @@ import { Deferred, Effect, Semaphore } from "effect";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../daemon/config-persistence.js";
 import { observeTurnTimelineFrame } from "../../domain/daemon/Services/turn-timeline.js";
 import * as Failure from "../../effect/failure-classification.js";
+import { isLegacyRunner } from "./runner-legacy-classification.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
 	type RunnerHello,
@@ -244,6 +245,7 @@ export const connectRunner = (options: {
 												pid: message.pid ?? options.pid,
 												driverKind:
 													message.driverKind ?? options.driverKind ?? "claude",
+												journalsBeforeExecution: !isLegacyRunner(message),
 											})
 											.pipe(
 												Effect.mapError((cause) =>

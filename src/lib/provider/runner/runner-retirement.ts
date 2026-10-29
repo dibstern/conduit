@@ -1,6 +1,7 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import {
+	Cause,
 	Clock,
 	Context,
 	Data,
@@ -11,10 +12,14 @@ import {
 	Layer,
 	Option,
 	Scheduler,
+	Schema,
+	type Semaphore,
 } from "effect";
 import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
+import type { ProviderRuntimeIngestion } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
 import * as Failure from "../../effect/failure-classification.js";
+import { createLogger } from "../../logger.js";
 import type {
 	CommitAndSignal,
 	CommitAndSignalFailure,
@@ -27,12 +32,28 @@ import {
 	type EventPayloadMap,
 } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
+import { isClaudeResumeRefused } from "../event-sink-errors.js";
 import {
 	runSendCommandIdQuery,
 	stopCovers,
 } from "../session-run-settlement.js";
+import {
+	type Grant,
+	makeRunnerAuthority,
+	type RunnerIdentity,
+} from "./runner-authority.js";
 import { connectRunner } from "./runner-connection.js";
-import { type RunnerSocket, runnerFailure } from "./runner-protocol.js";
+import type { RunnerChild } from "./runner-entry-lifecycle.js";
+import * as Entry from "./runner-entry-lifecycle.js";
+import {
+	journalsBeforeExecution,
+	legacyRunnerRunPredicate,
+} from "./runner-legacy-classification.js";
+import {
+	type RunnerSocket,
+	runnerBuildId,
+	runnerFailure,
+} from "./runner-protocol.js";
 import {
 	makeRunnerReceiptStore,
 	mergeRunnerMembers,
@@ -52,20 +73,27 @@ import {
 import {
 	discoverRunners,
 	type RunnerProcessTable,
+	readRunnerEvidence,
 	removeRunnerDiscovery,
+	runnerDirectory,
 	runnerPidMatchesRegistration,
 	runnerProcessTable,
 } from "./runner-registry.js";
 import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
+import { readRunnerSendJournal } from "./runner-send-journal.js";
 import {
+	type HeldSendRef,
 	type SendEvidence,
 	type SettlementTx,
 	type StoreFault,
 	sendRetryBackoff,
+	terminalTurnResult,
 	toStoreFault,
 } from "./send-settlement.js";
 import { settleSend } from "./send-settlement-outbox.js";
 import type { SessionFailure } from "./session-runner.js";
+
+const log = createLogger("runner-retirement");
 
 export type Hold =
 	| {
@@ -555,17 +583,29 @@ export const makeRunnerStopReconciler = (options: {
 		SessionFailure
 	>;
 	readonly released?: (input: RunRelease) => Effect.Effect<void>;
-	readonly recoverable?: (row: {
-		readonly sessionId: string;
-		readonly driverKind: string;
-	}) => Effect.Effect<boolean, SessionFailure>;
 	readonly committed: (
 		record: RunnerRetirement,
 	) => Effect.Effect<void, unknown>;
 	readonly shutdown: (record: RunnerRetirement) => Effect.Effect<void, unknown>;
-	readonly settle: (
-		record: RunnerRetirement,
-	) => Effect.Effect<boolean, unknown>;
+	/** Without it, Settle waits for the owner that will settle on recovery. */
+	readonly settlement?: {
+		readonly sql: SqlClient.SqlClient | undefined;
+		readonly configDir: string;
+		readonly driverKind: string;
+		readonly entry: (runnerId: string) => RunnerChild | undefined;
+		readonly ingestion: (
+			sessionId: string,
+			entry: RunnerChild | undefined,
+		) => Effect.Effect<
+			Pick<ProviderRuntimeIngestion, "ingestBatch"> | undefined,
+			unknown
+		>;
+		readonly projectRoot: (
+			sessionId: string,
+		) => Effect.Effect<string | undefined, unknown>;
+		readonly commit: (evidence: SendEvidence) => Effect.Effect<void, unknown>;
+		readonly wake: (sessionId: string) => Effect.Effect<void, unknown>;
+	};
 	readonly evict: (record: RunnerRetirement) => Effect.Effect<void, unknown>;
 	readonly prune: (record: RunnerRetirement) => Effect.Effect<void, unknown>;
 	readonly notice: (
@@ -688,6 +728,219 @@ export const makeRunnerStopReconciler = (options: {
 				});
 			});
 		};
+		// One observation per held transmission survives a failed commit for the retry.
+		const pendingGoneSettlements = new Map<string, SendEvidence>();
+		const settle = (retirement: RunnerRetirement) =>
+			Effect.gen(function* () {
+				const settlement = options.settlement;
+				if (!settlement) return false;
+				const { sql, configDir } = settlement;
+				if (!sql) return true;
+				const entry = settlement.entry(retirement.runnerId);
+				const sessionIngestion = yield* settlement.ingestion(
+					retirement.sessionId,
+					entry,
+				);
+				if (!sessionIngestion) {
+					// Deleting a session deletes its runs, so nothing is left to settle.
+					const [session] = yield* sql<{
+						id: string;
+					}>`SELECT id FROM sessions WHERE id = ${retirement.sessionId}`;
+					if (session) return false;
+					if (options.receipts)
+						yield* options.receipts.settled(retirement.runnerId);
+					return true;
+				}
+				const commands = yield* sql<{
+					request_sequence: number;
+					project_key: string;
+					session_id: string;
+					command_id: string;
+					attempt_count: number;
+					provider_id: string;
+					run_id: string;
+					payload_json: string;
+					transmission: number;
+				}>`SELECT command.request_sequence, command.project_key, command.session_id, command.command_id, command.attempt_count, command.provider_id, command.run_id, command.payload_json, run.held_transmission AS transmission FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id WHERE command.session_id = ${retirement.sessionId} AND command.effect_type = 'send_turn' AND run.runner_id = ${retirement.runnerId} AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running')`;
+				for (const command of commands) {
+					const key = JSON.stringify([
+						retirement.runnerId,
+						command.run_id,
+						command.request_sequence,
+						command.attempt_count,
+						command.transmission,
+					]);
+					let observed = pendingGoneSettlements.get(key);
+					if (!observed) {
+						const root =
+							entry?.registrationRoot ??
+							(yield* settlement.projectRoot(retirement.sessionId));
+						const directory = entry
+							? dirname(entry.socketPath)
+							: root
+								? runnerDirectory(root, configDir)
+								: undefined;
+						const evidence = readRunnerEvidence(
+							configDir,
+							retirement.runnerId,
+							retirement.sessionId,
+						);
+						const [cursor] = yield* sql<{
+							journals_before_execution: number | null;
+						}>`SELECT journals_before_execution FROM claude_runner_cursors WHERE runner_id = ${retirement.runnerId}`;
+						const journalBuild = journalsBeforeExecution(
+							cursor,
+							evidence?.buildId === runnerBuildId(),
+						);
+						const journalDirectory = evidence
+							? dirname(evidence.socketPath)
+							: directory;
+						const decodedPayload = yield* Effect.result(
+							Effect.try((): unknown => JSON.parse(command.payload_json)),
+						);
+						const payload =
+							decodedPayload._tag === "Success"
+								? decodedPayload.success
+								: undefined;
+						const journal = journalDirectory
+							? readRunnerSendJournal({
+									directory: journalDirectory,
+									sessionId: retirement.sessionId,
+									driverKind: settlement.driverKind,
+									commandId: command.command_id,
+									attempt: command.attempt_count,
+									nativeResumeFallback:
+										isRecord(payload) &&
+										payload["nativeResumeFallback"] === true,
+								})
+							: { _tag: "Unreadable" as const };
+						if (journalBuild && journal._tag === "Absent") {
+							yield* release({
+								sessionId: retirement.sessionId,
+								runId: command.run_id,
+								runnerId: retirement.runnerId,
+								commandId: command.command_id,
+								transmission: command.transmission,
+								reason: "JournalAbsent",
+							});
+							continue;
+						}
+						if (
+							journal._tag === "Present" &&
+							journal.state.status === "finished" &&
+							!(
+								isRecord(payload) && payload["nativeResumeFallback"] === true
+							) &&
+							(journal.state.result?.nativeResumeRejected ||
+								isClaudeResumeRefused(
+									journal.state.failure ?? journal.state.result?.error,
+								))
+						) {
+							yield* release({
+								sessionId: retirement.sessionId,
+								runId: command.run_id,
+								runnerId: retirement.runnerId,
+								commandId: command.command_id,
+								transmission: command.transmission,
+								reason: "ResumeRejected",
+							});
+							continue;
+						}
+						const send: HeldSendRef = {
+							sessionId: retirement.sessionId,
+							runId: command.run_id,
+							commandId: command.command_id,
+							requestSequence: command.request_sequence,
+							attempt: command.attempt_count,
+							runnerId: retirement.runnerId,
+							transmission: command.transmission,
+						};
+						const observedAt = clock.currentTimeMillisUnsafe();
+						const answer =
+							journal._tag === "Present" ? journal.state : undefined;
+						const finished = answer?.status === "finished" ? answer : undefined;
+						// An uncertain offline journal or an intake-only result under a
+						// deliberate stop retains the existing interrupted process-loss outcome.
+						// Missing or unreadable evidence remains delivery unknown (7.3).
+						const consumedOnly =
+							answer?.status === "uncertain" ||
+							finished?.result?.status === "accepted" ||
+							finished?.result?.status === "joined";
+						if (
+							finished &&
+							(finished.failure || terminalTurnResult(finished.result))
+						) {
+							observed = {
+								_tag: "journal_finished",
+								send,
+								answer: finished,
+								observedAt,
+							};
+						} else if (
+							consumedOnly &&
+							retirement.stopReason !== '{"_tag":"Exited"}'
+						) {
+							const reason: StopReason = yield* Schema.decodeUnknownEffect(
+								Schema.fromJsonString(
+									Schema.Union([
+										Schema.Struct({
+											_tag: Schema.Literals([
+												"Explicit",
+												"EndSession",
+												"ProjectRemoved",
+												"Idle",
+												"CandidateAbandoned",
+											]),
+										}),
+										Schema.Struct({
+											_tag: Schema.Literal("Superseded"),
+											successor: Schema.String,
+										}),
+									]),
+								),
+							)(retirement.stopReason);
+							observed = { _tag: "process_lost", send, reason, observedAt };
+						} else observed = { _tag: "delivery_unknown", send, observedAt };
+						pendingGoneSettlements.set(key, observed);
+					}
+					yield* settlement.commit(observed);
+					pendingGoneSettlements.delete(key);
+					yield* settlement.wake(retirement.sessionId);
+				}
+				const owners = sql<{
+					runId: string;
+				}>`SELECT DISTINCT owner.id AS runId
+			FROM provider_runs requested JOIN provider_runs owner
+			ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
+			WHERE requested.session_id = ${retirement.sessionId} AND owner.status IN ('pending', 'running')
+			AND (${legacyRunnerRunPredicate(sql, retirement.sessionId, sql`owner.id`)}
+				OR NOT EXISTS (SELECT 1 FROM provider_command_outbox command
+					JOIN provider_runs send_run ON send_run.id = command.run_id AND send_run.session_id = command.session_id
+					WHERE command.session_id = requested.session_id AND command.effect_type = 'send_turn'
+					AND COALESCE(send_run.joined_into, send_run.id) = owner.id))
+			AND (owner.runner_id = ${retirement.runnerId} OR (owner.runner_id IS NULL AND requested.id IN ${sql.in(retirement.ownedRunIds)}))`;
+				// Removal ends launched runs process lost (3.11), as an error as on main.
+				const errorCode =
+					retirement.stopReason === '{"_tag":"Exited"}'
+						? entry?.lifecycle.idleExiting
+							? undefined
+							: String(entry?.lifecycle.failure?.code ?? "provider_error")
+						: retirement.stopReason === '{"_tag":"ProjectRemoved"}'
+							? "runner_stopped"
+							: undefined;
+				yield* sessionIngestion.ingestBatch([], {
+					settleRuns: {
+						sessionId: retirement.sessionId,
+						reason: "Provider process stopped",
+						owners,
+						...(errorCode ? { errorCode } : {}),
+					},
+					...(options.receipts
+						? { beforeCommit: options.receipts.settled(retirement.runnerId) }
+						: {}),
+				});
+				return true;
+			});
 		const tick = (runnerId: string, retry = false, notice = false) =>
 			Effect.gen(function* () {
 				let retryPending = retry;
@@ -787,7 +1040,7 @@ export const makeRunnerStopReconciler = (options: {
 								break;
 							}
 							case "Settle":
-								if (!(yield* options.settle(record))) return;
+								if (!(yield* settle(record))) return;
 								break;
 							case "Evict":
 								yield* options.evict(record);
@@ -1174,15 +1427,19 @@ export const makeRunnerStopReconciler = (options: {
 						}),
 			requestStop,
 			release,
-			recover: () =>
+			recover: (
+				recoverable?: (row: {
+					readonly sessionId: string;
+					readonly driverKind: string;
+				}) => Effect.Effect<boolean, SessionFailure>,
+			) =>
 				Effect.gen(function* () {
 					const recovered = yield* refreshRows();
 					const retirements = yield* options.receipts?.retirements(
 						recovered.rows.map((row) => row.runnerId),
 					) ?? Effect.succeed({ rows: [], rejected: [] });
 					for (const record of retirements.rows) {
-						if (options.recoverable && !(yield* options.recoverable(record)))
-							continue;
+						if (recoverable && !(yield* recoverable(record))) continue;
 						if (get(record.runnerId)._tag !== "Running") continue;
 						setStop(record.runnerId, stoppedState(record));
 						watch(record.runnerId);
@@ -1190,8 +1447,7 @@ export const makeRunnerStopReconciler = (options: {
 					// Startup registers these intents and does not wait on their
 					// commits; a busy store must not hold up reattachment.
 					for (const row of recovered.rows) {
-						if (options.recoverable && !(yield* options.recoverable(row)))
-							continue;
+						if (recoverable && !(yield* recoverable(row))) continue;
 						if (row.retiredAt !== null || get(row.runnerId)._tag !== "Running")
 							continue;
 						if (row.role === "candidate")
@@ -1257,6 +1513,299 @@ export const makeRunnerStopReconciler = (options: {
 					}
 					return yield* wait;
 				}),
+		};
+	});
+
+type ReconcilerOptions = Parameters<typeof makeRunnerStopReconciler>[0];
+
+/** The attachment a grant was read for; adoption moves only the latest one. */
+export interface RunnerAttachment {
+	readonly runnerId: string;
+}
+
+/**
+ * Retirement owns process authority and every runner stop: the reconciler,
+ * the grants an entry and its latest attachment write with, the End command a
+ * stop keeps, and the manager's recovery and closing flags.
+ */
+export const makeRunnerRetirement = (
+	options: Omit<
+		ReconcilerOptions,
+		"committed" | "waitForExit" | "settlement"
+	> & {
+		readonly driverKind: string;
+		readonly settlement: Omit<
+			NonNullable<ReconcilerOptions["settlement"]>,
+			"driverKind" | "entry"
+		>;
+		readonly close: {
+			readonly lock: Semaphore.Semaphore;
+			readonly sends: Effect.Effect<void>;
+			readonly release: (
+				entry: RunnerChild,
+				cause: Cause.Cause<SessionFailure>,
+			) => Effect.Effect<void>;
+			readonly detach: (entry: RunnerChild) => void;
+		};
+	},
+) =>
+	Effect.gen(function* () {
+		const clock = yield* Clock.Clock;
+		const authority = yield* makeRunnerAuthority<RunnerChild>(
+			options.receipts,
+			(runnerId) => retirementOf(runnerId),
+		);
+		const grants = new WeakMap<RunnerChild | RunnerAttachment, Grant>();
+		const attachments = new WeakMap<RunnerChild, RunnerAttachment>();
+		const endCommands = new Map<string, string>();
+		const recoveredRunnerIds = new Set<string>();
+		let recovering = false;
+		let closing = false;
+		const retirementOf = (runnerId: string): RunnerRetirement | undefined => {
+			const state = stops.state(runnerId);
+			return "record" in state ? state.record : undefined;
+		};
+		const identityFor = (entry: RunnerChild): RunnerIdentity<RunnerChild> => {
+			const retirement = retirementOf(entry.runnerId);
+			return {
+				runnerId: entry.runnerId,
+				sessionId: entry.sessionId,
+				driverKind: options.driverKind,
+				pid: entry.pid ?? entry.child?.pid,
+				startTime: entry.startTime,
+				reaper: entry.reaper,
+				members: retirement?.members ?? [],
+				signalLog: retirement?.signalLog ?? [],
+				registeredAt: entry.registeredAt ?? 0,
+				socketPath: entry.socketPath,
+				attachmentId: entry.attachmentId,
+				ownedRunIds: [...(entry.ownedRunIds ?? [])],
+				signalled: retirement !== undefined && retirement.signal.tag !== "None",
+				signal: retirement?.signal ?? { tag: "None" },
+				entry,
+			};
+		};
+		const retirementForIdentity = (
+			identity: RunnerIdentity<RunnerChild>,
+		): RunnerRetirement =>
+			retirementOf(identity.runnerId) ?? {
+				runnerId: identity.runnerId,
+				sessionId: identity.sessionId,
+				driverKind: identity.driverKind,
+				identity:
+					identity.pid !== undefined && identity.startTime !== undefined
+						? {
+								tag: "Verified",
+								pid: identity.pid,
+								startTime: identity.startTime,
+							}
+						: {
+								tag: "Unverifiable",
+								...(identity.pid === undefined ? {} : { pid: identity.pid }),
+							},
+				reaper: identity.reaper,
+				members: identity.members,
+				signalLog: identity.signalLog,
+				signal: identity.signal,
+				retirement: { tag: "Watching" },
+				ownedRunIds: [],
+				retiredAt: clock.currentTimeMillisUnsafe(),
+				stopReason: "runner retired",
+			};
+		const retirementFor = (entry: RunnerChild): RunnerRetirement =>
+			retirementForIdentity(identityFor(entry));
+		const entryOf = (runnerId: string) =>
+			authority.records.get(runnerId)?.identity.entry;
+		const stops: Effect.Success<ReturnType<typeof makeRunnerStopReconciler>> =
+			yield* makeRunnerStopReconciler({
+				...options,
+				settlement: {
+					...options.settlement,
+					driverKind: options.driverKind,
+					entry: entryOf,
+				},
+				waitForExit: (retirement) => {
+					const child = entryOf(retirement.runnerId)?.child;
+					if (!child || child.exitCode !== null || child.signalCode !== null)
+						return undefined;
+					return Effect.callback<void>((resume) => {
+						if (child.exitCode !== null || child.signalCode !== null) {
+							resume(Effect.void);
+							return;
+						}
+						const exited = () => resume(Effect.void);
+						child.once("exit", exited);
+						return Effect.sync(() => {
+							child.off("exit", exited);
+						});
+					});
+				},
+				committed: (retirement) =>
+					Effect.gen(function* () {
+						const record = authority.records.get(retirement.runnerId);
+						const entry = record?.identity.entry;
+						if (entry) {
+							Entry.transition(entry, { _tag: "Stop" });
+							authority.captureBeforeRevoke(entry.runnerId, identityFor(entry));
+						}
+						authority.recordRetirement(retirement);
+						if (!entry)
+							log.warn(
+								`Retired surviving runner ${retirement.runnerId} for session ${retirement.sessionId}`,
+							);
+						if (record && record.tag._tag !== "Retired")
+							yield* authority.revoke(record.grant, "retired", {
+								ownedRunIds: record.identity.ownedRunIds,
+							});
+					}),
+				prune: (retirement) =>
+					options.prune(retirement).pipe(
+						Effect.andThen(
+							Effect.sync(() => {
+								endCommands.delete(retirement.runnerId);
+								recoveredRunnerIds.delete(retirement.runnerId);
+								authority.forget(retirement.runnerId);
+							}),
+						),
+					),
+			});
+		return {
+			...stops,
+			get records() {
+				return authority.records;
+			},
+			adopt: authority.adopt,
+			guarded: authority.guarded,
+			observe: authority.observe,
+			detach: authority.detach,
+			identityFor,
+			retirementFor,
+			retirementForIdentity,
+			/** Adopts the entry and moves its grant to the entry's latest attachment. */
+			adoptEntry: (entry: RunnerChild, phase: "starting" | "live") =>
+				authority.adopt([identityFor(entry)], phase).pipe(
+					Effect.mapError((cause) => runnerFailure("adopt runner", cause)),
+					Effect.flatMap(({ grants: adopted }) => {
+						const grant = adopted.get(entry.runnerId);
+						const attachment = attachments.get(entry);
+						for (const holder of attachment ? [entry, attachment] : [entry])
+							if (grant) grants.set(holder, grant);
+							else grants.delete(holder);
+						return grant
+							? Effect.void
+							: Effect.fail(
+									runnerFailure("adopt runner", "Runner authority was revoked"),
+								);
+					}),
+				),
+			/** A new attachment writes with the entry's grant until a later adoption. */
+			attach: (entry: RunnerChild): RunnerAttachment => {
+				const attachment = { runnerId: entry.runnerId };
+				const grant = grants.get(entry);
+				if (grant) grants.set(attachment, grant);
+				attachments.set(entry, attachment);
+				return attachment;
+			},
+			grantOf: (holder: RunnerChild | RunnerAttachment) => grants.get(holder),
+			stopRunner: (
+				entry: RunnerChild,
+				exceptCommandId?: string,
+				intent: "stop" | "failure" = "stop",
+				reason: StopReason = {
+					_tag: intent === "failure" ? "Exited" : "Explicit",
+				},
+			): Effect.Effect<void, SessionFailure> =>
+				Effect.gen(function* () {
+					if (intent === "failure")
+						yield* entry.outputs.withPermits(1)(Effect.void);
+					if (exceptCommandId) endCommands.set(entry.runnerId, exceptCommandId);
+					const stop = yield* stops
+						.requestStop(retirementFor(entry), reason)
+						.pipe(
+							Effect.tapError(() =>
+								Effect.sync(() => {
+									if (exceptCommandId) endCommands.delete(entry.runnerId);
+								}),
+							),
+						);
+					if (stop === "Requested")
+						yield* stops.awaitStop(entry.runnerId, "Escalated");
+				}),
+			/** The End command a runner's stop keeps answering, until it is pruned. */
+			endCommand: (runnerId: string) => endCommands.get(runnerId),
+			recoveredRunnerIds: recoveredRunnerIds as ReadonlySet<string>,
+			recover: (
+				recoverable: Parameters<typeof stops.recover>[0],
+			): ReturnType<typeof stops.recover> =>
+				stops.recover(recoverable).pipe(
+					Effect.tap((recovered) =>
+						Effect.sync(() => {
+							for (const row of recovered.rows)
+								recoveredRunnerIds.add(row.runnerId);
+						}),
+					),
+				),
+			/** A whole-manager recovery holds back upgrades until it exits. */
+			recovering: <A, E, R>(
+				sessionIds: ReadonlySet<string> | undefined,
+				body: Effect.Effect<A, E, R>,
+			): Effect.Effect<A, E, R> =>
+				sessionIds
+					? body
+					: Effect.suspend(() => {
+							recovering = true;
+							return body;
+						}).pipe(
+							Effect.ensuring(
+								Effect.sync(() => {
+									recovering = false;
+								}),
+							),
+						),
+			get inRecovery() {
+				return recovering;
+			},
+			get closing() {
+				return closing;
+			},
+			shutdown: options.close.lock
+				.withPermits(1)(
+					Effect.gen(function* () {
+						closing = true;
+						const entries = [...authority.records.values()].flatMap((record) =>
+							record.identity.entry && record.tag._tag !== "Retired"
+								? [record.identity.entry]
+								: [],
+						);
+						for (const entry of entries) Entry.notifyEntry(entry);
+						yield* options.close.sends;
+						const release = Effect.forEach(
+							entries,
+							(entry) =>
+								options.close.release(
+									entry,
+									Cause.fail(
+										runnerFailure("shutdown", "Runners are shutting down"),
+									),
+								),
+							{ discard: true },
+						);
+						return yield* Effect.forEach(
+							entries,
+							(entry) => Effect.sync(() => options.close.detach(entry)),
+							{ discard: true, concurrency: 4 },
+						).pipe(
+							Effect.ensuring(
+								Effect.sync(() => {
+									for (const runnerId of authority.records.keys())
+										authority.forget(runnerId);
+								}),
+							),
+							Effect.ensuring(release),
+						);
+					}),
+				)
+				.pipe(Effect.uninterruptible),
 		};
 	});
 
@@ -1547,8 +2096,8 @@ export const stopRegisteredRunners = (
 								)
 						: Effect.void;
 				},
-				// Project services have drained. Recovery will settle through their ingestion owner.
-				settle: () => Effect.succeed(false),
+				// Project services have drained, so no settlement port: recovery
+				// settles through their ingestion owner.
 				evict: () => Effect.void,
 				prune: () => Effect.void,
 				notice: () => Effect.succeed(true),

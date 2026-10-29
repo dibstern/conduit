@@ -12,6 +12,16 @@ export const isLegacyRunner = (hello: {
 	readonly sendJournalAnswers?: boolean;
 }): boolean => hello.sendJournalAnswers !== true;
 
+/** Whether a runner journals each send before executing it. A cursor row from before
+ * migration 0089 records nothing, so it falls back to the runner's build. */
+export const journalsBeforeExecution = (
+	row: { readonly journals_before_execution: number | null } | undefined,
+	currentBuild: boolean,
+): boolean =>
+	row?.journals_before_execution == null
+		? currentBuild
+		: row.journals_before_execution === 1;
+
 // These fields restore sinks and answer waiters only. A send is decided by replaying
 // its unchanged journal key, exactly as ecb3840d did, never from the legacy hello.
 export const legacyRunnerRetainedSends = (

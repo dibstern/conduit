@@ -105,7 +105,6 @@ it.effect(
 					},
 					committed: () => Effect.void,
 					shutdown: () => Effect.void,
-					settle: () => Effect.succeed(true),
 					evict: () => Effect.void,
 					prune: () => Effect.void,
 					notice: () => Effect.succeed(true),

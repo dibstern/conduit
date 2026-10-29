@@ -124,8 +124,6 @@ const writesOutside = (
 describe("runner state ownership", () => {
 	it("assigns RunnerChild fields only in runner-entry-lifecycle.ts", () => {
 		const owner = "src/lib/provider/runner/runner-entry-lifecycle.ts";
-		// Step 6 moves the write grant to Retirement; until then adoptEntry writes it.
-		const grant = ["grant", "outputAuthority"];
 		const entry = declarations(["RunnerChild"]);
 		const upgrade = declarations(["RunnerUpgrade"]);
 		expect({
@@ -137,14 +135,12 @@ describe("runner state ownership", () => {
 					["RunnerUpgrade.state", "RunnerUpgrade.activity"].includes(field),
 				),
 			],
-			writes: writesOutside(
-				owner,
-				new Set([...entry.members].filter((field) => !grant.includes(field))),
-				{ upgrade: ["state", "activity"] },
-			),
+			writes: writesOutside(owner, entry.members, {
+				upgrade: ["state", "activity"],
+			}),
 		}).toEqual({
 			declared: [`${owner}:RunnerChild`],
-			mutable: grant.map((field) => `RunnerChild.${field}`).sort(),
+			mutable: [],
 			writes: [],
 		});
 	});

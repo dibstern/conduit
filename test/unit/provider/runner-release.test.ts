@@ -84,7 +84,6 @@ it.effect(
 							actions.push("cleanup");
 						}),
 					shutdown: () => Effect.void,
-					settle: () => Effect.succeed(false),
 					evict: () => Effect.void,
 					prune: () => Effect.void,
 					notice: () => Effect.succeed(false),
@@ -139,7 +138,6 @@ it.effect(
 					released: () => Effect.void,
 					committed: () => Effect.void,
 					shutdown: () => Effect.void,
-					settle: () => Effect.succeed(false),
 					evict: () => Effect.void,
 					prune: () => Effect.void,
 					notice: () => Effect.succeed(false),
@@ -201,7 +199,6 @@ it.effect(
 						Effect.sync(() => {
 							actions.push("shutdown");
 						}),
-					settle: () => Effect.succeed(false),
 					evict: () => Effect.void,
 					prune: () => Effect.void,
 					notice: () => Effect.succeed(false),
@@ -265,7 +262,6 @@ for (const cached of ["missing", "candidate"])
 						released: () => Effect.void,
 						committed: () => Effect.void,
 						shutdown: () => Effect.void,
-						settle: () => Effect.succeed(false),
 						evict: () => Effect.void,
 						prune: () => Effect.void,
 						notice: () => Effect.succeed(false),
@@ -333,7 +329,6 @@ it.effect(
 					},
 					committed: () => Effect.void,
 					shutdown: () => Effect.void,
-					settle: () => Effect.succeed(false),
 					evict: () => Effect.void,
 					prune: () => Effect.void,
 					notice: () => Effect.succeed(false),

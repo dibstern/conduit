@@ -120,7 +120,6 @@ const harness = Effect.gen(function* () {
 		released: record("released"),
 		committed: record("committed"),
 		shutdown: record("shutdown"),
-		settle: (retired) => record("settle")(retired).pipe(Effect.as(true)),
 		evict: record("evict"),
 		prune: record("prune"),
 		notice: () => Effect.succeed(true),

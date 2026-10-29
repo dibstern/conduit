@@ -3708,6 +3708,10 @@ const continuationFixture = (
 					sends.push({ runnerId: connection.runnerId, command });
 					return behavior(connection, command);
 				});
+				// A real connection's hello claim records whether this runner journals.
+				yield* f.sql`UPDATE claude_runner_cursors SET journals_before_execution = ${Number(options.journalCapable !== false)} WHERE runner_id = ${connection.runnerId}`.pipe(
+					Effect.orDie,
+				);
 				yield* connection.onHello(
 					{
 						type: "hello",
@@ -4085,6 +4089,8 @@ it.effect(
 
 // Discovery can disappear at full shutdown. Settle must classify exactly the
 // same durable transmission with and without its registration, after restart.
+// The runner's hello journalled, so an older evidence build with no journal is
+// still unreceived (BC-1).
 for (const discovery of [true, false])
 	for (const evidence of [
 		"absent",
@@ -4097,6 +4103,7 @@ for (const discovery of [true, false])
 			() =>
 				run(
 					Effect.gen(function* () {
+						const absent = evidence === "absent" || evidence === "older-build";
 						const f = yield* continuationFixture();
 						yield* f.seed("run");
 						yield* f.sql`UPDATE provider_command_outbox SET payload_json = ${JSON.stringify({ inputId: "send", prompt: "send", history: [], workspaceRoot: f.root, extraFolders: [], configDir: configuredClaudeConfigDir(f.root), folderSource: "account" })} WHERE command_id = 'send'`;
@@ -4153,23 +4160,18 @@ for (const discovery of [true, false])
 							yield* f.sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'send'`,
 						).toEqual([
 							{
-								status: evidence === "absent" ? "completed" : "failed",
-								error_code:
-									evidence === "absent" ? null : "delivery_indeterminate",
+								status: absent ? "completed" : "failed",
+								error_code: absent ? null : "delivery_indeterminate",
 							},
 						]);
 						expect(
 							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'run'`,
-						).toEqual([
-							{ status: evidence === "absent" ? "completed" : "error" },
-						]);
+						).toEqual([{ status: absent ? "completed" : "error" }]);
 						expect(
 							yield* f.sql`SELECT json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
-						).toEqual(
-							evidence === "absent" ? [{ reason: "JournalAbsent" }] : [],
-						);
-						expect(f.delivered).toEqual(evidence === "absent" ? ["send"] : []);
-						expect(f.sends).toHaveLength(evidence === "absent" ? 2 : 1);
+						).toEqual(absent ? [{ reason: "JournalAbsent" }] : []);
+						expect(f.delivered).toEqual(absent ? ["send"] : []);
+						expect(f.sends).toHaveLength(absent ? 2 : 1);
 					}),
 				),
 		);
