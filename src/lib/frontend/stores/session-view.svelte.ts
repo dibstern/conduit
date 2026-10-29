@@ -152,6 +152,14 @@ export function isBarCollapsed(): boolean {
 	);
 }
 
+/** The folded Duo's goal and task chips fold into its header while reading down or typing. */
+export function isDuoChipRowFolded(): boolean {
+	return (
+		sessionViewState.pose === "duo-folded-portrait" &&
+		(!sessionViewState.barOpen || sessionViewState.keyboardOpen)
+	);
+}
+
 /**
  * The only path by which `atBottom` is written from outside the store. It exists
  * because the false->true edge closes the bar (jump-to-latest is not a scroll
