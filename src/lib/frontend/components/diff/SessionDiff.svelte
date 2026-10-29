@@ -2,6 +2,7 @@
 <script lang="ts">
 	import type { SessionDiffListing } from "../../../contracts/session-diff.js";
 	import { getCurrentSessionId } from "../../stores/router.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import ConduitMark from "../ui/ConduitMark.svelte";
@@ -14,6 +15,7 @@
 	const sessionId = $derived(getCurrentSessionId());
 	let listing = $state<SessionDiffListing | null>(null);
 	let failure = $state<string | null>(null);
+	let listed = $state(0);
 	// Only the newest listing call may land.
 	let latest = 0;
 
@@ -23,6 +25,7 @@
 			const next = await rpc("SessionDiffList", { sessionId: id, scope });
 			if (call !== latest) return;
 			listing = next;
+			listed += 1;
 			failure = null;
 		} catch (error) {
 			if (call === latest) failure = failureLine(error, "Could not load the diff.");
@@ -30,9 +33,14 @@
 	}
 
 	$effect(() => {
+		void sessionId;
 		listing = null;
 		failure = null;
-		if (sessionId) void list(sessionId);
+	});
+
+	// The pane stays mounted behind other tabs; only a shown pane snapshots.
+	$effect(() => {
+		if (sessionId && sessionViewState.rightPaneView === "diff") void list(sessionId);
 	});
 
 	/** A collected snapshot re-lists silently; rows keep what they already show. */
@@ -68,7 +76,7 @@
 				</p>
 			{:else}
 				{#each folder.files as file (`${file.path}\0${file.before}\0${file.after}`)}
-					<DiffFile {sessionId} {scope} revision={listing.revision} folder={folder.folder} {file} onGone={relist} />
+					<DiffFile {sessionId} {scope} revision={listing.revision} {listed} folder={folder.folder} {file} onGone={relist} />
 				{/each}
 			{/if}
 		{/each}

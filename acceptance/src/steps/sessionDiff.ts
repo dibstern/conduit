@@ -58,8 +58,9 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 	requireRpcControl(page).setStubs({
 		SessionDiffList: () => {
 			fixture.lists += 1;
+			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
 			return {
-				revision: `rev-${fixture.lists}`,
+				revision: "rev-unchanged",
 				folders: [{ folder: "/workspace/myapp", files: fixture.files }],
 			};
 		},

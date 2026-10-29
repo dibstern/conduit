@@ -31,6 +31,7 @@
 		sessionId,
 		scope,
 		revision,
+		listed,
 		folder,
 		file,
 		onGone,
@@ -38,6 +39,8 @@
 		sessionId: string;
 		scope: SessionDiffScope;
 		revision: string;
+		/** Counts landed listings: an unchanged folder re-lists the same revision. */
+		listed: number;
 		folder: string;
 		file: SessionDiffFile;
 		/** The listing's snapshot was collected; the owner re-lists. */
@@ -50,8 +53,8 @@
 	let patch = $state<string | null>(null);
 	let failure = $state<string | null>(null);
 	let host = $state<HTMLDivElement>();
-	// The revision that answered Gone; the next listing's revision retries.
-	let goneAt: string | null = null;
+	// The listing that answered Gone; the next one to land retries.
+	let goneAt: number | null = null;
 	let view: FileDiff | undefined;
 
 	const wanted = $derived(
@@ -59,11 +62,11 @@
 	);
 
 	$effect(() => {
-		if (!wanted || loading || patch !== null || failure !== null || revision === goneAt) return;
-		void load(revision);
+		if (!wanted || loading || patch !== null || failure !== null || listed === goneAt) return;
+		void load(revision, listed);
 	});
 
-	async function load(at: string) {
+	async function load(at: string, landed: number) {
 		loading = true;
 		try {
 			const reply = await rpc("SessionDiffFile", {
@@ -78,7 +81,7 @@
 			patch = reply.patch;
 		} catch (error) {
 			if (error instanceof SessionDiffError && error.reason === "gone") {
-				goneAt = at;
+				goneAt = landed;
 				onGone();
 			} else failure = failureLine(error, "Could not load this diff.");
 		} finally {
@@ -111,7 +114,8 @@
 	});
 
 	$effect(() => {
-		view?.setThemeType(themeState.resolved);
+		const type = themeState.resolved;
+		view?.setThemeType(type);
 	});
 
 	/** Small diffs load as they near the viewport. */

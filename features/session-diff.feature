@@ -45,3 +45,16 @@ Scenario Outline: A collected listing re-lists without an error
 Examples:
   | auto_path  | on_demand_path   | binary_path     | too_large_path | too_large_bytes | lists |
   | src/app.ts | src/generated.ts | assets/logo.png | data/dump.json | 1258291         | 2     |
+
+Scenario Outline: A hidden Diff pane does not list, and showing it again re-lists
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  When I open the Diff right pane
+  And I select the Files right pane tab
+  Then the diff was listed <first_lists> times
+  When I select the Diff right pane tab
+  Then the diff was listed <shown_lists> times
+
+Examples:
+  | count | first_lists | shown_lists |
+  | 1     | 1           | 2           |
