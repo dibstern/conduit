@@ -559,9 +559,6 @@ it.each([
 								registration.runnerId,
 							),
 						).toBe(false);
-				} else {
-					expect(yield* runner.hasLiveProcessEffect(sessionId)).toBe(false);
-					expect(signals).toHaveBeenCalled();
 				}
 				expect(
 					yield* sql`SELECT status FROM pending_approvals WHERE session_id = ${sessionId}`,
@@ -580,9 +577,30 @@ it.each([
 					}),
 				);
 				expect(yield* ownerPending.listPendingQuestions(sessionId)).toEqual([]);
-				// Survivor settlement is detached from recovery; observe its durable
-				// result before closing the fixture's store.
-				if (unverifiable)
+				// The Stop is detached from recovery; observe its durable result
+				// before closing the fixture's store. An unverifiable leader is never
+				// signalled and its window ends at Escalated (F19); its runs settle at
+				// Gone (6.5), so they stay open while it lives.
+				if (unverifiable) {
+					yield* sql<{
+						stop_state: string;
+					}>`SELECT stop_state FROM claude_runner_cursors WHERE session_id = ${sessionId} AND retired_at IS NOT NULL`.pipe(
+						Effect.repeat({
+							while: (rows) =>
+								!rows.some((row) => row.stop_state === "Escalated"),
+							schedule: Schedule.spaced("10 millis"),
+						}),
+						Effect.timeout("5 seconds"),
+					);
+					expect(yield* runner.hasLiveProcessEffect(sessionId)).toBe(true);
+					expect(signals).not.toHaveBeenCalled();
+					expect(
+						yield* sql`SELECT status FROM provider_command_outbox WHERE session_id = ${sessionId}`,
+					).toEqual([{ status: "running" }]);
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE session_id = ${sessionId}`,
+					).toEqual([{ status: "running" }]);
+				} else {
 					yield* sql<{
 						status: string;
 					}>`SELECT status FROM provider_command_outbox WHERE session_id = ${sessionId}`.pipe(
@@ -592,14 +610,11 @@ it.each([
 						}),
 						Effect.timeout("5 seconds"),
 					);
-				expect(
-					yield* sql`SELECT status FROM provider_command_outbox WHERE session_id = ${sessionId}`,
-				).toEqual([{ status: "failed" }]);
-				if (unverifiable) {
+					expect(yield* runner.hasLiveProcessEffect(sessionId)).toBe(false);
+					expect(signals).toHaveBeenCalled();
 					expect(
-						yield* sql`SELECT status FROM provider_runs WHERE session_id = ${sessionId}`,
-					).toEqual([{ status: "interrupted" }]);
-				} else {
+						yield* sql`SELECT status FROM provider_command_outbox WHERE session_id = ${sessionId}`,
+					).toEqual([{ status: "failed" }]);
 					expect(
 						yield* sql`SELECT status FROM provider_runs WHERE session_id = ${sessionId}`,
 					).toEqual([{ status: "error" }]);
@@ -625,6 +640,25 @@ it.each([
 	);
 	vi.unstubAllEnvs();
 	await fixture.restart();
+	// A survivor's run settles at Gone (6.5). Restart restarts its retries at
+	// 10, 30 and 60 s (6.7), so the first retry must find it gone before 30 s.
+	await vi.waitFor(
+		() => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				expect(
+					db
+						.prepare(
+							"SELECT status FROM provider_runs WHERE session_id = ? AND status IN ('pending', 'running')",
+						)
+						.all(sessionId),
+				).toEqual([]);
+			} finally {
+				db.close();
+			}
+		},
+		{ timeout: 30_000, interval: 50 },
+	);
 	const restored = await fixture.connect(sessionId);
 	expect(
 		(await restored.send(sessionId, "after-adoption-refusal")).done["status"],

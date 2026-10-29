@@ -430,7 +430,11 @@ export const decideRunnerStop = (
 			state: { _tag: "Settled", record: { ...record, stopState: "Settled" } },
 			actions: [{ _tag: "Settle" }, { _tag: "Evict" }, { _tag: "Prune" }],
 		};
-	const gone = decideRunnerKill(record, observation.processes).gone;
+	const { gone, signals } = decideRunnerKill(
+		record,
+		observation.processes,
+		"SIGKILL",
+	);
 	const elapsed = observation.now - (record.stopStartedAt ?? record.retiredAt);
 	const term = record.signalLog.find(
 		(attempt) => attempt.signal === "SIGTERM" && attempt.at !== undefined,
@@ -438,10 +442,11 @@ export const decideRunnerStop = (
 	const kill = record.signalLog.some((attempt) => attempt.signal === "SIGKILL");
 	// The bounded Stop waiter can finish while Gone/settlement writes retry.
 	// This transition uses the intent's durable timestamp even if a log failed.
+	// An unverifiable process is never signalled, so its window just ends (F19).
 	if (
 		(state._tag === "Escalating" || gone) &&
 		elapsed >= 4_000 &&
-		(gone || kill) &&
+		(gone || kill || signals.length === 0) &&
 		state._tag !== "Escalated"
 	)
 		return {
@@ -755,6 +760,7 @@ export const makeRunnerStopReconciler = (options: {
 			runFork(
 				Effect.gen(function* () {
 					const startedAt = clock.currentTimeMillisUnsafe();
+					let tickedAt = startedAt;
 					let healthy = yield* safeTick(runnerId);
 					while (
 						get(runnerId)._tag === "Escalating" ||
@@ -776,8 +782,13 @@ export const makeRunnerStopReconciler = (options: {
 							termAt !== undefined
 								? termAt + 3_000 - clock.currentTimeMillisUnsafe()
 								: 0;
+						// Leave only after a tick that began past the durable window end,
+						// so that tick decided Escalated.
 						if (
-							clock.currentTimeMillisUnsafe() - startedAt > 4_000 &&
+							tickedAt >=
+								("record" in current
+									? stopWindowEnd(current.record)
+									: startedAt + 4_000) &&
 							termRemaining <= 0
 						)
 							break;
@@ -792,6 +803,7 @@ export const makeRunnerStopReconciler = (options: {
 						yield* leaderExit && healthy
 							? Effect.raceFirst(leaderExit, Effect.sleep(delay))
 							: Effect.sleep(delay);
+						tickedAt = clock.currentTimeMillisUnsafe();
 						healthy = yield* safeTick(runnerId);
 					}
 					for (const offset of [10_000, 30_000, 60_000]) {
