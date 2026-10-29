@@ -142,6 +142,7 @@ Scenario: Expand opens the diagram centred in the media viewer with zoom control
   When the transcript contains a finished assistant message with a tall flowchart
   And I press Expand diagram on the diagram
   Then the media viewer shows the diagram centred with zoom controls and all of it visible
+  And the close button covers none of the expanded diagram's buttons
 
 Scenario: on a phone Expand opens the diagram fullscreen and the close button closes it
   Given the conduit app is served with the connected mockup
@@ -191,3 +192,23 @@ Scenario: a diagram still loading has no Expand button
   And the sequence diagram renderer never finishes downloading
   When the transcript contains a finished assistant message with a sequence diagram
   Then the diagram is still loading and has no Expand button
+
+Scenario: after pressing the zoom in button, Escape still resets the expanded diagram first
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I press Expand diagram on the diagram
+  And I press the zoom in button on the expanded diagram
+  Then the expanded diagram is zoomed
+  When I press Escape in the media viewer
+  Then the expanded diagram is back to its fit and the media viewer is still open
+
+Scenario: on a phone tapping the empty space around the expanded diagram closes it
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I press Expand diagram on the diagram
+  And I tap the empty space above the expanded diagram
+  Then the media viewer is dismissed

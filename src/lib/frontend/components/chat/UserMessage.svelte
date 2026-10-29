@@ -89,7 +89,7 @@
 						{#if failedImages.has(url)}
 							<span role="img" aria-label={attachment.name} class="flex size-[96px] items-center justify-center rounded-[10px] bg-bg-raised p-2 text-center text-xs text-text-muted">image unavailable</span>
 						{:else}
-							<Button variant="ghost" hoverFill="none" size="content" ariaLabel={`View image ${attachment.name}`} class="rounded-[10px] cursor-zoom-in" onclick={() => openMediaViewer({ kind: "image", src: url })}>
+							<Button variant="ghost" hoverFill="none" size="content" ariaLabel={`View image ${attachment.name}`} class="rounded-[10px] cursor-zoom-in" onclick={(event) => openMediaViewer({ kind: "image", src: url }, event.currentTarget)}>
 								<img src={url} alt={attachment.name} class="size-[96px] rounded-[10px] bg-bg-raised object-contain" onerror={() => failedImages.add(url)} />
 							</Button>
 						{/if}

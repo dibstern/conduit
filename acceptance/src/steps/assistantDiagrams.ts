@@ -352,6 +352,47 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert the close button clear of the diagram buttons",
+		match: /^the close button covers none of the expanded diagram's buttons$/,
+		run: async ({ world }) => {
+			const close = await viewer(world.page)
+				.getByRole("button", { name: "Close media viewer", exact: true })
+				.boundingBox();
+			if (!close) throw new Error("The close button has no box");
+			const buttons = viewer(world.page).locator("[data-diagram] button");
+			expect(await buttons.count()).toBeGreaterThan(0);
+			for (const box of await Promise.all(
+				(await buttons.all()).map((button) => button.boundingBox()),
+			)) {
+				if (!box) continue;
+				const apart =
+					box.x >= close.x + close.width ||
+					close.x >= box.x + box.width ||
+					box.y >= close.y + close.height ||
+					close.y >= box.y + box.height;
+				expect(apart).toBe(true);
+			}
+		},
+	},
+	{
+		name: "press zoom in on the expanded diagram",
+		match: /^I press the zoom in button on the expanded diagram$/,
+		run: async ({ world }) => {
+			await noteFit(expandedDrawing(world.page));
+			await viewer(world.page).locator(".pele-zoom-in").click();
+		},
+	},
+	{
+		name: "tap the empty space above the expanded diagram",
+		match: /^I tap the empty space above the expanded diagram$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const frame = await viewer(page).locator("[data-diagram]").boundingBox();
+			if (!frame) throw new Error("The expanded diagram has no box");
+			await page.mouse.click(frame.x + frame.width / 2, frame.y / 2);
+		},
+	},
+	{
 		name: "ctrl+wheel over the expanded diagram",
 		match:
 			/^I turn the mouse wheel up over the expanded diagram while holding Control$/,

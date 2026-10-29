@@ -7,7 +7,7 @@
 <script lang="ts">
   import { sessionState } from "../../stores/session.svelte.js";
   import { sessionViewState } from "../../stores/session-view.svelte.js";
-  import { closeMediaViewer, getMediaViewer } from "../../stores/ui.svelte.js";
+  import { closeMediaViewer, getMediaViewer, getMediaViewerOpener } from "../../stores/ui.svelte.js";
   import Diagram from "../chat/Diagram.svelte";
   import Button from "../ui/Button.svelte";
   import Dialog from "../ui/Dialog.svelte";
@@ -19,12 +19,6 @@
     void sessionState.currentId;
     return closeMediaViewer;
   });
-
-  // The control that opened the viewer, read before the dialog takes focus, so closing hands focus back to it.
-  let opener: Element | null = null;
-  $effect.pre(() => {
-    if (item) opener = document.activeElement;
-  });
 </script>
 
 <Dialog
@@ -33,7 +27,7 @@
   backdrop="dark"
   placement={sessionViewState.compact ? "fullscreen" : "center"}
   ariaLabel={item?.kind === "diagram" ? "Expanded diagram" : "Expanded image"}
-  returnFocus={() => (opener instanceof HTMLElement ? opener : null)}
+  returnFocus={getMediaViewerOpener}
 >
     <!-- Empty colour axes keep the fixed white scrim colours without a theme hover wash. -->
     <!-- design-token-waiver: Close button sits on the media viewer's fixed dark backdrop, which does not follow the runtime theme; --overlay-rgb flips to black in light themes and would invert this hover tint to near-invisible against a black backdrop. -->
@@ -48,10 +42,11 @@
     >
       &times;
     </Button>
-    <div class="flex h-full items-center justify-center">
+    <!-- Taps on the empty space around the content fall through to the dialog, which treats them as backdrop taps. -->
+    <div class="flex h-full items-center justify-center pointer-events-none *:pointer-events-auto">
       {#if item?.kind === "diagram"}
-        <!-- At most 100dvh - 8rem tall, so the close button above never covers the diagram's header. -->
-        <div class="h-[min(85dvh,calc(100dvh-8rem))] w-[min(90vw,1200px)]">
+        <!-- The close button is fixed to the dialog's top-right corner, so a 60px strip above the box keeps it off the diagram's header buttons. -->
+        <div class="mt-[60px] h-[min(85dvh,calc(100dvh-8rem))] w-[min(90vw,1200px)]">
           <Diagram source={item.source} variant="viewer" />
         </div>
       {:else}

@@ -36,7 +36,7 @@
 				{@const src = image.hash ? `/p/${encodeURIComponent(projectSlug ?? getCurrentSlug() ?? "")}/attachments/${image.hash}` : image.dataUrl ?? ""}
 				<div data-testid="draft-attachment" data-attachment-id={image.id} data-status={image.status} class="flex shrink-0 items-center gap-[14px]">
 				{#if image.mime.startsWith("image/")}
-				<ImageAttachmentThumb {src} name={image.name} imageId={image.id} onopen={() => openMediaViewer({ kind: "image", src })} onremove={(event) => {
+				<ImageAttachmentThumb {src} name={image.name} imageId={image.id} onopen={(event) => openMediaViewer({ kind: "image", src }, event.currentTarget)} onremove={(event) => {
 						event.preventDefault();
 						event.stopPropagation();
 						onRemove(image.id);

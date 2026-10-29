@@ -344,13 +344,25 @@ export type MediaItem =
 
 // Module-private so only openMediaViewer/closeMediaViewer can write it.
 let mediaViewer = $state<MediaItem | null>(null);
+// The control that opened the viewer. Safari never focuses a clicked button, so it is passed in, not read from focus.
+// Kept after close: the dialog hands focus back once it has closed.
+let mediaViewerOpener: HTMLElement | null = null;
 
 export function getMediaViewer(): MediaItem | null {
 	return mediaViewer;
 }
 
-export function openMediaViewer(item: MediaItem): void {
+export function getMediaViewerOpener(): HTMLElement | null {
+	return mediaViewerOpener;
+}
+
+/** opener is the control pressed to open the viewer; closing returns focus to it. */
+export function openMediaViewer(
+	item: MediaItem,
+	opener: EventTarget | null,
+): void {
 	mediaViewer = item;
+	mediaViewerOpener = opener instanceof HTMLElement ? opener : null;
 }
 
 export function closeMediaViewer(): void {

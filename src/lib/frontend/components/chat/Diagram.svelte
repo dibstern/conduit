@@ -62,9 +62,15 @@
 				},
 			);
 		};
+		// Pressing pele's zoom buttons must not take focus off the host, or the next Escape skips the zoom reset.
+		const keepFocus = (event: MouseEvent): void => {
+			if (event.target instanceof Element && event.target.closest(".pele-zoom")) event.preventDefault();
+		};
+		target.addEventListener("mousedown", keepFocus);
 		attempt();
 		return () => {
 			cancelled = true;
+			target.removeEventListener("mousedown", keepFocus);
 			mounted?.destroy();
 		};
 	});
@@ -77,7 +83,7 @@
 				<Button variant="ghost" size="content" tone="muted" iconOnly icon={showSource ? "workflow" : "code"} iconSize={14} touchTarget class="size-[28px] shrink-0" ariaLabel={showSource ? "Show diagram" : "Show code"} title={showSource ? "Show diagram" : "Show code"} onclick={() => (showSource = !showSource)} />
 			{/if}
 			{#if variant === "inline" && status === "ready"}
-				<Button variant="ghost" size="content" tone="muted" iconOnly icon="maximize" iconSize={14} touchTarget class="size-[28px] shrink-0" ariaLabel="Expand diagram" title="Expand diagram" onclick={() => openMediaViewer({ kind: "diagram", source })} />
+				<Button variant="ghost" size="content" tone="muted" iconOnly icon="maximize" iconSize={14} touchTarget class="size-[28px] shrink-0" ariaLabel="Expand diagram" title="Expand diagram" onclick={(event) => openMediaViewer({ kind: "diagram", source }, event.currentTarget)} />
 			{/if}
 		{/snippet}
 	</CodeBlockHeader>

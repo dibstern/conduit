@@ -46,7 +46,7 @@ const FIXTURE_IMAGE_SRC = `data:image/svg+xml;utf8,${encodeURIComponent(
 
 export const WithImage: Story = {
 	beforeEach: () => {
-		openMediaViewer({ kind: "image", src: FIXTURE_IMAGE_SRC });
+		openMediaViewer({ kind: "image", src: FIXTURE_IMAGE_SRC }, null);
 	},
 };
 
