@@ -37,6 +37,7 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	createTranscriptView,
 	loadOlderTranscript,
 	transcriptStatus,
 	viewTranscript,
@@ -166,6 +167,100 @@ afterEach(async () => {
 });
 
 describe("transcript feed interface", () => {
+	it("keeps two views of the same session independent", async () => {
+		const drawer = createTranscriptView();
+		viewTranscript("project", "A");
+		await settled(() => requestFor(wire.requests, "A") !== undefined);
+		const primary = requestFor(wire.requests, "A");
+		if (!primary) throw new Error("missing primary request");
+		await wire.emit(primary, snapshot([row("u2", "primary page")], 2, true));
+		await wire.emit(primary, { _tag: "synchronized" });
+		drawer.view("project", "A");
+		await settled(() => requestFor(wire.requests, "A", 1) !== undefined);
+		const task = requestFor(wire.requests, "A", 1);
+		if (!task) throw new Error("missing task request");
+		await wire.emit(task, snapshot([row("u3", "task page")], 3, true));
+		await wire.emit(task, { _tag: "synchronized" });
+		await settled(() => drawer.chat.transcript?.status._tag === "live");
+		expect(getOrCreateSessionSlot("A").messages.messages).toMatchObject([
+			{ type: "user", text: "primary page" },
+		]);
+		pageMock.rpc.mockResolvedValueOnce({
+			messages: [row("u1", "earlier task")],
+			hasMore: false,
+		});
+		await drawer.loadOlder();
+		expect(drawer.chat.messages.map((message) => message.uuid)).toEqual([
+			"u1/user",
+			"u3/user",
+		]);
+		expect(
+			getOrCreateSessionSlot("A").messages.messages.map(
+				(message) => message.uuid,
+			),
+		).toEqual(["u2/user"]);
+		expect(getOrCreateSessionSlot("A").messages.historyHasMore).toBe(true);
+		drawer.dispose();
+		await wire.emit(primary, snapshot([row("u4", "primary still live")], 4));
+		await wire.emit(primary, { _tag: "synchronized" });
+		await settled(() =>
+			getOrCreateSessionSlot("A").messages.messages.some(
+				(message) => message.uuid === "u4/user",
+			),
+		);
+	});
+	it("ignores a disposed view's late page without clearing a newer page", async () => {
+		const drawer = createTranscriptView();
+		drawer.view("project", "A");
+		await settled(() => requestFor(wire.requests, "A") !== undefined);
+		const first = requestFor(wire.requests, "A");
+		if (!first) throw new Error("missing first request");
+		await wire.emit(first, snapshot([row("u2", "first page")], 2, true));
+		await wire.emit(first, { _tag: "synchronized" });
+		await settled(() => drawer.chat.transcript?.status._tag === "live");
+		let finishOld:
+			| ((value: { messages: HistoryMessage[]; hasMore: boolean }) => void)
+			| undefined;
+		let finishNew:
+			| ((value: { messages: HistoryMessage[]; hasMore: boolean }) => void)
+			| undefined;
+		pageMock.rpc.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishOld = resolve;
+				}),
+		);
+		const oldPage = drawer.loadOlder();
+		drawer.dispose();
+		drawer.view("project", "A");
+		await settled(() => requestFor(wire.requests, "A", 1) !== undefined);
+		const second = requestFor(wire.requests, "A", 1);
+		if (!second) throw new Error("missing replacement request");
+		await wire.emit(second, snapshot([row("u5", "replacement page")], 5, true));
+		await wire.emit(second, { _tag: "synchronized" });
+		await settled(() => drawer.chat.transcript?.hwm === 5);
+		pageMock.rpc.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishNew = resolve;
+				}),
+		);
+		const newPage = drawer.loadOlder();
+		finishOld?.({ messages: [row("u1", "stale page")], hasMore: false });
+		await oldPage;
+		expect(drawer.chat.historyLoading).toBe(true);
+		expect(drawer.chat.messages.map((message) => message.uuid)).toEqual([
+			"u5/user",
+		]);
+		finishNew?.({ messages: [row("u4", "fresh page")], hasMore: false });
+		await newPage;
+		expect(drawer.chat.historyLoading).toBe(false);
+		expect(drawer.chat.messages.map((message) => message.uuid)).toEqual([
+			"u4/user",
+			"u5/user",
+		]);
+		drawer.dispose();
+	});
 	it("starts the feed while storage is pending and rejects a late saved draw", async () => {
 		let finish: ((record: SavedTranscript) => void) | undefined;
 		savedMock.openSavedTranscript.mockImplementation(

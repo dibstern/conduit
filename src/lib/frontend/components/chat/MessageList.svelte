@@ -13,14 +13,11 @@
 	import type { ChatMessage } from "../../types.js";
 	import {
 		consumeScrollRequest,
-		createEmptySessionMessages,
-		currentChat,
 		localSendsIn,
 		getSessionPhase,
 		isLlmActive,
 		isProcessing,
 		insertInputDraft,
-		sessionMessages,
 	} from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { findSession, rootBackgroundTasks, sessionState } from "../../stores/session.svelte.js";
@@ -73,22 +70,20 @@
 	import type { SessionResume } from "../../../contracts/limit-recovery.js";
 	import { formatSnoozeTime } from "../../utils/format.js";
 	import { retryFeedsNow } from "../../transport/supervise.js";
-	import { transcriptFeed } from "../../stores/transcript.svelte.js";
+	import { primaryTranscript, transcriptFeed, type TranscriptView } from "../../stores/transcript.svelte.js";
 
 	const END_OF_TRANSCRIPT = "end";
 	let messagesEl: HTMLDivElement | undefined = $state();
-	let { topClearance = 0, sessionId }: {
+	let { topClearance = 0, sessionId, view = primaryTranscript }: {
 		topClearance?: number;
 		sessionId?: string;
+		view?: TranscriptView;
 	} = $props();
 	const instanceId = $props.id();
 	const primary = $derived(sessionId === undefined);
 	const viewedSessionId = $derived(sessionId ?? sessionState.currentId);
 	const messagesId = $derived(primary ? "messages" : `messages-${instanceId}`);
-	const emptyChat = createEmptySessionMessages();
-	const chat = $derived(
-		primary ? currentChat() : sessionMessages.get(sessionId ?? "") ?? emptyChat,
-	);
+	const chat = $derived(view.chat);
 	const processing = $derived(
 		primary ? isProcessing() : isLlmActive(getSessionPhase(viewedSessionId ?? ""), chat.loadLifecycle),
 	);
@@ -537,7 +532,7 @@
 	<div id={primary ? "history-sentinel" : `${messagesId}-history-sentinel`} class="h-1" bind:this={sentinelEl}></div>
 
 	<!-- Headless loader (no visual output) -->
-	<HistoryLoader {sentinelEl} {sessionId} scrollRoot={primary ? undefined : messagesEl} />
+	<HistoryLoader {sentinelEl} {view} scrollRoot={primary ? undefined : messagesEl} />
 
 	<!-- Zero-height sticky rail so the pill floats over the transcript without
 	     pushing it down; the lift parks it in the top padding so at rest
@@ -595,7 +590,7 @@
 			{/if}
 			{#if segment.activity.length > 0 || (final && turn.live)}
 				{@const reply = segment.reply[0]}
-				<TurnActivity latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
+				<TurnActivity {view} scrollRoot={messagesEl} latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
 					onjump={scrollCtrl.requestJump}
 					onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
 					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}

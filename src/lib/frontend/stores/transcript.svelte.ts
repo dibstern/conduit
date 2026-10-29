@@ -20,9 +20,12 @@ import {
 	historyToChatMessages,
 } from "../utils/history-logic.js";
 import { renderMarkdown } from "../utils/markdown.js";
+import { isSubagentToolName } from "../utils/subagent-tools.js";
 import {
 	advanceTurnIfNewMessage,
 	clearSessionChatState,
+	createEmptySessionMessages,
+	getOrCreateSessionActivity,
 	getOrCreateSessionSlot,
 	historyState,
 	localSends,
@@ -680,18 +683,30 @@ const emptyTranscript = (project: ProjectRef): TranscriptEntry => ({
 	waiting: new Map(),
 	partOrder: new Map(),
 });
-const paging = new Map<string, Promise<void>>();
-
 function install(
 	sessionId: string,
 	slot: ReturnType<typeof getOrCreateSessionSlot>,
+	primary = true,
 ): void {
 	const entry = slot.messages.transcript;
-	if (!entry || sessionMessages.get(sessionId) !== slot.messages) return;
+	if (!entry || (primary && sessionMessages.get(sessionId) !== slot.messages))
+		return;
 	slot.messages.messages = deriveTranscriptMessages(
 		entry,
 		slot.messages.messages,
 	);
+	slot.messages.historyHasMore = entry.hasMore;
+	slot.messages.loadLifecycle = "ready";
+	if (primary && sessionState.currentId === sessionId)
+		historyState.hasMore = entry.hasMore;
+	// Context belongs to this slot. A private view never changes the primary's
+	// estimate; its read projection uses session context when it is available.
+	restoreContextFromMessages(slot.messages);
+	reconcileInputs(sessionId, entry);
+}
+
+/** Persisted input identities settle the session's one local input owner. */
+function reconcileInputs(sessionId: string, entry: TranscriptEntry): void {
 	// A run can end before its user message is placed, leaving no shell
 	// completion boundary for its send intent. The live row ends that exact input.
 	if (entry.status._tag === "live")
@@ -713,11 +728,6 @@ function install(
 				entry.pending.some((input) => input.inputId === inputId))
 		)
 			localSends.delete(inputId);
-	slot.messages.historyHasMore = entry.hasMore;
-	slot.messages.loadLifecycle = "ready";
-	if (sessionState.currentId === sessionId)
-		historyState.hasMore = entry.hasMore;
-	restoreContextFromMessages(slot.messages);
 }
 
 /**
@@ -757,7 +767,14 @@ export function placeSavedDraw(
 
 /** One live transcript feed: viewing a session stops the feed of the one
  *  viewed before. Each view (the open session, the task drawer) owns one. */
-function transcriptView(): {
+export interface TranscriptView {
+	readonly id: symbol;
+	readonly generation: number;
+	readonly sessionId: string | null;
+	readonly chat: Readonly<SessionMessages>;
+	readonly pageError: unknown;
+	loadOlder: () => Promise<void>;
+	dispose: () => void;
 	view: (project: ProjectRef, sessionId: string | null) => void;
 	/** The viewed session's load: the same promise throughout, settling true
 	 *  once its first load completes and false if it is left first. */
@@ -769,7 +786,17 @@ function transcriptView(): {
 		project: ProjectRef,
 		sessionId: string,
 	) => Promise<void> | undefined;
-} {
+}
+
+function transcriptView(primary: boolean): TranscriptView {
+	let currentSlot = $state.raw<ReturnType<
+		typeof getOrCreateSessionSlot
+	> | null>(null);
+	let currentSessionId = $state<string | null>(null);
+	let pageError = $state.raw<unknown>(null);
+	let paging: Promise<void> | null = null;
+	const empty = createEmptySessionMessages();
+
 	let viewed: {
 		project: ProjectRef;
 		sessionId: string | null;
@@ -807,7 +834,103 @@ function transcriptView(): {
 		return stopped;
 	}
 
-	return {
+	const view: TranscriptView = {
+		id: Symbol("transcript-view"),
+		get generation() {
+			return generation;
+		},
+		get sessionId() {
+			return primary ? placedSessionId() : currentSessionId;
+		},
+		get chat() {
+			if (primary) return sessionMessages.get(placedSessionId() ?? "") ?? empty;
+			// Private windows read session notices and terminal state without
+			// becoming another writer of the session's activity or messages.
+			const owned = currentSlot?.messages ?? empty;
+			const shared = sessionMessages.get(currentSessionId ?? "");
+			const activity = currentSlot?.activity;
+			const ended =
+				activity?.phase === "idle" &&
+				activity.endedGeneration === activity.turnGeneration;
+			const existing = new Map(
+				shared?.messages.map((message) => [message.uuid, message]),
+			);
+			const messages = owned.messages.map((message): ChatMessage => {
+				const merged = mergeSticky(message, existing.get(message.uuid));
+				if (!ended) return merged;
+				if (merged.type === "assistant" && !merged.finalized)
+					return { ...merged, finalized: true };
+				if (merged.type === "thinking" && !merged.done)
+					return { ...merged, done: true, duration: 0 };
+				if (
+					merged.type === "tool" &&
+					(merged.status === "pending" || merged.status === "running") &&
+					!isSubagentToolName(merged.name)
+				)
+					return { ...merged, status: "completed" };
+				return merged;
+			});
+			const ids = new Set(messages.map((message) => message.uuid));
+			for (const message of shared?.messages ?? [])
+				if (!message.uuid.includes("/") && !ids.has(message.uuid))
+					messages.push(message);
+			return {
+				messages,
+				transcript: owned.transcript,
+				currentAssistantText: owned.currentAssistantText,
+				loadLifecycle: owned.loadLifecycle,
+				contextPercent: shared?.contextPercent ?? owned.contextPercent,
+				historyHasMore: owned.historyHasMore,
+				historyLoading: owned.historyLoading,
+			};
+		},
+		get pageError() {
+			return pageError;
+		},
+		dispose: () => view.view(viewed?.project ?? "", null),
+		loadOlder: () => {
+			if (primary && view.sessionId !== currentSessionId)
+				return Promise.resolve();
+			if (paging) return paging;
+			const target = currentSlot;
+			const id = currentSessionId;
+			const entry = target?.messages.transcript;
+			if (!target || !id || !entry?.hasMore || !entry.rows[0])
+				return Promise.resolve();
+			const currentGeneration = generation;
+			pageError = null;
+			target.messages.historyLoading = true;
+			if (primary && sessionState.currentId === id) historyState.loading = true;
+			const current = () =>
+				generation === currentGeneration &&
+				currentSlot === target &&
+				paging === request;
+			const request = rpc("LoadMoreHistory", {
+				sessionId: id,
+				before: entry.rows[0].id,
+			})
+				.then((response) => {
+					if (!current() || !target.messages.transcript) return;
+					target.messages.transcript = applyTranscriptEnvelope(
+						target.messages.transcript,
+						response,
+					);
+					install(id, target, primary);
+				})
+				.catch((error: unknown) => {
+					if (current()) pageError = error;
+					throw error;
+				})
+				.finally(() => {
+					if (!current()) return;
+					target.messages.historyLoading = false;
+					if (primary && sessionState.currentId === id)
+						historyState.loading = false;
+					paging = null;
+				});
+			paging = request;
+			return request;
+		},
 		view: (project, sessionId) => {
 			if (viewed?.project === project && viewed.sessionId === sessionId) return;
 			viewed?.settle(false);
@@ -822,7 +945,19 @@ function transcriptView(): {
 			});
 			viewed = { project, sessionId, loaded, settle, requested, issue };
 			const currentGeneration = ++generation;
-			const slot = sessionId ? getOrCreateSessionSlot(sessionId) : null;
+			if (currentSlot) currentSlot.messages.historyLoading = false;
+			paging = null;
+			pageError = null;
+			currentSessionId = sessionId;
+			currentSlot = sessionId
+				? primary
+					? getOrCreateSessionSlot(sessionId)
+					: {
+							activity: getOrCreateSessionActivity(sessionId),
+							messages: createEmptySessionMessages(),
+						}
+				: null;
+			const slot = currentSlot;
 			// Only a session this page has not loaded yet opens from a saved page.
 			let saved: Promise<SavedTranscript | undefined> =
 				Promise.resolve(undefined);
@@ -837,7 +972,9 @@ function transcriptView(): {
 					!slot.messages.transcript ||
 					slot.messages.transcript.project !== project
 				) {
-					saved = openSavedTranscript(sessionId);
+					saved = primary
+						? openSavedTranscript(sessionId)
+						: Promise.resolve(undefined);
 					ledgers.delete(slot.messages);
 					slot.messages.transcript = emptyTranscript(project);
 					slot.messages.loadLifecycle = "loading";
@@ -848,7 +985,7 @@ function transcriptView(): {
 						...slot.messages.transcript,
 						status: { _tag: "cold" },
 					};
-					install(sessionId, slot);
+					install(sessionId, slot, primary);
 				}
 			}
 			let opened: SavedSnapshot | undefined;
@@ -869,7 +1006,7 @@ function transcriptView(): {
 						slot.messages.transcript,
 						record.snapshot,
 					);
-					install(sessionId ?? record.sessionId, slot);
+					install(sessionId ?? record.sessionId, slot, primary);
 				}
 			});
 			void stopFeed().then(async () => {
@@ -941,19 +1078,25 @@ function transcriptView(): {
 												)
 										)
 											refreshSessionSkills(sessionId);
-										if (envelope._tag === "synchronized" && unsaved) {
+										if (
+											primary &&
+											envelope._tag === "synchronized" &&
+											unsaved
+										) {
 											const snapshot = unsaved;
 											// A restored server may be older than the saved page. Keep its
 											// CAS token even when the network won and nothing was drawn.
 											void saved.then((record) =>
-												saveTranscript(
-													sessionId,
-													project,
-													snapshot,
-													record?.project === project
-														? record.snapshot.resumePoint
-														: undefined,
-												),
+												currentGeneration === generation
+													? saveTranscript(
+															sessionId,
+															project,
+															snapshot,
+															record?.project === project
+																? record.snapshot.resumePoint
+																: undefined,
+														)
+													: undefined,
 											);
 										}
 										unsaved =
@@ -964,6 +1107,7 @@ function transcriptView(): {
 										slot.messages.transcript = after;
 										const now = after.rows.find((row) => row.id === messageId);
 										if (
+											primary &&
 											now?.role === "assistant" &&
 											!was &&
 											before.status._tag === "live"
@@ -987,14 +1131,14 @@ function transcriptView(): {
 											item?._tag === "pendingInput"
 										) {
 											cancelFrame();
-											install(sessionId, slot);
+											install(sessionId, slot, primary);
 											if (envelope._tag === "synchronized")
 												viewed?.settle(true);
 										} else if (pendingFrame === null) {
 											const render = () => {
 												pendingFrame = null;
 												if (currentGeneration === generation)
-													install(sessionId, slot);
+													install(sessionId, slot, primary);
 											};
 											pendingFrame =
 												typeof requestAnimationFrame === "function"
@@ -1019,9 +1163,11 @@ function transcriptView(): {
 				? viewed.requested
 				: undefined,
 	};
+	return view;
 }
 
-const openView = transcriptView();
+export const primaryTranscript = transcriptView(true);
+const openView = primaryTranscript;
 /** The open session's transcript feed. */
 export const viewTranscript = openView.view;
 /** The open session's view while it is open. */
@@ -1029,7 +1175,9 @@ export const sessionViewLoaded = openView.loaded;
 /** Settles when the detail request starts, or the pending view is left. */
 export const sessionDetailRequested = openView.requested;
 /** The desktop task drawer's feed for the selected task's Child Session. */
-export const viewTaskTranscript = transcriptView().view;
+export function createTranscriptView(): TranscriptView {
+	return transcriptView(false);
+}
 
 export function transcriptStatus(sessionId: string): FeedStatus {
 	return sessionMessages.get(sessionId)?.transcript?.status ?? { _tag: "cold" };
@@ -1046,34 +1194,7 @@ export function transcriptFeed(
 }
 
 export function loadOlderTranscript(sessionId: string): Promise<void> {
-	const existing = paging.get(sessionId);
-	if (existing) return existing;
-	const slot = getOrCreateSessionSlot(sessionId);
-	const entry = slot.messages.transcript;
-	if (!entry || !entry.hasMore || !entry.rows[0]) return Promise.resolve();
-	slot.messages.historyLoading = true;
-	if (sessionState.currentId === sessionId) historyState.loading = true;
-	const request = rpc("LoadMoreHistory", {
-		sessionId,
-		before: entry.rows[0].id,
-	})
-		.then((response) => {
-			if (
-				sessionMessages.get(sessionId) !== slot.messages ||
-				!slot.messages.transcript
-			)
-				return;
-			slot.messages.transcript = applyTranscriptEnvelope(
-				slot.messages.transcript,
-				response,
-			);
-			install(sessionId, slot);
-		})
-		.finally(() => {
-			slot.messages.historyLoading = false;
-			if (sessionState.currentId === sessionId) historyState.loading = false;
-			paging.delete(sessionId);
-		});
-	paging.set(sessionId, request);
-	return request;
+	return primaryTranscript.sessionId === sessionId
+		? primaryTranscript.loadOlder()
+		: Promise.resolve();
 }

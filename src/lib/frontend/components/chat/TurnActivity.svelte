@@ -23,6 +23,7 @@
 	import { insertComposerReference, messageReplies, removeComposerReference, type ReplyReference } from "../input/composer-reference.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { reveal, revealedPart } from "../../stores/reveal.svelte.js";
+	import { primaryTranscript, type TranscriptView } from "../../stores/transcript.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
@@ -57,13 +58,15 @@
 	import TurnEconomics from "./TurnEconomics.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false }: {
+	let { view = primaryTranscript, scrollRoot, turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
 		liveTasks?: readonly BackgroundTask[];
 		taskListedAt?: ReadonlyMap<string, number>;
 		taskNow?: number;
+		view?: TranscriptView;
+		scrollRoot?: HTMLElement | undefined;
 		sessionId?: string | undefined;
 		forkMessageId?: string | undefined;
 		modelExecution?: ModelExecution | undefined;
@@ -124,7 +127,7 @@
 	$effect(() => {
 		const request = revealedPart.request;
 		untrack(() => {
-			if (!request || request.sessionId !== sessionId) return;
+			if (!request || request.sessionId !== sessionId || request.viewId !== view.id) return;
 			const i = segment.activity.findIndex((part) => part.uuid === request.uuid);
 			if (i >= 0 || turn.user?.uuid === request.uuid || segment.reply.some((part) => part.uuid === request.uuid)) openTurn();
 			if (i >= 0) {
@@ -310,7 +313,7 @@
 		const target = numberedMessages.find((part) => part.surfacingOrdinal === ordinal);
 		if (!target) return;
 		const index = segment.activity.findIndex((part) => part.uuid === target.uuid);
-		if (index < 0) return void reveal({ sessionId, uuid: target.uuid });
+		if (index < 0) return void reveal({ sessionId, uuid: target.uuid }, view, scrollRoot);
 		await jumpTo(index);
 		panelEl?.querySelector<HTMLElement>(`[data-log-part="${CSS.escape(target.uuid)}"]`)?.focus({ preventScroll: true });
 	}
@@ -342,7 +345,7 @@
 		void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-scrub"]')?.focus({ preventScroll: true }));
 	}
 	function revealMessage(part: SurfacePart | null) {
-		if (part) void reveal({ sessionId, uuid: part.uuid });
+		if (part) void reveal({ sessionId, uuid: part.uuid }, view, scrollRoot);
 	}
 	function surfaceCommand(event: KeyboardEvent) {
 		const target = event.target;
