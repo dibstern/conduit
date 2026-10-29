@@ -321,6 +321,7 @@ Scenario Outline: Interim streaming text keeps the live ticker and following car
   Then the Turn defaults to Full log with a three-step ticker
   When I collapse the surfaced turn
   Then the collapsed live Turn keeps its Working head and strip only
+  And the Jump to live control is not visible
   And the messages region visually matches turn-live-collapsed-<viewport> at 98 percent
   When I expand the surfaced turn
   Then the Turn defaults to Full log with a three-step ticker

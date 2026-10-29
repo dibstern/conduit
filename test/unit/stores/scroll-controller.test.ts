@@ -329,6 +329,24 @@ describe("ScrollController", () => {
 		ctrl.detach();
 	});
 
+	// Collapsing a long Turn can shrink the transcript until it fits. The
+	// browser clamps scrollTop and fires one scroll; nothing is left to scroll
+	// away from, so Jump to live must not stay up.
+	it("re-follows when the content shrinks until it no longer overflows", () => {
+		const ctrl = makeController();
+		lifecycle = "ready";
+		const div = createScrollableDiv();
+		ctrl.attach(div);
+		simulateScrollUp(div);
+		expect(ctrl.isDetached).toBe(true);
+		Object.defineProperty(div, "scrollHeight", { value: 400 });
+		div.scrollTop = 0;
+		div.dispatchEvent(new Event("scroll"));
+		expect(ctrl.isDetached).toBe(false);
+		expect(ctrl.isPinned).toBe(true);
+		ctrl.detach();
+	});
+
 	it("does NOT detach when distFromBottom is exactly at DETACH_THRESHOLD (50px)", () => {
 		const ctrl = makeController();
 		lifecycle = "ready";
