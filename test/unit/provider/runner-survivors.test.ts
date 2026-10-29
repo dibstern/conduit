@@ -1267,6 +1267,9 @@ it.effect(
 							.spyOn(runnerProcessTable, "members")
 							.mockImplementation(f.members),
 						vi
+							.spyOn(runnerProcessTable, "alive")
+							.mockImplementation((pid) => f.inspect(pid).state !== "gone"),
+						vi
 							.spyOn(runnerProcessTable, "signal")
 							.mockImplementation((pid, signal) => {
 								f.signals.push({ pid, signal });

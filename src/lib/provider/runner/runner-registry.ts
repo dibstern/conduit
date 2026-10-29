@@ -44,6 +44,8 @@ export interface RunnerProcessTable {
 		readonly pgid?: number;
 	};
 	readonly signal: (pid: number, signal: NodeJS.Signals) => void;
+	/** Liveness only: false proves the pid gone, true proves no identity. */
+	readonly alive?: (pid: number) => boolean;
 	readonly members?: (pgid: number) => readonly RunnerMember[] | undefined;
 	readonly inspectMany?: (
 		pids: readonly number[],
@@ -134,11 +136,15 @@ export const runnerProcessTable: RunnerProcessTable = {
 			number,
 			ReturnType<RunnerProcessTable["inspect"]>
 		>();
-		if (pids.length === 0) return observed;
+		// A gone pid is a gone member (6.6) without a ps.
+		for (const pid of pids)
+			if (!runnerPidAlive(pid)) observed.set(pid, { state: "gone" });
+		const live = pids.filter((pid) => !observed.has(pid));
+		if (live.length === 0) return observed;
 		try {
 			const output = execFileSync(
 				"ps",
-				["-o", "pid=,pgid=,lstart=,stat=", "-p", pids.join(",")],
+				["-o", "pid=,pgid=,lstart=,stat=", "-p", live.join(",")],
 				{
 					encoding: "utf8",
 					env: { ...process.env, LC_ALL: "C" },
@@ -189,7 +195,10 @@ export const runnerProcessTable: RunnerProcessTable = {
 		}
 	},
 	signal: (pid, signal) => process.kill(pid, signal),
+	alive: runnerPidAlive,
 	members: (pgid) => {
+		// A group with no member has none to list (6.6).
+		if (!runnerPidAlive(-pgid)) return [];
 		try {
 			const output = execFileSync("ps", ["-axo", "pid=,pgid=,lstart="], {
 				encoding: "utf8",
