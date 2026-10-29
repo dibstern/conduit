@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { WsRpcError, type WsRpcGroup } from "../../contracts/ws-rpc.js";
-import { resolveSessionRequestFolders } from "../../domain/relay/Services/provider-turn-dispatch.js";
+import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
 
 export type WsRpcHandlerMap = Parameters<typeof WsRpcGroup.of>[0];
 
@@ -12,7 +12,7 @@ export const resolveSessionRequestDirectory = (
 	kind: "file" | "terminal",
 ) =>
 	Effect.gen(function* () {
-		const { workspaceRoot, effectiveFolders } =
+		const { workspaceRoot, workspaceRootPresent, effectiveFolders } =
 			yield* resolveSessionRequestFolders(request.sessionId);
 		const directory =
 			request.root === undefined
@@ -23,6 +23,14 @@ export const resolveSessionRequestDirectory = (
 				new WsRpcError({ message: `Unknown ${kind} root: ${request.root}` }),
 			);
 		}
+		const present =
+			request.root === undefined
+				? workspaceRootPresent
+				: effectiveFolders.find(({ root }) => root === request.root)?.present;
+		if (!present)
+			return yield* new WsRpcError({
+				message: `Workspace folder is missing: ${directory}`,
+			});
 		return directory;
 	});
 

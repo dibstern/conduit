@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import {
 	Context,
 	Deferred,
@@ -53,8 +52,8 @@ import {
 } from "../../../provider/turn-settings.js";
 import type { ModelInfo, SendTurnInput } from "../../../provider/types.js";
 import {
-	effectiveSessionFolders,
-	effectiveWorkingDirectory,
+	sessionFolders,
+	workspaceFolderPresent,
 } from "../../../session/session-workspace.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
@@ -125,20 +124,18 @@ export const resolveLaunchFolders = (
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		const workspaceRoot =
-			workingDirectory ?? effectiveWorkingDirectory(config.projectDir, state);
-		const effectiveFolders = effectiveSessionFolders(
+		const folders = sessionFolders(
 			[config.projectDir, ...(config.extraFolders ?? [])],
 			state,
 		);
+		const workspaceRoot = workingDirectory ?? folders.workspaceRoot;
+		const { effectiveFolders } = folders;
 		const extraFolders: string[] = [];
 		const launchFolders = state
-			? effectiveFolders
-					.map(({ directory }) => directory)
-					.filter((folder) => folder !== workspaceRoot)
+			? folders.directories.filter((folder) => folder !== workspaceRoot)
 			: (config.extraFolders ?? []);
 		for (const folder of launchFolders) {
-			if (existsSync(folder)) extraFolders.push(folder);
+			if (yield* workspaceFolderPresent(folder)) extraFolders.push(folder);
 			else {
 				const message = `Extra folder "${folder}" does not exist and was skipped.`;
 				const log = yield* LoggerTag;
@@ -159,7 +156,7 @@ export const resolveLaunchFolders = (
 		return { workspaceRoot, extraFolders, effectiveFolders };
 	});
 
-/** Shared folder mapping for launches and browser requests; recheck session folders at launch. */
+/** Turn preparation alone may recover or move a missing workspace. */
 export const resolveSessionFolders = (
 	session: Pick<SessionRow, "id" | "workspace">,
 	{
@@ -200,7 +197,10 @@ export const resolveSessionFolders = (
 				: yield* Schema.decodeUnknownEffect(
 						Schema.fromJsonString(SessionWorkspaceSchema),
 					)(savedWorkspace);
-		let workspaceRoot = effectiveWorkingDirectory(config.projectDir, state);
+		let workspaceRoot = sessionFolders(
+			[config.projectDir, ...(config.extraFolders ?? [])],
+			state,
+		).workspaceRoot;
 		const missing = yield* inspectSessionWorktree(
 			{ id: session.id, workspace: state },
 			config,
@@ -211,7 +211,7 @@ export const resolveSessionFolders = (
 			missing?.reason === "branch-missing" &&
 			fallbackMissingWorktree &&
 			workspace._tag === "Some" &&
-			existsSync(config.projectDir)
+			(yield* workspaceFolderPresent(config.projectDir))
 		) {
 			workspaceRoot = yield* workspace.value.withLaunch(
 				session.id,
@@ -256,13 +256,13 @@ export const resolveSessionFolders = (
 			);
 			workspaceRoot = recreated.directory;
 		}
-		if (!existsSync(workspaceRoot)) {
+		if (!(yield* workspaceFolderPresent(workspaceRoot))) {
 			const fallback =
 				fallbackMissingWorktree &&
 				workspace._tag === "Some" &&
 				state?.origin === "existing" &&
 				workspaceRoot !== config.projectDir;
-			if (!fallback || !existsSync(config.projectDir))
+			if (!fallback || !(yield* workspaceFolderPresent(config.projectDir)))
 				return yield* Effect.fail(
 					new RelayError(
 						`Main project folder does not exist: ${fallback ? config.projectDir : workspaceRoot}`,
@@ -278,31 +278,6 @@ export const resolveSessionFolders = (
 			state = null;
 		}
 		return yield* resolveLaunchFolders(state, session.id, workspaceRoot);
-	});
-
-/** Browser requests identify a session; project-level requests keep the primary folder. */
-export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
-	Effect.gen(function* () {
-		if (sessionId === undefined) {
-			const config = yield* ConfigTag;
-			const extraFolders = config.extraFolders ?? [];
-			return {
-				workspaceRoot: config.projectDir,
-				extraFolders,
-				effectiveFolders: effectiveSessionFolders(
-					[config.projectDir, ...extraFolders],
-					null,
-				),
-			};
-		}
-		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
-		if (!session)
-			return yield* Effect.fail(
-				new RelayError(`Session ${sessionId} not found`, {
-					code: "SESSION_NOT_FOUND",
-				}),
-			);
-		return yield* resolveSessionFolders(session);
 	});
 
 export class ProviderTurnDispatchFibersTag extends Context.Service<

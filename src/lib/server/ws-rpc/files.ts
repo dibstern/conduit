@@ -1,10 +1,8 @@
-import { realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
 import { Clock, Effect, Option } from "effect";
 import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import { DirectoryListingServiceTag } from "../../domain/relay/Services/directory-listing-service.js";
-import { resolveSessionRequestFolders } from "../../domain/relay/Services/provider-turn-dispatch.js";
 import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
+import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
 import { ToolContentServiceTag } from "../../domain/relay/Services/tool-content-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../errors.js";
@@ -17,18 +15,12 @@ import {
 import { getDiscoveredSkillForSession } from "../../handlers/settings.js";
 import { getSkillContentValue } from "../../handlers/skill-content.js";
 import { labelProjectFolders } from "../../project-folders.js";
+import { guardWorkspacePath } from "../../session/session-workspace.js";
 import {
 	mapRpcFailure,
 	resolveSessionRequestDirectory,
 	type WsRpcHandlerMap,
 } from "./shared.js";
-
-const containsPath = (directory: string, path: string) => {
-	const within = relative(directory, path);
-	return (
-		within !== ".." && !within.startsWith(`..${sep}`) && !isAbsolute(within)
-	);
-};
 
 const resolveFileDirectory = (request: {
 	readonly sessionId?: string | undefined;
@@ -37,22 +29,7 @@ const resolveFileDirectory = (request: {
 }) =>
 	Effect.gen(function* () {
 		const directory = yield* resolveSessionRequestDirectory(request, "file");
-		const path = resolve(directory, request.path ?? ".");
-		if (!containsPath(directory, path)) {
-			return yield* Effect.fail(
-				new WsRpcError({ message: "Path is outside the selected folder" }),
-			);
-		}
-		if (request.root !== undefined) {
-			const [realRoot, realPath] = yield* Effect.tryPromise(() =>
-				Promise.all([realpath(directory), realpath(path)]),
-			);
-			if (!containsPath(realRoot, realPath)) {
-				return yield* Effect.fail(
-					new WsRpcError({ message: "Path is outside the selected folder" }),
-				);
-			}
-		}
+		yield* guardWorkspacePath(directory, request.path);
 		return directory;
 	});
 
@@ -86,6 +63,10 @@ export const filesHandlers = {
 					return { projectSlug: config.slug, entries: [] };
 				}
 				const { workspaceRoot, effectiveFolders } = folders.value;
+				if (!folders.value.workspaceRootPresent)
+					return yield* new WsRpcError({
+						message: `Workspace folder is missing: ${workspaceRoot}`,
+					});
 				const entries = yield* getFileTreeEntries(workspaceRoot, startedAt);
 				const roots = labelProjectFolders(
 					effectiveFolders.map(({ root }) => root),

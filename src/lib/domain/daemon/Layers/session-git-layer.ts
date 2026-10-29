@@ -1,9 +1,9 @@
 import { lstat, readFile, realpath, stat } from "node:fs/promises";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
 	Clock,
-	type Context,
+	Context,
 	Deferred,
 	Effect,
 	HashMap,
@@ -27,26 +27,20 @@ import {
 import { makeUnboundCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import {
 	type CanonicalDirectory,
-	canonicalDirectory,
-	forgetCanonicalDirectory,
-	publicationDirectory,
 	readPublishedSessionGit,
-	rememberWorkspaceDirectories,
-	workspaceDirectory,
 } from "../../../persistence/effect/session-git-publication.js";
+import { readSessionWorktreeOwnershipSnapshot } from "../../../persistence/effect/session-worktree-ownership.js";
+import { sessionFolders } from "../../../session/session-workspace.js";
 import {
-	readSessionWorktreeOwnershipSnapshot,
-	recordedBranchForFolder,
-} from "../../../persistence/effect/session-worktree-ownership.js";
-import {
-	effectiveSessionFolders,
-	effectiveWorkingDirectory,
-} from "../../../session/session-workspace.js";
+	WorkspaceDirectories,
+	workspaceDirectories,
+} from "../../../session/workspace-directories.js";
 import {
 	type SessionGit as GitState,
 	SessionGitSchema,
 } from "../../../shared-types.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { inspectSessionWorktree } from "../../relay/Services/session-workspace.js";
 import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
 import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectRegistryTag } from "../Services/project-registry-service.js";
@@ -117,6 +111,14 @@ interface DirectoryState {
 /** One daemon owner: all callers see committed publications, never raw reads. */
 export const makeSessionGit = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
+	const identities = yield* workspaceDirectories;
+	const {
+		canonicalDirectory,
+		forgetCanonicalDirectory,
+		publicationDirectory,
+		rememberWorkspaceDirectories,
+		workspaceDirectory,
+	} = identities;
 	const registry = yield* ProjectRegistryTag;
 	const unavailable = yield* DaemonStoreAvailability;
 	const owners = yield* OwnerScopes;
@@ -531,12 +533,9 @@ export const makeSessionGit = Effect.gen(function* () {
 				);
 				const keys = [
 					...new Set(
-						[
-							effectiveWorkingDirectory(folders[0] ?? "", workspace),
-							...effectiveSessionFolders(folders, workspace).map(
-								({ directory }) => directory,
-							),
-						].map((directory) => workspaceDirectory(directory, workspace)),
+						sessionFolders(folders, workspace).directories.map((directory) =>
+							workspaceDirectory(directory, workspace),
+						),
 					),
 				];
 				const previous = sessions.get(sessionId);
@@ -602,53 +601,19 @@ export const makeSessionGit = Effect.gen(function* () {
 						workspaceDirectory(path, session.workspace) === entry.directory,
 				);
 				if (!pair) continue;
-				const ownership = yield* readSessionWorktreeOwnershipSnapshot(
-					session.projectId,
-					id,
-				).pipe(Effect.provideService(SqlClient.SqlClient, sql));
-				const checkoutRoot =
-					ownership?._tag === "Owned"
-						? ownership.ownership.find(
-								({ path }) =>
-									entry.directory === resolve(path) ||
-									entry.directory.startsWith(`${resolve(path)}${sep}`),
-							)?.path
-						: undefined;
-				if (exists) {
-					const checkout = yield* Effect.tryPromise(async () => {
-						const root = checkoutRoot ?? entry.directory;
-						return (
-							(await lstat(root)).isDirectory() &&
-							(await lstat(join(root, ".git"))).isFile()
-						);
-					}).pipe(Effect.orElseSucceed(() => false));
-					if (checkout) return undefined;
-				}
-				if (Option.isNone(worktrees))
-					return {
-						path: entry.directory,
-						canRecreate: false,
-						reason: "git-failed" as const,
-					};
-				const recordedBranch =
-					ownership?._tag === "Owned"
-						? recordedBranchForFolder(ownership.ownership, ...pair)
-						: undefined;
-				return yield* worktrees.value
-					.inspectMissing(
-						{ path: pair[0], projectSlug: session.projectId, sessionId: id },
-						entry.directory,
-						Object.keys(session.workspace.worktrees),
-						recordedBranch,
-					)
-					.pipe(
-						Effect.provideService(SubprocessPriority, "background"),
-						Effect.orElseSucceed(() => ({
-							path: entry.directory,
-							canRecreate: false,
-							reason: "git-failed" as const,
-						})),
-					);
+				return yield* inspectSessionWorktree(
+					{ id, workspace: session.workspace },
+					{ projectDir: session.folders[0] ?? "", slug: session.projectId },
+					pair[0],
+				).pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+					Effect.provideService(SubprocessPriority, "background"),
+					Effect.provide(
+						Option.isSome(worktrees)
+							? Context.make(WorktreeServiceTag, worktrees.value)
+							: Context.empty(),
+					),
+				);
 			}
 			return undefined;
 		});
@@ -733,18 +698,11 @@ export const makeSessionGit = Effect.gen(function* () {
 														? null
 														: Option.getOrNull(decodeWorkspace(row.workspace));
 												if (
-													workspaceDirectory(
-														effectiveWorkingDirectory(
-															project.value.project.folders[0] ?? "",
-															workspace,
-														),
-														workspace,
-													) === entry.directory ||
-													effectiveSessionFolders(
+													sessionFolders(
 														project.value.project.folders,
 														workspace,
-													).some(
-														({ directory }) =>
+													).directories.some(
+														(directory) =>
 															workspaceDirectory(directory, workspace) ===
 															entry.directory,
 													)
@@ -1011,6 +969,7 @@ export const makeSessionGit = Effect.gen(function* () {
 						if (entry) yield* checkPresence(entry);
 					}
 					return yield* readPublishedSessionGit(sessionId).pipe(
+						Effect.provideService(WorkspaceDirectories, identities),
 						Effect.provideService(SqlClient.SqlClient, sql),
 						Effect.provideService(ProjectRegistryTag, registry),
 					);
@@ -1029,6 +988,7 @@ export const makeSessionGit = Effect.gen(function* () {
 						request(entry);
 				}
 				return yield* readPublishedSessionGit(sessionId).pipe(
+					Effect.provideService(WorkspaceDirectories, identities),
 					Effect.provideService(SqlClient.SqlClient, sql),
 					Effect.provideService(ProjectRegistryTag, registry),
 				);
