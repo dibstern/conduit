@@ -117,6 +117,8 @@ const config = defineConfig({
 	// proxy targets (localhost:2633) aren't running during E2E tests that use
 	// `vite preview`, so disable preview-mode proxying to avoid noisy
 	// ECONNREFUSED errors.
+	// @pierre/diffs' highlighter worker is an ES module with imports.
+	worker: { format: "es" },
 	preview: { proxy: {} },
 	server: {
 		host: "127.0.0.1",

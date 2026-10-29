@@ -101,6 +101,7 @@
 		"@opencode-ai/sdk": "1.19.1",
 		"@opentelemetry/exporter-trace-otlp-http": "^0.215.0",
 		"@opentelemetry/sdk-trace-node": "^2.7.0",
+		"@pierre/diffs": "1.6.2",
 		"@xterm/addon-search": "^0.16.0",
 		"better-sqlite3": "^13.0.3",
 		"bits-ui": "2.18.1",
