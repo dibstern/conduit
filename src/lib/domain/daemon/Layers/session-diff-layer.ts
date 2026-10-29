@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Effect } from "effect";
+import { Effect, Fiber, PubSub, Semaphore, Stream } from "effect";
 import {
 	SESSION_DIFF_AUTO_LINES,
 	SESSION_DIFF_TOO_LARGE_BYTES,
@@ -7,13 +7,18 @@ import {
 	type SessionDiffFile,
 	type SessionDiffFolder,
 	type SessionDiffListing,
+	type SessionDiffScope,
 } from "../../../contracts/session-diff.js";
 import {
 	type FolderSnapshot,
 	FolderTimeline,
 	type FolderTimelineError,
 } from "../Services/folder-timeline.js";
-import type { SessionDiff } from "../Services/session-diff.js";
+import type {
+	SessionDiff,
+	SessionDiffSession,
+} from "../Services/session-diff.js";
+import { SessionGit } from "../Services/session-git.js";
 
 const MEMO_LIMIT = 64;
 const STATUS = {
@@ -76,11 +81,14 @@ type Listed =
 
 export const makeSessionDiff = Effect.gen(function* () {
 	const timeline = yield* FolderTimeline;
+	const git = yield* SessionGit;
+	const layerScope = yield* Effect.scope;
 	const memo = new Map<
 		string,
 		{
 			readonly sessionId: string;
 			readonly scope: string;
+			readonly listing: SessionDiffListing;
 			readonly folders: ReadonlyMap<
 				string,
 				{
@@ -90,6 +98,16 @@ export const makeSessionDiff = Effect.gen(function* () {
 			>;
 		}
 	>();
+	// One per subscribed (session, folders, scope): the only thing that snapshots on a change.
+	const live = new Map<
+		string,
+		{
+			readonly revisions: PubSub.PubSub<string>;
+			readonly watcher: Fiber.Fiber<void>;
+			subscribers: number;
+		}
+	>();
+	const joining = yield* Semaphore.make(1);
 
 	const relative = (snapshot: FolderSnapshot) =>
 		snapshot.prefix === "" ? [] : [`--relative=${snapshot.prefix}`];
@@ -155,93 +173,159 @@ export const makeSessionDiff = Effect.gen(function* () {
 			);
 		});
 
-	return {
-		list: (session, scope) =>
-			Effect.gen(function* () {
-				const folders = yield* Effect.forEach(
-					session.folders,
-					(folder) =>
-						Effect.gen(function* (): Effect.fn.Return<
-							Listed,
-							FolderTimelineError
-						> {
-							if (!folder.present)
-								return {
-									folder: folder.root,
-									error: "unavailable" as const,
-									message: `Folder is missing: ${folder.directory}`,
-								};
-							const snapshot = yield* timeline.snapshot(folder.directory);
+	const list: SessionDiff["Service"]["list"] = (session, scope, revision) =>
+		Effect.gen(function* () {
+			const scopeKey = JSON.stringify(scope);
+			const remembered =
+				revision === undefined ? undefined : memo.get(revision);
+			if (remembered?.sessionId === session.id && remembered.scope === scopeKey)
+				return remembered.listing;
+			const folders = yield* Effect.forEach(
+				session.folders,
+				(folder) =>
+					Effect.gen(function* (): Effect.fn.Return<
+						Listed,
+						FolderTimelineError
+					> {
+						if (!folder.present)
 							return {
 								folder: folder.root,
-								snapshot,
-								files: yield* listFiles(snapshot),
+								error: "unavailable" as const,
+								message: `Folder is missing: ${folder.directory}`,
 							};
-						}).pipe(
-							Effect.catch((error) =>
-								Effect.succeed<Listed>({
-									folder: folder.root,
-									error:
-										error.reason === "timeout"
-											? ("timeout" as const)
-											: ("unavailable" as const),
-									message: error.message,
-								}),
-							),
-						),
-					{ concurrency: "unbounded" },
-				);
-				const scopeKey = JSON.stringify(scope);
-				const revision = createHash("sha256")
-					.update(
-						JSON.stringify([
-							session.id,
-							scopeKey,
-							folders.map((folder) =>
-								"snapshot" in folder
-									? [folder.folder, folder.snapshot]
-									: [folder.folder, folder.error, folder.message],
-							),
-						]),
-					)
-					.digest("hex")
-					.slice(0, 32);
-				memo.delete(revision);
-				memo.set(revision, {
-					sessionId: session.id,
-					scope: scopeKey,
-					folders: new Map(
-						folders.flatMap((folder) =>
-							"snapshot" in folder
-								? [
-										[
-											folder.folder,
-											{
-												snapshot: folder.snapshot,
-												files: new Map(
-													folder.files.map((file) => [file.path, file]),
-												),
-											},
-										],
-									]
-								: [],
+						const snapshot = yield* timeline.snapshot(folder.directory);
+						return {
+							folder: folder.root,
+							snapshot,
+							files: yield* listFiles(snapshot),
+						};
+					}).pipe(
+						Effect.catch((error) =>
+							Effect.succeed<Listed>({
+								folder: folder.root,
+								error:
+									error.reason === "timeout"
+										? ("timeout" as const)
+										: ("unavailable" as const),
+								message: error.message,
+							}),
 						),
 					),
-				});
-				for (const stale of memo.keys()) {
-					if (memo.size <= MEMO_LIMIT) break;
-					memo.delete(stale);
-				}
-				return {
-					revision,
-					folders: folders.map(
-						(folder): SessionDiffFolder =>
+				{ concurrency: "unbounded" },
+			);
+			const listed = createHash("sha256")
+				.update(
+					JSON.stringify([
+						session.id,
+						scopeKey,
+						folders.map((folder) =>
 							"snapshot" in folder
-								? { folder: folder.folder, files: folder.files }
-								: folder,
+								? [folder.folder, folder.snapshot]
+								: [folder.folder, folder.error, folder.message],
+						),
+					]),
+				)
+				.digest("hex")
+				.slice(0, 32);
+			const listing = {
+				revision: listed,
+				folders: folders.map(
+					(folder): SessionDiffFolder =>
+						"snapshot" in folder
+							? { folder: folder.folder, files: folder.files }
+							: folder,
+				),
+			} satisfies SessionDiffListing;
+			memo.delete(listed);
+			memo.set(listed, {
+				sessionId: session.id,
+				scope: scopeKey,
+				listing,
+				folders: new Map(
+					folders.flatMap((folder) =>
+						"snapshot" in folder
+							? [
+									[
+										folder.folder,
+										{
+											snapshot: folder.snapshot,
+											files: new Map(
+												folder.files.map((file) => [file.path, file]),
+											),
+										},
+									],
+								]
+							: [],
 					),
-				} satisfies SessionDiffListing;
-			}),
+				),
+			});
+			for (const stale of memo.keys()) {
+				if (memo.size <= MEMO_LIMIT) break;
+				memo.delete(stale);
+			}
+			return listing;
+		});
+
+	/** Re-lists once per change, keeping at most one change waiting behind a running list. */
+	const watch = (
+		session: SessionDiffSession,
+		scope: SessionDiffScope,
+		revisions: PubSub.PubSub<string>,
+	) => {
+		let latest: string | undefined;
+		return git.changes.pipe(
+			Stream.filter((change) => change.sessionIds.includes(session.id)),
+			Stream.buffer({ capacity: 1, strategy: "sliding" }),
+			Stream.runForEach(() =>
+				Effect.flatMap(list(session, scope), ({ revision }) => {
+					if (revision === latest) return Effect.void;
+					latest = revision;
+					return PubSub.publish(revisions, revision);
+				}),
+			),
+		);
+	};
+
+	return {
+		list,
+		changes: (session, scope) =>
+			Stream.unwrap(
+				Effect.gen(function* () {
+					const key = JSON.stringify([session, scope]);
+					const hub = yield* joining.withPermits(1)(
+						Effect.gen(function* () {
+							const open = live.get(key);
+							if (open) {
+								open.subscribers += 1;
+								return open;
+							}
+							// A subscriber only needs the newest revision.
+							const revisions = yield* PubSub.sliding<string>(1);
+							const watcher = yield* watch(session, scope, revisions).pipe(
+								Effect.forkIn(layerScope),
+							);
+							const opened = { revisions, watcher, subscribers: 1 };
+							live.set(key, opened);
+							return opened;
+						}),
+					);
+					yield* Effect.addFinalizer(() =>
+						joining.withPermits(1)(
+							Effect.suspend(() => {
+								hub.subscribers -= 1;
+								if (hub.subscribers > 0) return Effect.void;
+								live.delete(key);
+								return Fiber.interrupt(hub.watcher).pipe(
+									Effect.andThen(PubSub.shutdown(hub.revisions)),
+								);
+							}),
+						),
+					);
+					return Stream.fromSubscription(
+						yield* PubSub.subscribe(hub.revisions),
+					);
+				}),
+			),
 		file: (request) =>
 			Effect.gen(function* () {
 				const listed = memo.get(request.revision);

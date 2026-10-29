@@ -12,13 +12,18 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Fiber, Layer, PubSub, Schedule, Stream } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FolderTimeline } from "../../../src/lib/domain/daemon/Services/folder-timeline.js";
 import {
 	SessionDiff,
 	SessionDiffLive,
 } from "../../../src/lib/domain/daemon/Services/session-diff.js";
+import {
+	SessionGit,
+	type SessionGitChange,
+} from "../../../src/lib/domain/daemon/Services/session-git.js";
+import { Subprocess } from "../../../src/lib/domain/daemon/Services/subprocess.js";
 
 // Failure modes beyond the process E2E: a file's blobs, counts, size or tier
 // are wrong, swapped or misaligned after a rename's extra numstat paths; a
@@ -30,7 +35,10 @@ import {
 // store on first use; a folder without an index, a missing
 // folder or a non-git folder fails the whole listing; collect skips stores
 // left by an earlier run, prunes a snapshot still inside its grace period, or
-// keeps one past it so Gone never comes.
+// keeps one past it so Gone never comes; a live scope snapshots once per
+// subscriber instead of once per change, pushes an unchanged revision, reacts
+// to another session's change, or keeps snapshotting after its last subscriber
+// leaves; a list pinned to a pushed revision snapshots again.
 const GIT_KEYS = [
 	"GIT_DIR",
 	"GIT_INDEX_FILE",
@@ -76,11 +84,24 @@ function repository(files: Record<string, string>) {
 	return repo;
 }
 
+const sessionGit = (changes: Stream.Stream<SessionGitChange>) =>
+	Layer.succeed(SessionGit, {
+		read: () => Effect.succeed(undefined),
+		changes,
+		invalidate: () => Effect.void,
+	});
+
 const run = <A, E>(
 	program: Effect.Effect<A, E, SessionDiff | FolderTimeline>,
 ): Promise<A> =>
 	Effect.runPromise(
-		program.pipe(Effect.provide(SessionDiffLive(join(root, "config")))),
+		program.pipe(
+			Effect.provide(
+				SessionDiffLive(join(root, "config")).pipe(
+					Layer.provide(sessionGit(Stream.never)),
+				),
+			),
+		),
 	);
 
 const scope = { kind: "unstaged" } as const;
@@ -397,7 +418,13 @@ it("lists worktrees that share one repository together on first use", async () =
 					{ id: "s", folders: worktrees.map(present) },
 					scope,
 				);
-			}).pipe(Effect.provide(SessionDiffLive(join(root, `config-${attempt}`)))),
+			}).pipe(
+				Effect.provide(
+					SessionDiffLive(join(root, `config-${attempt}`)).pipe(
+						Layer.provide(sessionGit(Stream.never)),
+					),
+				),
+			),
 		);
 		expect(listing.folders.map((folder) => "files" in folder)).toEqual(
 			worktrees.map(() => true),
@@ -504,4 +531,145 @@ it("collect sweeps stores left by an earlier run, keeps a snapshot inside its gr
 	);
 
 	expect(outcomes).toEqual({ orphaned: false, kept: true, expired: "gone" });
+});
+
+it("pushes each new revision of a live scope to every subscriber from one snapshot, and stops when the last one leaves", async () => {
+	const repo = repository({ "tracked.txt": "one\n" });
+	writeFileSync(join(repo, "tracked.txt"), "two\n");
+	const published = Effect.runSync(PubSub.unbounded<SessionGitChange>());
+	// Each snapshot writes two trees: the index and the working tree.
+	let trees = 0;
+	const counted = Layer.effect(
+		Subprocess,
+		Effect.map(Subprocess, (real) => ({
+			...real,
+			run: (...call: Parameters<typeof real.run>) => {
+				if (call[1].includes("write-tree")) trees += 1;
+				return real.run(...call);
+			},
+		})),
+	);
+	const snapshots = () => trees / 2;
+	const session = { id: "s", folders: [present(repo)] };
+	const edit = (text: string) =>
+		Effect.sync(() => writeFileSync(join(repo, "tracked.txt"), text));
+	const change = (sessionId: string) =>
+		PubSub.publish(published, {
+			directory: repo,
+			sessionIds: [sessionId],
+			version: 1,
+		});
+	const until = (done: () => boolean) =>
+		Effect.sync(done).pipe(
+			Effect.repeat({
+				until: (ok) => ok,
+				schedule: Schedule.spaced("10 millis"),
+			}),
+			Effect.timeout("10 seconds"),
+		);
+	const quiet = Effect.sleep("300 millis");
+
+	const outcome = await Effect.runPromise(
+		Effect.gen(function* () {
+			const diff = yield* SessionDiff;
+			const seen: [string[], string[]] = [[], []];
+			const subscribe = (into: string[]) =>
+				diff.changes(session, scope).pipe(
+					Stream.runForEach((revision) =>
+						Effect.sync(() => into.push(revision)),
+					),
+					Effect.forkChild,
+				);
+			const [first, second] = [
+				yield* subscribe(seen[0]),
+				yield* subscribe(seen[1]),
+			];
+			yield* quiet;
+			const idle = snapshots();
+
+			yield* change("s");
+			yield* until(() => seen[0].length === 1 && seen[1].length === 1);
+			const firstChange = snapshots();
+
+			yield* change("s");
+			yield* until(() => snapshots() === 2);
+			yield* quiet;
+			const unchanged = seen.map((revisions) => revisions.length);
+
+			yield* edit("three\n");
+			yield* change("s");
+			yield* until(() => seen[0].length === 2 && seen[1].length === 2);
+			const pushed = seen[0][1] ?? "";
+			const beforePinned = snapshots();
+			const pinned = yield* diff.list(session, scope, pushed);
+			const pinnedSnapshots = snapshots() - beforePinned;
+
+			yield* change("t");
+			yield* quiet;
+			const otherSession = snapshots() - beforePinned;
+
+			yield* Fiber.interrupt(first);
+			yield* edit("four\n");
+			yield* change("s");
+			yield* until(() => seen[1].length === 3);
+			yield* quiet;
+			const oneLeft = seen.map((revisions) => revisions.length);
+
+			yield* Fiber.interrupt(second);
+			const beforeClosed = snapshots();
+			yield* edit("five\n");
+			yield* change("s");
+			yield* quiet;
+			const closed = snapshots() - beforeClosed;
+
+			const again: string[] = [];
+			const third = yield* subscribe(again);
+			yield* quiet;
+			yield* change("s");
+			yield* until(() => again.length === 1);
+			yield* Fiber.interrupt(third);
+
+			const [folder] = pinned.folders;
+			return {
+				idle,
+				firstChange,
+				sameRevision: seen[0][0] === seen[1][0],
+				unchanged,
+				pushedDiffers: pushed !== seen[0][0] && seen[1][1] === pushed,
+				pinnedRevision: pinned.revision === pushed,
+				pinnedAfter:
+					folder && "files" in folder ? folder.files[0]?.after : undefined,
+				pinnedSnapshots,
+				otherSession,
+				oneLeft,
+				closed,
+				reopened: again[0] !== undefined && !seen[1].includes(again[0]),
+			};
+		}).pipe(
+			Effect.provide(
+				SessionDiffLive(join(root, "config")).pipe(
+					Layer.provide(sessionGit(Stream.fromPubSub(published))),
+					Layer.provide(counted),
+				),
+			),
+		),
+	);
+
+	expect(outcome).toEqual({
+		idle: 0,
+		firstChange: 1,
+		sameRevision: true,
+		unchanged: [1, 1],
+		pushedDiffers: true,
+		pinnedRevision: true,
+		pinnedAfter: execFileSync("git", ["hash-object", "--stdin"], {
+			input: "three\n",
+			encoding: "utf8",
+		}).trim(),
+		pinnedSnapshots: 0,
+		otherSession: 0,
+		oneLeft: [2, 3],
+		closed: 0,
+		reopened: true,
+	});
 });
