@@ -10,7 +10,12 @@ interface DiffFixture {
 	readonly files: SessionDiffFile[];
 	readonly requested: string[];
 	readonly gone: Set<string>;
+	/** Patch requests whose revision another session listed. */
+	readonly foreign: string[];
 	lists: number;
+	holdNext: boolean;
+	release: (() => void) | null;
+	replied: Promise<void> | null;
 }
 
 const fixtures = new WeakMap<Page, DiffFixture>();
@@ -52,20 +57,39 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 		files,
 		requested: [],
 		gone: new Set(),
+		foreign: [],
 		lists: 0,
+		holdNext: false,
+		release: null,
+		replied: null,
 	};
 	fixtures.set(page, fixture);
 	requireRpcControl(page).setStubs({
-		SessionDiffList: () => {
+		SessionDiffList: async ({ sessionId }) => {
 			fixture.lists += 1;
+			if (fixture.holdNext) {
+				fixture.holdNext = false;
+				const held = new Promise<void>((resolve) => {
+					fixture.release = resolve;
+				});
+				fixture.replied = held;
+				await held;
+			}
 			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
 			return {
-				revision: "rev-unchanged",
+				revision: `rev-${sessionId}`,
 				folders: [{ folder: "/workspace/myapp", files: fixture.files }],
 			};
 		},
-		SessionDiffFile: ({ path }) => {
+		SessionDiffFile: ({ path, sessionId, revision }) => {
 			fixture.requested.push(path);
+			if (revision !== `rev-${sessionId}`) {
+				fixture.foreign.push(`${sessionId} ${revision} ${path}`);
+				throw new SessionDiffError({
+					reason: "not-listed",
+					message: "That file was not in this listing",
+				});
+			}
 			if (fixture.gone.delete(path))
 				throw new SessionDiffError({
 					reason: "gone",
@@ -254,6 +278,55 @@ export const sessionDiffHandlers: StepHandler[] = [
 			await expect
 				.poll(() => requireFixture(world.page).lists)
 				.toBe(Number(match[1]));
+		},
+	},
+	{
+		name: "hold next diff listing",
+		match: /^the next diff listing is held$/,
+		run: async ({ world }) => {
+			requireFixture(world.page).holdNext = true;
+		},
+	},
+	{
+		name: "release held diff listing",
+		match: /^the held diff listing lands$/,
+		run: async ({ world }) => {
+			const fixture = requireFixture(world.page);
+			const frames = (count: number) =>
+				world.page.evaluate(async (count) => {
+					for (let frame = 0; frame < count; frame += 1)
+						await new Promise((resolve) => requestAnimationFrame(resolve));
+				}, count);
+			// Visible rows observe and request their patch before the reply lands.
+			await frames(2);
+			await expect.poll(() => fixture.release !== null).toBe(true);
+			fixture.release?.();
+			fixture.release = null;
+			await fixture.replied;
+			// The mock sends the reply after the stub returns; one turn lets it go.
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			// Routed frames and evaluate share one channel, so this runs after the reply.
+			await frames(1);
+		},
+	},
+	{
+		name: "open session from the sidebar",
+		match: /^I open the "([^"]+)" session$/,
+		run: async ({ world, match }) => {
+			const before = world.page.url();
+			await world.page
+				.locator("#session-list .session-item-title", {
+					hasText: match[1] ?? "",
+				})
+				.click({ position: { x: 8, y: 6 } });
+			await expect(world.page).not.toHaveURL(before);
+		},
+	},
+	{
+		name: "patches use their session's revision",
+		match: /^every diff patch was requested with its own session's revision$/,
+		run: async ({ world }) => {
+			expect(requireFixture(world.page).foreign).toEqual([]);
 		},
 	},
 	{

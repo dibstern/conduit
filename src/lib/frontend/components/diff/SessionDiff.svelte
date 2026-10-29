@@ -13,8 +13,10 @@
 
 	const scope = { kind: "unstaged" } as const;
 	const sessionId = $derived(getCurrentSessionId());
-	let listing = $state<SessionDiffListing | null>(null);
-	let failure = $state<string | null>(null);
+	// A reply keeps the session it answered, so it never shows for another.
+	let reply = $state<{ id: string; listing: SessionDiffListing | null; failure: string | null } | null>(null);
+	const listing = $derived(reply?.id === sessionId ? reply.listing : null);
+	const failure = $derived(reply?.id === sessionId ? reply.failure : null);
 	let listed = $state(0);
 	// Only the newest listing call may land.
 	let latest = 0;
@@ -24,19 +26,12 @@
 		try {
 			const next = await rpc("SessionDiffList", { sessionId: id, scope });
 			if (call !== latest) return;
-			listing = next;
+			reply = { id, listing: next, failure: null };
 			listed += 1;
-			failure = null;
 		} catch (error) {
-			if (call === latest) failure = failureLine(error, "Could not load the diff.");
+			if (call === latest) reply = { id, listing: null, failure: failureLine(error, "Could not load the diff.") };
 		}
 	}
-
-	$effect(() => {
-		void sessionId;
-		listing = null;
-		failure = null;
-	});
 
 	// The pane stays mounted behind other tabs; only a shown pane snapshots.
 	$effect(() => {

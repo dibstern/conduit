@@ -58,3 +58,24 @@ Scenario Outline: A hidden Diff pane does not list, and showing it again re-list
 Examples:
   | count | first_lists | shown_lists |
   | 1     | 1           | 2           |
+
+Scenario Outline: A listing that lands after a session switch stays with its session
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  When I open the "<other>" session
+  And I open the Files right pane
+  And I open the "<first>" session
+  And the next diff listing is held
+  And I open the Diff right pane
+  And I open the "<other>" session
+  And the held diff listing lands
+  And the next diff listing is held
+  And I select the Diff right pane tab
+  And the held diff listing lands
+  Then the <path> diff shows its patch
+  And every diff patch was requested with its own session's revision
+  And the diff shows no error
+
+Examples:
+  | count | first                 | other                 | path       |
+  | 1     | Fix model selector UI | Add dark mode support | file-01.ts |
