@@ -134,5 +134,11 @@ it("refreshes an unfocused project's git in the open shell after a commit and a 
 		"test-results/project-list-git-refresh.json",
 		`${JSON.stringify(result, null, 2)}\n`,
 	);
-	expect(result).toMatchObject({ observedHead: head, observedDirty: true });
+	// Each change must be seen within its own budget, not merely by the end.
+	expect(result).toMatchObject({
+		observedHead: head,
+		commitVisibleMs: expect.any(Number),
+		observedDirty: true,
+		nestedEditVisibleMs: expect.any(Number),
+	});
 }, 150_000);
