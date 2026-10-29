@@ -4,6 +4,7 @@
 <!-- passing the preview off as the whole.                                        -->
 <script lang="ts">
 	import { type Snippet, untrack } from "svelte";
+	import type { ToolFileChange } from "../../../contracts/stored-event.js";
 	import type { ToolDetail } from "../../../contracts/tool-wire.js";
 	import type { ToolMessage } from "../../types.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -50,6 +51,22 @@
 			: tool;
 	});
 	const input = $derived(hasPresentation ? ensureCanonical(shown.name, shown.input) : undefined);
+	// Count lines in whole text only: a transcript preview or a Cursor-truncated call would undercount.
+	const complete = $derived(!presentation?.truncated && shown.preview?.fileChangesBytes === undefined);
+
+	const marked = (lines: readonly string[], mark: "+" | "-") =>
+		lines.filter((line) => line.startsWith(mark) && !line.startsWith(mark.repeat(3))).length;
+
+	/** A patch's added and removed lines, or the lines of an add that has no patch. */
+	const lineCounts = (change: ToolFileChange): { added: number; removed?: number } | undefined => {
+		if (change.patch !== undefined) {
+			const lines = change.patch.split("\n");
+			return { added: marked(lines, "+"), removed: marked(lines, "-") };
+		}
+		if (change.kind !== "add" || change.after === undefined) return undefined;
+		const { after } = change;
+		return { added: after.split("\n").length - (after === "" || after.endsWith("\n") ? 1 : 0) };
+	};
 
 	// The session the tool is shown in: a fork repeats its parent's call ids.
 	const session = $derived.by((): SessionRef | undefined => {
@@ -101,11 +118,11 @@
 <!-- Only Cursor cards render file changes inline; other providers' get f02e9.9's Diff action. -->
 {#if presentation && shown.fileChanges?.length}
 	{#each shown.fileChanges as change}
-	{@const patchLines = change.patch?.split("\n")}
+	{@const counts = complete ? lineCounts(change) : undefined}
 	<div data-testid="tool-file-change" class="my-1 overflow-x-auto">
 		<div class="font-mono text-xs text-text-secondary">{#if change.kind === "move"}{change.oldPath} → {/if}{change.path} <span class="text-text-muted">{change.kind}</span></div>
 		<div class="diff-stats flex gap-3 text-xs">
-			{#if patchLines}<span class="text-success">+{patchLines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length}</span><span class="text-error">-{patchLines.filter((line) => line.startsWith("-") && !line.startsWith("---")).length}</span>{/if}
+			{#if counts}<span class="text-success">+{counts.added}</span>{#if counts.removed !== undefined}<span class="text-error">-{counts.removed}</span>{/if}{/if}
 		</div>
 		{#if change.patch !== undefined}<pre class="tool-result font-mono text-xs whitespace-pre-wrap">{#each change.patch.split("\n") as line}<span class={line.startsWith("+") ? "text-success" : line.startsWith("-") ? "text-error" : "text-text-secondary"}>{line}{"\n"}</span>{/each}</pre>{:else}
 			{#if change.before !== undefined}<pre class="tool-result font-mono text-xs whitespace-pre-wrap text-error" aria-label="Before">{change.before}</pre>{/if}
