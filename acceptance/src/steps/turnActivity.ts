@@ -142,9 +142,7 @@ export const turnActivityHandlers: StepHandler[] = [
 			])
 				await expect(turn.locator(selector)).toHaveCount(0);
 			await expect(bar.getByText("Show", { exact: true })).toHaveCount(0);
-			await expect(
-				bar.getByRole("button", { name: "Make default", exact: true }),
-			).toHaveCount(0);
+			await expect(bar.getByTestId("turn-show-defaults")).toHaveCount(0);
 		},
 	},
 	{

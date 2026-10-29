@@ -129,7 +129,7 @@ export const ExpandedLight: Story = {
 	globals: { theme: "light" },
 };
 
-/** Elapsed time counts up, the strip grows, and the last three steps show as a fading ticker. */
+/** Elapsed time counts up and the strip grows. Jev-off turns start collapsed; JevOffLive shows the open ticker. */
 export const Live: Story = {
 	args: { turn: live, segment: liveSegment, final: true },
 	play: async ({ canvasElement }) => {
@@ -492,6 +492,7 @@ async function showSkillEvents(canvasElement: HTMLElement) {
 		name: /^\+ \d+ earlier steps?$/,
 	});
 	if (earlier) await userEvent.click(earlier);
+	(document.activeElement as HTMLElement | null)?.blur();
 	const rows = canvas.getAllByRole("button", { name: /^Skill / });
 	await expect(rows).toHaveLength(2);
 	for (const row of rows) {
@@ -537,6 +538,13 @@ const skillSurfacing = {
 export const SkillsJev: Story = {
 	...SkillsOpen,
 	args: { ...SkillsOpen.args, surfacing: skillSurfacing },
+	play: async ({ canvasElement }) => {
+		await showSkillEvents(canvasElement);
+		// Full log lists every message, unjudged ones included, so it is never empty.
+		await expect(
+			within(canvasElement).queryByText(/^Nothing at /),
+		).not.toBeInTheDocument();
+	},
 };
 
 export const SkillsLiveJev: Story = {
@@ -593,7 +601,10 @@ export const LiveCollapsed: Story = {
 		const canvas = within(canvasElement);
 		const head = canvas.getByRole("button", { name: /^Collapse turn$/ });
 		await userEvent.click(head);
-		head.blur();
+		// Collapsing hands focus to the card for keyboard continuity.
+		const card = canvas.getByTestId("surfacing-card");
+		await expect(card).toHaveFocus();
+		card.blur();
 		await expect(head).toHaveAccessibleName("Expand turn");
 		await expect(head).toHaveTextContent("Working");
 		await expect(canvas.queryByTestId("turn-show-bar")).not.toBeInTheDocument();
@@ -754,7 +765,8 @@ export const JevOffLive: Story = {
 export const JevOffLiveNarrow: Story = {
 	args: { ...JevOffLive.args, sessionId: "turn-activity-jev-off-live-narrow" },
 	play: async ({ canvasElement }) => {
-		canvasElement.style.width = "320px";
+		// 320px left the phrase within a pixel of fitting, so Linux fonts never truncated it.
+		canvasElement.style.width = "280px";
 		const elapsed = within(canvasElement).getByTestId("turn-live-elapsed");
 		await expect(elapsed.scrollWidth).toBeLessThanOrEqual(elapsed.clientWidth);
 		const phrase = elapsed.nextElementSibling;

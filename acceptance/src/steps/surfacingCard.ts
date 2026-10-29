@@ -1160,19 +1160,18 @@ export const surfacingCardHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const options = world.page.getByTestId("turn-show-bar");
 			const trigger = options.getByRole("button", {
-				name: "Show messages",
-				exact: true,
+				name: /^(Show messages|Default level)$/,
 			});
-			if (await trigger.count()) await trigger.click();
+			await trigger.click();
 			await world.page
-				.getByRole((await trigger.count()) ? "menuitem" : "button", {
+				.getByRole("menuitem", {
 					name: match[1] ?? "",
 					exact: true,
 				})
 				.click();
 			if (
 				await world.page
-					.getByRole("menu", { name: "Show, least to most", exact: true })
+					.getByRole("menu", { name: /^(Show, least to most|Default level)$/ })
 					.count()
 			)
 				await world.page.keyboard.press("Escape");

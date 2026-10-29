@@ -224,7 +224,7 @@
 				<Button variant="ghost" size="content" hoverFill="none" class="absolute top-1/2 z-[var(--z-raised)] flex size-[19px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-turn-bg font-mono text-[12px] text-status-ask ring-1 ring-status-ask pointer-events-auto" style="left:clamp(10px, {pin.x}%, calc(100% - 10px))" data-hand-back={pin.id} data-testid="turn-hand-back-pin" ariaLabel={`Q&A ${index + 1}: ${pin.label}`} onclick={(event) => { if (event.detail === 0) { clear(); onjump?.(pin.id); } }}>?</Button>
 			{/each}
 						{#if pinMarkers && anchor}<i class="surface-thumb" style:left={anchor}></i>{/if}
-		{#if hovered && (messagePreview || hoveredStep && stepPreview)}<i data-testid="strip-hover-marker" class="strip-hover-marker" style:left="{hoverX}%"><Icon name="chevron-down" size={10} class="absolute top-full left-1/2 -translate-x-1/2" /></i>{/if}
+		{#if hovered && (hoveredStep && stepPreview || messagePreview && !pinMarkers)}<i data-testid="strip-hover-marker" class="strip-hover-marker" style:left="{hoverX}%"><Icon name="chevron-down" size={10} class="absolute top-full left-1/2 -translate-x-1/2" /></i>{/if}
 		</div>
 		{#if markers.kind === "dots"}
 			{#each markers.dots as pin (pin.part.uuid)}
@@ -294,6 +294,7 @@
 	.dots .unread-dot { position:absolute; top:50%; width:7px; height:7px; border-radius:50%; background:var(--surface-colour,var(--color-accent)); transform:translate(-50%, -50%); box-shadow:0 0 0 1.5px var(--color-turn-bg); }
 	.dots .unread-dot.read { border:1px solid var(--surface-colour); background:var(--color-turn-bg); }
 	.dots .unread-dot.ask::after { content:""; position:absolute; inset:-4px; border:1px solid var(--color-status-ask); border-radius:50%; opacity:.55; }
-	@media (max-width:767px) { .minimised-scrub { padding:20px 0; } }
+	/* The ring hugs the 4px track, as on desktop, so it clears the peek card measured from the track. */
+	@media (max-width:767px) { .minimised-scrub { padding:20px 0; } .minimised-scrub:focus-visible { outline-offset:-14px; } }
 
 </style>

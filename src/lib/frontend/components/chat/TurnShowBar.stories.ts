@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { SvelteMap } from "svelte/reactivity";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import type { TurnPanelState } from "../../stores/turn-panel.svelte.js";
+import type { ShowStop } from "../../utils/turn-stops.js";
 import TurnShowBar from "./TurnShowBar.svelte";
 
 function panel(view: TurnPanelState["view"]): TurnPanelState {
@@ -193,22 +195,111 @@ export const KeyboardSelection: Story = {
 	},
 };
 
-/** A narrow card on a wide screen (768px with the sidebar open) keeps tabs, so they scroll. */
-export const NarrowCardTabs: Story = {
+/** Default actions share a menu so the settled bill fits beside the tabs in a full desktop card. */
+export const DefaultsMenu: Story = {
+	args: {
+		bill: {
+			cost: 0.1234,
+			context: { used: 64000, window: 200000, pct: 32 },
+		},
+	},
+	beforeEach: ({ args }) => {
+		sessionViewState.compact = false;
+		const selection = new SvelteMap<string, ShowStop>([["stop", "balanced"]]);
+		args["panel"] = {
+			...panel({ kind: "open", view: { kind: "show", stop: "balanced" } }),
+			hasHandBacks: true,
+			get view(): TurnPanelState["view"] {
+				return {
+					kind: "open",
+					view: { kind: "show", stop: selection.get("stop") ?? "balanced" },
+				};
+			},
+			get overridden() {
+				return selection.get("stop") !== "balanced";
+			},
+			show: fn((stop: ShowStop) => {
+				selection.set("stop", stop);
+			}),
+		};
+	},
+	play: async ({ canvasElement }) => {
+		canvasElement.style.width = "712px";
+		canvasElement.style.paddingTop = "120px";
+		await document.fonts.ready;
+		const canvas = within(canvasElement);
+		const body = within(canvasElement.ownerDocument.body);
+		const bar = canvas.getByTestId("turn-show-bar");
+		const tabs = canvas.getByRole("tablist", { name: "Show" });
+		const cost = canvas.getByText("$0.1234").closest(".turn-meta");
+		if (!cost) throw new Error("Missing settled bill");
+		await expect(bar).toHaveAttribute("data-layout", "tabs");
+		await expect(
+			Math.abs(
+				cost.getBoundingClientRect().top - tabs.getBoundingClientRect().top,
+			),
+		).toBeLessThanOrEqual(4);
+		const trigger = canvas.getByRole("button", { name: "Default level" });
+		await userEvent.click(trigger);
+		const menu = body.getByRole("menu", { name: "Default level" });
+		await expect(menu).toHaveAttribute("data-side", "top");
+		await expect(menu).toHaveAttribute("data-align", "end");
+		await expect(
+			within(menu).getByRole("menuitem", { name: "Make default" }),
+		).not.toHaveAttribute("aria-disabled", "true");
+		await expect(
+			within(menu).getByRole("menuitem", { name: "Back to default" }),
+		).toHaveAttribute("aria-disabled", "true");
+		await userEvent.keyboard("{Escape}");
+		await userEvent.click(canvas.getByRole("tab", { name: "Key" }));
+		await userEvent.click(trigger);
+		await expect(
+			body.getByRole("menuitem", { name: "Back to default" }),
+		).not.toHaveAttribute("aria-disabled", "true");
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(trigger).toHaveFocus());
+		trigger.blur();
+	},
+};
+
+/** A narrow desktop card (768px with the sidebar open) uses the Show menu without overflowing. */
+export const NarrowCardMenu: Story = {
+	args: {
+		...DefaultsMenu.args,
+		panel: {
+			...panel({ kind: "open", view: { kind: "show", stop: "balanced" } }),
+			hasHandBacks: true,
+		},
+	},
 	beforeEach: () => {
 		sessionViewState.compact = false;
 	},
 	play: async ({ canvasElement }) => {
 		canvasElement.style.width = "315px";
+		await document.fonts.ready;
 		const canvas = within(canvasElement);
 		const bar = canvas.getByTestId("turn-show-bar");
-		const tabs = canvas.getAllByRole("tab");
-		const usage = canvas.getByRole("tab", { name: "Usage" });
-		await waitFor(() => {
-			for (const tab of tabs) {
-				expect(tab.offsetHeight).toBe(usage.offsetHeight);
-			}
-		});
+		await waitFor(() => expect(bar).toHaveAttribute("data-layout", "menu"));
+		await expect(
+			canvas.getByRole("button", { name: "Show messages" }),
+		).toBeVisible();
+		await expect(bar.scrollWidth).toBeLessThanOrEqual(bar.clientWidth);
+		canvasElement.style.width = "710px";
+		await waitFor(() => expect(bar).toHaveAttribute("data-layout", "tabs"));
+		const tabs = canvas.getByRole("tablist", { name: "Show" });
+		const cost = canvas.getByText("$0.1234").closest(".turn-meta");
+		if (!cost) throw new Error("Missing settled bill");
+		await expect(tabs.scrollWidth).toBeLessThanOrEqual(tabs.clientWidth);
+		await expect(
+			Math.abs(
+				cost.getBoundingClientRect().top - tabs.getBoundingClientRect().top,
+			),
+		).toBeLessThanOrEqual(4);
+		canvasElement.style.width = "709px";
+		await waitFor(() => expect(bar).toHaveAttribute("data-layout", "menu"));
+		canvasElement.style.width = "315px";
+		await waitFor(() => expect(bar.clientWidth).toBe(315));
+		await expect(bar).toHaveAttribute("data-layout", "menu");
 		await expect(bar.scrollWidth).toBeLessThanOrEqual(bar.clientWidth);
 	},
 };

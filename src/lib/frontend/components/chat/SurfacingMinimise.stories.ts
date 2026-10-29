@@ -218,6 +218,8 @@ export const OpenPreview: Story = {
 			"aria-pressed",
 			"true",
 		);
+		// The previewed pin's thumb is the one cursor, as in design E.
+		await expect(canvas.queryByTestId("strip-hover-marker")).toBeNull();
 	},
 };
 

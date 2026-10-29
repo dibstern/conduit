@@ -190,6 +190,8 @@ export const UnwrittenLight: Story = {
 /** Beside the transcript a citation opens its turn card, so the summary shows no copy of its own. */
 export const CitationOpensCard: Story = {
 	...WholeTurn,
+	// Pinned: phone defaults to the compact viewport, where the sheet reads it.
+	args: { ...WholeTurn.args, phone: false },
 	play: async ({ args, canvasElement }) => {
 		const cite = within(canvasElement).getByTestId("surfacing-recap-cite-2");
 		await userEvent.click(cite);

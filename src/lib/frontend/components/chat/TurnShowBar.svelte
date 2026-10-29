@@ -16,7 +16,11 @@
 	import RunningPill from "./RunningPill.svelte";
 
 	let { panel, counts, bill, running, onlevelchange }: { panel: TurnPanelState; counts: StopCounts; bill: TurnEconomics; running: number; onlevelchange: () => void } = $props();
-	const layout = $derived<"tabs" | "menu">(sessionViewState.compact && (panel.stops.length > 1 || panel.hasHandBacks) ? "menu" : "tabs");
+	// The widest row (stops with counts, Q&A, override dot, ⋯, $0.1234, ctx 32%) first fits at
+	// 709px on macOS and 708px on Linux; NarrowCardMenu pins this. Real cards top out at 712px.
+	const TABS_MIN_WIDTH = 710;
+	let width = $state(0);
+	const layout = $derived<"tabs" | "menu">((sessionViewState.compact || (width > 0 && width < TABS_MIN_WIDTH)) && (panel.stops.length > 1 || panel.hasHandBacks) ? "menu" : "tabs");
 	const active = $derived.by(() => {
 		const view = panel.view;
 		switch (view.kind) {
@@ -59,18 +63,18 @@
 	{#if panel.overridden && active === stop}<i class="size-[6px] rounded-full bg-accent" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}
 {/snippet}
 
-{#snippet defaults()}
-	<Button variant="ghost" size="content" tone="muted" touchTarget class="px-[6px] text-[11.5px]" disabled={defaultState.kind === "saving"} onclick={makeDefault}>Make default</Button>
-	<Button variant="ghost" size="content" tone="muted" touchTarget class="px-[6px] text-[11.5px]" disabled={!panel.overridden || defaultState.kind === "saving"} onclick={resetLevel}>Back to default</Button>
+{#snippet defaultItems()}
+	<MenuItem disabled={defaultState.kind === "saving"} onselect={makeDefault}>Make default</MenuItem>
+	<MenuItem disabled={!panel.overridden || defaultState.kind === "saving"} onselect={resetLevel}>Back to default</MenuItem>
 {/snippet}
 
-<div data-testid="turn-show-bar" data-layout={layout} class="flex flex-wrap items-center gap-[4px] rounded-b-[13px] border-t border-border bg-turn-bg px-[12px]">
+<div bind:clientWidth={width} data-testid="turn-show-bar" data-layout={layout} class="flex flex-wrap items-center gap-[4px] rounded-b-[13px] border-t border-border bg-turn-bg px-[12px]">
 	{#if layout === "tabs"}
 		{#if panel.stops.length > 1}<span class="mr-[4px] text-[11.5px] text-text-muted">Show</span>{/if}
 	{:else}
 		<Menu ariaLabel="Show, least to most" presentation="popover" side="bottom" align="start">
 			{#snippet trigger({ props })}
-				<Button {...props} variant="ghost" size="content" tone="secondary" touchTarget class="min-h-[36px] gap-[6px] text-[12px]" data-testid="surfacing-level" ariaLabel="Show messages">{active === "usage" ? "Show ⌄" : `Show · ${active === "qa" ? "Q&A" : STOPS[active].menu} ⌄`}{#if panel.overridden && active !== "usage" && active !== "qa"}<i class="size-[6px] rounded-full bg-accent" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}</Button>
+				<Button {...props} variant="ghost" size="content" tone="secondary" touchTarget class="-mx-[6px] min-h-[36px] gap-[6px] px-[6px] text-[12px]" data-testid="surfacing-level" ariaLabel="Show messages">{active === "usage" ? "Show ⌄" : `Show · ${active === "qa" ? "Q&A" : STOPS[active].menu} ⌄`}{#if panel.overridden && active !== "usage" && active !== "qa"}<i class="size-[6px] rounded-full bg-accent" data-testid="surfacing-level-default-dot" title="Overrides the default level"></i>{/if}</Button>
 			{/snippet}
 			<MenuGroup label="Show, least to most">
 				<MenuRadioGroup value={active}>
@@ -89,8 +93,7 @@
 			</MenuGroup>
 			{#if panel.stops.length > 1}
 				<MenuSeparator />
-				<MenuItem disabled={defaultState.kind === "saving"} onselect={makeDefault}>Make default</MenuItem>
-				<MenuItem disabled={!panel.overridden || defaultState.kind === "saving"} onselect={resetLevel}>Back to default</MenuItem>
+				{@render defaultItems()}
 			{/if}
 		</Menu>
 	{/if}
@@ -100,7 +103,14 @@
 			{#snippet optionContent(option)}{#if option.value === "usage"}Usage{:else if option.value === "qa"}Q&A{:else}{@render stopContent(option.value, option.label)}{/if}{/snippet}
 		</Tabs>
 	</div>
-	{#if layout === "tabs" && panel.stops.length > 1}{@render defaults()}{/if}
+	{#if layout === "tabs" && panel.stops.length > 1}
+		<Menu ariaLabel="Default level" presentation="popover" side="top" align="end">
+			{#snippet trigger({ props })}
+				<Button {...props} variant="ghost" size="content" tone="muted" touchTarget class="min-h-[36px] px-[6px] text-[12px]" ariaLabel="Default level" data-testid="turn-show-defaults">⋯</Button>
+			{/snippet}
+			{@render defaultItems()}
+		</Menu>
+	{/if}
 	<RunningPill count={running} />
 	<span class="turn-meta ml-auto inline-flex items-center gap-[10px] whitespace-nowrap py-[6px] font-mono text-[11.5px] text-text-secondary">
 		<span>{bill.cost === undefined ? "Cost unavailable" : `$${bill.cost.toFixed(billDetail === "context" ? 4 : 2)}`}</span>

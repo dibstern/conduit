@@ -199,9 +199,11 @@ export function surfaceTurn(input: {
 		if (level === "final")
 			return { visible: [], pins: picked ? [picked] : [], empty: false };
 		const visible = visibleAt(level);
+		// Full log pins at All messages but lists every message, so it is never empty.
+		const fullLog = input.view?.kind === "show" && input.view.stop === "log";
 		return {
 			visible,
-			empty: visible.length === 0,
+			empty: visible.length === 0 && !fullLog,
 			pins: messages.filter(
 				(message) =>
 					visible.includes(message) ||

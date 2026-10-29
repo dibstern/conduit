@@ -188,8 +188,20 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"both light stories inherit the same WorkingQueued fixture and play assertions",
 	"layout-chatlayout--phone-top-colour | layout-chatlayout--sidebar-collapsed":
 		"on phone both show the same session with its sidebar collapsed; PhoneTopColour additionally asserts matching top-edge, header and browser theme colours, then restores the theme",
-	"ui-activitytimeline--default | ui-activitytimeline--touch-scrub":
-		"TouchScrub changes aria-valuetext and emits onjump; without emphasis both stories paint the same segments",
+	"ui-activitytimeline--default | ui-activitytimeline--live-fade | ui-activitytimeline--touch-scrub":
+		"TouchScrub changes aria-valuetext and emits onjump, LiveFade asserts the 1.2s fade duration that capture freezes; without emphasis all three paint the same segments",
+
+	// Turn log redesign E (conduit-test-xdyjq.9). Each pair asserts different
+	// reveal() results or a different setup path that end in one Turn state.
+	"chat-surfacing-minimise--message-destination | chat-surfacing-minimise--superseded-destination":
+		"both end with part 4 revealed in an open Turn; they differ in reveal() results (a minimised start versus a superseded first reveal)",
+	"chat-surfacing-minimise--minimised | chat-surfacing-minimise--unmounted-destination":
+		"both end with the Turn collapsed and no card; UnmountedDestination asserts reveal() reports missing for a Turn with no mounted panel",
+	// The live Turn sits below the 852px phone fold, which phone captures do not paint (conduit-test-cou9).
+	"chat-messagelist--turn-ledger | chat-messagelist--turn-ledger-live":
+		"on phone the last Turn is below the fold that capture leaves blank (conduit-test-cou9); desktop differs",
+	"chat-messagelist--turn-ledger-light | chat-messagelist--turn-ledger-live-light":
+		"on phone the last Turn is below the fold that capture leaves blank (conduit-test-cou9); desktop differs",
 };
 
 const BASELINE_DIRECTORY = resolve(

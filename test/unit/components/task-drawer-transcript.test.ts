@@ -498,16 +498,18 @@ describe("Surfacing in primary and child transcripts", () => {
 			JSON.parse(localStorage.getItem("surfacing-level-by-session") ?? "{}"),
 		).toMatchObject({ [parentId]: "key" });
 		rpc.call.mockResolvedValueOnce({ ...activeStatus, defaultLevel: "key" });
+		await fireEvent.click(view.getByRole("button", { name: "Default level" }));
 		await fireEvent.click(
-			await view.findByRole("button", { name: "Make default" }),
+			await view.findByRole("menuitem", { name: "Make default" }),
 		);
 		await waitFor(() => expect(sessionSurfaceLevel(parentId)).toBeUndefined());
 		expect(rpc.call).toHaveBeenCalledWith("UpdateMessageSurfacing", {
 			defaultLevel: "key",
 		});
 		await fireEvent.click(level.getByRole("tab", { name: "Most" }));
+		await fireEvent.click(view.getByRole("button", { name: "Default level" }));
 		await fireEvent.click(
-			await view.findByRole("button", { name: "Back to default" }),
+			await view.findByRole("menuitem", { name: "Back to default" }),
 		);
 		expect(sessionSurfaceLevel(parentId)).toBeUndefined();
 		expect(

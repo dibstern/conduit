@@ -55,6 +55,8 @@
 	let citedPart = $state<string | null>(null);
 	// With summaries off, the notes line carries the turn's bulk read.
 	const markCount = $derived(markReadInAxis && onmarkread ? view.unreadPartIds.length : 0);
+	// An open card carries its own "now ⇥"; the notes row offers it only without one.
+	const notesFollow = $derived(live && !view.following && !card);
 </script>
 
 {#snippet messageCard()}
@@ -65,13 +67,13 @@
 
 {@render strip(citedPart, messageCard)}
 
-{#if view.level === "final" || view.empty || view.notJudgedCount || markCount || (live && !view.following)}
+{#if view.level === "final" || view.empty || view.notJudgedCount || markCount || notesFollow}
 <div class="axis-notes" data-testid="surfacing-notes">
 	{#if view.level === "final"}<span>{STOPS.final.menu} · {counts.all} hidden</span>{/if}
 	{#if view.empty}<span>Nothing at {STOPS[view.level].short} · <Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" onclick={() => onlevel("all")}>Show {STOPS.all.short}</Button></span>{/if}
 	{#if view.notJudgedCount}<span data-testid="surfacing-not-judged">⚠ {view.notJudgedCount} not judged</span>{/if}
 	{#if markCount}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="h-[22px] shrink-0 rounded-full px-[8px] font-sans text-[11.5px] font-medium bg-accent/15 text-accent" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => onmarkread?.()}>✓ Mark {markCount} read</Button>{/if}
-	{#if live && !view.following}<Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" ariaLabel="Follow latest" onclick={onfollow}>now ⇥</Button>{/if}
+	{#if notesFollow}<Button variant="ghost-accent" size="content" hoverFill="none" touchTarget class="font-mono" ariaLabel="Follow latest" onclick={onfollow}>now ⇥</Button>{/if}
 </div>
 {/if}
 {#if readState.kind === "failed" && (!card || readState.uuid === card.part.uuid)}<p role="alert" class="mt-[4px] text-[12px] text-error">{readState.message}</p>{/if}

@@ -367,14 +367,22 @@ export const turnActivityShowHandlers: StepHandler[] = [
 			await expect(
 				tabs.getByRole("tab", { name: "Most", exact: true }),
 			).toHaveCSS("box-shadow", "none");
-			for (const name of ["Make default", "Back to default"]) {
+			const defaults = bar.getByRole("button", {
+				name: "Default level",
+				exact: true,
+			});
+			await expect(defaults).toBeVisible();
+			await expect(tabs.getByTestId("turn-show-defaults")).toHaveCount(0);
+			await defaults.click();
+			const menu = world.page.getByRole("menu", {
+				name: "Default level",
+				exact: true,
+			});
+			for (const name of ["Make default", "Back to default"])
 				await expect(
-					bar.getByRole("button", { name, exact: true }),
+					menu.getByRole("menuitem", { name, exact: true }),
 				).toBeVisible();
-				await expect(
-					tabs.getByRole("button", { name, exact: true }),
-				).toHaveCount(0);
-			}
+			await world.page.keyboard.press("Escape");
 		},
 	},
 	{

@@ -14,7 +14,12 @@ import {
 import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { AssistantMessage } from "../../types.js";
 import type { SurfaceTurn } from "../../utils/surface-turn.js";
-import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
+import {
+	type ActivityPart,
+	type Segment,
+	type Turn,
+	turnLog,
+} from "../../utils/turns.js";
 import { provideComposerDraft } from "../input/composer-reference.svelte.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -551,9 +556,10 @@ export const LivePicked: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("surfacing-pin-2"));
+		// The open card owns "now ⇥"; the notes row drops its copy.
 		await expect(
 			canvas.getAllByRole("button", { name: "Follow latest" }),
-		).toHaveLength(2);
+		).toHaveLength(1);
 		canvas.getByTestId("surfacing-pin-2").blur();
 	},
 };
@@ -663,21 +669,24 @@ export const RepliedLight: Story = {
 	globals: { theme: "light" },
 };
 
-const firstBlock: Segment = { activity: activity.slice(0, 8), reply: [] };
-const laterBlock: Segment = { activity: activity.slice(8), reply: [] };
-const handbackTurn: Turn = { ...turn, segments: [firstBlock, laterBlock] };
-export const HandBackFirstBlock: Story = {
-	args: { turn: handbackTurn, segment: firstBlock, final: false },
+// A hand-back splits the turn into blocks; like MessageList, the card reads
+// the whole turn as one head, strip and log.
+const handbackTurn: Turn = {
+	...turn,
+	segments: [
+		{ activity: activity.slice(0, 8), reply: [] },
+		{ activity: activity.slice(8), reply: [] },
+	],
 };
-export const HandBackFirstBlockLight: Story = {
-	...HandBackFirstBlock,
-	globals: { theme: "light" },
+export const HandBack: Story = {
+	args: {
+		turn: handbackTurn,
+		segment: turnLog(handbackTurn).segment,
+		final: true,
+	},
 };
-export const HandBackLastBlock: Story = {
-	args: { turn: handbackTurn, segment: laterBlock, final: true },
-};
-export const HandBackLastBlockLight: Story = {
-	...HandBackLastBlock,
+export const HandBackLight: Story = {
+	...HandBack,
 	globals: { theme: "light" },
 };
 const unjudgedSegment: Segment = {
