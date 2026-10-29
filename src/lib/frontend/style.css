@@ -1221,6 +1221,8 @@ body:has(dialog:modal) {
 		#stop,
 		[data-testid="permission-mode-badge"],
 		[data-testid="model-picker-trigger"],
+		[data-testid="variant-badge"],
+		[data-testid="composer-checkout"],
 		#attach-btn,
 		#new-session-btn,
 		[data-testid="list-bar-select"],
@@ -1243,6 +1245,13 @@ body:has(dialog:modal) {
 	gap: 0;
 	clip-path: none;
 }
+/* Its button recipe pins h-[28px]!, which min-height outgrows. */
+#layout[data-pose="duo-folded-portrait"]
+	#input-area
+	#input-row
+	[data-testid="composer-checkout"] {
+	min-height: 44px;
+}
 /* The slot is the whole target. */
 #layout[data-pose="duo-folded-portrait"]
 	:is(#session-bar, #input-area, #sidebar-header)
@@ -1253,6 +1262,8 @@ body:has(dialog:modal) {
 		#stop,
 		[data-testid="permission-mode-badge"],
 		[data-testid="model-picker-trigger"],
+		[data-testid="variant-badge"],
+		[data-testid="composer-checkout"],
 		#attach-btn
 	)::before {
 	display: none;
@@ -1267,8 +1278,33 @@ body:has(dialog:modal) {
 	bottom: 22px;
 }
 #layout[data-pose="duo-folded-portrait"]
-	:is([data-testid="model-picker-trigger"], [data-testid="list-bar-theme"]) {
+	:is(
+		[data-testid="model-picker-trigger"],
+		[data-testid="variant-badge"],
+		[data-testid="composer-checkout"],
+		[data-testid="list-bar-theme"]
+	) {
 	bottom: 70px;
+}
+/* Effort and Directory live in the Model sheet here. They wait folded into
+   Model, hidden but laid out, so the keyboard handoff can bud them from it. */
+#layout[data-pose="duo-folded-portrait"]:not([data-keyboard="open"])
+	#input-area
+	:is([data-testid="variant-badge"], [data-testid="composer-checkout"]) {
+	visibility: hidden;
+}
+/* Fixed slots, not the footer's measured fit, decide what shows here. */
+#layout[data-pose="duo-folded-portrait"]
+	#input-area
+	[data-testid="variant-badge"] {
+	display: inline-flex;
+}
+/* Its button is fixed in a slot; a 0-wide pill tells it to draw its icon. */
+#layout[data-pose="duo-folded-portrait"] #input-area .git-pill.compact {
+	display: inline-grid;
+	flex: none;
+	width: 0;
+	min-width: 0;
 }
 #layout[data-pose="duo-folded-portrait"]
 	:is([data-testid="permission-mode-badge"], [data-testid="list-bar-select"]) {
@@ -1284,6 +1320,8 @@ body:has(dialog:modal) {
 	:is(
 		#attach-btn,
 		[data-testid="model-picker-trigger"],
+		[data-testid="variant-badge"],
+		[data-testid="composer-checkout"],
 		[data-testid="permission-mode-badge"]
 	) {
 	background-color: var(--color-chip);
@@ -1292,16 +1330,14 @@ body:has(dialog:modal) {
 	background-color: var(--color-inverse-bg);
 	color: var(--color-inverse-text);
 }
-/* Icons only: labels, the model's chevron and effort, and the checkout chip. */
+/* Icons only: labels and the model's chevron. */
 #layout[data-pose="duo-folded-portrait"]
 	:is(
 		#session-bar-settle-label,
 		#input-area .model-label,
 		#input-area [data-testid="model-chip-chevron"],
 		#input-area [data-testid="picker-selected-context"],
-		#input-area [data-testid="variant-badge"],
-		#input-area [data-testid="add-claude-account-btn"],
-		#input-area .git-pill.compact
+		#input-area [data-testid="add-claude-account-btn"]
 	) {
 	display: none;
 }
@@ -1369,6 +1405,138 @@ body:has(dialog:modal) {
 	min-width: 0;
 	min-height: 0;
 	margin: 0;
+}
+
+/* The keyboard is open (conduit-test-tw49i.5, mockup card 7). iOS floats its
+   form bar at y316 and nothing beside or below it takes a touch, so the page
+   ends there. The rail empties into one row of a full composer above the form
+   bar (K-full): field y206-250, controls y254-298, hairline y304-316. */
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"] #app {
+	max-height: 316px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	:is(#session-bar-settle, #session-bar-more),
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#duo-rail::before {
+	display: none;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#input-area[data-compact] {
+	padding: 6px 8px 14px 22px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"] #input-row {
+	--composer-field-max: 44px;
+	height: 100px;
+	justify-content: flex-start;
+	padding: 4px 14px 52px 16px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	.context-hairline {
+	top: calc(100% + 2px);
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#input-area
+	:is(
+		#attach-btn,
+		[data-testid="model-picker-trigger"],
+		[data-testid="variant-badge"],
+		[data-testid="permission-mode-badge"],
+		[data-testid="composer-checkout"],
+		#send,
+		#stop
+	) {
+	top: 254px;
+	right: auto;
+	bottom: auto;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#input-area
+	:is(
+		#attach-btn,
+		[data-testid="variant-badge"],
+		[data-testid="permission-mode-badge"],
+		[data-testid="composer-checkout"]
+	) {
+	background-color: transparent;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"] #attach-btn {
+	left: 26px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#input-area
+	#input-row
+	[data-testid="model-picker-trigger"] {
+	left: 74px;
+	width: 116px;
+	padding: 5px 4px;
+	gap: 6px;
+	border-radius: 22px;
+	background-color: var(--color-chip);
+}
+/* The chip names its model, until Stop and Send both need the room. */
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:not(
+		:has(#stop):has(#send)
+	)
+	#input-area
+	.model-label {
+	display: block;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:not(
+		:has(#stop):has(#send)
+	)
+	#input-area
+	[data-testid="model-chip-chevron"] {
+	display: inline-flex;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	[data-testid="variant-badge"] {
+	left: 194px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	[data-testid="permission-mode-badge"] {
+	left: 238px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	[data-testid="composer-checkout"] {
+	left: 282px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#input-area
+	:is(#send, #stop) {
+	left: 326px;
+	padding: 4px;
+}
+/* Stop beside Send: the model chip keeps its logo alone and the row closes up. */
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:has(#stop):has(
+		#send
+	)
+	[data-testid="model-picker-trigger"] {
+	width: 44px;
+	padding: 3px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:has(#stop):has(
+		#send
+	)
+	[data-testid="variant-badge"] {
+	left: 122px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:has(#stop):has(
+		#send
+	)
+	[data-testid="permission-mode-badge"] {
+	left: 166px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:has(#stop):has(
+		#send
+	)
+	[data-testid="composer-checkout"] {
+	left: 210px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:has(#stop):has(
+		#send
+	)
+	#stop {
+	left: 282px;
 }
 
 #layout[data-pose="duo-folded-portrait"] #sidebar-header {
