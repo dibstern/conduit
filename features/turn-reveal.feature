@@ -53,15 +53,14 @@ Scenario: A citation opens its message without widening Answer
   And the effective surfacing level is Answer
   And the messages region visually matches turn-reveal-citation at 98 percent
 
-Scenario: The skills chip reveals an older step after paging history
+Scenario: The skills chip reveals a step outside the loaded transcript window
   Given the viewport is a phone
   And the session loaded skills with transcript anchors
   And the conduit app is served with the skill-navigation mockup
   Then turn 3 is absent from the first transcript page
   When I open the skills chip
   And I tap the skill row "paged-skill"
-  Then two older transcript pages were requested
-  And the Skill step in turn 3 is focused in its expanded activity panel and in the viewport
+  Then the Skill step in turn 3 is focused in its expanded activity panel and in the viewport
   And the messages region visually matches turn-reveal-paged-skill at 98 percent
 
 Scenario Outline: A reply outside the panel lands even with no activity

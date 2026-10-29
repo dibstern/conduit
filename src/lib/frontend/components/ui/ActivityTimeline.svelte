@@ -21,7 +21,7 @@
 </script>
 
 <script lang="ts">
-	import { onDestroy } from "svelte";
+	import { onDestroy, tick } from "svelte";
 	import { surfacePinRows, type SurfacePinGroup } from "../../utils/surface-turn.js";
 	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 	import Button from "./Button.svelte";
@@ -90,6 +90,14 @@
 	});
 	$effect(() => { oninteraction?.({ hovered, scrubbing }); });
 	onDestroy(() => oninteraction?.({ hovered: null, scrubbing: false }));
+
+	function placeHover(node: HTMLDivElement) {
+		hoverHeight = node.clientHeight;
+		// Apply the measured placement before the card can extend transcript overflow.
+		void tick().then(() => {
+			node.dataset["positioned"] = "";
+		});
+	}
 
 	function clear() { gesture = { kind: "idle", hovered: null }; }
 	function activateStep(id: string) {
@@ -240,13 +248,13 @@
 		</div>
 	{/if}
 	{#if hoveredStep && stepPreview}
-		<div role="group" aria-label="Step preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" bind:clientHeight={hoverHeight} style="top:{hoverPosition.top}px;left:{hoverPosition.left}px;width:{hoverPosition.width}px" data-side={hoverPosition.side} onpointerup={() => { const id = hoveredStep.id; clear(); activateStep(id); }}>
+		<div role="group" aria-label="Step preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" {@attach placeHover} bind:clientHeight={hoverHeight} style="top:{hoverPosition.top}px;left:{hoverPosition.left}px;width:{hoverPosition.width}px" data-side={hoverPosition.side} onpointerup={() => { const id = hoveredStep.id; clear(); activateStep(id); }}>
 			<i class="card-caret" style="left:{hoverPosition.caret};--card-background:var(--color-bg-alt)"></i>
 			<Surface variant="raised" radius="lg" padding="md" data-testid="turn-step-popover">{@render stepPreview(hoveredStep.id)}</Surface>
 		</div>
 	{/if}
 	{#if messagePreview && preview}
-		<div role="group" aria-label="Hover preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" bind:clientHeight={hoverHeight} style="top:{hoverPosition.top}px;left:{hoverPosition.left}px;width:{hoverPosition.width}px" class:ask={messagePreview.category === "ask" && !messagePreview.pending} data-side={hoverPosition.side} data-testid="surfacing-minimised-peek" data-ordinal={messagePreview.number}
+		<div role="group" aria-label="Hover preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" {@attach placeHover} bind:clientHeight={hoverHeight} style="top:{hoverPosition.top}px;left:{hoverPosition.left}px;width:{hoverPosition.width}px" class:ask={messagePreview.category === "ask" && !messagePreview.pending} data-side={hoverPosition.side} data-testid="surfacing-minimised-peek" data-ordinal={messagePreview.number}
 			onpointerup={() => { const pin = messagePreview; clear(); if (pin) onpick?.(pin); }}>
 			<i class="card-caret" style:left={hoverPosition.caret}></i>
 			{@render preview(messagePreview)}
@@ -278,6 +286,7 @@
 	/* Design E tints an Ask card's outline, not its fill. */
 	.hanging-card.ask { --card-border:color-mix(in srgb,var(--color-status-ask) 65%,var(--color-bg)); }
 	.hover-card { position:absolute; margin-top:0; }
+	.hover-card:not([data-positioned]) { position:fixed; visibility:hidden; }
 	.hover-card::before { content:""; position:absolute; bottom:100%; left:0; right:0; height:10px; }
 	.hover-card[data-side="top"]::before { bottom:auto; top:100%; }
 	.hover-card[data-side="top"] .card-caret { top:auto; bottom:-6px; transform:translateX(-50%) rotate(225deg); }

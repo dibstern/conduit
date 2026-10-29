@@ -62,6 +62,59 @@ describe("ScrollController", () => {
 		div.dispatchEvent(new Event("scroll"));
 	}
 
+	describe("observed layout changes", () => {
+		beforeEach(() => vi.useFakeTimers());
+		afterEach(() => vi.useRealTimers());
+
+		it("preserves a following reader's position on mutations without layout growth", async () => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			vi.advanceTimersToNextFrame();
+			div.scrollTop = 1486;
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.state).toBe("following");
+
+			div.append(document.createElement("span"));
+			await Promise.resolve();
+			vi.advanceTimersToNextFrame();
+			expect(div.scrollTop).toBe(1486);
+			ctrl.detach();
+		});
+
+		it("follows content growth observed while at the bottom", async () => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			vi.advanceTimersToNextFrame();
+
+			Object.defineProperty(div, "scrollHeight", { value: 2400 });
+			div.append(document.createElement("span"));
+			await Promise.resolve();
+			expect(div.scrollTop).toBe(2400);
+			expect(ctrl.state).toBe("following");
+			ctrl.detach();
+		});
+
+		it("follows growth that lands before its own scroll event is consumed", async () => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			vi.advanceTimersToNextFrame();
+
+			ctrl.onNewContent();
+			Object.defineProperty(div, "scrollHeight", { value: 2400 });
+			div.dispatchEvent(new Event("scroll"));
+			div.append(document.createElement("span"));
+			await Promise.resolve();
+			expect(div.scrollTop).toBe(2400);
+			ctrl.detach();
+		});
+	});
+
 	// Failure cases: a short historical window looks like latest at its bottom;
 	// an already queued prepend applies to a different navigation/window.
 	describe("transcript windows", () => {
