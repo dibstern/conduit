@@ -13,7 +13,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import Database from "better-sqlite3";
-import { Effect, Result, Schema } from "effect";
+import { Effect, Fiber, Queue, Result, Schema, Stream } from "effect";
 import { expect, it } from "vitest";
 import { SessionInfoSchema } from "../../src/lib/contracts/ws-rpc.js";
 import { loadDaemonConfigResult } from "../../src/lib/daemon/config-persistence.js";
@@ -742,7 +742,55 @@ it("snapshots folders only for an open session diff and lists the conduit reposi
 			);
 		} else report["file"] = "no text change in the worktree";
 
-		const closed = await measure(() => idleFor(DIFF_BUDGET.noViewerMs));
+		// Two devices watch the scope live, then both leave.
+		const second = await harness.connect(undefined, undefined, "conduit");
+		let opened: string[] = [];
+		const live = await measure(async () => {
+			const feeds = await Promise.all(
+				[browser, second].map(async (device) => {
+					const revisions = await Effect.runPromise(Queue.unbounded<string>());
+					return {
+						revisions,
+						fiber: Effect.runFork(
+							Stream.runForEach(
+								device.rpc.SubscribeSessionDiff({ sessionId, scope }),
+								({ revision }) => Queue.offer(revisions, revision),
+							),
+						),
+					};
+				}),
+			);
+			opened = await Promise.all(
+				feeds.map(({ revisions }) => Effect.runPromise(Queue.take(revisions))),
+			);
+			await Effect.runPromise(
+				Fiber.interruptAll(feeds.map(({ fiber }) => fiber)),
+			);
+		});
+		report["live"] = {
+			...live,
+			diffSpawns: diffSpawns(live),
+			opened,
+		};
+		check(
+			diffSpawns(live) <= DIFF_BUDGET.listSpawns,
+			`live: ${diffSpawns(live)} diff spawns to open two devices`,
+		);
+		check(new Set(opened).size === 1, `live: devices opened at ${opened}`);
+
+		// The session stays viewed and its git state changes, so a watcher left
+		// running would snapshot again.
+		const viewing = Effect.runFork(
+			Stream.runDrain(browser.rpc.SubscribeSessionTodos({ sessionId })),
+		);
+		const probe = join(repo, `.conduit-budget-probe-${randomUUID()}`);
+		const closed = await measure(async () => {
+			writeFileSync(probe, "probe\n");
+			await idleFor(DIFF_BUDGET.noViewerMs);
+		}).finally(() => {
+			rmSync(probe, { force: true });
+			return Effect.runPromise(Fiber.interrupt(viewing));
+		});
 		report["afterViewer"] = { ...closed, diffSpawns: diffSpawns(closed) };
 		check(
 			diffSpawns(closed) === 0,

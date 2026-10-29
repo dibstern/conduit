@@ -137,6 +137,8 @@ export const subscriptionAudiences = {
 				}),
 			),
 		),
+	SubscribeSessionDiff: (request, producer) =>
+		sessionAudience(request.sessionId, producer),
 	SubscribePtys: projectAudience,
 	SubscribeApprovals: (request, producer) =>
 		projectAudience(request, producer).pipe(Effect.andThen(globalAudience)),
