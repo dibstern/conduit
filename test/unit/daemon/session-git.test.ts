@@ -79,6 +79,7 @@ import {
 	withPublishedProjectGit,
 } from "../../../src/lib/persistence/effect/session-git-publication.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { WorkspaceDirectories } from "../../../src/lib/session/workspace-directories.js";
 
 const gitCommand = (directory: string, ...args: string[]) =>
 	execFileSync("git", args, {
@@ -210,6 +211,7 @@ const fixture = (extraFolders = false, linked = false) =>
 			commit,
 			commitAll,
 			projects: Context.get(context, ProjectRegistryTag),
+			directories: Context.get(context, WorkspaceDirectories),
 			sql,
 			owners: Context.get(context, OwnerScopes),
 			activity: Context.get(context, SessionActivityTag),
@@ -595,6 +597,7 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 			for (let index = 0; index < 10; index++) {
 				expect(
 					yield* readPublishedSessionGit("shared").pipe(
+						Effect.provideService(WorkspaceDirectories, f.directories),
 						Effect.provideService(SqlClient.SqlClient, f.sql),
 						Effect.provideService(ProjectRegistryTag, f.projects),
 					),
@@ -602,7 +605,10 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				expect(
 					(yield* withPublishedProjectGit([
 						{ slug: "project", title: "Project", folders: [f.repository] },
-					]).pipe(Effect.provideService(SqlClient.SqlClient, f.sql)))[0]?.git,
+					]).pipe(
+						Effect.provideService(WorkspaceDirectories, f.directories),
+						Effect.provideService(SqlClient.SqlClient, f.sql),
+					))[0]?.git,
 				).toMatchObject({ branch: "main" });
 			}
 			for (const spy of spies) expect(spy).not.toHaveBeenCalled();
@@ -625,6 +631,19 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				symlinkSync(missing, dangling, "dir");
 				expect(canonicalDirectory(dangling)).toBe(missing);
 			}),
+	);
+	it.effect("does not retain canonical identities between callers", () =>
+		Effect.gen(function* () {
+			const f = yield* fixture();
+			const replacement = join(f.root, "replacement");
+			mkdirSync(replacement);
+			expect(canonicalDirectory(f.alias)).toBe(
+				canonicalDirectory(f.repository),
+			);
+			rmSync(f.alias);
+			symlinkSync(replacement, f.alias, "dir");
+			expect(canonicalDirectory(f.alias)).toBe(canonicalDirectory(replacement));
+		}),
 	);
 	it.effect(
 		"refreshes listed directories after an unprobed nested file changes",

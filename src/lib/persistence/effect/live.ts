@@ -29,6 +29,10 @@ import {
 	stampProjectProvenance,
 } from "../../domain/persistence/Services/persistence-service.js";
 import type { SessionEventBusTag } from "../../domain/relay/Services/session-event-bus.js";
+import {
+	type WorkspaceDirectories,
+	WorkspaceDirectoriesLive,
+} from "../../session/workspace-directories.js";
 import { reclaimStore } from "../rewrite-store.js";
 import { bindEventStoreEffect } from "./bind-event-store-effect.js";
 import {
@@ -67,6 +71,7 @@ import {
 } from "./read-query-effect.js";
 
 export type PersistenceEffectContext =
+	| WorkspaceDirectories
 	| AttachmentStoreTag
 	| SqlClient.SqlClient
 	| SqliteNode.SqliteClient
@@ -84,6 +89,7 @@ export type PersistenceEffectContext =
 export type PersistenceEffectError = PersistenceError | Config.ConfigError;
 
 export type PersistenceStoreContext =
+	| WorkspaceDirectories
 	| AttachmentStoreTag
 	| SqlClient.SqlClient
 	| SqliteNode.SqliteClient
@@ -98,6 +104,7 @@ export class PersistenceStore extends Context.Service<
 
 export type PersistenceProjectContext = Exclude<
 	PersistenceEffectContext,
+	| WorkspaceDirectories
 	| SqlClient.SqlClient
 	| SqliteNode.SqliteClient
 	| ProjectorCursorEffectTag
@@ -203,6 +210,7 @@ export function makePersistenceStoreLayer(
 		cursorLayer,
 		projectionRunnerLayer,
 		attachmentLayer,
+		WorkspaceDirectoriesLive,
 	);
 }
 
