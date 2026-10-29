@@ -25,6 +25,9 @@ const drops = new WeakMap<
 >();
 const viewerSources = new WeakMap<Page, string>();
 const previousUrls = new WeakMap<Page, string>();
+const imageFailures = new WeakMap<Page, () => void>();
+const viewerImage = (page: Page) =>
+	page.getByRole("dialog").getByRole("img", { name: "Preview", exact: true });
 
 export const composerImageDropAndViewHandlers: StepHandler[] = [
 	{
@@ -140,16 +143,27 @@ export const composerImageDropAndViewHandlers: StepHandler[] = [
 	{
 		name: "seed a sent image through the transcript mock",
 		match:
-			/^the transcript contains a sent user message with an image attachment$/,
-		run: async ({ world }) => {
+			/^the transcript contains a sent user message with an image (attachment|that is still loading)$/,
+		run: async ({ world, match }) => {
 			const page = world.page;
 			const sessionId = new URL(page.url()).pathname.split("/")[2];
 			if (!sessionId) throw new Error("No session is open");
 			const url = new URL("/acceptance-images/sent-preview.png", page.url())
 				.href;
-			await page.route(url, (route) =>
-				route.fulfill({ contentType: "image/png", body: imageBytes }),
-			);
+			if (match[1] === "attachment")
+				await page.route(url, (route) =>
+					route.fulfill({ contentType: "image/png", body: imageBytes }),
+				);
+			else {
+				// Held until "the image fails to load", so the thumbnail can be clicked first.
+				const failed = new Promise<void>((resolve) =>
+					imageFailures.set(page, resolve),
+				);
+				await page.route(url, async (route) => {
+					await failed;
+					await route.fulfill({ status: 404 });
+				});
+			}
 			const messages: HistoryMessage[] = [
 				{
 					id: "sent-image-message",
@@ -223,16 +237,10 @@ export const composerImageDropAndViewHandlers: StepHandler[] = [
 			if (!source) throw new Error("No image thumbnail was opened");
 			const dialog = world.page.getByRole("dialog");
 			await expect(dialog).toBeVisible();
-			const image = dialog.locator("#media-viewer-image");
+			const image = viewerImage(world.page);
 			await expect(image).toBeVisible();
-			await expect(image).toHaveAttribute("src", source);
-			await expect
-				.poll(() =>
-					image.evaluate(
-						(img: HTMLImageElement) => img.complete && img.naturalWidth === 480,
-					),
-				)
-				.toBe(true);
+			await expect(image).toHaveAttribute("width", "480");
+			await expect(image.locator("image")).toHaveAttribute("href", source);
 			await expect(
 				dialog.getByRole("button", { name: "Close media viewer", exact: true }),
 			).toBeVisible();
@@ -258,7 +266,7 @@ export const composerImageDropAndViewHandlers: StepHandler[] = [
 		name: "assert media viewer dismissed",
 		match: /^the media viewer is dismissed$/,
 		run: async ({ world }) => {
-			await expect(world.page.locator("#media-viewer-image")).not.toBeVisible();
+			await expect(viewerImage(world.page)).not.toBeVisible();
 			await expect(
 				world.page.getByRole("button", {
 					name: "Close media viewer",
@@ -266,6 +274,33 @@ export const composerImageDropAndViewHandlers: StepHandler[] = [
 				}),
 			).not.toBeVisible();
 		},
+	},
+	{
+		name: "open a still-loading sent image thumbnail",
+		match: /^I click the sent image thumbnail while it is still loading$/,
+		run: ({ world }) =>
+			world.page
+				.locator("#messages")
+				.getByRole("button", {
+					name: "View image sent-preview.png",
+					exact: true,
+				})
+				.click(),
+	},
+	{
+		name: "fail the held image",
+		match: /^the image fails to load$/,
+		run: ({ world }) => {
+			const fail = imageFailures.get(world.page);
+			if (!fail) throw new Error("No image is still loading");
+			fail();
+		},
+	},
+	{
+		name: "assert the media viewer image error",
+		match: /^the media viewer says (.+)$/,
+		run: ({ world, match }) =>
+			expect(world.page.getByRole("dialog")).toContainText(match[1] ?? ""),
 	},
 	{
 		name: "switch session in-app from the sidebar",

@@ -78,3 +78,27 @@ Scenario: switching sessions closes the open media viewer
   Then the media viewer shows the sent image
   When I go back in the browser to the previous session
   Then the media viewer is dismissed
+
+Scenario: ctrl+wheel zooms the viewer image and Escape resets it before closing
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the transcript contains a sent user message with an image attachment
+  When I click the sent image thumbnail
+  Then the media viewer shows the sent image
+  And the close button covers none of the viewer image's buttons
+  When I turn the mouse wheel up over the viewer image while holding Control
+  Then the viewer image is zoomed
+  When I dismiss the media viewer with Escape
+  Then the viewer image is back to its fit and the media viewer is still open
+  When I dismiss the media viewer with Escape
+  Then the media viewer is dismissed
+
+Scenario: an image that fails to load in the media viewer says so
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And a session already exists on the Claude harness
+  And the transcript contains a sent user message with an image that is still loading
+  When I click the sent image thumbnail while it is still loading
+  And the image fails to load
+  Then the media viewer says Image couldn't load

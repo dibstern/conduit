@@ -1,4 +1,7 @@
 {
+	"src/lib/frontend/components/overlays/MediaViewer.svelte :: max-h-[90vh],max-w-[92vw],rounded": "conduit-test-3g0c7.5: the image is now ZoomableImage's svg wrapper, which carries these as [&>svg]: variants; the height cap became calc(100dvh-8rem) so the 60px close-button strip fits.",
+	"src/lib/frontend/components/overlays/MediaViewer.svelte :: object-contain": "conduit-test-3g0c7.5: the image is drawn inside an svg sized to its natural aspect ratio, so there is nothing left to letterbox.",
+	"src/lib/frontend/components/overlays/MediaViewer.svelte :: mt-[60px]": "conduit-test-3g0c7.5: the close-button strip moved from the diagram box to the shared wrapper as pt-[60px], so images get it too.",
 	"src/lib/frontend/components/chat/MessageTime.svelte :: text-text-dimmer": {
 		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
 		"requires": "tone=\"dimmer\"",

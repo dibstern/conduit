@@ -59,6 +59,11 @@ const wideDrawing = (page: Page) =>
 const viewer = (page: Page) => page.locator("dialog[open]");
 const expandedDrawing = (page: Page) =>
 	viewer(page).locator("[data-diagram] svg.pele");
+// The media viewer's zoomable content: an expanded diagram, or an ordinary image (in the image feature).
+const viewerContent = (page: Page, kind: string | undefined) =>
+	kind?.startsWith("viewer image")
+		? viewer(page).getByRole("img", { name: "Preview", exact: true })
+		: expandedDrawing(page);
 const expandButton = (page: Page) =>
 	diagram(page).getByRole("button", { name: "Expand diagram", exact: true });
 // pele names each diagram type's chunk, and Vite keeps that name before the hash.
@@ -359,14 +364,19 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert the close button clear of the diagram buttons",
-		match: /^the close button covers none of the expanded diagram's buttons$/,
-		run: async ({ world }) => {
+		match:
+			/^the close button covers none of the (expanded diagram's|viewer image's) buttons$/,
+		run: async ({ world, match }) => {
 			const close = await viewer(world.page)
 				.getByRole("button", { name: "Close media viewer", exact: true })
 				.boundingBox();
 			if (!close) throw new Error("The close button has no box");
-			const buttons = viewer(world.page).locator("[data-diagram] button");
-			expect(await buttons.count()).toBeGreaterThan(0);
+			// An image's buttons are pele's zoom controls, beside its svg.
+			const buttons = match[1]?.startsWith("viewer image")
+				? viewerContent(world.page, match[1]).locator("..").getByRole("button")
+				: viewer(world.page).locator("[data-diagram] button");
+			// pele loads after the viewer opens, so wait for its controls.
+			await expect(buttons.first()).toBeVisible();
 			for (const box of await Promise.all(
 				(await buttons.all()).map((button) => button.boundingBox()),
 			)) {
@@ -616,18 +626,19 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 	{
 		name: "ctrl+wheel over the expanded diagram",
 		match:
-			/^I turn the mouse wheel up over the expanded diagram while holding Control$/,
-		run: async ({ world }) => {
+			/^I turn the mouse wheel up over the (expanded diagram|viewer image) while holding Control$/,
+		run: async ({ world, match }) => {
 			const page = world.page;
 			await page.keyboard.down("Control");
-			await wheelOver(expandedDrawing(page), -200);
+			await wheelOver(viewerContent(page, match[1]), -200);
 			await page.keyboard.up("Control");
 		},
 	},
 	{
 		name: "assert the expanded diagram zoomed",
-		match: /^the expanded diagram is zoomed$/,
-		run: ({ world }) => expectZoomed(expandedDrawing(world.page)),
+		match: /^the (expanded diagram|viewer image) is zoomed$/,
+		run: ({ world, match }) =>
+			expectZoomed(viewerContent(world.page, match[1])),
 	},
 	{
 		name: "press Escape in the media viewer",
@@ -637,10 +648,11 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 	{
 		name: "assert the expanded diagram reset and viewer open",
 		match:
-			/^the expanded diagram is back to its fit and the media viewer is still open$/,
-		run: async ({ world }) => {
-			await expectAtFit(expandedDrawing(world.page));
-			await expect(expandedDrawing(world.page)).toBeVisible();
+			/^the (expanded diagram|viewer image) is back to its fit and the media viewer is still open$/,
+		run: async ({ world, match }) => {
+			const content = viewerContent(world.page, match[1]);
+			await expectAtFit(content);
+			await expect(content).toBeVisible();
 		},
 	},
 	{

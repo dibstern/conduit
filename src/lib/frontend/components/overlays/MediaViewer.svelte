@@ -11,6 +11,7 @@
   import Diagram from "../chat/Diagram.svelte";
   import Button from "../ui/Button.svelte";
   import Dialog from "../ui/Dialog.svelte";
+  import ZoomableImage from "./ZoomableImage.svelte";
 
   const item = $derived(getMediaViewer());
   // The shown content's zoom; Escape resets it before it can close the viewer.
@@ -45,20 +46,15 @@
     >
       &times;
     </Button>
-    <!-- Taps on the empty space around the content fall through to the dialog, which treats them as backdrop taps. -->
-    <div class="flex h-full items-center justify-center pointer-events-none *:pointer-events-auto">
+    <!-- Taps on the empty space around the content fall through to the dialog, which treats them as backdrop taps.
+         The close button is fixed to the dialog's top-right corner, so a 60px strip above the content keeps it off the content's buttons. -->
+    <div class="flex h-full items-center justify-center pt-[60px] pointer-events-none *:pointer-events-auto">
       {#if item?.kind === "diagram"}
-        <!-- The close button is fixed to the dialog's top-right corner, so a 60px strip above the box keeps it off the diagram's header buttons. -->
-        <div class="mt-[60px] h-[min(85dvh,calc(100dvh-8rem))] w-[min(90vw,1200px)]">
+        <div class="h-[min(85dvh,calc(100dvh-8rem))] w-[min(90vw,1200px)]">
           <Diagram bind:this={content} source={item.source} variant="viewer" />
         </div>
-      {:else}
-        <img
-          id="media-viewer-image"
-          class="max-w-[92vw] max-h-[90vh] object-contain rounded"
-          src={item?.src ?? ""}
-          alt="Preview"
-        />
+      {:else if item}
+        <ZoomableImage bind:this={content} src={item.src} />
       {/if}
     </div>
 </Dialog>
