@@ -314,6 +314,7 @@ const transition = (
 export const stopRegisteredRunners = (
 	workspaceRoot: string,
 	configDir: string,
+	reason: StopReason = { _tag: "Explicit" },
 ): Effect.Effect<void, RunnerProcessError> =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -325,7 +326,11 @@ export const stopRegisteredRunners = (
 					? Context.get(store.value, SqlClient.SqlClient)
 					: undefined);
 			if (!sql)
-				return yield* stopRegisteredRunners(workspaceRoot, configDir).pipe(
+				return yield* stopRegisteredRunners(
+					workspaceRoot,
+					configDir,
+					reason,
+				).pipe(
 					Effect.provide(
 						SqliteNode.layer({
 							filename: join(configDir, "events.db"),
@@ -396,17 +401,20 @@ export const stopRegisteredRunners = (
 							? (registration.startTime ??
 								runnerProcessTable.inspect(registration.pid).startTime)
 							: undefined;
-						yield* stops.requestStop({
-							runnerId: registration.runnerId,
-							sessionId: registration.sessionId,
-							driverKind: registration.driverKind ?? "claude",
-							identity:
-								startTime === undefined
-									? { tag: "Unverifiable", pid: registration.pid }
-									: { tag: "Verified", pid: registration.pid, startTime },
-							reaper,
-							members: [],
-						});
+						yield* stops.requestStop(
+							{
+								runnerId: registration.runnerId,
+								sessionId: registration.sessionId,
+								driverKind: registration.driverKind ?? "claude",
+								identity:
+									startTime === undefined
+										? { tag: "Unverifiable", pid: registration.pid }
+										: { tag: "Verified", pid: registration.pid, startTime },
+								reaper,
+								members: [],
+							},
+							reason,
+						);
 						yield* stops.awaitStop(registration.runnerId, "Escalated");
 						// Project ingestion has drained, so Settle belongs to startup.
 						// Use the reconciler's complete member/identity proof here even
@@ -1572,19 +1580,21 @@ export const makeProcessSessionRunner = (
 							WHERE command.session_id = requested.session_id AND command.effect_type = 'send_turn'
 							AND COALESCE(send_run.joined_into, send_run.id) = owner.id))
 					AND (owner.runner_id = ${retirement.runnerId} OR (owner.runner_id IS NULL AND requested.id IN ${sql.in(retirement.ownedRunIds)}))`;
+						// Removal ends launched runs process lost (3.11), as an error as on main.
+						const errorCode =
+							retirement.stopReason === '{"_tag":"Exited"}'
+								? entry?.lifecycle.idleExiting
+									? undefined
+									: String(entry?.lifecycle.failure?.code ?? "provider_error")
+								: retirement.stopReason === '{"_tag":"ProjectRemoved"}'
+									? "runner_stopped"
+									: undefined;
 						yield* sessionIngestion.ingestBatch([], {
 							settleRuns: {
 								sessionId: retirement.sessionId,
 								reason: "Provider process stopped",
 								owners,
-								...(retirement.stopReason === '{"_tag":"Exited"}' &&
-								!entry?.lifecycle.idleExiting
-									? {
-											errorCode: String(
-												entry?.lifecycle.failure?.code ?? "provider_error",
-											),
-										}
-									: {}),
+								...(errorCode ? { errorCode } : {}),
 							},
 							...(receipts
 								? { beforeCommit: receipts.settled(retirement.runnerId) }
@@ -5518,7 +5528,11 @@ export const makeProcessSessionRunner = (
 							);
 							if (!row?.running) return;
 						}
-						yield* stopRunner(entry, commandId, "stop", { _tag: "EndSession" });
+						yield* stopRunner(entry, commandId, "stop", {
+							_tag: command.control?.projectRemoved
+								? "ProjectRemoved"
+								: "EndSession",
+						});
 						return;
 					}
 					if (
@@ -6218,6 +6232,10 @@ export const makeProcessSessionRunner = (
 						)
 					)
 						continue;
+					// As for recovered registrations, a send whose project is not
+					// served stays with the reactor's project gate; the project's
+					// attachment recovers it once it is served.
+					if (!(yield* deps.projectRootForSession(row.session_id))) continue;
 					const [unheld] =
 						yield* sql`SELECT 1 FROM provider_runs WHERE id = ${row.run_id} AND session_id = ${row.session_id}
 					AND joined_into IS NULL AND runner_id IS NULL AND status IN ('pending','running')`;

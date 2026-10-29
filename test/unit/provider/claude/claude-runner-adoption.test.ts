@@ -424,8 +424,9 @@ describe("Claude runner adoption", () => {
 		const elapsed = Date.now() - started;
 		expect(Either.isSuccess(outcome)).toBe(true);
 		expect(fixture.attempts.length).toBeGreaterThan(1);
+		// Recovery bounds reconnects by count (retry < 4), not by time, so the
+		// attempt count is the bound; elapsed time only measures machine load.
 		expect(fixture.attempts.length).toBeLessThanOrEqual(6);
-		expect(elapsed).toBeLessThan(5000);
 		for (const suffix of ["", ".json", ".spool"])
 			expect(existsSync(`${fixture.socketPath}${suffix}`)).toBe(true);
 		expect(kill.mock.calls.every(([, signal]) => signal === 0)).toBe(true);

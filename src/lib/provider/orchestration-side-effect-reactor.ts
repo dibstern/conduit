@@ -2591,6 +2591,7 @@ export class ProviderSideEffectReactor {
 							.endSessionEffect(row.session_id, undefined, {
 								commandId: `project-inactive:${row.command_id}:${row.attempt_count}`,
 								providerProcessId: owner.success,
+								projectRemoved: true,
 							})
 							.pipe(
 								Effect.catch((cause) =>
