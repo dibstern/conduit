@@ -11,21 +11,26 @@
  */
 // The click to drop often arrives after the lift unmounted its header, so this
 // outlives every attachment. One set of listeners serves the whole document.
-let dropClickUntil = 0;
+let dropClickUntil: number | null = null;
 const guarded = new WeakSet<Document>();
 
 function guardClicks(document: Document) {
 	if (guarded.has(document)) return;
 	guarded.add(document);
 	function drop(event: MouseEvent) {
-		if (!event.isTrusted || event.timeStamp > dropClickUntil) return;
-		if (event.type === "click") dropClickUntil = 0;
+		if (
+			dropClickUntil === null ||
+			!event.isTrusted ||
+			event.timeStamp > dropClickUntil
+		)
+			return;
+		if (event.type === "click") dropClickUntil = null;
 		event.preventDefault();
 		event.stopImmediatePropagation();
 	}
 	// A new press or key starts a deliberate interaction whose click must land.
 	function keepNextClick() {
-		dropClickUntil = 0;
+		dropClickUntil = null;
 	}
 	// Capture runs before Svelte's delegated handlers.
 	document.addEventListener("mousedown", drop, true);

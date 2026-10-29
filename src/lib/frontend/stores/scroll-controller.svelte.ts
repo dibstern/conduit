@@ -51,13 +51,13 @@ export function createScrollController(
 	const observed = new Set<Element>();
 	let measureFrame: { handle?: number } | null = null;
 	let attachment = 0;
-	let lastObservedGap = 0;
+	let lastObservedExtent = 0;
 
 	function observeBottomGap(): number {
-		lastObservedGap = container
-			? container.scrollHeight - container.scrollTop - container.clientHeight
+		lastObservedExtent = container
+			? container.scrollHeight - container.clientHeight
 			: 0;
-		return lastObservedGap;
+		return lastObservedExtent - (container?.scrollTop ?? 0);
 	}
 
 	function measure() {
@@ -114,11 +114,13 @@ export function createScrollController(
 
 	function onContentChange() {
 		untrack(() => {
-			const previousGap = lastObservedGap;
-			const gap = observeBottomGap();
-			// Late layout growth is not a scroll gesture. Preserve follow before
-			// its queued scroll event can interpret the larger bottom gap as one.
-			if (gap > previousGap && getState() === "following") scrollToBottom();
+			const previousExtent = lastObservedExtent;
+			observeBottomGap();
+			followIfContentFits();
+			// A reader's queued scroll can increase the gap without layout growth.
+			// Follow only a larger scrollable extent, before its scroll event lands.
+			if (lastObservedExtent > previousExtent && getState() === "following")
+				scrollToBottom();
 			scheduleMeasure();
 		});
 	}
@@ -159,6 +161,20 @@ export function createScrollController(
 		}
 	}
 
+	function followIfContentFits(): boolean {
+		// A shrink at scrollTop zero emits no scroll. Pending reveals settle
+		// their own position once expansion and placement have finished.
+		if (
+			!container ||
+			jumpFrame !== null ||
+			container.scrollHeight > container.clientHeight
+		)
+			return false;
+		pinned = true;
+		userDetached = false;
+		return true;
+	}
+
 	function onScroll(): void {
 		scheduleMeasure();
 		if (!container || jumpFrame !== null) return;
@@ -171,18 +187,11 @@ export function createScrollController(
 			programmaticScrollCount--;
 			return;
 		}
-		// Read after the guards: our own scrolls record their gap, and reading here
+		// Read after the guards: our own scrolls record their layout, and reading here
 		// would absorb growth that landed before this queued event.
 		const distFromBottom = observeBottomGap();
 
-		// Content that fits leaves nothing to scroll away from, so follow. This
-		// covers a stray scroll on a short transcript and the clamp scroll after
-		// content shrinks to fit (a collapsed Turn), which must clear a detach.
-		if (container.scrollHeight <= container.clientHeight) {
-			pinned = true;
-			userDetached = false;
-			return;
-		}
+		if (followIfContentFits()) return;
 
 		pinned = distFromBottom < REFOLLOW_THRESHOLD;
 

@@ -66,6 +66,62 @@ describe("ScrollController", () => {
 		beforeEach(() => vi.useFakeTimers());
 		afterEach(() => vi.useRealTimers());
 
+		it.each([
+			"latest",
+			"historical",
+			"busy",
+		] as const)("re-pins fitting content without a scroll event, preserving %s navigation", async (mode) => {
+			let navigation: "latest" | "historical" | "busy" = "latest";
+			const ctrl = createScrollController(
+				() => "ready",
+				() => ({
+					historical: navigation === "historical",
+					busy: navigation === "busy",
+					topClearance: 0,
+					identity: 1,
+				}),
+			);
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			vi.advanceTimersToNextFrame();
+			div.scrollTop = 0;
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.isDetached).toBe(true);
+
+			navigation = mode;
+			Object.defineProperty(div, "scrollHeight", { value: 500 });
+			// Already at zero: shrinking to fit produces no clamp scroll event.
+			div.append(document.createElement("span"));
+			await Promise.resolve();
+			expect(ctrl.isPinned).toBe(true);
+			expect(ctrl.state).toBe(mode === "latest" ? "following" : "detached");
+			ctrl.onNewContent();
+			if (mode !== "latest") expect(div.scrollTop).toBe(0);
+			navigation = "latest";
+			expect(ctrl.state).toBe("following");
+			ctrl.detach();
+		});
+
+		it.each([
+			false,
+			true,
+		])("preserves a reader's scroll before its scroll event is handled (own scroll pending: %s)", async (ownScrollPending) => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			vi.advanceTimersToNextFrame();
+			if (ownScrollPending) ctrl.onNewContent();
+
+			// Hover/focus can mutate the DOM before the browser delivers scroll.
+			div.scrollTop = 1486;
+			if (ownScrollPending) div.dispatchEvent(new Event("scroll"));
+			div.append(document.createElement("span"));
+			await Promise.resolve();
+			expect(div.scrollTop).toBe(1486);
+			ctrl.detach();
+		});
+
 		it("preserves a following reader's position on mutations without layout growth", async () => {
 			const ctrl = makeController();
 			lifecycle = "ready";
@@ -157,6 +213,27 @@ describe("ScrollController", () => {
 	describe("explicit jumps", () => {
 		beforeEach(() => vi.useFakeTimers());
 		afterEach(() => vi.useRealTimers());
+
+		it("preserves a pending reveal through content that temporarily fits", async () => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			ctrl.requestJump();
+			div.scrollTop = 0;
+			Object.defineProperty(div, "scrollHeight", { value: 500 });
+			div.append(document.createElement("span"));
+			await Promise.resolve();
+			expect(ctrl.isDetached).toBe(true);
+
+			Object.defineProperty(div, "scrollHeight", { value: 2000 });
+			div.append(document.createElement("span"));
+			await Promise.resolve();
+			expect(div.scrollTop).toBe(0);
+			vi.advanceTimersToNextFrame();
+			expect(ctrl.isDetached).toBe(true);
+			ctrl.detach();
+		});
 
 		// A return expands the steps while the launching row is already visible.
 		// Neither a stale bottom-scroll event nor content timing may undo it.
