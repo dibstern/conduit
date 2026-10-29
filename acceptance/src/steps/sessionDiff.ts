@@ -2,6 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import {
 	SessionDiffError,
 	type SessionDiffFile,
+	type SessionDiffListing,
 } from "../../../src/lib/contracts/session-diff.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
@@ -103,7 +104,9 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 	};
 	fixtures.set(page, fixture);
 	requireRpcControl(page).setStubs({
-		SessionDiffList: async ({ sessionId }) => {
+		SessionDiffList: async ({ sessionId, scope }) => {
+			// Settled turns in the transcript list their own scope; these steps count the pane's.
+			if (scope.kind === "turn") return { revision: "turn", folders: [] };
 			fixture.lists += 1;
 			if (fixture.holdList) {
 				fixture.holdList = false;
@@ -152,6 +155,25 @@ function requireFixture(page: Page): DiffFixture {
 	if (!fixture) throw new Error("No session diff fixture was seeded");
 	return fixture;
 }
+
+/** Answers one turn's listing; every other turn and the pane list nothing. */
+function seedTurn(
+	page: Page,
+	turnId: string,
+	listing: Omit<SessionDiffListing, "revision">,
+): void {
+	requireRpcControl(page).setStubs({
+		SessionDiffList: ({ scope }) => ({
+			revision: "turn",
+			folders: [],
+			...(scope.kind === "turn" && scope.turnId === turnId && listing),
+		}),
+		SessionDiffFile: ({ path }) => ({ patch: patchFor(path) }),
+	});
+}
+
+const turnFooter = (page: Page) =>
+	page.locator("#messages .turn-activity").last().getByTestId("turn-show-bar");
 
 const row = (page: Page, path: string) =>
 	page.locator(`[data-testid="session-diff-file"][data-path="${path}"]`);
@@ -397,6 +419,92 @@ export const sessionDiffHandlers: StepHandler[] = [
 				})
 				.click({ position: { x: 8, y: 6 } });
 			await expect(world.page).not.toHaveURL(before);
+		},
+	},
+	{
+		name: "seed a turn's captured changes",
+		match:
+			/^the (\S+) turn changed (\S+) and (\S+) in a (shared|private) folder$/,
+		run: async ({ world, match }) => {
+			const [, turnId = "", first = "", second = "", sharing] = match;
+			seedTurn(world.page, turnId, {
+				folders: [
+					{
+						folder: "/workspace/myapp",
+						files: [changed(first, 3, 1), changed(second)],
+						...(sharing === "shared" && { shared: true }),
+					},
+				],
+			});
+		},
+	},
+	{
+		name: "seed an uncaptured turn",
+		match: /^the (\S+) turn was not captured$/,
+		run: async ({ world, match }) => {
+			seedTurn(world.page, match[1] ?? "", { folders: [], notCaptured: true });
+		},
+	},
+	{
+		name: "turn footer entry",
+		match: /^the turn footer shows "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				turnFooter(world.page).getByTestId("turn-diff-toggle"),
+			).toHaveText(match[1] ?? "");
+		},
+	},
+	{
+		name: "open a turn's changed files",
+		match: /^I open the turn's changed files$/,
+		run: async ({ world }) => {
+			const toggle = turnFooter(world.page).getByTestId("turn-diff-toggle");
+			await toggle.click();
+			await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		},
+	},
+	{
+		name: "turn diff rows",
+		match: /^the turn diff lists (\S+) and (\S+)$/,
+		run: async ({ world, match }) => {
+			const rows = turnFooter(world.page)
+				.getByTestId("turn-diff")
+				.getByTestId("session-diff-file");
+			await expect(rows).toHaveCount(2);
+			await expect(rows.first()).toHaveAttribute("data-path", match[1] ?? "");
+			await expect(rows.last()).toHaveAttribute("data-path", match[2] ?? "");
+		},
+	},
+	{
+		name: "turn diff shared label",
+		match: /^the turn diff (is|is not) labelled as shared with other sessions$/,
+		run: async ({ world, match }) => {
+			const label = turnFooter(world.page).getByTestId("turn-diff-shared");
+			await expect(label).toHaveCount(match[1] === "is" ? 1 : 0);
+			if (match[1] === "is")
+				await expect(label).toHaveText(
+					"May include changes from other sessions",
+				);
+		},
+	},
+	{
+		name: "turn not captured",
+		match: /^the turn footer says Not captured$/,
+		run: async ({ world }) => {
+			const footer = turnFooter(world.page);
+			await expect(footer.getByTestId("turn-diff-not-captured")).toContainText(
+				"Not captured",
+			);
+			await expect(footer.getByTestId("turn-diff-toggle")).toHaveCount(0);
+		},
+	},
+	{
+		name: "open the branch diff from a turn",
+		match: /^I open the branch diff from the turn footer$/,
+		run: async ({ world }) => {
+			await turnFooter(world.page)
+				.getByRole("button", { name: "Branch diff", exact: true })
+				.click();
 		},
 	},
 	{

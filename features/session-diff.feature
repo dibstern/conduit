@@ -172,3 +172,38 @@ Scenario Outline: A row that comes into view as the pane hides loads once the pa
 Examples:
   | count | first_path | last_path  | hidden_requests |
   | 30    | file-01.ts | file-30.ts | 0               |
+
+Scenario Outline: A settled turn's footer opens the files its run changed, labelled when another session shared the folder
+  Given message surfacing is inactive at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And the <turn_id> turn changed <first_path> and <second_path> in a <sharing> folder
+  And the panel choice session has a settled turn
+  When I expand the surfaced turn
+  Then the turn footer shows "<entry>"
+  When I open the turn's changed files
+  Then the turn diff lists <first_path> and <second_path>
+  And the <first_path> diff shows its patch
+  And the turn diff <label> labelled as shared with other sessions
+  And the messages region visually matches <baseline> at 98 percent
+
+Examples:
+  | turn_id        | first_path | second_path  | sharing | entry           | label  | baseline            |
+  | surfacing-user | src/app.ts | src/util.ts  | shared  | 2 files changed | is     | turn-diff-shared    |
+  | surfacing-user | src/app.ts | src/util.ts  | private | 2 files changed | is not | turn-diff-private   |
+
+Scenario Outline: A turn without a capture says Not captured and links to the Diff pane
+  Given message surfacing is inactive at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And the <turn_id> turn was not captured
+  And the panel choice session has a settled turn
+  When I expand the surfaced turn
+  Then the turn footer says Not captured
+  And the messages region visually matches <baseline> at 98 percent
+  When I open the branch diff from the turn footer
+  Then the Diff right pane is selected
+
+Examples:
+  | turn_id        | baseline               |
+  | surfacing-user | turn-diff-not-captured |

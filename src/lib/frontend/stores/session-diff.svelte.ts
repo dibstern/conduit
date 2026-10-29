@@ -29,7 +29,12 @@ export class DiffRow {
 }
 
 export type DiffFolder =
-	| { readonly folder: string; readonly rows: readonly DiffRow[] }
+	| {
+			readonly folder: string;
+			readonly rows: readonly DiffRow[];
+			/** Another session ran in this folder during the turn. */
+			readonly shared?: true;
+	  }
 	| {
 			readonly folder: string;
 			readonly error: "unavailable" | "timeout";
@@ -46,7 +51,12 @@ export class SessionDiffView {
 	state = $state<
 		| { readonly kind: "loading" }
 		| { readonly kind: "failed"; readonly message: string }
-		| { readonly kind: "listed"; readonly folders: readonly DiffFolder[] }
+		| {
+				readonly kind: "listed";
+				readonly folders: readonly DiffFolder[];
+				/** The turn's run was never captured, so there is nothing to list. */
+				readonly notCaptured?: true;
+		  }
 	>({ kind: "loading" });
 	// Reactive: a row's load() reads it, so a row refused while hidden asks again when shown.
 	#leases = $state(0);
@@ -91,6 +101,7 @@ export class SessionDiffView {
 				const { folder } = entry;
 				return {
 					folder,
+					...(entry.shared && { shared: entry.shared }),
 					rows: entry.files.map((file) => {
 						const key = [
 							folder,
@@ -108,7 +119,11 @@ export class SessionDiffView {
 				};
 			});
 			this.#rows = rows;
-			this.state = { kind: "listed", folders };
+			this.state = {
+				kind: "listed",
+				folders,
+				...(listing.notCaptured && { notCaptured: listing.notCaptured }),
+			};
 			for (const row of rows.values())
 				if (row.patch.kind === "gone") row.load();
 		} catch (error) {
