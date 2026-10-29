@@ -256,6 +256,10 @@ describe("Button colour axes", () => {
 	});
 
 	it("holds across every variant x tone x hoverFill x disabledStyle combination", () => {
+		// 20k combinations: collecting failures and asserting once, instead of
+		// four expects per combination, keeps the sweep inside its timeout on a
+		// loaded machine.
+		const broken: string[] = [];
 		for (const variant of BUTTON_VARIANTS) {
 			for (const tone of BUTTON_TONES) {
 				for (const fill of BUTTON_HOVER_FILLS) {
@@ -274,19 +278,29 @@ describe("Button colour axes", () => {
 						})
 							.split(/\s+/)
 							.filter(Boolean);
-						const where = `${variant}/${tone}/${fill}/${off}`;
-
-						expect(restingText(classes).length, where).toBeLessThanOrEqual(1);
-						expect(hoverFill(classes).length, where).toBeLessThanOrEqual(1);
+						const counts = {
+							resting: restingText(classes).length,
+							hover: hoverFill(classes).length,
+							opacity: offState(classes, "opacity").length,
+							cursor: offState(classes, "cursor").length,
+						};
 						// One per prefix, never two competing opacities -- or none
 						// at all, which is what `disabledStyle="none"` is for.
 						const expected = off === "none" ? 0 : 2;
-						expect(offState(classes, "opacity"), where).toHaveLength(expected);
-						expect(offState(classes, "cursor"), where).toHaveLength(expected);
+						if (
+							counts.resting > 1 ||
+							counts.hover > 1 ||
+							counts.opacity !== expected ||
+							counts.cursor !== expected
+						)
+							broken.push(
+								`${variant}/${tone}/${fill}/${off} ${JSON.stringify(counts)}`,
+							);
 					}
 				}
 			}
 		}
+		expect(broken).toEqual([]);
 	});
 
 	// conduit-test-or29: `:hover` keeps matching a disabled button, so a dead

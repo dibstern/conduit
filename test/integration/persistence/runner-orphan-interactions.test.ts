@@ -89,8 +89,8 @@ it.each([
 						(): Effect.Effect<RunnerRecoveryDependencies> =>
 							Effect.gen(function* () {
 								recoveryLookups++;
-								// Prepass, then the snapshotted row, then the real failure callback.
-								if (recoveryLookups === 3) {
+								// The snapshotted row, then the real failure callback.
+								if (recoveryLookups === 2) {
 									if (superseded)
 										yield* sql`UPDATE provider_command_outbox SET attempt_count = 2 WHERE command_id = 'send'`;
 									yield* pending.beginQuestionRequest({
@@ -163,7 +163,7 @@ it.each([
 			"test-results/82tn10-4-fix5-interactions.json",
 			JSON.stringify({ scenarios }, null, 2),
 		);
-		expect(evidence.recoveryLookups).toBe(3);
+		expect(evidence.recoveryLookups).toBe(2);
 		expect(evidence.commands).toEqual([
 			{
 				status: superseded ? "running" : "failed",

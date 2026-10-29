@@ -191,7 +191,12 @@ control.listen(0, "127.0.0.1", () => {
 		},
 	);
 	child.once("error", stopGroup);
-	child.once("exit", stopGroup);
+	child.once("exit", (code, signal) => {
+		console.error(
+			`OpenCode exited (${signal ? `signal ${signal}` : `exit code ${code}`})`,
+		);
+		stopGroup();
+	});
 	child.once("spawn", () => {
 		const address = control.address();
 		if (!address || typeof address === "string" || !child?.pid)

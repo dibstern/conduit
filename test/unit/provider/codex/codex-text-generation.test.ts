@@ -1,13 +1,17 @@
 // Failure modes: empty titles use the expensive provider default, explicit
 // choices lose native values, or stale choices reach the CLI instead of failing.
 
-import { execFile } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
+import {
+	makeSubprocess,
+	Subprocess,
+	type SubprocessService,
+} from "../../../../src/lib/domain/daemon/Services/subprocess.js";
 import { discoverCodex } from "../../../../src/lib/provider/codex/codex-discovery.js";
 import { generateCodexText } from "../../../../src/lib/provider/codex/codex-text-generation.js";
 
@@ -20,21 +24,13 @@ vi.mock("../../../../src/lib/provider/codex/codex-home.js", async () => {
 vi.mock("../../../../src/lib/provider/codex/codex-discovery.js", () => ({
 	discoverCodex: vi.fn(),
 }));
-vi.mock("node:child_process", () => ({
-	execFile: vi.fn(
-		(
-			_binary: string,
-			argv: string[],
-			_options: object,
-			callback: (error: Error | null, stdout: string) => void,
-		) => {
-			const output = argv[argv.indexOf("--output-last-message") + 1];
-			if (argv[0] === "exec" && output) writeFileSync(output, "Short title");
-			callback(null, "[]");
-			return { stdin: { end: vi.fn() } };
-		},
-	),
-}));
+const run = vi.fn<SubprocessService["run"]>((_binary, argv) =>
+	Effect.sync(() => {
+		const output = argv[argv.indexOf("--output-last-message") + 1];
+		if (argv[0] === "exec" && output) writeFileSync(output, "Short title");
+		return { stdout: "[]", stderr: "", exitCode: 0 };
+	}),
+);
 
 const roots: string[] = [];
 const input = {
@@ -100,19 +96,23 @@ describe("Codex title parameter choices", () => {
 	])("resolves %j to native effort %s", async (effort, expected) => {
 		const root = setup();
 		expect(
-			await Effect.runPromise(generateCodexText({ ...input, effort }, root)),
+			await Effect.runPromise(
+				generateCodexText({ ...input, effort }, root).pipe(
+					Effect.provideService(Subprocess, { ...makeSubprocess(), run }),
+				),
+			),
 		).toBe("Short title");
-		const invocation = vi
-			.mocked(execFile)
-			.mock.calls.find(
-				(call) => Array.isArray(call[1]) && call[1][0] === "exec",
-			);
+		const invocation = run.mock.calls.find(
+			(call) => Array.isArray(call[1]) && call[1][0] === "exec",
+		);
 		expect(invocation?.[1]).toContain(`model_reasoning_effort="${expected}"`);
 	});
 	it("surfaces a stale choice before invoking the CLI", async () => {
 		const root = setup();
 		const result = await Effect.runPromise(
-			Effect.result(generateCodexText({ ...input, effort: "removed" }, root)),
+			Effect.result(
+				generateCodexText({ ...input, effort: "removed" }, root),
+			).pipe(Effect.provideService(Subprocess, { ...makeSubprocess(), run })),
 		);
 		expect(result).toMatchObject({
 			_tag: "Failure",
@@ -124,6 +124,6 @@ describe("Codex title parameter choices", () => {
 				},
 			},
 		});
-		expect(execFile).not.toHaveBeenCalled();
+		expect(run).not.toHaveBeenCalled();
 	});
 });

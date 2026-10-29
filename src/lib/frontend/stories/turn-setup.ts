@@ -11,12 +11,14 @@ import {
 	sessionSurfaceLevel,
 	setSessionSurfaceLevel,
 } from "../stores/message-surfacing.svelte.js";
+import { replaceRoute, routerState } from "../stores/router.svelte.js";
 import {
 	setTurnMinimised,
 	turnMinimised,
 } from "../stores/turn-minimisation.svelte.js";
 import type { ChatMessage } from "../types.js";
 import type { Turn } from "../utils/turns.js";
+import { openSessionForSetup } from "./session-setup.js";
 
 /** Standalone panels still resolve pin, step and citation anchors from a transcript. */
 export function setupTurnStory({
@@ -31,6 +33,7 @@ export function setupTurnStory({
 		| undefined;
 }): () => void {
 	if (!sessionId) return () => {};
+	const previousRoute = routerState.path + routerState.search;
 	const previousMessages = sessionMessages.get(sessionId);
 	const previousActivity = sessionActivity.get(sessionId);
 	const previousStatus = messageSurfacing.status;
@@ -69,7 +72,9 @@ export function setupTurnStory({
 		messageSurfacing.status = surfacing.status;
 		messageSurfacing.categorySet = surfacing.categorySet;
 	}
+	openSessionForSetup(sessionId);
 	return () => {
+		replaceRoute(previousRoute);
 		if (previousMessages) sessionMessages.set(sessionId, previousMessages);
 		else sessionMessages.delete(sessionId);
 		if (previousActivity) sessionActivity.set(sessionId, previousActivity);

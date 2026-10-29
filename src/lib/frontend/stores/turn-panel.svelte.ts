@@ -35,29 +35,29 @@ export type TurnTarget =
 	| { kind: "message"; uuid: string }
 	| { kind: "step"; id: string };
 export type PendingReveal = { turnId: string; target: TurnTarget; seq: number };
-const pending = new SvelteMap<string, PendingReveal>();
+const pending = new SvelteMap<symbol, PendingReveal>();
 const receipts = new Map<number, (result: "landed" | "missing") => void>();
 let sequence = 0;
 
 /** A mounted destination, rather than a broadcast or DOM search, proves a landing. */
 export async function revealTurnTarget(
-	sessionId: string,
+	viewId: symbol,
 	turnId: string,
 	target: TurnTarget,
 ): Promise<"landed" | "missing"> {
-	const previous = pending.get(sessionId);
+	const previous = pending.get(viewId);
 	if (previous) receipts.get(previous.seq)?.("missing");
 	const seq = ++sequence;
 	const landed = new Promise<"landed" | "missing">((resolve) =>
 		receipts.set(seq, resolve),
 	);
-	pending.set(sessionId, { turnId, target, seq });
+	pending.set(viewId, { turnId, target, seq });
 	void tick().then(async () => {
 		for (let frame = 0; frame < 2; frame++)
 			await new Promise<void>((resolve) =>
 				requestAnimationFrame(() => resolve()),
 			);
-		if (pending.get(sessionId)?.seq === seq) pending.delete(sessionId);
+		if (pending.get(viewId)?.seq === seq) pending.delete(viewId);
 		receipts.get(seq)?.("missing");
 		receipts.delete(seq);
 	});
@@ -133,6 +133,7 @@ const messageStops = [...SURFACE_LEVELS, "log"] as const;
 const logStops = ["log"] as const;
 
 interface PanelInput {
+	readonly viewId: symbol;
 	readonly sessionId: string | undefined;
 	readonly turn: Turn;
 	readonly jev: boolean;
@@ -173,7 +174,7 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 	const stops = $derived(input.jev ? messageStops : logStops);
 	const key = $derived(JSON.stringify([input.sessionId ?? "", input.turn.id]));
 	const reveal = $derived.by(() => {
-		const entry = input.sessionId ? pending.get(input.sessionId) : undefined;
+		const entry = pending.get(input.viewId);
 		return entry?.turnId === input.turn.id ? entry : null;
 	});
 	const revealStop = $derived.by(() => {
@@ -316,10 +317,10 @@ export function createTurnPanel(input: PanelInput): TurnPanelState {
 			return reveal?.target ?? null;
 		},
 		ack(seq) {
-			if (!reveal || reveal.seq !== seq || !input.sessionId) return;
+			if (!reveal || reveal.seq !== seq) return;
 			open();
 			pick(revealStop === "log" ? "log" : "level");
-			pending.delete(input.sessionId);
+			pending.delete(input.viewId);
 			receipts.get(seq)?.("landed");
 			receipts.delete(seq);
 		},

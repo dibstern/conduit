@@ -34,6 +34,7 @@
 	import { insertComposerReference, messageReplies, removeComposerReference, type ReplyReference } from "../input/composer-reference.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { reveal } from "../../stores/reveal.svelte.js";
+	import { primaryTranscript, type TranscriptView } from "../../stores/transcript.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
@@ -68,7 +69,8 @@
 	import { turnLog } from "../../utils/turns.js";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
+	let { view = primaryTranscript, scrollRoot, turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
+		get viewId() { return view.id; },
 		get sessionId() { return sessionId; }, get turn() { return turn; },
 		get jev() { return surfacingActive; }, get processing() { return turn.live; },
 		get latestTurn() { return latestTurn; }, get newestSettledTurn() { return newestSettledTurn; },
@@ -84,6 +86,8 @@
 		liveTasks?: readonly BackgroundTask[];
 		taskListedAt?: ReadonlyMap<string, number>;
 		taskNow?: number;
+		view?: TranscriptView;
+		scrollRoot?: HTMLElement | undefined;
 		sessionId?: string | undefined;
 		forkMessageId?: string | undefined;
 		modelExecution?: ModelExecution | undefined;
@@ -271,7 +275,7 @@
 	}
 
 	function pick(pin: SurfacePin) {
-		void reveal({ sessionId, uuid: pin.part.uuid });
+		void reveal({ sessionId, uuid: pin.part.uuid }, view, scrollRoot);
 	}
 	// An open strip's pins are already on screen, so picking one keeps focus on the strip.
 	function selectPin(pin: SurfacePin) {
@@ -313,7 +317,7 @@
 		citedOrdinal = ordinal;
 		const target = numberedMessages.find((part) => part.surfacingOrdinal === ordinal);
 		if (!target) return;
-		await reveal({ sessionId, uuid: target.uuid });
+		await reveal({ sessionId, uuid: target.uuid }, view, scrollRoot);
 	}
 	/** Without Jev, hovering a citation marks its step on the activity strip. */
 	function hoverCitation(ordinal: number | null) {
@@ -341,7 +345,7 @@
 		void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-scrub"]')?.focus({ preventScroll: true }));
 	}
 	function revealMessage(part: SurfacePart | null) {
-		if (part) void reveal({ sessionId, uuid: part.uuid });
+		if (part) void reveal({ sessionId, uuid: part.uuid }, view, scrollRoot);
 	}
 	function surfaceCommand(event: KeyboardEvent) {
 		const target = event.target;
@@ -446,7 +450,7 @@
 	async function jumpTo(i: number) {
 		const part = segment.activity[i];
 		if (!part) return;
-		await reveal({ sessionId, uuid: part.uuid });
+		await reveal({ sessionId, uuid: part.uuid }, view, scrollRoot);
 	}
 
 </script>

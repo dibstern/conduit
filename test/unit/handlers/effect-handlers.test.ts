@@ -958,6 +958,7 @@ describe("switchModelForSession", () => {
 				readInboxState: () => Effect.succeed(undefined),
 				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -2536,6 +2537,7 @@ describe("handleNewSession", () => {
 				readInboxState: () => Effect.succeed(undefined),
 				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -2639,6 +2641,7 @@ describe("handleNewSession", () => {
 				readInboxState: () => Effect.succeed(undefined),
 				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -2936,6 +2939,7 @@ describe("loadMoreHistoryForSession", () => {
 			readInboxState: () => Effect.succeed(undefined),
 			readStoreIdentity: () => Effect.succeed("store"),
 			readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+			readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 			readSessionTranscriptPage: vi.fn(() =>
 				Effect.succeed({
 					messages: [
@@ -3515,6 +3519,7 @@ describe("handleMessage", () => {
 				readInboxState: () => Effect.succeed(undefined),
 				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -3798,6 +3803,7 @@ describe("handleMessage", () => {
 				readInboxState: () => Effect.succeed(undefined),
 				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),

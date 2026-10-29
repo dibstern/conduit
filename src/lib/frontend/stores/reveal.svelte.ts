@@ -1,13 +1,13 @@
 import { tick } from "svelte";
 import { pendingMessage } from "../utils/turn-stops.js";
 import { segmentTurns, turnLog } from "../utils/turns.js";
-import { getSessionPhase, sessionMessages } from "./chat.svelte.js";
+import { getSessionPhase } from "./chat.svelte.js";
 import {
 	messageSurfacing,
 	sessionJevEnabled,
 } from "./message-surfacing.svelte.js";
-import { findSession, sessionState } from "./session.svelte.js";
-import { loadOlderTranscript } from "./transcript.svelte.js";
+import { findSession } from "./session.svelte.js";
+import { primaryTranscript, type TranscriptView } from "./transcript.svelte.js";
 import { revealTurnTarget } from "./turn-panel.svelte.js";
 
 /** Land in the viewed session, defaulting to the primary transcript, paging if needed.
@@ -17,11 +17,15 @@ export async function reveal(
 		| { messageId: string; partId?: string | undefined }
 		| { uuid: string }
 	),
+	view: TranscriptView = primaryTranscript,
+	root?: HTMLElement,
 ): Promise<"landed" | "missing"> {
-	const primarySessionId = sessionState.currentId;
-	const sessionId = anchor.sessionId ?? primarySessionId;
-	if (!sessionId) return "missing";
-	const chat = () => sessionMessages.get(sessionId);
+	const sessionId = anchor.sessionId ?? view.sessionId;
+	if (!sessionId || sessionId !== view.sessionId) return "missing";
+	let generation = view.generation;
+	const current = () =>
+		view.sessionId === sessionId && view.generation === generation;
+	const chat = () => view.chat;
 	const partUuid =
 		"uuid" in anchor
 			? anchor.uuid
@@ -38,15 +42,30 @@ export async function reveal(
 		);
 	let target = findTarget();
 	let paged = false;
+	if ("messageId" in anchor) {
+		const loading = view.loadMessage(anchor.messageId);
+		generation = view.generation;
+		try {
+			await loading;
+		} catch {
+			return "missing";
+		}
+		if (!current()) return "missing";
+		paged = true;
+		target = findTarget();
+		if (!target) return "missing";
+	}
 	while (!target && chat()?.historyHasMore) {
 		const oldestId = chat()?.transcript?.rows[0]?.id;
 		try {
-			await loadOlderTranscript(sessionId);
+			const loading = view.loadOlder();
+			generation = view.generation;
+			await loading;
 			paged = true;
 		} catch {
 			return "missing";
 		}
-		if (sessionState.currentId !== primarySessionId) return "missing";
+		if (!current()) return "missing";
 		target = findTarget();
 		if (!target && chat()?.transcript?.rows[0]?.id === oldestId)
 			return "missing";
@@ -56,14 +75,15 @@ export async function reveal(
 	if (paged) {
 		// Let prepending preserve the reading position before the destination scrolls.
 		await tick();
+		if (!current()) return "missing";
 		await new Promise<void>((resolve) =>
 			requestAnimationFrame(() => resolve()),
 		);
 	}
-	if (sessionState.currentId !== primarySessionId) return "missing";
+	if (!current()) return "missing";
 	const turns = segmentTurns(
 		chat()?.messages ?? [],
-		getSessionPhase(sessionId) !== "idle",
+		getSessionPhase(sessionId) !== "idle" && view.window.kind === "latest",
 	);
 	const turn = turns.find((turn) =>
 		turnLog(turn).segment.activity.some((part) => part.uuid === target.uuid),
@@ -73,8 +93,8 @@ export async function reveal(
 			findSession(sessionId),
 			messageSurfacing.status,
 		);
-		return revealTurnTarget(
-			sessionId,
+		const result = await revealTurnTarget(
+			view.id,
 			turn.id,
 			jev &&
 				target.type === "assistant" &&
@@ -84,12 +104,14 @@ export async function reveal(
 				? { kind: "message", uuid: target.uuid }
 				: { kind: "step", id: target.uuid },
 		);
+		return current() ? result : "missing";
 	}
 	// User messages and the Turn's trailing reply live outside the panel.
+	const scope = root ?? document.getElementById("messages");
 	for (let frame = 0; frame <= 2; frame++) {
-		if (sessionState.currentId !== primarySessionId) return "missing";
-		const element = document.querySelector<HTMLElement>(
-			`[data-session-id="${CSS.escape(sessionId)}"] [data-uuid="${CSS.escape(target.uuid)}"]`,
+		if (!current()) return "missing";
+		const element = scope?.querySelector<HTMLElement>(
+			`[data-uuid="${CSS.escape(target.uuid)}"]`,
 		);
 		if (element) {
 			element.scrollIntoView({ block: "center" });

@@ -37,7 +37,11 @@ describe("Codex goals through the daemon and detached runner", () => {
 		);
 	}
 
-	async function start(name: string, source = name) {
+	async function start(
+		name: string,
+		source = name,
+		successorTimeoutMs?: number,
+	) {
 		artifactRoot = resolve(`test-results/codex-goals/${name}`);
 		mkdirSync(artifactRoot, { recursive: true });
 		reportPath = join(artifactRoot, "trace-report.jsonl");
@@ -58,6 +62,12 @@ describe("Codex goals through the daemon and detached runner", () => {
 				CONDUIT_CODEX_APP_SERVER_CAPTURE: capturePath,
 				CONDUIT_CODEX_APP_SERVER_TRACE_REPORT: reportPath,
 				CONDUIT_CODEX_APP_SERVER_TRACE_GATE: gatePath,
+				...(successorTimeoutMs === undefined
+					? {}
+					: {
+							CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS:
+								String(successorTimeoutMs),
+						}),
 			},
 		};
 		await harness.restart(restartOptions);
@@ -250,12 +260,37 @@ describe("Codex goals through the daemon and detached runner", () => {
 	);
 
 	it(
-		"closes 30 seconds after native completion without a successor",
+		"closes at the successor deadline after native completion without a successor",
 		async () => {
-			const { fixture, browser, id } = await start("goal-successor-timeout");
+			const successorTimeoutMs = 2_000;
+			const { fixture, browser, id } = await start(
+				"goal-successor-timeout",
+				"goal-successor-timeout",
+				successorTimeoutMs,
+			);
+			const completion = fixtureRows("goal-successor-timeout").find(
+				({ message }) => message?.method === "turn/completed",
+			);
+			if (typeof completion?.["at"] !== "number")
+				throw new Error("Missing native completion timestamp");
+			writeFileSync(gatePath, String(completion["at"] - 1));
+			const sending = browser.send(id, `/goal ${OBJECTIVE}`, TIMEOUT);
+			await vi.waitFor(
+				() =>
+					expect(
+						rows<TraceRow>(capturePath).some(
+							({ message }) => message?.method === "thread/tokenUsage/updated",
+						),
+					).toBe(true),
+				{ timeout: TIMEOUT },
+			);
+			// Start timing after startup/output, immediately before native completion.
+			const completionCursor = browser.frames.length;
 			const began = Date.now();
-			await browser.send(id, `/goal ${OBJECTIVE}`, TIMEOUT);
-			expect(Date.now() - began).toBeGreaterThanOrEqual(30_000);
+			writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+			await browser.waitForTurnEnd(id, completionCursor, 15_000);
+			await sending;
+			expect(Date.now() - began).toBeGreaterThanOrEqual(successorTimeoutMs);
 			const { turns, events } = snapshot(fixture, id);
 			expect(turns).toEqual([{ state: "completed" }]);
 			expect(

@@ -1,7 +1,7 @@
-import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Result, Schema } from "effect";
+import { Subprocess } from "../../domain/daemon/Services/subprocess.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import { modelParameterChoices } from "../turn-settings.js";
@@ -46,21 +46,34 @@ export const generateCodexText = (
 				new Error(`Unsupported Codex effort ${effort}`),
 			);
 		const binary = env["CONDUIT_CODEX_BINARY"] ?? "codex";
+		const subprocess = yield* Subprocess;
 		const run = (argv: string[], cwd: string, stdin = "") =>
-			Effect.tryPromise({
-				try: (signal) =>
-					new Promise<string>((resolve, reject) => {
-						const child = execFile(
-							binary,
-							argv,
-							{ cwd, env, signal, maxBuffer: 1024 * 1024 },
-							(error, stdout) => (error ? reject(error) : resolve(stdout)),
-						);
-						child.stdin?.end(stdin);
-					}),
-				// Keep the child's error, whose message carries its stderr.
-				catch: (cause) => cause,
-			});
+			subprocess
+				.run(binary, argv, {
+					cwd,
+					env,
+					timeoutMs: 0,
+					maxBuffer: 1024 * 1024,
+					input: stdin,
+				})
+				.pipe(
+					Effect.mapError(
+						(error) =>
+							error.cause ??
+							new Error(
+								`Command failed: ${binary} ${argv.join(" ")}\n${error.stderr}`,
+							),
+					),
+					Effect.flatMap(({ stdout, stderr, exitCode }) =>
+						exitCode === 0
+							? Effect.succeed(stdout)
+							: Effect.fail(
+									new Error(
+										`Command failed: ${binary} ${argv.join(" ")}\n${stderr}`,
+									),
+								),
+					),
+				);
 		const scratchRoot = join(configDir, "text-generation");
 		return yield* Effect.acquireUseRelease(
 			Effect.tryPromise(async () => {

@@ -1,24 +1,24 @@
 // Pure utility functions extracted from the Daemon class.
 
-import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
+import { makeSubprocessRunner } from "../domain/daemon/Services/subprocess.js";
 import { DEFAULT_CONFIG_DIR, ENV } from "../env.js";
 import { isProcessAlive } from "../instance/managed-opencode-process.js";
 import { isRecord } from "../utils.js";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Check whether the `opencode` binary is available on PATH.
  * Uses `which` (Unix) or `where.exe` (Windows).
  */
-export async function isOpencodeInstalled(): Promise<boolean> {
+export async function isOpencodeInstalled(
+	signal?: AbortSignal,
+): Promise<boolean> {
+	const run = makeSubprocessRunner();
 	const cmd = process.platform === "win32" ? "where.exe" : "which";
 	try {
-		await execFileAsync(cmd, ["opencode"]);
-		return true;
+		const { exitCode } = await run(cmd, ["opencode"], { timeoutMs: 0 }, signal);
+		return exitCode === 0;
 	} catch {
 		return false;
 	}

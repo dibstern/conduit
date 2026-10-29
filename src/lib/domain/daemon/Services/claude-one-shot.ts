@@ -2,6 +2,7 @@ import type { Options as SDKOptions } from "@anthropic-ai/claude-agent-sdk";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { Data, Effect, Schema } from "effect";
 import { claudeEffortOptions } from "../../../provider/claude/claude-query-options.js";
+import { makeClaudeQueryProcesses } from "../../../provider/claude/claude-query-processes.js";
 import {
 	type ClaudeConfigDir,
 	makeClaudeSdkEnv,
@@ -147,6 +148,10 @@ export const makeClaudeOneShot = (options: {
 		) =>
 			Effect.gen(function* () {
 				const abortController = new AbortController();
+				const processes = makeClaudeQueryProcesses({
+					killProcessGroup: true,
+					stderr: options.onStderr,
+				});
 				const text = yield* Effect.tryPromise({
 					try: () =>
 						collectGeneratedText(
@@ -175,6 +180,7 @@ export const makeClaudeOneShot = (options: {
 									allowedTools: [],
 									tools: [],
 									abortController,
+									spawnClaudeCodeProcess: processes.spawnClaudeCodeProcess,
 									...(options.onStderr === undefined
 										? {}
 										: { stderr: options.onStderr }),
@@ -187,8 +193,13 @@ export const makeClaudeOneShot = (options: {
 							: new ClaudeOneShotFailure({ reason: "query", cause }),
 				}).pipe(
 					Effect.ensuring(
-						Effect.sync(() => {
+						Effect.gen(function* () {
 							if (!abortController.signal.aborted) abortController.abort();
+							yield* Effect.tryPromise({
+								try: processes.stop,
+								catch: (cause) =>
+									new ClaudeOneShotFailure({ reason: "query", cause }),
+							}).pipe(Effect.orDie);
 						}),
 					),
 				);

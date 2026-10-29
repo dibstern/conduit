@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect, Result as Either, HashMap, Ref, Stream } from "effect";
@@ -29,6 +29,8 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 // keeps a viewed session's fallback poller warning against a stopped client.
 describe("managed OpenCode connection health reaches daemon clients", () => {
 	const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
+	const statusIntervalMs = 250;
+	const fallbackIntervalMs = 100;
 	let harness: ProcessHarness | undefined;
 	let scenario = "setup";
 	let evidence: Record<string, unknown> = {};
@@ -45,7 +47,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 			foregroundCli: true,
 			autoStartOpenCode: true,
 			managedOpenCode,
-			logLevel: "warn",
+			logLevel: "info",
 			...(managedOpenCode ? { holdRunnerOutput: "send-turn" as const } : {}),
 		});
 		if (managedOpenCode) {
@@ -83,9 +85,22 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 				} satisfies DaemonConfig),
 			);
 		}
-		await harness.restart({ opencodeIdleTimeoutMs: 120_000 });
+		await harness.restart({
+			opencodeIdleTimeoutMs: 120_000,
+			// The 8 KB log tail can drop lines at info level; keep the full log.
+			logFile: daemonLogPath(harness),
+			serviceEnvironment: {
+				CONDUIT_STATUS_RECONCILIATION_INTERVAL_MS: String(statusIntervalMs),
+				CONDUIT_MESSAGE_POLLER_INTERVAL_MS: String(fallbackIntervalMs),
+			},
+		});
 		return harness;
 	}
+
+	const daemonLogPath = (fixture: ProcessHarness) =>
+		join(fixture.root, "daemon.log");
+	const daemonLog = (fixture: ProcessHarness) =>
+		readFileSync(daemonLogPath(fixture), "utf8");
 
 	afterEach(async ({ task }) => {
 		if (!harness) return;
@@ -324,9 +339,16 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 			({ message }, index) => index >= cursor && message === newBusy,
 		);
 		evidence["newBusy"] = newBusy;
-		// Cross the existing 7s status reconciliation interval so both delayed
-		// stop work and the normal provider status read have time to publish.
-		await new Promise<void>((done) => setTimeout(done, 7_500));
+		// The old stop's settlement can finish after the restart; wait for it,
+		// then cover three reconciliation intervals.
+		await vi.waitFor(
+			() =>
+				expect(daemonLog(fixture)).toContain(
+					"Managed stop settlement finished",
+				),
+			{ timeout: 15_000, interval: 25 },
+		);
+		await new Promise<void>((done) => setTimeout(done, 3 * statusIntervalMs));
 		const subsequentRows = browser.frames
 			.slice(newBusyCursor + 1)
 			.map(({ message }) => message)
@@ -574,7 +596,7 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		);
 		const stopCursor = browser.frames.length;
 		const pollerWarnings = () =>
-			fixture.logTail
+			daemonLog(fixture)
 				.split("\n")
 				.filter(
 					(line) =>
@@ -587,9 +609,9 @@ describe("managed OpenCode connection health reaches daemon clients", () => {
 		expect((await browser.instanceStatus(instanceId)).instance.status).toBe(
 			"stopped",
 		);
-		// Four 750ms fallback intervals expose repeated non-starting-client
+		// Four shortened fallback intervals expose repeated non-starting-client
 		// warnings, including the sessions still awaiting user answers.
-		await new Promise<void>((done) => setTimeout(done, 3_000));
+		await new Promise<void>((done) => setTimeout(done, 4 * fallbackIntervalMs));
 		const afterStop = sessionState();
 		const warnings = pollerWarnings();
 		evidence["afterStop"] = afterStop;

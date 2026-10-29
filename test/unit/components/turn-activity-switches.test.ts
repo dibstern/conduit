@@ -15,6 +15,9 @@ import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/m
 import type { TurnRecap } from "../../../src/lib/contracts/turn-recap.js";
 import ActivityStrip from "../../../src/lib/frontend/components/chat/ActivityStrip.svelte";
 import TurnActivity from "../../../src/lib/frontend/components/chat/TurnActivity.svelte";
+import { sessionMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { reveal } from "../../../src/lib/frontend/stores/reveal.svelte.js";
+import { primaryTranscript } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { setupTurnStory } from "../../../src/lib/frontend/stories/turn-setup.js";
 import type { Segment, Turn } from "../../../src/lib/frontend/utils/turns.js";
 
@@ -115,6 +118,52 @@ afterEach(() => {
 	restoreTurn();
 	rpc.mockReset();
 	vi.unstubAllGlobals();
+});
+
+it("lands a turn reveal only in its own view of the same session", async () => {
+	// A same-session panel must not scroll, focus, or acknowledge another view's reveal.
+	const chat = sessionMessages.get("session");
+	if (!chat) throw new Error("Missing story transcript");
+	const sourceView = {
+		...primaryTranscript,
+		id: Symbol("source-view"),
+		sessionId: "session",
+		chat,
+	};
+	const otherView = { ...sourceView, id: Symbol("other-view") };
+	const other = render(TurnActivity, {
+		turn,
+		segment,
+		final: true,
+		sessionId: "session",
+		surfacing,
+		view: otherView,
+	});
+	const source = render(TurnActivity, {
+		turn,
+		segment,
+		final: true,
+		sessionId: "session",
+		surfacing,
+		view: sourceView,
+	});
+	const scroll = vi.fn<(this: Element) => void>();
+	Element.prototype.scrollIntoView = scroll;
+
+	expect(
+		await reveal(
+			{ sessionId: "session", uuid: "first" },
+			sourceView,
+			source.container,
+		),
+	).toBe("landed");
+	expect(
+		scroll.mock.instances.some((node) => other.container.contains(node)),
+	).toBe(false);
+	expect(
+		scroll.mock.instances.some((node) => source.container.contains(node)),
+	).toBe(true);
+	expect(source.container.contains(document.activeElement)).toBe(true);
 });
 
 it("keeps a summary generated without Jev clickable and its log numbered after enabling Jev", async () => {
