@@ -18,17 +18,17 @@ import {
 	type AttachmentRef,
 	AttachmentRefSchema,
 } from "../../../contracts/attachment-ref.js";
+import {
+	type DraftReview,
+	DraftReviewSchema,
+} from "../../../contracts/review-comment.js";
 import type {
 	DraftAttachment,
 	DraftListItem,
-	DraftReview,
 	InputDraftEnvelope,
 	InputDraftKey,
 } from "../../../contracts/ws-rpc.js";
-import {
-	DraftAttachmentMissing,
-	DraftReviewSchema,
-} from "../../../contracts/ws-rpc.js";
+import { DraftAttachmentMissing } from "../../../contracts/ws-rpc.js";
 import {
 	makeAttachmentStore,
 	REVIEW_MIME,

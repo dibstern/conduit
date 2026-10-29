@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { untrack } from "svelte";
 import {
+	type DraftAttachment,
 	DraftAttachmentRejected,
 	type InputDraftKey,
 } from "../../../contracts/ws-rpc.js";
@@ -63,13 +64,7 @@ export function handleInputSyncReceived(msg: {
 	restored?: string | undefined;
 	projectId?: string | undefined;
 	initial?: boolean;
-	attachments?: readonly {
-		id: string;
-		name: string;
-		mime: string;
-		size: number;
-		hash: string;
-	}[];
+	attachments?: readonly DraftAttachment[];
 }): void {
 	if (msg.attachments)
 		inputSyncEvents.push({

@@ -41,6 +41,8 @@
 						event.stopPropagation();
 						onRemove(image.id);
 				}} />
+				{:else if image.review}
+					<FileAttachmentChip testid="review-attachment-chip" kind="comment" name={`${image.review.path}:${image.review.lines.start === image.review.lines.end ? image.review.lines.start : `${image.review.lines.start}–${image.review.lines.end}`}`} detail={image.review.text} onremove={() => onRemove(image.id)} />
 				{:else}
 					<FileAttachmentChip testid="file-attachment-chip" name={image.name} detail={formatFileSize(image.size)} onremove={() => onRemove(image.id)} />
 				{/if}

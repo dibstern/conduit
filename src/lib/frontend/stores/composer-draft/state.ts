@@ -1,3 +1,4 @@
+import type { DraftReview } from "../../../contracts/review-comment.js";
 import type { InputDraftKey } from "../../../contracts/ws-rpc.js";
 
 export const draftKeyId = (key: InputDraftKey): string =>
@@ -16,13 +17,16 @@ export interface DraftAttachmentItem {
 	error?: string;
 	/** Validation refusals need an explicit Retry, even after reconnecting. */
 	retryOnReconnect?: false;
+	/** Present when the attachment is a review comment from the diff. */
+	review?: DraftReview | undefined;
 }
 type LocalAttachment = Required<
 	Pick<DraftAttachmentItem, "id" | "name" | "mime" | "size" | "dataUrl">
 > & { projectSlug?: string };
 type SavedAttachment = Required<
 	Pick<DraftAttachmentItem, "id" | "name" | "mime" | "size" | "hash">
->;
+> &
+	Pick<DraftAttachmentItem, "review">;
 
 export interface ReloadDraft {
 	key: InputDraftKey;

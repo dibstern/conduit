@@ -49,6 +49,7 @@ import { phoneToastsHandlers } from "./steps/phoneToasts.js";
 import { projectTreeHandlers } from "./steps/projectTree.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
 import { providerSettingsHandlers } from "./steps/providerSettings.js";
+import { reviewCommentHandlers } from "./steps/reviewComments.js";
 import { rightPaneHandlers } from "./steps/rightPane.js";
 import { sessionAutoSettleHandlers } from "./steps/sessionAutoSettle.js";
 import { sessionDiffHandlers } from "./steps/sessionDiff.js";
@@ -114,6 +115,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...projectTreeHandlers,
 	...rightPaneHandlers,
 	...sessionDiffHandlers,
+	...reviewCommentHandlers,
 	...sessionModeDefaultHandlers,
 	...backgroundTasksHandlers,
 	...launchingRowsHandlers,

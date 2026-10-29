@@ -1,6 +1,6 @@
 <!-- One file of a session diff: asks for its patch by size tier and renders it with @pierre/diffs. -->
 <script module lang="ts">
-	import { FileDiff, parsePatchFiles } from "@pierre/diffs";
+	import { FileDiff, parsePatchFiles, type SelectedLineRange } from "@pierre/diffs";
 	import { getOrCreateWorkerPoolSingleton } from "@pierre/diffs/worker";
 	import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 
@@ -15,10 +15,17 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
+	import { REVIEW_EXCERPT_MAX_CHARS, REVIEW_TEXT_MAX_CHARS } from "../../../contracts/review-comment.js";
+	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import type { DiffRow } from "../../stores/session-diff.svelte.js";
 	import { openFileViewer } from "../../stores/session-view.svelte.js";
 	import { themeState } from "../../stores/theme.svelte.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { formatFileSize } from "../../utils/format.js";
+	import { reviewExcerpt } from "../../utils/review-excerpt.js";
+	import Button from "../ui/Button.svelte";
+	import Textarea from "../ui/Textarea.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 
 	const { row }: { row: DiffRow } = $props();
@@ -29,6 +36,13 @@
 	let clicked = $state(false);
 	let host = $state<HTMLDivElement>();
 	let view: FileDiff | undefined;
+	// The lines picked for a review comment, and the comment being written.
+	let selection = $state<SelectedLineRange | null>(null);
+	let comment = $state("");
+	let commentError = $state("");
+	const lines = $derived(
+		selection && { start: Math.min(selection.start, selection.end), end: Math.max(selection.start, selection.end) },
+	);
 
 	const wanted = $derived(
 		file.tier === "tooLarge" || file.binary ? false : file.tier === "auto" ? visible : clicked,
@@ -51,6 +65,11 @@
 				diffStyle: "unified",
 				overflow: "scroll",
 				disableFileHeader: true,
+				enableLineSelection: true,
+				onLineSelectionEnd: (range) => {
+					selection = range;
+					commentError = "";
+				},
 			},
 			workerPool(),
 		);
@@ -66,6 +85,36 @@
 		const type = themeState.resolved;
 		view?.setThemeType(type);
 	});
+
+	function closeComment() {
+		selection = null;
+		comment = "";
+		view?.setSelectedLines(null);
+	}
+
+	/** The server adds the comment to the session's draft, so every device's composer shows it. */
+	async function addComment(event: SubmitEvent) {
+		event.preventDefault();
+		const sessionId = getCurrentSessionId();
+		if (!selection || !lines || !sessionId || patch === null || !comment.trim()) return;
+		try {
+			await rpc("AddDraftReview", {
+				key: { session: sessionId },
+				id: crypto.randomUUID(),
+				review: {
+					folder,
+					path: file.path,
+					side: selection.side ?? "additions",
+					lines,
+					excerpt: reviewExcerpt(patch, selection).slice(0, REVIEW_EXCERPT_MAX_CHARS),
+					text: comment.trim(),
+				},
+			});
+			closeComment();
+		} catch (error) {
+			commentError = failureLine(error, "Could not add the comment. Try again.");
+		}
+	}
 
 	/** Small diffs load as they near the viewport. */
 	function observe(node: HTMLElement) {
@@ -113,6 +162,16 @@
 		<!-- Unloaded rows reserve roughly their patch's height (changed lines plus
 		     context, at pierre's 20px rows), so only nearby rows load and nothing jumps. -->
 		<div bind:this={host} style:min-height={patch === null ? `${(file.insertions + file.deletions + 6) * 20}px` : undefined}></div>
+		{#if lines}
+			<form data-testid="review-comment-form" class="flex flex-col gap-2 px-3 py-2" onsubmit={addComment}>
+				<Textarea bind:value={comment} size="sm" rows={3} maxlength={REVIEW_TEXT_MAX_CHARS} aria-label="Review comment" placeholder={lines.start === lines.end ? `Comment on line ${lines.start}` : `Comment on lines ${lines.start}–${lines.end}`} />
+				{#if commentError}<p role="alert" class="text-xs text-error">{commentError}</p>{/if}
+				<div class="flex justify-end gap-2">
+					<Button variant="ghost" size="sm" onclick={closeComment}>Cancel</Button>
+					<Button variant="primary" size="sm" type="submit" disabled={!comment.trim()}>Add to message</Button>
+				</div>
+			</form>
+		{/if}
 	{/if}
 </section>
 

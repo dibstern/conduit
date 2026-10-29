@@ -808,7 +808,7 @@
 
 	async function sendMessage(textOverride?: string, delivery: InputDelivery = "queue"): Promise<boolean> {
 		if (composerDraft.sending || readingAttachments > 0 || !composerDraft.attachmentsReady || readOnlySubagent || !turnControl.ready) return false;
-		if (textOverride === undefined && draftAttachments.some((attachment) => !attachment.mime.startsWith("image/")) && !getProviderDriver(composerDriver)?.supportsFileAttachments) {
+		if (textOverride === undefined && draftAttachments.some((attachment) => !attachment.mime.startsWith("image/") && !attachment.review) && !getProviderDriver(composerDriver)?.supportsFileAttachments) {
 			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before sending these files.";
 			return false;
 		}

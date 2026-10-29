@@ -11,7 +11,7 @@ import {
 	type AttachmentRef,
 	AttachmentRefSchema,
 } from "../contracts/attachment-ref.js";
-import type { DraftReview } from "../contracts/ws-rpc.js";
+import type { DraftReview } from "../contracts/review-comment.js";
 
 /** A review comment is stored as its JSON; this mime never becomes an AttachmentRef. */
 export const REVIEW_MIME = "application/vnd.conduit.review+json";

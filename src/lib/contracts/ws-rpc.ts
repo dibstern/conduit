@@ -80,6 +80,7 @@ import {
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
+import { DraftReviewSchema } from "./review-comment.js";
 import {
 	SessionWorktreeInspectionSchema,
 	WorkspaceMoveError,
@@ -3069,28 +3070,6 @@ export const InputDraftKeySchema = Schema.Union([
 	Schema.Struct({ draft: NonEmptyString }),
 ]);
 export type InputDraftKey = typeof InputDraftKeySchema.Type;
-
-/** Caps from t3code's composer review context. */
-export const REVIEW_TEXT_MAX_CHARS = 16_000;
-export const REVIEW_EXCERPT_MAX_CHARS = 32_000;
-const ReviewLine = Schema.Number.pipe(
-	Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1)),
-);
-
-/** A comment on selected lines of one Session Diff file, quoting their excerpt. */
-export const DraftReviewSchema = Schema.Struct({
-	folder: NonEmptyString,
-	path: NonEmptyString,
-	side: Schema.Literals(["deletions", "additions"]),
-	lines: Schema.Struct({ start: ReviewLine, end: ReviewLine }),
-	excerpt: Schema.String.pipe(
-		Schema.check(Schema.isMaxLength(REVIEW_EXCERPT_MAX_CHARS)),
-	),
-	text: NonEmptyString.pipe(
-		Schema.check(Schema.isMaxLength(REVIEW_TEXT_MAX_CHARS)),
-	),
-});
-export type DraftReview = typeof DraftReviewSchema.Type;
 
 export const DraftAttachmentSchema = Schema.Struct({
 	id: NonEmptyString,

@@ -13,10 +13,8 @@ import { join, relative } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { Effect, Fiber, Queue, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-import type {
-	DraftReview,
-	InputDraftEnvelope,
-} from "../../../src/lib/contracts/ws-rpc.js";
+import type { DraftReview } from "../../../src/lib/contracts/review-comment.js";
+import type { InputDraftEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import { reviewExcerpt } from "../../../src/lib/frontend/utils/review-excerpt.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
