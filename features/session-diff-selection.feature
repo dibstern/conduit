@@ -66,7 +66,7 @@ Examples:
   | 30    | file-20.ts | /workspace/lib  | /workspace/myapp |
   | 30    | file-20.ts | /workspace/myapp | /workspace/lib  |
 
-Scenario Outline: Back returns to the previously revealed file
+Scenario Outline: Back returns to the previously revealed file, even from Files
   Given the conduit app is served with the long-transcript mockup
   And the session has <count> small unstaged files
   When I preview <first> in Files
@@ -75,8 +75,10 @@ Scenario Outline: Back returns to the previously revealed file
   And I open the previewed file's diff
   Then the <second> diff is revealed
   And the <first> diff is out of view
-  When I go back in the browser
-  Then the <first> diff is revealed
+  When I select the Files right pane tab
+  And I go back in the browser
+  Then the Diff right pane is selected
+  And the <first> diff is revealed
   And the URL holds the <first> diff selection
 
 Examples:

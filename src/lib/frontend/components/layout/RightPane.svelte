@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { tick, type Snippet } from "svelte";
+	import { tick, untrack, type Snippet } from "svelte";
+	import { getDiffReveal } from "../../stores/diff-selection.js";
 	import { closeFileViewer, RIGHT_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setRightPaneView, setRightPaneWidth } from "../../stores/session-view.svelte.js";
 	import { activeSessionView, sessionViews } from "./session-views.js";
 	import Button from "../ui/Button.svelte";
@@ -26,6 +27,16 @@
 
 	$effect(() => {
 		if (view !== "closed" && !opened.has(view)) opened = new Set([...opened, view]);
+	});
+
+	// A string, so only a different reveal reruns this. Back or Forward to one
+	// shows the Diff, as the reveal itself did, whatever the pane shows now.
+	const revealed = $derived.by(() => {
+		const reveal = getDiffReveal();
+		return reveal && `${reveal.folder}\n${reveal.path}\n${reveal.nonce}`;
+	});
+	$effect(() => {
+		if (revealed) untrack(() => setRightPaneView("diff"));
 	});
 
 	$effect(() => {
