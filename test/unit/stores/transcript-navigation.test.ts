@@ -12,6 +12,7 @@ import {
 	WsRpcError,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeWsRpcClientsLayer } from "../../../src/lib/frontend/transport/shared-client.js";
+import { retryFeedsNow } from "../../../src/lib/frontend/transport/supervise.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/types.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 import { makeRpcStream, makeRpcWire } from "../../helpers/rpc-wire.js";
@@ -34,10 +35,12 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { reveal } from "../../../src/lib/frontend/stores/reveal.svelte.js";
 import {
 	createTranscriptView,
 	primaryTranscript,
 	type TranscriptView,
+	transcriptFeed,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
@@ -140,6 +143,7 @@ afterEach(async () => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	openSessionForSetup(null);
+	vi.unstubAllGlobals();
 	vi.clearAllMocks();
 });
 
@@ -168,6 +172,170 @@ async function open() {
 }
 
 describe("full-session transcript navigation owner", () => {
+	// Reveal can reject its own page revision, search the wrong direction, or
+	// steal placement after another navigation supersedes its awaited body.
+	it.each([
+		"uuid",
+		"newer-part",
+		"superseded",
+	] as const)("reveals %s through the real transcript owner", async (scenario) => {
+		await open();
+		view.navigate("u10");
+		await wait(() => details.length === 2);
+		const historical = details[1];
+		if (!historical) throw new Error("missing historical feed");
+		await emit(historical, snapshot([10, 11], "historical"), {
+			_tag: "synchronized",
+		});
+		await wait(() => view.navigation?.phase === "placing");
+		const placement = view.navigation;
+		if (!placement) throw new Error("missing placement");
+		view.acknowledgePlacement(placement.id);
+		const target = scenario === "uuid" ? 9 : 80;
+		const root = document.createElement("div");
+		const element = document.createElement("div");
+		element.dataset["part"] =
+			scenario === "uuid" ? "u9/user" : `u${target}/p${target}`;
+		element.dataset["testid"] = "surfacing-msg-card";
+		element.scrollIntoView = vi.fn();
+		root.append(element);
+		vi.stubGlobal("CSS", { escape: (value: string) => value });
+		const pending = reveal(
+			scenario === "uuid"
+				? { uuid: "u9/user" }
+				: { messageId: "u80", partId: "p80" },
+			view,
+			root,
+		);
+		await wait(() => details.length === 3);
+		const replacement = details[2];
+		if (!replacement) throw new Error("missing replacement feed");
+		if (scenario !== "uuid")
+			expect(requests("SubscribeSessionDetail").at(-1)?.payload).toMatchObject({
+				window: { anchorMessageId: "u80", direction: "from" },
+			});
+		if (scenario === "superseded") {
+			view.navigate("u11");
+			expect(await pending).toBe("missing");
+			expect(element.scrollIntoView).not.toHaveBeenCalled();
+		} else {
+			const page = snapshot([target], "historical");
+			if (page._tag !== "snapshot") throw new Error("expected snapshot");
+			await emit(
+				replacement,
+				{
+					...page,
+					rows:
+						scenario === "uuid"
+							? page.rows
+							: [
+									...detailRowsOf({ ...row(target), role: "assistant" }),
+									...page.rows.filter((item) => item._tag === "window"),
+								],
+				},
+				{ _tag: "synchronized" },
+			);
+			expect(await pending).toBe("landed");
+			expect(element.scrollIntoView).toHaveBeenCalledOnce();
+			if (scenario === "newer-part") expect(view.navigation).toBeNull();
+		}
+		vi.unstubAllGlobals();
+	});
+
+	it("lets a loaded message reveal supersede an in-flight rail jump", async () => {
+		await open();
+		view.navigate("u10");
+		await wait(() => details.length === 2);
+		const pendingFeed = details[1];
+		if (!pendingFeed) throw new Error("missing pending feed");
+		const root = document.createElement("div");
+		const element = document.createElement("div");
+		element.dataset["uuid"] = "u119/user";
+		element.scrollIntoView = vi.fn();
+		root.append(element);
+		vi.stubGlobal("CSS", { escape: (value: string) => value });
+		expect(await reveal({ messageId: "u119" }, view, root)).toBe("landed");
+		expect(view.navigation).toBeNull();
+		await emit(pendingFeed, snapshot([10], "historical"), {
+			_tag: "synchronized",
+		});
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(view.window.kind).toBe("latest");
+		expect(element.scrollIntoView).toHaveBeenCalledOnce();
+	});
+	it("keeps a retired historical target readable and retries through the owner", async () => {
+		await open();
+		view.navigate("u20");
+		await wait(() => details.length === 2);
+		const historical = details[1];
+		if (!historical) throw new Error("missing historical feed");
+		await emit(historical, snapshot([20, 21], "historical"), {
+			_tag: "synchronized",
+		});
+		await wait(() => view.navigation?.phase === "placing");
+		const placement = view.navigation?.id;
+		if (placement !== undefined) view.acknowledgePlacement(placement);
+		await Effect.runPromise(
+			historical.fail(
+				new WsRpcError({
+					code: "unknown-turn",
+					message: "The selected message was removed",
+				}),
+			),
+		);
+		await wait(() => view.chat.transcript?.status._tag === "failed");
+		expect(transcriptFeed(view.chat.transcript)).toBe("failed");
+		expect(view.pageError).toBeInstanceOf(Error);
+		expect(view.chat.transcript?.rows.map((row) => row.id)).toEqual([
+			"u20",
+			"u21",
+		]);
+		view.navigate("u20");
+		expect(view.navigation?.phase).toBe("loading");
+		await wait(() => details.length === 3);
+		const retried = details[2];
+		if (!retried) throw new Error("missing retry feed");
+		expect(requests("SubscribeSessionDetail")[2]?.payload).toMatchObject({
+			window: { anchorMessageId: "u20", direction: "from" },
+		});
+		await emit(retried, snapshot([20, 21], "historical", 2), {
+			_tag: "synchronized",
+		});
+		await wait(() => view.chat.transcript?.status._tag === "live");
+		expect(view.pageError).toBeNull();
+	});
+	it.each([
+		false,
+		true,
+	])("heals index failure without clearing a newer navigation error (%s)", async (newerError) => {
+		const { index } = await open();
+		await Effect.runPromise(
+			index.fail(new WsRpcError({ message: "temporary index failure" })),
+		);
+		await wait(() => view.pageError instanceof Error);
+		let laterFailure: unknown;
+		if (newerError) {
+			view.navigate("u119");
+			const id = view.navigation?.id;
+			if (id === undefined) throw new Error("missing placement");
+			view.acknowledgePlacement(id, false);
+			laterFailure = view.pageError;
+		}
+		retryFeedsNow();
+		await wait(() => indexes.length === 2);
+		const recovered = indexes[1];
+		if (!recovered) throw new Error("missing recovered index");
+		await indexEmit(recovered, {
+			_tag: "snapshot",
+			sequence: 2,
+			rows: [prompt(121)],
+		});
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(view.prompts).toHaveLength(120);
+		await indexEmit(recovered, { _tag: "synchronized" });
+		await wait(() => view.prompts.length === 1);
+		expect(view.pageError).toBe(newerError ? laterFailure : null);
+	});
 	it.each([
 		"before",
 		"after",

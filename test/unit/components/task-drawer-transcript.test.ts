@@ -158,6 +158,10 @@ function mountDrawer() {
 		navigation: null,
 		transition: null,
 		navigate: () => {},
+		loadMessage: async (messageId) => {
+			if (!owner.chat.transcript?.rows.some((row) => row.id === messageId))
+				await owner.loadOlder();
+		},
 		latest: () => {},
 		loadNewer: async () => {},
 		acknowledgePlacement: () => {},

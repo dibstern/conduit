@@ -168,6 +168,80 @@ afterEach(async () => {
 });
 
 describe("transcript feed interface", () => {
+	it.each([
+		"edit",
+		"remove",
+	] as const)("discards an older page crossed by a same-sequence %s and permits a stable retry", async (change) => {
+		viewTranscript("project", "A");
+		await settled(() => requestFor(wire.requests, "A") !== undefined);
+		const feed = requestFor(wire.requests, "A");
+		if (!feed) throw new Error("missing feed");
+		await wire.emit(feed, snapshot([row("u2", "current")], 2, true));
+		await wire.emit(feed, { _tag: "synchronized" });
+		const messages = getOrCreateSessionSlot("A").messages;
+		await settled(() => messages.transcript?.status._tag === "live");
+		let finish:
+			| ((value: {
+					projectSlug: string;
+					sessionId: string;
+					messages: HistoryMessage[];
+					hasMore: boolean;
+			  }) => void)
+			| undefined;
+		pageMock.rpc.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				}),
+		);
+		const pending = loadOlderTranscript("A");
+		const before = messages.transcript;
+		await wire.emit(
+			feed,
+			change === "edit"
+				? {
+						_tag: "upsert",
+						sequence: 2,
+						item: {
+							_tag: "part",
+							messageId: "u2",
+							sortOrder: 0,
+							part: { id: "u2-text", type: "text", text: "edited" },
+						},
+					}
+				: { _tag: "remove", sequence: 2, id: "u1" },
+		);
+		await settled(() => messages.transcript !== before);
+		finish?.({
+			projectSlug: "project",
+			sessionId: "A",
+			messages: [row("u1", "stale older"), row("u2", "stale overlap")],
+			hasMore: false,
+		});
+		await pending;
+		expect(messages.transcript?.rows.map((item) => item.id)).toEqual(["u2"]);
+		expect(messages.historyLoading).toBe(false);
+		expect(messages.historyHasMore).toBe(true);
+		await settled(() =>
+			messages.messages.some(
+				(message) =>
+					message.type === "user" &&
+					message.text === (change === "edit" ? "edited" : "current"),
+			),
+		);
+		pageMock.rpc.mockResolvedValueOnce({
+			projectSlug: "project",
+			sessionId: "A",
+			messages: [row("u0", "stable older")],
+			hasMore: false,
+		});
+		await loadOlderTranscript("A");
+		expect(messages.transcript?.rows.map((item) => item.id)).toEqual([
+			"u0",
+			"u2",
+		]);
+		expect(messages.historyHasMore).toBe(false);
+	});
 	it("keeps two views of the same session independent", async () => {
 		const drawer = createTranscriptView();
 		viewTranscript("project", "A");

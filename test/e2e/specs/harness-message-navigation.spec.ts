@@ -136,6 +136,31 @@ test("complete prompt rail navigates bounded persisted windows", async ({
 		window: { anchorMessageId: promptId(1), direction: "from" },
 	});
 	await page.screenshot({ path: testInfo.outputPath("historical-window.png") });
+	const beforeReconnect = requests.filter(
+		(request) => request.tag === "SubscribeSessionDetail",
+	).length;
+	await harness.terminate();
+	await harness.restart({ keepPort: true });
+	await expect
+		.poll(
+			() =>
+				requests.filter((request) => request.tag === "SubscribeSessionDetail")
+					.length,
+		)
+		.toBeGreaterThan(beforeReconnect);
+	await expect(messages.filter({ hasText: "Prompt 1:" })).toBeInViewport();
+	await expect(rail).toHaveAttribute("aria-valuemax", String(promptCount));
+	expect(
+		requests
+			.filter((request) => request.tag === "SubscribeSessionDetail")
+			.at(-1)?.payload,
+	).toMatchObject({
+		window: { anchorMessageId: promptId(1), direction: "from" },
+	});
+	expect(await messages.count()).toBeLessThanOrEqual(50);
+	await page.screenshot({
+		path: testInfo.outputPath("reconnected-window.png"),
+	});
 	await page.getByTestId("jump-to-latest").click();
 	await expect(messages.filter({ hasText: "Prompt 120:" })).toBeInViewport();
 	await expect(rail).toHaveAttribute("aria-valuemax", String(promptCount));

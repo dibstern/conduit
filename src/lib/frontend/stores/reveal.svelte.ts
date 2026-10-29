@@ -24,7 +24,7 @@ export async function reveal(
 ): Promise<"landed" | "missing"> {
 	const sessionId = anchor.sessionId ?? view.sessionId;
 	if (!sessionId || sessionId !== view.sessionId) return "missing";
-	const generation = view.generation;
+	let generation = view.generation;
 	const current = () =>
 		view.sessionId === sessionId && view.generation === generation;
 	const chat = () => view.chat;
@@ -43,10 +43,24 @@ export async function reveal(
 				: message.uuid === partUuid,
 		);
 	let target = findTarget();
+	if ("messageId" in anchor) {
+		const loading = view.loadMessage(anchor.messageId);
+		generation = view.generation;
+		try {
+			await loading;
+		} catch {
+			return "missing";
+		}
+		if (!current()) return "missing";
+		target = findTarget();
+		if (!target) return "missing";
+	}
 	while (!target && chat()?.historyHasMore) {
 		const oldestId = chat()?.transcript?.rows[0]?.id;
 		try {
-			await view.loadOlder();
+			const loading = view.loadOlder();
+			generation = view.generation;
+			await loading;
 		} catch {
 			return "missing";
 		}

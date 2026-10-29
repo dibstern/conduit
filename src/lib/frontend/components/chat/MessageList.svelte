@@ -537,7 +537,7 @@
 	<!-- Zero-height sticky rail so the pill floats over the transcript without
 	     pushing it down; the lift parks it in the top padding so at rest
 	     it clears the first row. The pill fades in late, so fast switches never show it. -->
-	{#if feed !== "live" && (hasRows || feed === "failing")}
+	{#if (feed === "catchingUp" || feed === "failing") && (hasRows || feed === "failing")}
 		<div class="sticky top-4 z-10 h-0 flex items-start justify-center">
 			<div
 				class="feed-pill -translate-y-3 flex items-center gap-2 bg-bg-alt border border-border rounded-full px-3 py-0.5 text-xs text-text-secondary font-sans shadow-sm"

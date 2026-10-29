@@ -379,6 +379,162 @@ const runtimeEvent = (event: Record<string, unknown>): ProviderRuntimeEvent =>
 
 describe("subscribeSessionDetail", () => {
 	it.effect(
+		"live prompt mutations preserve inheritance and do not refill a historical interval",
+		() =>
+			Effect.gen(function* () {
+				const { subscribeSessionPromptIndex } = yield* Effect.promise(
+					() =>
+						import(
+							"../../../src/lib/domain/relay/Services/session-prompt-index.js"
+						),
+				);
+				yield* recoverProjections;
+				const messageIds = Array.from(
+					{ length: 60 },
+					(_, index) => `mutation-${String(index).padStart(2, "0")}`,
+				);
+				yield* commit([
+					sessionCreated(SID),
+					...messageIds.map((id) => messageCreated(SID, id, "user")),
+				]);
+				const index =
+					yield* Queue.unbounded<
+						import("../../../src/lib/contracts/ws-rpc.js").SessionPromptIndexEnvelope
+					>();
+				yield* subscribeSessionPromptIndex({ sessionId: SID }).pipe(
+					Stream.runForEach((frame) => Queue.offer(index, frame)),
+					Effect.forkScoped,
+				);
+				const opening = yield* takeN(index, 2);
+				if (opening[0]?._tag !== "snapshot")
+					throw new Error("expected index snapshot");
+				expect(opening[0].rows.map((row) => row.id)).toEqual(messageIds);
+				const { q } = yield* openDetail({
+					sessionId: SID,
+					window: { anchorMessageId: "mutation-05", direction: "from" },
+				});
+				const initial = yield* takeN(q, 2);
+				if (initial[0]?._tag !== "snapshot")
+					throw new Error("expected body snapshot");
+				expect(
+					initial[0].rows.flatMap((row) =>
+						row._tag === "message" ? [row.message.id] : [],
+					),
+				).toEqual(messageIds.slice(5, 55));
+
+				yield* commit([
+					canonicalEvent(
+						"message.created",
+						SID,
+						{ sessionId: SID, messageId: "inherited-live", role: "user" },
+						{
+							provider: "claude",
+							createdAt: at(),
+							metadata: { inherited: true },
+						},
+					),
+					textDelta(
+						SID,
+						"inherited-live",
+						"inherited-text",
+						"Original inherited prompt",
+					),
+				]);
+				expect(yield* Queue.take(index)).toMatchObject({
+					_tag: "upsert",
+					item: {
+						id: "inherited-live",
+						preview: "Original inherited prompt",
+						isInherited: true,
+					},
+				});
+				yield* takeN(q, 2);
+				yield* commit([
+					textDelta(SID, "inherited-live", "inherited-text", " edited"),
+				]);
+				expect(yield* Queue.take(index)).toMatchObject({
+					_tag: "upsert",
+					item: {
+						id: "inherited-live",
+						preview: "Original inherited prompt edited",
+						isInherited: true,
+					},
+				});
+				yield* takeN(q, 2);
+
+				yield* commit([
+					canonicalEvent(
+						"message.removed",
+						SID,
+						{ messageId: "mutation-05" },
+						{ provider: "claude", createdAt: at() },
+					),
+				]);
+				expect(yield* Queue.take(index)).toMatchObject({
+					_tag: "remove",
+					id: "mutation-05",
+				});
+				const deleted = yield* takeN(q, 2);
+				if (deleted[0]?._tag !== "snapshot")
+					throw new Error("expected removal snapshot");
+				expect(
+					deleted[0].rows.flatMap((row) =>
+						row._tag === "message" ? [row.message.id] : [],
+					),
+				).toEqual(messageIds.slice(6, 55));
+
+				const movedAt = at();
+				yield* commit([
+					canonicalEvent(
+						"message.snapshot",
+						SID,
+						{
+							message: {
+								id: "mutation-06",
+								sessionID: SID,
+								role: "user",
+								time: { created: movedAt },
+								parts: [
+									{ id: "moved-text", type: "text", text: "Corrected prompt" },
+								],
+							},
+							messageId: "mutation-06",
+							digest: "corrected-position",
+						},
+						{ provider: "claude", createdAt: movedAt },
+					),
+				]);
+				expect(yield* Queue.take(index)).toMatchObject({
+					_tag: "upsert",
+					item: {
+						id: "mutation-06",
+						createdAt: movedAt,
+						preview: "Corrected prompt",
+					},
+				});
+				const reordered = yield* takeN(q, 2);
+				if (reordered[0]?._tag !== "snapshot")
+					throw new Error("expected reordered snapshot");
+				expect(
+					reordered[0].rows.flatMap((row) =>
+						row._tag === "message" ? [row.message.id] : [],
+					),
+				).toEqual(messageIds.slice(7, 55));
+				expect(
+					reordered[0].rows.find((row) => row._tag === "window"),
+				).toMatchObject({
+					_tag: "window",
+					window: {
+						kind: "historical",
+						firstMessageId: "mutation-07",
+						lastMessageId: "mutation-54",
+						hasEarlier: true,
+						hasLater: true,
+					},
+				});
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
+	);
+	it.effect(
 		"prompt index follows projected rewind and undo without fetching bodies",
 		() =>
 			Effect.gen(function* () {

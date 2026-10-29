@@ -34,7 +34,7 @@ import {
 	localSends,
 	type PendingInput,
 	restoreContextFromMessages,
-	type SessionMessages,
+	SessionMessages,
 	sessionMessages,
 } from "./chat.svelte.js";
 import {
@@ -790,6 +790,7 @@ export interface TranscriptView {
 	} | null;
 	readonly transition: { id: number; kind: "replace" | "prepend" } | null;
 	navigate: (messageId: string) => void;
+	loadMessage: (messageId: string) => Promise<void>;
 	latest: () => void;
 	loadNewer: () => Promise<void>;
 	acknowledgePlacement: (id: number, placed?: boolean) => void;
@@ -889,6 +890,7 @@ function transcriptView(primary: boolean): TranscriptView {
 
 	function startIndex(project: string, sessionId: string, epoch: number): void {
 		let staged: Map<string, SessionPromptSummary> | null = null;
+		let failure: Error | undefined;
 		const ordered = (rows: Iterable<SessionPromptSummary>) =>
 			[...rows].sort(
 				(a, b) =>
@@ -908,8 +910,10 @@ function transcriptView(primary: boolean): TranscriptView {
 									if (
 										epoch === generation &&
 										(status._tag === "failed" || status._tag === "failing")
-									)
-										pageError = new Error(status.lastError);
+									) {
+										failure = new Error(status.lastError);
+										pageError = failure;
+									}
 								},
 							),
 							(envelope) =>
@@ -927,6 +931,8 @@ function transcriptView(primary: boolean): TranscriptView {
 										case "synchronized":
 											if (staged) prompts = ordered(staged.values());
 											staged = null;
+											if (pageError === failure) pageError = null;
+											failure = undefined;
 											break;
 										case "upsert": {
 											const next =
@@ -958,6 +964,7 @@ function transcriptView(primary: boolean): TranscriptView {
 		navigationId?: number,
 		pageDirection?: "before" | "after",
 		saved: Promise<SavedTranscript | undefined> = Promise.resolve(undefined),
+		place = true,
 	): Promise<void> {
 		const session = viewed;
 		const slot = currentSlot;
@@ -1041,8 +1048,11 @@ function transcriptView(primary: boolean): TranscriptView {
 										if (navigation?.id === navigationId) navigation = null;
 										retire(body);
 										pending = null;
-									} else if (body === active)
+									} else if (body === active) {
 										slot.messages.transcript = body.entry;
+										if (status._tag === "failed")
+											pageError = new Error(status.lastError);
+									}
 								},
 							),
 							(envelope) =>
@@ -1052,7 +1062,7 @@ function transcriptView(primary: boolean): TranscriptView {
 									const before = body.entry;
 									body.entry = applyTranscriptEnvelope(before, envelope);
 									if (envelope._tag === "synchronized") {
-										if (body === pending) {
+										if (body === pending && navigationId !== undefined) {
 											if (
 												pageDirection &&
 												body.entry.rows.length === 0 &&
@@ -1083,7 +1093,7 @@ function transcriptView(primary: boolean): TranscriptView {
 											active = body;
 											pending = null;
 											ledgers.set(slot.messages, body.ledger);
-											transition = { id: ++revision, kind: "replace" };
+											transition = { id: navigationId, kind: "replace" };
 											const requested = navigation;
 											if (requested && requested.id === navigationId) {
 												const rows = body.entry.rows.filter(
@@ -1095,11 +1105,15 @@ function transcriptView(primary: boolean): TranscriptView {
 														: pageDirection === "after"
 															? rows[0]?.id
 															: undefined;
-												navigation = {
-													...requested,
-													...(target ? { target: { messageId: target } } : {}),
-													phase: "placing",
-												};
+												navigation = place
+													? {
+															...requested,
+															...(target
+																? { target: { messageId: target } }
+																: {}),
+															phase: "placing",
+														}
+													: null;
 											}
 										}
 										cancelFrame(body);
@@ -1203,20 +1217,25 @@ function transcriptView(primary: boolean): TranscriptView {
 		target: NonNullable<TranscriptView["navigation"]>["target"],
 		request?: SessionDetailWindowRequest,
 		direction?: "before" | "after",
+		place = true,
 	): Promise<void> {
 		cancelPending();
 		pageError = null;
 		const id = ++revision;
 		const loaded =
-			target === "latest"
+			active?.entry.status._tag !== "failed" &&
+			(target === "latest"
 				? view.window.kind === "latest"
-				: view.chat.transcript?.rows.some((row) => row.id === target.messageId);
+				: view.chat.transcript?.rows.some(
+						(row) => row.id === target.messageId,
+					));
 		navigation = {
 			id,
 			target,
 			phase: loaded && !direction ? "placing" : "loading",
 		};
 		if (loaded && !direction) {
+			if (!place) navigation = null;
 			cancelScheduled();
 			return Promise.resolve();
 		}
@@ -1228,7 +1247,7 @@ function transcriptView(primary: boolean): TranscriptView {
 					resolve();
 					return;
 				}
-				void startBody(request, id, direction).then(resolve);
+				void startBody(request, id, direction, undefined, place).then(resolve);
 			};
 			if (scheduledNavigation) {
 				scheduledNavigation.finish();
@@ -1327,6 +1346,13 @@ function transcriptView(primary: boolean): TranscriptView {
 				{ anchorMessageId: messageId, direction: "from" },
 			);
 		},
+		loadMessage: (messageId) =>
+			requestNavigation(
+				{ messageId },
+				{ anchorMessageId: messageId, direction: "from" },
+				undefined,
+				false,
+			),
 		latest: () => {
 			void requestNavigation("latest");
 		},
@@ -1383,6 +1409,10 @@ function transcriptView(primary: boolean): TranscriptView {
 			})
 				.then((response) => {
 					if (!current() || !target.messages.transcript) return;
+					// Unary pages have no read version. Any intervening envelope,
+					// including one at the same sequence, can make this page stale.
+					// Discard it and permit a retry instead of resurrecting old rows.
+					if (target.messages.transcript !== entry) return;
 					target.messages.transcript = applyTranscriptEnvelope(
 						target.messages.transcript,
 						response,
@@ -1445,7 +1475,7 @@ function transcriptView(primary: boolean): TranscriptView {
 					? getOrCreateSessionSlot(sessionId)
 					: {
 							activity: getOrCreateSessionActivity(sessionId),
-							messages: createEmptySessionMessages(),
+							messages: new SessionMessages(),
 						}
 				: null;
 			const slot = currentSlot;
@@ -1516,8 +1546,9 @@ export function transcriptStatus(sessionId: string): FeedStatus {
  *  transcript at all (no session open) has nothing to wait for. */
 export function transcriptFeed(
 	entry: Pick<TranscriptEntry, "status"> | null,
-): "live" | "catchingUp" | "failing" {
+): "live" | "catchingUp" | "failing" | "failed" {
 	if (!entry || entry.status._tag === "live") return "live";
+	if (entry.status._tag === "failed") return "failed";
 	return entry.status._tag === "failing" ? "failing" : "catchingUp";
 }
 
