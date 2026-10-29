@@ -297,37 +297,39 @@ export const makeSessionDiff = Effect.gen(function* () {
 			Stream.unwrap(
 				Effect.gen(function* () {
 					const key = JSON.stringify([session, scope]);
-					const hub = yield* joining.withPermits(1)(
-						Effect.gen(function* () {
-							const open = live.get(key);
-							if (open) {
-								open.subscribers += 1;
-								return open;
-							}
-							// A subscriber only needs the newest revision.
-							const opened: Hub = {
-								revisions: yield* PubSub.sliding<string>(1),
-								subscribers: 1,
-							};
-							opened.watcher = yield* watch(session, scope, opened).pipe(
-								Effect.forkIn(layerScope),
-							);
-							live.set(key, opened);
-							return opened;
-						}),
-					);
-					yield* Effect.addFinalizer(() =>
+					// Joining is uninterruptible and registers leaving, so no join outlives its viewer.
+					const hub = yield* Effect.acquireRelease(
 						joining.withPermits(1)(
-							Effect.suspend(() => {
-								hub.subscribers -= 1;
-								if (hub.subscribers > 0) return Effect.void;
-								live.delete(key);
-								return Effect.andThen(
-									hub.watcher ? Fiber.interrupt(hub.watcher) : Effect.void,
-									PubSub.shutdown(hub.revisions),
+							Effect.gen(function* () {
+								const open = live.get(key);
+								if (open) {
+									open.subscribers += 1;
+									return open;
+								}
+								// A subscriber only needs the newest revision.
+								const opened: Hub = {
+									revisions: yield* PubSub.sliding<string>(1),
+									subscribers: 1,
+								};
+								opened.watcher = yield* watch(session, scope, opened).pipe(
+									Effect.forkIn(layerScope),
 								);
+								live.set(key, opened);
+								return opened;
 							}),
 						),
+						(hub) =>
+							joining.withPermits(1)(
+								Effect.suspend(() => {
+									hub.subscribers -= 1;
+									if (hub.subscribers > 0) return Effect.void;
+									live.delete(key);
+									return Effect.andThen(
+										hub.watcher ? Fiber.interrupt(hub.watcher) : Effect.void,
+										PubSub.shutdown(hub.revisions),
+									);
+								}),
+							),
 					);
 					const subscription = yield* PubSub.subscribe(hub.revisions);
 					// A joiner starts from the hub's revision; one published meanwhile repeats it.
