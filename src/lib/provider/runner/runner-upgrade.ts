@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Semaphore } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
 import type {
 	RunnerLiveQueryConfiguration,
@@ -70,6 +70,10 @@ export function makeRunnerUpgrade<
 	readonly failed: (sessionId: string, runner: T, cause: unknown) => void;
 	readonly cancelled: (sessionId: string, runner: T, replacement: T) => void;
 }) {
+	// A restart asks every live runner to upgrade at once. Unbounded, the
+	// concurrent provider starts starve each other (and other one-shot calls such
+	// as session titling) past their timeouts. Backoff sleeps outside the gate.
+	const warming = Semaphore.makeUnsafe(4);
 	const consider = (sessionId: string, runner: T): void => {
 		if (!options.eligible(sessionId, runner)) return;
 		if (runner.upgrade.inFlight) {
@@ -85,20 +89,25 @@ export function makeRunnerUpgrade<
 			Effect.gen(function* () {
 				// Only a turn boundary schedules a retry. Backoff never holds a send.
 				yield* Effect.sleep(Math.max(0, runner.upgrade.retryAt - Date.now()));
-				if (
-					activity !== runner.upgrade.activity ||
-					!options.eligible(sessionId, runner)
-				)
-					return;
-				replacement = yield* options.create(sessionId, runner);
-				yield* options.warm(sessionId, runner, replacement);
-				committed = yield* options.commit(
-					sessionId,
-					runner,
-					replacement,
-					activity,
+				yield* warming.withPermits(1)(
+					Effect.gen(function* () {
+						// Re-checked under the gate: a send while queued voids the attempt.
+						if (
+							activity !== runner.upgrade.activity ||
+							!options.eligible(sessionId, runner)
+						)
+							return;
+						replacement = yield* options.create(sessionId, runner);
+						yield* options.warm(sessionId, runner, replacement);
+						committed = yield* options.commit(
+							sessionId,
+							runner,
+							replacement,
+							activity,
+						);
+						if (!committed) options.cancelled(sessionId, runner, replacement);
+					}),
 				);
-				if (!committed) options.cancelled(sessionId, runner, replacement);
 			}).pipe(
 				Effect.catchCause((cause) =>
 					Effect.sync(() => {

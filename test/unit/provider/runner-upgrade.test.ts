@@ -127,3 +127,49 @@ it.effect("rewarms when eligibility returns during replacement cleanup", () =>
 		);
 	}),
 );
+
+it.live("warms at most four replacements at once and drains the rest", () =>
+	Effect.gen(function* () {
+		// A daemon restart asks every live runner to upgrade at once; unbounded,
+		// the concurrent Claude starts starve each other past their timeouts.
+		type Runner = { id: number; upgrade: RunnerUpgrade };
+		const release = yield* Deferred.make<void>();
+		const fibers: Fiber.Fiber<void>[] = [];
+		const committed: number[] = [];
+		let warming = 0;
+		let peak = 0;
+		const consider = makeRunnerUpgrade<Runner>({
+			eligible: () => true,
+			create: (_, old) =>
+				Effect.succeed({
+					id: old.id,
+					upgrade: { activity: 0, inFlight: false, failures: 0, retryAt: 0 },
+				}),
+			warm: () =>
+				Effect.gen(function* () {
+					peak = Math.max(peak, ++warming);
+					yield* Deferred.await(release);
+					warming--;
+				}),
+			commit: (_, __, replacement) =>
+				Effect.sync(() => committed.push(replacement.id) > 0),
+			stop: () => Effect.void,
+			runFork: (effect) => fibers.push(Effect.runFork(effect)),
+			failed: (_, __, cause) => {
+				throw cause;
+			},
+			cancelled: () => {},
+		});
+		for (let id = 1; id <= 6; id++)
+			consider(`session-${id}`, {
+				id,
+				upgrade: { activity: 0, inFlight: false, failures: 0, retryAt: 0 },
+			});
+		yield* Effect.sleep("20 millis");
+		expect(peak).toBe(4);
+		yield* Deferred.succeed(release, undefined);
+		yield* Fiber.joinAll(fibers);
+		expect(peak).toBe(4);
+		expect(committed.sort()).toEqual([1, 2, 3, 4, 5, 6]);
+	}),
+);

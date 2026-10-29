@@ -2058,7 +2058,27 @@ export const makeProcessSessionRunner = (
 					const recoveryPending = yield* Effect.serviceOption(
 						PendingInteractionServiceTag,
 					);
-					for (const registration of discoverAllRunners(configDir)) {
+					const discovered = discoverAllRunners(configDir);
+					// Recover, and so queue upgrades, in the sidebar's shape: pinned, then
+					// most recent activity, with settled and snoozed sessions last.
+					const ranked =
+						sql && discovered.length > 0
+							? yield* sql<{ id: string }>`SELECT s.id FROM sessions s
+									LEFT JOIN sessions r ON r.id = COALESCE(s.root_id, s.id)
+									WHERE s.id IN ${sql.in(discovered.map((r) => r.sessionId))}
+									ORDER BY r.pinned_at IS NULL, r.pinned_at,
+										r.settled_at IS NOT NULL OR (r.snoozed_at IS NOT NULL
+											AND (r.snoozed_until IS NULL OR r.snoozed_until > ${Date.now()})),
+										r.updated_at DESC`.pipe(
+									Effect.catch(() => Effect.succeed([])),
+								)
+							: [];
+					const rank = new Map(ranked.map((row, index) => [row.id, index]));
+					const byRank = (sessionId: string) =>
+						rank.get(sessionId) ?? Number.MAX_SAFE_INTEGER;
+					for (const registration of [...discovered].sort(
+						(a, b) => byRank(a.sessionId) - byRank(b.sessionId),
+					)) {
 						// Runner builds predating driverKind were all Claude.
 						if ((registration.driverKind ?? "claude") !== driver.driverKind)
 							continue;
