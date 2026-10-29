@@ -68,7 +68,7 @@ export type OpenCodeRuntimeIngressResult =
 	  }
 	| {
 			ok: false;
-			reason: "no-session" | "not-translatable" | "error";
+			reason: "no-session" | "foreign-instance" | "not-translatable" | "error";
 			error?: string;
 	  };
 
@@ -1423,6 +1423,17 @@ export class EffectOpenCodeRuntimeIngress
 					ok: false,
 					reason: "no-session",
 				} satisfies OpenCodeRuntimeIngressResult;
+			}
+			const [session] = yield* this.withSql(
+				this.sql<{
+					provider: string;
+				}>`SELECT provider FROM sessions WHERE id = ${sessionId}`,
+			);
+			// A directory subscription can receive multiple servers. Stored bindings
+			// decide which server may update an existing session.
+			if (session && session.provider !== providerInstanceId) {
+				this.stats.eventsSkipped++;
+				return { ok: false, reason: "foreign-instance" } as const;
 			}
 			this.rememberSessionInstance(
 				sessionId,

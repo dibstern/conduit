@@ -207,7 +207,7 @@ import { PermissionTimeoutLive } from "./timer-wiring.js";
 
 /**
  * Relay view of concrete OpenCode accounts. Clients default to the relay's
- * directory scope; only instances used by this project deliver events.
+ * directory scope; managed OpenCode also delivers native sessions before use.
  */
 const relayOpenCodeInstances = (
 	instances: OpenCodeInstances,
@@ -229,7 +229,13 @@ const relayOpenCodeInstances = (
 		events: (directories, instanceId = MANAGED_OPENCODE_ACCOUNT_ID) =>
 			instances
 				.events(directories, instanceId)
-				.pipe(Stream.filter((message) => used.has(message.instanceId))),
+				.pipe(
+					Stream.filter(
+						(message) =>
+							message.instanceId === MANAGED_OPENCODE_ACCOUNT_ID ||
+							used.has(message.instanceId),
+					),
+				),
 		use,
 		borrow: (instanceId, directory = scope) =>
 			instances.borrow(instanceId, directory).pipe(

@@ -422,6 +422,8 @@ const recordSSEEventStartEffect = (
 					context,
 				)
 			: undefined;
+		if (ingested?.ok === false && ingested.reason === "foreign-instance")
+			return ingested;
 
 		if (eventSessionId && event.type.startsWith("message.")) {
 			const sessionService = yield* SessionManagerServiceTag;
@@ -702,6 +704,8 @@ export const handleSSEEventEffect = (
 			eventSessionId,
 			context,
 		);
+		if (ingested?.ok === false && ingested.reason === "foreign-instance")
+			return;
 		const isPrompt =
 			event.type === "permission.asked" ||
 			event.type === "permission.replied" ||

@@ -302,7 +302,7 @@ function makeFakeIngress(options?: {
 	) => Effect.Effect<number, ProviderRuntimeIngestionError>;
 }) {
 	// Stand-in for the sessions table: a committed session.created projects it.
-	const projected = new Set<string>();
+	const projected = new Map<string, string>();
 	const ingestion = {
 		ingest: vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1)),
 		ingestBatch: vi.fn(
@@ -314,8 +314,14 @@ function makeFakeIngress(options?: {
 					Effect.tap(() =>
 						Effect.sync(() => {
 							for (const event of events)
-								if (event.type === "session.created")
-									projected.add(event.sessionId);
+								if (
+									event.type === "session.created" &&
+									typeof event.data === "object" &&
+									event.data !== null &&
+									"provider" in event.data &&
+									typeof event.data.provider === "string"
+								)
+									projected.set(event.sessionId, event.data.provider);
 						}),
 					),
 					// Stand in for the durable boundary: only a batch that committed
@@ -332,7 +338,7 @@ function makeFakeIngress(options?: {
 			Effect.succeed(
 				strings.join("?").includes("FROM sessions") &&
 					projected.has(String(values[0]))
-					? [{ id: values[0] }]
+					? [{ id: values[0], provider: projected.get(String(values[0])) }]
 					: [],
 			)) as unknown as SqlClient.SqlClient,
 		projectionRunner: makeProjectionRunner(),

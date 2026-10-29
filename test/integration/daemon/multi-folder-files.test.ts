@@ -27,6 +27,7 @@ describe("Multi-folder files through the built daemon", () => {
 		evidence = {};
 		harness = ProcessHarness.create({
 			managedOpenCode: true,
+			managedOpenCodeId: "opencode",
 			claudeReplay: { turns: ["pong-thinking-text-turn"], delayMs: 0 },
 		});
 		await harness.restart();
