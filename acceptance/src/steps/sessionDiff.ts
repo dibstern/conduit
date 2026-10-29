@@ -121,15 +121,17 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 		SessionDiffList: async ({ sessionId, revision }) => {
 			fixture.lists += 1;
 			fixture.asked.push(revision);
+			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
+			// A held listing answers with the snapshot taken when it was asked.
+			const listing = {
+				revision: revisionOf(fixture, sessionId),
+				folders: [{ folder: "/workspace/myapp", files: [...fixture.files] }],
+			};
 			if (fixture.holdList) {
 				fixture.holdList = false;
 				await held(fixture);
 			}
-			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
-			return {
-				revision: revisionOf(fixture, sessionId),
-				folders: [{ folder: "/workspace/myapp", files: fixture.files }],
-			};
+			return listing;
 		},
 		SessionDiffFile: async ({ path, sessionId, revision }) => {
 			fixture.requested.push(path);
@@ -393,6 +395,14 @@ export const sessionDiffHandlers: StepHandler[] = [
 		match: /^the next (\S+) patch reply is held$/,
 		run: async ({ world, match }) => {
 			requireFixture(world.page).holdPatch = match[1] ?? "";
+		},
+	},
+	{
+		name: "held diff listing asked",
+		match: /^the held diff listing has been asked for$/,
+		run: async ({ world }) => {
+			const fixture = requireFixture(world.page);
+			await expect.poll(() => fixture.release !== null).toBe(true);
 		},
 	},
 	{
