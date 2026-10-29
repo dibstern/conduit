@@ -2,8 +2,12 @@
 // The client's processing phase follows the session's shell row (ni8.35):
 // the row's status is the only server signal for "a turn is running", so
 // a busy row starts the turn and the row going idle ends it, in every tab.
-import { type Effect, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+	SessionDetailEnvelope,
+	WsRpcError,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	getOrCreateSessionSlot,
 	sessionActivity,
@@ -20,6 +24,10 @@ import {
 	clearSessionState,
 	resetSessionFamily,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	transcriptStatus,
+	viewTranscript,
+} from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { usageState } from "../../../src/lib/frontend/stores/usage.svelte.js";
 import { _resetRateLimit } from "../../../src/lib/frontend/stores/ws-send.svelte.js";
@@ -29,7 +37,8 @@ import {
 	type WsRpcClients,
 } from "../../../src/lib/frontend/transport/shared-client.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
-import { makeRpcWire } from "../../helpers/rpc-wire.js";
+import { detailUpserts } from "../../helpers/detail-rows.js";
+import { makeRpcStream, makeRpcWire } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 import {
 	applyFamilyFeedChange,
@@ -38,6 +47,7 @@ import {
 
 let runtime: ManagedRuntime.ManagedRuntime<WsRpcClients, never>;
 vi.mock("../../../src/lib/frontend/transport/runtime.js", () => ({
+	getRuntime: () => Promise.resolve(runtime),
 	runTransportEffect: <A, E>(effect: Effect.Effect<A, E, WsRpcClients>) =>
 		runtime.runPromise(effect),
 }));
@@ -232,6 +242,8 @@ describe("turn control sends over the browser RPC wire", () => {
 		serve();
 	});
 	afterEach(async () => {
+		viewTranscript("project-a", null);
+		await new Promise((resolve) => setTimeout(resolve, 0));
 		await runtime?.dispose();
 		for (const id of ["s", "side", "created", "redirected", "other"]) {
 			control.deleteTurn(id);
@@ -708,6 +720,70 @@ describe("turn control sends over the browser RPC wire", () => {
 		});
 		expect(control.turn().working).toBe(true);
 		end("queued-input", 3);
+		expect(control.turn().working).toBe(false);
+	});
+
+	it.each([
+		false,
+		true,
+	])("an early interrupted input's live transcript settles Stop after both turns, late send reply: %s", async (lateReply) => {
+		const feed = Effect.runSync(
+			makeRpcStream<SessionDetailEnvelope, WsRpcError>(),
+		);
+		await runtime.dispose();
+		serve({ SubscribeSessionDetail: () => feed.stream });
+		viewTranscript("project-a", "s");
+		await vi.waitFor(() =>
+			expect(
+				wire.requests.some((r) => r.tag === "SubscribeSessionDetail"),
+			).toBe(true),
+		);
+		await Effect.runPromise(
+			feed.emit({ _tag: "snapshot", sequence: 1, rows: [] }),
+		);
+		await Effect.runPromise(feed.emit({ _tag: "synchronized" }));
+		await vi.waitFor(() => expect(transcriptStatus("s")._tag).toBe("live"));
+
+		const alpha = request();
+		await received();
+		const alphaId = inputId;
+		const alphaReply = reply;
+		if (!lateReply) {
+			alphaReply({ ok: true, sessionId: "s", handedOff: true });
+			await alpha;
+		}
+		upsert("busy");
+		// Alpha ended before message placement. The shell can coalesce its
+		// missing boundary and Bravo's entire turn into Bravo's final idle row.
+		end("bravo", 20);
+		expect(control.turn().working).toBe(true);
+		for (const envelope of detailUpserts(
+			{
+				id: alphaId,
+				inputId: alphaId,
+				role: "user",
+				parts: [{ id: "alpha-text", type: "text", text: "Alpha" }],
+				turnTiming: { startedAt: 2, endedAt: 3, waits: [] },
+			},
+			21,
+		))
+			await Effect.runPromise(feed.emit(envelope));
+		await vi.waitFor(() => expect(control.turn().working).toBe(false));
+		if (lateReply) {
+			alphaReply({ ok: true, sessionId: "s", handedOff: true });
+			await alpha;
+		}
+		expect(control.turn().working).toBe(false);
+
+		inputId = "";
+		const next = request();
+		await received();
+		// Repeated old transcript rows cannot settle a new send.
+		await Effect.runPromise(feed.emit({ _tag: "synchronized" }));
+		expect(control.turn().working).toBe(true);
+		reply({ ok: true, sessionId: "s", handedOff: true });
+		await next;
+		end(inputId, 22);
 		expect(control.turn().working).toBe(false);
 	});
 

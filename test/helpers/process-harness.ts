@@ -246,6 +246,8 @@ export class ProcessHarness {
 		private readonly opencodeRecording?: string,
 		private readonly claudeReplay?: {
 			readonly turns: readonly ClaudeTraceName[];
+			/** Test-derived trace variants, isolated from committed recordings. */
+			readonly tracesDir?: string;
 			readonly delayMs?: number;
 			/** Relative paths resolve against the isolated project. */
 			readonly reportedCwd?: string;
@@ -273,6 +275,7 @@ export class ProcessHarness {
 		private readonly managedOpenCodeStopGraceMs?: number,
 		private readonly deadline?: number,
 		private readonly legacyStoreWitness = false,
+		private readonly serverLogFile?: string,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -743,6 +746,8 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			foregroundCli?: boolean;
 			/** Append native legacy-store acquisition and promotion evidence in the preload. */
 			legacyStoreWitness?: boolean;
+			/** Append every server generation's stdout/stderr, beyond the in-memory tail. */
+			serverLogFile?: string;
 			autoStartOpenCode?: boolean;
 			opencodeRecording?: string;
 			claudeReplay?: ProcessHarness["claudeReplay"];
@@ -791,6 +796,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			options.managedOpenCodeStopGraceMs,
 			options.deadline,
 			options.legacyStoreWitness,
+			options.serverLogFile,
 		);
 	}
 
@@ -1157,6 +1163,12 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 									this.claudeReplay.delayMs ?? 0,
 								),
 								CONDUIT_TEST_CLAUDE_REPLAY_PROJECT_DIR: this.projectDir,
+								CONDUIT_TEST_CLAUDE_REPLAY_TRACES_DIR:
+									this.claudeReplay.tracesDir,
+								CONDUIT_TEST_CLAUDE_REPLAY_HOLD: join(
+									this.root,
+									"claude-replay-hold",
+								),
 								...(this.claudeReplay.followWorkspaceDirectives
 									? { CONDUIT_TEST_CLAUDE_REPLAY_WORKSPACE_MOVES: "1" }
 									: {}),
@@ -1322,10 +1334,14 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 		child.stdout?.on("data", (data: Buffer) => {
 			this.logs = (this.logs + data.toString()).slice(-8000);
 			if (options.logFile) appendFileSync(options.logFile, data);
+			if (this.serverLogFile && this.serverLogFile !== options.logFile)
+				appendFileSync(this.serverLogFile, data);
 		});
 		child.stderr?.on("data", (data: Buffer) => {
 			this.logs = (this.logs + data.toString()).slice(-8000);
 			if (options.logFile) appendFileSync(options.logFile, data);
+			if (this.serverLogFile && this.serverLogFile !== options.logFile)
+				appendFileSync(this.serverLogFile, data);
 		});
 		let generation: Generation | undefined;
 		let fakeSdkActive = false;

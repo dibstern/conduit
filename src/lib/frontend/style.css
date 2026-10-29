@@ -1017,15 +1017,33 @@ body:has(dialog:modal) {
 }
 
 /* Wide layouts on iOS (an unfolded iPhone Duo, an iPad) get the blur too. The
-   sidebar paints over the strip, so it only covers #app, whose colour it shares. */
+   sidebar paints over the strip, so it only covers #app, whose colour it shares.
+   iOS then fills the whole status bar with #app's colour, so the sidebar floats as
+   a card on that colour rather than looking cut off under it.
+   The chat bar's controls start at 10.5px, inside the strip, so they are lifted
+   above it too. WebKit samples (width/2, 4), which they never cover; they must
+   never hold a fixed or sticky box, or WebKit samples them and the blur returns. */
 @supports (-webkit-touch-callout: none) {
 	#layout:not(.layout-compact) #compact-top-edge {
 		display: block;
 	}
 
-	#layout:not(.layout-compact) #sidebar {
+	#layout:not(.layout-compact)
+		:is(#sidebar, #session-bar-meta, #session-bar-more) {
 		position: relative;
 		z-index: 2;
+	}
+
+	#layout:not(.layout-compact):not(.sidebar-collapsed) #sidebar {
+		height: auto;
+		margin: env(safe-area-inset-top, 0px) 0 8px 8px;
+		border: 1px solid var(--color-border-subtle);
+		border-radius: 12px;
+	}
+
+	/* 49px under the card's 1px border centres the header on the 52px chat bar's line. */
+	#layout:not(.layout-compact):not(.sidebar-collapsed) #sidebar-header {
+		height: 49px;
 	}
 }
 

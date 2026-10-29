@@ -99,10 +99,7 @@ describe("WsRpcServerLayer GenerateGoalSummary", () => {
 				});
 				for (const [sessionId, message] of [
 					["missing", "Session missing not found"],
-					[
-						"opencode-goal",
-						"Goal summaries are available only for Claude sessions",
-					],
+					["opencode-goal", "This provider does not support goal summaries"],
 				] as const) {
 					expect(
 						yield* Effect.result(client.GenerateGoalSummary({ sessionId })),

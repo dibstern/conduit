@@ -446,6 +446,7 @@ for (const [
 	unaccepted,
 	continuation,
 	acknowledged,
+	childOnly = false,
 ] of [
 	[false, false, false, false, false],
 	[true, false, false, false, false],
@@ -454,348 +455,406 @@ for (const [
 	[false, false, true, false, false],
 	[false, false, true, true, false],
 	[false, false, false, false, true],
+	[false, false, false, false, false, true],
 ] as const) {
-	it(`${pendingCompletion ? "preserves an in-flight completion for" : "settles only"} the exited runner's ${unaccepted ? (continuation ? "pre-intake continuation" : "pre-intake input") : joined ? "joined" : acknowledged ? "acknowledged" : "own"} run without a binding`, async () => {
-		const root = mkdtempSync(join(tmpdir(), "run-exit-"));
-		roots.push(root);
-		const child = new TestChild();
-		transport.alive.mockImplementation(() => child.exitCode === null);
-		transport.spawn.mockImplementation(() => {
-			queueMicrotask(() =>
-				child.emit("message", {
-					channel: "conduit-claude-runner",
-					type: "listening",
-				}),
-			);
-			return child;
-		});
-		let completeNative: (() => Effect.Effect<void>) | undefined;
-		const driver: ProcessRunnerDriver = {
-			driverKind: "claude",
-			connect: (options) =>
-				Effect.gen(function* () {
-					completeNative = () =>
-						options
-							.emit(
-								{
-									type: "event",
-									sinkId: "old-sink",
-									event: {
-										eventId: "native-completion",
-										type: "turn.completed",
-										providerId: "claude",
-										sessionId: "s",
-										runId: "old-run",
-										providerRefs: {},
-										rawSource: { kind: "claude.sdk" },
-										createdAt: 10,
-										data: { messageId: "", userMessageId: "old-command" },
-									},
-								},
-								"s",
-							)
-							.pipe(Effect.ignore);
-					let closed = false;
-					const connection = {
-						get closed() {
-							return closed;
-						},
-						write: () => {},
-						destroy() {
-							closed = true;
-							options.onClose(runnerFailure("runner socket", "closed"));
-						},
-						commandEffect: () => Effect.succeed(undefined),
-					} as unknown as RunnerSocket;
-					yield* options.onHello(
-						{
-							type: "hello",
-							protocolVersion: 1,
-							buildId: runnerBuildId(),
-							stampsRunIds: true,
-							runnerId: options.runnerId,
-							sessionId: options.sessionId,
-							pid: child.pid,
-							sendCommands: [{ commandId: "old-command", attempt: 1 }],
-							bindings: [],
-						},
-						connection,
-					);
-					if (acknowledged)
-						options.onCommandsSettled?.([
-							{ commandId: "old-command", attempt: 1 },
-						]);
-					return connection;
-				}),
-			settingsDeferredCode: "test-deferred",
-			warmCommand: () => {
-				throw new Error("No upgrade expected");
-			},
-			snapshotCommandSettings: () => ({}),
-			loginChange: () => "None",
-			recoverCommands: () => Effect.succeed([]),
-		};
-		const persistence = makePersistenceEffectLayer(":memory:", "test-project");
-		const program = Effect.scoped(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const ingestion = yield* ProviderRuntimeIngestionTag;
-				const events = yield* EventStoreEffectTag;
-				const completionEntered = yield* Deferred.make<void>();
-				const releaseCompletion = yield* Deferred.make<void>();
-				const failureCleanup = yield* Deferred.make<void>();
-				const syntheticTerminalCommitted = yield* Deferred.make<void>();
-				yield* Effect.addFinalizer(() =>
-					Deferred.succeed(releaseCompletion, undefined),
-				);
-				yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at)
-				VALUES ('s', 'test-project', 'claude', 1, 1)`;
-				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
-				VALUES ('old-run', 's', ${unaccepted ? "pending" : "running"}, 1), ('future-run', 's', 'pending', 2)`;
-				const reservation = joined ? "joined-reservation" : "old-run";
-				const userMessageId = continuation ? "cut-off-input" : "old-command";
-				if (unaccepted) {
-					yield* sql`INSERT INTO messages (id, session_id, role, text, input_id, created_at, updated_at)
-						VALUES (${userMessageId}, 's', 'user', 'placed before intake', ${userMessageId}, 1, 1)`;
-					yield* sql`INSERT INTO turns (id, session_id, user_message_id, run_id, state, requested_at)
-						VALUES (${userMessageId}, 's', ${userMessageId}, 'old-run', 'pending', 1)`;
-					const commit = yield* makeCommitAndSignal;
-					yield* commit([
-						canonicalEvent("input.admitted", "s", {
-							sessionId: "s",
-							inputId: "queued-b",
-							delivery: "queue",
-							request: { text: "send after recovery" },
-						}),
-					]);
-				}
-				if (joined)
-					yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
-				VALUES (${reservation}, 's', 'pending', 1)`;
-				if (joined) {
-					for (const inputId of ["sibling-command", "old-command"]) {
-						const base = {
-							providerId: "claude",
-							sessionId: "s",
-							providerRefs: {},
-							rawSource: { kind: "claude.sdk" },
-							createdAt: 2,
-						};
-						yield* ingestion.ingest({
-							...base,
-							eventId: `placed-${inputId}`,
-							type: "message.created",
-							runId: inputId === "old-command" ? reservation : "old-run",
-							data: {
-								sessionId: "s",
-								messageId: inputId,
-								inputId,
-								role: "user",
-							},
-						});
-						yield* ingestion.ingest({
-							...base,
-							eventId: `accepted-${inputId}`,
-							type: "run.started",
-							runId: "old-run",
-							data: {
-								inputId,
-								requestedRunId:
-									inputId === "old-command" ? reservation : "old-run",
-							},
-						});
-					}
-					expect(
-						yield* sql`SELECT state, run_id FROM turns ORDER BY id`,
-					).toEqual([
-						{ state: "running", run_id: "old-run" },
-						{ state: "running", run_id: "old-run" },
-					]);
-				}
-				if (!unaccepted && !joined)
-					yield* events.appendBatch([
-						canonicalEvent(
-							"run.started",
-							"s",
-							{ inputId: "old-command", requestedRunId: reservation },
-							{ metadata: { runId: "old-run" } },
-						),
-					]);
-				yield* sql`INSERT INTO provider_command_outbox
-				(request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
-				VALUES (1, 'old-command', 'test-project', 's', 'claude', 'send_turn',
-					${reservation}, ${JSON.stringify({ inputId: "old-command", ...(continuation ? { continuation: { cutOffMessageId: userMessageId } } : {}) })}, 'running', 1, 1, 1),
-				(2, 'future-command', 'test-project', 's', 'claude', 'send_turn',
-					'future-run', '{"inputId":"future-command"}', 'pending', 0, 2, 2)`;
-				const runner = yield* makeProcessSessionRunner(
-					{
-						projectRootForSession: () => Effect.succeed(root),
-						daemonConfigDir: root,
-					},
-					(output) =>
-						Effect.gen(function* () {
-							if (output.type === "event") {
-								if (
-									pendingCompletion &&
-									output.event.type === "turn.completed"
-								) {
-									yield* Deferred.succeed(completionEntered, undefined);
-									yield* Deferred.await(releaseCompletion);
-								}
-								yield* ingestion.ingest(output.event);
-							} else if (
-								output.type === "background-task" &&
-								output.transition.kind === "session-ended"
-							)
-								yield* Deferred.succeed(failureCleanup, undefined);
-							return {};
-						}).pipe(
-							Effect.mapError((error) => runnerFailure("test output", error)),
-						),
-					driver,
-				).pipe(
-					Effect.provideService(ProviderRuntimeIngestionTag, {
-						...ingestion,
-						ingestBatch: (batch, options) =>
-							ingestion
-								.ingestBatch(batch, options)
-								.pipe(
-									Effect.tap(() =>
-										batch.some((event) => event.type === "turn.error")
-											? Deferred.succeed(syntheticTerminalCommitted, undefined)
-											: Effect.void,
-									),
-								),
+	it(
+		childOnly
+			? "recovers tool-linked child runs without parent reservations and preserves Side Threads"
+			: `${pendingCompletion ? "preserves an in-flight completion for" : "settles only"} the exited runner's ${unaccepted ? (continuation ? "pre-intake continuation" : "pre-intake input") : joined ? "joined" : acknowledged ? "acknowledged" : "own"} run without a binding`,
+		async () => {
+			const root = mkdtempSync(join(tmpdir(), "run-exit-"));
+			roots.push(root);
+			const child = new TestChild();
+			transport.alive.mockImplementation(() => child.exitCode === null);
+			transport.spawn.mockImplementation(() => {
+				queueMicrotask(() =>
+					child.emit("message", {
+						channel: "conduit-claude-runner",
+						type: "listening",
 					}),
 				);
-				yield* runner.executeEffect({
-					type: "pre-warm",
-					sessionId: "s",
-					input: {
-						sessionId: "s",
-						workspaceRoot: root,
-						extraFolders: [],
-						providerState: {},
-						configDir: configuredClaudeConfigDir(root),
-					},
-				});
-				if (pendingCompletion) {
-					if (!completeNative)
-						throw new Error("Runner connection was not established");
-					yield* Effect.forkChild(completeNative());
-					yield* Deferred.await(completionEntered);
-				}
-				child.exitCode = 0;
-				child.emit("exit", 0, null);
-				if (pendingCompletion) {
-					// A pending native commit owns the output permit. Give exit settlement
-					// a chance to contend for it before allowing that commit to finish.
-					yield* Effect.raceFirst(
-						Deferred.await(syntheticTerminalCommitted),
-						Effect.sleep(50),
-					);
-					yield* Deferred.succeed(releaseCompletion, undefined);
-					yield* Deferred.await(failureCleanup);
-				}
-				yield* Effect.promise(() =>
-					vi.waitFor(
-						async () => {
-							expect(
-								await Effect.runPromise(
-									sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
-								),
-							).toEqual([
-								{ status: pendingCompletion ? "completed" : "error" },
+				return child;
+			});
+			let completeNative: (() => Effect.Effect<void>) | undefined;
+			const driver: ProcessRunnerDriver = {
+				driverKind: "claude",
+				connect: (options) =>
+					Effect.gen(function* () {
+						completeNative = () =>
+							options
+								.emit(
+									{
+										type: "event",
+										sinkId: "old-sink",
+										event: {
+											eventId: "native-completion",
+											type: "turn.completed",
+											providerId: "claude",
+											sessionId: "s",
+											runId: "old-run",
+											providerRefs: {},
+											rawSource: { kind: "claude.sdk" },
+											createdAt: 10,
+											data: { messageId: "", userMessageId: "old-command" },
+										},
+									},
+									"s",
+								)
+								.pipe(Effect.ignore);
+						let closed = false;
+						const connection = {
+							get closed() {
+								return closed;
+							},
+							write: () => {},
+							destroy() {
+								closed = true;
+								options.onClose(runnerFailure("runner socket", "closed"));
+							},
+							commandEffect: () => Effect.succeed(undefined),
+						} as unknown as RunnerSocket;
+						yield* options.onHello(
+							{
+								type: "hello",
+								protocolVersion: 1,
+								buildId: runnerBuildId(),
+								stampsRunIds: true,
+								runnerId: options.runnerId,
+								sessionId: options.sessionId,
+								pid: child.pid,
+								sendCommands: childOnly
+									? []
+									: [{ commandId: "old-command", attempt: 1 }],
+								bindings: [],
+							},
+							connection,
+						);
+						if (acknowledged)
+							options.onCommandsSettled?.([
+								{ commandId: "old-command", attempt: 1 },
 							]);
+						return connection;
+					}),
+				settingsDeferredCode: "test-deferred",
+				warmCommand: () => {
+					throw new Error("No upgrade expected");
+				},
+				snapshotCommandSettings: () => ({}),
+				loginChange: () => "None",
+				recoverCommands: () => Effect.succeed([]),
+			};
+			const persistence = makePersistenceEffectLayer(
+				":memory:",
+				"test-project",
+			);
+			const program = Effect.scoped(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const ingestion = yield* ProviderRuntimeIngestionTag;
+					const events = yield* EventStoreEffectTag;
+					const completionEntered = yield* Deferred.make<void>();
+					const releaseCompletion = yield* Deferred.make<void>();
+					const failureCleanup = yield* Deferred.make<void>();
+					const syntheticTerminalCommitted = yield* Deferred.make<void>();
+					yield* Effect.addFinalizer(() =>
+						Deferred.succeed(releaseCompletion, undefined),
+					);
+					yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at)
+				VALUES ('s', 'test-project', 'claude', 1, 1)`;
+					yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+				VALUES ('old-run', 's', ${childOnly ? "completed" : unaccepted ? "pending" : "running"}, 1), ('future-run', 's', 'pending', 2)`;
+					if (childOnly) {
+						yield* sql`INSERT INTO sessions (id, project_id, provider, parent_id, created_at, updated_at)
+						VALUES ('child', 'test-project', 'claude', 's', 1, 1), ('nested', 'test-project', 'claude', 's', 1, 1), ('side', 'test-project', 'claude', 's', 1, 1)`;
+						yield* sql`INSERT INTO messages (id, session_id, role, created_at, updated_at)
+						VALUES ('launcher', 's', 'assistant', 1, 1), ('child-prompt', 'child', 'user', 1, 1), ('side-prompt', 'side', 'user', 1, 1)`;
+						yield* sql`INSERT INTO message_parts (id, message_id, type, metadata, sort_order, created_at, updated_at)
+						VALUES ('launcher-tool', 'launcher', 'tool', '{"childSessionId":"child"}', 0, 1, 1),
+							('nested-tool', 'child-prompt', 'tool', '{"childSessionId":"nested"}', 0, 1, 1)`;
+						yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+						VALUES ('child-run', 'child', 'running', 1), ('child-pending', 'child', 'pending', 2), ('nested-run', 'nested', 'running', 1), ('side-run', 'side', 'running', 1)`;
+						yield* sql`INSERT INTO turns (id, session_id, user_message_id, run_id, state, requested_at)
+						VALUES ('child-prompt', 'child', 'child-prompt', 'child-run', 'running', 1), ('side-prompt', 'side', 'side-prompt', 'side-run', 'running', 1)`;
+					}
+					const reservation = joined ? "joined-reservation" : "old-run";
+					const userMessageId = continuation ? "cut-off-input" : "old-command";
+					if (unaccepted) {
+						yield* sql`INSERT INTO messages (id, session_id, role, text, input_id, created_at, updated_at)
+						VALUES (${userMessageId}, 's', 'user', 'placed before intake', ${userMessageId}, 1, 1)`;
+						yield* sql`INSERT INTO turns (id, session_id, user_message_id, run_id, state, requested_at)
+						VALUES (${userMessageId}, 's', ${userMessageId}, 'old-run', 'pending', 1)`;
+						const commit = yield* makeCommitAndSignal;
+						yield* commit([
+							canonicalEvent("input.admitted", "s", {
+								sessionId: "s",
+								inputId: "queued-b",
+								delivery: "queue",
+								request: { text: "send after recovery" },
+							}),
+						]);
+					}
+					if (joined)
+						yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+				VALUES (${reservation}, 's', 'pending', 1)`;
+					if (joined) {
+						for (const inputId of ["sibling-command", "old-command"]) {
+							const base = {
+								providerId: "claude",
+								sessionId: "s",
+								providerRefs: {},
+								rawSource: { kind: "claude.sdk" },
+								createdAt: 2,
+							};
+							yield* ingestion.ingest({
+								...base,
+								eventId: `placed-${inputId}`,
+								type: "message.created",
+								runId: inputId === "old-command" ? reservation : "old-run",
+								data: {
+									sessionId: "s",
+									messageId: inputId,
+									inputId,
+									role: "user",
+								},
+							});
+							yield* ingestion.ingest({
+								...base,
+								eventId: `accepted-${inputId}`,
+								type: "run.started",
+								runId: "old-run",
+								data: {
+									inputId,
+									requestedRunId:
+										inputId === "old-command" ? reservation : "old-run",
+								},
+							});
+						}
+						expect(
+							yield* sql`SELECT state, run_id FROM turns ORDER BY id`,
+						).toEqual([
+							{ state: "running", run_id: "old-run" },
+							{ state: "running", run_id: "old-run" },
+						]);
+					}
+					if (!unaccepted && !joined)
+						yield* events.appendBatch([
+							canonicalEvent(
+								"run.started",
+								"s",
+								{ inputId: "old-command", requestedRunId: reservation },
+								{ metadata: { runId: "old-run" } },
+							),
+						]);
+					yield* sql`INSERT INTO provider_command_outbox
+				(request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
+				VALUES (1, 'old-command', 'test-project', 's', 'claude', 'send_turn',
+					${reservation}, ${JSON.stringify({ inputId: "old-command", ...(continuation ? { continuation: { cutOffMessageId: userMessageId } } : {}) })}, ${childOnly ? "completed" : "running"}, 1, 1, 1),
+				(2, 'future-command', 'test-project', 's', 'claude', 'send_turn',
+					'future-run', '{"inputId":"future-command"}', 'pending', 0, 2, 2)`;
+					const runner = yield* makeProcessSessionRunner(
+						{
+							projectRootForSession: () => Effect.succeed(root),
+							daemonConfigDir: root,
 						},
-						{ timeout: 1000, interval: 10 },
-					),
-				);
-				expect(
-					yield* sql`SELECT status FROM provider_runs WHERE id = 'future-run'`,
-				).toEqual([{ status: "pending" }]);
-				if (unaccepted) {
-					const ended =
-						yield* sql`SELECT run.completed_at AS run_end, turn.completed_at AS turn_end
+						(output) =>
+							Effect.gen(function* () {
+								if (output.type === "event") {
+									if (
+										pendingCompletion &&
+										output.event.type === "turn.completed"
+									) {
+										yield* Deferred.succeed(completionEntered, undefined);
+										yield* Deferred.await(releaseCompletion);
+									}
+									yield* ingestion.ingest(output.event);
+								} else if (
+									output.type === "background-task" &&
+									output.transition.kind === "session-ended"
+								)
+									yield* Deferred.succeed(failureCleanup, undefined);
+								return {};
+							}).pipe(
+								Effect.mapError((error) => runnerFailure("test output", error)),
+							),
+						driver,
+					).pipe(
+						Effect.provideService(ProviderRuntimeIngestionTag, {
+							...ingestion,
+							ingestBatch: (batch, options) =>
+								ingestion
+									.ingestBatch(batch, options)
+									.pipe(
+										Effect.tap(() =>
+											batch.some((event) => event.type === "turn.error")
+												? Deferred.succeed(
+														syntheticTerminalCommitted,
+														undefined,
+													)
+												: Effect.void,
+										),
+									),
+						}),
+					);
+					yield* runner.executeEffect({
+						type: "pre-warm",
+						sessionId: "s",
+						input: {
+							sessionId: "s",
+							workspaceRoot: root,
+							extraFolders: [],
+							providerState: {},
+							configDir: configuredClaudeConfigDir(root),
+						},
+					});
+					if (pendingCompletion) {
+						if (!completeNative)
+							throw new Error("Runner connection was not established");
+						yield* Effect.forkChild(completeNative());
+						yield* Deferred.await(completionEntered);
+					}
+					child.exitCode = 0;
+					child.emit("exit", 0, null);
+					if (pendingCompletion) {
+						// A pending native commit owns the output permit. Give exit settlement
+						// a chance to contend for it before allowing that commit to finish.
+						yield* Effect.raceFirst(
+							Deferred.await(syntheticTerminalCommitted),
+							Effect.sleep(50),
+						);
+						yield* Deferred.succeed(releaseCompletion, undefined);
+						yield* Deferred.await(failureCleanup);
+					}
+					yield* Effect.promise(() =>
+						vi.waitFor(
+							async () => {
+								expect(
+									await Effect.runPromise(
+										sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
+									),
+								).toEqual([
+									{
+										status:
+											pendingCompletion || childOnly ? "completed" : "error",
+									},
+								]);
+								if (childOnly) {
+									expect(
+										await Effect.runPromise(
+											sql`SELECT id, status FROM provider_runs WHERE session_id = 'child' ORDER BY id`,
+										),
+									).toEqual([
+										{ id: "child-pending", status: "interrupted" },
+										{ id: "child-run", status: "interrupted" },
+									]);
+									expect(
+										await Effect.runPromise(
+											sql`SELECT status FROM provider_runs WHERE id = 'nested-run'`,
+										),
+									).toEqual([{ status: "interrupted" }]);
+								}
+							},
+							{ timeout: 1000, interval: 10 },
+						),
+					);
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE id = 'future-run'`,
+					).toEqual([{ status: "pending" }]);
+					if (childOnly) {
+						expect(
+							yield* sql`SELECT state, run_id FROM turns WHERE session_id = 'child'`,
+						).toEqual([{ state: "interrupted", run_id: "child-run" }]);
+						expect(
+							yield* sql`SELECT status FROM provider_runs WHERE id = 'side-run'`,
+						).toEqual([{ status: "running" }]);
+						expect(
+							yield* sql`SELECT state FROM turns WHERE session_id = 'side'`,
+						).toEqual([{ state: "running" }]);
+					}
+					if (unaccepted) {
+						const ended =
+							yield* sql`SELECT run.completed_at AS run_end, turn.completed_at AS turn_end
 						FROM provider_runs run JOIN turns turn ON turn.id = ${userMessageId}
 						WHERE run.id = 'old-run'`;
-					// Repeated failure delivery cannot append another run terminal.
-					yield* failRunnerTurn(
-						(output) =>
-							output.type === "event"
-								? ingestion.ingest(output.event).pipe(
-										Effect.as({}),
-										Effect.mapError((error) =>
-											runnerFailure("test output", error),
-										),
-									)
-								: Effect.succeed({}),
-						"old-sink",
-						{
-							sessionId: "s",
-							runId: "old-run",
-							messageId: "",
-						},
-						runnerFailure("runner exit", "runner stopped"),
-						"claude",
-					);
-					expect(
-						yield* sql`SELECT state, run_id FROM turns WHERE id = ${userMessageId}`,
-					).toEqual([{ state: "error", run_id: "old-run" }]);
-					expect(
-						yield* sql`SELECT run.completed_at AS run_end, turn.completed_at AS turn_end
+						// Repeated failure delivery cannot append another run terminal.
+						yield* failRunnerTurn(
+							(output) =>
+								output.type === "event"
+									? ingestion.ingest(output.event).pipe(
+											Effect.as({}),
+											Effect.mapError((error) =>
+												runnerFailure("test output", error),
+											),
+										)
+									: Effect.succeed({}),
+							"old-sink",
+							{
+								sessionId: "s",
+								runId: "old-run",
+								messageId: "",
+							},
+							runnerFailure("runner exit", "runner stopped"),
+							"claude",
+						);
+						expect(
+							yield* sql`SELECT state, run_id FROM turns WHERE id = ${userMessageId}`,
+						).toEqual([{ state: "error", run_id: "old-run" }]);
+						expect(
+							yield* sql`SELECT run.completed_at AS run_end, turn.completed_at AS turn_end
 							FROM provider_runs run JOIN turns turn ON turn.id = ${userMessageId}
 							WHERE run.id = 'old-run'`,
-					).toEqual(ended);
+						).toEqual(ended);
+						expect(
+							yield* sql`SELECT json_extract(data, '$.userMessageId') AS user_message_id FROM events WHERE type = 'turn.error'`,
+						).toEqual([{ user_message_id: null }]);
+						expect(
+							yield* sql`SELECT type FROM events WHERE type = 'run.started'`,
+						).toEqual([]);
+						expect(
+							yield* sql`SELECT started_at FROM provider_runs WHERE id = 'old-run'`,
+						).toEqual([{ started_at: null }]);
+						const read = yield* ReadQueryEffectTag;
+						expect(yield* read.readInboxState("s")).toMatchObject({
+							// Busy and paused are independent: the failure after that
+							// handoff must keep queued work paused even when it completes.
+							paused: true,
+						});
+						expect(
+							yield* sql`SELECT input_id, state FROM pending_inputs WHERE input_id = 'queued-b'`,
+						).toEqual([{ input_id: "queued-b", state: "queued" }]);
+					}
 					expect(
-						yield* sql`SELECT json_extract(data, '$.userMessageId') AS user_message_id FROM events WHERE type = 'turn.error'`,
-					).toEqual([{ user_message_id: null }]);
-					expect(
-						yield* sql`SELECT type FROM events WHERE type = 'run.started'`,
-					).toEqual([]);
-					expect(
-						yield* sql`SELECT started_at FROM provider_runs WHERE id = 'old-run'`,
-					).toEqual([{ started_at: null }]);
-					const read = yield* ReadQueryEffectTag;
-					expect(yield* read.readInboxState("s")).toMatchObject({
-						// Busy and paused are independent: the failure after that
-						// handoff must keep queued work paused even when it completes.
-						paused: true,
-					});
-					expect(
-						yield* sql`SELECT input_id, state FROM pending_inputs WHERE input_id = 'queued-b'`,
-					).toEqual([{ input_id: "queued-b", state: "queued" }]);
-				}
-				expect(
-					yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'turn.error'`,
-				).toEqual(pendingCompletion ? [] : [{ run_id: "old-run" }]);
-				if (joined) {
-					child.emit("exit", 0, null);
-					expect(
-						yield* sql`SELECT id, state, run_id FROM turns WHERE completed_at IS NOT NULL ORDER BY id`,
+						yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'turn.error'`,
 					).toEqual(
-						["old-command", "sibling-command"].map((id) => ({
-							id,
-							state: pendingCompletion ? "completed" : "error",
-							run_id: "old-run",
-						})),
+						pendingCompletion || childOnly ? [] : [{ run_id: "old-run" }],
 					);
-					expect(
-						yield* sql`SELECT COUNT(*) AS count FROM events
+					if (joined) {
+						child.emit("exit", 0, null);
+						expect(
+							yield* sql`SELECT id, state, run_id FROM turns WHERE completed_at IS NOT NULL ORDER BY id`,
+						).toEqual(
+							["old-command", "sibling-command"].map((id) => ({
+								id,
+								state: pendingCompletion ? "completed" : "error",
+								run_id: "old-run",
+							})),
+						);
+						expect(
+							yield* sql`SELECT COUNT(*) AS count FROM events
 						WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-					).toEqual([{ count: 1 }]);
-				}
-			}),
-		).pipe(
-			Effect.provide(
-				Layer.merge(
-					persistence,
-					ProviderRuntimeIngestionLive.pipe(Layer.provide(persistence)),
+						).toEqual([{ count: 1 }]);
+					}
+				}),
+			).pipe(
+				Effect.provide(
+					Layer.merge(
+						persistence,
+						ProviderRuntimeIngestionLive.pipe(Layer.provide(persistence)),
+					),
 				),
-			),
-		);
-		await Effect.runPromise(program);
-	});
+			);
+			await Effect.runPromise(program);
+		},
+	);
 }
 
 effectIt.effect(

@@ -303,11 +303,14 @@ describe("Codex unjournaled commands through daemon recovery", () => {
 				() =>
 					expect(snapshot(fixture, id).events).toContainEqual(
 						expect.objectContaining({
-							type: "turn.error",
-							data: expect.objectContaining({ code: "cancelled" }),
+							type: "turn.interrupted",
+							metadata: expect.objectContaining({ runId: expect.any(String) }),
 						}),
 					),
 				{ timeout: TIMEOUT },
+			);
+			expect(snapshot(fixture, id).events).not.toContainEqual(
+				expect.objectContaining({ type: "turn.error" }),
 			);
 			writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 			await after.getModels();

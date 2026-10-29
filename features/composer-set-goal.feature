@@ -36,7 +36,7 @@ Scenario Outline: OpenCode offers a disabled goal entry and never shows goal sen
   Given the conduit app is served with the connected mockup
   And a session already exists on the OpenCode harness
   When I open the composer add menu
-  Then the goal entry is disabled and reads Goal with Claude only
+  Then the goal entry is disabled and reads Goal, not available for this agent
   When I try the disabled goal entry
   And I type <goal> into the composer
   Then the composer shows normal send controls

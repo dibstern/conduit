@@ -10,6 +10,7 @@ import {
 	type Scope,
 	Stream,
 } from "effect";
+import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
 import { createEventId } from "../../persistence/events.js";
 import {
 	type EventSinkError,
@@ -539,6 +540,9 @@ export class CursorRunnerPayload implements RunnerPayload {
 								inputId: input.inputId,
 								...(input.runId ? { runId: input.runId } : {}),
 								text: input.text ?? input.prompt,
+								...(input.images?.length
+									? { images: input.images.map(({ ref }) => ref) }
+									: {}),
 							},
 						});
 					const credential = this.deps.credential(input.inputId);
@@ -745,11 +749,20 @@ export class CursorRunnerPayload implements RunnerPayload {
 					);
 					const beforeUsage = yield* readUsage;
 					if (!claim()) return this.result(session, "cancelled", 0);
+					const prompt = seed
+						? `${digest}\n\n[Current request]\n${input.prompt}`
+						: input.prompt;
 					const run = yield* sdkCall("send", () =>
 						agent.send(
-							seed
-								? `${digest}\n\n[Current request]\n${input.prompt}`
-								: input.prompt,
+							input.images?.length
+								? {
+										text: prompt,
+										images: input.images.map(({ dataUrl }) => {
+											const { data, mime } = parseAttachmentDataUrl(dataUrl);
+											return { data, mimeType: mime };
+										}),
+									}
+								: prompt,
 							{
 								...config.send,
 								...(force ? { local: { force: true as const } } : {}),

@@ -1,6 +1,7 @@
 // Failure modes: overlapping logins, callbacks after cancel/deadline, a login
 // deadline displayed as key expiry, environment precedence, stale discovery,
-// stale credentials in existing runners, and secrets escaping into RPC/captures.
+// stale credentials in existing runners, recorded credentials authenticating
+// an unconfigured login slot, and secrets escaping into RPC/captures.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -70,6 +71,7 @@ describe("Cursor authentication through the built daemon and detached runners", 
 			catalogTtlMs?: number;
 			environmentKey?: boolean;
 			initialCredential?: boolean;
+			traceAuthOnly?: boolean;
 			backendUrl?: string;
 			storedBackendUrl?: string;
 			recordCommands?: boolean;
@@ -161,7 +163,9 @@ RunnerSocket.prototype.write = function(message) {
 					: {}),
 				CONDUIT_CURSOR_SDK_TRACE: tracePath,
 				CONDUIT_CURSOR_SDK_CAPTURE: capturePath,
-				CONDUIT_TEST_CURSOR_AUTH_STATE: authStatePath,
+				...(options.traceAuthOnly
+					? {}
+					: { CONDUIT_TEST_CURSOR_AUTH_STATE: authStatePath }),
 				CONDUIT_TEST_CURSOR_LOGIN_DELAY_MS: String(
 					options.loginDelayMs ?? 5_000,
 				),
@@ -500,6 +504,38 @@ RunnerSocket.prototype.write = function(message) {
 			freshBackendCredential: true,
 		};
 	}, 240_000);
+
+	it("does not authenticate an unconfigured login slot from recorded credentials", async () => {
+		const fixture = await start("unconfigured-recorded-login", {
+			traceAuthOnly: true,
+		});
+		expect(
+			(await fixture.requestRpc({ _tag: "GetInstances" })).instances.filter(
+				({ driver }) => driver === "cursor",
+			),
+		).toEqual([]);
+		expect(await fixture.requestRpc({ _tag: "GetCursorAuth" })).toMatchObject({
+			source: "none",
+			status: "logged-out",
+			login: { state: "idle" },
+		});
+		const { addedInstanceId } = await fixture.requestRpc({
+			_tag: "AddInstance",
+			name: "Recorded account",
+			driver: "cursor",
+		});
+		if (!addedInstanceId) throw new Error("Missing Cursor account");
+		expect(
+			await fixture.requestRpc({
+				_tag: "GetCursorAuth",
+				accountId: addedInstanceId,
+			}),
+		).toMatchObject({ source: "sdk-login", status: "logged-in" });
+		invariants = {
+			unconfiguredSlotLoggedOut: true,
+			configuredAccountRetainsReplayCredential: true,
+		};
+	}, 180_000);
 
 	it("shows one login link, completes once, reports the key expiry, and refreshes one routable account", async () => {
 		const fixture = await start("login-status-directory");
