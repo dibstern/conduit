@@ -2,6 +2,7 @@ import { Context, type Effect, Layer } from "effect";
 import type {
 	SessionDiffError,
 	SessionDiffListing,
+	SessionDiffPatch,
 	SessionDiffScope,
 } from "../../../contracts/session-diff.js";
 import { makeSessionDiff } from "../Layers/session-diff-layer.js";
@@ -36,7 +37,7 @@ export class SessionDiff extends Context.Service<
 			readonly path: string;
 			readonly before: string | null;
 			readonly after: string | null;
-		}) => Effect.Effect<{ readonly patch: string }, SessionDiffError>;
+		}) => Effect.Effect<SessionDiffPatch, SessionDiffError>;
 	}
 >()("SessionDiff") {}
 

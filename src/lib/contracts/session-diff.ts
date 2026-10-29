@@ -26,6 +26,12 @@ const fileFields = {
 	after: Schema.NullOr(Schema.String),
 	/** The larger side's size. */
 	bytes: Schema.Number,
+	/** A path that holds a Git LFS file, a submodule's commit or a symlink's target, not text. */
+	kind: Schema.optional(Schema.Literals(["lfs", "submodule", "symlink"])),
+	/** Git file modes, when both sides exist and they differ. */
+	mode: Schema.optional(
+		Schema.Struct({ before: Schema.String, after: Schema.String }),
+	),
 };
 
 /** A tooLarge file carries no line counts: git never diffs it. */
@@ -60,6 +66,16 @@ export const SessionDiffListingSchema = Schema.Struct({
 	folders: Schema.Array(SessionDiffFolderSchema),
 });
 export type SessionDiffListing = typeof SessionDiffListingSchema.Type;
+
+/**
+ * One file's patch. `crlf`: its lines end in CRLF, which renders invisibly.
+ * `latin1`: it is not UTF-8, so each byte was decoded as one Latin-1 character.
+ */
+export const SessionDiffPatchSchema = Schema.Struct({
+	patch: Schema.String,
+	notes: Schema.optional(Schema.Array(Schema.Literals(["crlf", "latin1"]))),
+});
+export type SessionDiffPatch = typeof SessionDiffPatchSchema.Type;
 
 /** Gone means the listing's snapshot was forgotten or collected: re-list. */
 export class SessionDiffError extends Schema.TaggedError<SessionDiffError>()(

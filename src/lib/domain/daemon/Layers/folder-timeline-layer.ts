@@ -89,19 +89,24 @@ export const makeFolderTimeline = (configDir: string) =>
 		const run = (
 			cwd: string,
 			args: readonly string[],
-			options: {
+			{
+				env,
+				maxBuffer = MAX_OUTPUT_BYTES,
+				...rest
+			}: {
 				readonly env?: NodeJS.ProcessEnv;
 				readonly input?: string;
 				readonly maxBuffer?: number;
+				readonly onStdout?: (chunk: Buffer) => void;
 			} = {},
 		) =>
 			subprocess
 				.run("git", ["--no-optional-locks", ...CONFIG, ...args], {
 					cwd,
-					env: { ...baseEnv(), ...options.env },
+					env: { ...baseEnv(), ...env },
 					timeoutMs: GIT_TIMEOUT_MS,
-					maxBuffer: options.maxBuffer ?? MAX_OUTPUT_BYTES,
-					...(options.input === undefined ? {} : { input: options.input }),
+					maxBuffer,
+					...rest,
 				})
 				.pipe(
 					Effect.mapError(
@@ -252,7 +257,11 @@ export const makeFolderTimeline = (configDir: string) =>
 			git: (
 				store: string,
 				args: readonly string[],
-				options: { readonly input?: string; readonly maxBuffer?: number } = {},
+				options: {
+					readonly input?: string;
+					readonly maxBuffer?: number;
+					readonly onStdout?: (chunk: Buffer) => void;
+				} = {},
 			) => run(store, ["--git-dir", store, ...args], options),
 			collect,
 		};

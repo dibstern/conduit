@@ -29,6 +29,7 @@ import {
 import {
 	SessionDiffError,
 	SessionDiffListingSchema,
+	SessionDiffPatchSchema,
 	SessionDiffScopeSchema,
 } from "./session-diff.js";
 import { AvatarChoiceSchema, AvatarSchema } from "./user-avatar.js";
@@ -2661,7 +2662,7 @@ export const SessionDiffFile = Rpc.make("SessionDiffFile", {
 		before: Schema.NullOr(Schema.String),
 		after: Schema.NullOr(Schema.String),
 	}),
-	success: Schema.Struct({ patch: Schema.String }),
+	success: SessionDiffPatchSchema,
 	error: Schema.Union([WsRpcError, SessionDiffError]),
 });
 
