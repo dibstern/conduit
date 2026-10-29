@@ -134,3 +134,60 @@ Scenario: the code toggle shows the source and switches back to the same drawing
   Then the noted diagram is still on screen
   When I press Copy code on the diagram
   Then the clipboard holds the diagram source
+
+Scenario: Expand opens the diagram centred in the media viewer with zoom controls and all of it visible
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a tall flowchart
+  And I press Expand diagram on the diagram
+  Then the media viewer shows the diagram centred with zoom controls and all of it visible
+
+Scenario: on a phone Expand opens the diagram fullscreen and the close button closes it
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I press Expand diagram on the diagram
+  Then the media viewer fills the screen with a close button at least 44 pixels square
+  When I close the media viewer
+  Then the media viewer is dismissed
+
+Scenario: ctrl+wheel zooms the expanded diagram, Escape resets it and a second Escape closes it
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I press Expand diagram on the diagram
+  And I turn the mouse wheel up over the expanded diagram while holding Control
+  Then the expanded diagram is zoomed
+  When I press Escape in the media viewer
+  Then the expanded diagram is back to its fit and the media viewer is still open
+  When I dismiss the media viewer with Escape
+  Then the media viewer is dismissed
+
+Scenario: the expanded diagram is named and closing it returns focus to Expand
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I press Expand diagram on the diagram
+  Then the media viewer is named Expanded diagram
+  When I close the media viewer
+  Then the Expand diagram button has focus
+
+Scenario: a diagram that failed to draw has no Expand button
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a broken flowchart diagram
+  Then the diagram error names line 2 and puts a caret under column 22
+  And the diagram has no Expand button
+
+Scenario: a diagram still loading has no Expand button
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  And the sequence diagram renderer never finishes downloading
+  When the transcript contains a finished assistant message with a sequence diagram
+  Then the diagram is still loading and has no Expand button

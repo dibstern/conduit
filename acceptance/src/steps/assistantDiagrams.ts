@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { expect, type JSHandle, type Page } from "@playwright/test";
+import {
+	expect,
+	type JSHandle,
+	type Locator,
+	type Page,
+} from "@playwright/test";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
@@ -16,6 +21,7 @@ const fixtures = {
 	"a flowchart diagram": [flowchart],
 	"a broken flowchart diagram": ["flowchart LR\n  Plan -->|oops Build"],
 	"an unknown diagram type": ["notadiagram\n  foo"],
+	"a sequence diagram": ["sequenceDiagram\n  Alice->>Bob: Plan"],
 	"a flowchart and two sequence diagrams": [
 		flowchart,
 		"sequenceDiagram\n  Alice->>Bob: Plan",
@@ -33,6 +39,7 @@ const STREAM_ID = "assistant-diagram-stream";
 const seededSources = new WeakMap<Page, string>();
 const scrolledFrom = new WeakMap<Page, number>();
 const noted = new WeakMap<Page, { svg: JSHandle<Element>; fill: string }>();
+const stalledDownloads = new WeakMap<Page, Promise<void>>();
 
 const markdown = (sources: readonly string[]) =>
 	`${["Here is the plan:", ...sources.map((source) => `\`\`\`mermaid\n${source}\n\`\`\``)].join("\n\n")}\n`;
@@ -43,14 +50,59 @@ const diagram = (page: Page) => lastAssistant(page).locator("[data-diagram]");
 const drawing = (page: Page) => diagram(page).locator("svg.pele").first();
 const wideDrawing = (page: Page) =>
 	diagram(page).filter({ hasText: "Watch the metrics" }).locator("svg.pele");
+const viewer = (page: Page) => page.locator("dialog[open]");
+const expandedDrawing = (page: Page) =>
+	viewer(page).locator("[data-diagram] svg.pele");
+const expandButton = (page: Page) =>
+	diagram(page).getByRole("button", { name: "Expand diagram", exact: true });
+// pele names each diagram type's chunk, and Vite keeps that name before the hash.
+const sequenceChunk = () => {
+	const chunk = /\["sequence",\(\)=>import\("\.\/chunks\/(\w+)\.js"\)/.exec(
+		readFileSync(createRequire(import.meta.url).resolve("pele/lazy"), "utf8"),
+	)?.[1];
+	if (!chunk) throw new Error("pele's sequence chunk was not found");
+	return new RegExp(`/assets/${chunk}-[\\w-]+\\.js$`);
+};
+const nodesInside = (svg: Element) => {
+	const edge = svg.getBoundingClientRect();
+	return [...svg.querySelectorAll(".pele-node")].filter((node) => {
+		const b = node.getBoundingClientRect();
+		return (
+			b.top >= edge.top - 1 &&
+			b.bottom <= edge.bottom + 1 &&
+			b.left >= edge.left - 1 &&
+			b.right <= edge.right + 1
+		);
+	}).length;
+};
 const transcriptScrollTop = (page: Page) =>
 	page.locator("#messages").evaluate((element) => element.scrollTop);
-// Zoomed in means pele narrowed the viewBox below the drawing's natural width.
-const isZoomed = (svg: SVGSVGElement) =>
-	svg.viewBox.baseVal.width < Number(svg.getAttribute("width"));
-const wheelOverWide = async (page: Page, deltaY: number) => {
-	await wideDrawing(page).hover();
-	await page.mouse.wheel(0, deltaY);
+const fitScales = new WeakMap<Page, number>();
+// Screen pixels per diagram unit. Zooming in raises it, whatever size pele gives the svg meanwhile.
+const scaleOf = (svg: Locator) =>
+	svg.evaluate(
+		(element: SVGSVGElement) =>
+			element.getBoundingClientRect().width / element.viewBox.baseVal.width,
+	);
+const noteFit = async (svg: Locator) => {
+	await expect(svg).toBeVisible();
+	fitScales.set(svg.page(), await scaleOf(svg));
+};
+const zoomFromFit = async (svg: Locator) => {
+	const fit = fitScales.get(svg.page());
+	if (fit === undefined) throw new Error("No fit was noted");
+	return (await scaleOf(svg)) / fit;
+};
+const expectZoomed = (svg: Locator) =>
+	expect.poll(() => zoomFromFit(svg)).toBeGreaterThan(1.01);
+const expectAtFit = (svg: Locator) =>
+	expect
+		.poll(async () => Math.abs((await zoomFromFit(svg)) - 1))
+		.toBeLessThan(0.01);
+const wheelOver = async (svg: Locator, deltaY: number) => {
+	await noteFit(svg);
+	await svg.hover();
+	await svg.page().mouse.wheel(0, deltaY);
 };
 const nodeFill = (svg: Element) => {
 	const shape = svg.querySelector(".pele-node rect");
@@ -218,20 +270,129 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		name: "fail the sequence renderer download once",
 		match: /^the sequence diagram renderer fails to download once$/,
 		run: async ({ world }) => {
-			// pele names each diagram type's chunk, and Vite keeps that name before the hash.
-			const chunk = /\["sequence",\(\)=>import\("\.\/chunks\/(\w+)\.js"\)/.exec(
-				readFileSync(
-					createRequire(import.meta.url).resolve("pele/lazy"),
-					"utf8",
-				),
-			)?.[1];
-			if (!chunk) throw new Error("pele's sequence chunk was not found");
-			await world.page.route(
-				new RegExp(`/assets/${chunk}-[\\w-]+\\.js$`),
-				(route) => route.abort(),
-				{ times: 1 },
-			);
+			await world.page.route(sequenceChunk(), (route) => route.abort(), {
+				times: 1,
+			});
 		},
+	},
+	{
+		name: "stall the sequence renderer download",
+		match: /^the sequence diagram renderer never finishes downloading$/,
+		run: async ({ world }) => {
+			let requested = (): void => {};
+			stalledDownloads.set(
+				world.page,
+				new Promise((resolve) => (requested = resolve)),
+			);
+			// Never fulfilled: the diagram stays loading for the rest of the scenario.
+			await world.page.route(sequenceChunk(), () => requested());
+		},
+	},
+	{
+		name: "assert loading diagram has no Expand button",
+		match: /^the diagram is still loading and has no Expand button$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const stalled = stalledDownloads.get(page);
+			if (!stalled) throw new Error("No download was stalled");
+			await stalled;
+			await expect(diagram(page)).toBeVisible();
+			await expect(drawing(page)).toHaveCount(0);
+			await expect(expandButton(page)).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert diagram has no Expand button",
+		match: /^the diagram has no Expand button$/,
+		run: ({ world }) => expect(expandButton(world.page)).toHaveCount(0),
+	},
+	{
+		name: "assert the viewer shows the diagram centred and whole",
+		match:
+			/^the media viewer shows the diagram centred with zoom controls and all of it visible$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const svg = expandedDrawing(page);
+			await expect(svg).toBeVisible();
+			await expect(viewer(page).locator(".pele-zoom-in")).toBeVisible();
+			const box = await viewer(page).boundingBox();
+			const size = page.viewportSize();
+			const drawn = await svg.boundingBox();
+			if (!box || !size || !drawn) throw new Error("The viewer has no box");
+			expect(Math.abs(box.x + box.width / 2 - size.width / 2)).toBeLessThan(2);
+			expect(Math.abs(box.y + box.height / 2 - size.height / 2)).toBeLessThan(
+				2,
+			);
+			expect(drawn.y).toBeGreaterThanOrEqual(box.y);
+			expect(drawn.y + drawn.height).toBeLessThanOrEqual(box.y + box.height);
+			expect(await svg.evaluate(nodesInside)).toBe(tallSteps);
+		},
+	},
+	{
+		name: "assert the viewer fills the screen with a big close button",
+		match:
+			/^the media viewer fills the screen with a close button at least (\d+) pixels square$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			await expect(expandedDrawing(page)).toBeVisible();
+			const box = await viewer(page).boundingBox();
+			const size = page.viewportSize();
+			const close = await viewer(page)
+				.getByRole("button", { name: "Close media viewer", exact: true })
+				.boundingBox();
+			if (!box || !size || !close) throw new Error("The viewer has no box");
+			expect(box).toEqual({
+				x: 0,
+				y: 0,
+				width: size.width,
+				height: size.height,
+			});
+			expect(close.width).toBeGreaterThanOrEqual(Number(match[1]));
+			expect(close.height).toBeGreaterThanOrEqual(Number(match[1]));
+		},
+	},
+	{
+		name: "ctrl+wheel over the expanded diagram",
+		match:
+			/^I turn the mouse wheel up over the expanded diagram while holding Control$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await page.keyboard.down("Control");
+			await wheelOver(expandedDrawing(page), -200);
+			await page.keyboard.up("Control");
+		},
+	},
+	{
+		name: "assert the expanded diagram zoomed",
+		match: /^the expanded diagram is zoomed$/,
+		run: ({ world }) => expectZoomed(expandedDrawing(world.page)),
+	},
+	{
+		name: "press Escape in the media viewer",
+		match: /^I press Escape in the media viewer$/,
+		run: ({ world }) => world.page.keyboard.press("Escape"),
+	},
+	{
+		name: "assert the expanded diagram reset and viewer open",
+		match:
+			/^the expanded diagram is back to its fit and the media viewer is still open$/,
+		run: async ({ world }) => {
+			await expectAtFit(expandedDrawing(world.page));
+			await expect(expandedDrawing(world.page)).toBeVisible();
+		},
+	},
+	{
+		name: "assert the media viewer accessible name",
+		match: /^the media viewer is named (.+)$/,
+		run: ({ world, match }) =>
+			expect(world.page.getByRole("dialog")).toHaveAccessibleName(
+				match[1] ?? "",
+			),
+	},
+	{
+		name: "assert Expand diagram has focus",
+		match: /^the Expand diagram button has focus$/,
+		run: ({ world }) => expect(expandButton(world.page)).toBeFocused(),
 	},
 	{
 		name: "assert first diagram drawn, others failed to load",
@@ -301,7 +462,7 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		match: /^I turn the mouse wheel down over the wide diagram$/,
 		run: async ({ world }) => {
 			scrolledFrom.set(world.page, await transcriptScrollTop(world.page));
-			await wheelOverWide(world.page, 200);
+			await wheelOver(wideDrawing(world.page), 200);
 		},
 	},
 	{
@@ -313,7 +474,7 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 			await expect
 				.poll(() => transcriptScrollTop(world.page))
 				.toBeGreaterThan(from);
-			expect(await wideDrawing(world.page).evaluate(isZoomed)).toBe(false);
+			await expectAtFit(wideDrawing(world.page));
 		},
 	},
 	{
@@ -322,7 +483,7 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 			/^I turn the mouse wheel up over the wide diagram while holding Control$/,
 		run: async ({ world }) => {
 			await world.page.keyboard.down("Control");
-			await wheelOverWide(world.page, -200);
+			await wheelOver(wideDrawing(world.page), -200);
 			await world.page.keyboard.up("Control");
 		},
 	},
@@ -330,7 +491,7 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		name: "focus the wide diagram and press +",
 		match: /^I focus the wide diagram and press \+$/,
 		run: async ({ world }) => {
-			await expect(wideDrawing(world.page)).toBeVisible();
+			await noteFit(wideDrawing(world.page));
 			await wideDrawing(world.page).focus();
 			await world.page.keyboard.press("+");
 		},
@@ -338,11 +499,7 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 	{
 		name: "assert the wide diagram zoomed",
 		match: /^the wide diagram is zoomed$/,
-		run: async ({ world }) => {
-			await expect
-				.poll(() => wideDrawing(world.page).evaluate(isZoomed))
-				.toBe(true);
-		},
+		run: ({ world }) => expectZoomed(wideDrawing(world.page)),
 	},
 	{
 		name: "assert capped, uncropped diagram",
@@ -360,24 +517,13 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 			expect(box.x).toBeGreaterThanOrEqual(frame.x);
 			expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width);
 			// Every step is drawn inside the visible svg: nothing is cut off.
-			const shown = await svg.evaluate((element) => {
-				const edge = element.getBoundingClientRect();
-				return [...element.querySelectorAll(".pele-node")].filter((node) => {
-					const b = node.getBoundingClientRect();
-					return (
-						b.top >= edge.top - 1 &&
-						b.bottom <= edge.bottom + 1 &&
-						b.left >= edge.left - 1 &&
-						b.right <= edge.right + 1
-					);
-				}).length;
-			});
-			expect(shown).toBe(tallSteps);
+			expect(await svg.evaluate(nodesInside)).toBe(tallSteps);
 		},
 	},
 	{
 		name: "press a diagram header button",
-		match: /^I press (Show code|Show diagram|Copy code) on the diagram$/,
+		match:
+			/^I press (Show code|Show diagram|Copy code|Expand diagram) on the diagram$/,
 		run: async ({ world, match }) => {
 			await world.page
 				.context()

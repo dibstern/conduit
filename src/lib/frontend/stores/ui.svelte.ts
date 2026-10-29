@@ -338,7 +338,9 @@ export function setPlanApproval(
 }
 
 /** What the app-wide media viewer shows. */
-export type MediaItem = { kind: "image"; src: string };
+export type MediaItem =
+	| { kind: "image"; src: string }
+	| { kind: "diagram"; source: string };
 
 // Module-private so only openMediaViewer/closeMediaViewer can write it.
 let mediaViewer = $state<MediaItem | null>(null);
