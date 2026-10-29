@@ -5,6 +5,13 @@ import type { StepHandler } from "../runtime.js";
 /** Measured on the device (Duo Probe, iOS 27, standalone, dpr 3). */
 const DUO_POSES = {
 	"folded portrait": { width: 466, height: 657, top: 0, right: 84 },
+	/** The whole 678pt screen, which the viewport sometimes reaches. */
+	"folded portrait at full height": {
+		width: 466,
+		height: 678,
+		top: 0,
+		right: 84,
+	},
 	"folded landscape": { width: 678, height: 445, top: 0, right: 84 },
 	"unfolded landscape": { width: 951, height: 648, top: 0, right: 84 },
 	"unfolded portrait": { width: 669, height: 930, top: 61, right: 0 },
@@ -27,13 +34,13 @@ export const duoPoseHandlers: StepHandler[] = [
 	{
 		name: "set a measured Duo pose",
 		match:
-			/^the viewport is a duo (folded portrait|folded landscape|unfolded landscape|unfolded portrait)( in a Safari tab)?$/,
+			/^the viewport is a duo (folded portrait at full height|folded portrait|folded landscape|unfolded landscape|unfolded portrait)( in a Safari tab)?$/,
 		run: async ({ world, match }) => {
 			const pose = match[1] as keyof typeof DUO_POSES;
 			const { width, height, top, right } = DUO_POSES[pose];
 			if (!match[2]) await installAsPwa(world.page);
 			await world.driver.setViewport(world.page, {
-				name: `duo-${pose.replace(" ", "-")}`,
+				name: `duo-${pose.replaceAll(" ", "-")}`,
 				width,
 				height,
 				insets: { top, right, bottom: 34, left: 0 },
