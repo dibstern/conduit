@@ -1,7 +1,7 @@
 /**
  * In the installed iOS app a tap above about screen y64 never becomes a click,
  * though pointerdown and pointerup still arrive (conduit-test-uwxj8). So a
- * control inside `node` clicks itself when a primary touch or pen lifts within
+ * control inside `node` clicks itself when a primary touch lifts within
  * 10px and 700ms of pressing it. The browser's own mousedown and click, if they
  * follow, are dropped: the click would activate the control again, or whatever
  * the first activation put under the finger, and the mousedown would pull focus
@@ -58,7 +58,9 @@ export function clickOnLift(node: HTMLElement): () => void {
 			control &&
 			node.contains(control) &&
 			event.isPrimary &&
-			(event.pointerType === "touch" || event.pointerType === "pen")
+			// Not pen: bits-ui menus open on a pen's pointerdown, so a click on lift
+			// would close them again. iPhones, where the dead zone is, take no pen.
+			event.pointerType === "touch"
 				? {
 						pointerId: event.pointerId,
 						x: event.clientX,

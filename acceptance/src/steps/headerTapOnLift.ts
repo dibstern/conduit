@@ -41,11 +41,11 @@ async function centreOf(
 async function liftTouch(
 	page: Page,
 	name: Control,
-	{ moveBy = 0, holdMs = 0 } = {},
+	{ moveBy = 0, holdMs = 0, pointerType = "touch" } = {},
 ): Promise<void> {
 	const point = await centreOf(page, name);
 	await page.evaluate(
-		async ({ x, y, moveBy, holdMs }) => {
+		async ({ x, y, moveBy, holdMs, pointerType }) => {
 			const target = document.elementFromPoint(x, y);
 			if (!target) throw new Error(`Nothing at ${x},${y}`);
 			const sequence: [type: string, clientX: number, waitMs: number][] = [
@@ -65,7 +65,7 @@ async function liftTouch(
 						cancelable: true,
 						composed: true,
 						pointerId: 41,
-						pointerType: "touch",
+						pointerType,
 						isPrimary: true,
 						button: type === "pointermove" ? -1 : 0,
 						buttons: type === "pointerup" ? 0 : 1,
@@ -75,7 +75,7 @@ async function liftTouch(
 				);
 			}
 		},
-		{ ...point, moveBy, holdMs },
+		{ ...point, moveBy, holdMs, pointerType },
 	);
 }
 
@@ -137,6 +137,16 @@ export const headerTapOnLiftHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await liftTouch(world.page, match[1] as Control, {
 				holdMs: Number(match[2]),
+			});
+		},
+	},
+	{
+		name: "press a header control with a pen",
+		match: new RegExp(`^I press the ${control} with a pen for (\\d+)ms$`),
+		run: async ({ world, match }) => {
+			await liftTouch(world.page, match[1] as Control, {
+				holdMs: Number(match[2]),
+				pointerType: "pen",
 			});
 		},
 	},

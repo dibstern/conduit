@@ -77,6 +77,10 @@ Scenario: A menu trigger that opens on lift by itself opens once
   When I tap the session overflow button with a finger
   Then the overflow session sheet stays open
 
+Scenario: A pen press on a menu trigger is left to the menu
+  When I press the session overflow button with a pen for 600ms
+  Then the overflow session sheet stays open
+
 Scenario: A disabled header control stays inert
   Given the session header holds a disabled probe button
   And I count clicks on the probe button
