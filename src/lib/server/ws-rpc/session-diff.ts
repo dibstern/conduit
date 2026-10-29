@@ -4,6 +4,7 @@ import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { SessionDiff } from "../../domain/daemon/Services/session-diff.js";
 import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
 import { readSessionWorktreeOwnership } from "../../domain/relay/Services/session-worktree-deletion.js";
+import { recordedOwnershipForFolder } from "../../persistence/effect/session-worktree-ownership.js";
 import { guardWorkspacePath } from "../../session/workspace-directories.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
@@ -32,8 +33,10 @@ export const sessionDiffHandlers = {
 						)
 					: [];
 			const folders = yield* Effect.forEach(effectiveFolders, (folder) => {
-				const launchBase = owned.find(
-					(ownership) => ownership.folder === folder.root,
+				const launchBase = recordedOwnershipForFolder(
+					owned,
+					folder.root,
+					folder.directory,
 				)?.head;
 				const listed =
 					launchBase === undefined ? folder : { ...folder, launchBase };
