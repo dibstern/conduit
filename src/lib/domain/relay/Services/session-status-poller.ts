@@ -18,11 +18,12 @@ import {
 	Ref,
 	Schedule,
 } from "effect";
-
+import { ENV } from "../../../env.js";
 import type { SessionStatus } from "../../../instance/sdk-types.js";
 import { busySessionIds } from "../../../session-busy.js";
 
-export const DEFAULT_RECONCILIATION_INTERVAL_MS = 7_000;
+export const DEFAULT_RECONCILIATION_INTERVAL_MS =
+	ENV.statusReconciliationIntervalMs;
 
 const POLLER_EVENT_BUFFER_CAPACITY = 64;
 const STATUS_RECONCILIATION_MAX_RETRIES = 5;

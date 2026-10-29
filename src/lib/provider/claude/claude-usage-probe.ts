@@ -68,6 +68,7 @@ export const makeClaudeUsageReader = (
 				);
 			const launch = {
 				configDir: folder,
+				killProcessGroup: true,
 			};
 			return Effect.acquireUseRelease(
 				makeClaudeEmptyQuery(
@@ -89,7 +90,7 @@ export const makeClaudeUsageReader = (
 					}),
 					launch,
 					options.prepareQuery,
-				).pipe(Effect.interruptible),
+				),
 				(resource) =>
 					Effect.gen(function* () {
 						yield* Effect.tryPromise({

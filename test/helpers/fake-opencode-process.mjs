@@ -650,6 +650,10 @@ const server = createServer(async (request, response) => {
 		response.end("[]");
 	}
 });
+server.on("error", (error) => {
+	console.error(`${error.code ?? "UNKNOWN"}: ${error.message}`);
+	process.exit(1);
+});
 const listen = () =>
 	server.listen(port, "127.0.0.1", () => {
 		const address = server.address();

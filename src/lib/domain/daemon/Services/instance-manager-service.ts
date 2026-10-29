@@ -1049,7 +1049,10 @@ const startManagedOpenCodeServer = (
 			);
 			let owned: ManagedOpenCodeRecord | undefined;
 			let previous: ManagedOpenCodeRecord | undefined;
+			let retryOnFreshPort = false;
 			return yield* Effect.gen(function* () {
+				owned = undefined;
+				previous = undefined;
 				const record: ManagedOpenCodeRecord = Option.getOrElse(
 					HashMap.get(
 						(yield* Ref.get(ref)).managedProcesses ?? HashMap.empty(),
@@ -1105,7 +1108,9 @@ const startManagedOpenCodeServer = (
 				// use a fresh port when replacing an invalid recorded process.
 				const port = yield* Effect.tryPromise({
 					try: () =>
-						availableOpenCodePort(record.pid !== undefined ? 0 : instance.port),
+						availableOpenCodePort(
+							retryOnFreshPort || record.pid !== undefined ? 0 : instance.port,
+						),
 					catch: (cause) => cause,
 				});
 				const env = managedOpenCodeEnv(record.env ?? instance.env);
@@ -1151,7 +1156,12 @@ const startManagedOpenCodeServer = (
 					...state,
 					instances: HashMap.modify(state.instances, instance.id, (current) => {
 						const { pid: _pid, version: _version, ...rest } = current;
-						return { ...rest, port, env: publicManagedOpenCodeEnv(env) };
+						return {
+							...rest,
+							port,
+							env: publicManagedOpenCodeEnv(env),
+							...(retryOnFreshPort ? { status: "starting" as const } : {}),
+						};
 					}),
 					managedProcesses: HashMap.set(
 						state.managedProcesses ?? HashMap.empty(),
@@ -1159,6 +1169,7 @@ const startManagedOpenCodeServer = (
 						{ port, env },
 					),
 				}));
+				if (retryOnFreshPort) yield* publishInstanceStatusChanged(instance.id);
 				yield* save;
 				const spawned = yield* Effect.tryPromise({
 					try: () =>
@@ -1193,13 +1204,18 @@ const startManagedOpenCodeServer = (
 				// still rediscover the detached child.
 				yield* save;
 				yield* Effect.tryPromise({
-					try: () => commitManagedOpenCodeSpawn(spawned.process),
+					try: () => commitManagedOpenCodeSpawn(spawned.process, spawned.log),
 					catch: (cause) => cause,
 				});
 				const health = yield* Effect.tryPromise({
 					try: (signal) =>
 						waitForOpenCodeHealth(
-							{ port, env, processIdentity: spawned.processIdentity },
+							{
+								port,
+								env,
+								processIdentity: spawned.processIdentity,
+								log: spawned.log,
+							},
 							spawned.process,
 							signal,
 						),
@@ -1225,7 +1241,6 @@ const startManagedOpenCodeServer = (
 						if (owned) {
 							const record = owned;
 							released = yield* stopRecordedManagedOpenCode(record).pipe(
-								Effect.as(true),
 								Effect.catch((error) =>
 									Effect.logWarning(
 										"Retaining failed-start OpenCode ownership",
@@ -1236,14 +1251,14 @@ const startManagedOpenCodeServer = (
 						}
 						yield* markManagedInstanceUnhealthy(instance, cause);
 						if (owned && released) {
-							const env = owned.env;
+							const { port, env } = owned;
 							yield* Ref.update(ref, (state) => ({
 								...state,
 								managedProcesses: HashMap.set(
 									state.managedProcesses ?? HashMap.empty(),
 									instance.id,
 									{
-										port: instance.port,
+										port,
 										...(env !== undefined ? { env } : {}),
 									},
 								),
@@ -1257,6 +1272,16 @@ const startManagedOpenCodeServer = (
 								),
 							),
 						);
+						if (
+							released &&
+							!retryOnFreshPort &&
+							cause instanceof ManagedOpenCodeProcessError &&
+							cause.portConflict
+						) {
+							// Retry only after cleanup has released the failed generation.
+							retryOnFreshPort = true;
+							return yield* Effect.fail(cause);
+						}
 						return !released
 							? (owned ?? null)
 							: !owned && previous?.processIdentity
@@ -1264,6 +1289,12 @@ const startManagedOpenCodeServer = (
 								: null;
 					}),
 				),
+				Effect.retry({
+					times: 1,
+					while: (cause) =>
+						cause instanceof ManagedOpenCodeProcessError &&
+						cause.portConflict === true,
+				}),
 			);
 		}).pipe(
 			Effect.catch((cause) =>

@@ -507,6 +507,14 @@ export function step(
 					{ ...state, snapshot: event.initial ? "ready" : state.snapshot },
 					[],
 				];
+			// Promotion retains sent text until admission commits; it is not a new draft.
+			if (
+				event.text !== undefined &&
+				state.inFlight.get(draftKeyId(event.key))?.includes(event.text)
+			)
+				return event.initial
+					? step({ ...state, snapshot: "ready" }, { _tag: "Flush" })
+					: [state, []];
 			// A missing draft row is empty; a missing session row remains unknown.
 			const incoming =
 				"draft" in event.key && event.initial ? (event.text ?? "") : event.text;

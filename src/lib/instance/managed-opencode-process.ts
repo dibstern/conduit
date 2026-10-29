@@ -1,6 +1,14 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from "node:fs";
+import {
+	chmodSync,
+	closeSync,
+	existsSync,
+	fstatSync,
+	mkdirSync,
+	openSync,
+	readSync,
+} from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +21,47 @@ export class ManagedOpenCodeProcessError extends Data.TaggedError(
 	"ManagedOpenCodeProcessError",
 )<{
 	message: string;
+	portConflict?: boolean;
 }> {}
+
+interface ManagedOpenCodeStartupLog {
+	path: string;
+	offset: number;
+}
+
+function startupExitError(
+	child: ChildProcess,
+	log?: ManagedOpenCodeStartupLog,
+): ManagedOpenCodeProcessError {
+	let tail = "";
+	try {
+		if (log) {
+			const fd = openSync(log.path, "r");
+			try {
+				const size = fstatSync(fd).size;
+				// Ignore older attempts in the append-only log when deciding to retry.
+				const length = Math.min(512, Math.max(0, size - log.offset));
+				const buffer = Buffer.alloc(length);
+				const bytes = readSync(fd, buffer, 0, length, size - length);
+				tail = buffer.subarray(0, bytes).toString("utf8").trim();
+			} finally {
+				closeSync(fd);
+			}
+		}
+	} catch {
+		// Missing diagnostics must not replace the startup failure.
+	}
+	const exit = child.signalCode
+		? `signal ${child.signalCode}`
+		: `exit code ${child.exitCode}`;
+	return new ManagedOpenCodeProcessError({
+		message: `OpenCode exited during startup (supervisor ${exit})${tail ? `: ${tail}` : ""}`,
+		portConflict:
+			/EADDRINUSE|address already in use|\bport\b[^\r\n]*\bin use\b/i.test(
+				tail,
+			),
+	});
+}
 
 export interface ManagedOpenCodeRecord {
 	pid?: number;
@@ -114,11 +162,13 @@ export function spawnManagedOpenCode(
 	pid: number;
 	process: ChildProcess;
 	processIdentity: ManagedOpenCodeProcessIdentity;
+	log?: ManagedOpenCodeStartupLog;
 }> {
 	const logDir = join(configDir, "logs");
 	mkdirSync(logDir, { recursive: true, mode: 0o700 });
 	const logPath = join(logDir, `opencode-${encodeURIComponent(id)}.log`);
 	const fd = openSync(logPath, "a", 0o600);
+	const log = { path: logPath, offset: fstatSync(fd).size };
 	const token = randomBytes(32).toString("hex");
 	const compiled = new URL("./managed-opencode-supervisor.js", import.meta.url);
 	const supervisorPath = fileURLToPath(
@@ -156,14 +206,11 @@ export function spawnManagedOpenCode(
 			clearTimeout(timer);
 			reject(cause);
 		});
-		child.once("exit", () => {
+		const exited = () => {
 			clearTimeout(timer);
-			reject(
-				new ManagedOpenCodeProcessError({
-					message: "OpenCode supervisor exited during startup",
-				}),
-			);
-		});
+			reject(startupExitError(child, log));
+		};
+		child.once("exit", exited);
 		child.once("message", (message: unknown) => {
 			if (
 				!isRecord(message) ||
@@ -173,6 +220,7 @@ export function spawnManagedOpenCode(
 			)
 				return;
 			clearTimeout(timer);
+			child.off("exit", exited);
 			if (child.pid === undefined)
 				reject(
 					new ManagedOpenCodeProcessError({
@@ -183,6 +231,7 @@ export function spawnManagedOpenCode(
 				resolve({
 					pid: message["pid"],
 					process: child,
+					log,
 					processIdentity: {
 						supervisorPid: child.pid,
 						controlPort: message["controlPort"],
@@ -193,7 +242,10 @@ export function spawnManagedOpenCode(
 	});
 }
 
-export function commitManagedOpenCodeSpawn(child: ChildProcess): Promise<void> {
+export function commitManagedOpenCodeSpawn(
+	child: ChildProcess,
+	log?: ManagedOpenCodeStartupLog,
+): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const finish = (cause?: Error) => {
 			clearTimeout(timer);
@@ -207,12 +259,7 @@ export function commitManagedOpenCodeSpawn(child: ChildProcess): Promise<void> {
 		const committed = (message: unknown) => {
 			if (isRecord(message) && message["committed"] === true) finish();
 		};
-		const exited = () =>
-			finish(
-				new ManagedOpenCodeProcessError({
-					message: "OpenCode supervisor exited before committing its identity",
-				}),
-			);
+		const exited = () => finish(startupExitError(child, log));
 		const timer = setTimeout(
 			() =>
 				finish(
@@ -225,6 +272,10 @@ export function commitManagedOpenCodeSpawn(child: ChildProcess): Promise<void> {
 		);
 		child.on("message", committed);
 		child.once("exit", exited);
+		if (child.exitCode !== null || child.signalCode !== null) {
+			exited();
+			return;
+		}
 		child.send({ command: "commit" }, (cause) => {
 			if (cause) finish(cause);
 		});
@@ -370,6 +421,7 @@ export async function waitForOpenCodeHealth(
 		port: number;
 		env?: Record<string, string>;
 		processIdentity: ManagedOpenCodeProcessIdentity;
+		log?: ManagedOpenCodeStartupLog | undefined;
 	},
 	child: ChildProcess,
 	signal?: AbortSignal,
@@ -381,9 +433,7 @@ export async function waitForOpenCodeHealth(
 				message: "OpenCode startup interrupted",
 			});
 		if (child.exitCode !== null || child.signalCode !== null)
-			throw new ManagedOpenCodeProcessError({
-				message: "OpenCode exited during startup",
-			});
+			throw startupExitError(child, instance.log);
 		const health = await probeOpenCodeHealth(instance.port, instance.env);
 		if (health) {
 			const owned = await inspectManagedOpenCodeProcess(

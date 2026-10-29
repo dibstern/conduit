@@ -2,6 +2,9 @@ import { parse } from "svelte/compiler";
 
 interface Ban {
 	readonly what: string;
+	// Literal text every match contains. Omitting comments only turns characters
+	// into spaces, so a source without it cannot match and skips the Svelte parse.
+	readonly word: RegExp;
 	readonly pattern: RegExp;
 }
 
@@ -9,21 +12,25 @@ const banned: readonly Ban[] = [
 	// `$state.snapshot` is Svelte's rune for a plain copy of reactive state.
 	{
 		what: "the envelope tags",
+		word: /snapshot|upsert|synchronized/i,
 		pattern: /(?<!\$state\.)\b(snapshot|upsert|synchronized)\b/i,
 	},
-	{ what: "a discriminator off the wire", pattern: /_tag/ },
-	{ what: "a wire sequence", pattern: /\bsequence\b/i },
+	{ what: "a discriminator off the wire", word: /_tag/, pattern: /_tag/ },
+	{ what: "a wire sequence", word: /sequence/i, pattern: /\bsequence\b/i },
 	{
 		what: "the subscription that owns the map",
+		word: /subscription/,
 		pattern: /from\s+["'][^"']*transport\/(session-)?subscription[^"']*["']/,
 	},
 	{
 		what: "the wire contract",
+		word: /contracts\/ws-rpc/,
 		pattern: /from\s+["'][^"']*contracts\/ws-rpc[^"']*["']/,
 	},
 ];
 
 export const violations = (source: string): readonly string[] => {
+	if (!banned.some(({ word }) => word.test(source))) return [];
 	const characters = source.split("");
 	const omit = (start: number, end: number): void => {
 		for (let i = start; i < end; i++) characters[i] = " ";

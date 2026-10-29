@@ -18,6 +18,10 @@ import {
 	startForegroundDaemon,
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { stopPtyHost } from "../../../src/lib/terminal/pty-host-client.js";
+import {
+	captureExistingChildren,
+	stopDaemonAndAssertNoSurvivors,
+} from "../helpers/daemon-survivors.js";
 import { spawnOpenCode } from "../helpers/opencode-spawner.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -143,6 +147,7 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 	});
 	let opencodeHandle: Awaited<ReturnType<typeof spawnOpenCode>> | undefined;
 	let daemon: ForegroundDaemonHandle | undefined;
+	let existingChildren = captureExistingChildren();
 	try {
 		await new Promise<void>((resolve, reject) => {
 			modelServer.once("error", reject);
@@ -184,6 +189,7 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 			},
 		});
 		opencodeHandle = opencode;
+		existingChildren = captureExistingChildren();
 		daemon = await startDaemon(configDir, opencode.url);
 		const projectSlug = (await daemon.addProject(projectDir)).slug;
 		const sideId = await rpc(daemon, (client) =>
@@ -239,7 +245,11 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 			}),
 		);
 
-		await daemon.stop();
+		const previousDaemon = daemon;
+		await stopDaemonAndAssertNoSurvivors(
+			() => previousDaemon.stop(),
+			existingChildren,
+		);
 		daemon = await startDaemon(configDir, opencode.url);
 		expect(daemon.getProjects().map((project) => project.slug)).toContain(
 			projectSlug,
@@ -302,11 +312,13 @@ test("a Side Thread keeps Plan and its read-only rules after a daemon restart", 
 		});
 	} finally {
 		try {
-			try {
-				await daemon?.stop();
-			} finally {
-				await stopPtyHost({ configDir, force: true });
-			}
+			await stopDaemonAndAssertNoSurvivors(async () => {
+				try {
+					await daemon?.stop();
+				} finally {
+					await stopPtyHost({ configDir, force: true });
+				}
+			}, existingChildren);
 		} finally {
 			try {
 				opencodeHandle?.stop();
