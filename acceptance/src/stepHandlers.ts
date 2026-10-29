@@ -2,6 +2,7 @@ import { PlaywrightDriver } from "./playwrightDriver.js";
 import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
 import { addProjectDialogHandlers } from "./steps/addProjectDialog.js";
 import { askContextHandlers } from "./steps/askContext.js";
+import { assistantDiagramsHandlers } from "./steps/assistantDiagrams.js";
 import { backgroundTasksHandlers } from "./steps/backgroundTasks.js";
 import { claudeSettingsHandlers } from "./steps/claudeSettings.js";
 import { codexAsyncQuestionHandlers } from "./steps/codexAsyncQuestion.js";
@@ -134,6 +135,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerFieldWidthHandlers,
 	...composerFilesHandlers,
 	...composerImageDropAndViewHandlers,
+	...assistantDiagramsHandlers,
 	...composerFinalDesignHandlers,
 	...composerLiveStatusHandlers,
 	...pendingInputTrayHandlers,

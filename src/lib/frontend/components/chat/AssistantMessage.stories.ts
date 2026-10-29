@@ -135,16 +135,9 @@ export const WithMermaid: Story = {
 	args: { message: mockAssistantWithMermaid },
 	play: async ({ canvasElement }) => {
 		await waitFor(
-			async () => {
-				const diagram = canvasElement.querySelector(".mermaid-diagram");
-				const label = diagram?.querySelector(".edgeLabel .labelBkg");
-				if (!diagram || !label)
-					throw new Error("Mermaid labels have not rendered yet");
-				await expect(getComputedStyle(label).backgroundColor).toBe(
-					getComputedStyle(diagram)
-						.backgroundColor.replace("rgb(", "rgba(")
-						.replace(")", ", 0.5)"),
-				);
+			() => {
+				if (!canvasElement.querySelector("[data-diagram] .pele-node"))
+					throw new Error("The diagram has not been drawn yet");
 			},
 			{ timeout: 10000 },
 		);

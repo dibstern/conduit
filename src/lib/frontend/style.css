@@ -1216,6 +1216,36 @@ body:has(dialog:modal) {
 	}
 }
 
+/* The only owner of diagram colours. Pele draws with these variables, so a
+   theme switch recolours diagrams with no redraw. Map every one it reads, or
+   it falls back to its own hardcoded palette. */
+.pele {
+	--pele-bg: var(--color-code-bg);
+	--pele-fg: var(--color-text);
+	--pele-muted: var(--color-text-muted);
+	--pele-line: var(--color-text-muted);
+	--pele-surface: var(--color-bg-alt);
+	--pele-surface-alt: var(--color-bg-surface);
+	--pele-border: var(--color-border);
+	--pele-accent: var(--color-accent);
+	--pele-critical: var(--color-error);
+	--pele-error: var(--color-error);
+	/* Text on a fill the diagram author chose, so the same in both themes. */
+	--pele-fg-on-light: var(--color-on-fill);
+	--pele-fg-on-dark: #fff;
+	--pele-font: var(--font-sans);
+	--pele-font-mono: var(--font-mono);
+	--pele-radius: 6px;
+	--pele-series-1: var(--color-accent);
+	--pele-series-2: var(--color-warning);
+	--pele-series-3: var(--color-success);
+	--pele-series-4: var(--color-error);
+	--pele-series-5: var(--color-act-explore);
+	--pele-series-6: var(--color-p-plan);
+	--pele-series-7: var(--color-act-text);
+	--pele-series-8: var(--color-cat-finding);
+}
+
 @layer components {
 	/* Prevent long unbroken strings (URLs, inline code, etc.) from overflowing
 	   the message card and widening the viewport. */
