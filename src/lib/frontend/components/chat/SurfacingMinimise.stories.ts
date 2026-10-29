@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import { getOrCreateSessionMessages } from "../../stores/chat.svelte.js";
@@ -245,6 +245,49 @@ export const StepPopover: Story = {
 		);
 		await expect(canvas.queryByTestId("surfacing-hover-preview")).toBeNull();
 		await expect(canvas.getByTestId("strip-hover-marker")).toBeVisible();
+	},
+};
+
+const unjudged: Segment = {
+	...unread,
+	activity: unread.activity.map((part) => {
+		if (part.uuid !== "minimise-agent/part-4" || part.type !== "assistant")
+			return part;
+		const { surfacingProbabilities: _never, ...unjudgedPart } = part;
+		return unjudgedPart;
+	}),
+};
+
+/** A settled message Jev never judged has no card, so its hover preview opens it in Full log. */
+export const UnjudgedPreviewOpensLog: Story = {
+	// Its own session: reveal leaves this Turn on Full log for the rest of the page.
+	args: {
+		turn: { ...turn, segments: [unjudged] },
+		segment: unjudged,
+		sessionId: "minimise-unjudged-session",
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const target = canvasElement.querySelector<HTMLElement>(
+			'[data-step-id="minimise-agent/part-4"]',
+		);
+		if (!target) throw new Error("Missing unjudged step");
+		const step = target.getBoundingClientRect();
+		await userEvent.pointer({
+			target,
+			coords: {
+				clientX: step.x + step.width / 2,
+				clientY: step.y + step.height / 2,
+			},
+		});
+		const preview = await canvas.findByRole("group", { name: "Hover preview" });
+		await userEvent.pointer({ keys: "[MouseLeft]", target: preview });
+		await waitFor(() => expectTurnStop(canvasElement, "log"));
+		await waitFor(() =>
+			expect(
+				canvasElement.querySelector('[data-log-part="minimise-agent/part-4"]'),
+			).toHaveFocus(),
+		);
 	},
 };
 

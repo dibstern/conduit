@@ -401,8 +401,9 @@
 		});
 	}
 	function stripChanged(interaction: StripInteraction) { stripInteraction = interaction; }
+	// A message with no card (never judged) goes through reveal(), which opens it in Full log.
 	function pickFromStrip(pin: SurfacePin) {
-		if (minimised || usage || qa) pick(pin);
+		if (minimised || usage || qa || !canOpenSurfaceMessage(pin.part, live)) pick(pin);
 		else selectPin(pin);
 	}
 
