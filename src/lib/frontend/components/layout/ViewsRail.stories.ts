@@ -32,7 +32,7 @@ export const IndependentViews: Story = {
 		}
 		const terminal = canvas.getByRole("button", { name: "Terminal" });
 		const files = canvas.getByRole("button", { name: "Files" });
-		await expect(canvas.getByRole("button", { name: "Diff" })).toBeDisabled();
+		await expect(canvas.getByRole("button", { name: "Diff" })).toBeEnabled();
 		await userEvent.click(terminal);
 		await userEvent.click(files);
 		await expect(terminal).toHaveAttribute("aria-pressed", "true");

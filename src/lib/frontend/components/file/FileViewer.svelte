@@ -151,10 +151,15 @@
 		return () => { active = false; };
 	});
 
-	// The tree behind the preview goes inert, so focus moves into the preview.
+	// The tree behind the preview goes inert, so focus moves into a newly opened
+	// preview. Re-revealing the same preview by switching tabs keeps tab focus.
 	let regionEl: HTMLDivElement | undefined = $state(undefined);
+	let focusedPreview: unknown;
 	$effect(() => {
-		regionEl?.focus({ preventScroll: true });
+		const preview = sessionViewState.filePreview;
+		if (!regionEl || preview === focusedPreview) return;
+		focusedPreview = preview;
+		regionEl.focus({ preventScroll: true });
 	});
 
 	$effect(() => {

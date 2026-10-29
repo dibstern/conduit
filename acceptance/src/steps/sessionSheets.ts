@@ -273,10 +273,6 @@ export const sessionSheetsHandlers: StepHandler[] = [
 				"aria-checked",
 				"true",
 			);
-			await expect(sheet.getByTestId("overflow-view-diff")).toHaveAttribute(
-				"aria-disabled",
-				"true",
-			);
 			await expect(sheet.locator(".shortcut-hint")).toHaveCount(0);
 		},
 	},

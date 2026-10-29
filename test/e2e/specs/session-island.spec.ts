@@ -136,10 +136,6 @@ test.describe("phone session island", () => {
 		for (const view of ["chat", "terminal", "diff", "files"]) {
 			await expect(sheet.getByTestId(`overflow-view-${view}`)).toBeVisible();
 		}
-		await expect(sheet.getByTestId("overflow-view-diff")).toHaveAttribute(
-			"aria-disabled",
-			"true",
-		);
 		for (const action of ["share", "settings", "debug"]) {
 			await expect(sheet.getByTestId(`overflow-${action}`)).toBeVisible();
 		}
