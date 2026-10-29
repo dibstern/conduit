@@ -40,15 +40,15 @@ export const sheetScrimStyle = ({
  * away, gliding there when `settling`. Its dialog gets --sheet-raised, 1 at rest
  * and 0 put away, and --sheet-transition, so the scrim and anything else styled
  * from them move with the sheet. Returns how long the glide takes: nothing when
- * the sheet is already there.
+ * the sheet is already there. `transform` replaces the offset's translation.
  */
 export function placeSheet(
 	node: HTMLElement,
 	offset: number,
 	away: number,
 	settling: boolean,
+	transform = offset !== 0 ? `translateY(${offset}px)` : "",
 ): number {
-	const transform = offset !== 0 ? `translateY(${offset}px)` : "";
 	const glideMs =
 		settling && node.style.transform !== transform ? settleMs() : 0;
 	const timing = `${glideMs}ms cubic-bezier(0.32, 0.72, 0, 1)`;
@@ -122,19 +122,65 @@ export const belowHeader: Action<HTMLElement, boolean> = (node, initial) => {
 	};
 };
 
-/** Hold the DOM through the same CSS glide used when a finger releases it. */
+/** The control that opened `node`: its own trigger, else one outside it whose aria-controls names the sheet or its content. */
+function openerOf(
+	node: HTMLElement,
+	trigger: HTMLElement | null,
+): HTMLElement | null {
+	return (
+		trigger ??
+		Array.from(document.querySelectorAll<HTMLElement>("[aria-controls]")).find(
+			(control) =>
+				node.contains(
+					document.getElementById(control.getAttribute("aria-controls") ?? ""),
+				),
+		) ??
+		null
+	);
+}
+
+/**
+ * In a Duo pose a resting sheet is put away into the control that opened it,
+ * wherever that sits: scaled about the control's centre down to its size.
+ * Off the Duo, with no control on screen, or once a finger has moved it, there
+ * is no such transform and the sheet glides behind the header.
+ */
+function intoTrigger(
+	node: HTMLElement,
+	trigger: HTMLElement | null,
+): string | undefined {
+	const control =
+		trigger?.closest("#layout[data-pose^='duo-']") &&
+		trigger.getClientRects()[0];
+	if (!control || node.style.transform !== "") return undefined;
+	const sheet = node.getBoundingClientRect();
+	node.style.transformOrigin = `${control.left + control.width / 2 - sheet.left}px ${control.top + control.height / 2 - sheet.top}px`;
+	return `scale(${Math.min(1, Math.max(control.width / sheet.width, control.height / sheet.height))})`;
+}
+
+/**
+ * Hold the DOM through the same CSS glide used when a finger releases it, or
+ * in a Duo pose grow out of and shrink back into `trigger`, measured each time.
+ */
 export function sheetGlide(
 	node: HTMLElement,
-	{ edge, onprogress }: Pick<DragToDismissOptions, "edge" | "onprogress">,
+	{
+		edge,
+		onprogress,
+		trigger,
+	}: Pick<DragToDismissOptions, "edge" | "onprogress"> & {
+		trigger: () => HTMLElement | null;
+	},
 ): (options?: { direction: "in" | "out" }) => TransitionConfig {
 	return ({ direction } = { direction: "in" }) => {
 		if (edge !== "top") return { duration: 0 };
 		const away = -node.offsetHeight;
+		const putAway = intoTrigger(node, openerOf(node, trigger()));
 		if (direction === "out") {
 			onprogress?.(1, true);
-			return { duration: placeSheet(node, away, away, true) };
+			return { duration: placeSheet(node, away, away, true, putAway) };
 		}
-		placeSheet(node, away, away, false);
+		placeSheet(node, away, away, false, putAway);
 		node.getBoundingClientRect();
 		onprogress?.(1, false);
 		requestAnimationFrame(() => {

@@ -238,7 +238,7 @@
 			<div class={sheetEdge === "top" ? "below-header pointer-events-none fixed z-[var(--z-sheet)] overflow-hidden [&:not(:has(*))]:hidden" : "contents"} use:belowHeader={sheetEdge === "top"}>
 			<BitsPopover.ContentStatic {...sheetContentProps} bind:ref={sheetEl}>
 				{#snippet child({ props })}
-					<div {...props} id={sheetContentProps.id} data-sheet-edge={sheetEdge} use:exemptFromBackgroundInert use:backgroundInert={modal && open} use:dragToDismiss={{ edge: sheetEdge, ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }} transition:sheetGlide|global={{ edge: sheetEdge, onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
+					<div {...props} id={sheetContentProps.id} data-sheet-edge={sheetEdge} use:exemptFromBackgroundInert use:backgroundInert={modal && open} use:dragToDismiss={{ edge: sheetEdge, ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }} transition:sheetGlide|global={{ edge: sheetEdge, trigger: () => triggerEl, onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
 						<SheetChrome edge={sheetEdge} maxHeight={sheetEdge === "top" ? "max(0px, calc(100dvh - var(--sheet-top, 0px) - 64px))" : "90dvh"} {footer} bottomPadding={sheetBottomPadding} bodyClass={className ?? ""}>{@render content()}</SheetChrome>
 					</div>
 				{/snippet}
