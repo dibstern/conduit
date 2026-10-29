@@ -1319,12 +1319,26 @@ body:has(dialog:modal) {
 #layout[data-pose="duo-folded-portrait"]
 	:is(
 		#attach-btn,
-		[data-testid="model-picker-trigger"],
 		[data-testid="variant-badge"],
-		[data-testid="composer-checkout"],
-		[data-testid="permission-mode-badge"]
+		[data-testid="composer-checkout"]
 	) {
 	background-color: var(--color-chip);
+}
+/* Permissions and Model are bare icons on the rail, larger than on the chip
+   row. The logo's badge overlaps its corner instead of pushing it off-centre. */
+#layout[data-pose="duo-folded-portrait"]:not([data-keyboard="open"])
+	#input-area
+	[data-testid="permission-mode-badge"]
+	svg {
+	width: 24px;
+	height: 24px;
+}
+#layout[data-pose="duo-folded-portrait"]:not([data-keyboard="open"])
+	#input-area
+	[data-testid="model-picker-trigger"]
+	[data-testid="harness-logo"] {
+	margin-right: 0;
+	scale: calc(24 / 18);
 }
 #layout[data-pose="duo-folded-portrait"] #new-session-btn {
 	background-color: var(--color-inverse-bg);

@@ -56,6 +56,16 @@ Examples:
   | header        | rail        | composer        | rail_working        | threshold |
   | duo-fp-header | duo-fp-rail | duo-fp-composer | duo-fp-rail-working | 98        |
 
+Scenario Outline: Model and Permissions are bare icons centred in their slots, the logo's badge on its corner
+  Given the Claude accounts are claude as personal, self as work
+  Then the composer harness logo for claude shows P on its badge
+  And the rail's Permissions and Model sit bare, each icon 24 px and centred in its slot
+  And the duo-rail region visually matches <rail> at <threshold> percent
+
+Examples:
+  | rail               | threshold |
+  | duo-fp-rail-badged | 98        |
+
 Scenario Outline: The context hairline turns amber at 80 percent
   When the mock relay reports context <percent> percent
   Then the context hairline reads <percent>% context in <colour>

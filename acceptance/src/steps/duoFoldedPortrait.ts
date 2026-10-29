@@ -128,6 +128,41 @@ export const duoFoldedPortraitHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "bare rail icons",
+		match:
+			/^the rail's (.+) sit bare, each icon (\d+) px and centred in its slot$/,
+		run: async ({ world, match }) => {
+			const size = Number(match[2]);
+			for (const name of (match[1] ?? "").split(" and ")) {
+				const icon = {
+					Permissions: "svg",
+					Model: "[data-testid='harness-logo']",
+				}[name];
+				if (!icon) throw new Error(`No bare rail icon: ${name}`);
+				const slot = world.page.locator(railControls[name] ?? "");
+				await expect(slot).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+				const outer = await boxOf(world.page, railControls[name] ?? "");
+				const inner = await slot.locator(icon).boundingBox();
+				if (!inner) throw new Error(`${name}'s icon is not laid out`);
+				const off = (a: number, b: number) =>
+					Math.abs(a - b) <= 1 ? 0 : Math.round((a - b) * 10) / 10;
+				expect({
+					name,
+					width: Math.round(inner.width),
+					height: Math.round(inner.height),
+					offCentreX: off(inner.x + inner.width / 2, outer.x + SLOT / 2),
+					offCentreY: off(inner.y + inner.height / 2, outer.y + SLOT / 2),
+				}).toEqual({
+					name,
+					width: size,
+					height: size,
+					offCentreX: 0,
+					offCentreY: 0,
+				});
+			}
+		},
+	},
+	{
 		name: "message field geometry",
 		match: /^the message field spans x (\d+) to (\d+) and y (\d+) to (\d+)$/,
 		run: async ({ world, match }) => {
