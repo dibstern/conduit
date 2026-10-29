@@ -498,6 +498,9 @@
 		slash_command: "Commands can't steer; they queue.",
 	};
 	const contextWarning = $derived(isContextWarning(currentChat().contextPercent, composerPreferences.contextWarning));
+	const foldedDuo = $derived(sessionViewState.pose === "duo-folded-portrait");
+	// The folded Duo's rail holds the icon controls, whatever the saved preference.
+	const composerControls = $derived(foldedDuo ? "icons" : composerPreferences.controls);
 	let contextDismissed = $state(false);
 	let clearedGoalDismissed = $state(false);
 	const contextDismissalKey = $derived(`conduit:context-warning-dismissed:${sessionState.currentId ?? "draft"}`);
@@ -1283,11 +1286,11 @@
 				</div>
 			</ComposerStrip>
 		{/if}
-		<ComposerFrame id="input-row" compact={sessionViewState.compact} words={composerPreferences.controls === "words"} goal={goal.border}>
+		<ComposerFrame id="input-row" compact={sessionViewState.compact} words={composerControls === "words"} goal={goal.border}>
 			{#if draftAttachments.length > 0}
 				<PastePreview images={draftAttachments} projectSlug={composerProjectSlug} onRemove={removeDraftAttachment} onRetry={(id) => composerDraft.retryAttachment(id)} />
 			{/if}
-			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" data-phone-icons={composerPreferences.controls === "icons" && sessionViewState.composerTier === "phone" ? "" : undefined} splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
+			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" data-phone-icons={composerControls === "icons" && sessionViewState.composerTier === "phone" ? "" : undefined} splitFooter={composerControls === "icons"} singleRow={composerControls === "words"}>
 				{#snippet field()}
 					<!-- Textarea row.
 					     The composer grows with its text and then scrolls, and both of those
@@ -1398,9 +1401,9 @@
 					</div>
 				{/snippet}
 				{#snippet controls()}
-					{#if composerPreferences.controls === "icons" && settingsPending}
+					{#if composerControls === "icons" && settingsPending}
 						{@render settingsStatus()}
-					{:else if composerPreferences.controls === "icons"}
+					{:else if composerControls === "icons"}
 						<div
 							in:fade={{ duration: 180 }}
 							id="input-bottom-right"
@@ -1513,7 +1516,14 @@
 				{/snippet}
 			</TwoRowComposerLayout>
 		</ComposerFrame>
-		{#if composerPreferences.controls === "words"}
+		{#if foldedDuo && currentChat().contextPercent > 0}
+			<!-- Amber from 80% always: the hairline is a meter, not the configurable warning. -->
+			<div data-testid="context-hairline" data-warning={currentChat().contextPercent >= 80 ? "true" : undefined} class="context-hairline">
+				<span><i style:width="{Math.min(100, currentChat().contextPercent)}%"></i></span>
+				<b>{Math.round(currentChat().contextPercent)}% context</b>
+			</div>
+		{/if}
+		{#if composerControls === "words"}
 			<div
 				data-testid="composer-words-row"
 				class="flex items-center justify-between gap-[12px] px-[14px] pt-[9px] text-[12px] text-text-dimmer whitespace-nowrap"
@@ -1569,4 +1579,10 @@
 <style>
 	#input-area[data-compact="true"] { padding: 6px 12px calc(env(safe-area-inset-bottom, 0px) + 8px); }
 	#input-area[data-compact="true"]:has(:global(textarea:focus)) { padding-bottom: 8px; }
+	/* The folded Duo's context reading: a hairline under the field, 8pt above the home indicator. */
+	.context-hairline { position: absolute; top: calc(100% + 6px); inset-inline: 12px; height: 12px; display: flex; align-items: center; gap: 8px; pointer-events: none; color: var(--color-text-secondary); }
+	.context-hairline[data-warning] { color: var(--color-status-amber); }
+	.context-hairline > span { position: relative; flex: 1; height: 2px; border-radius: 2px; overflow: hidden; background: var(--color-border); }
+	.context-hairline i { position: absolute; inset-block: 0; left: 0; border-radius: 2px; background: currentColor; }
+	.context-hairline b { font-size: 11px; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 </style>

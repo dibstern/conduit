@@ -21,6 +21,7 @@ import {
 	type SessionPermissionModeValue,
 	type SessionStatusValue,
 	SessionUsageLimitedPayloadSchema,
+	ToolFileChangeSchema,
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
 	type TurnModelResolvedPayload,
@@ -329,6 +330,13 @@ export function translateProviderRuntimeEventToDomain(
 						duration: numberFieldValue(data["duration"]) ?? 0,
 						...(data["outcome"] === "succeeded" || data["outcome"] === "failed"
 							? { outcome: data["outcome"] }
+							: {}),
+						...(data["fileChanges"] !== undefined
+							? {
+									fileChanges: Schema.decodeUnknownSync(
+										Schema.Array(ToolFileChangeSchema),
+									)(data["fileChanges"]),
+								}
 							: {}),
 						...(isRecord(data["metadata"])
 							? { metadata: data["metadata"] }

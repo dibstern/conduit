@@ -13,8 +13,49 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { EventDelivery } from "../../../src/lib/server/event-audiences.js";
 
 describe("Session Activity", () => {
+	it.effect(
+		"follows live connection Interests through overlapping holds and release",
+		() =>
+			Effect.gen(function* () {
+				const activity = yield* makeSessionActivity;
+				const first = new EventDelivery();
+				const second = new EventDelivery();
+				const releaseFirst = activity.watchInterests(first);
+				const releaseSecond = activity.watchInterests(second);
+				const interests = {
+					sessions: new Set(["session-a"]),
+					projects: new Set(["project-a"]),
+					ptys: new Map<string, ReadonlySet<string>>(),
+				};
+				const firstHold = first.subscription(interests);
+				const overlap = first.subscription(interests);
+				second.view(interests);
+				expect(activity.connectionInterests.size).toBe(2);
+				expect(activity.connectionInterests.get(first)).toEqual(interests);
+				firstHold.release();
+				expect(activity.connectionInterests.get(first)).toEqual(interests);
+				overlap.update({ ...interests, sessions: new Set(["session-b"]) });
+				expect(activity.connectionInterests.get(first)?.sessions).toEqual(
+					new Set(["session-b"]),
+				);
+				expect(activity.connectionInterests.get(second)?.sessions).toEqual(
+					new Set(["session-a"]),
+				);
+				first.close();
+				expect(activity.connectionInterests.has(first)).toBe(false);
+				expect(activity.connectionInterests.size).toBe(1);
+				releaseFirst();
+				releaseFirst();
+				releaseSecond();
+				second.view(interests);
+				expect(activity.connectionInterests.size).toBe(0);
+				expect(activity.viewers.size).toBe(0);
+			}),
+	);
+
 	it.effect(
 		"signals each changed session and stays silent for unchanged state",
 		() =>

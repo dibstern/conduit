@@ -50,6 +50,38 @@ const codePoints = (text: string) => [...text].length;
 const json = (value: unknown) => JSON.stringify(value);
 
 describe("projectTool", () => {
+	it("previews file-change text on code-point boundaries and reports full UTF-8 bytes", () => {
+		const patch = `${"😀".repeat(2_000)}é`;
+		const before = "x".repeat(2_001);
+		const after = "short";
+		expect(
+			projectTool({
+				name: "Patch",
+				fileChanges: [
+					{ path: "a.ts", kind: "update", patch },
+					{ path: "new.ts", oldPath: "old.ts", kind: "move", before, after },
+				],
+			}),
+		).toEqual({
+			fileChanges: [
+				{ path: "a.ts", kind: "update", patch: "😀".repeat(2_000) },
+				{
+					path: "new.ts",
+					oldPath: "old.ts",
+					kind: "move",
+					before: "x".repeat(2_000),
+					after,
+				},
+			],
+			fileChangesBytes: bytes(patch) + bytes(before) + bytes(after),
+		});
+		expect(
+			projectTool({
+				name: "Patch",
+				fileChanges: [{ path: "a.ts", kind: "add", after: "😀".repeat(2_000) }],
+			}),
+		).not.toHaveProperty("fileChangesBytes");
+	});
 	it("never cuts a question's input or a subagent's output (1)", () => {
 		const options = Array.from({ length: 60 }, (_, index) => ({
 			label: `Option ${index} ${"x".repeat(60)}`,
@@ -235,6 +267,83 @@ describe("transcript query and detail read", () => {
 				),
 			);
 
+	it.each([
+		"event",
+		"snapshot",
+		"legacy",
+	])("loads full file changes after previewing %s data", async (source) => {
+		const content = "😀".repeat(2_500);
+		const fileChanges = [
+			{ path: "a.ts", kind: "add" as const, before: "", after: content },
+		];
+		const { parts, details } = await run(({ commit, readQuery }) =>
+			Effect.gen(function* () {
+				yield* commit([
+					event("session.created", {
+						sessionId: SESSION,
+						title: "wire",
+						provider: "claude",
+						providerSessionId: SESSION,
+					}),
+					event("message.created", {
+						messageId: "m1",
+						role: "assistant",
+						sessionId: SESSION,
+					}),
+					...(source === "snapshot"
+						? [
+								event("message.snapshot", {
+									messageId: "m1",
+									digest: "snapshot",
+									message: {
+										id: "m1",
+										sessionID: SESSION,
+										role: "assistant",
+										parts: [
+											{
+												id: "write-1",
+												type: "tool",
+												tool: "Write",
+												callID: "write-1",
+												state: {
+													status: "completed",
+													input: { tool: "Write", filePath: "a.ts", content },
+													output: "done",
+													fileChanges,
+												},
+											},
+										],
+									},
+								}),
+							]
+						: [
+								...toolEvents("m1", "write-1", "Write", {
+									tool: "Write",
+									filePath: "a.ts",
+									content,
+								}),
+								event("tool.completed", {
+									messageId: "m1",
+									partId: "write-1",
+									result: "done",
+									duration: 1,
+									...(source === "event" ? { fileChanges } : {}),
+								}),
+							]),
+				]);
+				return {
+					parts: yield* toolParts(readQuery),
+					details: yield* readQuery.readToolDetails(SESSION, ["write-1"]),
+				};
+			}),
+		);
+		expect(parts[0]?.state).toMatchObject({
+			fileChanges: [{ ...fileChanges[0], after: "😀".repeat(2_000) }],
+			fileChangesBytes: bytes(content),
+		});
+		expect(details[0]).toHaveProperty("fileChanges", fileChanges);
+	});
+
 	it("replaces a running tool with its final result's preview (6), and the SQL cut matches the module (7)", async () => {
 		const final = `${"r".repeat(1_999)}😀${"tail".repeat(1_000)}`;
 		const question = {
@@ -281,6 +390,7 @@ describe("transcript query and detail read", () => {
 				return { running, done };
 			}),
 		);
+
 		const byId = (list: typeof parts.done, id: string) =>
 			list.find((part) => part.callID === id)?.state;
 		expect(byId(parts.running, "bash-1")?.output).toBeUndefined();
@@ -343,6 +453,9 @@ describe("transcript query and detail read", () => {
 				settled: true,
 				input: { _tag: "whole", value: JSON.parse(stored[0]?.input ?? "") },
 				output: { _tag: "whole", text: result },
+				fileChanges: [
+					{ path: "a.ts", kind: "add", before: "", after: content },
+				],
 			},
 		]);
 		expect(details[0]?.input?.value).toMatchObject({ content });

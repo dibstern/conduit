@@ -2,7 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
 import type { StepHandler } from "../runtime.js";
 import { installAsPwa } from "./duoPose.js";
-import { requireRpcControl } from "./shared.js";
+import { headerTargetMisses, requireRpcControl } from "./shared.js";
 
 /** The controls on each header's first row, and every control in each header. */
 const HEADERS = {
@@ -103,27 +103,14 @@ export const duoUnfoldedPortraitHandlers: StepHandler[] = [
 			/^every (session|list) header control is centred at y (\d+) or lower with at least (\d+) pixels of hit area below it$/,
 		run: async ({ world, match }) => {
 			const header = match[1] as Header;
-			const [minCentre, below] = [Number(match[2]), Number(match[3])];
-			const misses = await world.page.locator(HEADERS[header].all).evaluateAll(
-				(controls, { minCentre, below }) =>
-					controls.flatMap((control) => {
-						const rect = control.getBoundingClientRect();
-						if (rect.width === 0) return [];
-						const x = rect.left + rect.width / 2;
-						const y = rect.top + rect.height / 2;
-						const label = control.getAttribute("aria-label") ?? control.id;
-						if (y < minCentre - 0.5) return [`${label} centred at y ${y}`];
-						// The band's last pixel row; hit testing rounds to whole pixels.
-						const hit = document.elementFromPoint(x, y + below - 1);
-						return hit?.closest("button") === control
-							? []
-							: [
-									`${label} has under ${below}px of hit area below y ${y}: ${hit?.id || hit?.tagName} is there`,
-								];
-					}),
-				{ minCentre, below },
-			);
-			expect(misses).toEqual([]);
+			expect(
+				await headerTargetMisses(
+					world.page,
+					HEADERS[header].all,
+					Number(match[2]),
+					Number(match[3]),
+				),
+			).toEqual([]);
 		},
 	},
 	{

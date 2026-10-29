@@ -100,9 +100,7 @@ import {
 	transitionProjectUnavailable,
 } from "./daemon-store-availability.js";
 import { OwnerScopes } from "./owner-scopes.js";
-import { ReadRequest } from "./read-request.js";
 import { RelayCacheTag } from "./relay-cache.js";
-import { SessionGit } from "./session-git.js";
 import { Subprocess } from "./subprocess.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
@@ -388,14 +386,6 @@ export const allProjects = Effect.gen(function* () {
 export const projectInfos = Effect.gen(function* () {
 	const unavailable = yield* DaemonStoreAvailability;
 	const projects = yield* allProjects;
-	const git = yield* Effect.serviceOption(SessionGit);
-	if (Option.isSome(git)) {
-		yield* Effect.forEach(
-			[...new Set(projects.flatMap(({ folders }) => folders))],
-			(directory) => git.value.invalidate({ directory }),
-			{ discard: true },
-		).pipe(Effect.provideService(ReadRequest, "GetProjects"));
-	}
 	return yield* withPublishedProjectGit(
 		projects.map((project) => {
 			const unavailableReason = unavailable.get(project.slug);

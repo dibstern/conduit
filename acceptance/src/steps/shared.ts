@@ -212,6 +212,41 @@ export async function holdUntilVisible(
 	await button.page().mouse.up();
 }
 
+/**
+ * The header controls a thumb would miss: each one centred above `minCentre`,
+ * or whose hit area ends less than `below` px under its centre. Hit testing
+ * finds targets that outgrow their box (a ::before, a clip-path).
+ */
+export function headerTargetMisses(
+	page: Page,
+	controls: string,
+	minCentre: number,
+	below: number,
+): Promise<string[]> {
+	return page.locator(controls).evaluateAll(
+		(elements, { controls, minCentre, below }) =>
+			elements.flatMap((control) => {
+				const rect = control.getBoundingClientRect();
+				if (rect.width === 0) return [];
+				const x = rect.left + rect.width / 2;
+				const y = rect.top + rect.height / 2;
+				const label =
+					control.getAttribute("aria-label") ||
+					control.id ||
+					control.getAttribute("data-testid");
+				if (y < minCentre - 0.5) return [`${label} centred at y ${y}`];
+				// The band's last pixel row; hit testing rounds to whole pixels.
+				const hit = document.elementFromPoint(x, y + below - 1);
+				return hit?.closest(controls) === control
+					? []
+					: [
+							`${label} has under ${below}px of hit area below y ${y}: ${hit?.id || hit?.tagName} is there`,
+						];
+			}),
+		{ controls, minCentre, below },
+	);
+}
+
 export async function openModelPicker(page: Page): Promise<void> {
 	const picker = page.locator("#model-picker");
 	if ((await picker.count()) === 0) {

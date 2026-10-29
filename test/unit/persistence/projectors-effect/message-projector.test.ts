@@ -1311,6 +1311,49 @@ describe("MessageProjector", () => {
 	});
 
 	describe("tool.started", () => {
+		it("retains typed file changes when completing and replaying a tool", async () => {
+			await project(
+				makeStored("message.created", "s1", {
+					messageId: "m1",
+					role: "assistant",
+					sessionId: "s1",
+				}),
+			);
+			await project(
+				makeStored("tool.started", "s1", {
+					messageId: "m1",
+					partId: "tool1",
+					toolName: "Edit",
+					callId: "call1",
+					input: {
+						tool: "Edit",
+						filePath: "a.ts",
+						oldString: "old",
+						newString: "new",
+					},
+				}),
+			);
+			const fileChanges = [
+				{ path: "a.ts", kind: "update", before: "old", after: "new" },
+			] as const;
+			const completed = makeStored("tool.completed", "s1", {
+				messageId: "m1",
+				partId: "tool1",
+				result: "done",
+				duration: 1,
+				fileChanges,
+			});
+			await project(completed);
+			await project(completed, { replaying: true, version: 10 });
+			const row = await queryOne<MessagePartRow>(
+				"SELECT metadata FROM message_parts WHERE id = ?",
+				["tool1"],
+			);
+			expect(JSON.parse(row?.metadata ?? "null")).toMatchObject({
+				fileChanges,
+			});
+		});
+
 		it("adds a tool part row with started status", async () => {
 			const created = makeStored(
 				"message.created",
