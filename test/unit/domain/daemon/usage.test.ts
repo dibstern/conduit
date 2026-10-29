@@ -890,6 +890,315 @@ it.effect(
 		}),
 );
 
+it.effect("drops the late result of an account removed during its read", () =>
+	Effect.gen(function* () {
+		const started = yield* Deferred.make<void>();
+		const release = yield* Deferred.make<void>();
+		let ids = ["account-1", "account-2"];
+		const service = yield* makeUsage({
+			accounts: Effect.sync(() =>
+				ids.map((id) => ({ id, harness: "claude" as const })),
+			),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: (account) =>
+						account.id === "account-2"
+							? Deferred.succeed(started, undefined).pipe(
+									Effect.andThen(Deferred.await(release)),
+									Effect.as<UsageRead>({
+										status: "available",
+										windows: [{ kind: "five_hour", utilization: 50 }],
+									}),
+								)
+							: Effect.succeed<UsageRead>({ status: "available", windows: [] }),
+				},
+			},
+		});
+		const pending = yield* Effect.forkChild(service.refresh({ maxAge: 0 }));
+		yield* Deferred.await(started);
+		ids = ["account-1"];
+		yield* service.refresh({ accountIds: ["account-1"], maxAge: 0 });
+		yield* Deferred.succeed(release, undefined);
+		expect(
+			(yield* Fiber.join(pending)).map((reading) => reading.accountId),
+		).toEqual(["account-1"]);
+		expect(yield* service.latest("account-2")).toBeUndefined();
+		expect(
+			yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
+		).toMatchObject([[{ accountId: "account-1" }]]);
+	}),
+);
+
+it.effect(
+	"merges a live reading into the last reading by window id or kind",
+	() =>
+		Effect.gen(function* () {
+			let failing = false;
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([
+					{ id: "codex-1", harness: "codex" as const },
+					{ id: "codex-2", harness: "codex" as const },
+				]),
+				readers: {
+					claude: unavailableReader,
+					cursor: unavailableReader,
+					codex: {
+						read: () =>
+							failing
+								? Effect.fail(new Error("Reader failed"))
+								: Effect.succeed<UsageRead>({
+										status: "available",
+										planLabel: "Pro",
+										windows: [
+											{
+												id: "codex:primary",
+												kind: "five_hour",
+												label: "Codex",
+												utilization: 10,
+											},
+											{
+												id: "spark:primary",
+												kind: "five_hour",
+												label: "Spark",
+												utilization: 20,
+											},
+											{ kind: "seven_day", utilization: 5 },
+										],
+									}),
+					},
+				},
+			});
+			yield* service.refresh({ accountIds: ["codex-1"], maxAge: 0 });
+			yield* TestClock.adjust("1 minute");
+			failing = true;
+			yield* service.refresh({ accountIds: ["codex-1"], maxAge: 0 });
+			expect((yield* service.latest("codex-1"))?.stale).toBe(true);
+			yield* service.update("codex-1", "codex", {
+				status: "unknown",
+				windows: [
+					{ id: "codex:primary", kind: "month", utilization: 30 },
+					{ id: "spark:primary", kind: "custom", utilization: 25 },
+					{ kind: "seven_day", utilization: 7 },
+					{
+						id: "spark:secondary",
+						kind: "custom",
+						label: "Spark 30m",
+						utilization: 1,
+					},
+				],
+			});
+			expect(yield* service.latest("codex-1")).toEqual({
+				accountId: "codex-1",
+				harness: "codex",
+				status: "available",
+				planLabel: "Pro",
+				windows: [
+					{
+						id: "codex:primary",
+						kind: "month",
+						label: "Codex",
+						utilization: 30,
+					},
+					{
+						id: "spark:primary",
+						kind: "five_hour",
+						label: "Spark",
+						utilization: 25,
+					},
+					{ kind: "seven_day", utilization: 7 },
+					{
+						id: "spark:secondary",
+						kind: "custom",
+						label: "Spark 30m",
+						utilization: 1,
+					},
+				],
+				readAt: yield* Clock.currentTimeMillis,
+				stale: false,
+			});
+			yield* service.update("codex-1", "codex", {
+				status: "available",
+				windows: [{ id: "spark:primary", kind: "five_hour", utilization: 100 }],
+			});
+			expect((yield* service.latest("codex-1"))?.status).toBe("limited");
+			const empty: UsageRead = {
+				status: "unknown",
+				windows: [],
+				reason: "No rate limits yet",
+			};
+			yield* service.update("codex-2", "codex", empty);
+			yield* service.update("codex-2", "claude", {
+				status: "limited",
+				windows: [{ kind: "five_hour", utilization: 100 }],
+			});
+			yield* service.update("codex-3", "codex", empty);
+			expect(yield* service.latest("codex-2")).toEqual({
+				...empty,
+				accountId: "codex-2",
+				harness: "codex",
+				readAt: yield* Clock.currentTimeMillis,
+				stale: false,
+			});
+			expect(yield* service.latest("codex-3")).toBeUndefined();
+		}),
+);
+
+it.effect("keeps a live reading over a read that started before it", () =>
+	Effect.gen(function* () {
+		const started = yield* Deferred.make<void>();
+		const release = yield* Deferred.make<void>();
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: () =>
+						Deferred.succeed(started, undefined).pipe(
+							Effect.andThen(Deferred.await(release)),
+							Effect.as<UsageRead>({
+								status: "available",
+								windows: [{ kind: "five_hour", utilization: 20 }],
+							}),
+						),
+				},
+			},
+		});
+		const pending = yield* Effect.forkChild(
+			service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+		);
+		yield* Deferred.await(started);
+		yield* service.update("account-1", "claude", {
+			status: "available",
+			windows: [{ kind: "five_hour", utilization: 60 }],
+		});
+		const live = yield* service.latest("account-1");
+		expect(live?.windows).toEqual([{ kind: "five_hour", utilization: 60 }]);
+		yield* Deferred.succeed(release, undefined);
+		expect(yield* Fiber.join(pending)).toEqual([live]);
+		expect(yield* service.latest("account-1")).toEqual(live);
+		expect(
+			yield* service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+		).toMatchObject([{ windows: [{ kind: "five_hour", utilization: 20 }] }]);
+	}),
+);
+
+it.effect(
+	"logs a freed model window by its model, and not a window freed at its reset",
+	() => {
+		const messages: unknown[] = [];
+		return Effect.gen(function* () {
+			let calls = 0;
+			const atSecondRead = new Date(1_000).toISOString();
+			const later = new Date(60_000).toISOString();
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: () =>
+							Effect.sync((): UsageRead => {
+								const first = ++calls === 1;
+								return {
+									status: first ? "limited" : "available",
+									windows: [
+										{
+											kind: "five_hour",
+											utilization: first ? 100 : 20,
+											resetsAt: atSecondRead,
+										},
+										{
+											kind: "seven_day_model",
+											model: "Sonnet",
+											utilization: first ? 50 : 40,
+											resetsAt: later,
+										},
+										{
+											kind: "seven_day_model",
+											model: "Fable",
+											utilization: first ? 100 : 30,
+											resetsAt: later,
+										},
+									],
+								};
+							}),
+					},
+				},
+			});
+			yield* service.refresh({ maxAge: 0 });
+			yield* TestClock.adjust("1 second");
+			yield* service.refresh({ maxAge: 0 });
+			expect(messages).toEqual([
+				[
+					"Usage window free before reset",
+					{
+						accountId: "account-1",
+						window: "seven_day_model",
+						model: "Fable",
+						resetsAt: later,
+					},
+				],
+			]);
+		}).pipe(
+			Effect.provide(
+				Logger.layer([
+					Logger.make(({ message }) => {
+						messages.push(message);
+					}),
+				]),
+			),
+		);
+	},
+);
+
+it.effect(
+	"turn end re-reads without viewers only when a plan window is full",
+	() =>
+		Effect.gen(function* () {
+			const reads: Readonly<Record<string, UsageRead>> = {
+				"account-1": {
+					status: "limited",
+					windows: [{ kind: "five_hour", utilization: 100 }],
+				},
+				"account-2": {
+					status: "available",
+					windows: [
+						{ kind: "five_hour", utilization: 50 },
+						{ kind: "seven_day_model", model: "Fable", utilization: 100 },
+					],
+				},
+			};
+			const ids = ["account-1", "account-2", "account-3"];
+			const calls: string[] = [];
+			const service = yield* makeUsage({
+				accounts: Effect.succeed(
+					ids.map((id) => ({ id, harness: "claude" as const })),
+				),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: (account) =>
+							Effect.sync(() => {
+								calls.push(account.id);
+								return reads[account.id] ?? { status: "unknown", windows: [] };
+							}),
+					},
+				},
+			});
+			yield* service.refresh({
+				accountIds: ["account-1", "account-2"],
+				maxAge: 0,
+			});
+			for (const id of ids) yield* service.turnEnded(id);
+			yield* TestClock.adjust("10 seconds");
+			expect(calls).toEqual(["account-1", "account-2", "account-1"]);
+		}),
+);
+
 it.effect(
 	"keeps old usage payloads and scopes optional fields to plan windows",
 	() =>

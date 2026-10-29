@@ -4,18 +4,19 @@ import {
 	Deferred,
 	Duration,
 	Effect,
+	Equal,
 	Fiber,
 	FiberMap,
 	Schedule,
 	Schema,
+	type Scope,
 	Semaphore,
 	Stream,
 	SubscriptionRef,
+	SynchronizedRef,
 } from "effect";
 import { accountLimit } from "../../../contracts/account-limit.js";
 import {
-	type UsageForecast,
-	type UsageHistoryPoint,
 	UsageHistoryPointSchema,
 	type UsageReading,
 	UsageReadingSchema,
@@ -26,6 +27,22 @@ import type {
 	UsageRead,
 	UsageReader,
 } from "../../../provider/usage-reader.js";
+import {
+	type AccountUsage,
+	afterTurn,
+	decide,
+	emptyAccountUsage,
+	freedBeforeReset,
+	live,
+	publishedReading,
+	restored,
+	retired,
+	savedHistory,
+	settle,
+	shouldWake,
+} from "./account-usage.js";
+
+export { forecastUsage } from "./usage-forecast.js";
 
 export interface UsageService {
 	readonly setCursorKeychain?: (
@@ -72,47 +89,14 @@ export const UsageHistorySnapshotSchema = Schema.Record(
 );
 export type UsageHistorySnapshot = typeof UsageHistorySnapshotSchema.Type;
 
-export function forecastUsage(
-	points: readonly UsageHistoryPoint[],
-	latest: number,
-	resetsAt: number | undefined,
-	now: number,
-): UsageForecast | undefined {
-	const first = points[0];
-	const last = points.at(-1);
-	if (
-		resetsAt === undefined ||
-		!Number.isFinite(resetsAt) ||
-		resetsAt <= now ||
-		points.length < 3 ||
-		!first ||
-		!last ||
-		last.at - first.at < 15 * 60_000 ||
-		latest >= 100
-	)
-		return undefined;
-	// Center time offsets to avoid cancellation with epoch-sized timestamps.
-	const meanAt =
-		points.reduce((sum, point) => sum + (point.at - first.at), 0) /
-		points.length;
-	const meanUtilization =
-		points.reduce((sum, point) => sum + point.utilization, 0) / points.length;
-	let covariance = 0;
-	let variance = 0;
-	for (const point of points) {
-		const offset = point.at - first.at - meanAt;
-		covariance += offset * (point.utilization - meanUtilization);
-		variance += offset * offset;
-	}
-	const slope = covariance / variance;
-	if (slope <= 0) return { kind: "under", atReset: Math.round(latest) };
-	const projected = latest + slope * (resetsAt - last.at);
-	return projected >= 100
-		? { kind: "runs_out", at: last.at + (100 - latest) / slope }
-		: { kind: "under", atReset: Math.round(projected) };
-}
+type UsageState = {
+	readonly accounts: ReadonlyMap<string, AccountUsage>;
+	/** Bumped where the readings stream publishes: a refresh's end and a live update. */
+	readonly published: number;
+};
+type UsageStateRef = SubscriptionRef.SubscriptionRef<UsageState>;
 
-export const makeUsage = (options: {
+type UsageOptions = {
 	readonly accounts: Effect.Effect<readonly UsageAccount[]>;
 	readonly accountHarness?: (
 		accountId: string,
@@ -125,306 +109,212 @@ export const makeUsage = (options: {
 			snapshot: UsageHistorySnapshot,
 		) => Effect.Effect<void, unknown>;
 	};
-}) =>
-	Effect.gen(function* () {
-		// Stored readings can name harnesses that no current driver declares.
-		const readers: Readonly<Record<string, UsageReader | undefined>> =
-			options.readers;
-		const scope = yield* Effect.scope;
-		const historyStore = options.history;
-		let history = yield* (
-			historyStore?.load ?? Effect.succeed<UsageHistorySnapshot>({})
-		).pipe(
-			Effect.catchCause((cause) =>
-				Effect.logWarning("Usage history load failed", { cause }).pipe(
-					Effect.as<UsageHistorySnapshot>({}),
-				),
-			),
-		);
-		let savedHistory = history;
-		const historySaveLock = yield* Semaphore.make(1);
-		const lock = yield* Semaphore.make(1);
-		const subscriberLock = yield* Semaphore.make(1);
-		const turnRefreshes = yield* FiberMap.make<string, void>();
-		let subscribers = 0;
-		let sampler: Fiber.Fiber<void> | undefined;
-		const inFlight = new Map<string, Deferred.Deferred<UsageReading>>();
-		const configured = new Set(
-			(yield* options.accounts).map((account) => account.id),
-		);
-		// Restored readings keep their read time and stay stale until a read lands.
-		const latest = new Map<string, UsageReading>(
-			Object.entries(history).flatMap(([accountId, { reading }]) =>
-				reading && configured.has(accountId)
-					? [[accountId, { ...reading, stale: true }]]
-					: [],
-			),
-		);
-		const current = yield* SubscriptionRef.make<readonly UsageReading[]>([
-			...latest.values(),
-		]);
-		const attemptedAt = new Map<string, number>();
-		const liveVersions = new Map<string, number>();
-		const remember = (reading: UsageReading) => {
-			if (reading.status !== "available" && reading.status !== "limited")
-				return;
-			history = {
-				...history,
-				[reading.accountId]: { ...history[reading.accountId], reading },
-			};
-		};
-		const saveHistory = historyStore
-			? historySaveLock.withPermits(1)(
+};
+
+const withAccount = (
+	state: UsageState,
+	accountId: string,
+	record: AccountUsage,
+): UsageState => ({
+	...state,
+	accounts: new Map(state.accounts).set(accountId, record),
+});
+
+const readUsage = (
+	// Stored readings can name harnesses that no current driver declares.
+	readers: Readonly<Record<string, UsageReader | undefined>>,
+	account: UsageAccount,
+) =>
+	Effect.suspend(() => {
+		const reader = readers[account.harness];
+		return reader
+			? reader.read(account)
+			: Effect.succeed<UsageRead>({
+					status: "unavailable",
+					windows: [],
+					reason: "Usage reader is not available for this harness",
+				});
+	}).pipe(
+		Effect.timeoutOrElse({
+			duration: "5 seconds",
+			orElse: () =>
+				Effect.succeed<UsageRead>({
+					status: "unknown",
+					windows: [],
+					reason: "Usage read timed out",
+				}),
+		}),
+		Effect.catchCause(() =>
+			Effect.succeed<UsageRead>({
+				status: "unknown",
+				windows: [],
+				reason: "Usage read failed",
+			}),
+		),
+	);
+
+const settleRead =
+	(
+		state: UsageStateRef,
+		account: UsageAccount,
+		result: Deferred.Deferred<UsageReading>,
+	) =>
+	(read: UsageRead) =>
+		Effect.gen(function* () {
+			const readAt = yield* Clock.currentTimeMillis;
+			const { previous, reading } = yield* SubscriptionRef.modify(
+				state,
+				(current) => {
+					const record = current.accounts.get(account.id) ?? emptyAccountUsage;
+					const settled = settle(record, result, read, {
+						accountId: account.id,
+						harness: account.harness,
+						readAt,
+					});
+					return [
+						{ previous: record.reading, reading: settled.reading },
+						withAccount(current, account.id, settled.record),
+					];
+				},
+			);
+			for (const freed of freedBeforeReset(previous, reading))
+				yield* Effect.logInfo("Usage window free before reset", {
+					accountId: account.id,
+					...freed,
+				});
+			yield* Deferred.succeed(result, reading);
+		});
+
+const readAccount =
+	(
+		state: UsageStateRef,
+		scope: Scope.Scope,
+		readers: UsageOptions["readers"],
+	) =>
+	(accountId: string, account: UsageAccount | undefined, maxAge: number) =>
+		account
+			? Effect.uninterruptibleMask((restore) =>
 					Effect.gen(function* () {
-						if (history === savedHistory) return;
-						const snapshot = history;
-						yield* Effect.suspend(() => historyStore.save(snapshot)).pipe(
-							Effect.tap(() =>
-								Effect.sync(() => {
-									savedHistory = snapshot;
-								}),
-							),
-							Effect.catchCause((cause) =>
-								Effect.logWarning("Usage history save failed", { cause }),
-							),
-							// Async filesystem writes outlive interruption; retain the
-							// permit until the snapshot has finished saving.
-							Effect.uninterruptible,
-						);
+						const now = yield* Clock.currentTimeMillis;
+						const pending = yield* Deferred.make<UsageReading>();
+						// Deciding and marking the read in progress is one atomic step.
+						const decision = yield* SubscriptionRef.modify(state, (current) => {
+							const decision = decide(
+								current.accounts.get(accountId) ?? emptyAccountUsage,
+								now,
+								maxAge,
+								pending,
+							);
+							return [
+								decision,
+								decision.kind === "start"
+									? withAccount(current, accountId, decision.record)
+									: current,
+							];
+						});
+						if (decision.kind === "reuse") return decision.reading;
+						if (decision.kind === "start")
+							yield* Effect.forkIn(
+								restore(
+									readUsage(readers, account).pipe(
+										Effect.flatMap(settleRead(state, account, pending)),
+									),
+								),
+								scope,
+							);
+						return yield* restore(Deferred.await(decision.result));
 					}),
 				)
-			: Effect.void;
-		// A live reading's background save may not have run before shutdown.
-		yield* Effect.addFinalizer(() => saveHistory);
-		const read = (
-			accountId: string,
-			accounts: readonly UsageAccount[],
-			maxAge: Duration.Input,
-		) =>
-			Effect.gen(function* () {
-				const account = accounts.find((account) => account.id === accountId);
-				const result = yield* lock.withPermits(1)(
-					Effect.uninterruptibleMask((restore) =>
-						Effect.gen(function* () {
-							const existing = inFlight.get(accountId);
-							if (existing) return Deferred.await(existing);
-							const now = yield* Clock.currentTimeMillis;
-							const cached = latest.get(accountId);
-							const lastAttempt = attemptedAt.get(accountId);
-							if (
-								cached &&
-								lastAttempt !== undefined &&
-								now - lastAttempt < Duration.toMillis(maxAge)
-							)
-								return Effect.succeed(cached);
-							const pending = yield* Deferred.make<UsageReading>();
-							inFlight.set(accountId, pending);
-							attemptedAt.set(accountId, now);
-							const liveVersion = liveVersions.get(accountId) ?? 0;
-							const reading = Effect.suspend(() => {
-								const reader = account && readers[account.harness];
-								return account && reader
-									? reader.read(account)
-									: Effect.succeed<UsageRead>({
-											status: "unavailable",
-											windows: [],
-											reason: account
-												? "Usage reader is not available for this harness"
-												: "Claude account is not configured",
-										});
-							}).pipe(
-								Effect.timeoutOrElse({
-									duration: "5 seconds",
-									orElse: () =>
-										Effect.succeed<UsageRead>({
-											status: "unknown",
-											windows: [],
-											reason: "Usage read timed out",
-										}),
-								}),
-								Effect.catchCause(() =>
-									Effect.succeed<UsageRead>({
-										status: "unknown",
-										windows: [],
-										reason: "Usage read failed",
-									}),
-								),
-								Effect.flatMap((reading) =>
-									Effect.gen(function* () {
-										const readAt = yield* Clock.currentTimeMillis;
-										const windows =
-											reading.status === "available" ||
-											reading.status === "limited"
-												? reading.windows.map((window) => {
-														if (
-															account?.harness === "codex" ||
-															(window.kind !== "five_hour" &&
-																window.kind !== "seven_day")
-														)
-															return window;
-														const parsedReset =
-															window.resetsAt === undefined
-																? undefined
-																: Date.parse(window.resetsAt);
-														const resetsAt =
-															parsedReset !== undefined &&
-															Number.isFinite(parsedReset)
-																? parsedReset
-																: undefined;
-														const previous = history[accountId]?.[window.kind];
-														const last = previous?.points.at(-1);
-														const reset =
-															// Claude recomputes resets_at per request, so only a
-															// move of more than a few minutes is a new window.
-															(resetsAt !== undefined &&
-																previous?.resetsAt !== undefined &&
-																resetsAt - previous.resetsAt > 10 * 60_000) ||
-															(last !== undefined &&
-																window.utilization < last.utilization);
-														const points = [
-															...(reset ? [] : (previous?.points ?? [])),
-															{ at: readAt, utilization: window.utilization },
-														].slice(-2016);
-														const seriesReset = resetsAt ?? previous?.resetsAt;
-														history = {
-															...history,
-															[accountId]: {
-																...history[accountId],
-																[window.kind]: {
-																	points,
-																	...(seriesReset === undefined
-																		? {}
-																		: { resetsAt: seriesReset }),
-																},
-															},
-														};
-														const forecast = forecastUsage(
-															points,
-															window.utilization,
-															resetsAt,
-															readAt,
-														);
-														return {
-															...window,
-															// Evenly spaced transport samples, including both ends.
-															history:
-																points.length <= 48
-																	? points
-																	: Array.from(
-																			{ length: 48 },
-																			(_, i) => i,
-																		).flatMap(
-																			(i) =>
-																				points[
-																					Math.round(
-																						(i * (points.length - 1)) / 47,
-																					)
-																				] ?? [],
-																		),
-															...(forecast === undefined ? {} : { forecast }),
-														};
-													})
-												: reading.windows;
-										const value: UsageReading = ((liveVersions.get(accountId) ??
-											0) !== liveVersion
-											? latest.get(accountId)
-											: undefined) ?? {
-											...reading,
-											windows,
-											accountId,
-											harness: account?.harness ?? "claude",
-											readAt,
-											stale: false,
-										};
-										const previous = latest.get(accountId);
-										if (
-											value.status === "available" ||
-											value.status === "limited"
-										) {
-											for (const window of value.windows) {
-												const prior = previous?.windows.find(
-													(candidate) =>
-														candidate.kind === window.kind &&
-														(candidate.kind !== "seven_day_model" ||
-															(window.kind === "seven_day_model" &&
-																candidate.model === window.model)),
-												);
-												if (
-													window.utilization < 100 &&
-													prior &&
-													prior.utilization >= 100 &&
-													prior.resetsAt &&
-													Date.parse(prior.resetsAt) > readAt
-												)
-													yield* Effect.logInfo(
-														"Usage window free before reset",
-														{
-															accountId,
-															window: window.kind,
-															...(window.kind === "seven_day_model"
-																? { model: window.model }
-																: {}),
-															resetsAt: prior.resetsAt,
-														},
-													);
-											}
-										}
-										// A failed attempt returns unknown to its caller. The cache
-										// and subscribers retain the last reading, marked stale.
-										yield* Effect.sync(() => {
-											const previous = latest.get(accountId);
-											latest.set(
-												accountId,
-												value.status === "unknown" && previous
-													? { ...previous, stale: true }
-													: value,
-											);
-											remember(value);
-											inFlight.delete(accountId);
-										});
-										yield* Deferred.succeed(pending, value);
-									}),
-								),
-								Effect.ensuring(
-									Effect.sync(() => {
-										if (inFlight.get(accountId) === pending)
-											inFlight.delete(accountId);
-									}),
-								),
-							);
-							yield* Effect.forkIn(restore(reading), scope);
-							return Deferred.await(pending);
+			: Clock.currentTimeMillis.pipe(
+					Effect.map(
+						(readAt): UsageReading => ({
+							accountId,
+							harness: "claude",
+							status: "unavailable",
+							windows: [],
+							reason: "Claude account is not configured",
+							readAt,
+							stale: false,
 						}),
 					),
 				);
-				return yield* result;
-			});
-		const refresh: UsageService["refresh"] = ({ accountIds, maxAge }) =>
+
+const makeHistoryWriter = (
+	state: UsageStateRef,
+	history: UsageOptions["history"],
+	loaded: UsageHistorySnapshot,
+) =>
+	Effect.gen(function* () {
+		if (!history) return Effect.void;
+		const lastSaved = yield* SynchronizedRef.make(loaded);
+		// Async filesystem writes outlive interruption; hold the writer until
+		// the snapshot has finished saving.
+		return SynchronizedRef.updateEffect(lastSaved, (saved) =>
 			Effect.gen(function* () {
-				const accounts = yield* options.accounts;
-				const readings = yield* Effect.forEach(
-					[...new Set(accountIds ?? accounts.map((account) => account.id))],
-					(accountId) => read(accountId, accounts, maxAge),
-					{ concurrency: 8 },
+				const snapshot = savedHistory(
+					(yield* SubscriptionRef.get(state)).accounts,
 				);
-				// Publish the latest completed reads, including a newer overlapping
-				// refresh, so a slow batch cannot replace a fresh account reading.
-				// Recheck eligibility after reads: account edits can happen in flight.
-				const liveIds = new Set(
-					(yield* options.accounts).map((account) => account.id),
+				if (Equal.equals(snapshot, saved)) return saved;
+				return yield* Effect.suspend(() => history.save(snapshot)).pipe(
+					Effect.as(snapshot),
+					Effect.catchCause((cause) =>
+						Effect.logWarning("Usage history save failed", { cause }).pipe(
+							Effect.as(saved),
+						),
+					),
 				);
-				for (const id of latest.keys()) {
-					if (!liveIds.has(id)) {
-						latest.delete(id);
-						attemptedAt.delete(id);
-					}
-				}
-				yield* SubscriptionRef.set(current, [...latest.values()]);
-				yield* saveHistory;
-				return accountIds === undefined
-					? readings.filter((reading) => liveIds.has(reading.accountId))
-					: readings;
-			});
+			}).pipe(Effect.uninterruptible),
+		);
+	});
+
+const makeRefresh =
+	(
+		state: UsageStateRef,
+		accounts: UsageOptions["accounts"],
+		read: ReturnType<typeof readAccount>,
+		saveHistory: Effect.Effect<void>,
+	): UsageService["refresh"] =>
+	({ accountIds, maxAge }) =>
+		Effect.gen(function* () {
+			const configured = yield* accounts;
+			const readings = yield* Effect.forEach(
+				[...new Set(accountIds ?? configured.map((account) => account.id))],
+				(accountId) =>
+					read(
+						accountId,
+						configured.find((account) => account.id === accountId),
+						Duration.toMillis(maxAge),
+					),
+				{ concurrency: 8 },
+			);
+			// Publish the latest completed reads, including a newer overlapping
+			// refresh, so a slow batch cannot replace a fresh account reading.
+			// Recheck eligibility after reads: account edits can happen in flight.
+			const liveIds = new Set((yield* accounts).map((account) => account.id));
+			yield* SubscriptionRef.update(state, (current) => ({
+				accounts: new Map(
+					[...current.accounts].map(([accountId, record]) => [
+						accountId,
+						liveIds.has(accountId) ? record : retired(record),
+					]),
+				),
+				published: current.published + 1,
+			}));
+			yield* saveHistory;
+			return accountIds === undefined
+				? readings.filter((reading) => liveIds.has(reading.accountId))
+				: readings;
+		});
+
+const makeReadings = (
+	state: UsageStateRef,
+	scope: Scope.Scope,
+	refresh: UsageService["refresh"],
+) =>
+	Effect.gen(function* () {
+		const subscriberLock = yield* Semaphore.make(1);
+		let subscribers = 0;
+		let sampler: Fiber.Fiber<void> | undefined;
 		const readings = Stream.unwrap(
 			Effect.gen(function* () {
 				const subscriptionScope = yield* Effect.scope;
@@ -455,7 +345,13 @@ export const makeUsage = (options: {
 						),
 				);
 				let initial = true;
-				return SubscriptionRef.changes(current).pipe(
+				return SubscriptionRef.changes(state).pipe(
+					Stream.changesWith((a, b) => a.published === b.published),
+					Stream.map(({ accounts }) =>
+						[...accounts.values()].flatMap(
+							(record) => publishedReading(record) ?? [],
+						),
+					),
 					Stream.tap(() => {
 						if (!initial) return Effect.void;
 						initial = false;
@@ -469,115 +365,185 @@ export const makeUsage = (options: {
 				);
 			}),
 		);
-		// A successful turn can clear a full reading even without a viewer.
-		const turnEnded: UsageService["turnEnded"] = (accountId) =>
-			Effect.suspend(() =>
-				subscribers === 0 &&
-				!latest
-					.get(accountId)
-					?.windows.some(
-						(window) =>
-							(window.kind === "five_hour" || window.kind === "seven_day") &&
-							window.utilization >= 100,
-					)
-					? Effect.void
-					: FiberMap.run(
-							turnRefreshes,
-							accountId,
-							Effect.sleep("10 seconds").pipe(
-								Effect.andThen(refresh({ accountIds: [accountId], maxAge: 0 })),
-								Effect.asVoid,
-							),
-						).pipe(Effect.asVoid),
-			);
-		const pickFailover: UsageService["pickFailover"] = (excluding, modelId) =>
+		return { readings, viewers: () => subscribers };
+	});
+
+const makeTurnEnded = (
+	state: UsageStateRef,
+	viewers: () => number,
+	refresh: UsageService["refresh"],
+) =>
+	Effect.gen(function* () {
+		const timers = yield* FiberMap.make<string, void>();
+		// The timer carries out the record's wakeAt; a later wakeAt replaces it.
+		const wake = (accountId: string, wakeAt: number) =>
 			Effect.gen(function* () {
-				const order: readonly string[] = yield* options.order ??
-					Effect.succeed([]);
-				const accounts = [...(yield* options.accounts)].sort((a, b) => {
-					const first = order.indexOf(a.id);
-					const second = order.indexOf(b.id);
-					return (
-						(first === -1 ? order.length : first) -
-						(second === -1 ? order.length : second)
-					);
+				yield* Effect.sleep(wakeAt - (yield* Clock.currentTimeMillis));
+				const due = yield* SubscriptionRef.modify(state, (current) => {
+					const record = current.accounts.get(accountId);
+					return record?.wakeAt === wakeAt
+						? [
+								shouldWake(record, viewers()),
+								withAccount(current, accountId, {
+									...record,
+									wakeAt: undefined,
+								}),
+							]
+						: [false, current];
 				});
-				const harness = yield* options.accountHarness?.(excluding) ??
-					Effect.succeed(
-						accounts.find((account) => account.id === excluding)?.harness,
-					);
-				if (harness === undefined) return undefined;
-				for (const account of accounts) {
-					if (account.id === excluding || account.harness !== harness) continue;
-					const [reading] = yield* refresh({
-						accountIds: [account.id],
-						maxAge: "30 seconds",
-					});
-					if (
-						reading &&
-						accountLimit({
-							asker: "automatic",
-							modelId,
-							reading,
-							now: yield* Clock.currentTimeMillis,
-						}).kind === "go"
-					)
-						return account.id;
-				}
-				return undefined;
+				if (due) yield* refresh({ accountIds: [accountId], maxAge: 0 });
 			});
-		return {
-			readings,
-			update: (accountId, harness, reading) =>
-				Effect.gen(function* () {
-					if (
-						!(yield* options.accounts).some(
-							(account) =>
-								account.id === accountId && account.harness === harness,
-						)
-					)
-						return;
-					const readAt = yield* Clock.currentTimeMillis;
-					const previous = latest.get(accountId);
-					const windows = [...(previous?.windows ?? [])];
-					for (const window of reading.windows) {
-						const index = windows.findIndex((value) =>
-							window.id ? value.id === window.id : value.kind === window.kind,
-						);
-						if (index < 0) windows.push(window);
-						else
-							windows[index] = {
-								...windows[index],
-								...window,
-								...(window.kind === "custom" && !window.label
-									? { kind: windows[index]?.kind ?? window.kind }
-									: {}),
-							};
-					}
-					const next: UsageReading = {
-						...previous,
-						...reading,
+		const turnEnded: UsageService["turnEnded"] = (accountId) =>
+			Effect.gen(function* () {
+				const wakeAt = afterTurn(yield* Clock.currentTimeMillis);
+				yield* SubscriptionRef.update(state, (current) =>
+					withAccount(current, accountId, {
+						...(current.accounts.get(accountId) ?? emptyAccountUsage),
+						wakeAt,
+					}),
+				);
+				yield* FiberMap.run(timers, accountId, wake(accountId, wakeAt));
+			});
+		return turnEnded;
+	});
+
+const byOrder =
+	(order: readonly string[]) => (a: UsageAccount, b: UsageAccount) => {
+		const first = order.indexOf(a.id);
+		const second = order.indexOf(b.id);
+		return (
+			(first === -1 ? order.length : first) -
+			(second === -1 ? order.length : second)
+		);
+	};
+
+const failoverHarness = (
+	options: UsageOptions,
+	excluding: string,
+	accounts: readonly UsageAccount[],
+) =>
+	options.accountHarness?.(excluding) ??
+	Effect.succeed(accounts.find((account) => account.id === excluding)?.harness);
+
+const makePickFailover =
+	(
+		options: UsageOptions,
+		refresh: UsageService["refresh"],
+	): UsageService["pickFailover"] =>
+	(excluding, modelId) =>
+		Effect.gen(function* () {
+			const order: readonly string[] = yield* options.order ??
+				Effect.succeed([]);
+			const accounts = [...(yield* options.accounts)].sort(byOrder(order));
+			const harness = yield* failoverHarness(options, excluding, accounts);
+			if (harness === undefined) return undefined;
+			for (const account of accounts) {
+				if (account.id === excluding || account.harness !== harness) continue;
+				const [reading] = yield* refresh({
+					accountIds: [account.id],
+					maxAge: "30 seconds",
+				});
+				if (
+					reading &&
+					accountLimit({
+						asker: "automatic",
+						modelId,
+						reading,
+						now: yield* Clock.currentTimeMillis,
+					}).kind === "go"
+				)
+					return account.id;
+			}
+			return undefined;
+		});
+
+const makeUpdate =
+	(
+		state: UsageStateRef,
+		accounts: UsageOptions["accounts"],
+		saveInBackground: Effect.Effect<void>,
+	): NonNullable<UsageService["update"]> =>
+	(accountId, harness, reading) =>
+		Effect.gen(function* () {
+			if (
+				!(yield* accounts).some(
+					(account) => account.id === accountId && account.harness === harness,
+				)
+			)
+				return;
+			const readAt = yield* Clock.currentTimeMillis;
+			yield* SubscriptionRef.update(state, (current) => ({
+				...withAccount(
+					current,
+					accountId,
+					live(current.accounts.get(accountId) ?? emptyAccountUsage, reading, {
 						accountId,
 						harness,
-						windows,
 						readAt,
-						stale: false,
-						status: windows.some((window) => window.utilization >= 100)
-							? "limited"
-							: windows.length
-								? "available"
-								: reading.status,
-					};
-					latest.set(accountId, next);
-					remember(next);
-					liveVersions.set(accountId, (liveVersions.get(accountId) ?? 0) + 1);
-					yield* SubscriptionRef.set(current, [...latest.values()]);
-					// Live readings arrive mid-turn; the turn must not wait on the disk.
-					yield* Effect.forkIn(saveHistory, scope);
-				}),
-			latest: (accountId) => Effect.sync(() => latest.get(accountId)),
+					}),
+				),
+				published: current.published + 1,
+			}));
+			yield* saveInBackground;
+		});
+
+export const makeUsage = (options: UsageOptions) =>
+	Effect.gen(function* () {
+		const scope = yield* Effect.scope;
+		const loaded = yield* (
+			options.history?.load ?? Effect.succeed<UsageHistorySnapshot>({})
+		).pipe(
+			Effect.catchCause((cause) =>
+				Effect.logWarning("Usage history load failed", { cause }).pipe(
+					Effect.as<UsageHistorySnapshot>({}),
+				),
+			),
+		);
+		const configured = new Set(
+			(yield* options.accounts).map((account) => account.id),
+		);
+		const state = yield* SubscriptionRef.make<UsageState>({
+			accounts: new Map(
+				Object.entries(loaded).map(([accountId, saved]) => [
+					accountId,
+					configured.has(accountId)
+						? restored(saved)
+						: retired(restored(saved)),
+				]),
+			),
+			published: 0,
+		});
+		const saveHistory = yield* makeHistoryWriter(
+			state,
+			options.history,
+			loaded,
+		);
+		// A live reading's background save may not have run before shutdown.
+		yield* Effect.addFinalizer(() => saveHistory);
+		const refresh = makeRefresh(
+			state,
+			options.accounts,
+			readAccount(state, scope, options.readers),
+			saveHistory,
+		);
+		const { readings, viewers } = yield* makeReadings(state, scope, refresh);
+		return {
+			readings,
+			update: makeUpdate(
+				state,
+				options.accounts,
+				// Live readings arrive mid-turn; the turn must not wait on the disk.
+				Effect.forkIn(saveHistory, scope).pipe(Effect.asVoid),
+			),
+			latest: (accountId) =>
+				SubscriptionRef.get(state).pipe(
+					Effect.map(({ accounts }) => {
+						const record = accounts.get(accountId);
+						return record && publishedReading(record);
+					}),
+				),
 			refresh,
-			turnEnded,
-			pickFailover,
+			turnEnded: yield* makeTurnEnded(state, viewers, refresh),
+			pickFailover: makePickFailover(options, refresh),
 		} satisfies UsageService;
 	});
