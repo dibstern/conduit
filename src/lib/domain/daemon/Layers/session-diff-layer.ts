@@ -282,7 +282,8 @@ export const makeSessionDiff = Effect.gen(function* () {
 						snapshot.worktree,
 						"--",
 						...[file.oldPath, file.path].flatMap((path) =>
-							path === undefined ? [] : [`${snapshot.prefix}${path}`],
+							// Literal, so a name like `[id].ts` cannot match other files.
+							path === undefined ? [] : [`:(literal)${snapshot.prefix}${path}`],
 						),
 					])
 					.pipe(

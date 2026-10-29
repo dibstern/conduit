@@ -25,7 +25,9 @@ import {
 // tier boundary is off by one; file() serves a patch for a request that does
 // not match its listing exactly, or forgets a listing too early or never; a
 // subfolder lists or serves paths relative to the repository instead of
-// itself, or leaks changes outside it; a folder without an index, a missing
+// itself, or leaks changes outside it; a path with glob characters serves
+// other files' patches; worktrees sharing a repository race to create its
+// store on first use; a folder without an index, a missing
 // folder or a non-git folder fails the whole listing; collect skips stores
 // left by an earlier run, prunes a snapshot still inside its grace period, or
 // keeps one past it so Gone never comes.
@@ -326,12 +328,14 @@ it("forgets the least recently listed revision once 64 newer ones exist", async 
 	});
 });
 
-it("lists a subfolder relative to itself, keeps a rename's old path, and serves both patches", async () => {
+it("lists a subfolder relative to itself, keeps a rename's old path, and serves each patch alone", async () => {
 	const repo = repository({
+		"sub/[e]dited.txt": "glob before\n",
 		"sub/edited.txt": "before\n",
 		"sub/moved.txt": "a long enough line to be detected as a rename\n",
 		"outside.txt": "outside\n",
 	});
+	writeFileSync(join(repo, "sub/[e]dited.txt"), "glob after\n");
 	writeFileSync(join(repo, "sub/edited.txt"), "after\n");
 	renameSync(join(repo, "sub/moved.txt"), join(repo, "sub/renamed.txt"));
 	writeFileSync(join(repo, "outside.txt"), "changed outside\n");
@@ -364,11 +368,41 @@ it("lists a subfolder relative to itself, keeps a rename's old path, and serves 
 	expect(
 		files.map(({ path, status, oldPath }) => ({ path, status, oldPath })),
 	).toEqual([
+		{ path: "[e]dited.txt", status: "modified", oldPath: undefined },
 		{ path: "edited.txt", status: "modified", oldPath: undefined },
 		{ path: "renamed.txt", status: "renamed", oldPath: "moved.txt" },
 	]);
-	expect(patches[0]).toContain("-before\n+after\n");
-	expect(patches[1]).toContain("rename from moved.txt\nrename to renamed.txt");
+	expect(patches.map((patch) => patch.split("diff --git").length - 1)).toEqual([
+		1, 1, 1,
+	]);
+	expect(patches[0]).toContain("-glob before\n+glob after\n");
+	expect(patches[1]).toContain("-before\n+after\n");
+	expect(patches[2]).toContain("rename from moved.txt\nrename to renamed.txt");
+});
+
+it("lists worktrees that share one repository together on first use", async () => {
+	const repo = repository({ "tracked.txt": "one\n" });
+	const worktrees = Array.from({ length: 6 }, (_, n) => {
+		const worktree = join(root, `worktree-${n}`);
+		git(repo, "worktree", "add", "-q", "--detach", worktree);
+		writeFileSync(join(worktree, "tracked.txt"), `${n}\n`);
+		return worktree;
+	});
+
+	// Each attempt starts from an empty store, so every worktree initialises it.
+	for (const attempt of [1, 2, 3]) {
+		const listing = await Effect.runPromise(
+			Effect.gen(function* () {
+				return yield* (yield* SessionDiff).list(
+					{ id: "s", folders: worktrees.map(present) },
+					scope,
+				);
+			}).pipe(Effect.provide(SessionDiffLive(join(root, `config-${attempt}`)))),
+		);
+		expect(listing.folders.map((folder) => "files" in folder)).toEqual(
+			worktrees.map(() => true),
+		);
+	}
 });
 
 it("reports missing and non-git folders as unavailable beside a listed one", async () => {

@@ -9,7 +9,7 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { Clock, Deferred, Effect } from "effect";
+import { Clock, Deferred, Effect, Semaphore } from "effect";
 import {
 	type FolderSnapshot,
 	FolderTimelineError,
@@ -82,6 +82,8 @@ export const makeFolderTimeline = (configDir: string) =>
 		>();
 		// Stores keep a sweep entry until a sweep runs a full grace after their last snapshot.
 		const touched = new Map<string, number>();
+		// Worktrees of one repository share its store, so one creates it at a time.
+		const creating = yield* Semaphore.make(1);
 		let swept = false;
 
 		const run = (
@@ -135,20 +137,20 @@ export const makeFolderTimeline = (configDir: string) =>
 			const [indexFile = "", commonDir = "", prefix = ""] = stdout.split("\n");
 			const key = createHash("sha256").update(commonDir).digest("hex");
 			const store = join(root, `${key.slice(0, 16)}.git`);
-			const exists = yield* fs(() => stat(join(store, "objects"))).pipe(
-				Effect.as(true),
-				Effect.orElseSucceed(() => false),
-			);
-			if (!exists) {
+			// The store is named for its repository, so alternates never change once written.
+			const alternates = join(store, "objects", "info", "alternates");
+			yield* Effect.gen(function* () {
+				const exists = yield* fs(() => stat(alternates)).pipe(
+					Effect.as(true),
+					Effect.orElseSucceed(() => false),
+				);
+				if (exists) return;
 				yield* fs(() => mkdir(root, { recursive: true }));
 				yield* run(root, ["init", "--bare", "--quiet", "--template=", store]);
-			}
-			yield* fs(() =>
-				writeFile(
-					join(store, "objects", "info", "alternates"),
-					`${join(commonDir, "objects")}\n`,
-				),
-			);
+				yield* fs(() =>
+					writeFile(alternates, `${join(commonDir, "objects")}\n`),
+				);
+			}).pipe(creating.withPermits(1));
 			const repository = { indexFile, store, prefix };
 			repositories.set(directory, repository);
 			return repository;
