@@ -128,6 +128,9 @@ export const StatusPollerLive: Layer.Layer<
 							status: status as SessionStatusValue,
 						},
 						{
+							// Conduit's own inference, not a provider report. The projector
+							// keys its open-run guard on the source below, not this label.
+							provider: "conduit",
 							metadata: {
 								synthetic: true,
 								source: "reconciliation-loop",

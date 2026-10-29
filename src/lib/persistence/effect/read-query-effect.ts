@@ -1323,6 +1323,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					AND json_valid(mp.metadata)
 					AND json_extract(mp.metadata, '$.childSessionId') = c.id
 					AND json_type(mp.metadata, '$.providerTaskId') = 'text'
+					-- A child resumed directly runs its own turn, outside the task list.
+					AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.session_id = c.id
+						AND run.status IN ('pending', 'running'))
 			),
 			owned AS (
 				SELECT id, task_id, owner_id FROM stranded
