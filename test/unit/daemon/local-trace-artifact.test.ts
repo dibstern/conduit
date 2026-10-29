@@ -600,7 +600,7 @@ describe("local trace artifact Effect tracer", () => {
 							minMs: 0,
 						}),
 						// biome-ignore lint/suspicious/noExplicitAny: mock shape satisfies the subset of PinoLogger used by the bridge
-						makePinoLoggerLive(root as any),
+						makePinoLoggerLive(() => root as any),
 					),
 					{ local: true },
 				),

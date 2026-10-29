@@ -29,7 +29,7 @@ type MockPino = ReturnType<typeof mockPino>;
 /** Type-safe wrapper — casts mock root to PinoLogger for makePinoLoggerLive. */
 function layer(mock: MockPino): Layer.Layer<never> {
 	// biome-ignore lint/suspicious/noExplicitAny: mock shape satisfies the subset of PinoLogger used by the bridge
-	return makePinoLoggerLive(mock.root as any);
+	return makePinoLoggerLive(() => mock.root as any);
 }
 
 describe("PinoLoggerLive", () => {
