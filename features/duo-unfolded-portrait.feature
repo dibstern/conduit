@@ -10,7 +10,8 @@ Feature: The Duo's unfolded portrait header sits left of the status row
 # navigation.
 
 Scenario Outline: The session header row moves up beside the status row
-  Given the conduit app is served with the long-transcript mockup
+  Given the session loaded the skills "release-notes by you in turn 1; changelog-style by agent in turn 1; changelog-style by agent in turn 2"
+  And the conduit app is served with the long-transcript mockup
   And the viewport is a duo unfolded portrait
   Then the session header row is centred on y <centre> and ends at x <end>
   And the session title starts at y <title> and the divider sits at y <divider>
@@ -34,6 +35,14 @@ Scenario Outline: The session list header shares the row
 Examples:
   | centre | end | threshold |
   | 32     | 457 | 98        |
+
+Scenario: The list's banners stay clear of the status row
+  Given the conduit app is served with the long-transcript mockup
+  And the viewport is a duo unfolded portrait
+  When I tap back to the session list
+  And a new conduit build is waiting for a restart
+  Then the list shows the server-update banner
+  And no control reaches into the keep-clear zone from x 465 rightwards and y 79 upwards
 
 Scenario: The collapsed island also sits beside the status row
   Given the conduit app is served with the long-transcript mockup

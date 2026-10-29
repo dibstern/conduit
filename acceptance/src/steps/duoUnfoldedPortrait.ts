@@ -1,6 +1,8 @@
 import { expect, type Page } from "@playwright/test";
+import { WS_PROTOCOL_VERSION } from "../../../src/lib/shared-types.js";
 import type { StepHandler } from "../runtime.js";
 import { installAsPwa } from "./duoPose.js";
+import { requireRpcControl } from "./shared.js";
 
 /** The controls on each header's first row, and every control in each header. */
 const HEADERS = {
@@ -26,6 +28,28 @@ const visibleBoxes = (page: Page, selector: string): Promise<Box[]> =>
 	);
 
 export const duoUnfoldedPortraitHandlers: StepHandler[] = [
+	{
+		name: "announce a build waiting for a restart",
+		match: /^a new conduit build is waiting for a restart$/,
+		run: ({ world }) => {
+			// The running build ("dev") stays current, so the page does not reload.
+			requireRpcControl(world.page).setDaemonList("SubscribeServerStatus", {
+				protocolVersion: WS_PROTOCOL_VERSION,
+				buildId: "dev",
+				restartAvailable: true,
+				sessionsRevision: 0,
+			});
+		},
+	},
+	{
+		name: "see the server update banner in the list",
+		match: /^the list shows the server-update banner$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.locator('#sidebar [data-banner-id="server-update"]'),
+			).toBeVisible();
+		},
+	},
 	{
 		name: "set an installed portrait iPhone",
 		match: /^the viewport is an installed iPhone with a (\d+)pt top inset$/,
