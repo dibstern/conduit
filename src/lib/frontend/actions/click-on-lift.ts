@@ -34,64 +34,71 @@ function guardClicks(document: Document) {
 	document.addEventListener("keydown", keepNextClick, true);
 }
 
+type Press = {
+	pointerId: number;
+	x: number;
+	y: number;
+	at: number;
+	control: HTMLElement;
+};
+
+const isStill = (event: PointerEvent, from: { x: number; y: number }) =>
+	Math.hypot(event.clientX - from.x, event.clientY - from.y) < 10;
+
+/** The press a primary touch starts on a control inside `node`, if any. */
+function touchPress(node: HTMLElement, event: PointerEvent): Press | undefined {
+	// Not pen: bits-ui menus open on a pen's pointerdown, so a click on lift
+	// would close them again. iPhones, where the dead zone is, take no pen.
+	if (!event.isPrimary || event.pointerType !== "touch") return undefined;
+	const control =
+		event.target instanceof Element
+			? event.target.closest<HTMLElement>("button, a[href], [role='button']")
+			: null;
+	if (!control || !node.contains(control)) return undefined;
+	return {
+		pointerId: event.pointerId,
+		x: event.clientX,
+		y: event.clientY,
+		at: event.timeStamp,
+		control,
+	};
+}
+
+/** Whether `event` comes from the pointer that made `press`. */
+const continues = (
+	press: Press | undefined,
+	event: PointerEvent,
+): press is Press => press?.pointerId === event.pointerId;
+
+/** A short, still lift whose control did not handle it itself. */
+const isTap = (press: Press, event: PointerEvent) =>
+	!event.defaultPrevented &&
+	event.timeStamp - press.at < 700 &&
+	isStill(event, press);
+
 export function clickOnLift(node: HTMLElement): () => void {
 	const document = node.ownerDocument;
-	let press:
-		| {
-				pointerId: number;
-				x: number;
-				y: number;
-				at: number;
-				control: HTMLElement;
-		  }
-		| undefined;
-
-	const still = (event: PointerEvent, from: { x: number; y: number }) =>
-		Math.hypot(event.clientX - from.x, event.clientY - from.y) < 10;
+	let press: Press | undefined;
 
 	function pointerdown(event: PointerEvent) {
-		const control =
-			event.target instanceof Element
-				? event.target.closest<HTMLElement>("button, a[href], [role='button']")
-				: null;
-		press =
-			control &&
-			node.contains(control) &&
-			event.isPrimary &&
-			// Not pen: bits-ui menus open on a pen's pointerdown, so a click on lift
-			// would close them again. iPhones, where the dead zone is, take no pen.
-			event.pointerType === "touch"
-				? {
-						pointerId: event.pointerId,
-						x: event.clientX,
-						y: event.clientY,
-						at: event.timeStamp,
-						control,
-					}
-				: undefined;
+		press = touchPress(node, event);
 	}
 
 	function pointermove(event: PointerEvent) {
-		if (event.pointerId === press?.pointerId && !still(event, press))
-			press = undefined;
+		if (continues(press, event) && !isStill(event, press)) press = undefined;
 	}
 
 	function pointercancel(event: PointerEvent) {
-		if (event.pointerId === press?.pointerId) press = undefined;
+		if (continues(press, event)) press = undefined;
 	}
 
 	// Listens on the document after Svelte's delegated handlers, so a control's
 	// own pointerup has already run and could prevent the default.
 	function pointerup(event: PointerEvent) {
 		const pressed = press;
-		if (event.pointerId !== pressed?.pointerId) return;
+		if (!continues(pressed, event)) return;
 		press = undefined;
-		if (
-			event.defaultPrevented ||
-			event.timeStamp - pressed.at >= 700 ||
-			!still(event, pressed)
-		)
-			return;
+		if (!isTap(pressed, event)) return;
 		pressed.control.click();
 		dropClickUntil = event.timeStamp + 600;
 	}
