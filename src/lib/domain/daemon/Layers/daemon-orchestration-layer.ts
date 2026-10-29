@@ -233,25 +233,32 @@ export const DaemonOrchestrationLive = Layer.effect(
 		const events = yield* Effect.serviceOption(SessionEventBusTag);
 		if (Option.isSome(timeline) && Option.isSome(events)) {
 			const folders = timeline.value;
+			const scope = yield* Effect.scope;
 			// The run-end checkpoint, a joined run's release and a deleted session's captures.
 			yield* (yield* events.value.subscribe()).pipe(
 				Stream.runForEach((event) => {
 					const { runId } = event.metadata;
 					if (event.runEnded && runId)
-						return folders.runEnded(runId, (sessionId, capture) =>
-							Effect.gen(function* () {
-								const projectId = yield* projectOfSession(sessionId);
-								yield* persist.persistEvent(
-									canonicalEvent("run.changes_captured", sessionId, capture, {
-										provider: event.provider,
-										eventId: Schema.decodeSync(EventId)(
-											`evt_conduit_run_changes_captured_${runId}`,
-										),
-									}),
-									{ projectId },
-								);
-							}),
-						);
+						return folders
+							.runEnded(runId, (sessionId, capture) =>
+								Effect.gen(function* () {
+									const projectId = yield* projectOfSession(sessionId);
+									yield* persist.persistEvent(
+										canonicalEvent("run.changes_captured", sessionId, capture, {
+											provider: event.provider,
+											eventId: Schema.decodeSync(EventId)(
+												`evt_conduit_run_changes_captured_${runId}`,
+											),
+										}),
+										{ projectId },
+									);
+								}),
+							)
+							.pipe(
+								// Captures run beside the bus, which drops events a stalled subscriber misses.
+								Effect.forkIn(scope),
+								Effect.asVoid,
+							);
 					if (
 						event.type === "run.started" &&
 						runId &&

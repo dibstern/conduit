@@ -9,7 +9,7 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { Clock, Deferred, Effect, Semaphore } from "effect";
+import { Clock, Deferred, Effect, type Result, Semaphore } from "effect";
 import type { RunChangesCaptured } from "../../../contracts/stored-event.js";
 import {
 	type FolderSnapshot,
@@ -102,6 +102,8 @@ interface LiveRun {
 	/** Folders another session ran in while this run was live. */
 	readonly shared: Set<string>;
 	readonly done: Deferred.Deferred<void>;
+	/** Set at the run's end; its capture may still be recording. */
+	ended: boolean;
 }
 
 const gapOf = (error: FolderTimelineError) => ({
@@ -143,7 +145,7 @@ type Snapshot = (
 /** Marks the folders a new run shares with live runs of other sessions, on both sides. */
 function markShared(runs: Iterable<LiveRun>, live: LiveRun) {
 	for (const other of runs)
-		if (other.sessionId !== live.sessionId)
+		if (!other.ended && other.sessionId !== live.sessionId)
 			for (const directory of live.directories)
 				if (other.directories.includes(directory)) {
 					other.shared.add(directory);
@@ -178,10 +180,11 @@ const sparseTree = (
 	});
 
 const captureFolder = (
-	{ git, snapshot }: { readonly git: Git; readonly snapshot: Snapshot },
+	git: Git,
 	live: LiveRun,
 	store: string,
 	directory: string,
+	end: Result.Result<FolderSnapshot, FolderTimelineError>,
 ) =>
 	Effect.gen(function* (): Effect.fn.Return<
 		RunChangesCaptured["folders"][number],
@@ -192,7 +195,7 @@ const captureFolder = (
 			message: "The run had no start checkpoint",
 		};
 		if (!("store" in start)) return { directory, ...start };
-		const end = yield* snapshot(directory);
+		const { worktree } = yield* Effect.fromResult(end);
 		const { stdout } = yield* git(start.store, [
 			"diff-tree",
 			"-r",
@@ -201,7 +204,7 @@ const captureFolder = (
 			"--no-renames",
 			...(start.prefix === "" ? [] : [`--relative=${start.prefix}`]),
 			start.worktree,
-			end.worktree,
+			worktree,
 		]);
 		const changes = parseRaw(stdout);
 		if (changes.length > MAX_CHANGES)
@@ -299,11 +302,17 @@ const checkpointStart = (
 	runId: string,
 	live: LiveRun,
 	directory: string,
+	index: number,
 ) =>
 	Effect.gen(function* () {
 		const start = yield* snapshot(directory);
-		// The pin keeps the start tree's objects past the grace period.
-		yield* git(start.store, ["update-ref", `${PINS}${runId}`, start.worktree]);
+		// The pin keeps the start tree's objects past the grace period. Folders
+		// sharing a store each need their own.
+		yield* git(start.store, [
+			"update-ref",
+			`${PINS}${runId}/${index}`,
+			start.worktree,
+		]);
 		live.starts.set(directory, start);
 	}).pipe(
 		Effect.timeoutOrElse({
@@ -489,7 +498,11 @@ export const makeFolderTimeline = (configDir: string) =>
 					]).pipe(Effect.orElseSucceed(() => ({ stdout: "" })));
 					const orphans = stdout
 						.split("\n")
-						.filter((ref) => ref !== "" && !runs.has(ref.slice(PINS.length)));
+						.filter(
+							(ref) =>
+								ref !== "" &&
+								!runs.has(ref.slice(PINS.length, ref.lastIndexOf("/"))),
+						);
 					if (orphans.length > 0)
 						yield* run(store, ["--git-dir", store, "update-ref", "--stdin"], {
 							input: orphans.map((ref) => `delete ${ref}\n`).join(""),
@@ -541,13 +554,16 @@ export const makeFolderTimeline = (configDir: string) =>
 		) => run(store, ["--git-dir", store, ...args], options);
 
 		const unpin = (runId: string, live: LiveRun) =>
-			Effect.forEach(live.starts.values(), (start) =>
-				"store" in start
-					? git(start.store, ["update-ref", "-d", `${PINS}${runId}`]).pipe(
-							Effect.ignore,
-						)
-					: Effect.void,
-			);
+			Effect.forEach(live.directories, (directory, index) => {
+				const start = live.starts.get(directory);
+				return start && "store" in start
+					? git(start.store, [
+							"update-ref",
+							"-d",
+							`${PINS}${runId}/${index}`,
+						]).pipe(Effect.ignore)
+					: Effect.void;
+			});
 		const drop = (runId: string) =>
 			Effect.gen(function* () {
 				const live = runs.get(runId);
@@ -572,13 +588,14 @@ export const makeFolderTimeline = (configDir: string) =>
 						starts: new Map(),
 						shared: new Set(),
 						done: yield* Deferred.make<void>(),
+						ended: false,
 					};
 					markShared(runs.values(), live);
 					runs.set(runId, live);
 					yield* Effect.forEach(
 						directories,
-						(directory) =>
-							checkpointStart({ git, snapshot }, runId, live, directory),
+						(directory, index) =>
+							checkpointStart({ git, snapshot }, runId, live, directory, index),
 						{ concurrency: "unbounded", discard: true },
 					);
 				}),
@@ -587,8 +604,20 @@ export const makeFolderTimeline = (configDir: string) =>
 				Effect.gen(function* () {
 					const live = runs.get(runId);
 					if (!live) return;
+					live.ended = true;
+					// The end checkpoint is taken now; only writing the session's store waits.
+					const ends = yield* Effect.forEach(
+						live.directories,
+						(directory) =>
+							Effect.result(snapshot(directory)).pipe(
+								Effect.map((end) => [directory, end] as const),
+							),
+						{ concurrency: "unbounded" },
+					);
 					yield* sessionLock(live.sessionId).withPermits(1)(
 						Effect.gen(function* () {
+							// Forgotten while its end checkpoint was taken.
+							if (!runs.has(runId)) return;
 							const store = yield* openSessionStore(
 								run,
 								root,
@@ -598,9 +627,9 @@ export const makeFolderTimeline = (configDir: string) =>
 							const capture = {
 								runId,
 								folders: yield* Effect.forEach(
-									live.directories,
-									(directory) =>
-										captureFolder({ git, snapshot }, live, store, directory),
+									ends,
+									([directory, end]) =>
+										captureFolder(git, live, store, directory, end),
 									{ concurrency: "unbounded" },
 								),
 							};

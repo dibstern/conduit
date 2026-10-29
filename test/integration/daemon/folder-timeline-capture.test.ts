@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Fiber } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RunChangesCaptured } from "../../../src/lib/contracts/stored-event.js";
 import { FolderTimeline } from "../../../src/lib/domain/daemon/Services/folder-timeline.js";
@@ -152,7 +152,7 @@ it("captures each folder's changed paths, survives a user rebase and gc, and for
 		}),
 	);
 
-	expect(result.pinned).toBe("refs/conduit/runs/r1");
+	expect(result.pinned).toBe("refs/conduit/runs/r1/0");
 	expect(result.pinsAfter).toBe("");
 	expect(result.recorded).toHaveLength(1);
 	expect(result.recorded[0]?.sessionId).toBe("s1");
@@ -317,8 +317,8 @@ it("drops a joined run, holds settled until the capture is recorded, and collect
 			git(
 				store,
 				"update-ref",
-				"refs/conduit/runs/orphan",
-				git(store, "rev-parse", "refs/conduit/runs/r1"),
+				"refs/conduit/runs/orphan/0",
+				git(store, "rev-parse", "refs/conduit/runs/r1/0"),
 			);
 			yield* timeline.collect(0);
 			const collectedPins = pins(store);
@@ -344,10 +344,99 @@ it("drops a joined run, holds settled until the capture is recorded, and collect
 		}),
 	);
 	expect(outcome.startedPins).toBe(
-		"refs/conduit/runs/joiner\nrefs/conduit/runs/r1",
+		"refs/conduit/runs/joiner/0\nrefs/conduit/runs/r1/0",
 	);
 	expect(outcome.joinedRecorded).toEqual([]);
-	expect(outcome.collectedPins).toBe("refs/conduit/runs/r1");
+	expect(outcome.collectedPins).toBe("refs/conduit/runs/r1/0");
 	expect(outcome.order).toEqual(["recorded", "settled"]);
 	expect(outcome.endPins).toBe("");
+});
+
+it("pins each folder's start tree when two worktrees of one repository share a store", async () => {
+	const app = repository("app", { "a.txt": "a\n" });
+	const second = join(root, "second");
+	git(app, "worktree", "add", "-q", "-b", "second", second);
+	// Each worktree starts from a tree only the timeline's store holds.
+	writeFileSync(join(app, "a.txt"), "app start\n");
+	writeFileSync(join(second, "a.txt"), "second\n");
+	const folders = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			yield* timeline.runStarted({
+				sessionId: "s1",
+				runId: "r1",
+				directories: [app, second],
+			});
+			// Old enough to prune: only the pins keep the start trees alive.
+			yield* timeline.collect(0);
+			writeFileSync(join(app, "a.txt"), "app\n");
+			writeFileSync(join(second, "a.txt"), "second again\n");
+			return (yield* end("r1"))[0]?.capture.folders ?? [];
+		}),
+	);
+	expect(
+		folders.map((folder) =>
+			"changes" in folder ? folder.changes.map(({ path }) => path) : folder,
+		),
+	).toEqual([["a.txt"], ["a.txt"]]);
+});
+
+it("ends a run at its end checkpoint even while an earlier capture is still recording", async () => {
+	const app = repository("app", { "a.txt": "a\n" });
+	const other = repository("other", { "b.txt": "b\n" });
+	const outcome = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			const entered = yield* Deferred.make<void>();
+			const release = yield* Deferred.make<void>();
+			yield* timeline.runStarted({
+				sessionId: "s1",
+				runId: "r1",
+				directories: [app],
+			});
+			const first = yield* timeline
+				.runEnded("r1", () =>
+					Deferred.succeed(entered, undefined).pipe(
+						Effect.andThen(Deferred.await(release)),
+					),
+				)
+				.pipe(Effect.forkChild);
+			yield* Deferred.await(entered);
+			// r1 has ended: a run starting now does not overlap it.
+			yield* timeline.runStarted({
+				sessionId: "s2",
+				runId: "r2",
+				directories: [app],
+			});
+			yield* timeline.runStarted({
+				sessionId: "s1",
+				runId: "r3",
+				directories: [other],
+			});
+			writeFileSync(join(other, "during.txt"), "during\n");
+			const third = yield* end("r3").pipe(Effect.forkChild);
+			yield* Effect.sleep("1 second");
+			// Written after r3 ended, while r1 still holds the session's store.
+			writeFileSync(join(other, "after.txt"), "after\n");
+			yield* Deferred.succeed(release, undefined);
+			yield* Fiber.join(first);
+			const ended = yield* Fiber.join(third);
+			const second = yield* end("r2");
+			const folderOf = (recorded: typeof ended) =>
+				recorded[0]?.capture.folders[0];
+			const thirdFolder = folderOf(ended);
+			const secondFolder = folderOf(second);
+			return {
+				third:
+					thirdFolder && "changes" in thirdFolder
+						? thirdFolder.changes.map(({ path }) => path)
+						: thirdFolder,
+				secondShared:
+					secondFolder && "shared" in secondFolder
+						? secondFolder.shared
+						: secondFolder,
+			};
+		}),
+	);
+	expect(outcome).toEqual({ third: ["during.txt"], secondShared: false });
 });
