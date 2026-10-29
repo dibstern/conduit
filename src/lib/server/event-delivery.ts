@@ -14,6 +14,7 @@ import {
 	WsRpcError,
 	type WsRpcGroup,
 } from "../contracts/ws-rpc.js";
+import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
 import type { Envelope } from "../domain/relay/Services/read-model-subscription.js";
 import { ConfigTag } from "../domain/relay/Services/services.js";
@@ -29,6 +30,24 @@ import {
 export const CurrentEventDelivery = Context.Reference<
 	EventDelivery | undefined
 >("conduit/server/EventDelivery", { defaultValue: () => undefined });
+
+/**
+ * Requests run on the socket's protocol fiber, which never sees the
+ * connection's delivery, so a stream without one owns a delivery and reports
+ * its Interests to Session Activity itself.
+ */
+export const currentEventDelivery = Effect.gen(function* () {
+	const current = yield* CurrentEventDelivery;
+	if (current) return current;
+	const delivery = new EventDelivery();
+	const activity = yield* Effect.serviceOption(SessionActivityTag);
+	if (Option.isSome(activity))
+		yield* Effect.acquireRelease(
+			Effect.sync(() => activity.value.watchInterests(delivery)),
+			(release) => Effect.sync(release),
+		);
+	return delivery;
+});
 
 type WsRpcs = RpcGroup.Rpcs<typeof WsRpcGroup>;
 export interface SubscriptionProducer {
@@ -196,7 +215,7 @@ export const deliverEventStream = <K extends SubscribeMethod, A, E, R>(
 ): Stream.Stream<A, E | WsRpcError, R> =>
 	Stream.unwrap(
 		Effect.gen(function* () {
-			const delivery = (yield* CurrentEventDelivery) ?? new EventDelivery();
+			const delivery = yield* currentEventDelivery;
 			const config = yield* Effect.serviceOption(ConfigTag);
 			const openedProducer = producer ?? {
 				projectId: Option.isSome(config) ? config.value.slug : undefined,
@@ -239,7 +258,7 @@ export const deliverSessionRows = <
 ): Stream.Stream<Envelope<A> | ShellProjectsFrame, E, R> =>
 	Stream.unwrap(
 		Effect.gen(function* () {
-			const delivery = (yield* CurrentEventDelivery) ?? new EventDelivery();
+			const delivery = yield* currentEventDelivery;
 			const config = yield* Effect.serviceOption(ConfigTag);
 			const projectId = Option.isSome(config)
 				? config.value.slug
@@ -328,7 +347,7 @@ export const deliverPtyRows = <E, R>(
 ): Stream.Stream<PtyEnvelope, E, R> =>
 	Stream.unwrap(
 		Effect.gen(function* () {
-			const delivery = (yield* CurrentEventDelivery) ?? new EventDelivery();
+			const delivery = yield* currentEventDelivery;
 			const config = yield* Effect.serviceOption(ConfigTag);
 			const projectId = Option.isSome(config)
 				? config.value.slug

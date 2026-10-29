@@ -273,6 +273,8 @@ export interface SessionGit {
 	upstream?: string;
 	worktree?: string;
 	dirty?: boolean;
+	/** Porcelain and dirty content digest; no per-file state leaves SessionGit. */
+	fingerprint?: string;
 	changes?: { files: number; insertions: number; deletions: number };
 	ahead?: number;
 	behind?: number;
@@ -293,6 +295,7 @@ const GitStatusSchema = Schema.Struct({
 	upstream: Schema.optionalKey(Schema.String),
 	worktree: Schema.optionalKey(Schema.String),
 	dirty: Schema.optionalKey(Schema.Boolean),
+	fingerprint: Schema.optionalKey(Schema.String),
 	changes: Schema.optionalKey(
 		Schema.Struct({
 			files: Schema.Number,

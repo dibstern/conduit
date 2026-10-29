@@ -184,6 +184,7 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			slowRpcCount: (logs.match(/slow rpc/g) ?? []).length,
 		};
 	};
+	const idlePhase = () => delay(BUDGET.idleMs);
 
 	try {
 		report["revision"] = await git(resolve("."), "rev-parse", "HEAD");
@@ -304,16 +305,6 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 				CONDUIT_SLOW_RPC_MS: String(BUDGET.slowRpcMs),
 			},
 		});
-		const browser = await harness.connect(
-			undefined,
-			undefined,
-			"process-test",
-			false,
-		);
-		check(
-			sessions.every(({ id }) => latestRow(browser, id) !== undefined),
-			"all 30 sessions must reach the browser snapshot",
-		);
 		const startupAt = performance.now();
 		const startupDb = new Database(join(harness.configDir, "events.db"), {
 			readonly: true,
@@ -336,7 +327,32 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 		} finally {
 			startupDb.close();
 		}
-		const idle = await measure(() => delay(BUDGET.idleMs));
+		// Measure before connecting: SubscribeShell grants project Interests even
+		// when the browser has never opened any of that project's sessions.
+		const noInterests = await measure(idlePhase);
+		const coldFolders = [
+			coldProject,
+			...sessions
+				.filter(({ projectId }) => projectId === "cold-project")
+				.map(({ path }) => path),
+		];
+		const coldReads = coldFolders.reduce(
+			(reads, folder) => reads + (noInterests.gitReads[folder] ?? 0),
+			0,
+		);
+		report["noInterests"] = { ...noInterests, coldFolders, coldReads };
+		check(coldReads === 0, `no Interests: ${coldReads} cold-project git reads`);
+		const browser = await harness.connect(
+			undefined,
+			undefined,
+			"process-test",
+			false,
+		);
+		check(
+			sessions.every(({ id }) => latestRow(browser, id) !== undefined),
+			"all 30 sessions must reach the browser snapshot",
+		);
+		const idle = await measure(idlePhase);
 		report["idle"] = idle;
 		check(
 			(idle.spawns * 60_000) / idle.durationMs <= BUDGET.idleSpawnsPerMinute,
