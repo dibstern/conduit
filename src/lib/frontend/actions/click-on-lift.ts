@@ -88,10 +88,6 @@ export function clickOnLift(node: HTMLElement): () => void {
 		if (continues(press, event) && !isStill(event, press)) press = undefined;
 	}
 
-	function pointercancel(event: PointerEvent) {
-		if (continues(press, event)) press = undefined;
-	}
-
 	// Listens on the document after Svelte's delegated handlers, so a control's
 	// own pointerup has already run and could prevent the default.
 	function pointerup(event: PointerEvent) {
@@ -105,13 +101,11 @@ export function clickOnLift(node: HTMLElement): () => void {
 
 	node.addEventListener("pointerdown", pointerdown);
 	document.addEventListener("pointermove", pointermove, true);
-	document.addEventListener("pointercancel", pointercancel, true);
 	document.addEventListener("pointerup", pointerup);
 	guardClicks(document);
 	return () => {
 		node.removeEventListener("pointerdown", pointerdown);
 		document.removeEventListener("pointermove", pointermove, true);
-		document.removeEventListener("pointercancel", pointercancel, true);
 		document.removeEventListener("pointerup", pointerup);
 	};
 }
