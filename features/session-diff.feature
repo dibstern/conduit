@@ -46,18 +46,91 @@ Examples:
   | auto_path  | on_demand_path   | binary_path     | too_large_path | too_large_bytes | lists |
   | src/app.ts | src/generated.ts | assets/logo.png | data/dump.json | 1258291         | 2     |
 
-Scenario Outline: A hidden Diff pane does not list, and showing it again re-lists
+Scenario Outline: A hidden Diff pane does not list across session switches, and showing it again re-lists
   Given the conduit app is served with the long-transcript mockup
   And the session has <count> small unstaged files
-  When I open the Diff right pane
+  When I open the "<other>" session
+  And I open the Files right pane
+  And I open the "<first>" session
+  And I open the Diff right pane
   And I select the Files right pane tab
+  Then the diff was listed <first_lists> times
+  When I open the "<other>" session
+  And I open the "<first>" session
+  And I open the "<other>" session
   Then the diff was listed <first_lists> times
   When I select the Diff right pane tab
   Then the diff was listed <shown_lists> times
 
 Examples:
-  | count | first_lists | shown_lists |
-  | 1     | 1           | 2           |
+  | count | first                 | other                 | first_lists | shown_lists |
+  | 1     | Fix model selector UI | Add dark mode support | 1           | 2           |
+
+Scenario Outline: A hidden Diff pane fetches no patch until it is shown again
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  And the first <path> patch is gone
+  And the next <path> patch reply is held
+  When I open the Diff right pane
+  And the next diff listing is held
+  And the held diff patch lands
+  And I select the Files right pane tab
+  And the held diff listing lands
+  Then the <path> patch was requested <hidden_requests> times
+  When I select the Diff right pane tab
+  Then the <path> diff shows its patch
+  And the <path> patch was requested <shown_requests> times
+
+Examples:
+  | count | path       | hidden_requests | shown_requests |
+  | 1     | file-01.ts | 1               | 2              |
+
+Scenario Outline: A Gone that lands after a newer listing retries without another re-list
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  And the first <path> patch is gone
+  And the next <path> patch reply is held
+  When I open the Diff right pane
+  Then the <path> patch was requested <first_requests> times
+  When I select the Files right pane tab
+  And I select the Diff right pane tab
+  Then the diff was listed <lists> times
+  When the held diff patch lands
+  Then the <path> diff shows its patch
+  And the diff was listed <lists> times
+
+Examples:
+  | count | path       | first_requests | lists |
+  | 1     | file-01.ts | 1              | 2     |
+
+Scenario Outline: A pair that stays gone shows its error after one re-list
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  And every <path> patch is gone
+  When I open the Diff right pane
+  Then the <path> diff shows its error
+  And the diff was listed <lists> times
+  And the <path> patch was requested <requests> times
+
+Examples:
+  | count | path       | lists | requests |
+  | 1     | file-01.ts | 2     | 2        |
+
+Scenario Outline: A re-list fetches only the pair that changed
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  When I open the Diff right pane
+  Then the <last_path> diff shows its patch
+  When the <changed_path> pair changes
+  And I select the Files right pane tab
+  And I select the Diff right pane tab
+  Then the <changed_path> patch was requested <changed_requests> times
+  And the <same_path> patch was requested <same_requests> times
+  And the <last_path> patch was requested <same_requests> times
+
+Examples:
+  | count | same_path  | changed_path | last_path  | changed_requests | same_requests |
+  | 3     | file-01.ts | file-02.ts   | file-03.ts | 2                | 1             |
 
 Scenario Outline: A listing that lands after a session switch stays with its session
   Given the conduit app is served with the long-transcript mockup

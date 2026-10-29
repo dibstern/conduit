@@ -9,16 +9,47 @@ import { requireRpcControl } from "./shared.js";
 interface DiffFixture {
 	readonly files: SessionDiffFile[];
 	readonly requested: string[];
-	readonly gone: Set<string>;
+	/** Gone answers left per path. */
+	readonly gone: Map<string, number>;
 	/** Patch requests whose revision another session listed. */
 	readonly foreign: string[];
 	lists: number;
-	holdNext: boolean;
+	holdList: boolean;
+	holdPatch: string | null;
 	release: (() => void) | null;
 	replied: Promise<void> | null;
 }
 
 const fixtures = new WeakMap<Page, DiffFixture>();
+
+/** Parks a stub until a step releases it. */
+async function held(fixture: DiffFixture): Promise<void> {
+	const reply = new Promise<void>((resolve) => {
+		fixture.release = resolve;
+	});
+	fixture.replied = reply;
+	await reply;
+}
+
+const frames = (page: Page, count: number) =>
+	page.evaluate(async (count) => {
+		for (let frame = 0; frame < count; frame += 1)
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+	}, count);
+
+/** Lets a reply the page already has go out and come back, so a count can be read as final. */
+async function settle(page: Page): Promise<void> {
+	await frames(page, 2);
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	await frames(page, 2);
+}
+
+/** Polls a count to the expected value, then checks that it stays there. */
+async function settledAt(page: Page, read: () => number, expected: number) {
+	await expect.poll(read).toBe(expected);
+	await settle(page);
+	expect(read()).toBe(expected);
+}
 
 /** A patch whose first added line names its file, so a step can find it. */
 function patchFor(path: string, added = 1, removed = 1): string {
@@ -56,10 +87,11 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 	const fixture: DiffFixture = {
 		files,
 		requested: [],
-		gone: new Set(),
+		gone: new Map(),
 		foreign: [],
 		lists: 0,
-		holdNext: false,
+		holdList: false,
+		holdPatch: null,
 		release: null,
 		replied: null,
 	};
@@ -67,13 +99,9 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 	requireRpcControl(page).setStubs({
 		SessionDiffList: async ({ sessionId }) => {
 			fixture.lists += 1;
-			if (fixture.holdNext) {
-				fixture.holdNext = false;
-				const held = new Promise<void>((resolve) => {
-					fixture.release = resolve;
-				});
-				fixture.replied = held;
-				await held;
+			if (fixture.holdList) {
+				fixture.holdList = false;
+				await held(fixture);
 			}
 			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
 			return {
@@ -81,8 +109,12 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 				folders: [{ folder: "/workspace/myapp", files: fixture.files }],
 			};
 		},
-		SessionDiffFile: ({ path, sessionId, revision }) => {
+		SessionDiffFile: async ({ path, sessionId, revision }) => {
 			fixture.requested.push(path);
+			if (fixture.holdPatch === path) {
+				fixture.holdPatch = null;
+				await held(fixture);
+			}
 			if (revision !== `rev-${sessionId}`) {
 				fixture.foreign.push(`${sessionId} ${revision} ${path}`);
 				throw new SessionDiffError({
@@ -90,7 +122,9 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 					message: "That file was not in this listing",
 				});
 			}
-			if (fixture.gone.delete(path))
+			const gone = fixture.gone.get(path) ?? 0;
+			fixture.gone.set(path, gone - 1);
+			if (gone > 0)
 				throw new SessionDiffError({
 					reason: "gone",
 					message: "The listing is no longer available",
@@ -166,10 +200,27 @@ export const sessionDiffHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "first patch is gone",
-		match: /^the first (\S+) patch is gone$/,
+		name: "patch is gone",
+		match: /^(the first|every) (\S+) patch is gone$/,
 		run: async ({ world, match }) => {
-			requireFixture(world.page).gone.add(match[1] ?? "");
+			requireFixture(world.page).gone.set(
+				match[2] ?? "",
+				match[1] === "every" ? Number.POSITIVE_INFINITY : 1,
+			);
+		},
+	},
+	{
+		name: "diff pair changes",
+		match: /^the (\S+) pair changes$/,
+		run: async ({ world, match }) => {
+			const fixture = requireFixture(world.page);
+			const index = fixture.files.findIndex((file) => file.path === match[1]);
+			const file = fixture.files[index];
+			if (!file) throw new Error(`No diff fixture file ${match[1]}`);
+			fixture.files[index] = {
+				...file,
+				after: "5555555555555555555555555555555555555555",
+			};
 		},
 	},
 	{
@@ -275,30 +326,50 @@ export const sessionDiffHandlers: StepHandler[] = [
 		name: "diff list count",
 		match: /^the diff was listed ([0-9]+) times$/,
 		run: async ({ world, match }) => {
-			await expect
-				.poll(() => requireFixture(world.page).lists)
-				.toBe(Number(match[1]));
+			const fixture = requireFixture(world.page);
+			await settledAt(world.page, () => fixture.lists, Number(match[1]));
+		},
+	},
+	{
+		name: "patch request count",
+		match: /^the (\S+) patch was requested ([0-9]+) times$/,
+		run: async ({ world, match }) => {
+			const fixture = requireFixture(world.page);
+			const count = () =>
+				fixture.requested.filter((path) => path === match[1]).length;
+			await settledAt(world.page, count, Number(match[2]));
+		},
+	},
+	{
+		name: "diff row error",
+		match: /^the (\S+) diff shows its error$/,
+		run: async ({ world, match }) => {
+			await expect(
+				row(world.page, match[1] ?? "").getByTestId("session-diff-error"),
+			).toHaveText("Could not load this diff.");
 		},
 	},
 	{
 		name: "hold next diff listing",
 		match: /^the next diff listing is held$/,
 		run: async ({ world }) => {
-			requireFixture(world.page).holdNext = true;
+			requireFixture(world.page).holdList = true;
 		},
 	},
 	{
-		name: "release held diff listing",
-		match: /^the held diff listing lands$/,
+		name: "hold next diff patch",
+		match: /^the next (\S+) patch reply is held$/,
+		run: async ({ world, match }) => {
+			requireFixture(world.page).holdPatch = match[1] ?? "";
+		},
+	},
+	{
+		name: "release held diff reply",
+		match: /^the held diff (?:listing|patch) lands$/,
 		run: async ({ world }) => {
 			const fixture = requireFixture(world.page);
-			const frames = (count: number) =>
-				world.page.evaluate(async (count) => {
-					for (let frame = 0; frame < count; frame += 1)
-						await new Promise((resolve) => requestAnimationFrame(resolve));
-				}, count);
 			// Visible rows observe and request their patch before the reply lands.
-			await frames(2);
+			await frames(world.page, 2);
 			await expect.poll(() => fixture.release !== null).toBe(true);
 			fixture.release?.();
 			fixture.release = null;
@@ -306,7 +377,7 @@ export const sessionDiffHandlers: StepHandler[] = [
 			// The mock sends the reply after the stub returns; one turn lets it go.
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			// Routed frames and evaluate share one channel, so this runs after the reply.
-			await frames(1);
+			await frames(world.page, 1);
 		},
 	},
 	{
