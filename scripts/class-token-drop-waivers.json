@@ -1,4 +1,9 @@
 {
+	"src/lib/frontend/components/chat/MessageTime.svelte :: text-text-dimmer": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "tone=\"dimmer\"",
+		"reason": "The timestamp trigger uses Button's dimmer tone, which owns the same resting text colour."
+	},
 	"src/lib/frontend/components/input/AttachMenu.svelte :: font-sans": {
 		"movedTo": "src/lib/frontend/components/ui/floating-styles.ts",
 		"requires": "appearance=\"final\"",
