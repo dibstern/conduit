@@ -180,6 +180,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Relay-owned Jev preference",
 	},
+	"session.diff_base_set": {
+		produced: false,
+		reason: "Relay-owned diff base preference",
+	},
 	"session.unsnoozed": { produced: false, reason: "Relay-owned triage state" },
 	"permission.asked": {
 		produced: false,

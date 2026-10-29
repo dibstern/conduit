@@ -67,6 +67,8 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "restoreSessionForSend"
 	// Jev's RPC and DTO behavior is covered by session-jev-override E2E.
 	| "setSessionJev"
+	// The diff base's RPC, cross-client row and restart are covered by session-diff-base.
+	| "setSessionDiffBase"
 	// Retention parity and event reclamation are covered by auto-delete-archived-sweep.
 	| "deleteArchivedSessions"
 >;

@@ -49,7 +49,7 @@ const cannotHoldRefs = {
 	session_providers: "id session_id provider provider_sid status",
 	session_sidebar: "session_id row project_id",
 	sessions:
-		"id provider provider_sid title status parent_id fork_point_event permission_mode woken_reason fork_point_message_id goal_state model_id model_provider variant context_window limit_recovery resumes root_id workspace last_turn_end_input_id claude_worktree_state workspace_hint pending_rewind_message_id project_id forked_from goal_stuck jev",
+		"id provider provider_sid title status parent_id fork_point_event permission_mode woken_reason fork_point_message_id goal_state model_id model_provider variant context_window limit_recovery resumes root_id workspace last_turn_end_input_id claude_worktree_state workspace_hint pending_rewind_message_id project_id forked_from goal_stuck jev diff_base",
 	store_identity: "value",
 	surfacing_marks:
 		"part_id session_id message_id level category reason direction",

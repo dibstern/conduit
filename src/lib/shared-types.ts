@@ -401,6 +401,8 @@ export const SessionInfoSchema = Schema.Struct({
 	settledAutomatically: Schema.optional(Schema.Boolean),
 	autoSettleDisabled: Schema.optional(Schema.Boolean),
 	jev: Schema.optional(Schema.NullOr(Schema.Literals(["on", "off"]))),
+	/** The branch diff's base override; absent means the launch base. */
+	diffBase: Schema.optional(Schema.String),
 	pinnedAt: Schema.optional(Schema.Number),
 	snoozedAt: Schema.optional(Schema.Number),
 	git: Schema.optional(SessionGitSchema),

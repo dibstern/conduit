@@ -464,6 +464,13 @@ export const sessionHandlers = {
 		},
 	],
 
+	"session.diff_base_set": (event) => [
+		{
+			sql: "UPDATE sessions SET diff_base = ? WHERE id = ?",
+			params: [event.data.base, event.data.sessionId],
+		},
+	],
+
 	"session.unsnoozed": (event) => [
 		{
 			sql: `UPDATE sessions SET snoozed_at = NULL, snoozed_until = NULL,
