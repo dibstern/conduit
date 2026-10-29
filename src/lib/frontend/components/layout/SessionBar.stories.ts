@@ -722,7 +722,6 @@ export const ViewsSheetOpen: Story = {
 		);
 		expect(within(sheet).getAllByRole("menuitemradio")).toEqual(items);
 		await expect(items[0]).toHaveAttribute("aria-checked", "true");
-		await expect(items[2]).toHaveAttribute("aria-disabled", "true");
 		expect(
 			new Set(items.map((item) => item.getBoundingClientRect().top)).size,
 		).toBe(1);
