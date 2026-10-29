@@ -54,6 +54,7 @@
 		type Turn,
 	} from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
+	import MessageNavigationRail from "./MessageNavigationRail.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
 	import TurnActivity from "./TurnActivity.svelte";
 	import { insertComposerReference } from "../input/composer-reference.svelte.js";
@@ -508,10 +509,16 @@
 			.filter((turn) => !turn.live).at(-1)?.id,
 	);
 	const latestTurnId = $derived((forkSplit ? currentTurns.at(-1) ?? inheritedTurns.at(-1) : turns.at(-1))?.id);
+	let railVisible = $state(false);
+	const railMessages = $derived([
+		...turns.flatMap((turn) => turn.user ? [turn.user] : []),
+		...localSends.map((send) => send.message),
+	]);
 
 </script>
 
 <!-- Focusable so keyboard users can scroll it and `u` can target the open session. -->
+<div class="relative flex flex-1 min-h-0 min-w-0">
 <!-- break-words is inherited, so a long path or URL in any row wraps instead of
      widening the transcript (overflow-y-auto makes overflow-x scroll too). -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -522,6 +529,7 @@
 	aria-label="Transcript"
 	tabindex="0"
 	class="flex-1 overflow-y-auto pt-5 pb-3 relative break-words"
+	class:with-message-rail={railVisible}
 	style="-webkit-overflow-scrolling: touch;"
 	bind:this={messagesEl}
 >
@@ -747,8 +755,15 @@
 		/>
 	</div>
 </div>
+{#key viewedSessionId}
+	{#if messagesEl && feed === "live" && !coldOpen && !(primary && uiState.rewindActive)}
+		<MessageNavigationRail scroller={messagesEl} messages={railMessages} {topClearance} onjump={scrollCtrl.requestJump} bind:visible={railVisible} />
+	{/if}
+{/key}
+</div>
 
 <style>
+	.with-message-rail { padding-left: 32px; }
 	/* The delays are the whole point: a switch that synchronizes first never
 	   shows either element. 250ms for a warm pane's pill, 150ms for a cold
 	   pane's skeleton, per the switching-visuals decision (3A). */
