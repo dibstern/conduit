@@ -9,7 +9,9 @@ import type { MessageSnapshotPayload } from "../../contracts/stored-event.js";
 import type { Message } from "../../instance/sdk-types.js";
 import type { AttachmentStore } from "../../persistence/attachment-store.js";
 import { mapToolName } from "../../relay/event-translator.js";
+import { isRecord } from "../../utils.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
+import { openCodeToolFileChanges } from "./opencode-tool-file-changes.js";
 
 /** SSE and REST report the same summary; its identity owns the outcome. */
 export function completedCompactionEvent(
@@ -119,14 +121,25 @@ export function snapshotPayload(message: Message): MessageSnapshotPayload {
 				return part;
 			const tool =
 				typeof part["tool"] === "string" ? mapToolName(part["tool"]) : "";
+			const input = normalizeToolInput(
+				tool,
+				"input" in state ? state.input : undefined,
+			);
+			const fileChanges =
+				"status" in state && state.status === "completed"
+					? openCodeToolFileChanges(
+							input,
+							"metadata" in state && isRecord(state.metadata)
+								? state.metadata
+								: undefined,
+						)
+					: [];
 			return {
 				...part,
 				state: {
 					...state,
-					input: normalizeToolInput(
-						tool,
-						"input" in state ? state.input : undefined,
-					),
+					input,
+					...(fileChanges.length > 0 ? { fileChanges } : {}),
 				},
 			};
 		});

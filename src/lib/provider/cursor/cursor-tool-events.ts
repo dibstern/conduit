@@ -2,6 +2,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, isAbsolute, resolve, sep } from "node:path";
 import { Effect } from "effect";
+import type { ToolFileChange } from "../../contracts/stored-event.js";
 import type { CanonicalToolInput } from "../../persistence/events.js";
 import { assertNever } from "../../utils.js";
 import { optStr, str, toRecord } from "../normalize-tool-input-helpers.js";
@@ -204,6 +205,7 @@ export function fromConversationStep(
 			success = {
 				...fields(value, ["linesAdded", "linesRemoved"]),
 				...fields(value, ["diffString"], true),
+				...fields(value, ["beforeFullFileContent", "afterFullFileContent"]),
 			};
 			break;
 		case "write":
@@ -212,7 +214,10 @@ export function fromConversationStep(
 		case "delete":
 			input = { path: args["path"] ?? "" };
 			errorDetails = { path: value["path"] ?? "" };
-			success = { fileSize: Number(value["fileSize"] ?? 0) };
+			success = {
+				fileSize: Number(value["fileSize"] ?? 0),
+				...fields(value, ["prevContent"]),
+			};
 			break;
 		case "glob":
 			input = {
@@ -810,6 +815,7 @@ export function cursorToolOutcome(known: CursorToolCall): {
 	outcome: ToolOutcome;
 	result: unknown;
 	metadata: Record<string, unknown>;
+	fileChanges?: readonly ToolFileChange[];
 } {
 	const call =
 		known._tag === "Known"
@@ -829,6 +835,8 @@ export function cursorToolOutcome(known: CursorToolCall): {
 		...(call.type === "shell" ? { output: null } : {}),
 	};
 	let result: unknown = call.result ?? null;
+	let fileChanges: readonly ToolFileChange[] | undefined;
+	const path = str(args, "path") || str(value, "path");
 	if (call.type === "computerUse")
 		metadata["computerUse"] = {
 			actions: args["actions"],
@@ -867,7 +875,28 @@ export function cursorToolOutcome(known: CursorToolCall): {
 			case "read":
 				result = str(value, "content");
 				break;
-			case "edit":
+			case "edit": {
+				const patch = value["diffString"];
+				if (path)
+					fileChanges = [
+						{
+							path,
+							kind:
+								typeof patch === "string" && /^--- \/dev\/null\r?$/m.test(patch)
+									? "add"
+									: typeof patch === "string" &&
+											/^\+\+\+ \/dev\/null\r?$/m.test(patch)
+										? "delete"
+										: "update",
+							...(typeof patch === "string" ? { patch } : {}),
+							...(typeof value["beforeFullFileContent"] === "string"
+								? { before: value["beforeFullFileContent"] }
+								: {}),
+							...(typeof value["afterFullFileContent"] === "string"
+								? { after: value["afterFullFileContent"] }
+								: {}),
+						},
+					];
 				metadata["fileChange"] = {
 					filePath: str(args, "path"),
 					...(typeof value["diffString"] === "string"
@@ -882,13 +911,34 @@ export function cursorToolOutcome(known: CursorToolCall): {
 				};
 				result = str(value, "diffString") || call.result;
 				break;
+			}
 			case "write":
+				if (path)
+					fileChanges = [
+						{
+							path,
+							kind: "add",
+							...(typeof args["fileText"] === "string"
+								? { after: args["fileText"] }
+								: {}),
+						},
+					];
 				metadata["fileChange"] = {
 					filePath: str(args, "path"),
 					linesAdded: value["linesCreated"],
 				};
 				break;
 			case "delete":
+				if (path)
+					fileChanges = [
+						{
+							path,
+							kind: "delete",
+							...(typeof value["prevContent"] === "string"
+								? { before: value["prevContent"] }
+								: {}),
+						},
+					];
 				metadata["fileChange"] = {
 					filePath: str(args, "path"),
 					deleted: true,
@@ -925,7 +975,13 @@ export function cursorToolOutcome(known: CursorToolCall): {
 				assertNever(known.kind);
 		}
 	}
-	return { ...cursorToolInput(known), outcome, result, metadata };
+	return {
+		...cursorToolInput(known),
+		outcome,
+		result,
+		metadata,
+		...(fileChanges ? { fileChanges } : {}),
+	};
 }
 
 function isTruncated(value: unknown): boolean {

@@ -45,6 +45,7 @@ import {
 	readClaudeGoalStatus,
 } from "./claude-goal-tracker.js";
 import { claudeProviderStateUpdates } from "./claude-runtime-state.js";
+import { claudeToolFileChanges } from "./claude-tool-file-changes.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 import { fromSdkPermissionMode } from "./permission-mode-map.js";
 import type {
@@ -1790,6 +1791,15 @@ export class ClaudeEventTranslator {
 					);
 				}
 				const result = message.tool_use_result;
+				const fileChanges = !block.is_error
+					? claudeToolFileChanges(
+							normalizeToolInput(
+								matchedTool.toolName,
+								matchedTool.bufferedInput ?? matchedTool.input,
+							),
+							singleToolResult ? result : undefined,
+						)
+					: [];
 				const reportedPath =
 					workspaceTool &&
 					singleToolResult &&
@@ -1822,6 +1832,7 @@ export class ClaudeEventTranslator {
 						partId: matchedTool.itemId,
 						result: resultContent || null,
 						duration: 0,
+						...(fileChanges.length > 0 ? { fileChanges } : {}),
 						...(path !== undefined
 							? {
 									metadata: {
@@ -2078,6 +2089,7 @@ export class ClaudeEventTranslator {
 						partId: tool.itemId,
 						result: null,
 						duration: 0,
+						fileChanges: [],
 					}),
 				);
 				ctx.inFlightTools.delete(index);

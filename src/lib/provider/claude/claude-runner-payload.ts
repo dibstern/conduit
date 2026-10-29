@@ -3043,6 +3043,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						partId: tool.itemId,
 						result: null,
 						duration: 0,
+						fileChanges: [],
 					},
 					ctx.toolRunIds?.get(tool.itemId),
 				);

@@ -257,6 +257,7 @@ describe("Claude subagent transcripts across session contexts", () => {
 								partId: TOOL,
 								result: "file contents",
 								duration: 0,
+								outcome: "succeeded",
 							},
 						},
 					]);

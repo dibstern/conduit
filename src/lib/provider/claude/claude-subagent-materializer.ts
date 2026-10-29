@@ -5,6 +5,7 @@ import type {
 	ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventType,
 } from "../../contracts/providers/provider-runtime-event.js";
+import type { CanonicalToolInput } from "../../contracts/stored-event.js";
 import type { CanonicalEvent, MessageRole } from "../../persistence/events.js";
 import { isRecord } from "../../utils.js";
 import {
@@ -14,6 +15,7 @@ import {
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import type { ClaudeConfigDir } from "./claude-sdk-env.js";
 import { runSdkInWorker } from "./claude-session-fork.js";
+import { claudeToolFileChanges } from "./claude-tool-file-changes.js";
 import { normalizeToolInput } from "./normalize-tool-input.js";
 
 const PROVIDER = "claude" as const;
@@ -44,6 +46,7 @@ export interface ClaudeSubagentTranscriptCursor {
 	readonly toolStarts: Set<string>;
 	readonly toolCompletions: Set<string>;
 	readonly toolMessageIds?: Map<string, string>;
+	readonly toolInputs?: Map<string, CanonicalToolInput>;
 }
 
 export interface ClaudeSubagentTranscriptStage {
@@ -58,6 +61,7 @@ type MutableClaudeSubagentTranscriptCursor = {
 	toolStarts: Set<string>;
 	toolCompletions: Set<string>;
 	toolMessageIds?: Map<string, string>;
+	toolInputs?: Map<string, CanonicalToolInput>;
 };
 
 export const defaultClaudeSubagentSdk: ClaudeSubagentSdk = {
@@ -100,6 +104,7 @@ export function cloneClaudeSubagentTranscriptCursor(
 		toolStarts: new Set(cursor.toolStarts),
 		toolCompletions: new Set(cursor.toolCompletions),
 		toolMessageIds: new Map(cursor.toolMessageIds ?? []),
+		toolInputs: new Map(cursor.toolInputs ?? []),
 	};
 }
 
@@ -118,6 +123,11 @@ export function commitClaudeSubagentTranscriptCursor(
 	replaceSet(target.toolStarts, source.toolStarts);
 	replaceSet(target.toolCompletions, source.toolCompletions);
 	replaceMap(getToolMessageIds(target), getToolMessageIds(source));
+	replaceMap(
+		((target as MutableClaudeSubagentTranscriptCursor).toolInputs ??=
+			new Map()),
+		source.toolInputs ?? new Map(),
+	);
 }
 
 export function diffSessionMessagesToEvents(input: {
@@ -180,6 +190,7 @@ export function stageSessionMessagesToEvents(input: {
 	const events: ProviderRuntimeEvent[] = [];
 	const cursor = cloneClaudeSubagentTranscriptCursor(input.cursor);
 	const toolMessageIds = getToolMessageIds(cursor);
+	const toolInputs = cursor.toolInputs ?? new Map<string, CanonicalToolInput>();
 	const baseCreatedAt = Date.now();
 	let eventIndex = 0;
 	const eventOptions = () => ({
@@ -216,6 +227,7 @@ export function stageSessionMessagesToEvents(input: {
 				index,
 				cursor,
 				toolMessageIds,
+				toolInputs,
 				eventOptions,
 			});
 		}
@@ -254,6 +266,7 @@ function appendContentBlockEvents(input: {
 	readonly index: number;
 	readonly cursor: ClaudeSubagentTranscriptCursor;
 	readonly toolMessageIds: Map<string, string>;
+	readonly toolInputs: Map<string, CanonicalToolInput>;
 	readonly eventOptions: () => { provider: typeof PROVIDER; createdAt: number };
 }): void {
 	if (!isRecord(input.block)) return;
@@ -335,6 +348,7 @@ function appendContentBlockEvents(input: {
 			typeof input.block["name"] === "string" ? input.block["name"] : "unknown";
 		const normalizedInput = normalizeToolInput(toolName, input.block["input"]);
 		input.toolMessageIds.set(partId, input.messageId);
+		input.toolInputs.set(partId, normalizedInput);
 		if (input.cursor.toolStarts.has(partId)) return;
 		input.cursor.toolStarts.add(partId);
 		input.events.push(
@@ -367,6 +381,11 @@ function appendContentBlockEvents(input: {
 		const partId = input.block["tool_use_id"];
 		if (input.cursor.toolCompletions.has(partId)) return;
 		input.cursor.toolCompletions.add(partId);
+		const toolInput = input.toolInputs.get(partId);
+		const fileChanges =
+			toolInput && input.block["is_error"] !== true
+				? claudeToolFileChanges(toolInput)
+				: [];
 		input.events.push(
 			providerRuntimeEvent(
 				"tool.completed",
@@ -376,6 +395,8 @@ function appendContentBlockEvents(input: {
 					partId,
 					result: readToolResultContent(input.block["content"]),
 					duration: 0,
+					outcome: input.block["is_error"] === true ? "failed" : "succeeded",
+					...(fileChanges.length > 0 ? { fileChanges } : {}),
 				},
 				input.eventOptions(),
 			),
