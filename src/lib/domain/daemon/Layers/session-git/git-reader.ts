@@ -420,7 +420,12 @@ export const makeSessionGitReader = () => {
 				lines,
 				run,
 				AbortSignal.any([signal, AbortSignal.timeout(GIT_COMMAND_TIMEOUT_MS)]),
-			);
+			).catch((error: unknown) => {
+				// Over budget, porcelain alone still marks status changes; losing the
+				// whole read would publish no git at all.
+				if (signal.aborted) throw error;
+				return createHash("sha256").update(status).digest("hex");
+			});
 			const shortstat =
 				changed && born
 					? await git(directory, run, "diff", "HEAD", "--shortstat", "--")

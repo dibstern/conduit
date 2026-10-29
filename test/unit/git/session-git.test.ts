@@ -174,6 +174,30 @@ describe("readSessionGit", () => {
 			when === "before" ? 0 : 1,
 		);
 	});
+	it("keeps branch and counts when dirty content outlasts the fingerprint deadline", async () => {
+		const directory = repo();
+		commit(directory, "tracked");
+		const source = repo();
+		commit(source, "content");
+		git(directory, "clone", "-q", source, "module");
+		writeFileSync(join(directory, "module", "content"), "dirty\n");
+		const { runner } = subprocess();
+		const read = await readSessionGit(
+			directory,
+			undefined,
+			(command, args, options, signal) =>
+				/\/module\/?$/.test(options.cwd ?? "")
+					? new Promise((_, reject) =>
+							signal?.addEventListener("abort", () => reject(signal.reason)),
+						)
+					: runner(command, args, options, signal),
+		);
+		expect(read).toMatchObject({
+			branch: "main",
+			dirty: true,
+			fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+		});
+	});
 
 	// Failure modes: HEAD lives in a gitfile/commondir or packed ref; unborn and
 	// detached heads differ; a cache misses external ref changes or crosses repos;
