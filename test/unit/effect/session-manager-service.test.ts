@@ -19,7 +19,10 @@ import {
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { assert, expect, vi } from "vitest";
-import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromConfig,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	type DaemonConfig,
@@ -418,6 +421,7 @@ const requiredSessionServices = Layer.mergeAll(
 					configuredClaudeConfigDir("/tmp/conduit-session-test-login"),
 				),
 			),
+			Effect.succeed(NO_OPENCODE_HEALTH),
 		),
 	),
 	makePersistenceEffectLayer(":memory:", "test-project"),
@@ -2194,6 +2198,7 @@ describe("SessionManagerService", () => {
 										configuredClaudeConfigDir(join(tmpDir, "login")),
 									),
 								),
+								Effect.succeed(NO_OPENCODE_HEALTH),
 							),
 						}),
 				),

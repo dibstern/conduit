@@ -12,7 +12,10 @@ import {
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	decodeProviderRuntimeEvent,
@@ -1033,6 +1036,7 @@ describe("ProviderSideEffectReactor", () => {
 						configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 					),
 				),
+				Effect.succeed(NO_OPENCODE_HEALTH),
 			);
 			const resolveAccount = vi.spyOn(accountDirectory, "resolve");
 			const reactor = yield* makeReactor({
@@ -1151,6 +1155,7 @@ describe("ProviderSideEffectReactor", () => {
 								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 							),
 						),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 				});
 
@@ -1218,6 +1223,7 @@ describe("ProviderSideEffectReactor", () => {
 								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 							),
 						),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 				});
 

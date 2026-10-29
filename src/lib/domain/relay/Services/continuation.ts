@@ -135,10 +135,21 @@ const continuationPlanner = (account: Account) => {
 	}
 };
 
+// A read still running when the probe stopped waiting answers nothing, so the
+// prior reading it carries can't refuse.
 const continuationLimit = (
 	input: Parameters<typeof accountLimit>[0],
 	switched = false,
-) => narrowAccountLimit(input, switched ? undefined : input.recovery);
+) =>
+	narrowAccountLimit(
+		input.reading?.checking
+			? {
+					...input,
+					reading: { ...input.reading, status: "unknown", windows: [] },
+				}
+			: input,
+		switched ? undefined : input.recovery,
+	);
 
 /** The confirmation uses the same planner as delivery, without a live runner. */
 export const previewContinuation = (
@@ -440,6 +451,7 @@ export const makeContinuation = Effect.gen(function* () {
 													.refresh({
 														accountIds: [account.id],
 														maxAge: due ? "5 minutes" : 0,
+														wait: "5 seconds",
 													})
 													.pipe(
 														Effect.map((readings) =>

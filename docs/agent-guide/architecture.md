@@ -222,14 +222,19 @@ closing or sending the draft, or disconnecting the browser releases its hold.
 The same instance owner stops a server started exclusively for inventory 30
 seconds after its last hold releases. A real `use` or observed session activity
 permanently returns that start to the ordinary idle policy. A server already
-running when borrowed keeps the ordinary policy too. Instance aliases resolve
-to one registered identity before demand is counted. A borrow released during
+running when borrowed keeps the ordinary policy too. Account ids name concrete
+servers throughout routing and demand tracking. A borrow released during
 startup still arms grace when the shared start finishes.
 
-`GetModels.defaultOpenCodeInstanceId` identifies the project's configured
-OpenCode instance for initial draft selection, including a named instance beside
-the lazy Default. The browser waits for the instance and default snapshots before
-holding an initial pick. Draft inventory errors surface even when an older
+The account snapshot's default selects the OpenCode instance for new drafts.
+`openCodeStartSelection` in the contracts falls back to managed OpenCode while
+the selected server is unreachable, without changing the saved default.
+Without a selected default, the first configured OpenCode endpoint is used,
+excluding no-server placeholders; with no endpoint, managed OpenCode is used.
+Backend driver-default resolution uses the same rule and live runtime health.
+The browser waits
+for the instance and default snapshots before holding an initial pick.
+Draft inventory errors surface even when an older
 in-memory catalog exists; passive discovery retains its cached fallback.
 
 `CONDUIT_TEST_OPENCODE_BORROW_IDLE_TIMEOUT_MS` is a test-only positive integer

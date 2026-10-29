@@ -7,6 +7,7 @@ import {
 	accountsStateFromInstances,
 	apply,
 	list,
+	NO_OPENCODE_HEALTH,
 	resolve as resolveAccount,
 } from "../../../src/lib/account-directory.js";
 import type {
@@ -188,7 +189,10 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 	await expect(usageLink).toHaveText("Usage ›");
 	await usageLink.scrollIntoViewIfNeeded();
 	await page.evaluate(() => document.fonts.ready);
-	const artifactDir = resolve("test-results/settings-claude-accounts");
+	const artifactDir = resolve(
+		process.env["CONDUIT_E2E_ARTIFACTS"] ?? "test-results",
+		"settings-claude-accounts",
+	);
 	await mkdir(artifactDir, { recursive: true });
 	const accountsPath = resolve(
 		artifactDir,
@@ -372,7 +376,7 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				const id = payload["instanceId"];
 				if (typeof id !== "string") throw new Error("Missing account id");
 				const account = Either.getOrThrowWith(
-					resolveAccount(state, { _tag: "Id", id }),
+					resolveAccount(state, { _tag: "Id", id }, NO_OPENCODE_HEALTH),
 					(error) => error,
 				);
 				rpc.upsertShellRow({
@@ -394,7 +398,6 @@ test("deleting Claude defaults follows usage order and adding an account restore
 							)?.id;
 				if (!id)
 					return {
-						defaultOpenCodeInstanceId: "opencode",
 						projectSlug: "myapp",
 						providers: [],
 					};
@@ -402,7 +405,6 @@ test("deleting Claude defaults follows usage order and adding an account restore
 				if (!catalogue) throw new Error(`Missing fixture catalogue for ${id}`);
 				publishCatalogue(id);
 				return {
-					defaultOpenCodeInstanceId: "opencode",
 					projectSlug: "myapp",
 					instanceId: id,
 					providers: providersForAccount(id),
@@ -497,7 +499,10 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		await page.getByTestId("confirm-modal-action").click();
 		await expect(row).toHaveCount(0);
 	};
-	const artifactDir = resolve("test-results/settings-claude-accounts");
+	const artifactDir = resolve(
+		process.env["CONDUIT_E2E_ARTIFACTS"] ?? "test-results",
+		"settings-claude-accounts",
+	);
 	await mkdir(artifactDir, { recursive: true });
 	const capture = async (name: string) => {
 		const path = resolve(artifactDir, `${testInfo.project.name}-${name}.png`);

@@ -2,6 +2,9 @@
 // loses to busy/quota; a busy session probes or appends; a fresh refusal writes
 // recovery/events; a session moves or starts a turn while the probe is pending.
 // All refusals must leave the event stream untouched and never dispatch a turn.
+// Probe-reading failures: Try again refuses from the prior reading while the
+// fresh read is still running, where an unanswered probe went ahead; a
+// settled limited reading stops refusing.
 // Account-routing failures: a legacy binding selects the wrong receipt/login;
 // prewarm rereads stale or invalid disk config; an unknown account is ignored;
 // revalidation re-resolves an account instead of keeping the admitted snapshot.
@@ -15,6 +18,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
 	accountsStateFromConfig,
 	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
 } from "../../../../src/lib/account-directory.js";
 import type { Account } from "../../../../src/lib/contracts/account.js";
 import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
@@ -259,6 +263,18 @@ for (const scenario of [
 		probes: 1,
 	},
 	{
+		name: "limited account",
+		quota: "Limited",
+		result: "AccountStillLimited",
+		probes: 1,
+	},
+	{
+		name: "probe still reading a limited account goes ahead",
+		quota: "CheckingLimited",
+		result: "Right",
+		probes: 1,
+	},
+	{
 		name: "driver changed during probe",
 		duringProbe: "provider",
 		result: "StaleSwitch",
@@ -340,14 +356,31 @@ for (const scenario of [
 												launchLogin,
 											);
 									}
-									return "quota" in scenario && scenario.quota === "Unavailable"
-										? [
-												usageReading("claude", {
-													status: "unavailable",
-													reason: "Not logged in",
-												}),
-											]
-										: [usageReading("claude")];
+									const limited = usageReading("claude", {
+										status: "limited",
+										windows: [
+											{
+												kind: "seven_day",
+												utilization: 100,
+												resetsAt: new Date(
+													Date.now() + 3_600_000,
+												).toISOString(),
+											},
+										],
+										readAt: Date.now() + 60_000,
+									});
+									return [
+										"quota" in scenario
+											? {
+													Unavailable: usageReading("claude", {
+														status: "unavailable",
+														reason: "Not logged in",
+													}),
+													Limited: limited,
+													CheckingLimited: { ...limited, checking: true },
+												}[scenario.quota]
+											: usageReading("claude"),
+									];
 								}).pipe(Effect.orDie),
 							pickFailover: () => Effect.succeed(undefined),
 						}),
@@ -381,7 +414,10 @@ for (const scenario of [
 				Effect.provideService(ProviderRegistryTag, registry),
 				Effect.provideService(
 					AccountDirectory,
-					makeAccountDirectory(Effect.sync(() => accountState)),
+					makeAccountDirectory(
+						Effect.sync(() => accountState),
+						Effect.succeed(NO_OPENCODE_HEALTH),
+					),
 				),
 				Effect.provideService(AgentServiceTag, {
 					getActiveAgent: () => Effect.succeed(undefined),
@@ -450,6 +486,7 @@ for (const boundId of ["claude-sdk", "unknown-account", "opencode"] as const) {
 					configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
 				),
 			),
+			Effect.succeed(NO_OPENCODE_HEALTH),
 		);
 		const warmed: PreWarmSessionInput[] = [];
 		const registry = new ProviderRegistry([

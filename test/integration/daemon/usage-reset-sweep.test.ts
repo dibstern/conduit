@@ -18,7 +18,10 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import { LimitRecoverySchema } from "../../../src/lib/contracts/limit-recovery.js";
 import { AccountDirectoryStateLive } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
@@ -367,6 +370,7 @@ const withSweep = <A, E, R>(
 					[{ id: "claude", name: "Claude", driver: "claude", configDir: root }],
 					configuredClaudeConfigDir(join(root, "launch")),
 				),
+				Effect.succeed(NO_OPENCODE_HEALTH),
 			),
 		),
 		Effect.provide(makeOverridesStateLive()),
@@ -404,7 +408,11 @@ it.effect(
 it.effect("does not resume from a cached pre-limit Usage Reading", () =>
 	withSweep((fixture) =>
 		Effect.gen(function* () {
-			yield* fixture.usage.refresh({ accountIds: ["claude"], maxAge: 0 });
+			yield* fixture.usage.refresh({
+				accountIds: ["claude"],
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			yield* at(start + 1000);
 			const project = yield* fixture.project();
 			yield* at(start + 2000);
@@ -725,7 +733,11 @@ it.effect(
 					resetsAt: null,
 				});
 				yield* at(start + 1000);
-				yield* fixture.usage.refresh({ accountIds: ["claude"], maxAge: 0 });
+				yield* fixture.usage.refresh({
+					accountIds: ["claude"],
+					maxAge: 0,
+					wait: "until-settled",
+				});
 				yield* Effect.forkScoped(project.policy);
 				yield* project.continuation.queueLimitPolicy("s1");
 				yield* project.store.readAllBySession("s1").pipe(
@@ -759,7 +771,11 @@ it.effect(
 					],
 				});
 				yield* at(start + 1000);
-				yield* fixture.usage.refresh({ accountIds: ["claude"], maxAge: 0 });
+				yield* fixture.usage.refresh({
+					accountIds: ["claude"],
+					maxAge: 0,
+					wait: "until-settled",
+				});
 				yield* Effect.forkScoped(project.policy);
 				yield* project.continuation.queueLimitPolicy("s1");
 				const recovery = yield* project.recovery.pipe(

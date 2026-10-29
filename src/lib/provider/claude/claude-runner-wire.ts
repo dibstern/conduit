@@ -1,5 +1,9 @@
 import { Result, Schema } from "effect";
-import { type AccountsState, resolve } from "../../account-directory.js";
+import {
+	type AccountsState,
+	NO_OPENCODE_HEALTH,
+	resolve,
+} from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
 import { AccountUnroutable } from "../../contracts/limit-recovery.js";
 import { isRecord } from "../../utils.js";
@@ -32,7 +36,11 @@ export function claudeLaunchConfigFromAccounts(
 			folderSource: "implicitDefault",
 		};
 	const account = Result.getOrElse(
-		resolve(accounts, { _tag: "DriverDefault", driver: "claude" }),
+		resolve(
+			accounts,
+			{ _tag: "DriverDefault", driver: "claude" },
+			NO_OPENCODE_HEALTH,
+		),
 		(error) => {
 			throw error;
 		},

@@ -6,7 +6,10 @@ import { Effect, Layer, Queue, Schema, Stream } from "effect";
 import { RpcClientError } from "effect/rpc/RpcClientError";
 import { SocketCloseError } from "effect/socket/Socket";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromConfig,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import type { SessionDetailEnvelope } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	SessionDetailEnvelopeSchema,
@@ -75,6 +78,7 @@ const testLayer = () => {
 						configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
 					),
 				),
+				Effect.succeed(NO_OPENCODE_HEALTH),
 			),
 		),
 		makePersistenceEffectLayer(

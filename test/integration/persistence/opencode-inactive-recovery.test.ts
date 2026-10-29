@@ -156,7 +156,6 @@ it.each([
 					projectionRunner,
 					ingestion,
 					log: createSilentLogger(),
-					selectedInstanceId: "opencode",
 					fetchSessionMessages: () => Effect.succeed(history),
 				});
 				const commands = yield* runningRunnerCommands(

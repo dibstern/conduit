@@ -428,13 +428,59 @@ Scenario: Refresh all names every account and the oldest reading sets the update
 Scenario: Refresh all reports an account it couldn't read instead of calling it a plan-less login
   Given the viewport is a desktop
   And Usage settings have several Claude accounts in the normal state
-  And the next Usage refresh fails to read claude because Usage read timed out
+  And the next Usage refresh fails to read claude because Usage read timed out and retries in 25 seconds
   When I open settings to the Usage section
   And I press Refresh all in Usage settings
   Then the QuotaForAccounts RPC refreshes the attached project
   And an error toast contains Couldn't read plan usage for Personal
   And the Usage account claude status reads couldn't read usage in muted
-  And the Usage no-data card claude reads Usage read timed out. Press Refresh to try again.
+  And the Usage no-data card claude reads Usage read timed out. Trying again in 25s.
+
+Scenario Outline: An account it couldn't read counts down to its retry
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the normal state
+  And the next Usage refresh fails to read claude because Usage read timed out and retries in <retry_seconds> seconds
+  When I open settings to the Usage section
+  And I press Refresh all in Usage settings
+  Then the Usage no-data card claude reads Usage read timed out. <note>
+
+Examples:
+  | retry_seconds | note                 |
+  | 59            | Trying again in 59s. |
+  | 60            | Trying again in 1m.  |
+  | 61            | Trying again in 2m.  |
+  | 300           | Trying again in 5m.  |
+
+Scenario: An account it couldn't read says so while the retry reads it
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the normal state
+  And the next Usage refresh fails to read claude because Usage read timed out and retries in 25 seconds
+  When I open settings to the Usage section
+  And I press Refresh all in Usage settings
+  And the Usage account claude is checking
+  Then the Usage no-data card claude reads Usage read timed out. Trying again now…
+
+Scenario: Refresh all stays busy while any account is checking
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the normal state
+  And the Usage account work is checking
+  When I open settings to the Usage section
+  Then Refresh all in Usage settings is busy
+  When the Usage account work finishes checking
+  Then Refresh all in Usage settings is ready
+
+Scenario: A card updates from the stream before the Refresh all toast
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the normal state
+  And the next Usage refresh publishes the warnWk reading while work is still checking
+  When I open settings to the Usage section
+  And I press Refresh all in Usage settings
+  Then the Usage account claude status reads 91% of weekly window in amber
+  And Refresh all in Usage settings is busy
+  And no Usage refresh toast is shown
+  When the open Usage refresh finishes without reading work because Usage read timed out
+  Then an error toast contains Couldn't read plan usage for Work
+  And Refresh all in Usage settings is ready
 
 Scenario: the desktop footer opens the Usage section directly
   Given the viewport is a desktop

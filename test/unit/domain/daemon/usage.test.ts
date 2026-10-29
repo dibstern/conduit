@@ -21,6 +21,36 @@
 // it; a failed read is persisted and shown after the next restart; a removed
 // account comes back; a restored reading stops the first refresh from reading;
 // a live update is lost on restart; the stored reading does not survive JSON.
+// Slow-read failures: a read still gives up at five seconds; a hung read is
+// never closed, leaks its process, or stays checking forever; a caller whose
+// wait ran out gets a failure, a reading that is not marked checking, or
+// cancels the read; the read never publishes or saves once its callers left;
+// failover or Refresh all ignore their wait; checking never shows or never
+// clears; one slow account holds back the others' readings; the settled-read
+// log is missing or repeats per caller.
+// Schedule failures: a failed read retries at the wrong delay or never caps at
+// five minutes; a sign-in failure retries on the backoff; a success leaves the
+// failure count; a wake reads with nobody viewing and nothing full, or skips a
+// viewer; a skipped wake reschedules itself; a turn end pushes back a sooner
+// wake, or reads at once after a wake that already passed; accounts share one
+// clock instead of their own last read; a slow read's backoff is spent while it
+// runs; a viewer arriving after a skipped wake never reads, so the countdown
+// sits in the past; retryAt shows on a reading that hasn't failed, is missing
+// after a failure, or outlives the next success; the backoff holds back a
+// forced Refresh, or a forced read pushes back a wake still to come; a turn
+// that ends during a read is not read again after it, so a reading from
+// before the turn stands for five minutes; an account added while someone is
+// viewing is never read.
+// Live-reading failures: a live reading with every window still lets a refresh
+// within maxAge read again; one with only some windows, or none, counts as
+// fresh and leaves the rest unread; an account's first live reading with no
+// windows counts as fresh; it leaves the failure count and retryAt;
+// it doesn't restart the account's timer, so a viewer arriving after a skipped
+// wake reads at once and nothing reads five minutes after it; it pushes back a
+// sooner post-turn re-read; an older read landing after it overwrites it, adds
+// a failure, or winds its freshness back; a read that fails after a partial
+// live reading resets the failure count and waits five minutes instead of
+// backing off; a reading for an unknown account is kept.
 import {
 	mkdtemp,
 	readdir,
@@ -41,6 +71,7 @@ import {
 	Layer,
 	Logger,
 	Ref,
+	References,
 	Schema,
 	Stream,
 } from "effect";
@@ -60,6 +91,7 @@ import {
 	Usage,
 	type UsageHistorySnapshot,
 	UsageHistorySnapshotSchema,
+	type UsageService,
 } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { CodexAccountResources } from "../../../../src/lib/provider/codex/codex-account-resources.js";
@@ -101,19 +133,25 @@ it.effect("returns each account's cache until its maximum age is reached", () =>
 		const [first] = yield* service.refresh({
 			accountIds: ["account-1"],
 			maxAge: "30 seconds",
+			wait: "until-settled",
 		});
 		yield* TestClock.adjust("15 seconds");
-		yield* service.refresh({ accountIds: ["account-2"], maxAge: "30 seconds" });
+		yield* service.refresh({
+			accountIds: ["account-2"],
+			maxAge: "30 seconds",
+			wait: "until-settled",
+		});
 		yield* TestClock.adjust("14999 millis");
 		expect(
 			yield* service.refresh({
 				accountIds: ["account-1"],
 				maxAge: "30 seconds",
+				wait: "until-settled",
 			}),
 		).toEqual([first]);
 		expect(calls).toEqual(["account-1", "account-2"]);
 		yield* TestClock.adjust("1 millis");
-		yield* service.refresh({ maxAge: "30 seconds" });
+		yield* service.refresh({ maxAge: "30 seconds", wait: "until-settled" });
 		expect(calls).toEqual(["account-1", "account-2", "account-1"]);
 	}),
 );
@@ -142,16 +180,19 @@ it.effect(
 					},
 				},
 			});
-			const [previous] = yield* service.refresh({ maxAge: "30 seconds" });
+			const [previous] = yield* service.refresh({
+				maxAge: "30 seconds",
+				wait: "until-settled",
+			});
 			yield* TestClock.adjust("30 seconds");
-			yield* service.refresh({ maxAge: "30 seconds" });
+			yield* service.refresh({ maxAge: "30 seconds", wait: "until-settled" });
 			yield* TestClock.adjust("29999 millis");
-			expect(yield* service.refresh({ maxAge: "30 seconds" })).toEqual([
-				{ ...previous, stale: true },
-			]);
+			expect(
+				yield* service.refresh({ maxAge: "30 seconds", wait: "until-settled" }),
+			).toEqual([{ ...previous, stale: true }]);
 			expect(calls).toBe(2);
 			yield* TestClock.adjust("1 millis");
-			yield* service.refresh({ maxAge: "30 seconds" });
+			yield* service.refresh({ maxAge: "30 seconds", wait: "until-settled" });
 			expect(calls).toBe(3);
 		}),
 );
@@ -175,7 +216,7 @@ it.effect("turn end re-reads a full account without subscribers", () =>
 				},
 			},
 		});
-		yield* service.refresh({ maxAge: "5 minutes" });
+		yield* service.refresh({ maxAge: "5 minutes", wait: "until-settled" });
 		yield* service.turnEnded("account-1");
 		yield* service.turnEnded("account-1");
 		yield* TestClock.adjust("10 seconds");
@@ -223,10 +264,10 @@ it.effect(
 					},
 				},
 			});
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			yield* TestClock.adjust("1 second");
-			yield* service.refresh({ maxAge: 0 });
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			expect(messages).toEqual([
 				[
 					"Usage window free before reset",
@@ -240,8 +281,8 @@ it.effect(
 		}).pipe(
 			Effect.provide(
 				Logger.layer([
-					Logger.make(({ message }) => {
-						messages.push(message);
+					Logger.make(({ logLevel, message }) => {
+						if (logLevel === "Info") messages.push(message);
 					}),
 				]),
 			),
@@ -290,20 +331,29 @@ it.effect(
 					},
 				},
 			});
-			const previous = yield* service.refresh({ maxAge: 0 });
-			const snapshots = yield* Stream.runCollect(
-				Stream.take(service.readings, 2),
+			const previous = yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			});
+			const subscription = yield* Effect.forkChild(
+				Stream.runCollect(Stream.take(service.readings, 2)),
 			);
-			expect([...snapshots]).toEqual([previous, previous]);
+			yield* TestClock.adjust("1 minute");
 			expect(calls).toBe(1);
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			expect([...(yield* Fiber.join(subscription))]).toEqual([
+				previous,
+				[{ ...previous[0], checking: true }],
+			]);
 		}),
 );
 
 it.effect(
-	"emits the current snapshot before refreshing an expired subscription",
+	"emits the current snapshot, marks it checking while an expired subscription reads, then publishes the read",
 	() =>
 		Effect.gen(function* () {
 			let calls = 0;
+			const release = yield* Deferred.make<void>();
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 				readers: {
@@ -311,20 +361,33 @@ it.effect(
 					cursor: unavailableReader,
 					claude: {
 						read: () =>
-							Effect.sync(() => ({
-								status: "available",
-								windows: [{ kind: "five_hour", utilization: ++calls * 10 }],
-							})),
+							Effect.gen(function* () {
+								if (++calls > 1) yield* Deferred.await(release);
+								return {
+									status: "available",
+									windows: [{ kind: "five_hour", utilization: calls * 10 }],
+								};
+							}),
 					},
 				},
 			});
-			const previous = yield* service.refresh({ maxAge: 0 });
+			const previous = yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			yield* TestClock.adjust("5 minutes");
 			const snapshots = yield* Stream.runCollect(
-				Stream.take(service.readings, 2),
+				Stream.take(service.readings, 3).pipe(
+					Stream.tap(([reading]) =>
+						reading?.checking
+							? Deferred.succeed(release, undefined)
+							: Effect.void,
+					),
+				),
 			);
 			expect([...snapshots]).toEqual([
 				previous,
+				[{ ...previous[0], checking: true }],
 				[
 					{
 						...previous[0],
@@ -346,96 +409,158 @@ it.effect(
 		}),
 );
 
-it.effect("shares a five-minute sampler until the last subscriber leaves", () =>
-	Effect.gen(function* () {
-		const calls: string[] = [];
-		const service = yield* makeUsage({
-			accounts: Effect.succeed([
-				{ id: "account-1", harness: "claude" },
-				{ id: "account-2", harness: "claude" },
-			]),
-			readers: {
-				codex: unavailableReader,
-				cursor: unavailableReader,
-				claude: {
-					read: (account) =>
-						Effect.sync(() => {
-							calls.push(account.id);
-							return { status: "available", windows: [] };
-						}),
+it.effect(
+	"reads every five minutes while anyone views, once however many view",
+	() =>
+		Effect.gen(function* () {
+			const calls: string[] = [];
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([
+					{ id: "account-1", harness: "claude" },
+					{ id: "account-2", harness: "claude" },
+				]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: (account) =>
+							Effect.sync(() => {
+								calls.push(account.id);
+								return { status: "available", windows: [] };
+							}),
+					},
 				},
-			},
-		});
-		const first = yield* Effect.forkChild(Stream.runDrain(service.readings), {
-			startImmediately: true,
-		});
-		yield* TestClock.adjust("0 millis");
-		expect(calls).toEqual(["account-1", "account-2"]);
-		const second = yield* Effect.forkChild(Stream.runDrain(service.readings), {
-			startImmediately: true,
-		});
-		yield* TestClock.adjust("0 millis");
-		expect(calls).toHaveLength(2);
-		yield* TestClock.adjust("299999 millis");
-		expect(calls).toHaveLength(2);
-		yield* TestClock.adjust("1 millis");
-		expect(calls).toHaveLength(4);
-		yield* Fiber.interrupt(first);
-		yield* TestClock.adjust("5 minutes");
-		expect(calls).toHaveLength(6);
-		yield* Fiber.interrupt(second);
-		yield* TestClock.adjust("10 minutes");
-		expect(calls).toHaveLength(6);
-	}),
+			});
+			const first = yield* Effect.forkChild(Stream.runDrain(service.readings), {
+				startImmediately: true,
+			});
+			yield* TestClock.adjust("0 millis");
+			expect(calls).toEqual(["account-1", "account-2"]);
+			const second = yield* Effect.forkChild(
+				Stream.runDrain(service.readings),
+				{
+					startImmediately: true,
+				},
+			);
+			yield* TestClock.adjust("0 millis");
+			expect(calls).toHaveLength(2);
+			yield* TestClock.adjust("299999 millis");
+			expect(calls).toHaveLength(2);
+			yield* TestClock.adjust("1 millis");
+			expect(calls).toHaveLength(4);
+			yield* Fiber.interrupt(first);
+			yield* TestClock.adjust("5 minutes");
+			expect(calls).toHaveLength(6);
+			yield* Fiber.interrupt(second);
+			yield* TestClock.adjust("10 minutes");
+			expect(calls).toHaveLength(6);
+		}),
 );
 
-it.effect("debounces watched turn ends per account", () =>
-	Effect.gen(function* () {
-		const calls: string[] = [];
-		const service = yield* makeUsage({
-			accounts: Effect.succeed([
-				{ id: "account-1", harness: "claude" },
-				{ id: "account-2", harness: "claude" },
-			]),
-			readers: {
-				codex: unavailableReader,
-				cursor: unavailableReader,
-				claude: {
-					read: (account) =>
-						Effect.sync(() => {
-							calls.push(account.id);
-							return { status: "available", windows: [] };
-						}),
+it.effect(
+	"keeps the first wake of a burst of watched turn ends per account",
+	() =>
+		Effect.gen(function* () {
+			const calls: string[] = [];
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([
+					{ id: "account-1", harness: "claude" },
+					{ id: "account-2", harness: "claude" },
+				]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: (account) =>
+							Effect.sync(() => {
+								calls.push(account.id);
+								return { status: "available", windows: [] };
+							}),
+					},
 				},
-			},
-		});
-		yield* service.turnEnded("account-1");
-		yield* TestClock.adjust("10 seconds");
-		expect(calls).toEqual([]);
-		yield* Effect.forkChild(Stream.runDrain(service.readings), {
-			startImmediately: true,
-		});
-		yield* TestClock.adjust("1 millis");
-		calls.length = 0;
-		yield* service.turnEnded("account-1");
-		yield* TestClock.adjust("5 seconds");
-		yield* service.turnEnded("account-1");
-		yield* service.turnEnded("account-1");
-		yield* TestClock.adjust("9999 millis");
-		expect(calls).toEqual([]);
-		yield* TestClock.adjust("1 millis");
-		expect(calls).toEqual(["account-1"]);
-		yield* service.turnEnded("account-1");
-		yield* service.turnEnded("account-2");
-		yield* TestClock.adjust("10 seconds");
-		expect(calls.filter((id) => id === "account-1")).toHaveLength(2);
-		expect(calls.filter((id) => id === "account-2")).toHaveLength(1);
-	}),
+			});
+			yield* service.turnEnded("account-1");
+			yield* TestClock.adjust("10 seconds");
+			expect(calls).toEqual([]);
+			yield* Effect.forkChild(Stream.runDrain(service.readings), {
+				startImmediately: true,
+			});
+			yield* TestClock.adjust("1 millis");
+			calls.length = 0;
+			yield* service.turnEnded("account-1");
+			yield* TestClock.adjust("5 seconds");
+			yield* service.turnEnded("account-1");
+			yield* service.turnEnded("account-1");
+			yield* TestClock.adjust("4999 millis");
+			expect(calls).toEqual([]);
+			yield* TestClock.adjust("1 millis");
+			expect(calls).toEqual(["account-1"]);
+			yield* TestClock.adjust("10 seconds");
+			expect(calls).toEqual(["account-1"]);
+			yield* service.turnEnded("account-1");
+			yield* service.turnEnded("account-2");
+			yield* TestClock.adjust("10 seconds");
+			expect(calls.filter((id) => id === "account-1")).toHaveLength(2);
+			expect(calls.filter((id) => id === "account-2")).toHaveLength(1);
+		}),
 );
 
-it.effect("keeps five-minute sample times independent of read duration", () =>
+it.effect(
+	"schedules the next read five minutes after the last one settles",
+	() =>
+		Effect.gen(function* () {
+			const startedAt: number[] = [];
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: () =>
+							Effect.gen(function* () {
+								startedAt.push(yield* Clock.currentTimeMillis);
+								yield* Effect.sleep("4 seconds");
+								return { status: "available", windows: [] };
+							}),
+					},
+				},
+			});
+			const subscriber = yield* Effect.forkChild(
+				Stream.runDrain(service.readings),
+				{ startImmediately: true },
+			);
+			yield* TestClock.adjust("4 seconds");
+			expect(startedAt).toEqual([0]);
+			yield* TestClock.adjust("299999 millis");
+			expect(startedAt).toEqual([0]);
+			yield* TestClock.adjust("1 millis");
+			expect(startedAt).toEqual([0, 304_000]);
+			yield* TestClock.adjust("4 seconds");
+			yield* TestClock.adjust("300 seconds");
+			expect(startedAt).toEqual([0, 304_000, 608_000]);
+			yield* Fiber.interrupt(subscriber);
+		}),
+);
+
+const failedRead: UsageRead = {
+	status: "unknown",
+	windows: [],
+	reason: "Usage read timed out",
+};
+const signedOut: UsageRead = {
+	status: "unavailable",
+	windows: [],
+	reason: "Sign in to read usage",
+};
+const goodRead: UsageRead = {
+	status: "available",
+	windows: [{ kind: "five_hour", utilization: 41 }],
+};
+
+/** One Claude account whose reads take `takes` ms and return the script in turn, then fail; readAt logs when each started. */
+const scriptedAccount = (script: readonly UsageRead[], takes = 0) =>
 	Effect.gen(function* () {
-		const startedAt: number[] = [];
+		const readAt: number[] = [];
 		const service = yield* makeUsage({
 			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 			readers: {
@@ -444,26 +569,238 @@ it.effect("keeps five-minute sample times independent of read duration", () =>
 				claude: {
 					read: () =>
 						Effect.gen(function* () {
-							startedAt.push(yield* Clock.currentTimeMillis);
-							yield* Effect.sleep("4 seconds");
-							return { status: "available", windows: [] };
+							readAt.push(yield* Clock.currentTimeMillis);
+							const read = script[readAt.length - 1] ?? failedRead;
+							yield* Effect.sleep(takes);
+							return read;
 						}),
 				},
 			},
 		});
-		const subscriber = yield* Effect.forkChild(
-			Stream.runDrain(service.readings),
-			{ startImmediately: true },
-		);
-		yield* TestClock.adjust("4 seconds");
-		expect(startedAt).toEqual([0]);
-		yield* TestClock.adjust("296 seconds");
-		expect(startedAt).toEqual([0, 300000]);
-		yield* TestClock.adjust("4 seconds");
-		yield* TestClock.adjust("296 seconds");
-		expect(startedAt).toEqual([0, 300000, 600000]);
-		yield* Fiber.interrupt(subscriber);
+		return { service, readAt };
+	});
+
+/** The account's reading as a new viewer first sees it. */
+const published = (service: UsageService) =>
+	service.readings.pipe(
+		Stream.take(1),
+		Stream.runCollect,
+		Effect.map(([readings]) => readings?.[0]),
+	);
+
+const view = (service: { readonly readings: Stream.Stream<unknown> }) =>
+	Effect.forkChild(Stream.runDrain(service.readings), {
+		startImmediately: true,
+	});
+
+it.effect(
+	"retries a failed read after 30s, 1m and 2m, then every 5m, while viewed",
+	() =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([]);
+			yield* view(service);
+			yield* TestClock.adjust("15 minutes");
+			expect(readAt).toEqual([0, 30_000, 90_000, 210_000, 510_000, 810_000]);
+		}),
+);
+
+it.effect.each([
+	["a sign-in failure", signedOut],
+	["a success", goodRead],
+] as const)("%s waits five minutes and ends the failure streak", ([, read]) =>
+	Effect.gen(function* () {
+		const { service, readAt } = yield* scriptedAccount([
+			failedRead,
+			failedRead,
+			read,
+		]);
+		yield* view(service);
+		yield* TestClock.adjust("8 minutes");
+		expect(readAt).toEqual([0, 30_000, 90_000, 390_000, 420_000, 480_000]);
 	}),
+);
+
+it.effect(
+	"a wake does nothing with nobody viewing, and a later viewer reads the account it skipped",
+	() =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([]);
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			yield* TestClock.adjust("4 minutes");
+			expect(readAt).toEqual([0]);
+			yield* view(service);
+			yield* TestClock.adjust("0 millis");
+			expect(readAt).toEqual([0, 240_000]);
+			yield* TestClock.adjust("1 minute");
+			expect(readAt).toEqual([0, 240_000, 300_000]);
+		}),
+);
+
+it.effect("a turn end keeps a sooner retry", () =>
+	Effect.gen(function* () {
+		const { service, readAt } = yield* scriptedAccount([]);
+		yield* view(service);
+		yield* TestClock.adjust("25 seconds");
+		yield* service.turnEnded("account-1");
+		yield* TestClock.adjust("5 seconds");
+		expect(readAt).toEqual([0, 30_000]);
+	}),
+);
+
+it.effect(
+	"a turn end after a skipped wake reads ten seconds later, not at once",
+	() =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([goodRead, goodRead]);
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			yield* TestClock.adjust("5 minutes");
+			yield* service.update("account-1", "claude", {
+				status: "limited",
+				windows: [{ kind: "five_hour", utilization: 100 }],
+			});
+			yield* service.turnEnded("account-1");
+			yield* TestClock.adjust("9999 millis");
+			expect(readAt).toEqual([0]);
+			yield* TestClock.adjust("1 millis");
+			expect(readAt).toEqual([0, 310_000]);
+		}),
+);
+
+it.effect.each([
+	["a quick", 3_000, 11_000],
+	["a slow", 15_000, 15_000],
+] as const)(
+	"a turn that ends during %s read is read again once both are past, not five minutes later",
+	([, takes, again]) =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount(
+				[goodRead, goodRead],
+				takes,
+			);
+			yield* view(service);
+			yield* TestClock.adjust("1 second");
+			yield* service.turnEnded("account-1");
+			yield* TestClock.adjust("1 minute");
+			expect(readAt).toEqual([0, again]);
+		}),
+);
+
+it.effect(
+	"a failed read that a turn ended during retries at the turn's read, and says so",
+	() =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([], 3_000);
+			yield* view(service);
+			yield* TestClock.adjust("1 second");
+			yield* service.turnEnded("account-1");
+			yield* TestClock.adjust("2 seconds");
+			expect(yield* published(service)).toMatchObject({
+				status: "unknown",
+				retryAt: 11_000,
+			});
+			yield* TestClock.adjust("8 seconds");
+			expect(readAt).toEqual([0, 11_000]);
+		}),
+);
+
+it.effect(
+	"reads each account five minutes after its own last read while viewed",
+	() =>
+		Effect.gen(function* () {
+			const reads: string[] = [];
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([
+					{ id: "account-1", harness: "claude" },
+					{ id: "account-2", harness: "claude" },
+				]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: (account) =>
+							Effect.map(Clock.currentTimeMillis, (now) => {
+								reads.push(`${account.id}@${now / 1000}`);
+								return goodRead;
+							}),
+					},
+				},
+			});
+			yield* view(service);
+			yield* TestClock.adjust("2 minutes");
+			yield* service.turnEnded("account-2");
+			yield* TestClock.adjust("11 minutes");
+			expect(reads.filter((read) => read.startsWith("account-1"))).toEqual([
+				"account-1@0",
+				"account-1@300",
+				"account-1@600",
+			]);
+			expect(reads.filter((read) => read.startsWith("account-2"))).toEqual([
+				"account-2@0",
+				"account-2@130",
+				"account-2@430",
+				"account-2@730",
+			]);
+		}),
+);
+
+it.effect("a wake also reads an account added while someone is viewing", () =>
+	Effect.gen(function* () {
+		const reads: string[] = [];
+		const configured = yield* Ref.make([
+			{ id: "account-1", harness: "claude" as const },
+		]);
+		const service = yield* makeUsage({
+			accounts: Ref.get(configured),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: (account) =>
+						Effect.map(Clock.currentTimeMillis, (now) => {
+							reads.push(`${account.id}@${now / 1000}`);
+							return goodRead;
+						}),
+				},
+			},
+		});
+		yield* view(service);
+		yield* TestClock.adjust("1 minute");
+		yield* Ref.update(configured, (accounts) => [
+			...accounts,
+			{ id: "account-2", harness: "claude" as const },
+		]);
+		yield* TestClock.adjust("4 minutes");
+		expect(reads).toEqual(["account-1@0", "account-1@300", "account-2@300"]);
+	}),
+);
+
+it.effect(
+	"puts retryAt on the stream only after a failed read, and a forced read neither waits for it nor pushes it back",
+	() =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([
+				failedRead,
+				goodRead,
+				failedRead,
+			]);
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			expect(yield* published(service)).toMatchObject({
+				status: "unknown",
+				retryAt: 30_000,
+			});
+			yield* TestClock.adjust("10 seconds");
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			expect(yield* published(service)).not.toHaveProperty("retryAt");
+			yield* TestClock.adjust("10 seconds");
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			expect(yield* published(service)).toMatchObject({
+				status: "available",
+				stale: true,
+				retryAt: 30_000,
+			});
+			expect(yield* service.latest("account-1")).not.toHaveProperty("retryAt");
+			expect(readAt).toEqual([0, 10_000, 20_000]);
+		}),
 );
 
 it.effect(
@@ -489,17 +826,22 @@ it.effect(
 					cursor: unavailableReader,
 				},
 			});
-			const [previous] = yield* service.refresh({ maxAge: 0 });
+			const [previous] = yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			failed = true;
 			yield* TestClock.adjust("1 minute");
-			expect(yield* service.refresh({ maxAge: 0 })).toMatchObject([
-				{ status: "unknown" },
-			]);
+			expect(
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" }),
+			).toMatchObject([{ status: "unknown" }]);
 			expect(
 				yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
-			).toEqual([[{ ...previous, stale: true }]]);
+			).toEqual([[{ ...previous, stale: true, retryAt: 90_000 }]]);
 			failed = false;
-			expect(yield* service.refresh({ maxAge: 0 })).toMatchObject([
+			expect(
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" }),
+			).toMatchObject([
 				{ stale: false, readAt: yield* Clock.currentTimeMillis },
 			]);
 		}),
@@ -526,14 +868,19 @@ it.effect("retains a cached limit for failover after a read times out", () =>
 				cursor: unavailableReader,
 			},
 		});
-		const [previous] = yield* service.refresh({ maxAge: 0 });
+		const [previous] = yield* service.refresh({
+			maxAge: 0,
+			wait: "until-settled",
+		});
 		timedOut = true;
-		const pending = yield* Effect.forkChild(service.refresh({ maxAge: 0 }));
-		yield* TestClock.adjust("5 seconds");
+		const pending = yield* Effect.forkChild(
+			service.refresh({ maxAge: 0, wait: "until-settled" }),
+		);
+		yield* TestClock.adjust("30 seconds");
 		expect(yield* Fiber.join(pending)).toMatchObject([{ status: "unknown" }]);
 		expect(
 			yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
-		).toEqual([[{ ...previous, stale: true }]]);
+		).toEqual([[{ ...previous, stale: true, retryAt: 60_000 }]]);
 		const failover = yield* Effect.forkChild(service.pickFailover("other"));
 		yield* TestClock.adjust("5 seconds");
 		expect(yield* Fiber.join(failover)).toBeUndefined();
@@ -553,7 +900,9 @@ it.effect("treats a harness without a reader as unavailable", () =>
 				cursor: unavailableReader,
 			},
 		});
-		expect(yield* service.refresh({ maxAge: 0 })).toMatchObject([
+		expect(
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" }),
+		).toMatchObject([
 			{
 				accountId: "codex-1",
 				harness: "codex",
@@ -672,9 +1021,13 @@ it.effect("never picks unknown or stale accounts for failover", () =>
 				},
 			},
 		});
-		yield* service.refresh({ maxAge: 0 });
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 		failed = true;
-		yield* service.refresh({ accountIds: ["stale"], maxAge: 0 });
+		yield* service.refresh({
+			accountIds: ["stale"],
+			maxAge: 0,
+			wait: "until-settled",
+		});
 		expect(yield* service.latest("stale")).toMatchObject({
 			status: "available",
 			stale: true,
@@ -715,11 +1068,19 @@ it.effect(
 				},
 			});
 			const first = yield* Effect.forkChild(
-				service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+				service.refresh({
+					accountIds: ["account-1"],
+					maxAge: 0,
+					wait: "until-settled",
+				}),
 			);
 			yield* Deferred.await(started);
 			const second = yield* Effect.forkChild(
-				service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+				service.refresh({
+					accountIds: ["account-1"],
+					maxAge: 0,
+					wait: "until-settled",
+				}),
 			);
 			yield* Effect.yieldNow;
 			yield* Fiber.interrupt(first);
@@ -746,7 +1107,11 @@ it.effect(
 			];
 			expect(yield* Fiber.join(second)).toEqual(expected);
 			expect(
-				yield* service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+				yield* service.refresh({
+					accountIds: ["account-1"],
+					maxAge: 0,
+					wait: "until-settled",
+				}),
 			).toEqual([
 				{
 					...expected[0],
@@ -767,7 +1132,7 @@ it.effect(
 );
 
 it.effect(
-	"bounds the entire read at five seconds, releases it, and retries fresh",
+	"closes a read at thirty seconds, settles it unknown, and retries fresh",
 	() =>
 		Effect.gen(function* () {
 			const started = yield* Deferred.make<void>();
@@ -790,15 +1155,20 @@ it.effect(
 				},
 			});
 			const first = yield* Effect.forkChild(
-				service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+				service.refresh({
+					accountIds: ["account-1"],
+					maxAge: 0,
+					wait: "until-settled",
+				}),
 			);
 			yield* Deferred.await(started);
-			yield* TestClock.adjust("4999 millis");
+			yield* TestClock.adjust("29999 millis");
 			expect(
 				(yield* Effect.sync(() =>
 					Effect4PollOption.fromUndefinedOr(first.pollUnsafe()),
 				))._tag,
 			).toBe("None");
+			expect(released).toBe(0);
 			yield* TestClock.adjust("1 millis");
 			expect(yield* Fiber.join(first)).toEqual([
 				{
@@ -813,15 +1183,296 @@ it.effect(
 			]);
 			expect(released).toBe(1);
 			const retry = yield* Effect.forkChild(
-				service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+				service.refresh({
+					accountIds: ["account-1"],
+					maxAge: 0,
+					wait: "until-settled",
+				}),
 			);
-			yield* TestClock.adjust("5 seconds");
+			yield* TestClock.adjust("30 seconds");
 			expect(yield* Fiber.join(retry)).toMatchObject([
 				{ status: "unknown", windows: [] },
 			]);
 			expect(calls).toBe(2);
 			expect(released).toBe(2);
 		}),
+);
+
+it.effect(
+	"gives a caller whose wait runs out the current reading marked checking, then publishes the read",
+	() =>
+		Effect.gen(function* () {
+			const release = yield* Deferred.make<void>();
+			let calls = 0;
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: () =>
+							Effect.gen(function* () {
+								if (++calls > 1) yield* Deferred.await(release);
+								return {
+									status: "available",
+									windows: [{ kind: "five_hour", utilization: calls * 10 }],
+								};
+							}),
+					},
+				},
+			});
+			const [previous] = yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			});
+			yield* TestClock.adjust("1 minute");
+			const waiting = yield* Effect.forkChild(
+				service.refresh({ maxAge: 0, wait: "5 seconds" }),
+			);
+			yield* TestClock.adjust("5 seconds");
+			expect(yield* Fiber.join(waiting)).toEqual([
+				{ ...previous, checking: true },
+			]);
+			expect(yield* service.latest("account-1")).toEqual(previous);
+			yield* Deferred.succeed(release, undefined);
+			expect(
+				yield* service.readings.pipe(
+					Stream.filter(([reading]) => !reading?.checking),
+					Stream.take(1),
+					Stream.runCollect,
+				),
+			).toMatchObject([
+				[{ readAt: 65_000, stale: false, windows: [{ utilization: 20 }] }],
+			]);
+			expect(calls).toBe(2);
+		}),
+);
+
+it.effect(
+	"gives a caller whose wait runs out before the first reading unknown, marked checking",
+	() =>
+		Effect.gen(function* () {
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "codex" }]),
+				readers: {
+					claude: unavailableReader,
+					codex: { read: () => Effect.never },
+					cursor: unavailableReader,
+				},
+			});
+			expect(yield* service.refresh({ maxAge: 0, wait: 0 })).toEqual([
+				{
+					accountId: "account-1",
+					harness: "codex",
+					status: "unknown",
+					windows: [],
+					readAt: 0,
+					stale: false,
+					checking: true,
+				},
+			]);
+			expect(yield* service.latest("account-1")).toBeUndefined();
+		}),
+);
+
+it.effect("answers failover within five seconds while a read is slow", () =>
+	Effect.gen(function* () {
+		let slow = false;
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([
+				{ id: "current", harness: "claude" },
+				{ id: "spare", harness: "claude" },
+			]),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: () =>
+						slow
+							? Effect.never
+							: Effect.succeed({
+									status: "available",
+									windows: [{ kind: "five_hour", utilization: 20 }],
+								}),
+				},
+			},
+		});
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+		slow = true;
+		yield* TestClock.adjust("1 minute");
+		const failover = yield* Effect.forkChild(service.pickFailover("current"));
+		yield* TestClock.adjust("5 seconds");
+		expect(yield* Effect.sync(() => failover.pollUnsafe())).toBeDefined();
+		expect(yield* Fiber.join(failover)).toBe("spare");
+	}),
+);
+
+it.effect(
+	"waits until the read lands when the caller waits until settled",
+	() =>
+		Effect.gen(function* () {
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: () =>
+							Effect.sleep("20 seconds").pipe(
+								Effect.as<UsageRead>({ status: "available", windows: [] }),
+							),
+					},
+				},
+			});
+			const all = yield* Effect.forkChild(
+				service.refresh({ maxAge: 0, wait: "until-settled" }),
+			);
+			yield* TestClock.adjust("19999 millis");
+			expect(yield* Effect.sync(() => all.pollUnsafe())).toBeUndefined();
+			yield* TestClock.adjust("1 millis");
+			expect(yield* Fiber.join(all)).toEqual([
+				{
+					accountId: "account-1",
+					harness: "claude",
+					status: "available",
+					windows: [],
+					readAt: 20_000,
+					stale: false,
+				},
+			]);
+		}),
+);
+
+it.effect("publishes each account's reading as its own read lands", () =>
+	Effect.gen(function* () {
+		const release = yield* Deferred.make<void>();
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([
+				{ id: "fast", harness: "claude" },
+				{ id: "slow", harness: "claude" },
+			]),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: (account) =>
+						(account.id === "slow"
+							? Deferred.await(release)
+							: Effect.void
+						).pipe(Effect.as<UsageRead>({ status: "available", windows: [] })),
+				},
+			},
+		});
+		const all = yield* Effect.forkChild(
+			service.refresh({ maxAge: 0, wait: "until-settled" }),
+		);
+		expect(
+			yield* service.readings.pipe(
+				Stream.filter((readings) => readings.length > 0),
+				Stream.take(1),
+				Stream.runCollect,
+			),
+		).toEqual([[expect.objectContaining({ accountId: "fast", stale: false })]]);
+		expect(yield* Effect.sync(() => all.pollUnsafe())).toBeUndefined();
+		yield* Deferred.succeed(release, undefined);
+		expect(
+			(yield* Fiber.join(all)).map((reading) => reading.accountId),
+		).toEqual(["fast", "slow"]);
+	}),
+);
+
+it.effect(
+	"logs each settled read once with its account, duration and outcome",
+	() => {
+		const lines: unknown[] = [];
+		return Effect.gen(function* () {
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: () =>
+							Effect.sleep("7 seconds").pipe(
+								Effect.as<UsageRead>({
+									status: "unknown",
+									windows: [],
+									reason: "Not signed in",
+								}),
+							),
+					},
+				},
+			});
+			const first = yield* Effect.forkChild(
+				service.refresh({ maxAge: 0, wait: "until-settled" }),
+			);
+			const second = yield* Effect.forkChild(
+				service.refresh({ maxAge: 0, wait: "until-settled" }),
+			);
+			yield* TestClock.adjust("7 seconds");
+			yield* Fiber.join(first);
+			yield* Fiber.join(second);
+			expect(lines).toEqual([
+				{
+					logLevel: "Warn",
+					message: ["Usage read settled"],
+					annotations: {
+						accountId: "account-1",
+						durationMs: 7_000,
+						outcome: "unknown",
+						reason: "Not signed in",
+					},
+				},
+			]);
+		}).pipe(
+			Effect.provide(
+				Logger.layer([
+					Logger.make(({ logLevel, message, fiber }) => {
+						lines.push({
+							logLevel,
+							message,
+							annotations: fiber.getRef(References.CurrentLogAnnotations),
+						});
+					}),
+				]),
+			),
+		);
+	},
+);
+
+it.effect("saves a reading that lands after its caller stopped waiting", () =>
+	Effect.gen(function* () {
+		const saved = yield* Deferred.make<UsageHistorySnapshot>();
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: () =>
+						Effect.sleep("10 seconds").pipe(
+							Effect.as<UsageRead>({
+								status: "available",
+								windows: [{ kind: "five_hour", utilization: 10 }],
+							}),
+						),
+				},
+			},
+			history: {
+				load: Effect.succeed({}),
+				save: (snapshot) =>
+					snapshot["account-1"]?.reading
+						? Deferred.succeed(saved, snapshot)
+						: Effect.void,
+			},
+		});
+		yield* Effect.forkChild(service.refresh({ maxAge: 0, wait: 0 }));
+		yield* TestClock.adjust("10 seconds");
+		expect((yield* Deferred.await(saved))["account-1"]?.reading).toMatchObject({
+			readAt: 10_000,
+			windows: [{ utilization: 10 }],
+		});
+	}),
 );
 
 it.effect(
@@ -839,7 +1490,9 @@ it.effect(
 					cursor: unavailableReader,
 				},
 			});
-			expect(yield* service.refresh({ maxAge: 0 })).toEqual([
+			expect(
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" }),
+			).toEqual([
 				{
 					accountId: "account-1",
 					harness: "claude",
@@ -877,6 +1530,7 @@ it.effect(
 				yield* service.refresh({
 					accountIds: ["removed", "account-1", "account-1"],
 					maxAge: 0,
+					wait: "until-settled",
 				}),
 			).toMatchObject([
 				{
@@ -887,6 +1541,512 @@ it.effect(
 				{ accountId: "account-1", status: "available" },
 			]);
 			expect(read).toEqual(["account-1"]);
+		}),
+);
+
+it.effect("drops the late result of an account removed during its read", () =>
+	Effect.gen(function* () {
+		const started = yield* Deferred.make<void>();
+		const release = yield* Deferred.make<void>();
+		let ids = ["account-1", "account-2"];
+		const service = yield* makeUsage({
+			accounts: Effect.sync(() =>
+				ids.map((id) => ({ id, harness: "claude" as const })),
+			),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: (account) =>
+						account.id === "account-2"
+							? Deferred.succeed(started, undefined).pipe(
+									Effect.andThen(Deferred.await(release)),
+									Effect.as<UsageRead>({
+										status: "available",
+										windows: [{ kind: "five_hour", utilization: 50 }],
+									}),
+								)
+							: Effect.succeed<UsageRead>({ status: "available", windows: [] }),
+				},
+			},
+		});
+		const pending = yield* Effect.forkChild(
+			service.refresh({ maxAge: 0, wait: "until-settled" }),
+		);
+		yield* Deferred.await(started);
+		ids = ["account-1"];
+		yield* service.refresh({
+			accountIds: ["account-1"],
+			maxAge: 0,
+			wait: "until-settled",
+		});
+		yield* Deferred.succeed(release, undefined);
+		expect(
+			(yield* Fiber.join(pending)).map((reading) => reading.accountId),
+		).toEqual(["account-1"]);
+		expect(yield* service.latest("account-2")).toBeUndefined();
+		expect(
+			yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
+		).toMatchObject([[{ accountId: "account-1" }]]);
+	}),
+);
+
+it.effect(
+	"merges a live reading into the last reading by window id or kind",
+	() =>
+		Effect.gen(function* () {
+			let failing = false;
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([
+					{ id: "codex-1", harness: "codex" as const },
+					{ id: "codex-2", harness: "codex" as const },
+				]),
+				readers: {
+					claude: unavailableReader,
+					cursor: unavailableReader,
+					codex: {
+						read: () =>
+							failing
+								? Effect.fail(new Error("Reader failed"))
+								: Effect.succeed<UsageRead>({
+										status: "available",
+										planLabel: "Pro",
+										windows: [
+											{
+												id: "codex:primary",
+												kind: "five_hour",
+												label: "Codex",
+												utilization: 10,
+											},
+											{
+												id: "spark:primary",
+												kind: "five_hour",
+												label: "Spark",
+												utilization: 20,
+											},
+											{ kind: "seven_day", utilization: 5 },
+										],
+									}),
+					},
+				},
+			});
+			yield* service.refresh({
+				accountIds: ["codex-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			});
+			yield* TestClock.adjust("1 minute");
+			failing = true;
+			yield* service.refresh({
+				accountIds: ["codex-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			});
+			expect((yield* service.latest("codex-1"))?.stale).toBe(true);
+			yield* service.update("codex-1", "codex", {
+				status: "unknown",
+				windows: [
+					{ id: "codex:primary", kind: "month", utilization: 30 },
+					{ id: "spark:primary", kind: "custom", utilization: 25 },
+					{ kind: "seven_day", utilization: 7 },
+					{
+						id: "spark:secondary",
+						kind: "custom",
+						label: "Spark 30m",
+						utilization: 1,
+					},
+				],
+			});
+			expect(yield* service.latest("codex-1")).toEqual({
+				accountId: "codex-1",
+				harness: "codex",
+				status: "available",
+				planLabel: "Pro",
+				windows: [
+					{
+						id: "codex:primary",
+						kind: "month",
+						label: "Codex",
+						utilization: 30,
+					},
+					{
+						id: "spark:primary",
+						kind: "five_hour",
+						label: "Spark",
+						utilization: 25,
+					},
+					{ kind: "seven_day", utilization: 7 },
+					{
+						id: "spark:secondary",
+						kind: "custom",
+						label: "Spark 30m",
+						utilization: 1,
+					},
+				],
+				readAt: yield* Clock.currentTimeMillis,
+				stale: false,
+			});
+			yield* service.update("codex-1", "codex", {
+				status: "available",
+				windows: [{ id: "spark:primary", kind: "five_hour", utilization: 100 }],
+			});
+			expect((yield* service.latest("codex-1"))?.status).toBe("limited");
+			const empty: UsageRead = {
+				status: "unknown",
+				windows: [],
+				reason: "No rate limits yet",
+			};
+			yield* service.update("codex-2", "codex", empty);
+			yield* service.update("codex-2", "claude", {
+				status: "limited",
+				windows: [{ kind: "five_hour", utilization: 100 }],
+			});
+			yield* service.update("codex-3", "codex", empty);
+			expect(yield* service.latest("codex-2")).toEqual({
+				...empty,
+				accountId: "codex-2",
+				harness: "codex",
+				readAt: yield* Clock.currentTimeMillis,
+				stale: false,
+			});
+			expect(yield* service.latest("codex-3")).toBeUndefined();
+		}),
+);
+
+it.effect("keeps a live reading over a read that started before it", () =>
+	Effect.gen(function* () {
+		const started = yield* Deferred.make<void>();
+		const release = yield* Deferred.make<void>();
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: () =>
+						Deferred.succeed(started, undefined).pipe(
+							Effect.andThen(Deferred.await(release)),
+							Effect.as<UsageRead>({
+								status: "available",
+								windows: [{ kind: "five_hour", utilization: 20 }],
+							}),
+						),
+				},
+			},
+		});
+		const pending = yield* Effect.forkChild(
+			service.refresh({
+				accountIds: ["account-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			}),
+		);
+		yield* Deferred.await(started);
+		yield* service.update("account-1", "claude", {
+			status: "available",
+			windows: [{ kind: "five_hour", utilization: 60 }],
+		});
+		const live = yield* service.latest("account-1");
+		expect(live?.windows).toEqual([{ kind: "five_hour", utilization: 60 }]);
+		yield* Deferred.succeed(release, undefined);
+		expect(yield* Fiber.join(pending)).toEqual([live]);
+		expect(yield* service.latest("account-1")).toEqual(live);
+		expect(
+			yield* service.refresh({
+				accountIds: ["account-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			}),
+		).toMatchObject([{ windows: [{ kind: "five_hour", utilization: 20 }] }]);
+	}),
+);
+
+const bothWindows: UsageRead = {
+	status: "available",
+	windows: [
+		{ kind: "five_hour", utilization: 41 },
+		{ kind: "seven_day", utilization: 10 },
+	],
+};
+
+it.effect.each([
+	[
+		"every window counts as fresh",
+		bothWindows.windows.map((window) => ({ ...window, utilization: 60 })),
+		[0],
+	],
+	[
+		"only some windows doesn't",
+		[{ kind: "five_hour" as const, utilization: 60 }],
+		[0, 480_000],
+	],
+	["no windows doesn't", [], [0, 480_000]],
+] as const)(
+	"a live reading with %s for a refresh within maxAge",
+	([, windows, reads]) =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([
+				bothWindows,
+				bothWindows,
+			]);
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			yield* TestClock.adjust("4 minutes");
+			yield* service.update("account-1", "claude", {
+				status: windows.length ? "available" : "unknown",
+				windows,
+			});
+			yield* TestClock.adjust("4 minutes");
+			yield* service.refresh({ maxAge: "5 minutes", wait: "until-settled" });
+			expect(readAt).toEqual(reads);
+		}),
+);
+
+it.effect.each([
+	["windows counts as fresh", bothWindows.windows, []],
+	["no windows doesn't", [], [60_000]],
+] as const)(
+	"an account's first reading, live with %s, for a refresh within maxAge",
+	([, windows, reads]) =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([bothWindows]);
+			yield* service.update("account-1", "claude", {
+				status: windows.length ? "available" : "unknown",
+				windows,
+			});
+			yield* TestClock.adjust("1 minute");
+			yield* service.refresh({ maxAge: "5 minutes", wait: "until-settled" });
+			expect(readAt).toEqual(reads);
+		}),
+);
+
+it.effect("a full live reading after a failed read clears retryAt", () =>
+	Effect.gen(function* () {
+		const { service } = yield* scriptedAccount([goodRead, failedRead]);
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+		yield* TestClock.adjust("1 minute");
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+		expect(yield* published(service)).toMatchObject({ retryAt: 90_000 });
+		yield* TestClock.adjust("10 seconds");
+		yield* service.update("account-1", "claude", {
+			status: "available",
+			windows: [{ kind: "five_hour", utilization: 60 }],
+		});
+		const reading = yield* published(service);
+		expect(reading).toMatchObject({
+			status: "available",
+			windows: [{ kind: "five_hour", utilization: 60 }],
+			stale: false,
+		});
+		expect(reading).not.toHaveProperty("retryAt");
+	}),
+);
+
+it.effect(
+	"an older read that fails after a full live reading neither adds a failure nor winds its freshness back",
+	() =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([failedRead], 20_000);
+			yield* service.refresh({ maxAge: 0, wait: 0 });
+			yield* TestClock.adjust("10 seconds");
+			yield* service.update("account-1", "claude", {
+				status: "available",
+				windows: [{ kind: "five_hour", utilization: 60 }],
+			});
+			yield* TestClock.adjust("10 seconds");
+			const reading = yield* published(service);
+			expect(reading).toMatchObject({
+				status: "available",
+				windows: [{ kind: "five_hour", utilization: 60 }],
+				readAt: 10_000,
+			});
+			expect(reading).not.toHaveProperty("retryAt");
+			expect(reading).not.toHaveProperty("checking");
+			yield* TestClock.adjust("285 seconds");
+			expect(yield* service.refresh({ maxAge: "5 minutes", wait: 0 })).toEqual([
+				reading,
+			]);
+			yield* TestClock.adjust("0 millis");
+			expect(readAt).toEqual([0]);
+		}),
+);
+
+it.effect(
+	"a read that fails after a partial live reading keeps the live windows and backs off",
+	() =>
+		Effect.gen(function* () {
+			const { service } = yield* scriptedAccount(
+				[bothWindows, failedRead],
+				20_000,
+			);
+			yield* service.refresh({ maxAge: 0, wait: 0 });
+			yield* TestClock.adjust("1 minute");
+			yield* service.refresh({ maxAge: 0, wait: 0 });
+			yield* TestClock.adjust("10 seconds");
+			yield* service.update("account-1", "claude", {
+				status: "available",
+				windows: [{ kind: "five_hour", utilization: 60 }],
+			});
+			yield* TestClock.adjust("10 seconds");
+			expect(yield* published(service)).toMatchObject({
+				status: "available",
+				windows: [
+					{ kind: "five_hour", utilization: 60 },
+					{ kind: "seven_day", utilization: 10 },
+				],
+				retryAt: 110_000,
+			});
+		}),
+);
+
+it.effect(
+	"a full live reading after a skipped wake is next read five minutes after it, and a viewer waits for that",
+	() =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([goodRead, goodRead]);
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			yield* TestClock.adjust("6 minutes");
+			yield* service.update("account-1", "claude", {
+				status: "available",
+				windows: [{ kind: "five_hour", utilization: 60 }],
+			});
+			yield* view(service);
+			yield* TestClock.adjust("0 millis");
+			expect(readAt).toEqual([0]);
+			yield* TestClock.adjust("299999 millis");
+			expect(readAt).toEqual([0]);
+			yield* TestClock.adjust("1 millis");
+			expect(readAt).toEqual([0, 660_000]);
+		}),
+);
+
+it.effect("a full live reading keeps a sooner post-turn re-read", () =>
+	Effect.gen(function* () {
+		const { service, readAt } = yield* scriptedAccount([goodRead, goodRead]);
+		yield* view(service);
+		yield* TestClock.adjust("1 minute");
+		yield* service.turnEnded("account-1");
+		yield* TestClock.adjust("5 seconds");
+		yield* service.update("account-1", "claude", {
+			status: "available",
+			windows: [{ kind: "five_hour", utilization: 60 }],
+		});
+		yield* TestClock.adjust("5 seconds");
+		expect(readAt).toEqual([0, 70_000]);
+	}),
+);
+
+it.effect(
+	"logs a freed model window by its model, and not a window freed at its reset",
+	() => {
+		const messages: unknown[] = [];
+		return Effect.gen(function* () {
+			let calls = 0;
+			const atSecondRead = new Date(1_000).toISOString();
+			const later = new Date(60_000).toISOString();
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: () =>
+							Effect.sync((): UsageRead => {
+								const first = ++calls === 1;
+								return {
+									status: first ? "limited" : "available",
+									windows: [
+										{
+											kind: "five_hour",
+											utilization: first ? 100 : 20,
+											resetsAt: atSecondRead,
+										},
+										{
+											kind: "seven_day_model",
+											model: "Sonnet",
+											utilization: first ? 50 : 40,
+											resetsAt: later,
+										},
+										{
+											kind: "seven_day_model",
+											model: "Fable",
+											utilization: first ? 100 : 30,
+											resetsAt: later,
+										},
+									],
+								};
+							}),
+					},
+				},
+			});
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			yield* TestClock.adjust("1 second");
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			expect(messages).toEqual([
+				[
+					"Usage window free before reset",
+					{
+						accountId: "account-1",
+						window: "seven_day_model",
+						model: "Fable",
+						resetsAt: later,
+					},
+				],
+			]);
+		}).pipe(
+			Effect.provide(
+				Logger.layer([
+					Logger.make(({ logLevel, message }) => {
+						if (logLevel === "Info") messages.push(message);
+					}),
+				]),
+			),
+		);
+	},
+);
+
+it.effect(
+	"turn end re-reads without viewers only when a plan window is full",
+	() =>
+		Effect.gen(function* () {
+			const reads: Readonly<Record<string, UsageRead>> = {
+				"account-1": {
+					status: "limited",
+					windows: [{ kind: "five_hour", utilization: 100 }],
+				},
+				"account-2": {
+					status: "available",
+					windows: [
+						{ kind: "five_hour", utilization: 50 },
+						{ kind: "seven_day_model", model: "Fable", utilization: 100 },
+					],
+				},
+			};
+			const ids = ["account-1", "account-2", "account-3"];
+			const calls: string[] = [];
+			const service = yield* makeUsage({
+				accounts: Effect.succeed(
+					ids.map((id) => ({ id, harness: "claude" as const })),
+				),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: (account) =>
+							Effect.sync(() => {
+								calls.push(account.id);
+								return reads[account.id] ?? { status: "unknown", windows: [] };
+							}),
+					},
+				},
+			});
+			yield* service.refresh({
+				accountIds: ["account-1", "account-2"],
+				maxAge: 0,
+				wait: "until-settled",
+			});
+			for (const id of ids) yield* service.turnEnded(id);
+			yield* TestClock.adjust("10 seconds");
+			expect(calls).toEqual(["account-1", "account-2", "account-1"]);
 		}),
 );
 
@@ -997,14 +2157,19 @@ it.effect(
 				},
 			});
 			expect(
-				(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+				(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+					?.windows[0],
 			).not.toHaveProperty("forecast");
 			yield* TestClock.adjust("5 minutes");
 			expect(
-				(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+				(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+					?.windows[0],
 			).not.toHaveProperty("forecast");
 			yield* TestClock.adjust("599999 millis");
-			const beforeSpan = (yield* service.refresh({ maxAge: 0 }))[0]?.windows[0];
+			const beforeSpan = (yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			}))[0]?.windows[0];
 			expect(beforeSpan).toHaveProperty("history", [
 				{ at: 0, utilization: 10 },
 				{ at: 300_000, utilization: 10 },
@@ -1013,7 +2178,8 @@ it.effect(
 			expect(beforeSpan).not.toHaveProperty("forecast");
 			yield* TestClock.adjust("1 millis");
 			expect(
-				(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+				(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+					?.windows[0],
 			).toHaveProperty("forecast", { kind: "under", atReset: 10 });
 		}),
 );
@@ -1048,13 +2214,17 @@ it.effect("forecasts a steady low burn separately for each window", () =>
 				},
 			},
 		});
-		yield* service.refresh({ maxAge: 0 });
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 		yield* TestClock.adjust("20 minutes");
 		expect(
-			(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+			(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+				?.windows[0],
 		).not.toHaveProperty("forecast");
 		yield* TestClock.adjust("10 minutes");
-		const [reading] = yield* service.refresh({ maxAge: 0 });
+		const [reading] = yield* service.refresh({
+			maxAge: 0,
+			wait: "until-settled",
+		});
 		expect(reading?.windows[0]).toHaveProperty("forecast", {
 			kind: "under",
 			atReset: 70,
@@ -1095,12 +2265,13 @@ it.effect("forecasts a fast burn reaching the limit before reset", () =>
 				},
 			},
 		});
-		yield* service.refresh({ maxAge: 0 });
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 		yield* TestClock.adjust("10 minutes");
-		yield* service.refresh({ maxAge: 0 });
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 		yield* TestClock.adjust("10 minutes");
 		expect(
-			(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+			(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+				?.windows[0],
 		).toHaveProperty("forecast", { kind: "runs_out", at: 2_700_000 });
 	}),
 );
@@ -1144,16 +2315,19 @@ it.effect("loads history once and forecasts immediately after a restart", () =>
 		yield* Effect.scoped(
 			Effect.gen(function* () {
 				const first = yield* makeUsage(options);
-				yield* first.refresh({ maxAge: 0 });
+				yield* first.refresh({ maxAge: 0, wait: "until-settled" });
 				yield* TestClock.adjust("10 minutes");
-				yield* first.refresh({ maxAge: 0 });
+				yield* first.refresh({ maxAge: 0, wait: "until-settled" });
 				yield* TestClock.adjust("10 minutes");
-				yield* first.refresh({ maxAge: 0 });
+				yield* first.refresh({ maxAge: 0, wait: "until-settled" });
 			}),
 		);
 		const second = yield* makeUsage(options);
 		yield* TestClock.adjust("10 minutes");
-		const window = (yield* second.refresh({ maxAge: 0 }))[0]?.windows[0];
+		const window = (yield* second.refresh({
+			maxAge: 0,
+			wait: "until-settled",
+		}))[0]?.windows[0];
 		expect(window).toHaveProperty("forecast", { kind: "under", atReset: 70 });
 		expect(window).toHaveProperty("history", [
 			{ at: 0, utilization: 10 },
@@ -1205,7 +2379,7 @@ it.effect(
 			yield* Effect.scoped(
 				Effect.gen(function* () {
 					const first = yield* makeUsage(options(["account-1", "account-2"]));
-					yield* first.refresh({ maxAge: 0 });
+					yield* first.refresh({ maxAge: 0, wait: "until-settled" });
 					yield* first.update("account-2", "claude", {
 						status: "available",
 						windows: [{ kind: "seven_day", utilization: 12 }],
@@ -1236,13 +2410,96 @@ it.effect(
 				yield* second.readings.pipe(Stream.take(1), Stream.runCollect),
 			).toMatchObject([[restored, { accountId: "account-2", stale: true }]]);
 			const pending = yield* Effect.forkChild(
-				second.refresh({ accountIds: ["account-1"], maxAge: "5 minutes" }),
+				second.refresh({
+					accountIds: ["account-1"],
+					maxAge: "5 minutes",
+					wait: "until-settled",
+				}),
 			);
-			yield* TestClock.adjust("5 seconds");
+			yield* TestClock.adjust("30 seconds");
 			expect(yield* Fiber.join(pending)).toMatchObject([{ status: "unknown" }]);
 			expect(yield* second.latest("account-1")).toMatchObject(restored);
 			const removed = yield* makeUsage(options(["account-2"]));
 			expect(yield* removed.latest("account-1")).toBeUndefined();
+		}),
+);
+
+it.effect(
+	"after a restart, a signed-out account's old reading isn't restored, and an available reading is restored as stale with transient fields stripped",
+	() =>
+		Effect.gen(function* () {
+			const file = yield* Ref.make("{}");
+			const json = Schema.fromJsonString(UsageHistorySnapshotSchema);
+			let signedOut = false;
+			let cold = false;
+			const options = {
+				accounts: Effect.succeed([
+					{ id: "account-1", harness: "claude" as const },
+					{ id: "account-2", harness: "claude" as const },
+				]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: (account: { readonly id: string }) =>
+							cold
+								? Effect.never
+								: signedOut
+									? Effect.succeed<UsageRead>(
+											account.id === "account-1"
+												? {
+														status: "unavailable",
+														reason: "Signed out",
+														windows: [],
+													}
+												: { status: "unknown", windows: [] },
+										)
+									: Effect.succeed<UsageRead>({
+											status: "available",
+											windows: [{ kind: "seven_day", utilization: 30 }],
+										}),
+					},
+				},
+				history: {
+					load: Ref.get(file).pipe(
+						Effect.flatMap(Schema.decodeUnknownEffect(json)),
+					),
+					save: (snapshot: UsageHistorySnapshot) =>
+						Schema.encodeEffect(json)(snapshot).pipe(
+							Effect.flatMap((text) => Ref.set(file, text)),
+						),
+				},
+			};
+			yield* Effect.scoped(
+				Effect.gen(function* () {
+					const first = yield* makeUsage(options);
+					yield* first.refresh({ maxAge: 0, wait: "until-settled" });
+					signedOut = true;
+					yield* TestClock.adjust("1 minute");
+					yield* first.refresh({ maxAge: 0, wait: "until-settled" });
+					expect(yield* first.latest("account-2")).toMatchObject({
+						stale: true,
+					});
+				}),
+			);
+			const saved = yield* Ref.get(file).pipe(
+				Effect.flatMap(Schema.decodeUnknownEffect(json)),
+			);
+			expect(saved["account-1"]).not.toHaveProperty("reading");
+			expect(saved["account-2"]?.reading).toMatchObject({
+				status: "available",
+				readAt: 0,
+				stale: false,
+			});
+			cold = true;
+			const second = yield* makeUsage(options);
+			expect(yield* second.latest("account-1")).toBeUndefined();
+			expect(yield* second.latest("account-2")).toMatchObject({
+				accountId: "account-2",
+				status: "available",
+				readAt: 0,
+				stale: true,
+			});
 		}),
 );
 
@@ -1265,20 +2522,24 @@ for (const reset of ["later reset time", "utilization drop"] as const) {
 					},
 				},
 			});
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			yield* TestClock.adjust("10 minutes");
 			utilization = 20;
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			yield* TestClock.adjust("10 minutes");
 			utilization = 30;
 			expect(
-				(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+				(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+					?.windows[0],
 			).toHaveProperty("forecast");
 			yield* TestClock.adjust("1 minute");
 			if (reset === "later reset time")
 				resetsAt = new Date(7_200_000).toISOString();
 			else utilization = 5;
-			const window = (yield* service.refresh({ maxAge: 0 }))[0]?.windows[0];
+			const window = (yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			}))[0]?.windows[0];
 			expect(window).toHaveProperty("history", [
 				{ at: 1_260_000, utilization },
 			]);
@@ -1326,7 +2587,10 @@ it.effect(
 						),
 				},
 			});
-			const first = yield* service.refresh({ maxAge: 0 });
+			const first = yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			expect(first[0]?.windows[0]).toHaveProperty("history", [
 				{ at: 0, utilization: 10 },
 			]);
@@ -1335,15 +2599,30 @@ it.effect(
 			]);
 			expect(first[0]?.windows[2]).not.toHaveProperty("history");
 			expect(first[0]?.windows[3]).not.toHaveProperty("history");
-			expect(saves).toBe(1);
-			for (const failure of ["unknown", "unavailable"] as const) {
-				status = failure;
-				yield* TestClock.adjust("1 minute");
-				yield* service.refresh({ maxAge: 0 });
-			}
-			expect(saves).toBe(1);
+			// An unknown read keeps the saved reading and writes nothing; an
+			// unavailable one drops it.
+			const succeeded = yield* Ref.get(stored);
+			expect(
+				Object.values(succeeded).map((saved) => saved.reading?.status),
+			).toEqual(["available", "available"]);
+			const savesBefore = saves;
+			status = "unknown";
+			yield* TestClock.adjust("1 minute");
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			expect(saves).toBe(savesBefore);
+			expect(yield* Ref.get(stored)).toEqual(succeeded);
+			status = "unavailable";
+			yield* TestClock.adjust("1 minute");
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			const unavailable = yield* Ref.get(stored);
+			expect(unavailable["account-1"]).not.toHaveProperty("reading");
+			expect(unavailable["account-2"]).not.toHaveProperty("reading");
 			status = "limited";
-			yield* service.refresh({ accountIds: ["account-1"], maxAge: 0 });
+			yield* service.refresh({
+				accountIds: ["account-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			const snapshot = yield* Ref.get(stored);
 			expect(snapshot["account-1"]?.five_hour?.points).toEqual([
 				{ at: 0, utilization: 10 },
@@ -1354,7 +2633,6 @@ it.effect(
 				{ at: 120_000, utilization: 20 },
 			]);
 			expect(snapshot["account-2"]?.five_hour?.points).toHaveLength(1);
-			expect(saves).toBe(2);
 		}),
 );
 
@@ -1388,7 +2666,10 @@ it.effect(
 				},
 			});
 			yield* TestClock.setTime(2016 * 60_000);
-			const window = (yield* service.refresh({ maxAge: 0 }))[0]?.windows[0];
+			const window = (yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			}))[0]?.windows[0];
 			if (!window || window.kind === "seven_day_model")
 				throw new Error("Missing plan window");
 			expect(window.history).toHaveLength(48);
@@ -1445,11 +2726,19 @@ it.effect("serializes saves without losing concurrent account history", () =>
 			},
 		});
 		const first = yield* Effect.forkChild(
-			service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+			service.refresh({
+				accountIds: ["account-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			}),
 		);
 		yield* Deferred.await(started);
 		const second = yield* Effect.forkChild(
-			service.refresh({ accountIds: ["account-2"], maxAge: 0 }),
+			service.refresh({
+				accountIds: ["account-2"],
+				maxAge: 0,
+				wait: "until-settled",
+			}),
 		);
 		yield* Effect.yieldNow;
 		yield* Deferred.succeed(release, undefined);
@@ -1492,13 +2781,13 @@ it.effect(
 							: Ref.set(stored, snapshot),
 				},
 			});
-			expect(yield* service.refresh({ maxAge: 0 })).toMatchObject([
-				{ status: "available" },
-			]);
+			expect(
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" }),
+			).toMatchObject([{ status: "available" }]);
 			expect(yield* Ref.get(stored)).toEqual({});
 			failed = false;
 			status = "unknown";
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			expect((yield* Ref.get(stored))["account-1"]?.five_hour?.points).toEqual([
 				{ at: 0, utilization: 10 },
 			]);
@@ -1557,11 +2846,11 @@ it.effect(
 			);
 			yield* Effect.gen(function* () {
 				const service = yield* Usage;
-				yield* service.refresh({ maxAge: 0 });
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 				yield* TestClock.adjust("10 minutes");
-				yield* service.refresh({ maxAge: 0 });
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 				yield* TestClock.adjust("10 minutes");
-				yield* service.refresh({ maxAge: 0 });
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			}).pipe(Effect.provide(layer, { local: true }));
 			const file = join(configDir, "usage-history.json");
 			const snapshot = yield* Effect.tryPromise(() =>
@@ -1582,7 +2871,7 @@ it.effect(
 			]);
 			const readings = yield* Effect.gen(function* () {
 				const service = yield* Usage;
-				return yield* service.refresh({ maxAge: 0 });
+				return yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			}).pipe(Effect.provide(layer, { local: true }));
 			expect(readings[0]?.windows[0]).toHaveProperty("forecast", {
 				kind: "under",
@@ -1619,7 +2908,7 @@ it.effect(
 					);
 				const readings = yield* Effect.gen(function* () {
 					const service = yield* Usage;
-					return yield* service.refresh({ maxAge: 0 });
+					return yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 				}).pipe(
 					Effect.provide(
 						UsageLive({

@@ -81,7 +81,6 @@ test("files, mentions and new terminals follow a session move and navigation", a
 				nextCursor: null,
 			}),
 			GetModels: (input) => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
 				providers: [],
 			}),

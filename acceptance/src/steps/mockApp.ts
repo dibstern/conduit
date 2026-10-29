@@ -421,7 +421,6 @@ export const mockAppHandlers: StepHandler[] = [
 					!("sessionId" in payload) || payload.sessionId !== sessionId
 						? previous(payload)
 						: {
-								defaultOpenCodeInstanceId: "opencode",
 								projectSlug: "myapp",
 								instanceId,
 								providers: [],
@@ -790,7 +789,6 @@ export const mockAppHandlers: StepHandler[] = [
 								),
 							});
 						return {
-							defaultOpenCodeInstanceId: "opencode",
 							projectSlug: "myapp",
 							...(instanceId ? { instanceId } : {}),
 							providers:

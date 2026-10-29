@@ -235,9 +235,6 @@ describe("RelayFactoryLive Effect persistence wiring", () => {
 				const projects = yield* projectService.list();
 				const instances = yield* instanceService.list();
 				const daemonSessions = yield* sessionService.list({ limit: 5 });
-				expect(config?.openCodeInstanceId).toBe(
-					instances.find((instance) => instance.driver !== "claude")?.id,
-				);
 
 				expect(projects).toEqual([
 					{

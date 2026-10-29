@@ -774,10 +774,10 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 		]);
 	});
 
-	it("does not let the ingress session seeder overwrite an existing named provider", async () => {
+	it("rejects another server's event for a session bound to a named provider", async () => {
 		await persistSessionCreated(SESSION_ID, "work-oc");
 
-		await ingestOk(
+		const result = await ingest(
 			makeSSEEvent("message.created", {
 				sessionID: SESSION_ID,
 				messageID: "msg-stale-seeder-001",
@@ -786,6 +786,8 @@ describe("OpenCode Runtime Ingress Projection (SSE → append → project → re
 			SESSION_ID,
 			"opencode",
 		);
+
+		expect(result).toEqual({ ok: false, reason: "foreign-instance" });
 
 		expect(await readProviderBindings(SESSION_ID)).toEqual([
 			{

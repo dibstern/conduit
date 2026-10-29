@@ -404,6 +404,31 @@ Examples:
   | desktop  | 85% used    | 15% left      |
   | phone    | 23% used    | 77% left      |
 
+Scenario Outline: while its own usage read is open the account picker suggests nothing, then it suggests from the stream readings
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal, team as team-max
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the usage stream reads claude limited until 2026-01-05T09:00:00Z, self 23% used, team 40% used
+  And the quota check is held
+  And I open Switch account on the usage limit strip
+  Then the account picker row for personal reads 77% left and can be picked
+  And the account picker row for team-max reads 60% left and can be picked
+  And the account picker pre-selects nothing
+  When the quota check returns
+  Then the account picker pre-selects personal
+  When the usage stream reads claude limited until 2026-01-05T09:00:00Z, self 23% used, team <team_quota>
+  Then the account picker row for team-max reads <team_caption> and can be picked
+  And the account picker pre-selects <suggestion>
+
+Examples:
+  | viewport | team_quota | team_caption  | suggestion |
+  | desktop  | 10% used   | 90% left      | team-max   |
+  | desktop  | unknown    | usage unknown | personal   |
+  | phone    | 10% used   | 90% left      | team-max   |
+
 Scenario Outline: switching confirms what carries over, hands the session over and marks the transcript
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>

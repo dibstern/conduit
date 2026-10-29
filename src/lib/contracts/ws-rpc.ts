@@ -586,7 +586,6 @@ export type SessionDetailEnvelope = typeof SessionDetailEnvelopeSchema.Type;
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	instanceId: Schema.optional(Schema.String),
-	defaultOpenCodeInstanceId: Schema.optional(Schema.String),
 	/** Explicit account reads include its discovered catalog; other discovery catalogs follow providerModels. */
 	providers: Schema.Array(ProviderInfoSchema),
 	active: Schema.optional(ModelSelectionSchema),

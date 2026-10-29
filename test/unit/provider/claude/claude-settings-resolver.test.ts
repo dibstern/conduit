@@ -6,7 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { accountsStateFromConfig } from "../../../../src/lib/account-directory.js";
+import {
+	accountsStateFromConfig,
+	NO_OPENCODE_HEALTH,
+} from "../../../../src/lib/account-directory.js";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../../src/lib/contracts/claude-settings.js";
 import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
 import {
@@ -193,7 +196,10 @@ describe("resolveClaudeSettingsFromDisk", () => {
 				}),
 				Effect.provideService(
 					AccountDirectory,
-					makeAccountDirectory(Effect.sync(() => accounts)),
+					makeAccountDirectory(
+						Effect.sync(() => accounts),
+						Effect.succeed(NO_OPENCODE_HEALTH),
+					),
 				),
 				Effect.provideService(
 					ConfigTag,
@@ -252,6 +258,7 @@ describe("resolveClaudeSettingsFromDisk", () => {
 								configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
 							),
 						),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 				),
 				Effect.provideService(

@@ -1,5 +1,9 @@
 import { Context, Effect, Layer, Option, type Scope } from "effect";
-import { type AccountsState, defaultFor } from "../../account-directory.js";
+import {
+	type AccountsState,
+	defaultFor,
+	NO_OPENCODE_HEALTH,
+} from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
 import type { DaemonConfigLoadError } from "../../daemon/config-persistence.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
@@ -75,7 +79,7 @@ export const makeClaudeAccountScopes = (deps: {
 		return ClaudeAccountScopes.of({
 			defaultAccount: deps.accounts.pipe(
 				Effect.flatMap((state) =>
-					Option.match(defaultFor(state, "claude"), {
+					Option.match(defaultFor(state, "claude", NO_OPENCODE_HEALTH), {
 						onSome: Effect.succeed,
 						onNone: () =>
 							Effect.fail(

@@ -163,7 +163,6 @@ export async function serveModelCatalog(
 					),
 				});
 			return {
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "myapp",
 				...(typeof binding === "object" && binding !== null ? binding : {}),
 				...response,

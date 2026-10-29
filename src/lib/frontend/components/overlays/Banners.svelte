@@ -11,7 +11,6 @@
 	import { getCachedInstances, getDriverTraits, getInstanceTraits, instanceState } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { assertNever } from "../../../utils.js";
-	import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/account.js";
 	import { openSettings } from "../layout/chrome-actions.js";
 
 	const INSTANCE_WARNING: BannerConfig = {
@@ -50,13 +49,9 @@
 		const accountId = sessionId ? session?.accountId : getEffectiveInstanceId();
 		const instances = getCachedInstances();
 		const instance = instances.find((candidate) => candidate.id === accountId);
-		// Older relays publish their first OpenCode runtime under the managed
-		// transport alias. Prefer the account's own status whenever it is present.
-		const aliasedInstance = instances.find((candidate) => getInstanceTraits(candidate.id)?.runsOpenCodeServer);
 		const status =
 			sessionId && getInstanceTraits(instance?.id)?.runsOpenCodeServer && accountId
-				? uiState.opencodeConnections[accountId] ??
-					(accountId === aliasedInstance?.id ? uiState.opencodeConnections[MANAGED_OPENCODE_ACCOUNT_ID] : undefined)
+				? uiState.opencodeConnections[accountId]
 				: undefined;
 		if (status === "starting") {
 			banners.push({

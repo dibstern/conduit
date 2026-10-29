@@ -5,6 +5,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, HashMap, Layer, Option, Ref } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
+import { NO_OPENCODE_HEALTH } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import {
@@ -115,6 +116,7 @@ describe("SessionManager Effect", () => {
 				: AccountDirectoryFromConfigLive(
 						configDir,
 						configuredClaudeConfigDir(join(configDir, "login")),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 			makeSessionManagerStateLive(),
 			Layer.succeed(OpenCodeAPITag)(mockApi),
@@ -785,6 +787,7 @@ describe("SessionManager Effect", () => {
 					AccountDirectoryFromConfigLive(
 						dir,
 						configuredClaudeConfigDir(join(dir, "login")),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 				);
 			return Effect.gen(function* () {

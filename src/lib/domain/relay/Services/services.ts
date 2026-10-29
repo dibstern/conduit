@@ -34,6 +34,7 @@ import type {
 	RelayMessage,
 	SessionInfo,
 } from "../../../types.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
 	OpenCodeInstancesTag,
 	type OpenCodeUnavailable,
@@ -198,11 +199,6 @@ export const OpenCodeFileServiceLive: Layer.Layer<
 	}),
 );
 
-/** The canonical id names this relay's configured OpenCode default. */
-export const openCodeInstanceTarget =
-	(defaultInstanceId: string) => (instanceId: string) =>
-		instanceId === MANAGED_OPENCODE_ACCOUNT_ID ? defaultInstanceId : instanceId;
-
 export interface OpenCodeModelService {
 	/** Uses cached/empty data while stopped unless an interactive caller opts in. */
 	listProviders(options?: {
@@ -228,17 +224,23 @@ export class OpenCodeModelServiceTag extends Context.Service<
 export const OpenCodeModelServiceLive: Layer.Layer<
 	OpenCodeModelServiceTag,
 	never,
-	OpenCodeAPITag | OpenCodeInstancesTag | ConfigTag | LoggerTag
+	AccountDirectory | OpenCodeInstancesTag | ConfigTag | LoggerTag
 > = Layer.effect(
 	OpenCodeModelServiceTag,
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
 		const instances = yield* OpenCodeInstancesTag;
 		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
-		const defaultInstanceId =
-			config.openCodeInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
-		const target = openCodeInstanceTarget(defaultInstanceId);
+		const accounts = yield* AccountDirectory;
+		const defaultInstanceId = accounts
+			.defaultFor("opencode")
+			.pipe(
+				Effect.map((account) =>
+					Option.isSome(account)
+						? account.value.id
+						: MANAGED_OPENCODE_ACCOUNT_ID,
+				),
+			);
 		const catalogs = new Map<string, OpenCodeProviderList>();
 		const refresh = (
 			opencode: OpenCodeAPI,
@@ -276,41 +278,49 @@ export const OpenCodeModelServiceLive: Layer.Layer<
 		return {
 			listProviders: ({
 				startIfStopped = false,
-				instanceId = defaultInstanceId,
+				instanceId,
 				requireFresh = false,
 			} = {}) =>
 				Effect.gen(function* () {
-					const targetId = target(instanceId);
+					instanceId ??= yield* defaultInstanceId;
 					const running = startIfStopped
 						? Option.some(
 								yield* instances
-									.use(targetId, config.projectDir)
+									.use(instanceId, config.projectDir)
 									.pipe(Failure.mapEffectFailures(Failure.unknownError)),
 							)
-						: yield* instances.ifRunning(targetId, config.projectDir);
+						: yield* instances.ifRunning(instanceId, config.projectDir);
 					if (Option.isSome(running))
-						return yield* refresh(running.value, targetId, requireFresh);
+						return yield* refresh(running.value, instanceId, requireFresh);
 					if (requireFresh)
 						return yield* Effect.fail(
 							Failure.unknownError("OpenCode is not running"),
 						);
 					return (
-						catalogs.get(targetId) ?? {
+						catalogs.get(instanceId) ?? {
 							providers: [],
 							defaults: {},
 							connected: [],
 						}
 					);
 				}).pipe(Effect.scoped),
-			cachedProviders: (instanceId = defaultInstanceId) =>
-				Effect.sync(() =>
-					Option.fromNullishOr(catalogs.get(target(instanceId))),
-				),
-			persistDefaultModel: (providerID: string, modelID: string) =>
-				Effect.tryPromise(async () => {
-					await client.config.update({ model: `${providerID}/${modelID}` });
-					await fixupConfigFile(config.projectDir, log);
+			cachedProviders: (instanceId) =>
+				Effect.gen(function* () {
+					return Option.fromNullishOr(
+						catalogs.get(instanceId ?? (yield* defaultInstanceId)),
+					);
 				}),
+			persistDefaultModel: (providerID: string, modelID: string) =>
+				Effect.gen(function* () {
+					const instanceId = yield* defaultInstanceId;
+					const client = yield* instances
+						.use(instanceId, config.projectDir)
+						.pipe(Failure.mapEffectFailures(Failure.unknownError));
+					yield* Effect.tryPromise(async () => {
+						await client.config.update({ model: `${providerID}/${modelID}` });
+						await fixupConfigFile(config.projectDir, log);
+					});
+				}).pipe(Effect.scoped),
 		};
 	}),
 );

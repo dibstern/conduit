@@ -19,10 +19,14 @@ import {
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_DRIVERS,
 } from "./contracts/provider-instance.js";
+import { openCodeStartSelection } from "./contracts/start-selection.js";
 import type { DaemonConfig } from "./daemon/config-persistence.js";
+import type { InstanceStatus } from "./shared-types.js";
 import { assertNever } from "./utils.js";
 
 export { MANAGED_OPENCODE_ACCOUNT_ID };
+export const NO_OPENCODE_HEALTH: ReadonlyMap<string, InstanceStatus> =
+	new Map();
 export type { AccountChange } from "./contracts/account.js";
 
 const LEGACY_ACCOUNT_DRIVERS: Readonly<
@@ -219,10 +223,31 @@ export function accountsStateFromInstances(
 	};
 }
 
-function materializeDefault(
+/** The first configured OpenCode endpoint, excluding no-server placeholders. */
+const openCodeInstanceFor = (
+	instances: ReadonlyArray<{
+		readonly id: string;
+		readonly driver: KnownProviderDriverKind;
+		readonly managed?: boolean | undefined;
+		readonly port?: number | undefined;
+		readonly url?: string | undefined;
+	}>,
+) =>
+	instances.find((instance) => {
+		if (!getProviderDriver(instance.driver)?.runsOpenCodeServer) return false;
+		if (instance.managed === true || (instance.port ?? 0) > 0) return true;
+		if (instance.url !== undefined)
+			return URL.canParse(instance.url) && new URL(instance.url).port !== "0";
+		return instance.port === undefined;
+	});
+
+export function materializeDefault(
 	accounts: ReadonlyArray<{
 		readonly id: string;
 		readonly driver: KnownProviderDriverKind;
+		readonly managed?: boolean | undefined;
+		readonly port?: number | undefined;
+		readonly url?: string | undefined;
 	}>,
 	driver: KnownProviderDriverKind,
 	storedId: string | undefined,
@@ -232,6 +257,11 @@ function materializeDefault(
 		(account) => account.id === storedId && account.driver === driver,
 	);
 	if (stored !== undefined) return Option.some(AccountIdSchema.make(stored.id));
+	if (driver === "opencode")
+		return Option.map(
+			Option.fromNullishOr(openCodeInstanceFor(accounts)),
+			(account) => AccountIdSchema.make(account.id),
+		);
 	for (const id of usageOrder) {
 		const account = accounts.find(
 			(account) => account.id === id && account.driver === driver,
@@ -554,11 +584,14 @@ export function accountsStateFromConfig(
 export function defaultFor(
 	state: AccountsState,
 	driver: KnownProviderDriverKind,
+	openCodeStatuses: ReadonlyMap<string, InstanceStatus>,
 ): Option.Option<Account> {
 	const id =
-		getProviderDriver(driver)?.defaultAccountSource === "selection"
-			? state.defaults[driver]
-			: Option.some(MANAGED_OPENCODE_ACCOUNT_ID);
+		driver === "opencode"
+			? Option.some(
+					openCodeStartSelection(list(state), openCodeStatuses).account.id,
+				)
+			: state.defaults[driver];
 	return Option.flatMap(id, (accountId) =>
 		Option.fromNullishOr(
 			state.accounts.find(
@@ -571,16 +604,14 @@ export function defaultFor(
 export function list(state: AccountsState): ReadonlyArray<AccountListItem> {
 	return state.accounts.map((account) => ({
 		...account,
-		isDefault: Option.exists(
-			defaultFor(state, account.driver),
-			(selected) => selected.id === account.id,
-		),
+		isDefault: Option.contains(state.defaults[account.driver], account.id),
 	}));
 }
 
 export function resolve(
 	state: AccountsState,
 	ref: AccountRef,
+	openCodeStatuses: ReadonlyMap<string, InstanceStatus>,
 ): Result.Result<Account, AccountUnroutable> {
 	if (ref._tag === "Id") {
 		const live = state.accounts.find((account) => account.id === ref.id);
@@ -588,13 +619,13 @@ export function resolve(
 		const driver =
 			state.deleted.find((account) => account.id === ref.id)?.driver ??
 			accountDriverAlias(ref.id);
-		if (driver !== undefined)
-			return Option.match(defaultFor(state, driver), {
+		if (driver !== undefined && ref.id !== MANAGED_OPENCODE_ACCOUNT_ID)
+			return Option.match(defaultFor(state, driver, openCodeStatuses), {
 				onNone: () => Result.fail(new AccountUnroutable({ ref })),
 				onSome: Result.succeed,
 			});
 	} else {
-		return Option.match(defaultFor(state, ref.driver), {
+		return Option.match(defaultFor(state, ref.driver, openCodeStatuses), {
 			onNone: () => Result.fail(new AccountUnroutable({ ref })),
 			onSome: Result.succeed,
 		});

@@ -48,6 +48,7 @@ import { pendingInputTrayHandlers } from "./steps/pendingInputTray.js";
 import { phoneToastsHandlers } from "./steps/phoneToasts.js";
 import { projectTreeHandlers } from "./steps/projectTree.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
+import { providerSettingsHandlers } from "./steps/providerSettings.js";
 import { rightPaneHandlers } from "./steps/rightPane.js";
 import { sessionAutoSettleHandlers } from "./steps/sessionAutoSettle.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
@@ -168,6 +169,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...visualHandlers,
 	...claudeSettingsHandlers,
 	...providerInstancesHandlers,
+	...providerSettingsHandlers,
 ];
 
 export const conduitVisualLifecycle: AcceptanceLifecycle = {
