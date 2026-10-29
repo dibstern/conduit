@@ -3,7 +3,6 @@
 <!-- tool-detail module, and a failed load says so with a retry rather than       -->
 <!-- passing the preview off as the whole.                                        -->
 <script lang="ts">
-	import { Option, Schema } from "effect";
 	import { type Snippet, untrack } from "svelte";
 	import type { ToolDetail } from "../../../contracts/tool-wire.js";
 	import type { ToolMessage } from "../../types.js";
@@ -14,32 +13,6 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import Button from "../ui/Button.svelte";
 	import ConduitMark from "../ui/ConduitMark.svelte";
-
-	const decodePresentation = Schema.decodeUnknownOption(Schema.Struct({
-		fileChange: Schema.optional(Schema.Struct({
-			filePath: Schema.String,
-			diff: Schema.optional(Schema.String),
-			linesAdded: Schema.optional(Schema.Number),
-			linesRemoved: Schema.optional(Schema.Number),
-			fileSize: Schema.optional(Schema.Number),
-		})),
-		plan: Schema.optional(Schema.Struct({
-			title: Schema.optional(Schema.String),
-			content: Schema.String,
-		})),
-		computerUse: Schema.optional(Schema.Struct({
-			actions: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
-		})),
-		media: Schema.optional(Schema.Array(Schema.Struct({
-			path: Schema.optional(Schema.String),
-			mime: Schema.String,
-			url: Schema.optional(Schema.String),
-		}))),
-		truncated: Schema.optional(Schema.Boolean),
-		movedToBackground: Schema.optional(Schema.Boolean),
-		exitCode: Schema.optional(Schema.Number),
-		output: Schema.optional(Schema.String),
-	}));
 
 	const loadFromServer = async (tool: ToolMessage, session: SessionRef | undefined) =>
 		session && (await toolDetails.get(session, tool));
@@ -67,10 +40,8 @@
 	let attempt = $state(0);
 
 	const cut = $derived(shownCut(message));
-	const hasPresentation = $derived(typeof message.metadata?.['cursorToolType'] === "string");
-	const presentation = $derived(hasPresentation
-		? Option.getOrUndefined(decodePresentation(message.metadata))
-		: undefined);
+	const hasPresentation = $derived(message.presentation !== undefined);
+	const presentation = $derived(message.presentation);
 	const shown = $derived.by(() => {
 		const tool = full ?? message;
 		const output = message.metadata?.['output'];
@@ -117,6 +88,7 @@
 				...whole,
 				...(detail.input && { input: detail.input.value }),
 				...(detail.output && !tool.isError && { result: detail.output.text }),
+				...(detail.fileChanges !== undefined && { fileChanges: detail.fileChanges }),
 			};
 		}, fail);
 		return () => {
@@ -126,18 +98,20 @@
 </script>
 
 <div class={className}>
-{#if presentation?.fileChange}
-	{@const change = presentation.fileChange}
+{#if shown.fileChanges?.length}
+	{#each shown.fileChanges as change}
+	{@const patchLines = change.patch?.split("\n")}
 	<div data-testid="tool-file-change" class="my-1 overflow-x-auto">
-		<div class="font-mono text-xs text-text-secondary">{change.filePath}</div>
+		<div class="font-mono text-xs text-text-secondary">{#if change.kind === "move"}{change.oldPath} → {/if}{change.path} <span class="text-text-muted">{change.kind}</span></div>
 		<div class="diff-stats flex gap-3 text-xs">
-			{#if change.linesAdded !== undefined}<span class="text-success">+{change.linesAdded}</span>{/if}
-			{#if change.linesRemoved !== undefined}<span class="text-error">-{change.linesRemoved}</span>{/if}
+			{#if patchLines}<span class="text-success">+{patchLines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length}</span><span class="text-error">-{patchLines.filter((line) => line.startsWith("-") && !line.startsWith("---")).length}</span>{/if}
 		</div>
-		{#if change.diff}<pre class="tool-result font-mono text-xs whitespace-pre-wrap">{#each change.diff.split("\n") as line}<span class={line.startsWith("+") ? "text-success" : line.startsWith("-") ? "text-error" : "text-text-secondary"}>{line}{"\n"}</span>{/each}</pre>{/if}
-		{#if change.fileSize !== undefined}<div class="text-xs text-text-muted">{change.fileSize} bytes</div>{/if}
-		{#if input?.tool === "Write"}<pre class="tool-result font-mono text-xs whitespace-pre-wrap text-text-secondary">{input.content}</pre>{/if}
+		{#if change.patch !== undefined}<pre class="tool-result font-mono text-xs whitespace-pre-wrap">{#each change.patch.split("\n") as line}<span class={line.startsWith("+") ? "text-success" : line.startsWith("-") ? "text-error" : "text-text-secondary"}>{line}{"\n"}</span>{/each}</pre>{:else}
+			{#if change.before !== undefined}<pre class="tool-result font-mono text-xs whitespace-pre-wrap text-error" aria-label="Before">{change.before}</pre>{/if}
+			{#if change.after !== undefined}<pre class="tool-result font-mono text-xs whitespace-pre-wrap text-success" aria-label="After">{change.after}</pre>{/if}
+		{/if}
 	</div>
+	{/each}
 {:else if presentation?.plan}
 	<section data-testid="tool-plan" class="my-1">
 		{#if presentation.plan.title}<h3 class="text-sm font-medium">{presentation.plan.title}</h3>{/if}

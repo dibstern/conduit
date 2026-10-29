@@ -1,6 +1,8 @@
 // Single factory for constructing ToolMessage objects.
 // Used by history-logic.ts for projected transcript parts.
 
+import type { ToolFileChange } from "../../contracts/stored-event.js";
+import type { ToolPresentation } from "../../contracts/tool-wire.js";
 import type { ToolStatus } from "../../shared-types.js";
 import type { ToolMessage, ToolPreview } from "../types.js";
 
@@ -11,6 +13,8 @@ export interface ToolMessageInit {
 	name: string;
 	status: ToolStatus;
 	outcome?: "succeeded" | "failed";
+	fileChanges?: readonly ToolFileChange[];
+	presentation?: ToolPresentation;
 	result?: string;
 	isError?: boolean;
 	input?: unknown;
@@ -35,6 +39,8 @@ export function createToolMessage(init: ToolMessageInit): ToolMessage {
 		name: init.name,
 		status: init.status,
 		...(init.outcome !== undefined && { outcome: init.outcome }),
+		...(init.fileChanges !== undefined && { fileChanges: init.fileChanges }),
+		...(init.presentation !== undefined && { presentation: init.presentation }),
 		...(init.result !== undefined && { result: init.result }),
 		...(init.isError !== undefined && { isError: init.isError }),
 		...(init.input !== undefined && { input: init.input }),
