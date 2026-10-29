@@ -143,7 +143,9 @@ export const makeSessionTitleServiceLive = (
 					return title;
 				}).pipe(
 					Effect.timeoutOrElse({
-						duration: "30 seconds",
+						// Titling is background work, and a cold Claude start can pass 30s
+						// while other Claude processes are starting (e.g. after a restart).
+						duration: "90 seconds",
 						orElse: () =>
 							Effect.fail(new Error("Timed out waiting for title generation")),
 					}),

@@ -95,7 +95,7 @@
 				{pending}
 			</span>
 		{:else}
-			<span class="flex min-w-0 items-baseline gap-x-[8px]">
+			<span class="flex min-w-0 flex-wrap items-baseline gap-x-[8px] gap-y-[4px]">
 				{#if tooltip}
 					<Tooltip>
 						{#snippet trigger({ props })}
