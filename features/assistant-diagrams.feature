@@ -224,3 +224,101 @@ Scenario: on a phone tapping the empty space around the expanded diagram closes 
   And I press Expand diagram on the diagram
   And I tap the empty space above the expanded diagram
   Then the media viewer is dismissed
+
+Scenario Outline: Escape resets the zoomed expanded diagram first after I <move_focus>
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I press Expand diagram on the diagram
+  And I press the zoom in button on the expanded diagram
+  And I <move_focus>
+  Then <focused> has focus
+  And the expanded diagram is zoomed
+  When I press Escape in the media viewer
+  Then the expanded diagram is back to its fit and the media viewer is still open
+
+Examples:
+  | move_focus                                     | focused                              |
+  | focus the close button of the media viewer     | the close button of the media viewer |
+  | click the padding of the expanded diagram card | the media viewer itself              |
+
+Scenario: after zooming in until the zoom in button is disabled, Escape resets the expanded diagram first
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I press Expand diagram on the diagram
+  And I press the zoom in button on the expanded diagram until it is disabled
+  Then the expanded diagram is zoomed
+  When I press Escape in the media viewer
+  Then the expanded diagram is back to its fit and the media viewer is still open
+
+Scenario: in a subagent session Escape resets the expanded diagram, a second Escape closes it, and the session stays open
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  And the open session is a subagent of another session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I press Expand diagram on the diagram
+  And I press the zoom in button on the expanded diagram
+  Then the expanded diagram is zoomed
+  When I press Escape in the media viewer
+  Then the expanded diagram is back to its fit and the media viewer is still open
+  When I dismiss the media viewer with Escape
+  Then the media viewer is dismissed
+  And the subagent session is still open
+
+Scenario: with the background tasks pull-down open, Escape resets the expanded diagram, then closes it, and the pull-down stays open
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And the session has 1 live background task
+  And I click the background tasks row
+  And I focus Expand diagram and press Enter
+  And I press Enter on the zoom in button of the expanded diagram
+  Then the expanded diagram is zoomed
+  When I press Escape in the media viewer
+  Then the expanded diagram is back to its fit and the media viewer is still open
+  When I dismiss the media viewer with Escape
+  Then the media viewer is dismissed
+  And the background tasks pull-down is still open
+
+Scenario: 0 and ? on the expanded diagram at its fit leave the session list's scope and shortcuts alone
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  And the session list is scoped to the first project
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I press Expand diagram on the diagram
+  And I press 0 and then ? on the expanded diagram
+  Then the session list is still scoped to the first project
+  And no keyboard shortcuts sheet is open
+
+Scenario: session search opens above the zoomed expanded diagram and Escape closes the search first
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I press Expand diagram on the diagram
+  And I press the zoom in button on the expanded diagram
+  And I press Control+K
+  Then session search is open above the expanded diagram
+  When I press Escape in session search
+  Then session search is closed and the expanded diagram is still zoomed
+  When I press Escape in the media viewer
+  Then the expanded diagram is back to its fit and the media viewer is still open
+
+Scenario: with a file open in the files pane, Escape closes the expanded diagram and the file stays open
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  And the project has a file named notes.md
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I open notes.md from the files pane
+  Then the file viewer shows notes.md
+  When I focus Expand diagram and press Enter
+  And I dismiss the media viewer with Escape
+  Then the media viewer is dismissed
+  And the file viewer shows notes.md

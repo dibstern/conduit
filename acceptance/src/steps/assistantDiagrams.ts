@@ -9,7 +9,11 @@ import {
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRelayControl } from "./shared.js";
+import {
+	requireRelayControl,
+	requireRpcControl,
+	setSessionRowStatus,
+} from "./shared.js";
 
 const flowchart = "flowchart LR\n  Plan --> Build --> Ship";
 // Wider than the desktop transcript, so pele shrinks it to fit.
@@ -40,6 +44,8 @@ const seededSources = new WeakMap<Page, string>();
 const scrolledFrom = new WeakMap<Page, number>();
 const noted = new WeakMap<Page, { svg: JSHandle<Element>; fill: string }>();
 const stalledDownloads = new WeakMap<Page, Promise<void>>();
+const subagents = new WeakMap<Page, string>();
+const scopes = new WeakMap<Page, string>();
 
 const markdown = (sources: readonly string[]) =>
 	`${["Here is the plan:", ...sources.map((source) => `\`\`\`mermaid\n${source}\n\`\`\``)].join("\n\n")}\n`;
@@ -389,6 +395,193 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 			await noteFit(expandedDrawing(world.page));
 			await viewer(world.page).locator(".pele-zoom-in").press("Enter");
 		},
+	},
+	{
+		name: "press zoom in on the expanded diagram until disabled",
+		match:
+			/^I press the zoom in button on the expanded diagram until it is disabled$/,
+		run: async ({ world }) => {
+			await noteFit(expandedDrawing(world.page));
+			const zoomIn = viewer(world.page).locator(".pele-zoom-in");
+			for (let presses = 0; !(await zoomIn.isDisabled()); presses++) {
+				if (presses === 50) throw new Error("Zoom in never disabled");
+				await zoomIn.click();
+			}
+		},
+	},
+	{
+		name: "focus the media viewer close button",
+		match: /^I focus the close button of the media viewer$/,
+		run: ({ world }) =>
+			viewer(world.page)
+				.getByRole("button", { name: "Close media viewer", exact: true })
+				.focus(),
+	},
+	{
+		name: "click the expanded diagram card padding",
+		match: /^I click the padding of the expanded diagram card$/,
+		run: ({ world }) =>
+			// The drawing's scroll box is the card's last child; its 16px padding holds nothing focusable.
+			viewer(world.page)
+				.locator("[data-diagram] > :last-child")
+				.click({ position: { x: 6, y: 40 } }),
+	},
+	{
+		name: "assert media viewer focus",
+		match:
+			/^(the close button of the media viewer|the media viewer itself) has focus$/,
+		run: ({ world, match }) =>
+			expect(
+				match[1] === "the media viewer itself"
+					? viewer(world.page)
+					: viewer(world.page).getByRole("button", {
+							name: "Close media viewer",
+							exact: true,
+						}),
+			).toBeFocused(),
+	},
+	{
+		name: "focus Expand diagram and press Enter",
+		match: /^I focus Expand diagram and press Enter$/,
+		run: async ({ world }) => {
+			await expandButton(world.page).focus();
+			await world.page.keyboard.press("Enter");
+			await expect(expandedDrawing(world.page)).toBeVisible();
+		},
+	},
+	{
+		name: "make the open session a subagent",
+		match: /^the open session is a subagent of another session$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const id = new URL(page.url()).pathname.split("/")[2] ?? "";
+			subagents.set(page, id);
+			setSessionRowStatus(page, "diagram-parent", "idle", {
+				title: "Plan the release",
+				updatedAt: PINNED_CLOCK_MS,
+			});
+			setSessionRowStatus(page, id, "idle", { parentID: "diagram-parent" });
+			await expect(page.locator(".subagent-back-btn")).toBeVisible();
+		},
+	},
+	{
+		name: "assert the subagent session is still open",
+		match: /^the subagent session is still open$/,
+		run: async ({ world }) => {
+			await expect(world.page).toHaveURL(
+				new RegExp(`/s/${subagents.get(world.page)}(?:\\?|$)`),
+			);
+			await expect(world.page.locator(".subagent-back-btn")).toBeVisible();
+		},
+	},
+	{
+		name: "scope the session list to the first project",
+		match: /^the session list is scoped to the first project$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await page.evaluate(() =>
+				(document.activeElement as HTMLElement | null)?.blur(),
+			);
+			await page.keyboard.press("1");
+			await expect(page).toHaveURL(/[?&]p=[^&]+/);
+			scopes.set(page, new URL(page.url()).searchParams.get("p") ?? "");
+		},
+	},
+	{
+		name: "press 0 then ? on the expanded diagram",
+		match: /^I press 0 and then \? on the expanded diagram$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await noteFit(expandedDrawing(page));
+			await page.keyboard.press("0");
+			await page.keyboard.press("?");
+		},
+	},
+	{
+		name: "assert the session list is still scoped",
+		match: /^the session list is still scoped to the first project$/,
+		run: ({ world }) =>
+			expect
+				.poll(() => new URL(world.page.url()).searchParams.get("p"))
+				.toBe(scopes.get(world.page)),
+	},
+	{
+		name: "assert no keyboard shortcuts sheet",
+		match: /^no keyboard shortcuts sheet is open$/,
+		run: ({ world }) =>
+			expect(
+				world.page.getByRole("dialog", { name: "Keyboard shortcuts" }),
+			).toHaveCount(0),
+	},
+	{
+		name: "press Control+K",
+		match: /^I press Control\+K$/,
+		run: ({ world }) => world.page.keyboard.press("Control+K"),
+	},
+	{
+		name: "assert session search above the expanded diagram",
+		match: /^session search is open above the expanded diagram$/,
+		run: async ({ world }) => {
+			const search = world.page.getByRole("dialog", {
+				name: "Search every session",
+			});
+			await expect(search).toBeVisible();
+			await expect(search.locator("input").first()).toBeFocused();
+			await expect(expandedDrawing(world.page)).toBeVisible();
+		},
+	},
+	{
+		name: "press Escape in session search",
+		match: /^I press Escape in session search$/,
+		run: ({ world }) => world.page.keyboard.press("Escape"),
+	},
+	{
+		name: "assert search closed, diagram zoomed",
+		match:
+			/^session search is closed and the expanded diagram is still zoomed$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByRole("dialog", { name: "Search every session" }),
+			).toHaveCount(0);
+			await expectZoomed(expandedDrawing(world.page));
+		},
+	},
+	{
+		name: "stub a project file",
+		match: /^the project has a file named (\S+)$/,
+		run: ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const name = match[1] ?? "";
+			rpc.setStubs({
+				GetFileList: ({ path = "" }) => ({
+					projectSlug: rpc.projectSlug,
+					path,
+					entries: [{ name, type: "file", size: 8 }],
+				}),
+				GetFileContent: ({ path }) => ({
+					projectSlug: rpc.projectSlug,
+					path,
+					content: "# Notes\n",
+				}),
+			});
+		},
+	},
+	{
+		name: "open a file from the files pane",
+		match: /^I open (\S+) from the files pane$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			await page.keyboard.press("Alt+4");
+			await page.locator(`[data-path="${match[1]}"]`).click();
+		},
+	},
+	{
+		name: "assert the file viewer shows a file",
+		match: /^the file viewer shows (\S+)$/,
+		run: ({ world, match }) =>
+			expect(world.page.locator("#file-viewer-path")).toContainText(
+				match[1] ?? "",
+			),
 	},
 	{
 		name: "press Copy code on the expanded diagram",

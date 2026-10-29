@@ -1,7 +1,7 @@
 <!-- Draws one mermaid source with pele. Pele owns the zoom host; CSS owns its size, pele only measures it. -->
 <script lang="ts">
 	import type { DiagramType, Mounted } from "pele/lazy";
-	import { loadPele, nextRetry, retry } from "../../utils/diagram-loader.js";
+	import { loadPele, nextRetry, resetIfZoomed, retry } from "../../utils/diagram-loader.js";
 	import Button from "../ui/Button.svelte";
 	import CodeBlockHeader from "../ui/CodeBlockHeader.svelte";
 	import { openMediaViewer } from "../../stores/ui.svelte.js";
@@ -25,6 +25,13 @@
 	let host: HTMLDivElement | undefined = $state();
 	let showSource = $state(false);
 	const failed = $derived(status === "failed" || status === "loadFailed");
+	// Written only by the mount effect below; read by resetZoom.
+	let mounted: Mounted | undefined;
+
+	/** The media viewer's Escape: resets a zoomed drawing, false when there is nothing to reset. */
+	export function resetZoom(): boolean {
+		return !showSource && resetIfZoomed(mounted?.zoom);
+	}
 
 	// The only writer of status.
 	$effect(() => {
@@ -32,7 +39,6 @@
 		const target = host;
 		const text = source;
 		let cancelled = false;
-		let mounted: Mounted | undefined;
 		const attempt = (): void => {
 			status = "loading";
 			download(text).then(
@@ -62,21 +68,11 @@
 				},
 			);
 		};
-		// In the viewer, Escape anywhere in the diagram resets a zoomed drawing before it can close the dialog.
-		// pele only hears keys on its host, outside its buttons; preventDefault stops the dialog's cancel.
-		const frame = variant === "viewer" ? target.closest<HTMLElement>("[data-diagram]") : null;
-		const resetOnEscape = (event: KeyboardEvent): void => {
-			const zoom = mounted?.zoom;
-			if (event.key !== "Escape" || event.defaultPrevented || !zoom || zoom.scale === zoom.fit) return;
-			zoom.reset();
-			event.preventDefault();
-		};
-		frame?.addEventListener("keydown", resetOnEscape);
 		attempt();
 		return () => {
 			cancelled = true;
-			frame?.removeEventListener("keydown", resetOnEscape);
 			mounted?.destroy();
+			mounted = undefined;
 		};
 	});
 </script>

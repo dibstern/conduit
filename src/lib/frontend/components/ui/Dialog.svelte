@@ -37,6 +37,7 @@
 		placement = "center",
 		dismissible = true,
 		returnFocus,
+		onescape,
 		initialFocus = "dialog",
 		backdrop = "default",
 		sheetElement = $bindable<HTMLElement | undefined>(),
@@ -55,6 +56,8 @@
 		placement?: "center" | "top" | "sheet" | "fullscreen" | undefined;
 		dismissible?: boolean | undefined;
 		returnFocus?: (() => HTMLElement | null) | undefined;
+		/** Runs first for an Escape aimed at this dialog; returning true keeps it open. */
+		onescape?: (() => boolean) | undefined;
 		initialFocus?: "dialog" | "first" | undefined;
 		/** Scrim weight. `dark` for media, `subtle` for large panels that
 		 *  should still show their context. */
@@ -149,6 +152,24 @@
 		e.preventDefault();
 		if (dismissible) onclose();
 	}
+
+	// The dialog owns every Escape aimed at it, so no app shortcut also acts on it
+	// (the subagent back bar, the composer). Document capture runs before those
+	// listeners, and preventDefault on the keydown suppresses the cancel, which
+	// Chromium makes uncancelable the second time. Firefox drops focus to <body>
+	// when the focused control disables itself, so <body> counts as aimed here.
+	$effect(() => {
+		const el = dialogEl;
+		if (!open || !el || !onescape) return;
+		const escape = (event: KeyboardEvent): void => {
+			if (event.key !== "Escape" || event.isComposing) return;
+			if (!(event.target instanceof Node) || !(el.contains(event.target) || event.target === document.body)) return;
+			event.stopPropagation();
+			if (onescape?.()) event.preventDefault();
+		};
+		document.addEventListener("keydown", escape, true);
+		return () => document.removeEventListener("keydown", escape, true);
+	});
 
 	// ::backdrop is not a child element — clicks on it report the <dialog> as
 	// their target. This test only holds because the dialog has no padding or

@@ -1,4 +1,5 @@
 import type * as Pele from "pele/lazy";
+import type { Mounted } from "pele/lazy";
 
 let pele: Promise<typeof Pele> | undefined;
 
@@ -22,4 +23,11 @@ export function retry(): void {
 /** Settles at the next retry(). Only failed diagrams wait on it, so drawn ones are never remounted. */
 export function nextRetry(): Promise<void> {
 	return retried;
+}
+
+/** Resets a zoomed drawing. False at its fit, so the caller's Escape can close the viewer instead. */
+export function resetIfZoomed(zoom: Mounted["zoom"]): boolean {
+	if (!zoom || zoom.scale === zoom.fit) return false;
+	zoom.reset();
+	return true;
 }

@@ -234,7 +234,8 @@
 	}
 
 	function handleGoalDetailsKeydown(event: KeyboardEvent) {
-		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open && !sideThreadsPanel.open) || uiState.confirmDialog) return;
+		// Window capture runs before any modal dialog can claim the key; an open one owns it.
+		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open && !sideThreadsPanel.open) || document.querySelector("dialog:modal")) return;
 		if (goalDetails.open && sessionViewState.compact && !tasksPanel.open && !sideThreadsPanel.open) return;
 		if (sideThreadsPanel.open && sessionViewState.compact) return;
 		event.preventDefault();

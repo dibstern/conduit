@@ -13,6 +13,8 @@
   import Dialog from "../ui/Dialog.svelte";
 
   const item = $derived(getMediaViewer());
+  // The shown content's zoom; Escape resets it before it can close the viewer.
+  let content = $state<{ resetZoom(): boolean }>();
 
   // The only session-close call site: another session's content must never stay on screen.
   $effect(() => {
@@ -28,6 +30,7 @@
   placement={sessionViewState.compact ? "fullscreen" : "center"}
   ariaLabel={item?.kind === "diagram" ? "Expanded diagram" : "Expanded image"}
   returnFocus={getMediaViewerOpener}
+  onescape={() => content?.resetZoom() ?? false}
 >
     <!-- Empty colour axes keep the fixed white scrim colours without a theme hover wash. -->
     <!-- design-token-waiver: Close button sits on the media viewer's fixed dark backdrop, which does not follow the runtime theme; --overlay-rgb flips to black in light themes and would invert this hover tint to near-invisible against a black backdrop. -->
@@ -47,7 +50,7 @@
       {#if item?.kind === "diagram"}
         <!-- The close button is fixed to the dialog's top-right corner, so a 60px strip above the box keeps it off the diagram's header buttons. -->
         <div class="mt-[60px] h-[min(85dvh,calc(100dvh-8rem))] w-[min(90vw,1200px)]">
-          <Diagram source={item.source} variant="viewer" />
+          <Diagram bind:this={content} source={item.source} variant="viewer" />
         </div>
       {:else}
         <img
