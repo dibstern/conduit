@@ -766,7 +766,9 @@ it.effect(
 );
 
 it.effect(
-	"a held send releases NotSent after local admission times out before the socket write",
+	// C 4.7: an admission timeout is a daemon refusal, so the held send is released
+	// unwritten and settled permanently, never requeued.
+	"a held send whose local admission times out before the socket write settles permanently",
 	() =>
 		runRetirement(
 			Effect.gen(function* () {
@@ -799,8 +801,13 @@ it.effect(
 				expect(
 					yield* f.sql`SELECT json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
 				).toEqual([{ reason: "NotSent" }]);
-				expect(f.terminalCount()).toBe(0);
-				expect(sending.pollUnsafe()).toBeUndefined();
+				expect(
+					yield* f.sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = ${f.input.inputId}`,
+				).toEqual([{ status: "failed", error_code: "send_admission_timeout" }]);
+				expect(
+					yield* f.sql`SELECT json_extract(data, '$.code') AS code FROM events WHERE type = 'turn.error'`,
+				).toEqual([{ code: "send_admission_timeout" }]);
+				expect((yield* Fiber.join(sending)).status).toBe("cancelled");
 				old.onUpgradeState({
 					quiescent: true,
 					turnInFlight: false,
@@ -815,19 +822,10 @@ it.effect(
 						options: {},
 					},
 				});
-				yield* Deferred.succeed(f.pending, {
-					status: "completed",
-					cost: 0,
-					tokens: { input: 0, output: 0 },
-					durationMs: 0,
-					providerStateUpdates: [],
-				});
 				yield* TestClock.adjust("30 seconds");
-				expect((yield* Fiber.join(sending)).status).toBe("completed");
 				expect(
 					f.commands.filter((command) => command.type === "send-turn"),
-				).toHaveLength(1);
-				yield* f.terminal("turn.completed");
+				).toEqual([]);
 			}),
 		),
 );
@@ -6669,6 +6667,16 @@ for (const survived of [false, true])
 						}),
 					);
 					yield* Deferred.await(f.sending);
+					// A runner serving a turn is not quiescent, so its end retries no
+					// upgrade; a retry's candidate would wait out its own Stop window.
+					old.onUpgradeState({
+						quiescent: false,
+						revision: 2,
+						snapshot: {
+							input: { ...f.input, folderSource: "implicitDefault" },
+							options: {},
+						},
+					});
 					yield* Deferred.succeed(releaseWarm, undefined);
 					yield* Deferred.await(stopping);
 					f.outputs.length = 0;

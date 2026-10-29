@@ -1,4 +1,4 @@
-import { Duration, Effect, Schedule } from "effect";
+import { Clock, Duration, Effect, Schedule } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
 import type {
 	RunnerLiveQueryConfiguration,
@@ -92,17 +92,23 @@ export function makeRunnerUpgrade<
 					backoff = yield* newBackoff;
 					backoffs.set(runner, backoff);
 				}
-				const [, delay] = yield* backoff(Date.now(), undefined).pipe(
-					Effect.orDie,
-				);
+				// The deadline and its sleep share the Effect clock: a wall-clock
+				// deadline under a test or slowed clock fires early or never.
+				const now = yield* Clock.currentTimeMillis;
+				const [, delay] = yield* backoff(now, undefined).pipe(Effect.orDie);
 				runner.upgrade.failures++;
-				runner.upgrade.retryAt = Date.now() + Duration.toMillis(delay);
+				runner.upgrade.retryAt = now + Duration.toMillis(delay);
 				options.failed(sessionId, runner, cause);
 			});
 		options.runFork(
 			Effect.gen(function* () {
 				// Only a turn boundary schedules a retry. Backoff never holds a send.
-				yield* Effect.sleep(Math.max(0, runner.upgrade.retryAt - Date.now()));
+				yield* Effect.sleep(
+					Math.max(
+						0,
+						runner.upgrade.retryAt - (yield* Clock.currentTimeMillis),
+					),
+				);
 				if (
 					activity !== runner.upgrade.activity ||
 					!options.eligible(sessionId, runner)
