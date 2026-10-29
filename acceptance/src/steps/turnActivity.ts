@@ -1049,6 +1049,15 @@ export const turnActivityHandlers: StepHandler[] = [
 				.getByText("Staging", { exact: true })
 				.click();
 			await world.page.locator(".question-submit-btn").click();
+			// The relay's reply removes the card and rewrites the hand-back as
+			// answered. Wait for both, so the next step cannot race the rewrite for
+			// the transcript's scroll position.
+			await expect(world.page.locator(".question-card")).toHaveCount(0);
+			await expect(
+				panel(world.page).locator(".tool-subtitle-text", {
+					hasText: "Answered ✓",
+				}),
+			).toHaveCount(2);
 		},
 	},
 	{
