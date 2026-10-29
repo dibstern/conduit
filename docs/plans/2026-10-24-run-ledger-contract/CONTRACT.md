@@ -170,7 +170,7 @@ provider have the new one, and no row has both.
 | Registration (socket, pid; identity only) | runner host's `.json` | host | discovery only; never evidence | none |
 | Tasks, wake Runs, process facts, lost work, pending confirms, native command delivery | Run Ledger | observe, control, settle | `SessionActivity` (read-only view) | with its background-work ticket (12.2) |
 | Servers (per session) | Run Ledger | PortWatcher (`server_seen`, `server_gone`); declared marks through the CLI (8.7) | `SessionActivity`, `anythingMayAct`, auto-settle, Preview Gate, chat links | with the servers ticket (12.2) |
-| Server hold candidates (seen under 10s) | PortWatcher, in memory | PortWatcher | none; a candidate is never a server | none |
+| Server hold candidates (seen under 10s), first-scan readiness | PortWatcher, in memory | PortWatcher | auto-settle reads readiness; a candidate is never a server | none |
 | Conduit's `tailscale serve` ports and gate proxies | Preview Gate | the gate only | none; reconciled to Servers, never evidence | none |
 | Goal: confirmed status and pending action id | goal tracker | tracker | `SessionActivity` | none |
 | Native command confirmation deadline | Run Ledger (ordinary deadline) | `reconcile` | tracker reacts to `unconfirmed` | none |
@@ -2171,7 +2171,8 @@ At startup, in one recovery pass:
 | { kind: "send_native_command"; commandId: string; text: string }
 type TaskKey = { taskId: string; runId?: string };
 type ServerKey = { pid: number; startedAt: number; port: number };
-type Server = { key: ServerKey; command: string; cwd: string; taskKey?: TaskKey; role: "serving" | "awaited" };
+type Server = { key: ServerKey; command: string; cwd: string; taskKey?: TaskKey;
+                source: "detected" | "declared"; role: "serving" | "awaited" };
 type Servers = ReadonlyMap<number, Server>; // by port, per session; survives labels, queries and restarts
 type Tasks = { tag: "Unknown"; label: Label }
            | { tag: "Known"; label: Label; tasks: ReadonlyMap<TaskKey, Task> };
@@ -2182,8 +2183,10 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   `local_workflow` is workflow, `monitor`, `mcp_task`; others verbatim. A task is **monitoring** if it
   is ambient or a monitor; **serving** if a live server is linked to it and no declared `awaited`
   covers it; otherwise **work**.
-- `server_seen` adds or refreshes one entry per session and port; a declared role wins over
-  detection. `server_gone` deletes the entry; nothing else removes one.
+- `server_seen` adds or refreshes one entry per session and port. A declared entry keeps its source
+  and role against later detection of the same ServerKey; a new ServerKey on the port starts
+  detected. `server_gone` deletes the entry only when its full ServerKey matches, else it is a
+  no-op; nothing else removes one.
 - A runner event either answers a Send Token or is an unsolicited observation naming only the host
   label: background snapshots and task events, a turn start with no active Run, process events, and
   `activity`, `result`, `query_ended` for a wake Run (8.3). No fictitious send is minted.
@@ -2359,32 +2362,43 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   (`lsof` on macOS, `/proc` on Linux). It reads the session marker from the process environment:
   `CONDUIT_SESSION_ID` (Claude), `CODEX_THREAD_ID` (Codex), `CONDUIT_OPENCODE_SESSION_ID` (OpenCode,
   stamped by conduit's `shell.env` hook). The innermost runner's marker wins; unmarked ports are
-  ignored. A port held 10s records `server_seen`. The scan is compared against the ledger's Servers,
+  ignored. `CODEX_THREAD_ID` and the OpenCode marker are native ids: each resolves through its
+  provider's own lookup to a conduit session. A marker this daemon cannot resolve is ignored, never
+  read as deleted. One entry per port: one process's listeners (IPv4 and IPv6) are one server; when
+  different processes share a port the earliest started is the server. A port held 10s records
+  `server_seen`. The scan is compared against the ledger's Servers,
   not a copy: an entry missing from a successful scan records `server_gone`. A failed scan records
-  nothing. After a restart the first successful scan does the same comparison.
+  nothing. After a restart the first successful scan does the same comparison. Until that scan and
+  one hold have passed, a session's servers are unknown, not absent: auto-settle waits.
 - **Task link.** Claude: the server's stdout is `tasks/<task_id>.output`. Codex: one unique match of
   command and cwd in `thread/backgroundTerminals/list`. Otherwise, and always for OpenCode, the
   server is session-level and no task changes class. Cursor's SDK kills servers at turn end; it is
   out of scope.
 - **Declared.** `conduit server mark <port> --serving|--awaited` (CLI socket; Codex falls back to
   conduit's MCP tool) records `server_seen{source: "declared"}`. It is rejected, recording nothing,
-  when nothing listens on the port or the port belongs to another session.
+  when nothing listens on the port or the port belongs to another session. The caller's session is
+  its own marker, resolved as a scan resolves it; a mark skips the hold.
 - **Views.** `SessionActivity` reads a serving server or task as background (calm) and an
   `awaited` one as working. A live server pauses auto-settle. Servers are never lost work and never
   confirm-gated on their own; a linked task gates as a task (8.4).
-- **Ended sessions have no servers.** Each scan kills the marked processes of settled, archived and
-  deleted sessions, skipping the hold. Settle, Archive and Delete name the count; unsettling starts
+- **Ended sessions have no servers.** Each scan kills the marked listeners of sessions this daemon
+  knows as settled, archived or deleted (a deleted session keeps its `session.deleted` event),
+  skipping the hold. Settle, Archive and Delete name the count; unsettling starts
   nothing. `server_gone` for a deleted session is dropped.
 - **Stop.** One kill routine serves Stop and ended sessions: the process group only when its leader
   is not conduit, a runner host, an agent CLI or a shell; otherwise the server's process tree.
-  SIGTERM, then SIGKILL after 5s. The entry goes only by the next scan's `server_gone`.
+  SIGTERM, then SIGKILL after 5s. Stop names the full ServerKey, and before each signal the routine
+  re-checks the pid's start time, sending nothing on a mismatch. Stop intent is not persisted; a
+  server that survives a daemon crash mid-Stop stays listed. The entry goes only by the next scan's
+  `server_gone`.
 - **Preview Gate.** It owns conduit's `tailscale serve` ports and login-checking proxies and removes
   only its own. It reconciles them to Servers, refuses a port with no entry, and answers a dead
-  target with a "Server stopped" page. Without Tailscale or consent, Open shows the port and Copy
+  target with a "Server stopped" page. Each new upstream connection checks that the port's listener
+  still matches the entry's ServerKey, and fails closed to that page if not. Without Tailscale or consent, Open shows the port and Copy
   link. A chat link to `localhost:<port>` renders as a chip while that server is live, plain text
   otherwise.
 
-<!-- src: SERVERS brainstorm 2026-10-29 (tsp server-badge, Sections 1-6); t3code a27ec88bfa PortScanner.ts, ThreadServersPanel.tsx:97 -->
+<!-- src: SERVERS brainstorm 2026-10-29 (tsp server-badge, Sections 1-6); t3code a27ec88bfa PortScanner.ts, ThreadServersPanel.tsx:97; spec review 2026-10-29 (conduit-test-82tn.32.33.11) -->
 
 ## 9. Providers
 
