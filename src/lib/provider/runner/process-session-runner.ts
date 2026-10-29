@@ -1412,7 +1412,15 @@ export const makeProcessSessionRunner = (
 						const sessionIngestion = deps.recoveryForSession
 							? yield* ingestionForSession(retirement.sessionId)
 							: (entry?.ingestion ?? ingestion);
-						if (!sessionIngestion) return false;
+						if (!sessionIngestion) {
+							// Deleting a session deletes its runs, so nothing is left to settle.
+							const [session] = yield* sql<{
+								id: string;
+							}>`SELECT id FROM sessions WHERE id = ${retirement.sessionId}`;
+							if (session) return false;
+							if (receipts) yield* receipts.settled(retirement.runnerId);
+							return true;
+						}
 						const commands = yield* sql<{
 							request_sequence: number;
 							project_key: string;
@@ -4459,7 +4467,12 @@ export const makeProcessSessionRunner = (
 							(processId === undefined ||
 								(runnerId === processId &&
 									(record.tag._tag === "Live" ||
-										record.tag._tag === "Starting")))
+										record.tag._tag === "Starting" ||
+										// A runner owns its End until that End's Stop reaches Escalated.
+										(endCommands.has(runnerId) &&
+											["Committing", "Requested", "Escalating"].includes(
+												stops.state(runnerId)._tag,
+											)))))
 						)
 							return true;
 					}

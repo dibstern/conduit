@@ -529,6 +529,21 @@ describe("Claude session process runner", () => {
 				{ timeout: 5000 },
 			);
 			expect(existsSync(runner.socketPath)).toBe(false);
+			// A Gone runner settles and its retirement row is removed (6.5, 6.6).
+			await vi.waitFor(() => {
+				const db = new Database(harness.daemonStorePath(), { readonly: true });
+				try {
+					expect(
+						db
+							.prepare(
+								"SELECT runner_id FROM claude_runner_cursors WHERE session_id = ?",
+							)
+							.all(sessionId),
+					).toEqual([]);
+				} finally {
+					db.close();
+				}
+			});
 			expect(harness.generations.at(-1)?.exitCode).toBeUndefined();
 		} finally {
 			mkdirSync("test-results/process-harness", { recursive: true });
