@@ -296,7 +296,7 @@ Scenario: 0 and ? on the expanded diagram at its fit leave the session list's sc
   Then the session list is still scoped to the first project
   And no keyboard shortcuts sheet is open
 
-Scenario: session search opens above the zoomed expanded diagram and Escape closes the search first
+Scenario Outline: session search opens above the zoomed expanded diagram and Escape <escape_from> closes the search first
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop
   And I open a composer session
@@ -305,10 +305,15 @@ Scenario: session search opens above the zoomed expanded diagram and Escape clos
   And I press the zoom in button on the expanded diagram
   And I press Control+K
   Then session search is open above the expanded diagram
-  When I press Escape in session search
+  When I press Escape <escape_from>
   Then session search is closed and the expanded diagram is still zoomed
   When I press Escape in the media viewer
   Then the expanded diagram is back to its fit and the media viewer is still open
+
+Examples:
+  | escape_from                               |
+  | in session search                         |
+  | after focus drops out of session search   |
 
 Scenario: with a file open in the files pane, Escape closes the expanded diagram and the file stays open
   Given the conduit app is served with the connected mockup

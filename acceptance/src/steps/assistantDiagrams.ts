@@ -532,8 +532,16 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 	},
 	{
 		name: "press Escape in session search",
-		match: /^I press Escape in session search$/,
-		run: ({ world }) => world.page.keyboard.press("Escape"),
+		match:
+			/^I press Escape (in session search|after focus drops out of session search)$/,
+		run: async ({ world, match }) => {
+			// A control that disables itself (search's Show more while it loads) drops focus to <body>.
+			if (match[1]?.startsWith("after"))
+				await world.page.evaluate(() =>
+					(document.activeElement as HTMLElement | null)?.blur(),
+				);
+			await world.page.keyboard.press("Escape");
+		},
 	},
 	{
 		name: "assert search closed, diagram zoomed",
