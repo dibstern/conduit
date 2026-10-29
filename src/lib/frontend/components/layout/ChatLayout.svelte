@@ -28,6 +28,7 @@
 	import type { SettingsOpenDetail, SettingsSection } from "./chrome-actions.js";
 	import RewindBanner from "../overlays/RewindBanner.svelte";
 	import Button from "../ui/Button.svelte";
+	import { clickOnLift } from "../../actions/click-on-lift.js";
 	import {
 		uiState,
 		showToast,
@@ -556,7 +557,7 @@
 		class:select-none={isResizing || isSidebarResizing}
 		style={vvHeight ? `height: ${vvHeight}px;` : ""}
 	>
-		<div id="session-chrome" {@attach measureChrome}>
+		<div id="session-chrome" {@attach measureChrome} {@attach clickOnLift}>
 			{#if !phoneListScreen && !sessionViewState.compact}<Banners presentation="session-header" />{/if}
 			<!-- The list screen has its own bar in Sidebar; keep one session bar
 			     mounted across breakpoint changes so its state follows the viewport. -->

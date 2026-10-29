@@ -1,5 +1,5 @@
 import { cleanup, render } from "@testing-library/svelte";
-import { flushSync } from "svelte";
+import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MessageList from "../../../src/lib/frontend/components/chat/MessageList.svelte";
 import { getOrCreateSessionSlot } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -18,6 +18,7 @@ beforeEach(() => {
 		"ResizeObserver",
 		class {
 			observe() {}
+			unobserve() {}
 			disconnect() {}
 		},
 	);
@@ -59,7 +60,7 @@ describe("MessageList session-view publication", () => {
 		flushSync();
 	}
 
-	it("publishes detach, re-follow and programmatic follow without false detach", () => {
+	it("publishes detach, re-follow and programmatic follow without false detach", async () => {
 		const { transcript, getByRole } = mountTranscript();
 		expect(sessionViewState.atBottom).toBe(true);
 
@@ -73,6 +74,8 @@ describe("MessageList session-view publication", () => {
 		scrollTo(transcript, 200);
 		expect(sessionViewState.atBottom).toBe(false);
 		getByRole("button", { name: /Latest/ }).click();
+		flushSync();
+		await tick();
 		flushSync();
 		expect(sessionViewState.atBottom).toBe(true);
 

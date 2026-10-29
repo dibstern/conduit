@@ -6,6 +6,7 @@
 	import { uiState, markTerminalSettingsSeen } from "../../stores/ui.svelte.js";
 	import Dialog from "../ui/Dialog.svelte";
 	import Button from "../ui/Button.svelte";
+	import { clickOnLift } from "../../actions/click-on-lift.js";
 	import Icon from "../ui/Icon.svelte";
 	import Tabs from "../ui/Tabs.svelte";
 	import Badge from "../ui/Badge.svelte";
@@ -90,7 +91,7 @@
 		class:phone={sessionViewState.compact}
 		class="settings-panel bg-settings-bg ring-1 ring-border rounded-[16px] shadow-settings-dialog flex flex-col overflow-hidden font-sans leading-[1.5]"
 	>
-		<div class="settings-header shrink-0 bg-settings-rail {sessionViewState.compact ? 'grid grid-cols-[90px_minmax(0,1fr)_90px] items-center px-[14px]' : 'flex h-[52px] items-center px-[12px] pl-[20px] border-b border-settings-separator'}">
+		<div {@attach clickOnLift} class="settings-header shrink-0 bg-settings-rail {sessionViewState.compact ? 'grid grid-cols-[90px_minmax(0,1fr)_90px] items-center px-[14px]' : 'flex h-[52px] items-center px-[12px] pl-[20px] border-b border-settings-separator'}">
 			{#if listHidden}
 				<Button
 					bind:element={backEl}
