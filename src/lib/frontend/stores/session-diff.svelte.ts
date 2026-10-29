@@ -1,6 +1,7 @@
 // One (session, scope) Session Diff listing for one consumer: its answers, rows and patches.
 import { untrack } from "svelte";
 import {
+	type SessionDiffBase,
 	SessionDiffError,
 	type SessionDiffFile,
 	type SessionDiffScope,
@@ -29,7 +30,12 @@ export class DiffRow {
 }
 
 export type DiffFolder =
-	| { readonly folder: string; readonly rows: readonly DiffRow[] }
+	| {
+			readonly folder: string;
+			/** What a branch listing compared against, and any fallback it took. */
+			readonly base?: SessionDiffBase;
+			readonly rows: readonly DiffRow[];
+	  }
 	| {
 			readonly folder: string;
 			readonly error: "unavailable" | "timeout";
@@ -88,9 +94,10 @@ export class SessionDiffView {
 			const rows = new Map<string, DiffRow>();
 			const folders = listing.folders.map((entry): DiffFolder => {
 				if ("error" in entry) return entry;
-				const { folder } = entry;
+				const { folder, base } = entry;
 				return {
 					folder,
+					...(base ? { base } : {}),
 					rows: entry.files.map((file) => {
 						const key = [
 							folder,

@@ -1,4 +1,4 @@
-Feature: Unstaged session diff by size tier
+Feature: Branch session diff by size tier and base
 
 Scenario Outline: Small diffs load on their own, long ones on a click, and too-large files open in Files
   Given the conduit app is served with the long-transcript mockup
@@ -172,3 +172,36 @@ Scenario Outline: A row that comes into view as the pane hides loads once the pa
 Examples:
   | count | first_path | last_path  | hidden_requests |
   | 30    | file-01.ts | file-30.ts | 0               |
+
+Scenario Outline: Picking a diff base shares it with the session and re-lists against it
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  And the project has branches <first_branch> and <second_branch>
+  When I open the Diff right pane
+  Then the diff compares against <default_ref>
+  When I pick <second_branch> as the diff base
+  Then the diff base was set to <second_branch>
+  And the diff was last listed against <second_branch>
+  And the diff compares against <second_branch>
+  When I pick Automatic as the diff base
+  Then the diff base was set to automatic
+  And the diff was last listed against automatic
+  And the diff compares against <default_ref>
+
+Examples:
+  | count | first_branch | second_branch | default_ref |
+  | 1     | main         | release       | main        |
+
+Scenario Outline: A base that cannot be compared falls back with a visible notice
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> <size> unstaged files
+  And the diff base <wanted> is <reason>, so the diff falls back to <ref>
+  When I open the Diff right pane
+  Then the diff compares against <ref>
+  And the diff notice reads "<notice>"
+  And the right-pane region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | count | size  | wanted      | reason  | ref  | notice                                                                               | baseline                  | threshold |
+  | 1     | long  | release     | missing | main | release was not found, so this compares against main.                                | session-diff-base-missing | 98        |
+  | 0     | small | origin/main | shallow | HEAD | This clone is shallow, so origin/main has no shared history. Comparing against HEAD. | session-diff-base-shallow | 98        |

@@ -1,13 +1,21 @@
 import { expect, type Page } from "@playwright/test";
 import {
+	type SessionDiffBase,
 	SessionDiffError,
 	type SessionDiffFile,
+	type SessionDiffScope,
 } from "../../../src/lib/contracts/session-diff.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
 
 interface DiffFixture {
 	readonly files: SessionDiffFile[];
+	/** What the daemon resolves when no override is set. */
+	base: SessionDiffBase;
+	/** Every listing's scope, in order. */
+	readonly scopes: SessionDiffScope[];
+	/** Every SetSessionDiffBase payload's base, in order. */
+	readonly setBases: (string | null)[];
 	readonly requested: string[];
 	/** Gone answers left per path. */
 	readonly gone: Map<string, number>;
@@ -92,6 +100,9 @@ const changed = (path: string, insertions = 1, deletions = 1) =>
 function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 	const fixture: DiffFixture = {
 		files,
+		base: { ref: "main", source: "default" },
+		scopes: [],
+		setBases: [],
 		requested: [],
 		gone: new Map(),
 		foreign: [],
@@ -103,8 +114,9 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 	};
 	fixtures.set(page, fixture);
 	requireRpcControl(page).setStubs({
-		SessionDiffList: async ({ sessionId }) => {
+		SessionDiffList: async ({ sessionId, scope }) => {
 			fixture.lists += 1;
+			fixture.scopes.push(scope);
 			if (fixture.holdList) {
 				fixture.holdList = false;
 				await held(fixture);
@@ -112,8 +124,35 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
 			return {
 				revision: `rev-${sessionId}`,
-				folders: [{ folder: "/workspace/myapp", files: fixture.files }],
+				folders: [
+					{
+						folder: "/workspace/myapp",
+						files: fixture.files,
+						...(scope.kind === "branch"
+							? {
+									base:
+										scope.base === null
+											? fixture.base
+											: { ref: scope.base, source: "override" as const },
+								}
+							: {}),
+					},
+				],
 			};
+		},
+		// The daemon answers by publishing the session's row with its new base.
+		SetSessionDiffBase: async ({ sessionId, base }) => {
+			fixture.setBases.push(base);
+			const rpc = requireRpcControl(page);
+			const { diffBase: _, ...row } = (rpc.shellRows?.find(
+				(candidate) => (candidate as { id?: string }).id === sessionId,
+			) ?? {}) as Record<string, unknown>;
+			rpc.upsertShellRow({
+				...row,
+				...(base === null ? {} : { diffBase: base }),
+				id: sessionId,
+			});
+			return { ok: true };
 		},
 		SessionDiffFile: async ({ path, sessionId, revision }) => {
 			fixture.requested.push(path);
@@ -156,7 +195,87 @@ function requireFixture(page: Page): DiffFixture {
 const row = (page: Page, path: string) =>
 	page.locator(`[data-testid="session-diff-file"][data-path="${path}"]`);
 
+const baseTrigger = (page: Page) =>
+	page.locator('[data-testid="session-diff-base"]');
+
+/** "automatic" names the null base: the launch base and its fallbacks. */
+const named = (base: string) => (base === "automatic" ? null : base);
+
 export const sessionDiffHandlers: StepHandler[] = [
+	{
+		name: "project branches",
+		match: /^the project has branches (\S+) and (\S+)$/,
+		run: async ({ world, match }) => {
+			requireRpcControl(world.page).setStubs({
+				ListBranches: async () => ({
+					current: match[1] ?? "",
+					branches: [match[1] ?? "", match[2] ?? ""],
+				}),
+			});
+		},
+	},
+	{
+		name: "diff base falls back",
+		match:
+			/^the diff base (\S+) is (missing|shallow|unrelated), so the diff falls back to (\S+)$/,
+		run: async ({ world, match }) => {
+			const [, wanted = "", reason, ref = ""] = match;
+			requireFixture(world.page).base = {
+				ref,
+				source: ref === "HEAD" ? "head" : "default",
+				fallback: {
+					wanted,
+					reason: reason as "missing" | "shallow" | "unrelated",
+				},
+			};
+		},
+	},
+	{
+		name: "pick diff base",
+		match: /^I pick (\S+) as the diff base$/,
+		run: async ({ world, match }) => {
+			await baseTrigger(world.page).click();
+			await world.page
+				.getByRole("menuitemradio", { name: match[1] ?? "" })
+				.click();
+		},
+	},
+	{
+		name: "diff compares against",
+		match: /^the diff compares against (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect(baseTrigger(world.page)).toHaveText(
+				`against ${match[1] ?? ""}`,
+			);
+		},
+	},
+	{
+		name: "diff base was set",
+		match: /^the diff base was set to (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect
+				.poll(() => requireFixture(world.page).setBases.at(-1))
+				.toBe(named(match[1] ?? ""));
+		},
+	},
+	{
+		name: "diff last listed against",
+		match: /^the diff was last listed against (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect
+				.poll(() => requireFixture(world.page).scopes.at(-1))
+				.toEqual({ kind: "branch", base: named(match[1] ?? "") });
+		},
+	},
+	{
+		name: "diff notice",
+		match: /^the diff notice reads "(.+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.locator('[data-testid="session-diff-base-notice"]'),
+			).toHaveText(match[1] ?? "");
+		},
+	},
 	{
 		name: "seed diff tiers",
 		match:
@@ -193,14 +312,16 @@ export const sessionDiffHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "seed many small diffs",
-		match: /^the session has ([0-9]+) small unstaged files$/,
+		name: "seed many diffs",
+		// Long files wait for a click, so a shot of them never races highlighting.
+		match: /^the session has ([0-9]+) (small|long) unstaged files$/,
 		run: async ({ world, match }) => {
 			const count = Number(match[1]);
+			const lines = match[2] === "long" ? 600 : 1;
 			seed(
 				world.page,
 				Array.from({ length: count }, (_, index) =>
-					changed(`file-${String(index + 1).padStart(2, "0")}.ts`),
+					changed(`file-${String(index + 1).padStart(2, "0")}.ts`, lines),
 				),
 			);
 		},
