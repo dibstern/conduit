@@ -37,6 +37,7 @@
 		placement = "center",
 		dismissible = true,
 		returnFocus,
+		onescape,
 		initialFocus = "dialog",
 		backdrop = "default",
 		sheetElement = $bindable<HTMLElement | undefined>(),
@@ -55,6 +56,8 @@
 		placement?: "center" | "top" | "sheet" | "fullscreen" | undefined;
 		dismissible?: boolean | undefined;
 		returnFocus?: (() => HTMLElement | null) | undefined;
+		/** Runs first for an Escape aimed at this dialog; returning true keeps it open. */
+		onescape?: (() => boolean) | undefined;
 		initialFocus?: "dialog" | "first" | undefined;
 		/** Scrim weight. `dark` for media, `subtle` for large panels that
 		 *  should still show their context. */
@@ -149,6 +152,28 @@
 		e.preventDefault();
 		if (dismissible) onclose();
 	}
+
+	// The dialog owns every Escape aimed at it, so no app shortcut also acts on it
+	// (the subagent back bar, the composer). Document capture runs before those
+	// listeners, and preventDefault on the keydown suppresses the cancel, which
+	// Chromium makes uncancelable the second time. Firefox drops focus to <body>
+	// when the focused control disables itself, so <body> counts as aimed here.
+	// With another modal open, a <body> Escape may be the topmost one's, which
+	// can't be told apart: app shortcuts still never see it, but its cancel stays.
+	$effect(() => {
+		const el = dialogEl;
+		if (!open || !el || !onescape) return;
+		const escape = (event: KeyboardEvent): void => {
+			const target = event.target;
+			if (event.key !== "Escape" || event.isComposing || !(target instanceof Node)) return;
+			if (!el.contains(target) && target !== document.body) return;
+			event.stopPropagation();
+			if (!el.contains(target) && document.querySelectorAll("dialog:modal").length > 1) return;
+			if (onescape?.()) event.preventDefault();
+		};
+		document.addEventListener("keydown", escape, true);
+		return () => document.removeEventListener("keydown", escape, true);
+	});
 
 	// ::backdrop is not a child element — clicks on it report the <dialog> as
 	// their target. This test only holds because the dialog has no padding or

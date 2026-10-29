@@ -13,6 +13,7 @@ vi.mock("../../e2e/helpers/visual-helpers.js", () => ({
 	waitForFonts: vi.fn(),
 	waitForIcons: vi.fn(),
 	freezeAnimations: vi.fn(),
+	waitForFrame: vi.fn(),
 	screenshotLocator: vi.fn(async () => Buffer.from("captured region")),
 	compareImages: vi.fn(),
 }));

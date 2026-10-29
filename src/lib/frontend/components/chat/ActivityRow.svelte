@@ -8,8 +8,8 @@
 	import {
 		type ActivityPart,
 		firstLine,
+		isHandBack,
 		fmtDuration,
-		fmtTokens,
 		launchMeta,
 		launchRow,
 		launchStatus,
@@ -30,7 +30,9 @@
 	import { partStyle, segmentAppearance } from "./activity-style.js";
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import SkillDoc from "./SkillDoc.svelte";
+	import CompactionRule from "./CompactionRule.svelte";
 	import ToolFullDetail from "./ToolFullDetail.svelte";
+	import ToolItem from "./ToolItem.svelte";
 	import ShellToolDetail from "./ShellToolDetail.svelte";
 
 	let {
@@ -38,19 +40,21 @@
 		liveTasks,
 		taskListedAt,
 		duration,
-		highlight = false,
 		messageNumber,
 		messageCategory,
+		onmessage,
+		onhandback,
 		live = false,
 		runningTasks = new Set<string>(),
 	}: {
 		part: ActivityPart;
+		onhandback?: (() => void) | undefined;
 		liveTasks: readonly BackgroundTask[];
 		taskListedAt: ReadonlyMap<string, number>;
 		duration?: number | undefined;
-		highlight?: boolean;
 		messageNumber?: number | undefined;
 		messageCategory?: { glyph: string; colour: string | undefined } | undefined;
+		onmessage?: (() => void) | undefined;
 		live?: boolean;
 		/** Shared with the strip so status overrides use the same snapshot. */
 		runningTasks?: ReadonlySet<string>;
@@ -59,7 +63,7 @@
 	let expanded = $state(false);
 
 	const style = $derived(partStyle(part));
-	const iconTone = $derived(segmentAppearance(part, runningTasks).tone);
+	const iconTone = $derived(segmentAppearance(part, runningTasks, live).tone);
 	const iconColor = $derived(iconTone === "fail" ? "text-seg-fail" : iconTone === "live" ? "text-accent" : style.text);
 	const meta = $derived(duration === undefined ? "" : fmtDuration(duration));
 	// A step that launched a background task tracks that task. Foreground tasks
@@ -101,15 +105,17 @@
 
 </script>
 
-{#if part.type === "tool"}
+{#if part.type === "tool" && isHandBack(part)}
+	<div data-part={part.uuid}><ToolItem message={part} presentation="log" onopen={onhandback} /></div>
+{:else if part.type === "tool"}
 	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.outcome !== "failed")}
 	{@const failed = part.outcome === "failed"}
 	{@const movedToBackground = part.metadata?.['movedToBackground'] === true}
-	{@const verb = movedToBackground ? "Moved to background" : toolVerb(part, running ? "present" : "past")}
+	{@const isSkill = part.name === "Skill"}
+	{@const verb = isSkill ? "Skill" : movedToBackground ? "Moved to background" : running && !launch ? "Running" : toolVerb(part, running ? "present" : "past")}
 	{@const command = toolCommand(part)}
 	{@const subject = part.name === "Skill" ? skillName(part) : toolSubject(part)}
 	{@const tag = toolTags(part)[0]}
-	{@const isSkill = part.name === "Skill"}
 	{@const hasLiveOutput = typeof part.metadata?.['output'] === "string"}
 	{@const cursorDetail = typeof part.metadata?.['cursorToolType'] === "string" && (part.fileChanges?.length || part.metadata['plan'] || part.metadata['computerUse'] || part.metadata['media'] || part.metadata['output'] !== undefined || ensureCanonical(part.name, part.input).tool === "Unknown")}
 	<!-- A compact row is still this tool's rendering, so it answers to the same
@@ -124,7 +130,7 @@
 		<div class="flex items-center gap-[6px]">
 			<Button
 				variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="activity" disabledStyle="undimmed"
-				class="{launch ? '@container' : ''} {highlight ? 'bg-selection' : ''}"
+				class={launch ? "@container" : ""}
 				disabled={!!launch && !childSession}
 				aria-expanded={launch ? undefined : expanded}
 				ariaLabel={launch
@@ -152,10 +158,11 @@
 				</span>
 				{#if tag}
 					<!-- Which kind of subagent ran. Worth its own slot: two Task rows
-					     differ by this far more than by their descriptions. -->
-					<Badge variant="tag" size="sm" class="shrink-0 font-mono">{tag}</Badge>
+					     differ by this far more than by their descriptions. It truncates
+					     so a narrow row's status never spills over the open-task link. -->
+					<Badge variant="tag" size="sm" wrap class="min-w-0 font-mono"><span class="truncate">{tag}</span></Badge>
 				{/if}
-				<span class="tool-desc {launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1 min-w-0'} truncate font-mono text-mono-code text-text-dimmer">
+				<span class="tool-desc {launch?.step ? 'min-w-0 max-w-[50%]' : 'flex-1 min-w-0'} truncate font-mono text-mono-code {isSkill ? style.text : 'text-text-dimmer'}">
 					{subject}
 				</span>
 				{#if typeof part.metadata?.['cursorToolType'] === "string" && part.metadata['truncated'] === true}<span class="shrink-0 text-text-muted">Truncated</span>{/if}
@@ -172,13 +179,13 @@
 					{@const usage = launchUsage(launch)}
 					<!-- Status and time stay whole; a narrow row drops the usage. -->
 					<span class="launch-meta ml-auto shrink-0 whitespace-nowrap font-mono text-mono-time"><span class="{launchTone} {launchTone === 'text-text-dimmer' ? 'activity-time' : ''}">{lead}</span>{#if usage}<span class="text-text-dimmer @max-[480px]:hidden">{lead ? " · " : ""}{usage}</span>{/if}</span>
-				{:else if meta}<time class="activity-time ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</time>{/if}
+				{:else if !running && meta}<time class="activity-time ml-auto shrink-0 font-mono text-mono-time text-text-dimmer">{meta}</time>{/if}
 				{#if launch?.state.kind === "finished"}
 					<span class="shrink-0 {launchTone} [&_.lucide]:w-3 [&_.lucide]:h-3" aria-hidden="true">
 						<Icon name={{ completed: "circle-check", failed: "circle-x", stopped: "circle-stop" }[launch.state.outcome]} size={12} />
 					</span>
 				{:else if running}
-					<ConduitMark size={16} variant="running" />
+					<span class="running-block shrink-0" role="img" aria-label="Running"></span>
 				{:else if failed}
 					<span class="shrink-0 text-error [&_.lucide]:w-3 [&_.lucide]:h-3">
 						<Icon name="circle-alert" size={12} />
@@ -239,28 +246,10 @@
 		{/if}
 	</div>
 {:else if part.type === "system"}
-	{@const { preTokens: pre, postTokens: post } = part}
-	<!-- A boundary, not a step: there is nothing to open, so it is a rule across
-	     the log rather than a row. The saving is the one number worth reading. -->
-	<div
-		class="compaction-rule flex items-center gap-[8px] py-[6px] text-[12px] text-text-dimmer {highlight ? 'bg-selection' : ''}"
-		data-part={part.uuid}
-	>
-		<span class="h-px flex-1 bg-border" aria-hidden="true"></span>
-		<span class="shrink-0 [&_.lucide]:w-3 [&_.lucide]:h-3" aria-hidden="true"><Icon name={style.icon} size={12} /></span>
-		<span class="shrink-0">Compacted context</span>
-		{#if pre !== undefined && post !== undefined}
-			<span class="shrink-0 font-mono text-text-dimmer">{fmtTokens(pre)} → {fmtTokens(post)}</span>
-			{#if pre > post}
-				<span class="shrink-0 text-text-dimmer">·</span>
-				<span class="shrink-0 font-medium text-text-secondary">{fmtTokens(pre - post)} saved</span>
-			{/if}
-		{/if}
-		<span class="h-px flex-1 bg-border" aria-hidden="true"></span>
-	</div>
+	<CompactionRule {part} />
 {:else}
-	<div data-part={part.uuid} data-message-number={messageNumber} data-highlighted={highlight || undefined}>
-		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="activity" class={highlight ? "bg-selection" : ""} aria-expanded={expanded} onclick={(event) => { if (!hasRowSelection(event)) expanded = !expanded; }}>
+	<div data-part={part.uuid} data-message-number={messageNumber}>
+		<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="activity" aria-expanded={onmessage ? undefined : expanded} onclick={(event) => { if (hasRowSelection(event)) return; if (onmessage) onmessage(); else expanded = !expanded; }}>
 			{#if messageNumber !== undefined}<span class="shrink-0 font-mono text-mono-xs {style.text}" style:color={messageCategory?.colour}>{#if messageCategory}<span aria-hidden="true">{messageCategory.glyph}</span>{" "}{/if}#{messageNumber}</span>
 			{:else}<span class="shrink-0 {style.text}"><Icon name={style.icon} size={14} /></span>{/if}
 			<span class="flex-1 truncate italic text-text-secondary">{firstLine(part.rawText, 120)}</span>
@@ -271,3 +260,8 @@
 		{/if}
 	</div>
 {/if}
+
+<style>
+	.running-block { width:9px; height:9px; background:repeating-linear-gradient(90deg,var(--color-accent) 0 1.5px,transparent 1.5px 2.5px); animation:running-pulse .6s steps(2) infinite; }
+	@keyframes running-pulse { 50% { opacity:.35; } }
+</style>

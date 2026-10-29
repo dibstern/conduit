@@ -1,13 +1,18 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
+import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
+import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import { Utf8Bytes } from "../../../contracts/tool-wire.js";
+import { expandTurn, showTurnStop } from "../../stories/turn-controls.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { ChatMessage, ToolMessage } from "../../types.js";
 import {
 	type ActivityPart,
 	type CompactionPart,
 	segmentTurns,
 	type Turn,
+	turnLog,
 } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -15,6 +20,7 @@ const EMPTY_SEGMENT: Turn["segments"][number] = { activity: [], reply: [] };
 const EMPTY_TURN: Turn = {
 	id: "empty",
 	segments: [EMPTY_SEGMENT],
+	preface: [],
 	notices: [],
 	live: false,
 };
@@ -34,13 +40,19 @@ const meta = {
 	title: "Chat/Turn Activity",
 	component: TurnActivity,
 	parameters: { layout: "padded" },
-	args: { providerId: "claude" },
+	args: { providerId: "claude", sessionId: "turn-activity-story" },
+	beforeEach: ({ args }) =>
+		setupTurnStory({
+			turn: args["turn"],
+			sessionId: args["sessionId"],
+			surfacing: args["surfacing"],
+		}),
 } satisfies Meta<typeof TurnActivity>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Counts and duration stay in the head; the bill lives in its hover and log. */
+/** Counts and duration stay in the head; opening exposes the bill in the footer. */
 export const Settled: Story = {
 	args: { turn: settled, segment: settledSegment, final: true },
 	play: async ({ canvasElement }) => {
@@ -84,14 +96,14 @@ export const Expanded: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const toggle = canvas.getByRole("button", {
-			name: /^Work(ed|ing)\b/,
-			expanded: false,
+			name: /^(Expand|Collapse) turn$/,
 		});
-		await userEvent.click(toggle);
+		if (toggle.getAttribute("aria-expanded") !== "true")
+			await userEvent.click(toggle);
 		// A synthetic click leaves a focus ring and its tooltip; the baseline is the resting state.
 		toggle.blur();
 		await expect(
-			canvasElement.querySelector(".step-log .turn-meta"),
+			canvasElement.querySelector('[data-testid="turn-show-bar"] .turn-meta'),
 		).toBeVisible();
 		const colours = new Set<string>();
 		for (const part of settledSegment.activity) {
@@ -117,7 +129,7 @@ export const ExpandedLight: Story = {
 	globals: { theme: "light" },
 };
 
-/** Elapsed time counts up, the strip grows, and the last three steps show as a fading ticker. */
+/** Elapsed time counts up and the strip grows. Jev-off turns start collapsed; JevOffLive shows the open ticker. */
 export const Live: Story = {
 	args: { turn: live, segment: liveSegment, final: true },
 	play: async ({ canvasElement }) => {
@@ -131,6 +143,30 @@ export const Live: Story = {
 
 export const LiveLight: Story = { ...Live, globals: { theme: "light" } };
 
+const liveFourSteps: Turn = {
+	...live,
+	segments: [{ ...liveSegment, activity: liveSegment.activity.slice(-4) }],
+};
+
+/** One hidden step reads in the singular, on the control and the log's name. */
+export const LiveOneEarlierStep: Story = {
+	args: {
+		turn: liveFourSteps,
+		segment: liveFourSteps.segments[0] ?? EMPTY_SEGMENT,
+		final: true,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expandTurn(canvasElement);
+		await expect(
+			canvas.getByRole("button", { name: "+ 1 earlier step" }),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("region", { name: "Turn log, 4 steps" }),
+		).toBeVisible();
+	},
+};
+
 /** Summary generation is supplied by its owner; the phone row has the agreed copy. */
 export const SummaryRow: Story = {
 	args: {
@@ -140,6 +176,8 @@ export const SummaryRow: Story = {
 		onsummarize: fn(),
 	},
 	play: async ({ canvasElement, args }) => {
+		// Jev-off turns start collapsed (xdyjq.8), and the phone row lives in the open turn.
+		await expandTurn(canvasElement);
 		const button = within(canvasElement).getByRole("button", {
 			name: "✦ Summary",
 		});
@@ -235,11 +273,51 @@ const handBackMessages = [
 	},
 ] satisfies ChatMessage[];
 const [handBack = EMPTY_TURN] = segmentTurns(handBackMessages, false);
-const [handBackSegment = EMPTY_SEGMENT] = handBack.segments;
+const handBackLog = turnLog(handBack);
 
-/** The pre-question ledger is settled and carries no turn-level bill. */
+/** Both sides of a question share one head, strip and log. */
 export const HandBack: Story = {
-	args: { turn: handBack, segment: handBackSegment, final: false },
+	args: {
+		turn: handBack,
+		segment: handBackLog.segment,
+		entries: handBackLog.entries,
+		final: true,
+	},
+};
+
+export const HandBackExpanded: Story = {
+	...HandBack,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Expand turn", expanded: false }),
+		);
+		await userEvent.click(canvas.getByTestId("turn-hand-back-row"));
+		await expect(
+			within(canvas.getByRole("region", { name: "Turn Q&A" })).getByText(
+				"Use the staging project.",
+			),
+		).toBeVisible();
+	},
+};
+
+export const HandBackQa: Story = {
+	...HandBack,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Expand turn", expanded: false }),
+		);
+		await showTurnStop(canvasElement, "qa");
+		await expect(
+			canvas.getByRole("region", { name: "Turn Q&A" }),
+		).toHaveTextContent("Answered");
+	},
+};
+
+export const HandBackQaLight: Story = {
+	...HandBackQa,
+	globals: { theme: "light" },
 };
 
 const truncatedMessages = [
@@ -283,7 +361,7 @@ export const PreviewedOutputRetry: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const toggle = canvas.getByRole("button", {
-			name: /^Work(ed|ing)\b/,
+			name: "Expand turn",
 			expanded: false,
 		});
 		await userEvent.click(toggle);
@@ -343,10 +421,10 @@ const [twiceSegment = EMPTY_SEGMENT] = twice.segments;
 async function expand(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
 	const toggle = canvas.getByRole("button", {
-		name: /^Work(ed|ing)\b/,
-		expanded: false,
+		name: /^(Expand|Collapse) turn$/,
 	});
-	await userEvent.click(toggle);
+	if (toggle.getAttribute("aria-expanded") !== "true")
+		await userEvent.click(toggle);
 	// A synthetic click leaves a focus ring; the baseline is the resting state.
 	toggle.blur();
 	await expect(canvas.getAllByText("Compacted context")[0]).toBeVisible();
@@ -406,36 +484,295 @@ const skilledLive = withSkills(live, {
 const [skilledSegment = EMPTY_SEGMENT] = skilled.segments;
 const [skilledLiveSegment = EMPTY_SEGMENT] = skilledLive.segments;
 
-async function openSkills(canvasElement: HTMLElement) {
+async function showSkillEvents(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
-	const head = canvasElement.querySelector<HTMLButtonElement>(
-		".turn-activity-toggle",
-	);
-	if (head?.getAttribute("aria-expanded") === "false")
-		await userEvent.click(head);
-	const toggle = canvas.getByRole("button", { name: /skills?$/ });
-	await userEvent.click(toggle);
-	toggle.blur();
+	await expandTurn(canvasElement);
+	await showTurnStop(canvasElement, "log");
+	const earlier = canvas.queryByRole("button", {
+		name: /^\+ \d+ earlier steps?$/,
+	});
+	if (earlier) await userEvent.click(earlier);
+	(document.activeElement as HTMLElement | null)?.blur();
+	const rows = canvas.getAllByRole("button", { name: /^Skill / });
+	await expect(rows).toHaveLength(2);
+	for (const row of rows) {
+		await expect(row).toBeVisible();
+		await expect(row.querySelector("time")).toHaveTextContent("40ms");
+	}
 	await expect(
-		canvas.getByRole("list", { name: "Skills in this turn" }),
-	).toBeVisible();
+		canvas.queryByRole("button", { name: /^\d+ skills?$/ }),
+	).not.toBeInTheDocument();
+	await expect(
+		canvas.queryByRole("list", { name: "Skills in this turn" }),
+	).not.toBeInTheDocument();
 }
 
-/** Skills keep their chapter picker in the step log. */
+/** The head counts skills without a separate picker. */
 export const Skills: Story = {
 	args: { turn: skilled, segment: skilledSegment, final: true },
 };
 
-/** Open, it lists each skill with when it started and how long it governed, and the strip picks them out. */
+/** Skills sit among the other steps, with their loading time in the time column. */
 export const SkillsOpen: Story = {
 	args: { turn: skilled, segment: skilledSegment, final: true },
-	play: ({ canvasElement }) => openSkills(canvasElement),
+	play: ({ canvasElement }) => showSkillEvents(canvasElement),
 };
 
-/** While live, the skill still in charge is running rather than given a guessed duration. */
+/** A live turn keeps both skill events in the full log. */
 export const SkillsLive: Story = {
 	args: { turn: skilledLive, segment: skilledLiveSegment, final: true },
-	play: ({ canvasElement }) => openSkills(canvasElement),
+	play: ({ canvasElement }) => showSkillEvents(canvasElement),
+};
+
+const skillSurfacing = {
+	status: {
+		...DEFAULT_MESSAGE_SURFACING_SETTINGS,
+		enabled: true,
+		active: true,
+		summariesEnabled: false,
+		key: { source: "stored" as const, rejected: false },
+	},
+	categorySet: DEFAULT_CATEGORY_SET,
+};
+
+export const SkillsJev: Story = {
+	...SkillsOpen,
+	args: { ...SkillsOpen.args, surfacing: skillSurfacing },
+	play: async ({ canvasElement }) => {
+		await showSkillEvents(canvasElement);
+		// Full log lists every message, unjudged ones included, so it is never empty.
+		await expect(
+			within(canvasElement).queryByText(/^Nothing at /),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const SkillsLiveJev: Story = {
+	...SkillsLive,
+	args: { ...SkillsLive.args, surfacing: skillSurfacing },
+};
+
+/** Live stays on Full log even when text is streaming after its latest step. */
+const interimSegment = {
+	...liveSegment,
+	reply: [
+		{
+			type: "assistant" as const,
+			uuid: "live-interim",
+			rawText: "I am checking the final dependency.",
+			html: "<p>I am checking the final dependency.</p>",
+			finalized: false,
+		},
+	],
+};
+const interimTurn: Turn = { ...live, segments: [interimSegment] };
+
+export const LiveInterim: Story = {
+	args: {
+		turn: interimTurn,
+		segment: interimSegment,
+		final: true,
+		surfacing: skillSurfacing,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const stop = canvas.queryByRole("tab", { name: /^Full log$/ });
+		if (stop) await expect(stop).toHaveAttribute("aria-selected", "true");
+		else
+			await expect(
+				canvas.getByRole("button", { name: /^Show messages$/ }),
+			).toHaveTextContent("Full log");
+		await expect(
+			canvas.getByText("Following latest", { exact: true }),
+		).toBeVisible();
+		await expect(
+			[
+				...canvasElement.querySelectorAll<HTMLElement>(
+					".step-log [data-log-part]",
+				),
+			].filter((node) => node.offsetHeight > 0),
+		).toHaveLength(3);
+	},
+};
+
+export const LiveCollapsed: Story = {
+	args: { ...LiveInterim.args },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const head = canvas.getByRole("button", { name: /^Collapse turn$/ });
+		await userEvent.click(head);
+		// Collapsing hands focus to the card for keyboard continuity.
+		const card = canvas.getByTestId("surfacing-card");
+		await expect(card).toHaveFocus();
+		card.blur();
+		await expect(head).toHaveAccessibleName("Expand turn");
+		await expect(head).toHaveTextContent("Working");
+		await expect(canvas.queryByTestId("turn-show-bar")).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByTestId("surfacing-msg-card"),
+		).not.toBeInTheDocument();
+	},
+};
+
+const usageTurn = withSkills(once, { 0: "systematic-debugging", 7: "tdd" });
+const [usageSegment = EMPTY_SEGMENT] = usageTurn.segments;
+
+async function openUsage(canvasElement: HTMLElement) {
+	const canvas = within(canvasElement);
+	const head = canvas.getByRole("button", { name: /^(Expand|Collapse) turn$/ });
+	if (head.getAttribute("aria-expanded") !== "true")
+		await userEvent.click(head);
+	const usage = canvas.getByRole("tab", { name: /^Usage$/ });
+	await userEvent.click(usage);
+	await expect(usage).toHaveAttribute("aria-selected", "true");
+	const content = within(canvas.getByRole("region", { name: "Turn usage" }));
+	for (const label of [
+		"Cost",
+		"Tokens",
+		"Context at end",
+		"Skills loaded",
+		"Worth a look",
+	])
+		await expect(content.getByText(label, { exact: true })).toBeVisible();
+	await expect(content.getAllByRole("listitem").length).toBeGreaterThanOrEqual(
+		2,
+	);
+	await expect(
+		canvas.queryByTestId("surfacing-msg-card"),
+	).not.toBeInTheDocument();
+	usage.blur();
+}
+
+/** Usage collects the bill, skill loads, failed command and compaction. */
+export const Usage: Story = {
+	args: {
+		turn: usageTurn,
+		segment: usageSegment,
+		final: true,
+		surfacing: skillSurfacing,
+	},
+	play: ({ canvasElement }) => openUsage(canvasElement),
+};
+
+export const UsageLight: Story = { ...Usage, globals: { theme: "light" } };
+
+export const UsageJevOff: Story = {
+	...Usage,
+	args: {
+		...Usage.args,
+		surfacing: {
+			...skillSurfacing,
+			status: { ...skillSurfacing.status, enabled: false, active: false },
+		},
+	},
+};
+
+export const UsageLive: Story = {
+	...Usage,
+	args: { ...Usage.args, turn: skilledLive, segment: skilledLiveSegment },
+};
+
+/** Jev-off keeps the plain head and strip at both viewport sizes. */
+export const JevOffCollapsed: Story = {
+	tags: ["viewport-capture"],
+	args: {
+		sessionId: "turn-activity-jev-off-collapsed",
+		turn: settled,
+		segment: settledSegment,
+		final: true,
+		surfacing: {
+			...skillSurfacing,
+			status: {
+				...skillSurfacing.status,
+				enabled: false,
+				active: false,
+				summariesEnabled: false,
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(
+			canvas.getByRole("button", { name: "Expand turn" }),
+		).toHaveTextContent(/reads/);
+		await expect(
+			canvas.getByRole("slider", { name: /Activity timeline/ }),
+		).toBeVisible();
+		await expect(canvas.queryByTestId("turn-show-bar")).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByRole("region", { name: /^Turn log/ }),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const JevOffOpen: Story = {
+	...JevOffCollapsed,
+	tags: ["viewport-capture"],
+	args: { ...JevOffCollapsed.args, sessionId: "turn-activity-jev-off-open" },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const head = canvas.getByRole("button", { name: "Expand turn" });
+		await userEvent.click(head);
+		head.blur();
+		await expect(
+			canvas.getByRole("tab", { name: "Log", selected: true }),
+		).toBeVisible();
+		await expect(canvas.getByRole("tab", { name: "Usage" })).toBeVisible();
+		await expect(
+			canvas.getByRole("region", { name: /^Turn log/ }),
+		).toBeVisible();
+		await expect(
+			canvas.queryByRole("button", { name: "Show messages" }),
+		).not.toBeInTheDocument();
+		await expect(
+			canvas.queryByTestId("surfacing-msg-card"),
+		).not.toBeInTheDocument();
+	},
+};
+
+export const JevOffLive: Story = {
+	...JevOffOpen,
+	tags: ["viewport-capture"],
+	args: {
+		...JevOffCollapsed.args,
+		sessionId: "turn-activity-jev-off-live",
+		turn: live,
+		segment: liveSegment,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const head = canvas.getByRole("button", { name: "Expand turn" });
+		await userEvent.click(head);
+		head.blur();
+		await expect(head).toHaveTextContent("Working");
+		await expect(
+			canvas.getByRole("tab", { name: "Log", selected: true }),
+		).toBeVisible();
+		await expect(
+			canvas.getByRole("button", { name: /^\+ \d+ earlier steps?$/ }),
+		).toBeVisible();
+		await expect(
+			[
+				...canvasElement.querySelectorAll<HTMLElement>(
+					".step-log [data-log-part]",
+				),
+			].filter((node) => node.offsetHeight > 0),
+		).toHaveLength(3);
+	},
+};
+
+/** A narrow collapsed head truncates its phrase and keeps the whole elapsed time. */
+export const JevOffLiveNarrow: Story = {
+	args: { ...JevOffLive.args, sessionId: "turn-activity-jev-off-live-narrow" },
+	play: async ({ canvasElement }) => {
+		// 320px left the phrase within a pixel of fitting, so Linux fonts never truncated it.
+		canvasElement.style.width = "280px";
+		const elapsed = within(canvasElement).getByTestId("turn-live-elapsed");
+		await expect(elapsed.scrollWidth).toBeLessThanOrEqual(elapsed.clientWidth);
+		const phrase = elapsed.nextElementSibling;
+		await expect(phrase).toHaveClass("truncate");
+		await expect(phrase?.scrollWidth).toBeGreaterThan(phrase?.clientWidth ?? 0);
+	},
 };
 
 const runningTasks: Turn = {
@@ -481,13 +818,8 @@ export const RunningTasks: Story = {
 		],
 	},
 	play: async ({ canvasElement }) => {
-		const toggle = within(canvasElement).getByRole("button", {
-			name: /^Worked\b/,
-			expanded: false,
-		});
-		await userEvent.click(toggle);
-		toggle.blur();
-		const pill = canvasElement.querySelector(".step-log .turn-running");
+		await expandTurn(canvasElement);
+		const pill = canvasElement.querySelector(".turn-running");
 		await expect(pill).toBeVisible();
 		await expect(pill).toHaveTextContent("2 running");
 		const glyph = pill?.querySelector('[data-flow-glyph="running"]');
@@ -500,9 +832,6 @@ export const RunningTasks: Story = {
 			getComputedStyle(pill).getPropertyValue("--color-tool");
 		await expect(getComputedStyle(pill).color).toBe(expectedTool.color);
 		await expect(getComputedStyle(glyph).color).toBe(expectedTool.color);
-		await expect(
-			canvasElement.querySelector(".skills-toggle .lucide-sparkles"),
-		).toBeVisible();
 	},
 };
 

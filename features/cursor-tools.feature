@@ -38,6 +38,7 @@ Scenario Outline: inspect Cursor tool activity while output streams and after co
   And the jump-to-latest control is not visible
   And the messages region visually matches cursor-tools-file-changes at <threshold> percent
   When the Cursor relay publishes exploration tools
+  And I open the live Full log from earlier steps
   Then all Cursor exploration tools have compact rows
   When the Cursor relay publishes MCP, todos and a plan
   Then the Cursor MCP row identifies docs and lookup

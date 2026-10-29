@@ -191,9 +191,8 @@ async function pinClock(page: import("@playwright/test").Page): Promise<void> {
  * rule someone has to remember. Here it is a property of the capture
  * environment instead.
  *
- * A counter-based sequence, NOT a constant: AssistantMessage.svelte:96,241
- * derive mermaid element ids from Math.random, and a constant would make two
- * diagrams in one story collide on the same DOM id.
+ * A counter-based sequence, NOT a constant: a constant would make two
+ * Math.random-derived DOM ids in one story collide.
  *
  * `Date.now` is deliberately NOT pinned — `play()` bodies use `waitFor`, which
  * needs the clock to advance. Stories needing a fixed clock stub it themselves
@@ -478,7 +477,7 @@ if (stories.length > 0) {
 		["input-filemenu--hides-when-no-matches", "all"],
 		["input-commandmenu--hides-when-no-matches", "all"],
 		["overlays-confirmmodal--hidden", "all"],
-		["overlays-imagelightbox--hidden", "all"],
+		["overlays-mediaviewer--hidden", "all"],
 		["overlays-qrmodal--hidden", "all"],
 		["overlays-rewindbanner--inactive", "all"],
 		["overlays-connectoverlay--connected", "all"],
@@ -571,7 +570,7 @@ if (stories.length > 0) {
 		["layout-chatlayout--files-forced-expanded", "mobile"],
 	]);
 
-	// Stories whose element dimensions vary across platforms (e.g. Mermaid SVGs
+	// Stories whose element dimensions vary across platforms (e.g. diagram SVGs
 	// whose viewBox is computed from font metrics that differ between Docker
 	// emulation and native CI Linux).  Two fixes applied:
 	//

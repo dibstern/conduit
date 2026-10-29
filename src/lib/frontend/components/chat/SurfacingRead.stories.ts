@@ -2,7 +2,8 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
-import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -80,6 +81,7 @@ const turn: Turn = {
 		createdAt: START,
 	},
 	segments: [mixed],
+	preface: [],
 	notices: [],
 	live: false,
 };
@@ -114,9 +116,12 @@ const meta = {
 		// Persistence owns read state. The fixture keeps its initial state after a timer.
 		onMessagesRead: async () => {},
 	},
-	beforeEach: () => {
-		setSessionSurfaceLevel("read-story-session", null);
-	},
+	beforeEach: ({ args }) =>
+		setupTurnStory({
+			turn: args["turn"],
+			sessionId: args["sessionId"],
+			surfacing: args["surfacing"],
+		}),
 } satisfies Meta<typeof TurnActivity>;
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -132,9 +137,29 @@ export const MixedRead: Story = {
 		await expect(
 			canvas.queryByTestId("surfacing-mark-read"),
 		).not.toBeInTheDocument();
+		await expect(canvasElement.querySelector(".surface-axis")).toBeNull();
+		await expect(canvasElement.querySelector(".axis-notes")).toBeNull();
+		await expect(canvas.getByTestId("turn-show-bar")).toBeVisible();
+		// Read pins keep full ink; only the unread mark tells #5 apart from read #1 and #4.
+		const secondary = new Option().style;
+		for (const [number, unread] of [
+			["1", false],
+			["4", false],
+			["5", true],
+		] as const) {
+			const pin = canvasElement.querySelector(
+				`.pin-chip[data-number="${number}"]`,
+			);
+			if (!pin) throw new Error(`Missing pin #${number}`);
+			secondary.color = getComputedStyle(pin).getPropertyValue(
+				"--color-text-secondary",
+			);
+			await expect(getComputedStyle(pin).color).toBe(secondary.color);
+			await expect(
+				pin.closest("button")?.querySelector(".unread-dot") != null,
+			).toBe(unread);
+		}
 		for (const selector of [
-			".pin-chip.seen:not(.current)",
-			".surface-axis",
 			".turn-duration",
 			".turn-activity-toggle svg",
 			'[data-testid="surfacing-minimise-toggle"] svg',
@@ -169,7 +194,7 @@ export const MixedRead: Story = {
 		const style = getComputedStyle(summary);
 		await expect(style.color).toBe(ink.color);
 		await expect(style.fontWeight).toBe("500");
-		if (window.matchMedia("(max-width: 599px)").matches) {
+		if (sessionViewState.compact) {
 			await expect(style.fontSize).toBe("14px");
 			await expect(summary.getBoundingClientRect().height).toBe(38);
 			await expect(style.marginTop).toBe("10px");
@@ -180,7 +205,8 @@ export const MixedRead: Story = {
 			await expect(style.backgroundColor).toBe(ink.backgroundColor);
 			const toggle = verb.closest("button");
 			if (!toggle) throw new Error("Missing turn head toggle");
-			await expect(toggle.querySelector(".truncate")).not.toBeVisible();
+			// Phones keep only the skill count in the head (xdyjq.1); this turn ran none.
+			await expect(toggle.querySelector(".truncate")).toBeNull();
 			await expect(toggle.scrollWidth).toBeLessThanOrEqual(toggle.clientWidth);
 		} else {
 			await expect(style.fontSize).toBe("13px");
@@ -280,7 +306,7 @@ export const Final: Story = {
 		await expect(
 			canvas.queryByTestId("surfacing-msg-card"),
 		).not.toBeInTheDocument();
-		await expect(canvas.getByText("Final only · 6 hidden")).toBeVisible();
+		await expect(canvas.getByText("Answer only · 6 hidden")).toBeVisible();
 	},
 };
 export const FinalLight: Story = { ...Final, globals: { theme: "light" } };

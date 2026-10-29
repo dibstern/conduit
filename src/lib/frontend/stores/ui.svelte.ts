@@ -84,9 +84,6 @@ export const uiState = $state({
 		onReject: () => void;
 	} | null,
 
-	// Image lightbox
-	lightboxSrc: null as string | null,
-
 	// Client count
 	clientCount: 0,
 
@@ -337,12 +334,36 @@ export function setPlanApproval(
 	uiState.planApproval = { onApprove, onReject };
 }
 
-export function openLightbox(src: string): void {
-	uiState.lightboxSrc = src;
+/** What the app-wide media viewer shows. */
+export type MediaItem =
+	| { kind: "image"; src: string }
+	| { kind: "diagram"; source: string };
+
+// Module-private so only openMediaViewer/closeMediaViewer can write it.
+let mediaViewer = $state<MediaItem | null>(null);
+// The control that opened the viewer. Safari never focuses a clicked button, so it is passed in, not read from focus.
+// Kept after close: the dialog hands focus back once it has closed.
+let mediaViewerOpener: HTMLElement | null = null;
+
+export function getMediaViewer(): MediaItem | null {
+	return mediaViewer;
 }
 
-export function closeLightbox(): void {
-	uiState.lightboxSrc = null;
+export function getMediaViewerOpener(): HTMLElement | null {
+	return mediaViewerOpener;
+}
+
+/** opener is the control pressed to open the viewer; closing returns focus to it. */
+export function openMediaViewer(
+	item: MediaItem,
+	opener: EventTarget | null,
+): void {
+	mediaViewer = item;
+	mediaViewerOpener = opener instanceof HTMLElement ? opener : null;
+}
+
+export function closeMediaViewer(): void {
+	mediaViewer = null;
 }
 
 export function setClientCount(count: number): void {
@@ -356,7 +377,7 @@ export function resetProjectUI(): void {
 	uiState.planMode = false;
 	uiState.planContent = null;
 	uiState.planApproval = null;
-	uiState.lightboxSrc = null;
+	closeMediaViewer();
 	uiState.openPanels = new Set();
 	uiState.banners = [];
 	uiState.opencodeConnections = {};

@@ -1,34 +1,46 @@
-<!-- The Final turn head keeps counts and duration above a shared activity strip.
-     Skills, task status and the bill stay in the step log or duration hover.
+<!-- The turn head keeps counts and duration above a shared activity strip.
+     Usage holds the bill and notable events; running tasks stay in the footer.
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
+<script module lang="ts">
+	export type RunLabel =
+		| { kind: "working" }
+		| { kind: "woken"; task?: string }
+		| { kind: "stopping"; stuck?: boolean };
+</script>
+
 <script lang="ts">
 	import { onDestroy, tick, untrack } from "svelte";
-	import { on } from "svelte/events";
-	import type { AskExplanation } from "../../../contracts/ask-explanation.js";
-	import SurfacingAskContext from "./SurfacingAskContext.svelte";
-	import { MediaQuery } from "svelte/reactivity";
+	import type { ComponentProps, Snippet } from "svelte";
+	import type { SessionResume } from "../../../contracts/limit-recovery.js";
+	import { assertNever } from "../../../utils.js";
+	import SurfacingAskContext, { type AskState } from "./SurfacingAskContext.svelte";
 	import type { CategorySet } from "../../../contracts/category-set.js";
 	import type { MessageSurfacingStatus, MessageSurfacingPreferences } from "../../../contracts/message-surfacing.js";
 	import { numberTurnMessages } from "../../../turn-message-numbers.js";
 	import { TurnRecapState } from "../../stores/turn-recap.svelte.js";
 	import SurfacingSummary from "./SurfacingSummary.svelte";
-	import { messageSurfacing, sessionJevEnabled, sessionSurfaceLevel, setSessionSurfaceLevel, touchSurfaceSession, makeSurfaceDefault } from "../../stores/message-surfacing.svelte.js";
+	import { messageSurfacing, sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
+	import { createTurnPanel, landTurnTarget, type TurnPanelState } from "../../stores/turn-panel.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
-	import { surfaceTurn, surfaceTime, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
-	import SurfacingCard, { type SurfacingRegions } from "./SurfacingCard.svelte";
+	import { stopCounts } from "../../utils/turn-stops.js";
+	import { canOpenSurfaceMessage, surfaceTurn, surfaceKey, type CardSelection, type SurfaceLevel, type SurfacePart, type SurfacePin } from "../../utils/surface-turn.js";
+	import SurfacingCard, { type ReadState, type SurfacingRegions } from "./SurfacingCard.svelte";
+	import SurfacingMessageCard from "./SurfacingMessageCard.svelte";
 	import { MARK_GLYPHS, SurfacingFeedback } from "../../stores/surfacing-feedback.svelte.js";
 	import SurfacingMarkActions from "./SurfacingMarkActions.svelte";
 	import SurfacingMarkWhy from "./SurfacingMarkWhy.svelte";
 	import { insertComposerReference, messageReplies, removeComposerReference, type ReplyReference } from "../input/composer-reference.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { reveal, revealedPart } from "../../stores/reveal.svelte.js";
+	import { reveal } from "../../stores/reveal.svelte.js";
 	import { primaryTranscript, type TranscriptView } from "../../stores/transcript.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
 	import type { ModelExecution } from "../../types.js";
 	import Button from "../ui/Button.svelte";
+	import Badge from "../ui/Badge.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import ConduitMark from "../ui/ConduitMark.svelte";
 	import Tooltip from "../ui/Tooltip.svelte";
@@ -37,31 +49,40 @@
 		currentStepLabel,
 		economics,
 		fmtDuration,
-		latestStamp,
+		isHandBack,
 		liveLaunchedTasks,
-		stepCaption,
-		type SkillChapter,
-		skillChapters,
+		plural,
 		stepDurations,
 		stripLayout,
 		type Segment,
 		type Turn,
+		type TurnLogEntry,
 		turnStats,
 		workingTime,
 	} from "../../utils/turns.js";
 	import ActivityRow from "./ActivityRow.svelte";
 	import ActivityStrip from "./ActivityStrip.svelte";
-	import MinimisedTurn from "./MinimisedTurn.svelte";
-	import { setTurnMinimised, turnMinimised } from "../../stores/turn-minimisation.svelte.js";
-	import { partStyle } from "./activity-style.js";
-	import RunningPill from "./RunningPill.svelte";
-	import TurnEconomics from "./TurnEconomics.svelte";
+	import TurnLog from "./TurnLog.svelte";
+	import TurnShowBar from "./TurnShowBar.svelte";
+	import TurnUsage from "./TurnUsage.svelte";
+	import TurnQa from "./TurnQa.svelte";
+	import { turnLog } from "../../utils/turns.js";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { view = primaryTranscript, scrollRoot, turn, segment, final, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false }: {
+	let { view = primaryTranscript, scrollRoot, turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
+		get viewId() { return view.id; },
+		get sessionId() { return sessionId; }, get turn() { return turn; },
+		get jev() { return surfacingActive; }, get processing() { return turn.live; },
+		get latestTurn() { return latestTurn; }, get newestSettledTurn() { return newestSettledTurn; },
+		get status() { return surfacingConfig.status; }, get categorySet() { return surfacingConfig.categorySet; },
+	}) }: {
+		panel?: TurnPanelState;
 		turn: Turn;
+		runLabel?: RunLabel;
 		segment: Segment;
 		final: boolean;
+		entries?: readonly TurnLogEntry[];
+		renderResume?: Snippet<[SessionResume]>;
 		liveTasks?: readonly BackgroundTask[];
 		taskListedAt?: ReadonlyMap<string, number>;
 		taskNow?: number;
@@ -84,38 +105,40 @@
 		onReplyToAsk?: (reference: ReplyReference, text?: string) => void;
 	} = $props();
 
-	let expanded = $state(false);
-	// Once shown, the full log stays mounted and hiding it only hides it:
-	// remounting hundreds of rows made showing a long turn's log slow, and
-	// reset each row's own open state.
-	let logMounted = $state(false);
-	let skillsOpen = $state(false);
-	let hovered = $state<number | null>(null);
-	let focusUuid = $state<string | null>(null);
+	const fullLog = $derived(panel.view.kind === "open" && panel.view.view.kind === "show" && panel.view.view.stop === "log");
+	const usage = $derived(panel.view.kind === "open" && panel.view.view.kind === "usage");
+	const qa = $derived(panel.view.kind === "open" && panel.view.view.kind === "qa");
+	// Like the kept log rows, Q&A retains unfinished answers when changing views.
+	let qaMounted = $state(false);
+	$effect(() => { if (qa) qaMounted = true; });
+	type StripInteraction = Parameters<NonNullable<ComponentProps<typeof ActivityStrip>["oninteraction"]>>[0];
+	type CardSlot = NonNullable<ComponentProps<typeof ActivityStrip>["cardSlot"]>;
+	let stripInteraction = $state<StripInteraction>({ hovered: null, scrubbing: false });
+	let stripWidth = $state(0);
+	let citedStep = $state<string | null>(null);
 	let panelEl = $state<HTMLDivElement | undefined>();
-	let detailsOpen = $state(false);
+	let headTooltip = $state(false);
 
 	const settledNow = Date.now();
 	const now = $derived(final && turn.live ? clock.now : settledNow);
 
 	const stats = $derived(turnStats(segment));
 	const durations = $derived(stepDurations(segment, turn, final, now));
-	const duration = $derived.by(() => {
-		const index = turn.segments.indexOf(segment);
-		const until = index === -1 || index === turn.segments.length - 1 ? undefined : latestStamp(segment);
-		return workingTime(turn, now, until);
-	});
+	const duration = $derived(workingTime(turn, now));
 	const bill = $derived(economics(turn, now));
 	const running = $derived(liveLaunchedTasks(turn, liveTasks, liveTasks.length > 0 && turn.live ? clock.now : taskNow, taskListedAt));
 	const phrase = $derived(countsPhrase(stats));
-	const chapters = $derived(skillChapters(segment, turn, final, now));
-	const skillSteps = $derived(skillsOpen ? new Set(chapters.map((c) => c.index)) : null);
-	const TICKER_ROWS = 3;
-	const ticker = $derived(segment.activity.slice(-TICKER_ROWS));
-	const live = $derived(final && turn.live);
-	const showTicker = $derived(live && segment.reply.length === 0 && !segment.handBack);
-	const earlierCount = $derived(Math.max(0, segment.activity.length - ticker.length));
-	const numberedMessages = $derived(numberTurnMessages(turn.segments.flatMap((block) => block.activity.flatMap((part) => part.type === "assistant" ? [part] : []))));
+	const logEntries = $derived(entries ?? segment.activity.map((part, index): TurnLogEntry => ({ kind: "step", uuid: part.uuid, index, part })));
+	const live = $derived(panel.phase !== "settled");
+	function runText(label: RunLabel): string {
+		switch (label.kind) {
+			case "working": return "Working";
+			case "woken": return label.task ?? "Woken";
+			case "stopping": return label.stuck ? "Still stopping" : "Stopping";
+			default: return assertNever(label);
+		}
+	}
+	const numberedMessages = $derived(numberTurnMessages(segment.activity.flatMap((part) => part.type === "assistant" ? [part] : [])));
 	function messageNumber(index: number): number | undefined {
 		const part = segment.activity[index];
 		// A live message Jev has yet to number keeps its icon: a predicted number
@@ -124,64 +147,33 @@
 		return numbered || surfacingActive || summariesOn ? numberedMessages.find(({ uuid }) => uuid === part.uuid)?.surfacingOrdinal : undefined;
 	}
 
-	$effect(() => {
-		const request = revealedPart.request;
-		untrack(() => {
-			if (!request || request.sessionId !== sessionId || request.viewId !== view.id) return;
-			const i = segment.activity.findIndex((part) => part.uuid === request.uuid);
-			if (i >= 0 || turn.user?.uuid === request.uuid || segment.reply.some((part) => part.uuid === request.uuid)) openTurn();
-			if (i >= 0) {
-				const target = surfacingActive ? surface.messages.find(({ part }) => part.uuid === request.uuid) : undefined;
-				if (target && (live || target.part.surfacingProbabilities !== undefined)) {
-					if (level === "final") selectLevel("all");
-					pick(target);
-				} else void jumpTo(i);
-			}
-		});
-	});
-
 	const surfacingConfig = $derived(surfacing ?? messageSurfacing);
 	const surfacingActive = $derived(sessionJevEnabled(sessionId ? findSession(sessionId) : undefined, surfacingConfig.status));
-	const override = $derived(sessionSurfaceLevel(sessionId));
-	const level = $derived(override ?? surfacingConfig.status.defaultLevel);
+	const level = $derived(panel.saved);
 	const recap = new TurnRecapState();
-	let askExplanations = $state<Record<string, AskExplanation>>({});
-	let generatingAsk = $state<string | null>(null);
-	let askError = $state<{ uuid: string; message: string } | null>(null);
+	let asks = $state<Record<string, AskState>>({});
 	/** The Ask a citation left, offered back on the cited message's card. */
 	let askReturn = $state<{ ask: SurfacePin; cited: string } | null>(null);
-	const askIdentity = $derived(`${sessionId}/${turn.id}`);
-	$effect(() => {
-		void askIdentity;
-		askExplanations = {};
-		generatingAsk = null;
-		askError = null;
-		askReturn = null;
-	});
 	function setupFor(pin: SurfacePin): SurfacePart | null {
-		const parts = turn.segments.flatMap((block) => [...block.activity, ...block.reply]);
+		const parts = [...segment.activity, ...segment.reply];
 		const index = parts.findIndex((part) => part.uuid === pin.part.uuid);
 		return parts.slice(0, Math.max(0, index)).reverse().find((part): part is SurfacePart => part.type === "assistant" && !!part.rawText.trim()) ?? null;
 	}
 	async function explainAsk(pin: SurfacePin) {
-		if (!sessionId || !storeTurnId || !pin.part.partId || generatingAsk || askExplanations[pin.part.uuid]) return;
-		const identity = askIdentity;
-		generatingAsk = pin.part.uuid;
-		askError = null;
+		const uuid = pin.part.uuid;
+		if (!sessionId || !storeTurnId || !pin.part.partId || asks[uuid]?.kind === "ready" || Object.values(asks).some(({ kind }) => kind === "loading")) return;
+		asks[uuid] = { kind: "loading" };
 		try {
 			const explanation = await rpc("ExplainAsk", { sessionId, turnId: storeTurnId, partId: pin.part.partId });
-			if (identity === askIdentity) askExplanations = { ...askExplanations, [pin.part.uuid]: explanation };
+			asks[uuid] = { kind: "ready", explanation };
 		} catch (error) {
-			if (identity === askIdentity) askError = { uuid: pin.part.uuid, message: error instanceof Error ? error.message : String(error) };
-		} finally {
-			if (identity === askIdentity) generatingAsk = null;
+			asks[uuid] = { kind: "failed", message: error instanceof Error ? error.message : String(error) };
 		}
 	}
-	/** The event store keys a turn by its user message id; turn.id is that row's transcript uuid. */
+	/** The event store keys a turn by its user message id; turn.id is only a view key. */
 	const storeTurnId = $derived(turn.storeId ?? turn.user?.messageId);
-	// jsdom has no matchMedia; real browsers always do.
-	const phone = typeof matchMedia === "function" ? new MediaQuery("(max-width: 599px)") : { current: false };
-	let summaryOpen = $state<boolean | null>(null);
+	const phone = $derived(sessionViewState.compact);
+	let summaryOpen = $state<{ storeId: string; open: boolean } | null>(null);
 	let summarySettingsError = $state("");
 	let summarySaving = $state(false);
 	let citedOrdinal = $state<number | null>(null);
@@ -198,18 +190,14 @@
 		if (active && session && id) return untrack(() => recap.connect(session, id, watch));
 		return;
 	});
-	$effect(() => {
-		void storeTurnId;
-		void sessionId;
-		summaryOpen = null;
-	});
-	let picked = $state<string | null>(null);
-	let folded = $state<boolean | null>(null);
-	let readSaving = $state(false);
-	let readError = $state("");
-	let autoReadAttempt = $state<string | null>(null);
-	let readCard: string | null = null;
-	let digits = "";
+	let selection = $state<CardSelection>({ kind: "auto" });
+	let readState = $state<ReadState>({ kind: "idle" });
+	// A card is auto-read at most once per mount, so an explicit Unread sticks.
+	const autoReadAttempts = new Set<string>();
+	let readCardEl = $state<HTMLElement>();
+	let readCardOnScreen = $state(false);
+	let pageVisible = $state(false);
+	let keyBuffer = $state("");
 	const feedback = new SurfacingFeedback(() => sessionId, () => surfacingConfig.categorySet, (place) => {
 		void tick().then(() => {
 			const target = place === "card" ? panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-msg-card"]') : panelEl?.querySelector<HTMLElement>(`[data-testid="${place}"] button`);
@@ -217,83 +205,102 @@
 		});
 	}, pick, (uuid) => { const part = segment.activity.find((part) => part.uuid === uuid); return part?.type === "assistant" ? part : undefined; });
 	onDestroy(() => feedback.dispose());
+	const counts = $derived(stopCounts({ ...turn, segments: turn.segments.map((segment) => ({
+		...segment, activity: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), reply: segment.reply.map((part) => feedback.annotate(part)),
+	})) }, surfacingConfig.categorySet, live));
 	const surface = $derived(surfaceTurn({
 		parts: segment.activity.map((part) => part.type === "assistant" ? feedback.annotate(part) : part), turnParts: numberedMessages.map((part) => feedback.annotate(part)),
-		positions: stripLayout(segment, turn, final, now), categorySet: surfacingConfig.categorySet,
-		level, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, picked, folded, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
+		positions: stripLayout(segment, turn, final, now, stripWidth), categorySet: surfacingConfig.categorySet,
+		level, view: panel.view.kind === "open" ? panel.view.view : null, live, latestTurn, latestBlock: final, hasRecap: hasRecap || (summaryEnabled && recap.versions.length > 0 && !recap.error), citedOrdinal, selection: stripInteraction.scrubbing && stripInteraction.hovered ? { kind: "picked", uuid: stripInteraction.hovered } : panel.target?.kind === "message" ? { kind: "picked", uuid: panel.target.uuid } : selection, start: turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0,
 	}));
 	const summaryNew = $derived(surface.numbers.filter(({ number }) => number > (recap.versions.at(-1)?.lastOrdinal ?? 0)).length);
-	// Unknown read state and hidden unread messages must not make Auto fold a turn.
-	const turnParts = $derived(turn.segments.flatMap((block) => block.activity));
-	const allRead = $derived(turnParts.some((part) => part.type === "assistant") && turnParts.every((part) => part.type !== "assistant" || part.surfacingRead === true));
-	const minimised = $derived(surfacingActive && (turnMinimised(sessionId, turn.id) ?? (surfacingConfig.status.turnsOpen === "minimised" || (surfacingConfig.status.turnsOpen === "auto" && !turn.live && !newestSettledTurn && allRead && !surface.openAsk))));
-	const summaryVisible = $derived(!minimised && summaryEnabled && (summaryOpen ?? (!phone.current && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
-	$effect(() => {
-		if (minimised) { hovered = null; detailsOpen = false; }
+	const minimised = $derived(panel.view.kind === "collapsed");
+	const cardSlot = $derived.by((): CardSlot => {
+		if (!surfacingActive) return { kind: "none" };
+		const selected = minimised || usage || qa ? null : surface.card;
+		const hovered = surface.messages.find((pin) => pin.part.uuid === stripInteraction.hovered);
+		if (hovered && hovered.part.uuid !== selected?.part.uuid && (!stripInteraction.scrubbing || minimised)) return { kind: "preview", card: hovered };
+		return selected ? { kind: "selected", card: selected } : { kind: "none" };
 	});
-	function openTurn() {
-		// Only expanding counts as a hand choice; working inside an open turn leaves Auto in charge.
-		if (minimised) setTurnMinimised(sessionId, turn.id, false);
-	}
+	const summaryVisible = $derived((!surfacingActive || !minimised) && summaryEnabled && (summaryOpen && summaryOpen.storeId === storeTurnId ? summaryOpen.open : (!phone && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
 	function toggleMinimised() {
-		setTurnMinimised(sessionId, turn.id, !minimised);
+		if (panel.view.kind === "collapsed") panel.open();
+		else panel.collapse();
 		void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-card"]')?.focus({ preventScroll: true }));
 	}
-	async function openMinimisedMessage(pin: SurfacePin) {
-		openTurn();
-		if (live || pin.part.surfacingProbabilities !== undefined || pin.part.surfacingMark) {
-			if (level === "final") selectLevel("all");
-			pick(pin);
-			await tick();
-			panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-msg-card"]')?.focus({ preventScroll: true });
-		} else await jumpTo(pin.step);
-	}
+	// Track scalars so the live strip's clock cannot restart the read dwell.
+	const readTarget = $derived(cardSlot.kind === "selected" && cardSlot.card.read === false ? cardSlot.card.part.uuid : null);
+	const readText = $derived(cardSlot.kind === "selected" ? cardSlot.card.part.rawText : "");
 	$effect(() => {
-		if (sessionId && surfacingActive) untrack(() => touchSurfaceSession(sessionId));
+		const changed = () => { pageVisible = document.visibilityState === "visible"; };
+		changed();
+		document.addEventListener("visibilitychange", changed);
+		return () => document.removeEventListener("visibilitychange", changed);
 	});
-	const readTarget = $derived(surface.card?.part.uuid ?? null);
+	$effect(() => {
+		if (!readCardEl) { readCardOnScreen = false; return; }
+		const observer = new IntersectionObserver((entries) => {
+			const entry = entries.at(-1);
+			readCardOnScreen = !!entry?.isIntersecting && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
+		});
+		observer.observe(readCardEl);
+		return () => observer.disconnect();
+	});
+	// An unread card is read after 1s continuously visible, on screen and not scrubbed past.
 	$effect(() => {
 		const target = readTarget;
-		untrack(() => {
-			if (target === readCard) return;
-			readCard = target;
-			autoReadAttempt = null;
-			readError = "";
-		});
+		void readText;
+		if (!target || !pageVisible || !readCardOnScreen || stripInteraction.scrubbing || readState.kind === "saving" || autoReadAttempts.has(target)) return;
+		const timer = setTimeout(() => {
+			const card = untrack(() => cardSlot.kind === "selected" ? cardSlot.card : null);
+			if (card?.part.uuid === target && document.visibilityState === "visible" && readCardOnScreen && !stripInteraction.scrubbing) readMessage(card, true);
+		}, 1000);
+		return () => clearTimeout(timer);
 	});
-	async function writeRead(partIds: readonly string[], read: boolean) {
-		if (readSaving || !partIds.length || (!sessionId && !onMessagesRead)) return;
-		readSaving = true;
-		readError = "";
+	/** `uuid` names the card a failure belongs to; bulk saves default to the open card, or the turn when folded. */
+	async function writeRead(partIds: readonly string[], read: boolean, uuid = cardSlot.kind === "selected" ? cardSlot.card.part.uuid : turn.id) {
+		if (readState.kind === "saving" || !partIds.length || (!sessionId && !onMessagesRead)) return;
+		readState = { kind: "saving", uuid };
 		try {
 			if (onMessagesRead) await onMessagesRead(partIds, read);
 			else if (sessionId) await rpc("SetMessagesRead", { sessionId, partIds: [...partIds], read });
+			readState = { kind: "idle" };
 		} catch {
-			readError = "Couldn't save read state. Try again.";
-		} finally { readSaving = false; }
+			readState = { kind: "failed", uuid, message: "Couldn't save read state. Try again." };
+		}
 	}
 	function readMessage(pin: SurfacePin, read: boolean) {
-		// An explicit Unread must survive while this card stays open.
-		autoReadAttempt = pin.part.uuid;
-		if (pin.part.partId) void writeRead([pin.part.partId], read);
+		autoReadAttempts.add(pin.part.uuid);
+		if (pin.part.partId) void writeRead([pin.part.partId], read, pin.part.uuid);
 	}
 
 	function pick(pin: SurfacePin) {
-		openTurn();
-		picked = pin.part.uuid;
-		folded = false;
+		void reveal({ sessionId, uuid: pin.part.uuid }, view, scrollRoot);
+	}
+	// An open strip's pins are already on screen, so picking one keeps focus on the strip.
+	function selectPin(pin: SurfacePin) {
+		selection = { kind: "picked", uuid: pin.part.uuid };
+	}
+	function acknowledgeMessage(seq: number) {
+		if (panel.pending?.seq !== seq || panel.target?.kind !== "message") return;
+		selection = { kind: "picked", uuid: panel.target.uuid };
+		panel.ack(seq);
 	}
 	function toggleSummary() {
+		if (!storeTurnId) return;
 		const visible = summaryVisible;
-		openTurn();
-		summaryOpen = !visible;
+		if (minimised && surfacingActive) panel.open();
+		summaryOpen = { storeId: storeTurnId, open: !visible };
+	}
+	function closeSummary() {
+		if (storeTurnId) summaryOpen = { storeId: storeTurnId, open: false };
 	}
 	function retrySummary() {
 		generateSummary(recap.retry?.scope ?? (recap.versions.length && summaryNew > 0 ? "new" : "whole"), recap.retry?.sourceVersion);
 	}
 	function generateSummary(scope: "whole" | "new", sourceVersion?: number) {
 		if (!sessionId || !storeTurnId || !summaryEnabled) return;
-		summaryOpen = true;
+		summaryOpen = { storeId: storeTurnId, open: true };
 		void recap.generate(sessionId, storeTurnId, scope, sourceVersion);
 	}
 	async function updateSummarySettings(patch: Partial<MessageSurfacingPreferences["recap"]>) {
@@ -308,27 +315,20 @@
 	}
 	async function citeSummary(ordinal: number) {
 		citedOrdinal = ordinal;
-		if (surfacingActive) return;
-		// Without Jev a citation opens the numbered step log at its line.
 		const target = numberedMessages.find((part) => part.surfacingOrdinal === ordinal);
 		if (!target) return;
-		const index = segment.activity.findIndex((part) => part.uuid === target.uuid);
-		if (index < 0) return void reveal({ sessionId, uuid: target.uuid }, view, scrollRoot);
-		await jumpTo(index);
-		panelEl?.querySelector<HTMLElement>(`[data-log-part="${CSS.escape(target.uuid)}"]`)?.focus({ preventScroll: true });
+		await reveal({ sessionId, uuid: target.uuid }, view, scrollRoot);
 	}
 	/** Without Jev, hovering a citation marks its step on the activity strip. */
 	function hoverCitation(ordinal: number | null) {
 		const uuid = numberedMessages.find((part) => part.surfacingOrdinal === ordinal)?.uuid;
-		const index = segment.activity.findIndex((part) => part.uuid === uuid);
-		hovered = index >= 0 ? index : null;
+		citedStep = uuid ?? null;
 	}
 	function selectLevel(next: SurfaceLevel) {
-		if (sessionId) setSessionSurfaceLevel(sessionId, next);
-		picked = null;
-		folded = false;
+		panel.show(next);
+		selection = { kind: "latest" };
 	}
-	function followLatest() { picked = null; folded = false; }
+	function followLatest() { selection = { kind: "latest" }; }
 	const replies = $derived(messageReplies(sessionId));
 	// Reply toggles: a message already replied to in the draft takes its reference back out.
 	function messageReference(pin: Pick<SurfacePin, "label" | "glyph" | "time" | "part" | "builtinCategory">, ordinal: number, excerpt?: string): ReplyReference {
@@ -341,7 +341,7 @@
 		else insertComposerReference(messageReference(pin, pin.number, excerpt), sessionId);
 	}
 	function foldMessage() {
-		folded = true;
+		selection = { kind: "folded" };
 		void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-scrub"]')?.focus({ preventScroll: true }));
 	}
 	function revealMessage(part: SurfacePart | null) {
@@ -351,53 +351,64 @@
 		const target = event.target;
 		if (!event.defaultPrevented && event.key === "Escape" && feedback.pending) { event.preventDefault(); feedback.cancel(); return; }
 		if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || (target instanceof HTMLInputElement && target.type !== "checkbox") || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return;
-		if (event.key === "Escape" && summaryVisible) {
-			digits = "";
+		const { buffer, command } = surfaceKey(keyBuffer, event.key);
+		if (surfacingActive) keyBuffer = buffer;
+		if (command?.kind === "fold" && summaryVisible) {
 			event.stopPropagation();
 			// Native dialog cancel owns the phone sheet's dismissal.
-			if (!phone.current) { event.preventDefault(); summaryOpen = false; }
+			if (!phone) { event.preventDefault(); closeSummary(); }
 			return;
 		}
 		if (!surfacingActive) {
-			if (event.key === "s" && summaryEnabled) { event.preventDefault(); toggleSummary(); }
+			if (command?.kind === "collapse") { event.preventDefault(); toggleMinimised(); return; }
+			if (command?.kind === "summary" && summaryEnabled) { event.preventDefault(); toggleSummary(); }
 			return;
 		}
-		if (/^\d$/.test(event.key)) { event.preventDefault(); digits = (digits + event.key).slice(-8); return; }
-		const key = event.key;
-		if (key === "Enter" && !digits) return;
-		if (!["ArrowLeft", "ArrowRight", "Home", "End", "Enter", "Escape", "a", "u", "s", "r", "m", "h", "+", "-", "−"].includes(key)) { digits = ""; return; }
+		if (!buffer && !command && !["+", "-", "−"].includes(event.key)) return;
 		// Plain session shortcuts bubble to SessionBar; focused-turn keys own them first.
 		event.preventDefault();
-		if (onSurfacingShortcut?.(key)) return;
-		if (key === "h") { digits = ""; toggleMinimised(); return; }
-		if (feedback.command(key, surface.card)) return;
-		if (key === "s" && summaryEnabled) { toggleSummary(); return; }
-		if (key === "ArrowLeft" && surface.previous) pick(surface.previous);
-		else if (key === "ArrowRight" && surface.next) pick(surface.next);
-		else if (key === "Home" && surface.first) pick(surface.first);
-		else if (key === "End" && surface.last) pick(surface.last);
-		else if (key === "Enter" && digits) {
-			const target = surface.numbers.find(({ number }) => number === Number(digits));
-			if (target) { if (target.belowLevel) selectLevel("all"); revealMessage(target.part); }
-		} else if (key === "a") revealMessage(surface.openAsk);
-		else if (key === "u") revealMessage(surface.nextUnread?.part ?? null);
-		else if (key === "m" && surface.card?.read !== undefined) readMessage(surface.card, !surface.card.read);
-		else if (key === "r" && surface.card) replyTo(surface.card);
-		else if (key === "Escape") foldMessage();
-		digits = "";
+		const card = cardSlot.kind === "selected" ? cardSlot.card : null;
+		if (buffer || onSurfacingShortcut?.(event.key) || feedback.command(event.key, card) || !command) return;
+		switch (command.kind) {
+			case "step": { const pin = surface[command.to]; if (pin) pick(pin); return; }
+			case "number": {
+				const target = surface.numbers.find(({ number }) => number === command.n);
+				if (target) revealMessage(target.part);
+				return;
+			}
+			case "ask": revealMessage(surface.openAsk); return;
+			case "unread": revealMessage(surface.nextUnread?.part ?? null); return;
+			case "summary": if (summaryEnabled) toggleSummary(); return;
+			case "toggleRead": if (card?.read !== undefined) readMessage(card, !card.read); return;
+			case "reply": if (card) replyTo(card); return;
+			case "fold": foldMessage(); return;
+			case "collapse": toggleMinimised(); return;
+			default: assertNever(command);
+		}
 	}
-	function surfaceJump(x: number) {
-		const positions = stripLayout(segment, turn, final, now);
-		const i = positions.findIndex((position) => x <= position.left + position.width);
-		const index = i < 0 ? segment.activity.length - 1 : i;
-		const pin = surface.pins.find((pin) => pin.step === index);
+	function stripJump(id: string) {
+		const index = segment.activity.findIndex((part) => part.uuid === id);
+		if (index < 0) return;
+		const part = segment.activity[index];
+		if (part?.type === "tool" && isHandBack(part)) { openQa(id); return; }
+		const pin = surfacingActive ? surface.pins.find((pin) => pin.part.uuid === id) : undefined;
 		if (pin) pick(pin);
 		else void jumpTo(index);
 	}
-	function surfaceHover(x: number | null) {
-		const positions = stripLayout(segment, turn, final, now);
-		hovered = x === null ? null : positions.findIndex((position) => x <= position.left + position.width);
-		detailsOpen = hovered !== null && hovered >= 0;
+	function openQa(id: string) {
+		panel.qa();
+		void tick().then(() => {
+			const entry = panelEl?.querySelector<HTMLElement>(`[data-qa-entry="${CSS.escape(id)}"]`);
+			if (!qa || !entry) return;
+			entry.scrollIntoView({ block: "nearest" });
+			entry.focus({ preventScroll: true });
+		});
+	}
+	function stripChanged(interaction: StripInteraction) { stripInteraction = interaction; }
+	// A message with no card (never judged) goes through reveal(), which opens it in Full log.
+	function pickFromStrip(pin: SurfacePin) {
+		if (minimised || usage || qa || !canOpenSurfaceMessage(pin.part, live)) pick(pin);
+		else selectPin(pin);
 	}
 
 	const PREFETCH_REST_MS = 2_000;
@@ -436,51 +447,12 @@
 		return () => clearTimeout(resting);
 	});
 
-	/** "1m 4s in · 12s". Offsets under a second read as the start of the turn. */
-	function chapterTiming(c: SkillChapter): string {
-		let at: string | undefined;
-		if (c.offset !== undefined) {
-			at = c.offset < 1000 ? "at start" : `${fmtDuration(c.offset)} in`;
-		}
-		let span: string | undefined;
-		if (c.running) span = "running";
-		else if (c.duration !== undefined) span = fmtDuration(c.duration);
-		return [at, span].filter(Boolean).join(" · ");
-	}
-
-	// While live, the newest steps already show, and opening the log inserts
-	// the earlier ones above them. The scroll controller can't see that growth,
-	// so hold the newest step where the reader saw it. Closing needs no help:
-	// the header the reader just clicked stays put.
-	async function toggleLog() {
-		openTurn();
-		const uuid = showTicker && !expanded ? segment.activity.at(-1)?.uuid : undefined;
-		const newestTop = () => uuid === undefined ? undefined : panelEl?.querySelector(`[data-log-part="${CSS.escape(uuid)}"]`)?.getBoundingClientRect().top;
-		const before = newestTop();
-		expanded = !expanded;
-		logMounted ||= expanded;
-		if (before === undefined) return;
-		await tick();
-		const after = newestTop();
-		const scroller = panelEl?.closest("#messages");
-		if (after !== undefined && scroller) scroller.scrollTop += after - before;
-	}
-
 	async function jumpTo(i: number) {
 		const part = segment.activity[i];
 		if (!part) return;
-		onjump?.();
-		openTurn();
-		expanded = logMounted = true;
-		focusUuid = part.uuid;
-		await tick();
-		panelEl?.querySelector(`[data-part="${CSS.escape(part.uuid)}"]`)?.scrollIntoView({ block: "nearest" });
+		await reveal({ sessionId, uuid: part.uuid }, view, scrollRoot);
 	}
 
-	// Safari only paints :active when a touch listener covers the target.
-	function enableTouchActive(node: HTMLDivElement) {
-		return { destroy: on(node, "touchstart", () => {}, { passive: true }) };
-	}
 </script>
 
 {#snippet markLabel(pin: SurfacePin)}
@@ -498,14 +470,12 @@
 	{@render surfacingRegions.cardFoot?.(pin)}
 	<SurfacingMarkActions {pin} {feedback} canSave={!!sessionId} />
 {/snippet}
-{#snippet askContext(pin: SurfacePin)}
+{#snippet askContext(pin: SurfacePin, onexplain: () => void)}
 	{@render surfacingRegions.cardContext?.(pin)}
 	{#if pin.category === "ask" && !pin.pending}
-		<SurfacingAskContext setup={setupFor(pin)} view={surface} start={turn.user?.createdAt ?? 0}
-			explanation={askExplanations[pin.part.uuid]} generating={generatingAsk === pin.part.uuid}
-			error={askError?.uuid === pin.part.uuid ? askError.message : ""}
+		<SurfacingAskContext setup={setupFor(pin)} view={surface} start={turn.user?.createdAt ?? 0} ask={asks[pin.part.uuid]}
 			enabled={!!sessionId && !!pin.part.partId && summariesOn}
-			onexplain={() => { void explainAsk(pin); }} oncite={(part) => { askReturn = { ask: pin, cited: part.uuid }; revealMessage(part); }}
+			{onexplain} oncite={(part) => { askReturn = { ask: pin, cited: part.uuid }; revealMessage(part); }}
 			onReplyToAsk={(text) => { if (pin.number !== undefined) onReplyToAsk?.(messageReference(pin, pin.number), text); }} />
 	{:else if askReturn?.cited === pin.part.uuid && surface.openAsk?.uuid === askReturn.ask.part.uuid}
 		{@const ask = askReturn.ask}
@@ -527,90 +497,89 @@
 
 <!-- Phones open the summary from its own row under the strip; wider screens use the head chip. -->
 {#snippet summaryPanel(view: ReturnType<typeof surfaceTurn>, onhover: (ordinal: number | null) => void)}
-	<Button variant="ghost" size="content" align="start" tone="default" touchTarget class="min-[600px]:hidden w-full mt-[10px] mb-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
+	<Button variant="ghost" size="content" align="start" tone="default" touchTarget class="md:hidden w-full mt-[10px] mb-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>
 		<span class="mr-auto">{summaryLabel}</span>{#if recap.versions.length && summaryNew > 0}<span class="text-accent font-mono text-[12px]">{summaryNew} new</span>{/if}<Icon name="chevron-right" size={14} class="text-text-dimmer" />
 	</Button>
-	<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} phone={phone.current} {live} {view}
+	<SurfacingSummary versions={recap.versions} selected={recap.current} open={summaryVisible} {phone} {live} {view}
 		plainCitations={!surfacingActive}
-		start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings} {level}
+		start={turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0} settings={summarySettings}
 		generating={recap.generating} error={recap.error} settingsError={summarySettingsError} saving={summarySaving}
-		onclose={() => summaryOpen = false} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
+		onclose={closeSummary} onversion={(version) => recap.selected = version} ongenerate={generateSummary} onretry={retrySummary}
 		onsettings={updateSummarySettings} oncite={citeSummary} {replies}
 		onreply={(ordinal, excerpt) => { const cited = view.numbers.find(({ number }) => number === ordinal); if (cited) replyTo(cited, excerpt); }}
 		onquote={(excerpt) => { if (sessionId) insertComposerReference({ kind: "recap-excerpt", text: excerpt }, sessionId); }} {onhover} foot={surfacingActive ? summaryMarkRead : undefined} />
 {/snippet}
 
 {#snippet summaryMarkRead(view: ReturnType<typeof surfaceTurn>)}
-	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readSaving} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
+	{#if view.unreadPartIds.length}<Button variant="ghost" size="content" tone="secondary" touchTarget class="h-[24px] rounded-full bg-chip px-[10px] font-sans text-[12px] font-medium" disabled={readState.kind === "saving"} data-testid="surfacing-mark-read" onclick={() => { void writeRead(view.unreadPartIds, true); }}>✓ Mark {view.unreadPartIds.length} read</Button>{/if}
 {/snippet}
 
-<div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfacingActive || summaryEnabled ? surfaceCommand : undefined} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
+{#snippet preview(pin: SurfacePin)}
+	<SurfacingMessageCard kind="preview" card={pin} />
+{/snippet}
+
+<div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfaceCommand} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
 	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {modelExecution} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
 	<div class="md:ml-[42px]">
 		<!-- The active turn is a keyboard navigation group; inactive turns add no tab stop. -->
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-		<div role={surfacingActive ? "group" : undefined} tabindex={surfacingActive ? 0 : undefined} aria-label={surfacingActive ? "Turn messages" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} data-testid={surfacingActive ? "surfacing-card" : undefined} class="turn-head-card @container rounded-[14px] bg-turn-bg px-[12px] pt-[10px] pb-[2px] md:pb-[9px]">
+		<div role={surfacingActive ? "group" : undefined} tabindex={surfacingActive ? 0 : undefined} aria-label={surfacingActive ? "Turn messages" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} data-testid={surfacingActive ? "surfacing-card" : undefined} class="turn-head-card @container rounded-[14px] border border-border bg-turn-bg">
+			<div class="px-[12px] pt-[10px] pb-[2px] md:pb-[9px]">
 			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
-				<Tooltip bind:open={detailsOpen}>
+				<Tooltip interaction="passive" bind:open={headTooltip}>
 					{#snippet trigger({ props })}
+						{@const headPhrase = phone && surfacingActive ? plural(stats.skills, "skill") : phrase}
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
-							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" aria-expanded={expanded}
-							onclick={toggleLog}>
+							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Collapse turn"} aria-expanded={!minimised}
+							onclick={toggleMinimised}>
+							<Icon name={minimised ? "chevron-right" : "chevron-down"} size={14} class="shrink-0 text-text-dimmer" />
 							{#if live}<ConduitMark size={16} variant="running" />
-							{:else}<Icon name={expanded ? "chevron-down" : "chevron-right"} size={14} class="shrink-0 text-text-dimmer" />{/if}
-							<span class="text-[14px] font-semibold text-text">{live ? "Working" : "Worked"}</span>
+							{/if}
+							<span class="text-[14px] font-semibold text-text">{live ? runText(runLabel) : "Worked"}</span>
 							{#if live && !turn.user}
 								<span class="text-[12px] text-text-dimmer" data-testid="turn-live-elapsed">(no prompt to time from)</span>
 							{:else if duration !== undefined}
 								<span class="turn-duration font-mono text-[12px] text-text-dimmer shrink-0" data-testid={live ? "turn-live-elapsed" : undefined}>{live && duration < 1000 ? "0s" : fmtDuration(duration)}</span>
 							{/if}
-							{#if phrase}<span class="truncate text-[12px] text-text-muted {surfacingActive || minimised ? 'max-[599px]:hidden' : ''}">· {phrase}</span>{/if}
+							{#if headPhrase}<span class="truncate text-[12px] text-text-muted">· {headPhrase}</span>{/if}
 						</Button>
 					{/snippet}
 					<div class="max-w-[340px] flex flex-col gap-[6px] text-[12px]">
-						{#if hovered !== null}<span>{stepCaption(segment, turn, final, hovered, now)}</span>{:else if live}<span>{currentStepLabel(segment)}</span>{/if}
+						{#if live}<span>{currentStepLabel(segment)}</span>{/if}
 						{#if phrase}<span>{phrase}</span>{/if}
 						{#if stats.compactions > 0}<span>Context compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
-						<TurnEconomics economics={bill} />
-						{#if final}<RunningPill count={running.size} />{/if}
-						<span>Click to {expanded ? "hide" : "show"} the step log</span>
 					</div>
 				</Tooltip>
 				{#if surfacingActive || summaryEnabled}
 					<div class="surface-head-chips" data-surfacing-region="head-chips">
-						{#if surfacingActive && surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium bg-status-ask/18 text-status-ask" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}>? #{surface.openAsk.surfacingOrdinal}</Button>{/if}
+						{#if surfacingActive && surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}><Badge variant="ask" size="session" shape="pill">? #{surface.openAsk.surfacingOrdinal}</Badge></Button>{/if}
 						{#if surfacingActive && surface.hasReadState}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0 h-[24px] rounded-full px-[9px] font-mono text-[12px] font-medium {surface.unreadCount ? 'bg-accent/18 text-accent' : 'bg-chip text-text-secondary'}" data-testid="surfacing-head-unread" onclick={() => revealMessage(surface.nextUnread?.part ?? null)}>{surface.unreadCount ? `${surface.unreadCount} unread` : "All read ✓"}</Button>{/if}
 						{#if surfacingActive}{@render surfacingRegions.headChips?.(surface)}{/if}
-						{#if summaryEnabled}<Button variant="ghost" size="content" tone="default" hoverFill="none" touchTarget class="{minimised ? '' : 'max-[599px]:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[13px] leading-[normal] font-medium bg-chip" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised}<span class="max-[599px]:sr-only">{summaryLabel}</span><span class="min-[600px]:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised ? 'max-[599px]:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
+						{#if summaryEnabled}<Button variant="ghost" size="content" tone="default" hoverFill="none" touchTarget class="{minimised && surfacingActive ? '' : 'max-md:hidden'} shrink-0 h-[24px] rounded-full px-[9px] text-[13px] leading-[normal] font-medium bg-chip" data-testid="surfacing-summary-generate" aria-expanded={summaryVisible} onclick={toggleSummary}>{#if minimised && surfacingActive}<span class="max-md:sr-only">{summaryLabel}</span><span class="md:hidden" aria-hidden="true">✦</span>{:else}{summaryLabel}{/if}{#if recap.versions.length && summaryNew > 0}<span class="text-accent {minimised && surfacingActive ? 'max-md:hidden' : ''}">· {summaryNew} new</span>{/if}</Button>{/if}
 					</div>
 				{/if}
 					{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summary</Button></span>{/if}
-				{#if surfacingActive}<Button variant="ghost" size="content" tone="inherit" touchTarget class="ml-auto shrink-0 -my-[2px] h-[24px] w-[24px] text-text-dimmer" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Minimise turn"} aria-expanded={!minimised} onclick={toggleMinimised}><Icon name={minimised ? "chevron-down" : "chevron-up"} size={14} /></Button>{/if}
 			</div>
-			{#if minimised}
-				<MinimisedTurn view={surface} onopen={openMinimisedMessage}>
-					{#snippet strip()}<ActivityStrip {turn} {segment} {final} {now} {running} interactive={false} />{/snippet}
-				</MinimisedTurn>
+			{#if (usage || qa) && surfacingActive}
+				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} {preview} markers={{ kind: "dots", mode: "tab", dots: surface.messages }} openAsk={surface.openAsk} onpick={pickFromStrip} onjump={stripJump} oninteraction={stripChanged} />
+			{:else if minimised && surfacingActive}
+				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", mode: "collapsed", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if surfacingActive}
-				<SurfacingCard view={surface} {live} {level} overridden={override !== undefined} regions={{ ...surfacingRegions, cardHead: markHead, cardContext: askContext, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
-					{readSaving} {readError} canAutoRead={autoReadAttempt !== readTarget} onread={readMessage} onautoread={(pin) => readMessage(pin, true)}
+				<SurfacingCard view={surface} card={surface.card} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} context={askContext} onexplain={(pin) => { void explainAsk(pin); }} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
+					{readState} bind:cardEl={readCardEl} onread={readMessage}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
-					onreply={replyTo} replied={surface.card?.number !== undefined && replies.has(surface.card.number)}
-					startTime={surfaceTime((segment.activity[0]?.createdAt ?? turn.user?.createdAt ?? 0) - (turn.user?.createdAt ?? segment.activity[0]?.createdAt ?? 0))}
-					endTime={surfaceTime(duration ?? 0)} onpick={pick} onlevel={selectLevel}
-					ondefault={async () => { if (sessionId) await makeSurfaceDefault(sessionId, level); }}
-					onreset={() => { if (sessionId) setSessionSurfaceLevel(sessionId, null); picked = null; folded = false; }}
-					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand} onjump={surfaceJump} onhover={surfaceHover}>
-					{#snippet strip()}
-						<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} emphasis={skillSteps} interactive={false} />
+					onreply={replyTo} replied={cardSlot.kind === "selected" && cardSlot.card.number !== undefined && replies.has(cardSlot.card.number)}
+					onpick={pick} onlevel={selectLevel}
+					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand}>
+					{#snippet strip(cited: string | null, card: Snippet)}
+						<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} {preview} markers={{ kind: "pins", pins: surface.pins, selected: surface.card?.part.uuid ?? null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={pickFromStrip} onjump={stripJump} oncommand={surfaceCommand} />
 					{/snippet}
 				</SurfacingCard>
 			{:else}
 			<!-- The phone strip is a 44px tap target with its 4px bar centred; a summary row
 			     under it overlaps that empty area so it sits midway between bar and card edge. -->
-			<div class="md:mt-[7px] {summaryEnabled ? 'max-[599px]:-mb-[18px]' : ''}">
-				<ActivityStrip {turn} {segment} {final} {now} {running} active={hovered} emphasis={skillSteps}
-					onhover={(index) => { hovered = index; detailsOpen = index !== null; }} onjump={jumpTo} />
+			<div class="md:mt-[7px] {summaryEnabled ? 'max-md:-mb-[18px]' : ''}">
+				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} active={citedStep} oninteraction={stripChanged} onjump={stripJump} />
 			</div>
 			{#if summaryEnabled}{@render summaryPanel(surface, hoverCitation)}{/if}
 			{/if}
@@ -620,65 +589,29 @@
 				</Button>
 			{/if}
 		</div>
-		{#if !minimised && (logMounted || showTicker)}
-			<div class="step-log mt-[6px]" use:enableTouchActive hidden={!expanded && !showTicker} data-testid={live ? "turn-live-activity" : undefined}>
-				{#if !expanded && earlierCount > 0}
-					<Button variant="ghost" size="content" tone="muted" hoverFill="none" align="start" touchTarget
-						class="py-[8px] text-[12px]" onclick={() => (expanded = logMounted = true)}>+ {earlierCount} earlier messages</Button>
-				{/if}
-				{#each logMounted ? segment.activity : ticker as part, index (part.uuid)}
-					{@const i = logMounted ? index : earlierCount + index}
-					{@const latestLiveStep = live && i === segment.activity.length - 1}
-					{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
-					<div data-log-part={part.uuid} hidden={!expanded && i < earlierCount} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
-						<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} highlight={part.uuid === focusUuid} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category?.builtinCategory ? category : undefined} />
-						{#if surfacingActive && expanded && part.type === "assistant"}
-							{@const pin = surface.messages.find((message) => message.part.uuid === part.uuid)}
-							{#if pin}
-								{@const place = `surfacing-step-mark-${pin.number ?? pin.part.uuid}`}
-								<div data-testid={place} class="mb-[8px] ml-[20px]">
-									<div class="flex flex-wrap items-center gap-[4px]">
-										<Button variant="ghost" size="content" tone="muted" class="h-[26px] max-md:h-[32px] px-[6px] rounded-full text-[12px]" ariaLabel={`Open message #${pin.number ?? "?"}`} data-testid="surfacing-step-open-{pin.number}" onclick={() => { if (level === "final") selectLevel("all"); pick(pin); }}>#{pin.number ?? "?"} ↗</Button>
-										{@render markLabel(pin)}
-										<SurfacingMarkActions {pin} {feedback} {place} canSave={!!sessionId} />
-									</div>
-									<SurfacingMarkWhy {pin} {feedback} {place} categorySet={surfacingConfig.categorySet} />
-								</div>
-							{/if}
-						{/if}
-					</div>
-				{/each}
-				<div class="flex flex-wrap items-center gap-[10px] py-[8px] text-[12px] text-text-muted">
-					{#if stats.skills > 0}
-						<Button variant="ghost" size="content" tone="muted-soft" hoverFill="none" touchTarget
-							class="skills-toggle gap-[5px]" aria-expanded={skillsOpen} onclick={() => (skillsOpen = !skillsOpen)}>
-							<Icon name="sparkles" size={12} />{stats.skills} {stats.skills === 1 ? "skill" : "skills"}
-						</Button>
-					{/if}
-					{#if stats.compactions > 0}<span class="compaction-marker">compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
-					{#if final}<RunningPill count={running.size} /><TurnEconomics economics={bill} />{/if}
+		{#if usage}<TurnUsage {turn} {bill} />{/if}
+		{#if qa || qaMounted}<div hidden={!qa} onclickcapture={panel.hold}><TurnQa handBacks={turnLog(turn).handBacks} {sessionId} /></div>{/if}
+		<TurnLog class="step-log border-t border-border bg-bg px-[12px] py-[6px]" mode={minimised ? "collapsed" : usage ? "hidden" : fullLog ? "shown" : "hidden"} phase={panel.phase} pending={panel.pending} stepCount={counts.log} entries={logEntries}>
+			{#snippet row(entry: TurnLogEntry)}
+				{@const i = entry.index}
+				{#if entry.kind === "resumed"}
+					{@render renderResume?.(entry.resume)}
+				{:else}
+				{@const part = entry.part}
+				{@const latestLiveStep = live && i === segment.activity.length - 1}
+				{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
+				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, beforeScroll: onjump }} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category} onmessage={category && canOpenSurfaceMessage(category.part, live) ? () => pick(category) : undefined} onhandback={() => openQa(part.uuid)} />
 				</div>
-				{#if skillsOpen}
-					<ol class="skill-chapters pb-[8px]" aria-label="Skills in this turn">
-						{#each chapters as chapter (chapter.index)}
-							{@const part = segment.activity[chapter.index]}
-							<li><Button variant="ghost" size="content" align="start" tone="inherit" hoverFill="surface" touchTarget
-								class="gap-[8px] w-full py-[8px] text-[12px] text-left" onclick={() => jumpTo(chapter.index)}>
-								<span class={part ? partStyle(part).text : ""}><Icon name="sparkles" size={14} /></span>
-								<span class="flex-1 truncate font-mono text-text-secondary">{chapter.name || "Unnamed skill"}</span>
-								<span class="shrink-0 font-mono text-text-muted">{chapterTiming(chapter)}</span>
-							</Button></li>
-						{/each}
-					</ol>
 				{/if}
-			</div>
-		{/if}
+			{/snippet}
+		</TurnLog>
+		{#if !minimised}<TurnShowBar {panel} {counts} {bill} running={final ? running.size : 0} onlevelchange={followLatest} />{/if}
+		</div>
 	</div>
 </div>
 
 <style>
-	.step-log :global(::selection) { background:var(--color-accent-bg); color:inherit; }
 	.surface-head-chips { display:contents; }
-	.turn-activity[data-minimised="true"] .turn-duration { min-width:0; flex-shrink:1; overflow:hidden; text-overflow:ellipsis; }
 	.mark-toast { display:flex; align-items:center; gap:10px; width:fit-content; max-width:100%; min-height:34px; margin:10px auto 2px; padding:4px 5px 4px 14px; border-radius:999px; background:var(--color-inverse-bg); color:var(--color-inverse-text); font-size:13px; box-shadow:0 8px 24px rgb(0 0 0 / .22); }
 </style>

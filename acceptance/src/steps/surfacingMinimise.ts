@@ -34,6 +34,54 @@ function publish(page: Page, messages: History[]) {
 
 export const surfacingMinimiseHandlers: StepHandler[] = [
 	{
+		name: "preview the hovered step instead of a nearby message",
+		match:
+			/^the collapsed step preview follows the pointer while (hovering|dragging)$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const scope = panel(page, "3");
+			await scope.scrollIntoViewIfNeeded();
+			await page.clock.resume();
+			const bounds = async (id: string) => {
+				const box = await scope
+					.locator(`[data-step-id="surfacing-agent-3/${id}-3"]`)
+					.boundingBox();
+				if (!box) throw new Error(`Missing ${id}`);
+				return box;
+			};
+			const first = await bounds("surfacing-part-1");
+			const second = await bounds("surfacing-part-2");
+			const work = await bounds("surfacing-tool-1");
+			const midpoint =
+				(first.x + first.width / 2 + second.x + second.width / 2) / 2;
+			expect(midpoint - 2).toBeGreaterThan(work.x);
+			expect(midpoint + 2).toBeLessThan(work.x + work.width);
+			if (match[1] === "dragging") {
+				await page.mouse.move(midpoint - 8, work.y + work.height / 2);
+				await page.mouse.down();
+			}
+			for (const offset of [-2, 2]) {
+				await page.mouse.move(midpoint + offset, work.y + work.height / 2);
+				await expect(scope.getByTestId("turn-step-popover")).toContainText(
+					"route-surfacing-tool-1.ts",
+				);
+				await expect(scope.getByTestId("surfacing-hover-preview")).toHaveCount(
+					0,
+				);
+			}
+			if (match[1] === "dragging") {
+				await scope
+					.getByTestId("surfacing-minimised-strip")
+					.dispatchEvent("pointercancel", { pointerId: 1 });
+				await page.mouse.up();
+				await page.mouse.move(0, 0);
+				await page.mouse.move(midpoint + 2, work.y + work.height / 2);
+			}
+			await expect(scope).toHaveAttribute("data-minimised", "true");
+			await expect(page.getByRole("tooltip")).toHaveCount(0);
+		},
+	},
+	{
 		name: "seed Turns open and theme",
 		match:
 			/^minimising uses the (dark|light) theme with Turns open (Expanded|Auto|Minimised)$/,
@@ -110,6 +158,10 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 			});
 			await openSessionRoute(page, SESSION);
 			await expect(panel(page, "3")).toBeVisible();
+			// The paused clock holds frames, and the message rail appears on one
+			// and pads the transcript. Land it now so no later step aims at a
+			// layout that shifts under the pointer.
+			await page.clock.runFor(32);
 		},
 	},
 	{
@@ -119,7 +171,7 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 			// The visual capture waits a frame, which a paused clock never paints.
 			await world.page.clock.resume();
 			await panel(world.page, match[1] ?? "")
-				.getByRole("button", { name: "Minimise turn", exact: true })
+				.getByRole("button", { name: "Collapse turn", exact: true })
 				.click();
 			await world.page.mouse.move(0, 0);
 		},
@@ -173,7 +225,7 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 			const scope = panel(world.page, match[1] ?? "");
 			await expect(scope).toHaveAttribute("data-minimised", "false");
 			await expect(
-				scope.getByRole("button", { name: "Minimise turn", exact: true }),
+				scope.getByRole("button", { name: "Collapse turn", exact: true }),
 			).toHaveAttribute("aria-expanded", "true");
 			if (match[2])
 				await expect(scope.getByTestId("surfacing-msg-card")).toHaveAttribute(
@@ -234,19 +286,21 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert one-line peek without opening the turn",
+		name: "assert full card preview without opening the turn",
 		match: /^turn (\d+) peeks at message 1 with Click to open$/,
 		run: async ({ world, match }) => {
 			const scope = panel(world.page, match[1] ?? "");
 			await expect(scope).toHaveAttribute("data-minimised", "true");
 			const peek = scope.getByTestId("surfacing-minimised-peek");
 			await expect(peek).toBeInViewport();
-			await expect(peek).toHaveCSS("white-space", "nowrap");
 			await expect(peek).toHaveAttribute("data-ordinal", "1");
+			await expect(peek.getByTestId("surfacing-hover-preview")).toBeVisible();
 			await expect(peek).toContainText(
 				"The routing table has three consumers.",
 			);
-			await expect(peek).toContainText("Click to open");
+			await expect(peek).toContainText(
+				"Hover preview · click to open the turn on this message",
+			);
 		},
 	},
 	{

@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, within } from "@testing-library/svelte";
 import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MessageList from "../../../src/lib/frontend/components/chat/MessageList.svelte";
@@ -119,7 +119,7 @@ describe("MessageList session-view publication", () => {
 	it.each([
 		"assistant",
 		"tool",
-	])("renders resumed %s activity as working after a result", (kind) => {
+	])("renders resumed %s activity as working after a result", async (kind) => {
 		const slot = getOrCreateSessionSlot("session-view-first");
 		slot.activity.phase = "processing";
 		slot.messages.messages = [
@@ -138,6 +138,9 @@ describe("MessageList session-view publication", () => {
 		expect(container.querySelectorAll(".turn-activity")).toHaveLength(1);
 		expect(container.textContent).toContain("Worked");
 		expect(container.textContent).not.toContain("Working");
+		const toggle = within(container).getByTestId("surfacing-minimise-toggle");
+		if (toggle.getAttribute("aria-expanded") === "false")
+			await fireEvent.click(toggle);
 
 		slot.messages.messages = [
 			...slot.messages.messages,
@@ -159,7 +162,7 @@ describe("MessageList session-view publication", () => {
 					},
 		];
 		flushSync();
-		expect(container.querySelectorAll(".turn-activity")).toHaveLength(2);
+		expect(container.querySelectorAll(".turn-activity")).toHaveLength(1);
 		expect(
 			container.querySelectorAll(
 				'.turn-activity [data-testid="turn-live-head"]',
@@ -167,7 +170,7 @@ describe("MessageList session-view publication", () => {
 		).toHaveLength(1);
 		expect(container.textContent).toContain("Working");
 		expect(container.textContent).toContain(
-			kind === "assistant" ? "One more check" : "Reading",
+			kind === "assistant" ? "One more check" : "Running",
 		);
 
 		slot.messages.messages = [
@@ -180,7 +183,7 @@ describe("MessageList session-view publication", () => {
 		).toBeNull();
 		expect(container.textContent).not.toContain("Working");
 		if (kind === "assistant")
-			expect(container.querySelector(".result-bar")).not.toBeNull();
+			expect(container.querySelector(".result-bar")).toBeNull();
 		slot.messages.messages = [];
 		slot.activity.phase = "idle";
 	});

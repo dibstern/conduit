@@ -43,7 +43,7 @@ function summaryTrigger(page: Page): Locator {
 }
 
 function isPhone(page: Page): boolean {
-	return (page.viewportSize()?.width ?? 1440) < 600;
+	return (page.viewportSize()?.width ?? 1440) < 768;
 }
 
 async function openSummary(page: Page): Promise<void> {
@@ -78,17 +78,6 @@ function version(
 }
 
 export const surfacingRecapHandlers: StepHandler[] = [
-	{
-		name: "set unfolded Duo reader viewport",
-		match: /^the viewport is a duo$/,
-		run: async ({ world }) => {
-			await world.driver.setViewport(world.page, {
-				name: "duo",
-				width: 626,
-				height: 852,
-			});
-		},
-	},
 	{
 		name: "open a recap fixture through cached and generated RPCs",
 		match:
@@ -594,32 +583,32 @@ export const surfacingRecapHandlers: StepHandler[] = [
 	{
 		name: "assert citation is usable in its reader without scrolling the transcript",
 		match:
-			/^recap citation #(\d+) is readable below Balanced without moving the transcript$/,
+			/^recap citation #(\d+) is readable below Most without moving the transcript$/,
 		run: async ({ world, match }) => {
 			const card = world.page.getByTestId("surfacing-recap-reader");
 			await expect(card).toBeVisible();
 			await expect(card).toHaveAttribute("data-ordinal", match[1] ?? "");
-			await expect(card).toContainText("At All, below Balanced");
+			await expect(card).toContainText("At All messages, below Most");
 			await expect(card).toContainText("The file includes a second route.");
 			await expect(card).toBeInViewport();
-			if (isPhone(world.page))
-				expect(
-					await card.evaluate((element) => !!element.closest("dialog[open]")),
-				).toBe(true);
-			else if ((world.page.viewportSize()?.width ?? 1440) < 1024) {
-				const summaryBox = await summary(world.page).boundingBox();
-				const readerBox = await card.boundingBox();
-				if (!summaryBox || !readerBox)
-					throw new Error("Missing Duo reader geometry");
-				expect(readerBox.x).toBeGreaterThanOrEqual(
-					summaryBox.x + summaryBox.width,
-				);
-			}
+			expect(
+				await card.evaluate((element) => !!element.closest("dialog[open]")),
+			).toBe(true);
 			expect(
 				await world.page
 					.locator("#messages")
 					.evaluate((element) => element.scrollTop),
 			).toBe(recapFixtures.get(world.page)?.citationScroll);
+		},
+	},
+	{
+		name: "assert a citation opens only its turn card beside the summary",
+		match: /^the summary shows no second copy of the cited message$/,
+		run: async ({ world }) => {
+			await expect(summary(world.page)).toBeVisible();
+			await expect(
+				world.page.getByTestId("surfacing-recap-reader"),
+			).toHaveCount(0);
 		},
 	},
 	{

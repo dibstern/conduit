@@ -96,3 +96,17 @@ export const LongContent: Story = {
 		expect(tooltip.clientWidth).toBeGreaterThan(200);
 	},
 };
+
+/** A caption may overlap nearby controls without taking their pointer events. */
+export const Passive: Story = {
+	args: { interaction: "passive" },
+	play: async ({ canvasElement }) => {
+		const tooltip = within(canvasElement.ownerDocument.body).getByRole(
+			"tooltip",
+		);
+		await expect(tooltip).toBeVisible();
+		const wrapper = tooltip.parentElement;
+		if (!wrapper) throw new Error("Missing tooltip positioning wrapper");
+		await expect(wrapper).toHaveStyle({ pointerEvents: "none" });
+	},
+};

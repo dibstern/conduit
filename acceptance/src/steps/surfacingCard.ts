@@ -15,6 +15,11 @@ import {
 	requireRpcControl,
 	setSessionRowStatus,
 } from "./shared.js";
+import {
+	chooseShowStop,
+	expectShowCounts,
+	expectShowStop,
+} from "./turnActivityShow.js";
 
 type History = typeof HistoryMessageSchema.Type;
 type Part = typeof HistoryMessagePartSchema.Type;
@@ -33,10 +38,10 @@ const fixtures = new WeakMap<Page, History[]>();
 const readFixtures = new WeakMap<Page, ReadonlySet<number>>();
 const failingReadWrites = new WeakSet<Page>();
 const levels = {
-	Final: "final",
+	Answer: "final",
 	Key: "key",
-	Balanced: "balanced",
-	All: "all",
+	Most: "balanced",
+	"All messages": "all",
 } as const;
 const verdicts = [
 	{ finding: 1 },
@@ -265,9 +270,70 @@ function trackReads(page: Page): void {
 
 export const surfacingCardHandlers: StepHandler[] = [
 	{
+		name: "keyboard picking clears the strip caption",
+		match: /^keyboard picking a message clears the step popover$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await pick(page, "4");
+			const work = await panel(page)
+				.locator('[data-step-id="surfacing-agent/surfacing-tool-4"]')
+				.boundingBox();
+			if (!work) throw new Error("Missing work segment");
+			await panel(page).getByTestId("surfacing-scrub").focus();
+			await page.mouse.move(work.x + work.width / 2, work.y + work.height / 2);
+			await expect(panel(page).getByTestId("turn-step-popover")).toContainText(
+				"route-surfacing-tool-4.ts",
+			);
+			await page.keyboard.press("Home");
+			await expect(card(page)).toHaveAttribute("data-ordinal", "1");
+			await expect(page.getByRole("tooltip")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert plain strip is centred in its tap target",
+		match: /^the plain activity strip stays centred in its tap target$/,
+		run: async ({ world }) => {
+			const slider = world.page.getByRole("slider", {
+				name: /Activity timeline/,
+			});
+			const target = await slider.boundingBox();
+			const bar = await slider.locator("[data-step-id]").first().boundingBox();
+			if (!target || !bar) throw new Error("Missing plain strip geometry");
+			expect(
+				Math.abs(bar.y + bar.height / 2 - target.y - target.height / 2),
+			).toBeLessThan(0.5);
+		},
+	},
+	{
+		name: "cancel a strip scrub without committing its preview",
+		match:
+			/^cancelling a strip scrub preserves the selected message and clears the step popover$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await pick(page, "2");
+			const strip = panel(page).locator(".surface-strip");
+			const box = await strip.boundingBox();
+			if (!box) throw new Error("Missing activity strip");
+			const x = async (ordinal: string) =>
+				box.x +
+				(box.width * Number(await pin(page, ordinal).getAttribute("data-x"))) /
+					100;
+			await page.mouse.move(await x("2"), box.y + box.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(await x("8"), box.y + box.height / 2, { steps: 8 });
+			await expect(card(page)).toHaveAttribute("data-ordinal", "8");
+			await panel(page)
+				.getByTestId("surfacing-scrub")
+				.dispatchEvent("pointercancel", { pointerId: 1 });
+			await page.mouse.up();
+			await expect(card(page)).toHaveAttribute("data-ordinal", "2");
+			await expect(page.getByRole("tooltip")).toHaveCount(0);
+		},
+	},
+	{
 		name: "opt into surfacing before app startup",
 		match:
-			/^message surfacing is (active|inactive|missing-key|invalid-key) at (Final|Key|Balanced|All)$/,
+			/^message surfacing is (active|inactive|missing-key|invalid-key) at (Answer|Key|Most|All messages)$/,
 		run: ({ world, match }) => {
 			const level = levels[match[2] as keyof typeof levels];
 			mockMessageSurfacing.set(world.page, {
@@ -348,6 +414,12 @@ export const surfacingCardHandlers: StepHandler[] = [
 						top: box.top,
 						name: button.getAttribute("aria-label"),
 						members: button.getAttribute("data-group-members"),
+						count: (() => {
+							const small = chip.querySelector("small");
+							return small && small.getBoundingClientRect().width > 0
+								? small.textContent
+								: null;
+						})(),
 					};
 				}),
 			);
@@ -365,15 +437,17 @@ export const surfacingCardHandlers: StepHandler[] = [
 						expect(
 							chip.left - (ordered[index - 1]?.right ?? 0),
 						).toBeGreaterThanOrEqual(9);
-					if ((chip.members?.split(",").length ?? 0) > 1)
+					const size = chip.members?.split(",").length ?? 0;
+					if (size > 1) {
 						expect(chip.name).toMatch(/^Group of \d+, led by #\d+ \w+/);
+						// A phone pin drops its number, never its group count.
+						expect(chip.count).toBe(`+${size - 1}`);
+					}
 				}
 			}
 			const first = chips.find(({ row }) => row === "0"),
 				upper = chips.find(({ row }) => row === "1");
-			expect((first?.top ?? 0) - (upper?.top ?? 0)).toBe(
-				(world.page.viewportSize()?.width ?? 1024) < 768 ? 38 : 24,
-			);
+			expect((first?.top ?? 0) - (upper?.top ?? 0)).toBe(24);
 			const members = chips.flatMap(
 				({ members }) => members?.split(",").map(Number) ?? [],
 			);
@@ -520,6 +594,29 @@ export const surfacingCardHandlers: StepHandler[] = [
 			await page.clock.runFor(32);
 			await pick(page, match[1] === "1" ? "2" : "1");
 			await pick(page, match[1] ?? "");
+		},
+	},
+	{
+		name: "collapse an in-progress scrub and reopen its card",
+		match: /^I collapse and reopen the turn while holding a scrub$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const scrub = page.getByTestId("surfacing-scrub");
+			const strip = await scrub.locator(".surface-strip").boundingBox();
+			expect(strip).not.toBeNull();
+			if (!strip) throw new Error("No surfacing strip");
+			await scrub.focus();
+			await page.mouse.move(
+				strip.x + strip.width / 2,
+				strip.y + strip.height / 2,
+			);
+			await page.mouse.down();
+			await page.keyboard.press("h");
+			await expect(scrub).toHaveCount(0);
+			await page.mouse.up();
+			await page.getByTestId("surfacing-minimise-toggle").click();
+			await expect(card(page)).toBeInViewport();
+			await page.clock.runFor(32);
 		},
 	},
 	{
@@ -701,6 +798,15 @@ export const surfacingCardHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert bulk read failures remain visible without a card",
+		match: /^the turn reports a read save failure$/,
+		run: async ({ world }) => {
+			await expect(panel(world.page).getByRole("alert")).toContainText(
+				"Couldn't save read state",
+			);
+		},
+	},
+	{
 		name: "assert failed read writes do not report success",
 		match: /^the surfaced message reports a read save failure$/,
 		run: async ({ world }) => {
@@ -746,7 +852,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "assert the Jev card and pin scale",
 		match:
-			/^the full-width message card sits above pins aligned with their own steps$/,
+			/^the full-width message card hangs below pins aligned with their own steps$/,
 		run: async ({ world }) => {
 			const page = world.page;
 			await expect(card(page)).toBeVisible();
@@ -755,9 +861,11 @@ export const surfacingCardHandlers: StepHandler[] = [
 			const laneBox = await lane.boundingBox();
 			if (!messageBox || !laneBox)
 				throw new Error("Missing card or pin lane bounds");
-			expect(messageBox.y + messageBox.height).toBeLessThanOrEqual(
-				laneBox.y + 1,
-			);
+			const stripBox = await panel(page)
+				.locator(".surface-strip")
+				.boundingBox();
+			if (!stripBox) throw new Error("Missing strip bounds");
+			expect(messageBox.y).toBeGreaterThan(stripBox.y + stripBox.height);
 			expect(Math.abs(messageBox.width - laneBox.width)).toBeLessThanOrEqual(2);
 			const scrub = panel(page).getByTestId("surfacing-scrub");
 			await expect(scrub).toHaveAttribute("role", "slider");
@@ -787,6 +895,101 @@ export const surfacingCardHandlers: StepHandler[] = [
 					`stem of #${ordinal}`,
 				).toBeLessThanOrEqual(1.5);
 			}
+		},
+	},
+	{
+		name: "assert hanging card anchor and clamp",
+		match:
+			/^the hanging caret and thumb align with the selected pin inside the panel$/,
+		run: async ({ world }) => {
+			const scope = panel(world.page);
+			const caret = scope.locator(".card-caret");
+			const thumb = scope.locator(".surface-thumb");
+			await expect(caret).toBeVisible();
+			await expect(thumb).toBeVisible();
+			const geometry = await scope.evaluate((element) => {
+				const card = element
+					.querySelector('[data-testid="surfacing-msg-card"]')
+					?.getBoundingClientRect();
+				const track = element
+					.querySelector(".surface-strip")
+					?.getBoundingClientRect();
+				const caret = element
+					.querySelector(".card-caret")
+					?.getBoundingClientRect();
+				const thumb = element
+					.querySelector(".surface-thumb")
+					?.getBoundingClientRect();
+				if (!card || !track || !caret || !thumb)
+					throw new Error("Missing hanging card geometry");
+				const pin = element.querySelector('[aria-pressed="true"][data-x]');
+				if (!pin) throw new Error("Missing selected pin");
+				return {
+					card: { left: card.left, right: card.right, top: card.top },
+					caretX: caret.x + caret.width / 2,
+					caretY: caret.y,
+					thumbX: thumb.x + thumb.width / 2,
+					expected: Math.max(
+						track.left + 14,
+						Math.min(
+							track.right - 14,
+							track.left +
+								(track.width * Number(pin.getAttribute("data-x"))) / 100,
+						),
+					),
+				};
+			});
+			expect(Math.abs(geometry.caretX - geometry.expected)).toBeLessThanOrEqual(
+				1,
+			);
+			expect(Math.abs(geometry.caretX - geometry.thumbX)).toBeLessThanOrEqual(
+				1,
+			);
+			expect(geometry.caretX).toBeGreaterThanOrEqual(geometry.card.left + 13);
+			expect(geometry.caretX).toBeLessThanOrEqual(geometry.card.right - 13);
+			expect(geometry.caretY).toBeLessThan(geometry.card.top);
+		},
+	},
+	{
+		name: "assert hanging card border and Ask tint",
+		match: /^the hanging card and caret share the border outline and Ask tint$/,
+		run: async ({ world }) => {
+			const scope = panel(world.page);
+			// Design E tints an Ask card's outline, not its fill (_frame-e.html .jc.ask).
+			const outline = await scope.evaluate((element) => {
+				const card = element.querySelector(
+					'[data-testid="surfacing-msg-card"]',
+				);
+				const caret = element.querySelector(".card-caret");
+				if (!card || !caret) throw new Error("Missing card or caret");
+				const a = getComputedStyle(card),
+					b = getComputedStyle(caret);
+				const probe = document.createElement("span");
+				probe.style.color =
+					"color-mix(in srgb,var(--color-status-ask) 65%,var(--color-bg))";
+				probe.style.backgroundColor = "var(--color-bg)";
+				element.append(probe);
+				const { color: askBorder, backgroundColor: plainBg } =
+					getComputedStyle(probe);
+				probe.remove();
+				return {
+					cardWidth: a.borderTopWidth,
+					caretWidth: b.borderTopWidth,
+					cardBorder: a.borderTopColor,
+					caretBorder: b.borderTopColor,
+					askBorder,
+					cardBg: a.backgroundColor,
+					caretBg: b.backgroundColor,
+					plainBg,
+				};
+			});
+			expect(outline.cardWidth).toBe("1px");
+			expect(outline.caretWidth).toBe("1px");
+			expect(outline.cardBorder).toBe(outline.askBorder);
+			expect(outline.caretBorder).toBe(outline.askBorder);
+			expect(outline.cardBg).toBe(outline.plainBg);
+			expect(outline.caretBg).toBe(outline.plainBg);
+			await expect(card(world.page)).toHaveClass(/ask/);
 		},
 	},
 	{
@@ -855,38 +1058,45 @@ export const surfacingCardHandlers: StepHandler[] = [
 	},
 	{
 		name: "change surfacing level",
-		match: /^I set the surfacing level to (Final|Key|Balanced|All)$/,
+		match: /^I set the surfacing level to (Answer|Key|Most|All messages)$/,
 		run: async ({ world, match }) => {
-			await panel(world.page)
-				.getByTestId("surfacing-level")
-				.getByRole("radio", { name: new RegExp(`^${match[1]}(?:\\b|$)`) })
-				.click();
+			await chooseShowStop(world.page, match[1] ?? "");
+			if (
+				readFixtures.has(world.page) &&
+				(await panel(world.page)
+					.getByTestId("surfacing-level")
+					.getAttribute("aria-haspopup")) === "menu"
+			) {
+				// Read fixtures pause rAF too; let the menu finish its closing frame.
+				await world.page.clock.runFor(32);
+				await expect(
+					world.page.getByRole("menu", {
+						name: "Show, least to most",
+						exact: true,
+					}),
+				).toHaveCount(0);
+			}
 		},
 	},
 	{
 		name: "assert level pin counts and stable ordinal gaps",
 		match:
-			/^the surfacing pins are (\d+(?:,\d+)*) and level counts are Key (\d+), Balanced (\d+), All (\d+)$/,
+			/^the surfacing pins are (\d+(?:,\d+)*) and level counts are Key (\d+), Most (\d+), All messages (\d+)$/,
 		run: async ({ world, match }) => {
 			await expect
 				.poll(() => pinNumbers(panel(world.page)))
 				.toEqual((match[1] ?? "").split(","));
-			for (const [label, count] of [
-				["Key", match[2]],
-				["Balanced", match[3]],
-				["All", match[4]],
-			])
-				await expect(
-					panel(world.page)
-						.getByTestId("surfacing-level")
-						.getByRole("radio", { name: new RegExp(`^${label}\\b`) }),
-				).toContainText(count ?? "");
+			await expectShowCounts(world.page, [
+				["Key", match[2] ?? ""],
+				["Most", match[3] ?? ""],
+				["All messages", match[4] ?? ""],
+			]);
 		},
 	},
 	{
 		name: "assert override marker and browser persistence",
 		match:
-			/^the session surfacing override is (Final|Key|Balanced|All|absent)$/,
+			/^the session surfacing override is (Answer|Key|Most|All messages|absent)$/,
 		run: async ({ world, match }) => {
 			const expected =
 				match[1] === "absent"
@@ -948,16 +1158,29 @@ export const surfacingCardHandlers: StepHandler[] = [
 		name: "use surfacing level options",
 		match: /^I choose surfacing (Make default|Back to default)$/,
 		run: async ({ world, match }) => {
-			await control(world.page, "Level options").click();
+			const options = world.page.getByTestId("turn-show-bar");
+			const trigger = options.getByRole("button", {
+				name: /^(Show messages|Default level)$/,
+			});
+			await trigger.click();
 			await world.page
-				.getByRole("menuitem", { name: match[1] ?? "", exact: true })
+				.getByRole("menuitem", {
+					name: match[1] ?? "",
+					exact: true,
+				})
 				.click();
+			if (
+				await world.page
+					.getByRole("menu", { name: /^(Show, least to most|Default level)$/ })
+					.count()
+			)
+				await world.page.keyboard.press("Escape");
 		},
 	},
 	{
 		name: "assert surfacing default patch",
 		match:
-			/^the daemon default becomes (Final|Key|Balanced|All) without changing other settings$/,
+			/^the daemon default becomes (Answer|Key|Most|All messages) without changing other settings$/,
 		run: async ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
 			await expect
@@ -976,13 +1199,9 @@ export const surfacingCardHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert effective surfacing level",
-		match: /^the effective surfacing level is (Final|Key|Balanced|All)$/,
+		match: /^the effective surfacing level is (Answer|Key|Most|All messages)$/,
 		run: async ({ world, match }) => {
-			await expect(
-				panel(world.page)
-					.getByTestId("surfacing-level")
-					.getByRole("radio", { name: new RegExp(`^${match[1]}\\b`) }),
-			).toHaveAttribute("aria-checked", "true");
+			await expectShowStop(world.page, match[1] ?? "");
 		},
 	},
 	{
@@ -1154,16 +1373,17 @@ export const surfacingCardHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert Final keeps the strip",
-		match: /^Final shows (\d+) hidden messages and keeps the strip$/,
+		name: "assert Answer keeps the strip",
+		match: /^Answer shows (\d+) hidden messages and keeps the strip$/,
 		run: async ({ world, match }) => {
 			await expect(card(world.page)).toHaveCount(0);
 			await expect(
 				panel(world.page).locator("[data-group-members]"),
 			).toHaveCount(0);
 			await expect(panel(world.page)).toContainText(
-				`Final only · ${match[1]} hidden`,
+				`Answer only · ${match[1]} hidden`,
 			);
+			await expect(panel(world.page)).not.toContainText("Nothing at Answer");
 			await expect(
 				panel(world.page).locator("[data-step-id]").first(),
 			).toBeVisible();
@@ -1171,45 +1391,37 @@ export const surfacingCardHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert not judged note and empty level",
-		match: /^the turn shows (\d+) not judged and Nothing at (Key|Balanced)$/,
+		match: /^the turn shows (\d+) not judged and Nothing at (Key|Most)$/,
 		run: async ({ world, match }) => {
 			await expect(
 				panel(world.page).getByTestId("surfacing-not-judged"),
 			).toContainText(`${match[1]} not judged`);
 			await expect(panel(world.page)).toContainText(`Nothing at ${match[2]}`);
-			await expect(control(world.page, "Show All")).toBeVisible();
+			await expect(control(world.page, "Show All messages")).toBeVisible();
 		},
 	},
 	{
 		name: "show all from empty level",
 		match: /^I show all surfaced messages from the empty state$/,
 		run: async ({ world }) => {
-			await control(world.page, "Show All").click();
+			await control(world.page, "Show All messages").click();
 		},
 	},
 	{
-		name: "assert hand-back uses local parts and turn ordinals",
-		match:
-			/^the two hand-back blocks keep turn-wide numbers on their own strips$/,
+		name: "assert hand-back uses one strip and turn ordinals",
+		match: /^the hand-back turn keeps turn-wide numbers on one strip$/,
 		run: async ({ world }) => {
 			const panels = world.page.getByTestId("surfacing-card");
-			await expect(panels).toHaveCount(2);
-			for (const [index, expected] of [
-				[0, ["1", "2", "4"]],
-				[1, ["5", "8"]],
-			] as const) {
-				const block = panels.nth(index);
-				await expect.poll(() => pinNumbers(block)).toEqual(expected);
-				for (const ordinal of expected)
-					await expect(
-						block.locator(
-							`[data-step-id="surfacing-agent/surfacing-part-${ordinal}"]`,
-						),
-					).toBeVisible();
-			}
-			await expect(
-				panels.first().getByTestId("surfacing-msg-card"),
-			).toHaveCount(0);
+			await expect(panels).toHaveCount(1);
+			await expect
+				.poll(() => pinNumbers(panels))
+				.toEqual(["1", "2", "4", "5", "8"]);
+			for (const ordinal of [1, 2, 4, 5, 8])
+				await expect(
+					panels.locator(
+						`[data-step-id="surfacing-agent/surfacing-part-${ordinal}"]`,
+					),
+				).toBeVisible();
 		},
 	},
 	{
@@ -1223,7 +1435,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 	{
 		name: "click and hover a work segment without changing the selected pin",
 		match:
-			/^an ordinary strip segment still captions the head and opens its log row$/,
+			/^an ordinary strip segment shows its step popover and opens its log row$/,
 		run: async ({ world }) => {
 			const page = world.page;
 			await pick(page, "2");
@@ -1233,7 +1445,7 @@ export const surfacingCardHandlers: StepHandler[] = [
 			const box = await work.boundingBox();
 			if (!box) throw new Error("Missing ordinary work step");
 			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-			await expect(page.getByRole("tooltip")).toContainText(
+			await expect(panel(page).getByTestId("turn-step-popover")).toContainText(
 				"route-surfacing-tool-4.ts",
 			);
 			await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -1266,15 +1478,15 @@ export const surfacingCardHandlers: StepHandler[] = [
 			await page.keyboard.press("3");
 			await page.keyboard.press("Enter");
 			await expect(card(page)).toHaveAttribute("data-ordinal", "3");
-			await expect(
-				panel(page)
-					.getByTestId("surfacing-level")
-					.getByRole("radio", { name: /^All\b/ }),
-			).toHaveAttribute("aria-checked", "true");
+			await expectShowStop(page, "Most");
+			await card(page).focus();
 			// `s` toggles the turn summary (a modal sheet on phone), so it closes again before the card keys.
 			// `h` unmounts the card; surfacing-minimise covers its focus and toggle behavior.
 			for (const key of ["s", "s", "u", "r", "m", "a", "+", "−"]) {
-				await expect(card(page)).toBeVisible();
+				await expect(
+					card(page),
+					`Card remains open before ${key}`,
+				).toBeVisible();
 				const prevented = await card(page).evaluate(
 					(element, pressed) =>
 						!element.dispatchEvent(

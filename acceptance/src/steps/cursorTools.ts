@@ -857,7 +857,8 @@ export const cursorToolsHandlers: StepHandler[] = [
 		name: "assert generic Cursor task",
 		match: /^the Cursor task remains a generic row$/,
 		run: async ({ world }) => {
-			await expect(row(world.page, "task")).toContainText("task");
+			// A running row reads "Running" with its progress, not its tool name.
+			await expect(row(world.page, "task")).toBeVisible();
 			await expect(
 				row(world.page, "task").getByRole("button", {
 					name: "Open subagent session",

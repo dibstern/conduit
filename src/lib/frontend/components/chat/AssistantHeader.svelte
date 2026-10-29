@@ -26,6 +26,7 @@
 		modelExecution,
 		providerId,
 		createdAt,
+		pending,
 		copyState = $bindable("idle"),
 	}: {
 		message?: AssistantMessage | undefined;
@@ -34,6 +35,8 @@
 		modelExecution?: ModelExecution | undefined;
 		providerId?: string | undefined;
 		createdAt?: number | undefined;
+		/** Before the turn's first step: a dimmed avatar and this pulsing label stand in for the name. */
+		pending?: string | undefined;
 		copyState?: "idle" | "primed" | "done";
 	} = $props();
 
@@ -81,27 +84,34 @@
 </script>
 
 <div data-message-id={message?.messageId} class="assistant-header group/header grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-[8px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px]">
-	<span aria-hidden="true" class="mt-[4px] grid size-[20px] place-items-center rounded-[6px] md:mt-0 md:size-[28px] md:rounded-[8px] {providerId === 'claude' ? 'bg-harness-claude text-white [&_g]:fill-current' : 'bg-bg-raised'}">
+	<span aria-hidden="true" class="mt-[4px] grid size-[20px] place-items-center rounded-[6px] md:mt-0 md:size-[28px] md:rounded-[8px] {pending ? 'opacity-45' : ''} {providerId === 'claude' ? 'bg-harness-claude text-white [&_g]:fill-current' : 'bg-bg-raised'}">
 		<Icon name={provider?.logo ?? "bot"} size={providerId === "claude" ? 14 : 18} class={providerId === "claude" ? "size-[12px] md:size-[14px]" : ""} />
 	</span>
 	<div class="flex min-h-[28px] min-w-0 flex-wrap items-center gap-x-[8px] gap-y-[4px] text-[13.5px] font-semibold">
 		<!-- Keep the title and time on the same baseline. -->
-		<span class="flex min-w-0 flex-wrap items-baseline gap-x-[8px] gap-y-[4px]">
-			{#if tooltip}
-				<Tooltip>
-					{#snippet trigger({ props })}
-						<span {...props} class="min-w-0 truncate">{title}</span>
-					{/snippet}
-					{tooltip}
-				</Tooltip>
-			{:else}
-				<span class="min-w-0 truncate">{title}</span>
-			{/if}
-			{#if (createdAt ?? message?.createdAt) != null}
-				<span aria-hidden="true" class="font-normal text-text-dimmer">·</span>
-				<MessageTime createdAt={createdAt ?? message?.createdAt} />
-			{/if}
-		</span>
+		{#if pending}
+			<span data-testid="turn-opening-row" class="flex items-center gap-x-[8px] font-normal text-text-dimmer">
+				<span data-testid="turn-opening-pulse" aria-hidden="true" class="size-[6px] shrink-0 rounded-full bg-current motion-safe:animate-pulse"></span>
+				{pending}
+			</span>
+		{:else}
+			<span class="flex min-w-0 flex-wrap items-baseline gap-x-[8px] gap-y-[4px]">
+				{#if tooltip}
+					<Tooltip>
+						{#snippet trigger({ props })}
+							<span {...props} class="min-w-0 truncate">{title}</span>
+						{/snippet}
+						{tooltip}
+					</Tooltip>
+				{:else}
+					<span class="min-w-0 truncate">{title}</span>
+				{/if}
+				{#if (createdAt ?? message?.createdAt) != null}
+					<span aria-hidden="true" class="font-normal text-text-dimmer">·</span>
+					<MessageTime createdAt={createdAt ?? message?.createdAt} />
+				{/if}
+			</span>
+		{/if}
 		{#if message?.finalized}
 			<div class="msg-actions ml-auto flex items-center gap-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 group-hover/header:opacity-100 group-focus-within/header:opacity-100 touch:opacity-100" class:opacity-100={copyState !== "idle" || menuOpen}>
 				<Button variant="ghost" size="content" tone={copyState === "done" ? "success" : "dimmer"} iconOnly icon={copyState === "done" ? "check" : "copy"} iconSize={14} touchTarget class="size-[26px]" title={copyLabel} ariaLabel={copyLabel} onclick={copyMessage} />

@@ -194,9 +194,8 @@ describe("full-session transcript navigation owner", () => {
 		const target = scenario === "uuid" ? 9 : 80;
 		const root = document.createElement("div");
 		const element = document.createElement("div");
-		element.dataset["part"] =
+		element.dataset["uuid"] =
 			scenario === "uuid" ? "u9/user" : `u${target}/p${target}`;
-		element.dataset["testid"] = "surfacing-msg-card";
 		element.scrollIntoView = vi.fn();
 		root.append(element);
 		vi.stubGlobal("CSS", { escape: (value: string) => value });

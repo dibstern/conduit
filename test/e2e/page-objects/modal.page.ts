@@ -3,14 +3,14 @@ import type { Locator, Page } from "@playwright/test";
 export class ModalPage {
 	readonly page: Page;
 	readonly confirmModal: Locator;
-	readonly imageLightbox: Locator;
+	readonly mediaViewerImage: Locator;
 	readonly rewindModal: Locator;
 	readonly qrOverlay: Locator;
 
 	constructor(page: Page) {
 		this.page = page;
 		this.confirmModal = page.locator("#confirm-modal");
-		this.imageLightbox = page.locator("#image-lightbox");
+		this.mediaViewerImage = page.locator("#media-viewer-image");
 		this.rewindModal = page.locator("#rewind-modal");
 		this.qrOverlay = page.locator("#qr-overlay");
 	}

@@ -7,7 +7,7 @@ describe("getToolCategory", () => {
 		["Glob", "explore"],
 		["Grep", "explore"],
 		["LSP", "explore"],
-		["Skill", "explore"],
+		["Skill", "other"],
 		["Edit", "edit"],
 		["Write", "edit"],
 		["Bash", "shell"],

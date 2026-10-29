@@ -1,18 +1,21 @@
 <script lang="ts">
+	import type { ComponentProps } from "svelte";
 	import Tooltip from "../Tooltip.svelte";
 
 	let {
 		open = $bindable(false),
 		delayDuration = 700,
 		longText = false,
+		interaction = "hoverable",
 	}: {
 		open?: boolean;
 		delayDuration?: number;
 		longText?: boolean;
+		interaction?: ComponentProps<typeof Tooltip>["interaction"];
 	} = $props();
 </script>
 
-<Tooltip bind:open {delayDuration}>
+<Tooltip bind:open {delayDuration} {interaction}>
 	{#snippet trigger({ props })}
 		<button
 			{...props}

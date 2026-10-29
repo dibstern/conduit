@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { STOPS, SURFACE_LEVELS } from "../../utils/turn-stops.js";
 	import { onMount } from "svelte";
 	import type { MessageSurfacingPatch, MessageSurfacingStatus } from "../../../contracts/message-surfacing.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
@@ -37,7 +38,7 @@
 		"Saving a TypeSafe key requires TLS or loopback": "Saving a TypeSafe key requires HTTPS or localhost.",
 		"TypeSafe key is set by environment": "The key is set by TYPESAFE_API_KEY and can't be edited here.",
 	};
-	const levels = [{ value: "final", label: "Final" }, { value: "key", label: "Key" }, { value: "balanced", label: "Balanced" }, { value: "all", label: "All" }] as const;
+	const levels = SURFACE_LEVELS.map((value) => ({ value, label: STOPS[value].short }));
 	const models = [{ value: "sonnet", label: "Sonnet" }, { value: "opus", label: "Opus" }] as const;
 	const timings = [{ value: "turn-end", label: "When a turn ends" }, { value: "on-request", label: "On request" }] as const;
 	const turnsOpen = [{ value: "expanded", label: "Expanded" }, { value: "auto", label: "Auto" }, { value: "minimised", label: "Minimised" }] as const;
@@ -123,7 +124,7 @@
 		</SettingsGroup>
 		{#if error}<p role="alert" class="mt-2 text-error">{error}</p>{/if}
 		<SettingsGroup id="surfacing-turns" title="Turns">
-			<SettingsRow label="Default level" description="Sessions can override it from the level control on the axis.">
+			<SettingsRow label="Default level" description="Each turn's Show bar can switch that turn to another level.">
 				{#snippet control()}
 					{#if sessionViewState.compact}
 						<SettingsPicker label="Default level" value={status.defaultLevel} options={levels} disabled={saving} onvaluechange={(value) => { if (levels.some((o) => o.value === value)) void update({ defaultLevel: value as MessageSurfacingStatus["defaultLevel"] }); }} />

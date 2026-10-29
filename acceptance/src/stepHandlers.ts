@@ -2,6 +2,7 @@ import { PlaywrightDriver } from "./playwrightDriver.js";
 import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
 import { addProjectDialogHandlers } from "./steps/addProjectDialog.js";
 import { askContextHandlers } from "./steps/askContext.js";
+import { assistantDiagramsHandlers } from "./steps/assistantDiagrams.js";
 import { backgroundTasksHandlers } from "./steps/backgroundTasks.js";
 import { claudeSettingsHandlers } from "./steps/claudeSettings.js";
 import { codexAsyncQuestionHandlers } from "./steps/codexAsyncQuestion.js";
@@ -75,6 +76,14 @@ import { terminalSettingsHandlers } from "./steps/terminalSettings.js";
 import { themeMenuHandlers } from "./steps/themeMenu.js";
 import { titleGenerationSettingsHandlers } from "./steps/titleGenerationSettings.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
+import { turnActivityHandlers } from "./steps/turnActivity.js";
+import { turnActivityShowHandlers } from "./steps/turnActivityShow.js";
+import { turnActivitySkillsHandlers } from "./steps/turnActivitySkills.js";
+import { turnHoverHandlers } from "./steps/turnHover.js";
+import { turnOpeningHandlers } from "./steps/turnOpening.js";
+import { turnPanelHandlers } from "./steps/turnPanel.js";
+import { turnQaHandlers } from "./steps/turnQa.js";
+import { turnUsageHandlers } from "./steps/turnUsage.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
 import { usageSettingsHandlers } from "./steps/usageSettings.js";
@@ -115,6 +124,14 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...titleGenerationSettingsHandlers,
 	...sideThreadsHandlers,
 	...surfacingCardHandlers,
+	...turnActivitySkillsHandlers,
+	...turnActivityHandlers,
+	...turnQaHandlers,
+	...turnActivityShowHandlers,
+	...turnPanelHandlers,
+	...turnUsageHandlers,
+	...turnHoverHandlers,
+	...turnOpeningHandlers,
 	...surfacingMarksHandlers,
 	...surfacingMinimiseHandlers,
 	...surfacingRecapHandlers,
@@ -151,6 +168,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerFieldWidthHandlers,
 	...composerFilesHandlers,
 	...composerImageDropAndViewHandlers,
+	...assistantDiagramsHandlers,
 	...composerFinalDesignHandlers,
 	...composerLiveStatusHandlers,
 	...pendingInputTrayHandlers,
