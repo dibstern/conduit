@@ -964,6 +964,63 @@ describe("Codex interactions through the real daemon and detached runner", () =>
 	);
 
 	it(
+		"retires an async question when the user types a reply instead of answering it",
+		async () => {
+			const { fixture, browser, id } = await start(
+				"async-question-typed-reply",
+				"async-question-idle-answer",
+			);
+			const card = await pending(browser, id, "question");
+			await completed(fixture, id);
+			const cursor = await submit(browser, id);
+			await browser.waitFor(
+				(message) =>
+					message["type"] === "approval_removed" &&
+					message["id"] === card["toolId"],
+				cursor,
+				TIMEOUT,
+			);
+			await vi.waitFor(
+				() =>
+					expect(snapshot(fixture, id).turns.map(({ state }) => state)).toEqual(
+						["completed", "completed"],
+					),
+				{ timeout: TIMEOUT, interval: 100 },
+			);
+			// The typed reply is the only message sent; the card adds no answer text.
+			const starts = rows<TraceRow>(capturePath).filter(
+				({ dir, message }) => dir === "out" && message?.method === "turn/start",
+			);
+			expect(starts.at(-1)?.message?.params?.["input"]).toEqual([
+				{
+					type: "text",
+					text: "Continue the recorded interaction.",
+					text_elements: [],
+				},
+			]);
+			expect(
+				snapshot(fixture, id).events.filter(
+					({ type }) => type === "question.resolved",
+				),
+			).toMatchObject([{ data: { id: card["toolId"], answers: {} } }]);
+			expect(
+				sessionRows(fixture, id)["pending_approvals"]?.find(
+					(row) => row["id"] === card["toolId"],
+				)?.["status"],
+			).toBe("resolved");
+			const after = await fixture.connect(id);
+			expect(
+				after.frames.filter(
+					({ message }) =>
+						message["type"] === "question_pending" &&
+						message["toolId"] === card["toolId"],
+				),
+			).toEqual([]);
+		},
+		TIMEOUT * 2,
+	);
+
+	it(
 		"dismisses an async question after turn completion without sending a message",
 		async () => {
 			const { fixture, browser, id } = await start(

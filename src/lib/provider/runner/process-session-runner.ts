@@ -43,9 +43,9 @@ import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retir
 import { isRecord } from "../../utils.js";
 import { STOP_ABORT_WAIT_MS } from "../orchestration-command-contracts.js";
 import {
-	type RunSettlementOwner,
 	sessionRunOwnersQuery,
 	settleSessionRuns,
+	settleToolChildRuns,
 } from "../session-run-settlement.js";
 import type {
 	ProviderControlCommandStatus,
@@ -940,7 +940,7 @@ export const makeProcessSessionRunner = (
 				yield* entry.outputs.withPermits(1)(
 					lock.withPermits(1)(
 						Effect.gen(function* () {
-							const owners = new Map<string, RunSettlementOwner>();
+							const owners = new Map<string, Set<string>>();
 							for (const runId of entry.ownedRunIds ?? [])
 								reservations.add(runId);
 							for (const [, binding] of bindings)
@@ -950,7 +950,6 @@ export const makeProcessSessionRunner = (
 							if (
 								!sql ||
 								!sessionIngestion ||
-								!reservations.size ||
 								closing ||
 								entry.lifecycle.activity._tag === "Recovering" ||
 								entry.lifecycle.candidate ||
@@ -958,26 +957,42 @@ export const makeProcessSessionRunner = (
 								pid === undefined ||
 								runnerPidAlive(pid)
 							)
-								return Effect.void;
+								return;
+							if (driver.driverKind === "claude")
+								yield* settleToolChildRuns(
+									sql,
+									sessionId,
+									failure.message,
+									(events) => sessionIngestion.ingestBatch(events),
+								);
 							for (const reservation of reservations) {
-								const [accepted] = yield* sql<{ run_id: string }>`
-									SELECT COALESCE(joined_into, id) AS run_id FROM provider_runs
-									WHERE session_id = ${sessionId} AND id = ${reservation}
+								const [accepted] = yield* sql<{
+									run_id: string;
+									session_id: string;
+								}>`
+									SELECT COALESCE(joined_into, id) AS run_id, session_id FROM provider_runs
+									WHERE id = ${reservation}
 										AND (${entry.lifecycle.idleExiting ? 1 : 0} = 0 OR status = 'running' OR started_at IS NOT NULL OR joined_into IS NOT NULL)`;
-								if (accepted?.run_id)
-									owners.set(accepted.run_id, { runId: accepted.run_id });
+								if (accepted?.run_id) {
+									const runs =
+										owners.get(accepted.session_id) ?? new Set<string>();
+									runs.add(accepted.run_id);
+									owners.set(accepted.session_id, runs);
+								}
 							}
-							if (!owners.size) return;
-							return yield* settleSessionRuns(
-								sql,
-								sessionId,
-								failure.message,
-								(events) => sessionIngestion.ingestBatch(events),
-								{
-									...(endCommandId ? {} : { errorCode: "runner_stopped" }),
-									owners: [...owners.values()],
-								},
-							);
+							// Keep exact cohorts for all providers; Claude's durable backstop
+							// above also covers children absent from this process's memory.
+							for (const [ownerSessionId, runs] of owners)
+								yield* settleSessionRuns(
+									sql,
+									ownerSessionId,
+									failure.message,
+									(events) => sessionIngestion.ingestBatch(events),
+									{
+										...(endCommandId ? {} : { errorCode: "runner_stopped" }),
+										owners: [...runs].map((runId) => ({ runId })),
+									},
+								);
 						}),
 					),
 				);
@@ -2043,7 +2058,27 @@ export const makeProcessSessionRunner = (
 					const recoveryPending = yield* Effect.serviceOption(
 						PendingInteractionServiceTag,
 					);
-					for (const registration of discoverAllRunners(configDir)) {
+					const discovered = discoverAllRunners(configDir);
+					// Recover, and so queue upgrades, in the sidebar's shape: pinned, then
+					// most recent activity, with settled and snoozed sessions last.
+					const ranked =
+						sql && discovered.length > 0
+							? yield* sql<{ id: string }>`SELECT s.id FROM sessions s
+									LEFT JOIN sessions r ON r.id = COALESCE(s.root_id, s.id)
+									WHERE s.id IN ${sql.in(discovered.map((r) => r.sessionId))}
+									ORDER BY r.pinned_at IS NULL, r.pinned_at,
+										r.settled_at IS NOT NULL OR (r.snoozed_at IS NOT NULL
+											AND (r.snoozed_until IS NULL OR r.snoozed_until > ${Date.now()})),
+										r.updated_at DESC`.pipe(
+									Effect.catch(() => Effect.succeed([])),
+								)
+							: [];
+					const rank = new Map(ranked.map((row, index) => [row.id, index]));
+					const byRank = (sessionId: string) =>
+						rank.get(sessionId) ?? Number.MAX_SAFE_INTEGER;
+					for (const registration of [...discovered].sort(
+						(a, b) => byRank(a.sessionId) - byRank(b.sessionId),
+					)) {
 						// Runner builds predating driverKind were all Claude.
 						if ((registration.driverKind ?? "claude") !== driver.driverKind)
 							continue;
@@ -2266,6 +2301,17 @@ export const makeProcessSessionRunner = (
 											runnerFailure("refuse runner", cause),
 										),
 									);
+									if (driver.driverKind === "claude")
+										yield* settleToolChildRuns(
+											sql,
+											registration.sessionId,
+											failure.message,
+											(events) => ingestion.ingestBatch(events),
+										).pipe(
+											Effect.mapError((cause) =>
+												runnerFailure("refuse runner children", cause),
+											),
+										);
 								}
 								transition(entry, { _tag: "Recovered" });
 								transition(entry, { _tag: "Fail", failure });
@@ -2352,7 +2398,6 @@ export const makeProcessSessionRunner = (
 																	failure.message,
 																	(events) => ingestion.ingestBatch(events),
 																	{
-																		errorCode: "cancelled",
 																		owners: [{ runId: binding.runId }],
 																	},
 																).pipe(

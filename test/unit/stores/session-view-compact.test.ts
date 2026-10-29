@@ -1,47 +1,32 @@
+// @vitest-environment jsdom
 // The compact breakpoint decides whether the session bar replaces the global
 // header, so getting it wrong loses either the chrome or the way out of a
 // session. These tests pin the query string, the initial read, live changes,
 // and the teardown — the listener outliving the layout would keep writing to a
-// store nobody is rendering.
+// store nobody is rendering. Duo poses are covered by duo-pose.test.ts and the
+// duo-pose acceptance feature.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const matchMediaState = vi.hoisted(() => {
 	let matches = false;
-	const listeners = new Set<(event: MediaQueryListEvent) => void>();
 	const query = {
 		get matches() {
 			return matches;
 		},
 		media: "",
 		onchange: null,
-		addEventListener: vi.fn(
-			(_type: "change", listener: (event: MediaQueryListEvent) => void) => {
-				listeners.add(listener);
-			},
-		),
-		removeEventListener: vi.fn(
-			(_type: "change", listener: (event: MediaQueryListEvent) => void) => {
-				listeners.delete(listener);
-			},
-		),
 	};
 
 	return {
-		query,
 		matchMedia: vi.fn(() => query as unknown as MediaQueryList),
+		/** Crossing the breakpoint resizes the window, which the pose follows. */
 		setMatches(next: boolean) {
 			matches = next;
-			for (const listener of listeners) {
-				listener({ matches: next } as MediaQueryListEvent);
-			}
-		},
-		get listenerCount() {
-			return listeners.size;
+			window.dispatchEvent(new Event("resize"));
 		},
 		reset() {
 			matches = false;
-			listeners.clear();
 		},
 	};
 });
@@ -60,7 +45,7 @@ const {
 	noteSessionChanged,
 	publishAtBottom,
 	sessionViewState,
-	watchCompactViewport,
+	watchViewportPose,
 } = await import("../../../src/lib/frontend/stores/session-view.svelte.js");
 const { closePanel, openPanel, terminalState } = await import(
 	"../../../src/lib/frontend/stores/terminal.svelte.js"
@@ -131,9 +116,9 @@ describe("session bar collapse", () => {
 	});
 });
 
-describe("watchCompactViewport", () => {
+describe("watchViewportPose", () => {
 	it("agrees with Tailwind's md breakpoint", () => {
-		watchCompactViewport()();
+		watchViewportPose()();
 
 		// 767px, not 768: an ad-hoc `<= 768` check disagrees with every `md:`
 		// utility by exactly one pixel, which is how a phone layout leaks onto a
@@ -146,14 +131,14 @@ describe("watchCompactViewport", () => {
 	it("adopts the current viewport immediately rather than waiting for a change", () => {
 		matchMediaState.setMatches(true);
 
-		const stop = watchCompactViewport();
+		const stop = watchViewportPose();
 
 		expect(sessionViewState.compact).toBe(true);
 		stop();
 	});
 
 	it("follows the viewport across the breakpoint in both directions", () => {
-		const stop = watchCompactViewport();
+		const stop = watchViewportPose();
 		expect(sessionViewState.compact).toBe(false);
 
 		matchMediaState.setMatches(true);
@@ -166,7 +151,7 @@ describe("watchCompactViewport", () => {
 	});
 
 	it("keeps open views and the file preview across the breakpoint", () => {
-		const stop = watchCompactViewport();
+		const stop = watchViewportPose();
 		sessionViewState.filesOpen = true;
 		openPanel();
 		uiState.fileViewerOpen = true;
@@ -179,10 +164,10 @@ describe("watchCompactViewport", () => {
 	});
 
 	it("stops listening once torn down", () => {
-		const stop = watchCompactViewport();
+		const stop = watchViewportPose();
 		stop();
 
-		expect(matchMediaState.listenerCount).toBe(0);
+		expect(document.body.childElementCount).toBe(0);
 
 		matchMediaState.setMatches(true);
 		expect(sessionViewState.compact).toBe(false);

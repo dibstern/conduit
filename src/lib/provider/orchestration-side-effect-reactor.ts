@@ -919,7 +919,9 @@ export class ProviderSideEffectReactor {
 						turn.error.retryHandled !== true;
 				const code = failure
 					? providerFailureCode(failure)
-					: (turn?.error?.code ?? turn?.status ?? "provider_failure");
+					: turn?.status === "cancelled"
+						? "interrupted"
+						: (turn?.error?.code ?? turn?.status ?? "provider_failure");
 				const message =
 					typeof cause === "object" &&
 					cause !== null &&

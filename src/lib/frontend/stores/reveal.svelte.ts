@@ -1,10 +1,13 @@
 import { tick } from "svelte";
-import { sessionMessages } from "./chat.svelte.js";
-import { sessionState } from "./session.svelte.js";
-import { loadOlderTranscript } from "./transcript.svelte.js";
+import { primaryTranscript, type TranscriptView } from "./transcript.svelte.js";
 
 export const revealedPart = $state<{
-	request: { sessionId: string; uuid: string; counter: number } | null;
+	request: {
+		sessionId: string;
+		uuid: string;
+		counter: number;
+		viewId: symbol;
+	} | null;
 }>({ request: null });
 
 let revealCounter = 0;
@@ -16,11 +19,15 @@ export async function reveal(
 		| { messageId: string; partId?: string | undefined }
 		| { uuid: string }
 	),
+	view: TranscriptView = primaryTranscript,
+	root?: HTMLElement,
 ): Promise<"landed" | "missing"> {
-	const primarySessionId = sessionState.currentId;
-	const sessionId = anchor.sessionId ?? primarySessionId;
-	if (!sessionId) return "missing";
-	const chat = () => sessionMessages.get(sessionId);
+	const sessionId = anchor.sessionId ?? view.sessionId;
+	if (!sessionId || sessionId !== view.sessionId) return "missing";
+	let generation = view.generation;
+	const current = () =>
+		view.sessionId === sessionId && view.generation === generation;
+	const chat = () => view.chat;
 	const partUuid =
 		"uuid" in anchor
 			? anchor.uuid
@@ -36,14 +43,28 @@ export async function reveal(
 				: message.uuid === partUuid,
 		);
 	let target = findTarget();
-	while (!target && chat()?.historyHasMore) {
-		const oldestId = chat()?.transcript?.rows[0]?.id;
+	if ("messageId" in anchor) {
+		const loading = view.loadMessage(anchor.messageId);
+		generation = view.generation;
 		try {
-			await loadOlderTranscript(sessionId);
+			await loading;
 		} catch {
 			return "missing";
 		}
-		if (sessionState.currentId !== primarySessionId) return "missing";
+		if (!current()) return "missing";
+		target = findTarget();
+		if (!target) return "missing";
+	}
+	while (!target && chat()?.historyHasMore) {
+		const oldestId = chat()?.transcript?.rows[0]?.id;
+		try {
+			const loading = view.loadOlder();
+			generation = view.generation;
+			await loading;
+		} catch {
+			return "missing";
+		}
+		if (!current()) return "missing";
 		target = findTarget();
 		if (!target && chat()?.transcript?.rows[0]?.id === oldestId)
 			return "missing";
@@ -54,10 +75,15 @@ export async function reveal(
 	await tick();
 	// Prepending preserves the reading position in a frame after the DOM update.
 	await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-	if (sessionState.currentId !== primarySessionId) return "missing";
+	if (!current()) return "missing";
 	if (partUuid !== undefined) {
 		const counter = ++revealCounter;
-		revealedPart.request = { sessionId, uuid: partUuid, counter };
+		revealedPart.request = {
+			sessionId,
+			uuid: partUuid,
+			counter,
+			viewId: view.id,
+		};
 		try {
 			await tick();
 		} finally {
@@ -66,9 +92,10 @@ export async function reveal(
 				revealedPart.request = null;
 		}
 	}
-	if (sessionState.currentId !== primarySessionId) return "missing";
-	const element = document.querySelector<HTMLElement>(
-		`[data-session-id="${CSS.escape(sessionId)}"] [${partUuid === undefined ? "data-uuid" : "data-part"}="${CSS.escape(target.uuid)}"]`,
+	if (!current()) return "missing";
+	const scope = root ?? document.getElementById("messages");
+	const element = scope?.querySelector<HTMLElement>(
+		`[${partUuid === undefined ? "data-uuid" : "data-part"}="${CSS.escape(target.uuid)}"]`,
 	);
 	if (!element) return "missing";
 	if (

@@ -305,7 +305,7 @@ export const sessionsHandlers = {
 			});
 			if (!PROVIDER_DRIVERS[account.driver].supportsGoalState) {
 				return yield* new WsRpcError({
-					message: "Goal summaries are available only for Claude sessions",
+					message: "This provider does not support goal summaries",
 				});
 			}
 			return yield* (yield* GoalSummaryServiceTag).generate(request.sessionId);
@@ -515,9 +515,9 @@ export const sessionsHandlers = {
 						: mapRpcFailure("PreviewContinuation")(error),
 			),
 		),
-	QuotaForAccounts: (_request) =>
+	QuotaForAccounts: (request) =>
 		Effect.flatMap(Usage, (usage) =>
-			usage.refresh({ maxAge: "30 seconds" }),
+			usage.refresh({ maxAge: request.force ? 0 : "30 seconds" }),
 		).pipe(Effect.catch(mapRpcFailure("QuotaForAccounts"))),
 	GetContinuationHandoff: (request) =>
 		Effect.gen(function* () {

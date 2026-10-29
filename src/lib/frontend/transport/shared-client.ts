@@ -34,6 +34,7 @@ import { Socket } from "effect/socket";
 import type {
 	InputDraftKey,
 	SessionDetailEnvelope,
+	SessionDetailWindowRequest,
 } from "../../contracts/ws-rpc.js";
 import {
 	wsDebugLogMessage,
@@ -116,9 +117,12 @@ const makeSubscriptions = (
 				}),
 			options,
 		),
+	sessionPromptIndex: (options: { readonly sessionId: string }) =>
+		resumeStream(() => sockets.stream("SubscribeSessionPromptIndex", options)),
 	/** One session's transcript. Hot, so it rides the stream socket. */
 	sessionDetail: (options: {
 		readonly sessionId: string;
+		readonly window?: SessionDetailWindowRequest;
 		readonly resumeFromSequence?: number;
 		/** What the view resumed from has applied; the caller keeps it with
 		 *  the view, so a resume from its high-water mark is checked too. */
@@ -136,11 +140,16 @@ const makeSubscriptions = (
 							"SubscribeSessionDetail",
 							{
 								sessionId: options.sessionId,
-								...(resumeFromSequence === undefined
+								...(options.window ? { window: options.window } : {}),
+								...(options.window
 									? {}
-									: { resumeFromSequence }),
-								...(resumeBase === undefined ? {} : { resumeBase }),
-								...(resumePoint === undefined ? {} : { resumePoint }),
+									: {
+											...(resumeFromSequence === undefined
+												? {}
+												: { resumeFromSequence }),
+											...(resumeBase === undefined ? {} : { resumeBase }),
+											...(resumePoint === undefined ? {} : { resumePoint }),
+										}),
 							},
 							{ asQueue: true },
 						),
@@ -151,9 +160,11 @@ const makeSubscriptions = (
 					),
 				).pipe(decodeSessionDetail),
 			{
-				from: options.resumeFromSequence,
-				ledger: options.ledger ?? makeResumeLedger(),
-				saved: options.saved,
+				from: options.window ? undefined : options.resumeFromSequence,
+				...(options.window
+					? {}
+					: { ledger: options.ledger ?? makeResumeLedger() }),
+				saved: options.window ? undefined : options.saved,
 			},
 		),
 	/** One session's todo list. Low-rate, so it rides the control socket. */

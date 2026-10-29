@@ -25,6 +25,7 @@ import {
 	type InputDraftEnvelope,
 	InputDraftKeySchema,
 	type ProjectSetting,
+	SessionDetailItemSchema,
 	WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -76,6 +77,7 @@ type DaemonListTag =
 /** Subscriptions opened once per session, so each session gets its own stream. */
 const isSessionStream = (tag: string): boolean =>
 	tag === "SubscribeSessionDetail" ||
+	tag === "SubscribeSessionPromptIndex" ||
 	tag === "SubscribeSessionTodos" ||
 	tag === "SubscribeInputDraft";
 
@@ -251,6 +253,52 @@ export class RpcMockControl {
 				],
 				sessionId,
 			);
+		if (this.hasStream("SubscribeSessionPromptIndex", sessionId))
+			this.sendChunk(
+				"SubscribeSessionPromptIndex",
+				this.initialPromptIndexFrames(sessionId),
+				sessionId,
+			);
+	}
+
+	initialPromptIndexFrames(sessionId: string): readonly unknown[] {
+		const snapshot = mockDetailSnapshot(this.page, sessionId);
+		if (snapshot._tag !== "snapshot")
+			throw new Error("Expected fixture snapshot");
+		const rows = (this.detailRows.get(sessionId) ?? snapshot.rows).map((row) =>
+			Schema.decodeUnknownSync(SessionDetailItemSchema)(row),
+		);
+		return [
+			{
+				_tag: "snapshot",
+				sequence: this.detailSequences.get(sessionId) ?? snapshot.sequence,
+				rows: rows.flatMap((row) =>
+					row._tag === "message" && row.message.role === "user"
+						? [
+								{
+									id: row.message.id,
+									createdAt: row.message.time?.created ?? 0,
+									preview:
+										rows
+											.flatMap((part) =>
+												part._tag === "part" &&
+												part.messageId === row.message.id &&
+												part.part.type === "text"
+													? [part.part.text ?? ""]
+													: [],
+											)
+											.join(" ")
+											.replace(/\s+/g, " ")
+											.trim()
+											.slice(0, 240) || "Attached files",
+									isInherited: false,
+								},
+							]
+						: [],
+				),
+			},
+			{ _tag: "synchronized" },
+		];
 	}
 
 	/** How the detail feed answers a new subscription: synchronize (default),
@@ -972,6 +1020,10 @@ function initialStream(
 			return control.initialShellFrames();
 		case "SubscribeSessionDetail":
 			return control.initialDetailFrames(String(payload["sessionId"] ?? ""));
+		case "SubscribeSessionPromptIndex":
+			return control.initialPromptIndexFrames(
+				String(payload["sessionId"] ?? ""),
+			);
 		case "SubscribeSessionTodos":
 			return control.initialSessionTodosFrames(
 				String(payload["sessionId"] ?? ""),
@@ -1309,6 +1361,12 @@ export async function mockWsRpc(
 	subscribeMockDetail(page, (sessionId, envelope) => {
 		if (control.hasStream("SubscribeSessionDetail", sessionId))
 			control.sendChunk("SubscribeSessionDetail", [envelope], sessionId);
+		if (control.hasStream("SubscribeSessionPromptIndex", sessionId))
+			control.sendChunk(
+				"SubscribeSessionPromptIndex",
+				control.initialPromptIndexFrames(sessionId),
+				sessionId,
+			);
 	});
 	const projects = pendingProjects.get(page);
 	if (projects) control.setProjects(projects);

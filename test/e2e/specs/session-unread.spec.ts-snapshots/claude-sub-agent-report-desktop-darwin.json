@@ -24,7 +24,7 @@
     "scenario": "sub-agent",
     "window": "A",
     "dot": false,
-    "lastTurnEndVersion": null,
+    "lastTurnEndVersion": "turn end 1",
     "seenVersion": null,
     "unread": 0,
     "session": "sub-agent"
@@ -34,7 +34,7 @@
     "scenario": "sub-agent",
     "window": "B",
     "dot": false,
-    "lastTurnEndVersion": null,
+    "lastTurnEndVersion": "turn end 1",
     "seenVersion": null,
     "unread": 0,
     "session": "sub-agent"

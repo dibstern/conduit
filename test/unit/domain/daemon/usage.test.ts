@@ -16,6 +16,11 @@
 // samples; transport loses endpoints or exceeds 48 points; storage exceeds 2016
 // points; restarts lose history; overlapping saves overwrite newer snapshots;
 // missing/corrupt files or failed saves break reads.
+// Restart failures: a restart shows no reading until the first read lands; a
+// restored reading looks fresh (not stale, or read at boot) so failover trusts
+// it; a failed read is persisted and shown after the next restart; a removed
+// account comes back; a restored reading stops the first refresh from reading;
+// a live update is lost on restart; the stored reading does not survive JSON.
 import {
 	mkdtemp,
 	readdir,
@@ -1158,6 +1163,87 @@ it.effect("loads history once and forecasts immediately after a restart", () =>
 		]);
 		expect(loads).toBe(2);
 	}),
+);
+
+it.effect(
+	"restores each account's last successful reading as stale after a restart",
+	() =>
+		Effect.gen(function* () {
+			const file = yield* Ref.make("{}");
+			const json = Schema.fromJsonString(UsageHistorySnapshotSchema);
+			let cold = false;
+			const options = (ids: readonly string[]) => ({
+				accounts: Effect.succeed(
+					ids.map((id) => ({ id, harness: "claude" as const })),
+				),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: (account: { readonly id: string }) =>
+							cold
+								? Effect.never
+								: account.id === "account-1"
+									? Effect.succeed<UsageRead>({
+											status: "available",
+											planLabel: "Claude Max",
+											windows: [{ kind: "five_hour", utilization: 41 }],
+										})
+									: Effect.fail(new Error("Reader failed")),
+					},
+				},
+				history: {
+					load: Ref.get(file).pipe(
+						Effect.flatMap(Schema.decodeUnknownEffect(json)),
+					),
+					save: (snapshot: UsageHistorySnapshot) =>
+						Schema.encodeEffect(json)(snapshot).pipe(
+							Effect.flatMap((text) => Ref.set(file, text)),
+						),
+				},
+			});
+			yield* Effect.scoped(
+				Effect.gen(function* () {
+					const first = yield* makeUsage(options(["account-1", "account-2"]));
+					yield* first.refresh({ maxAge: 0 });
+					yield* first.update("account-2", "claude", {
+						status: "available",
+						windows: [{ kind: "seven_day", utilization: 12 }],
+					});
+				}),
+			);
+			yield* TestClock.adjust("10 minutes");
+			cold = true;
+			const second = yield* makeUsage(options(["account-1", "account-2"]));
+			const restored = {
+				accountId: "account-1",
+				harness: "claude",
+				status: "available",
+				planLabel: "Claude Max",
+				readAt: 0,
+				stale: true,
+			};
+			expect(yield* second.latest("account-1")).toMatchObject({
+				...restored,
+				windows: [{ kind: "five_hour", utilization: 41 }],
+			});
+			expect(yield* second.latest("account-2")).toMatchObject({
+				status: "available",
+				stale: true,
+				windows: [{ kind: "seven_day", utilization: 12 }],
+			});
+			expect(
+				yield* second.readings.pipe(Stream.take(1), Stream.runCollect),
+			).toMatchObject([[restored, { accountId: "account-2", stale: true }]]);
+			const pending = yield* Effect.forkChild(
+				second.refresh({ accountIds: ["account-1"], maxAge: "5 minutes" }),
+			);
+			yield* TestClock.adjust("5 seconds");
+			expect(yield* Fiber.join(pending)).toMatchObject([{ status: "unknown" }]);
+			expect(yield* second.latest("account-1")).toMatchObject(restored);
+			const removed = yield* makeUsage(options(["account-2"]));
+			expect(yield* removed.latest("account-1")).toBeUndefined();
+		}),
 );
 
 for (const reset of ["later reset time", "utilization drop"] as const) {

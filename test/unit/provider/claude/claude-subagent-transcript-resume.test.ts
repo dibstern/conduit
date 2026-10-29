@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Deferred, Effect, Fiber, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, expect, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import {
@@ -16,7 +17,11 @@ import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effe
 import { ProjectionRunnerEffectTag } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
-import { applyClaudeOwnershipDecisionEffect } from "../../../../src/lib/provider/claude/claude-message-ownership-runtime.js";
+import {
+	applyClaudeOwnershipDecisionEffect,
+	endClaudeMessageOwnershipEffect,
+	finalReadClaudeSubagentFeedEffect,
+} from "../../../../src/lib/provider/claude/claude-message-ownership-runtime.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { stageSessionMessagesToEvents } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
@@ -192,6 +197,77 @@ const setup = Effect.gen(function* () {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Claude subagent transcripts across session contexts", () => {
+	// A sweep must not publish a terminal before the observed run is durable,
+	// including when ownership closes during prompt or run-start delivery.
+	for (const heldType of ["message.created", "run.started"] as const) {
+		it.effect(
+			`settles a child opened while ownership ends during ${heldType}`,
+			() =>
+				withStore(
+					Effect.gen(function* () {
+						const { sink, feed, emitted } = yield* setup;
+						const sql = yield* SqlClient.SqlClient;
+						const entered = yield* Deferred.make<void>();
+						const release = yield* Deferred.make<void>();
+						const ctx = context({
+							...sink,
+							push: (event) =>
+								Effect.gen(function* () {
+									if (event.type === heldType) {
+										yield* Deferred.succeed(entered, undefined);
+										yield* Deferred.await(release);
+									}
+									yield* sink.push(event);
+								}),
+						});
+						const delivery = yield* Effect.forkChild(feed(ctx, transcript()));
+						yield* Deferred.await(entered);
+						yield* endClaudeMessageOwnershipEffect({}, ctx);
+						yield* Deferred.succeed(release, undefined);
+						yield* Fiber.join(delivery);
+						const [run] = yield* sql<{ id: string; status: string }>`
+						SELECT id, status FROM provider_runs WHERE session_id = ${CHILD}`;
+						expect(run).toMatchObject({ status: "interrupted" });
+						expect(
+							yield* sql`SELECT state, run_id FROM turns WHERE session_id = ${CHILD}`,
+						).toEqual([{ state: "interrupted", run_id: run?.id }]);
+						expect(
+							emitted
+								.filter((event) => event.type.startsWith("turn."))
+								.map((event) => event.runId),
+						).toEqual([run?.id]);
+					}),
+				),
+		);
+	}
+
+	it.effect("interrupts a final read without a task outcome report", () =>
+		withStore(
+			Effect.gen(function* () {
+				const { sink, feed } = yield* setup;
+				const sql = yield* SqlClient.SqlClient;
+				const ctx = context(sink);
+				yield* feed(ctx, transcript());
+				yield* finalReadClaudeSubagentFeedEffect(
+					{},
+					ctx,
+					{
+						kind: "final-read",
+						taskId: "missing-report",
+						childSessionId: CHILD,
+					},
+					() => Effect.void,
+				);
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE session_id = ${CHILD}`,
+				).toEqual([{ status: "interrupted" }]);
+				expect(
+					yield* sql`SELECT state FROM turns WHERE session_id = ${CHILD}`,
+				).toEqual([{ state: "interrupted" }]);
+			}),
+		),
+	);
+
 	it.effect("retains a parent launcher's run on a delayed child link", () =>
 		withStore(
 			Effect.gen(function* () {

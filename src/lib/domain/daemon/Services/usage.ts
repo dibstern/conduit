@@ -18,6 +18,7 @@ import {
 	type UsageHistoryPoint,
 	UsageHistoryPointSchema,
 	type UsageReading,
+	UsageReadingSchema,
 } from "../../../contracts/limit-recovery.js";
 import type { UsageHarness } from "../../../contracts/provider-instance.js";
 import type {
@@ -65,6 +66,8 @@ export const UsageHistorySnapshotSchema = Schema.Record(
 	Schema.Struct({
 		five_hour: Schema.optional(usageHistorySeriesSchema),
 		seven_day: Schema.optional(usageHistorySeriesSchema),
+		/** The last successful reading, shown as stale after a restart. */
+		reading: Schema.optional(UsageReadingSchema),
 	}),
 );
 export type UsageHistorySnapshot = typeof UsageHistorySnapshotSchema.Type;
@@ -140,16 +143,59 @@ export const makeUsage = (options: {
 		);
 		let savedHistory = history;
 		const historySaveLock = yield* Semaphore.make(1);
-		const current = yield* SubscriptionRef.make<readonly UsageReading[]>([]);
 		const lock = yield* Semaphore.make(1);
 		const subscriberLock = yield* Semaphore.make(1);
 		const turnRefreshes = yield* FiberMap.make<string, void>();
 		let subscribers = 0;
 		let sampler: Fiber.Fiber<void> | undefined;
 		const inFlight = new Map<string, Deferred.Deferred<UsageReading>>();
-		const latest = new Map<string, UsageReading>();
+		const configured = new Set(
+			(yield* options.accounts).map((account) => account.id),
+		);
+		// Restored readings keep their read time and stay stale until a read lands.
+		const latest = new Map<string, UsageReading>(
+			Object.entries(history).flatMap(([accountId, { reading }]) =>
+				reading && configured.has(accountId)
+					? [[accountId, { ...reading, stale: true }]]
+					: [],
+			),
+		);
+		const current = yield* SubscriptionRef.make<readonly UsageReading[]>([
+			...latest.values(),
+		]);
 		const attemptedAt = new Map<string, number>();
 		const liveVersions = new Map<string, number>();
+		const remember = (reading: UsageReading) => {
+			if (reading.status !== "available" && reading.status !== "limited")
+				return;
+			history = {
+				...history,
+				[reading.accountId]: { ...history[reading.accountId], reading },
+			};
+		};
+		const saveHistory = historyStore
+			? historySaveLock.withPermits(1)(
+					Effect.gen(function* () {
+						if (history === savedHistory) return;
+						const snapshot = history;
+						yield* Effect.suspend(() => historyStore.save(snapshot)).pipe(
+							Effect.tap(() =>
+								Effect.sync(() => {
+									savedHistory = snapshot;
+								}),
+							),
+							Effect.catchCause((cause) =>
+								Effect.logWarning("Usage history save failed", { cause }),
+							),
+							// Async filesystem writes outlive interruption; retain the
+							// permit until the snapshot has finished saving.
+							Effect.uninterruptible,
+						);
+					}),
+				)
+			: Effect.void;
+		// A live reading's background save may not have run before shutdown.
+		yield* Effect.addFinalizer(() => saveHistory);
 		const read = (
 			accountId: string,
 			accounts: readonly UsageAccount[],
@@ -333,6 +379,7 @@ export const makeUsage = (options: {
 													? { ...previous, stale: true }
 													: value,
 											);
+											remember(value);
 											inFlight.delete(accountId);
 										});
 										yield* Deferred.succeed(pending, value);
@@ -373,26 +420,7 @@ export const makeUsage = (options: {
 					}
 				}
 				yield* SubscriptionRef.set(current, [...latest.values()]);
-				if (historyStore)
-					yield* historySaveLock.withPermits(1)(
-						Effect.gen(function* () {
-							if (history === savedHistory) return;
-							const snapshot = history;
-							yield* Effect.suspend(() => historyStore.save(snapshot)).pipe(
-								Effect.tap(() =>
-									Effect.sync(() => {
-										savedHistory = snapshot;
-									}),
-								),
-								Effect.catchCause((cause) =>
-									Effect.logWarning("Usage history save failed", { cause }),
-								),
-								// Async filesystem writes outlive interruption; retain the
-								// permit until the snapshot has finished saving.
-								Effect.uninterruptible,
-							);
-						}),
-					);
+				yield* saveHistory;
 				return accountIds === undefined
 					? readings.filter((reading) => liveIds.has(reading.accountId))
 					: readings;
@@ -526,7 +554,7 @@ export const makeUsage = (options: {
 									: {}),
 							};
 					}
-					latest.set(accountId, {
+					const next: UsageReading = {
 						...previous,
 						...reading,
 						accountId,
@@ -539,9 +567,13 @@ export const makeUsage = (options: {
 							: windows.length
 								? "available"
 								: reading.status,
-					});
+					};
+					latest.set(accountId, next);
+					remember(next);
 					liveVersions.set(accountId, (liveVersions.get(accountId) ?? 0) + 1);
 					yield* SubscriptionRef.set(current, [...latest.values()]);
+					// Live readings arrive mid-turn; the turn must not wait on the disk.
+					yield* Effect.forkIn(saveHistory, scope);
 				}),
 			latest: (accountId) => Effect.sync(() => latest.get(accountId)),
 			refresh,

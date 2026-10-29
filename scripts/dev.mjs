@@ -4,6 +4,11 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const args = process.argv.slice(2);
 if (args[0] === "--") args.shift();
+// Info logs drown dev:all's own lines; daemon.log keeps warnings either way.
+// `pnpm dev:all -- --log-level info` (or the UI setting) brings them back.
+const serveArgs = args.includes("--log-level")
+	? args
+	: ["--log-level", "warn", ...args];
 
 const watchers = [];
 let stopping = false;
@@ -202,7 +207,7 @@ async function restart() {
 	mode = "child";
 	const server = spawn(
 		process.execPath,
-		["dist/src/bin/cli.js", "serve", ...args],
+		["dist/src/bin/cli.js", "serve", ...serveArgs],
 		{
 			stdio: "inherit",
 			detached: true,
@@ -379,18 +384,17 @@ try {
 	);
 	for (const watcher of watchers) watcher.on("error", fail);
 	await runBuild();
-	if (!stopping) {
-		watchers.push(
-			watch("dist", (_event, filename) => {
-				if (filename !== "build-ready.json" || stopping || activeBuild) return;
-				const buildId = readBuildId();
-				if (!buildId || buildId === lastBuildId) return;
-				lastBuildId = buildId;
-				log(`external build ${buildId.slice(0, 8)} detected`);
-				runRestart();
-			}).on("error", fail),
-		);
-	}
+	// Polled, not watched: an external build (a pre-commit `pnpm build`) often
+	// lands while dev:all is mid-cycle, and its one watch event was dropped,
+	// leaving the server on the old build for good. Polling catches up after.
+	setInterval(() => {
+		if (stopping || activeBuild || !rpc) return;
+		const buildId = readBuildId();
+		if (!buildId || buildId === lastBuildId) return;
+		lastBuildId = buildId;
+		log(`external build ${buildId.slice(0, 8)} detected`);
+		runRestart();
+	}, 1_000).unref();
 	await stopped;
 } catch (error) {
 	fail(error);

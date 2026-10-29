@@ -34,6 +34,11 @@
 		"reason": "conduit-test-npk3y.4 moves the worktree list into CheckoutDetails."
 	},
 	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: border-border,justify-center,mt-1,pt-1,px-3,py-1.5": "conduit-test-npk3y.3 removes the model footer and its spacing, border and alignment when Reload skills & commands moves into the header MenuItem.",
+	"src/lib/frontend/components/chat/MessageTime.svelte :: text-text-dimmer": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "tone=\"dimmer\"",
+		"reason": "The timestamp trigger uses Button's dimmer tone, which owns the same resting text colour."
+	},
 	"src/lib/frontend/components/input/AttachMenu.svelte :: font-sans": {
 		"movedTo": "src/lib/frontend/components/ui/floating-styles.ts",
 		"requires": "appearance=\"final\"",

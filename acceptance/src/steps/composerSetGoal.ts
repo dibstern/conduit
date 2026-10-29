@@ -41,13 +41,14 @@ export const composerSetGoalHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert disabled goal entry",
-		match: /^the goal entry is disabled and reads Goal with Claude only$/,
+		match:
+			/^the goal entry is disabled and reads Goal, not available for this agent$/,
 		run: async ({ world }) => {
 			const entry = world.page.getByTestId("attach-set-goal");
 			await expect(entry).toBeDisabled();
 			await expect(entry.getByText("Goal", { exact: true })).toBeVisible();
 			await expect(
-				entry.getByText("Claude only", { exact: true }),
+				entry.getByText("Not available for this agent", { exact: true }),
 			).toBeVisible();
 		},
 	},
