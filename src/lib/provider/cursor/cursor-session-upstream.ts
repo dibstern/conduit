@@ -1,7 +1,10 @@
 import { rm } from "node:fs/promises";
 import { Effect } from "effect";
 import type { SessionUpstreamAdapter } from "../../domain/relay/Services/session-command.js";
-import { discoverRunners, runnerPidAlive } from "../runner/runner-registry.js";
+import {
+	discoverRunners,
+	runnerProcessTable,
+} from "../runner/runner-registry.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
 import {
 	cursorSessionStorePath,
@@ -34,7 +37,11 @@ export const cursorUpstreamAdapter = (
 						discoverRunners(workspaceRoot, configDir).some(
 							(runner) => runner.sessionId === sessionId,
 						) ||
-						(identity && runnerPidAlive(identity.controllerPid))
+						// A zombie cannot write; Stop counts it as gone (6.6).
+						(identity &&
+							!["gone", "zombie"].includes(
+								runnerProcessTable.inspect(identity.controllerPid).state,
+							))
 					) {
 						throw new CursorSdkFailure({
 							operation: "agent.delete",

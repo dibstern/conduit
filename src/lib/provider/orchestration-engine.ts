@@ -10,6 +10,7 @@ import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 // Manages session-to-provider mapping.
 
 import {
+	Clock,
 	Data,
 	Deferred,
 	Effect,
@@ -869,7 +870,8 @@ export class OrchestrationEngine {
 									account !== undefined && !traits?.runsOpenCodeServer;
 								const stop: ProviderStopSnapshot = {
 									...snapshot,
-									deadlineAt: durable.now() + STOP_ABORT_WAIT_MS,
+									deadlineAt:
+										(yield* Clock.currentTimeMillis) + STOP_ABORT_WAIT_MS,
 									runnerBacked,
 									turnIds: [
 										...new Set(

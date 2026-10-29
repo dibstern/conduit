@@ -137,7 +137,8 @@ done
 kill -s TERM -- "-$group" 2>/dev/null || :
 deadline=$(( $(date +%s) + 3 ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
-  members=$(LC_ALL=C ps -axo pid=,pgid=,ppid=,stat=) || break
+  # exec keeps ps a direct child, so the reaper never waits on its own ps.
+  members=$(LC_ALL=C exec ps -axo pid=,pgid=,ppid=,stat=) || break
   remaining=0
   while read -r member pgid parent state; do
     if [ "$pgid" = "$group" ] && [ "$member" != "$$" ] && [ "$parent" != "$$" ]; then
