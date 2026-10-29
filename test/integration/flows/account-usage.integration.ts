@@ -112,7 +112,9 @@ it("filters usage by directory eligibility on the server and in both browser lis
 			instances.find((instance) => instance.id === "auth-token"),
 		).toHaveProperty("usageEligible", false);
 		const readings = await runtime.runPromise(
-			Effect.flatMap(Usage, (usage) => usage.refresh({ maxAge: 0 })),
+			Effect.flatMap(Usage, (usage) =>
+				usage.refresh({ maxAge: 0, wait: "until-settled" }),
+			),
 		);
 		expect(readings.map((reading) => reading.accountId).sort()).toEqual([
 			"claude",
@@ -160,12 +162,18 @@ it("filters usage by directory eligibility on the server and in both browser lis
 			}),
 		);
 		const afterEdit = await runtime.runPromise(
-			Effect.flatMap(Usage, (usage) => usage.refresh({ maxAge: 0 })),
+			Effect.flatMap(Usage, (usage) =>
+				usage.refresh({ maxAge: 0, wait: "until-settled" }),
+			),
 		);
 		expect(afterEdit.map((reading) => reading.accountId)).toEqual(["claude"]);
 		await runtime.runPromise(
 			Effect.flatMap(Usage, (usage) =>
-				usage.refresh({ accountIds: ["personal"], maxAge: 0 }),
+				usage.refresh({
+					accountIds: ["personal"],
+					maxAge: 0,
+					wait: "until-settled",
+				}),
 			),
 		);
 		const snapshot = await runtime.runPromise(
@@ -180,7 +188,9 @@ it("filters usage by directory eligibility on the server and in both browser lis
 			}),
 		);
 		const allExcluded = await runtime.runPromise(
-			Effect.flatMap(Usage, (usage) => usage.refresh({ maxAge: 0 })),
+			Effect.flatMap(Usage, (usage) =>
+				usage.refresh({ maxAge: 0, wait: "until-settled" }),
+			),
 		);
 		expect(allExcluded).toEqual([]);
 		const emptySnapshot = await runtime.runPromise(

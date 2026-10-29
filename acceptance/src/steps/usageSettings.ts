@@ -9,6 +9,7 @@ import {
 	chooseSettingsOption,
 	closeSettings,
 } from "../../../test/e2e/helpers/settings.js";
+import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { seedUsageLimits } from "./providerInstances.js";
 import { mockInstances, requireRpcControl } from "./shared.js";
@@ -55,6 +56,63 @@ export function accountReading(
 		readAt: now - 120_000,
 		stale: false,
 	};
+}
+
+/** Resolves a QuotaForAccounts request the stub is holding open. */
+const heldRefreshes = new WeakMap<
+	Page,
+	(readings: readonly UsageReading[]) => void
+>();
+
+/**
+ * Publish a refresh on the Usage stream: the default account reads `state`,
+ * `checking` names an account still reading, and the rest read again unchanged.
+ * Returns the snapshot from before the refresh.
+ */
+function publishRefresh(
+	page: Page,
+	state: keyof typeof usageValues,
+	checking?: string,
+): readonly UsageReading[] {
+	const previous = snapshot(page);
+	const now = clockTimes.get(page) ?? Date.now();
+	const accountId = mockInstances
+		.get(page)
+		?.find(
+			(account) => account["driver"] === "claude" && account["isDefault"],
+		)?.["id"];
+	requireRpcControl(page).setUsageReadings(
+		previous.map((reading) =>
+			reading.accountId === accountId
+				? {
+						...accountReading(
+							reading.accountId,
+							reading.planLabel ?? "Claude Max",
+							usageValues[state],
+							now,
+						),
+						readAt: now,
+					}
+				: reading.accountId === checking
+					? { ...reading, checking: true }
+					: { ...reading, readAt: now },
+		),
+	);
+	return previous;
+}
+
+/** The snapshot with one account's read finished now and no longer checking. */
+function finishRead(
+	page: Page,
+	accountId: string | undefined,
+	read: Partial<UsageReading> = {},
+): readonly UsageReading[] {
+	const now = clockTimes.get(page) ?? Date.now();
+	return snapshot(page).map((reading) => {
+		if (reading.accountId !== accountId) return reading;
+		const { checking: _checking, ...finished } = reading;
+		return { ...finished, readAt: now, ...read };
+	});
 }
 
 export function snapshot(page: Page): readonly UsageReading[] {
@@ -1339,35 +1397,88 @@ export const usageSettingsHandlers: StepHandler[] = [
 		match:
 			/^the next Usage refresh publishes the (normal|warn5|warnWk|limit) reading$/,
 		run: ({ world, match }) => {
-			const rpc = requireRpcControl(world.page);
-			rpc.setStubs({
+			requireRpcControl(world.page).setStubs({
+				QuotaForAccounts: () =>
+					publishRefresh(world.page, match[1] as keyof typeof usageValues),
+			});
+		},
+	},
+	{
+		name: "make refresh publish one account while another is still reading, holding the RPC open",
+		match:
+			/^the next Usage refresh publishes the (normal|warn5|warnWk|limit) reading while (\S+) is still checking$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setStubs({
 				QuotaForAccounts: () => {
-					const previous = snapshot(world.page);
-					const now = clockTimes.get(world.page) ?? Date.now();
-					const accountId = mockInstances
-						.get(world.page)
-						?.find(
-							(account) =>
-								account["driver"] === "claude" && account["isDefault"],
-						)?.["id"];
-					rpc.setUsageReadings(
-						previous.map((reading) =>
-							reading.accountId === accountId
-								? {
-										...accountReading(
-											reading.accountId,
-											reading.planLabel ?? "Claude Max",
-											usageValues[match[1] as keyof typeof usageValues],
-											now,
-										),
-										readAt: now,
-									}
-								: { ...reading, readAt: now },
-						),
+					publishRefresh(
+						world.page,
+						match[1] as keyof typeof usageValues,
+						match[2],
 					);
-					return previous;
+					return new Promise((resolve) =>
+						heldRefreshes.set(world.page, resolve),
+					);
 				},
 			});
+		},
+	},
+	{
+		name: "finish the held refresh with one account unread",
+		match:
+			/^the open Usage refresh finishes without reading (\S+) because (.+)$/,
+		run: ({ world, match }) => {
+			const finish = heldRefreshes.get(world.page);
+			if (!finish) throw new Error("No Usage refresh is open");
+			const finished = finishRead(world.page, match[1], {
+				status: "unknown",
+				windows: [],
+				reason: match[2] ?? "",
+			});
+			requireRpcControl(world.page).setUsageReadings(finished);
+			finish(finished);
+		},
+	},
+	{
+		name: "mark an account's reading checking on the Usage stream",
+		match: /^the Usage account (\S+) is checking$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setUsageReadings(
+				snapshot(world.page).map((reading) =>
+					reading.accountId === match[1]
+						? { ...reading, checking: true }
+						: reading,
+				),
+			);
+		},
+	},
+	{
+		name: "publish an account's finished read on the Usage stream",
+		match: /^the Usage account (\S+) finishes checking$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setUsageReadings(
+				finishRead(world.page, match[1]),
+			);
+		},
+	},
+	{
+		name: "assert whether Refresh all is busy",
+		match: /^(Refresh|Refresh all) in Usage settings is (busy|ready)$/,
+		run: async ({ world, match }) => {
+			const refresh = world.page.getByTestId("usage-settings-refresh");
+			await expect(refresh).toHaveText(match[1] ?? "");
+			const busy = match[2] === "busy";
+			await expect(refresh).toHaveAttribute("aria-busy", String(busy));
+			if (busy) await expect(refresh).toBeDisabled();
+			else await expect(refresh).toBeEnabled();
+		},
+	},
+	{
+		name: "assert the open refresh has not reported yet",
+		match: /^no Usage refresh toast is shown$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByRole("alert").filter({ hasText: "plan usage" }),
+			).toHaveCount(0);
 		},
 	},
 	{
@@ -1396,12 +1507,13 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "make refresh fail to read one account, as a cold read past the timeout does",
-		match: /^the next Usage refresh fails to read (\S+) because (.+)$/,
+		match:
+			/^the next Usage refresh fails to read (\S+) because (.+) and retries in (\d+) seconds$/,
 		run: ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
 			rpc.setStubs({
 				QuotaForAccounts: () => {
-					const now = clockTimes.get(world.page) ?? Date.now();
+					const now = clockTimes.get(world.page) ?? PINNED_CLOCK_MS;
 					const failed = snapshot(world.page).map((reading) =>
 						reading.accountId === match[1]
 							? {
@@ -1409,6 +1521,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 									status: "unknown" as const,
 									windows: [],
 									readAt: now,
+									retryAt: now + Number(match[3]) * 1000,
 									reason: match[2] ?? "",
 								}
 							: reading,

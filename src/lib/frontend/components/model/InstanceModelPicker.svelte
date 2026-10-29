@@ -362,7 +362,7 @@
 		untrack(() => {
 			if (!locked && selectedTraits?.catalogSource === "server")
 				viewDraftModels(getDraftProject(), selectedId, true);
-			void accounts.refreshQuotas();
+			void accounts.readUsage();
 			pickerTriggerEl = request.opener ?? pickerTriggerEl ?? triggerEl;
 			variantRef?.close();
 			searchQuery = "";
@@ -933,8 +933,8 @@
 		summary={handoff.summary}
 		confirm={{
 			from: handoff.from,
-			fromQuota: accounts.quotaOf(handoff.from),
-			quota: accounts.quotaOf(handoff.to),
+			fromQuota: accounts.readingOf(handoff.from),
+			quota: accounts.readingOf(handoff.to),
 			cutOff: handoff.limit?.cutOffMessageId !== undefined,
 			busy: accounts.switching,
 			onconfirm: () => void accounts.confirm(),

@@ -312,13 +312,7 @@
 	const sendAtTime = $derived(usageForecastTime(sendsAt, clock.now));
 	const hasSendMenu = $derived((sendMode === "at-reset" || sendMode === "switch") && hasOtherClaudeAccount);
 	$effect(() => {
-		// A quota reply belongs to the session and menu opening that requested it.
-		currentSession?.id;
-		accountId;
-		composerProjectSlug;
-		usageState.readings;
 		if (sendsAt === undefined || !hasOtherClaudeAccount) sendMenuOpen = false;
-		claudeAccounts.invalidateSendQuotas();
 	});
 	const placeholder = $derived(
 		sendsAt !== undefined
@@ -1485,8 +1479,7 @@
 						<Menu
 							bind:open={sendMenuOpen}
 							onopenchange={(open) => {
-								if (open) void claudeAccounts.refreshQuotas("send");
-								else claudeAccounts.invalidateSendQuotas(false);
+								if (open) void claudeAccounts.readUsage();
 							}}
 							presentation={sessionViewState.compact ? "sheet" : "popover"}
 							side="top"

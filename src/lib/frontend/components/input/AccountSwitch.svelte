@@ -1,6 +1,6 @@
 <!--
   AccountSwitch — moves one session to another account of the same provider:
-  accounts with each one's quota checked fresh on every open, then the
+  accounts with each one's usage read afresh on every open, then the
   handoff confirm, then ContinueSession on the chosen account. The usage-limit
   strip's Switch account brings its own trigger; only the session moves, never
   the project's binding.
@@ -55,13 +55,20 @@
 	let presentedRequest = $state<number | undefined>();
 	const handoff = $derived(claudeAccounts.pendingHandoff?.requestId === presentedRequest ? claudeAccounts.pendingHandoff : undefined);
 	const loading = $derived(claudeAccounts.handoff.kind === "previewing" && claudeAccounts.handoff.requestId === presentedRequest);
-	const suggested = $derived(claudeAccounts.suggestedAccount(account));
+	// While this picker's own read is open, its suggestion could be about to change.
+	let openRead = $state<Promise<unknown>>();
+	const suggested = $derived(openRead ? undefined : claudeAccounts.suggestedAccount(account));
 </script>
 
 <Menu
 	bind:open={pickerOpen}
 	onopenchange={(open) => {
-		if (open) void claudeAccounts.refreshQuotas();
+		if (!open) return;
+		const read = claudeAccounts.readUsage();
+		openRead = read;
+		void read.then(() => {
+			if (openRead === read) openRead = undefined;
+		});
 	}}
 	presentation={compact ? "sheet" : "popover"}
 	{side}
@@ -76,7 +83,7 @@
 	<div class={compact ? "mt-[4px] mb-[6px] text-[13px] font-semibold text-text" : "my-[4px] font-mono text-[10px] text-text-dimmer"}>Continue this session on</div>
 	{#each accounts as option (option.id)}
 		{@const selected = option.id === suggested}
-		{@const quota = claudeAccounts.quotaOf(option.id)}
+		{@const reading = claudeAccounts.readingOf(option.id)}
 		{@const choice = claudeAccounts.availabilityOf(option.id, account)}
 		<MenuItem
 			density="compact"
@@ -98,7 +105,7 @@
 			{#if choice.kind === "selectable" && choice.usageUnknown}
 				<QuotaMeter used="unknown" caption="usage unknown" size={compact ? "sm" : "md"} track={false} />
 			{:else}
-				<QuotaMeter {...quotaReading(quota, clock.now)} size={compact ? "sm" : "md"} track={accountLimit({ asker: "user", ...(quota ? { reading: quota } : {}), now: clock.now }).kind !== "wait-until"} />
+				<QuotaMeter {...quotaReading(reading, clock.now)} size={compact ? "sm" : "md"} track={accountLimit({ asker: "user", ...(reading ? { reading } : {}), now: clock.now }).kind !== "wait-until"} />
 			{/if}
 		</MenuItem>
 	{/each}
@@ -116,8 +123,8 @@
 		summary={handoff.summary}
 		confirm={{
 			from: handoff.from,
-			fromQuota: claudeAccounts.quotaOf(handoff.from),
-			quota: claudeAccounts.quotaOf(chosen),
+			fromQuota: claudeAccounts.readingOf(handoff.from),
+			quota: claudeAccounts.readingOf(chosen),
 			cutOff: limit?.cutOffMessageId !== undefined,
 			busy: claudeAccounts.switching,
 			onconfirm: () => void claudeAccounts.confirm(),

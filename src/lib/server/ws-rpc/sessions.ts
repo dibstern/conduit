@@ -518,7 +518,11 @@ export const sessionsHandlers = {
 		),
 	QuotaForAccounts: (request) =>
 		Effect.flatMap(Usage, (usage) =>
-			usage.refresh({ maxAge: request.force ? 0 : ENV.quotaReadMaxAgeMs }),
+			usage.refresh(
+				request.force
+					? { maxAge: 0, wait: "until-settled" }
+					: { maxAge: ENV.quotaReadMaxAgeMs, wait: "5 seconds" },
+			),
 		).pipe(Effect.catch(mapRpcFailure("QuotaForAccounts"))),
 	GetContinuationHandoff: (request) =>
 		Effect.gen(function* () {

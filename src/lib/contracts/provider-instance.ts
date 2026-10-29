@@ -43,7 +43,7 @@ export interface ProviderDriverTraits {
 	readonly sessionCapabilities: ProviderSessionCapabilities;
 	/** OpenCode's SDK/API and SSE lifecycle pin server-owned operations. */
 	readonly runsOpenCodeServer: boolean;
-	/** account-usage.integration.ts pins the account sampler's usage harness. */
+	/** account-usage.integration.ts pins the harness that reads the account's usage. */
 	readonly usageHarness: (typeof PROVIDER_USAGE_HARNESSES)[number] | undefined;
 	/** permissions-processing-timeout-effect.test.ts pins service-owned approvals/questions. */
 	readonly interactionSink: "permission-asking" | "auto-approving";
