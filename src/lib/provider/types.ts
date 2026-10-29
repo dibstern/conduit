@@ -60,6 +60,8 @@ export interface ProviderControlContext {
 	readonly retireRunIds?: readonly string[];
 	/** The committed cohort fenced by interrupt at the runner host. */
 	readonly stopRunIds?: readonly string[];
+	/** An End that retires the runner for its project's removal (3.11). */
+	readonly projectRemoved?: true;
 	readonly response?: PermissionResponse;
 	readonly operation?: "reply" | "reject";
 }

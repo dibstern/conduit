@@ -65,7 +65,11 @@ export const appendSendSettlement = (
 						? {
 								operation: "settle stopped runner",
 								code:
-									outcome === "cancelled" ? "interrupted" : "provider_error",
+									outcome === "cancelled"
+										? "interrupted"
+										: evidence.reason._tag === "ProjectRemoved"
+											? "runner_stopped"
+											: "provider_error",
 								message: "Provider process stopped",
 							}
 						: undefined;

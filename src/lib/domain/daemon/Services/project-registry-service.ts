@@ -645,6 +645,7 @@ export const remove = (slug: string) =>
 					yield* stopRegisteredRunners(
 						removed.value.project.folders[0],
 						state.configDir,
+						{ _tag: "ProjectRemoved" },
 					);
 					yield* refreshProjectRollups([slug]);
 				}).pipe(

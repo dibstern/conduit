@@ -297,6 +297,16 @@ export const makeRunnerSendFeeder = (options: {
 												yield* options.failed(item.input, reply.failure, hold);
 											else if (runnerCommandReplied(reply.failure) && live)
 												yield* Deferred.fail(live.reply, reply.failure);
+											else if (
+												reply.failure.code === "runner_detached" &&
+												live
+											) {
+												// Detachment is no outcome (4.7). It ends this daemon's
+												// live call so the caller hands the send to the next
+												// attachment, as on main.
+												if (item.live === live) item.live = undefined;
+												yield* Deferred.fail(live.reply, reply.failure);
+											}
 											return;
 										}
 										if (
