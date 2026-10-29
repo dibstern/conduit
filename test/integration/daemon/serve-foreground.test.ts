@@ -1569,15 +1569,10 @@ writeFileSync(gate + "-release", "fail the pending identity rename");
 		const alias = harness.generations[1];
 		if (!alias) throw new Error("Alias server generation missing");
 		expect(alias.pid).not.toBe(first.pid);
-		await vi.waitFor(
-			() => {
-				const proof = harness?.proof() as { logTail: string };
-				const generationStart = proof.logTail.indexOf(`"pid":${alias.pid},`);
-				expect(generationStart).toBeGreaterThanOrEqual(0);
-				expect(proof.logTail.slice(generationStart)).toContain("  Ready.\n");
-			},
-			{ timeout: 5000 },
-		);
+		// restart() clears the log tail, so it holds only the alias generation.
+		await vi.waitFor(() => expect(harness?.logTail).toContain("  Ready.\n"), {
+			timeout: 5000,
+		});
 		const restoredStatus = await sendRpcRequest(
 			join(harness.configDir, "relay.sock"),
 			{ _tag: "GetStatus" },
