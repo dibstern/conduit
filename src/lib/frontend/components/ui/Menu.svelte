@@ -11,7 +11,7 @@
 		exemptFromBackgroundInert,
 		registerOpenSurface,
 	} from "./actions/use-background-inert.svelte.js";
-	import { dragToDismiss, sheetGlide, sheetPosition, settleMs, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
+	import { belowHeader, dragToDismiss, sheetGlide, settleMs, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
 	import {
 		FLOATING_MENU_CONTENT_CLASSES,
 		FINAL_MENU_CONTENT_CLASSES,
@@ -277,8 +277,8 @@
 		{#if presentation === "sheet"}
 			<!-- Hidden while empty: a closed, zero-height fixed box still makes iOS 26 sample
 			     #session-chrome over #compact-top-edge, and the status-bar blur returns. -->
-			<div class={sheetEdge === "top" ? "pointer-events-none fixed inset-x-0 z-[var(--z-sheet)] overflow-hidden [&:not(:has(*))]:hidden" : "contents"} style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} use:sheetPosition={sheetEdge}>
-			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} class:pointer-events-none={!scrimInteractive} class:pointer-events-auto={scrimInteractive} style:opacity={scrimStyle.opacity} style:transition={scrimStyle.transition} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:exemptFromBackgroundInert></div>{/if}
+			<div class={sheetEdge === "top" ? "below-header pointer-events-none fixed z-[var(--z-sheet)] overflow-hidden [&:not(:has(*))]:hidden" : "contents"} use:belowHeader={sheetEdge === "top"}>
+			{#if open}<div aria-hidden="true" data-testid="menu-sheet-scrim" class="fixed inset-0 z-[var(--z-sheet)] bg-backdrop" class:below-header={sheetEdge === "top"} class:pointer-events-none={!scrimInteractive} class:pointer-events-auto={scrimInteractive} style:opacity={scrimStyle.opacity} style:transition={scrimStyle.transition} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:exemptFromBackgroundInert></div>{/if}
 			<DropdownMenu.ContentStatic {...sheetContentProps}>
 				{#snippet child({ props })}
 					<!-- Keep the bits-ui focus target on the menu shell. SheetChrome gives the

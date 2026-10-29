@@ -22,7 +22,7 @@ export const settleMs = () =>
 
 /**
  * Separate values for `style:` directives: a whole `style` attribute would be
- * rewritten on every frame, wiping the --sheet-top that sheetPosition sets.
+ * rewritten on every frame, wiping the variables that belowHeader sets.
  */
 export const sheetScrimStyle = ({
 	progress,
@@ -61,35 +61,65 @@ export function placeSheet(
 	return glideMs;
 }
 
-/** Clip a drop-down below the live header, including after its size changes. */
-export const sheetPosition: Action<HTMLElement, "bottom" | "top"> = (
-	node,
-	initial,
-) => {
-	let cleanup: (() => void) | undefined;
-	function update(edge: "bottom" | "top") {
-		cleanup?.();
-		if (edge !== "top") return;
-		const header = document.getElementById("session-bar");
-		const measure = () =>
-			node.style.setProperty(
-				"--sheet-top",
-				`${Math.max(0, header?.getBoundingClientRect().bottom ?? 0)}px`,
-			);
-		measure();
-		const observer = new ResizeObserver(measure);
-		if (header) observer.observe(header);
-		window.addEventListener("resize", measure);
-		window.addEventListener("scroll", measure, true);
-		cleanup = () => {
+/** --sheet-top is the header's bottom edge, --sheet-left and --sheet-right its column's insets. */
+function placeBelow(node: HTMLElement, header: HTMLElement): void {
+	const column = (
+		header.closest("#app, #sidebar") ?? header
+	).getBoundingClientRect();
+	node.style.setProperty(
+		"--sheet-top",
+		`${Math.max(0, header.getBoundingClientRect().bottom)}px`,
+	);
+	node.style.setProperty("--sheet-left", `${column.left}px`);
+	node.style.setProperty(
+		"--sheet-right",
+		`${document.documentElement.clientWidth - column.right}px`,
+	);
+}
+
+/** Re-place `node` whenever the live header (the session's, else the list's) moves or changes. */
+function followHeader(node: HTMLElement): () => void {
+	let header: Element | undefined;
+	const observer = new ResizeObserver(() => measure());
+	const measure = () => {
+		const live = ["session-bar", "sidebar-header"]
+			.map((id) => document.getElementById(id))
+			.find((element) => element?.getClientRects().length);
+		if (!live) return;
+		if (live !== header) {
 			observer.disconnect();
-			window.removeEventListener("resize", measure);
-			window.removeEventListener("scroll", measure, true);
-			node.style.removeProperty("--sheet-top");
-		};
-	}
-	update(initial);
-	return { update, destroy: () => cleanup?.() };
+			observer.observe(live);
+			header = live;
+		}
+		placeBelow(node, live);
+	};
+	measure();
+	const listening = new AbortController();
+	window.addEventListener("resize", measure, { signal: listening.signal });
+	window.addEventListener("scroll", measure, {
+		capture: true,
+		signal: listening.signal,
+	});
+	// The last place stays set, so a layer closing after this keeps it.
+	return () => {
+		observer.disconnect();
+		listening.abort();
+	};
+}
+
+/**
+ * While active, keeps a floating layer under the live header and inside that
+ * header's column. The .below-header utility applies the variables it sets.
+ */
+export const belowHeader: Action<HTMLElement, boolean> = (node, initial) => {
+	let stop = initial ? followHeader(node) : undefined;
+	return {
+		update(active) {
+			stop?.();
+			stop = active ? followHeader(node) : undefined;
+		},
+		destroy: () => stop?.(),
+	};
 };
 
 /** Hold the DOM through the same CSS glide used when a finger releases it. */

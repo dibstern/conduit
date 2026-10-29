@@ -1242,5 +1242,6 @@
 	"src/lib/frontend/components/model/ModelVariant.svelte :: flex-1,inline-flex,text-right": "conduit-test-npk3y.2 deletes the phone Composer sheet and its rows; the Session panel's picker rows replace them, so these classes have no remaining call site.",
 	"src/lib/frontend/components/session/GitIdentity.svelte :: gap-x-[10px],gap-y-[6px],justify-end,min-h-[50px],ml-auto,py-[3px],py-[8px],rounded-[7px],row": "conduit-test-npk3y.2 deletes the phone Composer sheet and its rows; the Session panel's picker rows replace them, so these classes have no remaining call site.",
 	"src/lib/frontend/components/ui/ComposerModeControl.svelte :: flex-1,inline-flex,min-w-0,text-right,text-text-dimmer,text-text-secondary,truncate": "conduit-test-npk3y.2 deletes the phone Composer sheet and its rows; the Session panel's picker rows replace them, so these classes have no remaining call site.",
-	"src/lib/frontend/components/ui/button-recipes.ts :: min-h-[48px],px-[4px],py-[8px],text-[15px]": "conduit-test-npk3y.2 deletes the composer-row button recipe with the phone Composer sheet, its only user."
+	"src/lib/frontend/components/ui/button-recipes.ts :: min-h-[48px],px-[4px],py-[8px],text-[15px]": "conduit-test-npk3y.2 deletes the composer-row button recipe with the phone Composer sheet, its only user.",
+	"src/lib/frontend/components/input/InputArea.svelte :: max-h-[120px]": "conduit-test-tw49i.5 makes the field's cap max-h-[var(--composer-field-max,120px)]: still 120px everywhere, and the folded Duo's full composer sets the variable to 44px."
 }

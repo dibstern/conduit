@@ -10,7 +10,7 @@
 	import { fade } from "svelte/transition";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { dimThemeColor } from "../../stores/theme.svelte.js";
-	import { dragToDismiss, sheetGlide, sheetPosition, settleMs, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
+	import { belowHeader, dragToDismiss, sheetGlide, settleMs, sheetScrimStyle } from "../../actions/drag-to-dismiss.js";
 	import SheetChrome from "./SheetChrome.svelte";
 	import {
 		backgroundInert,
@@ -216,7 +216,7 @@
 {/snippet}
 
 {#snippet scrim()}
-	<button type="button" tabindex="-1" aria-label="Close details" data-testid={sheetScrim?.testId ?? "popover-sheet-scrim"} class="pointer-events-auto fixed inset-0 z-[var(--z-sheet)] border-0 bg-backdrop p-0" style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} style:z-index={sheetScrim?.zIndex} style:opacity={scrimStyle.opacity} style:transition={scrimStyle.transition} onclick={() => handleOpenChange(false)} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:sheetPosition={sheetEdge} use:exemptFromBackgroundInert></button>
+	<button type="button" tabindex="-1" aria-label="Close details" data-testid={sheetScrim?.testId ?? "popover-sheet-scrim"} class="pointer-events-auto fixed inset-0 z-[var(--z-sheet)] border-0 bg-backdrop p-0" class:below-header={sheetEdge === "top"} style:z-index={sheetScrim?.zIndex} style:opacity={scrimStyle.opacity} style:transition={scrimStyle.transition} onclick={() => handleOpenChange(false)} transition:fade|global={{ duration: sheetEdge === "top" ? settleMs() : 0 }} use:belowHeader={sheetEdge === "top"} use:exemptFromBackgroundInert></button>
 {/snippet}
 
 <BitsPopover.Root bind:open onOpenChange={handleOpenChange}>
@@ -235,7 +235,7 @@
 			{#if open && (!modal || sheetEl) && sheetScrim?.portalTo === undefined}{@render scrim()}{/if}
 			<!-- Hidden while empty: a closed, zero-height fixed box still makes iOS 26 sample
 			     #session-chrome over #compact-top-edge, and the status-bar blur returns. -->
-			<div class={sheetEdge === "top" ? "pointer-events-none fixed inset-x-0 z-[var(--z-sheet)] overflow-hidden [&:not(:has(*))]:hidden" : "contents"} style:top={sheetEdge === "top" ? "var(--sheet-top, 0px)" : undefined} use:sheetPosition={sheetEdge}>
+			<div class={sheetEdge === "top" ? "below-header pointer-events-none fixed z-[var(--z-sheet)] overflow-hidden [&:not(:has(*))]:hidden" : "contents"} use:belowHeader={sheetEdge === "top"}>
 			<BitsPopover.ContentStatic {...sheetContentProps} bind:ref={sheetEl}>
 				{#snippet child({ props })}
 					<div {...props} id={sheetContentProps.id} data-sheet-edge={sheetEdge} use:exemptFromBackgroundInert use:backgroundInert={modal && open} use:dragToDismiss={{ edge: sheetEdge, ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }} transition:sheetGlide|global={{ edge: sheetEdge, onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
