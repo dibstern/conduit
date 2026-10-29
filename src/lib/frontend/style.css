@@ -1084,15 +1084,22 @@ body:has(dialog:modal) {
 	#session-bar-title-row {
 	padding-top: 2px;
 }
-/* The taller row's segments own its full 44px height (y 10 to 54), measured
-   from each button's centre so 24px and 32px segments reach equally far. */
-#layout[data-pose="duo-unfolded-portrait"]
+/* In both Duo portraits the taller row's segments own its full 44px height
+   (y 10 to 54), measured from each button's centre so 24px and 32px segments
+   reach equally far. */
+#layout:is(
+		[data-pose="duo-unfolded-portrait"],
+		[data-pose="duo-folded-portrait"]
+	)
 	#session-bar[data-compact="true"][data-collapsed="false"]
 	.session-bar-segments
 	button {
 	clip-path: inset(calc(50% - 22px) 0);
 }
-#layout[data-pose="duo-unfolded-portrait"]
+#layout:is(
+		[data-pose="duo-unfolded-portrait"],
+		[data-pose="duo-folded-portrait"]
+	)
 	#session-bar[data-compact="true"][data-collapsed="false"]
 	.session-bar-segments
 	button::before {
@@ -1323,21 +1330,6 @@ body:has(dialog:modal) {
 	#session-bar-title-row
 	button {
 	clip-path: none;
-}
-/* Segments (skills, side threads) own the row's 44px (y 10 to 54), measured
-   from each button's centre, as in unfolded portrait. */
-#layout[data-pose="duo-folded-portrait"]
-	#session-bar[data-compact="true"][data-collapsed="false"]
-	.session-bar-segments
-	button {
-	clip-path: inset(calc(50% - 22px) 0);
-}
-#layout[data-pose="duo-folded-portrait"]
-	#session-bar[data-compact="true"][data-collapsed="false"]
-	.session-bar-segments
-	button::before {
-	top: calc(50% - 22px);
-	height: 44px;
 }
 
 /* The composer is the field alone; its controls are in the rail. The bottom

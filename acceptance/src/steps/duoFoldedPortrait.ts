@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { StepHandler } from "../runtime.js";
+import { headerTargetMisses } from "./shared.js";
 
 /** The rail's controls, found by what they are, not by where the rail put them. */
 const railControls: Record<string, string> = {
@@ -82,30 +83,14 @@ export const duoFoldedPortraitHandlers: StepHandler[] = [
 			const header =
 				match[1] === "session" ? "#session-bar" : "#sidebar-header";
 			expect(await interactiveBoxes(world.page, header)).not.toEqual([]);
-			// Hit-test the band's last pixel row: a target can outgrow its box.
-			const misplaced = await world.page.locator(header).evaluate(
-				(root, { selector, centre, below }) =>
-					[...root.querySelectorAll(selector)].flatMap((control) => {
-						const rect = control.getBoundingClientRect();
-						if (rect.width === 0 || !control.checkVisibility()) return [];
-						const x = rect.x + rect.width / 2;
-						const y = rect.y + rect.height / 2;
-						const name = control.id || control.getAttribute("data-testid");
-						if (y < centre - 0.5) return [`${name} centred at y${y}`];
-						const hit = document.elementFromPoint(x, y + below - 1);
-						return hit?.closest(selector) === control
-							? []
-							: [
-									`${name} ends above y${y + below}: ${hit?.id || hit?.tagName}`,
-								];
-					}),
-				{
-					selector: INTERACTIVE,
-					centre: Number(match[2]),
-					below: Number(match[3]),
-				},
-			);
-			expect(misplaced).toEqual([]);
+			expect(
+				await headerTargetMisses(
+					world.page,
+					`${header} :is(${INTERACTIVE})`,
+					Number(match[2]),
+					Number(match[3]),
+				),
+			).toEqual([]);
 		},
 	},
 	{
