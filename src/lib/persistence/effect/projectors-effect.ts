@@ -1099,7 +1099,18 @@ export const makeMessageProjector = defineProjector(() => ({
 						 NULL, NULL,
 						 ${toolState && "status" in toolState && typeof toolState.status === "string" ? toolState.status : null},
 						 ${index}, ${start}, ${end},
-						 ${toolState && "metadata" in toolState ? encodeJson(toolState.metadata) : null},
+						 ${
+								toolState && "fileChanges" in toolState
+									? encodeJson({
+											...("metadata" in toolState
+												? jsonRecord(encodeJson(toolState.metadata))
+												: {}),
+											fileChanges: toolState.fileChanges,
+										})
+									: toolState && "metadata" in toolState
+										? encodeJson(toolState.metadata)
+										: null
+							},
 						 ${encodeJson(part)}, ${ctx.version})
 						ON CONFLICT (id) DO UPDATE SET
 							type = excluded.type, text = excluded.text, tool_name = excluded.tool_name,
@@ -1417,7 +1428,9 @@ export const makeMessageProjector = defineProjector(() => ({
 					WHERE mp.id = ${event.data.partId}`;
 				const metadata = yield* mergeMetadata(
 					rows[0]?.metadata ?? null,
-					event.data.metadata,
+					event.data.fileChanges === undefined
+						? event.data.metadata
+						: { ...event.data.metadata, fileChanges: event.data.fileChanges },
 					event.sessionId,
 					event.data.partId,
 				);

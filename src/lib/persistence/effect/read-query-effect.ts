@@ -1136,10 +1136,12 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				tool_id: string;
 				input: string | null;
 				output: string | null;
+				status: string | null;
+				metadata: string | null;
 				version: number;
 				settled: number | null;
 			}>`
-				SELECT COALESCE(mp.call_id, mp.id) AS tool_id, mp.input,
+				SELECT COALESCE(mp.call_id, mp.id) AS tool_id, mp.input, mp.status, mp.metadata,
 					${toolOutput} AS output, mp.version,
 					mp.status IN ('completed', 'error') AS settled
 				FROM message_parts mp
@@ -1155,6 +1157,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					settled: row.settled === 1,
 					input: row.input,
 					output: row.output,
+					status: row.status,
+					metadata: row.metadata,
 				}),
 			);
 		}).pipe(

@@ -495,8 +495,13 @@ export const CommandExecutionItemSchema = Schema.Struct({
 	exitCode: Schema.optional(Schema.NullOr(Schema.Number)),
 	durationMs: Schema.optional(Schema.NullOr(Schema.Number)),
 });
+export const PatchChangeKindSchema = Schema.Struct({
+	type: Schema.String,
+	move_path: Schema.optional(Schema.NullOr(Schema.String)),
+});
 export const FileUpdateChangeSchema = Schema.Struct({
 	path: Schema.String,
+	kind: Schema.optional(PatchChangeKindSchema),
 	diff: Schema.String,
 });
 export const FileChangeItemSchema = Schema.Struct({
@@ -927,6 +932,7 @@ export const CONSUMED_DEFINITIONS = {
 	TurnPlanUpdatedNotification: { schemas: [TurnPlanUpdatedNotificationSchema] },
 	TurnPlanStep: { schemas: [TurnPlanStepSchema] },
 	FileUpdateChange: { schemas: [FileUpdateChangeSchema] },
+	PatchChangeKind: { schemas: [PatchChangeKindSchema] },
 	ReasoningSummaryTextDeltaNotification: {
 		schemas: [ReasoningSummaryTextDeltaNotificationSchema],
 	},

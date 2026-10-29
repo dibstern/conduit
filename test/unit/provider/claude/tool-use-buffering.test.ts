@@ -214,6 +214,7 @@ describe("ClaudeEventTranslator — tool_use buffering", () => {
 		// tool.completed should also be emitted for the interrupted tool
 		const toolCompleted = events.filter((e) => e.type === "tool.completed");
 		expect(toolCompleted).toHaveLength(1);
+		expect(dataOf(toolCompleted[0])["fileChanges"]).toEqual([]);
 	});
 
 	it("bufferedInput overrides non-empty initial block.input", async () => {

@@ -8,6 +8,12 @@
 // question's options, a subagent's reply) are never cut. The transcript query
 // applies the same rule to outputs in SQL, reading these constants.
 
+import { Option, Schema } from "effect";
+import {
+	CanonicalToolInputSchema,
+	type ToolFileChange,
+	ToolFileChangeSchema,
+} from "../contracts/stored-event.js";
 import {
 	CodePoints,
 	PartVersion,
@@ -20,6 +26,7 @@ import {
 	type WholeInput,
 	type WholeText,
 } from "../contracts/tool-wire.js";
+import { deriveToolFileChanges } from "../tool-file-changes.js";
 
 export const PREVIEW_CODE_POINTS = CodePoints.make(2_000);
 
@@ -41,6 +48,8 @@ interface NeverCutToolWire {
 export interface ToolWire {
 	readonly input?: ToolInput;
 	readonly output?: ToolText;
+	readonly fileChanges?: readonly ToolFileChange[];
+	readonly fileChangesBytes?: Utf8Bytes;
 }
 
 /** The first PREVIEW_CODE_POINTS code points, or undefined when within budget. */
@@ -59,6 +68,48 @@ const head = (text: string): string | undefined => {
 
 const utf8Bytes = (text: string) =>
 	Utf8Bytes.make(Buffer.byteLength(text, "utf8"));
+
+/** Validate stored provider text, or derive legacy text before clipping input. */
+export function toolFileChanges(
+	status: unknown,
+	input: unknown,
+	recorded: unknown,
+): readonly ToolFileChange[] | undefined {
+	if (status !== "completed") return undefined;
+	const changes = Schema.decodeUnknownOption(
+		Schema.Array(ToolFileChangeSchema),
+	)(recorded);
+	if (Option.isSome(changes)) return changes.value;
+	const canonical = Schema.decodeUnknownOption(CanonicalToolInputSchema)(input);
+	if (Option.isNone(canonical)) return undefined;
+	const fallback = deriveToolFileChanges(canonical.value);
+	return fallback.length ? fallback : undefined;
+}
+
+/** File identities stay whole; provider text uses the same per-field budget. */
+function fileChangesWire(
+	changes: readonly ToolFileChange[] | undefined,
+): Pick<ToolWire, "fileChanges" | "fileChangesBytes"> {
+	if (changes === undefined) return {};
+	let fullBytes = 0;
+	let cut = false;
+	const text = (value: string) => {
+		fullBytes += utf8Bytes(value);
+		const preview = head(value);
+		if (preview !== undefined) cut = true;
+		return preview ?? value;
+	};
+	const fileChanges = changes.map((change) => ({
+		...change,
+		...(change.patch !== undefined ? { patch: text(change.patch) } : {}),
+		...(change.before !== undefined ? { before: text(change.before) } : {}),
+		...(change.after !== undefined ? { after: text(change.after) } : {}),
+	}));
+	return {
+		fileChanges,
+		...(cut ? { fileChangesBytes: Utf8Bytes.make(fullBytes) } : {}),
+	};
+}
 
 const parseInput = (stored: string): unknown => {
 	try {
@@ -104,7 +155,9 @@ export function projectTool(tool: {
 	readonly input?: string | null | undefined;
 	readonly output?: string | null | undefined;
 	readonly outputBytes?: number | null | undefined;
+	readonly fileChanges?: readonly ToolFileChange[] | undefined;
 }): ToolWire {
+	const fileChanges = fileChangesWire(tool.fileChanges);
 	if (tool.name != null && neverCut.has(tool.name)) {
 		const whole: NeverCutToolWire = {
 			...(tool.input == null
@@ -114,9 +167,10 @@ export function projectTool(tool: {
 				? {}
 				: { output: { _tag: "whole", text: tool.output } }),
 		};
-		return whole;
+		return { ...whole, ...fileChanges };
 	}
 	return {
+		...fileChanges,
 		...(tool.input == null ? {} : { input: inputWire(tool.input) }),
 		...(tool.output == null
 			? {}
@@ -159,14 +213,27 @@ export function toolDetail(stored: {
 	readonly settled: boolean;
 	readonly input: string | null;
 	readonly output: string | null;
+	readonly status?: string | null;
+	readonly metadata?: string | null;
 }): ToolDetail {
+	const input = stored.input == null ? undefined : parseInput(stored.input);
+	const metadata =
+		stored.metadata == null ? undefined : parseInput(stored.metadata);
+	const fileChanges = toolFileChanges(
+		stored.status,
+		input,
+		typeof metadata === "object" &&
+			metadata !== null &&
+			"fileChanges" in metadata
+			? metadata.fileChanges
+			: undefined,
+	);
 	return {
 		toolId: ToolCallId.make(stored.toolId),
 		version: PartVersion.make(stored.version),
 		settled: stored.settled,
-		...(stored.input == null
-			? {}
-			: { input: { _tag: "whole", value: parseInput(stored.input) } }),
+		...(fileChanges === undefined ? {} : { fileChanges }),
+		...(stored.input == null ? {} : { input: { _tag: "whole", value: input } }),
 		...(stored.output == null
 			? {}
 			: { output: { _tag: "whole", text: stored.output } }),
