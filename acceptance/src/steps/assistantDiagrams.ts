@@ -10,7 +10,8 @@ const flowchart = "flowchart LR\n  Plan --> Build --> Ship";
 // Wider than the desktop transcript, so pele shrinks it to fit.
 const wide = `flowchart LR\n  ${["Plan the work", "Build the parts", "Test every path", "Review the change", "Merge to main", "Release the build", "Watch the metrics"].map((label, n) => `N${n}[${label}]`).join(" --> ")}`;
 // Taller than the 380px cap.
-const tall = `flowchart TD\n  ${Array.from({ length: 10 }, (_, n) => `S${n}[Step ${n + 1}]`).join(" --> ")}`;
+const tallSteps = 10;
+const tall = `flowchart TD\n  ${Array.from({ length: tallSteps }, (_, n) => `S${n}[Step ${n + 1}]`).join(" --> ")}`;
 const fixtures = {
 	"a flowchart diagram": [flowchart],
 	"a broken flowchart diagram": ["flowchart LR\n  Plan -->|oops Build"],
@@ -350,23 +351,28 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 			const cap = Number(match[1]);
 			const svg = drawing(world.page);
 			await expect(svg).toBeVisible();
-			const natural = await svg.evaluate((element) => ({
-				width: Number(element.getAttribute("width")),
-				height: Number(element.getAttribute("height")),
-			}));
-			if (natural.height <= cap)
+			if (Number(await svg.getAttribute("height")) <= cap)
 				throw new Error("The fixture is not tall enough");
 			const box = await svg.boundingBox();
 			const frame = await diagram(world.page).boundingBox();
 			if (!box || !frame) throw new Error("The diagram has no box");
 			expect(box.height).toBeLessThanOrEqual(cap + 1);
-			// Same proportions and inside the frame: nothing is cut off.
-			expect(box.width / box.height).toBeCloseTo(
-				natural.width / natural.height,
-				1,
-			);
 			expect(box.x).toBeGreaterThanOrEqual(frame.x);
 			expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width);
+			// Every step is drawn inside the visible svg: nothing is cut off.
+			const shown = await svg.evaluate((element) => {
+				const edge = element.getBoundingClientRect();
+				return [...element.querySelectorAll(".pele-node")].filter((node) => {
+					const b = node.getBoundingClientRect();
+					return (
+						b.top >= edge.top - 1 &&
+						b.bottom <= edge.bottom + 1 &&
+						b.left >= edge.left - 1 &&
+						b.right <= edge.right + 1
+					);
+				}).length;
+			});
+			expect(shown).toBe(tallSteps);
 		},
 	},
 	{
