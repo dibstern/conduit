@@ -11,6 +11,10 @@ import {
 	type AttachmentRef,
 	AttachmentRefSchema,
 } from "../contracts/attachment-ref.js";
+import type { DraftReview } from "../contracts/ws-rpc.js";
+
+/** A review comment is stored as its JSON; this mime never becomes an AttachmentRef. */
+export const REVIEW_MIME = "application/vnd.conduit.review+json";
 
 export class AttachmentMissing extends Data.TaggedError("AttachmentMissing")<{
 	readonly hash: string;
@@ -24,6 +28,8 @@ export interface AttachmentStore {
 	readonly put: (
 		dataUrl: string,
 	) => Effect.Effect<AttachmentRef, AttachmentValidationError | SqlError>;
+	/** Stores a review comment's JSON and returns its blob hash. */
+	readonly putReview: (review: DraftReview) => Effect.Effect<string, SqlError>;
 	readonly get: (
 		hash: string,
 	) => Effect.Effect<
@@ -31,6 +37,9 @@ export interface AttachmentStore {
 		AttachmentMissing | SqlError
 	>;
 }
+
+const blobHash = (mime: string, bytes: Uint8Array) =>
+	createHash("sha256").update(mime).update("\0").update(bytes).digest("hex");
 
 const decodeRef = Schema.decodeUnknownSync(AttachmentRefSchema);
 
@@ -41,14 +50,9 @@ export function attachmentFromDataUrl(dataUrl: string): {
 } {
 	const parsed = parseAttachmentDataUrl(dataUrl);
 	const bytes = Buffer.from(parsed.data, "base64");
-	const hash = createHash("sha256")
-		.update(parsed.mime)
-		.update("\0")
-		.update(bytes)
-		.digest("hex");
 	return {
 		ref: decodeRef({
-			attachmentHash: hash,
+			attachmentHash: blobHash(parsed.mime, bytes),
 			mime: parsed.mime,
 			...(parsed.name !== undefined ? { name: parsed.name } : {}),
 		}),
@@ -66,9 +70,19 @@ export const makeAttachmentStore = Effect.gen(function* () {
 					? cause
 					: new AttachmentValidationError(String(cause)),
 		});
-		yield* sql`INSERT OR IGNORE INTO attachment_blobs (hash, mime, size, bytes, created_at)
-			VALUES (${ref.attachmentHash}, ${ref.mime}, ${bytes.length}, ${bytes}, ${Date.now()})`;
+		yield* insert(ref.attachmentHash, ref.mime, bytes);
 		return ref;
+	});
+	const insert = (hash: string, mime: string, bytes: Uint8Array) =>
+		sql`INSERT OR IGNORE INTO attachment_blobs (hash, mime, size, bytes, created_at)
+			VALUES (${hash}, ${mime}, ${bytes.length}, ${bytes}, ${Date.now()})`;
+	const putReview = Effect.fn("AttachmentStore.putReview")(function* (
+		review: DraftReview,
+	) {
+		const bytes = Buffer.from(JSON.stringify(review));
+		const hash = blobHash(REVIEW_MIME, bytes);
+		yield* insert(hash, REVIEW_MIME, bytes);
+		return hash;
 	});
 	const get = Effect.fn("AttachmentStore.get")(function* (hash: string) {
 		const [blob] = yield* sql<{
@@ -78,7 +92,7 @@ export const makeAttachmentStore = Effect.gen(function* () {
 		if (!blob) return yield* new AttachmentMissing({ hash });
 		return { bytes: Buffer.from(blob.bytes), mime: blob.mime };
 	});
-	return { put, get } satisfies AttachmentStore;
+	return { put, putReview, get } satisfies AttachmentStore;
 });
 
 /** Only the daemon's offline storage phase calls this; building a store never does. */

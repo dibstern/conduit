@@ -3070,12 +3070,36 @@ export const InputDraftKeySchema = Schema.Union([
 ]);
 export type InputDraftKey = typeof InputDraftKeySchema.Type;
 
+/** Caps from t3code's composer review context. */
+export const REVIEW_TEXT_MAX_CHARS = 16_000;
+export const REVIEW_EXCERPT_MAX_CHARS = 32_000;
+const ReviewLine = Schema.Number.pipe(
+	Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1)),
+);
+
+/** A comment on selected lines of one Session Diff file, quoting their excerpt. */
+export const DraftReviewSchema = Schema.Struct({
+	folder: NonEmptyString,
+	path: NonEmptyString,
+	side: Schema.Literals(["deletions", "additions"]),
+	lines: Schema.Struct({ start: ReviewLine, end: ReviewLine }),
+	excerpt: Schema.String.pipe(
+		Schema.check(Schema.isMaxLength(REVIEW_EXCERPT_MAX_CHARS)),
+	),
+	text: NonEmptyString.pipe(
+		Schema.check(Schema.isMaxLength(REVIEW_TEXT_MAX_CHARS)),
+	),
+});
+export type DraftReview = typeof DraftReviewSchema.Type;
+
 export const DraftAttachmentSchema = Schema.Struct({
 	id: NonEmptyString,
 	name: Schema.String,
 	mime: Schema.String,
 	size: Schema.Number,
 	hash: Schema.String,
+	/** Present exactly when the attachment is a review comment. */
+	review: Schema.optional(DraftReviewSchema),
 });
 export type DraftAttachment = typeof DraftAttachmentSchema.Type;
 
@@ -3093,6 +3117,18 @@ export const AddDraftAttachment = Rpc.make("AddDraftAttachment", {
 		Schema.Struct({ ended: Schema.Literals(["removed", "sent"]) }),
 	]),
 	error: Schema.Union([WsRpcError, DraftAttachmentRejected]),
+});
+
+/** A review comment joins the draft as an attachment; removal is RemoveDraftAttachment. */
+export const AddDraftReview = Rpc.make("AddDraftReview", {
+	payload: Schema.TaggedStruct("AddDraftReview", {
+		key: InputDraftKeySchema,
+		id: NonEmptyString,
+		review: DraftReviewSchema,
+		projectSlug: Schema.optional(NonEmptyString),
+	}),
+	success: AddDraftAttachment.successSchema,
+	error: WsRpcError,
 });
 
 export const RemoveDraftAttachment = Rpc.make("RemoveDraftAttachment", {
@@ -3639,6 +3675,7 @@ const wsRpcRequests = [
 	SendInputNow,
 	SyncInputDraft,
 	AddDraftAttachment,
+	AddDraftReview,
 	RemoveDraftAttachment,
 	CancelSession,
 	StopBackgroundTask,
