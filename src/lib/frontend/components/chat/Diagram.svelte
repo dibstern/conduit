@@ -62,15 +62,20 @@
 				},
 			);
 		};
-		// Pressing pele's zoom buttons must not take focus off the host, or the next Escape skips the zoom reset.
-		const keepFocus = (event: MouseEvent): void => {
-			if (event.target instanceof Element && event.target.closest(".pele-zoom")) event.preventDefault();
+		// In the viewer, Escape anywhere in the diagram resets a zoomed drawing before it can close the dialog.
+		// pele only hears keys on its host, outside its buttons; preventDefault stops the dialog's cancel.
+		const frame = variant === "viewer" ? target.closest<HTMLElement>("[data-diagram]") : null;
+		const resetOnEscape = (event: KeyboardEvent): void => {
+			const zoom = mounted?.zoom;
+			if (event.key !== "Escape" || event.defaultPrevented || !zoom || zoom.scale === zoom.fit) return;
+			zoom.reset();
+			event.preventDefault();
 		};
-		target.addEventListener("mousedown", keepFocus);
+		frame?.addEventListener("keydown", resetOnEscape);
 		attempt();
 		return () => {
 			cancelled = true;
-			target.removeEventListener("mousedown", keepFocus);
+			frame?.removeEventListener("keydown", resetOnEscape);
 			mounted?.destroy();
 		};
 	});

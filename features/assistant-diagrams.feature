@@ -193,13 +193,25 @@ Scenario: a diagram still loading has no Expand button
   When the transcript contains a finished assistant message with a sequence diagram
   Then the diagram is still loading and has no Expand button
 
-Scenario: after pressing the zoom in button, Escape still resets the expanded diagram first
+Scenario: after pressing Copy code and then the zoom in button, Escape still resets the expanded diagram first
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop
   And I open a composer session
   When the transcript contains a finished assistant message with a flowchart diagram
   And I press Expand diagram on the diagram
+  And I press Copy code on the expanded diagram
   And I press the zoom in button on the expanded diagram
+  Then the expanded diagram is zoomed
+  When I press Escape in the media viewer
+  Then the expanded diagram is back to its fit and the media viewer is still open
+
+Scenario: after zooming with the keyboard on the zoom in button, Escape resets the expanded diagram first
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I press Expand diagram on the diagram
+  And I press Enter on the zoom in button of the expanded diagram
   Then the expanded diagram is zoomed
   When I press Escape in the media viewer
   Then the expanded diagram is back to its fit and the media viewer is still open

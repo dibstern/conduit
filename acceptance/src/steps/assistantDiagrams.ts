@@ -383,6 +383,26 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "press Enter on zoom in on the expanded diagram",
+		match: /^I press Enter on the zoom in button of the expanded diagram$/,
+		run: async ({ world }) => {
+			await noteFit(expandedDrawing(world.page));
+			await viewer(world.page).locator(".pele-zoom-in").press("Enter");
+		},
+	},
+	{
+		name: "press Copy code on the expanded diagram",
+		match: /^I press Copy code on the expanded diagram$/,
+		run: async ({ world }) => {
+			await world.page
+				.context()
+				.grantPermissions(["clipboard-read", "clipboard-write"]);
+			await viewer(world.page)
+				.getByRole("button", { name: "Copy code", exact: true })
+				.click();
+		},
+	},
+	{
 		name: "tap the empty space above the expanded diagram",
 		match: /^I tap the empty space above the expanded diagram$/,
 		run: async ({ world }) => {
