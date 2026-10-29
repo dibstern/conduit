@@ -1558,6 +1558,11 @@ body:has(dialog:modal) {
 	padding: 10px 8px 0 26px;
 	box-shadow: 0 1px 0 var(--color-border-subtle);
 }
+/* A phone's header has no edge, so the filters sit straight under it. Below
+   this one's hairline they keep the 8pt they also leave beneath them. */
+#layout[data-pose="duo-folded-portrait"] #session-search {
+	padding-top: 8px;
+}
 
 @keyframes spin {
 	to {
