@@ -1248,6 +1248,8 @@ export async function mockWsRpc(
 		}),
 		GetCategorySet: () => DEFAULT_CATEGORY_SET,
 		ListRecaps: () => [],
+		// A session with no unstaged changes, until a step seeds some.
+		SessionDiffList: () => ({ revision: "clean", folders: [] }),
 		SubscribeRecaps: () =>
 			Stream.concat(
 				Stream.succeed({ versions: [], generating: false, error: null }),

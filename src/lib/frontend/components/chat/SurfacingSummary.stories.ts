@@ -30,10 +30,10 @@ const view = surfaceTurn({
 	positions: parts.map((_, index) => ({ left: index * 16, width: 16 })),
 	categorySet: DEFAULT_CATEGORY_SET,
 	level: "balanced",
+	view: { kind: "show", stop: "balanced" },
 	live: false,
 	latestTurn: true,
-	picked: null,
-	folded: null,
+	selection: { kind: "auto" },
 	start: START,
 });
 const whole: TurnRecap = {
@@ -187,13 +187,31 @@ export const UnwrittenLight: Story = {
 	globals: { theme: "light" },
 };
 
+/** Beside the transcript a citation opens its turn card, so the summary shows no copy of its own. */
+export const CitationOpensCard: Story = {
+	...WholeTurn,
+	// Pinned: phone defaults to the compact viewport, where the sheet reads it.
+	args: { ...WholeTurn.args, phone: false },
+	play: async ({ args, canvasElement }) => {
+		const cite = within(canvasElement).getByTestId("surfacing-recap-cite-2");
+		await userEvent.click(cite);
+		await expect(args["oncite"]).toHaveBeenCalledWith(2);
+		await expect(cite).toHaveAttribute("data-followed", "true");
+		await expect(
+			within(document.body).queryByTestId("surfacing-recap-reader"),
+		).toBeNull();
+	},
+};
+/** The phone sheet covers the card, so it reads the cited message itself. */
 export const CitedMessage: Story = {
 	...WholeTurn,
-	// The desktop citation reader is a popover outside the story root.
+	args: { ...WholeTurn.args, phone: true },
+	// The phone sheet renders outside the story root.
 	tags: ["viewport-capture"],
-	play: async ({ canvasElement }) => {
-		await within(canvasElement).getByTestId("surfacing-recap-cite-2").click();
-		const reader = within(document.body).getByTestId("surfacing-recap-reader");
+	play: async () => {
+		const body = within(document.body);
+		await body.getByTestId("surfacing-recap-cite-2").click();
+		const reader = body.getByTestId("surfacing-recap-reader");
 		await expect(reader).toBeVisible();
 		await expect(reader).toHaveTextContent(
 			"Recapture the phone sidebar, or keep the old paint order?",
@@ -209,10 +227,10 @@ export const CitedMessageLight: Story = {
 /** ↩ Reply on a cited message references it whole, and stays pressed while the draft does. */
 export const CitedReplied: Story = {
 	...WholeTurn,
-	args: { ...WholeTurn.args, replies: new Map([[2, 0]]) },
+	args: { ...WholeTurn.args, phone: true, replies: new Map([[2, 0]]) },
 	tags: ["viewport-capture"],
-	play: async ({ args, canvasElement }) => {
-		await within(canvasElement).getByTestId("surfacing-recap-cite-2").click();
+	play: async ({ args }) => {
+		await within(document.body).getByTestId("surfacing-recap-cite-2").click();
 		const reply = within(
 			within(document.body).getByTestId("surfacing-recap-reader"),
 		).getByRole("button", { name: "Reply" });

@@ -51,6 +51,7 @@ import { providerInstancesHandlers } from "./steps/providerInstances.js";
 import { providerSettingsHandlers } from "./steps/providerSettings.js";
 import { rightPaneHandlers } from "./steps/rightPane.js";
 import { sessionAutoSettleHandlers } from "./steps/sessionAutoSettle.js";
+import { sessionDiffHandlers } from "./steps/sessionDiff.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
 import { sessionModeDefaultHandlers } from "./steps/sessionModeDefault.js";
@@ -75,6 +76,14 @@ import { terminalSettingsHandlers } from "./steps/terminalSettings.js";
 import { themeMenuHandlers } from "./steps/themeMenu.js";
 import { titleGenerationSettingsHandlers } from "./steps/titleGenerationSettings.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
+import { turnActivityHandlers } from "./steps/turnActivity.js";
+import { turnActivityShowHandlers } from "./steps/turnActivityShow.js";
+import { turnActivitySkillsHandlers } from "./steps/turnActivitySkills.js";
+import { turnHoverHandlers } from "./steps/turnHover.js";
+import { turnOpeningHandlers } from "./steps/turnOpening.js";
+import { turnPanelHandlers } from "./steps/turnPanel.js";
+import { turnQaHandlers } from "./steps/turnQa.js";
+import { turnUsageHandlers } from "./steps/turnUsage.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
 import { usageSettingsHandlers } from "./steps/usageSettings.js";
@@ -104,6 +113,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionRowsHandlers,
 	...projectTreeHandlers,
 	...rightPaneHandlers,
+	...sessionDiffHandlers,
 	...sessionModeDefaultHandlers,
 	...backgroundTasksHandlers,
 	...launchingRowsHandlers,
@@ -114,6 +124,14 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...titleGenerationSettingsHandlers,
 	...sideThreadsHandlers,
 	...surfacingCardHandlers,
+	...turnActivitySkillsHandlers,
+	...turnActivityHandlers,
+	...turnQaHandlers,
+	...turnActivityShowHandlers,
+	...turnPanelHandlers,
+	...turnUsageHandlers,
+	...turnHoverHandlers,
+	...turnOpeningHandlers,
 	...surfacingMarksHandlers,
 	...surfacingMinimiseHandlers,
 	...surfacingRecapHandlers,

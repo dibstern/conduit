@@ -51,6 +51,14 @@ export function createScrollController(
 	const observed = new Set<Element>();
 	let measureFrame: { handle?: number } | null = null;
 	let attachment = 0;
+	let lastObservedExtent = 0;
+
+	function observeBottomGap(): number {
+		lastObservedExtent = container
+			? container.scrollHeight - container.clientHeight
+			: 0;
+		return lastObservedExtent - (container?.scrollTop ?? 0);
+	}
 
 	function measure() {
 		if (!container) return;
@@ -106,9 +114,13 @@ export function createScrollController(
 
 	function onContentChange() {
 		untrack(() => {
-			// Late layout growth is not a scroll gesture. Preserve follow before
-			// its queued scroll event can interpret the larger bottom gap as one.
-			if (getState() === "following") scrollToBottom();
+			const previousExtent = lastObservedExtent;
+			observeBottomGap();
+			followIfContentFits();
+			// A reader's queued scroll can increase the gap without layout growth.
+			// Follow only a larger scrollable extent, before its scroll event lands.
+			if (lastObservedExtent > previousExtent && getState() === "following")
+				scrollToBottom();
 			scheduleMeasure();
 		});
 	}
@@ -132,6 +144,7 @@ export function createScrollController(
 		programmaticScrollCount++;
 		pinned = true;
 		container.scrollTop = container.scrollHeight;
+		observeBottomGap();
 		// Clear unconsumed slots (a scroll that moved nothing fires no event) on
 		// the next frame. A frame dispatches scroll events before it runs rAF
 		// callbacks, so this always lands after our own event. setTimeout(0) does
@@ -148,6 +161,20 @@ export function createScrollController(
 		}
 	}
 
+	function followIfContentFits(): boolean {
+		// A shrink at scrollTop zero emits no scroll. Pending reveals settle
+		// their own position once expansion and placement have finished.
+		if (
+			!container ||
+			jumpFrame !== null ||
+			container.scrollHeight > container.clientHeight
+		)
+			return false;
+		pinned = true;
+		userDetached = false;
+		return true;
+	}
+
 	function onScroll(): void {
 		scheduleMeasure();
 		if (!container || jumpFrame !== null) return;
@@ -160,14 +187,12 @@ export function createScrollController(
 			programmaticScrollCount--;
 			return;
 		}
+		// Read after the guards: our own scrolls record their layout, and reading here
+		// would absorb growth that landed before this queued event.
+		const distFromBottom = observeBottomGap();
 
-		// Skip detach/re-follow logic if content doesn't overflow the
-		// container. Without this guard, edge cases (e.g. browser firing a
-		// scroll event on a non-overflowing container) could falsely detach.
-		if (container.scrollHeight <= container.clientHeight) return;
+		if (followIfContentFits()) return;
 
-		const distFromBottom =
-			container.scrollHeight - container.scrollTop - container.clientHeight;
 		pinned = distFromBottom < REFOLLOW_THRESHOLD;
 
 		// Re-follow when scrolled to the very bottom (within 5px).
@@ -214,6 +239,7 @@ export function createScrollController(
 			if (target === "latest") {
 				userDetached = false;
 				container.scrollTop = container.scrollHeight;
+				observeBottomGap();
 				pinned = true;
 				selectedTop = null;
 				scheduleMeasure();
@@ -236,6 +262,7 @@ export function createScrollController(
 				getNavigation().topClearance -
 				20;
 			container.scrollTop = top;
+			observeBottomGap();
 			pinned = false;
 			selectedTop =
 				Math.abs(container.scrollTop - top) > 1 ? container.scrollTop : null;
@@ -246,6 +273,7 @@ export function createScrollController(
 		attach(el: HTMLElement): void {
 			attachment++;
 			container = el;
+			observeBottomGap();
 			if (typeof MutationObserver !== "undefined") {
 				mutation = new MutationObserver(onContentChange);
 				mutation.observe(el, {
@@ -307,8 +335,7 @@ export function createScrollController(
 				jumpFrame = null;
 				if (!container || identity !== getNavigation().identity) return;
 				programmaticScrollCount = 0;
-				const gap =
-					container.scrollHeight - container.scrollTop - container.clientHeight;
+				const gap = observeBottomGap();
 				pinned = gap < REFOLLOW_THRESHOLD;
 				userDetached =
 					!pinned || getNavigation().historical || getNavigation().busy;
@@ -350,6 +377,7 @@ export function createScrollController(
 				const newScrollHeight = container.scrollHeight;
 				container.scrollTop =
 					prevScrollTop + (newScrollHeight - prevScrollHeight);
+				observeBottomGap();
 			});
 		},
 	};

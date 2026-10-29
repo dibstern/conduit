@@ -14,7 +14,7 @@
   (that one is a Button).
 -->
 <script module lang="ts">
-	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "ask-solid" | "ask" | "tag" | "chip" | "success" | "error" | "warning" | "snoozed" | "pinned" | "goal";
+	type BadgeVariant = "neutral" | "quiet" | "accent" | "accent-solid" | "ask-solid" | "ask" | "skill" | "tag" | "chip" | "success" | "error" | "warning" | "snoozed" | "pinned" | "goal";
 	type BadgeSize = "xs" | "sm" | "count" | "navigation-count" | "rail-count" | "status" | "label" | "session" | "command" | "indicator";
 	type BadgeShape = "rounded" | "pill";
 
@@ -29,6 +29,7 @@
 		"accent-solid": "bg-accent text-bg",
 		"ask-solid": "bg-fill-ask text-on-fill-ask",
 		ask: "bg-status-ask/18 text-status-ask",
+		skill: "bg-act-other/14 text-act-other",
 		success: "bg-success/16 text-success-ink",
 		error: "bg-error/14 text-error",
 		warning: "bg-warning-bg text-warning",

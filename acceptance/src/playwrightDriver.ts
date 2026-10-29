@@ -12,6 +12,7 @@ import {
 	freezeAnimations,
 	screenshotLocator,
 	waitForFonts,
+	waitForFrame,
 	waitForIcons,
 } from "../../test/e2e/helpers/visual-helpers.js";
 import type { VisualMode } from "./visualMode.js";
@@ -161,10 +162,7 @@ export class PlaywrightDriver {
 		}
 		// The app's pose follows resize events and its inset probe, which update in
 		// the next rendering step; one frame lets them land before the next step acts.
-		await page.evaluate(
-			() =>
-				new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
-		);
+		await waitForFrame(page);
 		this.activeViewport = viewport;
 	}
 
@@ -187,7 +185,7 @@ export class PlaywrightDriver {
 		selector: string,
 		baseline: string,
 		threshold: number,
-		mode: VisualMode,
+		mode: Exclude<VisualMode, "skip">,
 	): Promise<VisualMatchResult> {
 		if (!/^[a-z0-9-]+$/.test(regionId)) {
 			throw new Error(`Unsupported visual region: ${regionId}`);
@@ -213,10 +211,8 @@ export class PlaywrightDriver {
 					animation.finish();
 				}
 			}
-			return new Promise<void>((resolve) =>
-				requestAnimationFrame(() => resolve()),
-			);
 		});
+		await waitForFrame(page);
 
 		const locator = page.locator(selector);
 		await locator.waitFor({ state: "visible", timeout: 10_000 });

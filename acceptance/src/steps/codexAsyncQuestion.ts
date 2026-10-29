@@ -242,6 +242,22 @@ export const codexAsyncQuestionHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert settled Turn stays open on Q&A",
+		match: /^the settled Turn stays open on Q&A$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			// Settling is asynchronous; the stop button leaves once the turn is idle.
+			await expect(page.locator("#stop")).toBeHidden();
+			const panel = page.locator("#messages .turn-activity");
+			await expect(
+				panel.getByTestId("surfacing-minimise-toggle"),
+			).toHaveAttribute("aria-expanded", "true");
+			await expect(
+				panel.getByRole("region", { name: "Turn Q&A", exact: true }),
+			).toBeVisible();
+		},
+	},
+	{
 		name: "assert Codex async question does not block the composer",
 		match: /^the Codex async question leaves the composer idle$/,
 		run: async ({ world }) => {
@@ -287,9 +303,12 @@ export const codexAsyncQuestionHandlers: StepHandler[] = [
 			await expect(
 				world.page.locator("#messages .msg-user").last(),
 			).toContainText(`${titles[0]}\n${match[1]}\n\n${titles[1]}\n${match[2]}`);
-			await expect(world.page.locator(".tool-subtitle-text")).toContainText(
-				"Answered",
-			);
+			const qa = world.page.getByRole("region", {
+				name: "Turn Q&A",
+				exact: true,
+			});
+			await expect(qa).toContainText(match[1] ?? "");
+			await expect(qa.locator(".tool-subtitle-text")).toContainText("Answered");
 		},
 	},
 	{

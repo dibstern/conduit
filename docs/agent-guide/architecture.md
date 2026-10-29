@@ -125,7 +125,10 @@ by request fibers. The owner warns at most once per minute when reads request
 commands. `CONDUIT_STRICT_READ_SPAWN=1` turns this into a defect. The legacy
 Promise runner also rejects before enqueueing; session git's existing best-effort
 catches still return no git state. Strict mode remains opt-in while existing
-read paths still refresh git state.
+read paths still refresh git state. `SessionDiffList` and `SessionDiffFile` are
+named outside the read prefixes on purpose: a session diff snapshots folders into
+a private store under `<configDir>/folder-timeline/`, so it spawns git, and only
+while a Diff pane asks.
 
 `Subprocess.metrics` returns a JSON-serializable snapshot of spawn counts and
 cumulative wall and synchronous spawn time, globally and by command, plus active,

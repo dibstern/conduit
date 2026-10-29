@@ -3,19 +3,23 @@
 
 <script lang="ts">
 	import type { ToolMessage, QuestionRequest, AskUserQuestion } from "../../types.js";
-	import { permissionsState } from "../../stores/permissions.svelte.js";
+	import { pendingQuestionFor, permissionsState } from "../../stores/permissions.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
-	import { fmtDuration } from "../../utils/turns.js";
+	import { fmtDuration, isOpenHandBack } from "../../utils/turns.js";
 
 	import Icon from "../ui/Icon.svelte";
 	import ConduitMark from '../ui/ConduitMark.svelte';
 	import QuestionCard from "./QuestionCard.svelte";
 	import Surface from "../ui/Surface.svelte";
+	import Button from "../ui/Button.svelte";
 
-	let { message }: {
+	let { message, presentation = "card", onopen }: {
 		message: ToolMessage;
+		presentation?: "card" | "log";
+		onopen?: (() => void) | undefined;
 	} = $props();
+	let expanded = $state(false);
 
 	// The question tool name is "AskUserQuestion" (mapped from "question").
 	// When the question is active, render the interactive QuestionCard inline.
@@ -62,23 +66,16 @@
 	 * server-side que_ ID), or null if no match.
 	 */
 	const pendingQuestionRequest = $derived.by((): QuestionRequest | null => {
-		// Primary: match by toolUseId (toolu_ callID) — reliable 1:1 correlation
-		const byToolUseId = permissionsState.pendingQuestions.find(
-			(q) => q.toolUseId === message.id
-		);
-		if (byToolUseId) return byToolUseId;
+		const byId = pendingQuestionFor(message.id);
+		if (byId) return byId;
 
-		// Secondary: exact toolId match (for edge cases where toolId = message.id)
-		const byToolId = permissionsState.pendingQuestions.find(
-			(q) => q.toolId === message.id
-		);
-		if (byToolId) return byToolId;
-
-		// Tertiary: content-match against pending questions to find the correct que_ ID.
+		// Fallback: content-match against pending questions to find the correct que_ ID.
 		// Scoped to the viewed session: pending questions outlive switches, and
 		// another session's identical text must not bind (answers go by toolId).
 		const fallbackQuestions = questionDataFromInput;
-		if (fallbackQuestions) {
+		// Completed questions need an exact request match: identical historical
+		// wording cannot prove which async question is still pending.
+		if (fallbackQuestions && isOpenHandBack(message)) {
 			const contentMatch = permissionsState.pendingQuestions.find((pendingQuestion) => {
 				if (pendingQuestion.sessionId !== sessionState.currentId) return false;
 				if (pendingQuestion.questions.length !== fallbackQuestions.length) return false;
@@ -98,16 +95,10 @@
 		(message.input as Record<string, unknown> | null | undefined)?.['delivery'] === "async",
 	);
 
-	/** Whether the question is actively pending and should show an interactive card.
-	 *  Async questions stay interactive after their turn and tool have completed.
-	 *  Blocking questions are interactive when either:
-	 *  1. The tool is running AND matched to a pendingQuestion (has server-side que_ ID), OR
-	 *  2. The tool is running AND we have question data from the tool input (cross-process
-	 *     case where GET /question returns empty, but the tool is still running). */
+	/** The shared hand-back rule also covers completed, unanswered async questions. */
 	const isQuestionActive = $derived(
-		pendingQuestionRequest?.delivery === "async" ||
-		((message.status === "pending" || message.status === "running") &&
-			(pendingQuestionRequest !== null || questionDataFromInput !== null))
+		isOpenHandBack(message, pendingQuestionRequest) &&
+			(pendingQuestionRequest !== null || questionDataFromInput !== null)
 	);
 
 	/**
@@ -210,6 +201,13 @@
 	const duration = $derived(message.createdAt === undefined || (!running && message.endedAt === undefined) ? undefined : Math.max(0, (message.endedAt ?? clock.now) - message.createdAt));
 </script>
 
+{#if presentation === "log"}
+	<Button variant="ghost" size="transcript" layout="flow" tone="inherit" hoverFill="surface" aria-expanded={onopen ? undefined : expanded} data-testid="turn-hand-back-row" onclick={() => { if (onopen) onopen(); else expanded = !expanded; }}>
+		<span class="shrink-0 text-text-muted">?</span>
+		<span class="truncate text-text-secondary">{questionData?.map((question, index) => `${question.question} → ${question.isSecret ? "Secret answer hidden" : parsedAnswers?.[index]?.join(", ") || answerDisplay || "No answer"}`).join("; ") ?? answerDisplay ?? "No answer"}</span>
+	</Button>
+{/if}
+{#if presentation === "card" || expanded}
 <div class="min-w-0">
 	<div class="question-tool-header flex items-center gap-[8px] h-[26px] text-[12.5px] text-text-muted">
 		<span class="tool-status-icon shrink-0 text-text-dimmer"><Icon name="message-square" size={14} /></span>
@@ -295,6 +293,8 @@
 	</div>
 {/if}
 </div>
+
+{/if}
 
 <style>
 	.question-tool-option-control {

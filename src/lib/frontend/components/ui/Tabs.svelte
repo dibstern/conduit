@@ -37,7 +37,7 @@
 		SEGMENTED_VARIANTS,
 		segmentedItemClass,
 		type SegmentedOption,
-		type SegmentedVariant,
+		type TabVariant,
 	} from "./segmented-styles.js";
 
 	type TabOption = SegmentedOption<T> & {
@@ -61,6 +61,7 @@
 		activationMode = "automatic",
 		label,
 		class: className,
+		"data-testid": testId,
 		optionContent,
 		onValueChange,
 	}: {
@@ -71,7 +72,7 @@
 		 * "This computer". It is decorative: the tabs keep their own names.
 		 */
 		options: readonly TabOption[];
-		variant?: SegmentedVariant;
+		variant?: TabVariant;
 		/**
 		 * `vertical` is a section list: ArrowUp/ArrowDown move (Left/Right do
 		 * not), and the list announces `aria-orientation="vertical"`.
@@ -87,6 +88,7 @@
 		label: string;
 		/** Additional classes for the strip element. */
 		class?: string;
+		"data-testid"?: string | undefined;
 		/** Custom contents for each tab; the label remains its accessible name. */
 		optionContent?: Snippet<[SegmentedOption<T>, boolean]>;
 		onValueChange?: (value: T) => void;
@@ -141,6 +143,7 @@
 >
 	<Tabs.List
 		aria-label={label}
+		data-testid={testId}
 		class={[recipe.list, className].filter(Boolean).join(" ")}
 	>
 		{#if variant === "sections"}
@@ -154,7 +157,9 @@
 			{/each}
 		{:else}
 			{#each options as option (option.value)}
-				{#if option.groupLabel}
+				{#if variant === "footer" && option.groupLabel}
+					<span aria-hidden="true" class="my-[9px] mx-[4px] w-px bg-border"></span>
+				{:else if option.groupLabel}
 					<div aria-hidden="true" data-testid="tabs-group-label" class="mt-[12px] mb-[4px] px-[8px] text-[10px] font-semibold uppercase tracking-[0.09em] leading-[15px] text-text-dimmer">{option.groupLabel}</div>
 				{/if}
 				{@render trigger(option)}

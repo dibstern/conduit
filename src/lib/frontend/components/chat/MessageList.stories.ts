@@ -134,17 +134,12 @@ export const BusyEmpty: Story = {
 	beforeEach: () => seed([], true),
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await expect(canvas.getByTestId("turn-live-head")).toHaveTextContent(
-			"Working",
+		// A busy session with no messages yet opens quietly (c4275.1), with no
+		// Working card until its first step.
+		await expect(canvas.getByTestId("turn-opening")).toHaveTextContent(
+			"Sending…",
 		);
-		await expect(canvas.getByTestId("turn-live-elapsed")).toHaveTextContent(
-			"(no prompt to time from)",
-		);
-		await expect(
-			canvas
-				.getByTestId("turn-live-head")
-				.querySelector('[data-flow-glyph="running"]'),
-		).toBeVisible();
+		await expect(canvas.queryByTestId("turn-live-head")).toBeNull();
 		await expect(
 			canvas.queryByTestId("composer-status-header"),
 		).not.toBeInTheDocument();

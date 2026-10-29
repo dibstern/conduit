@@ -7,10 +7,19 @@ import {
 	DEFAULT_CATEGORY_SET,
 } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
-import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js";
+import {
+	expectSelectedPin,
+	showTurnStop,
+} from "../../stories/turn-controls.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { AssistantMessage } from "../../types.js";
 import type { SurfaceTurn } from "../../utils/surface-turn.js";
-import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
+import {
+	type ActivityPart,
+	type Segment,
+	type Turn,
+	turnLog,
+} from "../../utils/turns.js";
 import { provideComposerDraft } from "../input/composer-reference.svelte.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -94,6 +103,7 @@ const turn: Turn = {
 		createdAt: START,
 	},
 	segments: [segment],
+	preface: [],
 	notices: [],
 	live: false,
 };
@@ -119,9 +129,12 @@ const meta = {
 		sessionId: "jev-story-session",
 		surfacing: config,
 	},
-	beforeEach: () => {
-		setSessionSurfaceLevel("jev-story-session", null);
-	},
+	beforeEach: ({ args }) =>
+		setupTurnStory({
+			turn: args["turn"],
+			sessionId: args["sessionId"],
+			surfacing: args["surfacing"],
+		}),
 } satisfies Meta<typeof TurnActivity>;
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -137,8 +150,16 @@ export const Balanced: Story = {
 		const card = canvas
 			.getByTestId("surfacing-msg-card")
 			.getBoundingClientRect();
-		const lane = canvas.getByTestId("surfacing-pins").getBoundingClientRect();
-		await expect(card.bottom).toBeLessThanOrEqual(lane.top);
+		const strip = canvasElement
+			.querySelector(".surface-strip")
+			?.getBoundingClientRect();
+		if (!strip) throw new Error("Missing strip");
+		await expect(card.top).toBeGreaterThan(strip.bottom);
+		await expect(canvasElement.querySelector(".card-caret")).toBeVisible();
+		const lane = canvas.getByTestId("surfacing-pins");
+		await expect(lane.getBoundingClientRect().height).toBe(
+			lane.querySelector('[data-row="1"]') ? 49 : 25,
+		);
 		await expect(
 			canvas.queryByTestId("surfacing-pin-3"),
 		).not.toBeInTheDocument();
@@ -158,6 +179,11 @@ export const Ask: Story = {
 			"2",
 		);
 		await expect(canvas.getByText("Needs reply")).toBeVisible();
+		const chip = canvas
+			.getByTestId("surfacing-pin-2")
+			.querySelector(".pin-chip");
+		if (!chip) throw new Error("Missing Ask chip");
+		await expect(getComputedStyle(chip, "::before").animationName).toBe("none");
 		canvas.getByTestId("surfacing-pin-2").blur();
 	},
 };
@@ -440,9 +466,9 @@ export const GroupCited: Story = {
 		const pin = lifted();
 		if (!pin) throw new Error("Missing cited pin");
 		await expect(pin).toHaveClass(/current/);
-		const inverse = new Option().style;
-		inverse.color = getComputedStyle(pin).getPropertyValue("--color-bg");
-		await expect(getComputedStyle(pin).color).toBe(inverse.color);
+		// The citation lifts the selected pin without repainting it (xdyjq.17).
+		await expect(getComputedStyle(pin).translate).toBe("0px -4px");
+		await expectSelectedPin(pin);
 		await userEvent.unhover(footnote);
 		await expect(lifted()).toBeNull();
 		footnote.focus();
@@ -479,7 +505,7 @@ export const Final: Story = {
 		await expect(
 			canvas.queryByTestId("surfacing-msg-card"),
 		).not.toBeInTheDocument();
-		await expect(canvas.getByText("Final only · 6 hidden")).toBeVisible();
+		await expect(canvas.getByText("Answer only · 6 hidden")).toBeVisible();
 	},
 };
 export const FinalLight: Story = { ...Final, globals: { theme: "light" } };
@@ -530,9 +556,10 @@ export const LivePicked: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await userEvent.click(canvas.getByTestId("surfacing-pin-2"));
+		// The open card owns "now ⇥"; the notes row drops its copy.
 		await expect(
 			canvas.getAllByRole("button", { name: "Follow latest" }),
-		).toHaveLength(2);
+		).toHaveLength(1);
 		canvas.getByTestId("surfacing-pin-2").blur();
 	},
 };
@@ -599,11 +626,11 @@ export const OlderTurnLight: Story = {
 export const Override: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		await userEvent.click(canvas.getByRole("radio", { name: /^Key$/ }));
+		await showTurnStop(canvasElement, "key");
 		await expect(
 			canvas.getByTestId("surfacing-level-default-dot"),
 		).toBeVisible();
-		canvas.getByRole("radio", { name: /^Key$/ }).blur();
+		(canvasElement.ownerDocument.activeElement as HTMLElement | null)?.blur();
 	},
 };
 export const OverrideLight: Story = {
@@ -642,21 +669,24 @@ export const RepliedLight: Story = {
 	globals: { theme: "light" },
 };
 
-const firstBlock: Segment = { activity: activity.slice(0, 8), reply: [] };
-const laterBlock: Segment = { activity: activity.slice(8), reply: [] };
-const handbackTurn: Turn = { ...turn, segments: [firstBlock, laterBlock] };
-export const HandBackFirstBlock: Story = {
-	args: { turn: handbackTurn, segment: firstBlock, final: false },
+// A hand-back splits the turn into blocks; like MessageList, the card reads
+// the whole turn as one head, strip and log.
+const handbackTurn: Turn = {
+	...turn,
+	segments: [
+		{ activity: activity.slice(0, 8), reply: [] },
+		{ activity: activity.slice(8), reply: [] },
+	],
 };
-export const HandBackFirstBlockLight: Story = {
-	...HandBackFirstBlock,
-	globals: { theme: "light" },
+export const HandBack: Story = {
+	args: {
+		turn: handbackTurn,
+		segment: turnLog(handbackTurn).segment,
+		final: true,
+	},
 };
-export const HandBackLastBlock: Story = {
-	args: { turn: handbackTurn, segment: laterBlock, final: true },
-};
-export const HandBackLastBlockLight: Story = {
-	...HandBackLastBlock,
+export const HandBackLight: Story = {
+	...HandBack,
 	globals: { theme: "light" },
 };
 const unjudgedSegment: Segment = {

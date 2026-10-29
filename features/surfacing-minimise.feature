@@ -1,7 +1,20 @@
 Feature: Turns minimise to a head and thin strip without losing messages
 
+Scenario Outline: A collapsed strip previews the step under the pointer
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And minimising uses the dark theme with Turns open Minimised
+  And the minimising session has three turns
+  Then the collapsed step preview follows the pointer while <gesture>
+  And the messages region visually matches surfacing-peek-step-<gesture> at 98 percent
+
+Examples:
+  | gesture  |
+  | hovering |
+  | dragging |
+
 Scenario Outline: Chevron and h remember a hand choice over the setting
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And minimising uses the <theme> theme with Turns open Auto
@@ -24,8 +37,8 @@ Examples:
   | phone    | dark  | 98        |
   | phone    | light | 98        |
 
-Scenario Outline: Hovering a minimised strip peeks and a click opens the nearest message
-  Given message surfacing is active at Balanced
+Scenario Outline: Hovering a minimised message shows its full preview and a click opens it
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a desktop
   And minimising uses the <theme> theme with Turns open Minimised
@@ -41,8 +54,8 @@ Examples:
   | dark  | 98        |
   | light | 98        |
 
-Scenario Outline: On a phone a tap on the minimised strip opens the nearest message
-  Given message surfacing is active at Balanced
+Scenario Outline: On a phone a tap on a minimised message opens it
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a phone
   And minimising uses the <theme> theme with Turns open Minimised
@@ -56,7 +69,7 @@ Examples:
   | light |
 
 Scenario Outline: Auto folds only older fully read turns and expands explicit destinations
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And minimising uses the <theme> theme with Turns open Auto

@@ -563,16 +563,13 @@ describe("Surfacing in primary and child transcripts", () => {
 	it("changes, persists, defaults and resets the primary session's level", async () => {
 		const view = render(MessageList);
 		const level = within(view.getByTestId("surfacing-level"));
-		await fireEvent.click(level.getByRole("radio", { name: "Key" }));
+		await fireEvent.click(level.getByRole("tab", { name: "Key" }));
 		expect(sessionSurfaceLevel(parentId)).toBe("key");
 		expect(
 			JSON.parse(localStorage.getItem("surfacing-level-by-session") ?? "{}"),
 		).toMatchObject({ [parentId]: "key" });
-		await fireEvent.keyDown(
-			view.getByRole("button", { name: "Level options" }),
-			{ key: "Enter" },
-		);
 		rpc.call.mockResolvedValueOnce({ ...activeStatus, defaultLevel: "key" });
+		await fireEvent.click(view.getByRole("button", { name: "Default level" }));
 		await fireEvent.click(
 			await view.findByRole("menuitem", { name: "Make default" }),
 		);
@@ -580,17 +577,14 @@ describe("Surfacing in primary and child transcripts", () => {
 		expect(rpc.call).toHaveBeenCalledWith("UpdateMessageSurfacing", {
 			defaultLevel: "key",
 		});
-		await fireEvent.click(level.getByRole("radio", { name: "Balanced" }));
-		await fireEvent.keyDown(
-			view.getByRole("button", { name: "Level options" }),
-			{ key: "Enter" },
-		);
+		await fireEvent.click(level.getByRole("tab", { name: "Most" }));
+		await fireEvent.click(view.getByRole("button", { name: "Default level" }));
 		await fireEvent.click(
 			await view.findByRole("menuitem", { name: "Back to default" }),
 		);
 		expect(sessionSurfaceLevel(parentId)).toBeUndefined();
 		expect(
-			level.getByRole("radio", { name: "Key" }).getAttribute("aria-checked"),
+			level.getByRole("tab", { name: "Key" }).getAttribute("aria-selected"),
 		).toBe("true");
 		getOrCreateSessionSlot(parentId).messages.messages = getOrCreateSessionSlot(
 			parentId,
@@ -598,7 +592,9 @@ describe("Surfacing in primary and child transcripts", () => {
 			(part) => part.type !== "assistant" || part.partId !== "ask",
 		);
 		await settle();
-		await fireEvent.click(view.getByRole("button", { name: "Show All" }));
+		await fireEvent.click(
+			view.getByRole("button", { name: "Show All messages" }),
+		);
 		expect(sessionSurfaceLevel(parentId)).toBe("all");
 	});
 

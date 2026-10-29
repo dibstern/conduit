@@ -1,11 +1,12 @@
 // A turn is one user prompt, everything the model did in response, and its
-// reply segments. The transcript renders one collapsed activity line per segment
-// (summary sentence + duration strip), expandable to the log.
+// reply segments. The transcript renders one activity panel for the whole turn.
 
+import type { SessionResume } from "../../contracts/limit-recovery.js";
 import { skillNameFromTool } from "../../skill-recognition.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
+	QuestionRequest,
 	ResultMessage,
 	SystemMessage,
 	ThinkingMessage,
@@ -26,7 +27,7 @@ export type ActivityPart =
 	| AssistantMessage
 	| CompactionPart;
 
-/** Started and failed compactions stay notices; only a completed one is activity. */
+/** Only a completed compaction is activity. */
 export function isCompaction(msg: ChatMessage): msg is CompactionPart {
 	return msg.type === "system" && msg.compaction === "completed";
 }
@@ -50,24 +51,120 @@ export interface ClosedSegment {
 
 export type Segment = OpenSegment | ClosedSegment;
 
+export type TurnLogEntry =
+	| { kind: "step"; uuid: string; index: number; part: ActivityPart }
+	| { kind: "resumed"; uuid: string; index: number; resume: SessionResume };
+
 export interface Turn {
 	id: string;
 	/** Durable turns.id; absent for display-only placeholders. */
 	storeId?: string | undefined;
 	user?: UserMessage;
+	/** Completed compactions before the turn's first activity, reply or hand-back. */
+	preface: CompactionPart[];
 	/** Always at least one. */
 	segments: Segment[];
 	/**
-	 * Transcript-level notices — errors and in-flight or failed compactions. Kept
-	 * out of the activity log so a failure is never hidden behind a collapsed panel.
+	 * Transcript-level notices — errors, failed compactions and mid-turn status.
+	 * Kept out of the log so a failure is never hidden behind a collapsed panel.
 	 */
 	notices: SystemMessage[];
 	live: boolean;
+	/** Quiet presence before the first activity, reply or hand-back. */
+	opening?: "sending" | "compacting" | "working";
+}
+
+export type TurnPhase = "live" | "waiting" | "settled";
+
+/** Only the transcript's last Turn can still be running or waiting on a hand-back. */
+export function turnPhase(
+	turn: Turn,
+	processing: boolean,
+	latestTurn: boolean,
+): TurnPhase {
+	if (!processing || !latestTurn) return "settled";
+	const last = turn.segments.at(-1);
+	if (last?.end === undefined) return "live";
+	return last.handBack
+		? isOpenHandBack(last.handBack)
+			? "waiting"
+			: "live"
+		: "settled";
+}
+
+/** Earlier replies become steps once more work follows; only the last reply
+ * stays outside the panel. Segment boundaries still own phase and timing. */
+export function turnLog(
+	turn: Turn,
+	resumes: ReadonlyMap<string, readonly SessionResume[]> = new Map(),
+): {
+	segment: Segment;
+	entries: TurnLogEntry[];
+	handBacks: ToolMessage[];
+	resumedParts: ReadonlySet<string>;
+} {
+	const activity: ActivityPart[] = [];
+	const handBacks: ToolMessage[] = [];
+	const last = turn.segments.at(-1);
+	for (const segment of turn.segments) {
+		activity.push(...segment.activity);
+		if (segment !== last) activity.push(...segment.reply);
+		const handBack = segment.handBack;
+		if (!handBack) continue;
+		handBacks.push(handBack);
+		activity.push(handBack);
+	}
+	const segment: Segment =
+		last?.end === undefined
+			? { activity, reply: [...(last?.reply ?? [])] }
+			: {
+					activity,
+					reply: last.reply,
+					end: last.end,
+					...(last.handBack && isOpenHandBack(last.handBack)
+						? { handBack: last.handBack }
+						: {}),
+				};
+	const entries: TurnLogEntry[] = [];
+	const resumedParts = new Set<string>();
+	const addResumes = (uuid: string, index: number) => {
+		for (const [i, resume] of (resumes.get(uuid) ?? []).entries()) {
+			entries.push({
+				kind: "resumed",
+				uuid: `resume-${uuid}-${i}`,
+				index,
+				resume,
+			});
+			resumedParts.add(uuid);
+		}
+	};
+	for (const [index, part] of activity.entries()) {
+		addResumes(part.uuid, index);
+		entries.push({ kind: "step", uuid: part.uuid, index, part });
+	}
+	// A wake may produce only a reply, with no new activity step to carry its
+	// divider. It still belongs to this turn's log, before that trailing reply.
+	if (turn.segments.length > 1) {
+		for (const part of segment.reply) addResumes(part.uuid, activity.length);
+	}
+	return { segment, entries, handBacks, resumedParts };
 }
 
 /** AskUserQuestion or ExitPlanMode: the model stops and waits for the user. */
 export function isHandBack(tool: ToolMessage): boolean {
 	return tool.name === "AskUserQuestion" || tool.name === "ExitPlanMode";
+}
+
+/** Async questions remain answerable after the runner finishes, until answered or dismissed. */
+export function isOpenHandBack(
+	tool: ToolMessage,
+	question?: Pick<QuestionRequest, "delivery"> | null,
+): boolean {
+	if (!isHandBack(tool)) return false;
+	if (tool.status === "pending" || tool.status === "running") return true;
+	// A null async result also represents dismissal. Only a pending approval
+	// proves that a completed question is still answerable.
+	return tool.name === "AskUserQuestion" && question?.delivery === "async";
 }
 
 /** Only an open segment can receive new work. */
@@ -98,9 +195,12 @@ export function segmentTurns(
 	for (const msg of messages) {
 		if (msg.type === "user") {
 			turns.push({
-				id: msg.uuid,
+				// A send keeps its turn, and the hand choices keyed by it, when the
+				// server's row replaces the local copy.
+				id: msg.inputId ?? msg.uuid,
 				storeId: msg.turnId ?? msg.messageId,
 				user: msg,
+				preface: [],
 				segments: [{ activity: [], reply: [] }],
 				notices: [],
 				live: false,
@@ -113,6 +213,7 @@ export function segmentTurns(
 			turn = {
 				id: `turn-${msg.uuid}`,
 				storeId: msg.turnId,
+				preface: [],
 				segments: [{ activity: [], reply: [] }],
 				notices: [],
 				live: false,
@@ -127,6 +228,19 @@ export function segmentTurns(
 		}
 		if (msg.type === "result") {
 			turn.segments[turn.segments.length - 1] = { ...segment, end: msg };
+			continue;
+		}
+		if (
+			isCompaction(msg) &&
+			turn.segments.every(
+				(segment) =>
+					segment.activity.length === 0 &&
+					segment.reply.length === 0 &&
+					!segment.handBack &&
+					segment.end === undefined,
+			)
+		) {
+			turn.preface.push(msg);
 			continue;
 		}
 		if (segment.end !== undefined) {
@@ -147,7 +261,31 @@ export function segmentTurns(
 	// segment can never receive more work — the types see to that. So a result
 	// mid-turn no longer strands the transcript: the next part opens a fresh
 	// segment and the turn reads as live again.
-	if (last) last.live = processing && last.segments.at(-1)?.end === undefined;
+	if (last) last.live = turnPhase(last, processing, true) === "live";
+	for (const turn of turns) {
+		if (
+			turn.segments.some(
+				(segment) =>
+					segment.activity.length > 0 ||
+					segment.reply.length > 0 ||
+					segment.handBack,
+			)
+		)
+			continue;
+		// The row can report compaction before the turn counts as live. Its
+		// transient notice still belongs only in the opening rule in that gap.
+		if (turn.notices.some((notice) => notice.compaction === "started")) {
+			turn.opening = "compacting";
+			turn.notices = turn.notices.filter(
+				(notice) => notice.compaction !== "started",
+			);
+		} else if (turn.live) {
+			turn.opening =
+				turn.preface.length > 0 || turn.notices.length > 0
+					? "working"
+					: "sending";
+		}
+	}
 	return turns;
 }
 
@@ -461,9 +599,7 @@ export function plural(n: number, one: string, many = `${one}s`): string {
 }
 
 /**
- * "3 reads · 2 searches · 3 edits · 2 commands · 1 subagent". Skills and
- * compactions are left out: each has its own control beside the sentence, so
- * the phrase is empty when they are all the turn did.
+ * Counts the turn's work, including skills. Compactions keep their own marker.
  */
 export function countsPhrase(s: TurnStats): string {
 	const parts = [
@@ -472,12 +608,13 @@ export function countsPhrase(s: TurnStats): string {
 		plural(s.edits, "edit"),
 		plural(s.commands, "command"),
 		plural(s.fetches, "fetch", "fetches"),
+		plural(s.skills, "skill"),
 		plural(s.subagents, "subagent"),
 		plural(s.others, "other"),
 	].filter(Boolean);
 	if (parts.length > 0) return parts.join(" · ");
 	if (s.thinking > 0) return plural(s.thinking, "thought");
-	return s.skills > 0 || s.compactions > 0 ? "" : "no tools";
+	return s.compactions > 0 ? "" : "no tools";
 }
 
 export function fmtClock(ms: number): string {
@@ -496,19 +633,6 @@ export function fmtDuration(ms: number): string {
 	const minutes = Math.floor(ms / 60_000);
 	const sec = Math.floor((ms % 60_000) / 1000);
 	return `${minutes}m ${sec}s`;
-}
-
-/** When the prompt was sent, or failing that, when the first stamped work began. */
-function turnStart(turn: Turn): number | undefined {
-	if (turn.user?.createdAt !== undefined) return turn.user.createdAt;
-	for (const segment of turn.segments) {
-		const start =
-			segment.activity[0]?.createdAt ??
-			segment.reply[0]?.createdAt ??
-			segment.handBack?.createdAt;
-		if (start !== undefined) return start;
-	}
-	return undefined;
 }
 
 /** A stamped result closes the segment even if background tasks finish later. */
@@ -537,15 +661,19 @@ function firstStamp(segment: Segment): number | undefined {
 	return segment.handBack?.createdAt ?? segment.end?.createdAt;
 }
 
-/** Approval waits and gaps between segments stay out of the prompt's clock. */
+/** Opening compaction, approval waits and segment gaps stay out of the clock. */
 export function workingTime(
 	turn: Turn,
 	now: number,
 	until?: number,
 ): number | undefined {
 	const timing = turn.user?.turnTiming;
-	const start = timing?.startedAt ?? turn.user?.createdAt;
-	if (start === undefined) return undefined;
+	const startedAt = timing?.startedAt ?? turn.user?.createdAt;
+	if (startedAt === undefined) return undefined;
+	const start = Math.max(
+		startedAt,
+		turn.preface.at(-1)?.createdAt ?? startedAt,
+	);
 	let end = timing?.endedAt ?? (turn.live ? now : undefined);
 	if (end === undefined) {
 		for (const segment of turn.segments) {
@@ -678,100 +806,37 @@ export function stripLayout(
 	turn: Turn,
 	final: boolean,
 	now: number,
+	trackWidth = 1000,
 ): { left: number; width: number }[] {
 	const count = segment.activity.length;
 	if (count === 0) return [];
-	const gap = Math.min(0.2, 20 / Math.max(1, count - 1));
-	const available = 100 - gap * (count - 1);
-	const floor = Math.min(0.35, available / count);
+	const compactions = segment.activity.filter(
+		(part) => part.type === "system",
+	).length;
+	// Two physical pixels, shrinking only when the marks would consume the track.
+	const gap = Math.min(
+		200 / (trackWidth || 1000),
+		90 / Math.max(1, count - 1 + compactions),
+	);
+	const available = 100 - gap * (count - 1 + compactions);
+	const steps = count - compactions;
+	const floor = Math.min(0.35, available / Math.max(1, steps));
 	const weights = stepWeights(segment, turn, final, now).map((weight, i) =>
 		segment.activity[i]?.type === "system" ? 0 : weight,
 	);
 	const total = weights.reduce((sum, weight) => sum + weight, 0);
-	const remaining = available - floor * count;
+	const remaining = available - floor * steps;
 	let left = 0;
 	return weights.map((weight, i) => {
 		const width =
-			total === 0 ? available / count : floor + (remaining * weight) / total;
+			segment.activity[i]?.type === "system"
+				? gap
+				: total === 0
+					? available / Math.max(1, steps)
+					: floor + (remaining * weight) / total;
 		const position = { left, width: i === count - 1 ? 100 - left : width };
 		left += width + gap;
 		return position;
-	});
-}
-
-/** "Edited src/auth.ts · 1s" for the i-th step, for the hover caption. */
-export function stepCaption(
-	segment: Segment,
-	turn: Turn,
-	final: boolean,
-	i: number,
-	now: number,
-): string {
-	const part = segment.activity[i];
-	if (!part) return "";
-	const duration =
-		part.type === "system"
-			? undefined
-			: stepDurations(segment, turn, final, now)?.[i];
-	return duration === undefined
-		? partLabel(part)
-		: `${partLabel(part)} · ${fmtDuration(duration)}`;
-}
-
-/** One skill as a chapter of the turn. */
-export interface SkillChapter {
-	/** Position of the Skill call in `segment.activity`. */
-	index: number;
-	name: string;
-	/** Ms from the start of the turn to the Skill call. */
-	offset?: number;
-	/** Ms until the next skill took over or the work ended. */
-	duration?: number;
-	/** The last skill of a turn still working: its chapter has no end yet. */
-	running: boolean;
-}
-
-/**
- * The skills a segment loaded, in order. Loading one takes milliseconds, so a
- * skill's own span says nothing; what matters is the stretch of work it
- * governed, which runs until the next skill loads or the segment's work ends.
- * Any figure that would need a missing stamp is left out rather than guessed.
- */
-export function skillChapters(
-	segment: Segment,
-	turn: Turn,
-	final: boolean,
-	now: number,
-): SkillChapter[] {
-	const start = turnStart(turn);
-	const open =
-		final && turn.live && segment.reply.length === 0 && !segment.handBack;
-	const skills = segment.activity.flatMap((part, index) =>
-		part.type === "tool" &&
-		ensureCanonical(part.name, part.input).tool === "Skill"
-			? [{ part, index }]
-			: [],
-	);
-	return skills.map(({ part, index }, k) => {
-		const createdAt = part.createdAt;
-		const next = skills[k + 1];
-		const running = !next && open;
-		const end = next
-			? next.part.createdAt
-			: running
-				? undefined
-				: segmentEnd(segment, turn, final, now);
-		return {
-			index,
-			name: skillName(part),
-			running,
-			...(createdAt !== undefined && start !== undefined && createdAt >= start
-				? { offset: createdAt - start }
-				: {}),
-			...(createdAt !== undefined && end !== undefined && end >= createdAt
-				? { duration: end - createdAt }
-				: {}),
-		};
 	});
 }
 

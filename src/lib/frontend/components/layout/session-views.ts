@@ -14,7 +14,11 @@ export type SessionView = {
 	shortcut: number;
 	disabled?: boolean;
 	loadPane?: () => Promise<{
-		default: Component<{ pane?: boolean; onClose?: () => void }>;
+		default: Component<{
+			pane?: boolean;
+			onClose?: () => void;
+			visible?: boolean;
+		}>;
 	}>;
 	isOn: () => boolean;
 	select: () => void;

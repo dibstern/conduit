@@ -373,6 +373,17 @@ An absent field falls back to one pure derivation from canonical tool input for
 successful completed tools. An empty array explicitly records no file changes.
 Existing events need no migration.
 
+## Session Diff
+
+A **Session Diff** is a read-only view of a session's folders by scope; the
+`unstaged` scope compares each folder's index with its worktree, untracked
+files included. Listing snapshots each folder into the **Folder Timeline**, a
+private bare store per repository under `<configDir>/folder-timeline/` that
+borrows the repository's objects and never writes its index, objects or refs.
+A file's patch is served only for a path and blob pair the listing named;
+once the store collects that snapshot the request answers Gone and the client
+re-lists.
+
 ## Sidebar Overlay
 
 **Sidebar Overlay** is sidebar state that is deliberately not a canonical
@@ -381,6 +392,71 @@ The commit step finds sidebar changes by comparing rows, so it cannot see an
 overlay change. Overlays are announced through the commit module's one overlay
 operation, which bumps the row's version and wakes subscribers. No other code
 stamps a version or moves `session_sidebar` markers for an overlay.
+
+## Turn log
+
+A **Turn** is one user message and everything that follows it until the next
+user message. It has one activity component across all its segments. This is
+the reader's transcript unit, distinct from the provider turn prepared by
+**Turn Launcher** and recorded by **Turn Settlement**.
+
+A **Run** is one execution of the agent. A **wake Run** resumes work without a
+new user message and stays inside the last Turn. A **Segment** is activity and
+its trailing reply, ending at a result or a **Hand-back**. A Hand-back is an
+AskUserQuestion or ExitPlanMode call that pauses for the reader.
+
+**Live**, **Waiting** and **Settled** are derived phases. Only the transcript's
+last Turn can be Live or Waiting. While the session is processing, an open
+last segment is Live and a last segment ended by an open Hand-back is Waiting.
+Otherwise the Turn is Settled. Waiting uses the same pick rules as Live.
+
+The **Turn panel** owns whether the Turn is **Collapsed** or **Open**, and
+which view an Open Turn shows. A Collapsed panel has no active view. A
+**Show stop** is a message level or **Full log**, which includes every step
+and messages in place. A **Message level** is one of the persisted values
+`final`, `key`, `balanced` and `all`. The **Saved stop** is the session's
+message-level override, or the global `defaultLevel` when there is no override.
+With Jev off, the only Show stop is Full log.
+
+A **Q&A tab** lists a Turn's Hand-backs in order, with their questions or plans
+and answers. Open Hand-backs are answered there. Each has a ? pin and log row
+that opens Q&A at that entry, with Jev on or off. A Waiting Turn opens on Q&A
+unless the reader has picked a view. Answering returns to the Live default,
+Full log; a pick made while Waiting ends when work resumes.
+
+A **Pick** chooses a message level, Full log, Q&A or the **Usage tab**, which shows
+the Turn's economics and notable events. A **live pick** applies only to the
+last segment while the Turn is Live or Waiting. It stops applying on settle;
+a later wake Run starts fresh. A **settled pick** survives collapse, is
+suspended during a wake Run and returns when the Turn settles. Picks stay in
+memory for the page's lifetime, keyed by session and Turn; only the panel's
+open state is persisted. With no applicable pick, the panel uses the saved
+stop. Code retains the name `defaultLevel` for the global saved stop.
+
+**Following** means the card tracks the newest message rather than a picked
+message. The **Ticker** is the compact live log of the latest three steps,
+with access to earlier steps. The **Show bar** is the Open panel's view
+control. The **Notes line** explains hidden or unjudged messages and offers
+read actions. **Opened directly** marks a message reached through a citation
+or reveal even when its level would hide it. A **Reveal target** identifies
+the message or step a reveal request should open.
+
+A **Strip** is the Turn's activity timeline, with one pointer owner for the
+Collapsed dots and Open pins. A **Step** is one log row, identified by its
+part UUID; compaction rules mark boundaries rather than steps. A **Pin**
+identifies a message on the Open strip. Its Collapsed form is a **Dot**.
+A **Step popover** describes the hovered Step without opening the log.
+
+The **Card slot** is empty, selected or preview. The Strip owns its hanging
+position and caret; the Turn panel chooses its card. A selected card hangs
+below its pin, with a thumb at the same clamped position on the Strip. Only a
+selected card can auto-read after the continuous-visible dwell.
+
+A **Hover preview** temporarily fills the Card slot without changing the
+selection, focus or read state. It shows a full read-only message card in
+Collapsed, Open and Usage, except when that message is already selected.
+Other hovered Steps get a Step popover at the pointer. Both overlays flip
+above the Strip when space below is short, and Escape dismisses them.
 
 ## Skill Location
 

@@ -4,6 +4,7 @@ import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	realpathSync,
 	renameSync,
 	rmSync,
 	writeFileSync,
@@ -47,7 +48,9 @@ const git = async (cwd: string, ...args: string[]) =>
 
 // One status command is one session git read, independent of the other
 // commands used to implement a read. Keep all subprocess counts as well.
-function gitCommand(spawn: DaemonBudgetMeasurement["spawns"][number]) {
+type Spawn = DaemonBudgetMeasurement["spawns"][number];
+
+function gitCommand(spawn: Spawn) {
 	if (spawn.command !== "git") return spawn.command;
 	const args = spawn.args.slice();
 	while (args[0]?.startsWith("-")) {
@@ -107,28 +110,11 @@ async function until(predicate: () => boolean, timeoutMs = 10_000) {
 	return predicate();
 }
 
-it("keeps daemon git and loop delay within idle, read and churn budgets", async () => {
-	const harness = ProcessHarness.create({ logLevel: "warn" });
-	harness.disableIdlePolicies();
-	const report: Record<string, unknown> = {
-		schemaVersion: 1,
-		bead: "conduit-test-g43i.1",
-		budgets: BUDGET,
-		environment: {
-			node: process.version,
-			platform: process.platform,
-			arch: process.arch,
-		},
-		instrumentation:
-			"conduit:subprocess-metrics diagnostics; git status counts one read",
-	};
-	const failures: string[] = [];
-	const check = (condition: boolean, description: string) => {
-		if (!condition) failures.push(description);
-	};
-	const metricsDir = join(harness.root, "budget");
-	mkdirSync(metricsDir);
-	const logFile = join(metricsDir, "daemon.log");
+/** An idle phase is wall-clock time by definition. */
+const idleFor = (ms: number) => delay(ms);
+
+/** Phase boundaries over the daemon's budget control files. */
+function budgetProbe(metricsDir: string, logFile: string) {
 	let requestId = 0;
 	const request = async (action: "begin" | "end" | "snapshot") => {
 		const id = ++requestId;
@@ -184,7 +170,32 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			slowRpcCount: (logs.match(/slow rpc/g) ?? []).length,
 		};
 	};
-	const idlePhase = () => delay(BUDGET.idleMs);
+	return { measure, waitForQuiescence };
+}
+
+it("keeps daemon git and loop delay within idle, read and churn budgets", async () => {
+	const harness = ProcessHarness.create({ logLevel: "warn" });
+	harness.disableIdlePolicies();
+	const report: Record<string, unknown> = {
+		schemaVersion: 1,
+		bead: "conduit-test-g43i.1",
+		budgets: BUDGET,
+		environment: {
+			node: process.version,
+			platform: process.platform,
+			arch: process.arch,
+		},
+		instrumentation:
+			"conduit:subprocess-metrics diagnostics; git status counts one read",
+	};
+	const failures: string[] = [];
+	const check = (condition: boolean, description: string) => {
+		if (!condition) failures.push(description);
+	};
+	const metricsDir = join(harness.root, "budget");
+	mkdirSync(metricsDir);
+	const logFile = join(metricsDir, "daemon.log");
+	const { measure, waitForQuiescence } = budgetProbe(metricsDir, logFile);
 
 	try {
 		report["revision"] = await git(resolve("."), "rev-parse", "HEAD");
@@ -329,7 +340,7 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 		}
 		// Measure before connecting: SubscribeShell grants project Interests even
 		// when the browser has never opened any of that project's sessions.
-		const noInterests = await measure(idlePhase);
+		const noInterests = await measure(() => idleFor(BUDGET.idleMs));
 		const coldFolders = [
 			coldProject,
 			...sessions
@@ -352,7 +363,7 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			sessions.every(({ id }) => latestRow(browser, id) !== undefined),
 			"all 30 sessions must reach the browser snapshot",
 		);
-		const idle = await measure(idlePhase);
+		const idle = await measure(() => idleFor(BUDGET.idleMs));
 		report["idle"] = idle;
 		check(
 			(idle.spawns * 60_000) / idle.durationMs <= BUDGET.idleSpawnsPerMinute,
@@ -566,4 +577,192 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 		}
 	}
 	expect(failures, "See test-results/daemon-budget.json").toEqual([]);
+});
+
+// A session diff spends git only while a viewer asks. Targets are set before
+// the first measurement: if list p99 misses, live scopes use plain git diff.
+const DIFF_BUDGET = {
+	noViewerMs: 10_000,
+	lists: 21,
+	listP99Ms: 1_000,
+	listSpawns: 6,
+	fileSpawns: 1,
+} as const;
+
+const percentile = (samples: readonly number[], fraction: number) => {
+	const sorted = [...samples].sort((a, b) => a - b);
+	return Math.round(
+		sorted[Math.max(0, Math.ceil(fraction * sorted.length) - 1)] ?? 0,
+	);
+};
+
+it("snapshots folders only for an open session diff and lists the conduit repository within budget", async () => {
+	const harness = ProcessHarness.create({ logLevel: "warn" });
+	harness.disableIdlePolicies();
+	const repo = realpathSync(resolve("."));
+	const store = join(harness.configDir, "folder-timeline");
+	const report: Record<string, unknown> = {
+		schemaVersion: 1,
+		bead: "conduit-test-f02e9.2",
+		budgets: DIFF_BUDGET,
+		instrumentation:
+			"diff spawns are snapshot commands (write-tree, add) plus private-store reads",
+	};
+	const failures: string[] = [];
+	const check = (condition: boolean, description: string) => {
+		if (!condition) failures.push(description);
+	};
+	const metricsDir = join(harness.root, "budget");
+	mkdirSync(metricsDir);
+	const logFile = join(metricsDir, "daemon.log");
+	const { measure, waitForQuiescence } = budgetProbe(metricsDir, logFile);
+	const diffSpawns = ({ spawnEvents }: { spawnEvents: Spawn[] }) =>
+		spawnEvents.filter(
+			(spawn) =>
+				spawn.cwd.startsWith(store) ||
+				["git write-tree", "git add"].includes(gitCommand(spawn)),
+		).length;
+	const sessionId = "budget-diff";
+
+	try {
+		report["revision"] = await git(repo, "rev-parse", "HEAD");
+		const config = Result.getOrThrow(loadDaemonConfigResult(harness.configDir));
+		writeFileSync(
+			join(harness.configDir, "daemon.json"),
+			JSON.stringify({
+				...config,
+				projects: [
+					{ path: repo, folders: [repo], slug: "conduit", addedAt: 1 },
+				],
+			}),
+		);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				yield* commit(
+					[
+						canonicalEvent("session.created", sessionId, {
+							sessionId,
+							title: sessionId,
+							provider: "claude",
+						}),
+						...sessionPickEvents(sessionId, {
+							harness: "claude",
+							model: { providerId: "claude", modelId: "sonnet" },
+							effort: "",
+							contextWindow: "200k",
+						}),
+					],
+					{ publish: false },
+				);
+			}).pipe(
+				Effect.provide(
+					makePersistenceEffectLayer(harness.daemonStorePath(), "conduit"),
+				),
+			),
+		);
+		writeFileSync(
+			join(metricsDir, "request.json"),
+			JSON.stringify({ id: 0, action: "begin" }),
+		);
+		await harness.restart({
+			skipBrowserProbe: true,
+			logFile,
+			serviceEnvironment: { CONDUIT_TEST_SUBPROCESS_BUDGET: metricsDir },
+		});
+		await waitForQuiescence();
+		const browser = await harness.connect(undefined, undefined, "conduit");
+		const noViewer = await measure(() => idleFor(DIFF_BUDGET.noViewerMs));
+		report["noViewer"] = { ...noViewer, diffSpawns: diffSpawns(noViewer) };
+		check(
+			diffSpawns(noViewer) === 0,
+			`no viewer: ${diffSpawns(noViewer)} diff spawns`,
+		);
+
+		const scope = { kind: "unstaged" } as const;
+		const list = () =>
+			Effect.runPromise(browser.rpc.SessionDiffList({ sessionId, scope }));
+		const firstAt = performance.now();
+		let listing = await list();
+		const firstListMs = Math.round(performance.now() - firstAt);
+		const listMs: number[] = [];
+		const lists = await measure(async () => {
+			for (let index = 0; index < DIFF_BUDGET.lists; index++) {
+				const at = performance.now();
+				listing = await list();
+				listMs.push(performance.now() - at);
+			}
+		});
+		const listSpawns = diffSpawns(lists) / DIFF_BUDGET.lists;
+		const listP99 = percentile(listMs, 0.99);
+		report["viewer"] = {
+			...lists,
+			firstListMs,
+			listMs: { p50: percentile(listMs, 0.5), p99: listP99 },
+			listSpawns,
+			files: listing.folders.map((folder) =>
+				"files" in folder ? folder.files.length : folder.error,
+			),
+		};
+		check(
+			listP99 <= DIFF_BUDGET.listP99Ms,
+			`list p99 ${listP99}ms > ${DIFF_BUDGET.listP99Ms}ms`,
+		);
+		check(
+			listSpawns <= DIFF_BUDGET.listSpawns,
+			`list: ${listSpawns} diff spawns per call`,
+		);
+
+		// The worktree's own changes decide whether a text file is listed.
+		const text = listing.folders
+			.flatMap((folder) =>
+				"files" in folder
+					? folder.files.map((file) => ({ folder: folder.folder, file }))
+					: [],
+			)
+			.find(({ file }) => file.tier === "auto" && !file.binary);
+		if (text) {
+			const fileRead = await measure(() =>
+				Effect.runPromise(
+					browser.rpc.SessionDiffFile({
+						sessionId,
+						scope,
+						revision: listing.revision,
+						folder: text.folder,
+						path: text.file.path,
+						before: text.file.before,
+						after: text.file.after,
+					}),
+				),
+			);
+			report["file"] = { ...fileRead, diffSpawns: diffSpawns(fileRead) };
+			check(
+				diffSpawns(fileRead) <= DIFF_BUDGET.fileSpawns,
+				`file: ${diffSpawns(fileRead)} diff spawns`,
+			);
+		} else report["file"] = "no text change in the worktree";
+
+		const closed = await measure(() => idleFor(DIFF_BUDGET.noViewerMs));
+		report["afterViewer"] = { ...closed, diffSpawns: diffSpawns(closed) };
+		check(
+			diffSpawns(closed) === 0,
+			`after the viewer: ${diffSpawns(closed)} diff spawns`,
+		);
+	} catch (error) {
+		report["error"] = error instanceof Error ? error.message : String(error);
+		report["daemonLogTail"] = harness.logTail;
+		throw error;
+	} finally {
+		report["failures"] = failures;
+		try {
+			await harness.dispose();
+		} finally {
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/daemon-budget-diff.json",
+				`${JSON.stringify(report, null, 2).replaceAll(harness.root, "<fixture>").replaceAll(repo, "<repo>")}\n`,
+			);
+		}
+	}
+	expect(failures, "See test-results/daemon-budget-diff.json").toEqual([]);
 });

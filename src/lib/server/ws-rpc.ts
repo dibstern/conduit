@@ -53,6 +53,7 @@ import { filesHandlers } from "./ws-rpc/files.js";
 import { instancesHandlers } from "./ws-rpc/instances.js";
 import { modelsHandlers, subscribeDraftModels } from "./ws-rpc/models.js";
 import { projectsHandlers } from "./ws-rpc/projects.js";
+import { sessionDiffHandlers } from "./ws-rpc/session-diff.js";
 import { sessionSkillsHandlers } from "./ws-rpc/session-skills.js";
 import { sessionsHandlers } from "./ws-rpc/sessions.js";
 import { settingsHandlers } from "./ws-rpc/settings.js";
@@ -67,6 +68,7 @@ const unaryHandlers = {
 	...settingsHandlers,
 	...terminalsHandlers,
 	...filesHandlers,
+	...sessionDiffHandlers,
 	...sessionSkillsHandlers,
 	...modelsHandlers,
 	...sessionsHandlers,

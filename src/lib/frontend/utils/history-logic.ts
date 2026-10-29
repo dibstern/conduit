@@ -131,6 +131,7 @@ export function getAssistantText(msg: HistoryMessage | undefined): string {
 const LIVE_STATUS_TOOLS = new Set([
 	"question",
 	"AskUserQuestion",
+	"ExitPlanMode",
 	...SUBAGENT_TOOL_NAMES,
 ]);
 
@@ -468,6 +469,7 @@ export function historyToChatMessages(
 				type: "user",
 				uuid: uuidFor ? uuidFor(msg.id, "user") : generateUuid(),
 				messageId: msg.id,
+				...(msg.inputId != null ? { inputId: msg.inputId } : {}),
 				text: extractDisplayText(text),
 				...(attachments?.length ? { attachments } : {}),
 				...(msg.time?.created != null && { createdAt: msg.time.created }),

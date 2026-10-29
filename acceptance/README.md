@@ -43,15 +43,21 @@ sh acceptance/tools/build.sh
 - `features/` (repo root) — Gherkin feature files.
 - `build/acceptance/` — IR, dry reports, built binaries (gitignored).
 
-## Running the gate
+## Running checks
 
 ```sh
+pnpm acceptance:functional          # per-ticket behaviour check; skips screenshots
 pnpm acceptance:visual              # parse -> generate -> run (functional + visual)
 pnpm acceptance:visual:capture      # (re)capture baselines for the current platform
 pnpm acceptance:mutation:visual     # mutate example values to measure test strength
 ```
 
 Pass a feature name (`pnpm acceptance:visual cursor-unavailable`) or set `ACCEPTANCE_FEATURE=cursor-unavailable` to run or capture only that feature.
+
+Use `pnpm acceptance:functional` for per-ticket behaviour checks. It skips visual
+steps without reading or writing baseline or artifact PNGs. It is not the visual
+gate; run `pnpm acceptance:visual` for that.
+The feature name works the same with `pnpm acceptance:functional`.
 `VISUAL_ACCEPTANCE_CAPTURE_BASELINES=cursor-unavailable-rail` further limits
 capture to the named baseline; other baselines remain assertions.
 

@@ -8,7 +8,10 @@ Scenario Outline: A turn's launching rows show each task's state, time and usage
   And the transcript has a turn that launched a task in every state
   Then 2 launching steps breathe on the activity strip
   When I open the turn's steps
-  Then the step log shows "3 running"
+  Then the Show bar shows "3 running"
+  When I select the turn Usage tab
+  Then the Show bar shows "3 running"
+  When I select the turn Log tab
   And the "Map the session store" step is an ordinary foreground step
   And the "Run the dev server" launching row is running and reads "1m 35s"
   And the "Fix the flaky test" launching row is running and reads "42s · 12k tokens · 3 tools"
@@ -27,21 +30,21 @@ Examples:
   | desktop  | launching-rows-desktop | 98        |
   | phone    | launching-rows-phone   | 98        |
 
-Scenario: The step log stops counting once its tasks finish
+Scenario: The Show bar stops counting once its tasks finish
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop
   And a session already exists on the Claude harness
   And the session's live background tasks are the dev server, the flaky-test agent and that agent's nested shell
   And the transcript has a turn that launched a task in every state
   When I open the turn's steps
-  Then the step log shows "3 running"
+  Then the Show bar shows "3 running"
   When the session's live background tasks all finish
-  Then the step log shows "2 running"
+  Then the Show bar shows "2 running"
   And 2 launching steps breathe on the activity strip
   And the "Run the dev server" launching row is running and reads "1m 35s"
   And the "Fix the flaky test" launching row is running and reads "42s · 12k tokens · 3 tools"
   When the launching row clock advances by 3 seconds
-  Then the step log shows no running pill
+  Then the Show bar shows no running pill
   And no launching steps breathe on the activity strip
   And the "Run the dev server" launching row is no longer running and reads "no longer running"
   And the "Fix the flaky test" launching row is no longer running and reads "no longer running · 12k tokens · 3 tools"
