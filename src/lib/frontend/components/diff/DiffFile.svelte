@@ -94,10 +94,11 @@
 	/**
 	 * Keeps a revealed row at the top of the pane while the rows around it load
 	 * and resize, until the pane is scrolled from there. Only the pane scrolls,
-	 * never the page around it.
+	 * never the page around it. Rows sit inside folder groups, so the pane is
+	 * found, not assumed to be the row's parent; its children are those groups.
 	 */
 	function holdAtTop(node: HTMLElement) {
-		const pane = node.parentElement;
+		const pane = node.closest<HTMLElement>('[data-testid="session-diff"]');
 		if (!pane) return;
 		let held = pane.scrollTop;
 		const sizes = new ResizeObserver(() => {
