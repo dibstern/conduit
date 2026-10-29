@@ -10,10 +10,12 @@
 		sentinelEl,
 		sessionId,
 		scrollRoot,
+		paused = false,
 	}: {
 		sentinelEl?: HTMLElement | undefined;
 		sessionId?: string | undefined;
 		scrollRoot?: HTMLElement | undefined;
+		paused?: boolean;
 	} = $props();
 
 	const chat = $derived(
@@ -22,7 +24,7 @@
 	// A failed page stops paging this chat rather than retrying every frame.
 	let failedChat = $state<typeof chat>();
 	const canPage = $derived(
-		!!chat?.historyHasMore && !chat.historyLoading && failedChat !== chat,
+		!paused && !!chat?.historyHasMore && !chat.historyLoading && failedChat !== chat,
 	);
 
 	// An observer reports once on creation, then only on changes. A page that

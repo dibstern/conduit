@@ -544,7 +544,6 @@
 						{#if live}<span>{currentStepLabel(segment)}</span>{/if}
 						{#if phrase}<span>{phrase}</span>{/if}
 						{#if stats.compactions > 0}<span>Context compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
-						{#if stats.failed > 0}<span>{stats.failed} failed</span>{/if}
 					</div>
 				</Tooltip>
 				{#if surfacingActive || summaryEnabled}

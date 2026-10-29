@@ -1,6 +1,8 @@
 // State the session's own chrome needs but the transcript owns. Kept in one
 // place so the bar and the message list cannot disagree.
 
+import { classifyDuoPose, type DuoPose } from "../utils/duo-pose.js";
+
 /**
  * 767px is Tailwind's `md` breakpoint minus one, so this agrees with every
  * `md:` utility rather than with the app's older ad-hoc `<= 768` checks.
@@ -11,6 +13,14 @@ const FILES_PANE_MEMORY_LIMIT = 100;
 export const FILES_PANE_MIN_WIDTH = 280;
 
 export type ComposerTier = "wide" | "narrow" | "thin" | "phone";
+export type Pose = "desktop" | "phone" | DuoPose;
+
+/** Unfolded landscape is the Duo's desktop; its other poses are phone-sized. */
+const isCompactPose = (pose: Pose): boolean =>
+	pose !== "desktop" && pose !== "duo-unfolded-landscape";
+
+const initiallyCompact =
+	typeof matchMedia === "function" && matchMedia(COMPACT_QUERY).matches;
 
 type FilesPaneMemory = { filesOpen: boolean; width: number | null };
 let filesPaneMemory: Map<string, FilesPaneMemory> | undefined;
@@ -85,11 +95,10 @@ export const sessionViewState = $state({
 	filesPaneWidth: null as number | null,
 	filesPaneExpanded: false,
 
-	/** Phone-width viewport: the session bar replaces the global header. */
-	compact:
-		typeof matchMedia === "function"
-			? matchMedia(COMPACT_QUERY).matches
-			: false,
+	/** Written only by watchViewportPose; every pose-specific layout reads it. */
+	pose: (initiallyCompact ? "phone" : "desktop") as Pose,
+	/** Phone-sized pose: the session bar replaces the global header. */
+	compact: initiallyCompact,
 
 	/** Measured only by the composer's input wrapper. */
 	composerWidth: 0,
@@ -176,16 +185,53 @@ export function setFilesPaneWidth(width: number): void {
 }
 
 /**
- * Track the compact breakpoint. One listener for the whole app — call it from
- * the layout and dispose with the returned teardown.
+ * Track the pose, and the compact flag that follows from it. One listener for
+ * the whole app: call it from the layout and dispose with the returned teardown.
+ * It reads the layout viewport, never the visual one, so the keyboard cannot
+ * change the pose.
  */
-export function watchCompactViewport(): () => void {
+export function watchViewportPose(): () => void {
 	if (typeof matchMedia !== "function") return () => {};
-	const query = matchMedia(COMPACT_QUERY);
-	sessionViewState.compact = query.matches;
-	const onChange = (event: MediaQueryListEvent) => {
-		sessionViewState.compact = event.matches;
+	const compactQuery = matchMedia(COMPACT_QUERY);
+	const standaloneQuery = matchMedia("(display-mode: standalone)");
+	// The pose's only view of the safe-area insets: padding resolves each env().
+	const probe = document.createElement("div");
+	probe.setAttribute("aria-hidden", "true");
+	probe.style.cssText =
+		"position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;" +
+		"padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
+	document.body.append(probe);
+	const measure = () => {
+		const style = getComputedStyle(probe);
+		const pose: Pose =
+			classifyDuoPose({
+				width: innerWidth,
+				height: innerHeight,
+				standalone:
+					standaloneQuery.matches ||
+					(navigator as Navigator & { standalone?: boolean }).standalone ===
+						true,
+				insets: {
+					top: Number.parseFloat(style.paddingTop) || 0,
+					right: Number.parseFloat(style.paddingRight) || 0,
+					bottom: Number.parseFloat(style.paddingBottom) || 0,
+					left: Number.parseFloat(style.paddingLeft) || 0,
+				},
+			}) ?? (compactQuery.matches ? "phone" : "desktop");
+		sessionViewState.pose = pose;
+		sessionViewState.compact = isCompactPose(pose);
 	};
-	query.addEventListener("change", onChange);
-	return () => query.removeEventListener("change", onChange);
+	measure();
+	// Insets can change without a resize, e.g. env() resolving after first paint.
+	// Padding moves only the border box; the default content box never changes.
+	const insetObserver = new ResizeObserver(measure);
+	insetObserver.observe(probe, { box: "border-box" });
+	addEventListener("resize", measure);
+	addEventListener("orientationchange", measure);
+	return () => {
+		insetObserver.disconnect();
+		removeEventListener("resize", measure);
+		removeEventListener("orientationchange", measure);
+		probe.remove();
+	};
 }

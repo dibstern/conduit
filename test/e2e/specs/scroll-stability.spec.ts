@@ -1178,6 +1178,106 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 		await expect(page.locator(".history-beginning")).toBeAttached();
 	});
 
+	test("a fork with collapsed prior conversation does not page its inherited history", async ({
+		page,
+		relayUrl,
+	}) => {
+		// A side thread of a long session: every older page is inherited and
+		// lands inside the collapsed "Prior conversation" block, so the history
+		// sentinel never leaves view. Paging it all flashed "Loading history..."
+		// once per page and bounced the chat up and down.
+		const start = Date.parse("2026-10-27T10:00:00Z");
+		const forkId = "fork-paging";
+		const at = (i: number) => start + i * 60_000;
+		const history = (i: number) =>
+			[
+				{
+					id: `user-${i}`,
+					role: "user",
+					time: { created: at(i) },
+					parts: [{ id: `prompt-${i}`, type: "text", text: `Prompt ${i}` }],
+				},
+				{
+					id: `assistant-${i}`,
+					role: "assistant",
+					parentID: `user-${i}`,
+					time: { created: at(i) + 1000, completed: at(i) + 2000 },
+					parts: [{ id: `response-${i}`, type: "text", text: `Response ${i}` }],
+				},
+			] as const;
+		const rows = [28, 29, 30, 31].flatMap((i) =>
+			history(i).flatMap(({ parts, ...message }) => [
+				{ _tag: "message", message },
+				...parts.map((part) => ({
+					_tag: "part",
+					messageId: message.id,
+					sortOrder: 0,
+					part,
+				})),
+			]),
+		);
+		let pages = 0;
+		await mockWsRpc(page, {
+			stubs: {
+				ResolveSession: () => ({ projectSlug: "e2e-replay" }),
+				ViewSession: () => ({ ok: true }),
+				// Endless inherited history, always older than the last page.
+				LoadMoreHistory: ({ sessionId }) => {
+					pages += 1;
+					const first = 28 - pages * 2;
+					return {
+						projectSlug: "e2e-replay",
+						sessionId,
+						messages: [first, first + 1].flatMap(history),
+						hasMore: true,
+					};
+				},
+			},
+			streams: {
+				SubscribeSessionDetail: () => [
+					{ _tag: "snapshot", rows, sequence: 1, hasMore: true },
+					{ _tag: "synchronized" },
+				],
+			},
+		});
+		await mockRelayWebSocket(page, {
+			initMessages: [
+				{
+					type: "shell_snapshot",
+					roots: true,
+					sessions: [
+						{
+							id: forkId,
+							title: "Side question",
+							status: "idle",
+							updatedAt: at(31),
+							messageCount: 8,
+							forkedFrom: "fork-source",
+							forkPointMessageId: "assistant-30",
+							forkPointTimestamp: at(30) + 1500,
+						},
+					],
+				},
+			],
+			responses: new Map(),
+		});
+
+		await page.goto(new URL(`/s/${forkId}`, relayUrl).href);
+		await expect(page.locator(".msg-assistant").last()).toContainText(
+			"Response 31",
+		);
+		await expect(page.locator(".fork-context-toggle")).toBeVisible();
+		await page.waitForTimeout(1000);
+		expect(pages).toBe(0);
+
+		// Expanded, the inherited history is on screen and pages as usual.
+		await page.locator(".fork-context-toggle").click();
+		await page.locator("#messages").evaluate((el) => {
+			el.scrollTop = 0;
+		});
+		await expect.poll(() => pages).toBeGreaterThan(0);
+	});
+
 	test("session switch while scrolled up resets to bottom on new session", async ({
 		page,
 		relayUrl,
