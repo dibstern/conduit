@@ -304,11 +304,20 @@ export const turnQaHandlers: StepHandler[] = [
 				exact: true,
 			});
 			if (match[2] === "phone" && (await phoneMenu.count())) {
+				// Wait for the menu to take focus: an absent Q&A item passes at once,
+				// and an Escape that still lands on the trigger folds the open card.
+				const menu = world.page.getByRole("menu");
 				await phoneMenu.click();
+				await expect
+					.poll(() =>
+						menu.evaluate((el) => el.contains(document.activeElement)),
+					)
+					.toBe(true);
 				await expect(
-					world.page.getByRole("menuitemradio", { name: "Q&A", exact: true }),
+					menu.getByRole("menuitemradio", { name: "Q&A", exact: true }),
 				).toHaveCount(match[1] === "offers" ? 1 : 0);
 				await world.page.keyboard.press("Escape");
+				await expect(menu).toHaveCount(0);
 			} else {
 				await expect(
 					panel.getByRole("tab", { name: "Q&A", exact: true }),
