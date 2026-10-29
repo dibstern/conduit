@@ -108,7 +108,9 @@ Source names used in the comments:
 - **Wake Run.** A Run the agent started itself (origin `wake`), as opposed to a user input (origin
   `input`).
 - **Background task.** A provider task (shell, subagent, workflow, monitor, MCP task) keyed by the
-  provider's native id. Classed **monitoring** or **work**.
+  provider's native id. Classed **monitoring**, **serving** or **work**.
+- **Server.** A process listening on a TCP port that carries a session's marker (8.7). Keyed by
+  pid, start time and port, per session, never per label. **Serving:** live but calm.
 - **Native command.** A provider command that is a send but not a Run (goal set, pause, resume,
   clear).
 - **Lost work.** The durable record that a destruction may have ended background tasks.
@@ -167,6 +169,9 @@ provider have the new one, and no row has both.
 | Replay cursor and attachment | runner's cursor row | receipt store | none | none |
 | Registration (socket, pid; identity only) | runner host's `.json` | host | discovery only; never evidence | none |
 | Tasks, wake Runs, process facts, lost work, pending confirms, native command delivery | Run Ledger | observe, control, settle | `SessionActivity` (read-only view) | with its background-work ticket (12.2) |
+| Servers (per session) | Run Ledger | PortWatcher (`server_seen`, `server_gone`); declared marks through the CLI (8.7) | `SessionActivity`, `anythingMayAct`, auto-settle, Preview Gate, chat links | with the servers ticket (12.2) |
+| Server hold candidates (seen under 10s) | PortWatcher, in memory | PortWatcher | none; a candidate is never a server | none |
+| Conduit's `tailscale serve` ports and gate proxies | Preview Gate | the gate only | none; reconciled to Servers, never evidence | none |
 | Goal: confirmed status and pending action id | goal tracker | tracker | `SessionActivity` | none |
 | Native command confirmation deadline | Run Ledger (ordinary deadline) | `reconcile` | tracker reacts to `unconfirmed` | none |
 | Per-session ledger row (`alarmAt`, open work) | Run Ledger | written only when its value changes | scheduler | none |
@@ -2124,7 +2129,8 @@ At startup, in one recovery pass:
 ### 8.1 Ownership and provider support
 
 - The Run Ledger owns foreground Runs (origin `input`), wake Runs (origin `wake`), background tasks,
-  process facts (labels, 6.1), `anythingMayAct`, lost work, pending confirms and native commands.
+  process facts (labels, 6.1), servers (8.7), `anythingMayAct`, lost work, pending confirms and
+  native commands.
   Native commands skip the inbox and are never held.
 - The goal tracker owns the goal's condition, counters, confirmed status and pending action id only.
   Displayed phases (Pausing, Clearing, Resuming) are derived from the pending action. A failed action
@@ -2150,6 +2156,10 @@ At startup, in one recovery pass:
 | { kind: "turn_started"; wakeTask?: TaskKey }
 | { kind: "command_lifecycle"; commandId: string; state: "queued" | "started" | "completed" | "cancelled" }
 | { kind: "command_result"; commandId: string }
+// Server evidence (8.7): daemon observations naming the session, never a label
+| { kind: "server_seen"; server: ServerKey; command: string; cwd: string; taskKey?: TaskKey;
+    source: "detected" | "declared"; role?: "serving" | "awaited" }
+| { kind: "server_gone"; server: ServerKey }
 // Settlement additions
 | { kind: "process_started"; label: Label; reattached: boolean }
 // Control additions
@@ -2160,6 +2170,9 @@ At startup, in one recovery pass:
 | { kind: "stop_task"; key: TaskKey }
 | { kind: "send_native_command"; commandId: string; text: string }
 type TaskKey = { taskId: string; runId?: string };
+type ServerKey = { pid: number; startedAt: number; port: number };
+type Server = { key: ServerKey; command: string; cwd: string; taskKey?: TaskKey; role: "serving" | "awaited" };
+type Servers = ReadonlyMap<number, Server>; // by port, per session; survives labels, queries and restarts
 type Tasks = { tag: "Unknown"; label: Label }
            | { tag: "Known"; label: Label; tasks: ReadonlyMap<TaskKey, Task> };
 type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancelled | Failed;
@@ -2167,7 +2180,10 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
 
 - Task kind comes from `task_type`: `local_bash` is shell, `local_agent` is subagent,
   `local_workflow` is workflow, `monitor`, `mcp_task`; others verbatim. A task is **monitoring** if it
-  is ambient or a monitor, otherwise **work**.
+  is ambient or a monitor; **serving** if a live server is linked to it and no declared `awaited`
+  covers it; otherwise **work**.
+- `server_seen` adds or refreshes one entry per session and port; a declared role wins over
+  detection. `server_gone` deletes the entry; nothing else removes one.
 - A runner event either answers a Send Token or is an unsolicited observation naming only the host
   label: background snapshots and task events, a turn start with no active Run, process events, and
   `activity`, `result`, `query_ended` for a wake Run (8.3). No fictitious send is minted.
@@ -2227,7 +2243,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   OpenCode `probe native_session`), confirm-gated as in 8.4.
 - **`anythingMayAct`** is true for a non-ended Run, a send that may still act (a probe only reads,
   so it never may act, D31), or tasks live or
-  unknown. Tasks never block a new Run. Every liveness reader asks it: the worktree cleanup sweep,
+  unknown, or a server live (8.7). Tasks and servers never block a new Run. Every liveness reader
+  asks it: the worktree cleanup sweep,
   archive and delete `hasLiveWork`, the status poller's idle corrections, and the runner record
   deletion. The physical-process file guard stays.
 
@@ -2335,6 +2352,39 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
 - Goal flow is separate from Stop. Stop never pauses a goal.
 
 <!-- src: BG Decision 1, Decision 2, Decision 3; RA §8 (32.26, 32.27); AUDIT A4; AUDIT-2 A17, T4 -->
+
+### 8.7 Servers
+
+- **Detection.** One PortWatcher per daemon scans listening TCP ports owned by the user every 2s
+  (`lsof` on macOS, `/proc` on Linux). It reads the session marker from the process environment:
+  `CONDUIT_SESSION_ID` (Claude), `CODEX_THREAD_ID` (Codex), `CONDUIT_OPENCODE_SESSION_ID` (OpenCode,
+  stamped by conduit's `shell.env` hook). The innermost runner's marker wins; unmarked ports are
+  ignored. A port held 10s records `server_seen`. The scan is compared against the ledger's Servers,
+  not a copy: an entry missing from a successful scan records `server_gone`. A failed scan records
+  nothing. After a restart the first successful scan does the same comparison.
+- **Task link.** Claude: the server's stdout is `tasks/<task_id>.output`. Codex: one unique match of
+  command and cwd in `thread/backgroundTerminals/list`. Otherwise, and always for OpenCode, the
+  server is session-level and no task changes class. Cursor's SDK kills servers at turn end; it is
+  out of scope.
+- **Declared.** `conduit server mark <port> --serving|--awaited` (CLI socket; Codex falls back to
+  conduit's MCP tool) records `server_seen{source: "declared"}`. It is rejected, recording nothing,
+  when nothing listens on the port or the port belongs to another session.
+- **Views.** `SessionActivity` reads a serving server or task as background (calm) and an
+  `awaited` one as working. A live server pauses auto-settle. Servers are never lost work and never
+  confirm-gated on their own; a linked task gates as a task (8.4).
+- **Ended sessions have no servers.** Each scan kills the marked processes of settled, archived and
+  deleted sessions, skipping the hold. Settle, Archive and Delete name the count; unsettling starts
+  nothing. `server_gone` for a deleted session is dropped.
+- **Stop.** One kill routine serves Stop and ended sessions: the process group only when its leader
+  is not conduit, a runner host, an agent CLI or a shell; otherwise the server's process tree.
+  SIGTERM, then SIGKILL after 5s. The entry goes only by the next scan's `server_gone`.
+- **Preview Gate.** It owns conduit's `tailscale serve` ports and login-checking proxies and removes
+  only its own. It reconciles them to Servers, refuses a port with no entry, and answers a dead
+  target with a "Server stopped" page. Without Tailscale or consent, Open shows the port and Copy
+  link. A chat link to `localhost:<port>` renders as a chip while that server is live, plain text
+  otherwise.
+
+<!-- src: SERVERS brainstorm 2026-10-29 (tsp server-badge, Sections 1-6); t3code a27ec88bfa PortScanner.ts, ThreadServersPanel.tsx:97 -->
 
 ## 9. Providers
 
