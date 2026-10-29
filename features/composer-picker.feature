@@ -44,7 +44,7 @@ Examples:
   | wide   | composer-icons-picker-e1-model        | 98        |
   | narrow | composer-icons-picker-e1-model-narrow | 98        |
 
-Scenario Outline: E1 desktop icons mode uses the existing approvals menu
+Scenario Outline: E1 desktop icons mode opens the Session Permissions drill-in
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness
   And the harness logo is viewed in the <tier> tier
@@ -53,9 +53,10 @@ Scenario Outline: E1 desktop icons mode uses the existing approvals menu
   And approvals are ask
   When I tap the icons mode control
   Then the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
-  And the shared composer picker is closed
+  And the picker lists permission modes dontAsk, plan, ask, acceptEdits, auto, full with ask selected
   When I set approvals to auto
   Then the approvals menu is closed
+  And the picker Permissions row reads Auto
   And the mode shield names Auto
   And the mode shield uses the auto tone
   And the composer region visually matches <baseline> at <threshold> percent
@@ -64,6 +65,43 @@ Examples:
   | tier   | baseline                        | threshold |
   | wide   | composer-icons-mode-menu-wide   | 98        |
   | narrow | composer-icons-mode-menu-narrow | 98        |
+
+Scenario Outline: the permission control opens the Session Permissions drill-in
+  Given the conduit app is served with the connected mockup
+  And the harness logo is viewed in the <tier> tier
+  And a session already exists on the Claude harness
+  And the composer uses <control_style> controls
+  And the composer picker has the Claude catalog
+  And approvals are ask
+  When I tap the <permission_control>
+  Then the picker lists permission modes dontAsk, plan, ask, acceptEdits, auto, full with ask selected
+  And the model-picker region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier  | control_style | permission_control | baseline                                | threshold |
+  | wide  | words         | approvals word     | composer-picker-permission-word         | 98        |
+  | phone | icons         | icons mode control | composer-picker-permission-shield-phone | 98        |
+
+Scenario Outline: the checkout chip focuses Session Checkout and its row opens details
+  Given the conduit app is served with the connected mockup
+  And the harness logo is viewed in the <tier> tier
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the checkout branch can be renamed
+  And the checkout has uncommitted changes, 2 ahead, 1 behind
+  When I open the Session panel from the checkout chip
+  Then the checkout chip opens Session with Checkout focused
+  And the model-picker region visually matches <root_baseline> at <threshold> percent
+  When I view Checkout choices in the picker
+  Then the Checkout drill-in shows git tiles and Rename branch
+  And the model-picker region visually matches <details_baseline> at <threshold> percent
+
+Examples:
+  | tier  | root_baseline                           | details_baseline                           | threshold |
+  | wide  | composer-picker-checkout-chip-root       | composer-picker-checkout-chip-details       | 98        |
+  | phone | composer-picker-checkout-chip-root-phone | composer-picker-checkout-chip-details-phone | 98        |
 
 Scenario Outline: Account choices open from the Session root and Back restores focus
   Given the conduit app is served with the connected mockup

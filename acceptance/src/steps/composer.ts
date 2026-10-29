@@ -30,29 +30,24 @@ async function tapAt(
 }
 
 async function openApprovalsMenu(page: Page): Promise<void> {
-	const menu = page.getByTestId("permission-mode-dropdown");
-	if (await menu.isVisible()) return;
 	const button = page.getByTestId(
 		/^(permission-mode-badge|composer-word-approvals)$/,
 	);
 	const picker = page.getByTestId("model-picker");
+	const choice = picker.getByTestId("picker-permission-ask");
+	if (await choice.isVisible()) return;
 	if ((await picker.isVisible()) || !(await button.isVisible())) {
-		const choice = picker.getByTestId("picker-permission-ask");
-		if (await choice.isVisible()) return;
 		await openModelPicker(page);
 		await picker.getByTestId("picker-row-permissions").click();
-		await expect(choice).toBeVisible();
-		return;
+	} else {
+		await expect(button).not.toHaveAttribute("aria-busy", "true");
+		await button.click();
 	}
-	await expect(button).not.toHaveAttribute("aria-busy", "true");
-	await button.click();
-	await expect(menu).toBeVisible();
+	await expect(choice).toBeVisible();
 }
 
 function approvalOption(page: Page, mode: string) {
-	return page.getByTestId(
-		new RegExp(`^(permission-mode-option-${mode}|picker-permission-${mode})$`),
-	);
+	return page.getByTestId(`picker-permission-${mode}`);
 }
 
 export const composerHandlers: StepHandler[] = [
@@ -407,6 +402,11 @@ export const composerHandlers: StepHandler[] = [
 			);
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
 			await button.click();
+			await expect(button).toHaveAttribute("aria-haspopup", "dialog");
+			await expect(button).toHaveAttribute("aria-expanded", "true");
+			await expect(
+				world.page.getByTestId("picker-permission-ask"),
+			).toBeVisible();
 		},
 	},
 	{
@@ -452,16 +452,12 @@ export const composerHandlers: StepHandler[] = [
 		match: /^the approvals menu is ranked (.+)$/,
 		run: async ({ world, match }) => {
 			const expected = (match[1] ?? "").split(", ");
-			const options = world.page.getByTestId(
-				/^(permission-mode-option-|picker-permission-)/,
-			);
+			const options = world.page.getByTestId(/^picker-permission-/);
 			await expect(options.first()).toBeVisible();
 			await expect(options).toHaveCount(expected.length);
 			const actual = await options.evaluateAll((items) =>
 				items.map((item) =>
-					item
-						.getAttribute("data-testid")
-						?.replace(/^(permission-mode-option-|picker-permission-)/, ""),
+					item.getAttribute("data-testid")?.replace(/^picker-permission-/, ""),
 				),
 			);
 			if (actual.join(", ") !== expected.join(", ")) {
@@ -505,12 +501,11 @@ export const composerHandlers: StepHandler[] = [
 		name: "assert approvals menu closed",
 		match: /^the approvals menu is closed$/,
 		run: async ({ world }) => {
-			await expect(
-				world.page.getByTestId("permission-mode-dropdown"),
-			).toHaveCount(0);
 			await expect(world.page.getByTestId(/^picker-permission-/)).toHaveCount(
 				0,
 			);
+			// Picking returns to the Session root; OpenCode's root has no Permissions row.
+			await expect(world.page.getByTestId("picker-subtitle")).toBeVisible();
 		},
 	},
 ];

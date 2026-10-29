@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Button from "../../ui/Button.svelte";
-	import GitIdentity from "../GitIdentity.svelte";
+	import ComposerControlWithPicker from "../../model/__fixtures__/ComposerControlWithPicker.svelte";
 
 	// The story owns the session write: components may not speak the transport's vocabulary.
 	let { presentation, setWorktree }: {
@@ -17,7 +17,7 @@
 
 <div class="flex max-w-[320px] flex-col items-start gap-3">
 	<p role="status" data-testid="agent-worktree-status" class="text-xs text-text-muted">Composer checkout · Running turn</p>
-	<GitIdentity {presentation} />
+	<ComposerControlWithPicker {presentation} />
 	<div class="flex gap-2">
 		<Button variant="ghost" disabled={entered} onclick={() => setEntered(true)}>EnterWorktree</Button>
 		<Button variant="ghost" disabled={!entered} onclick={() => setEntered(false)}>ExitWorktree</Button>

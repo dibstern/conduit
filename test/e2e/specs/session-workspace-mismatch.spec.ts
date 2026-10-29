@@ -91,29 +91,23 @@ for (const viewport of [
 				await expect(
 					page.getByTestId("workspace-notice-indicator"),
 				).toBeVisible();
-				await openSessionPanel(page);
 			}
 			const checkout = page.getByTestId("composer-checkout");
-			if (!phone) await checkout.click();
-			const mismatch = phone
-				? page.locator(
-						'[data-testid="picker-checkout-notice"][data-kind="mismatch"]',
-					)
-				: page
-						.getByTestId("composer-checkout-menu")
-						.getByTestId("workspace-mismatch");
+			await checkout.click();
+			await expect(page.getByTestId("picker-row-checkout")).toBeFocused();
+			const mismatch = page.locator(
+				'[data-testid="picker-checkout-notice"][data-kind="mismatch"]',
+			);
 			await expect(mismatch).toContainText(actualPath);
-			if (phone)
-				await expect(page.getByTestId("picker-row-checkout")).toContainText(
-					target === main ? "main" : "requested",
-				);
-			else
-				await expect(mismatch).toContainText(
-					`The recorded folder is ${target}`,
-				);
-			const retry = phone
-				? mismatch.getByTestId("picker-checkout-notice-move")
-				: page.getByRole("menuitem", { name: "Retry move", exact: true });
+			await expect(page.getByTestId("picker-row-checkout")).toContainText(
+				target === main ? "main" : "requested",
+			);
+			await page.getByTestId("picker-row-checkout").click();
+			await expect(page.getByTestId("workspace-mismatch")).toContainText(
+				`The recorded folder is ${target}`,
+			);
+			await page.getByTestId("picker-back").click();
+			const retry = mismatch.getByTestId("picker-checkout-notice-move");
 			await page.screenshot({
 				path: testInfo.outputPath("workspace-mismatch.png"),
 			});
@@ -128,8 +122,7 @@ for (const viewport of [
 				.toEqual([
 					{ _tag: "MoveSessionWorkspace", sessionId: session.id, path: target },
 				]);
-			if (phone) await openSessionPanel(page);
-			else await checkout.click();
+			await openSessionPanel(page);
 			await expect(mismatch).toBeVisible();
 			// The shell feed clears the mismatch without a session-family update.
 			rpc.upsertShellRow({ ...session, workspaceMismatch: undefined });

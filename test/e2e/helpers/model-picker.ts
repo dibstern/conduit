@@ -8,8 +8,9 @@ export async function openPickerRoot(
 	page: Page,
 	trigger: Locator,
 ): Promise<void> {
-	await trigger.click();
-	await expect(page.getByTestId("model-picker")).toBeVisible();
+	const panel = page.getByTestId("model-picker");
+	if (!(await panel.isVisible())) await trigger.click();
+	await expect(panel).toBeVisible();
 	const back = page.getByTestId("picker-back");
 	if (await back.isVisible()) await back.click();
 }
@@ -33,4 +34,13 @@ export async function openSessionPanel(page: Page): Promise<void> {
 	await expect(sheet).toBeVisible();
 	const back = page.getByTestId("picker-back");
 	if (await back.isVisible()) await back.click();
+}
+
+/** Opens checkout details through the chip's focused Session panel row. */
+export async function openCheckoutDetails(page: Page): Promise<Locator> {
+	await openPickerRoot(page, page.getByTestId("composer-checkout"));
+	await page.getByTestId("picker-row-checkout").click();
+	const details = page.getByTestId("checkout-details");
+	await expect(details).toBeVisible();
+	return details;
 }

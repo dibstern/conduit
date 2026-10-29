@@ -2234,15 +2234,21 @@ export const ModeMenuOpen: Story = {
 		await userEvent.click(
 			await within(canvasElement).findByTestId("permission-mode-badge"),
 		);
-		const menu = await within(document.body).findByTestId(
-			"permission-mode-dropdown",
-		);
-		await expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(6);
+		const panel = await within(document.body).findByTestId("model-picker");
 		await expect(
-			within(menu).getByText("Ask before edits", { exact: true }),
+			within(panel).getByRole("heading", { name: "Permissions" }),
 		).toBeVisible();
 		await expect(
-			within(menu).getByText("Auto-accept edits", { exact: true }),
+			within(panel).getAllByTestId(/^picker-permission-/),
+		).toHaveLength(6);
+		await expect(
+			within(panel).getByTestId("picker-permission-ask"),
+		).toHaveAttribute("aria-pressed", "true");
+		await expect(
+			within(panel).getByText("Ask before edits", { exact: true }),
+		).toBeVisible();
+		await expect(
+			within(panel).getByText("Auto-accept edits", { exact: true }),
 		).toBeVisible();
 	},
 };

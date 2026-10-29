@@ -489,22 +489,18 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert inline phone checkout opens a bottom sheet",
+		name: "assert inline phone checkout opens the Session bottom sheet",
 		match: /^the checkout menu is a phone bottom sheet$/,
 		run: async ({ world }) => {
 			const viewport = world.page.viewportSize();
 			if (!viewport || viewport.width >= 768)
 				throw new Error("Phone viewport is required");
-			const menu = world.page.getByTestId("composer-checkout-menu");
-			await expect(menu).toBeVisible();
-			await expect(
-				menu.getByRole("menuitem", { name: "Copy worktree path" }),
-			).toContainText("Worktree");
-			await expect(menu).toContainText("Tap a row to copy it.");
-			await expect(world.page.getByTestId("menu-sheet-scrim")).toBeVisible();
+			const picker = world.page.getByTestId("model-picker");
+			await expect(picker).toBeVisible();
+			await expect(picker.getByTestId("picker-row-checkout")).toBeFocused();
 			await expect
 				.poll(async () => {
-					const bounds = await box(menu);
+					const bounds = await box(picker);
 					return (
 						Math.abs(bounds.x) <= 1 &&
 						Math.abs(bounds.width - viewport.width) <= 2 &&
@@ -683,10 +679,18 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		match:
 			/^I choose (Move|Retry move|Dismiss) in the phone Session panel checkout notice$/,
 		run: async ({ world, match }) => {
-			await world.page
-				.getByTestId("model-picker")
-				.getByTestId("picker-checkout-notice")
-				.first()
+			const picker = world.page.getByTestId("model-picker");
+			const mismatch = picker.locator(
+				'[data-testid="picker-checkout-notice"][data-kind="mismatch"]',
+			);
+			const kind =
+				match[1] === "Move"
+					? "hint"
+					: match[1] === "Retry move" || (await mismatch.isVisible())
+						? "mismatch"
+						: "hint";
+			await picker
+				.locator(`[data-testid="picker-checkout-notice"][data-kind="${kind}"]`)
 				.getByTestId(
 					match[1] === "Dismiss"
 						? "picker-checkout-notice-dismiss"

@@ -12,6 +12,7 @@
 	import MenuItem from "../ui/MenuItem.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import PermissionShield from "../ui/PermissionShield.svelte";
+	import CheckoutDetails from "../session/CheckoutDetails.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import ModelSelectionPanel from "./ModelSelectionPanel.svelte";
@@ -270,9 +271,14 @@
 		}
 	}
 
-	// The desktop panel hangs left from the trigger's right edge. A thin composer near the window's
+	// The desktop panel hangs left from the trigger's right edge; a bar control outside the picker
+	// (permissions, checkout chip) anchors it to that control instead. A thin composer near the window's
 	// left edge would push it offscreen, so slide it right to the floating menus' 8px collision padding.
 	function keepOnscreen(panel: HTMLElement) {
+		const opener = composerPickerState.request?.opener;
+		const parent = panel.offsetParent;
+		panel.style.translate = "";
+		if (opener && parent && !parent.contains(opener)) panel.style.right = `${parent.getBoundingClientRect().right - opener.getBoundingClientRect().right}px`;
 		const overflow = 8 - panel.getBoundingClientRect().left;
 		if (overflow > 0) panel.style.translate = `${overflow}px 0`;
 	}
@@ -361,7 +367,7 @@
 			searchQuery = "";
 			shownView = "root";
 			leftView = undefined;
-			view = request.section === "model" || request.section === "agent" || request.section === "account"
+			view = request.section === "model" || request.section === "agent" || request.section === "account" || request.section === "permissions"
 				? request.section
 				: "root";
 		});
@@ -569,16 +575,10 @@
 							<span class="truncate">{checkoutState.label}</span>
 						</span>
 					{/snippet}
-					{#if checkoutState.canListWorktrees}
-						<Button variant="picker-row" size="content" layout="flow" data-testid="picker-row-checkout" onclick={() => { view = "checkout"; void checkoutState.openWorktrees(); }}>
-							{@render checkoutRow()}
-							<Icon name="chevron-right" size={13} class="shrink-0 text-text-muted" />
-						</Button>
-					{:else}
-						<div data-testid="picker-row-checkout" class="flex min-h-[36px] items-center gap-[10px] px-[10px] py-[6px] text-[13.5px] max-md:min-h-[50px]">
-							{@render checkoutRow()}
-						</div>
-					{/if}
+					<Button variant="picker-row" size="content" layout="flow" data-testid="picker-row-checkout" onclick={() => { view = "checkout"; if (checkoutState.canListWorktrees) void checkoutState.openWorktrees(); }}>
+						{@render checkoutRow()}
+						<Icon name="chevron-right" size={13} class="shrink-0 text-text-muted" />
+					</Button>
 					{#each checkoutNotices as notice (notice.kind)}
 						<div data-testid="picker-checkout-notice" data-kind={notice.kind} class="mt-[2px] mr-[10px] mb-[6px] ml-[36px] rounded-[8px] bg-warning/10 px-[10px] py-[8px] text-[12px] leading-[1.4] text-warning">
 							<p class="break-words">{notice.label}</p>
@@ -707,23 +707,7 @@
 						</Button>
 					{/each}
 				{:else if view === "checkout"}
-					{#if checkoutState.worktrees === undefined}
-						<Button variant="picker-row" size="content" layout="flow" disabled>Loading worktrees…</Button>
-					{:else if checkoutState.worktrees.length === 0}
-						<Button variant="picker-row" size="content" layout="flow" disabled>No worktrees available</Button>
-					{:else}
-						{#each checkoutState.worktrees as worktree (worktree.path)}
-							{@const current = worktree.path === (checkoutState.currentDirectory ?? checkoutState.directory)}
-							<Button variant="picker-row" size="content" layout="flow" data-testid="picker-worktree" data-path={worktree.path} disabled={checkoutState.moving} onclick={() => { if (!current) { void checkoutState.move(worktree.path); closePicker(); } }}>
-								<Icon name="git-branch" size={16} class="shrink-0 text-text-muted" />
-								<span class="min-w-0 flex-1">
-									<span class="block">{worktree.branch ?? (worktree.main ? "Main folder" : "Detached HEAD")}{worktree.main ? " · main worktree" : ""}</span>
-									<span class="block break-all text-[12px] text-text-muted">{worktree.path}</span>
-								</span>
-								{#if current}<span data-testid="current-worktree" class="text-accent"><Icon name="check" size={16} /><span class="sr-only">Current worktree</span></span>{/if}
-							</Button>
-						{/each}
-					{/if}
+					<CheckoutDetails onclose={closePicker} />
 				{/if}
 
 			{/snippet}

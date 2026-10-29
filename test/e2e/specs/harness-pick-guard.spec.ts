@@ -1967,22 +1967,9 @@ async function selectFullPermission(page: Page): Promise<void> {
 		await openPickerRoot(page, page.locator(pickerSelector));
 		await page.getByTestId("picker-row-permissions").click();
 	}
-	await page
-		.getByTestId(
-			panel ? "picker-permission-full" : "permission-mode-option-full",
-		)
-		.click();
-	if (panel)
-		await expect(page.getByTestId("picker-row-permissions")).toContainText(
-			"Full access",
-		);
-	else
-		await expect(
-			page.getByRole("button", {
-				name: "Permissions: Full access. Open options",
-				exact: true,
-			}),
-		).toBeVisible();
+	await page.getByTestId("picker-permission-full").click();
+	// Picking returns to the Session root; OpenCode's root has no Permissions row.
+	await expect(page.getByTestId("picker-subtitle")).toBeVisible();
 	await page.keyboard.press("Escape");
 	await expect(page.locator(pickerSelector)).toHaveAttribute(
 		"data-shown-permission-mode",

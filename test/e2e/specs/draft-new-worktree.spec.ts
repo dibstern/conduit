@@ -555,6 +555,7 @@ for (const mode of [
 					"New workspace",
 				);
 				await press(await checkout(page));
+				await press(page.getByTestId("picker-row-checkout"));
 				const rows = page.getByTestId("session-folder-git");
 				await expect(rows).toHaveCount(3);
 				for (const root of [main, api]) {
@@ -575,7 +576,7 @@ for (const mode of [
 				);
 				await page.keyboard.press("Escape");
 				if (mode.hasTouch) {
-					await expect(page.getByTestId("composer-checkout-menu")).toBeHidden();
+					await expect(page.getByTestId("model-picker")).toBeHidden();
 					await press(page.getByTestId("session-bar-island-overflow"));
 					await press(page.getByTestId("overflow-view-files"));
 				} else {

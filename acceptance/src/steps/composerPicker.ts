@@ -13,6 +13,7 @@ import {
 	refetchModelCatalog,
 	requireRpcControl,
 	serveModelCatalog,
+	setSessionRowStatus,
 } from "./shared.js";
 
 const levels = ["low", "medium", "high", "xhigh", "max"];
@@ -829,6 +830,46 @@ export const composerPickerHandlers: StepHandler[] = [
 			await expect(
 				world.page.getByTestId("picker-row-permissions"),
 			).toBeVisible();
+		},
+	},
+	{
+		name: "seed checkout branch rename capability",
+		match: /^the checkout branch can be renamed$/,
+		run: ({ world }) => {
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			if (!sessionId) throw new Error("Branch rename requires an open session");
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				canRenameBranch: true,
+			});
+		},
+	},
+	{
+		name: "assert checkout chip opens the focused Session root",
+		match: /^the checkout chip opens Session with Checkout focused$/,
+		run: async ({ world }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(picker).toBeVisible();
+			await expect(picker.getByTestId("picker-back")).toHaveCount(0);
+			await expect(picker.getByTestId("picker-row-checkout")).toBeFocused();
+		},
+	},
+	{
+		name: "assert Checkout drill-in details and branch rename",
+		match: /^the Checkout drill-in shows git tiles and Rename branch$/,
+		run: async ({ world }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(
+				picker.getByRole("heading", { name: "Checkout", exact: true }),
+			).toBeVisible();
+			const details = picker.getByTestId("checkout-details");
+			await expect(details.getByTestId("checkout-ahead")).toHaveText("2ahead");
+			await expect(details.getByTestId("checkout-behind")).toHaveText(
+				"1behind",
+			);
+			await expect(details.getByTestId("checkout-changes")).toHaveText(
+				"3+12-4files changed",
+			);
+			await expect(details.getByTestId("session-branch-rename")).toBeVisible();
 		},
 	},
 	{

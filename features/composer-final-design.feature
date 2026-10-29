@@ -141,7 +141,7 @@ Scenario: holding phone footer effort and tapping checkout open their existing s
   And I tap the phone footer checkout control
   Then the checkout menu is a phone bottom sheet
   And the composer checkout menu shows conduit and account-chip in full
-  And the phone Session panel is closed
+  And the phone Session panel remains open
 
 Scenario Outline: the phone model pill opens the Session panel
   Given the conduit app is served with the connected mockup
@@ -286,7 +286,7 @@ Scenario: dismissing a phone workspace mismatch acknowledges its warning locally
   Then the phone Session panel checkout notice is absent
   When I close the phone Session panel
   And I open the composer checkout menu
-  Then the composer checkout menu reports /workspace/conduit-chip and offers Retry move
+  Then the Checkout drill-in keeps the recorded workspace mismatch at /workspace/conduit-chip without actions
 
 Scenario: a phone hint and mismatch at the same path have separate Dismiss actions
   Given the conduit app is served with the connected mockup

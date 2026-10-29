@@ -152,8 +152,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	// sheet, and these stories end with the menu closed.
 	"session-gitidentity--moved-back | session-gitidentity--moved-back-phone":
 		"same closed control at both tiers; the phone story asserts the notice's img role in play()",
-	"session-gitidentity--workspace-hint | session-gitidentity--workspace-hint-phone":
-		"same closed control at both tiers; the hint asserts the same in play() at each",
 	"session-gitidentity--worktree-missing | session-gitidentity--worktree-missing-phone":
 		"same closed control at both tiers; the phone story asserts the missing-worktree label in play()",
 	"ui-microlabelbutton--cancelled-hold | ui-microlabelbutton--default | ui-microlabelbutton--hold-and-tap | ui-microlabelbutton--hold-lifecycle":

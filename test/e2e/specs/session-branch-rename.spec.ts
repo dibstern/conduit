@@ -203,10 +203,10 @@ for (const mode of [
 			page.getByTestId("composer-icons-left").getByTestId("composer-checkout");
 		async function openRename(page: Page) {
 			await press(await checkout(page));
-			const menu = page.getByRole("menu", { name: "Checkout" });
-			await press(
-				menu.getByRole("menuitem", { name: "Rename branch", exact: true }),
-			);
+			await expect(page.getByTestId("picker-row-checkout")).toBeFocused();
+			await press(page.getByTestId("picker-row-checkout"));
+			await press(page.getByTestId("session-branch-rename"));
+			await expect(page.getByTestId("model-picker")).toBeHidden();
 			const dialog = page.getByRole("dialog", {
 				name: "Rename branch",
 				exact: true,
@@ -241,14 +241,16 @@ for (const mode of [
 					branchName: newName,
 				});
 				await expect(dialog).not.toBeVisible();
+				await expect(await checkout(page)).toBeFocused();
 				if (mode.hasTouch)
 					await expect(await checkout(page)).toHaveAccessibleName(
 						new RegExp(newName),
 					);
 				else await expect(await checkout(page)).toContainText(newName);
 				await press(await checkout(page));
+				await press(page.getByTestId("picker-row-checkout"));
 				const folderRows = page
-					.getByRole("menu", { name: "Checkout" })
+					.getByTestId("checkout-details")
 					.getByTestId("session-folder-git");
 				await expect(folderRows).toHaveCount(2);
 				for (const row of await folderRows.all())
@@ -274,11 +276,10 @@ for (const mode of [
 					ownership,
 				});
 				await press(await checkout(page));
-				const menu = page.getByRole("menu", { name: "Checkout" });
+				await press(page.getByTestId("picker-row-checkout"));
+				const menu = page.getByTestId("checkout-details");
 				await expect(menu).toBeVisible();
-				await expect(
-					menu.getByRole("menuitem", { name: "Rename branch", exact: true }),
-				).toHaveCount(0);
+				await expect(menu.getByTestId("session-branch-rename")).toHaveCount(0);
 				expect(
 					rpc.getRequests().filter(({ tag }) => tag === "RenameSessionBranch"),
 				).toHaveLength(0);
@@ -348,6 +349,7 @@ for (const mode of [
 				.fill(renamedBranch);
 			await press(dialog.getByRole("button", { name: "Cancel", exact: true }));
 			await expect(dialog).not.toBeVisible();
+			await expect(await checkout(page)).toBeFocused();
 			expect(
 				rpc.getRequests().filter(({ tag }) => tag === "RenameSessionBranch"),
 			).toHaveLength(0);

@@ -50,6 +50,17 @@ class WorkspaceCheckout {
 			? undefined
 			: this.folderGit,
 	);
+	operationLabel = $derived(
+		this.git?.operation
+			? {
+					rebase: "rebasing",
+					merge: "merging",
+					"cherry-pick": "cherry-picking",
+					revert: "reverting",
+					bisect: "bisecting",
+				}[this.git.operation]
+			: undefined,
+	);
 	projectName = $derived(
 		this.directory
 			?.replace(/[\\/]+$/, "")
@@ -77,28 +88,6 @@ class WorkspaceCheckout {
 	warningMismatch = $derived(
 		this.dismissedMismatch ? undefined : this.workspaceMismatch,
 	);
-	warningPath = $derived(
-		this.warningMismatch?.actualPath ?? this.workspaceHint,
-	);
-	warningDisplayPath = $derived.by(() => {
-		const warningPath = this.warningPath;
-		if (!warningPath) return "";
-		const path = warningPath.replaceAll("\\", "/");
-		if (!path.startsWith("/") && !/^[a-z]:\//i.test(path)) return warningPath;
-		const base = (this.directory ?? "")
-			.replaceAll("\\", "/")
-			.split("/")
-			.filter(Boolean);
-		const target = path.split("/").filter(Boolean);
-		if (target[0]?.includes(":") && target[0] !== base[0]) return warningPath;
-		let common = 0;
-		while (common < base.length && base[common] === target[common]) common++;
-		return (
-			[...base.slice(common).map(() => ".."), ...target.slice(common)].join(
-				"/",
-			) || "."
-		);
-	});
 	hintLabel = $derived(
 		`working in ${
 			this.workspaceHint
@@ -199,31 +188,22 @@ class WorkspaceCheckout {
 			(notice) => notice.kind !== "mismatch" || !this.dismissedMismatch,
 		),
 	);
-	warningNotice = $derived(
-		this.rowNotices.find(
-			(notice) => notice.kind === "mismatch" || notice.kind === "hint",
-		),
-	);
-
-	showWorktrees = $state(false);
 	worktrees = $state<readonly WorktreeInfo[] | undefined>();
 	currentDirectory = $state<string | undefined>();
 	moving = $state(false);
 	dismissing = $state(false);
 	showBranchRename = $state(false);
-	branchRenameOpener = $state<HTMLElement>();
 	branchName = $state("");
 	branchRenameError = $state<string | undefined>();
 	renamingBranch = $state(false);
 	private worktreeRequest = 0;
 
-	openBranchRename(opener: HTMLElement | undefined) {
+	openBranchRename() {
 		this.branchName =
 			this.git?.branch ??
 			this.folders.find((folder) => !folder.shared && folder.branch)?.branch ??
 			"";
 		this.branchRenameError = undefined;
-		this.branchRenameOpener = opener;
 		this.showBranchRename = true;
 	}
 
@@ -252,7 +232,6 @@ class WorkspaceCheckout {
 
 	async openWorktrees() {
 		if (!this.sessionId || !this.canListWorktrees) return;
-		this.showWorktrees = true;
 		this.worktrees = undefined;
 		this.currentDirectory = undefined;
 		const request = ++this.worktreeRequest;

@@ -6,6 +6,7 @@ import type {
 	SessionWorkspace,
 	WorktreeInfo,
 } from "../../../src/lib/shared-types.js";
+import { openCheckoutDetails } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, sendMockShellRowPatch } from "../helpers/rpc-mock.js";
 import { settleSheet } from "../helpers/sheet-drag.js";
@@ -250,9 +251,7 @@ for (const mode of [
 			);
 			await expect(page.getByTestId("session-skills-chip")).toHaveCount(0);
 			await capture(page, testInfo, `${mode.name}-dirty-composer`);
-			if (mode.hasTouch) await trigger.tap();
-			else await trigger.click();
-			const details = page.getByTestId("composer-checkout-menu");
+			const details = await openCheckoutDetails(page);
 			await expect(details).toBeVisible();
 			await expect(details.getByText(directory, { exact: true })).toBeVisible();
 			await expect(details.getByTestId("checkout-changes")).toHaveText(
@@ -265,23 +264,18 @@ for (const mode of [
 			await expect(
 				details.getByText("origin/main", { exact: true }),
 			).toBeVisible();
-			await expect(details).toContainText(
-				`${mode.hasTouch ? "Tap" : "Click"} a row to copy it.`,
-			);
 			await capture(page, testInfo, `${mode.name}-checkout-details`);
-			await details
-				.getByRole("menuitem", { name: "Copy worktree path" })
-				.click();
+			await details.getByRole("button", { name: "Copy worktree path" }).click();
 			await expect
 				.poll(() => page.evaluate(() => navigator.clipboard.readText()))
 				.toBe(directory);
 			await expect(details).toBeVisible();
-			await details.getByRole("menuitem", { name: "Copy branch name" }).click();
+			await details.getByRole("button", { name: "Copy branch name" }).click();
 			await expect
 				.poll(() => page.evaluate(() => navigator.clipboard.readText()))
 				.toBe("main");
 			await expect(details).toBeVisible();
-			await details.getByRole("menuitem", { name: "Copy commit hash" }).click();
+			await details.getByRole("button", { name: "Copy commit hash" }).click();
 			await expect
 				.poll(() => page.evaluate(() => navigator.clipboard.readText()))
 				.toBe("6b11104a9c2e88d27395d13c706d876fbab99aa1");
@@ -300,10 +294,10 @@ for (const mode of [
 				).toBeVisible();
 			await expect(trigger).not.toContainText("conduit-wt-draft");
 			await capture(page, testInfo, `${mode.name}-linked-worktree`);
-			await trigger.click();
+			await openCheckoutDetails(page);
 			await expect(
 				page
-					.getByTestId("composer-checkout-menu")
+					.getByTestId("checkout-details")
 					.getByText("conduit-wt-draft", { exact: true }),
 			).toBeVisible();
 		});
@@ -413,12 +407,11 @@ for (const mode of [
 					testInfo,
 					`${mode.name}-agent-${stage.name}-composer`,
 				);
-				await trigger.click();
-				const details = page.getByTestId("composer-checkout-menu");
+				const details = await openCheckoutDetails(page);
 				await expect(details).toBeVisible();
 				const checkout = {
 					Worktree: await details
-						.getByRole("menuitem", { name: "Copy worktree path" })
+						.getByRole("button", { name: "Copy worktree path" })
 						.locator("bdi")
 						.innerText(),
 					Branch: await details
@@ -469,9 +462,9 @@ for (const mode of [
 			await expect(
 				trigger.locator('[title="Uncommitted changes"]'),
 			).toHaveCount(0);
-			await trigger.click();
+			await openCheckoutDetails(page);
 			await expect(
-				page.getByRole("menuitem", { name: "Copy branch name" }),
+				page.getByRole("button", { name: "Copy branch name" }),
 			).toHaveCount(0);
 			await capture(page, testInfo, `${mode.name}-no-git-details`);
 		});
@@ -512,21 +505,24 @@ for (const mode of [
 				await expect(
 					trigger.locator('[data-icon="worktree"] svg'),
 				).toBeVisible();
-			await trigger.click();
-			const details = page.getByTestId("composer-checkout-menu");
-			await expect(details.getByText(moved, { exact: true })).toBeVisible();
-			await details
-				.getByRole("menuitem", { name: "Move to another worktree…" })
-				.click();
-			const current = details.getByRole("menuitem", { name: /feature\/one/ });
+			const details = await openCheckoutDetails(page);
+			await expect(
+				details.getByRole("button", { name: "Copy worktree path" }),
+			).toContainText(moved);
+			const current = details
+				.getByTestId("picker-worktree")
+				.filter({ hasText: "feature/one" });
 			await expect(
 				current.locator('[data-testid="current-worktree"]'),
 			).toBeVisible();
 			await expect(
-				details.getByRole("menuitem", { name: /main/ }),
+				details.getByTestId("picker-worktree").filter({ hasText: "main" }),
 			).toBeVisible();
 			await capture(page, testInfo, `${mode.name}-worktree-list`);
-			await details.getByRole("menuitem", { name: /feature\/two/ }).click();
+			await details
+				.getByTestId("picker-worktree")
+				.filter({ hasText: "feature/two" })
+				.click();
 			await expect.poll(() => moves).toEqual([other]);
 		});
 
@@ -535,15 +531,15 @@ for (const mode of [
 				page,
 				harness,
 			}) => {
-				const trigger = await openCheckout(page, harness.relayBaseUrl, {
+				await openCheckout(page, harness.relayBaseUrl, {
 					provider: supportsWorktree === false ? "opencode" : "claude",
 					supportsWorktree,
 					git: { branch: "main" },
 				});
-				await trigger.click();
+				const details = await openCheckoutDetails(page);
 				// An omitted override uses Claude's enabled driver capability.
 				await expect(
-					page.getByRole("menuitem", { name: "Move to another worktree…" }),
+					details.getByText("Worktrees", { exact: true }),
 				).toHaveCount(supportsWorktree === false ? 0 : 1);
 			});
 		}
@@ -554,7 +550,7 @@ for (const mode of [
 		}, testInfo) => {
 			const directory = "/workspace/conduit-alias/packages/app";
 			const canonicalDirectory = "/real/conduit/packages/app";
-			const trigger = await openCheckout(page, harness.relayBaseUrl, {
+			await openCheckout(page, harness.relayBaseUrl, {
 				provider: "claude",
 				directory,
 				canonicalDirectory,
@@ -565,13 +561,9 @@ for (const mode of [
 					{ path: "/real/conduit-one", branch: "feature/one", main: false },
 				],
 			});
-			await trigger.click();
-			const details = page.getByTestId("composer-checkout-menu");
-			await details
-				.getByRole("menuitem", { name: "Move to another worktree…" })
-				.click();
+			const details = await openCheckoutDetails(page);
 			const destination = details
-				.getByRole("menuitem")
+				.getByTestId("picker-worktree")
 				.filter({ hasText: canonicalDirectory });
 			await expect(destination.getByTestId("current-worktree")).toBeVisible();
 			await expect(details.getByTestId("current-worktree")).toHaveCount(1);
@@ -589,11 +581,11 @@ for (const mode of [
 				worktrees: [{ path, branch: "feature/removed", main: false }],
 				moveError: new WorkspaceMoveError({ path, reason: "missing" }),
 			});
-			await trigger.click();
-			await page
-				.getByRole("menuitem", { name: "Move to another worktree…" })
+			const details = await openCheckoutDetails(page);
+			await details
+				.getByTestId("picker-worktree")
+				.filter({ hasText: "feature/removed" })
 				.click();
-			await page.getByRole("menuitem", { name: /feature\/removed/ }).click();
 			const toast = page.getByRole("alert");
 			await expect(
 				toast.getByText("Could not move session", { exact: true }),
@@ -666,12 +658,12 @@ for (const mode of [
 			await expect(trigger).toHaveAttribute("title", "conduit / a1b2c3d");
 			if (!mode.hasTouch)
 				await expect(trigger.locator('[data-icon="commit"] svg')).toBeVisible();
-			await trigger.click();
+			await openCheckoutDetails(page);
 			await expect(
 				page.getByText("Detached at a1b2c3d", { exact: true }),
 			).toBeVisible();
 			await expect(
-				page.getByRole("menuitem", { name: "Copy branch name" }),
+				page.getByRole("button", { name: "Copy branch name" }),
 			).toHaveCount(0);
 			await capture(page, testInfo, `${mode.name}-detached-details`);
 		});
@@ -699,8 +691,7 @@ for (const mode of [
 			if (mode.hasTouch) await expect(trigger).not.toContainText("↑3");
 			else await expect(trigger).toContainText("↑3 ↓1");
 			await capture(page, testInfo, `${mode.name}-checkout-marks`);
-			await trigger.click();
-			const menu = page.getByTestId("composer-checkout-menu");
+			const menu = await openCheckoutDetails(page);
 			await expect(menu.getByTestId("checkout-ahead")).toHaveText("3ahead");
 			await expect(menu.getByTestId("checkout-behind")).toHaveText("1behind");
 		});
