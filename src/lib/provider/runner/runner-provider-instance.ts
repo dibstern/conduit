@@ -319,7 +319,16 @@ export class RunnerProviderInstance implements ProviderInstance {
 			const sessions = yield* sql<{
 				id: string;
 				provider: string;
-			}>`SELECT id, provider FROM sessions`;
+			}>`SELECT s.id, s.provider FROM sessions s
+				JOIN (
+					SELECT session_id FROM pending_approvals
+					WHERE status = 'pending'
+						AND COALESCE(json_extract(details, '$.delivery'), '') <> 'async'
+					UNION
+					SELECT session_id FROM provider_command_outbox
+					WHERE effect_type <> 'send_turn'
+						AND status IN ('pending', 'running', 'retryable_failed')
+				) cleanup ON cleanup.session_id = s.id`;
 			for (const session of sessions) {
 				if (sessionIds && !sessionIds.has(session.id)) continue;
 				const driver =

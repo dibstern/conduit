@@ -63,6 +63,9 @@ it("keeps parameter combination and default reads in the choice module and disco
 				source.slice(0, declaration.getStart(parsed)) +
 				source.slice(declaration.end);
 		}
+		// Every read below names the property, so a file without either word
+		// needs no TypeScript parse. This skips almost every file under src.
+		if (!/combinations|isDefault/.test(source)) continue;
 		const script = file.endsWith(".svelte")
 			? [...source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)]
 					.map((match) => match[1] ?? "")

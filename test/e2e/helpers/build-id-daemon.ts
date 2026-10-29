@@ -1,10 +1,11 @@
 // Compiled by tsgo so the test exercises the stamped server, not source/dev.
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { BUILD_ID } from "../../../src/lib/build-id.js";
 import { startForegroundDaemon } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
+import { stopDaemonAndAssertNoSurvivors } from "./daemon-survivors.js";
 
 const [root, staticDir, opencodeUrl, port] = process.argv.slice(2);
 if (!root || !staticDir || !opencodeUrl) throw new Error("Missing test paths");
@@ -45,10 +46,20 @@ const daemon = await startForegroundDaemon({
 await daemon.addProject(join(root, "build-id-test"));
 await daemon.addProject(join(root, "build-id-other"));
 process.send?.({ port: daemon.port, buildId: BUILD_ID });
-const stop = async () => {
-	await daemon.stop();
-	process.exit(0);
-};
+let stopping: Promise<void> | undefined;
+const stop = () =>
+	(stopping ??= (async () => {
+		try {
+			await stopDaemonAndAssertNoSurvivors(() => daemon.stop());
+			process.exit(0);
+		} catch (error) {
+			writeSync(
+				2,
+				`${error instanceof Error ? error.message : String(error)}\n`,
+			);
+			process.exit(1);
+		}
+	})());
 process.on("message", (message) => {
 	if (message === "stop") void stop();
 });

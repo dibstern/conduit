@@ -16,7 +16,8 @@ import {
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
 import { worktreeFixture } from "./worktree-service-fixture.js";
 
-describe("daemon Worktree service", () => {
+// Real git subprocesses: tests measured 3-9 s each under CPU contention.
+describe("daemon Worktree service", { timeout: 30_000 }, () => {
 	const context = worktreeFixture();
 	const {
 		repositoryState,
@@ -114,7 +115,7 @@ process.exit(result.status ?? 1);`,
 			expect(error.message).toContain("forced post-ref failure");
 		else expect(existsSync(timeoutMarker)).toBe(true);
 		assertUnchanged(before);
-	}, 30_000);
+	});
 
 	it("rolls back a worktree add that succeeded before reporting failure", async () => {
 		const before = repositoryState();
@@ -143,7 +144,7 @@ process.exit(result.status ?? 1);`,
 		expect(existsSync(timeoutMarker)).toBe(true);
 		expect(existsSync(marker)).toBe(true);
 		assertUnchanged(before);
-	}, 30_000);
+	});
 
 	it.each([
 		false,
@@ -187,5 +188,5 @@ finish();
 				expect(Cause.hasInterrupts(exit.cause)).toBe(true);
 		}
 		assertUnchanged(before);
-	}, 30_000);
+	});
 });

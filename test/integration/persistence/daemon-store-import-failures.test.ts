@@ -725,7 +725,8 @@ const backupPath = (project: ProjectStoreSource) =>
 
 function completedBackup(project: ProjectStoreSource, before: Buffer): void {
 	expect(existsSync(project.sourcePath)).toBe(false);
-	expect(readFileSync(backupPath(project))).toEqual(before);
+	// Buffer.equals: toEqual walks a large store byte by byte, which takes seconds.
+	expect(readFileSync(backupPath(project)).equals(before)).toBe(true);
 	const prefix = `${basename(project.sourcePath)}.imported-`;
 	expect(
 		readdirSync(dirname(project.sourcePath)).filter(

@@ -230,444 +230,447 @@ interface Metrics {
 test.describe.configure({ retries: 0 });
 test.use({ harnessOptions: { logLevel: "warn" } });
 
-test("creates reach every sidebar under streaming write load", async ({
-	browser,
-	harness,
-}, testInfo) => {
-	test.setTimeout(180_000 + parameters.creates * 2_000);
-	const contexts: BrowserContext[] = [];
-	const samples: Sample[] = [];
-	const metricsFile = join(harness.root, "create-latency-metrics.json");
-	const logFile = testInfo.outputPath("create-latency-daemon.log");
-	const traceFile = join(harness.root, "create-latency.trace.ndjson");
-	const expectedWriteRate =
-		(parameters.streams * 1_000) / parameters.streamIntervalMs;
-	let phaseStart: number | null = null;
-	let phaseEnd: number | null = null;
-	let backgroundTicks = 0;
-	let achievedWriteRate = 0;
-	let backgroundMeasured = false;
-	let streamTicks: number[] = [];
-	const diagnosticErrors: string[] = [];
-	const shellReads: Record<string, number> = {};
-	let sidebarReads: Metrics["sidebarReads"] = [];
-	let fixture: Awaited<ReturnType<typeof seedSessionLoadFixture>> | null = null;
-	let stopped = false;
-	let debuggedSessionId: string | null = null;
-	try {
-		// The fixture server can create the session before tracing is configured.
-		// Seeding appends to its store, so the existing restart preserves this ID
-		// and enables record-all before any streams or latency measurements start.
-		const setupDriver = await harness.connect(
-			undefined,
-			undefined,
-			undefined,
-			false,
-		);
-		debuggedSessionId = await setupDriver.createSession("Latency stream 0");
-		await harness.terminate();
-		fixture = await seedSessionLoadFixture(harness.daemonStorePath(), {
-			projectId: "process-test",
-			seen: true,
-		});
-		harness.disableIdlePolicies();
-		await harness.restart({
-			keepPort: true,
-			skipBrowserProbe: true,
-			metricsFile,
-			logFile,
-			serviceEnvironment: {
-				CONDUIT_SLOW_RPC_MS: String(parameters.slowRpcMs),
-				CONDUIT_TRACE_ENABLED: "1",
-				CONDUIT_TRACE_FILE: traceFile,
-				CONDUIT_TRACE_MAX_BYTES: String(1_073_741_824),
-				CONDUIT_TRACE_MIN_MS: String(parameters.traceMinMs),
-				CONDUIT_TRACE_SESSION: debuggedSessionId,
-			},
-		});
-		const driver = await harness.connect(
-			undefined,
-			undefined,
-			undefined,
-			false,
-		);
-		await expect
-			.poll(() => harness.generations.at(-1)?.fakeSdkActive)
-			.toBe(true);
-		await driver.view(debuggedSessionId);
-		await driver.history(debuggedSessionId);
-		const streams: string[] = [];
-		for (let index = 0; index < parameters.streams; index++) {
-			const sessionId =
-				index === 0
-					? debuggedSessionId
-					: await driver.createSession(`Latency stream ${index}`);
-			await Effect.runPromise(
-				driver.rpc["input.submit"]({
-					sessionId,
-					originId: driver.originId,
-					inputId: randomUUID(),
-					text: `load-stream-${index}`,
-					delivery: "queue",
-				}),
-			);
-			streams.push(sessionId);
-		}
-		const database = new DatabaseSync(harness.daemonStorePath(), {
-			readOnly: true,
-		});
+test(
+	"creates reach every sidebar under streaming write load",
+	{ tag: "@timed" },
+	async ({ browser, harness }, testInfo) => {
+		test.setTimeout(180_000 + parameters.creates * 2_000);
+		const contexts: BrowserContext[] = [];
+		const samples: Sample[] = [];
+		const metricsFile = join(harness.root, "create-latency-metrics.json");
+		const logFile = testInfo.outputPath("create-latency-daemon.log");
+		const traceFile = join(harness.root, "create-latency.trace.ndjson");
+		const expectedWriteRate =
+			(parameters.streams * 1_000) / parameters.streamIntervalMs;
+		let phaseStart: number | null = null;
+		let phaseEnd: number | null = null;
+		let backgroundTicks = 0;
+		let achievedWriteRate = 0;
+		let backgroundMeasured = false;
+		let streamTicks: number[] = [];
+		const diagnosticErrors: string[] = [];
+		const shellReads: Record<string, number> = {};
+		let sidebarReads: Metrics["sidebarReads"] = [];
+		let fixture: Awaited<ReturnType<typeof seedSessionLoadFixture>> | null =
+			null;
+		let stopped = false;
+		let debuggedSessionId: string | null = null;
 		try {
-			// Initial Git publication stamps every seeded sidebar row in the same
-			// transaction. Finish it before opening the measured subscriptions.
-			const published = database.prepare(
-				"SELECT 1 FROM session_git_published WHERE directory = ?",
+			// The fixture server can create the session before tracing is configured.
+			// Seeding appends to its store, so the existing restart preserves this ID
+			// and enables record-all before any streams or latency measurements start.
+			const setupDriver = await harness.connect(
+				undefined,
+				undefined,
+				undefined,
+				false,
+			);
+			debuggedSessionId = await setupDriver.createSession("Latency stream 0");
+			await harness.terminate();
+			fixture = await seedSessionLoadFixture(harness.daemonStorePath(), {
+				projectId: "process-test",
+				seen: true,
+			});
+			harness.disableIdlePolicies();
+			await harness.restart({
+				keepPort: true,
+				skipBrowserProbe: true,
+				metricsFile,
+				logFile,
+				serviceEnvironment: {
+					CONDUIT_SLOW_RPC_MS: String(parameters.slowRpcMs),
+					CONDUIT_TRACE_ENABLED: "1",
+					CONDUIT_TRACE_FILE: traceFile,
+					CONDUIT_TRACE_MAX_BYTES: String(1_073_741_824),
+					CONDUIT_TRACE_MIN_MS: String(parameters.traceMinMs),
+					CONDUIT_TRACE_SESSION: debuggedSessionId,
+				},
+			});
+			const driver = await harness.connect(
+				undefined,
+				undefined,
+				undefined,
+				false,
 			);
 			await expect
-				.poll(() => published.get(harness.projectDir) !== undefined)
+				.poll(() => harness.generations.at(-1)?.fakeSdkActive)
 				.toBe(true);
-			const pages: Page[] = [];
-			for (let device = 0; device < parameters.devices; device++) {
-				const context = await browser.newContext({
-					viewport: { width: 1440, height: 900 },
-					isMobile: false,
-				});
-				contexts.push(context);
-				const page = await context.newPage();
-				pages.push(page);
-				// New idle sessions must enter the rendered page ahead of the 5,001
-				// seeded unread roots, which precede idle rows in status grouping.
-				await new AppPage(page).goto(
-					`${harness.baseUrl}/?p=process-test&group=time`,
+			await driver.view(debuggedSessionId);
+			await driver.history(debuggedSessionId);
+			const streams: string[] = [];
+			for (let index = 0; index < parameters.streams; index++) {
+				const sessionId =
+					index === 0
+						? debuggedSessionId
+						: await driver.createSession(`Latency stream ${index}`);
+				await Effect.runPromise(
+					driver.rpc["input.submit"]({
+						sessionId,
+						originId: driver.originId,
+						inputId: randomUUID(),
+						text: `load-stream-${index}`,
+						delivery: "queue",
+					}),
 				);
-				await expect(
-					page.locator(`[data-session-id="${HEAVY_SESSION_ID}"]`).first(),
-				).toBeVisible({ timeout: 30_000 });
+				streams.push(sessionId);
 			}
-			// Count tick tokens, so coalescing several SDK deltas into one event
-			// cannot inflate or undercount the achieved background write rate.
-			const tickQuery = database.prepare(`
+			const database = new DatabaseSync(harness.daemonStorePath(), {
+				readOnly: true,
+			});
+			try {
+				// Initial Git publication stamps every seeded sidebar row in the same
+				// transaction. Finish it before opening the measured subscriptions.
+				const published = database.prepare(
+					"SELECT 1 FROM session_git_published WHERE directory = ?",
+				);
+				await expect
+					.poll(() => published.get(harness.projectDir) !== undefined)
+					.toBe(true);
+				const pages: Page[] = [];
+				for (let device = 0; device < parameters.devices; device++) {
+					const context = await browser.newContext({
+						viewport: { width: 1440, height: 900 },
+						isMobile: false,
+					});
+					contexts.push(context);
+					const page = await context.newPage();
+					pages.push(page);
+					// New idle sessions must enter the rendered page ahead of the 5,001
+					// seeded unread roots, which precede idle rows in status grouping.
+					await new AppPage(page).goto(
+						`${harness.baseUrl}/?p=process-test&group=time`,
+					);
+					await expect(
+						page.locator(`[data-session-id="${HEAVY_SESSION_ID}"]`).first(),
+					).toBeVisible({ timeout: 30_000 });
+				}
+				// Count tick tokens, so coalescing several SDK deltas into one event
+				// cannot inflate or undercount the achieved background write rate.
+				const tickQuery = database.prepare(`
 				SELECT session_id, coalesce(sum((length(json_extract(data, '$.text')) -
 					length(replace(json_extract(data, '$.text'), 'tick(', ''))) / 5), 0) AS n
 				FROM events WHERE type = 'text.delta'
 				AND session_id IN (${streams.map(() => "?").join(",")})
 				GROUP BY session_id
 			`);
-			const ticks = () => {
-				const counts = new Map(
-					tickQuery
-						.all(...streams)
-						.map((row) => [String(row["session_id"]), Number(row["n"])]),
-				);
-				streamTicks = streams.map((id) => counts.get(id) ?? 0);
-				return streamTicks;
-			};
-			await expect.poll(() => Math.min(...ticks())).toBeGreaterThan(10);
-			// Each device has rendered its snapshot above, so its initial sidebar
-			// read is already complete before the measured live windows start.
-			const beforeTicks = ticks();
-			phaseStart = now();
-			try {
-				const pending: Promise<void>[] = [];
-				for (let index = 0; index < parameters.creates; index++) {
-					const beforeCreateTicks = ticks();
-					await Promise.all(pages.map((page) => armArrival(page, index)));
-					const sample: Sample = {
-						index,
-						submittedAt: now(),
-						sessionId: null,
-						rpcMs: null,
-						arrivals: pages.map((_, device) => ({
-							device,
-							at: null,
-							ms: null,
-						})),
-						slowestMs: null,
-						backgroundTicks: [],
-					};
-					samples.push(sample);
-					const reply = await Effect.runPromise(
-						driver.rpc
-							.CreateSession({
-								projectSlug: "process-test",
-								providerId: "claude",
-								permissionMode: "ask",
-								originId: driver.originId,
-								title: `Create latency ${index}`,
-								model: {
-									providerId: "claude",
-									modelId: "sonnet",
-									variant: "",
-									contextWindow: "200k",
-								},
-							})
-							.pipe(Effect.timeout("15 seconds")),
+				const ticks = () => {
+					const counts = new Map(
+						tickQuery
+							.all(...streams)
+							.map((row) => [String(row["session_id"]), Number(row["n"])]),
 					);
-					sample.rpcMs = now() - sample.submittedAt;
-					sample.sessionId = reply.sessionId;
-					pending.push(
-						Promise.all(
-							pages.map((page) =>
-								arrival(page, index, reply.sessionId, sample.submittedAt),
-							),
-						).then(
-							(arrivals) => {
-								sample.arrivals = arrivals.map((at, device) => ({
-									device,
-									at,
-									ms: at === null ? null : at - sample.submittedAt,
-								}));
-								sample.slowestMs = arrivals.includes(null)
-									? null
-									: Math.max(
-											...arrivals.map((at) => (at ?? 0) - sample.submittedAt),
-										);
-							},
-							(error: unknown) => {
-								sample.arrivalError = String(error);
-							},
-						),
-					);
-					// Keep the same two ticks per stream/create as the former 200 ms
-					// cadence. Waiting for persisted work also tolerates OS scheduling
-					// delays without silently reducing the background workload.
-					await expect
-						.poll(() => {
-							sample.backgroundTicks = ticks().map(
-								(count, stream) => count - (beforeCreateTicks[stream] ?? 0),
-							);
-							return Math.min(...sample.backgroundTicks);
-						})
-						.toBeGreaterThanOrEqual(parameters.ticksPerCreate);
-				}
-				await Promise.all(pending);
-			} finally {
-				phaseEnd = now();
+					streamTicks = streams.map((id) => counts.get(id) ?? 0);
+					return streamTicks;
+				};
+				await expect.poll(() => Math.min(...ticks())).toBeGreaterThan(10);
+				// Each device has rendered its snapshot above, so its initial sidebar
+				// read is already complete before the measured live windows start.
+				const beforeTicks = ticks();
+				phaseStart = now();
 				try {
-					backgroundTicks = ticks().reduce(
-						(total, count, stream) =>
-							total + count - (beforeTicks[stream] ?? 0),
+					const pending: Promise<void>[] = [];
+					for (let index = 0; index < parameters.creates; index++) {
+						const beforeCreateTicks = ticks();
+						await Promise.all(pages.map((page) => armArrival(page, index)));
+						const sample: Sample = {
+							index,
+							submittedAt: now(),
+							sessionId: null,
+							rpcMs: null,
+							arrivals: pages.map((_, device) => ({
+								device,
+								at: null,
+								ms: null,
+							})),
+							slowestMs: null,
+							backgroundTicks: [],
+						};
+						samples.push(sample);
+						const reply = await Effect.runPromise(
+							driver.rpc
+								.CreateSession({
+									projectSlug: "process-test",
+									providerId: "claude",
+									permissionMode: "ask",
+									originId: driver.originId,
+									title: `Create latency ${index}`,
+									model: {
+										providerId: "claude",
+										modelId: "sonnet",
+										variant: "",
+										contextWindow: "200k",
+									},
+								})
+								.pipe(Effect.timeout("15 seconds")),
+						);
+						sample.rpcMs = now() - sample.submittedAt;
+						sample.sessionId = reply.sessionId;
+						pending.push(
+							Promise.all(
+								pages.map((page) =>
+									arrival(page, index, reply.sessionId, sample.submittedAt),
+								),
+							).then(
+								(arrivals) => {
+									sample.arrivals = arrivals.map((at, device) => ({
+										device,
+										at,
+										ms: at === null ? null : at - sample.submittedAt,
+									}));
+									sample.slowestMs = arrivals.includes(null)
+										? null
+										: Math.max(
+												...arrivals.map((at) => (at ?? 0) - sample.submittedAt),
+											);
+								},
+								(error: unknown) => {
+									sample.arrivalError = String(error);
+								},
+							),
+						);
+						// Keep the same two ticks per stream/create as the former 200 ms
+						// cadence. Waiting for persisted work also tolerates OS scheduling
+						// delays without silently reducing the background workload.
+						await expect
+							.poll(() => {
+								sample.backgroundTicks = ticks().map(
+									(count, stream) => count - (beforeCreateTicks[stream] ?? 0),
+								);
+								return Math.min(...sample.backgroundTicks);
+							})
+							.toBeGreaterThanOrEqual(parameters.ticksPerCreate);
+					}
+					await Promise.all(pending);
+				} finally {
+					phaseEnd = now();
+					try {
+						backgroundTicks = ticks().reduce(
+							(total, count, stream) =>
+								total + count - (beforeTicks[stream] ?? 0),
+							0,
+						);
+						achievedWriteRate =
+							(backgroundTicks * 1_000) / (phaseEnd - phaseStart);
+						backgroundMeasured = true;
+					} catch (error) {
+						diagnosticErrors.push(
+							`Background write measurement: ${String(error)}`,
+						);
+					}
+				}
+			} finally {
+				database.close();
+			}
+			await expect
+				.poll(
+					() =>
+						(JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics)
+							.flushedAt,
+				)
+				.toBeGreaterThan(phaseEnd ?? 0);
+			// Graceful shutdown flushes the NDJSON exporter before inspecting it.
+			await harness.terminate();
+			stopped = true;
+			const slowRecords = records(logFile).filter(
+				(record) => record["msg"] === "slow rpc",
+			);
+			const trace = traceSummary(traceFile, debuggedSessionId);
+			expect.soft(fixture.sessions).toBeGreaterThanOrEqual(10_000);
+			expect.soft(samples).toHaveLength(parameters.creates);
+			expect
+				.soft(
+					samples.flatMap((sample) =>
+						sample.arrivals.filter(({ at }) => at === null),
+					),
+					"Every device must render every created session before its arrival deadline",
+				)
+				.toEqual([]);
+			expect
+				.soft(
+					distribution(
+						samples.flatMap(({ slowestMs }) =>
+							slowestMs === null ? [] : [slowestMs],
+						),
+					).p90,
+					"Create-to-slowest-device p90 must stay under its regression ceiling",
+				)
+				.toBeLessThanOrEqual(parameters.p90CeilingMs);
+			expect
+				.soft(
+					slowRecords.length,
+					"CONDUIT_SLOW_RPC_MS=1 must emit slow rpc records",
+				)
+				.toBeGreaterThan(0);
+			expect
+				.soft(trace.spans, "Local trace must contain completed spans")
+				.toBeGreaterThan(0);
+			expect
+				.soft(
+					slowRecords.reduce(
+						(total, record) =>
+							(record["method"] === "CreateSession" ||
+								record["method"] === "SubscribeShell") &&
+							typeof record["sqlCount"] === "number" &&
+							record["sqlCount"] > 0
+								? total + record["sqlCount"]
+								: total,
 						0,
-					);
-					achievedWriteRate =
-						(backgroundTicks * 1_000) / (phaseEnd - phaseStart);
-					backgroundMeasured = true;
+					),
+					"CreateSession and SubscribeShell slow records must prove SQL activity",
+				)
+				.toBeGreaterThan(0);
+			expect
+				.soft(
+					trace.subFloorSpansForOtherSessions,
+					"Successful spans below CONDUIT_TRACE_MIN_MS must belong to the debugged session or its descendants",
+				)
+				.toBe(0);
+			expect
+				.soft(
+					trace.subFloorSpansForDebuggedSession,
+					"CONDUIT_TRACE_SESSION must retain short successful spans for the debugged session",
+				)
+				.toBeGreaterThan(0);
+			expect
+				.soft(
+					trace.createSessionSpans,
+					"Local trace must retain a RpcServer.CreateSession span",
+				)
+				.toBeGreaterThan(0);
+		} finally {
+			const cleanupErrors: string[] = [];
+			if (!stopped) {
+				if (phaseEnd !== null) {
+					try {
+						await expect
+							.poll(
+								() =>
+									(JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics)
+										.flushedAt,
+								{ timeout: 2_000 },
+							)
+							.toBeGreaterThan(phaseEnd);
+					} catch (error) {
+						diagnosticErrors.push(`Metrics flush: ${String(error)}`);
+					}
+				}
+				try {
+					await harness.terminate();
 				} catch (error) {
-					diagnosticErrors.push(
-						`Background write measurement: ${String(error)}`,
-					);
+					cleanupErrors.push(String(error));
 				}
 			}
-		} finally {
-			database.close();
-		}
-		await expect
-			.poll(
-				() =>
-					(JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics).flushedAt,
-			)
-			.toBeGreaterThan(phaseEnd ?? 0);
-		// Graceful shutdown flushes the NDJSON exporter before inspecting it.
-		await harness.terminate();
-		stopped = true;
-		const slowRecords = records(logFile).filter(
-			(record) => record["msg"] === "slow rpc",
-		);
-		const trace = traceSummary(traceFile, debuggedSessionId);
-		expect.soft(fixture.sessions).toBeGreaterThanOrEqual(10_000);
-		expect.soft(samples).toHaveLength(parameters.creates);
-		expect
-			.soft(
-				samples.flatMap((sample) =>
-					sample.arrivals.filter(({ at }) => at === null),
-				),
-				"Every device must render every created session before its arrival deadline",
-			)
-			.toEqual([]);
-		expect
-			.soft(
-				distribution(
+			let metricsFlushedAt: number | null = null;
+			if (phaseStart !== null && phaseEnd !== null) {
+				try {
+					const metrics = JSON.parse(
+						readFileSync(metricsFile, "utf8"),
+					) as Metrics;
+					metricsFlushedAt = metrics.flushedAt;
+					sidebarReads = metrics.sidebarReads.filter(
+						(read) =>
+							phaseStart !== null &&
+							phaseEnd !== null &&
+							read.at >= phaseStart &&
+							read.at <= phaseEnd,
+					);
+					for (const read of metrics.readModelReads) {
+						if (
+							read.source === "shell" &&
+							read.at >= phaseStart &&
+							read.at <= phaseEnd
+						)
+							shellReads[read.kind] = (shellReads[read.kind] ?? 0) + 1;
+					}
+				} catch (error) {
+					diagnosticErrors.push(`Shell read measurement: ${String(error)}`);
+				}
+			}
+			const closed = await Promise.allSettled(
+				contexts.map((context) => context.close()),
+			);
+			for (const result of closed) {
+				if (result.status === "rejected")
+					cleanupErrors.push(String(result.reason));
+			}
+			const slowRecords = records(logFile).filter(
+				(record) =>
+					record["msg"] === "slow rpc" &&
+					(record["method"] === "CreateSession" ||
+						record["method"] === "SubscribeShell"),
+			);
+			const report = {
+				parameters,
+				sidebarRowBudget,
+				fixture,
+				phaseStart,
+				phaseEnd,
+				cleanupErrors,
+				diagnosticErrors,
+				samples,
+				slowestMs: distribution(
 					samples.flatMap(({ slowestMs }) =>
 						slowestMs === null ? [] : [slowestMs],
 					),
-				).p90,
-				"Create-to-slowest-device p90 must stay under its regression ceiling",
-			)
-			.toBeLessThanOrEqual(parameters.p90CeilingMs);
-		expect
-			.soft(
-				slowRecords.length,
-				"CONDUIT_SLOW_RPC_MS=1 must emit slow rpc records",
-			)
-			.toBeGreaterThan(0);
-		expect
-			.soft(trace.spans, "Local trace must contain completed spans")
-			.toBeGreaterThan(0);
-		expect
-			.soft(
-				slowRecords.reduce(
-					(total, record) =>
-						(record["method"] === "CreateSession" ||
-							record["method"] === "SubscribeShell") &&
-						typeof record["sqlCount"] === "number" &&
-						record["sqlCount"] > 0
-							? total + record["sqlCount"]
-							: total,
-					0,
 				),
-				"CreateSession and SubscribeShell slow records must prove SQL activity",
-			)
-			.toBeGreaterThan(0);
-		expect
-			.soft(
-				trace.subFloorSpansForOtherSessions,
-				"Successful spans below CONDUIT_TRACE_MIN_MS must belong to the debugged session or its descendants",
-			)
-			.toBe(0);
-		expect
-			.soft(
-				trace.subFloorSpansForDebuggedSession,
-				"CONDUIT_TRACE_SESSION must retain short successful spans for the debugged session",
-			)
-			.toBeGreaterThan(0);
-		expect
-			.soft(
-				trace.createSessionSpans,
-				"Local trace must retain a RpcServer.CreateSession span",
-			)
-			.toBeGreaterThan(0);
-	} finally {
-		const cleanupErrors: string[] = [];
-		if (!stopped) {
-			if (phaseEnd !== null) {
-				try {
-					await expect
-						.poll(
-							() =>
-								(JSON.parse(readFileSync(metricsFile, "utf8")) as Metrics)
-									.flushedAt,
-							{ timeout: 2_000 },
-						)
-						.toBeGreaterThan(phaseEnd);
-				} catch (error) {
-					diagnosticErrors.push(`Metrics flush: ${String(error)}`);
-				}
-			}
-			try {
-				await harness.terminate();
-			} catch (error) {
-				cleanupErrors.push(String(error));
-			}
-		}
-		let metricsFlushedAt: number | null = null;
-		if (phaseStart !== null && phaseEnd !== null) {
-			try {
-				const metrics = JSON.parse(
-					readFileSync(metricsFile, "utf8"),
-				) as Metrics;
-				metricsFlushedAt = metrics.flushedAt;
-				sidebarReads = metrics.sidebarReads.filter(
-					(read) =>
-						phaseStart !== null &&
-						phaseEnd !== null &&
-						read.at >= phaseStart &&
-						read.at <= phaseEnd,
-				);
-				for (const read of metrics.readModelReads) {
-					if (
-						read.source === "shell" &&
-						read.at >= phaseStart &&
-						read.at <= phaseEnd
-					)
-						shellReads[read.kind] = (shellReads[read.kind] ?? 0) + 1;
-				}
-			} catch (error) {
-				diagnosticErrors.push(`Shell read measurement: ${String(error)}`);
-			}
-		}
-		const closed = await Promise.allSettled(
-			contexts.map((context) => context.close()),
-		);
-		for (const result of closed) {
-			if (result.status === "rejected")
-				cleanupErrors.push(String(result.reason));
-		}
-		const slowRecords = records(logFile).filter(
-			(record) =>
-				record["msg"] === "slow rpc" &&
-				(record["method"] === "CreateSession" ||
-					record["method"] === "SubscribeShell"),
-		);
-		const report = {
-			parameters,
-			sidebarRowBudget,
-			fixture,
-			phaseStart,
-			phaseEnd,
-			cleanupErrors,
-			diagnosticErrors,
-			samples,
-			slowestMs: distribution(
-				samples.flatMap(({ slowestMs }) =>
-					slowestMs === null ? [] : [slowestMs],
+				rpcMs: distribution(
+					samples.flatMap(({ rpcMs }) => (rpcMs === null ? [] : [rpcMs])),
 				),
-			),
-			rpcMs: distribution(
-				samples.flatMap(({ rpcMs }) => (rpcMs === null ? [] : [rpcMs])),
-			),
-			background: {
-				measured: backgroundMeasured,
-				streamTicks,
-				expectedWriteRate,
-				achievedWriteRate,
-				persistedTicks: backgroundTicks,
-			},
-			shell: {
-				metricsFlushedAt,
-				coversPhase:
-					phaseEnd === null
-						? null
-						: metricsFlushedAt !== null && metricsFlushedAt >= phaseEnd,
-				reads: shellReads,
-				totalReads: Object.values(shellReads).reduce(
-					(sum, count) => sum + count,
-					0,
-				),
-				replacements: shellReads["replacement"] ?? 0,
-				sidebarReads,
-				maxRowsPerRead: Math.max(0, ...sidebarReads.map(({ rows }) => rows)),
-			},
-			slowRpc: slowRecords,
-			trace: traceSummary(traceFile, debuggedSessionId),
-		};
-		const output = testInfo.outputPath("create-latency.json");
-		writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
-		await testInfo.attach("create-latency", {
-			path: output,
-			contentType: "application/json",
-		});
-		expect
-			.soft(sidebarReads.length, "Creates must exercise live sidebar reads")
-			.toBeGreaterThan(0);
-		expect
-			.soft(
-				report.shell.maxRowsPerRead,
-				"Live reads must materialize changed sessions within the row budget",
-			)
-			.toBeLessThanOrEqual(sidebarRowBudget);
-		expect
-			.soft(
-				shellReads["replacement"] ?? 0,
-				"Create phase must not replace the shell snapshot",
-			)
-			.toBe(0);
-		expect
-			.soft(diagnosticErrors, "Create phase diagnostics must be available")
-			.toEqual([]);
-		expect
-			.soft(cleanupErrors, "Isolated harness cleanup must succeed")
-			.toEqual([]);
-	}
-});
+				background: {
+					measured: backgroundMeasured,
+					streamTicks,
+					expectedWriteRate,
+					achievedWriteRate,
+					persistedTicks: backgroundTicks,
+				},
+				shell: {
+					metricsFlushedAt,
+					coversPhase:
+						phaseEnd === null
+							? null
+							: metricsFlushedAt !== null && metricsFlushedAt >= phaseEnd,
+					reads: shellReads,
+					totalReads: Object.values(shellReads).reduce(
+						(sum, count) => sum + count,
+						0,
+					),
+					replacements: shellReads["replacement"] ?? 0,
+					sidebarReads,
+					maxRowsPerRead: Math.max(0, ...sidebarReads.map(({ rows }) => rows)),
+				},
+				slowRpc: slowRecords,
+				trace: traceSummary(traceFile, debuggedSessionId),
+			};
+			const output = testInfo.outputPath("create-latency.json");
+			writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
+			await testInfo.attach("create-latency", {
+				path: output,
+				contentType: "application/json",
+			});
+			expect
+				.soft(sidebarReads.length, "Creates must exercise live sidebar reads")
+				.toBeGreaterThan(0);
+			expect
+				.soft(
+					report.shell.maxRowsPerRead,
+					"Live reads must materialize changed sessions within the row budget",
+				)
+				.toBeLessThanOrEqual(sidebarRowBudget);
+			expect
+				.soft(
+					shellReads["replacement"] ?? 0,
+					"Create phase must not replace the shell snapshot",
+				)
+				.toBe(0);
+			expect
+				.soft(diagnosticErrors, "Create phase diagnostics must be available")
+				.toEqual([]);
+			expect
+				.soft(cleanupErrors, "Isolated harness cleanup must succeed")
+				.toEqual([]);
+		}
+	},
+);
 
 test("overflow catches up every sidebar through create and delete bursts", async ({
 	browser,
@@ -809,9 +812,25 @@ test("overflow catches up every sidebar through create and delete bursts", async
 				.toBeGreaterThan(setupRenderedAt);
 			const beforeTicks = ticks();
 			phaseStart = now();
-			// Withhold shell delivery acknowledgements throughout the burst, so a
-			// fast client cannot drain the capacity-one advance bus between commits.
+			// Withhold shell delivery acknowledgements throughout the burst. The
+			// server still buffers envelopes behind the held one: 16 in the shell
+			// queue (shell-subscription.ts), then a batch in hand and two queued in
+			// ws-rpc.ts, each at most 16. A burst smaller than that never stalls the
+			// capacity-one advance bus.
+			// Renaming one session 100 times fills that buffer first; either the
+			// reader stalls or it falls behind, and both drop advances, so the
+			// creates and deletes below land inside the overflow catch-up.
 			holdingAcknowledgements = true;
+			for (let index = 0; index < 100; index++)
+				await Effect.runPromise(
+					driver.rpc
+						.RenameSession({
+							sessionId: HEAVY_SESSION_ID,
+							title: `Overflow padding ${index}`,
+							originId: driver.originId,
+						})
+						.pipe(Effect.timeout("15 seconds")),
+				);
 			await Promise.all(
 				Array.from({ length: 20 }, async (_, index) => {
 					const title = `Overflow ${index}: ${randomUUID()}`;

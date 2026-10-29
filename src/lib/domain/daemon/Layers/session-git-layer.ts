@@ -55,7 +55,10 @@ import { SessionActivityTag } from "../Services/session-activity.js";
 import type { SessionGit, SessionGitChange } from "../Services/session-git.js";
 import { Subprocess, SubprocessPriority } from "../Services/subprocess.js";
 import { WorktreeServiceTag } from "../Services/worktree-service.js";
-import { makeSessionGitReader } from "./session-git/git-reader.js";
+import {
+	defaultRefDependencies,
+	makeSessionGitReader,
+} from "./session-git/git-reader.js";
 
 type Tier = "running" | "viewed" | "listed" | "dormant";
 const intervals = {
@@ -297,10 +300,22 @@ export const makeSessionGit = Effect.gen(function* () {
 				join(gitDir, "index"),
 				join(gitDir, "packed-refs"),
 				join(refDir, "packed-refs"),
-				...[branch, "main", "master"].flatMap((ref) =>
-					ref === undefined ? [] : [join(refDir, "refs", "heads", ref)],
-				),
+				...(branch === undefined
+					? []
+					: [join(refDir, "refs", "heads", branch)]),
 			]);
+			const dependencies = defaultRefDependencies(refDir);
+			let next = dependencies.next();
+			while (!next.done) {
+				const path = next.value;
+				targets.add(path);
+				const baseline = entry.probes.get(path) ?? {
+					stamp: yield* probeStamp(path),
+					contents: yield* readText(path),
+				};
+				entry.probes.set(path, baseline);
+				next = dependencies.next(baseline.contents);
+			}
 			for (const path of entry.probes.keys())
 				if (!targets.has(path)) entry.probes.delete(path);
 			for (const path of targets) {
@@ -337,7 +352,11 @@ export const makeSessionGit = Effect.gen(function* () {
 					const contents = yield* readText(path);
 					if (contents !== previous.contents) {
 						request(entry, true);
-						if (path === join(entry.gitDirectory ?? "", "HEAD"))
+						if (
+							path === join(entry.gitDirectory ?? "", "HEAD") ||
+							previous.contents?.trim().startsWith("ref: ") ||
+							contents?.trim().startsWith("ref: ")
+						)
 							retarget = true;
 					}
 					previous.contents = contents;

@@ -26,15 +26,7 @@ const longLivedOwners = new Set(
 const remainingOneShotCallers = new Set(
 	[
 		"src/bin/cli-service.ts",
-		"src/lib/cli/tls.ts",
-		"src/lib/daemon/daemon-utils.ts",
 		"src/lib/daemon/keep-awake.ts",
-		"src/lib/domain/daemon/Layers/tailscale-serve-layer.ts",
-		"src/lib/provider/claude/claude-settings-resolver.ts",
-		"src/lib/provider/codex/codex-text-generation.ts",
-		"src/lib/provider/cursor/cursor-keychain.ts",
-		"src/lib/provider/cursor/cursor-skill-discovery.ts",
-		"src/lib/provider/project-shell-env.ts",
 		"src/lib/provider/runner/runner-registry.ts",
 	].map((path) => resolve(path)),
 );

@@ -501,7 +501,10 @@ test.describe("Paste on desktop", () => {
 		const dump = await startByteDump(page, testInfo);
 
 		await copy(page, "a\nb");
-		await page.keyboard.press("ControlOrMeta+v");
+		// Off macOS, xterm turns Ctrl+V into ^V; terminals paste with Ctrl+Shift+V there.
+		await page.keyboard.press(
+			process.platform === "darwin" ? "Meta+v" : "Control+Shift+v",
+		);
 		await expect(guard(page)).toContainText("Paste 2 lines?");
 		await dump.group();
 		await guard(page).getByRole("button", { name: "Paste" }).click();

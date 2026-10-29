@@ -14,6 +14,9 @@ export const connectionState = $state({
 let controlSocket: WebSocket | null = null;
 let lastMessageAt = 0;
 let relayStatusGeneration = 0;
+// Advances on proof of authentication, so a slower probe sent before it
+// cannot send the user back to the PIN page.
+let authGeneration = 0;
 
 export function getIsConnected(): boolean {
 	return connectionState.status === "connected";
@@ -55,14 +58,21 @@ onProjectAttached(fetchRelayStatus);
  * PIN page even when no project is attached.
  */
 function redirectIfPinRequired(): void {
+	const generation = authGeneration;
 	fetch("/api/auth/status")
 		.then((res) => (res.ok ? res.json() : null))
 		.then((auth: { hasPin?: boolean; authenticated?: boolean } | null) => {
-			if (auth?.hasPin && !auth.authenticated) replaceRoute("/auth");
+			if (auth?.hasPin && !auth.authenticated && generation === authGeneration)
+				replaceRoute("/auth");
 		})
 		.catch(() => {
 			// Daemon unreachable: keep redialing.
 		});
+}
+
+/** Called once the PIN is accepted. */
+export function markAuthenticated(): void {
+	authGeneration++;
 }
 
 /** Called by the control constructor on every dial, including RPC retries. */
@@ -103,6 +113,7 @@ export function trackControlSocket(socket: WebSocket): void {
 export function markControlSocketOpen(): void {
 	// A socket that closed before the protocol got here has already reported it.
 	if (!controlSocket) return;
+	authGeneration++;
 	lastMessageAt = Date.now();
 	connectionState.status = "connected";
 	connectionState.statusText = "Connected";

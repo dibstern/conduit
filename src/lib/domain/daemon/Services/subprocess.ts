@@ -6,10 +6,12 @@ import { ReadRequest } from "./read-request.js";
 
 export interface SubprocessOptions {
 	readonly cwd?: string;
+	/** Zero leaves the command without a deadline; shutdown still awaits its exit. */
 	readonly timeoutMs: number;
 	readonly key?: string;
 	readonly priority?: "interactive" | "background";
 	readonly env?: NodeJS.ProcessEnv;
+	readonly shell?: boolean;
 	readonly maxBuffer?: number;
 	readonly input?: string;
 	readonly onStdout?: (chunk: Buffer) => void;
@@ -130,6 +132,100 @@ interface Job {
 const metricsChannel = channel("conduit:subprocess-metrics");
 const log = createLogger("subprocess");
 
+// macOS answers EPERM for a group whose members are all zombies; those cannot write.
+const groupExited = (error: unknown) => {
+	const code = (error as NodeJS.ErrnoException).code;
+	return code === "ESRCH" || code === "EPERM";
+};
+
+/** The caller owns stop(); delivery of a kill signal is not a termination barrier. */
+export const spawnOwnedSubprocess = (
+	command: string,
+	args: readonly string[],
+	options: {
+		readonly cwd?: string;
+		readonly env?: NodeJS.ProcessEnv;
+		readonly signal?: AbortSignal;
+		readonly killProcessGroup?: boolean;
+	},
+) => {
+	const ownsGroup =
+		options.killProcessGroup !== false && process.platform !== "win32";
+	const child = spawn(command, args, {
+		...options,
+		stdio: ["pipe", "pipe", "pipe"],
+		detached: ownsGroup,
+	});
+	let closed = false;
+	let groupGone = false;
+	let stopping: Promise<void> | undefined;
+	const signal = (value: NodeJS.Signals) => {
+		if (!child.pid || groupGone || (!ownsGroup && closed)) return;
+		try {
+			if (ownsGroup) process.kill(-child.pid, value);
+			else child.kill(value);
+		} catch (error) {
+			if (!groupExited(error)) throw error;
+			groupGone = true;
+		}
+	};
+	// As in the command owner, descendants must release inherited pipes before close.
+	child.once("exit", () => {
+		if (ownsGroup) {
+			try {
+				signal("SIGKILL");
+			} catch {
+				// stop() will report a failure to observe the group's termination.
+			}
+		}
+	});
+	child.once("close", () => {
+		closed = true;
+	});
+	child.on("error", () => {
+		// The caller handles spawn errors; close still owns the lifetime barrier.
+	});
+	child.stdin.on("error", () => {
+		// Shutdown may race a final SDK write.
+	});
+	const stop = () =>
+		(stopping ??= (async () => {
+			child.stdin.end();
+			child.stdout.resume();
+			child.stderr.resume();
+			if (!closed) signal("SIGTERM");
+			const started = Date.now();
+			let escalated = false;
+			while (true) {
+				let groupAlive = false;
+				if (ownsGroup && child.pid && !groupGone) {
+					try {
+						process.kill(-child.pid, 0);
+						groupAlive = true;
+					} catch (error) {
+						if (!groupExited(error)) throw error;
+						groupGone = true;
+					}
+				}
+				if (closed && !groupAlive) return;
+				const elapsed = Date.now() - started;
+				if (!escalated && elapsed >= 250) {
+					signal("SIGKILL");
+					escalated = true;
+				}
+				if (elapsed >= 5_250)
+					throw new SubprocessError({
+						command,
+						reason: "timeout",
+						stdout: "",
+						stderr: `Subprocess ${child.pid} did not terminate after SIGKILL`,
+					});
+				await new Promise<void>((resolve) => setTimeout(resolve, 10));
+			}
+		})());
+	return { child, stop };
+};
+
 export const makeSubprocess = (
 	options: { readonly concurrency?: number } = {},
 ): SubprocessService => {
@@ -205,6 +301,7 @@ export const makeSubprocess = (
 		let child: ChildProcess | undefined;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		let failure: SubprocessError["reason"] | undefined;
+		let outputError: RangeError | undefined;
 		let finished = false;
 		let groupStopped = false;
 		const stdout: Buffer[] = [];
@@ -275,7 +372,13 @@ export const makeSubprocess = (
 				stderrBytes += chunk.length;
 			}
 			if (size + chunk.length > limit) {
-				failure ??= "output-limit";
+				if (failure === undefined) {
+					failure = "output-limit";
+					outputError = Object.assign(
+						new RangeError(`${pipe} maxBuffer length exceeded`),
+						{ code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" },
+					);
+				}
 				killGroup();
 			}
 		};
@@ -285,6 +388,7 @@ export const makeSubprocess = (
 			child = spawn(job.command, job.args, {
 				...(job.options.cwd !== undefined && { cwd: job.options.cwd }),
 				...(job.options.env !== undefined && { env: job.options.env }),
+				...(job.options.shell !== undefined && { shell: job.options.shell }),
 				stdio: ["pipe", "pipe", "pipe"],
 				detached: ownsGroup,
 			});
@@ -313,19 +417,21 @@ export const makeSubprocess = (
 		// before waiting for close, which owns releasing the concurrency slot.
 		if (ownsGroup) child.once("exit", () => killGroup());
 		child.once("close", (code, signal) =>
-			finish(code, spawnFailure, signal ?? undefined),
+			finish(code, spawnFailure ?? outputError, signal ?? undefined),
 		);
 		child.stdin?.on("error", () => {
 			/* A command may exit without reading its input. */
 		});
 		if (!job.options.keepStdinOpen) child.stdin?.end(job.options.input);
-		timer = setTimeout(() => {
-			failure ??= "timeout";
-			killGroup(job.options.killSignal ?? "SIGTERM");
-			timer = setTimeout(() => killGroup(), 250);
+		if (job.options.timeoutMs > 0) {
+			timer = setTimeout(() => {
+				failure ??= "timeout";
+				killGroup(job.options.killSignal ?? "SIGTERM");
+				timer = setTimeout(() => killGroup(), 250);
+				timer.unref();
+			}, job.options.timeoutMs);
 			timer.unref();
-		}, job.options.timeoutMs);
-		timer.unref();
+		}
 	};
 	const pump = () => {
 		while (!closed && running.size < concurrency && queue.length > 0) {
