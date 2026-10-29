@@ -93,6 +93,7 @@
 		primary ? isProcessing() : isLlmActive(getSessionPhase(viewedSessionId ?? ""), chat.loadLifecycle),
 	);
 	let sentinelEl: HTMLElement | undefined = $state();
+	let priorCollapsed = $state(true);
 	// Rows, pills and strips share when this view last observed each live task.
 	const taskListedAt = new Map<string, number>();
 	let taskSessionId: string | null | undefined;
@@ -537,7 +538,14 @@
 	<div id={primary ? "history-sentinel" : `${messagesId}-history-sentinel`} class="h-1" bind:this={sentinelEl}></div>
 
 	<!-- Headless loader (no visual output) -->
-	<HistoryLoader {sentinelEl} {sessionId} scrollRoot={primary ? undefined : messagesEl} />
+	<!-- Older pages of a fork are all inherited. Collapsed, they add no height,
+	     so the sentinel never leaves view and every page would load in turn. -->
+	<HistoryLoader
+		{sentinelEl}
+		{sessionId}
+		scrollRoot={primary ? undefined : messagesEl}
+		paused={!!forkSplit?.inherited.length && priorCollapsed}
+	/>
 
 	<!-- Zero-height sticky rail so the pill floats over the transcript without
 	     pushing it down; the lift parks it in the top padding so at rest
@@ -679,7 +687,7 @@
 		{@render goalNotice()}
 	{/if}
 	{#if forkSplit && forkSplit.inherited.length > 0}
-		<ForkContextBlock>
+		<ForkContextBlock bind:collapsed={priorCollapsed}>
 			{#each inheritedTurns as turn (turn.id)}
 				{@render turnItem(turn)}
 			{/each}

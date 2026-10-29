@@ -9,16 +9,15 @@
 
 	interface Props {
 		children: import("svelte").Snippet;
+		collapsed?: boolean;
 	}
 
-	let { children }: Props = $props();
+	// Default to collapsed; read from sessionStorage if available
+	let { children, collapsed = $bindable(true) }: Props = $props();
 
 	const storageKey = $derived(
 		`fork-collapsed-${sessionState.currentId ?? ""}`,
 	);
-
-	// Default to collapsed; read from sessionStorage if available
-	let collapsed = $state(true);
 
 	$effect(() => {
 		const key = storageKey;
