@@ -138,7 +138,7 @@ async function openPicker(canvasElement: HTMLElement) {
 	await userEvent.click(trigger);
 	const picker = await canvas.findByTestId("model-picker");
 	await expect(
-		within(picker).getByRole("heading", { name: "Harness & model" }),
+		within(picker).getByRole("heading", { name: "Session" }),
 	).toBeVisible();
 	await expect(within(picker).getByTestId("picker-row-model")).toBeVisible();
 	// userEvent.click leaves the pointer on the trigger. Its background has a
@@ -182,6 +182,13 @@ async function rootControls(canvasElement: HTMLElement) {
 		? "picker-harness-claude"
 		: "picker-row-model";
 	await expect(sheet.getByTestId(rootFocusTestId)).toHaveFocus();
+	await userEvent.click(sheet.getByTestId("picker-row-account"));
+	await expect(sheet.getByTestId("picker-account-options")).toBeVisible();
+	await expect(sheet.getByTestId("picker-account-add")).toHaveTextContent(
+		"Add account",
+	);
+	await userEvent.click(sheet.getByTestId("picker-back"));
+	await expect(sheet.getByTestId("picker-row-account")).toHaveFocus();
 	await drillModel(picker);
 	await expect(picker.querySelectorAll(".model-item-context")).toHaveLength(2);
 	await expect(picker.querySelector(".model-item-context")).toHaveTextContent(
@@ -189,7 +196,7 @@ async function rootControls(canvasElement: HTMLElement) {
 	);
 	await userEvent.click(sheet.getByTestId("picker-back"));
 	await expect(sheet.getByTestId("picker-row-model")).toBeVisible();
-	await expect(sheet.getByTestId(rootFocusTestId)).toHaveFocus();
+	await expect(sheet.getByTestId("picker-row-model")).toHaveFocus();
 	await userEvent.click(sheet.getByTestId("picker-context-option-1m"));
 	await expect(sheet.getByTestId("picker-context-option-1m")).toHaveAttribute(
 		"aria-checked",
@@ -250,9 +257,8 @@ export const Closed: Story = {
 		await expect(trigger).toHaveAttribute("data-shown-context-window", "200k");
 		await expect(trigger).toHaveAttribute("data-shown-permission-mode", "ask");
 		await expect(trigger).toHaveTextContent(/Sonnet 4\.5/);
-		await expect(
-			within(canvasElement).queryByTestId("composer-harness-trigger"),
-		).not.toBeInTheDocument();
+		await expect(trigger).toHaveAccessibleName(/^Harness and model:/);
+		await expect(trigger).toHaveAttribute("aria-expanded", "false");
 	},
 };
 
@@ -627,7 +633,7 @@ export const Locked: Story = {
 		);
 		await userEvent.click(other);
 		await expect(
-			within(picker).getByRole("heading", { name: "Harness & model" }),
+			within(picker).getByRole("heading", { name: "Session" }),
 		).toBeVisible();
 	},
 };

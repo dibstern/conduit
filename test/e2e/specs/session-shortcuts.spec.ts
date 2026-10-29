@@ -42,12 +42,7 @@ for (const mode of [
 			else await expect(page.locator("#terminal-panel")).toBeVisible();
 			await expect(input).toHaveValue("draft stays put");
 			await page.keyboard.press("Alt+4");
-			if (mode.name === "desktop")
-				await expect(page.getByTestId("side-pane-files")).toBeVisible();
-			else
-				await expect(
-					page.getByText("File Browser", { exact: true }),
-				).toBeVisible();
+			await expect(page.getByTestId("side-pane-files")).toBeVisible();
 			if (mode.name === "desktop") {
 				await page.locator("#files-pane-expand").click();
 				await expect(page.locator("#chat-area")).toHaveAttribute("inert", "");

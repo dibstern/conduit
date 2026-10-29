@@ -17,7 +17,7 @@ import {
 } from "../../../src/lib/frontend/utils/continuation.js";
 import { formatSnoozeTime } from "../../../src/lib/frontend/utils/format.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
-import { openPickerRoot } from "../helpers/model-picker.js";
+import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -458,6 +458,7 @@ for (const dismiss of [false, true]) {
 				);
 				await openPickerRoot(page, picker);
 				await page.getByTestId("picker-harness-claude").click();
+				await openPickerAccounts(page);
 				await page.getByTestId(`picker-account-${account.id}`).click();
 				await page.getByTestId("picker-row-model").click();
 				await page
@@ -2159,6 +2160,7 @@ test("scenario 12: changing agents sends a budgeted hidden handoff to a fresh na
 		);
 		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-harness-claude").click();
+		await openPickerAccounts(page);
 		for (const { id } of accounts)
 			await expect(page.getByTestId(`picker-account-${id}`)).toBeVisible();
 		await capture("01-accounts");
@@ -2344,6 +2346,7 @@ test("scenario 13: the new agent reads omitted history through the registered MC
 		);
 		await openPickerRoot(page, picker);
 		await page.getByTestId("picker-harness-claude").click();
+		await openPickerAccounts(page);
 		await page.getByTestId(`picker-account-${addedInstanceId}`).click();
 		await page.getByTestId("picker-row-model").click();
 		await page
@@ -3534,12 +3537,13 @@ test("story 16: composer account cards switch the session, not the project", asy
 		await expect(bar.locator("[data-account]")).toHaveCount(0);
 		await page.screenshot({ path: join(artifacts, "01-composer.png") });
 
-		// Phones reach the account through the Composer sheet.
+		// Both layouts reach accounts through the Session panel drill-in.
 		const openAccounts = async () => {
 			if ((page.viewportSize()?.width ?? 0) < 768) {
 				await page.getByTestId("composer-words-sheet-trigger").click();
-				await page.getByTestId("composer-more-account").click();
 			} else await page.getByTestId("composer-word-harness").click();
+			await openPickerAccounts(page);
+			await expect(page.getByTestId("picker-account-section")).toBeVisible();
 		};
 		await openAccounts();
 		const row = page.getByTestId(`picker-account-${target.id}`);

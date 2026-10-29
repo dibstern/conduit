@@ -27,6 +27,10 @@ import {
 	startForegroundDaemon,
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { isOpenCodeReachable } from "../helpers/daemon-harness.js";
+import {
+	captureExistingChildren,
+	stopDaemonAndAssertNoSurvivors,
+} from "../helpers/daemon-survivors.js";
 
 const SMART_DEFAULT_OPENCODE_URL = process.env["OPENCODE_URL"];
 
@@ -64,6 +68,7 @@ const test = base.extend<{
 		const staticDir = resolve(import.meta.dirname, "../../../dist/frontend");
 		const tmpDir = mkdtempSync(join(tmpdir(), "e2e-smart-default-"));
 		const socketPath = join(tmpDir, "relay.sock");
+		const existingChildren = captureExistingChildren();
 
 		// KEY: no opencodeUrl, smartDefault: true (the default)
 		const daemon = await startForegroundDaemon({
@@ -93,7 +98,10 @@ const test = base.extend<{
 		try {
 			await use({ daemon, socketPath, port, baseUrl, projectUrl });
 		} finally {
-			await daemon.stop();
+			await stopDaemonAndAssertNoSurvivors(
+				() => daemon.stop(),
+				existingChildren,
+			);
 			try {
 				rmSync(tmpDir, { recursive: true, force: true });
 			} catch {

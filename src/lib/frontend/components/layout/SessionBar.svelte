@@ -71,6 +71,7 @@
 	import SessionCommandItems from "../session/SessionCommandItems.svelte";
 	import AutoSettleRow from "../session/AutoSettleRow.svelte";
 	import { getProjectAccent } from "../session/session-list-project.js";
+	import ProjectMark from "../ui/ProjectMark.svelte";
 	import ViewCard from "../ui/ViewCard.svelte";
 	import { activeSessionView, sessionViews } from "./session-views.js";
 
@@ -668,6 +669,7 @@
 		</h1>
 		</div>
 		{#if goalShown && !sessionViewState.compact}{@render goalLine()}{/if}
+		{#if sessionViewState.pose === "duo-folded-portrait" && session}<span data-testid="session-bar-subline" class="flex min-w-0 items-center gap-[6px] text-[12px] leading-[16px] text-text-secondary"><ProjectMark accent={getProjectAccent(session)} /><span class="truncate">{project?.title ?? getCurrentSlug()}</span></span>{/if}
 		<!-- Collapsed, the full banner strip is hidden (style.css); this line stands in. -->
 		{#if collapsed}<BannersRow banners={appBanners()} onexpand={showControls} />{/if}
 		</div>

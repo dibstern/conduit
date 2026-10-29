@@ -2,13 +2,12 @@
 	import type { SessionPermissionMode } from "../../types.js";
 	import { PERMISSION_MODE_COLOURS } from "../../permission-modes.js";
 	import Button from "./Button.svelte";
-	import Icon from "./Icon.svelte";
 	import PermissionShield from "./PermissionShield.svelte";
 
 	let { mode, label, variant = "icons", loading = false, ...rest }: {
 		mode: SessionPermissionMode;
 		label: string;
-		variant?: "icons" | "words" | "row" | "summary";
+		variant?: "icons" | "words" | "summary";
 		loading?: boolean;
 		[key: string]: unknown;
 	} = $props();
@@ -18,13 +17,6 @@
 
 {#if variant === "summary"}
 	<span style:color={tone}>{word}</span>
-{:else if variant === "row"}
-	<Button {...rest} variant="composer-row" size="content" {loading} ariaLabel={`Permissions: ${label}. Open options`}>
-		<PermissionShield {mode} size={16} />
-		<span data-part="label" class="flex-1">Permissions</span>
-		<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{label}</span>
-		<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
-	</Button>
 {:else if variant === "words"}
 	<Button {...rest} variant="composer-word" size="content" tone="inherit" {loading} ariaLabel={`Permissions: ${label}. Open options`} style={`color: ${tone}`} touchTarget>{word}</Button>
 {:else}

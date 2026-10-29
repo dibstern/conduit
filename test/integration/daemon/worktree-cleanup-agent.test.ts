@@ -786,11 +786,10 @@ describe("Settling stops quiescent agents through the built daemon", () => {
 		expect(result.kept).toContainEqual(
 			kept({ sessionId: failed.sessionId, path: failed.path }),
 		);
+		// Not which run removed it: a turn finalizer can queue an automatic sweep
+		// after the drain, which removes the healthy checkout before this one.
 		for (const session of [healthy, neverStarted, exited])
 			expect(existsSync(session.path)).toBe(false);
-		expect(
-			result.removed.some(({ sessionId }) => sessionId === healthy.sessionId),
-		).toBe(true);
 		expect(stopCommands(fixture, neverStarted.sessionId)).toEqual([]);
 		expect(stopCommands(fixture, exited.sessionId)).toEqual([]);
 		expect(

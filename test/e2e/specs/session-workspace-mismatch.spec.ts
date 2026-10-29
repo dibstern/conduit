@@ -1,4 +1,4 @@
-import { openComposerSheet } from "../helpers/model-picker.js";
+import { openSessionPanel } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -86,25 +86,32 @@ for (const viewport of [
 				responses: new Map(),
 			});
 			await page.goto(`${harness.relayBaseUrl}/s/${session.id}`);
-			// Phones keep the checkout in the Composer sheet; its row flags the mismatch.
 			const phone = viewport.width < 768;
 			if (phone) {
-				await expect(page.getByTestId("composer-more-attention")).toBeVisible();
-				await openComposerSheet(page);
+				await expect(
+					page.getByTestId("workspace-notice-indicator"),
+				).toBeVisible();
 			}
 			const checkout = page.getByTestId("composer-checkout");
 			await checkout.click();
-			const mismatch = page
-				.getByTestId("composer-checkout-menu")
-				.getByTestId("workspace-mismatch");
+			await expect(page.getByTestId("picker-row-checkout")).toBeFocused();
+			const mismatch = page.locator(
+				'[data-testid="picker-checkout-notice"][data-kind="mismatch"]',
+			);
 			await expect(mismatch).toContainText(actualPath);
-			await expect(mismatch).toContainText(`The recorded folder is ${target}`);
+			await expect(page.getByTestId("picker-row-checkout")).toContainText(
+				target === main ? "main" : "requested",
+			);
+			await page.getByTestId("picker-row-checkout").click();
+			await expect(page.getByTestId("workspace-mismatch")).toContainText(
+				`The recorded folder is ${target}`,
+			);
+			await page.getByTestId("picker-back").click();
+			const retry = mismatch.getByTestId("picker-checkout-notice-move");
 			await page.screenshot({
 				path: testInfo.outputPath("workspace-mismatch.png"),
 			});
-			await page
-				.getByRole("menuitem", { name: "Retry move", exact: true })
-				.click();
+			await retry.click();
 			await expect
 				.poll(() =>
 					rpc
@@ -115,15 +122,12 @@ for (const viewport of [
 				.toEqual([
 					{ _tag: "MoveSessionWorkspace", sessionId: session.id, path: target },
 				]);
-			if (phone) await openComposerSheet(page);
-			await checkout.click();
+			await openSessionPanel(page);
 			await expect(mismatch).toBeVisible();
 			// The shell feed clears the mismatch without a session-family update.
 			rpc.upsertShellRow({ ...session, workspaceMismatch: undefined });
 			await expect(mismatch).toHaveCount(0);
-			await expect(
-				page.getByRole("menuitem", { name: "Retry move", exact: true }),
-			).toHaveCount(0);
+			await expect(retry).toHaveCount(0);
 			await testInfo.attach("retry-move-rpc", {
 				body: JSON.stringify(
 					rpc.getRequests().filter(({ tag }) => tag === "MoveSessionWorkspace"),

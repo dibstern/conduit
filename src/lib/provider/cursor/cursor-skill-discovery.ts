@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import { lstat, open, opendir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import {
@@ -10,9 +9,9 @@ import {
 	resolve,
 	sep,
 } from "node:path";
-import { promisify } from "node:util";
 import { Effect, Schema } from "effect";
 import { parse } from "yaml";
+import { makeSubprocessRunner } from "../../domain/daemon/Services/subprocess.js";
 import type { DiscoveredSkill } from "../types.js";
 import type { CursorAgentOptions } from "./sdk-port.js";
 
@@ -32,16 +31,6 @@ const SKILL_SOURCES: Record<SkillRoot, DiscoveredSkill["source"]> = {
 	managed: "user-skill",
 	plugin: "plugin-skill",
 };
-const execFileAsync = promisify(execFile);
-const gitToplevel = (cwd: string) =>
-	execFileAsync("git", ["rev-parse", "--show-toplevel"], {
-		cwd,
-		encoding: "utf8",
-		timeout: 5000,
-		maxBuffer: 64 * 1024,
-	})
-		.then(({ stdout }) => stdout.trim() || undefined)
-		.catch(() => undefined);
 const SKIPPED_DIRS = new Set(["node_modules", "__pycache__", "dist", "build"]);
 const MAX_DEPTH = 10;
 const MAX_ENTRIES = 8192;
@@ -153,7 +142,19 @@ export const discoverCursorSkillsEffect = (
 	cwd: string,
 	options: Partial<Pick<CursorAgentOptions, "dirs" | "settingSources">> = {},
 ): Effect.Effect<DiscoveredSkill[]> =>
-	Effect.tryPromise(async () => {
+	Effect.tryPromise(async (signal) => {
+		const run = makeSubprocessRunner();
+		const gitToplevel = (directory: string) =>
+			run(
+				"git",
+				["rev-parse", "--show-toplevel"],
+				{ cwd: directory, timeoutMs: 5000, maxBuffer: 64 * 1024 },
+				signal,
+			)
+				.then(({ stdout, exitCode }) =>
+					exitCode === 0 ? stdout.trim() || undefined : undefined,
+				)
+				.catch(() => undefined);
 		const sources = options.settingSources ?? [
 			"project",
 			"user",

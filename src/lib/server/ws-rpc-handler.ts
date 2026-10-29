@@ -14,6 +14,7 @@ import {
 	withRpcShutdownResponse,
 } from "../daemon/daemon-rpc-server.js";
 import { withReadRequestContext } from "../domain/daemon/Services/read-request.js";
+import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { SessionDirectory } from "../domain/daemon/Services/session-directory.js";
 import {
 	observeTurnTimelineSocketWrite,
@@ -281,6 +282,12 @@ const runRpcWebSocketConnection = <R>(
 		Effect.gen(function* () {
 			const delivery = new EventDelivery();
 			yield* Effect.addFinalizer(() => Effect.sync(() => delivery.close()));
+			const activity = yield* Effect.serviceOption(SessionActivityTag);
+			if (Option.isSome(activity))
+				yield* Effect.acquireRelease(
+					Effect.sync(() => activity.value.watchInterests(delivery)),
+					(release) => Effect.sync(release),
+				);
 			const pendingPinChanges = new Map<
 				RpcMessage.RequestEncoded["id"],
 				() => void

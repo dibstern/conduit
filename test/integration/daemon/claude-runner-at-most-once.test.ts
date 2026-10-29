@@ -209,6 +209,19 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 				throw new Error("Missing replacement runner");
 			expect(replacement.pid).not.toBe(original.pid);
 			await harness.kill();
+			// Server exit does not fence the runner's socket-close callback; until it runs,
+			// the runner still holds the dead daemon's socket and resets any new connection.
+			await vi.waitFor(
+				() =>
+					expect(
+						sdkProof(harness).some(
+							(mark) =>
+								mark["kind"] === "runner-detached" &&
+								mark["pid"] === replacement.pid,
+						),
+					).toBe(true),
+				{ timeout: 15_000 },
+			);
 			let direct: ClaudeRunnerSocket | undefined;
 			try {
 				const greeted = new Promise<ClaudeRunnerSocket>((resolve, reject) => {

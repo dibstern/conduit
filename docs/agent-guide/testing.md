@@ -155,6 +155,12 @@ pnpm test:e2e --grep "<name>"                     # by test name
 
 Prefer a single spec or grep filter over the full suite.
 
+Tag a harness or daemon test `@timed` (`test(name, { tag: "@timed" }, ...)`)
+when it asserts a wall-clock budget: a latency ceiling, a long-task limit, or a
+timing ratio. `scripts/test-all.sh` runs those in a second phase on one worker,
+because other workers' load on a 4-vCPU CI runner breaks such budgets without
+any regression.
+
 If the frontend is already built or you need to avoid package-script argument forwarding, run Playwright directly:
 
 ```bash

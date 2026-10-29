@@ -2,13 +2,12 @@
 <!-- Command menu triggered by "/" prefix. -->
 
 <script lang="ts">
-	import Popover from "../ui/Popover.svelte";
 	import ComposerFrame from "../ui/ComposerFrame.svelte";
 	import ComposerStrip from "../ui/ComposerStrip.svelte";
 	import ComposerSendGroup from "../ui/ComposerSendGroup.svelte";
 	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
 	import { accountLimit } from "../../../contracts/account-limit.js";
-	import { tick, untrack, type Snippet } from "svelte";
+	import { tick, untrack } from "svelte";
 	import { failureLine, toastFailure } from "../../transport/rpc-errors.js";
 	import { refreshInputDraftAttachments } from "../../stores/input-draft.js";
 	import Button from "../ui/Button.svelte";
@@ -78,12 +77,12 @@
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getDriverTraits, getInstanceById, instanceState } from "../../stores/instance.svelte.js";
-	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
+	import { requestTranscriptFollow, sessionViewState, setKeyboardHandoff } from "../../stores/session-view.svelte.js";
+	import { prepareHandoff } from "../../utils/composer-handoff.js";
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
-	import { composerPickerState } from "../../stores/composer-picker.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
@@ -101,20 +100,6 @@
 	const fileListboxId = `${inputAreaId}-file-listbox`;
 	const commandListboxId = `${inputAreaId}-command-listbox`;
 	let composerWrapperEl: HTMLDivElement | undefined = $state();
-	let composerMoreOpen = $state(false);
-	$effect(() => {
-		const request = composerPickerState.request;
-		if (request && composerMoreOpen) {
-			request.opener = composerWrapperEl?.querySelector<HTMLElement>('[data-testid="model-picker-trigger"], [data-testid="composer-words-sheet-trigger"]') ?? request.opener;
-			composerMoreOpen = false;
-		}
-	});
-	$effect(() => {
-		sessionState.currentId;
-		sessionViewState.composerTier;
-		composerPreferences.controls;
-		composerMoreOpen = false;
-	});
 
 	const composerDraft = createComposerDraft({
 		key: () => {
@@ -514,6 +499,26 @@
 		slash_command: "Commands can't steer; they queue.",
 	};
 	const contextWarning = $derived(isContextWarning(currentChat().contextPercent, composerPreferences.contextWarning));
+	const foldedDuo = $derived(sessionViewState.pose === "duo-folded-portrait");
+	// The folded Duo's rail holds the icon controls, whatever the saved preference.
+	const composerControls = $derived(foldedDuo ? "icons" : composerPreferences.controls);
+	let inputAreaEl: HTMLDivElement | undefined = $state();
+	// The keyboard hands the rail's controls to the full composer and back. A tap
+	// on a control must not blur the field: that would close the keyboard and send
+	// the controls back to the rail mid-tap. Menus that take focus still close it.
+	$effect(() => {
+		const root = inputAreaEl;
+		if (!foldedDuo || !root) return;
+		const keepKeyboardOpen = (event: MouseEvent) => {
+			if (sessionViewState.keyboardOpen && event.target instanceof Element && event.target.closest("button")) event.preventDefault();
+		};
+		root.addEventListener("mousedown", keepKeyboardOpen);
+		const endHandoff = setKeyboardHandoff((open) => prepareHandoff(root, open));
+		return () => {
+			root.removeEventListener("mousedown", keepKeyboardOpen);
+			endHandoff();
+		};
+	});
 	let contextDismissed = $state(false);
 	let clearedGoalDismissed = $state(false);
 	const contextDismissalKey = $derived(`conduit:context-warning-dismissed:${sessionState.currentId ?? "draft"}`);
@@ -1185,37 +1190,6 @@
 	</div>
 {/if}
 
-{#snippet phoneMore(rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>, checkout?: Snippet, warning?: Snippet, attention = false)}
-	{#snippet phoneTrigger({ props }: { props: Record<string, unknown> })}{@render trigger({ props, attention })}{/snippet}
-	<!-- Focus the sheet on open; Tab gives a row its keyboard-only focus ring. -->
-	<Popover bind:open={composerMoreOpen} presentation="auto" initialFocus="content" title="Composer" side="top" trigger={phoneTrigger} data-testid="composer-more-sheet" class="px-[16px]">
-		<div class="divide-y divide-border-subtle">
-			{@render rows()}
-			<PermissionModeSelector variant="row" />
-			{@render checkout?.()}
-		</div>
-		{@render warning?.()}
-	</Popover>
-{/snippet}
-
-{#snippet composerPhoneControls(rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>) }
-	{#if currentSession && composerDirectory}
-		{@const session = currentSession}
-		{#key session.id}
-			<GitIdentity
-				presentation="row"
-				directory={composerDirectory}
-			>
-				{#snippet children(attention, checkout, warning)}
-					{@render phoneMore(rows, trigger, checkout, warning, attention)}
-				{/snippet}
-			</GitIdentity>
-		{/key}
-	{:else}
-		{@render phoneMore(rows, trigger)}
-	{/if}
-{/snippet}
-
 <!-- While the textarea is focused the keyboard covers the home indicator, but iOS
      keeps env(safe-area-inset-bottom) at full size, leaving a dead gap above the
      keyboard. Drop the inset then. Restore it only once the keyboard has slid away:
@@ -1223,6 +1197,7 @@
      inset at once lifts the button out from under the finger before the click. -->
 <div
 	id="input-area"
+	bind:this={inputAreaEl}
 	data-compact={sessionViewState.compact}
 	class="shrink-0 px-[32px] pt-[8px] transition-[padding-bottom] duration-0 delay-250 has-[textarea:focus]:delay-0 pb-[calc(env(safe-area-inset-bottom,0px)+22px)] has-[textarea:focus]:pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
@@ -1330,11 +1305,11 @@
 				</div>
 			</ComposerStrip>
 		{/if}
-		<ComposerFrame id="input-row" compact={sessionViewState.compact} words={composerPreferences.controls === "words"} goal={goal.border}>
+		<ComposerFrame id="input-row" compact={sessionViewState.compact} words={composerControls === "words"} goal={goal.border}>
 			{#if draftAttachments.length > 0}
 				<PastePreview images={draftAttachments} projectSlug={composerProjectSlug} onRemove={removeDraftAttachment} onRetry={(id) => composerDraft.retryAttachment(id)} />
 			{/if}
-			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" data-phone-icons={composerPreferences.controls === "icons" && sessionViewState.composerTier === "phone" ? "" : undefined} splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
+			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" data-phone-icons={composerControls === "icons" && sessionViewState.composerTier === "phone" ? "" : undefined} splitFooter={composerControls === "icons"} singleRow={composerControls === "words"}>
 				{#snippet field()}
 					<!-- Textarea row.
 					     The composer grows with its text and then scrolls, and both of those
@@ -1346,7 +1321,7 @@
 					     revealCaret(), for edits the browser reveals before the row grows.
 					     `scrollbar-gutter: stable` keeps a scrollbar appearing from narrowing
 					     the textarea but not the mirror, which would wrap them differently. -->
-					<div class="max-h-[120px] overflow-y-auto [scrollbar-gutter:stable] max-md:[scrollbar-width:none]" bind:this={fieldScroller}>
+					<div class="max-h-[var(--composer-field-max,120px)] overflow-y-auto [scrollbar-gutter:stable] max-md:[scrollbar-width:none]" bind:this={fieldScroller}>
 						<!-- Past HIGHLIGHT_MAX_CHARS the mirror renders nothing, so it can no
 						     longer size the row: pin the row to the cap and let the textarea
 						     scroll itself. Safe only because the mirror is blank in that mode,
@@ -1445,9 +1420,9 @@
 					</div>
 				{/snippet}
 				{#snippet controls()}
-					{#if composerPreferences.controls === "icons" && settingsPending}
+					{#if composerControls === "icons" && settingsPending}
 						{@render settingsStatus()}
-					{:else if composerPreferences.controls === "icons"}
+					{:else if composerControls === "icons"}
 						<div
 							in:fade={{ duration: 180 }}
 							id="input-bottom-right"
@@ -1455,7 +1430,7 @@
 							class="flex w-full items-center min-w-0 gap-[2px]"
 						>
 							<!-- Harness instance + model picker -->
-							<InstanceModelPicker phoneControls={composerPhoneControls} />
+							<InstanceModelPicker />
 
 							<!-- Approvals (permission mode) selector -->
 							<PermissionModeSelector />
@@ -1466,7 +1441,6 @@
 									<GitIdentity
 										presentation="control"
 										compact={sessionViewState.composerTier === "phone"}
-										directory={composerDirectory}
 									/>
 								{/key}
 							{/if}
@@ -1546,6 +1520,8 @@
 						<Button variant="inverse" size="composer-action" icon="clock" iconSize={16} id="send" data-goal={isGoalCommand ? "true" : "false"} data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn">
 							{@render sendAtLabel()}
 						</Button>
+					{:else if isGoalCommand && sessionViewState.pose === "duo-folded-portrait"}
+						<Button variant="goal" size="composer-action" iconOnly icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn" />
 					{:else if isGoalCommand}
 						<Button variant="goal" size="composer-action" icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn">Set goal</Button>
 					{:else}
@@ -1561,7 +1537,14 @@
 				{/snippet}
 			</TwoRowComposerLayout>
 		</ComposerFrame>
-		{#if composerPreferences.controls === "words"}
+		{#if foldedDuo && currentChat().contextPercent > 0}
+			<!-- Amber from 80% always: the hairline is a meter, not the configurable warning. -->
+			<div data-testid="context-hairline" data-warning={currentChat().contextPercent >= 80 ? "true" : undefined} class="context-hairline">
+				<span><i style:width="{Math.min(100, currentChat().contextPercent)}%"></i></span>
+				<b>{Math.round(currentChat().contextPercent)}% context</b>
+			</div>
+		{/if}
+		{#if composerControls === "words"}
 			<div
 				data-testid="composer-words-row"
 				class="flex items-center justify-between gap-[12px] px-[14px] pt-[9px] text-[12px] text-text-dimmer whitespace-nowrap"
@@ -1570,7 +1553,7 @@
 					{@render settingsStatus()}
 				{:else}
 				<div in:fade={{ duration: 180 }} data-testid="composer-words-left" class="inline-flex min-w-0 items-center gap-[5px]" class:flex-1={sessionViewState.composerTier === "phone"}>
-					<InstanceModelPicker variant="words" phoneControls={composerPhoneControls}>
+					<InstanceModelPicker variant="words">
 						{#snippet phoneMode()}<PermissionModeSelector variant="summary" />{/snippet}
 					</InstanceModelPicker>
 					{#if sessionViewState.composerTier !== "phone" && (composerTraits?.composerModeControl ?? "permission-mode") === "permission-mode"}
@@ -1578,19 +1561,19 @@
 						<PermissionModeSelector variant="words" />
 					{/if}
 				</div>
-				{#if !sessionViewState.compact}<div in:fade={{ duration: 180 }} data-testid="composer-words-right" class="inline-flex min-w-[56px] flex-[0_1000000_auto] items-center justify-end gap-[5px]">
+				{#if !sessionViewState.compact || (currentSession && composerDirectory)}<div in:fade={{ duration: 180 }} data-testid="composer-words-right" class="inline-flex {sessionViewState.composerTier === 'phone' ? 'min-w-[66px]' : 'min-w-[56px]'} flex-[0_1000000_auto] items-center justify-end gap-[5px]">
 					{#if currentSession}
 						{@const session = currentSession}
-						{#if composerDirectory && sessionViewState.composerTier !== "phone"}
+						{#if composerDirectory}
 							{#key session.id}
 								<GitIdentity
 									presentation="word"
-									directory={composerDirectory}
+									compact={sessionViewState.composerTier === "phone"}
 								/>
 							{/key}
 						{/if}
-						{#if currentChat().contextPercent > 0}
-							{#if composerDirectory && sessionViewState.composerTier !== "phone"}<span aria-hidden="true" class="text-text-dimmer">·</span>{/if}
+						{#if sessionViewState.composerTier !== "phone" && currentChat().contextPercent > 0}
+							{#if composerDirectory}<span aria-hidden="true" class="text-text-dimmer">·</span>{/if}
 							<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0">{Math.round(currentChat().contextPercent)}%</span>
 						{/if}
 					{/if}
@@ -1617,4 +1600,10 @@
 <style>
 	#input-area[data-compact="true"] { padding: 6px 12px calc(env(safe-area-inset-bottom, 0px) + 8px); }
 	#input-area[data-compact="true"]:has(:global(textarea:focus)) { padding-bottom: 8px; }
+	/* The folded Duo's context reading: a hairline under the field, 8pt above the home indicator. */
+	.context-hairline { position: absolute; top: calc(100% + 6px); inset-inline: 12px; height: 12px; display: flex; align-items: center; gap: 8px; pointer-events: none; color: var(--color-text-secondary); }
+	.context-hairline[data-warning] { color: var(--color-status-amber); }
+	.context-hairline > span { position: relative; flex: 1; height: 2px; border-radius: 2px; overflow: hidden; background: var(--color-border); }
+	.context-hairline i { position: absolute; inset-block: 0; left: 0; border-radius: 2px; background: currentColor; }
+	.context-hairline b { font-size: 11px; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 </style>

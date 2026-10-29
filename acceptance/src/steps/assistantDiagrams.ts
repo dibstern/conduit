@@ -240,8 +240,8 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		name: "assert no diagram drawn",
 		match: /^no diagram is drawn$/,
 		run: async ({ world }) => {
-			// Give a wrongly eager mount the chance to show itself.
-			await world.page.waitForTimeout(500);
+			// The code header comes from the same sweep that would mount a diagram eagerly,
+			// so once the previous step has seen it, a wrong mount has already happened.
 			await expect(
 				lastAssistant(world.page).locator("[data-diagram]"),
 			).toHaveCount(0);

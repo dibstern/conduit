@@ -30,6 +30,29 @@ export function effectiveWorkingDirectory(
 	return paths.length === 1 ? (paths[0] ?? primary) : primary;
 }
 
+/** One folder answer shared by launches, Files and Git publications. */
+export const sessionFolders = (
+	folders: readonly string[],
+	workspace: SessionWorkspace | null | undefined,
+) => {
+	const workspaceRoot = effectiveWorkingDirectory(folders[0] ?? "", workspace);
+	const effectiveFolders = effectiveSessionFolders(folders, workspace);
+	const directories = [
+		...new Set([
+			workspaceRoot,
+			...effectiveFolders.map(({ directory }) => directory),
+		]),
+	];
+	return {
+		workspaceRoot,
+		effectiveFolders,
+		directories,
+		extraFolders: directories.filter(
+			(directory) => directory !== workspaceRoot,
+		),
+	};
+};
+
 /** Resolve a persisted session mapping without checking or changing its workspace. */
 export function storedWorkingDirectory(
 	primary: string,

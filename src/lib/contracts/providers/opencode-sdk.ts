@@ -45,6 +45,20 @@ const OpenCodeFileDiffSchema = Schema.Struct({
 	status: Schema.optional(Schema.Literals(["added", "deleted", "modified"])),
 });
 
+/** Tool metadata spans classic snapshot diffs and apply_patch's per-file records. */
+export const OpenCodeToolFileDiffSchema = Schema.Struct({
+	file: Schema.optional(Schema.String),
+	path: Schema.optional(Schema.String),
+	filePath: Schema.optional(Schema.String),
+	movePath: Schema.optional(Schema.String),
+	before: Schema.optional(Schema.String),
+	after: Schema.optional(Schema.String),
+	patch: Schema.optional(Schema.String),
+	diff: Schema.optional(Schema.String),
+	status: Schema.optional(Schema.Literals(["added", "deleted", "modified"])),
+	type: Schema.optional(Schema.Literals(["add", "update", "delete", "move"])),
+});
+
 const OpenCodeSessionTimeSchema = Schema.Struct({
 	created: Schema.Number,
 	updated: Schema.Number,

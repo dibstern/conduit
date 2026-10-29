@@ -1166,10 +1166,12 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				tool_id: string;
 				input: string | null;
 				output: string | null;
+				status: string | null;
+				metadata: string | null;
 				version: number;
 				settled: number | null;
 			}>`
-				SELECT COALESCE(mp.call_id, mp.id) AS tool_id, mp.input,
+				SELECT COALESCE(mp.call_id, mp.id) AS tool_id, mp.input, mp.status, mp.metadata,
 					${toolOutput} AS output, mp.version,
 					mp.status IN ('completed', 'error') AS settled
 				FROM message_parts mp
@@ -1185,6 +1187,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					settled: row.settled === 1,
 					input: row.input,
 					output: row.output,
+					status: row.status,
+					metadata: row.metadata,
 				}),
 			);
 		}).pipe(
@@ -1323,6 +1327,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					AND json_valid(mp.metadata)
 					AND json_extract(mp.metadata, '$.childSessionId') = c.id
 					AND json_type(mp.metadata, '$.providerTaskId') = 'text'
+					-- A child resumed directly runs its own turn, outside the task list.
+					AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.session_id = c.id
+						AND run.status IN ('pending', 'running'))
 			),
 			owned AS (
 				SELECT id, task_id, owner_id FROM stranded

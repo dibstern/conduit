@@ -1267,6 +1267,7 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 			"Response 31",
 		);
 		await expect(page.locator(".fork-context-toggle")).toBeVisible();
+		// test-waits-allow real-wait: proving no page loads needs a window; unpaused it loads dozens in this time.
 		await page.waitForTimeout(1000);
 		expect(pages).toBe(0);
 

@@ -88,9 +88,6 @@ export const uiState = $state({
 	clientCount: 0,
 
 	// File preview
-	fileViewerOpen: false,
-	fileViewerPath: null as string | null,
-	fileViewerRoot: null as string | null,
 });
 
 // Components should wrap in $derived() for reactive caching.
@@ -369,18 +366,6 @@ export function closeMediaViewer(): void {
 	mediaViewer = null;
 }
 
-export function openFileViewer(path: string, root?: string): void {
-	uiState.fileViewerOpen = true;
-	uiState.fileViewerPath = path;
-	uiState.fileViewerRoot = root ?? null;
-}
-
-export function closeFileViewer(): void {
-	uiState.fileViewerOpen = false;
-	uiState.fileViewerPath = null;
-	uiState.fileViewerRoot = null;
-}
-
 export function setClientCount(count: number): void {
 	uiState.clientCount = count;
 }
@@ -393,9 +378,6 @@ export function resetProjectUI(): void {
 	uiState.planContent = null;
 	uiState.planApproval = null;
 	closeMediaViewer();
-	uiState.fileViewerOpen = false;
-	uiState.fileViewerPath = null;
-	uiState.fileViewerRoot = null;
 	uiState.openPanels = new Set();
 	uiState.banners = [];
 	uiState.opencodeConnections = {};

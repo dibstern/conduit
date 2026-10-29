@@ -59,8 +59,8 @@ beforeEach(() => {
 	writeFileSync(join(home, ".zprofile"), 'export PATH="/usr/bin:/bin"\n');
 });
 
-afterEach(() => {
-	for (const value of resolvers.splice(0)) value.close();
+afterEach(async () => {
+	await Promise.all(resolvers.splice(0).map((value) => value.close()));
 	vi.useRealTimers();
 	rmSync(home, { recursive: true, force: true });
 });

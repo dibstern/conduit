@@ -85,13 +85,21 @@ import {
 	InputRequestSchema,
 	STEER_BLOCKERS,
 	TextSurfacedPayloadSchema,
+	ToolFileChangeSchema,
 } from "./stored-event.js";
 import { TerminalKeysSetting } from "./terminal-keys.js";
 import {
 	TitleGenerationSelectionSchema,
 	TitleGenerationStateSchema,
 } from "./title-generation.js";
-import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
+import {
+	ToolCallId,
+	ToolDetail,
+	ToolInput,
+	ToolPresentationSchema,
+	ToolText,
+	Utf8Bytes,
+} from "./tool-wire.js";
 import {
 	RecapScopeSchema,
 	RecapSnapshotSchema,
@@ -410,6 +418,9 @@ export const HistoryMessagePartSchema = Schema.Struct({
 			Schema.Struct({
 				input: Schema.optionalKey(ToolInput),
 				output: Schema.optionalKey(ToolText),
+				fileChanges: Schema.optionalKey(Schema.Array(ToolFileChangeSchema)),
+				fileChangesBytes: Schema.optionalKey(Utf8Bytes),
+				presentation: Schema.optionalKey(ToolPresentationSchema),
 			}),
 			[Schema.Record(Schema.String, Schema.Unknown)],
 		),

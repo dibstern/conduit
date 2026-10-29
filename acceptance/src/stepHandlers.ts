@@ -31,9 +31,14 @@ import { cursorTurnHandlers } from "./steps/cursorTurn.js";
 import { cursorUsageHandlers } from "./steps/cursorUsage.js";
 import { cursorUsageErrorsHandlers } from "./steps/cursorUsageErrors.js";
 import { draftAttachmentFailureHandlers } from "./steps/draftAttachmentFailures.js";
+import { duoAlertsHandlers } from "./steps/duoAlerts.js";
+import { duoFoldedKeyboardHandlers } from "./steps/duoFoldedKeyboard.js";
+import { duoFoldedPortraitHandlers } from "./steps/duoFoldedPortrait.js";
 import { duoPoseHandlers } from "./steps/duoPose.js";
+import { duoUnfoldedPortraitHandlers } from "./steps/duoUnfoldedPortrait.js";
 import { firstRunProjectsHandlers } from "./steps/firstRunProjects.js";
 import { harnessHandlers } from "./steps/harness.js";
+import { headerTapOnLiftHandlers } from "./steps/headerTapOnLift.js";
 import { launchingRowsHandlers } from "./steps/launchingRows.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
@@ -42,6 +47,7 @@ import { pendingInputTrayHandlers } from "./steps/pendingInputTray.js";
 import { phoneToastsHandlers } from "./steps/phoneToasts.js";
 import { projectTreeHandlers } from "./steps/projectTree.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
+import { rightPaneHandlers } from "./steps/rightPane.js";
 import { sessionAutoSettleHandlers } from "./steps/sessionAutoSettle.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
@@ -78,6 +84,7 @@ import { worktreeCleanupSettingsHandlers } from "./steps/worktreeCleanupSettings
 const driver = new PlaywrightDriver();
 
 export const conduitVisualHandlers: StepHandler[] = [
+	...headerTapOnLiftHandlers,
 	...addProjectDialogHandlers,
 	...firstRunProjectsHandlers,
 	...draftAttachmentFailureHandlers,
@@ -87,8 +94,13 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionAutoSettleHandlers,
 	...phoneToastsHandlers,
 	...duoPoseHandlers,
+	...duoUnfoldedPortraitHandlers,
+	...duoFoldedKeyboardHandlers,
+	...duoFoldedPortraitHandlers,
+	...duoAlertsHandlers,
 	...sessionRowsHandlers,
 	...projectTreeHandlers,
+	...rightPaneHandlers,
 	...sessionModeDefaultHandlers,
 	...backgroundTasksHandlers,
 	...launchingRowsHandlers,

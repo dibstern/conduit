@@ -1,6 +1,7 @@
 // State the session's own chrome needs but the transcript owns. Kept in one
 // place so the bar and the message list cannot disagree.
 
+import { tick, untrack } from "svelte";
 import { classifyDuoPose, type DuoPose } from "../utils/duo-pose.js";
 
 /**
@@ -8,9 +9,9 @@ import { classifyDuoPose, type DuoPose } from "../utils/duo-pose.js";
  * `md:` utility rather than with the app's older ad-hoc `<= 768` checks.
  */
 const COMPACT_QUERY = "(max-width: 767px)";
-const FILES_PANE_STORAGE_KEY = "files-pane-by-session";
-const FILES_PANE_MEMORY_LIMIT = 100;
-export const FILES_PANE_MIN_WIDTH = 280;
+const RIGHT_PANE_STORAGE_KEY = "files-pane-by-session";
+const RIGHT_PANE_MEMORY_LIMIT = 100;
+export const RIGHT_PANE_MIN_WIDTH = 280;
 
 export type ComposerTier = "wide" | "narrow" | "thin" | "phone";
 export type Pose = "desktop" | "phone" | DuoPose;
@@ -22,55 +23,76 @@ const isCompactPose = (pose: Pose): boolean =>
 const initiallyCompact =
 	typeof matchMedia === "function" && matchMedia(COMPACT_QUERY).matches;
 
-type FilesPaneMemory = { filesOpen: boolean; width: number | null };
-let filesPaneMemory: Map<string, FilesPaneMemory> | undefined;
+export type RightPaneView = "files" | "diff" | "closed";
+
+type RightPaneMemory = { view: RightPaneView; width: number | null };
+let rightPaneMemory: Map<string, RightPaneMemory> | undefined;
 let activeSessionId: string | null = null;
 
-function loadFilesPaneMemory(): Map<string, FilesPaneMemory> {
-	if (filesPaneMemory) return filesPaneMemory;
-	filesPaneMemory = new Map();
+function storedPaneView(
+	entry: Record<string, unknown>,
+): RightPaneView | undefined {
+	const view = entry["view"];
+	if (view === "files" || view === "diff" || view === "closed") return view;
+	if (view !== undefined || typeof entry["filesOpen"] !== "boolean")
+		return undefined;
+	return entry["filesOpen"] ? "files" : "closed";
+}
+
+function storedPaneMemory(value: unknown): RightPaneMemory | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value))
+		return undefined;
+	const entry = value as Record<string, unknown>;
+	const view = storedPaneView(entry);
+	if (!view) return undefined;
+	const width = entry["width"];
+	if (width === null) return { view, width };
+	if (
+		typeof width !== "number" ||
+		!Number.isFinite(width) ||
+		width < RIGHT_PANE_MIN_WIDTH
+	)
+		return undefined;
+	return { view, width };
+}
+
+function trimPaneMemory(memory: Map<string, RightPaneMemory>): void {
+	while (memory.size > RIGHT_PANE_MEMORY_LIMIT)
+		memory.delete(memory.keys().next().value ?? "");
+}
+
+function loadRightPaneMemory(): Map<string, RightPaneMemory> {
+	if (rightPaneMemory) return rightPaneMemory;
+	rightPaneMemory = new Map();
 	try {
 		const raw: unknown = JSON.parse(
-			localStorage.getItem(FILES_PANE_STORAGE_KEY) ?? "{}",
+			localStorage.getItem(RIGHT_PANE_STORAGE_KEY) ?? "{}",
 		);
 		if (raw === null || typeof raw !== "object" || Array.isArray(raw))
-			return filesPaneMemory;
+			return rightPaneMemory;
 		for (const [id, value] of Object.entries(raw)) {
-			if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-			const entry = value as Record<string, unknown>;
-			const filesOpen = entry["filesOpen"];
-			const width = entry["width"];
-			if (typeof filesOpen !== "boolean") continue;
-			if (
-				width !== null &&
-				(typeof width !== "number" ||
-					!Number.isFinite(width) ||
-					width < FILES_PANE_MIN_WIDTH)
-			)
-				continue;
-			filesPaneMemory.set(id, { filesOpen, width });
+			const entry = storedPaneMemory(value);
+			if (entry) rightPaneMemory.set(id, entry);
 		}
-		while (filesPaneMemory.size > FILES_PANE_MEMORY_LIMIT)
-			filesPaneMemory.delete(filesPaneMemory.keys().next().value ?? "");
+		trimPaneMemory(rightPaneMemory);
 	} catch {
 		// Storage is optional; malformed data falls back to the defaults.
 	}
-	return filesPaneMemory;
+	return rightPaneMemory;
 }
 
-function rememberFilesPane(): void {
+function rememberRightPane(): void {
 	if (!activeSessionId || sessionViewState.compact) return;
-	const memory = loadFilesPaneMemory();
+	const memory = loadRightPaneMemory();
 	memory.delete(activeSessionId);
 	memory.set(activeSessionId, {
-		filesOpen: sessionViewState.filesOpen,
-		width: sessionViewState.filesPaneWidth,
+		view: sessionViewState.rightPaneView,
+		width: sessionViewState.rightPaneWidth,
 	});
-	if (memory.size > FILES_PANE_MEMORY_LIMIT)
-		memory.delete(memory.keys().next().value ?? "");
+	trimPaneMemory(memory);
 	try {
 		localStorage.setItem(
-			FILES_PANE_STORAGE_KEY,
+			RIGHT_PANE_STORAGE_KEY,
 			JSON.stringify(Object.fromEntries(memory)),
 		);
 	} catch {
@@ -89,16 +111,18 @@ export const sessionViewState = $state({
 	 *  history, closed to the island after a scroll down or on reaching the
 	 *  bottom. Starts true so a fresh load arrives with the full bar on screen. */
 	barOpen: true,
-	/** Files view, rendered as an overlay on phones and a pane on desktop. */
-	filesOpen: false,
-	filesEverOpened: false,
-	filesPaneWidth: null as number | null,
-	filesPaneExpanded: false,
+	/** One pane selection and one preview, shared by desktop and phone. */
+	rightPaneView: "closed" as RightPaneView,
+	filePreview: null as { path: string; root: string | null } | null,
+	rightPaneWidth: null as number | null,
+	rightPaneExpanded: false,
 
 	/** Written only by watchViewportPose; every pose-specific layout reads it. */
 	pose: (initiallyCompact ? "phone" : "desktop") as Pose,
 	/** Phone-sized pose: the session bar replaces the global header. */
 	compact: initiallyCompact,
+	/** Written only by watchKeyboard; rendered as #layout[data-keyboard="open"]. */
+	keyboardOpen: false,
 
 	/** Measured only by the composer's input wrapper. */
 	composerWidth: 0,
@@ -119,8 +143,13 @@ const composerTier = $derived<ComposerTier>(
 				: "narrow",
 );
 
+/** The folded Duo's header stays put: its controls live in the side rail. */
 export function isBarCollapsed(): boolean {
-	return sessionViewState.compact && !sessionViewState.barOpen;
+	return (
+		sessionViewState.compact &&
+		!sessionViewState.barOpen &&
+		sessionViewState.pose !== "duo-folded-portrait"
+	);
 }
 
 /**
@@ -160,28 +189,40 @@ export function noteSessionChanged(sessionId: string | null = null): void {
 	activeSessionId = sessionId;
 	const memory =
 		sessionId && !sessionViewState.compact
-			? loadFilesPaneMemory().get(sessionId)
+			? loadRightPaneMemory().get(sessionId)
 			: undefined;
-	sessionViewState.filesOpen = memory?.filesOpen ?? false;
-	sessionViewState.filesEverOpened = memory?.filesOpen ?? false;
-	sessionViewState.filesPaneWidth = memory?.width ?? null;
-	sessionViewState.filesPaneExpanded = false;
-	if (memory) rememberFilesPane();
+	sessionViewState.rightPaneView = memory?.view ?? "closed";
+	sessionViewState.filePreview = null;
+	sessionViewState.rightPaneWidth = memory?.width ?? null;
+	sessionViewState.rightPaneExpanded = false;
+	if (memory) rememberRightPane();
 }
 
-export function setFilesOpen(open: boolean): void {
-	sessionViewState.filesOpen = open;
-	if (!open) sessionViewState.filesPaneExpanded = false;
-	rememberFilesPane();
+export function setRightPaneView(view: RightPaneView): void {
+	sessionViewState.rightPaneView = view;
+	if (view === "closed") {
+		sessionViewState.rightPaneExpanded = false;
+		closeFileViewer();
+	}
+	rememberRightPane();
 }
 
-export function setFilesPaneWidth(width: number): void {
+export function openFileViewer(path: string, root?: string): void {
+	setRightPaneView("files");
+	sessionViewState.filePreview = { path, root: root ?? null };
+}
+
+export function closeFileViewer(): void {
+	sessionViewState.filePreview = null;
+}
+
+export function setRightPaneWidth(width: number): void {
 	if (!Number.isFinite(width)) return;
-	sessionViewState.filesPaneWidth = Math.max(
-		FILES_PANE_MIN_WIDTH,
+	sessionViewState.rightPaneWidth = Math.max(
+		RIGHT_PANE_MIN_WIDTH,
 		Math.round(width),
 	);
-	rememberFilesPane();
+	rememberRightPane();
 }
 
 /**
@@ -233,5 +274,65 @@ export function watchViewportPose(): () => void {
 		removeEventListener("resize", measure);
 		removeEventListener("orientationchange", measure);
 		probe.remove();
+	};
+}
+
+/** Runs before the keyboard flips and returns what to run once the flip renders. */
+type KeyboardHandoff = (open: boolean) => () => void;
+const noHandoff: KeyboardHandoff = () => () => {};
+let keyboardHandoff = noHandoff;
+
+/** Lets the composer measure its controls on both sides of the flip (FLIP). */
+export function setKeyboardHandoff(handoff: KeyboardHandoff): () => void {
+	keyboardHandoff = handoff;
+	return () => {
+		if (keyboardHandoff === handoff) keyboardHandoff = noHandoff;
+	};
+}
+
+function setKeyboardOpen(open: boolean): void {
+	if (open === sessionViewState.keyboardOpen) return;
+	const play = keyboardHandoff(open);
+	sessionViewState.keyboardOpen = open;
+	// tick resolves after the DOM update and before the next paint.
+	void tick().then(play);
+}
+
+const raisesKeyboard = (target: EventTarget | null) =>
+	target instanceof Element && target.matches(":read-write");
+// A blur names the field that takes focus next, so moving between fields never
+// flickers the keyboard closed.
+const followFocus = (event: FocusEvent) =>
+	setKeyboardOpen(
+		raisesKeyboard(
+			event.type === "focusin" ? event.target : event.relatedTarget,
+		),
+	);
+
+/**
+ * Track whether the on-screen keyboard is up. iOS shows it exactly while a
+ * field that takes typing has focus, and these devices have no hardware
+ * keyboard, so focus on a `:read-write` element is the signal. Not
+ * visualViewport heights: they lag the keyboard's slide, and the pose keeps
+ * reading the layout viewport. Any field counts, not only the composer: the
+ * keyboard covers the same screen whichever field raised it.
+ */
+export function watchKeyboard(): () => void {
+	const reconcile = () =>
+		setKeyboardOpen(raisesKeyboard(document.activeElement));
+	// Untracked, so the effect that calls this does not re-run on every flip.
+	untrack(reconcile);
+	document.addEventListener("focusin", followFocus);
+	document.addEventListener("focusout", followFocus);
+	// Removing the focused field (a rename committing on Return) moves focus to
+	// the body without a focusout. Always on: when nothing changed, a batch costs
+	// one :read-write match and an early return.
+	const removals = new MutationObserver(reconcile);
+	removals.observe(document.body, { childList: true, subtree: true });
+	return () => {
+		document.removeEventListener("focusin", followFocus);
+		document.removeEventListener("focusout", followFocus);
+		removals.disconnect();
+		setKeyboardOpen(false);
 	};
 }

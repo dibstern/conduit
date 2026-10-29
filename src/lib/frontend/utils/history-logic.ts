@@ -289,6 +289,9 @@ function convertAssistantParts(
 					? (state?.error ?? "Unknown error")
 					: state?.output?.text;
 				const preview = {
+					...(state?.fileChangesBytes !== undefined && {
+						fileChangesBytes: state.fileChangesBytes,
+					}),
 					...(state?.input?._tag === "preview" && {
 						inputCuts: state.input.cuts,
 					}),
@@ -312,6 +315,12 @@ function convertAssistantParts(
 						name: mapToolName(rawToolName),
 						status: mapToolStatus(state?.status, rawToolName, toolMetadata),
 						...(outcome !== undefined && { outcome }),
+						...(state?.fileChanges !== undefined && {
+							fileChanges: state.fileChanges,
+						}),
+						...(state?.presentation !== undefined && {
+							presentation: state.presentation,
+						}),
 						...(toolResult != null && { result: toolResult }),
 						...(Object.keys(preview).length > 0 && { preview }),
 						isError,

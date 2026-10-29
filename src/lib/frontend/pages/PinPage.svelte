@@ -5,6 +5,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { navigate } from "../stores/router.svelte.js";
+	import { markAuthenticated } from "../transport/connection-status.svelte.js";
 
 	const LOW_PIN_ATTEMPT_WARNING_THRESHOLD = 3;
 
@@ -42,6 +43,7 @@
 			});
 			const data = await res.json();
 			if (data.ok) {
+				markAuthenticated();
 				// Use client-side navigation instead of window.location.href
 				// to avoid the server's single-project 302 redirect, which
 				// would dump the user into ChatLayout's ConnectOverlay with

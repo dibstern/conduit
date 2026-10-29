@@ -1,11 +1,10 @@
-import { existsSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
-import { basename, dirname, join, resolve, sep } from "node:path";
-import { Brand, Effect, HashMap, Option, Ref, Schema } from "effect";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { Effect, HashMap, Option, Ref, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import {
 	type SessionWorkspace,
 	SessionWorkspaceSchema,
-	type SessionWorktreeOwnership,
 } from "../../contracts/session-workspace.js";
 import {
 	type WorkspaceMissing,
@@ -13,101 +12,23 @@ import {
 } from "../../contracts/worktree.js";
 import { ProjectRegistryTag } from "../../domain/daemon/Services/project-registry-service.js";
 import { labelProjectFolders } from "../../project-folders.js";
+import { sessionFolders } from "../../session/session-workspace.js";
 import {
-	effectiveSessionFolders,
-	effectiveWorkingDirectory,
-} from "../../session/session-workspace.js";
+	type CanonicalDirectory,
+	type WorkspaceDirectories,
+	workspaceDirectories,
+} from "../../session/workspace-directories.js";
 import {
 	type ProjectInfo,
 	type SessionGit,
 	SessionGitSchema,
 } from "../../shared-types.js";
+import { readSessionWorktreeOwnershipSnapshot } from "./session-worktree-ownership.js";
 
-export type CanonicalDirectory = string & Brand.Brand<"CanonicalDirectory">;
-const directoryBrand = Brand.nominal<CanonicalDirectory>();
-const canonicalDirectories = new Map<string, CanonicalDirectory>();
-const ownedWorkspaceDirectories = new Map<string, CanonicalDirectory>();
-
-/** Recorded checkout roots retain their identity even when a symlink occupies them. */
-export const rememberWorkspaceDirectories = (
-	workspace: SessionWorkspace,
-	ownership: readonly SessionWorktreeOwnership[],
-): void => {
-	const roots = ownership.map(({ path }) => resolve(path));
-	const isOwned = (path: string) =>
-		roots.some((root) => path === root || path.startsWith(`${root}${sep}`));
-	for (const directory of Object.values(workspace.worktrees)) {
-		const path = resolve(directory);
-		const key = isOwned(path) ? directoryBrand(path) : canonicalDirectory(path);
-		if (!isOwned(key)) continue;
-		ownedWorkspaceDirectories.set(path, key);
-		ownedWorkspaceDirectories.set(key, key);
-	}
-};
-
-export const workspaceDirectory = (
-	directory: string,
-	workspace?: SessionWorkspace | null,
-): CanonicalDirectory =>
-	workspace?.origin === "conduit" &&
-	Object.values(workspace.worktrees).includes(directory)
-		? (ownedWorkspaceDirectories.get(resolve(directory)) ??
-			canonicalDirectory(directory))
-		: canonicalDirectory(directory);
-
-/** SQL keys already anchored by recorded ownership must not become legacy aliases. */
-export const publicationDirectory = (directory: string): CanonicalDirectory => {
-	const key = resolve(directory);
-	const owned = ownedWorkspaceDirectories.get(key);
-	return owned === key ? owned : canonicalDirectory(directory);
-};
-
-/** Only the SessionGit owner invalidates identities when presence changes. */
-export const forgetCanonicalDirectory = (directory: string): void => {
-	const key = resolve(directory);
-	const canonical = canonicalDirectories.get(key) ?? key;
-	canonicalDirectories.delete(key);
-	for (const [alias, value] of canonicalDirectories)
-		if (value === canonical) canonicalDirectories.delete(alias);
-};
-
-/** Preserve one identity through symlink aliases, including a missing child. */
-export const canonicalDirectory = (directory: string): CanonicalDirectory => {
-	const key = resolve(directory);
-	const cached = canonicalDirectories.get(key);
-	if (cached !== undefined) return cached;
-	let ancestor = key;
-	const children: string[] = [];
-	let links = 0;
-	let canonical: CanonicalDirectory;
-	for (;;) {
-		try {
-			canonical = directoryBrand(
-				join(realpathSync(ancestor), ...children.reverse()),
-			);
-			break;
-		} catch {
-			try {
-				if (links < 40 && lstatSync(ancestor).isSymbolicLink()) {
-					links++;
-					ancestor = resolve(dirname(ancestor), readlinkSync(ancestor));
-					continue;
-				}
-			} catch {
-				// Resolve missing children from the nearest existing ancestor.
-			}
-			const parent = dirname(ancestor);
-			if (parent === ancestor) {
-				canonical = directoryBrand(key);
-				break;
-			}
-			children.push(basename(ancestor));
-			ancestor = parent;
-		}
-	}
-	canonicalDirectories.set(key, canonical);
-	return canonical;
-};
+export {
+	type CanonicalDirectory,
+	canonicalDirectory,
+} from "../../session/workspace-directories.js";
 
 const decodeGit = Schema.decodeUnknownOption(
 	Schema.fromJsonString(SessionGitSchema),
@@ -118,7 +39,8 @@ const decodeMissing = Schema.decodeUnknownOption(
 
 const readPublications = (
 	directories: readonly string[],
-	workspace?: SessionWorkspace,
+	workspace: SessionWorkspace | undefined,
+	identities: WorkspaceDirectories["Service"],
 ) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -126,7 +48,7 @@ const readPublications = (
 			...new Set(
 				directories.flatMap((directory) => [
 					resolve(directory),
-					workspaceDirectory(directory, workspace),
+					identities.workspaceDirectory(directory, workspace),
 				]),
 			),
 		];
@@ -139,7 +61,10 @@ const readPublications = (
 			WHERE directory IN ${sql.in(keys)}`;
 		return new Map(
 			rows
-				.map((row) => ({ row, directory: publicationDirectory(row.directory) }))
+				.map((row) => ({
+					row,
+					directory: identities.publicationDirectory(row.directory),
+				}))
 				.sort(
 					(left, right) =>
 						Number(left.row.directory === left.directory) -
@@ -196,16 +121,29 @@ const sessionPublication = (
 							Schema.fromJsonString(SessionWorkspaceSchema),
 						)(row.workspace),
 					);
-		const primary = effectiveWorkingDirectory(roots[0], workspace);
-		const entries = effectiveSessionFolders(roots, workspace);
+		const identities = yield* workspaceDirectories;
+		if (workspace?.origin === "conduit") {
+			const ownership = yield* readSessionWorktreeOwnershipSnapshot(
+				row.project_id,
+				sessionId,
+			);
+			if (ownership?._tag === "Owned")
+				identities.rememberWorkspaceDirectories(workspace, ownership.ownership);
+		}
+		const {
+			workspaceRoot: primary,
+			effectiveFolders: entries,
+			directories,
+		} = sessionFolders(roots, workspace);
 		const publications = yield* readPublications(
-			[primary, ...entries.map(({ directory }) => directory)],
+			directories,
 			workspace,
+			identities,
 		);
 		const labels = labelProjectFolders(roots);
 		const statuses = entries.flatMap(({ root, directory, shared }, index) => {
 			const git = publications.get(
-				workspaceDirectory(directory, workspace),
+				identities.workspaceDirectory(directory, workspace),
 			)?.git;
 			return git || shared
 				? [
@@ -218,10 +156,12 @@ const sessionPublication = (
 					]
 				: [];
 		});
-		const git = publications.get(workspaceDirectory(primary, workspace))?.git;
+		const git = publications.get(
+			identities.workspaceDirectory(primary, workspace),
+		)?.git;
 		const missing = entries.flatMap(({ root, directory }) => {
 			const state = publications.get(
-				workspaceDirectory(directory, workspace),
+				identities.workspaceDirectory(directory, workspace),
 			)?.workspaceMissing;
 			return state ? [{ folder: root, ...state }] : [];
 		});
@@ -266,9 +206,12 @@ export const withPublishedProjectGit = <T extends ProjectInfo>(
 ) =>
 	Effect.gen(function* () {
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		const identities = yield* workspaceDirectories;
 		const publications = Option.isSome(sql)
 			? yield* readPublications(
 					projects.flatMap(({ folders }) => folders),
+					undefined,
+					identities,
 				).pipe(Effect.provideService(SqlClient.SqlClient, sql.value))
 			: new Map<
 					CanonicalDirectory,
@@ -280,13 +223,13 @@ export const withPublishedProjectGit = <T extends ProjectInfo>(
 		return projects.map((project) => {
 			const labels = labelProjectFolders(project.folders);
 			const folders = project.folders.flatMap((root, index) => {
-				const git = publications.get(canonicalDirectory(root))?.git;
+				const git = publications.get(identities.canonicalDirectory(root))?.git;
 				return git
 					? [{ ...git, root, label: labels[index]?.label ?? root }]
 					: [];
 			});
 			const primary = publications.get(
-				canonicalDirectory(project.folders[0]),
+				identities.canonicalDirectory(project.folders[0]),
 			)?.git;
 			return {
 				...project,

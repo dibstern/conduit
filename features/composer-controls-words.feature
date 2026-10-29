@@ -1,4 +1,4 @@
-Feature: Words composer keeps individual desktop controls and one phone sheet
+Feature: Words composer keeps desktop controls and opens the phone Session panel
 
 Scenario: phone checkout copies its branch and full commit hash
   Given the conduit app is served with the connected mockup
@@ -7,7 +7,7 @@ Scenario: phone checkout copies its branch and full commit hash
   And the composer picker has the Claude catalog
   And the composer checkout is conduit / account-chip as worktree
   And the composer uses words controls
-  When I tap the phone composer Checkout row
+  When I open the composer checkout menu
   And I tap the checkout Branch copy control
   Then the checkout shows Branch copied and the clipboard contains account-chip
   When I tap the checkout HEAD row
@@ -35,7 +35,7 @@ Examples:
   | baseline                      | threshold |
   | composer-controls-words-phone | 98        |
 
-Scenario Outline: phone Words opens every picker through one Composer sheet
+Scenario Outline: phone Words opens every picker through one Session panel
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -43,10 +43,10 @@ Scenario Outline: phone Words opens every picker through one Composer sheet
   And the Claude accounts are claude as personal, work as work
   And the composer checkout is conduit / account-chip as worktree
   And the composer uses words controls
-  When I open the phone composer sheet
-  Then the phone composer sheet has separate Harness, Account, Model, Effort, Permissions and Checkout rows
-  When I tap the phone composer <row> row
-  Then the phone composer sheet gives way to the picker
+  When I open the phone Session panel
+  Then the phone Session panel has Harness and Account sections and Model, Context, Effort, Agent, Permissions and Checkout rows
+  When I tap the phone Session panel <row> row
+  Then the phone Session panel remains open
   And the icons control opens the picker at <section>
   When I close the model picker
   Then the phone Words summary is focused
@@ -58,14 +58,14 @@ Examples:
   | Model   | Model   |
   | Effort  | Effort  |
 
-Scenario Outline: phone Words effort is changed through its sheet
+Scenario Outline: phone Words effort is changed through the Session panel
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And approvals are ask
   And the composer uses words controls
-  When I tap the phone composer Effort row
+  When I tap the phone Session panel Effort row
   Then the picker lists every effort level including xhigh
   When I set effort to high
   And I close the model picker
@@ -76,20 +76,20 @@ Examples:
   | baseline                            | threshold |
   | composer-controls-words-effort-phone | 98        |
 
-Scenario Outline: phone Words mode is changed through its sheet
+Scenario Outline: phone Words mode is changed through the Session panel
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   And approvals are plan
   And the composer uses words controls
-  When I tap the phone composer Permissions row
+  When I tap the phone Session panel Permissions row
   Then the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
-  And the phone composer Permissions row reads Plan
+  And the phone Session panel Permissions row reads Plan
   When I set approvals to acceptEdits
-  Then the phone composer Permissions row reads Auto-accept edits
+  Then the phone Session panel Permissions row reads Auto-accept edits
   And the approvals menu is closed
-  When I close the phone composer sheet
+  When I close the phone Session panel
   Then the phone Words mode is edits with the edits tone
   And the composer region visually matches <baseline> at <threshold> percent
 
@@ -104,7 +104,7 @@ Scenario Outline: phone Words keeps a selected context window in the summary
   And the composer picker has the Claude catalog
   And approvals are ask
   And the composer uses words controls
-  When I tap the phone composer Model row
+  When I tap the phone Session panel Model row
   And I go Back in the picker
   And I select context window 1m in the picker
   And I set effort to high
@@ -116,7 +116,7 @@ Examples:
   | baseline                      | threshold |
   | composer-words-window-1m-phone | 98        |
 
-Scenario Outline: phone Words keeps checkout details and warnings in its sheet
+Scenario Outline: phone Words keeps its checkout chip and inline Session panel warnings
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -126,11 +126,13 @@ Scenario Outline: phone Words keeps checkout details and warnings in its sheet
   And the session has a workspace hint at /workspace/conduit-hint
   And the composer uses words controls
   And the mock relay reports context 42 percent
-  Then the phone Words row omits checkout and shows 42% context
-  When I open the phone composer sheet
-  Then the phone composer warning row reports Claude is working in ../conduit-hint and offers Move and Dismiss
+  Then the phone Words row shows checkout and keeps 42% context in its summary
+  And the phone checkout warning mark is visible
+  When I open the phone Session panel
+  Then the phone Session panel checkout notice reports working in conduit-hint? and offers Move and Dismiss
   And the screen region visually matches <baseline> at <threshold> percent
-  When I tap the phone composer Checkout row
+  When I close the phone Session panel
+  And I open the composer checkout menu
   Then the composer checkout menu shows conduit-worktrees and feature/session-account-chip-redesign in full
   And the composer checkout menu shows uncommitted changes and upstream 2 ahead and 1 behind
 
