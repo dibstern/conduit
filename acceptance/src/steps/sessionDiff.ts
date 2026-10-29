@@ -810,7 +810,10 @@ export const sessionDiffHandlers: StepHandler[] = [
 				.map(({ tag }) => tag);
 			expect(
 				tags.filter(
-					(tag) => tag !== "SessionDiffList" && tag !== "SessionDiffFile",
+					(tag) =>
+						tag !== "SessionDiffList" &&
+						tag !== "SessionDiffFile" &&
+						tag !== "SubscribeSessionDiff",
 				),
 			).toEqual([]);
 		},
