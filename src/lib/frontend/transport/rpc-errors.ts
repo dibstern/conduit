@@ -49,6 +49,7 @@ export const copy: {
 	CategorySetRejected: (error) => error.message,
 	ClaudeSettingsTrustBoundaryError: (error) => error.message,
 	ClaudeSettingsResolveError: (error) => error.message,
+	SessionDiffError: (error) => error.message,
 };
 
 const isDeclared = Schema.is(

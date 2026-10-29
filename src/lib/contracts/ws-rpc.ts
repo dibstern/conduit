@@ -26,6 +26,11 @@ import {
 	CategoryTuningProposalSchema,
 	CategoryTuningScoreSchema,
 } from "./category-tuning.js";
+import {
+	SessionDiffError,
+	SessionDiffListingSchema,
+	SessionDiffScopeSchema,
+} from "./session-diff.js";
 import { AvatarChoiceSchema, AvatarSchema } from "./user-avatar.js";
 import {
 	ProjectWorktreeCleanupSchema,
@@ -2636,6 +2641,31 @@ export const GetToolDetails = Rpc.make("GetToolDetails", {
 	error: WsRpcError,
 });
 
+// Diff views run git on request, so these deliberately avoid read-RPC prefixes.
+export const SessionDiffList = Rpc.make("SessionDiffList", {
+	payload: Schema.TaggedStruct("SessionDiffList", {
+		sessionId: NonEmptyString,
+		scope: SessionDiffScopeSchema,
+	}),
+	success: SessionDiffListingSchema,
+	error: WsRpcError,
+});
+
+/** Serves only a file the listing named, by its folder, path and blob pair. */
+export const SessionDiffFile = Rpc.make("SessionDiffFile", {
+	payload: Schema.TaggedStruct("SessionDiffFile", {
+		sessionId: NonEmptyString,
+		scope: SessionDiffScopeSchema,
+		revision: NonEmptyString,
+		folder: NonEmptyString,
+		path: NonEmptyString,
+		before: Schema.NullOr(Schema.String),
+		after: Schema.NullOr(Schema.String),
+	}),
+	success: Schema.Struct({ patch: Schema.String }),
+	error: Schema.Union([WsRpcError, SessionDiffError]),
+});
+
 export const GetSkillContent = Rpc.make("GetSkillContent", {
 	payload: Schema.TaggedStruct("GetSkillContent", {
 		projectSlug: NonEmptyString,
@@ -3474,6 +3504,8 @@ const wsRpcRequests = [
 		}),
 	},
 	GetToolDetails,
+	SessionDiffList,
+	SessionDiffFile,
 	{
 		requests: [GetSkillContentForSession, GetSkillContent],
 		rpc: Rpc.make(GetSkillContent._tag, {
