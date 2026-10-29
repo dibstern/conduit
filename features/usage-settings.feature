@@ -436,6 +436,28 @@ Scenario: Refresh all reports an account it couldn't read instead of calling it 
   And the Usage account claude status reads couldn't read usage in muted
   And the Usage no-data card claude reads Usage read timed out. Press Refresh to try again.
 
+Scenario: Refresh all stays busy while any account is checking
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the normal state
+  And the Usage account work is checking
+  When I open settings to the Usage section
+  Then Refresh all in Usage settings is busy
+  When the Usage account work finishes checking
+  Then Refresh all in Usage settings is ready
+
+Scenario: A card updates from the stream before the Refresh all toast
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the normal state
+  And the next Usage refresh publishes the warnWk reading while work is still checking
+  When I open settings to the Usage section
+  And I press Refresh all in Usage settings
+  Then the Usage account claude status reads 91% of weekly window in amber
+  And Refresh all in Usage settings is busy
+  And no Usage refresh toast is shown
+  When the open Usage refresh finishes without reading work because Usage read timed out
+  Then an error toast contains Couldn't read plan usage for Work
+  And Refresh all in Usage settings is ready
+
 Scenario: the desktop footer opens the Usage section directly
   Given the viewport is a desktop
   And Usage settings have one Claude account in the normal state

@@ -65,6 +65,7 @@
 	let confirmed: UsageLimitsSetting | null = null;
 	let saveTicket = 0;
 	let refreshing = $state(false);
+	const refreshAllBusy = $derived(refreshing || accounts.some((account) => account.checking));
 	let keychainPending = $state<string | null>(null);
 	let keychainErrors = $state<Record<string, string | undefined>>({});
 	let now = $state(Date.now());
@@ -252,7 +253,7 @@
 	<div data-testid="usage-settings-subheader" class="text-[12px] text-text-dimmer {several ? 'md:ml-auto' : 'text-right'}">
 		{#if !several && !hasPlanData(single)}Claude{:else}
 		<span>{several ? `${accounts.length} accounts` : single?.planLabel ?? claudeAccounts.nameOf(undefined)} · updated {updatedLabel} · </span>
-		<TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" tone="dimmer" underline="always" data-testid="usage-settings-refresh" disabled={refreshing || !refreshSlug} aria-busy={refreshing} onclick={refresh}>{several ? "Refresh all" : "Refresh"}</TextButton>
+		<TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" tone="dimmer" underline="always" data-testid="usage-settings-refresh" disabled={refreshAllBusy || !refreshSlug} aria-busy={refreshAllBusy} onclick={refresh}>{several ? "Refresh all" : "Refresh"}</TextButton>
 		{/if}
 	</div>
 {/snippet}
