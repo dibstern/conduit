@@ -1,6 +1,6 @@
 import { Effect, Result, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
-import { resolve } from "../../account-directory.js";
+import { NO_OPENCODE_HEALTH, resolve } from "../../account-directory.js";
 import { makeAttachmentStore } from "../../persistence/attachment-store.js";
 import { resolveTurnImages } from "../resolve-turn-images.js";
 import type { ProcessRunnerDriver } from "./process-session-runner.js";
@@ -40,7 +40,9 @@ export const makeRunnerCommandRecovery =
 			const replayLock = yield* Semaphore.make(1);
 			return yield* recoverRunnerCommands(sql, sessionId, options.driverKind, {
 				driverForAccount: (id) =>
-					Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }))?.driver,
+					Result.getOrUndefined(
+						resolve(accounts, { _tag: "Id", id }, NO_OPENCODE_HEALTH),
+					)?.driver,
 				decodeInput: (row) => ({
 					...(JSON.parse(row.payload_json) as DurableSessionTurn),
 					commandAttempt: row.attempt_count,
@@ -98,10 +100,14 @@ export const makeRunnerCommandRecovery =
 										: yield* options.autoSettleAfterDays ??
 												Effect.succeed(undefined);
 								const current = Result.getOrUndefined(
-									resolve(yield* options.accounts, {
-										_tag: "Id",
-										id: input.account?.id ?? row.provider_id,
-									}),
+									resolve(
+										yield* options.accounts,
+										{
+											_tag: "Id",
+											id: input.account?.id ?? row.provider_id,
+										},
+										NO_OPENCODE_HEALTH,
+									),
 								);
 								if (!current || current.driver !== options.driverKind)
 									return yield* Effect.fail({

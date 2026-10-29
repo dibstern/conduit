@@ -26,7 +26,6 @@ export const patchSummarizer: ToolSummarizer<PatchInput> = {
 		);
 		return {
 			...(paths.length > 0 && { subtitle: paths.join(", ") }),
-			expandedContent: { kind: "code", language: "diff", content: input.patch },
 		};
 	},
 };

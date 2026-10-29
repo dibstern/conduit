@@ -111,7 +111,7 @@
 	{@const tag = toolTags(part)[0]}
 	{@const isSkill = part.name === "Skill"}
 	{@const hasLiveOutput = typeof part.metadata?.['output'] === "string"}
-	{@const cursorDetail = typeof part.metadata?.['cursorToolType'] === "string" && (part.metadata['fileChange'] || part.metadata['plan'] || part.metadata['computerUse'] || part.metadata['media'] || part.metadata['output'] !== undefined || ensureCanonical(part.name, part.input).tool === "Unknown")}
+	{@const cursorDetail = typeof part.metadata?.['cursorToolType'] === "string" && (part.fileChanges?.length || part.metadata['plan'] || part.metadata['computerUse'] || part.metadata['media'] || part.metadata['output'] !== undefined || ensureCanonical(part.name, part.input).tool === "Unknown")}
 	<!-- A compact row is still this tool's rendering, so it answers to the same
 	     .tool-item / data-tool-status hooks the expanded card used to. -->
 	<div

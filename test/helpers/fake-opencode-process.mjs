@@ -135,7 +135,7 @@ const server = createServer(async (request, response) => {
 	if (body)
 		appendFileSync(
 			join(configDir, "fake-opencode-request-bodies.jsonl"),
-			`${JSON.stringify({ pid: process.pid, method: request.method, path, body })}\n`,
+			`${JSON.stringify({ pid: process.pid, statePrefix, method: request.method, path, body })}\n`,
 		);
 	appendFileSync(
 		join(configDir, "fake-opencode-requests.jsonl"),
@@ -472,8 +472,56 @@ const server = createServer(async (request, response) => {
 			{ sessionID: pending.sessionID, requestID },
 		);
 		response.end("true");
+	} else if (
+		/^\/session\/[^/]+\/abort$/.test(path) &&
+		request.method === "POST"
+	) {
+		response.end("true");
 	} else if (/^\/session\/[^/]+\/message$/.test(path)) {
 		const sessionID = path.split("/")[2];
+		if (request.method === "POST") {
+			const input = JSON.parse(body || "{}");
+			if (input.agent !== "title") {
+				response
+					.writeHead(400)
+					.end('{"message":"Only title prompts are supported"}');
+				return;
+			}
+			const id = `msg_${randomUUID()}`;
+			response.end(
+				JSON.stringify({
+					info: {
+						id,
+						sessionID,
+						role: "assistant",
+						parentID: "title-input",
+						modelID: input.model.modelID,
+						providerID: input.model.providerID,
+						mode: "title",
+						path: { cwd: directory, root: directory },
+						time: { created: Date.now(), completed: Date.now() },
+						cost: 0,
+						tokens: {
+							input: 0,
+							output: 0,
+							reasoning: 0,
+							cache: { read: 0, write: 0 },
+						},
+						finish: "stop",
+					},
+					parts: [
+						{
+							id: `prt_${randomUUID()}`,
+							messageID: id,
+							sessionID,
+							type: "text",
+							text: "Managed OpenCode title",
+						},
+					],
+				}),
+			);
+			return;
+		}
 		const failureFile = join(configDir, "fake-opencode-history-failures.json");
 		const failures = existsSync(failureFile)
 			? JSON.parse(readFileSync(failureFile, "utf8"))
@@ -649,6 +697,10 @@ const server = createServer(async (request, response) => {
 	} else {
 		response.end("[]");
 	}
+});
+server.on("error", (error) => {
+	console.error(`${error.code ?? "UNKNOWN"}: ${error.message}`);
+	process.exit(1);
 });
 const listen = () =>
 	server.listen(port, "127.0.0.1", () => {

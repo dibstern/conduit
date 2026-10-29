@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Fiber, Layer, Option } from "effect";
+import { Effect, Fiber, Layer, Option, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterAll, afterEach, expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
@@ -31,6 +31,7 @@ import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
+import { SessionGit } from "../../../src/lib/domain/daemon/Services/session-git.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 
@@ -162,7 +163,7 @@ describe("projectInfos", () => {
 	});
 
 	it.effect(
-		"includes published git for a project and omits it for an unpublished one",
+		"reads published project git without asking SessionGit to refresh",
 		() => {
 			const directory = mkdtempSync(join(tmpdir(), "conduit-registry-git-"));
 			fixtureDirs.push(directory);
@@ -202,7 +203,13 @@ describe("projectInfos", () => {
 					VALUES (${realpathSync(directory)}, ${JSON.stringify(git)}, 1)`;
 				yield* addWithoutRelay(cached);
 				yield* addWithoutRelay(uncached);
-				const projects = yield* projectInfos;
+				const projects = yield* projectInfos.pipe(
+					Effect.provideService(SessionGit, {
+						read: () => Effect.die("Project reads must use published git"),
+						changes: Stream.empty,
+						invalidate: () => Effect.die("Project reads must not refresh git"),
+					}),
+				);
 				expect(
 					projects.find((project) => project.slug === "cached"),
 				).toHaveProperty("git", {

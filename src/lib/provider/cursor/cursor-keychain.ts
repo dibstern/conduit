@@ -1,7 +1,7 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { Effect, Schema } from "effect";
+import { Subprocess } from "../../domain/daemon/Services/subprocess.js";
 
 export interface CursorUsageToken {
 	readonly token: string;
@@ -106,35 +106,37 @@ export const readCursorKeychain = (
 		}
 		if (process.platform !== "darwin")
 			return Effect.succeed({ reason: cursorKeychainUnsupported });
-		return Effect.callback<CursorKeychainRead>((resume) => {
-			const child = execFile(
-				"/usr/bin/security",
-				[
-					"find-generic-password",
-					"-s",
-					"cursor-access-token",
-					"-a",
-					"cursor-user",
-					"-w",
-				],
-				{ timeout: 60_000, maxBuffer: 64 * 1024 },
-				(error, stdout) => {
-					resume(
-						Effect.succeed(
-							error
-								? {
-										reason: error.killed
-											? cursorKeychainTimeout
-											: error.code === 44
-												? missing
-												: denied,
-									}
-								: decodeToken(stdout.trim()),
-						),
-					);
-				},
-			);
-			return Effect.sync(() => child.kill());
+		return Effect.gen(function* () {
+			const subprocess = yield* Subprocess;
+			return yield* subprocess
+				.run(
+					"/usr/bin/security",
+					[
+						"find-generic-password",
+						"-s",
+						"cursor-access-token",
+						"-a",
+						"cursor-user",
+						"-w",
+					],
+					{ timeoutMs: 60_000, maxBuffer: 64 * 1024 },
+				)
+				.pipe(
+					Effect.map(
+						({ stdout, exitCode }): CursorKeychainRead =>
+							exitCode === 0
+								? decodeToken(stdout.trim())
+								: { reason: exitCode === 44 ? missing : denied },
+					),
+					Effect.catch((error) =>
+						Effect.succeed({
+							reason:
+								error.reason === "timeout" || error.reason === "output-limit"
+									? cursorKeychainTimeout
+									: denied,
+						}),
+					),
+				);
 		});
 	});
 

@@ -28,6 +28,7 @@ import {
 	type AccountsState,
 	accountsStateFromInstances,
 	assignAccountColorSlots,
+	materializeDefault,
 } from "../../../account-directory.js";
 import { DEFAULT_OPENCODE_URL } from "../../../constants.js";
 import {
@@ -345,19 +346,46 @@ export function makeInstanceManagerStateLive(
 					),
 					accountsState.launchLogin,
 				).accounts;
-	return makeOpenCodeRuntimeStateLive(config, seeded, options).pipe(
-		Layer.merge(
-			accountsState === undefined
+	return Layer.unwrap(
+		Effect.gen(function* () {
+			const runtime = yield* InstanceManagerStateTag;
+			const readOpenCodeStatuses = Effect.map(
+				Ref.get(runtime),
+				(state) =>
+					new Map(
+						Array.from(
+							HashMap.values(state.instances),
+							(instance) => [instance.id, instance.status] as const,
+						),
+					),
+			);
+			const accounts = [...runtimeAccounts, ...(accountsState?.accounts ?? [])];
+			return accountsState === undefined
 				? AccountDirectoryLive(
 						options?.launchLogin ?? captureClaudeLaunchLogin(process.env),
+						readOpenCodeStatuses,
 						seeded,
 						config?.maxInstances ?? DEFAULT_CONFIG.maxInstances,
 					)
-				: AccountDirectoryStateLive({
-						...accountsState,
-						accounts: [...runtimeAccounts, ...accountsState.accounts],
-					}),
-		),
+				: AccountDirectoryStateLive(
+						{
+							...accountsState,
+							accounts,
+							defaults: {
+								...accountsState.defaults,
+								opencode: materializeDefault(
+									accounts,
+									"opencode",
+									Option.getOrUndefined(accountsState.defaults.opencode),
+									[],
+								),
+							},
+						},
+						readOpenCodeStatuses,
+					);
+		}),
+	).pipe(
+		Layer.provideMerge(makeOpenCodeRuntimeStateLive(config, seeded, options)),
 	);
 }
 
@@ -629,63 +657,55 @@ export const getInstances = Effect.gen(function* () {
 		? (yield* Ref.get(config.value)).cursorUsageBinding
 		: undefined;
 	const state = yield* Ref.get(yield* InstanceManagerStateTag);
-	const runtimeOrder = new Map(
-		Array.from(
-			HashMap.keys(state.instances),
-			(id, index) => [id, index] as const,
-		),
-	);
-	return accounts
-		.map((account): OpenCodeInstance => {
-			const runtime = Option.getOrUndefined(
-				HashMap.get(state.instances, account.id),
-			);
-			return instanceInfo({
-				...(runtime ?? { status: "healthy", restartCount: 0, createdAt: 0 }),
-				id: account.id,
-				name: account.name,
-				...(account.colorSlot === undefined
-					? {}
-					: { colorSlot: account.colorSlot }),
-				driver: account.driver,
-				port:
-					account.driver === "opencode"
-						? (runtime?.port ?? account.port ?? 0)
-						: 0,
-				managed:
-					account.driver === "opencode" &&
-					(runtime?.managed ?? account.managed ?? false),
-				...(account.configuredFolder === undefined
-					? {}
-					: { configDir: account.configuredFolder }),
-				...(runtime?.url !== undefined
-					? { url: runtime.url }
-					: account.driver === "opencode" && account.url !== undefined
-						? { url: account.url }
-						: {}),
-				...(account.env === undefined
-					? {}
-					: {
-							env:
-								account.driver === "opencode" &&
-								(runtime?.managed ?? account.managed)
-									? publicManagedOpenCodeEnv(account.env)
-									: { ...account.env },
-						}),
-				isDefault: account.isDefault,
-				usageEligible:
-					PROVIDER_DRIVERS[account.driver].usageHarness !== undefined &&
-					account.usageEligible,
-				...(account.driver === "cursor"
-					? { cursorUsageSource: cursorUsageSource(account, binding) }
-					: {}),
-			});
-		})
-		.sort(
-			(left, right) =>
-				(runtimeOrder.get(left.id) ?? runtimeOrder.size) -
-				(runtimeOrder.get(right.id) ?? runtimeOrder.size),
+	return accounts.map((account): OpenCodeInstance => {
+		const runtime = Option.getOrUndefined(
+			HashMap.get(state.instances, account.id),
 		);
+		return instanceInfo({
+			...(runtime ?? {
+				status: account.driver === "opencode" ? "stopped" : "healthy",
+				restartCount: 0,
+				createdAt: 0,
+			}),
+			id: account.id,
+			name: account.name,
+			...(account.colorSlot === undefined
+				? {}
+				: { colorSlot: account.colorSlot }),
+			driver: account.driver,
+			port:
+				account.driver === "opencode"
+					? (runtime?.port ?? account.port ?? 0)
+					: 0,
+			managed:
+				account.driver === "opencode" &&
+				(runtime?.managed ?? account.managed ?? false),
+			...(account.configuredFolder === undefined
+				? {}
+				: { configDir: account.configuredFolder }),
+			...(runtime?.url !== undefined
+				? { url: runtime.url }
+				: account.driver === "opencode" && account.url !== undefined
+					? { url: account.url }
+					: {}),
+			...(account.env === undefined
+				? {}
+				: {
+						env:
+							account.driver === "opencode" &&
+							(runtime?.managed ?? account.managed)
+								? publicManagedOpenCodeEnv(account.env)
+								: { ...account.env },
+					}),
+			isDefault: account.isDefault,
+			usageEligible:
+				PROVIDER_DRIVERS[account.driver].usageHarness !== undefined &&
+				account.usageEligible,
+			...(account.driver === "cursor"
+				? { cursorUsageSource: cursorUsageSource(account, binding) }
+				: {}),
+		});
+	});
 }).pipe(Effect.withSpan("instance.getAll"));
 
 /** Mutation replies validate only the affected account, leaving other probes to inventory reads. */
@@ -1049,7 +1069,10 @@ const startManagedOpenCodeServer = (
 			);
 			let owned: ManagedOpenCodeRecord | undefined;
 			let previous: ManagedOpenCodeRecord | undefined;
+			let retryOnFreshPort = false;
 			return yield* Effect.gen(function* () {
+				owned = undefined;
+				previous = undefined;
 				const record: ManagedOpenCodeRecord = Option.getOrElse(
 					HashMap.get(
 						(yield* Ref.get(ref)).managedProcesses ?? HashMap.empty(),
@@ -1105,7 +1128,9 @@ const startManagedOpenCodeServer = (
 				// use a fresh port when replacing an invalid recorded process.
 				const port = yield* Effect.tryPromise({
 					try: () =>
-						availableOpenCodePort(record.pid !== undefined ? 0 : instance.port),
+						availableOpenCodePort(
+							retryOnFreshPort || record.pid !== undefined ? 0 : instance.port,
+						),
 					catch: (cause) => cause,
 				});
 				const env = managedOpenCodeEnv(record.env ?? instance.env);
@@ -1151,7 +1176,12 @@ const startManagedOpenCodeServer = (
 					...state,
 					instances: HashMap.modify(state.instances, instance.id, (current) => {
 						const { pid: _pid, version: _version, ...rest } = current;
-						return { ...rest, port, env: publicManagedOpenCodeEnv(env) };
+						return {
+							...rest,
+							port,
+							env: publicManagedOpenCodeEnv(env),
+							...(retryOnFreshPort ? { status: "starting" as const } : {}),
+						};
 					}),
 					managedProcesses: HashMap.set(
 						state.managedProcesses ?? HashMap.empty(),
@@ -1159,6 +1189,7 @@ const startManagedOpenCodeServer = (
 						{ port, env },
 					),
 				}));
+				if (retryOnFreshPort) yield* publishInstanceStatusChanged(instance.id);
 				yield* save;
 				const spawned = yield* Effect.tryPromise({
 					try: () =>
@@ -1193,13 +1224,18 @@ const startManagedOpenCodeServer = (
 				// still rediscover the detached child.
 				yield* save;
 				yield* Effect.tryPromise({
-					try: () => commitManagedOpenCodeSpawn(spawned.process),
+					try: () => commitManagedOpenCodeSpawn(spawned.process, spawned.log),
 					catch: (cause) => cause,
 				});
 				const health = yield* Effect.tryPromise({
 					try: (signal) =>
 						waitForOpenCodeHealth(
-							{ port, env, processIdentity: spawned.processIdentity },
+							{
+								port,
+								env,
+								processIdentity: spawned.processIdentity,
+								log: spawned.log,
+							},
 							spawned.process,
 							signal,
 						),
@@ -1225,7 +1261,6 @@ const startManagedOpenCodeServer = (
 						if (owned) {
 							const record = owned;
 							released = yield* stopRecordedManagedOpenCode(record).pipe(
-								Effect.as(true),
 								Effect.catch((error) =>
 									Effect.logWarning(
 										"Retaining failed-start OpenCode ownership",
@@ -1236,14 +1271,14 @@ const startManagedOpenCodeServer = (
 						}
 						yield* markManagedInstanceUnhealthy(instance, cause);
 						if (owned && released) {
-							const env = owned.env;
+							const { port, env } = owned;
 							yield* Ref.update(ref, (state) => ({
 								...state,
 								managedProcesses: HashMap.set(
 									state.managedProcesses ?? HashMap.empty(),
 									instance.id,
 									{
-										port: instance.port,
+										port,
 										...(env !== undefined ? { env } : {}),
 									},
 								),
@@ -1257,6 +1292,16 @@ const startManagedOpenCodeServer = (
 								),
 							),
 						);
+						if (
+							released &&
+							!retryOnFreshPort &&
+							cause instanceof ManagedOpenCodeProcessError &&
+							cause.portConflict
+						) {
+							// Retry only after cleanup has released the failed generation.
+							retryOnFreshPort = true;
+							return yield* Effect.fail(cause);
+						}
 						return !released
 							? (owned ?? null)
 							: !owned && previous?.processIdentity
@@ -1264,6 +1309,12 @@ const startManagedOpenCodeServer = (
 								: null;
 					}),
 				),
+				Effect.retry({
+					times: 1,
+					while: (cause) =>
+						cause instanceof ManagedOpenCodeProcessError &&
+						cause.portConflict === true,
+				}),
 			);
 		}).pipe(
 			Effect.catch((cause) =>
@@ -1367,15 +1418,20 @@ export const ManagedOpenCodeLifecycleLive = (configDir: string) =>
 					Effect.provide(context),
 					Effect.asVoid,
 				);
-			// Re-adopt managed OpenCode that outlived the previous daemon. Nothing
-			// spawns here: instances start on first use.
+			// Re-adopt managed survivors; nothing spawns here. Named external
+			// servers are polled because a named default is used only while
+			// healthy. "opencode" needs no health to be chosen, so it stays quiet
+			// until first use.
 			const state = yield* Ref.get(yield* InstanceManagerStateTag);
 			yield* Effect.forEach(
 				HashMap.values(state.instances),
 				(instance) =>
-					instance.managed &&
 					getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer
-						? semaphore.withPermits(1)(start(instance, true))
+						? instance.managed
+							? semaphore.withPermits(1)(start(instance, true))
+							: instance.id === MANAGED_OPENCODE_ACCOUNT_ID
+								? Effect.void
+								: startHealthPoller(instance.id)
 						: Effect.void,
 				{ concurrency: 1, discard: true },
 			);

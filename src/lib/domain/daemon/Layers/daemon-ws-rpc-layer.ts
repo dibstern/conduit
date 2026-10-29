@@ -100,6 +100,7 @@ import {
 	persistConfig,
 	removeInstance,
 	requestManagedOpenCodeShutdown,
+	startHealthPoller,
 	updateInstance,
 } from "../Services/instance-manager-service.js";
 import {
@@ -287,6 +288,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				| CursorAccountResources
 				| InstanceManagerStateTag
 				| PollerFibersTag
+				| InstanceHealthCheckTag
 				| ConfigPersistenceTag
 				| DaemonEventBusTag
 				| SessionActivityTag
@@ -933,6 +935,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 					Effect.gen(function* () {
 						const instance = yield* addInstance(request);
 						yield* persistConfig;
+						if (!instance.managed) yield* startHealthPoller(instance.id);
 						return {
 							projectSlug: request.projectSlug,
 							instances: yield* instanceList(instance.id),

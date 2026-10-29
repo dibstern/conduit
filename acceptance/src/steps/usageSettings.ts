@@ -754,6 +754,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 			expect(ids).toEqual([
 				"settings-tab-general",
 				"settings-tab-terminal",
+				"settings-tab-providers",
 				"settings-tab-models",
 				"settings-tab-claude",
 				"settings-tab-surfacing",

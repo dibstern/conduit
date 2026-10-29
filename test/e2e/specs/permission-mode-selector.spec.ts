@@ -234,7 +234,14 @@ const pill = (page: Page) =>
 
 async function selectFullAccess(page: Page): Promise<void> {
 	await pill(page).click();
-	await page.locator("[data-testid='permission-mode-option-full']").click();
+	await page.getByTestId("picker-permission-full").click();
+	// Picking returns to the Session root; OpenCode's root has no Permissions row.
+	await expect(page.getByTestId("picker-subtitle")).toBeVisible();
+	await page.keyboard.press("Escape");
+	await expect(page.getByTestId("model-picker")).toBeHidden();
+	await expect(pill(page)).toHaveAccessibleName(
+		"Permissions: Full access. Open options",
+	);
 }
 
 const switchCalls = (rpc: RpcMockControl) =>
@@ -247,9 +254,7 @@ test.describe("Permission mode with a bound session", () => {
 			.locator(".connect-overlay")
 			.waitFor({ state: "hidden", timeout: 10_000 });
 		await pill(page).click();
-		await expect(
-			page.locator("[data-testid='permission-mode-option-auto']"),
-		).toBeVisible();
+		await expect(page.getByTestId("picker-permission-auto")).toBeVisible();
 	});
 
 	test("hides Auto for non-Claude providers", async ({ page }) => {
@@ -258,9 +263,7 @@ test.describe("Permission mode with a bound session", () => {
 			.locator(".connect-overlay")
 			.waitFor({ state: "hidden", timeout: 10_000 });
 		await pill(page).click();
-		await expect(
-			page.locator("[data-testid='permission-mode-option-auto']"),
-		).toHaveCount(0);
+		await expect(page.getByTestId("picker-permission-auto")).toHaveCount(0);
 	});
 
 	test("offers Plan for Claude", async ({ page }) => {
@@ -269,17 +272,17 @@ test.describe("Permission mode with a bound session", () => {
 			.locator(".connect-overlay")
 			.waitFor({ state: "hidden", timeout: 10_000 });
 		await pill(page).click();
-		await expect(
-			page.locator("[data-testid='permission-mode-option-plan']"),
-		).toBeVisible();
+		await expect(page.getByTestId("picker-permission-plan")).toBeVisible();
 	});
 
 	test("an approved plan drops the pill back off Plan", async ({ page }) => {
-		const { rpc } = await setup(page, claudeBoundInit);
+		const { rpc, serverModes } = await setup(page, claudeBoundInit);
 		await page
 			.locator(".connect-overlay")
 			.waitFor({ state: "hidden", timeout: 10_000 });
 
+		// The server's live mode moves with each report; a catalog refetch reads it.
+		serverModes.set("sess-pm-001", "plan");
 		reportMode(rpc, "plan", "claude");
 		await expect(pill(page)).toHaveAccessibleName(
 			"Permissions: Plan. Open options",
@@ -289,6 +292,7 @@ test.describe("Permission mode with a bound session", () => {
 		// learns from the SDK's own report rather than from its stored request.
 		// A pill still reading "Plan" after that is the difference between "read
 		// only" on screen and a session that is now editing files.
+		serverModes.set("sess-pm-001", "ask");
 		reportMode(rpc, "ask", "claude");
 		await expect(pill(page)).toHaveAccessibleName(
 			"Permissions: Ask before edits. Open options",
@@ -468,7 +472,8 @@ test.describe("Permission mode selected in a draft", () => {
 
 		await selectFullAccess(page);
 		await pill(page).click();
-		await page.locator("[data-testid='permission-mode-option-ask']").click();
+		await page.getByTestId("picker-permission-ask").click();
+		await page.keyboard.press("Escape");
 		await expect(pill(page)).toHaveAccessibleName(
 			"Permissions: Ask before edits. Open options",
 		);

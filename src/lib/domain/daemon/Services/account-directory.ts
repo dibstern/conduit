@@ -21,6 +21,7 @@ import {
 	type ClaudeConfigDir,
 	resolveClaudeAccountFolder,
 } from "../../../provider/claude/claude-sdk-env.js";
+import type { InstanceStatus } from "../../../shared-types.js";
 import { DaemonConfigRefTag } from "./daemon-config-ref.js";
 import type { DaemonInstanceConfig } from "./daemon-state.js";
 
@@ -56,6 +57,7 @@ const resolveAccountFolders = (state: AccountsState): AccountsState => ({
 
 export function makeAccountDirectory(
 	read: Effect.Effect<AccountsState>,
+	readOpenCodeStatuses: Effect.Effect<ReadonlyMap<string, InstanceStatus>>,
 	commit?: AccountDirectory["Service"]["apply"],
 ): AccountDirectory["Service"] {
 	// Cursor's Keychain binding is read from the caller's context, so a reader
@@ -88,11 +90,17 @@ export function makeAccountDirectory(
 		snapshot: eligible,
 		list: Effect.map(eligible, list),
 		defaultFor: (driver) =>
-			Effect.map(eligible, (state) => defaultFor(state, driver)),
+			Effect.gen(function* () {
+				const state = yield* eligible;
+				const statuses = yield* readOpenCodeStatuses;
+				return defaultFor(state, driver, statuses);
+			}),
 		resolve: (ref) =>
-			Effect.flatMap(eligible, (state) =>
-				Effect.fromResult(resolve(state, ref)),
-			),
+			Effect.gen(function* () {
+				const state = yield* eligible;
+				const statuses = yield* readOpenCodeStatuses;
+				return yield* Effect.fromResult(resolve(state, ref, statuses));
+			}),
 		apply:
 			commit ??
 			((change) =>
@@ -105,12 +113,16 @@ export function makeAccountDirectory(
 	};
 }
 
-const makeWritableAccountDirectory = (initial: AccountsState) =>
+const makeWritableAccountDirectory = (
+	initial: AccountsState,
+	readOpenCodeStatuses: Effect.Effect<ReadonlyMap<string, InstanceStatus>>,
+) =>
 	Effect.gen(function* () {
 		const state = yield* Ref.make(resolveAccountFolders(initial));
 		const changes = yield* Semaphore.make(1);
 		return makeAccountDirectory(
 			changes.withPermits(1)(Ref.get(state)),
+			readOpenCodeStatuses,
 			<E, R>(
 				change: AccountChange,
 				usageOrder: ReadonlyArray<string> = [],
@@ -141,12 +153,19 @@ const makeWritableAccountDirectory = (initial: AccountsState) =>
 		);
 	});
 
-/** Account metadata has its own atomic state, independent of process runtime. */
-export const AccountDirectoryStateLive = (initial: AccountsState) =>
-	Layer.effect(AccountDirectory, makeWritableAccountDirectory(initial));
+/** Runtime health is read on every resolution; saved defaults remain metadata. */
+export const AccountDirectoryStateLive = (
+	initial: AccountsState,
+	readOpenCodeStatuses: Effect.Effect<ReadonlyMap<string, InstanceStatus>>,
+) =>
+	Layer.effect(
+		AccountDirectory,
+		makeWritableAccountDirectory(initial, readOpenCodeStatuses),
+	);
 
 export const AccountDirectoryLive = (
 	launchLogin: ClaudeConfigDir,
+	readOpenCodeStatuses: Effect.Effect<ReadonlyMap<string, InstanceStatus>>,
 	initialInstances: ReadonlyArray<DaemonInstanceConfig> = [],
 	maxAccounts = 5,
 ) =>
@@ -159,11 +178,13 @@ export const AccountDirectoryLive = (
 			launchLogin,
 			maxAccounts,
 		),
+		readOpenCodeStatuses,
 	);
 
 export const AccountDirectoryFromConfigLive = (
 	configDir: string,
 	launchLogin: ClaudeConfigDir,
+	readOpenCodeStatuses: Effect.Effect<ReadonlyMap<string, InstanceStatus>>,
 ) =>
 	Layer.effect(
 		AccountDirectory,
@@ -171,6 +192,6 @@ export const AccountDirectoryFromConfigLive = (
 			Effect.suspend(() =>
 				Effect.fromResult(loadAccountsState(configDir, launchLogin)),
 			),
-			makeWritableAccountDirectory,
+			(initial) => makeWritableAccountDirectory(initial, readOpenCodeStatuses),
 		),
 	);

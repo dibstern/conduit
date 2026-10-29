@@ -322,7 +322,6 @@ test("a draft only blocks providers that explicitly reject extra folders", async
 	control.rpc.setStubs({
 		GetModels: () => ({
 			projectSlug: "myapp",
-			defaultOpenCodeInstanceId: "opencode",
 			providers: ["claude", "anthropic"].map((provider) => ({
 				id: provider,
 				name: provider,

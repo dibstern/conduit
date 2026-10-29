@@ -9,18 +9,15 @@
 <script lang="ts">
 	import TranscriptJump from "../ui/TranscriptJump.svelte";
 	import Icon from "../ui/Icon.svelte";
-	import { untrack } from "svelte";
+	import { tick, untrack } from "svelte";
 	import type { ChatMessage } from "../../types.js";
 	import {
 		consumeScrollRequest,
-		createEmptySessionMessages,
-		currentChat,
 		localSendsIn,
 		getSessionPhase,
 		isLlmActive,
 		isProcessing,
 		insertInputDraft,
-		sessionMessages,
 	} from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { findSession, rootBackgroundTasks, sessionState } from "../../stores/session.svelte.js";
@@ -73,27 +70,24 @@
 	import type { SessionResume } from "../../../contracts/limit-recovery.js";
 	import { formatSnoozeTime } from "../../utils/format.js";
 	import { retryFeedsNow } from "../../transport/supervise.js";
-	import { transcriptFeed } from "../../stores/transcript.svelte.js";
+	import { primaryTranscript, transcriptFeed, type TranscriptView } from "../../stores/transcript.svelte.js";
 
 	const END_OF_TRANSCRIPT = "end";
 	let messagesEl: HTMLDivElement | undefined = $state();
-	let { topClearance = 0, sessionId }: {
+	let { topClearance = 0, sessionId, view = primaryTranscript }: {
 		topClearance?: number;
 		sessionId?: string;
+		view?: TranscriptView;
 	} = $props();
 	const instanceId = $props.id();
 	const primary = $derived(sessionId === undefined);
 	const viewedSessionId = $derived(sessionId ?? sessionState.currentId);
 	const messagesId = $derived(primary ? "messages" : `messages-${instanceId}`);
-	const emptyChat = createEmptySessionMessages();
-	const chat = $derived(
-		primary ? currentChat() : sessionMessages.get(sessionId ?? "") ?? emptyChat,
-	);
+	const chat = $derived(view.chat);
 	const processing = $derived(
 		primary ? isProcessing() : isLlmActive(getSessionPhase(viewedSessionId ?? ""), chat.loadLifecycle),
 	);
 	let sentinelEl: HTMLElement | undefined = $state();
-	let priorCollapsed = $state(true);
 	// Rows, pills and strips share when this view last observed each live task.
 	const taskListedAt = new Map<string, number>();
 	let taskSessionId: string | null | undefined;
@@ -136,7 +130,38 @@
 		return () => clearTimeout(timer);
 	});
 
-	const scrollCtrl = createScrollController(() => chat.loadLifecycle);
+	const scrollCtrl = createScrollController(() => chat.loadLifecycle, () => ({
+		historical: view.window.kind === "historical",
+		busy: view.navigation !== null,
+		topClearance,
+		identity: view.generation,
+	}));
+	let paneWidth = $state(0);
+	let forkCollapsed = $state(true);
+	$effect(() => {
+		const id = viewedSessionId;
+		try { forkCollapsed = sessionStorage.getItem(`fork-collapsed-${id ?? ""}`) !== "false"; }
+		catch { forkCollapsed = true; }
+	});
+	function persistFork(collapsed: boolean) {
+		try { sessionStorage.setItem(`fork-collapsed-${viewedSessionId ?? ""}`, String(collapsed)); }
+		catch { /* Private browsing may disable storage. */ }
+	}
+	$effect(() => {
+		const request = view.navigation;
+		if (!messagesEl || request?.phase !== "placing") return;
+		const target = request.target;
+		if (target !== "latest" && view.prompts.some((prompt) => prompt.id === target.messageId && prompt.isInherited)) {
+			forkCollapsed = false;
+			persistFork(false);
+		}
+		let cancelled = false;
+		void tick().then(() => {
+			if (cancelled || view.navigation?.id !== request.id) return;
+			view.acknowledgePlacement(request.id, scrollCtrl.place(request.target));
+		});
+		return () => { cancelled = true; };
+	});
 
 	let handledFollowRequest = sessionViewState.followRequest;
 	$effect(() => {
@@ -144,7 +169,7 @@
 		const request = sessionViewState.followRequest;
 		if (request === handledFollowRequest) return;
 		handledFollowRequest = request;
-		untrack(() => scrollCtrl.requestFollow());
+		untrack(() => view.latest());
 	});
 
 	// Attach/detach the controller to the scroll container
@@ -159,7 +184,7 @@
 	// Reset scroll state on session switch
 	$effect(() => {
 		const id = viewedSessionId;
-		scrollCtrl.resetForSession();
+		untrack(() => scrollCtrl.resetForSession());
 		if (primary) untrack(() => noteSessionChanged(id));
 	});
 
@@ -275,48 +300,19 @@
 	let prevScrollHeight = 0;
 	let prevScrollTop = 0;
 
-	// Derived first-message UUID — changes only on prepend or session switch,
-	// NOT on appends or content updates. This prevents the $effect.pre from
-	// firing spuriously when message html/status fields change.
-	const firstMessageUuid = $derived(chat.messages[0]?.uuid ?? "");
-
-	// Track previous state for prepend detection
-	let prevFirstUuid = "";
-	let prevMessageCount = 0;
-	let prevSessionId = $state("");
-
-	// Capture scroll state BEFORE DOM update using $effect.pre
+	// Window replacement and prepend have different placement semantics.
+	// The transcript owner identifies the transition before DOM updates.
+	let previousTransition: number | undefined;
 	$effect.pre(() => {
-		const currentSessionId = viewedSessionId ?? "";
-		const currentFirstUuid = firstMessageUuid;
-		const currentCount = chat.messages.length;
-
-		// Session changed — reset tracking, skip prepend detection
-		if (currentSessionId !== prevSessionId) {
-			prevSessionId = currentSessionId;
-			prevFirstUuid = currentFirstUuid;
-			prevMessageCount = currentCount;
-			return;
-		}
-
-		// Prepend detected within same session: first UUID changed AND count increased
-		if (
-			prevFirstUuid &&
-			currentFirstUuid &&
-			currentFirstUuid !== prevFirstUuid &&
-			currentCount > prevMessageCount &&
-			messagesEl
-		) {
-			awaitingPrepend = true;
+		const transition = view.transition;
+		if (!transition || transition.id === previousTransition) return;
+		previousTransition = transition.id;
+		awaitingPrepend = transition.kind === "prepend" && !!messagesEl;
+		if (awaitingPrepend && messagesEl) {
 			prevScrollHeight = messagesEl.scrollHeight;
 			prevScrollTop = messagesEl.scrollTop;
 		}
-
-		prevFirstUuid = currentFirstUuid;
-		prevMessageCount = currentCount;
 	});
-
-	// Restore scroll position AFTER DOM update (delegate to controller)
 	$effect(() => {
 		if (awaitingPrepend && messagesEl) {
 			scrollCtrl.onPrepend(prevScrollHeight, prevScrollTop);
@@ -338,7 +334,7 @@
 		}
 	}
 
-	const showJump = $derived(scrollCtrl.isDetached);
+	const showJump = $derived(scrollCtrl.isDetached || view.window.kind === "historical");
 
 	// Keep finished turns' props stable when only a later part changes.
 	function turnProjection() {
@@ -364,15 +360,16 @@
 	const projectTurns = turnProjection();
 	const projectInheritedTurns = turnProjection();
 	const projectCurrentTurns = turnProjection();
-	const turns = $derived(projectTurns(chat.messages, processing));
+	const windowProcessing = $derived(processing && view.window.kind === "latest");
+	const turns = $derived(projectTurns(chat.messages, windowProcessing));
 	const emptyLiveTurn = $derived<Turn | undefined>(
-		processing && chat.loadLifecycle === "ready" && turns.length === 0
+		windowProcessing && chat.loadLifecycle === "ready" && turns.length === 0
 			? { id: `turn-${viewedSessionId ?? instanceId}`, segments: [{ activity: [], reply: [] }], notices: [], live: true }
 			: undefined,
 	);
 	$effect(() => {
 		const turn = turns.at(-1);
-		if (!processing || chat.loadLifecycle !== "ready" || !turn || turn.user) return;
+		if (!windowProcessing || chat.loadLifecycle !== "ready" || !turn || turn.user) return;
 		const sessionId = viewedSessionId;
 		if (!sessionId) return;
 		const key = JSON.stringify([sessionId, turn.id]);
@@ -452,7 +449,7 @@
 		projectInheritedTurns(forkSplit?.inherited ?? [], false),
 	);
 	const currentTurns = $derived(
-		projectCurrentTurns(forkSplit?.current ?? [], processing),
+		projectCurrentTurns(forkSplit?.current ?? [], windowProcessing),
 	);
 	// Each continuation leaves a divider before the first reply-side message
 	// created at or after it, or after the last message until one arrives. An
@@ -498,7 +495,7 @@
 	const coldOpen = $derived(feed === "catchingUp" && !hasRows);
 	// Sends show from the click until the server places them. A draft's first
 	// send starts the pane, so it is not empty and never skeletons over it.
-	const localSends = $derived(primary ? localSendsIn(sessionState.currentId) : []);
+	const localSends = $derived(primary && view.window.kind === "latest" ? localSendsIn(sessionState.currentId) : []);
 	const firstSend = $derived(localSends.some((send) => send.opensSession));
 	// A cold pane has not heard from the feed, so it cannot yet claim the start.
 	const startConfirmed = $derived(transcript != null && transcript.hwm !== null);
@@ -510,11 +507,7 @@
 			.filter((turn) => !turn.live).at(-1)?.id,
 	);
 	const latestTurnId = $derived((forkSplit ? currentTurns.at(-1) ?? inheritedTurns.at(-1) : turns.at(-1))?.id);
-	let railVisible = $state(false);
-	const railMessages = $derived([
-		...turns.flatMap((turn) => turn.user ? [turn.user] : []),
-		...localSends.map((send) => send.message),
-	]);
+	const railVisible = $derived(view.prompts.length > 1 && !coldOpen && !(primary && uiState.rewindActive));
 
 </script>
 
@@ -533,6 +526,7 @@
 	class:with-message-rail={railVisible}
 	style="-webkit-overflow-scrolling: touch;"
 	bind:this={messagesEl}
+	bind:clientWidth={paneWidth}
 >
 	<!-- History sentinel (triggers lazy-loading of older messages) -->
 	<div id={primary ? "history-sentinel" : `${messagesId}-history-sentinel`} class="h-1" bind:this={sentinelEl}></div>
@@ -542,15 +536,15 @@
 	     so the sentinel never leaves view and every page would load in turn. -->
 	<HistoryLoader
 		{sentinelEl}
-		{sessionId}
+		{view}
 		scrollRoot={primary ? undefined : messagesEl}
-		paused={!!forkSplit?.inherited.length && priorCollapsed}
+		paused={!!forkSplit?.inherited.length && forkCollapsed}
 	/>
 
 	<!-- Zero-height sticky rail so the pill floats over the transcript without
 	     pushing it down; the lift parks it in the top padding so at rest
 	     it clears the first row. The pill fades in late, so fast switches never show it. -->
-	{#if feed !== "live" && (hasRows || feed === "failing")}
+	{#if (feed === "catchingUp" || feed === "failing") && (hasRows || feed === "failing")}
 		<div class="sticky top-4 z-10 h-0 flex items-start justify-center">
 			<div
 				class="feed-pill -translate-y-3 flex items-center gap-2 bg-bg-alt border border-border rounded-full px-3 py-0.5 text-xs text-text-secondary font-sans shadow-sm"
@@ -567,6 +561,17 @@
 				{/if}
 			</div>
 		</div>
+	{/if}
+
+	{#if view.navigation?.phase === "loading" || view.pageError}
+		<div class="sticky top-4 z-10 h-0 flex justify-center pointer-events-none">
+			<span role={view.pageError ? "alert" : "status"} class="max-w-[90%] rounded-full bg-bg-alt border border-border px-3 py-1 text-xs text-text-secondary shadow-sm">
+				{view.pageError ? "Couldn’t load messages. Select a marker to try again." : "Loading message…"}
+			</span>
+		</div>
+	{/if}
+	{#if view.window.kind === "historical" && view.window.hasEarlier}
+		<div class="flex justify-center py-3"><TextButton touchTarget disabled={view.navigation !== null} onclick={() => { void view.loadOlder().catch(() => {}); }}>Load earlier messages</TextButton></div>
 	{/if}
 
 	<!-- Beginning of session marker (was in HistoryView) -->
@@ -603,7 +608,7 @@
 			{/if}
 			{#if segment.activity.length > 0 || (final && turn.live)}
 				{@const reply = segment.reply[0]}
-				<TurnActivity latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
+				<TurnActivity {view} scrollRoot={messagesEl} latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
 					onjump={scrollCtrl.requestJump}
 					onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
 					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
@@ -687,7 +692,7 @@
 		{@render goalNotice()}
 	{/if}
 	{#if forkSplit && forkSplit.inherited.length > 0}
-		<ForkContextBlock bind:collapsed={priorCollapsed}>
+		<ForkContextBlock bind:collapsed={forkCollapsed} onCollapsedChange={persistFork}>
 			{#each inheritedTurns as turn (turn.id)}
 				{@render turnItem(turn)}
 			{/each}
@@ -751,6 +756,10 @@
 		</div>
 	{/each}
 
+	{#if view.window.kind === "historical" && view.window.hasLater}
+		<div class="flex justify-center py-3"><TextButton touchTarget disabled={view.navigation !== null} onclick={() => { void view.loadNewer().catch(() => {}); }}>Load later messages</TextButton></div>
+	{/if}
+
 	<!-- Zero-height rail keeps the floating action out of transcript geometry. -->
 	<div class="sticky bottom-[10px] h-0 flex justify-center z-5" hidden={!showJump}>
 		<TranscriptJump
@@ -758,14 +767,14 @@
 			data-testid={processing ? "jump-to-live" : "jump-to-latest"}
 			live={processing}
 			class="-translate-y-full"
-			title={processing ? "Jump to live" : "Scroll to bottom"}
-			onclick={() => scrollCtrl.requestFollow()}
+			title={view.window.kind === "historical" ? "Jump to latest" : processing ? "Jump to live" : "Scroll to bottom"}
+			onclick={() => view.latest()}
 		/>
 	</div>
 </div>
 {#key viewedSessionId}
-	{#if messagesEl && feed === "live" && !coldOpen && !(primary && uiState.rewindActive)}
-		<MessageNavigationRail scroller={messagesEl} messages={railMessages} {topClearance} onjump={scrollCtrl.requestJump} bind:visible={railVisible} />
+	{#if railVisible}
+		<MessageNavigationRail prompts={view.prompts} activeId={scrollCtrl.activeMessageId} pending={view.navigation !== null} {paneWidth} {topClearance} onnavigate={view.navigate} />
 	{/if}
 {/key}
 </div>

@@ -64,7 +64,6 @@ async function openSession(
 				nextCursor: null,
 			}),
 			GetModels: (input) => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "projectSlug" in input ? input.projectSlug : slug,
 				providers: [],
 			}),

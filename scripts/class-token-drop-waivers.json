@@ -1,4 +1,50 @@
 {
+	"src/lib/frontend/components/overlays/ProvidersSettingsTab.svelte :: signedOut(account)": "Not a class: the amber sub-line condition widened from signed-out Codex to any unavailable account (unavailable(account)), so Cursor's reason shows too.",
+	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: font-semibold,gap-3,grid-cols-1,leading-[1.5],max-w-full,md:grid-cols-2,p-0,py-3,resize-y,sr-only,text-text-dimmer": {
+		"movedTo": "src/lib/frontend/components/overlays/AccountForm.svelte",
+		"requires": "<AccountForm {form} />",
+		"reason": "conduit-test-3fc0.1 extracts the unchanged account form markup; Instances still renders that form."
+	},
+	"src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte :: flex-col,font-medium,gap-2,gap-[8px],gap-x-[12px],gap-y-[4px],max-md:min-h-[44px],max-md:min-w-[44px],max-md:text-[13px],mt-[16px],mx-[4px]": {
+		"movedTo": "src/lib/frontend/components/overlays/ModelVisibilityList.svelte",
+		"requires": "<ModelVisibilityList accountId={discoveryState.catalogAccountId} />",
+		"reason": "conduit-test-3fc0.2 extracts the unchanged visibility markup into the account-driven model list."
+	},
+	"src/lib/frontend/components/session/GitIdentity.svelte :: bg-accent/14,bg-success/10,bg-warning/10,border,border-border,break-all,break-words,flex-1,flex-wrap,folder.dirty,font-normal,font-semibold,gap-[6px],gap-[8px],gap-x-[12px],gap-x-[5px],gap-y-[8px],grid,grid-cols-[1fr_1fr_1.7fr],items-baseline,max-md:text-[17px],mb-[6px],ml-2,mt-[14px],mt-[2px],mt-[4px],mt-[8px],pb-[4px],place-items-center,pt-[6px],px-[10px],py-[2px],py-[6px],py-[9px],rounded-[10px],rounded-[12px],size-[34px],text-[12px],text-[15px],text-[17px],text-accent,text-error,text-right,text-text": {
+		"movedTo": "src/lib/frontend/components/session/CheckoutDetails.svelte",
+		"requires": "openPicker(\"checkout\")",
+		"reason": "conduit-test-npk3y.4 moves checkout identity, git tiles, folder sections and location details from the chip menu into the Session panel."
+	},
+	"src/lib/frontend/components/session/GitIdentity.svelte :: justify-center": "conduit-test-npk3y.4 turns the copy-branch MenuItem into an iconOnly Button in CheckoutDetails, which centres its icon itself.",
+	"src/lib/frontend/components/session/GitIdentity.svelte :: grid-cols-[auto_minmax(0,1fr)]": {
+		"movedTo": "src/lib/frontend/components/session/CheckoutDetails.svelte",
+		"requires": "openPicker(\"checkout\")",
+		"reason": "conduit-test-npk3y.4 moves the multi-folder details grid into the Session panel."
+	},
+	"src/lib/frontend/components/session/GitIdentity.svelte :: min-h-[36px]": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "openPicker(\"checkout\")",
+		"reason": "conduit-test-npk3y.4 uses the shared picker-row recipe for CheckoutDetails rows, including 50px phone targets."
+	},
+	"src/lib/frontend/components/session/GitIdentity.svelte :: border-t,divide-border,divide-y,flex-col,max-md:min-h-[44px],max-md:mx-4,max-md:px-4,max-md:size-[40px],mx-[8px],pt-[7px],px-3,px-4,px-[12px],px-[8px],rounded-[8px],size-[30px],text-[10px]": "conduit-test-npk3y.4 deletes the standalone checkout menu, its copy hint and grouped action borders. CheckoutDetails uses Session panel spacing, 13.5px picker rows and 50px phone targets instead of menu insets and 10px detail text.",
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: font-sans,gap-1.5,text-text-muted": {
+		"movedTo": "src/lib/frontend/components/model/InstanceModelPicker.svelte",
+		"requires": "openPicker(\"permissions\")",
+		"reason": "conduit-test-npk3y.4 makes the existing Permissions drill-in the single owner of approval choices."
+	},
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: flex,items-center": {
+		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
+		"requires": "openPicker(\"permissions\")",
+		"reason": "conduit-test-npk3y.4 uses the shared picker-row recipe for Permissions options."
+	},
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: checked]:bg-accent/14,checked]:text-text,data-[state,font-semibold,gap-x-1.5,grid,justify-center,leading-[1.3],row-span-2,text-[10.5px],text-[12.5px],truncate,w-[292px]": "conduit-test-npk3y.4 deletes the ranked permission menu. The Session panel uses its existing aria-pressed picker rows, regular 13.5px labels and wrapping 12px descriptions.",
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: grid-cols-[28px_minmax(0,1fr)]": "conduit-test-npk3y.4 removes the permission menu's two-row grid in favor of the existing Session panel rows.",
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: break-all": {
+		"movedTo": "src/lib/frontend/components/session/CheckoutDetails.svelte",
+		"requires": "<CheckoutDetails onclose={closePicker}",
+		"reason": "conduit-test-npk3y.4 moves the worktree list into CheckoutDetails."
+	},
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: border-border,justify-center,mt-1,pt-1,px-3,py-1.5": "conduit-test-npk3y.3 removes the model footer and its spacing, border and alignment when Reload skills & commands moves into the header MenuItem.",
 	"src/lib/frontend/components/chat/MessageTime.svelte :: text-text-dimmer": {
 		"movedTo": "src/lib/frontend/components/ui/button-recipes.ts",
 		"requires": "tone=\"dimmer\"",
@@ -184,7 +230,7 @@
 	"src/lib/frontend/components/input/InputArea.stories.ts :: bgSurfaceReference": "Not a class. This is a label inside the story's debug console.log template, which the guard reads as a class list. It went out with the bg-bg-surface probe above.",
 	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: bottom-[calc(100%+4px)]": "Hand-rolled positioning, replaced by ui/Menu's `side=\"top\"` + `sideOffset={4}`, which is the same 4px gap computed by the positioning engine instead of by CSS.",
 	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: duration-100": "Dead as-found. No transition-property was declared on the element, so a duration alone animated nothing.",
-	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: flex,items-center,gap-2,px-3,py-1.5": {
+	"src/lib/frontend/components/input/PermissionModeSelector.svelte :: gap-2,px-3,py-1.5": {
 		"movedTo": "src/lib/frontend/components/ui/floating-styles.ts",
 		"reason": "The row's whole geometry, token for token, is FLOATING_ITEM_BASE_CLASSES plus MENU_ITEM_DENSITY_CLASSES.default. Conditional on the call site still being a MenuRadioItem rather than a hand-rolled button that happens to sit in a menu.",
 		"requires": "<MenuRadioItem"
@@ -1180,5 +1226,22 @@
 	"src/lib/frontend/components/overlays/Toast.svelte :: h-[18px],items-start,max-md:bg-bg-alt,max-md:border-border,max-md:border-t,max-md:divide-border-subtle,max-md:divide-y,max-md:inset-x-0,max-md:pointer-events-auto,max-md:rounded-t-[18px],max-md:shadow-modal,md:bg-bg-alt,md:border,md:border-border,md:gap-2,md:p-[12px],md:right-[14px],md:rounded-[12px],md:shadow-modal,md:w-[310px],mr-[4px],mt-[2px],mt-[4px],px-[16px],py-[12px],toast-card,w-[18px]": "Toast placement design B: the phone bottom sheet and the desktop bottom-right stack (composer-clearance offsets, borders, divide rows, shadow-modal, 310px width, 16/12 padding, toast-card hook) become one top-anchored inset card layer with rounded-[14px], shadow-toast and compact or stacked rows.",
 	"src/lib/frontend/components/permissions/AttentionBanner.svelte :: flex,flex-col,font-medium,gap-1.5,gap-2,items-start,justify-between,m-0.5,mb-2,p-0.5,p-3,permission-notification-enter,pointer-events-auto,px-1,py-0.5,rounded,shadow-lg,text-base,text-text,text-xs,transition-colors,truncate": "Toast placement design B deletes AttentionBanner; another session needing you is now an attention-variant arrival toast with Open.",
 	"src/lib/frontend/components/session/SessionSheetBody.svelte :: bg-bg-surface,bottom-0,pb-[4px],sticky,z-[var(--z-raised)]": "Toast placement design B: toasts float above the sheet, so the sticky bottom host that migrated them into the sheet is deleted.",
-	"src/lib/frontend/components/ui/SheetNotice.svelte :: bg-accent/14,bg-popover-bg,break-words,cursor-pointer,data-[highlighted]:ring-1,data-[highlighted]:ring-accent,flex,font-medium,font-normal,font-semibold,gap-[8px],icon.class,items-center,last:-mr-[10px],max-w-full,mb-[2px],min-h-[40px],min-w-0,ml-[6px],mt-[10px],mx-auto,outline-hidden,pl-[14px],pr-[16px],px-[10px],py-[5px],ring-1,ring-border,rounded-[14px],rounded-[20px],shadow-dropdown,text-[12.5px],text-[13.5px],text-accent,text-success,text-text,text-text-secondary,w-max": "Toast placement design B deletes SheetNotice; toasts raised over a sheet stay in the global top layer."
+	"src/lib/frontend/components/ui/SheetNotice.svelte :: bg-accent/14,bg-popover-bg,break-words,cursor-pointer,data-[highlighted]:ring-1,data-[highlighted]:ring-accent,flex,font-medium,font-normal,font-semibold,gap-[8px],icon.class,items-center,last:-mr-[10px],max-w-full,mb-[2px],min-h-[40px],min-w-0,ml-[6px],mt-[10px],mx-auto,outline-hidden,pl-[14px],pr-[16px],px-[10px],py-[5px],ring-1,ring-border,rounded-[14px],rounded-[20px],shadow-dropdown,text-[12.5px],text-[13.5px],text-accent,text-success,text-text,text-text-secondary,w-max": "Toast placement design B deletes SheetNotice; toasts raised over a sheet stay in the global top layer.",
+	"src/lib/frontend/components/chat/DiffView.svelte :: bg-code-bg,border,border-border-subtle,border-collapse,border-r,diff-container,diff-filename,diff-gutter,diff-gutter-new,diff-gutter-old,diff-ln,diff-split-view,diff-stats,diff-table,diff-viewer,font-mono,leading-[20px],min-w-0,min-w-[36px],overflow-x-auto,px-[8px],py-[8px],rounded-[12px],select-none,text-mono-code,text-mono-time,text-right,text-text-dimmer,w-[36px]": "conduit-test-f02e9.1 deletes the orphaned inline DiffView and its homegrown differ; their rendering styles have no remaining consumer.",
+	"src/lib/frontend/components/layout/ChatLayout.svelte :: after:-inset-x-px,after:absolute,after:content-[,after:inset-y-0,aria-[orientation,bg-accent,bg-bg-alt,border,border-border-subtle,focus-visible:ring-2,focus-visible:ring-text,focus-visible:z-10,font-mono,group-focus-visible:bg-accent,h-6,has-[#model-picker]:overflow-x-visible,left-1/2,px-2,py-0.5,rounded-md,rounded-none,text-text-muted,text-xs,touch-none,translate-x-1/2,truncate,vertical]:cursor-col-resize,w-1.5,w-6,w-px,z-10": {
+		"movedTo": "src/lib/frontend/components/layout/RightPane.svelte",
+		"requires": "<RightPane>",
+		"reason": "conduit-test-f02e9.1 Q6A moves pane geometry, preview header and resize controls into RightPane."
+	},
+	"src/lib/frontend/components/layout/ChatLayout.svelte :: hover:bg-accent/50,isPaneResizing,ml-1.5": "conduit-test-f02e9.1 replaces the Files title margin with shared tabs and the layout resize flag with RightPane's pointer drag state; the divider uses group hover.",
+	"src/lib/frontend/utils/diff.ts :: bg-code-bg,border,border-border-subtle,diff-add,diff-code,diff-code-new,diff-code-old,diff-equal,diff-line,diff-ln,diff-ln-new,diff-ln-old,diff-marker,diff-marker-new,diff-marker-old,diff-remove,diff-split-view,diff-table,diff-text,diff-viewer,flex,flex-1,font-mono,font-semibold,leading-normal,min-h-[20px],min-w-[20px],overflow-x-auto,pr-3,rounded-lg,select-none,text-center,text-error,text-success,text-text-secondary,text-xs,whitespace-pre": "conduit-test-f02e9.1 deletes the orphaned inline DiffView and its homegrown differ; their rendering styles have no remaining consumer.",
+	"src/lib/frontend/utils/diff.ts :: bg-[rgba(192,57,43,0.08)]": "conduit-test-f02e9.1 deletes the orphaned differ and its unused HTML renderer.",
+	"src/lib/frontend/utils/diff.ts :: bg-[rgba(26,127,35,0.08)]": "conduit-test-f02e9.1 deletes the orphaned differ and its unused HTML renderer.",
+	"src/lib/frontend/components/input/InputArea.svelte :: divide-border-subtle,divide-y": "conduit-test-npk3y.2 deletes the phone Composer sheet and its rows; the Session panel's picker rows replace them, so these classes have no remaining call site.",
+	"src/lib/frontend/components/model/InstanceModelPicker.svelte :: bg-status-ask,gap-x-[7px],justify-end,size-[6px]": "conduit-test-npk3y.2 deletes the phone model attention dot and the sheet's model rows; the phone checkout chip now carries the workspace warning.",
+	"src/lib/frontend/components/model/ModelVariant.svelte :: flex-1,inline-flex,text-right": "conduit-test-npk3y.2 deletes the phone Composer sheet and its rows; the Session panel's picker rows replace them, so these classes have no remaining call site.",
+	"src/lib/frontend/components/session/GitIdentity.svelte :: gap-x-[10px],gap-y-[6px],justify-end,min-h-[50px],ml-auto,py-[3px],py-[8px],rounded-[7px],row": "conduit-test-npk3y.2 deletes the phone Composer sheet and its rows; the Session panel's picker rows replace them, so these classes have no remaining call site.",
+	"src/lib/frontend/components/ui/ComposerModeControl.svelte :: flex-1,inline-flex,min-w-0,text-right,text-text-dimmer,text-text-secondary,truncate": "conduit-test-npk3y.2 deletes the phone Composer sheet and its rows; the Session panel's picker rows replace them, so these classes have no remaining call site.",
+	"src/lib/frontend/components/ui/button-recipes.ts :: min-h-[48px],px-[4px],py-[8px],text-[15px]": "conduit-test-npk3y.2 deletes the composer-row button recipe with the phone Composer sheet, its only user.",
+	"src/lib/frontend/components/input/InputArea.svelte :: max-h-[120px]": "conduit-test-tw49i.5 makes the field's cap max-h-[var(--composer-field-max,120px)]: still 120px everywhere, and the folded Duo's full composer sets the variable to 44px."
 }

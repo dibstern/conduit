@@ -3,6 +3,7 @@
 import { Schema } from "effect";
 import { assert, describe, expect, test } from "vitest";
 import { AttachmentRefSchema } from "../../../src/lib/contracts/attachment-ref.js";
+import { Utf8Bytes } from "../../../src/lib/contracts/tool-wire.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import type { HistoryMessage } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
@@ -22,6 +23,32 @@ function userMsg(id: string): HistoryMessage {
 function assistantMsg(id: string): HistoryMessage {
 	return makeMsg("assistant", id);
 }
+
+test("retains file-change preview sizes when loading tool history", () => {
+	const messages = historyToChatMessages([
+		{
+			id: "m",
+			role: "assistant",
+			parts: [
+				{
+					id: "p",
+					type: "tool",
+					callID: "c",
+					tool: "Patch",
+					state: {
+						status: "completed",
+						fileChanges: [{ path: "a.ts", kind: "update", patch: "preview" }],
+						fileChangesBytes: Utf8Bytes.make(10_000),
+					},
+				},
+			],
+		},
+	]);
+	expect(messages.find(({ type }) => type === "tool")).toMatchObject({
+		fileChanges: [{ path: "a.ts", kind: "update", patch: "preview" }],
+		preview: { fileChangesBytes: 10_000 },
+	});
+});
 
 describe("historyToChatMessages attachments", () => {
 	const notes = Schema.decodeUnknownSync(AttachmentRefSchema)({

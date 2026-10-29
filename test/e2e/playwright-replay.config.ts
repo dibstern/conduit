@@ -63,7 +63,16 @@ export default defineConfig({
 		: [["list"], ["./helpers/require-tests-reporter.ts"]],
 
 	timeout: 30_000,
-	expect: { timeout: 10_000 },
+	// Text snapshots are platform-neutral; pixel baselines stay per platform.
+	snapshotPathTemplate:
+		"{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}{-projectName}{ext}",
+	expect: {
+		timeout: 10_000,
+		toHaveScreenshot: {
+			pathTemplate:
+				"{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}{-projectName}{-snapshotSuffix}{ext}",
+		},
+	},
 
 	use: {
 		// No baseURL — each test gets a dynamic relay URL via the replay fixture.

@@ -49,7 +49,7 @@ import {
 	type ProviderRuntimeIngestionError,
 	ProviderRuntimeIngestionTag,
 } from "./provider-runtime-ingestion-service.js";
-import { ConfigTag, SessionRetriesTag } from "./services.js";
+import { SessionRetriesTag } from "./services.js";
 import type { TurnFailureOwner } from "./turn-failure.js";
 
 export interface OpenCodeRuntimeIngressLog {
@@ -68,7 +68,7 @@ export type OpenCodeRuntimeIngressResult =
 	  }
 	| {
 			ok: false;
-			reason: "no-session" | "not-translatable" | "error";
+			reason: "no-session" | "foreign-instance" | "not-translatable" | "error";
 			error?: string;
 	  };
 
@@ -132,8 +132,6 @@ export interface EffectOpenCodeRuntimeIngressOptions {
 	) => string | undefined;
 	readonly retryingOf?: (sessionId: string) => string | undefined;
 	readonly backfillRetryDelayMs?: number;
-	/** The default OpenCode binding aliases this relay's selected instance. */
-	readonly selectedInstanceId?: string;
 	readonly resolveSessionPick?: (
 		providerInstanceId: string,
 		parentId?: string,
@@ -185,7 +183,6 @@ export class EffectOpenCodeRuntimeIngress
 		| undefined;
 	private readonly log: OpenCodeRuntimeIngressLog;
 	private readonly backfillRetryDelayMs: number;
-	private readonly selectedInstanceId: string;
 	private readonly resolveSessionPick:
 		| EffectOpenCodeRuntimeIngressOptions["resolveSessionPick"]
 		| undefined;
@@ -248,8 +245,6 @@ export class EffectOpenCodeRuntimeIngress
 		this.log = opts.log;
 		this.backfillRetryDelayMs = opts.backfillRetryDelayMs ?? 1_000;
 		this.resolveSessionPick = opts.resolveSessionPick;
-		this.selectedInstanceId =
-			opts.selectedInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
 		this.sessionCreationGate =
 			opts.sessionCreationGate ?? Semaphore.makeUnsafe(1);
 		this.fetchSessionMessages = opts.fetchSessionMessages;
@@ -456,22 +451,20 @@ export class EffectOpenCodeRuntimeIngress
 		return gate;
 	}
 
-	private instanceIdentity(instanceId: string): string {
-		return instanceId === MANAGED_OPENCODE_ACCOUNT_ID
-			? this.selectedInstanceId
-			: instanceId;
-	}
-
 	private rememberSessionInstance(
 		sessionId: string,
 		providerInstanceId: string,
 		directory?: string,
 	): void {
-		const instanceId = this.instanceIdentity(providerInstanceId);
-		if (this.sessionDirectories.get(sessionId)?.instanceId !== instanceId)
+		if (
+			this.sessionDirectories.get(sessionId)?.instanceId !== providerInstanceId
+		)
 			this.sessionDirectories.delete(sessionId);
 		if (directory !== undefined)
-			this.sessionDirectories.set(sessionId, { instanceId, directory });
+			this.sessionDirectories.set(sessionId, {
+				instanceId: providerInstanceId,
+				directory,
+			});
 		this.sessionInstanceIds.set(sessionId, providerInstanceId);
 	}
 
@@ -618,7 +611,7 @@ export class EffectOpenCodeRuntimeIngress
 							sessionId,
 							providerInstanceId,
 							controller.signal,
-							observed?.instanceId === this.instanceIdentity(providerInstanceId)
+							observed?.instanceId === providerInstanceId
 								? observed.directory
 								: undefined,
 						);
@@ -931,10 +924,7 @@ export class EffectOpenCodeRuntimeIngress
 			Record<string, SessionStatus> | "stopped" | undefined,
 			unknown
 		>,
-		instanceIds: readonly string[] = [
-			MANAGED_OPENCODE_ACCOUNT_ID,
-			this.selectedInstanceId,
-		],
+		instanceIds: readonly string[] = [MANAGED_OPENCODE_ACCOUNT_ID],
 	): Effect.Effect<void> {
 		let pending:
 			| Map<string, { instanceId: string; runIds: string[] }>
@@ -1434,6 +1424,17 @@ export class EffectOpenCodeRuntimeIngress
 					reason: "no-session",
 				} satisfies OpenCodeRuntimeIngressResult;
 			}
+			const [session] = yield* this.withSql(
+				this.sql<{
+					provider: string;
+				}>`SELECT provider FROM sessions WHERE id = ${sessionId}`,
+			);
+			// A directory subscription can receive multiple servers. Stored bindings
+			// decide which server may update an existing session.
+			if (session && session.provider !== providerInstanceId) {
+				this.stats.eventsSkipped++;
+				return { ok: false, reason: "foreign-instance" } as const;
+			}
 			this.rememberSessionInstance(
 				sessionId,
 				providerInstanceId,
@@ -1774,15 +1775,9 @@ export class EffectOpenCodeRuntimeIngress
 		return this.withSql(
 			Effect.gen({ self: this }, function* () {
 				if (this.stopped || !isCurrent()) return;
-				const defaultId = MANAGED_OPENCODE_ACCOUNT_ID;
-				const instanceIds =
-					providerInstanceId === defaultId ||
-					providerInstanceId === this.selectedInstanceId
-						? [defaultId, this.selectedInstanceId]
-						: [providerInstanceId];
 				const candidates = yield* this.sql<{ id: string; provider: string }>`
 					SELECT id, provider FROM sessions WHERE project_id = ${this.projectId}
-					AND provider IN ${this.sql.in(instanceIds)}`;
+					AND provider = ${providerInstanceId}`;
 				for (const { id: sessionId, provider } of candidates) {
 					yield* this.sessionGate(sessionId).withPermits(1)(
 						Effect.gen({ self: this }, function* () {
@@ -2016,7 +2011,6 @@ export const makeEffectOpenCodeRuntimeIngress = (
 			OpenCodeSessionCreationGateTag,
 		);
 		const retries = yield* Effect.serviceOption(SessionRetriesTag);
-		const config = yield* Effect.serviceOption(ConfigTag);
 		const ingress = new EffectOpenCodeRuntimeIngress({
 			projectId,
 			sql,
@@ -2031,9 +2025,6 @@ export const makeEffectOpenCodeRuntimeIngress = (
 			...(inputIdForUserEcho ? { inputIdForUserEcho } : {}),
 			...(resolveSessionPick ? { resolveSessionPick } : {}),
 			...(retries._tag === "Some" ? { retryingOf: retries.value } : {}),
-			...(config._tag === "Some" && config.value.openCodeInstanceId
-				? { selectedInstanceId: config.value.openCodeInstanceId }
-				: {}),
 		});
 		yield* ingress.recoverEffect();
 		// Reconciliation proof is valid only for the process that fetched REST.

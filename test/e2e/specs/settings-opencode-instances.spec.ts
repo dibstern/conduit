@@ -92,7 +92,10 @@ test("OpenCode instances can be added, edited and removed with no project open",
 	).toHaveCount(2);
 	await guides.getByRole("button").first().click();
 
-	const artifacts = resolve("test-results/settings-opencode-instances");
+	const artifacts = resolve(
+		process.env["CONDUIT_E2E_ARTIFACTS"] ?? "test-results",
+		"settings-opencode-instances",
+	);
 	mkdirSync(artifacts, { recursive: true });
 	await instances.scrollIntoViewIfNeeded();
 	await page.screenshot({

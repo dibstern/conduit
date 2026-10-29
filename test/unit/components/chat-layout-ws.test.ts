@@ -207,15 +207,15 @@ vi.mock("../../../src/lib/frontend/stores/permissions.svelte.js", () => ({
 	clearAllPermissions: vi.fn(),
 }));
 
-// These layout tests set compact state directly. The breakpoint listener has
-// its own coverage in session-view-compact.test.ts.
+// These layout tests set compact state directly. The pose listener has its own
+// coverage in session-view-compact.test.ts and features/duo-pose.feature.
 vi.mock(
 	"../../../src/lib/frontend/stores/session-view.svelte.js",
 	async (importOriginal) => ({
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/stores/session-view.svelte.js")
 		>()),
-		watchCompactViewport: vi.fn(() => () => {}),
+		watchViewportPose: vi.fn(() => () => {}),
 	}),
 );
 
@@ -253,9 +253,7 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 		sidebarCollapsed: false,
 		sidebarWidth: 256,
 		rewindActive: false,
-		fileViewerOpen: false,
 	},
-	closeFileViewer: vi.fn(),
 	showToast: vi.fn(),
 	resetProjectUI: vi.fn(),
 	setSidebarWidth: vi.fn(),

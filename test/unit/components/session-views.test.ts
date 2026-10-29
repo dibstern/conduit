@@ -11,16 +11,16 @@ import {
 	openPanel,
 	terminalState,
 } from "../../../src/lib/frontend/stores/terminal.svelte.js";
-import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 
 const chat = sessionViews.find((view) => view.id === "chat");
+const diff = sessionViews.find((view) => view.id === "diff");
 const files = sessionViews.find((view) => view.id === "files");
 
 beforeEach(() => {
 	sessionViewState.compact = false;
-	sessionViewState.filesOpen = false;
+	sessionViewState.rightPaneView = "closed";
 	closePanel();
-	uiState.fileViewerOpen = false;
+	sessionViewState.filePreview = null;
 });
 
 describe("session view registry", () => {
@@ -78,9 +78,9 @@ describe("session view registry", () => {
 	});
 
 	it("lets Terminal win on phones without discarding the file preview", () => {
-		sessionViewState.filesOpen = true;
+		sessionViewState.rightPaneView = "files";
 		openPanel();
-		uiState.fileViewerOpen = true;
+		sessionViewState.filePreview = { path: "src/index.ts", root: null };
 		sessionViewState.compact = true;
 		expect(activeSessionView()).toBe("terminal");
 		expect(files?.isOn()).toBe(false);
@@ -88,6 +88,17 @@ describe("session view registry", () => {
 		files?.select();
 		expect(activeSessionView()).toBe("files");
 		expect(terminalState.panelOpen).toBe(false);
-		expect(uiState.fileViewerOpen).toBe(true);
+		expect(sessionViewState.filePreview?.path).toBe("src/index.ts");
 	});
+});
+
+it("switches Files and Diff through one pane value", () => {
+	files?.select();
+	diff?.select();
+	expect(sessionViewState.rightPaneView).toBe("diff");
+	expect(diff?.disabled).not.toBe(true);
+	expect(files?.isOn()).toBe(false);
+	expect(diff?.isOn()).toBe(true);
+	diff?.select();
+	expect(sessionViewState.rightPaneView).toBe("closed");
 });

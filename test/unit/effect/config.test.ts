@@ -128,7 +128,10 @@ describe("DaemonConfigSchema", () => {
 					managed: false,
 				},
 			]);
-			expect(result.success.accountDefaults).toEqual({ claude: "claude" });
+			expect(result.success.accountDefaults).toEqual({
+				claude: "claude",
+				opencode: "opencode",
+			});
 		}
 	});
 

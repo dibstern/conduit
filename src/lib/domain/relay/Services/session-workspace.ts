@@ -1,5 +1,5 @@
 import { lstat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { Context, Effect, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
@@ -15,11 +15,13 @@ import {
 	type WorktreeBranchRenameError,
 	WorktreeRecoveryError,
 } from "../../../contracts/worktree.js";
+import { RelayError } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { readPublishedWorkspaceMissing } from "../../../persistence/effect/session-git-publication.js";
 import { recordedBranchForFolder } from "../../../persistence/effect/session-worktree-ownership.js";
 import { labelProjectFolders } from "../../../project-folders.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import { readWorkspaceFolders } from "../../../session/workspace-directories.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import {
 	OpenCodeInstancesTag,
@@ -49,7 +51,7 @@ export interface SessionWorkspace {
 		sessionId: string,
 		branchName: string,
 	) => Effect.Effect<void, WorktreeBranchRenameError | SessionCommandError>;
-	/** Serialize one session's launch-folder reads and workspace initialization in the caller's project. Not reentrant. */
+	/** Serialize one session's turn preparation and workspace initialization in the caller's project. Not reentrant. */
 	readonly withLaunch: <A, E, R>(
 		sessionId: string,
 		effect: Effect.Effect<A, E, R>,
@@ -127,6 +129,41 @@ export class SessionWorkspaceTag extends Context.Service<
 	SessionWorkspace
 >()("SessionWorkspace") {}
 
+/** Read the latest recorded folders without acquiring a launch permit. */
+export const resolveSessionRequestFolders = (sessionId: string | undefined) =>
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const roots = [config.projectDir, ...(config.extraFolders ?? [])];
+		if (sessionId === undefined)
+			return yield* readWorkspaceFolders(roots, null);
+		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
+		if (!session)
+			return yield* Effect.fail(
+				new RelayError(`Session ${sessionId} not found`, {
+					code: "SESSION_NOT_FOUND",
+				}),
+			);
+		const state =
+			session.workspace == null
+				? null
+				: yield* Schema.decodeUnknownEffect(
+						Schema.fromJsonString(SessionWorkspaceSchema),
+					)(session.workspace);
+		const workspaceMissing = yield* inspectSessionWorktree(
+			{ id: sessionId, workspace: state },
+			config,
+		);
+		const missingPaths = new Set(
+			workspaceMissing?.folders?.map(({ path }) => path) ??
+				(workspaceMissing ? [workspaceMissing.path] : []),
+		);
+		const folders = yield* readWorkspaceFolders(roots, state, missingPaths);
+		return {
+			...folders,
+			workspaceMissing,
+		};
+	});
+
 /** Passive reads never start an instance or extend its idle grace. */
 export const makeSessionOpenCodeClient = Effect.gen(function* () {
 	const workspace = yield* SessionWorkspaceTag;
@@ -134,31 +171,20 @@ export const makeSessionOpenCodeClient = Effect.gen(function* () {
 	const instances = yield* OpenCodeInstancesTag;
 	return (sessionId: string, instanceId?: string, directory?: string) =>
 		Effect.gen(function* () {
-			const target = yield* workspace.withLaunch(
-				sessionId,
-				Effect.gen(function* () {
-					const row = yield* read.getSession(sessionId);
-					const owner = instanceId ?? row?.provider;
-					if (owner === undefined) return Option.none();
-					return Option.some({
-						instanceId: owner,
-						directory:
-							row === undefined
-								? (directory ?? null)
-								: yield* workspace.get(sessionId, directory),
-					});
-				}),
-			);
-			if (Option.isNone(target)) return Option.none();
+			const row = yield* read.getSession(sessionId);
+			const owner = instanceId ?? row?.provider;
+			if (owner === undefined) return Option.none();
 			const client = yield* instances.ifRunning(
-				target.value.instanceId,
-				target.value.directory,
+				owner,
+				row === undefined
+					? (directory ?? null)
+					: yield* workspace.get(sessionId, directory),
 			);
 			if (Option.isNone(client))
 				return yield* new OpenCodeUnavailable({
-					instanceId: target.value.instanceId,
+					instanceId: owner,
 					reason: "not-running",
-					message: `OpenCode instance "${target.value.instanceId}" is not running`,
+					message: `OpenCode instance "${owner}" is not running`,
 				});
 			return client;
 		});
@@ -240,10 +266,15 @@ export const inspectSessionWorktree = (
 		readonly slug: string;
 		readonly extraFolders?: readonly string[];
 	},
+	/** Directory publication can inspect just its own Project Folder. */
+	onlyFolder?: string,
 ): Effect.Effect<WorkspaceMissing | undefined> =>
 	Effect.gen(function* () {
 		if (session.workspace?.origin !== "conduit") return undefined;
-		const entries = Object.entries(session.workspace.worktrees);
+		const allEntries = Object.entries(session.workspace.worktrees);
+		const entries = allEntries.filter(
+			([folder]) => onlyFolder === undefined || folder === onlyFolder,
+		);
 		const service = yield* Effect.serviceOption(WorktreeServiceTag);
 		const ownership = yield* Effect.cached(
 			readRecordedWorktreeOwnership(session.id, project.slug).pipe(
@@ -260,6 +291,21 @@ export const inspectSessionWorktree = (
 						(await lstat(join(directory, ".git"))).isFile(),
 				).pipe(Effect.orElseSucceed(() => false));
 				if (present) return [];
+				const recorded = yield* ownership;
+				const checkoutRoot = recorded.find(
+					({ path }) =>
+						resolve(directory) === resolve(path) ||
+						resolve(directory).startsWith(`${resolve(path)}${sep}`),
+				)?.path;
+				if (checkoutRoot && checkoutRoot !== directory) {
+					const healthy = yield* Effect.tryPromise(
+						async () =>
+							(await lstat(directory)).isDirectory() &&
+							(await lstat(checkoutRoot)).isDirectory() &&
+							(await lstat(join(checkoutRoot, ".git"))).isFile(),
+					).pipe(Effect.orElseSucceed(() => false));
+					if (healthy) return [];
+				}
 				const state: WorkspaceMissing | undefined =
 					service._tag === "None"
 						? { path: directory, canRecreate: false, reason: "git-failed" }
@@ -271,8 +317,8 @@ export const inspectSessionWorktree = (
 										sessionId: session.id,
 									},
 									directory,
-									entries.map(([folder]) => folder),
-									recordedBranchForFolder(yield* ownership, folder, directory),
+									allEntries.map(([folder]) => folder),
+									recordedBranchForFolder(recorded, folder, directory),
 								)
 								.pipe(
 									Effect.catch((error) =>

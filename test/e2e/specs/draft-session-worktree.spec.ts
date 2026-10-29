@@ -106,7 +106,6 @@ async function openDraft(page: Page, baseUrl: string, supportsWorktree = true) {
 			PreWarmSession: () => undefined,
 			PreWarmDraft: () => undefined,
 			GetModels: (input) => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "projectSlug" in input ? input.projectSlug : "e2e-replay",
 				providers: modelProviders.filter(
 					({ id }) =>
@@ -287,12 +286,13 @@ for (const mode of [
 				sessionId: "draft-session",
 				text: "Start in docs",
 			});
-			// Phones keep the session checkout in the Composer sheet.
-			if (mode.hasTouch)
-				await press(page.getByTestId("composer-words-sheet-trigger"));
-			await expect(page.getByTestId("composer-checkout")).toContainText(
-				"feature/docs",
-			);
+			const checkout = page.getByTestId("composer-checkout");
+			if (mode.hasTouch) {
+				await expect(checkout).toContainText("docs-draft");
+				await expect(checkout).toHaveAccessibleName(
+					"Checkout: docs-draft / feature/docs",
+				);
+			} else await expect(checkout).toContainText("feature/docs");
 		});
 
 		test("Current checkout clears the choice and the default sends no worktree path", async ({

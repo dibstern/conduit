@@ -10,6 +10,7 @@ import { TextSurfacedPayloadSchema } from "../contracts/stored-event.js";
 import {
 	type MessageVersion,
 	type PartVersion,
+	ToolPresentationSchema,
 	Utf8Bytes,
 } from "../contracts/tool-wire.js";
 import type { SessionDetailItemSchema } from "../contracts/ws-rpc.js";
@@ -20,7 +21,7 @@ import type {
 	ToolStatus,
 } from "../shared-types.js";
 import type { MessagePartRow, MessageWithParts } from "./read-model-types.js";
-import { projectTool } from "./tool-wire-projection.js";
+import { projectTool, toolFileChanges } from "./tool-wire-projection.js";
 
 function snapshotRowToHistory(
 	row: MessageWithParts,
@@ -69,9 +70,20 @@ function snapshotRowToHistory(
 		const projected = projectedParts.get(part.id);
 		// The RPC wire rejects an own undefined property, so drop the provider's
 		// metadata and add back only the filtered metadata when there is one.
-		const { metadata: _providerMetadata, ...providerState } = {
+		const {
+			metadata: _providerMetadata,
+			fileChanges: _fileChanges,
+			fileChangesBytes: _fileChangesBytes,
+			...providerState
+		} = {
 			...state,
 			metadata,
+			fileChanges:
+				state && "fileChanges" in state ? state.fileChanges : undefined,
+			fileChangesBytes:
+				state && "fileChangesBytes" in state
+					? state.fileChangesBytes
+					: undefined,
 		};
 		return {
 			...part,
@@ -83,6 +95,9 @@ function snapshotRowToHistory(
 				: {
 						state: {
 							...providerState,
+							...toolPresentation(
+								state && "metadata" in state ? state.metadata : undefined,
+							),
 							...("status" in state && state.status === "error"
 								? { outcome: "failed" as const }
 								: "status" in state && state.status === "completed"
@@ -90,6 +105,11 @@ function snapshotRowToHistory(
 									: {}),
 							...(metadata === undefined ? {} : { metadata }),
 							...projectTool({
+								fileChanges: toolFileChanges(
+									"status" in state ? state.status : undefined,
+									"input" in state ? state.input : undefined,
+									"fileChanges" in state ? state.fileChanges : undefined,
+								),
 								name:
 									"tool" in part && typeof part.tool === "string"
 										? part.tool
@@ -180,7 +200,6 @@ const CURSOR_PRESENTATION_KEYS = new Set([
 	"truncated",
 	"movedToBackground",
 	"exitCode",
-	"fileChange",
 	"plan",
 	"computerUse",
 	"media",
@@ -209,7 +228,7 @@ function browserMetadata(
 				(typeof value === "string" ||
 					typeof value === "number" ||
 					typeof value === "boolean" ||
-					["fileChange", "plan", "computerUse", "media"].includes(key)),
+					["plan", "computerUse", "media"].includes(key)),
 		),
 	);
 	return Object.keys(kept).length > 0 ? kept : undefined;
@@ -225,6 +244,21 @@ function parseObjectJson(value: string): Record<string, unknown> | undefined {
 		return undefined;
 	}
 	return undefined;
+}
+
+function toolPresentation(metadata: unknown) {
+	if (
+		typeof metadata !== "object" ||
+		metadata === null ||
+		!("cursorToolType" in metadata)
+	)
+		return {};
+	const presentation = Schema.decodeUnknownOption(ToolPresentationSchema)(
+		metadata,
+	);
+	return Option.isSome(presentation)
+		? { presentation: presentation.value }
+		: {};
 }
 
 /** A stored tool result as shown: JSON strings decoded, anything else raw. */
@@ -360,19 +394,27 @@ function partRowToHistoryPart(
 		row.result != null ||
 		row.metadata != null
 	) {
+		const status =
+			row.status == null ? undefined : TOOL_STATUSES.get(row.status);
+		const storedMetadata =
+			row.metadata == null ? undefined : parseObjectJson(row.metadata);
 		const stateObj: NonNullable<HistoryMessagePart["state"]> = {
 			...projectTool({
 				name: row.tool_name,
 				input: row.input,
 				output: row.result == null ? undefined : toolOutputText(row.result),
 				outputBytes: row.result_bytes,
+				fileChanges: toolFileChanges(
+					status,
+					row.input == null ? undefined : parseObjectJson(row.input),
+					storedMetadata?.["fileChanges"],
+				),
 			}),
 		};
-		const status =
-			row.status == null ? undefined : TOOL_STATUSES.get(row.status);
 		if (status) stateObj["status"] = status;
 		if (status === "error") stateObj.outcome = "failed";
 		else if (status === "completed") stateObj.outcome = "succeeded";
+		Object.assign(stateObj, toolPresentation(storedMetadata));
 		const metadata = browserMetadata(
 			row.metadata == null ? undefined : parseObjectJson(row.metadata),
 			row.result == null &&

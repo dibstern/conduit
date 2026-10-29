@@ -417,6 +417,59 @@ describe("Claude subagent transcripts and session establishment", () => {
 		expect(growStage.events).toEqual([]);
 	});
 
+	it.each([
+		false,
+		true,
+	])("retains successful child edits across polls and excludes failures (%s)", (failed) => {
+		const cursor = newCursor();
+		const start = stageSessionMessagesToEvents({
+			childSessionId: "child",
+			messages: [
+				contentMessage("assistant", "m1", [
+					{
+						type: "tool_use",
+						id: "edit1",
+						name: "Edit",
+						input: {
+							file_path: "/src/main.ts",
+							old_string: "old",
+							new_string: "new",
+						},
+					},
+				]),
+			],
+			cursor,
+		});
+		commitClaudeSubagentTranscriptCursor(cursor, start.cursor);
+		const complete = stageSessionMessagesToEvents({
+			childSessionId: "child",
+			messages: [
+				contentMessage("user", "m2", [
+					{
+						type: "tool_result",
+						tool_use_id: "edit1",
+						content: "done",
+						is_error: failed,
+					},
+				]),
+			],
+			cursor,
+		});
+		const completed = complete.events.find(
+			(event) => event.type === "tool.completed",
+		);
+		expect(completed?.data).toMatchObject({
+			outcome: failed ? "failed" : "succeeded",
+		});
+		if (failed) expect(completed?.data).not.toHaveProperty("fileChanges");
+		else
+			expect(completed?.data).toMatchObject({
+				fileChanges: [
+					{ path: "/src/main.ts", kind: "update", before: "old", after: "new" },
+				],
+			});
+	});
+
 	it("dedupes repeated tool start and completion snapshots", () => {
 		const cursor = newCursor();
 		const messages = [

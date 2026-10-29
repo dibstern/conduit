@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { WorktreeBranchRenameError } from "../../../contracts/worktree.js";
 import type { SessionGit } from "../../../shared-types.js";
+import { composerPickerState } from "../../stores/composer-picker.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
 import { routerState } from "../../stores/router.svelte.js";
@@ -13,6 +14,7 @@ import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { rpc } from "../../transport/ws-rpc-client.js";
 import type { SessionInfo } from "../../types.js";
+import ComposerControlWithPicker from "../model/__fixtures__/ComposerControlWithPicker.svelte";
 import AgentWorktreeLifecycle from "./__fixtures__/AgentWorktreeLifecycle.svelte";
 import GitIdentity from "./GitIdentity.svelte";
 
@@ -25,6 +27,7 @@ type CheckoutSeed = Pick<
 	| "workspaceHint"
 	| "canRenameBranch"
 > & {
+	directory?: string;
 	worktrees?: Awaited<ReturnType<typeof rpc<"ListWorktrees">>>;
 	renameError?: WorktreeBranchRenameError;
 };
@@ -50,9 +53,10 @@ const agentWorktreeGit: SessionGit = {
 const meta = {
 	title: "Session/GitIdentity",
 	component: GitIdentity,
+	render: (args) => ({ Component: ComposerControlWithPicker, props: args }),
 	tags: ["autodocs"],
-	args: { directory: "/src/conduit", presentation: "control" },
-	beforeEach: ({ canvasElement, args, parameters, id }) => {
+	args: { presentation: "control" },
+	beforeEach: ({ canvasElement, parameters, id }) => {
 		const previous = {
 			sessions: [...sessionState.liveSessions.values()],
 			projects: projectState.projects,
@@ -62,8 +66,9 @@ const meta = {
 			compact: sessionViewState.compact,
 			composerWidth: sessionViewState.composerWidth,
 		};
+		composerPickerState.request = null;
 		const checkout = parameters["checkout"] as CheckoutSeed | undefined;
-		const directory = args["directory"] ?? "/src/conduit";
+		const directory = checkout?.directory ?? "/src/conduit";
 		const restoreSocket = connectedSocket();
 		moveWorkspace.mockClear();
 		dismissWorkspaceHint.mockClear();
@@ -120,6 +125,7 @@ const meta = {
 		// The root outlives the story; take back layout changes from fit checks.
 		const style = canvasElement.getAttribute("style");
 		return () => {
+			composerPickerState.request = null;
 			for (const restoreReply of restoreReplies) restoreReply();
 			restoreSocket();
 			applySessionChange({
@@ -143,6 +149,31 @@ export default meta;
 type Story = StoryObj<typeof meta> & {
 	parameters?: { checkout?: CheckoutSeed };
 };
+
+async function openCheckoutPanel(canvasElement: HTMLElement) {
+	canvasElement.style.minHeight = "calc(100vh - 32px)";
+	canvasElement.style.display = "flex";
+	canvasElement.style.alignItems = "flex-end";
+	const body = within(canvasElement.ownerDocument.body);
+	await userEvent.click(within(canvasElement).getByTestId("composer-checkout"));
+	const panel = await body.findByTestId("model-picker");
+	await expect(
+		within(panel).getByRole("heading", { name: "Session" }),
+	).toBeVisible();
+	await waitFor(() =>
+		expect(within(panel).getByTestId("picker-row-checkout")).toHaveFocus(),
+	);
+	return panel;
+}
+
+async function openCheckoutDetails(canvasElement: HTMLElement) {
+	const panel = await openCheckoutPanel(canvasElement);
+	await userEvent.click(within(panel).getByTestId("picker-row-checkout"));
+	await expect(
+		within(panel).getByRole("heading", { name: "Checkout" }),
+	).toBeVisible();
+	return panel;
+}
 
 export const NoGit: Story = {};
 
@@ -208,11 +239,9 @@ export const Dirty: Story = {
 };
 
 export const Narrow: Story = {
-	args: {
-		directory: "/src/conduit-project-with-a-very-long-name",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-project-with-a-very-long-name",
 			git: {
 				branch: "feature/git-ui",
 				worktree: "linked-worktree-with-a-long-name",
@@ -301,11 +330,9 @@ export const DetailsOpen: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByTestId("composer-checkout"),
-		);
+		await openCheckoutDetails(canvasElement);
 		await expect(
-			within(document.body).getByRole("menu", { name: "Checkout" }),
+			within(document.body).getByTestId("model-picker"),
 		).toHaveTextContent("/src/conduit");
 	},
 };
@@ -386,9 +413,7 @@ export const FolderDetailsOpen: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByTestId("composer-checkout"),
-		);
+		await openCheckoutDetails(canvasElement);
 		const rows = within(canvasElement.ownerDocument.body).getAllByTestId(
 			"session-folder-git",
 		);
@@ -404,11 +429,9 @@ export const FolderDetailsOpen: Story = {
 
 export const NonGitPrimary: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/notes",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/notes",
 			git: {
 				folders: [
 					{
@@ -429,7 +452,7 @@ export const NonGitPrimary: Story = {
 		await expect(
 			identity.querySelector('[data-icon="folder"]'),
 		).toBeInTheDocument();
-		await userEvent.click(identity);
+		await openCheckoutDetails(canvasElement);
 		const rows = within(canvasElement.ownerDocument.body).getAllByTestId(
 			"session-folder-git",
 		);
@@ -443,11 +466,9 @@ export const NonGitPrimary: Story = {
 
 export const SharedFolderDetailsOpen: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/conduit/worktrees/workspace/session/app",
-	},
 	parameters: {
 		checkout: {
+			directory: "/conduit/worktrees/workspace/session/app",
 			git: {
 				branch: "conduit/session-cross-repo",
 				worktree: "app",
@@ -479,9 +500,7 @@ export const SharedFolderDetailsOpen: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByTestId("composer-checkout"),
-		);
+		await openCheckoutDetails(canvasElement);
 		const rows = within(canvasElement.ownerDocument.body).getAllByTestId(
 			"session-folder-git",
 		);
@@ -509,11 +528,9 @@ export const SharedFolderDetailsOpen: Story = {
 
 export const WorktreeMenu: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/conduit-one",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-one",
 			git: { branch: "feature/one", worktree: "conduit-one", dirty: true },
 			worktrees: {
 				directory: "/src/conduit-one",
@@ -526,19 +543,12 @@ export const WorktreeMenu: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByTestId("composer-checkout"),
-		);
-		await userEvent.click(
-			within(document.body).getByRole("menuitem", {
-				name: "Move to another worktree…",
-			}),
-		);
+		await openCheckoutDetails(canvasElement);
 		await expect(
 			await within(document.body).findByTestId("current-worktree"),
 		).toBeVisible();
 		await expect(
-			await within(document.body).findByRole("menuitem", {
+			await within(document.body).findByRole("button", {
 				name: /feature\/two/,
 			}),
 		).toBeVisible();
@@ -547,23 +557,19 @@ export const WorktreeMenu: Story = {
 
 export const RenameBranch: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/conduit/worktrees/workspace/rename-session/app",
-	},
 	parameters: {
 		checkout: {
+			directory: "/conduit/worktrees/workspace/rename-session/app",
 			git: { branch: "conduit/session-rename", worktree: "app", dirty: false },
 			canRenameBranch: true,
 		},
 	},
 	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByTestId("composer-checkout"),
-		);
+		await openCheckoutDetails(canvasElement);
 		await expect(
-			within(canvasElement.ownerDocument.body).getByRole("menuitem", {
-				name: /^Rename branch$/,
-			}),
+			within(canvasElement.ownerDocument.body).getByTestId(
+				"session-branch-rename",
+			),
 		).toBeVisible();
 	},
 };
@@ -584,12 +590,9 @@ export const RenameBranchError: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const body = within(canvasElement.ownerDocument.body);
-		await userEvent.click(
-			within(canvasElement).getByTestId("composer-checkout"),
-		);
-		await userEvent.click(
-			body.getByRole("menuitem", { name: "Rename branch" }),
-		);
+		await openCheckoutDetails(canvasElement);
+		await userEvent.click(body.getByTestId("session-branch-rename"));
+		await expect(body.queryByTestId("model-picker")).not.toBeInTheDocument();
 		const dialog = body.getByRole("dialog", { name: "Rename branch" });
 		const input = within(dialog).getByRole("textbox", { name: "Branch name" });
 		await expect(input).toHaveValue("conduit/session-rename");
@@ -623,11 +626,9 @@ export const RenameBranchErrorPhone: Story = {
 
 export const WorkspaceMismatch: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/conduit-two",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-two",
 			git: { branch: "feature/two", worktree: "conduit-two" },
 			workspaceMismatch: {
 				actualPath: "/src/conduit/.claude/worktrees/contract",
@@ -635,14 +636,12 @@ export const WorkspaceMismatch: Story = {
 		},
 	},
 	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByTestId("composer-checkout"),
-		);
+		await openCheckoutPanel(canvasElement);
 		const body = within(canvasElement.ownerDocument.body);
-		await expect(body.getByTestId("workspace-mismatch")).toHaveTextContent(
+		await expect(body.getByTestId("picker-checkout-notice")).toHaveTextContent(
 			"/src/conduit/.claude/worktrees/contract",
 		);
-		await userEvent.click(body.getByRole("menuitem", { name: "Retry move" }));
+		await userEvent.click(body.getByTestId("picker-checkout-notice-move"));
 		await waitFor(() =>
 			expect(moveWorkspace).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -651,10 +650,7 @@ export const WorkspaceMismatch: Story = {
 				}),
 			),
 		);
-		await userEvent.click(
-			within(canvasElement).getByTestId("composer-checkout"),
-		);
-		await expect(body.getByTestId("workspace-mismatch")).toBeVisible();
+		await expect(body.getByTestId("picker-checkout-notice")).toBeVisible();
 	},
 };
 
@@ -700,11 +696,9 @@ export const MovedBackPhone: Story = {
 
 export const WorktreeMissing: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/conduit-worktree",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-worktree",
 			workspace: { cause: "launch", origin: "existing", worktrees: {} },
 			workspaceMissing: {
 				path: "/src/conduit-worktree",
@@ -728,20 +722,16 @@ export const WorktreeMissingOpen: Story = {
 	...WorktreeMissing,
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
-		await userEvent.click(
-			within(canvasElement).getByTestId("composer-checkout"),
-		);
+		await openCheckoutPanel(canvasElement);
 		const body = within(canvasElement.ownerDocument.body);
+		await expect(body.getByTestId("picker-checkout-notice")).toHaveTextContent(
+			"worktree missing",
+		);
 		await expect(
-			body.getByText(
-				"This worktree is missing. It will be recreated from its branch on your next message.",
-			),
+			body.getByTestId("picker-checkout-notice-recreate"),
 		).toBeVisible();
 		await expect(
-			body.getByRole("menuitem", { name: "Recreate worktree" }),
-		).toBeVisible();
-		await expect(
-			body.getByRole("menuitem", { name: "Continue in main folder" }),
+			body.getByTestId("picker-checkout-notice-continue"),
 		).toBeVisible();
 	},
 };
@@ -765,11 +755,9 @@ export const WorktreeMissingPhone: Story = {
 
 export const WorktreeMissingExtraFolder: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/conduit-worktree",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-worktree",
 			workspace: { cause: "launch", origin: "existing", worktrees: {} },
 			git: {
 				branch: "conduit/multi-folder-session",
@@ -806,10 +794,15 @@ export const WorktreeMissingExtraFolder: Story = {
 		await expect(
 			canvas.getByTestId("workspace-notice-indicator"),
 		).toHaveAttribute("aria-label", "worktree missing: library");
-		await userEvent.click(canvas.getByTestId("composer-checkout"));
+		await openCheckoutPanel(canvasElement);
+		const panel = within(canvasElement.ownerDocument.body);
+		await expect(
+			panel.getByTestId("picker-checkout-notice-recreate"),
+		).toBeVisible();
+		await userEvent.click(panel.getByTestId("picker-row-checkout"));
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(
-			body.getByText(/^These worktrees are missing\./),
+			body.getByText(/^These worktrees will be recreated/),
 		).toBeVisible();
 		await expect(
 			body.getByTestId("workspace-missing-folder"),
@@ -817,9 +810,6 @@ export const WorktreeMissingExtraFolder: Story = {
 		await expect(
 			body.getByTestId("workspace-missing-folder"),
 		).toHaveTextContent("/src/library-worktree");
-		await expect(
-			body.getByRole("menuitem", { name: "Recreate worktree" }),
-		).toBeVisible();
 		await expect(
 			body.getByRole("region", { name: "library" }),
 		).toHaveTextContent("Worktree missing");
@@ -831,11 +821,9 @@ export const WorktreeMissingExtraFolder: Story = {
 
 export const WorkspaceHint: Story = {
 	tags: ["viewport-capture"],
-	args: {
-		directory: "/src/conduit",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit",
 			git: { branch: "main" },
 			workspaceHint: "/src/conduit-hint",
 		},
@@ -850,15 +838,16 @@ export const WorkspaceHint: Story = {
 		);
 		await expect(hint).toHaveTextContent(/^$/);
 		await expect(
-			canvas.queryByTestId("workspace-hint-move"),
+			canvas.queryByTestId("picker-checkout-notice-move"),
 		).not.toBeInTheDocument();
 		await expect(
-			canvas.queryByTestId("workspace-hint-dismiss"),
+			canvas.queryByTestId("picker-checkout-notice-dismiss"),
 		).not.toBeInTheDocument();
-		const identity = canvas.getByTestId("composer-checkout");
-		await userEvent.click(identity);
-		await expect(body.getByTestId("workspace-hint-dismiss")).toBeVisible();
-		await userEvent.click(body.getByTestId("workspace-hint-move"));
+		await openCheckoutPanel(canvasElement);
+		await expect(
+			body.getByTestId("picker-checkout-notice-dismiss"),
+		).toBeVisible();
+		await userEvent.click(body.getByTestId("picker-checkout-notice-move"));
 		await waitFor(() =>
 			expect(moveWorkspace).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -867,8 +856,10 @@ export const WorkspaceHint: Story = {
 				}),
 			),
 		);
-		await userEvent.click(identity);
-		await userEvent.click(body.getByTestId("workspace-hint-dismiss"));
+		await waitFor(() =>
+			expect(body.getByTestId("picker-checkout-notice-dismiss")).toBeEnabled(),
+		);
+		await userEvent.click(body.getByTestId("picker-checkout-notice-dismiss"));
 		await waitFor(() =>
 			expect(dismissWorkspaceHint).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -898,16 +889,18 @@ export const Word: Story = {
 			git: { branch: "account-chip", worktree: "account-chip" },
 		},
 	},
-	play: async ({ canvasElement, args }) => {
+	play: async ({ canvasElement, parameters }) => {
+		const seed = parameters["checkout"] as CheckoutSeed | undefined;
+		const directory = seed?.directory ?? "/src/conduit";
 		const checkout = within(canvasElement).getByTestId("composer-checkout");
 		await expect(checkout).toHaveAttribute(
 			"title",
-			`${args["directory"]?.split("/").pop()} / account-chip`,
+			`${directory.split("/").pop()} / account-chip`,
 		);
-		await userEvent.click(checkout);
+		await openCheckoutDetails(canvasElement);
 		await expect(
-			within(document.body).getByTestId("composer-checkout-menu"),
-		).toHaveTextContent(args["directory"] ?? "");
+			within(document.body).getByTestId("model-picker"),
+		).toHaveTextContent(directory);
 	},
 };
 
@@ -916,10 +909,10 @@ export const WordNarrow: Story = {
 	tags: ["viewport-capture"],
 	args: {
 		presentation: "word",
-		directory: "/src/conduit-worktrees",
 	},
 	parameters: {
 		checkout: {
+			directory: "/src/conduit-worktrees",
 			git: {
 				branch: "feature/session-account-chip-redesign",
 				worktree: "account-chip",
@@ -934,14 +927,14 @@ export const WordNarrow: Story = {
 		const container = checkout.parentElement;
 		if (!container) throw new Error("Missing checkout wrapper");
 		container.style.width = "160px";
-		// The words line names the branch alone; the menu keeps the project.
+		// The words line names the branch alone; Checkout keeps the project.
 		expect(checkout.querySelector('[data-part="project"]')).toBeNull();
 		const branch = checkout.querySelector('[data-part="branch"]');
 		if (!branch) throw new Error("Missing checkout branch");
 		expect(branch.scrollWidth).toBeGreaterThan(branch.clientWidth);
-		await userEvent.click(checkout);
+		await openCheckoutDetails(canvasElement);
 		await expect(
-			within(document.body).getByTestId("composer-checkout-menu"),
+			within(document.body).getByTestId("model-picker"),
 		).toHaveTextContent("feature/session-account-chip-redesign");
 	},
 };
@@ -986,10 +979,10 @@ export const WordWorkspaceHint: Story = {
 			canvas.getByTestId("workspace-notice-indicator"),
 		).toHaveAttribute("aria-label", "working in conduit-hint?");
 		await expect(
-			canvas.queryByTestId("workspace-hint-move"),
+			canvas.queryByTestId("picker-checkout-notice-move"),
 		).not.toBeInTheDocument();
-		await userEvent.click(canvas.getByTestId("composer-checkout"));
-		await userEvent.click(body.getByTestId("workspace-hint-move"));
+		await openCheckoutPanel(canvasElement);
+		await userEvent.click(body.getByTestId("picker-checkout-notice-move"));
 		await waitFor(() =>
 			expect(moveWorkspace).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -1003,7 +996,6 @@ export const WordWorkspaceHint: Story = {
 
 async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 	const canvas = within(canvasElement);
-	const body = within(canvasElement.ownerDocument.body);
 	const identity = canvas.getByTestId("composer-checkout");
 	await expect(identity).toHaveAttribute("title", "conduit / main");
 	await userEvent.click(canvas.getByRole("button", { name: "EnterWorktree" }));
@@ -1019,17 +1011,19 @@ async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 	await expect(canvas.getByTestId("agent-worktree-status")).toHaveTextContent(
 		"Composer checkout · Running turn",
 	);
-	await userEvent.click(identity);
-	let menu = await body.findByRole("menu", { name: "Checkout" });
+	let panel = await openCheckoutDetails(canvasElement);
 	await expect(
-		within(menu).getByText("/src/conduit/.claude/worktrees/header-agent", {
+		within(panel).getByText("/src/conduit/.claude/worktrees/header-agent", {
 			exact: true,
 		}),
 	).toBeVisible();
-	await expect(within(menu).getByText(/· worktree/)).toBeVisible();
+	await expect(within(panel).getByText(/· worktree/)).toBeVisible();
 	if (!exit) return;
-	await userEvent.keyboard("{Escape}");
-	await waitFor(() => expect(menu).not.toBeVisible());
+	// The phone panel is a native <dialog>: a synthetic Escape never reaches it.
+	const sheet = canvasElement.ownerDocument.querySelector("dialog[open]");
+	if (sheet) sheet.dispatchEvent(new Event("cancel", { cancelable: true }));
+	else await userEvent.keyboard("{Escape}");
+	await waitFor(() => expect(panel).not.toBeVisible());
 	await userEvent.click(canvas.getByRole("button", { name: "ExitWorktree" }));
 	await waitFor(() =>
 		expect(identity).toHaveAttribute("title", "conduit / main"),
@@ -1043,12 +1037,11 @@ async function playAgentMove(canvasElement: HTMLElement, exit: boolean) {
 	await expect(canvas.getByTestId("agent-worktree-status")).toHaveTextContent(
 		"Composer checkout · Running turn",
 	);
-	await userEvent.click(identity);
-	menu = await body.findByRole("menu", { name: "Checkout" });
+	panel = await openCheckoutDetails(canvasElement);
 	await expect(
-		within(menu).getByText("/src/conduit", { exact: true }),
+		within(panel).getByText("/src/conduit", { exact: true }),
 	).toBeVisible();
-	await expect(within(menu).queryByText(/· worktree/)).not.toBeInTheDocument();
+	await expect(within(panel).queryByText(/· worktree/)).not.toBeInTheDocument();
 }
 
 export const AgentEntersWorktree: Story = {
@@ -1058,8 +1051,9 @@ export const AgentEntersWorktree: Story = {
 			git: { branch: "main", dirty: false, ahead: 0, behind: 0 },
 		},
 	},
-	render: (args) => {
-		const directory = args["directory"];
+	render: (args, { parameters }) => {
+		const checkout = parameters["checkout"] as CheckoutSeed | undefined;
+		const directory = checkout?.directory ?? "/src/conduit";
 		let originalGit: SessionGit | undefined;
 		const setWorktree = (entered: boolean) => {
 			const session = sessionState.sessions.get(sessionState.currentId ?? "");
@@ -1128,11 +1122,9 @@ export const Phone: Story = {
 };
 
 export const LongNames: Story = {
-	args: {
-		directory: "/src/spm-architecture-deepening",
-	},
 	parameters: {
 		checkout: {
+			directory: "/src/spm-architecture-deepening",
 			git: { branch: "docs/architecture-deepening-design", dirty: true },
 		},
 	},

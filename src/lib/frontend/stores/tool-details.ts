@@ -41,6 +41,7 @@ const weight = ({ output, ...rest }: ToolDetail): number =>
 /** What a prefetch will download: the full size of each field the preview cut. */
 const fullBytes = ({ preview }: ToolMessage): number =>
 	(preview?.resultBytes ?? 0) +
+	(preview?.fileChangesBytes ?? 0) +
 	(preview?.inputCuts ?? []).reduce((sum, cut) => sum + cut.fullBytes, 0);
 
 /**
@@ -49,7 +50,9 @@ const fullBytes = ({ preview }: ToolMessage): number =>
  */
 export const shownCut = (
 	tool: ToolMessage,
-): "command and output" | "output" | "command" | undefined => {
+): "command and output" | "output" | "command" | "file changes" | undefined => {
+	if (tool.presentation && tool.preview?.fileChangesBytes !== undefined)
+		return "file changes";
 	const output = tool.preview?.resultBytes !== undefined;
 	const command =
 		toolCommand(tool) !== undefined &&

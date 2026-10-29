@@ -20,6 +20,7 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const TIMEOUT = 90_000;
 const RESET = 1_800_000_000;
+const CONTINUATION_SWEEP_INTERVAL_MS = 100;
 
 describe("Codex usage through the built daemon", () => {
 	let harness: ProcessHarness | undefined;
@@ -58,8 +59,9 @@ describe("Codex usage through the built daemon", () => {
 		await fixture.restart({
 			startupTimeoutMs: TIMEOUT,
 			runnerStartupTimeoutMs: TIMEOUT,
-			continuationSweepIntervalMs: 100,
+			continuationSweepIntervalMs: CONTINUATION_SWEEP_INTERVAL_MS,
 			serviceEnvironment: {
+				CONDUIT_QUOTA_READ_MAX_AGE_MS: "0",
 				CONDUIT_CODEX_APP_SERVER_TRACE: tracePath,
 				CONDUIT_TEST_CODEX_USAGE_TRACE: usagePath,
 				CONDUIT_CODEX_APP_SERVER_CAPTURE: capturePath,
@@ -538,9 +540,8 @@ describe("Codex usage through the built daemon", () => {
 					warnAt: 80,
 				},
 			});
-			// As in the process continuation tests, use a short sweep and a controlled
-			// reset timestamp rather than fake timers in the parent process.
-			const reset = Math.floor(Date.now() / 1000) + 30;
+			// Keep reset in the future until the limited state and resume replay are ready.
+			const reset = Math.floor(Date.now() / 1000) + 3600;
 			const quotaTrace = fixtureRows("usage-read");
 			const quotaResult = quotaTrace.find(
 				(row) => row.message?.result?.["rateLimitsByLimitId"],
@@ -616,6 +617,31 @@ describe("Codex usage through the built daemon", () => {
 					JSON.stringify(resumed).replaceAll(savedThread, String(original)),
 				) as TraceRow[],
 			);
+			// Hold the limit through four sweep intervals and reject any early resume.
+			await new Promise<void>((done) =>
+				setTimeout(done, 4 * CONTINUATION_SWEEP_INTERVAL_MS),
+			);
+			expect(
+				snapshot(fixture, id).events.map(({ type }) => type),
+			).not.toContain("session.resumed");
+			// Release the main allowance through the real usage probe. Spark stays full.
+			const releasedAt = Date.now();
+			primary.resetsAt = Math.floor(releasedAt / 1000);
+			writeTrace(usagePath, quotaTrace);
+			expect(await quota(fixture, accountId)).toMatchObject({
+				windows: expect.arrayContaining([
+					expect.objectContaining({
+						limitId: "codex",
+						utilization: 100,
+						resetsAt: new Date(primary.resetsAt * 1000).toISOString(),
+					}),
+					expect.objectContaining({
+						limitId: "codex_spark",
+						utilization: 100,
+					}),
+				]),
+			});
+			evidence["resetReleasedAt"] = releasedAt;
 			await vi.waitFor(
 				() =>
 					expect(snapshot(fixture, id).events).toContainEqual(

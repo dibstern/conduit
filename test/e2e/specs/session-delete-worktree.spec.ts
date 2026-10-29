@@ -123,7 +123,6 @@ async function setup(
 				return { ok: true, worktreeWarnings: options.warnings ?? [] };
 			},
 			GetModels: (input) => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
 				providers: [],
 			}),

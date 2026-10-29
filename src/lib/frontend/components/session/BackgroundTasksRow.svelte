@@ -43,7 +43,7 @@
 	<Surface variant="task-strip" radius="none" data-testid="background-tasks-row" class="min-w-0">
 		<Button id="background-tasks-toggle" variant="ghost" size="phone-task" touchTarget="always" tone="secondary" align="start" class="flex-1 pointer-events-auto" data-testid="background-tasks-toggle" aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" onclick={togglePanel}>
 			<ConduitMark size={12} variant="running" tone="inherit" />
-			<span class="truncate">{tasks.length} background {tasks.length === 1 ? "task" : "tasks"}</span>
+			<span class="truncate">{tasks.length} <span class="task-strip-word">background</span> {tasks.length === 1 ? "task" : "tasks"}</span>
 		</Button>
 		{#if onstopall}<Button variant="ghost" size="phone-task" touchTarget="always" tone="error" class="shrink-0 px-[8px]" data-testid="background-tasks-row-stop-all" onclick={onstopall}>Stop all</Button>{/if}
 	</Surface>

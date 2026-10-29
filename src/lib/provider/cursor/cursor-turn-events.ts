@@ -633,6 +633,9 @@ export class CursorTurnEvents {
 									? ("failed" as const)
 									: ("succeeded" as const),
 							input,
+							...(completed.fileChanges
+								? { fileChanges: completed.fileChanges }
+								: {}),
 							metadata: {
 								...tool?.metadata,
 								...completed.metadata,
@@ -869,6 +872,9 @@ export class CursorTurnEvents {
 							tool.completed?.input ??
 							cursorToolInput(cursorToolCall(tool.call)).input,
 						output,
+						...(tool.completed?.fileChanges
+							? { fileChanges: tool.completed.fileChanges }
+							: {}),
 						...(tool.completed?.outcome === "failed" ? { error: output } : {}),
 						metadata: tool.metadata,
 					},

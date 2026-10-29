@@ -81,6 +81,26 @@ export type ToolRunningPayload = PayloadOf<"tool.running">;
 
 export type ToolCompletedPayload = PayloadOf<"tool.completed">;
 
+/** Provider-reported text, not a snapshot of the file on disk. */
+const toolFileChangeText = {
+	path: Schema.String,
+	patch: Schema.optionalKey(Schema.String),
+	before: Schema.optionalKey(Schema.String),
+	after: Schema.optionalKey(Schema.String),
+};
+export const ToolFileChangeSchema = Schema.Union([
+	Schema.Struct({
+		...toolFileChangeText,
+		kind: Schema.Literals(["add", "update", "delete"]),
+	}),
+	Schema.Struct({
+		...toolFileChangeText,
+		kind: Schema.Literal("move"),
+		oldPath: Schema.String,
+	}),
+]);
+export type ToolFileChange = typeof ToolFileChangeSchema.Type;
+
 export type FileAttachedPayload = PayloadOf<"file.attached">;
 
 // Provider-agnostic tool input shape. Each adapter's normalizeToolInput()
@@ -352,7 +372,7 @@ const CompletionPayloadSchema = Schema.Struct({
 	duration: Schema.optionalKey(Schema.Number),
 });
 
-const CanonicalToolInputSchema = Schema.Union([
+export const CanonicalToolInputSchema = Schema.Union([
 	Schema.Struct({
 		tool: Schema.Literal("Read"),
 		filePath: Schema.String,
@@ -640,6 +660,7 @@ export const CanonicalEvents = {
 				Schema.optionalKey,
 			),
 			duration: Schema.Number,
+			fileChanges: Schema.optionalKey(Schema.Array(ToolFileChangeSchema)),
 			metadata: Schema.optionalKey(
 				Schema.Record(Schema.String, Schema.Unknown),
 			),

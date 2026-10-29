@@ -7,7 +7,7 @@
 	import { untrack } from "svelte";
 	import { attachedProjectState } from "../../stores/router.svelte.js";
 	import { rootBackgroundTasks, sessionState } from "../../stores/session.svelte.js";
-	import { viewTaskTranscript } from "../../stores/transcript.svelte.js";
+	import { createTranscriptView } from "../../stores/transcript.svelte.js";
 	import { uiState } from "../../stores/ui.svelte.js";
 	import MessageList from "../chat/MessageList.svelte";
 	import Button from "../ui/Button.svelte";
@@ -16,6 +16,7 @@
 	import { type OpenedTask, taskDrawer, taskKind } from "./background-tasks.svelte.js";
 
 	let { task }: { task: OpenedTask } = $props();
+	const view = createTranscriptView();
 
 	let drawerEl: HTMLElement | undefined = $state();
 	// Whoever opened the drawer gets focus back when it closes.
@@ -29,8 +30,8 @@
 	$effect(() => {
 		const project = attachedProjectState.slug ?? "";
 		const sessionId = project ? task.sessionId : null;
-		untrack(() => viewTaskTranscript(project, sessionId));
-		return () => viewTaskTranscript(project, null);
+		untrack(() => view.view(project, sessionId));
+		return () => view.dispose();
 	});
 
 	$effect(() => {
@@ -70,6 +71,6 @@
 		<span class="shrink-0">· {listed ? `${taskKind(listed).label} · running` : "ended"}</span>
 	</div>
 	<div data-testid="task-drawer-transcript" class="flex flex-1 min-h-0 flex-col overflow-hidden">
-		<MessageList sessionId={task.sessionId} />
+		<MessageList sessionId={task.sessionId} {view} />
 	</div>
 </aside>

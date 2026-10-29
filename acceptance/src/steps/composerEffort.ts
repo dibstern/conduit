@@ -3,17 +3,13 @@ import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js"
 import type { StepHandler } from "../runtime.js";
 import {
 	effortOptions,
-	openComposerMoreSheet,
+	openModelPicker,
 	refetchModelCatalog,
 	rejectedEffortSwitches,
 	requireRpcControl,
 } from "./shared.js";
 
 async function effortControl(page: Page) {
-	if ((page.viewportSize()?.width ?? 0) < 768) {
-		await openComposerMoreSheet(page);
-		return page.getByTestId("composer-more-effort");
-	}
 	return page.getByTestId(/^(variant-badge|composer-word-effort)$/);
 }
 
@@ -115,13 +111,17 @@ export const composerEffortHandlers: StepHandler[] = [
 			const picker = world.page.getByTestId("model-picker");
 			const alreadyOpen = await picker.isVisible();
 			if (!alreadyOpen) {
-				const control = await effortControl(world.page);
-				await control.click({
-					modifiers:
-						(await control.getAttribute("data-testid")) === "variant-badge"
-							? ["Alt"]
-							: [],
-				});
+				if ((world.page.viewportSize()?.width ?? 0) < 768) {
+					await openModelPicker(world.page);
+				} else {
+					const control = await effortControl(world.page);
+					await control.click({
+						modifiers:
+							(await control.getAttribute("data-testid")) === "variant-badge"
+								? ["Alt"]
+								: [],
+					});
+				}
 			}
 			const option = picker.getByTestId(`picker-effort-option-${match[1]}`);
 			await expect(option).toBeEnabled();

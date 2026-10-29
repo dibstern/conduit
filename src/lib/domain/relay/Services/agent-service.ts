@@ -3,7 +3,6 @@ import type { Account, AccountRef } from "../../../contracts/account.js";
 import type { AccountUnroutable } from "../../../contracts/limit-recovery.js";
 import {
 	type AccountId,
-	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
 import type { Agent } from "../../../instance/sdk-types.js";
@@ -231,9 +230,7 @@ export const AgentServiceLive: Layer.Layer<
 					if (PROVIDER_DRIVERS[account.driver].catalogSource === "discovery")
 						return yield* listClaudeAgents(account);
 
-					const running = yield* instances.ifRunning(
-						MANAGED_OPENCODE_ACCOUNT_ID,
-					);
+					const running = yield* instances.ifRunning(account.id);
 					if (Option.isNone(running)) {
 						// A stopped instance has no catalog to validate the saved selection against.
 						return yield* provideOverrides(

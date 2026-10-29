@@ -1,8 +1,17 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { closeSettings } from "../../../test/e2e/helpers/settings.js";
 import type { StepHandler } from "../runtime.js";
 import { seedComposerPickerCatalog } from "./composerPicker.js";
 import { requireRpcControl } from "./shared.js";
+
+async function checkoutDetails(page: Page) {
+	const picker = page.getByTestId("model-picker");
+	const row = picker.getByTestId("picker-row-checkout");
+	if (await row.isVisible()) await row.click();
+	const details = picker.getByTestId("checkout-details");
+	await expect(details).toBeVisible();
+	return details;
+}
 
 export const composerWordsHandlers: StepHandler[] = [
 	{
@@ -65,14 +74,16 @@ export const composerWordsHandlers: StepHandler[] = [
 			const row = world.page.getByTestId("composer-words-row");
 			const trigger = row.getByTestId("composer-words-sheet-trigger");
 			await expect(trigger).toBeVisible();
-			await expect(row.locator("button")).toHaveCount(1);
+			await expect(
+				row.getByTestId("composer-words-left").locator("button"),
+			).toHaveCount(1);
 			for (const label of match.slice(1))
 				await expect(trigger).toContainText(label);
 			await expect(trigger.locator("button, a, input")).toHaveCount(0);
 			await expect(trigger.getByTestId("harness-logo")).toBeVisible();
 			await expect
 				.poll(() =>
-					row.evaluate((element) => {
+					row.getByTestId("composer-words-left").evaluate((element) => {
 						const trigger = element.querySelector(
 							'[data-testid="composer-words-sheet-trigger"]',
 						);
@@ -90,7 +101,7 @@ export const composerWordsHandlers: StepHandler[] = [
 					}),
 				)
 				.toBe(true);
-			await expect(row.getByTestId("composer-checkout")).toHaveCount(0);
+			await expect(row.getByTestId("composer-word-effort")).toHaveCount(0);
 		},
 	},
 	{
@@ -137,14 +148,27 @@ export const composerWordsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert phone Words context usage",
-		match: /^the phone Words row omits checkout and shows (\d+)% context$/,
+		name: "assert phone Words checkout chip and summary context usage",
+		match:
+			/^the phone Words row shows checkout and keeps (\d+)% context in its summary$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId("composer-words-row");
-			await expect(row.getByTestId("composer-checkout")).toHaveCount(0);
-			await expect(row.getByTestId("composer-word-context-usage")).toHaveText(
-				`${match[1]}%`,
+			const right = row.getByTestId("composer-words-right");
+			const checkout = right.getByTestId("composer-checkout");
+			await expect(checkout).toBeVisible();
+			await expect(checkout.locator('[data-icon="folder"] svg')).toBeVisible();
+			await expect(checkout.locator('[data-part="project"]')).toContainText(
+				"conduit",
 			);
+			await expect(right.locator("button")).toHaveCount(1);
+			await expect(
+				right.getByTestId("composer-word-context-usage"),
+			).toHaveCount(0);
+			await expect(
+				row
+					.getByTestId("composer-words-sheet-trigger")
+					.getByTestId("composer-word-context-usage"),
+			).toHaveText(`${match[1]}%`);
 		},
 	},
 
@@ -301,7 +325,7 @@ export const composerWordsHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const checkout = world.page.getByTestId("composer-checkout");
 			await expect(checkout).toBeVisible();
-			// The words row names only the branch; the project stays in its menu.
+			// The words row names only the branch; the project stays in Checkout.
 			const project = checkout.locator('[data-part="project"]');
 			if (match[1]) await expect(project).toHaveText(match[1]);
 			else await expect(project).toHaveCount(0);
@@ -354,22 +378,22 @@ export const composerWordsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "open composer checkout menu",
-		match: /^I open the composer checkout menu$/,
+		name: "open Session panel from composer checkout",
+		match:
+			/^I open (?:the composer checkout menu|the Session panel from the checkout chip)$/,
 		run: async ({ world }) => {
 			await world.page.getByTestId("composer-checkout").click();
-			await expect(
-				world.page.getByTestId("composer-checkout-menu"),
-			).toBeVisible();
+			await expect(world.page.getByTestId("model-picker")).toBeVisible();
+			await expect(world.page.getByTestId("picker-row-checkout")).toBeFocused();
 		},
 	},
 	{
-		name: "assert checkout menu retains full names",
+		name: "assert Checkout drill-in retains full names",
 		match: /^the composer checkout menu shows (.+) and (.+) in full$/,
 		run: async ({ world, match }) => {
-			const menu = world.page.getByTestId("composer-checkout-menu");
-			await expect(menu).toContainText(`/workspace/${match[1]}`);
-			await expect(menu).toContainText(match[2] ?? "");
+			const details = await checkoutDetails(world.page);
+			await expect(details).toContainText(`/workspace/${match[1]}`);
+			await expect(details).toContainText(match[2] ?? "");
 		},
 	},
 	{
@@ -396,34 +420,36 @@ export const composerWordsHandlers: StepHandler[] = [
 		match:
 			/^the composer checkout menu shows uncommitted changes and upstream 2 ahead and 1 behind$/,
 		run: async ({ world }) => {
-			const menu = world.page.getByTestId("composer-checkout-menu");
-			await expect(menu.getByTestId("checkout-ahead")).toHaveText("2ahead");
-			await expect(menu.getByTestId("checkout-behind")).toHaveText("1behind");
-			await expect(menu.getByTestId("checkout-changes")).toHaveText(
+			const details = await checkoutDetails(world.page);
+			await expect(details.getByTestId("checkout-ahead")).toHaveText("2ahead");
+			await expect(details.getByTestId("checkout-behind")).toHaveText(
+				"1behind",
+			);
+			await expect(details.getByTestId("checkout-changes")).toHaveText(
 				"3+12-4files changed",
 			);
 			await expect(
-				menu.getByRole("menuitem", { name: "Copy worktree path" }),
+				details.getByRole("button", { name: "Copy worktree path" }),
 			).toContainText("Worktree");
 			await expect(
-				menu.getByRole("menuitem", { name: "Copy commit hash" }),
+				details.getByRole("button", { name: "Copy commit hash" }),
 			).toContainText("6b11104");
 		},
 	},
 	{
-		name: "copy a checkout value without closing the menu",
+		name: "copy a checkout value without closing the Checkout drill-in",
 		match: /^I tap the checkout (Branch copy control|HEAD row)$/,
 		run: async ({ world, match }) => {
 			await world.page
 				.context()
 				.grantPermissions(["clipboard-read", "clipboard-write"]);
-			const menu = world.page.getByTestId("composer-checkout-menu");
+			const details = await checkoutDetails(world.page);
 			const control =
 				match[1] === "HEAD row"
-					? menu.getByRole("menuitem", { name: "Copy commit hash" })
-					: menu.getByRole("menuitem", { name: "Copy branch name" });
+					? details.getByRole("button", { name: "Copy commit hash" })
+					: details.getByRole("button", { name: "Copy branch name" });
 			await control.click();
-			await expect(menu).toBeVisible();
+			await expect(details).toBeVisible();
 		},
 	},
 	{
@@ -443,7 +469,7 @@ export const composerWordsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert workspace warning is an icon and actions stay in the menu",
+		name: "assert workspace warning is an icon and actions stay in the Session panel",
 		match:
 			/^the composer checkout has a workspace (hint|mismatch) icon without inline actions$/,
 		run: async ({ world }) => {
@@ -454,11 +480,15 @@ export const composerWordsHandlers: StepHandler[] = [
 			await expect(warning).toHaveText("");
 			await expect(warning).toHaveAttribute("aria-label", /.+/);
 			await expect(warning.locator("svg")).toBeVisible();
-			await expect(world.page.getByTestId("workspace-hint-move")).toHaveCount(
-				0,
-			);
 			await expect(
-				world.page.getByTestId("workspace-hint-dismiss"),
+				world.page
+					.getByTestId("composer-checkout")
+					.getByTestId("picker-checkout-notice-move"),
+			).toHaveCount(0);
+			await expect(
+				world.page
+					.getByTestId("composer-checkout")
+					.getByTestId("picker-checkout-notice-dismiss"),
 			).toHaveCount(0);
 		},
 	},
@@ -477,35 +507,59 @@ export const composerWordsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert composer checkout menu workspace hint and actions",
+		name: "assert Session panel root workspace hint and actions",
 		match: /^the composer checkout menu offers Move and Dismiss for (.+)$/,
 		run: async ({ world, match }) => {
-			const menu = world.page.getByTestId("composer-checkout-menu");
-			await expect(menu).toContainText(match[1] ?? "");
-			await expect(menu.getByTestId("workspace-hint-move")).toBeVisible();
-			await expect(menu.getByTestId("workspace-hint-dismiss")).toBeVisible();
-		},
-	},
-	{
-		name: "assert composer checkout menu workspace mismatch and retry",
-		match: /^the composer checkout menu reports (.+) and offers Retry move$/,
-		run: async ({ world, match }) => {
-			const menu = world.page.getByTestId("composer-checkout-menu");
-			await expect(menu.getByTestId("workspace-mismatch")).toContainText(
-				match[1] ?? "",
+			const hint = world.page.locator(
+				'[data-testid="picker-checkout-notice"][data-kind="hint"]',
 			);
+			await expect(hint).toContainText((match[1] ?? "").split("/").pop() ?? "");
 			await expect(
-				menu.getByRole("menuitem", { name: "Retry move", exact: true }),
+				hint.getByTestId("picker-checkout-notice-move"),
+			).toBeVisible();
+			await expect(
+				hint.getByTestId("picker-checkout-notice-dismiss"),
 			).toBeVisible();
 		},
 	},
 	{
-		name: "select composer checkout workspace action",
+		name: "assert Session panel root workspace mismatch and retry",
+		match: /^the composer checkout menu reports (.+) and offers Retry move$/,
+		run: async ({ world, match }) => {
+			const notice = world.page.locator(
+				'[data-testid="picker-checkout-notice"][data-kind="mismatch"]',
+			);
+			await expect(notice).toContainText(match[1] ?? "");
+			await expect(
+				notice.getByTestId("picker-checkout-notice-move"),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "assert Checkout keeps dismissed workspace mismatch detail without actions",
+		match:
+			/^the Checkout drill-in keeps the recorded workspace mismatch at (.+) without actions$/,
+		run: async ({ world, match }) => {
+			const details = await checkoutDetails(world.page);
+			await expect(details.getByTestId("workspace-mismatch")).toContainText(
+				match[1] ?? "",
+			);
+			await expect(details.getByTestId(/^picker-checkout-notice-/)).toHaveCount(
+				0,
+			);
+		},
+	},
+	{
+		name: "select Session panel root checkout workspace action",
 		match: /^I choose (Move|Dismiss|Retry move) in the composer checkout menu$/,
 		run: async ({ world, match }) => {
 			await world.page
-				.getByTestId("composer-checkout-menu")
-				.getByRole("menuitem", { name: match[1] ?? "", exact: true })
+				.locator(
+					`[data-testid="picker-checkout-notice"][data-kind="${match[1] === "Retry move" ? "mismatch" : "hint"}"]`,
+				)
+				.getByTestId(
+					`picker-checkout-notice-${match[1] === "Dismiss" ? "dismiss" : "move"}`,
+				)
 				.click();
 		},
 	},
@@ -551,6 +605,7 @@ export const composerWordsHandlers: StepHandler[] = [
 			} else if (match[1] === "Agent") {
 				await expect(picker.getByTestId("picker-agent-build")).toBeVisible();
 			} else if (match[1] === "Account") {
+				await expect(picker.getByTestId("picker-back")).toBeVisible();
 				await expect
 					.poll(() =>
 						picker
@@ -623,7 +678,7 @@ export const composerWordsHandlers: StepHandler[] = [
 				world.page
 					.locator("#input-area")
 					.getByTestId(
-						/^(composer-harness-trigger|model-picker-trigger|variant-badge|permission-mode-badge)$/,
+						/^(model-picker-trigger|variant-badge|permission-mode-badge)$/,
 					),
 			).toHaveCount(0);
 		},

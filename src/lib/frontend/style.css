@@ -1061,6 +1061,94 @@ body:has(dialog:modal) {
 	padding-top: env(safe-area-inset-top, 0px);
 }
 
+/* A layer hanging from the live header across its content column, inside the
+   side safe areas: top sheets, their scrims and the Duo's toasts. belowHeader
+   (actions/drag-to-dismiss.ts) measures the header and column. */
+.below-header {
+	top: var(--sheet-top, 0px);
+	right: max(var(--sheet-right, 0px), env(safe-area-inset-right, 0px));
+	left: max(var(--sheet-left, 0px), env(safe-area-inset-left, 0px));
+}
+/* Toasts float in the header's band, so they end where its content does. */
+#toasts.below-header {
+	right: max(
+		var(--sheet-right, 0px),
+		env(safe-area-inset-right, 0px),
+		var(--duo-header-end, 0px)
+	);
+}
+
+/* Unfolded portrait reports a 61px top inset, but iOS's status row only fills
+   the top right (x 465 and up, y 79 and down). Both headers start at the top
+   instead, with 44px targets centred on y 32 and packed to end at x 457. */
+/* On the root, so the toast layer outside #layout reads it too. */
+:root:has(#layout[data-pose="duo-unfolded-portrait"]) {
+	--duo-header-end: 212px;
+}
+#layout[data-pose="duo-unfolded-portrait"] #app,
+#layout.phone-list-screen[data-pose="duo-unfolded-portrait"] #sidebar {
+	padding-top: 0;
+}
+#layout[data-pose="duo-unfolded-portrait"] #app.phone-session #session-chrome {
+	top: 0;
+}
+#layout[data-pose="duo-unfolded-portrait"]
+	#session-bar[data-compact="true"][data-collapsed="false"] {
+	grid-template-rows: 44px auto auto auto;
+	padding: 10px var(--duo-header-end) 7.5px 10px;
+}
+#layout[data-pose="duo-unfolded-portrait"]
+	#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-title-row {
+	padding-top: 2px;
+}
+/* In both Duo portraits the taller row's segments own its full 44px height
+   (y 10 to 54), measured from each button's centre so 24px and 32px segments
+   reach equally far. */
+#layout:is(
+		[data-pose="duo-unfolded-portrait"],
+		[data-pose="duo-folded-portrait"]
+	)
+	#session-bar[data-compact="true"][data-collapsed="false"]
+	.session-bar-segments
+	button {
+	clip-path: inset(calc(50% - 22px) 0);
+}
+#layout:is(
+		[data-pose="duo-unfolded-portrait"],
+		[data-pose="duo-folded-portrait"]
+	)
+	#session-bar[data-compact="true"][data-collapsed="false"]
+	.session-bar-segments
+	button::before {
+	top: calc(50% - 22px);
+	height: 44px;
+}
+/* Overflow stays centred on its target, clear of the status row. */
+#layout[data-pose="duo-unfolded-portrait"]
+	#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-more::before {
+	left: 50%;
+}
+/* The collapsed island shares the row: 46px tall, centred on y 32. */
+#layout[data-pose="duo-unfolded-portrait"]
+	#app.phone-session
+	#session-bar[data-collapsed="true"] {
+	margin: 9px var(--duo-header-end) 0 12px;
+}
+#layout[data-pose="duo-unfolded-portrait"] #sidebar-header {
+	height: 54px;
+	padding-top: 10px;
+}
+#layout[data-pose="duo-unfolded-portrait"]
+	:is(#sidebar-header, #session-search) {
+	padding-right: var(--duo-header-end);
+}
+/* Full-width list banners start below the status row (y 79), not under it. */
+#layout[data-pose="duo-unfolded-portrait"] #sidebar .banners {
+	margin-top: 25px;
+}
+
 #layout.layout-compact.phone-list-screen #app,
 #layout.layout-compact:not(.phone-list-screen) #sidebar {
 	display: none;
@@ -1072,6 +1160,518 @@ body:has(dialog:modal) {
 
 #layout.layout-compact .sidebar-resize-handle {
 	display: none;
+}
+
+/* The folded iPhone Duo (conduit-test-tw49i.4). The right 84pt strip holds the
+   camera, island and status glyphs down to about y253, so the page stops at its
+   left edge and the strip becomes a rail. The rail's slots are the existing
+   controls, moved here by position alone, so each keeps its own state and
+   handlers. Slots are 44pt and 48pt apart: Settle and More sit below the status
+   column, the rest stack up from the composer, so they keep their distance from
+   the home indicator whichever height the Duo reports. */
+#duo-rail {
+	display: none;
+}
+#layout[data-pose="duo-folded-portrait"] #app {
+	margin-right: env(safe-area-inset-right);
+}
+/* Padding, not width: the sidebar clips, and it is the containing block for the
+   rail controls in its header (it is a size container). */
+#layout[data-pose="duo-folded-portrait"] #sidebar {
+	padding-right: env(safe-area-inset-right);
+}
+/* A size container would hold the rail controls inside it. */
+#layout[data-pose="duo-folded-portrait"] :is(#session-bar-meta, #input-row) {
+	container: none;
+}
+#layout[data-pose="duo-folded-portrait"] #duo-rail {
+	display: block;
+	position: fixed;
+	inset-block: 0;
+	right: 0;
+	width: env(safe-area-inset-right);
+	background: var(--color-bg);
+	box-shadow: inset 1px 0 0 var(--color-border-subtle);
+	pointer-events: none;
+}
+/* The composer's controls share a tray that ends level with the field. */
+#layout[data-pose="duo-folded-portrait"]:not(.phone-list-screen)
+	#duo-rail::before {
+	content: "";
+	position: absolute;
+	right: 20px;
+	bottom: 18px;
+	width: 56px;
+	height: 200px;
+	border-radius: 18px;
+	background: var(--color-bg-surface);
+	box-shadow: inset 0 0 0 1px var(--color-border-subtle);
+}
+#layout[data-pose="duo-folded-portrait"]:has(#stop):has(#send)
+	#duo-rail::before {
+	height: 248px;
+}
+
+#layout[data-pose="duo-folded-portrait"]
+	:is(#session-bar, #input-area, #sidebar-header)
+	:is(
+		#session-bar-settle,
+		#session-bar-more,
+		#send,
+		#stop,
+		[data-testid="permission-mode-badge"],
+		[data-testid="model-picker-trigger"],
+		[data-testid="variant-badge"],
+		[data-testid="composer-checkout"],
+		#attach-btn,
+		#new-session-btn,
+		[data-testid="list-bar-select"],
+		[data-testid="list-bar-theme"],
+		#list-bar-settings
+	) {
+	position: fixed;
+	right: 26px;
+	flex: none;
+	width: 44px;
+	height: 44px;
+	min-width: 0;
+	min-height: 0;
+	margin: 0;
+	padding: 3px;
+	border: 0;
+	border-radius: 50%;
+	background-clip: content-box;
+	justify-content: center;
+	gap: 0;
+	clip-path: none;
+}
+/* Its button recipe pins h-[28px]!, which min-height outgrows. */
+#layout[data-pose="duo-folded-portrait"]
+	#input-area
+	#input-row
+	[data-testid="composer-checkout"] {
+	min-height: 44px;
+}
+/* The slot is the whole target. */
+#layout[data-pose="duo-folded-portrait"]
+	:is(#session-bar, #input-area, #sidebar-header)
+	:is(
+		#session-bar-settle,
+		#session-bar-more,
+		#send,
+		#stop,
+		[data-testid="permission-mode-badge"],
+		[data-testid="model-picker-trigger"],
+		[data-testid="variant-badge"],
+		[data-testid="composer-checkout"],
+		#attach-btn
+	)::before {
+	display: none;
+}
+#layout[data-pose="duo-folded-portrait"] #session-bar-settle {
+	top: 260px;
+}
+#layout[data-pose="duo-folded-portrait"] #session-bar-more {
+	top: 308px;
+}
+#layout[data-pose="duo-folded-portrait"] :is(#attach-btn, #list-bar-settings) {
+	bottom: 22px;
+}
+#layout[data-pose="duo-folded-portrait"]
+	:is(
+		[data-testid="model-picker-trigger"],
+		[data-testid="variant-badge"],
+		[data-testid="composer-checkout"],
+		[data-testid="list-bar-theme"]
+	) {
+	bottom: 70px;
+}
+/* Effort and Directory live in the Model sheet here. They wait folded into
+   Model, hidden but laid out, so the keyboard handoff can bud them from it. */
+#layout[data-pose="duo-folded-portrait"]:not([data-keyboard="open"])
+	#input-area
+	:is([data-testid="variant-badge"], [data-testid="composer-checkout"]) {
+	visibility: hidden;
+}
+/* Fixed slots, not the footer's measured fit, decide what shows here. */
+#layout[data-pose="duo-folded-portrait"]
+	#input-area
+	[data-testid="variant-badge"] {
+	display: inline-flex;
+}
+/* Its button is fixed in a slot; a 0-wide pill tells it to draw its icon. */
+#layout[data-pose="duo-folded-portrait"] #input-area .git-pill.compact {
+	display: inline-grid;
+	flex: none;
+	width: 0;
+	min-width: 0;
+}
+#layout[data-pose="duo-folded-portrait"]
+	:is([data-testid="permission-mode-badge"], [data-testid="list-bar-select"]) {
+	bottom: 118px;
+}
+#layout[data-pose="duo-folded-portrait"] :is(#send, #stop, #new-session-btn) {
+	bottom: 166px;
+}
+#layout[data-pose="duo-folded-portrait"]:has(#stop) #send {
+	bottom: 214px;
+}
+#layout[data-pose="duo-folded-portrait"]
+	:is(
+		#attach-btn,
+		[data-testid="variant-badge"],
+		[data-testid="composer-checkout"]
+	) {
+	background-color: var(--color-chip);
+}
+/* Permissions and Model are bare icons on the rail, larger than on the chip
+   row. The logo's badge overlaps its corner instead of pushing it off-centre. */
+#layout[data-pose="duo-folded-portrait"]:not([data-keyboard="open"])
+	#input-area
+	[data-testid="permission-mode-badge"]
+	svg {
+	width: 24px;
+	height: 24px;
+}
+#layout[data-pose="duo-folded-portrait"]:not([data-keyboard="open"])
+	#input-area
+	[data-testid="model-picker-trigger"]
+	[data-testid="harness-logo"] {
+	margin-right: 0;
+	scale: calc(24 / 18);
+}
+#layout[data-pose="duo-folded-portrait"] #new-session-btn {
+	background-color: var(--color-inverse-bg);
+	color: var(--color-inverse-text);
+}
+/* Icons only: labels and the model's chevron. */
+#layout[data-pose="duo-folded-portrait"]
+	:is(
+		#session-bar-settle-label,
+		#input-area .model-label,
+		#input-area [data-testid="model-chip-chevron"],
+		#input-area [data-testid="picker-selected-context"],
+		#input-area [data-testid="add-claude-account-btn"]
+	) {
+	display: none;
+}
+
+/* One 54pt header row: its targets centre at y32, below the top band no touch
+   reaches, with the title and project beside the back control. */
+#layout[data-pose="duo-folded-portrait"] #session-bar {
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	grid-template-rows: 44px auto;
+	grid-template-areas:
+		"back title meta"
+		"chips chips chips";
+	column-gap: 8px;
+	padding: 10px 8px 0 26px;
+}
+#layout[data-pose="duo-folded-portrait"] #session-bar-back {
+	height: 44px;
+	min-height: 0;
+	padding-inline: 12px;
+	border-block: 5px solid transparent;
+	background-clip: padding-box;
+}
+/* Hidden visually only: it stays the button's name. */
+#layout[data-pose="duo-folded-portrait"]
+	#session-bar-back
+	> span:not([data-testid="session-bar-attention"]) {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+}
+#layout[data-pose="duo-folded-portrait"] #session-bar #session-bar-title-row {
+	padding: 0;
+}
+#layout[data-pose="duo-folded-portrait"] #session-bar #session-bar-title {
+	font-size: 15px;
+	line-height: 20px;
+	font-weight: 650;
+}
+#layout[data-pose="duo-folded-portrait"]
+	#session-bar
+	#session-bar-title-row
+	button {
+	clip-path: none;
+}
+
+/* The goal and background tasks as one row of chips, y58-102 (conduit-test-
+   tw49i.6, mockup card 15): 44px targets around 34px pills, ending at x394 so
+   none reaches into the status column. */
+#layout[data-pose="duo-folded-portrait"] #duo-chips {
+	grid-area: chips;
+	display: flex;
+	gap: 6px;
+	min-width: 0;
+	max-width: calc(394px - 26px);
+	height: 44px;
+	margin-top: 4px;
+}
+#layout[data-pose="duo-folded-portrait"]
+	#duo-chips
+	[data-testid="background-tasks-row"] {
+	flex: 1 1 0;
+	height: 44px;
+	margin: 0;
+	padding: 0;
+	gap: 6px;
+	background: none;
+}
+#layout[data-pose="duo-folded-portrait"]
+	#duo-chips
+	:is(
+		[data-testid="session-goal-subtitle"],
+		#background-tasks-toggle,
+		[data-testid="background-tasks-row-stop-all"]
+	) {
+	flex: none;
+	height: 44px;
+	padding-inline: 12px;
+	border-block: 5px solid transparent;
+	border-radius: 999px;
+	background-clip: padding-box;
+	clip-path: none;
+	gap: 6px;
+	font-size: 13px;
+	font-weight: 600;
+}
+#layout[data-pose="duo-folded-portrait"]
+	#duo-chips
+	:is(
+		[data-testid="session-goal-subtitle"],
+		#background-tasks-toggle,
+		[data-testid="background-tasks-row-stop-all"]
+	)::before {
+	display: none;
+}
+#layout[data-pose="duo-folded-portrait"]
+	#duo-chips
+	[data-testid="session-goal-subtitle"] {
+	background-color: color-mix(in srgb, currentColor 9%, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 38%, transparent);
+}
+#layout[data-pose="duo-folded-portrait"]
+	#duo-chips
+	[data-testid="session-goal-subtitle"][data-goal-phase="paused"] {
+	background-color: transparent;
+	box-shadow: none;
+	outline: 1px dashed color-mix(in srgb, currentColor 45%, transparent);
+	outline-offset: -1px;
+}
+#layout[data-pose="duo-folded-portrait"]
+	#duo-chips
+	[data-testid="session-goal-subtitle"]
+	:is(b, small) {
+	font-weight: inherit;
+}
+#layout[data-pose="duo-folded-portrait"]
+	#duo-chips
+	[data-testid="session-goal-subtitle"]
+	small {
+	font-size: 12px;
+	font-weight: 500;
+	color: var(--color-text-secondary);
+}
+#layout[data-pose="duo-folded-portrait"] #duo-chips #background-tasks-toggle {
+	flex: 1 1 auto;
+	background-color: var(--color-chip);
+	color: var(--color-text);
+}
+/* Beside the goal, the tasks chip is the count alone; its sheet has Stop all. */
+#layout[data-pose="duo-folded-portrait"]
+	#duo-chips:has([data-testid="session-goal-subtitle"])
+	:is(.task-strip-word, [data-testid="background-tasks-row-stop-all"]) {
+	display: none;
+}
+#layout[data-pose="duo-folded-portrait"]
+	#duo-chips:has([data-testid="session-goal-subtitle"])
+	:is([data-testid="background-tasks-row"], #background-tasks-toggle) {
+	flex: none;
+}
+/* Folded (mockup card 16), the chips are marks in the project line. */
+#layout[data-pose="duo-folded-portrait"] .duo-subline-mark {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 3px;
+	margin-left: 4px;
+	color: var(--color-status-goal);
+}
+#layout[data-pose="duo-folded-portrait"]
+	.duo-subline-mark[data-tone="goal-paused"] {
+	color: var(--color-status-amber);
+}
+#layout[data-pose="duo-folded-portrait"]
+	.duo-subline-mark[data-tone="goal-met"] {
+	color: var(--color-status-green);
+}
+
+/* The composer is the field alone; its controls are in the rail. The bottom
+   padding holds the context hairline, 8pt above the home indicator, and it is
+   the same with the keyboard up, so it has no keyboard delay to wait out. */
+#layout[data-pose="duo-folded-portrait"] #input-area[data-compact] {
+	padding: 8px 8px 18px 12px;
+	transition: none;
+}
+#layout[data-pose="duo-folded-portrait"] #input-row {
+	min-height: 52px;
+	justify-content: center;
+	padding-inline: 16px 14px;
+}
+#layout[data-pose="duo-folded-portrait"]
+	#input-bottom
+	> [data-slot]:not([data-slot="field"]) {
+	grid-area: 1 / 1;
+	min-width: 0;
+	min-height: 0;
+	margin: 0;
+}
+
+/* The keyboard is open (conduit-test-tw49i.5, mockup card 7). iOS floats its
+   form bar at y316 and nothing beside or below it takes a touch, so the page
+   ends there. The rail empties into one row of a full composer above the form
+   bar (K-full): field y206-250, controls y254-298, hairline y304-316. */
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"] #app {
+	max-height: 316px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	:is(#session-bar-settle, #session-bar-more),
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#duo-rail::before {
+	display: none;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#input-area[data-compact] {
+	padding: 6px 8px 14px 22px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"] #input-row {
+	--composer-field-max: 44px;
+	height: 100px;
+	justify-content: flex-start;
+	padding: 4px 14px 52px 16px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	.context-hairline {
+	top: calc(100% + 2px);
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#input-area
+	:is(
+		#attach-btn,
+		[data-testid="model-picker-trigger"],
+		[data-testid="variant-badge"],
+		[data-testid="permission-mode-badge"],
+		[data-testid="composer-checkout"],
+		#send,
+		#stop
+	) {
+	top: 254px;
+	right: auto;
+	bottom: auto;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#input-area
+	:is(
+		#attach-btn,
+		[data-testid="variant-badge"],
+		[data-testid="permission-mode-badge"],
+		[data-testid="composer-checkout"]
+	) {
+	background-color: transparent;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"] #attach-btn {
+	left: 26px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#input-area
+	#input-row
+	[data-testid="model-picker-trigger"] {
+	left: 74px;
+	width: 116px;
+	padding: 5px 4px;
+	gap: 6px;
+	border-radius: 22px;
+	background-color: var(--color-chip);
+}
+/* The chip names its model, until Stop and Send both need the room. */
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:not(
+		:has(#stop):has(#send)
+	)
+	#input-area
+	.model-label {
+	display: block;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:not(
+		:has(#stop):has(#send)
+	)
+	#input-area
+	[data-testid="model-chip-chevron"] {
+	display: inline-flex;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	[data-testid="variant-badge"] {
+	left: 194px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	[data-testid="permission-mode-badge"] {
+	left: 238px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	[data-testid="composer-checkout"] {
+	left: 282px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]
+	#input-area
+	:is(#send, #stop) {
+	left: 326px;
+	padding: 4px;
+}
+/* Stop beside Send: the model chip keeps its logo alone and the row closes up. */
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:has(#stop):has(
+		#send
+	)
+	[data-testid="model-picker-trigger"] {
+	width: 44px;
+	padding: 3px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:has(#stop):has(
+		#send
+	)
+	[data-testid="variant-badge"] {
+	left: 122px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:has(#stop):has(
+		#send
+	)
+	[data-testid="permission-mode-badge"] {
+	left: 166px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:has(#stop):has(
+		#send
+	)
+	[data-testid="composer-checkout"] {
+	left: 210px;
+}
+#layout[data-pose="duo-folded-portrait"][data-keyboard="open"]:has(#stop):has(
+		#send
+	)
+	#stop {
+	left: 282px;
+}
+
+#layout[data-pose="duo-folded-portrait"] #sidebar-header {
+	height: 54px;
+	padding: 10px 8px 0 26px;
+	box-shadow: 0 1px 0 var(--color-border-subtle);
+}
+/* A phone's header has no edge, so the filters sit straight under it. Below
+   this one's hairline they keep the 8pt they also leave beneath them. */
+#layout[data-pose="duo-folded-portrait"] #session-search {
+	padding-top: 8px;
 }
 
 @keyframes spin {
@@ -1439,12 +2039,6 @@ body:has(dialog:modal) {
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
-}
-
-.file-viewer-pane.phone-overlay {
-	position: fixed;
-	inset: 0;
-	z-index: var(--z-pane);
 }
 
 .file-viewer-body {

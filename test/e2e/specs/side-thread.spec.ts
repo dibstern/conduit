@@ -207,12 +207,8 @@ test.describe("OpenCode Side Threads", () => {
 			// An ordinary OpenCode session has no Plan approval mode.
 			const approvalPill = page.getByTestId("permission-mode-badge");
 			await approvalPill.click();
-			await expect(
-				page.getByTestId("permission-mode-option-ask"),
-			).toBeVisible();
-			await expect(page.getByTestId("permission-mode-option-plan")).toHaveCount(
-				0,
-			);
+			await expect(page.getByTestId("picker-permission-ask")).toBeVisible();
+			await expect(page.getByTestId("picker-permission-plan")).toHaveCount(0);
 			await page.keyboard.press("Escape");
 
 			await app.sendMessage(`$${command} ${question}`);
@@ -457,7 +453,7 @@ test.describe("OpenCode Side Threads", () => {
 			expect(sidePrompts[1]?.agent).toBe("build");
 			expect(sidePrompts[1]?.agent).not.toBe("plan");
 			await approvalPill.click();
-			const planOption = page.getByTestId("permission-mode-option-plan");
+			const planOption = page.getByTestId("picker-permission-plan");
 			await expect(planOption).toBeVisible();
 			await expect(planOption).not.toContainText("Claude");
 			await planOption.click();

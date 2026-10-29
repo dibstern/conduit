@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { openPickerRoot } from "../helpers/model-picker.js";
+import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -78,6 +78,7 @@ test("account colours agree across browsers and controls after removal and resta
 			);
 			await openPickerRoot(client, trigger);
 			await client.getByTestId("picker-harness-claude").click();
+			await openPickerAccounts(client);
 			const accountBadge = client
 				.getByTestId("picker-account-work")
 				.getByTestId("account-logo")
@@ -110,6 +111,7 @@ test("account colours agree across browsers and controls after removal and resta
 			);
 			await openPickerRoot(client, trigger);
 			await client.getByTestId("picker-harness-claude").click();
+			await openPickerAccounts(client);
 			await expect(client.getByTestId("picker-account-personal")).toHaveCount(
 				0,
 			);

@@ -5,6 +5,7 @@ import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	openModelPicker,
+	openPickerAccounts,
 	requireRelayControl,
 	requireRpcControl,
 	setSessionRowStatus,
@@ -29,7 +30,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 				resumes: [{ at: PINNED_CLOCK_MS, instanceId, reason: "user" }],
 			});
 			rpc.setDaemonList("SubscribeInstances", {
-				// The relay drives the first OpenCode instance in the list.
+				// Older relays aliased the managed server's status onto the first OpenCode instance.
 				instances: (match[3]
 					? [instanceId, "healthy-oc"]
 					: ["healthy-oc", instanceId]
@@ -119,7 +120,6 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			}
 			rpc.setStubs({
 				GetModels: () => ({
-					defaultOpenCodeInstanceId: "opencode",
 					projectSlug: "myapp",
 					instanceId: match[3] ?? (claude ? "claude" : "opencode"),
 					providers: dualDriverProviders.filter(
@@ -201,6 +201,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			});
 			await openModelPicker(world.page);
 			await world.page.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(world.page);
 			await world.page.getByTestId(`picker-account-${instanceId}`).click();
 			await world.page
 				.getByTestId("picker-row-model")

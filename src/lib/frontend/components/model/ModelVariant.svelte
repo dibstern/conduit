@@ -1,8 +1,6 @@
 <script lang="ts">
-	import type { Snippet } from "svelte";
 	import EffortMeter from "../ui/EffortMeter.svelte";
 	import Button from "../ui/Button.svelte";
-	import Icon from "../ui/Icon.svelte";
 	import Menu from "../ui/Menu.svelte";
 	import MenuGroup from "../ui/MenuGroup.svelte";
 	import MenuRadioGroup from "../ui/MenuRadioGroup.svelte";
@@ -17,10 +15,9 @@
 	import { resolveModelParameters } from "./model-parameters.js";
 	import { effortLevels as knownLevels } from "./effort-levels.js";
 
-	let { onOpen, variant = "icons", children, wordLabel }: {
+	let { onOpen, variant = "icons", wordLabel }: {
 		onOpen?: (() => void) | undefined;
-		variant?: "icons" | "words" | "control" | "row" | undefined;
-		children?: Snippet<[row: Snippet, control: Snippet]> | undefined;
+		variant?: "icons" | "words" | "control" | "hidden" | undefined;
 		wordLabel?: string | undefined;
 	} = $props();
 
@@ -78,23 +75,6 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#snippet effortRow()}
-		<Button
-			variant="composer-row" size="content"
-			ariaLabel={`Effort: ${displayedWord ?? levelName}. Open effort options`}
-			loading={effort.pending}
-			disabled={variants.length === 0}
-			aria-haspopup="dialog"
-			data-testid="composer-more-effort"
-			onclick={() => openPicker("effort")}
-		>
-			<Icon name="sliders-horizontal" size={16} class="shrink-0 text-text-dimmer" />
-			<span data-part="label" class="flex-1">Effort</span>
-			<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{displayedWord ?? (variants.length === 0 && !currentVariant ? "Unavailable" : parameters ? levelName : currentVariant || "Default")}</span>
-			<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
-		</Button>
-{/snippet}
-
 {#snippet effortControl()}
 	{#if showEffort && (!phone || levels > 0)}
 	<Button
@@ -126,9 +106,7 @@
 	{/if}
 {/snippet}
 
-{#if variant === "row"}
-	{#if children}{@render children(effortRow, effortControl)}{:else}{@render effortRow()}{/if}
-{:else if showEffort && variant === "words"}
+{#if showEffort && variant === "words"}
 		<Button
 			variant="composer-word"
 			size="content"
@@ -146,8 +124,8 @@
 			}}
 		><span>{displayedWord ?? (parameters ? currentEffort || levelName : currentVariant || "default")}</span></Button>
 {:else if variant === "control"}
-	{#if sessionViewState.composerWidth >= 480}{@render effortControl()}{/if}
-{:else if showEffort}
+	{#if phone || sessionViewState.composerWidth >= 480}{@render effortControl()}{/if}
+{:else if showEffort && variant !== "hidden"}
 	<Menu
 		bind:open
 		onopenchange={(nextOpen) => { if (nextOpen) onOpen?.(); }}

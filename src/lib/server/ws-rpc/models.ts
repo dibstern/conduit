@@ -1,5 +1,4 @@
 import { Effect, Sink, Stream } from "effect";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../account-directory.js";
 import { PROVIDER_DRIVERS } from "../../contracts/provider-instance.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
@@ -257,17 +256,12 @@ export const subscribeDraftModels = (request: {
 			yield* instances.borrow(account.id, config.projectDir);
 			// The passive event subscription replays an already-connected stream.
 			// Its scope retains the borrow until cancellation or browser disconnect.
-			const eventInstanceId =
-				account.id === config.openCodeInstanceId
-					? MANAGED_OPENCODE_ACCOUNT_ID
-					: account.id;
 			const inventories = instances
 				.events([config.projectDir], account.id)
 				.pipe(
 					Stream.filter(
 						(event) =>
-							event._tag === "connected" &&
-							event.instanceId === eventInstanceId,
+							event._tag === "connected" && event.instanceId === account.id,
 					),
 					Stream.mapEffect(() =>
 						getModelsResponse({

@@ -10,7 +10,10 @@ import { it } from "@effect/vitest";
 import { Context, Effect, Layer, Queue, Schedule, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { AccountDirectoryStateLive } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
@@ -230,6 +233,7 @@ const withHeldMessages = <A, E, R>(
 					[{ id: "claude", name: "Claude", driver: "claude", configDir: root }],
 					configuredClaudeConfigDir(join(root, "launch")),
 				),
+				Effect.succeed(NO_OPENCODE_HEALTH),
 			),
 		),
 		Effect.provide(makeOverridesStateLive()),

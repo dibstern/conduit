@@ -17,7 +17,10 @@ import { join } from "node:path";
 import { it } from "@effect/vitest";
 import { Effect, Result as Either, Semaphore, Stream } from "effect";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import {
 	AccountDirectory,
@@ -328,7 +331,9 @@ for (const scenario of [
 				cancel: () => Effect.die("This fixture only admits continuations"),
 				sendNow: () => Effect.die("This fixture only admits continuations"),
 			}),
-			Effect.provide(AccountDirectoryStateLive(accounts)),
+			Effect.provide(
+				AccountDirectoryStateLive(accounts, Effect.succeed(NO_OPENCODE_HEALTH)),
+			),
 			Effect.provide(makeOverridesStateLive()),
 			Effect.provide(
 				makePersistenceEffectLayer(database, "effective-continuation"),

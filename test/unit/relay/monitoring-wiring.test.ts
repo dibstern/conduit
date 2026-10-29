@@ -5,7 +5,10 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { Effect, Layer, ManagedRuntime, Option, PubSub, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import { EventId } from "../../../src/lib/contracts/stored-event.js";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -73,6 +76,7 @@ const accountDirectory = () =>
 				configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
 			),
 		),
+		Effect.succeed(NO_OPENCODE_HEALTH),
 	);
 
 function createHarness(

@@ -1,6 +1,9 @@
 import { dirname } from "node:path";
 import { Context, Effect, Layer, ManagedRuntime, Option } from "effect";
-import { accountsStateFromConfig } from "../../src/lib/account-directory.js";
+import {
+	accountsStateFromConfig,
+	NO_OPENCODE_HEALTH,
+} from "../../src/lib/account-directory.js";
 import {
 	defaultDaemonConfig,
 	loadDaemonConfigResult,
@@ -68,6 +71,7 @@ function makeTestAdapterRuntime(config: OwnerConfig) {
 						sdkDefaultClaudeConfigDir(`${configDir}/test-home/.claude`),
 					),
 				),
+				Effect.succeed(NO_OPENCODE_HEALTH),
 			);
 		}),
 	);

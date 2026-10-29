@@ -168,6 +168,8 @@ export interface SubscriptionSource<T, E = never> {
 	 * the removal.
 	 */
 	readonly resume: "catchUp" | "rebase";
+	/** Bounded views can reconcile membership by replacing their whole interval. */
+	readonly live?: "snapshot";
 }
 
 /**
@@ -466,6 +468,7 @@ export const stream = <T, E = never>(options: {
 							}
 						}
 						if (through === undefined) return [];
+						if (options.source.live === "snapshot") return yield* replace;
 
 						// A removal also closes the window, so catch up every row before
 						// moving the watermark past it. Removals sort first within a
