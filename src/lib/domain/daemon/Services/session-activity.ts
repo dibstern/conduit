@@ -8,6 +8,10 @@ import {
 	type Scope,
 	Stream,
 } from "effect";
+import type {
+	EventDelivery,
+	Interests,
+} from "../../../server/event-audiences.js";
 import { makeSessionBackgroundLiveness } from "../../../session/background-liveness.js";
 import { makeSessionCompactions } from "../../../session/session-compactions.js";
 import { makeSessionRetries } from "../../../session/session-retries.js";
@@ -20,6 +24,8 @@ export interface SessionActivity {
 	readonly retries: ReturnType<typeof makeSessionRetries>;
 	readonly hintDismissals: Map<string, number>;
 	readonly viewers: Map<string, number>;
+	readonly connectionInterests: Map<EventDelivery, Interests>;
+	readonly watchInterests: (delivery: EventDelivery) => () => void;
 	readonly changed: (sessionId: string) => void;
 	readonly subscribe: Effect.Effect<Stream.Stream<string>, never, Scope.Scope>;
 }
@@ -38,6 +44,7 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 		};
 		const compactions = makeSessionCompactions();
 		const retries = makeSessionRetries();
+		const connectionInterests = new Map<EventDelivery, Interests>();
 		// Existing hint consumers mutate a Map. Keep that interface while ensuring
 		// dismissals and resets notify readers just like the other activity state.
 		const hintDismissals = new (class extends Map<string, number> {
@@ -80,6 +87,21 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 			},
 			hintDismissals,
 			viewers: new Map(),
+			connectionInterests,
+			watchInterests: (delivery) => {
+				const update = () => {
+					const interests = delivery.interests;
+					if (interests.sessions.size === 0 && interests.projects.size === 0)
+						connectionInterests.delete(delivery);
+					else connectionInterests.set(delivery, interests);
+				};
+				update();
+				const release = delivery.onChange(update);
+				return () => {
+					release();
+					connectionInterests.delete(delivery);
+				};
+			},
 			changed,
 			subscribe: Effect.map(PubSub.subscribe(changes), Stream.fromSubscription),
 		} satisfies SessionActivity;
