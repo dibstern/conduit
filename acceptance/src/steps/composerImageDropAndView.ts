@@ -23,7 +23,8 @@ const drops = new WeakMap<
 	Page,
 	{ url: string; document: JSHandle<Document> }
 >();
-const lightboxSources = new WeakMap<Page, string>();
+const viewerSources = new WeakMap<Page, string>();
+const previousUrls = new WeakMap<Page, string>();
 
 export const composerImageDropAndViewHandlers: StepHandler[] = [
 	{
@@ -210,19 +211,19 @@ export const composerImageDropAndViewHandlers: StepHandler[] = [
 				.toBe(true);
 			const source = await image.getAttribute("src");
 			if (!source) throw new Error("Image thumbnail has no source");
-			lightboxSources.set(world.page, source);
+			viewerSources.set(world.page, source);
 			await button.click();
 		},
 	},
 	{
-		name: "assert lightbox source and loaded image",
-		match: /^the lightbox shows the (draft|sent) image$/,
+		name: "assert media viewer source and loaded image",
+		match: /^the media viewer shows the (draft|sent) image$/,
 		run: async ({ world }) => {
-			const source = lightboxSources.get(world.page);
+			const source = viewerSources.get(world.page);
 			if (!source) throw new Error("No image thumbnail was opened");
 			const dialog = world.page.getByRole("dialog");
 			await expect(dialog).toBeVisible();
-			const image = dialog.locator("#image-lightbox");
+			const image = dialog.locator("#media-viewer-image");
 			await expect(image).toBeVisible();
 			await expect(image).toHaveAttribute("src", source);
 			await expect
@@ -233,34 +234,69 @@ export const composerImageDropAndViewHandlers: StepHandler[] = [
 				)
 				.toBe(true);
 			await expect(
-				dialog.getByRole("button", { name: "Close lightbox", exact: true }),
+				dialog.getByRole("button", { name: "Close media viewer", exact: true }),
 			).toBeVisible();
 		},
 	},
 	{
-		name: "close lightbox button",
-		match: /^I close the image lightbox$/,
+		name: "close media viewer button",
+		match: /^I close the media viewer$/,
 		run: async ({ world }) => {
 			await world.page
-				.getByRole("button", { name: "Close lightbox", exact: true })
+				.getByRole("button", { name: "Close media viewer", exact: true })
 				.click();
 		},
 	},
 	{
-		name: "close lightbox with Escape",
-		match: /^I dismiss the image lightbox with Escape$/,
+		name: "close media viewer with Escape",
+		match: /^I dismiss the media viewer with Escape$/,
 		run: async ({ world }) => {
 			await world.page.keyboard.press("Escape");
 		},
 	},
 	{
-		name: "assert lightbox dismissed",
-		match: /^the image lightbox is dismissed$/,
+		name: "assert media viewer dismissed",
+		match: /^the media viewer is dismissed$/,
 		run: async ({ world }) => {
-			await expect(world.page.locator("#image-lightbox")).not.toBeVisible();
+			await expect(world.page.locator("#media-viewer-image")).not.toBeVisible();
 			await expect(
-				world.page.getByRole("button", { name: "Close lightbox", exact: true }),
+				world.page.getByRole("button", {
+					name: "Close media viewer",
+					exact: true,
+				}),
 			).not.toBeVisible();
+		},
+	},
+	{
+		name: "switch session in-app from the sidebar",
+		match: /^I switch to the "([^"]+)" session from the sidebar$/,
+		run: async ({ world, match }) => {
+			const { page } = world;
+			previousUrls.set(page, page.url());
+			await page
+				.locator("#session-list .session-item-title", {
+					hasText: match[1] ?? "",
+				})
+				.click({ position: { x: 8, y: 6 } });
+			await expect(page).not.toHaveURL(previousUrls.get(page) ?? "");
+		},
+	},
+	{
+		// Same-document Back: a full reload would close any overlay on its own.
+		name: "browser back to the previous session",
+		match: /^I go back in the browser to the previous session$/,
+		run: async ({ world }) => {
+			const { page } = world;
+			const previous = previousUrls.get(page);
+			if (!previous)
+				throw new Error("No in-app session switch to go back from");
+			const before = await page.evaluateHandle(() => window.document);
+			await page.goBack();
+			await expect(page).toHaveURL(previous);
+			expect(await page.evaluate((d) => d === window.document, before)).toBe(
+				true,
+			);
+			await before.dispose();
 		},
 	},
 ];

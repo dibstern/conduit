@@ -84,9 +84,6 @@ export const uiState = $state({
 		onReject: () => void;
 	} | null,
 
-	// Image lightbox
-	lightboxSrc: null as string | null,
-
 	// Client count
 	clientCount: 0,
 
@@ -340,12 +337,22 @@ export function setPlanApproval(
 	uiState.planApproval = { onApprove, onReject };
 }
 
-export function openLightbox(src: string): void {
-	uiState.lightboxSrc = src;
+/** What the app-wide media viewer shows. */
+export type MediaItem = { kind: "image"; src: string };
+
+// Module-private so only openMediaViewer/closeMediaViewer can write it.
+let mediaViewer = $state<MediaItem | null>(null);
+
+export function getMediaViewer(): MediaItem | null {
+	return mediaViewer;
 }
 
-export function closeLightbox(): void {
-	uiState.lightboxSrc = null;
+export function openMediaViewer(item: MediaItem): void {
+	mediaViewer = item;
+}
+
+export function closeMediaViewer(): void {
+	mediaViewer = null;
 }
 
 export function openFileViewer(path: string, root?: string): void {
@@ -371,7 +378,7 @@ export function resetProjectUI(): void {
 	uiState.planMode = false;
 	uiState.planContent = null;
 	uiState.planApproval = null;
-	uiState.lightboxSrc = null;
+	closeMediaViewer();
 	uiState.fileViewerOpen = false;
 	uiState.fileViewerPath = null;
 	uiState.fileViewerRoot = null;
