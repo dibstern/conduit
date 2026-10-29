@@ -463,6 +463,7 @@ const makeUpdate =
 		state: UsageStateRef,
 		accounts: UsageOptions["accounts"],
 		saveInBackground: Effect.Effect<void>,
+		schedule: (accountId: string) => Effect.Effect<void>,
 	): NonNullable<UsageService["update"]> =>
 	(accountId, harness, reading) =>
 		Effect.gen(function* () {
@@ -473,17 +474,15 @@ const makeUpdate =
 			)
 				return;
 			const readAt = yield* Clock.currentTimeMillis;
-			yield* SubscriptionRef.update(state, (current) =>
-				withAccount(
-					current,
-					accountId,
-					live(current.accounts.get(accountId) ?? emptyAccountUsage, reading, {
-						accountId,
-						harness,
-						readAt,
-					}),
-				),
-			);
+			const rescheduled = yield* SubscriptionRef.modify(state, (current) => {
+				const record = current.accounts.get(accountId) ?? emptyAccountUsage;
+				const next = live(record, reading, { accountId, harness, readAt });
+				return [
+					next.wakeAt !== record.wakeAt,
+					withAccount(current, accountId, next),
+				] as const;
+			});
+			if (rescheduled) yield* schedule(accountId);
 			yield* saveInBackground;
 		});
 
@@ -521,8 +520,9 @@ export const makeUsage = (options: UsageOptions) =>
 		yield* Effect.addFinalizer(() => saveHistory);
 		const viewers = yield* Ref.make(0);
 		const timers = yield* FiberMap.make<string, void>();
-		// Settled reads and turn ends restart their account's timer. It reads
-		// wakeAt as it starts, so after racing writes the last restart wins.
+		// Settled reads, turn ends and fresh live readings restart their
+		// account's timer. It reads wakeAt as it starts, so after racing writes
+		// the last restart wins.
 		const schedule = (accountId: string) =>
 			FiberMap.run(
 				timers,
@@ -552,6 +552,7 @@ export const makeUsage = (options: UsageOptions) =>
 				options.accounts,
 				// Live readings arrive mid-turn; the turn must not wait on the disk.
 				Effect.forkIn(saveHistory, scope).pipe(Effect.asVoid),
+				schedule,
 			),
 			latest: (accountId) =>
 				SubscriptionRef.get(state).pipe(

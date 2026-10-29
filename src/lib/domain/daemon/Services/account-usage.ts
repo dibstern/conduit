@@ -184,15 +184,16 @@ export const freedBeforeReset = (
 			})
 		: [];
 
+const sameWindow = (update: UsageWindow, window: UsageWindow) =>
+	update.id ? window.id === update.id : window.kind === update.kind;
+
 const mergeWindows = (
 	updates: readonly UsageWindow[],
 	windows: readonly UsageWindow[] = [],
 ) => {
 	const merged = [...windows];
 	for (const window of updates) {
-		const index = merged.findIndex((value) =>
-			window.id ? value.id === window.id : value.kind === window.kind,
-		);
+		const index = merged.findIndex((value) => sameWindow(window, value));
 		const prior = merged[index];
 		if (!prior) merged.push(window);
 		else
@@ -207,7 +208,11 @@ const mergeWindows = (
 	return merged;
 };
 
-/** Merge a reading pushed by a running turn. */
+/**
+ * Merge a reading pushed by a running turn. One that carries every window the
+ * merged reading shows counts as a successful read taken now; one with only
+ * some leaves the rest to be read.
+ */
 export const live = (
 	record: AccountUsage,
 	read: UsageRead,
@@ -228,11 +233,23 @@ export const live = (
 				? "available"
 				: read.status,
 	};
-	return {
+	const merged = {
 		...record,
 		reading,
 		inFlight: record.inFlight && { ...record.inFlight, overtaken: true },
 	};
+	const complete =
+		read.windows.length > 0 &&
+		windows.every((window) =>
+			read.windows.some((update) => sameWindow(update, window)),
+		);
+	return complete
+		? {
+				...merged,
+				lastAttemptAt: readAt,
+				...nextRead(record, reading, { readAt, startedAt: readAt }),
+			}
+		: merged;
 };
 
 /** A finished turn's usage is read again in ten seconds, unless a wake to come is sooner. */

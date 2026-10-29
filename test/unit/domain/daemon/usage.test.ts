@@ -41,6 +41,15 @@
 // that ends during a read is not read again after it, so a reading from
 // before the turn stands for five minutes; an account added while someone is
 // viewing is never read.
+// Live-reading failures: a live reading with every window still lets a refresh
+// within maxAge read again; one with only some windows, or none, counts as
+// fresh and leaves the rest unread; an account's first live reading with no
+// windows counts as fresh; it leaves the failure count and retryAt;
+// it doesn't restart the account's timer, so a viewer arriving after a skipped
+// wake reads at once and nothing reads five minutes after it; it pushes back a
+// sooner post-turn re-read; an older read landing after it overwrites it, adds
+// a failure, or winds its freshness back; a reading for an unknown account is
+// kept.
 import {
 	mkdtemp,
 	readdir,
@@ -1748,6 +1757,152 @@ it.effect("keeps a live reading over a read that started before it", () =>
 				wait: "until-settled",
 			}),
 		).toMatchObject([{ windows: [{ kind: "five_hour", utilization: 20 }] }]);
+	}),
+);
+
+const bothWindows: UsageRead = {
+	status: "available",
+	windows: [
+		{ kind: "five_hour", utilization: 41 },
+		{ kind: "seven_day", utilization: 10 },
+	],
+};
+
+it.effect.each([
+	[
+		"every window counts as fresh",
+		bothWindows.windows.map((window) => ({ ...window, utilization: 60 })),
+		[0],
+	],
+	[
+		"only some windows doesn't",
+		[{ kind: "five_hour" as const, utilization: 60 }],
+		[0, 480_000],
+	],
+	["no windows doesn't", [], [0, 480_000]],
+] as const)(
+	"a live reading with %s for a refresh within maxAge",
+	([, windows, reads]) =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([
+				bothWindows,
+				bothWindows,
+			]);
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			yield* TestClock.adjust("4 minutes");
+			yield* service.update("account-1", "claude", {
+				status: windows.length ? "available" : "unknown",
+				windows,
+			});
+			yield* TestClock.adjust("4 minutes");
+			yield* service.refresh({ maxAge: "5 minutes", wait: "until-settled" });
+			expect(readAt).toEqual(reads);
+		}),
+);
+
+it.effect.each([
+	["windows counts as fresh", bothWindows.windows, []],
+	["no windows doesn't", [], [60_000]],
+] as const)(
+	"an account's first reading, live with %s, for a refresh within maxAge",
+	([, windows, reads]) =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([bothWindows]);
+			yield* service.update("account-1", "claude", {
+				status: windows.length ? "available" : "unknown",
+				windows,
+			});
+			yield* TestClock.adjust("1 minute");
+			yield* service.refresh({ maxAge: "5 minutes", wait: "until-settled" });
+			expect(readAt).toEqual(reads);
+		}),
+);
+
+it.effect("a full live reading after a failed read clears retryAt", () =>
+	Effect.gen(function* () {
+		const { service } = yield* scriptedAccount([goodRead, failedRead]);
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+		yield* TestClock.adjust("1 minute");
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+		expect(yield* published(service)).toMatchObject({ retryAt: 90_000 });
+		yield* TestClock.adjust("10 seconds");
+		yield* service.update("account-1", "claude", {
+			status: "available",
+			windows: [{ kind: "five_hour", utilization: 60 }],
+		});
+		const reading = yield* published(service);
+		expect(reading).toMatchObject({
+			status: "available",
+			windows: [{ kind: "five_hour", utilization: 60 }],
+			stale: false,
+		});
+		expect(reading).not.toHaveProperty("retryAt");
+	}),
+);
+
+it.effect(
+	"an older read that fails after a full live reading neither adds a failure nor winds its freshness back",
+	() =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([failedRead], 20_000);
+			yield* service.refresh({ maxAge: 0, wait: 0 });
+			yield* TestClock.adjust("10 seconds");
+			yield* service.update("account-1", "claude", {
+				status: "available",
+				windows: [{ kind: "five_hour", utilization: 60 }],
+			});
+			yield* TestClock.adjust("10 seconds");
+			const reading = yield* published(service);
+			expect(reading).toMatchObject({
+				status: "available",
+				windows: [{ kind: "five_hour", utilization: 60 }],
+				readAt: 10_000,
+			});
+			expect(reading).not.toHaveProperty("retryAt");
+			expect(reading).not.toHaveProperty("checking");
+			yield* TestClock.adjust("285 seconds");
+			expect(yield* service.refresh({ maxAge: "5 minutes", wait: 0 })).toEqual([
+				reading,
+			]);
+			yield* TestClock.adjust("0 millis");
+			expect(readAt).toEqual([0]);
+		}),
+);
+
+it.effect(
+	"a full live reading after a skipped wake is next read five minutes after it, and a viewer waits for that",
+	() =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([goodRead, goodRead]);
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			yield* TestClock.adjust("6 minutes");
+			yield* service.update("account-1", "claude", {
+				status: "available",
+				windows: [{ kind: "five_hour", utilization: 60 }],
+			});
+			yield* view(service);
+			yield* TestClock.adjust("0 millis");
+			expect(readAt).toEqual([0]);
+			yield* TestClock.adjust("299999 millis");
+			expect(readAt).toEqual([0]);
+			yield* TestClock.adjust("1 millis");
+			expect(readAt).toEqual([0, 660_000]);
+		}),
+);
+
+it.effect("a full live reading keeps a sooner post-turn re-read", () =>
+	Effect.gen(function* () {
+		const { service, readAt } = yield* scriptedAccount([goodRead, goodRead]);
+		yield* view(service);
+		yield* TestClock.adjust("1 minute");
+		yield* service.turnEnded("account-1");
+		yield* TestClock.adjust("5 seconds");
+		yield* service.update("account-1", "claude", {
+			status: "available",
+			windows: [{ kind: "five_hour", utilization: 60 }],
+		});
+		yield* TestClock.adjust("5 seconds");
+		expect(readAt).toEqual([0, 70_000]);
 	}),
 );
 
