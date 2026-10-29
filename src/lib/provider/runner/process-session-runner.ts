@@ -5667,7 +5667,9 @@ export const makeProcessSessionRunner = (
 						held &&
 						!sentToRunner &&
 						!("delivery" in failure) &&
-						!("replied" in failure)
+						!("replied" in failure) &&
+						// Admission timeout is permanent (4.7); the feeder settles it.
+						failure.code !== "send_admission_timeout"
 							? { ...failure, delivery: { _tag: "NotSent" as const } }
 							: failure,
 					),
@@ -6093,7 +6095,7 @@ export const makeProcessSessionRunner = (
 					})),
 				),
 			release: (input) => stops.release(input),
-			failed: (input, failure) => {
+			failed: (input, failure, held) => {
 				const observedAt = clock.currentTimeMillisUnsafe();
 				return Effect.gen(function* () {
 					if (!sql) return;
@@ -6106,8 +6108,9 @@ export const makeProcessSessionRunner = (
 							WHERE session_id = ${input.sessionId} AND run_id = ${input.runId} AND command_id = ${input.commandId}
 							AND (${input.requestSequence ?? null} IS NULL OR request_sequence = ${input.requestSequence ?? null})
 							AND (${input.attempt ?? null} IS NULL OR attempt_count = ${input.attempt ?? null}) ORDER BY request_sequence DESC LIMIT 1`;
-							if (row)
-								yield* commitSettlement({
+							if (!row) return;
+							if (!held)
+								return yield* commitSettlement({
 									_tag: "failed",
 									observedAt,
 									failure,
@@ -6117,6 +6120,32 @@ export const makeProcessSessionRunner = (
 										attempt: row.attempt_count,
 									},
 								});
+							// A held send is released unwritten and settled in one commit, so
+							// its ref is unheld even when the input was built by a release.
+							const { lifecycle } = yield* sessionCommit(input.sessionId);
+							yield* lifecycle.releaseRun(
+								{
+									sessionId: input.sessionId,
+									runId: input.runId,
+									commandId: input.commandId,
+									runnerId: held.runner,
+									transmission: held.transmission,
+									reason: "NotSent",
+								},
+								() => Effect.void,
+								{
+									_tag: "failed",
+									observedAt,
+									failure,
+									send: {
+										sessionId: input.sessionId,
+										runId: input.runId,
+										commandId: input.commandId,
+										requestSequence: row.request_sequence,
+										attempt: row.attempt_count,
+									},
+								},
+							);
 						}),
 					);
 					yield* wakeReactor(input.sessionId);

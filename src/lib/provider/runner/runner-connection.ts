@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { createConnection } from "node:net";
-import { Deferred, Effect, Schedule, Semaphore } from "effect";
+import { Deferred, Effect, Semaphore } from "effect";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../daemon/config-persistence.js";
 import { observeTurnTimelineFrame } from "../../domain/daemon/Services/turn-timeline.js";
 import * as Failure from "../../effect/failure-classification.js";
@@ -21,7 +21,6 @@ import {
 	currentRunnerOutput,
 	type makeRunnerReceiptStore,
 } from "./runner-receipts.js";
-import { runnerRetrySchedule } from "./runner-retry.js";
 import type { RunnerUpgradeState } from "./runner-upgrade.js";
 import type {
 	SessionFailure,
@@ -104,7 +103,6 @@ export const connectRunner = (options: {
 		let acknowledged = 0;
 		let lastReply: SessionOutputReply = {};
 		let heldAck = false;
-		let resyncDelay = yield* Schedule.toStepWithSleep(runnerRetrySchedule);
 		return yield* Effect.callback<RunnerSocket, SessionFailure>((resume) => {
 			let settled = false;
 			let active = true;
@@ -143,6 +141,7 @@ export const connectRunner = (options: {
 			let replayTimer: ReturnType<typeof setTimeout> | undefined;
 			let replayCommittedSequence = 0;
 			let resyncScheduled = false;
+			let resyncFailures = 0;
 			const socket = createConnection(options.socketPath);
 			const finish = (effect: Effect.Effect<RunnerSocket, SessionFailure>) => {
 				if (settled) return;
@@ -531,8 +530,11 @@ export const connectRunner = (options: {
 												// Keep the runner's waiter pending and replay from the durable
 												// boundary. Coalesce failures and back off persistent write errors.
 												resyncScheduled = true;
-												return resyncDelay(undefined).pipe(
-													Effect.orDie,
+												const delay = Math.min(
+													1000,
+													25 * 2 ** Math.min(resyncFailures++, 6),
+												);
+												return Effect.sleep(delay).pipe(
 													Effect.andThen(
 														Effect.sync(() => {
 															resyncScheduled = false;
@@ -546,9 +548,8 @@ export const connectRunner = (options: {
 												);
 											}),
 										onSuccess: (result) =>
-											Effect.gen(function* () {
-												resyncDelay =
-													yield* Schedule.toStepWithSleep(runnerRetrySchedule);
+											Effect.sync(() => {
+												resyncFailures = 0;
 												releaseOutputWaiters();
 												reply(result);
 											}),

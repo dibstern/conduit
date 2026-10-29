@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Brand, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/sql";
 import { recordClaudeNativeResumeFallback } from "../claude/prepare-turn.js";
 import { isClaudeResumeRefused } from "../event-sink-errors.js";
@@ -155,24 +155,24 @@ export const settleDirectSend = (
 	}).pipe(Effect.mapError(toStoreFault));
 
 /** Only the predicate can construct a key for the pre-hold recovery path. */
-export class LegacySendKey {
-	// A type-only private brand makes the key nominal, so only prove constructs one.
-	private declare readonly brand: "LegacySendKey";
-	private constructor(readonly row: SendRow) {}
-	static prove(
+export type LegacySendKey = {
+	readonly row: SendRow;
+} & Brand.Brand<"LegacySendKey">;
+const legacySendKey = Brand.nominal<LegacySendKey>();
+export const LegacySendKey = {
+	prove: (
 		sql: SqlClient.SqlClient,
 		row: SendRow,
-	): Effect.Effect<LegacySendKey | undefined, StoreFault> {
-		return Effect.gen(function* () {
+	): Effect.Effect<LegacySendKey | undefined, StoreFault> =>
+		Effect.gen(function* () {
 			if (
 				!row.run_id ||
 				!(yield* legacyRunnerRunQuery(sql, row.session_id, row.run_id))
 			)
 				return undefined;
-			return new LegacySendKey(row);
-		}).pipe(Effect.mapError(toStoreFault));
-	}
-}
+			return legacySendKey({ row });
+		}).pipe(Effect.mapError(toStoreFault)),
+};
 
 export const settleLegacySend = (
 	tx: SettlementTx,

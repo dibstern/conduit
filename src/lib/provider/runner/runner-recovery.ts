@@ -333,6 +333,8 @@ export const settleRunnerCommandReply = (
 			EXISTS (SELECT 1 FROM messages WHERE session_id = ${row.session_id} AND input_id = ${inputId}) AS shown,
 			EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${row.session_id}
 				AND input_id = ${row.command_id} AND state = 'steering') AS steering`;
+		// A failure placed here names its user message, as main's placement did.
+		let placedMessageId: string | undefined;
 		if (
 			payload &&
 			options.persistUserMessage &&
@@ -349,13 +351,14 @@ export const settleRunnerCommandReply = (
 						? continuation["cutOffMessageId"]
 						: undefined;
 			const driver = payload.account?.driver ?? row.provider_id;
+			placedMessageId =
+				cutOffMessageId ??
+				options.userMessageIdForInput?.(driver, inputId) ??
+				inputId;
 			yield* options.persistUserMessage(row.session_id, payload.prompt, {
 				projectId: row.project_key,
 				project: options.project,
-				messageId:
-					cutOffMessageId ??
-					options.userMessageIdForInput?.(driver, inputId) ??
-					inputId,
+				messageId: placedMessageId,
 				inputId,
 				runId: row.run_id,
 				provider: driver,
@@ -413,7 +416,7 @@ export const settleRunnerCommandReply = (
 					: {
 							messageId: options.processLost
 								? ""
-								: `provider-command:${row.command_id}`,
+								: (placedMessageId ?? `provider-command:${row.command_id}`),
 							error: message,
 							code,
 							retryable,

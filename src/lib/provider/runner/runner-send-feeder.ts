@@ -58,9 +58,11 @@ export const makeRunnerSendFeeder = (options: {
 		input: OwnerSend,
 	) => Effect.Effect<"Started", SessionFailure>;
 	readonly release: (input: RunRelease) => Effect.Effect<void, SessionFailure>;
+	/** Settles the send as failed; a held send is released in the same commit. */
 	readonly failed: (
 		input: OwnerSend,
 		failure: SessionFailure,
+		held?: Held,
 	) => Effect.Effect<void, SessionFailure>;
 	readonly awaitRun: (
 		input: OwnerSend,
@@ -289,7 +291,11 @@ export const makeRunnerSendFeeder = (options: {
 														? { refusalReason: evidence.reason }
 														: {}),
 												});
-											} else if (runnerCommandReplied(reply.failure) && live)
+											} else if (
+												reply.failure.code === "send_admission_timeout"
+											)
+												yield* options.failed(item.input, reply.failure, hold);
+											else if (runnerCommandReplied(reply.failure) && live)
 												yield* Deferred.fail(live.reply, reply.failure);
 											return;
 										}
