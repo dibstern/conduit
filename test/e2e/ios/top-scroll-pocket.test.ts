@@ -114,6 +114,13 @@ const CASES: Record<string, string[]> = {
 		`arm=${ARM}`,
 		`app-switch=${AWAY}`,
 	],
+	// The probe widens the page to the iPhone Duo's inner screen first.
+	unfolded: [
+		`ready=${READY}`,
+		`unfold=for (const deadline = Date.now() + 5000; document.getElementById("layout").classList.contains("layout-compact"); await new Promise((resolve) => setTimeout(resolve, 100))) if (Date.now() > deadline) throw new Error("still compact"); return document.documentElement.clientWidth + "px, sidebar " + document.getElementById("sidebar").getBoundingClientRect().width + "px";`,
+		`session-menu-open=${menu("#session-bar-more", true)}`,
+		`session-menu-close=${menu("#session-bar-more", false)}`,
+	],
 	// Proves the probe can see the blur: without the strip it must show.
 	control: [
 		`ready=${READY}`,

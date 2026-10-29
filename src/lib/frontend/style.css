@@ -1016,6 +1016,19 @@ body:has(dialog:modal) {
 	display: none;
 }
 
+/* Wide layouts on iOS (an unfolded iPhone Duo, an iPad) get the blur too. The
+   sidebar paints over the strip, so it only covers #app, whose colour it shares. */
+@supports (-webkit-touch-callout: none) {
+	#layout:not(.layout-compact) #compact-top-edge {
+		display: block;
+	}
+
+	#layout:not(.layout-compact) #sidebar {
+		position: relative;
+		z-index: 2;
+	}
+}
+
 /* #app is hidden on the phone list, so stay under its icon buttons (positioned), whose
    pressed and focus states would lose their top 12px in a browser tab. */
 #layout.layout-compact.phone-list-screen #compact-top-edge {
