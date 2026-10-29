@@ -540,13 +540,17 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 			];
 			const rpc = requireRpcControl(world.page);
 			rpc.setUsageReadings(readings);
+			// The menu's own read finds blocked full, and publishes that before it answers.
+			const read = readings.map((reading) =>
+				reading.accountId === "blocked"
+					? accountReading("blocked", "Pro", [100, 9], now)
+					: reading,
+			);
 			rpc.setStubs({
-				QuotaForAccounts: () =>
-					readings.map((reading) =>
-						reading.accountId === "blocked"
-							? accountReading("blocked", "Pro", [100, 9], now)
-							: reading,
-					),
+				QuotaForAccounts: () => {
+					rpc.setUsageReadings(read);
+					return read;
+				},
 			});
 		},
 	},
