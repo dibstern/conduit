@@ -1389,32 +1389,27 @@ describe("built-dist Claude runner lifecycle", () => {
 		"crash",
 		"reload",
 	])("finishes %s cleanup before starting a replacement turn", async (phase) => {
-		const { harness, browser, sessionId } = await start({
-			failureCleanupDelayMs: 5000,
-		});
+		const { harness, browser, sessionId } = await start();
 		const failed = browser.send(sessionId, "approval-overlap-crash");
 		await browser.waitFor(
 			(message) => message["type"] === "permission_pending",
 		);
+		let cursor: number;
+		let replacement: ReturnType<typeof browser.send>;
 		if (phase === "crash") {
+			// The replacement queues behind the open turn before the crash, so the
+			// turn's failure pauses the queue. Resume is what starts the
+			// replacement, once that cleanup has finished.
+			replacement = browser.send(sessionId, "approval-overlap-recovery");
+			await waitFor(harness, () =>
+				expect(snapshot(harness, sessionId).queued).toHaveLength(1),
+			);
 			process.kill(started(harness).pid, "SIGKILL");
 			await waitFor(harness, () =>
 				expect(JSON.stringify(harness.proof())).toContain(
 					"Claude runner failed",
 				),
 			);
-		} else {
-			await browser.reloadSession(sessionId);
-			// The reload interrupts the turn, and an interrupted turn advances no
-			// turn-end version, so this send never settles; the ledger shows it.
-			failed.catch(() => undefined);
-		}
-		let cursor = browser.frames.length;
-		const replacement = browser.send(sessionId, "approval-overlap-recovery");
-		if (phase === "crash") {
-			// The crashed turn stays open until its cleanup ends it, so the send
-			// queues behind it and the turn's failure pauses the queue. Resume
-			// is what starts the replacement, once that cleanup has finished.
 			await failed;
 			const paused = snapshot(harness, sessionId);
 			expect(paused.session).toEqual({ status: "idle" });
@@ -1424,6 +1419,13 @@ describe("built-dist Claude runner lifecycle", () => {
 			if (!queued) throw new Error("Missing the queued replacement");
 			cursor = browser.frames.length;
 			await browser.sendNow(sessionId, queued.inputId);
+		} else {
+			await browser.reloadSession(sessionId);
+			// The reload interrupts the turn, and an interrupted turn advances no
+			// turn-end version, so this send never settles; the ledger shows it.
+			failed.catch(() => undefined);
+			cursor = browser.frames.length;
+			replacement = browser.send(sessionId, "approval-overlap-recovery");
 		}
 		const approval = await browser.waitFor(
 			(message) => message["type"] === "permission_pending",

@@ -223,7 +223,6 @@ export class ProcessHarness {
 			idleDayMs?: number;
 			nonDefaultConfigDir?: boolean;
 			idleTimeoutMs?: number | null;
-			failureCleanupDelayMs?: number;
 			serverProtocolVersion?: number;
 			runnerHelloProtocolVersion?: number;
 			runnerHelloAfterFirst?: boolean;
@@ -1227,13 +1226,6 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					...(this.runnerLifecycle?.nonDefaultConfigDir
 						? {
 								CONDUIT_TEST_DAEMON_CONFIG_DIR: this.configDir,
-							}
-						: {}),
-					...(this.runnerLifecycle?.failureCleanupDelayMs !== undefined
-						? {
-								CONDUIT_TEST_RUNNER_FAILURE_DELAY_MS: String(
-									this.runnerLifecycle.failureCleanupDelayMs,
-								),
 							}
 						: {}),
 					...(this.runnerLifecycle?.idleTimeoutMs !== undefined
