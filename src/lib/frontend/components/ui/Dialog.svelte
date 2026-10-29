@@ -157,17 +157,18 @@
 	// (the subagent back bar, the composer). Document capture runs before those
 	// listeners, and preventDefault on the keydown suppresses the cancel, which
 	// Chromium makes uncancelable the second time. Firefox drops focus to <body>
-	// when the focused control disables itself, so <body> counts as aimed here,
-	// but only while no other modal is open: the topmost one can't be told apart.
+	// when the focused control disables itself, so <body> counts as aimed here.
+	// With another modal open, a <body> Escape may be the topmost one's, which
+	// can't be told apart: app shortcuts still never see it, but its cancel stays.
 	$effect(() => {
 		const el = dialogEl;
 		if (!open || !el || !onescape) return;
-		const aimedHere = (target: Node): boolean =>
-			el.contains(target) || (target === document.body && document.querySelectorAll("dialog:modal").length === 1);
 		const escape = (event: KeyboardEvent): void => {
-			if (event.key !== "Escape" || event.isComposing) return;
-			if (!(event.target instanceof Node) || !aimedHere(event.target)) return;
+			const target = event.target;
+			if (event.key !== "Escape" || event.isComposing || !(target instanceof Node)) return;
+			if (!el.contains(target) && target !== document.body) return;
 			event.stopPropagation();
+			if (!el.contains(target) && document.querySelectorAll("dialog:modal").length > 1) return;
 			if (onescape?.()) event.preventDefault();
 		};
 		document.addEventListener("keydown", escape, true);

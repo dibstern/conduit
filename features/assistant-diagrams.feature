@@ -327,3 +327,18 @@ Scenario: with a file open in the files pane, Escape closes the expanded diagram
   And I dismiss the media viewer with Escape
   Then the media viewer is dismissed
   And the file viewer shows notes.md
+
+Scenario: with a file open, session search above the zoomed expanded diagram closes on Escape after focus drops and the file stays open
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  And the project has a file named notes.md
+  When the transcript contains a finished assistant message with a flowchart diagram
+  And I open notes.md from the files pane
+  And I focus Expand diagram and press Enter
+  And I press the zoom in button on the expanded diagram
+  And I press Control+K
+  Then session search is open above the expanded diagram
+  When I press Escape after focus drops out of session search
+  Then session search is closed and the expanded diagram is still zoomed
+  And the file viewer shows notes.md
