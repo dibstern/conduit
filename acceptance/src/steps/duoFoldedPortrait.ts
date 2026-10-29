@@ -184,6 +184,15 @@ export const duoFoldedPortraitHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "session filters clear the list header",
+		match: /^the session filters start (\d+) pixels below the list header$/,
+		run: async ({ world, match }) => {
+			const header = await boxOf(world.page, "#sidebar-header");
+			const filters = await boxOf(world.page, "#session-search > :first-child");
+			expect(filters.y - (header.y + header.height)).toBe(Number(match[1]));
+		},
+	},
+	{
 		name: "message field geometry",
 		match: /^the message field spans x (\d+) to (\d+) and y (\d+) to (\d+)$/,
 		run: async ({ world, match }) => {

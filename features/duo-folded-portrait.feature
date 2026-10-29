@@ -122,3 +122,12 @@ Scenario Outline: The session list follows the same header and rail rules
 Examples:
   | header             | rail             | threshold |
   | duo-fp-list-header | duo-fp-list-rail | 98        |
+
+# A phone's list header has no edge, so the filters sit straight under it. This
+# header draws a hairline along its bottom edge, so the filters keep their own
+# 8pt above it, as they do below.
+Scenario: The session filters start below the list header's hairline
+  When I tap back to the session list
+  Then the session filters start 8 pixels below the list header
+  And the list header controls are centred at y 32 or lower with 22 pixels below
+  And no control reaches into the status column

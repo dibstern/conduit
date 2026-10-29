@@ -51,11 +51,111 @@ const boxes = (page: Page, selector: string): Promise<Box[]> =>
 		}),
 	);
 
+/** A top sheet's transform transition: its box on the first and last frames, and its origin within the untransformed box. */
+type SheetMotion = { first: Box; last: Box; origin: { x: number; y: number } };
+type MotionLog = { sheetMotion?: SheetMotion[] };
+
+/**
+ * Logs every top sheet transform transition from now on, read off the running
+ * transition paused at its first and last frames, so nothing hangs on frame timing.
+ */
+const watchSheetMotion = (page: Page): Promise<void> =>
+	page.evaluate(() => {
+		const log = window as Window & MotionLog;
+		const installed = log.sheetMotion !== undefined;
+		log.sheetMotion = [];
+		if (installed) return;
+		document.addEventListener(
+			"transitionrun",
+			(event) => {
+				const sheet = event.target;
+				if (
+					event.propertyName !== "transform" ||
+					!(sheet instanceof HTMLElement) ||
+					!sheet.matches("[data-sheet-edge='top']")
+				)
+					return;
+				const motion = sheet
+					.getAnimations()
+					.find(
+						(animation): animation is CSSTransition =>
+							animation instanceof CSSTransition &&
+							animation.transitionProperty === "transform",
+					);
+				const end = Number(motion?.effect?.getComputedTiming().endTime);
+				if (!motion || !end) return;
+				motion.pause();
+				// Anonymous: a named function here gets an esbuild __name() call the page lacks.
+				const [first, last] = [0, end].map((time) => {
+					motion.currentTime = time;
+					const { left, top, right, bottom } = sheet.getBoundingClientRect();
+					return { left, top, right, bottom };
+				});
+				motion.currentTime = 0;
+				motion.play();
+				const [x = 0, y = 0] = getComputedStyle(sheet)
+					.transformOrigin.split(" ")
+					.map(Number.parseFloat);
+				if (first && last)
+					log.sheetMotion?.push({ first, last, origin: { x, y } });
+			},
+			true,
+		);
+	});
+
+const loggedMotion = async (page: Page): Promise<SheetMotion[]> => {
+	await expect
+		.poll(() =>
+			page.evaluate(() => (window as Window & MotionLog).sheetMotion?.length),
+		)
+		.toBeGreaterThan(0);
+	await settleTransitions(page);
+	return page.evaluate(() => (window as Window & MotionLog).sheetMotion ?? []);
+};
+
+const centre = (box: Box) => ({
+	x: (box.left + box.right) / 2,
+	y: (box.top + box.bottom) / 2,
+});
+const gap = (from: Box, to: Box) =>
+	Math.hypot(centre(from).x - centre(to).x, centre(from).y - centre(to).y);
+const width = (box: Box) => box.right - box.left;
+const height = (box: Box) => box.bottom - box.top;
+
+/** The small end of the motion sits toward the control, scaled about a point inside it. */
+async function expectGrowthFromControl(
+	page: Page,
+	surface: string,
+	{
+		small,
+		rest,
+		origin,
+	}: { small: Box; rest: Box; origin: SheetMotion["origin"] },
+): Promise<void> {
+	const [control] = await boxes(page, DROP_DOWNS[surface] ?? "");
+	if (!control) throw new Error(`The ${surface} control is not on screen`);
+	const pivot = { x: rest.left + origin.x, y: rest.top + origin.y };
+	expect(pivot.x).toBeGreaterThanOrEqual(control.left);
+	expect(pivot.x).toBeLessThanOrEqual(control.right);
+	expect(pivot.y).toBeGreaterThanOrEqual(control.top);
+	expect(pivot.y).toBeLessThanOrEqual(control.bottom);
+	expect(width(small)).toBeLessThan(width(rest));
+	expect(gap(small, control)).toBeLessThan(gap(rest, control));
+}
+
+/** The far end of the motion is the resting box moved up by its own height. */
+function expectGlideBehindHeader(away: Box, rest: Box): void {
+	expect(away.left).toBeCloseTo(rest.left, 0);
+	expect(away.right).toBeCloseTo(rest.right, 0);
+	expect(away.top).toBeCloseTo(rest.top - height(rest), 0);
+}
+
 export const duoAlertsHandlers: StepHandler[] = [
 	{
 		name: "open a header drop-down",
 		match: /^I open the (tasks|goal|Side Threads|sessions|skills) drop-down$/,
 		run: async ({ world, match }) => {
+			await watchSheetMotion(world.page);
 			await world.page.locator(DROP_DOWNS[match[1] ?? ""] ?? "").click();
 			await expect(
 				world.page.locator("[aria-expanded='true']"),
@@ -112,6 +212,63 @@ export const duoAlertsHandlers: StepHandler[] = [
 			expect(sheet?.top).toBeCloseTo(await headerBottom(page), 0);
 			expect(sheet?.left).toBeCloseTo(Number(match[1]), 0);
 			expect(sheet?.right).toBeCloseTo(Number(match[2]), 0);
+		},
+	},
+	{
+		name: "close a header drop-down with Escape",
+		match: /^I press Escape in the (?:tasks|sessions) drop-down$/,
+		run: async ({ world }) => {
+			await watchSheetMotion(world.page);
+			await world.page.keyboard.press("Escape");
+			await expect(world.page.locator(TOP_SHEET)).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert the drop-down grew out of its control",
+		match: /^the (tasks|sessions) drop-down grew out of its control$/,
+		run: async ({ world, match }) => {
+			const [entrance] = await loggedMotion(world.page);
+			if (!entrance) throw new Error("No entrance was logged");
+			await expectGrowthFromControl(world.page, match[1] ?? "", {
+				small: entrance.first,
+				rest: entrance.last,
+				origin: entrance.origin,
+			});
+		},
+	},
+	{
+		name: "assert the drop-down shrank back into its control",
+		match: /^the (tasks|sessions) drop-down shrank back into its control$/,
+		run: async ({ world, match }) => {
+			const [exit] = await loggedMotion(world.page);
+			if (!exit) throw new Error("No exit was logged");
+			await expectGrowthFromControl(world.page, match[1] ?? "", {
+				small: exit.last,
+				rest: exit.first,
+				origin: exit.origin,
+			});
+		},
+	},
+	{
+		name: "assert the drop-down entered by gliding down from behind the header",
+		match: /^the drop-down glided down from behind the header$/,
+		run: async ({ world }) => {
+			const [entrance] = await loggedMotion(world.page);
+			if (!entrance) throw new Error("No entrance was logged");
+			expectGlideBehindHeader(entrance.first, entrance.last);
+		},
+	},
+	{
+		name: "assert the drop-down left by gliding up behind the header",
+		match: /^the drop-down glided back up behind the header$/,
+		run: async ({ world }) => {
+			const motion = await loggedMotion(world.page);
+			const exit = motion.at(-1);
+			if (!exit) throw new Error("No exit was logged");
+			expect(exit.last.bottom).toBeLessThanOrEqual(
+				(await headerBottom(world.page)) + 1,
+			);
+			expect(width(exit.last)).toBeCloseTo(width(exit.first), 0);
 		},
 	},
 	{
