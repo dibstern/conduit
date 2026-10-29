@@ -254,6 +254,8 @@ export const makeFolderTimeline = (configDir: string) =>
 				args: readonly string[],
 				options: { readonly input?: string; readonly maxBuffer?: number } = {},
 			) => run(store, ["--git-dir", store, ...args], options),
+			folderGit: (directory: string, args: readonly string[]) =>
+				run(directory, args),
 			collect,
 		};
 	});

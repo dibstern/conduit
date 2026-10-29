@@ -3,6 +3,7 @@ import { SessionDiffError } from "../../contracts/session-diff.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { SessionDiff } from "../../domain/daemon/Services/session-diff.js";
 import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
+import { readSessionWorktreeOwnership } from "../../domain/relay/Services/session-worktree-deletion.js";
 import { guardWorkspacePath } from "../../session/workspace-directories.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
@@ -23,12 +24,24 @@ export const sessionDiffHandlers = {
 			const { effectiveFolders } = yield* resolveSessionRequestFolders(
 				request.sessionId,
 			);
-			const folders = yield* Effect.forEach(effectiveFolders, (folder) =>
-				guardWorkspacePath(folder.directory).pipe(
-					Effect.as(folder),
-					Effect.orElseSucceed(() => ({ ...folder, present: false })),
-				),
-			);
+			// Unreadable ownership only drops the launch base: the default branch stands in.
+			const owned =
+				request.scope.kind === "branch"
+					? yield* readSessionWorktreeOwnership(request.sessionId, false).pipe(
+							Effect.orElseSucceed(() => []),
+						)
+					: [];
+			const folders = yield* Effect.forEach(effectiveFolders, (folder) => {
+				const launchBase = owned.find(
+					(ownership) => ownership.folder === folder.root,
+				)?.head;
+				const listed =
+					launchBase === undefined ? folder : { ...folder, launchBase };
+				return guardWorkspacePath(folder.directory).pipe(
+					Effect.as(listed),
+					Effect.orElseSucceed(() => ({ ...listed, present: false })),
+				);
+			});
 			return yield* diff.list(
 				{ id: request.sessionId, folders },
 				request.scope,

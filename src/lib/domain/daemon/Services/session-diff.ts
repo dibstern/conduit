@@ -12,6 +12,8 @@ export interface SessionDiffFolder {
 	readonly root: string;
 	readonly directory: string;
 	readonly present: boolean;
+	/** The commit the session's worktree launched from, if it owns one. */
+	readonly launchBase?: string;
 }
 
 /**
