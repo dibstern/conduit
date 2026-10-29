@@ -87,3 +87,50 @@ Scenario: one Retry recovers every diagram whose renderer failed to download
   And I press Retry on one failed diagram
   Then every diagram in the assistant message is drawn
   And the noted diagram is still on screen
+
+Scenario: only a diagram shrunk to fit shows zoom controls
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a wide and a small flowchart
+  Then the wide diagram shows zoom controls and the small one does not
+
+Scenario: a plain wheel over a diagram scrolls the conversation and ctrl+wheel zooms it
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a tall, a wide and a tall flowchart
+  And I scroll the wide diagram to the middle of the conversation
+  And I turn the mouse wheel down over the wide diagram
+  Then the conversation scrolls and the wide diagram is not zoomed
+  When I turn the mouse wheel up over the wide diagram while holding Control
+  Then the wide diagram is zoomed
+
+Scenario: pressing + on a focused diagram zooms it
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a wide flowchart
+  And I focus the wide diagram and press +
+  Then the wide diagram is zoomed
+
+Scenario: a tall diagram fits a capped height without being cropped
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a tall flowchart
+  Then the diagram is at most 380 pixels tall and shows all of it
+
+Scenario: the code toggle shows the source and switches back to the same drawing
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart diagram
+  Then the assistant message draws the diagram
+  When I note the drawn diagram and its node colour
+  And I press Show code on the diagram
+  Then the diagram shows its source instead of the drawing
+  When I press Show diagram on the diagram
+  Then the noted diagram is still on screen
+  When I press Copy code on the diagram
+  Then the clipboard holds the diagram source

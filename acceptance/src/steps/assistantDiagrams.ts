@@ -7,6 +7,10 @@ import type { StepHandler } from "../runtime.js";
 import { requireRelayControl } from "./shared.js";
 
 const flowchart = "flowchart LR\n  Plan --> Build --> Ship";
+// Wider than the desktop transcript, so pele shrinks it to fit.
+const wide = `flowchart LR\n  ${["Plan the work", "Build the parts", "Test every path", "Review the change", "Merge to main", "Release the build", "Watch the metrics"].map((label, n) => `N${n}[${label}]`).join(" --> ")}`;
+// Taller than the 380px cap.
+const tall = `flowchart TD\n  ${Array.from({ length: 10 }, (_, n) => `S${n}[Step ${n + 1}]`).join(" --> ")}`;
 const fixtures = {
 	"a flowchart diagram": [flowchart],
 	"a broken flowchart diagram": ["flowchart LR\n  Plan -->|oops Build"],
@@ -16,12 +20,17 @@ const fixtures = {
 		"sequenceDiagram\n  Alice->>Bob: Plan",
 		"sequenceDiagram\n  Bob->>Alice: Ship",
 	],
+	"a wide and a small flowchart": [wide, flowchart],
+	"a tall, a wide and a tall flowchart": [tall, wide, tall],
+	"a wide flowchart": [wide],
+	"a tall flowchart": [tall],
 } as const;
 type DiagramFixture = keyof typeof fixtures;
 const fixturePattern = Object.keys(fixtures).join("|");
 
 const STREAM_ID = "assistant-diagram-stream";
 const seededSources = new WeakMap<Page, string>();
+const scrolledFrom = new WeakMap<Page, number>();
 const noted = new WeakMap<Page, { svg: JSHandle<Element>; fill: string }>();
 
 const markdown = (sources: readonly string[]) =>
@@ -29,6 +38,19 @@ const markdown = (sources: readonly string[]) =>
 const lastAssistant = (page: Page) =>
 	page.locator("#messages .msg-assistant").last();
 const diagram = (page: Page) => lastAssistant(page).locator("[data-diagram]");
+// pele's root svg; header and zoom-control icons are svgs too.
+const drawing = (page: Page) => diagram(page).locator("svg.pele").first();
+const wideDrawing = (page: Page) =>
+	diagram(page).filter({ hasText: "Watch the metrics" }).locator("svg.pele");
+const transcriptScrollTop = (page: Page) =>
+	page.locator("#messages").evaluate((element) => element.scrollTop);
+// Zoomed in means pele narrowed the viewBox below the drawing's natural width.
+const isZoomed = (svg: SVGSVGElement) =>
+	svg.viewBox.baseVal.width < Number(svg.getAttribute("width"));
+const wheelOverWide = async (page: Page, deltaY: number) => {
+	await wideDrawing(page).hover();
+	await page.mouse.wheel(0, deltaY);
+};
 const nodeFill = (svg: Element) => {
 	const shape = svg.querySelector(".pele-node rect");
 	return shape ? getComputedStyle(shape).fill : "";
@@ -39,7 +61,8 @@ const notedDiagram = (page: Page) => {
 	return before;
 };
 const assertNotedStillShown = async (page: Page) => {
-	const current = await diagram(page).locator("svg").first().elementHandle();
+	await expect(drawing(page)).toBeVisible();
+	const current = await drawing(page).elementHandle();
 	const same = await notedDiagram(page).svg.evaluate(
 		(svg, other) => svg.isConnected && svg === other,
 		current,
@@ -122,7 +145,7 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		name: "assert diagram drawn",
 		match: /^the assistant message draws the diagram$/,
 		run: async ({ world }) => {
-			const svg = diagram(world.page).locator("svg").first();
+			const svg = drawing(world.page);
 			await expect(svg).toBeVisible();
 			await expect(svg).toContainText("Build");
 			await expect(diagram(world.page).locator(".pele-error")).toHaveCount(0);
@@ -166,10 +189,7 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		name: "note diagram and node colour",
 		match: /^I note the drawn diagram and its node colour$/,
 		run: async ({ world }) => {
-			const svg = await diagram(world.page)
-				.locator("svg")
-				.first()
-				.elementHandle();
+			const svg = await drawing(world.page).elementHandle();
 			if (!svg) throw new Error("No drawn diagram to note");
 			const fill = await svg.evaluate(nodeFill);
 			if (!fill) throw new Error("The drawn diagram has no filled node");
@@ -219,7 +239,7 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const diagrams = diagram(world.page);
 			await expect(diagrams).toHaveCount(3);
-			await expect(diagrams.nth(0).locator("svg").first()).toBeVisible();
+			await expect(diagrams.nth(0).locator("svg.pele")).toBeVisible();
 			for (const n of [1, 2]) {
 				await expect(diagrams.nth(n)).toContainText(
 					"The diagram renderer failed to load",
@@ -243,11 +263,144 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const diagrams = diagram(world.page);
 			for (const n of [0, 1, 2]) {
-				await expect(diagrams.nth(n).locator("svg").first()).toBeVisible();
+				await expect(diagrams.nth(n).locator("svg.pele")).toBeVisible();
 			}
 			await expect(lastAssistant(world.page)).not.toContainText(
 				"failed to load",
 			);
+		},
+	},
+	{
+		name: "assert zoom controls only on the shrunk diagram",
+		match: /^the wide diagram shows zoom controls and the small one does not$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const small = diagram(page).filter({ hasNotText: "Watch the metrics" });
+			await expect(small.locator("svg.pele")).toBeVisible();
+			await expect(
+				diagram(page)
+					.filter({ hasText: "Watch the metrics" })
+					.locator(".pele-zoom-in"),
+			).toBeVisible();
+			await expect(small.locator(".pele-zoom-in")).toBeHidden();
+		},
+	},
+	{
+		name: "scroll the wide diagram to the middle",
+		match: /^I scroll the wide diagram to the middle of the conversation$/,
+		run: async ({ world }) => {
+			await expect(wideDrawing(world.page)).toBeVisible();
+			await wideDrawing(world.page).evaluate((svg) =>
+				svg.scrollIntoView({ block: "center" }),
+			);
+		},
+	},
+	{
+		name: "plain wheel over the wide diagram",
+		match: /^I turn the mouse wheel down over the wide diagram$/,
+		run: async ({ world }) => {
+			scrolledFrom.set(world.page, await transcriptScrollTop(world.page));
+			await wheelOverWide(world.page, 200);
+		},
+	},
+	{
+		name: "assert the conversation scrolled, diagram not zoomed",
+		match: /^the conversation scrolls and the wide diagram is not zoomed$/,
+		run: async ({ world }) => {
+			const from = scrolledFrom.get(world.page);
+			if (from === undefined) throw new Error("No wheel was turned");
+			await expect
+				.poll(() => transcriptScrollTop(world.page))
+				.toBeGreaterThan(from);
+			expect(await wideDrawing(world.page).evaluate(isZoomed)).toBe(false);
+		},
+	},
+	{
+		name: "ctrl+wheel over the wide diagram",
+		match:
+			/^I turn the mouse wheel up over the wide diagram while holding Control$/,
+		run: async ({ world }) => {
+			await world.page.keyboard.down("Control");
+			await wheelOverWide(world.page, -200);
+			await world.page.keyboard.up("Control");
+		},
+	},
+	{
+		name: "focus the wide diagram and press +",
+		match: /^I focus the wide diagram and press \+$/,
+		run: async ({ world }) => {
+			await expect(wideDrawing(world.page)).toBeVisible();
+			await wideDrawing(world.page).focus();
+			await world.page.keyboard.press("+");
+		},
+	},
+	{
+		name: "assert the wide diagram zoomed",
+		match: /^the wide diagram is zoomed$/,
+		run: async ({ world }) => {
+			await expect
+				.poll(() => wideDrawing(world.page).evaluate(isZoomed))
+				.toBe(true);
+		},
+	},
+	{
+		name: "assert capped, uncropped diagram",
+		match: /^the diagram is at most (\d+) pixels tall and shows all of it$/,
+		run: async ({ world, match }) => {
+			const cap = Number(match[1]);
+			const svg = drawing(world.page);
+			await expect(svg).toBeVisible();
+			const natural = await svg.evaluate((element) => ({
+				width: Number(element.getAttribute("width")),
+				height: Number(element.getAttribute("height")),
+			}));
+			if (natural.height <= cap)
+				throw new Error("The fixture is not tall enough");
+			const box = await svg.boundingBox();
+			const frame = await diagram(world.page).boundingBox();
+			if (!box || !frame) throw new Error("The diagram has no box");
+			expect(box.height).toBeLessThanOrEqual(cap + 1);
+			// Same proportions and inside the frame: nothing is cut off.
+			expect(box.width / box.height).toBeCloseTo(
+				natural.width / natural.height,
+				1,
+			);
+			expect(box.x).toBeGreaterThanOrEqual(frame.x);
+			expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width);
+		},
+	},
+	{
+		name: "press a diagram header button",
+		match: /^I press (Show code|Show diagram|Copy code) on the diagram$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.context()
+				.grantPermissions(["clipboard-read", "clipboard-write"]);
+			await diagram(world.page)
+				.getByRole("button", { name: match[1] ?? "", exact: true })
+				.click();
+		},
+	},
+	{
+		name: "assert the diagram shows its source",
+		match: /^the diagram shows its source instead of the drawing$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await expect(diagram(page).locator("pre code")).toHaveText(
+				seededSources.get(page) ?? "",
+			);
+			await expect(drawing(page)).toBeHidden();
+		},
+	},
+	{
+		name: "assert clipboard holds the diagram source",
+		match: /^the clipboard holds the diagram source$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await expect
+				.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+				// A fenced block's text ends with its closing newline.
+				.toBe(`${seededSources.get(page)}\n`);
 		},
 	},
 	{
@@ -294,7 +447,7 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		name: "click the drawn diagram twice",
 		match: /^I click the drawn diagram twice$/,
 		run: async ({ world }) => {
-			const svg = diagram(world.page).locator("svg").first();
+			const svg = drawing(world.page);
 			await svg.click();
 			await svg.click();
 		},
@@ -304,7 +457,7 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		match: /^I press Enter on the drawn diagram twice$/,
 		run: async ({ world }) => {
 			// The inline diagram has nothing focusable yet, so send the key from inside it.
-			const svg = diagram(world.page).locator("svg").first();
+			const svg = drawing(world.page);
 			for (const _ of [1, 2]) {
 				await svg.dispatchEvent("keydown", { key: "Enter", bubbles: true });
 			}
