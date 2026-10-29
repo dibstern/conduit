@@ -172,6 +172,30 @@ export const makeRunnerRunLifecycle = (
 								runner_id: string;
 							}>`SELECT runner_id FROM claude_runner_cursors
 						WHERE session_id = ${input.sessionId} AND retired_at IS NULL AND role = 'serving'`;
+							// A steer redirects the Run on the runner it was sent to. With that
+							// runner gone the Run has ended, so the steer fails and returns to
+							// the inbox (CONTRACT 4.8) instead of starting a fresh turn on
+							// another runner, as main fails it when the runner exits.
+							const [steer] = yield* sql<{
+								moved: number;
+							}>`SELECT EXISTS (SELECT 1 FROM events
+						WHERE session_id = ${input.sessionId} AND type = 'run.dispatched' AND json_valid(data)
+							AND json_extract(data, '$.commandId') = ${commandId}
+							AND json_extract(data, '$.runnerId') IS NOT ${serving?.runner_id ?? null}) AS moved
+						FROM pending_inputs WHERE session_id = ${input.sessionId} AND input_id = ${commandId} AND state = 'steering'`;
+							if (steer && (!serving || steer.moved === 1)) {
+								yield* settleSend(tx, {
+									_tag: "failed",
+									send,
+									observedAt,
+									failure: {
+										operation: "send-turn",
+										message: "Runner exited",
+										code: "runner_stopped",
+									},
+								});
+								return { _tag: "Ended" };
+							}
 							if (!serving) {
 								const [candidate] = yield* sql<{
 									runner_id: string;
