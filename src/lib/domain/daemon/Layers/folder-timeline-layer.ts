@@ -127,6 +127,200 @@ function parseRaw(output: string): Change[] {
 	return changes;
 }
 
+type Git = (
+	store: string,
+	args: readonly string[],
+	options?: {
+		readonly input?: string;
+		readonly env?: NodeJS.ProcessEnv;
+		readonly maxBuffer?: number;
+	},
+) => Effect.Effect<{ readonly stdout: string }, FolderTimelineError>;
+type Snapshot = (
+	directory: string,
+) => Effect.Effect<FolderSnapshot, FolderTimelineError>;
+
+/** Marks the folders a new run shares with live runs of other sessions, on both sides. */
+function markShared(runs: Iterable<LiveRun>, live: LiveRun) {
+	for (const other of runs)
+		if (other.sessionId !== live.sessionId)
+			for (const directory of live.directories)
+				if (other.directories.includes(directory)) {
+					other.shared.add(directory);
+					live.shared.add(directory);
+				}
+}
+
+/** A tree of only the changed paths, as they were on one side of the run. */
+const sparseTree = (
+	git: Git,
+	store: string,
+	changes: readonly Change[],
+	side: "before" | "after",
+) =>
+	Effect.gen(function* () {
+		const index = join(store, `sparse-${randomUUID()}.index`);
+		const env = { GIT_INDEX_FILE: index };
+		return yield* Effect.gen(function* () {
+			yield* git(store, ["update-index", "-z", "--index-info"], {
+				env,
+				input: changes
+					.flatMap((change) => {
+						const entry = change[side];
+						return entry
+							? [`${entry.mode} ${entry.blob}\t${change.path}\0`]
+							: [];
+					})
+					.join(""),
+			});
+			return (yield* git(store, ["write-tree"], { env })).stdout.trim();
+		}).pipe(Effect.ensuring(Effect.promise(() => rm(index, { force: true }))));
+	});
+
+const captureFolder = (
+	{ git, snapshot }: { readonly git: Git; readonly snapshot: Snapshot },
+	live: LiveRun,
+	store: string,
+	directory: string,
+) =>
+	Effect.gen(function* (): Effect.fn.Return<
+		RunChangesCaptured["folders"][number],
+		FolderTimelineError
+	> {
+		const start = live.starts.get(directory) ?? {
+			gap: "failed" as const,
+			message: "The run had no start checkpoint",
+		};
+		if (!("store" in start)) return { directory, ...start };
+		const end = yield* snapshot(directory);
+		const { stdout } = yield* git(start.store, [
+			"diff-tree",
+			"-r",
+			"-z",
+			"--raw",
+			"--no-renames",
+			...(start.prefix === "" ? [] : [`--relative=${start.prefix}`]),
+			start.worktree,
+			end.worktree,
+		]);
+		const changes = parseRaw(stdout);
+		if (changes.length > MAX_CHANGES)
+			return {
+				directory,
+				gap: "failed",
+				message: `The run changed ${changes.length} files, more than ${MAX_CHANGES}`,
+			};
+		return {
+			directory,
+			before: yield* sparseTree(git, store, changes, "before"),
+			after: yield* sparseTree(git, store, changes, "after"),
+			shared: live.shared.has(directory),
+			changes,
+		};
+	}).pipe(
+		Effect.catch((error) => Effect.succeed({ directory, ...gapOf(error) })),
+	);
+
+/** Chains the capture under the session's ref and copies its objects into the store. */
+const commitCapture = (git: Git, store: string, capture: RunChangesCaptured) =>
+	Effect.gen(function* () {
+		const trees = capture.folders.flatMap((folder, index) =>
+			"changes" in folder
+				? [
+						`040000 tree ${folder.before}\t${index}-before`,
+						`040000 tree ${folder.after}\t${index}-after`,
+					]
+				: [],
+		);
+		if (trees.length === 0) return;
+		const root = (yield* git(store, ["mktree"], {
+			input: `${trees.join("\n")}\n`,
+		})).stdout.trim();
+		const previous = yield* git(store, [
+			"rev-parse",
+			"--verify",
+			"--quiet",
+			SESSION_REF,
+		]).pipe(
+			Effect.map(({ stdout }) => stdout.trim()),
+			Effect.orElseSucceed(() => ""),
+		);
+		const parent = previous === "" ? [] : ["-p", previous];
+		const commit = (yield* git(
+			store,
+			["commit-tree", root, ...parent, "-m", capture.runId],
+			{ env: IDENTITY },
+		)).stdout.trim();
+		// Without --local, objects borrowed through alternates are copied in.
+		yield* git(
+			store,
+			["pack-objects", "--revs", "-q", join(store, "objects", "pack", "pack")],
+			{ input: `${commit}\n${previous === "" ? "" : `^${previous}\n`}` },
+		);
+		yield* git(store, ["update-ref", SESSION_REF, commit, ...parent.slice(1)]);
+	});
+
+/** Creates the session's store, borrowing from every store its run's folders use. */
+const openSessionStore = (
+	run: Git,
+	root: string,
+	store: string,
+	live: LiveRun,
+) =>
+	Effect.gen(function* () {
+		const borrowed = [
+			...new Set(
+				[...live.starts.values()].flatMap((start) =>
+					"store" in start ? [join(start.store, "objects")] : [],
+				),
+			),
+		];
+		const exists = yield* fs(() => stat(store)).pipe(
+			Effect.as(true),
+			Effect.orElseSucceed(() => false),
+		);
+		if (!exists) {
+			yield* fs(() => mkdir(join(root, "sessions"), { recursive: true }));
+			yield* run(root, ["init", "--bare", "--quiet", "--template=", store]);
+		}
+		// Captures are self-contained, so only this run needs borrowing.
+		yield* fs(() =>
+			writeFile(
+				join(store, "objects", "info", "alternates"),
+				borrowed.map((path) => `${path}\n`).join(""),
+			),
+		);
+		return store;
+	});
+
+/** Pins a folder's start tree for the run, or records the gap that stopped it. */
+const checkpointStart = (
+	{ git, snapshot }: { readonly git: Git; readonly snapshot: Snapshot },
+	runId: string,
+	live: LiveRun,
+	directory: string,
+) =>
+	Effect.gen(function* () {
+		const start = yield* snapshot(directory);
+		// The pin keeps the start tree's objects past the grace period.
+		yield* git(start.store, ["update-ref", `${PINS}${runId}`, start.worktree]);
+		live.starts.set(directory, start);
+	}).pipe(
+		Effect.timeoutOrElse({
+			duration: START_BUDGET_MS,
+			orElse: () =>
+				Effect.fail(
+					new FolderTimelineError({
+						reason: "timeout",
+						message: `The start checkpoint took over ${START_BUDGET_MS}ms`,
+					}),
+				),
+		}),
+		Effect.catch((error) =>
+			Effect.sync(() => live.starts.set(directory, gapOf(error))),
+		),
+	);
+
 export const makeFolderTimeline = (configDir: string) =>
 	Effect.gen(function* () {
 		const subprocess = yield* Subprocess;
@@ -363,150 +557,6 @@ export const makeFolderTimeline = (configDir: string) =>
 				yield* Deferred.succeed(live.done, undefined);
 			});
 
-		/** A tree of only the changed paths, as they were on one side of the run. */
-		const sparseTree = (
-			store: string,
-			changes: readonly Change[],
-			side: "before" | "after",
-		) =>
-			Effect.gen(function* () {
-				const index = join(store, `sparse-${randomUUID()}.index`);
-				const env = { GIT_INDEX_FILE: index };
-				return yield* Effect.gen(function* () {
-					yield* git(store, ["update-index", "-z", "--index-info"], {
-						env,
-						input: changes
-							.flatMap((change) => {
-								const entry = change[side];
-								return entry
-									? [`${entry.mode} ${entry.blob}\t${change.path}\0`]
-									: [];
-							})
-							.join(""),
-					});
-					return (yield* git(store, ["write-tree"], { env })).stdout.trim();
-				}).pipe(
-					Effect.ensuring(Effect.promise(() => rm(index, { force: true }))),
-				);
-			});
-
-		const captureFolder = (live: LiveRun, store: string, directory: string) =>
-			Effect.gen(function* (): Effect.fn.Return<
-				RunChangesCaptured["folders"][number],
-				FolderTimelineError
-			> {
-				const start = live.starts.get(directory) ?? {
-					gap: "failed" as const,
-					message: "The run had no start checkpoint",
-				};
-				if (!("store" in start)) return { directory, ...start };
-				const end = yield* snapshot(directory);
-				const { stdout } = yield* git(start.store, [
-					"diff-tree",
-					"-r",
-					"-z",
-					"--raw",
-					"--no-renames",
-					...(start.prefix === "" ? [] : [`--relative=${start.prefix}`]),
-					start.worktree,
-					end.worktree,
-				]);
-				const changes = parseRaw(stdout);
-				if (changes.length > MAX_CHANGES)
-					return {
-						directory,
-						gap: "failed",
-						message: `The run changed ${changes.length} files, more than ${MAX_CHANGES}`,
-					};
-				return {
-					directory,
-					before: yield* sparseTree(store, changes, "before"),
-					after: yield* sparseTree(store, changes, "after"),
-					shared: live.shared.has(directory),
-					changes,
-				};
-			}).pipe(
-				Effect.catch((error) => Effect.succeed({ directory, ...gapOf(error) })),
-			);
-
-		/** Chains the capture under the session's ref and copies its objects into the store. */
-		const commitCapture = (store: string, capture: RunChangesCaptured) =>
-			Effect.gen(function* () {
-				const trees = capture.folders.flatMap((folder, index) =>
-					"changes" in folder
-						? [
-								`040000 tree ${folder.before}\t${index}-before`,
-								`040000 tree ${folder.after}\t${index}-after`,
-							]
-						: [],
-				);
-				if (trees.length === 0) return;
-				const root = (yield* git(store, ["mktree"], {
-					input: `${trees.join("\n")}\n`,
-				})).stdout.trim();
-				const previous = yield* git(store, [
-					"rev-parse",
-					"--verify",
-					"--quiet",
-					SESSION_REF,
-				]).pipe(
-					Effect.map(({ stdout }) => stdout.trim()),
-					Effect.orElseSucceed(() => ""),
-				);
-				const parent = previous === "" ? [] : ["-p", previous];
-				const commit = (yield* git(
-					store,
-					["commit-tree", root, ...parent, "-m", capture.runId],
-					{ env: IDENTITY },
-				)).stdout.trim();
-				// Without --local, objects borrowed through alternates are copied in.
-				yield* git(
-					store,
-					[
-						"pack-objects",
-						"--revs",
-						"-q",
-						join(store, "objects", "pack", "pack"),
-					],
-					{ input: `${commit}\n${previous === "" ? "" : `^${previous}\n`}` },
-				);
-				yield* git(store, [
-					"update-ref",
-					SESSION_REF,
-					commit,
-					...parent.slice(1),
-				]);
-			});
-
-		/** Creates the session's store, borrowing from every store its run's folders use. */
-		const openSessionStore = (sessionId: string, live: LiveRun) =>
-			Effect.gen(function* () {
-				const store = sessionStore(sessionId);
-				const borrowed = [
-					...new Set(
-						[...live.starts.values()].flatMap((start) =>
-							"store" in start ? [join(start.store, "objects")] : [],
-						),
-					),
-				];
-				const exists = yield* fs(() => stat(store)).pipe(
-					Effect.as(true),
-					Effect.orElseSucceed(() => false),
-				);
-				if (!exists) {
-					yield* fs(() => mkdir(join(root, "sessions"), { recursive: true }));
-					yield* run(root, ["init", "--bare", "--quiet", "--template=", store]);
-				}
-				// Captures are self-contained, so only this run needs borrowing.
-				yield* fs(() =>
-					writeFile(
-						join(store, "objects", "info", "alternates"),
-						borrowed.map((path) => `${path}\n`).join(""),
-					),
-				);
-				return store;
-			});
-
 		return {
 			snapshot,
 			git,
@@ -523,41 +573,12 @@ export const makeFolderTimeline = (configDir: string) =>
 						shared: new Set(),
 						done: yield* Deferred.make<void>(),
 					};
-					for (const other of runs.values())
-						if (other.sessionId !== sessionId)
-							for (const directory of directories)
-								if (other.directories.includes(directory)) {
-									other.shared.add(directory);
-									live.shared.add(directory);
-								}
+					markShared(runs.values(), live);
 					runs.set(runId, live);
 					yield* Effect.forEach(
 						directories,
 						(directory) =>
-							Effect.gen(function* () {
-								const start = yield* snapshot(directory);
-								// The pin keeps the start tree's objects past the grace period.
-								yield* git(start.store, [
-									"update-ref",
-									`${PINS}${runId}`,
-									start.worktree,
-								]);
-								live.starts.set(directory, start);
-							}).pipe(
-								Effect.timeoutOrElse({
-									duration: START_BUDGET_MS,
-									orElse: () =>
-										Effect.fail(
-											new FolderTimelineError({
-												reason: "timeout",
-												message: `The start checkpoint took over ${START_BUDGET_MS}ms`,
-											}),
-										),
-								}),
-								Effect.catch((error) =>
-									Effect.sync(() => live.starts.set(directory, gapOf(error))),
-								),
-							),
+							checkpointStart({ git, snapshot }, runId, live, directory),
 						{ concurrency: "unbounded", discard: true },
 					);
 				}),
@@ -568,16 +589,22 @@ export const makeFolderTimeline = (configDir: string) =>
 					if (!live) return;
 					yield* sessionLock(live.sessionId).withPermits(1)(
 						Effect.gen(function* () {
-							const store = yield* openSessionStore(live.sessionId, live);
+							const store = yield* openSessionStore(
+								run,
+								root,
+								sessionStore(live.sessionId),
+								live,
+							);
 							const capture = {
 								runId,
 								folders: yield* Effect.forEach(
 									live.directories,
-									(directory) => captureFolder(live, store, directory),
+									(directory) =>
+										captureFolder({ git, snapshot }, live, store, directory),
 									{ concurrency: "unbounded" },
 								),
 							};
-							yield* commitCapture(store, capture);
+							yield* commitCapture(git, store, capture);
 							yield* record(live.sessionId, capture);
 						}),
 					);
