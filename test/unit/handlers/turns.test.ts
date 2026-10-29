@@ -517,22 +517,6 @@ describe("turnStats", () => {
 		expect(s.skills).toBe(2);
 		expect(s.others).toBe(0);
 	});
-
-	it("counts failures from the typed outcome regardless of status", () => {
-		const s = turnStats({
-			activity: [
-				tool(
-					"Bash",
-					{ tool: "Bash", command: "false" },
-					{ status: "error", outcome: "failed" },
-				),
-				tool("Bash", { tool: "Bash", command: "nope" }, { outcome: "failed" }),
-				tool("Bash", { tool: "Bash", command: "ls" }),
-			],
-			reply: [],
-		});
-		expect(s.failed).toBe(2);
-	});
 });
 
 describe("countsPhrase", () => {

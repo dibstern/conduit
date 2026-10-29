@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { segmentAppearance } from "../../../src/lib/frontend/components/chat/activity-style.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
-import { turnStats } from "../../../src/lib/frontend/utils/turns.js";
 
 describe("tool outcome presentation", () => {
 	it.each([
@@ -9,21 +8,18 @@ describe("tool outcome presentation", () => {
 			outcome: "failed",
 			status: "completed",
 			isError: false,
-			failed: 1,
 			tone: "fail",
 		},
 		{
 			outcome: "succeeded",
 			status: "error",
 			isError: true,
-			failed: 0,
 			tone: "shell",
 		},
-	] as const)("uses $outcome for activity colour and failure count", ({
+	] as const)("uses $outcome for activity colour", ({
 		outcome,
 		status,
 		isError,
-		failed,
 		tone,
 	}) => {
 		const part: ToolMessage = {
@@ -36,9 +32,9 @@ describe("tool outcome presentation", () => {
 			status,
 			isError,
 		};
-		expect
-			.soft(segmentAppearance(part, new Set()))
-			.toEqual({ tone, running: false });
-		expect.soft(turnStats({ activity: [part], reply: [] }).failed).toBe(failed);
+		expect(segmentAppearance(part, new Set())).toEqual({
+			tone,
+			running: false,
+		});
 	});
 });

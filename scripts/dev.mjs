@@ -379,18 +379,17 @@ try {
 	);
 	for (const watcher of watchers) watcher.on("error", fail);
 	await runBuild();
-	if (!stopping) {
-		watchers.push(
-			watch("dist", (_event, filename) => {
-				if (filename !== "build-ready.json" || stopping || activeBuild) return;
-				const buildId = readBuildId();
-				if (!buildId || buildId === lastBuildId) return;
-				lastBuildId = buildId;
-				log(`external build ${buildId.slice(0, 8)} detected`);
-				runRestart();
-			}).on("error", fail),
-		);
-	}
+	// Polled, not watched: an external build (a pre-commit `pnpm build`) often
+	// lands while dev:all is mid-cycle, and its one watch event was dropped,
+	// leaving the server on the old build for good. Polling catches up after.
+	setInterval(() => {
+		if (stopping || activeBuild || !rpc) return;
+		const buildId = readBuildId();
+		if (!buildId || buildId === lastBuildId) return;
+		lastBuildId = buildId;
+		log(`external build ${buildId.slice(0, 8)} detected`);
+		runRestart();
+	}, 1_000).unref();
 	await stopped;
 } catch (error) {
 	fail(error);

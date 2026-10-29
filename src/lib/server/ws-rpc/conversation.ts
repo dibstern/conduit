@@ -34,6 +34,7 @@ import {
 	handleAskUserResponse,
 	handlePermissionResponse,
 	handleQuestionReject,
+	retireAsyncQuestions,
 } from "../../handlers/permissions.js";
 import {
 	cancelSessionById,
@@ -210,6 +211,19 @@ export const conversationHandlers = {
 					: {}),
 				...(request.images ? { images: request.images } : {}),
 			});
+			if (!("refused" in sent)) {
+				const sessionId = sent.sessionId ?? request.sessionId;
+				const log = yield* LoggerTag;
+				yield* retireAsyncQuestions(sessionId, request.inputId).pipe(
+					Effect.catch((error) =>
+						Effect.sync(() =>
+							log.warn(
+								`Failed to retire async questions for ${sessionId}: ${String(error)}`,
+							),
+						),
+					),
+				);
+			}
 			return "refused" in sent
 				? { ok: false as const, reason: sent.refused }
 				: {
