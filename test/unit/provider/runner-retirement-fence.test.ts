@@ -214,6 +214,8 @@ const retirementFixture = (
 		const replacementGate = { hold: false };
 		const replacementConnecting = yield* Deferred.make<void>();
 		const replacementReady = yield* Deferred.make<void>();
+		// The next original attachment loses its socket during backlog replay.
+		const replayLoss = { armed: false };
 		const driver: ProcessRunnerDriver = {
 			driverKind,
 			legacyPrepareTurnEffect: (input) =>
@@ -314,6 +316,12 @@ const retirementFixture = (
 									: [],
 						},
 						connection,
+						replayLoss.armed && options.runnerId === runnerId
+							? Effect.sync(() => {
+									replayLoss.armed = false;
+									Object.assign(connection, { closed: true });
+								})
+							: undefined,
 					);
 					return connection;
 				}),
@@ -345,13 +353,19 @@ const retirementFixture = (
 				processes.get(pid) ?? { state: "gone" as const },
 			signal: () => {},
 		};
+		// A held gate parks every accounts read until the test opens it.
+		const accountsGate: { hold?: Deferred.Deferred<void> } = {};
 		const manager = yield* makeProcessSessionRunner(
 			{
 				daemonConfigDir: root,
-				accounts: Effect.succeed(
-					accountsStateFromInstances(
-						[{ id: "account", driver: driverKind, name: "Account" }],
-						configuredClaudeConfigDir(root),
+				accounts: Effect.suspend(() =>
+					accountsGate.hold ? Deferred.await(accountsGate.hold) : Effect.void,
+				).pipe(
+					Effect.as(
+						accountsStateFromInstances(
+							[{ id: "account", driver: driverKind, name: "Account" }],
+							configuredClaudeConfigDir(root),
+						),
 					),
 				),
 				projectRootForSession: () => Effect.succeed(root),
@@ -425,12 +439,94 @@ const retirementFixture = (
 			replacementGate,
 			replacementConnecting,
 			replacementReady,
+			replayLoss,
+			accountsGate,
 			outputs,
 			retained,
 			background,
 			output,
 		};
 	});
+
+it.effect(
+	"a lost attachment after replay fails the attach, not the retained send",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture(
+					false,
+					undefined,
+					(_accountId, work) => work,
+				);
+				yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at)
+					VALUES (1, 'retained', 'test-project', 's', 'account', 'send_turn', '{}', 'running', 0, 1, 1)`;
+				f.replayLoss.armed = true;
+				const recovery = yield* Effect.forkChild(f.manager.recoverEffect);
+				yield* TestClock.adjust("10 seconds");
+				yield* Fiber.join(recovery);
+				expect(f.replayLoss.armed).toBe(false);
+				// Recovery retried the attach and the send stayed live.
+				expect(f.attachments).toHaveLength(2);
+				expect(f.outputs).toEqual([]);
+				expect(f.retained.has("retained")).toBe(true);
+			}),
+		),
+);
+
+it.effect("whole-manager recovery holds upgrades back until it ends", () =>
+	runRetirement(
+		Effect.gen(function* () {
+			const f = yield* retirementFixture(false);
+			const hold = yield* Deferred.make<void>();
+			const connect = vi.mocked(f.driver.connect).getMockImplementation();
+			if (!connect) return yield* Effect.die("missing connect");
+			// The previous build's runner parks recovery's owner-send sweep after it attaches.
+			vi.mocked(f.driver.connect).mockImplementationOnce((options) =>
+				connect({
+					...options,
+					onHello: (hello, connection, replay) =>
+						options
+							.onHello(
+								{ ...hello, buildId: "previous-build" },
+								connection,
+								replay,
+							)
+							.pipe(
+								Effect.tap(() =>
+									Effect.sync(() => {
+										f.accountsGate.hold = hold;
+									}),
+								),
+							),
+				}),
+			);
+			const recovery = yield* Effect.forkChild(f.manager.recoverEffect);
+			yield* TestClock.adjust(0);
+			const old = f.attachments[0];
+			if (!old?.onUpgradeState)
+				return yield* Effect.die("missing upgrade callback");
+			old.onUpgradeState({
+				quiescent: true,
+				revision: 1,
+				snapshot: {
+					input: {
+						...f.input,
+						configDir: configuredClaudeConfigDir(f.root),
+						folderSource: "implicitDefault",
+					},
+					options: {},
+				},
+			});
+			yield* TestClock.adjust("4 seconds");
+			expect(f.attachments).toHaveLength(1);
+			delete f.accountsGate.hold;
+			yield* Deferred.succeed(hold, undefined);
+			yield* Fiber.join(recovery);
+			yield* TestClock.adjust("4 seconds");
+			expect(f.attachments.length).toBeGreaterThan(1);
+		}),
+	),
+);
 
 it.effect(
 	"S7 recovery requeues a missing send without dispatch or visible events",

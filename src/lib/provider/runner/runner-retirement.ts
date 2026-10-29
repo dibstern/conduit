@@ -1674,7 +1674,11 @@ export const makeRunnerRetirement = (
 			get records() {
 				return authority.records;
 			},
-			adopt: authority.adopt,
+			/** Recovery restores live authority to durable serving rows only. */
+			adopt: (identities: Parameters<typeof authority.adopt>[0]) =>
+				authority
+					.adopt(identities, "live")
+					.pipe(Effect.map(({ grants: adopted }) => adopted)),
 			guarded: authority.guarded,
 			observe: authority.observe,
 			detach: authority.detach,
