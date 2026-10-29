@@ -3,6 +3,7 @@
 
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
+	import { clickOnLift } from "../../actions/click-on-lift.js";
 	import ConduitMark from "../ui/ConduitMark.svelte";
 	import SessionList from "../session/SessionList.svelte";
 	import ThemeMenu from "./ThemeMenu.svelte";
@@ -86,6 +87,7 @@
 >
 	<div
 		id="sidebar-header"
+		{@attach clickOnLift}
 		class="flex shrink-0 items-center gap-[2px] pr-[8px] {sessionViewState.compact ? 'h-[46px] pl-[18px]' : 'h-[48px] pl-[16px]'}"
 	>
 		{@render title()}
