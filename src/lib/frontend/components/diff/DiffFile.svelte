@@ -22,7 +22,7 @@
 	import TextButton from "../ui/TextButton.svelte";
 
 	// `reveal` changes each time this file is asked for, from a link, Back or a click.
-	const { row, reveal }: { row: DiffRow; reveal?: string | undefined } = $props();
+	const { row, reveal }: { row: DiffRow; reveal?: string | null | undefined } = $props();
 	const { folder, file } = $derived(row);
 	const patch = $derived(row.patch.kind === "ready" ? row.patch.patch : null);
 

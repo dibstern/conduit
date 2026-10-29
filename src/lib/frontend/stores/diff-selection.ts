@@ -20,7 +20,7 @@ export interface DiffReveal {
 	/** The Project Folder root, or null for whichever folder lists the path. */
 	readonly folder: string | null;
 	/** Changes on every reveal, so asking for the same file again scrolls again. */
-	readonly nonce: string;
+	readonly nonce: string | null;
 }
 
 const UNSTAGED: SessionDiffScope = { kind: "unstaged" };
@@ -38,19 +38,19 @@ export function getDiffReveal(): DiffReveal | null {
 	return {
 		path,
 		folder: params.get(DIFF_FOLDER_PARAM),
-		nonce: params.get(DIFF_REVEAL_PARAM) ?? "",
+		nonce: params.get(DIFF_REVEAL_PARAM),
 	};
 }
 
 /** Opens the Diff pane in the default scope at a file, as a new history entry. */
 export function revealInDiff(path: string, folder: string | null): void {
 	const params = getCurrentSearchParams();
-	const nonce = Number(params.get(DIFF_REVEAL_PARAM)) + 1 || 1;
 	params.delete(DIFF_SCOPE_PARAM);
 	params.set(DIFF_PATH_PARAM, path);
 	if (folder === null) params.delete(DIFF_FOLDER_PARAM);
 	else params.set(DIFF_FOLDER_PARAM, folder);
-	params.set(DIFF_REVEAL_PARAM, String(nonce));
+	// Random, so it differs from any token the URL holds, a link's included.
+	params.set(DIFF_REVEAL_PARAM, Math.random().toString(36).slice(2, 8));
 	setRightPaneView("diff");
 	navigate(`${routerState.path}?${params}`);
 }
