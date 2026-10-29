@@ -99,14 +99,13 @@ export const makeSessionDiff = Effect.gen(function* () {
 		}
 	>();
 	// One per subscribed (session, folders, scope): the only thing that snapshots on a change.
-	const live = new Map<
-		string,
-		{
-			readonly revisions: PubSub.PubSub<string>;
-			readonly watcher: Fiber.Fiber<void>;
-			subscribers: number;
-		}
-	>();
+	interface Hub {
+		readonly revisions: PubSub.PubSub<string>;
+		watcher?: Fiber.Fiber<void>;
+		latest?: string;
+		subscribers: number;
+	}
+	const live = new Map<string, Hub>();
 	const joining = yield* Semaphore.make(1);
 
 	const relative = (snapshot: FolderSnapshot) =>
@@ -266,25 +265,28 @@ export const makeSessionDiff = Effect.gen(function* () {
 			return listing;
 		});
 
-	/** Re-lists once per change, keeping at most one change waiting behind a running list. */
+	/**
+	 * Lists once on opening, then once per change, keeping at most one change waiting
+	 * behind a running list. A change published before the feed opens precedes the
+	 * first snapshot, so that list already sees it.
+	 */
 	const watch = (
 		session: SessionDiffSession,
 		scope: SessionDiffScope,
-		revisions: PubSub.PubSub<string>,
-	) => {
-		let latest: string | undefined;
-		return git.changes.pipe(
+		hub: Hub,
+	) =>
+		git.changes.pipe(
 			Stream.filter((change) => change.sessionIds.includes(session.id)),
+			Stream.merge(Stream.make(undefined)),
 			Stream.buffer({ capacity: 1, strategy: "sliding" }),
 			Stream.runForEach(() =>
 				Effect.flatMap(list(session, scope), ({ revision }) => {
-					if (revision === latest) return Effect.void;
-					latest = revision;
-					return PubSub.publish(revisions, revision);
+					if (revision === hub.latest) return Effect.void;
+					hub.latest = revision;
+					return PubSub.publish(hub.revisions, revision);
 				}),
 			),
 		);
-	};
 
 	return {
 		list,
@@ -300,11 +302,13 @@ export const makeSessionDiff = Effect.gen(function* () {
 								return open;
 							}
 							// A subscriber only needs the newest revision.
-							const revisions = yield* PubSub.sliding<string>(1);
-							const watcher = yield* watch(session, scope, revisions).pipe(
+							const opened: Hub = {
+								revisions: yield* PubSub.sliding<string>(1),
+								subscribers: 1,
+							};
+							opened.watcher = yield* watch(session, scope, opened).pipe(
 								Effect.forkIn(layerScope),
 							);
-							const opened = { revisions, watcher, subscribers: 1 };
 							live.set(key, opened);
 							return opened;
 						}),
@@ -315,15 +319,19 @@ export const makeSessionDiff = Effect.gen(function* () {
 								hub.subscribers -= 1;
 								if (hub.subscribers > 0) return Effect.void;
 								live.delete(key);
-								return Fiber.interrupt(hub.watcher).pipe(
-									Effect.andThen(PubSub.shutdown(hub.revisions)),
+								return Effect.andThen(
+									hub.watcher ? Fiber.interrupt(hub.watcher) : Effect.void,
+									PubSub.shutdown(hub.revisions),
 								);
 							}),
 						),
 					);
-					return Stream.fromSubscription(
-						yield* PubSub.subscribe(hub.revisions),
-					);
+					const subscription = yield* PubSub.subscribe(hub.revisions);
+					// A joiner starts from the hub's revision; one published meanwhile repeats it.
+					return Stream.concat(
+						hub.latest === undefined ? Stream.empty : Stream.make(hub.latest),
+						Stream.fromSubscription(subscription),
+					).pipe(Stream.changes);
 				}),
 			),
 		file: (request) =>

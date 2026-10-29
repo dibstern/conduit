@@ -533,7 +533,7 @@ it("collect sweeps stores left by an earlier run, keeps a snapshot inside its gr
 	expect(outcomes).toEqual({ orphaned: false, kept: true, expired: "gone" });
 });
 
-it("pushes each new revision of a live scope to every subscriber from one snapshot, and stops when the last one leaves", async () => {
+it("opens a live scope with one snapshot, pushes each new revision to every subscriber, and stops when the last one leaves", async () => {
 	const repo = repository({ "tracked.txt": "one\n" });
 	writeFileSync(join(repo, "tracked.txt"), "two\n");
 	const published = Effect.runSync(PubSub.unbounded<SessionGitChange>());
@@ -567,7 +567,13 @@ it("pushes each new revision of a live scope to every subscriber from one snapsh
 			}),
 			Effect.timeout("10 seconds"),
 		);
+	// Long enough for a stray list to snapshot or push.
 	const quiet = Effect.sleep("300 millis");
+	const blob = (text: string) =>
+		execFileSync("git", ["hash-object", "--stdin"], {
+			input: text,
+			encoding: "utf8",
+		}).trim();
 
 	const outcome = await Effect.runPromise(
 		Effect.gen(function* () {
@@ -580,16 +586,11 @@ it("pushes each new revision of a live scope to every subscriber from one snapsh
 					),
 					Effect.forkChild,
 				);
-			const [first, second] = [
-				yield* subscribe(seen[0]),
-				yield* subscribe(seen[1]),
-			];
-			yield* quiet;
-			const idle = snapshots();
-
-			yield* change("s");
-			yield* until(() => seen[0].length === 1 && seen[1].length === 1);
-			const firstChange = snapshots();
+			const first = yield* subscribe(seen[0]);
+			yield* until(() => seen[0].length === 1);
+			const second = yield* subscribe(seen[1]);
+			yield* until(() => seen[1].length === 1);
+			const opened = snapshots();
 
 			yield* change("s");
 			yield* until(() => snapshots() === 2);
@@ -624,26 +625,27 @@ it("pushes each new revision of a live scope to every subscriber from one snapsh
 
 			const again: string[] = [];
 			const third = yield* subscribe(again);
-			yield* quiet;
-			yield* change("s");
 			yield* until(() => again.length === 1);
 			yield* Fiber.interrupt(third);
+			const reopened = yield* diff.list(session, scope, again[0]);
 
-			const [folder] = pinned.folders;
+			const after = (listing: typeof pinned) => {
+				const [folder] = listing.folders;
+				return folder && "files" in folder ? folder.files[0]?.after : undefined;
+			};
 			return {
-				idle,
-				firstChange,
-				sameRevision: seen[0][0] === seen[1][0],
+				opened,
+				joinedSame: seen[0][0] === seen[1][0],
 				unchanged,
 				pushedDiffers: pushed !== seen[0][0] && seen[1][1] === pushed,
 				pinnedRevision: pinned.revision === pushed,
-				pinnedAfter:
-					folder && "files" in folder ? folder.files[0]?.after : undefined,
+				pinnedAfter: after(pinned),
 				pinnedSnapshots,
 				otherSession,
 				oneLeft,
 				closed,
-				reopened: again[0] !== undefined && !seen[1].includes(again[0]),
+				reopenedAfter: after(reopened),
+				reopenedSnapshots: snapshots() - beforeClosed,
 			};
 		}).pipe(
 			Effect.provide(
@@ -656,20 +658,17 @@ it("pushes each new revision of a live scope to every subscriber from one snapsh
 	);
 
 	expect(outcome).toEqual({
-		idle: 0,
-		firstChange: 1,
-		sameRevision: true,
+		opened: 1,
+		joinedSame: true,
 		unchanged: [1, 1],
 		pushedDiffers: true,
 		pinnedRevision: true,
-		pinnedAfter: execFileSync("git", ["hash-object", "--stdin"], {
-			input: "three\n",
-			encoding: "utf8",
-		}).trim(),
+		pinnedAfter: blob("three\n"),
 		pinnedSnapshots: 0,
 		otherSession: 0,
 		oneLeft: [2, 3],
 		closed: 0,
-		reopened: true,
+		reopenedAfter: blob("five\n"),
+		reopenedSnapshots: 1,
 	});
 });
