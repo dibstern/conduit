@@ -6,11 +6,13 @@ Feature: The folded iPhone Duo hands the rail's controls to a full composer abov
 # tappable may sit below y316. Focusing the composer moves the rail's controls
 # into one row of a full composer (K-full) at x22-374, y202-302, above the form
 # bar, and the rail empties. With the keyboard closed, Effort and Directory live
-# in the Model sheet. The controls glide there and back on one 350ms clock,
-# 25ms apart, nearest first and Send last.
+# in the Model sheet. The controls glide there on the keyboard's 350ms clock,
+# 25ms apart, nearest first and Send last, all done by 350ms; closing plays the
+# same glide backwards, easing included.
 #
 # The keyboard is up exactly while an editable field has focus, so focusing the
-# composer opens it here, and blurring the field (the form bar's tick) closes it.
+# composer opens it here, and blurring the field (the form bar's tick) or
+# removing it closes it.
 #
 # Coordinates are CSS px in the installed app's measured 466x657 layout
 # viewport, which the keyboard does not change.
@@ -44,19 +46,27 @@ Examples:
 
 Scenario: The controls glide in on one clock, nearest first and Send last
   When I focus the composer
-  Then the controls glide in the order Permissions, Model, Effort, Directory, Attach, Send, 25 ms apart over 350 ms
+  Then the controls glide in the order Permissions, Model, Effort, Directory, Attach, Send, 25 ms apart, all done by 350 ms, eased cubic-bezier(0.32, 0.72, 0, 1)
   And Effort and Directory bud out of Model
 
-Scenario: Closing the keyboard plays the glide in reverse and refills the rail
+Scenario: Closing the keyboard plays the glide backwards and refills the rail
   When I focus the composer
   And the handoff settles
   And I close the keyboard
   Then the keyboard is closed
-  And the controls glide in the order Send, Attach, Directory, Effort, Model, Permissions, 25 ms apart over 350 ms
+  And the controls glide in the order Send, Attach, Directory, Effort, Model, Permissions, 25 ms apart, all done by 350 ms, eased cubic-bezier(1, 0, 0.68, 0.28)
   And Effort and Directory fold back into Model
   When the handoff settles
   Then the rail reads Settle at 260, More at 308, Send at 447, Permissions at 495, Model at 543, Attach at 591
   And the message field spans x 12 to 374 and y 587 to 639
+
+Scenario: The keyboard closes when the field it serves goes away
+  When I start renaming the session from the header
+  Then the keyboard is open
+  When I name the session Release prep and press Return
+  Then the keyboard is closed
+  When the handoff settles
+  Then the rail reads Settle at 260, More at 308, Send at 447, Permissions at 495, Model at 543, Attach at 591
 
 Scenario: Reduced motion swaps the glide for a 150ms crossfade
   Given the motion preference is reduced

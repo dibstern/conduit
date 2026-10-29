@@ -11,7 +11,6 @@ import {
 
 /** The full composer's one row of targets (mockup card 7). */
 const ROW_TOP = 254;
-const GLIDE_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
 
 type Glide = {
 	name: string;
@@ -145,6 +144,29 @@ export const duoFoldedKeyboardHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "open header rename",
+		match: /^I start renaming the session from the header$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			await page.getByTestId("session-bar-island-overflow").click();
+			await page.getByTestId("session-ctx-rename").click();
+			await expect(
+				page.getByRole("textbox", { name: "Session name" }),
+			).toBeFocused();
+		},
+	},
+	{
+		// Return commits by unmounting the focused field, which fires no focusout.
+		name: "commit header rename",
+		match: /^I name the session (.+) and press Return$/,
+		run: async ({ world, match }) => {
+			const field = world.page.getByRole("textbox", { name: "Session name" });
+			await field.fill(match[1] ?? "");
+			await field.press("Enter");
+			await expect(field).toHaveCount(0);
+		},
+	},
+	{
 		name: "keyboard state",
 		match: /^the keyboard is (open|closed)$/,
 		run: async ({ world, match }) => {
@@ -236,12 +258,15 @@ export const duoFoldedKeyboardHandlers: StepHandler[] = [
 		},
 	},
 	{
+		// Every control glides for the same time, so the last to start, Send, ends the handoff.
 		name: "glide order and clock",
 		match:
-			/^the controls glide in the order (.+), (\d+) ms apart over (\d+) ms$/,
+			/^the controls glide in the order (.+), (\d+) ms apart, all done by (\d+) ms, eased (.+)$/,
 		run: async ({ world, match }) => {
 			const glides = await handoffGlides(world.page);
+			const names = (match[1] ?? "").split(", ");
 			const step = Number(match[2]);
+			const duration = Number(match[3]) - (names.length - 1) * step;
 			expect(
 				glides.map(({ name, delay, duration, easing }) => ({
 					name,
@@ -250,11 +275,11 @@ export const duoFoldedKeyboardHandlers: StepHandler[] = [
 					easing,
 				})),
 			).toEqual(
-				(match[1] ?? "").split(", ").map((name, index) => ({
+				names.map((name, index) => ({
 					name,
 					delay: index * step,
-					duration: Number(match[3]),
-					easing: GLIDE_EASING,
+					duration,
+					easing: match[4],
 				})),
 			);
 		},

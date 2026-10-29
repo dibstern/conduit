@@ -318,13 +318,21 @@ const followFocus = (event: FocusEvent) =>
  * keyboard covers the same screen whichever field raised it.
  */
 export function watchKeyboard(): () => void {
+	const reconcile = () =>
+		setKeyboardOpen(raisesKeyboard(document.activeElement));
 	// Untracked, so the effect that calls this does not re-run on every flip.
-	untrack(() => setKeyboardOpen(raisesKeyboard(document.activeElement)));
+	untrack(reconcile);
 	document.addEventListener("focusin", followFocus);
 	document.addEventListener("focusout", followFocus);
+	// Removing the focused field (a rename committing on Return) moves focus to
+	// the body without a focusout. Always on: when nothing changed, a batch costs
+	// one :read-write match and an early return.
+	const removals = new MutationObserver(reconcile);
+	removals.observe(document.body, { childList: true, subtree: true });
 	return () => {
 		document.removeEventListener("focusin", followFocus);
 		document.removeEventListener("focusout", followFocus);
+		removals.disconnect();
 		setKeyboardOpen(false);
 	};
 }
