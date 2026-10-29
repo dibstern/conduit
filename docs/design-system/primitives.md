@@ -23,6 +23,9 @@ The primitive measures the track's `width`; the adapter and Turn share it with
 with `mode: "collapsed" | "tab"`, or `{ kind: "pins"; pins; selected }`. Only
 pins can render the thumb, derived from the card slot.
 The existing `surfacePinRows` helper lays out the pin groups inside the primitive.
+On a phone a pin shows its glyph without its number, but a group keeps its
+`+N` count, and `surfacePinRows` sizes the pill for it. A turn with no
+segments draws an empty track rather than nothing.
 `cardSlot` is `none | selected { card } | preview { card }`, chosen by the
 Turn owner. The `card` snippet fills the selected hanging slot under the strip;
 the primitive aligns its caret and thumb at one clamped pin position. The
@@ -41,7 +44,7 @@ Home, End and Enter itself.
 
 The `Keyboard`, `TouchScrub`, `Pins` and `Collapsed` stories assert focus,
 slider values, release-only picking, keyboard picking and the collapsed peek.
-Visual baselines for this prefactor are deferred to conduit-test-xdyjq.9.
+`PhonePins` asserts hidden numbers and `NoSteps` the empty track.
 
 ### Button
 
