@@ -127,6 +127,7 @@ import {
 	SessionDirectory,
 } from "../Services/session-directory.js";
 import { SessionGit, SessionGitLive } from "../Services/session-git.js";
+import { WorkingTreeEditsLive } from "../Services/working-tree-edits.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AccountPictureLive } from "./account-picture-layer.js";
 import { makeAccountResourceScopesLive } from "./account-resource-scopes-layer.js";
@@ -911,6 +912,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const withSessionDiff = SessionDiffLive(configDir).pipe(
 		Layer.provideMerge(withSessionGit),
 	);
+	const withWorkingTreeEdits = Layer.unwrap(
+		Effect.map(PersistenceStore, (store) =>
+			WorkingTreeEditsLive.pipe(Layer.provide(Layer.succeedContext(store))),
+		),
+	).pipe(Layer.provideMerge(withSessionDiff));
 	const withGitChanges = Layer.effectDiscard(
 		Effect.gen(function* () {
 			const git = yield* SessionGit;
@@ -922,7 +928,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				Effect.forkScoped,
 			);
 		}),
-	).pipe(Layer.provideMerge(withSessionDiff));
+	).pipe(Layer.provideMerge(withWorkingTreeEdits));
 	const withSessionWorkspace = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;

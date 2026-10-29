@@ -27,6 +27,8 @@ import {
 	CategoryTuningScoreSchema,
 } from "./category-tuning.js";
 import {
+	SessionDiffEditError,
+	SessionDiffEditSchema,
 	SessionDiffError,
 	SessionDiffListingSchema,
 	SessionDiffPatchSchema,
@@ -2687,6 +2689,26 @@ export const SessionDiffFile = Rpc.make("SessionDiffFile", {
 	error: Schema.Union([WsRpcError, SessionDiffError]),
 });
 
+/** Restores a listed unstaged file, or one hunk of it, to the index. */
+export const SessionDiffDiscard = Rpc.make("SessionDiffDiscard", {
+	payload: Schema.TaggedStruct(
+		"SessionDiffDiscard",
+		SessionDiffEditSchema.fields,
+	),
+	success: OkResponseSchema,
+	error: Schema.Union([WsRpcError, SessionDiffEditError]),
+});
+
+/** Stages a listed unstaged file, or one hunk of it. */
+export const SessionDiffStage = Rpc.make("SessionDiffStage", {
+	payload: Schema.TaggedStruct(
+		"SessionDiffStage",
+		SessionDiffEditSchema.fields,
+	),
+	success: OkResponseSchema,
+	error: Schema.Union([WsRpcError, SessionDiffEditError]),
+});
+
 export const GetSkillContent = Rpc.make("GetSkillContent", {
 	payload: Schema.TaggedStruct("GetSkillContent", {
 		projectSlug: NonEmptyString,
@@ -3542,6 +3564,8 @@ const wsRpcRequests = [
 	GetToolDetails,
 	SessionDiffList,
 	SessionDiffFile,
+	SessionDiffDiscard,
+	SessionDiffStage,
 	{
 		requests: [GetSkillContentForSession, GetSkillContent],
 		rpc: Rpc.make(GetSkillContent._tag, {
