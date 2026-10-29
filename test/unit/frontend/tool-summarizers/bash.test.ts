@@ -68,25 +68,7 @@ describe("Edit summarizer", () => {
 			} as never,
 			{},
 		);
-		expect(result.subtitle).toBe("/src/main.ts");
-	});
-
-	it("returns diff expandedContent when old and new strings present", () => {
-		const s = lookupSummarizer("Edit");
-		const result = s.summarize(
-			{
-				tool: "Edit",
-				filePath: "/f.ts",
-				oldString: "foo",
-				newString: "bar",
-			} as never,
-			{},
-		);
-		expect(result.expandedContent).toEqual({
-			kind: "diff",
-			before: "foo",
-			after: "bar",
-		});
+		expect(result).toEqual({ subtitle: "/src/main.ts" });
 	});
 
 	it("strips repoRoot from filePath", () => {

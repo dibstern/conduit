@@ -50,9 +50,6 @@ const {
 const { closePanel, openPanel, terminalState } = await import(
 	"../../../src/lib/frontend/stores/terminal.svelte.js"
 );
-const { uiState } = await import(
-	"../../../src/lib/frontend/stores/ui.svelte.js"
-);
 
 beforeEach(() => {
 	matchMediaState.reset();
@@ -60,7 +57,7 @@ beforeEach(() => {
 	publishAtBottom(true);
 	noteSessionChanged();
 	closePanel();
-	uiState.fileViewerOpen = false;
+	sessionViewState.filePreview = null;
 	vi.clearAllMocks();
 });
 
@@ -152,14 +149,14 @@ describe("watchViewportPose", () => {
 
 	it("keeps open views and the file preview across the breakpoint", () => {
 		const stop = watchViewportPose();
-		sessionViewState.filesOpen = true;
+		sessionViewState.rightPaneView = "files";
 		openPanel();
-		uiState.fileViewerOpen = true;
+		sessionViewState.filePreview = { path: "src/index.ts", root: null };
 		matchMediaState.setMatches(true);
 		matchMediaState.setMatches(false);
-		expect(sessionViewState.filesOpen).toBe(true);
+		expect(sessionViewState.rightPaneView).toBe("files");
 		expect(terminalState.panelOpen).toBe(true);
-		expect(uiState.fileViewerOpen).toBe(true);
+		expect(sessionViewState.filePreview?.path).toBe("src/index.ts");
 		stop();
 	});
 

@@ -21,11 +21,6 @@ describe("lookupSummarizer", () => {
 		} as const;
 		expect(lookupSummarizer(input.tool).tool).toBe("Patch");
 		const result = lookupSummarizer(input.tool).summarize(input, {});
-		expect(result.subtitle).toBe("/src/changed.ts");
-		expect(result.expandedContent).toEqual({
-			kind: "code",
-			language: "diff",
-			content: input.patch,
-		});
+		expect(result).toEqual({ subtitle: "/src/changed.ts" });
 	});
 });
