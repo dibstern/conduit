@@ -1084,18 +1084,20 @@ body:has(dialog:modal) {
 	#session-bar-title-row {
 	padding-top: 2px;
 }
-/* The taller row's segments own its full height, down to the title's line. */
+/* The taller row's segments own its full 44px height (y 10 to 54), measured
+   from each button's centre so 24px and 32px segments reach equally far. */
 #layout[data-pose="duo-unfolded-portrait"]
 	#session-bar[data-compact="true"][data-collapsed="false"]
 	.session-bar-segments
 	button {
-	clip-path: inset(-10px 0 -7px);
+	clip-path: inset(calc(50% - 22px) 0);
 }
 #layout[data-pose="duo-unfolded-portrait"]
 	#session-bar[data-compact="true"][data-collapsed="false"]
 	.session-bar-segments
 	button::before {
-	height: calc(100% + 17px);
+	top: calc(50% - 22px);
+	height: 44px;
 }
 /* Overflow stays centred on its target, clear of the status row. */
 #layout[data-pose="duo-unfolded-portrait"]
@@ -1116,6 +1118,10 @@ body:has(dialog:modal) {
 #layout[data-pose="duo-unfolded-portrait"]
 	:is(#sidebar-header, #session-search) {
 	padding-right: var(--duo-header-end);
+}
+/* Full-width list banners start below the status row (y 79), not under it. */
+#layout[data-pose="duo-unfolded-portrait"] #sidebar .banners {
+	margin-top: 25px;
 }
 
 #layout.layout-compact.phone-list-screen #app,
