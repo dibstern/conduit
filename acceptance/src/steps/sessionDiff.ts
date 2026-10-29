@@ -2,12 +2,18 @@ import { expect, type Page } from "@playwright/test";
 import {
 	SessionDiffError,
 	type SessionDiffFile,
+	type SessionDiffFolder,
+	type SessionDiffPatch,
 } from "../../../src/lib/contracts/session-diff.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
 
 interface DiffFixture {
+	/** The first folder's files, listed under `folder`; `others` list after it. */
 	readonly files: SessionDiffFile[];
+	readonly folder: string;
+	readonly others: readonly SessionDiffFolder[];
+	readonly notes: ReadonlyMap<string, SessionDiffPatch["notes"]>;
 	readonly requested: string[];
 	/** Gone answers left per path. */
 	readonly gone: Map<string, number>;
@@ -89,9 +95,20 @@ const changed = (path: string, insertions = 1, deletions = 1) =>
 		binary: false,
 	}) satisfies SessionDiffFile;
 
-function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
+function seed(
+	page: Page,
+	files: SessionDiffFile[],
+	{
+		folder = "/workspace/myapp",
+		others = [],
+		notes = new Map(),
+	}: Partial<Pick<DiffFixture, "folder" | "others" | "notes">> = {},
+): DiffFixture {
 	const fixture: DiffFixture = {
 		files,
+		folder,
+		others,
+		notes,
 		requested: [],
 		gone: new Map(),
 		foreign: [],
@@ -112,7 +129,7 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
 			return {
 				revision: `rev-${sessionId}`,
-				folders: [{ folder: "/workspace/myapp", files: fixture.files }],
+				folders: [{ folder, files: fixture.files }, ...others],
 			};
 		},
 		SessionDiffFile: async ({ path, sessionId, revision }) => {
@@ -135,13 +152,18 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 					reason: "gone",
 					message: "The listing is no longer available",
 				});
-			const file = fixture.files.find((entry) => entry.path === path);
-			return {
-				patch:
-					file && "insertions" in file
-						? patchFor(path, file.insertions, file.deletions)
-						: "",
-			};
+			const file = [
+				fixture.files,
+				...others.map((entry) => ("files" in entry ? entry.files : [])),
+			]
+				.flat()
+				.find((entry) => entry.path === path);
+			const patch =
+				file && "insertions" in file
+					? patchFor(path, file.insertions, file.deletions)
+					: "";
+			const fileNotes = notes.get(path);
+			return fileNotes ? { patch, notes: fileNotes } : { patch };
 		},
 	});
 	return fixture;
@@ -202,6 +224,90 @@ export const sessionDiffHandlers: StepHandler[] = [
 				Array.from({ length: count }, (_, index) =>
 					changed(`file-${String(index + 1).padStart(2, "0")}.ts`),
 				),
+			);
+		},
+	},
+	{
+		name: "seed diff folders",
+		match:
+			/^the session diff has folders (\S+) with (\S+), (\S+) with (\S+), and (\S+) unavailable$/,
+		run: async ({ world, match }) => {
+			const [
+				,
+				first = "",
+				firstPath = "",
+				second = "",
+				secondPath = "",
+				gone = "",
+			] = match;
+			seed(world.page, [changed(firstPath)], {
+				folder: first,
+				others: [
+					{ folder: second, files: [changed(secondPath)] },
+					{
+						folder: gone,
+						error: "unavailable",
+						message: `Folder is missing: ${gone}`,
+					},
+				],
+			});
+		},
+	},
+	{
+		name: "seed diff edge cases",
+		match:
+			/^the session has unstaged edge cases: submodule (\S+), LFS (\S+), symlink (\S+), mode change (\S+) from ([0-7]+) to ([0-7]+), rename (\S+) to (\S+), CRLF (\S+) and Latin-1 (\S+)$/,
+		run: async ({ world, match }) => {
+			const [
+				,
+				submodule = "",
+				lfs = "",
+				symlink = "",
+				script = "",
+				modeBefore = "",
+				modeAfter = "",
+				oldPath = "",
+				moved = "",
+				crlf = "",
+				latin1 = "",
+			] = match;
+			const same = "7777777777777777777777777777777777777777";
+			seed(
+				world.page,
+				(
+					[
+						{
+							...changed(submodule),
+							kind: "submodule",
+							before: "5555555555555555555555555555555555555555",
+							after: "6666666666666666666666666666666666666666",
+							bytes: 0,
+						},
+						{ ...changed(lfs, 2, 2), kind: "lfs" },
+						{ ...changed(symlink), kind: "symlink" },
+						{
+							...changed(script, 0, 0),
+							before: same,
+							after: same,
+							mode: { before: modeBefore, after: modeAfter },
+						},
+						{
+							...changed(moved, 0, 0),
+							status: "renamed",
+							oldPath,
+							before: same,
+							after: same,
+						},
+						changed(crlf),
+						changed(latin1),
+					] satisfies SessionDiffFile[]
+				).sort((left, right) => left.path.localeCompare(right.path)),
+				{
+					notes: new Map([
+						[crlf, ["crlf"]],
+						[latin1, ["latin1"]],
+					]),
+				},
 			);
 		},
 	},
@@ -477,6 +583,46 @@ export const sessionDiffHandlers: StepHandler[] = [
 		match: /^every diff patch was requested with its own session's revision$/,
 		run: async ({ world }) => {
 			expect(requireFixture(world.page).foreign).toEqual([]);
+		},
+	},
+	{
+		name: "diff folder group",
+		match:
+			/^the (\S+) diff group is headed (\S+) and (?:lists (\S+)|shows "([^"]+)")$/,
+		run: async ({ world, match }) => {
+			const [, folder = "", name = "", path, error] = match;
+			const group = world.page.locator(
+				`[data-testid="session-diff-folder"][data-folder="${folder}"]`,
+			);
+			const rows = group.locator('[data-testid="session-diff-file"]');
+			const errors = group.locator('[data-testid="session-diff-error"]');
+			await expect(group.getByRole("heading")).toHaveText(name);
+			if (path === undefined) {
+				await expect(errors).toHaveText(error ?? "");
+				await expect(rows).toHaveCount(0);
+			} else {
+				await expect(rows).toHaveAttribute("data-path", path);
+				await expect(errors).toHaveCount(0);
+			}
+		},
+	},
+	{
+		name: "diff row label",
+		match: /^the (\S+) diff is labelled "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				row(world.page, match[1] ?? "").getByTestId("session-diff-label"),
+			).toHaveText(match[2] ?? "");
+		},
+	},
+	{
+		name: "patchless diff row",
+		match: /^the (\S+) diff reads "([^"]+)" without a patch$/,
+		run: async ({ world, match }) => {
+			const path = match[1] ?? "";
+			await expect(row(world.page, path)).toContainText(match[2] ?? "");
+			await settle(world.page);
+			expect(requireFixture(world.page).requested).not.toContain(path);
 		},
 	},
 	{

@@ -11,6 +11,8 @@
 			poolOptions: { workerFactory: () => new DiffsWorker(), poolSize: 2 },
 			highlighterOptions: { theme, tokenizeMaxLineLength: 1000 },
 		});
+	const kindLabel = { lfs: "Git LFS", submodule: "Submodule", symlink: "Symlink" } as const;
+	const noteLabel = { crlf: "CRLF", latin1: "Not UTF-8 (Latin-1)" } as const;
 </script>
 
 <script lang="ts">
@@ -24,6 +26,19 @@
 	const { row }: { row: DiffRow } = $props();
 	const { folder, file } = $derived(row);
 	const patch = $derived(row.patch.kind === "ready" ? row.patch.patch : null);
+	const labels = $derived([
+		...(file.kind ? [kindLabel[file.kind]] : []),
+		...(file.mode ? [`${file.mode.before} → ${file.mode.after}`] : []),
+		...(row.patch.kind === "ready" ? (row.patch.notes ?? []).map((note) => noteLabel[note]) : []),
+	]);
+	// Git's patch for these is a hash, a commit pair or only a header, so the row says what changed instead.
+	const patchless = $derived(
+		file.tier === "tooLarge" ||
+			file.binary ||
+			file.kind === "lfs" ||
+			file.kind === "submodule" ||
+			file.before === file.after,
+	);
 
 	let visible = $state(false);
 	let clicked = $state(false);
@@ -31,7 +46,7 @@
 	let view: FileDiff | undefined;
 
 	const wanted = $derived(
-		file.tier === "tooLarge" || file.binary ? false : file.tier === "auto" ? visible : clicked,
+		patchless ? false : file.tier === "auto" ? visible : clicked,
 	);
 
 	$effect(() => {
@@ -69,7 +84,7 @@
 
 	/** Small diffs load as they near the viewport. */
 	function observe(node: HTMLElement) {
-		if (file.tier !== "auto" || file.binary) return;
+		if (file.tier !== "auto" || patchless) return;
 		const observer = new IntersectionObserver(
 			([entry]) => {
 				if (!entry?.isIntersecting) return;
@@ -88,6 +103,9 @@
 		<span class="min-w-0 flex-1 truncate font-mono text-text-secondary" title={file.path}>
 			{file.oldPath === undefined ? file.path : `${file.oldPath} → ${file.path}`}
 		</span>
+		{#each labels as label (label)}
+			<span data-testid="session-diff-label" class="shrink-0 text-text-dimmer">{label}</span>
+		{/each}
 		{#if file.tier === "tooLarge"}
 			<span class="shrink-0 text-text-dimmer">{formatFileSize(file.bytes)}</span>
 		{:else if file.binary}
@@ -102,6 +120,14 @@
 			<span>Too large to diff.</span>
 			<TextButton underline="always" class="text-xs" onclick={() => openFileViewer(file.path, folder)}>Open in Files</TextButton>
 		</div>
+	{:else if file.kind === "submodule"}
+		<p class="px-3 pb-2 font-mono text-xs text-text-dimmer">
+			Commit {[file.before, file.after].flatMap((id) => (id ? [id.slice(0, 7)] : [])).join(" → ")}
+		</p>
+	{:else if file.kind === "lfs"}
+		<p class="px-3 pb-2 text-xs text-text-dimmer">Stored in Git LFS.</p>
+	{:else if file.before === file.after}
+		<p class="px-3 pb-2 text-xs text-text-dimmer">No content changes.</p>
 	{:else if file.tier === "onDemand" && !clicked}
 		<div class="flex items-center gap-2 px-3 pb-2 text-xs text-text-dimmer">
 			<span>{file.insertions + file.deletions} changed lines.</span>
