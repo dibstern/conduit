@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import { Deferred, Effect, type Semaphore } from "effect";
+import { type Cause, Deferred, Effect, type Semaphore } from "effect";
 import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
 import type { ProviderRuntimeIngestion } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
 import type { RunnerHello, RunnerSocket } from "./runner-protocol.js";
@@ -507,4 +507,25 @@ export const end = (entry: RunnerChild) => {
 	const writable: Writable<RunnerChild> = entry;
 	writable.sourceDelivery = undefined;
 	notifyEntry(entry);
+};
+
+/** Wakes the entry's waiters: ready fails with the cause, drained and an End release settle. */
+export const releaseWaiters = (
+	entry: RunnerChild,
+	cause: Cause.Cause<SessionFailure>,
+) =>
+	Effect.gen(function* () {
+		notifyEntry(entry);
+		yield* Deferred.failCause(entry.ready, cause);
+		yield* Deferred.succeed(entry.drained, undefined);
+		const ending = entry.lifecycle.end;
+		if (ending) yield* Deferred.succeed(ending.released, undefined);
+	});
+
+/** Ends the entry and lets go of its connection and child, without stopping the process. */
+export const detach = (entry: RunnerChild, failure?: SessionFailure) => {
+	end(entry);
+	entry.connection?.destroy(failure);
+	entry.child?.unref();
+	if (entry.child?.connected) entry.child.disconnect();
 };

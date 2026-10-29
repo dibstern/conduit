@@ -10,6 +10,7 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import type { RunRelease } from "../../../src/lib/provider/runner/process-runner-types.js";
 import {
 	runnerBuildId,
 	runnerFailure,
@@ -22,7 +23,6 @@ import {
 import {
 	makeRunnerRunLifecycle,
 	makeRunnerStopReconciler,
-	type RunRelease,
 } from "../../../src/lib/provider/runner/runner-retirement.js";
 import type { SendEvidence } from "../../../src/lib/provider/runner/send-settlement.js";
 

@@ -21,7 +21,6 @@ import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import { ProviderRuntimeIngestionTag } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
-import { createLogger } from "../../logger.js";
 import { makeClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../persistence/effect/commit-and-signal.js";
 import {
@@ -33,10 +32,11 @@ import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retir
 import type {
 	ProviderControlCommandStatus,
 	ProviderControlContext,
-	ProviderNativeSession,
 } from "../types.js";
-import type { RunnerRecord } from "./runner-authority.js";
-import type { connectRunner } from "./runner-connection.js";
+import type {
+	ProcessRunnerDeps,
+	ProcessRunnerDriver,
+} from "./process-runner-types.js";
 import {
 	legacyAnswerCommandId,
 	makeRunnerDispatch,
@@ -45,14 +45,9 @@ import type { RunnerChild } from "./runner-entry-lifecycle.js";
 import * as Entry from "./runner-entry-lifecycle.js";
 import { legacyRunnerRunQuery } from "./runner-legacy-classification.js";
 import { runnerFailure } from "./runner-protocol.js";
-import type {
-	RunnerDriverPieces,
-	RunnerProviderInstanceDeps,
-} from "./runner-provider-instance.js";
 import { makeRunnerReceiptStore } from "./runner-receipts.js";
 import {
 	discoverAllRunners,
-	type RunnerProcessTable,
 	readRunnerEvidence,
 	removeRunnerDiscovery,
 	removeRunnerEvidence,
@@ -76,74 +71,12 @@ import {
 import { settleSend } from "./send-settlement-outbox.js";
 import type {
 	AdmitSend,
-	SessionCommand,
 	SessionFailure,
 	SessionOutput,
 	SessionOutputReply,
 	SessionRunner,
 	SessionTurn,
 } from "./session-runner.js";
-
-export interface ProcessRunnerDeps {
-	readonly accountResources?: RunnerProviderInstanceDeps["accountResources"];
-	readonly accounts?: Effect.Effect<
-		import("../../account-directory.js").AccountsState
-	>;
-	readonly daemonConfigDir?: string;
-	readonly processTable?: RunnerProcessTable;
-	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
-	readonly subagentPollTimeoutMs?: number;
-	readonly sessionForkSdk?: import("../claude/claude-provider-runtime.js").ClaudeSessionRunnerDeps["sessionForkSdk"];
-	readonly claudeSettingsOverrides?: import("../claude/claude-provider-runtime.js").ClaudeSessionRunnerDeps["claudeSettingsOverrides"];
-	readonly projectRootForSession: NonNullable<
-		RunnerProviderInstanceDeps["projectRootForSession"]
-	>;
-	readonly recoveryForSession?: RunnerProviderInstanceDeps["recoveryForSession"];
-}
-
-export interface ProcessRunnerDriver {
-	readonly spawnEnvironment?: Readonly<Record<string, string>>;
-	readonly driverKind: string;
-	readonly legacyPrepareTurnEffect?: RunnerDriverPieces["prepareTurnEffect"];
-	/** The account owner retains this demand until the native sink is released. */
-	readonly withAccountScope?: (
-		accountId: string,
-		work: Effect.Effect<void>,
-	) => Effect.Effect<void, SessionFailure>;
-	/** The payload resumes durable state on demand and needs no warm SDK query. */
-	readonly coldUpgrade?: true;
-	readonly connect: typeof connectRunner;
-	readonly settingsDeferredCode: string;
-	readonly warmCommand: (
-		sessionId: string,
-		state: import("./runner-upgrade.js").RunnerUpgradeState,
-		snapshot: import("./runner-upgrade.js").RunnerSettingsSnapshot,
-	) => Extract<SessionCommand, { type: "pre-warm" }>;
-	readonly snapshotCommandSettings: (
-		snapshot: import("./runner-upgrade.js").RunnerSettingsSnapshot | undefined,
-	) => Omit<
-		Extract<SessionCommand, { type: "send-turn" }>,
-		"type" | "sinkId" | "aborted" | "input"
-	>;
-	readonly loginChange: (
-		a: {
-			readonly configDir: import("./session-runner.js").SessionTurn["configDir"];
-			readonly root: string;
-			readonly account?: SessionTurn["account"];
-			readonly instanceId?: string;
-			readonly shellConfig?: SessionTurn["shellConfig"];
-		},
-		b: {
-			readonly configDir: import("./session-runner.js").SessionTurn["configDir"];
-			readonly root: string;
-			readonly account?: SessionTurn["account"];
-			readonly instanceId?: string;
-			readonly shellConfig?: SessionTurn["shellConfig"];
-		},
-	) => "None" | "Settings" | "Account";
-}
-
-const log = createLogger("process-session-runner");
 
 export const makeProcessSessionRunner = (
 	deps: ProcessRunnerDeps,
@@ -167,18 +100,6 @@ export const makeProcessSessionRunner = (
 		);
 		const processTable = deps.processTable ?? runnerProcessTable;
 		const clock = yield* Clock.Clock;
-		const pidAlive = (pid: number, startTime?: string) => {
-			const current = processTable.inspect(pid);
-			return (
-				!["gone", "zombie"].includes(current.state) &&
-				!(
-					startTime !== undefined &&
-					current.startTime !== undefined &&
-					current.startTime !== startTime
-				)
-			);
-		};
-		const runnerLabel = `${driver.driverKind.charAt(0).toUpperCase()}${driver.driverKind.slice(1)} runner`;
 		const accountDisplayName = (
 			input: Pick<SessionTurn, "account" | "instanceId"> | undefined,
 		) =>
@@ -188,12 +109,6 @@ export const makeProcessSessionRunner = (
 			driver.driverKind;
 		const lock = yield* Semaphore.make(1);
 		const configDir = resolve(deps.daemonConfigDir ?? DEFAULT_CONFIG_DIR);
-		const startupTimeoutMs =
-			process.env["NODE_ENV"] === "test"
-				? Number(
-						process.env["CONDUIT_TEST_RUNNER_STARTUP_TIMEOUT_MS"] ?? 10_000,
-					)
-				: 10_000;
 		const sqlOption = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const sql = sqlOption._tag === "Some" ? sqlOption.value : undefined;
 		const projection = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
@@ -372,31 +287,12 @@ export const makeProcessSessionRunner = (
 							),
 						)
 				: (legacyRetirePrompts?.(currentProcessId, owner) ?? Effect.succeed(0));
-		const currentEntry = (sessionId: string) => {
-			const serving = stops.serving(sessionId);
-			if (serving) return stops.records.get(serving)?.identity.entry;
-			for (const record of stops.records.values())
-				if (
-					record.identity.sessionId === sessionId &&
-					record.tag._tag === "Starting" &&
-					record.identity.entry?.pid === undefined &&
-					!record.identity.entry?.lifecycle.candidate
-				)
-					return record.identity.entry;
-			return undefined;
-		};
-		const attachedEntries = () =>
-			[...stops.records.values()].flatMap((record) =>
-				record.identity.entry && record.tag._tag !== "Retired"
-					? [record.identity.entry]
-					: [],
-			);
 		const sends = makeRunnerSends({
 			sendScopes,
 			runFork,
 			withAccountScope: driver.withAccountScope,
 			closing: () => stops.closing,
-			currentEntry,
+			currentEntry: (sessionId) => stops.currentEntry(sessionId),
 		});
 		const failSendOnce = (binding: SendBinding, failure: Effect.Effect<void>) =>
 			Effect.suspend(() => (sends.outcome(binding) ? failure : Effect.void));
@@ -444,7 +340,7 @@ export const makeProcessSessionRunner = (
 				Entry.end(entry);
 				entry.connection?.destroy();
 				yield* closeStoppedSends(entry.runnerId);
-				yield* releaseEntryWaiters(
+				yield* Entry.releaseWaiters(
 					entry,
 					Cause.fail(
 						entry.lifecycle.failure ??
@@ -452,23 +348,6 @@ export const makeProcessSessionRunner = (
 					),
 				);
 			});
-		const releaseEntryWaiters = (
-			entry: RunnerChild,
-			cause: Cause.Cause<SessionFailure>,
-		) =>
-			Effect.gen(function* () {
-				Entry.notifyEntry(entry);
-				yield* Deferred.failCause(entry.ready, cause);
-				yield* Deferred.succeed(entry.drained, undefined);
-				const ending = entry.lifecycle.end;
-				if (ending) yield* Deferred.succeed(ending.released, undefined);
-			});
-		const detach = (entry: RunnerChild, failure?: SessionFailure) => {
-			Entry.end(entry);
-			entry.connection?.destroy(failure);
-			entry.child?.unref();
-			if (entry.child?.connected) entry.child.disconnect();
-		};
 		const stops: Effect.Success<ReturnType<typeof makeRunnerRetirement>> =
 			yield* makeRunnerRetirement({
 				receipts,
@@ -477,8 +356,8 @@ export const makeProcessSessionRunner = (
 				close: {
 					lock,
 					sends: sendScopes.closeAll,
-					release: releaseEntryWaiters,
-					detach,
+					release: Entry.releaseWaiters,
+					detach: Entry.detach,
 				},
 				...(sql
 					? {
@@ -549,7 +428,7 @@ export const makeProcessSessionRunner = (
 						if (record) {
 							const exceptCommandId = stops.endCommand(retirement.runnerId);
 							yield* retireReplacedPrompts(
-								currentEntry(retirement.sessionId)?.runnerId ?? null,
+								stops.currentEntry(retirement.sessionId)?.runnerId ?? null,
 								{
 									sessionId: retirement.sessionId,
 									expiredProcessId: retirement.runnerId,
@@ -559,7 +438,7 @@ export const makeProcessSessionRunner = (
 							yield* lock
 								.withPermits(1)(
 									Effect.suspend(() =>
-										currentEntry(retirement.sessionId)
+										stops.currentEntry(retirement.sessionId)
 											? Effect.void
 											: emit({
 													type: "background-task",
@@ -629,109 +508,33 @@ export const makeProcessSessionRunner = (
 						return true;
 					}),
 			});
-		const retireRecord = (
-			record: RunnerRecord<RunnerChild>,
-			cause: SessionFailure,
-		): Effect.Effect<void, SessionFailure> =>
-			Effect.gen(function* () {
-				const entry = record.identity.entry;
-				const alreadyRetired = record.tag._tag === "Retired";
-				yield* stops.requestStop(
-					entry
-						? stops.retirementFor(entry)
-						: stops.retirementForIdentity(record.identity),
-				);
-				if (!alreadyRetired)
-					log.warn(
-						`Retired surviving runner ${record.identity.runnerId}: ${cause.message}`,
-					);
-				if (entry) {
-					Entry.transition(entry, { _tag: "Fail", failure: cause });
-					Entry.transition(entry, { _tag: "Recovered" });
-					yield* releaseEntryWaiters(entry, Cause.fail(cause));
-				}
-			});
-		const retireSurvivor = (
-			entry: RunnerChild,
-			cause: SessionFailure,
-		): Effect.Effect<void, SessionFailure> => {
-			const record = stops.records.get(entry.runnerId);
-			return record?.identity.entry === entry
-				? retireRecord(record, cause)
-				: Effect.void;
-		};
-		const detachSession = (sessionId: string): Effect.Effect<void> =>
-			lock
-				.withPermits(1)(
-					Effect.gen(function* () {
-						const entries = attachedEntries().filter(
-							(entry) => entry.sessionId === sessionId,
-						);
-						for (const entry of entries) {
-							const failure = runnerFailure(
-								"detach runner",
-								"Project released its runner attachment",
-							);
-							const detached = { ...failure, code: "runner_detached" };
-							Entry.transition(entry, { _tag: "Fail", failure: detached });
-							detach(entry, detached);
-							stops.detach(entry.runnerId);
-							yield* sends.closeRunner(entry.runnerId);
-							yield* releaseEntryWaiters(entry, Cause.fail(detached));
-						}
-					}),
-				)
-				.pipe(
-					Effect.uninterruptible,
-					Effect.catchCause((cause) =>
-						Effect.logError("Runner detachment failed", cause),
-					),
-				);
-		const nativeSession = (
-			sessionId: string,
-		): Effect.Effect<ProviderNativeSession | undefined> =>
-			Effect.sync(() => {
-				const entry = currentEntry(sessionId);
-				const state = entry?.upgrade.state;
-				const snapshot = state?.snapshot;
-				if (!entry || !Entry.canReconfigure(entry.lifecycle) || !snapshot)
-					return undefined;
-				return {
-					instanceId: snapshot.input.instanceId ?? driver.driverKind,
-					configDir: snapshot.input.configDir,
-					agent: snapshot.input.agent,
-					resumeSessionId: state?.resumeSessionId,
-				};
-			});
-		const { start, createEntry, upgrade, recover, startStored, turnEnds } =
-			yield* makeRunnerStarter({
-				deps,
-				driver,
-				runFork,
-				clock,
-				configDir,
-				runnerLabel,
-				startupTimeoutMs,
-				lock,
-				sql,
-				projection,
-				receipts,
-				legacyRetirePrompts,
-				processTable,
-				sends,
-				stops,
-				pidAlive,
-				currentEntry,
-				emit,
-				failBoundSend,
-				ingestionForSession,
-				wakeReactor,
-				nativeSession,
-				detach,
-				detachSession,
-				releaseEntryWaiters,
-				retireSurvivor,
-			});
+		const {
+			start,
+			createEntry,
+			upgrade,
+			recover,
+			startStored,
+			turnEnds,
+			retireSurvivor,
+			detachSession,
+			nativeSession,
+		} = yield* makeRunnerStarter({
+			deps,
+			driver,
+			runFork,
+			configDir,
+			lock,
+			sql,
+			projection,
+			receipts,
+			legacyRetirePrompts,
+			sends,
+			stops,
+			emit,
+			failBoundSend,
+			ingestionForSession,
+			wakeReactor,
+		});
 		// Starter's acknowledge loop is forked above, so shutdown runs while it is alive.
 		yield* Effect.addFinalizer(() =>
 			stops.shutdown.pipe(
@@ -748,12 +551,10 @@ export const makeProcessSessionRunner = (
 			sql,
 			sends,
 			stops,
-			starter: { start, createEntry, upgrade },
-			currentEntry,
+			starter: { start, createEntry, upgrade, retireSurvivor },
 			emit,
 			failSendOnce,
 			failBoundSend,
-			retireSurvivor,
 			accountDisplayName,
 		});
 
@@ -781,7 +582,7 @@ export const makeProcessSessionRunner = (
 
 			hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
 				return Effect.sync(() => {
-					const entry = currentEntry(sessionId);
+					const entry = stops.currentEntry(sessionId);
 					return (
 						entry !== undefined &&
 						Entry.countsTowardDemand(entry.lifecycle) &&
@@ -794,7 +595,7 @@ export const makeProcessSessionRunner = (
 				control: ProviderControlContext,
 			): Effect.Effect<ProviderControlCommandStatus, SessionFailure> {
 				return Effect.gen(function* () {
-					const entry = currentEntry(sessionId);
+					const entry = stops.currentEntry(sessionId);
 					if (entry && entry.runnerId !== control.providerProcessId)
 						return "gone";
 					const unavailable = () =>
@@ -804,7 +605,7 @@ export const makeProcessSessionRunner = (
 						);
 					if (!entry) return yield* Effect.fail(unavailable());
 					const pid = entry.pid ?? entry.child?.pid;
-					if (pid !== undefined && !pidAlive(pid, entry.startTime))
+					if (pid !== undefined && !stops.pidAlive(pid, entry.startTime))
 						return "gone";
 					const connection = entry.connection;
 					if (
@@ -838,10 +639,10 @@ export const makeProcessSessionRunner = (
 								connection.observedCommandStatus(legacyAnswerId),
 							)
 						: connection.commandStatusEffect(control.commandId);
-					const current = currentEntry(sessionId);
+					const current = stops.currentEntry(sessionId);
 					if (current && current.runnerId !== control.providerProcessId)
 						return "gone";
-					if (pid !== undefined && !pidAlive(pid, entry.startTime))
+					if (pid !== undefined && !stops.pidAlive(pid, entry.startTime))
 						return "gone";
 					if (
 						current !== entry ||
@@ -857,7 +658,7 @@ export const makeProcessSessionRunner = (
 				sessionId: string,
 			): Effect.Effect<string | undefined> {
 				return Effect.sync(() => {
-					const entry = currentEntry(sessionId);
+					const entry = stops.currentEntry(sessionId);
 					return entry && Entry.canControl(entry.lifecycle)
 						? entry.runnerId
 						: undefined;
@@ -926,7 +727,7 @@ export const makeProcessSessionRunner = (
 						const identity = state.record.identity;
 						if (
 							identity.pid !== undefined &&
-							pidAlive(
+							stops.pidAlive(
 								identity.pid,
 								identity.tag === "Verified" ? identity.startTime : undefined,
 							)
@@ -944,7 +745,10 @@ export const makeProcessSessionRunner = (
 						const pid = entry?.pid ?? entry?.child?.pid ?? record.identity.pid;
 						const alive =
 							pid !== undefined &&
-							pidAlive(pid, entry?.startTime ?? record.identity.startTime);
+							stops.pidAlive(
+								pid,
+								entry?.startTime ?? record.identity.startTime,
+							);
 						if (
 							alive &&
 							record.identity.sessionId === sessionId &&
@@ -966,7 +770,7 @@ export const makeProcessSessionRunner = (
 
 			hasDemandEffect(sessionId: string): Effect.Effect<boolean> {
 				return Effect.sync(() => {
-					const entry = currentEntry(sessionId);
+					const entry = stops.currentEntry(sessionId);
 					return (
 						entry !== undefined &&
 						Entry.countsTowardDemand(entry.lifecycle) &&
@@ -977,7 +781,7 @@ export const makeProcessSessionRunner = (
 
 			getAccountSwitchBlockEffect(sessionId: string, account: Account) {
 				return Effect.sync(() => {
-					const entry = currentEntry(sessionId);
+					const entry = stops.currentEntry(sessionId);
 					const snapshot = entry?.upgrade.state?.snapshot;
 					if (
 						!entry ||

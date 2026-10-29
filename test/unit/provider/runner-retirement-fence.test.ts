@@ -72,10 +72,8 @@ import {
 } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { makeInProcessSessionRunner } from "../../../src/lib/provider/runner/in-process-session-runner.js";
-import {
-	makeProcessSessionRunner,
-	type ProcessRunnerDriver,
-} from "../../../src/lib/provider/runner/process-session-runner.js";
+import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
+import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import {
 	isLegacyRunner,
 	legacyRunnerRunQuery,

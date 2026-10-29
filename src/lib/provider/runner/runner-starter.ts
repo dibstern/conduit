@@ -43,9 +43,11 @@ import { isClaudeResumeRefused } from "../event-sink-errors.js";
 import { STOP_ABORT_WAIT_MS } from "../orchestration-command-contracts.js";
 import type { ProviderNativeSession, TurnResult } from "../types.js";
 import type {
+	OwnerSend,
 	ProcessRunnerDeps,
 	ProcessRunnerDriver,
-} from "./process-session-runner.js";
+} from "./process-runner-types.js";
+import type { RunnerRecord } from "./runner-authority.js";
 import type { RunnerChild } from "./runner-entry-lifecycle.js";
 import * as Entry from "./runner-entry-lifecycle.js";
 import {
@@ -78,13 +80,11 @@ import {
 import {
 	discoverAllRunners,
 	prepareRunnerDirectory,
-	type RunnerProcessTable,
 	runnerDirectory,
 	runnerPidMatchesRegistration,
 } from "./runner-registry.js";
 import type { makeRunnerRetirement } from "./runner-retirement.js";
 import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
-import type { OwnerSend } from "./runner-send-feeder.js";
 import { runnerSendCommandsForProcess } from "./runner-send-journal.js";
 import type { makeRunnerSends, SendBinding } from "./runner-sends.js";
 import { makeRunnerUpgrade } from "./runner-upgrade.js";
@@ -109,7 +109,8 @@ import type {
 	SessionOutputReply,
 } from "./session-runner.js";
 
-const log = createLogger("process-session-runner");
+/** The runner's log, shared with Dispatch so the component name has one owner. */
+export const log = createLogger("process-session-runner");
 export const CANCELLED_TURN: TurnResult = {
 	status: "cancelled",
 	cost: 0,
@@ -124,10 +125,7 @@ interface RunnerStarterOptions {
 	readonly runFork: Effect.Success<
 		ReturnType<typeof FiberSet.makeRuntime<never, void, never>>
 	>;
-	readonly clock: Clock.Clock;
 	readonly configDir: string;
-	readonly runnerLabel: string;
-	readonly startupTimeoutMs: number;
 	readonly lock: Semaphore.Semaphore;
 	readonly sql: SqlClient.SqlClient | undefined;
 	readonly projection: Option.Option<ProjectionRunnerEffect>;
@@ -137,7 +135,6 @@ interface RunnerStarterOptions {
 	readonly legacyRetirePrompts:
 		| Effect.Success<typeof makeRetireReplacedProcessPrompts>
 		| undefined;
-	readonly processTable: RunnerProcessTable;
 	readonly sends: ReturnType<typeof makeRunnerSends>;
 	readonly stops: Pick<
 		Effect.Success<ReturnType<typeof makeRunnerRetirement>>,
@@ -146,11 +143,15 @@ interface RunnerStarterOptions {
 		| "attach"
 		| "awaitStop"
 		| "closing"
+		| "currentEntry"
+		| "detach"
 		| "grantOf"
 		| "guarded"
 		| "identityFor"
 		| "inRecovery"
 		| "observe"
+		| "pidAlive"
+		| "processTable"
 		| "records"
 		| "recover"
 		| "recovering"
@@ -158,11 +159,10 @@ interface RunnerStarterOptions {
 		| "release"
 		| "requestStop"
 		| "retirementFor"
+		| "retirementForIdentity"
 		| "state"
 		| "stopRunner"
 	>;
-	readonly pidAlive: (pid: number, startTime?: string) => boolean;
-	readonly currentEntry: (sessionId: string) => RunnerChild | undefined;
 	readonly emit: (
 		output: SessionOutput,
 		sessionId?: string,
@@ -177,19 +177,6 @@ interface RunnerStarterOptions {
 		sessionId: string,
 	) => Effect.Effect<ProviderRuntimeIngestion | undefined>;
 	readonly wakeReactor: (sessionId: string) => Effect.Effect<void>;
-	readonly nativeSession: (
-		sessionId: string,
-	) => Effect.Effect<ProviderNativeSession | undefined>;
-	readonly detach: (entry: RunnerChild, failure?: SessionFailure) => void;
-	readonly detachSession: (sessionId: string) => Effect.Effect<void>;
-	readonly releaseEntryWaiters: (
-		entry: RunnerChild,
-		cause: Cause.Cause<SessionFailure>,
-	) => Effect.Effect<void>;
-	readonly retireSurvivor: (
-		entry: RunnerChild,
-		cause: SessionFailure,
-	) => Effect.Effect<void, SessionFailure>;
 }
 
 export const makeRunnerStarter = (options: RunnerStarterOptions) =>
@@ -198,35 +185,114 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 			deps,
 			driver,
 			runFork,
-			clock,
 			configDir,
-			runnerLabel,
-			startupTimeoutMs,
 			lock,
 			sql,
 			projection,
 			receipts,
 			legacyRetirePrompts,
-			processTable,
 			sends,
 			stops,
-			pidAlive,
-			currentEntry,
 			emit,
 			failBoundSend,
 			ingestionForSession,
 			wakeReactor,
-			nativeSession,
-			detach,
-			detachSession,
-			releaseEntryWaiters,
-			retireSurvivor,
 		} = options;
+		const clock = yield* Clock.Clock;
+		const runnerLabel = `${driver.driverKind.charAt(0).toUpperCase()}${driver.driverKind.slice(1)} runner`;
+		const startupTimeoutMs =
+			process.env["NODE_ENV"] === "test"
+				? Number(
+						process.env["CONDUIT_TEST_RUNNER_STARTUP_TIMEOUT_MS"] ?? 10_000,
+					)
+				: 10_000;
+		const attachedEntries = () =>
+			[...stops.records.values()].flatMap((record) =>
+				record.identity.entry && record.tag._tag !== "Retired"
+					? [record.identity.entry]
+					: [],
+			);
+		const retireRecord = (
+			record: RunnerRecord<RunnerChild>,
+			cause: SessionFailure,
+		): Effect.Effect<void, SessionFailure> =>
+			Effect.gen(function* () {
+				const entry = record.identity.entry;
+				const alreadyRetired = record.tag._tag === "Retired";
+				yield* stops.requestStop(
+					entry
+						? stops.retirementFor(entry)
+						: stops.retirementForIdentity(record.identity),
+				);
+				if (!alreadyRetired)
+					log.warn(
+						`Retired surviving runner ${record.identity.runnerId}: ${cause.message}`,
+					);
+				if (entry) {
+					Entry.transition(entry, { _tag: "Fail", failure: cause });
+					Entry.transition(entry, { _tag: "Recovered" });
+					yield* Entry.releaseWaiters(entry, Cause.fail(cause));
+				}
+			});
+		const retireSurvivor = (
+			entry: RunnerChild,
+			cause: SessionFailure,
+		): Effect.Effect<void, SessionFailure> => {
+			const record = stops.records.get(entry.runnerId);
+			return record?.identity.entry === entry
+				? retireRecord(record, cause)
+				: Effect.void;
+		};
+		const detachSession = (sessionId: string): Effect.Effect<void> =>
+			lock
+				.withPermits(1)(
+					Effect.gen(function* () {
+						const entries = attachedEntries().filter(
+							(entry) => entry.sessionId === sessionId,
+						);
+						for (const entry of entries) {
+							const failure = runnerFailure(
+								"detach runner",
+								"Project released its runner attachment",
+							);
+							const detached = { ...failure, code: "runner_detached" };
+							Entry.transition(entry, { _tag: "Fail", failure: detached });
+							Entry.detach(entry, detached);
+							stops.detach(entry.runnerId);
+							yield* sends.closeRunner(entry.runnerId);
+							yield* Entry.releaseWaiters(entry, Cause.fail(detached));
+						}
+					}),
+				)
+				.pipe(
+					Effect.uninterruptible,
+					Effect.catchCause((cause) =>
+						Effect.logError("Runner detachment failed", cause),
+					),
+				);
+		const nativeSession = (
+			sessionId: string,
+		): Effect.Effect<ProviderNativeSession | undefined> =>
+			Effect.sync(() => {
+				const entry = stops.currentEntry(sessionId);
+				const state = entry?.upgrade.state;
+				const snapshot = state?.snapshot;
+				if (!entry || !Entry.canReconfigure(entry.lifecycle) || !snapshot)
+					return undefined;
+				return {
+					instanceId: snapshot.input.instanceId ?? driver.driverKind,
+					configDir: snapshot.input.configDir,
+					agent: snapshot.input.agent,
+					resumeSessionId: state?.resumeSessionId,
+				};
+			});
 		const turnEnds = yield* PubSub.unbounded<string>();
 		const activeEntries = () =>
 			[...stops.records.values()].flatMap((record) => {
 				const entry = record.identity.entry;
-				return entry && currentEntry(entry.sessionId) === entry ? [entry] : [];
+				return entry && stops.currentEntry(entry.sessionId) === entry
+					? [entry]
+					: [];
 			});
 		const tracked = (entry: RunnerChild) =>
 			stops.records.get(entry.runnerId)?.identity.entry === entry;
@@ -378,7 +444,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 			Effect.gen(function* () {
 				const ownsEntry = entry.lifecycle.candidate
 					? tracked(entry)
-					: currentEntry(entry.sessionId) === entry;
+					: stops.currentEntry(entry.sessionId) === entry;
 				if (stops.closing || !ownsEntry) return;
 				// An orphan's session is gone or already served. EndSession is not
 				// role-gated, so the commit stops whatever row it reads.
@@ -858,7 +924,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 											},
 											closing: () =>
 												stops.closing ||
-												currentEntry(sessionId) !== entry ||
+												stops.currentEntry(sessionId) !== entry ||
 												entry.connection !== connection ||
 												connection.closed,
 											send: (commandId, command, attempt) => {
@@ -928,7 +994,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 										}),
 									closing: () =>
 										stops.closing ||
-										currentEntry(sessionId) !== entry ||
+										stops.currentEntry(sessionId) !== entry ||
 										entry.connection !== connection ||
 										connection.closed,
 									fail: (failure) => failed(sessionId, entry, failure),
@@ -1184,14 +1250,14 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							const ownsEntry = () =>
 								(entry.lifecycle.candidate
 									? tracked(entry)
-									: currentEntry(sessionId) === entry) &&
+									: stops.currentEntry(sessionId) === entry) &&
 								Entry.canControl(entry.lifecycle) &&
 								!stops.closing;
 							Entry.connect(entry, {
 								hello,
 								connection,
 								attachmentId: (yield* currentRunnerOutput)?.attachmentId,
-								startTime: (pid) => processTable.inspect(pid).startTime,
+								startTime: (pid) => stops.processTable.inspect(pid).startTime,
 								owns: ownsEntry,
 							});
 							const ensureAttached = () =>
@@ -1716,7 +1782,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								sessionId,
 							});
 						if (
-							currentEntry(sessionId) === entry &&
+							stops.currentEntry(sessionId) === entry &&
 							wasInFlight &&
 							state.turnInFlight === false
 						)
@@ -1813,7 +1879,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							Entry.bindProcess(entry, {
 								child,
 								pid: child.pid,
-								startTime: (pid) => processTable.inspect(pid).startTime,
+								startTime: (pid) => stops.processTable.inspect(pid).startTime,
 							});
 							return child;
 						} finally {
@@ -1967,7 +2033,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 				),
 				Effect.onError((cause) =>
 					Effect.sync(() => {
-						detach(entry);
+						Entry.detach(entry);
 						failed(
 							sessionId,
 							entry,
@@ -2032,7 +2098,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 		const eligible = (sessionId: string, entry: RunnerChild) =>
 			!stops.closing &&
 			!stops.inRecovery &&
-			currentEntry(sessionId) === entry &&
+			stops.currentEntry(sessionId) === entry &&
 			Entry.canUpgrade(entry.lifecycle) &&
 			entry.buildId !== undefined &&
 			(entry.buildId !== runnerBuildId() ||
@@ -2263,7 +2329,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 						);
 						const discovered = discoverAllRunners(
 							configDir,
-							processTable,
+							stops.processTable,
 						).filter(
 							(registration) =>
 								(registration.driverKind ?? "claude") === driver.driverKind &&
@@ -2473,10 +2539,10 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							if (
 								sessionIds &&
 								(!sessionIds.has(registration.sessionId) ||
-									(currentEntry(registration.sessionId)?.runnerId ===
+									(stops.currentEntry(registration.sessionId)?.runnerId ===
 										registration.runnerId &&
 										!Entry.isAwaitingProject(
-											currentEntry(registration.sessionId)?.lifecycle,
+											stops.currentEntry(registration.sessionId)?.lifecycle,
 										)))
 							)
 								continue;
@@ -2518,7 +2584,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							// Reattach their spool once the project's services become available.
 							if (
 								Entry.isAwaitingProject(
-									currentEntry(registration.sessionId)?.lifecycle,
+									stops.currentEntry(registration.sessionId)?.lifecycle,
 								) &&
 								recovery
 							)
@@ -2535,7 +2601,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							let abandoned =
 								missingCursor ||
 								(sql !== undefined && !persisted && !outstandingEnd) ||
-								Boolean(currentEntry(registration.sessionId));
+								Boolean(stops.currentEntry(registration.sessionId));
 							const entry: RunnerChild = {
 								...registration,
 								recoveringCommands: !abandoned,
@@ -2577,7 +2643,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 												"Runners are shutting down",
 											),
 										);
-									abandoned ||= Boolean(currentEntry(registration.sessionId));
+									abandoned ||= Boolean(
+										stops.currentEntry(registration.sessionId),
+									);
 									if (abandoned)
 										Entry.transition(entry, { _tag: "MakeCandidate" });
 									yield* stops.adoptEntry(
@@ -2617,7 +2685,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								Entry.canControl(entry.lifecycle) &&
 								(entry.lifecycle.candidate
 									? tracked(entry)
-									: currentEntry(registration.sessionId) === entry)
+									: stops.currentEntry(registration.sessionId) === entry)
 									? Effect.void
 									: Effect.fail(
 											runnerFailure(
@@ -2634,7 +2702,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								runFork(
 									stop.pipe(
 										Effect.catchCause((cause) =>
-											releaseEntryWaiters(entry, cause).pipe(
+											Entry.releaseWaiters(entry, cause).pipe(
 												// Shutdown interrupts a Stop still committing; that is not an error.
 												Effect.andThen(
 													Failure.isInterruptedOnly(cause)
@@ -2663,7 +2731,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									(connected._tag === "Failure"
 										? connected.failure.code !== "runner_incompatible"
 										: connected.success.closed) &&
-									pidAlive(registration.pid, registration.startTime) &&
+									stops.pidAlive(registration.pid, registration.startTime) &&
 									retry < 4;
 									retry++
 								) {
@@ -2690,12 +2758,14 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									stopUnawaited(
 										Effect.gen(function* () {
 											yield* stops.stopRunner(entry, undefined, "failure");
-											if (pidAlive(registration.pid, registration.startTime))
+											if (
+												stops.pidAlive(registration.pid, registration.startTime)
+											)
 												return yield* retireSurvivor(entry, failure);
 											Entry.transition(entry, { _tag: "Recovered" });
 											Entry.transition(entry, { _tag: "Fail", failure });
 											yield* stops.stopRunner(entry);
-											yield* releaseEntryWaiters(entry, Cause.fail(failure));
+											yield* Entry.releaseWaiters(entry, Cause.fail(failure));
 										}),
 									);
 									return;
@@ -2708,7 +2778,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 													"recover runner",
 													"Runner disconnected during recovery",
 												);
-									if (!pidAlive(registration.pid, registration.startTime)) {
+									if (
+										!stops.pidAlive(registration.pid, registration.startTime)
+									) {
 										Entry.transition(entry, { _tag: "Recovered" });
 										const abandonedFailure: SessionFailure = {
 											...failure,
@@ -2724,7 +2796,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 												.stopRunner(entry, undefined, "failure")
 												.pipe(
 													Effect.andThen(
-														releaseEntryWaiters(
+														Entry.releaseWaiters(
 															entry,
 															Cause.fail(abandonedFailure),
 														),
@@ -2773,7 +2845,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 										return Effect.void;
 									// Interruption is no stop reason (6.3), but its waiters must settle.
 									if (Failure.isInterruptedOnly(exit.cause))
-										return releaseEntryWaiters(entry, exit.cause);
+										return Entry.releaseWaiters(entry, exit.cause);
 									return Effect.sync(() => {
 										Entry.transition(entry, { _tag: "Recovered" });
 										Entry.transition(entry, {
@@ -2789,7 +2861,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 												.stopRunner(entry)
 												.pipe(
 													Effect.andThen(
-														releaseEntryWaiters(entry, exit.cause),
+														Entry.releaseWaiters(entry, exit.cause),
 													),
 												),
 										);
@@ -2898,5 +2970,8 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 			recover,
 			startStored,
 			turnEnds: Effect.map(PubSub.subscribe(turnEnds), Stream.fromSubscription),
+			retireSurvivor,
+			detachSession,
+			nativeSession,
 		};
 	});

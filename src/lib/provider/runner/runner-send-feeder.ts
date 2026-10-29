@@ -16,10 +16,15 @@ import { isClaudeResumeRefused } from "../event-sink-errors.js";
 import { runSendCommandIdQuery } from "../session-run-settlement.js";
 import type { ProviderNativeSession, TurnResult } from "../types.js";
 import type {
+	Held,
+	Hold,
+	OwnerSend,
 	ProcessRunnerDeps,
 	ProcessRunnerDriver,
-} from "./process-session-runner.js";
-import type { makeRunnerDispatch, WritePermission } from "./runner-dispatch.js";
+	RunRelease,
+	WritePermission,
+} from "./process-runner-types.js";
+import type { makeRunnerDispatch } from "./runner-dispatch.js";
 import type { RunnerChild } from "./runner-entry-lifecycle.js";
 import { legacyRunnerRunQuery } from "./runner-legacy-classification.js";
 import { replayLegacyRunnerSend } from "./runner-legacy-recovery.js";
@@ -35,10 +40,8 @@ import {
 	runningRunnerCommands,
 } from "./runner-recovery.js";
 import type {
-	Hold,
 	makeRunnerRetirement,
 	makeRunnerRunLifecycle,
-	RunRelease,
 } from "./runner-retirement.js";
 import type { makeRunnerSends } from "./runner-sends.js";
 import { CANCELLED_TURN, type makeRunnerStarter } from "./runner-starter.js";
@@ -53,15 +56,6 @@ import {
 } from "./send-settlement.js";
 import type { SessionCommand, SessionFailure } from "./session-runner.js";
 
-export interface OwnerSend {
-	readonly sessionId: string;
-	readonly runId: string;
-	readonly commandId: string;
-	readonly nativeResumeFallback?: boolean;
-	readonly requestSequence?: number;
-	readonly attempt?: number;
-}
-type Held = Extract<Hold, { _tag: "Held" }>;
 type Transmit = (
 	held: Held,
 	permission: WritePermission,
@@ -719,7 +713,7 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 		}
 		const transmitStoredOwner = (
 			input: OwnerSend,
-			held: Extract<Hold, { _tag: "Held" }>,
+			held: Held,
 			permission: WritePermission,
 		): Effect.Effect<TurnResult | undefined, SessionFailure> =>
 			Effect.gen(function* () {

@@ -37,10 +37,8 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { sendPreparedClaudeTurn } from "../../../src/lib/provider/claude/prepare-turn.js";
-import {
-	makeProcessSessionRunner,
-	type ProcessRunnerDriver,
-} from "../../../src/lib/provider/runner/process-session-runner.js";
+import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
+import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import * as RunnerConnection from "../../../src/lib/provider/runner/runner-connection.js";
 import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-legacy-classification.js";
 import {

@@ -38,6 +38,12 @@ import {
 	runSendCommandIdQuery,
 	stopCovers,
 } from "../session-run-settlement.js";
+import type {
+	Held,
+	Hold,
+	OwnerSend,
+	RunRelease,
+} from "./process-runner-types.js";
 import {
 	type Grant,
 	makeRunnerAuthority,
@@ -81,7 +87,6 @@ import {
 	runnerProcessTable,
 } from "./runner-registry.js";
 import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
-import type { OwnerSend } from "./runner-send-feeder.js";
 import { readRunnerSendJournal } from "./runner-send-journal.js";
 import {
 	type HeldSendRef,
@@ -97,25 +102,6 @@ import { settleSend } from "./send-settlement-outbox.js";
 import type { SessionFailure } from "./session-runner.js";
 
 const log = createLogger("runner-retirement");
-
-export type Hold =
-	| {
-			readonly _tag: "Held";
-			readonly runner: string;
-			readonly transmission: number;
-	  }
-	| { readonly _tag: "Cleaning"; readonly runner: string }
-	| {
-			readonly _tag: "Unserved";
-			readonly predecessor: Option.Option<{
-				readonly runner: string;
-				readonly until: number;
-			}>;
-	  }
-	| { readonly _tag: "Busy" }
-	| { readonly _tag: "Covered" }
-	| { readonly _tag: "Exhausted" }
-	| { readonly _tag: "Ended" };
 
 const stopWindowEnd = (record: {
 	readonly retiredAt: number;
@@ -138,7 +124,7 @@ export const makeRunnerRunLifecycle = (
 				},
 				runner: string,
 				transmission: number,
-			) => void;
+			) => () => void;
 			readonly released: (input: RunRelease) => Effect.Effect<void>;
 		};
 	},
@@ -152,6 +138,7 @@ export const makeRunnerRunLifecycle = (
 			readonly observedAt?: number;
 		}): Effect.Effect<Hold, StoreFault> => {
 			const followUps: Effect.Effect<void>[] = [];
+			let unhold: (() => void) | undefined;
 			return commit
 				.write<Hold, CommitAndSignalFailure | StoreFault, never>(
 					(project, stamp) =>
@@ -297,8 +284,13 @@ export const makeRunnerRunLifecycle = (
 								]),
 							);
 							// Inside the commit permit: a release of this transmission commits
-							// only after this one, so its delete always finds the entry.
-							options.holds?.held(input, serving.runner_id, transmission);
+							// only after this one, so its delete always finds the entry. A
+							// rollback after this point undoes the set below.
+							unhold = options.holds?.held(
+								input,
+								serving.runner_id,
+								transmission,
+							);
 							return { _tag: "Held", runner: serving.runner_id, transmission };
 						}),
 					{
@@ -308,6 +300,7 @@ export const makeRunnerRunLifecycle = (
 					},
 				)
 				.pipe(
+					Effect.onError(() => Effect.sync(() => unhold?.())),
 					Effect.tap(() => options.wakeReactor ?? Effect.void),
 					Effect.mapError(toStoreFault),
 				);
@@ -462,16 +455,6 @@ export type RunnerStop =
 	| { readonly _tag: "Escalated"; readonly record: RunnerRetirement }
 	| { readonly _tag: "Gone"; readonly record: RunnerRetirement }
 	| { readonly _tag: "Settled"; readonly record: RunnerRetirement };
-
-export interface RunRelease {
-	readonly sessionId: string;
-	readonly runId: string;
-	readonly runnerId: string;
-	readonly commandId: string;
-	readonly transmission: number;
-	readonly reason: "Refused" | "NotSent" | "JournalAbsent" | "ResumeRejected";
-	readonly refusalReason?: "exiting" | "retiring" | "interrupted";
-}
 
 type StopAction =
 	| { readonly _tag: "SendShutdown" }
@@ -1717,6 +1700,32 @@ export const makeRunnerRetirement = (
 			get records() {
 				return authority.records;
 			},
+			/** The serving runner's entry, else the one still starting unbound. */
+			currentEntry: (sessionId: string) => {
+				const serving = stops.serving(sessionId);
+				if (serving) return authority.records.get(serving)?.identity.entry;
+				for (const record of authority.records.values())
+					if (
+						record.identity.sessionId === sessionId &&
+						record.tag._tag === "Starting" &&
+						record.identity.entry?.pid === undefined &&
+						!record.identity.entry?.lifecycle.candidate
+					)
+						return record.identity.entry;
+				return undefined;
+			},
+			pidAlive: (pid: number, startTime?: string) => {
+				const current = options.processTable.inspect(pid);
+				return (
+					!["gone", "zombie"].includes(current.state) &&
+					!(
+						startTime !== undefined &&
+						current.startTime !== undefined &&
+						current.startTime !== startTime
+					)
+				);
+			},
+			processTable: options.processTable,
 			/** Recovery restores live authority to durable serving rows only. */
 			adopt: (identities: Parameters<typeof authority.adopt>[0]) =>
 				authority
@@ -1796,14 +1805,20 @@ export const makeRunnerRetirement = (
 								}),
 							),
 						),
-			/** The lifecycle's writers: the hold's commit sets, a release deletes. */
+			/** The lifecycle's writers: the hold sets, its rollback undoes the set, a release deletes. */
 			holds: {
 				held: (
 					run: Pick<OwnerSend, "sessionId" | "runId" | "commandId">,
 					runner: string,
 					transmission: number,
 				) => {
-					currentHolds.set(holdKey(run), { runner, transmission });
+					const key = holdKey(run);
+					const hold = { runner, transmission };
+					currentHolds.set(key, hold);
+					// Identity, not transmission: a later hold may reuse an uncommitted number.
+					return () => {
+						if (currentHolds.get(key) === hold) currentHolds.delete(key);
+					};
 				},
 				released: (input: RunRelease) =>
 					Effect.suspend(() => {
@@ -1819,11 +1834,7 @@ export const makeRunnerRetirement = (
 			/** Every committed release, for the feeder's re-enqueue only. */
 			releases,
 			/** Settles the send as failed; a held send is released in the same commit. */
-			refuse: (
-				input: OwnerSend,
-				failure: SessionFailure,
-				held?: Extract<Hold, { _tag: "Held" }>,
-			) => {
+			refuse: (input: OwnerSend, failure: SessionFailure, held?: Held) => {
 				const {
 					sql,
 					commit: commitSettlement,

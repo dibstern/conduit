@@ -11,21 +11,26 @@ import {
 import type { SqlClient } from "effect/sql";
 import { accountSwitchBusyMessage } from "../../contracts/limit-recovery.js";
 import * as Failure from "../../effect/failure-classification.js";
-import { createLogger } from "../../logger.js";
 import { STOP_ABORT_WAIT_MS } from "../orchestration-command-contracts.js";
 import { runSendCommandIdQuery } from "../session-run-settlement.js";
 import type { TurnResult } from "../types.js";
 import type {
+	Held,
 	ProcessRunnerDeps,
 	ProcessRunnerDriver,
-} from "./process-session-runner.js";
+	WritePermission,
+} from "./process-runner-types.js";
 import type { RunnerChild } from "./runner-entry-lifecycle.js";
 import * as Entry from "./runner-entry-lifecycle.js";
 import { runnerBuildId, runnerFailure } from "./runner-protocol.js";
 import { currentRunnerOutput } from "./runner-receipts.js";
-import type { Hold, makeRunnerRetirement } from "./runner-retirement.js";
+import type { makeRunnerRetirement } from "./runner-retirement.js";
 import type { makeRunnerSends, SendBinding } from "./runner-sends.js";
-import { CANCELLED_TURN, type makeRunnerStarter } from "./runner-starter.js";
+import {
+	CANCELLED_TURN,
+	log,
+	type makeRunnerStarter,
+} from "./runner-starter.js";
 import { failRunnerTurn } from "./runner-turn-failure.js";
 import { makeSendAdmissionWait } from "./send-admission.js";
 import type { SendScope } from "./send-scope.js";
@@ -37,19 +42,10 @@ import type {
 	SessionTurn,
 } from "./session-runner.js";
 
-const log = createLogger("process-session-runner");
-
 export const legacyAnswerCommandId = (entry: RunnerChild, commandId: string) =>
 	entry.capabilities?.settlesAnswers === true
 		? undefined
 		: `${commandId}:answer`;
-
-/** The feeder's write permission, as Dispatch consumes it, so Dispatch never imports the feeder. */
-export interface WritePermission {
-	readonly current: () => boolean;
-	/** Consume immediately before the first byte, without yielding before write. */
-	readonly consume: () => boolean;
-}
 
 interface RunnerDispatchOptions {
 	readonly deps: ProcessRunnerDeps;
@@ -62,13 +58,17 @@ interface RunnerDispatchOptions {
 	readonly sends: ReturnType<typeof makeRunnerSends>;
 	readonly stops: Pick<
 		Effect.Success<ReturnType<typeof makeRunnerRetirement>>,
-		"awaitStop" | "closing" | "records" | "shutdown" | "stopRunner"
+		| "awaitStop"
+		| "closing"
+		| "currentEntry"
+		| "records"
+		| "shutdown"
+		| "stopRunner"
 	>;
 	readonly starter: Pick<
 		Effect.Success<ReturnType<typeof makeRunnerStarter>>,
-		"start" | "createEntry" | "upgrade"
+		"start" | "createEntry" | "upgrade" | "retireSurvivor"
 	>;
-	readonly currentEntry: (sessionId: string) => RunnerChild | undefined;
 	readonly emit: (
 		output: SessionOutput,
 		sessionId?: string,
@@ -83,10 +83,6 @@ interface RunnerDispatchOptions {
 		entry: RunnerChild,
 		failure: SessionFailure,
 	) => Effect.Effect<void>;
-	readonly retireSurvivor: (
-		entry: RunnerChild,
-		cause: SessionFailure,
-	) => Effect.Effect<void, SessionFailure>;
 	readonly accountDisplayName: (
 		input: Pick<SessionTurn, "account" | "instanceId"> | undefined,
 	) => string;
@@ -101,19 +97,17 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 		sql,
 		sends,
 		stops,
-		starter: { start, createEntry, upgrade },
-		currentEntry,
+		starter: { start, createEntry, upgrade, retireSurvivor },
 		emit,
 		failSendOnce,
 		failBoundSend,
-		retireSurvivor,
 		accountDisplayName,
 	} = options;
 	function dispatch(
 		command: Extract<SessionCommand, { type: "send-turn" }>,
 		send: SendScope,
 		recovered?: RunnerChild,
-		held?: Extract<Hold, { _tag: "Held" }>,
+		held?: Held,
 		legacySend?: boolean,
 		permission?: WritePermission,
 	): Effect.Effect<TurnResult, SessionFailure>;
@@ -121,7 +115,7 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 		command: Exclude<SessionCommand, { type: "send-turn" }>,
 		send?: SendScope,
 		recovered?: RunnerChild,
-		held?: Extract<Hold, { _tag: "Held" }>,
+		held?: Held,
 		legacySend?: boolean,
 		permission?: WritePermission,
 	): Effect.Effect<void, SessionFailure>;
@@ -129,7 +123,7 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 		command: SessionCommand,
 		send: SendScope,
 		recovered?: RunnerChild,
-		held?: Extract<Hold, { _tag: "Held" }>,
+		held?: Held,
 		legacySend?: boolean,
 		permission?: WritePermission,
 	): Effect.Effect<TurnResult | undefined, SessionFailure>;
@@ -137,7 +131,7 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 		command: SessionCommand,
 		send?: SendScope,
 		recovered?: RunnerChild,
-		held?: Extract<Hold, { _tag: "Held" }>,
+		held?: Held,
 		legacySend = false,
 		permission?: WritePermission,
 	): Effect.Effect<TurnResult | undefined, SessionFailure> {
@@ -258,7 +252,7 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 			// Admission parks on this entry. Only a new gate step may pick another holder.
 			let selectedEntry = held
 				? stops.records.get(held.runner)?.identity.entry
-				: currentEntry(sessionId);
+				: stops.currentEntry(sessionId);
 			let selecting = true;
 			while (selecting) {
 				const selection = yield* lock.withPermits(1)(
@@ -586,7 +580,8 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 					const waiting = entry;
 					yield* Deferred.await(waiting.ready).pipe(
 						Effect.catch((failure) =>
-							currentEntry(sessionId) !== waiting && waiting.lifecycle.stop
+							stops.currentEntry(sessionId) !== waiting &&
+							waiting.lifecycle.stop
 								? Effect.void
 								: Effect.fail(failure),
 						),
@@ -663,7 +658,7 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 					: yield* Deferred.await(entry.ready);
 			if (
 				command.control &&
-				(currentEntry(sessionId) !== entry ||
+				(stops.currentEntry(sessionId) !== entry ||
 					entry.runnerId !== command.control.providerProcessId ||
 					!Entry.canControl(entry.lifecycle) ||
 					connection.closed)

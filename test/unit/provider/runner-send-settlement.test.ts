@@ -49,10 +49,8 @@ import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/clau
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
-import {
-	makeProcessSessionRunner,
-	type ProcessRunnerDriver,
-} from "../../../src/lib/provider/runner/process-session-runner.js";
+import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
+import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import {
 	type RunnerHello,
 	type RunnerSocket,

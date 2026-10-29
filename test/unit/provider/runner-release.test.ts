@@ -2,10 +2,14 @@ import { it } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
-import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import {
+	type CommitAndSignal,
+	makeCommitAndSignal,
+} from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import type { RunRelease } from "../../../src/lib/provider/runner/process-runner-types.js";
 import {
 	makeRunnerReceiptStore,
 	type RunnerRetirement,
@@ -13,7 +17,6 @@ import {
 import {
 	makeRunnerRunLifecycle,
 	makeRunnerStopReconciler,
-	type RunRelease,
 } from "../../../src/lib/provider/runner/runner-retirement.js";
 
 const record: RunnerRetirement = {
@@ -309,6 +312,74 @@ for (const cached of ["missing", "candidate"])
 				}),
 			).pipe(Effect.provide(layer)),
 	);
+
+// A hold whose transaction rolls back after its body set the current hold must
+// not leave that uncommitted transmission current.
+it.effect("a rolled-back hold leaves no current hold", () =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const receipts = yield* makeRunnerReceiptStore(sql);
+			const commit = yield* makeCommitAndSignal;
+			yield* commit([
+				canonicalEvent("session.created", "session", {
+					sessionId: "session",
+					title: "session",
+					provider: "claude",
+				}),
+				canonicalEvent(
+					"run.requested",
+					"session",
+					{ runId: "run", inputId: "run" },
+					{ provider: "claude", metadata: { runId: "run" } },
+				),
+			]);
+			yield* receipts.register(
+				"runner",
+				{ sessionId: "session", pid: 123, startTime: "started" },
+				"serving",
+			);
+			yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at) VALUES (1, 'send', 'project', 'session', 'claude', 'send_turn', '{}', 'run', 'running', 1, 1)`;
+			const current = new Set<number>();
+			// The body succeeds, then a later statement in its transaction fails.
+			const write: CommitAndSignal["write"] = (body, writeOptions) =>
+				commit.write(
+					(project, stamp) =>
+						body(project, stamp).pipe(
+							Effect.tap(() => sql`SELECT missing FROM rolled_back`),
+						),
+					writeOptions,
+				);
+			const lifecycle = makeRunnerRunLifecycle({
+				sql,
+				commit: Object.assign(
+					(events: Parameters<CommitAndSignal>[0]) => commit(events),
+					{ committed: commit.committed, write },
+				),
+				eventStore: yield* EventStoreEffectTag,
+				holds: {
+					held: (_run, _runner, transmission) => {
+						current.add(transmission);
+						return () => current.delete(transmission);
+					},
+					released: () => Effect.void,
+				},
+			});
+			const held = yield* Effect.exit(
+				lifecycle.holdRun({
+					sessionId: "session",
+					runId: "run",
+					commandId: "send",
+				}),
+			);
+			expect(held._tag).toBe("Failure");
+			expect(
+				yield* sql`SELECT held_transmission FROM provider_runs WHERE id = 'run'`,
+			).toEqual([{ held_transmission: null }]);
+			expect([...current]).toEqual([]);
+		}),
+	).pipe(Effect.provide(layer)),
+);
 
 it.effect(
 	"a repeated swap Stop checks its winner in SQL after the serving row changes",

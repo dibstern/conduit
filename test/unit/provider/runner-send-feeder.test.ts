@@ -2,15 +2,15 @@ import { it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Option, PubSub, Scheduler } from "effect";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
+import type {
+	OwnerSend,
+	RunRelease,
+} from "../../../src/lib/provider/runner/process-runner-types.js";
 import {
 	type RunnerCommandFailure,
 	runnerFailure,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
-import type { RunRelease } from "../../../src/lib/provider/runner/runner-retirement.js";
-import {
-	makeRunnerSendFeeder,
-	type OwnerSend,
-} from "../../../src/lib/provider/runner/runner-send-feeder.js";
+import { makeRunnerSendFeeder } from "../../../src/lib/provider/runner/runner-send-feeder.js";
 import {
 	StoreRejected,
 	StoreUnavailable,
