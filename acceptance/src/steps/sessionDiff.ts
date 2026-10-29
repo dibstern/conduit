@@ -336,6 +336,20 @@ export const sessionDiffHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "diff mode changes",
+		match: /^the (\S+) mode changes from ([0-7]+) to ([0-7]+)$/,
+		run: async ({ world, match }) => {
+			const fixture = requireFixture(world.page);
+			const index = fixture.files.findIndex((file) => file.path === match[1]);
+			const file = fixture.files[index];
+			if (!file) throw new Error(`No diff fixture file ${match[1]}`);
+			fixture.files[index] = {
+				...file,
+				mode: { before: match[2] ?? "", after: match[3] ?? "" },
+			};
+		},
+	},
+	{
 		name: "diff row order",
 		match: /^the diff lists (\S+), (\S+), (\S+) and (\S+)$/,
 		run: async ({ world, match }) => {

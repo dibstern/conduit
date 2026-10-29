@@ -20,7 +20,7 @@ export type DiffPatch =
 export class DiffRow {
 	patch = $state<DiffPatch>({ kind: "idle" });
 	constructor(
-		/** The blob pair; an unchanged pair keeps its row and patch across listings. */
+		/** The blob pair and its labels; an unchanged one keeps its row and patch across listings. */
 		readonly key: string,
 		readonly folder: string,
 		readonly file: SessionDiffFile,
@@ -99,6 +99,10 @@ export class SessionDiffView {
 							file.path,
 							file.before,
 							file.after,
+							// A mode change rewrites the patch header and the label.
+							file.kind,
+							file.mode?.before,
+							file.mode?.after,
 						].join("\0");
 						const row: DiffRow =
 							this.#rows.get(key) ??

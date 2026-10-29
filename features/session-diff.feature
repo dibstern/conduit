@@ -132,6 +132,21 @@ Examples:
   | count | same_path  | changed_path | last_path  | changed_requests | same_requests |
   | 3     | file-01.ts | file-02.ts   | file-03.ts | 2                | 1             |
 
+Scenario Outline: A re-list relabels and re-fetches a pair whose mode changed
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  When I open the Diff right pane
+  Then the <path> diff shows its patch
+  When the <path> mode changes from <mode_before> to <mode_after>
+  And I select the Files right pane tab
+  And I select the Diff right pane tab
+  Then the <path> diff is labelled "<mode_label>"
+  And the <path> patch was requested <requests> times
+
+Examples:
+  | count | path       | mode_before | mode_after | mode_label      | requests |
+  | 1     | file-01.ts | 100644      | 100755     | 100644 → 100755 | 2        |
+
 Scenario Outline: A listing that lands after a session switch stays with its session
   Given the conduit app is served with the long-transcript mockup
   And the session has <count> small unstaged files
