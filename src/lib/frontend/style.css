@@ -1061,6 +1061,63 @@ body:has(dialog:modal) {
 	padding-top: env(safe-area-inset-top, 0px);
 }
 
+/* Unfolded portrait reports a 61px top inset, but iOS's status row only fills
+   the top right (x 465 and up, y 79 and down). Both headers start at the top
+   instead, with 44px targets centred on y 32 and packed to end at x 457. */
+#layout[data-pose="duo-unfolded-portrait"] {
+	--duo-header-end: 212px;
+}
+#layout[data-pose="duo-unfolded-portrait"] #app,
+#layout.phone-list-screen[data-pose="duo-unfolded-portrait"] #sidebar {
+	padding-top: 0;
+}
+#layout[data-pose="duo-unfolded-portrait"] #app.phone-session #session-chrome {
+	top: 0;
+}
+#layout[data-pose="duo-unfolded-portrait"]
+	#session-bar[data-compact="true"][data-collapsed="false"] {
+	grid-template-rows: 44px auto auto auto;
+	padding: 10px var(--duo-header-end) 7.5px 10px;
+}
+#layout[data-pose="duo-unfolded-portrait"]
+	#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-title-row {
+	padding-top: 2px;
+}
+/* The taller row's segments own its full height, down to the title's line. */
+#layout[data-pose="duo-unfolded-portrait"]
+	#session-bar[data-compact="true"][data-collapsed="false"]
+	.session-bar-segments
+	button {
+	clip-path: inset(-10px 0 -7px);
+}
+#layout[data-pose="duo-unfolded-portrait"]
+	#session-bar[data-compact="true"][data-collapsed="false"]
+	.session-bar-segments
+	button::before {
+	height: calc(100% + 17px);
+}
+/* Overflow stays centred on its target, clear of the status row. */
+#layout[data-pose="duo-unfolded-portrait"]
+	#session-bar[data-compact="true"][data-collapsed="false"]
+	#session-bar-more::before {
+	left: 50%;
+}
+/* The collapsed island shares the row: 46px tall, centred on y 32. */
+#layout[data-pose="duo-unfolded-portrait"]
+	#app.phone-session
+	#session-bar[data-collapsed="true"] {
+	margin: 9px var(--duo-header-end) 0 12px;
+}
+#layout[data-pose="duo-unfolded-portrait"] #sidebar-header {
+	height: 54px;
+	padding-top: 10px;
+}
+#layout[data-pose="duo-unfolded-portrait"]
+	:is(#sidebar-header, #session-search) {
+	padding-right: var(--duo-header-end);
+}
+
 #layout.layout-compact.phone-list-screen #app,
 #layout.layout-compact:not(.phone-list-screen) #sidebar {
 	display: none;
