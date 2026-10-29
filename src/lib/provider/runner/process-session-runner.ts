@@ -351,13 +351,22 @@ export const stopRegisteredRunners = (
 				receipts,
 				processTable: runnerProcessTable,
 				committed: () => Effect.void,
-				shutdown: (record) =>
-					connections
-						.get(record.runnerId)
-						?.commandEffect(`runner-stop:${record.runnerId}`, {
-							type: "shutdown",
-						})
-						.pipe(Effect.asVoid) ?? Effect.void,
+				// This connection never acknowledges output, so a runner flushing
+				// output on shutdown waits for it to close, even past SIGTERM.
+				// Close it when the shutdown window ends, before any signal.
+				shutdown: (record) => {
+					const connection = connections.get(record.runnerId);
+					return connection
+						? connection
+								.commandEffect(`runner-stop:${record.runnerId}`, {
+									type: "shutdown",
+								})
+								.pipe(
+									Effect.asVoid,
+									Effect.ensuring(Effect.sync(() => connection.destroy())),
+								)
+						: Effect.void;
+				},
 				// Project services have drained. Recovery will settle through their ingestion owner.
 				settle: () => Effect.succeed(false),
 				evict: () => Effect.void,

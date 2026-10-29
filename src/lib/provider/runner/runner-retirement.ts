@@ -558,6 +558,12 @@ export const makeRunnerStopReconciler = (options: {
 					row.role === "serving" &&
 					row.retiredAt === null,
 			)?.runnerId;
+		const knownPids = (record: RunnerRetirement) =>
+			[
+				record.identity.pid,
+				record.reaper?.pid,
+				...record.members.map((member) => member.pid),
+			].filter((pid) => pid !== undefined);
 		/** Fills the routing cache; no Stop decision reads it. */
 		const refreshRows = () =>
 			Effect.gen(function* () {
@@ -655,12 +661,48 @@ export const makeRunnerStopReconciler = (options: {
 				}
 				if (!("record" in state)) return;
 				yield* options.committed(state.record);
+				let unsent = false;
 				for (let step = 0; step < 5; step++) {
 					if (!("record" in state) || state._tag === "Settled") return;
-					const processes = observeRunnerRetirement(
-						state.record,
-						options.processTable,
-					);
+					// Only a signal needs identity (6.6): runRunnerKill reads it after
+					// its commit, and a step after a kill that sent nothing reads it so
+					// a reused pid is seen gone. The window otherwise reads liveness,
+					// where a live pid is unknown, never gone.
+					const alive = options.processTable.alive;
+					const liveness: RunnerRetirementObservation | undefined =
+						alive &&
+						!unsent &&
+						(state._tag === "Requested" || state._tag === "Escalating")
+							? {
+									group: undefined,
+									processes: new Map(
+										knownPids(state.record).map((pid) => [
+											pid,
+											{ state: alive(pid) ? "unknown" : "gone" },
+										]),
+									),
+								}
+							: undefined;
+					const now = clock.currentTimeMillisUnsafe();
+					// Liveness names no signal target, so an Escalated it decides is
+					// re-read with identity: the window never ends on it without KILL.
+					const processes: RunnerRetirementObservation =
+						liveness &&
+						decideRunnerStop(
+							{
+								...state,
+								record: decideRunnerKill(state.record, liveness).record,
+							},
+							{
+								_tag: "Observe",
+								now,
+								processes: liveness,
+								retry: retryPending,
+								notice: noticePending,
+							},
+						).state._tag !== "Escalated"
+							? liveness
+							: observeRunnerRetirement(state.record, options.processTable);
 					const observed: RunnerRetirement = decideRunnerKill(
 						state.record,
 						processes,
@@ -673,7 +715,7 @@ export const makeRunnerStopReconciler = (options: {
 					state = { ...state, record: observed };
 					const decision = decideRunnerStop(state, {
 						_tag: "Observe",
-						now: clock.currentTimeMillisUnsafe(),
+						now: processes === liveness ? now : clock.currentTimeMillisUnsafe(),
 						processes,
 						retry: retryPending,
 						notice: noticePending,
@@ -690,16 +732,20 @@ export const makeRunnerStopReconciler = (options: {
 										Effect.ignore,
 									);
 								break;
-							case "Signal":
-								record = (yield* runRunnerKill(
-									record,
-									options.processTable,
-									options.receipts,
-									action.signal,
-									processes,
-								)).record;
+							case "Signal": {
+								const killed: ReturnType<typeof decideRunnerKill> =
+									yield* runRunnerKill(
+										record,
+										options.processTable,
+										options.receipts,
+										action.signal,
+										processes,
+									);
+								record = killed.record;
+								unsent = killed.signals.length === 0;
 								retryPending = false;
 								break;
+							}
 							case "Settle":
 								if (!(yield* options.settle(record))) return;
 								break;
@@ -800,8 +846,19 @@ export const makeRunnerStopReconciler = (options: {
 									250,
 									startedAt + 4_000 - clock.currentTimeMillisUnsafe(),
 								);
-						yield* leaderExit && healthy
-							? Effect.raceFirst(leaderExit, Effect.sleep(delay))
+						// With no exit event, poll the known pids as main did, so Gone
+						// follows the last exit (the reaper's, 6.6) by one interval.
+						const alive = options.processTable.alive;
+						const pids = "record" in current ? knownPids(current.record) : [];
+						const exited =
+							leaderExit ??
+							(alive &&
+								Effect.gen(function* () {
+									do yield* Effect.sleep("25 millis");
+									while (pids.some(alive));
+								}));
+						yield* exited && healthy
+							? Effect.raceFirst(exited, Effect.sleep(delay))
 							: Effect.sleep(delay);
 						tickedAt = clock.currentTimeMillisUnsafe();
 						healthy = yield* safeTick(runnerId);
