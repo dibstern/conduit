@@ -33,7 +33,7 @@ import { formatErrorDetail } from "../../../errors.js";
 import { setLogFile, setLogFormat, setLogLevel } from "../../../logger.js";
 import type { PersistenceStore } from "../../../persistence/effect/live.js";
 import { captureClaudeLaunchLogin } from "../../../provider/claude/claude-sdk-env.js";
-import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
+import { stopRegisteredRunners } from "../../../provider/runner/runner-retirement.js";
 import { stopPtyHost } from "../../../terminal/pty-host-client.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { ConfigPersistenceTag } from "../Services/config-persistence-service.js";

@@ -108,7 +108,7 @@ describe("send settlement ownership", () => {
 		expect(kinds.sort()).toEqual(["run.dispatched", "run.released"]);
 	});
 
-	it("allows only the outbox adapter to import the run-terminal writer", () => {
+	it("keeps the run-terminal writer private to the outbox adapter", () => {
 		const imports = sources(join(root, "src/lib")).flatMap((file) => {
 			const parsed = ts.createSourceFile(
 				file,
@@ -129,7 +129,10 @@ describe("send settlement ownership", () => {
 					: [],
 			);
 		});
-		expect(imports).toEqual([adapter]);
+		expect(imports).toEqual([]);
+		expect(readFileSync(join(root, adapter), "utf8")).toMatch(
+			/^const settleRunnerCommandReply = /m,
+		);
 	});
 
 	it("keeps send retry policy in classify while permitting producers and decoders", () => {
@@ -187,14 +190,12 @@ describe("send settlement ownership", () => {
 	});
 
 	it("has no optional run settlement or direct outbox terminal write in the writer", () => {
-		const source = readFileSync(
-			join(root, "src/lib/provider/runner/runner-recovery.ts"),
-			"utf8",
-		);
+		const source = readFileSync(join(root, adapter), "utf8");
 		const writer = source.slice(
-			source.indexOf("export const settleRunnerCommandReply"),
-			source.indexOf("export const settleUnclaimedRunnerCommands"),
+			source.indexOf("const settleRunnerCommandReply"),
+			source.indexOf("export const appendSendSettlement"),
 		);
+		expect(writer).toMatch(/^const settleRunnerCommandReply/);
 		expect(writer).not.toMatch(/\bsettleRun\b/);
 		expect(writer).not.toMatch(
 			/UPDATE\s+provider_command_outbox\s+SET\s+status/,
@@ -203,7 +204,8 @@ describe("send settlement ownership", () => {
 
 	// The run terminal ends every held send's row through settleRunCommands. Only an
 	// unheld direct send's reply (a native-lifecycle provider's turn.completed is not a
-	// run terminal) and a legacy send's native-resume requeue write the row directly.
+	// run terminal), a legacy send's native-resume requeue and a legacy send its
+	// runner no longer reports write the row directly.
 	it("leaves settlement outbox status writes to direct replies and legacy requeue", () => {
 		const writes = readdirSync(join(root, "src/lib/provider/runner"))
 			.filter(
@@ -236,7 +238,18 @@ describe("send settlement ownership", () => {
 		expect(writes).toEqual([
 			`${adapter}:settleDirectSend`,
 			`${adapter}:settleLegacySend`,
+			`${adapter}:requeueLegacySend`,
 		]);
+		// Outside the adapter, the only outbox UPDATE is a write-lock touch that changes no column.
+		const outside = readdirSync(join(root, "src/lib/provider/runner")).filter(
+			(name) =>
+				name.endsWith(".ts") &&
+				`src/lib/provider/runner/${name}` !== adapter &&
+				/UPDATE\s+provider_command_outbox\b(?!\s+SET\s+status\s*=\s*status\s)/.test(
+					readFileSync(join(root, "src/lib/provider/runner", name), "utf8"),
+				),
+		);
+		expect(outside).toEqual([]);
 		const source = readFileSync(join(root, adapter), "utf8");
 		const direct = source.slice(
 			source.indexOf("export const settleDirectSend"),

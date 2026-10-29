@@ -2,11 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import {
 	importProjectStore,
 	seedDaemonStore,
@@ -20,8 +23,12 @@ it.live(
 	() =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			// A store from a build before migration 0089.
+			yield* sql`DROP TABLE claude_runner_cursors`;
+			yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 89`;
 			yield* sql`CREATE TABLE claude_runner_cursors (runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, session_id TEXT NOT NULL)`;
 			yield* sql`INSERT INTO claude_runner_cursors VALUES ('older', 3, 'session'), ('newer', 9, 'session')`;
+			yield* makeEffectSqlMigrator();
 			const receipts = yield* makeRunnerReceiptStore(sql);
 			expect((yield* receipts.runners()).rows).toMatchObject([
 				{ runnerId: "older", role: "candidate" },
@@ -77,7 +84,10 @@ it.live(
 				);
 				const legacyDb = new DatabaseSync(legacy.sourcePath);
 				try {
-					legacyDb.exec(`CREATE TABLE claude_runner_cursors (runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
+					// Both sources come from builds before migration 0089.
+					legacyDb.exec(`DROP TABLE claude_runner_cursors;
+				DELETE FROM effect_sql_migrations WHERE migration_id = 89;
+				CREATE TABLE claude_runner_cursors (runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
 				result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '');
 				INSERT INTO claude_runner_cursors VALUES ('legacy_runner', 1, '{}', 'fixture-attachment')`);
 				} finally {
@@ -85,7 +95,9 @@ it.live(
 				}
 				const recentDb = new DatabaseSync(recent.sourcePath);
 				try {
-					recentDb.exec(`CREATE TABLE claude_runner_cursors (
+					recentDb.exec(`DROP TABLE claude_runner_cursors;
+					DELETE FROM effect_sql_migrations WHERE migration_id = 89;
+					CREATE TABLE claude_runner_cursors (
 					runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
 					result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '',
 					retired_at INTEGER, pid INTEGER, start_time TEXT, owned_run_ids TEXT NOT NULL DEFAULT '[]',
@@ -113,10 +125,14 @@ it.live(
 				}
 				const configDir = join(root, "daemon");
 				yield* seedDaemonStore(configDir, legacy);
-				// Model an already-running older daemon's destination as well as its source.
+				// Model an older daemon's destination as well as its source. Daemon
+				// startup migrates it before any import, and 0089 must leave its
+				// columns in the order a fresh store has, or the import rejects them.
 				const destination = new DatabaseSync(daemonStorePath(configDir));
 				try {
-					destination.exec("DROP INDEX IF EXISTS idx_runner_serving_session");
+					destination.exec(
+						"DROP INDEX IF EXISTS idx_runner_serving_session; DELETE FROM effect_sql_migrations WHERE migration_id = 89",
+					);
 					for (const field of [
 						"retired_at",
 						"pid",
@@ -137,6 +153,7 @@ it.live(
 						"stop_reason",
 						"stop_started_at",
 						"role",
+						"journals_before_execution",
 					])
 						destination.exec(
 							`ALTER TABLE claude_runner_cursors DROP COLUMN ${field}`,
@@ -144,6 +161,13 @@ it.live(
 				} finally {
 					destination.close();
 				}
+				yield* makeEffectSqlMigrator().pipe(
+					Effect.provide(
+						SqliteNode.layer({ filename: daemonStorePath(configDir) }).pipe(
+							Layer.provide(Reactivity.layer),
+						),
+					),
+				);
 				yield* importProjectStore(configDir, recent);
 				const imported = new DatabaseSync(daemonStorePath(configDir), {
 					readOnly: true,
@@ -228,6 +252,88 @@ it.live(
 						stop_reason: "Provider process stopped",
 						stop_started_at: null,
 					});
+				} finally {
+					imported.close();
+				}
+			}),
+		),
+);
+
+it.live(
+	"ranks duplicate live cursors from sources before 0089, with and without a role column",
+	() =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const root = yield* Effect.acquireRelease(
+					Effect.sync(() =>
+						mkdtempSync(join(tmpdir(), "conduit-runner-role-import-")),
+					),
+					(directory) =>
+						Effect.sync(() =>
+							rmSync(directory, { recursive: true, force: true }),
+						),
+				);
+				const transcript = { prompt: "hello", reply: "reply" };
+				const roleless = yield* Effect.tryPromise(() =>
+					createProjectStoreFixture(root, "roleless", { transcript }),
+				);
+				const roled = yield* Effect.tryPromise(() =>
+					createProjectStoreFixture(root, "roled", { transcript }),
+				);
+				// Each table is a prefix of today's columns, as every older build's was.
+				for (const [source, columns, sessionId] of [
+					[roleless, "", "ses_roleless"],
+					[
+						roled,
+						`, signalled INTEGER NOT NULL DEFAULT 0,
+						driver_kind TEXT NOT NULL DEFAULT 'claude', retirement_state TEXT NOT NULL DEFAULT 'Watching',
+						signal_state TEXT NOT NULL DEFAULT 'None', signal_members TEXT NOT NULL DEFAULT '[]', signal_sent_members TEXT NOT NULL DEFAULT '[]',
+						reaper_pid INTEGER, reaper_start_time TEXT, member_snapshot TEXT NOT NULL DEFAULT '[]', signal_log TEXT NOT NULL DEFAULT '[]',
+						stop_state TEXT NOT NULL DEFAULT 'Requested', stop_reason TEXT NOT NULL DEFAULT 'Provider process stopped', stop_started_at INTEGER,
+						role TEXT NOT NULL DEFAULT 'serving'`,
+						"ses_roled",
+					],
+				] as const) {
+					const db = new DatabaseSync(source.sourcePath);
+					try {
+						db.exec(`DROP TABLE claude_runner_cursors;
+						DELETE FROM effect_sql_migrations WHERE migration_id = 89;
+						CREATE TABLE claude_runner_cursors (runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
+						result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '',
+						retired_at INTEGER, pid INTEGER, start_time TEXT, owned_run_ids TEXT NOT NULL DEFAULT '[]',
+						session_id TEXT NOT NULL DEFAULT ''${columns});
+						INSERT INTO claude_runner_cursors (runner_id, sequence, session_id)
+						VALUES ('${sessionId}_older', 3, '${sessionId}'), ('${sessionId}_newer', 9, '${sessionId}')`);
+					} finally {
+						db.close();
+					}
+				}
+				const configDir = join(root, "daemon");
+				yield* seedDaemonStore(configDir, roleless);
+				yield* importProjectStore(configDir, roled);
+				const imported = new DatabaseSync(daemonStorePath(configDir), {
+					readOnly: true,
+				});
+				try {
+					expect(
+						imported
+							.prepare(
+								"SELECT runner_id, role FROM claude_runner_cursors ORDER BY runner_id",
+							)
+							.all(),
+					).toEqual([
+						{ runner_id: "ses_roled_newer", role: "serving" },
+						{ runner_id: "ses_roled_older", role: "candidate" },
+						{ runner_id: "ses_roleless_newer", role: "serving" },
+						{ runner_id: "ses_roleless_older", role: "candidate" },
+					]);
+					expect(
+						imported
+							.prepare(
+								"SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_runner_serving_session'",
+							)
+							.all(),
+					).toHaveLength(1);
 				} finally {
 					imported.close();
 				}

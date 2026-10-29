@@ -75,7 +75,7 @@ import {
 	type FolderIssue,
 	isPermissionDenied,
 } from "../../../project-folders.js";
-import { stopRegisteredRunners } from "../../../provider/runner/process-session-runner.js";
+import { stopRegisteredRunners } from "../../../provider/runner/runner-retirement.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
 import { InputDraftsTag } from "../../relay/Services/input-drafts.js";

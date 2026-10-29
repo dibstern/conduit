@@ -76,6 +76,7 @@ import {
 	makeProcessSessionRunner,
 	type ProcessRunnerDriver,
 } from "../../../src/lib/provider/runner/process-session-runner.js";
+import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-legacy-classification.js";
 import {
 	type RunnerCommandFailure,
 	type RunnerHello,
@@ -93,7 +94,6 @@ import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
-import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-recovery.js";
 import * as runnerRegistry from "../../../src/lib/provider/runner/runner-registry.js";
 import { prepareRunnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
 import { makeRunnerRunLifecycle } from "../../../src/lib/provider/runner/runner-retirement.js";
@@ -8766,6 +8766,71 @@ it.effect(
 				expect(
 					yield* f.sql`SELECT value FROM provider_state WHERE key = 'nativeThread:account'`,
 				).toEqual([{ value: "old-cursor" }]);
+			}),
+		),
+);
+
+// Failure mode: a key proved while the run was in a legacy cohort settles the run
+// after it has left the cohort, though it was never started or dispatched.
+it.effect(
+	"BC-2 legacy settlement rechecks the legacy predicate, not only the outbox claim",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				const input = yield* f.seed("cohort-left", 1, 0);
+				yield* f.sql`UPDATE provider_command_outbox SET status = 'running', attempt_count = 1`;
+				yield* f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, owned_run_ids)
+					VALUES ('legacy-cohort', 0, 's', ${JSON.stringify([input.runId])})`;
+				const { runningRunnerCommands } = yield* Effect.promise(
+					() => import("../../../src/lib/provider/runner/runner-recovery.js"),
+				);
+				const [row] = yield* runningRunnerCommands(
+					f.sql,
+					"claude",
+					() => "claude",
+					"s",
+				);
+				if (!row) return yield* Effect.die("Missing recovery command");
+				const { LegacySendKey, settleLegacySend } = yield* Effect.promise(
+					() =>
+						import(
+							"../../../src/lib/provider/runner/send-settlement-outbox.js"
+						),
+				);
+				const key = yield* LegacySendKey.prove(f.sql, row);
+				if (!key) return yield* Effect.die("Missing legacy recovery key");
+				yield* f.sql`DELETE FROM claude_runner_cursors WHERE runner_id = 'legacy-cohort'`;
+				expect(yield* legacyRunnerRunQuery(f.sql, "s", input.runId)).toBe(
+					false,
+				);
+				const commit = yield* makeCommitAndSignal;
+				yield* commit.write((project, stamp) =>
+					settleLegacySend(
+						{
+							sql: f.sql,
+							project,
+							stamp,
+							persistUserMessage: f.persist.persistUserMessage,
+						},
+						key,
+						{
+							status: "completed",
+							cost: 0,
+							tokens: { input: 0, output: 0 },
+							durationMs: 0,
+							providerStateUpdates: [],
+						},
+						undefined,
+						2,
+					),
+				);
+				expect(
+					yield* f.sql`SELECT status FROM provider_command_outbox`,
+				).toEqual([{ status: "running" }]);
+				expect(
+					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed','turn.error','turn.interrupted')`,
+				).toEqual([]);
 			}),
 		),
 );

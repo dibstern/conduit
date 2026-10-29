@@ -1,4 +1,5 @@
-import type { Deferred } from "effect";
+import { Deferred, Effect } from "effect";
+import type { RunnerSourceDelivery } from "./runner-upgrade.js";
 import type { SessionFailure } from "./session-runner.js";
 
 type Activity =
@@ -247,4 +248,32 @@ export const nextRunnerLifecycle = (
 		default:
 			return state;
 	}
+};
+
+// Notification is private to admission; it never changes account eligibility.
+export const notifyEntry = (entry: {
+	readonly deliveryWaiters?: Set<Deferred.Deferred<void>>;
+}): void => {
+	const waiters = [...(entry.deliveryWaiters ?? [])];
+	// Completing a Deferred can synchronously register its next observation.
+	entry.deliveryWaiters?.clear();
+	for (const waiter of waiters) Deferred.doneUnsafe(waiter, Effect.void);
+};
+
+// Every lifecycle write goes through this boundary; reduction itself is pure.
+export const transition = (
+	entry: {
+		lifecycle: RunnerEntryLifecycle;
+		sourceDelivery?: RunnerSourceDelivery | undefined;
+		readonly deliveryWaiters?: Set<Deferred.Deferred<void>>;
+	},
+	event: RunnerEntryTransition,
+) => {
+	const ending = entry.lifecycle.end;
+	entry.lifecycle = nextRunnerLifecycle(entry.lifecycle, event);
+	if (!canReconfigure(entry.lifecycle)) entry.sourceDelivery = undefined;
+	notifyEntry(entry);
+	return event._tag === "FinishEnd" && ending?.pending === 1
+		? ending.released
+		: undefined;
 };

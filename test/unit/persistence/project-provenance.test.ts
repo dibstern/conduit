@@ -139,6 +139,7 @@ describe("Bound project provenance", () => {
 			"0086_events_provider_identity_indexes",
 			"0087_provider_run_holder",
 			"0088_provider_run_held_transmission",
+			"0089_runner_cursors",
 		]);
 	});
 

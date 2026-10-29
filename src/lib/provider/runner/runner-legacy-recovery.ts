@@ -40,7 +40,6 @@ import type {
 	TurnResult,
 } from "../types.js";
 import {
-	type RunnerHello,
 	type RunnerSendAnswer,
 	type RunnerSocket,
 	runnerFailure,
@@ -64,23 +63,6 @@ import type {
 } from "./session-runner.js";
 
 // Delete this compatibility module once no main-built runner can remain alive (32.13).
-// These fields restore sinks and answer waiters only. A send is decided by replaying
-// its unchanged journal key, exactly as ecb3840d did, never from the legacy hello.
-export const legacyRunnerRetainedSends = (
-	hello: RunnerHello,
-): NonNullable<RunnerHello["sendCommands"]> => hello.sendCommands ?? [];
-
-export const legacyRunnerAnswerCompletions = (
-	hello: RunnerHello,
-): readonly {
-	readonly commandId: string;
-	readonly failure?: SessionFailure;
-}[] => hello.completedCommands ?? [];
-
-export const legacyRunnerBindings = (
-	hello: RunnerHello,
-): NonNullable<RunnerHello["bindings"]> => hello.bindings ?? [];
-
 const LegacyTurn = Schema.Struct({
 	sessionId: Schema.optionalKey(Schema.String),
 	projectId: Schema.optionalKey(Schema.String),

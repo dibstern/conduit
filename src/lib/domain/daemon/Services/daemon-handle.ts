@@ -9,7 +9,7 @@ import type { DaemonLifecycleContext } from "../../../daemon/daemon-lifecycle.js
 import type { DaemonStatus } from "../../../daemon/daemon-types.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
 import type { FolderIssue } from "../../../project-folders.js";
-import type { RunnerProcessError } from "../../../provider/runner/process-session-runner.js";
+import type { RunnerProcessError } from "../../../provider/runner/runner-retirement.js";
 import type { OpenCodeInstance, StoredProject } from "../../../types.js";
 import { KeepAwakeTag } from "../Layers/keep-awake-layer.js";
 import { AccountDirectory } from "./account-directory.js";

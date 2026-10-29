@@ -1,18 +1,27 @@
+import { join } from "node:path";
+import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import {
 	Clock,
+	Context,
+	Data,
 	Deferred,
 	Effect,
 	Exit,
 	FiberSet,
+	Layer,
 	Option,
 	Scheduler,
 } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import * as Failure from "../../effect/failure-classification.js";
 import type {
 	CommitAndSignal,
 	CommitAndSignalFailure,
 } from "../../persistence/effect/commit-and-signal.js";
 import type { UnboundEventStoreEffect } from "../../persistence/effect/event-store-effect.js";
+import { PersistenceStore } from "../../persistence/effect/live.js";
+import { makeEffectSqlMigrator } from "../../persistence/effect/migrations.js";
 import {
 	canonicalEvent,
 	type EventPayloadMap,
@@ -22,9 +31,10 @@ import {
 	runSendCommandIdQuery,
 	stopCovers,
 } from "../session-run-settlement.js";
-import { runnerFailure } from "./runner-protocol.js";
+import { connectRunner } from "./runner-connection.js";
+import { type RunnerSocket, runnerFailure } from "./runner-protocol.js";
 import {
-	type makeRunnerReceiptStore,
+	makeRunnerReceiptStore,
 	mergeRunnerMembers,
 	type RunnerCursorIdentity,
 	type RunnerMember,
@@ -39,16 +49,22 @@ import {
 	type StopTarget,
 	stopRecord,
 } from "./runner-receipts.js";
-import type { RunnerProcessTable } from "./runner-registry.js";
+import {
+	discoverRunners,
+	type RunnerProcessTable,
+	removeRunnerDiscovery,
+	runnerPidMatchesRegistration,
+	runnerProcessTable,
+} from "./runner-registry.js";
 import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
 import {
 	type SendEvidence,
 	type SettlementTx,
 	type StoreFault,
 	sendRetryBackoff,
-	settleSend,
 	toStoreFault,
 } from "./send-settlement.js";
+import { settleSend } from "./send-settlement-outbox.js";
 import type { SessionFailure } from "./session-runner.js";
 
 export type Hold =
@@ -1469,3 +1485,147 @@ const runRunnerKill = (
 			},
 		};
 	});
+
+export class RunnerProcessError extends Data.TaggedError("RunnerProcessError")<{
+	readonly message: string;
+}> {}
+
+/** Stop registered project runners for an explicit stop or project removal. */
+export const stopRegisteredRunners = (
+	workspaceRoot: string,
+	configDir: string,
+	reason: StopReason = { _tag: "Explicit" },
+): Effect.Effect<void, RunnerProcessError> =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const ambientSql = yield* Effect.serviceOption(SqlClient.SqlClient);
+			const store = yield* Effect.serviceOption(PersistenceStore);
+			const sql =
+				Option.getOrUndefined(ambientSql) ??
+				(Option.isSome(store)
+					? Context.get(store.value, SqlClient.SqlClient)
+					: undefined);
+			// Migration 0089 owns claude_runner_cursors, so this store migrates before any read.
+			if (!sql)
+				return yield* makeEffectSqlMigrator().pipe(
+					Effect.andThen(
+						stopRegisteredRunners(workspaceRoot, configDir, reason),
+					),
+					Effect.provide(
+						SqliteNode.layer({
+							filename: join(configDir, "events.db"),
+							busyTimeout: 5000,
+						}).pipe(Layer.provide(Reactivity.layer)),
+					),
+					Effect.mapError(
+						(cause) => new RunnerProcessError({ message: String(cause) }),
+					),
+				);
+			const receipts = yield* makeRunnerReceiptStore(sql, { configDir }).pipe(
+				Effect.mapError(
+					(cause) => new RunnerProcessError({ message: String(cause) }),
+				),
+			);
+			const connections = new Map<string, RunnerSocket>();
+			const stops = yield* makeRunnerStopReconciler({
+				receipts,
+				processTable: runnerProcessTable,
+				committed: () => Effect.void,
+				// This connection never acknowledges output, so a runner flushing
+				// output on shutdown waits for it to close, even past SIGTERM.
+				// Close it when the shutdown window ends, before any signal.
+				shutdown: (record) => {
+					const connection = connections.get(record.runnerId);
+					return connection
+						? connection
+								.commandEffect(`runner-stop:${record.runnerId}`, {
+									type: "shutdown",
+								})
+								.pipe(
+									Effect.asVoid,
+									Effect.ensuring(Effect.sync(() => connection.destroy())),
+								)
+						: Effect.void;
+				},
+				// Project services have drained. Recovery will settle through their ingestion owner.
+				settle: () => Effect.succeed(false),
+				evict: () => Effect.void,
+				prune: () => Effect.void,
+				notice: () => Effect.succeed(true),
+			});
+			const registrations = yield* Effect.try({
+				try: () => discoverRunners(workspaceRoot, configDir),
+				catch: (cause) => new RunnerProcessError({ message: String(cause) }),
+			});
+			const runFork = yield* FiberSet.makeRuntime<never, void, never>();
+			const outcomes = yield* Effect.forEach(
+				registrations,
+				(registration) =>
+					Effect.gen(function* () {
+						let reaper: RunnerMember | undefined;
+						const connection = yield* Effect.result(
+							Effect.acquireRelease(
+								connectRunner({
+									...registration,
+									driverKind: registration.driverKind ?? "claude",
+									deps: { workspaceRoot, daemonConfigDir: configDir },
+									runFork: (effect) =>
+										runFork(effect.pipe(Effect.interruptible)),
+									emit: () => Effect.never,
+									onHello: (hello) =>
+										Effect.sync(() => {
+											reaper = hello.reaper;
+										}),
+									onClose: () => {},
+								}),
+								(connection) => Effect.sync(() => connection.destroy()),
+							),
+						);
+						const verified =
+							connection._tag === "Success" ||
+							runnerPidMatchesRegistration(registration);
+						if (connection._tag === "Success")
+							connections.set(registration.runnerId, connection.success);
+						const startTime = verified
+							? (registration.startTime ??
+								runnerProcessTable.inspect(registration.pid).startTime)
+							: undefined;
+						yield* stops.requestStop(
+							{
+								runnerId: registration.runnerId,
+								sessionId: registration.sessionId,
+								driverKind: registration.driverKind ?? "claude",
+								identity:
+									startTime === undefined
+										? { tag: "Unverifiable", pid: registration.pid }
+										: { tag: "Verified", pid: registration.pid, startTime },
+								reaper,
+								members: [],
+							},
+							reason,
+						);
+						yield* stops.awaitStop(registration.runnerId, "Escalated");
+						// Project ingestion has drained, so Settle belongs to startup.
+						// Use the reconciler's complete member/identity proof here even
+						// when its next Gone observation is on the survivor cadence.
+						const state = stops.state(registration.runnerId);
+						if (
+							"record" in state &&
+							decideRunnerKill(
+								state.record,
+								observeRunnerRetirement(state.record, runnerProcessTable),
+							).gone
+						)
+							removeRunnerDiscovery(registration.socketPath);
+					}).pipe(Effect.exit),
+				{ concurrency: 4 },
+			);
+			const failures = outcomes.filter(Exit.isFailure);
+			if (failures.length)
+				return yield* new RunnerProcessError({
+					message: failures
+						.map((exit) => Failure.renderCause(exit.cause))
+						.join("\n"),
+				});
+		}),
+	);

@@ -40,9 +40,9 @@ import { sendPreparedClaudeTurn } from "../../../src/lib/provider/claude/prepare
 import {
 	makeProcessSessionRunner,
 	type ProcessRunnerDriver,
-	stopRegisteredRunners,
 } from "../../../src/lib/provider/runner/process-session-runner.js";
 import * as RunnerConnection from "../../../src/lib/provider/runner/runner-connection.js";
+import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-legacy-classification.js";
 import {
 	type RunnerCommandFailure,
 	type RunnerSendAnswer,
@@ -58,6 +58,7 @@ import {
 	registerRunner,
 	runnerProcessTable,
 } from "../../../src/lib/provider/runner/runner-registry.js";
+import { stopRegisteredRunners } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { RunnerSendJournal } from "../../../src/lib/provider/runner/runner-send-journal.js";
 import { failRunnerTurn } from "../../../src/lib/provider/runner/runner-turn-failure.js";
 import type {
@@ -4896,16 +4897,12 @@ for (const provenance of ["direct", "joined"] as const)
 						yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, joined_into) VALUES ('old-joined','s','joined',1,'old-owner')`;
 					yield* f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, owned_run_ids, retired_at) VALUES ('bad-json',0,'s','not-json',1),('bad-object',0,'s','{"run":"object-only"}',1)`;
 					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('object-only','s','pending',1)`;
-					expect(
-						yield* RunnerRecovery.legacyRunnerRunQuery(f.sql, "s", "old-owner"),
-					).toBe(true);
-					expect(
-						yield* RunnerRecovery.legacyRunnerRunQuery(
-							f.sql,
-							"s",
-							"object-only",
-						),
-					).toBe(false);
+					expect(yield* legacyRunnerRunQuery(f.sql, "s", "old-owner")).toBe(
+						true,
+					);
+					expect(yield* legacyRunnerRunQuery(f.sql, "s", "object-only")).toBe(
+						false,
+					);
 				}),
 			),
 	);
@@ -4960,9 +4957,7 @@ for (const reason of ["ResumeRejected", "JournalAbsent"] as const)
 						}),
 					);
 					for (const runId of ["released", "modern", "queued", "discovered"])
-						expect(
-							yield* RunnerRecovery.legacyRunnerRunQuery(f.sql, "s", runId),
-						).toBe(false);
+						expect(yield* legacyRunnerRunQuery(f.sql, "s", runId)).toBe(false);
 				}),
 			),
 	);
