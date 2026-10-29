@@ -356,7 +356,7 @@ export const makeInputDrafts: Effect.Effect<
 						const [existing] = yield* sql<{
 							state: "live" | "removed" | "sent";
 						}>`SELECT state FROM draft_attachments WHERE id = ${id}`;
-						if (existing?.state === "removed" || existing?.state === "sent")
+						if (existing && existing.state !== "live")
 							return { ended: existing.state };
 						if (!existing) {
 							if (!(yield* ensureDraft(actualKey, projectId)))

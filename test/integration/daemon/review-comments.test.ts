@@ -93,7 +93,10 @@ describe("Review comments through the built daemon", () => {
 		const fixture = harness;
 		const repo = fixture.projectDir;
 		git(repo, "init", "-b", "main");
-		writeFileSync(join(repo, "app.ts"), "const a = 1;\nconst b = 2;\n");
+		writeFileSync(
+			join(repo, "app.ts"),
+			"const a = 1;\nconst b = 2;\nconst c = 3;\n",
+		);
 		git(repo, "add", ".");
 		git(
 			repo,
@@ -107,7 +110,10 @@ describe("Review comments through the built daemon", () => {
 			"-m",
 			"Initial commit",
 		);
-		writeFileSync(join(repo, "app.ts"), "const a = 1;\nconst b = 3;\n");
+		writeFileSync(
+			join(repo, "app.ts"),
+			"const a = 1;\nconst b = 3;\nconst c = 3;\n",
+		);
 		const gitDir = join(repo, ".git");
 		const before = repositoryBytes(gitDir);
 
@@ -177,6 +183,31 @@ describe("Review comments through the built daemon", () => {
 			};
 			evidence["excerpt"] = review.excerpt;
 			expect(review.excerpt).toBe("+const b = 3;");
+			// Other selections the diff pane can make on the same patch.
+			const excerpts = {
+				deletion: reviewExcerpt(patch, { start: 2, side: "deletions", end: 2 }),
+				span: reviewExcerpt(patch, { start: 1, side: "additions", end: 2 }),
+				reversed: reviewExcerpt(patch, { start: 2, side: "additions", end: 1 }),
+				acrossSides: reviewExcerpt(patch, {
+					start: 2,
+					side: "deletions",
+					end: 2,
+					endSide: "additions",
+				}),
+				trailing: reviewExcerpt(patch, { start: 3, side: "deletions", end: 3 }),
+				endOutside: reviewExcerpt(patch, { start: 3, end: 9 }),
+				outside: reviewExcerpt(patch, { start: 9, end: 9 }),
+			};
+			evidence["excerpts"] = excerpts;
+			expect(excerpts).toEqual({
+				deletion: "-const b = 2;",
+				span: " const a = 1;\n-const b = 2;\n+const b = 3;",
+				reversed: " const a = 1;\n-const b = 2;\n+const b = 3;",
+				acrossSides: "-const b = 2;\n+const b = 3;",
+				trailing: " const c = 3;",
+				endOutside: "",
+				outside: "",
+			});
 
 			const forged: DraftReview = {
 				...review,
@@ -188,6 +219,10 @@ describe("Review comments through the built daemon", () => {
 				clientA.rpc.AddDraftReview({ key, id: reviewId, review }),
 			);
 			expect(added).toMatchObject({ attachment: { id: reviewId, review } });
+			// A retried add returns the same live comment instead of a second one.
+			expect(
+				await run(clientA.rpc.AddDraftReview({ key, id: reviewId, review })),
+			).toEqual(added);
 			await run(
 				clientA.rpc.AddDraftReview({ key, id: forgedId, review: forged }),
 			);
@@ -260,37 +295,41 @@ describe("Review comments through the built daemon", () => {
 			);
 
 			await clientB.followSession(sessionId);
-			const cursor = clientB.frames.length;
-			const inputId = randomUUID();
-			expect(
-				await run(
-					clientB.rpc["input.submit"]({
-						sessionId,
-						originId: clientB.originId,
-						inputId,
-						text: "please fix",
-						draftKey: key,
-						draftText: "please fix",
-						attachmentIds: [reviewId, forgedAgainId],
-						delivery: "queue",
-					}),
-				),
-			).toMatchObject({ ok: true });
-			await clientB.waitForTurnEnd(sessionId, cursor, undefined, inputId);
-			const reply = (await clientB.history(sessionId))
-				.filter(({ role }) => role === "assistant")
-				.flatMap(({ parts }) =>
-					(parts ?? []).flatMap((part) =>
+			// The mock agent echoes the prompt it received as `done(<prompt>).`.
+			const send = async (text: string, attachmentIds: string[]) => {
+				const cursor = clientB.frames.length;
+				const inputId = randomUUID();
+				expect(
+					await run(
+						clientB.rpc["input.submit"]({
+							sessionId,
+							originId: clientB.originId,
+							inputId,
+							text,
+							draftKey: key,
+							draftText: text,
+							attachmentIds,
+							delivery: "queue",
+						}),
+					),
+				).toMatchObject({ ok: true });
+				await clientB.waitForTurnEnd(sessionId, cursor, undefined, inputId);
+				const reply = (await clientB.history(sessionId))
+					.filter(({ role }) => role === "assistant")
+					.at(-1)
+					?.parts?.flatMap((part) =>
 						part.type === "text" && typeof part.text === "string"
 							? [part.text]
 							: [],
-					),
-				)
-				.join("");
-			const prompt = reply.slice(
-				reply.indexOf("done(") + 5,
-				reply.lastIndexOf(")."),
-			);
+					)
+					.join("");
+				return reply?.slice(
+					reply.indexOf("done(") + 5,
+					reply.lastIndexOf(")."),
+				);
+			};
+			const prompt =
+				(await send("please fix", [reviewId, forgedAgainId])) ?? "";
 			evidence["prompt"] = prompt;
 			expect(prompt.startsWith("please fix\n\n<review_context")).toBe(true);
 			expect(prompt).toContain("untrusted");
@@ -304,6 +343,10 @@ describe("Review comments through the built daemon", () => {
 
 			// Sent comments leave both drafts.
 			await Promise.all([draftsA.until([]), draftsB.until([])]);
+			// A send without comments carries no fence.
+			const plain = await send("thanks", []);
+			evidence["plainPrompt"] = plain;
+			expect(plain).toBe("thanks");
 		} finally {
 			await Promise.all(
 				[draftsA, draftsB].map(({ fiber }) =>
