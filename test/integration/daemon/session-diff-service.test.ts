@@ -628,6 +628,20 @@ it("falls back past a missing launch commit or override with a notice, and lists
 		fallback: { wanted: "no-such-branch", reason: "missing" },
 	});
 
+	// A stale origin/HEAD, as after the remote renames its default branch.
+	git(
+		repo,
+		"symbolic-ref",
+		"refs/remotes/origin/HEAD",
+		"refs/remotes/origin/gone",
+	);
+	const staleRemote = await listBranch(present(repo), null);
+	expect(staleRemote.base).toEqual({
+		ref: "main",
+		source: "default",
+		fallback: { wanted: "origin/gone", reason: "missing" },
+	});
+
 	const fresh = join(root, "fresh");
 	mkdirSync(fresh);
 	git(fresh, "init", "-q", "-b", "main");

@@ -149,23 +149,20 @@ export const makeSessionDiff = Effect.gen(function* () {
 				folder.launchBase === undefined
 					? undefined
 					: attempt(folder.launchBase, "launch"),
-				Effect.gen(function* () {
-					const defaultRef =
-						(yield* git(
-							"symbolic-ref",
-							"--quiet",
-							"--short",
-							"refs/remotes/origin/HEAD",
-						)) ??
-						((yield* verify("refs/heads/main"))
-							? "main"
-							: (yield* verify("refs/heads/master"))
-								? "master"
-								: null);
-					return defaultRef === null
-						? undefined
-						: yield* attempt(defaultRef, "default");
-				}),
+				// origin/HEAD can name a branch the remote has since renamed, so each default gets its try.
+				...[
+					git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"),
+					verify("refs/heads/main").pipe(
+						Effect.map((found) => found && "main"),
+					),
+					verify("refs/heads/master").pipe(
+						Effect.map((found) => found && "master"),
+					),
+				].map((ref) =>
+					Effect.flatMap(ref, (found) =>
+						found === null ? Effect.undefined : attempt(found, "default"),
+					),
+				),
 			];
 			for (const effect of wanted) {
 				const resolved = effect && (yield* effect);
