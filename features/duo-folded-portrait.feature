@@ -66,6 +66,21 @@ Examples:
   | rail               | threshold |
   | duo-fp-rail-badged | 98        |
 
+Scenario Outline: Set goal puts the goal icon in Send's slot, above the keyboard and on the rail
+  When I type $goal Ship the release into the composer
+  And the handoff settles
+  Then Send shows the goal icon alone, centred in its slot
+  And the composer region visually matches <composer> at <threshold> percent
+  When I close the keyboard
+  And the handoff settles
+  Then the rail reads Send at 447, Permissions at 495, Model at 543, Attach at 591
+  And Send shows the goal icon alone, centred in its slot
+  And the duo-rail region visually matches <rail> at <threshold> percent
+
+Examples:
+  | composer          | rail             | threshold |
+  | duo-fp-kfull-goal | duo-fp-rail-goal | 98        |
+
 Scenario Outline: The context hairline turns amber at 80 percent
   When the mock relay reports context <percent> percent
   Then the context hairline reads <percent>% context in <colour>

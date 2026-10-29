@@ -35,6 +35,21 @@ export async function boxOf(page: Page, selector: string): Promise<Box> {
 	return box;
 }
 
+/** An icon's size, and how far its centre sits from its slot's, 0 within 1px. */
+async function iconInSlot(page: Page, slot: string, icon: string) {
+	const outer = await boxOf(page, slot);
+	const inner = await page.locator(slot).locator(icon).boundingBox();
+	if (!inner) throw new Error(`${slot} ${icon} is not laid out`);
+	const off = (a: number, b: number) =>
+		Math.abs(a - b) <= 1 ? 0 : Math.round((a - b) * 10) / 10;
+	return {
+		width: Math.round(inner.width),
+		height: Math.round(inner.height),
+		offCentreX: off(inner.x + inner.width / 2, outer.x + outer.width / 2),
+		offCentreY: off(inner.y + inner.height / 2, outer.y + outer.height / 2),
+	};
+}
+
 /** Every rendered interactive element's box, keyed by a readable name. */
 function interactiveBoxes(
 	page: Page,
@@ -139,27 +154,33 @@ export const duoFoldedPortraitHandlers: StepHandler[] = [
 					Model: "[data-testid='harness-logo']",
 				}[name];
 				if (!icon) throw new Error(`No bare rail icon: ${name}`);
-				const slot = world.page.locator(railControls[name] ?? "");
-				await expect(slot).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-				const outer = await boxOf(world.page, railControls[name] ?? "");
-				const inner = await slot.locator(icon).boundingBox();
-				if (!inner) throw new Error(`${name}'s icon is not laid out`);
-				const off = (a: number, b: number) =>
-					Math.abs(a - b) <= 1 ? 0 : Math.round((a - b) * 10) / 10;
-				expect({
-					name,
-					width: Math.round(inner.width),
-					height: Math.round(inner.height),
-					offCentreX: off(inner.x + inner.width / 2, outer.x + SLOT / 2),
-					offCentreY: off(inner.y + inner.height / 2, outer.y + SLOT / 2),
-				}).toEqual({
-					name,
-					width: size,
-					height: size,
-					offCentreX: 0,
-					offCentreY: 0,
-				});
+				const slot = railControls[name] ?? "";
+				await expect(world.page.locator(slot)).toHaveCSS(
+					"background-color",
+					"rgba(0, 0, 0, 0)",
+				);
+				expect({ name, ...(await iconInSlot(world.page, slot, icon)) }).toEqual(
+					{ name, width: size, height: size, offCentreX: 0, offCentreY: 0 },
+				);
 			}
+		},
+	},
+	{
+		name: "goal icon alone in Send's slot",
+		match: /^Send shows the goal icon alone, centred in its slot$/,
+		run: async ({ world }) => {
+			const send = world.page.locator("#send");
+			await expect(send).toHaveAttribute("data-goal", "true");
+			await expect(send).toHaveText("");
+			const { offCentreX, offCentreY } = await iconInSlot(
+				world.page,
+				"#send",
+				"svg.lucide-target",
+			);
+			expect({ offCentreX, offCentreY }).toEqual({
+				offCentreX: 0,
+				offCentreY: 0,
+			});
 		},
 	},
 	{

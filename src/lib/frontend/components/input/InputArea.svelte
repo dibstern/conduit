@@ -1520,6 +1520,8 @@
 						<Button variant="inverse" size="composer-action" icon="clock" iconSize={16} id="send" data-goal={isGoalCommand ? "true" : "false"} data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn">
 							{@render sendAtLabel()}
 						</Button>
+					{:else if isGoalCommand && sessionViewState.pose === "duo-folded-portrait"}
+						<Button variant="goal" size="composer-action" iconOnly icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn" />
 					{:else if isGoalCommand}
 						<Button variant="goal" size="composer-action" icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn">Set goal</Button>
 					{:else}
