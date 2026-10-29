@@ -40,8 +40,15 @@
 	let selection = $state<SelectedLineRange | null>(null);
 	let comment = $state("");
 	let commentError = $state("");
+	let saving = $state(false);
+	const side = $derived(selection?.side ?? "additions");
+	const endSide = $derived(selection?.endSide ?? side);
+	// One side's numbers sort; numbers from the old and new file do not, so they keep selection order.
 	const lines = $derived(
-		selection && { start: Math.min(selection.start, selection.end), end: Math.max(selection.start, selection.end) },
+		selection &&
+			(endSide === side
+				? { start: Math.min(selection.start, selection.end), end: Math.max(selection.start, selection.end) }
+				: { start: selection.start, end: selection.end }),
 	);
 
 	const wanted = $derived(
@@ -67,6 +74,7 @@
 				disableFileHeader: true,
 				enableLineSelection: true,
 				onLineSelectionEnd: (range) => {
+					if (saving) return;
 					selection = range;
 					commentError = "";
 				},
@@ -96,7 +104,8 @@
 	async function addComment(event: SubmitEvent) {
 		event.preventDefault();
 		const sessionId = getCurrentSessionId();
-		if (!selection || !lines || !sessionId || patch === null || !comment.trim()) return;
+		if (saving || !selection || !lines || !sessionId || patch === null || !comment.trim()) return;
+		saving = true;
 		try {
 			await rpc("AddDraftReview", {
 				key: { session: sessionId },
@@ -104,7 +113,8 @@
 				review: {
 					folder,
 					path: file.path,
-					side: selection.side ?? "additions",
+					side,
+					...(endSide !== side && { endSide }),
 					lines,
 					excerpt: reviewExcerpt(patch, selection).slice(0, REVIEW_EXCERPT_MAX_CHARS),
 					text: comment.trim(),
@@ -113,6 +123,8 @@
 			closeComment();
 		} catch (error) {
 			commentError = failureLine(error, "Could not add the comment. Try again.");
+		} finally {
+			saving = false;
 		}
 	}
 
@@ -164,11 +176,11 @@
 		<div bind:this={host} style:min-height={patch === null ? `${(file.insertions + file.deletions + 6) * 20}px` : undefined}></div>
 		{#if lines}
 			<form data-testid="review-comment-form" class="flex flex-col gap-2 px-3 py-2" onsubmit={addComment}>
-				<Textarea bind:value={comment} size="sm" rows={3} maxlength={REVIEW_TEXT_MAX_CHARS} aria-label="Review comment" placeholder={lines.start === lines.end ? `Comment on line ${lines.start}` : `Comment on lines ${lines.start}–${lines.end}`} />
+				<Textarea bind:value={comment} disabled={saving} size="sm" rows={3} maxlength={REVIEW_TEXT_MAX_CHARS} aria-label="Review comment" placeholder={lines.start === lines.end ? `Comment on line ${lines.start}` : `Comment on lines ${lines.start}–${lines.end}`} />
 				{#if commentError}<p role="alert" class="text-xs text-error">{commentError}</p>{/if}
 				<div class="flex justify-end gap-2">
 					<Button variant="ghost" size="sm" onclick={closeComment}>Cancel</Button>
-					<Button variant="primary" size="sm" type="submit" disabled={!comment.trim()}>Add to message</Button>
+					<Button variant="primary" size="sm" type="submit" disabled={saving || !comment.trim()}>Add to message</Button>
 				</div>
 			</form>
 		{/if}
